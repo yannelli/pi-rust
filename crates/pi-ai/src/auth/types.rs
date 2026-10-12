@@ -94,7 +94,7 @@ pub struct CredentialInfo {
 
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
-    #[error("login cancelled")]
+    #[error("Login cancelled")]
     Cancelled,
     #[error("credential storage failed: {0}")]
     Storage(String),
