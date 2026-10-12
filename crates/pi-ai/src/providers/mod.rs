@@ -12,6 +12,7 @@ pub mod github_copilot;
 mod http_mock;
 #[cfg(test)]
 pub(crate) mod mock_server;
+pub mod openai_codex;
 pub mod openai_completions;
 pub mod openai_responses;
 #[cfg(test)]
