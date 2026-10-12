@@ -115,6 +115,7 @@ static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
     providers.insert("openai-completions".into(), Arc::new(providers::openai_completions::OpenAICompletions));
     providers.insert("openai-responses".into(), Arc::new(providers::openai_responses::OpenAIResponses));
     providers.insert("anthropic-messages".into(), Arc::new(providers::anthropic::AnthropicMessages));
+    providers.insert("bedrock-converse-stream".into(), Arc::new(providers::bedrock::BedrockConverseStream));
     RwLock::new(providers)
 });
 
