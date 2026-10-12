@@ -204,6 +204,15 @@ fn function_table(functions: Vec<SandboxFunction>) -> HashMap<String, SandboxFun
     functions.into_iter().map(|function| (function.name().to_string(), function)).collect()
 }
 
+/// Stops the worker when the execution ends, also when the caller drops the execution future.
+struct InterruptOnDrop(Arc<AtomicBool>);
+
+impl Drop for InterruptOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
 pub(crate) async fn run(params: ExecutionParams) -> CodemodeResult {
     let tools_json = Value::Array(
         params
@@ -229,6 +238,7 @@ pub(crate) async fn run(params: ExecutionParams) -> CodemodeResult {
         params.store.iter().map(|(key, value)| (key.clone(), Value::String(js_stringify(value)))).collect();
 
     let interrupt = Arc::new(AtomicBool::new(false));
+    let _stop_worker = InterruptOnDrop(interrupt.clone());
     let (to_host, mut messages) = tokio::sync::mpsc::unbounded_channel();
     let (replies, replies_rx) = mpsc::channel();
     let mut execution = Execution {
@@ -251,7 +261,6 @@ pub(crate) async fn run(params: ExecutionParams) -> CodemodeResult {
     };
 
     let cancel = params.cancel.unwrap_or_default();
-    let mut on_exit = None;
     let outcome = if cancel.is_cancelled() {
         Err(CodemodeError::new(CodemodeErrorKind::Aborted, "Execution aborted"))
     } else {
@@ -259,20 +268,15 @@ pub(crate) async fn run(params: ExecutionParams) -> CodemodeResult {
             Err(error) => {
                 Err(CodemodeError::new(CodemodeErrorKind::Sandbox, format!("Failed to start worker: {error}")))
             }
-            Ok(exit) => {
-                on_exit = Some(exit);
-                drive(&mut execution, &mut messages, params.timeout, &cancel, &params.closed).await
-            }
+            Ok(()) => drive(&mut execution, &mut messages, params.timeout, &cancel, &params.closed).await,
         }
     };
 
+    // The worker stops at its next interrupt check and frees its VM on its own thread, so the
+    // result does not wait for a large heap to be released.
     execution.cancel_pending();
-    interrupt.store(true, Ordering::SeqCst);
     execution.replies = None;
     drop(messages);
-    if let Some(exit) = on_exit {
-        let _ = exit.await;
-    }
     CodemodeResult { outcome, output: execution.output, calls: execution.calls }
 }
 

@@ -258,3 +258,25 @@ async fn keeps_tools_and_console_frozen() {
     "#;
     assert_eq!(attempt(&sandbox(vec![echo()]), code).await, json!([false, "still"]));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn survives_interrupts_at_arbitrary_points() {
+    let sandbox = sandbox(vec![echo()]);
+    let code = r#"
+        const objects = [];
+        for (let i = 0; ; i++) {
+            objects.push({ i, self: objects, p: Promise.resolve(i).then((x) => [x, objects]) });
+            if (i % 100 === 0) await tools.echo({ i });
+            if (objects.length > 5000) objects.length = 0;
+            store("k" + (i % 10), i);
+            console.log(i);
+        }
+    "#;
+    let runs = (0..40u64).map(|round| {
+        let timeout = Timeout::After(Duration::from_millis(5 + round * 3));
+        sandbox.execute(code, ExecuteOptions { timeout: Some(timeout), ..ExecuteOptions::default() })
+    });
+    for result in futures::future::join_all(runs).await {
+        assert_eq!(result.unwrap().error().map(|error| error.kind), Some(CodemodeErrorKind::Timeout));
+    }
+}

@@ -63,9 +63,8 @@ pub(crate) struct WorkerSetup {
     pub replies: mpsc::Receiver<HostReply>,
 }
 
-/// Start the worker thread. The returned receiver resolves when the thread has exited.
-pub(crate) fn spawn(setup: WorkerSetup) -> std::io::Result<tokio::sync::oneshot::Receiver<()>> {
-    let (exited, on_exit) = tokio::sync::oneshot::channel();
+/// Start the worker thread.
+pub(crate) fn spawn(setup: WorkerSetup) -> std::io::Result<()> {
     std::thread::Builder::new().name("codemode".into()).stack_size(THREAD_STACK_BYTES).spawn(move || {
         let to_host = setup.to_host.clone();
         let interrupt = setup.interrupt.clone();
@@ -74,9 +73,8 @@ pub(crate) fn spawn(setup: WorkerSetup) -> std::io::Result<tokio::sync::oneshot:
         {
             let _ = to_host.send(WorkerMessage::Crash(message));
         }
-        drop(exited);
     })?;
-    Ok(on_exit)
+    Ok(())
 }
 
 fn eval_options(filename: &str) -> EvalOptions {
