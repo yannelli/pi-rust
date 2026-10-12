@@ -1,5 +1,6 @@
 //! Unified streaming LLM API for the pi agent harness.
 
+pub mod auth;
 pub mod env;
 pub mod json;
 pub mod models;
