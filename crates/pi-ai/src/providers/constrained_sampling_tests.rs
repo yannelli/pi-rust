@@ -152,3 +152,23 @@ fn grammar_tools_need_one_required_string_property() {
         Err("Grammar tool call \"sample_tool\" requires argument \"payload\" to be a string.".into())
     );
 }
+
+#[test]
+fn strict_mode_preferences_follow_provider_support() {
+    let mut empty_object = tool(json!({"type": "object", "properties": {}}), None);
+    empty_object.constrained_sampling = Some(json!({"type": "json_schema", "strict": "require"}));
+    assert_eq!(resolve_json_schema_strict_sampling(&empty_object, true, None), Ok(Some(true)));
+    let error = resolve_json_schema_strict_sampling(&empty_object, false, None).unwrap_err();
+    assert_eq!(
+        error,
+        "Tool \"sample_tool\" requires JSON-schema constrained sampling, but strict tools are unsupported."
+    );
+    empty_object.constrained_sampling = Some(json!({"type": "json_schema", "strict": "prefer"}));
+    assert_eq!(resolve_json_schema_strict_sampling(&empty_object, false, None), Ok(None));
+    let strict = json_schema_tool_parameters(&empty_object, true);
+    assert_eq!((strict["required"].clone(), strict["additionalProperties"].clone()), (json!([]), json!(false)));
+    let error = make_strict_json_schema(&json!({"type": "object", "oneOf": []}), None).unwrap_err();
+    assert_eq!(error.0, "oneOf schemas are unsupported");
+    assert!(make_strict_json_schema(&json!({"type": "string"}), None).is_err());
+    assert!(make_strict_json_schema(&json!({"type": "object", "required": ["missing"]}), None).is_err());
+}

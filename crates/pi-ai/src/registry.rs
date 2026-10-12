@@ -154,6 +154,12 @@ static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
     providers.insert("anthropic-messages".into(), Arc::new(providers::anthropic::AnthropicMessages));
     providers.insert("bedrock-converse-stream".into(), Arc::new(providers::bedrock::BedrockConverseStream));
     providers.insert("openai-codex-responses".into(), Arc::new(providers::openai_codex::OpenAICodexResponses));
+    providers.insert("google-generative-ai".into(), Arc::new(providers::google::GoogleGenerativeAI));
+    providers.insert("google-vertex".into(), Arc::new(providers::google_vertex::GoogleVertex));
+    providers.insert("mistral-conversations".into(), Arc::new(providers::mistral::MistralConversations));
+    providers.insert("pi-messages".into(), Arc::new(providers::pi_messages::PiMessages));
+    providers
+        .insert("azure-openai-responses".into(), Arc::new(providers::azure_openai_responses::AzureOpenAIResponses));
     RwLock::new(providers)
 });
 

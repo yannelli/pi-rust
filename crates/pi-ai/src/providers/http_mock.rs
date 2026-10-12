@@ -1,5 +1,6 @@
 //! Route-based HTTP/1.1 mock server for provider tests: every connection gets one reply
-//! chosen by a handler, and every request is recorded.
+//! chosen by a handler, and every request is recorded with its raw bytes. `mock_http`
+//! serves a fixed reply script instead, with silent and slow bodies.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
