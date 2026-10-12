@@ -167,8 +167,15 @@ pub(crate) fn http_error_message(status: u16, body: &str) -> String {
             .find(|message| !message.is_empty())
             .map(str::to_string)
     });
-    let message = json_message.unwrap_or_else(|| trimmed.to_string());
-    format!("Provider HTTP {status}: {}", truncate_chars(&message, MAX_ERROR_MESSAGE_CHARS))
+    let code = serde_json::from_str::<Value>(trimmed).ok().and_then(|value| {
+        value.pointer("/error/code").or_else(|| value.get("code")).and_then(Value::as_str).map(str::to_string)
+    });
+    let mut message = truncate_chars(&json_message.unwrap_or_else(|| trimmed.to_string()), MAX_ERROR_MESSAGE_CHARS);
+    // Keep the error code: retry classification and usage hints match on it.
+    if let Some(code) = code.filter(|code| !code.is_empty() && !message.contains(code.as_str())) {
+        message.push_str(&format!(" ({code})"));
+    }
+    format!("Provider HTTP {status}: {message}")
 }
 
 pub(crate) fn truncate_chars(text: &str, max: usize) -> String {
@@ -300,6 +307,10 @@ mod tests {
         );
         assert_eq!(http_error_message(502, "bad gateway"), "Provider HTTP 502: bad gateway");
         assert_eq!(http_error_message(500, ""), "Provider HTTP 500");
+        assert_eq!(
+            http_error_message(429, r#"{"error":{"message":"Quota","code":"insufficient_quota"}}"#),
+            "Provider HTTP 429: Quota (insufficient_quota)"
+        );
     }
 
     #[test]
