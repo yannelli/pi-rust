@@ -9,5 +9,6 @@ pub mod interactive;
 pub mod print_mode;
 pub mod render;
 pub mod session;
+pub mod settings;
 pub mod system_prompt;
 pub mod tools;
