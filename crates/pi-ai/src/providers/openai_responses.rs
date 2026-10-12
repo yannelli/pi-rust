@@ -51,7 +51,7 @@ impl ApiProvider for OpenAIResponses {
             .post(endpoint(&model.base_url, "/responses"))
             .headers(header_map(defaults, model, &options))
             .json(&body);
-        let handler = ResponsesStream { cost: model.cost, ..ResponsesStream::default() };
+        let handler = ResponsesStream { cost: model.cost.clone(), ..ResponsesStream::default() };
         spawn_sse_request(model, request, options.cancel, handler)
     }
 }

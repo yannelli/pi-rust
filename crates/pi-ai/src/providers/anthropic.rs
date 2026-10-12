@@ -56,7 +56,7 @@ impl ApiProvider for AnthropicMessages {
             .headers(header_map(defaults, model, &options))
             .json(&body);
         let handler = AnthropicStream {
-            cost: model.cost,
+            cost: model.cost.clone(),
             oauth_tools: if oauth { context.tools.iter().map(|tool| tool.name.clone()).collect() } else { Vec::new() },
             blocks: HashMap::new(),
             stop: None,

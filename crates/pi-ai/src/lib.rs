@@ -9,6 +9,7 @@ pub mod providers;
 pub mod registry;
 pub mod sse;
 pub mod stream;
+pub mod transcript;
 pub mod types;
 
 pub use env::get_env_api_key;

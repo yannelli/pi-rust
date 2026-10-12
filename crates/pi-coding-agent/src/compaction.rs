@@ -33,6 +33,7 @@ impl Default for CompactionSettings {
 /// Character-based estimate (4 characters per token).
 pub fn estimate_tokens(message: &Message) -> u64 {
     let chars: usize = match message {
+        Message::System(system) => system.content.text().len(),
         Message::User(user) => match &user.content {
             UserContent::Text(text) => text.len(),
             UserContent::Blocks(blocks) => blocks.iter().map(block_chars).sum(),
@@ -138,6 +139,7 @@ pub fn serialize_conversation(messages: &[Message]) -> String {
     let mut parts = Vec::new();
     for message in messages {
         match message {
+            Message::System(_) => {}
             Message::User(user) => {
                 let text = user.content.text();
                 if !text.is_empty() {

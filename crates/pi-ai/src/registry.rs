@@ -56,6 +56,9 @@ pub fn stream(model: &Model, context: &Context, mut options: StreamOptions) -> A
     if options.api_key.is_none() {
         options.api_key = get_env_api_key(&model.provider);
     }
+    if context.messages.iter().any(|message| matches!(message, crate::types::Message::System(_))) {
+        return provider.stream(model, &crate::transcript::flatten_context(context), options);
+    }
     provider.stream(model, context, options)
 }
 

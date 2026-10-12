@@ -247,6 +247,7 @@ fn emit_result(finalized: &Finalized, emit: &EventSink) -> ToolResultMessage {
         is_error: finalized.is_error,
         timestamp: now_ms(),
         duration_ms: finalized.duration_ms,
+        ..Default::default()
     };
     emit(AgentEvent::MessageStart { message: Message::ToolResult(result.clone()) });
     emit(AgentEvent::MessageEnd { message: Message::ToolResult(result.clone()) });

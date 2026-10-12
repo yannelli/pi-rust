@@ -114,6 +114,7 @@ fn history(model_id: &str) -> Vec<Message> {
         name: "read".into(),
         arguments: json!({"path": "a.png"}).as_object().cloned().unwrap(),
         thought_signature: None,
+        ..Default::default()
     };
     vec![
         Message::User(UserMessage {
@@ -142,6 +143,7 @@ fn history(model_id: &str) -> Vec<Message> {
             error_message: None,
             timestamp: 2,
             duration_ms: None,
+            ..Default::default()
         }),
         Message::ToolResult(ToolResultMessage {
             tool_call_id: "call_1".into(),
@@ -154,6 +156,7 @@ fn history(model_id: &str) -> Vec<Message> {
             is_error: false,
             timestamp: 3,
             duration_ms: None,
+            ..Default::default()
         }),
     ]
 }
@@ -172,6 +175,7 @@ async fn request_body_converts_messages_tools_and_options() {
             name: "read".into(),
             description: "Read a file".into(),
             parameters: json!({"type": "object", "properties": {"path": {"type": "string"}}}),
+            ..Default::default()
         }],
     };
     let mut options = StreamOptions {

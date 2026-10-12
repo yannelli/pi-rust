@@ -189,7 +189,7 @@ pub(crate) fn thinking_budget(level: ThinkingLevel) -> u64 {
         ThinkingLevel::Off | ThinkingLevel::Minimal => 1024,
         ThinkingLevel::Low => 2048,
         ThinkingLevel::Medium => 8192,
-        ThinkingLevel::High | ThinkingLevel::Xhigh => 16384,
+        ThinkingLevel::High | ThinkingLevel::Xhigh | ThinkingLevel::Max => 16384,
     }
 }
 
@@ -280,6 +280,8 @@ pub(crate) fn transform_messages(
     let mut transformed = Vec::with_capacity(messages.len());
     for message in messages {
         match message {
+            // Callers collapse system messages into the prompt before conversion.
+            Message::System(_) => {}
             Message::User(user) => {
                 let mut user = user.clone();
                 if let (false, UserContent::Blocks(blocks)) = (images, &user.content) {
@@ -359,6 +361,8 @@ fn close_orphaned_tool_calls(messages: Vec<Message>) -> Vec<Message> {
                 tool_name: name,
                 content: vec![ContentBlock::text("No result provided")],
                 details: None,
+                usage: None,
+                nested_calls: None,
                 is_error: true,
                 timestamp: now_ms(),
                 duration_ms: None,
@@ -375,7 +379,7 @@ fn close_orphaned_tool_calls(messages: Vec<Message>) -> Vec<Message> {
                 pending = assistant.tool_calls().map(|call| (call.id.clone(), call.name.clone())).collect();
             }
             Message::ToolResult(tool_result) => pending.retain(|(id, _)| *id != tool_result.tool_call_id),
-            Message::User(_) => flush(&mut pending, &mut result),
+            Message::System(_) | Message::User(_) => flush(&mut pending, &mut result),
         }
         result.push(message);
     }
@@ -413,6 +417,7 @@ mod tests {
                     name: "read".into(),
                     arguments: Default::default(),
                     thought_signature: None,
+                    ..Default::default()
                 })],
                 api: "other".into(),
                 provider: "other".into(),
@@ -423,6 +428,7 @@ mod tests {
                 error_message: None,
                 timestamp: 0,
                 duration_ms: None,
+                ..Default::default()
             })
         };
         let model = crate::providers::faux::FauxProvider::model();

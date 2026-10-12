@@ -130,6 +130,7 @@ fn history(model_id: &str) -> Vec<Message> {
                 name: "read".into(),
                 arguments: json!({"path": "a.png"}).as_object().cloned().unwrap(),
                 thought_signature: None,
+                ..Default::default()
             }),
         ],
         api: API.into(),
@@ -141,6 +142,7 @@ fn history(model_id: &str) -> Vec<Message> {
         error_message: None,
         timestamp: 1,
         duration_ms: None,
+        ..Default::default()
     };
     let result = ToolResultMessage {
         tool_call_id: "call|1".into(),
@@ -150,13 +152,14 @@ fn history(model_id: &str) -> Vec<Message> {
         is_error: false,
         timestamp: 2,
         duration_ms: None,
+        ..Default::default()
     };
     vec![Message::user("hi"), Message::Assistant(assistant), Message::ToolResult(result)]
 }
 
 fn tools() -> Vec<Tool> {
     let parameters = json!({"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]});
-    vec![Tool { name: "read".into(), description: "Read a file".into(), parameters }]
+    vec![Tool { name: "read".into(), description: "Read a file".into(), parameters, ..Default::default() }]
 }
 
 #[tokio::test]

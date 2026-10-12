@@ -40,6 +40,7 @@ impl FauxResponse {
                     name: (*name).into(),
                     arguments: arguments.as_object().cloned().unwrap_or_default(),
                     thought_signature: None,
+                    ..Default::default()
                 })
             })
             .collect();
@@ -82,11 +83,12 @@ impl FauxProvider {
             base_url: String::new(),
             reasoning: true,
             input: vec!["text".into(), "image".into()],
-            cost: ModelCost { input: 1.0, output: 2.0, cache_read: 0.0, cache_write: 0.0 },
+            cost: ModelCost { input: 1.0, output: 2.0, cache_read: 0.0, cache_write: 0.0, ..Default::default() },
             context_window: 128_000,
             max_tokens: 8_192,
             headers: Default::default(),
             compat: None,
+            ..Default::default()
         }
     }
 }
@@ -100,7 +102,7 @@ impl ApiProvider for FauxProvider {
         let delay = self.chunk_delay;
         let cancel = options.cancel.clone();
         let input_tokens = serde_json::to_string(context).map(|json| json.len() as u64 / 4).unwrap_or_default();
-        let cost = model.cost;
+        let cost = model.cost.clone();
         tokio::spawn(async move {
             builder.start();
             let pause = || async {

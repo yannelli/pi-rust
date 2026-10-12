@@ -130,11 +130,12 @@ pub(crate) fn test_model(api: &str, provider: &str, base_url: &str) -> Model {
         base_url: base_url.into(),
         reasoning: true,
         input: vec!["text".into(), "image".into()],
-        cost: ModelCost { input: 1.0, output: 2.0, cache_read: 0.5, cache_write: 4.0 },
+        cost: ModelCost { input: 1.0, output: 2.0, cache_read: 0.5, cache_write: 4.0, ..Default::default() },
         context_window: 100_000,
         max_tokens: 4096,
         headers: Default::default(),
         compat: None,
+        ..Default::default()
     }
 }
 

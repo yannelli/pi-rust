@@ -44,7 +44,7 @@ impl ApiProvider for OpenAICompletions {
             .headers(header_map(defaults, model, &options))
             .json(&body);
         let handler = CompletionsStream {
-            cost: model.cost,
+            cost: model.cost.clone(),
             opencode_go: model.provider == "opencode-go",
             supports_finish_reason: compat.supports_finish_reason,
             tools_by_index: HashMap::new(),

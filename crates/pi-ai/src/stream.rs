@@ -271,6 +271,7 @@ impl MessageBuilder {
             name: name.into(),
             arguments: JsonObject::new(),
             thought_signature: None,
+            ..Default::default()
         }));
         let content_index = self.message.content.len() - 1;
         self.tool_calls.push(PendingToolCall { content_index, json: String::new() });
@@ -389,6 +390,7 @@ mod tests {
             max_tokens: 100,
             headers: Default::default(),
             compat: None,
+            ..Default::default()
         }
     }
 

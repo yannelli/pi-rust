@@ -78,7 +78,12 @@ pub trait AgentTool: Send + Sync {
     ) -> anyhow::Result<AgentToolResult>;
 
     fn declaration(&self) -> Tool {
-        Tool { name: self.name().into(), description: self.description().into(), parameters: self.parameters() }
+        Tool {
+            name: self.name().into(),
+            description: self.description().into(),
+            parameters: self.parameters(),
+            ..Default::default()
+        }
     }
 }
 

@@ -225,6 +225,7 @@ fn convert_messages(
                     params.push(json!({"role": "assistant", "content": blocks}));
                 }
             }
+            Message::System(_) => {}
             Message::ToolResult(_) => {
                 let mut results = Vec::new();
                 while let Some(Message::ToolResult(result)) = messages.get(index) {

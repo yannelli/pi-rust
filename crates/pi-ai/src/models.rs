@@ -135,7 +135,7 @@ impl ModelRegistry {
                         .input
                         .or_else(|| base.as_ref().map(|model| model.input.clone()))
                         .unwrap_or_else(|| vec!["text".into()]),
-                    cost: entry.cost.or(base.as_ref().map(|model| model.cost)).unwrap_or_default(),
+                    cost: entry.cost.or(base.as_ref().map(|model| model.cost.clone())).unwrap_or_default(),
                     context_window: entry
                         .context_window
                         .or(base.as_ref().map(|model| model.context_window))
@@ -143,6 +143,7 @@ impl ModelRegistry {
                     max_tokens: entry.max_tokens.or(base.as_ref().map(|model| model.max_tokens)).unwrap_or(16_384),
                     headers,
                     compat: entry.compat.or_else(|| base.as_ref().and_then(|model| model.compat.clone())),
+                    ..Default::default()
                 };
                 self.upsert(model);
             }
