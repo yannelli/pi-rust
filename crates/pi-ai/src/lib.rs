@@ -15,7 +15,10 @@ pub mod types;
 pub use env::get_env_api_key;
 pub use models::ModelRegistry;
 pub use overflow::is_context_overflow;
-pub use registry::{ApiProvider, StreamOptions, api_provider, complete, http_client, register_api_provider, stream};
+pub use registry::{
+    ApiProvider, CacheRetention, ProviderResponse, StreamOptions, ThinkingBudgets, Transport, api_provider, complete,
+    http_client, register_api_provider, stream,
+};
 pub use stream::{
     AssistantMessageEvent, AssistantMessageEventStream, EventSender, MessageBuilder, error_stream, event_channel,
 };

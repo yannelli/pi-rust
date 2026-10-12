@@ -10,8 +10,52 @@ use crate::providers;
 use crate::stream::{AssistantMessageEventStream, error_stream};
 use crate::types::{AssistantMessage, Context, Model, StopReason, ThinkingLevel};
 
-/// Per-request options. `api_key` falls back to the provider's environment variable.
+/// Preferred transport for providers that support several.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Transport {
+    #[default]
+    Sse,
+    Websocket,
+    WebsocketCached,
+    Auto,
+}
+
+/// Prompt cache retention preference; providers map it to supported values.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CacheRetention {
+    None,
+    #[default]
+    Short,
+    Long,
+}
+
+/// Token budgets per thinking level for token-based providers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ThinkingBudgets {
+    pub minimal: Option<u64>,
+    pub low: Option<u64>,
+    pub medium: Option<u64>,
+    pub high: Option<u64>,
+}
+
+/// HTTP status and headers of a provider response, passed to `on_response`.
 #[derive(Clone, Debug, Default)]
+pub struct ProviderResponse {
+    pub status: u16,
+    pub headers: BTreeMap<String, String>,
+}
+
+/// Inspects or replaces the request payload before it is sent; `None` keeps it.
+pub type OnPayloadFn = Arc<dyn Fn(&serde_json::Value, &Model) -> Option<serde_json::Value> + Send + Sync>;
+pub type OnResponseFn = Arc<dyn Fn(&ProviderResponse, &Model) + Send + Sync>;
+/// Observes each parsed provider stream event before normalization.
+pub type OnProviderStreamEventFn = Arc<dyn Fn(&serde_json::Value, &Model) + Send + Sync>;
+
+/// Per-request options. Field meanings follow upstream `StreamOptions` and `SimpleStreamOptions`.
+/// `api_key` falls back to the provider's environment variable.
+#[derive(Clone, Default)]
 pub struct StreamOptions {
     pub api_key: Option<String>,
     pub cancel: CancellationToken,
@@ -19,8 +63,43 @@ pub struct StreamOptions {
     pub temperature: Option<f64>,
     /// Requested reasoning effort; `None` or `Off` disables thinking where the API allows it.
     pub reasoning: Option<ThinkingLevel>,
+    pub thinking_budgets: Option<ThinkingBudgets>,
+    /// Extra headers; a `None` value suppresses a provider default header.
     pub headers: BTreeMap<String, String>,
+    pub suppressed_headers: Vec<String>,
     pub session_id: Option<String>,
+    /// Provider-scoped environment values that take precedence over the process environment.
+    pub env: BTreeMap<String, String>,
+    pub transport: Option<Transport>,
+    pub cache_retention: Option<CacheRetention>,
+    /// Merged into OpenAI-compatible request bodies after named fields, over `Model.sampling_params`.
+    pub sampling_params: Option<serde_json::Map<String, serde_json::Value>>,
+    pub timeout_ms: Option<u64>,
+    pub max_retries: Option<u32>,
+    /// Longest server-requested retry delay to honor; 0 disables the cap. Default 60000.
+    pub max_retry_delay_ms: Option<u64>,
+    pub websocket_connect_timeout_ms: Option<u64>,
+    /// `auto` or `none`; adapters choose when unset.
+    pub tool_choice: Option<String>,
+    pub metadata: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Ask a capable provider for a durable deferred handle (`15m`, `1h`, `24h`).
+    pub deferred: Option<String>,
+    pub on_payload: Option<OnPayloadFn>,
+    pub on_response: Option<OnResponseFn>,
+    pub on_provider_stream_event: Option<OnProviderStreamEventFn>,
+}
+
+impl std::fmt::Debug for StreamOptions {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("StreamOptions")
+            .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
+            .field("max_tokens", &self.max_tokens)
+            .field("reasoning", &self.reasoning)
+            .field("session_id", &self.session_id)
+            .field("transport", &self.transport)
+            .finish_non_exhaustive()
+    }
 }
 
 /// One wire protocol, such as `openai-completions`. Implementations must

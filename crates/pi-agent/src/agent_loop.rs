@@ -233,6 +233,7 @@ async fn stream_assistant_response(
         reasoning: config.reasoning.filter(|level| *level != ThinkingLevel::Off),
         headers: Default::default(),
         session_id: config.session_id.clone(),
+        ..Default::default()
     };
     let mut response = match &config.stream_fn {
         Some(stream_fn) => stream_fn(&config.model, &request, options),
