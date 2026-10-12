@@ -136,6 +136,7 @@ enum OpenBlock {
 struct PendingToolCall {
     content_index: usize,
     json: String,
+    ended: bool,
 }
 
 /// Builds the partial message and emits ordered events. Providers call the
@@ -287,7 +288,7 @@ impl MessageBuilder {
             ..Default::default()
         }));
         let content_index = self.message.content.len() - 1;
-        self.tool_calls.push(PendingToolCall { content_index, json: String::new() });
+        self.tool_calls.push(PendingToolCall { content_index, json: String::new(), ended: false });
         self.sender.push(AssistantMessageEvent::ToolcallStart { content_index, partial: self.message.clone() });
         self.tool_calls.len() - 1
     }
@@ -328,20 +329,31 @@ impl MessageBuilder {
         }
     }
 
+    /// Finish one tool call: parse its arguments and emit `ToolcallEnd`. Calls that are still
+    /// open when the message finishes end automatically.
+    pub fn end_tool_call(&mut self, handle: usize) {
+        let Some(pending) = self.tool_calls.get_mut(handle).filter(|pending| !pending.ended) else { return };
+        pending.ended = true;
+        let content_index = pending.content_index;
+        let arguments = match parse_streaming_json(&pending.json) {
+            Some(Value::Object(arguments)) => Some(arguments),
+            _ => None,
+        };
+        let ContentBlock::ToolCall(call) = &mut self.message.content[content_index] else { return };
+        if let Some(arguments) = arguments {
+            call.arguments = arguments;
+        }
+        let tool_call = call.clone();
+        self.sender.push(AssistantMessageEvent::ToolcallEnd {
+            content_index,
+            tool_call,
+            partial: self.message.clone(),
+        });
+    }
+
     fn end_tool_calls(&mut self) {
-        for pending in std::mem::take(&mut self.tool_calls) {
-            let ContentBlock::ToolCall(call) = &mut self.message.content[pending.content_index] else { continue };
-            if !pending.json.trim().is_empty()
-                && let Ok(Value::Object(arguments)) = serde_json::from_str::<Value>(&pending.json)
-            {
-                call.arguments = arguments;
-            }
-            let tool_call = call.clone();
-            self.sender.push(AssistantMessageEvent::ToolcallEnd {
-                content_index: pending.content_index,
-                tool_call,
-                partial: self.message.clone(),
-            });
+        for handle in 0..self.tool_calls.len() {
+            self.end_tool_call(handle);
         }
     }
 

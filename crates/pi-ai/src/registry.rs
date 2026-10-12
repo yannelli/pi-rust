@@ -152,6 +152,14 @@ static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
     providers.insert("openai-completions".into(), Arc::new(providers::openai_completions::OpenAICompletions));
     providers.insert("openai-responses".into(), Arc::new(providers::openai_responses::OpenAIResponses));
     providers.insert("anthropic-messages".into(), Arc::new(providers::anthropic::AnthropicMessages));
+    providers.insert("bedrock-converse-stream".into(), Arc::new(providers::bedrock::BedrockConverseStream));
+    providers.insert("openai-codex-responses".into(), Arc::new(providers::openai_codex::OpenAICodexResponses));
+    providers.insert("google-generative-ai".into(), Arc::new(providers::google::GoogleGenerativeAI));
+    providers.insert("google-vertex".into(), Arc::new(providers::google_vertex::GoogleVertex));
+    providers.insert("mistral-conversations".into(), Arc::new(providers::mistral::MistralConversations));
+    providers.insert("pi-messages".into(), Arc::new(providers::pi_messages::PiMessages));
+    providers
+        .insert("azure-openai-responses".into(), Arc::new(providers::azure_openai_responses::AzureOpenAIResponses));
     RwLock::new(providers)
 });
 
@@ -173,6 +181,8 @@ pub fn stream(model: &Model, context: &Context, mut options: StreamOptions) -> A
         options.api_key = get_env_api_key(&model.provider);
     }
     add_opencode_session_header(model, &mut options);
+    let (model, options) = providers::cloudflare::prepare_cloudflare_request(model, options);
+    let model = model.as_ref();
     let has_system = context.messages.iter().any(|message| matches!(message, crate::types::Message::System(_)));
     if has_system && !provider.supports_system_messages() {
         return provider.stream(model, &crate::transcript::flatten_context(context), options);

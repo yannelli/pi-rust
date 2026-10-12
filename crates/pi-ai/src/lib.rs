@@ -2,10 +2,13 @@
 
 pub mod attribution;
 pub mod auth;
+pub mod classify;
 pub mod env;
 pub mod estimate;
 pub mod http;
+pub mod images;
 pub mod json;
+pub mod model_operations;
 pub mod models;
 pub mod overflow;
 pub mod providers;
@@ -18,7 +21,14 @@ pub mod stream;
 pub mod transcript;
 pub mod types;
 
+pub use classify::{
+    ClassifierApi, ClassifierContext, ClassifierOptions, ClassifierResult, classifier_api, classify,
+    register_classifier_api,
+};
 pub use env::get_env_api_key;
+pub use images::{
+    AssistantImages, ImagesApi, ImagesContext, ImagesOptions, generate_images, images_api, register_images_api,
+};
 pub use models::ModelRegistry;
 pub use overflow::is_context_overflow;
 pub use registry::{

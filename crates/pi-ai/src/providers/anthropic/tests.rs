@@ -10,41 +10,41 @@ use crate::types::{
     Usage,
 };
 
-const API: &str = "anthropic-messages";
+pub(super) const API: &str = "anthropic-messages";
 
-fn event(data: Value) -> String {
+pub(super) fn event(data: Value) -> String {
     let kind = data["type"].as_str().unwrap().to_string();
     frame(Some(&kind), &data)
 }
 
-fn message_start(usage: Value) -> String {
+pub(super) fn message_start(usage: Value) -> String {
     event(json!({"type": "message_start", "message": {"id": "msg_1", "model": "test-model", "usage": usage}}))
 }
 
-fn block_start(index: u64, block: Value) -> String {
+pub(super) fn block_start(index: u64, block: Value) -> String {
     event(json!({"type": "content_block_start", "index": index, "content_block": block}))
 }
 
-fn delta(index: u64, delta: Value) -> String {
+pub(super) fn delta(index: u64, delta: Value) -> String {
     event(json!({"type": "content_block_delta", "index": index, "delta": delta}))
 }
 
-fn block_stop(index: u64) -> String {
+pub(super) fn block_stop(index: u64) -> String {
     event(json!({"type": "content_block_stop", "index": index}))
 }
 
-fn message_end(reason: &str, usage: Value) -> Vec<String> {
+pub(super) fn message_end(reason: &str, usage: Value) -> Vec<String> {
     vec![
         event(json!({"type": "message_delta", "delta": {"stop_reason": reason}, "usage": usage})),
         event(json!({"type": "message_stop"})),
     ]
 }
 
-fn context() -> Context {
+pub(super) fn context() -> Context {
     Context { messages: vec![Message::user("hi")], ..Context::default() }
 }
 
-fn options() -> StreamOptions {
+pub(super) fn options() -> StreamOptions {
     StreamOptions { api_key: Some("sk-ant-api-test".into()), ..StreamOptions::default() }
 }
 
@@ -157,7 +157,7 @@ fn history(model_id: &str) -> Vec<Message> {
     vec![Message::user("hi"), Message::Assistant(assistant), Message::ToolResult(result)]
 }
 
-fn tools() -> Vec<Tool> {
+pub(super) fn tools() -> Vec<Tool> {
     let parameters = json!({"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]});
     vec![Tool { name: "read".into(), description: "Read a file".into(), parameters, ..Default::default() }]
 }

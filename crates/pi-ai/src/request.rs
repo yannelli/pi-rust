@@ -95,7 +95,6 @@ pub(crate) struct SendOptions<'a> {
 }
 
 impl<'a> SendOptions<'a> {
-    #[allow(dead_code)]
     pub fn from_request(options: &'a RequestOptions, default_retries: u32) -> Self {
         Self {
             env: &options.env,
@@ -261,7 +260,6 @@ pub(crate) async fn send_request(
 }
 
 /// Send `request` and parse a JSON response body. The timeout and retries cover the body too.
-#[allow(dead_code)]
 pub(crate) async fn post_json(
     request: &HttpRequest,
     options: &SendOptions<'_>,
