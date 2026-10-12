@@ -688,8 +688,10 @@ name = "pi-ai"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "futures",
  "reqwest",
+ "ring",
  "serde",
  "serde_json",
  "thiserror",
