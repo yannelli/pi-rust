@@ -8,6 +8,7 @@ pub mod files;
 pub mod interactive;
 pub mod print_mode;
 pub mod render;
+pub mod resources;
 pub mod session;
 pub mod system_prompt;
 pub mod tools;

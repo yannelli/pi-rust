@@ -7,7 +7,6 @@ use pi_ai::ThinkingLevel;
 use serde::{Deserialize, Serialize};
 
 pub const ENV_AGENT_DIR: &str = "PI_CODING_AGENT_DIR";
-const CONTEXT_FILE_NAMES: [&str; 5] = ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"];
 
 pub fn home_dir() -> PathBuf {
     std::env::var_os("HOME")
@@ -84,37 +83,11 @@ fn read_settings(path: &Path) -> Settings {
     std::fs::read_to_string(path).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default()
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ContextFile {
-    pub path: PathBuf,
-    pub content: String,
-}
-
-fn context_file_in(dir: &Path) -> Option<ContextFile> {
-    CONTEXT_FILE_NAMES.iter().find_map(|name| {
-        let path = dir.join(name);
-        if !path.is_file() {
-            return None;
-        }
-        let content = std::fs::read_to_string(&path).ok()?;
-        Some(ContextFile { path, content: content.trim_start_matches('\u{feff}').to_string() })
-    })
-}
+pub use crate::resources::ContextFile;
 
 /// The global context file, then one per directory from the filesystem root down to `cwd`.
 pub fn load_context_files(cwd: &Path, agent_dir: &Path) -> Vec<ContextFile> {
-    let mut files = Vec::new();
-    if let Some(global) = context_file_in(agent_dir) {
-        files.push(global);
-    }
-    let mut ancestors: Vec<ContextFile> = cwd.ancestors().filter_map(context_file_in).collect();
-    ancestors.reverse();
-    for file in ancestors {
-        if !files.iter().any(|existing| existing.path == file.path) {
-            files.push(file);
-        }
-    }
-    files
+    crate::resources::load_project_context_files(cwd, agent_dir)
 }
 
 #[cfg(test)]
