@@ -326,6 +326,7 @@ pub enum Message {
     Custom(CustomMessage),
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "role", rename_all = "camelCase")]
 enum KnownMessage {
