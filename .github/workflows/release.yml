@@ -1,0 +1,214 @@
+name: Release
+
+# Releases run after CI passes on main: conventional commits since the last tag decide
+# the next semantic version. Pushing a `v*` tag releases that exact version.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+  pull_request:
+    paths: [".github/workflows/release.yml", "xtask/**", "Cargo.toml", "Cargo.lock"]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump (auto reads conventional commits)
+        type: choice
+        options: [auto, patch, minor, major]
+        default: auto
+      dry_run:
+        description: Build every target without tagging or publishing
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  plan:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.plan.outputs.release }}
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+      publish: ${{ steps.mode.outputs.publish }}
+      ref: ${{ steps.commit.outputs.ref || steps.mode.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || '' }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Plan version
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          BUMP: ${{ inputs.bump || 'auto' }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$EVENT" = push ]; then
+            cargo xtask check-tag "$REF_NAME"
+            version="${REF_NAME#v}"
+            prerelease=false
+            case "$version" in *-*) prerelease=true ;; esac
+            printf 'release=true\nversion=%s\ntag=%s\nprerelease=%s\n' "$version" "$REF_NAME" "$prerelease" >> "$GITHUB_OUTPUT"
+          elif [ "$EVENT" = pull_request ]; then
+            version="$(cargo xtask plan | sed -n 's/^version=//p')"
+            printf 'release=true\nversion=%s\ntag=v%s\nprerelease=false\n' "${version:-0.0.0}" "${version:-0.0.0}" >> "$GITHUB_OUTPUT"
+          else
+            cargo xtask plan --bump "$BUMP" --github-output
+          fi
+      - name: Decide whether to publish
+        id: mode
+        env:
+          EVENT: ${{ github.event_name }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          REF: ${{ github.ref }}
+          RELEASE: ${{ steps.plan.outputs.release }}
+        run: |
+          publish=false
+          case "$EVENT" in
+            push) publish=true ;;
+            workflow_run) publish="$RELEASE" ;;
+            workflow_dispatch) [ "$DRY_RUN" = false ] && [ "$REF" = refs/heads/main ] && publish="$RELEASE" ;;
+          esac
+          if [ "$publish" = true ] && [ "$EVENT" != push ]; then
+            git fetch --quiet origin main
+            if [ "$(git rev-parse origin/main)" != "$(git rev-parse HEAD)" ]; then
+              echo "main moved past $(git rev-parse --short HEAD); the next CI run on main releases it."
+              publish=false
+            fi
+          fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Commit version and tag
+        id: commit
+        if: steps.mode.outputs.publish == 'true' && github.event_name != 'push'
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          cargo xtask prepare "$VERSION"
+          git add Cargo.toml Cargo.lock CHANGELOG.md
+          git diff --cached --quiet || git commit -m "chore(release): v$VERSION"
+          git tag -a "v$VERSION" -m "v$VERSION"
+          git push origin HEAD:refs/heads/main "refs/tags/v$VERSION"
+          echo "ref=v$VERSION" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest, zig: true }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-latest, zig: true }
+          - { target: armv7-unknown-linux-musleabihf, os: ubuntu-latest, zig: true }
+          - { target: x86_64-apple-darwin, os: macos-latest }
+          - { target: aarch64-apple-darwin, os: macos-latest }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
+          - { target: aarch64-pc-windows-msvc, os: windows-latest }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Install cargo-zigbuild
+        if: matrix.zig
+        run: |
+          python3 -m venv "$RUNNER_TEMP/zig"
+          "$RUNNER_TEMP/zig/bin/pip" install --quiet cargo-zigbuild
+          echo "$RUNNER_TEMP/zig/bin" >> "$GITHUB_PATH"
+      - name: Put clang on PATH for ring
+        if: matrix.target == 'aarch64-pc-windows-msvc'
+        shell: bash
+        run: echo "C:\\Program Files\\LLVM\\bin" >> "$GITHUB_PATH"
+      - name: Build
+        shell: bash
+        run: |
+          if [ "${{ matrix.zig }}" = true ]; then
+            cargo zigbuild --release --locked -p pi-coding-agent --target ${{ matrix.target }}
+          else
+            cargo build --release --locked -p pi-coding-agent --target ${{ matrix.target }}
+          fi
+      - name: Package
+        shell: bash
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          name="pi-$TAG-$TARGET"
+          mkdir -p "dist/$name"
+          cp README.md LICENSE "dist/$name/"
+          [ -f CHANGELOG.md ] && cp CHANGELOG.md "dist/$name/"
+          if [ "${{ runner.os }}" = Windows ]; then
+            cp "target/$TARGET/release/pi.exe" "dist/$name/"
+            (cd dist && 7z a -tzip -bso0 "$name.zip" "$name")
+          else
+            cp "target/$TARGET/release/pi" "dist/$name/"
+            tar -C dist -czf "dist/$name.tar.gz" "$name"
+          fi
+          rm -rf "dist/$name"
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pi-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: [plan, build]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pi-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          PRERELEASE: ${{ needs.plan.outputs.prerelease }}
+        run: |
+          flags=()
+          [ "$PRERELEASE" = true ] && flags+=(--prerelease)
+          if cargo xtask notes "$VERSION" > notes.md; then
+            flags+=(--notes-file notes.md)
+          else
+            flags+=(--generate-notes)
+          fi
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --title "$TAG" --verify-tag "${flags[@]}"
+          fi
