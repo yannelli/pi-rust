@@ -14,6 +14,7 @@ mod mock_http;
 pub(crate) mod mock_server;
 pub mod openai_completions;
 pub mod openai_responses;
+pub mod pi_messages;
 #[cfg(test)]
 mod plumbing_tests;
 mod strict_schema;
