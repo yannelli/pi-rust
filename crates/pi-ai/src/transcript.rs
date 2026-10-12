@@ -143,6 +143,64 @@ pub fn flatten_context(context: &Context) -> Context {
     }
 }
 
+/// Keep later system messages in place when the API accepts them; otherwise collapse them.
+pub fn resolve_transcript(messages: Vec<Message>, supports_mid_convo_system_messages: bool) -> Vec<Message> {
+    if supports_mid_convo_system_messages { messages } else { collapse_system_messages(&messages) }
+}
+
+/// Drop the leading system message for APIs that carry the prompt outside the message list.
+pub fn without_initial_system_message(messages: &[Message]) -> &[Message] {
+    match messages.first() {
+        Some(Message::System(_)) => &messages[1..],
+        _ => messages,
+    }
+}
+
+/// Every tool definition the transcript declares, in first-declaration order with the latest value.
+pub fn declared_tools(messages: &[Message]) -> Vec<Tool> {
+    let mut tools: Vec<Tool> = Vec::new();
+    for tool in system_messages(messages).flat_map(|system| system.tools_added.iter().flatten()) {
+        match tools.iter_mut().find(|existing| existing.name == tool.name) {
+            Some(existing) => *existing = tool.clone(),
+            None => tools.push(tool.clone()),
+        }
+    }
+    tools
+}
+
+/// Whether a tool name was declared twice with different definitions.
+pub fn has_tool_redefinitions(messages: &[Message]) -> bool {
+    let mut declared: BTreeMap<&str, &Tool> = BTreeMap::new();
+    for tool in system_messages(messages).flat_map(|system| system.tools_added.iter().flatten()) {
+        if declared.insert(&tool.name, tool).is_some_and(|before| before != tool) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Tool declarations split between the request-level field and in-place additions.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TranscriptTools {
+    /// Tools sent in the top-level request field.
+    pub request_tools: Vec<Tool>,
+    /// Whether later system messages carry their own `tools_added` as in-place additions.
+    /// When false, `request_tools` already holds the complete current tool set.
+    pub anchors_additions: bool,
+}
+
+/// APIs that can anchor additions at a system message keep the leading tools at the top and
+/// load later ones in place. That works only without removals or redeclarations.
+pub fn resolve_transcript_tools(messages: &[Message], supports_tool_additions: bool) -> TranscriptTools {
+    let anchors_additions = supports_tool_additions && !has_non_additive_tool_changes(messages);
+    let request_tools = if anchors_additions {
+        initial_system_message(messages).and_then(|system| system.tools_added.clone()).unwrap_or_default()
+    } else {
+        current_tools(messages)
+    };
+    TranscriptTools { request_tools, anchors_additions }
+}
+
 /// Added and removed tools between two complete tool states.
 pub fn tool_state_changes(previous: &[Tool], current: &[Tool]) -> (Vec<Tool>, Vec<ToolReference>) {
     let by_name =
@@ -207,6 +265,29 @@ mod tests {
         let flat = flatten_context(&Context { messages, ..Context::default() });
         assert_eq!(flat.system_prompt.as_deref(), Some("base\n\nmore\n\ncwd"));
         assert_eq!(flat.messages.len(), 1);
+    }
+
+    #[test]
+    fn resolves_tools_for_addition_only_transports() {
+        let added = |name: &str, timestamp: i64| {
+            system(json!({"role": "system", "content": "", "toolsAdded": [tool(name)], "timestamp": timestamp}))
+        };
+        let messages = vec![added("a", 1), Message::user("x"), added("b", 2)];
+        let anchored = resolve_transcript_tools(&messages, true);
+        assert!(anchored.anchors_additions);
+        assert_eq!(anchored.request_tools, [tool("a")]);
+        assert_eq!(resolve_transcript_tools(&messages, false).request_tools, [tool("a"), tool("b")]);
+        let mut redeclared = messages.clone();
+        let changed = Tool::new("a", "changed", json!({"type": "object"}));
+        redeclared.push(system(json!({"role": "system", "content": "", "toolsAdded": [changed], "timestamp": 3})));
+        assert!(has_tool_redefinitions(&redeclared) && !has_tool_redefinitions(&messages));
+        let resolved = resolve_transcript_tools(&redeclared, true);
+        assert!(!resolved.anchors_additions);
+        assert_eq!(declared_tools(&redeclared).iter().map(|tool| tool.name.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+        assert_eq!(declared_tools(&redeclared)[0].description, "changed");
+        assert_eq!(resolve_transcript(messages.clone(), true).len(), 3);
+        assert_eq!(resolve_transcript(messages.clone(), false).len(), 2);
+        assert_eq!(without_initial_system_message(&messages).len(), 2);
     }
 
     #[test]

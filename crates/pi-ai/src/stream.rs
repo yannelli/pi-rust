@@ -10,7 +10,7 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 
 use crate::json::parse_streaming_json;
-use crate::types::{AssistantMessage, ContentBlock, JsonObject, Model, StopReason, ToolCall};
+use crate::types::{AssistantMessage, ContentBlock, DeferredHandle, JsonObject, Model, StopReason, ToolCall};
 
 /// Streaming events. A stream emits `Start` first and ends with exactly one
 /// `Done` or `Error`; setup failures may emit `Error` without `Start`.
@@ -112,6 +112,19 @@ pub fn error_stream(model: &Model, reason: StopReason, error: impl Into<String>)
     message.error_message = Some(error.into());
     sender.push(AssistantMessageEvent::Error { reason, error: message });
     stream
+}
+
+/// An assistant message diagnostic (`{type, timestamp, error?, details?}`), as upstream
+/// `createAssistantMessageDiagnostic` builds it.
+pub fn diagnostic(kind: &str, error: Option<&str>, details: Option<JsonObject>) -> Value {
+    let mut value = serde_json::json!({"type": kind, "timestamp": crate::types::now_ms()});
+    if let Some(message) = error {
+        value["error"] = serde_json::json!({"message": message});
+    }
+    if let Some(details) = details {
+        value["details"] = Value::Object(details);
+    }
+    value
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -332,7 +345,18 @@ impl MessageBuilder {
         }
     }
 
-    /// Emit `Done`. `reason` must be `Stop`, `Length`, or `ToolUse`; a `Stop`
+    /// Emit `Done` with reason `Deferred`: the provider continues the request later.
+    pub fn defer(mut self, handle: DeferredHandle) {
+        self.message.deferred = Some(handle);
+        self.finish(StopReason::Deferred);
+    }
+
+    /// Append a redacted diagnostic to the message, see [`diagnostic`].
+    pub fn add_diagnostic(&mut self, diagnostic: Value) {
+        self.message.diagnostics.push(diagnostic);
+    }
+
+    /// Emit `Done`. `reason` must be `Stop`, `Length`, `ToolUse`, or `Deferred`; a `Stop`
     /// response that contains tool calls is reported as `ToolUse`.
     pub fn finish(mut self, reason: StopReason) {
         self.close_open_block();

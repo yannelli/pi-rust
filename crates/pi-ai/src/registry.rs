@@ -3,12 +3,14 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, LazyLock, RwLock};
 
+use futures::future::BoxFuture;
 use tokio_util::sync::CancellationToken;
 
 use crate::env::get_env_api_key;
 use crate::providers;
+use crate::request::RequestOptions;
 use crate::stream::{AssistantMessageEventStream, error_stream};
-use crate::types::{AssistantMessage, Context, Model, StopReason, ThinkingLevel};
+use crate::types::{AssistantMessage, Context, DeferredHandle, Model, StopReason, ThinkingLevel};
 
 /// Preferred transport for providers that support several.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -102,10 +104,45 @@ impl std::fmt::Debug for StreamOptions {
     }
 }
 
+/// Options for fetching or cancelling a deferred response.
+#[derive(Clone, Debug, Default)]
+pub struct DeferredOptions {
+    pub request: RequestOptions,
+    /// Longest provider long-poll in milliseconds; `None` or 0 checks once.
+    pub wait_ms: Option<u64>,
+}
+
 /// One wire protocol, such as `openai-completions`. Implementations must
 /// always end the returned stream with `Done` or `Error` and honor `options.cancel`.
 pub trait ApiProvider: Send + Sync {
     fn stream(&self, model: &Model, context: &Context, options: StreamOptions) -> AssistantMessageEventStream;
+
+    /// Whether `stream` reads system messages from the transcript itself. When false, the
+    /// registry first folds them into `system_prompt` and `tools`.
+    fn supports_system_messages(&self) -> bool {
+        false
+    }
+
+    /// Continue a response that ended with stop reason `Deferred`. A response that is still
+    /// pending ends with `Deferred` again.
+    fn fetch_deferred(
+        &self,
+        model: &Model,
+        _handle: &DeferredHandle,
+        _options: DeferredOptions,
+    ) -> AssistantMessageEventStream {
+        error_stream(model, StopReason::Error, "API does not support deferred responses")
+    }
+
+    /// Best-effort cancellation of a deferred response.
+    fn cancel_deferred(
+        &self,
+        _model: &Model,
+        _handle: &DeferredHandle,
+        _options: DeferredOptions,
+    ) -> BoxFuture<'static, Result<(), String>> {
+        Box::pin(async { Err("API cannot cancel deferred responses".to_string()) })
+    }
 }
 
 type Registry = RwLock<HashMap<String, Arc<dyn ApiProvider>>>;
@@ -135,10 +172,55 @@ pub fn stream(model: &Model, context: &Context, mut options: StreamOptions) -> A
     if options.api_key.is_none() {
         options.api_key = get_env_api_key(&model.provider);
     }
-    if context.messages.iter().any(|message| matches!(message, crate::types::Message::System(_))) {
+    add_opencode_session_header(model, &mut options);
+    let has_system = context.messages.iter().any(|message| matches!(message, crate::types::Message::System(_)));
+    if has_system && !provider.supports_system_messages() {
         return provider.stream(model, &crate::transcript::flatten_context(context), options);
     }
     provider.stream(model, context, options)
+}
+
+/// OpenCode routes a conversation by its `x-opencode-session` header.
+fn add_opencode_session_header(model: &Model, options: &mut StreamOptions) {
+    const HEADER: &str = "x-opencode-session";
+    let Some(session) = options.session_id.clone() else { return };
+    let present = options.headers.keys().any(|name| name.eq_ignore_ascii_case(HEADER));
+    if matches!(model.provider.as_str(), "opencode" | "opencode-go") && !present {
+        options.headers.insert(HEADER.into(), session);
+    }
+}
+
+fn deferred_provider(model: &Model, options: &mut DeferredOptions) -> Result<Arc<dyn ApiProvider>, String> {
+    if options.request.api_key.is_none() {
+        options.request.api_key = get_env_api_key(&model.provider);
+    }
+    api_provider(&model.api).ok_or_else(|| format!("No provider registered for API: {}", model.api))
+}
+
+/// Stream the continuation of a deferred response.
+pub fn stream_deferred(
+    model: &Model,
+    handle: &DeferredHandle,
+    mut options: DeferredOptions,
+) -> AssistantMessageEventStream {
+    match deferred_provider(model, &mut options) {
+        Ok(provider) => provider.fetch_deferred(model, handle, options),
+        Err(error) => error_stream(model, StopReason::Error, error),
+    }
+}
+
+/// Fetch a deferred response; the result has stop reason `Deferred` while it is still pending.
+pub async fn fetch_deferred(model: &Model, handle: &DeferredHandle, options: DeferredOptions) -> AssistantMessage {
+    stream_deferred(model, handle, options).result(model).await
+}
+
+/// Best-effort cancellation of a deferred response.
+pub async fn cancel_deferred(
+    model: &Model,
+    handle: &DeferredHandle,
+    mut options: DeferredOptions,
+) -> Result<(), String> {
+    deferred_provider(model, &mut options)?.cancel_deferred(model, handle, options).await
 }
 
 /// Stream a response and return the final message.
