@@ -25,6 +25,7 @@ base64 = "0.22.1"
 globset = "0.4.16"
 ignore = "0.4.23"
 regex = "1.11.1"
+serde_yaml_ng = "0.10.0"
 similar = "2.7.0"
 unicode-normalization = "0.1.24"
 
