@@ -6,6 +6,7 @@ pub mod compaction;
 pub mod config;
 pub mod files;
 pub mod interactive;
+pub mod messages;
 pub mod print_mode;
 pub mod render;
 pub mod session;

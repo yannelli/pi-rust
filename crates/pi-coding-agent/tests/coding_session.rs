@@ -79,7 +79,7 @@ async fn compacts_automatically_near_the_context_window() {
     register_api_provider("faux-compact", provider.clone());
     let mut session = CodingSession::new(options(root.path(), "faux-compact")).unwrap();
     session.compaction.reserve_tokens = 2500;
-    session.compaction.keep_recent_tokens = 500;
+    session.compaction.keep_recent_tokens = 1500;
     session.prompt(&format!("first question {long}"), Vec::new()).await.unwrap();
     session.prompt(&format!("second question {long}"), Vec::new()).await.unwrap();
     session.prompt("third question", Vec::new()).await.unwrap();

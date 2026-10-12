@@ -171,6 +171,7 @@ impl CodingSession {
                     .or_else(|| key_registry.api_key(provider))
             })),
             session_id: Some(session.id().to_string()),
+            convert_to_llm: Some(Arc::new(crate::messages::convert_to_llm)),
             ..AgentHooks::default()
         });
 
