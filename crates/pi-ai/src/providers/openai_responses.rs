@@ -10,18 +10,17 @@ mod tests;
 #[cfg(test)]
 mod tests_transcript;
 
-use self::request::{Compat, build_body};
+use self::request::{Compat, build_body, grammar_properties};
 use crate::http::pi_user_agent;
-use crate::providers::common::{HttpRequest, endpoint, has_header, header_map, spawn_provider_stream};
+use crate::providers::common::{HttpRequest, endpoint, has_header, header_map_with, spawn_provider_stream};
+use crate::providers::github_copilot::copilot_dynamic_headers;
 use crate::registry::{ApiProvider, CacheRetention, StreamOptions};
 use crate::simple_options::resolve_cache_retention;
 use crate::stream::{AssistantMessageEventStream, error_stream};
 use crate::transcript::{normalize_context, resolve_transcript};
 use crate::types::{Context, Model, StopReason};
 
-// Shared with the Codex and Copilot adapters.
-#[allow(unused_imports)]
-pub(crate) use self::convert::{ConvertOptions, TOOL_CALL_PROVIDERS, convert_messages, convert_tools};
+pub(crate) use self::convert::{ConvertOptions, convert_messages};
 pub(crate) use self::events::ResponsesStream;
 
 pub struct OpenAIResponses;
@@ -40,28 +39,35 @@ impl ApiProvider for OpenAIResponses {
         }
         let compat = Compat::resolve(model);
         let messages = resolve_transcript(normalize_context(context), compat.supports_mid_convo_system_messages);
-        let body = build_body(model, &messages, &options, &compat);
+        let built = grammar_properties(&messages, &compat)
+            .and_then(|grammar| Ok((build_body(model, &messages, &options, &compat, &grammar)?, grammar)));
+        let (body, grammar) = match built {
+            Ok(built) => built,
+            Err(error) => return error_stream(model, StopReason::Error, error),
+        };
         let mut defaults = vec![("user-agent", pi_user_agent())];
         if let Some(key) = api_key {
             defaults.push(("authorization", format!("Bearer {key}")));
         }
+        let mut overrides = copilot_dynamic_headers(model, &messages);
         let retention = resolve_cache_retention(options.cache_retention, &options.env);
         if let (Some(session), false) = (&options.session_id, retention == CacheRetention::None) {
             match compat.session_affinity_format.as_str() {
-                "openrouter" => defaults.push(("x-session-id", session.clone())),
+                "openrouter" => overrides.push(("x-session-id", session.clone())),
                 format => {
                     if format == "openai" {
-                        defaults.push(("session_id", session.clone()));
+                        overrides.push(("session_id", session.clone()));
                     }
-                    defaults.push(("x-client-request-id", session.clone()));
+                    overrides.push(("x-client-request-id", session.clone()));
                 }
             }
         }
         let request = HttpRequest {
             url: endpoint(&model.base_url, "/responses"),
-            headers: header_map(defaults, model, &options),
+            headers: header_map_with(defaults, overrides, model, &options),
             body,
         };
-        spawn_provider_stream(model, &options, request, ResponsesStream::new(model))
+        let handler = ResponsesStream::new(model).with_grammar_tool_input_properties(grammar);
+        spawn_provider_stream(model, &options, request, handler)
     }
 }

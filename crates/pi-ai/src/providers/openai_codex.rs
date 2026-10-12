@@ -253,6 +253,7 @@ async fn websocket_request(
 fn response_items(prepared: &Prepared, builder: &MessageBuilder) -> Vec<Value> {
     let output = [Message::Assistant(builder.message().clone())];
     codex_input(&prepared.model, &output, prepared.compat, &prepared.grammar)
+        .unwrap_or_default()
         .into_iter()
         .filter(|item| !matches!(item["type"].as_str(), Some("function_call_output" | "custom_tool_call_output")))
         .collect()

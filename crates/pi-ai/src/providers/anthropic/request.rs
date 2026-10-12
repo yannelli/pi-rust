@@ -34,6 +34,7 @@ pub(super) struct Compat {
     pub cache_control_on_tools: bool,
     pub temperature: bool,
     pub allow_empty_signature: bool,
+    pub strict_tools: bool,
     pub mid_convo_system_messages: bool,
     pub mid_convo_tool_changes: bool,
     pub force_adaptive_thinking: bool,
@@ -59,6 +60,7 @@ impl Compat {
             cache_control_on_tools: flag("supportsCacheControlOnTools", true),
             temperature: flag("supportsTemperature", true),
             allow_empty_signature: flag("allowEmptySignature", false),
+            strict_tools: flag("supportsStrictTools", false),
             mid_convo_system_messages: flag("supportsMidConvoSystemMessages", false),
             mid_convo_tool_changes: flag("supportsMidConvoToolChanges", false),
             force_adaptive_thinking: compat_bool(model, "forceAdaptiveThinking") == Some(true),
@@ -129,7 +131,7 @@ pub(super) struct Params<'a> {
 }
 
 /// The request body and the `anthropic-beta` features.
-pub(super) fn build_params(params: &Params) -> (Value, Vec<String>) {
+pub(super) fn build_params(params: &Params) -> Result<(Value, Vec<String>), String> {
     let Params { model, messages, options, compat, thinking, oauth } = *params;
     let cache_control = cache_control(resolve_cache_retention(options.cache_retention, &options.env), compat);
     let initial = initial_system_message(messages);
@@ -138,7 +140,8 @@ pub(super) fn build_params(params: &Params) -> (Value, Vec<String>) {
     let conversation = if initial.is_some() { &transformed[1..] } else { &transformed[..] };
     let initial_tools = initial.and_then(|system| system.tools_added.as_deref()).unwrap_or_default();
     let native_tools = compat.mid_convo_system_messages && compat.mid_convo_tool_changes && !initial_tools.is_empty();
-    let format = ToolFormat { oauth, eager_input_streaming: compat.eager_input_streaming };
+    let format =
+        ToolFormat { oauth, eager_input_streaming: compat.eager_input_streaming, strict_tools: compat.strict_tools };
     let converted = convert_messages(
         conversation,
         &ConvertOptions {
@@ -148,7 +151,7 @@ pub(super) fn build_params(params: &Params) -> (Value, Vec<String>) {
             managed_provider: compat.mid_convo_effort.then_some(model.provider.as_str()),
             native_tools: native_tools.then_some(format),
         },
-    );
+    )?;
     let betas = beta_features(params, native_tools);
     let mut body = Map::new();
     body.insert("model".into(), json!(model.id));
@@ -186,13 +189,13 @@ pub(super) fn build_params(params: &Params) -> (Value, Vec<String>) {
     }
     let tool_cache = cache_control.as_ref().filter(|_| compat.cache_control_on_tools);
     if native_tools {
-        let mut tools = convert_tools(initial_tools, format, tool_cache);
+        let mut tools = convert_tools(initial_tools, format, tool_cache)?;
         tools.push(deferred_tool_placeholder());
         body.insert("tools".into(), Value::Array(tools));
     } else {
         let tools = current_tools(messages);
         if !tools.is_empty() {
-            body.insert("tools".into(), Value::Array(convert_tools(&tools, format, tool_cache)));
+            body.insert("tools".into(), Value::Array(convert_tools(&tools, format, tool_cache)?));
         }
     }
     insert_thinking(&mut body, model, compat, thinking);
@@ -206,7 +209,7 @@ pub(super) fn build_params(params: &Params) -> (Value, Vec<String>) {
         let fallbacks: Vec<Value> = compat.fallback_models.iter().map(|model| json!({"model": model})).collect();
         body.insert("fallbacks".into(), Value::Array(fallbacks));
     }
-    (Value::Object(body), betas)
+    Ok((Value::Object(body), betas))
 }
 
 fn insert_thinking(body: &mut Map<String, Value>, model: &Model, compat: &Compat, thinking: &Thinking) {

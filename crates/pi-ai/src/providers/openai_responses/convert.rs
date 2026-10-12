@@ -8,13 +8,14 @@ use serde_json::{Value, json};
 use crate::providers::common::{
     compat_bool, data_url, has_images, sanitize_id, short_hash, take_chars, tool_result_text, transform_messages,
 };
+use crate::providers::constrained_sampling::{ResponsesToolOptions, convert_responses_tools, grammar_tool_input};
 use crate::transcript::{
     render_system_message_update, resolve_transcript, resolve_transcript_tools, system_message_text,
 };
-use crate::types::{AssistantMessage, ContentBlock, Message, Model, SystemMessage, Tool, UserContent};
+use crate::types::{AssistantMessage, ContentBlock, Message, Model, SystemMessage, UserContent};
 
 /// Providers whose `call_id|item_id` tool call ids are replayed with their item id.
-pub(crate) const TOOL_CALL_PROVIDERS: &[&str] = &["openai", "openai-codex", "opencode"];
+const TOOL_CALL_PROVIDERS: &[&str] = &["openai", "openai-codex", "opencode"];
 
 /// How [`convert_messages`] renders a transcript.
 #[derive(Clone, Debug)]
@@ -30,8 +31,8 @@ pub(crate) struct ConvertOptions {
     pub tool_call_providers: &'static [&'static str],
     /// Grammar tools by name, with the argument property that holds their raw input.
     pub grammar_tool_input_properties: BTreeMap<String, String>,
-    /// `strict` for function tools inside tool additions; `None` omits the field.
-    pub tool_strict: Option<bool>,
+    /// How tools inside tool additions are declared.
+    pub tool_options: ResponsesToolOptions,
 }
 
 impl Default for ConvertOptions {
@@ -43,32 +44,9 @@ impl Default for ConvertOptions {
             supports_tool_search: false,
             tool_call_providers: TOOL_CALL_PROVIDERS,
             grammar_tool_input_properties: BTreeMap::new(),
-            tool_strict: None,
+            tool_options: ResponsesToolOptions::default(),
         }
     }
-}
-
-/// Function tools. `strict` is sent when `Some`, as upstream does when strict mode is supported.
-pub(crate) fn convert_tools(tools: &[Tool], strict: Option<bool>) -> Vec<Value> {
-    convert_tools_with(tools, strict, false)
-}
-
-fn convert_tools_with(tools: &[Tool], strict: Option<bool>, defer_loading: bool) -> Vec<Value> {
-    tools
-        .iter()
-        .map(|tool| {
-            let mut value = json!({
-                "type": "function", "name": tool.name, "description": tool.description, "parameters": tool.parameters,
-            });
-            if defer_loading {
-                value["defer_loading"] = json!(true);
-            }
-            if let Some(strict) = strict {
-                value["strict"] = json!(strict);
-            }
-            value
-        })
-        .collect()
 }
 
 fn normalize_part(part: &str) -> String {
@@ -103,8 +81,13 @@ fn parse_text_signature(signature: Option<&str>) -> Option<(String, Option<Strin
     Some((signature.to_string(), None))
 }
 
-/// Input items for a normalized transcript (leading system message first).
-pub(crate) fn convert_messages(model: &Model, messages: &[Message], options: &ConvertOptions) -> Vec<Value> {
+/// Input items for a normalized transcript (leading system message first). Fails when a tool
+/// cannot be declared with its required constrained sampling.
+pub(crate) fn convert_messages(
+    model: &Model,
+    messages: &[Message],
+    options: &ConvertOptions,
+) -> Result<Vec<Value>, String> {
     let messages = resolve_transcript(messages.to_vec(), options.supports_mid_convo_system_messages);
     let providers = options.tool_call_providers;
     let normalize = |id: &str, source: &AssistantMessage| normalize_tool_call_id(model, providers, id, source);
@@ -121,7 +104,7 @@ pub(crate) fn convert_messages(model: &Model, messages: &[Message], options: &Co
         match message {
             Message::System(system) => {
                 if !leading && anchors {
-                    items.extend(tool_additions(system, &format!("system:{message_index}"), options));
+                    items.extend(tool_additions(system, &format!("system:{message_index}"), options)?);
                 }
                 if !leading || options.include_system_prompt {
                     let text = if leading { system_message_text(system) } else { render_system_message_update(system) };
@@ -141,7 +124,7 @@ pub(crate) fn convert_messages(model: &Model, messages: &[Message], options: &Co
                 items.push(json!({"role": "user", "content": content}));
             }
             Message::Assistant(assistant) => {
-                let output = convert_assistant(model, assistant, message_index, options);
+                let output = convert_assistant(model, assistant, message_index, options)?;
                 if output.is_empty() {
                     continue;
                 }
@@ -164,34 +147,35 @@ pub(crate) fn convert_messages(model: &Model, messages: &[Message], options: &Co
             message_index += 1;
         }
     }
-    items
+    Ok(items)
 }
 
 /// Items that load the tools a later system message adds.
-fn tool_additions(system: &SystemMessage, seed: &str, options: &ConvertOptions) -> Vec<Value> {
+fn tool_additions(system: &SystemMessage, seed: &str, options: &ConvertOptions) -> Result<Vec<Value>, String> {
     let tools = system.tools_added.as_deref().unwrap_or_default();
     if tools.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     if options.supports_additional_tools {
-        let tools = convert_tools(tools, options.tool_strict);
-        return vec![json!({"type": "additional_tools", "role": "developer", "tools": tools})];
+        let tools = convert_responses_tools(tools, options.tool_options)?;
+        return Ok(vec![json!({"type": "additional_tools", "role": "developer", "tools": tools})]);
     }
     if !options.supports_tool_search {
-        return Vec::new();
+        return Ok(Vec::new());
     }
+    let search_options = ResponsesToolOptions { tool_search_result: true, ..options.tool_options };
     let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_str()).collect();
     let call_id = format!("pi_tool_load_{}", short_hash(&format!("{seed}:{}", names.join(","))));
-    vec![
+    Ok(vec![
         json!({
             "type": "tool_search_call", "call_id": call_id, "execution": "client", "status": "completed",
             "arguments": {"query": names.join(" "), "limit": names.len()},
         }),
         json!({
             "type": "tool_search_output", "call_id": call_id, "execution": "client", "status": "completed",
-            "tools": convert_tools_with(tools, options.tool_strict, true),
+            "tools": convert_responses_tools(tools, search_options)?,
         }),
-    ]
+    ])
 }
 
 fn tool_result_output(model: &Model, content: &[ContentBlock]) -> Value {
@@ -223,7 +207,7 @@ fn convert_assistant(
     assistant: &AssistantMessage,
     message_index: usize,
     options: &ConvertOptions,
-) -> Vec<Value> {
+) -> Result<Vec<Value>, String> {
     let same_provider_and_api = assistant.provider == model.provider && assistant.api == model.api;
     let same_model = same_provider_and_api && assistant.model == model.id;
     let different_model = same_provider_and_api && assistant.model != model.id;
@@ -265,7 +249,7 @@ fn convert_assistant(
                 let prefix = if custom.is_some() { "ctc_" } else { "fc_" };
                 let mut item = match custom {
                     Some(property) => {
-                        let input = call.arguments.get(property).and_then(Value::as_str).unwrap_or_default();
+                        let input = grammar_tool_input(&call.name, &call.arguments, property)?;
                         json!({"type": "custom_tool_call", "call_id": call_id, "name": call.name, "input": input})
                     }
                     None => json!({"type": "function_call", "call_id": call_id, "name": call.name}),
@@ -284,5 +268,5 @@ fn convert_assistant(
             _ => {}
         }
     }
-    output
+    Ok(output)
 }

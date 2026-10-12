@@ -241,7 +241,7 @@ async fn namespaces_and_grammar_tool_calls_round_trip() {
     };
     let history =
         normalize_context(&Context { messages: vec![Message::Assistant(message.clone())], ..Context::default() });
-    let replayed = convert_messages(&model, &history, &grammar);
+    let replayed = convert_messages(&model, &history, &grammar).unwrap();
     assert_eq!(
         replayed[0],
         json!({"type": "function_call", "call_id": "call_test", "name": "lookup", "id": "fc_test",
@@ -253,6 +253,73 @@ async fn namespaces_and_grammar_tool_calls_round_trip() {
         "input": "hel\"lo", "id": "ctc_test", "namespace": "dynamic_tools"})
     );
     let other = crate::types::Model { id: "other".into(), ..model.clone() };
-    let replayed = convert_messages(&other, &history, &ConvertOptions::default());
+    let replayed = convert_messages(&other, &history, &ConvertOptions::default()).unwrap();
     assert!(replayed[0].get("namespace").is_none() && replayed[0].get("id").is_none());
+}
+
+fn constrained(name: &str, config: Value) -> Tool {
+    let parameters = json!({"type": "object", "properties": {"input": {"type": "string"}}, "required": ["input"]});
+    let mut tool = Tool::new(name, format!("{name} tool"), parameters);
+    tool.constrained_sampling = Some(config);
+    tool
+}
+
+#[tokio::test]
+async fn grammar_and_strict_tools_use_constrained_sampling() {
+    let model = model(json!({"supportsOpenAIGrammarTools": true, "supportsStrictMode": true}));
+    let grammar = constrained("query", json!({"type": "grammar", "variants": {"openai_lark": "start: /.+/"}}));
+    let strict = constrained("lookup", json!({"type": "json_schema", "strict": "prefer"}));
+    let context = Context {
+        tools: vec![grammar, strict, tool("plain")],
+        messages: vec![Message::user("x")],
+        ..Context::default()
+    };
+    let payload = capture_payload(&OpenAIResponses, &model, &context, options()).await;
+    let tools = payload["tools"].as_array().unwrap();
+    assert_eq!(
+        tools[0],
+        json!({"type": "custom", "name": "query", "description": "query tool",
+        "format": {"type": "grammar", "syntax": "lark", "definition": "start: /.+/"}})
+    );
+    assert_eq!(
+        (tools[1]["strict"].clone(), tools[1]["parameters"]["additionalProperties"].clone()),
+        (json!(true), json!(false))
+    );
+    assert_eq!(tools[2]["strict"], false);
+    let required = constrained("lookup", json!({"type": "json_schema", "strict": "require"}));
+    let context = Context { tools: vec![required], messages: vec![Message::user("x")], ..Context::default() };
+    let (_, message) = collect(OpenAIResponses.stream(&self::model(json!({})), &context, options())).await;
+    let expected = "Tool \"lookup\" requires JSON-schema constrained sampling, but strict tools are unsupported.";
+    assert_eq!(message.error_message.as_deref(), Some(expected));
+}
+
+#[tokio::test]
+async fn grammar_tool_calls_stream_into_their_input_property() {
+    let parameters = json!({"type": "object", "properties": {"sql": {"type": "string"}}, "required": ["sql"]});
+    let mut grammar = Tool::new("query", "query tool", parameters);
+    grammar.constrained_sampling = Some(json!({"type": "grammar", "variants": {"openai_regex": "SELECT .+"}}));
+    let item = json!({"type": "custom_tool_call", "id": "ctc_1", "call_id": "call_1", "name": "query", "input": ""});
+    let frames = vec![
+        frame(None, &json!({"type": "response.output_item.added", "output_index": 0, "item": item})),
+        frame(None, &json!({"type": "response.custom_tool_call_input.delta", "output_index": 0, "delta": "SELECT 1"})),
+        frame(
+            None,
+            &json!({"type": "response.output_item.done", "output_index": 0,
+            "item": {"type": "custom_tool_call", "id": "ctc_1", "call_id": "call_1", "name": "query", "input": "SELECT 1"}}),
+        ),
+        frame(None, &json!({"type": "response.completed", "response": {"id": "resp", "status": "completed"}})),
+    ];
+    let mut server = MockServer::start(MockResponse::Sse(frames)).await;
+    let mut model = test_model(API, "github-copilot", &server.base_url);
+    model.compat = Some(json!({"supportsOpenAIGrammarTools": true}));
+    let context = Context { tools: vec![grammar], messages: vec![Message::user("x")], ..Context::default() };
+    let (_, message) = collect(OpenAIResponses.stream(&model, &context, options())).await;
+    let call = message.tool_calls().next().unwrap();
+    assert_eq!(Value::Object(call.arguments.clone()), json!({"sql": "SELECT 1"}));
+    let request = server.request().await;
+    assert_eq!(request.body["tools"][0]["format"]["syntax"], "regex");
+    assert_eq!(
+        (request.headers["x-initiator"].as_str(), request.headers["openai-intent"].as_str()),
+        ("user", "conversation-edits")
+    );
 }

@@ -148,6 +148,21 @@ pub(crate) fn header_map(defaults: Vec<(&str, String)>, model: &Model, options: 
     build_headers(defaults, &model.headers, &options.headers, &options.suppressed_headers)
 }
 
+/// Like [`header_map`], with `overrides` applied after `model.headers` and before `options.headers`.
+pub(crate) fn header_map_with(
+    defaults: Vec<(&str, String)>,
+    overrides: Vec<(&str, String)>,
+    model: &Model,
+    options: &StreamOptions,
+) -> HeaderMap {
+    let mut model_headers = model.headers.clone();
+    for (name, value) in overrides {
+        model_headers.retain(|existing, _| !existing.eq_ignore_ascii_case(name));
+        model_headers.insert(name.to_string(), value);
+    }
+    build_headers(defaults, &model_headers, &options.headers, &options.suppressed_headers)
+}
+
 /// True when the caller supplied header `name` with a non-empty value.
 pub(crate) fn has_header(model: &Model, options: &StreamOptions, name: &str) -> bool {
     model

@@ -127,12 +127,16 @@ fn build_body(
         supports_tool_search: tool_search,
         tool_call_providers: TOOL_CALL_PROVIDERS,
         grammar_tool_input_properties: grammar.clone(),
-        tool_strict: supports_strict.then_some(false),
+        tool_options: ResponsesToolOptions {
+            supports_strict_mode: supports_strict,
+            supports_openai_grammar_tools: supports_grammar,
+            ..ResponsesToolOptions::default()
+        },
         ..ConvertOptions::default()
     };
     let mut body = Map::new();
     body.insert("model".into(), json!(resolve_deployment_name(model, options)));
-    body.insert("input".into(), Value::Array(convert_messages(model, &messages, &convert)));
+    body.insert("input".into(), Value::Array(convert_messages(model, &messages, &convert)?));
     body.insert("stream".into(), json!(true));
     if let Some(session) = &options.session_id {
         body.insert("prompt_cache_key".into(), json!(clamp_openai_prompt_cache_key(session)));

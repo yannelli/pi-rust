@@ -169,13 +169,14 @@ pub(super) fn codex_input(
     messages: &[Message],
     compat: Compat,
     grammar: &BTreeMap<String, String>,
-) -> Vec<Value> {
+) -> Result<Vec<Value>, String> {
     let options = ConvertOptions {
         include_system_prompt: false,
         supports_mid_convo_system_messages: compat.supports_mid_convo_system_messages,
         supports_additional_tools: compat.supports_additional_tools,
         supports_tool_search: compat.supports_tool_search,
         grammar_tool_input_properties: grammar.clone(),
+        tool_options: compat.tool_options(),
         ..ConvertOptions::default()
     };
     convert_messages(model, messages, &options)
@@ -196,7 +197,7 @@ pub(super) fn build_body(
     body.insert("stream".into(), json!(true));
     let instructions = initial_system_message(messages).map(system_message_text).filter(|text| !text.is_empty());
     body.insert("instructions".into(), json!(instructions.as_deref().unwrap_or("You are a helpful assistant.")));
-    body.insert("input".into(), Value::Array(codex_input(model, messages, compat, grammar)));
+    body.insert("input".into(), Value::Array(codex_input(model, messages, compat, grammar)?));
     body.insert("text".into(), json!({"verbosity": "low"}));
     body.insert("include".into(), json!(["reasoning.encrypted_content"]));
     if let Some(session) = cache_session_id {
