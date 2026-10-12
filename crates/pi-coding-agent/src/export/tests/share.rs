@@ -69,6 +69,15 @@ fn request<'a>(
 }
 
 #[test]
+fn share_future_can_be_spawned() {
+    fn assert_send<T: Send>(_: &T) {}
+    let runner = MockRunner::new(|_| output(0, "", ""));
+    let session = fixture();
+    let future = share_session(request(&session, &runner, None, CancellationToken::new()));
+    assert_send(&future);
+}
+
+#[test]
 fn viewer_url_appends_the_gist_id() {
     assert_eq!(share_viewer_url_with(Some("https://example.com/view/"), "abc"), "https://example.com/view/#abc");
     assert_eq!(share_viewer_url_with(None, "abc"), "https://pi.dev/session/#abc");
