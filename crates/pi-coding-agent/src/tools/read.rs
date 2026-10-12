@@ -18,12 +18,16 @@ use super::{as_count, check_aborted, parse_args};
 use crate::images::{ProcessImageOptions, process_image};
 
 const IMAGE_TYPE_SNIFF_BYTES: usize = 4100;
+const NON_VISION_IMAGE_NOTE: &str =
+    "[Current model does not support images. The image will be omitted from this request.]";
 const PNG_SIGNATURE: &[u8] = &[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 pub struct ReadTool {
     cwd: PathBuf,
     description: String,
     image_options: ProcessImageOptions,
+    /// Set when the model has no image input, so the model hears the image is dropped.
+    non_vision_note: bool,
 }
 
 #[derive(Deserialize)]
@@ -44,7 +48,14 @@ impl ReadTool {
             "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to {DEFAULT_MAX_LINES} lines or {}KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
             DEFAULT_MAX_BYTES / 1024
         );
-        Self { cwd, description, image_options }
+        Self { cwd, description, image_options, non_vision_note: false }
+    }
+
+    /// Resize profile from the model's `inputLimits`, plus the note for models without vision.
+    pub fn for_model(cwd: PathBuf, model: &pi_ai::Model, auto_resize: bool) -> Self {
+        let mut tool = Self::with_image_options(cwd, ProcessImageOptions::for_model(model, auto_resize));
+        tool.non_vision_note = !model.input.iter().any(|input| input == "image");
+        tool
     }
 }
 
@@ -89,6 +100,7 @@ impl AgentTool for ReadTool {
             let options = self.image_options;
             let processed = tokio::task::spawn_blocking(move || process_image(&buffer, mime_type, &options)).await?;
             check_aborted(&cancel)?;
+            let vision_note = if self.non_vision_note { format!("\n{NON_VISION_IMAGE_NOTE}") } else { String::new() };
             let content = match processed {
                 Ok(image) => {
                     let mut note = format!("Read image file [{}]", image.mime_type);
@@ -96,9 +108,12 @@ impl AgentTool for ReadTool {
                         note.push('\n');
                         note.push_str(&image.hints.join("\n"));
                     }
+                    note.push_str(&vision_note);
                     vec![ContentBlock::text(note), ContentBlock::Image { data: image.data, mime_type: image.mime_type }]
                 }
-                Err(message) => vec![ContentBlock::text(format!("Read image file [{mime_type}]\n{message}"))],
+                Err(message) => {
+                    vec![ContentBlock::text(format!("Read image file [{mime_type}]\n{message}{vision_note}"))]
+                }
             };
             return Ok(AgentToolResult { content, ..Default::default() });
         }

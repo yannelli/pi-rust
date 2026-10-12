@@ -266,6 +266,16 @@ async fn read_tool_resizes_large_images() {
     let ContentBlock::Image { data, .. } = &result.content[1] else { panic!("expected an image") };
     assert_eq!(dims(data), (240, 3));
 
+    let images = pi_ai::ModelImageInputLimits { resize: Some(limits(600, 600, 1 << 20)), ..Default::default() };
+    let input_limits = pi_ai::ModelInputLimits { max_request_bytes: None, images: Some(images) };
+    let text_only = pi_ai::Model { input: vec!["text".into()], input_limits: Some(input_limits), ..Default::default() };
+    let result = read(&ReadTool::for_model(dir.path().to_path_buf(), &text_only, true), "wide.png").await;
+    assert!(result.content[0].as_text().unwrap().ends_with(
+        "Multiply coordinates by 4.00 to map to original image.]\n[Current model does not support images. The image will be omitted from this request.]"
+    ));
+    let ContentBlock::Image { data, .. } = &result.content[1] else { panic!("expected an image") };
+    assert_eq!(dims(data), (600, 8));
+
     let mut broken = encode_png(&gradient(4, 4)).unwrap();
     broken.truncate(40);
     std::fs::write(dir.path().join("broken.png"), broken).unwrap();

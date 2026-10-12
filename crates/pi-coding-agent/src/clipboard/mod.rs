@@ -1,9 +1,11 @@
 //! System clipboard for `/copy` and paste (upstream `utils/clipboard.ts`, `utils/wsl.ts`).
 //! Platform tools do the work: pbcopy and pbpaste, wl-clipboard, xclip, xsel, Termux:API,
 //! PowerShell and clip.exe, with OSC 52 for remote and display-less terminals.
+//! Calls block for up to a few seconds; async callers should use `spawn_blocking`.
 
 pub mod command;
 mod image;
+mod paste;
 mod windows;
 
 #[cfg(test)]
@@ -20,6 +22,7 @@ pub use command::{ClipboardRunner, SystemClipboardRunner, run_clipboard_command}
 pub use image::{
     ClipboardImage, extension_for_image_mime_type, is_wayland_session, read_clipboard_image, read_clipboard_image_with,
 };
+pub use paste::{read_clipboard_file_paths, read_clipboard_file_paths_with, save_clipboard_image};
 
 const MAX_OSC52_ENCODED_LENGTH: usize = 100_000;
 const COMMAND_TIMEOUT: Duration = Duration::from_millis(5000);

@@ -306,3 +306,33 @@ fn command_runner_distinguishes_failure_empty_output_and_timeouts() {
     assert_eq!(run_clipboard_command("sh", &sh("sleep 5"), None, Duration::from_millis(100)), None);
     assert!(started.elapsed() < Duration::from_secs(3));
 }
+
+#[test]
+fn reads_copied_file_paths_on_macos_and_windows() {
+    let runner = Mock::new(|_, _| Some(b"/Users/me/a.png\n/Users/me/b c.txt\n".to_vec()));
+    let paths = with(env(Platform::MacOs, &[]), &runner, read_clipboard_file_paths_with).0;
+    assert_eq!(paths.unwrap(), ["/Users/me/a.png", "/Users/me/b c.txt"]);
+    let (name, script_args, _) = runner.call(0);
+    assert_eq!((name.as_str(), &script_args[..3]), ("osascript", &args(&["-l", "JavaScript", "-e"])[..]));
+
+    let runner = Mock::new(|_, _| Some(b"C:\\a.png\r\n".to_vec()));
+    let paths = with(env(Platform::Windows, &[]), &runner, read_clipboard_file_paths_with).0;
+    assert_eq!(paths.unwrap(), ["C:\\a.png"]);
+    assert!(runner.call(0).1[2].contains("FileDropList"));
+
+    let runner = Mock::new(|_, _| Some(Vec::new()));
+    assert_eq!(with(env(Platform::MacOs, &[]), &runner, read_clipboard_file_paths_with).0, None);
+    let runner = Mock::ok();
+    assert_eq!(with(env(Platform::Linux, &[("DISPLAY", ":0")]), &runner, read_clipboard_file_paths_with).0, None);
+    assert!(runner.names().is_empty());
+}
+
+#[test]
+fn saves_pasted_images_with_their_extension() {
+    let image = ClipboardImage { bytes: vec![1, 2, 3], mime_type: "image/jpeg".into() };
+    let path = save_clipboard_image(&image).unwrap();
+    let name = path.file_name().unwrap().to_str().unwrap().to_string();
+    assert!(name.starts_with("pi-clipboard-") && name.ends_with(".jpg"), "{name}");
+    assert_eq!(std::fs::read(&path).unwrap(), [1, 2, 3]);
+    std::fs::remove_file(path).unwrap();
+}
