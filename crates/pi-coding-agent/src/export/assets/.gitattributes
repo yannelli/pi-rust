@@ -1,0 +1,2 @@
+# Embedded verbatim in exported HTML; keep the bytes identical on every platform.
+* -text

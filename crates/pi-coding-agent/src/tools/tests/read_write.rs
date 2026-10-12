@@ -66,14 +66,11 @@ async fn read_truncates_by_bytes_and_long_first_line() {
     assert_eq!(out, "[Line 1 is 60.0KB, exceeds 50.0KB limit. Use bash: sed -n '1p' huge.txt | head -c 51200]");
 }
 
+/// A decodable 1x1 PNG; images now pass through resize processing.
 fn tiny_png() -> Vec<u8> {
-    let mut png = vec![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13];
-    png.extend_from_slice(b"IHDR");
-    png.extend_from_slice(&[0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1f, 0x15, 0xc4, 0x89]);
-    png.extend_from_slice(&[0, 0, 0, 0]);
-    png.extend_from_slice(b"IEND");
-    png.extend_from_slice(&[0xae, 0x42, 0x60, 0x82]);
-    png
+    use base64::Engine;
+    let data = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
+    base64::engine::general_purpose::STANDARD.decode(data).unwrap()
 }
 
 #[tokio::test]
