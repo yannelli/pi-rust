@@ -12,7 +12,7 @@ use crate::registry::StreamOptions;
 pub(crate) use crate::request::{HttpRequest, http_error_message, truncate_chars};
 use crate::request::{SendOptions, apply_payload_hook, build_headers, error_chain, provider_response, send_request};
 use crate::sse::{SseEvent, sse_events};
-use crate::stream::{AssistantMessageEventStream, MessageBuilder, event_channel};
+use crate::stream::{AssistantMessageEventStream, EventSender, MessageBuilder, event_channel};
 use crate::types::{ContentBlock, Model, StopReason, ThinkingLevel};
 
 /// Consumes the SSE events of one response.
@@ -68,11 +68,23 @@ pub(crate) fn spawn_sse_request<H: SseHandler>(
 pub(crate) fn spawn_provider_stream<H: SseHandler>(
     model: &Model,
     options: &StreamOptions,
+    request: HttpRequest,
+    handler: H,
+) -> AssistantMessageEventStream {
+    spawn_provider_stream_with(model, options, request, |_| handler)
+}
+
+/// [`spawn_provider_stream`] for handlers that emit some block events themselves through a
+/// clone of the event sender, for example to append to a block that is no longer the last one.
+pub(crate) fn spawn_provider_stream_with<H: SseHandler>(
+    model: &Model,
+    options: &StreamOptions,
     mut request: HttpRequest,
-    mut handler: H,
+    make_handler: impl FnOnce(EventSender) -> H,
 ) -> AssistantMessageEventStream {
     request.body = apply_payload_hook(request.body, options.on_payload.as_ref(), model);
     let (sender, stream) = event_channel();
+    let mut handler = make_handler(sender.clone());
     let mut builder = MessageBuilder::new(model, sender);
     let (model, options) = (model.clone(), options.clone());
     tokio::spawn(async move {
