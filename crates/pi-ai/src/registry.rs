@@ -146,13 +146,7 @@ pub async fn complete(model: &Model, context: &Context, options: StreamOptions) 
     stream(model, context, options).result(model).await
 }
 
-/// Shared HTTP client for providers.
-pub fn http_client() -> &'static reqwest::Client {
-    static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
-        reqwest::Client::builder()
-            .user_agent(concat!("pi-rust/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .expect("HTTP client configuration is valid")
-    });
-    &CLIENT
+/// Shared pooled HTTP client for providers; proxies and idle timeouts follow [`crate::http`].
+pub fn http_client() -> reqwest::Client {
+    crate::http::shared_client()
 }

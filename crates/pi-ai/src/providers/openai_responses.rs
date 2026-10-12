@@ -10,8 +10,10 @@ use serde_json::{Value, json};
 
 use self::request::build_body;
 use crate::json::parse_streaming_json;
-use crate::providers::common::{SseHandler, as_u64, compat_str, endpoint, has_header, header_map, spawn_sse_request};
-use crate::registry::{ApiProvider, StreamOptions, http_client};
+use crate::providers::common::{
+    HttpRequest, SseHandler, as_u64, compat_str, endpoint, has_header, header_map, spawn_provider_stream,
+};
+use crate::registry::{ApiProvider, StreamOptions};
 use crate::sse::SseEvent;
 use crate::stream::{AssistantMessageEventStream, MessageBuilder, error_stream};
 use crate::types::{ContentBlock, Context, JsonObject, Model, ModelCost, StopReason, Usage};
@@ -47,12 +49,13 @@ impl ApiProvider for OpenAIResponses {
                 }
             }
         }
-        let request = http_client()
-            .post(endpoint(&model.base_url, "/responses"))
-            .headers(header_map(defaults, model, &options))
-            .json(&body);
+        let request = HttpRequest {
+            url: endpoint(&model.base_url, "/responses"),
+            headers: header_map(defaults, model, &options),
+            body,
+        };
         let handler = ResponsesStream { cost: model.cost.clone(), ..ResponsesStream::default() };
-        spawn_sse_request(model, request, options.cancel, handler)
+        spawn_provider_stream(model, &options, request, handler)
     }
 }
 

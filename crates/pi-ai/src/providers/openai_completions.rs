@@ -12,8 +12,8 @@ use serde_json::Value;
 
 use self::reasoning_details::{append_reasoning_detail, is_reasoning_detail};
 use self::request::{Compat, REASONING_FIELDS, build_body};
-use crate::providers::common::{SseHandler, as_u64, endpoint, header_map, spawn_sse_request};
-use crate::registry::{ApiProvider, StreamOptions, http_client};
+use crate::providers::common::{HttpRequest, SseHandler, as_u64, endpoint, header_map, spawn_provider_stream};
+use crate::registry::{ApiProvider, StreamOptions};
 use crate::sse::SseEvent;
 use crate::stream::{AssistantMessageEventStream, MessageBuilder};
 use crate::types::{ContentBlock, Context, Model, ModelCost, StopReason, Usage};
@@ -39,10 +39,11 @@ impl ApiProvider for OpenAICompletions {
                 defaults.push(("x-session-affinity", session.clone()));
             }
         }
-        let request = http_client()
-            .post(endpoint(&model.base_url, "/chat/completions"))
-            .headers(header_map(defaults, model, &options))
-            .json(&body);
+        let request = HttpRequest {
+            url: endpoint(&model.base_url, "/chat/completions"),
+            headers: header_map(defaults, model, &options),
+            body,
+        };
         let handler = CompletionsStream {
             cost: model.cost.clone(),
             opencode_go: model.provider == "opencode-go",
@@ -52,7 +53,7 @@ impl ApiProvider for OpenAICompletions {
             finish: None,
             reasoning_details: Vec::new(),
         };
-        spawn_sse_request(model, request, options.cancel, handler)
+        spawn_provider_stream(model, &options, request, handler)
     }
 }
 
