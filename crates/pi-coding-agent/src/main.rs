@@ -15,7 +15,7 @@ fn list_models(search: &str, agent_dir: &std::path::Path) -> anyhow::Result<()> 
     let needle = search.to_lowercase();
     let mut rows: Vec<_> = registry
         .models()
-        .iter()
+        .into_iter()
         .filter(|model| {
             needle.is_empty()
                 || format!("{}/{} {}", model.provider, model.id, model.name).to_lowercase().contains(&needle)

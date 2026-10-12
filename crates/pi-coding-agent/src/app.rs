@@ -85,7 +85,7 @@ pub fn resolve_model(
         let preferred =
             DEFAULT_MODELS.iter().find(|(name, _)| *name == provider).and_then(|(_, id)| registry.find(provider, id));
         return preferred
-            .or_else(|| registry.models().iter().find(|model| model.provider == provider))
+            .or_else(|| registry.models().into_iter().find(|model| model.provider == provider))
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("Unknown provider: {provider}"));
     }
@@ -101,7 +101,7 @@ pub fn resolve_model(
         .iter()
         .filter(|(provider, _)| registry.has_api_key(provider))
         .find_map(|(provider, id)| registry.find(provider, id))
-        .or_else(|| registry.models().iter().find(|model| registry.has_api_key(&model.provider)))
+        .or_else(|| registry.models().into_iter().find(|model| registry.has_api_key(&model.provider)))
         .cloned()
         .ok_or_else(|| {
             anyhow::anyhow!("No model available. Set a provider API key (for example ANTHROPIC_API_KEY or OPENAI_API_KEY) or configure models.json.")
