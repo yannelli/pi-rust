@@ -4,11 +4,25 @@ A Rust-only port of the [pi](https://github.com/earendil-works/pi) coding agent 
 
 ## Install
 
+Download the archive for your platform from [Releases](https://github.com/yannelli/pi-rust/releases), extract it, and put `pi` (or `pi.exe`) on your `PATH`. Each release has `SHA256SUMS`.
+
+| Platform | Archive |
+| --- | --- |
+| Linux x86_64 | `pi-vX.Y.Z-x86_64-unknown-linux-musl.tar.gz` |
+| Linux arm64 | `pi-vX.Y.Z-aarch64-unknown-linux-musl.tar.gz` |
+| Linux armv7 (32-bit) | `pi-vX.Y.Z-armv7-unknown-linux-musleabihf.tar.gz` |
+| macOS Apple silicon | `pi-vX.Y.Z-aarch64-apple-darwin.tar.gz` |
+| macOS Intel | `pi-vX.Y.Z-x86_64-apple-darwin.tar.gz` |
+| Windows x86_64 | `pi-vX.Y.Z-x86_64-pc-windows-msvc.zip` |
+| Windows arm64 | `pi-vX.Y.Z-aarch64-pc-windows-msvc.zip` |
+
+Linux binaries are static and run on any distribution, including Termux. With the GitHub CLI: `gh release download --repo yannelli/pi-rust --pattern '*aarch64-apple-darwin*'`.
+
+To build from source (Rust 1.85 or newer):
+
 ```sh
 cargo install --path crates/pi-coding-agent
 ```
-
-This installs the `pi` binary. Rust 1.85 or newer is required.
 
 ## Use
 
@@ -72,6 +86,25 @@ cargo test --workspace
 ```
 
 Tests use the `faux` provider and local mock HTTP servers; they need no API keys or network access.
+
+## Releases
+
+Versions follow [Semantic Versioning](https://semver.org/) and are derived from [Conventional Commits](https://www.conventionalcommits.org/):
+
+| Commit | Release |
+| --- | --- |
+| `fix:`, `perf:`, `revert:` | patch |
+| `feat:` | minor (patch before 1.0) |
+| `feat!:`, `fix!:`, or a `BREAKING CHANGE:` footer | major (minor before 1.0) |
+| `docs:`, `chore:`, `ci:`, `test:`, `refactor:`, `style:`, `build:` | none |
+
+After CI passes on `main`, the Release workflow runs `cargo xtask plan`. When a release is due it bumps the workspace version, prepends the `CHANGELOG.md` section, commits `chore(release): vX.Y.Z`, tags `vX.Y.Z`, builds every target, and publishes the GitHub release with checksums. Pushing a `vX.Y.Z` tag that matches `Cargo.toml` releases that version directly, and `vX.Y.Z-rc.1` tags publish pre-releases. Run the workflow manually with `dry_run` to build all targets without publishing.
+
+```sh
+cargo xtask plan                 # next version and release decision
+cargo xtask prepare 0.2.0        # set the version and update CHANGELOG.md
+cargo xtask notes 0.2.0          # print release notes
+```
 
 ## License
 
