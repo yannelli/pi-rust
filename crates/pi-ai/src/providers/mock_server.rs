@@ -225,3 +225,21 @@ pub(crate) async fn cancel_after_first_text(
     };
     tokio::time::timeout(Duration::from_secs(5), drive).await.expect("cancellation is prompt")
 }
+
+/// Run `provider` and return the request body its `on_payload` hook saw. Point `model` at an
+/// unreachable address such as `http://127.0.0.1:9` so the request fails after the hook.
+pub(crate) async fn capture_payload(
+    provider: &dyn crate::registry::ApiProvider,
+    model: &Model,
+    context: &crate::types::Context,
+    mut options: crate::registry::StreamOptions,
+) -> Value {
+    let captured: Arc<Mutex<Option<Value>>> = Arc::default();
+    let slot = captured.clone();
+    options.on_payload = Some(Arc::new(move |payload, _| {
+        *slot.lock().unwrap() = Some(payload.clone());
+        None
+    }));
+    provider.stream(model, context, options).result(model).await;
+    captured.lock().unwrap().take().expect("payload captured")
+}

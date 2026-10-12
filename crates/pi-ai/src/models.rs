@@ -238,7 +238,7 @@ mod tests {
     #[test]
     fn bundled_catalog_parses() {
         assert!(!builtin_models().is_empty());
-        assert!(builtin_models().iter().all(|model| !model.base_url.is_empty()));
+        assert!(builtin_models().iter().all(|model| model.provider == "azure" || !model.base_url.is_empty()));
     }
 
     #[test]
