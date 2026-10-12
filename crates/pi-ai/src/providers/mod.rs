@@ -3,6 +3,7 @@
 pub mod anthropic;
 pub mod aws;
 pub mod bedrock;
+pub mod cloudflare;
 mod common;
 pub mod constrained_sampling;
 pub mod faux;

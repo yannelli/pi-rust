@@ -136,6 +136,8 @@ pub fn stream(model: &Model, context: &Context, mut options: StreamOptions) -> A
     if options.api_key.is_none() {
         options.api_key = get_env_api_key(&model.provider);
     }
+    let (model, options) = providers::cloudflare::prepare_cloudflare_request(model, options);
+    let model = model.as_ref();
     if context.messages.iter().any(|message| matches!(message, crate::types::Message::System(_))) {
         return provider.stream(model, &crate::transcript::flatten_context(context), options);
     }
