@@ -136,7 +136,10 @@ jobs:
           key: ${{ matrix.target }}
       - name: Install cargo-zigbuild
         if: matrix.zig
-        run: pipx install cargo-zigbuild
+        run: |
+          python3 -m venv "$RUNNER_TEMP/zig"
+          "$RUNNER_TEMP/zig/bin/pip" install --quiet cargo-zigbuild
+          echo "$RUNNER_TEMP/zig/bin" >> "$GITHUB_PATH"
       - name: Put clang on PATH for ring
         if: matrix.target == 'aarch64-pc-windows-msvc'
         shell: bash
