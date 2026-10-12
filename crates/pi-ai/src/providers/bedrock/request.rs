@@ -8,12 +8,14 @@ use super::model_info::{
     gpt_effort, gpt_oss_effort, is_claude, is_gov_cloud, map_effort, supports_adaptive_thinking,
     supports_block_binding, supports_prompt_caching,
 };
-use crate::providers::common::{
-    MIN_ANSWER_TOKENS, compat_bool, sanitize_id, take_chars, thinking_budget, transform_messages,
-};
+use crate::providers::common::{compat_bool, sanitize_id, take_chars, transform_messages};
 use crate::providers::constrained_sampling::{json_schema_tool_parameters, resolve_json_schema_strict_sampling};
-use crate::providers::provider_env::provider_env_value;
 use crate::registry::{CacheRetention, StreamOptions, ThinkingBudgets};
+use crate::simple_options::{
+    adjust_max_tokens_for_thinking, clamp_max_tokens_to_context, clamp_reasoning, clamp_thinking_budget_to_answer_room,
+    resolve_cache_retention, thinking_budget_for_level,
+};
+use crate::transcript::normalize_context;
 use crate::types::{ContentBlock, Context, Message, Model, ThinkingLevel, ToolResultMessage, UserContent};
 
 const EMPTY_TEXT_PLACEHOLDER: &str = "<empty>";
@@ -27,19 +29,18 @@ pub(super) fn build_body(
     options: &StreamOptions,
     configured_region: Option<&str>,
 ) -> Result<Value, String> {
-    let cache = cache_retention(options);
+    let cache = resolve_cache_retention(options.cache_retention, &options.env);
     let reasoning = options.reasoning.filter(|level| *level != ThinkingLevel::Off && model.reasoning);
-    let base_max_tokens = options.max_tokens.unwrap_or(model.max_tokens);
+    let transcript = normalize_context(context);
+    let base_max_tokens =
+        clamp_max_tokens_to_context(model, &transcript, options.max_tokens.unwrap_or(model.max_tokens));
     let mut budgets = options.thinking_budgets.unwrap_or_default();
     let mut max_tokens = base_max_tokens;
     if let Some(level) = reasoning.filter(|_| is_claude(model) && !supports_adaptive_thinking(model)) {
-        let clamped = clamp_level(level);
-        let mut budget = budget_for(&budgets, clamped).unwrap_or_else(|| thinking_budget(clamped));
-        max_tokens = (base_max_tokens + budget).min(model.max_tokens);
-        if max_tokens <= budget {
-            budget = budget.min(max_tokens.saturating_sub(MIN_ANSWER_TOKENS));
-        }
-        set_budget(&mut budgets, clamped, budget.min(max_tokens.saturating_sub(MIN_ANSWER_TOKENS)));
+        let custom = options.thinking_budgets.as_ref();
+        let (adjusted, budget) = adjust_max_tokens_for_thinking(Some(base_max_tokens), model.max_tokens, level, custom);
+        max_tokens = clamp_max_tokens_to_context(model, &transcript, adjusted);
+        set_budget(&mut budgets, clamp_reasoning(level), clamp_thinking_budget_to_answer_room(budget, max_tokens));
     }
     let mut body = Map::new();
     body.insert("modelId".into(), json!(model.id));
@@ -70,13 +71,6 @@ pub(super) fn build_body(
     Ok(Value::Object(body))
 }
 
-fn cache_retention(options: &StreamOptions) -> CacheRetention {
-    options.cache_retention.unwrap_or_else(|| match provider_env_value("PI_CACHE_RETENTION", &options.env) {
-        Some(value) if value == "long" => CacheRetention::Long,
-        _ => CacheRetention::Short,
-    })
-}
-
 fn cache_point(model: &Model, cache: CacheRetention, options: &StreamOptions) -> Option<Value> {
     if cache == CacheRetention::None || !supports_prompt_caching(model, &options.env) {
         return None;
@@ -85,23 +79,6 @@ fn cache_point(model: &Model, cache: CacheRetention, options: &StreamOptions) ->
         CacheRetention::Long => json!({"cachePoint": {"type": "default", "ttl": "1h"}}),
         _ => json!({"cachePoint": {"type": "default"}}),
     })
-}
-
-fn clamp_level(level: ThinkingLevel) -> ThinkingLevel {
-    match level {
-        ThinkingLevel::Xhigh | ThinkingLevel::Max => ThinkingLevel::High,
-        level => level,
-    }
-}
-
-fn budget_for(budgets: &ThinkingBudgets, level: ThinkingLevel) -> Option<u64> {
-    match level {
-        ThinkingLevel::Minimal => budgets.minimal,
-        ThinkingLevel::Low => budgets.low,
-        ThinkingLevel::Medium => budgets.medium,
-        ThinkingLevel::High => budgets.high,
-        _ => None,
-    }
 }
 
 fn set_budget(budgets: &mut ThinkingBudgets, level: ThinkingLevel, budget: u64) {
@@ -127,7 +104,7 @@ fn additional_fields(
         let mut thinking = if adaptive {
             json!({"type": "adaptive"})
         } else {
-            let budget = budget_for(budgets, clamp_level(level)).unwrap_or_else(|| thinking_budget(level));
+            let budget = thinking_budget_for_level(level, Some(budgets));
             json!({"type": "enabled", "budget_tokens": budget})
         };
         if !gov_cloud {

@@ -15,12 +15,14 @@ use reqwest::header::HeaderMap;
 use serde_json::Value;
 
 use self::events::{BedrockEvents, Failure, error_prefix, with_retention_hint};
+use crate::http::client_for_env;
 use crate::providers::aws::credentials::{self, ChainInput, profile_region};
 use crate::providers::aws::endpoint::{regional_endpoint, standard_bedrock_endpoint_region};
 use crate::providers::aws::event_stream::Decoder;
 use crate::providers::aws::sigv4::{Credentials, SignableRequest, sign, uri_encode};
 use crate::providers::provider_env::{process_env_value, provider_env_value};
-use crate::registry::{ApiProvider, ProviderResponse, StreamOptions, http_client};
+use crate::registry::{ApiProvider, StreamOptions};
+use crate::request::provider_response;
 use crate::stream::{AssistantMessageEventStream, MessageBuilder, event_channel};
 use crate::types::{Context, Model, StopReason};
 
@@ -208,10 +210,11 @@ impl Run {
         target: &Target,
         options: &StreamOptions,
     ) -> Result<reqwest::Response, Failure> {
+        let client = client_for_env(&options.env);
         let mut sends = 0;
         loop {
             sends += 1;
-            let mut request = http_client().post(url.clone()).body(payload.to_vec());
+            let mut request = client.post(url.clone()).body(payload.to_vec());
             let signed = match auth {
                 Auth::Bearer(token) => vec![("authorization".to_string(), format!("Bearer {token}"))],
                 Auth::Sign(credentials) => {
@@ -247,15 +250,6 @@ impl Run {
 
 fn header(headers: &HeaderMap, name: &str) -> Option<String> {
     headers.get(name).and_then(|value| value.to_str().ok()).map(str::to_string)
-}
-
-fn provider_response(response: &reqwest::Response) -> ProviderResponse {
-    let headers = response
-        .headers()
-        .iter()
-        .filter_map(|(name, value)| Some((name.as_str().to_string(), value.to_str().ok()?.to_string())))
-        .collect();
-    ProviderResponse { status: response.status().as_u16(), headers }
 }
 
 /// A non-2xx reply as the SDK reports it: `{prefix or code}: {message}`.

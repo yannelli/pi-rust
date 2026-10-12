@@ -10,6 +10,7 @@ use super::*;
 use crate::providers::aws::event_stream::{HeaderValue, Message as Frame, encode};
 use crate::providers::http_mock::{Reply, RouteServer};
 use crate::providers::mock_server::{cancel_after_first_text, collect, kinds};
+use crate::registry::ProviderResponse;
 use crate::stream::AssistantMessageEvent;
 use crate::types::{ContentBlock, ModelCost};
 
@@ -127,6 +128,8 @@ async fn streams_thinking_text_and_usage_with_a_bearer_token() {
     assert_eq!((thinking.as_str(), thinking_signature.as_deref(), *redacted), ("Plan", Some("sig-1"), false));
     assert_eq!((message.usage.input, message.usage.output, message.usage.total_tokens), (100, 5, 1_000_105));
     assert_eq!((message.usage.cache_write, message.usage.cache_write_1h), (1_000_000, Some(400_000)));
+    let expected_cache_write = (600_000.0 * 6.25 + 400_000.0 * 5.0 * 2.0) / 1_000_000.0;
+    assert!((message.usage.cost.cache_write - expected_cache_write).abs() < 1e-9, "{:?}", message.usage.cost);
 
     let request = &server.requests()[0];
     assert_eq!(request.path, "/model/us.anthropic.claude-opus-4-8/converse-stream");

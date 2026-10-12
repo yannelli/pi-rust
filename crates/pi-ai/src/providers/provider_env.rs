@@ -3,13 +3,7 @@
 
 use std::collections::BTreeMap;
 
-/// The first non-empty value of `name` from `env`, then from the process environment.
-pub(crate) fn provider_env_value(name: &str, env: &BTreeMap<String, String>) -> Option<String> {
-    env.get(name)
-        .filter(|value| !value.is_empty())
-        .cloned()
-        .or_else(|| std::env::var(name).ok().filter(|value| !value.is_empty()))
-}
+pub(crate) use crate::simple_options::provider_env_value;
 
 /// Only the process environment, for checks upstream makes without scoped overrides.
 pub(crate) fn process_env_value(name: &str) -> Option<String> {
