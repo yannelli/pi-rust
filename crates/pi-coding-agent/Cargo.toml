@@ -17,13 +17,15 @@ async-trait.workspace = true
 futures.workspace = true
 pi-agent.workspace = true
 pi-ai.workspace = true
+reqwest.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 tokio.workspace = true
 tokio-util.workspace = true
 base64 = "0.22.1"
 globset = "0.4.16"
 ignore = "0.4.23"
+image = { version = "0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
 regex = "1.11.1"
 similar = "2.7.0"
 unicode-normalization = "0.1.24"

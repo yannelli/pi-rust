@@ -4,7 +4,6 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
-use base64::Engine;
 use pi_agent::{AgentTool, AgentToolResult, ToolUpdateCallback};
 use pi_ai::ContentBlock;
 use serde::Deserialize;
@@ -16,6 +15,7 @@ use super::truncate::{
     DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, TruncatedBy, TruncationOptions, format_size, truncate_head,
 };
 use super::{as_count, check_aborted, parse_args};
+use crate::images::{ProcessImageOptions, process_image};
 
 const IMAGE_TYPE_SNIFF_BYTES: usize = 4100;
 const PNG_SIGNATURE: &[u8] = &[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
@@ -23,6 +23,7 @@ const PNG_SIGNATURE: &[u8] = &[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 pub struct ReadTool {
     cwd: PathBuf,
     description: String,
+    image_options: ProcessImageOptions,
 }
 
 #[derive(Deserialize)]
@@ -34,11 +35,16 @@ struct ReadArgs {
 
 impl ReadTool {
     pub fn new(cwd: PathBuf) -> Self {
+        Self::with_image_options(cwd, ProcessImageOptions::default())
+    }
+
+    /// Images are processed with `options`, for example [`ProcessImageOptions::for_model`].
+    pub fn with_image_options(cwd: PathBuf, image_options: ProcessImageOptions) -> Self {
         let description = format!(
             "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to {DEFAULT_MAX_LINES} lines or {}KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
             DEFAULT_MAX_BYTES / 1024
         );
-        Self { cwd, description }
+        Self { cwd, description, image_options }
     }
 }
 
@@ -80,14 +86,21 @@ impl AgentTool for ReadTool {
 
         let sniff = &buffer[..buffer.len().min(IMAGE_TYPE_SNIFF_BYTES)];
         if let Some(mime_type) = detect_supported_image_mime_type(sniff) {
-            let data = base64::engine::general_purpose::STANDARD.encode(&buffer);
-            return Ok(AgentToolResult {
-                content: vec![
-                    ContentBlock::text(format!("Read image file [{mime_type}]")),
-                    ContentBlock::Image { data, mime_type: mime_type.to_string() },
-                ],
-                ..Default::default()
-            });
+            let options = self.image_options;
+            let processed = tokio::task::spawn_blocking(move || process_image(&buffer, mime_type, &options)).await?;
+            check_aborted(&cancel)?;
+            let content = match processed {
+                Ok(image) => {
+                    let mut note = format!("Read image file [{}]", image.mime_type);
+                    if !image.hints.is_empty() {
+                        note.push('\n');
+                        note.push_str(&image.hints.join("\n"));
+                    }
+                    vec![ContentBlock::text(note), ContentBlock::Image { data: image.data, mime_type: image.mime_type }]
+                }
+                Err(message) => vec![ContentBlock::text(format!("Read image file [{mime_type}]\n{message}"))],
+            };
+            return Ok(AgentToolResult { content, ..Default::default() });
         }
 
         let text = String::from_utf8_lossy(&buffer);

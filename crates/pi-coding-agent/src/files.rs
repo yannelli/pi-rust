@@ -1,12 +1,15 @@
-//! `@path` arguments: text files are inlined in `<file>` tags, images are attached.
+//! `@path` arguments: text files are inlined in `<file>` tags, images are attached
+//! after auto-resize (upstream `cli/file-processor.ts`).
 
 use std::path::Path;
 
-use base64::Engine;
 use pi_ai::ContentBlock;
 
+use crate::images::{ProcessImageOptions, process_image};
 use crate::tools::detect_supported_image_mime_type;
 use crate::tools::path_utils::resolve_read_path;
+
+const IMAGE_TYPE_SNIFF_BYTES: usize = 4100;
 
 #[derive(Debug, Default, PartialEq)]
 pub struct ProcessedFiles {
@@ -14,23 +17,39 @@ pub struct ProcessedFiles {
     pub images: Vec<ContentBlock>,
 }
 
+/// Process `@file` arguments with the default image limits (2000x2000, 4.5MB).
 pub fn process_file_args(paths: &[String], cwd: &Path) -> anyhow::Result<ProcessedFiles> {
+    process_file_args_with(paths, cwd, &ProcessImageOptions::default())
+}
+
+/// Process `@file` arguments; images go through [`process_image`] with `options`.
+pub fn process_file_args_with(
+    paths: &[String],
+    cwd: &Path,
+    options: &ProcessImageOptions,
+) -> anyhow::Result<ProcessedFiles> {
     let mut processed = ProcessedFiles::default();
     for input in paths {
         let path = resolve_read_path(input, cwd);
         let bytes =
             std::fs::read(&path).map_err(|error| anyhow::anyhow!("Cannot read file {}: {error}", path.display()))?;
+        if bytes.is_empty() {
+            continue;
+        }
         let name = path.display();
-        if let Some(mime_type) = detect_supported_image_mime_type(&bytes) {
-            processed.images.push(ContentBlock::Image {
-                data: base64::engine::general_purpose::STANDARD.encode(&bytes),
-                mime_type: mime_type.to_string(),
-            });
-            processed.text.push_str(&format!("<file name=\"{name}\"></file>\n"));
-        } else if bytes.is_empty() {
-            processed.text.push_str(&format!("<file name=\"{name}\"></file>\n"));
+        let sniff = &bytes[..bytes.len().min(IMAGE_TYPE_SNIFF_BYTES)];
+        if let Some(mime_type) = detect_supported_image_mime_type(sniff) {
+            match process_image(&bytes, mime_type, options) {
+                Ok(image) => {
+                    let hints = image.hints.join("\n");
+                    processed.images.push(ContentBlock::Image { data: image.data, mime_type: image.mime_type });
+                    processed.text.push_str(&format!("<file name=\"{name}\">{hints}</file>\n"));
+                }
+                Err(message) => processed.text.push_str(&format!("<file name=\"{name}\">{message}</file>\n")),
+            }
         } else {
             let content = String::from_utf8_lossy(&bytes);
+            let content = content.strip_prefix('\u{feff}').unwrap_or(&content);
             processed.text.push_str(&format!("<file name=\"{name}\">\n{content}\n</file>\n"));
         }
     }
@@ -39,20 +58,62 @@ pub fn process_file_args(paths: &[String], cwd: &Path) -> anyhow::Result<Process
 
 #[cfg(test)]
 mod tests {
+    use base64::Engine;
+
     use super::*;
+
+    fn png(width: u32, height: u32) -> Vec<u8> {
+        let image =
+            image::RgbaImage::from_fn(width, height, |x, y| image::Rgba([(x % 256) as u8, (y % 256) as u8, 7, 255]));
+        crate::images::encode_png(&image).unwrap()
+    }
 
     #[test]
     fn inlines_text_and_attaches_images() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("a.txt"), "hello").unwrap();
-        let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13];
-        png.extend_from_slice(b"IHDR");
-        png.extend_from_slice(&[0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1f, 0x15, 0xc4, 0x89]);
-        std::fs::write(dir.path().join("b.png"), png).unwrap();
-        let processed = process_file_args(&["a.txt".into(), "b.png".into()], dir.path()).unwrap();
-        let a = dir.path().join("a.txt");
-        assert!(processed.text.starts_with(&format!("<file name=\"{}\">\nhello\n</file>\n", a.display())));
+        std::fs::write(dir.path().join("a.txt"), "\u{feff}hello").unwrap();
+        std::fs::write(dir.path().join("b.png"), png(1, 1)).unwrap();
+        std::fs::write(dir.path().join("empty.txt"), "").unwrap();
+        let args = ["a.txt".into(), "b.png".into(), "empty.txt".into()];
+        let processed = process_file_args(&args, dir.path()).unwrap();
+        let (a, b) = (dir.path().join("a.txt"), dir.path().join("b.png"));
+        let expected =
+            format!("<file name=\"{}\">\nhello\n</file>\n<file name=\"{}\"></file>\n", a.display(), b.display());
+        assert_eq!(processed.text, expected);
         assert_eq!(processed.images.len(), 1);
         assert!(process_file_args(&["missing".into()], dir.path()).is_err());
+    }
+
+    #[test]
+    fn resizes_large_images_and_notes_the_scale() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("wide.png"), png(2400, 30)).unwrap();
+        let processed = process_file_args(&["wide.png".into()], dir.path()).unwrap();
+        let ContentBlock::Image { data, mime_type } = &processed.images[0] else { panic!("expected an image") };
+        let bytes = base64::engine::general_purpose::STANDARD.decode(data).unwrap();
+        let decoded = image::load_from_memory(&bytes).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (2000, 25));
+        assert_eq!(mime_type, "image/png");
+        assert!(processed.text.contains(
+            "[Image: original 2400x30, displayed at 2000x25. Multiply coordinates by 1.20 to map to original image.]"
+        ));
+
+        let options = ProcessImageOptions { auto_resize: false, resize: None };
+        let processed = process_file_args_with(&["wide.png".into()], dir.path(), &options).unwrap();
+        let ContentBlock::Image { data, .. } = &processed.images[0] else { panic!("expected an image") };
+        assert_eq!(base64::engine::general_purpose::STANDARD.decode(data).unwrap(), png(2400, 30));
+    }
+
+    #[test]
+    fn notes_images_that_cannot_be_processed() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut broken = png(4, 4);
+        broken.truncate(40);
+        std::fs::write(dir.path().join("broken.png"), &broken).unwrap();
+        let processed = process_file_args(&["broken.png".into()], dir.path()).unwrap();
+        assert!(processed.images.is_empty());
+        assert!(
+            processed.text.contains(">[Image omitted: could not be resized below the inline image size limit.]</file>")
+        );
     }
 }
