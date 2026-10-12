@@ -1,0 +1,78 @@
+# pi-rust
+
+A Rust-only port of the [pi](https://github.com/earendil-works/pi) coding agent harness: a streaming multi-provider LLM API, an agent loop with tool calling, and the `pi` coding agent CLI. No Node.js or JavaScript runtime is required.
+
+## Install
+
+```sh
+cargo install --path crates/pi-coding-agent
+```
+
+This installs the `pi` binary. Rust 1.85 or newer is required.
+
+## Use
+
+```sh
+export ANTHROPIC_API_KEY=...        # or OPENAI_API_KEY, OPENROUTER_API_KEY, ...
+pi                                  # interactive session in the current directory
+pi -p "Summarize src/main.rs"       # print mode: run once, print the answer
+pi --mode json -p "List the TODOs"  # one JSON agent event per line
+pi -c                               # continue the latest session here
+pi -r                               # pick a session to resume
+pi --model openai/gpt-5.5 --thinking high
+pi @notes.md @screenshot.png "What changed?"
+cat error.log | pi -p "Explain this error"
+```
+
+Run `pi --help` for all options. In interactive mode, type `/help` for commands: `/model`, `/thinking`, `/compact`, `/new`, `/session`, `/resume`, `/follow`, `/abort`, `/quit`. Input typed while the agent works is queued as steering. Ctrl+C aborts a response; press it twice to exit.
+
+## Configuration
+
+pi-rust reads the same files as the TypeScript pi, so both can share one setup.
+
+| Path | Purpose |
+| --- | --- |
+| `~/.pi/agent/models.json` | Custom providers and models; same format as pi (`providers.<name>.baseUrl`, `api`, `apiKey`, `models`, `modelOverrides`) |
+| `~/.pi/agent/settings.json` | `defaultProvider`, `defaultModel`, `defaultThinkingLevel`; `<cwd>/.pi/settings.json` overrides them |
+| `~/.pi/agent/AGENTS.md` | Global instructions; `AGENTS.md` or `CLAUDE.md` files from the filesystem root down to the working directory are added too |
+| `~/.pi/agent/sessions/` | JSONL sessions in pi's v3 format |
+
+`PI_CODING_AGENT_DIR` replaces `~/.pi/agent`. API keys come from `--api-key`, then `models.json` (`$VAR`, `${VAR}`, `!command`, or a literal), then provider environment variables such as `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`.
+
+## Providers
+
+The bundled catalog has about 1,100 models from pi's catalog that use one of three wire protocols:
+
+- `anthropic-messages`: Anthropic, including prompt caching, thinking with signatures, and OAuth tokens.
+- `openai-responses`: OpenAI, including reasoning items and encrypted reasoning replay.
+- `openai-completions`: OpenAI-compatible endpoints (OpenRouter, Groq, Cerebras, DeepSeek, xAI, Fireworks, Together, Ollama, LM Studio, vLLM and others), with pi's per-provider compatibility settings.
+
+## Crates
+
+| Crate | Contents |
+| --- | --- |
+| [`pi-ai`](crates/pi-ai) | Message types (JSON-compatible with pi), streaming event protocol, SSE parsing, providers, model registry, context overflow detection, and a scripted `faux` provider for tests |
+| [`pi-agent`](crates/pi-agent) | The agent loop, tool argument validation, and the stateful `Agent`. The loop runs tool calls in parallel or in order, accepts steering and follow-up input between turns, and supports tool hooks and cancellation |
+| [`pi-coding-agent`](crates/pi-coding-agent) | Tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`), system prompt, sessions, compaction, and the `pi` CLI |
+
+`grep` and `find` are implemented in Rust with the `ignore` crate; they do not need ripgrep or fd.
+
+## Differences from the TypeScript pi
+
+Ported: the agent loop semantics, the coding tools and their truncation limits, the system prompt structure, project context files, session files with compaction, automatic compaction near the context window and after overflow errors, model selection, and print and JSON modes.
+
+Not ported: the full-screen TUI (pi-rust has a line-based interactive mode), extensions, skills, prompt templates, themes, MCP, `/login` OAuth flows and `auth.json`, session branching and tree navigation, RPC mode, HTML export, image resizing, and the Google, Bedrock, and Mistral wire protocols.
+
+## Development
+
+```sh
+cargo fmt --all
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+```
+
+Tests use the `faux` provider and local mock HTTP servers; they need no API keys or network access.
+
+## License
+
+MIT. Based on [pi](https://github.com/earendil-works/pi) by Mario Zechner; see [LICENSE](LICENSE).

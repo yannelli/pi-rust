@@ -31,8 +31,5 @@ pub fn api_key_env_vars(provider: &str) -> &'static [&'static str] {
 
 /// The first non-empty API key variable set for `provider`.
 pub fn get_env_api_key(provider: &str) -> Option<String> {
-    api_key_env_vars(provider)
-        .iter()
-        .filter_map(|name| std::env::var(name).ok())
-        .find(|value| !value.trim().is_empty())
+    api_key_env_vars(provider).iter().filter_map(|name| std::env::var(name).ok()).find(|value| !value.trim().is_empty())
 }

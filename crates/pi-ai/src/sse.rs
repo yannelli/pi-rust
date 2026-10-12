@@ -62,7 +62,10 @@ where
                             done = true;
                             buffer.clear();
                             data.clear();
-                            return Some((Err("SSE event exceeds 16 MiB".to_string()), (body, buffer, current, data, done)));
+                            return Some((
+                                Err("SSE event exceeds 16 MiB".to_string()),
+                                (body, buffer, current, data, done),
+                            ));
                         }
                     }
                     Some(Err(error)) => {

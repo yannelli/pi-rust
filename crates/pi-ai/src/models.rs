@@ -10,9 +10,8 @@ use serde_json::Value;
 use crate::env::get_env_api_key;
 use crate::types::{Model, ModelCost};
 
-static BUILTIN: LazyLock<Vec<Model>> = LazyLock::new(|| {
-    serde_json::from_str(include_str!("../models.json")).expect("bundled models.json is valid")
-});
+static BUILTIN: LazyLock<Vec<Model>> =
+    LazyLock::new(|| serde_json::from_str(include_str!("../models.json")).expect("bundled models.json is valid"));
 
 /// Models shipped with this crate.
 pub fn builtin_models() -> &'static [Model] {
@@ -83,7 +82,8 @@ impl ModelRegistry {
         let mut registry = Self::builtin();
         if path.exists() {
             let display = path.display().to_string();
-            let text = std::fs::read_to_string(path).map_err(|source| ModelsFileError::Read { path: display.clone(), source })?;
+            let text = std::fs::read_to_string(path)
+                .map_err(|source| ModelsFileError::Read { path: display.clone(), source })?;
             registry.apply_json(&text).map_err(|source| ModelsFileError::Parse { path: display, source })?;
         }
         Ok(registry)
@@ -97,7 +97,8 @@ impl ModelRegistry {
                 self.api_keys.insert(provider.clone(), api_key.clone());
             }
             for (id, patch) in &config.model_overrides {
-                if let Some(model) = self.models.iter_mut().find(|model| model.provider == provider && &model.id == id) {
+                if let Some(model) = self.models.iter_mut().find(|model| model.provider == provider && &model.id == id)
+                {
                     let mut value = serde_json::to_value(&*model)?;
                     merge(&mut value, patch);
                     *model = serde_json::from_value(value)?;
@@ -121,15 +122,24 @@ impl ModelRegistry {
                 headers.extend(config.headers.clone());
                 headers.extend(entry.headers);
                 let model = Model {
-                    name: entry.name.or_else(|| base.as_ref().map(|model| model.name.clone())).unwrap_or_else(|| entry.id.clone()),
+                    name: entry
+                        .name
+                        .or_else(|| base.as_ref().map(|model| model.name.clone()))
+                        .unwrap_or_else(|| entry.id.clone()),
                     id: entry.id,
                     api,
                     provider: provider.clone(),
                     base_url,
                     reasoning: entry.reasoning.or(base.as_ref().map(|model| model.reasoning)).unwrap_or(false),
-                    input: entry.input.or_else(|| base.as_ref().map(|model| model.input.clone())).unwrap_or_else(|| vec!["text".into()]),
+                    input: entry
+                        .input
+                        .or_else(|| base.as_ref().map(|model| model.input.clone()))
+                        .unwrap_or_else(|| vec!["text".into()]),
                     cost: entry.cost.or(base.as_ref().map(|model| model.cost)).unwrap_or_default(),
-                    context_window: entry.context_window.or(base.as_ref().map(|model| model.context_window)).unwrap_or(128_000),
+                    context_window: entry
+                        .context_window
+                        .or(base.as_ref().map(|model| model.context_window))
+                        .unwrap_or(128_000),
                     max_tokens: entry.max_tokens.or(base.as_ref().map(|model| model.max_tokens)).unwrap_or(16_384),
                     headers,
                     compat: entry.compat.or_else(|| base.as_ref().and_then(|model| model.compat.clone())),
@@ -159,7 +169,9 @@ impl ModelRegistry {
     /// Resolve `provider/id`, an exact id, or a case-insensitive substring of the id or name.
     pub fn resolve(&self, pattern: &str, provider: Option<&str>) -> Option<&Model> {
         let (provider, pattern) = match (provider, pattern.split_once('/')) {
-            (None, Some((prefix, rest))) if self.models.iter().any(|model| model.provider == prefix) => (Some(prefix), rest),
+            (None, Some((prefix, rest))) if self.models.iter().any(|model| model.provider == prefix) => {
+                (Some(prefix), rest)
+            }
             _ => (provider, pattern),
         };
         let candidates: Vec<&Model> =
@@ -195,11 +207,12 @@ pub fn resolve_config_value(value: &str) -> Option<String> {
         let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
         return (output.status.success() && !text.is_empty()).then_some(text);
     }
-    let name = value
-        .strip_prefix("${")
-        .and_then(|rest| rest.strip_suffix('}'))
-        .or_else(|| value.strip_prefix('$'))
-        .filter(|name| !name.is_empty() && name.chars().all(|character| character.is_ascii_alphanumeric() || character == '_'));
+    let name =
+        value.strip_prefix("${").and_then(|rest| rest.strip_suffix('}')).or_else(|| value.strip_prefix('$')).filter(
+            |name| {
+                !name.is_empty() && name.chars().all(|character| character.is_ascii_alphanumeric() || character == '_')
+            },
+        );
     match name {
         Some(name) => std::env::var(name).ok().filter(|value| !value.is_empty()),
         None => Some(value.to_string()),

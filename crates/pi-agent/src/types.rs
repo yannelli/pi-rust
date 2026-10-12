@@ -85,18 +85,41 @@ pub trait AgentTool: Send + Sync {
 pub type SharedTool = Arc<dyn AgentTool>;
 
 /// Events emitted by the loop, in order. Field names match the TypeScript pi.
+/// Events are short-lived, so variants hold messages inline instead of boxing them.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
 pub enum AgentEvent {
     AgentStart,
-    AgentEnd { messages: Vec<Message> },
+    AgentEnd {
+        messages: Vec<Message>,
+    },
     TurnStart,
-    TurnEnd { message: Message, tool_results: Vec<ToolResultMessage> },
-    MessageStart { message: Message },
-    MessageUpdate { message: Message, assistant_message_event: AssistantMessageEvent },
-    MessageEnd { message: Message },
-    ToolExecutionStart { tool_call_id: String, tool_name: String, args: Value },
-    ToolExecutionUpdate { tool_call_id: String, tool_name: String, args: Value, partial_result: AgentToolResult },
+    TurnEnd {
+        message: Message,
+        tool_results: Vec<ToolResultMessage>,
+    },
+    MessageStart {
+        message: Message,
+    },
+    MessageUpdate {
+        message: Message,
+        assistant_message_event: AssistantMessageEvent,
+    },
+    MessageEnd {
+        message: Message,
+    },
+    ToolExecutionStart {
+        tool_call_id: String,
+        tool_name: String,
+        args: Value,
+    },
+    ToolExecutionUpdate {
+        tool_call_id: String,
+        tool_name: String,
+        args: Value,
+        partial_result: AgentToolResult,
+    },
     ToolExecutionEnd {
         tool_call_id: String,
         tool_name: String,

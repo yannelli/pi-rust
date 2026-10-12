@@ -171,7 +171,8 @@ impl MessageBuilder {
                 self.message.content.push(ContentBlock::text(""));
                 let index = self.message.content.len() - 1;
                 self.open = Some(OpenBlock::Text(index));
-                self.sender.push(AssistantMessageEvent::TextStart { content_index: index, partial: self.message.clone() });
+                self.sender
+                    .push(AssistantMessageEvent::TextStart { content_index: index, partial: self.message.clone() });
                 index
             }
         };
@@ -212,7 +213,9 @@ impl MessageBuilder {
     /// Attach a signature to the open thinking block, opening one if needed.
     pub fn thinking_signature(&mut self, signature: String, redacted: bool) {
         let index = self.open_thinking();
-        if let ContentBlock::Thinking { thinking_signature, redacted: block_redacted, .. } = &mut self.message.content[index] {
+        if let ContentBlock::Thinking { thinking_signature, redacted: block_redacted, .. } =
+            &mut self.message.content[index]
+        {
             *thinking_signature = Some(signature);
             *block_redacted |= redacted;
         }
@@ -239,14 +242,22 @@ impl MessageBuilder {
         match self.open.take() {
             Some(OpenBlock::Text(index)) => {
                 let content = self.message.content[index].as_text().unwrap_or_default().to_string();
-                self.sender.push(AssistantMessageEvent::TextEnd { content_index: index, content, partial: self.message.clone() });
+                self.sender.push(AssistantMessageEvent::TextEnd {
+                    content_index: index,
+                    content,
+                    partial: self.message.clone(),
+                });
             }
             Some(OpenBlock::Thinking(index)) => {
                 let content = match &self.message.content[index] {
                     ContentBlock::Thinking { thinking, .. } => thinking.clone(),
                     _ => String::new(),
                 };
-                self.sender.push(AssistantMessageEvent::ThinkingEnd { content_index: index, content, partial: self.message.clone() });
+                self.sender.push(AssistantMessageEvent::ThinkingEnd {
+                    content_index: index,
+                    content,
+                    partial: self.message.clone(),
+                });
             }
             None => {}
         }
@@ -401,8 +412,19 @@ mod tests {
         assert_eq!(
             kinds,
             [
-                "start", "thinking_start", "thinking_delta", "thinking_end", "text_start", "text_delta", "text_delta",
-                "text_end", "toolcall_start", "toolcall_delta", "toolcall_delta", "toolcall_end", "done"
+                "start",
+                "thinking_start",
+                "thinking_delta",
+                "thinking_end",
+                "text_start",
+                "text_delta",
+                "text_delta",
+                "text_end",
+                "toolcall_start",
+                "toolcall_delta",
+                "toolcall_delta",
+                "toolcall_end",
+                "done"
             ]
         );
         let AssistantMessageEvent::Done { reason, message } = events.last().unwrap() else { panic!() };
