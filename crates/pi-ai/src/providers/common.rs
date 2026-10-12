@@ -281,7 +281,7 @@ pub(crate) fn transform_messages(
     for message in messages {
         match message {
             // Callers collapse system messages into the prompt before conversion.
-            Message::System(_) => {}
+            Message::System(_) | Message::Custom(_) => {}
             Message::User(user) => {
                 let mut user = user.clone();
                 if let (false, UserContent::Blocks(blocks)) = (images, &user.content) {
@@ -379,7 +379,7 @@ fn close_orphaned_tool_calls(messages: Vec<Message>) -> Vec<Message> {
                 pending = assistant.tool_calls().map(|call| (call.id.clone(), call.name.clone())).collect();
             }
             Message::ToolResult(tool_result) => pending.retain(|(id, _)| *id != tool_result.tool_call_id),
-            Message::System(_) | Message::User(_) => flush(&mut pending, &mut result),
+            Message::System(_) | Message::User(_) | Message::Custom(_) => flush(&mut pending, &mut result),
         }
         result.push(message);
     }

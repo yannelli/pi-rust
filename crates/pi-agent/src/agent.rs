@@ -12,8 +12,8 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use crate::agent_loop::{
-    AfterToolCallFn, AgentContext, AgentLoopConfig, ApiKeyFn, BeforeToolCallFn, EventSink, MessageSource, StreamFn,
-    TransformContextFn, run_agent_loop, run_agent_loop_continue,
+    AfterToolCallFn, AgentContext, AgentLoopConfig, ApiKeyFn, BeforeToolCallFn, ConvertToLlmFn, EventSink,
+    MessageSource, StreamFn, TransformContextFn, default_convert_to_llm, run_agent_loop, run_agent_loop_continue,
 };
 use crate::types::{AgentEvent, SharedTool, ToolExecutionMode};
 
@@ -64,6 +64,7 @@ pub struct AgentHooks {
     pub before_tool_call: Option<BeforeToolCallFn>,
     pub after_tool_call: Option<AfterToolCallFn>,
     pub transform_context: Option<TransformContextFn>,
+    pub convert_to_llm: Option<ConvertToLlmFn>,
     pub tool_execution: ToolExecutionMode,
     pub max_tokens: Option<u64>,
     pub temperature: Option<f64>,
@@ -294,6 +295,7 @@ impl Agent {
             before_tool_call: hooks.before_tool_call,
             after_tool_call: hooks.after_tool_call,
             transform_context: hooks.transform_context,
+            convert_to_llm: hooks.convert_to_llm,
         };
         (context, config)
     }

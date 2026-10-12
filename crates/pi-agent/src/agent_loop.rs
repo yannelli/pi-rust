@@ -27,6 +27,9 @@ pub type BeforeToolCallFn = Arc<
 pub type AfterToolCallFn = Arc<
     dyn for<'a> Fn(AfterToolCall<'a>, CancellationToken) -> BoxFuture<'a, Option<AfterToolCallResult>> + Send + Sync,
 >;
+/// Converts the transcript to provider messages before each request. The default
+/// drops `Message::Custom` entries; hosts map their custom roles to user messages.
+pub type ConvertToLlmFn = Arc<dyn Fn(&[Message]) -> Vec<Message> + Send + Sync>;
 /// Receives loop events synchronously, in order.
 pub type EventSink = Arc<dyn Fn(AgentEvent) + Send + Sync>;
 
@@ -60,6 +63,12 @@ pub struct AgentLoopConfig {
     pub after_tool_call: Option<AfterToolCallFn>,
     /// Rewrites the messages sent to the model, for example to compact old turns.
     pub transform_context: Option<TransformContextFn>,
+    pub convert_to_llm: Option<ConvertToLlmFn>,
+}
+
+/// The default `convert_to_llm`: keep provider roles, drop custom ones.
+pub fn default_convert_to_llm(messages: &[Message]) -> Vec<Message> {
+    messages.iter().filter(|message| !matches!(message, Message::Custom(_))).cloned().collect()
 }
 
 impl AgentLoopConfig {
@@ -79,6 +88,7 @@ impl AgentLoopConfig {
             before_tool_call: None,
             after_tool_call: None,
             transform_context: None,
+            convert_to_llm: None,
         }
     }
 }
@@ -204,6 +214,10 @@ async fn stream_assistant_response(
     if let Some(transform) = &config.transform_context {
         messages = transform(messages, cancel.clone()).await;
     }
+    let messages = match &config.convert_to_llm {
+        Some(convert) => convert(&messages),
+        None => default_convert_to_llm(&messages),
+    };
     let request = Context {
         system_prompt: context.system_prompt.clone(),
         messages,

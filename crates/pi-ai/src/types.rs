@@ -291,15 +291,87 @@ pub struct SystemMessage {
     pub timestamp: i64,
 }
 
+/// A message with an app-defined role, such as the coding agent's `bashExecution`,
+/// `custom`, `branchSummary`, and `compactionSummary`. Providers never see these:
+/// the agent loop converts them (`convert_to_llm`) and the registry drops leftovers.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CustomMessage {
+    pub role: String,
+    /// Every field except `role`, including `timestamp`.
+    pub fields: JsonObject,
+}
+
+impl CustomMessage {
+    pub fn new(role: impl Into<String>, fields: JsonObject) -> Self {
+        Self { role: role.into(), fields }
+    }
+
+    pub fn timestamp(&self) -> i64 {
+        self.fields.get("timestamp").and_then(Value::as_i64).unwrap_or_default()
+    }
+
+    pub fn str_field(&self, key: &str) -> Option<&str> {
+        self.fields.get(key).and_then(Value::as_str)
+    }
+}
+
 /// Messages are moved and matched everywhere, so variants stay unboxed.
 #[allow(clippy::large_enum_variant)]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "role", rename_all = "camelCase")]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Message {
     System(SystemMessage),
     User(UserMessage),
     Assistant(AssistantMessage),
     ToolResult(ToolResultMessage),
+    Custom(CustomMessage),
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "role", rename_all = "camelCase")]
+enum KnownMessage {
+    System(SystemMessage),
+    User(UserMessage),
+    Assistant(AssistantMessage),
+    ToolResult(ToolResultMessage),
+}
+
+impl Serialize for Message {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let known = match self {
+            Self::System(message) => KnownMessage::System(message.clone()),
+            Self::User(message) => KnownMessage::User(message.clone()),
+            Self::Assistant(message) => KnownMessage::Assistant(message.clone()),
+            Self::ToolResult(message) => KnownMessage::ToolResult(message.clone()),
+            Self::Custom(custom) => {
+                let mut object = Map::with_capacity(custom.fields.len() + 1);
+                object.insert("role".into(), Value::String(custom.role.clone()));
+                object.extend(
+                    custom.fields.iter().filter(|(key, _)| *key != "role").map(|(k, v)| (k.clone(), v.clone())),
+                );
+                return object.serialize(serializer);
+            }
+        };
+        known.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Message {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let mut object = Map::deserialize(deserializer)?;
+        let role = object.get("role").and_then(Value::as_str).ok_or_else(|| D::Error::missing_field("role"))?;
+        if !matches!(role, "system" | "user" | "assistant" | "toolResult") {
+            let role = role.to_string();
+            object.remove("role");
+            return Ok(Self::Custom(CustomMessage { role, fields: object }));
+        }
+        Ok(match serde_json::from_value(Value::Object(object)).map_err(D::Error::custom)? {
+            KnownMessage::System(message) => Self::System(message),
+            KnownMessage::User(message) => Self::User(message),
+            KnownMessage::Assistant(message) => Self::Assistant(message),
+            KnownMessage::ToolResult(message) => Self::ToolResult(message),
+        })
+    }
 }
 
 impl Message {
@@ -307,12 +379,13 @@ impl Message {
         Self::User(UserMessage { content: UserContent::Text(text.into()), timestamp: now_ms() })
     }
 
-    pub fn role(&self) -> &'static str {
+    pub fn role(&self) -> &str {
         match self {
             Self::System(_) => "system",
             Self::User(_) => "user",
             Self::Assistant(_) => "assistant",
             Self::ToolResult(_) => "toolResult",
+            Self::Custom(custom) => &custom.role,
         }
     }
 }
@@ -530,6 +603,13 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(result, Message::ToolResult(ToolResultMessage { is_error: false, .. })));
+        let custom: Message =
+            serde_json::from_str(r#"{"role":"bashExecution","command":"ls","output":"a","exitCode":0,"timestamp":4}"#)
+                .unwrap();
+        let Message::Custom(bash) = &custom else { panic!("expected custom") };
+        assert_eq!((bash.role.as_str(), bash.str_field("command"), bash.timestamp()), ("bashExecution", Some("ls"), 4));
+        let encoded = serde_json::to_value(&custom).unwrap();
+        assert_eq!((encoded["role"].as_str(), encoded["exitCode"].as_i64()), (Some("bashExecution"), Some(0)));
     }
 
     #[test]

@@ -135,7 +135,7 @@ fn convert_messages(model: &Model, context: &Context) -> Vec<Value> {
                 }
                 items.extend(output);
             }
-            Message::System(_) => {}
+            Message::System(_) | Message::Custom(_) => {}
             Message::ToolResult(result) => {
                 let call_id = result.tool_call_id.split('|').next().unwrap_or_default();
                 let text = tool_result_text(&result.content);

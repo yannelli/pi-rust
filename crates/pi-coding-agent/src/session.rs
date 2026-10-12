@@ -371,7 +371,7 @@ mod tests {
         match message {
             Message::User(user) => user.content.text(),
             Message::Assistant(assistant) => assistant.text(),
-            Message::System(_) | Message::ToolResult(_) => String::new(),
+            Message::System(_) | Message::ToolResult(_) | Message::Custom(_) => String::new(),
         }
     }
 

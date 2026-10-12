@@ -238,7 +238,7 @@ fn has_tool_history(messages: &[Message]) -> bool {
     messages.iter().any(|message| match message {
         Message::ToolResult(_) => true,
         Message::Assistant(assistant) => assistant.tool_calls().next().is_some(),
-        Message::System(_) | Message::User(_) => false,
+        Message::System(_) | Message::User(_) | Message::Custom(_) => false,
     })
 }
 
@@ -295,7 +295,7 @@ fn convert_messages(model: &Model, context: &Context, compat: &Compat) -> Vec<Va
                 last_was_tool_result = false;
                 params.extend(convert_assistant(model, &assistant.content, compat));
             }
-            Message::System(_) => {}
+            Message::System(_) | Message::Custom(_) => {}
             Message::ToolResult(_) => {
                 let mut images = Vec::new();
                 while let Some(Message::ToolResult(result)) = messages.get(index) {
