@@ -125,6 +125,9 @@ pub enum OAuthError {
     Network(String),
     #[error("OAuth request aborted")]
     Aborted,
+    /// The user cancelled the sign-in, or it did not finish in time.
+    #[error("Sign-in cancelled")]
+    Cancelled,
     #[error("{0}")]
     Other(String),
 }

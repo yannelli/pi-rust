@@ -2,6 +2,8 @@
 #![allow(dead_code)]
 
 pub mod http;
+pub mod oauth_server;
+pub mod provider;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

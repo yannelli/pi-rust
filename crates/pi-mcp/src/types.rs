@@ -188,3 +188,28 @@ pub struct ReadResourceResult {
     #[serde(default, rename = "_meta", skip_serializing_if = "Option::is_none")]
     pub meta: Option<Value>,
 }
+
+/// MCP App user interfaces (`ui://` URIs and `profile=mcp-app` HTML), which only hosts that render them can use.
+pub fn is_mcp_app_resource(uri: &str, mime_type: Option<&str>) -> bool {
+    if uri.starts_with("ui://") {
+        return true;
+    }
+    let mime_type = mime_type.unwrap_or_default().to_ascii_lowercase();
+    mime_type.split(';').skip(1).any(|parameter| {
+        let Some((name, value)) = parameter.split_once('=') else { return false };
+        let value = value.trim_start();
+        name.trim() == "profile" && value.strip_prefix('"').unwrap_or(value).starts_with("mcp-app")
+    })
+}
+
+impl Resource {
+    pub fn is_mcp_app(&self) -> bool {
+        is_mcp_app_resource(&self.uri, self.mime_type.as_deref())
+    }
+}
+
+impl ResourceTemplate {
+    pub fn is_mcp_app(&self) -> bool {
+        is_mcp_app_resource(&self.uri_template, self.mime_type.as_deref())
+    }
+}

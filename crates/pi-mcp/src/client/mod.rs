@@ -117,6 +117,28 @@ pub struct McpClient {
     inner: Arc<Inner>,
 }
 
+impl fmt::Debug for McpClient {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("McpClient")
+            .field("name", &self.inner.options.name)
+            .field("state", &self.connection_state())
+            .finish_non_exhaustive()
+    }
+}
+
+/// A handle that does not keep the client alive, for listeners the client itself holds.
+#[derive(Clone)]
+pub struct WeakMcpClient {
+    inner: std::sync::Weak<Inner>,
+}
+
+impl WeakMcpClient {
+    pub fn upgrade(&self) -> Option<McpClient> {
+        self.inner.upgrade().map(|inner| McpClient { inner })
+    }
+}
+
 impl McpClient {
     pub fn new(options: McpClientOptions) -> Self {
         let mut handlers: HashMap<String, RequestHandler> = HashMap::new();
@@ -176,6 +198,10 @@ impl McpClient {
     /// Whether two handles share one connection.
     pub fn same(&self, other: &McpClient) -> bool {
         Arc::ptr_eq(&self.inner, &other.inner)
+    }
+
+    pub fn downgrade(&self) -> WeakMcpClient {
+        WeakMcpClient { inner: Arc::downgrade(&self.inner) }
     }
 
     pub async fn connect(&self, transport: SharedTransport) -> Result<InitializeResult, McpError> {

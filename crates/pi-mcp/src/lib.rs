@@ -12,6 +12,7 @@ pub mod log;
 pub mod naming;
 pub mod oauth;
 pub mod output;
+pub mod runtime;
 pub mod transport;
 pub mod types;
 
