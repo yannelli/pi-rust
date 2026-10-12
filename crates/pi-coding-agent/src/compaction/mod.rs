@@ -26,7 +26,7 @@ pub use self::cut_point::{CutPointResult, find_cut_point, find_projected_cut_poi
 pub use self::prepare::{CompactionDetails, CompactionPreparation, prepare_compaction, prepare_compaction_entries};
 pub use self::recovery::{
     CompactionCheck, CompactionCheckInput, check_compaction, exceeds_compaction_threshold, find_message_entry_id,
-    is_recoverable_length, omit_recovery_attempt,
+    is_recoverable_length, is_window_overflow, omit_recovery_attempt,
 };
 pub use self::retry::{RetryCallbacks, RetryPolicy, is_retryable_assistant_error, retry_assistant_call};
 pub use self::summarize::{
