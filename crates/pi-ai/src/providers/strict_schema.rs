@@ -153,6 +153,61 @@ pub(crate) fn tool_parameters(tool: &Tool, strict: Option<bool>) -> Value {
     }
 }
 
+/// A grammar-constrained tool: `(syntax, definition, input property)` for OpenAI custom tools.
+#[derive(Debug)]
+pub(crate) struct GrammarTool {
+    pub syntax: &'static str,
+    pub definition: String,
+    pub input_property: String,
+}
+
+fn grammar_input_property(tool: &Tool) -> Result<String, String> {
+    let schema = &tool.parameters;
+    if schema["type"] != "object" {
+        return Err("grammar constrained sampling requires an object parameter schema".into());
+    }
+    let required = schema["required"].as_array().filter(|keys| keys.len() == 1);
+    let Some(property) = required.and_then(|keys| keys[0].as_str()) else {
+        return Err("grammar constrained sampling requires exactly one required string property".into());
+    };
+    match schema.pointer(&format!("/properties/{}", property.replace('~', "~0").replace('/', "~1"))) {
+        None => Err(format!("grammar constrained sampling requires a properties entry for {property}")),
+        Some(entry) if entry["type"] != "string" => {
+            Err(format!("grammar constrained sampling property {property} must have type string"))
+        }
+        Some(_) => Ok(property.to_string()),
+    }
+}
+
+/// The grammar variant of a tool that opts into grammar sampling, when the API supports it.
+pub(crate) fn resolve_grammar_sampling(
+    tool: &Tool,
+    supports_grammar_tools: bool,
+) -> Result<Option<GrammarTool>, String> {
+    let Some(config) = tool.constrained_sampling.as_ref().filter(|config| config["type"] == "grammar") else {
+        return Ok(None);
+    };
+    if !supports_grammar_tools {
+        return Ok(None);
+    }
+    let variant = |key: &str| {
+        config.pointer(&format!("/variants/{key}")).and_then(Value::as_str).filter(|text| !text.trim().is_empty())
+    };
+    let (syntax, definition) = match (variant("openai_lark"), variant("openai_regex")) {
+        (Some(lark), _) => ("lark", lark),
+        (None, Some(regex)) => ("regex", regex),
+        (None, None) => {
+            return Err(format!(
+                "Tool \"{}\" cannot use grammar constrained sampling: no supported grammar variant was provided.",
+                tool.name
+            ));
+        }
+    };
+    let input_property = grammar_input_property(tool)
+        .map_err(|error| format!("Tool \"{}\" cannot use grammar constrained sampling: {error}.", tool.name))?;
+    Ok(Some(GrammarTool { syntax, definition: definition.to_string(), input_property }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,6 +220,24 @@ mod tests {
         assert_eq!(strict["additionalProperties"], json!(false));
         assert_eq!(strict["properties"]["b"], json!({"anyOf": [{"type": "number"}, {"type": "null"}]}));
         assert!(make_strict_json_schema(&json!({"type": "object", "oneOf": []})).is_err());
+    }
+
+    #[test]
+    fn grammar_tools_need_a_variant_and_one_required_string() {
+        let mut tool = Tool::new(
+            "apply",
+            "d",
+            json!({"type": "object", "properties": {"input": {"type": "string"}}, "required": ["input"]}),
+        );
+        tool.constrained_sampling = Some(json!({"type": "grammar", "variants": {"openai_regex": "[a-z]+"}}));
+        assert!(resolve_grammar_sampling(&tool, false).unwrap().is_none());
+        let grammar = resolve_grammar_sampling(&tool, true).unwrap().unwrap();
+        assert_eq!(
+            (grammar.syntax, grammar.definition.as_str(), grammar.input_property.as_str()),
+            ("regex", "[a-z]+", "input")
+        );
+        tool.constrained_sampling = Some(json!({"type": "grammar", "variants": {}}));
+        assert!(resolve_grammar_sampling(&tool, true).unwrap_err().contains("no supported grammar variant"));
     }
 
     #[test]

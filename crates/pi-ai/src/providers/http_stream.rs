@@ -4,11 +4,13 @@
 use futures::{Stream, StreamExt};
 use serde_json::Value;
 
+use crate::providers::common::SseHandler;
 use crate::registry::{ProviderResponse, StreamOptions};
 use crate::request::{HttpRequest, SendOptions, provider_response, send_request};
 use crate::retry::ProviderRequestError;
 use crate::sse::{SseEvent, sse_events};
-use crate::types::Model;
+use crate::stream::{AssistantMessageEventStream, MessageBuilder, event_channel};
+use crate::types::{Model, StopReason};
 
 /// When `on_response` runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -16,6 +18,7 @@ pub(crate) enum ResponseReport {
     Never,
     /// Successful and failed responses, as adapters that call `fetch` directly do.
     Always,
+    SuccessOnly,
 }
 
 pub(crate) struct SendConfig {
@@ -43,7 +46,12 @@ pub(crate) async fn send(
     };
     let result = send_request(request, &send_options).await;
     let report = |response: ProviderResponse| {
-        if let (ResponseReport::Always, Some(hook)) = (config.report, &options.on_response) {
+        let wanted = match config.report {
+            ResponseReport::Never => false,
+            ResponseReport::Always => true,
+            ResponseReport::SuccessOnly => (200..300).contains(&response.status),
+        };
+        if let (true, Some(hook)) = (wanted, &options.on_response) {
             hook(&response, model);
         }
     };
@@ -86,4 +94,45 @@ pub(crate) fn hooked_events<'a>(
         }
         event
     })
+}
+
+/// Send `request` and feed its SSE body to `handler` through a `MessageBuilder`. `format`
+/// turns a failed request into the adapter's error message.
+pub(crate) fn spawn_builder_stream<H: SseHandler>(
+    model: &Model,
+    options: StreamOptions,
+    request: HttpRequest,
+    config: SendConfig,
+    format: fn(ProviderRequestError) -> String,
+    mut handler: H,
+) -> AssistantMessageEventStream {
+    let (sender, stream) = event_channel();
+    let model = model.clone();
+    tokio::spawn(async move {
+        let mut builder = MessageBuilder::new(&model, sender);
+        let drive = async {
+            let response = send(&request, &model, &options, &config).await.map_err(format)?;
+            handler.start(&mut builder);
+            builder.start();
+            let mut events = std::pin::pin!(hooked_events(response, &model, &options));
+            while let Some(event) = events.next().await {
+                if !handler.event(&mut builder, event?)? {
+                    break;
+                }
+            }
+            handler.end(&mut builder)
+        };
+        let cancel = options.cancel.clone();
+        let result = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => Err(String::new()),
+            result = drive => result,
+        };
+        match result {
+            _ if cancel.is_cancelled() => builder.fail(StopReason::Aborted, "Request was aborted"),
+            Ok(reason) => builder.finish(reason),
+            Err(error) => builder.fail(StopReason::Error, handler.error_message(error)),
+        }
+    });
+    stream
 }

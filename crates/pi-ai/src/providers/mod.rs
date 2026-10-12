@@ -1,6 +1,7 @@
 //! Built-in wire protocols.
 
 pub mod anthropic;
+pub mod azure_openai_responses;
 mod common;
 mod emitter;
 pub mod faux;

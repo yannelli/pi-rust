@@ -25,6 +25,10 @@ const MAX_DIAGNOSTIC_BODY_CHARS: usize = 8192;
 pub struct PiMessages;
 
 impl ApiProvider for PiMessages {
+    fn supports_system_messages(&self) -> bool {
+        true
+    }
+
     fn stream(&self, model: &Model, context: &Context, options: StreamOptions) -> AssistantMessageEventStream {
         let (sender, stream) = event_channel();
         let Some(api_key) = options.api_key.clone().filter(|key| !key.is_empty()) else {
