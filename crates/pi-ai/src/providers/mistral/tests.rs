@@ -315,6 +315,7 @@ async fn errors_keep_status_body_and_raw_stop_reasons() {
         let (_, message) = collect(MistralConversations.stream(&model(&server.base_url), &hello(), keyed())).await;
         assert_eq!((message.stop_reason, message.raw_stop_reason.as_deref()), (stop, Some(reason)));
         assert_eq!(message.error_message.as_deref(), error);
+        assert_eq!(crate::retry::is_retryable_assistant_error(&message), reason == "error", "{reason}");
     }
     let missing = StreamOptions { api_key: None, ..StreamOptions::default() };
     let (_, message) = collect(MistralConversations.stream(&model("http://127.0.0.1:9"), &hello(), missing)).await;

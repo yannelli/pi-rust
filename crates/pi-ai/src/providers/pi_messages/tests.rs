@@ -185,3 +185,29 @@ async fn aborts_and_is_registered() {
     assert_eq!(message.stop_reason, StopReason::Aborted);
     assert!(api_provider("pi-messages").is_some());
 }
+
+#[tokio::test]
+async fn streams_thinking_and_serializes_image_context() {
+    let server = MockHttp::start(vec![wire(&[
+        json!({"type": "start"}),
+        json!({"type": "thinking_start", "contentIndex": 0}),
+        json!({"type": "thinking_delta", "contentIndex": 0, "delta": "Plan"}),
+        json!({"type": "thinking_end", "contentIndex": 0, "content": "Plan", "contentSignature": "sig", "redacted": false}),
+        json!({"type": "done", "reason": "stop", "usage": usage()}),
+    ])])
+    .await;
+    let image = ContentBlock::Image { data: "aGVsbG8=".into(), mime_type: "image/png".into() };
+    let user = Message::User(UserMessage {
+        content: UserContent::Blocks(vec![ContentBlock::text("see"), image]),
+        timestamp: 3,
+    });
+    let context = Context { system_prompt: Some("Be brief".into()), messages: vec![user], ..Context::default() };
+    let (events, message) = collect(PiMessages.stream(&model(&server.base_url), &context, keyed())).await;
+    assert_eq!(kinds(&events), ["start", "thinking_start", "thinking_delta", "thinking_end", "done"]);
+    let ContentBlock::Thinking { thinking, thinking_signature, .. } = &message.content[0] else { panic!("thinking") };
+    assert_eq!((thinking.as_str(), thinking_signature.as_deref()), ("Plan", Some("sig")));
+    assert!((message.usage.cost.total - 0.3).abs() < 1e-12);
+    let messages = server.request(0).json()["context"]["messages"].clone();
+    assert_eq!(messages[0], json!({"role": "system", "content": "Be brief", "timestamp": 0}));
+    assert_eq!(messages[1]["content"][1], json!({"type": "image", "data": "aGVsbG8=", "mimeType": "image/png"}));
+}

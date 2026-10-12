@@ -227,3 +227,48 @@ async fn safety_stops_are_errors_and_bad_keys_fail_cleanly() {
     assert_eq!(message.error_message.as_deref(), Some("Provider stopped with: SAFETY"));
     assert!(sign_assertion("a@b", "not a pem", "aud", 0).unwrap_err().contains("PEM"));
 }
+
+#[tokio::test]
+async fn streams_thinking_tool_calls_images_usage_and_aborts() {
+    let parts = |parts: Value| frame(None, &json!({"candidates": [{"content": {"role": "model", "parts": parts}}]}));
+    let server = MockHttp::start(vec![Reply::sse(vec![
+        parts(json!([{"text": "Look", "thought": true, "thoughtSignature": "c2ln"}])),
+        parts(json!([{"functionCall": {"id": "call-1", "name": "read", "args": {"path": "a.png"}}}])),
+        frame(None, &json!({"candidates": [{"finishReason": "STOP"}],
+            "usageMetadata": {"promptTokenCount": 50, "candidatesTokenCount": 5, "thoughtsTokenCount": 5, "totalTokenCount": 60}})),
+    ])])
+    .await;
+    let user = Message::User(crate::types::UserMessage {
+        content: crate::types::UserContent::Blocks(vec![
+            crate::types::ContentBlock::text("what is this"),
+            crate::types::ContentBlock::Image { data: "aGVsbG8=".into(), mime_type: "image/png".into() },
+        ]),
+        timestamp: 1,
+    });
+    let context = Context { messages: vec![user], ..Context::default() };
+    let options = StreamOptions {
+        api_key: Some("AIzaSyExample".into()),
+        reasoning: Some(crate::types::ThinkingLevel::High),
+        ..StreamOptions::default()
+    };
+    let (_, message) = collect(GoogleVertex.stream(&model(&server.base_url), &context, options)).await;
+    assert_eq!(message.stop_reason, StopReason::ToolUse);
+    assert!(matches!(&message.content[0], crate::types::ContentBlock::Thinking { thinking, .. } if thinking == "Look"));
+    assert_eq!(message.tool_calls().next().unwrap().arguments["path"], "a.png");
+    assert_eq!((message.usage.input, message.usage.output, message.usage.total_tokens), (50, 10, 60));
+    assert!((message.usage.cost.total - (50.0 + 10.0 * 2.0) / 1e6).abs() < 1e-12);
+    let body = server.request(0).json();
+    assert_eq!(body["contents"][0]["parts"][1]["inlineData"]["mimeType"], "image/png");
+    assert_eq!(body["generationConfig"]["thinkingConfig"], json!({"includeThoughts": true, "thinkingLevel": "HIGH"}));
+
+    let hanging = Reply {
+        body: crate::providers::mock_http::Body::ChunksThenHang(vec![parts(json!([{"text": "par"}]))]),
+        ..Reply::sse(Vec::new())
+    };
+    let server = MockHttp::start(vec![hanging]).await;
+    let options = StreamOptions { api_key: Some("AIzaSyExample".into()), ..StreamOptions::default() };
+    let cancel = options.cancel.clone();
+    let stream = GoogleVertex.stream(&model(&server.base_url), &context, options);
+    let message = crate::providers::mock_server::cancel_after_first_text(stream, cancel).await;
+    assert_eq!(message.stop_reason, StopReason::Aborted);
+}

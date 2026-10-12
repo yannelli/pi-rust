@@ -181,3 +181,29 @@ async fn aborts_and_validates_configuration() {
     let (_, message) = collect(AzureOpenAIResponses.stream(&model(), &context(), invalid)).await;
     assert!(message.error_message.unwrap().contains("Invalid Azure OpenAI base URL"));
 }
+
+#[tokio::test]
+async fn streams_tool_calls_and_sends_images() {
+    let call = json!({"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "read", "arguments": ""});
+    let done = json!({"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "read", "arguments": "{\"path\":\"a.png\"}"});
+    let server = MockHttp::start(vec![Reply::sse(vec![
+        event(json!({"type": "response.output_item.added", "output_index": 0, "item": call})),
+        event(json!({"type": "response.function_call_arguments.delta", "output_index": 0, "delta": "{\"path\":\"a.png\"}"})),
+        event(json!({"type": "response.output_item.done", "output_index": 0, "item": done})),
+        event(json!({"type": "response.completed", "response": {"id": "resp_2", "status": "completed", "output": []}})),
+    ])])
+    .await;
+    let image = ContentBlock::Image { data: "aGVsbG8=".into(), mime_type: "image/png".into() };
+    let user = Message::User(crate::types::UserMessage {
+        content: crate::types::UserContent::Blocks(vec![ContentBlock::text("open it"), image]),
+        timestamp: 1,
+    });
+    let context = Context { messages: vec![user], ..Context::default() };
+    let (_, message) = collect(AzureOpenAIResponses.stream(&model(), &context, keyed(&server))).await;
+    assert_eq!(message.stop_reason, StopReason::ToolUse, "{:?}", message.error_message);
+    let call = message.tool_calls().next().unwrap();
+    assert_eq!((call.id.as_str(), &call.arguments["path"]), ("call_1|fc_1", &json!("a.png")));
+    let input = server.request(0).json()["input"].clone();
+    assert_eq!(input[0]["content"][1]["type"], "input_image");
+    assert_eq!(input[0]["content"][1]["image_url"], "data:image/png;base64,aGVsbG8=");
+}
