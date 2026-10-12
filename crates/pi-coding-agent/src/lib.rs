@@ -1,11 +1,13 @@
 //! Coding agent: tools, sessions, system prompt, compaction, and CLI modes.
 
 pub mod app;
+pub mod auth_cli;
 pub mod cli;
 pub mod compaction;
 pub mod config;
 pub mod files;
 pub mod interactive;
+pub mod model_resolver;
 pub mod print_mode;
 pub mod render;
 pub mod session;

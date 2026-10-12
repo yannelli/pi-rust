@@ -38,6 +38,10 @@ const POST_EXIT_IDLE: Duration = Duration::from_millis(250);
 pub struct BashTool {
     cwd: PathBuf,
     description: String,
+    /// `shellPath` setting: run commands with this shell.
+    shell_path: Option<PathBuf>,
+    /// `shellCommandPrefix` setting: a line run before every command.
+    command_prefix: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -52,7 +56,27 @@ impl BashTool {
             "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last {DEFAULT_MAX_LINES} lines or {}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
             DEFAULT_MAX_BYTES / 1024
         );
-        Self { cwd, description }
+        Self { cwd, description, shell_path: None, command_prefix: None }
+    }
+
+    /// Run commands with `shell` (`-c <command>`); a missing file fails each command.
+    pub fn with_shell_path(mut self, shell: Option<PathBuf>) -> Self {
+        self.shell_path = shell;
+        self
+    }
+
+    /// Run `prefix` on its own line before every command, such as `shopt -s expand_aliases`.
+    pub fn with_command_prefix(mut self, prefix: Option<String>) -> Self {
+        self.command_prefix = prefix.filter(|prefix| !prefix.is_empty());
+        self
+    }
+
+    fn shell(&self) -> anyhow::Result<PathBuf> {
+        match &self.shell_path {
+            Some(path) if path.exists() => Ok(path.clone()),
+            Some(path) => bail!("Custom shell path not found: {}", path.display()),
+            None => Ok(shell_program()),
+        }
     }
 }
 
@@ -192,14 +216,19 @@ impl AgentTool for BashTool {
             bail!("Working directory does not exist: {}\nCannot execute bash commands.", self.cwd.display());
         }
 
-        let mut command = tokio::process::Command::new(shell_program());
+        let script = match &self.command_prefix {
+            Some(prefix) => format!("{prefix}\n{}", args.command),
+            None => args.command.clone(),
+        };
+        let mut command = tokio::process::Command::new(self.shell()?);
         for name in SESSION_VARIABLES {
             command.env_remove(name);
         }
         command
             .arg("-c")
-            .arg(&args.command)
+            .arg(&script)
             .current_dir(&self.cwd)
+            .envs(pi_ai::env::child_process_env())
             .envs(SESSION_ENVIRONMENT.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())

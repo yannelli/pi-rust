@@ -190,6 +190,7 @@ async fn reports_provider_errors_with_a_failing_exit_code() {
     let root = tempfile::tempdir().unwrap();
     let (url, _) = mock_server(vec![r#"ERROR{"error":{"message":"upstream exploded"}}"#.to_string()]).await;
     setup(root.path(), &url);
+    write_settings(root.path(), json!({"retry": {"enabled": false}}));
     let output = tokio::task::spawn_blocking({
         let root = root.path().to_path_buf();
         move || pi(&root, &["--model", "mock/mock-model", "--no-session", "-p", "hi"], None)
@@ -206,7 +207,132 @@ fn rejects_unknown_flags_and_lists_models() {
     let root = tempfile::tempdir().unwrap();
     setup(root.path(), "http://127.0.0.1:9/v1");
     let output = pi(root.path(), &["--bogus"], None);
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(String::from_utf8_lossy(&output.stderr).trim(), "Error: Unknown option: --bogus");
     let output = pi(root.path(), &["--list-models", "mock"], None);
-    assert!(String::from_utf8_lossy(&output.stdout).contains("mock/mock-model"));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert!(lines[0].starts_with("provider  model") && lines[0].contains("max-out"), "{stdout}");
+    assert!(lines[1].starts_with("mock      mock-model  100K"), "{stdout}");
+}
+
+fn write_settings(root: &Path, settings: Value) {
+    std::fs::write(root.join("agent/settings.json"), settings.to_string()).unwrap();
+}
+
+async fn pi_async(root: &Path, args: &[&str]) -> Output {
+    let root = root.to_path_buf();
+    let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
+    tokio::task::spawn_blocking(move || pi(&root, &args.iter().map(String::as_str).collect::<Vec<_>>(), None))
+        .await
+        .unwrap()
+}
+
+fn events(output: &Output) -> Vec<Value> {
+    String::from_utf8_lossy(&output.stdout).lines().map(|line| serde_json::from_str(line).unwrap()).collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn retries_transient_errors_and_streams_delta_events() {
+    let root = tempfile::tempdir().unwrap();
+    let error = r#"ERROR{"error":{"message":"overloaded"}}"#.to_string();
+    let (url, requests) = mock_server(vec![error, text_body("Recovered")]).await;
+    setup(root.path(), &url);
+    write_settings(root.path(), json!({"retry": {"baseDelayMs": 1, "maxRetries": 2}}));
+    let output = pi_async(root.path(), &["--model", "mock-model", "--mode", "json", "--no-session", "-nt", "hi"]).await;
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let events = events(&output);
+    let kinds: Vec<&str> = events.iter().map(|event| event["type"].as_str().unwrap()).collect();
+    let retry_start = kinds.iter().position(|kind| *kind == "auto_retry_start").unwrap();
+    assert_eq!(events[retry_start]["attempt"], 1);
+    assert_eq!(events[retry_start]["maxAttempts"], 2);
+    assert_eq!(events[retry_start]["delayMs"], 1);
+    let ends: Vec<&Value> = events.iter().filter(|event| event["type"] == "agent_end").collect();
+    assert_eq!((ends[0]["willRetry"].as_bool(), ends[1]["willRetry"].as_bool()), (Some(true), Some(false)));
+    let retry_end = events.iter().find(|event| event["type"] == "auto_retry_end").unwrap();
+    assert_eq!((retry_end["success"].as_bool(), retry_end["attempt"].as_u64()), (Some(true), Some(1)));
+    for update in events.iter().filter(|event| event["type"] == "message_update") {
+        assert!(update.get("message").is_none() && update["assistantMessageEvent"].get("partial").is_none());
+        assert!(update["usage"].is_object());
+    }
+    let requests = requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 2);
+    let roles: Vec<&str> =
+        requests[1]["messages"].as_array().unwrap().iter().map(|message| message["role"].as_str().unwrap()).collect();
+    assert!(!roles.contains(&"assistant"), "the failed response is not sent again: {roles:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn redirected_stdout_runs_print_mode_with_prompt_flags_and_markers() {
+    let root = tempfile::tempdir().unwrap();
+    let (url, requests) = mock_server(vec![
+        tool_call_body("call_1", "bash", r#"{"command":"echo $PI_CODING_AGENT $AI_AGENT"}"#),
+        text_body("All done"),
+    ])
+    .await;
+    setup(root.path(), &url);
+    write_settings(root.path(), json!({"defaultTools": ["+grep"], "shellCommandPrefix": "export EXTRA=1"}));
+    std::fs::write(root.path().join("work/system.txt"), "System from file.").unwrap();
+    let args = [
+        "--model",
+        "mock/mock-model",
+        "--no-session",
+        "--system-prompt",
+        "system.txt",
+        "--append-system-prompt",
+        "First addition.",
+        "--append-system-prompt",
+        "Second addition.",
+        "-xt",
+        "edit",
+        "Go",
+    ];
+    let output = pi_async(root.path(), &args).await;
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "All done\n");
+    let requests = requests.lock().unwrap().clone();
+    let first = requests[0]["messages"].to_string();
+    assert!(first.contains("System from file.") && first.contains("First addition.\\n\\nSecond addition."), "{first}");
+    let tools: Vec<&str> = requests[0]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["function"]["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(tools, ["read", "bash", "write", "grep"]);
+    assert!(requests[1]["messages"].to_string().contains("true pi"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn startup_errors_exit_with_status_one() {
+    let root = tempfile::tempdir().unwrap();
+    setup(root.path(), "http://127.0.0.1:9/v1");
+    let output = pi_async(root.path(), &["--provider", "mock", "hi"]).await;
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--provider requires --model (for example: --provider mock --model <pattern>)"),
+        "{stderr}"
+    );
+    let output = pi_async(root.path(), &["--model", "nothing-like-this", "hi"]).await;
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Model \"nothing-like-this\" not found"));
+    let output = pi_async(root.path(), &["--mode", "xml"]).await;
+    assert_eq!(output.status.code(), Some(1));
+}
+
+#[test]
+fn auth_commands_print_and_check_credentials() {
+    let root = tempfile::tempdir().unwrap();
+    setup(root.path(), "http://127.0.0.1:9/v1");
+    let output = pi(root.path(), &["auth", "print-api-key", "--provider", "mock"], None);
+    assert_eq!((output.status.code(), String::from_utf8_lossy(&output.stdout).as_ref()), (Some(0), "secret-key\n"));
+    let output = pi(root.path(), &["auth", "check", "--model", "mock-model", "--json"], None);
+    assert_eq!(output.status.code(), Some(0));
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result, json!({"status": "ready", "provider": "mock", "authType": "api_key"}));
+    let output = pi(root.path(), &["auth", "check"], None);
+    assert_eq!(output.status.code(), Some(2));
+    let output = pi(root.path(), &["auth", "print-api-key", "--json"], None);
+    assert_eq!(output.status.code(), Some(1));
 }

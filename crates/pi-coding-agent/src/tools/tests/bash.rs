@@ -119,3 +119,25 @@ async fn streams_partial_updates() {
     assert!(updates.iter().any(|u| text(u) == "first\n"));
     assert_eq!(text(updates.last().unwrap()), "first\nsecond\n");
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn custom_shell_path_and_command_prefix() {
+    use pi_agent::AgentTool;
+
+    use crate::tools::BashTool;
+    let dir = tempfile::tempdir().unwrap();
+    let call = |tool: BashTool, command: &str| {
+        let args = json!({ "command": command });
+        async move { tool.execute("call-1", args, CancellationToken::new(), super::noop()).await }
+    };
+    let tool = BashTool::new(dir.path().to_path_buf())
+        .with_shell_path(Some("/bin/sh".into()))
+        .with_command_prefix(Some("PREFIXED=yes".into()));
+    let result = call(tool, "echo $PREFIXED").await.unwrap();
+    assert_eq!(text(&result), "yes\n");
+
+    let missing = BashTool::new(dir.path().to_path_buf()).with_shell_path(Some(dir.path().join("no-shell")));
+    let error = call(missing, "true").await.unwrap_err().to_string();
+    assert!(error.starts_with("Custom shell path not found: "), "{error}");
+}
