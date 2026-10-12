@@ -182,11 +182,11 @@ pub fn stream(model: &Model, context: &Context, mut options: StreamOptions) -> A
 
 /// OpenCode routes a conversation by its `x-opencode-session` header.
 fn add_opencode_session_header(model: &Model, options: &mut StreamOptions) {
-    const HEADER: &str = "x-opencode-session";
-    let Some(session) = options.session_id.clone() else { return };
-    let present = options.headers.keys().any(|name| name.eq_ignore_ascii_case(HEADER));
-    if matches!(model.provider.as_str(), "opencode" | "opencode-go") && !present {
-        options.headers.insert(HEADER.into(), session);
+    let session = crate::attribution::session_headers(model, options.session_id.as_deref()).unwrap_or_default();
+    for (name, value) in session {
+        if !options.headers.keys().any(|present| present.eq_ignore_ascii_case(&name)) {
+            options.headers.insert(name, value);
+        }
     }
 }
 
