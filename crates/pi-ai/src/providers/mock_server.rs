@@ -1,17 +1,20 @@
-//! Minimal HTTP/1.1 server for provider tests. Each server accepts one request.
+//! Minimal HTTP/1.1 server for provider tests. A server answers its scripted responses in
+//! order, one per connection, and records every request it receives.
 
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::StreamExt;
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use tokio::sync::oneshot;
+use tokio::sync::mpsc;
 
 use crate::stream::{AssistantMessageEvent, AssistantMessageEventStream};
 use crate::types::{AssistantMessage, Model, ModelCost};
 
+#[derive(Clone, Debug)]
 pub(crate) enum MockResponse {
     /// Send these SSE frames, then close the connection.
     Sse(Vec<String>),
@@ -19,10 +22,28 @@ pub(crate) enum MockResponse {
     SseThenHang(Vec<String>),
     /// Reply with a status code and a JSON body.
     Status(u16, String),
+    /// Reply with a status code, extra headers, and a body.
+    Full { status: u16, headers: Vec<(String, String)>, body: String },
+    /// Wait this long before answering with the inner response.
+    Delayed(Duration, Box<MockResponse>),
 }
 
-#[derive(Debug)]
+impl MockResponse {
+    /// A 200 response with a JSON body.
+    #[allow(dead_code)]
+    pub fn json(body: &Value) -> Self {
+        Self::Status(200, body.to_string())
+    }
+
+    pub fn with_headers(status: u16, headers: &[(&str, &str)], body: impl Into<String>) -> Self {
+        let headers = headers.iter().map(|(name, value)| (name.to_string(), value.to_string())).collect();
+        Self::Full { status, headers, body: body.into() }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct RecordedRequest {
+    /// Request target; an absolute URL when the request came through a proxy.
     pub path: String,
     /// Header names are lowercase.
     pub headers: HashMap<String, String>,
@@ -31,49 +52,84 @@ pub(crate) struct RecordedRequest {
 
 pub(crate) struct MockServer {
     pub base_url: String,
-    request: Option<oneshot::Receiver<RecordedRequest>>,
+    requests: mpsc::UnboundedReceiver<RecordedRequest>,
+    received: Arc<Mutex<Vec<RecordedRequest>>>,
 }
 
 impl MockServer {
+    /// A server that answers one request.
     pub async fn start(response: MockResponse) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind mock server");
-        let base_url = format!("http://{}", listener.local_addr().expect("local address"));
-        let (sender, receiver) = oneshot::channel();
-        tokio::spawn(async move {
-            let Ok((mut socket, _)) = listener.accept().await else { return };
-            let Some(request) = read_request(&mut socket).await else { return };
-            let _ = sender.send(request);
-            match response {
-                MockResponse::Sse(frames) => {
-                    write_sse(&mut socket, &frames).await;
-                    let _ = socket.shutdown().await;
-                }
-                MockResponse::SseThenHang(frames) => {
-                    write_sse(&mut socket, &frames).await;
-                    tokio::time::sleep(Duration::from_secs(30)).await;
-                }
-                MockResponse::Status(status, body) => {
-                    let head = format!(
-                        "HTTP/1.1 {status} Error\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                        body.len()
-                    );
-                    let _ = socket.write_all(head.as_bytes()).await;
-                    let _ = socket.write_all(body.as_bytes()).await;
-                    let _ = socket.shutdown().await;
-                }
-            }
-        });
-        Self { base_url, request: Some(receiver) }
+        Self::sequence(vec![response]).await
     }
 
-    /// The request the server received.
+    /// A server that answers `responses` in order, one per request.
+    pub async fn sequence(responses: Vec<MockResponse>) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind mock server");
+        let base_url = format!("http://{}", listener.local_addr().expect("local address"));
+        let (sender, requests) = mpsc::unbounded_channel();
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let log = received.clone();
+        tokio::spawn(async move {
+            for response in responses {
+                let Ok((mut socket, _)) = listener.accept().await else { return };
+                let Some(request) = read_request(&mut socket).await else { return };
+                log.lock().unwrap().push(request.clone());
+                let _ = sender.send(request);
+                tokio::spawn(async move { respond(&mut socket, response).await });
+            }
+        });
+        Self { base_url, requests, received }
+    }
+
+    /// The next request the server received, in order.
     pub async fn request(&mut self) -> RecordedRequest {
-        self.request.take().expect("request already taken").await.expect("server received a request")
+        tokio::time::timeout(Duration::from_secs(5), self.requests.recv())
+            .await
+            .expect("server received a request in time")
+            .expect("server is running")
+    }
+
+    /// Every request received so far.
+    pub fn requests(&self) -> Vec<RecordedRequest> {
+        self.received.lock().unwrap().clone()
     }
 }
 
+async fn respond(socket: &mut tokio::net::TcpStream, response: MockResponse) {
+    match response {
+        MockResponse::Sse(frames) => {
+            write_sse(socket, &frames).await;
+            let _ = socket.shutdown().await;
+        }
+        MockResponse::SseThenHang(frames) => {
+            write_sse(socket, &frames).await;
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        }
+        MockResponse::Status(status, body) => write_full(socket, status, &[], &body).await,
+        MockResponse::Full { status, headers, body } => write_full(socket, status, &headers, &body).await,
+        MockResponse::Delayed(delay, inner) => {
+            tokio::time::sleep(delay).await;
+            Box::pin(respond(socket, *inner)).await;
+        }
+    }
+}
+
+async fn write_full(socket: &mut tokio::net::TcpStream, status: u16, headers: &[(String, String)], body: &str) {
+    let mut head = format!("HTTP/1.1 {status} Status\r\nContent-Length: {}\r\nConnection: close\r\n", body.len());
+    if !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("content-type")) {
+        head.push_str("Content-Type: application/json\r\n");
+    }
+    for (name, value) in headers {
+        head.push_str(&format!("{name}: {value}\r\n"));
+    }
+    head.push_str("\r\n");
+    let _ = socket.write_all(head.as_bytes()).await;
+    let _ = socket.write_all(body.as_bytes()).await;
+    let _ = socket.shutdown().await;
+}
+
 async fn write_sse(socket: &mut tokio::net::TcpStream, frames: &[String]) {
-    let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
+    let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nx-request-id: req_1\r\nConnection: close\r\n\r\n";
     let _ = socket.write_all(head.as_bytes()).await;
     for frame in frames {
         let _ = socket.write_all(frame.as_bytes()).await;
@@ -168,4 +224,22 @@ pub(crate) async fn cancel_after_first_text(
         panic!("stream ended without a terminal event");
     };
     tokio::time::timeout(Duration::from_secs(5), drive).await.expect("cancellation is prompt")
+}
+
+/// Run `provider` and return the request body its `on_payload` hook saw. Point `model` at an
+/// unreachable address such as `http://127.0.0.1:9` so the request fails after the hook.
+pub(crate) async fn capture_payload(
+    provider: &dyn crate::registry::ApiProvider,
+    model: &Model,
+    context: &crate::types::Context,
+    mut options: crate::registry::StreamOptions,
+) -> Value {
+    let captured: Arc<Mutex<Option<Value>>> = Arc::default();
+    let slot = captured.clone();
+    options.on_payload = Some(Arc::new(move |payload, _| {
+        *slot.lock().unwrap() = Some(payload.clone());
+        None
+    }));
+    provider.stream(model, context, options).result(model).await;
+    captured.lock().unwrap().take().expect("payload captured")
 }
