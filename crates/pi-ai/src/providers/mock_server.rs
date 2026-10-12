@@ -30,7 +30,6 @@ pub(crate) enum MockResponse {
 
 impl MockResponse {
     /// A 200 response with a JSON body.
-    #[allow(dead_code)]
     pub fn json(body: &Value) -> Self {
         Self::Status(200, body.to_string())
     }
@@ -73,6 +72,26 @@ impl MockServer {
             for response in responses {
                 let Ok((mut socket, _)) = listener.accept().await else { return };
                 let Some(request) = read_request(&mut socket).await else { return };
+                log.lock().unwrap().push(request.clone());
+                let _ = sender.send(request);
+                tokio::spawn(async move { respond(&mut socket, response).await });
+            }
+        });
+        Self { base_url, requests, received }
+    }
+
+    /// A server that answers any number of requests with `handler`.
+    pub async fn routed(handler: impl Fn(&RecordedRequest) -> MockResponse + Send + Sync + 'static) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind mock server");
+        let base_url = format!("http://{}", listener.local_addr().expect("local address"));
+        let (sender, requests) = mpsc::unbounded_channel();
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let log = received.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else { return };
+                let Some(request) = read_request(&mut socket).await else { continue };
+                let response = handler(&request);
                 log.lock().unwrap().push(request.clone());
                 let _ = sender.send(request);
                 tokio::spawn(async move { respond(&mut socket, response).await });
