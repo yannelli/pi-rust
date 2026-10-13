@@ -15,7 +15,7 @@ use super::types::CodemodeOutputItem;
 const PRELUDE_SOURCE: &str = include_str!("prelude.js");
 /// Native stack of the worker thread, and the part QuickJS may use before it throws a `RangeError`.
 const THREAD_STACK_BYTES: usize = 16 * 1024 * 1024;
-const MAX_JS_STACK_BYTES: usize = 4 * 1024 * 1024;
+const MAX_JS_STACK_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CallTarget {

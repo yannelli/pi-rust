@@ -122,7 +122,7 @@ impl From<crate::platform::shell::ShellConfig> for ShellConfig {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn find_executable_on_path(executable: &str) -> Option<PathBuf> {
     let paths = std::env::var_os("PATH")?;
     std::env::split_paths(&paths).map(|dir| dir.join(executable)).find(|candidate| candidate.is_file())

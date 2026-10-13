@@ -80,7 +80,7 @@ async fn compacts_after_crossing_the_threshold() {
     h.session.prompt("third question", Vec::new()).await.unwrap();
 
     let requests = h.requests();
-    assert_eq!(requests.len(), 4);
+    assert_eq!(requests.len(), 4, "compaction events: {:?}", compaction_events(&h.events()));
     assert!(is_summary_request(&requests[2]));
     let after = &requests[3].messages;
     assert!(text(&after[0]).contains("Summarized"));
