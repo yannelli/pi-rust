@@ -138,14 +138,16 @@ impl Renderer {
                     _ => {}
                 }
             }
-            AgentEvent::ToolExecutionStart { tool_name, args, .. } => {
+            AgentEvent::ToolExecutionStart { tool_name, args, parent_tool_call_id, .. } => {
+                let indent = if parent_tool_call_id.is_some() { "  " } else { "" };
                 let text = format!(
-                    "{} {}",
+                    "{indent}{} {}",
                     self.style.cyan(&format!("→ {tool_name}")),
                     self.style.dim(&summarize_args(tool_name, args))
                 );
                 self.line(&text);
             }
+            AgentEvent::ToolExecutionEnd { parent_tool_call_id: Some(_), .. } => {}
             AgentEvent::ToolExecutionEnd { result, is_error, .. } => {
                 let preview = tool_preview(result);
                 if !preview.is_empty() {

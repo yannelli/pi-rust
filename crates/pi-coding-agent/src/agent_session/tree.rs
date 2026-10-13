@@ -300,16 +300,17 @@ impl AgentSession {
         {
             let services = self.services();
             let mut loader = services.resources();
-            let options = super::services::resource_loader_options(
+            let mut options = super::services::resource_loader_options(
                 &services.cwd,
                 &services.agent_dir,
                 services.settings.as_ref(),
                 &resource_options_of(&loader.options),
             );
+            options.package_resources = loader.options.package_resources.clone();
             loader.options = options;
             loader.reload();
         }
-        self.refresh_builtin_tools(self.model().as_ref());
+        self.refresh_builtin_tools();
         self.activate_new_default_tools(&previous_defaults);
         self.rebuild_system_prompt();
     }

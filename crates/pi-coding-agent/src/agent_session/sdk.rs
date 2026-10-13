@@ -228,7 +228,7 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
         disposed: AtomicBool::new(false),
         weak: weak.clone(),
     });
-    session.refresh_builtin_tools(model.as_ref());
+    session.refresh_builtin_tools();
     let active = session.active_tool_names();
     session.set_active_tools_by_name(&active);
     session.install_hooks();

@@ -235,3 +235,22 @@ async fn switches_models_and_thinking_levels_with_events() {
     assert!(kinds.iter().filter(|kind| **kind == "model_change").count() >= 3);
     assert!(kinds.contains(&"thinking_level_change"));
 }
+
+#[tokio::test]
+async fn blocks_images_when_configured() {
+    let h = harness(Options {
+        responses: vec![FauxResponse::text("ok")],
+        settings: json!({"images": {"blockImages": true}}),
+        ..Options::default()
+    })
+    .await;
+    let image = ContentBlock::Image { data: PNG.into(), mime_type: "image/png".into() };
+    h.session.prompt("look", vec![image]).await.unwrap();
+    let sent = h.requests()[0].messages.last().unwrap().clone();
+    let Message::User(user) = sent else { panic!("user message") };
+    let pi_ai::UserContent::Blocks(blocks) = &user.content else { panic!("blocks") };
+    assert!(!blocks.iter().any(|block| matches!(block, ContentBlock::Image { .. })));
+    assert!(text(&Message::User(user.clone())).contains("Image reading is disabled."));
+    assert!(h.session.messages().iter().any(|message| matches!(message, Message::User(user)
+        if matches!(&user.content, pi_ai::UserContent::Blocks(blocks) if blocks.len() > 1))));
+}

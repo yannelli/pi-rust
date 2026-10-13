@@ -7,7 +7,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use pi_ai::auth::{CredentialStore, OAuthLookup};
 
 use super::model_runtime::{ModelRuntime, ModelRuntimeOptions};
-use crate::resources::{ResourceDiagnostic, ResourceLoader, ResourceLoaderOptions, ResourceSettings};
+use crate::packages::{PackageManager, PackageManagerOptions};
+use crate::resources::{ResolvedPaths, ResourceDiagnostic, ResourceLoader, ResourceLoaderOptions, ResourceSettings};
 use crate::settings::{ResourceKind, SettingsManager, SettingsOptions, SettingsScope};
 
 /// How bad a runtime diagnostic is; the app decides what to print and whether to stop.
@@ -154,6 +155,25 @@ pub fn resource_diagnostics(loader: &ResourceLoader) -> Vec<RuntimeDiagnostic> {
         .collect()
 }
 
+/// Resources of the `packages` settings; missing packages install first, as upstream.
+pub async fn package_resources(
+    cwd: &Path,
+    agent_dir: &Path,
+    settings: &Arc<SettingsManager>,
+) -> (ResolvedPaths, Option<RuntimeDiagnostic>) {
+    let configured = [SettingsScope::Global, SettingsScope::Project];
+    if configured.iter().all(|scope| settings.packages(*scope).is_empty()) {
+        return (ResolvedPaths::default(), None);
+    }
+    let manager = PackageManager::new(PackageManagerOptions::new(cwd, agent_dir, settings.clone()));
+    match manager.resolve_package_resources(None).await {
+        Ok(paths) => (paths, None),
+        Err(error) => {
+            (ResolvedPaths::default(), Some(RuntimeDiagnostic::warning(format!("Failed to load packages: {error:#}"))))
+        }
+    }
+}
+
 /// Create settings, the model runtime, and the resource loader for `options.cwd`.
 pub async fn create_agent_session_services(options: CreateServicesOptions) -> AgentSessionServices {
     let cwd = crate::session::ids::resolve_path(&options.cwd);
@@ -180,7 +200,11 @@ pub async fn create_agent_session_services(options: CreateServicesOptions) -> Ag
     if let Some(error) = model_runtime.load_error() {
         diagnostics.push(RuntimeDiagnostic::warning(format!("errors loading models.json:\n{error}")));
     }
-    let mut loader = ResourceLoader::new(resource_loader_options(&cwd, &agent_dir, &settings, &options.resources));
+    let (packages, package_error) = package_resources(&cwd, &agent_dir, &settings).await;
+    diagnostics.extend(package_error);
+    let mut loader_options = resource_loader_options(&cwd, &agent_dir, &settings, &options.resources);
+    loader_options.package_resources = packages;
+    let mut loader = ResourceLoader::new(loader_options);
     loader.reload();
     diagnostics.extend(resource_diagnostics(&loader));
     AgentSessionServices {

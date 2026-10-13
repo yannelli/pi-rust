@@ -2,22 +2,20 @@
 //! `_refreshToolRegistry`, `_rebuildSystemPrompt`, `_preparePromptAndToolLoadout`).
 
 use std::path::Path;
-use std::sync::Arc;
 
 use pi_agent::SharedTool;
 use pi_ai::transcript::{current_system_message, current_tools, tool_state_changes};
-use pi_ai::{Message, Model, SystemMessage, UserContent};
+use pi_ai::{Message, SystemMessage, UserContent};
 use serde_json::Value;
 
 use super::{AgentSession, lock};
-use crate::images::ProcessImageOptions;
 use crate::resources::LoadedResources;
 use crate::settings::SettingsManager;
 use crate::settings::tools::{apply_tool_modifiers, matches_any_tool};
 use crate::system_prompt::{
     BuildSystemPromptOptions, build_system_prompt_sections, diff_system_prompt_sections, render_system_prompt,
 };
-use crate::tools::{self, ALL_TOOLS, BashTool, ReadTool};
+use crate::tools::{self, ALL_TOOLS};
 
 /// A registered tool as `getAllTools` reports it.
 #[derive(Clone, Debug, PartialEq)]
@@ -59,28 +57,11 @@ impl ToolState {
     }
 }
 
-/// Built-in tools for `cwd`. `read` fits images to the model's limits when `images.autoResize`
-/// is on; `bash` uses `shellPath` and `shellCommandPrefix`.
-pub(crate) fn builtin_tools(cwd: &Path, settings: &SettingsManager, model: Option<&Model>) -> Vec<SharedTool> {
-    let auto_resize = settings.image_auto_resize();
-    ALL_TOOLS
-        .iter()
-        .filter_map(|name| match *name {
-            "read" => Some(Arc::new(match model {
-                Some(model) => ReadTool::for_model(cwd.to_path_buf(), model, auto_resize),
-                None => ReadTool::with_image_options(
-                    cwd.to_path_buf(),
-                    ProcessImageOptions { auto_resize, ..ProcessImageOptions::default() },
-                ),
-            }) as SharedTool),
-            "bash" => Some(Arc::new(
-                BashTool::new(cwd.to_path_buf())
-                    .with_shell_path(settings.shell_path())
-                    .with_command_prefix(settings.shell_command_prefix()),
-            ) as SharedTool),
-            other => tools::create_tool(other, cwd),
-        })
-        .collect()
+/// Built-in tools for `cwd` with `images.autoResize`, `shellPath`, and `shellCommandPrefix`.
+/// `read` fits images to the model of each call.
+pub(crate) fn builtin_tools(cwd: &Path, settings: &SettingsManager) -> Vec<SharedTool> {
+    let options = tools::ToolsOptions::from_settings(settings);
+    tools::create_tools_with_options(ALL_TOOLS, cwd, &options).unwrap_or_default()
 }
 
 /// Base prompt options from the loaded resources, with snippets and guidelines of every
@@ -155,9 +136,9 @@ impl AgentSession {
         tools.base_prompt = prompt_options(self.cwd(), &resources, &active);
     }
 
-    /// Rebuild the registry; the `read` tool notes depend on the model.
-    pub(crate) fn refresh_builtin_tools(&self, model: Option<&Model>) {
-        let builtins = builtin_tools(self.cwd(), self.settings(), model);
+    /// Rebuild the registry from the current settings.
+    pub(crate) fn refresh_builtin_tools(&self) {
+        let builtins = builtin_tools(self.cwd(), self.settings());
         let selected = {
             let mut tools = lock(&self.tools);
             let mut registry: Vec<SharedTool> =

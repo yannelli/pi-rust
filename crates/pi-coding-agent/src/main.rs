@@ -14,6 +14,7 @@ use pi_coding_agent::config::{ENV_SESSION_DIR, agent_dir, auth_path, env_flag, e
 use pi_coding_agent::export::{ExportTheme, export_from_file};
 use pi_coding_agent::files::process_file_args;
 use pi_coding_agent::interactive::run_interactive;
+use pi_coding_agent::packages::{PackageCommandOptions, run_config_command, run_package_command};
 use pi_coding_agent::print_mode::run_print_mode;
 use pi_coding_agent::session::branching::missing_session_cwd;
 use pi_coding_agent::session::ids::assert_valid_session_id;
@@ -302,6 +303,16 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
         eprint!("{}", output.stderr);
         return Ok(output.code);
     }
+    let cwd = std::env::current_dir()?;
+    let bootstrap_settings = SettingsManager::create(&cwd, &agent_dir, SettingsOptions { project_trusted: false });
+    configure_http_from_settings(&bootstrap_settings);
+    let package_options = PackageCommandOptions::from_env(cwd.clone(), agent_dir.clone());
+    if let Some(code) = run_package_command(&raw, &package_options).await {
+        return Ok(code);
+    }
+    if let Some(code) = run_config_command(&raw, &package_options, None).await {
+        return Ok(code);
+    }
     let mut args = parse_args(&raw);
     for warning in &args.warnings {
         eprintln!("Warning: {warning}");
@@ -316,7 +327,6 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
         println!("{}", env!("CARGO_PKG_VERSION"));
         return Ok(0);
     }
-    let cwd = std::env::current_dir()?;
     let startup_settings = SettingsManager::create(
         &cwd,
         &agent_dir,

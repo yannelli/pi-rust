@@ -3,6 +3,7 @@
 mod bash;
 mod compaction;
 mod harness;
+mod login;
 mod prompt;
 mod retry;
 mod runtime;
