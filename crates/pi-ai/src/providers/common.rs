@@ -12,8 +12,8 @@ use crate::registry::StreamOptions;
 pub(crate) use crate::request::{HttpRequest, http_error_message, truncate_chars};
 use crate::request::{SendOptions, apply_payload_hook, build_headers, error_chain, provider_response, send_request};
 use crate::sse::{SseEvent, sse_events};
-use crate::stream::{AssistantMessageEventStream, MessageBuilder, event_channel};
-use crate::types::{ContentBlock, Model, StopReason, ThinkingLevel};
+use crate::stream::{AssistantMessageEventStream, EventSender, MessageBuilder, event_channel};
+use crate::types::{ContentBlock, Model, StopReason};
 
 /// Consumes the SSE events of one response.
 pub(crate) trait SseHandler: Send + 'static {
@@ -68,11 +68,23 @@ pub(crate) fn spawn_sse_request<H: SseHandler>(
 pub(crate) fn spawn_provider_stream<H: SseHandler>(
     model: &Model,
     options: &StreamOptions,
+    request: HttpRequest,
+    handler: H,
+) -> AssistantMessageEventStream {
+    spawn_provider_stream_with(model, options, request, |_| handler)
+}
+
+/// [`spawn_provider_stream`] for handlers that emit some block events themselves through a
+/// clone of the event sender, for example to append to a block that is no longer the last one.
+pub(crate) fn spawn_provider_stream_with<H: SseHandler>(
+    model: &Model,
+    options: &StreamOptions,
     mut request: HttpRequest,
-    mut handler: H,
+    make_handler: impl FnOnce(EventSender) -> H,
 ) -> AssistantMessageEventStream {
     request.body = apply_payload_hook(request.body, options.on_payload.as_ref(), model);
     let (sender, stream) = event_channel();
+    let mut handler = make_handler(sender.clone());
     let mut builder = MessageBuilder::new(model, sender);
     let (model, options) = (model.clone(), options.clone());
     tokio::spawn(async move {
@@ -186,32 +198,6 @@ pub(crate) fn compat_bool(model: &Model, key: &str) -> Option<bool> {
 
 pub(crate) fn compat_str<'a>(model: &'a Model, key: &str) -> Option<&'a str> {
     compat_value(model, key)?.as_str()
-}
-
-/// `PI_CACHE_RETENTION=long` requests long prompt cache retention.
-pub(crate) fn long_cache_retention() -> bool {
-    std::env::var("PI_CACHE_RETENTION").is_ok_and(|value| value == "long")
-}
-
-/// The requested reasoning level for budget-style APIs: `None` when off or unsupported,
-/// with `xhigh` and `max` clamped to `high` as upstream `clampReasoning` does.
-pub(crate) fn reasoning_level(model: &Model, options: &StreamOptions) -> Option<ThinkingLevel> {
-    if !model.reasoning {
-        return None;
-    }
-    match options.reasoning? {
-        ThinkingLevel::Off => None,
-        ThinkingLevel::Xhigh | ThinkingLevel::Max => Some(ThinkingLevel::High),
-        level => Some(level),
-    }
-}
-
-/// Tokens always left for the answer when thinking shares the output ceiling.
-pub(crate) const MIN_ANSWER_TOKENS: u64 = crate::simple_options::MIN_ANSWER_TOKENS;
-
-/// Default thinking token budget for a level.
-pub(crate) fn thinking_budget(level: ThinkingLevel) -> u64 {
-    crate::simple_options::thinking_budget_for_level(level, None)
 }
 
 /// Replace characters outside `[A-Za-z0-9_-]` with `_`.
