@@ -22,10 +22,37 @@ pub fn builtin_models() -> &'static [Model] {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ModelsFileError {
-    #[error("cannot read {path}: {source}")]
+    #[error("Failed to load models.json: {source}\n\nFile: {path}")]
     Read { path: String, source: std::io::Error },
+    /// The text is not JSON (comments allowed).
+    #[error("Failed to parse models.json: {message}\n\nFile: {path}")]
+    Syntax { path: String, message: String },
+    /// The document does not match the `models.json` schema; one `path: message` per line.
+    #[error("Invalid models.json schema:\n{}\n\nFile: {path}", format_schema_errors(.errors))]
+    Schema { path: String, errors: Vec<String> },
+    /// A provider configuration that cannot be applied, such as a model without `api`.
     #[error("invalid models file {path}: {message}")]
     Parse { path: String, message: String },
+}
+
+fn format_schema_errors(errors: &[String]) -> String {
+    if errors.is_empty() {
+        return "Unknown schema error".into();
+    }
+    errors.iter().map(|error| format!("  - {error}")).collect::<Vec<_>>().join("\n")
+}
+
+static MODELS_SCHEMA: LazyLock<serde_json::Value> =
+    LazyLock::new(|| serde_json::from_str(include_str!("models.schema.json")).expect("bundled models schema is valid"));
+
+/// Check `models.json` text the way upstream `ModelConfig.load` does: comments and a BOM are
+/// allowed, then the document must match the schema. `path` names the file in the error.
+pub fn validate_models_json(text: &str, path: &str) -> Result<(), ModelsFileError> {
+    let stripped = json::strip_json_comments(text.trim_start_matches('\u{feff}'));
+    let value: serde_json::Value = serde_json::from_str(&stripped)
+        .map_err(|error| ModelsFileError::Syntax { path: path.into(), message: error.to_string() })?;
+    let errors = crate::json_schema::schema_errors(&MODELS_SCHEMA, &value);
+    if errors.is_empty() { Ok(()) } else { Err(ModelsFileError::Schema { path: path.into(), errors }) }
 }
 
 /// Available models and the `models.json` auth settings per provider.
@@ -47,13 +74,20 @@ impl ModelRegistry {
     /// The bundled catalog plus `path` when it exists.
     pub fn load(path: &Path) -> Result<Self, ModelsFileError> {
         let mut registry = Self::builtin();
-        if path.exists() {
-            let display = path.display().to_string();
-            let text = std::fs::read_to_string(path)
-                .map_err(|source| ModelsFileError::Read { path: display.clone(), source })?;
-            registry.apply_json(&text).map_err(|message| ModelsFileError::Parse { path: display, message })?;
-        }
+        registry.apply_models_file(path)?;
         Ok(registry)
+    }
+
+    /// Validate and apply the `models.json` at `path`; a missing file changes nothing.
+    pub fn apply_models_file(&mut self, path: &Path) -> Result<(), ModelsFileError> {
+        if !path.exists() {
+            return Ok(());
+        }
+        let display = path.display().to_string();
+        let text =
+            std::fs::read_to_string(path).map_err(|source| ModelsFileError::Read { path: display.clone(), source })?;
+        validate_models_json(&text, &display)?;
+        self.apply_json(&text).map_err(|message| ModelsFileError::Parse { path: display, message })
     }
 
     /// Like [`Self::load`], but an invalid file leaves the bundled catalog and returns the error,

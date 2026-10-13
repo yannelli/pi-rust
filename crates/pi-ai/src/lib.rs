@@ -10,6 +10,7 @@ mod frames_reduce;
 pub mod http;
 pub mod images;
 pub mod json;
+pub mod json_schema;
 pub mod model_operations;
 pub mod models;
 pub mod overflow;
