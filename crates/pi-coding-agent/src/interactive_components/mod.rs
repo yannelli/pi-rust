@@ -16,6 +16,9 @@ pub mod extension_selector;
 pub mod external_editor;
 pub mod first_time_setup;
 pub mod keybinding_hints;
+pub mod login;
+pub mod model_selector;
+pub mod scoped_models_selector;
 pub mod session_selector;
 pub mod settings_selector;
 pub mod show_images_selector;
@@ -31,9 +34,11 @@ pub use extension_editor::{ExtensionEditor, ExtensionEditorOptions};
 pub use extension_input::{ExtensionInput, ExtensionInputOptions};
 pub use extension_selector::{ExtensionSelector, ExtensionSelectorOptions};
 pub use external_editor::{ExternalEditorResult, edit_in_external_editor};
+pub use model_selector::{ModelSelector, ModelSelectorOptions, ModelSelectorSource};
 pub use keybinding_hints::{
     format_key_display_text, format_key_text, key_display_text, key_hint, key_text, raw_key_hint,
 };
+pub use scoped_models_selector::{EnabledIds, ModelsCallbacks, ModelsConfig, ScopedModelsSelector};
 pub use show_images_selector::ShowImagesSelector;
 pub use theme_selector::ThemeSelector;
 pub use thinking_selector::ThinkingSelector;

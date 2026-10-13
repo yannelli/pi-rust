@@ -1,0 +1,297 @@
+//! Ports `model-selector.test.ts` and regression 7209 (filter resets the selection).
+
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use pi_ai::Model;
+use pi_tui::Component;
+
+use crate::interactive_components::model_selector::{
+    DefaultModelReference, ModelSelector, ModelSelectorOptions, ModelSelectorSource, ModelsRefreshResult,
+};
+use crate::interactive_components::test_support::{Calls, Harness, flush, keys, local, plain, setup, setup_with};
+use crate::model_resolver::ScopedModel;
+
+struct FakeSource {
+    models: RefCell<Vec<Model>>,
+    error: Option<String>,
+}
+
+impl ModelSelectorSource for FakeSource {
+    fn available_models(&self) -> Vec<Model> {
+        self.models.borrow().clone()
+    }
+
+    fn find_model(&self, provider: &str, id: &str) -> Option<Model> {
+        self.models.borrow().iter().find(|model| model.provider == provider && model.id == id).cloned()
+    }
+
+    fn catalog_error(&self) -> Option<String> {
+        self.error.clone()
+    }
+}
+
+fn model(provider: &str, id: &str, name: &str) -> Model {
+    Model { id: id.into(), name: name.into(), provider: provider.into(), reasoning: true, ..Default::default() }
+}
+
+fn source(models: Vec<Model>) -> Rc<FakeSource> {
+    Rc::new(FakeSource { models: RefCell::new(models), error: None })
+}
+
+fn rendered(selector: &Rc<RefCell<ModelSelector>>) -> String {
+    plain(&selector.borrow_mut().render(120)).join("\n")
+}
+
+fn selected_model_id(rendered: &str) -> Option<String> {
+    let line = rendered.lines().find(|line| line.starts_with("→ "))?;
+    let rest = line.trim_start_matches("→").trim_start();
+    let id = rest.split(" [").next()?.trim_start_matches("✓").trim();
+    (!id.is_empty()).then(|| id.to_string())
+}
+
+fn refreshed() -> crate::interactive_components::model_selector::ModelRefreshFn {
+    Box::new(|_| Box::pin(async { Ok(ModelsRefreshResult::default()) }))
+}
+
+#[test]
+fn keeps_the_current_model_marked_while_browsing() {
+    let _kb = setup();
+    let models = vec![model("faux", "current-model", "Current Model"), model("faux", "browsed-model", "Browsed Model")];
+    let harness = Harness::new_shared(120, 30, |tui| {
+        ModelSelector::new(
+            tui,
+            Some(models[0].clone()),
+            source(models.clone()),
+            Vec::new(),
+            |_| {},
+            || {},
+            Default::default(),
+        )
+    });
+    let row = |id: &str| {
+        harness
+            .render(120)
+            .into_iter()
+            .find(|line| line.contains(&format!("{id} [")))
+            .map(|line| line.trim_end().to_string())
+    };
+    assert_eq!(row("current-model").as_deref(), Some("→ ✓ current-model [faux]"));
+    harness.send(keys::DOWN);
+    assert_eq!(row("current-model").as_deref(), Some("  ✓ current-model [faux]"));
+    assert_eq!(row("browsed-model").as_deref(), Some("→   browsed-model [faux]"));
+    let screen = harness.screen();
+    assert!(screen.contains("Only showing models from configured providers. Use /login to add providers."));
+    assert!(screen.contains("Model Name: Browsed Model"), "{screen}");
+}
+
+#[test]
+fn uses_the_configured_save_binding() {
+    let _kb = setup_with(&[("app.models.save", "ctrl+r")]);
+    let current = model("faux", "m1", "M1");
+    let saved = Calls::new();
+    let calls = saved.clone();
+    let options = ModelSelectorOptions {
+        on_select_as_default: Some(Box::new(move |model: &Model| calls.push(model.id.clone()))),
+        ..Default::default()
+    };
+    let harness = Harness::new_shared(120, 30, |tui| {
+        ModelSelector::new(
+            tui,
+            Some(current.clone()),
+            source(vec![current.clone()]),
+            Vec::new(),
+            |_| {},
+            || {},
+            options,
+        )
+    });
+    assert!(harness.screen().contains("Ctrl+R to set as default"));
+    harness.send("\x13");
+    assert!(saved.is_empty());
+    harness.send("\x12");
+    assert_eq!(saved.get(), ["m1"]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn lists_every_catalog_that_failed_to_refresh() {
+    local(async {
+        let _kb = setup();
+        let current = model("openai", "gpt", "GPT");
+        let refresh: crate::interactive_components::model_selector::ModelRefreshFn = Box::new(|_| {
+            Box::pin(async {
+                Ok(ModelsRefreshResult { aborted: false, errors: vec!["openai".into(), "anthropic".into()] })
+            })
+        });
+        let options = ModelSelectorOptions { refresh: Some(refresh), ..Default::default() };
+        let harness = Harness::new_shared(120, 30, |tui| {
+            ModelSelector::new(
+                tui,
+                Some(current.clone()),
+                source(vec![current.clone()]),
+                Vec::new(),
+                |_| {},
+                || {},
+                options,
+            )
+        });
+        assert!(harness.screen().contains("Refreshing model catalogs…"));
+        flush(&harness).await;
+        let text = rendered(&harness.component);
+        assert!(
+            text.contains("Could not refresh 2 model catalogs (openai, anthropic); showing cached models."),
+            "{text}"
+        );
+        assert!(!text.contains("Refreshing"));
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn refresh_reloads_the_snapshot_and_reports_single_failures() {
+    local(async {
+        let _kb = setup();
+        let fake = source(vec![model("faux", "a", "A")]);
+        let late = fake.clone();
+        let refresh: crate::interactive_components::model_selector::ModelRefreshFn = Box::new(move |_| {
+            Box::pin(async move {
+                late.models.borrow_mut().push(model("faux", "b", "B"));
+                Ok(ModelsRefreshResult::default())
+            })
+        });
+        let options = ModelSelectorOptions { refresh: Some(refresh), ..Default::default() };
+        let harness = Harness::new_shared(120, 30, |tui| {
+            ModelSelector::new(tui, None, fake.clone(), Vec::new(), |_| {}, || {}, options)
+        });
+        flush(&harness).await;
+        let screen = harness.screen();
+        assert!(screen.contains("Model catalogs refreshed.") && screen.contains("  b [faux]"), "{screen}");
+
+        let failing: crate::interactive_components::model_selector::ModelRefreshFn =
+            Box::new(|_| Box::pin(async { Ok(ModelsRefreshResult { aborted: false, errors: vec!["radius".into()] }) }));
+        let options = ModelSelectorOptions { refresh: Some(failing), ..Default::default() };
+        let harness = Harness::new_shared(120, 30, |tui| {
+            ModelSelector::new(tui, None, fake.clone(), Vec::new(), |_| {}, || {}, options)
+        });
+        flush(&harness).await;
+        assert!(harness.screen().contains("Could not refresh radius; showing cached models."));
+    })
+    .await;
+}
+
+fn alpha_models() -> Vec<Model> {
+    vec![
+        model("faux", "alpha-1", "Alpha One"),
+        model("faux", "alpha-2", "Alpha Two"),
+        model("faux", "alpha-3", "Alpha Three"),
+        model("faux", "beta-1", "Beta One"),
+    ]
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn typing_a_query_moves_the_selection_to_the_first_row_in_all() {
+    local(async {
+        let _kb = setup();
+        let models = alpha_models();
+        let options = ModelSelectorOptions { refresh: Some(refreshed()), ..Default::default() };
+        let harness = Harness::new_shared(120, 30, |tui| {
+            ModelSelector::new(tui, Some(models[0].clone()), source(models.clone()), Vec::new(), |_| {}, || {}, options)
+        });
+        flush(&harness).await;
+        assert!(rendered(&harness.component).contains("Model catalogs refreshed."));
+        assert_eq!(selected_model_id(&rendered(&harness.component)).as_deref(), Some("alpha-1"));
+        harness.send_all(&[keys::DOWN, keys::DOWN]);
+        assert_eq!(selected_model_id(&rendered(&harness.component)).as_deref(), Some("alpha-3"));
+        harness.type_text("alpha");
+        let text = rendered(&harness.component);
+        assert_eq!(selected_model_id(&text).as_deref(), Some("alpha-1"));
+        assert!(!text.contains("beta-1"));
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn typing_a_query_moves_the_selection_to_the_first_row_in_scoped() {
+    local(async {
+        let _kb = setup();
+        let models = alpha_models();
+        let scoped: Vec<ScopedModel> =
+            [1, 2, 0].iter().map(|&index| ScopedModel { model: models[index].clone(), thinking_level: None }).collect();
+        let options = ModelSelectorOptions { refresh: Some(refreshed()), ..Default::default() };
+        let harness = Harness::new_shared(120, 30, |tui| {
+            ModelSelector::new(tui, Some(models[0].clone()), source(models.clone()), scoped, |_| {}, || {}, options)
+        });
+        flush(&harness).await;
+        let text = rendered(&harness.component);
+        assert!(text.contains("Model catalogs refreshed."));
+        assert!(text.contains("Scope: all | scoped"));
+        assert_eq!(selected_model_id(&text).as_deref(), Some("alpha-1"));
+        harness.type_text("alpha");
+        assert_eq!(selected_model_id(&rendered(&harness.component)).as_deref(), Some("alpha-2"));
+    })
+    .await;
+}
+
+#[test]
+fn tab_switches_scope_and_default_model_sorts_and_searches() {
+    let models = alpha_models();
+    let scoped = vec![ScopedModel { model: models[3].clone(), thinking_level: None }];
+    let selected = Calls::new();
+    let on_select = selected.recorder();
+    let options = ModelSelectorOptions {
+        default_model: Some(DefaultModelReference { provider: "faux".into(), id: "alpha-3".into() }),
+        ..Default::default()
+    };
+    let harness = Harness::new_shared(120, 30, |tui| {
+        let mut on_select = on_select;
+        ModelSelector::new(
+            tui,
+            Some(models[1].clone()),
+            source(models.clone()),
+            scoped,
+            move |model: &Model| on_select(model.id.clone()),
+            || {},
+            options,
+        )
+    });
+    let screen = harness.screen();
+    assert!(screen.contains("→   beta-1 [faux]"), "{screen}");
+    assert!(screen.contains("tab scope (all/scoped)"));
+    harness.send(keys::TAB);
+    let lines = harness.render(120);
+    let ids: Vec<String> = lines
+        .iter()
+        .map(|line| line.chars().skip(4).collect::<String>())
+        .filter(|rest| rest.contains(" [faux]"))
+        .collect();
+    assert!(ids[0].starts_with("alpha-2") && ids[1].starts_with("alpha-3 [faux] · default"), "{ids:?}");
+    harness.type_text("def");
+    assert_eq!(selected_model_id(&harness.render(120).join("\n")).as_deref(), Some("alpha-3"));
+    harness.send(keys::ENTER);
+    assert_eq!(selected.get(), ["alpha-3"]);
+}
+
+#[test]
+fn wraps_navigation_and_shows_no_matches_and_cancels() {
+    let models = alpha_models();
+    let cancelled = Calls::new();
+    let harness = Harness::new_shared(120, 30, |tui| {
+        ModelSelector::new(
+            tui,
+            None,
+            source(models.clone()),
+            Vec::new(),
+            |_| {},
+            cancelled.counter(),
+            Default::default(),
+        )
+    });
+    harness.send(keys::UP);
+    assert_eq!(selected_model_id(&harness.render(120).join("\n")).as_deref(), Some("beta-1"));
+    harness.send(keys::DOWN);
+    assert_eq!(selected_model_id(&harness.render(120).join("\n")).as_deref(), Some("alpha-1"));
+    harness.type_text("zzzz");
+    assert!(harness.screen().contains("  No matching models"));
+    harness.send(keys::ESCAPE);
+    assert_eq!(cancelled.len(), 1);
+}
