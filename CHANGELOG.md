@@ -2,6 +2,17 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.1.6] - 2026-10-13
+
+### Added
+
+- **durable:** restore pi-durable ([5d236f1](https://github.com/yannelli/pi-rust/commit/5d236f143dda37172dfef20c8ce23151acb92dbd))
+
+### Fixed
+
+- **durable:** use the NTFS file index as the Windows watch identity ([49582d9](https://github.com/yannelli/pi-rust/commit/49582d938951a6e6d6f407521736869176221fc1))
+- **durable:** map FSEvents real paths to the watched spelling, and fix Windows test expectations ([677804b](https://github.com/yannelli/pi-rust/commit/677804b93a37cef38801565da85abe785b554f3f))
+
 ## [0.1.5] - 2026-10-13
 
 ### Added
