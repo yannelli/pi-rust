@@ -2,4 +2,5 @@
 //! the embedded JavaScript runtime against sessions over the faux provider.
 
 mod examples;
+mod provider;
 mod harness;
