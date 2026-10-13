@@ -268,6 +268,7 @@
     for (const name of names) defineLazy(name, () => loadBuiltin(module)[name]);
   }
   defineLazy("crypto", () => loadBuiltin("crypto").webcrypto);
+  if (typeof globalThis.Intl === "undefined") defineLazy("Intl", () => loadBuiltin("internal/intl"));
   defineLazy("navigator", () => ({
     hardwareConcurrency: loadBuiltin("os").availableParallelism(),
     language: "en-US",

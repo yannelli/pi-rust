@@ -32,6 +32,7 @@ const SOURCES: &[(&str, &str)] = &[
     ("querystring", include_str!("../js/querystring.js")),
     ("url", include_str!("../js/url.js")),
     ("internal/web", include_str!("../js/web.js")),
+    ("internal/intl", include_str!("../js/intl.js")),
     ("internal/streams_common", include_str!("../js/streams_common.js")),
     ("internal/streams_readable", include_str!("../js/streams_readable.js")),
     ("internal/streams_writable", include_str!("../js/streams_writable.js")),
