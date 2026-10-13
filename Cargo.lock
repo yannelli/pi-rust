@@ -2325,6 +2325,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-durable"
+version = "0.1.2"
+dependencies = [
+ "async-trait",
+ "futures",
+ "pi-ai",
+ "pi-chord",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "pi-embedded"
 version = "0.1.2"
 dependencies = [
