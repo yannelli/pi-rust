@@ -16,6 +16,7 @@ use crate::hooks::{
     PrepareRequestFn,
 };
 use crate::tool_execution::{execute_tool_calls, fail_truncated_tool_calls};
+use crate::transcript::{declare_tool_changes, is_transcript_context};
 use crate::types::{
     AfterToolCall, AfterToolCallResult, AgentEvent, BeforeToolCall, BeforeToolCallResult, SharedTool, ToolExecutionMode,
 };
@@ -40,6 +41,8 @@ pub type EventSink = Arc<dyn Fn(AgentEvent) + Send + Sync>;
 /// Conversation state the loop reads and appends to.
 #[derive(Clone, Default)]
 pub struct AgentContext {
+    /// `None`: the transcript's system messages carry the prompt and tool declarations, and the
+    /// loop declares tool changes (upstream behavior). `Some`: sent beside the messages instead.
     pub system_prompt: Option<String>,
     pub messages: Vec<Message>,
     pub tools: Vec<SharedTool>,
@@ -114,6 +117,7 @@ pub async fn run_agent_loop(
     emit: EventSink,
     cancel: CancellationToken,
 ) -> Vec<Message> {
+    let prompts = declare_tool_changes(context, prompts);
     emit(AgentEvent::AgentStart);
     emit(AgentEvent::TurnStart);
     for message in &prompts {
@@ -184,7 +188,7 @@ async fn run_loop(
                 emit(AgentEvent::TurnStart);
             }
             prepared.append(&mut pending);
-            for message in prepared {
+            for message in declare_tool_changes(context, prepared) {
                 emit(AgentEvent::MessageStart { message: message.clone() });
                 emit(AgentEvent::MessageEnd { message: message.clone() });
                 context.messages.push(message.clone());
@@ -298,10 +302,16 @@ async fn stream_assistant_response(
         Some(convert) => convert(&messages),
         None => default_convert_to_llm(&messages),
     };
-    let request = Context {
-        system_prompt: context.system_prompt.clone(),
-        messages,
-        tools: context.tools.iter().map(|tool| tool.declaration()).collect(),
+    // A transcript context reaches the provider as messages only: system messages carry the
+    // prompt and the tool declarations.
+    let request = if is_transcript_context(context) {
+        Context { system_prompt: None, messages, tools: Vec::new() }
+    } else {
+        Context {
+            system_prompt: context.system_prompt.clone(),
+            messages,
+            tools: context.tools.iter().map(|tool| tool.declaration()).collect(),
+        }
     };
     let api_key =
         config.get_api_key.as_ref().and_then(|get| get(&config.model.provider)).or_else(|| config.api_key.clone());

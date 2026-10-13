@@ -228,8 +228,10 @@ async fn truncated_responses_do_not_execute_tool_calls() {
         run_agent_loop(vec![Message::user("go")], &mut context, &config(stream_fn), sink, CancellationToken::new())
             .await;
     assert_eq!(tool.calls.load(Ordering::SeqCst), 0);
+    // The context declares no tools yet, so the loop announces the loadout first.
+    assert!(matches!(&added[0], Message::System(system) if system.tools_added.as_ref().unwrap()[0].name == "echo"));
     assert!(
-        matches!(&added[2], Message::ToolResult(result) if result.is_error && result.content[0].as_text().unwrap().contains("output token limit"))
+        matches!(&added[3], Message::ToolResult(result) if result.is_error && result.content[0].as_text().unwrap().contains("output token limit"))
     );
 }
 
@@ -282,7 +284,8 @@ async fn agent_steering_and_follow_up_queues() {
     assert_eq!(last_user(2), "follow");
     let state = agent.state();
     assert!(!state.is_streaming && !agent.is_running());
-    assert_eq!(state.messages.len(), 7);
+    // The tool declaration, then user, assistant, tool result, steer, assistant, follow-up, assistant.
+    assert_eq!(state.messages.len(), 8);
 }
 
 #[tokio::test]

@@ -98,9 +98,11 @@ async fn end_decision_skips_queue_polling_and_next_turn_preparation() {
     config.get_steering_messages = Some(source(steering.clone(), |_| Vec::new()));
     config.get_follow_up_messages = Some(source(follow_ups.clone(), |_| vec![Message::user("queued")]));
     let tool_results = Arc::new(Mutex::new(Vec::new()));
-    let seen = tool_results.clone();
+    let context_roles = Arc::new(Mutex::new(Vec::new()));
+    let (seen, seen_roles) = (tool_results.clone(), context_roles.clone());
     config.finish_turn = Some(Arc::new(move |turn, _| {
         seen.lock().unwrap().extend(turn.tool_results.iter().map(|result| result.tool_call_id.clone()));
+        *seen_roles.lock().unwrap() = roles(&turn.context.messages);
         async { Some(AgentTurnDecision::End) }.boxed()
     }));
     let prepare_calls = prepares.clone();
@@ -110,7 +112,10 @@ async fn end_decision_skips_queue_polling_and_next_turn_preparation() {
     }));
     let mut context = AgentContext { tools: vec![FnTool::noop()], ..Default::default() };
     let (events, sink) = recorder();
-    run_agent_loop(vec![Message::user("run")], &mut context, &config, sink, CancellationToken::new()).await;
+    let added = run_agent_loop(vec![Message::user("run")], &mut context, &config, sink, CancellationToken::new()).await;
+    // The context declares no tools, so the loop announces the loadout with a system message.
+    assert_eq!(roles(&added), ["system", "user", "assistant", "toolResult"]);
+    assert_eq!(*context_roles.lock().unwrap(), ["system", "user", "assistant", "toolResult"]);
     assert_eq!(requests.lock().unwrap().len(), 1);
     assert_eq!(steering.load(Ordering::SeqCst), 1);
     assert_eq!(follow_ups.load(Ordering::SeqCst), 0);
