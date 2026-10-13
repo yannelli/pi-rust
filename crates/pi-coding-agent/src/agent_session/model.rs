@@ -155,7 +155,6 @@ impl AgentSession {
                 runner.emit_detached(event);
             }
         }
-        self.refresh_environment();
     }
 
     /// Cycle to the next supported thinking level; `None` when the model has no reasoning.

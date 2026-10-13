@@ -34,7 +34,8 @@ pub struct PowerShellToolOptions {
     /// Expose the session's `PI_*` variables to commands. Default: true.
     pub expose_session_environment: bool,
     pub spawn_hook: Option<ShellSpawnHook>,
-    /// Supplies the session variables. Default: [`super::set_session_environment`].
+    /// Supplies the session variables. Sessions supply their own; standalone tools default to
+    /// [`super::set_session_environment`].
     pub session_environment: Option<SessionEnvironmentFn>,
 }
 

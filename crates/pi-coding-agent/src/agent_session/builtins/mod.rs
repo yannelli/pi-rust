@@ -169,7 +169,7 @@ impl AgentSession {
         }
         let added: Vec<String> =
             self.current_default_tools().into_iter().filter(|name| !previous_defaults.contains(name)).collect();
-        let builtins = super::tools::builtin_tools(self.cwd(), self.settings());
+        let builtins = self.builtin_tools();
         self.install_builtin_tools();
         {
             let mut tools = lock(&self.tools);

@@ -21,6 +21,7 @@ use crate::model_resolver::{InitialModelOptions, ModelCatalog, ScopedModel, find
 use crate::session::SessionManager;
 use crate::settings::DEFAULT_THINKING_LEVEL;
 use crate::settings::tools::{apply_tool_modifiers, is_tool_modifier, matches_any_tool, tool_list_error};
+use crate::tools::ToolsOptions;
 use crate::virtual_models::get_branch_selection;
 
 /// `--no-tools` (`All`) or `--no-builtin-tools` (`Builtin`).
@@ -53,6 +54,10 @@ pub struct CreateAgentSessionOptions {
     pub restore_tools: bool,
     /// Extensions loaded for this session ([`crate::extensions::load_extensions`]).
     pub extensions: Option<Arc<crate::extensions::ExtensionRunner>>,
+    /// Options of the built-in tools: custom backends, the bash spawn hook, and whether the
+    /// shell tools expose the session's `PI_*` variables. Unset uses
+    /// [`ToolsOptions::from_settings`]; start from it to keep the settings.
+    pub tool_options: Option<ToolsOptions>,
 }
 
 impl CreateAgentSessionOptions {
@@ -71,6 +76,7 @@ impl CreateAgentSessionOptions {
             mcp: McpSessionOptions::default(),
             restore_tools: false,
             extensions: None,
+            tool_options: None,
         }
     }
 }
@@ -207,8 +213,6 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
         auth_stream_fn(services.model_runtime.clone(), settings.clone(), options.stream_fn, request_hooks.clone());
     let resources = services.resources().resources().clone();
     let base_prompt = prompt_options(&services.cwd, &resources);
-    let builtin = builtin_tools(&services.cwd, &settings);
-    let tools = ToolState::new(builtin, options.custom_tools, selection, base_prompt);
     let mut mcp_options = options.mcp;
     if let Some(runner) = &options.extensions {
         mcp_options.registry = Some(runner.mcp_registry().clone());
@@ -216,6 +220,10 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
     let builtins = BuiltinState { mcp_options, ..BuiltinState::default() };
     let (idle, _) = watch::channel(true);
     let session = Arc::new_cyclic(|weak| {
+        let tool_options = options.tool_options;
+        let builtin = builtin_tools(&services.cwd, &settings, tool_options.as_ref(), weak.clone());
+        let mut tools = ToolState::new(builtin, options.custom_tools, selection, base_prompt);
+        tools.tool_options = tool_options;
         let warmer_host = Arc::new(SessionWarmerHost::new(weak.clone()));
         AgentSession {
             agent: agent.clone(),
@@ -253,7 +261,6 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
         }
     });
     *lock(&session.agent_listener) = Some(id);
-    session.refresh_environment();
     if let Some(runner) = options.extensions {
         session.attach_extensions(runner).await;
     }

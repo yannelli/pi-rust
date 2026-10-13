@@ -5,6 +5,8 @@ pub mod auth;
 pub mod classify;
 pub mod env;
 pub mod estimate;
+pub mod frames;
+mod frames_reduce;
 pub mod http;
 pub mod images;
 pub mod json;
@@ -27,6 +29,7 @@ pub use classify::{
     register_classifier_api,
 };
 pub use env::get_env_api_key;
+pub use frames::{AssistantMessageFrame, AssistantMessageFrameEncoder, FrameError, reduce_assistant_message_frames};
 pub use images::{
     AssistantImages, ImagesApi, ImagesContext, ImagesOptions, generate_images, images_api, register_images_api,
 };

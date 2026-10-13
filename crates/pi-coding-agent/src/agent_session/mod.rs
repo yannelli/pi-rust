@@ -31,7 +31,6 @@ mod tool_api;
 mod tools;
 mod tree;
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
@@ -281,21 +280,6 @@ impl AgentSession {
     pub fn refresh_context(&self) {
         let messages = self.session_manager().build_session_context().messages;
         self.agent.update_state(|state| state.messages = messages);
-    }
-
-    /// Publish the session, model, and reasoning level to bash commands as `PI_*` variables.
-    pub(crate) fn refresh_environment(&self) {
-        let mut variables = BTreeMap::new();
-        variables.insert("PI_SESSION_ID".to_string(), self.session_id());
-        if let Some(file) = self.session_file() {
-            variables.insert("PI_SESSION_FILE".to_string(), file.display().to_string());
-        }
-        if let Some(model) = self.model() {
-            variables.insert("PI_PROVIDER".to_string(), model.provider);
-            variables.insert("PI_MODEL".to_string(), model.id);
-        }
-        variables.insert("PI_REASONING_LEVEL".to_string(), self.thinking_level().as_str().to_string());
-        crate::tools::set_session_environment(variables);
     }
 
     /// Abort all work, detach from the agent, and drop every listener.

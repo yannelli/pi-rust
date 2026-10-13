@@ -12,6 +12,7 @@ use super::{ALL_TOOLS, DEFAULT_TOOLS, create_tool, create_tools, tool_info};
 mod bash;
 mod edit;
 mod factories;
+mod operations;
 mod read_write;
 mod search;
 mod shell;

@@ -19,6 +19,7 @@ mod find;
 mod grep;
 mod ls;
 pub mod mutation_queue;
+mod operations;
 mod output;
 pub mod path_utils;
 mod powershell;
@@ -33,9 +34,13 @@ mod tests;
 
 pub use bash::{BASH_TOOL_CONFIG, BashTool, BashToolOptions};
 pub use edit::EditTool;
-pub use find::FindTool;
+pub use find::{FindTool, relativize_find_result_path};
 pub use grep::GrepTool;
 pub use ls::LsTool;
+pub use operations::{
+    EditOperations, EditToolOptions, FindGlobOptions, FindOperations, FindToolOptions, GrepOperations, GrepToolOptions,
+    LocalFileOperations, LsOperations, LsToolOptions, ReadOperations, WriteOperations, WriteToolOptions,
+};
 pub use output::{FullOutput, OutputAccumulator, OutputSnapshot};
 pub use powershell::{LocalPowerShellOperations, POWERSHELL_TOOL_CONFIG, PowerShellTool, PowerShellToolOptions};
 pub(crate) use read::detect_supported_image_mime_type;
@@ -119,25 +124,30 @@ fn prefer_json_schema() -> Value {
     json!({ "type": "json_schema", "strict": "prefer" })
 }
 
-/// Options of the built-in tools (upstream `ToolsOptions`). The other tools have none.
+/// Options of the built-in tools (upstream `ToolsOptions`).
 #[derive(Clone, Default)]
 pub struct ToolsOptions {
     pub read: ReadToolOptions,
     pub bash: BashToolOptions,
     pub powershell: PowerShellToolOptions,
+    pub write: WriteToolOptions,
+    pub edit: EditToolOptions,
+    pub grep: GrepToolOptions,
+    pub find: FindToolOptions,
+    pub ls: LsToolOptions,
 }
 
 impl ToolsOptions {
     /// `images.autoResize`, `shellPath`, and `shellCommandPrefix` from the settings.
     pub fn from_settings(settings: &SettingsManager) -> Self {
         Self {
-            read: ReadToolOptions { auto_resize_images: settings.image_auto_resize(), resize_options: None },
+            read: ReadToolOptions { auto_resize_images: settings.image_auto_resize(), ..ReadToolOptions::default() },
             bash: BashToolOptions {
                 shell_path: settings.shell_path(),
                 command_prefix: settings.shell_command_prefix(),
                 ..BashToolOptions::default()
             },
-            powershell: PowerShellToolOptions::default(),
+            ..Self::default()
         }
     }
 }
@@ -155,37 +165,37 @@ pub fn create_powershell_tool(cwd: &Path, options: PowerShellToolOptions) -> Sha
     Arc::new(ShellTool::powershell(cwd.to_path_buf(), options))
 }
 
-pub fn create_edit_tool(cwd: &Path) -> SharedTool {
-    Arc::new(EditTool::new(cwd.to_path_buf()))
+pub fn create_edit_tool(cwd: &Path, options: EditToolOptions) -> SharedTool {
+    Arc::new(EditTool::with_options(cwd.to_path_buf(), options))
 }
 
-pub fn create_write_tool(cwd: &Path) -> SharedTool {
-    Arc::new(WriteTool::new(cwd.to_path_buf()))
+pub fn create_write_tool(cwd: &Path, options: WriteToolOptions) -> SharedTool {
+    Arc::new(WriteTool::with_options(cwd.to_path_buf(), options))
 }
 
-pub fn create_grep_tool(cwd: &Path) -> SharedTool {
-    Arc::new(GrepTool::new(cwd.to_path_buf()))
+pub fn create_grep_tool(cwd: &Path, options: GrepToolOptions) -> SharedTool {
+    Arc::new(GrepTool::with_options(cwd.to_path_buf(), options))
 }
 
-pub fn create_find_tool(cwd: &Path) -> SharedTool {
-    Arc::new(FindTool::new(cwd.to_path_buf()))
+pub fn create_find_tool(cwd: &Path, options: FindToolOptions) -> SharedTool {
+    Arc::new(FindTool::with_options(cwd.to_path_buf(), options))
 }
 
-pub fn create_ls_tool(cwd: &Path) -> SharedTool {
-    Arc::new(LsTool::new(cwd.to_path_buf()))
+pub fn create_ls_tool(cwd: &Path, options: LsToolOptions) -> SharedTool {
+    Arc::new(LsTool::with_options(cwd.to_path_buf(), options))
 }
 
 /// The built-in tool `name` (one of [`ALL_TOOLS`]), or `None` for other names.
 pub fn create_tool_with_options(name: &str, cwd: &Path, options: &ToolsOptions) -> Option<SharedTool> {
     let tool = match name {
-        "read" => create_read_tool(cwd, options.read),
+        "read" => create_read_tool(cwd, options.read.clone()),
         "bash" => create_bash_tool(cwd, options.bash.clone()),
         "powershell" if cfg!(windows) => create_powershell_tool(cwd, options.powershell.clone()),
-        "edit" => create_edit_tool(cwd),
-        "write" => create_write_tool(cwd),
-        "grep" => create_grep_tool(cwd),
-        "find" => create_find_tool(cwd),
-        "ls" => create_ls_tool(cwd),
+        "edit" => create_edit_tool(cwd, options.edit.clone()),
+        "write" => create_write_tool(cwd, options.write.clone()),
+        "grep" => create_grep_tool(cwd, options.grep.clone()),
+        "find" => create_find_tool(cwd, options.find.clone()),
+        "ls" => create_ls_tool(cwd, options.ls.clone()),
         _ => return None,
     };
     Some(tool)

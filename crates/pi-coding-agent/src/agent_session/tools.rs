@@ -2,9 +2,9 @@
 //! `_rebuildSystemPrompt`): registered tools, the active set declared to the model, the callable
 //! set other tools reach, pending tools of a restored loadout, and their prompt contributions.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use pi_agent::{
     ActivationFilter, RefreshOptions, SharedTool, ToolAnnotations, ToolExposure, ToolNamespace, ToolRegistry,
@@ -16,7 +16,9 @@ use crate::resources::LoadedResources;
 use crate::settings::SettingsManager;
 use crate::settings::tools::{apply_tool_modifiers, matches_any_tool};
 use crate::system_prompt::BuildSystemPromptOptions;
-use crate::tools::{self, ALL_TOOLS};
+use crate::tools::{self, ALL_TOOLS, SessionEnvironmentFn, ToolsOptions};
+
+use super::AgentSession;
 
 /// Where a registered tool comes from (upstream `sourceInfo`).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -87,6 +89,8 @@ pub(crate) struct ToolState {
     pub default_tool_modifiers: Vec<String>,
     /// Prompt options from the resources; the tool fields follow the registry.
     pub base_prompt: BuildSystemPromptOptions,
+    /// SDK options of the built-in tools; unset uses the settings.
+    pub tool_options: Option<ToolsOptions>,
 }
 
 /// The `--tools` and `--exclude-tools` lists and the `defaultTools` handling of a session.
@@ -121,6 +125,7 @@ impl ToolState {
             uses_default_tools: selection.uses_default_tools,
             default_tool_modifiers: selection.default_tool_modifiers,
             base_prompt,
+            tool_options: None,
         }
     }
 
@@ -277,11 +282,49 @@ impl ToolState {
     }
 }
 
-/// Built-in tools for `cwd` with `images.autoResize`, `shellPath`, and `shellCommandPrefix`.
-/// `read` fits images to the model of each call.
-pub(crate) fn builtin_tools(cwd: &Path, settings: &SettingsManager) -> Vec<SharedTool> {
-    let options = tools::ToolsOptions::from_settings(settings);
+/// Built-in tools for `cwd` with the SDK options, or `images.autoResize`, `shellPath`, and
+/// `shellCommandPrefix` from the settings. `read` fits images to the model of each call, and the
+/// shell tools read the `PI_*` variables from `session` unless the options supply them.
+pub(crate) fn builtin_tools(
+    cwd: &Path,
+    settings: &SettingsManager,
+    custom: Option<&ToolsOptions>,
+    session: Weak<AgentSession>,
+) -> Vec<SharedTool> {
+    let mut options = custom.cloned().unwrap_or_else(|| ToolsOptions::from_settings(settings));
+    let environment = session_environment_fn(session);
+    options.bash.session_environment.get_or_insert_with(|| environment.clone());
+    options.powershell.session_environment.get_or_insert(environment);
     tools::create_tools_with_options(ALL_TOOLS, cwd, &options).unwrap_or_default()
+}
+
+/// The `PI_*` variables of the session, read when each command starts (upstream reads them
+/// from the tool call's context).
+fn session_environment_fn(session: Weak<AgentSession>) -> SessionEnvironmentFn {
+    Arc::new(move || session.upgrade().map(|session| session.environment_variables()).unwrap_or_default())
+}
+
+impl AgentSession {
+    /// Session id and file, provider, model, and reasoning level as bash `PI_*` variables.
+    pub fn environment_variables(&self) -> BTreeMap<String, String> {
+        let mut variables = BTreeMap::new();
+        variables.insert("PI_SESSION_ID".to_string(), self.session_id());
+        if let Some(file) = self.session_file() {
+            variables.insert("PI_SESSION_FILE".to_string(), file.display().to_string());
+        }
+        if let Some(model) = self.model() {
+            variables.insert("PI_PROVIDER".to_string(), model.provider);
+            variables.insert("PI_MODEL".to_string(), model.id);
+        }
+        variables.insert("PI_REASONING_LEVEL".to_string(), self.thinking_level().as_str().to_string());
+        variables
+    }
+
+    /// The built-in tools with this session's tool options.
+    pub(crate) fn builtin_tools(&self) -> Vec<SharedTool> {
+        let custom = super::lock(&self.tools).tool_options.clone();
+        builtin_tools(self.cwd(), self.settings(), custom.as_ref(), self.weak.clone())
+    }
 }
 
 /// Base prompt options from the loaded resources; the registry fills in the tool fields.

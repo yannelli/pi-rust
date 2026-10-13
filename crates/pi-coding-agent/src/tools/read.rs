@@ -1,6 +1,7 @@
 //! `read` tool: text files with offset/limit and head truncation, images as attachments.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
@@ -10,6 +11,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
+use super::operations::{LocalFileOperations, ReadOperations};
 use super::path_utils::resolve_read_path;
 use super::truncate::{
     DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, TruncatedBy, TruncationOptions, format_size, truncate_head,
@@ -17,7 +19,6 @@ use super::truncate::{
 use super::{as_count, check_aborted, parse_args};
 use crate::images::{ProcessImageOptions, process_image};
 
-const IMAGE_TYPE_SNIFF_BYTES: usize = 4100;
 const NON_VISION_IMAGE_NOTE: &str =
     "[Current model does not support images. The image will be omitted from this request.]";
 const PNG_SIGNATURE: &[u8] = &[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
@@ -30,20 +31,33 @@ pub struct ReadTool {
     resize: Option<ImageResizeOptions>,
     /// Note that images are dropped, for calls without a model.
     non_vision_note: bool,
+    operations: Arc<dyn ReadOperations>,
 }
 
 /// Options of the read tool (upstream `ReadToolOptions`).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone)]
 pub struct ReadToolOptions {
     /// Resize images to the model's limits (`images.autoResize`). Default: true.
     pub auto_resize_images: bool,
     /// Resize profile when the call's model has none.
     pub resize_options: Option<ImageResizeOptions>,
+    /// Custom backend. Default: the local file system.
+    pub operations: Option<Arc<dyn ReadOperations>>,
 }
 
 impl Default for ReadToolOptions {
     fn default() -> Self {
-        Self { auto_resize_images: true, resize_options: None }
+        Self { auto_resize_images: true, resize_options: None, operations: None }
+    }
+}
+
+impl std::fmt::Debug for ReadToolOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReadToolOptions")
+            .field("auto_resize_images", &self.auto_resize_images)
+            .field("resize_options", &self.resize_options)
+            .field("custom_operations", &self.operations.is_some())
+            .finish()
     }
 }
 
@@ -72,13 +86,17 @@ impl ReadTool {
             auto_resize: options.auto_resize_images,
             resize: options.resize_options,
             non_vision_note: false,
+            operations: options.operations.unwrap_or_else(|| Arc::new(LocalFileOperations)),
         }
     }
 
     /// Images are processed with `options`, for example [`ProcessImageOptions::for_model`].
     pub fn with_image_options(cwd: PathBuf, image_options: ProcessImageOptions) -> Self {
-        let options =
-            ReadToolOptions { auto_resize_images: image_options.auto_resize, resize_options: image_options.resize };
+        let options = ReadToolOptions {
+            auto_resize_images: image_options.auto_resize,
+            resize_options: image_options.resize,
+            operations: None,
+        };
         Self::with_options(cwd, options)
     }
 
@@ -98,17 +116,21 @@ impl ReadTool {
         let args: ReadArgs = parse_args("read", args)?;
         check_aborted(&cancel)?;
         let absolute = resolve_read_path(&args.path, &self.cwd);
-        let buffer =
-            tokio::fs::read(&absolute).await.map_err(|e| anyhow!("Could not read file {}: {e}", absolute.display()))?;
+        let ops = &self.operations;
+        let unreadable = |e: anyhow::Error| anyhow!("Could not read file {}: {e}", absolute.display());
+        ops.access(&absolute).await.map_err(unreadable)?;
         check_aborted(&cancel)?;
-
-        let sniff = &buffer[..buffer.len().min(IMAGE_TYPE_SNIFF_BYTES)];
-        let Some(mime_type) = detect_supported_image_mime_type(sniff) else {
+        let mime_type = ops.detect_image_mime_type(&absolute).await.map_err(unreadable)?;
+        check_aborted(&cancel)?;
+        let buffer = ops.read_file(&absolute).await.map_err(unreadable)?;
+        check_aborted(&cancel)?;
+        let Some(mime_type) = mime_type else {
             return read_text(&String::from_utf8_lossy(&buffer), &args);
         };
         let resize = model.and_then(|model| ProcessImageOptions::for_model(model, self.auto_resize).resize);
         let options = ProcessImageOptions { auto_resize: self.auto_resize, resize: resize.or(self.resize) };
-        let processed = tokio::task::spawn_blocking(move || process_image(&buffer, mime_type, &options)).await?;
+        let image_mime = mime_type.clone();
+        let processed = tokio::task::spawn_blocking(move || process_image(&buffer, &image_mime, &options)).await?;
         check_aborted(&cancel)?;
         let non_vision = model.map_or(self.non_vision_note, |model| !supports_images(model));
         let vision_note = if non_vision { format!("\n{NON_VISION_IMAGE_NOTE}") } else { String::new() };
