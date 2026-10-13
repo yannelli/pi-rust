@@ -2,6 +2,8 @@
 //! works is queued as steering, or as a follow-up with `/follow`. `!cmd` runs a shell command
 //! for the model to see and `!!cmd` runs one it does not see.
 
+pub mod selector;
+
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
