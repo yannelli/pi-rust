@@ -242,6 +242,37 @@ async fn create_runtime_parts(
     Ok(RuntimeParts { session: created.session, model_fallback_message: created.model_fallback_message, diagnostics })
 }
 
+/// Flags the extensions of `cwd` register, for `--help`.
+pub async fn extension_help_flags(options: &AppOptions, cwd: &Path) -> Vec<crate::cli::HelpFlag> {
+    let trust = TrustCache { store: ProjectTrustStore::new(&options.agent_dir), decided: Mutex::default() };
+    let (project_trusted, _) = trust.project_trusted(options, cwd, &options.agent_dir).await;
+    let services = create_agent_session_services(CreateServicesOptions {
+        cwd: cwd.to_path_buf(),
+        agent_dir: options.agent_dir.clone(),
+        settings: options.settings.clone(),
+        project_trusted: Some(project_trusted),
+        model_runtime: None,
+        credentials: options.credentials.clone(),
+        oauth: options.oauth.clone(),
+        resources: options.resources.clone(),
+    })
+    .await;
+    let Some(runner) = extensions::load(options, &services).await.runner else { return Vec::new() };
+    let flags = runner
+        .registry()
+        .flags
+        .iter()
+        .map(|flag| crate::cli::HelpFlag {
+            name: flag.name.clone(),
+            kind: flag.kind.clone(),
+            description: flag.description.clone(),
+            extension_path: flag.extension_path.clone(),
+        })
+        .collect();
+    runner.shutdown();
+    flags
+}
+
 /// The factory that applies `options` to every session the runtime creates.
 pub fn runtime_factory(options: AppOptions) -> RuntimeFactory {
     let decided = options.project_trust_decisions.iter().cloned().collect();

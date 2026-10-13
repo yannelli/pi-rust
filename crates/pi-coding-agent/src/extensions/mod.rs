@@ -15,6 +15,7 @@ mod ops_ui;
 mod provider;
 pub mod registry;
 mod replace;
+pub mod rpc;
 pub mod runner;
 mod session;
 pub(crate) mod shell;

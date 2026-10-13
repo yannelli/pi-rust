@@ -1,6 +1,31 @@
 //! `pi --help` text, following upstream `printHelp`.
 
+/// An extension flag for the `Extension CLI Flags` section: name, `string` or `boolean`,
+/// description, and the registering extension.
+pub struct HelpFlag {
+    pub name: String,
+    pub kind: String,
+    pub description: Option<String>,
+    pub extension_path: String,
+}
+
 pub fn help_text() -> String {
+    help_text_with_flags(&[])
+}
+
+/// `--help` with the flags loaded extensions registered.
+pub fn help_text_with_flags(flags: &[HelpFlag]) -> String {
+    let mut extension_flags = String::new();
+    if !flags.is_empty() {
+        extension_flags.push_str("\nExtension CLI Flags:\n");
+        for flag in flags {
+            let value = if flag.kind == "string" { " <value>" } else { "" };
+            let usage = format!("  --{}{value}", flag.name);
+            let description =
+                flag.description.clone().unwrap_or_else(|| format!("Registered by {}", flag.extension_path));
+            extension_flags.push_str(&format!("{usage:<30}{description}\n"));
+        }
+    }
     format!(
         "pi {version} - AI coding assistant with read, bash, edit, write tools
 
@@ -56,6 +81,8 @@ Options:
   --                             End option parsing; treat remaining arguments as messages/files
   --help, -h                     Show this help
   --version, -v                  Show version number
+
+Extensions can register additional flags (e.g., --plan from plan-mode extension).{extension_flags}
 
 Examples:
   pi auth print-api-key --provider openai

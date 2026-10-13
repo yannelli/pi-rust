@@ -95,8 +95,8 @@ impl RpcServer {
                 ok(id, "clear_queue", Some(json!({"steering": steering, "followUp": follow_up})))
             }
             RpcCommand::NewSession { parent_session } => {
-                self.runtime.new_session(parent_session, None).await?;
-                ok(id, "new_session", Some(json!({"cancelled": false})))
+                let result = self.runtime.new_session(parent_session, None).await?;
+                ok(id, "new_session", Some(json!({"cancelled": result.cancelled})))
             }
             RpcCommand::GetState => ok(id, "get_state", Some(to_json(session_state(&session)))),
             RpcCommand::GetMessages => ok(id, "get_messages", Some(json!({"messages": session.messages()}))),
@@ -182,8 +182,8 @@ impl RpcServer {
                 ok(id, "export_html", Some(json!({"path": path.display().to_string()})))
             }
             RpcCommand::SwitchSession { session_path } => {
-                self.runtime.switch_session(Path::new(&session_path), None).await?;
-                ok(id, "switch_session", Some(json!({"cancelled": false})))
+                let result = self.runtime.switch_session(Path::new(&session_path), None).await?;
+                ok(id, "switch_session", Some(json!({"cancelled": result.cancelled})))
             }
             RpcCommand::Fork { entry_id } => {
                 let result = self.runtime.fork(&entry_id, ForkPosition::Before).await?;
@@ -266,6 +266,7 @@ impl RpcServer {
                 let data = json!({"disposition": disposition.as_str()});
                 output.send(&success(response_id.as_ref(), "prompt", Some(data)));
             })),
+            source: Some("rpc".into()),
             ..PromptOptions::default()
         };
         let (output, id) = (self.output.clone(), id.cloned());

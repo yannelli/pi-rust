@@ -9,7 +9,7 @@ use crate::settings::tools::tool_list_error;
 #[path = "cli_help.rs"]
 mod help;
 
-pub use help::help_text;
+pub use help::{HelpFlag, help_text, help_text_with_flags};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OutputMode {
