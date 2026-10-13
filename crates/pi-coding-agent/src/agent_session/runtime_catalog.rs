@@ -134,14 +134,7 @@ impl ModelRuntime {
             }
             true
         };
-        {
-            let mut auth = write(&self.provider_auth);
-            if enabled {
-                auth.insert(LLAMA_PROVIDER_ID.into(), Arc::new(LlamaAuth));
-            } else {
-                auth.remove(LLAMA_PROVIDER_ID);
-            }
-        }
+        self.register_provider_auth(LLAMA_PROVIDER_ID, enabled.then(|| Arc::new(LlamaAuth) as Arc<dyn ProviderAuth>));
         if changed && enabled {
             self.refresh_catalogs(false, Some(vec![LLAMA_PROVIDER_ID.into()]), false).await;
         } else {
@@ -153,6 +146,16 @@ impl ModelRuntime {
     /// The llama.cpp provider when `builtin:llama.cpp` is on.
     pub fn llama_provider(&self) -> Option<Arc<LlamaProvider>> {
         read(&self.catalogs).llama.clone()
+    }
+
+    /// Set or remove the request auth of a provider whose credentials `auth.json` and
+    /// `models.json` cannot describe. Without a login flow, `/login` explains where it is set up.
+    pub fn register_provider_auth(&self, provider: &str, auth: Option<Arc<dyn ProviderAuth>>) {
+        let mut registered = write(&self.provider_auth);
+        match auth {
+            Some(auth) => drop(registered.insert(provider.to_string(), auth)),
+            None => drop(registered.remove(provider)),
+        }
     }
 
     pub(super) fn provider_auth(&self, provider: &str) -> Option<Arc<dyn ProviderAuth>> {

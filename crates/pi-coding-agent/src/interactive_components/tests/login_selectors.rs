@@ -19,6 +19,7 @@ fn provider(id: &str, name: &str, auth_type: AuthType, status: Option<(AuthType,
         method_name: None,
         status: status.map(|(auth_type, source)| AuthCheck { auth_type, source: source.into() }),
         subscription: None,
+        ambient: false,
     }
 }
 

@@ -23,6 +23,9 @@ pub struct LoginProvider {
     pub subscription: bool,
     /// How the provider is configured now, if it is.
     pub status: Option<AuthCheck>,
+    /// An API key method without an interactive login: its credentials come from outside
+    /// (upstream `ApiKeyAuth` without `login`).
+    pub ambient: bool,
 }
 
 impl LoginProvider {
@@ -61,6 +64,11 @@ impl ModelRuntime {
                 ids.push((*id).to_string());
             }
         }
+        for id in super::model_runtime::read(&self.provider_auth).keys() {
+            if !ids.contains(id) {
+                ids.push(id.clone());
+            }
+        }
         ids
     }
 
@@ -76,7 +84,8 @@ impl ModelRuntime {
         for id in self.login_provider_ids() {
             let oauth = self.resolver().oauth(&id);
             let api_key = self.supports_api_key_login(&id);
-            if oauth.is_none() && !api_key {
+            let ambient = !api_key && id != crate::llama::LLAMA_PROVIDER_ID && self.provider_auth(&id).is_some();
+            if oauth.is_none() && !api_key && !ambient {
                 continue;
             }
             let status = self.resolver().check(&id).await.ok().flatten();
@@ -90,11 +99,13 @@ impl ModelRuntime {
                     login_label: oauth.login_label().map(str::to_string),
                     subscription,
                     status: status.clone(),
+                    ambient: false,
                 });
             }
-            if api_key && auth_type != Some(AuthType::OAuth) {
+            if (api_key || ambient) && auth_type != Some(AuthType::OAuth) {
                 let auth_type = AuthType::ApiKey;
-                options.push(LoginProvider { id, name, auth_type, login_label: None, subscription, status });
+                let login_label = None;
+                options.push(LoginProvider { id, name, auth_type, login_label, subscription, status, ambient });
             }
         }
         options.sort_by_key(|option| option.name.to_lowercase());
@@ -129,6 +140,7 @@ impl ModelRuntime {
                     auth_type: info.auth_type,
                     login_label: None,
                     subscription,
+                    ambient: false,
                 }
             })
             .collect();
