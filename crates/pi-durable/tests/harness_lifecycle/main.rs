@@ -1,9 +1,10 @@
 //! Port of upstream `test/harness-lifecycle.test.ts`. This file holds the helpers and the open and close cases;
-//! `sealed.rs` holds the cases of operations after close begins, paused scheduling, and registry changes.
+//! `sealed.rs` holds operations after close begins, and `paused.rs` paused scheduling and registry changes.
 
 #[path = "../support/mod.rs"]
 mod support;
 
+mod paused;
 mod sealed;
 
 use std::future::Future;
