@@ -344,6 +344,17 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
     Ok(object)
 }
 
+/// Stop a child that ran past its deadline: with `signal` on Unix, by termination elsewhere.
+#[cfg(unix)]
+fn terminate(child: &mut std::process::Child, signal: &str) {
+    let _ = super::core::kill(i64::from(child.id()), signal);
+}
+
+#[cfg(not(unix))]
+fn terminate(child: &mut std::process::Child, _signal: &str) {
+    let _ = child.kill();
+}
+
 fn spawn_sync<'js>(
     ctx: Ctx<'js>,
     options: Value<'js>,
@@ -392,10 +403,7 @@ fn spawn_sync<'js>(
             Ok(Some(status)) => break Ok(status),
             Ok(None) if deadline.is_some_and(|deadline| Instant::now() >= deadline) && !timed_out => {
                 timed_out = true;
-                #[cfg(unix)]
-                let _ = super::core::kill(i64::from(child.id()), kill_signal.0.as_deref().unwrap_or("SIGTERM"));
-                #[cfg(not(unix))]
-                let _ = child.kill();
+                terminate(&mut child, kill_signal.0.as_deref().unwrap_or("SIGTERM"));
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(2)),
             Err(error) => break Err(error),

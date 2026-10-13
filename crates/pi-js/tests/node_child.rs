@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 mod common;
 
 use common::*;
@@ -54,7 +56,6 @@ return out;
 
 const CHILD_EXPECTED: &str = r##"{"spawn":["out\n","err\n",[3,null],["spawn",["exit",3,null]],"number",3],"stdin":"hello world","exec":[null,"bar\n",""],"execFail":[2,false,null,"echo bad >&2; exit 2","Command failed: echo bad >&2; exit 2\nbad\n","","bad\n"],"promisified":"a b","promisifiedFail":[4,"",""],"execFile":"x y\n","spawnSync":["in","x\n",5,null,3],"execSync":"hi\n","execSyncFail":[7,"Command failed: exit 7"],"execFileSync":"env-only","cwd":"sub","missing":["ENOENT","spawn definitely-not-a-command-xyz","definitely-not-a-command-xyz","spawn definitely-not-a-command-xyz ENOENT"],"missingSync":["ENOENT",null],"kill":[null,"SIGTERM",true],"timeout":[true,"SIGTERM",null],"timeoutSync":["ETIMEDOUT","SIGTERM"],"inherit":[null,0]}"##;
 
-#[cfg(unix)]
 #[tokio::test]
 async fn child_process_matches_node() {
     let (_dir, root) = tempdir();
