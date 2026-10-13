@@ -165,6 +165,22 @@ fn enter_selects_the_first_prefix_match() {
 }
 
 #[test]
+fn enter_ignores_a_list_built_before_more_typing() {
+    let editor = editor();
+    editor.set_autocomplete_provider(argument_provider("argtest", &["two", "three"], true));
+    type_text(&editor, "/argtest t");
+    flush();
+    assert!(editor.is_showing_autocomplete());
+    let submitted = Rc::new(std::cell::RefCell::new(String::new()));
+    let sink = submitted.clone();
+    editor.on_submit(move |text| *sink.borrow_mut() = text.to_string());
+    type_text(&editor, "x");
+    editor.handle_input("\r");
+    assert_eq!(*submitted.borrow(), "/argtest tx");
+    assert!(!editor.is_showing_autocomplete());
+}
+
+#[test]
 fn highlights_a_unique_prefix_match() {
     let provider = argument_provider("argtest", &["one", "two", "three"], false);
     assert_eq!(enter_after(provider, "/argtest tw"), "/argtest two");
