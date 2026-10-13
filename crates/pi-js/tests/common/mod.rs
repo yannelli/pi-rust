@@ -72,3 +72,19 @@ pub async fn eval_json(runtime: &JsRuntime, body: &str) -> serde_json::Value {
 pub fn json(value: HostValue) -> serde_json::Value {
     value.into_json()
 }
+
+/// Run an async function body as a CommonJS module in `root` (so `require` works) and return
+/// its JSON result.
+pub async fn run_cjs(runtime: &JsRuntime, root: &Path, body: &str) -> serde_json::Value {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let name = format!("case-{}.cjs", NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst));
+    write(root, &name, &format!("module.exports = async function () {{\n{body}\n}};\n"));
+    let function = match runtime.import_default(root.join(&name).display().to_string()).await {
+        Ok(function) => function,
+        Err(error) => panic!("module failed: {}", error.display_with_stack()),
+    };
+    match function.call(vec![]).await {
+        Ok(value) => value.into_json(),
+        Err(error) => panic!("script failed: {}", error.display_with_stack()),
+    }
+}

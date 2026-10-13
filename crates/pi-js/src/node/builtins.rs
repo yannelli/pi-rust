@@ -27,6 +27,17 @@ const SOURCES: &[(&str, &str)] = &[
     ("console", include_str!("../js/console.js")),
     ("module", include_str!("../js/module.js")),
     ("perf_hooks", include_str!("../js/perf_hooks.js")),
+    ("buffer", include_str!("../js/buffer.js")),
+    ("string_decoder", include_str!("../js/string_decoder.js")),
+    ("querystring", include_str!("../js/querystring.js")),
+    ("url", include_str!("../js/url.js")),
+    ("internal/web", include_str!("../js/web.js")),
+    ("internal/streams_common", include_str!("../js/streams_common.js")),
+    ("internal/streams_readable", include_str!("../js/streams_readable.js")),
+    ("internal/streams_writable", include_str!("../js/streams_writable.js")),
+    ("internal/streams_pipe", include_str!("../js/streams_pipe.js")),
+    ("stream", include_str!("../js/stream.js")),
+    ("stream/promises", "module.exports = require('stream').promises;"),
 ];
 
 /// Every module name `require` accepts, for `module.builtinModules`.

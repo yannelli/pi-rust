@@ -166,6 +166,7 @@ function outputStream(name, fd) {
   });
   stream.fd = fd;
   stream._type = "pipe";
+  stream._isStdio = true;
   Object.defineProperty(stream, "isTTY", { get: () => native.io.isTTY(name) });
   Object.defineProperty(stream, "columns", { get: () => (native.io.size() || [80, 24])[0] });
   Object.defineProperty(stream, "rows", { get: () => (native.io.size() || [80, 24])[1] });
