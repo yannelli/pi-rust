@@ -20,12 +20,20 @@ impl AgentSession {
         if let AgentEvent::MessageStart { message: Message::User(user) } = event {
             self.dequeue_user_text(&user.content);
         }
+        // Detected before the message is persisted, as the scan must not contain it yet.
+        let cache_miss = match event {
+            AgentEvent::MessageEnd { message: Message::Assistant(assistant) } => self.cache_miss_notice(assistant),
+            _ => None,
+        };
         match event {
             AgentEvent::AgentEnd { messages } => {
                 let will_retry = self.will_retry_after_agent_end(messages);
                 self.emit(&AgentSessionEvent::AgentEnd { messages, will_retry });
             }
             other => self.emit(&AgentSessionEvent::Agent(other)),
+        }
+        if let Some((miss, notice)) = cache_miss {
+            self.emit(&AgentSessionEvent::CacheMiss { miss, notice });
         }
         match event {
             AgentEvent::MessageEnd { message } => self.persist_message_end(message),

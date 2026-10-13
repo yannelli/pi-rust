@@ -7,8 +7,8 @@ use std::sync::{Arc, Weak};
 use futures::FutureExt;
 use pi_agent::transcript::hide_tool_declarations;
 use pi_agent::{
-    AfterToolCallFn, AfterToolCallResult, AgentContext, AgentHooks, AgentLoopTurnUpdate, AgentRequestUpdate,
-    BeforeToolCallFn, CallableToolsFn, ConvertToLlmFn, PrepareNextTurnFn, PrepareRequestFn, TransformContextFn,
+    AfterToolCallFn, AfterToolCallResult, AgentContext, AgentHooks, AgentLoopTurnUpdate, BeforeToolCallFn,
+    CallableToolsFn, ConvertToLlmFn, PrepareNextTurnFn, PrepareRequestFn, TransformContextFn,
 };
 use pi_ai::Message;
 
@@ -17,7 +17,7 @@ use crate::images::{ProcessImageOptions, block_images, normalize_tool_result_ima
 
 impl AgentSession {
     /// The request context: the session projection with the active tools.
-    fn projected_context(&self) -> AgentContext {
+    pub(crate) fn projected_context(&self) -> AgentContext {
         let messages = self.session_manager().build_session_context().messages;
         let tools = self.with_state(|state| state.tools.clone());
         AgentContext { system_prompt: None, messages, tools }
@@ -43,7 +43,7 @@ impl AgentSession {
     /// Resize oversized images in tool results per `images.autoResize`.
     fn normalize_tool_images(&self, content: &[pi_ai::ContentBlock]) -> Option<Vec<pi_ai::ContentBlock>> {
         let auto_resize = self.settings().image_auto_resize();
-        let options = match self.model() {
+        let options = match self.limits_model() {
             Some(model) => ProcessImageOptions::for_model(&model, auto_resize),
             None => ProcessImageOptions { auto_resize, ..ProcessImageOptions::default() },
         };
@@ -52,11 +52,11 @@ impl AgentSession {
 }
 
 fn prepare_request_hook(weak: Weak<AgentSession>) -> PrepareRequestFn {
-    Arc::new(move |_request, _cancel| {
+    Arc::new(move |_request, cancel| {
         let weak = weak.clone();
         async move {
             let session = weak.upgrade()?;
-            Some(AgentRequestUpdate { context: Some(session.projected_context()), ..AgentRequestUpdate::default() })
+            Some(session.prepare_request_update(cancel).await)
         }
         .boxed()
     })
@@ -128,7 +128,7 @@ impl AgentSession {
             if settings.block_images() { block_images(converted) } else { converted }
         });
         self.agent.set_hooks(AgentHooks {
-            stream_fn: Some(self.stream_fn().clone()),
+            stream_fn: Some(AgentSession::loop_stream_fn(weak.clone())),
             convert_to_llm: Some(convert),
             prepare_request: Some(prepare_request_hook(weak.clone())),
             prepare_next_turn: Some(prepare_next_turn_hook(weak.clone())),

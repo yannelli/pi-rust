@@ -131,3 +131,18 @@ fn config_values_read_environment_and_commands() {
     assert_eq!(resolve_config_value("!printf secret").as_deref(), Some("secret"));
     assert_eq!(resolve_config_value("$PI_RUST_SURELY_UNSET_VARIABLE"), None);
 }
+
+#[test]
+fn upsert_keeps_chat_models_and_classifiers_with_one_id_apart() {
+    let mut registry = ModelRegistry::builtin();
+    let chat = registry.models()[0].clone();
+    let before = registry.all_models().len();
+    let classifier = Model { model_type: Some("classifier".into()), ..chat.clone() };
+    registry.upsert(classifier.clone());
+    registry.upsert(Model { max_tokens: 7, ..chat.clone() });
+    let same: Vec<&Model> =
+        registry.all_models().iter().filter(|model| model.provider == chat.provider && model.id == chat.id).collect();
+    assert_eq!((same.len(), registry.all_models().len()), (2, before + 1), "{same:#?}");
+    assert!(same.iter().any(|model| model.model_type == chat.model_type && model.max_tokens == 7));
+    assert!(same.iter().any(|model| models_are_equal(model, &classifier)));
+}

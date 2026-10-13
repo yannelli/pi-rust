@@ -8,7 +8,7 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use regex::Regex;
-use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -112,19 +112,6 @@ pub fn split_incomplete_ansi_suffix(text: &str) -> (&str, &str) {
     (text, "")
 }
 
-fn shell_program(shell_path: Option<&Path>) -> anyhow::Result<PathBuf> {
-    if let Some(path) = shell_path {
-        anyhow::ensure!(path.exists(), "Custom shell path not found: {}", path.display());
-        return Ok(path.to_path_buf());
-    }
-    if Path::new("/bin/bash").exists() {
-        return Ok(PathBuf::from("/bin/bash"));
-    }
-    let on_path = std::env::var_os("PATH")
-        .and_then(|paths| std::env::split_paths(&paths).map(|dir| dir.join("bash")).find(|path| path.is_file()));
-    Ok(on_path.unwrap_or_else(|| PathBuf::from("sh")))
-}
-
 fn spawn_reader(mut stream: impl AsyncRead + Unpin + Send + 'static, sender: mpsc::UnboundedSender<Vec<u8>>) {
     tokio::spawn(async move {
         let mut buffer = vec![0u8; 8192];
@@ -199,22 +186,33 @@ pub async fn execute_bash_command(
     cancel: &CancellationToken,
     on_chunk: &mut (dyn FnMut(&str) + Send),
 ) -> anyhow::Result<BashResult> {
-    let mut process = tokio::process::Command::new(shell_program(shell_path)?);
+    let config = crate::tools::bash_shell_config(shell_path)?;
+    let from_stdin = config.transport == crate::tools::CommandTransport::Stdin;
+    let mut process = tokio::process::Command::new(&config.shell);
     for name in SESSION_VARIABLES {
         process.env_remove(name);
     }
+    process.args(&config.args);
+    if !from_stdin {
+        process.arg(command);
+    }
     process
-        .arg("-c")
-        .arg(command)
         .current_dir(cwd)
         .envs(pi_ai::env::child_process_env())
-        .stdin(Stdio::null())
+        .stdin(if from_stdin { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     #[cfg(unix)]
     process.process_group(0);
     let mut child = process.spawn().map_err(|error| anyhow::anyhow!("Failed to start shell: {error}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let script = command.as_bytes().to_vec();
+        tokio::spawn(async move {
+            let _ = stdin.write_all(&script).await;
+            let _ = stdin.shutdown().await;
+        });
+    }
     let (sender, mut receiver) = mpsc::unbounded_channel();
     if let Some(stdout) = child.stdout.take() {
         spawn_reader(stdout, sender.clone());

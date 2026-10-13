@@ -11,14 +11,17 @@ use tokio::sync::watch;
 
 use super::auth::auth_stream_fn;
 use super::builtins::{BuiltinState, McpSessionOptions};
+use super::cache::SessionWarmerHost;
 use super::services::AgentSessionServices;
 use super::tools::{ActiveSelection, ToolSelection, ToolState, builtin_tools, default_tool_names, prompt_options};
 use super::{AgentSession, RunState, lock};
 use crate::app::format_no_models_available_message;
+use crate::cache_warmer::CacheWarmer;
 use crate::model_resolver::{InitialModelOptions, ModelCatalog, ScopedModel, find_initial_model};
 use crate::session::SessionManager;
 use crate::settings::DEFAULT_THINKING_LEVEL;
 use crate::settings::tools::{apply_tool_modifiers, is_tool_modifier, matches_any_tool, tool_list_error};
+use crate::virtual_models::get_branch_selection;
 
 /// `--no-tools` (`All`) or `--no-builtin-tools` (`Builtin`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -108,7 +111,10 @@ fn choose_model(options: &CreateAgentSessionOptions, has_existing: bool) -> (Opt
     let settings = &options.services.settings;
     let mut model = options.model.clone();
     let mut fallback = None;
-    let restored = options.session_manager.build_session_context().model;
+    // Assistant messages name the physical model that answered; a virtual selection is only in
+    // `model_change` entries.
+    let get_model = |provider: &str, id: &str| runtime.find_model(provider, id);
+    let restored = get_branch_selection(&options.session_manager.get_branch(None), &get_model);
     if model.is_none()
         && has_existing
         && let Some((provider, id)) = restored
@@ -200,23 +206,28 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
     let tools = ToolState::new(builtin, options.custom_tools, selection, base_prompt);
     let builtins = BuiltinState { mcp_options: options.mcp, ..BuiltinState::default() };
     let (idle, _) = watch::channel(true);
-    let session = Arc::new_cyclic(|weak| AgentSession {
-        agent: agent.clone(),
-        services: services.clone(),
-        session: Mutex::new(session_manager),
-        listeners: Mutex::new(Vec::new()),
-        next_listener: AtomicU64::new(1),
-        state: Mutex::new(RunState::default()),
-        idle,
-        tools: Mutex::new(tools),
-        builtins: Mutex::new(builtins),
-        stream_fn,
-        has_custom_stream,
-        model_selected: AtomicBool::new(model.is_some()),
-        scoped_models: Mutex::new(options.scoped_models),
-        agent_listener: Mutex::new(None),
-        disposed: AtomicBool::new(false),
-        weak: weak.clone(),
+    let session = Arc::new_cyclic(|weak| {
+        let warmer_host = Arc::new(SessionWarmerHost::new(weak.clone()));
+        AgentSession {
+            agent: agent.clone(),
+            services: services.clone(),
+            session: Mutex::new(session_manager),
+            listeners: Mutex::new(Vec::new()),
+            next_listener: AtomicU64::new(1),
+            state: Mutex::new(RunState::default()),
+            idle,
+            tools: Mutex::new(tools),
+            builtins: Mutex::new(builtins),
+            stream_fn,
+            has_custom_stream,
+            model_selected: AtomicBool::new(model.is_some()),
+            scoped_models: Mutex::new(options.scoped_models),
+            agent_listener: Mutex::new(None),
+            disposed: AtomicBool::new(false),
+            cache_warmer: CacheWarmer::new(warmer_host.clone()),
+            warmer_host,
+            weak: weak.clone(),
+        }
     });
     session.install_builtin_tools();
     session.refresh_tools(ActiveSelection { names: Some(active), include_all_registered: true });

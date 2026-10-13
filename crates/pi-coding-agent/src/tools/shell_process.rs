@@ -18,7 +18,7 @@ const MAX_TIMEOUT_MS: f64 = 2_147_483_647.0;
 /// How long to keep reading after the shell exits while descendants still hold the pipes.
 const POST_EXIT_IDLE: Duration = Duration::from_millis(250);
 /// Arguments the PowerShell tool runs commands with.
-pub const POWERSHELL_ARGS: [&str; 5] = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"];
+pub const POWERSHELL_ARGS: [&str; 5] = crate::platform::shell::POWERSHELL_ARGS;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -112,74 +112,32 @@ pub(crate) fn resolve_timeout(timeout: Option<f64>) -> anyhow::Result<Option<Dur
     Ok(Some(Duration::from_secs_f64(secs)))
 }
 
-fn is_legacy_wsl_bash_path(path: &Path) -> bool {
-    let normalized = path.to_string_lossy().replace('/', "\\").to_lowercase();
-    let bytes = normalized.as_bytes();
-    bytes.len() > 3
-        && bytes[0].is_ascii_lowercase()
-        && normalized[1..].starts_with(":\\windows\\")
-        && matches!(&normalized[11..], "system32\\bash.exe" | "sysnative\\bash.exe")
-}
-
-fn bash_config_for(shell: PathBuf) -> ShellConfig {
-    if is_legacy_wsl_bash_path(&shell) {
-        return ShellConfig { shell, args: vec!["-s".into()], transport: CommandTransport::Stdin };
+impl From<crate::platform::shell::ShellConfig> for ShellConfig {
+    fn from(config: crate::platform::shell::ShellConfig) -> Self {
+        let transport = match config.command_transport {
+            crate::platform::shell::CommandTransport::Argv => CommandTransport::Argv,
+            crate::platform::shell::CommandTransport::Stdin => CommandTransport::Stdin,
+        };
+        Self { shell: PathBuf::from(config.shell), args: config.args, transport }
     }
-    ShellConfig { shell, args: vec!["-c".into()], transport: CommandTransport::Argv }
 }
 
+#[cfg(test)]
 pub(crate) fn find_executable_on_path(executable: &str) -> Option<PathBuf> {
     let paths = std::env::var_os("PATH")?;
     std::env::split_paths(&paths).map(|dir| dir.join(executable)).find(|candidate| candidate.is_file())
 }
 
-/// Bash for the bash tool: `custom` when given, then Git Bash and `bash.exe` on PATH on
-/// Windows, or `/bin/bash`, `bash` on PATH, and `sh` elsewhere.
+/// Bash for the bash tool and `!` commands ([`crate::platform::shell::resolve_shell_config`]):
+/// `custom` when given, then Git Bash and `bash.exe` on PATH on Windows, or `/bin/bash`, `bash`
+/// on PATH, and `sh` elsewhere.
 pub fn bash_shell_config(custom: Option<&Path>) -> anyhow::Result<ShellConfig> {
-    if let Some(path) = custom {
-        if path.exists() {
-            return Ok(bash_config_for(path.to_path_buf()));
-        }
-        bail!("Custom shell path not found: {}", path.display());
-    }
-    if cfg!(windows) {
-        let candidates: Vec<PathBuf> = ["ProgramFiles", "ProgramFiles(x86)"]
-            .iter()
-            .filter_map(std::env::var_os)
-            .map(|dir| PathBuf::from(dir).join("Git").join("bin").join("bash.exe"))
-            .collect();
-        if let Some(found) = candidates.iter().find(|path| path.exists()) {
-            return Ok(bash_config_for(found.clone()));
-        }
-        if let Some(found) = find_executable_on_path("bash.exe") {
-            return Ok(bash_config_for(found));
-        }
-        let searched: Vec<String> = candidates.iter().map(|path| format!("  {}", path.display())).collect();
-        bail!(
-            "No bash shell found. Options:\n  1. Install Git for Windows: https://git-scm.com/download/win\n  2. Add your bash to PATH (Cygwin, MSYS2, etc.)\n  3. Set shellPath in settings.json\n\nSearched Git Bash in:\n{}",
-            searched.join("\n")
-        );
-    }
-    Ok(bash_config_for(default_unix_shell()))
-}
-
-fn default_unix_shell() -> PathBuf {
-    if Path::new("/bin/bash").exists() {
-        return PathBuf::from("/bin/bash");
-    }
-    find_executable_on_path("bash").unwrap_or_else(|| PathBuf::from("sh"))
+    crate::platform::shell::shell_config(custom).map(ShellConfig::from).map_err(anyhow::Error::msg)
 }
 
 /// PowerShell on Windows, preferring PowerShell 7 (`pwsh.exe`).
 pub fn powershell_shell_config() -> anyhow::Result<ShellConfig> {
-    if !cfg!(windows) {
-        bail!("The powershell tool is only available on Windows.");
-    }
-    let Some(shell) = find_executable_on_path("pwsh.exe").or_else(|| find_executable_on_path("powershell.exe")) else {
-        bail!("No PowerShell executable found. Install PowerShell or add powershell.exe/pwsh.exe to PATH.");
-    };
-    let args = POWERSHELL_ARGS.iter().map(|arg| arg.to_string()).collect();
-    Ok(ShellConfig { shell, args, transport: CommandTransport::Argv })
+    crate::platform::shell::powershell_config().map(ShellConfig::from).map_err(anyhow::Error::msg)
 }
 
 /// This process's environment with the child-process overlay (upstream `getShellEnv`).
@@ -223,7 +181,8 @@ fn kill_tree_command(pid: u32) -> tokio::process::Command {
 /// Uses the shell's `kill` builtin because a standalone `kill` binary is not always installed.
 #[cfg(not(windows))]
 fn kill_tree_command(pid: u32) -> tokio::process::Command {
-    let mut command = tokio::process::Command::new(default_unix_shell());
+    let shell = bash_shell_config(None).map(|config| config.shell).unwrap_or_else(|_| PathBuf::from("sh"));
+    let mut command = tokio::process::Command::new(shell);
     command.args(["-c", &format!("kill -KILL -- -{pid}")]);
     command
 }
@@ -343,13 +302,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn legacy_wsl_bash_reads_the_command_from_stdin() {
-        for path in ["C:\\Windows\\System32\\bash.exe", "c:/windows/sysnative/bash.exe"] {
-            let config = bash_config_for(PathBuf::from(path));
-            assert_eq!((config.args, config.transport), (vec!["-s".to_string()], CommandTransport::Stdin));
-        }
-        let git = bash_config_for(PathBuf::from("C:\\Program Files\\Git\\bin\\bash.exe"));
-        assert_eq!((git.args, git.transport), (vec!["-c".to_string()], CommandTransport::Argv));
+    fn converts_platform_shell_configs() {
+        use crate::platform::shell::{CommandTransport as Transport, ShellConfig as Platform};
+        let wsl = Platform { shell: "bash.exe".into(), args: vec!["-s".into()], command_transport: Transport::Stdin };
+        let config = ShellConfig::from(wsl);
+        assert_eq!((config.shell, config.transport), (PathBuf::from("bash.exe"), CommandTransport::Stdin));
     }
 
     #[test]

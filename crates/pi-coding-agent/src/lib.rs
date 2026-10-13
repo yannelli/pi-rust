@@ -3,6 +3,8 @@
 pub mod agent_session;
 pub mod app;
 pub mod auth_cli;
+pub mod cache_stats;
+pub mod cache_warmer;
 pub mod catalog;
 pub mod cli;
 pub mod clipboard;
@@ -31,7 +33,9 @@ pub mod resources;
 pub mod rpc;
 pub mod session;
 pub mod settings;
+pub mod startup;
 pub mod system_prompt;
 pub mod theme;
 pub mod tools;
 pub mod update;
+pub mod virtual_models;
