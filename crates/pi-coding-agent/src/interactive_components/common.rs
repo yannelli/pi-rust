@@ -67,3 +67,35 @@ pub fn fuzzy_filter_by<T: Clone>(items: &[T], query: &str, get_text: impl Fn(&T)
 pub fn locale_compare(a: &str, b: &str) -> std::cmp::Ordering {
     a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| b.cmp(a))
 }
+
+/// Upstream `frame` of the `/llama` and `/mcp` views: accent borders, a bold title, the body,
+/// and a dim footer line.
+pub fn frame(title: &str, body: Vec<pi_tui::ComponentRef>, footer: Option<&str>) -> pi_tui::Container {
+    let accent_border = || component(DynamicBorder::with_color(|text| theme().fg(ThemeColor::Accent, text)));
+    let mut container = pi_tui::Container::new();
+    container.add_child(accent_border());
+    container.add_child(self::text(&fg(ThemeColor::Accent, &bold(title)), 1, 0));
+    for child in body {
+        container.add_child(child);
+    }
+    if let Some(footer) = footer.filter(|footer| !footer.is_empty()) {
+        container.add_child(spacer(1));
+        container.add_child(self::text(&fg(ThemeColor::Dim, footer), 1, 0));
+    }
+    container.add_child(accent_border());
+    container
+}
+
+/// Cuts lines wider than `width`, as the `/llama` and `/mcp` views do before returning them.
+pub fn clamp_lines(lines: Vec<String>, width: usize) -> Vec<String> {
+    lines
+        .into_iter()
+        .map(|line| {
+            if pi_tui::utils::visible_width(&line) > width {
+                pi_tui::utils::truncate_to_width_with(&line, width, "", false)
+            } else {
+                line
+            }
+        })
+        .collect()
+}

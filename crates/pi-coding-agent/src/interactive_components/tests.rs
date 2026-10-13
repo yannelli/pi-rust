@@ -6,6 +6,7 @@ mod easter_eggs;
 mod extension_dialogs;
 mod first_time_setup;
 mod llama_login;
+mod llama_view;
 mod login_dialog;
 mod login_selectors;
 mod model_selector;

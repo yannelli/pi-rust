@@ -10,8 +10,8 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use super::LoginDialog;
-use super::llama_cpp::{LLAMA_CPP_PROVIDER_ID, llama_cpp_login};
 use crate::agent_session::ModelRuntime;
+use crate::llama::{ENV_LLAMA_BASE_URL, LLAMA_PROVIDER_ID, login_llama};
 
 /// Upstream `RADIUS_LOGIN_INTRO`, shown under Radius select prompts.
 pub const RADIUS_LOGIN_INTRO: &str = "Radius is a service crafted for Pi by the builders of Pi, Earendil Works";
@@ -124,9 +124,10 @@ pub async fn run_dialog_login(
 ) -> AuthResult<Credential> {
     let interaction = dialog_interaction(dialog);
     let cancel = dialog.borrow().cancel_token();
-    if provider_id == LLAMA_CPP_PROVIDER_ID && auth_type == AuthType::ApiKey {
+    if provider_id == LLAMA_PROVIDER_ID && auth_type == AuthType::ApiKey {
+        let env_url = std::env::var(ENV_LLAMA_BASE_URL).ok();
         let credential = tokio::select! {
-            result = llama_cpp_login(&interaction, cancel.clone()) => result?,
+            result = login_llama(&interaction, env_url.as_deref(), None, &cancel) => result?,
             () = cancel.cancelled() => return Err(AuthError::Cancelled),
         };
         let credential = Credential::ApiKey(credential);
