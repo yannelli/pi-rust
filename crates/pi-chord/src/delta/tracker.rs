@@ -5,7 +5,7 @@
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
-use super::diff::diff_draft;
+use super::diff::diff_draft_ordered;
 use super::{Op, apply_immutable};
 use crate::error::{ChordError, ChordResult};
 use crate::json::Json;
@@ -60,7 +60,8 @@ pub struct Change {
     owner: u64,
     status: Status,
     base_revision: u64,
-    base: Json,
+    /// Both are dropped once the change settles or goes stale, so held changes keep nothing alive.
+    base: Option<Json>,
     draft: Option<Json>,
     settled: bool,
     prepared_status: Option<Status>,
@@ -71,9 +72,16 @@ impl Change {
     pub fn state(&mut self) -> ChordResult<&mut Json> {
         match self.status.load(Ordering::SeqCst) {
             OPEN => self.draft.as_mut().ok_or_else(settled_error),
-            PREPARED => Err(ChordError::type_error("Prepared overlays are read-only")),
-            _ => Err(settled_error()),
+            _ => {
+                self.release();
+                Err(settled_error())
+            }
         }
+    }
+
+    fn release(&mut self) {
+        self.draft = None;
+        self.base = None;
     }
 
     /// Read the draft without changing it.
@@ -92,15 +100,19 @@ impl Change {
         match self.status.load(Ordering::SeqCst) {
             OPEN => {}
             PREPARED => return Err(ChordError::type_error("Prepared overlays are read-only")),
-            _ => return Err(settled_error()),
+            _ => {
+                self.release();
+                return Err(settled_error());
+            }
         }
         self.settled = true;
-        let draft = self.draft.take().ok_or_else(settled_error)?;
-        let ops = diff_draft(&self.base, &draft);
+        let (Some(draft), Some(base)) = (self.draft.take(), self.base.take()) else { return Err(settled_error()) };
+        let ops = diff_draft_ordered(&base, &draft);
+        drop(draft);
         let value = if ops.is_empty() {
-            self.base.clone()
+            base.clone()
         } else {
-            match apply_immutable(Some(&self.base), &ops) {
+            match apply_immutable(Some(&base), &ops) {
                 Ok(value) => value,
                 Err(error) => {
                     self.status.store(ABORTED, Ordering::SeqCst);
@@ -114,7 +126,7 @@ impl Change {
             owner: self.owner,
             status: self.status.clone(),
             base_revision: self.base_revision,
-            base: self.base.clone(),
+            base,
             value,
             ops,
         })
@@ -129,7 +141,7 @@ impl Change {
             return;
         }
         self.settled = true;
-        self.draft = None;
+        self.release();
         let _ = self.status.compare_exchange(OPEN, ABORTED, Ordering::SeqCst, Ordering::SeqCst);
     }
 }
@@ -172,7 +184,7 @@ impl Tracker {
             owner: self.owner,
             status,
             base_revision: self.revision,
-            base: self.value.clone(),
+            base: Some(self.value.clone()),
             draft: Some(self.value.clone()),
             settled: false,
             prepared_status: None,

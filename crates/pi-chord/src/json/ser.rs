@@ -28,10 +28,22 @@ impl From<SerError> for ChordError {
     }
 }
 
+/// How an absent `Option` (the analog of JavaScript `undefined`) is written.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NoneMode {
+    Null,
+    Omit,
+    Reject,
+}
+
 /// Builds a value. `None` marks an absent `Option` so object properties can omit it.
 #[derive(Clone, Copy)]
 pub(crate) struct JsonSerializer {
-    pub omit_none: bool,
+    pub none: NoneMode,
+}
+
+fn undefined() -> SerError {
+    SerError("Value contains a non-JSON undefined; expected strict JSON".into())
 }
 
 type Out = Result<Option<Json>, SerError>;
@@ -184,7 +196,11 @@ impl ser::Serializer for JsonSerializer {
 
 impl SeqBuilder {
     fn push<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<(), SerError> {
-        self.items.push(present(value.serialize(self.serializer)?));
+        match value.serialize(self.serializer)? {
+            Some(value) => self.items.push(value),
+            None if self.serializer.none == NoneMode::Null => self.items.push(Json::Null),
+            None => return Err(undefined()),
+        }
         Ok(())
     }
     fn finish(self) -> Out {
@@ -217,10 +233,13 @@ impl MapBuilder {
             Some(value) => {
                 self.map.insert(key, value);
             }
-            None if self.serializer.omit_none => {}
-            None => {
-                self.map.insert(key, Json::Null);
-            }
+            None => match self.serializer.none {
+                NoneMode::Omit => {}
+                NoneMode::Null => {
+                    self.map.insert(key, Json::Null);
+                }
+                NoneMode::Reject => return Err(undefined()),
+            },
         }
         Ok(())
     }

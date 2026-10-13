@@ -86,6 +86,53 @@ fn write_json(out: &mut impl Write, value: &Json) -> fmt::Result {
     }
 }
 
+fn write_pretty(out: &mut String, value: &Json, indent: &str, depth: usize) -> fmt::Result {
+    let pad = |out: &mut String, depth: usize| (0..depth).for_each(|_| out.push_str(indent));
+    match value {
+        Json::Array(items) if !items.is_empty() => {
+            out.push('[');
+            for (index, item) in items.iter().enumerate() {
+                out.push_str(if index > 0 { ",\n" } else { "\n" });
+                pad(out, depth + 1);
+                write_pretty(out, item, indent, depth + 1)?;
+            }
+            out.push('\n');
+            pad(out, depth);
+            out.push(']');
+            Ok(())
+        }
+        Json::Object(map) if !map.is_empty() => {
+            out.push('{');
+            for (index, (key, item)) in map.iter().enumerate() {
+                out.push_str(if index > 0 { ",\n" } else { "\n" });
+                pad(out, depth + 1);
+                write_json_string(out, key)?;
+                out.push_str(": ");
+                write_pretty(out, item, indent, depth + 1)?;
+            }
+            out.push('\n');
+            pad(out, depth);
+            out.push('}');
+            Ok(())
+        }
+        _ => write_json(out, value),
+    }
+}
+
+impl Json {
+    /// Indented JSON text byte-identical to `JSON.stringify(value, null, indent)`.
+    pub fn to_string_pretty(&self, indent: usize) -> String {
+        let mut out = String::new();
+        let indent = " ".repeat(indent.min(10));
+        if indent.is_empty() {
+            let _ = write_json(&mut out, self);
+        } else {
+            let _ = write_pretty(&mut out, self, &indent, 0);
+        }
+        out
+    }
+}
+
 impl fmt::Display for Json {
     /// Compact JSON text byte-identical to JavaScript `JSON.stringify`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -110,5 +157,7 @@ mod tests {
     fn stringifies_like_javascript() {
         let value = crate::json!({"a": "x\"\u{1}\n/é", "b": [1, 2.5, null, true], "1": {}});
         assert_eq!(value.to_string(), r#"{"1":{},"a":"x\"\u0001\n/é","b":[1,2.5,null,true]}"#);
+        let pretty = crate::json!({"a": [1, {}], "b": {"c": []}}).to_string_pretty(2);
+        assert_eq!(pretty, "{\n  \"a\": [\n    1,\n    {}\n  ],\n  \"b\": {\n    \"c\": []\n  }\n}");
     }
 }

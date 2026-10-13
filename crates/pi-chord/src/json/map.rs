@@ -15,7 +15,7 @@ pub struct JsonMap {
 }
 
 /// The numeric value of a canonical array-index key such as `"0"` or `"42"`.
-fn array_index_key(key: &str) -> Option<u32> {
+pub(crate) fn array_index_key(key: &str) -> Option<u32> {
     if key.is_empty() || key.len() > 10 || (key.len() > 1 && key.starts_with('0')) {
         return None;
     }
@@ -51,8 +51,8 @@ impl JsonMap {
     }
 
     /// Set a property. An existing key keeps its position, like a JavaScript assignment.
-    pub fn insert(&mut self, key: impl Into<Arc<str>>, value: Json) -> Option<Json> {
-        let key = key.into();
+    pub fn insert(&mut self, key: impl Into<Arc<str>>, value: impl Into<Json>) -> Option<Json> {
+        let (key, value) = (key.into(), value.into());
         if let Some(slot) = self.entries.get_mut(&*key) {
             return Some(std::mem::replace(slot, value));
         }

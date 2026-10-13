@@ -10,6 +10,7 @@ mod text;
 use std::sync::Arc;
 
 pub use map::JsonMap;
+pub(crate) use map::array_index_key;
 pub use number::{Number, format_js_number};
 pub(crate) use text::{utf16_len, utf16_offset};
 

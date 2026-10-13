@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use super::diff_array::diff_array;
 use super::{Op, Path, Seg, is_reserved, overlap};
-use crate::json::{Json, JsonMap, format_js_number, utf16_len, utf16_offset};
+use crate::json::{Json, JsonMap, array_index_key, format_js_number, utf16_len, utf16_offset};
 
 const DEFAULT_OVERLAP_SCAN: usize = 65_536;
 const MAX_DELTA_OPERATIONS: usize = 4_096;
@@ -14,6 +14,8 @@ const MAX_DELTA_OPERATIONS: usize = 4_096;
 pub(crate) struct Emitter {
     pub ops: Vec<Op>,
     pub overflowed: bool,
+    /// Reproduce the draft's property order too, as the upstream tracker's recorded ops do.
+    pub preserve_order: bool,
 }
 
 impl Emitter {
@@ -65,6 +67,29 @@ pub(crate) fn emit_string(before: &str, after: &str, path: &[Seg], out: &mut Emi
     }
 }
 
+/// Keys of `after` that must be deleted and set again so the result has `after`'s key order.
+fn moved_keys(before: &JsonMap, after: &JsonMap) -> Vec<Arc<str>> {
+    let named = |map: &JsonMap| map.keys().filter(|key| array_index_key(key).is_none()).cloned().collect::<Vec<_>>();
+    let (target, base) = (named(after), named(before));
+    let kept: Vec<&Arc<str>> = base.iter().filter(|key| after.contains_key(key)).collect();
+    let mut position = 0;
+    let mut prefix = 0;
+    for key in &target {
+        match kept[position..].iter().position(|candidate| *candidate == key) {
+            Some(offset) if before.contains_key(key) => {
+                position += offset + 1;
+                prefix += 1;
+            }
+            _ => break,
+        }
+    }
+    let skipped = kept.len() - prefix;
+    if skipped == 0 {
+        return Vec::new();
+    }
+    target[prefix..].iter().filter(|key| before.contains_key(key)).cloned().collect()
+}
+
 fn diff_object(before: &JsonMap, after: &JsonMap, path: &[Seg], out: &mut Emitter, after_value: &Json) {
     if before.keys().chain(after.keys()).any(|key| is_reserved(key)) {
         if before != after {
@@ -72,11 +97,17 @@ fn diff_object(before: &JsonMap, after: &JsonMap, path: &[Seg], out: &mut Emitte
         }
         return;
     }
+    let moved = if out.preserve_order { moved_keys(before, after) } else { Vec::new() };
     for (key, value) in after.iter() {
         if out.overflowed {
             return;
         }
         let next = child(path, Seg::Key(key.clone()));
+        if moved.contains(key) {
+            out.emit(Op::Delete(next.clone()));
+            out.emit_set(&next, value);
+            continue;
+        }
         match before.get(key) {
             Some(previous) => diff_value(previous, value, &next, out),
             None => out.emit_set(&next, value),
@@ -176,7 +207,16 @@ fn operation_cost(op: &Op) -> usize {
 
 /// Draft batches: like the tracker, they fold to a root replacement only past the operation limit.
 pub(crate) fn diff_draft(before: &Json, after: &Json) -> Vec<Op> {
-    let mut out = Emitter::default();
+    diff_with(before, after, false)
+}
+
+/// The tracker's batch: like [`diff_draft`], keeping the draft's property order.
+pub(crate) fn diff_draft_ordered(before: &Json, after: &Json) -> Vec<Op> {
+    diff_with(before, after, true)
+}
+
+fn diff_with(before: &Json, after: &Json, preserve_order: bool) -> Vec<Op> {
+    let mut out = Emitter { preserve_order, ..Emitter::default() };
     diff_value(before, after, &[], &mut out);
     if out.overflowed { vec![Op::Replace(after.clone())] } else { out.ops }
 }
