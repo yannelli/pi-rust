@@ -2,15 +2,17 @@ use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use pi_ai::ModelRegistry;
-use pi_ai::auth::{AuthResolver, FileCredentialStore, OAuthLookup};
+use pi_ai::auth::OAuthLookup;
 use pi_ai::env::{process_env_value, set_child_process_env};
 use pi_coding_agent::agent_session::auth::configure_http_from_settings;
-use pi_coding_agent::agent_session::{BUILTIN_EXTENSIONS, DiagnosticLevel, RuntimeDiagnostic};
-use pi_coding_agent::app::{AppOptions, configured_providers, create_app_runtime, format_no_models_available_message};
+use pi_coding_agent::agent_session::{
+    BUILTIN_EXTENSIONS, CreateServicesOptions, DiagnosticLevel, RuntimeDiagnostic, create_agent_session_services,
+};
+use pi_coding_agent::app::{AppOptions, create_app_runtime, format_no_models_available_message};
 use pi_coding_agent::auth_cli::run_auth_command;
 use pi_coding_agent::cli::{Args, OutputMode, help_text, normalize_session_name, parse_args, unknown_flags_error};
-use pi_coding_agent::config::{ENV_SESSION_DIR, agent_dir, auth_path, env_flag, expand_tilde, models_path};
+use pi_coding_agent::config::{ENV_SESSION_DIR, agent_dir, env_flag, expand_tilde};
+use pi_coding_agent::diagnostics::{print_timings, take_over_stdout, time};
 use pi_coding_agent::export::{ExportTheme, export_from_file};
 use pi_coding_agent::files::process_file_args;
 use pi_coding_agent::interactive::startup_ui::prompt_project_trust;
@@ -18,12 +20,14 @@ use pi_coding_agent::interactive::{InteractiveOptions, run_interactive};
 use pi_coding_agent::mcp_cli::run_mcp_cli;
 use pi_coding_agent::packages::{PackageCommandOptions, run_config_command, run_package_command};
 use pi_coding_agent::print_mode::run_print_mode;
+use pi_coding_agent::rpc::{RpcModeOptions, run_rpc_mode};
 use pi_coding_agent::session::branching::missing_session_cwd;
 use pi_coding_agent::session::ids::assert_valid_session_id;
 use pi_coding_agent::session::{
     NewSessionOptions, ResolvedSession, SessionManager, list_sessions, listing::resolve_session_arg, session_dir,
 };
 use pi_coding_agent::settings::{SettingsManager, SettingsOptions};
+use pi_coding_agent::startup::{install_update_commands, prepare_process, startup_changelog_once};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AppMode {
@@ -69,16 +73,14 @@ fn fuzzy_matches(text: &str, query: &str) -> bool {
     })
 }
 
-/// `--list-models [search]`: models with configured auth, as an aligned table.
-async fn list_models(search: &str, agent_dir: &Path) {
-    let (mut registry, error) = ModelRegistry::load_lenient(&models_path(agent_dir));
-    if let Some(error) = error {
+/// `--list-models [search]`: models with configured auth, as an aligned table. The session
+/// services supply them, so cached catalogs and llama.cpp models appear too.
+async fn list_models(search: &str, cwd: &Path, agent_dir: &Path) {
+    let services = create_agent_session_services(CreateServicesOptions::new(cwd, agent_dir)).await;
+    if let Some(error) = services.model_runtime.load_error() {
         eprintln!("Warning: errors loading models.json:\n{error}");
     }
-    let resolver = AuthResolver::new(Arc::new(FileCredentialStore::new(auth_path(agent_dir))), oauth_lookup());
-    resolver.set_provider_configs(registry.auth_configs());
-    registry.set_configured_providers(configured_providers(&resolver, &registry).await);
-    let mut models = registry.available_models();
+    let mut models = services.model_runtime.available_models();
     if models.is_empty() {
         println!("{}", format_no_models_available_message());
         return;
@@ -300,6 +302,7 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
         set_child_process_env("PI_SKIP_VERSION_CHECK", "1");
     }
     let agent_dir = agent_dir();
+    let crash_context = prepare_process(&agent_dir);
     if let Some(output) = run_auth_command(&raw, &agent_dir, oauth_lookup()).await {
         print!("{}", output.stdout);
         eprint!("{}", output.stderr);
@@ -310,6 +313,7 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
     configure_http_from_settings(&bootstrap_settings);
     let mut package_options = PackageCommandOptions::from_env(cwd.clone(), agent_dir.clone());
     package_options.builtin_extensions = BUILTIN_EXTENSIONS.iter().map(|name| name.to_string()).collect();
+    install_update_commands(&mut package_options);
     if let Some(code) = run_package_command(&raw, &package_options).await {
         return Ok(code);
     }
@@ -322,6 +326,7 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
         return Ok(code);
     }
     let mut args = parse_args(&raw);
+    time("parseArgs");
     for warning in &args.warnings {
         eprintln!("Warning: {warning}");
     }
@@ -357,7 +362,7 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
         return Ok(0);
     }
     if let Some(search) = &args.list_models {
-        list_models(search, &agent_dir).await;
+        list_models(search, &cwd, &agent_dir).await;
         return Ok(0);
     }
     if let Some(error) = unknown_flags_error(&args.unknown_flags) {
@@ -366,15 +371,21 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
     }
     let mut mode = app_mode(&args, std::io::stdin().is_terminal(), std::io::stdout().is_terminal());
     if mode == AppMode::Rpc {
-        eprintln!("Error: RPC mode is not supported yet");
-        return Ok(1);
+        take_over_stdout()?;
+        if !args.file_args.is_empty() {
+            eprintln!("Error: @file arguments are not supported in RPC mode");
+            return Ok(1);
+        }
     }
     validate_session_flags(&args)?;
+    if mode == AppMode::Json {
+        take_over_stdout()?;
+    }
     let startup_diagnostics: Vec<RuntimeDiagnostic> =
         startup_settings.drain_errors().iter().map(|error| RuntimeDiagnostic::warning(error.diagnostic())).collect();
 
     let mut stdin_content = None;
-    if !std::io::stdin().is_terminal() {
+    if mode != AppMode::Rpc && !std::io::stdin().is_terminal() {
         let mut piped = String::new();
         std::io::stdin().read_to_string(&mut piped)?;
         stdin_content = Some(piped.trim().to_string()).filter(|text| !text.is_empty());
@@ -410,6 +421,7 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
     }
 
     let mut options = AppOptions { oauth: Some(oauth_lookup()), ..AppOptions::from_args(&args, &cwd, &agent_dir) };
+    time("createSessionManager");
     if interactive {
         let session_cwd = session_manager.cwd().to_path_buf();
         let local = tokio::task::LocalSet::new();
@@ -420,6 +432,8 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
     }
     let runtime = create_app_runtime(options, session_manager).await?;
     let session = runtime.session();
+    time("createRuntime");
+    crash_context.set_session_file(session.session_file().as_deref());
     configure_http_from_settings(session.settings());
     let runtime_diagnostics: Vec<RuntimeDiagnostic> =
         runtime.diagnostics().into_iter().filter(|diagnostic| !startup_diagnostics.contains(diagnostic)).collect();
@@ -438,12 +452,20 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
         return Ok(1);
     }
 
+    print_timings();
     match mode {
+        AppMode::Rpc => {
+            // Upstream refreshes catalogs in the background for RPC; interactive mode starts its own refresh.
+            session.model_runtime().refresh_in_background();
+            Ok(run_rpc_mode(Arc::new(runtime), RpcModeOptions::default()).await)
+        }
         AppMode::Print | AppMode::Json => {
             let output = if mode == AppMode::Json { OutputMode::Json } else { OutputMode::Text };
             Ok(run_print_mode(&runtime, output, initial_message, files.images, args.messages).await)
         }
         _ => {
+            session.model_runtime().refresh_in_background();
+            let changelog = startup_changelog_once(session.settings(), !session.messages().is_empty());
             let mut diagnostics = startup_diagnostics;
             diagnostics.extend(runtime_diagnostics);
             let options = InteractiveOptions {
@@ -455,6 +477,7 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
                 initial_theme_setting: args.use_theme.clone(),
                 startup_diagnostics: diagnostics,
                 model_fallback_message: runtime.model_fallback_message(),
+                changelog_markdown: changelog.markdown,
                 agent_dir: Some(agent_dir.clone()),
                 ..InteractiveOptions::default()
             };

@@ -10,7 +10,7 @@ use super::components::ExpandableText;
 use super::components::pi_logo::{pi_logo_lines, pi_wordmark, supports_pi_logo};
 use super::mode::InteractiveMode;
 use crate::interactive_components::{DynamicBorder, key_hint, key_text, raw_key_hint};
-use crate::platform::changelog::{condensed_changelog_notice, embedded_changelog_entries, startup_changelog};
+use crate::platform::changelog::condensed_changelog_notice;
 use crate::settings::QuietStartup;
 use crate::settings::schema::{FullscreenExitOutput, TuiMode};
 use crate::theme::{ThemeColor, load_resource_themes, set_registered_themes, theme};
@@ -39,7 +39,8 @@ impl InteractiveMode {
         if self.state.borrow().initialized {
             return;
         }
-        self.state.borrow_mut().changelog_markdown = self.changelog_for_display();
+        let changelog = self.options.borrow_mut().changelog_markdown.take();
+        self.state.borrow_mut().changelog_markdown = changelog;
         self.print_model_scope();
         self.mount_layout();
         self.setup_startup_handlers();
@@ -110,27 +111,6 @@ impl InteractiveMode {
             theme().fg(ThemeColor::Muted, &format!(" ({text} to cycle)"))
         };
         println!("{}", theme().fg(ThemeColor::Dim, &format!("Model scope: {}{hint}", list.join(", "))));
-    }
-
-    /// New changelog entries after an update; records the version on a fresh install.
-    fn changelog_for_display(&self) -> Option<String> {
-        let settings = self.settings();
-        let has_messages = !self.session().messages().is_empty();
-        let last = settings.last_changelog_version();
-        let decision = startup_changelog(&embedded_changelog_entries(), last.as_deref(), has_messages);
-        if decision.record_version {
-            settings.set_last_changelog_version(VERSION);
-        }
-        if decision.report_install && crate::platform::telemetry::install_telemetry_enabled(&settings) {
-            tokio::spawn(async move {
-                let client = pi_ai::http::shared_client();
-                let url = crate::platform::telemetry::REPORT_INSTALL_URL;
-                let offline = crate::config::offline();
-                let _ =
-                    crate::platform::telemetry::report_install_telemetry(&client, url, VERSION, true, offline).await;
-            });
-        }
-        decision.markdown
     }
 
     fn build_header(&self) {

@@ -4,11 +4,12 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use super::cache_stats::compute_cache_waste;
 use super::components::bordered_loader::BorderedLoader;
 use super::components::summaries::format_thousands;
 use super::mode::InteractiveMode;
 use super::util::format_tokens;
+use crate::cache_stats::compute_cache_waste;
+use crate::cache_warmer::format_cache_warming_status;
 use crate::session::usage::usage_cost_breakdown;
 use crate::settings::schema::CacheWarmingMode;
 use crate::theme::{ThemeColor, theme};
@@ -28,6 +29,13 @@ impl InteractiveMode {
             CacheWarmingMode::Streaming => "streaming",
             CacheWarmingMode::Idle => "idle",
         };
+        let warming_status = session.cache_warming_status();
+        let warming_text = format_cache_warming_status(&warming_status, pi_ai::now_ms());
+        let economics = warming_status
+            .decision
+            .as_ref()
+            .filter(|decision| decision.economics_available)
+            .map(|decision| (decision.miss_cost, decision.warm_cost));
         let selected = session.model().map(|model| format!("{}/{}", model.provider, model.id)).unwrap_or_default();
         let render = move || {
             let t = theme();
@@ -64,7 +72,11 @@ impl InteractiveMode {
             info.push_str(&format!("{} {}\n", dim("Total:"), format_thousands(tokens.tokens())));
             info.push_str(&format!("\n{}\n", t.bold("Cache Warming")));
             info.push_str(&format!("{} {warming}\n", dim("Mode:")));
-            info.push_str(&format!("{} Inactive (cache warming unavailable)\n", dim("Status:")));
+            info.push_str(&format!("{} {warming_text}\n", dim("Status:")));
+            if let Some((miss, warm)) = economics {
+                info.push_str(&format!("{} ${miss:.3}\n", dim("Cache miss penalty:")));
+                info.push_str(&format!("{} ${warm:.3}\n", dim("Refresh cost:")));
+            }
             if stats.cost > 0.0 || waste.missed_tokens > 0 {
                 info.push_str(&format!("\n{}\n", t.bold("Cost")));
                 info.push_str(&format!("{} ${:.3}", dim("Total:"), stats.cost));

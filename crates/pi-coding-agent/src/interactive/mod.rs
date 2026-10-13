@@ -6,7 +6,6 @@ mod autocomplete;
 mod background;
 pub mod bridge;
 mod bug;
-mod cache_stats;
 mod chat;
 mod commands;
 pub mod components;
@@ -42,7 +41,6 @@ pub use hotkeys::hotkeys_markdown;
 pub use mode::InteractiveMode;
 
 use crate::agent_session::{AgentSessionRuntime, RuntimeDiagnostic};
-use crate::diagnostics::crash_log::{CrashContext, crash_log_path, install_crash_hook};
 use crate::settings::schema::TuiMode;
 
 /// What the interactive mode starts with (upstream `InteractiveModeOptions`).
@@ -63,6 +61,8 @@ pub struct InteractiveOptions {
     pub startup_diagnostics: Vec<RuntimeDiagnostic>,
     /// Why the restored model could not be used.
     pub model_fallback_message: Option<String>,
+    /// "What's New" since the last run (`startup::startup_changelog_once`).
+    pub changelog_markdown: Option<String>,
     /// The terminal to draw on; the process terminal when `None`.
     pub terminal: Option<TerminalRef>,
     /// The agent directory; `PI_CODING_AGENT_DIR` or `~/.pi/agent` when `None`.
@@ -71,21 +71,11 @@ pub struct InteractiveOptions {
     pub skip_update_checks: bool,
 }
 
-/// Run the interactive mode for `runtime` until the user quits. Installs the keybindings and
-/// the crash hook, removes binaries a self-update left behind, and runs the UI in a `LocalSet`.
+/// Run the interactive mode for `runtime` until the user quits: installs the keybindings of
+/// `keybindings.json` and runs the UI in a `LocalSet`.
 pub async fn run_interactive(runtime: Arc<AgentSessionRuntime>, options: InteractiveOptions) -> anyhow::Result<()> {
     let agent_dir = options.agent_dir.clone().unwrap_or_else(crate::config::agent_dir);
     crate::keybindings::KeybindingsManager::create(&agent_dir).install();
-    let context = CrashContext::default();
-    {
-        let session = runtime.session();
-        context.set_cwd(session.cwd());
-        context.set_session_file(session.session_file().as_deref());
-    }
-    install_crash_hook(crash_log_path(&agent_dir), context);
-    if let Ok(executable) = std::env::current_exe() {
-        crate::update::cleanup_update_quarantine(&executable);
-    }
     let options = InteractiveOptions { agent_dir: Some(agent_dir), ..options };
     let local = tokio::task::LocalSet::new();
     local

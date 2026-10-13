@@ -1,9 +1,9 @@
-//! Prompt cache misses: prompt tokens of the last request that were billed again instead of
-//! read from the cache (upstream `core/cache-stats.ts` and `formatCacheWarmingUsage`).
+//! Prompt cache misses (upstream `core/cache-stats.ts`): prompt tokens of the last request that
+//! were billed again instead of read from the cache, and the transcript notice for them.
 
 use std::collections::HashMap;
 
-use pi_ai::{AssistantMessage, Message};
+use pi_ai::{AssistantMessage, Message, Usage};
 
 use crate::session::entry::{Entry, EntryData, UsageEntry};
 
@@ -13,14 +13,20 @@ pub const CACHE_TTL_MS: i64 = 5 * 60 * 1000;
 /// Misses at or below this many tokens are cache breakpoint noise.
 const NOISE_FLOOR_TOKENS: u64 = 1024;
 
+/// Notices are shown from this many missed tokens or this many dollars.
+const NOTICE_MIN_TOKENS: u64 = 20_000;
+const NOTICE_MIN_COST: f64 = 0.1;
+
 /// A counted miss on one assistant message.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CacheMiss {
+    /// Prompt tokens of the last request that were not read from the cache.
     pub missed_tokens: u64,
     /// Extra dollars paid compared to a full hit; 0 without pricing.
     pub missed_cost: f64,
-    /// Milliseconds since the last request.
+    /// Milliseconds since the last request, which last refreshed the cache.
     pub idle_ms: i64,
+    /// The model changed since the last request.
     pub model_changed: bool,
 }
 
@@ -28,6 +34,7 @@ pub struct CacheMiss {
 pub struct CacheWasteTotals {
     pub missed_tokens: u64,
     pub missed_cost: f64,
+    /// Counted misses (turns above the noise floor).
     pub miss_count: u64,
 }
 
@@ -42,15 +49,17 @@ impl ModelPriceSource for crate::agent_session::ModelRuntime {
     }
 }
 
+/// The last request of the scan; everything in its prompt should be cached now.
 struct LastRequest {
     prompt_tokens: u64,
     model_key: String,
     timestamp: i64,
-    /// Some request so far reported cache activity.
+    /// Some request of this scan segment reported cache activity, which tells a total miss on a
+    /// cache-read-only provider apart from a provider that never reports caching.
     reported_cache: bool,
 }
 
-fn prompt_tokens(usage: &pi_ai::Usage) -> u64 {
+fn prompt_tokens(usage: &Usage) -> u64 {
     usage.input + usage.cache_read + usage.cache_write
 }
 
@@ -69,6 +78,8 @@ fn detect_miss(
     if missed_tokens <= NOISE_FLOOR_TOKENS {
         return None;
     }
+    // Missed tokens land in the input or cache write buckets, so this message's own costs give
+    // the rate actually paid for them.
     let paid_tokens = usage.input + usage.cache_write;
     let paid_per_token =
         if paid_tokens > 0 { (usage.cost.input + usage.cost.cache_write) / paid_tokens as f64 } else { 0.0 };
@@ -96,11 +107,6 @@ fn as_last_request(message: &AssistantMessage, reported_cache: bool) -> Option<L
     })
 }
 
-/// Milliseconds of an RFC 3339 timestamp, 0 when it does not parse.
-fn timestamp_millis(timestamp: &str) -> i64 {
-    timestamp.parse::<jiff::Timestamp>().map(|parsed| parsed.as_millisecond()).unwrap_or(0)
-}
-
 struct Scan {
     last: Option<LastRequest>,
     totals: CacheWasteTotals,
@@ -112,6 +118,7 @@ fn scan<'a>(entries: impl IntoIterator<Item = &'a Entry>, prices: &dyn ModelPric
     let mut result = Scan { last: None, totals: CacheWasteTotals::default(), misses: HashMap::new() };
     for entry in entries {
         match entry.data() {
+            // The context changed on purpose; model switches are not exempt.
             EntryData::Compaction(_) | EntryData::BranchSummary(_) => result.last = None,
             EntryData::Usage(usage) if usage.kind == "cache_warm" => {
                 let tokens = prompt_tokens(&usage.usage);
@@ -119,7 +126,7 @@ fn scan<'a>(entries: impl IntoIterator<Item = &'a Entry>, prices: &dyn ModelPric
                     result.last = Some(LastRequest {
                         prompt_tokens: tokens,
                         model_key: format!("{}/{}", usage.provider, usage.model),
-                        timestamp: timestamp_millis(entry.timestamp()),
+                        timestamp: crate::session::parse_iso(entry.timestamp()).unwrap_or(0),
                         reported_cache: true,
                     });
                 }
@@ -167,6 +174,35 @@ pub fn detect_cache_miss<'a>(
     detect_miss(scan(entries, prices).last.as_ref(), message, prices)
 }
 
+/// Token counts as the footer shows them: `950`, `1.2k`, `45k`, `1.5M`, `12M`.
+pub fn format_tokens(count: u64) -> String {
+    let value = count as f64;
+    match count {
+        0..1_000 => count.to_string(),
+        1_000..10_000 => format!("{:.1}k", value / 1_000.0),
+        10_000..1_000_000 => format!("{}k", (value / 1_000.0).round()),
+        1_000_000..10_000_000 => format!("{:.1}M", value / 1_000_000.0),
+        _ => format!("{}M", (value / 1_000_000.0).round()),
+    }
+}
+
+/// The transcript notice for `miss`, or `None` below 20k tokens and $0.10. It only states what
+/// is known: the miss, a model switch, or an idle gap past the cache TTL.
+pub fn cache_miss_notice(miss: &CacheMiss) -> Option<String> {
+    if miss.missed_tokens < NOTICE_MIN_TOKENS && miss.missed_cost < NOTICE_MIN_COST {
+        return None;
+    }
+    let cost = if miss.missed_cost >= 0.01 { format!(" (~${:.2})", miss.missed_cost) } else { String::new() };
+    let label = if miss.model_changed {
+        "Cache miss after model switch".to_string()
+    } else if miss.idle_ms >= CACHE_TTL_MS {
+        format!("Cache miss after {}m idle", (miss.idle_ms as f64 / 60_000.0).round())
+    } else {
+        "Cache miss".to_string()
+    };
+    Some(format!("{label}: {} tokens re-billed{cost}", format_tokens(miss.missed_tokens)))
+}
+
 /// `Cache warmed (<note>): $<cost>` with at least three decimals.
 pub fn format_cache_warming_usage(entry: &UsageEntry) -> String {
     let note = entry.note.as_deref().map(|note| format!(" ({note})")).unwrap_or_default();
@@ -178,57 +214,5 @@ pub fn format_cache_warming_usage(entry: &UsageEntry) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct NoPrices;
-
-    impl ModelPriceSource for NoPrices {
-        fn cache_read_price(&self, _: &str, _: &str) -> Option<f64> {
-            None
-        }
-    }
-
-    fn assistant(input: u64, cache_read: u64, cache_write: u64, timestamp: i64) -> AssistantMessage {
-        let mut message =
-            AssistantMessage { provider: "anthropic".into(), model: "claude".into(), timestamp, ..Default::default() };
-        message.usage.input = input;
-        message.usage.cache_read = cache_read;
-        message.usage.cache_write = cache_write;
-        message.usage.cost.input = input as f64 * 3e-6;
-        message.usage.cost.cache_read = cache_read as f64 * 0.3e-6;
-        message
-    }
-
-    #[test]
-    fn counts_misses_above_the_noise_floor() {
-        let last = as_last_request(&assistant(100, 50_000, 1000, 0), false);
-        let miss = detect_miss(last.as_ref(), &assistant(40_000, 11_000, 0, 400_000), &NoPrices).unwrap();
-        assert_eq!(miss.missed_tokens, 40_000);
-        assert!((miss.missed_cost - 40_000.0 * 2.7e-6).abs() < 1e-9);
-        assert_eq!(miss.idle_ms, 400_000);
-        assert!(!miss.model_changed);
-        assert!(detect_miss(last.as_ref(), &assistant(500, 50_600, 0, 1), &NoPrices).is_none());
-    }
-
-    #[test]
-    fn ignores_providers_without_cache_reports() {
-        let last = as_last_request(&assistant(50_000, 0, 0, 0), false);
-        assert!(detect_miss(last.as_ref(), &assistant(60_000, 0, 0, 1), &NoPrices).is_none());
-    }
-
-    #[test]
-    fn formats_cache_warming_cost() {
-        let mut entry = UsageEntry {
-            kind: "cache_warm".into(),
-            provider: "anthropic".into(),
-            model: "claude".into(),
-            usage: pi_ai::Usage::default(),
-            note: Some("idle".into()),
-        };
-        entry.usage.cost.total = 0.0123;
-        assert_eq!(format_cache_warming_usage(&entry), "Cache warmed (idle): $0.0123");
-        entry.usage.cost.total = 0.5;
-        assert_eq!(format_cache_warming_usage(&entry), "Cache warmed (idle): $0.500");
-    }
-}
+#[path = "cache_stats_tests.rs"]
+mod tests;

@@ -11,8 +11,7 @@ use super::components::ThemedText;
 use super::mode::InteractiveMode;
 use crate::interactive_components::DynamicBorder;
 use crate::packages::{PackageManager, PackageManagerOptions};
-use crate::platform::http::VERSION;
-use crate::platform::version_check::{LatestPiRelease, VersionCheckOptions, check_for_new_pi_version};
+use crate::platform::version_check::LatestPiRelease;
 use crate::resources::brand::APP_NAME;
 use crate::theme::{ThemeColor, theme};
 
@@ -44,13 +43,13 @@ impl InteractiveMode {
         if self.options.borrow().skip_update_checks {
             return;
         }
-        let skip = crate::platform::version_check::version_check_skipped();
-        self.spawn(move |mode| async move {
-            let check = async move { check_for_new_pi_version(VERSION, &VersionCheckOptions::default(), skip).await };
-            if let Ok(Some(release)) = tokio::spawn(check).await {
-                mode.show_new_version_notification(&release);
-            }
-        });
+        if let Some(check) = crate::startup::spawn_version_check() {
+            self.spawn(move |mode| async move {
+                if let Ok(Some(release)) = check.await {
+                    mode.show_new_version_notification(&release);
+                }
+            });
+        }
         let session = self.session();
         let options = PackageManagerOptions::new(session.cwd(), &self.agent_dir, session.settings().clone());
         self.spawn(move |mode| async move {

@@ -7,7 +7,6 @@ use pi_ai::{ContentBlock, Message, StopReason};
 use serde_json::Value;
 
 use super::bridge::UiEvent;
-use super::cache_stats::detect_cache_miss;
 use super::chat::{abort_message, error_result};
 use super::components::{AssistantMessageComponent, StatusIndicator, StatusKind};
 use super::mode::InteractiveMode;
@@ -144,6 +143,8 @@ impl InteractiveMode {
                 self.update_editor_border_color();
             }
             UiEvent::Notify { message, level } => self.show_notice(&message, level),
+            UiEvent::ModelRouted => {}
+            UiEvent::CacheMiss(notice) => self.add_warning_notice(notice),
             UiEvent::Call(call) => {
                 if let Some(mode) = self.weak.upgrade() {
                     (call.0)(&mode);
@@ -288,7 +289,6 @@ impl InteractiveMode {
                 tool.borrow_mut().set_args_complete();
             }
             self.maybe_show_thinking_drop_notice(&assistant);
-            self.maybe_show_cache_miss_notice(&assistant);
         }
         let mut state = self.state.borrow_mut();
         state.streaming_component = None;
@@ -337,20 +337,6 @@ impl InteractiveMode {
                 self.add_spacer();
                 self.add_text(move || theme().fg(ThemeColor::Error, &error), 1, 0);
             }
-        }
-    }
-
-    fn maybe_show_cache_miss_notice(&self, message: &pi_ai::AssistantMessage) {
-        if !self.settings().show_cache_miss_notices() {
-            return;
-        }
-        let session = self.session();
-        let miss = {
-            let manager = session.session_manager();
-            detect_cache_miss(manager.entries(), message, session.model_runtime().as_ref())
-        };
-        if let Some(miss) = miss {
-            self.add_cache_miss_notice(miss);
         }
     }
 

@@ -172,7 +172,7 @@ impl InteractiveMode {
                 mode.show_status(&format!("HTTP idle timeout: {}", format_http_idle_timeout_ms(timeout)));
             }),
             on_cache_warming_mode_change: on!(weak, |mode, warming| {
-                mode.settings().set_cache_warming_mode(warming);
+                mode.session().set_cache_warming_mode(warming);
                 mode.show_status(&format!("Cache warming: {}", setting_str(warming)));
             }),
             on_model_thinking_level_change: {

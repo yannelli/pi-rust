@@ -6,7 +6,7 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use pi_ai::{Message, StopReason, ThinkingLevel};
+use pi_ai::{Message, ThinkingLevel};
 use pi_tui::utils::truncate_to_width_with;
 use pi_tui::{Component, visible_width};
 
@@ -18,9 +18,6 @@ use crate::interactive::util::{format_tokens, resolve_lexically};
 use crate::session::EntryData;
 use crate::session::usage::UsageTotals;
 use crate::theme::{ThemeColor, theme};
-
-/// The `api` of virtual models, which route each request to a physical model.
-pub const VIRTUAL_MODEL_API: &str = "pi-virtual";
 
 /// Newlines, tabs, and repeated spaces collapse to single spaces.
 fn sanitize_status_text(text: &str) -> String {
@@ -55,21 +52,9 @@ struct SessionStats {
     context_usage: Option<ContextUsage>,
 }
 
-/// The physical model and level of the latest successful response under a virtual model.
+/// The physical model and level a virtual model routed the latest request to.
 fn routed_model(session: &AgentSession) -> Option<(String, Option<ThinkingLevel>)> {
-    session.model().filter(|model| model.api == VIRTUAL_MODEL_API)?;
-    let latest = session.with_state(|state| {
-        state.messages.iter().rev().find_map(|message| match message {
-            Message::Assistant(assistant)
-                if assistant.stop_reason != StopReason::Error && assistant.stop_reason != StopReason::Aborted =>
-            {
-                Some((assistant.provider.clone(), assistant.model.clone(), assistant.thinking_level))
-            }
-            _ => None,
-        })
-    })?;
-    let physical = session.model_runtime().get_model(&latest.0, &latest.1)?;
-    Some((physical.id, latest.2))
+    session.routed_model().map(|routed| (routed.model.id, routed.thinking_level))
 }
 
 pub struct FooterComponent {
@@ -94,9 +79,7 @@ impl FooterComponent {
 
     fn session_stats(&mut self) -> &SessionStats {
         let session = &self.session;
-        let limits_model = routed_model(session)
-            .and_then(|(id, _)| session.model().map(|model| (model.provider, id)))
-            .or_else(|| session.model().map(|model| (model.provider, model.id)));
+        let limits_model = session.limits_model().map(|model| (model.provider, model.id));
         let key = {
             let manager = session.session_manager();
             StatsKey {
@@ -157,8 +140,9 @@ impl Component for FooterComponent {
         };
         let session = self.session.clone();
         let model = session.model();
+        let limits = session.limits_model().or_else(|| model.clone());
         let context_window =
-            context_usage.as_ref().map(|usage| usage.context_window).or(model.as_ref().map(|m| m.context_window));
+            context_usage.as_ref().map(|usage| usage.context_window).or(limits.as_ref().map(|m| m.context_window));
         let percent = context_usage.as_ref().and_then(|usage| usage.percent);
         let percent_value = percent.unwrap_or(0.0);
 

@@ -167,7 +167,7 @@ impl AgentSession {
     /// Resize prompt images per `images.autoResize`; unusable images become hints.
     fn normalize_prompt_images(&self, images: &[ContentBlock]) -> (Vec<ContentBlock>, Vec<String>) {
         let auto_resize = self.settings().image_auto_resize();
-        let options = match self.model() {
+        let options = match self.limits_model() {
             Some(model) => ProcessImageOptions::for_model(&model, auto_resize),
             None => ProcessImageOptions { auto_resize, ..ProcessImageOptions::default() },
         };

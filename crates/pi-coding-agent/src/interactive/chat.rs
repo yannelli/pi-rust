@@ -9,7 +9,6 @@ use pi_ai::{Message, StopReason, Usage};
 use pi_tui::{ComponentRef, Spacer, component};
 use serde_json::Value;
 
-use super::cache_stats::{CACHE_TTL_MS, CacheMiss, collect_cache_misses, format_cache_warming_usage};
 use super::components::summaries::user_content_text;
 use super::components::{
     AssistantMessageComponent, BashExecutionComponent, Collapsible, CollapsibleMessage, CustomMessageComponent,
@@ -19,6 +18,7 @@ use super::components::{
 use super::mode::{InteractiveMode, LastStatus};
 use super::renderers::{ToolResultView, builtin_renderer};
 use super::util::format_tokens;
+use crate::cache_stats::{CacheMiss, cache_miss_notice, collect_cache_misses, format_cache_warming_usage};
 use crate::markdown_transform::create_mermaid_markdown_transformer;
 use crate::markdown_transform::{ActiveThemeStyle, MermaidTransformerOptions};
 use crate::messages::{
@@ -354,18 +354,13 @@ impl InteractiveMode {
     }
 
     pub(super) fn add_cache_miss_notice(&self, miss: CacheMiss) {
-        if miss.missed_tokens < 20_000 && miss.missed_cost < 0.1 {
-            return;
+        if let Some(notice) = cache_miss_notice(&miss) {
+            self.add_warning_notice(notice);
         }
-        let cost = if miss.missed_cost >= 0.01 { format!(" (~${:.2})", miss.missed_cost) } else { String::new() };
-        let label = if miss.model_changed {
-            "Cache miss after model switch".to_string()
-        } else if miss.idle_ms >= CACHE_TTL_MS {
-            format!("Cache miss after {}m idle", (miss.idle_ms as f64 / 60_000.0).round())
-        } else {
-            "Cache miss".to_string()
-        };
-        let text = format!("{label}: {} tokens re-billed{cost}", format_tokens(miss.missed_tokens));
+    }
+
+    /// A transcript notice in the warning color, such as a cache miss.
+    pub(super) fn add_warning_notice(&self, text: String) {
         self.add_spacer();
         self.add_text(move || theme().fg(ThemeColor::Warning, &text), 1, 0);
     }

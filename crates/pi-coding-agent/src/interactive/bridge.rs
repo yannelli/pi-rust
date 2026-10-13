@@ -90,6 +90,10 @@ pub enum UiEvent {
     Error(String),
     /// The theme file changed on disk.
     ThemeChanged,
+    /// A virtual model routed a request; the footer shows the route.
+    ModelRouted,
+    /// The notice of a response that re-billed cached prompt tokens.
+    CacheMiss(String),
     /// A notice from a session feature, such as MCP (upstream `ctx.ui.notify`).
     Notify {
         message: String,
@@ -138,6 +142,8 @@ impl UiEvent {
             }
             AgentSessionEvent::SummarizationRetryFinished => UiEvent::SummarizationRetryFinished,
             AgentSessionEvent::BashExecutionUpdate { .. } => return None,
+            AgentSessionEvent::ModelRouted { .. } => UiEvent::ModelRouted,
+            AgentSessionEvent::CacheMiss { notice, .. } => UiEvent::CacheMiss(notice.clone()),
         })
     }
 
