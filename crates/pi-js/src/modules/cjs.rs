@@ -45,7 +45,7 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
 fn compile<'js>(ctx: Ctx<'js>, filename: String) -> rquickjs::Result<Object<'js>> {
     let result = Object::new(ctx.clone())?;
     let state = state();
-    if state.inline_sources.borrow().contains_key(&filename) {
+    if super::has_inline_source(&state, &filename) {
         result.set("format", "esm")?;
         return Ok(result);
     }

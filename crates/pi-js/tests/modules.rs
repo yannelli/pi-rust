@@ -177,3 +177,24 @@ async fn evaluates_inline_modules() {
         .unwrap();
     assert_eq!(module.get("out").await.unwrap().into_json(), json!(42));
 }
+
+#[tokio::test]
+async fn registered_source_files_load_with_relative_imports() {
+    let (_dir, root) = tempdir();
+    let (runtime, _capture) = runtime(&root);
+    let base = std::env::temp_dir().join("pi-source-files-test").join("pkg");
+    runtime.register_source_files([
+        (base.join("index.mjs"), "export * from './lib/math.mjs';\nexport default 'pkg';\n".to_string()),
+        (base.join("lib/math.mjs"), "export const triple = (n) => n * 3;\n".to_string()),
+    ]);
+    let entry = serde_json::to_string(&base.join("index.mjs").display().to_string()).unwrap();
+    runtime.register_virtual_module(
+        "virtual-pkg",
+        VirtualModule::Source(format!("export * from {entry};\nexport {{ default }} from {entry};\n")),
+    );
+    write(&root, "use.ts", "import name, { triple } from 'virtual-pkg';\nexport const out = `${name}:${triple(4)}`;\n");
+    let namespace = runtime.import("./use.ts").await.unwrap();
+    assert_eq!(namespace.get("out").await.unwrap().into_json(), json!("pkg:12"));
+    let required = run_cjs(&runtime, &root, &format!("return require({entry}).triple(2);")).await;
+    assert_eq!(required, json!(6));
+}

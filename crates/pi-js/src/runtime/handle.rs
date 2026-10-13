@@ -193,6 +193,16 @@ impl JsHandle {
         self.shared.virtual_modules.write().unwrap_or_else(|poison| poison.into_inner()).insert(name, module);
     }
 
+    /// Make module files load from memory: each `(path, source)` pair acts as a file at that
+    /// absolute path, so relative imports between registered files resolve.
+    pub fn register_source_files(&self, files: impl IntoIterator<Item = (std::path::PathBuf, String)>) {
+        let mut registered = self.shared.source_files.write().unwrap_or_else(|poison| poison.into_inner());
+        for (path, source) in files {
+            let key = crate::resolve::normalize(&path).display().to_string();
+            registered.insert(key, source.into());
+        }
+    }
+
     pub fn register_host_function(&self, name: impl Into<String>, function: HostFunction) {
         self.shared.host_functions.write().unwrap_or_else(|poison| poison.into_inner()).insert(name, function);
     }

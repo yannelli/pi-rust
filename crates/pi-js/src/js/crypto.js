@@ -1,4 +1,4 @@
-// node:crypto: hashes, HMAC, random values, PBKDF2, and a webcrypto object without subtle.
+// node:crypto: hashes, HMAC, random values, PBKDF2, and a webcrypto object with subtle.digest.
 const { Buffer } = require("buffer");
 const { Transform } = require("stream");
 const nativeCrypto = native.crypto;
@@ -195,9 +195,21 @@ function unsupported(name) {
   };
 }
 
-const subtle = new Proxy({}, {
+const DIGESTS = { "SHA-1": "sha1", "SHA-256": "sha256", "SHA-384": "sha384", "SHA-512": "sha512" };
+
+// SubtleCrypto.digest; other subtle methods throw the unsupported error.
+async function digest(algorithm, data) {
+  const name = typeof algorithm === "string" ? algorithm : algorithm && algorithm.name;
+  const hashName = DIGESTS[String(name).toUpperCase()];
+  if (!hashName) throw new (globalThis.DOMException || Error)(`Unrecognized algorithm name: ${name}`, "NotSupportedError");
+  const bytes = new Hash(hashName).update(data).digest();
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+}
+
+const subtle = new Proxy({ digest }, {
   get(target, name) {
     if (typeof name === "symbol") return undefined;
+    if (name in target) return target[name];
     return unsupported(`subtle.${name}`);
   },
 });

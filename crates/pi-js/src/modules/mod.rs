@@ -13,7 +13,7 @@ use rquickjs::{Ctx, Function, Module, Runtime, Value};
 use crate::error::JsError;
 use crate::resolve::{ResolveKind, Resolved, normalize};
 use crate::runtime::convert::{caught, throw};
-use crate::runtime::state::state;
+use crate::runtime::state::{LoopState, state};
 use crate::transpile::{FreeGlobals, ModuleFormat, register_source_map};
 use crate::virtual_modules::VirtualModule;
 
@@ -36,17 +36,14 @@ pub(crate) fn resolve_kind(
     let state = state();
     let from_path = from.map(Path::new).filter(|path| path.is_absolute());
     let base_dir = state.cwd.borrow().clone();
-    {
-        let inline = state.inline_sources.borrow();
-        if inline.contains_key(specifier) {
-            return Ok(("file", specifier.to_string()));
-        }
-        if specifier.starts_with('.') {
-            let dir = from_path.and_then(Path::parent).unwrap_or(&base_dir);
-            let candidate = normalize(&dir.join(specifier)).display().to_string();
-            if inline.contains_key(&candidate) {
-                return Ok(("file", candidate));
-            }
+    if has_inline_source(&state, specifier) {
+        return Ok(("file", specifier.to_string()));
+    }
+    if specifier.starts_with('.') {
+        let dir = from_path.and_then(Path::parent).unwrap_or(&base_dir);
+        let candidate = normalize(&dir.join(specifier)).display().to_string();
+        if has_inline_source(&state, &candidate) {
+            return Ok(("file", candidate));
         }
     }
     let virtual_modules = state.shared.virtual_modules.read().unwrap_or_else(|poison| poison.into_inner());
@@ -57,6 +54,20 @@ pub(crate) fn resolve_kind(
         Resolved::Virtual(name) => ("virtual", name),
         Resolved::File(path) => ("file", path.display().to_string()),
     })
+}
+
+/// Whether `key` names a module evaluated from a string or a registered source file.
+pub(crate) fn has_inline_source(state: &LoopState, key: &str) -> bool {
+    state.inline_sources.borrow().contains_key(key)
+        || state.shared.source_files.read().unwrap_or_else(|poison| poison.into_inner()).contains_key(key)
+}
+
+fn inline_source(state: &LoopState, key: &str) -> Option<String> {
+    if let Some(source) = state.inline_sources.borrow().get(key) {
+        return Some(source.clone());
+    }
+    let files = state.shared.source_files.read().unwrap_or_else(|poison| poison.into_inner());
+    files.get(key).map(|source| source.to_string())
 }
 
 /// Make `name` (relative names resolve against the cwd) load from `source`; returns its key.
@@ -98,8 +109,7 @@ impl Loader for PiLoader {
 
 fn load<'js>(ctx: &Ctx<'js>, key: &str) -> Result<Module<'js, Declared>, JsError> {
     let state = state();
-    let inline = state.inline_sources.borrow().get(key).cloned();
-    if let Some(source) = inline {
+    if let Some(source) = inline_source(&state, key) {
         return load_source(ctx, key, Path::new(key), &source);
     }
     if key.starts_with("node:") || key == "pi:host" {

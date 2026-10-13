@@ -45,6 +45,8 @@ pub(crate) struct Shared {
     /// Files opened through `fs.open`, by descriptor.
     pub files: crate::node::fs::FileTable,
     pub http: crate::node::fetch::Clients,
+    /// Module sources registered by path; they load as if the files existed.
+    pub source_files: RwLock<HashMap<String, Arc<str>>>,
 }
 
 pub(crate) struct PendingPromise {

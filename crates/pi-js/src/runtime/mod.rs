@@ -173,6 +173,7 @@ impl JsRuntime {
             resolver: ModuleResolver::new(),
             files: Default::default(),
             http: Default::default(),
+            source_files: Default::default(),
             interrupt: Arc::new(AtomicBool::new(false)),
             alive: AtomicBool::new(false),
             config: RuntimeConfig {
