@@ -12,6 +12,7 @@ pub mod images;
 pub mod interactive;
 pub mod messages;
 pub mod model_resolver;
+pub mod packages;
 pub mod print_mode;
 pub mod render;
 pub mod resources;
