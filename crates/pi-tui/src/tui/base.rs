@@ -142,6 +142,8 @@ pub(crate) struct TuiInner {
     /// Focus flags that could not be set because the component was borrowed at the time.
     pub pending_focus_flags: RefCell<Vec<(ComponentRef, bool)>>,
     pub dispatch_depth: Cell<u32>,
+    /// The TUI that took over the terminal; render requests of this stopped TUI go there.
+    pub successor: RefCell<Option<Weak<TuiInner>>>,
 }
 
 impl TuiInner {

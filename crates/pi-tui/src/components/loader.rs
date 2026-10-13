@@ -105,6 +105,11 @@ impl Loader {
         self.state.borrow().message.clone()
     }
 
+    /// The current indicator frame, styled like the rendered line (upstream `getRenderedIndicator`).
+    pub fn rendered_indicator(&self) -> String {
+        self.state.borrow().rendered_indicator()
+    }
+
     /// Replaces the indicator. `None` restores the default spinner.
     pub fn set_indicator(&mut self, indicator: Option<LoaderIndicatorOptions>) {
         {

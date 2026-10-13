@@ -55,11 +55,11 @@ fn quotes_fd_paths_with_separators() {
 }
 
 #[test]
-fn no_fd_means_no_attachment_suggestions() {
+fn without_fd_the_built_in_walker_suggests_files() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("README.md"), "x").unwrap();
     let provider = CombinedAutocompleteProvider::new(Vec::new(), dir.path().to_string_lossy().into_owned(), None);
-    assert_eq!(suggest(&provider, "@REA", 4, false), None);
+    assert_eq!(values(&suggest(&provider, "@REA", 4, false)), ["@README.md"]);
 }
 
 #[test]
