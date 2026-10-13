@@ -236,3 +236,17 @@ impl Calls<()> {
         move || calls.push(())
     }
 }
+
+/// Yields to `spawn_local` tasks a few times, then processes UI work. Use inside a `LocalSet`
+/// (see [`local`]).
+pub async fn flush<C: Component + 'static>(harness: &Harness<C>) {
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+    }
+    harness.settle();
+}
+
+/// Runs a future on a `LocalSet`, as interactive mode does, so components can `spawn_local`.
+pub async fn local<F: std::future::Future>(future: F) -> F::Output {
+    tokio::task::LocalSet::new().run_until(future).await
+}

@@ -21,6 +21,7 @@ fn key_hints_format_bound_keys() {
     assert_eq!(key_display_text("app.models.save"), "Ctrl+S");
     assert_eq!(key_text("app.session.new"), "");
     assert_eq!(format_key_text("ctrl+x/shift+y"), "ctrl+x/shift+y");
+    assert_eq!(format_key_display_text("ctrl+x/shift+y"), "Ctrl+X/Shift+Y");
     let hint = pi_tui::utils::strip_terminal_sequences(&key_hint("tui.select.confirm", "select"));
     assert_eq!(hint, "enter select");
     let raw = pi_tui::utils::strip_terminal_sequences(&raw_key_hint("↑↓", "navigate"));
