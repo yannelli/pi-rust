@@ -7,6 +7,7 @@ mod ownership;
 mod reconcile;
 mod run;
 mod runtime;
+mod step;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::atomic::AtomicBool;
