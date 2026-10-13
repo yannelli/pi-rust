@@ -27,6 +27,11 @@ pub fn format_key_text(key: &str) -> String {
     format_key_text_with(key, false)
 }
 
+/// [`format_key_text`] with capitalized parts, such as `Ctrl+X`.
+pub fn format_key_display_text(key: &str) -> String {
+    format_key_text_with(key, true)
+}
+
 fn format_keys(keys: &[String], capitalize: bool) -> String {
     if keys.is_empty() { String::new() } else { format_key_text_with(&keys.join("/"), capitalize) }
 }

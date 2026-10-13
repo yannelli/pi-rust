@@ -29,6 +29,7 @@ globset = "0.4.16"
 ignore = "0.4.23"
 nodejs-semver = "7"
 ring.workspace = true
+jiff = { version = "0.2.35", default-features = false, features = ["std", "tz-system", "tzdb-bundle-platform", "tzdb-zoneinfo"] }
 image = { version = "0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
 regex = "1.11.1"
 serde_yaml_ng = "0.10.0"
