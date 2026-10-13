@@ -23,3 +23,4 @@ pub mod session;
 pub mod settings;
 pub mod system_prompt;
 pub mod tools;
+pub mod update;
