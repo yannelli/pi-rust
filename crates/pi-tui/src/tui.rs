@@ -128,6 +128,7 @@ impl Tui {
             on_debug: RefCell::new(None),
             pending_focus_flags: RefCell::new(Vec::new()),
             dispatch_depth: Cell::new(0),
+            successor: RefCell::new(None),
         });
         let client: Rc<dyn ui_loop::LoopClient> = inner.clone();
         ui_loop::register_client(Rc::downgrade(&client));
@@ -247,7 +248,17 @@ impl Tui {
 
     /// Schedules a render (throttled to one per 16 ms). `force` redraws everything right away.
     pub fn request_render(&self, force: bool) {
-        self.inner.request_render(force);
+        let successor = self.inner.successor.borrow().as_ref().and_then(Weak::upgrade);
+        match successor {
+            Some(next) => Tui::from_inner(next).request_render(force),
+            None => self.inner.request_render(force),
+        }
+    }
+
+    /// Forwards render requests to `next` once this TUI is replaced, so components created for
+    /// this TUI keep repainting after a switch between regular and fullscreen mode.
+    pub fn hand_over_to(&self, next: &Tui) {
+        *self.inner.successor.borrow_mut() = Some(Rc::downgrade(&next.inner));
     }
 
     /// Adds a listener that sees input before the focused component.
