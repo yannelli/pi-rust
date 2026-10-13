@@ -20,7 +20,7 @@ use crate::documents::encode;
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{ConversationId, DocumentId};
 use crate::session::{CommittedObserver, CommittedStateSource, CommittedWatch, DocumentState, Release, Session};
-use crate::types::{CommitChange, CommitPublication, DocumentCommitChange};
+use crate::types::{CommitChange, CommitPublication, DocumentCommitChange, Storage};
 
 /// The view `{ conversation, entries, docs }` as JSON: the conversation record, the raw active entries (as
 /// `ContextView::entries`), and the built-in conversation documents keyed by kind.
@@ -151,6 +151,24 @@ impl ConversationViews {
         T: Send + 'static,
         F: FnOnce(&Json, Arc<Release>) -> (Arc<dyn ViewObserver>, T) + Send + 'static,
     {
+        self.attach_with(id, context, |_, _| async { Ok(()) }, move |value, release, ()| create(value, release))
+    }
+
+    /// [`Self::attach`] with a `prepare` read that runs on the line before the observer is created.
+    pub fn attach_with<T, S, P, PFut, F>(
+        self: &Arc<Self>,
+        id: ConversationId,
+        context: &Context,
+        prepare: P,
+        create: F,
+    ) -> impl Future<Output = DurableResult<(T, Arc<Release>)>> + Send + use<T, S, P, PFut, F>
+    where
+        T: Send + 'static,
+        S: Send + 'static,
+        P: FnOnce(Arc<dyn Storage>, Context) -> PFut + Send + 'static,
+        PFut: Future<Output = DurableResult<S>> + Send + 'static,
+        F: FnOnce(&Json, Arc<Release>, S) -> (Arc<dyn ViewObserver>, T) + Send + 'static,
+    {
         let views = self.clone();
         let context = context.clone();
         self.session.read_on_line(async move {
@@ -175,7 +193,8 @@ impl ConversationViews {
                     }
                 }
             });
-            let (observer, result) = create(&value, release.clone());
+            let prepared = prepare(views.session.storage(), context.clone()).await?;
+            let (observer, result) = create(&value, release.clone(), prepared);
             // Close or cancellation may begin while the mount hydrates; register nothing then.
             if views.closed.load(Ordering::SeqCst) {
                 return Err(closed_error(&views.session));

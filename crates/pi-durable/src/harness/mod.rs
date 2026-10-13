@@ -7,6 +7,7 @@ pub mod context;
 mod conversation;
 mod core;
 pub mod define;
+pub mod events;
 pub mod generation;
 mod host;
 pub mod inbox;
@@ -31,6 +32,7 @@ pub use agent::{AGENT_DOC, INSTRUCTIONS_KEY, add_tools, configure, create_agent}
 pub use conversation::{Conversation, CreateOptions, EntryRange};
 pub use core::{ConversationCreatedHook, EnvBuilder, EnvTarget, HarnessOptions, NowFn, ReportFn};
 pub use define::*;
+pub use events::{AgentEvent, AgentEventStream, watch_events};
 pub use host::{ConversationInit, Harness};
 pub use registry::{Registry, RegistryReader, RegistrySnapshot, builtin_tasks, create_registry};
 pub use scheduler::{ConversationHandle, HookApi, TaskRuntime};
