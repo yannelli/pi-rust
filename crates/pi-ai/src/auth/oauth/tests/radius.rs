@@ -24,6 +24,7 @@ fn select(method: &'static str) -> TestInteraction {
 async fn flow(server: &MockServer) -> RadiusOAuth {
     let mut flow = RadiusOAuth::new("Radius", &format!("{}/", server.base));
     flow.callback_port = free_port().await;
+    flow.hooks.no_timeouts = true;
     flow
 }
 

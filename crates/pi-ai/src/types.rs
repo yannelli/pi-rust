@@ -92,13 +92,25 @@ pub struct Usage {
 }
 
 impl Usage {
-    /// Fill `cost` from per-million-token model prices.
+    /// Fill `cost` from per-million-token model prices. The highest tier whose threshold the
+    /// total input exceeds prices the whole request; 1h cache writes cost twice the input rate.
     pub fn apply_cost(&mut self, cost: &ModelCost) {
+        let input_tokens = self.input + self.cache_read + self.cache_write;
+        let (mut rates, mut threshold) = ((cost.input, cost.output, cost.cache_read, cost.cache_write), None);
+        for tier in &cost.tiers {
+            if input_tokens > tier.input_tokens_above && threshold.is_none_or(|above| tier.input_tokens_above > above) {
+                rates = (tier.input, tier.output, tier.cache_read, tier.cache_write);
+                threshold = Some(tier.input_tokens_above);
+            }
+        }
+        let (input, output, cache_read, cache_write) = rates;
+        let long_write = self.cache_write_1h.unwrap_or_default().min(self.cache_write);
+        let short_write = self.cache_write - long_write;
         let per_million = |tokens: u64, price: f64| tokens as f64 * price / 1_000_000.0;
-        self.cost.input = per_million(self.input, cost.input);
-        self.cost.output = per_million(self.output, cost.output);
-        self.cost.cache_read = per_million(self.cache_read, cost.cache_read);
-        self.cost.cache_write = per_million(self.cache_write, cost.cache_write);
+        self.cost.input = per_million(self.input, input);
+        self.cost.output = per_million(self.output, output);
+        self.cost.cache_read = per_million(self.cache_read, cache_read);
+        self.cost.cache_write = per_million(short_write, cache_write) + per_million(long_write, input * 2.0);
         self.cost.total = self.cost.input + self.cost.output + self.cost.cache_read + self.cost.cache_write;
     }
 }
@@ -626,5 +638,40 @@ mod tests {
         assert_eq!(usage.cost.input, 3.0);
         assert_eq!(usage.cost.output, 7.5);
         assert_eq!(usage.cost.total, 10.5);
+    }
+
+    #[test]
+    fn usage_cost_applies_tiers_and_long_cache_writes() {
+        let cost = ModelCost {
+            input: 3.0,
+            output: 15.0,
+            cache_read: 0.3,
+            cache_write: 3.75,
+            tiers: vec![
+                ModelCostTier {
+                    input_tokens_above: 200_000,
+                    input: 6.0,
+                    output: 22.5,
+                    cache_read: 0.6,
+                    cache_write: 7.5,
+                },
+                ModelCostTier {
+                    input_tokens_above: 100_000,
+                    input: 4.0,
+                    output: 20.0,
+                    cache_read: 0.4,
+                    cache_write: 5.0,
+                },
+            ],
+        };
+        let mut usage = Usage { input: 150_000, cache_read: 100_000, output: 1_000_000, ..Usage::default() };
+        usage.apply_cost(&cost);
+        assert_eq!((usage.cost.input, usage.cost.output), (0.9, 22.5));
+        let mut usage = Usage { input: 200_000, output: 0, ..Usage::default() };
+        usage.apply_cost(&cost);
+        assert_eq!(usage.cost.input, 0.8);
+        let mut usage = Usage { cache_write: 1_000_000, cache_write_1h: Some(400_000), ..Usage::default() };
+        usage.apply_cost(&ModelCost { input: 3.0, cache_write: 3.75, ..Default::default() });
+        assert!((usage.cost.cache_write - (0.6 * 3.75 + 0.4 * 6.0)).abs() < 1e-9);
     }
 }
