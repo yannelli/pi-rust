@@ -85,6 +85,9 @@ struct Core {
     watcher: Option<RecommendedWatcher>,
     /// Watched paths and the identity of what each watch was installed on.
     installed: HashMap<String, (u64, u64)>,
+    /// Real paths of watched paths that differ from the given spelling. FSEvents reports real paths, such as
+    /// `/private/var` for `/var` on macOS.
+    aliases: Vec<(String, String)>,
     events: BTreeSet<String>,
     flush_at: Option<Instant>,
     settle_at: Option<Instant>,
@@ -235,6 +238,12 @@ impl Core {
             let Some(watcher) = self.watcher.as_mut() else { return false };
             match watcher.watch(Path::new(&path), mode) {
                 Ok(()) => {
+                    if let Ok(real) = std::fs::canonicalize(&path).map(|real| real.to_string_lossy().into_owned())
+                        && real != path
+                        && !self.aliases.iter().any(|(existing, _)| *existing == real)
+                    {
+                        self.aliases.push((real, path.clone()));
+                    }
                     self.installed.insert(path, identity);
                     added = true;
                 }
@@ -266,12 +275,21 @@ impl Core {
             self.schedule_flush();
         }
         for path in paths {
-            let path = path.to_string_lossy().into_owned();
+            let path = self.given_spelling(path.to_string_lossy().into_owned());
             // Events about unrelated siblings of an ancestor, or about excluded entries, are ignored.
             if in_scope(&path, &self.targets) {
                 self.events.insert(reported(&path, &self.targets));
                 self.schedule_flush();
             }
+        }
+    }
+
+    /// Map a real path back to the spelling the targets use, by the longest matching alias.
+    fn given_spelling(&self, path: String) -> String {
+        let alias = self.aliases.iter().filter(|(real, _)| is_within(&path, real)).max_by_key(|(real, _)| real.len());
+        match alias {
+            Some((real, given)) => format!("{given}{}", &path[real.len()..]),
+            None => path,
         }
     }
 
@@ -362,6 +380,7 @@ impl LocalFileWatcher {
             snapshot: Snapshot::new(),
             watcher: None,
             installed: HashMap::new(),
+            aliases: Vec::new(),
             events: BTreeSet::new(),
             flush_at: None,
             settle_at: None,
