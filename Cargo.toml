@@ -7,6 +7,7 @@ members = [
     "crates/pi-client",
     "crates/pi-codemode",
     "crates/pi-coding-agent",
+    "crates/pi-durable",
     "crates/pi-embedded",
     "crates/pi-js",
     "crates/pi-mcp",
