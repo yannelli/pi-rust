@@ -362,3 +362,22 @@ async fn tool_results_carry_usage_and_after_hooks_replace_structured_content() {
     });
     assert_eq!(end.expect("tool_execution_end").structured_content, None);
 }
+
+#[tokio::test]
+async fn base_stream_options_reach_the_provider_under_loop_settings() {
+    let (requests, stream_fn) = sequence(vec![]);
+    let mut config = config(stream_fn);
+    config.session_id = Some("loop-session".into());
+    config.stream_options = pi_ai::StreamOptions {
+        transport: Some(pi_ai::Transport::Sse),
+        max_tokens: Some(50),
+        session_id: Some("base-session".into()),
+        ..Default::default()
+    };
+    let (_, sink) = recorder();
+    run_agent_loop(vec![Message::user("run")], &mut AgentContext::default(), &config, sink, CancellationToken::new())
+        .await;
+    let request = requests.lock().unwrap()[0].clone();
+    assert_eq!(request.transport, Some(pi_ai::Transport::Sse));
+    assert_eq!((request.max_tokens, request.session_id.as_deref()), (Some(50), Some("loop-session")));
+}

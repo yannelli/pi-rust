@@ -2,12 +2,12 @@
 //! and reduces loop events into observable state.
 
 use std::collections::{HashSet, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use futures::FutureExt;
 use pi_ai::transcript::{create_initial_system_message, current_system_message, current_system_prompt};
-use pi_ai::{ContentBlock, Message, Model, ThinkingLevel, UserContent, UserMessage, now_ms};
+use pi_ai::{ContentBlock, Message, Model, StreamOptions, ThinkingLevel, UserContent, UserMessage, now_ms};
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
@@ -99,6 +99,8 @@ pub struct AgentHooks {
     pub prepare_request: Option<PrepareRequestFn>,
     pub prepare_next_turn: Option<PrepareNextTurnFn>,
     pub callable_tools: Option<CallableToolsFn>,
+    /// Base request options such as transport, thinking budgets, and payload observers.
+    pub stream_options: StreamOptions,
     pub tool_execution: ToolExecutionMode,
     pub max_tokens: Option<u64>,
     pub temperature: Option<f64>,
@@ -314,8 +316,12 @@ impl Agent {
     }
 
     pub async fn prompt_messages(&self, messages: Vec<Message>) -> anyhow::Result<()> {
+        self.run_prompt(messages, false).await
+    }
+
+    async fn run_prompt(&self, messages: Vec<Message>, skip_initial_steering_poll: bool) -> anyhow::Result<()> {
         let cancel = self.begin_run()?;
-        let (mut context, config) = self.snapshot();
+        let (mut context, config) = self.snapshot(skip_initial_steering_poll);
         run_agent_loop(messages, &mut context, &config, self.sink(), cancel).await;
         self.finish_run();
         Ok(())
@@ -331,15 +337,19 @@ impl Agent {
             matches!(state.messages.last(), Some(Message::Assistant(_)))
         };
         if last_is_assistant {
-            let steering: Vec<Message> = lock(&self.inner.steering).messages.drain(..).collect();
-            let queued = if steering.is_empty() { lock(&self.inner.follow_up).drain() } else { steering };
-            if queued.is_empty() {
+            // Steering already delivered here is not polled again when the run starts.
+            let steering = lock(&self.inner.steering).drain();
+            if !steering.is_empty() {
+                return self.run_prompt(steering, true).await;
+            }
+            let follow_ups = lock(&self.inner.follow_up).drain();
+            if follow_ups.is_empty() {
                 anyhow::bail!("Cannot continue from message role: assistant");
             }
-            return self.prompt_messages(queued).await;
+            return self.run_prompt(follow_ups, false).await;
         }
         let cancel = self.begin_run()?;
-        let (mut context, config) = self.snapshot();
+        let (mut context, config) = self.snapshot(false);
         let result = run_agent_loop_continue(&mut context, &config, self.sink(), cancel).await;
         self.finish_run();
         result.map(|_| ())
@@ -373,14 +383,16 @@ impl Agent {
         self.inner.running.send_replace(false);
     }
 
-    fn snapshot(&self) -> (AgentContext, AgentLoopConfig) {
+    fn snapshot(&self, skip_initial_steering_poll: bool) -> (AgentContext, AgentLoopConfig) {
         let state = lock(&self.inner.state).clone();
         let hooks = lock(&self.inner.hooks).clone();
         let context = AgentContext { system_prompt: state.system_prompt, messages: state.messages, tools: state.tools };
         let steering = self.inner.clone();
         let follow_up = self.inner.clone();
+        let skip = Arc::new(AtomicBool::new(skip_initial_steering_poll));
         let get_steering_messages: MessageSource = Arc::new(move || {
-            let messages = lock(&steering.steering).drain();
+            let messages =
+                if skip.swap(false, Ordering::SeqCst) { Vec::new() } else { lock(&steering.steering).drain() };
             async move { messages }.boxed()
         });
         let get_follow_up_messages: MessageSource = Arc::new(move || {
@@ -407,6 +419,7 @@ impl Agent {
             prepare_request: hooks.prepare_request,
             prepare_next_turn: hooks.prepare_next_turn,
             callable_tools: hooks.callable_tools,
+            stream_options: hooks.stream_options,
         };
         (context, config)
     }
