@@ -147,11 +147,12 @@ pub fn auth_stream_fn(
                     }
                 }
             }
+            let mut observers = None;
             let mut upstream = match request_auth(&runtime, &model).await {
                 Ok(request) => {
                     apply_request_settings(&mut options, &request, &settings);
                     super::extension_hooks::apply_header_hooks(&hooks, &mut options).await;
-                    super::extension_hooks::install_request_observers(&hooks, &mut options);
+                    observers = super::extension_hooks::install_request_observers(&hooks, &mut options);
                     match &inner {
                         Some(stream_fn) => stream_fn(&request.model, &context, options),
                         None => pi_ai::stream(&request.model, &context, options),
@@ -160,6 +161,9 @@ pub fn auth_stream_fn(
                 Err(message) => error_stream(&model, StopReason::Error, message),
             };
             while let Some(event) = upstream.next().await {
+                if let Some(observers) = &observers {
+                    observers.settled().await;
+                }
                 sender.push(event);
             }
         });

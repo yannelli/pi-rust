@@ -2,7 +2,7 @@
 //! `_afterToolCall`, `transformContext`, the turn boundary hooks, and the provider request hooks
 //! of `sdk.ts`).
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock, Weak};
 use std::time::Duration;
 
@@ -41,8 +41,60 @@ pub(crate) async fn apply_header_hooks(slot: &RequestHooksSlot, options: &mut St
 }
 
 /// Payload, response, and stream event observers for one request.
-pub(crate) fn install_request_observers(slot: &RequestHooksSlot, options: &mut StreamOptions) {
-    let Some(runner) = slot_runner(slot) else { return };
+/// Response and stream events waiting for their handlers, in arrival order.
+pub(crate) struct ObserverQueue {
+    sender: tokio::sync::mpsc::UnboundedSender<Value>,
+    pending: AtomicUsize,
+    idle: tokio::sync::Notify,
+}
+
+impl ObserverQueue {
+    fn start(runner: Arc<ExtensionRunner>) -> Arc<Self> {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<Value>();
+        let queue = Arc::new(Self { sender, pending: AtomicUsize::new(0), idle: tokio::sync::Notify::new() });
+        let weak = Arc::downgrade(&queue);
+        tokio::spawn(async move {
+            while let Some(event) = receiver.recv().await {
+                runner.emit(event).await;
+                let Some(queue) = weak.upgrade() else { break };
+                queue.done();
+            }
+        });
+        queue
+    }
+
+    fn push(&self, event: Value) {
+        self.pending.fetch_add(1, Ordering::SeqCst);
+        if self.sender.send(event).is_err() {
+            self.done();
+        }
+    }
+
+    fn done(&self) {
+        if self.pending.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.idle.notify_waiters();
+        }
+    }
+
+    /// Wait until every queued event reached its handlers, as upstream awaits each emit.
+    pub(crate) async fn settled(&self) {
+        loop {
+            let notified = self.idle.notified();
+            if self.pending.load(Ordering::SeqCst) == 0 {
+                return;
+            }
+            notified.await;
+        }
+    }
+}
+
+/// Payload, response, and stream event observers for one request. The returned queue holds the
+/// response and stream events; await [`ObserverQueue::settled`] before passing an event on.
+pub(crate) fn install_request_observers(
+    slot: &RequestHooksSlot,
+    options: &mut StreamOptions,
+) -> Option<Arc<ObserverQueue>> {
+    let runner = slot_runner(slot)?;
     if runner.has_handlers("before_provider_request") {
         let weak = Arc::downgrade(&runner);
         options.on_payload = Some(Arc::new(move |payload: &Value, _model: &Model| {
@@ -55,36 +107,31 @@ pub(crate) fn install_request_observers(slot: &RequestHooksSlot, options: &mut S
     let wants_response = runner.has_handlers("after_provider_response");
     let wants_stream = runner.has_handlers("provider_stream_event");
     if !wants_response && !wants_stream {
-        return;
+        return None;
     }
-    // One ordered queue, so handlers see the response before its stream events, as upstream awaits each.
-    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<Value>();
-    let forward = runner.clone();
-    tokio::spawn(async move {
-        while let Some(event) = receiver.recv().await {
-            forward.emit(event).await;
-        }
-    });
+    // One ordered queue, so handlers see the response before its stream events.
+    let queue = ObserverQueue::start(runner);
     if wants_response {
-        let sender = sender.clone();
+        let queue = queue.clone();
         options.on_response = Some(Arc::new(move |response: &pi_ai::ProviderResponse, _model: &Model| {
-            let event =
-                json!({"type": "after_provider_response", "status": response.status, "headers": response.headers});
-            let _ = sender.send(event);
+            queue.push(
+                json!({"type": "after_provider_response", "status": response.status, "headers": response.headers}),
+            );
         }));
     }
     if wants_stream {
+        let queue = queue.clone();
         options.on_provider_stream_event = Some(Arc::new(move |data: &Value, model: &Model| {
-            let event = json!({
+            queue.push(json!({
                 "type": "provider_stream_event",
                 "data": data,
                 "provider": model.provider,
                 "api": model.api,
                 "model": model.id,
-            });
-            let _ = sender.send(event);
+            }));
         }));
     }
+    Some(queue)
 }
 
 fn outcome(message: &AssistantMessage) -> &'static str {
