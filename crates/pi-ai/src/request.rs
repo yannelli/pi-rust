@@ -157,7 +157,8 @@ pub(crate) fn http_error_message(status: u16, body: &str) -> String {
     if trimmed.is_empty() {
         return format!("Provider HTTP {status}");
     }
-    let json_message = serde_json::from_str::<Value>(trimmed).ok().and_then(|value| {
+    let parsed = serde_json::from_str::<Value>(trimmed).ok();
+    let json_message = parsed.as_ref().and_then(|value| {
         [value.pointer("/error/message"), value.get("message"), value.get("error"), value.get("detail")]
             .into_iter()
             .flatten()
@@ -166,13 +167,18 @@ pub(crate) fn http_error_message(status: u16, body: &str) -> String {
             .find(|message| !message.is_empty())
             .map(str::to_string)
     });
-    let code = serde_json::from_str::<Value>(trimmed).ok().and_then(|value| {
+    let code = parsed.as_ref().and_then(|value| {
         value.pointer("/error/code").or_else(|| value.get("code")).and_then(Value::as_str).map(str::to_string)
     });
     let mut message = truncate_chars(&json_message.unwrap_or_else(|| trimmed.to_string()), MAX_ERROR_MESSAGE_CHARS);
     // Keep the error code: retry classification and usage hints match on it.
     if let Some(code) = code.filter(|code| !code.is_empty() && !message.contains(code.as_str())) {
         message.push_str(&format!(" ({code})"));
+    }
+    // OpenRouter puts the upstream provider's own error in `error.metadata.raw`.
+    let raw = parsed.as_ref().and_then(|value| value.pointer("/error/metadata/raw")).and_then(Value::as_str);
+    if let Some(raw) = raw.filter(|raw| !raw.is_empty() && !message.contains(raw)) {
+        message.push_str(&format!("\n{raw}"));
     }
     format!("Provider HTTP {status}: {message}")
 }
@@ -308,6 +314,10 @@ mod tests {
         assert_eq!(
             http_error_message(429, r#"{"error":{"message":"Quota","code":"insufficient_quota"}}"#),
             "Provider HTTP 429: Quota (insufficient_quota)"
+        );
+        assert_eq!(
+            http_error_message(400, r#"{"error":{"message":"Provider returned error","metadata":{"raw":"bad tool"}}}"#),
+            "Provider HTTP 400: Provider returned error\nbad tool"
         );
     }
 

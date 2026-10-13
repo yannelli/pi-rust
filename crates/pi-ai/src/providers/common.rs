@@ -8,9 +8,8 @@ use tokio_util::sync::CancellationToken;
 
 pub(crate) use super::transform::transform_messages;
 use crate::registry::StreamOptions;
-#[allow(unused_imports)]
-pub(crate) use crate::request::{HttpRequest, http_error_message, truncate_chars};
-use crate::request::{SendOptions, apply_payload_hook, build_headers, error_chain, provider_response, send_request};
+pub(crate) use crate::request::HttpRequest;
+use crate::request::{SendOptions, apply_payload_hook, build_headers, provider_response, send_request};
 use crate::sse::{SseEvent, sse_events};
 use crate::stream::{AssistantMessageEventStream, EventSender, MessageBuilder, event_channel};
 use crate::types::{ContentBlock, Model, StopReason};
@@ -30,37 +29,6 @@ pub(crate) trait SseHandler: Send + 'static {
     fn error_message(&self, message: String) -> String {
         message
     }
-}
-
-/// Send a prepared `request` on a background task and stream its SSE body through `handler`.
-/// Prefer [`spawn_provider_stream`], which also honors the request options.
-#[allow(dead_code)]
-pub(crate) fn spawn_sse_request<H: SseHandler>(
-    model: &Model,
-    request: reqwest::RequestBuilder,
-    cancel: CancellationToken,
-    mut handler: H,
-) -> AssistantMessageEventStream {
-    let (sender, stream) = event_channel();
-    let mut builder = MessageBuilder::new(model, sender);
-    tokio::spawn(async move {
-        let drive = async {
-            let response = request.send().await.map_err(|error| format!("Request failed: {}", error_chain(&error)))?;
-            let status = response.status();
-            if !status.is_success() {
-                let body = response.text().await.unwrap_or_default();
-                return Err(http_error_message(status.as_u16(), &body));
-            }
-            read_events(&mut builder, response, &mut handler, None, None).await
-        };
-        let result = tokio::select! {
-            biased;
-            _ = cancel.cancelled() => Err(String::new()),
-            result = drive => result,
-        };
-        settle(builder, &handler, result, cancel.is_cancelled());
-    });
-    stream
 }
 
 /// POST `request` with the hooks, retries, timeout, and proxy settings of `options`, and
