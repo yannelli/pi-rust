@@ -254,3 +254,13 @@ async fn rejects_pending_requests_after_disconnect_or_disposal() {
     let result = client.request(server_target(), call("test", "disposed", vec![]), None).await;
     assert!(matches!(result, Err(ClientError::Disposed)));
 }
+
+#[tokio::test]
+async fn rejects_an_invalid_service_call_before_sending() {
+    let server = MemoryByteServer::new();
+    let client = connect_client(&server).await.unwrap();
+    let result = client.request(server_target(), call("", "member", vec![]), None).await;
+    assert!(matches!(result, Err(ClientError::Type(_))));
+    assert_eq!(server.messages().len(), 1);
+    client.dispose();
+}

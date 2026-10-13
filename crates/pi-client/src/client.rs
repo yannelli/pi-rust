@@ -2,7 +2,9 @@
 
 use std::sync::{Arc, Mutex};
 
-use pi_chord::services::{ServiceCall, ServiceCatalogueEntry, create_service_catalogue_call, parse_service_catalogue};
+use pi_chord::services::{
+    ServiceCall, ServiceCatalogueEntry, create_service_catalogue_call, parse_service_call, parse_service_catalogue,
+};
 use pi_chord::{AbortSignal, Json};
 use pi_protocol::{
     CancelEnvelope, ClientMessage, DEFAULT_MAX_FRAME_LENGTH, RequestEnvelope, RpcTarget, ServerHello, SessionTarget,
@@ -226,7 +228,9 @@ impl Inner {
             }
             state.request_sequence += 1;
             let id = format!("request-{}", state.request_sequence);
-            let request = RequestEnvelope { id: id.clone(), target: target.clone(), call: call.to_json() };
+            let call = call.to_json();
+            parse_service_call(&call).map_err(|error| ClientError::Type(error.to_string()))?;
+            let request = RequestEnvelope { id: id.clone(), target: target.clone(), call };
             let frame = encode_client_message(&ClientMessage::Request(request), &self.frame_options())?;
             state.pending.insert(id.clone(), Pending { sender: Some(sender), subscription, abort: None });
             (id, transport, frame)
