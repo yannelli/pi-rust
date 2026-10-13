@@ -53,6 +53,8 @@ impl Gate {
     }
 }
 
+type CommitFilter = Arc<dyn Fn(&[StorageWrite]) -> bool + Send + Sync>;
+
 /// Memory storage with observable commits, held calls, and injected commit failures.
 #[derive(Default)]
 pub struct ControlledStorage {
@@ -62,6 +64,8 @@ pub struct ControlledStorage {
     pub mint_count: AtomicUsize,
     pub document_read_count: AtomicUsize,
     commit_gate: Mutex<Option<Gate>>,
+    /// When set, the commit gate holds only the batches it accepts.
+    commit_filter: Mutex<Option<CommitFilter>>,
     find_gate: Mutex<Option<Gate>>,
     commit_failure: Mutex<Option<DurableError>>,
     closed: AtomicBool,
@@ -92,6 +96,12 @@ impl ControlledStorage {
         let gate = Gate::new();
         *self.commit_gate.lock().unwrap() = Some(gate.clone());
         gate
+    }
+
+    /// Hold only the commits whose batch `filter` accepts.
+    pub fn hold_commits_where(&self, filter: impl Fn(&[StorageWrite]) -> bool + Send + Sync + 'static) -> Gate {
+        *self.commit_filter.lock().unwrap() = Some(Arc::new(filter));
+        self.hold_commits()
     }
 
     pub fn hold_find_document(&self) -> Gate {
@@ -132,7 +142,10 @@ impl ControlledStorage {
 impl Storage for ControlledStorage {
     async fn commit(&self, writes: &[StorageWrite], context: &Context) -> DurableResult<Seq> {
         self.commits.lock().unwrap().push(writes.to_vec());
-        if let Some(gate) = Self::take_gate(&self.commit_gate) {
+        let filter = self.commit_filter.lock().unwrap().clone();
+        if filter.is_none_or(|filter| filter(writes))
+            && let Some(gate) = Self::take_gate(&self.commit_gate)
+        {
             gate.pass().await;
         }
         if let Some(error) = self.commit_failure.lock().unwrap().take() {
