@@ -14,6 +14,8 @@ pub mod files;
 pub mod highlight;
 pub mod images;
 pub mod interactive;
+pub mod interactive_components;
+pub mod keybindings;
 pub mod llama;
 pub mod markdown_transform;
 pub mod mcp_cli;

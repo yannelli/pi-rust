@@ -108,6 +108,11 @@ impl ConfigEditor {
         self.write_scope
     }
 
+    /// The settings that toggles write to.
+    pub fn settings(&self) -> &Arc<SettingsManager> {
+        &self.settings
+    }
+
     /// Tab in the selector switches between global and project mode.
     pub fn set_write_scope(&mut self, scope: ConfigWriteScope) {
         self.write_scope = scope;
