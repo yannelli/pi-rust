@@ -1521,6 +1521,7 @@ dependencies = [
  "crossterm",
  "crossterm_winapi",
  "fancy-regex 0.19.2",
+ "ignore",
  "objc2-core-graphics",
  "png",
  "regex",

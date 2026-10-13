@@ -58,7 +58,7 @@ struct Active {
 
 /// The editor slot: a container that holds the editor or the active selector.
 pub struct SelectorSlot {
-    tui: Tui,
+    tui: RefCell<Tui>,
     container: Rc<RefCell<Container>>,
     editor: RefCell<ComponentRef>,
     active: RefCell<Option<Active>>,
@@ -68,12 +68,21 @@ pub struct SelectorSlot {
 impl SelectorSlot {
     pub fn new(tui: Tui, container: Rc<RefCell<Container>>, editor: ComponentRef) -> Rc<Self> {
         Rc::new(Self {
-            tui,
+            tui: RefCell::new(tui),
             container,
             editor: RefCell::new(editor),
             active: RefCell::new(None),
             next_token: Cell::new(1),
         })
+    }
+
+    /// Follow a renderer switch.
+    pub fn set_tui(&self, tui: Tui) {
+        *self.tui.borrow_mut() = tui;
+    }
+
+    fn tui(&self) -> Tui {
+        self.tui.borrow().clone()
     }
 
     pub fn container(&self) -> Rc<RefCell<Container>> {
@@ -117,8 +126,8 @@ impl SelectorSlot {
             container.clear();
             container.add_child(editor.clone());
         }
-        self.tui.set_focus(Some(editor));
-        self.tui.request_render(false);
+        self.tui().set_focus(Some(editor));
+        self.tui().request_render(false);
     }
 
     pub fn show(self: &Rc<Self>, create: Box<dyn FnOnce(SelectorDone) -> SelectorSpec>) {
@@ -140,7 +149,7 @@ impl SelectorSlot {
             container.clear();
             container.add_child(spec.component);
         }
-        self.tui.set_focus(Some(spec.focus));
-        self.tui.request_render(false);
+        self.tui().set_focus(Some(spec.focus));
+        self.tui().request_render(false);
     }
 }
