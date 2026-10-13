@@ -30,7 +30,9 @@ pub struct ExtensionTool {
 
 impl ExtensionTool {
     pub fn new(runner: &Arc<ExtensionRunner>, descriptor: ToolDescriptor) -> Self {
-        let parse = |value: &Option<Value>| value.clone().and_then(|value| serde_json::from_value(value).ok());
+        fn parse<T: serde::de::DeserializeOwned>(value: &Option<Value>) -> Option<T> {
+            value.clone().and_then(|value| serde_json::from_value(value).ok())
+        }
         Self {
             runner: Arc::downgrade(runner),
             exposure: parse(&descriptor.exposure.clone().map(Value::from)).unwrap_or_default(),

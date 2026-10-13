@@ -35,10 +35,6 @@ impl Args {
         self.json(index).as_u64().unwrap_or(0)
     }
 
-    pub fn opt_u64(&self, index: usize) -> Option<u64> {
-        self.json(index).as_u64()
-    }
-
     pub fn bool(&self, index: usize) -> bool {
         self.json(index).as_bool().unwrap_or(false)
     }
@@ -46,10 +42,6 @@ impl Args {
 
 pub(crate) fn error(message: impl std::fmt::Display) -> JsError {
     JsError::new(message.to_string())
-}
-
-pub(crate) fn json(value: impl serde::Serialize) -> Result<HostValue, JsError> {
-    serde_json::to_value(value).map(HostValue::Json).map_err(error)
 }
 
 fn split(args: Vec<HostValue>) -> Result<(String, Args), JsError> {
@@ -105,5 +97,5 @@ pub(crate) fn dispatch_sync(runner: &ExtensionRunner, args: Vec<HostValue>) -> R
 
 pub(crate) async fn dispatch_async(runner: Arc<ExtensionRunner>, args: Vec<HostValue>) -> Result<HostValue, JsError> {
     let (op, args) = split(args)?;
-    ops_async::run(runner, &op, args).await
+    ops_async::run(runner, &op, args.0).await
 }

@@ -231,8 +231,9 @@ impl InteractiveMode {
             let resumed_here = cwd_override.is_some();
             let switch = async move { runtime.switch_session(&path, cwd_override.as_deref()).await };
             match tokio::spawn(switch).await {
-                Ok(Ok(())) if resumed_here => mode.show_status("Resumed session in current cwd"),
-                Ok(Ok(())) => mode.show_status("Resumed session"),
+                Ok(Ok(result)) if result.cancelled => {}
+                Ok(Ok(_)) if resumed_here => mode.show_status("Resumed session in current cwd"),
+                Ok(Ok(_)) => mode.show_status("Resumed session"),
                 Ok(Err(error)) => mode.show_error(&format!("Failed to resume session: {error:#}")),
                 Err(error) => mode.show_error(&format!("Failed to resume session: {error}")),
             }

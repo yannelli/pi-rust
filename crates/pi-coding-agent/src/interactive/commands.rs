@@ -165,7 +165,8 @@ impl InteractiveMode {
                 let input = std::path::PathBuf::from(&path);
                 let result = tokio::spawn(async move { runtime.import_from_jsonl(&input, None).await }).await;
                 match result {
-                    Ok(Ok(())) => mode.show_status(&format!("Session imported from: {path}")),
+                    Ok(Ok(result)) if result.cancelled => {}
+                    Ok(Ok(_)) => mode.show_status(&format!("Session imported from: {path}")),
                     Ok(Err(error)) => mode.show_error(&format!("Failed to import session: {error:#}")),
                     Err(error) => mode.show_error(&format!("Failed to import session: {error}")),
                 }
@@ -249,7 +250,8 @@ impl InteractiveMode {
         let runtime = self.runtime.clone();
         self.spawn(move |mode| async move {
             match tokio::spawn(async move { runtime.new_session(None, None).await }).await {
-                Ok(Ok(())) => {
+                Ok(Ok(result)) if result.cancelled => {}
+                Ok(Ok(_)) => {
                     mode.add_spacer();
                     mode.add_text(|| theme().fg(ThemeColor::Accent, "✓ New session started"), 1, 1);
                     mode.request_render();

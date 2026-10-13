@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use pi_ai::auth::{
-    AuthResolver, Credential, CredentialStore, FileCredentialStore, OAuthLookup, RuntimeCredentialStore,
+    AuthResolver, Credential, CredentialStore, FileCredentialStore, OAuthAuth, OAuthLookup, RuntimeCredentialStore,
 };
 use pi_ai::{Model, ModelRegistry};
 
@@ -43,10 +43,13 @@ pub struct ModelRuntime {
     models_path: PathBuf,
     load_error: Option<String>,
     /// Providers with usable auth at the last check.
-    configured: RwLock<HashSet<String>>,
+    pub(super) configured: RwLock<HashSet<String>>,
     pub(super) virtual_models: RwLock<BTreeMap<(String, String), RegisteredVirtualModel>>,
     pub(super) catalogs: RwLock<CatalogState>,
     pub(super) provider_auth: RwLock<HashMap<String, Arc<dyn ProviderAuth>>>,
+    /// `pi.registerProvider` configs by provider id, applied over `models.json`.
+    pub(super) extension_providers: RwLock<BTreeMap<String, serde_json::Value>>,
+    pub(super) extension_oauth: Arc<RwLock<HashMap<String, Arc<dyn OAuthAuth>>>>,
 }
 
 pub(super) fn read<T>(lock: &RwLock<T>) -> RwLockReadGuard<'_, T> {
@@ -62,7 +65,11 @@ impl ModelRuntime {
     pub async fn create(options: ModelRuntimeOptions) -> Self {
         let (registry, error) = ModelRegistry::load_lenient(&options.models_path);
         let runtime_store = Arc::new(RuntimeCredentialStore::new(options.credentials));
-        let oauth = options.oauth.unwrap_or_else(|| Arc::new(|_: &str| None));
+        let builtin = options.oauth.unwrap_or_else(|| Arc::new(|_: &str| None));
+        let extension_oauth: Arc<RwLock<HashMap<String, Arc<dyn OAuthAuth>>>> = Arc::default();
+        let registered = extension_oauth.clone();
+        let oauth: OAuthLookup =
+            Arc::new(move |provider: &str| read(&registered).get(provider).cloned().or_else(|| builtin(provider)));
         let resolver = Arc::new(AuthResolver::new(runtime_store.clone(), oauth));
         resolver.set_provider_configs(registry.auth_configs());
         let runtime = Self {
@@ -75,6 +82,8 @@ impl ModelRuntime {
             virtual_models: RwLock::default(),
             catalogs: RwLock::default(),
             provider_auth: RwLock::default(),
+            extension_providers: RwLock::default(),
+            extension_oauth,
         };
         runtime.refresh_configured_providers().await;
         runtime

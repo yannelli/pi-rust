@@ -7,17 +7,20 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock, Weak};
 
+use futures::future::BoxFuture;
 use pi_agent::{ToolContext, ToolUpdateCallback};
-use pi_ai::EventSender;
+use pi_ai::{ApiProvider, EventSender};
 use pi_js::{HostFunction, HostValue, JsError, JsHandle, JsRef, JsRuntime, JsRuntimeOptions};
 use pi_mcp::McpServerRegistry;
 use serde_json::{Value, json};
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
+use super::inline::InlineExtension;
+use super::provider::LoginRequest;
 use super::registry::Registry;
 use super::{modules, ops};
-use crate::agent_session::{AgentSession, AgentSessionRuntime, lock};
+use crate::agent_session::{AgentSession, AgentSessionRuntime, ModelRuntime, lock};
 use crate::extension_ui::{ExtensionMode, ExtensionUi, NoOpExtensionUi};
 
 /// A failed extension handler (upstream `ExtensionError`).
@@ -86,10 +89,20 @@ pub struct ExtensionRunner {
     pub(crate) custom_done: Mutex<HashMap<u64, oneshot::Sender<Value>>>,
     pub(crate) data: Mutex<HashMap<u64, DataFn>>,
     pub(crate) nested: Mutex<HashMap<String, ToolContext>>,
-    pub(crate) mcp: Arc<McpServerRegistry>,
+    pub(crate) mcp: McpServerRegistry,
+    model_runtime: Arc<ModelRuntime>,
+    /// Providers this runner registered, with the extension that registered each.
+    pub(crate) providers: Mutex<Vec<(String, String)>>,
+    /// APIs this runner replaced: the replaced implementation and the owning provider.
+    pub(crate) apis: Mutex<HashMap<String, (Option<Arc<dyn ApiProvider>>, Option<String>)>>,
+    pub(crate) logins: Mutex<HashMap<u64, mpsc::UnboundedSender<LoginRequest>>>,
+    pub(crate) virtual_models: Mutex<Vec<(String, String)>>,
+    pub(crate) inline: Mutex<Vec<Arc<dyn InlineExtension>>>,
+    /// Extension paths that registered tools with the session.
+    pub(crate) tool_paths: Mutex<std::collections::BTreeSet<String>>,
+    /// Watchers of signal ids handed to JavaScript, stopped on release.
+    watchers: Mutex<HashMap<u64, CancellationToken>>,
     load_errors: Mutex<Vec<ExtensionLoadError>>,
-    pub(crate) turn_index: AtomicU64,
-    pub(crate) project_trusted: AtomicBool,
     pub(crate) terminal_input: AtomicBool,
     stale: AtomicBool,
     weak: Weak<ExtensionRunner>,
@@ -107,8 +120,17 @@ fn js_error(error: JsError) -> anyhow::Error {
 
 impl ExtensionRunner {
     /// Start a JavaScript runtime with the host modules; no extension is loaded yet.
-    pub async fn start(cwd: &Path, agent_dir: &Path) -> anyhow::Result<Arc<Self>> {
-        let mut options = JsRuntimeOptions::new(cwd);
+    pub fn start(
+        cwd: &Path,
+        agent_dir: &Path,
+        model_runtime: Arc<ModelRuntime>,
+    ) -> BoxFuture<'static, anyhow::Result<Arc<Self>>> {
+        let (cwd, agent_dir) = (cwd.to_path_buf(), agent_dir.to_path_buf());
+        Box::pin(async move { Self::start_at(cwd, agent_dir, model_runtime).await })
+    }
+
+    async fn start_at(cwd: PathBuf, agent_dir: PathBuf, model_runtime: Arc<ModelRuntime>) -> anyhow::Result<Arc<Self>> {
+        let mut options = JsRuntimeOptions::new(&cwd);
         options.name = "pi-extensions".into();
         options.virtual_modules = modules::virtual_modules();
         // Host work runs on the caller's runtime, so operations survive the runner they started from.
@@ -142,8 +164,8 @@ impl ExtensionRunner {
                 js: js.clone(),
                 runtime: Mutex::new(Some(runtime)),
                 host: OnceLock::new(),
-                cwd: cwd.to_path_buf(),
-                agent_dir: agent_dir.to_path_buf(),
+                cwd: cwd.clone(),
+                agent_dir,
                 registry: RwLock::default(),
                 session: RwLock::new(Weak::new()),
                 targets: Mutex::default(),
@@ -155,10 +177,16 @@ impl ExtensionRunner {
                 custom_done: Mutex::default(),
                 data: Mutex::default(),
                 nested: Mutex::default(),
-                mcp: Arc::new(McpServerRegistry::new()),
+                mcp: McpServerRegistry::new(),
+                model_runtime,
+                providers: Mutex::default(),
+                apis: Mutex::default(),
+                logins: Mutex::default(),
+                virtual_models: Mutex::default(),
+                inline: Mutex::default(),
+                tool_paths: Mutex::default(),
+                watchers: Mutex::default(),
                 load_errors: Mutex::default(),
-                turn_index: AtomicU64::new(0),
-                project_trusted: AtomicBool::new(true),
                 terminal_input: AtomicBool::new(false),
                 stale: AtomicBool::new(false),
                 weak: weak.clone(),
@@ -168,7 +196,17 @@ impl ExtensionRunner {
         let config = json!({ "cwd": cwd.display().to_string() });
         let host = module.call_method_ref("createHost", vec![config.into()]).await.map_err(js_error)?;
         let _ = runner.host.set(host);
+        runner.watch_mcp_servers();
         Ok(runner)
+    }
+
+    pub(crate) fn weak(&self) -> Weak<Self> {
+        self.weak.clone()
+    }
+
+    /// The model runtime providers and virtual models register with.
+    pub fn model_runtime(&self) -> &Arc<ModelRuntime> {
+        &self.model_runtime
     }
 
     pub(crate) fn this(&self) -> Arc<Self> {
@@ -239,7 +277,8 @@ impl ExtensionRunner {
         self.registry().handlers.contains(event)
     }
 
-    pub fn mcp_registry(&self) -> &Arc<McpServerRegistry> {
+    /// Servers extensions registered; the session's built-in MCP connects them.
+    pub fn mcp_registry(&self) -> &McpServerRegistry {
         &self.mcp
     }
 
@@ -288,22 +327,34 @@ impl ExtensionRunner {
     /// A token id JavaScript sees as an `AbortSignal`, aborted when `token` is cancelled.
     pub(crate) fn signal_for(&self, token: &CancellationToken) -> u64 {
         let id = self.next_id();
+        let released = CancellationToken::new();
+        lock(&self.watchers).insert(id, released.clone());
         let (token, weak) = (token.clone(), self.weak.clone());
-        tokio::spawn(async move {
-            token.cancelled().await;
-            if let Some(runner) = weak.upgrade() {
-                let _ = runner.call_json("abortSignal", vec![json!(id)]).await;
-            }
-        });
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                tokio::select! {
+                    () = token.cancelled() => {}
+                    () = released.cancelled() => return,
+                }
+                if let Some(runner) = weak.upgrade() {
+                    let _ = runner.call_json("abortSignal", vec![json!(id)]).await;
+                }
+            });
+        }
         id
     }
 
     /// Forget a signal id handed to JavaScript once its operation finished.
     pub(crate) fn release_signal(&self, id: u64) {
+        if let Some(watcher) = lock(&self.watchers).remove(&id) {
+            watcher.cancel();
+        }
         let host = self.host().clone();
-        tokio::spawn(async move {
-            let _ = host.call_method("releaseSignal", vec![json!(id).into()]).await;
-        });
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                let _ = host.call_method("releaseSignal", vec![json!(id).into()]).await;
+            });
+        }
     }
 
     /// The token behind a signal id JavaScript created (`signal.create`).
@@ -311,9 +362,16 @@ impl ExtensionRunner {
         id.and_then(|id| lock(&self.signals).get(&id).cloned()).unwrap_or_default()
     }
 
-    /// Stop the JavaScript runtime. Pending calls fail.
+    /// Stop the JavaScript runtime and restore the APIs it replaced. Pending calls fail.
     pub fn shutdown(&self) {
+        self.restore_apis();
+        for (_, watcher) in lock(&self.watchers).drain() {
+            watcher.cancel();
+        }
         let runtime = lock(&self.runtime).take();
-        drop(runtime);
+        // Dropping the runtime joins its thread, which must not be this one.
+        if let Some(runtime) = runtime {
+            std::thread::spawn(move || drop(runtime));
+        }
     }
 }

@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
-use pi_ai::{ContentBlock, Message, StreamOptions, ThinkingLevel};
+use pi_ai::{AssistantMessage, AssistantMessageEvent, ContentBlock, Message, StopReason, StreamOptions, ThinkingLevel};
 use serde_json::{Map, Value, json};
 
 use crate::resources::{ContextFile, Skill, SourceInfo};
@@ -175,4 +175,73 @@ pub(crate) fn user_content(value: &Value) -> (String, Vec<ContentBlock>) {
 
 pub(crate) fn thinking_level(value: &Value) -> Option<ThinkingLevel> {
     value.as_str().and_then(crate::model_resolver::parse_thinking_level)
+}
+
+/// Upstream `SimpleStreamOptions` JSON for a JavaScript stream; `signal` is a signal id.
+pub(crate) fn stream_options_to_json(options: &StreamOptions, signal: u64) -> Value {
+    let mut value = json!({
+        "signal": signal,
+        "headers": headers_to_json(&options.headers, &options.suppressed_headers),
+    });
+    let mut set = |key: &str, field: Value| {
+        if !field.is_null() {
+            value[key] = field;
+        }
+    };
+    set("apiKey", json!(options.api_key));
+    set("maxTokens", json!(options.max_tokens));
+    set("temperature", json!(options.temperature));
+    set("reasoning", json!(options.reasoning.filter(|level| *level != ThinkingLevel::Off)));
+    set("sessionId", json!(options.session_id));
+    set("cacheRetention", json!(options.cache_retention));
+    set("toolChoice", json!(options.tool_choice));
+    set("serviceTier", json!(options.service_tier));
+    set("timeoutMs", json!(options.timeout_ms));
+    set("maxRetries", json!(options.max_retries));
+    set("metadata", json!(options.metadata));
+    set("env", if options.env.is_empty() { Value::Null } else { json!(options.env) });
+    value
+}
+
+/// A stream event pushed by a JavaScript provider.
+pub(crate) fn event_from_json(value: &Value) -> Option<AssistantMessageEvent> {
+    let partial = || serde_json::from_value::<AssistantMessage>(value["partial"].clone()).ok();
+    let index = || value["contentIndex"].as_u64().map(|index| index as usize);
+    let text = |key: &str| value[key].as_str().unwrap_or_default().to_string();
+    let reason = || serde_json::from_value::<StopReason>(value["reason"].clone()).unwrap_or(StopReason::Stop);
+    Some(match value["type"].as_str()? {
+        "start" => AssistantMessageEvent::Start { partial: partial()? },
+        "text_start" => AssistantMessageEvent::TextStart { content_index: index()?, partial: partial()? },
+        "text_delta" => {
+            AssistantMessageEvent::TextDelta { content_index: index()?, delta: text("delta"), partial: partial()? }
+        }
+        "text_end" => {
+            AssistantMessageEvent::TextEnd { content_index: index()?, content: text("content"), partial: partial()? }
+        }
+        "thinking_start" => AssistantMessageEvent::ThinkingStart { content_index: index()?, partial: partial()? },
+        "thinking_delta" => {
+            AssistantMessageEvent::ThinkingDelta { content_index: index()?, delta: text("delta"), partial: partial()? }
+        }
+        "thinking_end" => {
+            AssistantMessageEvent::ThinkingEnd { content_index: index()?, content: text("content"), partial: partial()? }
+        }
+        "toolcall_start" => AssistantMessageEvent::ToolcallStart { content_index: index()?, partial: partial()? },
+        "toolcall_delta" => {
+            AssistantMessageEvent::ToolcallDelta { content_index: index()?, delta: text("delta"), partial: partial()? }
+        }
+        "toolcall_end" => AssistantMessageEvent::ToolcallEnd {
+            content_index: index()?,
+            tool_call: serde_json::from_value(value["toolCall"].clone()).ok()?,
+            partial: partial()?,
+        },
+        "done" => AssistantMessageEvent::Done {
+            reason: reason(),
+            message: serde_json::from_value(value["message"].clone()).ok()?,
+        },
+        "error" => AssistantMessageEvent::Error {
+            reason: serde_json::from_value(value["reason"].clone()).unwrap_or(StopReason::Error),
+            error: serde_json::from_value(value["error"].clone()).ok()?,
+        },
+        _ => return None,
+    })
 }

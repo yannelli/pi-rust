@@ -38,7 +38,7 @@ impl AgentSession {
         }
         self.flush_pending_bash_messages();
         self.flush_pending_custom_messages();
-        self.emit_agent_settled();
+        self.emit_agent_settled().await;
         result
     }
 
@@ -52,7 +52,7 @@ impl AgentSession {
                 self.agent.continue_run().await?;
                 continue;
             }
-            if self.abort_requested() || !self.agent.has_queued_messages() {
+            if self.abort_requested() || !self.before_settle_boundary().await || self.abort_requested() {
                 break;
             }
             self.agent.continue_run().await?;
@@ -60,13 +60,16 @@ impl AgentSession {
         Ok(())
     }
 
-    fn emit_agent_settled(&self) {
+    async fn emit_agent_settled(&self) {
         let aborted = {
             let mut state = lock(&self.state);
             state.run_active = false;
             state.abort_requested
         };
         self.cache_warmer().on_agent_settled();
+        if let Some(runner) = self.extension_runner() {
+            runner.emit(serde_json::json!({"type": "agent_settled", "aborted": aborted})).await;
+        }
         self.emit(&AgentSessionEvent::AgentSettled { aborted });
         self.notify_idle();
     }

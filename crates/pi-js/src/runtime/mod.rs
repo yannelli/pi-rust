@@ -233,6 +233,9 @@ fn thread_main(
     setup: LoopSetup,
     ready: mpsc::Sender<Result<(), JsError>>,
 ) {
+    // Host functions on this thread may spawn tasks on the runtime's tokio runtime.
+    let tokio = shared.tokio.clone();
+    let _entered = tokio.enter();
     let state = LoopState::install(shared.clone(), sender);
     let (runtime, context) = match event_loop::create(&setup, &state) {
         Ok(pair) => pair,

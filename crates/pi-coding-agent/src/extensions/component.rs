@@ -111,7 +111,7 @@ impl JsComponent {
                     let object = value.as_object().cloned();
                     let has = |name: &str| {
                         object.as_ref().is_some_and(|object| {
-                            object.get::<_, rquickjs::Value>(name).is_ok_and(|value| !value.is_undefined())
+                            object.get::<_, pi_js::rquickjs::Value>(name).is_ok_and(|value| !value.is_undefined())
                         })
                     };
                     Ok((has("handleInput"), has("wantsKeyRelease"), has("focused")))
@@ -147,10 +147,10 @@ impl OptionalMethod for JsRef {
         self.handle().blocking_with(move |scope| {
             let value = scope.value(&target)?;
             let Some(object) = value.as_object() else { return Ok(()) };
-            let function: rquickjs::Value = object.get(method.as_str()).map_err(|error| scope.caught(error))?;
+            let function: pi_js::rquickjs::Value = object.get(method.as_str()).map_err(|error| scope.caught(error))?;
             if let Some(function) = function.as_function() {
-                let _: rquickjs::Value =
-                    function.call((rquickjs::function::This(value.clone()),)).map_err(|error| scope.caught(error))?;
+                let _: pi_js::rquickjs::Value =
+                    function.call((pi_js::rquickjs::function::This(value.clone()),)).map_err(|error| scope.caught(error))?;
             }
             Ok(())
         })

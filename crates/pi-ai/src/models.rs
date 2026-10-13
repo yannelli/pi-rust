@@ -99,6 +99,11 @@ impl ModelRegistry {
         }
     }
 
+    /// Keep only the models `keep` accepts.
+    pub fn retain_models(&mut self, keep: impl Fn(&Model) -> bool) {
+        self.models.retain(|model| keep(model));
+    }
+
     /// Every model, including image and classifier models.
     pub fn all_models(&self) -> &[Model] {
         &self.models

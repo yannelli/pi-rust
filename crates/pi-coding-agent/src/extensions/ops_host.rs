@@ -30,8 +30,8 @@ fn theme_snapshot(theme: &crate::theme::Theme) -> Value {
     let bg: serde_json::Map<String, Value> =
         ThemeBg::ALL.iter().map(|color| (color.name().into(), json!(theme.get_bg_ansi(*color)))).collect();
     let mode = match theme.get_color_mode() {
-        pi_tui::TerminalColorMode::Truecolor => "truecolor",
-        pi_tui::TerminalColorMode::Color256 => "256color",
+        pi_tui::colors::TerminalColorMode::Truecolor => "truecolor",
+        pi_tui::colors::TerminalColorMode::Color256 => "256color",
     };
     let appearance = match theme.appearance() {
         crate::theme::ThemeAppearance::Light => "light",
@@ -62,7 +62,7 @@ fn builtin_info(runner: &ExtensionRunner, name: &str) -> Result<Value, JsError> 
 }
 
 fn catalog(kind: &str, args: &Args) -> Value {
-    let models = pi_ai::builtin_models();
+    let models = pi_ai::models::builtin_models();
     match kind {
         "model" => {
             let (provider, id) = (args.opt_str(1), args.opt_str(2));
@@ -208,7 +208,7 @@ pub(crate) fn sync(runner: &ExtensionRunner, op: &str, args: &Args) -> Result<Ho
         "mcp.list" => runner.mcp_servers_json(),
         "stream.event" => {
             let sender = lock(&runner.sinks).get(&args.u64(0)).cloned();
-            if let (Some(sender), Ok(event)) = (sender, serde_json::from_value(args.json(1))) {
+            if let (Some(sender), Some(event)) = (sender, super::convert::event_from_json(&args.json(1))) {
                 sender.push(event);
             }
             Value::Null

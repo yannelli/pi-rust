@@ -4,6 +4,7 @@ import { createEventBus, createExtension, createExtensionAPI, createRuntime } fr
 import * as bridge from "./bridge.js";
 import { call, callAsync, errorMessage, optional, registerCallback, releaseCallback, signalFor } from "./bridge.js";
 import { Runner } from "./runner.js";
+import { apiProviders } from "./ai.js";
 import { sessionStream } from "./stream.js";
 import { currentTheme } from "./theme.js";
 import * as ui from "./ui.js";
@@ -119,6 +120,8 @@ export function createHost(config) {
 			host.flush();
 			return errors;
 		},
+		bindModels: () => runtime.bindModels(),
+		flagValues: () => Object.fromEntries(runtime.flagValues),
 		bind() {
 			runtime.bind();
 			dirty = true;
@@ -247,7 +250,14 @@ export function createHost(config) {
 			if (!provider?.streamSimple) throw new Error(`Provider ${name} has no streamSimple`);
 			const stream = provider.streamSimple(model, context, { ...options, signal: signalFor(options.signal) });
 			for await (const event of stream) call("stream.event", sink, event);
-			return optional(await stream.result?.());
+			return null;
+		},
+		async apiStream(api, model, context, options, sink) {
+			const provider = apiProviders.get(api)?.provider;
+			if (!provider) throw new Error(`No provider registered for API: ${api}`);
+			const stream = provider.streamSimple(model, context, { ...options, signal: signalFor(options.signal) });
+			for await (const event of stream) call("stream.event", sink, event);
+			return null;
 		},
 		async providerHeaders(name, model) {
 			const headers = runtime.providers.get(name)?.config.headers;
@@ -317,6 +327,7 @@ function loginCallbacks(keys) {
 	const forward = (name) => (...args) => callAsync("oauth.callback", keys, name, ...args.map((arg) => (typeof arg === "function" ? null : arg)));
 	return {
 		onAuth: (info) => void forward("onAuth")(info),
+		onDeviceCode: (info) => void forward("onDeviceCode")(info),
 		onPrompt: (prompt) => forward("onPrompt")(prompt),
 		onProgress: (message) => void forward("onProgress")(message),
 		onManualCodeInput: () => forward("onManualCodeInput")(),

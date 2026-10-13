@@ -123,10 +123,16 @@ async fn route_direct(
 
 /// Wrap `inner` (or `pi_ai::stream`) so each request carries resolved auth and settings.
 /// Virtual models are routed first, as requests outside the agent loop.
-pub fn auth_stream_fn(runtime: Arc<ModelRuntime>, settings: Arc<SettingsManager>, inner: Option<StreamFn>) -> StreamFn {
+/// `hooks` adds the extension provider request hooks.
+pub fn auth_stream_fn(
+    runtime: Arc<ModelRuntime>,
+    settings: Arc<SettingsManager>,
+    inner: Option<StreamFn>,
+    hooks: super::RequestHooksSlot,
+) -> StreamFn {
     Arc::new(move |model: &Model, context: &pi_ai::Context, mut options: StreamOptions| {
         let (sender, stream) = event_channel();
-        let (runtime, settings, inner) = (runtime.clone(), settings.clone(), inner.clone());
+        let (runtime, settings, inner, hooks) = (runtime.clone(), settings.clone(), inner.clone(), hooks.clone());
         let (mut model, context) = (model.clone(), context.clone());
         tokio::spawn(async move {
             if is_virtual_model(&model) {
@@ -144,6 +150,8 @@ pub fn auth_stream_fn(runtime: Arc<ModelRuntime>, settings: Arc<SettingsManager>
             let mut upstream = match request_auth(&runtime, &model).await {
                 Ok(request) => {
                     apply_request_settings(&mut options, &request, &settings);
+                    super::extension_hooks::apply_header_hooks(&hooks, &mut options).await;
+                    super::extension_hooks::install_request_observers(&hooks, &mut options);
                     match &inner {
                         Some(stream_fn) => stream_fn(&request.model, &context, options),
                         None => pi_ai::stream(&request.model, &context, options),

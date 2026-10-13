@@ -51,6 +51,8 @@ pub struct CreateAgentSessionOptions {
     /// Restore the tools the transcript declares instead of the initial selection, as upstream
     /// sessions created without `initialActiveToolNames` do.
     pub restore_tools: bool,
+    /// Extensions loaded for this session ([`crate::extensions::load_extensions`]).
+    pub extensions: Option<Arc<crate::extensions::ExtensionRunner>>,
 }
 
 impl CreateAgentSessionOptions {
@@ -68,6 +70,7 @@ impl CreateAgentSessionOptions {
             stream_fn: None,
             mcp: McpSessionOptions::default(),
             restore_tools: false,
+            extensions: None,
         }
     }
 }
@@ -199,12 +202,18 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
     });
     agent.set_queue_modes(settings.steering_mode(), settings.follow_up_mode());
     let has_custom_stream = options.stream_fn.is_some();
-    let stream_fn = auth_stream_fn(services.model_runtime.clone(), settings.clone(), options.stream_fn);
+    let request_hooks = super::RequestHooksSlot::default();
+    let stream_fn =
+        auth_stream_fn(services.model_runtime.clone(), settings.clone(), options.stream_fn, request_hooks.clone());
     let resources = services.resources().resources().clone();
     let base_prompt = prompt_options(&services.cwd, &resources);
     let builtin = builtin_tools(&services.cwd, &settings);
     let tools = ToolState::new(builtin, options.custom_tools, selection, base_prompt);
-    let builtins = BuiltinState { mcp_options: options.mcp, ..BuiltinState::default() };
+    let mut mcp_options = options.mcp;
+    if let Some(runner) = &options.extensions {
+        mcp_options.registry = Some(runner.mcp_registry().clone());
+    }
+    let builtins = BuiltinState { mcp_options, ..BuiltinState::default() };
     let (idle, _) = watch::channel(true);
     let session = Arc::new_cyclic(|weak| {
         let warmer_host = Arc::new(SessionWarmerHost::new(weak.clone()));
@@ -226,6 +235,8 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
             disposed: AtomicBool::new(false),
             cache_warmer: CacheWarmer::new(warmer_host.clone()),
             warmer_host,
+            extensions: Default::default(),
+            request_hooks,
             weak: weak.clone(),
         }
     });
@@ -243,6 +254,9 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
     });
     *lock(&session.agent_listener) = Some(id);
     session.refresh_environment();
+    if let Some(runner) = options.extensions {
+        session.attach_extensions(runner).await;
+    }
     session.start_builtin_extensions();
     Ok(CreateAgentSessionResult { session, model_fallback_message })
 }

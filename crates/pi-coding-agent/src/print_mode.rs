@@ -8,6 +8,8 @@ use pi_ai::{ContentBlock, Message, StopReason};
 
 use crate::agent_session::{AgentSession, AgentSessionRuntime, PromptOptions};
 use crate::cli::OutputMode;
+use crate::extension_ui::ExtensionMode;
+use crate::extensions::ExtensionBindings;
 
 /// One JSON line on the real stdout, which the stdout guard keeps for protocol output.
 fn write_line(line: &str) {
@@ -39,7 +41,7 @@ fn bind_json_output(runtime: &AgentSessionRuntime) {
 /// Run `initial_message` with `initial_images`, then each of `messages`. Returns the exit code:
 /// 1 when a prompt fails or, in text mode, when the last response is an error or aborted.
 pub async fn run_print_mode(
-    runtime: &AgentSessionRuntime,
+    runtime: &Arc<AgentSessionRuntime>,
     mode: OutputMode,
     initial_message: Option<String>,
     initial_images: Vec<ContentBlock>,
@@ -51,6 +53,15 @@ pub async fn run_print_mode(
         write_line(&header.to_string());
         bind_json_output(runtime);
     }
+    let bindings = ExtensionBindings {
+        mode: if json { ExtensionMode::Json } else { ExtensionMode::Print },
+        runtime: Some(Arc::downgrade(runtime)),
+        on_error: Some(Arc::new(|error: &crate::extensions::ExtensionError| {
+            eprintln!("Extension error ({}): {}", error.extension_path, error.error);
+        })),
+        ..ExtensionBindings::default()
+    };
+    runtime.session().bind_extensions(bindings).await;
     let result = async {
         if let Some(text) = initial_message {
             let options = PromptOptions { images: initial_images, ..PromptOptions::default() };

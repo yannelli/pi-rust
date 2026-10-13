@@ -6,9 +6,9 @@ use std::sync::Arc;
 
 use pi_agent::AgentToolResult;
 use pi_js::{HostValue, JsError};
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
-use super::convert::{prompt_options_from_json, prompt_options_to_json};
+use super::convert::prompt_options_from_json;
 use super::ops::{Args, error};
 use super::runner::{ExtensionError, ExtensionRunner};
 use crate::agent_session::{AgentSession, lock};
@@ -260,7 +260,7 @@ fn context(runner: &ExtensionRunner, session: &Arc<AgentSession>, name: &str, ta
             None => Value::Null,
         },
         "systemPrompt" => json!(session.system_prompt()),
-        "systemPromptOptions" => prompt_options_to_json(&session.extension_prompt_options()),
+        "systemPromptOptions" => session.extension_prompt_options(),
         other => return Err(error(format!("Unknown context property: {other}"))),
     })
 }
@@ -275,6 +275,11 @@ pub(crate) fn sync(runner: &ExtensionRunner, op: &str, args: &Args) -> Result<Ho
             }
             Value::Null
         }
+        ("session", "write") => super::replace::write(runner, args)?,
+        // `project_trust` handlers run before a session exists.
+        ("ctx", "mode") if args.u64(0) == 0 => json!(runner.mode().as_str()),
+        ("ctx", "hasUI") if args.u64(0) == 0 => json!(runner.mode().has_ui()),
+        ("ctx", "cwd") if args.u64(0) == 0 && runner.session().is_none() => json!(runner.cwd().display().to_string()),
         ("prompt", "build") => {
             let options = prompt_options_from_json(&args.json(0), runner.cwd());
             json!(crate::system_prompt::render_system_prompt(&options).map_err(error)?)
@@ -313,7 +318,3 @@ where
     })
 }
 
-/// An object of string values, for headers and similar maps.
-pub(crate) fn string_map(value: &Value) -> Map<String, Value> {
-    value.as_object().cloned().unwrap_or_default()
-}

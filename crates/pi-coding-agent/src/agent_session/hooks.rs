@@ -7,8 +7,8 @@ use std::sync::{Arc, Weak};
 use futures::FutureExt;
 use pi_agent::transcript::hide_tool_declarations;
 use pi_agent::{
-    AfterToolCallFn, AfterToolCallResult, AgentContext, AgentHooks, AgentLoopTurnUpdate, BeforeToolCallFn,
-    CallableToolsFn, ConvertToLlmFn, PrepareNextTurnFn, PrepareRequestFn, TransformContextFn,
+    AfterToolCallFn, AgentContext, AgentHooks, AgentLoopTurnUpdate, AgentTurnDecision, BeforeToolCallFn,
+    CallableToolsFn, ConvertToLlmFn, FinishTurnFn, PrepareNextTurnFn, PrepareRequestFn, TransformContextFn,
 };
 use pi_ai::Message;
 
@@ -76,11 +76,37 @@ fn prepare_next_turn_hook(weak: Weak<AgentSession>) -> PrepareNextTurnFn {
     })
 }
 
+/// `tool_result` handlers, then image normalization of the final content.
 fn after_tool_call_hook(weak: Weak<AgentSession>) -> AfterToolCallFn {
     Arc::new(move |call, _cancel| {
-        let content = weak.upgrade().and_then(|session| session.normalize_tool_images(&call.result.content));
-        async move { content.map(|content| AfterToolCallResult { content: Some(content), ..Default::default() }) }
-            .boxed()
+        let weak = weak.clone();
+        async move {
+            let session = weak.upgrade()?;
+            let hooked = session.extension_tool_result(&call).await;
+            let content = hooked.as_ref().and_then(|hooked| hooked.content.clone());
+            let base = content.clone().unwrap_or_else(|| call.result.content.clone());
+            let normalized = session.normalize_tool_images(&base);
+            if hooked.is_none() && normalized.is_none() {
+                return None;
+            }
+            let mut result = hooked.unwrap_or_default();
+            result.content = normalized.or(content);
+            Some(result)
+        }
+        .boxed()
+    })
+}
+
+/// `turn_end` boundary handlers decide whether the run continues (upstream `finishTurn`).
+fn finish_turn_hook(weak: Weak<AgentSession>) -> FinishTurnFn {
+    Arc::new(move |turn, _cancel| {
+        let weak = weak.clone();
+        async move {
+            let session = weak.upgrade()?;
+            let continued = session.finish_turn_boundary(turn.message, turn.tool_results).await;
+            continued.then_some(AgentTurnDecision::Continue)
+        }
+        .boxed()
     })
 }
 
@@ -98,21 +124,27 @@ fn callable_tools_hook(weak: Weak<AgentSession>) -> CallableToolsFn {
 /// `_installHiddenDeclarationsProjection`).
 fn transform_context_hook(weak: Weak<AgentSession>) -> TransformContextFn {
     Arc::new(move |messages, _cancel| {
-        let hidden = weak.upgrade().map(|session| session.hidden_declarations()).unwrap_or_default();
-        async move { hide_tool_declarations(messages, &hidden) }.boxed()
+        let weak = weak.clone();
+        async move {
+            let Some(session) = weak.upgrade() else { return messages };
+            let messages = session.extension_context(messages).await;
+            hide_tool_declarations(messages, &session.hidden_declarations())
+        }
+        .boxed()
     })
 }
 
 /// A call waits for the MCP servers it needs (upstream MCP `tool_call` handler).
+/// Extension `tool_call` handlers run after the wait and may block or edit the call.
 fn before_tool_call_hook(weak: Weak<AgentSession>) -> BeforeToolCallFn {
     Arc::new(move |call, cancel| {
-        let manager = weak.upgrade().and_then(|session| session.mcp_manager());
-        let (name, args) = (call.tool_call.name.clone(), call.args.clone());
+        let weak = weak.clone();
         async move {
-            if let Some(manager) = manager {
-                manager.wait_for_tool_call(&name, &args, &cancel).await;
+            let session = weak.upgrade()?;
+            if let Some(manager) = session.mcp_manager() {
+                manager.wait_for_tool_call(&call.tool_call.name, call.args, &cancel).await;
             }
-            None
+            session.extension_tool_call(&call).await
         }
         .boxed()
     })
@@ -135,7 +167,9 @@ impl AgentSession {
             before_tool_call: Some(before_tool_call_hook(weak.clone())),
             after_tool_call: Some(after_tool_call_hook(weak.clone())),
             transform_context: Some(transform_context_hook(weak.clone())),
-            callable_tools: Some(callable_tools_hook(weak)),
+            callable_tools: Some(callable_tools_hook(weak.clone())),
+            finish_turn: Some(finish_turn_hook(weak.clone())),
+            on_event: Some(super::extension_hooks::agent_event_hook(weak)),
             session_id: Some(self.session_id()),
             ..AgentHooks::default()
         });

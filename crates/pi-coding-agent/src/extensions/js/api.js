@@ -69,6 +69,7 @@ export function createRuntime(onChange) {
 	const unsubscribers = new Set();
 	const runtime = {
 		bound: false,
+		modelsBound: false,
 		staleMessage: undefined,
 		flagValues: new Map(),
 		pendingProviders: [],
@@ -99,7 +100,7 @@ export function createRuntime(onChange) {
 		},
 		registerProvider(name, config, extensionPath) {
 			runtime.providers.set(name, { config, extensionPath });
-			if (!runtime.bound) {
+			if (!runtime.modelsBound) {
 				runtime.pendingProviders.push(name);
 				return;
 			}
@@ -122,12 +123,12 @@ export function createRuntime(onChange) {
 		unregisterProvider(name) {
 			runtime.providers.delete(name);
 			runtime.pendingProviders = runtime.pendingProviders.filter((pending) => pending !== name);
-			if (runtime.bound) call("provider.unregister", name);
+			if (runtime.modelsBound) call("provider.unregister", name);
 		},
 		registerVirtualModel(definition, extensionPath) {
 			const key = `${definition.provider}/${definition.id}`;
 			runtime.virtualModels.set(key, { definition, extensionPath });
-			if (!runtime.bound) {
+			if (!runtime.modelsBound) {
 				runtime.pendingVirtualModels.push(key);
 				return;
 			}
@@ -152,18 +153,23 @@ export function createRuntime(onChange) {
 			const key = `${provider}/${id}`;
 			runtime.virtualModels.delete(key);
 			runtime.pendingVirtualModels = runtime.pendingVirtualModels.filter((pending) => pending !== key);
-			if (runtime.bound) call("virtualModel.unregister", provider, id);
+			if (runtime.modelsBound) call("virtualModel.unregister", provider, id);
 		},
-		/** Rust bound the session: flush queued registrations, then act directly. */
+		/** The model runtime exists: apply queued providers and virtual models, then directly. */
+		bindModels() {
+			runtime.modelsBound = true;
+			for (const name of runtime.pendingProviders.splice(0)) runtime.applyProvider(name);
+			for (const key of runtime.pendingVirtualModels.splice(0)) runtime.applyVirtualModel(key);
+		},
+		/** Rust bound the session: actions go to it. */
 		bind() {
+			runtime.bindModels();
 			runtime.bound = true;
 			runtime.action = (op, ...args) => {
 				runtime.assertActive();
 				runtime.markChanged(true);
 				return call(op, 0, ...args);
 			};
-			for (const name of runtime.pendingProviders.splice(0)) runtime.applyProvider(name);
-			for (const key of runtime.pendingVirtualModels.splice(0)) runtime.applyVirtualModel(key);
 		},
 	};
 	return runtime;

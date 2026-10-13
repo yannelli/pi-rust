@@ -461,7 +461,7 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
         }
         AppMode::Print | AppMode::Json => {
             let output = if mode == AppMode::Json { OutputMode::Json } else { OutputMode::Text };
-            Ok(run_print_mode(&runtime, output, initial_message, files.images, args.messages).await)
+            Ok(run_print_mode(&Arc::new(runtime), output, initial_message, files.images, args.messages).await)
         }
         _ => {
             session.model_runtime().refresh_in_background();

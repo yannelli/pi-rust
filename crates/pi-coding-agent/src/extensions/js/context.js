@@ -152,9 +152,26 @@ export function createToolContext(runner, toolCallId, signal, target = 0) {
 	});
 }
 
+/** The session manager a `newSession` setup writes to (upstream `SessionManager`). */
+function createWritableSessionManager(target) {
+	const write = (method, ...args) => call("session.write", target, method, ...args);
+	return {
+		...createSessionManagerView(target),
+		appendMessage: (message) => write("appendMessage", message),
+		appendCustomEntry: (customType, data) => write("appendCustomEntry", customType, data ?? null),
+		appendCustomMessageEntry: (customType, content, display, details) =>
+			write("appendCustomMessageEntry", customType, content, Boolean(display), details ?? null),
+		appendSessionInfo: (name) => write("appendSessionInfo", name),
+		appendLabelChange: (targetId, label) => write("appendLabelChange", targetId, label ?? null),
+		appendModelChange: (provider, modelId) => write("appendModelChange", provider, modelId),
+		appendThinkingLevelChange: (level) => write("appendThinkingLevelChange", level),
+	};
+}
+
 async function replaceSession(runner, op, args, options) {
 	const withSession = options?.withSession;
-	const setupKey = options?.setup ? registerCallback(options.setup) : undefined;
+	const setup = options?.setup;
+	const setupKey = setup ? registerCallback((target) => setup(createWritableSessionManager(target))) : undefined;
 	try {
 		const result = await callAsync(op, ...args, { ...options, setup: setupKey, withSession: undefined });
 		if (!result.cancelled && withSession && result.target) {

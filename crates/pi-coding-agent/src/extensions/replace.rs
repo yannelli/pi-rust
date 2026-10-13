@@ -36,9 +36,6 @@ fn replaced(runner: &ExtensionRunner, runtime: &AgentSessionRuntime, cancelled: 
 
 pub(crate) async fn run(runner: &Arc<ExtensionRunner>, name: &str, args: &Args) -> Result<Value, JsError> {
     let target = args.u64(0);
-    if name == "write" {
-        return Err(error("session.write is synchronous"));
-    }
     if name == "navigateTree" {
         let session = runner.target_session(target)?;
         let options = args.json(2);
@@ -65,7 +62,7 @@ pub(crate) async fn run(runner: &Arc<ExtensionRunner>, name: &str, args: &Args) 
             let parent = options["parentSession"].as_str().map(str::to_string);
             let setup = options["setup"].as_u64().map(|key| {
                 let weak = Arc::downgrade(runner);
-                let setup: crate::agent_session::runtime::AsyncSetupFn = Box::new(move |session: Arc<AgentSession>| {
+                let setup: crate::agent_session::AsyncSetupFn = Box::new(move |session: Arc<AgentSession>| {
                     async move {
                         let Some(runner) = weak.upgrade() else { return };
                         let id = add_target(&runner, &session);
