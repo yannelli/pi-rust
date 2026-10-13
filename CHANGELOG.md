@@ -2,6 +2,25 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.1.4] - 2026-10-13
+
+### Added
+
+- **chord:** bundle facets with oxc and load them through QuickJS ([114d294](https://github.com/yannelli/pi-rust/commit/114d294bcff0e4bdba05298977a90aa6eeb54e5b))
+- **chord:** read, check, and load facet bundle manifests and artifacts ([e7b5465](https://github.com/yannelli/pi-rust/commit/e7b546577656680613d0391537013ee1dbb72d07))
+- **chord:** add pi-chord crate with JSON, delta, state, services, and facets ([8d2f451](https://github.com/yannelli/pi-rust/commit/8d2f4519b80fa8f431f89e08867f8acda2db5c18))
+- **interactive:** ambient-credential login dialog, panic crash kind, and Termux helper tool warnings ([57c8aa9](https://github.com/yannelli/pi-rust/commit/57c8aa9a0af76b09cfc56c56fdb3e3b35ddfe120))
+- **models:** compose extension providers like upstream, route queued input through input handlers, keep extension stacks ([7811114](https://github.com/yannelli/pi-rust/commit/781111404df05baafbdff9e56be437840a4303d9))
+- **models:** validate models.json against the upstream schema with upstream error texts ([4a269e3](https://github.com/yannelli/pi-rust/commit/4a269e3981212d1af241b9678a07f6cff96f616c))
+
+### Fixed
+
+- **tools:** signal the process group directly on cancel, and make the bash cancel tests wait for progress ([8922b6c](https://github.com/yannelli/pi-rust/commit/8922b6ccbb5a44840830b4736ae4f81a2aa187b6))
+- **chord:** drop settled tracker drafts and keep draft key order ([458e0a3](https://github.com/yannelli/pi-rust/commit/458e0a3703e1cb6b439ba5c0619a7fee9709dde4))
+- **ai:** await payload hooks instead of blocking, and drop the 30s before_provider_request limit ([bf0b28e](https://github.com/yannelli/pi-rust/commit/bf0b28e8a16ddff61e0dbb97d719a6c4451daf0d))
+- **session:** abort before session_shutdown, await the UI detach, and pass trust UIs to project_trust handlers ([cdf69fd](https://github.com/yannelli/pi-rust/commit/cdf69fd5c7cbe82e7c907bee3021ba5b2a300aa8))
+- **cli:** match upstream startup timings, help branding, stdout takeover, and env overlay ([462792a](https://github.com/yannelli/pi-rust/commit/462792acd02d4b0e66c1925e16b25d0faf34251c))
+
 ## [0.1.3] - 2026-10-13
 
 ### Added

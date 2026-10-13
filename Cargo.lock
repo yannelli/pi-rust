@@ -2201,7 +2201,7 @@ dependencies = [
 
 [[package]]
 name = "pi-agent"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2216,7 +2216,7 @@ dependencies = [
 
 [[package]]
 name = "pi-ai"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -2241,7 +2241,7 @@ dependencies = [
 
 [[package]]
 name = "pi-chord"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -2264,7 +2264,7 @@ dependencies = [
 
 [[package]]
 name = "pi-codemode"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2282,7 +2282,7 @@ dependencies = [
 
 [[package]]
 name = "pi-coding-agent"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "agent-client-protocol-schema",
  "anyhow",
@@ -2326,7 +2326,7 @@ dependencies = [
 
 [[package]]
 name = "pi-embedded"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2344,7 +2344,7 @@ dependencies = [
 
 [[package]]
 name = "pi-js"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "base64 0.22.1",
  "futures",
@@ -2371,7 +2371,7 @@ dependencies = [
 
 [[package]]
 name = "pi-mcp"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2393,7 +2393,7 @@ dependencies = [
 
 [[package]]
 name = "pi-telemetry"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "futures",
  "serde",
@@ -2403,7 +2403,7 @@ dependencies = [
 
 [[package]]
 name = "pi-tui"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "arboard",
  "base64 0.22.1",
