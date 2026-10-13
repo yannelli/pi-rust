@@ -67,7 +67,9 @@ impl ApiProvider for OpenAIResponses {
             headers: header_map_with(defaults, overrides, model, &options),
             body,
         };
-        let handler = ResponsesStream::new(model).with_grammar_tool_input_properties(grammar);
+        let handler = ResponsesStream::new(model)
+            .with_grammar_tool_input_properties(grammar)
+            .with_service_tier_pricing(model, options.service_tier.clone());
         spawn_provider_stream(model, &options, request, handler)
     }
 }

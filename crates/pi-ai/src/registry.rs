@@ -84,6 +84,8 @@ pub struct StreamOptions {
     /// `auto` or `none`; adapters choose when unset.
     pub tool_choice: Option<String>,
     pub metadata: Option<serde_json::Map<String, serde_json::Value>>,
+    /// OpenAI `service_tier` (`auto`, `default`, `flex`, `priority`) for APIs that accept it.
+    pub service_tier: Option<String>,
     /// Ask a capable provider for a durable deferred handle (`15m`, `1h`, `24h`).
     pub deferred: Option<String>,
     pub on_payload: Option<OnPayloadFn>,

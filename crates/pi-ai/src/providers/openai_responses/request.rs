@@ -122,6 +122,9 @@ pub(crate) fn build_body(
     if let (Some(temperature), false) = (options.temperature, omit_unsupported) {
         body.insert("temperature".into(), json!(temperature));
     }
+    if let Some(tier) = &options.service_tier {
+        body.insert("service_tier".into(), json!(tier));
+    }
     if !tools.request_tools.is_empty() {
         body.insert("tools".into(), Value::Array(convert_responses_tools(&tools.request_tools, tool_options)?));
     }

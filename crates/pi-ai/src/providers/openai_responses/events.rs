@@ -76,6 +76,18 @@ pub(crate) struct ResponsesStream {
     reasoning_blocks: HashMap<String, usize>,
     unfinished_tools: HashMap<usize, String>,
     terminal: Option<Result<StopReason, String>>,
+    /// Model id and requested service tier, when tier pricing applies.
+    service_tier_pricing: Option<(String, Option<String>)>,
+}
+
+/// Cost multiplier of an OpenAI service tier.
+fn service_tier_multiplier(model_id: &str, tier: Option<&str>) -> f64 {
+    match tier {
+        Some("flex") => 0.5,
+        Some("priority" | "fast") if model_id == "gpt-5.5" => 2.5,
+        Some("priority" | "fast") => 2.0,
+        _ => 1.0,
+    }
 }
 
 impl ResponsesStream {
@@ -87,7 +99,14 @@ impl ResponsesStream {
             reasoning_blocks: HashMap::new(),
             unfinished_tools: HashMap::new(),
             terminal: None,
+            service_tier_pricing: None,
         }
+    }
+
+    /// Price usage by the service tier the response reports, else the requested one.
+    pub(crate) fn with_service_tier_pricing(mut self, model: &Model, requested: Option<String>) -> Self {
+        self.service_tier_pricing = Some((model.id.clone(), requested));
+        self
     }
 
     /// Grammar tools by name, with the argument property that receives their raw input.
@@ -333,6 +352,17 @@ impl ResponsesStream {
             };
         }
         message.usage.apply_cost(&self.cost);
+        if let Some((model_id, requested)) = &self.service_tier_pricing {
+            let tier = response["service_tier"].as_str().or(requested.as_deref());
+            let multiplier = service_tier_multiplier(model_id, tier);
+            if multiplier != 1.0 {
+                let cost = &mut message.usage.cost;
+                for part in [&mut cost.input, &mut cost.output, &mut cost.cache_read, &mut cost.cache_write] {
+                    *part *= multiplier;
+                }
+                cost.total = cost.input + cost.output + cost.cache_read + cost.cache_write;
+            }
+        }
         let status = response["status"].as_str();
         let reason = response.pointer("/incomplete_details/reason").and_then(Value::as_str);
         message.raw_stop_reason = match (status, reason) {

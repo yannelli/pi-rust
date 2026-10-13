@@ -323,3 +323,25 @@ async fn grammar_tool_calls_stream_into_their_input_property() {
         ("user", "conversation-edits")
     );
 }
+
+#[tokio::test]
+async fn service_tiers_are_sent_and_priced() {
+    for (requested, reported, multiplier) in
+        [("flex", None, 0.5), ("auto", Some("priority"), 2.0), ("default", None, 1.0)]
+    {
+        let mut response = json!({"id": "r", "status": "completed",
+            "usage": {"input_tokens": 1000, "output_tokens": 1000, "total_tokens": 2000}});
+        if let Some(tier) = reported {
+            response["service_tier"] = json!(tier);
+        }
+        let frames = vec![frame(None, &json!({"type": "response.completed", "response": response}))];
+        let mut server = MockServer::start(MockResponse::Sse(frames)).await;
+        let model = test_model(API, "openai", &server.base_url);
+        let context = Context { messages: vec![Message::user("x")], ..Context::default() };
+        let options = StreamOptions { service_tier: Some(requested.into()), ..options() };
+        let (_, message) = collect(OpenAIResponses.stream(&model, &context, options)).await;
+        let expected = (1000.0 * 1.0 + 1000.0 * 2.0) / 1e6 * multiplier;
+        assert!((message.usage.cost.total - expected).abs() < 1e-12, "{requested}: {}", message.usage.cost.total);
+        assert_eq!(server.request().await.body["service_tier"], requested);
+    }
+}
