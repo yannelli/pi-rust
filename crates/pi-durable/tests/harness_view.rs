@@ -1,4 +1,4 @@
-//! Port of upstream `test/harness-view.test.ts` (the core cases).
+//! Port of upstream `test/harness-view.test.ts` .
 
 mod support;
 
@@ -79,6 +79,9 @@ fn ops_json(ops: &[Op]) -> Vec<Value> {
     ops.iter().map(|op| serde_json::to_value(op).unwrap()).collect()
 }
 
+#[path = "harness_view/more.rs"]
+mod more;
+
 async fn drained() {
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 }
@@ -153,7 +156,7 @@ async fn skips_commits_that_touch_nothing_mounted() {
     let setup = chat_setup(RegisterFauxProviderOptions::default());
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &setup).await;
     let other = harness.create_conversation(CreateOptions::default(), &context()).await.unwrap();
-    let (_, frames, watch) = record(&root).await;
+    let (acquired, frames, watch) = record(&root).await;
     let other_id = other.id;
     let note = move |tx: Tx| async move { tx.append_entry(other_id, EntryDraft::new("note")).await };
     other.commit(note, &context()).await.unwrap();
@@ -166,6 +169,11 @@ async fn skips_commits_that_touch_nothing_mounted() {
     let frames = frames.lock().unwrap().clone();
     assert_eq!(frames.len(), 2);
     assert_eq!(ops_json(&frames[0].1), [json!(["s", ["docs", "pi.agent", "thinkingLevel"], "high"])]);
+    let part =
+        |value: &Json, path: &[&str]| path.iter().fold(value.clone(), |value, key| value.get(key).unwrap().clone());
+    assert!(part(&frames[0].0, &["entries"]).same_ref(&part(&acquired, &["entries"])));
+    assert!(part(&frames[0].0, &["docs", "pi.live"]).same_ref(&part(&acquired, &["docs", "pi.live"])));
+    assert!(part(&frames[1].0, &["docs"]).same_ref(&part(&frames[0].0, &["docs"])));
     watch.stop().await;
     harness.close(&context()).await.unwrap();
 }
