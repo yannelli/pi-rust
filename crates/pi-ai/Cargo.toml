@@ -16,6 +16,7 @@ path = "src/bin/pi-ai.rs"
 async-trait.workspace = true
 base64.workspace = true
 crc32fast.workspace = true
+pi-telemetry.workspace = true
 futures.workspace = true
 reqwest.workspace = true
 ring.workspace = true
