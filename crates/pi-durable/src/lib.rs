@@ -5,6 +5,7 @@
 pub mod env;
 pub mod errors;
 pub mod ids;
+pub mod storage;
 pub mod testing;
 pub mod types;
 
