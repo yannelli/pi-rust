@@ -357,6 +357,18 @@ impl InteractiveMode {
         self.request_render();
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<String>();
         let run = tokio::spawn(async move {
+            let streamed = std::sync::atomic::AtomicBool::new(false);
+            let forward = |chunk: &str| {
+                streamed.store(true, std::sync::atomic::Ordering::SeqCst);
+                let _ = sender.send(chunk.to_string());
+            };
+            if let Some(result) = session.extension_user_bash_with(&command, exclude_from_context, &forward).await {
+                if !streamed.load(std::sync::atomic::Ordering::SeqCst) && !result.output.is_empty() {
+                    let _ = sender.send(result.output.clone());
+                }
+                session.record_bash_result(&command, &result, exclude_from_context);
+                return Ok(result);
+            }
             let mut on_chunk = move |chunk: &str| {
                 let _ = sender.send(chunk.to_string());
             };

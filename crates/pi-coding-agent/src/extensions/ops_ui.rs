@@ -50,10 +50,20 @@ pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<
         }
         return Ok(HostValue::Undefined);
     }
+    if name == "invalidateTool" {
+        runner.bindings().ui.invalidate_tool(&args.str(0)?);
+        return Ok(HostValue::Undefined);
+    }
     let target = args.u64(0);
     let ui = runner.target_ui(target);
     let text = |index| args.opt_str(index);
     let value = match name {
+        "editorEvent" => {
+            ui.editor_event(&args.str(1)?, text(2).as_deref());
+            Value::Null
+        }
+        "editorShortcut" => json!(runner.target_runner(target).dispatch_shortcut(&args.str(1)?)),
+        "editorActions" => json!(ui.editor_actions()),
         "requestRender" => {
             ui.request_render(args.bool(1));
             Value::Null
@@ -88,9 +98,9 @@ pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<
         "setWorkingIndicator" => {
             let options = args.json(1);
             let indicator = (!options.is_null()).then(|| WorkingIndicatorOptions {
-                frames: options["frames"].as_array().map(|frames| {
-                    frames.iter().filter_map(|frame| frame.as_str().map(str::to_string)).collect()
-                }),
+                frames: options["frames"]
+                    .as_array()
+                    .map(|frames| frames.iter().filter_map(|frame| frame.as_str().map(str::to_string)).collect()),
                 interval_ms: options["intervalMs"].as_u64(),
             });
             ui.set_working_indicator(indicator);

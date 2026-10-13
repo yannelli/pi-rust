@@ -32,6 +32,8 @@ pub(crate) struct ExtensionState {
     /// Timestamps of assistant messages whose `turn_end` ran from `finish_turn`.
     pub(crate) dispatched: Mutex<Vec<i64>>,
     pub(crate) outcome: Mutex<&'static str>,
+    /// What the mode bound, kept for extensions loaded later (reload, replacement).
+    bindings: Mutex<Option<ExtensionBindings>>,
 }
 
 impl Default for ExtensionState {
@@ -44,6 +46,7 @@ impl Default for ExtensionState {
             turn_index: AtomicU64::new(0),
             dispatched: Mutex::default(),
             outcome: Mutex::new("completed"),
+            bindings: Mutex::default(),
         }
     }
 }
@@ -66,8 +69,11 @@ fn resource_paths(found: &Value, key: &str) -> Vec<(PathBuf, PathMetadata)> {
         .filter_map(|entry| {
             let path = entry["path"].as_str()?;
             let extension_path = entry["extensionPath"].as_str().unwrap_or_default();
-            let mut metadata =
-                PathMetadata::new(&extension_source_label(extension_path), SourceScope::Temporary, SourceOrigin::TopLevel);
+            let mut metadata = PathMetadata::new(
+                &extension_source_label(extension_path),
+                SourceScope::Temporary,
+                SourceOrigin::TopLevel,
+            );
             if !extension_path.starts_with('<') {
                 metadata.base_dir = std::path::Path::new(extension_path).parent().map(PathBuf::from);
             }
@@ -100,6 +106,7 @@ impl AgentSession {
     /// Bind the mode's UI and handlers, then emit `session_start`, report MCP servers nothing
     /// connects, and add resources from `resources_discover` (upstream `bindExtensions`).
     pub async fn bind_extensions(&self, bindings: ExtensionBindings) {
+        *lock(&self.extensions.bindings) = Some(bindings.clone());
         let Some(runner) = self.extension_runner() else { return };
         runner.set_bindings(bindings);
         if self.extensions.started.swap(true, std::sync::atomic::Ordering::SeqCst) {
@@ -112,6 +119,11 @@ impl AgentSession {
         runner.report_unconnected_mcp();
         self.discover_extension_resources(&runner, reason).await;
         self.extensions.bound.send_replace(true);
+    }
+
+    /// What the mode last bound with [`Self::bind_extensions`].
+    pub fn extension_bindings(&self) -> Option<ExtensionBindings> {
+        lock(&self.extensions.bindings).clone()
     }
 
     /// Make prompts wait for a [`Self::bind_extensions`] that is about to start.
@@ -306,7 +318,8 @@ impl AgentSession {
             .into_iter()
             .flatten()
             .map(|message| {
-                let content = serde_json::from_value(message["content"].clone()).unwrap_or(UserContent::Blocks(Vec::new()));
+                let content =
+                    serde_json::from_value(message["content"].clone()).unwrap_or(UserContent::Blocks(Vec::new()));
                 CustomMessage {
                     custom_type: message["customType"].as_str().unwrap_or_default().to_string(),
                     content,
@@ -323,6 +336,16 @@ impl AgentSession {
     /// `user_bash` handlers (`!cmd`): a result one of them produced, or the command run through
     /// the operations one supplied; `None` runs it locally. The result is not recorded yet.
     pub async fn extension_user_bash(&self, command: &str, exclude_from_context: bool) -> Option<BashResult> {
+        self.extension_user_bash_with(command, exclude_from_context, &|_| {}).await
+    }
+
+    /// [`Self::extension_user_bash`] that also passes output to `on_chunk` as it arrives.
+    pub async fn extension_user_bash_with(
+        &self,
+        command: &str,
+        exclude_from_context: bool,
+        on_chunk: &(dyn Fn(&str) + Send + Sync),
+    ) -> Option<BashResult> {
         let runner = self.extension_runner().filter(|runner| runner.has_handlers("user_bash"))?;
         let cwd = self.session_manager().cwd().to_path_buf();
         let event = json!({
@@ -361,6 +384,7 @@ impl AgentSession {
             slot
         };
         let forward = |delta: &str| {
+            on_chunk(delta);
             self.emit(&super::AgentSessionEvent::BashExecutionUpdate { id: None, delta: delta.to_string() });
         };
         let result = crate::extensions::shell::run_user_bash(&runner, key, command, &cwd, cancel, &forward).await;
@@ -384,7 +408,8 @@ impl AgentSession {
     /// Unload and load the extensions again (upstream `reload`).
     pub async fn reload_extensions(&self) -> anyhow::Result<()> {
         let old = self.extension_runner();
-        let bindings = old.as_ref().map(|runner| runner.bindings());
+        let bindings = self.extension_bindings();
+        let inline = old.as_ref().map(|runner| lock(&runner.inline).clone()).unwrap_or_default();
         let flags = match &old {
             Some(runner) => runner.call_json("flagValues", Vec::new()).await.unwrap_or(Value::Null),
             None => Value::Null,
@@ -397,7 +422,7 @@ impl AgentSession {
         *self.extensions.runner.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
         self.reload();
         let flags = flags.as_object().map(|flags| flags.clone().into_iter().collect()).unwrap_or_default();
-        let options = crate::extensions::LoadOptions { flag_values: flags, ..Default::default() };
+        let options = crate::extensions::LoadOptions { flag_values: flags, inline, ..Default::default() };
         let loaded = crate::extensions::load_extensions(self.services(), &options).await;
         for diagnostic in &loaded.diagnostics {
             if let Some(bindings) = &bindings

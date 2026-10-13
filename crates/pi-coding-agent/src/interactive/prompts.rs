@@ -3,6 +3,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Duration;
 
 use pi_tui::program_status::BlockedKind;
 use pi_tui::{ComponentRef, component};
@@ -30,6 +31,26 @@ fn send<T>(slot: &AnswerSlot<T>, value: T) {
     if let Some(sender) = slot.borrow_mut().take() {
         let _ = sender.send(value);
     }
+}
+
+/// Close a dialog with `None` once `cancel` fires.
+fn watch_cancel(
+    cancel: Option<CancellationToken>,
+    slot: &AnswerSlot<Option<String>>,
+    done: &SelectorDone,
+    weak: std::rc::Weak<InteractiveMode>,
+) -> Option<tokio::task::AbortHandle> {
+    let cancel = cancel?;
+    let (slot, done) = (slot.clone(), done.clone());
+    let watcher = tokio::task::spawn_local(async move {
+        cancel.cancelled().await;
+        send(&slot, None);
+        done();
+        if let Some(mode) = weak.upgrade() {
+            mode.request_render();
+        }
+    });
+    Some(watcher.abort_handle())
 }
 
 impl InteractiveMode {
@@ -91,11 +112,25 @@ impl InteractiveMode {
         options: Vec<String>,
         blocked: (BlockedKind, String),
     ) -> oneshot::Receiver<Option<String>> {
+        self.ask_choice_within(title, options, blocked, None, None)
+    }
+
+    /// [`InteractiveMode::ask_choice`] that closes with `None` after `timeout` or on `cancel`.
+    pub(super) fn ask_choice_within(
+        &self,
+        title: &str,
+        options: Vec<String>,
+        blocked: (BlockedKind, String),
+        timeout: Option<Duration>,
+        cancel: Option<CancellationToken>,
+    ) -> oneshot::Receiver<Option<String>> {
         let (slot, receiver) = answer();
         let title = title.to_string();
         let tui = self.tui();
         let toggle = self.action(|mode| mode.toggle_tool_output_expansion());
+        let weak = self.weak.clone();
         self.show_dialog(blocked, move |done| {
+            let watcher = watch_cancel(cancel, &slot, &done, weak);
             let (on_select, on_cancel) = (slot.clone(), slot);
             let (done_select, done_cancel) = (done.clone(), done);
             let selector = ExtensionSelector::new(
@@ -111,12 +146,18 @@ impl InteractiveMode {
                 },
                 ExtensionSelectorOptions {
                     tui: Some(tui),
-                    timeout: None,
+                    timeout,
                     on_toggle_tools_expanded: Some(Box::new(move || toggle())),
                     description: None,
                 },
             );
-            let dispose = selector.disposer();
+            let dispose_selector = selector.disposer();
+            let dispose = move || {
+                dispose_selector();
+                if let Some(watcher) = watcher {
+                    watcher.abort();
+                }
+            };
             (component(selector), Some(Box::new(dispose) as Box<dyn FnOnce()>))
         });
         receiver
@@ -151,23 +192,23 @@ impl InteractiveMode {
         initial: Option<String>,
         cancel: Option<CancellationToken>,
     ) -> oneshot::Receiver<Option<String>> {
+        self.ask_input_within(title, initial, None, cancel)
+    }
+
+    /// [`InteractiveMode::ask_input_until`] that also closes with `None` after `timeout`.
+    pub(super) fn ask_input_within(
+        &self,
+        title: &str,
+        initial: Option<String>,
+        timeout: Option<Duration>,
+        cancel: Option<CancellationToken>,
+    ) -> oneshot::Receiver<Option<String>> {
         let (slot, receiver) = answer();
         let title = title.to_string();
         let tui = self.tui();
         let weak = self.weak.clone();
         self.show_dialog((BlockedKind::Question, title.clone()), move |done| {
-            let watcher = cancel.map(|cancel| {
-                let (watch_slot, watch_done) = (slot.clone(), done.clone());
-                tokio::task::spawn_local(async move {
-                    cancel.cancelled().await;
-                    send(&watch_slot, None);
-                    watch_done();
-                    if let Some(mode) = weak.upgrade() {
-                        mode.request_render();
-                    }
-                })
-                .abort_handle()
-            });
+            let watcher = watch_cancel(cancel, &slot, &done, weak);
             let (on_submit, on_cancel) = (slot.clone(), slot);
             let (done_submit, done_cancel) = (done.clone(), done);
             let input = ExtensionInput::new(
@@ -181,7 +222,7 @@ impl InteractiveMode {
                     send(&on_cancel, None);
                     done_cancel();
                 },
-                ExtensionInputOptions { tui: Some(tui), timeout: None, initial_value: initial, description: None },
+                ExtensionInputOptions { tui: Some(tui), timeout, initial_value: initial, description: None },
             );
             let dispose_input = input.disposer();
             let dispose = move || {

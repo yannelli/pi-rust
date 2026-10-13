@@ -51,7 +51,10 @@ impl JsShellOperations {
 #[async_trait]
 impl ShellOperations for JsShellOperations {
     async fn exec(&self, command: &str, cwd: &Path, options: ShellExecOptions) -> Result<Option<i32>, ShellExecError> {
-        let runner = self.runner.upgrade().ok_or_else(|| ShellExecError::Failed(anyhow::anyhow!("The extension host has shut down")))?;
+        let runner = self
+            .runner
+            .upgrade()
+            .ok_or_else(|| ShellExecError::Failed(anyhow::anyhow!("The extension host has shut down")))?;
         let data_key = runner.next_id();
         let on_data = options.on_data.clone();
         lock(&runner.data).insert(data_key, Arc::new(move |text: &str| on_data(text.as_bytes())));
@@ -62,7 +65,12 @@ impl ShellOperations for JsShellOperations {
             "timeout": options.timeout,
             "env": options.env,
         });
-        let call = vec![json!(self.key).into(), json!(command).into(), json!(cwd.display().to_string()).into(), exec_options.into()];
+        let call = vec![
+            json!(self.key).into(),
+            json!(command).into(),
+            json!(cwd.display().to_string()).into(),
+            exec_options.into(),
+        ];
         let result = runner.host().call_method("invokeCallback", call).await;
         lock(&runner.data).remove(&data_key);
         runner.release_signal(signal);
@@ -121,7 +129,8 @@ pub(crate) async fn builtin_execute(runner: &Arc<ExtensionRunner>, args: &Args) 
     let on_update: ToolUpdateCallback =
         js_update_callback(runner, options["updateKey"].as_u64()).unwrap_or_else(|| Arc::new(|_: AgentToolResult| {}));
     let params = tool.prepare_arguments(params).map_err(|failure| error(format!("{failure:#}")))?;
-    let result = tool.execute(&call_id, params, cancel, on_update).await.map_err(|failure| error(format!("{failure:#}")))?;
+    let result =
+        tool.execute(&call_id, params, cancel, on_update).await.map_err(|failure| error(format!("{failure:#}")))?;
     Ok(json!(result))
 }
 
@@ -168,7 +177,8 @@ pub(crate) async fn run_user_bash(
         env: None::<BTreeMap<String, String>>,
     };
     let result = JsShellOperations::new(runner, key).exec(command, cwd, options).await;
-    let full = crate::agent_session::bash::sanitize_binary_output(&crate::agent_session::bash::strip_ansi(&lock(&output)));
+    let full =
+        crate::agent_session::bash::sanitize_binary_output(&crate::agent_session::bash::strip_ansi(&lock(&output)));
     on_chunk(&full);
     let truncation = crate::tools::truncate::truncate_tail(&full, Default::default());
     let full_output_path = truncation.truncated.then(|| {

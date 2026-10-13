@@ -46,7 +46,8 @@ impl ApiProvider for JsApiProvider {
             StreamTarget::Provider(name) => ("providerStream", name.clone()),
             StreamTarget::Api(api) => ("apiStream", api.clone()),
         };
-        let args = vec![json!(name), json!(model), json!(context), stream_options_to_json(&options, signal), json!(key)];
+        let args =
+            vec![json!(name), json!(model), json!(context), stream_options_to_json(&options, signal), json!(key)];
         let model = model.clone();
         handle.spawn(async move {
             let result = runner.call_json(method, args).await;
@@ -94,7 +95,11 @@ fn credential(value: Value) -> AuthResult<OAuthCredential> {
     serde_json::from_value(value).map_err(|failure| AuthError::Other(format!("Invalid OAuth credential: {failure}")))
 }
 
-async fn answer(interaction: &dyn AuthInteraction, request: &LoginRequest, cancel: &CancellationToken) -> Result<Value, String> {
+async fn answer(
+    interaction: &dyn AuthInteraction,
+    request: &LoginRequest,
+    cancel: &CancellationToken,
+) -> Result<Value, String> {
     let arg = request.args.first().cloned().unwrap_or(Value::Null);
     let text = |key: &str| arg[key].as_str().map(str::to_string);
     let prompt = match request.name.as_str() {
@@ -117,7 +122,9 @@ async fn answer(interaction: &dyn AuthInteraction, request: &LoginRequest, cance
             interaction.notify(AuthEvent::Progress { message });
             return Ok(Value::Null);
         }
-        "onPrompt" => AuthPrompt::Text { message: text("message").unwrap_or_default(), placeholder: text("placeholder") },
+        "onPrompt" => {
+            AuthPrompt::Text { message: text("message").unwrap_or_default(), placeholder: text("placeholder") }
+        }
         "onSelect" => AuthPrompt::Select {
             message: text("message").unwrap_or_default(),
             options: serde_json::from_value(arg["options"].clone()).unwrap_or_default(),
@@ -163,7 +170,11 @@ impl OAuthAuth for JsOAuth {
         credential(result?)
     }
 
-    async fn refresh(&self, credential_value: &OAuthCredential, cancel: CancellationToken) -> AuthResult<OAuthCredential> {
+    async fn refresh(
+        &self,
+        credential_value: &OAuthCredential,
+        cancel: CancellationToken,
+    ) -> AuthResult<OAuthCredential> {
         let runner = self.runner()?;
         let signal = runner.signal_for(&cancel);
         let result = self.call("refreshToken", vec![json!(credential_value), json!(signal)]).await;
@@ -211,7 +222,8 @@ impl ModelRouter for JsRouter {
         runner.release_signal(signal);
         let route = result.map_err(|failure| anyhow::anyhow!(failure.message))?;
         let target = &route["model"];
-        let (provider, id) = (target["provider"].as_str().unwrap_or_default(), target["id"].as_str().unwrap_or_default());
+        let (provider, id) =
+            (target["provider"].as_str().unwrap_or_default(), target["id"].as_str().unwrap_or_default());
         let model = match models.find(provider, id) {
             Some(model) => model,
             None => serde_json::from_value(target.clone())
@@ -228,7 +240,9 @@ impl ExtensionRunner {
     pub(crate) fn register_provider(&self, name: &str, config: Value, extension_path: &str) -> Result<(), String> {
         let runtime = self.model_runtime().clone();
         if config["hasStreamSimple"].as_bool() == Some(true) {
-            let api = config["api"].as_str().ok_or(format!("Provider {name}: \"api\" is required when registering streamSimple."))?;
+            let api = config["api"]
+                .as_str()
+                .ok_or(format!("Provider {name}: \"api\" is required when registering streamSimple."))?;
             let provider = JsApiProvider { runner: self.weak(), target: StreamTarget::Provider(name.to_string()) };
             self.install_api(api, Arc::new(provider), Some(name));
         }
@@ -256,8 +270,11 @@ impl ExtensionRunner {
 
     pub(crate) fn unregister_provider(&self, name: &str) {
         lock(&self.providers).retain(|(existing, _)| existing != name);
-        let apis: Vec<String> =
-            lock(&self.apis).iter().filter(|(_, (_, owner))| owner.as_deref() == Some(name)).map(|(api, _)| api.clone()).collect();
+        let apis: Vec<String> = lock(&self.apis)
+            .iter()
+            .filter(|(_, (_, owner))| owner.as_deref() == Some(name))
+            .map(|(api, _)| api.clone())
+            .collect();
         for api in apis {
             self.restore_api(&api);
         }
@@ -314,11 +331,18 @@ impl ExtensionRunner {
     }
 
     /// A Rust implementation of `api`, ignoring the ones this runner installed.
-    pub(crate) fn stream_api(&self, model: &Model, context: &Context, options: StreamOptions) -> AssistantMessageEventStream {
+    pub(crate) fn stream_api(
+        &self,
+        model: &Model,
+        context: &Context,
+        options: StreamOptions,
+    ) -> AssistantMessageEventStream {
         let previous = lock(&self.apis).get(&model.api).map(|(previous, _)| previous.clone());
         match previous {
             Some(Some(provider)) => provider.stream(model, context, options),
-            Some(None) => error_stream(model, StopReason::Error, format!("No provider registered for API: {}", model.api)),
+            Some(None) => {
+                error_stream(model, StopReason::Error, format!("No provider registered for API: {}", model.api))
+            }
             None => pi_ai::stream(model, context, options),
         }
     }
@@ -328,7 +352,12 @@ impl ExtensionRunner {
         let text = |key: &str| definition[key].as_str().unwrap_or_default().to_string();
         let (provider, id) = (text("provider"), text("id"));
         let router = JsRouter { runner: self.weak(), key: format!("{provider}/{id}") };
-        let mut model = VirtualModelDefinition::new(&provider, &id, &definition["name"].as_str().unwrap_or(&id).to_string(), Arc::new(router));
+        let mut model = VirtualModelDefinition::new(
+            &provider,
+            &id,
+            &definition["name"].as_str().unwrap_or(&id).to_string(),
+            Arc::new(router),
+        );
         model.thinking_levels = definition["thinkingLevels"]
             .as_array()
             .map(|levels| levels.iter().filter_map(super::convert::thinking_level).collect());

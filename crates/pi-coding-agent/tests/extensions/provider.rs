@@ -126,12 +126,9 @@ export default function (pi) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn oauth_login_runs_the_extension_flow_and_its_key_reaches_requests() {
-    let h = harness(Setup {
-        files: vec![("oauth.js", OAUTH_PROVIDER.into())],
-        load: vec!["oauth.js"],
-        ..Setup::default()
-    })
-    .await;
+    let h =
+        harness(Setup { files: vec![("oauth.js", OAUTH_PROVIDER.into())], load: vec!["oauth.js"], ..Setup::default() })
+            .await;
     assert_eq!(h.errors(), Vec::<String>::new());
     let runtime = h.session.model_runtime().clone();
     let providers = runtime.login_providers(Some(AuthType::OAuth)).await;

@@ -40,7 +40,10 @@ pub(crate) fn prompt_options_to_json(options: &BuildSystemPromptOptions) -> Valu
 }
 
 fn strings(value: &Value) -> Vec<String> {
-    value.as_array().map(|items| items.iter().filter_map(|item| item.as_str().map(str::to_string)).collect()).unwrap_or_default()
+    value
+        .as_array()
+        .map(|items| items.iter().filter_map(|item| item.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
 }
 
 fn skill_from_json(value: &Value) -> Option<Skill> {
@@ -71,8 +74,8 @@ pub(crate) fn prompt_options_from_json(value: &Value, cwd: &Path) -> BuildSystem
         options.selected_tools = strings(&value["selectedTools"]);
     }
     options.hidden_tools = strings(&value["hiddenTools"]);
-    options.tool_snippets = serde_json::from_value::<HashMap<String, String>>(value["toolSnippets"].clone())
-        .unwrap_or_default();
+    options.tool_snippets =
+        serde_json::from_value::<HashMap<String, String>>(value["toolSnippets"].clone()).unwrap_or_default();
     options.tool_guidelines =
         serde_json::from_value::<HashMap<String, Vec<String>>>(value["toolGuidelines"].clone()).unwrap_or_default();
     options.prompt_guidelines = strings(&value["promptGuidelines"]);
@@ -97,7 +100,10 @@ pub(crate) fn prompt_options_from_json(value: &Value, cwd: &Path) -> BuildSystem
                 .collect()
         })
         .unwrap_or_default();
-    options.skills = value["skills"].as_array().map(|skills| skills.iter().filter_map(skill_from_json).collect()).unwrap_or_default();
+    options.skills = value["skills"]
+        .as_array()
+        .map(|skills| skills.iter().filter_map(skill_from_json).collect())
+        .unwrap_or_default();
     options
 }
 
@@ -222,9 +228,11 @@ pub(crate) fn event_from_json(value: &Value) -> Option<AssistantMessageEvent> {
         "thinking_delta" => {
             AssistantMessageEvent::ThinkingDelta { content_index: index()?, delta: text("delta"), partial: partial()? }
         }
-        "thinking_end" => {
-            AssistantMessageEvent::ThinkingEnd { content_index: index()?, content: text("content"), partial: partial()? }
-        }
+        "thinking_end" => AssistantMessageEvent::ThinkingEnd {
+            content_index: index()?,
+            content: text("content"),
+            partial: partial()?,
+        },
         "toolcall_start" => AssistantMessageEvent::ToolcallStart { content_index: index()?, partial: partial()? },
         "toolcall_delta" => {
             AssistantMessageEvent::ToolcallDelta { content_index: index()?, delta: text("delta"), partial: partial()? }

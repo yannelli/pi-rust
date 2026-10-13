@@ -87,6 +87,7 @@ pub(super) struct ModeState {
     /// Login options for `/login` completion, refreshed after each login and logout.
     pub login_providers: Vec<crate::interactive_components::login::AuthSelectorProvider>,
     pub main_screen_state: Option<pi_tui::TuiMainScreenRenderState>,
+    pub extensions: super::extension_view::ExtensionUiState,
 }
 
 impl ModeState {
@@ -124,6 +125,7 @@ impl ModeState {
             anthropic_warning_shown: false,
             login_providers: Vec::new(),
             main_screen_state: None,
+            extensions: Default::default(),
         }
     }
 }
@@ -211,6 +213,12 @@ impl InteractiveMode {
         mode.install_debug_handler(&mode.tui());
         let bridge = mode.bridge.clone();
         runtime.set_rebind_session(Some(Arc::new(move |session: &Arc<AgentSession>| bridge.rebind(session))));
+        let bridge = Arc::downgrade(&mode.bridge);
+        runtime.set_before_session_invalidate(Some(Arc::new(move || {
+            if let Some(bridge) = bridge.upgrade() {
+                bridge.call(|mode| mode.reset_extension_ui());
+            }
+        })));
         mode
     }
 
@@ -430,6 +438,7 @@ impl InteractiveMode {
     pub async fn run_once(&self) -> anyhow::Result<()> {
         ui_loop::run_once_async().await.map_err(|error| anyhow::anyhow!("{error}"))?;
         self.drain_events();
+        self.sync_extension_mirror();
         Ok(())
     }
 

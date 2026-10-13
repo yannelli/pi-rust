@@ -4,8 +4,8 @@
 
 pub mod auth;
 pub mod bash;
-pub mod builtins;
 mod boundary;
+pub mod builtins;
 mod cache;
 mod compaction;
 pub mod events;
@@ -51,8 +51,8 @@ pub use self::model::ModelCycleResult;
 pub use self::model_runtime::{ModelRuntime, ModelRuntimeOptions};
 pub use self::prompt::{PromptDisposition, PromptOptions, StreamingBehavior};
 pub use self::runtime::{
-    AgentSessionRuntime, AsyncSetupFn, ForkPosition, ForkResult, RuntimeFactory, RuntimeParts, RuntimeTarget,
-    SwitchResult,
+    AgentSessionRuntime, AsyncSetupFn, ForkPosition, ForkResult, InvalidateFn, RuntimeFactory, RuntimeParts,
+    RuntimeTarget, SwitchResult,
 };
 pub use self::runtime_catalog::{CachedFileModelsStore, CatalogSetup, LlamaAuth, ProviderAuth, catalog_base_url};
 pub use self::runtime_virtual::RouteOptions;

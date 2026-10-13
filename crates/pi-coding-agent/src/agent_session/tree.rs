@@ -122,7 +122,9 @@ impl AgentSession {
         lock(&self.state).branch_summary = Some(cancel.clone());
         self.notify_idle();
         let mut options = options;
-        let hooked = self.before_tree(target_id, old_leaf.as_deref(), common_ancestor.as_deref(), &entries, &mut options, &cancel).await;
+        let hooked = self
+            .before_tree(target_id, old_leaf.as_deref(), common_ancestor.as_deref(), &entries, &mut options, &cancel)
+            .await;
         let from_extension = matches!(hooked, BeforeTree::Summary(_));
         let summary = match hooked {
             BeforeTree::Cancelled => Ok(Some(Err(NavigateTreeResult { cancelled: true, ..Default::default() }))),
@@ -262,7 +264,8 @@ impl AgentSession {
         let mut summary_entry_id = None;
         match summary {
             Some((text, details, usage)) => {
-                let id = session.branch_with_summary(new_leaf.as_deref(), &text, details, Some(from_extension), usage)?;
+                let id =
+                    session.branch_with_summary(new_leaf.as_deref(), &text, details, Some(from_extension), usage)?;
                 if let Some(label) = label {
                     session.append_label_change(&id, Some(label))?;
                 }

@@ -83,9 +83,10 @@ fn read_models(session: &AgentSession, method: &str, args: &Args) -> Result<Valu
         "find" => json!(runtime.get_model(&args.str(2)?, &args.str(3)?)),
         "findOfType" => {
             let (kind, provider, id) = (args.str(2)?, args.str(3)?, args.str(4)?);
-            let found = runtime.all_models().into_iter().find(|model| {
-                model.provider == provider && model.id == id && of_type(model, &kind)
-            });
+            let found = runtime
+                .all_models()
+                .into_iter()
+                .find(|model| model.provider == provider && model.id == id && of_type(model, &kind));
             json!(found)
         }
         "getModelsOfType" | "getAvailableOfType" => {
@@ -93,7 +94,9 @@ fn read_models(session: &AgentSession, method: &str, args: &Args) -> Result<Valu
             let models = if method == "getModelsOfType" { runtime.all_models() } else { runtime.available_models() };
             let models: Vec<_> = models
                 .into_iter()
-                .filter(|model| of_type(model, &kind) && provider.as_ref().is_none_or(|wanted| &model.provider == wanted))
+                .filter(|model| {
+                    of_type(model, &kind) && provider.as_ref().is_none_or(|wanted| &model.provider == wanted)
+                })
                 .collect();
             json!(models)
         }
@@ -119,18 +122,16 @@ fn read_models(session: &AgentSession, method: &str, args: &Args) -> Result<Valu
                 false => Value::Null,
             }
         }
-        "getRegisteredProviderIds" => json!(session.extension_runner().map(|runner| runner.provider_ids()).unwrap_or_default()),
+        "getRegisteredProviderIds" => {
+            json!(session.extension_runner().map(|runner| runner.provider_ids()).unwrap_or_default())
+        }
         other => return Err(error(format!("Unknown model registry method: {other}"))),
     })
 }
 
 fn tool_infos(session: &AgentSession, names: &[String]) -> Value {
     let infos = session.all_tools();
-    names
-        .iter()
-        .filter_map(|name| infos.iter().find(|info| &info.name == name))
-        .map(tool_info_json)
-        .collect()
+    names.iter().filter_map(|name| infos.iter().find(|info| &info.name == name)).map(tool_info_json).collect()
 }
 
 pub(crate) fn tool_info_json(info: &crate::agent_session::ToolInfo) -> Value {
@@ -156,7 +157,12 @@ fn report(runner: &ExtensionRunner, event: &str) -> impl Fn(anyhow::Error) + Sen
     move |failure| {
         if let Some(runner) = weak.upgrade() {
             let error = format!("{failure:#}");
-            runner.emit_error(ExtensionError { extension_path: "<runtime>".into(), event: event.clone(), error, stack: None });
+            runner.emit_error(ExtensionError {
+                extension_path: "<runtime>".into(),
+                event: event.clone(),
+                error,
+                stack: None,
+            });
         }
     }
 }
@@ -256,7 +262,9 @@ fn context(runner: &ExtensionRunner, session: &Arc<AgentSession>, name: &str, ta
             Value::Null
         }
         "contextUsage" => match session.context_usage() {
-            Some(usage) => json!({"tokens": usage.tokens, "contextWindow": usage.context_window, "percent": usage.percent}),
+            Some(usage) => {
+                json!({"tokens": usage.tokens, "contextWindow": usage.context_window, "percent": usage.percent})
+            }
             None => Value::Null,
         },
         "systemPrompt" => json!(session.system_prompt()),
@@ -317,4 +325,3 @@ where
             .flatten()
     })
 }
-

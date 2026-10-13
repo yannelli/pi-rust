@@ -30,7 +30,10 @@ pub(super) struct Layout {
     pub document: Rc<RefCell<Container>>,
     pub pending: Rc<RefCell<Container>>,
     pub status: Rc<RefCell<Container>>,
+    /// Extension widgets above and below the editor.
+    pub widgets_above: Rc<RefCell<Container>>,
     pub editor: Rc<RefCell<Container>>,
+    pub widgets_below: Rc<RefCell<Container>>,
     pub footer: Rc<RefCell<Container>>,
     /// Fullscreen layout: the transcript scroll view above the fixed input dock.
     pub root: ComponentRef,
@@ -54,6 +57,7 @@ impl Layout {
         document.add_child(chat.clone());
         let document = Rc::new(RefCell::new(document));
         let (pending, status, footer) = (shared_container(), shared_container(), shared_container());
+        let (widgets_above, widgets_below) = (shared_container(), shared_container());
         let transcript = ScrollView::new(
             document.clone(),
             ScrollViewOptions {
@@ -73,7 +77,9 @@ impl Layout {
             vec![
                 entry(pending.clone(), dock_options(0)),
                 entry(status.clone(), dock_options(0)),
+                entry(widgets_above.clone(), dock_options(0)),
                 entry(editor.clone(), dock_options(3)),
+                entry(widgets_below.clone(), dock_options(0)),
                 entry(footer.clone(), dock_options(0)),
             ],
             StackOptions::default(),
@@ -103,7 +109,9 @@ impl Layout {
             document,
             pending,
             status,
+            widgets_above,
             editor,
+            widgets_below,
             footer,
             root: component(root),
             transcript: transcript_handle,
@@ -112,7 +120,15 @@ impl Layout {
 
     /// The root children of both renderers, top to bottom.
     pub fn roots(&self) -> Vec<ComponentRef> {
-        vec![self.document.clone(), self.pending.clone(), self.status.clone(), self.editor.clone(), self.footer.clone()]
+        vec![
+            self.document.clone(),
+            self.pending.clone(),
+            self.status.clone(),
+            self.widgets_above.clone(),
+            self.editor.clone(),
+            self.widgets_below.clone(),
+            self.footer.clone(),
+        ]
     }
 }
 

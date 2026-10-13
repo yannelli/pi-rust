@@ -22,7 +22,10 @@ pub(super) async fn load(options: &AppOptions, services: &AgentSessionServices) 
 }
 
 /// Apply `--name [value]` flags extensions registered; the rest are unknown options.
-pub(super) async fn apply_flags(runner: Option<&Arc<ExtensionRunner>>, flags: &[(String, FlagValue)]) -> Vec<RuntimeDiagnostic> {
+pub(super) async fn apply_flags(
+    runner: Option<&Arc<ExtensionRunner>>,
+    flags: &[(String, FlagValue)],
+) -> Vec<RuntimeDiagnostic> {
     let mut diagnostics = Vec::new();
     let mut unknown = Vec::new();
     for (name, value) in flags {

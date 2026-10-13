@@ -149,8 +149,9 @@ impl OptionalMethod for JsRef {
             let Some(object) = value.as_object() else { return Ok(()) };
             let function: pi_js::rquickjs::Value = object.get(method.as_str()).map_err(|error| scope.caught(error))?;
             if let Some(function) = function.as_function() {
-                let _: pi_js::rquickjs::Value =
-                    function.call((pi_js::rquickjs::function::This(value.clone()),)).map_err(|error| scope.caught(error))?;
+                let _: pi_js::rquickjs::Value = function
+                    .call((pi_js::rquickjs::function::This(value.clone()),))
+                    .map_err(|error| scope.caught(error))?;
             }
             Ok(())
         })
@@ -160,7 +161,9 @@ impl OptionalMethod for JsRef {
 impl Component for JsComponent {
     fn render(&mut self, width: usize) -> Vec<String> {
         match self.call("render", vec![json!(width).into()]) {
-            Some(Value::Array(lines)) => lines.iter().map(|line| line.as_str().unwrap_or_default().to_string()).collect(),
+            Some(Value::Array(lines)) => {
+                lines.iter().map(|line| line.as_str().unwrap_or_default().to_string()).collect()
+            }
             _ => Vec::new(),
         }
     }

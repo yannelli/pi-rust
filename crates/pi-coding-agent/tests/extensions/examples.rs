@@ -47,7 +47,10 @@ async fn dynamic_tools_register_after_start_and_from_commands() {
     let h = harness(Setup {
         files: vec![("dynamic-tools.ts", example("dynamic-tools.ts"))],
         load: vec!["dynamic-tools.ts"],
-        responses: vec![FauxResponse::tool_call("c1", "echo_session", json!({"message": "hi"})), FauxResponse::text("ok")],
+        responses: vec![
+            FauxResponse::tool_call("c1", "echo_session", json!({"message": "hi"})),
+            FauxResponse::text("ok"),
+        ],
         ..Setup::default()
     })
     .await;
@@ -74,7 +77,10 @@ async fn event_bus_delivers_between_handlers() {
     h.session.prompt("/emit hi there", Vec::new()).await.unwrap();
     assert_eq!(
         h.ui.calls(),
-        vec!["notify(info): Event from event-bus-example: Session started", "notify(info): Event from /emit command: hi there"]
+        vec![
+            "notify(info): Event from event-bus-example: Session started",
+            "notify(info): Event from /emit command: hi there"
+        ]
     );
 }
 
@@ -143,6 +149,9 @@ async fn input_transform_handles_and_rewrites_input() {
     assert_eq!(h.ui.calls(), vec!["notify(info): pong"]);
     h.session.prompt("?quick What is TypeScript?", Vec::new()).await.unwrap();
     let transcript = h.transcript();
-    assert!(transcript.contains(&"user: Respond briefly in 1-2 sentences: What is TypeScript?".to_string()), "{transcript:?}");
+    assert!(
+        transcript.contains(&"user: Respond briefly in 1-2 sentences: What is TypeScript?".to_string()),
+        "{transcript:?}"
+    );
     assert_eq!(h.provider.requests().len(), 1);
 }

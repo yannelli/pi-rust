@@ -104,7 +104,9 @@ pub(crate) fn write(runner: &ExtensionRunner, args: &Args) -> Result<Value, JsEr
             let message: pi_ai::Message = serde_json::from_value(args.json(2)).map_err(error)?;
             manager.append_message(&message)
         }
-        "appendCustomEntry" => manager.append_custom_entry(&args.str(2)?, Some(args.json(3)).filter(|data| !data.is_null())),
+        "appendCustomEntry" => {
+            manager.append_custom_entry(&args.str(2)?, Some(args.json(3)).filter(|data| !data.is_null()))
+        }
         "appendCustomMessageEntry" => {
             let content = serde_json::from_value(args.json(3)).map_err(error)?;
             let details = Some(args.json(5)).filter(|details| !details.is_null());

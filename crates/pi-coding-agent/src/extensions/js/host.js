@@ -295,6 +295,27 @@ export function createHost(config) {
 			const resolve = (index) => (index < resolvers.length ? resolvers[index](toolName, () => resolve(index + 1)) : base());
 			return resolve(0) ?? null;
 		},
+		/** Which renderers `toolName` has: `{ call, result, shell }`, or null. */
+		toolRendererInfo(toolName) {
+			const renderers = host.toolRenderers(toolName);
+			if (!renderers?.renderCall && !renderers?.renderResult) return null;
+			return { call: Boolean(renderers.renderCall), result: Boolean(renderers.renderResult), shell: renderers.renderShell ?? "default" };
+		},
+		renderToolCall(toolName, args, context) {
+			const render = host.toolRenderers(toolName)?.renderCall;
+			if (!render) return null;
+			const [ctx, keep] = toolRenderContext(context, "call");
+			return keep(render(args, currentTheme(), ctx));
+		},
+		renderToolResult(toolName, result, options, context) {
+			const render = host.toolRenderers(toolName)?.renderResult;
+			if (!render) return null;
+			const [ctx, keep] = toolRenderContext(context, "result");
+			return keep(render(result, options, currentTheme(), ctx));
+		},
+		releaseToolRender(toolCallId) {
+			toolRenderState.delete(toolCallId);
+		},
 		transformMarkdown(markdown, context) {
 			let text = markdown;
 			for (const ext of runner.extensions) {
@@ -310,6 +331,29 @@ export function createHost(config) {
 		theme: () => currentTheme(),
 	};
 	return host;
+}
+
+/** Renderer state and the last component of each render slot, per tool call. */
+const toolRenderState = new Map();
+
+function toolRenderContext(context, slot) {
+	let entry = toolRenderState.get(context.toolCallId);
+	if (!entry) {
+		entry = { state: {}, last: {} };
+		toolRenderState.set(context.toolCallId, entry);
+	}
+	const ctx = {
+		...context,
+		durationMs: optional(context.durationMs),
+		state: entry.state,
+		lastComponent: entry.last[slot],
+		invalidate: () => call("ui.invalidateTool", context.toolCallId),
+	};
+	const keep = (component) => {
+		entry.last[slot] = component ?? undefined;
+		return component ?? null;
+	};
+	return [ctx, keep];
 }
 
 async function runOperations(operations, command, cwd, options) {

@@ -25,10 +25,16 @@ fn apply_drafts(manager: &mut SessionManager, drafts: &[Value]) -> anyhow::Resul
             Some("custom_message") => {
                 let content = serde_json::from_value(draft["content"].clone())?;
                 let display = draft["display"].as_bool().unwrap_or(false);
-                manager.append_custom_message_entry(&text(draft, "customType"), content, display, optional(draft, "details"))?
+                manager.append_custom_message_entry(
+                    &text(draft, "customType"),
+                    content,
+                    display,
+                    optional(draft, "details"),
+                )?
             }
             Some("context_edit") => {
-                let replacement = optional(draft, "replacement").and_then(|replacement| optional(&replacement, "content"));
+                let replacement =
+                    optional(draft, "replacement").and_then(|replacement| optional(&replacement, "content"));
                 manager.append_context_edit(&text(draft, "targetId"), replacement)?
             }
             Some("compaction") => {

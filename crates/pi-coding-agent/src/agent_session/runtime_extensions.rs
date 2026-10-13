@@ -35,7 +35,8 @@ fn apply_extension_provider(registry: &mut ModelRegistry, provider: &str, config
                 Some((model["id"].as_str()?.to_string(), kind))
             })
             .collect();
-        registry.retain_models(|model| model.provider != provider || keep.contains(&(model.id.clone(), model_kind(model))));
+        registry
+            .retain_models(|model| model.provider != provider || keep.contains(&(model.id.clone(), model_kind(model))));
     }
     Ok(())
 }
@@ -109,8 +110,12 @@ mod tests {
             "models": [{"id": "only", "name": "Only", "contextWindow": 1000, "maxTokens": 100}],
         });
         apply_extension_provider(&mut registry, "anthropic", &config).unwrap();
-        let models: Vec<&str> =
-            registry.all_models().iter().filter(|model| model.provider == "anthropic").map(|model| model.id.as_str()).collect();
+        let models: Vec<&str> = registry
+            .all_models()
+            .iter()
+            .filter(|model| model.provider == "anthropic")
+            .map(|model| model.id.as_str())
+            .collect();
         assert_eq!(models, vec!["only"]);
         let model = registry.find("anthropic", "only").unwrap();
         assert_eq!((model.api.as_str(), model.base_url.as_str()), ("custom-api", "http://localhost:1"));

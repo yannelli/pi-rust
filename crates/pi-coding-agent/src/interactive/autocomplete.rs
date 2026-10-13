@@ -65,7 +65,7 @@ fn source_tag(source: &SourceInfo) -> Option<String> {
     Some(scope.to_string())
 }
 
-fn prefixed_description(description: &str, source: &SourceInfo) -> Option<String> {
+pub(super) fn prefixed_description(description: &str, source: &SourceInfo) -> Option<String> {
     match (source_tag(source), description.is_empty()) {
         (None, true) => None,
         (None, false) => Some(description.to_string()),
@@ -145,6 +145,7 @@ impl InteractiveMode {
             }
             commands.push(command.into());
         }
+        commands.extend(self.extension_slash_commands());
         let mut skills = std::collections::HashMap::new();
         if session.settings().enable_skill_commands() {
             for skill in &resources.skills {

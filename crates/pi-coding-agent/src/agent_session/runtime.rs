@@ -45,6 +45,8 @@ pub type RuntimeFactory = Arc<dyn Fn(RuntimeTarget) -> BoxFuture<'static, anyhow
 
 /// Called with the new session after every replacement, for example to resubscribe.
 pub type RebindFn = Arc<dyn Fn(&Arc<AgentSession>) + Send + Sync>;
+/// Runs on the runtime before a session is replaced or disposed.
+pub type InvalidateFn = Arc<dyn Fn() + Send + Sync>;
 
 /// Adds entries to a new session before it starts (upstream `newSession({ setup })`).
 pub type SessionSetupFn = Box<dyn FnOnce(&mut SessionManager) + Send>;
@@ -86,6 +88,7 @@ pub struct AgentSessionRuntime {
     current: Mutex<RuntimeParts>,
     factory: RuntimeFactory,
     rebind: Mutex<Option<RebindFn>>,
+    before_invalidate: Mutex<Option<InvalidateFn>>,
     agent_dir: PathBuf,
 }
 
@@ -106,7 +109,13 @@ impl AgentSessionRuntime {
             previous_session_file: None,
         };
         let parts = factory(target).await?;
-        Ok(Self { current: Mutex::new(parts), factory, rebind: Mutex::new(None), agent_dir: agent_dir.to_path_buf() })
+        Ok(Self {
+            current: Mutex::new(parts),
+            factory,
+            rebind: Mutex::new(None),
+            before_invalidate: Mutex::new(None),
+            agent_dir: agent_dir.to_path_buf(),
+        })
     }
 
     pub fn session(&self) -> Arc<AgentSession> {
@@ -133,11 +142,21 @@ impl AgentSessionRuntime {
         *lock(&self.rebind) = rebind;
     }
 
+    /// Runs after `session_shutdown`, before the session goes away, so a UI can detach what the
+    /// old extensions put in it (upstream `setBeforeSessionInvalidate`).
+    pub fn set_before_session_invalidate(&self, before: Option<InvalidateFn>) {
+        *lock(&self.before_invalidate) = before;
+    }
+
     /// `session_shutdown` to the extensions, then abort and dispose of the session.
     async fn teardown_current(&self, reason: &str, target: Option<&Path>) {
         let session = self.session();
         let target = target.map(|path| path.display().to_string());
         session.shutdown_extensions(reason, target.as_deref()).await;
+        let before_invalidate = lock(&self.before_invalidate).clone();
+        if let Some(before_invalidate) = before_invalidate {
+            before_invalidate();
+        }
         session.abort().await;
         session.shutdown().await;
         // A command that replaced the session still runs on the old runtime (`withSession`); it
@@ -176,7 +195,7 @@ impl AgentSessionRuntime {
             SessionStartReason::Resume => "resume",
             SessionStartReason::Fork => "fork",
         };
-        let bindings = self.session().extension_runner().map(|runner| runner.bindings());
+        let bindings = self.session().extension_bindings();
         let target_file = session_manager.file().map(Path::to_path_buf);
         self.teardown_current(reason_name, target_file.as_deref()).await;
         let target = RuntimeTarget {

@@ -13,8 +13,8 @@ use super::convert::stream_options_from_json;
 use super::ops::{Args, error};
 use super::runner::ExtensionRunner;
 use super::{ops_ui, replace, shell};
-use crate::agent_session::lock;
 use crate::agent_session::auth::request_auth;
+use crate::agent_session::lock;
 
 fn model(value: Value) -> Result<Model, JsError> {
     serde_json::from_value(value).map_err(|failure| error(format!("Invalid model: {failure}")))
@@ -38,9 +38,11 @@ pub(crate) async fn pump(runner: &ExtensionRunner, mut stream: AssistantMessageE
     let mut last = None;
     while let Some(event) = stream.next().await {
         let value = json!(event);
-        if let Some(message) = value.get("message").or_else(|| value.get("error")).filter(|_| {
-            matches!(value["type"].as_str(), Some("done" | "error"))
-        }) {
+        if let Some(message) = value
+            .get("message")
+            .or_else(|| value.get("error"))
+            .filter(|_| matches!(value["type"].as_str(), Some("done" | "error")))
+        {
             last = Some(message.clone());
         }
         let _ = runner.host().call_method("invokeCallback", vec![json!(key).into(), value.into()]).await;
@@ -93,7 +95,9 @@ async fn model_op(runner: &Arc<ExtensionRunner>, name: &str, args: Args) -> Resu
         },
         "apiKey" => json!(runtime.api_key_for(&args.str(1)?).await),
         "providerAuth" => match runtime.resolve_provider_auth(&args.str(1)?).await {
-            Some(Ok(Some(resolved))) => json!({"apiKey": resolved.auth.api_key, "headers": resolved.auth.headers, "source": resolved.source}),
+            Some(Ok(Some(resolved))) => {
+                json!({"apiKey": resolved.auth.api_key, "headers": resolved.auth.headers, "source": resolved.source})
+            }
             _ => Value::Null,
         },
         "stream" => {
@@ -145,7 +149,8 @@ pub(crate) async fn run(runner: Arc<ExtensionRunner>, op: &str, args: Vec<HostVa
         "ctx" if name == "compact" => {
             let session = runner.target_session(args.u64(0))?;
             let instructions = args.opt_str(1);
-            let result = session.compact(instructions.as_deref()).await.map_err(|failure| error(format!("{failure:#}")))?;
+            let result =
+                session.compact(instructions.as_deref()).await.map_err(|failure| error(format!("{failure:#}")))?;
             crate::agent_session::compaction_result_json(&result)
         }
         "ctx" if name == "waitForIdle" => {

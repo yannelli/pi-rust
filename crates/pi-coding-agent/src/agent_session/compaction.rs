@@ -270,7 +270,8 @@ impl AgentSession {
             error_message: error_message.clone(),
         });
         if result.is_err() {
-            self.compact_failed(CompactionReason::Manual, error_message.as_deref(), aborted, false, from_extension).await;
+            self.compact_failed(CompactionReason::Manual, error_message.as_deref(), aborted, false, from_extension)
+                .await;
         }
         result
     }
@@ -293,7 +294,8 @@ impl AgentSession {
                 None => anyhow::bail!("Nothing to compact (session too small)"),
             }
         };
-        self.summarize(&preparation, &model, instructions, cancel, CompactionReason::Manual, false, from_extension).await
+        self.summarize(&preparation, &model, instructions, cancel, CompactionReason::Manual, false, from_extension)
+            .await
     }
 
     /// Cancel a running manual or automatic compaction.

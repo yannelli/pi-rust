@@ -65,12 +65,31 @@ export async function createComponent(id, target, extra) {
 		case "footer":
 			return await entry.factory(tui, theme, footerData(target));
 		case "editor":
-			return await entry.factory(tui, getEditorTheme(), appKeybindings());
+			return attachEditor(await entry.factory(tui, getEditorTheme(), appKeybindings()), target);
 		case "autocomplete":
 			return entry.factory(extra);
 		default:
 			return await entry.factory(tui, theme);
 	}
+}
+
+/** Wire a custom editor to the app like upstream `setCustomEditorComponent`: its submit, change,
+ * escape, Ctrl+D, paste, and app actions reach the Rust TUI. */
+function attachEditor(editor, target) {
+	if (!editor) return editor;
+	const send = (kind, value) => call("ui.editorEvent", target, kind, value ?? null);
+	editor.onSubmit = (text) => send("submit", text);
+	editor.onChange = (text) => send("change", text);
+	if (editor.actionHandlers instanceof Map) {
+		editor.onEscape ??= () => send("escape");
+		editor.onCtrlD ??= () => send("ctrlD");
+		editor.onPasteImage ??= () => send("pasteImage");
+		editor.onExtensionShortcut ??= (data) => call("ui.editorShortcut", target, data) === true;
+		for (const action of call("ui.editorActions", target) ?? []) {
+			editor.actionHandlers.set(action, () => send("action", action));
+		}
+	}
+	return editor;
 }
 
 function footerData(target) {

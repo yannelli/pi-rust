@@ -162,7 +162,13 @@ pub trait ExtensionUi: Send + Sync {
     }
 
     /// Set (or clear with `None`) a widget built by an extension component factory.
-    fn set_widget_component(&self, _key: &str, _factory: Option<ComponentFactory>, _placement: Option<WidgetPlacement>) {}
+    fn set_widget_component(
+        &self,
+        _key: &str,
+        _factory: Option<ComponentFactory>,
+        _placement: Option<WidgetPlacement>,
+    ) {
+    }
 
     /// Replace (or restore with `None`) the footer.
     fn set_footer(&self, _factory: Option<ComponentFactory>) {}
@@ -192,6 +198,18 @@ pub trait ExtensionUi: Send + Sync {
     fn footer_data(&self, _kind: &str) -> Value {
         Value::Null
     }
+
+    /// A custom editor reports `submit`, `change`, `escape`, `ctrlD`, `pasteImage`, or `action`
+    /// (with the app action id) as the default editor would handle it.
+    fn editor_event(&self, _kind: &str, _value: Option<&str>) {}
+
+    /// The app actions a custom editor forwards through [`Self::editor_event`].
+    fn editor_actions(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// A tool renderer asked to draw the row of `tool_call_id` again (`context.invalidate()`).
+    fn invalidate_tool(&self, _tool_call_id: &str) {}
 }
 
 /// The UI of modes without one (print and JSON): dialogs return their defaults at once.

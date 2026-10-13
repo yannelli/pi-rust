@@ -11,12 +11,12 @@ use pi_coding_agent::agent_session::{
 };
 use pi_coding_agent::app::{AppOptions, create_app_runtime, format_no_models_available_message};
 use pi_coding_agent::auth_cli::run_auth_command;
-use pi_coding_agent::cli::{Args, OutputMode, normalize_session_name, parse_args};
 use pi_coding_agent::cli::help_text_with_flags;
-use pi_coding_agent::extensions::rpc::ExtensionRpcHost;
+use pi_coding_agent::cli::{Args, OutputMode, normalize_session_name, parse_args};
 use pi_coding_agent::config::{ENV_SESSION_DIR, agent_dir, env_flag, expand_tilde};
 use pi_coding_agent::diagnostics::{print_timings, take_over_stdout, time};
 use pi_coding_agent::export::{ExportTheme, export_from_file};
+use pi_coding_agent::extensions::rpc::ExtensionRpcHost;
 use pi_coding_agent::files::process_file_args;
 use pi_coding_agent::interactive::startup_ui::prompt_project_trust;
 use pi_coding_agent::interactive::{InteractiveOptions, run_interactive};
@@ -467,7 +467,8 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
         AppMode::Rpc => {
             // Upstream refreshes catalogs in the background for RPC; interactive mode starts its own refresh.
             session.model_runtime().refresh_in_background();
-            let options = RpcModeOptions { extension_host: Some(ExtensionRpcHost::shared()), ..RpcModeOptions::default() };
+            let options =
+                RpcModeOptions { extension_host: Some(ExtensionRpcHost::shared()), ..RpcModeOptions::default() };
             Ok(run_rpc_mode(Arc::new(runtime), options).await)
         }
         AppMode::Print | AppMode::Json => {

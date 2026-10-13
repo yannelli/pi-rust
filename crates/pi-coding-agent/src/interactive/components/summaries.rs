@@ -168,17 +168,30 @@ pub fn user_content_text(content: &UserContent) -> String {
     }
 }
 
-/// An extension message with `display: true`, drawn as a labeled box.
+/// Draws a custom message instead of the box: `(expanded, output pad)` to a component, or
+/// `None` for the default look (upstream `MessageRenderer`).
+pub type CustomMessageRenderer = Rc<dyn Fn(bool, usize) -> Option<ComponentRef>>;
+
+/// An extension message with `display: true`, drawn as a labeled box or by its renderer.
 pub struct CustomMessageComponent {
     message: CustomMessage,
     options: RenderOptions,
     container: Container,
     expanded: bool,
+    renderer: Option<CustomMessageRenderer>,
 }
 
 impl CustomMessageComponent {
     pub fn new(message: CustomMessage, options: RenderOptions) -> Self {
-        let mut component = Self { message, options, container: Container::new(), expanded: false };
+        Self::with_renderer(message, options, None)
+    }
+
+    pub fn with_renderer(
+        message: CustomMessage,
+        options: RenderOptions,
+        renderer: Option<CustomMessageRenderer>,
+    ) -> Self {
+        let mut component = Self { message, options, container: Container::new(), expanded: false, renderer };
         component.rebuild();
         component
     }
@@ -193,6 +206,11 @@ impl CustomMessageComponent {
     fn rebuild(&mut self) {
         self.container.clear();
         self.container.add_child(component(Spacer::new(1)));
+        let custom = self.renderer.as_ref().and_then(|render| render(self.expanded, self.options.output_pad));
+        if let Some(custom) = custom {
+            self.container.add_child(custom);
+            return;
+        }
         let mut body = BoxComponent::new(self.options.output_pad, 1, Some(custom_bg()));
         body.add_child(component(Text::new(&label(&self.message.custom_type), 0, 0)));
         body.add_child(component(Spacer::new(1)));

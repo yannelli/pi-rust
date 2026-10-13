@@ -20,6 +20,7 @@ pub mod runner;
 mod session;
 pub(crate) mod shell;
 pub mod tool;
+mod tui_hooks;
 pub mod vendor;
 
 pub use component::{ComponentFactory, ComponentKind, CustomRequest, JsComponent};
@@ -31,3 +32,4 @@ pub use runner::{
 };
 pub use session::{LoadOptions, LoadedExtensions, load_extensions};
 pub use tool::ExtensionTool;
+pub use tui_hooks::{TerminalInputVerdict, ToolRenderRequest, ToolRendererInfo};

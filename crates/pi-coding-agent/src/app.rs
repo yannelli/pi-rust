@@ -75,8 +75,7 @@ pub struct AppOptions {
     /// `ctx.mode` of `project_trust` handlers; print mode when unset.
     pub extension_mode: Option<crate::extension_ui::ExtensionMode>,
     /// `ctx.ui` of `project_trust` handlers; without one they have no UI.
-    pub project_trust_ui:
-        Option<(Arc<dyn crate::extension_ui::ExtensionUi>, crate::extension_ui::ExtensionMode)>,
+    pub project_trust_ui: Option<(Arc<dyn crate::extension_ui::ExtensionUi>, crate::extension_ui::ExtensionMode)>,
 }
 
 fn resolve_cli_paths(cwd: &Path, paths: &[String]) -> Vec<String> {
@@ -144,7 +143,12 @@ struct TrustCache {
 impl TrustCache {
     /// Trust for `cwd`: the cached decision, else extension `project_trust` handlers, the
     /// saved decision, and `defaultProjectTrust`.
-    async fn project_trusted(&self, options: &AppOptions, cwd: &Path, agent_dir: &Path) -> (bool, Vec<RuntimeDiagnostic>) {
+    async fn project_trusted(
+        &self,
+        options: &AppOptions,
+        cwd: &Path,
+        agent_dir: &Path,
+    ) -> (bool, Vec<RuntimeDiagnostic>) {
         if let Some(settings) = &options.settings {
             return (settings.is_project_trusted(), Vec::new());
         }
@@ -155,11 +159,8 @@ impl TrustCache {
         let home = home_dir();
         let needs_decision = options.project_trust_override.is_none()
             && crate::resources::trust::has_trust_requiring_project_resources(cwd, &home);
-        let (extension_decision, mut diagnostics) = if needs_decision {
-            extensions::trust_decision(options, cwd, agent_dir).await
-        } else {
-            (None, Vec::new())
-        };
+        let (extension_decision, mut diagnostics) =
+            if needs_decision { extensions::trust_decision(options, cwd, agent_dir).await } else { (None, Vec::new()) };
         let request = ProjectTrustRequest {
             cwd,
             home: &home,

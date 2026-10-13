@@ -87,7 +87,8 @@ impl ExtensionRunner {
         let mut entries = Vec::new();
         let mut files = Vec::new();
         for extension in extensions {
-            if extension.replaceable() && extension.tools().iter().any(|tool| taken.contains(&tool.name().to_string())) {
+            if extension.replaceable() && extension.tools().iter().any(|tool| taken.contains(&tool.name().to_string()))
+            {
                 continue;
             }
             let index = {

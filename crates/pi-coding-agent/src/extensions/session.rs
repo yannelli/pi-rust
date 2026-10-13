@@ -42,7 +42,8 @@ pub async fn load_extensions(services: &AgentSessionServices, options: &LoadOpti
     if entries.is_empty() && options.inline.is_empty() {
         return LoadedExtensions::default();
     }
-    let runner = match ExtensionRunner::start(&services.cwd, &services.agent_dir, services.model_runtime.clone()).await {
+    let runner = match ExtensionRunner::start(&services.cwd, &services.agent_dir, services.model_runtime.clone()).await
+    {
         Ok(runner) => runner,
         Err(error) => {
             let message = format!("Failed to start the extension host: {error:#}");

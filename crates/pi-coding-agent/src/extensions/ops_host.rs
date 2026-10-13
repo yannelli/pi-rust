@@ -66,12 +66,18 @@ fn catalog(kind: &str, args: &Args) -> Value {
     match kind {
         "model" => {
             let (provider, id) = (args.opt_str(1), args.opt_str(2));
-            json!(models.iter().find(|model| Some(&model.provider) == provider.as_ref() && Some(&model.id) == id.as_ref()))
+            json!(
+                models
+                    .iter()
+                    .find(|model| Some(&model.provider) == provider.as_ref() && Some(&model.id) == id.as_ref())
+            )
         }
         "models" => {
             let provider = args.opt_str(1);
-            let models: Vec<_> =
-                models.iter().filter(|model| provider.as_ref().is_none_or(|wanted| &model.provider == wanted)).collect();
+            let models: Vec<_> = models
+                .iter()
+                .filter(|model| provider.as_ref().is_none_or(|wanted| &model.provider == wanted))
+                .collect();
             json!(models)
         }
         _ => {
@@ -142,7 +148,8 @@ pub(crate) fn sync(runner: &ExtensionRunner, op: &str, args: &Args) -> Result<Ho
             json!(crate::compaction::estimate_tokens(&message))
         }
         "text.parseFrontmatter" => {
-            let parsed = crate::resources::frontmatter::parse_frontmatter(&args.str(0)?).map_err(|failure| error(failure.to_string()))?;
+            let parsed = crate::resources::frontmatter::parse_frontmatter(&args.str(0)?)
+                .map_err(|failure| error(failure.to_string()))?;
             json!({"frontmatter": parsed.frontmatter, "body": parsed.body})
         }
         "shell.config" => {

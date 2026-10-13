@@ -22,6 +22,8 @@ struct Handlers {
     on_escape: Option<Action>,
     on_ctrl_d: Option<Action>,
     on_paste_image: Option<Action>,
+    /// Extension shortcuts, checked before everything else; true when one ran.
+    on_extension_shortcut: Option<Rc<dyn Fn(&str) -> bool>>,
 }
 
 /// Shared state of one custom editor.
@@ -98,6 +100,45 @@ impl EditorHandle {
         self.handlers.borrow_mut().on_paste_image = handler;
     }
 
+    pub fn set_on_extension_shortcut(&self, handler: Option<Rc<dyn Fn(&str) -> bool>>) {
+        self.handlers.borrow_mut().on_extension_shortcut = handler;
+    }
+
+    /// The `app.*` actions with handlers, which a custom editor forwards here.
+    pub fn action_ids(&self) -> Vec<String> {
+        self.handlers.borrow().actions.iter().map(|(id, _)| id.clone()).collect()
+    }
+
+    /// Run the handler of `action` as if its key was pressed here.
+    pub fn trigger_action(&self, action: &str) {
+        if let Some(handler) = self.action(action) {
+            handler();
+        }
+    }
+
+    /// Escape as this editor handles it without autocomplete.
+    pub fn trigger_escape(&self) {
+        let handler = self.handlers.borrow().on_escape.clone().or_else(|| self.action("app.interrupt"));
+        if let Some(handler) = handler {
+            handler();
+        }
+    }
+
+    /// Ctrl+D on an empty editor.
+    pub fn trigger_ctrl_d(&self) {
+        let handler = self.handlers.borrow().on_ctrl_d.clone().or_else(|| self.action("app.exit"));
+        if let Some(handler) = handler {
+            handler();
+        }
+    }
+
+    pub fn trigger_paste_image(&self) {
+        let handler = self.handlers.borrow().on_paste_image.clone();
+        if let Some(handler) = handler {
+            handler();
+        }
+    }
+
     pub fn on_submit(&self, callback: impl FnMut(&str) + 'static) {
         self.editor.on_submit(callback);
     }
@@ -116,6 +157,10 @@ impl EditorHandle {
 
     /// Upstream `CustomEditor.handleInput`.
     pub fn handle_input(&self, data: &str) {
+        let shortcut = self.handlers.borrow().on_extension_shortcut.clone();
+        if shortcut.is_some_and(|shortcut| shortcut(data)) {
+            return;
+        }
         let keys = get_keybindings();
         if keys.matches(data, "app.clipboard.pasteImage") {
             let handler = self.handlers.borrow().on_paste_image.clone();

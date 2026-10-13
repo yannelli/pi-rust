@@ -56,7 +56,9 @@ impl InteractiveMode {
             get_mode: Arc::new(move || mode_source.mermaid_rendering_mode()),
             theme: Some(Arc::new(ActiveThemeStyle)),
         });
-        RenderOptions { markdown_theme, output_pad: self.state.borrow().output_pad, transformers: vec![mermaid] }
+        let mut transformers = vec![mermaid];
+        transformers.extend(self.extension_markdown_transformers());
+        RenderOptions { markdown_theme, output_pad: self.state.borrow().output_pad, transformers }
     }
 
     pub(super) fn add_to_chat(&self, child: ComponentRef) {
@@ -138,6 +140,9 @@ impl InteractiveMode {
 
     /// Built-in renderer, a registered tool without one, or an unknown tool.
     fn tool_display(&self, name: &str) -> ToolDisplay {
+        if let Some(renderer) = self.extension_tool_renderer(name) {
+            return ToolDisplay::Renderer(renderer);
+        }
         if let Some(renderer) = builtin_renderer(name) {
             return ToolDisplay::Renderer(renderer);
         }
@@ -217,7 +222,8 @@ impl InteractiveMode {
             self.add_to_chat(pi_tui::component(component));
         } else if let Some(custom) = CustomMessage::from_message(message) {
             if custom.display {
-                let mut component = CustomMessageComponent::new(custom, self.render_options());
+                let renderer = self.extension_message_renderer(&custom);
+                let mut component = CustomMessageComponent::with_renderer(custom, self.render_options(), renderer);
                 component.set_expanded(self.state.borrow().tool_output_expanded);
                 self.add_to_chat(pi_tui::component(component));
             }

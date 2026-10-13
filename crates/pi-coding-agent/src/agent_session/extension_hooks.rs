@@ -8,7 +8,9 @@ use std::time::Duration;
 
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use pi_agent::{AfterToolCall, AfterToolCallResult, AgentEvent, AgentEventHookFn, BeforeToolCall, BeforeToolCallResult};
+use pi_agent::{
+    AfterToolCall, AfterToolCallResult, AgentEvent, AgentEventHookFn, BeforeToolCall, BeforeToolCallResult,
+};
 use pi_ai::{AssistantMessage, Message, Model, StopReason, StreamOptions, ToolResultMessage};
 use serde_json::{Value, json};
 
@@ -54,7 +56,8 @@ pub(crate) fn install_request_observers(slot: &RequestHooksSlot, options: &mut S
         let weak = Arc::downgrade(&runner);
         options.on_response = Some(Arc::new(move |response: &pi_ai::ProviderResponse, _model: &Model| {
             if let Some(runner) = weak.upgrade() {
-                let event = json!({"type": "after_provider_response", "status": response.status, "headers": response.headers});
+                let event =
+                    json!({"type": "after_provider_response", "status": response.status, "headers": response.headers});
                 runner.emit_detached(event);
             }
         }));
@@ -184,7 +187,12 @@ impl AgentSession {
                 let input = result.get("input").filter(|input| *input != call.args).cloned();
                 let block = result["block"].as_bool().unwrap_or(false);
                 let reason = result["reason"].as_str().map(str::to_string);
-                (block || input.is_some()).then_some(BeforeToolCallResult { block, reason, terminate: false, args: input })
+                (block || input.is_some()).then_some(BeforeToolCallResult {
+                    block,
+                    reason,
+                    terminate: false,
+                    args: input,
+                })
             }
             Err(error) => Some(BeforeToolCallResult { block: true, reason: Some(error.message), ..Default::default() }),
         }
@@ -241,7 +249,12 @@ impl AgentSession {
         self.dispatch_turn_end(&runner, message, results).await
     }
 
-    async fn dispatch_turn_end(&self, runner: &ExtensionRunner, message: &AssistantMessage, results: &[ToolResultMessage]) -> bool {
+    async fn dispatch_turn_end(
+        &self,
+        runner: &ExtensionRunner,
+        message: &AssistantMessage,
+        results: &[ToolResultMessage],
+    ) -> bool {
         let outcome = outcome(message);
         *lock(&self.extensions.outcome) = outcome;
         if !runner.has_handlers("turn_end") {

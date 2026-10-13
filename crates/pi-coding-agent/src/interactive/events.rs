@@ -93,7 +93,7 @@ impl InteractiveMode {
                     self.ui.chat.borrow_mut().remove_child(&streaming);
                 }
             }
-            UiEvent::AgentSettled { .. } => {}
+            UiEvent::AgentSettled { .. } => self.check_shutdown_requested(),
             UiEvent::CompactionStart { reason } => {
                 self.set_terminal_progress(true);
                 let abort = self.action(|mode| mode.session().abort_compaction());
