@@ -16,7 +16,7 @@ pub use validate::{is_loopback_redirect_uri, resolve_exposure_aliases, validate_
 
 /// How a server's tools reach the model: `codemode` scripts, `deferred` until `tool_search` loads
 /// them, `direct` declarations like built-in tools, or `hidden` (unreachable).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum McpExposure {
     #[default]

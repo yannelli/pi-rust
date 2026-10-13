@@ -1,6 +1,7 @@
 //! Test helpers: an in-memory MCP server and a minimal HTTP/1.1 server.
 #![allow(dead_code)]
 
+pub mod fake_mcp;
 pub mod http;
 pub mod oauth_server;
 pub mod provider;
