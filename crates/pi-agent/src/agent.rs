@@ -10,7 +10,7 @@ use futures::future::BoxFuture;
 use pi_ai::transcript::{create_initial_system_message, current_system_message, current_system_prompt};
 use pi_ai::{ContentBlock, Message, Model, StreamOptions, ThinkingLevel, UserContent, UserMessage, now_ms};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use crate::agent_loop::{
@@ -116,19 +116,23 @@ pub type Listener = Arc<dyn Fn(&AgentEvent) + Send + Sync>;
 /// A listener the run awaits, with the run's abort signal (upstream async `subscribe`).
 pub type AsyncListener = Arc<dyn Fn(AgentEvent, CancellationToken) -> BoxFuture<'static, ()> + Send + Sync>;
 
+/// Sync and async listeners share one list so they run in subscription order.
+#[derive(Clone)]
+enum AnyListener {
+    Sync(Listener),
+    Async(AsyncListener),
+}
+
 struct Inner {
     state: Mutex<AgentState>,
     hooks: Mutex<AgentHooks>,
     steering: Mutex<MessageQueue>,
     follow_up: Mutex<MessageQueue>,
-    listeners: Mutex<Vec<(u64, Listener)>>,
-    async_listeners: Mutex<Vec<(u64, AsyncListener)>>,
+    listeners: Mutex<Vec<(u64, AnyListener)>>,
     next_listener: AtomicU64,
     run: Mutex<Option<CancellationToken>>,
     running: watch::Sender<bool>,
 }
-
-type RunEventSender = mpsc::UnboundedSender<Option<AgentEvent>>;
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -160,7 +164,6 @@ impl Agent {
                 steering: Mutex::new(MessageQueue::default()),
                 follow_up: Mutex::new(MessageQueue::default()),
                 listeners: Mutex::new(Vec::new()),
-                async_listeners: Mutex::new(Vec::new()),
                 next_listener: AtomicU64::new(0),
                 run: Mutex::new(None),
                 running: watch::channel(false).0,
@@ -237,13 +240,13 @@ impl Agent {
     /// Register a listener; returns an id for `unsubscribe`.
     pub fn subscribe(&self, listener: impl Fn(&AgentEvent) + Send + Sync + 'static) -> u64 {
         let id = self.inner.next_listener.fetch_add(1, Ordering::SeqCst);
-        lock(&self.inner.listeners).push((id, Arc::new(listener)));
+        lock(&self.inner.listeners).push((id, AnyListener::Sync(Arc::new(listener))));
         id
     }
 
-    /// Register a listener the run awaits. Events reach it in order, one at a time, after the
-    /// sync listeners; the run and [`Self::wait_for_idle`] settle once it has handled
-    /// `agent_end`. It gets the run's abort signal. Returns an id for `unsubscribe`.
+    /// Register a listener the loop awaits for each event before it continues, as upstream
+    /// `subscribe` awaits async listeners. Listeners run in subscription order and get the
+    /// run's abort signal. Returns an id for `unsubscribe`.
     pub fn subscribe_async<F, Fut>(&self, listener: F) -> u64
     where
         F: Fn(AgentEvent, CancellationToken) -> Fut + Send + Sync + 'static,
@@ -251,13 +254,12 @@ impl Agent {
     {
         let id = self.inner.next_listener.fetch_add(1, Ordering::SeqCst);
         let listener: AsyncListener = Arc::new(move |event, signal| listener(event, signal).boxed());
-        lock(&self.inner.async_listeners).push((id, listener));
+        lock(&self.inner.listeners).push((id, AnyListener::Async(listener)));
         id
     }
 
     pub fn unsubscribe(&self, id: u64) {
         lock(&self.inner.listeners).retain(|(listener_id, _)| *listener_id != id);
-        lock(&self.inner.async_listeners).retain(|(listener_id, _)| *listener_id != id);
     }
 
     /// Queue a message delivered after the current turn's tool calls.
@@ -324,7 +326,7 @@ impl Agent {
         }
     }
 
-    /// Wait until the run and the async listeners' handling of its events have finished.
+    /// Wait until the run, including the listeners' handling of `agent_end`, has finished.
     pub async fn wait_for_idle(&self) {
         let mut receiver = self.inner.running.subscribe();
         let _ = receiver.wait_for(|running| !running).await;
@@ -349,12 +351,8 @@ impl Agent {
     async fn run_prompt(&self, messages: Vec<Message>, skip_initial_steering_poll: bool) -> anyhow::Result<()> {
         let cancel = self.begin_run()?;
         let (mut context, config) = self.snapshot(skip_initial_steering_poll);
-        let (sink, deliver, close) = self.sink(cancel.clone());
-        let run = async {
-            run_agent_loop(messages, &mut context, &config, sink, cancel).await;
-            let _ = close.send(None);
-        };
-        tokio::join!(run, deliver);
+        let sink = self.sink(cancel.clone());
+        run_agent_loop(messages, &mut context, &config, sink, cancel).await;
         self.finish_run();
         Ok(())
     }
@@ -382,13 +380,8 @@ impl Agent {
         }
         let cancel = self.begin_run()?;
         let (mut context, config) = self.snapshot(false);
-        let (sink, deliver, close) = self.sink(cancel.clone());
-        let run = async {
-            let result = run_agent_loop_continue(&mut context, &config, sink, cancel).await;
-            let _ = close.send(None);
-            result
-        };
-        let (result, ()) = tokio::join!(run, deliver);
+        let sink = self.sink(cancel.clone());
+        let result = run_agent_loop_continue(&mut context, &config, sink, cancel).await;
         self.finish_run();
         result.map(|_| ())
     }
@@ -462,30 +455,16 @@ impl Agent {
         (context, config)
     }
 
-    /// The run's event sink, the future that hands its events to the async listeners, and the
-    /// sender that ends that future (`None`) after the events queued before it.
-    fn sink(&self, cancel: CancellationToken) -> (EventSink, BoxFuture<'static, ()>, RunEventSender) {
-        let (sender, mut receiver) = mpsc::unbounded_channel::<Option<AgentEvent>>();
-        let close = sender.clone();
-        let listeners = self.inner.clone();
-        let signal = cancel.clone();
-        let deliver = async move {
-            while let Some(Some(event)) = receiver.recv().await {
-                let current: Vec<AsyncListener> =
-                    lock(&listeners.async_listeners).iter().map(|(_, listener)| listener.clone()).collect();
-                for listener in current {
-                    listener(event.clone(), signal.clone()).await;
-                }
-            }
-        };
+    /// The run's event sink: reduce state, await the `on_event` hook, then await each listener.
+    fn sink(&self, cancel: CancellationToken) -> EventSink {
         let inner = self.inner.clone();
         let hook = lock(&self.inner.hooks).on_event.clone();
         let sink: EventSink = Arc::new(move |event| {
-            let (inner, hook, cancel, sender) = (inner.clone(), hook.clone(), cancel.clone(), sender.clone());
+            let (inner, hook, cancel) = (inner.clone(), hook.clone(), cancel.clone());
             async move {
                 reduce(&inner, &event);
                 let replacement = match &hook {
-                    Some(hook) => hook(event.clone(), cancel).await,
+                    Some(hook) => hook(event.clone(), cancel.clone()).await,
                     None => None,
                 };
                 let event = match (event, replacement) {
@@ -497,13 +476,13 @@ impl Agent {
                     }
                     (event, _) => event,
                 };
-                let listeners: Vec<Listener> =
+                let listeners: Vec<AnyListener> =
                     lock(&inner.listeners).iter().map(|(_, listener)| listener.clone()).collect();
                 for listener in listeners {
-                    listener(&event);
-                }
-                if !lock(&inner.async_listeners).is_empty() {
-                    let _ = sender.send(Some(event.clone()));
+                    match listener {
+                        AnyListener::Sync(listener) => listener(&event),
+                        AnyListener::Async(listener) => listener(event.clone(), cancel.clone()).await,
+                    }
                 }
                 match event {
                     AgentEvent::MessageEnd { message } => Some(message),
@@ -512,7 +491,7 @@ impl Agent {
             }
             .boxed()
         });
-        (sink, deliver.boxed(), close)
+        sink
     }
 }
 
