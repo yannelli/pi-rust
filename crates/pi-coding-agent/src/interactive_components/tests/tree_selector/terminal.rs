@@ -39,7 +39,9 @@ fn renders_header_tree_connectors_active_path_and_position() {
     assert!(screen[1].starts_with("────"));
     assert_eq!(screen[2], "   Session Tree");
     let text = harness.screen();
-    assert!(text.contains("  ↑/↓ move · ←/→ page · ctrl+←/→ branch · ctrl+x copy"), "{text}");
+    // macOS lists option+left/right first for branch folding, and shows alt as option.
+    let branch = if cfg!(target_os = "macos") { "option" } else { "ctrl" };
+    assert!(text.contains(&format!("  ↑/↓ move · ←/→ page · {branch}+←/→ branch · ctrl+x copy")), "{text}");
     assert!(text.contains("filters ctrl+d/t/u/l/a"), "{text}");
     assert!(text.contains("cycle ctrl+o/shift+ctrl+o"), "{text}");
     assert!(text.contains("  Type to search:"));

@@ -118,6 +118,6 @@ impl ResourceDiagnostic {
     }
 
     pub fn path_is(&self, path: &std::path::Path) -> bool {
-        self.path.as_deref() == Some(path.display().to_string().as_str())
+        self.path.as_deref().is_some_and(|own| std::path::Path::new(own) == path)
     }
 }

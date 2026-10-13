@@ -129,11 +129,18 @@ fn armin_timer_drives_frames_and_stops() {
     let harness =
         Harness::new(40, 30, |tui| ArminComponent::with_random(tui, Some(ArminEffect::Scanline), fixture_random(1)));
     assert!(harness.component.borrow().is_animating());
-    harness.run_for(Duration::from_millis(150));
-    let rows = harness.viewport().iter().filter(|line| !line.trim().is_empty()).count();
-    assert!((2..19).contains(&rows), "{}", harness.screen());
-    harness.run_for(Duration::from_millis(900));
-    assert!(!harness.component.borrow().is_animating());
+    // Frames advance once per timer tick, so wait on frame progress rather than wall time.
+    let rows = || harness.viewport().iter().filter(|line| !line.trim().is_empty()).count();
+    let started = std::time::Instant::now();
+    while rows() < 2 {
+        assert!(started.elapsed() < Duration::from_secs(10), "no frame drawn:\n{}", harness.screen());
+        harness.run_for(Duration::from_millis(10));
+    }
+    assert!(rows() < 19 && harness.component.borrow().is_animating(), "{}", harness.screen());
+    while harness.component.borrow().is_animating() {
+        assert!(started.elapsed() < Duration::from_secs(20), "the animation never stopped");
+        harness.run_for(Duration::from_millis(20));
+    }
     assert!(harness.screen().contains("ARMIN SAYS HI"));
     assert!(harness.screen().contains("▀▄▄"), "{}", harness.screen());
 }

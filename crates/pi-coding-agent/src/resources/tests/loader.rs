@@ -281,8 +281,8 @@ fn collects_extension_paths_with_source_info() {
     let expected = [
         cli_file.display().to_string(),
         "builtin:mcp".into(),
-        d.cwd.join(".pi/extensions/project/index.js").display().to_string(),
-        d.agent.join("extensions/user.ts").display().to_string(),
+        d.cwd.join(".pi").join("extensions").join("project").join("index.js").display().to_string(),
+        d.agent.join("extensions").join("user.ts").display().to_string(),
     ];
     assert_eq!(paths, expected);
     assert_eq!(resources.extensions[0].source_info.source, "cli");

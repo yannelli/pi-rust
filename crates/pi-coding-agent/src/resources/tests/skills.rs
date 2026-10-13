@@ -202,7 +202,7 @@ fn load_skills_handles_explicit_paths_and_collisions() {
 #[test]
 fn expands_skill_commands_and_parses_blocks() {
     let temp = tempfile::tempdir().unwrap();
-    let file = temp.path().join("pdf/SKILL.md");
+    let file = temp.path().join("pdf").join("SKILL.md");
     write(&file, "---\nname: pdf\ndescription: PDFs.\n---\n\nRead `references/formats.md`.\n");
     let skills = load_skills_from_dir(&temp.path().join("pdf"), "test").skills;
     let expanded = expand_skill_command("/skill:pdf extract report.pdf ", &skills).unwrap();

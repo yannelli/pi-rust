@@ -92,7 +92,8 @@ fn renders_each_entry_type() {
 #[test]
 fn summarizes_tool_calls_by_tool() {
     let _kb = setup();
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = ["HOME", "USERPROFILE"].iter().filter_map(|key| std::env::var(key).ok()).find(|home| !home.is_empty());
+    let home = home.unwrap_or_default();
     let long = format!(r#"[custom: {{"long":"{}...]"#, "z".repeat(31));
     let calls = [
         (
