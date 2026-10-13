@@ -1,12 +1,15 @@
 //! How the `codemode` tool presents the other tools while it is active.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
+
+use pi_agent::{SharedTool, ToolExposure};
+pub use pi_agent::{ToolLoadout, ToolLoadoutChanges};
 
 use crate::description::{
     CODEMODE_TOOL_NAME, CodemodeDescriptionOptions, CodemodeMode, DEFAULT_CODEMODE_INLINE_BUDGET,
     codemode_callable_tools, create_codemode_description, describe_script_call,
 };
-use crate::host::{CodemodeToolInfo, ToolExposure};
+use crate::host::CodemodeToolInfo;
 
 /// File name of the codemode reference (globals, tool results, `store()`, the `models` API).
 pub const CODEMODE_DOCS_FILE_NAME: &str = "codemode.md";
@@ -35,42 +38,24 @@ impl Default for CodemodeToolOptions {
     }
 }
 
-/// The tools of a session as the `codemode` tool sees them when a request is prepared.
-#[derive(Clone, Debug, Default)]
-pub struct ToolLoadout {
-    /// Tools declared to the model (the active tools), in order, with their original descriptions.
-    pub declared: Vec<CodemodeToolInfo>,
-    /// Tools callable through the host.
-    pub callable: Vec<CodemodeToolInfo>,
-    /// Exposure by tool name. Missing names are `direct`.
-    pub exposures: HashMap<String, ToolExposure>,
-}
-
-impl ToolLoadout {
-    pub fn exposure(&self, name: &str) -> ToolExposure {
-        self.exposures.get(name).copied().unwrap_or_default()
-    }
-}
-
-/// Changes the `codemode` tool makes to what the model sees.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ToolLoadoutChanges {
-    /// Model-facing descriptions of declared tools, by tool name.
-    pub descriptions: BTreeMap<String, String>,
-    /// Declared tools whose declarations requests leave out. They stay active and callable.
-    pub hidden_declarations: Vec<String>,
-}
-
 /// `on`: declared tools that scripts can call say how; the description lists callable tools that
 /// are not `direct`. `only`: the description lists every callable tool, and the declarations of
 /// active `direct` tools are hidden. Listing by exposure keeps the description stable across loads.
 pub fn prepare_codemode_loadout(loadout: &ToolLoadout, options: &CodemodeToolOptions) -> ToolLoadoutChanges {
     let is_direct = |tool: &CodemodeToolInfo| loadout.exposure(&tool.name) == ToolExposure::Direct;
-    let callable = codemode_callable_tools(&loadout.callable);
+    // Listings show each tool with the guidelines the session normalized for it.
+    let info = |tool: &SharedTool| CodemodeToolInfo {
+        prompt_guidelines: loadout.prompt_guidelines(tool.name()),
+        namespace: loadout.namespace(tool.name()),
+        ..CodemodeToolInfo::from_tool(tool.as_ref())
+    };
+    let declared_infos: Vec<CodemodeToolInfo> = loadout.declared.iter().map(info).collect();
+    let callable_infos: Vec<CodemodeToolInfo> = loadout.callable.iter().map(info).collect();
+    let callable = codemode_callable_tools(&callable_infos);
     let callable_names: HashSet<&str> = callable.iter().map(|tool| tool.name.as_str()).collect();
     let mut descriptions = BTreeMap::new();
     if options.mode == CodemodeMode::On {
-        for tool in loadout.declared.iter().filter(|tool| callable_names.contains(tool.name.as_str())) {
+        for tool in declared_infos.iter().filter(|tool| callable_names.contains(tool.name.as_str())) {
             descriptions.insert(tool.name.clone(), describe_script_call(tool));
         }
     }
@@ -91,7 +76,7 @@ pub fn prepare_codemode_loadout(loadout: &ToolLoadout, options: &CodemodeToolOpt
         },
     );
     descriptions.insert(CODEMODE_TOOL_NAME.into(), description);
-    let declared: HashSet<&str> = loadout.declared.iter().map(|tool| tool.name.as_str()).collect();
+    let declared: HashSet<&str> = declared_infos.iter().map(|tool| tool.name.as_str()).collect();
     let hidden_declarations = match options.mode {
         CodemodeMode::Only => callable
             .iter()

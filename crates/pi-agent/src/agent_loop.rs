@@ -35,6 +35,8 @@ pub type AfterToolCallFn = Arc<
 /// Converts the transcript to provider messages before each request. The default
 /// drops `Message::Custom` entries; hosts map their custom roles to user messages.
 pub type ConvertToLlmFn = Arc<dyn Fn(&[Message]) -> Vec<Message> + Send + Sync>;
+/// Tools that nested calls ([`crate::ToolContext::execute_tool`]) resolve against.
+pub type CallableToolsFn = Arc<dyn Fn() -> Vec<SharedTool> + Send + Sync>;
 /// Receives loop events synchronously, in order.
 pub type EventSink = Arc<dyn Fn(AgentEvent) + Send + Sync>;
 
@@ -77,6 +79,8 @@ pub struct AgentLoopConfig {
     pub prepare_request: Option<PrepareRequestFn>,
     /// Runs before each turn after the first; can replace state and append messages.
     pub prepare_next_turn: Option<PrepareNextTurnFn>,
+    /// Tools callable from other tools. Defaults to the context's tools.
+    pub callable_tools: Option<CallableToolsFn>,
 }
 
 /// The default `convert_to_llm`: keep provider roles, drop custom ones.
@@ -105,6 +109,7 @@ impl AgentLoopConfig {
             finish_turn: None,
             prepare_request: None,
             prepare_next_turn: None,
+            callable_tools: None,
         }
     }
 }

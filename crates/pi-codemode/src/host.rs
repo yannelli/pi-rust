@@ -2,6 +2,7 @@
 //! execution, the store on the session branch, and the model catalog.
 
 use async_trait::async_trait;
+use pi_agent::{AgentTool, normalize_prompt_guidelines};
 use pi_ai::ContentBlock;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -9,38 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::store::CodemodeStoreEntryData;
 
-/// How a tool is offered: declared to the model, only to the model, only to scripts, found by
-/// search, or not at all.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ToolExposure {
-    #[default]
-    Direct,
-    ModelOnly,
-    Codemode,
-    Deferred,
-    Hidden,
-}
-
-/// A group of related tools, such as the tools of one MCP server.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ToolNamespace {
-    /// For example `mcp__docs`.
-    pub name: String,
-    /// Short summary shown once with the group in tool listings.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    /// Longer usage guidance, such as MCP server instructions. Only `describeNamespace()` returns it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub instructions: Option<String>,
-}
-
-impl ToolNamespace {
-    pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into(), ..Self::default() }
-    }
-}
+pub use pi_agent::{ToolExposure, ToolNamespace};
 
 /// A tool as scripts and listings see it.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -59,6 +29,18 @@ pub struct CodemodeToolInfo {
 impl CodemodeToolInfo {
     pub fn new(name: impl Into<String>, description: impl Into<String>, parameters: Value) -> Self {
         Self { name: name.into(), description: description.into(), parameters, ..Self::default() }
+    }
+
+    /// The script view of a registered tool, with its normalized prompt guidelines.
+    pub fn from_tool(tool: &dyn AgentTool) -> Self {
+        Self {
+            name: tool.name().into(),
+            description: tool.description().into(),
+            parameters: tool.parameters(),
+            output_schema: tool.output_schema(),
+            namespace: tool.namespace().cloned(),
+            prompt_guidelines: normalize_prompt_guidelines(&tool.prompt_guidelines()),
+        }
     }
 }
 

@@ -2,7 +2,6 @@
 
 mod support;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use pi_codemode::{
@@ -28,13 +27,13 @@ fn echo_tool() -> CodemodeToolInfo {
 }
 
 fn loadout() -> ToolLoadout {
-    let codemode = CodemodeToolInfo::new("codemode", "", json!({}));
-    let tools = vec![read_tool(), echo_tool(), codemode];
-    ToolLoadout {
-        declared: tools.clone(),
-        callable: tools,
-        exposures: HashMap::from([("codemode".to_string(), ToolExposure::ModelOnly)]),
-    }
+    let codemode = InfoTool::shared(CodemodeToolInfo::new("codemode", "", json!({})), ToolExposure::ModelOnly);
+    let tools = vec![
+        InfoTool::shared(read_tool(), ToolExposure::Direct),
+        InfoTool::shared(echo_tool(), ToolExposure::Direct),
+        codemode,
+    ];
+    ToolLoadout { declared: tools.clone(), callable: tools.clone(), registered: tools, ..ToolLoadout::default() }
 }
 
 #[test]
@@ -66,9 +65,9 @@ fn lists_codemode_and_deferred_exposures_by_exposure_not_activity() {
     let mut search = CodemodeToolInfo::new("mcp__docs__search", "Search docs.", json!({}));
     search.namespace = Some(ToolNamespace::new("mcp__docs"));
     let late = CodemodeToolInfo::new("mcp__late__x", "Late.", json!({}));
-    loadout.callable.extend([search, late]);
-    loadout.exposures.insert("mcp__docs__search".into(), ToolExposure::Codemode);
-    loadout.exposures.insert("mcp__late__x".into(), ToolExposure::Deferred);
+    let added = [InfoTool::shared(search, ToolExposure::Codemode), InfoTool::shared(late, ToolExposure::Deferred)];
+    loadout.callable.extend(added.clone());
+    loadout.registered.extend(added);
     let description = &prepare_codemode_loadout(&loadout, &CodemodeToolOptions::default()).descriptions["codemode"];
     assert!(description.contains("## mcp__docs\n\n### `mcp__docs__search`"));
     assert!(!description.contains("mcp__late__x"));
