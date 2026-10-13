@@ -2,6 +2,30 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.1.5] - 2026-10-13
+
+### Added
+
+- **durable:** add JsonlStorage over the FileSystem capability ([e3ed422](https://github.com/yannelli/pi-rust/commit/e3ed422ceae1b3a96af5c5d0d2dea7669ffff456))
+- **durable:** port the Session kernel, document definitions, and typed entries ([24a50b9](https://github.com/yannelli/pi-rust/commit/24a50b9855214eb89ce857d301750797559fd1db))
+- **durable:** add the image processor on the image crate with EXIF orientation ([3173ba3](https://github.com/yannelli/pi-rust/commit/3173ba345d075ea3cfb92b56534efd7a076f2f5c))
+- **durable:** add SqliteStorage over a portable database facade with bundled SQLite ([0188ba8](https://github.com/yannelli/pi-rust/commit/0188ba8e3a1af914b234681b7e251b8d584e374c))
+- **durable:** add local file watcher and the execution env conformance suite ([9dbb321](https://github.com/yannelli/pi-rust/commit/9dbb3218bc47c69a5d0dfcf6bb49e1e12aa5b10f))
+- **durable:** add LocalExecutionEnv shell with spills, timeouts, and process-tree kills ([295f7e2](https://github.com/yannelli/pi-rust/commit/295f7e2886a28109904ad89aab1bd6b6e4fb9314))
+- **client:** port pi-client with Unix transport, discovery, and an in-process server test ([a4e3de8](https://github.com/yannelli/pi-rust/commit/a4e3de80c1c78c55083fc6050cf9bd303970a5cb))
+- **durable:** add LocalExecutionEnv file system, decoders, line scanner, and truncation ([44fc2a9](https://github.com/yannelli/pi-rust/commit/44fc2a9bc004a66dcf554031fe638497bdb87cc6))
+- **durable:** add Models trait, registry-backed model access, faux provider, and uuidv7 helpers ([dc6a23c](https://github.com/yannelli/pi-rust/commit/dc6a23cbb9e906b8f3417453981aad75ce435fd8))
+- **durable:** add MemoryStorage and the storage conformance suite ([af55095](https://github.com/yannelli/pi-rust/commit/af550950001563bd0078a5927f189e48408ceb47))
+- **server:** port pi-server router, Unix listener, and test harness ([c0e0a80](https://github.com/yannelli/pi-rust/commit/c0e0a80e93105dada4df38d8dcd57b5b0de01aca))
+- **protocol:** port pi-protocol CBOR codec, framing, and envelopes ([2c6a270](https://github.com/yannelli/pi-rust/commit/2c6a2706ca489c0fe38367c46e9d8e33e049d8cd))
+- **durable:** add testing module root ([da743b7](https://github.com/yannelli/pi-rust/commit/da743b7ec860812ee8fbe6c416eb9097c7ca1b4d))
+- **durable:** add pi-durable crate with records, storage contract, and execution env interface ([a8c0a4b](https://github.com/yannelli/pi-rust/commit/a8c0a4b2b44d173f7f17316343e45f579581fe14))
+
+### Fixed
+
+- hold pi-durable for the next release ([d9c9038](https://github.com/yannelli/pi-rust/commit/d9c903881304ed0d80fbea781ca13be1d734366a))
+- **client:** validate service calls before sending them ([0b31baf](https://github.com/yannelli/pi-rust/commit/0b31bafc0ad9a45538c7bf61dbf21f91632a4cbf))
+
 ## [0.1.4] - 2026-10-13
 
 ### Added
