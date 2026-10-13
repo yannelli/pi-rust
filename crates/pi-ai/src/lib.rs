@@ -11,6 +11,7 @@ pub mod json;
 pub mod model_operations;
 pub mod models;
 pub mod overflow;
+pub mod provider_options;
 pub mod providers;
 pub mod registry;
 pub mod request;
@@ -31,6 +32,7 @@ pub use images::{
 };
 pub use models::ModelRegistry;
 pub use overflow::{is_context_overflow, is_recoverable_length};
+pub use provider_options::{AzureOptions, BedrockOptions, ReasoningSummary, ThinkingDisplay, VertexOptions};
 pub use registry::{
     ApiProvider, CacheRetention, DeferredOptions, ProviderResponse, StreamOptions, ThinkingBudgets, Transport,
     api_provider, cancel_deferred, complete, fetch_deferred, http_client, register_api_provider, stream,

@@ -8,6 +8,7 @@ use super::model_info::{
     gpt_effort, gpt_oss_effort, is_claude, is_gov_cloud, map_effort, supports_adaptive_thinking,
     supports_block_binding, supports_prompt_caching,
 };
+use crate::provider_options::BedrockOptions;
 use crate::providers::common::{compat_bool, sanitize_id, take_chars, transform_messages};
 use crate::providers::constrained_sampling::{json_schema_tool_parameters, resolve_json_schema_strict_sampling};
 use crate::registry::{CacheRetention, StreamOptions, ThinkingBudgets};
@@ -64,9 +65,12 @@ pub(super) fn build_body(
         body.insert("toolConfig".into(), tool_config);
     }
     if let Some(level) = reasoning
-        && let Some(fields) = additional_fields(model, level, &budgets, configured_region)
+        && let Some(fields) = additional_fields(model, level, &budgets, configured_region, &options.bedrock)
     {
         body.insert("additionalModelRequestFields".into(), fields);
+    }
+    if let Some(metadata) = &options.bedrock.request_metadata {
+        body.insert("requestMetadata".into(), json!(metadata));
     }
     Ok(Value::Object(body))
 }
@@ -96,6 +100,7 @@ fn additional_fields(
     level: ThinkingLevel,
     budgets: &ThinkingBudgets,
     configured_region: Option<&str>,
+    bedrock: &BedrockOptions,
 ) -> Option<Value> {
     if is_claude(model) {
         let gov_cloud = is_gov_cloud(model, configured_region);
@@ -108,7 +113,7 @@ fn additional_fields(
             json!({"type": "enabled", "budget_tokens": budget})
         };
         if !gov_cloud {
-            thinking["display"] = json!("summarized");
+            thinking["display"] = json!(bedrock.thinking_display.unwrap_or_default().as_str());
         }
         let mut fields = json!({"thinking": thinking});
         if adaptive {
@@ -119,7 +124,7 @@ fn additional_fields(
             if binding {
                 fields["anthropic_beta"] = json!([THINKING_BINDING_CONTROLS_BETA]);
             }
-        } else {
+        } else if bedrock.interleaved_thinking.unwrap_or(true) {
             fields["anthropic_beta"] = json!([INTERLEAVED_THINKING_BETA]);
         }
         return Some(fields);

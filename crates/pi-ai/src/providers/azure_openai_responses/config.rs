@@ -10,9 +10,12 @@ use crate::types::Model;
 const DEFAULT_API_VERSION: &str = "v1";
 const AZURE_HOST_SUFFIXES: [&str; 3] = [".openai.azure.com", ".cognitiveservices.azure.com", ".ai.azure.com"];
 
-/// The deployment for `model`: its entry in `AZURE_OPENAI_DEPLOYMENT_NAME_MAP`
-/// (`model=deployment,...`), else the model id.
+/// The deployment for `model`: `options.azure.deployment_name`, then its entry in
+/// `AZURE_OPENAI_DEPLOYMENT_NAME_MAP` (`model=deployment,...`), else the model id.
 pub(crate) fn resolve_deployment_name(model: &Model, options: &StreamOptions) -> String {
+    if let Some(name) = options.azure.deployment_name.as_ref().filter(|name| !name.is_empty()) {
+        return name.clone();
+    }
     let map = provider_env_value("AZURE_OPENAI_DEPLOYMENT_NAME_MAP", &options.env).unwrap_or_default();
     map.split(',')
         .filter_map(|entry| entry.trim().split_once('='))
@@ -37,11 +40,24 @@ fn normalize_base_url(base_url: &str) -> Result<String, String> {
     Ok(url.to_string().trim_end_matches('/').to_string())
 }
 
-/// Base URL from `AZURE_OPENAI_BASE_URL`, then `AZURE_OPENAI_RESOURCE_NAME`, then the model.
+/// Base URL from the options or `AZURE_OPENAI_BASE_URL`, then the resource name (options or
+/// `AZURE_OPENAI_RESOURCE_NAME`), then the model.
 pub(crate) fn resolve_base_url(model: &Model, options: &StreamOptions) -> Result<String, String> {
-    let explicit = provider_env_value("AZURE_OPENAI_BASE_URL", &options.env).filter(|url| !url.trim().is_empty());
+    let explicit = options
+        .azure
+        .base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+        .map(str::to_string)
+        .or_else(|| provider_env_value("AZURE_OPENAI_BASE_URL", &options.env).filter(|url| !url.trim().is_empty()));
     let from_resource = || {
-        provider_env_value("AZURE_OPENAI_RESOURCE_NAME", &options.env)
+        options
+            .azure
+            .resource_name
+            .clone()
+            .filter(|name| !name.is_empty())
+            .or_else(|| provider_env_value("AZURE_OPENAI_RESOURCE_NAME", &options.env))
             .map(|name| format!("https://{name}.openai.azure.com/openai/v1"))
     };
     let from_model = || (!model.base_url.is_empty()).then(|| model.base_url.clone());
@@ -51,10 +67,17 @@ pub(crate) fn resolve_base_url(model: &Model, options: &StreamOptions) -> Result
     normalize_base_url(&base)
 }
 
-/// The Responses endpoint: `{base}/responses?api-version={AZURE_OPENAI_API_VERSION or v1}`.
+/// The Responses endpoint: `{base}/responses?api-version={version}`, where the version comes
+/// from the options, then `AZURE_OPENAI_API_VERSION`, else `v1`.
 pub(crate) fn responses_url(model: &Model, options: &StreamOptions) -> Result<String, String> {
     let base = resolve_base_url(model, options)?;
-    let version = provider_env_value("AZURE_OPENAI_API_VERSION", &options.env).unwrap_or(DEFAULT_API_VERSION.into());
+    let version = options
+        .azure
+        .api_version
+        .clone()
+        .filter(|version| !version.is_empty())
+        .or_else(|| provider_env_value("AZURE_OPENAI_API_VERSION", &options.env))
+        .unwrap_or(DEFAULT_API_VERSION.into());
     let mut url = Url::parse(&base).map_err(|_| format!("Invalid Azure OpenAI base URL: {base}"))?;
     url.set_path(&format!("{}/responses", url.path().trim_end_matches('/')));
     url.query_pairs_mut().append_pair("api-version", &version);
@@ -114,5 +137,33 @@ mod tests {
         assert_eq!(resolve_deployment_name(&model, &env), "mini-deploy");
         let unmapped = Model { id: "gpt-5".into(), ..Model::default() };
         assert_eq!(resolve_deployment_name(&unmapped, &env), "gpt-5");
+    }
+
+    #[test]
+    fn request_options_win_over_the_environment() {
+        let mut options = options(&[
+            ("AZURE_OPENAI_BASE_URL", "https://env.openai.azure.com"),
+            ("AZURE_OPENAI_RESOURCE_NAME", "env-resource"),
+            ("AZURE_OPENAI_DEPLOYMENT_NAME_MAP", "gpt-4o-mini=env-deploy"),
+            ("AZURE_OPENAI_API_VERSION", "env-version"),
+        ]);
+        options.azure = crate::provider_options::AzureOptions {
+            base_url: Some("  https://option.cognitiveservices.azure.com/ ".into()),
+            resource_name: Some("option-resource".into()),
+            deployment_name: Some("option-deploy".into()),
+            api_version: Some("2025-03-01-preview".into()),
+        };
+        let model = Model { id: "gpt-4o-mini".into(), ..Model::default() };
+        assert_eq!(
+            responses_url(&model, &options).unwrap(),
+            "https://option.cognitiveservices.azure.com/openai/v1/responses?api-version=2025-03-01-preview"
+        );
+        assert_eq!(resolve_deployment_name(&model, &options), "option-deploy");
+        options.azure.base_url = None;
+        options.env.remove("AZURE_OPENAI_BASE_URL");
+        if std::env::var("AZURE_OPENAI_BASE_URL").is_err() {
+            let base = resolve_base_url(&model, &options).unwrap();
+            assert_eq!(base, "https://option-resource.openai.azure.com/openai/v1");
+        }
     }
 }

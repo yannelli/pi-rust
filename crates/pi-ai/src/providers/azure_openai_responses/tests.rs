@@ -207,3 +207,21 @@ async fn streams_tool_calls_and_sends_images() {
     assert_eq!(input[0]["content"][1]["type"], "input_image");
     assert_eq!(input[0]["content"][1]["image_url"], "data:image/png;base64,aGVsbG8=");
 }
+
+#[tokio::test]
+async fn reasoning_summary_and_endpoint_options() {
+    let server = MockHttp::start(vec![text_stream("ok", json!([]))]).await;
+    let mut options = keyed(&server);
+    options.env.remove("AZURE_OPENAI_BASE_URL");
+    options.azure.base_url = Some(format!("{}/openai/v1", server.base_url));
+    options.azure.deployment_name = Some("option-deploy".into());
+    options.azure.api_version = Some("2025-03-01-preview".into());
+    options.reasoning_summary = Some(crate::provider_options::ReasoningSummary::Detailed);
+    let (_, message) = collect(AzureOpenAIResponses.stream(&model(), &context(), options)).await;
+    assert_eq!(message.stop_reason, StopReason::Stop, "{:?}", message.error_message);
+    let request = server.request(0);
+    assert_eq!(request.path, "/openai/v1/responses?api-version=2025-03-01-preview");
+    let body = request.json();
+    assert_eq!(body["model"], "option-deploy");
+    assert_eq!(body["reasoning"], json!({"effort": "medium", "summary": "detailed"}));
+}

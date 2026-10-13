@@ -7,6 +7,7 @@ use futures::future::BoxFuture;
 use tokio_util::sync::CancellationToken;
 
 use crate::env::get_env_api_key;
+use crate::provider_options::{AzureOptions, BedrockOptions, ReasoningSummary, VertexOptions};
 use crate::providers;
 use crate::request::RequestOptions;
 use crate::stream::{AssistantMessageEventStream, error_stream};
@@ -88,6 +89,14 @@ pub struct StreamOptions {
     pub service_tier: Option<String>,
     /// Ask a capable provider for a durable deferred handle (`15m`, `1h`, `24h`).
     pub deferred: Option<String>,
+    /// OpenAI Responses, Azure, and Codex reasoning summary; alone it requests `medium` effort
+    /// on Responses and Azure.
+    pub reasoning_summary: Option<ReasoningSummary>,
+    pub vertex: VertexOptions,
+    pub azure: AzureOptions,
+    pub bedrock: BedrockOptions,
+    /// pi-messages: ask the backend for debug metadata (`?debug=1`).
+    pub debug: bool,
     pub on_payload: Option<OnPayloadFn>,
     pub on_response: Option<OnResponseFn>,
     pub on_provider_stream_event: Option<OnProviderStreamEventFn>,

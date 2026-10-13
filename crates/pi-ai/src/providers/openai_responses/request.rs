@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use serde_json::{Map, Value, json};
 
 use super::convert::{ConvertOptions, convert_messages};
+use crate::provider_options::ReasoningSummary;
 use crate::providers::common::{compat_bool, compat_str};
 use crate::providers::constrained_sampling::{
     ResponsesToolOptions, convert_responses_tools, grammar_tool_input_properties,
@@ -132,11 +133,17 @@ pub(crate) fn build_body(
         body.insert("tool_choice".into(), json!(choice));
     }
     let effort = reasoning_effort(model, options);
+    let summary = options.reasoning_summary.map_or("auto", ReasoningSummary::as_str);
+    let summary_only = effort.is_none() && options.reasoning_summary.is_some();
     if model.reasoning {
         match effort {
             Some(level) => {
                 let effort = provider_thinking_value(model, level).unwrap_or_else(|| level.as_str().to_string());
-                body.insert("reasoning".into(), json!({"effort": effort, "summary": "auto"}));
+                body.insert("reasoning".into(), json!({"effort": effort, "summary": summary}));
+                body.insert("include".into(), json!(["reasoning.encrypted_content"]));
+            }
+            None if summary_only => {
+                body.insert("reasoning".into(), json!({"effort": "medium", "summary": summary}));
                 body.insert("include".into(), json!(["reasoning.encrypted_content"]));
             }
             None if model.provider != "github-copilot" => match mapped_thinking_level(model, ThinkingLevel::Off) {
@@ -154,9 +161,38 @@ pub(crate) fn build_body(
             body.insert("include".into(), json!(["reasoning.encrypted_content"]));
         }
     }
-    let level = effort.unwrap_or(ThinkingLevel::Off);
+    let level = effort.or(summary_only.then_some(ThinkingLevel::Medium)).unwrap_or(ThinkingLevel::Off);
     if let Some(sampling) = resolve_sampling_params(model, level, options.sampling_params.as_ref()) {
         body.extend(sampling);
     }
     Ok(Value::Object(body))
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::*;
+    use crate::providers::mock_server::test_model;
+
+    fn body(model: &Model, options: &StreamOptions) -> Value {
+        let messages = [Message::user("hi")];
+        build_body(model, &messages, options, &Compat::resolve(model), &BTreeMap::new()).unwrap()
+    }
+
+    #[test]
+    fn reasoning_summary_sets_the_summary_and_defaults_effort_to_medium() {
+        let model = test_model("openai-responses", "openai", "https://api.openai.com/v1");
+        let summary_only = StreamOptions { reasoning_summary: Some(ReasoningSummary::Concise), ..Default::default() };
+        let request = body(&model, &summary_only);
+        assert_eq!(request["reasoning"], json!({"effort": "medium", "summary": "concise"}));
+        assert_eq!(request["include"], json!(["reasoning.encrypted_content"]));
+        let with_effort = StreamOptions {
+            reasoning: Some(ThinkingLevel::High),
+            reasoning_summary: Some(ReasoningSummary::Detailed),
+            ..Default::default()
+        };
+        assert_eq!(body(&model, &with_effort)["reasoning"], json!({"effort": "high", "summary": "detailed"}));
+        let plain = StreamOptions { reasoning: Some(ThinkingLevel::Low), ..Default::default() };
+        assert_eq!(body(&model, &plain)["reasoning"], json!({"effort": "low", "summary": "auto"}));
+        assert_eq!(body(&model, &StreamOptions::default())["reasoning"], json!({"effort": "none"}));
+    }
 }

@@ -202,6 +202,21 @@ async fn signs_requests_with_environment_credentials() {
 }
 
 #[tokio::test]
+async fn bearer_token_option_wins_over_the_api_key() {
+    let frames = vec![
+        event("messageStart", json!({"role": "assistant"})),
+        event("messageStop", json!({"stopReason": "end_turn"})),
+    ];
+    let server = RouteServer::start(move |_| stream_reply(frames.clone())).await;
+    let model = bedrock_model("anthropic.claude-3-5-sonnet-20240620-v1:0", &server.base_url);
+    let mut options = bearer_options();
+    options.bedrock.bearer_token = Some("option-token".into());
+    let (_, message) = collect(BedrockConverseStream.stream(&model, &context(), options)).await;
+    assert_eq!(message.stop_reason, StopReason::Stop, "{:?}", message.error_message);
+    assert_eq!(server.requests()[0].headers["authorization"], "Bearer option-token");
+}
+
+#[tokio::test]
 async fn reports_http_errors_with_prefixes_and_diagnostics() {
     let server = RouteServer::start(|_| {
         Reply::json(400, &json!({"message": "data retention mode 'default' is not available"}))

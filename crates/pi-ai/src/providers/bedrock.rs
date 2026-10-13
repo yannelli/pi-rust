@@ -16,6 +16,7 @@ use serde_json::Value;
 
 use self::events::{BedrockEvents, Failure, error_prefix, with_retention_hint};
 use crate::http::client_for_env;
+use crate::provider_options::BedrockOptions;
 use crate::providers::aws::credentials::{self, ChainInput, profile_region};
 use crate::providers::aws::endpoint::{regional_endpoint, standard_bedrock_endpoint_region};
 use crate::providers::aws::event_stream::Decoder;
@@ -85,10 +86,22 @@ fn arn_region(model_id: &str) -> Option<&str> {
 
 /// Region: ARN-embedded, then configured, then a pinned standard endpoint's, then the
 /// profile's config region when an ambient profile is set, else `us-east-1`.
+#[cfg(test)]
 pub(crate) fn resolve_target(model: &Model, env: &BTreeMap<String, String>) -> Result<Target, String> {
-    let profile = env.get("AWS_PROFILE").filter(|profile| !profile.is_empty()).cloned();
-    let configured_region =
-        provider_env_value("AWS_REGION", env).or_else(|| provider_env_value("AWS_DEFAULT_REGION", env));
+    resolve_target_with(model, &BedrockOptions::default(), env)
+}
+
+/// [`resolve_target`] with the request's `region` and `profile` options, which win over the environment.
+pub(crate) fn resolve_target_with(
+    model: &Model,
+    bedrock: &BedrockOptions,
+    env: &BTreeMap<String, String>,
+) -> Result<Target, String> {
+    let non_empty = |value: &Option<String>| value.clone().filter(|value| !value.is_empty());
+    let profile = non_empty(&bedrock.profile).or_else(|| non_empty(&env.get("AWS_PROFILE").cloned()));
+    let configured_region = non_empty(&bedrock.region)
+        .or_else(|| provider_env_value("AWS_REGION", env))
+        .or_else(|| provider_env_value("AWS_DEFAULT_REGION", env));
     let ambient_profile = process_env_value("AWS_PROFILE");
     let endpoint_region = standard_bedrock_endpoint_region(&model.base_url);
     let explicit = !model.base_url.is_empty()
@@ -125,10 +138,9 @@ enum Auth {
 
 async fn resolve_auth(options: &StreamOptions, target: &Target) -> Result<Auth, String> {
     let skip_auth = provider_env_value("AWS_BEDROCK_SKIP_AUTH", &options.env).as_deref() == Some("1");
-    let bearer = options
-        .api_key
-        .clone()
-        .filter(|key| !key.is_empty())
+    let bearer = [&options.bedrock.bearer_token, &options.api_key]
+        .into_iter()
+        .find_map(|token| token.clone().filter(|token| !token.is_empty()))
         .or_else(|| provider_env_value("AWS_BEARER_TOKEN_BEDROCK", &options.env));
     match (skip_auth, bearer) {
         (true, _) => Ok(Auth::Sign(Credentials::new("dummy-access-key", "dummy-secret-key"))),
@@ -160,7 +172,7 @@ impl Run {
         options: &StreamOptions,
         builder: &mut MessageBuilder,
     ) -> Result<StopReason, Failure> {
-        let target = resolve_target(model, &options.env).map_err(Failure::new)?;
+        let target = resolve_target_with(model, &options.bedrock, &options.env).map_err(Failure::new)?;
         let mut body =
             request::build_body(model, context, options, target.configured_region.as_deref()).map_err(Failure::new)?;
         if let Some(replacement) = options.on_payload.as_ref().and_then(|hook| hook(&body, model)) {
