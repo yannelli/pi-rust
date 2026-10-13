@@ -12,6 +12,7 @@ mod spawner;
 use std::sync::{Arc, Mutex};
 
 pub use environment::FacetEnvironment;
+pub(crate) use lifecycle::single_or_aggregate;
 pub use lifecycle::{ActivateCallback, Disposal};
 pub use loader::{FacetLoader, LoadedFacets, combine_facet_loaders, create_static_facet_loader};
 pub use spawner::{LocalServiceSpawner, ServiceSpawner};

@@ -6,6 +6,7 @@ pub mod delta;
 pub mod error;
 pub mod facets;
 pub mod json;
+pub mod node;
 pub mod services;
 pub mod state;
 mod strict;
