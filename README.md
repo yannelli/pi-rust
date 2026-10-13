@@ -40,6 +40,23 @@ cat error.log | pi -p "Explain this error"
 
 Run `pi --help` for all options. In interactive mode, type `/help` for commands: `/model`, `/thinking`, `/compact`, `/new`, `/session`, `/resume`, `/follow`, `/abort`, `/quit`. Input typed while the agent works is queued as steering. Ctrl+C aborts a response; press it twice to exit.
 
+## ACP (Zed and other editors)
+
+`pi --mode acp` runs pi as an [Agent Client Protocol](https://agentclientprotocol.com) server over stdio, so editors such as Zed can use it as an external agent. In Zed, add this to `settings.json`:
+
+```json
+"agent_servers": {
+  "pi": {
+    "type": "custom",
+    "command": "pi",
+    "args": ["--mode", "acp"],
+    "env": {}
+  }
+}
+```
+
+Each editor session runs a pi session in its project directory, saved in `~/.pi/agent/sessions/` like any other, so the editor can list, resume, and delete them and `pi -r` can resume them too. The editor's model and thinking selectors, slash commands (prompt templates, `/skill:name`, and `/compact`, `/autocompact`, `/export`, `/session`, `/name`, `/steering`, `/follow-up`, `/changelog`), tool call diffs and terminals, and context usage all work. Set `quietStartup: true` in pi's settings to hide the startup info block, and `PI_ACP_ENABLE_EMBEDDED_CONTEXT=true` to accept embedded file contents in prompts. Without configured models, the editor offers to launch pi in a terminal to log in. ACP mode is a port of [pi-acp](https://github.com/svkozak/pi-acp) by Sergii Kozak (MIT).
+
 ## Configuration
 
 pi-rust reads the same files as the TypeScript pi, so both can share one setup.

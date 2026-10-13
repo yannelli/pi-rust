@@ -1,6 +1,7 @@
 //! [`PiBackend`] over an in-process [`AgentSessionRuntime`], using the same session APIs and
 //! JSON shapes as RPC mode, and the factory that opens one runtime per ACP session.
 
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -18,7 +19,10 @@ use crate::agent_session::{
     AgentSession, AgentSessionEvent, AgentSessionRuntime, DiagnosticLevel, PromptOptions, compaction_result_json, lock,
 };
 use crate::app::{AppOptions, create_app_runtime};
-use crate::rpc::{RpcExtensionUi, RpcOutput, builtin_commands, resource_commands, session_state};
+use crate::rpc::{
+    RpcExtensionBinding, RpcExtensionHost, RpcExtensionUi, RpcOutput, RpcShutdownHandle, builtin_commands,
+    resource_commands, session_state,
+};
 use crate::session::{NewSessionOptions, SessionManager, session_dir};
 
 /// A message update with the delta and, for tool call events, the call itself.
@@ -48,16 +52,48 @@ fn message_update_json(event: &AssistantMessageEvent) -> Value {
     json!({"type": "message_update", "assistantMessageEvent": inner})
 }
 
-/// The RPC record of a session event; `None` for events ACP mode ignores.
-pub fn event_json(event: &AgentSessionEvent<'_>) -> Option<Value> {
-    if !event.is_upstream_event() {
-        return None;
+/// Session events as RPC records. Edits and writes also carry the file before the tool runs
+/// (`fileSnapshot`) and after it ends (`fileAfter`), read while the agent waits for the event.
+pub struct EventEncoder {
+    cwd: PathBuf,
+    mutations: HashMap<String, PathBuf>,
+}
+
+impl EventEncoder {
+    pub fn new(cwd: &Path) -> Self {
+        Self { cwd: cwd.to_path_buf(), mutations: HashMap::new() }
     }
-    match event {
-        AgentSessionEvent::Agent(AgentEvent::MessageUpdate { assistant_message_event, .. }) => {
-            Some(message_update_json(assistant_message_event)).filter(|value| !value.is_null())
+
+    /// The record for `event`; `None` for events ACP mode ignores.
+    pub fn encode(&mut self, event: &AgentSessionEvent<'_>) -> Option<Value> {
+        if !event.is_upstream_event() {
+            return None;
         }
-        other => Some(other.to_json()),
+        let AgentSessionEvent::Agent(agent_event) = event else { return Some(event.to_json()) };
+        match agent_event {
+            AgentEvent::MessageUpdate { assistant_message_event, .. } => {
+                Some(message_update_json(assistant_message_event)).filter(|value| !value.is_null())
+            }
+            AgentEvent::ToolExecutionStart { tool_call_id, tool_name, args, .. }
+                if tool_name == "edit" || tool_name == "write" =>
+            {
+                let mut value = event.to_json();
+                let path = args.get("path").or_else(|| args.get("file_path")).and_then(Value::as_str);
+                if let Some(path) = path.map(|path| self.cwd.join(path)) {
+                    value["fileSnapshot"] = json!({"oldText": std::fs::read_to_string(&path).ok()});
+                    self.mutations.insert(tool_call_id.clone(), path);
+                }
+                Some(value)
+            }
+            AgentEvent::ToolExecutionEnd { tool_call_id, .. } => {
+                let mut value = event.to_json();
+                if let Some(path) = self.mutations.remove(tool_call_id) {
+                    value["fileAfter"] = json!({"newText": std::fs::read_to_string(path).ok()});
+                }
+                Some(value)
+            }
+            _ => Some(event.to_json()),
+        }
     }
 }
 
@@ -88,26 +124,33 @@ pub struct RuntimeBackend {
     runtime: Arc<AgentSessionRuntime>,
     session: Arc<AgentSession>,
     ui: Arc<RpcExtensionUi>,
+    host: Option<Arc<dyn RpcExtensionHost>>,
     subscription: u64,
     events: Mutex<Option<UnboundedReceiver<Value>>>,
 }
 
 impl RuntimeBackend {
-    /// Stream the runtime's session and route its extension dialogs through events.
-    pub fn start(runtime: Arc<AgentSessionRuntime>) -> Arc<Self> {
+    /// Stream the runtime's session and route its extension dialogs through events. The
+    /// extension host binds to the session as in RPC mode, with dialogs mapped to ACP.
+    pub fn start(runtime: Arc<AgentSessionRuntime>, host: Option<Arc<dyn RpcExtensionHost>>) -> Arc<Self> {
         let session = runtime.session();
         let (sender, receiver) = unbounded_channel();
         let events = sender.clone();
+        let encoder = Mutex::new(EventEncoder::new(session.cwd()));
         let subscription = session.subscribe(move |event| {
-            if let Some(value) = event_json(event) {
+            if let Some(value) = lock(&encoder).encode(event) {
                 let _ = events.send(value);
             }
         });
         let output = RpcOutput::spawn(Box::new(EventWriter { sender, buffer: Vec::new() }));
-        let ui = RpcExtensionUi::new(output);
+        let ui = RpcExtensionUi::new(output.clone());
         crate::rpc::bind_builtins(&session, &ui);
+        if let Some(host) = &host {
+            let shutdown = RpcShutdownHandle::default();
+            host.bind(RpcExtensionBinding::new(runtime.clone(), session.clone(), ui.clone(), shutdown, output));
+        }
         session.model_runtime().refresh_in_background();
-        Arc::new(Self { runtime, session, ui, subscription, events: Mutex::new(Some(receiver)) })
+        Arc::new(Self { runtime, session, ui, host, subscription, events: Mutex::new(Some(receiver)) })
     }
 
     pub fn session(&self) -> &Arc<AgentSession> {
@@ -221,6 +264,9 @@ impl PiBackend for RuntimeBackend {
 
     async fn get_commands(&self) -> anyhow::Result<Value> {
         let mut commands = builtin_commands(&self.session);
+        if let Some(host) = &self.host {
+            commands.extend(host.commands(&self.session));
+        }
         commands.extend(resource_commands(&self.session));
         Ok(json!({"commands": commands}))
     }
@@ -245,6 +291,8 @@ pub struct RuntimeBackendFactory {
     pub app: AppOptions,
     /// `--session-dir`, `PI_CODING_AGENT_SESSION_DIR`, or the `sessionDir` setting.
     pub session_dir: Option<PathBuf>,
+    /// Extensions, bound to every session as in RPC mode.
+    pub extension_host: Option<Arc<dyn RpcExtensionHost>>,
 }
 
 impl RuntimeBackendFactory {
@@ -278,6 +326,6 @@ impl BackendFactory for RuntimeBackendFactory {
             runtime.dispose().await;
             return Err(internal_error(json!({}), &errors.join("\n")));
         }
-        Ok(RuntimeBackend::start(Arc::new(runtime)))
+        Ok(RuntimeBackend::start(Arc::new(runtime), self.extension_host.clone()))
     }
 }

@@ -234,7 +234,10 @@ impl AcpSession {
         if name == "edit" || name == "write" {
             lock(&self.inner).mutations.insert(id.clone());
             if let Some(path) = tool_path(&args) {
-                let old_text = std::fs::read_to_string(resolve(&self.cwd, path)).ok();
+                let old_text = match event.get("fileSnapshot") {
+                    Some(snapshot) => snapshot["oldText"].as_str().map(String::from),
+                    None => std::fs::read_to_string(resolve(&self.cwd, path)).ok(),
+                };
                 if name == "edit"
                     && let Some(text) = &old_text
                 {
@@ -309,7 +312,10 @@ impl AcpSession {
         let mut diff = None;
         if !is_error
             && let Some(snapshot) = snapshot
-            && let Ok(new_text) = std::fs::read_to_string(resolve(&self.cwd, &snapshot.path))
+            && let Some(new_text) = match event.get("fileAfter") {
+                Some(after) => after["newText"].as_str().map(String::from),
+                None => std::fs::read_to_string(resolve(&self.cwd, &snapshot.path)).ok(),
+            }
             && snapshot.old_text.as_deref() != Some(new_text.as_str())
         {
             diff = Some(Diff::new(snapshot.path, new_text).old_text(snapshot.old_text));

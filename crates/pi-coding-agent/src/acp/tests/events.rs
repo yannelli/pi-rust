@@ -374,3 +374,56 @@ async fn failed_or_unchanged_mutations_fall_back_to_text() {
     assert_eq!(end["status"], "failed");
     assert_eq!(end["content"], json!([{"type": "content", "content": {"type": "text", "text": "No match"}}]));
 }
+
+#[tokio::test]
+async fn runtime_snapshots_win_over_disk_reads() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "on disk\n").unwrap();
+    let f = fixture(dir.path());
+    f.emit(json!({"type": "tool_execution_start", "toolCallId": "t1", "toolName": "edit",
+        "args": {"path": "a.txt", "oldText": "needle"}, "fileSnapshot": {"oldText": "x\nneedle\n"}}))
+        .await;
+    assert_eq!(f.client.update_bodies()[0]["locations"][0]["line"], 2);
+    f.emit(json!({"type": "tool_execution_end", "toolCallId": "t1", "isError": false, "result": {},
+        "fileAfter": {"newText": "x\nthread\n"}}))
+        .await;
+    let end = completed_update(&f).await;
+    assert_eq!(
+        end["content"],
+        json!([{"type": "diff", "path": "a.txt", "oldText": "x\nneedle\n", "newText": "x\nthread\n"}])
+    );
+}
+
+#[test]
+fn the_encoder_reads_files_around_mutations() {
+    use crate::acp::EventEncoder;
+    use crate::agent_session::AgentSessionEvent;
+    use pi_agent::{AgentEvent, AgentToolResult};
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "before\n").unwrap();
+    let mut encoder = EventEncoder::new(dir.path());
+    let start = AgentEvent::ToolExecutionStart {
+        tool_call_id: "t1".into(),
+        tool_name: "write".into(),
+        args: json!({"path": "a.txt"}),
+        parent_tool_call_id: None,
+    };
+    let encoded = encoder.encode(&AgentSessionEvent::Agent(&start)).unwrap();
+    assert_eq!(
+        (encoded["type"].clone(), encoded["fileSnapshot"].clone()),
+        (json!("tool_execution_start"), json!({"oldText": "before\n"}))
+    );
+    std::fs::write(dir.path().join("a.txt"), "after\n").unwrap();
+    let end = AgentEvent::ToolExecutionEnd {
+        tool_call_id: "t1".into(),
+        tool_name: "write".into(),
+        result: AgentToolResult::default(),
+        is_error: false,
+        duration_ms: None,
+        parent_tool_call_id: None,
+    };
+    let encoded = encoder.encode(&AgentSessionEvent::Agent(&end)).unwrap();
+    assert_eq!(encoded["fileAfter"], json!({"newText": "after\n"}));
+    let settled = encoder.encode(&AgentSessionEvent::AgentSettled { aborted: false }).unwrap();
+    assert_eq!(settled, json!({"type": "agent_settled", "aborted": false}));
+}

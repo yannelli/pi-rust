@@ -38,7 +38,7 @@ pub use backend::{AcpClient, BackendFactory, PiBackend};
 pub use connection::ClientConnection;
 pub use events::{edit_old_texts, find_unique_line_number, format_auto_retry_message, tool_call_locations};
 pub use ext_ui::{extension_ui_tool_call, option_index};
-pub use runtime::{RuntimeBackend, RuntimeBackendFactory, event_json};
+pub use runtime::{EventEncoder, RuntimeBackend, RuntimeBackendFactory};
 pub use session::{AcpSession, AcpSessionParams, SESSION_STATS_TIMEOUT, TurnEnd, TurnResult, to_usage_update};
 
 use crate::app::AppOptions;
@@ -58,6 +58,8 @@ pub struct AcpModeOptions {
     pub handle_signals: bool,
     /// Check for a newer pi release for the startup info.
     pub version_check: bool,
+    /// Extensions, bound to every session with ACP dialogs (see `RpcExtensionHost`).
+    pub extension_host: Option<Arc<dyn crate::rpc::RpcExtensionHost>>,
 }
 
 impl AcpModeOptions {
@@ -79,7 +81,7 @@ impl AcpModeOptions {
             terminal_launch: auth::default_launch(),
             version: env!("CARGO_PKG_VERSION").to_string(),
         };
-        Self { app, session_dir, agent, handle_signals: false, version_check: false }
+        Self { app, session_dir, agent, handle_signals: false, version_check: false, extension_host: None }
     }
 
     /// Options from the command line, as `pi --mode acp` uses them.
@@ -111,7 +113,11 @@ async fn termination_signal() -> i32 {
 pub async fn serve_acp(options: AcpModeOptions, input: impl AsyncRead + Unpin, output: Box<dyn Write + Send>) -> i32 {
     let output = RpcOutput::spawn(output);
     let client = ClientConnection::new(output.clone());
-    let factory = Arc::new(RuntimeBackendFactory { app: options.app, session_dir: options.session_dir });
+    let factory = Arc::new(RuntimeBackendFactory {
+        app: options.app,
+        session_dir: options.session_dir,
+        extension_host: options.extension_host,
+    });
     let check = if options.version_check { crate::startup::spawn_version_check() } else { None };
     let agent = AcpAgent::new(client.clone(), factory, options.agent, check);
     let handle_signals = options.handle_signals;
