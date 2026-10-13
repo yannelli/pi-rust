@@ -1,0 +1,304 @@
+//! Opening a connection: one try per transport, retries after transient HTTP errors, and the
+//! listeners that keep tools and resources current.
+
+use std::path::Path;
+use std::sync::{Arc, MutexGuard};
+use std::time::Duration;
+
+use super::{CONNECT_RETRY_DELAYS, Inner, McpServerConnection, ServerState, Status};
+use crate::client::{McpClient, McpClientOptions, RequestOptions};
+use crate::error::{McpError, OAuthError};
+use crate::transport::SharedTransport;
+use crate::types::{Resource, ResourceTemplate, Root, Tool};
+
+const STDERR_TAIL_CHARS: usize = 2_000;
+
+/// Servers that do not implement `resources/templates/list` have no templates.
+pub(super) async fn list_templates(
+    client: &McpClient,
+    options: RequestOptions,
+) -> Result<Vec<ResourceTemplate>, McpError> {
+    match client.list_resource_templates(options).await {
+        Err(error) if error.is_method_not_found() => Ok(Vec::new()),
+        result => result,
+    }
+}
+
+/// Resources and templates at connect time, for counts in lists. A server whose lists fail still
+/// connects: the resource tools list and read its resources on demand.
+async fn fetch_resources(client: &McpClient) -> (Vec<Resource>, Vec<ResourceTemplate>) {
+    let (resources, templates) = futures::join!(
+        client.list_resources(RequestOptions::default()),
+        list_templates(client, RequestOptions::default())
+    );
+    let resources = resources.unwrap_or_default().into_iter().filter(|resource| !resource.is_mcp_app());
+    let templates = templates.unwrap_or_default().into_iter().filter(|template| !template.is_mcp_app());
+    (resources.collect(), templates.collect())
+}
+
+fn stderr_tail(transport: &SharedTransport) -> Option<String> {
+    let stderr = transport.stderr()?;
+    let trimmed = stderr.trim();
+    let skip = trimmed.chars().count().saturating_sub(STDERR_TAIL_CHARS);
+    let tail: String = trimmed.chars().skip(skip).collect();
+    (!tail.is_empty()).then_some(tail)
+}
+
+fn root(cwd: &Path) -> Root {
+    let uri = url::Url::from_file_path(cwd).map_or_else(|()| format!("file://{}", cwd.display()), String::from);
+    Root { uri, name: cwd.file_name().map(|name| name.to_string_lossy().into_owned()) }
+}
+
+struct Listed {
+    tools: Vec<Tool>,
+    has_resources: bool,
+    resources: Vec<Resource>,
+    resource_templates: Vec<ResourceTemplate>,
+}
+
+fn is_current(status: &Status, client: &McpClient) -> bool {
+    status.client.as_ref().is_some_and(|current| current.same(client))
+}
+
+impl Inner {
+    pub(super) fn lock(&self) -> MutexGuard<'_, Status> {
+        self.status.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn handle(self: &Arc<Self>) -> McpServerConnection {
+        McpServerConnection { inner: self.clone() }
+    }
+
+    pub(super) fn changed(self: &Arc<Self>) {
+        if let Some(on_change) = &self.options.on_change {
+            on_change(&self.handle());
+        }
+    }
+
+    fn tools_changed(self: &Arc<Self>) {
+        if let Some(on_tools) = &self.options.on_tools {
+            on_tools(&self.handle());
+        }
+    }
+
+    /// Resolves once a connect in progress finished, whatever its result.
+    pub(super) async fn settle_opening(&self) {
+        let opening = self.opening.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+        if let Some(opening) = opening {
+            let _ = opening.await;
+        }
+    }
+
+    pub(super) fn sign_in_required_message(&self) -> String {
+        let entry = &self.options.entry;
+        let command = match entry.config.auth_provider() {
+            Some(provider) => format!("/login {provider}"),
+            None => "/mcp".into(),
+        };
+        format!("MCP server \"{}\" requires sign-in. Run {command} to sign in.", entry.name)
+    }
+
+    /// Servers that still reject the request after a refresh need the user to sign in again.
+    pub(super) fn needs_sign_in(&self, error: &McpError) -> bool {
+        matches!(error, McpError::OAuth(OAuthError::AuthorizationRequired))
+            || (self.auth.is_some() && matches!(error, McpError::AuthRequired { .. }))
+    }
+
+    pub(super) fn mark_needs_auth(self: &Arc<Self>) {
+        {
+            let mut status = self.lock();
+            status.state = ServerState::NeedsAuth;
+            status.error = None;
+        }
+        self.changed();
+    }
+
+    pub(super) async fn drop_client(&self, client: &McpClient) {
+        {
+            let mut status = self.lock();
+            if is_current(&status, client) {
+                status.client = None;
+            }
+        }
+        client.close().await;
+    }
+
+    pub(super) async fn open(self: Arc<Self>) -> Result<McpClient, McpError> {
+        self.lock().state = ServerState::Connecting;
+        self.changed();
+        let retries: &[Duration] = if self.options.entry.config.is_http() { &CONNECT_RETRY_DELAYS } else { &[] };
+        let mut retry = 0;
+        loop {
+            self.lock().stderr_tail = None;
+            let error = match self.connect_once().await {
+                Ok(client) => return Ok(client),
+                Err(error) => error,
+            };
+            let delay = retries.get(retry).filter(|_| !self.shutdown.is_cancelled() && error.is_transient());
+            let Some(delay) = delay else { return Err(self.connect_failed(error)) };
+            retry += 1;
+            tokio::select! {
+                () = tokio::time::sleep(*delay) => {}
+                () = self.shutdown.cancelled() => return Err(self.connect_failed(error)),
+            }
+        }
+    }
+
+    async fn connect_once(self: &Arc<Self>) -> Result<McpClient, McpError> {
+        let options = &self.options;
+        let mut client_options = McpClientOptions::new("pi", options.client_version.clone());
+        client_options.request_timeout = Some(self.handle().timeout());
+        client_options.roots = Some(vec![root(&options.cwd)]);
+        let client = McpClient::new(client_options);
+        if let Some(log) = options.log.clone() {
+            let name = options.entry.name.clone();
+            client.on_notification("notifications/message", move |params| log.write(&name, params));
+        }
+        let transport = match (options.create_transport)(&options.entry, &options.cwd, self.auth.clone()) {
+            Ok(transport) => transport,
+            Err(error) => {
+                client.close().await;
+                return Err(error);
+            }
+        };
+        // Shutting down stops the connect: closing the client fails its pending requests.
+        let result = tokio::select! {
+            result = self.initialize(&client, &transport) => result,
+            () = self.shutdown.cancelled() => Err(McpError::closed()),
+        };
+        let checked = result.and_then(|listed| {
+            if self.shutdown.is_cancelled() {
+                Err(McpError::other("shut down while connecting"))
+            } else if !client.is_connected() {
+                Err(McpError::other("connection closed during setup"))
+            } else {
+                Ok(listed)
+            }
+        });
+        let listed = match checked {
+            Ok(listed) => listed,
+            Err(error) => {
+                client.close().await;
+                let tail = stderr_tail(&transport);
+                self.lock().stderr_tail = tail;
+                return Err(error);
+            }
+        };
+        {
+            let mut status = self.lock();
+            status.client = Some(client.clone());
+            status.tools = listed.tools;
+            status.has_resources = listed.has_resources;
+            status.resources = listed.resources;
+            status.resource_templates = listed.resource_templates;
+            status.instructions =
+                client.instructions().map(|text| text.trim().to_string()).filter(|text| !text.is_empty());
+            status.state = ServerState::Connected;
+            status.error = None;
+        }
+        self.tools_changed();
+        self.changed();
+        Ok(client)
+    }
+
+    async fn initialize(self: &Arc<Self>, client: &McpClient, transport: &SharedTransport) -> Result<Listed, McpError> {
+        client.connect(transport.clone()).await?;
+        let weak = Arc::downgrade(self);
+        for (method, resources) in
+            [("notifications/tools/list_changed", false), ("notifications/resources/list_changed", true)]
+        {
+            let (weak, weak_client) = (weak.clone(), client.downgrade());
+            client.on_notification(method, move |_| {
+                let (Some(inner), Some(client)) = (weak.upgrade(), weak_client.upgrade()) else { return };
+                if resources {
+                    tokio::spawn(inner.refresh_resources(client));
+                } else {
+                    tokio::spawn(inner.refresh_tools(client));
+                }
+            });
+        }
+        let (weak_client, closed_transport) = (client.downgrade(), transport.clone());
+        client.on_close(move || {
+            if let (Some(inner), Some(client)) = (weak.upgrade(), weak_client.upgrade()) {
+                inner.handle_client_close(&client, &closed_transport);
+            }
+        });
+        // Servers without the tools capability (prompts or resources only) do not answer tools/list.
+        let capabilities = client.server_capabilities().unwrap_or_default();
+        let has_resources = capabilities.resources();
+        let tools = async {
+            if capabilities.tools() { client.list_tools(RequestOptions::default()).await } else { Ok(Vec::new()) }
+        };
+        let resources = async { if has_resources { fetch_resources(client).await } else { (Vec::new(), Vec::new()) } };
+        let (tools, (resources, resource_templates)) = futures::join!(tools, resources);
+        Ok(Listed { tools: tools?, has_resources, resources, resource_templates })
+    }
+
+    fn connect_failed(self: &Arc<Self>, error: McpError) -> McpError {
+        let closed = self.shutdown.is_cancelled();
+        if self.needs_sign_in(&error) && !closed {
+            self.mark_needs_auth();
+            return McpError::Other(self.sign_in_required_message());
+        }
+        let message = {
+            let mut status = self.lock();
+            status.state = if closed { ServerState::Closed } else { ServerState::Failed };
+            let message = match &status.stderr_tail {
+                Some(tail) => format!("{error}\n{tail}"),
+                None => error.to_string(),
+            };
+            status.error = Some(message.clone());
+            message
+        };
+        self.changed();
+        McpError::Other(format!("MCP server \"{}\" failed to connect: {message}", self.options.entry.name))
+    }
+
+    /// The transport dropped. The next call reconnects; until then the status shows why.
+    fn handle_client_close(self: &Arc<Self>, client: &McpClient, transport: &SharedTransport) {
+        {
+            let mut status = self.lock();
+            if self.shutdown.is_cancelled() || !is_current(&status, client) {
+                return;
+            }
+            status.client = None;
+            status.state = ServerState::Disconnected;
+            status.error = Some(match stderr_tail(transport) {
+                Some(tail) => format!("Connection closed\n{tail}"),
+                None => "Connection closed".into(),
+            });
+        }
+        self.changed();
+    }
+
+    async fn refresh_tools(self: Arc<Self>, client: McpClient) {
+        match client.list_tools(RequestOptions::default()).await {
+            Ok(tools) => {
+                {
+                    let mut status = self.lock();
+                    if self.shutdown.is_cancelled() || !is_current(&status, &client) {
+                        return;
+                    }
+                    status.tools = tools;
+                }
+                self.tools_changed();
+            }
+            Err(error) => self.lock().error = Some(format!("Failed to refresh tools: {error}")),
+        }
+        self.changed();
+    }
+
+    async fn refresh_resources(self: Arc<Self>, client: McpClient) {
+        let (resources, resource_templates) = fetch_resources(&client).await;
+        {
+            let mut status = self.lock();
+            if self.shutdown.is_cancelled() || !is_current(&status, &client) {
+                return;
+            }
+            status.resources = resources;
+            status.resource_templates = resource_templates;
+        }
+        self.tools_changed();
+        self.changed();
+    }
+}
