@@ -62,6 +62,8 @@ pub struct AppOptions {
     pub custom_tools: Vec<SharedTool>,
     /// How sessions run the built-in MCP support.
     pub mcp: McpSessionOptions,
+    /// Virtual models registered in every session's model runtime.
+    pub virtual_models: Vec<crate::virtual_models::VirtualModelDefinition>,
 }
 
 fn resolve_cli_paths(cwd: &Path, paths: &[String]) -> Vec<String> {
@@ -171,6 +173,11 @@ async fn create_runtime_parts(
     .await;
     let mut diagnostics: Vec<RuntimeDiagnostic> = trust_diagnostic.into_iter().collect();
     diagnostics.extend(services.diagnostics.iter().cloned());
+    for definition in &options.virtual_models {
+        if let Err(error) = services.model_runtime.register_virtual_model(definition.clone()) {
+            diagnostics.push(RuntimeDiagnostic::error(format!("{error:#}")));
+        }
+    }
     let inputs = setup::CliInputs {
         provider: options.provider.as_deref(),
         model: options.model.as_deref(),

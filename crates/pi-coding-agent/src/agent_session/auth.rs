@@ -7,11 +7,13 @@ use futures::StreamExt;
 use pi_agent::StreamFn;
 use pi_ai::auth::{AuthOverrides, Credential, ModelAuth, ProviderEnv};
 use pi_ai::http::{HttpSettings, configure_http};
-use pi_ai::{Model, StopReason, StreamOptions, ThinkingBudgets, error_stream, event_channel};
+use pi_ai::{Model, StopReason, StreamOptions, ThinkingBudgets, ThinkingLevel, error_stream, event_channel};
 
 use super::model_runtime::ModelRuntime;
+use super::runtime_virtual::RouteOptions;
 use crate::app::{format_no_api_key_found_message, oauth_failed_message};
 use crate::settings::SettingsManager;
+use crate::virtual_models::{ModelRouteReason, is_virtual_model};
 
 /// Auth for one request: the model with its resolved base URL, plus key, headers, and env.
 #[derive(Clone, Debug)]
@@ -24,10 +26,13 @@ pub struct RequestAuth {
 /// Resolve request auth for `model`, failing with upstream messages when nothing usable is set.
 pub async fn request_auth(runtime: &ModelRuntime, model: &Model) -> Result<RequestAuth, String> {
     let resolver = runtime.resolver();
-    let resolved = resolver
-        .resolve_for_model(&model.provider, &model.id, &AuthOverrides::default())
-        .await
-        .map_err(|error| error.to_string())?;
+    let resolved = match runtime.resolve_provider_auth(&model.provider).await {
+        Some(resolved) => resolved?,
+        None => resolver
+            .resolve_for_model(&model.provider, &model.id, &AuthOverrides::default())
+            .await
+            .map_err(|error| error.to_string())?,
+    };
     match resolved {
         Some(resolved) if resolved.auth.api_key.is_some() || !resolved.auth.headers.is_empty() => {
             let mut model = model.clone();
@@ -90,13 +95,51 @@ pub fn apply_request_settings(options: &mut StreamOptions, request: &RequestAuth
     }
 }
 
+/// Route a request for a virtual model outside the agent loop (`direct`): the output budget is
+/// capped to the routed model and the thinking level is the routed one.
+async fn route_direct(
+    runtime: &ModelRuntime,
+    model: &Model,
+    context: &pi_ai::Context,
+    options: &mut StreamOptions,
+) -> Result<Model, String> {
+    let level = options.reasoning.unwrap_or(ThinkingLevel::Off);
+    let mut route_options = RouteOptions::new(ModelRouteReason::Direct, level);
+    route_options.cancel = options.cancel.clone();
+    let route = runtime.resolve_model(model, context.messages.clone(), route_options).await;
+    let route = route.map_err(|error| format!("{error:#}"))?;
+    let limit = route.model.max_tokens;
+    options.max_tokens = options.max_tokens.map(|tokens| if limit > 0 { tokens.min(limit) } else { tokens });
+    options.reasoning = (route.thinking_level != ThinkingLevel::Off).then_some(route.thinking_level);
+    // Keys of the virtual model's provider are not sent to another vendor.
+    if route.model.provider != model.provider {
+        options.api_key = None;
+        options.headers.clear();
+        options.env.clear();
+    }
+    Ok(route.model)
+}
+
 /// Wrap `inner` (or `pi_ai::stream`) so each request carries resolved auth and settings.
+/// Virtual models are routed first, as requests outside the agent loop.
 pub fn auth_stream_fn(runtime: Arc<ModelRuntime>, settings: Arc<SettingsManager>, inner: Option<StreamFn>) -> StreamFn {
     Arc::new(move |model: &Model, context: &pi_ai::Context, mut options: StreamOptions| {
         let (sender, stream) = event_channel();
         let (runtime, settings, inner) = (runtime.clone(), settings.clone(), inner.clone());
-        let (model, context) = (model.clone(), context.clone());
+        let (mut model, context) = (model.clone(), context.clone());
         tokio::spawn(async move {
+            if is_virtual_model(&model) {
+                match route_direct(&runtime, &model, &context, &mut options).await {
+                    Ok(routed) => model = routed,
+                    Err(message) => {
+                        let mut upstream = error_stream(&model, StopReason::Error, message);
+                        while let Some(event) = upstream.next().await {
+                            sender.push(event);
+                        }
+                        return;
+                    }
+                }
+            }
             let mut upstream = match request_auth(&runtime, &model).await {
                 Ok(request) => {
                     apply_request_settings(&mut options, &request, &settings);

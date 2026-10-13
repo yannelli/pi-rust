@@ -15,6 +15,7 @@ use crate::compaction::{
     prepare_compaction, summarize_compaction,
 };
 use crate::session::NewCompaction;
+use crate::virtual_models::is_virtual_model;
 
 pub(crate) fn no_model_selected_message() -> String {
     format!("No model selected. {}", crate::app::provider_login_help())
@@ -40,9 +41,14 @@ impl AgentSession {
         }
     }
 
-    /// The model that produced `message` when it is the current one; `None` for another model.
+    /// The model whose limits apply to `message`, or `None` when another model produced it.
+    /// Under a virtual selection, that is the physical model that produced it.
     pub(crate) fn model_for_message(&self, message: &AssistantMessage) -> Option<Model> {
-        self.model().filter(|model| model.provider == message.provider && model.id == message.model)
+        let model = self.model()?;
+        if is_virtual_model(&model) {
+            return self.model_runtime().physical_model(&message.provider, &message.model);
+        }
+        (model.provider == message.provider && model.id == message.model).then_some(model)
     }
 
     /// The model whose limits apply to `message`.
@@ -69,27 +75,29 @@ impl AgentSession {
         })
     }
 
-    /// Request settings for a summary with `model`. Missing auth fails unless the session was
-    /// created with its own stream function.
+    /// The model of a summary (a virtual selection routed first) and its request settings.
+    /// Missing auth fails unless the session was created with its own stream function.
     pub(crate) async fn summarization_options(
         &self,
         model: &Model,
         cancel: CancellationToken,
         source: SummarizationSource,
-    ) -> anyhow::Result<SummarizationOptions> {
-        if let Err(message) = request_auth(self.model_runtime(), model).await
+    ) -> anyhow::Result<(Model, SummarizationOptions)> {
+        let (model, thinking_level) = self.summary_model(model, &cancel).await?;
+        if let Err(message) = request_auth(self.model_runtime(), &model).await
             && !self.has_custom_stream_fn()
         {
             anyhow::bail!(message);
         }
-        Ok(SummarizationOptions {
+        let options = SummarizationOptions {
             cancel,
-            thinking_level: Some(self.thinking_level()),
+            thinking_level: Some(thinking_level),
             stream_fn: Some(self.stream_fn().clone()),
             retry: Some(self.retry_policy()),
             on_retry: Some(self.summarization_retry_callback(source)),
             ..SummarizationOptions::default()
-        })
+        };
+        Ok((model, options))
     }
 
     async fn summarize(
@@ -100,9 +108,9 @@ impl AgentSession {
         cancel: CancellationToken,
         reason: CompactionReason,
     ) -> anyhow::Result<CompactionResult> {
-        let options =
+        let (model, options) =
             self.summarization_options(model, cancel.clone(), SummarizationSource::Compaction(reason)).await?;
-        let mut result = summarize_compaction(preparation, model, instructions, &options).await?;
+        let mut result = summarize_compaction(preparation, &model, instructions, &options).await?;
         if cancel.is_cancelled() {
             anyhow::bail!("Compaction cancelled");
         }
@@ -231,7 +239,11 @@ impl AgentSession {
                 lock(&self.state).overflow_recovery_attempted = true;
                 let targets = entry_id.into_iter().chain(tool_results.iter().cloned()).collect();
                 self.omit_recovery_attempt(targets);
-                self.run_auto_compaction(CompactionReason::Overflow, true).await
+                let retry = self.run_auto_compaction(CompactionReason::Overflow, true).await;
+                if retry {
+                    lock(&self.state).failed_response = Some(assistant.clone());
+                }
+                retry
             }
             CompactionCheck::RecoveryExhausted { error_message } => {
                 self.emit(&AgentSessionEvent::CompactionEnd {
@@ -289,7 +301,8 @@ impl AgentSession {
 
     /// Compact between turns of one run when the projected context crosses the threshold.
     pub(crate) async fn compact_before_next_response(&self) {
-        let Some(model) = self.model() else { return };
+        // A virtual selection is checked when the request is routed, against the routed model.
+        let Some(model) = self.model().filter(|model| !is_virtual_model(model)) else { return };
         let settings = self.compaction_settings(Some(&model));
         let exceeds = exceeds_compaction_threshold(&self.session_manager(), &model, &settings);
         if exceeds {

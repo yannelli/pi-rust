@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use pi_ai::auth::{CredentialStore, OAuthLookup};
 
 use super::model_runtime::{ModelRuntime, ModelRuntimeOptions};
+use super::runtime_catalog::CatalogSetup;
 use crate::packages::{PackageManager, PackageManagerOptions};
 use crate::resources::{ResolvedPaths, ResourceDiagnostic, ResourceLoader, ResourceLoaderOptions, ResourceSettings};
 use crate::settings::{ResourceKind, SettingsManager, SettingsOptions, SettingsScope};
@@ -132,6 +133,12 @@ pub fn resource_loader_options(
     options
 }
 
+/// Whether the built-in extension `name` loads (`builtin:<name>` among the extensions).
+pub fn builtin_enabled(loader: &ResourceLoader, name: &str) -> bool {
+    let path = format!("{}{name}", crate::resources::source_info::BUILTIN_PATH_PREFIX);
+    loader.resources().extensions.iter().any(|entry| entry.path.to_string_lossy() == path)
+}
+
 /// Resource problems as diagnostics: errors stay errors, everything else is a warning.
 pub fn resource_diagnostics(loader: &ResourceLoader) -> Vec<RuntimeDiagnostic> {
     let loaded = loader.resources();
@@ -198,7 +205,9 @@ pub async fn create_agent_session_services(options: CreateServicesOptions) -> Ag
             if options.oauth.is_some() {
                 runtime_options.oauth = options.oauth;
             }
-            Arc::new(ModelRuntime::create(runtime_options).await)
+            let runtime = ModelRuntime::create(runtime_options).await;
+            runtime.enable_dynamic_catalogs(CatalogSetup::for_agent_dir(&agent_dir)).await;
+            Arc::new(runtime)
         }
     };
     if let Some(error) = model_runtime.load_error() {
@@ -211,6 +220,7 @@ pub async fn create_agent_session_services(options: CreateServicesOptions) -> Ag
     let mut loader = ResourceLoader::new(loader_options);
     loader.reload();
     diagnostics.extend(resource_diagnostics(&loader));
+    model_runtime.set_llama_enabled(builtin_enabled(&loader, crate::llama::LLAMA_PROVIDER_ID)).await;
     AgentSessionServices {
         cwd,
         agent_dir,

@@ -151,10 +151,16 @@ pub struct ReleaseSource {
     pub token: Option<String>,
 }
 
+/// `PI_GITHUB_API_URL` (a GitHub API mirror, or a local server in tests), else api.github.com.
+pub fn github_api_url() -> String {
+    let custom = pi_ai::env::process_env_value("PI_GITHUB_API_URL").filter(|url| !url.trim().is_empty());
+    custom.map(|url| url.trim_end_matches('/').to_string()).unwrap_or_else(|| GITHUB_API_URL.into())
+}
+
 impl Default for ReleaseSource {
     fn default() -> Self {
         Self {
-            api_url: GITHUB_API_URL.into(),
+            api_url: github_api_url(),
             repo: GITHUB_REPO.into(),
             client: pi_ai::http::shared_client(),
             token: pi_ai::env::process_env_value("GITHUB_TOKEN").filter(|token| !token.is_empty()),

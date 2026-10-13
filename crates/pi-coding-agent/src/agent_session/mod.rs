@@ -5,17 +5,22 @@
 pub mod auth;
 pub mod bash;
 pub mod builtins;
+mod cache;
 mod compaction;
 pub mod events;
 mod hooks;
 mod listener;
+mod llama_api;
 pub mod login;
 mod model;
 pub mod model_runtime;
 mod output_file;
 mod prompt;
+mod routing;
 mod run;
 pub mod runtime;
+mod runtime_catalog;
+mod runtime_virtual;
 pub mod sdk;
 pub mod services;
 mod tool_api;
@@ -34,11 +39,15 @@ use tokio_util::sync::CancellationToken;
 
 pub use self::bash::BashResult;
 pub use self::builtins::{BUILTIN_EXTENSIONS, McpSessionOptions, NotifyFn, NotifyLevel};
+pub use self::cache::CacheWarmingDecider;
 pub use self::events::{AgentSessionEvent, CompactionReason, SummarizationSource, compaction_result_json};
+pub use self::llama_api::LlamaProgressFn;
 pub use self::model::ModelCycleResult;
 pub use self::model_runtime::{ModelRuntime, ModelRuntimeOptions};
 pub use self::prompt::{PromptDisposition, PromptOptions, StreamingBehavior};
 pub use self::runtime::{AgentSessionRuntime, ForkPosition, ForkResult, RuntimeFactory, RuntimeParts, RuntimeTarget};
+pub use self::runtime_catalog::{CachedFileModelsStore, CatalogSetup, LlamaAuth, ProviderAuth, catalog_base_url};
+pub use self::runtime_virtual::RouteOptions;
 pub use self::sdk::{CreateAgentSessionOptions, CreateAgentSessionResult, NoTools, create_agent_session};
 pub use self::services::{
     AgentSessionServices, CreateServicesOptions, DiagnosticLevel, ResourceOptions, RuntimeDiagnostic,
@@ -82,6 +91,10 @@ pub(crate) struct RunState {
     pub next_bash: u64,
     /// Prompt options of the active run.
     pub run_prompt: Option<BuildSystemPromptOptions>,
+    /// The failed response the next request retries (upstream `_failedResponse`).
+    pub failed_response: Option<AssistantMessage>,
+    /// Why routing the current request failed; its stream ends with this error.
+    pub route_failure: Option<String>,
 }
 
 /// One conversation. Create it with [`create_agent_session`]; it is always held in an `Arc`.
@@ -103,6 +116,8 @@ pub struct AgentSession {
     scoped_models: Mutex<Vec<ScopedModel>>,
     agent_listener: Mutex<Option<u64>>,
     disposed: AtomicBool,
+    cache_warmer: Arc<crate::cache_warmer::CacheWarmer>,
+    warmer_host: Arc<cache::SessionWarmerHost>,
     weak: Weak<AgentSession>,
 }
 
@@ -277,6 +292,7 @@ impl AgentSession {
         }
         self.request_abort();
         self.abort_bash();
+        self.cache_warmer.cancel();
         if let Some(manager) = self.stop_mcp()
             && let Ok(handle) = tokio::runtime::Handle::try_current()
         {

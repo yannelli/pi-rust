@@ -86,9 +86,14 @@ impl ModelRegistry {
         Ok(())
     }
 
-    /// Add `model`, replacing one with the same provider and id.
+    /// Add `model`, replacing one with the same provider, id, and type (a chat model and a
+    /// classifier may share an id).
     pub fn upsert(&mut self, model: Model) {
-        match self.models.iter_mut().find(|existing| existing.provider == model.provider && existing.id == model.id) {
+        let kind = |model: &Model| model.model_type.clone().unwrap_or_else(|| "chat".into());
+        let same = |existing: &Model| {
+            existing.provider == model.provider && existing.id == model.id && kind(existing) == kind(&model)
+        };
+        match self.models.iter_mut().find(|existing| same(existing)) {
             Some(existing) => *existing = model,
             None => self.models.push(model),
         }

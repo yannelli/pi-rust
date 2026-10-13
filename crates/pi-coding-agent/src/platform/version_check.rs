@@ -1,5 +1,6 @@
-//! Version check against pi.dev (upstream `utils/version-check.ts`). `PI_OFFLINE` disables
-//! every request; `PI_SKIP_VERSION_CHECK` disables only the automatic startup check.
+//! Version check against the latest GitHub release of pi-rust, the source `pi update` installs
+//! from (upstream `utils/version-check.ts` asks pi.dev, which reports the TypeScript releases).
+//! `PI_OFFLINE` disables every request; `PI_SKIP_VERSION_CHECK` disables only the startup check.
 
 use std::cmp::Ordering;
 use std::time::Duration;
@@ -8,8 +9,9 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use super::http::{FetchError, FetchRetryOptions, fetch_with_retry, pi_user_agent};
+use crate::update::GitHubRelease;
 
-pub const LATEST_VERSION_URL: &str = "https://pi.dev/api/latest-version";
+pub const LATEST_VERSION_URL: &str = "https://api.github.com/repos/yannelli/pi-rust/releases/latest";
 const DEFAULT_TIMEOUT: Duration = Duration::from_millis(10_000);
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -41,31 +43,36 @@ pub fn is_newer_package_version(candidate: &str, current: &str) -> bool {
 
 #[derive(Clone, Debug)]
 pub struct VersionCheckOptions {
+    /// The GitHub "latest release" endpoint; `PI_GITHUB_API_URL` replaces api.github.com.
     pub url: String,
     pub timeout: Duration,
     /// Retry transient failures twice, as `pi update` does.
     pub retry: bool,
     pub offline: bool,
     pub client: reqwest::Client,
+    /// `GITHUB_TOKEN`, for higher API rate limits.
+    pub token: Option<String>,
 }
 
 impl Default for VersionCheckOptions {
     fn default() -> Self {
+        let api_url = crate::update::github_api_url();
+        let url = match api_url.as_str() {
+            crate::update::release::GITHUB_API_URL => LATEST_VERSION_URL.into(),
+            _ => format!("{api_url}/repos/{}/releases/latest", crate::update::GITHUB_REPO),
+        };
         Self {
-            url: LATEST_VERSION_URL.into(),
+            url,
             timeout: DEFAULT_TIMEOUT,
             retry: false,
             offline: crate::config::offline(),
             client: pi_ai::http::shared_client(),
+            token: pi_ai::env::process_env_value("GITHUB_TOKEN").filter(|token| !token.is_empty()),
         }
     }
 }
 
-fn non_empty(value: Option<&Value>) -> Option<String> {
-    value.and_then(Value::as_str).map(str::trim).filter(|text| !text.is_empty()).map(String::from)
-}
-
-/// The release pi.dev reports, or `None` offline, on an HTTP error, or without a version.
+/// The latest release on GitHub, or `None` offline, on an HTTP error, or without a tag.
 pub async fn get_latest_pi_release(
     current_version: &str,
     options: &VersionCheckOptions,
@@ -79,8 +86,17 @@ pub async fn get_latest_pi_release(
         ..FetchRetryOptions::default()
     };
     let agent = pi_user_agent(current_version);
-    let build =
-        || options.client.get(&options.url).header("User-Agent", agent.as_str()).header("accept", "application/json");
+    let build = || {
+        let request = options
+            .client
+            .get(&options.url)
+            .header("User-Agent", agent.as_str())
+            .header("accept", "application/vnd.github+json");
+        match &options.token {
+            Some(token) => request.header("Authorization", format!("Bearer {token}")),
+            None => request,
+        }
+    };
     let response = fetch_with_retry(build, &retry, &CancellationToken::new()).await?;
     if !response.status().is_success() {
         return Ok(None);
@@ -90,12 +106,12 @@ pub async fn get_latest_pi_release(
         Ok(Err(error)) => return Err(FetchError::Request(error)),
         Err(_) => return Err(FetchError::TimedOut),
     };
-    let Some(version) = non_empty(data.get("version")) else { return Ok(None) };
-    Ok(Some(LatestPiRelease {
-        version,
-        package_name: non_empty(data.get("packageName")),
-        note: non_empty(data.get("note")),
-    }))
+    let Some(release) = GitHubRelease::from_json(&data).filter(|release| !release.prerelease) else { return Ok(None) };
+    let version = release.version().trim();
+    if version.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(LatestPiRelease { version: version.to_string(), package_name: None, note: None }))
 }
 
 pub async fn get_latest_pi_version(
@@ -134,14 +150,21 @@ mod tests {
     use super::*;
     use crate::platform::test_http::{TestReply, TestServer, client};
 
+    const PATH: &str = "/repos/yannelli/pi-rust/releases/latest";
+
     fn options(server: &TestServer) -> VersionCheckOptions {
         VersionCheckOptions {
-            url: format!("{}/api/latest-version", server.url),
+            url: format!("{}{PATH}", server.url),
             timeout: Duration::from_secs(5),
             retry: false,
             offline: false,
             client: client(),
+            token: None,
         }
+    }
+
+    fn release(tag: &str) -> serde_json::Value {
+        json!({"tag_name": tag, "prerelease": false, "body": "## Changes", "assets": []})
     }
 
     #[test]
@@ -158,21 +181,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn returns_only_newer_versions_with_metadata() {
-        let server = TestServer::start(|_| {
-            TestReply::json(&json!({"version": "1.2.3", "packageName": " @new-scope/pi ", "note": " **Read this** "}))
-        })
-        .await;
-        let options = options(&server);
+    async fn returns_only_newer_github_releases() {
+        let server = TestServer::start(|_| TestReply::json(&release("v1.2.3"))).await;
+        let mut options = options(&server);
         assert_eq!(check_for_new_pi_version("1.2.3", &options, false).await, None);
-        let release = check_for_new_pi_version("1.2.2", &options, false).await.unwrap();
-        assert_eq!(release.version, "1.2.3");
-        assert_eq!(release.package_name.as_deref(), Some("@new-scope/pi"));
-        assert_eq!(release.note.as_deref(), Some("**Read this**"));
+        let latest = check_for_new_pi_version("1.2.2", &options, false).await.unwrap();
+        assert_eq!(latest, LatestPiRelease { version: "1.2.3".into(), package_name: None, note: None });
         let request = &server.requests()[0];
         assert!(request.header("user-agent").unwrap().starts_with("pi/1.2.3 "));
-        assert_eq!(request.header("accept"), Some("application/json"));
-        assert_eq!(request.path(), "/api/latest-version");
+        assert_eq!(request.header("accept"), Some("application/vnd.github+json"));
+        assert_eq!(request.path(), PATH);
+        assert_eq!(request.header("authorization"), None);
+        options.token = Some("gh-token".into());
+        check_for_new_pi_version("1.2.2", &options, false).await.unwrap();
+        assert_eq!(server.requests()[2].header("authorization"), Some("Bearer gh-token"));
     }
 
     #[tokio::test]
@@ -183,7 +205,7 @@ mod tests {
             if counter.fetch_add(1, AtomicOrdering::SeqCst) < 2 {
                 TestReply::status(503, "down")
             } else {
-                TestReply::json(&json!({"version": "1.2.4"}))
+                TestReply::json(&release("v1.2.4"))
             }
         })
         .await;
@@ -198,7 +220,7 @@ mod tests {
 
     #[tokio::test]
     async fn skip_and_offline_avoid_requests() {
-        let server = TestServer::start(|_| TestReply::json(&json!({"version": "9.9.9"}))).await;
+        let server = TestServer::start(|_| TestReply::json(&release("9.9.9"))).await;
         let mut options = options(&server);
         assert_eq!(check_for_new_pi_version("1.0.0", &options, true).await, None);
         assert!(server.requests().is_empty());
@@ -209,16 +231,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn missing_versions_and_http_errors_return_none() {
+    async fn missing_tags_prereleases_and_http_errors_return_none() {
         let server = TestServer::start(|request| match request.query("case").as_deref() {
-            Some("blank") => TestReply::json(&json!({"version": "  "})),
+            Some("blank") => TestReply::json(&json!({"name": "no tag"})),
+            Some("pre") => TestReply::json(&json!({"tag_name": "v2.0.0-rc.1", "prerelease": true})),
             _ => TestReply::status(404, "missing"),
         })
         .await;
         let mut options = options(&server);
-        options.url = format!("{}/api/latest-version?case=blank", server.url);
-        assert_eq!(get_latest_pi_release("1.0.0", &options).await.unwrap(), None);
-        options.url = format!("{}/api/latest-version", server.url);
+        for case in ["blank", "pre"] {
+            options.url = format!("{}{PATH}?case={case}", server.url);
+            assert_eq!(get_latest_pi_release("1.0.0", &options).await.unwrap(), None);
+        }
+        options.url = format!("{}{PATH}", server.url);
         assert_eq!(get_latest_pi_release("1.0.0", &options).await.unwrap(), None);
     }
 }

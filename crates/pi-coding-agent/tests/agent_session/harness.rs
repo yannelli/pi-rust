@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use pi_ai::auth::InMemoryCredentialStore;
+use pi_ai::auth::{Credential, InMemoryCredentialStore};
 use pi_ai::providers::faux::{FauxProvider, FauxResponse};
 use pi_ai::{Context, Message, register_api_provider};
 use pi_coding_agent::agent_session::{
@@ -32,6 +32,10 @@ pub struct Options {
     pub files: Vec<(&'static str, &'static str)>,
     /// More `models.json` providers, by name.
     pub providers: Value,
+    /// More fields of the `local/tiny` model, such as `cost` or `promptCache`.
+    pub tiny: Value,
+    /// Stored credentials by provider.
+    pub credentials: BTreeMap<String, Credential>,
 }
 
 impl Default for Options {
@@ -45,6 +49,8 @@ impl Default for Options {
             delay: None,
             files: Vec::new(),
             providers: json!({}),
+            tiny: json!({}),
+            credentials: BTreeMap::new(),
         }
     }
 }
@@ -66,6 +72,9 @@ fn write_models(agent_dir: &Path, api: &str, options: &Options) {
         "models": [{"id": "tiny", "contextWindow": options.context_window, "maxTokens": options.max_tokens,
             "reasoning": true, "input": ["text", "image"]},
             {"id": "other", "contextWindow": options.context_window, "maxTokens": options.max_tokens}]}}});
+    for (key, value) in options.tiny.as_object().unwrap() {
+        models["providers"]["local"]["models"][0][key] = value.clone();
+    }
     for (name, provider) in options.providers.as_object().unwrap() {
         models["providers"][name] = provider.clone();
     }
@@ -110,7 +119,7 @@ pub async fn harness_with(options: Options, configure: impl FnOnce(&mut CreateAg
     let settings = Arc::new(SettingsManager::in_memory(values));
     let services = create_agent_session_services(CreateServicesOptions {
         settings: Some(settings.clone()),
-        credentials: Some(Arc::new(InMemoryCredentialStore::new(BTreeMap::new()))),
+        credentials: Some(Arc::new(InMemoryCredentialStore::new(options.credentials.clone()))),
         ..CreateServicesOptions::new(&cwd, &agent_dir)
     })
     .await;
