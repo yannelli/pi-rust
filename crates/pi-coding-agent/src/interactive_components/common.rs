@@ -61,3 +61,9 @@ pub fn fuzzy_filter_by<T: Clone>(items: &[T], query: &str, get_text: impl Fn(&T)
         .map(|(item, _)| item)
         .collect()
 }
+
+/// Approximates JavaScript `localeCompare` for identifiers: case-insensitive first, then
+/// lowercase before uppercase.
+pub fn locale_compare(a: &str, b: &str) -> std::cmp::Ordering {
+    a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| b.cmp(a))
+}
