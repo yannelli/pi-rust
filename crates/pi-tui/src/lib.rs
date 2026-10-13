@@ -69,9 +69,11 @@ mod debug_log;
 pub mod editor_component;
 pub mod env;
 pub mod fuzzy;
+pub mod html;
 pub mod keybindings;
 pub mod keys;
 pub mod kill_ring;
+pub mod latex;
 pub mod layout;
 pub mod layout_node;
 pub mod main_screen;
@@ -102,6 +104,10 @@ pub use component::{
 pub use components::{
     AltScreenFlashContainer, HStack, Input, InputOptions, ScrollView, ScrollViewHandle, ScrollViewOptions,
     ScrollViewScrollToOptions, ScrollViewScrollbar, StackChild, StackEntryOptions, StackOptions, VStack,
+};
+pub use components::{
+    BoxComponent, CancellableLoader, Image, Loader, Markdown, MouseRegion, SelectList, SettingsList, Spacer, Text,
+    TruncatedText,
 };
 pub use components::{Editor, EditorOptions, EditorTheme};
 pub use editor_component::EditorComponent;
