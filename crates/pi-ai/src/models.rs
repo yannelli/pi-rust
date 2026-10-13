@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 
 use crate::auth::ProviderAuthConfig;
 use crate::env::get_env_api_key;
-use crate::types::{Model, ThinkingLevel};
+use crate::types::Model;
 
 #[path = "models_json.rs"]
 mod json;
@@ -207,41 +207,7 @@ pub fn is_chat_model(model: &Model) -> bool {
     model.model_type.as_deref().is_none_or(|kind| kind == "chat")
 }
 
-const EXTENDED_LEVELS: [ThinkingLevel; 7] = ThinkingLevel::ALL;
-
-/// Thinking levels `model` supports. Non-reasoning models support only `off`; a `null`
-/// entry in `thinkingLevelMap` removes a level; `xhigh` and `max` need an explicit entry.
-pub fn supported_thinking_levels(model: &Model) -> Vec<ThinkingLevel> {
-    if !model.reasoning {
-        return vec![ThinkingLevel::Off];
-    }
-    EXTENDED_LEVELS
-        .into_iter()
-        .filter(|level| {
-            let mapped = model.thinking_level_map.as_ref().and_then(|map| map.get(level.as_str()));
-            match mapped {
-                Some(None) => false,
-                Some(Some(_)) => true,
-                None => !matches!(level, ThinkingLevel::Xhigh | ThinkingLevel::Max),
-            }
-        })
-        .collect()
-}
-
-/// The closest supported level: `level` itself, else the next higher, else the next lower.
-pub fn clamp_thinking_level(model: &Model, level: ThinkingLevel) -> ThinkingLevel {
-    let available = supported_thinking_levels(model);
-    if available.contains(&level) {
-        return level;
-    }
-    let index = EXTENDED_LEVELS.iter().position(|candidate| *candidate == level).unwrap_or(0);
-    EXTENDED_LEVELS[index..]
-        .iter()
-        .chain(EXTENDED_LEVELS[..index].iter().rev())
-        .find(|candidate| available.contains(candidate))
-        .copied()
-        .unwrap_or(ThinkingLevel::Off)
-}
+pub use crate::simple_options::{clamp_thinking_level, supported_thinking_levels};
 
 /// Whether two models are the same catalog entry.
 pub fn models_are_equal(a: &Model, b: &Model) -> bool {

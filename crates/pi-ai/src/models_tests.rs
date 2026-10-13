@@ -1,4 +1,5 @@
 use super::*;
+use crate::types::ThinkingLevel;
 
 #[test]
 fn bundled_catalog_parses() {
