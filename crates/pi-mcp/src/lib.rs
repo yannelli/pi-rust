@@ -2,6 +2,7 @@
 //! transports, OAuth, `mcp.json` configuration, server connections, and tool adapters.
 
 pub mod auth;
+pub mod cli;
 pub mod client;
 pub mod config;
 pub mod config_value;
@@ -21,6 +22,7 @@ pub mod transport;
 pub mod types;
 
 pub use auth::{AuthProvider, StaticToken, UnauthorizedContext};
+pub use cli::{McpCommandOptions, run_mcp_command};
 pub use client::{ClientState, McpClient, McpClientOptions, RequestOptions};
 pub use config::{
     LoadedMcpConfig, McpConfigScope, McpExposure, McpServerConfig, McpServerEntry, get_mcp_tool_exposure,
