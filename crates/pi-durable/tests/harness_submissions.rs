@@ -163,8 +163,38 @@ async fn cancels_only_a_wait_and_rejects_pending_waits_on_close() {
     assert!(error.to_string().contains("Harness is closed"), "{error}");
 }
 
-// "rejects a wait whose submission read spans the start of close" needs a Storage that holds one read; the
-// Rust `ControlledStorage` holds commits and document lookups only, so the case is not ported.
+#[tokio::test]
+async fn rejects_a_wait_whose_submission_read_spans_the_start_of_close() {
+    let (entered, release) = (Deferred::default(), Deferred::default());
+    let hold = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let storage = Arc::new(ControlledStorage::default());
+    let (armed, signal, gate) = (hold.clone(), entered.clone(), release.clone());
+    *storage.call_hook.lock().unwrap() = Some(Arc::new(move |call: support::StorageCall| {
+        let held = call.method == "submission" && armed.load(std::sync::atomic::Ordering::SeqCst);
+        let (entered, release) = (signal.clone(), gate.clone());
+        Box::pin(async move {
+            if held {
+                entered.resolve();
+                release.wait().await;
+            }
+            Ok(())
+        })
+    }));
+    let setup = setup();
+    setup.faux.set_responses([unanswered().0]);
+    let (harness, root) = open_chat(storage, &setup).await;
+    let submission = root.submit(SubmissionDraft::input("hi"), &ctx()).await.unwrap();
+    hold.store(true, std::sync::atomic::Ordering::SeqCst);
+    let waiting = tokio::spawn(async move { submission.wait(&ctx()).await });
+    entered.wait().await;
+    let closer = harness.clone();
+    let closing = tokio::spawn(async move { closer.close(&ctx()).await });
+    support::flush().await;
+    release.resolve();
+    let error = waiting.await.unwrap().err().unwrap();
+    assert!(error.to_string().contains("Harness is closed"), "{error}");
+    closing.await.unwrap().unwrap();
+}
 
 #[tokio::test]
 async fn reacquires_a_submission_after_reopen_and_settles_it_durably() {

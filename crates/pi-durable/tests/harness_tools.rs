@@ -1,5 +1,14 @@
-//! Port of upstream `test/harness-tools.test.ts` (tool rounds, results, hooks, and the execution api).
+//! Port of upstream `test/harness-tools.test.ts`. This file holds the helpers and the first cases; the modules in
+//! `harness_tools/` hold the other cases, one per upstream `describe` group.
 
+#[path = "harness_tools/hooks.rs"]
+mod hooks;
+#[path = "harness_tools/lifetime.rs"]
+mod lifetime;
+#[path = "harness_tools/results.rs"]
+mod result_cases;
+#[path = "harness_tools/rounds.rs"]
+mod rounds;
 mod support;
 
 use std::sync::{Arc, Mutex};
@@ -20,11 +29,11 @@ use pi_durable::{EntryRecord, SubmissionStatus};
 use serde_json::{Value, json};
 use support::harness_support::*;
 
-fn echo_parameters() -> Value {
+pub fn echo_parameters() -> Value {
     json!({ "type": "object", "properties": { "text": { "type": "string" } } })
 }
 
-fn tool<F, Fut>(name: &str, execute: F) -> ToolRegistration
+pub fn tool<F, Fut>(name: &str, execute: F) -> ToolRegistration
 where
     F: Fn(pi_ai::JsonObject, ToolExecutionApi, pi_chord::Context) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = pi_durable::DurableResult<ToolExecutionResult>> + Send + 'static,
@@ -32,38 +41,42 @@ where
     define_tool(name, format!("The {name} tool"), echo_parameters(), execute)
 }
 
-fn empty_result() -> ToolExecutionResult {
+pub fn empty_result() -> ToolExecutionResult {
     ToolExecutionResult { output: Some(Vec::new()), ..ToolExecutionResult::default() }
 }
 
-fn add_tool(setup: &ChatSetup, tool: ToolRegistration) {
+pub fn add_tool(setup: &ChatSetup, tool: ToolRegistration) {
     let name = format!("tool:{}", tool.name());
     setup.registry.install(Extension::new(name).tool(tool)).unwrap();
 }
 
-fn add_tool_hooks(setup: &ChatSetup, name: &str, hooks: ToolHooks) {
+pub fn add_tool_hooks(setup: &ChatSetup, name: &str, hooks: ToolHooks) {
     setup.registry.install(Extension::new(name).hook(hook(&tool_task(), hooks))).unwrap();
 }
 
 /// A tool-calling answer with one call per `(name, args, id)`.
-fn calls(list: &[(&str, Value, &str)]) -> FauxResponseStep {
+pub fn call_message(list: &[(&str, Value, &str)]) -> pi_ai::AssistantMessage {
     let blocks =
         list.iter().map(|(name, args, id)| faux_tool_call_with_id(*name, args.clone(), *id)).collect::<Vec<_>>();
-    faux_assistant_message(blocks, FauxMessageOptions::stop_reason(StopReason::ToolUse)).into()
+    faux_assistant_message(blocks, FauxMessageOptions::stop_reason(StopReason::ToolUse))
 }
 
-fn done() -> FauxResponseStep {
+pub fn calls(list: &[(&str, Value, &str)]) -> FauxResponseStep {
+    call_message(list).into()
+}
+
+pub fn done() -> FauxResponseStep {
     faux_assistant_message(vec![faux_text("done")], FauxMessageOptions::default()).into()
 }
 
-struct Run {
-    harness: Harness,
-    root: Conversation,
-    entries: Vec<EntryRecord>,
-    status: SubmissionStatus,
+pub struct Run {
+    pub harness: Harness,
+    pub root: Conversation,
+    pub entries: Vec<EntryRecord>,
+    pub status: SubmissionStatus,
 }
 
-async fn run(setup: &ChatSetup, responses: Vec<FauxResponseStep>) -> Run {
+pub async fn run(setup: &ChatSetup, responses: Vec<FauxResponseStep>) -> Run {
     setup.faux.set_responses(responses);
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), setup).await;
     let settled = root.submit(SubmissionDraft::input("go"), &ctx()).await.unwrap().wait(&ctx()).await.unwrap();
@@ -71,7 +84,7 @@ async fn run(setup: &ChatSetup, responses: Vec<FauxResponseStep>) -> Run {
     Run { harness, root, entries, status: settled.status }
 }
 
-fn results(entries: &[EntryRecord]) -> Vec<ToolResultMessage> {
+pub fn results(entries: &[EntryRecord]) -> Vec<ToolResultMessage> {
     entries
         .iter()
         .filter(|entry| TOOL_RESULT_ENTRY.is(Some(entry)))
@@ -82,7 +95,7 @@ fn results(entries: &[EntryRecord]) -> Vec<ToolResultMessage> {
         .collect()
 }
 
-fn result_text(message: &ToolResultMessage) -> String {
+pub fn result_text(message: &ToolResultMessage) -> String {
     let parts: Vec<String> = message
         .content
         .iter()

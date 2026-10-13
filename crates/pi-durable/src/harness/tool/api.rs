@@ -12,7 +12,7 @@ use pi_chord::{Context, Json};
 
 use super::result::{check_key, fallback_result};
 use super::{NESTED_RESULT_DOC, NestedResult};
-use crate::documents::{DocScope, DocToken, DocValue};
+use crate::documents::{DocFamilyToken, DocScope, DocToken, DocValue, RewindableDocScope};
 use crate::env::{SharedEnv, ShellOutputSkip, ShellOutputWindow};
 use crate::errors::{DurableError, DurableResult};
 use crate::harness::output::{OutputBuffer, OutputChunk, OutputLimits};
@@ -22,9 +22,9 @@ use crate::harness::scheduler::{ConversationHandle, TaskRuntime};
 use crate::harness::task::Task;
 use crate::harness::types::{Agent, NestedToolExecutionResult, ToolDiagnostic};
 use crate::harness::util::{cancellation, lock, with_context};
-use crate::ids::{ConversationId, TaskId};
+use crate::ids::{ConversationId, EntryId, TaskId};
 use crate::models::Models;
-use crate::session::Tx;
+use crate::session::{CommittedWatch, Tx};
 use crate::tasks::{TaskOptions, TaskOwnership};
 use crate::types::TaskRecord;
 
@@ -196,6 +196,36 @@ impl ToolExecutionApi {
         context: &Context,
     ) -> DurableResult<Option<Json>> {
         self.runtime.snapshot(token, owner, context).await
+    }
+
+    pub async fn family_snapshot<T: DocValue, I: DocValue, S: DocScope>(
+        &self,
+        token: &DocFamilyToken<T, I, S>,
+        owner: S::Owner,
+        key: &str,
+        context: &Context,
+    ) -> DurableResult<Option<Json>> {
+        self.runtime.family_snapshot(token, owner, key, context).await
+    }
+
+    pub async fn snapshot_as_of<T: DocValue, S: RewindableDocScope>(
+        &self,
+        token: &DocToken<T, S>,
+        conversation_id: ConversationId,
+        at: EntryId,
+        context: &Context,
+    ) -> DurableResult<Option<Json>> {
+        self.runtime.snapshot_as_of(token, conversation_id, at, context).await
+    }
+
+    /// A watch of a committed document; it stops when the tool's invocation ends.
+    pub async fn watch_doc<T: DocValue, S: DocScope>(
+        &self,
+        token: &DocToken<T, S>,
+        owner: S::Owner,
+        context: &Context,
+    ) -> DurableResult<Option<CommittedWatch>> {
+        self.runtime.watch_doc(token, owner, context).await
     }
 
     /// Run tool `name` as a nested call of this one and wait for its result. Its call ID is `<callId>/<key>`.

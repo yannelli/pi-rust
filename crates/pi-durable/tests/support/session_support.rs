@@ -55,7 +55,7 @@ impl Gate {
 
 type CommitFilter = Arc<dyn Fn(&[StorageWrite]) -> bool + Send + Sync>;
 
-/// One Storage call a test hook sees: `task`, `scan_entries`, `mint_id`, or `close`.
+/// One Storage call a test hook sees: `task`, `scan_entries`, `mint_id`, `submission`, or `close`.
 pub struct StorageCall {
     pub method: &'static str,
     pub limit: usize,
@@ -82,7 +82,7 @@ pub struct ControlledStorage {
     filtered_failure: Mutex<Option<(CommitFilter, DurableError)>>,
     /// When set, `close()` closes and then fails with this error.
     pub close_failure: Mutex<Option<DurableError>>,
-    /// Runs before `task`, `scan_entries`, `mint_id`, and `close`; an error fails that call.
+    /// Runs before `task`, `scan_entries`, `mint_id`, `submission`, and `close`; an error fails that call.
     pub call_hook: Mutex<Option<CallHook>>,
     closed: AtomicBool,
 }
@@ -276,6 +276,7 @@ impl Storage for ControlledStorage {
     }
 
     async fn submission(&self, id: SubmissionId, context: &Context) -> DurableResult<Option<SubmissionRecord>> {
+        self.hook("submission", 0, false, context).await?;
         self.open()?;
         self.inner.submission(id, context).await
     }
