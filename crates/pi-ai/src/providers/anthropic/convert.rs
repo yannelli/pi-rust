@@ -3,9 +3,10 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::providers::common::{has_images, sanitize_id, take_chars};
+use crate::providers::constrained_sampling::{json_schema_tool_parameters, resolve_json_schema_strict_sampling};
 use crate::transcript::render_system_message_update;
 use crate::types::{AssistantMessage, ContentBlock, Message, Tool, ToolResultMessage, UserContent};
 
@@ -57,6 +58,32 @@ pub(super) fn normalize_tool_call_id(id: &str) -> String {
 pub(super) struct ToolFormat {
     pub oauth: bool,
     pub eager_input_streaming: bool,
+    pub strict_tools: bool,
+}
+
+/// Keywords that Anthropic strict tool use rejects for the whole request.
+const STRICT_UNSUPPORTED_KEYWORDS: [&str; 11] = [
+    "minimum",
+    "maximum",
+    "exclusiveMinimum",
+    "exclusiveMaximum",
+    "multipleOf",
+    "maxItems",
+    "uniqueItems",
+    "minContains",
+    "maxContains",
+    "minProperties",
+    "maxProperties",
+];
+const STRICT_STRING_FORMATS: [&str; 10] =
+    ["date-time", "time", "date", "duration", "email", "hostname", "uri", "ipv4", "ipv6", "uuid"];
+
+fn strict_unsupported(key: &str, value: &Value) -> bool {
+    match key {
+        "minItems" => value.as_u64().is_none_or(|count| count > 1),
+        "format" => value.as_str().is_none_or(|format| !STRICT_STRING_FORMATS.contains(&format)),
+        key => STRICT_UNSUPPORTED_KEYWORDS.contains(&key),
+    }
 }
 
 pub(super) fn deferred_tool_placeholder() -> Value {
@@ -68,27 +95,38 @@ pub(super) fn deferred_tool_placeholder() -> Value {
     })
 }
 
-/// Tool definitions; `cache_control` goes on the last one.
-pub(super) fn convert_tools(tools: &[Tool], format: ToolFormat, cache_control: Option<&Value>) -> Vec<Value> {
+/// Tool definitions; `cache_control` goes on the last one. Fails when a tool requires strict
+/// sampling that the model or its schema cannot provide.
+pub(super) fn convert_tools(
+    tools: &[Tool],
+    format: ToolFormat,
+    cache_control: Option<&Value>,
+) -> Result<Vec<Value>, String> {
     let last = tools.len().saturating_sub(1);
-    tools
-        .iter()
-        .enumerate()
-        .map(|(index, tool)| {
-            let name = if format.oauth { to_claude_code_name(&tool.name) } else { tool.name.clone() };
-            let properties = tool.parameters.get("properties").cloned().unwrap_or_else(|| json!({}));
-            let required = tool.parameters.get("required").cloned().unwrap_or_else(|| json!([]));
-            let mut value = json!({"name": name, "description": tool.description});
-            if format.eager_input_streaming {
-                value["eager_input_streaming"] = json!(true);
-            }
-            value["input_schema"] = json!({"type": "object", "properties": properties, "required": required});
-            if let (Some(cache_control), true) = (cache_control, index == last) {
-                value["cache_control"] = cache_control.clone();
-            }
-            value
-        })
-        .collect()
+    let mut converted = Vec::with_capacity(tools.len());
+    for (index, tool) in tools.iter().enumerate() {
+        let strict =
+            resolve_json_schema_strict_sampling(tool, format.strict_tools, Some(&strict_unsupported))? == Some(true);
+        let parameters = json_schema_tool_parameters(tool, strict);
+        let name = if format.oauth { to_claude_code_name(&tool.name) } else { tool.name.clone() };
+        let mut input_schema = if strict { parameters.as_object().cloned().unwrap_or_default() } else { Map::new() };
+        input_schema.insert("type".into(), json!("object"));
+        input_schema.insert("properties".into(), parameters.get("properties").cloned().unwrap_or_else(|| json!({})));
+        input_schema.insert("required".into(), parameters.get("required").cloned().unwrap_or_else(|| json!([])));
+        let mut value = json!({"name": name, "description": tool.description});
+        if format.eager_input_streaming {
+            value["eager_input_streaming"] = json!(true);
+        }
+        if strict {
+            value["strict"] = json!(true);
+        }
+        value["input_schema"] = Value::Object(input_schema);
+        if let (Some(cache_control), true) = (cache_control, index == last) {
+            value["cache_control"] = cache_control.clone();
+        }
+        converted.push(value);
+    }
+    Ok(converted)
 }
 
 pub(super) struct ConvertOptions<'a> {
@@ -110,7 +148,7 @@ pub(super) struct Converted {
 /// Convert a transformed transcript without its leading system message. Later system
 /// messages are held until the next assistant message, since a system message between a
 /// `tool_use` and its `tool_result` is rejected.
-pub(super) fn convert_messages(messages: &[Message], options: &ConvertOptions) -> Converted {
+pub(super) fn convert_messages(messages: &[Message], options: &ConvertOptions) -> Result<Converted, String> {
     let mut params: Vec<Value> = Vec::new();
     let mut assistant_levels = BTreeMap::new();
     let mut pending: Vec<Value> = Vec::new();
@@ -134,7 +172,7 @@ pub(super) fn convert_messages(messages: &[Message], options: &ConvertOptions) -
                             if options.oauth { to_claude_code_name(&removed.name) } else { removed.name.clone() };
                         blocks.push(json!({"type": "tool_removal", "tool": {"type": "tool_reference", "name": name}}));
                     }
-                    for definition in convert_tools(added, format, None) {
+                    for definition in convert_tools(added, format, None)? {
                         blocks.push(
                             json!({"type": "tool_addition", "tool": {"type": "tool_definition", "definition": definition}}),
                         );
@@ -188,7 +226,7 @@ pub(super) fn convert_messages(messages: &[Message], options: &ConvertOptions) -
     if let Some(cache_control) = options.cache_control {
         cache_last_message(&mut params, cache_control);
     }
-    Converted { messages: params, assistant_levels }
+    Ok(Converted { messages: params, assistant_levels })
 }
 
 fn managed_level(assistant: &AssistantMessage, managed_provider: Option<&str>) -> Option<String> {

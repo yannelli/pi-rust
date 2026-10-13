@@ -246,3 +246,66 @@ async fn tool_choice_metadata_and_beta_overrides() {
     let suppressed = StreamOptions { suppressed_headers: vec!["anthropic-beta".into()], ..options };
     assert!(!sent(lazy, &context, suppressed).await.headers.contains_key("anthropic-beta"));
 }
+
+fn strict_tool(parameters: Value) -> Tool {
+    let mut tool = Tool::new("lookup", "Look up a value", parameters);
+    tool.constrained_sampling = Some(json!({"type": "json_schema", "strict": "prefer"}));
+    tool
+}
+
+async fn first_tool(tool: Tool) -> Value {
+    let model = model(json!({"forceAdaptiveThinking": true, "supportsStrictTools": true}));
+    let context = Context { messages: vec![Message::user("Use the tool")], tools: vec![tool], ..Context::default() };
+    let options = StreamOptions { cache_retention: Some(CacheRetention::None), ..options() };
+    capture_payload(&AnthropicMessages, &model, &context, options).await["tools"][0].clone()
+}
+
+#[tokio::test]
+async fn strict_tools_send_the_full_schema_only_when_supported() {
+    let legacy = json!({"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"],
+        "additionalProperties": false, "title": "LookupInput"});
+    let tool = first_tool(Tool::new("lookup", "Look up a value", legacy)).await;
+    assert!(tool.get("strict").is_none());
+    let expected = json!({"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]});
+    assert_eq!(tool["input_schema"], expected);
+    let strict = first_tool(strict_tool(json!({"type": "object", "title": "StrictLookupInput",
+        "properties": {"value": {"type": "string"}, "optional": {"type": "number"}}, "required": ["value"]})))
+    .await;
+    assert_eq!(strict["strict"], true);
+    assert_eq!(strict["input_schema"]["additionalProperties"], false);
+    assert_eq!(strict["input_schema"]["required"], json!(["value", "optional"]));
+    assert_eq!(
+        strict["input_schema"]["properties"]["optional"],
+        json!({"anyOf": [{"type": "number"}, {"type": "null"}]})
+    );
+    assert_eq!(strict["input_schema"]["title"], "StrictLookupInput");
+    for rejected in [
+        json!({"timeoutMs": {"type": "integer", "minimum": 1, "maximum": 300000}}),
+        json!({"tags": {"type": "array", "items": {"type": "string"}, "minItems": 2}}),
+        json!({"expression": {"type": "string", "format": "regex"}}),
+    ] {
+        let tool = first_tool(strict_tool(json!({"type": "object", "properties": rejected}))).await;
+        assert!(tool.get("strict").is_none(), "{tool}");
+    }
+    let supported = json!({"type": "object", "properties": {
+        "code": {"type": "string", "minLength": 1, "maxLength": 1000, "pattern": "^[a-z]+$"},
+        "url": {"type": "string", "format": "uri"},
+        "tags": {"type": "array", "items": {"type": "string"}, "minItems": 1}}});
+    assert_eq!(first_tool(strict_tool(supported)).await["strict"], true);
+}
+
+#[tokio::test]
+async fn copilot_models_use_bearer_auth_and_dynamic_headers() {
+    let mut copilot = test_model(API, "github-copilot", UNREACHABLE);
+    copilot.headers.insert("X-Initiator".into(), "model".into());
+    let image = serde_json::from_value(json!({"role": "user", "timestamp": 1,
+        "content": [{"type": "image", "data": "AA==", "mimeType": "image/png"}]}))
+    .unwrap();
+    let context = context(vec![Message::user("hi"), Message::User(image)]);
+    let request = sent(copilot, &context, StreamOptions { api_key: Some("tid_copilot".into()), ..options() }).await;
+    assert_eq!(request.headers["authorization"], "Bearer tid_copilot");
+    assert!(!request.headers.contains_key("x-api-key"));
+    assert_eq!(request.headers["x-initiator"], "user");
+    assert_eq!(request.headers["openai-intent"], "conversation-edits");
+    assert_eq!(request.headers["copilot-vision-request"], "true");
+}

@@ -91,7 +91,6 @@ impl ResponsesStream {
     }
 
     /// Grammar tools by name, with the argument property that receives their raw input.
-    #[allow(dead_code)]
     pub(crate) fn with_grammar_tool_input_properties(mut self, properties: BTreeMap<String, String>) -> Self {
         self.grammar_properties = properties;
         self
