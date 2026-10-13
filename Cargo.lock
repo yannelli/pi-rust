@@ -2381,7 +2381,7 @@ dependencies = [
 
 [[package]]
 name = "pi-durable"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
