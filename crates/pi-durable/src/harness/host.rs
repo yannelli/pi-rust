@@ -16,6 +16,7 @@ use super::live::LIVE_DOC;
 use super::registry::builtin_tasks;
 use super::scheduler::Scheduler;
 use super::submissions::{Submission, Submissions};
+use super::task_graph::{TaskGraphView, TaskGraphWatch};
 use super::types::{AbortSubmissionResult, AbortTaskResult, HarnessInspection};
 use super::usage::{PROVIDER_DOC, USAGE_DOC, UsageState, add_usage_state};
 use super::util::{cancellation, scan_all};
@@ -76,6 +77,7 @@ pub(crate) struct HarnessInner {
     pub scheduler: Arc<Scheduler>,
     pub submissions: Arc<Submissions>,
     pub views: Arc<ConversationViews>,
+    pub task_graph: Arc<TaskGraphView>,
 }
 
 /// Durable agent harness over one Session; cheap to clone. Derefs to the [`Session`].
@@ -130,8 +132,16 @@ impl Harness {
             let submissions = Submissions::new(session.clone(), scheduler.clone())?;
             let _ = scheduler.submissions.set(Arc::downgrade(&submissions));
             let views = ConversationViews::new(session.clone())?;
+            let task_graph = TaskGraphView::new(session.clone())?;
             scheduler.open(context).await?;
-            Ok::<_, DurableError>(HarnessInner { session: session.clone(), core, scheduler, submissions, views })
+            Ok::<_, DurableError>(HarnessInner {
+                session: session.clone(),
+                core,
+                scheduler,
+                submissions,
+                views,
+                task_graph,
+            })
         };
         match opened.await {
             Ok(inner) => Ok(Harness(Arc::new(inner))),
@@ -145,6 +155,16 @@ impl Harness {
 
     pub fn session(&self) -> &Session {
         &self.0.session
+    }
+
+    /// A disposable read-only Chord state of every live task (spec section 9.5); its value is a [`super::TaskGraph`].
+    pub async fn task_graph(&self, context: &Context) -> DurableResult<crate::session::DocumentState> {
+        self.0.task_graph.state(context).await
+    }
+
+    /// A serialized exact-frame watch of the [`super::TaskGraph`]; cancelling `context` stops it.
+    pub async fn watch_task_graph(&self, context: &Context) -> DurableResult<TaskGraphWatch> {
+        self.0.task_graph.watch(context).await
     }
 
     /// Restart dispatch after a cancellation paused it.

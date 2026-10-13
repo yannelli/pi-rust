@@ -10,3 +10,5 @@ pub mod session_support;
 pub use session_support::*;
 #[allow(dead_code)]
 pub mod harness_support;
+#[allow(dead_code)]
+pub mod task_support;
