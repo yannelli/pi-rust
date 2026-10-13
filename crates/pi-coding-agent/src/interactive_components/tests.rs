@@ -9,6 +9,7 @@ mod llama_login;
 mod llama_view;
 mod login_dialog;
 mod login_selectors;
+mod mcp_view;
 mod model_selector;
 mod scoped_models_selector;
 mod session_selector;

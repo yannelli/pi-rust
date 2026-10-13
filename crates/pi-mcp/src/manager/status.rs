@@ -113,6 +113,16 @@ impl McpManager {
         self.inner.lock().config_errors.clone()
     }
 
+    /// The trusted project's `mcp.json`, where per-project overrides are saved.
+    pub fn project_config(&self) -> Option<std::path::PathBuf> {
+        self.inner.lock().project_config.clone()
+    }
+
+    /// The notice for a session without servers.
+    pub fn no_servers_message(&self) -> String {
+        no_servers_message(&self.inner.options.agent_dir)
+    }
+
     /// Plain status for `/mcp` without a UI.
     pub fn format_status(&self) -> String {
         let (statuses, errors) = (self.statuses(), self.config_errors());
