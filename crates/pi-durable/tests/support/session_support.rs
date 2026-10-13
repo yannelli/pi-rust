@@ -78,6 +78,8 @@ pub struct ControlledStorage {
     commit_filter: Mutex<Option<CommitFilter>>,
     find_gate: Mutex<Option<Gate>>,
     commit_failure: Mutex<Option<DurableError>>,
+    /// When set, the first batch the filter accepts fails with the error, once.
+    filtered_failure: Mutex<Option<(CommitFilter, DurableError)>>,
     /// When set, `close()` closes and then fails with this error.
     pub close_failure: Mutex<Option<DurableError>>,
     /// Runs before `task`, `scan_entries`, `mint_id`, and `close`; an error fails that call.
@@ -130,6 +132,14 @@ impl ControlledStorage {
         gate
     }
 
+    pub fn fail_commit_where(
+        &self,
+        filter: impl Fn(&[StorageWrite]) -> bool + Send + Sync + 'static,
+        error: DurableError,
+    ) {
+        *self.filtered_failure.lock().unwrap() = Some((Arc::new(filter), error));
+    }
+
     pub fn fail_next_commit(&self, error: DurableError) {
         *self.commit_failure.lock().unwrap() = Some(error);
     }
@@ -169,6 +179,11 @@ impl ControlledStorage {
 #[async_trait]
 impl Storage for ControlledStorage {
     async fn commit(&self, writes: &[StorageWrite], context: &Context) -> DurableResult<Seq> {
+        let failure = self.filtered_failure.lock().unwrap().take();
+        match failure {
+            Some((filter, error)) if filter(writes) => return Err(error),
+            failure => *self.filtered_failure.lock().unwrap() = failure,
+        }
         self.commits.lock().unwrap().push(writes.to_vec());
         let filter = self.commit_filter.lock().unwrap().clone();
         if filter.is_none_or(|filter| filter(writes))
