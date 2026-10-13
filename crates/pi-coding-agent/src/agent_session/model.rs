@@ -9,6 +9,14 @@ use super::{AgentSession, AgentSessionEvent, lock};
 use crate::model_resolver::ScopedModel;
 use crate::settings::DEFAULT_THINKING_LEVEL;
 
+/// `model_select` for extensions, unless the model did not change.
+fn model_select_event(model: &Model, previous: Option<&Model>, source: &str) -> Option<serde_json::Value> {
+    if previous.is_some_and(|previous| models_are_equal(previous, model)) {
+        return None;
+    }
+    Some(serde_json::json!({"type": "model_select", "model": model, "previousModel": previous, "source": source}))
+}
+
 /// Result of [`AgentSession::cycle_model`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModelCycleResult {
@@ -26,7 +34,13 @@ impl AgentSession {
             anyhow::bail!("No API key for {}/{}", model.provider, model.id);
         }
         let level = self.thinking_level_for_switch(&model, None);
-        self.apply_model(model, level, persist);
+        let previous = self.model();
+        self.apply_model(model.clone(), level, persist);
+        if let Some(event) = model_select_event(&model, previous.as_ref(), "set")
+            && let Some(runner) = self.extension_runner()
+        {
+            runner.emit(event).await;
+        }
         Ok(())
     }
 
@@ -93,6 +107,11 @@ impl AgentSession {
         let next = candidates[next].clone();
         let level = self.thinking_level_for_switch(&next.model, next.thinking_level);
         self.apply_model(next.model.clone(), level, persist);
+        if let Some(event) = model_select_event(&next.model, current.as_ref(), "cycle")
+            && let Some(runner) = self.extension_runner()
+        {
+            runner.emit_detached(event);
+        }
         Some(ModelCycleResult { model: next.model, thinking_level: self.thinking_level(), is_scoped })
     }
 
@@ -127,6 +146,14 @@ impl AgentSession {
                 eprintln!("Warning: could not save session: {error:#}");
             }
             self.emit(&AgentSessionEvent::ThinkingLevelChanged { level: effective });
+            if let Some(runner) = self.extension_runner() {
+                let event = serde_json::json!({
+                    "type": "thinking_level_select",
+                    "level": effective.as_str(),
+                    "previousLevel": before.as_str(),
+                });
+                runner.emit_detached(event);
+            }
         }
         self.refresh_environment();
     }

@@ -344,6 +344,15 @@ impl ExtensionRunner {
         id
     }
 
+    /// A signal id for an event field (`signal` of `session_before_compact`), aborted with `token`.
+    pub fn signal_id(&self, token: &CancellationToken) -> u64 {
+        self.signal_for(token)
+    }
+
+    pub fn release_signal_id(&self, id: u64) {
+        self.release_signal(id);
+    }
+
     /// Forget a signal id handed to JavaScript once its operation finished.
     pub(crate) fn release_signal(&self, id: u64) {
         if let Some(watcher) = lock(&self.watchers).remove(&id) {

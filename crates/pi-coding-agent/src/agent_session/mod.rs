@@ -103,6 +103,8 @@ pub(crate) struct RunState {
     pub failed_response: Option<AssistantMessage>,
     /// Why routing the current request failed; its stream ends with this error.
     pub route_failure: Option<String>,
+    /// A `session_before_compact` handler cancelled the running compaction.
+    pub compaction_cancelled_by_extension: bool,
 }
 
 /// One conversation. Create it with [`create_agent_session`]; it is always held in an `Arc`.

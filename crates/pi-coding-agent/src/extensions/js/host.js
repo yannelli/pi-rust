@@ -169,7 +169,7 @@ export function createHost(config) {
 			});
 		},
 		hasHandlers: (type) => runner.hasHandlers(type),
-		emit: (event) => runner.emit(event),
+		emit: (event) => runner.emit(typeof event.signal === "number" ? { ...event, signal: signalFor(event.signal) } : event),
 		emitToolCall: (event) => runner.emitToolCall(event),
 		emitToolResult: (event) => runner.emitToolResult(event),
 		emitMessageEnd: (event) => runner.emitMessageEnd(event),
