@@ -2,24 +2,15 @@
 //! `api/openai-completions.ts`. One text block and one thinking block collect their deltas for
 //! the whole response, so the handler emits those block events itself.
 
-use std::collections::HashMap;
-
 use serde_json::Value;
 
-use super::convert::REASONING_FIELDS;
+use super::convert::{GrammarInputs, REASONING_FIELDS};
 use super::reasoning_details::{append_reasoning_detail, is_reasoning_detail};
-use crate::json::parse_streaming_json;
+use super::tool_calls::ToolCalls;
 use crate::providers::common::SseHandler;
 use crate::sse::SseEvent;
 use crate::stream::{AssistantMessageEvent, EventSender, MessageBuilder};
-use crate::types::{ContentBlock, JsonObject, Model, ModelCost, StopReason, ToolCall, Usage};
-
-/// A tool call being streamed: where it lives in the content and its raw argument JSON.
-struct StreamingTool {
-    content_index: usize,
-    partial_args: String,
-    stream_index: Option<u64>,
-}
+use crate::types::{ContentBlock, Model, ModelCost, StopReason, Usage};
 
 pub(super) struct CompletionsStream {
     sender: EventSender,
@@ -29,15 +20,13 @@ pub(super) struct CompletionsStream {
     supports_finish_reason: bool,
     text: Option<usize>,
     thinking: Option<usize>,
-    tools: Vec<StreamingTool>,
-    tools_by_index: HashMap<u64, usize>,
-    tools_by_id: HashMap<String, usize>,
+    tools: ToolCalls,
     finish: Option<Result<StopReason, String>>,
     reasoning_details: Option<Vec<Value>>,
 }
 
 impl CompletionsStream {
-    pub fn new(model: &Model, supports_finish_reason: bool, sender: EventSender) -> Self {
+    pub fn new(model: &Model, supports_finish_reason: bool, grammar: GrammarInputs, sender: EventSender) -> Self {
         Self {
             sender,
             model_id: model.id.clone(),
@@ -46,9 +35,7 @@ impl CompletionsStream {
             supports_finish_reason,
             text: None,
             thinking: None,
-            tools: Vec::new(),
-            tools_by_index: HashMap::new(),
-            tools_by_id: HashMap::new(),
+            tools: ToolCalls::new(grammar),
             finish: None,
             reasoning_details: None,
         }
@@ -110,7 +97,10 @@ impl SseHandler for CompletionsStream {
             self.thinking_delta(builder, signature, text);
         }
         for call in delta.get("tool_calls").and_then(Value::as_array).into_iter().flatten() {
-            self.tool_call_delta(builder, call);
+            if let Err(error) = self.tools.delta(builder, &self.sender, call) {
+                self.apply_reasoning_details(builder);
+                return Err(error);
+            }
         }
         let details = delta.get("reasoning_details").and_then(Value::as_array);
         for detail in details.into_iter().flatten().filter(|detail| is_reasoning_detail(detail)) {
@@ -121,7 +111,7 @@ impl SseHandler for CompletionsStream {
     }
 
     fn end(&mut self, builder: &mut MessageBuilder) -> Result<StopReason, String> {
-        self.finish_blocks(builder);
+        self.finish_blocks(builder)?;
         match self.finish.take() {
             Some(result) => result,
             None if !self.supports_finish_reason => Ok(StopReason::Stop),
@@ -183,79 +173,6 @@ impl CompletionsStream {
         self.push(AssistantMessageEvent::ThinkingDelta { content_index: index, delta: delta.to_string(), partial });
     }
 
-    /// Match a delta to its call by stream index, then by id, so providers that change ids
-    /// mid-stream still extend one call.
-    fn tool_call_delta(&mut self, builder: &mut MessageBuilder, call: &Value) {
-        let stream_index = call.get("index").and_then(Value::as_u64);
-        let id = call.get("id").and_then(Value::as_str).filter(|id| !id.is_empty());
-        let name = [call.pointer("/function/name"), call.pointer("/custom/name")]
-            .into_iter()
-            .find_map(|name| name.and_then(Value::as_str))
-            .filter(|name| !name.is_empty());
-        let existing = stream_index
-            .and_then(|index| self.tools_by_index.get(&index))
-            .or_else(|| id.and_then(|id| self.tools_by_id.get(id)))
-            .copied();
-        let slot = match existing {
-            Some(slot) => slot,
-            None => self.start_tool_call(builder, stream_index, id, name),
-        };
-        if let (Some(index), None) = (stream_index, self.tools[slot].stream_index) {
-            self.tools[slot].stream_index = Some(index);
-            self.tools_by_index.insert(index, slot);
-        }
-        if let Some(id) = id {
-            self.tools_by_id.insert(id.to_string(), slot);
-        }
-        let arguments = call.pointer("/function/arguments").and_then(Value::as_str).filter(|args| !args.is_empty());
-        let tool = &mut self.tools[slot];
-        if let Some(arguments) = arguments {
-            tool.partial_args.push_str(arguments);
-        }
-        let parsed = arguments.map(|_| streaming_arguments(&tool.partial_args));
-        let content_index = tool.content_index;
-        if let ContentBlock::ToolCall(block) = &mut builder.message_mut().content[content_index] {
-            if let (true, Some(id)) = (block.id.is_empty(), id) {
-                block.id = id.to_string();
-            }
-            if let (true, Some(name)) = (block.name.is_empty(), name) {
-                block.name = name.to_string();
-            }
-            if let Some(parsed) = parsed {
-                block.arguments = parsed;
-            }
-        }
-        let partial = builder.message().clone();
-        let delta = arguments.unwrap_or_default().to_string();
-        self.push(AssistantMessageEvent::ToolcallDelta { content_index, delta, partial });
-    }
-
-    fn start_tool_call(
-        &mut self,
-        builder: &mut MessageBuilder,
-        stream_index: Option<u64>,
-        id: Option<&str>,
-        name: Option<&str>,
-    ) -> usize {
-        let content = &mut builder.message_mut().content;
-        content.push(ContentBlock::ToolCall(ToolCall {
-            id: id.unwrap_or_default().to_string(),
-            name: name.unwrap_or_default().to_string(),
-            ..Default::default()
-        }));
-        let content_index = content.len() - 1;
-        let slot = self.tools.len();
-        self.tools.push(StreamingTool { content_index, partial_args: String::new(), stream_index });
-        if let Some(index) = stream_index {
-            self.tools_by_index.insert(index, slot);
-        }
-        if let Some(id) = id {
-            self.tools_by_id.insert(id.to_string(), slot);
-        }
-        self.push(AssistantMessageEvent::ToolcallStart { content_index, partial: builder.message().clone() });
-        slot
-    }
-
     /// Store the streamed `reasoning_details` as the thinking signature for replay.
     fn apply_reasoning_details(&mut self, builder: &mut MessageBuilder) {
         let (Some(index), Some(details)) = (self.thinking, &self.reasoning_details) else { return };
@@ -266,13 +183,8 @@ impl CompletionsStream {
     }
 
     /// Finalize every block in content order and emit its end event.
-    fn finish_blocks(&mut self, builder: &mut MessageBuilder) {
+    fn finish_blocks(&mut self, builder: &mut MessageBuilder) -> Result<(), String> {
         self.apply_reasoning_details(builder);
-        for tool in &self.tools {
-            if let ContentBlock::ToolCall(call) = &mut builder.message_mut().content[tool.content_index] {
-                call.arguments = streaming_arguments(&tool.partial_args);
-            }
-        }
         for index in 0..builder.message().content.len() {
             let message = builder.message();
             let event = match &message.content[index] {
@@ -284,25 +196,15 @@ impl CompletionsStream {
                     let content = thinking.clone();
                     AssistantMessageEvent::ThinkingEnd { content_index: index, content, partial: message.clone() }
                 }
-                ContentBlock::ToolCall(call) => {
-                    let tool_call = call.clone();
-                    AssistantMessageEvent::ToolcallEnd { content_index: index, tool_call, partial: message.clone() }
+                ContentBlock::ToolCall(_) => {
+                    self.tools.finish(builder, &self.sender, index)?;
+                    continue;
                 }
                 _ => continue,
             };
             self.push(event);
         }
-        self.text = None;
-        self.thinking = None;
-        self.tools.clear();
-    }
-}
-
-/// Arguments from partial JSON; an unparseable prefix yields an empty object.
-fn streaming_arguments(partial: &str) -> JsonObject {
-    match parse_streaming_json(partial) {
-        Some(Value::Object(arguments)) => arguments,
-        _ => JsonObject::new(),
+        Ok(())
     }
 }
 

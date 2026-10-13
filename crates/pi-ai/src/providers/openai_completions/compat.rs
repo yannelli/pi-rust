@@ -25,6 +25,8 @@ pub(crate) struct Compat {
     /// Top-level field that caps reasoning tokens, if the server has one.
     pub thinking_budget_field: Option<String>,
     pub supports_strict_mode: bool,
+    /// Grammar tools are sent as OpenAI `custom` tools.
+    pub supports_openai_grammar_tools: bool,
     pub supports_mid_convo_system_messages: bool,
     pub supports_mid_convo_tool_additions: bool,
     /// Anthropic-style `cache_control` markers (`cacheControlFormat: "anthropic"`).
@@ -151,6 +153,7 @@ impl Compat {
             zai_tool_stream: flag("zaiToolStream", false),
             thinking_budget_field: budget_field,
             supports_strict_mode: flag("supportsStrictMode", false),
+            supports_openai_grammar_tools: flag("supportsOpenAIGrammarTools", false),
             supports_mid_convo_system_messages: flag("supportsMidConvoSystemMessages", false),
             supports_mid_convo_tool_additions: flag("supportsMidConvoToolAdditions", false),
             anthropic_cache_control: compat_str(model, "cacheControlFormat")

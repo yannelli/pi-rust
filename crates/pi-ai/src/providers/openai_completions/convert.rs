@@ -1,12 +1,18 @@
 //! Transcript and tool conversion for Chat Completions, ported from upstream
 //! `convertMessages` and `convertTools` in `api/openai-completions.ts`.
 
+use std::collections::HashMap;
+
 use serde_json::{Value, json};
 
 use super::compat::Compat;
 use super::reasoning_details::{parse_legacy_encrypted_detail, parse_reasoning_details};
 use crate::providers::common::{
     data_url, has_images, sanitize_id, short_hash, take_chars, tool_result_text, transform_messages,
+};
+use crate::providers::constrained_sampling::{
+    grammar_tool_input, json_schema_tool_parameters, resolve_grammar_constrained_sampling,
+    resolve_json_schema_strict_sampling,
 };
 use crate::transcript::{render_system_message_update, resolve_transcript_tools, system_message_text};
 use crate::types::{ContentBlock, Message, Model, Tool, ToolCall, UserContent};
@@ -16,17 +22,28 @@ pub(super) const REASONING_FIELDS: [&str; 3] = ["reasoning_content", "reasoning"
 
 const TOOL_RESULT_BRIDGE: &str = "I have processed the tool results.";
 
-/// Function tools. `strict` is sent only when the server supports strict mode.
-pub(super) fn convert_tools(tools: &[Tool], compat: &Compat) -> Vec<Value> {
+/// Tool name to the argument property that holds a grammar tool's raw input.
+pub(super) type GrammarInputs = HashMap<String, String>;
+
+/// Grammar tools become `custom` tools; JSON-schema tools are `function` tools with `strict`
+/// only when the server supports strict mode. Fails when a tool requires unsupported sampling.
+pub(super) fn convert_tools(tools: &[Tool], compat: &Compat) -> Result<Vec<Value>, String> {
     tools
         .iter()
         .map(|tool| {
-            let mut function =
-                json!({"name": tool.name, "description": tool.description, "parameters": tool.parameters});
-            if compat.supports_strict_mode {
-                function["strict"] = json!(false);
+            if let Some(grammar) = resolve_grammar_constrained_sampling(tool, compat.supports_openai_grammar_tools)? {
+                let format = json!({"type": "grammar",
+                    "grammar": {"syntax": grammar.format.as_str(), "definition": grammar.definition}});
+                let custom = json!({"name": tool.name, "description": tool.description, "format": format});
+                return Ok(json!({"type": "custom", "custom": custom}));
             }
-            json!({"type": "function", "function": function})
+            let strict = resolve_json_schema_strict_sampling(tool, compat.supports_strict_mode, None)?;
+            let parameters = json_schema_tool_parameters(tool, strict == Some(true));
+            let mut function = json!({"name": tool.name, "description": tool.description, "parameters": parameters});
+            if compat.supports_strict_mode {
+                function["strict"] = json!(strict.unwrap_or(false));
+            }
+            Ok(json!({"type": "function", "function": function}))
         })
         .collect()
 }
@@ -52,7 +69,12 @@ fn bridge() -> Value {
 }
 
 /// Messages for a resolved transcript whose leading system message, if any, is the prompt.
-pub(super) fn convert_messages(model: &Model, messages: &[Message], compat: &Compat) -> Vec<Value> {
+pub(super) fn convert_messages(
+    model: &Model,
+    messages: &[Message],
+    compat: &Compat,
+    grammar: &GrammarInputs,
+) -> Result<Vec<Value>, String> {
     let transformed = transform_messages(messages, model, &|id, _| normalize_tool_call_id(model, id));
     let anchors = resolve_transcript_tools(messages, compat.anchors_tool_additions()).anchors_additions;
     let instruction_role = if model.reasoning && compat.supports_developer_role { "developer" } else { "system" };
@@ -71,7 +93,7 @@ pub(super) fn convert_messages(model: &Model, messages: &[Message], compat: &Com
             Message::System(system) => {
                 let added = system.tools_added.as_deref().unwrap_or_default();
                 if index > 0 && anchors && !added.is_empty() {
-                    params.push(json!({"role": "system", "tools": convert_tools(added, compat)}));
+                    params.push(json!({"role": "system", "tools": convert_tools(added, compat)?}));
                 }
                 let text = if index == 0 { system_message_text(system) } else { render_system_message_update(system) };
                 if !text.is_empty() {
@@ -95,7 +117,7 @@ pub(super) fn convert_messages(model: &Model, messages: &[Message], compat: &Com
                 last_role = Some("user");
             }
             Message::Assistant(assistant) => {
-                if let Some(converted) = convert_assistant(model, &assistant.content, compat) {
+                if let Some(converted) = convert_assistant(model, &assistant.content, compat, grammar)? {
                     params.push(converted);
                     last_role = Some("assistant");
                 }
@@ -139,7 +161,7 @@ pub(super) fn convert_messages(model: &Model, messages: &[Message], compat: &Com
         }
         index += 1;
     }
-    params
+    Ok(params)
 }
 
 fn user_part(block: &ContentBlock) -> Option<Value> {
@@ -158,8 +180,23 @@ fn image_part(block: &ContentBlock) -> Option<Value> {
     }
 }
 
+/// A replayed tool call: grammar tools replay their raw input as a `custom` call.
+fn convert_tool_call(call: &ToolCall, grammar: &GrammarInputs) -> Result<Value, String> {
+    if let Some(property) = grammar.get(&call.name) {
+        let input = grammar_tool_input(&call.name, &call.arguments, property)?;
+        return Ok(json!({"id": call.id, "type": "custom", "custom": {"name": call.name, "input": input}}));
+    }
+    let arguments = Value::Object(call.arguments.clone()).to_string();
+    Ok(json!({"id": call.id, "type": "function", "function": {"name": call.name, "arguments": arguments}}))
+}
+
 /// An assistant message, or `None` when it has neither content nor tool calls.
-fn convert_assistant(model: &Model, content: &[ContentBlock], compat: &Compat) -> Option<Value> {
+fn convert_assistant(
+    model: &Model,
+    content: &[ContentBlock],
+    compat: &Compat,
+    grammar: &GrammarInputs,
+) -> Result<Option<Value>, String> {
     let texts: Vec<&str> =
         content.iter().filter_map(ContentBlock::as_text).filter(|text| !text.trim().is_empty()).collect();
     let joined = texts.concat();
@@ -202,14 +239,9 @@ fn convert_assistant(model: &Model, content: &[ContentBlock], compat: &Compat) -
         }
     }
     if !calls.is_empty() {
-        let tool_calls: Vec<Value> = calls
-            .iter()
-            .map(|call| {
-                let arguments = Value::Object(call.arguments.clone()).to_string();
-                json!({"id": call.id, "type": "function", "function": {"name": call.name, "arguments": arguments}})
-            })
-            .collect();
-        message["tool_calls"] = Value::Array(tool_calls);
+        let tool_calls: Result<Vec<Value>, String> =
+            calls.iter().map(|call| convert_tool_call(call, grammar)).collect();
+        message["tool_calls"] = Value::Array(tool_calls?);
     }
     if let Some(details) = details {
         message["reasoning_details"] = Value::Array(details);
@@ -222,7 +254,7 @@ fn convert_assistant(model: &Model, content: &[ContentBlock], compat: &Compat) -
         Value::Array(parts) => !parts.is_empty(),
         _ => false,
     };
-    (has_content || !calls.is_empty()).then_some(message)
+    Ok((has_content || !calls.is_empty()).then_some(message))
 }
 
 /// Anthropic-style markers: the first instruction message, the last tool, and the last

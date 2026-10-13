@@ -4,7 +4,7 @@
 use serde_json::{Map, Value, json};
 
 use super::compat::Compat;
-use super::convert::{apply_cache_control, convert_messages, convert_tools};
+use super::convert::{GrammarInputs, apply_cache_control, convert_messages, convert_tools};
 use super::thinking::{apply_thinking, reasoning_effort, thinking_budget};
 use crate::registry::{CacheRetention, StreamOptions};
 use crate::simple_options::{
@@ -33,17 +33,25 @@ fn truthy(value: &Value) -> bool {
     }
 }
 
-/// Build the body. `messages` is the resolved transcript, `estimate` the normalized one used
-/// to clamp the output cap to the context window.
+/// Messages and options that shape one request body.
+pub(super) struct BodyInput<'a> {
+    /// The resolved transcript.
+    pub messages: &'a [Message],
+    /// The normalized transcript, used to clamp the output cap to the context window.
+    pub estimate: &'a [Message],
+    pub grammar: &'a GrammarInputs,
+}
+
+/// Build the body. Fails when a tool requires constrained sampling the server lacks.
 pub(super) fn build_body(
     model: &Model,
-    messages: &[Message],
-    estimate: &[Message],
+    input: &BodyInput,
     options: &StreamOptions,
     compat: &Compat,
-) -> Value {
+) -> Result<Value, String> {
+    let messages = input.messages;
     let tools = resolve_transcript_tools(messages, compat.anchors_tool_additions());
-    let mut converted = convert_messages(model, messages, compat);
+    let mut converted = convert_messages(model, messages, compat, input.grammar)?;
     let retention = resolve_cache_retention(options.cache_retention, &options.env);
     let long = retention == CacheRetention::Long && compat.supports_long_cache_retention;
     let mut body = Map::new();
@@ -64,7 +72,7 @@ pub(super) fn build_body(
     if compat.supports_store {
         body.insert("store".into(), json!(false));
     }
-    let max_tokens = clamp_max_tokens_to_context(model, estimate, options.max_tokens.unwrap_or(model.max_tokens));
+    let max_tokens = clamp_max_tokens_to_context(model, input.estimate, options.max_tokens.unwrap_or(model.max_tokens));
     if max_tokens > 0 {
         let field = if compat.max_tokens_field == "max_tokens" { "max_tokens" } else { "max_completion_tokens" };
         body.insert(field.into(), json!(max_tokens));
@@ -74,7 +82,7 @@ pub(super) fn build_body(
     }
     let mut request_tools = None;
     if !tools.request_tools.is_empty() {
-        request_tools = Some(convert_tools(&tools.request_tools, compat));
+        request_tools = Some(convert_tools(&tools.request_tools, compat)?);
         if compat.zai_tool_stream {
             body.insert("tool_stream".into(), json!(true));
         }
@@ -123,5 +131,5 @@ pub(super) fn build_body(
     if let Some(sampling) = resolve_sampling_params(model, level, options.sampling_params.as_ref()) {
         body.extend(sampling);
     }
-    Value::Object(body)
+    Ok(Value::Object(body))
 }
