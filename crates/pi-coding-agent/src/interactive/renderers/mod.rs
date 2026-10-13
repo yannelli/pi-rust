@@ -2,6 +2,7 @@
 //! A renderer draws a tool's call header and result; it never executes the tool.
 
 mod edit;
+mod extras;
 mod read;
 mod search;
 mod shell;
@@ -22,6 +23,7 @@ use crate::theme::{ThemeColor, theme};
 use crate::tools::path_utils::resolve_to_cwd;
 
 pub use edit::EditRenderer;
+pub use extras::{CodemodeRenderer, McpRenderer};
 pub use read::ReadRenderer;
 pub use search::{FindRenderer, GrepRenderer, LsRenderer};
 pub use shell::ShellRenderer;
@@ -89,6 +91,11 @@ pub trait ToolRenderer {
     fn refresh_call_after_result(&self) -> bool {
         false
     }
+
+    /// `renderShell: "self"`: the renderer draws its own frame, without the default box.
+    fn self_shell(&self) -> bool {
+        false
+    }
 }
 
 /// The renderer of a built-in tool (upstream `createAllToolRenderers`).
@@ -102,6 +109,7 @@ pub fn builtin_renderer(tool_name: &str) -> Option<Rc<dyn ToolRenderer>> {
         "grep" => Rc::new(GrepRenderer),
         "find" => Rc::new(FindRenderer),
         "ls" => Rc::new(LsRenderer),
+        "codemode" => Rc::new(CodemodeRenderer),
         _ => return None,
     };
     Some(renderer)

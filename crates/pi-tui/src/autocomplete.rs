@@ -13,7 +13,7 @@ use std::pin::Pin;
 use std::rc::Rc;
 
 pub use abort::{AbortController, AbortSignal};
-pub use combined::CombinedAutocompleteProvider;
+pub use combined::{CombinedAutocompleteProvider, apply_default_completion, default_should_trigger_file_completion};
 pub(crate) use paths::is_autocomplete_separator;
 
 /// A boxed future that runs on the UI thread.

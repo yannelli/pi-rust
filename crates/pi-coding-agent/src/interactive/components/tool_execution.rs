@@ -72,6 +72,9 @@ pub struct ToolExecutionComponent {
     state: RendererState,
     content_box: Rc<RefCell<BoxComponent>>,
     content_text: Rc<RefCell<Text>>,
+    /// Holds the call and result of a renderer that draws its own frame (`renderShell: "self"`).
+    self_container: Rc<RefCell<Container>>,
+    self_height: Cell<usize>,
     images: Vec<ImageEntry>,
     /// Set by the render context's `invalidate`, consumed on the next render.
     dirty: Rc<Cell<bool>>,
@@ -113,6 +116,8 @@ impl ToolExecutionComponent {
             state: RendererState::default(),
             content_box: component(BoxComponent::new(1, 1, Some(bg(ThemeBg::ToolPendingBg)))),
             content_text: component(Text::new("", 1, 1).with_custom_bg_fn(Some(bg(ThemeBg::ToolPendingBg)))),
+            self_container: component(Container::new()),
+            self_height: Cell::new(0),
             images: Vec::new(),
             dirty,
             clicked: Rc::default(),
@@ -281,7 +286,16 @@ impl ToolExecutionComponent {
                 self.state = state;
                 let call = self.region(call);
                 let result = result.map(|result| self.region(result));
-                self.fill_box(background, call, result);
+                if renderer.self_shell() {
+                    let mut container = self.self_container.borrow_mut();
+                    container.clear();
+                    container.add_child(call);
+                    if let Some(result) = result {
+                        container.add_child(result);
+                    }
+                } else {
+                    self.fill_box(background, call, result);
+                }
             }
         }
         self.update_images();
@@ -328,10 +342,38 @@ impl ToolExecutionComponent {
     }
 }
 
+impl ToolExecutionComponent {
+    fn is_self_shell(&self) -> bool {
+        matches!(&self.display, ToolDisplay::Renderer(renderer) if renderer.self_shell())
+    }
+
+    /// The renderer's own lines after a blank line, then the images; nothing when both are empty.
+    fn render_self_shell(&mut self, width: usize) -> Vec<String> {
+        let content = self.self_container.borrow_mut().render(width);
+        self.self_height.set(content.len());
+        if content.is_empty() && self.images.is_empty() {
+            return Vec::new();
+        }
+        let mut lines = Vec::new();
+        if !content.is_empty() {
+            lines.push(String::new());
+            lines.extend(content);
+        }
+        for image in &self.images {
+            lines.push(String::new());
+            lines.extend(image.component.borrow_mut().render(width));
+        }
+        lines
+    }
+}
+
 impl Component for ToolExecutionComponent {
     fn render(&mut self, width: usize) -> Vec<String> {
         if self.dirty.take() {
             self.update_display();
+        }
+        if self.is_self_shell() {
+            return self.render_self_shell(width);
         }
         let mut lines = Spacer::new(1).render(width);
         let content: ComponentRef = match self.display {
@@ -347,6 +389,18 @@ impl Component for ToolExecutionComponent {
     }
 
     fn handle_mouse(&mut self, event: &TuiMouseEvent) -> Option<MouseResponse> {
+        if self.is_self_shell() {
+            let height = self.self_height.get() as i32;
+            if event.y <= 0 || event.y > height {
+                return None;
+            }
+            let inner = TuiMouseEvent { y: event.y - 1, height, ..event.clone() };
+            let response = self.self_container.borrow_mut().handle_mouse(&inner);
+            if self.clicked.take() {
+                self.set_expanded(!self.expanded);
+            }
+            return response;
+        }
         let mut container = Container::new();
         container.add_child(pi_tui::component(Spacer::new(1)));
         match self.display {
@@ -361,6 +415,7 @@ impl Component for ToolExecutionComponent {
     }
 
     fn invalidate(&mut self) {
+        self.self_container.borrow_mut().invalidate();
         self.content_box.borrow_mut().invalidate();
         self.content_text.borrow_mut().invalidate();
         self.update_display();

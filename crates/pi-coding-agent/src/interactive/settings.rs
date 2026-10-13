@@ -6,13 +6,17 @@ use std::rc::{Rc, Weak};
 
 use pi_ai::Model;
 use pi_tui::{Component, component};
+use tokio_util::sync::CancellationToken;
 
 use super::components::{for_each_tool, set_component_output_pad};
 use super::layout::{renderer_mode, scrollbar_setting, wheel_lines};
 use super::mode::InteractiveMode;
+use super::model_refresh::{RefreshOutcome, refresh_catalogs};
 use super::selector::SelectorSpec;
 use crate::agent_session::auth::configure_http_from_settings;
-use crate::interactive_components::scoped_models_selector::{EnabledIds, ModelsCallbacks, ModelsConfig};
+use crate::interactive_components::scoped_models_selector::{
+    EnabledIds, ModelsCallbacks, ModelsConfig, RefreshStatusKind,
+};
 use crate::interactive_components::settings_selector::{
     DefaultProjectTrust, SettingsCallbacks, SettingsConfig, format_http_idle_timeout_ms,
 };
@@ -33,6 +37,13 @@ fn setting_str(value: impl serde::Serialize) -> String {
 
 /// Sets the value a setting shows, such as reverting a rejected change.
 type ValueUpdater = Rc<dyn Fn(&str, &str)>;
+
+/// What `/scoped-models` shares between its callbacks and the catalog refresh.
+struct ScopedState {
+    models: Vec<Model>,
+    enabled: EnabledIds,
+    changed: bool,
+}
 
 fn model_key(model: &Model) -> String {
     format!("{}/{}", model.provider, model.id)
@@ -352,7 +363,11 @@ impl InteractiveMode {
         Some(ids)
     }
 
-    fn update_session_models(&self, enabled: &EnabledIds, models: &[Model]) {
+    fn update_session_models(&self, state: &Rc<RefCell<ScopedState>>, enabled: EnabledIds) {
+        state.borrow_mut().enabled = enabled.clone();
+        let models = state.borrow().models.clone();
+        let models = models.as_slice();
+        let enabled = &enabled;
         let available: HashSet<String> = models.iter().map(model_key).collect();
         let session = self.session();
         let scoped: Vec<ScopedModel> = match enabled {
@@ -368,31 +383,44 @@ impl InteractiveMode {
         self.request_render();
     }
 
-    /// `/scoped-models`: the models Ctrl+P cycles through.
+    /// `/scoped-models`: the models Ctrl+P cycles through. The catalogs refresh while it is open.
     pub(super) fn show_models_selector(&self) {
         let session = self.session();
         let models = session.model_runtime().available_models();
         let scoped = session.scoped_models();
-        let enabled = if scoped.is_empty() {
-            self.configured_enabled_ids(&models)
-        } else {
+        let had_scoped = !scoped.is_empty();
+        let enabled = if had_scoped {
             Some(scoped.iter().map(|scoped| model_key(&scoped.model)).collect())
+        } else {
+            self.configured_enabled_ids(&models)
         };
+        let state = Rc::new(RefCell::new(ScopedState { models, enabled, changed: false }));
         let weak = self.weak.clone();
         self.selector.show(Box::new(move |done| {
-            let (change, persist, cancel) = (weak.clone(), weak.clone(), weak);
-            let (change_models, persist_models) = (models.clone(), models.clone());
-            let selector = ScopedModelsSelector::new(
-                ModelsConfig { all_models: models, enabled_model_ids: enabled, refresh_status: None },
+            let (change, persist, cancel, refresh) = (weak.clone(), weak.clone(), weak.clone(), weak.clone());
+            let (change_state, persist_state) = (state.clone(), state.clone());
+            let (models, enabled) = {
+                let state = state.borrow();
+                (state.models.clone(), state.enabled.clone())
+            };
+            let config = ModelsConfig {
+                all_models: models,
+                enabled_model_ids: enabled,
+                refresh_status: Some("Refreshing model catalogs…".into()),
+            };
+            let selector = component(ScopedModelsSelector::new(
+                config,
                 ModelsCallbacks {
                     on_change: Box::new(move |enabled| {
-                        with(&change, |mode| mode.update_session_models(&enabled, &change_models))
+                        change_state.borrow_mut().changed = true;
+                        with(&change, |mode| mode.update_session_models(&change_state, enabled))
                     }),
                     on_persist: Box::new(move |enabled| {
                         with(&persist, |mode| {
-                            let available: HashSet<String> = persist_models.iter().map(model_key).collect();
+                            let models = persist_state.borrow().models.clone();
+                            let available: HashSet<String> = models.iter().map(model_key).collect();
                             let all = enabled.as_ref().is_some_and(|ids| {
-                                ids.len() == persist_models.len() && ids.iter().all(|id| available.contains(id))
+                                ids.len() == models.len() && ids.iter().all(|id| available.contains(id))
                             });
                             let patterns = enabled.filter(|_| !all);
                             mode.settings().set_enabled_models(patterns.as_deref());
@@ -404,8 +432,46 @@ impl InteractiveMode {
                         with(&cancel, |mode| mode.request_render());
                     }),
                 },
-            );
-            SelectorSpec::new(component(selector))
+            ));
+            let token = CancellationToken::new();
+            let target = Rc::downgrade(&selector);
+            let (task_state, task_token) = (state.clone(), token.clone());
+            if let Some(mode) = refresh.upgrade() {
+                mode.spawn(move |mode| async move {
+                    let outcome = refresh_catalogs(mode.session().model_runtime().clone(), task_token.clone()).await;
+                    let Some(selector) = target.upgrade().filter(|_| !task_token.is_cancelled()) else { return };
+                    mode.apply_scoped_refresh(&task_state, &selector, &outcome, had_scoped);
+                });
+            }
+            SelectorSpec::new(selector).with_dispose(move || token.cancel())
         }));
+    }
+
+    fn apply_scoped_refresh(
+        &self,
+        state: &Rc<RefCell<ScopedState>>,
+        selector: &Rc<RefCell<ScopedModelsSelector>>,
+        outcome: &RefreshOutcome,
+        had_scoped: bool,
+    ) {
+        let models = self.session().model_runtime().available_models();
+        let changed = state.borrow().changed;
+        if !changed && !had_scoped {
+            let enabled = self.configured_enabled_ids(&models);
+            state.borrow_mut().enabled = enabled.clone();
+            selector.borrow_mut().update_models(models.clone(), Some(enabled));
+        } else {
+            selector.borrow_mut().update_models(models.clone(), None);
+        }
+        state.borrow_mut().models = models;
+        let enabled = state.borrow().enabled.clone();
+        if enabled.is_some() {
+            self.update_session_models(state, enabled);
+        }
+        match outcome.warning("showing cached models") {
+            Some(warning) => selector.borrow_mut().set_refresh_status(&warning, RefreshStatusKind::Warning),
+            None => selector.borrow_mut().set_refresh_status("Model catalogs refreshed.", RefreshStatusKind::Success),
+        }
+        self.request_render();
     }
 }

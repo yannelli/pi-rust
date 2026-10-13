@@ -232,5 +232,7 @@ impl InteractiveMode {
         let mut footer = self.footer_data.borrow_mut();
         let branch = footer.git_branch();
         mirror.set_footer(branch, footer.extension_statuses(), footer.available_provider_count());
+        drop(footer);
+        self.sync_extension_overlays();
     }
 }

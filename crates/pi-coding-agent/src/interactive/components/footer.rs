@@ -192,6 +192,13 @@ impl Component for FooterComponent {
         } else {
             display
         });
+        if crate::config::experimental_features_enabled() {
+            parts.push(format!(
+                "{} {}",
+                theme.fg(ThemeColor::Dim, "•"),
+                theme.bold(&theme.fg(ThemeColor::Warning, "xp"))
+            ));
+        }
 
         let mut stats_left = parts.join(" ");
         let mut stats_left_width = visible_width(&stats_left);

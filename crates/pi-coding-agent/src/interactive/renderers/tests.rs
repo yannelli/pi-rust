@@ -23,7 +23,11 @@ struct Call<'a> {
 
 impl<'a> Call<'a> {
     fn new(tool: &str, args: Value, cwd: &'a Path) -> Self {
-        Self { renderer: builtin_renderer(tool).unwrap(), args, cwd, state: RendererState::default(), expanded: false }
+        Self::with(builtin_renderer(tool).unwrap(), args, cwd)
+    }
+
+    fn with(renderer: Rc<dyn ToolRenderer>, args: Value, cwd: &'a Path) -> Self {
+        Self { renderer, args, cwd, state: RendererState::default(), expanded: false }
     }
 
     fn context(&mut self, partial: bool, is_error: bool) -> ToolRenderContext<'_> {
@@ -184,4 +188,56 @@ fn generic_headers_list_arguments() {
     assert_eq!(pi_tui::strip_terminal_sequences(&expanded), "mcp_tool\n  text: a\n    b");
     let long = format_tool_call_with_args("t", &json!({"v": "x".repeat(200)}), false);
     assert!(pi_tui::strip_terminal_sequences(&long).ends_with("..."));
+}
+
+#[test]
+fn mcp_results_preview_five_lines_and_name_the_full_output() {
+    let cwd = Path::new("/work");
+    let renderer = Rc::new(McpRenderer::from_tool_name("mcp__github__search").unwrap());
+    let mut call = Call::with(renderer, json!({"q": "pi"}), cwd);
+    assert_eq!(call.header(), ["github/search q=\"pi\""]);
+    let lines: Vec<String> = (1..=8).map(|n| format!("row {n}")).collect();
+    let result =
+        ToolResultView { details: Some(json!({"fullOutputPath": "/tmp/mcp.txt"})), ..output(&lines.join("\n")) };
+    let rendered = call.result(&result);
+    assert_eq!(rendered[..6], ["", "row 1", "row 2", "row 3", "row 4", "row 5"], "{rendered:?}");
+    assert!(rendered[6].starts_with("... (3 more lines,"), "{rendered:?}");
+    assert_eq!(rendered[7], "Full output: /tmp/mcp.txt");
+    call.expanded = true;
+    assert_eq!(call.result(&result).len(), 9);
+}
+
+#[test]
+fn codemode_lists_nested_calls_and_drops_the_script_header() {
+    let cwd = Path::new("/work");
+    let mut call = Call::new("codemode", json!({"code": "const a = 1;\nreturn a;"}), cwd);
+    assert_eq!(call.header(), ["codemode", "const a = 1;", "return a;"]);
+    let calls = json!([
+        {"id": "c/1", "name": "read", "args": "{\"path\":\"a\"}", "status": "ok", "durationMs": 12.0},
+        {"id": "c/2", "name": "models.complete", "args": "", "status": "ok", "durationMs": 1500.0, "cost": 0.02},
+        {"id": "c/3", "name": "models.complete", "args": "", "status": "error", "cost": 0.0012, "error": "boom"}
+    ]);
+    let result = ToolResultView {
+        content: vec![
+            ContentBlock::text("Script completed\nWall time 0.5 seconds\nOutput:\n"),
+            ContentBlock::text("done"),
+        ],
+        details: Some(json!({"calls": calls})),
+        ..ToolResultView::default()
+    };
+    let rendered = call.result(&result);
+    assert_eq!(
+        rendered,
+        [
+            "",
+            "✓ read {\"path\":\"a\"} 12ms",
+            "✓ models.complete 1.5s $0.02",
+            "✗ models.complete $0.0012",
+            "Model calls: $0.02",
+            "",
+            "done"
+        ]
+    );
+    call.expanded = true;
+    assert!(call.result(&result).contains(&"    boom".to_string()));
 }

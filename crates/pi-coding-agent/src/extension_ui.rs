@@ -11,6 +11,15 @@ use tokio_util::sync::CancellationToken;
 
 use crate::extensions::{ComponentFactory, CustomRequest};
 
+/// Editor text and cursor (a byte offset) for [`ExtensionUi::autocomplete_base`].
+#[derive(Clone, Debug, Default)]
+pub struct AutocompleteRequest {
+    pub lines: Vec<String>,
+    pub cursor_line: usize,
+    pub cursor_col: usize,
+    pub force: bool,
+}
+
 /// The run mode an extension sees as `ctx.mode`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExtensionMode {
@@ -156,8 +165,26 @@ pub trait ExtensionUi: Send + Sync {
     fn set_tools_expanded(&self, _expanded: bool) {}
 
     /// Show an extension component until it calls `done` (`ctx.ui.custom()`); `None` when this UI
-    /// cannot show components.
-    async fn custom(&self, _request: CustomRequest) -> Option<Value> {
+    /// cannot show components, an error when the factory fails.
+    async fn custom(&self, _request: CustomRequest) -> Result<Option<Value>, String> {
+        Ok(None)
+    }
+
+    /// A session replacement an extension started (`ctx.newSession()`, `ctx.fork()`) failed; the
+    /// TUI reports it as fatal and ends the run (upstream `handleFatalRuntimeError`).
+    fn fatal_runtime_error(&self, _prefix: &str, _message: &str) {}
+
+    /// A method of the overlay handle `onHandle` received (`hide`, `setHidden`, `isHidden`,
+    /// `focus`, `unfocus`, `isFocused`, `getBounds`) for the `custom()` overlay `id`.
+    fn overlay(&self, _id: u64, _method: &str, _arg: &Value) -> Value {
+        Value::Null
+    }
+
+    /// Suggestions of the built-in autocomplete provider, for providers extensions stack on it.
+    async fn autocomplete_base(
+        &self,
+        _request: AutocompleteRequest,
+    ) -> Option<pi_tui::autocomplete::AutocompleteSuggestions> {
         None
     }
 

@@ -1,10 +1,6 @@
 //! `/session`, `/debug`, and `/share` (upstream `handleSessionCommand`, `handleDebugCommand`, and
 //! `session-share.ts`).
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
-use super::components::bordered_loader::BorderedLoader;
 use super::components::summaries::format_thousands;
 use super::mode::InteractiveMode;
 use super::util::format_tokens;
@@ -150,68 +146,5 @@ impl InteractiveMode {
         };
         self.add_text(written, 1, 1);
         self.request_render();
-    }
-
-    /// `/share`: a secret GitHub gist of the HTML export, through the `gh` command.
-    pub(super) fn handle_share_command(&self) {
-        match std::process::Command::new("gh").args(["auth", "status"]).output() {
-            Err(_) => {
-                return self.show_error("GitHub CLI (gh) is not installed. Install it from https://cli.github.com/");
-            }
-            Ok(output) if !output.status.success() => {
-                return self.show_error("GitHub CLI is not logged in. Run 'gh auth login' first.");
-            }
-            Ok(_) => {}
-        }
-        let directory = std::env::temp_dir().join(format!("pi-share-{}", crate::session::ids::uuid_v4()));
-        let html = directory.join("session.html");
-        if let Err(error) = std::fs::create_dir_all(&directory)
-            .map_err(anyhow::Error::from)
-            .and_then(|()| self.session().export_to_html(Some(&html.to_string_lossy())))
-        {
-            let _ = std::fs::remove_dir_all(&directory);
-            return self.show_error(&format!("Failed to export session: {error}"));
-        }
-        let loader = Rc::new(RefCell::new(BorderedLoader::new(&self.tui(), "Creating gist...", true)));
-        let cancel = loader.borrow().signal();
-        let weak = self.weak.clone();
-        loader.borrow_mut().set_on_abort(Some(Box::new(move || {
-            if let Some(mode) = weak.upgrade() {
-                mode.selector.restore_editor();
-                mode.show_status("Share cancelled");
-            }
-        })));
-        self.show_in_editor_slot(loader.clone(), loader.clone());
-        self.spawn(move |mode| async move {
-            let mut command = tokio::process::Command::new("gh");
-            command.args(["gist", "create", "--public=false"]).arg(&html).kill_on_drop(true);
-            let output = tokio::select! {
-                output = command.output() => output,
-                _ = cancel.cancelled() => Err(std::io::Error::other("cancelled")),
-            };
-            let _ = std::fs::remove_dir_all(&directory);
-            if cancel.is_cancelled() {
-                return;
-            }
-            loader.borrow_mut().dispose();
-            mode.selector.restore_editor();
-            let output = match output {
-                Ok(output) => output,
-                Err(error) => return mode.show_error(&format!("Failed to create gist: {error}")),
-            };
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                let reason = if stderr.is_empty() { "Unknown error".to_string() } else { stderr };
-                return mode.show_error(&format!("Failed to create gist: {reason}"));
-            }
-            let gist_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            let Some(gist_id) = gist_url.rsplit('/').next().filter(|id| !id.is_empty()) else {
-                return mode.show_error("Failed to parse gist ID from gh output");
-            };
-            let preview = crate::export::share::share_viewer_url(gist_id);
-            let link = pi_tui::terminal_image::hyperlink;
-            let preview_link = link(&preview, &preview);
-            mode.show_status(&format!("Share URL: {preview_link}\nGist: {}", link(&gist_url, &gist_url)));
-        });
     }
 }

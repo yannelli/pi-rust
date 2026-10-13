@@ -3,13 +3,15 @@
 
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use pi_tui::component;
+use tokio::sync::{mpsc, oneshot};
 
 use super::components::{StatusIndicator, StatusKind};
 use super::mode::InteractiveMode;
 use super::selector::SelectorSpec;
-use crate::agent_session::NavigateTreeOptions;
+use crate::agent_session::{NavigateTreeOptions, TrustPromptFn};
 use crate::interactive_components::session_selector::{
     SessionSelectorOptions, all_sessions_loader, project_sessions_loader,
 };
@@ -18,8 +20,22 @@ use crate::interactive_components::tree_selector::{
     CUSTOM_INSTRUCTIONS_TITLE,
 };
 use crate::interactive_components::{SessionSelector, TreeData, TreeSelector};
+use crate::resources::trust::{ProjectTrustOption, ProjectTrustPrompt};
 use crate::session::SessionManager;
 use crate::session::branching::missing_session_cwd;
+
+type TrustRequest = (ProjectTrustPrompt, oneshot::Sender<Option<ProjectTrustOption>>);
+
+/// A trust prompt for a replacement session, answered on the UI thread from the receiver.
+fn trust_prompt_channel() -> (TrustPromptFn, mpsc::UnboundedReceiver<TrustRequest>) {
+    let (sender, receiver) = mpsc::unbounded_channel::<TrustRequest>();
+    let prompt: TrustPromptFn = Arc::new(move |prompt| {
+        let (reply, answer) = oneshot::channel();
+        let sent = sender.send((prompt, reply)).is_ok();
+        Box::pin(async move { if sent { answer.await.ok().flatten() } else { None } })
+    });
+    (prompt, receiver)
+}
 
 impl InteractiveMode {
     /// `/tree` and its key: move to another point of the session tree.
@@ -229,13 +245,25 @@ impl InteractiveMode {
                 }
             };
             let resumed_here = cwd_override.is_some();
-            let switch = async move { runtime.switch_session(&path, cwd_override.as_deref()).await };
-            match tokio::spawn(switch).await {
-                Ok(Ok(result)) if result.cancelled => {}
-                Ok(Ok(_)) if resumed_here => mode.show_status("Resumed session in current cwd"),
-                Ok(Ok(_)) => mode.show_status("Resumed session"),
-                Ok(Err(error)) => mode.show_error(&format!("Failed to resume session: {error:#}")),
-                Err(error) => mode.show_error(&format!("Failed to resume session: {error}")),
+            let (prompt, mut requests) = trust_prompt_channel();
+            let switch = async move { runtime.switch_session_with(&path, cwd_override.as_deref(), Some(prompt)).await };
+            let mut task = tokio::spawn(switch);
+            let result = loop {
+                tokio::select! {
+                    result = &mut task => break result,
+                    Some((prompt, reply)) = requests.recv() => {
+                        let labels = prompt.options.iter().map(|option| option.label.clone()).collect();
+                        let chosen = mode.ask_choice(&prompt.message, labels).await.ok().flatten();
+                        let option = chosen.and_then(|label| prompt.options.into_iter().find(|o| o.label == label));
+                        let _ = reply.send(option);
+                    }
+                }
+            };
+            match super::shutdown::joined(result) {
+                Ok(result) if result.cancelled => {}
+                Ok(_) if resumed_here => mode.show_status("Resumed session in current cwd"),
+                Ok(_) => mode.show_status("Resumed session"),
+                Err(error) => mode.handle_fatal_runtime_error("Failed to resume session", &error),
             }
         });
     }

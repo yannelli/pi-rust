@@ -341,10 +341,12 @@ impl AgentSession {
 
     /// Export the session to HTML; returns the written path.
     pub fn export_to_html(&self, output_path: Option<&str>) -> anyhow::Result<PathBuf> {
-        let Some(file) = self.session_file() else { anyhow::bail!("Cannot export in-memory session to HTML") };
-        let theme =
-            self.settings().theme().and_then(|name| ExportTheme::builtin(&name)).unwrap_or_else(ExportTheme::dark);
-        let tools = self.with_state(|state| {
+        self.export_to_html_themed(output_path, None)
+    }
+
+    /// The active tools as the export lists them.
+    pub fn export_tools(&self) -> Vec<ExportTool> {
+        self.with_state(|state| {
             state
                 .tools
                 .iter()
@@ -353,13 +355,28 @@ impl AgentSession {
                     description: Some(tool.description().to_string()),
                     parameters: tool.parameters(),
                 })
-                .collect::<Vec<_>>()
-        });
+                .collect()
+        })
+    }
+
+    /// [`Self::export_to_html`] in `theme_name`, else the `theme` setting, when they exist.
+    pub fn export_to_html_themed(
+        &self,
+        output_path: Option<&str>,
+        theme_name: Option<&str>,
+    ) -> anyhow::Result<PathBuf> {
+        let Some(file) = self.session_file() else { anyhow::bail!("Cannot export in-memory session to HTML") };
+        let name = [theme_name.map(str::to_string), self.settings().theme()]
+            .into_iter()
+            .flatten()
+            .find(|name| crate::theme::get_theme_by_name(name).is_some());
+        let theme = crate::theme::export_theme(name.as_deref()).unwrap_or_else(|_| ExportTheme::dark());
+        let renderer = crate::export::AnsiToolRendererAdapter::new(super::export_tools::SessionToolRenderer::new(self));
         let options = HtmlExportOptions {
             theme,
             system_prompt: Some(self.system_prompt()),
-            tools: Some(tools),
-            tool_renderer: None,
+            tools: Some(self.export_tools()),
+            tool_renderer: Some(&renderer),
         };
         export_session_html(&file, output_path, &options)
     }
@@ -369,11 +386,29 @@ impl AgentSession {
         self.session_manager().export_branch_to_jsonl(output_path)
     }
 
-    /// Reload settings and resources (`/reload`): queue modes, skills, prompt templates,
-    /// context files, and system prompt files. `defaultTools` additions become active.
+    /// Reload settings and resources: queue modes, skills, prompt templates, context files, and
+    /// system prompt files, keeping the resolved packages. `defaultTools` additions become active.
     pub fn reload(&self) {
         let previous_defaults = self.current_default_tools();
         self.settings().reload();
+        self.reload_with_packages(None, &previous_defaults);
+    }
+
+    /// [`Self::reload`] that resolves the `packages` settings again, installing missing ones
+    /// (`/reload`, upstream `ResourceLoader.reload`). Returns the package error, if any.
+    pub async fn reload_resources(&self) -> Option<super::RuntimeDiagnostic> {
+        let previous_defaults = self.current_default_tools();
+        self.settings().reload();
+        let (cwd, agent_dir, settings) = {
+            let services = self.services();
+            (services.cwd.clone(), services.agent_dir.clone(), services.settings.clone())
+        };
+        let (packages, error) = super::services::package_resources(&cwd, &agent_dir, &settings).await;
+        self.reload_with_packages(Some(packages), &previous_defaults);
+        error
+    }
+
+    fn reload_with_packages(&self, packages: Option<crate::resources::ResolvedPaths>, previous_defaults: &[String]) {
         self.sync_queue_modes();
         {
             let services = self.services();
@@ -384,11 +419,11 @@ impl AgentSession {
                 services.settings.as_ref(),
                 &resource_options_of(&loader.options),
             );
-            options.package_resources = loader.options.package_resources.clone();
+            options.package_resources = packages.unwrap_or_else(|| loader.options.package_resources.clone());
             loader.options = options;
             loader.reload();
         }
-        self.reload_tools(&previous_defaults);
+        self.reload_tools(previous_defaults);
         self.rebuild_system_prompt();
     }
 }
