@@ -130,10 +130,20 @@ impl ExtensionRunner {
         if !self.has_handlers(kind) {
             return;
         }
-        let runner = self.this();
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.spawn(async move { runner.emit(event).await });
-        }
+        let Ok(handle) = tokio::runtime::Handle::try_current() else { return };
+        // One queue keeps the order events happened in, as upstream's single event loop does.
+        let sender = self.detached.get_or_init(|| {
+            let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<Value>();
+            let weak = Arc::downgrade(&self.this());
+            handle.spawn(async move {
+                while let Some(event) = receiver.recv().await {
+                    let Some(runner) = weak.upgrade() else { break };
+                    runner.emit(event).await;
+                }
+            });
+            sender
+        });
+        let _ = sender.send(event);
     }
 
     /// Servers registered while nothing connects them become extension errors.

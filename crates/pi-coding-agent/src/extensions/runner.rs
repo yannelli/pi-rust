@@ -108,6 +108,8 @@ pub struct ExtensionRunner {
     load_errors: Mutex<Vec<ExtensionLoadError>>,
     pub(crate) terminal_input: AtomicBool,
     stale: AtomicBool,
+    /// Queue of `emit_detached` events, delivered one at a time in order.
+    pub(crate) detached: OnceLock<mpsc::UnboundedSender<Value>>,
     weak: Weak<ExtensionRunner>,
 }
 
@@ -192,6 +194,7 @@ impl ExtensionRunner {
                 load_errors: Mutex::default(),
                 terminal_input: AtomicBool::new(false),
                 stale: AtomicBool::new(false),
+                detached: OnceLock::new(),
                 weak: weak.clone(),
             }
         });
