@@ -4,14 +4,17 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
+use async_trait::async_trait;
 use futures::future::join_all;
 use pi_ai::{AssistantMessage, Message, ToolCall, ToolResultMessage, now_ms};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
-use crate::agent_loop::{AgentContext, AgentLoopConfig, EventSink};
+use crate::agent_loop::{AfterToolCallFn, AgentContext, AgentLoopConfig, BeforeToolCallFn, EventSink};
+use crate::nested::{NestedToolCallHost, NestedToolCallRunner, ToolContext, combine_usage};
 use crate::types::{
-    AfterToolCall, AgentEvent, AgentToolResult, BeforeToolCall, SharedTool, ToolExecutionMode, ToolUpdateCallback,
+    AfterToolCall, AgentEvent, AgentToolCallOutcome, AgentToolResult, BeforeToolCall, BeforeToolCallResult, SharedTool,
+    ToolExecutionMode, ToolUpdateCallback,
 };
 use crate::validate::validate_tool_arguments;
 
@@ -21,18 +24,57 @@ pub(crate) struct ToolBatch {
     pub terminate: bool,
 }
 
-struct Finalized {
-    call: ToolCall,
-    result: AgentToolResult,
-    is_error: bool,
-    duration_ms: Option<u64>,
-}
-
 /// Preparations live for one batch, so the outcome stays inline.
 #[allow(clippy::large_enum_variant)]
 enum Prepared {
-    Immediate(Finalized),
+    Immediate(AgentToolCallOutcome),
     Ready { tool: SharedTool, call: ToolCall, args: Value },
+}
+
+/// Options for [`run_tool_call`].
+#[derive(Clone)]
+pub struct RunToolCallOptions<'a> {
+    /// Tools the call resolves against.
+    pub tools: &'a [SharedTool],
+    /// Passed to the hooks as the message that issued the call.
+    pub assistant_message: &'a AssistantMessage,
+    /// Passed to the hooks as the current agent context.
+    pub context: &'a AgentContext,
+    pub before_tool_call: Option<&'a BeforeToolCallFn>,
+    pub after_tool_call: Option<&'a AfterToolCallFn>,
+    /// Reported to the hooks for calls made by another tool.
+    pub parent_tool_call_id: Option<&'a str>,
+    /// Context handed to the tool; defaults to one without nested calls.
+    pub tool_context: Option<ToolContext>,
+    pub cancel: CancellationToken,
+    pub on_update: Option<ToolUpdateCallback>,
+}
+
+fn error_outcome(call: &ToolCall, text: impl Into<String>, terminate: bool) -> AgentToolCallOutcome {
+    AgentToolCallOutcome {
+        tool_call: call.clone(),
+        result: AgentToolResult { terminate, ..AgentToolResult::error(text) },
+        is_error: true,
+        duration_ms: None,
+    }
+}
+
+/// Run one call through the same steps as a model-issued call: argument preparation, schema
+/// validation, `before_tool_call`, execution, and `after_tool_call`. Emits no events and adds no
+/// messages. Unknown tools, validation errors, blocked calls, and failures come back as errors.
+pub async fn run_tool_call(call: ToolCall, options: RunToolCallOptions<'_>) -> AgentToolCallOutcome {
+    let RunToolCallOptions { tools, assistant_message, context, parent_tool_call_id, cancel, .. } = options;
+    let before = options.before_tool_call;
+    match prepare(tools, context, assistant_message, &call, before, parent_tool_call_id, &cancel).await {
+        Prepared::Immediate(outcome) => outcome,
+        Prepared::Ready { tool, call, args } => {
+            let tool_context = options.tool_context.unwrap_or_else(|| ToolContext::new(call.id.clone()));
+            let on_update = options.on_update.unwrap_or_else(|| Arc::new(|_| {}));
+            let executed = execute_prepared(&tool, &args, tool_context, &cancel, on_update).await;
+            let after = options.after_tool_call;
+            finalize(context, assistant_message, call, &args, executed, after, parent_tool_call_id, &cancel).await
+        }
+    }
 }
 
 /// A response cut off by the output limit may carry incomplete arguments, so none of its calls run.
@@ -40,27 +82,97 @@ pub(crate) fn fail_truncated_tool_calls(calls: &[ToolCall], emit: &EventSink) ->
     let mut messages = Vec::new();
     for call in calls {
         emit_start(call, emit);
-        let finalized = Finalized {
-            call: call.clone(),
-            result: AgentToolResult::text(format!(
-                "Tool call \"{}\" was not executed: the response hit the output token limit, so its arguments may be truncated. Re-issue the tool call with complete arguments.",
-                call.name
-            )),
-            is_error: true,
-            duration_ms: None,
-        };
-        messages.push(emit_end_and_result(&finalized, emit));
+        let text = format!(
+            "Tool call \"{}\" was not executed: the response hit the output token limit, so its arguments may be truncated. Re-issue the tool call with complete arguments.",
+            call.name
+        );
+        let outcome = error_outcome(call, text, false);
+        emit_end(&outcome, emit);
+        messages.push(emit_result(&outcome, None, emit));
     }
     ToolBatch { messages, terminate: false }
 }
 
+/// Runs calls tools make while the batch executes, against the loop's tools and hooks.
+struct LoopNestedHost {
+    context: Arc<AgentContext>,
+    message: AssistantMessage,
+    config: AgentLoopConfig,
+    emit: EventSink,
+}
+
+#[async_trait]
+impl NestedToolCallHost for LoopNestedHost {
+    fn tools(&self) -> Vec<SharedTool> {
+        match &self.config.callable_tools {
+            Some(callable) => callable(),
+            None => self.context.tools.clone(),
+        }
+    }
+
+    fn is_sequential(&self) -> bool {
+        self.config.tool_execution == ToolExecutionMode::Sequential
+    }
+
+    async fn run_tool_call(
+        &self,
+        call: ToolCall,
+        parent_tool_call_id: &str,
+        context: ToolContext,
+        cancel: CancellationToken,
+        on_update: ToolUpdateCallback,
+    ) -> AgentToolCallOutcome {
+        let tools = self.tools();
+        let options = RunToolCallOptions {
+            tools: &tools,
+            assistant_message: &self.message,
+            context: &self.context,
+            before_tool_call: self.config.before_tool_call.as_ref(),
+            after_tool_call: self.config.after_tool_call.as_ref(),
+            parent_tool_call_id: Some(parent_tool_call_id),
+            tool_context: Some(context),
+            cancel,
+            on_update: Some(on_update),
+        };
+        run_tool_call(call, options).await
+    }
+
+    fn emit(&self, event: AgentEvent) {
+        (self.emit)(event);
+    }
+}
+
 pub(crate) async fn execute_tool_calls(
+    context: &mut AgentContext,
+    message: &AssistantMessage,
+    calls: &[ToolCall],
+    config: &AgentLoopConfig,
+    emit: &EventSink,
+    cancel: &CancellationToken,
+) -> ToolBatch {
+    // Shared with nested calls for the batch, then handed back without a copy.
+    let shared = Arc::new(std::mem::take(context));
+    let host = LoopNestedHost {
+        context: shared.clone(),
+        message: message.clone(),
+        config: config.clone(),
+        emit: emit.clone(),
+    };
+    let runner = NestedToolCallRunner::new(Arc::new(host));
+    let batch = run_batch(&shared, message, calls, config, emit, cancel, &runner).await;
+    drop(runner);
+    *context = Arc::try_unwrap(shared).unwrap_or_else(|shared| (*shared).clone());
+    batch
+}
+
+async fn run_batch(
     context: &AgentContext,
     message: &AssistantMessage,
     calls: &[ToolCall],
     config: &AgentLoopConfig,
     emit: &EventSink,
     cancel: &CancellationToken,
+    runner: &Arc<NestedToolCallRunner>,
 ) -> ToolBatch {
     let sequential = config.tool_execution == ToolExecutionMode::Sequential
         || calls.iter().any(|call| {
@@ -69,19 +181,21 @@ pub(crate) async fn execute_tool_calls(
                 .iter()
                 .any(|tool| tool.name() == call.name && tool.execution_mode() == Some(ToolExecutionMode::Sequential))
         });
-    let mut finalized_calls = Vec::new();
+    let before = config.before_tool_call.as_ref();
+    let mut outcomes = Vec::new();
     let mut messages = Vec::new();
     if sequential {
         for call in calls {
             emit_start(call, emit);
-            let finalized = match prepare(context, message, call, config, cancel).await {
-                Prepared::Immediate(finalized) => finalized,
+            let outcome = match prepare(&context.tools, context, message, call, before, None, cancel).await {
+                Prepared::Immediate(outcome) => outcome,
                 Prepared::Ready { tool, call, args } => {
-                    run_prepared(context, tool, call, args, message, config, emit, cancel).await
+                    run_prepared(context, tool, call, args, message, config, emit, cancel, runner).await
                 }
             };
-            messages.push(emit_end_and_result(&finalized, emit));
-            finalized_calls.push(finalized);
+            emit_end(&outcome, emit);
+            messages.push(emit_result(&outcome, Some(runner), emit));
+            outcomes.push(outcome);
             if cancel.is_cancelled() {
                 break;
             }
@@ -90,9 +204,9 @@ pub(crate) async fn execute_tool_calls(
         let mut prepared = Vec::new();
         for call in calls {
             emit_start(call, emit);
-            let preparation = prepare(context, message, call, config, cancel).await;
-            if let Prepared::Immediate(finalized) = &preparation {
-                emit_end(finalized, emit);
+            let preparation = prepare(&context.tools, context, message, call, before, None, cancel).await;
+            if let Prepared::Immediate(outcome) = &preparation {
+                emit_end(outcome, emit);
             }
             prepared.push(preparation);
             if cancel.is_cancelled() {
@@ -101,63 +215,62 @@ pub(crate) async fn execute_tool_calls(
         }
         let runs = prepared.into_iter().map(|preparation| async move {
             match preparation {
-                Prepared::Immediate(finalized) => finalized,
+                Prepared::Immediate(outcome) => outcome,
                 Prepared::Ready { tool, call, args } => {
-                    let finalized = if cancel.is_cancelled() {
-                        Finalized {
-                            call,
-                            result: AgentToolResult::text("Operation aborted"),
-                            is_error: true,
-                            duration_ms: None,
-                        }
+                    let outcome = if cancel.is_cancelled() {
+                        error_outcome(&call, "Operation aborted", false)
                     } else {
-                        run_prepared(context, tool, call, args, message, config, emit, cancel).await
+                        run_prepared(context, tool, call, args, message, config, emit, cancel, runner).await
                     };
-                    emit_end(&finalized, emit);
-                    finalized
+                    emit_end(&outcome, emit);
+                    outcome
                 }
             }
         });
-        for finalized in join_all(runs).await {
-            messages.push(emit_result(&finalized, emit));
-            finalized_calls.push(finalized);
+        for outcome in join_all(runs).await {
+            messages.push(emit_result(&outcome, Some(runner), emit));
+            outcomes.push(outcome);
         }
     }
-    let terminate = !finalized_calls.is_empty() && finalized_calls.iter().all(|finalized| finalized.result.terminate);
+    let terminate = !outcomes.is_empty() && outcomes.iter().all(|outcome| outcome.result.terminate);
     ToolBatch { messages, terminate }
 }
 
 async fn prepare(
+    tools: &[SharedTool],
     context: &AgentContext,
     message: &AssistantMessage,
     call: &ToolCall,
-    config: &AgentLoopConfig,
+    before: Option<&BeforeToolCallFn>,
+    parent_tool_call_id: Option<&str>,
     cancel: &CancellationToken,
 ) -> Prepared {
-    let immediate = |text: String, terminate: bool| {
-        Prepared::Immediate(Finalized {
-            call: call.clone(),
-            result: AgentToolResult { terminate, is_error: true, ..AgentToolResult::text(text) },
-            is_error: true,
-            duration_ms: None,
-        })
-    };
-    let Some(tool) = context.tools.iter().find(|tool| tool.name() == call.name) else {
+    let immediate = |text: String, terminate: bool| Prepared::Immediate(error_outcome(call, text, terminate));
+    let Some(tool) = tools.iter().find(|tool| tool.name() == call.name) else {
         return immediate(format!("Tool {} not found", call.name), false);
     };
-    let args = match validate_tool_arguments(&call.name, &tool.parameters(), &Value::Object(call.arguments.clone())) {
+    let prepared = match tool.prepare_arguments(Value::Object(call.arguments.clone())) {
+        Ok(prepared) => prepared,
+        Err(error) => return immediate(format!("{error:#}"), false),
+    };
+    let mut args = match validate_tool_arguments(&call.name, &tool.parameters(), &prepared) {
         Ok(args) => args,
         Err(error) => return immediate(error, false),
     };
-    if let Some(before) = &config.before_tool_call {
-        let input = BeforeToolCall { assistant_message: message, tool_call: call, args: &args, context };
+    if let Some(before) = before {
+        let input =
+            BeforeToolCall { assistant_message: message, tool_call: call, args: &args, context, parent_tool_call_id };
         let decision = before(input, cancel.clone()).await;
         if cancel.is_cancelled() {
             return immediate("Operation aborted".into(), false);
         }
-        if let Some(decision) = decision.filter(|decision| decision.block) {
-            let reason = decision.reason.unwrap_or_else(|| "Tool execution was blocked".into());
-            return immediate(reason, decision.terminate);
+        match decision {
+            Some(decision) if decision.block => {
+                let reason = decision.reason.unwrap_or_else(|| "Tool execution was blocked".into());
+                return immediate(reason, decision.terminate);
+            }
+            Some(BeforeToolCallResult { args: Some(replaced), .. }) => args = replaced,
+            _ => {}
         }
     }
     if cancel.is_cancelled() {
@@ -166,52 +279,60 @@ async fn prepare(
     Prepared::Ready { tool: tool.clone(), call: call.clone(), args }
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn run_prepared(
-    context: &AgentContext,
-    tool: SharedTool,
-    call: ToolCall,
-    args: Value,
-    message: &AssistantMessage,
-    config: &AgentLoopConfig,
-    emit: &EventSink,
+struct Executed {
+    result: AgentToolResult,
+    is_error: bool,
+    duration_ms: u64,
+}
+
+async fn execute_prepared(
+    tool: &SharedTool,
+    args: &Value,
+    tool_context: ToolContext,
     cancel: &CancellationToken,
-) -> Finalized {
+    on_update: ToolUpdateCallback,
+) -> Executed {
     let started = Instant::now();
     // Updates that arrive after the tool returns are dropped, as in the TypeScript loop.
     let accepting = Arc::new(AtomicBool::new(true));
-    let on_update: ToolUpdateCallback = {
-        let (emit, accepting) = (emit.clone(), accepting.clone());
-        let (id, name, update_args) = (call.id.clone(), call.name.clone(), Value::Object(call.arguments.clone()));
-        Arc::new(move |partial_result| {
+    let guarded: ToolUpdateCallback = {
+        let accepting = accepting.clone();
+        Arc::new(move |partial| {
             if accepting.load(Ordering::SeqCst) {
-                emit(AgentEvent::ToolExecutionUpdate {
-                    tool_call_id: id.clone(),
-                    tool_name: name.clone(),
-                    args: update_args.clone(),
-                    partial_result,
-                });
+                on_update(partial);
             }
         })
     };
-    let outcome = tool.execute(&call.id, args.clone(), cancel.child_token(), on_update).await;
+    let outcome = tool.execute_with_context(&tool_context, args.clone(), cancel.child_token(), guarded).await;
     accepting.store(false, Ordering::SeqCst);
-    let duration_ms = Some(started.elapsed().as_millis() as u64);
-    let (mut result, mut is_error) = match outcome {
-        Ok(result) => {
-            let is_error = result.is_error;
-            (result, is_error)
-        }
-        Err(error) => (AgentToolResult::text(format!("{error:#}")), true),
-    };
-    if let Some(after) = &config.after_tool_call {
+    let duration_ms = started.elapsed().as_millis() as u64;
+    match outcome {
+        Ok(result) => Executed { is_error: result.is_error, result, duration_ms },
+        Err(error) => Executed { result: AgentToolResult::error(format!("{error:#}")), is_error: true, duration_ms },
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn finalize(
+    context: &AgentContext,
+    message: &AssistantMessage,
+    call: ToolCall,
+    args: &Value,
+    executed: Executed,
+    after: Option<&AfterToolCallFn>,
+    parent_tool_call_id: Option<&str>,
+    cancel: &CancellationToken,
+) -> AgentToolCallOutcome {
+    let Executed { mut result, mut is_error, duration_ms } = executed;
+    if let Some(after) = after {
         let input = AfterToolCall {
             assistant_message: message,
             tool_call: &call,
-            args: &args,
+            args,
             result: &result,
             is_error,
             context,
+            parent_tool_call_id,
         };
         if let Some(update) = after(input, cancel.clone()).await {
             // Structured content not replaced along with the content may no longer match it.
@@ -234,7 +355,37 @@ async fn run_prepared(
         }
     }
     result.is_error = is_error;
-    Finalized { call, result, is_error, duration_ms }
+    AgentToolCallOutcome { tool_call: call, result, is_error, duration_ms: Some(duration_ms) }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_prepared(
+    context: &AgentContext,
+    tool: SharedTool,
+    call: ToolCall,
+    args: Value,
+    message: &AssistantMessage,
+    config: &AgentLoopConfig,
+    emit: &EventSink,
+    cancel: &CancellationToken,
+    runner: &Arc<NestedToolCallRunner>,
+) -> AgentToolCallOutcome {
+    let on_update: ToolUpdateCallback = {
+        let emit = emit.clone();
+        let (id, name, update_args) = (call.id.clone(), call.name.clone(), Value::Object(call.arguments.clone()));
+        Arc::new(move |partial_result| {
+            emit(AgentEvent::ToolExecutionUpdate {
+                tool_call_id: id.clone(),
+                tool_name: name.clone(),
+                args: update_args.clone(),
+                partial_result,
+                parent_tool_call_id: None,
+            });
+        })
+    };
+    let tool_context = ToolContext::nested(call.id.clone(), runner.clone(), cancel.clone());
+    let executed = execute_prepared(&tool, &args, tool_context, cancel, on_update).await;
+    finalize(context, message, call, &args, executed, config.after_tool_call.as_ref(), None, cancel).await
 }
 
 fn emit_start(call: &ToolCall, emit: &EventSink) {
@@ -242,37 +393,48 @@ fn emit_start(call: &ToolCall, emit: &EventSink) {
         tool_call_id: call.id.clone(),
         tool_name: call.name.clone(),
         args: Value::Object(call.arguments.clone()),
+        parent_tool_call_id: None,
     });
 }
 
-fn emit_end(finalized: &Finalized, emit: &EventSink) {
+fn emit_end(outcome: &AgentToolCallOutcome, emit: &EventSink) {
     emit(AgentEvent::ToolExecutionEnd {
-        tool_call_id: finalized.call.id.clone(),
-        tool_name: finalized.call.name.clone(),
-        result: finalized.result.clone(),
-        is_error: finalized.is_error,
-        duration_ms: finalized.duration_ms,
+        tool_call_id: outcome.tool_call.id.clone(),
+        tool_name: outcome.tool_call.name.clone(),
+        result: outcome.result.clone(),
+        is_error: outcome.is_error,
+        duration_ms: outcome.duration_ms,
+        parent_tool_call_id: None,
     });
 }
 
-fn emit_result(finalized: &Finalized, emit: &EventSink) -> ToolResultMessage {
-    let result = ToolResultMessage {
-        tool_call_id: finalized.call.id.clone(),
-        tool_name: finalized.call.name.clone(),
-        content: finalized.result.content.clone(),
-        details: finalized.result.details.clone(),
-        usage: finalized.result.usage,
-        is_error: finalized.is_error,
+/// Build the result message, with the record and usage of the call's nested calls.
+fn emit_result(
+    outcome: &AgentToolCallOutcome,
+    runner: Option<&Arc<NestedToolCallRunner>>,
+    emit: &EventSink,
+) -> ToolResultMessage {
+    let mut result = ToolResultMessage {
+        tool_call_id: outcome.tool_call.id.clone(),
+        tool_name: outcome.tool_call.name.clone(),
+        content: outcome.result.content.clone(),
+        details: outcome.result.details.clone(),
+        usage: outcome.result.usage,
+        is_error: outcome.is_error,
         timestamp: now_ms(),
-        duration_ms: finalized.duration_ms,
+        duration_ms: outcome.duration_ms,
         ..Default::default()
     };
+    if let Some(summary) = runner.and_then(|runner| runner.take_record(&outcome.tool_call.id)) {
+        result.nested_calls = summary.calls;
+        if let Some(usage) = summary.usage {
+            result.usage = Some(match &result.usage {
+                Some(own) => combine_usage(own, &usage),
+                None => usage,
+            });
+        }
+    }
     emit(AgentEvent::MessageStart { message: Message::ToolResult(result.clone()) });
     emit(AgentEvent::MessageEnd { message: Message::ToolResult(result.clone()) });
     result
-}
-
-fn emit_end_and_result(finalized: &Finalized, emit: &EventSink) -> ToolResultMessage {
-    emit_end(finalized, emit);
-    emit_result(finalized, emit)
 }

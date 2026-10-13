@@ -100,6 +100,13 @@ enum Kind {
     Read,
 }
 
+const READ_ONLY: ToolAnnotations = ToolAnnotations {
+    read_only_hint: Some(true),
+    destructive_hint: None,
+    idempotent_hint: None,
+    open_world_hint: None,
+};
+
 /// One of the three resource tools.
 #[derive(Clone)]
 pub struct McpResourceTool {
@@ -161,7 +168,7 @@ impl McpResourceTool {
     }
 
     pub fn annotations(&self) -> ToolAnnotations {
-        ToolAnnotations { read_only_hint: Some(true), ..ToolAnnotations::default() }
+        READ_ONLY.clone()
     }
 
     pub fn output_schema(&self) -> Value {
@@ -317,6 +324,18 @@ impl AgentTool for McpResourceTool {
 
     fn parameters(&self) -> Value {
         if self.kind == Kind::Read { schemas::read_parameters() } else { schemas::list_parameters() }
+    }
+
+    fn output_schema(&self) -> Option<Value> {
+        Some(McpResourceTool::output_schema(self))
+    }
+
+    fn exposure(&self) -> ToolExposure {
+        self.exposure
+    }
+
+    fn annotations(&self) -> Option<&ToolAnnotations> {
+        Some(&READ_ONLY)
     }
 
     async fn execute(

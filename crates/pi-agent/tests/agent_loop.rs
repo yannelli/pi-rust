@@ -189,7 +189,15 @@ async fn hooks_block_and_rewrite_results() {
     let mut config = config(stream_fn);
     config.before_tool_call = Some(Arc::new(|input, _| {
         let block = input.args["text"] == "block";
-        async move { block.then(|| BeforeToolCallResult { block: true, reason: Some("denied".into()), terminate: false }) }.boxed()
+        async move {
+            block.then(|| BeforeToolCallResult {
+                block: true,
+                reason: Some("denied".into()),
+                terminate: false,
+                args: None,
+            })
+        }
+        .boxed()
     }));
     config.after_tool_call = Some(Arc::new(|input, _| {
         let text = format!("{}!", input.result.content[0].as_text().unwrap_or_default());

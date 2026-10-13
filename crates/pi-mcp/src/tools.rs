@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use pi_agent::{AgentTool, AgentToolResult, ToolUpdateCallback};
-use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 
@@ -18,19 +17,7 @@ use crate::output::{ConvertOptions, McpToolDetails, McpToolOutput, OutputSaver, 
 use crate::runtime::McpServerConnection;
 use crate::types::Tool;
 
-/// How the agent reaches a tool, with the names pi uses.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ToolExposure {
-    /// Declared to the model.
-    #[default]
-    Direct,
-    ModelOnly,
-    Codemode,
-    /// Declared once `tool_search` loads it; codemode scripts can call it.
-    Deferred,
-    Hidden,
-}
+pub use pi_agent::{ToolAnnotations, ToolExposure, ToolNamespace};
 
 /// `codemode` and `deferred` both leave tools out of the codemode description; they differ only in
 /// which tool the integration activates to reach them.
@@ -40,32 +27,6 @@ pub fn to_tool_exposure(exposure: McpExposure) -> ToolExposure {
         McpExposure::Direct => ToolExposure::Direct,
         McpExposure::Hidden => ToolExposure::Hidden,
     }
-}
-
-/// Hints with the meaning of MCP tool annotations. They come from the tool's author, unverified.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ToolAnnotations {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub read_only_hint: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub destructive_hint: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub idempotent_hint: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub open_world_hint: Option<bool>,
-}
-
-/// A group of related tools, such as the tools of one MCP server (`mcp__docs`).
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ToolNamespace {
-    pub name: String,
-    /// Short summary shown once with the group in tool listings.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    /// Longer guidance, like server instructions, returned when a script describes the namespace.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub instructions: Option<String>,
 }
 
 /// Calls a server's tools; implemented by server connections.
@@ -281,6 +242,22 @@ impl AgentTool for McpTool {
 
     fn parameters(&self) -> Value {
         self.parameters.clone()
+    }
+
+    fn output_schema(&self) -> Option<Value> {
+        Some(self.output_schema.clone())
+    }
+
+    fn exposure(&self) -> ToolExposure {
+        self.exposure
+    }
+
+    fn namespace(&self) -> Option<&ToolNamespace> {
+        Some(&self.namespace)
+    }
+
+    fn annotations(&self) -> Option<&ToolAnnotations> {
+        self.annotations.as_ref()
     }
 
     async fn execute(

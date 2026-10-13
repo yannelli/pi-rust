@@ -117,6 +117,10 @@ impl AgentTool for EditTool {
         })
     }
 
+    fn prepare_arguments(&self, args: Value) -> anyhow::Result<Value> {
+        Ok(prepare_edit_arguments(args))
+    }
+
     async fn execute(
         &self,
         _tool_call_id: &str,

@@ -970,6 +970,7 @@ dependencies = [
  "async-trait",
  "futures",
  "pi-ai",
+ "regex",
  "serde",
  "serde_json",
  "tokio",

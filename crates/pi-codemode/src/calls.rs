@@ -135,24 +135,4 @@ pub(crate) fn usage_from_value(value: &Value) -> Option<Usage> {
     })
 }
 
-/// Sum of two usages, keeping the optional token splits when either side reports them.
-pub fn combine_usage(first: &Usage, second: &Usage) -> Usage {
-    let optional =
-        |a: Option<u64>, b: Option<u64>| (a.is_some() || b.is_some()).then(|| a.unwrap_or(0) + b.unwrap_or(0));
-    Usage {
-        input: first.input + second.input,
-        output: first.output + second.output,
-        cache_read: first.cache_read + second.cache_read,
-        cache_write: first.cache_write + second.cache_write,
-        cache_write_1h: optional(first.cache_write_1h, second.cache_write_1h),
-        reasoning: optional(first.reasoning, second.reasoning),
-        total_tokens: first.total_tokens + second.total_tokens,
-        cost: Cost {
-            input: first.cost.input + second.cost.input,
-            output: first.cost.output + second.cost.output,
-            cache_read: first.cost.cache_read + second.cost.cache_read,
-            cache_write: first.cost.cache_write + second.cost.cache_write,
-            total: first.cost.total + second.cost.total,
-        },
-    }
-}
+pub use pi_agent::combine_usage;
