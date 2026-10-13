@@ -174,6 +174,8 @@ impl ModelRuntime {
         } else {
             build_registry(builtin_models(), &catalogs, Some(self.models_path()))
         };
+        let mut registry = registry;
+        self.apply_extension_providers(&mut registry);
         self.resolver().set_provider_configs(registry.auth_configs());
         *self.registry_mut() = registry;
         self.apply_virtual_models();

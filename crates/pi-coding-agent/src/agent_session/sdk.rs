@@ -52,6 +52,10 @@ pub struct CreateAgentSessionOptions {
     /// Restore the tools the transcript declares instead of the initial selection, as upstream
     /// sessions created without `initialActiveToolNames` do.
     pub restore_tools: bool,
+    /// Extensions loaded for this session ([`crate::extensions::load_extensions`]).
+    pub extensions: Option<Arc<crate::extensions::ExtensionRunner>>,
+    /// The `session_start` event the extensions get when they bind; unset sends `startup`.
+    pub session_start_event: Option<serde_json::Value>,
     /// Options of the built-in tools: custom backends, the bash spawn hook, and whether the
     /// shell tools expose the session's `PI_*` variables. Unset uses
     /// [`ToolsOptions::from_settings`]; start from it to keep the settings.
@@ -73,6 +77,8 @@ impl CreateAgentSessionOptions {
             stream_fn: None,
             mcp: McpSessionOptions::default(),
             restore_tools: false,
+            extensions: None,
+            session_start_event: None,
             tool_options: None,
         }
     }
@@ -80,6 +86,8 @@ impl CreateAgentSessionOptions {
 
 pub struct CreateAgentSessionResult {
     pub session: Arc<AgentSession>,
+    /// The extensions attached to the session (upstream `extensionsResult`).
+    pub extensions: Option<Arc<crate::extensions::ExtensionRunner>>,
     /// Why the restored or saved model was not used.
     pub model_fallback_message: Option<String>,
 }
@@ -205,10 +213,16 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
     });
     agent.set_queue_modes(settings.steering_mode(), settings.follow_up_mode());
     let has_custom_stream = options.stream_fn.is_some();
-    let stream_fn = auth_stream_fn(services.model_runtime.clone(), settings.clone(), options.stream_fn);
+    let request_hooks = super::RequestHooksSlot::default();
+    let stream_fn =
+        auth_stream_fn(services.model_runtime.clone(), settings.clone(), options.stream_fn, request_hooks.clone());
     let resources = services.resources().resources().clone();
     let base_prompt = prompt_options(&services.cwd, &resources);
-    let builtins = BuiltinState { mcp_options: options.mcp, ..BuiltinState::default() };
+    let mut mcp_options = options.mcp;
+    if let Some(runner) = &options.extensions {
+        mcp_options.registry = Some(runner.mcp_registry().clone());
+    }
+    let builtins = BuiltinState { mcp_options, ..BuiltinState::default() };
     let (idle, _) = watch::channel(true);
     let session = Arc::new_cyclic(|weak| {
         let tool_options = options.tool_options;
@@ -234,6 +248,8 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
             disposed: AtomicBool::new(false),
             cache_warmer: CacheWarmer::new(warmer_host.clone()),
             warmer_host,
+            extensions: Default::default(),
+            request_hooks,
             weak: weak.clone(),
         }
     });
@@ -250,6 +266,13 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
         }
     });
     *lock(&session.agent_listener) = Some(id);
+    if let Some(event) = options.session_start_event {
+        session.set_session_start_event(event);
+    }
+    let extensions = options.extensions;
+    if let Some(runner) = extensions.clone() {
+        session.attach_extensions(runner).await;
+    }
     session.start_builtin_extensions();
-    Ok(CreateAgentSessionResult { session, model_fallback_message })
+    Ok(CreateAgentSessionResult { session, extensions, model_fallback_message })
 }

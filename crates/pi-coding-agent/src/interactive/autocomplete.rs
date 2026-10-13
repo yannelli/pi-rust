@@ -65,7 +65,7 @@ fn source_tag(source: &SourceInfo) -> Option<String> {
     Some(scope.to_string())
 }
 
-fn prefixed_description(description: &str, source: &SourceInfo) -> Option<String> {
+pub(super) fn prefixed_description(description: &str, source: &SourceInfo) -> Option<String> {
     match (source_tag(source), description.is_empty()) {
         (None, true) => None,
         (None, false) => Some(description.to_string()),
@@ -115,7 +115,9 @@ impl InteractiveMode {
     /// Commands, templates, and skills for the editor, plus `@` file search without `fd`.
     pub(super) fn setup_autocomplete_provider(&self) {
         let mut commands: Vec<CommandEntry> = Vec::new();
-        for (name, description, hint) in BUILTIN_SLASH_COMMANDS {
+        // `/mcp` belongs to the built-in MCP extension; an extension may replace it.
+        let mcp = self.session().builtin_extension_enabled("mcp");
+        for (name, description, hint) in BUILTIN_SLASH_COMMANDS.iter().filter(|(name, _, _)| *name != "mcp" || mcp) {
             let mut command = SlashCommand::new(*name, Some(description));
             if let Some(hint) = hint {
                 command = command.with_argument_hint(*hint);
@@ -145,6 +147,7 @@ impl InteractiveMode {
             }
             commands.push(command.into());
         }
+        commands.extend(self.extension_slash_commands());
         let mut skills = std::collections::HashMap::new();
         if session.settings().enable_skill_commands() {
             for skill in &resources.skills {

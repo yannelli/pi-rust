@@ -93,7 +93,7 @@ impl InteractiveMode {
                     self.ui.chat.borrow_mut().remove_child(&streaming);
                 }
             }
-            UiEvent::AgentSettled { .. } => {}
+            UiEvent::AgentSettled { .. } => self.check_shutdown_requested(),
             UiEvent::CompactionStart { reason } => {
                 self.set_terminal_progress(true);
                 let abort = self.action(|mode| mode.session().abort_compaction());
@@ -182,6 +182,10 @@ impl InteractiveMode {
                 self.render_session_items(items, false, false);
             }
             crate::session::entry::EntryData::Compaction(_) => self.on_compaction_entry(&entry),
+            crate::session::entry::EntryData::Custom { .. } => {
+                self.add_custom_entry_to_chat(&Value::Object(entry.raw().clone()));
+                self.tui().request_render(false);
+            }
             _ => {}
         }
     }

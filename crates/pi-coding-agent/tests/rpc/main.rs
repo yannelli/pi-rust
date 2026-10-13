@@ -13,6 +13,7 @@ mod mcp_fake;
 mod binary;
 mod builtins;
 mod client;
+mod extension_host;
 mod extension_ui;
 mod framing;
 mod model;

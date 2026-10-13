@@ -17,12 +17,12 @@ pub use agent::{Agent, AgentHooks, AgentInitialState, AgentState, AsyncListener,
 pub use agent_loop::{
     AfterToolCallFn, AgentContext, AgentLoopConfig, ApiKeyFn, BeforeToolCallFn, CallableToolsFn, ConvertToLlmFn,
     EventSink, MessageSource, StreamFn, TransformContextFn, default_convert_to_llm, run_agent_loop,
-    run_agent_loop_continue,
+    run_agent_loop_continue, sync_sink,
 };
 pub use described::{DescribedTool, with_description};
 pub use hooks::{
-    AgentLoopTurnUpdate, AgentRequestUpdate, AgentTurnContext, AgentTurnDecision, FinishTurnFn, PrepareNextTurnContext,
-    PrepareNextTurnFn, PrepareRequestContext, PrepareRequestFn,
+    AgentEventHookFn, AgentLoopTurnUpdate, AgentRequestUpdate, AgentTurnContext, AgentTurnDecision, FinishTurnFn,
+    PrepareNextTurnContext, PrepareNextTurnFn, PrepareRequestContext, PrepareRequestFn,
 };
 pub use nested::{
     ExecuteToolOptions, NESTED_CALL_LIMITS, NestedCallLimits, NestedCallRecorder, NestedCallSummary,

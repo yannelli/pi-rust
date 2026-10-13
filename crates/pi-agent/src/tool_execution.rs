@@ -78,17 +78,17 @@ pub async fn run_tool_call(call: ToolCall, options: RunToolCallOptions<'_>) -> A
 }
 
 /// A response cut off by the output limit may carry incomplete arguments, so none of its calls run.
-pub(crate) fn fail_truncated_tool_calls(calls: &[ToolCall], emit: &EventSink) -> ToolBatch {
+pub(crate) async fn fail_truncated_tool_calls(calls: &[ToolCall], emit: &EventSink) -> ToolBatch {
     let mut messages = Vec::new();
     for call in calls {
-        emit_start(call, emit);
+        emit_start(call, emit).await;
         let text = format!(
             "Tool call \"{}\" was not executed: the response hit the output token limit, so its arguments may be truncated. Re-issue the tool call with complete arguments.",
             call.name
         );
         let outcome = error_outcome(call, text, false);
-        emit_end(&outcome, emit);
-        messages.push(emit_result(&outcome, None, emit));
+        emit_end(&outcome, emit).await;
+        messages.push(emit_result(&outcome, None, emit).await);
     }
     ToolBatch { messages, terminate: false }
 }
@@ -138,8 +138,8 @@ impl NestedToolCallHost for LoopNestedHost {
         run_tool_call(call, options).await
     }
 
-    fn emit(&self, event: AgentEvent) {
-        (self.emit)(event);
+    async fn emit(&self, event: AgentEvent) {
+        (self.emit)(event).await;
     }
 
     fn model(&self) -> Option<Arc<Model>> {
@@ -192,15 +192,15 @@ async fn run_batch(
     let mut messages = Vec::new();
     if sequential {
         for call in calls {
-            emit_start(call, emit);
+            emit_start(call, emit).await;
             let outcome = match prepare(&context.tools, context, message, call, before, None, cancel).await {
                 Prepared::Immediate(outcome) => outcome,
                 Prepared::Ready { tool, call, args } => {
                     run_prepared(context, tool, call, args, message, config, emit, cancel, runner).await
                 }
             };
-            emit_end(&outcome, emit);
-            messages.push(emit_result(&outcome, Some(runner), emit));
+            emit_end(&outcome, emit).await;
+            messages.push(emit_result(&outcome, Some(runner), emit).await);
             outcomes.push(outcome);
             if cancel.is_cancelled() {
                 break;
@@ -209,10 +209,10 @@ async fn run_batch(
     } else {
         let mut prepared = Vec::new();
         for call in calls {
-            emit_start(call, emit);
+            emit_start(call, emit).await;
             let preparation = prepare(&context.tools, context, message, call, before, None, cancel).await;
             if let Prepared::Immediate(outcome) = &preparation {
-                emit_end(outcome, emit);
+                emit_end(outcome, emit).await;
             }
             prepared.push(preparation);
             if cancel.is_cancelled() {
@@ -228,13 +228,13 @@ async fn run_batch(
                     } else {
                         run_prepared(context, tool, call, args, message, config, emit, cancel, runner).await
                     };
-                    emit_end(&outcome, emit);
+                    emit_end(&outcome, emit).await;
                     outcome
                 }
             }
         });
         for outcome in join_all(runs).await {
-            messages.push(emit_result(&outcome, Some(runner), emit));
+            messages.push(emit_result(&outcome, Some(runner), emit).await);
             outcomes.push(outcome);
         }
     }
@@ -376,34 +376,70 @@ async fn run_prepared(
     cancel: &CancellationToken,
     runner: &Arc<NestedToolCallRunner>,
 ) -> AgentToolCallOutcome {
-    let on_update: ToolUpdateCallback = {
-        let emit = emit.clone();
-        let (id, name, update_args) = (call.id.clone(), call.name.clone(), Value::Object(call.arguments.clone()));
-        Arc::new(move |partial_result| {
-            emit(AgentEvent::ToolExecutionUpdate {
-                tool_call_id: id.clone(),
-                tool_name: name.clone(),
-                args: update_args.clone(),
-                partial_result,
-                parent_tool_call_id: None,
-            });
-        })
-    };
+    let (id, name, update_args) = (call.id.clone(), call.name.clone(), Value::Object(call.arguments.clone()));
+    let (on_update, updates) = update_relay(emit.clone(), move |partial_result| AgentEvent::ToolExecutionUpdate {
+        tool_call_id: id.clone(),
+        tool_name: name.clone(),
+        args: update_args.clone(),
+        partial_result,
+        parent_tool_call_id: None,
+    });
     let tool_context = ToolContext::nested(call.id.clone(), runner.clone(), cancel.clone());
-    let executed = execute_prepared(&tool, &args, tool_context, cancel, on_update).await;
+    let executed = updates.run(execute_prepared(&tool, &args, tool_context, cancel, on_update)).await;
     finalize(context, message, call, &args, executed, config.after_tool_call.as_ref(), None, cancel).await
 }
 
-fn emit_start(call: &ToolCall, emit: &EventSink) {
+/// Delivers `tool_execution_update` events in order while a tool runs. The tool's update
+/// callback is synchronous, so events queue until the relay emits them.
+pub(crate) struct UpdateRelay {
+    sender: futures::channel::mpsc::UnboundedSender<AgentEvent>,
+    receiver: futures::channel::mpsc::UnboundedReceiver<AgentEvent>,
+    emit: EventSink,
+}
+
+impl UpdateRelay {
+    /// Run `execution` while emitting queued updates; updates sent after it ends are dropped.
+    pub async fn run<T>(self, execution: impl std::future::Future<Output = T>) -> T {
+        use futures::StreamExt;
+        let Self { sender, mut receiver, emit } = self;
+        let execution = async move {
+            let output = execution.await;
+            sender.close_channel();
+            output
+        };
+        let drain = async move {
+            while let Some(event) = receiver.next().await {
+                emit(event).await;
+            }
+        };
+        futures::join!(execution, drain).0
+    }
+}
+
+/// An update callback that queues `make(partial)` events, and the relay that emits them.
+pub(crate) fn update_relay(
+    emit: EventSink,
+    make: impl Fn(AgentToolResult) -> AgentEvent + Send + Sync + 'static,
+) -> (ToolUpdateCallback, UpdateRelay) {
+    let (sender, receiver) = futures::channel::mpsc::unbounded();
+    let queue = sender.clone();
+    let callback: ToolUpdateCallback = Arc::new(move |partial| {
+        let _ = queue.unbounded_send(make(partial));
+    });
+    (callback, UpdateRelay { sender, receiver, emit })
+}
+
+async fn emit_start(call: &ToolCall, emit: &EventSink) {
     emit(AgentEvent::ToolExecutionStart {
         tool_call_id: call.id.clone(),
         tool_name: call.name.clone(),
         args: Value::Object(call.arguments.clone()),
         parent_tool_call_id: None,
-    });
+    })
+    .await;
 }
 
-fn emit_end(outcome: &AgentToolCallOutcome, emit: &EventSink) {
+async fn emit_end(outcome: &AgentToolCallOutcome, emit: &EventSink) {
     emit(AgentEvent::ToolExecutionEnd {
         tool_call_id: outcome.tool_call.id.clone(),
         tool_name: outcome.tool_call.name.clone(),
@@ -411,11 +447,12 @@ fn emit_end(outcome: &AgentToolCallOutcome, emit: &EventSink) {
         is_error: outcome.is_error,
         duration_ms: outcome.duration_ms,
         parent_tool_call_id: None,
-    });
+    })
+    .await;
 }
 
 /// Build the result message, with the record and usage of the call's nested calls.
-fn emit_result(
+async fn emit_result(
     outcome: &AgentToolCallOutcome,
     runner: Option<&Arc<NestedToolCallRunner>>,
     emit: &EventSink,
@@ -440,7 +477,8 @@ fn emit_result(
             });
         }
     }
-    emit(AgentEvent::MessageStart { message: Message::ToolResult(result.clone()) });
-    emit(AgentEvent::MessageEnd { message: Message::ToolResult(result.clone()) });
-    result
+    match crate::agent_loop::emit_message(emit, Message::ToolResult(result.clone()), true).await {
+        Message::ToolResult(replaced) => replaced,
+        _ => result,
+    }
 }

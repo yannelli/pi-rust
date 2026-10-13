@@ -79,6 +79,13 @@ impl SessionStatsReport {
 
 type PendingSummary = (String, Option<Value>, Option<Usage>);
 
+/// What `session_before_tree` handlers decided.
+enum BeforeTree {
+    Continue,
+    Cancelled,
+    Summary(Box<PendingSummary>),
+}
+
 impl AgentSession {
     /// Move to another entry of the session tree in the same file, summarizing the abandoned
     /// branch when asked. A user or custom message target moves to its parent.
@@ -95,7 +102,7 @@ impl AgentSession {
                 "Wait for the current compaction or tree navigation to finish before navigating the session tree."
             );
         }
-        let (old_leaf, entries) = {
+        let (old_leaf, entries, common_ancestor) = {
             let session = self.session_manager();
             let old_leaf = session.leaf_id().map(String::from);
             if old_leaf.as_deref() == Some(target_id) {
@@ -104,8 +111,8 @@ impl AgentSession {
             if session.get_entry(target_id).is_none() {
                 anyhow::bail!("Entry {target_id} not found");
             }
-            let (entries, _) = collect_entries_for_branch_summary(&session, old_leaf.as_deref(), target_id);
-            (old_leaf, entries.into_iter().cloned().collect::<Vec<Entry>>())
+            let (entries, ancestor) = collect_entries_for_branch_summary(&session, old_leaf.as_deref(), target_id);
+            (old_leaf, entries.into_iter().cloned().collect::<Vec<Entry>>(), ancestor)
         };
         let model = self.model();
         if options.summarize && model.is_none() {
@@ -114,9 +121,18 @@ impl AgentSession {
         let cancel = CancellationToken::new();
         lock(&self.state).branch_summary = Some(cancel.clone());
         self.notify_idle();
-        let summary = match (options.summarize && !entries.is_empty(), model) {
-            (true, Some(model)) => self.branch_summary(&entries, &model, &options, cancel).await,
-            _ => Ok(None),
+        let mut options = options;
+        let hooked = self
+            .before_tree(target_id, old_leaf.as_deref(), common_ancestor.as_deref(), &entries, &mut options, &cancel)
+            .await;
+        let from_extension = matches!(hooked, BeforeTree::Summary(_));
+        let summary = match hooked {
+            BeforeTree::Cancelled => Ok(Some(Err(NavigateTreeResult { cancelled: true, ..Default::default() }))),
+            BeforeTree::Summary(summary) => Ok(Some(Ok(*summary))),
+            BeforeTree::Continue => match (options.summarize && !entries.is_empty(), model) {
+                (true, Some(model)) => self.branch_summary(&entries, &model, &options, cancel).await,
+                _ => Ok(None),
+            },
         };
         lock(&self.state).branch_summary = None;
         self.notify_idle();
@@ -126,11 +142,75 @@ impl AgentSession {
             Ok(None) => None,
             Err(error) => return Err(error),
         };
-        let result = self.apply_navigation(target_id, summary, options.label.as_deref())?;
-        let _ = old_leaf;
+        let summarized = summary.is_some();
+        let result = self.apply_navigation(target_id, summary, options.label.as_deref(), from_extension)?;
         self.refresh_context();
         self.restore_tools_from_transcript();
+        if let Some(runner) = self.extension_runner() {
+            let (new_leaf, summary_entry) = {
+                let session = self.session_manager();
+                let entry = result.summary_entry_id.as_deref().and_then(|id| session.get_entry(id));
+                (session.leaf_id().map(String::from), entry.map(|entry| Value::Object(entry.raw().clone())))
+            };
+            let mut event = json!({"type": "session_tree", "newLeafId": new_leaf, "oldLeafId": old_leaf});
+            if let Some(entry) = summary_entry {
+                event["summaryEntry"] = entry;
+            }
+            if summarized {
+                event["fromExtension"] = json!(from_extension);
+            }
+            runner.emit(event).await;
+        }
         Ok(result)
+    }
+
+    /// `session_before_tree`: cancel, a summary, or changed instructions and label.
+    async fn before_tree(
+        &self,
+        target_id: &str,
+        old_leaf: Option<&str>,
+        common_ancestor: Option<&str>,
+        entries: &[Entry],
+        options: &mut NavigateTreeOptions,
+        cancel: &CancellationToken,
+    ) -> BeforeTree {
+        let Some(runner) = self.extension_runner().filter(|runner| runner.has_handlers("session_before_tree")) else {
+            return BeforeTree::Continue;
+        };
+        let signal = runner.signal_id(cancel);
+        let preparation = json!({
+            "targetId": target_id,
+            "oldLeafId": old_leaf,
+            "commonAncestorId": common_ancestor,
+            "entriesToSummarize": entries.iter().map(|entry| Value::Object(entry.raw().clone())).collect::<Vec<_>>(),
+            "userWantsSummary": options.summarize,
+            "customInstructions": options.custom_instructions,
+            "replaceInstructions": options.replace_instructions,
+            "label": options.label,
+        });
+        let event = json!({"type": "session_before_tree", "preparation": preparation, "signal": signal});
+        let result = runner.emit(event).await;
+        runner.release_signal_id(signal);
+        if result["cancel"].as_bool() == Some(true) {
+            return BeforeTree::Cancelled;
+        }
+        if let Some(text) = result["customInstructions"].as_str() {
+            options.custom_instructions = Some(text.to_string());
+        }
+        if let Some(replace) = result["replaceInstructions"].as_bool() {
+            options.replace_instructions = replace;
+        }
+        if let Some(label) = result["label"].as_str() {
+            options.label = Some(label.to_string());
+        }
+        match result["summary"]["summary"].as_str() {
+            Some(text) if options.summarize => {
+                let details = result["summary"].get("details").filter(|details| !details.is_null()).cloned();
+                let usage = serde_json::from_value(result["summary"]["usage"].clone()).ok();
+                BeforeTree::Summary(Box::new((text.to_string(), details, usage)))
+            }
+            _ => BeforeTree::Continue,
+        }
     }
 
     async fn branch_summary(
@@ -166,6 +246,7 @@ impl AgentSession {
         target_id: &str,
         summary: Option<PendingSummary>,
         label: Option<&str>,
+        from_extension: bool,
     ) -> anyhow::Result<NavigateTreeResult> {
         let mut session = self.session_manager();
         let target =
@@ -183,7 +264,8 @@ impl AgentSession {
         let mut summary_entry_id = None;
         match summary {
             Some((text, details, usage)) => {
-                let id = session.branch_with_summary(new_leaf.as_deref(), &text, details, Some(false), usage)?;
+                let id =
+                    session.branch_with_summary(new_leaf.as_deref(), &text, details, Some(from_extension), usage)?;
                 if let Some(label) = label {
                     session.append_label_change(&id, Some(label))?;
                 }
@@ -232,6 +314,9 @@ impl AgentSession {
             session.append_session_info(name)?;
             session.session_name()
         };
+        if let Some(runner) = self.extension_runner() {
+            runner.emit_detached(serde_json::json!({"type": "session_info_changed", "name": name}));
+        }
         self.emit(&super::AgentSessionEvent::SessionInfoChanged { name });
         Ok(())
     }

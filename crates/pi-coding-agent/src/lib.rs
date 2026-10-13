@@ -14,6 +14,7 @@ pub mod config;
 pub mod diagnostics;
 pub mod export;
 pub mod extension_ui;
+pub mod extensions;
 pub mod files;
 pub mod highlight;
 pub mod images;

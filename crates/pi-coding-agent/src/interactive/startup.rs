@@ -42,6 +42,7 @@ impl InteractiveMode {
         let changelog = self.options.borrow_mut().changelog_markdown.take();
         self.state.borrow_mut().changelog_markdown = changelog;
         self.print_model_scope();
+        self.render_widgets();
         self.mount_layout();
         self.setup_startup_handlers();
         let tui = self.tui();
@@ -284,6 +285,11 @@ impl InteractiveMode {
         self.update_editor_border_color();
         self.update_terminal_title();
         self.report_program_status();
+        if first_bind {
+            self.bind_current_extensions();
+        } else {
+            self.after_extensions_bound();
+        }
     }
 
     pub(super) fn update_available_provider_count(&self) {

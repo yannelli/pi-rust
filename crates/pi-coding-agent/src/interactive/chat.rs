@@ -31,9 +31,17 @@ use crate::theme::{ThemeColor, get_markdown_theme, theme};
 
 /// One transcript item of a session replay.
 pub(super) enum RenderItem {
-    Message { message: Box<Message>, entry_id: Option<String> },
+    Message {
+        message: Box<Message>,
+        entry_id: Option<String>,
+    },
     CacheWarm(crate::session::entry::UsageEntry),
-    SummaryCost { compaction: bool, usage: Usage },
+    SummaryCost {
+        compaction: bool,
+        usage: Usage,
+    },
+    /// A `custom` entry, drawn when an extension registered a renderer for it.
+    CustomEntry(serde_json::Value),
 }
 
 /// The text of an aborted tool row, with the retry count.
@@ -56,7 +64,9 @@ impl InteractiveMode {
             get_mode: Arc::new(move || mode_source.mermaid_rendering_mode()),
             theme: Some(Arc::new(ActiveThemeStyle)),
         });
-        RenderOptions { markdown_theme, output_pad: self.state.borrow().output_pad, transformers: vec![mermaid] }
+        let mut transformers = vec![mermaid];
+        transformers.extend(self.extension_markdown_transformers());
+        RenderOptions { markdown_theme, output_pad: self.state.borrow().output_pad, transformers }
     }
 
     pub(super) fn add_to_chat(&self, child: ComponentRef) {
@@ -138,6 +148,9 @@ impl InteractiveMode {
 
     /// Built-in renderer, a registered tool without one, or an unknown tool.
     fn tool_display(&self, name: &str) -> ToolDisplay {
+        if let Some(renderer) = self.extension_tool_renderer(name) {
+            return ToolDisplay::Renderer(renderer);
+        }
         if let Some(renderer) = builtin_renderer(name) {
             return ToolDisplay::Renderer(renderer);
         }
@@ -217,7 +230,8 @@ impl InteractiveMode {
             self.add_to_chat(pi_tui::component(component));
         } else if let Some(custom) = CustomMessage::from_message(message) {
             if custom.display {
-                let mut component = CustomMessageComponent::new(custom, self.render_options());
+                let renderer = self.extension_message_renderer(&custom);
+                let mut component = CustomMessageComponent::with_renderer(custom, self.render_options(), renderer);
                 component.set_expanded(self.state.borrow().tool_output_expanded);
                 self.add_to_chat(pi_tui::component(component));
             }
@@ -237,6 +251,10 @@ impl InteractiveMode {
     pub(super) fn render_items_of(entries: &[Entry]) -> Vec<RenderItem> {
         let mut items = Vec::new();
         for entry in entries {
+            if let EntryData::Custom { .. } = entry.data() {
+                items.push(RenderItem::CustomEntry(serde_json::Value::Object(entry.raw().clone())));
+                continue;
+            }
             if let EntryData::Usage(usage) = entry.data()
                 && usage.kind == "cache_warm"
             {
@@ -288,6 +306,7 @@ impl InteractiveMode {
         for item in items {
             match item {
                 RenderItem::CacheWarm(usage) => self.add_cache_warming_usage(&usage),
+                RenderItem::CustomEntry(entry) => self.add_custom_entry_to_chat(&entry),
                 RenderItem::SummaryCost { compaction, usage } => self.add_summary_cost_notice(compaction, &usage),
                 RenderItem::Message { message, entry_id } => match *message {
                     Message::Assistant(assistant) => {

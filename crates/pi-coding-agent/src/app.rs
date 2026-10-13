@@ -24,6 +24,8 @@ use crate::resources::trust::{
 use crate::session::SessionManager;
 use crate::settings::{SettingsManager, SettingsOptions};
 
+#[path = "app_extensions.rs"]
+mod extensions;
 #[path = "app_setup.rs"]
 mod setup;
 
@@ -66,6 +68,14 @@ pub struct AppOptions {
     pub project_trust_decisions: Vec<(PathBuf, bool)>,
     /// Virtual models registered in every session's model runtime.
     pub virtual_models: Vec<crate::virtual_models::VirtualModelDefinition>,
+    /// Long flags the CLI does not know, for flags extensions register (`--plan`).
+    pub extension_flags: Vec<(String, crate::cli::FlagValue)>,
+    /// Extensions supplied by the program, loaded before the extension files.
+    pub inline_extensions: Vec<Arc<dyn crate::extensions::InlineExtension>>,
+    /// `ctx.mode` of `project_trust` handlers; print mode when unset.
+    pub extension_mode: Option<crate::extension_ui::ExtensionMode>,
+    /// `ctx.ui` of `project_trust` handlers; without one they have no UI.
+    pub project_trust_ui: Option<(Arc<dyn crate::extension_ui::ExtensionUi>, crate::extension_ui::ExtensionMode)>,
 }
 
 fn resolve_cli_paths(cwd: &Path, paths: &[String]) -> Vec<String> {
@@ -118,6 +128,7 @@ impl AppOptions {
             no_tools,
             resources,
             project_trust_override: args.project_trust_override,
+            extension_flags: args.unknown_flags.clone(),
             ..Self::default()
         }
     }
@@ -130,30 +141,44 @@ struct TrustCache {
 }
 
 impl TrustCache {
-    fn project_trusted(&self, options: &AppOptions, cwd: &Path, agent_dir: &Path) -> (bool, Option<RuntimeDiagnostic>) {
+    /// Trust for `cwd`: the cached decision, else extension `project_trust` handlers, the
+    /// saved decision, and `defaultProjectTrust`.
+    async fn project_trusted(
+        &self,
+        options: &AppOptions,
+        cwd: &Path,
+        agent_dir: &Path,
+    ) -> (bool, Vec<RuntimeDiagnostic>) {
         if let Some(settings) = &options.settings {
-            return (settings.is_project_trusted(), None);
+            return (settings.is_project_trusted(), Vec::new());
         }
         if let Some(trusted) = lock(&self.decided).get(cwd) {
-            return (*trusted, None);
+            return (*trusted, Vec::new());
         }
         let global = SettingsManager::create(cwd, agent_dir, SettingsOptions { project_trusted: false });
         let home = home_dir();
+        let needs_decision = options.project_trust_override.is_none()
+            && crate::resources::trust::has_trust_requiring_project_resources(cwd, &home);
+        let (extension_decision, mut diagnostics) =
+            if needs_decision { extensions::trust_decision(options, cwd, agent_dir).await } else { (None, Vec::new()) };
         let request = ProjectTrustRequest {
             cwd,
             home: &home,
             trust_override: options.project_trust_override,
             default_project_trust: DefaultProjectTrust::parse(global.default_project_trust()),
-            extension_decision: None,
+            extension_decision,
             has_ui: false,
         };
-        let (trusted, diagnostic) = match resolve_project_trust(&self.store, &request) {
-            Ok(ProjectTrustResolution::Decided(trusted)) => (trusted, None),
-            Ok(ProjectTrustResolution::Prompt(_)) => (false, None),
-            Err(error) => (false, Some(RuntimeDiagnostic::warning(format!("Could not read project trust: {error:#}")))),
+        let trusted = match resolve_project_trust(&self.store, &request) {
+            Ok(ProjectTrustResolution::Decided(trusted)) => trusted,
+            Ok(ProjectTrustResolution::Prompt(_)) => false,
+            Err(error) => {
+                diagnostics.push(RuntimeDiagnostic::warning(format!("Could not read project trust: {error:#}")));
+                false
+            }
         };
         lock(&self.decided).insert(cwd.to_path_buf(), trusted);
-        (trusted, diagnostic)
+        (trusted, diagnostics)
     }
 }
 
@@ -162,7 +187,7 @@ async fn create_runtime_parts(
     trust: &TrustCache,
     target: RuntimeTarget,
 ) -> anyhow::Result<RuntimeParts> {
-    let (project_trusted, trust_diagnostic) = trust.project_trusted(options, &target.cwd, &target.agent_dir);
+    let (project_trusted, trust_diagnostics) = trust.project_trusted(options, &target.cwd, &target.agent_dir).await;
     let services = create_agent_session_services(CreateServicesOptions {
         cwd: target.cwd.clone(),
         agent_dir: target.agent_dir.clone(),
@@ -174,8 +199,12 @@ async fn create_runtime_parts(
         resources: options.resources.clone(),
     })
     .await;
-    let mut diagnostics: Vec<RuntimeDiagnostic> = trust_diagnostic.into_iter().collect();
+    let mut diagnostics: Vec<RuntimeDiagnostic> = trust_diagnostics;
     diagnostics.extend(services.diagnostics.iter().cloned());
+    // Extensions load before the model is chosen, so `--model` can name a provider they register.
+    let loaded = extensions::load(options, &services).await;
+    diagnostics.extend(loaded.diagnostics);
+    diagnostics.extend(extensions::apply_flags(loaded.runner.as_ref(), &options.extension_flags).await);
     for definition in &options.virtual_models {
         if let Err(error) = services.model_runtime.register_virtual_model(definition.clone()) {
             diagnostics.push(RuntimeDiagnostic::error(format!("{error:#}")));
@@ -209,8 +238,68 @@ async fn create_runtime_parts(
     create.custom_tools = options.custom_tools.clone();
     create.stream_fn = options.stream_fn.clone();
     create.mcp = options.mcp.clone();
+    create.extensions = loaded.runner;
     let created = create_agent_session(create).await?;
     Ok(RuntimeParts { session: created.session, model_fallback_message: created.model_fallback_message, diagnostics })
+}
+
+/// Flags the extensions of `cwd` register, for `--help`.
+pub async fn extension_help_flags(options: &AppOptions, cwd: &Path) -> Vec<crate::cli::HelpFlag> {
+    let trust = TrustCache { store: ProjectTrustStore::new(&options.agent_dir), decided: Mutex::default() };
+    let (project_trusted, _) = trust.project_trusted(options, cwd, &options.agent_dir).await;
+    let services = create_agent_session_services(CreateServicesOptions {
+        cwd: cwd.to_path_buf(),
+        agent_dir: options.agent_dir.clone(),
+        settings: options.settings.clone(),
+        project_trusted: Some(project_trusted),
+        model_runtime: None,
+        credentials: options.credentials.clone(),
+        oauth: options.oauth.clone(),
+        resources: options.resources.clone(),
+    })
+    .await;
+    let Some(runner) = extensions::load(options, &services).await.runner else { return Vec::new() };
+    let flags = runner
+        .registry()
+        .flags
+        .iter()
+        .map(|flag| crate::cli::HelpFlag {
+            name: flag.name.clone(),
+            kind: flag.kind.clone(),
+            description: flag.description.clone(),
+            extension_path: flag.extension_path.clone(),
+        })
+        .collect();
+    runner.shutdown();
+    flags
+}
+
+/// The `project_trust` decision of the extensions that load without project trust, for a
+/// startup prompt; `None` when no handler decided or `cwd` needs no decision.
+pub async fn extension_trust_decision(
+    options: &AppOptions,
+    cwd: &Path,
+) -> (Option<crate::resources::trust::ExtensionTrustDecision>, Vec<RuntimeDiagnostic>) {
+    let needs_decision = options.project_trust_override.is_none()
+        && crate::resources::trust::has_trust_requiring_project_resources(cwd, &home_dir());
+    if !needs_decision {
+        return (None, Vec::new());
+    }
+    extensions::trust_decision(options, cwd, &options.agent_dir).await
+}
+
+/// `PackageCommandOptions.trust_extensions`: `pi install` and `pi config` ask the extensions'
+/// `project_trust` handlers before the saved decision.
+pub fn package_trust_extensions(agent_dir: PathBuf) -> crate::packages::TrustExtensionsFn {
+    let options = AppOptions { agent_dir, ..AppOptions::default() };
+    Arc::new(move |cwd: PathBuf| {
+        let options = options.clone();
+        async move {
+            let (decision, diagnostics) = extension_trust_decision(&options, &cwd).await;
+            (decision, diagnostics.into_iter().map(|diagnostic| diagnostic.message).collect())
+        }
+        .boxed()
+    })
 }
 
 /// The factory that applies `options` to every session the runtime creates.

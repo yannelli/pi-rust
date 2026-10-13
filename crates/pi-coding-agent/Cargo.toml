@@ -18,6 +18,7 @@ futures.workspace = true
 pi-agent.workspace = true
 pi-ai.workspace = true
 pi-codemode = { path = "../pi-codemode" }
+pi-js = { path = "../pi-js" }
 pi-mcp = { path = "../pi-mcp" }
 pi-tui = { path = "../pi-tui" }
 reqwest.workspace = true

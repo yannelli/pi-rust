@@ -18,7 +18,7 @@ pub fn supported_modules() -> Vec<&'static str> {
 pub const UNSUPPORTED_APIS: &[&str] = &[
     "crypto: createCipheriv, createDecipheriv, createSign, createVerify, sign, verify, key pairs and key objects \
      beyond createSecretKey, Diffie-Hellman and ECDH, public and private encrypt, scrypt, hkdf, primes, \
-     webcrypto.subtle, setFips",
+     webcrypto.subtle except digest, setFips",
     "fs: glob, lchmod, fchmod, fchown, lutimes, statfs, openAsBlob, bigint Stats, cp with a filter, \
      FileHandle chmod, chown, and readableWebStream; reading descriptor 0",
     "child_process: fork, IPC (send and disconnect), stdio entries that are streams or descriptors above 2",

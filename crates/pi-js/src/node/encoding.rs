@@ -148,6 +148,17 @@ fn set_component(href: &str, component: &str, value: &str) -> Option<Vec<String>
     Some(components(&url))
 }
 
+/// `Intl.Segmenter` segments of `text` (UAX #29 graphemes, words, or sentences).
+fn segment(text: &str, granularity: &str) -> Vec<String> {
+    use unicode_segmentation::UnicodeSegmentation;
+    let segments: Vec<&str> = match granularity {
+        "word" => text.split_word_bounds().collect(),
+        "sentence" => text.split_sentence_bounds().collect(),
+        _ => text.graphemes(true).collect(),
+    };
+    segments.into_iter().map(str::to_string).collect()
+}
+
 pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
     let object = Object::new(ctx.clone())?;
     set_fn(&object, "encode", |ctx: Ctx<'js>, text: String, encoding: Opt<String>| {
@@ -172,6 +183,7 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
         Ok(String::from_utf8_lossy(body).into_owned())
     })?;
     set_fn(&object, "isUtf8", |bytes: String| std::str::from_utf8(&latin1_to_bytes(&bytes)).is_ok())?;
+    set_fn(&object, "segment", |text: String, granularity: String| segment(&text, &granularity))?;
     set_fn(&object, "urlParse", |input: String, base: Opt<Option<String>>| {
         parse_url(&input, base.0.flatten().as_deref()).map(|url| components(&url))
     })?;

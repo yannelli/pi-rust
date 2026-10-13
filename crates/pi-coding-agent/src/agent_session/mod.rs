@@ -4,10 +4,13 @@
 
 pub mod auth;
 pub mod bash;
+mod boundary;
 pub mod builtins;
 mod cache;
 mod compaction;
 pub mod events;
+mod extension_hooks;
+mod extension_host;
 mod hooks;
 mod listener;
 mod llama_api;
@@ -20,6 +23,7 @@ mod routing;
 mod run;
 pub mod runtime;
 mod runtime_catalog;
+mod runtime_extensions;
 mod runtime_virtual;
 pub mod sdk;
 pub mod services;
@@ -40,11 +44,15 @@ pub use self::bash::BashResult;
 pub use self::builtins::{BUILTIN_EXTENSIONS, McpSessionOptions, NotifyFn, NotifyLevel};
 pub use self::cache::CacheWarmingDecider;
 pub use self::events::{AgentSessionEvent, CompactionReason, SummarizationSource, compaction_result_json};
+pub use self::extension_hooks::RequestHooksSlot;
 pub use self::llama_api::LlamaProgressFn;
 pub use self::model::ModelCycleResult;
 pub use self::model_runtime::{ModelRuntime, ModelRuntimeOptions};
 pub use self::prompt::{PromptDisposition, PromptOptions, StreamingBehavior};
-pub use self::runtime::{AgentSessionRuntime, ForkPosition, ForkResult, RuntimeFactory, RuntimeParts, RuntimeTarget};
+pub use self::runtime::{
+    AgentSessionRuntime, AsyncSetupFn, ForkPosition, ForkResult, InvalidateFn, RuntimeFactory, RuntimeParts,
+    RuntimeTarget, SwitchResult,
+};
 pub use self::runtime_catalog::{CachedFileModelsStore, CatalogSetup, LlamaAuth, ProviderAuth, catalog_base_url};
 pub use self::runtime_virtual::RouteOptions;
 pub use self::sdk::{CreateAgentSessionOptions, CreateAgentSessionResult, NoTools, create_agent_session};
@@ -94,6 +102,8 @@ pub(crate) struct RunState {
     pub failed_response: Option<AssistantMessage>,
     /// Why routing the current request failed; its stream ends with this error.
     pub route_failure: Option<String>,
+    /// A `session_before_compact` handler cancelled the running compaction.
+    pub compaction_cancelled_by_extension: bool,
 }
 
 /// One conversation. Create it with [`create_agent_session`]; it is always held in an `Arc`.
@@ -117,6 +127,9 @@ pub struct AgentSession {
     disposed: AtomicBool,
     cache_warmer: Arc<crate::cache_warmer::CacheWarmer>,
     warmer_host: Arc<cache::SessionWarmerHost>,
+    pub(crate) extensions: extension_host::ExtensionState,
+    /// The extensions provider request hooks reach; shared with `stream_fn`.
+    request_hooks: RequestHooksSlot,
     weak: Weak<AgentSession>,
 }
 

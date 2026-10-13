@@ -9,14 +9,18 @@ use pi_coding_agent::agent_session::auth::configure_http_from_settings;
 use pi_coding_agent::agent_session::{
     BUILTIN_EXTENSIONS, CreateServicesOptions, DiagnosticLevel, RuntimeDiagnostic, create_agent_session_services,
 };
-use pi_coding_agent::app::{AppOptions, create_app_runtime, format_no_models_available_message};
+use pi_coding_agent::app::{
+    AppOptions, create_app_runtime, format_no_models_available_message, package_trust_extensions,
+};
 use pi_coding_agent::auth_cli::run_auth_command;
-use pi_coding_agent::cli::{Args, OutputMode, help_text, normalize_session_name, parse_args, unknown_flags_error};
+use pi_coding_agent::cli::help_text_with_flags;
+use pi_coding_agent::cli::{Args, OutputMode, normalize_session_name, parse_args};
 use pi_coding_agent::config::{agent_dir, env_flag, expand_tilde};
 use pi_coding_agent::diagnostics::{guarded_stdout, print_timings, record_fatal_error, take_over_stdout, time};
 use pi_coding_agent::export::{ExportTheme, export_from_file};
+use pi_coding_agent::extensions::rpc::ExtensionRpcHost;
 use pi_coding_agent::files::process_cli_file_args;
-use pi_coding_agent::interactive::startup_ui::prompt_project_trust;
+use pi_coding_agent::interactive::startup_ui::startup_project_trust;
 use pi_coding_agent::interactive::{InteractiveOptions, run_interactive};
 use pi_coding_agent::interactive_components::first_time_setup::should_run_first_time_setup;
 use pi_coding_agent::mcp_cli::run_mcp_cli;
@@ -314,6 +318,7 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
     configure_http_from_settings(&bootstrap_settings);
     let mut package_options = PackageCommandOptions::from_env(cwd.clone(), agent_dir.clone());
     package_options.builtin_extensions = BUILTIN_EXTENSIONS.iter().map(|name| name.to_string()).collect();
+    package_options.trust_extensions = Some(package_trust_extensions(agent_dir.clone()));
     install_update_commands(&mut package_options);
     if let Some(code) = run_package_command(&raw, &package_options).await {
         return Ok(code);
@@ -359,21 +364,23 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
         };
     }
     if args.help {
-        println!("{}", help_text());
+        let options = AppOptions { oauth: Some(oauth_lookup()), ..AppOptions::from_args(&args, &cwd, &agent_dir) };
+        let flags = pi_coding_agent::app::extension_help_flags(&options, &cwd).await;
+        println!("{}", help_text_with_flags(&flags));
         return Ok(0);
     }
     if let Some(search) = &args.list_models {
         list_models(search, &cwd, &agent_dir).await;
         return Ok(0);
     }
-    if let Some(error) = unknown_flags_error(&args.unknown_flags) {
-        eprintln!("Error: {error}");
-        return Ok(1);
-    }
     if args.terminal_login {
         args.mode = None;
     } else if args.mode == Some(OutputMode::Acp) {
-        return Ok(run_acp_mode(AcpModeOptions::from_args(&args, &cwd, &agent_dir, oauth_lookup())).await);
+        let options = AcpModeOptions {
+            extension_host: Some(ExtensionRpcHost::shared()),
+            ..AcpModeOptions::from_args(&args, &cwd, &agent_dir, oauth_lookup())
+        };
+        return Ok(run_acp_mode(options).await);
     }
     let mut mode = app_mode(&args, std::io::stdin().is_terminal(), std::io::stdout().is_terminal());
     if mode == AppMode::Rpc {
@@ -446,13 +453,15 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
 
     let mut options = AppOptions { oauth: Some(oauth_lookup()), ..AppOptions::from_args(&args, &cwd, &agent_dir) };
     time("createSessionManager");
+    let mut trust_diagnostics = Vec::new();
     let home = pi_coding_agent::config::home_dir();
     let auto_trust_cwd = auto_trust_on_reload_cwd(session_manager.cwd(), args.project_trust_override, &home);
     if interactive {
         let session_cwd = session_manager.cwd().to_path_buf();
         let local = tokio::task::LocalSet::new();
-        let prompt = prompt_project_trust(&session_cwd, &agent_dir, args.project_trust_override);
-        if let Some(trusted) = local.run_until(prompt).await {
+        let (trusted, diagnostics) = local.run_until(startup_project_trust(&options, &session_cwd)).await;
+        trust_diagnostics = diagnostics;
+        if let Some(trusted) = trusted {
             options.project_trust_decisions.push((session_cwd, trusted));
         }
     }
@@ -492,16 +501,19 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
         AppMode::Rpc => {
             // Upstream refreshes catalogs in the background for RPC; interactive mode starts its own refresh.
             session.model_runtime().refresh_in_background();
-            Ok(run_rpc_mode(Arc::new(runtime), RpcModeOptions::default()).await)
+            let options =
+                RpcModeOptions { extension_host: Some(ExtensionRpcHost::shared()), ..RpcModeOptions::default() };
+            Ok(run_rpc_mode(Arc::new(runtime), options).await)
         }
         AppMode::Print | AppMode::Json => {
             let output = if mode == AppMode::Json { OutputMode::Json } else { OutputMode::Text };
-            Ok(run_print_mode(&runtime, output, initial_message, files.images, args.messages).await)
+            Ok(run_print_mode(&Arc::new(runtime), output, initial_message, files.images, args.messages).await)
         }
         _ => {
             session.model_runtime().refresh_in_background();
             let changelog = startup_changelog_once(session.settings(), !session.messages().is_empty());
             let mut diagnostics = startup_diagnostics;
+            diagnostics.extend(trust_diagnostics);
             diagnostics.extend(runtime_diagnostics);
             if !migrations.migrated_auth_providers.is_empty() {
                 let providers = migrations.migrated_auth_providers.join(", ");

@@ -25,6 +25,7 @@ oxc_semantic = "0.153.0"
 oxc_sourcemap = "9.0.0"
 oxc_span = "0.153.0"
 oxc_transformer = "0.153.0"
+unicode-segmentation = "1.12"
 url = "2.5.8"
 
 # rquickjs-sys ships pregenerated bindings for every release target except armv7 musl.

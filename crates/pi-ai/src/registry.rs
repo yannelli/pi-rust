@@ -179,6 +179,11 @@ pub fn register_api_provider(api: impl Into<String>, provider: Arc<dyn ApiProvid
     REGISTRY.write().unwrap_or_else(|poisoned| poisoned.into_inner()).insert(api.into(), provider);
 }
 
+/// Remove the provider for `api`, returning it.
+pub fn unregister_api_provider(api: &str) -> Option<Arc<dyn ApiProvider>> {
+    REGISTRY.write().unwrap_or_else(|poisoned| poisoned.into_inner()).remove(api)
+}
+
 pub fn api_provider(api: &str) -> Option<Arc<dyn ApiProvider>> {
     REGISTRY.read().unwrap_or_else(|poisoned| poisoned.into_inner()).get(api).cloned()
 }

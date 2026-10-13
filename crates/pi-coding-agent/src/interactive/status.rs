@@ -199,7 +199,7 @@ impl InteractiveMode {
         }
         self.ui.status.borrow_mut().clear();
         self.editor.set_working_status_indicator(None);
-        if self.editor.embed_working_status() {
+        if self.embeds_working_status() {
             self.editor.set_working_status_indicator(Some(indicator));
             self.state.borrow_mut().active_status_embedded = true;
         } else {
@@ -239,11 +239,16 @@ impl InteractiveMode {
 
     /// The spinner for an agent run, colored like the editor border.
     pub(super) fn show_working_status_indicator(&self) {
-        let color: Option<StyleFn> = self.editor.embed_working_status().then(|| {
+        let color: Option<StyleFn> = self.embeds_working_status().then(|| {
             let editor = self.editor.clone();
             Rc::new(move |text: &str| (editor.border_color())(text)) as StyleFn
         });
-        let indicator = StatusIndicator::working(&self.tui(), DEFAULT_WORKING_MESSAGE, None, color);
+        let (message, indicator) = {
+            let state = &self.state.borrow().extensions;
+            (state.working_message.clone(), state.working_indicator.clone())
+        };
+        let message = message.as_deref().unwrap_or(DEFAULT_WORKING_MESSAGE);
+        let indicator = StatusIndicator::working(&self.tui(), message, indicator, color);
         self.show_status_indicator(indicator);
     }
 

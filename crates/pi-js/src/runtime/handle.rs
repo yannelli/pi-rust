@@ -156,10 +156,27 @@ impl JsHandle {
         produce: Produce,
         convert: impl for<'a> FnOnce(&Ctx<'a>, Value<'a>) -> Result<R, JsError> + Send + 'static,
     ) -> Result<R, JsError> {
+        self.blocking_request_within(produce, convert, None)
+    }
+
+    /// [`Self::blocking_request`] that gives up after `timeout`; the call still runs later.
+    pub(crate) fn blocking_request_within<R: Send + 'static>(
+        &self,
+        produce: Produce,
+        convert: impl for<'a> FnOnce(&Ctx<'a>, Value<'a>) -> Result<R, JsError> + Send + 'static,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<R, JsError> {
         self.refuse_on_js_thread()?;
         let (sender, receiver) = mpsc::channel();
         self.dispatch(Reply::Blocking(sender), produce, convert)?;
-        receiver.recv().map_err(|_| shut_down())?
+        match timeout {
+            None => receiver.recv().map_err(|_| shut_down())?,
+            Some(timeout) => match receiver.recv_timeout(timeout) {
+                Ok(result) => result,
+                Err(mpsc::RecvTimeoutError::Timeout) => Err(JsError::new("JavaScript call timed out")),
+                Err(mpsc::RecvTimeoutError::Disconnected) => Err(shut_down()),
+            },
+        }
     }
 
     /// Evaluate a classic script (global scope) and await its value if it is a promise.
@@ -193,6 +210,16 @@ impl JsHandle {
         self.shared.virtual_modules.write().unwrap_or_else(|poison| poison.into_inner()).insert(name, module);
     }
 
+    /// Make module files load from memory: each `(path, source)` pair acts as a file at that
+    /// absolute path, so relative imports between registered files resolve.
+    pub fn register_source_files(&self, files: impl IntoIterator<Item = (std::path::PathBuf, String)>) {
+        let mut registered = self.shared.source_files.write().unwrap_or_else(|poison| poison.into_inner());
+        for (path, source) in files {
+            let key = crate::resolve::normalize(&path).display().to_string();
+            registered.insert(key, source.into());
+        }
+    }
+
     pub fn register_host_function(&self, name: impl Into<String>, function: HostFunction) {
         self.shared.host_functions.write().unwrap_or_else(|poison| poison.into_inner()).insert(name, function);
     }
@@ -213,6 +240,10 @@ impl JsHandle {
 
 fn persist_value<'a>(ctx: &Ctx<'a>, value: Value<'a>) -> Result<JsRef, JsError> {
     Ok(super::convert::persist(ctx, value))
+}
+
+fn persist_present<'a>(ctx: &Ctx<'a>, value: Value<'a>) -> Result<Option<JsRef>, JsError> {
+    Ok((!value.is_undefined() && !value.is_null()).then(|| super::convert::persist(ctx, value)))
 }
 
 pub(crate) fn default_export<'a>(ctx: &Ctx<'a>, namespace: Value<'a>) -> Result<Value<'a>, JsError> {
@@ -324,6 +355,25 @@ impl JsRef {
 
     pub fn blocking_call_method_ref(&self, name: &str, args: Vec<HostValue>) -> Result<JsRef, JsError> {
         self.handle().blocking_request(self.invoke(Some(name.into()), args), persist_value)
+    }
+
+    /// [`JsRef::blocking_call_method`] that fails after `timeout` instead of waiting longer.
+    pub fn blocking_call_method_within(
+        &self,
+        name: &str,
+        args: Vec<HostValue>,
+        timeout: std::time::Duration,
+    ) -> Result<HostValue, JsError> {
+        self.handle().blocking_request_within(self.invoke(Some(name.into()), args), to_host, Some(timeout))
+    }
+
+    /// Like [`JsRef::call_method_ref`], with `None` for an `undefined` or `null` result.
+    pub async fn call_method_opt_ref(&self, name: &str, args: Vec<HostValue>) -> Result<Option<JsRef>, JsError> {
+        self.handle().request(self.invoke(Some(name.into()), args), persist_present).await
+    }
+
+    pub fn blocking_call_method_opt_ref(&self, name: &str, args: Vec<HostValue>) -> Result<Option<JsRef>, JsError> {
+        self.handle().blocking_request(self.invoke(Some(name.into()), args), persist_present)
     }
 
     fn property(&self, key: &str) -> Produce {

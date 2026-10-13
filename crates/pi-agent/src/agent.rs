@@ -17,7 +17,7 @@ use crate::agent_loop::{
     AfterToolCallFn, AgentContext, AgentLoopConfig, ApiKeyFn, BeforeToolCallFn, CallableToolsFn, ConvertToLlmFn,
     EventSink, MessageSource, StreamFn, TransformContextFn, run_agent_loop, run_agent_loop_continue,
 };
-use crate::hooks::{FinishTurnFn, PrepareNextTurnFn, PrepareRequestFn};
+use crate::hooks::{AgentEventHookFn, FinishTurnFn, PrepareNextTurnFn, PrepareRequestFn};
 use crate::types::{AgentEvent, SharedTool, ToolExecutionMode};
 
 /// How queued messages are released to the loop.
@@ -100,6 +100,10 @@ pub struct AgentHooks {
     pub prepare_request: Option<PrepareRequestFn>,
     pub prepare_next_turn: Option<PrepareNextTurnFn>,
     pub callable_tools: Option<CallableToolsFn>,
+    /// Awaited for every loop event after state is updated and before listeners run, as
+    /// upstream awaits its async listeners. For `MessageEnd`, a returned message with the same
+    /// role replaces the finalized one in the state, the transcript, and the listener event.
+    pub on_event: Option<AgentEventHookFn>,
     /// Base request options such as transport, thinking budgets, and payload observers.
     pub stream_options: StreamOptions,
     pub tool_execution: ToolExecutionMode,
@@ -460,10 +464,11 @@ impl Agent {
 
     /// The run's event sink, the future that hands its events to the async listeners, and the
     /// sender that ends that future (`None`) after the events queued before it.
-    fn sink(&self, signal: CancellationToken) -> (EventSink, BoxFuture<'static, ()>, RunEventSender) {
+    fn sink(&self, cancel: CancellationToken) -> (EventSink, BoxFuture<'static, ()>, RunEventSender) {
         let (sender, mut receiver) = mpsc::unbounded_channel::<Option<AgentEvent>>();
         let close = sender.clone();
         let listeners = self.inner.clone();
+        let signal = cancel.clone();
         let deliver = async move {
             while let Some(Some(event)) = receiver.recv().await {
                 let current: Vec<AsyncListener> =
@@ -474,41 +479,64 @@ impl Agent {
             }
         };
         let inner = self.inner.clone();
+        let hook = lock(&self.inner.hooks).on_event.clone();
         let sink: EventSink = Arc::new(move |event| {
-            {
-                let mut state = lock(&inner.state);
-                match &event {
-                    AgentEvent::MessageStart { message } | AgentEvent::MessageUpdate { message, .. } => {
-                        state.streaming_message = Some(message.clone());
+            let (inner, hook, cancel, sender) = (inner.clone(), hook.clone(), cancel.clone(), sender.clone());
+            async move {
+                reduce(&inner, &event);
+                let replacement = match &hook {
+                    Some(hook) => hook(event.clone(), cancel).await,
+                    None => None,
+                };
+                let event = match (event, replacement) {
+                    (AgentEvent::MessageEnd { message }, Some(replaced)) if replaced.role() == message.role() => {
+                        if let Some(last) = lock(&inner.state).messages.last_mut() {
+                            *last = replaced.clone();
+                        }
+                        AgentEvent::MessageEnd { message: replaced }
                     }
-                    AgentEvent::MessageEnd { message } => {
-                        state.streaming_message = None;
-                        state.messages.push(message.clone());
-                    }
-                    AgentEvent::ToolExecutionStart { tool_call_id, .. } => {
-                        state.pending_tool_calls.insert(tool_call_id.clone());
-                    }
-                    AgentEvent::ToolExecutionEnd { tool_call_id, .. } => {
-                        state.pending_tool_calls.remove(tool_call_id);
-                    }
-                    AgentEvent::TurnEnd { message: Message::Assistant(message), .. }
-                        if message.error_message.is_some() =>
-                    {
-                        state.error_message = message.error_message.clone();
-                    }
-                    AgentEvent::AgentEnd { .. } => state.streaming_message = None,
-                    _ => {}
+                    (event, _) => event,
+                };
+                let listeners: Vec<Listener> =
+                    lock(&inner.listeners).iter().map(|(_, listener)| listener.clone()).collect();
+                for listener in listeners {
+                    listener(&event);
+                }
+                if !lock(&inner.async_listeners).is_empty() {
+                    let _ = sender.send(Some(event.clone()));
+                }
+                match event {
+                    AgentEvent::MessageEnd { message } => Some(message),
+                    _ => None,
                 }
             }
-            let listeners: Vec<Listener> =
-                lock(&inner.listeners).iter().map(|(_, listener)| listener.clone()).collect();
-            for listener in listeners {
-                listener(&event);
-            }
-            if !lock(&inner.async_listeners).is_empty() {
-                let _ = sender.send(Some(event));
-            }
+            .boxed()
         });
         (sink, deliver.boxed(), close)
+    }
+}
+
+/// Reduce a loop event into the observable state before hooks and listeners see it.
+fn reduce(inner: &Inner, event: &AgentEvent) {
+    let mut state = lock(&inner.state);
+    match event {
+        AgentEvent::MessageStart { message } | AgentEvent::MessageUpdate { message, .. } => {
+            state.streaming_message = Some(message.clone());
+        }
+        AgentEvent::MessageEnd { message } => {
+            state.streaming_message = None;
+            state.messages.push(message.clone());
+        }
+        AgentEvent::ToolExecutionStart { tool_call_id, .. } => {
+            state.pending_tool_calls.insert(tool_call_id.clone());
+        }
+        AgentEvent::ToolExecutionEnd { tool_call_id, .. } => {
+            state.pending_tool_calls.remove(tool_call_id);
+        }
+        AgentEvent::TurnEnd { message: Message::Assistant(message), .. } if message.error_message.is_some() => {
+            state.error_message = message.error_message.clone();
+        }
+        AgentEvent::AgentEnd { .. } => state.streaming_message = None,
+        _ => {}
     }
 }

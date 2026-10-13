@@ -43,7 +43,7 @@ async fn finish_turn_runs_after_tool_results_and_before_turn_end() {
         async { None }.boxed()
     }));
     let seen = ordering.clone();
-    let sink: pi_agent::EventSink = Arc::new(move |event| match &event {
+    let sink: pi_agent::EventSink = pi_agent::sync_sink(move |event| match &event {
         AgentEvent::MessageEnd { message } => seen.lock().unwrap().push(format!("message_end:{}", role(message))),
         AgentEvent::TurnEnd { .. } => seen.lock().unwrap().push("turn_end".into()),
         _ => {}

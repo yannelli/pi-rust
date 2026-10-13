@@ -6,7 +6,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use serde_json::Value;
 use tokio_util::sync::CancellationToken;
+
+use crate::extensions::{ComponentFactory, CustomRequest};
 
 /// The run mode an extension sees as `ctx.mode`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -151,6 +154,62 @@ pub trait ExtensionUi: Send + Sync {
     }
 
     fn set_tools_expanded(&self, _expanded: bool) {}
+
+    /// Show an extension component until it calls `done` (`ctx.ui.custom()`); `None` when this UI
+    /// cannot show components.
+    async fn custom(&self, _request: CustomRequest) -> Option<Value> {
+        None
+    }
+
+    /// Set (or clear with `None`) a widget built by an extension component factory.
+    fn set_widget_component(
+        &self,
+        _key: &str,
+        _factory: Option<ComponentFactory>,
+        _placement: Option<WidgetPlacement>,
+    ) {
+    }
+
+    /// Replace (or restore with `None`) the footer.
+    fn set_footer(&self, _factory: Option<ComponentFactory>) {}
+
+    /// Replace (or restore with `None`) the header.
+    fn set_header(&self, _factory: Option<ComponentFactory>) {}
+
+    /// Replace (or restore with `None`) the input editor.
+    fn set_editor_component(&self, _factory: Option<ComponentFactory>) {}
+
+    /// Wrap the editor's autocomplete provider; the factory receives the current one.
+    fn add_autocomplete_provider(&self, _factory: ComponentFactory) {}
+
+    /// Whether extensions listen to raw terminal input (`onTerminalInput`); pass input to
+    /// [`crate::extensions::ExtensionRunner::terminal_input`] while enabled.
+    fn set_terminal_input_listening(&self, _listening: bool) {}
+
+    /// Render extension components again (`tui.requestRender()`).
+    fn request_render(&self, _force: bool) {}
+
+    /// Terminal `(columns, rows)` for extension components.
+    fn terminal_size(&self) -> (u16, u16) {
+        (80, 24)
+    }
+
+    /// Footer data for extension footers: `gitBranch`, `statuses`, or `providerCount`.
+    fn footer_data(&self, _kind: &str) -> Value {
+        Value::Null
+    }
+
+    /// A custom editor reports `submit`, `change`, `escape`, `ctrlD`, `pasteImage`, or `action`
+    /// (with the app action id) as the default editor would handle it.
+    fn editor_event(&self, _kind: &str, _value: Option<&str>) {}
+
+    /// The app actions a custom editor forwards through [`Self::editor_event`].
+    fn editor_actions(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// A tool renderer asked to draw the row of `tool_call_id` again (`context.invalidate()`).
+    fn invalidate_tool(&self, _tool_call_id: &str) {}
 }
 
 /// The UI of modes without one (print and JSON): dialogs return their defaults at once.

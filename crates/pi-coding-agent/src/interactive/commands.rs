@@ -118,7 +118,9 @@ impl InteractiveMode {
         } else if text == "/resume" {
             clear();
             self.show_session_selector();
-        } else if let Some(args) = argument(text, "mcp") {
+        } else if let Some(args) = argument(text, "mcp")
+            && self.session().builtin_extension_enabled("mcp")
+        {
             clear();
             self.handle_mcp_command(args.map(str::to_string));
         } else if text == "/llama" {
@@ -165,7 +167,8 @@ impl InteractiveMode {
                 let input = std::path::PathBuf::from(&path);
                 let result = tokio::spawn(async move { runtime.import_from_jsonl(&input, None).await }).await;
                 match result {
-                    Ok(Ok(())) => mode.show_status(&format!("Session imported from: {path}")),
+                    Ok(Ok(result)) if result.cancelled => {}
+                    Ok(Ok(_)) => mode.show_status(&format!("Session imported from: {path}")),
                     Ok(Err(error)) => mode.show_error(&format!("Failed to import session: {error:#}")),
                     Err(error) => mode.show_error(&format!("Failed to import session: {error}")),
                 }
@@ -249,7 +252,8 @@ impl InteractiveMode {
         let runtime = self.runtime.clone();
         self.spawn(move |mode| async move {
             match tokio::spawn(async move { runtime.new_session(None, None).await }).await {
-                Ok(Ok(())) => {
+                Ok(Ok(result)) if result.cancelled => {}
+                Ok(Ok(_)) => {
                     mode.add_spacer();
                     mode.add_text(|| theme().fg(ThemeColor::Accent, "✓ New session started"), 1, 1);
                     mode.request_render();
@@ -283,6 +287,7 @@ impl InteractiveMode {
         if session.is_compacting() {
             return self.show_warning("Wait for compaction to finish before reloading.");
         }
+        self.reset_extension_ui();
         let mut reload_box = Container::new();
         let border = || component(DynamicBorder::with_color(|text: &str| theme().fg(ThemeColor::Border, text)));
         let message = "Reloading keybindings, extensions, skills, prompts, themes, and context files...";
@@ -298,7 +303,12 @@ impl InteractiveMode {
         self.spawn(|mode| async move {
             tokio::task::yield_now().await;
             let session = mode.session();
-            if let Err(error) = tokio::task::spawn_blocking(move || session.reload()).await {
+            let error = match tokio::spawn(async move { session.reload_extensions().await }).await {
+                Ok(Ok(())) => None,
+                Ok(Err(error)) => Some(format!("{error:#}")),
+                Err(error) => Some(error.to_string()),
+            };
+            if let Some(error) = error {
                 mode.selector.restore_editor();
                 return mode.show_error(&format!("Reload failed: {error}"));
             }
@@ -320,7 +330,7 @@ impl InteractiveMode {
             if let Some(controller) = mode.theme_controller() {
                 controller.apply_from_settings();
             }
-            mode.setup_autocomplete_provider();
+            mode.after_extensions_bound();
             mode.show_loaded_resources(false, true);
             if let Some(error) = mode.session().model_runtime().load_error() {
                 mode.show_error(&format!("models.json error: {error}"));

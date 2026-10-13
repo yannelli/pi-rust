@@ -108,7 +108,7 @@ impl NestedToolCallHost for TestHost {
         let result = tool.execute_with_context(&context, args, cancel, on_update).await.unwrap();
         AgentToolCallOutcome { is_error: result.is_error, tool_call: call, result, duration_ms: Some(0) }
     }
-    fn emit(&self, event: AgentEvent) {
+    async fn emit(&self, event: AgentEvent) {
         let value = serde_json::to_value(&event).unwrap();
         let text = |key: &str| value[key].as_str().map(String::from);
         self.events.lock().unwrap().push((

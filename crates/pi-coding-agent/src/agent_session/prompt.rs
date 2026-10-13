@@ -53,11 +53,20 @@ pub struct PromptOptions {
     pub streaming_behavior: Option<StreamingBehavior>,
     /// Called once the prompt is accepted, before the run, with its disposition.
     pub preflight_result: Option<Arc<dyn Fn(PromptDisposition) + Send + Sync>>,
+    /// Where the input came from for `input` handlers: `interactive` (default), `rpc`, or
+    /// `extension`.
+    pub source: Option<String>,
 }
 
 impl Default for PromptOptions {
     fn default() -> Self {
-        Self { expand_prompt_templates: true, images: Vec::new(), streaming_behavior: None, preflight_result: None }
+        Self {
+            expand_prompt_templates: true,
+            images: Vec::new(),
+            streaming_behavior: None,
+            preflight_result: None,
+            source: None,
+        }
     }
 }
 
@@ -80,6 +89,17 @@ impl AgentSession {
     }
 
     pub async fn prompt_with(&self, text: &str, options: PromptOptions) -> anyhow::Result<PromptDisposition> {
+        let source = options.source.clone().unwrap_or_else(|| "interactive".into());
+        if source != "extension" {
+            self.wait_extensions_bound().await;
+        }
+        // Extension commands run first, even while streaming; they send their own messages.
+        if options.expand_prompt_templates && text.starts_with('/') && self.try_extension_command(text).await {
+            if let Some(callback) = &options.preflight_result {
+                callback(PromptDisposition::Handled);
+            }
+            return Ok(PromptDisposition::Handled);
+        }
         if lock(&self.state).manual_compaction.is_some() {
             anyhow::bail!(
                 "Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry."
@@ -98,6 +118,13 @@ impl AgentSession {
             self.run_mcp_command(args).await;
             return Ok(PromptDisposition::Handled);
         }
+        let behavior = if self.is_streaming() { options.streaming_behavior } else { None };
+        let Some((text, input_images)) = self.run_input_handlers(text, options.images.clone(), &source, behavior).await
+        else {
+            preflight(PromptDisposition::Handled);
+            return Ok(PromptDisposition::Handled);
+        };
+        let text = text.as_str();
         let expanded = if options.expand_prompt_templates { self.expand_input(text) } else { text.to_string() };
         if self.is_streaming() {
             let Some(behavior) = options.streaming_behavior else {
@@ -105,7 +132,7 @@ impl AgentSession {
                     "Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message."
                 );
             };
-            self.queue_message(&expanded, options.images, behavior);
+            self.queue_message(&expanded, input_images, behavior);
             preflight(PromptDisposition::Queued);
             return Ok(PromptDisposition::Queued);
         }
@@ -121,13 +148,16 @@ impl AgentSession {
         if let Some(last) = last_assistant {
             self.check_compaction(&last, None, false, &[]).await;
         }
-        let (images, hints) = self.normalize_prompt_images(&options.images);
-        let text = if hints.is_empty() { expanded } else { format!("{expanded}\n\n{}", hints.join("\n")) };
-        let mut messages = vec![user_message(&text, images)];
-        messages.append(&mut lock(&self.state).pending_next_turn);
         let servers_section = self.prepare_mcp_for_prompt().await;
         let mut prompt_options = self.effective_prompt_options();
         set_servers_section(&mut prompt_options, servers_section);
+        // Before image normalization, so a model chosen by a handler sets the resize profile.
+        let (prompt_options, extra) = self.run_before_agent_start(&expanded, &input_images, prompt_options).await;
+        let (images, hints) = self.normalize_prompt_images(&input_images);
+        let text = if hints.is_empty() { expanded } else { format!("{expanded}\n\n{}", hints.join("\n")) };
+        let mut messages = vec![user_message(&text, images)];
+        messages.append(&mut lock(&self.state).pending_next_turn);
+        messages.extend(extra);
         let update = self.prepare_prompt_and_tool_loadout(&prompt_options, &self.messages());
         lock(&self.state).run_prompt = Some(prompt_options);
         if let Some(update) = update {

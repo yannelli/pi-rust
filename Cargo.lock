@@ -2275,6 +2275,7 @@ dependencies = [
  "pi-agent",
  "pi-ai",
  "pi-codemode",
+ "pi-js",
  "pi-mcp",
  "pi-tui",
  "pulldown-cmark",
@@ -2322,6 +2323,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "unicode-segmentation",
  "url",
 ]
 
@@ -4092,6 +4094,7 @@ checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
 name = "xtask"
 version = "0.0.0"
 dependencies = [
+ "flate2",
  "serde_json",
  "tempfile",
 ]

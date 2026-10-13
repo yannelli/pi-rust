@@ -45,13 +45,17 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
 fn compile<'js>(ctx: Ctx<'js>, filename: String) -> rquickjs::Result<Object<'js>> {
     let result = Object::new(ctx.clone())?;
     let state = state();
-    if state.inline_sources.borrow().contains_key(&filename) {
+    let registered = super::registered_source(&state, &filename);
+    if registered.is_none() && super::has_inline_source(&state, &filename) {
         result.set("format", "esm")?;
         return Ok(result);
     }
     let path = Path::new(&filename);
-    let source = std::fs::read_to_string(path)
-        .map_err(|error| throw(&ctx, &JsError::from_io(&error, "open", Some(&filename))))?;
+    let source = match registered {
+        Some(source) => source.to_string(),
+        None => std::fs::read_to_string(path)
+            .map_err(|error| throw(&ctx, &JsError::from_io(&error, "open", Some(&filename))))?,
+    };
     if path.extension().is_some_and(|ext| ext == "json") {
         result.set("format", "json")?;
         result.set("text", source)?;
