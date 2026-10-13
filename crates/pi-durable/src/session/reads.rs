@@ -87,7 +87,7 @@ impl Session {
         token: &DocToken<T, S>,
         owner: S::Owner,
         context: &Context,
-    ) -> impl Future<Output = DurableResult<Option<Json>>> + Send + 'static {
+    ) -> impl Future<Output = DurableResult<Option<Json>>> + Send + use<T, S> {
         self.snapshot_erased(token.definition().clone(), token.resolve(owner), context)
     }
 
@@ -96,9 +96,9 @@ impl Session {
         &self,
         token: &DocFamilyToken<T, I, S>,
         owner: S::Owner,
-        key: impl Into<String>,
+        key: &str,
         context: &Context,
-    ) -> impl Future<Output = DurableResult<Option<Json>>> + Send + 'static {
+    ) -> impl Future<Output = DurableResult<Option<Json>>> + Send + use<T, I, S> {
         self.snapshot_erased(token.definition().clone(), token.resolve(owner, key), context)
     }
 
@@ -108,7 +108,7 @@ impl Session {
         definition: Def,
         resolved: ResolvedAddress,
         context: &Context,
-    ) -> impl Future<Output = DurableResult<Option<Json>>> + Send + 'static {
+    ) -> impl Future<Output = DurableResult<Option<Json>>> + Send + use<> {
         let usable = self.0.assert_usable();
         let cached = lock(&self.0.documents)
             .get(&resolved.id)
@@ -138,7 +138,7 @@ impl Session {
         conversation_id: ConversationId,
         at: EntryId,
         context: &Context,
-    ) -> impl Future<Output = DurableResult<Option<Json>>> + Send + 'static {
+    ) -> impl Future<Output = DurableResult<Option<Json>>> + Send + use<T, S> {
         self.snapshot_as_of_erased(token.definition().clone(), token.resolve(conversation_id), at, context)
     }
 
@@ -146,10 +146,10 @@ impl Session {
         &self,
         token: &DocFamilyToken<T, I, S>,
         conversation_id: ConversationId,
-        key: impl Into<String>,
+        key: &str,
         at: EntryId,
         context: &Context,
-    ) -> impl Future<Output = DurableResult<Option<Json>>> + Send + 'static {
+    ) -> impl Future<Output = DurableResult<Option<Json>>> + Send + use<T, I, S> {
         let resolved = token.resolve(conversation_id, key);
         self.snapshot_as_of_erased(token.definition().clone(), resolved, at, context)
     }
@@ -161,7 +161,7 @@ impl Session {
         resolved: ResolvedAddress,
         at: EntryId,
         context: &Context,
-    ) -> impl Future<Output = DurableResult<Option<Json>>> + Send + 'static {
+    ) -> impl Future<Output = DurableResult<Option<Json>>> + Send + use<> {
         let usable = self.0.assert_usable();
         let core = self.0.clone();
         let context = context.clone();
@@ -197,7 +197,7 @@ impl Session {
         token: &DocToken<T, S>,
         conversation_id: ConversationId,
         context: &Context,
-    ) -> impl Future<Output = DurableResult<Option<OnLineDocument>>> + Send + 'static {
+    ) -> impl Future<Output = DurableResult<Option<OnLineDocument>>> + Send + use<T, S> {
         let core = self.0.clone();
         let definition = token.definition().clone();
         let resolved = token.resolve(conversation_id);

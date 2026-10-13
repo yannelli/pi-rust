@@ -99,13 +99,13 @@ impl CommittedWatch {
     }
 
     /// Idempotently stop future callbacks and return the terminal result. A running callback keeps running.
-    pub fn stop(&self) -> impl Future<Output = WatchEnd> + Send + 'static {
+    pub fn stop(&self) -> impl Future<Output = WatchEnd> + Send + use<> {
         self.terminate(WatchEnd::Stopped);
         self.closed()
     }
 
     /// Settles when the watch terminates.
-    pub fn closed(&self) -> impl Future<Output = WatchEnd> + Send + 'static {
+    pub fn closed(&self) -> impl Future<Output = WatchEnd> + Send + use<> {
         let mut receiver = self.0.closed.subscribe();
         async move {
             let end = receiver.wait_for(Option::is_some).await.ok().and_then(|end| end.clone());

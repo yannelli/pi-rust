@@ -76,7 +76,7 @@ impl Line {
     }
 
     /// Queue `job` behind every job enqueued before and start waiting now.
-    pub fn enqueue<T, F>(&self, job: F) -> impl Future<Output = DurableResult<T>> + Send + 'static
+    pub fn enqueue<T, F>(&self, job: F) -> impl Future<Output = DurableResult<T>> + Send + use<T, F>
     where
         T: Send + 'static,
         F: Future<Output = DurableResult<T>> + Send + 'static,

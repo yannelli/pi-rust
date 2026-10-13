@@ -85,7 +85,7 @@ impl Session {
         token: &DocToken<T, S>,
         owner: S::Owner,
         context: &Context,
-    ) -> impl Future<Output = DurableResult<Option<DocumentState>>> + Send + 'static {
+    ) -> impl Future<Output = DurableResult<Option<DocumentState>>> + Send + use<T, S> {
         self.document_state_erased(token.definition().clone(), token.resolve(owner), context)
     }
 
@@ -93,9 +93,9 @@ impl Session {
         &self,
         token: &DocFamilyToken<T, I, S>,
         owner: S::Owner,
-        key: impl Into<String>,
+        key: &str,
         context: &Context,
-    ) -> impl Future<Output = DurableResult<Option<DocumentState>>> + Send + 'static {
+    ) -> impl Future<Output = DurableResult<Option<DocumentState>>> + Send + use<T, I, S> {
         self.document_state_erased(token.definition().clone(), token.resolve(owner, key), context)
     }
 
@@ -104,7 +104,7 @@ impl Session {
         definition: Def,
         resolved: ResolvedAddress,
         context: &Context,
-    ) -> impl Future<Output = DurableResult<Option<DocumentState>>> + Send + 'static {
+    ) -> impl Future<Output = DurableResult<Option<DocumentState>>> + Send + use<> {
         let usable = self.0.assert_usable();
         let core = self.0.clone();
         let context = context.clone();
@@ -138,7 +138,7 @@ impl Session {
         token: &DocToken<T, S>,
         owner: S::Owner,
         context: &Context,
-    ) -> impl Future<Output = DurableResult<Option<CommittedWatch>>> + Send + 'static {
+    ) -> impl Future<Output = DurableResult<Option<CommittedWatch>>> + Send + use<T, S> {
         self.watch_doc_erased(token.definition().clone(), token.resolve(owner), context)
     }
 
@@ -146,9 +146,9 @@ impl Session {
         &self,
         token: &DocFamilyToken<T, I, S>,
         owner: S::Owner,
-        key: impl Into<String>,
+        key: &str,
         context: &Context,
-    ) -> impl Future<Output = DurableResult<Option<CommittedWatch>>> + Send + 'static {
+    ) -> impl Future<Output = DurableResult<Option<CommittedWatch>>> + Send + use<T, I, S> {
         self.watch_doc_erased(token.definition().clone(), token.resolve(owner, key), context)
     }
 
@@ -157,7 +157,7 @@ impl Session {
         definition: Def,
         resolved: ResolvedAddress,
         context: &Context,
-    ) -> impl Future<Output = DurableResult<Option<CommittedWatch>>> + Send + 'static {
+    ) -> impl Future<Output = DurableResult<Option<CommittedWatch>>> + Send + use<> {
         let usable = self.0.assert_usable();
         let core = self.0.clone();
         let context = context.clone();

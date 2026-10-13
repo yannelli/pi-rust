@@ -118,7 +118,7 @@ impl SessionCore {
         Ok(())
     }
 
-    pub fn enqueue<T, F>(&self, job: F) -> impl Future<Output = DurableResult<T>> + Send + 'static
+    pub fn enqueue<T, F>(&self, job: F) -> impl Future<Output = DurableResult<T>> + Send + use<T, F>
     where
         T: Send + 'static,
         F: Future<Output = DurableResult<T>> + Send + 'static,
@@ -234,7 +234,7 @@ impl Session {
         &self,
         change: F,
         context: &Context,
-    ) -> impl Future<Output = DurableResult<T>> + Send + 'static
+    ) -> impl Future<Output = DurableResult<T>> + Send + use<T, F, Fut>
     where
         T: Send + 'static,
         F: FnOnce(Tx) -> Fut + Send + 'static,
@@ -249,7 +249,7 @@ impl Session {
         change: F,
         context: &Context,
         scope: TransactionScope,
-    ) -> impl Future<Output = DurableResult<T>> + Send + 'static
+    ) -> impl Future<Output = DurableResult<T>> + Send + use<T, F, Fut>
     where
         T: Send + 'static,
         F: FnOnce(Tx) -> Fut + Send + 'static,
@@ -263,7 +263,7 @@ impl Session {
     }
 
     /// Internal: run a read-only job on the mutation line so multi-read derivations see one committed state.
-    pub fn read_on_line<T, F>(&self, job: F) -> impl Future<Output = DurableResult<T>> + Send + 'static
+    pub fn read_on_line<T, F>(&self, job: F) -> impl Future<Output = DurableResult<T>> + Send + use<T, F>
     where
         T: Send + 'static,
         F: Future<Output = DurableResult<T>> + Send + 'static,
@@ -290,7 +290,7 @@ impl Session {
     }
 
     /// Internal: settles with `SessionFailed` the moment the Session fails; pending forever otherwise.
-    pub fn failed(&self) -> impl Future<Output = DurableError> + Send + 'static {
+    pub fn failed(&self) -> impl Future<Output = DurableError> + Send + use<> {
         let mut receiver = self.0.failed.subscribe();
         async move {
             let error = receiver.wait_for(Option::is_some).await.ok().and_then(|error| error.clone());
@@ -302,7 +302,7 @@ impl Session {
     }
 
     /// Settles once closed, Storage included.
-    pub fn closed(&self) -> impl Future<Output = SessionEnd> + Send + 'static {
+    pub fn closed(&self) -> impl Future<Output = SessionEnd> + Send + use<> {
         let mut receiver = self.0.closed.subscribe();
         async move {
             let end = receiver.wait_for(Option::is_some).await.ok().and_then(|end| end.clone());
@@ -323,7 +323,7 @@ impl Session {
     }
 
     /// Seal admission, run close listeners, settle admitted commits, then close Storage.
-    pub fn close(&self, context: &Context) -> impl Future<Output = DurableResult<()>> + Send + 'static {
+    pub fn close(&self, context: &Context) -> impl Future<Output = DurableResult<()>> + Send + use<> {
         let (closing, created) = {
             let mut slot = lock(&self.0.closing);
             match &*slot {
@@ -376,7 +376,7 @@ impl Session {
     }
 
     /// Drop every loaded tracker on the mutation line; later access cold-loads from Storage.
-    pub fn unload_documents(&self) -> impl Future<Output = DurableResult<()>> + Send + 'static {
+    pub fn unload_documents(&self) -> impl Future<Output = DurableResult<()>> + Send + use<> {
         let core = self.0.clone();
         self.0.enqueue(async move {
             lock(&core.documents).clear();

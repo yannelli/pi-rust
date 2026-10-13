@@ -27,7 +27,7 @@ impl Tx {
         &self,
         token: &DocToken<T, S>,
         owner: S::Owner,
-    ) -> impl Future<Output = DurableResult<Draft<T>>> + Send + 'static {
+    ) -> impl Future<Output = DurableResult<Draft<T>>> + Send + use<T, S> {
         typed(self.doc_erased(token.definition().clone(), token.resolve(owner), None))
     }
 
@@ -36,9 +36,9 @@ impl Tx {
         &self,
         token: &DocFamilyToken<T, I, S>,
         owner: S::Owner,
-        key: impl Into<String>,
+        key: &str,
         seed: &I,
-    ) -> impl Future<Output = DurableResult<Draft<T>>> + Send + 'static {
+    ) -> impl Future<Output = DurableResult<Draft<T>>> + Send + use<T, I, S> {
         let resolved = token.resolve(owner, key);
         let draft = match encode(seed) {
             Ok(seed) => self.doc_erased(token.definition().clone(), resolved, Some(seed)),
