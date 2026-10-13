@@ -6,5 +6,9 @@ mod support;
 
 #[path = "env_node/filesystem.rs"]
 mod filesystem;
+#[path = "env_node/shell.rs"]
+mod shell;
+#[path = "env_node/spill.rs"]
+mod spill;
 #[path = "env_node/text_lines.rs"]
 mod text_lines;

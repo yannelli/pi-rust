@@ -45,7 +45,10 @@ fn find_on_path(name: &str) -> Option<String> {
 pub(crate) fn shell_config(custom: Option<&str>) -> Result<ShellConfig, ExecutionError> {
     if let Some(custom) = custom.filter(|custom| !custom.is_empty()) {
         if Path::new(custom).exists() {
-            return Ok(bash_shell_config(custom.to_string()));
+            // A relative path names the file found relative to this process, not a program on `PATH`.
+            let config = bash_shell_config(custom.to_string());
+            let absolute = std::path::absolute(custom).map(|path| path.to_string_lossy().into_owned());
+            return Ok(ShellConfig { shell: absolute.unwrap_or(config.shell), ..config });
         }
         let message = format!("Custom shell path not found: {custom}");
         return Err(ExecutionError::new(ExecutionErrorCode::ShellUnavailable, message));

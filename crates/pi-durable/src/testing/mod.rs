@@ -4,4 +4,5 @@ pub mod storage_conformance;
 
 #[doc(hidden)]
 pub use tokio as __tokio;
+pub mod env_conformance;
 pub mod faux;
