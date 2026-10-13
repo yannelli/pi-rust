@@ -1,0 +1,15 @@
+[package]
+name = "pi-protocol"
+description = "Transport-neutral CBOR protocol for remote pi sessions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+pi-chord = { path = "../pi-chord" }
+thiserror.workspace = true
+
+[lints]
+workspace = true

@@ -9,6 +9,7 @@ members = [
     "crates/pi-embedded",
     "crates/pi-js",
     "crates/pi-mcp",
+    "crates/pi-protocol",
     "crates/pi-telemetry",
     "crates/pi-tui",
     "xtask",
