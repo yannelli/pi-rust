@@ -8,6 +8,7 @@ use pi_ai::{AssistantMessage, Message, Model, ThinkingLevel, ToolResultMessage};
 use tokio_util::sync::CancellationToken;
 
 use crate::agent_loop::AgentContext;
+use crate::types::AgentEvent;
 
 /// A completed turn: the assistant message, its tool results, and the context after both.
 #[derive(Clone, Copy)]
@@ -91,3 +92,8 @@ pub type PrepareNextTurnFn = Arc<
         + Send
         + Sync,
 >;
+
+/// Awaited for every loop event before listeners run. For `MessageEnd`, a returned message with
+/// the same role replaces the finalized one (upstream `message_end` handlers).
+pub type AgentEventHookFn =
+    Arc<dyn Fn(AgentEvent, CancellationToken) -> BoxFuture<'static, Option<Message>> + Send + Sync>;

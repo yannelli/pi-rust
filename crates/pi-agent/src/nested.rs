@@ -169,7 +169,8 @@ pub trait NestedToolCallHost: Send + Sync {
         cancel: CancellationToken,
         on_update: ToolUpdateCallback,
     ) -> AgentToolCallOutcome;
-    fn emit(&self, event: AgentEvent);
+    /// Deliver an event of a nested call; awaited before the call goes on.
+    async fn emit(&self, event: AgentEvent);
     /// Model of the turn the calls belong to, passed on to [`ToolContext::model`].
     fn model(&self) -> Option<Arc<Model>> {
         None
@@ -242,12 +243,14 @@ impl NestedToolCallRunner {
             let call = ToolCall { id: id.clone(), name: name.clone(), arguments, ..Default::default() };
             let index = lock(&recorder).start(&call);
             let call_args = Value::Object(call.arguments.clone());
-            self.host.emit(AgentEvent::ToolExecutionStart {
-                tool_call_id: id.clone(),
-                tool_name: name.clone(),
-                args: call_args.clone(),
-                parent_tool_call_id: Some(caller_id.clone()),
-            });
+            self.host
+                .emit(AgentEvent::ToolExecutionStart {
+                    tool_call_id: id.clone(),
+                    tool_name: name.clone(),
+                    args: call_args.clone(),
+                    parent_tool_call_id: Some(caller_id.clone()),
+                })
+                .await;
 
             let exclusive = !holds_queue
                 && (self.host.is_sequential()
@@ -259,15 +262,16 @@ impl NestedToolCallRunner {
                 id.clone(),
                 CallScope { recorder: recorder.clone(), next_id: 1, holds_queue: holds_queue || exclusive },
             );
+            let (queue, mut updates) = futures::channel::mpsc::unbounded::<AgentEvent>();
             let on_update: ToolUpdateCallback = {
-                let (host, id, name, args, parent) =
-                    (self.host.clone(), id.clone(), name.clone(), call_args, caller_id.clone());
+                let (id, name, args, parent) = (id.clone(), name.clone(), call_args, caller_id.clone());
                 let forward = options.on_update.clone();
+                let queue = queue.clone();
                 Arc::new(move |partial_result: AgentToolResult| {
                     if let Some(forward) = &forward {
                         forward(partial_result.clone());
                     }
-                    host.emit(AgentEvent::ToolExecutionUpdate {
+                    let _ = queue.unbounded_send(AgentEvent::ToolExecutionUpdate {
                         tool_call_id: id.clone(),
                         tool_name: name.clone(),
                         args: args.clone(),
@@ -278,7 +282,18 @@ impl NestedToolCallRunner {
             };
             let cancel = options.cancel.unwrap_or(caller_cancel);
             let context = ToolContext::nested(id.clone(), self.clone(), cancel.clone());
-            let outcome = self.host.run_tool_call(call, &caller_id, context, cancel, on_update).await;
+            let host = self.host.clone();
+            let execution = async {
+                let outcome = self.host.run_tool_call(call, &caller_id, context, cancel, on_update).await;
+                queue.close_channel();
+                outcome
+            };
+            let drain = async move {
+                while let Some(event) = futures::StreamExt::next(&mut updates).await {
+                    host.emit(event).await;
+                }
+            };
+            let (outcome, ()) = futures::join!(execution, drain);
             lock(&self.scopes).remove(&id);
             drop(guard);
 
@@ -290,14 +305,16 @@ impl NestedToolCallRunner {
                     recorder.add_usage(usage);
                 }
             }
-            self.host.emit(AgentEvent::ToolExecutionEnd {
-                tool_call_id: id,
-                tool_name: name,
-                result: outcome.result.clone(),
-                is_error: outcome.is_error,
-                duration_ms: outcome.duration_ms,
-                parent_tool_call_id: Some(caller_id),
-            });
+            self.host
+                .emit(AgentEvent::ToolExecutionEnd {
+                    tool_call_id: id,
+                    tool_name: name,
+                    result: outcome.result.clone(),
+                    is_error: outcome.is_error,
+                    duration_ms: outcome.duration_ms,
+                    parent_tool_call_id: Some(caller_id),
+                })
+                .await;
             outcome
         })
     }

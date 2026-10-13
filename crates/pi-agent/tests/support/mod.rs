@@ -98,7 +98,7 @@ pub fn config(stream_fn: StreamFn) -> AgentLoopConfig {
 pub fn recorder() -> (Arc<Mutex<Vec<AgentEvent>>>, EventSink) {
     let events = Arc::new(Mutex::new(Vec::new()));
     let sink_events = events.clone();
-    (events, Arc::new(move |event| sink_events.lock().unwrap().push(event)))
+    (events, pi_agent::sync_sink(move |event| sink_events.lock().unwrap().push(event)))
 }
 
 pub fn kind(event: &AgentEvent) -> String {

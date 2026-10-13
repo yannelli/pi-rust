@@ -37,8 +37,35 @@ pub type AfterToolCallFn = Arc<
 pub type ConvertToLlmFn = Arc<dyn Fn(&[Message]) -> Vec<Message> + Send + Sync>;
 /// Tools that nested calls ([`crate::ToolContext::execute_tool`]) resolve against.
 pub type CallableToolsFn = Arc<dyn Fn() -> Vec<SharedTool> + Send + Sync>;
-/// Receives loop events synchronously, in order.
-pub type EventSink = Arc<dyn Fn(AgentEvent) + Send + Sync>;
+/// Receives loop events in order; the loop awaits each before it goes on. For `MessageEnd`, a
+/// returned message with the same role replaces the finalized one (upstream handlers replace it
+/// in place before it is persisted).
+pub type EventSink = Arc<dyn Fn(AgentEvent) -> BoxFuture<'static, Option<Message>> + Send + Sync>;
+
+/// An [`EventSink`] over a synchronous callback that never replaces messages.
+pub fn sync_sink(callback: impl Fn(AgentEvent) + Send + Sync + 'static) -> EventSink {
+    Arc::new(move |event| {
+        callback(event);
+        Box::pin(async { None })
+    })
+}
+
+/// Emit `MessageStart` and `MessageEnd` for `message` and return it, replaced when the
+/// `MessageEnd` sink asked for a replacement with the same role.
+pub(crate) async fn emit_message(emit: &EventSink, message: Message, start: bool) -> Message {
+    if start {
+        emit(AgentEvent::MessageStart { message: message.clone() }).await;
+    }
+    finish_message(emit, message).await
+}
+
+/// Emit `MessageEnd` and return the possibly replaced message.
+pub(crate) async fn finish_message(emit: &EventSink, message: Message) -> Message {
+    match emit(AgentEvent::MessageEnd { message: message.clone() }).await {
+        Some(replacement) if replacement.role() == message.role() => replacement,
+        _ => message,
+    }
+}
 
 /// Conversation state the loop reads and appends to.
 #[derive(Clone, Default)]
@@ -127,14 +154,14 @@ pub async fn run_agent_loop(
     cancel: CancellationToken,
 ) -> Vec<Message> {
     let prompts = declare_tool_changes(context, prompts);
-    emit(AgentEvent::AgentStart);
-    emit(AgentEvent::TurnStart);
-    for message in &prompts {
-        emit(AgentEvent::MessageStart { message: message.clone() });
-        emit(AgentEvent::MessageEnd { message: message.clone() });
+    emit(AgentEvent::AgentStart).await;
+    emit(AgentEvent::TurnStart).await;
+    let mut new_messages = Vec::with_capacity(prompts.len());
+    for message in prompts {
+        let message = emit_message(&emit, message, true).await;
+        context.messages.push(message.clone());
+        new_messages.push(message);
     }
-    context.messages.extend(prompts.iter().cloned());
-    let mut new_messages = prompts;
     run_loop(context, &mut new_messages, config, &emit, &cancel).await;
     new_messages
 }
@@ -152,8 +179,8 @@ pub async fn run_agent_loop_continue(
         Some(Message::Assistant(_)) => anyhow::bail!("Cannot continue from message role: assistant"),
         Some(_) => {}
     }
-    emit(AgentEvent::AgentStart);
-    emit(AgentEvent::TurnStart);
+    emit(AgentEvent::AgentStart).await;
+    emit(AgentEvent::TurnStart).await;
     let mut new_messages = Vec::new();
     run_loop(context, &mut new_messages, config, &emit, &cancel).await;
     Ok(new_messages)
@@ -194,12 +221,11 @@ async fn run_loop(
                 if pending.is_empty() {
                     pending = take(&config.get_steering_messages).await;
                 }
-                emit(AgentEvent::TurnStart);
+                emit(AgentEvent::TurnStart).await;
             }
             prepared.append(&mut pending);
             for message in declare_tool_changes(context, prepared) {
-                emit(AgentEvent::MessageStart { message: message.clone() });
-                emit(AgentEvent::MessageEnd { message: message.clone() });
+                let message = emit_message(emit, message, true).await;
                 context.messages.push(message.clone());
                 new_messages.push(message);
             }
@@ -216,8 +242,8 @@ async fn run_loop(
             new_messages.push(Message::Assistant(message.clone()));
             if matches!(message.stop_reason, StopReason::Error | StopReason::Aborted) {
                 finish_turn(&config.finish_turn, &message, &[], context, new_messages, cancel).await;
-                emit(AgentEvent::TurnEnd { message: Message::Assistant(message), tool_results: Vec::new() });
-                emit(AgentEvent::AgentEnd { messages: new_messages.clone() });
+                emit(AgentEvent::TurnEnd { message: Message::Assistant(message), tool_results: Vec::new() }).await;
+                emit(AgentEvent::AgentEnd { messages: new_messages.clone() }).await;
                 return;
             }
 
@@ -226,7 +252,7 @@ async fn run_loop(
             has_more_tool_calls = false;
             if !tool_calls.is_empty() {
                 let batch = if message.stop_reason == StopReason::Length {
-                    fail_truncated_tool_calls(&tool_calls, emit)
+                    fail_truncated_tool_calls(&tool_calls, emit).await
                 } else {
                     execute_tool_calls(context, &message, &tool_calls, &config, emit, cancel).await
                 };
@@ -242,9 +268,10 @@ async fn run_loop(
             emit(AgentEvent::TurnEnd {
                 message: Message::Assistant(message.clone()),
                 tool_results: tool_results.clone(),
-            });
+            })
+            .await;
             if decision == Some(AgentTurnDecision::End) || cancel.is_cancelled() {
-                emit(AgentEvent::AgentEnd { messages: new_messages.clone() });
+                emit(AgentEvent::AgentEnd { messages: new_messages.clone() }).await;
                 return;
             }
             explicit_continuation = decision == Some(AgentTurnDecision::Continue);
@@ -268,7 +295,7 @@ async fn run_loop(
         }
         break;
     }
-    emit(AgentEvent::AgentEnd { messages: new_messages.clone() });
+    emit(AgentEvent::AgentEnd { messages: new_messages.clone() }).await;
 }
 
 async fn finish_turn(
@@ -345,13 +372,13 @@ async fn stream_assistant_response(
             AssistantMessageEvent::Start { partial } => {
                 context.messages.push(Message::Assistant(partial.clone()));
                 added_partial = true;
-                emit(AgentEvent::MessageStart { message: Message::Assistant(partial.clone()) });
+                emit(AgentEvent::MessageStart { message: Message::Assistant(partial.clone()) }).await;
             }
             AssistantMessageEvent::Done { message, .. } | AssistantMessageEvent::Error { error: message, .. } => {
                 let mut message = message.clone();
                 // Record the requested level, whichever stream function answered.
                 message.thinking_level = Some(config.reasoning.unwrap_or(ThinkingLevel::Off));
-                return finish_response(context, message, added_partial, emit);
+                return finish_response(context, message, added_partial, emit).await;
             }
             AssistantMessageEvent::TextStart { partial, .. }
             | AssistantMessageEvent::TextDelta { partial, .. }
@@ -367,7 +394,7 @@ async fn stream_assistant_response(
                     if let Some(last) = context.messages.last_mut() {
                         *last = message.clone();
                     }
-                    emit(AgentEvent::MessageUpdate { message, assistant_message_event: event.clone() });
+                    emit(AgentEvent::MessageUpdate { message, assistant_message_event: event.clone() }).await;
                 }
             }
         }
@@ -376,10 +403,10 @@ async fn stream_assistant_response(
     message.stop_reason = if cancel.is_cancelled() { StopReason::Aborted } else { StopReason::Error };
     message.error_message = Some("Provider stream ended without a final event".into());
     message.thinking_level = Some(config.reasoning.unwrap_or(ThinkingLevel::Off));
-    finish_response(context, message, added_partial, emit)
+    finish_response(context, message, added_partial, emit).await
 }
 
-fn finish_response(
+async fn finish_response(
     context: &mut AgentContext,
     message: AssistantMessage,
     added_partial: bool,
@@ -392,8 +419,14 @@ fn finish_response(
         }
     } else {
         context.messages.push(wrapped.clone());
-        emit(AgentEvent::MessageStart { message: wrapped.clone() });
+        emit(AgentEvent::MessageStart { message: wrapped.clone() }).await;
     }
-    emit(AgentEvent::MessageEnd { message: wrapped });
-    message
+    let finished = finish_message(emit, wrapped).await;
+    if let Some(last) = context.messages.last_mut() {
+        *last = finished.clone();
+    }
+    match finished {
+        Message::Assistant(replaced) => replaced,
+        _ => message,
+    }
 }
