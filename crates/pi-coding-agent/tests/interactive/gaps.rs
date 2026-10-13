@@ -21,6 +21,7 @@ export default function (pi) {
 			},
 			applyCompletion: (...args) => current.applyCompletion(...args),
 		}));
+		ctx.ui.notify("AUTOCOMPLETE-READY");
 	});
 	pi.registerCommand("broken", { handler: async (_args, ctx) => {
 		try {
@@ -55,6 +56,8 @@ export default function (pi) {
 async fn extension_autocomplete_custom_and_overlay_handles() {
     local(async {
         let ui = start(Options { files: vec![(".pi/extensions/gaps.ts", EXTENSION)], ..Options::default() }).await;
+        // session_start runs after the UI starts; typing earlier would miss the provider.
+        ui.wait_for("AUTOCOMPLETE-READY").await;
         ui.send("say %co").await;
         ui.wait_for("EXT-COMPLETION").await;
         ui.send("\t").await;
