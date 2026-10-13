@@ -1,12 +1,14 @@
 //! Application Default Credentials for Vertex AI, following `google-auth-library`:
 //! `GOOGLE_APPLICATION_CREDENTIALS`, the gcloud well-known file, then the metadata server.
+//! Files may hold user, service account, external account, or impersonated credentials.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex};
 
 use base64::Engine;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+use futures::future::BoxFuture;
 use ring::rand::SystemRandom;
 use ring::signature::{RSA_PKCS1_SHA256, RsaKeyPair};
 use serde_json::{Value, json};
@@ -16,8 +18,26 @@ use crate::request::error_chain;
 use crate::simple_options::provider_env_value;
 use crate::types::now_ms;
 
+#[path = "auth_aws.rs"]
+mod aws;
+#[path = "auth_certificate.rs"]
+mod certificate;
+#[path = "auth_executable.rs"]
+mod executable;
+#[path = "auth_external.rs"]
+mod external;
+#[path = "auth_impersonated.rs"]
+mod impersonated;
+#[cfg(test)]
+#[path = "auth_tests.rs"]
+mod tests;
+#[cfg(test)]
+#[path = "auth_tests_sources.rs"]
+mod tests_sources;
+
 pub(crate) const CLOUD_PLATFORM_SCOPE: &str = "https://www.googleapis.com/auth/cloud-platform";
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+pub(crate) const DEFAULT_UNIVERSE: &str = "googleapis.com";
 const NO_ADC_FOUND: &str = "Could not load the default credentials. Browse to https://cloud.google.com/docs/authentication/getting-started for more information.";
 /// Tokens are refreshed this long before they expire.
 const EAGER_REFRESH_MS: i64 = 5 * 60 * 1000;
@@ -123,16 +143,35 @@ async fn file_token(path: &PathBuf, options: &StreamOptions) -> Result<(AccessTo
     let text =
         tokio::fs::read_to_string(path).await.map_err(|error| read_error(format!("{}: {error}", path.display())))?;
     let credentials: Value = serde_json::from_str(&text).map_err(|error| read_error(error.to_string()))?;
-    credentials_token(&credentials, &crate::http::client_for_env(&options.env)).await
+    credentials_token(&credentials, &options.env).await
 }
 
 /// Exchange a parsed credentials file for an access token and its lifetime in seconds.
-pub(crate) async fn credentials_token(
-    credentials: &Value,
-    client: &reqwest::Client,
-) -> Result<(AccessToken, i64), String> {
-    let field = |key: &str| credentials[key].as_str().filter(|value| !value.is_empty());
-    let quota_project = field("quota_project_id").map(str::to_string);
+/// `impersonated_service_account` recurses into its `source_credentials`.
+pub(crate) fn credentials_token<'a>(
+    credentials: &'a Value,
+    env: &'a BTreeMap<String, String>,
+) -> BoxFuture<'a, Result<(AccessToken, i64), String>> {
+    Box::pin(async move {
+        let quota_project = string_field(credentials, "quota_project_id").map(str::to_string);
+        let (token, expires_in) = match string_field(credentials, "type") {
+            Some("impersonated_service_account") => impersonated::token(credentials, env).await?,
+            Some("external_account") => external::external_account_token(credentials, env).await?,
+            Some("external_account_authorized_user") => external::authorized_user_token(credentials, env).await?,
+            _ => oauth_token(credentials, &crate::http::client_for_env(env)).await?,
+        };
+        Ok((AccessToken { token, quota_project }, expires_in))
+    })
+}
+
+/// A non-empty string field of a JSON object.
+pub(crate) fn string_field<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+    value[key].as_str().filter(|value| !value.is_empty())
+}
+
+/// `authorized_user` refresh or the `service_account` JWT bearer grant.
+async fn oauth_token(credentials: &Value, client: &reqwest::Client) -> Result<(String, i64), String> {
+    let field = |key: &str| string_field(credentials, key);
     let form: Vec<(&str, String)> = match field("type") {
         Some("authorized_user") => {
             let client_id = field("client_id").ok_or("The incoming JSON object does not contain a client_id field")?;
@@ -146,9 +185,6 @@ pub(crate) async fn credentials_token(
                 ("refresh_token", refresh.to_string()),
                 ("grant_type", "refresh_token".to_string()),
             ]
-        }
-        Some(kind @ ("external_account" | "external_account_authorized_user" | "impersonated_service_account")) => {
-            return Err(format!("Unsupported Google credential type for Vertex AI: {kind}"));
         }
         _ => {
             let email =
@@ -166,8 +202,7 @@ pub(crate) async fn credentials_token(
         .send()
         .await
         .map_err(|error| format!("Google token request failed: {}", error_chain(&error)))?;
-    let (token, expires_in) = parse_token_response(response).await?;
-    Ok((AccessToken { token, quota_project }, expires_in))
+    parse_token_response(response).await
 }
 
 async fn metadata_token(host: &str) -> Result<(AccessToken, i64), String> {
@@ -200,8 +235,15 @@ async fn parse_token_response(response: reqwest::Response) -> Result<(String, i6
     Ok((token.to_string(), parsed["expires_in"].as_i64().unwrap_or(3600)))
 }
 
+/// Seconds from now until an RFC 3339 `expireTime`, or an hour when it does not parse.
+pub(crate) fn seconds_until(expire_time: Option<&str>) -> i64 {
+    let at = expire_time.and_then(crate::providers::aws::sigv4::parse_rfc3339);
+    let millis = at.and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok()).map(|at| at.as_millis() as i64);
+    millis.map_or(3600, |millis| (millis - now_ms()) / 1000)
+}
+
 /// DER bytes of the first PEM block in `pem`.
-fn pem_to_der(pem: &str) -> Result<Vec<u8>, String> {
+pub(crate) fn pem_to_der(pem: &str) -> Result<Vec<u8>, String> {
     let body: String = pem
         .lines()
         .map(str::trim)
