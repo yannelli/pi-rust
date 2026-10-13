@@ -7,6 +7,7 @@ use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use serde_json::{Map, Value, json};
 
 use crate::http::pi_user_agent;
+use crate::provider_options::ReasoningSummary;
 use crate::providers::common::compat_bool;
 use crate::providers::constrained_sampling::{ResponsesToolOptions, convert_responses_tools};
 use crate::providers::openai_responses::{ConvertOptions, convert_messages};
@@ -217,10 +218,11 @@ pub(super) fn build_body(
     let effort =
         options.reasoning.map(|level| clamp_thinking_level(model, level)).filter(|level| *level != ThinkingLevel::Off);
     if let Some(level) = effort {
+        let summary = options.reasoning_summary.map_or("auto", ReasoningSummary::as_str);
         let mapped = map.and_then(|map| map.get(level.as_str()).cloned().flatten());
         body.insert(
             "reasoning".into(),
-            json!({"effort": mapped.as_deref().unwrap_or(level.as_str()), "summary": "auto"}),
+            json!({"effort": mapped.as_deref().unwrap_or(level.as_str()), "summary": summary}),
         );
     } else if model.reasoning && map.and_then(|map| map.get("off")) != Some(&None) {
         let off = map.and_then(|map| map.get("off").cloned().flatten());
@@ -244,4 +246,27 @@ pub(super) fn uuid_v7() -> String {
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     let hex = crate::providers::aws::sigv4::hex(&bytes);
     format!("{}-{}-{}-{}-{}", &hex[..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..])
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::*;
+    use crate::provider_options::ReasoningSummary;
+    use crate::providers::mock_server::test_model;
+
+    #[test]
+    fn reasoning_summary_applies_only_with_an_effort() {
+        let mut model = test_model("openai-codex-responses", "openai-codex", "https://chatgpt.com/backend-api");
+        model.reasoning = true;
+        let messages = [Message::user("hi")];
+        let body = |options: &StreamOptions| build_body(&model, &messages, options, None, &BTreeMap::new()).unwrap();
+        let options = StreamOptions {
+            reasoning: Some(ThinkingLevel::Medium),
+            reasoning_summary: Some(ReasoningSummary::Off),
+            ..Default::default()
+        };
+        assert_eq!(body(&options)["reasoning"], json!({"effort": "medium", "summary": "off"}));
+        let summary_only = StreamOptions { reasoning_summary: Some(ReasoningSummary::On), ..Default::default() };
+        assert_eq!(body(&summary_only)["reasoning"], json!({"effort": "none"}));
+    }
 }

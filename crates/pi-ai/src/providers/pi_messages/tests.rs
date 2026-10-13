@@ -120,10 +120,12 @@ async fn forwards_wire_events_and_reports_response_headers() {
         on_response: Some(Arc::new(move |response: &ProviderResponse, _: &Model| {
             response_hook.lock().unwrap().push(response.clone())
         })),
+        debug: true,
         ..keyed()
     };
     let (_, message) = collect(PiMessages.stream(&model(&server.base_url), &context(), options)).await;
     assert_eq!((message.stop_reason, message.text().as_str()), (StopReason::Stop, "Hello"));
+    assert_eq!(server.request(0).path, "/v1/messages?debug=1");
     assert_eq!(*seen.lock().unwrap(), events);
     assert_eq!(responses.lock().unwrap()[0].headers["x-pi-gateway-upstream-provider"], "anthropic");
 }

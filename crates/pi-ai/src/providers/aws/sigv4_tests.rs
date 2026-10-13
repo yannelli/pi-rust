@@ -91,3 +91,9 @@ fn formats_and_parses_utc_timestamps() {
     assert_eq!(format_amz_date(parse_rfc3339("2024-02-29T23:59:59Z").unwrap()), "20240229T235959Z");
     assert_eq!(parse_rfc3339("not a date"), None);
 }
+
+#[test]
+fn formats_iso8601_like_javascript() {
+    let time = parse_rfc3339("2024-02-29T23:59:58Z").unwrap() + Duration::from_millis(7);
+    assert_eq!(format_iso8601(time), "2024-02-29T23:59:58.007Z");
+}

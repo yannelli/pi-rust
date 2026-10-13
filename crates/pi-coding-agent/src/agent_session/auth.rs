@@ -63,8 +63,9 @@ pub fn install_telemetry_enabled(settings: &SettingsManager) -> bool {
 /// `thinkingBudgets`, `retry.provider.*`, `httpIdleTimeoutMs`, `websocketConnectTimeoutMs`).
 pub fn apply_request_settings(options: &mut StreamOptions, request: &RequestAuth, settings: &SettingsManager) {
     options.api_key = request.auth.api_key.clone();
-    let mut headers = std::mem::take(&mut options.headers);
-    headers.extend(request.auth.headers.clone());
+    // Request headers win over configured provider headers, as in upstream `prepareRequest`.
+    let mut headers = request.auth.headers.clone();
+    headers.extend(std::mem::take(&mut options.headers));
     let telemetry = install_telemetry_enabled(settings);
     let merged = pi_ai::attribution::merge_provider_attribution_headers(
         &request.model,
@@ -164,4 +165,83 @@ pub fn configure_http_from_settings(settings: &SettingsManager) {
         http_proxy: settings.http_proxy(),
         idle_timeout_ms: settings.http_idle_timeout_ms().ok(),
     });
+}
+
+#[cfg(test)]
+mod attribution_tests {
+    use std::collections::BTreeMap;
+
+    use serde_json::json;
+
+    use super::*;
+
+    fn headers(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs.iter().map(|(name, value)| (name.to_string(), value.to_string())).collect()
+    }
+
+    fn captured(
+        provider: &str,
+        base_url: &str,
+        telemetry: bool,
+        configured: &[(&str, &str)],
+        request: &[(&str, &str)],
+    ) -> BTreeMap<String, String> {
+        let model = Model { provider: provider.into(), base_url: base_url.into(), ..Model::default() };
+        let auth = ModelAuth { api_key: Some("test-api-key".into()), headers: headers(configured), base_url: None };
+        let settings = SettingsManager::in_memory(json!({"enableInstallTelemetry": telemetry}));
+        let mut options =
+            StreamOptions { headers: headers(request), session_id: Some("s-1".into()), ..Default::default() };
+        apply_request_settings(&mut options, &RequestAuth { model, auth, env: None }, &settings);
+        options.headers
+    }
+
+    /// Ported from upstream `sdk-openrouter-attribution.test.ts`.
+    #[test]
+    fn attribution_headers_follow_telemetry_and_yield_to_configured_and_request_headers() {
+        if std::env::var("PI_TELEMETRY").is_ok() {
+            return;
+        }
+        let openrouter = captured("openrouter", "https://openrouter.ai/api/v1", true, &[], &[]);
+        assert_eq!(openrouter["HTTP-Referer"], "https://pi.dev");
+        assert_eq!(openrouter["X-OpenRouter-Title"], "pi");
+        assert_eq!(openrouter["X-OpenRouter-Categories"], "cli-agent");
+        assert!(captured("openrouter", "https://openrouter.ai/api/v1", false, &[], &[]).is_empty());
+        let legacy = captured("custom-openrouter", "not-a-url-openrouter.ai", true, &[], &[]);
+        assert_eq!(legacy["X-OpenRouter-Title"], "pi");
+        let configured =
+            [("HTTP-Referer", "https://provider.example"), ("X-OpenRouter-Categories", "provider-category")];
+        let overridden = captured(
+            "openrouter",
+            "https://openrouter.ai/api/v1",
+            true,
+            &configured,
+            &[("X-OpenRouter-Title", "request-title")],
+        );
+        assert_eq!(overridden["HTTP-Referer"], "https://provider.example");
+        assert_eq!(overridden["X-OpenRouter-Title"], "request-title");
+        assert_eq!(overridden["X-OpenRouter-Categories"], "provider-category");
+        let nim = captured(
+            "nvidia",
+            "https://integrate.api.nvidia.com/v1",
+            true,
+            &[("X-BILLING-INVOKE-ORIGIN", "Provider")],
+            &[("X-BILLING-INVOKE-ORIGIN", "Request")],
+        );
+        assert_eq!(nim["X-BILLING-INVOKE-ORIGIN"], "Request");
+        assert_eq!(
+            captured("custom-nim", "https://integrate.api.nvidia.com/v1", true, &[], &[])["X-BILLING-INVOKE-ORIGIN"],
+            "Pi"
+        );
+        let opencode = captured(
+            "opencode",
+            "https://opencode.ai/zen/v1",
+            false,
+            &[("x-opencode-client", "configured-client")],
+            &[],
+        );
+        assert_eq!(
+            (opencode["x-opencode-session"].as_str(), opencode["x-opencode-client"].as_str()),
+            ("s-1", "configured-client")
+        );
+    }
 }

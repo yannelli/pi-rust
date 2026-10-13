@@ -3,8 +3,9 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 
 use super::bedrock_model;
+use crate::provider_options::{BedrockOptions, ThinkingDisplay};
 use crate::providers::bedrock::request::build_body;
-use crate::providers::bedrock::resolve_target;
+use crate::providers::bedrock::{resolve_target, resolve_target_with};
 use crate::registry::{CacheRetention, StreamOptions};
 use crate::types::{
     AssistantMessage, ContentBlock, Context, Message, Model, StopReason, ThinkingLevel, Tool, ToolCall,
@@ -247,4 +248,49 @@ fn resolves_regions_and_endpoints_like_the_sdk_config() {
     let arn = Model { id: "arn:aws-us-gov:bedrock:us-gov-west-1:1:application-inference-profile/abc".into(), ..us };
     let env = BTreeMap::from([("AWS_REGION".to_string(), "us-east-1".to_string())]);
     assert_eq!(resolve_target(&arn, &env).unwrap().region, "us-gov-west-1");
+}
+
+#[test]
+fn request_options_set_display_interleaving_and_metadata() {
+    let budget = bedrock_model("us.anthropic.claude-sonnet-4-5-20250929-v1:0", "");
+    let bedrock = BedrockOptions {
+        interleaved_thinking: Some(false),
+        thinking_display: Some(ThinkingDisplay::Omitted),
+        request_metadata: Some(BTreeMap::from([("team".to_string(), "ai".to_string())])),
+        ..BedrockOptions::default()
+    };
+    let options = StreamOptions {
+        reasoning: Some(ThinkingLevel::High),
+        cache_retention: Some(CacheRetention::None),
+        bedrock,
+        ..Default::default()
+    };
+    let body = build_body(&budget, &hello(), &options, None).unwrap();
+    let fields = &body["additionalModelRequestFields"];
+    assert_eq!(fields["thinking"], json!({"type": "enabled", "budget_tokens": 16384, "display": "omitted"}));
+    assert!(fields.get("anthropic_beta").is_none());
+    assert_eq!(body["requestMetadata"], json!({"team": "ai"}));
+    let adaptive = build_body(&bedrock_model("us.anthropic.claude-opus-4-8", ""), &hello(), &options, None).unwrap();
+    assert_eq!(adaptive["additionalModelRequestFields"]["thinking"]["display"], "omitted");
+    let plain = StreamOptions { reasoning: Some(ThinkingLevel::High), ..Default::default() };
+    assert!(build_body(&budget, &hello(), &plain, None).unwrap().get("requestMetadata").is_none());
+}
+
+#[test]
+fn request_region_and_profile_win_over_the_environment() {
+    let us = bedrock_model("us.anthropic.claude-opus-4-8", "https://bedrock-runtime.us-east-1.amazonaws.com");
+    let env = BTreeMap::from([
+        ("AWS_REGION".to_string(), "us-east-2".to_string()),
+        ("AWS_PROFILE".to_string(), "scoped".to_string()),
+    ]);
+    let bedrock =
+        BedrockOptions { region: Some("eu-west-1".into()), profile: Some("explicit".into()), ..Default::default() };
+    let target = resolve_target_with(&us, &bedrock, &env).unwrap();
+    assert_eq!(
+        (target.endpoint.as_str(), target.region.as_str(), target.profile.as_deref()),
+        ("https://bedrock-runtime.eu-west-1.amazonaws.com", "eu-west-1", Some("explicit"))
+    );
+    assert_eq!(target.configured_region.as_deref(), Some("eu-west-1"));
+    let target = resolve_target_with(&us, &BedrockOptions::default(), &env).unwrap();
+    assert_eq!((target.region.as_str(), target.profile.as_deref()), ("us-east-2", Some("scoped")));
 }

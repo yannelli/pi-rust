@@ -70,7 +70,9 @@ fn resolve_api_key(options: &StreamOptions) -> Option<String> {
 }
 
 fn resolve_project(options: &StreamOptions) -> Result<String, String> {
-    provider_env_value("GOOGLE_CLOUD_PROJECT", &options.env)
+    let project = options.vertex.project.clone().filter(|project| !project.is_empty());
+    project
+        .or_else(|| provider_env_value("GOOGLE_CLOUD_PROJECT", &options.env))
         .or_else(|| provider_env_value("GCLOUD_PROJECT", &options.env))
         .ok_or_else(|| {
             "Vertex AI requires a project ID. Set GOOGLE_CLOUD_PROJECT/GCLOUD_PROJECT or pass project in options."
@@ -79,7 +81,9 @@ fn resolve_project(options: &StreamOptions) -> Result<String, String> {
 }
 
 fn resolve_location(options: &StreamOptions) -> Result<String, String> {
-    provider_env_value("GOOGLE_CLOUD_LOCATION", &options.env)
+    let location = options.vertex.location.clone().filter(|location| !location.is_empty());
+    location
+        .or_else(|| provider_env_value("GOOGLE_CLOUD_LOCATION", &options.env))
         .ok_or_else(|| "Vertex AI requires a location. Set GOOGLE_CLOUD_LOCATION or pass location in options.".into())
 }
 
@@ -133,4 +137,27 @@ fn vertex_url(model: &Model, scope: Option<&(String, String)>, path: &str) -> St
     }
     parts.push(path.to_string());
     format!("{}:streamGenerateContent?alt=sse", parts.join("/"))
+}
+
+#[cfg(test)]
+mod option_tests {
+    use super::*;
+    use crate::provider_options::VertexOptions;
+
+    #[test]
+    fn request_project_and_location_win_over_the_environment() {
+        let mut options = StreamOptions::default();
+        options.env.insert("GOOGLE_CLOUD_PROJECT".into(), "env-project".into());
+        options.env.insert("GOOGLE_CLOUD_LOCATION".into(), "env-location".into());
+        assert_eq!(resolve_project(&options).unwrap(), "env-project");
+        assert_eq!(resolve_location(&options).unwrap(), "env-location");
+        options.vertex = VertexOptions { project: Some("test-project".into()), location: Some("us-central1".into()) };
+        assert_eq!(resolve_project(&options).unwrap(), "test-project");
+        assert_eq!(resolve_location(&options).unwrap(), "us-central1");
+        let scope = ("test-project".to_string(), "us-central1".to_string());
+        assert_eq!(
+            vertex_url(&Model::default(), Some(&scope), "publishers/google/models/gemini"),
+            "https://us-central1-aiplatform.googleapis.com/v1/projects/test-project/locations/us-central1/publishers/google/models/gemini:streamGenerateContent?alt=sse"
+        );
+    }
 }

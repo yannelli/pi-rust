@@ -2,10 +2,13 @@
 //! WebSocket (`websocket`, `websocket-cached`, or `auto`) with SSE fallback, or SSE alone.
 
 mod events;
+#[cfg(test)]
+mod proxy_tests;
 mod request;
 mod sse;
 #[cfg(test)]
 mod tests;
+mod tunnel;
 mod websocket;
 #[cfg(test)]
 mod ws_tests;
@@ -220,7 +223,8 @@ async fn websocket_request(
     let url = resolve_codex_websocket_url(&prepared.model.base_url);
     let connect_timeout = options.websocket_connect_timeout_ms.unwrap_or(DEFAULT_CONNECT_TIMEOUT_MS);
     let session = prepared.session.as_deref();
-    let mut lease = websocket::acquire(&url, &prepared.ws_headers, session, &prepared.account, connect_timeout).await?;
+    let (headers, account, env) = (&prepared.ws_headers, &prepared.account, &options.env);
+    let mut lease = websocket::acquire(&url, headers, session, account, env, connect_timeout).await?;
     // Upstream checks the configured transport, so an unset (default auto) transport sends full context.
     let cached_context = matches!(options.transport, Some(Transport::WebsocketCached | Transport::Auto));
     let previous = lease.continuation.take();

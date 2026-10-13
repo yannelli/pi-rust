@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
-use super::endpoint::service_host;
+use super::endpoint::{configured_endpoint, dns_suffix, service_host};
 use super::sigv4::{Credentials, SignableRequest, parse_rfc3339, sign, uri_encode};
 use crate::providers::provider_env::provider_env_value;
 use crate::registry::http_client;
@@ -21,6 +21,8 @@ pub struct RoleRequest<'a> {
     pub region: &'a str,
     pub external_id: Option<&'a str>,
     pub duration_seconds: Option<&'a str>,
+    /// `mfa_serial` and the code the MFA callback returned for it.
+    pub mfa: Option<(&'a str, String)>,
 }
 
 fn form(pairs: &[(&str, &str)]) -> String {
@@ -28,8 +30,7 @@ fn form(pairs: &[(&str, &str)]) -> String {
 }
 
 fn sts_url(region: &str, env: &BTreeMap<String, String>) -> String {
-    provider_env_value("AWS_ENDPOINT_URL_STS", env)
-        .unwrap_or_else(|| format!("https://{}/", service_host("sts", region)))
+    configured_endpoint("STS", env).unwrap_or_else(|| format!("https://{}/", service_host("sts", region)))
 }
 
 /// `sts:AssumeRole` signed with `source` credentials.
@@ -47,6 +48,10 @@ pub async fn assume_role(
     ];
     if let Some(external_id) = request.external_id {
         pairs.push(("ExternalId", external_id));
+    }
+    if let Some((serial, code)) = &request.mfa {
+        pairs.push(("SerialNumber", serial));
+        pairs.push(("TokenCode", code.as_str()));
     }
     let body = form(&pairs);
     let url =
@@ -83,7 +88,7 @@ pub async fn assume_role_with_web_identity(
     parse_sts_response(send_text(builder).await?)
 }
 
-async fn send_text(builder: reqwest::RequestBuilder) -> Result<String, String> {
+pub(super) async fn send_text(builder: reqwest::RequestBuilder) -> Result<String, String> {
     let response = builder.send().await.map_err(|error| format!("Credential request failed: {error}"))?;
     let status = response.status();
     let text = response.text().await.map_err(|error| format!("Credential response failed: {error}"))?;
@@ -192,10 +197,14 @@ pub async fn sso_role_credentials(
     account_id: &str,
     role_name: &str,
     access_token: &str,
+    env: &BTreeMap<String, String>,
 ) -> Result<Credentials, String> {
+    let base = configured_endpoint("SSO", env)
+        .unwrap_or_else(|| format!("https://portal.sso.{region}.{}", dns_suffix(region)))
+        .trim_end_matches('/')
+        .to_string();
     let url = format!(
-        "https://portal.sso.{region}.{}/federation/credentials?account_id={}&role_name={}",
-        super::endpoint::dns_suffix(region),
+        "{base}/federation/credentials?account_id={}&role_name={}",
         uri_encode(account_id),
         uri_encode(role_name)
     );
@@ -203,11 +212,13 @@ pub async fn sso_role_credentials(
     let text = send_text(builder).await?;
     let value: Value = serde_json::from_str(&text).map_err(|error| format!("Invalid SSO credentials: {error}"))?;
     let role = &value["roleCredentials"];
-    let field = |key: &str| role.get(key).and_then(Value::as_str).map(str::to_string);
+    let field = |key: &str| role.get(key).and_then(Value::as_str).filter(|text| !text.is_empty()).map(str::to_string);
+    let expiration = role["expiration"].as_u64().map(|millis| UNIX_EPOCH + Duration::from_millis(millis));
+    let invalid = || "SSO returns an invalid temporary credential.".to_string();
     Ok(Credentials {
-        access_key_id: field("accessKeyId").ok_or("SSO response is missing accessKeyId")?,
-        secret_access_key: field("secretAccessKey").ok_or("SSO response is missing secretAccessKey")?,
-        session_token: field("sessionToken"),
-        expiration: role["expiration"].as_u64().map(|millis| UNIX_EPOCH + Duration::from_millis(millis)),
+        access_key_id: field("accessKeyId").ok_or_else(invalid)?,
+        secret_access_key: field("secretAccessKey").ok_or_else(invalid)?,
+        session_token: Some(field("sessionToken").ok_or_else(invalid)?),
+        expiration: Some(expiration.ok_or_else(invalid)?),
     })
 }

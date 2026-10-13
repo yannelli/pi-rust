@@ -3,9 +3,10 @@
 //! the web identity token file, container credentials, and EC2 instance metadata.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use futures::future::BoxFuture;
 use ring::digest;
 use serde_json::Value;
 
@@ -18,6 +19,27 @@ use crate::providers::provider_env::{home_dir, provider_env_value};
 const REFRESH_MARGIN: Duration = Duration::from_secs(300);
 
 static CACHE: LazyLock<Mutex<HashMap<String, Credentials>>> = LazyLock::new(Mutex::default);
+static MFA_CODE_PROVIDER: LazyLock<Mutex<Option<MfaCodeProvider>>> = LazyLock::new(Mutex::default);
+
+/// What an MFA callback is asked for. The SDK passes only `serial` (the profile's
+/// `mfa_serial`); `profile` names the assume-role profile so a prompt can show it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MfaPrompt {
+    pub profile: String,
+    pub serial: String,
+}
+
+/// Port of the SDK's `mfaCodeProvider`: returns the current code for an MFA device.
+pub type MfaCodeProvider = Arc<dyn Fn(MfaPrompt) -> BoxFuture<'static, Result<String, String>> + Send + Sync>;
+
+/// Set the process-wide MFA callback, used when a `ChainInput` has none.
+pub fn set_mfa_code_provider(provider: Option<MfaCodeProvider>) {
+    *MFA_CODE_PROVIDER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = provider;
+}
+
+fn global_mfa_code_provider() -> Option<MfaCodeProvider> {
+    MFA_CODE_PROVIDER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
+}
 
 /// Inputs to the chain. `profile` is a profile chosen for this request, which wins over
 /// ambient environment keys; `region` is used for STS when a profile names none.
@@ -25,6 +47,8 @@ pub struct ChainInput<'a> {
     pub env: &'a BTreeMap<String, String>,
     pub profile: Option<String>,
     pub region: String,
+    /// Asked for a code when an assume-role profile has `mfa_serial`.
+    pub mfa_code_provider: Option<MfaCodeProvider>,
 }
 
 /// Static keys from `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN`.
@@ -127,7 +151,7 @@ async fn web_identity(
     let token = std::fs::read_to_string(token_file)
         .map_err(|error| format!("Cannot read web identity token file {token_file}: {error}"))?;
     let session_name = session.unwrap_or_else(|| format!("aws-sdk-js-session-{}", now_millis()));
-    let request = RoleRequest { role_arn, session_name, region, external_id: None, duration_seconds: None };
+    let request = RoleRequest { role_arn, session_name, region, external_id: None, duration_seconds: None, mfa: None };
     remote::assume_role_with_web_identity(&request, token.trim(), env).await
 }
 
@@ -179,24 +203,25 @@ fn resolve_profile<'a>(
             if source_only {
                 return Ok(source);
             }
-            if has("mfa_serial") {
-                return Err(format!(
-                    "Profile {name} requires multi-factor authentication, which pi cannot prompt for."
-                ));
-            }
-            let region = data.get("region").map_or(input.region.as_str(), String::as_str);
-            let request = RoleRequest {
-                role_arn: &data["role_arn"],
-                session_name: data
-                    .get("role_session_name")
-                    .cloned()
-                    .unwrap_or_else(|| format!("aws-sdk-js-{}", now_millis())),
-                region,
-                external_id: data.get("external_id").map(String::as_str),
-                duration_seconds: data.get("duration_seconds").map(String::as_str),
+            let load = async {
+                let mfa = match data.get("mfa_serial") {
+                    Some(serial) => Some((serial.as_str(), mfa_code(name, serial, input).await?)),
+                    None => None,
+                };
+                let request = RoleRequest {
+                    role_arn: &data["role_arn"],
+                    session_name: data
+                        .get("role_session_name")
+                        .cloned()
+                        .unwrap_or_else(|| format!("aws-sdk-js-{}", now_millis())),
+                    region: data.get("region").map_or(input.region.as_str(), String::as_str),
+                    external_id: data.get("external_id").map(String::as_str),
+                    duration_seconds: data.get("duration_seconds").map(String::as_str),
+                    mfa,
+                };
+                remote::assume_role(&request, &source, input.env).await
             };
-            let key = format!("assume-role:{name}:{}", request.role_arn);
-            return cached(&key, remote::assume_role(&request, &source, input.env)).await;
+            return cached(&format!("assume-role:{name}:{}", data["role_arn"]), load).await;
         }
         if let Some(credentials) = static_credentials(data) {
             return Ok(credentials);
@@ -215,13 +240,21 @@ fn resolve_profile<'a>(
         }
         if ["sso_start_url", "sso_account_id", "sso_session", "sso_region", "sso_role_name"].iter().any(|key| has(key))
         {
-            return cached(&format!("sso:{name}"), sso_credentials(name, data, shared, input.env)).await;
+            return cached(&format!("sso:{name}"), sso::sso_credentials(name, data, shared, input.env)).await;
         }
         if let Some(session) = data.get("login_session") {
             return login_credentials(session, input.env);
         }
         Err(format!("Could not resolve credentials using profile: [{name}] in configuration/credentials file(s)."))
     })
+}
+
+/// Ask the request's MFA callback, or the process-wide one, for the code of `serial`.
+async fn mfa_code(profile: &str, serial: &str, input: &ChainInput<'_>) -> Result<String, String> {
+    let provider = input.mfa_code_provider.clone().or_else(global_mfa_code_provider).ok_or_else(|| {
+        format!("Profile {profile} requires multi-factor authentication, but no MFA code callback was provided.")
+    })?;
+    provider(MfaPrompt { profile: profile.to_string(), serial: serial.to_string() }).await
 }
 
 async fn credential_source(source: &str, env: &BTreeMap<String, String>) -> Result<Credentials, String> {
@@ -270,33 +303,6 @@ fn read_json(path: &std::path::Path) -> Result<Value, String> {
     serde_json::from_str(&text).map_err(|error| format!("Invalid JSON in {}: {error}", path.display()))
 }
 
-async fn sso_credentials(
-    name: &str,
-    data: &Section,
-    shared: &SharedConfig,
-    env: &BTreeMap<String, String>,
-) -> Result<Credentials, String> {
-    let session = data.get("sso_session").map(|session| (session, shared.sso_sessions.get(session)));
-    let (cache_key, region) = match session {
-        Some((session, Some(section))) => (session.clone(), section.get("sso_region")),
-        Some((session, None)) => return Err(format!("Profile {name} refers to missing sso-session {session}")),
-        None => (data.get("sso_start_url").cloned().unwrap_or_default(), data.get("sso_region")),
-    };
-    let (Some(region), Some(account), Some(role)) = (region, data.get("sso_account_id"), data.get("sso_role_name"))
-    else {
-        return Err(format!("Profile {name} is missing sso_region, sso_account_id, or sso_role_name"));
-    };
-    let digest = digest::digest(&digest::SHA1_FOR_LEGACY_USE_ONLY, cache_key.as_bytes());
-    let path = home_dir(env).unwrap_or_default().join(".aws/sso/cache").join(format!("{}.json", hex(digest.as_ref())));
-    let token = read_json(&path).map_err(|error| format!("{error}. Run `aws sso login --profile {name}`."))?;
-    let expired =
-        token["expiresAt"].as_str().and_then(parse_rfc3339).is_none_or(|expires| expires <= SystemTime::now());
-    let (Some(access_token), false) = (token["accessToken"].as_str(), expired) else {
-        return Err(format!("The SSO session for profile {name} has expired. Run `aws sso login --profile {name}`."));
-    };
-    remote::sso_role_credentials(region, account, role, access_token).await
-}
-
 fn login_credentials(session: &str, env: &BTreeMap<String, String>) -> Result<Credentials, String> {
     let directory = provider_env_value("AWS_LOGIN_CACHE_DIRECTORY", env)
         .map(std::path::PathBuf::from)
@@ -316,6 +322,13 @@ fn login_credentials(session: &str, env: &BTreeMap<String, String>) -> Result<Cr
     Ok(credentials)
 }
 
+#[path = "sso.rs"]
+mod sso;
+
 #[cfg(test)]
 #[path = "credentials_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "credentials_sso_tests.rs"]
+mod sso_tests;

@@ -1,24 +1,25 @@
 //! Codex WebSocket transport: rustls connections, per-session cached sockets with
 //! continuation state, and the debug statistics upstream exposes.
 
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::{LazyLock, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use futures::{FutureExt, StreamExt};
+use reqwest::Url;
 use serde_json::Value;
-use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message as WsMessage};
-use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream, connect_async_tls_with_config};
+use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream, client_async_tls_with_config};
 
 use super::events::CodexError;
 use super::request::HeaderList;
+use super::tunnel::{self, Tunnel};
 
-pub(super) type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+pub(super) type Socket = WebSocketStream<MaybeTlsStream<Tunnel>>;
 type Key = (String, String);
 
 /// Idle cached sockets close after this long.
@@ -138,22 +139,13 @@ pub(super) fn record_failure(session: Option<&str>, error: &str) {
     });
 }
 
-fn tls_connector() -> Connector {
-    static CONFIG: LazyLock<Arc<rustls::ClientConfig>> = LazyLock::new(|| {
-        let mut roots = rustls::RootCertStore::empty();
-        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        let provider = Arc::new(rustls::crypto::ring::default_provider());
-        let config = rustls::ClientConfig::builder_with_provider(provider)
-            .with_safe_default_protocol_versions()
-            .expect("ring supports the default TLS versions")
-            .with_root_certificates(roots)
-            .with_no_client_auth();
-        Arc::new(config)
-    });
-    Connector::Rustls(CONFIG.clone())
-}
-
-async fn connect(url: &str, headers: &HeaderList, timeout_ms: u64) -> Result<Socket, CodexError> {
+/// Connect, through the applicable proxy, within `timeout_ms` for the whole handshake.
+async fn connect(
+    url: &str,
+    headers: &HeaderList,
+    env: &BTreeMap<String, String>,
+    timeout_ms: u64,
+) -> Result<Socket, CodexError> {
     let transport = |message: String| CodexError::Transport(message);
     let mut request =
         url.into_client_request().map_err(|error| transport(format!("Invalid WebSocket URL: {error}")))?;
@@ -162,7 +154,12 @@ async fn connect(url: &str, headers: &HeaderList, timeout_ms: u64) -> Result<Soc
             request.headers_mut().insert(name, value);
         }
     }
-    let connecting = connect_async_tls_with_config(request, None, false, Some(tls_connector()));
+    let target = Url::parse(url).map_err(|error| transport(format!("Invalid WebSocket URL: {error}")))?;
+    let connecting = async {
+        let stream = tunnel::open(&target, env).await?;
+        let connector = Connector::Rustls(tunnel::tls_config());
+        client_async_tls_with_config(request, stream, None, Some(connector)).await.map_err(handshake_error)
+    };
     let result = if timeout_ms > 0 {
         tokio::time::timeout(Duration::from_millis(timeout_ms), connecting)
             .await
@@ -170,10 +167,16 @@ async fn connect(url: &str, headers: &HeaderList, timeout_ms: u64) -> Result<Soc
     } else {
         connecting.await
     };
-    result.map(|(socket, _)| socket).map_err(|error| match error {
-        WsError::Http(response) => transport(format!("Unexpected server response: {}", response.status().as_u16())),
-        error => transport(error.to_string()),
-    })
+    result.map(|(socket, _)| socket)
+}
+
+fn handshake_error(error: WsError) -> CodexError {
+    match error {
+        WsError::Http(response) => {
+            CodexError::Transport(format!("Unexpected server response: {}", response.status().as_u16()))
+        }
+        error => CodexError::Transport(error.to_string()),
+    }
 }
 
 fn close_later(mut socket: Socket, reason: &'static str) {
@@ -251,6 +254,7 @@ pub(super) async fn acquire(
     headers: &HeaderList,
     session: Option<&str>,
     account: &str,
+    env: &BTreeMap<String, String>,
     connect_timeout_ms: u64,
 ) -> Result<Lease, CodexError> {
     let one_shot = |socket| Lease {
@@ -261,7 +265,7 @@ pub(super) async fn acquire(
         continuation: None,
         created_at: Instant::now(),
     };
-    let Some(session) = session else { return Ok(one_shot(connect(url, headers, connect_timeout_ms).await?)) };
+    let Some(session) = session else { return Ok(one_shot(connect(url, headers, env, connect_timeout_ms).await?)) };
     let key = (session.to_string(), account.to_string());
     let cached = {
         let mut state = state();
@@ -272,7 +276,7 @@ pub(super) async fn acquire(
             Some(state.idle.remove(&key))
         }
     };
-    let Some(cached) = cached else { return Ok(one_shot(connect(url, headers, connect_timeout_ms).await?)) };
+    let Some(cached) = cached else { return Ok(one_shot(connect(url, headers, env, connect_timeout_ms).await?)) };
     let mut lease = Lease {
         socket: None,
         key: Some(key),
@@ -292,7 +296,7 @@ pub(super) async fn acquire(
         let reason = if idle.created_at.elapsed() >= MAX_AGE { "connection_age_limit" } else { "done" };
         close_later(idle.socket, reason);
     }
-    lease.socket = Some(connect(url, headers, connect_timeout_ms).await?);
+    lease.socket = Some(connect(url, headers, env, connect_timeout_ms).await?);
     Ok(lease)
 }
 
