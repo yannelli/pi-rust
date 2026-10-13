@@ -190,7 +190,8 @@ mod tests {
     }
 
     fn assistant(input: u64, cache_read: u64, cache_write: u64, timestamp: i64) -> AssistantMessage {
-        let mut message = AssistantMessage { provider: "anthropic".into(), model: "claude".into(), timestamp, ..Default::default() };
+        let mut message =
+            AssistantMessage { provider: "anthropic".into(), model: "claude".into(), timestamp, ..Default::default() };
         message.usage.input = input;
         message.usage.cache_read = cache_read;
         message.usage.cache_write = cache_write;

@@ -70,7 +70,7 @@ impl InteractiveMode {
                 info.push_str(&format!("{} ${:.3}", dim("Total:"), stats.cost));
                 if breakdown.len() > 1 || breakdown.first().is_some_and(|entry| entry.key != selected) {
                     for entry in &breakdown {
-                        let tokens = dim(&format!("({} tokens)", format_tokens(entry.tokens as f64)));
+                        let tokens = dim(&format!("({} tokens)", format_tokens(entry.tokens)));
                         let key = dim(&format!("{}:", entry.key));
                         info.push_str(&format!("\n  {key} ${:.3} {tokens}", entry.cost));
                     }
@@ -142,19 +142,22 @@ impl InteractiveMode {
 
     /// `/share`: a secret GitHub gist of the HTML export, through the `gh` command.
     pub(super) fn handle_share_command(&self) {
-        let directory = match tempfile::Builder::new().prefix("pi-share-").tempdir() {
-            Ok(directory) => directory,
-            Err(error) => return self.show_error(&format!("Failed to export session: {error}")),
-        };
         match std::process::Command::new("gh").args(["auth", "status"]).output() {
-            Err(_) => return self.show_error("GitHub CLI (gh) is not installed. Install it from https://cli.github.com/"),
+            Err(_) => {
+                return self.show_error("GitHub CLI (gh) is not installed. Install it from https://cli.github.com/");
+            }
             Ok(output) if !output.status.success() => {
                 return self.show_error("GitHub CLI is not logged in. Run 'gh auth login' first.");
             }
             Ok(_) => {}
         }
-        let html = directory.path().join("session.html");
-        if let Err(error) = self.session().export_to_html(Some(&html.to_string_lossy())) {
+        let directory = std::env::temp_dir().join(format!("pi-share-{}", crate::session::ids::uuid_v4()));
+        let html = directory.join("session.html");
+        if let Err(error) = std::fs::create_dir_all(&directory)
+            .map_err(anyhow::Error::from)
+            .and_then(|()| self.session().export_to_html(Some(&html.to_string_lossy())))
+        {
+            let _ = std::fs::remove_dir_all(&directory);
             return self.show_error(&format!("Failed to export session: {error}"));
         }
         let loader = Rc::new(RefCell::new(BorderedLoader::new(&self.tui(), "Creating gist...", true)));
@@ -172,9 +175,12 @@ impl InteractiveMode {
             command.args(["gist", "create", "--public=false"]).arg(&html).kill_on_drop(true);
             let output = tokio::select! {
                 output = command.output() => output,
-                _ = cancel.cancelled() => return,
+                _ = cancel.cancelled() => Err(std::io::Error::other("cancelled")),
             };
-            drop(directory);
+            let _ = std::fs::remove_dir_all(&directory);
+            if cancel.is_cancelled() {
+                return;
+            }
             loader.borrow_mut().dispose();
             mode.selector.restore_editor();
             let output = match output {
@@ -190,8 +196,7 @@ impl InteractiveMode {
             let Some(gist_id) = gist_url.rsplit('/').next().filter(|id| !id.is_empty()) else {
                 return mode.show_error("Failed to parse gist ID from gh output");
             };
-            let base = std::env::var("PI_SHARE_VIEWER_URL").unwrap_or_else(|_| "https://pi.dev/session/".into());
-            let preview = format!("{base}#{gist_id}");
+            let preview = crate::export::share::share_viewer_url(gist_id);
             let link = pi_tui::terminal_image::hyperlink;
             let preview_link = link(&preview, &preview);
             mode.show_status(&format!("Share URL: {preview_link}\nGist: {}", link(&gist_url, &gist_url)));

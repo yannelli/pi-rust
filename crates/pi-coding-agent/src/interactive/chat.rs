@@ -20,8 +20,10 @@ use super::mode::{InteractiveMode, LastStatus};
 use super::renderers::{ToolResultView, builtin_renderer};
 use super::util::format_tokens;
 use crate::markdown_transform::create_mermaid_markdown_transformer;
-use crate::markdown_transform::mermaid::{ActiveThemeStyle, MermaidTransformerOptions};
-use crate::messages::{BashExecutionMessage, BranchSummaryMessage, CompactionSummaryMessage, CustomMessage, CustomRole};
+use crate::markdown_transform::{ActiveThemeStyle, MermaidTransformerOptions};
+use crate::messages::{
+    BashExecutionMessage, BranchSummaryMessage, CompactionSummaryMessage, CustomMessage, CustomRole,
+};
 use crate::resources::parse_skill_block;
 use crate::session::entry::{Entry, EntryData};
 use crate::session::session_entry_to_context_messages;
@@ -29,7 +31,7 @@ use crate::theme::{ThemeColor, get_markdown_theme, theme};
 
 /// One transcript item of a session replay.
 pub(super) enum RenderItem {
-    Message { message: Message, entry_id: Option<String> },
+    Message { message: Box<Message>, entry_id: Option<String> },
     CacheWarm(crate::session::entry::UsageEntry),
     SummaryCost { compaction: bool, usage: Usage },
 }
@@ -244,7 +246,10 @@ impl InteractiveMode {
             let messages = session_entry_to_context_messages(entry);
             let has_messages = !messages.is_empty();
             items.extend(
-                messages.into_iter().map(|message| RenderItem::Message { message, entry_id: Some(entry.id().into()) }),
+                messages.into_iter().map(|message| RenderItem::Message {
+                    message: Box::new(message),
+                    entry_id: Some(entry.id().into()),
+                }),
             );
             let cost = match entry.data() {
                 EntryData::Compaction(compaction) => compaction.usage.map(|usage| (true, usage)),
@@ -284,39 +289,42 @@ impl InteractiveMode {
             match item {
                 RenderItem::CacheWarm(usage) => self.add_cache_warming_usage(&usage),
                 RenderItem::SummaryCost { compaction, usage } => self.add_summary_cost_notice(compaction, &usage),
-                RenderItem::Message { message: Message::Assistant(assistant), entry_id } => {
-                    self.add_message_to_chat(&Message::Assistant(assistant.clone()), false);
-                    let failed = matches!(assistant.stop_reason, StopReason::Aborted | StopReason::Error);
-                    for block in &assistant.content {
-                        let pi_ai::ContentBlock::ToolCall { id, name, arguments, .. } = block else { continue };
-                        let tool = self.new_tool_component(name, id, arguments.clone());
-                        if failed {
-                            let text = match assistant.stop_reason {
-                                StopReason::Aborted => abort_message(session.retry_attempt()),
-                                _ => assistant.error_message.clone().unwrap_or_else(|| "Error".into()),
-                            };
-                            tool.borrow_mut().update_result(error_result(&text), false);
-                        } else {
-                            pending.push((id.clone(), tool));
+                RenderItem::Message { message, entry_id } => match *message {
+                    Message::Assistant(assistant) => {
+                        self.add_message_to_chat(&Message::Assistant(assistant.clone()), false);
+                        let failed = matches!(assistant.stop_reason, StopReason::Aborted | StopReason::Error);
+                        for block in &assistant.content {
+                            let pi_ai::ContentBlock::ToolCall(call) = block else { continue };
+                            let id = &call.id;
+                            let tool = self.new_tool_component(&call.name, id, Value::Object(call.arguments.clone()));
+                            if failed {
+                                let text = match assistant.stop_reason {
+                                    StopReason::Aborted => abort_message(session.retry_attempt()),
+                                    _ => assistant.error_message.clone().unwrap_or_else(|| "Error".into()),
+                                };
+                                tool.borrow_mut().update_result(error_result(&text), false);
+                            } else {
+                                pending.push((id.clone(), tool));
+                            }
+                        }
+                        if !failed && let Some(miss) = entry_id.and_then(|id| cache_misses.get(&id).copied()) {
+                            self.add_cache_miss_notice(miss);
                         }
                     }
-                    if !failed && let Some(miss) = entry_id.and_then(|id| cache_misses.get(&id).copied()) {
-                        self.add_cache_miss_notice(miss);
+                    Message::ToolResult(result) => {
+                        if let Some(index) = pending.iter().position(|(id, _)| *id == result.tool_call_id) {
+                            let (_, tool) = pending.remove(index);
+                            let view = ToolResultView {
+                                content: result.content.clone(),
+                                details: result.details.clone(),
+                                is_error: result.is_error,
+                                duration_ms: None,
+                            };
+                            tool.borrow_mut().update_result(view, false);
+                        }
                     }
-                }
-                RenderItem::Message { message: Message::ToolResult(result), .. } => {
-                    if let Some(index) = pending.iter().position(|(id, _)| *id == result.tool_call_id) {
-                        let (_, tool) = pending.remove(index);
-                        let view = ToolResultView {
-                            content: result.content.clone(),
-                            details: result.details.clone(),
-                            is_error: result.is_error,
-                            duration_ms: None,
-                        };
-                        tool.borrow_mut().update_result(view, false);
-                    }
-                }
-                RenderItem::Message { message, .. } => self.add_message_to_chat(&message, populate_history),
+                    message => self.add_message_to_chat(&message, populate_history),
+                },
             }
         }
         self.state.borrow_mut().pending_tools = pending;
@@ -340,7 +348,7 @@ impl InteractiveMode {
         let tokens = usage.input + usage.output + usage.cache_read + usage.cache_write;
         let cost = if usage.cost.total >= 0.01 { format!(" (~${:.2})", usage.cost.total) } else { String::new() };
         let label = if compaction { "Compaction" } else { "Branch summary" };
-        let text = format!("{label}: {} tokens billed{cost}", format_tokens(tokens as f64));
+        let text = format!("{label}: {} tokens billed{cost}", format_tokens(tokens));
         self.add_spacer();
         self.add_text(move || theme().fg(ThemeColor::Warning, &text), 1, 0);
     }
@@ -357,7 +365,7 @@ impl InteractiveMode {
         } else {
             "Cache miss".to_string()
         };
-        let text = format!("{label}: {} tokens re-billed{cost}", format_tokens(miss.missed_tokens as f64));
+        let text = format!("{label}: {} tokens re-billed{cost}", format_tokens(miss.missed_tokens));
         self.add_spacer();
         self.add_text(move || theme().fg(ThemeColor::Warning, &text), 1, 0);
     }

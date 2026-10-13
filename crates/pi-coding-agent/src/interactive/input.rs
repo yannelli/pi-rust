@@ -405,7 +405,7 @@ impl InteractiveMode {
                     return Ok(Some((joined, true)));
                 }
                 if let Some(image) = crate::clipboard::read_clipboard_image() {
-                    let path = crate::clipboard::paste::save_clipboard_image(&image).map_err(|e| e.to_string())?;
+                    let path = crate::clipboard::save_clipboard_image(&image).map_err(|e| e.to_string())?;
                     return Ok(Some((path.display().to_string(), false)));
                 }
                 Ok(crate::clipboard::read_clipboard_text().map(|text| (text, false)))

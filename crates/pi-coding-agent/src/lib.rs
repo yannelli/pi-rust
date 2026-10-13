@@ -25,7 +25,6 @@ pub mod model_resolver;
 pub mod packages;
 pub mod platform;
 pub mod print_mode;
-pub mod render;
 pub mod resources;
 pub mod session;
 pub mod settings;

@@ -113,7 +113,7 @@ impl InteractiveMode {
         } else if text == "/dementedelves" {
             clear();
             self.add_spacer();
-            let announcement = crate::interactive_components::earendil_announcement::EarendilAnnouncement::new();
+            let announcement = crate::interactive_components::EarendilAnnouncementComponent::new();
             self.add_to_chat(component(announcement));
         } else if text == "/resume" {
             clear();
@@ -121,9 +121,9 @@ impl InteractiveMode {
         } else if let Some(args) = argument(text, "mcp") {
             clear();
             self.handle_mcp_command(args.map(str::to_string));
-        } else if let Some(args) = argument(text, "llama") {
+        } else if text == "/llama" {
             clear();
-            self.handle_llama_command(args.map(str::to_string));
+            self.handle_llama_command();
         } else if text == "/quit" {
             clear();
             self.request_shutdown();
@@ -178,7 +178,7 @@ impl InteractiveMode {
     pub(super) fn handle_copy_command(&self, flash: bool, prefer_selection: bool) {
         let tui = self.tui();
         if prefer_selection && tui.is_viewport() && !tui.get_copy_on_select() && tui.has_active_selection() {
-            let _ = tui.copy_active_selection_to_clipboard();
+            drop(tui.copy_active_selection_to_clipboard());
             return;
         }
         let Some(text) = self.session().last_assistant_text() else {
@@ -221,7 +221,7 @@ impl InteractiveMode {
         self.add_text(move || theme().fg(ThemeColor::Dim, &line), 1, 0);
     }
 
-    fn add_bordered_markdown(&self, title: &'static str, markdown: &str) {
+    pub(super) fn add_bordered_markdown(&self, title: &'static str, markdown: &str) {
         self.add_spacer();
         self.add_to_chat(component(DynamicBorder::new()));
         self.add_text(move || theme().bold(&theme().fg(ThemeColor::Accent, title)), 1, 0);
@@ -275,7 +275,7 @@ impl InteractiveMode {
     }
 
     /// `/reload`: settings, keybindings, skills, prompts, themes, and context files.
-    fn handle_reload_command(&self) {
+    pub(super) fn handle_reload_command(&self) {
         let session = self.session();
         if session.is_streaming() {
             return self.show_warning("Wait for the current response to finish before reloading.");

@@ -115,7 +115,11 @@ impl ProgramStatusReporter {
 
     /// Forget the replaced session's run.
     pub fn reset(&mut self) {
-        *self = Self { blocked: std::mem::take(&mut self.blocked), last_report: self.last_report.take(), ..Self::default() };
+        *self = Self {
+            blocked: std::mem::take(&mut self.blocked),
+            last_report: self.last_report.take(),
+            ..Self::default()
+        };
     }
 
     /// The status to show for `session_name`.
@@ -131,7 +135,12 @@ impl ProgramStatusReporter {
         } else {
             self.resting.clone()
         };
-        ProgramStatus { state: report.state, app: Some(APP_NAME.to_string()), kind: report.kind, message: report.message }
+        ProgramStatus {
+            state: report.state,
+            app: Some(APP_NAME.to_string()),
+            kind: report.kind,
+            message: report.message,
+        }
     }
 
     /// The status when it differs from the last one reported.

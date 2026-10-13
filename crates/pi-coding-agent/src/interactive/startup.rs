@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use pi_tui::{Spacer, Text, component};
 
-use super::components::pi_logo::{pi_logo_lines, pi_wordmark, supports_pi_logo};
 use super::components::ExpandableText;
+use super::components::pi_logo::{pi_logo_lines, pi_wordmark, supports_pi_logo};
 use super::mode::InteractiveMode;
 use crate::interactive_components::{DynamicBorder, key_hint, key_text, raw_key_hint};
 use crate::platform::changelog::{condensed_changelog_notice, embedded_changelog_entries, startup_changelog};
@@ -122,7 +122,11 @@ impl InteractiveMode {
         }
         if decision.report_install && crate::platform::telemetry::install_telemetry_enabled(&settings) {
             tokio::spawn(async move {
-                let _ = crate::platform::telemetry::report_install_telemetry(VERSION).await;
+                let client = pi_ai::http::shared_client();
+                let url = crate::platform::telemetry::REPORT_INSTALL_URL;
+                let offline = crate::config::offline();
+                let _ =
+                    crate::platform::telemetry::report_install_telemetry(&client, url, VERSION, true, offline).await;
             });
         }
         decision.markdown
@@ -145,7 +149,6 @@ impl InteractiveMode {
             format!("{top} {version}\n{bottom} {hints}")
         };
         let collapsed = {
-            let with_logo = with_logo.clone();
             move || {
                 let compact = [
                     key_hint("app.interrupt", "interrupt"),
@@ -193,7 +196,8 @@ impl InteractiveMode {
         }
         self.add_to_chat(component(DynamicBorder::new()));
         if self.settings().collapse_changelog() {
-            let notice = condensed_changelog_notice(&markdown, VERSION).replace("/changelog", &theme().bold("/changelog"));
+            let notice =
+                condensed_changelog_notice(&markdown, VERSION).replace("/changelog", &theme().bold("/changelog"));
             self.add_to_chat(component(Text::new(&notice, 1, 0)));
         } else {
             self.add_text(|| theme().bold(&theme().fg(ThemeColor::Accent, "What's New")), 1, 0);
@@ -232,6 +236,7 @@ impl InteractiveMode {
             ));
         }
         self.start_version_check();
+        self.maybe_warn_about_anthropic_subscription_auth(None);
     }
 
     pub(super) fn register_resource_themes(&self) {
@@ -282,6 +287,8 @@ impl InteractiveMode {
         self.program_status.borrow_mut().reset();
         self.apply_runtime_settings();
         self.bridge.subscribe(&session);
+        self.install_session_hooks();
+        self.refresh_login_providers();
         if first_bind {
             self.show_loaded_resources(false, false);
             self.render_initial_messages();

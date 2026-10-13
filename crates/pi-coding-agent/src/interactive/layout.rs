@@ -168,37 +168,38 @@ pub(super) fn create_tui(
     fn search_match(text: &str) -> String {
         theme().bg(ThemeBg::SearchMatchBg, &theme().fg(ThemeColor::SearchMatchText, text))
     }
-    let alt = TuiAltScreenOptions {
-        wheel_scroll_lines: Some(wheel_lines(settings)),
-        mouse: None,
-        search_match_style: Some(Rc::new(|text: &str| theme().underline(&search_match(text)))),
-        search_current_match_style: Some(Rc::new(|text: &str| theme().bold(&theme().inverse(&search_match(text))))),
-        search_navigation_button_style: Some(Rc::new(|text: &str, hovered: bool| {
-            if hovered { theme().underline(text) } else { text.to_string() }
-        })),
-        scroll_to_end_indicator: Some(Rc::new(|| {
-            let shortcut = key_display_text("tui.altScreen.bottom");
-            let suffix = if shortcut.is_empty() { String::new() } else { format!(" · {shortcut}") };
-            let label = format!(" ↓ Jump to latest message{suffix} ");
-            theme().bg(ThemeBg::SelectedBg, &theme().fg(ThemeColor::Text, &label))
-        })),
-        open_url: Some(Rc::new(|url: &str| pi_ai::auth::oauth::browser::open_browser(url))),
-        on_right_click_paste: Some(Rc::new(move || {
-            if let Some(mode) = owner.upgrade() {
-                mode.handle_right_click_paste();
-            }
-        })),
-        copy_on_select: Some(settings.fullscreen_copy_on_select()),
-        copy_selection: Some(Rc::new(|text: String, completion: pi_tui::CopyCompletion| {
-            std::thread::spawn(move || {
-                let outcome = match crate::clipboard::copy_to_clipboard(&text) {
-                    Ok(()) => pi_tui::CopyOutcome::Copied,
-                    Err(error) => pi_tui::CopyOutcome::Failed(Some(error.to_string())),
-                };
-                completion.complete(outcome);
-            });
-        })),
-    };
+    let alt =
+        TuiAltScreenOptions {
+            wheel_scroll_lines: Some(wheel_lines(settings)),
+            mouse: None,
+            search_match_style: Some(Rc::new(|text: &str| theme().underline(&search_match(text)))),
+            search_current_match_style: Some(Rc::new(|text: &str| theme().bold(&theme().inverse(&search_match(text))))),
+            search_navigation_button_style: Some(Rc::new(|text: &str, hovered: bool| {
+                if hovered { theme().underline(text) } else { text.to_string() }
+            })),
+            scroll_to_end_indicator: Some(Rc::new(|| {
+                let shortcut = key_display_text("tui.altScreen.bottom");
+                let suffix = if shortcut.is_empty() { String::new() } else { format!(" · {shortcut}") };
+                let label = format!(" ↓ Jump to latest message{suffix} ");
+                theme().bg(ThemeBg::SelectedBg, &theme().fg(ThemeColor::Text, &label))
+            })),
+            open_url: Some(Rc::new(|url: &str| pi_ai::auth::oauth::open_browser(url))),
+            on_right_click_paste: Some(Rc::new(move || {
+                if let Some(mode) = owner.upgrade() {
+                    mode.handle_right_click_paste();
+                }
+            })),
+            copy_on_select: Some(settings.fullscreen_copy_on_select()),
+            copy_selection: Some(Rc::new(|text: String, completion: pi_tui::CopyCompletion| {
+                std::thread::spawn(move || {
+                    let outcome = match crate::clipboard::copy_to_clipboard(&text) {
+                        Ok(()) => pi_tui::CopyOutcome::Copied,
+                        Err(error) => pi_tui::CopyOutcome::Failed(Some(error.to_string())),
+                    };
+                    completion.complete(outcome);
+                });
+            })),
+        };
     Tui::new_alt_screen(terminal, options, alt)
 }
 

@@ -74,7 +74,8 @@ impl InteractiveMode {
             }
             UiEvent::ToolEnd { id, result, is_error, duration_ms } => {
                 if let Some(tool) = self.pending_tool(&id) {
-                    let view = ToolResultView { content: result.content, details: result.details, is_error, duration_ms };
+                    let view =
+                        ToolResultView { content: result.content, details: result.details, is_error, duration_ms };
                     tool.borrow_mut().update_result(view, false);
                     self.state.borrow_mut().pending_tools.retain(|(pending, _)| *pending != id);
                 }
@@ -141,6 +142,12 @@ impl InteractiveMode {
             UiEvent::ThemeChanged => {
                 self.tui().invalidate();
                 self.update_editor_border_color();
+            }
+            UiEvent::Notify { message, level } => self.show_notice(&message, level),
+            UiEvent::Call(call) => {
+                if let Some(mode) = self.weak.upgrade() {
+                    (call.0)(&mode);
+                }
             }
         }
         self.request_render();
@@ -245,12 +252,13 @@ impl InteractiveMode {
         let Some(streaming) = self.state.borrow().streaming_component.clone() else { return };
         streaming.borrow_mut().update_content(&assistant, true);
         for block in &assistant.content {
-            let ContentBlock::ToolCall { id, name, arguments, .. } = block else { continue };
-            match self.pending_tool(id) {
-                Some(tool) => tool.borrow_mut().update_args(arguments.clone()),
+            let ContentBlock::ToolCall(call) = block else { continue };
+            let arguments = Value::Object(call.arguments.clone());
+            match self.pending_tool(&call.id) {
+                Some(tool) => tool.borrow_mut().update_args(arguments),
                 None => {
-                    let tool = self.new_tool_component(name, id, arguments.clone());
-                    self.state.borrow_mut().pending_tools.push((id.clone(), tool));
+                    let tool = self.new_tool_component(&call.name, &call.id, arguments);
+                    self.state.borrow_mut().pending_tools.push((call.id.clone(), tool));
                 }
             }
         }

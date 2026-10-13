@@ -131,7 +131,7 @@ fn format_scope_groups(items: &[Item], format_path: &dyn Fn(&Item) -> String) ->
     lines.join("\n")
 }
 
-fn compact_list(items: Vec<String>, sort: bool) -> String {
+pub(super) fn compact_list(items: Vec<String>, sort: bool) -> String {
     let mut labels: Vec<String> =
         items.into_iter().map(|item| item.trim().to_string()).filter(|item| !item.is_empty()).collect();
     if sort {
@@ -236,7 +236,7 @@ fn format_diagnostics(diagnostics: &[ResourceDiagnostic], sources: &HashMap<Stri
 }
 
 impl InteractiveMode {
-    fn add_loaded_section(
+    pub(super) fn add_loaded_section(
         &self,
         name: &'static str,
         collapsed: impl Fn() -> String + 'static,
@@ -277,7 +277,10 @@ impl InteractiveMode {
         let extensions: Vec<Item> = resources
             .extensions
             .iter()
-            .map(|extension| Item { path: extension.path.display().to_string(), source: Some(extension.source_info.clone()) })
+            .map(|extension| Item {
+                path: extension.path.display().to_string(),
+                source: Some(extension.source_info.clone()),
+            })
             .collect();
         for item in &extensions {
             if let Some(info) = &item.source {
@@ -307,7 +310,8 @@ impl InteractiveMode {
                     .iter()
                     .map(|path| {
                         let absolute = resolve_lexically(Path::new(path), &cwd);
-                        cwd_relative_path(&absolute, &cwd).unwrap_or_else(|| format_display_path(&absolute.display().to_string()))
+                        cwd_relative_path(&absolute, &cwd)
+                            .unwrap_or_else(|| format_display_path(&absolute.display().to_string()))
                     })
                     .collect();
                 let full = context.clone();
@@ -315,8 +319,10 @@ impl InteractiveMode {
                     "Context",
                     move || compact_list(relative.clone(), false),
                     move || {
-                        let lines: Vec<String> =
-                            full.iter().map(|path| theme().fg(ThemeColor::Dim, &format!("  {}", format_display_path(path)))).collect();
+                        let lines: Vec<String> = full
+                            .iter()
+                            .map(|path| theme().fg(ThemeColor::Dim, &format!("  {}", format_display_path(path))))
+                            .collect();
                         lines.join("\n")
                     },
                 );
@@ -326,7 +332,10 @@ impl InteractiveMode {
                 let items: Vec<Item> = resources
                     .skills
                     .iter()
-                    .map(|skill| Item { path: skill.file_path.display().to_string(), source: Some(skill.source_info.clone()) })
+                    .map(|skill| Item {
+                        path: skill.file_path.display().to_string(),
+                        source: Some(skill.source_info.clone()),
+                    })
                     .collect();
                 self.add_loaded_section(
                     "Skills",
@@ -344,16 +353,24 @@ impl InteractiveMode {
                 let items: Vec<Item> = resources
                     .prompts
                     .iter()
-                    .map(|prompt| Item { path: prompt.file_path.display().to_string(), source: Some(prompt.source_info.clone()) })
+                    .map(|prompt| Item {
+                        path: prompt.file_path.display().to_string(),
+                        source: Some(prompt.source_info.clone()),
+                    })
                     .collect();
                 self.add_loaded_section(
                     "Prompts",
                     move || compact_list(names.clone(), true),
-                    move || format_scope_groups(&items, &|item| by_path.get(&item.path).cloned().unwrap_or_else(|| format_display_path(&item.path))),
+                    move || {
+                        format_scope_groups(&items, &|item| {
+                            by_path.get(&item.path).cloned().unwrap_or_else(|| format_display_path(&item.path))
+                        })
+                    },
                 );
             }
             if !extensions.is_empty() {
-                let labels: Vec<String> = extensions.iter().map(|item| compact_extension_label(item, &extensions)).collect();
+                let labels: Vec<String> =
+                    extensions.iter().map(|item| compact_extension_label(item, &extensions)).collect();
                 let items = extensions.clone();
                 self.add_loaded_section(
                     "Extensions",

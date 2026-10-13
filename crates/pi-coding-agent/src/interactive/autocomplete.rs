@@ -8,7 +8,7 @@ use pi_tui::fuzzy::fuzzy_filter;
 use pi_tui::{AutocompleteItem, CombinedAutocompleteProvider, SlashCommand};
 
 use super::mode::InteractiveMode;
-use crate::interactive_components::model_selector::source::model_search_text;
+use crate::interactive_components::model_selector::model_search_text;
 use crate::resources::source_info::{SourceInfo, SourceScope};
 
 /// Built-in commands: name, description, and argument hint.
@@ -35,8 +35,8 @@ pub const BUILTIN_SLASH_COMMANDS: &[(&str, &str, Option<&str>)] = &[
     ("new", "Start a new session", None),
     ("compact", "Manually compact the session context", None),
     ("resume", "Resume a different session", None),
-    ("mcp", "Manage MCP servers", None),
-    ("llama", "Manage llama.cpp models", None),
+    ("mcp", "Manage MCP servers: sign in, reconnect, enable or disable, and change exposure", None),
+    ("llama", "Manage llama.cpp router models", None),
     ("reload", "Reload keybindings, extensions, skills, prompts, themes, and context files", None),
     ("quit", "Quit pi", None),
 ];
@@ -85,11 +85,12 @@ fn model_completions(weak: &Weak<InteractiveMode>, prefix: &str) -> Option<Vec<A
     if models.is_empty() {
         return None;
     }
-    let filtered = fuzzy_filter(models, prefix, model_search_text);
+    let searchable: Vec<(String, pi_ai::Model)> = models.into_iter().map(|m| (model_search_text(&m), m)).collect();
+    let filtered = fuzzy_filter(searchable, prefix, |(text, _)| text.as_str());
     (!filtered.is_empty()).then(|| {
         filtered
             .into_iter()
-            .map(|model| {
+            .map(|(_, model)| {
                 AutocompleteItem::new(format!("{}/{}", model.provider, model.id), model.id.clone())
                     .with_description(model.provider.clone())
             })
@@ -105,8 +106,9 @@ fn thinking_completions(weak: &Weak<InteractiveMode>, prefix: &str) -> Option<Ve
         .into_iter()
         .map(|level| level.as_str().to_string())
         .collect();
-    let filtered = fuzzy_filter(levels, prefix, |level: &String| level.clone());
-    (!filtered.is_empty()).then(|| filtered.into_iter().map(|level| AutocompleteItem::new(level.clone(), level)).collect())
+    let filtered = fuzzy_filter(levels, prefix, |level: &String| level.as_str());
+    (!filtered.is_empty())
+        .then(|| filtered.into_iter().map(|level| AutocompleteItem::new(level.clone(), level)).collect())
 }
 
 impl InteractiveMode {
@@ -124,6 +126,9 @@ impl InteractiveMode {
                 "thinking" => command.with_argument_completions(move |prefix| thinking_completions(&weak, prefix)),
                 "login" => command.with_argument_completions(move |prefix| {
                     weak.upgrade().and_then(|mode| mode.login_completions(prefix))
+                }),
+                "mcp" => command.with_argument_completions(move |prefix| {
+                    weak.upgrade().and_then(|mode| mode.mcp_completions(prefix))
                 }),
                 _ => command,
             };

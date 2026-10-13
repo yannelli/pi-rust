@@ -71,6 +71,28 @@ pub fn quote_if_needed(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+/// `pi --session <id>` (with `--session-dir` when not the default) to continue this session, or
+/// `None` without a terminal or a saved session file (upstream `formatResumeCommand`).
+pub fn resume_command(session: &crate::agent_session::AgentSession, agent_dir: &Path) -> Option<String> {
+    use std::io::IsTerminal;
+    if !std::io::stdout().is_terminal() {
+        return None;
+    }
+    let manager = session.session_manager();
+    let file = manager.session_file()?;
+    if !manager.is_persisted() || !file.exists() {
+        return None;
+    }
+    let mut args = vec![crate::resources::brand::APP_NAME.to_string()];
+    if !manager.uses_default_session_dir(agent_dir) {
+        args.push("--session-dir".into());
+        args.push(quote_if_needed(&manager.session_dir().display().to_string()));
+    }
+    args.push("--session".into());
+    args.push(manager.session_id().to_string());
+    Some(args.join(" "))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

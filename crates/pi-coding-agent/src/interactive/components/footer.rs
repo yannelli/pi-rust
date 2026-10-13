@@ -24,10 +24,7 @@ pub const VIRTUAL_MODEL_API: &str = "pi-virtual";
 
 /// Newlines, tabs, and repeated spaces collapse to single spaces.
 fn sanitize_status_text(text: &str) -> String {
-    text.split(|c: char| matches!(c, '\r' | '\n' | '\t' | ' '))
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ")
+    text.split(['\r', '\n', '\t', ' ']).filter(|part| !part.is_empty()).collect::<Vec<_>>().join(" ")
 }
 
 /// `cwd` with the home directory shown as `~`.
@@ -156,7 +153,7 @@ impl Component for FooterComponent {
         let theme = theme();
         let (totals, cache_hit_rate, context_usage) = {
             let stats = self.session_stats();
-            (stats.totals, stats.latest_cache_hit_rate, stats.context_usage.clone())
+            (stats.totals, stats.latest_cache_hit_rate, stats.context_usage)
         };
         let session = self.session.clone();
         let model = session.model();

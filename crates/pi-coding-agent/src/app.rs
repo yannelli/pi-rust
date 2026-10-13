@@ -62,6 +62,8 @@ pub struct AppOptions {
     pub custom_tools: Vec<SharedTool>,
     /// How sessions run the built-in MCP support.
     pub mcp: McpSessionOptions,
+    /// Trust answers given before the runtime started, such as the interactive startup prompt.
+    pub project_trust_decisions: Vec<(PathBuf, bool)>,
 }
 
 fn resolve_cli_paths(cwd: &Path, paths: &[String]) -> Vec<String> {
@@ -205,8 +207,9 @@ async fn create_runtime_parts(
 
 /// The factory that applies `options` to every session the runtime creates.
 pub fn runtime_factory(options: AppOptions) -> RuntimeFactory {
+    let decided = options.project_trust_decisions.iter().cloned().collect();
     let trust =
-        Arc::new(TrustCache { store: ProjectTrustStore::new(&options.agent_dir), decided: Mutex::new(HashMap::new()) });
+        Arc::new(TrustCache { store: ProjectTrustStore::new(&options.agent_dir), decided: Mutex::new(decided) });
     let options = Arc::new(options);
     Arc::new(move |target: RuntimeTarget| {
         let (options, trust) = (options.clone(), trust.clone());

@@ -13,7 +13,8 @@ use pi_coding_agent::cli::{Args, OutputMode, help_text, normalize_session_name, 
 use pi_coding_agent::config::{ENV_SESSION_DIR, agent_dir, auth_path, env_flag, expand_tilde, models_path};
 use pi_coding_agent::export::{ExportTheme, export_from_file};
 use pi_coding_agent::files::process_file_args;
-use pi_coding_agent::interactive::run_interactive;
+use pi_coding_agent::interactive::startup_ui::prompt_project_trust;
+use pi_coding_agent::interactive::{InteractiveOptions, run_interactive};
 use pi_coding_agent::mcp_cli::run_mcp_cli;
 use pi_coding_agent::packages::{PackageCommandOptions, run_config_command, run_package_command};
 use pi_coding_agent::print_mode::run_print_mode;
@@ -408,15 +409,23 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
         session_manager.append_session_info(&name)?;
     }
 
-    let options = AppOptions { oauth: Some(oauth_lookup()), ..AppOptions::from_args(&args, &cwd, &agent_dir) };
+    let mut options = AppOptions { oauth: Some(oauth_lookup()), ..AppOptions::from_args(&args, &cwd, &agent_dir) };
+    if interactive {
+        let session_cwd = session_manager.cwd().to_path_buf();
+        let local = tokio::task::LocalSet::new();
+        let prompt = prompt_project_trust(&session_cwd, &agent_dir, args.project_trust_override);
+        if let Some(trusted) = local.run_until(prompt).await {
+            options.project_trust_decisions.push((session_cwd, trusted));
+        }
+    }
     let runtime = create_app_runtime(options, session_manager).await?;
     let session = runtime.session();
     configure_http_from_settings(session.settings());
     let runtime_diagnostics: Vec<RuntimeDiagnostic> =
         runtime.diagnostics().into_iter().filter(|diagnostic| !startup_diagnostics.contains(diagnostic)).collect();
     let has_errors = runtime_diagnostics.iter().any(|diagnostic| diagnostic.level == DiagnosticLevel::Error);
-    report(&startup_diagnostics);
     if mode != AppMode::Interactive || has_errors {
+        report(&startup_diagnostics);
         report(&runtime_diagnostics);
     }
     if has_errors {
@@ -435,14 +444,21 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
             Ok(run_print_mode(&runtime, output, initial_message, files.images, args.messages).await)
         }
         _ => {
-            report(&runtime_diagnostics);
-            if let Some(message) = runtime.model_fallback_message() {
-                eprintln!("Warning: {message}");
-            }
-            for extra in args.messages {
-                session.follow_up(&extra, Vec::new());
-            }
-            run_interactive(runtime, initial_message.map(|text| (text, files.images))).await?;
+            let mut diagnostics = startup_diagnostics;
+            diagnostics.extend(runtime_diagnostics);
+            let options = InteractiveOptions {
+                initial_message,
+                initial_images: files.images,
+                initial_messages: args.messages,
+                verbose: args.verbose,
+                tui_mode: args.tui_mode,
+                initial_theme_setting: args.use_theme.clone(),
+                startup_diagnostics: diagnostics,
+                model_fallback_message: runtime.model_fallback_message(),
+                agent_dir: Some(agent_dir.clone()),
+                ..InteractiveOptions::default()
+            };
+            run_interactive(Arc::new(runtime), options).await?;
             Ok(0)
         }
     }

@@ -81,6 +81,9 @@ pub(super) struct ModeState {
     pub working_visible: bool,
     pub header: Option<Rc<RefCell<ExpandableText>>>,
     pub bug_hint_shown: bool,
+    pub anthropic_warning_shown: bool,
+    /// Login options for `/login` completion, refreshed after each login and logout.
+    pub login_providers: Vec<crate::interactive_components::login::AuthSelectorProvider>,
     pub main_screen_state: Option<pi_tui::TuiMainScreenRenderState>,
 }
 
@@ -115,6 +118,8 @@ impl ModeState {
             working_visible: true,
             header: None,
             bug_hint_shown: false,
+            anthropic_warning_shown: false,
+            login_providers: Vec::new(),
             main_screen_state: None,
         }
     }
@@ -133,7 +138,6 @@ pub struct InteractiveMode {
     pub(super) bridge: Arc<EventBridge>,
     pub(super) ui: Layout,
     pub(super) editor: EditorHandle,
-    pub(super) editor_component: ComponentRef,
     pub(super) selector: Rc<SelectorSlot>,
     pub(super) footer: Rc<RefCell<FooterComponent>>,
     pub(super) footer_data: Rc<RefCell<FooterData>>,
@@ -171,7 +175,7 @@ impl InteractiveMode {
             let mut editor_container = Container::new();
             editor_container.add_child(editor_component.clone());
             let editor_container = Rc::new(RefCell::new(editor_container));
-            let selector = SelectorSlot::new(tui.clone(), editor_container.clone(), editor_component.clone());
+            let selector = SelectorSlot::new(tui.clone(), editor_container.clone(), editor_component);
             let footer_data = Rc::new(RefCell::new(FooterData::new(session.cwd())));
             let mut footer = FooterComponent::new(session.clone(), footer_data.clone());
             footer.set_auto_compact_enabled(session.auto_compaction_enabled());
@@ -190,7 +194,6 @@ impl InteractiveMode {
                 bridge: EventBridge::new(ui_loop::waker()),
                 ui,
                 editor,
-                editor_component,
                 selector,
                 footer,
                 footer_data,

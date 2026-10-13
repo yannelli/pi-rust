@@ -62,3 +62,29 @@ pub fn set_component_expanded(component: &ComponentRef, expanded: bool) -> bool 
     }
     true
 }
+
+/// Upstream `"setOutputPad" in child && child.setOutputPad(padding)` for chat children.
+pub fn set_component_output_pad(component: &ComponentRef, padding: usize) {
+    let Ok(mut component) = component.try_borrow_mut() else { return };
+    let any = component.as_any_mut();
+    if let Some(tool) = any.downcast_mut::<ToolExecutionComponent>() {
+        tool.set_output_pad(padding);
+    } else if let Some(bash) = any.downcast_mut::<BashExecutionComponent>() {
+        bash.set_output_pad(padding);
+    } else if let Some(message) = any.downcast_mut::<AssistantMessageComponent>() {
+        message.set_output_pad(padding);
+    } else if let Some(message) = any.downcast_mut::<CollapsibleMessage>() {
+        message.set_output_pad(padding);
+    }
+}
+
+/// Applies `apply` to each tool execution component among `children`.
+pub fn for_each_tool(children: &[ComponentRef], mut apply: impl FnMut(&mut ToolExecutionComponent)) {
+    for child in children {
+        if let Ok(mut child) = child.try_borrow_mut()
+            && let Some(tool) = child.as_any_mut().downcast_mut::<ToolExecutionComponent>()
+        {
+            apply(tool);
+        }
+    }
+}

@@ -2,6 +2,7 @@
 //! borrowed [`AgentSessionEvent`] into an owned [`UiEvent`], queues it, and wakes the UI loop.
 
 use std::collections::VecDeque;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use pi_agent::{AgentEvent, AgentToolResult};
@@ -9,24 +10,50 @@ use pi_ai::Message;
 use pi_tui::TuiWaker;
 use serde_json::Value;
 
+use super::mode::InteractiveMode;
 use crate::agent_session::{AgentSession, AgentSessionEvent, CompactionReason, SummarizationSource};
 use crate::compaction::CompactionResult;
 
+/// Kept for every session: work for the UI thread outlives session switches.
+const ANY_GENERATION: u64 = u64::MAX;
+
+/// Work for the UI thread, sent from any thread.
+pub struct UiCall(pub UiCallFn);
+
+/// The work of a [`UiCall`].
+pub type UiCallFn = Box<dyn FnOnce(&Rc<InteractiveMode>) + Send>;
+
 /// An owned session event, or a notice from a background task.
-#[derive(Debug)]
 pub enum UiEvent {
     AgentStart,
     TurnStart,
     MessageStart(Message),
     MessageUpdate(Message),
     MessageEnd(Message),
-    ToolStart { id: String, name: String, args: Value, nested: bool },
-    ToolUpdate { id: String, partial: AgentToolResult },
-    ToolEnd { id: String, result: AgentToolResult, is_error: bool, duration_ms: Option<u64> },
+    ToolStart {
+        id: String,
+        name: String,
+        args: Value,
+        nested: bool,
+    },
+    ToolUpdate {
+        id: String,
+        partial: AgentToolResult,
+    },
+    ToolEnd {
+        id: String,
+        result: AgentToolResult,
+        is_error: bool,
+        duration_ms: Option<u64>,
+    },
     AgentEnd,
-    AgentSettled { aborted: bool },
+    AgentSettled {
+        aborted: bool,
+    },
     QueueUpdate,
-    CompactionStart { reason: CompactionReason },
+    CompactionStart {
+        reason: CompactionReason,
+    },
     CompactionEnd {
         reason: CompactionReason,
         result: Option<CompactionResult>,
@@ -37,10 +64,25 @@ pub enum UiEvent {
     EntryAppended(Value),
     SessionInfoChanged,
     ThinkingLevelChanged,
-    AutoRetryStart { attempt: u32, max_attempts: u32, delay_ms: u64 },
-    AutoRetryEnd { success: bool, attempt: u32, final_error: Option<String> },
-    SummarizationRetryScheduled { attempt: u32, max_attempts: u32, delay_ms: u64, error_message: String },
-    SummarizationRetryAttemptStart { source: SummarizationSource },
+    AutoRetryStart {
+        attempt: u32,
+        max_attempts: u32,
+        delay_ms: u64,
+    },
+    AutoRetryEnd {
+        success: bool,
+        attempt: u32,
+        final_error: Option<String>,
+    },
+    SummarizationRetryScheduled {
+        attempt: u32,
+        max_attempts: u32,
+        delay_ms: u64,
+        error_message: String,
+    },
+    SummarizationRetryAttemptStart {
+        source: SummarizationSource,
+    },
     SummarizationRetryFinished,
     /// The runtime replaced the session (`/new`, `/resume`, fork, import).
     Rebind(Arc<AgentSession>),
@@ -48,6 +90,12 @@ pub enum UiEvent {
     Error(String),
     /// The theme file changed on disk.
     ThemeChanged,
+    /// A notice from a session feature, such as MCP (upstream `ctx.ui.notify`).
+    Notify {
+        message: String,
+        level: pi_mcp::NotifyLevel,
+    },
+    Call(UiCall),
 }
 
 impl UiEvent {
@@ -188,6 +236,12 @@ impl EventBridge {
         self.push(UiEvent::Rebind(session.clone()));
     }
 
+    /// Run `call` on the UI thread with the mode.
+    pub fn call(&self, call: impl FnOnce(&Rc<InteractiveMode>) + Send + 'static) {
+        self.lock().queue.push_back((ANY_GENERATION, UiEvent::Call(UiCall(Box::new(call)))));
+        self.waker.wake();
+    }
+
     pub fn unsubscribe(&self) {
         if let Some((session, id)) = self.lock().subscription.take() {
             session.unsubscribe(id);
@@ -198,7 +252,12 @@ impl EventBridge {
     pub fn drain(&self) -> Vec<UiEvent> {
         let mut state = self.lock();
         let generation = state.generation;
-        state.queue.drain(..).filter(|(queued, _)| *queued == generation).map(|(_, event)| event).collect()
+        state
+            .queue
+            .drain(..)
+            .filter(|(queued, _)| *queued == generation || *queued == ANY_GENERATION)
+            .map(|(_, event)| event)
+            .collect()
     }
 
     pub fn waker(&self) -> &TuiWaker {
