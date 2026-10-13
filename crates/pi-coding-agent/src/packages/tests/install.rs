@@ -105,7 +105,12 @@ async fn git_installs_clone_and_install_dependencies_without_peers() {
     let calls = runner.calls();
     assert_eq!(
         calls[0].argv(),
-        strings(&["git", "clone", "https://github.com/user/repo", &target.display().to_string()])
+        strings(&[
+            "git",
+            "clone",
+            "https://github.com/user/repo",
+            &crate::resources::paths::normalize(&target).display().to_string()
+        ])
     );
     assert_eq!(calls[1].argv(), strings(&["npm", "install", "--omit=dev", "--legacy-peer-deps"]));
     assert_eq!(calls[1].spec.cwd.as_deref(), Some(target.as_path()));

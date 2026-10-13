@@ -17,7 +17,7 @@ fn view_runner(response: &'static str) -> Arc<MockRunner> {
 #[tokio::test]
 async fn npm_ranges_update_with_the_configured_spec() {
     let fixture = Fixture::new();
-    let project_npm = fixture.cwd.join(".pi/npm");
+    let project_npm = fixture.cwd.join(".pi").join("npm");
     fake_npm_package(&project_npm, "example", "1.0.0", &[]);
     fixture.settings.set_project_packages(&sources(json!(["npm:example@^1.0.0"]))).unwrap();
     let runner = view_runner("[\"1.0.0\",\"1.2.0\",\"2.0.0\"]");
@@ -43,7 +43,7 @@ async fn npm_ranges_update_with_the_configured_spec() {
 async fn npm_updates_batch_per_scope_and_git_updates_run_in_parallel() {
     let fixture = Fixture::new();
     let user_npm = fixture.agent_dir.join("npm");
-    let project_npm = fixture.cwd.join(".pi/npm");
+    let project_npm = fixture.cwd.join(".pi").join("npm");
     for name in ["user-old", "user-current", "user-unknown"] {
         fake_npm_package(&user_npm, name, "1.0.0", &[]);
     }
@@ -125,7 +125,7 @@ async fn update_lookups_suggest_source_prefixes() {
 #[tokio::test]
 async fn offline_mode_skips_updates_and_checks() {
     let fixture = Fixture::new();
-    fake_npm_package(&fixture.cwd.join(".pi/npm"), "example", "1.0.0", &[]);
+    fake_npm_package(&fixture.cwd.join(".pi").join("npm"), "example", "1.0.0", &[]);
     fixture.settings.set_project_packages(&sources(json!(["npm:example"]))).unwrap();
     let runner = view_runner("\"9.0.0\"");
     let manager = fixture.offline_manager(runner.clone());
@@ -137,7 +137,7 @@ async fn offline_mode_skips_updates_and_checks() {
 #[tokio::test]
 async fn update_checks_report_unpinned_npm_packages() {
     let fixture = Fixture::new();
-    fake_npm_package(&fixture.cwd.join(".pi/npm"), "example", "1.0.0", &[]);
+    fake_npm_package(&fixture.cwd.join(".pi").join("npm"), "example", "1.0.0", &[]);
     fixture.settings.set_project_packages(&sources(json!(["npm:example"]))).unwrap();
     let updates = fixture.manager(view_runner("\"1.2.3\"")).check_for_available_updates().await;
     assert_eq!(updates.len(), 1);

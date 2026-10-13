@@ -184,6 +184,7 @@ fn manifests_keep_string_arrays_and_gallery_fields() {
     assert!(read_pi_manifest(&path).is_none());
 }
 
+#[cfg(unix)]
 #[test]
 fn package_dir_honors_the_environment_override() {
     let dir = crate::packages::package_dir_from(Some("/nix/store/pi"), Some(Path::new("/usr/bin/pi")));

@@ -50,7 +50,13 @@ async fn install_list_and_remove_local_packages() {
     assert_eq!(crate::resources::paths::canonicalize(&fixture.agent_dir.join(stored)), pkg);
 
     let listed = run(&fixture, "list").await;
-    assert_eq!(listed.stdout, format!("User packages:\n  ../project/packages/local-package\n    {}\n", pkg.display()));
+    assert_eq!(
+        listed.stdout,
+        format!(
+            "User packages:\n  ../project/packages/local-package\n    {}\n",
+            crate::resources::paths::normalize(&pkg).display()
+        )
+    );
     let removed = run(&fixture, &format!("uninstall {}/", pkg.display())).await;
     assert_eq!(removed.code, 0);
     assert!(removed.stdout.ends_with(&format!("Removed {}/\n", pkg.display())));
