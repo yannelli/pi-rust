@@ -31,7 +31,21 @@ async fn run(executable: PathBuf, root: &Path, args: &[&str], envs: &[(&str, Str
     for (name, value) in envs {
         command.env(name, value);
     }
-    tokio::task::spawn_blocking(move || command.output().unwrap()).await.unwrap()
+    // A fresh copy can be briefly busy on Linux while a sibling test's fork still holds its
+    // write descriptor (ETXTBSY); that clears as soon as the fork execs, so retry.
+    tokio::task::spawn_blocking(move || {
+        for _ in 0..100 {
+            match command.output() {
+                Err(error) if error.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                result => return result.unwrap(),
+            }
+        }
+        command.output().unwrap()
+    })
+    .await
+    .unwrap()
 }
 
 fn pi_binary() -> PathBuf {
