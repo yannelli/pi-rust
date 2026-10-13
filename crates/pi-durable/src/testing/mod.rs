@@ -6,3 +6,4 @@ pub mod storage_conformance;
 pub use tokio as __tokio;
 pub mod env_conformance;
 pub mod faux;
+pub mod storage_benchmark;

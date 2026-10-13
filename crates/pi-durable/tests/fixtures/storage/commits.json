@@ -1,0 +1,434 @@
+[
+ [
+  {
+   "type": "conversation",
+   "value": {
+    "id": 1
+   }
+  }
+ ],
+ [
+  {
+   "type": "entry",
+   "value": {
+    "kind": "user",
+    "data": {
+     "text": "first ✓",
+     "list": [
+      1,
+      2.25,
+      null,
+      true
+     ]
+    },
+    "id": 2,
+    "conversationId": 1
+   }
+  },
+  {
+   "type": "entry",
+   "value": {
+    "kind": "marker",
+    "id": 3,
+    "conversationId": 1,
+    "head": 2
+   }
+  },
+  {
+   "type": "task",
+   "value": {
+    "id": 5,
+    "conversationId": 1,
+    "kind": "fixture.task",
+    "version": 2,
+    "input": {
+     "prompt": "héllo",
+     "n": 1.5
+    },
+    "background": false,
+    "abortRequested": false,
+    "state": {
+     "status": "pending",
+     "checkpoint": {
+      "phase": "start"
+     }
+    }
+   }
+  },
+  {
+   "type": "submission",
+   "value": {
+    "conversationId": 1,
+    "type": "input",
+    "requestId": "req-1",
+    "status": "queued",
+    "id": 6
+   }
+  }
+ ],
+ [
+  {
+   "type": "task",
+   "value": {
+    "id": 5,
+    "conversationId": 1,
+    "kind": "fixture.task",
+    "version": 2,
+    "input": {
+     "prompt": "héllo",
+     "n": 1.5
+    },
+    "background": false,
+    "abortRequested": false,
+    "state": {
+     "status": "running",
+     "checkpoint": {
+      "phase": "effect"
+     }
+    },
+    "memos": {
+     "winner": "a"
+    },
+    "startedAt": 1700000000123
+   }
+  },
+  {
+   "type": "submission",
+   "value": {
+    "conversationId": 1,
+    "type": "input",
+    "requestId": "req-1",
+    "status": "placed",
+    "entry": 2,
+    "id": 6
+   }
+  },
+  {
+   "type": "document.create",
+   "record": {
+    "id": 7,
+    "kind": "settings",
+    "scope": {
+     "kind": "session"
+    }
+   },
+   "content": {
+    "version": 1,
+    "kind": "base",
+    "value": {
+     "count": 0,
+     "name": "ünïcode"
+    }
+   }
+  },
+  {
+   "type": "document.create",
+   "record": {
+    "id": 8,
+    "kind": "notes",
+    "key": "k\u0000ey",
+    "scope": {
+     "kind": "conversation",
+     "conversationId": 1
+    },
+    "history": "rewindable",
+    "fork": "asOf"
+   },
+   "content": {
+    "version": 1,
+    "kind": "base",
+    "value": {
+     "items": [
+      "a"
+     ]
+    }
+   }
+  },
+  {
+   "type": "document.create",
+   "record": {
+    "id": 9,
+    "kind": "live",
+    "scope": {
+     "kind": "conversation",
+     "conversationId": 1
+    },
+    "history": "latest",
+    "fork": "current"
+   },
+   "content": {
+    "version": 1,
+    "kind": "base",
+    "value": {
+     "tools": {}
+    }
+   }
+  }
+ ],
+ [
+  {
+   "type": "document.change",
+   "id": 7,
+   "content": {
+    "version": 1,
+    "kind": "delta",
+    "ops": [
+     [
+      "s",
+      [
+       "count"
+      ],
+      1
+     ],
+     [
+      "a",
+      [
+       "name"
+      ],
+      "!"
+     ]
+    ]
+   }
+  },
+  {
+   "type": "document.change",
+   "id": 8,
+   "content": {
+    "version": 1,
+    "kind": "delta",
+    "ops": [
+     [
+      "p",
+      [
+       "items"
+      ],
+      1,
+      0,
+      [
+       "b",
+       "c"
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "document.change",
+   "id": 9,
+   "content": {
+    "version": 1,
+    "kind": "delta",
+    "ops": [
+     [
+      "s",
+      [
+       "tools",
+       "read"
+      ],
+      {
+       "state": "running"
+      }
+     ]
+    ]
+   }
+  }
+ ],
+ [
+  {
+   "type": "conversation",
+   "value": {
+    "id": 10,
+    "parent": {
+     "conversationId": 1,
+     "at": 3
+    },
+    "owner": {
+     "conversationId": 1,
+     "taskId": 5
+    }
+   }
+  },
+  {
+   "type": "document.copy",
+   "record": {
+    "id": 11,
+    "kind": "notes",
+    "key": "k\u0000ey",
+    "scope": {
+     "kind": "conversation",
+     "conversationId": 10
+    },
+    "history": "rewindable",
+    "fork": "asOf"
+   },
+   "source": {
+    "id": 8,
+    "at": 4
+   }
+  },
+  {
+   "type": "document.copy",
+   "record": {
+    "id": 12,
+    "kind": "live",
+    "scope": {
+     "kind": "conversation",
+     "conversationId": 10
+    },
+    "history": "latest",
+    "fork": "current"
+   },
+   "source": {
+    "id": 9,
+    "at": "current"
+   }
+  },
+  {
+   "type": "entry",
+   "value": {
+    "kind": "assistant",
+    "data": {
+     "text": "child"
+    },
+    "id": 13,
+    "conversationId": 10,
+    "byTaskId": 5
+   }
+  }
+ ],
+ [
+  {
+   "type": "document.change",
+   "id": 7,
+   "content": {
+    "version": 2,
+    "kind": "base",
+    "value": {
+     "count": 2,
+     "migrated": true
+    }
+   }
+  },
+  {
+   "type": "document.change",
+   "id": 8,
+   "content": {
+    "version": 1,
+    "kind": "base",
+    "value": {
+     "items": [
+      "checkpoint"
+     ]
+    }
+   }
+  },
+  {
+   "type": "document.change",
+   "id": 9,
+   "content": {
+    "version": 1,
+    "kind": "base",
+    "value": {
+     "tools": {}
+    }
+   }
+  }
+ ],
+ [
+  {
+   "type": "document.change",
+   "id": 8,
+   "content": {
+    "version": 1,
+    "kind": "delta",
+    "ops": [
+     [
+      "r",
+      {
+       "items": [
+        "replaced"
+       ]
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "type": "document.retire",
+   "id": 9
+  },
+  {
+   "type": "task",
+   "value": {
+    "id": 5,
+    "conversationId": 1,
+    "kind": "fixture.task",
+    "version": 2,
+    "input": {
+     "prompt": "héllo",
+     "n": 1.5
+    },
+    "background": false,
+    "abortRequested": false,
+    "state": {
+     "status": "terminal",
+     "outcome": {
+      "status": "completed",
+      "result": null
+     }
+    },
+    "startedAt": 1700000000123,
+    "endedAt": 1700000000456.5
+   }
+  },
+  {
+   "type": "submission",
+   "value": {
+    "conversationId": 1,
+    "type": "input",
+    "requestId": "req-1",
+    "status": "done",
+    "entry": 2,
+    "answer": 13,
+    "id": 6
+   }
+  }
+ ],
+ [
+  {
+   "type": "task",
+   "value": {
+    "id": 14,
+    "conversationId": 10,
+    "kind": "fixture.child",
+    "version": 1,
+    "input": null,
+    "owner": 5,
+    "background": true,
+    "abortRequested": true,
+    "abortReason": "restart",
+    "state": {
+     "status": "waiting",
+     "checkpoint": {},
+     "on": [
+      5
+     ],
+     "policy": "failFast"
+    }
+   }
+  },
+  {
+   "type": "submission",
+   "value": {
+    "conversationId": 10,
+    "type": "write",
+    "status": "unanswered",
+    "reason": "closed",
+    "detail": {
+     "retry": false
+    },
+    "id": 15
+   }
+  }
+ ]
+]

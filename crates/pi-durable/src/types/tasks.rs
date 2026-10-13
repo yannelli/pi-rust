@@ -52,7 +52,7 @@ impl TaskStatus {
 pub struct TaskOutcomeError {
     pub message: String,
     /// Optional structured diagnostic data for inspection or recovery.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, deserialize_with = "super::present_json::deserialize", skip_serializing_if = "Option::is_none")]
     pub detail: Option<Json>,
 }
 
@@ -68,20 +68,32 @@ impl TaskOutcomeError {
 pub enum TaskOutcome {
     Completed {
         /// Absent when the task's result is `undefined` upstream.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            deserialize_with = "super::present_json::deserialize",
+            skip_serializing_if = "Option::is_none"
+        )]
         result: Option<Json>,
     },
     /// Expected task or domain failure explicitly committed by its implementation.
     Failed {
         error: TaskOutcomeError,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            deserialize_with = "super::present_json::deserialize",
+            skip_serializing_if = "Option::is_none"
+        )]
         result: Option<Json>,
     },
     /// Explicit cancellation handled by the task's abort protocol.
     Aborted {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            deserialize_with = "super::present_json::deserialize",
+            skip_serializing_if = "Option::is_none"
+        )]
         result: Option<Json>,
     },
     /// Task that cannot resume because its definition or migration is unavailable.
