@@ -9,6 +9,8 @@ mod definitions;
 mod edges;
 mod nodes;
 mod recovery;
+mod tool_events;
+mod tools;
 mod waiting;
 
 use std::sync::{Arc, Mutex};
