@@ -3,6 +3,7 @@
 mod common;
 
 use std::sync::{Arc, Mutex};
+#[cfg(unix)]
 use std::time::{Duration, Instant};
 
 use pi_mcp::{ClientState, McpClient, McpClientOptions, RequestOptions, StdioTransport, StdioTransportOptions};

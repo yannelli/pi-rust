@@ -75,9 +75,13 @@ fn ignore_sigterm_forever() -> ! {
 }
 
 fn stubborn() {
-    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("runtime");
     #[cfg(unix)]
-    let _signal = runtime.block_on(async { tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) });
+    let _sigterm = {
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("runtime");
+        let signal =
+            runtime.block_on(async { tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) });
+        (runtime, signal)
+    };
     let exe = std::env::current_exe().expect("current exe");
     let grandchild = std::process::Command::new(exe)
         .arg("--grandchild")
