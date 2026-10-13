@@ -11,7 +11,7 @@ use pi_agent::{SharedTool, ToolExposure};
 use pi_mcp::manager::UpdateConfigFn;
 use pi_mcp::oauth::CallbackServerFactory;
 use pi_mcp::runtime::{McpOAuthCredentialStore, TransportFactory};
-use pi_mcp::{LoadedMcpConfig, MCP_SERVERS_SECTION, McpManager, McpManagerOptions, load_mcp_config};
+use pi_mcp::{LoadedMcpConfig, MCP_SERVERS_SECTION, McpManager, McpManagerOptions, McpServerRegistry, load_mcp_config};
 
 use super::same_tool;
 use crate::agent_session::tools::ToolSource;
@@ -38,6 +38,8 @@ pub struct McpSessionOptions {
     pub callback_factory: Option<Arc<dyn CallbackServerFactory>>,
     /// Saves `/mcp` changes. Default: edit the `mcp.json` that defines the server.
     pub update_config: Option<UpdateConfigFn>,
+    /// Servers extensions register with `pi.registerMcpServer()`; they connect while registered.
+    pub registry: Option<McpServerRegistry>,
 }
 
 fn mcp_source() -> ToolSource {
@@ -73,6 +75,13 @@ impl AgentSession {
             options.callback_factory = factory;
         }
         options.update_config = configured.update_config;
+        options.registry = configured.registry;
+        let weak = self.weak.clone();
+        options.on_registered_change = Some(Arc::new(move || {
+            if let Some(session) = weak.upgrade() {
+                session.ensure_mcp_discovery();
+            }
+        }));
         let runtime = self.model_runtime().clone();
         options.provider_token = Some(Arc::new(move |provider: String| {
             let runtime = runtime.clone();

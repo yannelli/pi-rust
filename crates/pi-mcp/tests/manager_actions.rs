@@ -170,7 +170,9 @@ async fn signs_in_through_the_browser_refreshes_and_signs_out() {
     assert_eq!(*notifications.lock().unwrap(), [needs]);
     assert_eq!(manager.format_status(), "issues: needs sign-in, run /mcp login issues (direct)");
 
-    assert_eq!(manager.sign_in("issues", BrowserPrompt::new(Browser::Follow), None).await, None);
+    let prompt = BrowserPrompt::new(Browser::Follow);
+    assert_eq!(manager.sign_in("issues", prompt.clone(), None).await, None);
+    assert_eq!(*prompt.servers.lock().unwrap(), ["issues"]);
     assert_eq!(server.log(), ["401 none", "register", "token code"]);
     let whoami = manager.tool("mcp__issues__whoami").unwrap();
     let call = || whoami.call(json!({}), CancellationToken::new(), None);
@@ -188,6 +190,7 @@ async fn signs_in_through_the_browser_refreshes_and_signs_out() {
     let store = other.for_server("issues", &server.url);
     let prompt = BrowserPrompt::new(Browser::Follow);
     let options = pi_mcp::runtime::SignInOptions {
+        server_name: "issues".into(),
         server_url: url::Url::parse(&server.url).unwrap(),
         store,
         settings: Default::default(),

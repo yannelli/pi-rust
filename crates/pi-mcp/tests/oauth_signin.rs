@@ -31,6 +31,7 @@ async fn sign_in(
     challenge: Option<OAuthChallenge>,
 ) -> Result<(), OAuthError> {
     sign_in_mcp_server(SignInOptions {
+        server_name: "test".into(),
         server_url: Url::parse(&server.url).unwrap(),
         store,
         settings,
@@ -222,11 +223,11 @@ struct MixedUpPaste {
 
 #[async_trait]
 impl McpSignInPrompt for MixedUpPaste {
-    fn show_authorization_url(&self, url: &Url) {
+    fn show_authorization_url(&self, _server: &str, url: &Url) {
         *self.shown.lock().unwrap() = Some(url.clone());
     }
 
-    async fn prompt_for_redirect_url(&self, _cancel: CancellationToken) -> Option<String> {
+    async fn prompt_for_redirect_url(&self, _server: &str, _cancel: CancellationToken) -> Option<String> {
         let shown = self.shown.lock().unwrap().clone()?;
         let param = |name: &str| shown.query_pairs().find(|(key, _)| key == name).map(|(_, value)| value.into_owned());
         let mut redirect = Url::parse(&param("redirect_uri")?).ok()?;
@@ -278,6 +279,7 @@ async fn cancels_a_sign_in_waiting_on_a_stalled_authorization_server() {
         server.state().stall.insert(path.into());
         let cancel = CancellationToken::new();
         let options = SignInOptions {
+            server_name: "test".into(),
             server_url: Url::parse(&server.url).unwrap(),
             store: store_for(&server),
             settings: McpOAuthSettings::default(),

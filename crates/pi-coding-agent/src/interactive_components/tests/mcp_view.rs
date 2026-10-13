@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use pi_mcp::runtime::{McpSignInPrompt, ServerState};
-use pi_mcp::{McpConfigScope, McpExposure, McpServerConfig, McpServerEntry, McpServerStatus, Tool};
+use pi_mcp::{McpConfigScope, McpExposure, McpServerConfig, McpServerEntry, McpServerStatus, McpSubscription, Tool};
 use reqwest::Url;
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
@@ -117,14 +117,15 @@ impl McpServers for FakeServers {
         "No MCP servers configured. Add them to /agent/mcp.json or .pi/mcp.json.".into()
     }
 
-    fn subscribe(&self, listener: Box<dyn Fn() + Send + Sync>) {
+    fn subscribe(&self, listener: Box<dyn Fn() + Send + Sync>) -> Option<McpSubscription> {
         self.listeners.borrow_mut().push(listener);
+        None
     }
 
     async fn sign_in(&self, name: &str, prompt: Arc<dyn McpSignInPrompt>, cancel: CancellationToken) -> Option<String> {
-        prompt.show_authorization_url(&Url::parse("https://auth.example/authorize?client=pi").unwrap());
+        prompt.show_authorization_url(name, &Url::parse("https://auth.example/authorize?client=pi").unwrap());
         let url = tokio::select! {
-            url = prompt.prompt_for_redirect_url(CancellationToken::new()) => url,
+            url = prompt.prompt_for_redirect_url(name, CancellationToken::new()) => url,
             () = cancel.cancelled() => return Some("Sign-in cancelled.".into()),
         };
         self.log.push(format!("signin {name} {url:?}"));

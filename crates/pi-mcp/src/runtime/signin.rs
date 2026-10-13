@@ -158,11 +158,11 @@ pub(crate) fn create_provider(
 
 #[async_trait]
 pub trait McpSignInPrompt: Send + Sync {
-    /// Show the authorization URL to the user and open it in a browser.
-    fn show_authorization_url(&self, url: &Url);
+    /// Show the authorization URL for signing in to `server` and open it in a browser.
+    fn show_authorization_url(&self, server: &str, url: &Url);
     /// Ask for the redirect URL from the browser address bar, for when the browser cannot reach the
     /// callback (for example over SSH). Cancelled once the callback arrives. `None` or "" cancels.
-    async fn prompt_for_redirect_url(&self, cancel: CancellationToken) -> Option<String>;
+    async fn prompt_for_redirect_url(&self, server: &str, cancel: CancellationToken) -> Option<String>;
 }
 
 fn response_from_redirect_url(
@@ -193,13 +193,14 @@ async fn wait_for_authorization_response(
     callback: &dyn CallbackServer,
     state: &str,
     redirect_url: &Url,
-    prompt: &dyn McpSignInPrompt,
+    prompt: (&dyn McpSignInPrompt, &str),
     cancel: &CancellationToken,
 ) -> Result<(String, Option<String>), OAuthError> {
+    let (prompt, server) = prompt;
     let prompt_cancel = cancel.child_token();
     let from_browser = callback.wait_for_callback(state, Some(redirect_url.path()))?;
     let from_user = async {
-        let input = prompt.prompt_for_redirect_url(prompt_cancel.clone()).await;
+        let input = prompt.prompt_for_redirect_url(server, prompt_cancel.clone()).await;
         match input.filter(|input| !input.trim().is_empty()) {
             Some(input) => response_from_redirect_url(&input, state, redirect_url),
             None => Err(OAuthError::Cancelled),
@@ -234,6 +235,8 @@ pub fn sign_in_page(page: &CallbackPage) -> String {
 }
 
 pub struct SignInOptions {
+    /// Name of the server in `mcp.json`, passed to the prompt.
+    pub server_name: String,
     pub server_url: Url,
     pub store: Arc<dyn McpOAuthStateStore>,
     pub settings: McpOAuthSettings,
@@ -365,9 +368,9 @@ async fn run_sign_in(
     let redirect = url.query_pairs().find(|(key, _)| key == "redirect_uri").map(|(_, value)| value.into_owned());
     let redirect = Url::parse(redirect.as_deref().unwrap_or(&redirect_url))
         .map_err(|_| OAuthError::other("Invalid redirect URI"))?;
-    options.prompt.show_authorization_url(&url);
-    let (code, iss) =
-        wait_for_authorization_response(callback, &state, &redirect, options.prompt.as_ref(), &options.cancel).await?;
+    options.prompt.show_authorization_url(&options.server_name, &url);
+    let prompt = (options.prompt.as_ref(), options.server_name.as_str());
+    let (code, iss) = wait_for_authorization_response(callback, &state, &redirect, prompt, &options.cancel).await?;
     let exchange = OAuthFlowOptions { authorization_code: Some(code), iss, ..flow };
     authorize_mcp(&provider, &exchange).await.map(|_| ())
 }

@@ -125,8 +125,8 @@ impl McpManager {
 
     /// Plain status for `/mcp` without a UI.
     pub fn format_status(&self) -> String {
-        let (statuses, errors) = (self.statuses(), self.config_errors());
-        if statuses.is_empty() && errors.is_empty() {
+        let (statuses, errors, overridden) = (self.statuses(), self.config_errors(), self.overridden());
+        if statuses.is_empty() && errors.is_empty() && overridden.is_empty() {
             return no_servers_message(&self.inner.options.agent_dir);
         }
         let mut lines: Vec<String> = statuses
@@ -155,6 +155,7 @@ impl McpManager {
             })
             .collect();
         lines.extend(errors.iter().map(|error| format!("config error: {error}")));
+        lines.extend(overridden.iter().map(|line| format!("overridden: {line}")));
         lines.join("\n")
     }
 }

@@ -175,7 +175,6 @@ pub(super) async fn list(loaded: &LoadedMcpConfig, json: bool, note: Option<&str
 }
 
 struct TerminalPrompt {
-    name: String,
     log: LineFn,
     open_url: Option<LineFn>,
     read_redirect_url: Option<ReadRedirectFn>,
@@ -183,15 +182,15 @@ struct TerminalPrompt {
 
 #[async_trait]
 impl McpSignInPrompt for TerminalPrompt {
-    fn show_authorization_url(&self, url: &Url) {
-        (self.log)(&format!("Sign in to MCP server \"{}\" in your browser:\n{url}", self.name));
+    fn show_authorization_url(&self, server: &str, url: &Url) {
+        (self.log)(&format!("Sign in to MCP server \"{server}\" in your browser:\n{url}"));
         if let Some(open_url) = &self.open_url {
             open_url(url.as_str());
         }
     }
 
     /// The pasted redirect URL in a terminal; otherwise only the browser callback finishes the sign-in.
-    async fn prompt_for_redirect_url(&self, cancel: CancellationToken) -> Option<String> {
+    async fn prompt_for_redirect_url(&self, _server: &str, cancel: CancellationToken) -> Option<String> {
         match &self.read_redirect_url {
             Some(read) => read(cancel).await,
             None => {
@@ -257,7 +256,6 @@ async fn sign_in(
         timer.cancel();
     });
     let prompt = TerminalPrompt {
-        name: name.into(),
         log: log.clone(),
         open_url: options.open_url.clone(),
         read_redirect_url: options.read_redirect_url.clone(),
@@ -265,6 +263,7 @@ async fn sign_in(
     let result = match (connection.oauth_settings(), Url::parse(url)) {
         (Ok(settings), Ok(server_url)) => {
             sign_in_mcp_server(SignInOptions {
+                server_name: name.into(),
                 server_url,
                 store: credentials.for_server(name, url),
                 settings,

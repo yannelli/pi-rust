@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use pi_mcp::manager::describe_state;
 use pi_mcp::runtime::{McpSignInPrompt, ServerState};
-use pi_mcp::{McpExposure, McpServerStatus, NotifyLevel};
+use pi_mcp::{McpExposure, McpServerStatus, McpSubscription, NotifyLevel};
 use tokio_util::sync::CancellationToken;
 
 use crate::agent_session::{AgentSession, lock};
@@ -46,10 +46,15 @@ impl AgentSession {
             && self.settings().is_project_trusted()
     }
 
-    /// Called whenever servers, their states, or their tools change.
-    pub fn subscribe_mcp(&self, listener: impl Fn() + Send + Sync + 'static) {
+    /// Called whenever servers, their states, or their tools change, until `unsubscribe_mcp`.
+    /// `None` when MCP is off.
+    pub fn subscribe_mcp(&self, listener: impl Fn() + Send + Sync + 'static) -> Option<McpSubscription> {
+        self.mcp_manager().map(|manager| manager.subscribe(listener))
+    }
+
+    pub fn unsubscribe_mcp(&self, subscription: McpSubscription) {
         if let Some(manager) = self.mcp_manager() {
-            manager.subscribe(listener);
+            manager.unsubscribe(subscription);
         }
     }
 
