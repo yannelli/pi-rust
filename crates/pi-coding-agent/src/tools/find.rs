@@ -136,6 +136,14 @@ impl AgentTool for FindTool {
         })
     }
 
+    fn prompt_snippet(&self) -> Option<&str> {
+        super::builtin_snippet("find")
+    }
+
+    fn prompt_guidelines(&self) -> Vec<String> {
+        super::builtin_guidelines("find")
+    }
+
     async fn execute(
         &self,
         _tool_call_id: &str,
