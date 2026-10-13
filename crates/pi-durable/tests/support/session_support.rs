@@ -112,6 +112,12 @@ impl ControlledStorage {
         gate
     }
 
+    /// Drop the commit gate as a crash would: a held commit never lands, and later commits pass.
+    pub fn crash(&self) {
+        *self.commit_gate.lock().unwrap() = None;
+        *self.commit_filter.lock().unwrap() = None;
+    }
+
     /// Hold only the commits whose batch `filter` accepts.
     pub fn hold_commits_where(&self, filter: impl Fn(&[StorageWrite]) -> bool + Send + Sync + 'static) -> Gate {
         *self.commit_filter.lock().unwrap() = Some(Arc::new(filter));
