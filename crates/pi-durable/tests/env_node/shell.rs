@@ -107,7 +107,18 @@ async fn uses_stdin_command_transport_for_legacy_wsl_bash_paths() {
     std::env::set_current_dir(dir.path()).unwrap();
     let env = LocalExecutionEnv::new(LocalEnvOptions { shell_path: Some(shell_path.into()), ..options_in(dir.path()) });
     let command = "name='World'; echo \"Hello, ${name}!\"";
-    let (result, output) = collect(&env, command, ShellExecOptions::default(), &context()).await;
+    // A script just written can fail with ETXTBSY while another test forks; retry the spawn.
+    let mut attempt = 0;
+    let (result, output) = loop {
+        let (result, output) = collect(&env, command, ShellExecOptions::default(), &context()).await;
+        attempt += 1;
+        match &result {
+            Err(error) if error.code == ExecutionErrorCode::SpawnError && attempt < 20 => {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            _ => break (result, output),
+        }
+    };
     std::env::set_current_dir(original).unwrap();
     assert_eq!(result.unwrap().exit_code, 0);
     assert!(output.contains("Hello, World!"), "{output}");
