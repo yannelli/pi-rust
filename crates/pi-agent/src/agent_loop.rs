@@ -81,6 +81,9 @@ pub struct AgentLoopConfig {
     pub prepare_next_turn: Option<PrepareNextTurnFn>,
     /// Tools callable from other tools. Defaults to the context's tools.
     pub callable_tools: Option<CallableToolsFn>,
+    /// Base request options (transport, thinking budgets, headers, payload observers, ...).
+    /// The fields above, the cancellation token, and the reasoning level take precedence.
+    pub stream_options: StreamOptions,
 }
 
 /// The default `convert_to_llm`: keep provider roles, drop custom ones.
@@ -110,6 +113,7 @@ impl AgentLoopConfig {
             prepare_request: None,
             prepare_next_turn: None,
             callable_tools: None,
+            stream_options: StreamOptions::default(),
         }
     }
 }
@@ -320,15 +324,15 @@ async fn stream_assistant_response(
     };
     let api_key =
         config.get_api_key.as_ref().and_then(|get| get(&config.model.provider)).or_else(|| config.api_key.clone());
+    let base = &config.stream_options;
     let options = StreamOptions {
-        api_key,
+        api_key: api_key.or_else(|| base.api_key.clone()),
         cancel: cancel.clone(),
-        max_tokens: config.max_tokens,
-        temperature: config.temperature,
+        max_tokens: config.max_tokens.or(base.max_tokens),
+        temperature: config.temperature.or(base.temperature),
         reasoning: config.reasoning.filter(|level| *level != ThinkingLevel::Off),
-        headers: Default::default(),
-        session_id: config.session_id.clone(),
-        ..Default::default()
+        session_id: config.session_id.clone().or_else(|| base.session_id.clone()),
+        ..base.clone()
     };
     let mut response = match &config.stream_fn {
         Some(stream_fn) => stream_fn(&config.model, &request, options),

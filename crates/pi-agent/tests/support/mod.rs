@@ -46,6 +46,9 @@ pub struct Request {
     pub model: Model,
     pub context: Context,
     pub reasoning: Option<ThinkingLevel>,
+    pub session_id: Option<String>,
+    pub transport: Option<pi_ai::Transport>,
+    pub max_tokens: Option<u64>,
 }
 
 pub type Responder = Arc<dyn Fn(usize, &Context) -> AssistantMessage + Send + Sync>;
@@ -60,7 +63,14 @@ pub fn scripted(
     let stream_fn: StreamFn = Arc::new(move |model: &Model, context: &Context, options: StreamOptions| {
         let index = {
             let mut seen = seen.lock().unwrap();
-            seen.push(Request { model: model.clone(), context: context.clone(), reasoning: options.reasoning });
+            seen.push(Request {
+                model: model.clone(),
+                context: context.clone(),
+                reasoning: options.reasoning,
+                session_id: options.session_id.clone(),
+                transport: options.transport,
+                max_tokens: options.max_tokens,
+            });
             seen.len() - 1
         };
         let message = respond(index, context);

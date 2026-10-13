@@ -1,0 +1,39 @@
+[package]
+name = "pi-tui"
+description = "Terminal UI library with differential rendering for the pi agent harness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+base64 = "0.22"
+crossterm = { version = "0.29", default-features = false, features = ["windows"] }
+regex = "1"
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true }
+unicode-segmentation = "1.12"
+vt100 = "0.16"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["event", "stdio", "fs", "termios"] }
+signal-hook = "0.3"
+
+[target.'cfg(windows)'.dependencies]
+crossterm_winapi = "0.9"
+winsafe = { version = "0.0.24", features = ["user"] }
+
+[target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dependencies]
+arboard = "3.6"
+png = "0.18"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGEventSource", "CGEventTypes"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

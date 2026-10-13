@@ -213,6 +213,14 @@ impl AgentTool for GrepTool {
         })
     }
 
+    fn prompt_snippet(&self) -> Option<&str> {
+        super::builtin_snippet("grep")
+    }
+
+    fn prompt_guidelines(&self) -> Vec<String> {
+        super::builtin_guidelines("grep")
+    }
+
     async fn execute(
         &self,
         _tool_call_id: &str,

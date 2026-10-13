@@ -23,13 +23,18 @@ serde_json = { workspace = true, features = ["float_roundtrip"] }
 tokio.workspace = true
 tokio-util.workspace = true
 base64 = "0.22.1"
+flate2 = "1"
 globset = "0.4.16"
 ignore = "0.4.23"
+nodejs-semver = "7"
+ring.workspace = true
 image = { version = "0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
 regex = "1.11.1"
 serde_yaml_ng = "0.10.0"
 similar = "2.7.0"
+tar = { version = "0.4", default-features = false }
 unicode-normalization = "0.1.24"
+zip = { version = "7", default-features = false, features = ["deflate-flate2"] }
 
 [dev-dependencies]
 tempfile.workspace = true

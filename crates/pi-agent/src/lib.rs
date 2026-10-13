@@ -5,6 +5,7 @@ pub mod agent_loop;
 pub mod described;
 pub mod hooks;
 pub mod nested;
+pub mod proxy;
 pub mod registry;
 mod tool_execution;
 pub mod tool_model;
@@ -27,6 +28,7 @@ pub use nested::{
     ExecuteToolOptions, NESTED_CALL_LIMITS, NestedCallLimits, NestedCallRecorder, NestedCallSummary,
     NestedToolCallHost, NestedToolCallRunner, ToolContext, combine_usage,
 };
+pub use proxy::{ProxyAssistantMessageEvent, ProxyStreamOptions, proxy_stream_fn, stream_proxy};
 pub use registry::{ActivationFilter, RefreshOptions, ToolInfo, ToolRegistry};
 pub use tool_execution::{RunToolCallOptions, run_tool_call};
 pub use tool_model::{

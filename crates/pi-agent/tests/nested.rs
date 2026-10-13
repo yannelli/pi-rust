@@ -296,7 +296,13 @@ async fn the_loop_runs_nested_calls_with_hooks_and_records_them_on_the_result() 
             let invalid = context.execute_tool("echo", json!({}), ExecuteToolOptions::default()).await;
             let blocked =
                 context.execute_tool("echo", json!({"value": "blocked"}), ExecuteToolOptions::default()).await;
-            let text = format!("{} {} {}", ok.result.content[0].as_text().unwrap(), invalid.is_error, blocked.is_error);
+            let model = context.model().map(|model| model.id.clone()).unwrap_or_default();
+            let text = format!(
+                "{} {} {} {model}",
+                ok.result.content[0].as_text().unwrap(),
+                invalid.is_error,
+                blocked.is_error
+            );
             AgentToolResult::text(text).with_usage(usage(1, 0.0))
         }
         .boxed()
@@ -332,7 +338,8 @@ async fn the_loop_runs_nested_calls_with_hooks_and_records_them_on_the_result() 
     else {
         panic!("expected a tool result");
     };
-    assert_eq!(result.content[0].as_text(), Some("inner true true"));
+    let expected = format!("inner true true {}", config.model.id);
+    assert_eq!(result.content[0].as_text(), Some(expected.as_str()));
     let nested = result.nested_calls.as_ref().unwrap();
     let ids: Vec<&str> = nested.calls.iter().map(|call| call.id.as_str()).collect();
     assert_eq!(ids, ["model-1/1", "model-1/2", "model-1/3"]);
@@ -353,4 +360,5 @@ async fn the_loop_runs_nested_calls_with_hooks_and_records_them_on_the_result() 
 async fn tools_outside_the_loop_cannot_run_nested_calls() {
     let outcome = ToolContext::new("solo").execute_tool("echo", json!({}), ExecuteToolOptions::default()).await;
     assert!(outcome.is_error && !ToolContext::new("solo").can_execute_tools());
+    assert!(ToolContext::new("solo").model().is_none());
 }

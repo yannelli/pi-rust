@@ -1,6 +1,14 @@
 [workspace]
 resolver = "3"
-members = ["crates/pi-ai", "crates/pi-agent", "crates/pi-codemode", "crates/pi-coding-agent", "crates/pi-mcp", "xtask"]
+members = [
+    "crates/pi-ai",
+    "crates/pi-agent",
+    "crates/pi-codemode",
+    "crates/pi-coding-agent",
+    "crates/pi-mcp",
+    "crates/pi-tui",
+    "xtask",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -40,3 +48,10 @@ all = { level = "warn", priority = -1 }
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# Line tables keep backtraces readable while cutting debug-build disk use.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

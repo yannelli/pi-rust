@@ -57,6 +57,14 @@ impl AgentTool for LsTool {
         })
     }
 
+    fn prompt_snippet(&self) -> Option<&str> {
+        super::builtin_snippet("ls")
+    }
+
+    fn prompt_guidelines(&self) -> Vec<String> {
+        super::builtin_guidelines("ls")
+    }
+
     async fn execute(
         &self,
         _tool_call_id: &str,
