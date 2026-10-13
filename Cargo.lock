@@ -2329,17 +2329,22 @@ name = "pi-durable"
 version = "0.1.2"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "futures",
+ "image",
+ "notify",
  "pi-agent",
  "pi-ai",
  "pi-chord",
  "ring",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror",
  "tokio",
  "tokio-util",
+ "url",
 ]
 
 [[package]]

@@ -8,6 +8,7 @@ pub mod ids;
 pub mod models;
 pub mod storage;
 pub mod testing;
+pub mod truncate;
 pub mod types;
 pub mod util;
 
