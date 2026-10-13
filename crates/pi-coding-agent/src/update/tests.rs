@@ -92,7 +92,8 @@ async fn updates_a_release_install_after_checking_the_checksum() {
         assert_ne!(std::fs::metadata(&executable).unwrap().permissions().mode() & 0o111, 0);
     }
     let leftovers: Vec<_> = std::fs::read_dir(dir.path()).unwrap().map(|entry| entry.unwrap().file_name()).collect();
-    assert_eq!(leftovers.len(), 1, "{leftovers:?}");
+    let expected = if cfg!(windows) { 2 } else { 1 };
+    assert_eq!(leftovers.len(), expected, "{leftovers:?}");
 }
 
 #[tokio::test]
