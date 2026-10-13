@@ -17,7 +17,7 @@ use pi_tui::{
     ComponentRef, HStack, ScrollView, ScrollViewOptions, StackChild, StackEntryOptions, StackOptions,
     TuiAltScreenOptions, TuiOptions, VStack, component,
 };
-use support::{Image, ImageOptions, Text};
+use support::{Image, ImageOptions, ImageTheme, Text};
 
 /// Resets the capability cache when dropped, like the upstream `finally` blocks.
 struct ResetCapabilities;
@@ -117,7 +117,13 @@ fn reuses_moved_kitty_images_without_dropping_hstack_siblings() {
     let h = Harness::new(20, 6);
     let label = component(Text::new("left", 0, 0));
     let dimensions = ImageDimensions { width_px: 100, height_px: 100 };
-    let image = component(Image::new(&"A".repeat(8192), "image/png", ImageOptions::default(), Some(dimensions)));
+    let image = component(Image::new(
+        &"A".repeat(8192),
+        "image/png",
+        ImageTheme::default(),
+        ImageOptions::default(),
+        Some(dimensions),
+    ));
     let header = component(Text::new("header", 0, 0));
     let fixed =
         |cells: usize| StackEntryOptions { basis: Some(StackBasis::Fixed(cells)), ..StackEntryOptions::default() };

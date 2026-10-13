@@ -1276,6 +1276,7 @@ dependencies = [
  "signal-hook",
  "tempfile",
  "tokio",
+ "tokio-util",
  "unicode-segmentation",
  "vt100",
  "winsafe",

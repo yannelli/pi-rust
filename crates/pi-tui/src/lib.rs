@@ -68,6 +68,7 @@ mod debug_log;
 pub mod editor_component;
 pub mod env;
 pub mod fuzzy;
+pub mod html;
 pub mod keybindings;
 pub mod keys;
 pub mod kill_ring;
@@ -100,6 +101,9 @@ pub use component::{
 pub use components::{
     AltScreenFlashContainer, HStack, Input, InputOptions, ScrollView, ScrollViewHandle, ScrollViewOptions,
     ScrollViewScrollToOptions, ScrollViewScrollbar, StackChild, StackEntryOptions, StackOptions, VStack,
+};
+pub use components::{
+    BoxComponent, CancellableLoader, Image, Loader, MouseRegion, SelectList, SettingsList, Spacer, Text, TruncatedText,
 };
 pub use editor_component::EditorComponent;
 pub use keybindings::{KeybindingsManager, get_keybindings, set_keybindings};
