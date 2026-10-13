@@ -61,6 +61,7 @@
 
 pub mod alt_screen;
 pub mod alt_screen_search;
+pub mod autocomplete;
 pub mod colors;
 pub mod component;
 pub mod components;
@@ -91,6 +92,7 @@ pub mod wheel_scroll;
 pub mod word_navigation;
 
 pub use alt_screen::{CopyCompletion, CopyOutcome, CopyRequest, CopySelectionFn, TuiAltScreenOptions};
+pub use autocomplete::{AutocompleteItem, AutocompleteProvider, CombinedAutocompleteProvider, SlashCommand};
 pub use component::{
     AsAny, CURSOR_MARKER, Component, ComponentRef, Container, FAKE_CURSOR_END, FAKE_CURSOR_START, MouseResponse,
     TuiMouseButton, TuiMouseDispatchResult, TuiMouseDispatchTarget, TuiMouseEvent, TuiMouseEventResult,
@@ -101,6 +103,7 @@ pub use components::{
     AltScreenFlashContainer, HStack, Input, InputOptions, ScrollView, ScrollViewHandle, ScrollViewOptions,
     ScrollViewScrollToOptions, ScrollViewScrollbar, StackChild, StackEntryOptions, StackOptions, VStack,
 };
+pub use components::{Editor, EditorOptions, EditorTheme};
 pub use editor_component::EditorComponent;
 pub use keybindings::{KeybindingsManager, get_keybindings, set_keybindings};
 pub use keys::{Key, KeyEventType, is_key_release, is_key_repeat, matches_key, parse_key};

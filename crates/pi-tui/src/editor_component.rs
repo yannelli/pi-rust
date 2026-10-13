@@ -1,6 +1,9 @@
 //! Interface for editor components, so extensions can replace the default editor
 //! (upstream `editor-component.ts`).
 
+use std::rc::Rc;
+
+use crate::autocomplete::AutocompleteProvider;
 use crate::component::Component;
 use crate::components::scroll_view::StyleFn;
 
@@ -8,8 +11,7 @@ use crate::components::scroll_view::StyleFn;
 pub type EditorTextCallback = Box<dyn FnMut(&str)>;
 
 /// A custom editor (vim mode, emacs mode, ...). Methods with defaults are optional upstream and
-/// do nothing unless overridden. The autocomplete provider setter lives with the autocomplete
-/// module, which extends this interface.
+/// do nothing unless overridden.
 pub trait EditorComponent: Component {
     /// Current text.
     fn get_text(&self) -> String;
@@ -56,4 +58,7 @@ pub trait EditorComponent: Component {
 
     /// Maximum visible items in the autocomplete dropdown.
     fn set_autocomplete_max_visible(&mut self, _max_visible: usize) {}
+
+    /// Sets the autocomplete provider. Editors without autocomplete ignore it.
+    fn set_autocomplete_provider(&mut self, _provider: Rc<dyn AutocompleteProvider>) {}
 }
