@@ -5,6 +5,7 @@
 pub mod env;
 pub mod errors;
 pub mod ids;
+pub mod testing;
 pub mod types;
 
 pub use errors::{DurableError, DurableResult};
