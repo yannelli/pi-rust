@@ -45,6 +45,9 @@ impl InteractiveMode {
         self.render_widgets();
         self.mount_layout();
         self.setup_startup_handlers();
+        if self.uses_process_terminal {
+            self.install_aws_mfa_prompt();
+        }
         let tui = self.tui();
         tui.set_focus(Some(self.selector.editor()));
         tui.start();
@@ -156,6 +159,15 @@ impl InteractiveMode {
             1,
             0,
         )));
+        if show_logo {
+            let weak = self.weak.clone();
+            header_text.borrow_mut().set_on_logo_click(Some(Box::new(move |column, row| {
+                if let Some(mode) = weak.upgrade() {
+                    let (column, row) = (column.max(0) as usize, row.max(0) as usize);
+                    crate::interactive_components::play_pi_logo_3d(&mode.tui(), column, row);
+                }
+            })));
+        }
         header.add_child(component(Spacer::new(1)));
         header.add_child(header_text.clone());
         header.add_child(component(Spacer::new(1)));
@@ -218,6 +230,7 @@ impl InteractiveMode {
             ));
         }
         self.start_version_check();
+        self.check_tmux_keyboard_setup();
         self.maybe_warn_about_anthropic_subscription_auth(None);
     }
 
@@ -331,6 +344,9 @@ impl InteractiveMode {
     /// Restore the terminal (upstream `stop`). In fullscreen with `fullscreenExitOutput:
     /// transcript`, the transcript is printed to the main screen first.
     pub fn stop(&self, exit_output: Option<FullscreenExitOutput>) {
+        if self.uses_process_terminal {
+            self.remove_aws_mfa_prompt();
+        }
         self.selector.dispose_active();
         self.set_terminal_progress(false);
         self.clear_status_indicator(None);

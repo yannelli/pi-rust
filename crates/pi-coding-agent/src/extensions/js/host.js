@@ -276,6 +276,8 @@ export function createHost(config) {
 			return await entry.definition.route({ ...request, signal }, runner.createContext());
 		},
 		createComponent: ui.createComponent,
+		autocompleteChain: ui.autocompleteChain,
+		autocomplete: ui.autocomplete,
 		terminalInput: ui.terminalInput,
 		renderMessage(customType, message, options) {
 			const renderer = firstPerName("messageRenderers").get(customType);

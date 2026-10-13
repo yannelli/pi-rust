@@ -43,7 +43,7 @@ pub use session::{AcpSession, AcpSessionParams, SESSION_STATS_TIMEOUT, TurnEnd, 
 
 use crate::app::AppOptions;
 use crate::cli::Args;
-use crate::config::{ENV_SESSION_DIR, expand_tilde, home_dir};
+use crate::config::{expand_tilde, home_dir};
 use crate::rpc::{RawStdout, RpcOutput};
 
 /// Options of [`serve_acp`].
@@ -67,7 +67,8 @@ impl AcpModeOptions {
     /// `PI_CODING_AGENT_SESSION_DIR`, or the `sessionDir` setting.
     pub fn new(app: AppOptions, session_dir_arg: Option<&str>) -> Self {
         let agent_dir = app.agent_dir.clone();
-        let env_dir = pi_ai::env::process_env_value(ENV_SESSION_DIR).filter(|dir| !dir.is_empty());
+        let env_dir = pi_ai::env::process_env_value(&crate::resources::brand::session_dir_env_var())
+            .filter(|dir| !dir.is_empty());
         let session_dir = session_dir_arg
             .or(env_dir.as_deref())
             .map(expand_tilde)

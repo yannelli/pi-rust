@@ -151,6 +151,14 @@ impl MissingSessionCwd {
     }
 }
 
+impl std::fmt::Display for MissingSessionCwd {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.error_message())
+    }
+}
+
+impl std::error::Error for MissingSessionCwd {}
+
 /// The missing-cwd problem of a file-backed session, if its cwd is gone.
 pub fn missing_session_cwd(session: &SessionManager, fallback_cwd: &Path) -> Option<MissingSessionCwd> {
     let file = session.session_file()?;

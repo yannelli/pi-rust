@@ -155,49 +155,65 @@ impl AutocompleteProvider for CombinedAutocompleteProvider {
         item: &AutocompleteItem,
         prefix: &str,
     ) -> CompletionResult {
-        let current_line = line_at(lines, cursor_line);
-        let cursor_col = floor_boundary(current_line, cursor_col);
-        let before_prefix = &current_line[..floor_boundary(current_line, cursor_col.saturating_sub(prefix.len()))];
-        let after_cursor = &current_line[cursor_col..];
-        let is_quoted_prefix = prefix.starts_with('"') || prefix.starts_with("@\"");
-        let after_cursor = if is_quoted_prefix && item.value.ends_with('"') && after_cursor.starts_with('"') {
-            &after_cursor[1..]
-        } else {
-            after_cursor
-        };
-        let replace = |new_line: String, cursor: usize| {
-            let mut new_lines = lines.to_vec();
-            if cursor_line < new_lines.len() {
-                new_lines[cursor_line] = new_line;
-            }
-            CompletionResult { lines: new_lines, cursor_line, cursor_col: cursor }
-        };
-        let is_directory = item.label.ends_with('/');
-        // Directories keep the cursor before a closing quote so completion can continue inside.
-        let value_offset =
-            if is_directory && item.value.ends_with('"') { item.value.len() - 1 } else { item.value.len() };
-
-        // A command name: `/` at the start of the line with no further path separator.
-        if prefix.starts_with('/') && js_trim(before_prefix).is_empty() && !prefix[1..].contains('/') {
-            let new_line = format!("{before_prefix}/{} {after_cursor}", item.value);
-            return replace(new_line, before_prefix.len() + item.value.len() + 2);
-        }
-
-        // An attachment: no space after directories so completion can continue.
-        if prefix.starts_with('@') {
-            let suffix = if is_directory { "" } else { " " };
-            let new_line = format!("{before_prefix}{}{suffix}{after_cursor}", item.value);
-            return replace(new_line, before_prefix.len() + value_offset + suffix.len());
-        }
-
-        // Command arguments and plain paths replace the prefix with the value.
-        let new_line = format!("{before_prefix}{}{after_cursor}", item.value);
-        replace(new_line, before_prefix.len() + value_offset)
+        apply_default_completion(lines, cursor_line, cursor_col, item, prefix)
     }
 
     fn should_trigger_file_completion(&self, lines: &[String], cursor_line: usize, cursor_col: usize) -> bool {
-        let current_line = line_at(lines, cursor_line);
-        let text_before = js_trim(&current_line[..floor_boundary(current_line, cursor_col)]);
-        !(text_before.starts_with('/') && !text_before.contains(' '))
+        default_should_trigger_file_completion(lines, cursor_line, cursor_col)
     }
+}
+
+/// How the built-in provider applies an item: commands get a trailing space, attachments one
+/// unless they are directories, and other items replace the prefix.
+pub fn apply_default_completion(
+    lines: &[String],
+    cursor_line: usize,
+    cursor_col: usize,
+    item: &AutocompleteItem,
+    prefix: &str,
+) -> CompletionResult {
+    let current_line = line_at(lines, cursor_line);
+    let cursor_col = floor_boundary(current_line, cursor_col);
+    let before_prefix = &current_line[..floor_boundary(current_line, cursor_col.saturating_sub(prefix.len()))];
+    let after_cursor = &current_line[cursor_col..];
+    let is_quoted_prefix = prefix.starts_with('"') || prefix.starts_with("@\"");
+    let after_cursor = if is_quoted_prefix && item.value.ends_with('"') && after_cursor.starts_with('"') {
+        &after_cursor[1..]
+    } else {
+        after_cursor
+    };
+    let replace = |new_line: String, cursor: usize| {
+        let mut new_lines = lines.to_vec();
+        if cursor_line < new_lines.len() {
+            new_lines[cursor_line] = new_line;
+        }
+        CompletionResult { lines: new_lines, cursor_line, cursor_col: cursor }
+    };
+    let is_directory = item.label.ends_with('/');
+    // Directories keep the cursor before a closing quote so completion can continue inside.
+    let value_offset = if is_directory && item.value.ends_with('"') { item.value.len() - 1 } else { item.value.len() };
+
+    // A command name: `/` at the start of the line with no further path separator.
+    if prefix.starts_with('/') && js_trim(before_prefix).is_empty() && !prefix[1..].contains('/') {
+        let new_line = format!("{before_prefix}/{} {after_cursor}", item.value);
+        return replace(new_line, before_prefix.len() + item.value.len() + 2);
+    }
+
+    // An attachment: no space after directories so completion can continue.
+    if prefix.starts_with('@') {
+        let suffix = if is_directory { "" } else { " " };
+        let new_line = format!("{before_prefix}{}{suffix}{after_cursor}", item.value);
+        return replace(new_line, before_prefix.len() + value_offset + suffix.len());
+    }
+
+    // Command arguments and plain paths replace the prefix with the value.
+    let new_line = format!("{before_prefix}{}{after_cursor}", item.value);
+    replace(new_line, before_prefix.len() + value_offset)
+}
+
+/// Whether an explicit Tab completes files: not while typing a command name.
+pub fn default_should_trigger_file_completion(lines: &[String], cursor_line: usize, cursor_col: usize) -> bool {
+    let current_line = line_at(lines, cursor_line);
+    let text_before = js_trim(&current_line[..floor_boundary(current_line, cursor_col)]);
+    !(text_before.starts_with('/') && !text_before.contains(' '))
 }

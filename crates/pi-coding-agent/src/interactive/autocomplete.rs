@@ -115,9 +115,13 @@ impl InteractiveMode {
     /// Commands, templates, and skills for the editor, plus `@` file search without `fd`.
     pub(super) fn setup_autocomplete_provider(&self) {
         let mut commands: Vec<CommandEntry> = Vec::new();
-        // `/mcp` belongs to the built-in MCP extension; an extension may replace it.
-        let mcp = self.session().builtin_extension_enabled("mcp");
-        for (name, description, hint) in BUILTIN_SLASH_COMMANDS.iter().filter(|(name, _, _)| *name != "mcp" || mcp) {
+        // `/mcp` and `/llama` belong to built-in extensions; an extension may replace them.
+        let enabled = |name: &str| match name {
+            "mcp" => self.session().builtin_extension_enabled("mcp"),
+            "llama" => self.session().builtin_extension_enabled(crate::llama::LLAMA_PROVIDER_ID),
+            _ => true,
+        };
+        for (name, description, hint) in BUILTIN_SLASH_COMMANDS.iter().filter(|(name, _, _)| enabled(name)) {
             let mut command = SlashCommand::new(*name, Some(description));
             if let Some(hint) = hint {
                 command = command.with_argument_hint(*hint);
@@ -161,7 +165,8 @@ impl InteractiveMode {
         self.state.borrow_mut().skill_commands = skills;
         let cwd = session.cwd().display().to_string();
         let provider = CombinedAutocompleteProvider::new(commands, cwd, None);
-        self.editor.set_autocomplete_provider(Rc::new(provider));
+        let provider = self.wrap_extension_autocomplete(Rc::new(provider));
+        self.editor.set_autocomplete_provider(provider);
     }
 }
 

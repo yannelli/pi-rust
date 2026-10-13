@@ -4,41 +4,63 @@ A Rust-only port of the [pi](https://github.com/earendil-works/pi) coding agent 
 
 ## Install
 
-Download the archive for your platform from [Releases](https://github.com/yannelli/pi-rust/releases), extract it, and put `pi` (or `pi.exe`) on your `PATH`. Each release has `SHA256SUMS`.
+Each [release](https://github.com/yannelli/pi-rust/releases) has an archive per platform and a `SHA256SUMS` file. Every archive holds a `pi-vX.Y.Z-<target>/` folder with `pi` (or `pi.exe`), `README.md`, `LICENSE`, and `CHANGELOG.md`.
 
-| Platform | Archive |
+| Platform | Target |
 | --- | --- |
-| Linux x86_64 | `pi-vX.Y.Z-x86_64-unknown-linux-musl.tar.gz` |
-| Linux arm64 | `pi-vX.Y.Z-aarch64-unknown-linux-musl.tar.gz` |
-| Linux armv7 (32-bit) | `pi-vX.Y.Z-armv7-unknown-linux-musleabihf.tar.gz` |
-| macOS Apple silicon | `pi-vX.Y.Z-aarch64-apple-darwin.tar.gz` |
-| macOS Intel | `pi-vX.Y.Z-x86_64-apple-darwin.tar.gz` |
-| Windows x86_64 | `pi-vX.Y.Z-x86_64-pc-windows-msvc.zip` |
-| Windows arm64 | `pi-vX.Y.Z-aarch64-pc-windows-msvc.zip` |
+| Linux x86_64 | `x86_64-unknown-linux-musl` |
+| Linux arm64 | `aarch64-unknown-linux-musl` |
+| Linux armv7 (32-bit) | `armv7-unknown-linux-musleabihf` |
+| macOS Apple silicon | `aarch64-apple-darwin` |
+| macOS Intel | `x86_64-apple-darwin` |
+| Windows x86_64 | `x86_64-pc-windows-msvc` |
+| Windows arm64 | `aarch64-pc-windows-msvc` |
 
-Linux binaries are static and run on any distribution, including Termux. With the GitHub CLI: `gh release download --repo yannelli/pi-rust --pattern '*aarch64-apple-darwin*'`.
-
-To build from source (Rust 1.85 or newer):
+Linux and macOS (Linux binaries are static and run on any distribution, including Termux):
 
 ```sh
-cargo install --path crates/pi-coding-agent
+target=x86_64-unknown-linux-musl   # pick yours from the table
+tag=$(curl -fsSL https://api.github.com/repos/yannelli/pi-rust/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
+curl -fsSLO "https://github.com/yannelli/pi-rust/releases/download/$tag/pi-$tag-$target.tar.gz"
+curl -fsSLO "https://github.com/yannelli/pi-rust/releases/download/$tag/SHA256SUMS"
+grep " pi-$tag-$target.tar.gz$" SHA256SUMS | sha256sum -c -   # macOS: shasum -a 256 -c -
+tar -xzf "pi-$tag-$target.tar.gz"
+mkdir -p ~/.local/bin && install -m 755 "pi-$tag-$target/pi" ~/.local/bin/pi   # ~/.local/bin must be on PATH
+pi --version
 ```
+
+Windows (PowerShell):
+
+```powershell
+$target = "x86_64-pc-windows-msvc"   # or aarch64-pc-windows-msvc
+$tag = (Invoke-RestMethod https://api.github.com/repos/yannelli/pi-rust/releases/latest).tag_name
+Invoke-WebRequest "https://github.com/yannelli/pi-rust/releases/download/$tag/pi-$tag-$target.zip" -OutFile pi.zip
+Expand-Archive pi.zip -DestinationPath "$env:LOCALAPPDATA\pi" -Force
+$bin = "$env:LOCALAPPDATA\pi\pi-$tag-$target"
+[Environment]::SetEnvironmentVariable("Path", "$([Environment]::GetEnvironmentVariable('Path', 'User'));$bin", "User")
+```
+
+Open a new terminal afterwards so the `Path` change applies. With the GitHub CLI, `gh release download --repo yannelli/pi-rust --pattern '*<target>*'` fetches the latest archive. A browser download on macOS may need `xattr -d com.apple.quarantine pi` before the first run.
+
+`pi update --self` replaces a release install with the latest release, and `pi update --models` refreshes the model catalogs. To build from source (Rust 1.85 or newer): `cargo install --path crates/pi-coding-agent`.
 
 ## Use
 
 ```sh
-export ANTHROPIC_API_KEY=...        # or OPENAI_API_KEY, OPENROUTER_API_KEY, ...
+export ANTHROPIC_API_KEY=...        # or OPENAI_API_KEY, GEMINI_API_KEY, ...; or run /login
 pi                                  # interactive session in the current directory
 pi -p "Summarize src/main.rs"       # print mode: run once, print the answer
-pi --mode json -p "List the TODOs"  # one JSON agent event per line
+pi --mode json -p "List the TODOs"  # one JSON event per line
+pi --mode rpc                       # JSON-RPC over stdio for other programs
 pi -c                               # continue the latest session here
 pi -r                               # pick a session to resume
 pi --model openai/gpt-5.5 --thinking high
 pi @notes.md @screenshot.png "What changed?"
 cat error.log | pi -p "Explain this error"
+pi install npm:<package>            # install a pi package (extensions, skills, themes)
 ```
 
-Run `pi --help` for all options. In interactive mode, type `/help` for commands: `/model`, `/thinking`, `/compact`, `/new`, `/session`, `/resume`, `/follow`, `/abort`, `/quit`. Input typed while the agent works is queued as steering. Ctrl+C aborts a response; press it twice to exit.
+Run `pi --help` for all options. In interactive mode, type `/` to list commands, for example `/login`, `/model`, `/settings`, `/tree`, `/fork`, `/compact`, `/export`, `/share`, `/mcp`, and `/hotkeys`. Input typed while the agent works is queued as steering, and Alt+Enter (Ctrl+Q on Windows) queues a follow-up.
 
 ## ACP (Zed and other editors)
 
@@ -59,40 +81,47 @@ Each editor session runs a pi session in its project directory, saved in `~/.pi/
 
 ## Configuration
 
-pi-rust reads the same files as the TypeScript pi, so both can share one setup.
+pi-rust reads the same files as the TypeScript pi, so both can share one setup. `PI_CODING_AGENT_DIR` replaces `~/.pi/agent`.
 
 | Path | Purpose |
 | --- | --- |
-| `~/.pi/agent/models.json` | Custom providers and models; same format as pi (`providers.<name>.baseUrl`, `api`, `apiKey`, `models`, `modelOverrides`) |
-| `~/.pi/agent/settings.json` | `defaultProvider`, `defaultModel`, `defaultThinkingLevel`; `<cwd>/.pi/settings.json` overrides them |
-| `~/.pi/agent/AGENTS.md` | Global instructions; `AGENTS.md` or `CLAUDE.md` files from the filesystem root down to the working directory are added too |
-| `~/.pi/agent/sessions/` | JSONL sessions in pi's v3 format |
+| `~/.pi/agent/auth.json` | API keys and OAuth logins from `/login` or `pi auth` |
+| `~/.pi/agent/settings.json` | Settings; `<project>/.pi/settings.json` overrides them for a trusted project |
+| `~/.pi/agent/models.json` | Custom providers and models |
+| `~/.pi/agent/keybindings.json` | Key bindings |
+| `~/.pi/agent/mcp.json`, `<project>/.pi/mcp.json` | MCP servers |
+| `~/.pi/agent/{extensions,skills,prompts,themes}/` | Extensions, skills, prompt templates, and themes; `.pi/` in a project and `~/.agents/skills` work too |
+| `AGENTS.md`, `CLAUDE.md`, `SYSTEM.md`, `APPEND_SYSTEM.md` | Context files and system prompt overrides |
+| `~/.pi/agent/sessions/` | Sessions as JSONL trees in pi's format |
 
-`PI_CODING_AGENT_DIR` replaces `~/.pi/agent`. API keys come from `--api-key`, then `models.json` (`$VAR`, `${VAR}`, `!command`, or a literal), then provider environment variables such as `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`.
+On first start, pi-rust moves files from older pi layouts the same way pi does (for example `oauth.json` into `auth.json`).
 
 ## Providers
 
-The bundled catalog has about 1,100 models from pi's catalog that use one of three wire protocols:
-
-- `anthropic-messages`: Anthropic, including prompt caching, thinking with signatures, and OAuth tokens.
-- `openai-responses`: OpenAI, including reasoning items and encrypted reasoning replay.
-- `openai-completions`: OpenAI-compatible endpoints (OpenRouter, Groq, Cerebras, DeepSeek, xAI, Fireworks, Together, Ollama, LM Studio, vLLM and others), with pi's per-provider compatibility settings.
+pi-rust has every wire protocol of pi: `anthropic-messages`, `openai-responses`, `openai-completions`, `openai-codex-responses` (SSE and WebSocket), `azure-openai-responses`, `google-generative-ai`, `google-vertex`, `bedrock-converse-stream`, `mistral-conversations`, and `pi-messages`. The bundled catalog is pi's, and `pi update --models` refreshes it. `/login` supports OAuth for Anthropic, OpenAI Codex, GitHub Copilot, OpenRouter, xAI, Kimi, Meta, and Radius, plus API keys and ambient AWS and Google credentials. llama.cpp servers and virtual models work as in pi.
 
 ## Crates
 
 | Crate | Contents |
 | --- | --- |
-| [`pi-ai`](crates/pi-ai) | Message types (JSON-compatible with pi), streaming event protocol, SSE parsing, providers, model registry, context overflow detection, and a scripted `faux` provider for tests |
-| [`pi-agent`](crates/pi-agent) | The agent loop, tool argument validation, and the stateful `Agent`. The loop runs tool calls in parallel or in order, accepts steering and follow-up input between turns, and supports tool hooks and cancellation |
-| [`pi-coding-agent`](crates/pi-coding-agent) | Tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`), system prompt, sessions, compaction, and the `pi` CLI |
-
-`grep` and `find` are implemented in Rust with the `ignore` crate; they do not need ripgrep or fd.
+| [`pi-ai`](crates/pi-ai) | Message types (JSON-compatible with pi), streaming events, providers, OAuth, the model registry and catalogs |
+| [`pi-agent`](crates/pi-agent) | The agent loop, tool argument validation, and the stateful `Agent` |
+| [`pi-tui`](crates/pi-tui) | The terminal UI library: differential rendering, editor, markdown, images, and components |
+| [`pi-mcp`](crates/pi-mcp) | The MCP client (stdio and HTTP, OAuth) and server manager |
+| [`pi-codemode`](crates/pi-codemode) | Codemode: a sandboxed JavaScript runtime the model scripts tools in |
+| [`pi-js`](crates/pi-js) | Embedded QuickJS with Node-style modules and TypeScript, for pi extensions |
+| [`pi-coding-agent`](crates/pi-coding-agent) | Tools, sessions, compaction, resources, extensions, the interactive TUI, print, JSON, RPC, and ACP modes, and the `pi` CLI |
 
 ## Differences from the TypeScript pi
 
-Ported: the agent loop semantics, the coding tools and their truncation limits, the system prompt structure, project context files, session files with compaction, automatic compaction near the context window and after overflow errors, model selection, and print and JSON modes.
+pi-rust ports the `pi` CLI and its libraries feature for feature. These parts differ:
 
-Not ported: the full-screen TUI (pi-rust has a line-based interactive mode), extensions, skills, prompt templates, themes, MCP, `/login` OAuth flows and `auth.json`, session branching and tree navigation, RPC mode, HTML export, image resizing, and the Google, Bedrock, and Mistral wire protocols.
+- Extensions run on embedded QuickJS, so no Node install is needed. Most Node built-in modules work; the APIs that do not (for example `crypto` signing and `child_process.fork`) throw `ERR_PI_UNSUPPORTED`. Native npm addons cannot load.
+- `grep` and `find` use the Rust `ignore` crate, so pi-rust does not download `rg` or `fd`.
+- The version check and `pi update --self` use this repository's releases.
+- CJK and Thai word movement uses ICU4X dictionaries, so a few word boundaries differ from Node's `Intl.Segmenter`.
+- `pi --mode acp` (above) is an addition; the TypeScript pi needs the separate pi-acp adapter.
+- Not included: `pi experimental` and the `chord` package, which the published TypeScript pi leaves out too.
 
 ## Development
 

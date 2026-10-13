@@ -16,7 +16,6 @@ use crate::interactive_components::{
     ModelSelector, ModelSelectorOptions, ModelSelectorSource, ThinkingSelector, TrustSelector, TrustSelectorOptions,
     UserMessageItem, UserMessageSelector,
 };
-use crate::model_resolver::find_exact_model_reference_match;
 use crate::resources::brand::APP_NAME;
 use crate::resources::trust::ProjectTrustStore;
 use crate::settings::DEFAULT_THINKING_LEVEL;
@@ -97,32 +96,18 @@ impl InteractiveMode {
         }));
     }
 
-    /// `/model [reference]`: switch to an exact match, else open the selector with the search.
-    pub(super) fn handle_model_command(&self, search: Option<String>) {
-        let Some(search) = search else { return self.show_model_selector(None) };
-        let session = self.session();
-        let scoped = session.scoped_models();
-        let models: Vec<Model> = if scoped.is_empty() {
-            session.model_runtime().available_models()
-        } else {
-            scoped.into_iter().map(|scoped| scoped.model).collect()
-        };
-        match find_exact_model_reference_match(&search, &models) {
-            Some(model) => self.apply_model(model, false),
-            None => self.show_model_selector(Some(search)),
-        }
-    }
-
-    fn apply_model(&self, model: Model, persist: bool) {
+    pub(super) fn apply_model(&self, model: Model, persist: bool) {
         let session = self.session();
         self.spawn(move |mode| async move {
             let id = format!("{}/{}", model.provider, model.id);
             let short = model.id.clone();
+            let selected = model.clone();
             match tokio::spawn(async move { session.set_model(model, persist).await }).await {
                 Ok(Ok(())) => {
                     mode.update_available_provider_count();
                     mode.update_editor_border_color();
                     mode.show_status(&if persist { format!("Default model: {id}") } else { format!("Model: {short}") });
+                    mode.maybe_warn_about_anthropic_subscription_auth(Some(selected));
                 }
                 Ok(Err(error)) => mode.show_error(&error.to_string()),
                 Err(error) => mode.show_error(&error.to_string()),
@@ -138,6 +123,7 @@ impl InteractiveMode {
             _ => None,
         };
         let source: Rc<dyn ModelSelectorSource> = Rc::new(RuntimeSource(session.model_runtime().clone()));
+        let refresh_runtime = session.model_runtime().clone();
         let tui = self.tui();
         let weak = self.weak.clone();
         self.selector.show(Box::new(move |done| {
@@ -169,7 +155,7 @@ impl InteractiveMode {
                         }
                     })),
                     default_model,
-                    refresh: None,
+                    refresh: Some(super::model_refresh::selector_refresh(refresh_runtime)),
                 },
             );
             let dispose = selector.borrow().disposer();

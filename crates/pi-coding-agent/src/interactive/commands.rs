@@ -5,8 +5,11 @@ use pi_tui::{ComponentRef, Container, Markdown, Spacer, component};
 
 use super::mode::InteractiveMode;
 use super::selector::SelectorSpec;
+use super::shutdown::joined;
+use crate::agent_session::SessionImportFileNotFound;
 use crate::interactive_components::DynamicBorder;
 use crate::platform::changelog::{changelog_command_markdown, embedded_changelog_entries};
+use crate::session::branching::MissingSessionCwd;
 use crate::theme::{ThemeColor, theme};
 
 /// The argument of `/<command> <argument>`, or `None` for another command.
@@ -108,6 +111,9 @@ impl InteractiveMode {
             self.defer(|mode| mode.handle_debug_command());
         } else if text == "/arminsayshi" {
             clear();
+            if crate::interactive_components::play_armin_3d(&self.tui()) {
+                return true;
+            }
             self.add_spacer();
             self.add_to_chat(component(crate::interactive_components::armin::ArminComponent::new(&self.tui())));
         } else if text == "/dementedelves" {
@@ -123,7 +129,7 @@ impl InteractiveMode {
         {
             clear();
             self.handle_mcp_command(args.map(str::to_string));
-        } else if text == "/llama" {
+        } else if text == "/llama" && self.session().builtin_extension_enabled(crate::llama::LLAMA_PROVIDER_ID) {
             clear();
             self.handle_llama_command();
         } else if text == "/quit" {
@@ -161,19 +167,34 @@ impl InteractiveMode {
                 return;
             }
             mode.clear_status_indicator(None);
-            let runtime = mode.runtime.clone();
             let path = path.clone();
-            mode.spawn(move |mode| async move {
-                let input = std::path::PathBuf::from(&path);
-                let result = tokio::spawn(async move { runtime.import_from_jsonl(&input, None).await }).await;
-                match result {
-                    Ok(Ok(result)) if result.cancelled => {}
-                    Ok(Ok(_)) => mode.show_status(&format!("Session imported from: {path}")),
-                    Ok(Err(error)) => mode.show_error(&format!("Failed to import session: {error:#}")),
-                    Err(error) => mode.show_error(&format!("Failed to import session: {error}")),
-                }
-            });
+            mode.spawn(move |mode| async move { mode.import_session(path).await });
         });
+    }
+
+    async fn import_session(&self, path: String) {
+        let input = std::path::PathBuf::from(&path);
+        let mut cwd_override: Option<std::path::PathBuf> = None;
+        loop {
+            let (runtime, input, cwd) = (self.runtime.clone(), input.clone(), cwd_override.clone());
+            let import = async move { runtime.import_from_jsonl(&input, cwd.as_deref()).await };
+            let error = match joined(tokio::spawn(import).await) {
+                Ok(result) if result.cancelled => return self.show_status("Import cancelled"),
+                Ok(_) => return self.show_status(&format!("Session imported from: {path}")),
+                Err(error) => error,
+            };
+            if let Some(missing) = error.downcast_ref::<MissingSessionCwd>().filter(|_| cwd_override.is_none()) {
+                if !self.ask_confirm("Session cwd not found", &missing.prompt()).await {
+                    return self.show_status("Import cancelled");
+                }
+                cwd_override = Some(missing.fallback_cwd.clone());
+                continue;
+            }
+            if error.is::<SessionImportFileNotFound>() {
+                return self.show_error(&format!("Failed to import session: {error}"));
+            }
+            return self.handle_fatal_runtime_error("Failed to import session", &error);
+        }
     }
 
     /// `/copy` and the copy key: the selection in fullscreen when not copied on select, else
@@ -251,15 +272,14 @@ impl InteractiveMode {
         self.clear_status_indicator(None);
         let runtime = self.runtime.clone();
         self.spawn(move |mode| async move {
-            match tokio::spawn(async move { runtime.new_session(None, None).await }).await {
-                Ok(Ok(result)) if result.cancelled => {}
-                Ok(Ok(_)) => {
+            match joined(tokio::spawn(async move { runtime.new_session(None, None).await }).await) {
+                Ok(result) if result.cancelled => {}
+                Ok(_) => {
                     mode.add_spacer();
                     mode.add_text(|| theme().fg(ThemeColor::Accent, "✓ New session started"), 1, 1);
                     mode.request_render();
                 }
-                Ok(Err(error)) => mode.show_error(&format!("Failed to create session: {error:#}")),
-                Err(error) => mode.show_error(&format!("Failed to create session: {error}")),
+                Err(error) => mode.handle_fatal_runtime_error("Failed to create session", &error),
             }
         });
     }

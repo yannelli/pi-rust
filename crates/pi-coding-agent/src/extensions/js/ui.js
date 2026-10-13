@@ -139,7 +139,8 @@ export function createUiContext(target, prompt) {
 			prompt("custom", undefined, async () => {
 				const id = registerFactory("custom", factory);
 				try {
-					const handleKey = options?.onHandle ? registerCallback(options.onHandle) : undefined;
+					const onHandle = options?.onHandle;
+					const handleKey = onHandle ? registerCallback((overlay) => onHandle(overlayHandle(target, overlay))) : undefined;
 					const overlay = typeof options?.overlayOptions === "function" ? options.overlayOptions() : options?.overlayOptions;
 					const result = await callAsync("ui.custom", target, id, {
 						overlay: Boolean(options?.overlay),
@@ -205,9 +206,52 @@ export function createUiContext(target, prompt) {
 
 let editorFactory;
 
-/** Called by Rust for an autocomplete provider created by `addAutocompleteProvider`. */
-export async function autocomplete(provider, method, args) {
-	return await provider[method](...args);
+/** The `OverlayHandle` of a `custom()` overlay; calls go to the Rust TUI. */
+function overlayHandle(target, id) {
+	const op = (method, arg) => call("ui.overlay", target, id, method, arg ?? null);
+	return {
+		hide: () => op("hide"),
+		setHidden: (hidden) => op("setHidden", Boolean(hidden)),
+		isHidden: () => Boolean(op("isHidden")),
+		focus: () => op("focus"),
+		unfocus: () => op("unfocus"),
+		isFocused: () => Boolean(op("isFocused")),
+		getBounds: () => optional(op("getBounds")),
+	};
+}
+
+/** The built-in provider as the `current` of the first `addAutocompleteProvider` factory. */
+function baseAutocomplete(target) {
+	return {
+		getSuggestions: async (lines, cursorLine, cursorCol, options) =>
+			optional(await callAsync("ui.autocompleteBase", target, lines, cursorLine, cursorCol, Boolean(options?.force))) ??
+			null,
+		applyCompletion: (lines, cursorLine, cursorCol, item, prefix) =>
+			call("ui.autocompleteApply", lines, cursorLine, cursorCol, item, prefix),
+		shouldTriggerFileCompletion: (lines, cursorLine, cursorCol) =>
+			call("ui.autocompleteFileTrigger", lines, cursorLine, cursorCol),
+	};
+}
+
+/** Called by Rust: apply the `addAutocompleteProvider` factories `ids` in order to the built-in
+ * provider; the result keeps the trigger characters of every provider in the chain. */
+export function autocompleteChain(target, ids) {
+	let provider = baseAutocomplete(target);
+	const triggers = new Set();
+	for (const id of ids) {
+		const entry = factories.get(id);
+		if (!entry) continue;
+		provider = entry.factory(provider) ?? provider;
+		for (const trigger of provider.triggerCharacters ?? []) triggers.add(trigger);
+	}
+	return { provider, triggerCharacters: [...triggers] };
+}
+
+/** Called by Rust with a chain from `autocompleteChain`. */
+export async function autocomplete(chain, method, args) {
+	const provider = chain.provider;
+	if (typeof provider[method] !== "function") return null;
+	return (await provider[method](...args)) ?? null;
 }
 
 export { invokeCallback };

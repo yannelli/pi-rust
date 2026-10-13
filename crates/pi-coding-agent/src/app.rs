@@ -12,14 +12,15 @@ use pi_ai::auth::{CredentialStore, OAuthLookup};
 
 use crate::agent_session::{
     AgentSessionRuntime, CreateAgentSessionOptions, CreateServicesOptions, McpSessionOptions, NoTools, ResourceOptions,
-    RuntimeDiagnostic, RuntimeFactory, RuntimeParts, RuntimeTarget, create_agent_session,
+    RuntimeDiagnostic, RuntimeFactory, RuntimeParts, RuntimeTarget, TrustPromptFn, create_agent_session,
     create_agent_session_services, lock,
 };
 use crate::cli::Args;
 use crate::config::home_dir;
 use crate::resources::paths::{is_local_path, resolve_path};
 use crate::resources::trust::{
-    DefaultProjectTrust, ProjectTrustRequest, ProjectTrustResolution, ProjectTrustStore, resolve_project_trust,
+    DefaultProjectTrust, ProjectTrustRequest, ProjectTrustResolution, ProjectTrustStore, apply_project_trust_choice,
+    resolve_project_trust,
 };
 use crate::session::SessionManager;
 use crate::settings::{SettingsManager, SettingsOptions};
@@ -148,6 +149,7 @@ impl TrustCache {
         options: &AppOptions,
         cwd: &Path,
         agent_dir: &Path,
+        trust_prompt: Option<&TrustPromptFn>,
     ) -> (bool, Vec<RuntimeDiagnostic>) {
         if let Some(settings) = &options.settings {
             return (settings.is_project_trusted(), Vec::new());
@@ -167,12 +169,19 @@ impl TrustCache {
             trust_override: options.project_trust_override,
             default_project_trust: DefaultProjectTrust::parse(global.default_project_trust()),
             extension_decision,
-            has_ui: false,
+            has_ui: trust_prompt.is_some(),
         };
-        let trusted = match resolve_project_trust(&self.store, &request) {
-            Ok(ProjectTrustResolution::Decided(trusted)) => trusted,
-            Ok(ProjectTrustResolution::Prompt(_)) => false,
-            Err(error) => {
+        let trusted = match (resolve_project_trust(&self.store, &request), trust_prompt) {
+            (Ok(ProjectTrustResolution::Decided(trusted)), _) => trusted,
+            (Ok(ProjectTrustResolution::Prompt(prompt)), Some(ask)) => {
+                let choice = ask(prompt).await;
+                apply_project_trust_choice(&self.store, choice.as_ref()).unwrap_or_else(|error| {
+                    diagnostics.push(RuntimeDiagnostic::warning(format!("Could not save project trust: {error:#}")));
+                    choice.is_some_and(|choice| choice.trusted)
+                })
+            }
+            (Ok(ProjectTrustResolution::Prompt(_)), None) => false,
+            (Err(error), _) => {
                 diagnostics.push(RuntimeDiagnostic::warning(format!("Could not read project trust: {error:#}")));
                 false
             }
@@ -187,7 +196,8 @@ async fn create_runtime_parts(
     trust: &TrustCache,
     target: RuntimeTarget,
 ) -> anyhow::Result<RuntimeParts> {
-    let (project_trusted, trust_diagnostics) = trust.project_trusted(options, &target.cwd, &target.agent_dir).await;
+    let (project_trusted, trust_diagnostics) =
+        trust.project_trusted(options, &target.cwd, &target.agent_dir, target.trust_prompt.as_ref()).await;
     let services = create_agent_session_services(CreateServicesOptions {
         cwd: target.cwd.clone(),
         agent_dir: target.agent_dir.clone(),
@@ -246,7 +256,7 @@ async fn create_runtime_parts(
 /// Flags the extensions of `cwd` register, for `--help`.
 pub async fn extension_help_flags(options: &AppOptions, cwd: &Path) -> Vec<crate::cli::HelpFlag> {
     let trust = TrustCache { store: ProjectTrustStore::new(&options.agent_dir), decided: Mutex::default() };
-    let (project_trusted, _) = trust.project_trusted(options, cwd, &options.agent_dir).await;
+    let (project_trusted, _) = trust.project_trusted(options, cwd, &options.agent_dir, None).await;
     let services = create_agent_session_services(CreateServicesOptions {
         cwd: cwd.to_path_buf(),
         agent_dir: options.agent_dir.clone(),

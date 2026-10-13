@@ -65,7 +65,9 @@ impl ModelRuntime {
     }
 
     fn supports_api_key_login(&self, id: &str) -> bool {
-        !api_key_env_vars(id).is_empty() || self.registry().auth_configs().contains_key(id)
+        !api_key_env_vars(id).is_empty()
+            || super::login_flows::has_custom_api_key_login(id)
+            || self.registry().auth_configs().contains_key(id)
     }
 
     /// Login options sorted by name; `auth_type` limits them to one method.
@@ -164,6 +166,11 @@ impl ModelRuntime {
                 if !self.supports_api_key_login(provider) {
                     return Err(AuthError::other(format!("{name} does not support api_key login")));
                 }
+                if let Some(credential) =
+                    super::login_flows::custom_api_key_login(provider, interaction, &cancel).await?
+                {
+                    return self.store_login(provider, Credential::ApiKey(credential), &cancel).await;
+                }
                 let prompt = AuthPrompt::Secret { message: format!("Enter {name} API key"), placeholder: None };
                 let key = interaction.prompt(prompt, cancel.clone()).await?;
                 let key = key.trim().to_string();
@@ -173,6 +180,15 @@ impl ModelRuntime {
                 Credential::ApiKey(ApiKeyCredential { key: Some(key), env: None })
             }
         };
+        self.store_login(provider, credential, &cancel).await
+    }
+
+    async fn store_login(
+        &self,
+        provider: &str,
+        credential: Credential,
+        cancel: &CancellationToken,
+    ) -> AuthResult<Credential> {
         if cancel.is_cancelled() {
             return Err(AuthError::Cancelled);
         }

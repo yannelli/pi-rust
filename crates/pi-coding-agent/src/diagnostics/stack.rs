@@ -105,6 +105,23 @@ pub fn find_extension_stack_matches(stack: Option<&str>, extensions: &[Extension
     matches
 }
 
+/// The warning shown after a fatal error whose stack has frames from loaded extensions
+/// (upstream `formatCrashExtensionHint`).
+pub fn format_crash_extension_hint(matches: &[String]) -> Option<String> {
+    let quoted: Vec<String> = matches.iter().filter(|m| !m.is_empty()).map(|m| format!("`{m}`")).collect();
+    let labels = match quoted.as_slice() {
+        [] => return None,
+        [one] => one.clone(),
+        [first, second] => format!("{first} and {second}"),
+        [rest @ .., last] => format!("{}, and {last}", rest.join(", ")),
+    };
+    let (noun, pronoun) = if quoted.len() == 1 { ("extension", "it") } else { ("extensions", "them") };
+    let app = crate::resources::brand::APP_NAME;
+    Some(format!(
+        "A stack frame came from loaded {noun} {labels}, which may be involved. Try disabling {pronoun} with `{app} config`, or run `{app} -ne` to confirm."
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,5 +188,20 @@ mod tests {
         };
         let stack = "Error: progress 100%\n    at run (file:///Users/reporter/.pi/agent/extensions/local%20memory/worker.ts:4:2)";
         assert_eq!(find_extension_stack_matches(Some(stack), &[extension]), [path]);
+    }
+
+    #[test]
+    fn formats_the_extension_hint_like_upstream() {
+        let labels = |items: &[&str]| items.iter().map(|item| item.to_string()).collect::<Vec<_>>();
+        assert_eq!(format_crash_extension_hint(&[]), None);
+        let app = crate::resources::brand::APP_NAME;
+        assert_eq!(
+            format_crash_extension_hint(&labels(&["npm:a"])).unwrap(),
+            format!(
+                "A stack frame came from loaded extension `npm:a`, which may be involved. Try disabling it with `{app} config`, or run `{app} -ne` to confirm."
+            )
+        );
+        assert!(format_crash_extension_hint(&labels(&["a", "b"])).unwrap().contains("extensions `a` and `b`,"));
+        assert!(format_crash_extension_hint(&labels(&["a", "b", "c"])).unwrap().contains("`a`, `b`, and `c`,"));
     }
 }

@@ -9,12 +9,14 @@ pub mod builtins;
 mod cache;
 mod compaction;
 pub mod events;
+mod export_tools;
 mod extension_hooks;
 mod extension_host;
 mod hooks;
 mod listener;
 mod llama_api;
 pub mod login;
+mod login_flows;
 mod model;
 pub mod model_runtime;
 mod output_file;
@@ -51,7 +53,7 @@ pub use self::model_runtime::{ModelRuntime, ModelRuntimeOptions};
 pub use self::prompt::{PromptDisposition, PromptOptions, StreamingBehavior};
 pub use self::runtime::{
     AgentSessionRuntime, AsyncSetupFn, ForkPosition, ForkResult, InvalidateFn, RuntimeFactory, RuntimeParts,
-    RuntimeTarget, SwitchResult,
+    RuntimeTarget, SessionImportFileNotFound, SwitchResult, TrustPromptFn,
 };
 pub use self::runtime_catalog::{CachedFileModelsStore, CatalogSetup, LlamaAuth, ProviderAuth, catalog_base_url};
 pub use self::runtime_virtual::RouteOptions;

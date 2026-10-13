@@ -58,6 +58,8 @@ pub(super) struct ModeState {
     pub ready: bool,
     pub shutting_down: bool,
     pub exit: bool,
+    /// Set by a fatal runtime error; `run` then fails with it.
+    pub fatal_error: Option<String>,
     pub last_sigint: Option<Instant>,
     pub last_escape: Option<Instant>,
     pub changelog_markdown: Option<String>,
@@ -97,6 +99,7 @@ impl ModeState {
             ready: false,
             shutting_down: false,
             exit: false,
+            fatal_error: None,
             last_sigint: None,
             last_escape: None,
             changelog_markdown: None,
@@ -451,7 +454,7 @@ impl InteractiveMode {
                 crate::signals::termination_signal().await;
                 crate::signals::kill_tracked_detached_children();
                 if let Some(mode) = weak.upgrade() {
-                    mode.request_shutdown();
+                    mode.request_signal_shutdown();
                 }
             });
         }
@@ -466,7 +469,10 @@ impl InteractiveMode {
                 return Err(error);
             }
         }
-        Ok(())
+        match self.state.borrow_mut().fatal_error.take() {
+            Some(message) => Err(super::FatalErrorReported(message).into()),
+            None => Ok(()),
+        }
     }
 
     fn send_startup_messages(&self) {

@@ -140,7 +140,8 @@ pub(crate) async fn run(runner: Arc<ExtensionRunner>, op: &str, args: Vec<HostVa
     let args = Args(args);
     let (group, name) = op.split_once('.').unwrap_or((op, ""));
     let value = match group {
-        "ui" if name == "custom" => ops_ui::custom(&runner, args.u64(0), args.u64(1), args.json(2)).await,
+        "ui" if name == "custom" => ops_ui::custom(&runner, args.u64(0), args.u64(1), args.json(2)).await?,
+        "ui" if name == "autocompleteBase" => ops_ui::autocomplete_base(&runner, &args).await?,
         "ui" => dialog(&runner, name, &args).await?,
         "models" => model_op(&runner, name, args).await?,
         "tools" if name == "executeNested" => nested_call(&runner, &args).await?,

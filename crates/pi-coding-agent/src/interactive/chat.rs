@@ -16,7 +16,7 @@ use super::components::{
     set_component_expanded,
 };
 use super::mode::{InteractiveMode, LastStatus};
-use super::renderers::{ToolResultView, builtin_renderer};
+use super::renderers::{McpRenderer, ToolResultView, builtin_renderer};
 use super::util::format_tokens;
 use crate::cache_stats::{CacheMiss, cache_miss_notice, collect_cache_misses, format_cache_warming_usage};
 use crate::markdown_transform::create_mermaid_markdown_transformer;
@@ -154,11 +154,19 @@ impl InteractiveMode {
         if let Some(renderer) = builtin_renderer(name) {
             return ToolDisplay::Renderer(renderer);
         }
-        if self.session().all_tools().iter().any(|tool| tool.name == name) {
-            ToolDisplay::Generic
-        } else {
-            ToolDisplay::Unknown
+        let tools = self.session().all_tools();
+        let registered = tools.iter().find(|tool| tool.name == name);
+        if let Some(tool) = registered.filter(|tool| tool.source_path == "builtin:mcp")
+            && let Some(shared) = self.session().tool(&tool.name)
+        {
+            return ToolDisplay::Renderer(Rc::new(McpRenderer { label: shared.label().to_string() }));
         }
+        if registered.is_none()
+            && let Some(renderer) = McpRenderer::from_tool_name(name)
+        {
+            return ToolDisplay::Renderer(Rc::new(renderer));
+        }
+        if registered.is_some() { ToolDisplay::Generic } else { ToolDisplay::Unknown }
     }
 
     pub(super) fn new_tool_component(&self, name: &str, id: &str, args: Value) -> Rc<RefCell<ToolExecutionComponent>> {

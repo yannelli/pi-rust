@@ -57,6 +57,10 @@ impl JsToolRenderer {
 }
 
 impl ToolRenderer for JsToolRenderer {
+    fn self_shell(&self) -> bool {
+        self.info.self_shell
+    }
+
     fn render_call(&self, context: &mut ToolRenderContext<'_>) -> ComponentRef {
         let runner = self.runner.upgrade().filter(|_| self.info.call);
         let request = self.request(context);
