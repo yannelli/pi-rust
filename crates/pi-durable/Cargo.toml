@@ -9,14 +9,24 @@ rust-version.workspace = true
 
 [dependencies]
 async-trait.workspace = true
+base64.workspace = true
 futures.workspace = true
+image = { version = "0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
+notify = "8.2.0"
+pi-agent.workspace = true
 pi-ai.workspace = true
 pi-chord = { path = "../pi-chord" }
 rusqlite = { version = "0.40", features = ["bundled"] }
+ring.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["rt", "sync", "macros", "time"] }
+tokio = { workspace = true, features = ["rt", "sync", "macros", "time", "process", "fs", "io-util"] }
+tokio-util.workspace = true
+url = "2.5.8"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.5", features = ["fs", "process"] }
 
 [dev-dependencies]
 tempfile.workspace = true

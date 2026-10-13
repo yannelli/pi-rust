@@ -2,6 +2,9 @@
 //!
 //! Operations return failures as values (`FileError`, `ExecutionError`) rather than panicking.
 
+pub mod decode;
+pub mod line_scan;
+pub mod local;
 mod types;
 
 use std::sync::Arc;
@@ -9,6 +12,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use pi_chord::Context;
 
+pub use decode::{StreamDecoder, starts_with_bom};
+pub use line_scan::{InvalidLineRange, LineScanner};
+pub use local::{LocalEnvOptions, LocalExecutionEnv, LocalFileWatcher, LocalWatchOptions};
 pub use types::*;
 
 /// Result of a file operation.
