@@ -206,6 +206,7 @@ pub async fn execute_bash_command(
     #[cfg(unix)]
     process.process_group(0);
     let mut child = process.spawn().map_err(|error| anyhow::anyhow!("Failed to start shell: {error}"))?;
+    let _tracked = crate::signals::DetachedChildGuard::new(child.id());
     if let Some(mut stdin) = child.stdin.take() {
         let script = command.as_bytes().to_vec();
         tokio::spawn(async move {

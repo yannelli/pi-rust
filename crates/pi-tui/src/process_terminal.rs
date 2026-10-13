@@ -317,6 +317,21 @@ impl Terminal for ProcessTerminal {
     }
 }
 
+/// Put the terminal back after a crash, when a TUI left it in raw mode: leave the alternate
+/// screen, turn off mouse, paste, and keyboard protocols, show the cursor, and leave raw mode.
+/// Does nothing when raw mode is off, so it is safe to call from a panic hook.
+pub fn restore_terminal_after_crash() {
+    if !crossterm::terminal::is_raw_mode_enabled().unwrap_or(false) {
+        return;
+    }
+    let sequence = "\x1b[?2026l\x1b[?1006l\x1b[?1004l\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?2004l\x1b[?2031l\
+                    \x1b[<u\x1b[>4;0m\x1b[?7h\x1b[?1049l\x1b[0m\x1b[?25h\r\n";
+    let mut stdout = std::io::stdout();
+    let _ = std::io::Write::write_all(&mut stdout, sequence.as_bytes());
+    let _ = std::io::Write::flush(&mut stdout);
+    let _ = crossterm::terminal::disable_raw_mode();
+}
+
 #[cfg(test)]
 mod tests {
     use super::format_timestamp;

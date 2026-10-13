@@ -24,8 +24,8 @@ pub use bug_report::{
 pub use bug_summary::{BugReportSummaryOptions, generate_bug_report_summary};
 pub use bug_upload::{UploadBugReportOptions, radius_gateway_url, upload_bug_report};
 pub use crash_log::{
-    Crash, CrashContext, CrashRecord, clear_crash_log, crash_log_path, install_crash_hook, read_crash_log,
-    record_crash, take_unnotified_crash,
+    Crash, CrashContext, CrashRecord, clear_crash_log, crash_log_path, crash_report_instructions, install_crash_hook,
+    read_crash_log, record_crash, record_fatal_error, take_unnotified_crash,
 };
 pub use output_guard::{
     flush_raw_stdout, guarded_stdout, is_stdout_taken_over, restore_stdout, take_over_stdout, write_raw_stdout,
