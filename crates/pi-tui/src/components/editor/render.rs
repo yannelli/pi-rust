@@ -30,7 +30,8 @@ impl BorderContext<'_> {
     }
 }
 
-/// Draws a border line in place of the default one.
+/// Draws a border line in place of the default one. It runs during render, so it must not call
+/// back into the editor.
 pub type BorderRenderer = Box<dyn FnMut(&BorderContext<'_>) -> String>;
 
 /// A border with a centered `↑ N more` label, shortened to fit narrow widths.

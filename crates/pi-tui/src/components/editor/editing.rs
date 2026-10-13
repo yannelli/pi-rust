@@ -407,7 +407,7 @@ impl EditorCore {
             self.state.lines[line].replace_range(start..col, "");
             self.set_cursor_col(start);
         } else {
-            let start_line = line + 1 - pieces.len();
+            let Some(start_line) = (line + 1).checked_sub(pieces.len()) else { return };
             let start_col = self.state.lines[start_line].len().saturating_sub(pieces[0].len());
             let after = self.state.lines[line][col..].to_string();
             let merged = format!("{}{after}", &self.state.lines[start_line][..start_col]);
