@@ -3,7 +3,6 @@
 
 use std::path::{Path, PathBuf};
 
-use pi_ai::transcript::current_system_message;
 use pi_ai::{Message, Usage};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -201,14 +200,6 @@ impl AgentSession {
         Ok(NavigateTreeResult { editor_text, cancelled: false, aborted: false, summary_entry_id })
     }
 
-    /// Activate the tools the transcript declares, when it declares any.
-    pub(crate) fn restore_tools_from_transcript(&self) {
-        let declared = self.with_state(|state| current_system_message(&state.messages));
-        let Some(tools) = declared.and_then(|system| system.tools_added) else { return };
-        let names: Vec<String> = tools.into_iter().map(|tool| tool.name).collect();
-        self.set_active_tools_by_name(&names);
-    }
-
     /// Cancel a running branch summary.
     pub fn abort_branch_summary(&self) {
         if let Some(token) = &lock(&self.state).branch_summary {
@@ -310,8 +301,7 @@ impl AgentSession {
             loader.options = options;
             loader.reload();
         }
-        self.refresh_builtin_tools();
-        self.activate_new_default_tools(&previous_defaults);
+        self.reload_tools(&previous_defaults);
         self.rebuild_system_prompt();
     }
 }
@@ -330,5 +320,6 @@ fn resource_options_of(options: &crate::resources::ResourceLoaderOptions) -> sup
         no_context_files: options.no_context_files,
         system_prompt: options.system_prompt.clone(),
         append_system_prompt: options.append_system_prompt.clone(),
+        disabled_builtin_extensions: options.disabled_builtin_extensions.clone(),
     }
 }

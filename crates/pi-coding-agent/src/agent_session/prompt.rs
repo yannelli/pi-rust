@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use pi_ai::{ContentBlock, Message, UserContent, UserMessage};
 
+use super::builtins::mcp::set_servers_section;
 use super::{AgentSession, lock};
 use crate::app::{format_no_api_key_found_message, oauth_failed_message};
 use crate::images::{ProcessImageOptions, decode_base64_lenient, process_image};
@@ -60,6 +61,12 @@ impl Default for PromptOptions {
     }
 }
 
+/// The arguments of a `/mcp` command line, or `None` for other input.
+fn mcp_command_args(text: &str) -> Option<&str> {
+    let rest = text.trim().strip_prefix("/mcp")?;
+    (rest.is_empty() || rest.starts_with(char::is_whitespace)).then(|| rest.trim())
+}
+
 fn user_message(text: &str, images: Vec<ContentBlock>) -> Message {
     let mut blocks = vec![ContentBlock::text(text)];
     blocks.extend(images);
@@ -78,12 +85,20 @@ impl AgentSession {
                 "Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry."
             );
         }
-        let expanded = if options.expand_prompt_templates { self.expand_input(text) } else { text.to_string() };
         let preflight = |disposition| {
             if let Some(callback) = &options.preflight_result {
                 callback(disposition);
             }
         };
+        if options.expand_prompt_templates
+            && let Some(args) = mcp_command_args(text)
+            && self.mcp_manager().is_some()
+        {
+            preflight(PromptDisposition::Handled);
+            self.run_mcp_command(args).await;
+            return Ok(PromptDisposition::Handled);
+        }
+        let expanded = if options.expand_prompt_templates { self.expand_input(text) } else { text.to_string() };
         if self.is_streaming() {
             let Some(behavior) = options.streaming_behavior else {
                 anyhow::bail!(
@@ -110,7 +125,9 @@ impl AgentSession {
         let text = if hints.is_empty() { expanded } else { format!("{expanded}\n\n{}", hints.join("\n")) };
         let mut messages = vec![user_message(&text, images)];
         messages.append(&mut lock(&self.state).pending_next_turn);
-        let prompt_options = self.effective_prompt_options();
+        let servers_section = self.prepare_mcp_for_prompt().await;
+        let mut prompt_options = self.effective_prompt_options();
+        set_servers_section(&mut prompt_options, servers_section);
         let update = self.prepare_prompt_and_tool_loadout(&prompt_options, &self.messages());
         lock(&self.state).run_prompt = Some(prompt_options);
         if let Some(update) = update {

@@ -127,6 +127,7 @@ impl AgentSessionRuntime {
     async fn teardown_current(&self) {
         let session = self.session();
         session.abort().await;
+        session.shutdown().await;
         session.dispose();
     }
 
