@@ -18,6 +18,7 @@ pub mod interactive_components;
 pub mod keybindings;
 pub mod llama;
 pub mod markdown_transform;
+pub mod mcp_cli;
 pub mod mermaid;
 pub mod messages;
 pub mod model_resolver;

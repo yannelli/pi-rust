@@ -11,8 +11,9 @@ use pi_ai::ThinkingLevel;
 use pi_ai::auth::{CredentialStore, OAuthLookup};
 
 use crate::agent_session::{
-    AgentSessionRuntime, CreateAgentSessionOptions, CreateServicesOptions, NoTools, ResourceOptions, RuntimeDiagnostic,
-    RuntimeFactory, RuntimeParts, RuntimeTarget, create_agent_session, create_agent_session_services, lock,
+    AgentSessionRuntime, CreateAgentSessionOptions, CreateServicesOptions, McpSessionOptions, NoTools, ResourceOptions,
+    RuntimeDiagnostic, RuntimeFactory, RuntimeParts, RuntimeTarget, create_agent_session,
+    create_agent_session_services, lock,
 };
 use crate::cli::Args;
 use crate::config::home_dir;
@@ -59,6 +60,8 @@ pub struct AppOptions {
     /// Model request function in place of `pi_ai::stream`.
     pub stream_fn: Option<StreamFn>,
     pub custom_tools: Vec<SharedTool>,
+    /// How sessions run the built-in MCP support.
+    pub mcp: McpSessionOptions,
 }
 
 fn resolve_cli_paths(cwd: &Path, paths: &[String]) -> Vec<String> {
@@ -96,6 +99,7 @@ impl AppOptions {
             system_prompt: args.system_prompt.as_deref().map(|input| resolve_prompt_arg(input, cwd)),
             append_system_prompt: (!append.is_empty())
                 .then(|| append.iter().map(|input| resolve_prompt_arg(input, cwd)).collect()),
+            disabled_builtin_extensions: if args.no_mcp { vec!["mcp".into()] } else { Vec::new() },
         };
         Self {
             agent_dir: agent_dir.to_path_buf(),
@@ -194,6 +198,7 @@ async fn create_runtime_parts(
     create.no_tools = options.no_tools;
     create.custom_tools = options.custom_tools.clone();
     create.stream_fn = options.stream_fn.clone();
+    create.mcp = options.mcp.clone();
     let created = create_agent_session(create).await?;
     Ok(RuntimeParts { session: created.session, model_fallback_message: created.model_fallback_message, diagnostics })
 }

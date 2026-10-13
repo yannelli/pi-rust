@@ -4,6 +4,7 @@
 
 pub mod auth;
 pub mod bash;
+pub mod builtins;
 mod compaction;
 pub mod events;
 mod hooks;
@@ -17,6 +18,7 @@ mod run;
 pub mod runtime;
 pub mod sdk;
 pub mod services;
+mod tool_api;
 mod tools;
 mod tree;
 
@@ -31,6 +33,7 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 pub use self::bash::BashResult;
+pub use self::builtins::{BUILTIN_EXTENSIONS, McpSessionOptions, NotifyFn, NotifyLevel};
 pub use self::events::{AgentSessionEvent, CompactionReason, SummarizationSource, compaction_result_json};
 pub use self::model::ModelCycleResult;
 pub use self::model_runtime::{ModelRuntime, ModelRuntimeOptions};
@@ -41,7 +44,7 @@ pub use self::services::{
     AgentSessionServices, CreateServicesOptions, DiagnosticLevel, ResourceOptions, RuntimeDiagnostic,
     create_agent_session_services,
 };
-pub use self::tools::ToolInfo;
+pub use self::tools::{ToolInfo, ToolSource};
 pub use self::tree::{NavigateTreeOptions, NavigateTreeResult, SessionStatsReport};
 use crate::model_resolver::ScopedModel;
 use crate::session::SessionManager;
@@ -91,6 +94,7 @@ pub struct AgentSession {
     pub(crate) state: Mutex<RunState>,
     idle: watch::Sender<bool>,
     pub(crate) tools: Mutex<tools::ToolState>,
+    pub(crate) builtins: Mutex<builtins::BuiltinState>,
     /// The auth-wrapped stream function, shared by session and summarization requests.
     stream_fn: StreamFn,
     /// Whether the session was created with its own stream function (tests, SDK hosts).
@@ -273,6 +277,11 @@ impl AgentSession {
         }
         self.request_abort();
         self.abort_bash();
+        if let Some(manager) = self.stop_mcp()
+            && let Ok(handle) = tokio::runtime::Handle::try_current()
+        {
+            handle.spawn(async move { manager.shutdown().await });
+        }
         if let Some(id) = lock(&self.agent_listener).take() {
             self.agent.unsubscribe(id);
         }

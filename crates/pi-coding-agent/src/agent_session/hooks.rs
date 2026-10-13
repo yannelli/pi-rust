@@ -5,9 +5,10 @@
 use std::sync::{Arc, Weak};
 
 use futures::FutureExt;
+use pi_agent::transcript::hide_tool_declarations;
 use pi_agent::{
     AfterToolCallFn, AfterToolCallResult, AgentContext, AgentHooks, AgentLoopTurnUpdate, AgentRequestUpdate,
-    ConvertToLlmFn, PrepareNextTurnFn, PrepareRequestFn,
+    BeforeToolCallFn, CallableToolsFn, ConvertToLlmFn, PrepareNextTurnFn, PrepareRequestFn, TransformContextFn,
 };
 use pi_ai::Message;
 
@@ -26,6 +27,7 @@ impl AgentSession {
     /// and tool changes made during the run in a system message before the next request.
     async fn prepare_next_turn(&self) -> AgentLoopTurnUpdate {
         self.compact_before_next_response().await;
+        self.mcp_turn_start().await;
         let options = self.effective_prompt_options();
         let context = self.projected_context();
         let update = self.prepare_prompt_and_tool_loadout(&options, &context.messages);
@@ -82,6 +84,40 @@ fn after_tool_call_hook(weak: Weak<AgentSession>) -> AfterToolCallFn {
     })
 }
 
+/// Nested calls resolve against the callable tools: the active `direct` tools and every
+/// `codemode` or `deferred` tool.
+fn callable_tools_hook(weak: Weak<AgentSession>) -> CallableToolsFn {
+    Arc::new(move || {
+        weak.upgrade()
+            .map(|session| session.with_tool_registry(|registry| registry.callable_tools()))
+            .unwrap_or_default()
+    })
+}
+
+/// Requests leave out the declarations `prepare_loadout` hooks hide (upstream
+/// `_installHiddenDeclarationsProjection`).
+fn transform_context_hook(weak: Weak<AgentSession>) -> TransformContextFn {
+    Arc::new(move |messages, _cancel| {
+        let hidden = weak.upgrade().map(|session| session.hidden_declarations()).unwrap_or_default();
+        async move { hide_tool_declarations(messages, &hidden) }.boxed()
+    })
+}
+
+/// A call waits for the MCP servers it needs (upstream MCP `tool_call` handler).
+fn before_tool_call_hook(weak: Weak<AgentSession>) -> BeforeToolCallFn {
+    Arc::new(move |call, cancel| {
+        let manager = weak.upgrade().and_then(|session| session.mcp_manager());
+        let (name, args) = (call.tool_call.name.clone(), call.args.clone());
+        async move {
+            if let Some(manager) = manager {
+                manager.wait_for_tool_call(&name, &args, &cancel).await;
+            }
+            None
+        }
+        .boxed()
+    })
+}
+
 impl AgentSession {
     /// Install the session's hooks on its agent; `stream_fn` already resolves auth per request.
     pub(crate) fn install_hooks(&self) {
@@ -96,7 +132,10 @@ impl AgentSession {
             convert_to_llm: Some(convert),
             prepare_request: Some(prepare_request_hook(weak.clone())),
             prepare_next_turn: Some(prepare_next_turn_hook(weak.clone())),
-            after_tool_call: Some(after_tool_call_hook(weak)),
+            before_tool_call: Some(before_tool_call_hook(weak.clone())),
+            after_tool_call: Some(after_tool_call_hook(weak.clone())),
+            transform_context: Some(transform_context_hook(weak.clone())),
+            callable_tools: Some(callable_tools_hook(weak)),
             session_id: Some(self.session_id()),
             ..AgentHooks::default()
         });

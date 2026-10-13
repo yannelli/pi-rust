@@ -1470,6 +1470,8 @@ dependencies = [
  "notify",
  "pi-agent",
  "pi-ai",
+ "pi-codemode",
+ "pi-mcp",
  "pi-tui",
  "pulldown-cmark",
  "regex",
@@ -1489,6 +1491,7 @@ dependencies = [
  "two-face",
  "unicode-normalization",
  "unicode-segmentation",
+ "url",
  "zip",
 ]
 

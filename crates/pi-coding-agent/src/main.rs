@@ -6,7 +6,7 @@ use pi_ai::ModelRegistry;
 use pi_ai::auth::{AuthResolver, FileCredentialStore, OAuthLookup};
 use pi_ai::env::{process_env_value, set_child_process_env};
 use pi_coding_agent::agent_session::auth::configure_http_from_settings;
-use pi_coding_agent::agent_session::{DiagnosticLevel, RuntimeDiagnostic};
+use pi_coding_agent::agent_session::{BUILTIN_EXTENSIONS, DiagnosticLevel, RuntimeDiagnostic};
 use pi_coding_agent::app::{AppOptions, configured_providers, create_app_runtime, format_no_models_available_message};
 use pi_coding_agent::auth_cli::run_auth_command;
 use pi_coding_agent::cli::{Args, OutputMode, help_text, normalize_session_name, parse_args, unknown_flags_error};
@@ -14,6 +14,7 @@ use pi_coding_agent::config::{ENV_SESSION_DIR, agent_dir, auth_path, env_flag, e
 use pi_coding_agent::export::{ExportTheme, export_from_file};
 use pi_coding_agent::files::process_file_args;
 use pi_coding_agent::interactive::run_interactive;
+use pi_coding_agent::mcp_cli::run_mcp_cli;
 use pi_coding_agent::packages::{PackageCommandOptions, run_config_command, run_package_command};
 use pi_coding_agent::print_mode::run_print_mode;
 use pi_coding_agent::session::branching::missing_session_cwd;
@@ -306,13 +307,17 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
     let cwd = std::env::current_dir()?;
     let bootstrap_settings = SettingsManager::create(&cwd, &agent_dir, SettingsOptions { project_trusted: false });
     configure_http_from_settings(&bootstrap_settings);
-    let package_options = PackageCommandOptions::from_env(cwd.clone(), agent_dir.clone());
+    let mut package_options = PackageCommandOptions::from_env(cwd.clone(), agent_dir.clone());
+    package_options.builtin_extensions = BUILTIN_EXTENSIONS.iter().map(|name| name.to_string()).collect();
     if let Some(code) = run_package_command(&raw, &package_options).await {
         return Ok(code);
     }
     let config_selector = (std::io::stdin().is_terminal() && std::io::stdout().is_terminal())
         .then(pi_coding_agent::interactive_components::config_selector::config_selector_fn);
     if let Some(code) = run_config_command(&raw, &package_options, config_selector.as_ref()).await {
+        return Ok(code);
+    }
+    if let Some(code) = run_mcp_cli(&raw, &cwd, &agent_dir).await {
         return Ok(code);
     }
     let mut args = parse_args(&raw);
