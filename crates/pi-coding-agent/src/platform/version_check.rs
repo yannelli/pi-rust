@@ -43,7 +43,7 @@ pub fn is_newer_package_version(candidate: &str, current: &str) -> bool {
 
 #[derive(Clone, Debug)]
 pub struct VersionCheckOptions {
-    /// The GitHub "latest release" endpoint.
+    /// The GitHub "latest release" endpoint; `PI_GITHUB_API_URL` replaces api.github.com.
     pub url: String,
     pub timeout: Duration,
     /// Retry transient failures twice, as `pi update` does.
@@ -56,8 +56,13 @@ pub struct VersionCheckOptions {
 
 impl Default for VersionCheckOptions {
     fn default() -> Self {
+        let api_url = crate::update::github_api_url();
+        let url = match api_url.as_str() {
+            crate::update::release::GITHUB_API_URL => LATEST_VERSION_URL.into(),
+            _ => format!("{api_url}/repos/{}/releases/latest", crate::update::GITHUB_REPO),
+        };
         Self {
-            url: LATEST_VERSION_URL.into(),
+            url,
             timeout: DEFAULT_TIMEOUT,
             retry: false,
             offline: crate::config::offline(),

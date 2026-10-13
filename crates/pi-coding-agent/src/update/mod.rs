@@ -18,7 +18,7 @@ pub use install::{
 };
 pub use release::{
     ArchiveKind, GITHUB_REPO, GitHubRelease, ReleaseAsset, ReleaseSource, UpdateError, archive_name, binary_name,
-    release_target, select_assets,
+    github_api_url, release_target, select_assets,
 };
 
 use crate::platform::version_check::is_newer_package_version;

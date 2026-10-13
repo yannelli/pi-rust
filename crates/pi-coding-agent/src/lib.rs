@@ -29,6 +29,7 @@ pub mod render;
 pub mod resources;
 pub mod session;
 pub mod settings;
+pub mod startup;
 pub mod system_prompt;
 pub mod theme;
 pub mod tools;

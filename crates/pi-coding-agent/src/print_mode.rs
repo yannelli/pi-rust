@@ -9,10 +9,9 @@ use pi_ai::{ContentBlock, Message, StopReason};
 use crate::agent_session::{AgentSession, AgentSessionRuntime, PromptOptions};
 use crate::cli::OutputMode;
 
+/// One JSON line on the real stdout, which the stdout guard keeps for protocol output.
 fn write_line(line: &str) {
-    let mut stdout = std::io::stdout().lock();
-    let _ = writeln!(stdout, "{line}");
-    let _ = stdout.flush();
+    let _ = crate::diagnostics::write_raw_stdout(&format!("{line}\n"));
 }
 
 /// The session that prints events, with its listener id.
