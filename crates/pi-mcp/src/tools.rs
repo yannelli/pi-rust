@@ -255,8 +255,9 @@ pub fn to_agent_result(output: McpToolOutput) -> AgentToolResult {
     AgentToolResult {
         content: output.content,
         details: Some(details_json(&output.details)),
+        structured_content: Some(output.structured_content),
         is_error: output.is_error,
-        terminate: false,
+        ..AgentToolResult::default()
     }
 }
 

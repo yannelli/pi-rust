@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use futures::FutureExt;
+use pi_ai::transcript::{create_initial_system_message, current_system_message, current_system_prompt};
 use pi_ai::{ContentBlock, Message, Model, ThinkingLevel, UserContent, UserMessage, now_ms};
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
@@ -61,6 +62,27 @@ pub struct AgentState {
     pub streaming_message: Option<Message>,
     pub pending_tool_calls: HashSet<String>,
     pub error_message: Option<String>,
+}
+
+impl AgentState {
+    /// The system prompt: `system_prompt` when set, else replayed from the transcript.
+    pub fn current_system_prompt(&self) -> String {
+        match &self.system_prompt {
+            Some(prompt) => prompt.clone(),
+            None => current_system_prompt(&self.messages),
+        }
+    }
+}
+
+/// Initial state for [`Agent::with_initial_state`]. The prompt and tools become the leading
+/// system message unless `messages` already starts with one.
+#[derive(Clone, Default)]
+pub struct AgentInitialState {
+    pub system_prompt: Option<String>,
+    pub model: Option<Model>,
+    pub thinking_level: ThinkingLevel,
+    pub tools: Vec<SharedTool>,
+    pub messages: Vec<Message>,
 }
 
 /// Hooks and request settings applied to every run.
@@ -130,6 +152,49 @@ impl Agent {
                 running: watch::channel(false).0,
             }),
         }
+    }
+
+    /// An agent whose transcript carries the prompt and tool declarations, as upstream.
+    pub fn with_initial_state(initial: AgentInitialState) -> Self {
+        let unknown = || Model {
+            id: "unknown".into(),
+            name: "unknown".into(),
+            api: "unknown".into(),
+            provider: "unknown".into(),
+            ..Model::default()
+        };
+        let agent = Self::new(initial.model.unwrap_or_else(unknown));
+        let declarations: Vec<_> = initial.tools.iter().map(|tool| tool.declaration()).collect();
+        let mut messages = initial.messages;
+        if !matches!(messages.first(), Some(Message::System(_)))
+            && let Some(system) = create_initial_system_message(initial.system_prompt.as_deref(), &declarations)
+        {
+            messages.insert(0, Message::System(system));
+        }
+        agent.update_state(|state| {
+            state.thinking_level = initial.thinking_level;
+            state.tools = initial.tools;
+            state.messages = messages;
+        });
+        agent
+    }
+
+    /// Clear the transcript and queues, keeping the replayed prompt and tool baseline.
+    pub fn reset(&self) -> anyhow::Result<()> {
+        if lock(&self.inner.run).is_some() {
+            anyhow::bail!("Agent is already processing. Wait for completion before resetting.");
+        }
+        {
+            let mut state = lock(&self.inner.state);
+            let baseline = current_system_message(&state.messages);
+            state.messages = baseline.map(Message::System).into_iter().collect();
+            state.is_streaming = false;
+            state.streaming_message = None;
+            state.pending_tool_calls.clear();
+            state.error_message = None;
+        }
+        self.clear_queues();
+        Ok(())
     }
 
     /// A copy of the current state.
@@ -257,9 +322,12 @@ impl Agent {
 
     /// Continue from the transcript; after an assistant message, queued input is used.
     pub async fn continue_run(&self) -> anyhow::Result<()> {
-        let last_is_assistant = match lock(&self.inner.state).messages.last() {
-            None => anyhow::bail!("No messages to continue from"),
-            Some(message) => matches!(message, Message::Assistant(_)),
+        let last_is_assistant = {
+            let state = lock(&self.inner.state);
+            if state.messages.iter().all(|message| matches!(message, Message::System(_))) {
+                anyhow::bail!("No messages to continue from");
+            }
+            matches!(state.messages.last(), Some(Message::Assistant(_)))
         };
         if last_is_assistant {
             let steering: Vec<Message> = lock(&self.inner.steering).messages.drain(..).collect();
