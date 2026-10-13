@@ -395,3 +395,24 @@ pub fn content_kind(write: &StorageWrite) -> Option<&'static str> {
         _ => None,
     }
 }
+
+/// A one-shot signal tests resolve and await (upstream `deferred()`).
+#[derive(Clone)]
+pub struct Deferred(watch::Sender<bool>);
+
+impl Default for Deferred {
+    fn default() -> Self {
+        Self(watch::channel(false).0)
+    }
+}
+
+impl Deferred {
+    pub fn resolve(&self) {
+        self.0.send_replace(true);
+    }
+
+    pub async fn wait(&self) {
+        let mut receiver = self.0.subscribe();
+        let _ = receiver.wait_for(|done| *done).await;
+    }
+}
