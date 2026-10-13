@@ -17,6 +17,7 @@ async-trait.workspace = true
 futures.workspace = true
 pi-agent.workspace = true
 pi-ai.workspace = true
+pi-tui = { path = "../pi-tui" }
 reqwest.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["float_roundtrip"] }
@@ -29,6 +30,11 @@ image = { version = "0.25.10", default-features = false, features = ["bmp", "gif
 regex = "1.11.1"
 serde_yaml_ng = "0.10.0"
 similar = "2.7.0"
+syntect = { version = "5.3.0", default-features = false, features = ["parsing", "default-syntaxes", "regex-fancy"] }
+two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }
+notify = "8.2.0"
+pulldown-cmark = { version = "0.13.0", default-features = false }
+unicode-segmentation = "1.12"
 unicode-normalization = "0.1.24"
 
 [dev-dependencies]

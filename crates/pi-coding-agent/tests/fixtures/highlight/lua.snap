@@ -1,0 +1,21 @@
+«syntaxComment:-- A greeter»
+«syntaxKeyword:local» Greeter = {}
+Greeter.__index = Greeter
+
+«syntaxKeyword:function» Greeter.«syntaxFunction:new»(«syntaxVariable:name»)
+  «syntaxKeyword:local» «syntaxType:self» = «syntaxType:setmetatable»({}, Greeter)
+  «syntaxType:self».name = name «syntaxKeyword:or» «syntaxString:"world"»
+  «syntaxType:self».count = «syntaxNumber:42»
+  «syntaxKeyword:return» «syntaxType:self»
+«syntaxKeyword:end»
+
+«syntaxKeyword:function» Greeter:«syntaxFunction:greet»(«syntaxVariable:times»)
+  «syntaxKeyword:for» i = «syntaxNumber:1», times «syntaxKeyword:do»
+    «syntaxType:print»(«syntaxType:string».format(«syntaxString:"Hello %s %d"», «syntaxType:self».name, i))
+  «syntaxKeyword:end»
+  «syntaxKeyword:return» «syntaxNumber:nil», «syntaxNumber:true», «syntaxNumber:3.5»
+«syntaxKeyword:end»
+
+«syntaxComment:--[[ block»
+«syntaxComment:comment ]]»
+«syntaxKeyword:return» Greeter

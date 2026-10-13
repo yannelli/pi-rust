@@ -1,0 +1,19 @@
+«syntaxKeyword:using» System;
+«syntaxKeyword:using» System.Collections.Generic;
+
+«syntaxKeyword:namespace» Demo
+{
+    «syntaxComment:/// <summary>A greeter.</summary>»
+    «syntaxKeyword:public» «syntaxKeyword:class» «syntaxFunction:Greeter» : «syntaxFunction:IGreeter»
+    {
+        «syntaxKeyword:private» «syntaxKeyword:readonly» «syntaxType:int» _count = «syntaxNumber:3»;
+
+        «muted:[Obsolete("old")]»
+        «syntaxKeyword:public» «syntaxType:string» «syntaxFunction:Greet»(«syntaxType:string» «syntaxVariable:name»)
+        {
+            «syntaxComment:// Build the message»
+            «syntaxKeyword:var» list = «syntaxKeyword:new» «syntaxType:List»<«syntaxType:string»> { «syntaxString:"a"», «syntaxString:"b"» };
+            «syntaxKeyword:return» «syntaxString:$"Hello »{name}«syntaxString: »{_count}«syntaxString:"» + «syntaxNumber:null» + «syntaxNumber:true»;
+        }
+    }
+}

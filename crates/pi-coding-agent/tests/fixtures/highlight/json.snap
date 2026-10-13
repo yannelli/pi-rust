@@ -1,0 +1,7 @@
+{
+  «syntaxVariable:"name"»: «syntaxString:"pi"»,
+  «syntaxVariable:"version"»: «syntaxNumber:1.5»,
+  «syntaxVariable:"private"»: «syntaxNumber:true»,
+  «syntaxVariable:"tags"»: [«syntaxString:"a"», «syntaxString:"b"»],
+  «syntaxVariable:"nested"»: { «syntaxVariable:"value"»: «syntaxNumber:null», «syntaxVariable:"count"»: «syntaxNumber:-3» }
+}

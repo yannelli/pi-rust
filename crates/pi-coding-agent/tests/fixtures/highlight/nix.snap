@@ -1,0 +1,15 @@
+{ pkgs ? «syntaxType:import» «syntaxString:<nixpkgs>» {}, lib, ... }:
+
+«syntaxKeyword:let»
+  «syntaxVariable:version» = «syntaxString:"1.0"»;
+  «syntaxComment:# Build inputs»
+  «syntaxVariable:inputs» = «syntaxKeyword:with» pkgs; [ git curl ];
+«syntaxKeyword:in»
+pkgs.stdenv.mkDerivation «syntaxKeyword:rec» {
+  «syntaxVariable:pname» = «syntaxString:"demo"»;
+  «syntaxKeyword:inherit» version;
+  «syntaxVariable:src» = «syntaxString:./src»;
+  «syntaxVariable:buildInputs» = inputs;
+  «syntaxVariable:doCheck» = «syntaxNumber:true»;
+  «syntaxVariable:meta».«syntaxVariable:description» = «syntaxString:"Demo »«italic:${version}»«syntaxString:"»;
+}

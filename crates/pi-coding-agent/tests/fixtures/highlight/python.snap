@@ -1,0 +1,13 @@
+«syntaxKeyword:import» os
+«syntaxKeyword:from» typing «syntaxKeyword:import» List
+
+«muted:@decorator»
+«syntaxKeyword:class» «syntaxFunction:Greeter»(«syntaxFunction:Base»):
+    «syntaxString:"""Docstring for the class."""»
+
+    «syntaxKeyword:def» «syntaxFunction:greet»«syntaxVariable:(self,» «syntaxVariable:name:» «syntaxType:str» «syntaxVariable:=» «syntaxString:"world"»«syntaxVariable:,» «syntaxVariable:count=»«syntaxNumber:3»«syntaxVariable:)» -> List[«syntaxType:str»]:
+        «syntaxComment:# Say hello»
+        result = [«syntaxString:f"Hello »«text:{name}»«syntaxString:!"» «syntaxKeyword:for» _ «syntaxKeyword:in» «syntaxType:range»(count)]
+        «syntaxKeyword:if» «syntaxKeyword:not» result «syntaxKeyword:and» «syntaxNumber:None» «syntaxKeyword:is» «syntaxNumber:True»:
+            «syntaxKeyword:raise» ValueError(«syntaxString:'empty'»)
+        «syntaxKeyword:return» result + [«syntaxNumber:0x1F», «syntaxNumber:3.14», «syntaxNumber:1e-3»]
