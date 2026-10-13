@@ -32,6 +32,19 @@ async fn connects_to_a_newline_delimited_server_and_captures_stderr() {
 }
 
 #[tokio::test]
+async fn servers_see_the_child_process_environment_overlay() {
+    pi_ai::env::set_child_process_env("PI_MCP_STDIO_OVERLAY_TEST", "from-overlay");
+    let transport = Arc::new(StdioTransport::new(StdioTransportOptions::new(SERVER, Vec::new())));
+    let client = McpClient::new(McpClientOptions::new("stdio-test", "1.0.0"));
+    client.connect(transport).await.unwrap();
+    let arguments = json!({ "name": "PI_MCP_STDIO_OVERLAY_TEST" });
+    let result = client.call_tool("env", Some(arguments), RequestOptions::default()).await.unwrap();
+    let text = serde_json::to_value(result).unwrap()["content"][0]["text"].clone();
+    assert_eq!(text, json!("from-overlay"));
+    client.close().await;
+}
+
+#[tokio::test]
 async fn reports_a_missing_command_like_node() {
     let transport = Arc::new(StdioTransport::new(StdioTransportOptions::new("pi-test-missing-mcp-server", Vec::new())));
     let client = McpClient::new(McpClientOptions::new("stdio-test", "1.0.0"));

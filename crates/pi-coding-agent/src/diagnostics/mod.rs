@@ -28,7 +28,8 @@ pub use crash_log::{
     read_crash_log, record_crash, record_fatal_error, take_unnotified_crash,
 };
 pub use output_guard::{
-    flush_raw_stdout, guarded_stdout, is_stdout_taken_over, restore_stdout, take_over_stdout, write_raw_stdout,
+    flush_raw_stdout, guarded_stdout, is_stdout_taken_over, restore_stdout, say_stdout, take_over_stdout,
+    write_raw_stdout,
 };
 pub use redact::{redact_json_value, redact_url};
 pub use stack::{ExtensionStackInfo, find_extension_stack_matches, format_crash_extension_hint};

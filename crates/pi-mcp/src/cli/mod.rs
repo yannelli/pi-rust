@@ -19,16 +19,16 @@ use crate::oauth::CallbackServerFactory;
 use crate::runtime::signin::APP_NAME;
 use crate::runtime::{McpOAuthCredentialStore, TransportFactory};
 
-pub const HELP: &str = r#"Usage:
-  pi mcp add <server> [options] -- <command> [args...]
-  pi mcp add <server> [options] --url <url>
-  pi mcp remove <server> [-l]
-  pi mcp list [--json]
-  pi mcp login <server> [--timeout <seconds>]
-  pi mcp logout <server>
+const HELP_TEMPLATE: &str = r#"Usage:
+  {app} mcp add <server> [options] -- <command> [args...]
+  {app} mcp add <server> [options] --url <url>
+  {app} mcp remove <server> [-l]
+  {app} mcp list [--json]
+  {app} mcp login <server> [--timeout <seconds>]
+  {app} mcp logout <server>
 
 Configure and check MCP servers and sign in to OAuth servers without starting a session.
-Reads ~/.pi/agent/mcp.json and, in trusted projects, .pi/mcp.json.
+Reads ~/{config}/agent/mcp.json and, in trusted projects, {config}/mcp.json.
 
 Commands:
   add <server>            Add or replace a server in mcp.json
@@ -38,7 +38,7 @@ Commands:
   logout <server>         Delete the stored OAuth credentials
 
 Options for add and remove:
-  -l, --local             Use .pi/mcp.json in the current project instead of the global file
+  -l, --local             Use {config}/mcp.json in the current project instead of the global file
 
 Options for add:
   --url <url>             Streamable HTTP server URL (instead of a command)
@@ -61,7 +61,13 @@ Other options:
   --json                  Print the list as JSON
   --timeout <seconds>     How long login waits for the browser (default: 300)"#;
 
-const HELP_HINT: &str = "Use \"pi mcp --help\" for usage.";
+/// `pi mcp --help` with the brand's name and configuration directory.
+pub fn help_text() -> String {
+    HELP_TEMPLATE.replace("{app}", APP_NAME).replace("{config}", CONFIG_DIR_NAME)
+}
+
+static HELP_HINT: std::sync::LazyLock<String> =
+    std::sync::LazyLock::new(|| format!("Use \"{APP_NAME} mcp --help\" for usage."));
 
 pub type LineFn = Arc<dyn Fn(&str) + Send + Sync>;
 /// Asks for the redirect URL from the browser address bar; resolves to `None` once cancelled.
@@ -145,7 +151,7 @@ fn parse_options(args: &[String], known: &[(&str, Kind)], error: &LineFn, max_po
             continue;
         };
         let Some((_, kind)) = known.iter().find(|(known, _)| *known == name) else {
-            error(&format!("Unknown option {arg}.\n{HELP_HINT}"));
+            error(&format!("Unknown option {arg}.\n{}", *HELP_HINT));
             return None;
         };
         if *kind == Kind::Flag {
@@ -171,11 +177,11 @@ fn parse_options(args: &[String], known: &[(&str, Kind)], error: &LineFn, max_po
 pub async fn run_mcp_command(args: &[String], options: &McpCommandOptions) -> i32 {
     let (log, error) = (&options.log, &options.error);
     let Some(command) = args.first().map(String::as_str) else {
-        log(HELP);
+        log(&help_text());
         return 0;
     };
     if command == "help" || args.iter().any(|arg| arg == "--help" || arg == "-h") {
-        log(HELP);
+        log(&help_text());
         return 0;
     }
     let rest = &args[1..];
@@ -196,7 +202,7 @@ pub async fn run_mcp_command(args: &[String], options: &McpCommandOptions) -> i3
         "list" => {
             let Some(parsed) = parse_options(rest, &[("json", Kind::Flag)], error, usize::MAX) else { return 1 };
             if !parsed.positional.is_empty() {
-                error(&format!("Usage: {APP_NAME} mcp list [--json]\n{HELP_HINT}"));
+                error(&format!("Usage: {APP_NAME} mcp list [--json]\n{}", *HELP_HINT));
                 return 1;
             }
             report::list(&loaded, parsed.has("json"), untrusted_note.as_deref(), options).await
@@ -205,7 +211,7 @@ pub async fn run_mcp_command(args: &[String], options: &McpCommandOptions) -> i3
             let known: &[(&str, Kind)] = if command == "login" { &[("timeout", Kind::Value)] } else { &[] };
             let Some(parsed) = parse_options(rest, known, error, usize::MAX) else { return 1 };
             let [name] = parsed.positional.as_slice() else {
-                error(&format!("Usage: {APP_NAME} mcp {command} <server>\n{HELP_HINT}"));
+                error(&format!("Usage: {APP_NAME} mcp {command} <server>\n{}", *HELP_HINT));
                 return 1;
             };
             let Some(entry) = loaded.servers.iter().find(|server| server.name == *name) else {
@@ -226,7 +232,7 @@ pub async fn run_mcp_command(args: &[String], options: &McpCommandOptions) -> i3
             report::login_or_logout(entry, command == "login", timeout, options).await
         }
         _ => {
-            error(&format!("Unknown mcp command \"{command}\".\n{HELP_HINT}"));
+            error(&format!("Unknown mcp command \"{command}\".\n{}", *HELP_HINT));
             1
         }
     }
@@ -323,7 +329,7 @@ fn build_config(parsed: &Parsed, command: &[String], error: &LineFn) -> Option<M
 fn add(args: &[String], project_config: &Path, options: &McpCommandOptions) -> i32 {
     let (log, error) = (&options.log, &options.error);
     let usage =
-        format!("Usage: {APP_NAME} mcp add <server> [options] (--url <url> | -- <command> [args...])\n{HELP_HINT}");
+        format!("Usage: {APP_NAME} mcp add <server> [options] (--url <url> | -- <command> [args...])\n{}", *HELP_HINT);
     let Some(parsed) = parse_options(args, &ADD_OPTIONS, error, 2) else { return 1 };
     let Some((name, command)) = parsed.positional.split_first() else {
         error(&usage);
@@ -390,7 +396,7 @@ fn remove(args: &[String], project_config: &Path, options: &McpCommandOptions) -
     let error = &options.error;
     let Some(parsed) = parse_options(args, &[("local", Kind::Flag)], error, usize::MAX) else { return 1 };
     let [name] = parsed.positional.as_slice() else {
-        error(&format!("Usage: {APP_NAME} mcp remove <server> [-l]\n{HELP_HINT}"));
+        error(&format!("Usage: {APP_NAME} mcp remove <server> [-l]\n{}", *HELP_HINT));
         return 1;
     };
     let project = parsed.has("local");

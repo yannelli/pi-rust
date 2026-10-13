@@ -91,6 +91,11 @@ pub fn guarded_stdout() -> Box<dyn Write + Send> {
     if is_stdout_taken_over() { Box::new(io::stderr()) } else { Box::new(io::stdout()) }
 }
 
+/// `println!` through [`guarded_stdout`], so it stays off the protocol stream on every platform.
+pub fn say_stdout(line: &str) {
+    let _ = writeln!(guarded_stdout(), "{line}");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

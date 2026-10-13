@@ -132,7 +132,9 @@ impl McpTransport for StdioTransport {
         let mut command = Command::new(process::resolve_command(&options.command, env_path));
         command.args(&options.args).stdin(Stdio::piped()).stdout(Stdio::piped());
         command.stderr(if options.stderr == StderrMode::Inherit { Stdio::inherit() } else { Stdio::piped() });
-        if !options.inherit_env {
+        if options.inherit_env {
+            command.envs(pi_ai::env::child_process_env());
+        } else {
             command.env_clear();
         }
         command.envs(&options.env);

@@ -122,6 +122,26 @@ fn rejects_unknown_flags_and_lists_models() {
     assert!(lines[1].starts_with("mock      mock-model  100K"), "{stdout}");
 }
 
+#[test]
+fn metadata_commands_run_migrations_and_keep_stdout_free_outside_plain_mode() {
+    let root = tempfile::tempdir().unwrap();
+    setup(root.path(), "http://127.0.0.1:9/v1");
+    std::fs::create_dir_all(root.path().join("agent/commands")).unwrap();
+    let output = pi(root.path(), &["--help"], None);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Migrated Global commands/ → prompts/"), "{stdout}");
+    assert!(stdout.contains(" - AI coding assistant"), "{stdout}");
+    assert!(root.path().join("agent/prompts").is_dir());
+
+    let output = pi(root.path(), &["-p", "--help"], None);
+    assert!(output.stdout.is_empty(), "{}", String::from_utf8_lossy(&output.stdout));
+    assert!(String::from_utf8_lossy(&output.stderr).contains(" - AI coding assistant"));
+
+    let output = pi(root.path(), &["--mode", "json", "--list-models", "mock"], None);
+    assert!(output.stdout.is_empty(), "{}", String::from_utf8_lossy(&output.stdout));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("mock-model"));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn retries_transient_errors_and_streams_delta_events() {
     let root = tempfile::tempdir().unwrap();

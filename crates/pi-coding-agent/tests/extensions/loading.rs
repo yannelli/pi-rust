@@ -173,3 +173,18 @@ async fn project_trust_handlers_decide_with_the_startup_ui() {
     let skipped = AppOptions { project_trust_override: Some(false), ..options };
     assert!(extension_trust_decision(&skipped, &cwd).await.0.is_none());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn extensions_see_the_child_process_environment_overlay() {
+    pi_ai::env::set_child_process_env("PI_EXTENSION_OVERLAY_TEST", "proxy-from-settings");
+    let source = "export default function (pi) {\n\tpi.on(\"input\", (event) => ({ action: \"transform\", text: event.text + \" \" + process.env.PI_EXTENSION_OVERLAY_TEST }));\n}\n";
+    let h = harness(Setup {
+        files: vec![("env.ts", source.into())],
+        load: vec!["env.ts"],
+        responses: vec![FauxResponse::text("ok")],
+        ..Setup::default()
+    })
+    .await;
+    h.session.prompt("x", Vec::new()).await.unwrap();
+    assert_eq!(h.last_prompt(), "x proxy-from-settings");
+}

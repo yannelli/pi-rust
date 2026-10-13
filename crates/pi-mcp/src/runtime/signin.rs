@@ -17,7 +17,11 @@ use crate::oauth::{
     step_up_scope,
 };
 
-pub const APP_NAME: &str = "pi";
+/// The CLI name, `pi` unless the build sets `PI_CONFIG_NAME`, as the coding agent's brand does.
+pub const APP_NAME: &str = match option_env!("PI_CONFIG_NAME") {
+    Some(name) => name,
+    None => "pi",
+};
 const CALLBACK_HOST: &str = "127.0.0.1";
 const CALLBACK_PATH: &str = "/callback";
 /// Where pi.dev serves pi's Client ID Metadata Documents.

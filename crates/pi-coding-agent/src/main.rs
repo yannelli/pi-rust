@@ -14,7 +14,9 @@ use pi_coding_agent::auth_cli::run_auth_command;
 use pi_coding_agent::cli::help_text_with_flags;
 use pi_coding_agent::cli::{Args, OutputMode, normalize_session_name, parse_args};
 use pi_coding_agent::config::{agent_dir, env_flag, expand_tilde};
-use pi_coding_agent::diagnostics::{guarded_stdout, print_timings, record_fatal_error, take_over_stdout, time};
+use pi_coding_agent::diagnostics::{
+    guarded_stdout, print_timings, record_fatal_error, reset_timings, say_stdout, take_over_stdout, time,
+};
 use pi_coding_agent::export::{ExportTheme, export_from_file};
 use pi_coding_agent::extensions::rpc::ExtensionRpcHost;
 use pi_coding_agent::files::process_cli_file_args;
@@ -55,6 +57,16 @@ fn app_mode(args: &Args, stdin_is_tty: bool, stdout_is_tty: bool) -> AppMode {
     }
 }
 
+/// Upstream `isPlainRuntimeMetadataCommand`: `--help` or `--list-models` without `-p` or `--mode`.
+fn is_plain_runtime_metadata_command(args: &Args) -> bool {
+    !args.print && args.mode.is_none() && (args.help || args.list_models.is_some())
+}
+
+fn extension_load_failure_hint() -> String {
+    let app = pi_coding_agent::resources::brand::APP_NAME;
+    format!("Hint: Start without extensions using \"{app} -ne\".")
+}
+
 /// OAuth providers for token refresh; the OAuth stream supplies the built-in table.
 fn oauth_lookup() -> OAuthLookup {
     Arc::new(pi_ai::auth::oauth::builtin_oauth)
@@ -92,13 +104,13 @@ async fn list_models(search: &str, args: &Args, cwd: &Path, agent_dir: &Path) ->
     }
     let mut models = model_runtime.available_models();
     if models.is_empty() {
-        println!("{}", format_no_models_available_message());
+        say_stdout(&format_no_models_available_message());
         return Ok(());
     }
     if !search.is_empty() {
         models.retain(|model| fuzzy_matches(&format!("{} {}", model.provider, model.id), search));
         if models.is_empty() {
-            println!("No models matching \"{search}\"");
+            say_stdout(&format!("No models matching \"{search}\""));
             return Ok(());
         }
     }
@@ -119,7 +131,7 @@ async fn list_models(search: &str, args: &Args, cwd: &Path, agent_dir: &Path) ->
         (0..6).map(|column| rows.iter().map(|row| row[column].chars().count()).max().unwrap_or(0)).collect();
     for row in rows {
         let cells: Vec<String> = row.iter().zip(&widths).map(|(cell, width)| format!("{cell:<width$}")).collect();
-        println!("{}", cells.join("  "));
+        say_stdout(&cells.join("  "));
     }
     runtime.dispose().await;
     Ok(())
@@ -248,7 +260,7 @@ async fn create_session_manager(args: &Args, place: &SessionPlace<'_>) -> Result
         };
     }
     let dir = place.dir();
-    if args.resume && place.interactive {
+    if args.resume {
         let terminal = dialogs::process_terminal();
         let pick = dialogs::select_session_on(terminal, place.settings, place.cwd, place.dir_override, place.agent_dir);
         return match tokio::task::LocalSet::new().run_until(pick).await {
@@ -302,6 +314,7 @@ async fn run(raw: Vec<String>) -> anyhow::Result<i32> {
 }
 
 async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
+    reset_timings(pi_coding_agent::diagnostics::timings::MAIN);
     set_child_process_env("PI_CODING_AGENT", "true");
     set_child_process_env("AI_AGENT", "pi");
     if raw.iter().any(|arg| arg == "--offline") || env_flag("PI_OFFLINE") {
@@ -334,7 +347,6 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
         return Ok(code);
     }
     let mut args = parse_args(&raw);
-    time("parseArgs");
     for warning in &args.warnings {
         eprintln!("Warning: {warning}");
     }
@@ -344,6 +356,7 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
         }
         return Ok(1);
     }
+    time("parseArgs");
     if args.version {
         println!("{}", env!("CARGO_PKG_VERSION"));
         return Ok(0);
@@ -365,39 +378,38 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
             Err(error) => Err(fail(format!("{error:#}")).into()),
         };
     }
+    if args.terminal_login {
+        args.mode = None;
+    }
+    let acp = args.mode == Some(OutputMode::Acp);
+    let mut mode = app_mode(&args, std::io::stdin().is_terminal(), std::io::stdout().is_terminal());
+    if mode != AppMode::Interactive && !acp && !is_plain_runtime_metadata_command(&args) {
+        take_over_stdout()?;
+    }
+    if mode == AppMode::Rpc && !args.file_args.is_empty() {
+        eprintln!("Error: @file arguments are not supported in RPC mode");
+        return Ok(1);
+    }
+    validate_session_flags(&args)?;
+    let migrations = pi_coding_agent::migrations::run_migrations(&cwd, &agent_dir);
+    time("runMigrations");
     if args.help {
         let options = AppOptions { oauth: Some(oauth_lookup()), ..AppOptions::from_args(&args, &cwd, &agent_dir) };
         let flags = pi_coding_agent::app::extension_help_flags(&options, &cwd).await;
-        println!("{}", help_text_with_flags(&flags));
+        say_stdout(&help_text_with_flags(&flags));
         return Ok(0);
     }
     if let Some(search) = &args.list_models {
         list_models(search, &args, &cwd, &agent_dir).await?;
         return Ok(0);
     }
-    if args.terminal_login {
-        args.mode = None;
-    } else if args.mode == Some(OutputMode::Acp) {
+    if acp {
         let options = AcpModeOptions {
             extension_host: Some(ExtensionRpcHost::shared()),
             ..AcpModeOptions::from_args(&args, &cwd, &agent_dir, oauth_lookup())
         };
         return Ok(run_acp_mode(options).await);
     }
-    let mut mode = app_mode(&args, std::io::stdin().is_terminal(), std::io::stdout().is_terminal());
-    if mode == AppMode::Rpc {
-        take_over_stdout()?;
-        if !args.file_args.is_empty() {
-            eprintln!("Error: @file arguments are not supported in RPC mode");
-            return Ok(1);
-        }
-    }
-    if matches!(mode, AppMode::Json | AppMode::Print) {
-        take_over_stdout()?;
-    }
-    validate_session_flags(&args)?;
-    let migrations = pi_coding_agent::migrations::run_migrations(&cwd, &agent_dir);
-    time("runMigrations");
     if mode == AppMode::Interactive && should_run_first_time_setup(&pi_coding_agent::config::settings_path(&agent_dir))
     {
         tokio::task::LocalSet::new().run_until(dialogs::show_first_time_setup(&startup_settings)).await;
@@ -411,27 +423,6 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
     }
     let startup_diagnostics: Vec<RuntimeDiagnostic> =
         startup_settings.drain_errors().iter().map(|error| RuntimeDiagnostic::warning(error.diagnostic())).collect();
-
-    let mut stdin_content = None;
-    if mode != AppMode::Rpc && !std::io::stdin().is_terminal() {
-        let mut piped = String::new();
-        std::io::stdin().read_to_string(&mut piped)?;
-        stdin_content = Some(piped.trim().to_string()).filter(|text| !text.is_empty());
-        if stdin_content.is_some() && mode == AppMode::Interactive {
-            mode = AppMode::Print;
-        }
-    }
-    time("readPipedStdin");
-    let files = process_cli_file_args(&args.file_args, &cwd)?;
-    time("prepareInitialMessage");
-    let mut parts: Vec<String> = stdin_content.into_iter().collect();
-    if !files.text.is_empty() {
-        parts.push(files.text.clone());
-    }
-    if !args.messages.is_empty() {
-        parts.push(args.messages.remove(0));
-    }
-    let initial_message = (!parts.is_empty()).then(|| parts.concat());
 
     let env_session_dir =
         process_env_value(&pi_coding_agent::resources::brand::session_dir_env_var()).filter(|dir| !dir.is_empty());
@@ -473,6 +464,33 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
     time("createAgentSessionRuntime");
     crash_context.set_session_file(session.session_file().as_deref());
     configure_http_from_settings(session.settings());
+    let mut stdin_content = None;
+    if mode != AppMode::Rpc && !std::io::stdin().is_terminal() {
+        let mut piped = String::new();
+        std::io::stdin().read_to_string(&mut piped)?;
+        stdin_content = Some(piped.trim().to_string()).filter(|text| !text.is_empty());
+        if stdin_content.is_some() && mode == AppMode::Interactive {
+            mode = AppMode::Print;
+        }
+    }
+    time("readPipedStdin");
+    let files = process_cli_file_args(&args.file_args, &cwd)?;
+    time("prepareInitialMessage");
+    let mut parts: Vec<String> = stdin_content.into_iter().collect();
+    if !files.text.is_empty() {
+        parts.push(files.text.clone());
+    }
+    if !args.messages.is_empty() {
+        parts.push(args.messages.remove(0));
+    }
+    let initial_message = (!parts.is_empty()).then(|| parts.concat());
+    time("initTheme");
+    if mode == AppMode::Interactive && !migrations.deprecation_warnings.is_empty() {
+        print!("{}", pi_coding_agent::migrations::deprecation_warning_text(&migrations.deprecation_warnings));
+        tokio::task::LocalSet::new().run_until(dialogs::wait_for_any_key_on(dialogs::process_terminal())).await;
+        println!();
+    }
+    time("resolveModelScope");
     let runtime_diagnostics: Vec<RuntimeDiagnostic> =
         runtime.diagnostics().into_iter().filter(|diagnostic| !startup_diagnostics.contains(diagnostic)).collect();
     let has_errors = runtime_diagnostics.iter().any(|diagnostic| diagnostic.level == DiagnosticLevel::Error);
@@ -481,16 +499,12 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
         report(&runtime_diagnostics);
     }
     if has_errors {
+        if runtime_diagnostics.iter().any(|diagnostic| diagnostic.message.contains("Failed to load extension")) {
+            eprintln!("\x1b[33m{}\x1b[39m", extension_load_failure_hint());
+        }
         runtime.dispose().await;
         return Ok(1);
     }
-    time("initTheme");
-    if mode == AppMode::Interactive && !migrations.deprecation_warnings.is_empty() {
-        print!("{}", pi_coding_agent::migrations::deprecation_warning_text(&migrations.deprecation_warnings));
-        tokio::task::LocalSet::new().run_until(dialogs::wait_for_any_key_on(dialogs::process_terminal())).await;
-        println!();
-    }
-    time("resolveModelScope");
     time("createAgentSession");
     if mode != AppMode::Interactive && session.model().is_none() {
         eprintln!("Error: {}", format_no_models_available_message());
@@ -498,9 +512,9 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
         return Ok(1);
     }
 
-    print_timings();
     match mode {
         AppMode::Rpc => {
+            print_timings();
             // Upstream refreshes catalogs in the background for RPC; interactive mode starts its own refresh.
             session.model_runtime().refresh_in_background();
             let options =
@@ -508,6 +522,7 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
             Ok(run_rpc_mode(Arc::new(runtime), options).await)
         }
         AppMode::Print | AppMode::Json => {
+            print_timings();
             let output = if mode == AppMode::Json { OutputMode::Json } else { OutputMode::Text };
             Ok(run_print_mode(&Arc::new(runtime), output, initial_message, files.images, args.messages).await)
         }
@@ -539,6 +554,7 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
                 run_startup_benchmark(Arc::new(runtime), options).await?;
                 return Ok(0);
             }
+            print_timings();
             if let Err(error) = run_interactive(Arc::new(runtime), options).await {
                 if error.is::<pi_coding_agent::interactive::FatalErrorReported>() {
                     return Ok(1);

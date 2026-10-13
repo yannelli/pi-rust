@@ -11,7 +11,7 @@ use super::mode::InteractiveMode;
 use crate::interactive_components::model_selector::model_search_text;
 use crate::resources::source_info::{SourceInfo, SourceScope};
 
-/// Built-in commands: name, description, and argument hint.
+/// Built-in commands: name, description, and argument hint. `{app}` stands for the CLI name.
 pub const BUILTIN_SLASH_COMMANDS: &[(&str, &str, Option<&str>)] = &[
     ("settings", "Open settings menu", None),
     ("model", "Select model (opens selector UI)", Some("<provider/model>")),
@@ -38,7 +38,7 @@ pub const BUILTIN_SLASH_COMMANDS: &[(&str, &str, Option<&str>)] = &[
     ("mcp", "Manage MCP servers: sign in, reconnect, enable or disable, and change exposure", None),
     ("llama", "Manage llama.cpp router models", None),
     ("reload", "Reload keybindings, extensions, skills, prompts, themes, and context files", None),
-    ("quit", "Quit pi", None),
+    ("quit", "Quit {app}", None),
 ];
 
 /// `[u]`, `[p:npm:pkg]`, or `[t:git:host/path@ref]` before a description; nothing for built-ins.
@@ -122,7 +122,8 @@ impl InteractiveMode {
             _ => true,
         };
         for (name, description, hint) in BUILTIN_SLASH_COMMANDS.iter().filter(|(name, _, _)| enabled(name)) {
-            let mut command = SlashCommand::new(*name, Some(description));
+            let description = description.replace("{app}", crate::resources::brand::APP_NAME);
+            let mut command = SlashCommand::new(*name, Some(description.as_str()));
             if let Some(hint) = hint {
                 command = command.with_argument_hint(*hint);
             }

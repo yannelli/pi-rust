@@ -97,6 +97,7 @@ export function createHost(config) {
 			for (const entry of entries) {
 				try {
 					const module = await import(entry.resolvedPath);
+					call("timing", `${entry.path} module import`);
 					const factory = typeof module.default === "function" ? module.default : module;
 					if (typeof factory !== "function") {
 						errors.push({ path: entry.path, error: `Extension does not export a valid factory function: ${entry.path}` });
@@ -111,6 +112,7 @@ export function createHost(config) {
 						load.discard();
 						throw error;
 					}
+					call("timing", `${entry.path} factory`);
 					runner.extensions.push(extension);
 				} catch (error) {
 					errors.push({ path: entry.path, error: `Failed to load extension: ${errorMessage(error)}` });
