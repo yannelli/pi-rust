@@ -20,9 +20,11 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 ring.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+similar = "2.7.0"
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "sync", "macros", "time", "process", "fs", "io-util"] }
 tokio-util.workspace = true
+unicode-normalization = "0.1.24"
 url = "2.5.8"
 
 [target.'cfg(unix)'.dependencies]
