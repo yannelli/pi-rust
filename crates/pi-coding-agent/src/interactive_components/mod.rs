@@ -15,7 +15,9 @@ pub mod extension_selector;
 pub mod external_editor;
 pub mod first_time_setup;
 pub mod keybinding_hints;
+pub mod llama_view;
 pub mod login;
+pub mod mcp_view;
 pub mod model_selector;
 pub mod scoped_models_selector;
 pub mod session_selector;
@@ -41,6 +43,8 @@ pub use first_time_setup::{FirstTimeSetupComponent, FirstTimeSetupResult, apply_
 pub use keybinding_hints::{
     format_key_display_text, format_key_text, key_display_text, key_hint, key_text, raw_key_hint,
 };
+pub use llama_view::{HuggingFaceSearch, LlamaView, LlamaViewUi};
+pub use mcp_view::{McpManagerView, McpMenu, McpServers, run_mcp_manager, sign_in_with_view};
 pub use model_selector::{ModelSelector, ModelSelectorOptions, ModelSelectorSource};
 pub use scoped_models_selector::{EnabledIds, ModelsCallbacks, ModelsConfig, ScopedModelsSelector};
 pub use session_selector::{SessionSelector, SessionSelectorOptions};

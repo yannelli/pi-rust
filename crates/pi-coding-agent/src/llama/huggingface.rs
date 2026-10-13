@@ -108,6 +108,7 @@ fn encode_segment(segment: &str) -> String {
     encoded
 }
 
+#[derive(Clone)]
 pub struct HuggingFaceClient {
     token: Option<String>,
     base_url: String,

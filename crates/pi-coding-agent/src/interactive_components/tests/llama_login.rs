@@ -9,9 +9,7 @@ use pi_ai::auth::{AuthResult, AuthType, Credential, CredentialStore, InMemoryCre
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::agent_session::{ModelRuntime, ModelRuntimeOptions};
-use crate::interactive_components::login::{
-    LoginDialog, check_llama_server, llama_cpp_post_login_guidance, normalize_llama_server_url, run_dialog_login,
-};
+use crate::interactive_components::login::{LoginDialog, llama_cpp_post_login_guidance, run_dialog_login};
 use crate::interactive_components::test_support::{Harness, flush, keys, local};
 
 /// Serves one canned response per connection; records request heads.
@@ -36,15 +34,6 @@ async fn mock_server(status: &'static str, body: &'static str) -> (String, Arc<s
 }
 
 #[test]
-fn server_urls_are_normalized() {
-    assert_eq!(normalize_llama_server_url(" http://127.0.0.1:8080/ ").unwrap(), "http://127.0.0.1:8080");
-    assert_eq!(normalize_llama_server_url("http://host:8080/v1/?x=1#y").unwrap(), "http://host:8080");
-    assert_eq!(normalize_llama_server_url("https://host/llama/v1").unwrap(), "https://host/llama");
-    assert_eq!(normalize_llama_server_url("ftp://host").unwrap_err(), "Server URL must use http or https");
-    assert_eq!(normalize_llama_server_url("not a url").unwrap_err(), "Invalid URL");
-}
-
-#[test]
 fn post_login_guidance_depends_on_loaded_models() {
     assert_eq!(
         llama_cpp_post_login_guidance("Saved API key for llama.cpp", 0),
@@ -54,18 +43,6 @@ fn post_login_guidance_depends_on_loaded_models() {
         llama_cpp_post_login_guidance("Saved API key for llama.cpp", 2),
         "Saved API key for llama.cpp. Use /model to select a loaded llama.cpp model, or /llama to manage models."
     );
-}
-
-#[tokio::test]
-async fn server_check_reports_errors_like_upstream() {
-    let (url, _) = mock_server("401 Unauthorized", r#"{"error":{"message":"Invalid API Key"}}"#).await;
-    assert_eq!(check_llama_server(&url, Some("k")).await.unwrap_err(), "Invalid API Key");
-    let (url, _) = mock_server("500 Internal Server Error", "oops").await;
-    assert_eq!(check_llama_server(&url, None).await.unwrap_err(), "llama.cpp returned HTTP 500");
-    let (url, _) = mock_server("200 OK", r#"{"object":"list"}"#).await;
-    assert_eq!(check_llama_server(&url, None).await.unwrap_err(), "llama.cpp returned an invalid model catalog");
-    let (url, _) = mock_server("200 OK", r#"{"data":[{"id":"m"}]}"#).await;
-    assert_eq!(check_llama_server(&url, None).await.unwrap_err(), "Server is not running in llama.cpp router mode");
 }
 
 #[tokio::test(flavor = "current_thread")]
