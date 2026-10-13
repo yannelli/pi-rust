@@ -2223,6 +2223,7 @@ dependencies = [
  "base64 0.22.1",
  "crc32fast",
  "futures",
+ "pi-telemetry",
  "reqwest",
  "ring",
  "rustls",
@@ -2347,6 +2348,16 @@ dependencies = [
  "tokio",
  "tokio-util",
  "url",
+]
+
+[[package]]
+name = "pi-telemetry"
+version = "0.1.1"
+dependencies = [
+ "futures",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

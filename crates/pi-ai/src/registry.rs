@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, LazyLock, RwLock};
 
 use futures::future::BoxFuture;
+use pi_telemetry::TelemetryContext;
 use tokio_util::sync::CancellationToken;
 
 use crate::env::get_env_api_key;
@@ -62,6 +63,8 @@ pub type OnProviderStreamEventFn = Arc<dyn Fn(&serde_json::Value, &Model) + Send
 pub struct StreamOptions {
     pub api_key: Option<String>,
     pub cancel: CancellationToken,
+    /// Explicit parent context for telemetry produced by this logical request.
+    pub telemetry_context: Option<Arc<dyn TelemetryContext>>,
     pub max_tokens: Option<u64>,
     pub temperature: Option<f64>,
     /// Requested reasoning effort; `None` or `Off` disables thinking where the API allows it.
