@@ -1,6 +1,7 @@
 //! Agent session integration tests over the faux provider.
 
 mod bash;
+mod cache;
 mod codemode;
 mod codemode_store;
 mod compaction;
@@ -16,3 +17,4 @@ mod tool_registry;
 mod tool_search;
 mod tool_support;
 mod tree;
+mod virtual_models;

@@ -22,7 +22,7 @@ pub use self::decision::{
     MAX_WARMING_AGE, cache_warming_delay, evaluate, format_cache_warming_status, is_replayable, prompt_cache_ttl,
 };
 pub use crate::cache_stats::format_cache_warming_usage;
-use crate::settings::schema::CacheWarmingMode;
+pub use crate::settings::schema::CacheWarmingMode;
 
 /// What the warmer needs from its session.
 pub trait CacheWarmerHost: Send + Sync {

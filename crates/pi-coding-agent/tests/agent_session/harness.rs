@@ -32,6 +32,8 @@ pub struct Options {
     pub files: Vec<(&'static str, &'static str)>,
     /// More `models.json` providers, by name.
     pub providers: Value,
+    /// More fields of the `local/tiny` model, such as `cost` or `promptCache`.
+    pub tiny: Value,
 }
 
 impl Default for Options {
@@ -45,6 +47,7 @@ impl Default for Options {
             delay: None,
             files: Vec::new(),
             providers: json!({}),
+            tiny: json!({}),
         }
     }
 }
@@ -66,6 +69,9 @@ fn write_models(agent_dir: &Path, api: &str, options: &Options) {
         "models": [{"id": "tiny", "contextWindow": options.context_window, "maxTokens": options.max_tokens,
             "reasoning": true, "input": ["text", "image"]},
             {"id": "other", "contextWindow": options.context_window, "maxTokens": options.max_tokens}]}}});
+    for (key, value) in options.tiny.as_object().unwrap() {
+        models["providers"]["local"]["models"][0][key] = value.clone();
+    }
     for (name, provider) in options.providers.as_object().unwrap() {
         models["providers"][name] = provider.clone();
     }
