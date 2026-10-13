@@ -1,0 +1,386 @@
+[
+  {
+    "name": "cjk_flowchart",
+    "src": "graph LR\n  A[中文标签] --> B[日本語のテキスト]\n  B -->|한국어| C[混合 mixed 文字]",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "┌──────────┐         ┌──────────────────┐ 한국어  ┌─────────────────┐",
+        "│ 中文标签 ├────────▶│ 日本語のテキスト ├────────▶│ 混合 mixed 文字 │",
+        "└──────────┘         └──────────────────┘         └─────────────────┘"
+      ],
+      "styled": [
+        [["┌──────────┐","border"],["         ","none"],["┌──────────────────┐","border"],[" ","none"],["한국어","edgeLabel"],["  ","none"],["┌─────────────────┐","border"]],
+        [["│","border"],[" ","none"],["中文标签","text"],[" ","none"],["├","border"],["────────▶","edge"],["│","border"],[" ","none"],["日本語のテキスト","text"],[" ","none"],["├","border"],["────────▶","edge"],["│","border"],[" ","none"],["混合 mixed 文字","text"],[" ","none"],["│","border"]],
+        [["└──────────┘","border"],["         ","none"],["└──────────────────┘","border"],["         ","none"],["└─────────────────┘","border"]]
+      ],
+      "width": 69,
+      "warnings": []
+    }
+  },
+  {
+    "name": "cjk_rl",
+    "src": "graph RL\n  A[中文] -->|标签| B[テスト]",
+    "kind": "flowchart",
+    "art": {
+      "plain": ["┌────────┐  标签 ┌──────┐","│ テスト │◄──────┤ 中文 │","└────────┘       └──────┘"],
+      "styled": [
+        [["┌────────┐","border"],["  ","none"],["标签","edgeLabel"],[" ","none"],["┌──────┐","border"]],
+        [["│","border"],[" ","none"],["テスト","text"],[" ","none"],["│","border"],["◄──────","edge"],["┤","border"],[" ","none"],["中文","text"],[" ","none"],["│","border"]],
+        [["└────────┘","border"],["       ","none"],["└──────┘","border"]]
+      ],
+      "width": 25,
+      "warnings": []
+    }
+  },
+  {
+    "name": "cjk_wrap",
+    "src": "graph TD\n  A[这是一个非常长的中文标签需要换行显示在多行上面而且还要更长一些才能被截断显示省略号吧还有更多更多的文字内容]",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "┌──────────────────────────┐",
+        "│ 这是一个非常长的中文标签 │",
+        "│ 需要换行显示在多行上面而 │",
+        "│ 且还要更长一些才能被截断 │",
+        "│ 显示省略号吧还有更多更…  │",
+        "└──────────────────────────┘"
+      ],
+      "styled": [
+        [["┌──────────────────────────┐","border"]],
+        [["│","border"],[" ","none"],["这是一个非常长的中文标签","text"],[" ","none"],["│","border"]],
+        [["│","border"],[" ","none"],["需要换行显示在多行上面而","text"],[" ","none"],["│","border"]],
+        [["│","border"],[" ","none"],["且还要更长一些才能被截断","text"],[" ","none"],["│","border"]],
+        [["│","border"],[" ","none"],["显示省略号吧还有更多更…","text"],["  ","none"],["│","border"]],
+        [["└──────────────────────────┘","border"]]
+      ],
+      "width": 28,
+      "warnings": []
+    }
+  },
+  {
+    "name": "emoji_labels",
+    "src": "graph TD\n  A[🚀 Launch] --> B[👨\u200d👩\u200d👧 family]\n  B --> C[🇺🇸 flag and 1\ufe0f\u20e3 keycap]\n  C --> D[❤\ufe0f heart ❤ plain]\n  D --> E[é combining e\u0301 and 한글 ᄒᆞᆫ]",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "       ┌───────────┐",
+        "       │ 🚀 Launch │",
+        "       └─────┬─────┘",
+        "             │",
+        "             ▼",
+        "       ┌───────────┐",
+        "       │ 👨\u200d👩\u200d👧 family │",
+        "       └─────┬─────┘",
+        "             │",
+        "             ▼",
+        " ┌───────────────────────┐",
+        " │ 🇺🇸 flag and 1\ufe0f\u20e3 keycap │",
+        " └───────────┬───────────┘",
+        "             │",
+        "             ▼",
+        "   ┌──────────────────┐",
+        "   │ ❤\ufe0f heart ❤ plain │",
+        "   └─────────┬────────┘",
+        "             │",
+        "             ▼",
+        "┌────────────────────────┐",
+        "│ é combining e\u0301 and 한글 │",
+        "│           ᄒᆞᆫ           │",
+        "└────────────────────────┘"
+      ],
+      "styled": [
+        [["       ","none"],["┌───────────┐","border"]],
+        [["       ","none"],["│","border"],[" ","none"],["🚀 Launch","text"],[" ","none"],["│","border"]],
+        [["       ","none"],["└─────┬─────┘","border"]],
+        [["             ","none"],["│","edge"]],
+        [["             ","none"],["▼","edge"]],
+        [["       ","none"],["┌───────────┐","border"]],
+        [["       ","none"],["│","border"],[" ","none"],["👨\u200d👩\u200d👧 family","text"],[" ","none"],["│","border"]],
+        [["       ","none"],["└─────┬─────┘","border"]],
+        [["             ","none"],["│","edge"]],
+        [["             ","none"],["▼","edge"]],
+        [[" ","none"],["┌───────────────────────┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["🇺🇸 flag and 1\ufe0f\u20e3 keycap","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└───────────┬───────────┘","border"]],
+        [["             ","none"],["│","edge"]],
+        [["             ","none"],["▼","edge"]],
+        [["   ","none"],["┌──────────────────┐","border"]],
+        [["   ","none"],["│","border"],[" ","none"],["❤\ufe0f heart ❤ plain","text"],[" ","none"],["│","border"]],
+        [["   ","none"],["└─────────┬────────┘","border"]],
+        [["             ","none"],["│","edge"]],
+        [["             ","none"],["▼","edge"]],
+        [["┌────────────────────────┐","border"]],
+        [["│","border"],[" ","none"],["é combining e\u0301 and 한글","text"],[" ","none"],["│","border"]],
+        [["│","border"],["           ","none"],["ᄒᆞᆫ","text"],["           ","none"],["│","border"]],
+        [["└────────────────────────┘","border"]]
+      ],
+      "width": 26,
+      "warnings": []
+    }
+  },
+  {
+    "name": "zero_width",
+    "src": "graph LR\n  A[soft\u00adhyphen] --> B[zero\u200bwidth]\n  B --> C[nbsp\u00a0here\u00a0]",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "┌────────────┐    ┌───────────┐    ┌───────────┐",
+        "│ softhyphen ├───▶│ zerowidth ├───▶│ nbsp here │",
+        "└────────────┘    └───────────┘    └───────────┘"
+      ],
+      "styled": [
+        [["┌────────────┐","border"],["    ","none"],["┌───────────┐","border"],["    ","none"],["┌───────────┐","border"]],
+        [["│","border"],[" ","none"],["softhyphen","text"],[" ","none"],["├","border"],["───▶","edge"],["│","border"],[" ","none"],["zerowidth","text"],[" ","none"],["├","border"],["───▶","edge"],["│","border"],[" ","none"],["nbsp here","text"],[" ","none"],["│","border"]],
+        [["└────────────┘","border"],["    ","none"],["└───────────┘","border"],["    ","none"],["└───────────┘","border"]]
+      ],
+      "width": 48,
+      "warnings": []
+    }
+  },
+  {
+    "name": "controls_stripped",
+    "src": "graph LR\n  A[\u001b[31mred\u001b[0m] --> B[bell\u0007]\u0085",
+    "kind": "flowchart",
+    "art": {
+      "plain": ["┌────────────────────────┐","│ 31mred[0m] --> B[bell] │","└────────────────────────┘"],
+      "styled": [
+        [["┌────────────────────────┐","border"]],
+        [["│","border"],[" ","none"],["31mred[0m] --> B[bell]","text"],[" ","none"],["│","border"]],
+        [["└────────────────────────┘","border"]]
+      ],
+      "width": 26,
+      "warnings": ["node \"A\": label is missing its closing `]]`"]
+    }
+  },
+  {
+    "name": "cjk_sequence",
+    "src": "sequenceDiagram\n  participant 甲 as 用户\n  participant 乙\n  甲->>乙: 你好世界\n  Note over 甲,乙: 注释",
+    "kind": "sequence",
+    "art": {
+      "plain": [
+        "┌──────┐   ┌────┐",
+        "│ 用户 │   │ 乙 │",
+        "└───┬──┘   └──┬─┘",
+        "    │         │",
+        "    │你好世界 │",
+        "    ├────────▶│",
+        "    │         │",
+        "  ┌─────────────┐",
+        "  │    注释     │",
+        "  └─────────────┘",
+        "    │         │",
+        "┌───┴──┐   ┌──┴─┐",
+        "│ 用户 │   │ 乙 │",
+        "└──────┘   └────┘"
+      ],
+      "styled": [
+        [["┌──────┐","border"],["   ","none"],["┌────┐","border"]],
+        [["│","border"],[" ","none"],["用户","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["乙","text"],[" ","none"],["│","border"]],
+        [["└───┬──┘","border"],["   ","none"],["└──┬─┘","border"]],
+        [["    ","none"],["│","edge"],["         ","none"],["│","edge"]],
+        [["    ","none"],["│","edge"],["你好世界","text"],[" ","none"],["│","edge"]],
+        [["    ","none"],["├────────▶│","edge"]],
+        [["    ","none"],["│","edge"],["         ","none"],["│","edge"]],
+        [["  ","none"],["┌─────────────┐","border"]],
+        [["  ","none"],["│","border"],["    ","none"],["注释","text"],["     ","none"],["│","border"]],
+        [["  ","none"],["└─────────────┘","border"]],
+        [["    ","none"],["│","edge"],["         ","none"],["│","edge"]],
+        [["┌───┴──┐","border"],["   ","none"],["┌──┴─┐","border"]],
+        [["│","border"],[" ","none"],["用户","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["乙","text"],[" ","none"],["│","border"]],
+        [["└──────┘","border"],["   ","none"],["└────┘","border"]]
+      ],
+      "width": 17,
+      "warnings": []
+    }
+  },
+  {
+    "name": "cjk_class",
+    "src": "classDiagram\n  class 动物 {\n    +名字 字符串\n    +叫()\n  }\n  动物 <|-- 狗",
+    "kind": "class",
+    "art": {
+      "plain": [
+        "┌──────────────┐",
+        "│     动物     │",
+        "├──────────────┤",
+        "│ +名字 字符串 │",
+        "├──────────────┤",
+        "│ +叫()        │",
+        "└───────△──────┘",
+        "        │",
+        "        │",
+        "     ┌────┐",
+        "     │ 狗 │",
+        "     └────┘"
+      ],
+      "styled": [
+        [["┌──────────────┐","border"]],
+        [["│","border"],["     ","none"],["动物","text"],["     ","none"],["│","border"]],
+        [["├──────────────┤","border"]],
+        [["│","border"],[" ","none"],["+名字 字符串","text"],[" ","none"],["│","border"]],
+        [["├──────────────┤","border"]],
+        [["│","border"],[" ","none"],["+叫()","text"],["        ","none"],["│","border"]],
+        [["└───────","border"],["△","edge"],["──────┘","border"]],
+        [["        ","none"],["│","edge"]],
+        [["        ","none"],["│","edge"]],
+        [["     ","none"],["┌────┐","border"]],
+        [["     ","none"],["│","border"],[" ","none"],["狗","text"],[" ","none"],["│","border"]],
+        [["     ","none"],["└────┘","border"]]
+      ],
+      "width": 16,
+      "warnings": []
+    }
+  },
+  {
+    "name": "emoji_er",
+    "src": "erDiagram\n  USER ||--o{ POST : \"writes ✍\ufe0f\"\n  USER {\n    string name \"🙂\"\n  }",
+    "kind": "er",
+    "art": {
+      "plain": [
+        " ┌─────────────┐",
+        " │    USER     │",
+        " ├─────────────┤",
+        " │ string name │",
+        " └──────┬──────┘",
+        "        │",
+        "        │1 writes ✍\ufe0f 0..*",
+        "    ┌──────┐",
+        "    │ POST │",
+        "    └──────┘"
+      ],
+      "styled": [
+        [[" ","none"],["┌─────────────┐","border"]],
+        [[" ","none"],["│","border"],["    ","none"],["USER","text"],["     ","none"],["│","border"]],
+        [[" ","none"],["├─────────────┤","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["string name","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└──────┬──────┘","border"]],
+        [["        ","none"],["│","edge"]],
+        [["        ","none"],["│","edge"],["1 writes ✍\ufe0f 0..*","edgeLabel"]],
+        [["    ","none"],["┌──────┐","border"]],
+        [["    ","none"],["│","border"],[" ","none"],["POST","text"],[" ","none"],["│","border"]],
+        [["    ","none"],["└──────┘","border"]]
+      ],
+      "width": 25,
+      "warnings": []
+    }
+  },
+  {
+    "name": "bom_whitespace",
+    "src": "\ufeffgraph TD\n  A --> B",
+    "kind": "flowchart",
+    "art": {
+      "plain": [" ┌───┐"," │ A │"," └─┬─┘","   │","   ▼"," ┌───┐"," │ B │"," └───┘"],
+      "styled": [
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"]],
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└───┘","border"]]
+      ],
+      "width": 6,
+      "warnings": []
+    }
+  },
+  {
+    "name": "crlf_lines",
+    "src": "graph TD\r\n  A --> B\r\n  B --> C\r\n",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        " ┌───┐",
+        " │ A │",
+        " └─┬─┘",
+        "   │",
+        "   ▼",
+        " ┌───┐",
+        " │ B │",
+        " └─┬─┘",
+        "   │",
+        "   ▼",
+        " ┌───┐",
+        " │ C │",
+        " └───┘"
+      ],
+      "styled": [
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"]],
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"]],
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["C","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└───┘","border"]]
+      ],
+      "width": 6,
+      "warnings": []
+    }
+  },
+  {"name":"pie_unsupported","src":"pie title Pets\n  \"Dogs\" : 386\n  \"Cats\" : 85","kind":null,"art":null},
+  {
+    "name": "gantt_unsupported",
+    "src": "gantt\n  title A Gantt Diagram\n  section Section\n  A task :a1, 2014-01-01, 30d",
+    "kind": null,
+    "art": null
+  },
+  {"name":"blank","src":"","kind":null,"art":null},
+  {"name":"whitespace_only","src":"   \n\t\n  ","kind":null,"art":null},
+  {"name":"plain_text","src":"just some words","kind":null,"art":null},
+  {
+    "name": "comment_header",
+    "src": "%% comment\ngraph TD\n A --> B",
+    "kind": "flowchart",
+    "art": {
+      "plain": [" ┌───┐"," │ A │"," └─┬─┘","   │","   ▼"," ┌───┐"," │ B │"," └───┘"],
+      "styled": [
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"]],
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└───┘","border"]]
+      ],
+      "width": 6,
+      "warnings": []
+    }
+  },
+  {
+    "name": "tab_separated",
+    "src": "graph\tLR\n\tA\t-->\tB",
+    "kind": "flowchart",
+    "art": {
+      "plain": ["┌───┐    ┌───┐","│ A ├───▶│ B │","└───┘    └───┘"],
+      "styled": [
+        [["┌───┐","border"],["    ","none"],["┌───┐","border"]],
+        [["│","border"],[" ","none"],["A","text"],[" ","none"],["├","border"],["───▶","edge"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [["└───┘","border"],["    ","none"],["└───┘","border"]]
+      ],
+      "width": 14,
+      "warnings": []
+    }
+  },
+  {
+    "name": "ideographic_space",
+    "src": "graph\u3000TD\n  A\u3000-->\u3000B[x\u2003y]",
+    "kind": "flowchart",
+    "art": {
+      "plain": [" ┌───┐"," │ A │"," └───┘"],
+      "styled": [
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└───┘","border"]]
+      ],
+      "width": 6,
+      "warnings": ["dropped, expected a link: \"\u3000-->\u3000B[x\u2003y]\""]
+    }
+  }
+]

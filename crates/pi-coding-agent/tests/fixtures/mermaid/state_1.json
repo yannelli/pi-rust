@@ -1,0 +1,455 @@
+[
+  {
+    "name": "basic",
+    "src": "stateDiagram-v2\n  [*] --> Still\n  Still --> [*]\n  Still --> Moving\n  Moving --> Still\n  Moving --> Crash\n  Crash --> [*]",
+    "kind": "state",
+    "art": {
+      "plain": [
+        "   ╭───╮",
+        "   │ ● │",
+        "   ╰─┬─╯",
+        "     │",
+        "     ▼",
+        " ╭───────╮",
+        " │ Still ├◄┬┐",
+        " ╰───┬───╯ ││",
+        "     │     ││",
+        "     ▼     ││",
+        "╭────────╮ ││",
+        "│ Moving ├─┘│",
+        "╰────┬───╯  │",
+        "     │      │",
+        "     ▼      │",
+        " ╭───────╮  │",
+        " │ Crash │  │",
+        " ╰───┬───╯  │",
+        "     │      │",
+        "     ▼      │",
+        "   ╭───╮    │",
+        "   │ ● │◄───┘",
+        "   ╰───╯"
+      ],
+      "styled": [
+        [["   ","none"],["╭───╮","border"]],
+        [["   ","none"],["│","border"],[" ","none"],["●","text"],[" ","none"],["│","border"]],
+        [["   ","none"],["╰─┬─╯","border"]],
+        [["     ","none"],["│","edge"]],
+        [["     ","none"],["▼","edge"]],
+        [[" ","none"],["╭───────╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["Still","text"],[" ","none"],["├","border"],["◄┬┐","edge"]],
+        [[" ","none"],["╰───┬───╯","border"],[" ","none"],["││","edge"]],
+        [["     ","none"],["│","edge"],["     ","none"],["││","edge"]],
+        [["     ","none"],["▼","edge"],["     ","none"],["││","edge"]],
+        [["╭────────╮","border"],[" ","none"],["││","edge"]],
+        [["│","border"],[" ","none"],["Moving","text"],[" ","none"],["├","border"],["─┘│","edge"]],
+        [["╰────┬───╯","border"],["  ","none"],["│","edge"]],
+        [["     ","none"],["│","edge"],["      ","none"],["│","edge"]],
+        [["     ","none"],["▼","edge"],["      ","none"],["│","edge"]],
+        [[" ","none"],["╭───────╮","border"],["  ","none"],["│","edge"]],
+        [[" ","none"],["│","border"],[" ","none"],["Crash","text"],[" ","none"],["│","border"],["  ","none"],["│","edge"]],
+        [[" ","none"],["╰───┬───╯","border"],["  ","none"],["│","edge"]],
+        [["     ","none"],["│","edge"],["      ","none"],["│","edge"]],
+        [["     ","none"],["▼","edge"],["      ","none"],["│","edge"]],
+        [["   ","none"],["╭───╮","border"],["    ","none"],["│","edge"]],
+        [["   ","none"],["│","border"],[" ","none"],["●","text"],[" ","none"],["│","border"],["◄───┘","edge"]],
+        [["   ","none"],["╰───╯","border"]]
+      ],
+      "width": 13,
+      "warnings": []
+    }
+  },
+  {
+    "name": "v1_header",
+    "src": "stateDiagram\n  [*] --> A\n  A --> B: go\n  B --> [*]",
+    "kind": "state",
+    "art": {
+      "plain": [
+        " ╭───╮",
+        " │ ● │",
+        " ╰─┬─╯",
+        "   │",
+        "   ▼",
+        " ╭───╮",
+        " │ A │",
+        " ╰─┬─╯",
+        "   │",
+        "   ▼go",
+        " ╭───╮",
+        " │ B │",
+        " ╰─┬─╯",
+        "   │",
+        "   ▼",
+        " ╭───╮",
+        " │ ● │",
+        " ╰───╯"
+      ],
+      "styled": [
+        [[" ","none"],["╭───╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["●","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰─┬─╯","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"]],
+        [[" ","none"],["╭───╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰─┬─╯","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"],["go","edgeLabel"]],
+        [[" ","none"],["╭───╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰─┬─╯","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"]],
+        [[" ","none"],["╭───╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["●","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰───╯","border"]]
+      ],
+      "width": 6,
+      "warnings": []
+    }
+  },
+  {
+    "name": "choice",
+    "src": "stateDiagram-v2\n  state check <<choice>>\n  [*] --> check\n  check --> Big: n > 10\n  check --> Small: n <= 10",
+    "kind": "state",
+    "art": {
+      "plain": [
+        "       ╭───╮",
+        "       │ ● │",
+        "       ╰─┬─╯",
+        "         │",
+        "         ▼",
+        "     ╭───────╮",
+        "     │ check │",
+        "     ╰───┬───╯",
+        "    ┌────┴─────┐",
+        "    ▼n > 10    ▼n <= 10",
+        " ╭─────╮   ╭───────╮",
+        " │ Big │   │ Small │",
+        " ╰─────╯   ╰───────╯"
+      ],
+      "styled": [
+        [["       ","none"],["╭───╮","border"]],
+        [["       ","none"],["│","border"],[" ","none"],["●","text"],[" ","none"],["│","border"]],
+        [["       ","none"],["╰─┬─╯","border"]],
+        [["         ","none"],["│","edge"]],
+        [["         ","none"],["▼","edge"]],
+        [["     ","none"],["╭───────╮","border"]],
+        [["     ","none"],["│","border"],[" ","none"],["check","text"],[" ","none"],["│","border"]],
+        [["     ","none"],["╰───┬───╯","border"]],
+        [["    ","none"],["┌────┴─────┐","edge"]],
+        [["    ","none"],["▼","edge"],["n > 10","edgeLabel"],["    ","none"],["▼","edge"],["n <= 10","edgeLabel"]],
+        [[" ","none"],["╭─────╮","border"],["   ","none"],["╭───────╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["Big","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["Small","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰─────╯","border"],["   ","none"],["╰───────╯","border"]]
+      ],
+      "width": 23,
+      "warnings": []
+    }
+  },
+  {
+    "name": "fork_stereo",
+    "src": "stateDiagram-v2\n  state fork1 <<fork>>\n  [*] --> fork1\n  fork1 --> A\n  fork1 --> B",
+    "kind": "state",
+    "art": {
+      "plain": [
+        "     ╭───╮",
+        "     │ ● │",
+        "     ╰─┬─╯",
+        "       │",
+        "       ▼",
+        "   ╭───────╮",
+        "   │ fork1 │",
+        "   ╰───┬───╯",
+        "   ┌───┴───┐",
+        "   ▼       ▼",
+        " ╭───╮   ╭───╮",
+        " │ A │   │ B │",
+        " ╰───╯   ╰───╯"
+      ],
+      "styled": [
+        [["     ","none"],["╭───╮","border"]],
+        [["     ","none"],["│","border"],[" ","none"],["●","text"],[" ","none"],["│","border"]],
+        [["     ","none"],["╰─┬─╯","border"]],
+        [["       ","none"],["│","edge"]],
+        [["       ","none"],["▼","edge"]],
+        [["   ","none"],["╭───────╮","border"]],
+        [["   ","none"],["│","border"],[" ","none"],["fork1","text"],[" ","none"],["│","border"]],
+        [["   ","none"],["╰───┬───╯","border"]],
+        [["   ","none"],["┌───┴───┐","edge"]],
+        [["   ","none"],["▼","edge"],["       ","none"],["▼","edge"]],
+        [[" ","none"],["╭───╮","border"],["   ","none"],["╭───╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰───╯","border"],["   ","none"],["╰───╯","border"]]
+      ],
+      "width": 14,
+      "warnings": []
+    }
+  },
+  {
+    "name": "composite",
+    "src": "stateDiagram-v2\n  [*] --> First\n  state First {\n    [*] --> fir\n    fir --> [*]\n  }\n  First --> Second\n  state Second {\n    sec --> sec2\n    --\n    other\n  }",
+    "kind": "state",
+    "art": {
+      "plain": [
+        "         ╭───╮            ╭─────╮   ╭───────╮",
+        "         │ ● │            │ sec │   │ other │",
+        "         ╰─┬─╯            ╰───┬─╯   ╰───────╯",
+        "     ┌─────┴────┐             │",
+        "     ▼          ▼             ▼",
+        " ╭───────╮   ╭─────╮      ╭──────╮",
+        " │ First │   │ fir │      │ sec2 │",
+        " ╰───┬───╯   ╰──┬──╯      ╰──────╯",
+        "     │          │",
+        "     ▼          ▼",
+        "╭────────╮    ╭───╮",
+        "│ Second │    │ ● │",
+        "╰────────╯    ╰───╯"
+      ],
+      "styled": [
+        [["         ","none"],["╭───╮","border"],["            ","none"],["╭─────╮","border"],["   ","none"],["╭───────╮","border"]],
+        [["         ","none"],["│","border"],[" ","none"],["●","text"],[" ","none"],["│","border"],["            ","none"],["│","border"],[" ","none"],["sec","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["other","text"],[" ","none"],["│","border"]],
+        [["         ","none"],["╰─┬─╯","border"],["            ","none"],["╰───┬─╯","border"],["   ","none"],["╰───────╯","border"]],
+        [["     ","none"],["┌─────┴────┐","edge"],["             ","none"],["│","edge"]],
+        [["     ","none"],["▼","edge"],["          ","none"],["▼","edge"],["             ","none"],["▼","edge"]],
+        [[" ","none"],["╭───────╮","border"],["   ","none"],["╭─────╮","border"],["      ","none"],["╭──────╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["First","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["fir","text"],[" ","none"],["│","border"],["      ","none"],["│","border"],[" ","none"],["sec2","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰───┬───╯","border"],["   ","none"],["╰──┬──╯","border"],["      ","none"],["╰──────╯","border"]],
+        [["     ","none"],["│","edge"],["          ","none"],["│","edge"]],
+        [["     ","none"],["▼","edge"],["          ","none"],["▼","edge"]],
+        [["╭────────╮","border"],["    ","none"],["╭───╮","border"]],
+        [["│","border"],[" ","none"],["Second","text"],[" ","none"],["│","border"],["    ","none"],["│","border"],[" ","none"],["●","text"],[" ","none"],["│","border"]],
+        [["╰────────╯","border"],["    ","none"],["╰───╯","border"]]
+      ],
+      "width": 45,
+      "warnings": []
+    }
+  },
+  {
+    "name": "descriptions",
+    "src": "stateDiagram-v2\n  S1: The first state\n  S2 : second &amp; last\n  S1 --> S2\n  S3",
+    "kind": "state",
+    "art": {
+      "plain": [
+        " ╭─────────────────╮  ╭──────╮   ╭────╮",
+        " │ The first state │  │ last │   │ S3 │",
+        " ╰────────┬────────╯  ╰──────╯   ╰────╯",
+        "          │",
+        "          ▼",
+        "   ╭─────────────╮",
+        "   │ second &amp │",
+        "   ╰─────────────╯"
+      ],
+      "styled": [
+        [[" ","none"],["╭─────────────────╮","border"],["  ","none"],["╭──────╮","border"],["   ","none"],["╭────╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["The first state","text"],[" ","none"],["│","border"],["  ","none"],["│","border"],[" ","none"],["last","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["S3","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰────────┬────────╯","border"],["  ","none"],["╰──────╯","border"],["   ","none"],["╰────╯","border"]],
+        [["          ","none"],["│","edge"]],
+        [["          ","none"],["▼","edge"]],
+        [["   ","none"],["╭─────────────╮","border"]],
+        [["   ","none"],["│","border"],[" ","none"],["second &amp","text"],[" ","none"],["│","border"]],
+        [["   ","none"],["╰─────────────╯","border"]]
+      ],
+      "width": 39,
+      "warnings": []
+    }
+  },
+  {
+    "name": "state_as",
+    "src": "stateDiagram-v2\n  state \"A long state label\" as Long\n  state \"Only label\"\n  [*] --> Long\n  Long --> Done",
+    "kind": "state",
+    "art": {
+      "plain": [
+        "╭────────────╮    ╭───╮",
+        "│ Only label │    │ ● │",
+        "╰────────────╯    ╰─┬─╯",
+        "                    │",
+        "                    ▼",
+        "         ╭────────────────────╮",
+        "         │ A long state label │",
+        "         ╰──────────┬─────────╯",
+        "                    │",
+        "                    ▼",
+        "                ╭──────╮",
+        "                │ Done │",
+        "                ╰──────╯"
+      ],
+      "styled": [
+        [["╭────────────╮","border"],["    ","none"],["╭───╮","border"]],
+        [["│","border"],[" ","none"],["Only label","text"],[" ","none"],["│","border"],["    ","none"],["│","border"],[" ","none"],["●","text"],[" ","none"],["│","border"]],
+        [["╰────────────╯","border"],["    ","none"],["╰─┬─╯","border"]],
+        [["                    ","none"],["│","edge"]],
+        [["                    ","none"],["▼","edge"]],
+        [["         ","none"],["╭────────────────────╮","border"]],
+        [["         ","none"],["│","border"],[" ","none"],["A long state label","text"],[" ","none"],["│","border"]],
+        [["         ","none"],["╰──────────┬─────────╯","border"]],
+        [["                    ","none"],["│","edge"]],
+        [["                    ","none"],["▼","edge"]],
+        [["                ","none"],["╭──────╮","border"]],
+        [["                ","none"],["│","border"],[" ","none"],["Done","text"],[" ","none"],["│","border"]],
+        [["                ","none"],["╰──────╯","border"]]
+      ],
+      "width": 31,
+      "warnings": []
+    }
+  },
+  {
+    "name": "notes",
+    "src": "stateDiagram-v2\n  A --> B\n  note right of A : single line note\n  note left of B\n    multi line\n    note text\n  end note\n  B --> C",
+    "kind": "state",
+    "art": {
+      "plain": [
+        " ╭───╮",
+        " │ A │",
+        " ╰─┬─╯",
+        "   │",
+        "   ▼",
+        " ╭───╮",
+        " │ B │",
+        " ╰─┬─╯",
+        "   │",
+        "   ▼",
+        " ╭───╮",
+        " │ C │",
+        " ╰───╯"
+      ],
+      "styled": [
+        [[" ","none"],["╭───╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰─┬─╯","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"]],
+        [[" ","none"],["╭───╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰─┬─╯","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"]],
+        [[" ","none"],["╭───╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["C","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰───╯","border"]]
+      ],
+      "width": 6,
+      "warnings": []
+    }
+  },
+  {
+    "name": "direction_lr",
+    "src": "stateDiagram-v2\n  direction LR\n  [*] --> A\n  A --> B: next\n  B --> A: back\n  B --> [*]",
+    "kind": "state",
+    "art": {
+      "plain": [
+        "╭───╮       ╭───╮ next  ╭───╮       ╭───╮",
+        "│ ● ├──────▶│ A ├──────▶│ B ├──────▶│ ● │",
+        "╰───╯       ╰───╯       ╰─┬─╯       ╰───╯",
+        "              ▲     back  │",
+        "              └───────────┘"
+      ],
+      "styled": [
+        [["╭───╮","border"],["       ","none"],["╭───╮","border"],[" ","none"],["next","edgeLabel"],["  ","none"],["╭───╮","border"],["       ","none"],["╭───╮","border"]],
+        [["│","border"],[" ","none"],["●","text"],[" ","none"],["├","border"],["──────▶","edge"],["│","border"],[" ","none"],["A","text"],[" ","none"],["├","border"],["──────▶","edge"],["│","border"],[" ","none"],["B","text"],[" ","none"],["├","border"],["──────▶","edge"],["│","border"],[" ","none"],["●","text"],[" ","none"],["│","border"]],
+        [["╰───╯","border"],["       ","none"],["╰───╯","border"],["       ","none"],["╰─┬─╯","border"],["       ","none"],["╰───╯","border"]],
+        [["              ","none"],["▲","edge"],["     ","none"],["back","edgeLabel"],["  ","none"],["│","edge"]],
+        [["              ","none"],["└───────────┘","edge"]]
+      ],
+      "width": 41,
+      "warnings": []
+    }
+  },
+  {
+    "name": "chain",
+    "src": "stateDiagram-v2\n  A --> B --> C: last hop\n  C --> A",
+    "kind": "state",
+    "art": {
+      "plain": [
+        " ╭───╮",
+        " │ A │◄───────┐",
+        " ╰─┬─╯        │",
+        "   │          │",
+        "   ▼          │",
+        " ╭───╮        │",
+        " │ B │        │",
+        " ╰─┬─╯        │",
+        "   │          │",
+        "   ▼last hop  │",
+        " ╭───╮        │",
+        " │ C ├────────┘",
+        " ╰───╯"
+      ],
+      "styled": [
+        [[" ","none"],["╭───╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"],["◄───────┐","edge"]],
+        [[" ","none"],["╰─┬─╯","border"],["        ","none"],["│","edge"]],
+        [["   ","none"],["│","edge"],["          ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"],["          ","none"],["│","edge"]],
+        [[" ","none"],["╭───╮","border"],["        ","none"],["│","edge"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"],["        ","none"],["│","edge"]],
+        [[" ","none"],["╰─┬─╯","border"],["        ","none"],["│","edge"]],
+        [["   ","none"],["│","edge"],["          ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"],["last hop","edgeLabel"],["  ","none"],["│","edge"]],
+        [[" ","none"],["╭───╮","border"],["        ","none"],["│","edge"]],
+        [[" ","none"],["│","border"],[" ","none"],["C","text"],[" ","none"],["├","border"],["────────┘","edge"]],
+        [[" ","none"],["╰───╯","border"]]
+      ],
+      "width": 15,
+      "warnings": []
+    }
+  },
+  {
+    "name": "style_tags",
+    "src": "stateDiagram-v2\n  A:::warn --> B:::ok\n  B --> C:::x-y\n  classDef warn fill:red\n  class A warn",
+    "kind": "state",
+    "art": {
+      "plain": [
+        " ╭───╮",
+        " │ A │",
+        " ╰─┬─╯",
+        "   │",
+        "   ▼",
+        " ╭───╮",
+        " │ B │",
+        " ╰─┬─╯",
+        "   │",
+        "   ▼",
+        " ╭───╮",
+        " │ C │",
+        " ╰───╯"
+      ],
+      "styled": [
+        [[" ","none"],["╭───╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰─┬─╯","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"]],
+        [[" ","none"],["╭───╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰─┬─╯","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"]],
+        [[" ","none"],["╭───╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["C","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰───╯","border"]]
+      ],
+      "width": 6,
+      "warnings": []
+    }
+  },
+  {
+    "name": "ignored",
+    "src": "stateDiagram-v2\n  hide empty description\n  scale 350 width\n  A --> B\n  }",
+    "kind": "state",
+    "art": {
+      "plain": [" ╭───╮"," │ A │"," ╰─┬─╯","   │","   ▼"," ╭───╮"," │ B │"," ╰───╯"],
+      "styled": [
+        [[" ","none"],["╭───╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰─┬─╯","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"]],
+        [[" ","none"],["╭───╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰───╯","border"]]
+      ],
+      "width": 6,
+      "warnings": []
+    }
+  }
+]

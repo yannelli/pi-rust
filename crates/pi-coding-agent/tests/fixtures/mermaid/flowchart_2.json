@@ -1,0 +1,448 @@
+[
+  {
+    "name": "fan_out",
+    "src": "graph TD\n  A & B --> C & D\n  C --> E",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        " ┌───┐   ┌───┐",
+        " │ A │   │ B │",
+        " └─┬─┘   └─┬─┘",
+        "   ├───────┤",
+        "   ├───────┤",
+        "   ▼       ▼",
+        " ┌───┐   ┌───┐",
+        " │ C │   │ D │",
+        " └─┬─┘   └───┘",
+        "   │",
+        "   ▼",
+        " ┌───┐",
+        " │ E │",
+        " └───┘"
+      ],
+      "styled": [
+        [[" ","none"],["┌───┐","border"],["   ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─┬─┘","border"],["   ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["├───────┤","edge"]],
+        [["   ","none"],["├───────┤","edge"]],
+        [["   ","none"],["▼","edge"],["       ","none"],["▼","edge"]],
+        [[" ","none"],["┌───┐","border"],["   ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["C","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["D","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─┬─┘","border"],["   ","none"],["└───┘","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"]],
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["E","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└───┘","border"]]
+      ],
+      "width": 14,
+      "warnings": []
+    }
+  },
+  {
+    "name": "self_loop_td",
+    "src": "graph TD\n  A[Retry step] --> A\n  A -->|again| A\n  A --> B",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "        ┌────────────┐",
+        "        │ Retry step │",
+        "        └──────┬┬────┘",
+        "               ││   ▲  again",
+        "               │╰───╯",
+        "               │",
+        "               ▼",
+        "             ┌───┐",
+        "             │ B │",
+        "             └───┘"
+      ],
+      "styled": [
+        [["        ","none"],["┌────────────┐","border"]],
+        [["        ","none"],["│","border"],[" ","none"],["Retry step","text"],[" ","none"],["│","border"]],
+        [["        ","none"],["└──────┬┬────┘","border"]],
+        [["               ","none"],["││","edge"],["   ","none"],["▲","edge"],["  ","none"],["again","edgeLabel"]],
+        [["               ","none"],["│╰───╯","edge"]],
+        [["               ","none"],["│","edge"]],
+        [["               ","none"],["▼","edge"]],
+        [["             ","none"],["┌───┐","border"]],
+        [["             ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [["             ","none"],["└───┘","border"]]
+      ],
+      "width": 28,
+      "warnings": []
+    }
+  },
+  {
+    "name": "self_loop_lr",
+    "src": "graph LR\n  A -->|loop back| A\n  A --> B\n  B -.-> B\n  B ==> B",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "┌─────┐            ┌─────┐",
+        "│  A  ├───────────▶│  B  │",
+        "└───┬─┘            └───┬─┘",
+        "    │▲  loop back      ┃▲",
+        "    ╰╯                 ┗┛"
+      ],
+      "styled": [
+        [["┌─────┐","border"],["            ","none"],["┌─────┐","border"]],
+        [["│","border"],["  ","none"],["A","text"],["  ","none"],["├","border"],["───────────▶","edge"],["│","border"],["  ","none"],["B","text"],["  ","none"],["│","border"]],
+        [["└───┬─┘","border"],["            ","none"],["└───┬─┘","border"]],
+        [["    ","none"],["│▲","edge"],["  ","none"],["loop back","edgeLabel"],["      ","none"],["┃▲","edge"]],
+        [["    ","none"],["╰╯","edge"],["                 ","none"],["┗┛","edge"]]
+      ],
+      "width": 26,
+      "warnings": []
+    }
+  },
+  {
+    "name": "cycle",
+    "src": "graph TD\n  A --> B --> C --> A",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        " ┌───┐",
+        " │ A │◄┐",
+        " └─┬─┘ │",
+        "   │   │",
+        "   ▼   │",
+        " ┌───┐ │",
+        " │ B │ │",
+        " └─┬─┘ │",
+        "   │   │",
+        "   ▼   │",
+        " ┌───┐ │",
+        " │ C ├─┘",
+        " └───┘"
+      ],
+      "styled": [
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"],["◄┐","edge"]],
+        [[" ","none"],["└─┬─┘","border"],[" ","none"],["│","edge"]],
+        [["   ","none"],["│","edge"],["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"],["   ","none"],["│","edge"]],
+        [[" ","none"],["┌───┐","border"],[" ","none"],["│","edge"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"],[" ","none"],["│","edge"]],
+        [[" ","none"],["└─┬─┘","border"],[" ","none"],["│","edge"]],
+        [["   ","none"],["│","edge"],["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"],["   ","none"],["│","edge"]],
+        [[" ","none"],["┌───┐","border"],[" ","none"],["│","edge"]],
+        [[" ","none"],["│","border"],[" ","none"],["C","text"],[" ","none"],["├","border"],["─┘","edge"]],
+        [[" ","none"],["└───┘","border"]]
+      ],
+      "width": 8,
+      "warnings": []
+    }
+  },
+  {
+    "name": "skip_edges_td",
+    "src": "graph TD\n  A --> B --> C --> D\n  A --> D\n  A -->|skip| C\n  D --> B",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        " ┌───┐",
+        " │ A ├──────┐",
+        " └─┬─┘      │",
+        "   │        │",
+        "   ▼        │",
+        " ┌───┐      │",
+        " │ B │◄─────┼┐",
+        " └─┬─┘      ││",
+        "   │        ││",
+        "   ▼        ││",
+        " ┌───┐ skip ││",
+        " │ C │◄─────┤│",
+        " └─┬─┘      ││",
+        "   │        ││",
+        "   ▼        ││",
+        " ┌───┐      ││",
+        " │ D ├◄─────┴┘",
+        " └───┘"
+      ],
+      "styled": [
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["├","border"],["──────┐","edge"]],
+        [[" ","none"],["└─┬─┘","border"],["      ","none"],["│","edge"]],
+        [["   ","none"],["│","edge"],["        ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"],["        ","none"],["│","edge"]],
+        [[" ","none"],["┌───┐","border"],["      ","none"],["│","edge"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"],["◄─────┼┐","edge"]],
+        [[" ","none"],["└─┬─┘","border"],["      ","none"],["││","edge"]],
+        [["   ","none"],["│","edge"],["        ","none"],["││","edge"]],
+        [["   ","none"],["▼","edge"],["        ","none"],["││","edge"]],
+        [[" ","none"],["┌───┐","border"],[" ","none"],["skip","edgeLabel"],[" ","none"],["││","edge"]],
+        [[" ","none"],["│","border"],[" ","none"],["C","text"],[" ","none"],["│","border"],["◄─────┤│","edge"]],
+        [[" ","none"],["└─┬─┘","border"],["      ","none"],["││","edge"]],
+        [["   ","none"],["│","edge"],["        ","none"],["││","edge"]],
+        [["   ","none"],["▼","edge"],["        ","none"],["││","edge"]],
+        [[" ","none"],["┌───┐","border"],["      ","none"],["││","edge"]],
+        [[" ","none"],["│","border"],[" ","none"],["D","text"],[" ","none"],["├","border"],["◄─────┴┘","edge"]],
+        [[" ","none"],["└───┘","border"]]
+      ],
+      "width": 14,
+      "warnings": []
+    }
+  },
+  {
+    "name": "skip_edges_lr",
+    "src": "graph LR\n  A --> B --> C --> D\n  A -->|skip ahead| D\n  D -.-> A\n  C ==> A",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "┌───┐    ┌───┐    ┌───┐    ┌───┐",
+        "│ A ├───▶│ B ├───▶│ C ├───▶│ D │",
+        "└─┬─┘    └───┘    └─┬─┘    └─┬─┘",
+        "  ▲                 ┃        ▲",
+        "  ├────────────skip─ahead╌╌╌╌┤",
+        "  └──────────────────────────┘"
+      ],
+      "styled": [
+        [["┌───┐","border"],["    ","none"],["┌───┐","border"],["    ","none"],["┌───┐","border"],["    ","none"],["┌───┐","border"]],
+        [["│","border"],[" ","none"],["A","text"],[" ","none"],["├","border"],["───▶","edge"],["│","border"],[" ","none"],["B","text"],[" ","none"],["├","border"],["───▶","edge"],["│","border"],[" ","none"],["C","text"],[" ","none"],["├","border"],["───▶","edge"],["│","border"],[" ","none"],["D","text"],[" ","none"],["│","border"]],
+        [["└─┬─┘","border"],["    ","none"],["└───┘","border"],["    ","none"],["└─┬─┘","border"],["    ","none"],["└─┬─┘","border"]],
+        [["  ","none"],["▲","edge"],["                 ","none"],["┃","edge"],["        ","none"],["▲","edge"]],
+        [["  ","none"],["├────────────skip─ahead╌╌╌╌┤","edge"]],
+        [["  ","none"],["└──────────────────────────┘","edge"]]
+      ],
+      "width": 32,
+      "warnings": []
+    }
+  },
+  {
+    "name": "wide_rank",
+    "src": "graph TD\n  R --> A1 & A2 & A3 & A4\n  A1 --> B4\n  A2 --> B3\n  A3 --> B2\n  A4 --> B1\n  B1 & B2 & B3 & B4 --> Z",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "               ┌───┐",
+        "               │ R │",
+        "               └─┬─┘",
+        "   ┌────────┬────┴───┬────────┐",
+        "   ▼        ▼        ▼        ▼",
+        "┌────┐   ┌────┐   ┌────┐   ┌────┐",
+        "│ A1 │   │ A2 │   │ A3 │   │ A4 │",
+        "└──┬─┘   └──┬─┘   └──┬─┘   └──┬─┘",
+        "   │        │        │        │",
+        "   ▼        ▼        ▼        ▼",
+        "┌────┐   ┌────┐   ┌────┐   ┌────┐",
+        "│ B4 │   │ B3 │   │ B2 │   │ B1 │",
+        "└──┬─┘   └──┬─┘   └──┬─┘   └──┬─┘",
+        "   └────────┴────┬───┴────────┘",
+        "                 ▼",
+        "               ┌───┐",
+        "               │ Z │",
+        "               └───┘"
+      ],
+      "styled": [
+        [["               ","none"],["┌───┐","border"]],
+        [["               ","none"],["│","border"],[" ","none"],["R","text"],[" ","none"],["│","border"]],
+        [["               ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["┌────────┬────┴───┬────────┐","edge"]],
+        [["   ","none"],["▼","edge"],["        ","none"],["▼","edge"],["        ","none"],["▼","edge"],["        ","none"],["▼","edge"]],
+        [["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"]],
+        [["│","border"],[" ","none"],["A1","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["A2","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["A3","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["A4","text"],[" ","none"],["│","border"]],
+        [["└──┬─┘","border"],["   ","none"],["└──┬─┘","border"],["   ","none"],["└──┬─┘","border"],["   ","none"],["└──┬─┘","border"]],
+        [["   ","none"],["│","edge"],["        ","none"],["│","edge"],["        ","none"],["│","edge"],["        ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"],["        ","none"],["▼","edge"],["        ","none"],["▼","edge"],["        ","none"],["▼","edge"]],
+        [["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"]],
+        [["│","border"],[" ","none"],["B4","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["B3","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["B2","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["B1","text"],[" ","none"],["│","border"]],
+        [["└──┬─┘","border"],["   ","none"],["└──┬─┘","border"],["   ","none"],["└──┬─┘","border"],["   ","none"],["└──┬─┘","border"]],
+        [["   ","none"],["└────────┴────┬───┴────────┘","edge"]],
+        [["                 ","none"],["▼","edge"]],
+        [["               ","none"],["┌───┐","border"]],
+        [["               ","none"],["│","border"],[" ","none"],["Z","text"],[" ","none"],["│","border"]],
+        [["               ","none"],["└───┘","border"]]
+      ],
+      "width": 33,
+      "warnings": []
+    }
+  },
+  {
+    "name": "crossing_lr",
+    "src": "graph LR\n  A --> D\n  B --> C\n  A --> C\n  B --> E\n  C --> F\n  D --> F\n  E --> F",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "         ┌───┐",
+        "     ┌──▶│ D ├┐",
+        "┌───┐│   └───┘│",
+        "│ A ├┤        │",
+        "└───┘│   ┌───┐│   ┌───┐",
+        "     ├──▶│ C ├┼──▶│ F │",
+        "┌───┐│   └───┘│   └───┘",
+        "│ B ├┤        │",
+        "└───┘│   ┌───┐│",
+        "     └──▶│ E ├┘",
+        "         └───┘"
+      ],
+      "styled": [
+        [["         ","none"],["┌───┐","border"]],
+        [["     ","none"],["┌──▶","edge"],["│","border"],[" ","none"],["D","text"],[" ","none"],["├","border"],["┐","edge"]],
+        [["┌───┐","border"],["│","edge"],["   ","none"],["└───┘","border"],["│","edge"]],
+        [["│","border"],[" ","none"],["A","text"],[" ","none"],["├","border"],["┤","edge"],["        ","none"],["│","edge"]],
+        [["└───┘","border"],["│","edge"],["   ","none"],["┌───┐","border"],["│","edge"],["   ","none"],["┌───┐","border"]],
+        [["     ","none"],["├──▶","edge"],["│","border"],[" ","none"],["C","text"],[" ","none"],["├","border"],["┼──▶","edge"],["│","border"],[" ","none"],["F","text"],[" ","none"],["│","border"]],
+        [["┌───┐","border"],["│","edge"],["   ","none"],["└───┘","border"],["│","edge"],["   ","none"],["└───┘","border"]],
+        [["│","border"],[" ","none"],["B","text"],[" ","none"],["├","border"],["┤","edge"],["        ","none"],["│","edge"]],
+        [["└───┘","border"],["│","edge"],["   ","none"],["┌───┐","border"],["│","edge"]],
+        [["     ","none"],["└──▶","edge"],["│","border"],[" ","none"],["E","text"],[" ","none"],["├","border"],["┘","edge"]],
+        [["         ","none"],["└───┘","border"]]
+      ],
+      "width": 23,
+      "warnings": []
+    }
+  },
+  {
+    "name": "bus_tracks_td",
+    "src": "graph TD\n  A[Wide source node] --> X\n  A --> Y\n  A --> Z\n  B[Another wide one] --> X\n  B --> Z\n  C --> Y",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "┌──────────────────┐   ┌──────────────────┐    ┌───┐",
+        "│ Another wide one │   │ Wide source node │    │ C │",
+        "└─────────┬────────┘   └─────────┬────────┘    └─┬─┘",
+        "          └─────┬───────┬────────┼─────┬─────────┘",
+        "                ├───────┼────────┘     │",
+        "                ▼       ▼              ▼",
+        "              ┌───┐   ┌───┐          ┌───┐",
+        "              │ X │   │ Z │          │ Y │",
+        "              └───┘   └───┘          └───┘"
+      ],
+      "styled": [
+        [["┌──────────────────┐","border"],["   ","none"],["┌──────────────────┐","border"],["    ","none"],["┌───┐","border"]],
+        [["│","border"],[" ","none"],["Another wide one","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["Wide source node","text"],[" ","none"],["│","border"],["    ","none"],["│","border"],[" ","none"],["C","text"],[" ","none"],["│","border"]],
+        [["└─────────┬────────┘","border"],["   ","none"],["└─────────┬────────┘","border"],["    ","none"],["└─┬─┘","border"]],
+        [["          ","none"],["└─────┬───────┬────────┼─────┬─────────┘","edge"]],
+        [["                ","none"],["├───────┼────────┘","edge"],["     ","none"],["│","edge"]],
+        [["                ","none"],["▼","edge"],["       ","none"],["▼","edge"],["              ","none"],["▼","edge"]],
+        [["              ","none"],["┌───┐","border"],["   ","none"],["┌───┐","border"],["          ","none"],["┌───┐","border"]],
+        [["              ","none"],["│","border"],[" ","none"],["X","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["Z","text"],[" ","none"],["│","border"],["          ","none"],["│","border"],[" ","none"],["Y","text"],[" ","none"],["│","border"]],
+        [["              ","none"],["└───┘","border"],["   ","none"],["└───┘","border"],["          ","none"],["└───┘","border"]]
+      ],
+      "width": 52,
+      "warnings": []
+    }
+  },
+  {
+    "name": "styles_mixed",
+    "src": "graph TD\n  A ==> B\n  A -.-> C\n  A --> D\n  B -.- C\n  C === D",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        " ┌───┐",
+        " │ A ├─┐",
+        " └─┬─┘ │",
+        "   ┃   │",
+        "   ▼   │",
+        " ┌───┐ │",
+        " │ B │ │",
+        " └─┬─┘ │",
+        "   ╎   │",
+        "   ╎   │",
+        " ┌───┐ │",
+        " │ C │◄┤",
+        " └─┬─┘ │",
+        "   ┃   │",
+        "   ┃   │",
+        " ┌───┐ │",
+        " │ D │◄┘",
+        " └───┘"
+      ],
+      "styled": [
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["├","border"],["─┐","edge"]],
+        [[" ","none"],["└─┬─┘","border"],[" ","none"],["│","edge"]],
+        [["   ","none"],["┃","edge"],["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"],["   ","none"],["│","edge"]],
+        [[" ","none"],["┌───┐","border"],[" ","none"],["│","edge"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"],[" ","none"],["│","edge"]],
+        [[" ","none"],["└─┬─┘","border"],[" ","none"],["│","edge"]],
+        [["   ","none"],["╎","edge"],["   ","none"],["│","edge"]],
+        [["   ","none"],["╎","edge"],["   ","none"],["│","edge"]],
+        [[" ","none"],["┌───┐","border"],[" ","none"],["│","edge"]],
+        [[" ","none"],["│","border"],[" ","none"],["C","text"],[" ","none"],["│","border"],["◄┤","edge"]],
+        [[" ","none"],["└─┬─┘","border"],[" ","none"],["│","edge"]],
+        [["   ","none"],["┃","edge"],["   ","none"],["│","edge"]],
+        [["   ","none"],["┃","edge"],["   ","none"],["│","edge"]],
+        [[" ","none"],["┌───┐","border"],[" ","none"],["│","edge"]],
+        [[" ","none"],["│","border"],[" ","none"],["D","text"],[" ","none"],["│","border"],["◄┘","edge"]],
+        [[" ","none"],["└───┘","border"]]
+      ],
+      "width": 8,
+      "warnings": []
+    }
+  },
+  {
+    "name": "subgraph_simple",
+    "src": "flowchart TD\n  subgraph one\n    a1 --> a2\n  end\n  c1 --> a2",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        " ┌────┐",
+        " │ c1 │",
+        " └──┬─┘",
+        "    │",
+        "    ▼",
+        "┌ one ─┐",
+        "│┌────┐│",
+        "││ a1 ││",
+        "│└──┬─┘│",
+        "│   │  │",
+        "│   ▼  │",
+        "│┌────┐│",
+        "││ a2 ││",
+        "│└────┘│",
+        "└──────┘"
+      ],
+      "styled": [
+        [[" ","none"],["┌────┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["c1","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└──┬─┘","border"]],
+        [["    ","none"],["│","edge"]],
+        [["    ","none"],["▼","edge"]],
+        [["┌","border"],[" one ","text"],["─┐","border"]],
+        [["│┌────┐│","border"]],
+        [["││","border"],[" ","none"],["a1","text"],[" ","none"],["││","border"]],
+        [["│└──┬─┘│","border"]],
+        [["│","border"],["   ","none"],["│","edge"],["  ","none"],["│","border"]],
+        [["│","border"],["   ","none"],["▼","edge"],["  ","none"],["│","border"]],
+        [["│┌────┐│","border"]],
+        [["││","border"],[" ","none"],["a2","text"],[" ","none"],["││","border"]],
+        [["│└────┘│","border"]],
+        [["└──────┘","border"]]
+      ],
+      "width": 8,
+      "warnings": []
+    }
+  },
+  {
+    "name": "subgraph_nested",
+    "src": "flowchart LR\n  subgraph outer[Outer box]\n    subgraph inner[Inner box]\n      x --> y\n    end\n    z --> x\n  end\n  start --> z\n  y --> finish",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "             ┌ Outer box ──────────────┐",
+        "             │         ┌ Inner box ───┐│",
+        "             │         │              ││",
+        "┌───────┐    │┌───┐    │┌───┐    ┌───┐││    ┌────────┐",
+        "│ start ├───▶││ z ├───▶││ x ├───▶│ y ││├───▶│ finish │",
+        "└───────┘    │└───┘    │└───┘    └───┘││    └────────┘",
+        "             │         └──────────────┘│",
+        "             └─────────────────────────┘"
+      ],
+      "styled": [
+        [["             ","none"],["┌","border"],[" Outer box ","text"],["──────────────┐","border"]],
+        [["             ","none"],["│","border"],["         ","none"],["┌","border"],[" Inner box ","text"],["───┐│","border"]],
+        [["             ","none"],["│","border"],["         ","none"],["│","border"],["              ","none"],["││","border"]],
+        [["┌───────┐","border"],["    ","none"],["│┌───┐","border"],["    ","none"],["│┌───┐","border"],["    ","none"],["┌───┐││","border"],["    ","none"],["┌────────┐","border"]],
+        [["│","border"],[" ","none"],["start","text"],[" ","none"],["├","border"],["───▶","edge"],["││","border"],[" ","none"],["z","text"],[" ","none"],["├","border"],["───▶","edge"],["││","border"],[" ","none"],["x","text"],[" ","none"],["├","border"],["───▶","edge"],["│","border"],[" ","none"],["y","text"],[" ","none"],["││├","border"],["───▶","edge"],["│","border"],[" ","none"],["finish","text"],[" ","none"],["│","border"]],
+        [["└───────┘","border"],["    ","none"],["│└───┘","border"],["    ","none"],["│└───┘","border"],["    ","none"],["└───┘││","border"],["    ","none"],["└────────┘","border"]],
+        [["             ","none"],["│","border"],["         ","none"],["└──────────────┘│","border"]],
+        [["             ","none"],["└─────────────────────────┘","border"]]
+      ],
+      "width": 54,
+      "warnings": []
+    }
+  }
+]

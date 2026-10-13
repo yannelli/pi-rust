@@ -1,0 +1,300 @@
+[
+  {
+    "name": "basic",
+    "src": "erDiagram\n  CUSTOMER ||--o{ ORDER : places\n  ORDER ||--|{ LINE-ITEM : contains\n  CUSTOMER }|..|{ DELIVERY-ADDRESS : uses",
+    "kind": "er",
+    "art": {
+      "plain": [
+        "         ┌──────────┐",
+        "         │ CUSTOMER │",
+        "         └─────┬────┘",
+        "       ┌───────┴╌╌╌╌╌╌╌╌┐",
+        "       │1 places 0..*   ╎1..* uses 1..*",
+        "   ┌───────┐  ┌──────────────────┐",
+        "   │ ORDER │  │ DELIVERY-ADDRESS │",
+        "   └───┬───┘  └──────────────────┘",
+        "       │",
+        "       │1 contains 1..*",
+        " ┌───────────┐",
+        " │ LINE-ITEM │",
+        " └───────────┘"
+      ],
+      "styled": [
+        [["         ","none"],["┌──────────┐","border"]],
+        [["         ","none"],["│","border"],[" ","none"],["CUSTOMER","text"],[" ","none"],["│","border"]],
+        [["         ","none"],["└─────┬────┘","border"]],
+        [["       ","none"],["┌───────┴╌╌╌╌╌╌╌╌┐","edge"]],
+        [["       ","none"],["│","edge"],["1 places 0..*","edgeLabel"],["   ","none"],["╎","edge"],["1..* uses 1..*","edgeLabel"]],
+        [["   ","none"],["┌───────┐","border"],["  ","none"],["┌──────────────────┐","border"]],
+        [["   ","none"],["│","border"],[" ","none"],["ORDER","text"],[" ","none"],["│","border"],["  ","none"],["│","border"],[" ","none"],["DELIVERY-ADDRESS","text"],[" ","none"],["│","border"]],
+        [["   ","none"],["└───┬───┘","border"],["  ","none"],["└──────────────────┘","border"]],
+        [["       ","none"],["│","edge"]],
+        [["       ","none"],["│","edge"],["1 contains 1..*","edgeLabel"]],
+        [[" ","none"],["┌───────────┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["LINE-ITEM","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└───────────┘","border"]]
+      ],
+      "width": 39,
+      "warnings": []
+    }
+  },
+  {
+    "name": "attributes",
+    "src": "erDiagram\n  CUSTOMER {\n    string name PK \"the name\"\n    string custNumber\n    string sector\n  }\n  ORDER {\n    int orderNumber PK\n    string deliveryAddress FK\n  }\n  CUSTOMER ||--o{ ORDER : places",
+    "kind": "er",
+    "art": {
+      "plain": [
+        "     ┌───────────────────┐",
+        "     │     CUSTOMER      │",
+        "     ├───────────────────┤",
+        "     │ string name PK    │",
+        "     │ string custNumber │",
+        "     │ string sector     │",
+        "     └─────────┬─────────┘",
+        "               │",
+        "               │1 places 0..*",
+        " ┌───────────────────────────┐",
+        " │           ORDER           │",
+        " ├───────────────────────────┤",
+        " │ int orderNumber PK        │",
+        " │ string deliveryAddress FK │",
+        " └───────────────────────────┘"
+      ],
+      "styled": [
+        [["     ","none"],["┌───────────────────┐","border"]],
+        [["     ","none"],["│","border"],["     ","none"],["CUSTOMER","text"],["      ","none"],["│","border"]],
+        [["     ","none"],["├───────────────────┤","border"]],
+        [["     ","none"],["│","border"],[" ","none"],["string name PK","text"],["    ","none"],["│","border"]],
+        [["     ","none"],["│","border"],[" ","none"],["string custNumber","text"],[" ","none"],["│","border"]],
+        [["     ","none"],["│","border"],[" ","none"],["string sector","text"],["     ","none"],["│","border"]],
+        [["     ","none"],["└─────────┬─────────┘","border"]],
+        [["               ","none"],["│","edge"]],
+        [["               ","none"],["│","edge"],["1 places 0..*","edgeLabel"]],
+        [[" ","none"],["┌───────────────────────────┐","border"]],
+        [[" ","none"],["│","border"],["           ","none"],["ORDER","text"],["           ","none"],["│","border"]],
+        [[" ","none"],["├───────────────────────────┤","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["int orderNumber PK","text"],["        ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["string deliveryAddress FK","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└───────────────────────────┘","border"]]
+      ],
+      "width": 30,
+      "warnings": []
+    }
+  },
+  {
+    "name": "cardinalities_all",
+    "src": "erDiagram\n  A |o--o| B : zero-one\n  B ||--|| C : one\n  C }o--o{ D : many\n  D }|..|{ E : \"one or more\"\n  E |o..|{ F",
+    "kind": "er",
+    "art": {
+      "plain": [
+        " ┌───┐",
+        " │ A │",
+        " └─┬─┘",
+        "   │",
+        "   │0..1 zero-one 0..1",
+        " ┌───┐",
+        " │ B │",
+        " └─┬─┘",
+        "   │",
+        "   │1 one 1",
+        " ┌───┐",
+        " │ C │",
+        " └─┬─┘",
+        "   │",
+        "   │0..* many 0..*",
+        " ┌───┐",
+        " │ D │",
+        " └─┬─┘",
+        "   ╎",
+        "   ╎1..* one or more 1..*",
+        " ┌───┐",
+        " │ E │",
+        " └─┬─┘",
+        "   ╎",
+        "   ╎0..1 1..*",
+        " ┌───┐",
+        " │ F │",
+        " └───┘"
+      ],
+      "styled": [
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["│","edge"],["0..1 zero-one 0..1","edgeLabel"]],
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["│","edge"],["1 one 1","edgeLabel"]],
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["C","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["│","edge"],["0..* many 0..*","edgeLabel"]],
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["D","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["╎","edge"]],
+        [["   ","none"],["╎","edge"],["1..* one or more 1..*","edgeLabel"]],
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["E","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["╎","edge"]],
+        [["   ","none"],["╎","edge"],["0..1 1..*","edgeLabel"]],
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["F","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└───┘","border"]]
+      ],
+      "width": 25,
+      "warnings": []
+    }
+  },
+  {
+    "name": "alias",
+    "src": "erDiagram\n  p[Person] ||--o{ c[Car] : drives\n  p {\n    string name\n  }",
+    "kind": "er",
+    "art": {
+      "plain": [
+        " ┌─────────────┐",
+        " │   Person    │",
+        " ├─────────────┤",
+        " │ string name │",
+        " └──────┬──────┘",
+        "        │",
+        "        │1 drives 0..*",
+        "     ┌─────┐",
+        "     │ Car │",
+        "     └─────┘"
+      ],
+      "styled": [
+        [[" ","none"],["┌─────────────┐","border"]],
+        [[" ","none"],["│","border"],["   ","none"],["Person","text"],["    ","none"],["│","border"]],
+        [[" ","none"],["├─────────────┤","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["string name","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└──────┬──────┘","border"]],
+        [["        ","none"],["│","edge"]],
+        [["        ","none"],["│","edge"],["1 drives 0..*","edgeLabel"]],
+        [["     ","none"],["┌─────┐","border"]],
+        [["     ","none"],["│","border"],[" ","none"],["Car","text"],[" ","none"],["│","border"]],
+        [["     ","none"],["└─────┘","border"]]
+      ],
+      "width": 22,
+      "warnings": []
+    }
+  },
+  {
+    "name": "many_attrs",
+    "src": "erDiagram\n  T {\n    int a\n    int b\n    int c\n    int d\n    int e\n    int f\n    int g\n    int h\n    int i\n    int j\n  }",
+    "kind": "er",
+    "art": {
+      "plain": [
+        " ┌───────┐",
+        " │   T   │",
+        " ├───────┤",
+        " │ int a │",
+        " │ int b │",
+        " │ int c │",
+        " │ int d │",
+        " │ int e │",
+        " │ int f │",
+        " │ int g │",
+        " │ int h │",
+        " │ …     │",
+        " └───────┘"
+      ],
+      "styled": [
+        [[" ","none"],["┌───────┐","border"]],
+        [[" ","none"],["│","border"],["   ","none"],["T","text"],["   ","none"],["│","border"]],
+        [[" ","none"],["├───────┤","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["int a","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["int b","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["int c","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["int d","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["int e","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["int f","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["int g","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["int h","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["…","text"],["     ","none"],["│","border"]],
+        [[" ","none"],["└───────┘","border"]]
+      ],
+      "width": 10,
+      "warnings": []
+    }
+  },
+  {
+    "name": "entity_only",
+    "src": "erDiagram\n  LONELY",
+    "kind": "er",
+    "art": {
+      "plain": ["┌────────┐","│ LONELY │","└────────┘"],
+      "styled": [
+        [["┌────────┐","border"]],
+        [["│","border"],[" ","none"],["LONELY","text"],[" ","none"],["│","border"]],
+        [["└────────┘","border"]]
+      ],
+      "width": 10,
+      "warnings": []
+    }
+  },
+  {
+    "name": "final_line_retry",
+    "src": "erDiagram\n  A ||--o{ B : has\n  A ||--o{",
+    "kind": "er",
+    "art": {
+      "plain": [" ┌───┐"," │ A │"," └─┬─┘","   │","   │1 has 0..*"," ┌───┐"," │ B │"," └───┘"],
+      "styled": [
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["│","edge"],["1 has 0..*","edgeLabel"]],
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└───┘","border"]]
+      ],
+      "width": 14,
+      "warnings": ["dropped, unreadable final line: \"A ||--o{\""]
+    }
+  },
+  {"name":"bad_op","src":"erDiagram\n  A ||--x{ B : has","kind":"er","art":null},
+  {
+    "name": "lr_direction_ignored",
+    "src": "erDiagram\n  A ||--o{ B : has\n  B }o--|| C : in",
+    "kind": "er",
+    "art": {
+      "plain": [
+        " ┌───┐",
+        " │ A │",
+        " └─┬─┘",
+        "   │",
+        "   │1 has 0..*",
+        " ┌───┐",
+        " │ B │",
+        " └─┬─┘",
+        "   │",
+        "   │0..* in 1",
+        " ┌───┐",
+        " │ C │",
+        " └───┘"
+      ],
+      "styled": [
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["│","edge"],["1 has 0..*","edgeLabel"]],
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["│","edge"],["0..* in 1","edgeLabel"]],
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["C","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└───┘","border"]]
+      ],
+      "width": 14,
+      "warnings": []
+    }
+  }
+]

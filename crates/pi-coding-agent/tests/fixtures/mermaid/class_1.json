@@ -1,0 +1,472 @@
+[
+  {
+    "name": "basic",
+    "src": "classDiagram\n  Animal <|-- Duck\n  Animal <|-- Fish\n  Animal : +int age\n  Animal : +String gender\n  Animal: +isMammal()\n  Animal: +mate()\n  class Duck{\n    +String beakColor\n    +swim()\n    +quack()\n  }",
+    "kind": "class",
+    "art": {
+      "plain": [
+        "          ┌────────────────┐",
+        "          │     Animal     │",
+        "          ├────────────────┤",
+        "          │ +int age       │",
+        "          │ +String gender │",
+        "          ├────────────────┤",
+        "          │ +isMammal()    │",
+        "          │ +mate()        │",
+        "          └────────△───────┘",
+        "           ┌───────┴────────┐",
+        "           │                │",
+        " ┌───────────────────┐      │",
+        " │       Duck        │      │",
+        " ├───────────────────┤  ┌──────┐",
+        " │ +String beakColor │  │ Fish │",
+        " ├───────────────────┤  └──────┘",
+        " │ +swim()           │",
+        " │ +quack()          │",
+        " └───────────────────┘"
+      ],
+      "styled": [
+        [["          ","none"],["┌────────────────┐","border"]],
+        [["          ","none"],["│","border"],["     ","none"],["Animal","text"],["     ","none"],["│","border"]],
+        [["          ","none"],["├────────────────┤","border"]],
+        [["          ","none"],["│","border"],[" ","none"],["+int age","text"],["       ","none"],["│","border"]],
+        [["          ","none"],["│","border"],[" ","none"],["+String gender","text"],[" ","none"],["│","border"]],
+        [["          ","none"],["├────────────────┤","border"]],
+        [["          ","none"],["│","border"],[" ","none"],["+isMammal()","text"],["    ","none"],["│","border"]],
+        [["          ","none"],["│","border"],[" ","none"],["+mate()","text"],["        ","none"],["│","border"]],
+        [["          ","none"],["└────────","border"],["△","edge"],["───────┘","border"]],
+        [["           ","none"],["┌───────┴────────┐","edge"]],
+        [["           ","none"],["│","edge"],["                ","none"],["│","edge"]],
+        [[" ","none"],["┌───────────────────┐","border"],["      ","none"],["│","edge"]],
+        [[" ","none"],["│","border"],["       ","none"],["Duck","text"],["        ","none"],["│","border"],["      ","none"],["│","edge"]],
+        [[" ","none"],["├───────────────────┤","border"],["  ","none"],["┌──────┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["+String beakColor","text"],[" ","none"],["│","border"],["  ","none"],["│","border"],[" ","none"],["Fish","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["├───────────────────┤","border"],["  ","none"],["└──────┘","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["+swim()","text"],["           ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["+quack()","text"],["          ","none"],["│","border"]],
+        [[" ","none"],["└───────────────────┘","border"]]
+      ],
+      "width": 32,
+      "warnings": []
+    }
+  },
+  {
+    "name": "annotations_generics",
+    "src": "classDiagram\n  class Shape{\n    <<interface>>\n    +area() double\n  }\n  <<abstract>> Base\n  class Square~T~ {\n    +List~int~ sides\n    +Map~String, List~int~~ nested\n  }\n  Shape <|.. Square~T~\n  Base <|-- Shape",
+    "kind": "class",
+    "art": {
+      "plain": [
+        "          ┌────────────┐",
+        "          │ «abstract» │",
+        "          │    Base    │",
+        "          └──────△─────┘",
+        "                 │",
+        "                 │",
+        "        ┌────────────────┐",
+        "        │  «interface»   │",
+        "        │     Shape      │",
+        "        ├────────────────┤",
+        "        │ +area() double │",
+        "        └────────△───────┘",
+        "                 ╎",
+        "                 ╎",
+        "┌────────────────────────────────┐",
+        "│           Square<T>            │",
+        "├────────────────────────────────┤",
+        "│ +List<int> sides               │",
+        "│ +Map<String, List>int<> nested │",
+        "└────────────────────────────────┘"
+      ],
+      "styled": [
+        [["          ","none"],["┌────────────┐","border"]],
+        [["          ","none"],["│","border"],[" ","none"],["«abstract»","text"],[" ","none"],["│","border"]],
+        [["          ","none"],["│","border"],["    ","none"],["Base","text"],["    ","none"],["│","border"]],
+        [["          ","none"],["└──────","border"],["△","edge"],["─────┘","border"]],
+        [["                 ","none"],["│","edge"]],
+        [["                 ","none"],["│","edge"]],
+        [["        ","none"],["┌────────────────┐","border"]],
+        [["        ","none"],["│","border"],["  ","none"],["«interface»","text"],["   ","none"],["│","border"]],
+        [["        ","none"],["│","border"],["     ","none"],["Shape","text"],["      ","none"],["│","border"]],
+        [["        ","none"],["├────────────────┤","border"]],
+        [["        ","none"],["│","border"],[" ","none"],["+area() double","text"],[" ","none"],["│","border"]],
+        [["        ","none"],["└────────","border"],["△","edge"],["───────┘","border"]],
+        [["                 ","none"],["╎","edge"]],
+        [["                 ","none"],["╎","edge"]],
+        [["┌────────────────────────────────┐","border"]],
+        [["│","border"],["           ","none"],["Square<T>","text"],["            ","none"],["│","border"]],
+        [["├────────────────────────────────┤","border"]],
+        [["│","border"],[" ","none"],["+List<int> sides","text"],["               ","none"],["│","border"]],
+        [["│","border"],[" ","none"],["+Map<String, List>int<> nested","text"],[" ","none"],["│","border"]],
+        [["└────────────────────────────────┘","border"]]
+      ],
+      "width": 34,
+      "warnings": []
+    }
+  },
+  {
+    "name": "relations_all",
+    "src": "classDiagram\n  A1 <|-- B1\n  A2 --|> B2\n  A3 <|.. B3\n  A4 ..|> B4\n  A5 *-- B5\n  A6 --* B6\n  A7 o-- B7\n  A8 --o B8",
+    "kind": "class",
+    "art": {
+      "plain": [
+        "┌────┐   ┌────┐   ┌────┐   ┌────┐   ┌────┐   ┌────┐   ┌────┐   ┌────┐",
+        "│ A1 │   │ A2 │   │ A3 │   │ A4 │   │ A5 │   │ A6 │   │ A7 │   │ A8 │",
+        "└──△─┘   └──┬─┘   └──△─┘   └──┬─┘   └──◆─┘   └──┬─┘   └──◇─┘   └──┬─┘",
+        "   │        │        ╎        ╎        │        │        │        │",
+        "   │        ▽        ╎        ▽        │        ◆        │        ◇",
+        "┌────┐   ┌────┐   ┌────┐   ┌────┐   ┌────┐   ┌────┐   ┌────┐   ┌────┐",
+        "│ B1 │   │ B2 │   │ B3 │   │ B4 │   │ B5 │   │ B6 │   │ B7 │   │ B8 │",
+        "└────┘   └────┘   └────┘   └────┘   └────┘   └────┘   └────┘   └────┘"
+      ],
+      "styled": [
+        [["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"]],
+        [["│","border"],[" ","none"],["A1","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["A2","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["A3","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["A4","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["A5","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["A6","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["A7","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["A8","text"],[" ","none"],["│","border"]],
+        [["└──","border"],["△","edge"],["─┘","border"],["   ","none"],["└──┬─┘","border"],["   ","none"],["└──","border"],["△","edge"],["─┘","border"],["   ","none"],["└──┬─┘","border"],["   ","none"],["└──","border"],["◆","edge"],["─┘","border"],["   ","none"],["└──┬─┘","border"],["   ","none"],["└──","border"],["◇","edge"],["─┘","border"],["   ","none"],["└──┬─┘","border"]],
+        [["   ","none"],["│","edge"],["        ","none"],["│","edge"],["        ","none"],["╎","edge"],["        ","none"],["╎","edge"],["        ","none"],["│","edge"],["        ","none"],["│","edge"],["        ","none"],["│","edge"],["        ","none"],["│","edge"]],
+        [["   ","none"],["│","edge"],["        ","none"],["▽","edge"],["        ","none"],["╎","edge"],["        ","none"],["▽","edge"],["        ","none"],["│","edge"],["        ","none"],["◆","edge"],["        ","none"],["│","edge"],["        ","none"],["◇","edge"]],
+        [["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"]],
+        [["│","border"],[" ","none"],["B1","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["B2","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["B3","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["B4","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["B5","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["B6","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["B7","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["B8","text"],[" ","none"],["│","border"]],
+        [["└────┘","border"],["   ","none"],["└────┘","border"],["   ","none"],["└────┘","border"],["   ","none"],["└────┘","border"],["   ","none"],["└────┘","border"],["   ","none"],["└────┘","border"],["   ","none"],["└────┘","border"],["   ","none"],["└────┘","border"]]
+      ],
+      "width": 69,
+      "warnings": []
+    }
+  },
+  {
+    "name": "relations_more",
+    "src": "classDiagram\n  C1 <-- D1\n  C2 --> D2\n  C3 <.. D3\n  C4 ..> D4\n  C5 -- D5\n  C6 .. D6",
+    "kind": "class",
+    "art": {
+      "plain": [
+        "┌────┐   ┌────┐   ┌────┐   ┌────┐   ┌────┐   ┌────┐",
+        "│ C1 │   │ C2 │   │ C3 │   │ C4 │   │ C5 │   │ C6 │",
+        "└──▲─┘   └──┬─┘   └──▲─┘   └──┬─┘   └──┬─┘   └──┬─┘",
+        "   │        │        ╎        ╎        │        ╎",
+        "   │        ▼        ╎        ▼        │        ╎",
+        "┌────┐   ┌────┐   ┌────┐   ┌────┐   ┌────┐   ┌────┐",
+        "│ D1 │   │ D2 │   │ D3 │   │ D4 │   │ D5 │   │ D6 │",
+        "└────┘   └────┘   └────┘   └────┘   └────┘   └────┘"
+      ],
+      "styled": [
+        [["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"]],
+        [["│","border"],[" ","none"],["C1","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["C2","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["C3","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["C4","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["C5","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["C6","text"],[" ","none"],["│","border"]],
+        [["└──","border"],["▲","edge"],["─┘","border"],["   ","none"],["└──┬─┘","border"],["   ","none"],["└──","border"],["▲","edge"],["─┘","border"],["   ","none"],["└──┬─┘","border"],["   ","none"],["└──┬─┘","border"],["   ","none"],["└──┬─┘","border"]],
+        [["   ","none"],["│","edge"],["        ","none"],["│","edge"],["        ","none"],["╎","edge"],["        ","none"],["╎","edge"],["        ","none"],["│","edge"],["        ","none"],["╎","edge"]],
+        [["   ","none"],["│","edge"],["        ","none"],["▼","edge"],["        ","none"],["╎","edge"],["        ","none"],["▼","edge"],["        ","none"],["│","edge"],["        ","none"],["╎","edge"]],
+        [["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"],["   ","none"],["┌────┐","border"]],
+        [["│","border"],[" ","none"],["D1","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["D2","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["D3","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["D4","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["D5","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["D6","text"],[" ","none"],["│","border"]],
+        [["└────┘","border"],["   ","none"],["└────┘","border"],["   ","none"],["└────┘","border"],["   ","none"],["└────┘","border"],["   ","none"],["└────┘","border"],["   ","none"],["└────┘","border"]]
+      ],
+      "width": 51,
+      "warnings": []
+    }
+  },
+  {
+    "name": "cardinalities",
+    "src": "classDiagram\n  Customer \"1\" --> \"*\" Ticket : buys\n  Student \"0..*\" -- \"1..*\" Course\n  Galaxy --> \"many\" Star\n  Car \"1\" *-- Wheel : has",
+    "kind": "class",
+    "art": null
+  },
+  {
+    "name": "many_members",
+    "src": "classDiagram\n  class Big {\n    +a1\n    +a2\n    +a3\n    +a4\n    +a5\n    +a6\n    +a7\n    +a8\n    +a9\n    +a10\n    +m1()\n    +m2()\n  }",
+    "kind": "class",
+    "art": {
+      "plain": [
+        " ┌───────┐",
+        " │  Big  │",
+        " ├───────┤",
+        " │ +a1   │",
+        " │ +a2   │",
+        " │ +a3   │",
+        " │ +a4   │",
+        " │ +a5   │",
+        " │ +a6   │",
+        " │ +a7   │",
+        " │ +a8   │",
+        " │ …     │",
+        " ├───────┤",
+        " │ +m1() │",
+        " │ +m2() │",
+        " └───────┘"
+      ],
+      "styled": [
+        [[" ","none"],["┌───────┐","border"]],
+        [[" ","none"],["│","border"],["  ","none"],["Big","text"],["  ","none"],["│","border"]],
+        [[" ","none"],["├───────┤","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["+a1","text"],["   ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["+a2","text"],["   ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["+a3","text"],["   ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["+a4","text"],["   ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["+a5","text"],["   ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["+a6","text"],["   ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["+a7","text"],["   ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["+a8","text"],["   ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["…","text"],["     ","none"],["│","border"]],
+        [[" ","none"],["├───────┤","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["+m1()","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["+m2()","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└───────┘","border"]]
+      ],
+      "width": 10,
+      "warnings": []
+    }
+  },
+  {
+    "name": "direction_lr",
+    "src": "classDiagram\n  direction LR\n  Vehicle <|-- Car\n  Vehicle <|-- Bike\n  Car *-- Engine",
+    "kind": "class",
+    "art": {
+      "plain": [
+        "               ┌─────┐     ┌────────┐",
+        "           ┌───│ Car ◆─────│ Engine │",
+        "┌─────────┐│   └─────┘     └────────┘",
+        "│ Vehicle ◁┤",
+        "└─────────┘│   ┌──────┐",
+        "           └───│ Bike │",
+        "               └──────┘"
+      ],
+      "styled": [
+        [["               ","none"],["┌─────┐","border"],["     ","none"],["┌────────┐","border"]],
+        [["           ","none"],["┌───","edge"],["│","border"],[" ","none"],["Car","text"],[" ","none"],["◆─────","edge"],["│","border"],[" ","none"],["Engine","text"],[" ","none"],["│","border"]],
+        [["┌─────────┐","border"],["│","edge"],["   ","none"],["└─────┘","border"],["     ","none"],["└────────┘","border"]],
+        [["│","border"],[" ","none"],["Vehicle","text"],[" ","none"],["◁┤","edge"]],
+        [["└─────────┘","border"],["│","edge"],["   ","none"],["┌──────┐","border"]],
+        [["           ","none"],["└───","edge"],["│","border"],[" ","none"],["Bike","text"],[" ","none"],["│","border"]],
+        [["               ","none"],["└──────┘","border"]]
+      ],
+      "width": 37,
+      "warnings": []
+    }
+  },
+  {
+    "name": "ignored",
+    "src": "classDiagram\n  note \"a note\"\n  namespace Shapes {\n  class Triangle\n  }\n  link Triangle \"http://x\"\n  click Triangle call cb()\n  style Triangle fill:#f9f\n  cssClass \"Triangle\" styleClass\n  Triangle --> Circle",
+    "kind": "class",
+    "art": {
+      "plain": [
+        "┌──────────┐",
+        "│ Triangle │",
+        "└─────┬────┘",
+        "      │",
+        "      ▼",
+        " ┌────────┐",
+        " │ Circle │",
+        " └────────┘"
+      ],
+      "styled": [
+        [["┌──────────┐","border"]],
+        [["│","border"],[" ","none"],["Triangle","text"],[" ","none"],["│","border"]],
+        [["└─────┬────┘","border"]],
+        [["      ","none"],["│","edge"]],
+        [["      ","none"],["▼","edge"]],
+        [[" ","none"],["┌────────┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["Circle","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└────────┘","border"]]
+      ],
+      "width": 12,
+      "warnings": []
+    }
+  },
+  {
+    "name": "style_tags",
+    "src": "classDiagram\n  class Foo:::alert\n  Foo:::alert --> Bar\n  Bar : +field",
+    "kind": "class",
+    "art": {
+      "plain": [
+        "  ┌─────┐",
+        "  │ Foo │",
+        "  └──┬──┘",
+        "     │",
+        "     ▼",
+        "┌────────┐",
+        "│  Bar   │",
+        "├────────┤",
+        "│ +field │",
+        "└────────┘"
+      ],
+      "styled": [
+        [["  ","none"],["┌─────┐","border"]],
+        [["  ","none"],["│","border"],[" ","none"],["Foo","text"],[" ","none"],["│","border"]],
+        [["  ","none"],["└──┬──┘","border"]],
+        [["     ","none"],["│","edge"]],
+        [["     ","none"],["▼","edge"]],
+        [["┌────────┐","border"]],
+        [["│","border"],["  ","none"],["Bar","text"],["   ","none"],["│","border"]],
+        [["├────────┤","border"]],
+        [["│","border"],[" ","none"],["+field","text"],[" ","none"],["│","border"]],
+        [["└────────┘","border"]]
+      ],
+      "width": 10,
+      "warnings": []
+    }
+  },
+  {
+    "name": "glued_o",
+    "src": "classDiagram\n  Foo o-- Bar\n  Moo --> Zoo\n  Too --o Boo",
+    "kind": "class",
+    "art": {
+      "plain": [
+        " ┌─────┐   ┌─────┐   ┌─────┐",
+        " │ Foo │   │ Moo │   │ Too │",
+        " └──◇──┘   └──┬──┘   └──┬──┘",
+        "    │         │         │",
+        "    │         ▼         ◇",
+        " ┌─────┐   ┌─────┐   ┌─────┐",
+        " │ Bar │   │ Zoo │   │ Boo │",
+        " └─────┘   └─────┘   └─────┘"
+      ],
+      "styled": [
+        [[" ","none"],["┌─────┐","border"],["   ","none"],["┌─────┐","border"],["   ","none"],["┌─────┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["Foo","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["Moo","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["Too","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└──","border"],["◇","edge"],["──┘","border"],["   ","none"],["└──┬──┘","border"],["   ","none"],["└──┬──┘","border"]],
+        [["    ","none"],["│","edge"],["         ","none"],["│","edge"],["         ","none"],["│","edge"]],
+        [["    ","none"],["│","edge"],["         ","none"],["▼","edge"],["         ","none"],["◇","edge"]],
+        [[" ","none"],["┌─────┐","border"],["   ","none"],["┌─────┐","border"],["   ","none"],["┌─────┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["Bar","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["Zoo","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["Boo","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─────┘","border"],["   ","none"],["└─────┘","border"],["   ","none"],["└─────┘","border"]]
+      ],
+      "width": 28,
+      "warnings": []
+    }
+  },
+  {
+    "name": "entities_members",
+    "src": "classDiagram\n  class A\n  A : +List&lt;int&gt; items\n  A : +get() &amp; more",
+    "kind": "class",
+    "art": null
+  },
+  {
+    "name": "final_line_retry",
+    "src": "classDiagram\n  A <|-- B\n  this is not valid",
+    "kind": "class",
+    "art": {
+      "plain": [" ┌───┐"," │ A │"," └─△─┘","   │","   │"," ┌───┐"," │ B │"," └───┘"],
+      "styled": [
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─","border"],["△","edge"],["─┘","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["│","edge"]],
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└───┘","border"]]
+      ],
+      "width": 6,
+      "warnings": ["dropped, unreadable final line: \"this is not valid\""]
+    }
+  },
+  {"name":"invalid_mid","src":"classDiagram\n  this is not valid\n  A <|-- B","kind":"class","art":null},
+  {
+    "name": "self_relation",
+    "src": "classDiagram\n  Node --> Node : next\n  Node : +value",
+    "kind": "class",
+    "art": {
+      "plain": [
+        "       ┌────────┐",
+        "       │  Node  │",
+        "       ├────────┤",
+        "       │ +value │",
+        "       └─────┬──┘",
+        "             │ ▲  next",
+        "             ╰─╯"
+      ],
+      "styled": [
+        [["       ","none"],["┌────────┐","border"]],
+        [["       ","none"],["│","border"],["  ","none"],["Node","text"],["  ","none"],["│","border"]],
+        [["       ","none"],["├────────┤","border"]],
+        [["       ","none"],["│","border"],[" ","none"],["+value","text"],[" ","none"],["│","border"]],
+        [["       ","none"],["└─────┬──┘","border"]],
+        [["             ","none"],["│","edge"],[" ","none"],["▲","edge"],["  ","none"],["next","edgeLabel"]],
+        [["             ","none"],["╰─╯","edge"]]
+      ],
+      "width": 22,
+      "warnings": []
+    }
+  },
+  {
+    "name": "cardinalities_ok",
+    "src": "classDiagram\n  Customer \"1\" --> \"*\" Ticket : buys\n  Galaxy --> \"many\" Star\n  Car \"1\" *-- \"4\" Wheel : has",
+    "kind": "class",
+    "art": {
+      "plain": [
+        "┌──────────┐   ┌────────┐    ┌─────┐",
+        "│ Customer │   │ Galaxy │    │ Car │",
+        "└─────┬────┘   └────┬───┘    └──◆──┘",
+        "      │             │           │",
+        "      ▼1 buys *     ▼many       │1 has 4",
+        " ┌────────┐     ┌──────┐    ┌───────┐",
+        " │ Ticket │     │ Star │    │ Wheel │",
+        " └────────┘     └──────┘    └───────┘"
+      ],
+      "styled": [
+        [["┌──────────┐","border"],["   ","none"],["┌────────┐","border"],["    ","none"],["┌─────┐","border"]],
+        [["│","border"],[" ","none"],["Customer","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["Galaxy","text"],[" ","none"],["│","border"],["    ","none"],["│","border"],[" ","none"],["Car","text"],[" ","none"],["│","border"]],
+        [["└─────┬────┘","border"],["   ","none"],["└────┬───┘","border"],["    ","none"],["└──","border"],["◆","edge"],["──┘","border"]],
+        [["      ","none"],["│","edge"],["             ","none"],["│","edge"],["           ","none"],["│","edge"]],
+        [["      ","none"],["▼","edge"],["1 buys *","edgeLabel"],["     ","none"],["▼","edge"],["many","edgeLabel"],["       ","none"],["│","edge"],["1 has 4","edgeLabel"]],
+        [[" ","none"],["┌────────┐","border"],["     ","none"],["┌──────┐","border"],["    ","none"],["┌───────┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["Ticket","text"],[" ","none"],["│","border"],["     ","none"],["│","border"],[" ","none"],["Star","text"],[" ","none"],["│","border"],["    ","none"],["│","border"],[" ","none"],["Wheel","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└────────┘","border"],["     ","none"],["└──────┘","border"],["    ","none"],["└───────┘","border"]]
+      ],
+      "width": 40,
+      "warnings": []
+    }
+  },
+  {
+    "name": "entities_quoted",
+    "src": "classDiagram\n  class A\n  A : +items \"&lt;int&gt;\"\n  A --> B : \"x &amp; y\"",
+    "kind": "class",
+    "art": {
+      "plain": [
+        "┌────────────────┐",
+        "│       A        │",
+        "├────────────────┤",
+        "│ +items \"<int>\" │",
+        "└────────┬───────┘",
+        "         │",
+        "         ▼\"x & y\"",
+        "       ┌───┐",
+        "       │ B │",
+        "       └───┘"
+      ],
+      "styled": [
+        [["┌────────────────┐","border"]],
+        [["│","border"],["       ","none"],["A","text"],["        ","none"],["│","border"]],
+        [["├────────────────┤","border"]],
+        [["│","border"],[" ","none"],["+items \"<int>\"","text"],[" ","none"],["│","border"]],
+        [["└────────┬───────┘","border"]],
+        [["         ","none"],["│","edge"]],
+        [["         ","none"],["▼","edge"],["\"x & y\"","edgeLabel"]],
+        [["       ","none"],["┌───┐","border"]],
+        [["       ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [["       ","none"],["└───┘","border"]]
+      ],
+      "width": 18,
+      "warnings": []
+    }
+  },
+  {
+    "name": "rl_direction",
+    "src": "classDiagram\n  direction RL\n  Left <|-- Right : extends\n  Right : +field",
+    "kind": "class",
+    "art": {
+      "plain": [
+        "┌────────┐",
+        "│  Right │  extends ┌──────┐",
+        "├────────┤──────────▷ Left │",
+        "│ +field │          └──────┘",
+        "└────────┘"
+      ],
+      "styled": [
+        [["┌────────┐","border"]],
+        [["│","border"],["  ","none"],["Right","text"],[" ","none"],["│","border"],["  ","none"],["extends","edgeLabel"],[" ","none"],["┌──────┐","border"]],
+        [["├────────┤","border"],["──────────▷","edge"],[" ","none"],["Left","text"],[" ","none"],["│","border"]],
+        [["│","border"],[" ","none"],["+field","text"],[" ","none"],["│","border"],["          ","none"],["└──────┘","border"]],
+        [["└────────┘","border"]]
+      ],
+      "width": 28,
+      "warnings": []
+    }
+  }
+]
