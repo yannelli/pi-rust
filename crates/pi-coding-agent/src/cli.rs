@@ -18,6 +18,8 @@ pub enum OutputMode {
     Json,
     /// JSON-RPC over stdin and stdout; the protocol belongs to the machine-interface stream.
     Rpc,
+    /// Agent Client Protocol over stdin and stdout, for editors such as Zed.
+    Acp,
 }
 
 /// Value of an unknown `--flag`: `--flag=value` or `--flag value`, or `true` without one.
@@ -31,8 +33,10 @@ pub enum FlagValue {
 pub struct Args {
     pub help: bool,
     pub version: bool,
-    /// `--mode text|json|rpc`; `json` and `rpc` imply non-interactive output.
+    /// `--mode text|json|rpc|acp`; `json`, `rpc`, and `acp` imply non-interactive output.
     pub mode: Option<OutputMode>,
+    /// `--terminal-login`: ACP Terminal Auth relaunches pi interactively with this flag.
+    pub terminal_login: bool,
     pub print: bool,
     pub continue_session: bool,
     pub resume: bool,
@@ -149,9 +153,13 @@ pub fn parse_args(raw: &[String]) -> Args {
                 Some("text") => args.mode = Some(OutputMode::Text),
                 Some("json") => args.mode = Some(OutputMode::Json),
                 Some("rpc") => args.mode = Some(OutputMode::Rpc),
-                Some(other) => args.errors.push(format!("Invalid mode \"{other}\". Valid values: text, json, rpc")),
-                None => args.errors.push("--mode requires text, json, or rpc".into()),
+                Some("acp") => args.mode = Some(OutputMode::Acp),
+                Some(other) => {
+                    args.errors.push(format!("Invalid mode \"{other}\". Valid values: text, json, rpc, acp"))
+                }
+                None => args.errors.push("--mode requires text, json, rpc, or acp".into()),
             },
+            "--terminal-login" => args.terminal_login = true,
             "-c" | "--continue" => args.continue_session = true,
             "-r" | "--resume" => args.resume = true,
             "--provider" => args.provider = value(&mut index, arg, &mut args.errors),
