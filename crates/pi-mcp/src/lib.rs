@@ -14,6 +14,7 @@ pub mod manager;
 pub mod naming;
 pub mod oauth;
 pub mod output;
+pub mod registered;
 pub mod resources;
 pub mod runtime;
 pub mod section;
@@ -32,9 +33,12 @@ pub use content::{CallToolResult, ContentBlock, to_llm_content};
 pub use error::{McpError, OAuthError};
 pub use jsonrpc::{JsonRpcErrorObject, JsonRpcId, JsonRpcMessage};
 pub use log::McpServerLog;
-pub use manager::{McpAgentTool, McpManager, McpManagerOptions, McpServerStatus, NotifyLevel};
+pub use manager::{
+    McpAgentTool, McpConnectionId, McpManager, McpManagerOptions, McpServerStatus, McpSubscription, NotifyLevel,
+};
 pub use naming::create_mcp_tool_name;
 pub use output::{McpToolDetails, McpToolOutput, convert_mcp_result};
+pub use registered::{McpServerRegistry, RegisteredMcpServer};
 pub use resources::{McpResourceServer, McpResourceTool, create_mcp_resource_tools};
 pub use section::{MCP_SERVERS_SECTION, McpServerListing, render_servers_section};
 pub use tools::{McpTool, McpToolOptions, ToolAnnotations, ToolExposure, ToolNamespace, to_tool_exposure};

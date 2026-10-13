@@ -31,7 +31,7 @@ pub async fn show_menu(view: &View, build: McpMenuBuilder, live: bool) -> Option
 /// while servers change; `open_browser` opens sign-in pages.
 pub async fn run_mcp_manager(view: &View, servers: Rc<dyn McpServers>, open_browser: BrowserOpenFn) {
     let (changed, mut changes) = mpsc::unbounded_channel::<()>();
-    servers.subscribe(Box::new(move || {
+    let subscription = servers.subscribe(Box::new(move || {
         let _ = changed.send(());
     }));
     let weak = Rc::downgrade(view);
@@ -52,14 +52,25 @@ pub async fn run_mcp_manager(view: &View, servers: Rc<dyn McpServers>, open_brow
         }
     }
     rebuilds.abort();
+    if let Some(subscription) = subscription {
+        servers.unsubscribe(subscription);
+    }
 }
 
-/// Runs `operation` without blocking the menu, then shows its message with the server.
+/// Runs `operation` without blocking the menu, then shows its message with the server unless
+/// the connection it started for was disabled or replaced meanwhile (upstream `runInBackground`).
 fn in_background(servers: &Rc<dyn McpServers>, name: &str, operation: impl Future<Output = Option<String>> + 'static) {
     let (servers, name) = (servers.clone(), name.to_string());
     tokio::task::spawn_local(async move {
-        let message = operation.await;
-        servers.set_message(&name, message);
+        let mut operation = std::pin::pin!(operation);
+        // The first poll starts the action, which may start a connection, before its id is read.
+        let first = futures::poll!(operation.as_mut());
+        let id = servers.connection_id(&name);
+        let message = match first {
+            std::task::Poll::Ready(message) => message,
+            std::task::Poll::Pending => operation.await,
+        };
+        servers.set_message_if_current(&name, id, message);
     });
 }
 
@@ -115,11 +126,11 @@ struct ViewSignInPrompt {
 
 #[async_trait]
 impl McpSignInPrompt for ViewSignInPrompt {
-    fn show_authorization_url(&self, url: &Url) {
+    fn show_authorization_url(&self, _server: &str, url: &Url) {
         let _ = self.sender.send(PromptRequest::ShowUrl(url.to_string()));
     }
 
-    async fn prompt_for_redirect_url(&self, cancel: CancellationToken) -> Option<String> {
+    async fn prompt_for_redirect_url(&self, _server: &str, cancel: CancellationToken) -> Option<String> {
         let (reply, receiver) = oneshot::channel();
         self.sender.send(PromptRequest::Redirect(cancel, reply)).ok()?;
         receiver.await.ok().flatten()

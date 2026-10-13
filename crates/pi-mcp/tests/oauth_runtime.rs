@@ -22,6 +22,7 @@ use url::Url;
 
 async fn sign_in(server: &OAuthMcpServer, store: Arc<McpOAuthServerStore>) {
     sign_in_mcp_server(SignInOptions {
+        server_name: "test".into(),
         server_url: Url::parse(&server.url).unwrap(),
         store,
         settings: McpOAuthSettings::default(),

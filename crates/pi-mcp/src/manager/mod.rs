@@ -3,11 +3,13 @@
 //! reported once through `notify`.
 
 mod actions;
+mod registered;
 mod registry;
 mod status;
 mod waits;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -18,11 +20,13 @@ use tokio_util::sync::CancellationToken;
 use crate::config::{LoadedMcpConfig, McpServerConfigPatch, McpServerEntry, update_mcp_server_config};
 use crate::log::McpServerLog;
 use crate::oauth::{CallbackServerFactory, LoopbackCallbackFactory};
+use crate::registered::McpServerRegistry;
 use crate::runtime::{
     ConnectionOptions, McpOAuthCredentialStore, McpServerConnection, ProviderTokenFn, ServerState, TransportFactory,
     default_transport_factory,
 };
 
+pub use actions::McpConnectionId;
 pub use registry::McpAgentTool;
 pub use status::{McpServerStatus, describe_state};
 pub use waits::{STILL_CONNECTING_MESSAGE, script_needs_server};
@@ -42,6 +46,14 @@ pub type NotifyFn = Arc<dyn Fn(&str, NotifyLevel) + Send + Sync>;
 /// Saves a change to the server's config file: its project override when set, else its source.
 pub type UpdateConfigFn = Arc<dyn Fn(&McpServerEntry, &McpServerConfigPatch) -> Result<(), String> + Send + Sync>;
 type Ready = Shared<BoxFuture<'static, ()>>;
+type Listener = Arc<dyn Fn() + Send + Sync>;
+
+/// Subscription ids are unique across managers, so a stale id never removes another listener.
+static NEXT_SUBSCRIPTION: AtomicU64 = AtomicU64::new(1);
+
+/// A listener added with [`McpManager::subscribe`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct McpSubscription(pub u64);
 
 pub struct McpManagerOptions {
     /// Where `mcp.json`, `mcp-auth.json`, and `mcp.log` live.
@@ -61,6 +73,10 @@ pub struct McpManagerOptions {
     /// Receives OAuth redirects during sign-in. Default: the loopback callback server.
     pub callback_factory: Arc<dyn CallbackServerFactory>,
     pub client_version: String,
+    /// Servers extensions register; they connect next to the configured ones while registered.
+    pub registry: Option<McpServerRegistry>,
+    /// Called after registered servers were added or removed, for example to activate codemode.
+    pub on_registered_change: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl McpManagerOptions {
@@ -76,6 +92,8 @@ impl McpManagerOptions {
             notify: None,
             callback_factory: Arc::new(LoopbackCallbackFactory),
             client_version: env!("CARGO_PKG_VERSION").into(),
+            registry: None,
+            on_registered_change: None,
         }
     }
 }
@@ -93,9 +111,28 @@ struct Server {
     closing: Option<Ready>,
     /// Result of the last action that failed.
     message: Option<String>,
+    /// For servers extensions registered: the config as registered, to notice registering again.
+    registered_config: Option<String>,
 }
 
 impl Server {
+    fn new(id: u64, entry: McpServerEntry, registered_config: Option<String>) -> Self {
+        Self {
+            id,
+            entry,
+            connection: None,
+            attempt: None,
+            ready: None,
+            closing: None,
+            message: None,
+            registered_config,
+        }
+    }
+
+    fn registered(&self) -> bool {
+        self.registered_config.is_some()
+    }
+
     fn enabled(&self) -> bool {
         self.entry.config.is_enabled()
     }
@@ -108,6 +145,11 @@ struct State {
     servers: Vec<Server>,
     next_id: u64,
     config_errors: Vec<String>,
+    /// Name and source of the servers from `mcp.json`, which take precedence over registered ones.
+    configured: Vec<(String, String)>,
+    /// Registered servers that `mcp.json` overrides.
+    overridden: Vec<String>,
+    registry_listener: Option<u64>,
     project_config: Option<PathBuf>,
     auto_enable_codemode: bool,
     warned_unreachable: bool,
@@ -137,7 +179,7 @@ pub(crate) struct Inner {
     credentials: McpOAuthCredentialStore,
     log: Arc<McpServerLog>,
     state: Mutex<State>,
-    listeners: Mutex<Vec<Arc<dyn Fn() + Send + Sync>>>,
+    listeners: Mutex<Vec<(McpSubscription, Listener)>>,
     /// Sign-ins and other actions that outlive their caller; shutdown waits for them.
     background: Mutex<Vec<Ready>>,
 }
@@ -161,6 +203,9 @@ impl McpManager {
             servers: Vec::new(),
             next_id: 0,
             config_errors: Vec::new(),
+            configured: Vec::new(),
+            overridden: Vec::new(),
+            registry_listener: None,
             project_config: None,
             auto_enable_codemode: true,
             warned_unreachable: false,
@@ -180,9 +225,19 @@ impl McpManager {
         Self { inner: Arc::new(inner) }
     }
 
-    /// Called whenever servers, their states, or the tools change.
-    pub fn subscribe(&self, listener: impl Fn() + Send + Sync + 'static) {
-        self.inner.listeners.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(Arc::new(listener));
+    /// Called whenever servers, their states, or the tools change, until `unsubscribe`.
+    pub fn subscribe(&self, listener: impl Fn() + Send + Sync + 'static) -> McpSubscription {
+        let id = McpSubscription(NEXT_SUBSCRIPTION.fetch_add(1, Ordering::Relaxed));
+        self.inner.listeners.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push((id, Arc::new(listener)));
+        id
+    }
+
+    /// Stop calling a listener. Returns false when it was not subscribed to this manager.
+    pub fn unsubscribe(&self, subscription: McpSubscription) -> bool {
+        let mut listeners = self.inner.listeners.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let before = listeners.len();
+        listeners.retain(|(id, _)| *id != subscription);
+        listeners.len() != before
     }
 
     pub fn credentials(&self) -> &McpOAuthCredentialStore {
@@ -200,22 +255,20 @@ impl McpManager {
             state.auto_enable_codemode = loaded.auto_enable_codemode.unwrap_or(true);
             state.warned_unreachable = false;
             state.waited_for_startup = false;
-            let first = state.next_id;
-            state.next_id += loaded.servers.len() as u64;
-            let servers = loaded.servers.into_iter().zip(first..);
-            state.servers = servers
-                .map(|(entry, id)| Server {
-                    id,
-                    entry,
-                    connection: None,
-                    attempt: None,
-                    ready: None,
-                    closing: None,
-                    message: None,
-                })
-                .collect();
+            state.configured = loaded.servers.iter().map(|entry| (entry.name.clone(), entry.source.clone())).collect();
+            let (registered, overridden) = self.inner.registered_for_start(&state.configured);
+            state.overridden = overridden;
+            let configured = loaded.servers.into_iter().map(|entry| (entry, None));
+            let all = configured.chain(registered.into_iter().map(|(entry, config)| (entry, Some(config))));
+            let mut servers = Vec::new();
+            for (entry, registered_config) in all {
+                state.next_id += 1;
+                servers.push(Server::new(state.next_id, entry, registered_config));
+            }
+            state.servers = servers;
             state.servers.iter().filter(|server| server.enabled()).map(|server| server.id).collect()
         };
+        self.inner.watch_registry();
         self.inner.emit_change();
         if enabled.is_empty() {
             self.inner.report_problems(None);
@@ -245,6 +298,7 @@ impl McpManager {
 
     /// Stop the session: close every connection and wait for running sign-ins and actions.
     pub async fn shutdown(&self) {
+        self.inner.unwatch_registry();
         let connections: Vec<McpServerConnection> = {
             let mut state = self.inner.lock();
             state.session.cancel();
@@ -274,7 +328,7 @@ impl Inner {
 
     fn emit_change(&self) {
         let listeners = self.listeners.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
-        for listener in listeners {
+        for (_, listener) in listeners {
             listener();
         }
     }

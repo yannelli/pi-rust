@@ -34,17 +34,18 @@ struct RpcMcpSignIn {
 
 #[async_trait]
 impl McpSignInPrompt for RpcMcpSignIn {
-    fn show_authorization_url(&self, url: &Url) {
-        let message = format!("Sign in to the MCP server in your browser:\n{url}");
+    fn show_authorization_url(&self, server: &str, url: &Url) {
+        let message = format!("Sign in to MCP server \"{server}\" in your browser:\n{url}");
         self.ui.notify(&message, Some(NotifyType::Info));
         pi_ai::auth::oauth::open_browser(url.as_str());
     }
 
-    async fn prompt_for_redirect_url(&self, cancel: CancellationToken) -> Option<String> {
-        let title =
-            "Waiting for sign-in. If the browser cannot reach this machine, paste the URL it was redirected to.";
+    async fn prompt_for_redirect_url(&self, server: &str, cancel: CancellationToken) -> Option<String> {
+        let title = format!(
+            "Waiting for sign-in to \"{server}\". If the browser cannot reach this machine, paste the URL it was redirected to."
+        );
         let options = DialogOptions { timeout: None, cancel: Some(cancel) };
-        self.ui.input(title, Some("http://127.0.0.1:.../callback?code=..."), options).await
+        self.ui.input(&title, Some("http://127.0.0.1:.../callback?code=..."), options).await
     }
 }
 

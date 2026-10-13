@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use pi_mcp::config::get_mcp_tool_exposure;
 use pi_mcp::manager::describe_state;
 use pi_mcp::runtime::{McpSignInPrompt, ServerState};
-use pi_mcp::{McpConfigScope, McpExposure, McpManager, McpServerStatus, Tool};
+use pi_mcp::{McpConfigScope, McpConnectionId, McpExposure, McpManager, McpServerStatus, McpSubscription, Tool};
 use pi_tui::components::SelectItem;
 use tokio_util::sync::CancellationToken;
 
@@ -32,14 +32,29 @@ pub trait McpServers {
         self.statuses().into_iter().find(|status| status.entry.name == name)
     }
     fn config_errors(&self) -> Vec<String>;
+    /// Shown above the servers: config errors and registered servers `mcp.json` overrides.
+    fn notices(&self) -> Vec<String> {
+        self.config_errors().iter().map(|error| format!("config: {error}")).collect()
+    }
     /// The tools a connected server offers.
     fn tools(&self, name: &str) -> Vec<Tool>;
     /// Whether a global server can be turned on or off for the trusted project alone.
     fn can_save_in_project(&self, name: &str) -> bool;
     /// Shown when no servers are configured.
     fn empty_message(&self) -> String;
-    /// Called whenever servers, their states, or their tools change.
-    fn subscribe(&self, listener: Box<dyn Fn() + Send + Sync>);
+    /// Called whenever servers, their states, or their tools change, until `unsubscribe`.
+    fn subscribe(&self, listener: Box<dyn Fn() + Send + Sync>) -> Option<McpSubscription>;
+    fn unsubscribe(&self, _subscription: McpSubscription) {}
+    /// The server's current connection try, which changes when it is disabled or replaced.
+    fn connection_id(&self, _name: &str) -> Option<McpConnectionId> {
+        None
+    }
+    /// Shows the result of an action started for connection `id`, unless it is stale now.
+    fn set_message_if_current(&self, name: &str, id: Option<McpConnectionId>, message: Option<String>) {
+        if self.connection_id(name) == id {
+            self.set_message(name, message);
+        }
+    }
     async fn sign_in(&self, name: &str, prompt: Arc<dyn McpSignInPrompt>, cancel: CancellationToken) -> Option<String>;
     /// Whether stored credentials were deleted.
     async fn sign_out(&self, name: &str) -> bool;
@@ -64,6 +79,10 @@ impl McpServers for McpManager {
         McpManager::config_errors(self)
     }
 
+    fn notices(&self) -> Vec<String> {
+        McpManager::notices(self)
+    }
+
     fn tools(&self, name: &str) -> Vec<Tool> {
         self.connection(name).map(|connection| connection.tools()).unwrap_or_default()
     }
@@ -79,8 +98,22 @@ impl McpServers for McpManager {
         self.no_servers_message()
     }
 
-    fn subscribe(&self, listener: Box<dyn Fn() + Send + Sync>) {
-        McpManager::subscribe(self, listener);
+    fn subscribe(&self, listener: Box<dyn Fn() + Send + Sync>) -> Option<McpSubscription> {
+        Some(McpManager::subscribe(self, listener))
+    }
+
+    fn unsubscribe(&self, subscription: McpSubscription) {
+        McpManager::unsubscribe(self, subscription);
+    }
+
+    fn connection_id(&self, name: &str) -> Option<McpConnectionId> {
+        McpManager::connection_id(self, name)
+    }
+
+    fn set_message_if_current(&self, name: &str, id: Option<McpConnectionId>, message: Option<String>) {
+        if let Some(id) = id {
+            McpManager::set_message_if_current(self, name, id, message);
+        }
     }
 
     async fn sign_in(&self, name: &str, prompt: Arc<dyn McpSignInPrompt>, cancel: CancellationToken) -> Option<String> {
@@ -119,6 +152,10 @@ impl McpServers for Arc<AgentSession> {
         self.mcp_config_errors()
     }
 
+    fn notices(&self) -> Vec<String> {
+        self.mcp_manager().map(|manager| manager.notices()).unwrap_or_default()
+    }
+
     fn tools(&self, name: &str) -> Vec<Tool> {
         self.mcp_manager().map(|manager| McpServers::tools(&manager, name)).unwrap_or_default()
     }
@@ -131,8 +168,22 @@ impl McpServers for Arc<AgentSession> {
         self.mcp_manager().map_or_else(|| self.mcp_status_text(), |manager| manager.no_servers_message())
     }
 
-    fn subscribe(&self, listener: Box<dyn Fn() + Send + Sync>) {
-        self.subscribe_mcp(listener);
+    fn subscribe(&self, listener: Box<dyn Fn() + Send + Sync>) -> Option<McpSubscription> {
+        self.subscribe_mcp(listener)
+    }
+
+    fn unsubscribe(&self, subscription: McpSubscription) {
+        self.unsubscribe_mcp(subscription);
+    }
+
+    fn connection_id(&self, name: &str) -> Option<McpConnectionId> {
+        self.mcp_manager().and_then(|manager| manager.connection_id(name))
+    }
+
+    fn set_message_if_current(&self, name: &str, id: Option<McpConnectionId>, message: Option<String>) {
+        if let (Some(manager), Some(id)) = (self.mcp_manager(), id) {
+            manager.set_message_if_current(name, id, message);
+        }
     }
 
     async fn sign_in(&self, name: &str, prompt: Arc<dyn McpSignInPrompt>, cancel: CancellationToken) -> Option<String> {
@@ -185,7 +236,7 @@ fn scope_name(status: &McpServerStatus) -> Option<String> {
 
 /// The servers, the ones that need the user first.
 pub fn servers_menu(servers: &dyn McpServers) -> McpMenu {
-    let errors: Vec<String> = servers.config_errors().iter().map(|error| format!("config: {error}")).collect();
+    let errors = servers.notices();
     let statuses = servers.statuses();
     let items = statuses.iter().map(|status| {
         let place = match &status.entry.override_path {

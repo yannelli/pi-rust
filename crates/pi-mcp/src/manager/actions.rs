@@ -47,6 +47,7 @@ impl McpManager {
             Err(error) => return Some(format!("Sign-in failed: {error}")),
         };
         let options = SignInOptions {
+            server_name: name.into(),
             server_url,
             store: self.inner.credentials.for_server(name, &url),
             settings,
@@ -228,5 +229,37 @@ impl Inner {
         }
         server.entry = entry;
         None
+    }
+}
+
+/// Identifies a server's current connection try. It changes when the connection is replaced, the
+/// server is disabled, or the server is replaced or removed, so late results can be dropped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct McpConnectionId {
+    pub server: u64,
+    pub attempt: Option<u64>,
+}
+
+impl McpManager {
+    /// The server's current connection try; `None` when no server has the name.
+    pub fn connection_id(&self, name: &str) -> Option<McpConnectionId> {
+        let state = self.inner.lock();
+        state.named(name).map(|server| McpConnectionId { server: server.id, attempt: server.attempt })
+    }
+
+    /// Show the result of an action started for connection `id`, unless the server was disabled,
+    /// replaced, removed, or reconnected for another action meanwhile. Returns whether it was shown.
+    pub fn set_message_if_current(&self, name: &str, id: McpConnectionId, message: Option<String>) -> bool {
+        {
+            let mut state = self.inner.lock();
+            let ended = state.session.is_cancelled();
+            let Some(server) = state.servers.iter_mut().find(|server| server.entry.name == name) else { return false };
+            if ended || server.id != id.server || server.attempt != id.attempt {
+                return false;
+            }
+            server.message = message;
+        }
+        self.inner.emit_change();
+        true
     }
 }

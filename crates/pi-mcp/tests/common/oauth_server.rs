@@ -220,12 +220,19 @@ pub enum Browser {
 pub struct BrowserPrompt {
     browser: Browser,
     pub opened: Mutex<Vec<Url>>,
+    /// The server name of each shown URL.
+    pub servers: Mutex<Vec<String>>,
     location: watch::Sender<Option<String>>,
 }
 
 impl BrowserPrompt {
     pub fn new(browser: Browser) -> Arc<Self> {
-        Arc::new(Self { browser, opened: Mutex::default(), location: watch::channel(None).0 })
+        Arc::new(Self {
+            browser,
+            opened: Mutex::default(),
+            servers: Mutex::default(),
+            location: watch::channel(None).0,
+        })
     }
 
     pub fn opened_param(&self, index: usize, name: &str) -> Option<String> {
@@ -236,8 +243,9 @@ impl BrowserPrompt {
 
 #[async_trait]
 impl McpSignInPrompt for BrowserPrompt {
-    fn show_authorization_url(&self, url: &Url) {
+    fn show_authorization_url(&self, server: &str, url: &Url) {
         self.opened.lock().unwrap().push(url.clone());
+        self.servers.lock().unwrap().push(server.into());
         let url = url.clone();
         match self.browser {
             Browser::Follow => {
@@ -257,7 +265,7 @@ impl McpSignInPrompt for BrowserPrompt {
         }
     }
 
-    async fn prompt_for_redirect_url(&self, cancel: CancellationToken) -> Option<String> {
+    async fn prompt_for_redirect_url(&self, _server: &str, cancel: CancellationToken) -> Option<String> {
         if self.browser != Browser::Paste {
             cancel.cancelled().await;
             return None;
