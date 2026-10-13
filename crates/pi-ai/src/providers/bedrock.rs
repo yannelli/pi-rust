@@ -150,7 +150,7 @@ async fn resolve_auth(options: &StreamOptions, target: &Target) -> Result<Auth, 
                 env: &options.env,
                 profile: target.profile.clone(),
                 region: target.region.clone(),
-                mfa_code_provider: None,
+                mfa_code_provider: options.bedrock.mfa_code_provider.clone(),
             };
             credentials::resolve(&input).await.map(Auth::Sign)
         }

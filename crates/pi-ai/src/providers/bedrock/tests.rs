@@ -347,3 +347,50 @@ async fn unsupported_images_fail_before_sending() {
     let message = events.last().and_then(AssistantMessageEvent::final_message).unwrap();
     assert_eq!(message.error_message.as_deref(), Some("Unknown image type: image/bmp"));
 }
+
+#[tokio::test]
+async fn bedrock_options_profile_and_mfa_hook_reach_the_credential_chain() {
+    let sts = "<AssumeRoleResponse><AssumeRoleResult><Credentials><AccessKeyId>ASIABEDROCKMFA</AccessKeyId><SecretAccessKey>s</SecretAccessKey><SessionToken>t</SessionToken><Expiration>2099-01-01T00:00:00Z</Expiration></Credentials></AssumeRoleResult></AssumeRoleResponse>";
+    let frames = vec![
+        event("messageStart", json!({"role": "assistant"})),
+        event("messageStop", json!({"stopReason": "end_turn"})),
+    ];
+    let server = RouteServer::start(move |request| {
+        if String::from_utf8_lossy(&request.body).contains("Action=AssumeRole") {
+            return Reply::new(200, "text/xml", sts);
+        }
+        stream_reply(frames.clone())
+    })
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    let config = "[profile bedrock-mfa]\nrole_arn = arn:aws:iam::123:role/bedrock-mfa\nsource_profile = base\nmfa_serial = arn:aws:iam::123:mfa/me\n";
+    std::fs::write(dir.path().join("config"), config).unwrap();
+    std::fs::write(dir.path().join("credentials"), "[base]\naws_access_key_id = AKIABASE\naws_secret_access_key = b\n")
+        .unwrap();
+    let path = |name: &str| dir.path().join(name).display().to_string();
+    let env = BTreeMap::from([
+        ("HOME".to_string(), dir.path().display().to_string()),
+        ("AWS_CONFIG_FILE".to_string(), path("config")),
+        ("AWS_SHARED_CREDENTIALS_FILE".to_string(), path("credentials")),
+        ("AWS_EC2_METADATA_DISABLED".to_string(), "true".to_string()),
+        ("AWS_ENDPOINT_URL_STS".to_string(), server.base_url.clone()),
+    ]);
+    let prompts = Arc::new(Mutex::new(Vec::new()));
+    let seen = prompts.clone();
+    let mut options = StreamOptions { env, ..StreamOptions::default() };
+    options.bedrock.profile = Some("bedrock-mfa".into());
+    options.bedrock.region = Some("us-west-2".into());
+    options.bedrock.mfa_code_provider = Some(Arc::new(move |prompt: crate::provider_options::MfaPrompt| {
+        seen.lock().unwrap().push(prompt.serial);
+        Box::pin(async { Ok("123456".to_string()) })
+    }));
+    let model = bedrock_model("anthropic.claude-3-5-sonnet-20240620-v1:0", &server.base_url);
+    let (_, message) = collect(BedrockConverseStream.stream(&model, &context(), options)).await;
+    assert_eq!(message.stop_reason, StopReason::Stop, "{:?}", message.error_message);
+    assert_eq!(*prompts.lock().unwrap(), ["arn:aws:iam::123:mfa/me"]);
+    let requests = server.requests();
+    assert!(String::from_utf8_lossy(&requests[0].body).contains("TokenCode=123456"));
+    let authorization = &requests[1].headers["authorization"];
+    assert!(authorization.starts_with("AWS4-HMAC-SHA256 Credential=ASIABEDROCKMFA/"), "{authorization}");
+    assert!(authorization.contains("/us-west-2/bedrock/aws4_request"), "{authorization}");
+}

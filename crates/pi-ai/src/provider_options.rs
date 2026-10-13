@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-// MFA_REEXPORT
+pub use crate::providers::aws::credentials::{MfaCodeProvider, MfaPrompt, set_mfa_code_provider};
 
 /// Reasoning summary detail for OpenAI Responses, Azure, and Codex. `off` and `on` are Codex only.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,7 +81,9 @@ pub struct BedrockOptions {
     pub thinking_display: Option<ThinkingDisplay>,
     /// Cost allocation tags sent as `requestMetadata`.
     pub request_metadata: Option<BTreeMap<String, String>>,
-    // MFA_FIELD
+    /// Asks the user for an MFA code when an assume-role profile sets `mfa_serial`; without it
+    /// the process-wide provider from [`set_mfa_code_provider`] is used.
+    pub mfa_code_provider: Option<MfaCodeProvider>,
 }
 
 impl std::fmt::Debug for BedrockOptions {
@@ -94,7 +96,7 @@ impl std::fmt::Debug for BedrockOptions {
             .field("interleaved_thinking", &self.interleaved_thinking)
             .field("thinking_display", &self.thinking_display)
             .field("request_metadata", &self.request_metadata)
-            // MFA_DEBUG
+            .field("mfa_code_provider", &self.mfa_code_provider.is_some())
             .finish()
     }
 }
