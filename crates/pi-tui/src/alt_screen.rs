@@ -15,7 +15,7 @@ use std::rc::{Rc, Weak};
 use std::time::Instant;
 
 pub(crate) use lifecycle::{after_terminal_stop, before_terminal_start, before_terminal_stop, do_render};
-pub use public::{CopyCompletion, CopyOutcome, CopySelectionFn};
+pub use public::{CopyCompletion, CopyOutcome, CopyRequest, CopySelectionFn};
 pub(crate) use viewport::handle_viewport_input;
 
 use crate::alt_screen_search::{

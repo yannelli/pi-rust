@@ -90,7 +90,7 @@ pub mod utils;
 pub mod wheel_scroll;
 pub mod word_navigation;
 
-pub use alt_screen::{CopyCompletion, CopyOutcome, CopySelectionFn, TuiAltScreenOptions};
+pub use alt_screen::{CopyCompletion, CopyOutcome, CopyRequest, CopySelectionFn, TuiAltScreenOptions};
 pub use component::{
     AsAny, CURSOR_MARKER, Component, ComponentRef, Container, FAKE_CURSOR_END, FAKE_CURSOR_START, MouseResponse,
     TuiMouseButton, TuiMouseDispatchResult, TuiMouseDispatchTarget, TuiMouseEvent, TuiMouseEventResult,
