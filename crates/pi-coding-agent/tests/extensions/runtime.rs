@@ -245,5 +245,8 @@ async fn a_failing_new_session_setup_reports_the_extension_stack() {
     let calls = r.ui.calls();
     let fatal = calls.iter().find(|call| call.starts_with("fatal: ")).expect("a fatal error");
     assert!(fatal.starts_with("fatal: Failed to create session: setup broke | "), "{fatal}");
-    assert!(fatal.contains(&r.extension.display().to_string()), "{fatal}");
+    // Windows temp paths can be 8.3 short names while the JS stack shows the long form,
+    // so match on the temp folder and file names.
+    let folder = r.extension.parent().and_then(|dir| dir.file_name()).unwrap().to_string_lossy();
+    assert!(fatal.contains(&*folder) && fatal.contains("ext.ts:"), "{fatal}");
 }
