@@ -19,7 +19,7 @@ pub fn take_over_stdout() -> io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::fd::AsFd;
-        let saved = rustix::io::dup(io::stdout().as_fd())?;
+        let saved = rustix::io::fcntl_dupfd_cloexec(io::stdout().as_fd(), 3)?;
         rustix::stdio::dup2_stdout(io::stderr().as_fd())?;
         *raw = Some(std::fs::File::from(saved));
     }
