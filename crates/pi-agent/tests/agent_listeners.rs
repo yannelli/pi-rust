@@ -6,9 +6,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use pi_agent::{Agent, AgentEvent, AgentHooks, AgentInitialState, StreamFn};
+use pi_agent::{Agent, AgentEvent, AgentHooks, AgentInitialState, SharedTool, StreamFn};
 use pi_ai::stream::event_channel;
 use pi_ai::{AssistantMessageEvent, Message, StopReason, StreamOptions};
+use serde_json::json;
 use support::*;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
@@ -145,4 +146,93 @@ async fn passes_the_active_abort_signal_to_subscribers() {
     agent.abort();
     prompt.await.unwrap().unwrap();
     assert!(signal.is_cancelled());
+}
+
+fn tool_agent(tool: SharedTool, stream_fn: StreamFn) -> Agent {
+    let initial = AgentInitialState { model: Some(model()), tools: vec![tool], ..Default::default() };
+    let agent = Agent::with_initial_state(initial);
+    agent.set_hooks(AgentHooks { stream_fn: Some(stream_fn), ..AgentHooks::default() });
+    agent
+}
+
+/// An async listener that waits on `barrier` for events matching `blocks`.
+fn block_on(agent: &Agent, barrier: &Arc<Notify>, blocks: fn(&AgentEvent) -> bool) {
+    let barrier = barrier.clone();
+    agent.subscribe_async(move |event, _signal| {
+        let barrier = barrier.clone();
+        async move {
+            if blocks(&event) {
+                barrier.notified().await;
+            }
+        }
+    });
+}
+
+#[tokio::test]
+async fn slow_tool_execution_start_listener_delays_the_tool() {
+    let tool = FnTool::noop();
+    let (_, stream_fn) = sequence(vec![tool_use(vec![call("call-1", "noop", json!({}))])]);
+    let agent = tool_agent(tool.clone(), stream_fn);
+    let barrier = Arc::new(Notify::new());
+    block_on(&agent, &barrier, |event| matches!(event, AgentEvent::ToolExecutionStart { .. }));
+
+    let running = agent.clone();
+    let prompt = tokio::spawn(async move { running.prompt("run tool", Vec::new()).await });
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(tool.count(), 0, "the tool must wait for the tool_execution_start listener");
+    assert!(agent.state().pending_tool_calls.contains("call-1"));
+
+    barrier.notify_one();
+    prompt.await.unwrap().unwrap();
+    assert_eq!(tool.count(), 1);
+}
+
+#[tokio::test]
+async fn message_end_listener_finishes_before_the_next_turn() {
+    let tool = FnTool::noop();
+    let (requests, stream_fn) = sequence(vec![tool_use(vec![call("call-1", "noop", json!({}))])]);
+    let agent = tool_agent(tool.clone(), stream_fn);
+    let barrier = Arc::new(Notify::new());
+    block_on(&agent, &barrier, |event| matches!(event, AgentEvent::MessageEnd { message: Message::Assistant(_) }));
+
+    let running = agent.clone();
+    let prompt = tokio::spawn(async move { running.prompt("run tool", Vec::new()).await });
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(requests.lock().unwrap().len(), 1);
+    assert_eq!(tool.count(), 0, "tools wait for the assistant message_end listener");
+
+    barrier.notify_one();
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(tool.count(), 1);
+    assert_eq!(requests.lock().unwrap().len(), 2);
+    assert!(!prompt.is_finished(), "the second assistant message_end is still blocked");
+
+    barrier.notify_one();
+    prompt.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn sync_and_async_listeners_run_in_subscription_order() {
+    let agent = ok_agent();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let sink = seen.clone();
+    agent.subscribe(move |event| sink.lock().unwrap().push(format!("a:{}", kind(event))));
+    let sink = seen.clone();
+    agent.subscribe_async(move |event, _signal| {
+        let sink = sink.clone();
+        async move {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            sink.lock().unwrap().push(format!("b:{}", kind(&event)));
+        }
+    });
+    let sink = seen.clone();
+    agent.subscribe(move |event| sink.lock().unwrap().push(format!("c:{}", kind(event))));
+    agent.prompt("hello", Vec::new()).await.unwrap();
+
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.len() % 3, 0);
+    for chunk in seen.chunks(3) {
+        let event = chunk[0].trim_start_matches("a:");
+        assert_eq!(chunk, [format!("a:{event}"), format!("b:{event}"), format!("c:{event}")]);
+    }
 }
