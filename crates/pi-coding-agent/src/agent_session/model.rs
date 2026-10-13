@@ -128,7 +128,6 @@ impl AgentSession {
             }
             self.emit(&AgentSessionEvent::ThinkingLevelChanged { level: effective });
         }
-        self.refresh_environment();
     }
 
     /// Cycle to the next supported thinking level; `None` when the model has no reasoning.

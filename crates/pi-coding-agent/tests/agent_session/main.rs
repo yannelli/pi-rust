@@ -16,6 +16,7 @@ mod mcp_fake;
 mod prompt;
 mod retry;
 mod runtime;
+mod tool_options;
 mod tool_registry;
 mod tool_search;
 mod tool_support;
