@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/pi-ai",
     "crates/pi-agent",
+    "crates/pi-chord",
     "crates/pi-codemode",
     "crates/pi-coding-agent",
     "crates/pi-embedded",

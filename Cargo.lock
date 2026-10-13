@@ -2240,6 +2240,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-chord"
+version = "0.1.1"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "futures",
+ "indexmap 2.14.2",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_parser",
+ "oxc_semantic",
+ "oxc_span",
+ "pi-js",
+ "ring",
+ "ryu",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "pi-codemode"
 version = "0.1.2"
 dependencies = [
