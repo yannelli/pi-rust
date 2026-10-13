@@ -32,7 +32,7 @@ fn info(name: &str, timestamp: &str) -> Value {
 #[tokio::test]
 async fn lists_sessions_and_load_replays_history() {
     let env = Env::new();
-    let file = env.agent_dir().join("sessions/--tmp--project--/0000_aaaa.jsonl");
+    let file = env.agent_dir().join("sessions").join("--tmp--project--").join("0000_aaaa.jsonl");
     write_session(
         &file,
         &[

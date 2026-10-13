@@ -39,9 +39,16 @@ pub(crate) fn resolve_kind(
     if has_inline_source(&state, specifier) {
         return Ok(("file", specifier.to_string()));
     }
-    if specifier.starts_with('.') {
+    // Absolute specifiers too: on Windows `C:/x/y.js` and `C:\x/y.js` name the key `C:\x\y.js`.
+    let candidate = if specifier.starts_with('.') {
         let dir = from_path.and_then(Path::parent).unwrap_or(&base_dir);
-        let candidate = normalize(&dir.join(specifier)).display().to_string();
+        Some(normalize(&dir.join(specifier)).display().to_string())
+    } else if Path::new(specifier).is_absolute() {
+        Some(normalize(Path::new(specifier)).display().to_string())
+    } else {
+        None
+    };
+    if let Some(candidate) = candidate {
         if has_inline_source(&state, &candidate) {
             return Ok(("file", candidate));
         }

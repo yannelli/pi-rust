@@ -550,17 +550,30 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
     }
 }
 
-#[tokio::main]
-async fn main() {
+/// Stack for the thread that drives `run` and for runtime workers. Windows gives the main thread
+/// only 1 MiB, which deep debug-build futures overflow.
+const STACK_SIZE: usize = 8 * 1024 * 1024;
+
+fn main() {
     let raw: Vec<String> = std::env::args().skip(1).collect();
-    let code = match run(raw).await {
-        Ok(code) => code,
-        Err(error) => {
-            eprintln!("Error: {error:#}");
-            1
-        }
-    };
-    std::process::exit(code);
+    let driver = std::thread::Builder::new().name("main".into()).stack_size(STACK_SIZE).spawn(move || {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .thread_stack_size(STACK_SIZE)
+            .build()
+            .expect("tokio runtime");
+        let code = match runtime.block_on(run(raw)) {
+            Ok(code) => code,
+            Err(error) => {
+                eprintln!("Error: {error:#}");
+                1
+            }
+        };
+        std::process::exit(code);
+    });
+    // The driver exits the process itself; reaching here means it panicked.
+    let _ = driver.expect("spawn the main thread").join();
+    std::process::exit(101);
 }
 
 #[cfg(test)]
