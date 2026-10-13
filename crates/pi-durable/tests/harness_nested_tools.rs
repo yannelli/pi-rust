@@ -1,5 +1,12 @@
-//! Port of upstream `test/harness-nested-tools.test.ts` (the core cases).
+//! Port of upstream `test/harness-nested-tools.test.ts`. This file holds the helpers and the first cases; the
+//! modules in `harness_nested_tools/` hold the others.
 
+#[path = "harness_nested_tools/abandoned.rs"]
+mod abandoned;
+#[path = "harness_nested_tools/calls.rs"]
+mod calls;
+#[path = "harness_nested_tools/slots.rs"]
+mod slots;
 mod support;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -20,7 +27,7 @@ use pi_durable::{EntryRecord, SubmissionStatus, TaskQuery, TaskRecord};
 use serde_json::{Value, json};
 use support::harness_support::*;
 
-fn tool<F, Fut>(name: &str, execute: F) -> ToolRegistration
+pub fn tool<F, Fut>(name: &str, execute: F) -> ToolRegistration
 where
     F: Fn(pi_ai::JsonObject, ToolExecutionApi, pi_chord::Context) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = pi_durable::DurableResult<ToolExecutionResult>> + Send + 'static,
@@ -30,7 +37,7 @@ where
 }
 
 /// Returns `echo <text>` and counts its runs.
-fn echo_tool(runs: Arc<AtomicUsize>) -> ToolRegistration {
+pub fn echo_tool(runs: Arc<AtomicUsize>) -> ToolRegistration {
     tool("echo", move |args, _, _| {
         runs.fetch_add(1, Ordering::SeqCst);
         let text = args.get("text").and_then(Value::as_str).unwrap_or_default().to_owned();
@@ -38,21 +45,25 @@ fn echo_tool(runs: Arc<AtomicUsize>) -> ToolRegistration {
     })
 }
 
-fn add_tool(setup: &ChatSetup, tool: ToolRegistration) {
+pub fn add_tool(setup: &ChatSetup, tool: ToolRegistration) {
     let name = format!("tool:{}", tool.name());
     setup.registry.install(Extension::new(name).tool(tool)).unwrap();
 }
 
-fn call(name: &str) -> FauxResponseStep {
-    let block = faux_tool_call_with_id(name, json!({}), "c1");
-    faux_assistant_message(vec![block], FauxMessageOptions::stop_reason(StopReason::ToolUse)).into()
+pub fn call_message(name: &str, args: Value) -> pi_ai::AssistantMessage {
+    let block = faux_tool_call_with_id(name, args, "c1");
+    faux_assistant_message(vec![block], FauxMessageOptions::stop_reason(StopReason::ToolUse))
 }
 
-fn done() -> FauxResponseStep {
+pub fn call(name: &str) -> FauxResponseStep {
+    call_message(name, json!({})).into()
+}
+
+pub fn done() -> FauxResponseStep {
     faux_assistant_message(vec![faux_text("done")], FauxMessageOptions::default()).into()
 }
 
-fn results(entries: &[EntryRecord]) -> Vec<ToolResultMessage> {
+pub fn results(entries: &[EntryRecord]) -> Vec<ToolResultMessage> {
     entries
         .iter()
         .filter(|entry| TOOL_RESULT_ENTRY.is(Some(entry)))
@@ -63,7 +74,7 @@ fn results(entries: &[EntryRecord]) -> Vec<ToolResultMessage> {
         .collect()
 }
 
-fn result_text(message: &ToolResultMessage) -> String {
+pub fn result_text(message: &ToolResultMessage) -> String {
     let parts: Vec<&str> = message
         .content
         .iter()
@@ -76,17 +87,17 @@ fn result_text(message: &ToolResultMessage) -> String {
 }
 
 /// The value a schema-less nested call gives programs.
-fn nested_text(result: &NestedToolExecutionResult) -> String {
+pub fn nested_text(result: &NestedToolExecutionResult) -> String {
     result.structured_output.as_ref().and_then(Json::as_str).unwrap_or_default().to_owned()
 }
 
-async fn tool_tasks(harness: &Harness) -> Vec<TaskRecord> {
+pub async fn tool_tasks(harness: &Harness) -> Vec<TaskRecord> {
     let query = TaskQuery { kind: Some("pi.tool".into()), ..TaskQuery::default() };
     let scan = harness.commit(move |tx| async move { tx.scan_tasks(query, 100, None).await }, &ctx());
     scan.await.unwrap().items
 }
 
-async fn run_once(
+pub async fn run_once(
     setup: &ChatSetup,
     responses: Vec<FauxResponseStep>,
 ) -> (Harness, Conversation, SubmissionStatus, Vec<EntryRecord>) {
@@ -97,7 +108,7 @@ async fn run_once(
     (harness, root, settled.status, entries)
 }
 
-fn args(value: Value) -> pi_ai::JsonObject {
+pub fn args(value: Value) -> pi_ai::JsonObject {
     value.as_object().cloned().unwrap_or_default()
 }
 
