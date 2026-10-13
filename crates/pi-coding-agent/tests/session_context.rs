@@ -152,7 +152,8 @@ fn preloaded_entries_take_identity_from_options_or_header() {
     });
     let options = NewSessionOptions { id: Some("restored-session".into()), parent_session: None };
     let restored = SessionManager::in_memory_with(Path::new("/project"), options, entries.clone()).unwrap();
-    assert_eq!((restored.session_id(), restored.header().cwd.as_str()), ("restored-session", "/project"));
+    let project = std::path::absolute("/project").unwrap().display().to_string();
+    assert_eq!((restored.session_id(), restored.header().cwd.as_str()), ("restored-session", project.as_str()));
     let generated =
         SessionManager::in_memory_with(Path::new("/project"), NewSessionOptions::default(), entries.clone()).unwrap();
     assert_eq!(&generated.session_id()[14..15], "7");

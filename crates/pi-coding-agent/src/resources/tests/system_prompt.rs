@@ -199,7 +199,7 @@ fn snapshots_with_system_and_append_system_files() {
     write(&agent.join("skills/lint/SKILL.md"), "---\nname: lint\ndescription: Lint & fix.\n---\nRun it.");
     std::fs::create_dir_all(&cwd).unwrap();
     let cwd_text = cwd.display().to_string().replace('\\', "/");
-    let skill_path = agent.join("skills/lint/SKILL.md").display().to_string();
+    let skill_path = agent.join("skills").join("lint").join("SKILL.md").display().to_string();
     let skills = format!(
         "<skills>\nThe following skills provide specialized instructions for specific tasks.\nUse the read tool to load a skill's file when the task matches its description.\nWhen a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.\n\n<available_skills>\n  <skill>\n    <name>lint</name>\n    <description>Lint &amp; fix.</description>\n    <location>{skill_path}</location>\n  </skill>\n</available_skills>\n</skills>"
     );

@@ -226,6 +226,8 @@ impl Run {
         target: &Target,
         options: &StreamOptions,
     ) -> Result<reqwest::Response, Failure> {
+        // The shared client is built without HTTP/2, so every endpoint already gets the
+        // HTTP/1.1 handler that upstream selects with `AWS_BEDROCK_FORCE_HTTP1=1`.
         let client = client_for_env(&options.env);
         let mut sends = 0;
         loop {

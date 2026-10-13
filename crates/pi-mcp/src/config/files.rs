@@ -11,8 +11,12 @@ use serde_json::{Map, Value};
 use super::{McpExposure, McpServerConfig, mcp_namespace, validate_mcp_server_config};
 
 const OVERRIDE_KEYS: [&str; 3] = ["enabled", "exposure", "toolExposure"];
-/// Name of the project config directory, `.pi`.
-pub const CONFIG_DIR_NAME: &str = ".pi";
+/// Name of the project config directory: `.pi` unless the build sets `PI_CONFIG_DIR`, as the
+/// coding agent's `resources::brand::CONFIG_DIR_NAME` does.
+pub const CONFIG_DIR_NAME: &str = match option_env!("PI_CONFIG_DIR") {
+    Some(dir) => dir,
+    None => ".pi",
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]

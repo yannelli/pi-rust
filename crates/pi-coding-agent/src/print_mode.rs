@@ -1,7 +1,6 @@
 //! Non-interactive mode (upstream `modes/print-mode.ts`): run the prompts, then print the
 //! final response (text), or the session header and every session event as JSON lines (json).
 
-use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 use pi_ai::{ContentBlock, Message, StopReason};
@@ -71,8 +70,27 @@ pub async fn run_print_mode(
             runtime.session().prompt(message, Vec::new()).await?;
         }
         anyhow::Ok(())
-    }
-    .await;
+    };
+    // SIGTERM and SIGHUP (Ctrl+Break and console close on Windows) stop the run. The prompts
+    // keep running while the runtime is disposed, so the abort can settle the agent loop.
+    let mut work = std::pin::pin!(result);
+    let result = tokio::select! {
+        result = &mut work => result,
+        code = crate::signals::termination_signal() => {
+            crate::signals::kill_tracked_detached_children();
+            runtime.set_rebind_session(None);
+            let mut dispose = std::pin::pin!(runtime.dispose());
+            let mut work_done = false;
+            loop {
+                tokio::select! {
+                    () = &mut dispose => break,
+                    _ = &mut work, if !work_done => work_done = true,
+                }
+            }
+            let _ = crate::diagnostics::flush_raw_stdout();
+            std::process::exit(code);
+        }
+    };
     let code = match result {
         Err(error) => {
             eprintln!("{error:#}");
@@ -83,6 +101,7 @@ pub async fn run_print_mode(
     };
     runtime.set_rebind_session(None);
     runtime.dispose().await;
+    let _ = crate::diagnostics::flush_raw_stdout();
     code
 }
 
@@ -94,12 +113,11 @@ fn print_final_response(session: &AgentSession) -> i32 {
         eprintln!("{}", message.unwrap_or_else(|| format!("Request {reason}")));
         return 1;
     }
-    let mut stdout = std::io::stdout().lock();
     for block in &last.content {
         if let ContentBlock::Text { text, .. } = block {
-            let _ = writeln!(stdout, "{text}");
+            let _ = crate::diagnostics::write_raw_stdout(&format!("{text}\n"));
         }
     }
-    let _ = stdout.flush();
+    let _ = crate::diagnostics::flush_raw_stdout();
     0
 }

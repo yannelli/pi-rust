@@ -193,14 +193,18 @@ fn stacks_flash_messages_and_collapses_them_as_they_expire() {
     let h = harness_with_text(20, 4, "one\ntwo\nthree\nfour");
 
     h.tui.flash("First", Some(Duration::from_millis(80)));
-    h.tui.flash("Second", Some(Duration::from_millis(500)));
-    wait_for_render();
+    h.tui.flash("Second", Some(Duration::from_secs(30)));
+    // Render without running the loop, so no expiry timer can fire before this check.
+    h.tui.render_now(true).expect("render");
     let viewport = h.xterm_viewport();
     assert!(viewport[0].ends_with(" First "), "{viewport:?}");
     assert!(viewport[1].ends_with(" Second "), "{viewport:?}");
 
-    ui_loop::run_for(Duration::from_millis(100)).expect("loop");
-    wait_for_render();
+    let started = std::time::Instant::now();
+    while h.xterm_viewport().iter().any(|line| line.contains("First")) {
+        assert!(started.elapsed() < Duration::from_secs(10), "the first flash never expired");
+        ui_loop::run_once(Some(Duration::from_millis(20))).expect("loop");
+    }
     let viewport = h.xterm_viewport();
     assert!(viewport[0].ends_with(" Second "), "{viewport:?}");
     assert!(!viewport.iter().any(|line| line.contains("First")));

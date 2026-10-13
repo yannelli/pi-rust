@@ -56,7 +56,9 @@ async fn queues_steering_and_follow_ups_and_restores_them_on_abort() {
         ui.submit("steer me").await;
         ui.wait_for("Steering: steer me").await;
         ui.send("later please").await;
-        ui.send("\x1b\r").await;
+        // The follow-up key is ctrl+q with Windows keybindings and alt+enter elsewhere.
+        let windows = pi_coding_agent::keybindings::use_windows_keybindings();
+        ui.send(if windows { "\x11" } else { "\x1b\r" }).await;
         ui.wait_for("Follow-up: later please").await;
         ui.send("\x1b").await;
         ui.wait_until("the abort", |ui| !ui.session().is_streaming()).await;

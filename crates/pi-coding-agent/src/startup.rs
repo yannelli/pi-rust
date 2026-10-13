@@ -3,15 +3,17 @@
 //! with install telemetry, and the startup version check.
 
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use futures::FutureExt;
 use tokio::task::JoinHandle;
 
-use crate::agent_session::catalog_base_url;
+use crate::agent_session::{AgentSessionRuntime, catalog_base_url};
 use crate::catalog::{CatalogConfig, refresh_model_catalogs};
 use crate::diagnostics::{CrashContext, crash_log_path, install_crash_hook};
+use crate::interactive::{InteractiveMode, InteractiveOptions};
 use crate::packages::{ModelsUpdateFn, PackageCommandOptions, SelfUpdateFn, SelfUpdateRequest};
 use crate::platform::VERSION;
 use crate::platform::changelog::{StartupChangelog, embedded_changelog_entries, startup_changelog};
@@ -19,6 +21,7 @@ use crate::platform::telemetry::{REPORT_INSTALL_URL, install_telemetry_enabled, 
 use crate::platform::version_check::{
     LatestPiRelease, VersionCheckOptions, check_for_new_pi_version, version_check_skipped,
 };
+use crate::resources::trust::{ProjectTrustStore, has_trust_requiring_project_resources};
 use crate::settings::SettingsManager;
 use crate::update::{SelfUpdateOptions, UpdateError, cleanup_update_quarantine, run_self_update};
 
@@ -137,6 +140,86 @@ pub fn spawn_version_check() -> Option<JoinHandle<Option<LatestPiRelease>>> {
         return None;
     }
     Some(tokio::spawn(async { check_for_new_pi_version(VERSION, &VersionCheckOptions::default(), false).await }))
+}
+
+/// `PI_STARTUP_BENCHMARK`: whether to time the interactive startup and exit.
+pub fn startup_benchmark_enabled() -> bool {
+    crate::config::env_flag("PI_STARTUP_BENCHMARK")
+}
+
+/// The `PI_STARTUP_BENCHMARK` run: set up the interactive UI, give the terminal 150ms to answer
+/// its queries, restore the terminal, and print the timings with `interactiveMode.init`.
+pub async fn run_startup_benchmark(
+    runtime: Arc<AgentSessionRuntime>,
+    options: InteractiveOptions,
+) -> anyhow::Result<()> {
+    let agent_dir = options.agent_dir.clone().unwrap_or_else(crate::config::agent_dir);
+    crate::keybindings::KeybindingsManager::create(&agent_dir).install();
+    let options = InteractiveOptions { agent_dir: Some(agent_dir), ..options };
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async move {
+            let mode = InteractiveMode::new(runtime, options);
+            mode.init().await;
+            crate::diagnostics::time("interactiveMode.init");
+            let _ = tokio::time::timeout(Duration::from_millis(150), async {
+                loop {
+                    let _ = mode.run_once().await;
+                }
+            })
+            .await;
+            mode.stop(None);
+            crate::theme::stop_theme_watcher();
+            crate::diagnostics::print_timings();
+            std::io::stdout().flush()?;
+            std::io::stderr().flush()
+        })
+        .await?;
+    Ok(())
+}
+
+/// Upstream `autoTrustOnReloadCwd`: the session cwd, when no `-a`/`-na` flag decides trust and
+/// the project has no resources that need trust yet. A `/reload` that then finds such resources
+/// saves the implicit trust.
+pub fn auto_trust_on_reload_cwd(session_cwd: &Path, trust_override: Option<bool>, home: &Path) -> Option<PathBuf> {
+    let needs_trust = has_trust_requiring_project_resources(session_cwd, home);
+    (trust_override.is_none() && !needs_trust).then(|| session_cwd.to_path_buf())
+}
+
+/// Upstream `maybeSaveImplicitProjectTrustAfterReload`: after `/reload`, save trust for `cwd`
+/// once when it is `auto_cwd`, trusted, newly has trust-requiring resources, and has no saved
+/// decision. Returns whether trust was saved; the error is the warning to show.
+pub fn save_implicit_project_trust_after_reload(
+    auto_cwd: &mut Option<PathBuf>,
+    cwd: &Path,
+    project_trusted: bool,
+    agent_dir: &Path,
+    home: &Path,
+) -> Result<bool, String> {
+    if auto_cwd.as_deref() != Some(cwd) || !project_trusted || !has_trust_requiring_project_resources(cwd, home) {
+        return Ok(false);
+    }
+    let store = ProjectTrustStore::new(agent_dir);
+    let saved = store.get(cwd).and_then(|decision| match decision {
+        Some(_) => Ok(false),
+        None => store.set(cwd, Some(true)).map(|()| true),
+    });
+    match saved {
+        Ok(saved) => {
+            *auto_cwd = None;
+            Ok(saved)
+        }
+        Err(error) => Err(format!("Could not save project trust after reload: {error:#}")),
+    }
+}
+
+/// The `/reload` status line, noting saved project trust.
+pub fn reload_status(saved_project_trust: bool) -> &'static str {
+    if saved_project_trust {
+        "Reloaded keybindings, extensions, skills, prompts, themes, and context files; saved project trust"
+    } else {
+        "Reloaded keybindings, extensions, skills, prompts, themes, and context files"
+    }
 }
 
 #[cfg(test)]

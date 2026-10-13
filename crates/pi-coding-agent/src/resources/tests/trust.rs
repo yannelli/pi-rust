@@ -29,7 +29,8 @@ fn stores_decisions_and_inherits_from_parents() {
     assert_eq!(entry.path, canonicalize(&parent));
 
     let text = std::fs::read_to_string(store.path()).unwrap();
-    let expected = format!("{{\n  \"{}\": true\n}}\n", canonicalize(&parent).display());
+    let key = serde_json::to_string(&canonicalize(&parent).display().to_string()).unwrap();
+    let expected = format!("{{\n  {key}: true\n}}\n");
     assert_eq!(text, expected);
     assert!(!store.path().with_file_name("trust.json.lock").exists());
 }

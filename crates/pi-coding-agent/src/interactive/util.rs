@@ -113,7 +113,8 @@ mod tests {
     #[test]
     fn relative_paths_stay_inside_cwd() {
         let cwd = Path::new("/work/project");
-        assert_eq!(cwd_relative_path(Path::new("/work/project/src/a.rs"), cwd).as_deref(), Some("src/a.rs"));
+        let native = Path::new("src").join("a.rs").display().to_string();
+        assert_eq!(cwd_relative_path(Path::new("/work/project/src/a.rs"), cwd), Some(native));
         assert_eq!(cwd_relative_path(Path::new("/work/project"), cwd).as_deref(), Some("."));
         assert_eq!(cwd_relative_path(Path::new("/work/other"), cwd), None);
         assert_eq!(format_path_relative_to_cwd_or_absolute(Path::new("../x"), cwd), "/work/x");

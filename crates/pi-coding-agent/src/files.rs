@@ -22,6 +22,12 @@ pub fn process_file_args(paths: &[String], cwd: &Path) -> anyhow::Result<Process
     process_file_args_with(paths, cwd, &ProcessImageOptions::default())
 }
 
+/// `@file` arguments of the command line (upstream `prepareInitialMessage`): images stay at full
+/// size, because the session resizes them for the chosen model per `images.autoResize`.
+pub fn process_cli_file_args(paths: &[String], cwd: &Path) -> anyhow::Result<ProcessedFiles> {
+    process_file_args_with(paths, cwd, &ProcessImageOptions { auto_resize: false, resize: None })
+}
+
 /// Process `@file` arguments; images go through [`process_image`] with `options`.
 pub fn process_file_args_with(
     paths: &[String],
@@ -66,6 +72,19 @@ mod tests {
         let image =
             image::RgbaImage::from_fn(width, height, |x, y| image::Rgba([(x % 256) as u8, (y % 256) as u8, 7, 255]));
         crate::images::encode_png(&image).unwrap()
+    }
+
+    #[test]
+    fn cli_file_images_keep_their_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let original = png(2600, 20);
+        std::fs::write(dir.path().join("wide.png"), &original).unwrap();
+        let processed = process_cli_file_args(&["wide.png".into()], dir.path()).unwrap();
+        let [ContentBlock::Image { data, .. }] = processed.images.as_slice() else { panic!("one image") };
+        assert_eq!(base64::engine::general_purpose::STANDARD.decode(data).unwrap(), original);
+        let resized = process_file_args(&["wide.png".into()], dir.path()).unwrap();
+        let [ContentBlock::Image { data, .. }] = resized.images.as_slice() else { panic!("one image") };
+        assert_ne!(base64::engine::general_purpose::STANDARD.decode(data).unwrap(), original);
     }
 
     #[test]

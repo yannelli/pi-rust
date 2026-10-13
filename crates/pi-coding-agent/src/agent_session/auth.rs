@@ -167,12 +167,25 @@ pub fn auth_stream_fn(
     })
 }
 
-/// Apply the global `httpProxy` and `httpIdleTimeoutMs` settings to every HTTP client.
+/// Apply the global `httpProxy` and `httpIdleTimeoutMs` settings to every HTTP client, and
+/// export the proxy to child processes.
 pub fn configure_http_from_settings(settings: &SettingsManager) {
+    apply_http_proxy_env(settings.http_proxy().as_deref());
     configure_http(HttpSettings {
         http_proxy: settings.http_proxy(),
         idle_timeout_ms: settings.http_idle_timeout_ms().ok(),
     });
+}
+
+/// Upstream `applyHttpProxySettings`: `HTTP_PROXY` and `HTTPS_PROXY` for child processes,
+/// unless the environment already sets them.
+pub fn apply_http_proxy_env(proxy: Option<&str>) {
+    let Some(proxy) = proxy.map(str::trim).filter(|proxy| !proxy.is_empty()) else { return };
+    for name in ["HTTP_PROXY", "HTTPS_PROXY"] {
+        if pi_ai::env::process_env_value(name).is_none() {
+            pi_ai::env::set_child_process_env(name, proxy);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -201,6 +214,21 @@ mod attribution_tests {
             StreamOptions { headers: headers(request), session_id: Some("s-1".into()), ..Default::default() };
         apply_request_settings(&mut options, &RequestAuth { model, auth, env: None }, &settings);
         options.headers
+    }
+
+    #[test]
+    fn http_proxy_setting_is_exported_to_child_processes() {
+        let has_env = |name| std::env::var(name).is_ok();
+        apply_http_proxy_env(Some("  "));
+        apply_http_proxy_env(Some(" http://proxy.test:8080 "));
+        let env = pi_ai::env::child_process_env();
+        for name in ["HTTP_PROXY", "HTTPS_PROXY"] {
+            if !has_env(name) {
+                assert_eq!(env.get(name).map(String::as_str), Some("http://proxy.test:8080"));
+            }
+        }
+        apply_http_proxy_env(Some("http://other.test"));
+        assert_eq!(pi_ai::env::child_process_env().get("HTTP_PROXY"), env.get("HTTP_PROXY"));
     }
 
     /// Ported from upstream `sdk-openrouter-attribution.test.ts`.

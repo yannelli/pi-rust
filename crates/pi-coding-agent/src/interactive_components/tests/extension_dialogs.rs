@@ -145,10 +145,15 @@ fn extension_editor_submits_and_cancels() {
     assert_eq!(cancelled.len(), 1);
 }
 
+/// `path` made absolute the way the trust store resolves it (`D:\\project` on Windows).
+fn abs(path: &str) -> String {
+    crate::resources::paths::absolute(std::path::Path::new(path)).display().to_string()
+}
+
 fn trust(cwd: &str, saved: Option<(&str, bool)>, trusted: bool, selections: &Calls<TrustSelection>) -> TrustSelector {
     TrustSelector::new(TrustSelectorOptions {
-        cwd: PathBuf::from(cwd),
-        saved_decision: saved.map(|(path, decision)| ProjectTrustStoreEntry { path: path.into(), decision }),
+        cwd: PathBuf::from(abs(cwd)),
+        saved_decision: saved.map(|(path, decision)| ProjectTrustStoreEntry { path: abs(path).into(), decision }),
         project_trusted: trusted,
         on_select: Box::new(selections.recorder()),
         on_cancel: Box::new(|| {}),
@@ -156,7 +161,7 @@ fn trust(cwd: &str, saved: Option<(&str, bool)>, trusted: bool, selections: &Cal
 }
 
 fn update(path: &str, decision: Option<bool>) -> ProjectTrustUpdate {
-    ProjectTrustUpdate { path: path.into(), decision }
+    ProjectTrustUpdate { path: abs(path).into(), decision }
 }
 
 #[test]
@@ -164,13 +169,13 @@ fn trust_selector_keeps_the_saved_trusted_decision_marked_while_browsing() {
     let _kb = setup();
     let mut selector = trust("/project", Some(("/project", true)), true, &Calls::new());
     let output = render_text(&mut selector, 120);
-    assert!(output.contains("Saved decision: trusted (/project)"), "{output}");
+    assert!(output.contains(&format!("Saved decision: trusted ({})", abs("/project"))), "{output}");
     assert!(output.contains("Current session: trusted"));
     assert!(output.contains("→ ✓ Trust"));
     selector.handle_input(keys::DOWN);
     let output = render_text(&mut selector, 120);
     assert!(output.contains("✓ Trust"));
-    assert!(output.contains("→   Trust parent folder (/)"));
+    assert!(output.contains(&format!("→   Trust parent folder ({})", abs("/"))), "{output}");
     assert!(!output.contains("✓ Do not trust"));
 }
 
@@ -188,7 +193,7 @@ fn trust_selector_labels_saved_ancestor_decisions_as_inherited() {
     let _kb = setup();
     let mut selector = trust("/parent/project/nested", Some(("/parent", true)), true, &Calls::new());
     let output = render_text(&mut selector, 120);
-    assert!(output.contains("Saved decision: trusted (inherited from /parent)"), "{output}");
+    assert!(output.contains(&format!("Saved decision: trusted (inherited from {})", abs("/parent"))), "{output}");
 }
 
 #[test]
@@ -196,8 +201,8 @@ fn trust_selector_adds_a_trust_parent_option() {
     let selections = Calls::new();
     let harness = Harness::new(120, 20, |_| trust("/parent/project", Some(("/parent", true)), true, &selections));
     let screen = harness.screen();
-    assert!(screen.contains("Saved decision: trusted (inherited from /parent)"), "{screen}");
-    assert!(screen.contains("✓ Trust parent folder (/parent)"));
+    assert!(screen.contains(&format!("Saved decision: trusted (inherited from {})", abs("/parent"))), "{screen}");
+    assert!(screen.contains(&format!("✓ Trust parent folder ({})", abs("/parent"))), "{screen}");
     harness.send(keys::ENTER);
     let expected = vec![update("/parent", Some(true)), update("/parent/project", None)];
     assert_eq!(selections.get(), [TrustSelection { trusted: true, updates: expected }]);

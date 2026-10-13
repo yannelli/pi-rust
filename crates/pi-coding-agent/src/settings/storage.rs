@@ -43,7 +43,10 @@ pub struct FileSettingsStorage {
 
 impl FileSettingsStorage {
     pub fn new(cwd: &Path, agent_dir: &Path) -> Self {
-        Self { global: agent_dir.join("settings.json"), project: cwd.join(".pi").join("settings.json") }
+        Self {
+            global: agent_dir.join("settings.json"),
+            project: crate::resources::brand::project_config_dir(cwd).join("settings.json"),
+        }
     }
 
     fn file(&self, scope: SettingsScope) -> &Path {
