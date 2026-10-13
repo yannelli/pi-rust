@@ -13,6 +13,7 @@ pub mod highlight;
 pub mod images;
 pub mod interactive;
 pub mod markdown_transform;
+pub mod mcp_cli;
 pub mod mermaid;
 pub mod messages;
 pub mod model_resolver;

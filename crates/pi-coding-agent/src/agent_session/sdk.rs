@@ -10,8 +10,9 @@ use pi_ai::{Model, ThinkingLevel};
 use tokio::sync::watch;
 
 use super::auth::auth_stream_fn;
+use super::builtins::{BuiltinState, McpSessionOptions};
 use super::services::AgentSessionServices;
-use super::tools::{ToolState, default_tool_names, prompt_options};
+use super::tools::{ActiveSelection, ToolSelection, ToolState, builtin_tools, default_tool_names, prompt_options};
 use super::{AgentSession, RunState, lock};
 use crate::app::format_no_models_available_message;
 use crate::model_resolver::{InitialModelOptions, ModelCatalog, ScopedModel, find_initial_model};
@@ -42,6 +43,11 @@ pub struct CreateAgentSessionOptions {
     pub custom_tools: Vec<SharedTool>,
     /// Model request function in place of `pi_ai::stream`; auth and settings still apply.
     pub stream_fn: Option<StreamFn>,
+    /// How the built-in MCP support loads its config and connects (tests, SDK hosts).
+    pub mcp: McpSessionOptions,
+    /// Restore the tools the transcript declares instead of the initial selection, as upstream
+    /// sessions created without `initialActiveToolNames` do.
+    pub restore_tools: bool,
 }
 
 impl CreateAgentSessionOptions {
@@ -57,6 +63,8 @@ impl CreateAgentSessionOptions {
             no_tools: None,
             custom_tools: Vec::new(),
             stream_fn: None,
+            mcp: McpSessionOptions::default(),
+            restore_tools: false,
         }
     }
 }
@@ -67,14 +75,7 @@ pub struct CreateAgentSessionResult {
     pub model_fallback_message: Option<String>,
 }
 
-struct ToolSelection {
-    active: Vec<String>,
-    allowed: Option<Vec<String>>,
-    uses_default_tools: bool,
-    modifiers: Vec<String>,
-}
-
-fn select_tools(options: &CreateAgentSessionOptions) -> anyhow::Result<ToolSelection> {
+fn select_tools(options: &CreateAgentSessionOptions) -> anyhow::Result<(Vec<String>, ToolSelection)> {
     if let Some(error) = options.tools.as_deref().and_then(tool_list_error) {
         anyhow::bail!("Invalid tools option: {error}");
     }
@@ -92,12 +93,13 @@ fn select_tools(options: &CreateAgentSessionOptions) -> anyhow::Result<ToolSelec
     };
     let mut active = selected.unwrap_or(defaults);
     active.retain(|name| !matches_any_tool(&options.exclude_tools, name));
-    Ok(ToolSelection {
-        active,
+    let selection = ToolSelection {
         allowed,
+        excluded: options.exclude_tools.clone(),
         uses_default_tools: (options.tools.is_none() || modifiers.is_some()) && options.no_tools.is_none(),
-        modifiers: modifiers.unwrap_or_default(),
-    })
+        default_tool_modifiers: modifiers.unwrap_or_default(),
+    };
+    Ok((active, selection))
 }
 
 /// The model to use: the given one, the session's (when it still has auth), or the default.
@@ -169,7 +171,7 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
     let (model, model_fallback_message) = choose_model(&options, has_existing);
     let restored = existing.thinking_level.filter(|_| has_thinking_entry);
     let thinking = choose_thinking_level(&options, model.as_ref(), has_existing, restored);
-    let selection = select_tools(&options)?;
+    let (active, selection) = select_tools(&options)?;
 
     let mut session_manager = options.session_manager;
     if has_existing {
@@ -193,23 +195,10 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
     let has_custom_stream = options.stream_fn.is_some();
     let stream_fn = auth_stream_fn(services.model_runtime.clone(), settings.clone(), options.stream_fn);
     let resources = services.resources().resources().clone();
-    let mut active = selection.active;
-    for tool in &options.custom_tools {
-        if !active.iter().any(|name| name == tool.name()) {
-            active.push(tool.name().to_string());
-        }
-    }
-    let base_prompt = prompt_options(&services.cwd, &resources, &active);
-    let tools = ToolState {
-        registry: Vec::new(),
-        custom: options.custom_tools,
-        active,
-        allowed: selection.allowed,
-        excluded: options.exclude_tools,
-        uses_default_tools: selection.uses_default_tools,
-        default_tool_modifiers: selection.modifiers,
-        base_prompt,
-    };
+    let base_prompt = prompt_options(&services.cwd, &resources);
+    let builtin = builtin_tools(&services.cwd, &settings);
+    let tools = ToolState::new(builtin, options.custom_tools, selection, base_prompt);
+    let builtins = BuiltinState { mcp_options: options.mcp, ..BuiltinState::default() };
     let (idle, _) = watch::channel(true);
     let session = Arc::new_cyclic(|weak| AgentSession {
         agent: agent.clone(),
@@ -220,6 +209,7 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
         state: Mutex::new(RunState::default()),
         idle,
         tools: Mutex::new(tools),
+        builtins: Mutex::new(builtins),
         stream_fn,
         has_custom_stream,
         model_selected: AtomicBool::new(model.is_some()),
@@ -228,9 +218,11 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
         disposed: AtomicBool::new(false),
         weak: weak.clone(),
     });
-    session.refresh_builtin_tools();
-    let active = session.active_tool_names();
-    session.set_active_tools_by_name(&active);
+    session.install_builtin_tools();
+    session.refresh_tools(ActiveSelection { names: Some(active), include_all_registered: true });
+    if options.restore_tools {
+        session.restore_tools_from_transcript();
+    }
     session.install_hooks();
     let weak = Arc::downgrade(&session);
     let id = agent.subscribe(move |event| {
@@ -240,5 +232,6 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
     });
     *lock(&session.agent_listener) = Some(id);
     session.refresh_environment();
+    session.start_builtin_extensions();
     Ok(CreateAgentSessionResult { session, model_fallback_message })
 }
