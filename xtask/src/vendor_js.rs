@@ -25,6 +25,17 @@ const PI_AI_FILES: &[&str] = &[
     "utils/validation.ts",
 ];
 
+/// Self-contained coding-agent modules the `@earendil-works/pi-coding-agent` shim re-exports.
+const CODING_AGENT_FILES: &[&str] = &[
+    "core/tools/file-mutation-queue.ts",
+    "core/tools/truncate.ts",
+    "modes/interactive/components/bordered-loader.ts",
+    "modes/interactive/components/custom-editor.ts",
+    "modes/interactive/components/dynamic-border.ts",
+    "modes/interactive/components/keybinding-hints.ts",
+    "modes/interactive/components/visual-truncate.ts",
+];
+
 /// Bare specifiers inside bundled files and the bundled file each one resolves to.
 const BARE_IMPORTS: &[(&str, &str)] = &[
     ("marked", "marked/lib/marked.esm.js"),
@@ -89,6 +100,9 @@ fn collect(upstream: &Path) -> Result<BTreeMap<String, String>, String> {
     }
     for name in PI_AI_FILES {
         add(upstream.join("packages/ai/src").join(name), &format!("pi-ai/src/{name}"))?;
+    }
+    for name in CODING_AGENT_FILES {
+        add(upstream.join("packages/coding-agent/src").join(name), &format!("pi-coding-agent/src/{name}"))?;
     }
     add(upstream.join("LICENSE"), "pi/LICENSE")?;
     Ok(files.into_iter().map(|(key, source)| (key.clone(), rewrite_bare_imports(&key, &source))).collect())

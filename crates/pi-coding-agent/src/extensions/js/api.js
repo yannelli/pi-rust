@@ -5,8 +5,6 @@ import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { call, callAsync } from "./bridge.js";
 
-const MCP_NAMESPACE = (name) => name.replace(/-/g, "_");
-
 export function createEventBus() {
 	const emitter = new EventEmitter();
 	emitter.setMaxListeners(0);
@@ -77,7 +75,6 @@ export function createRuntime(onChange) {
 		pendingVirtualModels: [],
 		providers: new Map(),
 		virtualModels: new Map(),
-		mcpServers: new Map(),
 		action: notBound,
 		markChanged: onChange,
 		assertActive() {
@@ -157,9 +154,6 @@ export function createRuntime(onChange) {
 			runtime.pendingVirtualModels = runtime.pendingVirtualModels.filter((pending) => pending !== key);
 			if (runtime.bound) call("virtualModel.unregister", provider, id);
 		},
-		mcpChanged() {
-			if (runtime.bound) call("mcp.servers", [...runtime.mcpServers.values()]);
-		},
 		/** Rust bound the session: flush queued registrations, then act directly. */
 		bind() {
 			runtime.bound = true;
@@ -170,7 +164,6 @@ export function createRuntime(onChange) {
 			};
 			for (const name of runtime.pendingProviders.splice(0)) runtime.applyProvider(name);
 			for (const key of runtime.pendingVirtualModels.splice(0)) runtime.applyVirtualModel(key);
-			runtime.mcpChanged();
 		},
 	};
 	return runtime;
@@ -388,37 +381,22 @@ export function createExtensionAPI(extension, runtime, cwd, eventBus) {
 		},
 		registerMcpServer(name, config) {
 			assertActive();
-			if (typeof name !== "string" || !/^[A-Za-z0-9_-]+$/.test(name)) {
-				throw new Error(`Invalid MCP server registered by extension "${extension.path}": invalid server name "${name}"`);
-			}
-			if (typeof config !== "object" || config === null || (!config.command && !config.url)) {
-				throw new Error(`Invalid MCP server registered by extension "${extension.path}": needs command or url`);
-			}
-			const owner = runtime.mcpServers.get(name)?.extensionPath;
-			if (owner !== undefined && owner !== extension.path) {
-				throw new Error(`MCP server "${name}" is already registered by extension "${owner}"`);
-			}
-			const clash = [...runtime.mcpServers.values()].find(
-				(server) => server.name !== name && MCP_NAMESPACE(server.name) === MCP_NAMESPACE(name),
-			);
-			if (clash) throw new Error(`MCP server "${name}" conflicts with registered server "${clash.name}"`);
-			const server = { name, config: structuredClone(config), extensionPath: extension.path };
-			apply(() => {
-				runtime.mcpServers.set(name, server);
-				runtime.mcpChanged();
-			});
+			const register = () => {
+				const error = call("mcp.register", extension.path, name, config ?? null);
+				if (error) throw new Error(error);
+			};
+			if (state !== "loading") return register();
+			const invalid = call("mcp.check", extension.path, name, config ?? null);
+			if (invalid) throw new Error(invalid);
+			pendingChanges.push(register);
 		},
 		unregisterMcpServer(name) {
 			assertActive();
-			apply(() => {
-				if (runtime.mcpServers.get(name)?.extensionPath !== extension.path) return;
-				runtime.mcpServers.delete(name);
-				runtime.mcpChanged();
-			});
+			apply(() => call("mcp.unregister", name, extension.path));
 		},
 		getMcpServers() {
 			assertActive();
-			return [...runtime.mcpServers.values()].map((server) => structuredClone(server));
+			return call("mcp.list");
 		},
 		registerVirtualModel(model) {
 			assertActive();
@@ -447,8 +425,14 @@ export function createExtensionAPI(extension, runtime, cwd, eventBus) {
 			if (state !== "loading") return;
 			runtime.assertActive();
 			for (const [name, value] of pendingFlags) if (!runtime.flagValues.has(name)) runtime.flagValues.set(name, value);
-			for (const change of pendingChanges) change();
 			state = "active";
+			for (const change of pendingChanges) {
+				try {
+					change();
+				} catch (error) {
+					call("error", { extensionPath: extension.path, event: "load", error: String(error?.message ?? error), stack: null });
+				}
+			}
 		},
 		discard() {
 			if (state !== "loading") return;
