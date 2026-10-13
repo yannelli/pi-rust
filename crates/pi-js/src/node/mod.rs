@@ -4,6 +4,10 @@ mod builtins;
 mod core;
 mod crypto;
 pub(crate) mod encoding;
+pub(crate) mod fs;
+mod fs_ops;
+mod fs_output;
+mod os;
 
 use rquickjs::context::EvalOptions;
 use rquickjs::{Ctx, Function, Object, Persistent};
@@ -19,6 +23,8 @@ pub(crate) fn install(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
     native.set("builtins", builtins::natives(ctx)?)?;
     native.set("encoding", encoding::natives(ctx)?)?;
     native.set("crypto", crypto::natives(ctx)?)?;
+    native.set("fs", fs::natives(ctx)?)?;
+    native.set("os", os::natives(ctx)?)?;
     core::install(ctx, &native)?;
     let config = core::config(ctx)?;
     let mut options = EvalOptions::default();

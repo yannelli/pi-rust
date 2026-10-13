@@ -38,6 +38,15 @@ const SOURCES: &[(&str, &str)] = &[
     ("internal/streams_pipe", include_str!("../js/streams_pipe.js")),
     ("stream", include_str!("../js/stream.js")),
     ("stream/promises", "module.exports = require('stream').promises;"),
+    ("os", include_str!("../js/os.js")),
+    ("crypto", include_str!("../js/crypto.js")),
+    ("internal/fs_utils", include_str!("../js/fs_utils.js")),
+    ("internal/fs_ops", include_str!("../js/fs_ops.js")),
+    ("internal/fs_streams", include_str!("../js/fs_streams.js")),
+    ("fs", include_str!("../js/fs.js")),
+    ("fs/promises", include_str!("../js/fs_promises.js")),
+    ("readline", include_str!("../js/readline.js")),
+    ("readline/promises", include_str!("../js/readline_promises.js")),
 ];
 
 /// Every module name `require` accepts, for `module.builtinModules`.

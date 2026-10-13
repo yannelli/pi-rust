@@ -42,6 +42,8 @@ pub(crate) struct Shared {
     pub alive: AtomicBool,
     pub config: RuntimeConfig,
     pub output: Arc<dyn OutputSink>,
+    /// Files opened through `fs.open`, by descriptor.
+    pub files: crate::node::fs::FileTable,
 }
 
 pub(crate) struct PendingPromise {

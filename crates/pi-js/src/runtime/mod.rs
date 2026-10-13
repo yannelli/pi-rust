@@ -171,6 +171,7 @@ impl JsRuntime {
             host_functions: RwLock::new(options.host_functions.clone()),
             transpiler: TranspileCache::new(options.transpile.clone(), options.cache_dir.clone()),
             resolver: ModuleResolver::new(),
+            files: Default::default(),
             interrupt: Arc::new(AtomicBool::new(false)),
             alive: AtomicBool::new(false),
             config: RuntimeConfig {
