@@ -266,13 +266,15 @@ fn writes_a_transcript_truncates_tool_results_and_omits_system_messages() {
     );
 }
 
+type SummaryRequest = (Vec<Message>, SimpleStreamOptions);
+
 /// Scripted faux model that answers agent requests and summarization requests from separate queues.
 #[derive(Clone, Default)]
 struct Script {
     agent: Arc<Mutex<VecDeque<AssistantMessage>>>,
     summaries: Arc<Mutex<VecDeque<AssistantMessage>>>,
     agent_requests: Arc<Mutex<Vec<Vec<Message>>>>,
-    summary_requests: Arc<Mutex<Vec<(Vec<Message>, SimpleStreamOptions)>>>,
+    summary_requests: Arc<Mutex<Vec<SummaryRequest>>>,
 }
 
 fn is_summary_request(messages: &[Message]) -> bool {
