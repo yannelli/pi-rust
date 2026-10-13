@@ -46,6 +46,8 @@ pub enum UiEvent {
     Rebind(Arc<AgentSession>),
     /// A prompt or command failed outside the event stream.
     Error(String),
+    /// The theme file changed on disk.
+    ThemeChanged,
 }
 
 impl UiEvent {
