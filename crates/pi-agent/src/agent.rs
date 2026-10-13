@@ -15,6 +15,7 @@ use crate::agent_loop::{
     AfterToolCallFn, AgentContext, AgentLoopConfig, ApiKeyFn, BeforeToolCallFn, ConvertToLlmFn, EventSink,
     MessageSource, StreamFn, TransformContextFn, run_agent_loop, run_agent_loop_continue,
 };
+use crate::hooks::{FinishTurnFn, PrepareNextTurnFn, PrepareRequestFn};
 use crate::types::{AgentEvent, SharedTool, ToolExecutionMode};
 
 /// How queued messages are released to the loop.
@@ -33,6 +34,13 @@ struct MessageQueue {
 }
 
 impl MessageQueue {
+    fn peek(&self) -> Vec<Message> {
+        match self.mode {
+            QueueMode::All => self.messages.iter().cloned().collect(),
+            QueueMode::OneAtATime => self.messages.front().cloned().into_iter().collect(),
+        }
+    }
+
     fn drain(&mut self) -> Vec<Message> {
         match self.mode {
             QueueMode::All => self.messages.drain(..).collect(),
@@ -65,6 +73,9 @@ pub struct AgentHooks {
     pub after_tool_call: Option<AfterToolCallFn>,
     pub transform_context: Option<TransformContextFn>,
     pub convert_to_llm: Option<ConvertToLlmFn>,
+    pub finish_turn: Option<FinishTurnFn>,
+    pub prepare_request: Option<PrepareRequestFn>,
+    pub prepare_next_turn: Option<PrepareNextTurnFn>,
     pub tool_execution: ToolExecutionMode,
     pub max_tokens: Option<u64>,
     pub temperature: Option<f64>,
@@ -166,8 +177,35 @@ impl Agent {
     }
 
     pub fn clear_queues(&self) {
+        self.clear_steering_queue();
+        self.clear_follow_up_queue();
+    }
+
+    pub fn clear_steering_queue(&self) {
         lock(&self.inner.steering).messages.clear();
+    }
+
+    pub fn clear_follow_up_queue(&self) {
         lock(&self.inner.follow_up).messages.clear();
+    }
+
+    /// The messages the next drain point would take, without consuming them.
+    pub fn peek_queued_messages(&self) -> Vec<Message> {
+        let steering = lock(&self.inner.steering).peek();
+        if steering.is_empty() { lock(&self.inner.follow_up).peek() } else { steering }
+    }
+
+    pub fn steering_mode(&self) -> QueueMode {
+        lock(&self.inner.steering).mode
+    }
+
+    pub fn follow_up_mode(&self) -> QueueMode {
+        lock(&self.inner.follow_up).mode
+    }
+
+    /// Cancellation token of the active run, if any.
+    pub fn signal(&self) -> Option<CancellationToken> {
+        lock(&self.inner.run).clone()
     }
 
     /// Remove and return all queued messages, steering first.
@@ -296,6 +334,9 @@ impl Agent {
             after_tool_call: hooks.after_tool_call,
             transform_context: hooks.transform_context,
             convert_to_llm: hooks.convert_to_llm,
+            finish_turn: hooks.finish_turn,
+            prepare_request: hooks.prepare_request,
+            prepare_next_turn: hooks.prepare_next_turn,
         };
         (context, config)
     }

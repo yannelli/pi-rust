@@ -28,6 +28,8 @@ struct Finalized {
     duration_ms: Option<u64>,
 }
 
+/// Preparations live for one batch, so the outcome stays inline.
+#[allow(clippy::large_enum_variant)]
 enum Prepared {
     Immediate(Finalized),
     Ready { tool: SharedTool, call: ToolCall, args: Value },
@@ -75,7 +77,7 @@ pub(crate) async fn execute_tool_calls(
             let finalized = match prepare(context, message, call, config, cancel).await {
                 Prepared::Immediate(finalized) => finalized,
                 Prepared::Ready { tool, call, args } => {
-                    run_prepared(tool, call, args, message, config, emit, cancel).await
+                    run_prepared(context, tool, call, args, message, config, emit, cancel).await
                 }
             };
             messages.push(emit_end_and_result(&finalized, emit));
@@ -109,7 +111,7 @@ pub(crate) async fn execute_tool_calls(
                             duration_ms: None,
                         }
                     } else {
-                        run_prepared(tool, call, args, message, config, emit, cancel).await
+                        run_prepared(context, tool, call, args, message, config, emit, cancel).await
                     };
                     emit_end(&finalized, emit);
                     finalized
@@ -148,7 +150,7 @@ async fn prepare(
         Err(error) => return immediate(error, false),
     };
     if let Some(before) = &config.before_tool_call {
-        let input = BeforeToolCall { assistant_message: message, tool_call: call, args: &args };
+        let input = BeforeToolCall { assistant_message: message, tool_call: call, args: &args, context };
         let decision = before(input, cancel.clone()).await;
         if cancel.is_cancelled() {
             return immediate("Operation aborted".into(), false);
@@ -164,7 +166,9 @@ async fn prepare(
     Prepared::Ready { tool: tool.clone(), call: call.clone(), args }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_prepared(
+    context: &AgentContext,
     tool: SharedTool,
     call: ToolCall,
     args: Value,
@@ -201,14 +205,27 @@ async fn run_prepared(
         Err(error) => (AgentToolResult::text(format!("{error:#}")), true),
     };
     if let Some(after) = &config.after_tool_call {
-        let input =
-            AfterToolCall { assistant_message: message, tool_call: &call, args: &args, result: &result, is_error };
+        let input = AfterToolCall {
+            assistant_message: message,
+            tool_call: &call,
+            args: &args,
+            result: &result,
+            is_error,
+            context,
+        };
         if let Some(update) = after(input, cancel.clone()).await {
+            // Structured content not replaced along with the content may no longer match it.
+            if update.structured_content.is_some() || update.content.is_some() {
+                result.structured_content = update.structured_content;
+            }
             if let Some(content) = update.content {
                 result.content = content;
             }
             if let Some(details) = update.details {
                 result.details = Some(details);
+            }
+            if let Some(usage) = update.usage {
+                result.usage = Some(usage);
             }
             if let Some(terminate) = update.terminate {
                 result.terminate = terminate;
@@ -244,6 +261,7 @@ fn emit_result(finalized: &Finalized, emit: &EventSink) -> ToolResultMessage {
         tool_name: finalized.call.name.clone(),
         content: finalized.result.content.clone(),
         details: finalized.result.details.clone(),
+        usage: finalized.result.usage,
         is_error: finalized.is_error,
         timestamp: now_ms(),
         duration_ms: finalized.duration_ms,

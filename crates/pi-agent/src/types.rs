@@ -3,10 +3,12 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use pi_ai::{AssistantMessage, AssistantMessageEvent, ContentBlock, Message, Tool, ToolCall, ToolResultMessage};
+use pi_ai::{AssistantMessage, AssistantMessageEvent, ContentBlock, Message, Tool, ToolCall, ToolResultMessage, Usage};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
+
+use crate::agent_loop::AgentContext;
 
 /// Result of one tool execution.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -15,6 +17,12 @@ pub struct AgentToolResult {
     pub content: Vec<ContentBlock>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub details: Option<Value>,
+    /// Machine-readable result matching the tool's `output_schema`. Never sent to the model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structured_content: Option<Value>,
+    /// Usage of the tool execution itself, outside the main context accounting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Usage>,
     /// Marks the result as an error without failing the tool call.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_error: bool,
@@ -34,6 +42,16 @@ impl AgentToolResult {
 
     pub fn with_details(mut self, details: Value) -> Self {
         self.details = Some(details);
+        self
+    }
+
+    pub fn with_structured_content(mut self, structured_content: Value) -> Self {
+        self.structured_content = Some(structured_content);
+        self
+    }
+
+    pub fn with_usage(mut self, usage: Usage) -> Self {
+        self.usage = Some(usage);
         self
     }
 }
@@ -139,7 +157,10 @@ pub enum AgentEvent {
 pub struct BeforeToolCall<'a> {
     pub assistant_message: &'a AssistantMessage,
     pub tool_call: &'a ToolCall,
+    /// Validated arguments for the tool schema.
     pub args: &'a Value,
+    /// Agent context at the time the call is prepared.
+    pub context: &'a AgentContext,
 }
 
 /// `block` skips execution and reports `reason` as an error result.
@@ -157,13 +178,18 @@ pub struct AfterToolCall<'a> {
     pub args: &'a Value,
     pub result: &'a AgentToolResult,
     pub is_error: bool,
+    /// Agent context at the time the call is finalized.
+    pub context: &'a AgentContext,
 }
 
-/// Fields set here replace the executed result's fields.
+/// Fields set here replace the executed result's fields. Replacing `content` without
+/// `structured_content` drops the structured content, since it may no longer match.
 #[derive(Clone, Debug, Default)]
 pub struct AfterToolCallResult {
     pub content: Option<Vec<ContentBlock>>,
     pub details: Option<Value>,
+    pub structured_content: Option<Value>,
     pub is_error: Option<bool>,
+    pub usage: Option<Usage>,
     pub terminate: Option<bool>,
 }
