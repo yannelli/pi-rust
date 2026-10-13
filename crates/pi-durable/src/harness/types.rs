@@ -156,7 +156,12 @@ impl ToolExecutionResult {
 #[serde(rename_all = "camelCase")]
 pub struct NestedToolExecutionResult {
     pub task_id: TaskId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// A stored `null` stays `Some(Json::Null)`; absent means no structured output.
+    #[serde(
+        default,
+        deserialize_with = "crate::types::present_json::deserialize",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub structured_output: Option<Json>,
     pub is_error: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
