@@ -146,8 +146,12 @@ async fn resolve_auth(options: &StreamOptions, target: &Target) -> Result<Auth, 
         (true, _) => Ok(Auth::Sign(Credentials::new("dummy-access-key", "dummy-secret-key"))),
         (false, Some(token)) => Ok(Auth::Bearer(token)),
         (false, None) => {
-            let input =
-                ChainInput { env: &options.env, profile: target.profile.clone(), region: target.region.clone() };
+            let input = ChainInput {
+                env: &options.env,
+                profile: target.profile.clone(),
+                region: target.region.clone(),
+                mfa_code_provider: None,
+            };
             credentials::resolve(&input).await.map(Auth::Sign)
         }
     }

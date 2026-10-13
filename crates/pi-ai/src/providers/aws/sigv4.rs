@@ -199,6 +199,16 @@ pub fn format_amz_date(time: SystemTime) -> String {
     format!("{year:04}{month:02}{day:02}T{:02}{:02}{:02}Z", rem / 3600, rem % 3600 / 60, rem % 60)
 }
 
+/// `YYYY-MM-DDTHH:MM:SS.mmmZ` in UTC, as JavaScript's `Date.toISOString` writes it.
+pub fn format_iso8601(time: SystemTime) -> String {
+    let since = time.duration_since(UNIX_EPOCH).unwrap_or_default();
+    let seconds = since.as_secs() as i64;
+    let (year, month, day) = civil_from_days(seconds.div_euclid(86_400));
+    let rem = seconds.rem_euclid(86_400);
+    let (hour, minute, second, millis) = (rem / 3600, rem % 3600 / 60, rem % 60, since.subsec_millis());
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z")
+}
+
 fn civil_from_days(days: i64) -> (i64, u32, u32) {
     let z = days + 719_468;
     let era = z.div_euclid(146_097);

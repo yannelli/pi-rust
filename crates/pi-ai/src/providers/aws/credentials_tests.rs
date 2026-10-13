@@ -5,15 +5,15 @@ use serde_json::json;
 use super::*;
 use crate::providers::http_mock::{Reply, RouteServer};
 
-const STS_REPLY: &str = "<AssumeRoleResponse><AssumeRoleResult><Credentials><AccessKeyId>ASIAROLE</AccessKeyId><SecretAccessKey>role&amp;secret</SecretAccessKey><SessionToken>role-token</SessionToken><Expiration>2099-01-01T00:00:00Z</Expiration></Credentials></AssumeRoleResult></AssumeRoleResponse>";
+pub(super) const STS_REPLY: &str = "<AssumeRoleResponse><AssumeRoleResult><Credentials><AccessKeyId>ASIAROLE</AccessKeyId><SecretAccessKey>role&amp;secret</SecretAccessKey><SessionToken>role-token</SessionToken><Expiration>2099-01-01T00:00:00Z</Expiration></Credentials></AssumeRoleResult></AssumeRoleResponse>";
 
-struct Fixture {
-    dir: tempfile::TempDir,
-    env: BTreeMap<String, String>,
+pub(super) struct Fixture {
+    pub dir: tempfile::TempDir,
+    pub env: BTreeMap<String, String>,
 }
 
 /// Config files in a temp home, with instance metadata disabled.
-fn fixture(config: &str, credentials: &str) -> Fixture {
+pub(super) fn fixture(config: &str, credentials: &str) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("config"), config).unwrap();
     std::fs::write(dir.path().join("credentials"), credentials).unwrap();
@@ -27,8 +27,8 @@ fn fixture(config: &str, credentials: &str) -> Fixture {
     Fixture { dir, env }
 }
 
-fn input<'a>(env: &'a BTreeMap<String, String>, profile: Option<&str>) -> ChainInput<'a> {
-    ChainInput { env, profile: profile.map(str::to_string), region: "us-east-1".into() }
+pub(super) fn input<'a>(env: &'a BTreeMap<String, String>, profile: Option<&str>) -> ChainInput<'a> {
+    ChainInput { env, profile: profile.map(str::to_string), region: "us-east-1".into(), mfa_code_provider: None }
 }
 
 #[tokio::test]
@@ -157,7 +157,7 @@ async fn uses_sso_and_login_caches() {
     let expired = json!({"accessToken": "t", "expiresAt": "2001-01-01T00:00:00Z"});
     std::fs::write(sso_dir.join(format!("{key}.json")), expired.to_string()).unwrap();
     let error = resolve(&input(&fixture.env, Some("sso"))).await.unwrap_err();
-    assert!(error.contains("aws sso login --profile sso"), "{error}");
+    assert!(error.contains("Value not present for 'clientId' in SSO Token. Cannot refresh. To refresh"), "{error}");
 
     let login_dir = fixture.dir.path().join(".aws/login/cache");
     std::fs::create_dir_all(&login_dir).unwrap();

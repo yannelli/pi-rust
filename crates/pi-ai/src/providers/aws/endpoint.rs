@@ -1,4 +1,8 @@
-//! AWS partition DNS suffixes, from the SDK's `partitions.json`.
+//! AWS partition DNS suffixes, from the SDK's `partitions.json`, and configured endpoint URLs.
+
+use std::collections::BTreeMap;
+
+use crate::providers::provider_env::provider_env_value;
 
 /// `(region prefix, dns suffix, dual-stack dns suffix)`, most specific prefixes first.
 const PARTITIONS: [(&str, &str, &str); 7] = [
@@ -33,6 +37,17 @@ pub fn regional_endpoint(service: &str, region: &str, fips: bool, dual_stack: bo
     let (suffix, dual_suffix) = partition(region);
     let service = if fips { format!("{service}-fips") } else { service.to_string() };
     format!("https://{service}.{region}.{}", if dual_stack { dual_suffix } else { suffix })
+}
+
+/// Port of the SDK's `getEndpointFromConfig` environment selector: `AWS_ENDPOINT_URL_{SERVICE_ID}`
+/// (for example `SSO_OIDC`), then `AWS_ENDPOINT_URL`, unless `AWS_IGNORE_CONFIGURED_ENDPOINT_URLS=true`.
+pub fn configured_endpoint(service_id: &str, env: &BTreeMap<String, String>) -> Option<String> {
+    if provider_env_value("AWS_IGNORE_CONFIGURED_ENDPOINT_URLS", env).as_deref() == Some("true") {
+        return None;
+    }
+    let suffix = service_id.split(' ').map(str::to_ascii_uppercase).collect::<Vec<_>>().join("_");
+    provider_env_value(&format!("AWS_ENDPOINT_URL_{suffix}"), env)
+        .or_else(|| provider_env_value("AWS_ENDPOINT_URL", env))
 }
 
 /// The region of a standard `bedrock-runtime[-fips].{region}.amazonaws.com[.cn]` URL.
@@ -77,5 +92,15 @@ mod tests {
             Some("cn-north-1".into())
         );
         assert_eq!(standard_bedrock_endpoint_region("https://bedrock-vpc.example.com"), None);
+    }
+
+    #[test]
+    fn reads_configured_endpoint_urls() {
+        let mut env = BTreeMap::from([("AWS_ENDPOINT_URL".to_string(), "http://all".to_string())]);
+        assert_eq!(configured_endpoint("SSO OIDC", &env).as_deref(), Some("http://all"));
+        env.insert("AWS_ENDPOINT_URL_SSO_OIDC".into(), "http://oidc".into());
+        assert_eq!(configured_endpoint("SSO OIDC", &env).as_deref(), Some("http://oidc"));
+        env.insert("AWS_IGNORE_CONFIGURED_ENDPOINT_URLS".into(), "true".into());
+        assert_eq!(configured_endpoint("SSO OIDC", &env), None);
     }
 }
