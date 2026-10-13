@@ -7,9 +7,10 @@ use std::sync::{Arc, Mutex};
 
 use common::*;
 use pi_ai::providers::faux::{FauxProvider, FauxResponse};
+use pi_ai::retry::{RetryEvent, RetryPolicy};
 use pi_ai::{ContentBlock, Message, Model, StopReason, ToolCall};
 use pi_coding_agent::compaction::{
-    CompactionSettings, RetryCallbacks, RetryPolicy, SUMMARIZATION_SYSTEM_PROMPT, SummarizationOptions, compact,
+    CompactionSettings, SUMMARIZATION_SYSTEM_PROMPT, SummarizationOptions, compact,
     compact_session, prepare_compaction,
 };
 use pi_coding_agent::session::{EntryData, SessionManager};
@@ -149,18 +150,18 @@ async fn retries_transient_summarization_errors() {
         vec![FauxResponse::Error("socket hang up".into()), FauxResponse::text("recovered summary")],
     );
     let events = Arc::new(Mutex::new(Vec::new()));
-    let (scheduled, started, finished) = (events.clone(), events.clone(), events.clone());
+    let sink = events.clone();
     let options = SummarizationOptions {
-        retry: Some(RetryPolicy { base_delay_ms: 1, ..RetryPolicy::default() }),
-        callbacks: RetryCallbacks {
-            on_retry_scheduled: Some(Arc::new(move |retry, max, _, error| {
-                scheduled.lock().unwrap().push(format!("scheduled {retry}/{max}: {error}"))
-            })),
-            on_retry_attempt_start: Some(Arc::new(move || started.lock().unwrap().push("start".into()))),
-            on_retry_finished: Some(Arc::new(move |success, retry, _| {
-                finished.lock().unwrap().push(format!("finished {success} {retry}"))
-            })),
-        },
+        retry: Some(RetryPolicy { enabled: true, max_retries: 3, base_delay_ms: 1, max_agent_delay_ms: None }),
+        on_retry: Some(Arc::new(move |event| {
+            sink.lock().unwrap().push(match event {
+                RetryEvent::Scheduled { retry, max_retries, error_message, .. } => {
+                    format!("scheduled {retry}/{max_retries}: {error_message}")
+                }
+                RetryEvent::RetryStart => "start".into(),
+                RetryEvent::Finished { success, retry, .. } => format!("finished {success} {retry}"),
+            })
+        })),
         ..SummarizationOptions::default()
     };
     let mut session = long_session(6);
