@@ -30,6 +30,8 @@ pub struct Options {
     pub delay: Option<Duration>,
     /// Files under the project directory, written before the session starts.
     pub files: Vec<(&'static str, &'static str)>,
+    /// More `models.json` providers, by name.
+    pub providers: Value,
 }
 
 impl Default for Options {
@@ -42,6 +44,7 @@ impl Default for Options {
             persist: true,
             delay: None,
             files: Vec::new(),
+            providers: json!({}),
         }
     }
 }
@@ -59,10 +62,13 @@ pub struct Harness {
 }
 
 fn write_models(agent_dir: &Path, api: &str, options: &Options) {
-    let models = json!({"providers": {"local": {"baseUrl": "http://unused", "api": api, "apiKey": "test-key",
+    let mut models = json!({"providers": {"local": {"baseUrl": "http://unused", "api": api, "apiKey": "test-key",
         "models": [{"id": "tiny", "contextWindow": options.context_window, "maxTokens": options.max_tokens,
             "reasoning": true, "input": ["text", "image"]},
             {"id": "other", "contextWindow": options.context_window, "maxTokens": options.max_tokens}]}}});
+    for (name, provider) in options.providers.as_object().unwrap() {
+        models["providers"][name] = provider.clone();
+    }
     std::fs::write(agent_dir.join("models.json"), models.to_string()).unwrap();
 }
 
@@ -75,6 +81,11 @@ pub fn record(session: &AgentSession) -> Arc<Mutex<Vec<Value>>> {
 }
 
 pub async fn harness(options: Options) -> Harness {
+    harness_with(options, |_| {}).await
+}
+
+/// A harness whose session is created with options `configure` adjusts (tools, MCP, ...).
+pub async fn harness_with(options: Options, configure: impl FnOnce(&mut CreateAgentSessionOptions)) -> Harness {
     let root = tempfile::tempdir().unwrap();
     let cwd = root.path().join("work");
     let agent_dir = root.path().join("agent");
@@ -108,14 +119,24 @@ pub async fn harness(options: Options) -> Harness {
     } else {
         SessionManager::in_memory(&cwd)
     };
-    let session = open_session(&services, manager).await;
+    let session = open_session_with(&services, manager, configure).await;
     let events = record(&session);
     Harness { _root: root, provider, cwd, agent_dir, settings, services, session, events }
 }
 
 /// Create a session over `manager` with the given services.
 pub async fn open_session(services: &AgentSessionServices, manager: SessionManager) -> Arc<AgentSession> {
-    create_agent_session(CreateAgentSessionOptions::new(services.clone(), manager)).await.unwrap().session
+    open_session_with(services, manager, |_| {}).await
+}
+
+pub async fn open_session_with(
+    services: &AgentSessionServices,
+    manager: SessionManager,
+    configure: impl FnOnce(&mut CreateAgentSessionOptions),
+) -> Arc<AgentSession> {
+    let mut options = CreateAgentSessionOptions::new(services.clone(), manager);
+    configure(&mut options);
+    create_agent_session(options).await.unwrap().session
 }
 
 impl Harness {
