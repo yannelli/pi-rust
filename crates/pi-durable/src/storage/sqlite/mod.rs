@@ -6,6 +6,7 @@ mod connection;
 pub mod database;
 pub mod migrations;
 mod reads;
+mod rows;
 mod writes;
 
 use std::sync::Arc;

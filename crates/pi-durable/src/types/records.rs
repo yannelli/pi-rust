@@ -86,7 +86,7 @@ pub struct EntryRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<Vec<Message>>,
     /// JSON payload consumed by views, extensions, or bookkeeping logic.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, deserialize_with = "super::present_json::deserialize", skip_serializing_if = "Option::is_none")]
     pub data: Option<Json>,
     /// Context-only overrides of earlier visible entries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -178,7 +178,7 @@ pub struct SubmissionRecord {
     pub answer: Option<EntryId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, deserialize_with = "super::present_json::deserialize", skip_serializing_if = "Option::is_none")]
     pub detail: Option<Json>,
     pub id: SubmissionId,
 }
@@ -235,7 +235,11 @@ pub enum SubmissionSettlement {
     },
     Unanswered {
         reason: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            deserialize_with = "super::present_json::deserialize",
+            skip_serializing_if = "Option::is_none"
+        )]
         detail: Option<Json>,
     },
 }

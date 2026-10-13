@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use super::database::{SqliteExecutor, SqliteValue, transaction};
-use super::reads::{materialize, record};
+use super::rows::{materialize, record};
 use super::{SqliteStorage, encode, indexed, parse_next_id, scope_columns};
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{DocumentId, Seq};

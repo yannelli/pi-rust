@@ -30,3 +30,13 @@ pub(crate) mod optional_map {
         }
     }
 }
+
+/// Serde adapter for an optional JSON field where a present `null` stays `Some(Json::Null)`, as upstream keeps it.
+pub(crate) mod present_json {
+    use pi_chord::Json;
+    use serde::{Deserialize, Deserializer};
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Json>, D::Error> {
+        Json::deserialize(deserializer).map(Some)
+    }
+}

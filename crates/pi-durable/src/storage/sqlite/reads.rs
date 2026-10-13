@@ -4,15 +4,14 @@ use std::sync::atomic::Ordering;
 
 use async_trait::async_trait;
 use pi_chord::Context;
-use pi_chord::delta::{apply, parse_ops};
 
-use super::database::{SqliteExecutor, SqliteValue, transaction};
+use super::database::{SqliteValue, transaction};
+use super::rows::{materialize, record, records};
 use super::{SqliteStorage, decode, indexed, scope_columns};
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{ConversationId, DocumentId, EntryId, Seq, SubmissionId, TaskId};
 use crate::storage::memory::page;
 use crate::storage::scan::{MAX_SAFE_INTEGER, ScanStart, cursor_id, scan_start};
-use crate::storage::{is_alive_at, is_current_only};
 use crate::types::{
     ConversationQuery, ConversationRecord, Cursor, DocumentAddress, DocumentPoint, DocumentQuery, DocumentRecord,
     EntryQuery, EntryRecord, Page, ScanOrder, Storage, StorageWrite, StoredDocument, StoredEntry, SubmissionQuery,
@@ -31,77 +30,6 @@ fn scan_sql(start: ScanStart) -> (&'static str, SqliteValue, &'static str) {
 
 fn unknown_conversation(id: ConversationId) -> DurableError {
     DurableError::storage_request(format!("Unknown conversation: {id}"))
-}
-
-pub(crate) async fn records<T: serde::de::DeserializeOwned>(
-    executor: &dyn SqliteExecutor,
-    sql: &str,
-    params: &[SqliteValue],
-) -> DurableResult<Vec<T>> {
-    let rows = executor.all(sql, params).await?;
-    rows.iter().map(|row| decode(row.text("record")?)).collect()
-}
-
-pub(crate) async fn record<T: serde::de::DeserializeOwned>(
-    executor: &dyn SqliteExecutor,
-    sql: &str,
-    params: &[SqliteValue],
-) -> DurableResult<Option<T>> {
-    match executor.get(sql, params).await? {
-        Some(row) => Ok(Some(decode(row.text("record")?)?)),
-        None => Ok(None),
-    }
-}
-
-/// Materialize one incarnation from its newest applicable base and the delta tail after it.
-pub(crate) async fn materialize(
-    executor: &dyn SqliteExecutor,
-    id: DocumentId,
-    at: DocumentPoint,
-) -> DurableResult<Option<StoredDocument>> {
-    let id_value = SqliteValue::from(id.0);
-    let found: Option<DocumentRecord> =
-        record(executor, "SELECT record FROM documents WHERE id = ?", std::slice::from_ref(&id_value)).await?;
-    let Some(stored) = found else { return Ok(None) };
-    if at != DocumentPoint::Current && is_current_only(&stored) {
-        return Err(DurableError::storage_request(format!("Document {id} does not retain historical content")));
-    }
-    if !is_alive_at(&stored, at) {
-        return Ok(None);
-    }
-    let upper = SqliteValue::from(match at {
-        DocumentPoint::Current => MAX_SAFE_INTEGER,
-        DocumentPoint::At(seq) => seq.0,
-    });
-    let base = executor
-        .get(
-            "SELECT seq, kind, version, content FROM document_revisions
-				WHERE document_id = ? AND kind = 'base' AND seq <= ? ORDER BY seq DESC LIMIT 1",
-            &[id_value.clone(), upper.clone()],
-        )
-        .await?;
-    let Some(base) = base else {
-        return Err(DurableError::storage(format!("Document {id} is missing a required base")));
-    };
-    let version = base.integer("version")?;
-    let mut value = decode::<pi_chord::Json>(base.text("content")?)?;
-    let tail = executor
-        .all(
-            "SELECT seq, kind, version, content FROM document_revisions
-				WHERE document_id = ? AND seq > ? AND seq <= ? ORDER BY seq",
-            &[id_value, SqliteValue::Integer(base.integer("seq")?), upper],
-        )
-        .await?;
-    for revision in &tail {
-        if revision.text("kind")? != "delta" || revision.integer("version")? != version {
-            return Err(DurableError::storage(format!(
-                "Document {id} crosses a stored version boundary without a base"
-            )));
-        }
-        let ops = parse_ops(&decode(revision.text("content")?)?)?;
-        value = apply(Some(value), &ops)?;
-    }
-    Ok(Some(StoredDocument { record: stored, version: version as u32, value, deltas_since_base: tail.len() as u32 }))
 }
 
 impl SqliteStorage {
