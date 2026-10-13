@@ -37,6 +37,7 @@ crc32fast = "1"
 ruzstd = "0.8"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake", "__rustls-tls"] }
+tokio-rustls = { version = "0.26", default-features = false }
 webpki-roots = "1"
 
 [workspace.lints.rust]
