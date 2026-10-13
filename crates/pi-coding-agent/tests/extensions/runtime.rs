@@ -28,6 +28,10 @@ struct Runtime {
 
 /// A runtime whose sessions load `source` from the settings, bound to a recording UI.
 async fn runtime(source: &str, responses: Vec<FauxResponse>, mode: ExtensionMode) -> Runtime {
+    runtime_with(source, FauxProvider::new(responses), mode).await
+}
+
+async fn runtime_with(source: &str, provider: Arc<FauxProvider>, mode: ExtensionMode) -> Runtime {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let root = tempfile::tempdir().unwrap();
     let (cwd, agent_dir) = (root.path().join("work"), root.path().join("agent"));
@@ -39,7 +43,7 @@ async fn runtime(source: &str, responses: Vec<FauxResponse>, mode: ExtensionMode
     let models = json!({"providers": {"local": {"baseUrl": "http://unused", "api": api, "apiKey": "k",
         "models": [{"id": "tiny", "contextWindow": 128000, "maxTokens": 4000}]}}});
     std::fs::write(agent_dir.join("models.json"), models.to_string()).unwrap();
-    register_api_provider(api, FauxProvider::new(responses));
+    register_api_provider(api, provider);
     let settings = json!({"defaultProvider": "local", "defaultModel": "tiny",
         "extensions": [extension.display().to_string()]});
     let options = AppOptions {
@@ -147,4 +151,83 @@ async fn without_a_ui_dialogs_return_their_defaults() {
     let answers = entries.iter().find(|entry| entry["customType"] == "answers").expect("answers entry");
     assert_eq!(answers["data"], json!({"mode": "print", "hasUI": false, "choice": null, "ok": false, "text": null}));
     assert!(r.ui.calls().is_empty(), "{:?}", r.ui.calls());
+}
+
+const SHUTDOWN_ROLES: &str = r#"export default function (pi) {
+	pi.on("session_shutdown", (event, ctx) => {
+		const roles = ctx.sessionManager.getEntries().filter((e) => e.type === "message").map((e) => e.message.role);
+		ctx.ui.notify(`shutdown ${event.reason} ${roles.join(",")} idle=${ctx.isIdle()}`);
+	});
+}
+"#;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_running_turn_is_aborted_and_saved_before_session_shutdown() {
+    let long = "word ".repeat(400);
+    let provider = FauxProvider::with_delay(vec![FauxResponse::text(long)], std::time::Duration::from_millis(20));
+    let r = runtime_with(SHUTDOWN_ROLES, provider, ExtensionMode::Tui).await;
+    let session = r.runtime.session();
+    let prompt = tokio::spawn(async move { session.prompt("hello", Vec::new()).await });
+    let streaming = r.runtime.session();
+    eventually(|| streaming.is_streaming()).await;
+    let old_file = r.runtime.session().session_file().expect("persisted");
+    r.runtime.new_session(None, None).await.unwrap();
+    let _ = prompt.await;
+    let calls = r.ui.calls();
+    let shutdown = calls.iter().find(|call| call.starts_with("notify(info): shutdown new")).expect("shutdown");
+    assert!(shutdown.ends_with("user,assistant idle=true"), "{calls:?}");
+    let saved = std::fs::read_to_string(old_file).unwrap();
+    assert!(saved.contains("\"stopReason\":\"aborted\""), "{saved}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn resume_gives_project_trust_handlers_the_live_ui() {
+    let root = tempfile::tempdir().unwrap();
+    let (work, other, agent_dir) = (root.path().join("work"), root.path().join("other"), root.path().join("agent"));
+    std::fs::create_dir_all(&work).unwrap();
+    std::fs::create_dir_all(other.join(".pi/extensions")).unwrap();
+    std::fs::write(other.join(".pi/extensions/project.ts"), "export default function () {}\n").unwrap();
+    std::fs::create_dir_all(agent_dir.join("extensions")).unwrap();
+    let source = r#"export default function (pi) {
+	pi.on("project_trust", async (event, ctx) => {
+		const choice = await ctx.ui.select(`Trust ${event.cwd}? (${ctx.mode}, ${ctx.hasUI})`, ["Trust", "Skip"]);
+		return choice === "Trust" ? { trusted: "yes", remember: true } : undefined;
+	});
+}
+"#;
+    std::fs::write(agent_dir.join("extensions/trust.ts"), source).unwrap();
+    let api = "faux-runtime-resume-trust";
+    let models = json!({"providers": {"local": {"baseUrl": "http://unused", "api": api, "apiKey": "k",
+        "models": [{"id": "tiny", "contextWindow": 128000, "maxTokens": 4000}]}}});
+    std::fs::write(agent_dir.join("models.json"), models.to_string()).unwrap();
+    let settings = json!({"defaultProvider": "local", "defaultModel": "tiny"});
+    std::fs::write(agent_dir.join("settings.json"), settings.to_string()).unwrap();
+    register_api_provider(api, FauxProvider::new(Vec::new()));
+    let options = AppOptions {
+        agent_dir: agent_dir.clone(),
+        credentials: Some(Arc::new(InMemoryCredentialStore::new(BTreeMap::new()))),
+        ..AppOptions::default()
+    };
+    let manager = SessionManager::create(&work, Some(&agent_dir.join("sessions")));
+    let runtime = Arc::new(create_app_runtime(options, manager).await.unwrap());
+    let ui = Arc::new(RecordingUi::default());
+    ui.answers.lock().unwrap().push("Trust".into());
+    let bindings = ExtensionBindings {
+        ui: ui.clone(),
+        mode: ExtensionMode::Tui,
+        runtime: Some(Arc::downgrade(&runtime)),
+        ..ExtensionBindings::default()
+    };
+    runtime.session().bind_extensions(bindings).await;
+
+    let file = root.path().join("other.jsonl");
+    let header = json!({"type": "session", "version": 3, "id": "resume-trust", "timestamp": "2025-01-01T00:00:00Z",
+        "cwd": other.display().to_string()});
+    std::fs::write(&file, format!("{header}\n")).unwrap();
+    let prompt: pi_coding_agent::agent_session::TrustPromptFn = Arc::new(|_| Box::pin(async { None }));
+    runtime.switch_session_with(&file, None, Some(prompt)).await.unwrap();
+    let expected = format!("select: Trust {}? (tui, true) [Trust, Skip]", other.display());
+    assert!(ui.calls().contains(&expected), "{:?}", ui.calls());
+    let store = pi_coding_agent::resources::trust::ProjectTrustStore::new(&agent_dir);
+    assert_eq!(store.get(&other).unwrap(), Some(true));
 }

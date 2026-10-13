@@ -217,10 +217,9 @@ impl InteractiveMode {
         let bridge = mode.bridge.clone();
         runtime.set_rebind_session(Some(Arc::new(move |session: &Arc<AgentSession>| bridge.rebind(session))));
         let bridge = Arc::downgrade(&mode.bridge);
-        runtime.set_before_session_invalidate(Some(Arc::new(move || {
-            if let Some(bridge) = bridge.upgrade() {
-                bridge.call(|mode| mode.reset_extension_ui());
-            }
+        runtime.set_before_session_invalidate(Some(Arc::new(move || match bridge.upgrade() {
+            Some(bridge) => bridge.call_and_wait(|mode| mode.reset_extension_ui()),
+            None => Box::pin(async {}),
         })));
         mode
     }
@@ -464,11 +463,13 @@ impl InteractiveMode {
         self.send_startup_messages();
         while !self.is_exited() {
             if let Err(error) = self.run_once().await {
+                self.bridge.close();
                 self.state.borrow_mut().shutting_down = true;
                 self.tui().stop(pi_tui::TuiStopOptions::default());
                 return Err(error);
             }
         }
+        self.bridge.close();
         match self.state.borrow_mut().fatal_error.take() {
             Some(message) => Err(super::FatalErrorReported(message).into()),
             None => Ok(()),

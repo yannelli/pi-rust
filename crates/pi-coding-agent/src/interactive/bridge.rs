@@ -181,6 +181,8 @@ struct State {
     queue: VecDeque<(u64, UiEvent)>,
     generation: u64,
     subscription: Option<(Arc<AgentSession>, u64)>,
+    /// The UI loop ended; nothing queued runs any more.
+    closed: bool,
 }
 
 /// The queue between session listeners and the UI thread. `Send + Sync`.
@@ -246,6 +248,37 @@ impl EventBridge {
     pub fn call(&self, call: impl FnOnce(&Rc<InteractiveMode>) + Send + 'static) {
         self.lock().queue.push_back((ANY_GENERATION, UiEvent::Call(UiCall(Box::new(call)))));
         self.waker.wake();
+    }
+
+    /// Run `call` on the UI thread; the future resolves once it ran, or at once after
+    /// [`Self::close`].
+    pub fn call_and_wait(
+        &self,
+        call: impl FnOnce(&Rc<InteractiveMode>) + Send + 'static,
+    ) -> futures::future::BoxFuture<'static, ()> {
+        let (done, finished) = tokio::sync::oneshot::channel::<()>();
+        {
+            let mut state = self.lock();
+            if state.closed {
+                return Box::pin(async {});
+            }
+            let call = move |mode: &Rc<InteractiveMode>| {
+                call(mode);
+                let _ = done.send(());
+            };
+            state.queue.push_back((ANY_GENERATION, UiEvent::Call(UiCall(Box::new(call)))));
+        }
+        self.waker.wake();
+        Box::pin(async move {
+            let _ = finished.await;
+        })
+    }
+
+    /// The UI loop ended: drop the queued events, which releases waiting callers.
+    pub fn close(&self) {
+        let mut state = self.lock();
+        state.closed = true;
+        state.queue.clear();
     }
 
     pub fn unsubscribe(&self) {

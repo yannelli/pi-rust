@@ -452,7 +452,7 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
     if interactive {
         let session_cwd = session_manager.cwd().to_path_buf();
         let local = tokio::task::LocalSet::new();
-        let (trusted, diagnostics) = local.run_until(startup_project_trust(&options, &session_cwd)).await;
+        let (trusted, diagnostics) = local.run_until(startup_project_trust(&options, &session_cwd, settings)).await;
         trust_diagnostics = diagnostics;
         if let Some(trusted) = trusted {
             options.project_trust_decisions.push((session_cwd, trusted));

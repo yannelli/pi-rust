@@ -53,7 +53,7 @@ pub use self::model_runtime::{ModelRuntime, ModelRuntimeOptions};
 pub use self::prompt::{PromptDisposition, PromptOptions, StreamingBehavior};
 pub use self::runtime::{
     AgentSessionRuntime, AsyncSetupFn, ForkPosition, ForkResult, InvalidateFn, RuntimeFactory, RuntimeParts,
-    RuntimeTarget, SessionImportFileNotFound, SwitchResult, TrustPromptFn,
+    RuntimeTarget, SessionImportFileNotFound, SwitchResult, TrustPromptFn, TrustUi,
 };
 pub use self::runtime_catalog::{CachedFileModelsStore, CatalogSetup, LlamaAuth, ProviderAuth, catalog_base_url};
 pub use self::runtime_virtual::RouteOptions;

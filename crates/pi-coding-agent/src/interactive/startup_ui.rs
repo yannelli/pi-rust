@@ -104,19 +104,22 @@ pub async fn prompt_project_trust_on(
     agent_dir: &Path,
     trust_override: Option<bool>,
 ) -> Option<bool> {
-    prompt_project_trust_with(terminal, cwd, agent_dir, trust_override, None).await
+    let settings = SettingsManager::create(cwd, agent_dir, SettingsOptions { project_trusted: false });
+    prompt_project_trust_with(terminal, cwd, agent_dir, trust_override, None, &settings).await
 }
 
 /// [`prompt_project_trust_on`] after the `project_trust` handlers of extensions: their decision
-/// counts as the answer. `None` when neither they nor a prompt decided.
+/// counts as the answer. `None` when neither they nor a prompt decided. `settings` are the
+/// startup settings, with `--use-theme` applied, that style the prompt.
 pub async fn prompt_project_trust_with(
     terminal: TerminalRef,
     cwd: &Path,
     agent_dir: &Path,
     trust_override: Option<bool>,
     extension_decision: Option<ExtensionTrustDecision>,
+    settings: &SettingsManager,
 ) -> Option<bool> {
-    let global = SettingsManager::create(cwd, agent_dir, SettingsOptions { project_trusted: false });
+    let global = settings;
     let store = ProjectTrustStore::new(agent_dir);
     let home = home_dir();
     let request = ProjectTrustRequest {
@@ -133,7 +136,7 @@ pub async fn prompt_project_trust_with(
         _ => return None,
     };
     let labels: Vec<String> = prompt.options.iter().map(|option| option.label.clone()).collect();
-    let chosen = show_startup_selector(terminal, &global, &prompt.message, labels).await;
+    let chosen = show_startup_selector(terminal, global, &prompt.message, labels).await;
     let option = chosen.and_then(|label| prompt.options.iter().find(|option| option.label == label));
     Some(apply_project_trust_choice(&store, option).unwrap_or(false))
 }
@@ -216,20 +219,21 @@ pub async fn run_with_startup_ui<T, Fut: Future<Output = T>>(
 }
 
 /// The project trust decision at interactive startup: `project_trust` handlers of extensions
-/// first, with startup dialogs as their UI, then the trust prompt. Call inside a `LocalSet`.
+/// first, with startup dialogs as their UI, then the trust prompt. `settings` are the startup
+/// settings (upstream `startupSettingsManager`). Call inside a `LocalSet`.
 pub async fn startup_project_trust(
     options: &crate::app::AppOptions,
     cwd: &Path,
+    settings: &SettingsManager,
 ) -> (Option<bool>, Vec<crate::agent_session::RuntimeDiagnostic>) {
     let terminal: TerminalRef = Rc::new(RefCell::new(ProcessTerminal::new()));
-    let settings = SettingsManager::create(cwd, &options.agent_dir, SettingsOptions { project_trusted: false });
-    let (decision, diagnostics) = run_with_startup_ui(terminal.clone(), &settings, |ui| {
+    let (decision, diagnostics) = run_with_startup_ui(terminal.clone(), settings, |ui| {
         let mut options = options.clone();
         options.project_trust_ui = Some((ui, crate::extension_ui::ExtensionMode::Tui));
         async move { crate::app::extension_trust_decision(&options, cwd).await }
     })
     .await;
     let override_ = options.project_trust_override;
-    let trusted = prompt_project_trust_with(terminal, cwd, &options.agent_dir, override_, decision).await;
+    let trusted = prompt_project_trust_with(terminal, cwd, &options.agent_dir, override_, decision, settings).await;
     (trusted, diagnostics)
 }

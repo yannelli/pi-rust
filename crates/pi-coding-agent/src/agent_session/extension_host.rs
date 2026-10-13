@@ -414,6 +414,12 @@ impl AgentSession {
 
     /// Unload extensions after `session_shutdown` (reload, replacement, or quit).
     pub(crate) async fn shutdown_extensions(&self, reason: &str, target: Option<&str>) {
+        self.emit_session_shutdown(reason, target).await;
+        self.invalidate_extensions().await;
+    }
+
+    /// `session_shutdown` to the extensions (upstream `emitSessionShutdownEvent`).
+    pub(crate) async fn emit_session_shutdown(&self, reason: &str, target: Option<&str>) {
         let Some(runner) = self.extension_runner() else { return };
         if runner.has_handlers("session_shutdown") {
             let mut event = json!({"type": "session_shutdown", "reason": reason});
@@ -422,7 +428,13 @@ impl AgentSession {
             }
             runner.emit(event).await;
         }
-        runner.invalidate(None).await;
+    }
+
+    /// Make the extension contexts of this session stale.
+    pub(crate) async fn invalidate_extensions(&self) {
+        if let Some(runner) = self.extension_runner() {
+            runner.invalidate(None).await;
+        }
     }
 
     /// Unload and load the extensions again (upstream `reload`).

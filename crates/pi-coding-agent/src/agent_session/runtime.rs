@@ -33,7 +33,12 @@ pub struct RuntimeTarget {
     /// Shows the trust prompt for `cwd` when it needs a decision (upstream
     /// `projectTrustContextFactory`); without it the project stays untrusted.
     pub trust_prompt: Option<TrustPromptFn>,
+    /// `ctx.ui` of the `project_trust` handlers for `cwd`: the live UI on `/resume`.
+    pub trust_ui: Option<TrustUi>,
 }
+
+/// An extension UI and mode for `project_trust` handlers (upstream `ProjectTrustContext`).
+pub type TrustUi = (Arc<dyn crate::extension_ui::ExtensionUi>, crate::extension_ui::ExtensionMode);
 
 /// Asks the user to pick a project trust option; `None` when dismissed.
 pub type TrustPromptFn = Arc<
@@ -58,7 +63,7 @@ pub type RuntimeFactory = Arc<dyn Fn(RuntimeTarget) -> BoxFuture<'static, anyhow
 /// Called with the new session after every replacement, for example to resubscribe.
 pub type RebindFn = Arc<dyn Fn(&Arc<AgentSession>) + Send + Sync>;
 /// Runs on the runtime before a session is replaced or disposed.
-pub type InvalidateFn = Arc<dyn Fn() + Send + Sync>;
+pub type InvalidateFn = Arc<dyn Fn() -> BoxFuture<'static, ()> + Send + Sync>;
 
 /// Adds entries to a new session before it starts (upstream `newSession({ setup })`).
 pub type SessionSetupFn = Box<dyn FnOnce(&mut SessionManager) + Send>;
@@ -132,6 +137,7 @@ impl AgentSessionRuntime {
             reason: SessionStartReason::Startup,
             previous_session_file: None,
             trust_prompt: None,
+            trust_ui: None,
         };
         let parts = factory(target).await?;
         Ok(Self {
@@ -173,16 +179,18 @@ impl AgentSessionRuntime {
         *lock(&self.before_invalidate) = before;
     }
 
-    /// `session_shutdown` to the extensions, then abort and dispose of the session.
+    /// Settle the running turn so it is saved to the outgoing session, send `session_shutdown`,
+    /// let the UI detach (upstream `beforeSessionInvalidate`), then invalidate and dispose.
     async fn teardown_current(&self, reason: &str, target: Option<&Path>) {
         let session = self.session();
         let target = target.map(|path| path.display().to_string());
-        session.shutdown_extensions(reason, target.as_deref()).await;
+        session.abort().await;
+        session.emit_session_shutdown(reason, target.as_deref()).await;
         let before_invalidate = lock(&self.before_invalidate).clone();
         if let Some(before_invalidate) = before_invalidate {
-            before_invalidate();
+            before_invalidate().await;
         }
-        session.abort().await;
+        session.invalidate_extensions().await;
         session.shutdown().await;
         // A command that replaced the session still runs on the old runtime (`withSession`); it
         // stops once nothing holds it. Quitting stops it now.
@@ -204,7 +212,7 @@ impl AgentSessionRuntime {
         reason: SessionStartReason,
         previous_session_file: Option<PathBuf>,
     ) -> anyhow::Result<()> {
-        self.replace_with(session_manager, reason, previous_session_file, None, None).await
+        self.replace_with(session_manager, reason, previous_session_file, None, None, None).await
     }
 
     async fn replace_with(
@@ -214,6 +222,7 @@ impl AgentSessionRuntime {
         previous_session_file: Option<PathBuf>,
         setup: Option<AsyncSetupFn>,
         trust_prompt: Option<TrustPromptFn>,
+        trust_ui: Option<TrustUi>,
     ) -> anyhow::Result<()> {
         let reason_name = match reason {
             SessionStartReason::Startup => "startup",
@@ -231,6 +240,7 @@ impl AgentSessionRuntime {
             reason,
             previous_session_file: previous_session_file.clone(),
             trust_prompt,
+            trust_ui,
         };
         let parts = (self.factory)(target).await?;
         let session = parts.session.clone();
@@ -261,7 +271,7 @@ impl AgentSessionRuntime {
     }
 
     /// [`Self::switch_session`] that asks `trust_prompt` when the session's folder needs a
-    /// trust decision.
+    /// trust decision; the `project_trust` handlers then get the current session's UI.
     pub async fn switch_session_with(
         &self,
         path: &Path,
@@ -279,7 +289,10 @@ impl AgentSessionRuntime {
         let previous = self.session().session_file();
         let session_manager = SessionManager::open_with(path, None, cwd_override)?;
         assert_cwd_exists(&session_manager, &self.cwd())?;
-        self.replace_with(session_manager, SessionStartReason::Resume, previous, None, trust_prompt).await?;
+        let bindings = trust_prompt.as_ref().and_then(|_| self.session().extension_bindings());
+        let trust_ui = bindings.map(|bindings| (bindings.ui, bindings.mode));
+        let reason = SessionStartReason::Resume;
+        self.replace_with(session_manager, reason, previous, None, trust_prompt, trust_ui).await?;
         Ok(SwitchResult::default())
     }
 
@@ -316,7 +329,7 @@ impl AgentSessionRuntime {
         let options = NewSessionOptions { id: None, parent_session };
         let cwd = self.cwd();
         let session_manager = SessionManager::create_with(&cwd, persisted.then_some(dir.as_path()), options)?;
-        self.replace_with(session_manager, SessionStartReason::New, previous, setup, None).await?;
+        self.replace_with(session_manager, SessionStartReason::New, previous, setup, None, None).await?;
         Ok(SwitchResult::default())
     }
 
