@@ -42,6 +42,10 @@ pulldown-cmark = { version = "0.13.0", default-features = false }
 unicode-segmentation = "1.12"
 unicode-normalization = "0.1.24"
 zip = { version = "7", default-features = false, features = ["deflate-flate2"] }
+semver = "1.0.26"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.5", features = ["stdio"] }
 
 [dev-dependencies]
 tempfile.workspace = true
