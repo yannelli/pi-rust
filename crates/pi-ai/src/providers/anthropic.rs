@@ -43,11 +43,14 @@ impl ApiProvider for AnthropicMessages {
         if let Some(hook) = options.on_payload.take() {
             // A replaced payload still streams.
             options.on_payload = Some(Arc::new(move |payload, model| {
-                hook(payload, model).map(|mut next| {
-                    if let Some(object) = next.as_object_mut() {
-                        object.insert("stream".into(), true.into());
-                    }
-                    next
+                let next = hook(payload, model);
+                Box::pin(async move {
+                    next.await.map(|mut next| {
+                        if let Some(object) = next.as_object_mut() {
+                            object.insert("stream".into(), true.into());
+                        }
+                        next
+                    })
                 })
             }));
         }

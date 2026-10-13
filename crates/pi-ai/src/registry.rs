@@ -50,8 +50,21 @@ pub struct ProviderResponse {
     pub headers: BTreeMap<String, String>,
 }
 
-/// Inspects or replaces the request payload before it is sent; `None` keeps it.
-pub type OnPayloadFn = Arc<dyn Fn(&serde_json::Value, &Model) -> Option<serde_json::Value> + Send + Sync>;
+/// Inspects or replaces the request payload before it is sent; `None` keeps it. Upstream
+/// `onPayload` may return a promise, so the hook is asynchronous; see [`payload_hook`].
+pub type OnPayloadFn = Arc<
+    dyn Fn(&serde_json::Value, &Model) -> futures::future::BoxFuture<'static, Option<serde_json::Value>> + Send + Sync,
+>;
+
+/// An [`OnPayloadFn`] from a synchronous function.
+pub fn payload_hook(
+    hook: impl Fn(&serde_json::Value, &Model) -> Option<serde_json::Value> + Send + Sync + 'static,
+) -> OnPayloadFn {
+    Arc::new(move |payload, model| {
+        let result = hook(payload, model);
+        Box::pin(async move { result })
+    })
+}
 pub type OnResponseFn = Arc<dyn Fn(&ProviderResponse, &Model) + Send + Sync>;
 /// Observes each parsed provider stream event before normalization.
 pub type OnProviderStreamEventFn = Arc<dyn Fn(&serde_json::Value, &Model) + Send + Sync>;

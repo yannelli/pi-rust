@@ -42,7 +42,7 @@ pub use provider_options::{
 };
 pub use registry::{
     ApiProvider, CacheRetention, DeferredOptions, ProviderResponse, StreamOptions, ThinkingBudgets, Transport,
-    api_provider, cancel_deferred, complete, fetch_deferred, http_client, register_api_provider, stream,
+    api_provider, cancel_deferred, complete, fetch_deferred, http_client, payload_hook, register_api_provider, stream,
     stream_deferred, unregister_api_provider,
 };
 pub use request::RequestOptions;

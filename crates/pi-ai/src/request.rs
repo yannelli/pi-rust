@@ -109,9 +109,9 @@ impl<'a> SendOptions<'a> {
 }
 
 /// Apply `on_payload`: a returned value replaces the body.
-pub(crate) fn apply_payload_hook(body: Value, hook: Option<&OnPayloadFn>, model: &Model) -> Value {
+pub(crate) async fn apply_payload_hook(body: Value, hook: Option<&OnPayloadFn>, model: &Model) -> Value {
     match hook {
-        Some(hook) => hook(&body, model).unwrap_or(body),
+        Some(hook) => hook(&body, model).await.unwrap_or(body),
         None => body,
     }
 }

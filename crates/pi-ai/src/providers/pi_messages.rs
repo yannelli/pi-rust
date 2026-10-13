@@ -36,7 +36,7 @@ impl ApiProvider for PiMessages {
             sender.push(error_event(model, message, false, Vec::new()));
             return stream;
         };
-        let payload = apply_payload_hook(build_payload(model, context, &options), options.on_payload.as_ref(), model);
+        let payload = build_payload(model, context, &options);
         let defaults = vec![
             ("authorization", format!("Bearer {api_key}")),
             ("accept", "text/event-stream".to_string()),
@@ -44,9 +44,11 @@ impl ApiProvider for PiMessages {
         ];
         let headers = build_headers(defaults, &Default::default(), &options.headers, &options.suppressed_headers);
         let url = messages_url(model, options.debug);
-        let request = HttpRequest { url, headers, body: payload };
+        let mut request = HttpRequest { url, headers, body: payload };
         let model = model.clone();
         tokio::spawn(async move {
+            let payload = std::mem::take(&mut request.body);
+            request.body = apply_payload_hook(payload, options.on_payload.as_ref(), &model).await;
             let cancel = options.cancel.clone();
             let result = tokio::select! {
                 biased;

@@ -53,7 +53,7 @@ impl ApiProvider for GoogleGenerativeAI {
         let prepare = {
             let (model, options) = (model.clone(), options.clone());
             async move {
-                let params = apply_payload_hook(params, options.on_payload.as_ref(), &model);
+                let params = apply_payload_hook(params, options.on_payload.as_ref(), &model).await;
                 let (model_id, body) = to_wire(&params)?;
                 let path = model_path(&model_id, false)?;
                 let headers =

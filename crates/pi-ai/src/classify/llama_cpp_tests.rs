@@ -364,7 +364,7 @@ async fn passes_completion_payloads_and_responses_through_the_request_hooks() {
     let statuses: Arc<Mutex<Vec<u16>>> = Arc::default();
     let (seen_payloads, seen_statuses) = (payloads.clone(), statuses.clone());
     let mut options = options();
-    options.request.on_payload = Some(Arc::new(move |payload: &Value, _: &Model| {
+    options.request.on_payload = Some(crate::registry::payload_hook(move |payload: &Value, _: &Model| {
         seen_payloads.lock().unwrap().push(payload.clone());
         let mut payload = payload.clone();
         payload["id_slot"] = json!(1);

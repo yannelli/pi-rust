@@ -126,7 +126,7 @@ impl Request<'_> {
     /// POST to the server root. With `hooks`, the payload and response hooks run (completions only).
     async fn post(&self, path: &str, body: Value, hooks: bool) -> Result<Value, ProviderRequestError> {
         let options = &self.options.request;
-        let body = if hooks { apply_payload_hook(body, options.on_payload.as_ref(), self.model) } else { body };
+        let body = if hooks { apply_payload_hook(body, options.on_payload.as_ref(), self.model).await } else { body };
         let mut defaults = vec![("content-type", "application/json".to_string())];
         if let Some(key) = options.api_key.as_deref().filter(|key| !key.is_empty()) {
             defaults.push(("authorization", format!("Bearer {key}")));

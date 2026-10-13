@@ -4,7 +4,6 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock, Weak};
-use std::time::Duration;
 
 use futures::FutureExt;
 use futures::future::BoxFuture;
@@ -16,9 +15,6 @@ use serde_json::{Value, json};
 
 use super::{AgentSession, lock};
 use crate::extensions::ExtensionRunner;
-
-/// How long a `before_provider_request` handler may hold a request.
-const PAYLOAD_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Extension hooks around provider requests, shared with the session's stream function.
 pub type RequestHooksSlot = Arc<RwLock<Option<Weak<ExtensionRunner>>>>;
@@ -97,11 +93,14 @@ pub(crate) fn install_request_observers(
     let runner = slot_runner(slot)?;
     if runner.has_handlers("before_provider_request") {
         let weak = Arc::downgrade(&runner);
+        // Awaited like upstream's `onPayload`: no time limit, and no thread blocks on it.
         options.on_payload = Some(Arc::new(move |payload: &Value, _model: &Model| {
-            let runner = weak.upgrade()?;
-            let call = vec![payload.clone().into()];
-            let result = runner.host().blocking_call_method_within("emitBeforeProviderRequest", call, PAYLOAD_TIMEOUT);
-            result.ok().map(pi_js::HostValue::into_json).filter(|changed| changed != payload)
+            let (weak, payload) = (weak.clone(), payload.clone());
+            Box::pin(async move {
+                let runner = weak.upgrade()?;
+                let changed = runner.call_json("emitBeforeProviderRequest", vec![payload.clone()]).await.ok()?;
+                (changed != payload).then_some(changed)
+            })
         }));
     }
     let wants_response = runner.has_handlers("after_provider_response");

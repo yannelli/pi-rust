@@ -12,7 +12,7 @@ use crate::http::pi_user_agent;
 use crate::providers::common::{HttpRequest, endpoint, header_map};
 use crate::providers::http_stream::{ResponseReport, SendConfig, spawn_builder_stream, status_text};
 use crate::registry::{ApiProvider, StreamOptions};
-use crate::request::{apply_payload_hook, truncate_error_text};
+use crate::request::truncate_error_text;
 use crate::retry::ProviderRequestError;
 use crate::stream::{AssistantMessageEventStream, error_stream};
 use crate::types::{Context, Model, StopReason};
@@ -33,7 +33,7 @@ impl ApiProvider for MistralConversations {
             return error_stream(model, StopReason::Error, format!("No API key for provider: {}", model.provider));
         };
         let payload = match build_payload(model, context, &options) {
-            Ok(payload) => apply_payload_hook(payload, options.on_payload.as_ref(), model),
+            Ok(payload) => payload,
             Err(error) => return error_stream(model, StopReason::Error, error),
         };
         let mut defaults = vec![
@@ -47,7 +47,7 @@ impl ApiProvider for MistralConversations {
         let request = HttpRequest {
             url: endpoint(&model.base_url, "/v1/chat/completions"),
             headers: header_map(defaults, model, &options),
-            body: to_wire(payload),
+            body: payload,
         };
         let timeout = options.timeout_ms.unwrap_or(DEFAULT_HEADER_TIMEOUT_MS);
         let config = SendConfig {
@@ -55,7 +55,8 @@ impl ApiProvider for MistralConversations {
             timeout: Some((timeout, format!("Mistral response headers timed out after {timeout}ms"))),
             report: ResponseReport::Always,
         };
-        spawn_builder_stream(model, options, request, config, mistral_error, MistralStream::new(model.cost.clone()))
+        let handler = MistralStream::new(model.cost.clone());
+        spawn_builder_stream(model, options, request, to_wire, config, mistral_error, handler)
     }
 }
 
