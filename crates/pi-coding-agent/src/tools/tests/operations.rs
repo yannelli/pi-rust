@@ -13,10 +13,12 @@ use tokio_util::sync::CancellationToken;
 
 use super::{noop, text};
 use crate::tools::{
-    EditOperations, EditToolOptions, FindGlobOptions, FindOperations, FindToolOptions, GrepOperations, GrepToolOptions,
-    LsOperations, LsToolOptions, ReadOperations, ReadToolOptions, ToolsOptions, WriteOperations, WriteToolOptions,
-    create_tool_with_options, relativize_find_result_path,
+    EditOperations, EditToolOptions, GrepOperations, GrepToolOptions, LsOperations, LsToolOptions, ReadOperations,
+    ReadToolOptions, ToolsOptions, WriteOperations, WriteToolOptions, create_tool_with_options,
+    relativize_find_result_path,
 };
+#[cfg(unix)]
+use crate::tools::{FindGlobOptions, FindOperations, FindToolOptions};
 
 /// An in-memory file system keyed by absolute path.
 #[derive(Default)]
@@ -176,8 +178,10 @@ async fn ls_uses_custom_operations() {
     assert_eq!(err, "Path not found: /r/nope");
 }
 
+#[cfg(unix)]
 struct FixedGlob(Vec<&'static str>, Mutex<Option<FindGlobOptions>>);
 
+#[cfg(unix)]
 #[async_trait]
 impl FindOperations for FixedGlob {
     async fn exists(&self, _: &Path) -> anyhow::Result<bool> {
