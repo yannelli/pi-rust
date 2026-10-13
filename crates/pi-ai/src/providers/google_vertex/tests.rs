@@ -272,3 +272,31 @@ async fn streams_thinking_tool_calls_images_usage_and_aborts() {
     let message = crate::providers::mock_server::cancel_after_first_text(stream, cancel).await;
     assert_eq!(message.stop_reason, StopReason::Aborted);
 }
+
+#[tokio::test]
+async fn external_accounts_authenticate_vertex_requests() {
+    if std::env::var("GOOGLE_CLOUD_QUOTA_PROJECT").is_ok_and(|value| !value.is_empty()) {
+        return;
+    }
+    let sts = MockHttp::start(vec![token_reply("federated-token")]).await;
+    let api = MockHttp::start(vec![ok_stream(), ok_stream()]).await;
+    let dir = tempfile::tempdir().unwrap();
+    let subject = dir.path().join("subject.txt");
+    std::fs::write(&subject, "oidc-token").unwrap();
+    let credentials = json!({
+        "type": "external_account", "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+        "audience": "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p/providers/x",
+        "token_url": format!("{}/v1/token", sts.base_url), "credential_source": {"file": subject},
+        "quota_project_id": "federated-quota"
+    });
+    let options = adc_options(&write_json(&dir, "external.json", &credentials));
+    for _ in 0..2 {
+        let (_, message) = collect(GoogleVertex.stream(&model(&api.base_url), &context(), options.clone())).await;
+        assert_eq!(message.stop_reason, StopReason::Stop, "{:?}", message.error_message);
+    }
+    assert_eq!(sts.requests().len(), 1, "the federated token is cached");
+    assert_eq!(sts.request(0).form()["subject_token"], "oidc-token");
+    let request = api.request(1);
+    assert_eq!(request.headers["authorization"], "Bearer federated-token");
+    assert_eq!(request.headers["x-goog-user-project"], "federated-quota");
+}

@@ -11,6 +11,7 @@ use serde_json::{Map, Value, json};
 
 use self::config::{resolve_deployment_name, responses_url};
 use crate::http::pi_user_agent;
+use crate::provider_options::ReasoningSummary;
 use crate::providers::common::{HttpRequest, compat_bool, header_map};
 use crate::providers::constrained_sampling::{
     ResponsesToolOptions, convert_responses_tools, resolve_grammar_constrained_sampling,
@@ -167,11 +168,17 @@ fn build_body(
     }
     let effort =
         options.reasoning.map(|level| clamp_thinking_level(model, level)).filter(|level| *level != ThinkingLevel::Off);
+    let summary = options.reasoning_summary.map_or("auto", ReasoningSummary::as_str);
+    let summary_only = effort.is_none() && options.reasoning_summary.is_some();
     if model.reasoning {
         match effort {
             Some(level) => {
                 let value = provider_thinking_value(model, level).unwrap_or_else(|| level.as_str().to_string());
-                body.insert("reasoning".into(), json!({"effort": value, "summary": "auto"}));
+                body.insert("reasoning".into(), json!({"effort": value, "summary": summary}));
+                body.insert("include".into(), json!(["reasoning.encrypted_content"]));
+            }
+            None if summary_only => {
+                body.insert("reasoning".into(), json!({"effort": "medium", "summary": summary}));
                 body.insert("include".into(), json!(["reasoning.encrypted_content"]));
             }
             None => match mapped_thinking_level(model, ThinkingLevel::Off) {
@@ -185,7 +192,7 @@ fn build_body(
             },
         }
     }
-    let level = effort.unwrap_or(ThinkingLevel::Off);
+    let level = effort.or(summary_only.then_some(ThinkingLevel::Medium)).unwrap_or(ThinkingLevel::Off);
     if let Some(sampling) = resolve_sampling_params(model, level, options.sampling_params.as_ref()) {
         body.extend(sampling);
     }

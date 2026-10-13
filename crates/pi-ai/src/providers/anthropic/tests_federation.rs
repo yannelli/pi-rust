@@ -139,3 +139,39 @@ async fn token_endpoint_failures_explain_the_federation_rule() {
     assert!(error.contains("set the ANTHROPIC_WORKSPACE_ID environment variable"));
     assert!(!error.contains("secret"));
 }
+
+/// Upstream's `PiAnthropic` turns off the SDK default credential chain (`ANTHROPIC_PROFILE`,
+/// `ANTHROPIC_CONFIG_DIR` profiles), so profile files never supply auth.
+#[tokio::test]
+async fn does_not_run_the_sdk_profile_credential_chain() {
+    let mut federation = federation(|_| sse()).await;
+    let config_dir = tempfile::tempdir().unwrap();
+    for dir in ["configs", "credentials"] {
+        std::fs::create_dir_all(config_dir.path().join(dir)).unwrap();
+    }
+    let token_file = config_dir.path().join("credentials/work.json");
+    std::fs::write(&token_file, json!({"type": "oauth_token", "access_token": "profile-token"}).to_string()).unwrap();
+    let config = json!({"authentication": {"type": "user_oauth", "credentials_path": token_file}});
+    std::fs::write(config_dir.path().join("configs/work.json"), config.to_string()).unwrap();
+    let profile_env = BTreeMap::from([
+        ("ANTHROPIC_PROFILE".to_string(), "work".to_string()),
+        ("ANTHROPIC_CONFIG_DIR".to_string(), config_dir.path().to_str().unwrap().to_string()),
+    ]);
+    let model = test_model(API, "anthropic", &federation.server.base_url);
+    let mut env = federation.env.clone();
+    env.extend(profile_env.clone());
+    let headers = BTreeMap::from([("Authorization".to_string(), "Bearer auth-token".to_string())]);
+    let options = StreamOptions { env, headers, ..Default::default() };
+    let (_, message) = collect(AnthropicMessages.stream(&model, &context(), options)).await;
+    assert_eq!(message.stop_reason, StopReason::Stop, "{:?}", message.error_message);
+    let request = federation.server.request().await;
+    assert_eq!(
+        (request.path.as_str(), request.headers["authorization"].as_str()),
+        ("/v1/messages", "Bearer auth-token")
+    );
+    let options = StreamOptions { env: profile_env, ..Default::default() };
+    if std::env::var("ANTHROPIC_FEDERATION_RULE_ID").is_err() {
+        let (_, message) = collect(AnthropicMessages.stream(&model, &context(), options)).await;
+        assert_eq!(message.error_message.as_deref(), Some("No API key for provider: anthropic"));
+    }
+}

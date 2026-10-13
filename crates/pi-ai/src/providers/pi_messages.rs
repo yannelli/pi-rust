@@ -43,7 +43,7 @@ impl ApiProvider for PiMessages {
             ("content-type", "application/json".to_string()),
         ];
         let headers = build_headers(defaults, &Default::default(), &options.headers, &options.suppressed_headers);
-        let url = format!("{}/messages", model.base_url.trim_end_matches('/'));
+        let url = messages_url(model, options.debug);
         let request = HttpRequest { url, headers, body: payload };
         let model = model.clone();
         tokio::spawn(async move {
@@ -63,6 +63,19 @@ impl ApiProvider for PiMessages {
         });
         stream
     }
+}
+
+/// `{baseUrl}/messages`, with `debug=1` set in the query when debug metadata is requested.
+fn messages_url(model: &Model, debug: bool) -> String {
+    let url = format!("{}/messages", model.base_url.trim_end_matches('/'));
+    let Some(mut parsed) = debug.then(|| reqwest::Url::parse(&url).ok()).flatten() else { return url };
+    let pairs: Vec<(String, String)> = parsed
+        .query_pairs()
+        .filter(|(name, _)| name != "debug")
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+    parsed.query_pairs_mut().clear().extend_pairs(pairs).append_pair("debug", "1");
+    parsed.to_string()
 }
 
 /// `{model, context, options}`, where `context` is the transcript with a leading system message.
