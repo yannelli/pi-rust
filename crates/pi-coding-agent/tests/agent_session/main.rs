@@ -2,10 +2,13 @@
 
 mod bash;
 mod cache;
+mod catalog;
 mod codemode;
 mod codemode_store;
 mod compaction;
 mod harness;
+mod http_mock;
+mod llama;
 mod login;
 mod mcp;
 mod mcp_discovery;

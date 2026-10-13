@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use pi_ai::auth::InMemoryCredentialStore;
+use pi_ai::auth::{Credential, InMemoryCredentialStore};
 use pi_ai::providers::faux::{FauxProvider, FauxResponse};
 use pi_ai::{Context, Message, register_api_provider};
 use pi_coding_agent::agent_session::{
@@ -34,6 +34,8 @@ pub struct Options {
     pub providers: Value,
     /// More fields of the `local/tiny` model, such as `cost` or `promptCache`.
     pub tiny: Value,
+    /// Stored credentials by provider.
+    pub credentials: BTreeMap<String, Credential>,
 }
 
 impl Default for Options {
@@ -48,6 +50,7 @@ impl Default for Options {
             files: Vec::new(),
             providers: json!({}),
             tiny: json!({}),
+            credentials: BTreeMap::new(),
         }
     }
 }
@@ -116,7 +119,7 @@ pub async fn harness_with(options: Options, configure: impl FnOnce(&mut CreateAg
     let settings = Arc::new(SettingsManager::in_memory(values));
     let services = create_agent_session_services(CreateServicesOptions {
         settings: Some(settings.clone()),
-        credentials: Some(Arc::new(InMemoryCredentialStore::new(BTreeMap::new()))),
+        credentials: Some(Arc::new(InMemoryCredentialStore::new(options.credentials.clone()))),
         ..CreateServicesOptions::new(&cwd, &agent_dir)
     })
     .await;
