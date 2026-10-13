@@ -57,7 +57,8 @@ async fn refuses_a_tree_over_the_directory_budget_and_stops_with_an_error_when_o
     let changes = Arc::new(Mutex::new(Vec::new()));
     let sink = changes.clone();
     let watcher = env.watch(&tree, Arc::new(move |change| sink.lock().unwrap().push(change)), &ctx).await.unwrap();
-    assert_eq!(watcher.mode(), WatchMode::Native);
+    // Windows polls by default (see LocalFileWatcher::open).
+    assert_eq!(watcher.mode(), if cfg!(windows) { WatchMode::Polling } else { WatchMode::Native });
     env.create_dir("tree/d", true, &ctx).await.unwrap();
     let errored = || changes.lock().unwrap().iter().any(|change| matches!(change, WatchChange::Error(_)));
     let deadline = tokio::time::Instant::now() + Duration::from_secs(3);

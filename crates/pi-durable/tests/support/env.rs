@@ -32,7 +32,7 @@ pub fn path_string(path: &Path) -> String {
 }
 
 pub fn join(root: &Path, relative: &str) -> String {
-    path_string(&root.join(relative))
+    path_string(&root.join(relative.replace('/', std::path::MAIN_SEPARATOR_STR)))
 }
 
 pub fn local_env(root: &Path) -> LocalExecutionEnv {
