@@ -23,8 +23,6 @@ use crate::interactive_components::login::system_browser;
 use crate::interactive_components::{McpManagerView, McpServers, run_mcp_manager, sign_in_with_view};
 use crate::theme::{ThemeColor, theme};
 
-const REDIRECT_PROMPT: &str =
-    "Waiting for sign-in. If the browser cannot reach this machine, paste the URL it was redirected to.";
 const MCP_ACTIONS: [&str; 3] = ["login", "logout", "reconnect"];
 const NO_OAUTH_SERVER: &str = "No enabled MCP server uses OAuth. Only HTTP servers without an Authorization header do.";
 
@@ -35,18 +33,21 @@ struct UiSignInPrompt {
 
 #[async_trait]
 impl McpSignInPrompt for UiSignInPrompt {
-    fn show_authorization_url(&self, url: &Url) {
+    fn show_authorization_url(&self, server: &str, url: &Url) {
         let Some(bridge) = self.bridge.upgrade() else { return };
-        let message = format!("Sign in to the MCP server in your browser:\n{url}");
+        let message = format!("Sign in to MCP server \"{server}\" in your browser:\n{url}");
         bridge.push(UiEvent::Notify { message, level: NotifyLevel::Info });
         pi_ai::auth::oauth::open_browser(url.as_str());
     }
 
-    async fn prompt_for_redirect_url(&self, cancel: CancellationToken) -> Option<String> {
+    async fn prompt_for_redirect_url(&self, server: &str, cancel: CancellationToken) -> Option<String> {
         let bridge = self.bridge.upgrade()?;
         let (reply, answer) = oneshot::channel();
+        let title = format!(
+            "Waiting for sign-in to \"{server}\". If the browser cannot reach this machine, paste the URL it was redirected to."
+        );
         bridge.call(move |mode| {
-            let receiver = mode.ask_input_until(REDIRECT_PROMPT, None, Some(cancel));
+            let receiver = mode.ask_input_until(&title, None, Some(cancel));
             tokio::task::spawn_local(async move {
                 let _ = reply.send(receiver.await.ok().flatten());
             });
