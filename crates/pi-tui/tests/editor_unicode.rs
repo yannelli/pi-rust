@@ -139,8 +139,7 @@ fn navigates_words_with_ctrl_arrows() {
     }
 }
 
-/// Upstream relies on ICU's dictionary, which groups 你好 and 世界 into words. UAX #29 has no
-/// dictionary, so each ideograph is its own word; fullwidth punctuation still stops movement.
+/// Upstream issue #4972: 你好 and 世界 are dictionary words and fullwidth punctuation stops movement.
 #[test]
 fn stops_at_fullwidth_chinese_punctuation() {
     let editor = editor();
@@ -148,11 +147,11 @@ fn stops_at_fullwidth_chinese_punctuation() {
     editor.set_text(text);
     let at = |prefix: &str| (0, prefix.len());
 
-    for expected in ["你好，世", "你好，", "你好", "你", ""] {
+    for expected in ["你好，", "你好", ""] {
         editor.handle_input(CTRL_LEFT);
         assert_eq!(cursor(&editor), at(expected));
     }
-    for expected in ["你", "你好", "你好，", "你好，世", text] {
+    for expected in ["你好", "你好，", text] {
         editor.handle_input(CTRL_RIGHT);
         assert_eq!(cursor(&editor), at(expected));
     }
@@ -165,13 +164,11 @@ fn handles_mixed_cjk_and_ascii_word_movement() {
     editor.set_text(text);
     let at = |prefix: &str| (0, prefix.len());
 
-    for expected in ["hello你好，world世", "hello你好，world", "hello你好，", "hello你好", "hello你", "hello", ""]
-    {
+    for expected in ["hello你好，world", "hello你好，", "hello你好", "hello", ""] {
         editor.handle_input(CTRL_LEFT);
         assert_eq!(cursor(&editor), at(expected), "left to {expected:?}");
     }
-    for expected in ["hello", "hello你", "hello你好", "hello你好，", "hello你好，world", "hello你好，world世", text]
-    {
+    for expected in ["hello", "hello你好", "hello你好，", "hello你好，world", text] {
         editor.handle_input(CTRL_RIGHT);
         assert_eq!(cursor(&editor), at(expected), "right to {expected:?}");
     }
@@ -233,4 +230,39 @@ fn custom_border_renderer_replaces_the_top_border() {
     let lines = editor.render(width);
     assert_eq!(lines[0], format!("== status {}", "=".repeat(10)));
     assert_eq!(strip_terminal_sequences(lines.last().unwrap()), "\u{2500}".repeat(width));
+}
+
+const CTRL_W: &str = "\x17";
+const ALT_D: &str = "\x1bd";
+
+#[test]
+fn moves_over_japanese_and_thai_dictionary_words() {
+    let editor = editor();
+    let text = "こんにちは世界 สวัสดีครับ";
+    editor.set_text(text);
+    let at = |prefix: &str| (0, prefix.len());
+    for expected in ["こんにちは世界 สวัสดี", "こんにちは世界 ", "こんにちは", ""] {
+        editor.handle_input(CTRL_LEFT);
+        assert_eq!(cursor(&editor), at(expected), "left to {expected:?}");
+    }
+    for expected in ["こんにちは", "こんにちは世界", "こんにちは世界 สวัสดี", text] {
+        editor.handle_input(CTRL_RIGHT);
+        assert_eq!(cursor(&editor), at(expected), "right to {expected:?}");
+    }
+}
+
+#[test]
+fn deletes_cjk_and_thai_words() {
+    let editor = editor();
+    editor.set_text("中华人民共和国。ฉันชอบกิน");
+    for expected in ["中华人民共和国。ฉันชอบ", "中华人民共和国。ฉัน", "中华人民共和国。", "中华人民共和国", "中华人民"]
+    {
+        editor.handle_input(CTRL_W);
+        assert_eq!(editor.get_text(), expected);
+    }
+    editor.handle_input("\x01");
+    for expected in ["人民", ""] {
+        editor.handle_input(ALT_D);
+        assert_eq!(editor.get_text(), expected);
+    }
 }
