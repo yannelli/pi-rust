@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use futures::future::join_all;
-use pi_ai::{AssistantMessage, Message, ToolCall, ToolResultMessage, now_ms};
+use pi_ai::{AssistantMessage, Message, Model, ToolCall, ToolResultMessage, now_ms};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
@@ -99,6 +99,7 @@ struct LoopNestedHost {
     message: AssistantMessage,
     config: AgentLoopConfig,
     emit: EventSink,
+    model: Arc<Model>,
 }
 
 #[async_trait]
@@ -140,6 +141,10 @@ impl NestedToolCallHost for LoopNestedHost {
     fn emit(&self, event: AgentEvent) {
         (self.emit)(event);
     }
+
+    fn model(&self) -> Option<Arc<Model>> {
+        Some(self.model.clone())
+    }
 }
 
 pub(crate) async fn execute_tool_calls(
@@ -157,6 +162,7 @@ pub(crate) async fn execute_tool_calls(
         message: message.clone(),
         config: config.clone(),
         emit: emit.clone(),
+        model: Arc::new(config.model.clone()),
     };
     let runner = NestedToolCallRunner::new(Arc::new(host));
     let batch = run_batch(&shared, message, calls, config, emit, cancel, &runner).await;

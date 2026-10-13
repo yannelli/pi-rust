@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use futures::future::BoxFuture;
-use pi_ai::{Cost, NestedToolCallRecord, NestedToolCalls, ToolCall, Usage};
+use pi_ai::{Cost, Model, NestedToolCallRecord, NestedToolCalls, ToolCall, Usage};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
@@ -170,6 +170,10 @@ pub trait NestedToolCallHost: Send + Sync {
         on_update: ToolUpdateCallback,
     ) -> AgentToolCallOutcome;
     fn emit(&self, event: AgentEvent);
+    /// Model of the turn the calls belong to, passed on to [`ToolContext::model`].
+    fn model(&self) -> Option<Arc<Model>> {
+        None
+    }
 }
 
 /// Calls below one model-issued call share its recorder.
@@ -203,6 +207,10 @@ impl NestedToolCallRunner {
 
     pub fn tools(&self) -> Vec<SharedTool> {
         self.host.tools()
+    }
+
+    pub fn model(&self) -> Option<Arc<Model>> {
+        self.host.model()
     }
 
     /// Run `name` for the call `caller_id`; the nested call gets the id `<caller_id>/<n>`.
@@ -313,12 +321,13 @@ pub struct ToolContext {
     tool_call_id: String,
     runner: Option<Arc<NestedToolCallRunner>>,
     cancel: CancellationToken,
+    model: Option<Arc<Model>>,
 }
 
 impl ToolContext {
     /// A context without nested calls, for tools run outside the loop.
     pub fn new(tool_call_id: impl Into<String>) -> Self {
-        Self { tool_call_id: tool_call_id.into(), runner: None, cancel: CancellationToken::new() }
+        Self { tool_call_id: tool_call_id.into(), runner: None, cancel: CancellationToken::new(), model: None }
     }
 
     pub fn nested(
@@ -326,11 +335,22 @@ impl ToolContext {
         runner: Arc<NestedToolCallRunner>,
         cancel: CancellationToken,
     ) -> Self {
-        Self { tool_call_id: tool_call_id.into(), runner: Some(runner), cancel }
+        let model = runner.model();
+        Self { tool_call_id: tool_call_id.into(), runner: Some(runner), cancel, model }
+    }
+
+    pub fn with_model(mut self, model: Option<Arc<Model>>) -> Self {
+        self.model = model;
+        self
     }
 
     pub fn tool_call_id(&self) -> &str {
         &self.tool_call_id
+    }
+
+    /// Model of the turn that issued the call (upstream `ctx.model`), `None` outside the loop.
+    pub fn model(&self) -> Option<&Model> {
+        self.model.as_deref()
     }
 
     /// Whether [`execute_tool`](Self::execute_tool) can run tools.
