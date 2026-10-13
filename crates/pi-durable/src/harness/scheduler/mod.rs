@@ -258,9 +258,10 @@ impl Scheduler {
         if let Some(run) = run {
             let failed = self.core.session.failed();
             let joined = async move {
+                // A run that ignores its signal can outlive a failed Session, which ends the wait with its failure.
                 tokio::select! {
                     () = run.finished() => Ok(()),
-                    _ = failed => Ok(()),
+                    error = failed => Err(error),
                 }
             };
             with_context(joined, context).await?;

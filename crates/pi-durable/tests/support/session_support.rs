@@ -55,6 +55,16 @@ impl Gate {
 
 type CommitFilter = Arc<dyn Fn(&[StorageWrite]) -> bool + Send + Sync>;
 
+/// One Storage call a test hook sees: `task`, `scan_entries`, `mint_id`, or `close`.
+pub struct StorageCall {
+    pub method: &'static str,
+    pub limit: usize,
+    pub first_page: bool,
+    pub context: Context,
+}
+
+pub type CallHook = Arc<dyn Fn(StorageCall) -> futures::future::BoxFuture<'static, DurableResult<()>> + Send + Sync>;
+
 /// Memory storage with observable commits, held calls, and injected commit failures.
 #[derive(Default)]
 pub struct ControlledStorage {
@@ -70,6 +80,8 @@ pub struct ControlledStorage {
     commit_failure: Mutex<Option<DurableError>>,
     /// When set, `close()` closes and then fails with this error.
     pub close_failure: Mutex<Option<DurableError>>,
+    /// Runs before `task`, `scan_entries`, `mint_id`, and `close`; an error fails that call.
+    pub call_hook: Mutex<Option<CallHook>>,
     closed: AtomicBool,
 }
 
@@ -122,6 +134,14 @@ impl ControlledStorage {
         self
     }
 
+    async fn hook(&self, method: &'static str, limit: usize, first_page: bool, context: &Context) -> DurableResult<()> {
+        let hook = self.call_hook.lock().unwrap().clone();
+        match hook {
+            Some(hook) => hook(StorageCall { method, limit, first_page, context: context.clone() }).await,
+            None => Ok(()),
+        }
+    }
+
     fn open(&self) -> DurableResult<()> {
         if self.closed.load(Ordering::SeqCst) {
             return Err(DurableError::storage("MemoryStorage is closed"));
@@ -159,6 +179,7 @@ impl Storage for ControlledStorage {
 
     async fn mint_id(&self) -> DurableResult<u64> {
         self.mint_count.fetch_add(1, Ordering::SeqCst);
+        self.hook("mint_id", 0, false, &context()).await?;
         self.open()?;
         self.inner.mint_id().await
     }
@@ -211,11 +232,13 @@ impl Storage for ControlledStorage {
         cursor: Option<&Cursor>,
         context: &Context,
     ) -> DurableResult<Page<EntryRecord>> {
+        self.hook("scan_entries", limit, cursor.is_none(), context).await?;
         self.open()?;
         self.inner.scan_entries(query, limit, cursor, context).await
     }
 
     async fn task(&self, id: TaskId, context: &Context) -> DurableResult<Option<TaskRecord>> {
+        self.hook("task", 0, false, context).await?;
         self.open()?;
         self.inner.task(id, context).await
     }
@@ -292,7 +315,8 @@ impl Storage for ControlledStorage {
         self.inner.scan_documents(query, limit, cursor, context).await
     }
 
-    async fn close(&self, _context: &Context) -> DurableResult<()> {
+    async fn close(&self, context: &Context) -> DurableResult<()> {
+        self.hook("close", 0, false, context).await?;
         self.closed.store(true, Ordering::SeqCst);
         match self.close_failure.lock().unwrap().clone() {
             Some(error) => Err(error),

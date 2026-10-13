@@ -51,8 +51,16 @@ impl<K: Eq + Hash + Clone, T: Clone + Send + 'static> Waiters<K, T> {
             if cancelled {
                 return Err(cancellation(&context));
             }
-            let wait = async move { receiver.await.unwrap_or_else(|_| Err(DurableError::error("Wait was dropped"))) };
-            with_context(wait, &context).await
+            // A wait already settled wins over a later cancellation, as upstream settles it first.
+            let settled = |result: Result<DurableResult<T>, _>| {
+                result.unwrap_or_else(|_| Err(DurableError::error("Wait was dropped")))
+            };
+            let Some(signal) = context.abort_signal() else { return settled(receiver.await) };
+            tokio::select! {
+                biased;
+                result = receiver => settled(result),
+                reason = signal.cancelled() => Err(DurableError::from(reason)),
+            }
         }
     }
 
