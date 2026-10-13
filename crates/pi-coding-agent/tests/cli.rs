@@ -226,3 +226,53 @@ fn auth_commands_print_and_check_credentials() {
     let output = pi(root.path(), &["auth", "print-api-key", "--json"], None);
     assert_eq!(output.status.code(), Some(1));
 }
+
+/// Upstream `print-mode.ts` signal handlers: SIGTERM kills the running bash command's process
+/// group, disposes the runtime, and exits 143. Startup migrations ran before the prompt.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn print_mode_exits_143_on_sigterm_and_kills_detached_children() {
+    let root = tempfile::tempdir().unwrap();
+    let command = r#"{"command":"echo $$ > pid.txt; sleep 60"}"#;
+    let (url, _) = mock_server(vec![tool_call_body("call_1", "bash", command), text_body("unused")]).await;
+    setup(root.path(), &url);
+    std::fs::write(root.path().join("agent/oauth.json"), r#"{"legacy": {"access": "a"}}"#).unwrap();
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_pi"))
+        .args(["--model", "mock/mock-model", "-p", "Run it"])
+        .current_dir(root.path().join("work"))
+        .env("PI_CODING_AGENT_DIR", root.path().join("agent"))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let pid_file = root.path().join("work/pid.txt");
+    let shell_pid = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        loop {
+            if let Some(pid) = std::fs::read_to_string(&pid_file).ok().filter(|text| text.ends_with('\n')) {
+                return pid.trim().to_string();
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("the bash command started");
+    let auth: Value =
+        serde_json::from_str(&std::fs::read_to_string(root.path().join("agent/auth.json")).unwrap()).unwrap();
+    assert_eq!(auth["legacy"], json!({"type": "oauth", "access": "a"}));
+
+    let pid = child.id().unwrap().to_string();
+    assert!(tokio::process::Command::new("kill").args(["-TERM", &pid]).status().await.unwrap().success());
+    let status = tokio::time::timeout(std::time::Duration::from_secs(20), child.wait()).await.unwrap().unwrap();
+    assert_eq!(status.code(), Some(143));
+    let mut alive = true;
+    for _ in 0..40 {
+        alive = std::process::Command::new("kill").args(["-0", &shell_pid]).status().unwrap().success();
+        if !alive {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(!alive, "the bash command survived");
+}

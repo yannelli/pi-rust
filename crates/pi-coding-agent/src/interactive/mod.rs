@@ -69,6 +69,8 @@ pub struct InteractiveOptions {
     pub agent_dir: Option<PathBuf>,
     /// Skip the release and package update checks after startup, as tests do.
     pub skip_update_checks: bool,
+    /// Upstream `autoTrustOnReloadCwd` ([`crate::startup::auto_trust_on_reload_cwd`]).
+    pub auto_trust_on_reload_cwd: Option<PathBuf>,
 }
 
 /// Run the interactive mode for `runtime` until the user quits: installs the keybindings of

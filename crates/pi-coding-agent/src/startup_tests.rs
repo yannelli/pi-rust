@@ -73,3 +73,36 @@ fn the_startup_changelog_is_computed_once() {
     assert_eq!(startup_changelog_once(&other, true), first);
     assert_eq!(other.last_changelog_version().as_deref(), Some("0.0.1"));
 }
+
+#[test]
+fn reload_saves_implicit_trust_once_for_the_startup_cwd() {
+    let root = tempfile::tempdir().unwrap();
+    let (home, cwd, agent) = (root.path().join("home"), root.path().join("work"), root.path().join("agent"));
+    std::fs::create_dir_all(&cwd).unwrap();
+    std::fs::create_dir_all(&home).unwrap();
+    assert_eq!(auto_trust_on_reload_cwd(&cwd, Some(true), &home), None);
+    let mut auto = auto_trust_on_reload_cwd(&cwd, None, &home);
+    assert_eq!(auto.as_deref(), Some(cwd.as_path()));
+
+    // Nothing needs trust yet, or the project is not trusted: nothing is saved.
+    assert_eq!(save_implicit_project_trust_after_reload(&mut auto, &cwd, true, &agent, &home), Ok(false));
+    std::fs::create_dir_all(cwd.join(".pi")).unwrap();
+    std::fs::write(cwd.join(".pi/settings.json"), "{}").unwrap();
+    assert_eq!(auto_trust_on_reload_cwd(&cwd, None, &home), None);
+    assert_eq!(save_implicit_project_trust_after_reload(&mut auto, &cwd, false, &agent, &home), Ok(false));
+    let other = root.path().join("other");
+    assert_eq!(save_implicit_project_trust_after_reload(&mut auto, &other, true, &agent, &home), Ok(false));
+
+    assert_eq!(save_implicit_project_trust_after_reload(&mut auto, &cwd, true, &agent, &home), Ok(true));
+    assert_eq!(ProjectTrustStore::new(&agent).get(&cwd).unwrap(), Some(true));
+    assert_eq!(auto, None);
+    assert_eq!(save_implicit_project_trust_after_reload(&mut auto, &cwd, true, &agent, &home), Ok(false));
+    assert!(reload_status(true).ends_with("; saved project trust"));
+    assert!(!reload_status(false).contains("trust"));
+
+    // A saved decision is kept as is.
+    let mut auto = Some(cwd.clone());
+    ProjectTrustStore::new(&agent).set(&cwd, Some(false)).unwrap();
+    assert_eq!(save_implicit_project_trust_after_reload(&mut auto, &cwd, true, &agent, &home), Ok(false));
+    assert_eq!(auto, None);
+}

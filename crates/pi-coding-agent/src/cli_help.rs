@@ -8,8 +8,15 @@ Usage:
   pi [options] [--] [@files...] [messages...]
 
 Commands:
+  pi install <source> [-l]     Install extension source and add to settings
+  pi remove <source> [-l]      Remove extension source from settings
+  pi uninstall <source> [-l]   Alias for remove
+  pi update [source|self|pi]   Update pi, extensions, or model catalogs
+  pi list                      List installed extensions from settings
+  pi config [-l]               Open TUI to enable/disable package resources (Tab switches scope)
   pi auth <command>            Print credentials or check provider readiness
-  pi <command> --help          Show help for auth
+  pi mcp <command>             Check MCP servers, sign in to or out of OAuth servers
+  pi <command> --help          Show help for install/remove/uninstall/update/list/config/auth/mcp
 
 Options:
   --provider <name>              Provider to search for --model (requires --model)
@@ -27,17 +34,19 @@ Options:
   --session-dir <dir>            Directory for session storage and lookup
   --no-session                   Don't save session (ephemeral)
   --name, -n <name>              Set session display name
-  --models <patterns>            Comma-separated model patterns for model cycling
+  --models <patterns>            Comma-separated model patterns for Ctrl+P cycling
                                  Supports globs (anthropic/*, *sonnet*) and fuzzy matching
   --no-tools, -nt                Disable all tools by default (built-in and extension)
   --no-builtin-tools, -nbt       Disable built-in tools by default but keep extension/custom tools enabled
   --tools, -t <tools>            Comma-separated allowlist of tool names or patterns (*) to enable
+                                 Keeps MCP tools unless an entry starts with mcp__
                                  Only +name/-name entries add to or remove from the defaults
   --exclude-tools, -xt <tools>   Comma-separated denylist of tool names or patterns (*) to disable
+                                 Applies to all tools, MCP tools included
   --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh, max
   --extension, -e <path>         Load an extension file or builtin:<name> (can be used multiple times)
-  --no-extensions, -ne           Disable extension discovery and built-in extensions
-  --no-mcp                       Disable built-in MCP support
+  --no-extensions, -ne           Disable extension discovery and built-in extensions (explicit -e paths still work)
+  --no-mcp                       Disable built-in MCP support: no servers connect and no MCP tools
   --skill <path>                 Load a skill file or directory (can be used multiple times)
   --no-skills, -ns               Disable skills discovery and loading
   --prompt-template <path>       Load a prompt template file or directory (can be used multiple times)

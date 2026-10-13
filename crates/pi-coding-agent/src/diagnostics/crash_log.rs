@@ -140,17 +140,43 @@ pub fn panic_message(info: &std::panic::PanicHookInfo<'_>) -> String {
     }
 }
 
-/// Record panics as `fatal_error` crashes in `path`, then run the earlier hook.
+/// Upstream `crashReportInstructions`: how to send the crash with `/bug`.
+pub fn crash_report_instructions(session_file: Option<&str>) -> String {
+    let app = crate::resources::brand::APP_NAME;
+    let resume = match session_file {
+        Some(_) => format!("run `{app} -r` to resume the session, then"),
+        None => format!("start {app} and"),
+    };
+    format!("To report this crash: {resume} run /bug. The crash details are attached automatically.")
+}
+
+/// Record panics as `fatal_error` crashes in `path`, then run the earlier hook. A terminal a
+/// TUI left in raw mode is restored first, and the report instructions follow the panic text.
 pub fn install_crash_hook(path: PathBuf, context: CrashContext) {
     let earlier = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        pi_tui::process_terminal::restore_terminal_after_crash();
         let (session_file, cwd) = context.snapshot();
         let stack = std::backtrace::Backtrace::force_capture().to_string();
+        let instructions = crash_report_instructions(session_file.as_deref());
         let crash =
             Crash { kind: "fatal_error".into(), message: panic_message(info), stack: Some(stack), session_file, cwd };
-        record_crash(crash, &path);
+        let recorded = record_crash(crash, &path).is_some();
         earlier(info);
+        if recorded {
+            eprintln!("\n{instructions}");
+        }
     }));
+}
+
+/// Record a fatal runtime error that ends the run (upstream `handleFatalRuntimeError`) and
+/// return the report instructions to show, or `None` when nothing was written.
+pub fn record_fatal_error(path: &Path, context: &CrashContext, error: &anyhow::Error) -> Option<String> {
+    let (session_file, cwd) = context.snapshot();
+    let instructions = crash_report_instructions(session_file.as_deref());
+    let stack = Some(format!("{error:?}"));
+    let crash = Crash { kind: "fatal_error".into(), message: format!("{error:#}"), stack, session_file, cwd };
+    record_crash(crash, path).map(|_| instructions)
 }
 
 #[cfg(test)]
@@ -159,6 +185,25 @@ mod tests {
 
     fn crash(message: &str) -> Crash {
         Crash { kind: "uncaught_exception".into(), message: message.into(), cwd: "/w".into(), ..Crash::default() }
+    }
+
+    #[test]
+    fn records_fatal_errors_with_report_instructions() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = crash_log_path(dir.path());
+        let context = CrashContext::default();
+        context.set_cwd(Path::new("/w"));
+        let error = anyhow::anyhow!("disk full").context("Failed to resume session");
+        let instructions = record_fatal_error(&path, &context, &error).unwrap();
+        assert_eq!(
+            instructions,
+            "To report this crash: start pi and run /bug. The crash details are attached automatically."
+        );
+        let record = &read_crash_log(&path)[0];
+        assert_eq!((record.kind.as_str(), record.cwd.as_str()), ("fatal_error", "/w"));
+        assert_eq!(record.message, "Failed to resume session: disk full");
+        context.set_session_file(Some(Path::new("/s.jsonl")));
+        assert!(crash_report_instructions(Some("/s.jsonl")).starts_with("To report this crash: run `pi -r` to resume"));
     }
 
     #[test]

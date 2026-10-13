@@ -3,8 +3,12 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::resources::brand::{agent_dir_env_var, default_agent_dir};
+
+/// The agent directory variable of the default brand; [`agent_dir_env_var`] follows a rebrand.
 pub const ENV_AGENT_DIR: &str = "PI_CODING_AGENT_DIR";
-/// Session directory override; `--session-dir` wins over it, and it wins over `sessionDir`.
+/// Session directory override of the default brand; `--session-dir` wins over it, and it wins
+/// over `sessionDir`. [`crate::resources::brand::session_dir_env_var`] follows a rebrand.
 pub const ENV_SESSION_DIR: &str = "PI_CODING_AGENT_SESSION_DIR";
 
 pub fn home_dir() -> PathBuf {
@@ -24,11 +28,11 @@ pub fn expand_tilde(path: &str) -> PathBuf {
     }
 }
 
-/// `$PI_CODING_AGENT_DIR` or `~/.pi/agent`.
+/// `$PI_CODING_AGENT_DIR` or `~/.pi/agent`, with the brand's variable and directory names.
 pub fn agent_dir() -> PathBuf {
-    match std::env::var(ENV_AGENT_DIR) {
+    match std::env::var(agent_dir_env_var()) {
         Ok(dir) if !dir.is_empty() => expand_tilde(&dir),
-        _ => home_dir().join(".pi").join("agent"),
+        _ => default_agent_dir(&home_dir()),
     }
 }
 

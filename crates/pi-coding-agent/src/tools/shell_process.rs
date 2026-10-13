@@ -239,6 +239,7 @@ impl ShellOperations for LocalShellOperations {
         #[cfg(windows)]
         process.creation_flags(CREATE_NO_WINDOW);
         let mut child = process.spawn().map_err(|e| anyhow!("Failed to start {}: {e}", self.shell_name))?;
+        let _tracked = crate::signals::DetachedChildGuard::new(child.id());
         if let Some(mut stdin) = child.stdin.take() {
             let script = command.as_bytes().to_vec();
             tokio::spawn(async move {
