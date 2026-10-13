@@ -107,16 +107,25 @@ fn handle(message: Message, runtime: &Runtime, context: &Context, state: &LoopSt
     }
 }
 
-/// Run every queued job, then report rejections nobody handled.
+/// Run queued `nextTick` callbacks, then every queued job, repeating while ticks were added,
+/// as Node's `processTicksAndRejections` does; then report rejections nobody handled.
 pub(crate) fn drain_jobs(runtime: &Runtime, context: &Context, state: &LoopState) {
     loop {
-        match runtime.execute_pending_job() {
-            Ok(true) => {}
-            Ok(false) => break,
-            Err(exception) => exception.0.with(|ctx| {
-                let value = ctx.catch();
-                report_value(&ctx, UncaughtKind::Exception, value);
-            }),
+        if state.ticks_pending.replace(false) {
+            run_ticks(context, state);
+        }
+        loop {
+            match runtime.execute_pending_job() {
+                Ok(true) => {}
+                Ok(false) => break,
+                Err(exception) => exception.0.with(|ctx| {
+                    let value = ctx.catch();
+                    report_value(&ctx, UncaughtKind::Exception, value);
+                }),
+            }
+        }
+        if !state.ticks_pending.get() {
+            break;
         }
     }
     let rejections = std::mem::take(&mut *state.rejections.borrow_mut());
@@ -133,6 +142,18 @@ pub(crate) fn drain_jobs(runtime: &Runtime, context: &Context, state: &LoopState
     if runtime.is_job_pending() {
         drain_jobs(runtime, context, state);
     }
+}
+
+fn run_ticks(context: &Context, state: &LoopState) {
+    context.with(|ctx| {
+        let result = state
+            .internal(&ctx)
+            .and_then(|internal| internal.get::<_, Function>("runTicks"))
+            .and_then(|run| run.call::<_, ()>(()));
+        if let Err(error) = result {
+            report_error(&ctx, UncaughtKind::Exception, error);
+        }
+    });
 }
 
 fn run_timers(runtime: &Runtime, context: &Context, state: &LoopState) {

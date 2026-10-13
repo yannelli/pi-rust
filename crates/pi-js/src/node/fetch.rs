@@ -93,7 +93,10 @@ async fn run(client: reqwest::Client, request: FetchRequest, body: Option<Vec<u8
     let method = match reqwest::Method::from_bytes(request.method.as_bytes()) {
         Ok(method) => method,
         Err(_) => {
-            return emit(Event::Error(JsError::type_error(format!("'{}' is not a valid HTTP method.", request.method))));
+            return emit(Event::Error(JsError::type_error(format!(
+                "'{}' is not a valid HTTP method.",
+                request.method
+            ))));
         }
     };
     let mut builder = client.request(method, &request.url);

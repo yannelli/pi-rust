@@ -140,6 +140,7 @@ fn process<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
         vec![elapsed.as_secs() as f64, elapsed.subsec_nanos() as f64]
     })?;
     set_fn(&process, "uptime", || started().elapsed().as_secs_f64())?;
+    set_fn(&process, "scheduleTicks", || state().ticks_pending.set(true))?;
     set_fn(&process, "exit", |code: Opt<i32>| exit(code.0.unwrap_or(0)))?;
     set_fn(&process, "kill", |ctx: Ctx<'js>, pid: i64, signal: Opt<String>| {
         kill(pid, signal.0.as_deref().unwrap_or("SIGTERM")).map_err(|error| throw(&ctx, &error))

@@ -53,6 +53,15 @@ const SOURCES: &[(&str, &str)] = &[
     ("stream/web", include_str!("../js/stream_web.js")),
     ("internal/fetch_body", include_str!("../js/fetch_body.js")),
     ("internal/fetch", include_str!("../js/fetch.js")),
+    ("assert", include_str!("../js/assert.js")),
+    ("assert/strict", "module.exports = require('assert').strict;"),
+    ("tty", include_str!("../js/tty.js")),
+    ("diagnostics_channel", include_str!("../js/diagnostics_channel.js")),
+    ("stream/consumers", include_str!("../js/stream_consumers.js")),
+    (
+        "constants",
+        "module.exports = { ...require('os').constants.errno, ...require('os').constants.signals, ...require('os').constants.priority, ...require('internal/fs_utils').constants };",
+    ),
 ];
 
 /// Every module name `require` accepts, for `module.builtinModules`.

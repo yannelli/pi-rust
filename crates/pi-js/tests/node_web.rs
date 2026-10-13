@@ -41,6 +41,7 @@ return out;
 const URL_EXPECTED: &str = r##"{"parts":["https://user:pa%20ss@example.com:8080/c?x=1&y=two%20words#frag","https://example.com:8080","https:","user","pa%20ss","example.com:8080","example.com","8080","/c","?x=1&y=two%20words","#frag"],"afterParams":"https://user:pa%20ss@example.com:8080/c?y=two+words&z=%C3%A4%26%3D#frag","afterSet":"https://user:pa%20ss@example.com/new%20path?y=two+words&z=%C3%A4%26%3D","rel":"http://h/a/x?q","canParse":[false,true],"err":["TypeError","ERR_INVALID_URL"],"params":["1",["1","3"],true," x y",4,["a","b","a","c"]],"paramsStr":"a=9&b=2&c=+x+y","paramsObj":"k=v+w&%C3%A9=1","fileUrl":"file:///tmp/a%20b%23c.txt","filePath":"/tmp/a b.txt","legacy":["http:",true,"user:pw","host.com:8080","8080","host.com","#hash","?query=string&a=1",{"query":"string","a":"1"},"/p/a/t/h","/p/a/t/h?query=string&a=1","http://user:pw@host.com:8080/p/a/t/h?query=string&a=1#hash"],"legacyRel":["/a/b","c=d"],"format":"https://ex.com/x?a=1%202&b=x&b=y","resolve":["/one/two/four","http://example.com/one","http://example.com/two"],"qs":["a=1&a=2&b=x%20y&c=",{"a":["1","2"],"b":" ","c":""}],"qsEscape":"a%20b%26c%2F%C3%A9","domain":"xn--espaol-zwa.com"}"##;
 
 #[tokio::test]
+#[cfg_attr(windows, ignore = "expects POSIX file URLs")]
 async fn url_and_querystring_match_node() {
     let (_dir, root) = tempdir();
     let (runtime, _capture) = runtime(&root);

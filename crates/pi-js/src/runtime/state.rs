@@ -74,6 +74,8 @@ pub(crate) struct LoopState {
     pub inline_sources: RefCell<HashMap<String, String>>,
     pub idle_waiters: RefCell<Vec<tokio::sync::oneshot::Sender<()>>>,
     pub shutting_down: Cell<bool>,
+    /// `process.nextTick` callbacks are queued; they run before the next microtasks.
+    pub ticks_pending: Cell<bool>,
     pub cwd: RefCell<PathBuf>,
 }
 
@@ -100,6 +102,7 @@ impl LoopState {
             inline_sources: RefCell::default(),
             idle_waiters: RefCell::default(),
             shutting_down: Cell::new(false),
+            ticks_pending: Cell::new(false),
             cwd: RefCell::new(cwd),
         });
         STATE.with(|slot| *slot.borrow_mut() = Some(state.clone()));

@@ -88,3 +88,17 @@ pub async fn run_cjs(runtime: &JsRuntime, root: &Path, body: &str) -> serde_json
         Err(error) => panic!("script failed: {}", error.display_with_stack()),
     }
 }
+
+/// Compare two JSON objects key by key so a failure names the differing key.
+pub fn assert_same_keys(actual: &serde_json::Value, expected: &serde_json::Value) {
+    let (Some(actual), Some(expected)) = (actual.as_object(), expected.as_object()) else {
+        assert_eq!(actual, expected);
+        return;
+    };
+    for (key, value) in expected {
+        assert_eq!(actual.get(key), Some(value), "key `{key}` differs");
+    }
+    for key in actual.keys() {
+        assert!(expected.contains_key(key), "unexpected key `{key}`");
+    }
+}

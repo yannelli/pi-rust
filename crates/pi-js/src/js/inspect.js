@@ -200,7 +200,7 @@ function isBoxed(value) {
 function describe(ctx, value, name, prefix, keys) {
   const withoutIndexes = () => keys.filter((key) => !(typeof key === "string" && INDEX.test(key)));
   if (Array.isArray(value)) {
-    const shown = withoutIndexes().filter((key) => key !== "length");
+    const shown = withoutIndexes().filter((key) => ctx.showHidden || key !== "length");
     return { braces: [`${name === "Array" ? "" : prefix}[`, "]"], keys: shown, entries: (level) => formatList(ctx, value, level) };
   }
   if (typeof value === "function") {

@@ -65,30 +65,25 @@ process.kill = (pid, signal = "SIGTERM") => {
   return nativeProcess.kill(Number(pid), name);
 };
 
+// The event loop calls runTicks before each microtask checkpoint, as Node does.
 const tickQueue = [];
-let tickScheduled = false;
-function runTicks() {
-  tickScheduled = false;
+internal.runTicks = function runTicks() {
   while (tickQueue.length > 0) {
     const [callback, args] = tickQueue.shift();
     try {
       callback(...args);
     } catch (error) {
-      if (tickQueue.length > 0 && !tickScheduled) {
-        tickScheduled = true;
-        queueMicrotask(runTicks);
-      }
+      if (tickQueue.length > 0) nativeProcess.scheduleTicks();
       throw error;
     }
   }
-}
+};
 process.nextTick = function nextTick(callback, ...args) {
-  if (typeof callback !== "function") throw new TypeError('The "callback" argument must be of type function');
-  tickQueue.push([callback, args]);
-  if (!tickScheduled) {
-    tickScheduled = true;
-    queueMicrotask(runTicks);
+  if (typeof callback !== "function") {
+    throw Object.assign(new TypeError('The "callback" argument must be of type function'), { code: "ERR_INVALID_ARG_TYPE" });
   }
+  tickQueue.push([callback, args]);
+  nativeProcess.scheduleTicks();
 };
 
 function hrtime(previous) {
