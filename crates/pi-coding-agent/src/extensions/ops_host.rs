@@ -119,6 +119,10 @@ pub(crate) fn sync(runner: &ExtensionRunner, op: &str, args: &Args) -> Result<Ho
             });
             Value::Null
         }
+        "timing" => {
+            crate::diagnostics::time_in(&args.str(0)?, crate::diagnostics::timings::EXTENSIONS);
+            Value::Null
+        }
         "registry" => {
             runner.apply_registry(args.json(0));
             Value::Null

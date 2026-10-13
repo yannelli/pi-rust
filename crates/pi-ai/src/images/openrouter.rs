@@ -55,7 +55,7 @@ async fn run(
         ("accept", "application/json".into()),
     ];
     let headers = build_headers(defaults, &model.headers, &options.headers, &options.suppressed_headers);
-    let body = apply_payload_hook(build_params(model, context), options.on_payload.as_ref(), model);
+    let body = apply_payload_hook(build_params(model, context), options.on_payload.as_ref(), model).await;
     let request = HttpRequest { url: endpoint(&model.base_url, "chat/completions"), headers, body };
     let send = SendOptions { label: Some("OpenRouter"), ..SendOptions::from_request(options, 0) };
     let (response, body) = post_json(&request, &send).await?;

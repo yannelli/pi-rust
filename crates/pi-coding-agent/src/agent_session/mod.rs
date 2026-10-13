@@ -25,6 +25,7 @@ mod routing;
 mod run;
 pub mod runtime;
 mod runtime_catalog;
+mod runtime_extension_ops;
 mod runtime_extensions;
 mod runtime_virtual;
 pub mod sdk;
@@ -53,9 +54,10 @@ pub use self::model_runtime::{ModelRuntime, ModelRuntimeOptions};
 pub use self::prompt::{PromptDisposition, PromptOptions, StreamingBehavior};
 pub use self::runtime::{
     AgentSessionRuntime, AsyncSetupFn, ForkPosition, ForkResult, InvalidateFn, RuntimeFactory, RuntimeParts,
-    RuntimeTarget, SessionImportFileNotFound, SwitchResult, TrustPromptFn,
+    RuntimeTarget, SessionImportFileNotFound, SwitchResult, TrustPromptFn, TrustUi,
 };
 pub use self::runtime_catalog::{CachedFileModelsStore, CatalogSetup, LlamaAuth, ProviderAuth, catalog_base_url};
+pub use self::runtime_extensions::{ExtensionProviderHooks, RefreshModelsContext};
 pub use self::runtime_virtual::RouteOptions;
 pub use self::sdk::{CreateAgentSessionOptions, CreateAgentSessionResult, NoTools, create_agent_session};
 pub use self::services::{

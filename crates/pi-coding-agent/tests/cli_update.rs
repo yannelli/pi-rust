@@ -186,10 +186,42 @@ async fn timings_go_to_stderr_and_json_mode_keeps_stdout_for_events() {
     assert!(output.status.success(), "stderr: {}", text(&output.stderr));
     let stderr = text(&output.stderr);
     assert!(stderr.contains("Startup Timings: main") && stderr.contains("createRuntime"), "{stderr}");
+    assert_eq!(stderr.matches("Startup Timings: main").count(), 1, "{stderr}");
+    let labels: Vec<&str> = stderr
+        .split("Startup Timings: main ---\n")
+        .nth(1)
+        .unwrap()
+        .lines()
+        .take_while(|line| !line.contains("TOTAL"))
+        .filter_map(|line| line.trim().split(':').next())
+        .collect();
+    let expected = [
+        "parseArgs",
+        "runMigrations",
+        "createSessionManager",
+        "createRuntime",
+        "createAgentSessionRuntime",
+        "readPipedStdin",
+        "prepareInitialMessage",
+        "initTheme",
+        "resolveModelScope",
+        "createAgentSession",
+    ];
+    assert_eq!(labels, expected, "{stderr}");
     let stdout = text(&output.stdout);
     assert!(stdout.lines().all(|line| serde_json::from_str::<Value>(line).is_ok()), "{stdout}");
 
     let output = run(pi_binary(), root.path(), &args, &[]).await;
     assert!(output.status.success(), "stderr: {}", text(&output.stderr));
     assert!(!text(&output.stderr).contains("Startup Timings"), "timings are off by default");
+
+    std::fs::write(root.path().join("work/timed.ts"), "export default function () {}\n").unwrap();
+    let with_extension = ["-e", "./timed.ts", "--model", "mock-model", "--mode", "json", "--no-session", "-p", "Hi"];
+    let output = run(pi_binary(), root.path(), &with_extension, &[("PI_TIMING", "1".into())]).await;
+    assert!(output.status.success(), "stderr: {}", text(&output.stderr));
+    let stderr = text(&output.stderr);
+    let extensions = stderr.split("--- Startup Timings: extensions ---\n").nth(1).expect(&stderr);
+    let import = extensions.find("timed.ts module import: ").expect(extensions);
+    let factory = extensions.find("timed.ts factory: ").expect(extensions);
+    assert!(import < factory, "{extensions}");
 }

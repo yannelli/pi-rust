@@ -219,18 +219,36 @@ impl AgentSession {
         (normalized, hints)
     }
 
-    /// Queue a steering message, delivered after the current turn's tool calls.
-    pub fn steer(&self, text: &str, images: Vec<ContentBlock>) -> PromptDisposition {
-        let expanded = self.expand_input(text);
-        self.queue_message(&expanded, images, StreamingBehavior::Steer);
-        PromptDisposition::Queued
+    /// Queue a steering message, delivered after the current turn's tool calls. Errors on an
+    /// extension command; `input` handlers may handle it instead.
+    pub async fn steer(&self, text: &str, images: Vec<ContentBlock>) -> anyhow::Result<PromptDisposition> {
+        self.queue_user_input(text, images, StreamingBehavior::Steer, "interactive").await
     }
 
     /// Queue a follow-up, delivered when the agent has no more tool calls or steering.
-    pub fn follow_up(&self, text: &str, images: Vec<ContentBlock>) -> PromptDisposition {
-        let expanded = self.expand_input(text);
-        self.queue_message(&expanded, images, StreamingBehavior::FollowUp);
-        PromptDisposition::Queued
+    pub async fn follow_up(&self, text: &str, images: Vec<ContentBlock>) -> anyhow::Result<PromptDisposition> {
+        self.queue_user_input(text, images, StreamingBehavior::FollowUp, "interactive").await
+    }
+
+    /// Upstream `_queueUserInput`: refuse extension commands, run `input` handlers with
+    /// `source`, expand skills and templates, then queue.
+    pub async fn queue_user_input(
+        &self,
+        text: &str,
+        images: Vec<ContentBlock>,
+        behavior: StreamingBehavior,
+        source: &str,
+    ) -> anyhow::Result<PromptDisposition> {
+        if text.starts_with('/') {
+            self.ensure_not_extension_command(text)?;
+        }
+        let streaming = self.is_streaming().then_some(behavior);
+        let Some((text, images)) = self.run_input_handlers(text, images, source, streaming).await else {
+            return Ok(PromptDisposition::Handled);
+        };
+        let expanded = self.expand_input(&text);
+        self.queue_message(&expanded, images, behavior);
+        Ok(PromptDisposition::Queued)
     }
 
     fn queue_message(&self, text: &str, images: Vec<ContentBlock>, behavior: StreamingBehavior) {

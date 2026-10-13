@@ -63,7 +63,7 @@ fn is_date_time(value: &str) -> bool {
 }
 
 /// Whether `value` matches the named format. Unregistered formats always match.
-pub(crate) fn test_format(format: &str, value: &str) -> bool {
+pub(super) fn test_format(format: &str, value: &str) -> bool {
     match format {
         "date" => is_date(value),
         "time" => is_time(value),

@@ -14,7 +14,7 @@ use super::types::{
     RpcBashResult, RpcCommand, RpcCommandSource, RpcSessionState, RpcSlashCommand, RpcStreamingBehavior, error,
     success, success_line_with_raw_data,
 };
-use crate::agent_session::{AgentSession, ForkPosition, PromptOptions, compaction_result_json};
+use crate::agent_session::{AgentSession, ForkPosition, PromptOptions, StreamingBehavior, compaction_result_json};
 
 fn ok(id: Option<&Value>, command: &str, data: Option<Value>) -> anyhow::Result<Option<Reply>> {
     Ok(Some(Reply::Json(success(id, command, data))))
@@ -79,11 +79,14 @@ impl RpcServer {
                 Ok(None)
             }
             RpcCommand::Steer { message, images } => {
-                let disposition = session.steer(&message, images.unwrap_or_default());
+                let images = images.unwrap_or_default();
+                let disposition = session.queue_user_input(&message, images, StreamingBehavior::Steer, "rpc").await?;
                 ok(id, "steer", Some(json!({"disposition": disposition.as_str()})))
             }
             RpcCommand::FollowUp { message, images } => {
-                let disposition = session.follow_up(&message, images.unwrap_or_default());
+                let images = images.unwrap_or_default();
+                let behavior = StreamingBehavior::FollowUp;
+                let disposition = session.queue_user_input(&message, images, behavior, "rpc").await?;
                 ok(id, "follow_up", Some(json!({"disposition": disposition.as_str()})))
             }
             RpcCommand::Abort => {

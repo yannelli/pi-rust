@@ -120,7 +120,7 @@ fn registry_applies_models_json_over_the_composed_catalog() {
 
     std::fs::write(&path, "{ not json").unwrap();
     let (registry, error) = build_registry(&[model("a", "a1")], &catalogs, Some(&path));
-    assert!(matches!(error, Some(pi_ai::models::ModelsFileError::Parse { .. })));
+    assert!(matches!(error, Some(pi_ai::models::ModelsFileError::Syntax { .. })));
     assert_eq!(registry.all_models().len(), 2);
 }
 

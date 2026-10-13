@@ -21,7 +21,10 @@ async fn request_hooks_edit_the_payload_and_headers_and_see_the_response() {
             .await;
     let source = r#"export default function (pi) {
 	const seen = [];
-	pi.on("before_provider_request", (event) => ({ ...event.payload, temperature: 0.25 }));
+	pi.on("before_provider_request", async (event) => {
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		return { ...event.payload, temperature: 0.25 };
+	});
 	pi.on("before_provider_headers", (event) => { event.headers["x-extension"] = "yes"; });
 	pi.on("after_provider_response", (event) => { seen.push(`status ${event.status}`); });
 	pi.on("provider_stream_event", (event) => { seen.push(`${event.provider}/${event.model}`); });

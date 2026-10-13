@@ -71,6 +71,11 @@ impl ExtensionUi for RecordingUi {
         self.answer()
     }
 
+    fn fatal_runtime_error(&self, prefix: &str, message: &str, stack: &str) {
+        let first = stack.lines().find(|line| line.contains(".ts")).unwrap_or("no stack").trim();
+        self.push(format!("fatal: {prefix}: {message} | {first}"));
+    }
+
     fn notify(&self, message: &str, kind: Option<NotifyType>) {
         self.push(format!("notify({}): {message}", kind.unwrap_or_default().as_str()));
     }

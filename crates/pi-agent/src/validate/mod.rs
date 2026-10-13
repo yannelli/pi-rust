@@ -1,25 +1,12 @@
 //! Tool argument coercion and validation (upstream `validateToolArguments`): drop optional
 //! nulls, coerce toward the schema, then check it with TypeBox's keywords and messages.
 
-mod check;
 mod coerce;
-mod formats;
 
 use serde_json::Value;
 
-use check::{Checker, SchemaError};
 use coerce::{coerce, normalize_optional_nulls};
-
-/// TypeBox's error path: `/a/0/b` becomes `a.0.b`; `required` names the first missing property.
-fn display_path(error: &SchemaError) -> String {
-    let base = error.instance_path.trim_start_matches('/').replace('/', ".");
-    if error.keyword == "required"
-        && let Some(missing) = error.required.first()
-    {
-        return if base.is_empty() { missing.clone() } else { format!("{base}.{missing}") };
-    }
-    if base.is_empty() { "root".into() } else { base }
-}
+use pi_ai::json_schema::{Checker, display_path};
 
 /// Whether `value` matches `schema`.
 pub fn is_valid(schema: &Value, value: &Value) -> bool {

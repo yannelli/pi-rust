@@ -68,7 +68,7 @@ async fn serializes_sdk_payloads_to_the_wire_format() {
         max_tokens: Some(123),
         tool_choice: Some("lookup".into()),
         session_id: Some("session-1".into()),
-        on_payload: Some(Arc::new(move |payload: &Value, _: &Model| {
+        on_payload: Some(crate::registry::payload_hook(move |payload: &Value, _: &Model| {
             payload_hook.lock().unwrap().push(payload.clone());
             let mut next = payload.clone();
             let extra = json!({"topP": 0.9, "randomSeed": 42, "presencePenalty": 0.1, "frequencyPenalty": 0.2,

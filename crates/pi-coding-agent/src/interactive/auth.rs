@@ -16,8 +16,8 @@ use super::selector::SelectorSpec;
 use crate::agent_session::login::{NO_STORED_CREDENTIALS, logout_message};
 use crate::interactive_components::login::{
     AuthSelectorMode, AuthSelectorProvider, LoginDialog, LoginMethodChoice, LoginMethodMenu, OAuthSelector,
-    RadiusLoginMenu, api_key_login_details, format_auth_selector_provider_type, llama_cpp_post_login_guidance,
-    login_action_label, no_login_providers_message, run_dialog_login,
+    RadiusLoginMenu, ambient_auth_dialog, api_key_login_details, format_auth_selector_provider_type,
+    llama_cpp_post_login_guidance, login_action_label, no_login_providers_message, run_dialog_login,
 };
 use crate::interactive_components::{ExtensionSelector, ExtensionSelectorOptions};
 use crate::llama::LLAMA_PROVIDER_ID;
@@ -258,6 +258,9 @@ impl InteractiveMode {
 
     /// The login dialog in the editor slot, running the provider's flow until it ends.
     fn show_login_dialog(&self, provider: AuthSelectorProvider, on_back: OnBack) {
+        if provider.ambient {
+            return self.show_ambient_auth_dialog(&provider, on_back);
+        }
         let previous_model = self.session().model();
         let dialog =
             Rc::new(RefCell::new(LoginDialog::new(&self.tui(), &provider.id, |_, _| {}, Some(&provider.name), None)));
@@ -300,6 +303,26 @@ impl InteractiveMode {
                 }
             }
         });
+    }
+
+    /// A provider whose credentials come from outside: explain it and wait for the close key
+    /// (upstream `showAmbientAuthDialog`).
+    fn show_ambient_auth_dialog(&self, provider: &AuthSelectorProvider, on_back: OnBack) {
+        let close: Rc<RefCell<OnBack>> = Rc::default();
+        let on_close = {
+            let close = close.clone();
+            move || {
+                if let Some(close) = close.borrow_mut().take() {
+                    close();
+                }
+                if let Some(back) = &on_back {
+                    back();
+                }
+            }
+        };
+        let method = provider.method_name.as_deref();
+        let dialog = ambient_auth_dialog(&self.tui(), &provider.id, &provider.name, method, on_close);
+        *close.borrow_mut() = Some(self.mount_view(component(dialog)));
     }
 
     /// Picks the provider's default model when none was set, then reports where the credential went.

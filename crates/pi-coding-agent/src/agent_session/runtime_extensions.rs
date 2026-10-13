@@ -1,42 +1,117 @@
 //! Providers registered by extensions in the model runtime (upstream `ModelRuntime`
-//! `registerProvider` and `unregisterProvider`): their models and auth settings apply over
-//! `models.json`, and their OAuth flows join the built-in ones.
+//! `registerProvider` and `provider-composer.ts`): their models and auth settings apply over
+//! `models.json`, `modelOverrides` apply last, and their OAuth flows join the built-in ones.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
-use pi_ai::ModelRegistry;
 use pi_ai::auth::OAuthAuth;
+use pi_ai::{Model, ModelRegistry};
 use serde_json::{Map, Value, json};
 
 use super::model_runtime::{ModelRuntime, read, write};
+pub use super::runtime_extension_ops::{ExtensionProviderHooks, RefreshModelsContext};
 
-const MODEL_KEYS: [&str; 7] = ["name", "baseUrl", "apiKey", "api", "headers", "authHeader", "models"];
-const EFFECT_KEYS: [&str; 5] = ["baseUrl", "apiKey", "headers", "authHeader", "models"];
+/// Keys of a registration that change the composed provider.
+const EFFECT_KEYS: [&str; 6] = ["name", "baseUrl", "apiKey", "headers", "authHeader", "models"];
 
-fn model_kind(model: &pi_ai::Model) -> String {
-    model.model_type.clone().unwrap_or_else(|| "chat".into())
+pub(super) fn model_kind(model: &Model) -> &str {
+    model.model_type.as_deref().unwrap_or("chat")
 }
 
-/// Apply one extension provider: its `models` replace the provider's models.
-fn apply_extension_provider(registry: &mut ModelRegistry, provider: &str, config: &Value) -> Result<(), String> {
+fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+    value.get(key).and_then(Value::as_str)
+}
+
+/// Upstream `findExtensionModelDefaults`: a model of the same type to inherit `api` and
+/// `baseUrl` from.
+fn extension_defaults<'a>(models: &'a [Model], definition: &Value) -> Option<&'a Model> {
+    let kind = text(definition, "type").unwrap_or("chat");
+    let candidates: Vec<&Model> = models.iter().filter(|model| model_kind(model) == kind).collect();
+    let id = text(definition, "id").unwrap_or_default();
+    let api = text(definition, "api");
+    candidates
+        .iter()
+        .find(|model| model.id == id)
+        .or_else(|| api.and_then(|api| candidates.iter().find(|model| model.api == api)))
+        .or_else(
+            || if kind == "chat" { candidates.iter().find(|model| model.api == "openai-completions") } else { None },
+        )
+        .or_else(|| candidates.first())
+        .copied()
+}
+
+/// Upstream `extensionModelFromDefinition`: the definition as given, with `api`, `provider`, and
+/// `baseUrl` filled in and `headers` moved to the request auth.
+fn extension_model(provider: &str, models: &[Model], config: &Value, definition: &Value) -> Result<Model, String> {
+    let kind = text(definition, "type").unwrap_or("chat");
+    let id = text(definition, "id").unwrap_or_default().to_string();
+    let defaults = extension_defaults(models, definition);
+    let provider_api = if kind == "chat" { text(config, "api") } else { None };
+    let api = text(definition, "api").or(provider_api).map(str::to_string).or_else(|| defaults.map(|m| m.api.clone()));
+    let api = api.ok_or_else(|| {
+        let level = if kind == "chat" { " or provider level" } else { "" };
+        format!("Provider {provider}, model {id}: no \"api\" specified. Set it at model level{level}.")
+    })?;
+    let base_url = text(definition, "baseUrl")
+        .or_else(|| text(config, "baseUrl"))
+        .map(str::to_string)
+        .or_else(|| defaults.map(|model| model.base_url.clone()))
+        .ok_or_else(|| format!("Provider {provider}: \"baseUrl\" is required when defining custom models."))?;
+    let mut object: Map<String, Value> = definition.as_object().cloned().unwrap_or_default();
+    object.insert("api".into(), json!(api));
+    object.insert("provider".into(), json!(provider));
+    object.insert("baseUrl".into(), json!(base_url));
+    object.remove("headers");
+    // The Rust model needs a name and marks chat models by an absent type.
+    object.entry("name").or_insert_with(|| json!(id));
+    if kind == "chat" {
+        object.remove("type");
+    }
+    serde_json::from_value(Value::Object(object)).map_err(|error| format!("Provider {provider}, model {id}: {error}"))
+}
+
+/// Upstream `applyExtension` plus the auth layering of `composeModelProvider`: `models` (or the
+/// refreshed list) replace the provider's models; otherwise `baseUrl` moves the existing ones.
+pub(super) fn apply_extension_provider(
+    registry: &mut ModelRegistry,
+    provider: &str,
+    config: &Value,
+    refreshed: Option<&[Value]>,
+) -> Result<(), String> {
     let present = |key: &str| config.get(key).is_some_and(|value| !value.is_null());
-    if !EFFECT_KEYS.iter().any(|key| present(key)) {
+    if refreshed.is_none() && !EFFECT_KEYS.iter().any(|key| present(key)) {
         return Ok(());
     }
-    let fields: Map<String, Value> =
-        MODEL_KEYS.iter().filter(|key| present(key)).map(|key| ((*key).to_string(), config[*key].clone())).collect();
-    registry.apply_json(&json!({"providers": {provider: fields}}).to_string())?;
-    if let Some(models) = config["models"].as_array() {
-        let keep: HashSet<(String, String)> = models
+    let current = registry.provider_models(provider);
+    let definitions = refreshed.or_else(|| config["models"].as_array().map(Vec::as_slice));
+    let models = match definitions {
+        Some(definitions) => definitions
             .iter()
-            .filter_map(|model| {
-                let kind = model["type"].as_str().unwrap_or("chat").to_string();
-                Some((model["id"].as_str()?.to_string(), kind))
-            })
-            .collect();
-        registry
-            .retain_models(|model| model.provider != provider || keep.contains(&(model.id.clone(), model_kind(model))));
+            .map(|definition| extension_model(provider, &current, config, definition))
+            .collect::<Result<Vec<_>, _>>()?,
+        None => match text(config, "baseUrl") {
+            Some(base_url) => current.into_iter().map(|model| Model { base_url: base_url.into(), ..model }).collect(),
+            None => current,
+        },
+    };
+    registry.replace_provider_models(provider, models);
+    if let Some(name) = text(config, "name") {
+        registry.set_provider_name(provider, name);
+    }
+    let auth = registry.auth_config_mut(provider);
+    if let Some(key) = text(config, "apiKey") {
+        auth.api_key = Some(key.to_string());
+    }
+    if let Some(headers) = config["headers"].as_object() {
+        auth.headers.extend(headers.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))));
+    }
+    if let Some(auth_header) = config["authHeader"].as_bool() {
+        auth.auth_header = auth_header;
+    }
+    for definition in definitions.into_iter().flatten() {
+        let (Some(id), Some(headers)) = (text(definition, "id"), definition["headers"].as_object()) else { continue };
+        let entry = auth.model_headers.entry(id.to_string()).or_default();
+        entry.extend(headers.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))));
     }
     Ok(())
 }
@@ -52,9 +127,12 @@ impl ModelRuntime {
             }
         }
         let mut probe = self.registry().clone();
-        apply_extension_provider(&mut probe, provider, &effective)?;
+        apply_extension_provider(&mut probe, provider, &effective, None)?;
         let api_key = effective["apiKey"].as_str().and_then(pi_ai::models::resolve_config_value);
         write(&self.extension_providers).insert(provider.to_string(), effective);
+        if let Some(state) = write(&self.extension_hooks).get_mut(provider) {
+            state.refreshed = None;
+        }
         self.rebuild_registry();
         if api_key.is_some() {
             write(&self.configured).insert(provider.to_string());
@@ -65,6 +143,7 @@ impl ModelRuntime {
     }
 
     pub fn unregister_extension_provider(&self, provider: &str) {
+        write(&self.extension_hooks).remove(provider);
         if write(&self.extension_providers).remove(provider).is_some() {
             self.rebuild_registry();
         }
@@ -87,37 +166,30 @@ impl ModelRuntime {
         providers
     }
 
-    /// Apply the extension providers to a freshly composed registry.
+    /// Apply the extension providers to a freshly composed registry, then the `modelOverrides`
+    /// of `models.json` as the topmost layer.
     pub(super) fn apply_extension_providers(&self, registry: &mut ModelRegistry) {
         let providers = read(&self.extension_providers).clone();
+        let hooks = read(&self.extension_hooks);
         for (provider, config) in &providers {
-            let _ = apply_extension_provider(registry, provider, config);
+            let state = hooks.get(provider);
+            let refreshed = state.and_then(|state| state.refreshed.as_deref());
+            if apply_extension_provider(registry, provider, config, refreshed).is_err() && refreshed.is_some() {
+                let _ = apply_extension_provider(registry, provider, config, None);
+            }
+            if let Some(modified) = state.and_then(|state| state.modified.clone()) {
+                let others: Vec<Model> = registry
+                    .provider_models(provider)
+                    .into_iter()
+                    .filter(|model| model_kind(model) != "chat")
+                    .collect();
+                registry.replace_provider_models(provider, modified.into_iter().chain(others).collect());
+            }
+            let _ = registry.apply_model_overrides(provider);
         }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn extension_models_replace_the_provider_models() {
-        let mut registry = ModelRegistry::builtin();
-        let config = json!({
-            "baseUrl": "http://localhost:1",
-            "api": "custom-api",
-            "apiKey": "key",
-            "models": [{"id": "only", "name": "Only", "contextWindow": 1000, "maxTokens": 100}],
-        });
-        apply_extension_provider(&mut registry, "anthropic", &config).unwrap();
-        let models: Vec<&str> = registry
-            .all_models()
-            .iter()
-            .filter(|model| model.provider == "anthropic")
-            .map(|model| model.id.as_str())
-            .collect();
-        assert_eq!(models, vec!["only"]);
-        let model = registry.find("anthropic", "only").unwrap();
-        assert_eq!((model.api.as_str(), model.base_url.as_str()), ("custom-api", "http://localhost:1"));
-    }
-}
+#[path = "runtime_extensions_tests.rs"]
+mod tests;

@@ -262,11 +262,21 @@ impl ExtensionRunner {
         }
         let mut stored = config.clone();
         if let Some(object) = stored.as_object_mut() {
-            for key in ["hasStreamSimple", "hasHeaderFunction", "oauth", "streamSimple"] {
+            for key in [
+                "hasStreamSimple",
+                "hasHeaderFunction",
+                "oauth",
+                "streamSimple",
+                "hasRefreshModels",
+                "imageApis",
+                "classifierApis",
+            ] {
                 object.remove(key);
             }
         }
         runtime.register_extension_provider(name, stored)?;
+        let hooks = super::provider_hooks::JsProviderHooks::from_config(self.weak(), name, &config);
+        runtime.register_extension_hooks(name, hooks.map(|hooks| Arc::new(hooks) as _));
         if let Some(oauth) = config["oauth"].as_object() {
             let display = oauth.get("name").and_then(Value::as_str).unwrap_or(name).to_string();
             let oauth = JsOAuth { runner: self.weak(), provider: name.to_string(), name: display };
@@ -293,6 +303,7 @@ impl ExtensionRunner {
             self.restore_api(&api);
         }
         self.model_runtime().unregister_extension_provider(name);
+        self.model_runtime().register_extension_hooks(name, None);
         self.model_runtime().register_extension_oauth(name, None);
         if let Some(session) = self.session() {
             session.refresh_model_from_registry();

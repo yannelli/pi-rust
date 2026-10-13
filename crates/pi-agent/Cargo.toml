@@ -12,7 +12,6 @@ anyhow.workspace = true
 async-trait.workspace = true
 futures.workspace = true
 pi-ai.workspace = true
-regex = "1.11.1"
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

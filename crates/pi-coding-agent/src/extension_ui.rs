@@ -172,7 +172,8 @@ pub trait ExtensionUi: Send + Sync {
 
     /// A session replacement an extension started (`ctx.newSession()`, `ctx.fork()`) failed; the
     /// TUI reports it as fatal and ends the run (upstream `handleFatalRuntimeError`).
-    fn fatal_runtime_error(&self, _prefix: &str, _message: &str) {}
+    /// `stack` is the JavaScript stack when the error came from an extension.
+    fn fatal_runtime_error(&self, _prefix: &str, _message: &str, _stack: &str) {}
 
     /// A method of the overlay handle `onHandle` received (`hide`, `setHidden`, `isHidden`,
     /// `focus`, `unfocus`, `isFocused`, `getBounds`) for the `custom()` overlay `id`.

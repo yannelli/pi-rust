@@ -79,7 +79,7 @@ async fn hooks_see_payload_response_and_stream_events() {
     let events: Arc<Mutex<Vec<Value>>> = Arc::default();
     let (seen_responses, seen_events) = (responses.clone(), events.clone());
     let options = StreamOptions {
-        on_payload: Some(Arc::new(|payload, model| {
+        on_payload: Some(crate::registry::payload_hook(|payload, model| {
             let mut payload = payload.clone();
             payload["metadata"] = json!({"model": model.id});
             Some(payload)

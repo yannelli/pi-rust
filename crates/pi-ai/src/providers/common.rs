@@ -50,12 +50,13 @@ pub(crate) fn spawn_provider_stream_with<H: SseHandler>(
     mut request: HttpRequest,
     make_handler: impl FnOnce(EventSender) -> H,
 ) -> AssistantMessageEventStream {
-    request.body = apply_payload_hook(request.body, options.on_payload.as_ref(), model);
     let (sender, stream) = event_channel();
     let mut handler = make_handler(sender.clone());
     let mut builder = MessageBuilder::new(model, sender);
     let (model, options) = (model.clone(), options.clone());
     tokio::spawn(async move {
+        let body = std::mem::take(&mut request.body);
+        request.body = apply_payload_hook(body, options.on_payload.as_ref(), &model).await;
         let send = SendOptions {
             env: &options.env,
             cancel: &options.cancel,

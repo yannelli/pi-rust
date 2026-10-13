@@ -255,7 +255,7 @@ pub(crate) async fn capture_payload(
 ) -> Value {
     let captured: Arc<Mutex<Option<Value>>> = Arc::default();
     let slot = captured.clone();
-    options.on_payload = Some(Arc::new(move |payload, _| {
+    options.on_payload = Some(crate::registry::payload_hook(move |payload, _| {
         *slot.lock().unwrap() = Some(payload.clone());
         None
     }));

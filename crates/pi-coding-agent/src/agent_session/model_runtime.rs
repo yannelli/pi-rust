@@ -50,6 +50,8 @@ pub struct ModelRuntime {
     /// `pi.registerProvider` configs by provider id, applied over `models.json`.
     pub(super) extension_providers: RwLock<BTreeMap<String, serde_json::Value>>,
     pub(super) extension_oauth: Arc<RwLock<HashMap<String, Arc<dyn OAuthAuth>>>>,
+    /// `refreshModels`, `oauth.modifyModels`, `images`, and `classifiers` of extension providers.
+    pub(super) extension_hooks: RwLock<HashMap<String, super::runtime_extension_ops::ExtensionHookState>>,
 }
 
 pub(super) fn read<T>(lock: &RwLock<T>) -> RwLockReadGuard<'_, T> {
@@ -84,6 +86,7 @@ impl ModelRuntime {
             provider_auth: RwLock::default(),
             extension_providers: RwLock::default(),
             extension_oauth,
+            extension_hooks: RwLock::default(),
         };
         runtime.refresh_configured_providers().await;
         runtime

@@ -179,7 +179,9 @@ impl Run {
         let target = resolve_target_with(model, &options.bedrock, &options.env).map_err(Failure::new)?;
         let mut body =
             request::build_body(model, context, options, target.configured_region.as_deref()).map_err(Failure::new)?;
-        if let Some(replacement) = options.on_payload.as_ref().and_then(|hook| hook(&body, model)) {
+        if let Some(hook) = &options.on_payload
+            && let Some(replacement) = hook(&body, model).await
+        {
             body = replacement;
         }
         let model_id = body.get("modelId").and_then(Value::as_str).unwrap_or(&model.id).to_string();

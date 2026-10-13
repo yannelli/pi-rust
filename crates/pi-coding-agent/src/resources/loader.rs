@@ -192,6 +192,7 @@ impl ResourceLoader {
 
     /// Discover and load every resource for the current options.
     pub fn reload(&mut self) {
+        crate::diagnostics::reset_timings(crate::diagnostics::timings::EXTENSIONS);
         let options = &self.options;
         let local = LocalResourceOptions {
             cwd: &options.cwd,

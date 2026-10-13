@@ -26,6 +26,22 @@ pub fn termux_package_for_tool(tool: &str) -> &str {
     }
 }
 
+/// Helper tools upstream installs at startup: id, display name, and the commands that provide it.
+const HELPER_TOOLS: [(&str, &str, &[&str]); 2] = [("fd", "fd", &["fd", "fdfind"]), ("rg", "ripgrep", &["rg"])];
+
+/// Upstream `ensureTool` on Termux, where Linux downloads do not run: a warning for each helper
+/// tool `available` cannot find. Elsewhere pi needs no download, so there is nothing to say.
+pub fn termux_tool_warnings(env: &PlatformEnv, available: impl Fn(&str) -> bool) -> Vec<String> {
+    if !is_termux(env) {
+        return Vec::new();
+    }
+    HELPER_TOOLS
+        .iter()
+        .filter(|(_, _, commands)| !commands.iter().any(|command| available(command)))
+        .map(|(tool, name, _)| format!("{name} not found. Install with: pkg install {}", termux_package_for_tool(tool)))
+        .collect()
+}
+
 /// Windows and WSL terminals reserve some key combinations, so pi uses other defaults there.
 pub fn use_windows_keybindings(env: &PlatformEnv) -> bool {
     env.platform == Platform::Windows
@@ -96,6 +112,12 @@ mod tests {
         assert!(!is_termux(&env(Platform::Linux, &[("PREFIX", "/usr/local")], None)));
         assert_eq!(termux_package_for_tool("rg"), "ripgrep");
         assert_eq!(termux_package_for_tool("fd"), "fd");
+        let termux = env(Platform::Android, &[], None);
+        assert_eq!(
+            termux_tool_warnings(&termux, |command| command == "fdfind"),
+            ["ripgrep not found. Install with: pkg install ripgrep"]
+        );
+        assert!(termux_tool_warnings(&env(Platform::Linux, &[], None), |_| false).is_empty());
     }
 
     #[test]

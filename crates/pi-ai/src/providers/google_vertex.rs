@@ -38,7 +38,7 @@ impl ApiProvider for GoogleVertex {
         let prepare = {
             let (model, options) = (model.clone(), options.clone());
             async move {
-                let params = apply_payload_hook(params, options.on_payload.as_ref(), &model);
+                let params = apply_payload_hook(params, options.on_payload.as_ref(), &model).await;
                 let (model_id, body) = to_wire(&params)?;
                 let path = model_path(&model_id, true)?;
                 let url = vertex_url(&model, scope.as_ref(), &path);

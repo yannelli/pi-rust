@@ -22,10 +22,37 @@ pub fn builtin_models() -> &'static [Model] {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ModelsFileError {
-    #[error("cannot read {path}: {source}")]
+    #[error("Failed to load models.json: {source}\n\nFile: {path}")]
     Read { path: String, source: std::io::Error },
+    /// The text is not JSON (comments allowed).
+    #[error("Failed to parse models.json: {message}\n\nFile: {path}")]
+    Syntax { path: String, message: String },
+    /// The document does not match the `models.json` schema; one `path: message` per line.
+    #[error("Invalid models.json schema:\n{}\n\nFile: {path}", format_schema_errors(.errors))]
+    Schema { path: String, errors: Vec<String> },
+    /// A provider configuration that cannot be applied, such as a model without `api`.
     #[error("invalid models file {path}: {message}")]
     Parse { path: String, message: String },
+}
+
+fn format_schema_errors(errors: &[String]) -> String {
+    if errors.is_empty() {
+        return "Unknown schema error".into();
+    }
+    errors.iter().map(|error| format!("  - {error}")).collect::<Vec<_>>().join("\n")
+}
+
+static MODELS_SCHEMA: LazyLock<serde_json::Value> =
+    LazyLock::new(|| serde_json::from_str(include_str!("models.schema.json")).expect("bundled models schema is valid"));
+
+/// Check `models.json` text the way upstream `ModelConfig.load` does: comments and a BOM are
+/// allowed, then the document must match the schema. `path` names the file in the error.
+pub fn validate_models_json(text: &str, path: &str) -> Result<(), ModelsFileError> {
+    let stripped = json::strip_json_comments(text.trim_start_matches('\u{feff}'));
+    let value: serde_json::Value = serde_json::from_str(&stripped)
+        .map_err(|error| ModelsFileError::Syntax { path: path.into(), message: error.to_string() })?;
+    let errors = crate::json_schema::schema_errors(&MODELS_SCHEMA, &value);
+    if errors.is_empty() { Ok(()) } else { Err(ModelsFileError::Schema { path: path.into(), errors }) }
 }
 
 /// Available models and the `models.json` auth settings per provider.
@@ -36,6 +63,8 @@ pub struct ModelRegistry {
     provider_names: HashMap<String, String>,
     /// Providers known to have usable auth; replaces the key heuristic when set.
     configured: Option<HashSet<String>>,
+    /// `models.json` `modelOverrides` per provider, applied again after extension providers.
+    model_overrides: HashMap<String, std::collections::BTreeMap<String, serde_json::Map<String, serde_json::Value>>>,
 }
 
 impl ModelRegistry {
@@ -47,13 +76,20 @@ impl ModelRegistry {
     /// The bundled catalog plus `path` when it exists.
     pub fn load(path: &Path) -> Result<Self, ModelsFileError> {
         let mut registry = Self::builtin();
-        if path.exists() {
-            let display = path.display().to_string();
-            let text = std::fs::read_to_string(path)
-                .map_err(|source| ModelsFileError::Read { path: display.clone(), source })?;
-            registry.apply_json(&text).map_err(|message| ModelsFileError::Parse { path: display, message })?;
-        }
+        registry.apply_models_file(path)?;
         Ok(registry)
+    }
+
+    /// Validate and apply the `models.json` at `path`; a missing file changes nothing.
+    pub fn apply_models_file(&mut self, path: &Path) -> Result<(), ModelsFileError> {
+        if !path.exists() {
+            return Ok(());
+        }
+        let display = path.display().to_string();
+        let text =
+            std::fs::read_to_string(path).map_err(|source| ModelsFileError::Read { path: display.clone(), source })?;
+        validate_models_json(&text, &display)?;
+        self.apply_json(&text).map_err(|message| ModelsFileError::Parse { path: display, message })
     }
 
     /// Like [`Self::load`], but an invalid file leaves the bundled catalog and returns the error,
@@ -77,6 +113,9 @@ impl ModelRegistry {
             models = rest;
             models.extend(applied);
             auth_configs.insert(provider.clone(), json::auth_config(config));
+            if let Some(overrides) = config.model_overrides.as_ref().filter(|overrides| !overrides.is_empty()) {
+                self.model_overrides.insert(provider.clone(), overrides.clone());
+            }
             if let Some(name) = &config.name {
                 self.provider_names.insert(provider.clone(), name.clone());
             }
@@ -97,6 +136,42 @@ impl ModelRegistry {
             Some(existing) => *existing = model,
             None => self.models.push(model),
         }
+    }
+
+    /// Every model of `provider`, of every type, in catalog order.
+    pub fn provider_models(&self, provider: &str) -> Vec<Model> {
+        self.models.iter().filter(|model| model.provider == provider).cloned().collect()
+    }
+
+    /// Replace the models of `provider` with `models`.
+    pub fn replace_provider_models(&mut self, provider: &str, models: Vec<Model>) {
+        self.models.retain(|model| model.provider != provider);
+        self.models.extend(models);
+    }
+
+    /// Apply the `models.json` `modelOverrides` of `provider` to its chat models (upstream
+    /// applies them last, after custom models and extension providers). Merging is idempotent.
+    pub fn apply_model_overrides(&mut self, provider: &str) -> Result<(), String> {
+        let Some(overrides) = self.model_overrides.get(provider) else { return Ok(()) };
+        for (id, patch) in overrides {
+            for model in self.models.iter_mut().filter(|model| model.provider == provider && &model.id == id) {
+                if is_chat_model(model) {
+                    *model = json::apply_override(model, patch)
+                        .map_err(|error| format!("Provider {provider}, model {id}: {error}"))?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The auth settings of `provider`, created empty when missing.
+    pub fn auth_config_mut(&mut self, provider: &str) -> &mut ProviderAuthConfig {
+        self.auth_configs.entry(provider.to_string()).or_default()
+    }
+
+    /// Set the display name of `provider`.
+    pub fn set_provider_name(&mut self, provider: &str, name: &str) {
+        self.provider_names.insert(provider.to_string(), name.to_string());
     }
 
     /// Keep only the models `keep` accepts.

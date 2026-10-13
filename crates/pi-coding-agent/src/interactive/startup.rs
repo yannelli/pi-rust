@@ -63,6 +63,7 @@ impl InteractiveMode {
             self.pump_until(wait, Duration::from_millis(500)).await;
         }
         self.build_header();
+        self.show_managed_tool_warnings();
         self.setup_key_handlers();
         self.setup_autocomplete_provider();
         self.rebind_current_session();
@@ -79,6 +80,28 @@ impl InteractiveMode {
             }
         });
         self.state.borrow_mut().ready = true;
+        self.request_render();
+    }
+
+    /// Upstream `ensureTool("fd")` and `ensureTool("rg")` statuses: on Termux, how to install a
+    /// missing helper tool.
+    fn show_managed_tool_warnings(&self) {
+        let env = crate::platform::PlatformEnv::from_process();
+        let bin_dir = self.agent_dir.join("bin");
+        let path = pi_ai::env::process_env_value("PATH").unwrap_or_default();
+        let available = |command: &str| {
+            let mut dirs = std::iter::once(bin_dir.clone()).chain(std::env::split_paths(&path));
+            dirs.any(|dir| dir.join(command).is_file())
+        };
+        let warnings = crate::platform::termux_tool_warnings(&env, available);
+        if warnings.is_empty() {
+            return;
+        }
+        self.add_to_chat(component(Spacer::new(1)));
+        for warning in warnings {
+            let message = format!("Warning: {warning}");
+            self.add_text(move || theme().fg(ThemeColor::Warning, &message), 1, 0);
+        }
         self.request_render();
     }
 

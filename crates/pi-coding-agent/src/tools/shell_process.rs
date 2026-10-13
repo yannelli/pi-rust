@@ -163,11 +163,22 @@ fn spawn_reader(mut stream: impl AsyncRead + Unpin + Send + 'static, tx: mpsc::U
 /// Kill the child and its descendants: its process group on Unix, `taskkill /T` on Windows.
 pub(crate) async fn kill_tree(child: &mut tokio::process::Child) {
     if let Some(pid) = child.id() {
-        let mut command = kill_tree_command(pid);
-        command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-        let _ = command.status().await;
+        kill_tree_pid(pid).await;
     }
     let _ = child.start_kill();
+}
+
+#[cfg(windows)]
+async fn kill_tree_pid(pid: u32) {
+    let mut command = kill_tree_command(pid);
+    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    let _ = command.status().await;
+}
+
+/// Signals the group directly, so a busy machine does not delay the kill behind a new process.
+#[cfg(not(windows))]
+async fn kill_tree_pid(pid: u32) {
+    crate::signals::kill_process_tree(pid);
 }
 
 #[cfg(windows)]
@@ -175,15 +186,6 @@ fn kill_tree_command(pid: u32) -> tokio::process::Command {
     let root = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("C:\\Windows"));
     let mut command = tokio::process::Command::new(root.join("System32").join("taskkill.exe"));
     command.args(["/F", "/T", "/PID", &pid.to_string()]).creation_flags(CREATE_NO_WINDOW);
-    command
-}
-
-/// Uses the shell's `kill` builtin because a standalone `kill` binary is not always installed.
-#[cfg(not(windows))]
-fn kill_tree_command(pid: u32) -> tokio::process::Command {
-    let shell = bash_shell_config(None).map(|config| config.shell).unwrap_or_else(|_| PathBuf::from("sh"));
-    let mut command = tokio::process::Command::new(shell);
-    command.args(["-c", &format!("kill -KILL -- -{pid}")]);
     command
 }
 

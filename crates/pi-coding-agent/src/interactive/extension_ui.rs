@@ -285,8 +285,9 @@ impl ExtensionUi for TuiExtensionUi {
         receiver.await.ok().flatten()
     }
 
-    fn fatal_runtime_error(&self, prefix: &str, message: &str) {
-        let (prefix, error) = (prefix.to_string(), anyhow::anyhow!(message.to_string()));
+    fn fatal_runtime_error(&self, prefix: &str, message: &str, stack: &str) {
+        let error = crate::diagnostics::StackError { message: message.to_string(), stack: Some(stack.to_string()) };
+        let (prefix, error) = (prefix.to_string(), anyhow::Error::new(error));
         self.run(move |mode| mode.handle_fatal_runtime_error(&prefix, &error));
     }
 

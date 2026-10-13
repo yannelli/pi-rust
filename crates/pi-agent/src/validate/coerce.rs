@@ -3,7 +3,7 @@
 
 use serde_json::{Map, Number, Value};
 
-use super::check::{Checker, matches_type};
+use pi_ai::json_schema::{Checker, matches_type};
 
 fn schema_types(schema: &Map<String, Value>) -> Vec<&str> {
     match schema.get("type") {
@@ -49,7 +49,7 @@ fn coerce_primitive(value: &Value, kind: &str) -> Option<Value> {
             Some(Value::Bool(number.as_f64() == Some(1.0)))
         }
         ("string", Value::Null) => Some(Value::String(String::new())),
-        ("string", Value::Number(number)) => Some(Value::String(super::check::js_number(number.as_f64()?))),
+        ("string", Value::Number(number)) => Some(Value::String(pi_ai::json_schema::js_number(number.as_f64()?))),
         ("string", Value::Bool(flag)) => Some(Value::String(flag.to_string())),
         ("null", Value::String(text)) if text.is_empty() => Some(Value::Null),
         ("null", Value::Bool(false)) => Some(Value::Null),

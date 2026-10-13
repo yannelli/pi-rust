@@ -97,6 +97,7 @@ export function createHost(config) {
 			for (const entry of entries) {
 				try {
 					const module = await import(entry.resolvedPath);
+					call("timing", `${entry.path} module import`);
 					const factory = typeof module.default === "function" ? module.default : module;
 					if (typeof factory !== "function") {
 						errors.push({ path: entry.path, error: `Extension does not export a valid factory function: ${entry.path}` });
@@ -111,6 +112,7 @@ export function createHost(config) {
 						load.discard();
 						throw error;
 					}
+					call("timing", `${entry.path} factory`);
 					runner.extensions.push(extension);
 				} catch (error) {
 					errors.push({ path: entry.path, error: `Failed to load extension: ${errorMessage(error)}` });
@@ -258,6 +260,27 @@ export function createHost(config) {
 			const stream = provider.streamSimple(model, context, { ...options, signal: signalFor(options.signal) });
 			for await (const event of stream) call("stream.event", sink, event);
 			return null;
+		},
+		async providerRefreshModels(name, context) {
+			const provider = runtime.providers.get(name)?.config;
+			if (typeof provider?.refreshModels !== "function") throw new Error(`Provider ${name} has no refreshModels`);
+			const signal = signalFor(context.signal);
+			return (await provider.refreshModels({ ...context, signal, publish: async ({ update }) => (update?.(), true) })) ?? [];
+		},
+		async providerModifyModels(name, models, credential) {
+			const modify = runtime.providers.get(name)?.config.oauth?.modifyModels;
+			if (typeof modify !== "function") throw new Error(`Provider ${name} has no OAuth modifyModels`);
+			return modify(models, credential);
+		},
+		async providerImages(name, api, model, context, options) {
+			const implementation = runtime.providers.get(name)?.config.images?.[api];
+			if (!implementation) throw new Error(`Provider ${name} has no image implementation for "${api}"`);
+			return implementation.generateImages(model, context, { ...options, signal: signalFor(options.signal) });
+		},
+		async providerClassify(name, api, model, context, options) {
+			const implementation = runtime.providers.get(name)?.config.classifiers?.[api];
+			if (!implementation) throw new Error(`Provider ${name} has no classifier implementation for "${api}"`);
+			return implementation.classify(model, context, { ...options, signal: signalFor(options.signal) });
 		},
 		async providerHeaders(name, model) {
 			const headers = runtime.providers.get(name)?.config.headers;

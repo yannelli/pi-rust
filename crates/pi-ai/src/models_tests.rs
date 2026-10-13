@@ -146,3 +146,49 @@ fn upsert_keeps_chat_models_and_classifiers_with_one_id_apart() {
     assert!(same.iter().any(|model| model.model_type == chat.model_type && model.max_tokens == 7));
     assert!(same.iter().any(|model| models_are_equal(model, &classifier)));
 }
+
+fn schema_error(text: &str) -> String {
+    validate_models_json(text, "/tmp/models.json").unwrap_err().to_string()
+}
+
+#[test]
+fn models_json_schema_checks_match_upstream() {
+    let compat =
+        r#"{"providers": {"demo": {"api": "custom-api", "compat": {"customOption": "value", "supportsStore": true}}}}"#;
+    assert!(validate_models_json(compat, "x").is_ok());
+    let with_schema = r#"{"$schema": "https://example.com/models.schema.json",
+        "providers": {"demo": {"baseUrl": "http://localhost:8080/v1", "models": [{"id": "demo"}]}}}"#;
+    assert!(validate_models_json(with_schema, "x").is_ok());
+
+    let error = schema_error(r#"{"providers": {"demo": {"compat": {"supportsLongCacheRetention": "yes"}}}}"#);
+    assert!(error.starts_with("Invalid models.json schema:\n  - "), "{error}");
+    assert!(error.ends_with("\n\nFile: /tmp/models.json"), "{error}");
+    let error = schema_error(r#"{"providers": {"demo": {"models": [{"id": ""}]}}}"#);
+    assert!(error.contains("  - providers.demo.models.0.id: must not have fewer than 1 characters"), "{error}");
+    assert!(schema_error(r#"{"$schema": 42, "providers": {}}"#).contains("$schema: must be string"));
+    assert!(schema_error(r#"{"providers": {"demo": {"oauth": "github"}}}"#).contains("providers.demo.oauth"));
+    let error = schema_error(r#"{"providers": {"demo": {"models": [{"id": "m", "input": ["audio"]}]}}}"#);
+    assert!(error.contains("providers.demo.models.0.input.0"), "{error}");
+    assert!(
+        schema_error(r#"{"providers": {"demo": {"models": [{"id": "m", "contextWindow": 0}]}}}"#)
+            .contains("contextWindow")
+    );
+    assert!(schema_error("{}").contains("  - providers: must have required properties providers"));
+
+    let error = schema_error("{\n  \"providers\": {\n");
+    assert!(error.starts_with("Failed to parse models.json: "), "{error}");
+    assert!(error.ends_with("\n\nFile: /tmp/models.json"), "{error}");
+    assert!(schema_error("").starts_with("Failed to parse models.json: "));
+}
+
+#[test]
+fn invalid_models_json_files_keep_the_bundled_catalog() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("models.json");
+    std::fs::write(&path, r#"{"providers": {"demo": {"apiKey": ""}}}"#).unwrap();
+    let (registry, error) = ModelRegistry::load_lenient(&path);
+    let error = error.expect("schema error").to_string();
+    assert!(error.contains("providers.demo.apiKey: must not have fewer than 1 characters"), "{error}");
+    assert!(error.ends_with(&format!("File: {}", path.display())));
+    assert_eq!(registry.all_models().len(), builtin_models().len());
+}

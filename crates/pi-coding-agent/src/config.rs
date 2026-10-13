@@ -5,12 +5,6 @@ use std::path::{Path, PathBuf};
 
 use crate::resources::brand::{agent_dir_env_var, default_agent_dir};
 
-/// The agent directory variable of the default brand; [`agent_dir_env_var`] follows a rebrand.
-pub const ENV_AGENT_DIR: &str = "PI_CODING_AGENT_DIR";
-/// Session directory override of the default brand; `--session-dir` wins over it, and it wins
-/// over `sessionDir`. [`crate::resources::brand::session_dir_env_var`] follows a rebrand.
-pub const ENV_SESSION_DIR: &str = "PI_CODING_AGENT_SESSION_DIR";
-
 pub fn home_dir() -> PathBuf {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))

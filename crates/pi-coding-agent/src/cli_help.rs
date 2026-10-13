@@ -1,5 +1,7 @@
 //! `pi --help` text, following upstream `printHelp`.
 
+use crate::resources::brand::{APP_NAME, CONFIG_DIR_NAME, agent_dir_env_var, session_dir_env_var};
+
 /// An extension flag for the `Extension CLI Flags` section: name, `string` or `boolean`,
 /// description, and the registering extension.
 pub struct HelpFlag {
@@ -27,21 +29,21 @@ pub fn help_text_with_flags(flags: &[HelpFlag]) -> String {
         }
     }
     format!(
-        "pi {version} - AI coding assistant with read, bash, edit, write tools
+        "{app} - AI coding assistant with read, bash, edit, write tools
 
 Usage:
-  pi [options] [--] [@files...] [messages...]
+  {app} [options] [--] [@files...] [messages...]
 
 Commands:
-  pi install <source> [-l]     Install extension source and add to settings
-  pi remove <source> [-l]      Remove extension source from settings
-  pi uninstall <source> [-l]   Alias for remove
-  pi update [source|self|pi]   Update pi, extensions, or model catalogs
-  pi list                      List installed extensions from settings
-  pi config [-l]               Open TUI to enable/disable package resources (Tab switches scope)
-  pi auth <command>            Print credentials or check provider readiness
-  pi mcp <command>             Check MCP servers, sign in to or out of OAuth servers
-  pi <command> --help          Show help for install/remove/uninstall/update/list/config/auth/mcp
+  {app} install <source> [-l]     Install extension source and add to settings
+  {app} remove <source> [-l]      Remove extension source from settings
+  {app} uninstall <source> [-l]   Alias for remove
+  {app} update [source|self|pi]   Update pi, extensions, or model catalogs
+  {app} list                      List installed extensions from settings
+  {app} config [-l]               Open TUI to enable/disable package resources (Tab switches scope)
+  {app} auth <command>            Print credentials or check provider readiness
+  {app} mcp <command>             Check MCP servers, sign in to or out of OAuth servers
+  {app} <command> --help          Show help for install/remove/uninstall/update/list/config/auth/mcp
 
 Options:
   --provider <name>              Provider to search for --model (requires --model)
@@ -94,14 +96,72 @@ Options:
 Extensions can register additional flags (e.g., --plan from plan-mode extension).{extension_flags}
 
 Examples:
-  pi auth print-api-key --provider openai
-  pi \"List all .ts files in src/\"
-  pi @prompt.md @image.png \"What color is the sky?\"
-  pi -p \"List all .ts files in src/\"
-  pi --model openai/gpt-4o \"Help me refactor this code\"
-  pi --model sonnet:high \"Solve this complex problem\"
-  pi --models claude-sonnet,claude-haiku,gpt-4o
-  pi --tools read,grep,find,ls -p \"Review the code in src/\"
+  # Print a provider API key for an external client
+  {app} auth print-api-key --provider openai
+
+  # Print an OAuth bearer token for an external client (refreshes if expired)
+  {app} auth print-bearer-token --provider openai-codex
+
+  # Interactive mode
+  {app}
+
+  # Interactive mode with initial prompt
+  {app} \"List all .ts files in src/\"
+
+  # Include files in initial message
+  {app} @prompt.md @image.png \"What color is the sky?\"
+
+  # Non-interactive mode (process and exit)
+  {app} -p \"List all .ts files in src/\"
+
+  # Prompt beginning with a dash
+  {app} -p -- \"- Summarize these points\"
+
+  # Multiple messages (interactive)
+  {app} \"Read package.json\" \"What dependencies do we have?\"
+
+  # Continue previous session
+  {app} --continue \"What did we discuss?\"
+
+  # Start a named session
+  {app} --name \"Refactor auth module\"
+
+  # Use different model
+  {app} --provider openai --model gpt-4o-mini \"Help me refactor this code\"
+
+  # Use model with provider prefix (no --provider needed)
+  {app} --model openai/gpt-4o \"Help me refactor this code\"
+
+  # Use model with thinking level shorthand
+  {app} --model sonnet:high \"Solve this complex problem\"
+
+  # Limit model cycling to specific models
+  {app} --models claude-sonnet,claude-haiku,gpt-4o
+
+  # Limit to a specific provider with glob pattern
+  {app} --models \"github-copilot/*\"
+
+  # Cycle models with fixed thinking levels
+  {app} --models sonnet:high,haiku:low
+
+  # Start with a specific thinking level
+  {app} --thinking high \"Solve this complex problem\"
+
+  # Read-only mode (no file modifications possible)
+  {app} --tools read,grep,find,ls -p \"Review the code in src/\"
+
+  # Add codemode to the default tools
+  {app} --tools +codemode
+
+  # Codemode with only the tools of one MCP server
+  {app} --tools read,bash,codemode,'mcp__radius__*'
+
+  # Disable one tool while keeping the rest available
+  {app} --exclude-tools ask_question
+
+  # Export a session file to HTML
+  {app} --export ~/{config_dir}/agent/sessions/--path--/session.jsonl
+  {app} --export session.jsonl output.html
 
 Environment Variables:
   ANTHROPIC_AUTH_TOKEN             - Anthropic bearer auth token
@@ -137,8 +197,8 @@ Environment Variables:
   XIAOMI_TOKEN_PLAN_CN_API_KEY     - Xiaomi MiMo Token Plan API key (China region)
   XIAOMI_TOKEN_PLAN_AMS_API_KEY    - Xiaomi MiMo Token Plan API key (Amsterdam region)
   XIAOMI_TOKEN_PLAN_SGP_API_KEY    - Xiaomi MiMo Token Plan API key (Singapore region)
-  PI_CODING_AGENT_DIR              - Config directory (default: ~/.pi/agent)
-  PI_CODING_AGENT_SESSION_DIR      - Session storage directory (overridden by --session-dir)
+  {agent_dir_env:<32} - Config directory (default: ~/{config_dir}/agent)
+  {session_dir_env:<32} - Session storage directory (overridden by --session-dir)
   PI_OFFLINE                       - Disable startup network operations when set to 1/true/yes
 
 Built-in Tool Names:
@@ -149,6 +209,36 @@ Built-in Tool Names:
   grep       - Search file contents (read-only, off by default)
   find       - Find files by glob pattern (read-only, off by default)
   ls         - List directory contents (read-only, off by default)",
-        version = env!("CARGO_PKG_VERSION")
+        app = APP_NAME,
+        config_dir = CONFIG_DIR_NAME,
+        agent_dir_env = agent_dir_env_var(),
+        session_dir_env = session_dir_env_var(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn help_uses_the_brand_and_lists_every_upstream_example() {
+        let text = help_text();
+        assert!(text.starts_with(&format!("{APP_NAME} - AI coding assistant")), "{text}");
+        assert!(text.contains(&format!("\n  {APP_NAME} mcp <command>  ")));
+        for example in [
+            "# Print an OAuth bearer token for an external client (refreshes if expired)",
+            "# Prompt beginning with a dash",
+            "# Cycle models with fixed thinking levels",
+            "# Codemode with only the tools of one MCP server",
+            "--tools read,bash,codemode,'mcp__radius__*'",
+            "--export session.jsonl output.html",
+        ] {
+            assert!(text.contains(example), "missing {example}");
+        }
+        let agent_dir =
+            format!("  {:<32} - Config directory (default: ~/{CONFIG_DIR_NAME}/agent)", agent_dir_env_var());
+        assert!(text.contains(&agent_dir));
+        assert!(text.contains(&format!("~/{CONFIG_DIR_NAME}/agent/sessions/--path--/session.jsonl")));
+        assert!(text.contains(&session_dir_env_var()));
+    }
 }

@@ -82,7 +82,12 @@ struct Prepared {
     grammar: BTreeMap<String, String>,
 }
 
-fn prepare(model: &Model, context: &Context, options: &StreamOptions, token: &str) -> Result<Prepared, CodexError> {
+async fn prepare(
+    model: &Model,
+    context: &Context,
+    options: &StreamOptions,
+    token: &str,
+) -> Result<Prepared, CodexError> {
     let transport = |message: String| CodexError::Transport(message);
     let account = extract_account_id(token).map_err(transport)?;
     let compat = Compat::resolve(model);
@@ -93,7 +98,9 @@ fn prepare(model: &Model, context: &Context, options: &StreamOptions, token: &st
         .collect();
     let session = cache_session_id(options);
     let mut body = build_body(model, &messages, options, session.as_deref(), &grammar).map_err(transport)?;
-    if let Some(replacement) = options.on_payload.as_ref().and_then(|hook| hook(&body, model)) {
+    if let Some(hook) = &options.on_payload
+        && let Some(replacement) = hook(&body, model).await
+    {
         body = replacement;
     }
     let request_id = session.clone().unwrap_or_else(uuid_v7);
@@ -122,7 +129,7 @@ async fn execute(
     token: &str,
     builder: &mut MessageBuilder,
 ) -> Result<StopReason, CodexError> {
-    let prepared = prepare(model, context, options, token)?;
+    let prepared = prepare(model, context, options, token).await?;
     let session = prepared.session.as_deref();
     let transport = options.transport.unwrap_or(Transport::Auto);
     let mut started = false;

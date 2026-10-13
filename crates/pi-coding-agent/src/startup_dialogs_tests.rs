@@ -109,3 +109,31 @@ async fn waits_for_any_key() {
     })
     .await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn trust_prompt_uses_the_startup_settings_theme() {
+    let _theme = global_state();
+    local(async {
+        let root = tempfile::tempdir().unwrap();
+        let (cwd, agent_dir) = (root.path().join("work"), root.path().join("agent"));
+        std::fs::create_dir_all(cwd.join(".pi")).unwrap();
+        std::fs::create_dir_all(&agent_dir).unwrap();
+        std::fs::write(cwd.join(".pi/settings.json"), "{}").unwrap();
+        let startup = SettingsManager::create(&cwd, &agent_dir, SettingsOptions { project_trusted: true });
+        startup.apply_overrides(serde_json::json!({ "theme": "light" }));
+        let terminal = VirtualTerminal::shared(100, 30);
+        feed(&terminal, &["\x1b"]);
+        let prompt = crate::interactive::startup_ui::prompt_project_trust_with(
+            terminal.clone(),
+            &cwd,
+            &agent_dir,
+            None,
+            None,
+            &startup,
+        );
+        assert_eq!(prompt.await, Some(false));
+        assert!(terminal.borrow().writes().contains("Trust project folder?"));
+        assert_eq!(crate::theme::theme().name(), Some("light"));
+    })
+    .await;
+}

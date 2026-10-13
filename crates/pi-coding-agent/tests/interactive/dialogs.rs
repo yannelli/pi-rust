@@ -63,3 +63,33 @@ async fn settings_change_the_hide_thinking_setting() {
     })
     .await;
 }
+
+struct OutsideAuth;
+
+#[async_trait::async_trait]
+impl pi_coding_agent::agent_session::ProviderAuth for OutsideAuth {
+    async fn check(&self, _stored: Option<&pi_ai::auth::Credential>) -> bool {
+        false
+    }
+
+    async fn resolve(
+        &self,
+        _stored: Option<&pi_ai::auth::Credential>,
+    ) -> Result<Option<pi_ai::auth::ResolvedAuth>, String> {
+        Ok(None)
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn login_explains_providers_configured_outside_pi() {
+    local(async {
+        let ui = start(Options::default()).await;
+        ui.session().model_runtime().register_provider_auth("outside-cloud", Some(std::sync::Arc::new(OutsideAuth)));
+        ui.submit("/login outside-cloud").await;
+        ui.wait_for("Authentication is configured outside pi.").await;
+        assert!(ui.screen().contains("outside-cloud setup"), "{}", ui.screen());
+        ui.send("\x1b").await;
+        ui.wait_until("dialog closed", |ui| !ui.screen().contains("is configured outside")).await;
+    })
+    .await;
+}
