@@ -1,5 +1,5 @@
-//! Non-interactive mode: run the prompts, then print the final response (text)
-//! or every agent event as one JSON object per line (json).
+//! Non-interactive mode (upstream `modes/print-mode.ts`): run the prompts, then print the
+//! final response (text), or stream every session event as one JSON object per line (json).
 
 use std::io::Write;
 use std::sync::Arc;
@@ -9,49 +9,57 @@ use pi_ai::{ContentBlock, Message, StopReason};
 use crate::app::CodingSession;
 use crate::cli::OutputMode;
 
-/// Returns the process exit code.
+/// Run `initial_message` with `initial_images`, then each of `messages`. Returns the exit code:
+/// 1 when a prompt fails or, in text mode, when the last response is an error or aborted.
 pub async fn run_print_mode(
     session: Arc<CodingSession>,
     mode: OutputMode,
+    initial_message: Option<String>,
+    initial_images: Vec<ContentBlock>,
     messages: Vec<String>,
-    first_images: Vec<ContentBlock>,
-) -> anyhow::Result<i32> {
-    if messages.is_empty() {
-        anyhow::bail!("No message given. Pass a message after -p or on stdin.");
+) -> i32 {
+    let json = mode == OutputMode::Json;
+    let subscription = json.then(|| {
+        session.subscribe(|event| {
+            let mut stdout = std::io::stdout().lock();
+            let _ = writeln!(stdout, "{}", event.to_json());
+            let _ = stdout.flush();
+        })
+    });
+    let result = async {
+        if let Some(text) = initial_message {
+            session.prompt(&text, initial_images).await?;
+        }
+        for message in &messages {
+            session.prompt(message, Vec::new()).await?;
+        }
+        anyhow::Ok(())
     }
-    if mode == OutputMode::Json {
-        session.agent.subscribe(|event| {
-            if let Ok(line) = serde_json::to_string(event) {
-                let mut stdout = std::io::stdout().lock();
-                let _ = writeln!(stdout, "{line}");
-                let _ = stdout.flush();
-            }
-        });
+    .await;
+    if let Some(id) = subscription {
+        session.unsubscribe(id);
     }
-    let mut images = first_images;
-    for message in &messages {
-        session.prompt(message, std::mem::take(&mut images)).await?;
-        if let Some(Message::Assistant(last)) = session.agent.state().messages.last()
-            && matches!(last.stop_reason, StopReason::Error | StopReason::Aborted)
-        {
-            if mode == OutputMode::Text {
-                eprintln!("Error: {}", last.error_message.as_deref().unwrap_or("request failed"));
-            }
-            return Ok(1);
+    if let Err(error) = result {
+        eprintln!("{error:#}");
+        return 1;
+    }
+    if json {
+        return 0;
+    }
+    let state = session.agent.state();
+    let Some(Message::Assistant(last)) = state.messages.last() else { return 0 };
+    if matches!(last.stop_reason, StopReason::Error | StopReason::Aborted) {
+        let reason = if last.stop_reason == StopReason::Error { "error" } else { "aborted" };
+        let message = last.error_message.clone().filter(|message| !message.is_empty());
+        eprintln!("{}", message.unwrap_or_else(|| format!("Request {reason}")));
+        return 1;
+    }
+    let mut stdout = std::io::stdout().lock();
+    for block in &last.content {
+        if let ContentBlock::Text { text, .. } = block {
+            let _ = writeln!(stdout, "{text}");
         }
     }
-    if mode == OutputMode::Text {
-        let state = session.agent.state();
-        let text = state
-            .messages
-            .iter()
-            .rev()
-            .find_map(|message| match message {
-                Message::Assistant(assistant) => Some(assistant.text()),
-                _ => None,
-            })
-            .unwrap_or_default();
-        println!("{text}");
-    }
-    Ok(0)
+    let _ = stdout.flush();
+    0
 }

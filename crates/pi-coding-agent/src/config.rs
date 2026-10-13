@@ -3,10 +3,9 @@
 
 use std::path::{Path, PathBuf};
 
-use pi_ai::ThinkingLevel;
-use serde::{Deserialize, Serialize};
-
 pub const ENV_AGENT_DIR: &str = "PI_CODING_AGENT_DIR";
+/// Session directory override; `--session-dir` wins over it, and it wins over `sessionDir`.
+pub const ENV_SESSION_DIR: &str = "PI_CODING_AGENT_SESSION_DIR";
 
 pub fn home_dir() -> PathBuf {
     std::env::var_os("HOME")
@@ -41,46 +40,19 @@ pub fn settings_path(agent_dir: &Path) -> PathBuf {
     agent_dir.join("settings.json")
 }
 
-/// The subset of `settings.json` this port reads. Unknown keys are preserved on save.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Settings {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_provider: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_thinking_level: Option<ThinkingLevel>,
-    #[serde(flatten)]
-    pub other: serde_json::Map<String, serde_json::Value>,
+pub fn auth_path(agent_dir: &Path) -> PathBuf {
+    agent_dir.join("auth.json")
 }
 
-impl Settings {
-    /// Global settings overlaid by `<cwd>/.pi/settings.json`.
-    pub fn load(agent_dir: &Path, cwd: &Path) -> Self {
-        let mut settings = read_settings(&settings_path(agent_dir));
-        let project = read_settings(&cwd.join(".pi").join("settings.json"));
-        settings.default_provider = project.default_provider.or(settings.default_provider);
-        settings.default_model = project.default_model.or(settings.default_model);
-        settings.default_thinking_level = project.default_thinking_level.or(settings.default_thinking_level);
-        settings
-    }
-
-    /// Save the default model and thinking level to the global settings file.
-    pub fn save_defaults(agent_dir: &Path, provider: &str, model: &str, thinking: ThinkingLevel) -> anyhow::Result<()> {
-        let path = settings_path(agent_dir);
-        let mut settings = read_settings(&path);
-        settings.default_provider = Some(provider.into());
-        settings.default_model = Some(model.into());
-        settings.default_thinking_level = Some(thinking);
-        std::fs::create_dir_all(agent_dir)?;
-        std::fs::write(&path, serde_json::to_string_pretty(&settings)? + "\n")?;
-        Ok(())
-    }
+/// Whether an environment flag is set to `1`, `true`, or `yes`.
+pub fn env_flag(name: &str) -> bool {
+    pi_ai::env::process_env_value(name)
+        .is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("yes"))
 }
 
-fn read_settings(path: &Path) -> Settings {
-    std::fs::read_to_string(path).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default()
+/// Offline mode (`--offline` or `PI_OFFLINE`): no startup network operations.
+pub fn offline() -> bool {
+    env_flag("PI_OFFLINE")
 }
 
 pub use crate::resources::ContextFile;
@@ -107,24 +79,5 @@ mod tests {
         std::fs::write(nested.join("CLAUDE.md"), "ignored").unwrap();
         let contents: Vec<String> = load_context_files(&nested, &agent).into_iter().map(|file| file.content).collect();
         assert_eq!(contents, ["global", "repo", "sub"]);
-    }
-
-    #[test]
-    fn settings_overlay_project_values_and_keep_unknown_keys() {
-        let root = tempfile::tempdir().unwrap();
-        let agent = root.path().join("agent");
-        std::fs::create_dir_all(root.path().join(".pi")).unwrap();
-        std::fs::create_dir_all(&agent).unwrap();
-        std::fs::write(settings_path(&agent), r#"{"defaultProvider":"openai","defaultModel":"a","theme":"dark"}"#)
-            .unwrap();
-        std::fs::write(root.path().join(".pi/settings.json"), r#"{"defaultModel":"b"}"#).unwrap();
-        let settings = Settings::load(&agent, root.path());
-        assert_eq!(settings.default_provider.as_deref(), Some("openai"));
-        assert_eq!(settings.default_model.as_deref(), Some("b"));
-        Settings::save_defaults(&agent, "anthropic", "c", ThinkingLevel::High).unwrap();
-        let saved: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(settings_path(&agent)).unwrap()).unwrap();
-        assert_eq!(saved["theme"], "dark");
-        assert_eq!(saved["defaultThinkingLevel"], "high");
     }
 }
