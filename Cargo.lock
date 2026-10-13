@@ -2263,6 +2263,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-client"
+version = "0.1.2"
+dependencies = [
+ "async-trait",
+ "futures",
+ "pi-chord",
+ "pi-protocol",
+ "pi-server",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "pi-codemode"
 version = "0.1.2"
 dependencies = [
