@@ -2,10 +2,14 @@
 //!
 //! Conversations, model turns, tool calls, and application state are committed to storage before anything is shown.
 
+pub mod documents;
+pub mod entries;
 pub mod env;
 pub mod errors;
 pub mod ids;
+pub mod session;
 pub mod storage;
+pub mod tasks;
 pub mod testing;
 pub mod types;
 
