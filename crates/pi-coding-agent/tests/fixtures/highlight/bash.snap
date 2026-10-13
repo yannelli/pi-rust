@@ -1,0 +1,15 @@
+«muted:#!/usr/bin/env bash»
+«syntaxType:set» -euo pipefail
+
+«syntaxComment:# Greet everyone»
+«syntaxFunction:greet»() {
+  «syntaxType:local» name=«syntaxString:"»«syntaxVariable:${1»:-«syntaxVariable:world}»«syntaxString:"»
+  «syntaxType:echo» «syntaxString:"Hello »«syntaxVariable:$name»«syntaxString:"» > /dev/null
+}
+
+«syntaxKeyword:for» i «syntaxKeyword:in» 1 2 3; «syntaxKeyword:do»
+  «syntaxKeyword:if» «syntaxType:[[» -n «syntaxString:"»«syntaxVariable:$i»«syntaxString:"» && «syntaxVariable:$i» -gt 1 «syntaxType:]]»; «syntaxKeyword:then»
+    greet «syntaxString:"user»«syntaxVariable:$i»«syntaxString:"»
+  «syntaxKeyword:fi»
+«syntaxKeyword:done»
+«syntaxType:export» PATH=«syntaxString:"»«syntaxVariable:$HOME»«syntaxString:/bin:»«syntaxVariable:$PATH»«syntaxString:"»

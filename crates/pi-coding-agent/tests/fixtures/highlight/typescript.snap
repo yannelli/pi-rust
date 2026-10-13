@@ -1,0 +1,18 @@
+«syntaxKeyword:import» «syntaxKeyword:type» { Config } «syntaxKeyword:from» «syntaxString:"./config"»;
+
+«syntaxKeyword:interface» «syntaxFunction:Options»<«syntaxFunction:T»> {
+  name: «syntaxType:string»;
+  value?: «syntaxFunction:T»;
+}
+
+«syntaxKeyword:export» «syntaxKeyword:function» «syntaxFunction:parse»<«syntaxFunction:T» «syntaxKeyword:extends» «syntaxType:object»>«syntaxVariable:(input:» «syntaxType:string»«syntaxVariable:,» «syntaxVariable:opts:» «syntaxFunction:Options»«syntaxVariable:<»«syntaxFunction:T»«syntaxVariable:>)»: «syntaxFunction:T» | «syntaxType:undefined» {
+  «syntaxComment:// Parse the input»
+  «syntaxKeyword:const» result: «syntaxType:number»[] = [«syntaxNumber:1», «syntaxNumber:2», «syntaxNumber:3»];
+  «syntaxKeyword:if» (input.length > «syntaxNumber:0» && opts.name !== «syntaxString:""») {
+    «syntaxKeyword:return» «syntaxType:JSON».parse(input) «syntaxKeyword:as» «syntaxFunction:T»;
+  }
+  «syntaxKeyword:return» «syntaxNumber:undefined»;
+}
+
+«syntaxKeyword:enum» «syntaxFunction:Color» { Red = «syntaxNumber:1», Green }
+«syntaxKeyword:type» «syntaxFunction:Pair» = [«syntaxType:string», «syntaxType:number»];

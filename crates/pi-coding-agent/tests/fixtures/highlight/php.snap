@@ -1,0 +1,19 @@
+«muted:<?php»
+«syntaxKeyword:namespace» App;
+
+«syntaxKeyword:use» «syntaxType:App»\«syntaxType:Models»\«syntaxType:User»;
+
+«syntaxKeyword:class» «syntaxFunction:Greeter» «syntaxKeyword:extends» «syntaxFunction:Base»
+{
+    «syntaxKeyword:private» «syntaxKeyword:int» «syntaxVariable:$count» = «syntaxNumber:3»;
+
+    «syntaxKeyword:public» «syntaxKeyword:function» «syntaxFunction:greet»«syntaxVariable:(»«syntaxKeyword:string» «syntaxVariable:$name»«syntaxVariable:)»: «syntaxKeyword:string»
+    {
+        «syntaxComment:// Greet someone»
+        «syntaxVariable:$message» = «syntaxString:"Hello {»«syntaxVariable:$name»«syntaxString:}!"»;
+        «syntaxKeyword:return» «syntaxVariable:$this»->«syntaxVariable:count» > «syntaxNumber:0» ? «syntaxVariable:$message» : «syntaxString:'none'»;
+    }
+}
+
+«syntaxVariable:$g» = «syntaxKeyword:new» «syntaxType:Greeter»();
+«syntaxType:echo» «syntaxVariable:$g»->greet(«syntaxString:"world"»), «syntaxNumber:true», «syntaxNumber:null»;

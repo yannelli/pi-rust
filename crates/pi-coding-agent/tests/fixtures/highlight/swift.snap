@@ -1,0 +1,18 @@
+«syntaxKeyword:import» «syntaxType:Foundation»
+
+«syntaxComment:// A greeter»
+«syntaxKeyword:protocol» Greeting {
+    «syntaxKeyword:func» «syntaxFunction:greet»«syntaxVariable:(_ name: »«syntaxType:String»«syntaxVariable:)» -> «syntaxType:String»
+}
+
+struct Greeter: Greeting {
+    «syntaxKeyword:let» count: «syntaxType:Int» = «syntaxNumber:42»
+
+    «syntaxKeyword:func» «syntaxFunction:greet»«syntaxVariable:(_ name: »«syntaxType:String»«syntaxVariable:)» -> «syntaxType:String» {
+        «syntaxKeyword:guard» count > «syntaxNumber:0» «syntaxKeyword:else» { «syntaxKeyword:return» «syntaxString:""» }
+        «syntaxKeyword:return» «syntaxString:"Hello »«syntaxType:\(»name«syntaxType:)»«syntaxString:! »«syntaxType:\(»count * «syntaxNumber:2»«syntaxType:)»«syntaxString:"»
+    }
+}
+
+«syntaxKeyword:let» g = Greeter()
+print(g.greet(«syntaxString:"world"»), «syntaxKeyword:true», nil «syntaxKeyword:as» «syntaxType:Int»?)

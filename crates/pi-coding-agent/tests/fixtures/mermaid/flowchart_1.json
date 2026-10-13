@@ -1,0 +1,463 @@
+[
+  {
+    "name": "lr_basic",
+    "src": "flowchart LR\n  A[Start] --> B[Done]",
+    "kind": "flowchart",
+    "art": {
+      "plain": ["┌───────┐    ┌──────┐","│ Start ├───▶│ Done │","└───────┘    └──────┘"],
+      "styled": [
+        [["┌───────┐","border"],["    ","none"],["┌──────┐","border"]],
+        [["│","border"],[" ","none"],["Start","text"],[" ","none"],["├","border"],["───▶","edge"],["│","border"],[" ","none"],["Done","text"],[" ","none"],["│","border"]],
+        [["└───────┘","border"],["    ","none"],["└──────┘","border"]]
+      ],
+      "width": 21,
+      "warnings": []
+    }
+  },
+  {
+    "name": "td_readme",
+    "src": "flowchart TD\n  P[Parse source] --> S{Supported?}\n  S -->|yes| Y[Lay out]\n  S -->|no| N[Framed source]\n  Y --> U[Unicode art]\n  N --> U",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "      ┌──────────────┐",
+        "      │ Parse source │",
+        "      └───────┬──────┘",
+        "              │",
+        "              ▼",
+        "       ╭────────────╮",
+        "       │ Supported? │",
+        "       ╰──────┬─────╯",
+        "      ┌───────┴────────┐",
+        "      ▼yes             ▼no",
+        " ┌─────────┐   ┌───────────────┐",
+        " │ Lay out │   │ Framed source │",
+        " └────┬────┘   └───────┬───────┘",
+        "      └───────┬────────┘",
+        "              ▼",
+        "       ┌─────────────┐",
+        "       │ Unicode art │",
+        "       └─────────────┘"
+      ],
+      "styled": [
+        [["      ","none"],["┌──────────────┐","border"]],
+        [["      ","none"],["│","border"],[" ","none"],["Parse source","text"],[" ","none"],["│","border"]],
+        [["      ","none"],["└───────┬──────┘","border"]],
+        [["              ","none"],["│","edge"]],
+        [["              ","none"],["▼","edge"]],
+        [["       ","none"],["╭────────────╮","border"]],
+        [["       ","none"],["│","border"],[" ","none"],["Supported?","text"],[" ","none"],["│","border"]],
+        [["       ","none"],["╰──────┬─────╯","border"]],
+        [["      ","none"],["┌───────┴────────┐","edge"]],
+        [["      ","none"],["▼","edge"],["yes","edgeLabel"],["             ","none"],["▼","edge"],["no","edgeLabel"]],
+        [[" ","none"],["┌─────────┐","border"],["   ","none"],["┌───────────────┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["Lay out","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["Framed source","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└────┬────┘","border"],["   ","none"],["└───────┬───────┘","border"]],
+        [["      ","none"],["└───────┬────────┘","edge"]],
+        [["              ","none"],["▼","edge"]],
+        [["       ","none"],["┌─────────────┐","border"]],
+        [["       ","none"],["│","border"],[" ","none"],["Unicode art","text"],[" ","none"],["│","border"]],
+        [["       ","none"],["└─────────────┘","border"]]
+      ],
+      "width": 32,
+      "warnings": []
+    }
+  },
+  {
+    "name": "graph_no_dir",
+    "src": "graph\n  A --> B\n  B --> C",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        " ┌───┐",
+        " │ A │",
+        " └─┬─┘",
+        "   │",
+        "   ▼",
+        " ┌───┐",
+        " │ B │",
+        " └─┬─┘",
+        "   │",
+        "   ▼",
+        " ┌───┐",
+        " │ C │",
+        " └───┘"
+      ],
+      "styled": [
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"]],
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"]],
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["C","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└───┘","border"]]
+      ],
+      "width": 6,
+      "warnings": []
+    }
+  },
+  {
+    "name": "tb_chain",
+    "src": "graph TB\nA --> B --> C --> D",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        " ┌───┐",
+        " │ A │",
+        " └─┬─┘",
+        "   │",
+        "   ▼",
+        " ┌───┐",
+        " │ B │",
+        " └─┬─┘",
+        "   │",
+        "   ▼",
+        " ┌───┐",
+        " │ C │",
+        " └─┬─┘",
+        "   │",
+        "   ▼",
+        " ┌───┐",
+        " │ D │",
+        " └───┘"
+      ],
+      "styled": [
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"]],
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"]],
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["C","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"]],
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["D","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└───┘","border"]]
+      ],
+      "width": 6,
+      "warnings": []
+    }
+  },
+  {
+    "name": "bt_arrows",
+    "src": "graph BT\n  A[Bottom] --> B[Middle]\n  B --> C(Top)\n  A -.-> C",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "  ╭─────╮",
+        "  │ Top │◄╌┐",
+        "  ╰─────╯  ╎",
+        "     ▲     ╎",
+        "     │     ╎",
+        "┌────┴───┐ ╎",
+        "│ Middle │ ╎",
+        "└────────┘ ╎",
+        "     ▲     ╎",
+        "     │     ╎",
+        "┌────┴───┐ ╎",
+        "│ Bottom ├╌┘",
+        "└────────┘"
+      ],
+      "styled": [
+        [["  ","none"],["╭─────╮","border"]],
+        [["  ","none"],["│","border"],[" ","none"],["Top","text"],[" ","none"],["│","border"],["◄╌┐","edge"]],
+        [["  ","none"],["╰─────╯","border"],["  ","none"],["╎","edge"]],
+        [["     ","none"],["▲","edge"],["     ","none"],["╎","edge"]],
+        [["     ","none"],["│","edge"],["     ","none"],["╎","edge"]],
+        [["┌────┴───┐","border"],[" ","none"],["╎","edge"]],
+        [["│","border"],[" ","none"],["Middle","text"],[" ","none"],["│","border"],[" ","none"],["╎","edge"]],
+        [["└────────┘","border"],[" ","none"],["╎","edge"]],
+        [["     ","none"],["▲","edge"],["     ","none"],["╎","edge"]],
+        [["     ","none"],["│","edge"],["     ","none"],["╎","edge"]],
+        [["┌────┴───┐","border"],[" ","none"],["╎","edge"]],
+        [["│","border"],[" ","none"],["Bottom","text"],[" ","none"],["├","border"],["╌┘","edge"]],
+        [["└────────┘","border"]]
+      ],
+      "width": 12,
+      "warnings": []
+    }
+  },
+  {
+    "name": "rl_labels",
+    "src": "graph RL\n  A[Left side] -->|go| B[Right side]\n  B -- back --> C{Choice}",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "╭────────╮  back ┌────────────┐    go ┌───────────┐",
+        "│ Choice │◄──────┤ Right side │◄──────┤ Left side │",
+        "╰────────╯       └────────────┘       └───────────┘"
+      ],
+      "styled": [
+        [["╭────────╮","border"],["  ","none"],["back","edgeLabel"],[" ","none"],["┌────────────┐","border"],["    ","none"],["go","edgeLabel"],[" ","none"],["┌───────────┐","border"]],
+        [["│","border"],[" ","none"],["Choice","text"],[" ","none"],["│","border"],["◄──────","edge"],["┤","border"],[" ","none"],["Right side","text"],[" ","none"],["│","border"],["◄──────","edge"],["┤","border"],[" ","none"],["Left side","text"],[" ","none"],["│","border"]],
+        [["╰────────╯","border"],["       ","none"],["└────────────┘","border"],["       ","none"],["└───────────┘","border"]]
+      ],
+      "width": 51,
+      "warnings": []
+    }
+  },
+  {
+    "name": "lr_labels",
+    "src": "flowchart LR\n  A -->|a label| B\n  A -- inline text --> C\n  B -. dotted text .-> D\n  C == thick text ==> D",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "      a label      ┌───┐",
+        "     ┌────────────▶│ B ├┐",
+        "┌───┐│             └───┘╎dotted text  ┌───┐",
+        "│ A ├┤                  ├────────────▶│ D │",
+        "└───┘│inline text  ┌───┐┃             └───┘",
+        "     └────────────▶│ C ├┛",
+        "                   └───┘"
+      ],
+      "styled": [
+        [["      ","none"],["a label","edgeLabel"],["      ","none"],["┌───┐","border"]],
+        [["     ","none"],["┌────────────▶","edge"],["│","border"],[" ","none"],["B","text"],[" ","none"],["├","border"],["┐","edge"]],
+        [["┌───┐","border"],["│","edge"],["             ","none"],["└───┘","border"],["╎","edge"],["dotted text","edgeLabel"],["  ","none"],["┌───┐","border"]],
+        [["│","border"],[" ","none"],["A","text"],[" ","none"],["├","border"],["┤","edge"],["                  ","none"],["├────────────▶","edge"],["│","border"],[" ","none"],["D","text"],[" ","none"],["│","border"]],
+        [["└───┘","border"],["│","edge"],["inline text","edgeLabel"],["  ","none"],["┌───┐","border"],["┃","edge"],["             ","none"],["└───┘","border"]],
+        [["     ","none"],["└────────────▶","edge"],["│","border"],[" ","none"],["C","text"],[" ","none"],["├","border"],["┛","edge"]],
+        [["                   ","none"],["└───┘","border"]]
+      ],
+      "width": 43,
+      "warnings": []
+    }
+  },
+  {
+    "name": "shapes",
+    "src": "flowchart TD\n  A[rect] --> B(round)\n  B --> C{diamond}\n  C --> D((circle))\n  D --> E([stadium])\n  E --> F[[subroutine]]\n  F --> G[(database)]\n  G --> H{{hexagon}}\n  H --> I>flag]",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "   ┌──────┐",
+        "   │ rect │",
+        "   └───┬──┘",
+        "       │",
+        "       ▼",
+        "   ╭───────╮",
+        "   │ round │",
+        "   ╰───┬───╯",
+        "       │",
+        "       ▼",
+        "  ╭─────────╮",
+        "  │ diamond │",
+        "  ╰────┬────╯",
+        "       │",
+        "       ▼",
+        "  ╭────────╮",
+        "  │ circle │",
+        "  ╰────┬───╯",
+        "       │",
+        "       ▼",
+        "  ╭─────────╮",
+        "  │ stadium │",
+        "  ╰────┬────╯",
+        "       │",
+        "       ▼",
+        "┌────────────┐",
+        "│ subroutine │",
+        "└──────┬─────┘",
+        "       │",
+        "       ▼",
+        " ╭──────────╮",
+        " │ database │",
+        " ╰─────┬────╯",
+        "       │",
+        "       ▼",
+        "  ╭─────────╮",
+        "  │ hexagon │",
+        "  ╰────┬────╯",
+        "       │",
+        "       ▼",
+        "   ┌──────┐",
+        "   │ flag │",
+        "   └──────┘"
+      ],
+      "styled": [
+        [["   ","none"],["┌──────┐","border"]],
+        [["   ","none"],["│","border"],[" ","none"],["rect","text"],[" ","none"],["│","border"]],
+        [["   ","none"],["└───┬──┘","border"]],
+        [["       ","none"],["│","edge"]],
+        [["       ","none"],["▼","edge"]],
+        [["   ","none"],["╭───────╮","border"]],
+        [["   ","none"],["│","border"],[" ","none"],["round","text"],[" ","none"],["│","border"]],
+        [["   ","none"],["╰───┬───╯","border"]],
+        [["       ","none"],["│","edge"]],
+        [["       ","none"],["▼","edge"]],
+        [["  ","none"],["╭─────────╮","border"]],
+        [["  ","none"],["│","border"],[" ","none"],["diamond","text"],[" ","none"],["│","border"]],
+        [["  ","none"],["╰────┬────╯","border"]],
+        [["       ","none"],["│","edge"]],
+        [["       ","none"],["▼","edge"]],
+        [["  ","none"],["╭────────╮","border"]],
+        [["  ","none"],["│","border"],[" ","none"],["circle","text"],[" ","none"],["│","border"]],
+        [["  ","none"],["╰────┬───╯","border"]],
+        [["       ","none"],["│","edge"]],
+        [["       ","none"],["▼","edge"]],
+        [["  ","none"],["╭─────────╮","border"]],
+        [["  ","none"],["│","border"],[" ","none"],["stadium","text"],[" ","none"],["│","border"]],
+        [["  ","none"],["╰────┬────╯","border"]],
+        [["       ","none"],["│","edge"]],
+        [["       ","none"],["▼","edge"]],
+        [["┌────────────┐","border"]],
+        [["│","border"],[" ","none"],["subroutine","text"],[" ","none"],["│","border"]],
+        [["└──────┬─────┘","border"]],
+        [["       ","none"],["│","edge"]],
+        [["       ","none"],["▼","edge"]],
+        [[" ","none"],["╭──────────╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["database","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰─────┬────╯","border"]],
+        [["       ","none"],["│","edge"]],
+        [["       ","none"],["▼","edge"]],
+        [["  ","none"],["╭─────────╮","border"]],
+        [["  ","none"],["│","border"],[" ","none"],["hexagon","text"],[" ","none"],["│","border"]],
+        [["  ","none"],["╰────┬────╯","border"]],
+        [["       ","none"],["│","edge"]],
+        [["       ","none"],["▼","edge"]],
+        [["   ","none"],["┌──────┐","border"]],
+        [["   ","none"],["│","border"],[" ","none"],["flag","text"],[" ","none"],["│","border"]],
+        [["   ","none"],["└──────┘","border"]]
+      ],
+      "width": 14,
+      "warnings": []
+    }
+  },
+  {
+    "name": "link_kinds_td",
+    "src": "graph TD\n  A --> B\n  A --- C\n  A -.-> D\n  A -.- E\n  A ==> F\n  A === G\n  A --o H\n  A --x I",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "                             ┌───┐",
+        "                             │ A │",
+        "                             └─┬─┘",
+        "   ┌───────┬───────┬───────┬───┴───┬───────┬───────┬───────┐",
+        "   ▼       │       ▼       ╎       ▼       ┃       o       ×",
+        " ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───┐",
+        " │ B │   │ C │   │ D │   │ E │   │ F │   │ G │   │ H │   │ I │",
+        " └───┘   └───┘   └───┘   └───┘   └───┘   └───┘   └───┘   └───┘"
+      ],
+      "styled": [
+        [["                             ","none"],["┌───┐","border"]],
+        [["                             ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"]],
+        [["                             ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["┌───────┬───────┬───────┬───┴───┬───────┬───────┬───────┐","edge"]],
+        [["   ","none"],["▼","edge"],["       ","none"],["│","edge"],["       ","none"],["▼","edge"],["       ","none"],["╎","edge"],["       ","none"],["▼","edge"],["       ","none"],["┃","edge"],["       ","none"],["o","edge"],["       ","none"],["×","edge"]],
+        [[" ","none"],["┌───┐","border"],["   ","none"],["┌───┐","border"],["   ","none"],["┌───┐","border"],["   ","none"],["┌───┐","border"],["   ","none"],["┌───┐","border"],["   ","none"],["┌───┐","border"],["   ","none"],["┌───┐","border"],["   ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["C","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["D","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["E","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["F","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["G","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["H","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["I","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└───┘","border"],["   ","none"],["└───┘","border"],["   ","none"],["└───┘","border"],["   ","none"],["└───┘","border"],["   ","none"],["└───┘","border"],["   ","none"],["└───┘","border"],["   ","none"],["└───┘","border"],["   ","none"],["└───┘","border"]]
+      ],
+      "width": 62,
+      "warnings": []
+    }
+  },
+  {
+    "name": "link_heads_lr",
+    "src": "graph LR\n  A <--> B\n  B o--o C\n  C x--x D\n  E <-- F\n  F --o G\n  G --x H",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "┌───┐    ┌───┐    ┌───┐    ┌───┐",
+        "│ A ◄───▶│ B o───o│ C ×───×│ D │",
+        "└───┘    └───┘    └───┘    └───┘",
+        "",
+        "",
+        "         ┌───┐",
+        "     ┌──▶│ E │",
+        "┌───┐│   └───┘",
+        "│ F ├┤",
+        "└───┘│   ┌───┐    ┌───┐",
+        "     └──o│ G ├───×│ H │",
+        "         └───┘    └───┘"
+      ],
+      "styled": [
+        [["┌───┐","border"],["    ","none"],["┌───┐","border"],["    ","none"],["┌───┐","border"],["    ","none"],["┌───┐","border"]],
+        [["│","border"],[" ","none"],["A","text"],[" ","none"],["◄───▶","edge"],["│","border"],[" ","none"],["B","text"],[" ","none"],["o───o","edge"],["│","border"],[" ","none"],["C","text"],[" ","none"],["×───×","edge"],["│","border"],[" ","none"],["D","text"],[" ","none"],["│","border"]],
+        [["└───┘","border"],["    ","none"],["└───┘","border"],["    ","none"],["└───┘","border"],["    ","none"],["└───┘","border"]],
+        [],
+        [],
+        [["         ","none"],["┌───┐","border"]],
+        [["     ","none"],["┌──▶","edge"],["│","border"],[" ","none"],["E","text"],[" ","none"],["│","border"]],
+        [["┌───┐","border"],["│","edge"],["   ","none"],["└───┘","border"]],
+        [["│","border"],[" ","none"],["F","text"],[" ","none"],["├","border"],["┤","edge"]],
+        [["└───┘","border"],["│","edge"],["   ","none"],["┌───┐","border"],["    ","none"],["┌───┐","border"]],
+        [["     ","none"],["└──o","edge"],["│","border"],[" ","none"],["G","text"],[" ","none"],["├","border"],["───×","edge"],["│","border"],[" ","none"],["H","text"],[" ","none"],["│","border"]],
+        [["         ","none"],["└───┘","border"],["    ","none"],["└───┘","border"]]
+      ],
+      "width": 32,
+      "warnings": []
+    }
+  },
+  {
+    "name": "reversed_td",
+    "src": "graph TD\n  A <-- B\n  B <-.- C",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        " ┌───┐",
+        " │ C │",
+        " └─┬─┘",
+        "   ╎",
+        "   ▼",
+        " ┌───┐",
+        " │ B │",
+        " └─┬─┘",
+        "   │",
+        "   ▼",
+        " ┌───┐",
+        " │ A │",
+        " └───┘"
+      ],
+      "styled": [
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["C","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["╎","edge"]],
+        [["   ","none"],["▼","edge"]],
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"]],
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└───┘","border"]]
+      ],
+      "width": 6,
+      "warnings": []
+    }
+  },
+  {
+    "name": "long_edge_label",
+    "src": "graph TD\n  A -->|this label is definitely much longer than twenty eight columns| B",
+    "kind": "flowchart",
+    "art": {
+      "plain": [" ┌───┐"," │ A │"," └─┬─┘","   │","   ▼this label is definitely mu…"," ┌───┐"," │ B │"," └───┘"],
+      "styled": [
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"],["this label is definitely mu…","edgeLabel"]],
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└───┘","border"]]
+      ],
+      "width": 32,
+      "warnings": []
+    }
+  }
+]

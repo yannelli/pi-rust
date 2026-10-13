@@ -1,0 +1,18 @@
+«syntaxKeyword:package» «syntaxKeyword:demo»
+
+«syntaxKeyword:import» groovy.transform.CompileStatic
+
+«syntaxComment:// A greeter»
+«muted:@CompileStatic»
+«syntaxKeyword:class» «syntaxFunction:Greeter» «syntaxKeyword:extends» «syntaxFunction:Base» {
+    «syntaxType:String» name = «syntaxString:'world'»
+    «syntaxType:int» count = «syntaxNumber:42»
+
+    «syntaxType:String» «syntaxFunction:greet»(«syntaxType:int» «syntaxVariable:times» = 1) {
+        «syntaxKeyword:def» parts = []
+        times.times { i -> parts << «syntaxString:"Hello ${name} ${i}"» }
+        «syntaxKeyword:return» parts ? parts.join(«syntaxString:', '») : «syntaxNumber:null»
+    }
+}
+
+«syntaxType:println» «syntaxKeyword:new» «syntaxType:Greeter»().greet(«syntaxNumber:2») + «syntaxNumber:true»

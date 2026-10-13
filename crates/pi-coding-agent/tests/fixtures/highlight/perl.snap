@@ -1,0 +1,15 @@
+«muted:#!/usr/bin/perl»
+«syntaxKeyword:use» strict;
+«syntaxKeyword:use» warnings;
+
+«syntaxComment:# Greet everyone»
+«syntaxKeyword:sub» «syntaxFunction:greet» {
+    «syntaxKeyword:my» ($name, $count) = @_;
+    «syntaxKeyword:my» %seen = (a => «syntaxNumber:1», b => «syntaxNumber:2»);
+    «syntaxType:print» «syntaxString:"Hello »«text:$name»«syntaxString:\n"» «syntaxKeyword:for» «syntaxNumber:1» .. $count;
+    «syntaxKeyword:return» «syntaxType:scalar»(«syntaxType:keys» %seen) > «syntaxNumber:0» ? «syntaxNumber:1» : «syntaxType:undef»;
+}
+
+«syntaxKeyword:my» @names = «syntaxType:qw»(«syntaxString:alice bob»);
+greet($_, «syntaxNumber:2») «syntaxKeyword:foreach» @names;
+«syntaxKeyword:if» ($names[«syntaxNumber:0»] =~ /«syntaxString:^a»/«syntaxNumber:i») { «syntaxType:print» «syntaxString:'match'», «syntaxString:"\n"»; }

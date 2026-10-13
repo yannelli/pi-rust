@@ -1,0 +1,16 @@
+«syntaxKeyword:require» «syntaxString:"json"»
+
+«syntaxComment:# A greeter»
+«syntaxKeyword:class» «syntaxFunction:Greeter» < «syntaxFunction:Base»
+  «syntaxKeyword:attr_reader» :name
+
+  «syntaxKeyword:def» «syntaxFunction:initialize»«syntaxVariable:(name» «syntaxVariable:=» «syntaxString:"world"»«syntaxVariable:)»
+    «syntaxVariable:@name» = «syntaxType:name»
+    «syntaxVariable:@count» = «syntaxNumber:42»
+  «syntaxKeyword:end»
+
+  «syntaxKeyword:def» «syntaxFunction:greet»
+    «syntaxType:puts» «syntaxString:"Hello »«text:#{»«syntaxVariable:@name»«text:}»«syntaxString:!"» «syntaxKeyword:if» «syntaxVariable:@count» > «syntaxNumber:0»
+    [«syntaxNumber:1», «syntaxNumber:2.5», :sym, «syntaxNumber:nil», «syntaxNumber:true»].each { |«syntaxVariable:x»| «syntaxType:p» x }
+  «syntaxKeyword:end»
+«syntaxKeyword:end»

@@ -1,0 +1,22 @@
+«syntaxKeyword:package» main
+
+«syntaxKeyword:import» (
+	«syntaxString:"fmt"»
+	«syntaxString:"strings"»
+)
+
+«syntaxComment:// Point is a 2D point.»
+«syntaxKeyword:type» «syntaxFunction:Point» «syntaxKeyword:struct» {
+	X, Y «syntaxKeyword:int»
+}
+
+«syntaxKeyword:func» («syntaxVariable:p» *«syntaxType:Point») «syntaxFunction:String»() «syntaxKeyword:string» {
+	«syntaxKeyword:return» fmt.Sprintf(«syntaxString:"(%d, %d)"», p.X, p.Y)
+}
+
+«syntaxKeyword:func» «syntaxFunction:main»() {
+	p := &Point{X: «syntaxNumber:1», Y: «syntaxNumber:2»}
+	«syntaxKeyword:if» p != «syntaxNumber:nil» && «syntaxNumber:true» {
+		fmt.Println(strings.ToUpper(p.String()), «syntaxNumber:3.5», «syntaxString:`raw`»)
+	}
+}

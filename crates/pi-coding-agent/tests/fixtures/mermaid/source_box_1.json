@@ -1,0 +1,435 @@
+[
+  {
+    "name": "flow_unbounded",
+    "src": "flowchart TD\n  P[Parse source] --> S{Supported?}\n  S -->|yes| Y[Lay out]\n  S -->|no| N[Framed source]\n  Y --> U[Unicode art]\n  N --> U",
+    "maxWidth": null,
+    "art": {
+      "plain": [
+        "╭ mermaid: flowchart ─────────────────╮",
+        "│ flowchart TD                        │",
+        "│   P[Parse source] --> S{Supported?} │",
+        "│   S -->|yes| Y[Lay out]             │",
+        "│   S -->|no| N[Framed source]        │",
+        "│   Y --> U[Unicode art]              │",
+        "│   N --> U                           │",
+        "╰─────────────────────────────────────╯"
+      ],
+      "styled": [
+        [["╭","border"],[" mermaid: flowchart ","title"],["─────────────────╮","border"]],
+        [["│ ","border"],["flowchart TD","text"],["                        │","border"]],
+        [["│ ","border"],["  P[Parse source] --> S{Supported?}","text"],[" │","border"]],
+        [["│ ","border"],["  S -->|yes| Y[Lay out]","text"],["             │","border"]],
+        [["│ ","border"],["  S -->|no| N[Framed source]","text"],["        │","border"]],
+        [["│ ","border"],["  Y --> U[Unicode art]","text"],["              │","border"]],
+        [["│ ","border"],["  N --> U","text"],["                           │","border"]],
+        [["╰─────────────────────────────────────╯","border"]]
+      ],
+      "width": 39,
+      "warnings": []
+    }
+  },
+  {
+    "name": "flow_w40",
+    "src": "flowchart TD\n  P[Parse source] --> S{Supported?}\n  S -->|yes| Y[Lay out]\n  S -->|no| N[Framed source]\n  Y --> U[Unicode art]\n  N --> U",
+    "maxWidth": 40,
+    "art": {
+      "plain": [
+        "╭ mermaid: flowchart ─────────────────╮",
+        "│ flowchart TD                        │",
+        "│   P[Parse source] --> S{Supported?} │",
+        "│   S -->|yes| Y[Lay out]             │",
+        "│   S -->|no| N[Framed source]        │",
+        "│   Y --> U[Unicode art]              │",
+        "│   N --> U                           │",
+        "╰─────────────────────────────────────╯"
+      ],
+      "styled": [
+        [["╭","border"],[" mermaid: flowchart ","title"],["─────────────────╮","border"]],
+        [["│ ","border"],["flowchart TD","text"],["                        │","border"]],
+        [["│ ","border"],["  P[Parse source] --> S{Supported?}","text"],[" │","border"]],
+        [["│ ","border"],["  S -->|yes| Y[Lay out]","text"],["             │","border"]],
+        [["│ ","border"],["  S -->|no| N[Framed source]","text"],["        │","border"]],
+        [["│ ","border"],["  Y --> U[Unicode art]","text"],["              │","border"]],
+        [["│ ","border"],["  N --> U","text"],["                           │","border"]],
+        [["╰─────────────────────────────────────╯","border"]]
+      ],
+      "width": 39,
+      "warnings": []
+    }
+  },
+  {
+    "name": "flow_w20",
+    "src": "flowchart TD\n  P[Parse source] --> S{Supported?}\n  S -->|yes| Y[Lay out]\n  S -->|no| N[Framed source]\n  Y --> U[Unicode art]\n  N --> U",
+    "maxWidth": 20,
+    "art": {
+      "plain": [
+        "╭ mermaid: flowchart ──╮",
+        "│ flowchart TD         │",
+        "│   P[Parse source     │",
+        "│ ] --> S{Supporte     │",
+        "│ d?}                  │",
+        "│   S -->|yes| Y[L     │",
+        "│ ay out]              │",
+        "│   S -->|no| N[Fr     │",
+        "│ amed source]         │",
+        "│   Y --> U[Unicod     │",
+        "│ e art]               │",
+        "│   N --> U            │",
+        "╰──────────────────────╯"
+      ],
+      "styled": [
+        [["╭","border"],[" mermaid: flowchart ","title"],["──╮","border"]],
+        [["│ ","border"],["flowchart TD","text"],["         │","border"]],
+        [["│ ","border"],["  P[Parse source","text"],["     │","border"]],
+        [["│ ","border"],["] --> S{Supporte","text"],["     │","border"]],
+        [["│ ","border"],["d?}","text"],["                  │","border"]],
+        [["│ ","border"],["  S -->|yes| Y[L","text"],["     │","border"]],
+        [["│ ","border"],["ay out]","text"],["              │","border"]],
+        [["│ ","border"],["  S -->|no| N[Fr","text"],["     │","border"]],
+        [["│ ","border"],["amed source]","text"],["         │","border"]],
+        [["│ ","border"],["  Y --> U[Unicod","text"],["     │","border"]],
+        [["│ ","border"],["e art]","text"],["               │","border"]],
+        [["│ ","border"],["  N --> U","text"],["            │","border"]],
+        [["╰──────────────────────╯","border"]]
+      ],
+      "width": 24,
+      "warnings": []
+    }
+  },
+  {
+    "name": "flow_w8",
+    "src": "flowchart TD\n  P[Parse source] --> S{Supported?}\n  S -->|yes| Y[Lay out]\n  S -->|no| N[Framed source]\n  Y --> U[Unicode art]\n  N --> U",
+    "maxWidth": 8,
+    "art": {
+      "plain": [
+        "╭ mermaid: flowchart ──╮",
+        "│ flowchar             │",
+        "│ t TD                 │",
+        "│   P[Pars             │",
+        "│ e source             │",
+        "│ ] --> S{             │",
+        "│ Supporte             │",
+        "│ d?}                  │",
+        "│   S -->|             │",
+        "│ yes| Y[L             │",
+        "│ ay out]              │",
+        "│   S -->|             │",
+        "│ no| N[Fr             │",
+        "│ amed sou             │",
+        "│ rce]                 │",
+        "│   Y -->              │",
+        "│ U[Unicod             │",
+        "│ e art]               │",
+        "│   N -->              │",
+        "│ U                    │",
+        "╰──────────────────────╯"
+      ],
+      "styled": [
+        [["╭","border"],[" mermaid: flowchart ","title"],["──╮","border"]],
+        [["│ ","border"],["flowchar","text"],["             │","border"]],
+        [["│ ","border"],["t TD","text"],["                 │","border"]],
+        [["│ ","border"],["  P[Pars","text"],["             │","border"]],
+        [["│ ","border"],["e source","text"],["             │","border"]],
+        [["│ ","border"],["] --> S{","text"],["             │","border"]],
+        [["│ ","border"],["Supporte","text"],["             │","border"]],
+        [["│ ","border"],["d?}","text"],["                  │","border"]],
+        [["│ ","border"],["  S -->|","text"],["             │","border"]],
+        [["│ ","border"],["yes| Y[L","text"],["             │","border"]],
+        [["│ ","border"],["ay out]","text"],["              │","border"]],
+        [["│ ","border"],["  S -->|","text"],["             │","border"]],
+        [["│ ","border"],["no| N[Fr","text"],["             │","border"]],
+        [["│ ","border"],["amed sou","text"],["             │","border"]],
+        [["│ ","border"],["rce]","text"],["                 │","border"]],
+        [["│ ","border"],["  Y --> ","text"],["             │","border"]],
+        [["│ ","border"],["U[Unicod","text"],["             │","border"]],
+        [["│ ","border"],["e art]","text"],["               │","border"]],
+        [["│ ","border"],["  N --> ","text"],["             │","border"]],
+        [["│ ","border"],["U","text"],["                    │","border"]],
+        [["╰──────────────────────╯","border"]]
+      ],
+      "width": 24,
+      "warnings": []
+    }
+  },
+  {
+    "name": "flow_w0",
+    "src": "flowchart TD\n  P[Parse source] --> S{Supported?}\n  S -->|yes| Y[Lay out]\n  S -->|no| N[Framed source]\n  Y --> U[Unicode art]\n  N --> U",
+    "maxWidth": 0,
+    "art": {
+      "plain": [
+        "╭ mermaid: flowchart ──╮",
+        "│ flowchar             │",
+        "│ t TD                 │",
+        "│   P[Pars             │",
+        "│ e source             │",
+        "│ ] --> S{             │",
+        "│ Supporte             │",
+        "│ d?}                  │",
+        "│   S -->|             │",
+        "│ yes| Y[L             │",
+        "│ ay out]              │",
+        "│   S -->|             │",
+        "│ no| N[Fr             │",
+        "│ amed sou             │",
+        "│ rce]                 │",
+        "│   Y -->              │",
+        "│ U[Unicod             │",
+        "│ e art]               │",
+        "│   N -->              │",
+        "│ U                    │",
+        "╰──────────────────────╯"
+      ],
+      "styled": [
+        [["╭","border"],[" mermaid: flowchart ","title"],["──╮","border"]],
+        [["│ ","border"],["flowchar","text"],["             │","border"]],
+        [["│ ","border"],["t TD","text"],["                 │","border"]],
+        [["│ ","border"],["  P[Pars","text"],["             │","border"]],
+        [["│ ","border"],["e source","text"],["             │","border"]],
+        [["│ ","border"],["] --> S{","text"],["             │","border"]],
+        [["│ ","border"],["Supporte","text"],["             │","border"]],
+        [["│ ","border"],["d?}","text"],["                  │","border"]],
+        [["│ ","border"],["  S -->|","text"],["             │","border"]],
+        [["│ ","border"],["yes| Y[L","text"],["             │","border"]],
+        [["│ ","border"],["ay out]","text"],["              │","border"]],
+        [["│ ","border"],["  S -->|","text"],["             │","border"]],
+        [["│ ","border"],["no| N[Fr","text"],["             │","border"]],
+        [["│ ","border"],["amed sou","text"],["             │","border"]],
+        [["│ ","border"],["rce]","text"],["                 │","border"]],
+        [["│ ","border"],["  Y --> ","text"],["             │","border"]],
+        [["│ ","border"],["U[Unicod","text"],["             │","border"]],
+        [["│ ","border"],["e art]","text"],["               │","border"]],
+        [["│ ","border"],["  N --> ","text"],["             │","border"]],
+        [["│ ","border"],["U","text"],["                    │","border"]],
+        [["╰──────────────────────╯","border"]]
+      ],
+      "width": 24,
+      "warnings": []
+    }
+  },
+  {
+    "name": "pie_w30",
+    "src": "pie title Pets\n  \"Dogs\" : 386\n  \"Cats\" : 85",
+    "maxWidth": 30,
+    "art": {
+      "plain": [
+        "╭ mermaid: pie ──╮",
+        "│ pie title Pets │",
+        "│   \"Dogs\" : 386 │",
+        "│   \"Cats\" : 85  │",
+        "╰────────────────╯"
+      ],
+      "styled": [
+        [["╭","border"],[" mermaid: pie ","title"],["──╮","border"]],
+        [["│ ","border"],["pie title Pets","text"],[" │","border"]],
+        [["│ ","border"],["  \"Dogs\" : 386","text"],[" │","border"]],
+        [["│ ","border"],["  \"Cats\" : 85","text"],["  │","border"]],
+        [["╰────────────────╯","border"]]
+      ],
+      "width": 18,
+      "warnings": []
+    }
+  },
+  {
+    "name": "blank",
+    "src": "",
+    "maxWidth": null,
+    "art": {
+      "plain": ["╭ mermaid: diagram ──╮","╰────────────────────╯"],
+      "styled": [[["╭","border"],[" mermaid: diagram ","title"],["──╮","border"]],[["╰────────────────────╯","border"]]],
+      "width": 22,
+      "warnings": []
+    }
+  },
+  {
+    "name": "blank_w10",
+    "src": "  \n  ",
+    "maxWidth": 10,
+    "art": {
+      "plain": ["╭ mermaid: diagram ──╮","╰────────────────────╯"],
+      "styled": [[["╭","border"],[" mermaid: diagram ","title"],["──╮","border"]],[["╰────────────────────╯","border"]]],
+      "width": 22,
+      "warnings": []
+    }
+  },
+  {
+    "name": "leading_blank_lines",
+    "src": "\n\n  \ngraph TD\n\n  A --> B   \n\n",
+    "maxWidth": 24,
+    "art": {
+      "plain": [
+        "╭ mermaid: graph ──╮",
+        "│ graph TD         │",
+        "│                  │",
+        "│   A --> B        │",
+        "│                  │",
+        "╰──────────────────╯"
+      ],
+      "styled": [
+        [["╭","border"],[" mermaid: graph ","title"],["──╮","border"]],
+        [["│ ","border"],["graph TD","text"],["         │","border"]],
+        [["│ ","border"],["","text"],["                 │","border"]],
+        [["│ ","border"],["  A --> B","text"],["        │","border"]],
+        [["│ ","border"],["","text"],["                 │","border"]],
+        [["╰──────────────────╯","border"]]
+      ],
+      "width": 20,
+      "warnings": []
+    }
+  },
+  {
+    "name": "cjk_wrap",
+    "src": "graph LR\n  A[中文标签中文标签中文标签中文标签] --> B[日本語のテキスト]",
+    "maxWidth": 15,
+    "art": {
+      "plain": [
+        "╭ mermaid: graph ──╮",
+        "│ graph LR         │",
+        "│   A[中文标       │",
+        "│ 签中文标签       │",
+        "│ 中文标签中       │",
+        "│ 文标签] -->      │",
+        "│  B[日本語の      │",
+        "│ テキスト]        │",
+        "╰──────────────────╯"
+      ],
+      "styled": [
+        [["╭","border"],[" mermaid: graph ","title"],["──╮","border"]],
+        [["│ ","border"],["graph LR","text"],["         │","border"]],
+        [["│ ","border"],["  A[中文标","text"],["       │","border"]],
+        [["│ ","border"],["签中文标签","text"],["       │","border"]],
+        [["│ ","border"],["中文标签中","text"],["       │","border"]],
+        [["│ ","border"],["文标签] -->","text"],["      │","border"]],
+        [["│ ","border"],[" B[日本語の","text"],["      │","border"]],
+        [["│ ","border"],["テキスト]","text"],["        │","border"]],
+        [["╰──────────────────╯","border"]]
+      ],
+      "width": 20,
+      "warnings": []
+    }
+  },
+  {
+    "name": "emoji_wrap",
+    "src": "graph LR\n  A[👨\u200d👩\u200d👧👨\u200d👩\u200d👧👨\u200d👩\u200d👧👨\u200d👩\u200d👧👨\u200d👩\u200d👧] --> B",
+    "maxWidth": 11,
+    "art": {
+      "plain": [
+        "╭ mermaid: graph ──╮",
+        "│ graph LR         │",
+        "│   A[👨\u200d👩\u200d👧👨\u200d👩\u200d👧         │",
+        "│ 👨\u200d👩\u200d👧👨\u200d👩\u200d👧👨\u200d👩\u200d👧]          │",
+        "│ --> B            │",
+        "╰──────────────────╯"
+      ],
+      "styled": [
+        [["╭","border"],[" mermaid: graph ","title"],["──╮","border"]],
+        [["│ ","border"],["graph LR","text"],["         │","border"]],
+        [["│ ","border"],["  A[👨\u200d👩\u200d👧👨\u200d👩\u200d👧","text"],["         │","border"]],
+        [["│ ","border"],["👨\u200d👩\u200d👧👨\u200d👩\u200d👧👨\u200d👩\u200d👧] ","text"],["         │","border"]],
+        [["│ ","border"],["--> B","text"],["            │","border"]],
+        [["╰──────────────────╯","border"]]
+      ],
+      "width": 20,
+      "warnings": []
+    }
+  },
+  {
+    "name": "long_header",
+    "src": "averyveryverylongdiagramheadertoken here",
+    "maxWidth": 12,
+    "art": {
+      "plain": [
+        "╭ mermaid: averyveryverylongdiagramheadertoken ──╮",
+        "│ averyver                                       │",
+        "│ yverylon                                       │",
+        "│ gdiagram                                       │",
+        "│ headerto                                       │",
+        "│ ken here                                       │",
+        "╰────────────────────────────────────────────────╯"
+      ],
+      "styled": [
+        [["╭","border"],[" mermaid: averyveryverylongdiagramheadertoken ","title"],["──╮","border"]],
+        [["│ ","border"],["averyver","text"],["                                       │","border"]],
+        [["│ ","border"],["yverylon","text"],["                                       │","border"]],
+        [["│ ","border"],["gdiagram","text"],["                                       │","border"]],
+        [["│ ","border"],["headerto","text"],["                                       │","border"]],
+        [["│ ","border"],["ken here","text"],["                                       │","border"]],
+        [["╰────────────────────────────────────────────────╯","border"]]
+      ],
+      "width": 50,
+      "warnings": []
+    }
+  },
+  {
+    "name": "controls",
+    "src": "graph TD\u001b[31m\n  A --> B\u0007",
+    "maxWidth": null,
+    "art": {
+      "plain": ["╭ mermaid: graph ──╮","│ graph TD[31m     │","│   A --> B        │","╰──────────────────╯"],
+      "styled": [
+        [["╭","border"],[" mermaid: graph ","title"],["──╮","border"]],
+        [["│ ","border"],["graph TD[31m","text"],["     │","border"]],
+        [["│ ","border"],["  A --> B","text"],["        │","border"]],
+        [["╰──────────────────╯","border"]]
+      ],
+      "width": 20,
+      "warnings": []
+    }
+  },
+  {
+    "name": "crlf",
+    "src": "graph TD\r\n  A --> B\r\n",
+    "maxWidth": 16,
+    "art": {
+      "plain": ["╭ mermaid: graph ──╮","│ graph TD         │","│   A --> B        │","╰──────────────────╯"],
+      "styled": [
+        [["╭","border"],[" mermaid: graph ","title"],["──╮","border"]],
+        [["│ ","border"],["graph TD","text"],["         │","border"]],
+        [["│ ","border"],["  A --> B","text"],["        │","border"]],
+        [["╰──────────────────╯","border"]]
+      ],
+      "width": 20,
+      "warnings": []
+    }
+  },
+  {
+    "name": "class_w30",
+    "src": "classDiagram\n  Animal <|-- Duck\n  Animal <|-- Fish\n  Animal : +int age\n  Animal : +String gender\n  Animal: +isMammal()\n  Animal: +mate()\n  class Duck{\n    +String beakColor\n    +swim()\n    +quack()\n  }",
+    "maxWidth": 30,
+    "art": {
+      "plain": [
+        "╭ mermaid: classDiagram ────╮",
+        "│ classDiagram              │",
+        "│   Animal <|-- Duck        │",
+        "│   Animal <|-- Fish        │",
+        "│   Animal : +int age       │",
+        "│   Animal : +String gender │",
+        "│   Animal: +isMammal()     │",
+        "│   Animal: +mate()         │",
+        "│   class Duck{             │",
+        "│     +String beakColor     │",
+        "│     +swim()               │",
+        "│     +quack()              │",
+        "│   }                       │",
+        "╰───────────────────────────╯"
+      ],
+      "styled": [
+        [["╭","border"],[" mermaid: classDiagram ","title"],["────╮","border"]],
+        [["│ ","border"],["classDiagram","text"],["              │","border"]],
+        [["│ ","border"],["  Animal <|-- Duck","text"],["        │","border"]],
+        [["│ ","border"],["  Animal <|-- Fish","text"],["        │","border"]],
+        [["│ ","border"],["  Animal : +int age","text"],["       │","border"]],
+        [["│ ","border"],["  Animal : +String gender","text"],[" │","border"]],
+        [["│ ","border"],["  Animal: +isMammal()","text"],["     │","border"]],
+        [["│ ","border"],["  Animal: +mate()","text"],["         │","border"]],
+        [["│ ","border"],["  class Duck{","text"],["             │","border"]],
+        [["│ ","border"],["    +String beakColor","text"],["     │","border"]],
+        [["│ ","border"],["    +swim()","text"],["               │","border"]],
+        [["│ ","border"],["    +quack()","text"],["              │","border"]],
+        [["│ ","border"],["  }","text"],["                       │","border"]],
+        [["╰───────────────────────────╯","border"]]
+      ],
+      "width": 29,
+      "warnings": []
+    }
+  }
+]
