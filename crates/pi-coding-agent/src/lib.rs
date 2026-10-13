@@ -7,6 +7,7 @@ pub mod cli;
 pub mod clipboard;
 pub mod compaction;
 pub mod config;
+pub mod diagnostics;
 pub mod export;
 pub mod files;
 pub mod images;
