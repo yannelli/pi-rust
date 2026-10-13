@@ -113,7 +113,8 @@ pub(super) async fn poll(task: TaskRecord, runtime: TaskRuntime, context: Contex
 async fn commit_partial(runtime: TaskRuntime, partial: AssistantMessage, attempt: u32, context: Context) {
     let conversation_id = runtime.conversation_id();
     let result = async {
-        let message = encode(&partial)?;
+        // Stored as a whole `Message`, with its role, as upstream stores the `AssistantMessage`.
+        let message = encode(&pi_ai::Message::Assistant(partial))?;
         let change = move |tx: Tx, _| async move {
             let draft = tx.doc(&LIVE_DOC, conversation_id).await?;
             draft.edit(|live| {

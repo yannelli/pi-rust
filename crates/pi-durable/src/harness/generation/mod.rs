@@ -328,7 +328,9 @@ pub(crate) async fn convert_partial(
     let Some(partial) = live.generation.as_ref().and_then(|generation| generation.message.clone()) else {
         return Ok(());
     };
-    let mut message: AssistantMessage = partial.deserialize_into()?;
+    let Message::Assistant(mut message) = partial.deserialize_into()? else {
+        return Err(DurableError::error("Committed partial is not an assistant message"));
+    };
     message.stop_reason = pi_ai::StopReason::Aborted;
     append_assistant(tx, conversation_id, &message).await?;
     Ok(())
