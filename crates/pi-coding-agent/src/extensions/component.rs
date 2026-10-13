@@ -50,11 +50,27 @@ impl ComponentFactory {
         self.kind
     }
 
+    /// The factory id; a `custom()` overlay is addressed by it.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// Call the JavaScript callback `key` with `arg`, such as the `onHandle` of `custom()`.
+    pub async fn invoke_callback(&self, key: u64, arg: Value) -> Result<Value, String> {
+        let runner = self.runner.upgrade().ok_or("The extension host has shut down")?;
+        runner.call_json("invokeCallback", vec![json!(key), arg]).await.map_err(|error| error.message)
+    }
+
     fn args(&self) -> Vec<HostValue> {
         vec![json!(self.id).into(), json!(self.target).into(), Value::Null.into()]
     }
 
-    fn host(&self) -> Result<JsRef, String> {
+    /// The session target the factory's components belong to.
+    pub fn target(&self) -> u64 {
+        self.target
+    }
+
+    pub(crate) fn host(&self) -> Result<JsRef, String> {
         let runner = self.runner.upgrade().ok_or("The extension host has shut down")?;
         Ok(runner.host().clone())
     }
@@ -89,6 +105,8 @@ pub struct CustomRequest {
     pub overlay_options: Option<Value>,
     /// Resolves with the value passed to `done`.
     pub done: oneshot::Receiver<Value>,
+    /// The `onHandle` callback, called with the overlay id once the overlay is shown.
+    pub handle_key: Option<u64>,
 }
 
 /// A JavaScript component (`render`, optional `handleInput`, `invalidate`, `dispose`). Calls

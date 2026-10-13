@@ -59,6 +59,11 @@ pub fn offline() -> bool {
     env_flag("PI_OFFLINE")
 }
 
+/// `PI_EXPERIMENTAL=1` enables experimental features (upstream `areExperimentalFeaturesEnabled`).
+pub fn experimental_features_enabled() -> bool {
+    pi_ai::env::process_env_value("PI_EXPERIMENTAL").as_deref() == Some("1")
+}
+
 pub use crate::resources::ContextFile;
 
 /// The global context file, then one per directory from the filesystem root down to `cwd`.

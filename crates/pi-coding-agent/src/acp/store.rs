@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::agent_session::lock;
+use crate::resources::brand::CONFIG_DIR_NAME;
 use crate::session::ids::iso_timestamp;
 
 /// One mapped session.
@@ -22,7 +23,7 @@ pub struct StoredSession {
 
 /// `~/.pi/pi-acp/session-map.json`, kept apart from pi's own `~/.pi/agent`.
 pub fn default_session_map_path() -> PathBuf {
-    crate::config::home_dir().join(".pi").join("pi-acp").join("session-map.json")
+    crate::config::home_dir().join(CONFIG_DIR_NAME).join("pi-acp").join("session-map.json")
 }
 
 /// The map file, read and rewritten on every change.

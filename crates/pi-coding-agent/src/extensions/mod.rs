@@ -2,6 +2,7 @@
 //! on the embedded pi-js runtime, one runtime per session. JavaScript host modules port the
 //! upstream API and event runner; host operations in Rust reach the session, models, and UI.
 
+pub mod autocomplete;
 pub mod component;
 pub(crate) mod convert;
 pub mod inline;

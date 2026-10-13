@@ -3,6 +3,7 @@
 
 mod auth;
 mod autocomplete;
+mod aws_mfa;
 mod background;
 pub mod bridge;
 mod bug;
@@ -13,6 +14,7 @@ mod dialogs;
 mod events;
 mod extension_bind;
 mod extension_editor_slot;
+mod extension_overlay;
 pub mod extension_ui;
 mod extension_view;
 pub mod footer_data;
@@ -23,15 +25,19 @@ mod layout;
 mod llama;
 mod mcp;
 mod mode;
+mod model_refresh;
 mod navigation;
 mod prompts;
 pub mod renderers;
 mod resources_view;
 pub mod selector;
 mod settings;
+mod share;
+mod shutdown;
 mod startup;
 pub mod startup_ui;
 mod status;
+mod tmux;
 pub mod util;
 
 use std::path::PathBuf;
@@ -43,6 +49,7 @@ use pi_tui::TerminalRef;
 pub use autocomplete::BUILTIN_SLASH_COMMANDS;
 pub use hotkeys::hotkeys_markdown;
 pub use mode::InteractiveMode;
+pub use shutdown::FatalErrorReported;
 
 use crate::agent_session::{AgentSessionRuntime, RuntimeDiagnostic};
 use crate::settings::schema::TuiMode;

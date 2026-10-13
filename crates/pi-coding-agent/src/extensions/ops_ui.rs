@@ -50,6 +50,16 @@ pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<
         }
         return Ok(HostValue::Undefined);
     }
+    if name == "autocompleteApply" {
+        return Ok(HostValue::Json(autocomplete_apply(args)?));
+    }
+    if name == "autocompleteFileTrigger" {
+        let lines: Vec<String> = serde_json::from_value(args.json(0)).map_err(error)?;
+        let line = args.u64(1) as usize;
+        let col = utf16_to_byte(lines.get(line).map_or("", String::as_str), args.u64(2) as usize);
+        let trigger = pi_tui::autocomplete::default_should_trigger_file_completion(&lines, line, col);
+        return Ok(HostValue::Json(json!(trigger)));
+    }
     if name == "invalidateTool" {
         runner.bindings().ui.invalidate_tool(&args.str(0)?);
         return Ok(HostValue::Undefined);
@@ -160,6 +170,7 @@ pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<
             Ok(()) => Value::Null,
             Err(message) => json!(message),
         },
+        "overlay" => ui.overlay(args.u64(1), &args.str(2)?, &args.json(3)),
         "getToolsExpanded" => json!(ui.get_tools_expanded()),
         "setToolsExpanded" => {
             ui.set_tools_expanded(args.bool(1));
@@ -170,8 +181,9 @@ pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<
     Ok(HostValue::Json(value))
 }
 
-/// `ctx.ui.custom(factory, options)`: resolves with the value passed to `done`.
-pub(crate) async fn custom(runner: &ExtensionRunner, target: u64, id: u64, options: Value) -> Value {
+/// `ctx.ui.custom(factory, options)`: resolves with the value passed to `done`, and rejects
+/// when the factory throws.
+pub(crate) async fn custom(runner: &ExtensionRunner, target: u64, id: u64, options: Value) -> Result<Value, JsError> {
     let (sender, done) = tokio::sync::oneshot::channel();
     lock(&runner.custom_done).insert(id, sender);
     let request = CustomRequest {
@@ -179,10 +191,11 @@ pub(crate) async fn custom(runner: &ExtensionRunner, target: u64, id: u64, optio
         overlay: options["overlay"].as_bool().unwrap_or(false),
         overlay_options: options.get("overlayOptions").filter(|value| !value.is_null()).cloned(),
         done,
+        handle_key: options["handleKey"].as_u64(),
     };
     let result = runner.target_ui(target).custom(request).await;
     lock(&runner.custom_done).remove(&id);
-    result.unwrap_or(Value::Null)
+    Ok(result.map_err(JsError::new)?.unwrap_or(Value::Null))
 }
 
 /// Every keybinding id with its effective keys, for the JavaScript `KeybindingsManager`.
@@ -200,4 +213,68 @@ fn keybindings() -> Value {
         })
         .collect();
     json!({"definitions": definitions, "user": {}})
+}
+
+/// Byte offset of UTF-16 index `index` in `text`, as the TUI counts cursor columns.
+pub(crate) fn utf16_to_byte(text: &str, index: usize) -> usize {
+    let mut units = 0;
+    for (offset, c) in text.char_indices() {
+        if units >= index {
+            return offset;
+        }
+        units += c.len_utf16();
+    }
+    text.len()
+}
+
+/// UTF-16 index of byte offset `offset` in `text`, as JavaScript counts string positions.
+pub(crate) fn byte_to_utf16(text: &str, offset: usize) -> usize {
+    text.get(..offset.min(text.len())).map_or(0, |prefix| prefix.encode_utf16().count())
+}
+
+/// The built-in provider's `applyCompletion`, for providers extensions stack on it.
+fn autocomplete_apply(args: &Args) -> Result<Value, JsError> {
+    let lines: Vec<String> = serde_json::from_value(args.json(0)).map_err(error)?;
+    let line = args.u64(1) as usize;
+    let col = utf16_to_byte(lines.get(line).map_or("", String::as_str), args.u64(2) as usize);
+    let item = args.json(3);
+    let item = pi_tui::AutocompleteItem {
+        value: item["value"].as_str().unwrap_or_default().to_string(),
+        label: item["label"].as_str().unwrap_or_default().to_string(),
+        description: item["description"].as_str().map(str::to_string),
+    };
+    let result = pi_tui::autocomplete::apply_default_completion(&lines, line, col, &item, &args.str(4)?);
+    let col = byte_to_utf16(result.lines.get(result.cursor_line).map_or("", String::as_str), result.cursor_col);
+    Ok(json!({"lines": result.lines, "cursorLine": result.cursor_line, "cursorCol": col}))
+}
+
+/// `getSuggestions` of the built-in provider under extension providers.
+pub(crate) async fn autocomplete_base(runner: &ExtensionRunner, args: &Args) -> Result<Value, JsError> {
+    let lines: Vec<String> = serde_json::from_value(args.json(1)).map_err(error)?;
+    let line = args.u64(2) as usize;
+    let col = utf16_to_byte(lines.get(line).map_or("", String::as_str), args.u64(3) as usize);
+    let request =
+        crate::extension_ui::AutocompleteRequest { lines, cursor_line: line, cursor_col: col, force: args.bool(4) };
+    let Some(suggestions) = runner.target_ui(args.u64(0)).autocomplete_base(request).await else {
+        return Ok(Value::Null);
+    };
+    let items: Vec<Value> = suggestions
+        .items
+        .iter()
+        .map(|item| json!({"value": item.value, "label": item.label, "description": item.description}))
+        .collect();
+    Ok(json!({"items": items, "prefix": suggestions.prefix}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{byte_to_utf16, utf16_to_byte};
+
+    #[test]
+    fn converts_cursor_columns() {
+        assert_eq!(utf16_to_byte("aé😀b", 2), 3);
+        assert_eq!(utf16_to_byte("aé😀b", 4), 7);
+        assert_eq!(byte_to_utf16("aé😀b", 7), 4);
+        assert_eq!(utf16_to_byte("ab", 9), 2);
+    }
 }

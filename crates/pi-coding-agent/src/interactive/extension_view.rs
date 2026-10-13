@@ -13,13 +13,12 @@ use pi_tui::{
     ComponentRef, Container, OverlayAnchor, OverlayMargin, OverlayOptions, SizeValue, Spacer, Text, component,
 };
 use serde_json::Value;
-use tokio::sync::oneshot;
 
 use super::components::ThemedText;
 use super::extension_ui::UiMirror;
 use super::mode::InteractiveMode;
 use crate::extension_ui::WidgetPlacement;
-use crate::extensions::{ComponentFactory, CustomRequest, JsComponent};
+use crate::extensions::{ComponentFactory, JsComponent};
 use crate::theme::{ThemeColor, theme};
 
 /// Most lines a text widget shows (upstream `MAX_WIDGET_LINES`).
@@ -76,6 +75,11 @@ pub(super) struct ExtensionUiState {
     pub working_indicator: Option<LoaderIndicatorOptions>,
     pub tool_invalidators: HashMap<String, Rc<dyn Fn()>>,
     pub shutdown_requested: bool,
+    /// Overlays of `custom()` calls whose `onHandle` received a handle, by overlay id.
+    pub overlays: HashMap<u64, pi_tui::OverlayHandle>,
+    /// `addAutocompleteProvider` factories, applied in order over the built-in provider.
+    pub autocomplete_factories: Vec<ComponentFactory>,
+    pub autocomplete_base: Option<Rc<dyn pi_tui::AutocompleteProvider>>,
 }
 
 impl ExtensionUiState {
@@ -102,7 +106,7 @@ fn size(value: &Value) -> Option<SizeValue> {
 }
 
 /// Upstream `OverlayOptions` from their JSON form.
-fn overlay_options(value: Option<&Value>) -> OverlayOptions {
+pub(super) fn overlay_options(value: Option<&Value>) -> OverlayOptions {
     let Some(value) = value else { return OverlayOptions::default() };
     let anchor = match value["anchor"].as_str() {
         Some("top-left") => Some(OverlayAnchor::TopLeft),
@@ -312,37 +316,6 @@ impl InteractiveMode {
         self.request_render();
     }
 
-    /// `ctx.ui.custom()`: show the component until it calls `done`, then answer `sender`.
-    pub(super) fn show_extension_custom(&self, request: CustomRequest, sender: oneshot::Sender<Value>) {
-        let saved_text = self.current_editor_text();
-        self.spawn(move |mode| async move {
-            let CustomRequest { factory, overlay, overlay_options: options, done } = request;
-            let js = match factory.create_async().await {
-                Ok(js) => Rc::new(RefCell::new(js)),
-                Err(error) => {
-                    mode.show_error(&format!("Extension component failed: {error}"));
-                    return;
-                }
-            };
-            let view: ComponentRef = js.clone();
-            let close: Rc<dyn Fn()> = if overlay {
-                let handle = mode.tui().show_overlay(view, overlay_options(options.as_ref()));
-                Rc::new(move || handle.hide())
-            } else {
-                mode.mount_view(view)
-            };
-            mode.request_render();
-            let result = done.await.unwrap_or(Value::Null);
-            close();
-            if !overlay {
-                mode.set_extension_editor_text(&saved_text);
-            }
-            dispose(&js);
-            mode.request_render();
-            let _ = sender.send(result);
-        });
-    }
-
     pub(super) fn invalidate_extension_tool(&self, tool_call_id: &str) {
         let invalidate = self.state.borrow().extensions.tool_invalidators.get(tool_call_id).cloned();
         if let Some(invalidate) = invalidate {
@@ -355,6 +328,7 @@ impl InteractiveMode {
     /// `resetExtensionUI`).
     pub(super) fn reset_extension_ui(&self) {
         self.tui().hide_overlay();
+        self.reset_extension_overlays_and_autocomplete();
         self.set_extension_terminal_input(false);
         self.set_extension_footer(None);
         self.set_extension_header(None);

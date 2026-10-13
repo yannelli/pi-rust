@@ -73,7 +73,10 @@ pub(crate) async fn run(runner: &Arc<ExtensionRunner>, name: &str, args: &Args) 
                 });
                 setup
             });
-            let result = runtime.new_session_with(parent, setup).await.map_err(failure)?;
+            let result = runtime.new_session_with(parent, setup).await.map_err(|error| {
+                runner.target_ui(target).fatal_runtime_error("Failed to create session", &format!("{error:#}"));
+                failure(error)
+            })?;
             Ok(replaced(runner, &runtime, result.cancelled))
         }
         "fork" => {
@@ -82,7 +85,10 @@ pub(crate) async fn run(runner: &Arc<ExtensionRunner>, name: &str, args: &Args) 
                 Some("at") => ForkPosition::At,
                 _ => ForkPosition::Before,
             };
-            let result = runtime.fork(&args.str(1)?, position).await.map_err(failure)?;
+            let result = runtime.fork(&args.str(1)?, position).await.map_err(|error| {
+                runner.target_ui(target).fatal_runtime_error("Failed to fork session", &format!("{error:#}"));
+                failure(error)
+            })?;
             Ok(replaced(runner, &runtime, result.cancelled))
         }
         "switch" => {

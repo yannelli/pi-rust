@@ -30,6 +30,7 @@ pub(super) struct UiMirror {
     pub statuses: Mutex<BTreeMap<String, String>>,
     pub provider_count: AtomicUsize,
     pub editor_actions: Mutex<Vec<String>>,
+    pub overlays: Mutex<std::collections::HashMap<u64, super::extension_overlay::OverlayMirror>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -37,6 +38,17 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 impl UiMirror {
+    pub fn set_overlay(&self, id: u64, state: Option<super::extension_overlay::OverlayMirror>) {
+        match state {
+            Some(state) => lock(&self.overlays).insert(id, state),
+            None => lock(&self.overlays).remove(&id),
+        };
+    }
+
+    fn overlay(&self, id: u64) -> Option<super::extension_overlay::OverlayMirror> {
+        lock(&self.overlays).get(&id).cloned()
+    }
+
     pub fn set_editor_text(&self, text: &str) {
         *lock(&self.editor_text) = text.to_string();
     }
@@ -236,10 +248,50 @@ impl ExtensionUi for TuiExtensionUi {
         self.run(move |mode| mode.set_tools_expanded(expanded));
     }
 
-    async fn custom(&self, request: CustomRequest) -> Option<Value> {
+    async fn custom(&self, request: CustomRequest) -> Result<Option<Value>, String> {
         let (sender, receiver) = oneshot::channel();
         self.run(move |mode| mode.show_extension_custom(request, sender));
-        receiver.await.ok()
+        match receiver.await {
+            Ok(result) => result.map(Some),
+            Err(_) => Ok(None),
+        }
+    }
+
+    fn overlay(&self, id: u64, method: &str, arg: &Value) -> Value {
+        let Some(state) = self.mirror.overlay(id) else { return Value::Null };
+        match method {
+            "isHidden" => json!(state.hidden),
+            "isFocused" => json!(state.focused),
+            "getBounds" => state.bounds,
+            "hide" | "setHidden" | "focus" | "unfocus" => {
+                if method == "setHidden" {
+                    let hidden = arg.as_bool().unwrap_or(false);
+                    self.mirror.set_overlay(id, Some(super::extension_overlay::OverlayMirror { hidden, ..state }));
+                }
+                let (method, arg) = (method.to_string(), arg.clone());
+                self.run(move |mode| mode.extension_overlay_action(id, &method, &arg));
+                Value::Null
+            }
+            _ => Value::Null,
+        }
+    }
+
+    async fn autocomplete_base(
+        &self,
+        request: crate::extension_ui::AutocompleteRequest,
+    ) -> Option<pi_tui::autocomplete::AutocompleteSuggestions> {
+        let (sender, receiver) = oneshot::channel();
+        self.run(move |mode| mode.base_autocomplete_suggestions(request, sender));
+        receiver.await.ok().flatten()
+    }
+
+    fn fatal_runtime_error(&self, prefix: &str, message: &str) {
+        let (prefix, error) = (prefix.to_string(), anyhow::anyhow!(message.to_string()));
+        self.run(move |mode| mode.handle_fatal_runtime_error(&prefix, &error));
+    }
+
+    fn add_autocomplete_provider(&self, factory: ComponentFactory) {
+        self.run(move |mode| mode.add_extension_autocomplete(factory));
     }
 
     fn set_footer(&self, factory: Option<ComponentFactory>) {

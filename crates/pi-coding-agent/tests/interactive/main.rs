@@ -2,6 +2,7 @@
 
 mod dialogs;
 mod extensions;
+mod gaps;
 mod harness;
 mod keys;
 mod startup;

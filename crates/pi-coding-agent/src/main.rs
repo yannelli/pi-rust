@@ -6,9 +6,7 @@ use pi_ai::auth::OAuthLookup;
 use pi_ai::env::{process_env_value, set_child_process_env};
 use pi_coding_agent::acp::{AcpModeOptions, run_acp_mode};
 use pi_coding_agent::agent_session::auth::configure_http_from_settings;
-use pi_coding_agent::agent_session::{
-    BUILTIN_EXTENSIONS, CreateServicesOptions, DiagnosticLevel, RuntimeDiagnostic, create_agent_session_services,
-};
+use pi_coding_agent::agent_session::{BUILTIN_EXTENSIONS, DiagnosticLevel, RuntimeDiagnostic};
 use pi_coding_agent::app::{
     AppOptions, create_app_runtime, format_no_models_available_message, package_trust_extensions,
 };
@@ -83,23 +81,25 @@ fn fuzzy_matches(text: &str, query: &str) -> bool {
     })
 }
 
-/// `--list-models [search]`: models with configured auth, as an aligned table. The session
-/// services supply them, so cached catalogs and llama.cpp models appear too.
-async fn list_models(search: &str, cwd: &Path, agent_dir: &Path) {
-    let services = create_agent_session_services(CreateServicesOptions::new(cwd, agent_dir)).await;
-    if let Some(error) = services.model_runtime.load_error() {
+/// `--list-models [search]`: models with configured auth, as an aligned table. The runtime is
+/// created first, so `--api-key`, `-a`/`-na`, and providers extensions register count too.
+async fn list_models(search: &str, args: &Args, cwd: &Path, agent_dir: &Path) -> anyhow::Result<()> {
+    let options = AppOptions { oauth: Some(oauth_lookup()), ..AppOptions::from_args(args, cwd, agent_dir) };
+    let runtime = create_app_runtime(options, SessionManager::in_memory(cwd)).await?;
+    let model_runtime = runtime.session().model_runtime().clone();
+    if let Some(error) = model_runtime.load_error() {
         eprintln!("Warning: errors loading models.json:\n{error}");
     }
-    let mut models = services.model_runtime.available_models();
+    let mut models = model_runtime.available_models();
     if models.is_empty() {
         println!("{}", format_no_models_available_message());
-        return;
+        return Ok(());
     }
     if !search.is_empty() {
         models.retain(|model| fuzzy_matches(&format!("{} {}", model.provider, model.id), search));
         if models.is_empty() {
             println!("No models matching \"{search}\"");
-            return;
+            return Ok(());
         }
     }
     models.sort_by(|a, b| (&a.provider, &a.id).cmp(&(&b.provider, &b.id)));
@@ -121,6 +121,8 @@ async fn list_models(search: &str, cwd: &Path, agent_dir: &Path) {
         let cells: Vec<String> = row.iter().zip(&widths).map(|(cell, width)| format!("{cell:<width$}")).collect();
         println!("{}", cells.join("  "));
     }
+    runtime.dispose().await;
+    Ok(())
 }
 
 /// A startup message for stdout, or stderr when RPC or JSON mode owns stdout.
@@ -370,7 +372,7 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
         return Ok(0);
     }
     if let Some(search) = &args.list_models {
-        list_models(search, &cwd, &agent_dir).await;
+        list_models(search, &args, &cwd, &agent_dir).await?;
         return Ok(0);
     }
     if args.terminal_login {
@@ -538,6 +540,9 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
                 return Ok(0);
             }
             if let Err(error) = run_interactive(Arc::new(runtime), options).await {
+                if error.is::<pi_coding_agent::interactive::FatalErrorReported>() {
+                    return Ok(1);
+                }
                 eprintln!("Error: {error:#}");
                 let crashes = pi_coding_agent::diagnostics::crash_log_path(&agent_dir);
                 if let Some(instructions) = record_fatal_error(&crashes, &crash_context, &error) {

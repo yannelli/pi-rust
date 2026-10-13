@@ -30,7 +30,19 @@ pub struct RuntimeTarget {
     pub session_manager: SessionManager,
     pub reason: SessionStartReason,
     pub previous_session_file: Option<PathBuf>,
+    /// Shows the trust prompt for `cwd` when it needs a decision (upstream
+    /// `projectTrustContextFactory`); without it the project stays untrusted.
+    pub trust_prompt: Option<TrustPromptFn>,
 }
+
+/// Asks the user to pick a project trust option; `None` when dismissed.
+pub type TrustPromptFn = Arc<
+    dyn Fn(
+            crate::resources::trust::ProjectTrustPrompt,
+        ) -> BoxFuture<'static, Option<crate::resources::trust::ProjectTrustOption>>
+        + Send
+        + Sync,
+>;
 
 /// A created session with its diagnostics. Its services are `session.services()`.
 #[derive(Clone)]
@@ -79,10 +91,22 @@ pub struct ForkResult {
 
 fn assert_cwd_exists(session: &SessionManager, fallback: &Path) -> anyhow::Result<()> {
     match missing_session_cwd(session, fallback) {
-        Some(missing) => anyhow::bail!(missing.error_message()),
+        Some(missing) => Err(anyhow::Error::new(missing)),
         None => Ok(()),
     }
 }
+
+/// `/import` of a file that does not exist.
+#[derive(Debug)]
+pub struct SessionImportFileNotFound(pub PathBuf);
+
+impl std::fmt::Display for SessionImportFileNotFound {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "File not found: {}", self.0.display())
+    }
+}
+
+impl std::error::Error for SessionImportFileNotFound {}
 
 pub struct AgentSessionRuntime {
     current: Mutex<RuntimeParts>,
@@ -107,6 +131,7 @@ impl AgentSessionRuntime {
             session_manager,
             reason: SessionStartReason::Startup,
             previous_session_file: None,
+            trust_prompt: None,
         };
         let parts = factory(target).await?;
         Ok(Self {
@@ -179,7 +204,7 @@ impl AgentSessionRuntime {
         reason: SessionStartReason,
         previous_session_file: Option<PathBuf>,
     ) -> anyhow::Result<()> {
-        self.replace_with(session_manager, reason, previous_session_file, None).await
+        self.replace_with(session_manager, reason, previous_session_file, None, None).await
     }
 
     async fn replace_with(
@@ -188,6 +213,7 @@ impl AgentSessionRuntime {
         reason: SessionStartReason,
         previous_session_file: Option<PathBuf>,
         setup: Option<AsyncSetupFn>,
+        trust_prompt: Option<TrustPromptFn>,
     ) -> anyhow::Result<()> {
         let reason_name = match reason {
             SessionStartReason::Startup => "startup",
@@ -204,6 +230,7 @@ impl AgentSessionRuntime {
             session_manager,
             reason,
             previous_session_file: previous_session_file.clone(),
+            trust_prompt,
         };
         let parts = (self.factory)(target).await?;
         let session = parts.session.clone();
@@ -230,6 +257,17 @@ impl AgentSessionRuntime {
 
     /// Open the session stored in `path` (`/resume`).
     pub async fn switch_session(&self, path: &Path, cwd_override: Option<&Path>) -> anyhow::Result<SwitchResult> {
+        self.switch_session_with(path, cwd_override, None).await
+    }
+
+    /// [`Self::switch_session`] that asks `trust_prompt` when the session's folder needs a
+    /// trust decision.
+    pub async fn switch_session_with(
+        &self,
+        path: &Path,
+        cwd_override: Option<&Path>,
+        trust_prompt: Option<TrustPromptFn>,
+    ) -> anyhow::Result<SwitchResult> {
         let event = serde_json::json!({
             "type": "session_before_switch",
             "reason": "resume",
@@ -241,7 +279,7 @@ impl AgentSessionRuntime {
         let previous = self.session().session_file();
         let session_manager = SessionManager::open_with(path, None, cwd_override)?;
         assert_cwd_exists(&session_manager, &self.cwd())?;
-        self.replace(session_manager, SessionStartReason::Resume, previous).await?;
+        self.replace_with(session_manager, SessionStartReason::Resume, previous, None, trust_prompt).await?;
         Ok(SwitchResult::default())
     }
 
@@ -278,7 +316,7 @@ impl AgentSessionRuntime {
         let options = NewSessionOptions { id: None, parent_session };
         let cwd = self.cwd();
         let session_manager = SessionManager::create_with(&cwd, persisted.then_some(dir.as_path()), options)?;
-        self.replace_with(session_manager, SessionStartReason::New, previous, setup).await?;
+        self.replace_with(session_manager, SessionStartReason::New, previous, setup, None).await?;
         Ok(SwitchResult::default())
     }
 
@@ -354,7 +392,7 @@ impl AgentSessionRuntime {
     pub async fn import_from_jsonl(&self, input: &Path, cwd_override: Option<&Path>) -> anyhow::Result<SwitchResult> {
         let resolved = resolve_path(&crate::config::expand_tilde(&input.to_string_lossy()));
         if !resolved.exists() {
-            anyhow::bail!("File not found: {}", resolved.display());
+            return Err(SessionImportFileNotFound(resolved).into());
         }
         let current = self.session();
         let previous = current.session_file();

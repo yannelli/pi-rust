@@ -6,6 +6,8 @@ use std::path::Path;
 use agent_client_protocol_schema::{AvailableCommand, AvailableCommandInput, UnstructuredCommandInput};
 use serde_json::Value;
 
+use crate::resources::brand::project_config_dir;
+
 /// A prompt file under `prompts/` (upstream `FileSlashCommand`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FileSlashCommand {
@@ -72,7 +74,7 @@ fn load_dir(dir: &Path, user: bool, subdir: &str, out: &mut Vec<FileSlashCommand
 pub fn load_slash_commands(cwd: &Path, agent_dir: &Path) -> Vec<FileSlashCommand> {
     let mut commands = Vec::new();
     load_dir(&agent_dir.join("prompts"), true, "", &mut commands);
-    load_dir(&cwd.join(".pi").join("prompts"), false, "", &mut commands);
+    load_dir(&project_config_dir(cwd).join("prompts"), false, "", &mut commands);
     commands
 }
 
