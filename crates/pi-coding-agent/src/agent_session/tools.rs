@@ -70,8 +70,10 @@ pub(crate) struct ActiveSelection {
 pub(crate) struct ToolState {
     pub registry: ToolRegistry,
     builtin: Vec<SharedTool>,
-    /// Tools of built-in extensions, extensions, and the SDK, in registration order.
+    /// Tools of built-in extensions and extensions, in registration order.
     registered: Vec<(SharedTool, ToolSource)>,
+    /// SDK tools; they win over other tools of the same name.
+    custom: Vec<SharedTool>,
     /// `--tools` names or patterns; `None` allows every tool.
     allowed: Option<Vec<String>>,
     /// Whether the allowlist filters MCP tools: it is empty or names an `mcp__` tool.
@@ -106,11 +108,11 @@ impl ToolState {
             .allowed
             .as_ref()
             .is_some_and(|allowed| allowed.is_empty() || allowed.iter().any(|entry| entry.starts_with("mcp__")));
-        let registered = custom.into_iter().map(|tool| (tool.clone(), ToolSource::sdk(tool.name()))).collect();
         Self {
             registry: ToolRegistry::default(),
             builtin,
-            registered,
+            registered: Vec::new(),
+            custom,
             allowed: selection.allowed,
             allowlist_filters_mcp,
             excluded: selection.excluded,
@@ -134,11 +136,15 @@ impl ToolState {
         }
     }
 
-    /// The allowed tools in registration order: built-in tools, then registered ones.
+    /// Registered and SDK tools, which registration activates as a group at startup.
+    fn extension_tools(&self) -> impl Iterator<Item = &SharedTool> {
+        self.registered.iter().map(|(tool, _)| tool).chain(&self.custom)
+    }
+
+    /// The allowed tools in registration order: built-in, registered, then SDK tools.
     fn allowed_tools(&self) -> Vec<SharedTool> {
-        let builtin = self.builtin.iter().filter(|tool| self.is_allowed(tool.name())).cloned();
-        let registered = self.registered.iter().filter(|(tool, _)| self.is_allowed(tool.name()));
-        builtin.chain(registered.map(|(tool, _)| tool.clone())).collect()
+        let all = self.builtin.iter().chain(self.extension_tools());
+        all.filter(|tool| self.is_allowed(tool.name())).cloned().collect()
     }
 
     pub fn set_builtin(&mut self, tools: Vec<SharedTool>) {
@@ -173,7 +179,10 @@ impl ToolState {
     }
 
     pub fn source_of(&self, name: &str) -> ToolSource {
-        match self.registered.iter().rev().find(|(tool, _)| tool.name() == name) {
+        if self.custom.iter().any(|tool| tool.name() == name) {
+            return ToolSource::sdk(name);
+        }
+        match self.registered.iter().find(|(tool, _)| tool.name() == name) {
             Some((_, source)) => source.clone(),
             None => ToolSource::builtin(name),
         }
@@ -213,8 +222,8 @@ impl ToolState {
             let named = tools.iter().filter(|tool| matches_any_tool(allowed, tool.name()));
             next.extend(named.filter(|tool| tool.exposure().is_declarable()).map(|tool| tool.name().to_string()));
         } else if selection.include_all_registered {
-            let registered = self.registered.iter().filter(|(tool, _)| self.is_allowed(tool.name()));
-            next.extend(registered.filter(|(tool, _)| activates(tool)).map(|(tool, _)| tool.name().to_string()));
+            let registered = self.extension_tools().filter(|tool| self.is_allowed(tool.name()));
+            next.extend(registered.filter(|tool| activates(tool)).map(|tool| tool.name().to_string()));
         } else if !explicit {
             let newly = tools.iter().filter(|tool| !activated_before.contains(tool.name()) && activates(tool));
             next.extend(newly.map(|tool| tool.name().to_string()));
