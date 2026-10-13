@@ -44,7 +44,8 @@ async fn records_bash_results_and_sends_them_to_the_model() {
 #[tokio::test]
 async fn defers_results_while_streaming_and_cancels_commands() {
     let h = harness(Options {
-        responses: vec![FauxResponse::text("x".repeat(200)), FauxResponse::text("next")],
+        // Long enough to still be streaming after a slow shell start (Git Bash on Windows).
+        responses: vec![FauxResponse::text("x".repeat(2000)), FauxResponse::text("next")],
         delay: Some(Duration::from_millis(2)),
         ..Options::default()
     })

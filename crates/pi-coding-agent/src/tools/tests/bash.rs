@@ -56,9 +56,12 @@ async fn cancellation_kills_process_group() {
     let dir = tempfile::tempdir().unwrap();
     let tool = create_tool("bash", dir.path()).unwrap();
     let cancel = CancellationToken::new();
-    let trigger = cancel.clone();
+    let (trigger, pid_file) = (cancel.clone(), dir.path().join("child.pid"));
     tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(400)).await;
+        // Cancel once the background child exists, however slowly the shell starts.
+        while !std::fs::read_to_string(&pid_file).is_ok_and(|pid| pid.ends_with('\n')) {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
         trigger.cancel();
     });
     let args = json!({ "command": "sleep 30 & echo $! > child.pid; wait" });
