@@ -44,6 +44,7 @@ pub(crate) struct Shared {
     pub output: Arc<dyn OutputSink>,
     /// Files opened through `fs.open`, by descriptor.
     pub files: crate::node::fs::FileTable,
+    pub http: crate::node::fetch::Clients,
 }
 
 pub(crate) struct PendingPromise {

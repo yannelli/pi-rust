@@ -5,6 +5,7 @@ mod child;
 mod core;
 mod crypto;
 pub(crate) mod encoding;
+pub(crate) mod fetch;
 pub(crate) mod fs;
 mod fs_ops;
 mod fs_output;
@@ -27,6 +28,7 @@ pub(crate) fn install(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
     native.set("fs", fs::natives(ctx)?)?;
     native.set("os", os::natives(ctx)?)?;
     native.set("child", child::natives(ctx)?)?;
+    native.set("fetch", fetch::natives(ctx)?)?;
     core::install(ctx, &native)?;
     let config = core::config(ctx)?;
     let mut options = EvalOptions::default();

@@ -48,6 +48,11 @@ const SOURCES: &[(&str, &str)] = &[
     ("readline", include_str!("../js/readline.js")),
     ("readline/promises", include_str!("../js/readline_promises.js")),
     ("child_process", include_str!("../js/child_process.js")),
+    ("internal/streams_web", include_str!("../js/streams_web.js")),
+    ("internal/streams_web_writable", include_str!("../js/streams_web_writable.js")),
+    ("stream/web", include_str!("../js/stream_web.js")),
+    ("internal/fetch_body", include_str!("../js/fetch_body.js")),
+    ("internal/fetch", include_str!("../js/fetch.js")),
 ];
 
 /// Every module name `require` accepts, for `module.builtinModules`.

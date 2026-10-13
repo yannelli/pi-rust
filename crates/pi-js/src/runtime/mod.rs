@@ -172,6 +172,7 @@ impl JsRuntime {
             transpiler: TranspileCache::new(options.transpile.clone(), options.cache_dir.clone()),
             resolver: ModuleResolver::new(),
             files: Default::default(),
+            http: Default::default(),
             interrupt: Arc::new(AtomicBool::new(false)),
             alive: AtomicBool::new(false),
             config: RuntimeConfig {

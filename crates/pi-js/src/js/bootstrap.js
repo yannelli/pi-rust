@@ -258,7 +258,10 @@
     "internal/web": ["EventTarget", "Event", "CustomEvent", "AbortController", "AbortSignal", "DOMException",
       "TextEncoder", "TextDecoder", "structuredClone"],
     "internal/fetch": ["fetch", "Headers", "Request", "Response", "FormData"],
-    "internal/streams_web": ["ReadableStream", "WritableStream", "TransformStream"],
+    "stream/web": ["ReadableStream", "ReadableStreamDefaultReader", "ReadableStreamDefaultController", "WritableStream",
+      "WritableStreamDefaultWriter", "WritableStreamDefaultController", "TransformStream", "TransformStreamDefaultController",
+      "ByteLengthQueuingStrategy", "CountQueuingStrategy", "TextEncoderStream", "TextDecoderStream", "CompressionStream",
+      "DecompressionStream"],
     perf_hooks: ["performance", "PerformanceObserver"],
   };
   for (const [module, names] of Object.entries(lazyGlobals)) {
