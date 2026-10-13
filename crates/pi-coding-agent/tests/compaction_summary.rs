@@ -10,8 +10,7 @@ use pi_ai::providers::faux::{FauxProvider, FauxResponse};
 use pi_ai::retry::{RetryEvent, RetryPolicy};
 use pi_ai::{ContentBlock, Message, Model, StopReason, ToolCall};
 use pi_coding_agent::compaction::{
-    CompactionSettings, SUMMARIZATION_SYSTEM_PROMPT, SummarizationOptions, compact,
-    compact_session, prepare_compaction,
+    CompactionSettings, SUMMARIZATION_SYSTEM_PROMPT, SummarizationOptions, compact, compact_session, prepare_compaction,
 };
 use pi_coding_agent::session::{EntryData, SessionManager};
 use serde_json::json;

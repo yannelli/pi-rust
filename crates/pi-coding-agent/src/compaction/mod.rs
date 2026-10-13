@@ -28,8 +28,8 @@ pub use self::recovery::{
     omit_recovery_attempt,
 };
 pub use self::summarize::{
-    CompactionResult, RetryEventFn, SummarizationOptions, compact, compact_session, complete_summarization, generate_summary,
-    generate_summary_with_usage, summarization_failure, summarize_compaction,
+    CompactionResult, RetryEventFn, SummarizationOptions, compact, compact_session, complete_summarization,
+    generate_summary, generate_summary_with_usage, summarization_failure, summarize_compaction,
 };
 pub use self::utils::{
     FileOperations, SUMMARIZATION_SYSTEM_PROMPT, compute_file_lists, extract_file_ops_from_message,

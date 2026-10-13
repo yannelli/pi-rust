@@ -104,7 +104,8 @@ pub async fn complete_summarization(
     options.session_id = options.session_id.or_else(|| Some(crate::session::uuid_v7()));
     let cancel = options.cancel.clone();
     let produce = || {
-        let (model, context, options, stream_fn) = (model.clone(), context.clone(), options.clone(), stream_fn.cloned());
+        let (model, context, options, stream_fn) =
+            (model.clone(), context.clone(), options.clone(), stream_fn.cloned());
         async move {
             match stream_fn {
                 Some(stream_fn) => stream_fn(&model, &context, options).result(&model).await,

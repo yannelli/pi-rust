@@ -5,16 +5,21 @@ use std::sync::Arc;
 use pi_ai::ModelRegistry;
 use pi_ai::auth::{AuthResolver, FileCredentialStore, OAuthLookup};
 use pi_ai::env::{process_env_value, set_child_process_env};
-use pi_coding_agent::app::{
-    CodingSession, SessionOptions, StartupError, configured_providers, format_no_models_available_message,
-};
+use pi_coding_agent::agent_session::auth::configure_http_from_settings;
+use pi_coding_agent::agent_session::{DiagnosticLevel, RuntimeDiagnostic};
+use pi_coding_agent::app::{AppOptions, configured_providers, create_app_runtime, format_no_models_available_message};
 use pi_coding_agent::auth_cli::run_auth_command;
-use pi_coding_agent::cli::{Args, OutputMode, help_text, parse_args, unknown_flags_error};
+use pi_coding_agent::cli::{Args, OutputMode, help_text, normalize_session_name, parse_args, unknown_flags_error};
 use pi_coding_agent::config::{ENV_SESSION_DIR, agent_dir, auth_path, env_flag, expand_tilde, models_path};
+use pi_coding_agent::export::{ExportTheme, export_from_file};
 use pi_coding_agent::files::process_file_args;
 use pi_coding_agent::interactive::run_interactive;
 use pi_coding_agent::print_mode::run_print_mode;
-use pi_coding_agent::session::{list_sessions, session_dir};
+use pi_coding_agent::session::branching::missing_session_cwd;
+use pi_coding_agent::session::ids::assert_valid_session_id;
+use pi_coding_agent::session::{
+    NewSessionOptions, ResolvedSession, SessionManager, list_sessions, listing::resolve_session_arg, session_dir,
+};
 use pi_coding_agent::settings::{SettingsManager, SettingsOptions};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -114,19 +119,177 @@ fn pick_session(dir: &Path) -> anyhow::Result<Option<PathBuf>> {
         let first: String = info.first_message.lines().next().unwrap_or_default().chars().take(70).collect();
         println!("{:>3}. {} ({} messages)", index + 1, first, info.message_count);
     }
-    print!("Resume which session? ");
-    std::io::Write::flush(&mut std::io::stdout())?;
-    let mut answer = String::new();
-    std::io::stdin().read_line(&mut answer)?;
+    let answer = ask("Resume which session? ")?;
     Ok(answer
-        .trim()
         .parse::<usize>()
         .ok()
         .and_then(|choice| sessions.get(choice.wrapping_sub(1)))
         .map(|info| info.path.clone()))
 }
 
+/// Print `question` and read one trimmed line from the terminal.
+fn ask(question: &str) -> anyhow::Result<String> {
+    print!("{question}");
+    std::io::Write::flush(&mut std::io::stdout())?;
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer)?;
+    Ok(answer.trim().to_string())
+}
+
+/// A startup failure already reported to the user, with the exit code.
+#[derive(Debug)]
+struct Exit(i32);
+
+impl std::fmt::Display for Exit {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "exit {}", self.0)
+    }
+}
+
+impl std::error::Error for Exit {}
+
+fn fail(message: impl std::fmt::Display) -> Exit {
+    eprintln!("Error: {message}");
+    Exit(1)
+}
+
+/// Upstream `validateForkFlags` and `validateSessionIdFlags`.
+fn validate_session_flags(args: &Args) -> Result<(), Exit> {
+    fn conflicts(flags: &[(bool, &'static str)]) -> Vec<&'static str> {
+        flags.iter().filter(|(set, _)| *set).map(|(_, flag)| *flag).collect()
+    }
+    if args.fork.is_some() {
+        let found = conflicts(&[
+            (args.session.is_some(), "--session"),
+            (args.continue_session, "--continue"),
+            (args.resume, "--resume"),
+            (args.no_session, "--no-session"),
+        ]);
+        if !found.is_empty() {
+            return Err(fail(format!("--fork cannot be combined with {}", found.join(", "))));
+        }
+    }
+    if let Some(id) = &args.session_id {
+        let found = conflicts(&[
+            (args.session.is_some(), "--session"),
+            (args.continue_session, "--continue"),
+            (args.resume, "--resume"),
+        ]);
+        if !found.is_empty() {
+            return Err(fail(format!("--session-id cannot be combined with {}", found.join(", "))));
+        }
+        assert_valid_session_id(id).map_err(fail)?;
+    }
+    Ok(())
+}
+
+struct SessionPlace<'a> {
+    cwd: &'a Path,
+    agent_dir: &'a Path,
+    /// `--session-dir`, `PI_CODING_AGENT_SESSION_DIR`, or the `sessionDir` setting.
+    dir_override: Option<&'a Path>,
+    interactive: bool,
+}
+
+impl SessionPlace<'_> {
+    fn dir(&self) -> PathBuf {
+        self.dir_override.map(Path::to_path_buf).unwrap_or_else(|| session_dir(self.agent_dir, self.cwd))
+    }
+
+    fn fork(&self, source: &Path, id: Option<String>) -> Result<SessionManager, Exit> {
+        let options = NewSessionOptions { id, parent_session: None };
+        SessionManager::fork_from(source, self.cwd, self.dir_override, self.agent_dir, options).map_err(fail)
+    }
+}
+
+/// Upstream `createSessionManager`: the session the run starts with.
+fn create_session_manager(args: &Args, place: &SessionPlace<'_>) -> Result<SessionManager, Exit> {
+    let id = args.session_id.clone();
+    if args.no_session {
+        return SessionManager::create_with(place.cwd, None, NewSessionOptions { id, parent_session: None })
+            .map_err(fail);
+    }
+    if let Some(fork) = &args.fork {
+        if let Some(id) = &id
+            && SessionManager::find_by_id(place.cwd, id, place.dir_override, place.agent_dir).is_some()
+        {
+            return Err(fail(format!("Session already exists with id '{id}'")));
+        }
+        return match resolve_session_arg(fork, place.cwd, place.dir_override, place.agent_dir) {
+            ResolvedSession::Path(path) | ResolvedSession::Local(path) | ResolvedSession::Global { path, .. } => {
+                place.fork(&path, id)
+            }
+            ResolvedSession::NotFound(arg) => Err(fail(format!("No session found matching '{arg}'"))),
+        };
+    }
+    if let Some(session) = &args.session {
+        return match resolve_session_arg(session, place.cwd, place.dir_override, place.agent_dir) {
+            ResolvedSession::Path(path) | ResolvedSession::Local(path) => {
+                SessionManager::open_with(&path, place.dir_override, None).map_err(fail)
+            }
+            ResolvedSession::Global { path, cwd } => {
+                println!("Session found in different project: {cwd}");
+                let answer = if place.interactive {
+                    ask("Fork this session into current directory? [y/N] ")
+                } else {
+                    Ok(String::new())
+                };
+                if !answer.is_ok_and(|answer| answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes")) {
+                    println!("Aborted.");
+                    return Err(Exit(0));
+                }
+                place.fork(&path, None)
+            }
+            ResolvedSession::NotFound(arg) => Err(fail(format!("No session found matching '{arg}'"))),
+        };
+    }
+    let dir = place.dir();
+    if args.resume && place.interactive {
+        if let Some(path) = pick_session(&dir).map_err(fail)? {
+            return SessionManager::open_with(&path, place.dir_override, None).map_err(fail);
+        }
+    }
+    if args.continue_session {
+        return SessionManager::continue_recent(place.cwd, &dir, place.agent_dir).map_err(fail);
+    }
+    if let Some(id) = &id {
+        if let Some(path) = SessionManager::find_by_id(place.cwd, id, place.dir_override, place.agent_dir) {
+            return SessionManager::open_with(&path, place.dir_override, None).map_err(fail);
+        }
+        eprintln!("Warning: No project session found with id '{id}'; creating a new session with that id.");
+    }
+    SessionManager::create_with(place.cwd, Some(&dir), NewSessionOptions { id, parent_session: None }).map_err(fail)
+}
+
+/// A stored session whose cwd is gone continues in the current directory after confirmation.
+fn check_session_cwd(session: SessionManager, place: &SessionPlace<'_>) -> Result<SessionManager, Exit> {
+    let Some(missing) = missing_session_cwd(&session, place.cwd) else { return Ok(session) };
+    if !place.interactive {
+        return Err(fail(missing.error_message()));
+    }
+    let answer = ask(&format!("{}\nContinue in the current directory? [y/N] ", missing.prompt())).map_err(fail)?;
+    if !(answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes")) {
+        return Err(Exit(0));
+    }
+    let file = missing.session_file.unwrap_or_default();
+    SessionManager::open_with(&file, place.dir_override, Some(&missing.fallback_cwd)).map_err(fail)
+}
+
+fn report(diagnostics: &[RuntimeDiagnostic]) {
+    for diagnostic in diagnostics {
+        match diagnostic.level {
+            DiagnosticLevel::Error => eprintln!("Error: {}", diagnostic.message),
+            DiagnosticLevel::Warning => eprintln!("Warning: {}", diagnostic.message),
+            DiagnosticLevel::Info => eprintln!("{}", diagnostic.message),
+        }
+    }
+}
+
 async fn run(raw: Vec<String>) -> anyhow::Result<i32> {
+    start(raw).await.or_else(|error| error.downcast::<Exit>().map(|exit| exit.0))
+}
+
+async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
     set_child_process_env("PI_CODING_AGENT", "true");
     set_child_process_env("AI_AGENT", "pi");
     if raw.iter().any(|arg| arg == "--offline") || env_flag("PI_OFFLINE") {
@@ -153,6 +316,24 @@ async fn run(raw: Vec<String>) -> anyhow::Result<i32> {
         println!("{}", env!("CARGO_PKG_VERSION"));
         return Ok(0);
     }
+    let cwd = std::env::current_dir()?;
+    let startup_settings = SettingsManager::create(
+        &cwd,
+        &agent_dir,
+        SettingsOptions { project_trusted: args.project_trust_override.unwrap_or(true) },
+    );
+    configure_http_from_settings(&startup_settings);
+    if let Some(input) = &args.export {
+        let theme =
+            startup_settings.theme().and_then(|name| ExportTheme::builtin(&name)).unwrap_or_else(ExportTheme::dark);
+        return match export_from_file(input, args.messages.first().map(String::as_str), &theme) {
+            Ok(path) => {
+                println!("Exported to: {}", path.display());
+                Ok(0)
+            }
+            Err(error) => Err(fail(format!("{error:#}")).into()),
+        };
+    }
     if args.help {
         println!("{}", help_text());
         return Ok(0);
@@ -170,12 +351,9 @@ async fn run(raw: Vec<String>) -> anyhow::Result<i32> {
         eprintln!("Error: RPC mode is not supported yet");
         return Ok(1);
     }
-    let cwd = std::env::current_dir()?;
-    let trusted = args.project_trust_override.unwrap_or(true);
-    let settings = Arc::new(SettingsManager::create(&cwd, &agent_dir, SettingsOptions { project_trusted: trusted }));
-    for error in settings.drain_errors() {
-        eprintln!("Warning: {}", error.diagnostic());
-    }
+    validate_session_flags(&args)?;
+    let startup_diagnostics: Vec<RuntimeDiagnostic> =
+        startup_settings.drain_errors().iter().map(|error| RuntimeDiagnostic::warning(error.diagnostic())).collect();
 
     let mut stdin_content = None;
     if !std::io::stdin().is_terminal() {
@@ -196,71 +374,58 @@ async fn run(raw: Vec<String>) -> anyhow::Result<i32> {
     }
     let initial_message = (!parts.is_empty()).then(|| parts.concat());
 
-    let persist = !args.no_session;
     let env_session_dir = process_env_value(ENV_SESSION_DIR).filter(|dir| !dir.is_empty());
-    let sessions_dir = args
+    let dir_override = args
         .session_dir
         .as_deref()
         .or(env_session_dir.as_deref())
         .map(expand_tilde)
-        .or_else(|| settings.session_dir())
-        .unwrap_or_else(|| session_dir(&agent_dir, &cwd));
-    let mut session_file = args.session.as_deref().map(expand_tilde);
-    if args.resume && session_file.is_none() && persist && mode == AppMode::Interactive {
-        session_file = pick_session(&sessions_dir)?;
+        .or_else(|| startup_settings.session_dir());
+    let interactive = mode == AppMode::Interactive && std::io::stdin().is_terminal();
+    let place = SessionPlace { cwd: &cwd, agent_dir: &agent_dir, dir_override: dir_override.as_deref(), interactive };
+    let mut session_manager = check_session_cwd(create_session_manager(&args, &place)?, &place)?;
+    if let Some(name) = &args.name {
+        let Some(name) = normalize_session_name(name) else {
+            return Err(fail("--name requires a non-empty value").into());
+        };
+        session_manager.append_session_info(&name)?;
     }
-    let created = CodingSession::new(SessionOptions {
-        cwd,
-        agent_dir,
-        provider: args.provider.clone(),
-        model: args.model.clone(),
-        api_key: args.api_key.clone(),
-        thinking: args.thinking,
-        models: args.models.clone(),
-        system_prompt: args.system_prompt.clone(),
-        append_system_prompt: args.append_system_prompt.clone(),
-        tools: args.tools.clone(),
-        exclude_tools: args.exclude_tools.clone(),
-        no_tools: args.no_tools,
-        no_builtin_tools: args.no_builtin_tools,
-        no_context_files: args.no_context_files,
-        session_file,
-        continue_recent: args.continue_session,
-        persist,
-        session_dir: Some(sessions_dir),
-        settings: Some(settings),
-        oauth: Some(oauth_lookup()),
-        ..SessionOptions::default()
-    })
-    .await;
-    let session = match created {
-        Ok(session) => Arc::new(session),
-        Err(error) => {
-            if let Some(startup) = error.downcast_ref::<StartupError>() {
-                startup.warnings.iter().for_each(|warning| eprintln!("Warning: {warning}"));
-                startup.errors.iter().for_each(|error| eprintln!("Error: {error}"));
-                return Ok(1);
-            }
-            return Err(error);
-        }
-    };
-    for warning in &session.warnings {
-        eprintln!("Warning: {warning}");
+
+    let options = AppOptions { oauth: Some(oauth_lookup()), ..AppOptions::from_args(&args, &cwd, &agent_dir) };
+    let runtime = create_app_runtime(options, session_manager).await?;
+    let session = runtime.session();
+    configure_http_from_settings(session.settings());
+    let runtime_diagnostics: Vec<RuntimeDiagnostic> =
+        runtime.diagnostics().into_iter().filter(|diagnostic| !startup_diagnostics.contains(diagnostic)).collect();
+    let has_errors = runtime_diagnostics.iter().any(|diagnostic| diagnostic.level == DiagnosticLevel::Error);
+    report(&startup_diagnostics);
+    if mode != AppMode::Interactive || has_errors {
+        report(&runtime_diagnostics);
+    }
+    if has_errors {
+        runtime.dispose().await;
+        return Ok(1);
+    }
+    if mode != AppMode::Interactive && session.model().is_none() {
+        eprintln!("Error: {}", format_no_models_available_message());
+        runtime.dispose().await;
+        return Ok(1);
     }
 
     match mode {
         AppMode::Print | AppMode::Json => {
             let output = if mode == AppMode::Json { OutputMode::Json } else { OutputMode::Text };
-            Ok(run_print_mode(session, output, initial_message, files.images, args.messages).await)
+            Ok(run_print_mode(&runtime, output, initial_message, files.images, args.messages).await)
         }
         _ => {
-            if let Some(message) = &session.model_fallback_message {
+            report(&runtime_diagnostics);
+            if let Some(message) = runtime.model_fallback_message() {
                 eprintln!("Warning: {message}");
             }
             for extra in args.messages {
-                session.agent.follow_up(pi_ai::Message::user(extra));
+                session.follow_up(&extra, Vec::new());
             }
-            run_interactive(session, initial_message.map(|text| (text, files.images))).await?;
+            run_interactive(runtime, initial_message.map(|text| (text, files.images))).await?;
             Ok(0)
         }
     }
