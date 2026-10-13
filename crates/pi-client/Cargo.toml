@@ -1,0 +1,24 @@
+[package]
+name = "pi-client"
+description = "Client for remote pi sessions over framed CBOR bytes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+futures.workspace = true
+pi-chord = { path = "../pi-chord" }
+pi-protocol = { path = "../pi-protocol" }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "sync", "macros", "time", "net", "io-util", "fs"] }
+
+[dev-dependencies]
+pi-server = { path = "../pi-server" }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["full", "test-util"] }
+
+[lints]
+workspace = true
