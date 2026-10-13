@@ -22,13 +22,20 @@ impl AgentSession {
             let mut state = lock(&self.state);
             state.abort_requested = false;
             state.run_active = true;
+            // Compaction before the prompt may have scheduled a retry; the new prompt replaces it.
+            state.failed_response = None;
         }
+        self.record_selection();
         self.notify_idle();
         let result = self.drive_run(messages).await;
         if self.abort_requested() {
             self.finish_cancelled_retry();
         }
-        lock(&self.state).run_prompt = None;
+        {
+            let mut state = lock(&self.state);
+            state.run_prompt = None;
+            state.failed_response = None;
+        }
         self.flush_pending_bash_messages();
         self.flush_pending_custom_messages();
         self.emit_agent_settled();
@@ -59,6 +66,7 @@ impl AgentSession {
             state.run_active = false;
             state.abort_requested
         };
+        self.cache_warmer().on_agent_settled();
         self.emit(&AgentSessionEvent::AgentSettled { aborted });
         self.notify_idle();
     }
@@ -78,6 +86,7 @@ impl AgentSession {
             if self.abort_requested() {
                 self.finish_cancelled_retry();
             }
+            lock(&self.state).failed_response = Some(message);
             return Ok(!self.abort_requested());
         }
         if self.abort_requested() {

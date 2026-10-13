@@ -140,7 +140,9 @@ impl AgentSession {
         options: &NavigateTreeOptions,
         cancel: CancellationToken,
     ) -> anyhow::Result<Option<Result<PendingSummary, NavigateTreeResult>>> {
-        let summarization = self.summarization_options(model, cancel, SummarizationSource::BranchSummary).await?;
+        let (model, summarization) =
+            self.summarization_options(model, cancel, SummarizationSource::BranchSummary).await?;
+        let model = &model;
         let summary_options = BranchSummaryOptions {
             summarization,
             custom_instructions: options.custom_instructions.clone(),
@@ -248,7 +250,7 @@ impl AgentSession {
 
     /// Current context use of the active branch. `tokens` is unknown right after compaction.
     pub fn context_usage(&self) -> Option<ContextUsage> {
-        let model = self.model()?;
+        let model = self.limits_model()?;
         context_usage(&self.session_manager(), model.context_window)
     }
 

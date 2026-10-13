@@ -26,7 +26,11 @@ fn bind_json_output(runtime: &AgentSessionRuntime) {
         if let Some((previous, id)) = current.take() {
             previous.unsubscribe(id);
         }
-        let id = session.subscribe(|event| write_line(&event.to_json().to_string()));
+        let id = session.subscribe(|event| {
+            if event.is_upstream_event() {
+                write_line(&event.to_json().to_string());
+            }
+        });
         *current = Some((session.clone(), id));
     };
     bind(&runtime.session());

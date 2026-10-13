@@ -5,7 +5,9 @@ use pi_agent::AgentEvent;
 use pi_ai::{AssistantMessageEvent, ContentBlock, Message, ThinkingLevel};
 use serde_json::{Map, Value, json};
 
+use crate::cache_stats::CacheMiss;
 use crate::compaction::CompactionResult;
+use crate::virtual_models::{ModelRouteReason, RoutedModel};
 
 /// Why a compaction ran.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -96,6 +98,17 @@ pub enum AgentSessionEvent<'a> {
         id: Option<String>,
         delta: String,
     },
+    /// A request of a virtual model selection was routed (pi-rust; the footer shows the route).
+    ModelRouted {
+        route: &'a RoutedModel,
+        reason: ModelRouteReason,
+    },
+    /// A completed response re-billed cached prompt tokens (pi-rust; `showCacheMissNotices`).
+    /// Sent right after its `message_end`, with the transcript notice.
+    CacheMiss {
+        miss: CacheMiss,
+        notice: String,
+    },
 }
 
 impl AgentSessionEvent<'_> {
@@ -117,7 +130,14 @@ impl AgentSessionEvent<'_> {
             Self::SummarizationRetryAttemptStart { .. } => "summarization_retry_attempt_start",
             Self::SummarizationRetryFinished => "summarization_retry_finished",
             Self::BashExecutionUpdate { .. } => "bash_execution_update",
+            Self::ModelRouted { .. } => "model_routed",
+            Self::CacheMiss { .. } => "cache_miss",
         }
+    }
+
+    /// Whether upstream pi sends this event too; JSON mode prints only those.
+    pub fn is_upstream_event(&self) -> bool {
+        !matches!(self, Self::ModelRouted { .. } | Self::CacheMiss { .. })
     }
 
     /// The JSON record for `--mode json` and RPC. `message_update` drops the cumulative
@@ -199,6 +219,21 @@ impl AgentSessionEvent<'_> {
                 Some(id) => json!({"type": "bash_execution_update", "id": id, "delta": delta}),
                 None => json!({"type": "bash_execution_update", "delta": delta}),
             },
+            Self::ModelRouted { route, reason } => {
+                let mut event = json!({"type": "model_routed", "reason": reason.as_str(), "model": route.model});
+                if let Some(level) = route.thinking_level {
+                    event["thinkingLevel"] = json!(level.as_str());
+                }
+                event
+            }
+            Self::CacheMiss { miss, notice } => json!({
+                "type": "cache_miss",
+                "missedTokens": miss.missed_tokens,
+                "missedCost": miss.missed_cost,
+                "idleMs": miss.idle_ms,
+                "modelChanged": miss.model_changed,
+                "notice": notice,
+            }),
         }
     }
 }
