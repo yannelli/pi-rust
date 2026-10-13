@@ -2,6 +2,8 @@
 
 use std::sync::LazyLock;
 
+use icu_segmenter::WordSegmenter;
+use icu_segmenter::options::WordBreakInvariantOptions;
 use regex::Regex;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -56,17 +58,68 @@ fn is_hangul_syllable(c: char) -> bool {
     ('\u{AC00}'..='\u{D7A3}').contains(&c)
 }
 
-fn push_uax29<'a>(piece: &'a str, offset: usize, out: &mut Vec<WordSegment<'a>>) {
-    out.extend(piece.split_word_bound_indices().map(|(index, segment)| WordSegment {
-        segment,
-        index: offset + index,
-        is_word_like: is_word_like(segment),
+/// A run of characters that ICU segments with a dictionary (Han, kana, Thai, Lao, Khmer, Myanmar),
+/// with the marks and joiners that follow them.
+static DICTIONARY_RUN: LazyLock<Regex> = LazyLock::new(|| {
+    let letter = r"\p{Han}\p{Hiragana}\p{Katakana}\p{Thai}\p{Lao}\p{Khmer}\p{Myanmar}\x{30FC}";
+    Regex::new(&format!(r"[{letter}][{letter}\p{{M}}\x{{200C}}\x{{200D}}]*"))
+        .unwrap_or_else(|err| panic!("dictionary run regex: {err}"))
+});
+
+fn push_segment<'a>(segment: &'a str, index: usize, out: &mut Vec<WordSegment<'a>>) {
+    out.push(WordSegment { segment, index, is_word_like: is_word_like(segment) });
+}
+
+/// True for pieces that ICU keeps on the word before them: marks, joiners, and the Thai and Lao
+/// repetition and abbreviation signs.
+fn attaches_to_previous(piece: &str) -> bool {
+    piece.chars().all(|c| is_extend_or_format(c) || matches!(c, '\u{0E2F}' | '\u{0E46}' | '\u{0EC6}'))
+}
+
+/// Splits a run of dictionary-script text into dictionary words with ICU4X. Like ICU, every
+/// dictionary word is word-like; a lone character keeps its own status (`々` alone is not).
+fn push_dictionary_run<'a>(run: &'a str, offset: usize, out: &mut Vec<WordSegment<'a>>) {
+    if run.chars().nth(1).is_none() {
+        push_segment(run, offset, out);
+        return;
+    }
+    let segmenter = WordSegmenter::new_dictionary(WordBreakInvariantOptions::default());
+    let mut words: Vec<(usize, usize)> = Vec::new();
+    let mut start = 0;
+    for end in segmenter.segment_str(run).filter(|&end| end > 0) {
+        match words.last_mut() {
+            Some(word) if attaches_to_previous(&run[start..end]) => word.1 = end,
+            _ => words.push((start, end)),
+        }
+        start = end;
+    }
+    out.extend(words.into_iter().map(|(start, end)| WordSegment {
+        segment: &run[start..end],
+        index: offset + start,
+        is_word_like: true,
     }));
 }
 
+/// UAX #29 word segments, with each run of dictionary-script text split into dictionary words.
+fn push_uax29<'a>(piece: &'a str, offset: usize, out: &mut Vec<WordSegment<'a>>) {
+    let mut last = 0;
+    for run in DICTIONARY_RUN.find_iter(piece) {
+        push_rule_based(&piece[last..run.start()], offset + last, out);
+        push_dictionary_run(run.as_str(), offset + run.start(), out);
+        last = run.end();
+    }
+    push_rule_based(&piece[last..], offset + last, out);
+}
+
+fn push_rule_based<'a>(piece: &'a str, offset: usize, out: &mut Vec<WordSegment<'a>>) {
+    for (index, segment) in piece.split_word_bound_indices() {
+        push_segment(segment, offset + index, out);
+    }
+}
+
 /// Splits `s` at word boundaries (`index` is a byte offset): UAX #29, plus ICU's rule that Hangul
-/// syllable runs are words of their own (`API를` gives `API`, `를`). ICU's dictionary is absent, so
-/// Han, kana, and Thai runs follow plain UAX #29 rules.
+/// syllable runs are words of their own (`API를` gives `API`, `를`), and Han, kana, Thai, Lao, Khmer,
+/// and Myanmar runs split into dictionary words (ICU4X's compiled dictionaries).
 pub fn word_segments(s: &str) -> Vec<WordSegment<'_>> {
     let mut out = Vec::new();
     if !s.contains(is_hangul_syllable) {
@@ -150,6 +203,35 @@ mod tests {
         assert_eq!(summary("\u{3131}a"), [("\u{3131}a", 0, true)]);
         assert_eq!(summary("\u{AC00}\u{200D}\u{AC00}"), [("\u{AC00}\u{200D}", 0, false), ("\u{AC00}", 6, true)]);
         assert_eq!(summary("\u{AC00}\u{200D}\u{1F642}a"), [("\u{AC00}\u{200D}\u{1F642}", 0, false), ("a", 10, true)]);
+    }
+
+    fn words(s: &str) -> Vec<&str> {
+        word_segments(s).into_iter().map(|w| w.segment).collect()
+    }
+
+    #[test]
+    fn splits_dictionary_scripts_into_words() {
+        assert_eq!(
+            summary("你好世界 test"),
+            [("你好", 0, true), ("世界", 6, true), (" ", 12, false), ("test", 13, true)]
+        );
+        assert_eq!(words("中华人民共和国"), ["中华", "人民", "共和国"]);
+        assert_eq!(words("こんにちは世界"), ["こんにちは", "世界"]);
+        assert_eq!(
+            words("パソコンでプログラミングを勉強する"),
+            ["パソコン", "で", "プログラミング", "を", "勉強", "する"]
+        );
+        assert_eq!(words("ฉันชอบกินข้าวผัด"), ["ฉัน", "ชอบ", "กิน", "ข้าว", "ผัด"]);
+        assert_eq!(words("ทุกสองสัปดาห์"), ["ทุก", "สอง", "สัปดาห์"]);
+    }
+
+    #[test]
+    fn keeps_icu_word_status_around_dictionary_words() {
+        assert_eq!(summary("你好，世界"), [("你好", 0, true), ("\u{FF0C}", 6, false), ("世界", 9, true)]);
+        assert_eq!(summary("ไปๆมาๆ"), [("ไปๆ", 0, true), ("มาๆ", 9, true)]);
+        assert_eq!(summary("日本\u{200D}語"), [("日本\u{200D}", 0, true), ("語", 9, true)]);
+        assert_eq!(summary("々a"), [("々", 0, false), ("a", 3, true)]);
+        assert_eq!(words("hello你好，world世界"), ["hello", "你好", "\u{FF0C}", "world", "世界"]);
     }
 
     #[test]

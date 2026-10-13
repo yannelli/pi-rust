@@ -49,7 +49,7 @@ fn parses_session_resource_and_mode_flags() {
 fn reports_bad_input_like_upstream() {
     let args = parse("--thinking huge --bogus -x --mode xml --model");
     assert_eq!(args.errors.len(), 3, "{:?}", args.errors);
-    assert!(args.errors.contains(&"Invalid mode \"xml\". Valid values: text, json, rpc".to_string()));
+    assert!(args.errors.contains(&"Invalid mode \"xml\". Valid values: text, json, rpc, acp".to_string()));
     assert!(args.warnings[0].contains("Invalid thinking level \"huge\""));
     assert_eq!(args.unknown_flags, [("bogus".to_string(), FlagValue::Bool)]);
     assert_eq!(unknown_flags_error(&args.unknown_flags).unwrap(), "Unknown option: --bogus");
@@ -57,7 +57,9 @@ fn reports_bad_input_like_upstream() {
     assert_eq!(flags[1], ("level".to_string(), FlagValue::String("3".into())));
     assert_eq!(flags[2], ("out".to_string(), FlagValue::String("file.txt".into())));
     assert_eq!(unknown_flags_error(&flags).unwrap(), "Unknown options: --plan, --level, --out");
-    assert_eq!(parse("--mode --print").errors, ["--mode requires text, json, or rpc"]);
+    assert_eq!(parse("--mode --print").errors, ["--mode requires text, json, rpc, or acp"]);
+    let acp = parse("--mode acp --terminal-login");
+    assert_eq!((acp.mode, acp.terminal_login), (Some(OutputMode::Acp), true));
     assert!(parse("--tui-mode wide").errors[0].contains("Invalid TUI mode"));
     assert_eq!(parse("--use-theme").errors, ["--use-theme requires a theme name"]);
     assert_eq!(parse("--name").errors, ["--name requires a value"]);

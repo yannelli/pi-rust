@@ -405,5 +405,6 @@ fn resource_options_of(options: &crate::resources::ResourceLoaderOptions) -> sup
         system_prompt: options.system_prompt.clone(),
         append_system_prompt: options.append_system_prompt.clone(),
         disabled_builtin_extensions: options.disabled_builtin_extensions.clone(),
+        home: Some(options.home.clone()),
     }
 }

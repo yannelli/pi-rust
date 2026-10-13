@@ -115,6 +115,7 @@ impl AppOptions {
             append_system_prompt: (!append.is_empty())
                 .then(|| append.iter().map(|input| resolve_prompt_arg(input, cwd)).collect()),
             disabled_builtin_extensions: if args.no_mcp { vec!["mcp".into()] } else { Vec::new() },
+            home: None,
         };
         Self {
             agent_dir: agent_dir.to_path_buf(),

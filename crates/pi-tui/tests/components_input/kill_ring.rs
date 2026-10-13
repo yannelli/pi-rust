@@ -36,13 +36,11 @@ fn ctrl_w_preserves_ascii_punctuation_boundaries() {
 
 #[test]
 fn ctrl_w_handles_unicode_word_boundaries() {
-    // Upstream ICU groups "你好" and "世界"; UAX #29 without a dictionary stops at every
-    // ideograph, so each ideograph is its own step. Punctuation stops match upstream.
+    // Segments as 你好|世界|。|你好|，|世界.
     let (_lock, mut input) = setup();
     value_with_cursor_at_end(&mut input, "你好世界。你好，世界");
-    let head = ["你好世界。你好，世", "你好世界。你好，", "你好世界。你好", "你好世界。你", "你好世界。"];
-    let tail = ["你好世界", "你好世", "你好", "你", ""];
-    for expected in head.into_iter().chain(tail) {
+    for expected in ["你好世界。你好，", "你好世界。你好", "你好世界。", "你好世界", "你好", ""]
+    {
         input.handle_input(CTRL_W);
         assert_eq!(input.get_value(), expected);
     }
@@ -219,13 +217,10 @@ fn alt_d_preserves_ascii_punctuation_boundaries() {
 
 #[test]
 fn alt_d_handles_unicode_word_boundaries() {
-    // Same segmentation difference as the Ctrl+W case: one step per ideograph.
     let (_lock, mut input) = setup();
     input.set_value("你好世界。你好，世界");
     input.handle_input(CTRL_A);
-    let head = ["好世界。你好，世界", "世界。你好，世界", "界。你好，世界", "。你好，世界", "你好，世界"];
-    let tail = ["好，世界", "，世界", "世界", "界", ""];
-    for expected in head.into_iter().chain(tail) {
+    for expected in ["世界。你好，世界", "。你好，世界", "你好，世界", "，世界", "世界", ""] {
         input.handle_input(ALT_D);
         assert_eq!(input.get_value(), expected);
     }

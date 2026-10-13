@@ -10,6 +10,7 @@ fn contents(cwd: &Path, agent: &Path) -> Vec<String> {
     load_project_context_files(cwd, agent).into_iter().map(|file| file.content).collect()
 }
 
+#[cfg(unix)]
 fn paths(cwd: &Path, agent: &Path) -> Vec<PathBuf> {
     load_project_context_files(cwd, agent).into_iter().map(|file| file.path).collect()
 }

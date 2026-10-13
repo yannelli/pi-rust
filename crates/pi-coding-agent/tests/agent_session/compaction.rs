@@ -62,7 +62,7 @@ async fn compacts_manually_and_persists_the_entry() {
 
 #[tokio::test]
 async fn compacts_after_crossing_the_threshold() {
-    let long = "x".repeat(4000);
+    let long = "x".repeat(6500);
     let h = harness(Options {
         responses: vec![
             FauxResponse::text(format!("first answer {long}")),
@@ -71,7 +71,7 @@ async fn compacts_after_crossing_the_threshold() {
             FauxResponse::text("third answer"),
         ],
         context_window: 8000,
-        settings: json!({"compaction": {"reserveTokens": 2500, "keepRecentTokens": 1500}}),
+        settings: json!({"compaction": {"reserveTokens": 2500, "keepRecentTokens": 4000}}),
         ..Options::default()
     })
     .await;
@@ -80,7 +80,7 @@ async fn compacts_after_crossing_the_threshold() {
     h.session.prompt("third question", Vec::new()).await.unwrap();
 
     let requests = h.requests();
-    assert_eq!(requests.len(), 4);
+    assert_eq!(requests.len(), 4, "compaction events: {:?}", compaction_events(&h.events()));
     assert!(is_summary_request(&requests[2]));
     let after = &requests[3].messages;
     assert!(text(&after[0]).contains("Summarized"));

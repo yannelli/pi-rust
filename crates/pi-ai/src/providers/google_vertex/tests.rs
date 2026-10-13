@@ -131,7 +131,7 @@ async fn service_accounts_sign_an_rs256_assertion() {
     assert_eq!(claims["scope"], "https://www.googleapis.com/auth/cloud-platform");
     assert_eq!(claims["aud"], format!("{}/token", token_server.base_url));
     assert_eq!(claims["exp"].as_i64().unwrap() - claims["iat"].as_i64().unwrap(), 3600);
-    let der = STANDARD.decode(include_str!("test_key.b64").replace('\n', "")).unwrap();
+    let der = STANDARD.decode(include_str!("test_key.b64").split_whitespace().collect::<String>()).unwrap();
     let public = RsaKeyPair::from_pkcs8(&der).unwrap().public_key().as_ref().to_vec();
     let signature = URL_SAFE_NO_PAD.decode(segments[2]).unwrap();
     let signed = format!("{}.{}", segments[0], segments[1]);

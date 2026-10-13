@@ -39,6 +39,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake", "__rustls-tls"] }
 tokio-rustls = { version = "0.26", default-features = false }
 webpki-roots = "1"
+icu_segmenter = { version = "2.1", default-features = false, features = ["compiled_data"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -57,3 +58,8 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# Unoptimized QuickJS C frames are large enough on some compilers that deep JS recursion
+# hits the engine stack limit early in debug builds, so the engine is always optimized.
+[profile.dev.package.rquickjs-sys]
+opt-level = 2
