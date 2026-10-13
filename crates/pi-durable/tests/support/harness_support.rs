@@ -22,6 +22,8 @@ pub struct ChatSetup {
     pub reports: Arc<Mutex<Vec<DurableError>>>,
     /// Live Harness settings; tests change them between decisions.
     pub settings: Arc<Mutex<HarnessSettings>>,
+    /// Fixed clock in milliseconds; `None` reads the system clock.
+    pub now: Arc<Mutex<Option<f64>>>,
 }
 
 pub fn chat_setup(options: RegisterFauxProviderOptions) -> ChatSetup {
@@ -32,6 +34,7 @@ pub fn chat_setup(options: RegisterFauxProviderOptions) -> ChatSetup {
         registry: Arc::new(create_registry()),
         reports: Arc::default(),
         settings: Arc::default(),
+        now: Arc::default(),
     }
 }
 
@@ -41,6 +44,8 @@ impl ChatSetup {
         let reports = self.reports.clone();
         let mut options = HarnessOptions::new(self.models.clone(), self.registry.clone() as Arc<dyn RegistryReader>)
             .with_on_report(move |error| reports.lock().unwrap().push(error.clone()));
+        let now = self.now.clone();
+        options = options.with_now(move || now.lock().unwrap().unwrap_or_else(system_now));
         options.settings = Some(Arc::new(move || Ok(settings.lock().unwrap().clone())));
         options
     }
@@ -158,4 +163,8 @@ pub async fn run_task(harness: &Harness, conversation: &Conversation) -> pi_dura
         assert!(Instant::now() < deadline, "No run started");
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
+}
+
+fn system_now() -> f64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as f64
 }
