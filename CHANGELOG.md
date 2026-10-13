@@ -2,6 +2,13 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.1.3] - 2026-10-13
+
+### Added
+
+- **embedded:** add pi-embedded crate with in-process sessions, host adapters, and a C ABI for native hosts ([68f1bca](https://github.com/yannelli/pi-rust/commit/68f1bca2ebf93c77b724a6be27ff0dd9a1066b8c))
+- **telemetry:** add pi-telemetry crate and thread telemetry context through pi-ai options ([96a0459](https://github.com/yannelli/pi-rust/commit/96a045902ad11358a3f730dd427d71ee0a63642d))
+
 ## [0.1.2] - 2026-10-13
 
 ### Fixed
