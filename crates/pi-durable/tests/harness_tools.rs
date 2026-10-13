@@ -148,7 +148,7 @@ async fn gives_tools_and_hooks_the_harness_models() {
     add_tool_hooks(&setup, "hooks:1", before);
     let Run { harness, status, .. } = run(&setup, vec![calls(&[("echo", json!({}), "c1")]), done()]).await;
     assert_eq!(status, SubmissionStatus::Done);
-    let seen = seen.lock().unwrap();
+    let seen = seen.lock().unwrap().clone();
     assert_eq!(seen.len(), 2);
     assert!(seen.iter().all(|models| Arc::ptr_eq(models, &setup.models)));
     harness.close(&ctx()).await.unwrap();
