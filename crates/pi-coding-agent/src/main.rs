@@ -310,7 +310,9 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
     if let Some(code) = run_package_command(&raw, &package_options).await {
         return Ok(code);
     }
-    if let Some(code) = run_config_command(&raw, &package_options, None).await {
+    let config_selector = (std::io::stdin().is_terminal() && std::io::stdout().is_terminal())
+        .then(pi_coding_agent::interactive_components::config_selector::config_selector_fn);
+    if let Some(code) = run_config_command(&raw, &package_options, config_selector.as_ref()).await {
         return Ok(code);
     }
     let mut args = parse_args(&raw);
