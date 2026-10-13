@@ -1,14 +1,16 @@
-//! Bundled model catalog and the `models.json` overlay used by the TypeScript pi.
+//! Bundled model catalog, the `models.json` overlay used by the TypeScript pi, and
+//! per-model thinking level support.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::LazyLock;
 
-use serde::Deserialize;
-use serde_json::Value;
-
+use crate::auth::ProviderAuthConfig;
 use crate::env::get_env_api_key;
-use crate::types::{Model, ModelCost};
+use crate::types::Model;
+
+#[path = "models_json.rs"]
+mod json;
 
 static BUILTIN: LazyLock<Vec<Model>> =
     LazyLock::new(|| serde_json::from_str(include_str!("../models.json")).expect("bundled models.json is valid"));
@@ -22,59 +24,24 @@ pub fn builtin_models() -> &'static [Model] {
 pub enum ModelsFileError {
     #[error("cannot read {path}: {source}")]
     Read { path: String, source: std::io::Error },
-    #[error("invalid models file {path}: {source}")]
-    Parse { path: String, source: serde_json::Error },
+    #[error("invalid models file {path}: {message}")]
+    Parse { path: String, message: String },
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ModelsFile {
-    #[serde(default)]
-    providers: BTreeMap<String, ProviderConfig>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ProviderConfig {
-    base_url: Option<String>,
-    api: Option<String>,
-    api_key: Option<String>,
-    #[serde(default)]
-    headers: BTreeMap<String, String>,
-    #[serde(default)]
-    models: Vec<ModelConfig>,
-    #[serde(default)]
-    model_overrides: BTreeMap<String, Value>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ModelConfig {
-    id: String,
-    name: Option<String>,
-    api: Option<String>,
-    base_url: Option<String>,
-    reasoning: Option<bool>,
-    input: Option<Vec<String>>,
-    cost: Option<ModelCost>,
-    context_window: Option<u64>,
-    max_tokens: Option<u64>,
-    #[serde(default)]
-    headers: BTreeMap<String, String>,
-    compat: Option<Value>,
-}
-
-/// Available models and per-provider API key sources.
+/// Available models and the `models.json` auth settings per provider.
 #[derive(Clone, Debug, Default)]
 pub struct ModelRegistry {
     models: Vec<Model>,
-    api_keys: HashMap<String, String>,
+    auth_configs: HashMap<String, ProviderAuthConfig>,
+    provider_names: HashMap<String, String>,
+    /// Providers known to have usable auth; replaces the key heuristic when set.
+    configured: Option<HashSet<String>>,
 }
 
 impl ModelRegistry {
     /// The bundled catalog only.
     pub fn builtin() -> Self {
-        Self { models: builtin_models().to_vec(), api_keys: HashMap::new() }
+        Self { models: builtin_models().to_vec(), ..Self::default() }
     }
 
     /// The bundled catalog plus `path` when it exists.
@@ -84,86 +51,108 @@ impl ModelRegistry {
             let display = path.display().to_string();
             let text = std::fs::read_to_string(path)
                 .map_err(|source| ModelsFileError::Read { path: display.clone(), source })?;
-            registry.apply_json(&text).map_err(|source| ModelsFileError::Parse { path: display, source })?;
+            registry.apply_json(&text).map_err(|message| ModelsFileError::Parse { path: display, message })?;
         }
         Ok(registry)
     }
 
-    /// Apply a `models.json` document: add or replace models and record key sources.
-    pub fn apply_json(&mut self, text: &str) -> Result<(), serde_json::Error> {
-        let file: ModelsFile = serde_json::from_str(text)?;
-        for (provider, config) in file.providers {
-            if let Some(api_key) = &config.api_key {
-                self.api_keys.insert(provider.clone(), api_key.clone());
-            }
-            for (id, patch) in &config.model_overrides {
-                if let Some(model) = self.models.iter_mut().find(|model| model.provider == provider && &model.id == id)
-                {
-                    let mut value = serde_json::to_value(&*model)?;
-                    merge(&mut value, patch);
-                    *model = serde_json::from_value(value)?;
-                }
-            }
-            let template = self.models.iter().find(|model| model.provider == provider).cloned();
-            for entry in config.models {
-                let base = self.models.iter().find(|model| model.provider == provider && model.id == entry.id).cloned();
-                let fallback = base.as_ref().or(template.as_ref());
-                let api = entry
-                    .api
-                    .or_else(|| config.api.clone())
-                    .or_else(|| fallback.map(|model| model.api.clone()))
-                    .unwrap_or_else(|| "openai-completions".into());
-                let base_url = entry
-                    .base_url
-                    .or_else(|| config.base_url.clone())
-                    .or_else(|| fallback.map(|model| model.base_url.clone()))
-                    .unwrap_or_default();
-                let mut headers = fallback.map(|model| model.headers.clone()).unwrap_or_default();
-                headers.extend(config.headers.clone());
-                headers.extend(entry.headers);
-                let model = Model {
-                    name: entry
-                        .name
-                        .or_else(|| base.as_ref().map(|model| model.name.clone()))
-                        .unwrap_or_else(|| entry.id.clone()),
-                    id: entry.id,
-                    api,
-                    provider: provider.clone(),
-                    base_url,
-                    reasoning: entry.reasoning.or(base.as_ref().map(|model| model.reasoning)).unwrap_or(false),
-                    input: entry
-                        .input
-                        .or_else(|| base.as_ref().map(|model| model.input.clone()))
-                        .unwrap_or_else(|| vec!["text".into()]),
-                    cost: entry.cost.or(base.as_ref().map(|model| model.cost)).unwrap_or_default(),
-                    context_window: entry
-                        .context_window
-                        .or(base.as_ref().map(|model| model.context_window))
-                        .unwrap_or(128_000),
-                    max_tokens: entry.max_tokens.or(base.as_ref().map(|model| model.max_tokens)).unwrap_or(16_384),
-                    headers,
-                    compat: entry.compat.or_else(|| base.as_ref().and_then(|model| model.compat.clone())),
-                };
-                self.upsert(model);
+    /// Like [`Self::load`], but an invalid file leaves the bundled catalog and returns the error,
+    /// as upstream reports `models.json` problems without stopping.
+    pub fn load_lenient(path: &Path) -> (Self, Option<ModelsFileError>) {
+        match Self::load(path) {
+            Ok(registry) => (registry, None),
+            Err(error) => (Self::builtin(), Some(error)),
+        }
+    }
+
+    /// Apply a `models.json` document (comments allowed). Nothing changes when it is invalid.
+    pub fn apply_json(&mut self, text: &str) -> Result<(), String> {
+        let file = json::parse_models_file(text)?;
+        let mut models = self.models.clone();
+        let mut auth_configs = self.auth_configs.clone();
+        for (provider, config) in &file.providers {
+            let (own, rest): (Vec<Model>, Vec<Model>) =
+                models.into_iter().partition(|model| &model.provider == provider);
+            let applied = json::apply_provider(provider, own, config)?;
+            models = rest;
+            models.extend(applied);
+            auth_configs.insert(provider.clone(), json::auth_config(config));
+            if let Some(name) = &config.name {
+                self.provider_names.insert(provider.clone(), name.clone());
             }
         }
+        self.models = models;
+        self.auth_configs = auth_configs;
         Ok(())
     }
 
-    /// Add `model`, replacing one with the same provider and id.
+    /// Add `model`, replacing one with the same provider, id, and type (a chat model and a
+    /// classifier may share an id).
     pub fn upsert(&mut self, model: Model) {
-        match self.models.iter_mut().find(|existing| existing.provider == model.provider && existing.id == model.id) {
+        let kind = |model: &Model| model.model_type.clone().unwrap_or_else(|| "chat".into());
+        let same = |existing: &Model| {
+            existing.provider == model.provider && existing.id == model.id && kind(existing) == kind(&model)
+        };
+        match self.models.iter_mut().find(|existing| same(existing)) {
             Some(existing) => *existing = model,
             None => self.models.push(model),
         }
     }
 
-    pub fn models(&self) -> &[Model] {
+    /// Keep only the models `keep` accepts.
+    pub fn retain_models(&mut self, keep: impl Fn(&Model) -> bool) {
+        self.models.retain(|model| keep(model));
+    }
+
+    /// Every model, including image and classifier models.
+    pub fn all_models(&self) -> &[Model] {
         &self.models
     }
 
+    /// Chat models.
+    pub fn models(&self) -> Vec<&Model> {
+        self.models.iter().filter(|model| is_chat_model(model)).collect()
+    }
+
+    /// Chat models whose provider has configured auth.
+    pub fn available_models(&self) -> Vec<&Model> {
+        self.models.iter().filter(|model| is_chat_model(model) && self.has_api_key(&model.provider)).collect()
+    }
+
+    /// Distinct provider ids in catalog order.
+    pub fn providers(&self) -> Vec<String> {
+        let mut seen = HashSet::new();
+        let mut providers: Vec<String> = self
+            .models
+            .iter()
+            .filter(|model| seen.insert(model.provider.clone()))
+            .map(|model| model.provider.clone())
+            .collect();
+        for provider in self.auth_configs.keys() {
+            if seen.insert(provider.clone()) {
+                providers.push(provider.clone());
+            }
+        }
+        providers
+    }
+
+    pub fn has_provider(&self, provider: &str) -> bool {
+        self.models.iter().any(|model| model.provider == provider) || self.auth_configs.contains_key(provider)
+    }
+
+    /// Display name from `models.json`, if set.
+    pub fn provider_name(&self, provider: &str) -> Option<&str> {
+        self.provider_names.get(provider).map(String::as_str)
+    }
+
+    /// The chat model `provider`/`id`.
     pub fn find(&self, provider: &str, id: &str) -> Option<&Model> {
-        self.models.iter().find(|model| model.provider == provider && model.id == id)
+        self.models.iter().find(|model| model.provider == provider && model.id == id && is_chat_model(model))
+    }
+
+    /// `models.json` auth settings per provider, for [`crate::auth::AuthResolver`].
+    pub fn auth_configs(&self) -> HashMap<String, ProviderAuthConfig> {
+        self.auth_configs.clone()
     }
 
     /// Resolve `provider/id`, an exact id, or a case-insensitive substring of the id or name.
@@ -174,8 +163,11 @@ impl ModelRegistry {
             }
             _ => (provider, pattern),
         };
-        let candidates: Vec<&Model> =
-            self.models.iter().filter(|model| provider.is_none_or(|provider| model.provider == provider)).collect();
+        let candidates: Vec<&Model> = self
+            .models
+            .iter()
+            .filter(|model| is_chat_model(model) && provider.is_none_or(|provider| model.provider == provider))
+            .collect();
         if let Some(model) = candidates.iter().find(|model| model.id == pattern) {
             return Some(model);
         }
@@ -188,80 +180,50 @@ impl ModelRegistry {
         matches.into_iter().next()
     }
 
-    /// API key for `provider`: `models.json` value (`$VAR`, `${VAR}`, `!command`, or literal), then environment.
+    /// Record which providers have usable auth (from [`crate::auth::AuthResolver::check`]).
+    pub fn set_configured_providers(&mut self, providers: HashSet<String>) {
+        self.configured = Some(providers);
+    }
+
+    /// Synchronous API key lookup: `models.json` value (`$VAR`, `!command`, or literal), then
+    /// environment. Stored `auth.json` credentials and OAuth need [`crate::auth::AuthResolver`].
     pub fn api_key(&self, provider: &str) -> Option<String> {
-        self.api_keys.get(provider).and_then(|value| resolve_config_value(value)).or_else(|| get_env_api_key(provider))
+        let configured = self.auth_configs.get(provider).and_then(|config| config.api_key.as_deref());
+        configured.and_then(resolve_config_value).or_else(|| get_env_api_key(provider))
     }
 
-    /// Whether a key is configured for `provider`, without running `!command` values.
+    /// Whether `provider` has usable auth. Uses the recorded configured providers when set,
+    /// otherwise a `models.json` key or an environment variable, without running commands.
     pub fn has_api_key(&self, provider: &str) -> bool {
-        self.api_keys.contains_key(provider) || get_env_api_key(provider).is_some()
-    }
-}
-
-/// Resolve a configuration value: `$NAME` or `${NAME}` reads the environment,
-/// `!command` runs a shell command and uses its trimmed output.
-pub fn resolve_config_value(value: &str) -> Option<String> {
-    if let Some(command) = value.strip_prefix('!') {
-        let output = std::process::Command::new("sh").arg("-c").arg(command).output().ok()?;
-        let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        return (output.status.success() && !text.is_empty()).then_some(text);
-    }
-    let name =
-        value.strip_prefix("${").and_then(|rest| rest.strip_suffix('}')).or_else(|| value.strip_prefix('$')).filter(
-            |name| {
-                !name.is_empty() && name.chars().all(|character| character.is_ascii_alphanumeric() || character == '_')
-            },
-        );
-    match name {
-        Some(name) => std::env::var(name).ok().filter(|value| !value.is_empty()),
-        None => Some(value.to_string()),
-    }
-}
-
-fn merge(target: &mut Value, patch: &Value) {
-    match (target, patch) {
-        (Value::Object(target), Value::Object(patch)) => {
-            for (key, value) in patch {
-                merge(target.entry(key.clone()).or_insert(Value::Null), value);
+        match &self.configured {
+            Some(configured) => configured.contains(provider),
+            None => {
+                self.auth_configs.get(provider).is_some_and(|config| config.api_key.is_some())
+                    || get_env_api_key(provider).is_some()
+                    || crate::env::find_env_keys(provider, None).is_some()
             }
         }
-        (target, patch) => *target = patch.clone(),
     }
+}
+
+/// Resolve a configuration value against the process environment. See
+/// [`crate::auth::resolve_value::resolve_config_value`].
+pub fn resolve_config_value(value: &str) -> Option<String> {
+    crate::auth::resolve_value::resolve_config_value(value, None)
+}
+
+/// Whether `model` is a chat model (no `type`, or `chat`), as opposed to image or classifier models.
+pub fn is_chat_model(model: &Model) -> bool {
+    model.model_type.as_deref().is_none_or(|kind| kind == "chat")
+}
+
+pub use crate::simple_options::{clamp_thinking_level, supported_thinking_levels};
+
+/// Whether two models are the same catalog entry.
+pub fn models_are_equal(a: &Model, b: &Model) -> bool {
+    a.provider == b.provider && a.id == b.id && a.model_type == b.model_type
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bundled_catalog_parses() {
-        assert!(!builtin_models().is_empty());
-        assert!(builtin_models().iter().all(|model| !model.base_url.is_empty()));
-    }
-
-    #[test]
-    fn models_json_adds_providers_and_overrides() {
-        let mut registry = ModelRegistry::builtin();
-        let anthropic = registry.models().iter().find(|model| model.provider == "anthropic").unwrap().id.clone();
-        registry
-            .apply_json(&format!(
-                r#"{{"providers":{{"ollama":{{"baseUrl":"http://localhost:11434/v1","api":"openai-completions","apiKey":"ollama","models":[{{"id":"qwen2.5-coder:7b"}}]}},
-                "anthropic":{{"modelOverrides":{{"{anthropic}":{{"maxTokens":1234}}}}}}}}}}"#
-            ))
-            .unwrap();
-        let ollama = registry.find("ollama", "qwen2.5-coder:7b").unwrap();
-        assert_eq!(ollama.base_url, "http://localhost:11434/v1");
-        assert_eq!(registry.api_key("ollama").as_deref(), Some("ollama"));
-        assert_eq!(registry.find("anthropic", &anthropic).unwrap().max_tokens, 1234);
-        assert_eq!(registry.resolve("ollama/qwen2.5-coder:7b", None).unwrap().provider, "ollama");
-        assert_eq!(registry.resolve("QWEN", Some("ollama")).unwrap().id, "qwen2.5-coder:7b");
-    }
-
-    #[test]
-    fn config_values_read_environment_and_commands() {
-        assert_eq!(resolve_config_value("literal").as_deref(), Some("literal"));
-        assert_eq!(resolve_config_value("!printf secret").as_deref(), Some("secret"));
-        assert_eq!(resolve_config_value("$PI_RUST_SURELY_UNSET_VARIABLE"), None);
-    }
-}
+#[path = "models_tests.rs"]
+mod tests;

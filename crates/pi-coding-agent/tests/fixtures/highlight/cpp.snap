@@ -1,0 +1,21 @@
+«muted:#include <iostream>»
+«muted:#include "local.h"»
+
+«syntaxKeyword:namespace» demo {
+
+«syntaxKeyword:template» <«syntaxKeyword:typename» T>
+«syntaxKeyword:class» «syntaxFunction:Box» {
+«syntaxKeyword:public»:
+    «syntaxKeyword:explicit» «syntaxFunction:Box»(T «syntaxVariable:value») : value_(value) {}
+    T «syntaxFunction:get»() «syntaxKeyword:const» { «syntaxKeyword:return» value_; }
+«syntaxKeyword:private»:
+    T value_;
+};
+
+}  «syntaxComment:// namespace demo»
+
+«syntaxKeyword:int» «syntaxFunction:main»«syntaxVariable:(»«syntaxKeyword:int» «syntaxVariable:argc,» «syntaxKeyword:char»«syntaxVariable:**» «syntaxVariable:argv)» {
+    «syntaxKeyword:auto» box = demo::Box<«syntaxKeyword:int»>(«syntaxNumber:42»);
+    std::cout << «syntaxString:"value: "» << box.get() << std::endl;
+    «syntaxKeyword:return» «syntaxNumber:nullptr» == argv ? «syntaxNumber:1» : «syntaxNumber:0»;
+}

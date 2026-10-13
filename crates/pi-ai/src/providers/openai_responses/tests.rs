@@ -128,6 +128,7 @@ async fn request_body_converts_history_tools_and_reasoning() {
                 name: "read".into(),
                 arguments: json!({"path": "a"}).as_object().cloned().unwrap(),
                 thought_signature: None,
+                ..Default::default()
             }),
         ],
         api: API.into(),
@@ -139,6 +140,7 @@ async fn request_body_converts_history_tools_and_reasoning() {
         error_message: None,
         timestamp: 1,
         duration_ms: None,
+        ..Default::default()
     };
     let result = ToolResultMessage {
         tool_call_id: "call_1|fc_1".into(),
@@ -148,11 +150,17 @@ async fn request_body_converts_history_tools_and_reasoning() {
         is_error: false,
         timestamp: 2,
         duration_ms: None,
+        ..Default::default()
     };
     let context = Context {
         system_prompt: Some("Be brief.".into()),
         messages: vec![Message::user("hi"), Message::Assistant(assistant), Message::ToolResult(result)],
-        tools: vec![Tool { name: "read".into(), description: "Read".into(), parameters: json!({"type": "object"}) }],
+        tools: vec![Tool {
+            name: "read".into(),
+            description: "Read".into(),
+            parameters: json!({"type": "object"}),
+            ..Default::default()
+        }],
     };
     let options = StreamOptions { reasoning: Some(ThinkingLevel::Xhigh), session_id: Some("s1".into()), ..options() };
     let (_, message) = collect(OpenAIResponses.stream(&model, &context, options)).await;

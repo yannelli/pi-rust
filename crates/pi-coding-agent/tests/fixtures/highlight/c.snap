@@ -1,0 +1,19 @@
+«muted:#include <stdio.h>»
+«muted:#define MAX 10»
+
+«syntaxComment:/* A point */»
+«syntaxKeyword:struct» «syntaxFunction:point» {
+    «syntaxKeyword:int» x;
+    «syntaxKeyword:int» y;
+};
+
+«syntaxKeyword:static» «syntaxKeyword:int» «syntaxFunction:add»«syntaxVariable:(»«syntaxKeyword:int» «syntaxVariable:a,» «syntaxKeyword:int» «syntaxVariable:b)» {
+    «syntaxKeyword:return» a + b;
+}
+
+«syntaxKeyword:int» «syntaxFunction:main»«syntaxVariable:(»«syntaxKeyword:void»«syntaxVariable:)» {
+    «syntaxKeyword:struct» point p = { «syntaxNumber:1», «syntaxNumber:2» };
+    «syntaxKeyword:char» *name = «syntaxString:"world"»;
+    «syntaxType:printf»(«syntaxString:"Hello %s %d\n"», name, add(p.x, MAX));
+    «syntaxKeyword:return» «syntaxNumber:0»;
+}

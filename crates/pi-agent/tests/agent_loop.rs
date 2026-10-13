@@ -71,7 +71,7 @@ fn faux(responses: Vec<FauxResponse>) -> (Arc<FauxProvider>, StreamFn) {
 fn recorder() -> (Arc<Mutex<Vec<AgentEvent>>>, EventSink) {
     let events = Arc::new(Mutex::new(Vec::new()));
     let sink_events = events.clone();
-    (events, Arc::new(move |event| sink_events.lock().unwrap().push(event)))
+    (events, pi_agent::sync_sink(move |event| sink_events.lock().unwrap().push(event)))
 }
 
 fn kinds(events: &[AgentEvent]) -> Vec<String> {
@@ -189,7 +189,15 @@ async fn hooks_block_and_rewrite_results() {
     let mut config = config(stream_fn);
     config.before_tool_call = Some(Arc::new(|input, _| {
         let block = input.args["text"] == "block";
-        async move { block.then(|| BeforeToolCallResult { block: true, reason: Some("denied".into()), terminate: false }) }.boxed()
+        async move {
+            block.then(|| BeforeToolCallResult {
+                block: true,
+                reason: Some("denied".into()),
+                terminate: false,
+                args: None,
+            })
+        }
+        .boxed()
     }));
     config.after_tool_call = Some(Arc::new(|input, _| {
         let text = format!("{}!", input.result.content[0].as_text().unwrap_or_default());
@@ -228,8 +236,10 @@ async fn truncated_responses_do_not_execute_tool_calls() {
         run_agent_loop(vec![Message::user("go")], &mut context, &config(stream_fn), sink, CancellationToken::new())
             .await;
     assert_eq!(tool.calls.load(Ordering::SeqCst), 0);
+    // The context declares no tools yet, so the loop announces the loadout first.
+    assert!(matches!(&added[0], Message::System(system) if system.tools_added.as_ref().unwrap()[0].name == "echo"));
     assert!(
-        matches!(&added[2], Message::ToolResult(result) if result.is_error && result.content[0].as_text().unwrap().contains("output token limit"))
+        matches!(&added[3], Message::ToolResult(result) if result.is_error && result.content[0].as_text().unwrap().contains("output token limit"))
     );
 }
 
@@ -282,7 +292,8 @@ async fn agent_steering_and_follow_up_queues() {
     assert_eq!(last_user(2), "follow");
     let state = agent.state();
     assert!(!state.is_streaming && !agent.is_running());
-    assert_eq!(state.messages.len(), 7);
+    // The tool declaration, then user, assistant, tool result, steer, assistant, follow-up, assistant.
+    assert_eq!(state.messages.len(), 8);
 }
 
 #[tokio::test]

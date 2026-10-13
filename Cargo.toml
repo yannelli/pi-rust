@@ -1,6 +1,15 @@
 [workspace]
 resolver = "3"
-members = ["crates/pi-ai", "crates/pi-agent", "crates/pi-coding-agent", "xtask"]
+members = [
+    "crates/pi-ai",
+    "crates/pi-agent",
+    "crates/pi-codemode",
+    "crates/pi-coding-agent",
+    "crates/pi-js",
+    "crates/pi-mcp",
+    "crates/pi-tui",
+    "xtask",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -21,7 +30,16 @@ thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+ring = "0.17"
+base64 = "0.22"
 tempfile = "3"
+crc32fast = "1"
+ruzstd = "0.8"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake", "__rustls-tls"] }
+tokio-rustls = { version = "0.26", default-features = false }
+webpki-roots = "1"
+icu_segmenter = { version = "2.1", default-features = false, features = ["compiled_data"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -33,3 +51,15 @@ all = { level = "warn", priority = -1 }
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# Line tables keep backtraces readable while cutting debug-build disk use.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+# Unoptimized QuickJS C frames are large enough on some compilers that deep JS recursion
+# hits the engine stack limit early in debug builds, so the engine is always optimized.
+[profile.dev.package.rquickjs-sys]
+opt-level = 2

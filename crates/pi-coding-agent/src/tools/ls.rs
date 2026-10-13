@@ -1,6 +1,7 @@
 //! `ls` tool: sorted directory listing with '/' suffix for directories, dotfiles included.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
@@ -10,6 +11,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 
+use super::operations::{LsOperations, LsToolOptions};
 use super::path_utils::resolve_to_cwd;
 use super::truncate::{DEFAULT_MAX_BYTES, TruncationOptions, format_size, truncate_head};
 use super::{as_count, check_aborted, details_or_none, parse_args};
@@ -19,6 +21,7 @@ const DEFAULT_LIMIT: i64 = 500;
 pub struct LsTool {
     cwd: PathBuf,
     description: String,
+    operations: Arc<dyn LsOperations>,
 }
 
 #[derive(Deserialize)]
@@ -29,11 +32,15 @@ struct LsArgs {
 
 impl LsTool {
     pub fn new(cwd: PathBuf) -> Self {
+        Self::with_options(cwd, LsToolOptions::default())
+    }
+
+    pub fn with_options(cwd: PathBuf, options: LsToolOptions) -> Self {
         let description = format!(
             "List directory contents. Returns entries sorted alphabetically, with '/' suffix for directories. Includes dotfiles. Output is truncated to {DEFAULT_LIMIT} entries or {}KB (whichever is hit first).",
             DEFAULT_MAX_BYTES / 1024
         );
-        Self { cwd, description }
+        Self { cwd, description, operations: options.resolve() }
     }
 }
 
@@ -57,6 +64,14 @@ impl AgentTool for LsTool {
         })
     }
 
+    fn prompt_snippet(&self) -> Option<&str> {
+        super::builtin_snippet("ls")
+    }
+
+    fn prompt_guidelines(&self) -> Vec<String> {
+        super::builtin_guidelines("ls")
+    }
+
     async fn execute(
         &self,
         _tool_call_id: &str,
@@ -69,15 +84,14 @@ impl AgentTool for LsTool {
         let dir = resolve_to_cwd(args.path.as_deref().unwrap_or("."), &self.cwd);
         let limit = as_count(args.limit).unwrap_or(DEFAULT_LIMIT).max(0) as usize;
 
-        let meta = tokio::fs::metadata(&dir).await.map_err(|_| anyhow!("Path not found: {}", dir.display()))?;
-        if !meta.is_dir() {
+        let ops = &self.operations;
+        if !ops.exists(&dir).await.unwrap_or(false) {
+            bail!("Path not found: {}", dir.display());
+        }
+        if !ops.is_directory(&dir).await.map_err(|_| anyhow!("Path not found: {}", dir.display()))? {
             bail!("Not a directory: {}", dir.display());
         }
-        let mut reader = tokio::fs::read_dir(&dir).await.map_err(|e| anyhow!("Cannot read directory: {e}"))?;
-        let mut entries = Vec::new();
-        while let Some(entry) = reader.next_entry().await.map_err(|e| anyhow!("Cannot read directory: {e}"))? {
-            entries.push(entry.file_name().to_string_lossy().into_owned());
-        }
+        let mut entries = ops.read_dir(&dir).await.map_err(|e| anyhow!("Cannot read directory: {e}"))?;
         entries.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| a.cmp(b)));
 
         let mut results = Vec::new();
@@ -88,10 +102,10 @@ impl AgentTool for LsTool {
                 break;
             }
             check_aborted(&cancel)?;
-            let Ok(meta) = tokio::fs::metadata(dir.join(&entry)).await else {
+            let Ok(is_dir) = ops.is_directory(&dir.join(&entry)).await else {
                 continue;
             };
-            results.push(if meta.is_dir() { format!("{entry}/") } else { entry });
+            results.push(if is_dir { format!("{entry}/") } else { entry });
         }
 
         if results.is_empty() {

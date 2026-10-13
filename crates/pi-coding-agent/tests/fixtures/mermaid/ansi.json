@@ -1,0 +1,105 @@
+{
+  "defaultTheme": {"border":"2","edge":"36","edgeLabel":"2;36","title":"1"},
+  "customTheme": {"border":"38;5;244","text":"1","edge":"36","edgeLabel":"33"},
+  "cases": [
+    {
+      "name": "flow_default",
+      "src": "flowchart TD\n  P[Parse source] --> S{Supported?}\n  S -->|yes| Y[Lay out]\n  S -->|no| N[Framed source]\n  Y --> U[Unicode art]\n  N --> U",
+      "mode": "default",
+      "lines": [
+        "      \u001b[2m┌──────────────┐\u001b[0m",
+        "      \u001b[2m│\u001b[0m Parse source \u001b[2m│\u001b[0m",
+        "      \u001b[2m└───────┬──────┘\u001b[0m",
+        "              \u001b[36m│\u001b[0m",
+        "              \u001b[36m▼\u001b[0m",
+        "       \u001b[2m╭────────────╮\u001b[0m",
+        "       \u001b[2m│\u001b[0m Supported? \u001b[2m│\u001b[0m",
+        "       \u001b[2m╰──────┬─────╯\u001b[0m",
+        "      \u001b[36m┌───────┴────────┐\u001b[0m",
+        "      \u001b[36m▼\u001b[0m\u001b[2;36myes\u001b[0m             \u001b[36m▼\u001b[0m\u001b[2;36mno\u001b[0m",
+        " \u001b[2m┌─────────┐\u001b[0m   \u001b[2m┌───────────────┐\u001b[0m",
+        " \u001b[2m│\u001b[0m Lay out \u001b[2m│\u001b[0m   \u001b[2m│\u001b[0m Framed source \u001b[2m│\u001b[0m",
+        " \u001b[2m└────┬────┘\u001b[0m   \u001b[2m└───────┬───────┘\u001b[0m",
+        "      \u001b[36m└───────┬────────┘\u001b[0m",
+        "              \u001b[36m▼\u001b[0m",
+        "       \u001b[2m┌─────────────┐\u001b[0m",
+        "       \u001b[2m│\u001b[0m Unicode art \u001b[2m│\u001b[0m",
+        "       \u001b[2m└─────────────┘\u001b[0m"
+      ]
+    },
+    {
+      "name": "sequence_default",
+      "src": "sequenceDiagram\n  Alice->>John: Hello John, how are you?\n  John-->>Alice: Great!\n  Alice-)John: See you later!",
+      "mode": "default",
+      "lines": [
+        "\u001b[2m┌───────┐\u001b[0m                 \u001b[2m┌──────┐\u001b[0m",
+        "\u001b[2m│\u001b[0m Alice \u001b[2m│\u001b[0m                 \u001b[2m│\u001b[0m John \u001b[2m│\u001b[0m",
+        "\u001b[2m└───┬───┘\u001b[0m                 \u001b[2m└───┬──┘\u001b[0m",
+        "    \u001b[36m│\u001b[0m                         \u001b[36m│\u001b[0m",
+        "    \u001b[36m│\u001b[0mHello John, how are you? \u001b[36m│\u001b[0m",
+        "    \u001b[36m├────────────────────────▶│\u001b[0m",
+        "    \u001b[36m│\u001b[0m                         \u001b[36m│\u001b[0m",
+        "    \u001b[36m│\u001b[0m         Great!          \u001b[36m│\u001b[0m",
+        "    \u001b[36m│◄╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤\u001b[0m",
+        "    \u001b[36m│\u001b[0m                         \u001b[36m│\u001b[0m",
+        "    \u001b[36m│\u001b[0m     See you later!      \u001b[36m│\u001b[0m",
+        "    \u001b[36m├────────────────────────▶│\u001b[0m",
+        "    \u001b[36m│\u001b[0m                         \u001b[36m│\u001b[0m",
+        "\u001b[2m┌───┴───┐\u001b[0m                 \u001b[2m┌───┴──┐\u001b[0m",
+        "\u001b[2m│\u001b[0m Alice \u001b[2m│\u001b[0m                 \u001b[2m│\u001b[0m John \u001b[2m│\u001b[0m",
+        "\u001b[2m└───────┘\u001b[0m                 \u001b[2m└──────┘\u001b[0m"
+      ]
+    },
+    {
+      "name": "class_default",
+      "src": "classDiagram\n  Animal <|-- Duck\n  Animal <|-- Fish\n  Animal : +int age\n  Animal : +String gender\n  Animal: +isMammal()\n  Animal: +mate()\n  class Duck{\n    +String beakColor\n    +swim()\n    +quack()\n  }",
+      "mode": "default",
+      "lines": [
+        "          \u001b[2m┌────────────────┐\u001b[0m",
+        "          \u001b[2m│\u001b[0m     Animal     \u001b[2m│\u001b[0m",
+        "          \u001b[2m├────────────────┤\u001b[0m",
+        "          \u001b[2m│\u001b[0m +int age       \u001b[2m│\u001b[0m",
+        "          \u001b[2m│\u001b[0m +String gender \u001b[2m│\u001b[0m",
+        "          \u001b[2m├────────────────┤\u001b[0m",
+        "          \u001b[2m│\u001b[0m +isMammal()    \u001b[2m│\u001b[0m",
+        "          \u001b[2m│\u001b[0m +mate()        \u001b[2m│\u001b[0m",
+        "          \u001b[2m└────────\u001b[0m\u001b[36m△\u001b[0m\u001b[2m───────┘\u001b[0m",
+        "           \u001b[36m┌───────┴────────┐\u001b[0m",
+        "           \u001b[36m│\u001b[0m                \u001b[36m│\u001b[0m",
+        " \u001b[2m┌───────────────────┐\u001b[0m      \u001b[36m│\u001b[0m",
+        " \u001b[2m│\u001b[0m       Duck        \u001b[2m│\u001b[0m      \u001b[36m│\u001b[0m",
+        " \u001b[2m├───────────────────┤\u001b[0m  \u001b[2m┌──────┐\u001b[0m",
+        " \u001b[2m│\u001b[0m +String beakColor \u001b[2m│\u001b[0m  \u001b[2m│\u001b[0m Fish \u001b[2m│\u001b[0m",
+        " \u001b[2m├───────────────────┤\u001b[0m  \u001b[2m└──────┘\u001b[0m",
+        " \u001b[2m│\u001b[0m +swim()           \u001b[2m│\u001b[0m",
+        " \u001b[2m│\u001b[0m +quack()          \u001b[2m│\u001b[0m",
+        " \u001b[2m└───────────────────┘\u001b[0m"
+      ]
+    },
+    {
+      "name": "source_box_default",
+      "src": "pie\n  \"a\" : 1",
+      "mode": "sourceBox",
+      "lines": [
+        "\u001b[2m╭\u001b[0m\u001b[1m mermaid: pie \u001b[0m\u001b[2m──╮\u001b[0m",
+        "\u001b[2m│ \u001b[0mpie\u001b[2m            │\u001b[0m",
+        "\u001b[2m│ \u001b[0m  \"a\" : 1\u001b[2m      │\u001b[0m",
+        "\u001b[2m╰────────────────╯\u001b[0m"
+      ]
+    },
+    {
+      "name": "flow_custom",
+      "src": "flowchart LR\n  A -->|a label| B\n  A -- inline text --> C\n  B -. dotted text .-> D\n  C == thick text ==> D",
+      "mode": "custom",
+      "lines": [
+        "      \u001b[33ma label\u001b[0m      \u001b[38;5;244m┌───┐\u001b[0m",
+        "     \u001b[36m┌────────────▶\u001b[0m\u001b[38;5;244m│\u001b[0m \u001b[1mB\u001b[0m \u001b[38;5;244m├\u001b[0m\u001b[36m┐\u001b[0m",
+        "\u001b[38;5;244m┌───┐\u001b[0m\u001b[36m│\u001b[0m             \u001b[38;5;244m└───┘\u001b[0m\u001b[36m╎\u001b[0m\u001b[33mdotted text\u001b[0m  \u001b[38;5;244m┌───┐\u001b[0m",
+        "\u001b[38;5;244m│\u001b[0m \u001b[1mA\u001b[0m \u001b[38;5;244m├\u001b[0m\u001b[36m┤\u001b[0m                  \u001b[36m├────────────▶\u001b[0m\u001b[38;5;244m│\u001b[0m \u001b[1mD\u001b[0m \u001b[38;5;244m│\u001b[0m",
+        "\u001b[38;5;244m└───┘\u001b[0m\u001b[36m│\u001b[0m\u001b[33minline text\u001b[0m  \u001b[38;5;244m┌───┐\u001b[0m\u001b[36m┃\u001b[0m             \u001b[38;5;244m└───┘\u001b[0m",
+        "     \u001b[36m└────────────▶\u001b[0m\u001b[38;5;244m│\u001b[0m \u001b[1mC\u001b[0m \u001b[38;5;244m├\u001b[0m\u001b[36m┛\u001b[0m",
+        "                   \u001b[38;5;244m└───┘\u001b[0m"
+      ]
+    }
+  ]
+}

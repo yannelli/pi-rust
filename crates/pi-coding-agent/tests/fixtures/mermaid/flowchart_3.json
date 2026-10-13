@@ -1,0 +1,466 @@
+[
+  {
+    "name": "subgraph_quoted",
+    "src": "graph TD\n  subgraph \"Quoted &amp; title\"\n    A --> B\n  end\n  subgraph s2 [Second]\n    C\n  end\n  B --> C",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "┌ Quoted & title ┐",
+        "│      ┌───┐     │",
+        "│      │ A │     │",
+        "│      └─┬─┘     │",
+        "│        │       │",
+        "│        ▼       │",
+        "│      ┌───┐     │",
+        "│      │ B │     │",
+        "│      └───┘     │",
+        "└────────┬───────┘",
+        "         │",
+        "         ▼",
+        "    ┌ Second ┐",
+        "    │  ┌───┐ │",
+        "    │  │ C │ │",
+        "    │  └───┘ │",
+        "    └────────┘"
+      ],
+      "styled": [
+        [["┌","border"],[" Quoted & title ","text"],["┐","border"]],
+        [["│","border"],["      ","none"],["┌───┐","border"],["     ","none"],["│","border"]],
+        [["│","border"],["      ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"],["     ","none"],["│","border"]],
+        [["│","border"],["      ","none"],["└─┬─┘","border"],["     ","none"],["│","border"]],
+        [["│","border"],["        ","none"],["│","edge"],["       ","none"],["│","border"]],
+        [["│","border"],["        ","none"],["▼","edge"],["       ","none"],["│","border"]],
+        [["│","border"],["      ","none"],["┌───┐","border"],["     ","none"],["│","border"]],
+        [["│","border"],["      ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"],["     ","none"],["│","border"]],
+        [["│","border"],["      ","none"],["└───┘","border"],["     ","none"],["│","border"]],
+        [["└────────┬───────┘","border"]],
+        [["         ","none"],["│","edge"]],
+        [["         ","none"],["▼","edge"]],
+        [["    ","none"],["┌","border"],[" Second ","text"],["┐","border"]],
+        [["    ","none"],["│","border"],["  ","none"],["┌───┐","border"],[" ","none"],["│","border"]],
+        [["    ","none"],["│","border"],["  ","none"],["│","border"],[" ","none"],["C","text"],[" ","none"],["│","border"],[" ","none"],["│","border"]],
+        [["    ","none"],["│","border"],["  ","none"],["└───┘","border"],[" ","none"],["│","border"]],
+        [["    ","none"],["└────────┘","border"]]
+      ],
+      "width": 18,
+      "warnings": []
+    }
+  },
+  {
+    "name": "subgraph_edges_to_group",
+    "src": "flowchart TB\n  c1-->a2\n  subgraph one\n  a1-->a2\n  end\n  subgraph two\n  b1-->b2\n  end\n  subgraph three\n  c1-->c2\n  end\n  one --> two\n  three --> two\n  two --> c2",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "            ┌ one ─┐",
+        "   ┌────┐   │┌────┐│",
+        "   │ c1 │   ││ a1 │├─┐",
+        "   └─┬┬─┘   │└────┘│ │",
+        "     ││     └──┬───┘ │",
+        "     │└────────┤     │",
+        "     ▼         │     │",
+        " ┌ three ┐     ▼     │",
+        " │┌────┐ │  ┌────┐   │",
+        " ││ c2 │ │◄─│ a2 │───┼┐",
+        " │└────┘ │  └────┘   ││",
+        " └───┬───┘           ││",
+        "     └──┐            ││",
+        "        ▼            ││",
+        "    ┌ two ─┐         ││",
+        "    │┌────┐│         ││",
+        "    ││ b1 ││         ││",
+        "    │└──┬─┘│         ││",
+        "    │   │  │         ││",
+        "    │   ▼  ├◄────────┴┘",
+        "    │┌────┐│",
+        "    ││ b2 ││",
+        "    │└────┘│",
+        "    └──────┘"
+      ],
+      "styled": [
+        [["            ","none"],["┌","border"],[" one ","text"],["─┐","border"]],
+        [["   ","none"],["┌────┐","border"],["   ","none"],["│┌────┐│","border"]],
+        [["   ","none"],["│","border"],[" ","none"],["c1","text"],[" ","none"],["│","border"],["   ","none"],["││","border"],[" ","none"],["a1","text"],[" ","none"],["│├","border"],["─┐","edge"]],
+        [["   ","none"],["└─┬┬─┘","border"],["   ","none"],["│└────┘│","border"],[" ","none"],["│","edge"]],
+        [["     ","none"],["││","edge"],["     ","none"],["└──┬───┘","border"],[" ","none"],["│","edge"]],
+        [["     ","none"],["│└────────┤","edge"],["     ","none"],["│","edge"]],
+        [["     ","none"],["▼","edge"],["         ","none"],["│","edge"],["     ","none"],["│","edge"]],
+        [[" ","none"],["┌","border"],[" three ","text"],["┐","border"],["     ","none"],["▼","edge"],["     ","none"],["│","edge"]],
+        [[" ","none"],["│┌────┐","border"],[" ","none"],["│","border"],["  ","none"],["┌────┐","border"],["   ","none"],["│","edge"]],
+        [[" ","none"],["││","border"],[" ","none"],["c2","text"],[" ","none"],["│","border"],[" ","none"],["│","border"],["◄─","edge"],["│","border"],[" ","none"],["a2","text"],[" ","none"],["│","border"],["───┼┐","edge"]],
+        [[" ","none"],["│└────┘","border"],[" ","none"],["│","border"],["  ","none"],["└────┘","border"],["   ","none"],["││","edge"]],
+        [[" ","none"],["└───┬───┘","border"],["           ","none"],["││","edge"]],
+        [["     ","none"],["└──┐","edge"],["            ","none"],["││","edge"]],
+        [["        ","none"],["▼","edge"],["            ","none"],["││","edge"]],
+        [["    ","none"],["┌","border"],[" two ","text"],["─┐","border"],["         ","none"],["││","edge"]],
+        [["    ","none"],["│┌────┐│","border"],["         ","none"],["││","edge"]],
+        [["    ","none"],["││","border"],[" ","none"],["b1","text"],[" ","none"],["││","border"],["         ","none"],["││","edge"]],
+        [["    ","none"],["│└──┬─┘│","border"],["         ","none"],["││","edge"]],
+        [["    ","none"],["│","border"],["   ","none"],["│","edge"],["  ","none"],["│","border"],["         ","none"],["││","edge"]],
+        [["    ","none"],["│","border"],["   ","none"],["▼","edge"],["  ","none"],["├","border"],["◄────────┴┘","edge"]],
+        [["    ","none"],["│┌────┐│","border"]],
+        [["    ","none"],["││","border"],[" ","none"],["b2","text"],[" ","none"],["││","border"]],
+        [["    ","none"],["│└────┘│","border"]],
+        [["    ","none"],["└──────┘","border"]]
+      ],
+      "width": 23,
+      "warnings": []
+    }
+  },
+  {
+    "name": "subgraph_empty",
+    "src": "graph TD\n  subgraph empty\n  end\n  subgraph kept\n  end\n  A --> kept\n  B",
+    "kind": "flowchart",
+    "art": {
+      "plain": ["  ┌───┐   ┌───┐","  │ A │   │ B │","  └─┬─┘   └───┘","    │","    ▼","┌ kept ┐","│      │","└──────┘"],
+      "styled": [
+        [["  ","none"],["┌───┐","border"],["   ","none"],["┌───┐","border"]],
+        [["  ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"],["   ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [["  ","none"],["└─┬─┘","border"],["   ","none"],["└───┘","border"]],
+        [["    ","none"],["│","edge"]],
+        [["    ","none"],["▼","edge"]],
+        [["┌","border"],[" kept ","text"],["┐","border"]],
+        [["│","border"],["      ","none"],["│","border"]],
+        [["└──────┘","border"]]
+      ],
+      "width": 15,
+      "warnings": []
+    }
+  },
+  {
+    "name": "subgraph_rl",
+    "src": "graph RL\n  subgraph g1[Group one]\n    A[Alpha] --> B[Beta]\n  end\n  B --> C[Gamma]",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "             ┌────────── Group one ┐",
+        "             │                     │",
+        "┌───────┐    │┌──────┐    ┌───────┐│",
+        "│ Gamma │◄───┤│ Beta │◄───┤ Alpha ││",
+        "└───────┘    │└──────┘    └───────┘│",
+        "             └─────────────────────┘"
+      ],
+      "styled": [
+        [["             ","none"],["┌──────────","border"],[" Group one ","text"],["┐","border"]],
+        [["             ","none"],["│","border"],["                     ","none"],["│","border"]],
+        [["┌───────┐","border"],["    ","none"],["│┌──────┐","border"],["    ","none"],["┌───────┐│","border"]],
+        [["│","border"],[" ","none"],["Gamma","text"],[" ","none"],["│","border"],["◄───","edge"],["┤│","border"],[" ","none"],["Beta","text"],[" ","none"],["│","border"],["◄───","edge"],["┤","border"],[" ","none"],["Alpha","text"],[" ","none"],["││","border"]],
+        [["└───────┘","border"],["    ","none"],["│└──────┘","border"],["    ","none"],["└───────┘│","border"]],
+        [["             ","none"],["└─────────────────────┘","border"]]
+      ],
+      "width": 36,
+      "warnings": []
+    }
+  },
+  {
+    "name": "subgraph_bt",
+    "src": "graph BT\n  subgraph g1[Lower]\n    A --> B\n  end\n  subgraph g2[Upper]\n    C\n  end\n  B --> C",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        " ┌───────┐",
+        " │ ┌───┐ │",
+        " │ │ C │ │",
+        " │ └───┘ │",
+        " └ Upper ┘",
+        "     ▲",
+        "     │",
+        " ┌───┴───┐",
+        " │ ┌───┐ │",
+        " │ │ B │ │",
+        " │ └───┘ │",
+        " │   ▲   │",
+        " │   │   │",
+        " │ ┌─┴─┐ │",
+        " │ │ A │ │",
+        " │ └───┘ │",
+        " └ Lower ┘"
+      ],
+      "styled": [
+        [[" ","none"],["┌───────┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["┌───┐","border"],[" ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["│","border"],[" ","none"],["C","text"],[" ","none"],["│","border"],[" ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["└───┘","border"],[" ","none"],["│","border"]],
+        [[" ","none"],["└","border"],[" Upper ","text"],["┘","border"]],
+        [["     ","none"],["▲","edge"]],
+        [["     ","none"],["│","edge"]],
+        [[" ","none"],["┌───┴───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["┌───┐","border"],[" ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"],[" ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["└───┘","border"],[" ","none"],["│","border"]],
+        [[" ","none"],["│","border"],["   ","none"],["▲","edge"],["   ","none"],["│","border"]],
+        [[" ","none"],["│","border"],["   ","none"],["│","edge"],["   ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["┌─┴─┐","border"],[" ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"],[" ","none"],["│","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["└───┘","border"],[" ","none"],["│","border"]],
+        [[" ","none"],["└","border"],[" Lower ","text"],["┘","border"]]
+      ],
+      "width": 10,
+      "warnings": []
+    }
+  },
+  {
+    "name": "style_tags",
+    "src": "flowchart LR\n  A:::foo --> B:::bar-baz\n  B:::x-->C\n  C:::-->D\n  classDef foo fill:#f9f\n  class A foo",
+    "kind": "flowchart",
+    "art": {
+      "plain": ["┌───┐    ┌───┐    ┌───┐","│ A ├───▶│ B ├───▶│ C │","└───┘    └───┘    └───┘"],
+      "styled": [
+        [["┌───┐","border"],["    ","none"],["┌───┐","border"],["    ","none"],["┌───┐","border"]],
+        [["│","border"],[" ","none"],["A","text"],[" ","none"],["├","border"],["───▶","edge"],["│","border"],[" ","none"],["B","text"],[" ","none"],["├","border"],["───▶","edge"],["│","border"],[" ","none"],["C","text"],[" ","none"],["│","border"]],
+        [["└───┘","border"],["    ","none"],["└───┘","border"],["    ","none"],["└───┘","border"]]
+      ],
+      "width": 23,
+      "warnings": ["dropped, expected a link: \":::-->D\""]
+    }
+  },
+  {
+    "name": "ignored_statements",
+    "src": "graph TD\n  A --> B\n  classDef green fill:#9f6\n  class A green\n  style B fill:#f9f\n  linkStyle 0 stroke:#ff3\n  click A callback\n  direction LR",
+    "kind": "flowchart",
+    "art": {
+      "plain": [" ┌───┐"," │ A │"," └─┬─┘","   │","   ▼"," ┌───┐"," │ B │"," └───┘"],
+      "styled": [
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└─┬─┘","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"]],
+        [[" ","none"],["┌───┐","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["└───┘","border"]]
+      ],
+      "width": 6,
+      "warnings": []
+    }
+  },
+  {
+    "name": "comments_semicolons",
+    "src": "graph LR;\n  A --> B; B --> C %% trailing comment\n  %% whole line comment\n  C[\"a;b %% c\"] --> D",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "┌───┐    ┌───┐    ┌──────────┐    ┌───┐",
+        "│ A ├───▶│ B ├───▶│ a;b %% c ├───▶│ D │",
+        "└───┘    └───┘    └──────────┘    └───┘"
+      ],
+      "styled": [
+        [["┌───┐","border"],["    ","none"],["┌───┐","border"],["    ","none"],["┌──────────┐","border"],["    ","none"],["┌───┐","border"]],
+        [["│","border"],[" ","none"],["A","text"],[" ","none"],["├","border"],["───▶","edge"],["│","border"],[" ","none"],["B","text"],[" ","none"],["├","border"],["───▶","edge"],["│","border"],[" ","none"],["a;b %% c","text"],[" ","none"],["├","border"],["───▶","edge"],["│","border"],[" ","none"],["D","text"],[" ","none"],["│","border"]],
+        [["└───┘","border"],["    ","none"],["└───┘","border"],["    ","none"],["└──────────┘","border"],["    ","none"],["└───┘","border"]]
+      ],
+      "width": 39,
+      "warnings": []
+    }
+  },
+  {
+    "name": "html_labels",
+    "src": "graph TD\n  A[\"<b>Bold</b> and <i>italic</i>\"] --> B[line<br>break]\n  B --> C[\"`**strong** and _em_ snake_case`\"]\n  C --> D['single quoted']\n  D --> E[Vec<String> stays]",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "     ┌─────────────────┐",
+        "     │ Bold and italic │",
+        "     └────────┬────────┘",
+        "              │",
+        "              ▼",
+        "       ┌────────────┐",
+        "       │ line break │",
+        "       └──────┬─────┘",
+        "              │",
+        "              ▼",
+        "┌──────────────────────────┐",
+        "│ strong and em snake_case │",
+        "└─────────────┬────────────┘",
+        "              │",
+        "              ▼",
+        "      ┌───────────────┐",
+        "      │ single quoted │",
+        "      └───────┬───────┘",
+        "              │",
+        "              ▼",
+        "    ┌───────────────────┐",
+        "    │ Vec<String> stays │",
+        "    └───────────────────┘"
+      ],
+      "styled": [
+        [["     ","none"],["┌─────────────────┐","border"]],
+        [["     ","none"],["│","border"],[" ","none"],["Bold and italic","text"],[" ","none"],["│","border"]],
+        [["     ","none"],["└────────┬────────┘","border"]],
+        [["              ","none"],["│","edge"]],
+        [["              ","none"],["▼","edge"]],
+        [["       ","none"],["┌────────────┐","border"]],
+        [["       ","none"],["│","border"],[" ","none"],["line break","text"],[" ","none"],["│","border"]],
+        [["       ","none"],["└──────┬─────┘","border"]],
+        [["              ","none"],["│","edge"]],
+        [["              ","none"],["▼","edge"]],
+        [["┌──────────────────────────┐","border"]],
+        [["│","border"],[" ","none"],["strong and em snake_case","text"],[" ","none"],["│","border"]],
+        [["└─────────────┬────────────┘","border"]],
+        [["              ","none"],["│","edge"]],
+        [["              ","none"],["▼","edge"]],
+        [["      ","none"],["┌───────────────┐","border"]],
+        [["      ","none"],["│","border"],[" ","none"],["single quoted","text"],[" ","none"],["│","border"]],
+        [["      ","none"],["└───────┬───────┘","border"]],
+        [["              ","none"],["│","edge"]],
+        [["              ","none"],["▼","edge"]],
+        [["    ","none"],["┌───────────────────┐","border"]],
+        [["    ","none"],["│","border"],[" ","none"],["Vec<String> stays","text"],[" ","none"],["│","border"]],
+        [["    ","none"],["└───────────────────┘","border"]]
+      ],
+      "width": 28,
+      "warnings": []
+    }
+  },
+  {
+    "name": "entities",
+    "src": "graph TD\n  A[\"&amp; &lt;tag&gt; &quot;q&quot; &apos;s&apos;\"] --> B[\"&#35; &#x41; &#X42; &#0; &#xD800; &amp;lt;\"]\n  B --> C[\"&toString; &valueOf; &__proto__; &nope; & alone\"]",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "     ┌─────────────────┐",
+        "     │ & <tag> \"q\" 's' │",
+        "     └────────┬────────┘",
+        "              │",
+        "              ▼",
+        "┌──────────────────────────┐",
+        "│ # A B &#0; &#xD800; &lt; │",
+        "└─────────────┬────────────┘",
+        "              │",
+        "              ▼",
+        "┌──────────────────────────┐",
+        "│  function toString() {   │",
+        "│ [native code] } function │",
+        "│   valueOf() { [native    │",
+        "│ code] } [object Object]… │",
+        "└──────────────────────────┘"
+      ],
+      "styled": [
+        [["     ","none"],["┌─────────────────┐","border"]],
+        [["     ","none"],["│","border"],[" ","none"],["& <tag> \"q\" 's'","text"],[" ","none"],["│","border"]],
+        [["     ","none"],["└────────┬────────┘","border"]],
+        [["              ","none"],["│","edge"]],
+        [["              ","none"],["▼","edge"]],
+        [["┌──────────────────────────┐","border"]],
+        [["│","border"],[" ","none"],["# A B &#0; &#xD800; &lt;","text"],[" ","none"],["│","border"]],
+        [["└─────────────┬────────────┘","border"]],
+        [["              ","none"],["│","edge"]],
+        [["              ","none"],["▼","edge"]],
+        [["┌──────────────────────────┐","border"]],
+        [["│","border"],["  ","none"],["function toString() {","text"],["   ","none"],["│","border"]],
+        [["│","border"],[" ","none"],["[native code] } function","text"],[" ","none"],["│","border"]],
+        [["│","border"],["   ","none"],["valueOf() { [native","text"],["    ","none"],["│","border"]],
+        [["│","border"],[" ","none"],["code] } [object Object]…","text"],[" ","none"],["│","border"]],
+        [["└──────────────────────────┘","border"]]
+      ],
+      "width": 28,
+      "warnings": []
+    }
+  },
+  {
+    "name": "label_wrapping",
+    "src": "graph TD\n  A[This is a very long label that needs to wrap over several lines to fit inside the box width limit] --> B\n  B[some_very_long_identifier_name_that_has_no_spaces_at_all] --> C\n  C[path/to/a/really/deep/nested/file/in/the/repo.rs] --> D\n  D[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "┌──────────────────────────┐",
+        "│   This is a very long    │",
+        "│ label that needs to wrap │",
+        "│  over several lines to   │",
+        "│ fit inside the box widt… │",
+        "└─────────────┬────────────┘",
+        "              │",
+        "              ▼",
+        "  ┌───────────────────────┐",
+        "  │    some_very_long_    │",
+        "  │ identifier_name_that_ │",
+        "  │ has_no_spaces_at_all  │",
+        "  └───────────┬───────────┘",
+        "              │",
+        "              ▼",
+        "┌──────────────────────────┐",
+        "│  path/to/a/really/deep/  │",
+        "│ nested/file/in/the/repo. │",
+        "│            rs            │",
+        "└─────────────┬────────────┘",
+        "              │",
+        "              ▼",
+        "┌──────────────────────────┐",
+        "│ aaaaaaaaaaaaaaaaaaaaaaaa │",
+        "│ aaaaaaaaaaaaaaaaaaaaaaaa │",
+        "│        aaaaaaaaaa        │",
+        "└──────────────────────────┘"
+      ],
+      "styled": [
+        [["┌──────────────────────────┐","border"]],
+        [["│","border"],["   ","none"],["This is a very long","text"],["    ","none"],["│","border"]],
+        [["│","border"],[" ","none"],["label that needs to wrap","text"],[" ","none"],["│","border"]],
+        [["│","border"],["  ","none"],["over several lines to","text"],["   ","none"],["│","border"]],
+        [["│","border"],[" ","none"],["fit inside the box widt…","text"],[" ","none"],["│","border"]],
+        [["└─────────────┬────────────┘","border"]],
+        [["              ","none"],["│","edge"]],
+        [["              ","none"],["▼","edge"]],
+        [["  ","none"],["┌───────────────────────┐","border"]],
+        [["  ","none"],["│","border"],["    ","none"],["some_very_long_","text"],["    ","none"],["│","border"]],
+        [["  ","none"],["│","border"],[" ","none"],["identifier_name_that_","text"],[" ","none"],["│","border"]],
+        [["  ","none"],["│","border"],[" ","none"],["has_no_spaces_at_all","text"],["  ","none"],["│","border"]],
+        [["  ","none"],["└───────────┬───────────┘","border"]],
+        [["              ","none"],["│","edge"]],
+        [["              ","none"],["▼","edge"]],
+        [["┌──────────────────────────┐","border"]],
+        [["│","border"],["  ","none"],["path/to/a/really/deep/","text"],["  ","none"],["│","border"]],
+        [["│","border"],[" ","none"],["nested/file/in/the/repo.","text"],[" ","none"],["│","border"]],
+        [["│","border"],["            ","none"],["rs","text"],["            ","none"],["│","border"]],
+        [["└─────────────┬────────────┘","border"]],
+        [["              ","none"],["│","edge"]],
+        [["              ","none"],["▼","edge"]],
+        [["┌──────────────────────────┐","border"]],
+        [["│","border"],[" ","none"],["aaaaaaaaaaaaaaaaaaaaaaaa","text"],[" ","none"],["│","border"]],
+        [["│","border"],[" ","none"],["aaaaaaaaaaaaaaaaaaaaaaaa","text"],[" ","none"],["│","border"]],
+        [["│","border"],["        ","none"],["aaaaaaaaaa","text"],["        ","none"],["│","border"]],
+        [["└──────────────────────────┘","border"]]
+      ],
+      "width": 28,
+      "warnings": []
+    }
+  },
+  {
+    "name": "quoted_closer",
+    "src": "graph TD\n  A[\"a] b\"] --> B[5\" pipe]\n  B --> C(\"paren ) inside\")",
+    "kind": "flowchart",
+    "art": {
+      "plain": [
+        "     ┌──────┐",
+        "     │ a] b │",
+        "     └───┬──┘",
+        "         │",
+        "         ▼",
+        "    ┌─────────┐",
+        "    │ 5\" pipe │",
+        "    └────┬────┘",
+        "         │",
+        "         ▼",
+        "╭────────────────╮",
+        "│ paren ) inside │",
+        "╰────────────────╯"
+      ],
+      "styled": [
+        [["     ","none"],["┌──────┐","border"]],
+        [["     ","none"],["│","border"],[" ","none"],["a] b","text"],[" ","none"],["│","border"]],
+        [["     ","none"],["└───┬──┘","border"]],
+        [["         ","none"],["│","edge"]],
+        [["         ","none"],["▼","edge"]],
+        [["    ","none"],["┌─────────┐","border"]],
+        [["    ","none"],["│","border"],[" ","none"],["5\" pipe","text"],[" ","none"],["│","border"]],
+        [["    ","none"],["└────┬────┘","border"]],
+        [["         ","none"],["│","edge"]],
+        [["         ","none"],["▼","edge"]],
+        [["╭────────────────╮","border"]],
+        [["│","border"],[" ","none"],["paren ) inside","text"],[" ","none"],["│","border"]],
+        [["╰────────────────╯","border"]]
+      ],
+      "width": 18,
+      "warnings": []
+    }
+  }
+]

@@ -1,0 +1,20 @@
+«syntaxKeyword:import» «syntaxString:'dart:math'»;
+
+«syntaxComment:// A greeter»
+«syntaxKeyword:class» «syntaxType:Greeter» «syntaxKeyword:extends» «syntaxType:Base» {
+  «syntaxKeyword:final» «syntaxType:String» name;
+  «syntaxType:int» count = «syntaxNumber:42»;
+
+  «syntaxType:Greeter»(«syntaxType:this».name);
+
+  «muted:@override»
+  «syntaxType:String» «syntaxFunction:greet»([«syntaxType:int» times = «syntaxNumber:1»]) {
+    «syntaxKeyword:final» parts = <«syntaxType:String»>[];
+    «syntaxKeyword:for» («syntaxKeyword:var» i = «syntaxNumber:0»; i < «syntaxFunction:max»(times, «syntaxNumber:1»); i++) {
+      parts.«syntaxFunction:add»(«syntaxString:'Hello $»«syntaxVariable:name»«syntaxString: ${»«syntaxVariable:i + 1»«syntaxString:}'»);
+    }
+    «syntaxKeyword:return» parts.isEmpty ? «syntaxNumber:null» : parts.«syntaxFunction:join»(«syntaxString:', '»);
+  }
+}
+
+«syntaxType:void» «syntaxFunction:main»() => «syntaxFunction:print»(«syntaxType:Greeter»(«syntaxString:'world'»).«syntaxFunction:greet»(«syntaxNumber:2») + «syntaxNumber:true».«syntaxFunction:toString»());

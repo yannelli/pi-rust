@@ -1,0 +1,7 @@
+{
+  "name": "pi",
+  "version": 1.5,
+  "private": true,
+  "tags": ["a", "b"],
+  "nested": { "value": null, "count": -3 }
+}

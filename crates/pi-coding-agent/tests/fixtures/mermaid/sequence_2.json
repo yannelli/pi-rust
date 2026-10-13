@@ -1,0 +1,313 @@
+[
+  {
+    "name": "autonumber",
+    "src": "sequenceDiagram\n  autonumber\n  A->>B: first\n  B-->>A\n  A->>A: self",
+    "kind": "sequence",
+    "art": {
+      "plain": [
+        "┌───┐         ┌───┐",
+        "│ A │         │ B │",
+        "└─┬─┘         └─┬─┘",
+        "  │             │",
+        "  │  1. first   │",
+        "  ├────────────▶│",
+        "  │             │",
+        "  │     2.      │",
+        "  │◄╌╌╌╌╌╌╌╌╌╌╌╌┤",
+        "  │             │",
+        "  ├──╮          │",
+        "  │  │ 3. self  │",
+        "  │◄─╯          │",
+        "  │             │",
+        "┌─┴─┐         ┌─┴─┐",
+        "│ A │         │ B │",
+        "└───┘         └───┘"
+      ],
+      "styled": [
+        [["┌───┐","border"],["         ","none"],["┌───┐","border"]],
+        [["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"],["         ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [["└─┬─┘","border"],["         ","none"],["└─┬─┘","border"]],
+        [["  ","none"],["│","edge"],["             ","none"],["│","edge"]],
+        [["  ","none"],["│","edge"],["  ","none"],["1. first","text"],["   ","none"],["│","edge"]],
+        [["  ","none"],["├────────────▶│","edge"]],
+        [["  ","none"],["│","edge"],["             ","none"],["│","edge"]],
+        [["  ","none"],["│","edge"],["     ","none"],["2.","text"],["      ","none"],["│","edge"]],
+        [["  ","none"],["│◄╌╌╌╌╌╌╌╌╌╌╌╌┤","edge"]],
+        [["  ","none"],["│","edge"],["             ","none"],["│","edge"]],
+        [["  ","none"],["├──╮","edge"],["          ","none"],["│","edge"]],
+        [["  ","none"],["│","edge"],["  ","none"],["│","edge"],[" ","none"],["3. self","text"],["  ","none"],["│","edge"]],
+        [["  ","none"],["│◄─╯","edge"],["          ","none"],["│","edge"]],
+        [["  ","none"],["│","edge"],["             ","none"],["│","edge"]],
+        [["┌─┴─┐","border"],["         ","none"],["┌─┴─┐","border"]],
+        [["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"],["         ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [["└───┘","border"],["         ","none"],["└───┘","border"]]
+      ],
+      "width": 19,
+      "warnings": []
+    }
+  },
+  {
+    "name": "activations",
+    "src": "sequenceDiagram\n  title Ignored title\n  A->>+B: request\n  activate A\n  B-->>-A: response\n  deactivate A\n  create participant C\n  A->>C: make\n  destroy C",
+    "kind": "sequence",
+    "art": {
+      "plain": [
+        "┌───┐     ┌───┐  ┌───┐",
+        "│ A │     │ B │  │ C │",
+        "└─┬─┘     └─┬─┘  └─┬─┘",
+        "  │         │      │",
+        "  │ request │      │",
+        "  ├────────▶│      │",
+        "  │         │      │",
+        "  │response │      │",
+        "  │◄╌╌╌╌╌╌╌╌┤      │",
+        "  │         │      │",
+        "  │      make      │",
+        "  ├───────────────▶│",
+        "  │         │      │",
+        "┌─┴─┐     ┌─┴─┐  ┌─┴─┐",
+        "│ A │     │ B │  │ C │",
+        "└───┘     └───┘  └───┘"
+      ],
+      "styled": [
+        [["┌───┐","border"],["     ","none"],["┌───┐","border"],["  ","none"],["┌───┐","border"]],
+        [["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"],["     ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"],["  ","none"],["│","border"],[" ","none"],["C","text"],[" ","none"],["│","border"]],
+        [["└─┬─┘","border"],["     ","none"],["└─┬─┘","border"],["  ","none"],["└─┬─┘","border"]],
+        [["  ","none"],["│","edge"],["         ","none"],["│","edge"],["      ","none"],["│","edge"]],
+        [["  ","none"],["│","edge"],[" ","none"],["request","text"],[" ","none"],["│","edge"],["      ","none"],["│","edge"]],
+        [["  ","none"],["├────────▶│","edge"],["      ","none"],["│","edge"]],
+        [["  ","none"],["│","edge"],["         ","none"],["│","edge"],["      ","none"],["│","edge"]],
+        [["  ","none"],["│","edge"],["response","text"],[" ","none"],["│","edge"],["      ","none"],["│","edge"]],
+        [["  ","none"],["│◄╌╌╌╌╌╌╌╌┤","edge"],["      ","none"],["│","edge"]],
+        [["  ","none"],["│","edge"],["         ","none"],["│","edge"],["      ","none"],["│","edge"]],
+        [["  ","none"],["│","edge"],["      ","none"],["make","text"],["      ","none"],["│","edge"]],
+        [["  ","none"],["├───────────────▶│","edge"]],
+        [["  ","none"],["│","edge"],["         ","none"],["│","edge"],["      ","none"],["│","edge"]],
+        [["┌─┴─┐","border"],["     ","none"],["┌─┴─┐","border"],["  ","none"],["┌─┴─┐","border"]],
+        [["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"],["     ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"],["  ","none"],["│","border"],[" ","none"],["C","text"],[" ","none"],["│","border"]],
+        [["└───┘","border"],["     ","none"],["└───┘","border"],["  ","none"],["└───┘","border"]]
+      ],
+      "width": 22,
+      "warnings": []
+    }
+  },
+  {
+    "name": "long_labels",
+    "src": "sequenceDiagram\n  participant Short\n  participant VeryLongParticipantNameThatOverflows\n  Short->>VeryLongParticipantNameThatOverflows: a fairly long message label goes here\n  VeryLongParticipantNameThatOverflows-->>Short: ok",
+    "kind": "sequence",
+    "art": {
+      "plain": [
+        "┌───────┐                    ┌──────────────────────────┐",
+        "│ Short │                    │ VeryLongParticipantName… │",
+        "└───┬───┘                    └─────────────┬────────────┘",
+        "    │                                      │",
+        "    │a fairly long message label goes here │",
+        "    ├─────────────────────────────────────▶│",
+        "    │                                      │",
+        "    │                  ok                  │",
+        "    │◄╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤",
+        "    │                                      │",
+        "┌───┴───┐                    ┌─────────────┴────────────┐",
+        "│ Short │                    │ VeryLongParticipantName… │",
+        "└───────┘                    └──────────────────────────┘"
+      ],
+      "styled": [
+        [["┌───────┐","border"],["                    ","none"],["┌──────────────────────────┐","border"]],
+        [["│","border"],[" ","none"],["Short","text"],[" ","none"],["│","border"],["                    ","none"],["│","border"],[" ","none"],["VeryLongParticipantName…","text"],[" ","none"],["│","border"]],
+        [["└───┬───┘","border"],["                    ","none"],["└─────────────┬────────────┘","border"]],
+        [["    ","none"],["│","edge"],["                                      ","none"],["│","edge"]],
+        [["    ","none"],["│","edge"],["a fairly long message label goes here","text"],[" ","none"],["│","edge"]],
+        [["    ","none"],["├─────────────────────────────────────▶│","edge"]],
+        [["    ","none"],["│","edge"],["                                      ","none"],["│","edge"]],
+        [["    ","none"],["│","edge"],["                  ","none"],["ok","text"],["                  ","none"],["│","edge"]],
+        [["    ","none"],["│◄╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤","edge"]],
+        [["    ","none"],["│","edge"],["                                      ","none"],["│","edge"]],
+        [["┌───┴───┐","border"],["                    ","none"],["┌─────────────┴────────────┐","border"]],
+        [["│","border"],[" ","none"],["Short","text"],[" ","none"],["│","border"],["                    ","none"],["│","border"],[" ","none"],["VeryLongParticipantName…","text"],[" ","none"],["│","border"]],
+        [["└───────┘","border"],["                    ","none"],["└──────────────────────────┘","border"]]
+      ],
+      "width": 57,
+      "warnings": []
+    }
+  },
+  {
+    "name": "leftward",
+    "src": "sequenceDiagram\n  A->>B: right\n  C->>A: all the way left\n  B--xA: cross left",
+    "kind": "sequence",
+    "art": {
+      "plain": [
+        "┌───┐       ┌───┐  ┌───┐",
+        "│ A │       │ B │  │ C │",
+        "└─┬─┘       └─┬─┘  └─┬─┘",
+        "  │           │      │",
+        "  │   right   │      │",
+        "  ├──────────▶│      │",
+        "  │           │      │",
+        "  │ all the way left │",
+        "  │◄─────────────────┤",
+        "  │           │      │",
+        "  │cross left │      │",
+        "  │×╌╌╌╌╌╌╌╌╌╌┤      │",
+        "  │           │      │",
+        "┌─┴─┐       ┌─┴─┐  ┌─┴─┐",
+        "│ A │       │ B │  │ C │",
+        "└───┘       └───┘  └───┘"
+      ],
+      "styled": [
+        [["┌───┐","border"],["       ","none"],["┌───┐","border"],["  ","none"],["┌───┐","border"]],
+        [["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"],["       ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"],["  ","none"],["│","border"],[" ","none"],["C","text"],[" ","none"],["│","border"]],
+        [["└─┬─┘","border"],["       ","none"],["└─┬─┘","border"],["  ","none"],["└─┬─┘","border"]],
+        [["  ","none"],["│","edge"],["           ","none"],["│","edge"],["      ","none"],["│","edge"]],
+        [["  ","none"],["│","edge"],["   ","none"],["right","text"],["   ","none"],["│","edge"],["      ","none"],["│","edge"]],
+        [["  ","none"],["├──────────▶│","edge"],["      ","none"],["│","edge"]],
+        [["  ","none"],["│","edge"],["           ","none"],["│","edge"],["      ","none"],["│","edge"]],
+        [["  ","none"],["│","edge"],[" ","none"],["all the way left","text"],[" ","none"],["│","edge"]],
+        [["  ","none"],["│◄─────────────────┤","edge"]],
+        [["  ","none"],["│","edge"],["           ","none"],["│","edge"],["      ","none"],["│","edge"]],
+        [["  ","none"],["│","edge"],["cross left","text"],[" ","none"],["│","edge"],["      ","none"],["│","edge"]],
+        [["  ","none"],["│×╌╌╌╌╌╌╌╌╌╌┤","edge"],["      ","none"],["│","edge"]],
+        [["  ","none"],["│","edge"],["           ","none"],["│","edge"],["      ","none"],["│","edge"]],
+        [["┌─┴─┐","border"],["       ","none"],["┌─┴─┐","border"],["  ","none"],["┌─┴─┐","border"]],
+        [["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"],["       ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"],["  ","none"],["│","border"],[" ","none"],["C","text"],[" ","none"],["│","border"]],
+        [["└───┘","border"],["       ","none"],["└───┘","border"],["  ","none"],["└───┘","border"]]
+      ],
+      "width": 24,
+      "warnings": []
+    }
+  },
+  {
+    "name": "entities",
+    "src": "sequenceDiagram\n  A->>B: a &lt; b &amp;&amp; c\n  Note over A: &quot;quoted&quot;",
+    "kind": "sequence",
+    "art": null
+  },
+  {
+    "name": "entities_quoted",
+    "src": "sequenceDiagram\n  A->>B: \"a &lt; b &amp;&amp; c\"\n  Note over A: \"&#x41;&#66;\"",
+    "kind": "sequence",
+    "art": {
+      "plain": [
+        "┌───┐         ┌───┐",
+        "│ A │         │ B │",
+        "└─┬─┘         └─┬─┘",
+        "  │             │",
+        "  │\"a < b && c\" │",
+        "  ├────────────▶│",
+        "  │             │",
+        "┌──────┐        │",
+        "│ \"AB\" │        │",
+        "└──────┘        │",
+        "  │             │",
+        "┌─┴─┐         ┌─┴─┐",
+        "│ A │         │ B │",
+        "└───┘         └───┘"
+      ],
+      "styled": [
+        [["┌───┐","border"],["         ","none"],["┌───┐","border"]],
+        [["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"],["         ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [["└─┬─┘","border"],["         ","none"],["└─┬─┘","border"]],
+        [["  ","none"],["│","edge"],["             ","none"],["│","edge"]],
+        [["  ","none"],["│","edge"],["\"a < b && c\"","text"],[" ","none"],["│","edge"]],
+        [["  ","none"],["├────────────▶│","edge"]],
+        [["  ","none"],["│","edge"],["             ","none"],["│","edge"]],
+        [["┌──────┐","border"],["        ","none"],["│","edge"]],
+        [["│","border"],[" ","none"],["\"AB\"","text"],[" ","none"],["│","border"],["        ","none"],["│","edge"]],
+        [["└──────┘","border"],["        ","none"],["│","edge"]],
+        [["  ","none"],["│","edge"],["             ","none"],["│","edge"]],
+        [["┌─┴─┐","border"],["         ","none"],["┌─┴─┐","border"]],
+        [["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"],["         ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [["└───┘","border"],["         ","none"],["└───┘","border"]]
+      ],
+      "width": 19,
+      "warnings": []
+    }
+  },
+  {
+    "name": "final_line_retry",
+    "src": "sequenceDiagram\n  A->>B: hi\n  B-",
+    "kind": "sequence",
+    "art": {
+      "plain": [
+        "┌───┐  ┌───┐",
+        "│ A │  │ B │",
+        "└─┬─┘  └─┬─┘",
+        "  │      │",
+        "  │  hi  │",
+        "  ├─────▶│",
+        "  │      │",
+        "┌─┴─┐  ┌─┴─┐",
+        "│ A │  │ B │",
+        "└───┘  └───┘"
+      ],
+      "styled": [
+        [["┌───┐","border"],["  ","none"],["┌───┐","border"]],
+        [["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"],["  ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [["└─┬─┘","border"],["  ","none"],["└─┬─┘","border"]],
+        [["  ","none"],["│","edge"],["      ","none"],["│","edge"]],
+        [["  ","none"],["│","edge"],["  ","none"],["hi","text"],["  ","none"],["│","edge"]],
+        [["  ","none"],["├─────▶│","edge"]],
+        [["  ","none"],["│","edge"],["      ","none"],["│","edge"]],
+        [["┌─┴─┐","border"],["  ","none"],["┌─┴─┐","border"]],
+        [["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"],["  ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [["└───┘","border"],["  ","none"],["└───┘","border"]]
+      ],
+      "width": 12,
+      "warnings": ["dropped, unreadable final line: \"B-\""]
+    }
+  },
+  {"name":"invalid_mid","src":"sequenceDiagram\n  garbage here\n  A->>B: hi","kind":"sequence","art":null},
+  {"name":"header_only","src":"sequenceDiagram","kind":"sequence","art":null},
+  {
+    "name": "note_bad",
+    "src": "sequenceDiagram\n  A->>B: hi\n  Note under A: nope\n  B->>A: bye",
+    "kind": "sequence",
+    "art": null
+  },
+  {
+    "name": "long_divider",
+    "src": "sequenceDiagram\n  A->>B: x\n  loop this is a rather long loop condition that is wider than the diagram\n    B->>A: y\n  end",
+    "kind": "sequence",
+    "art": {
+      "plain": [
+        "┌───┐  ┌───┐",
+        "│ A │  │ B │",
+        "└─┬─┘  └─┬─┘",
+        "  │      │",
+        "  │  x   │",
+        "  ├─────▶│",
+        "  │      │",
+        "── loop this is a rather long loop condition that is wider than the diagram",
+        "  │      │",
+        "  │  y   │",
+        "  │◄─────┤",
+        "  │      │",
+        "── end ─────────────────────────────────────────────────────────────────────",
+        "  │      │",
+        "┌─┴─┐  ┌─┴─┐",
+        "│ A │  │ B │",
+        "└───┘  └───┘"
+      ],
+      "styled": [
+        [["┌───┐","border"],["  ","none"],["┌───┐","border"]],
+        [["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"],["  ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [["└─┬─┘","border"],["  ","none"],["└─┬─┘","border"]],
+        [["  ","none"],["│","edge"],["      ","none"],["│","edge"]],
+        [["  ","none"],["│","edge"],["  ","none"],["x","text"],["   ","none"],["│","edge"]],
+        [["  ","none"],["├─────▶│","edge"]],
+        [["  ","none"],["│","edge"],["      ","none"],["│","edge"]],
+        [["──","edge"],[" loop this is a rather long loop condition that is wider than the diagram","edgeLabel"]],
+        [["  ","none"],["│","edge"],["      ","none"],["│","edge"]],
+        [["  ","none"],["│","edge"],["  ","none"],["y","text"],["   ","none"],["│","edge"]],
+        [["  ","none"],["│◄─────┤","edge"]],
+        [["  ","none"],["│","edge"],["      ","none"],["│","edge"]],
+        [["──","edge"],[" end ","edgeLabel"],["─────────────────────────────────────────────────────────────────────","edge"]],
+        [["  ","none"],["│","edge"],["      ","none"],["│","edge"]],
+        [["┌─┴─┐","border"],["  ","none"],["┌─┴─┐","border"]],
+        [["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"],["  ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [["└───┘","border"],["  ","none"],["└───┘","border"]]
+      ],
+      "width": 76,
+      "warnings": []
+    }
+  }
+]

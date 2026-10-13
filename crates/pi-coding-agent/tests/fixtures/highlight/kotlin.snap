@@ -1,0 +1,16 @@
+«syntaxKeyword:package» demo
+
+«syntaxKeyword:import» kotlin.math.max
+
+«syntaxComment:// A greeter»
+«syntaxKeyword:data» «syntaxKeyword:class» «syntaxFunction:Greeter»(«syntaxKeyword:val» «syntaxVariable:name»: «syntaxType:String») : «syntaxFunction:Base»() {
+    «syntaxKeyword:private» «syntaxKeyword:val» count = «syntaxNumber:42»
+
+    «syntaxKeyword:fun» «syntaxFunction:greet»(«syntaxVariable:times»: «syntaxType:Int» = «syntaxNumber:1»): «syntaxType:String» {
+        «syntaxKeyword:val» parts = mutableListOf<«syntaxType:String»>()
+        «syntaxKeyword:for» (i «syntaxKeyword:in» «syntaxNumber:0» until max(times, «syntaxNumber:1»)) parts += «syntaxString:"Hello »«syntaxVariable:$name»«syntaxString: »«syntaxVariable:${i + 1}»«syntaxString:"»
+        «syntaxKeyword:return» «syntaxKeyword:if» (parts.isEmpty()) «syntaxString:""» «syntaxKeyword:else» parts.joinToString(«syntaxString:", "»)
+    }
+}
+
+«syntaxKeyword:fun» «syntaxFunction:main»() = println(Greeter(«syntaxString:"world"»).greet(«syntaxNumber:2») + «syntaxNumber:null» + «syntaxNumber:true»)

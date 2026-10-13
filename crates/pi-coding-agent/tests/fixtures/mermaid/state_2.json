@@ -1,0 +1,136 @@
+[
+  {
+    "name": "self_transition",
+    "src": "stateDiagram-v2\n  A --> A: tick\n  A --> B",
+    "kind": "state",
+    "art": {
+      "plain": [
+        "        ╭─────╮",
+        "        │  A  │",
+        "        ╰──┬┬─╯",
+        "           ││▲  tick",
+        "           │╰╯",
+        "           │",
+        "           ▼",
+        "         ╭───╮",
+        "         │ B │",
+        "         ╰───╯"
+      ],
+      "styled": [
+        [["        ","none"],["╭─────╮","border"]],
+        [["        ","none"],["│","border"],["  ","none"],["A","text"],["  ","none"],["│","border"]],
+        [["        ","none"],["╰──┬┬─╯","border"]],
+        [["           ","none"],["││▲","edge"],["  ","none"],["tick","edgeLabel"]],
+        [["           ","none"],["│╰╯","edge"]],
+        [["           ","none"],["│","edge"]],
+        [["           ","none"],["▼","edge"]],
+        [["         ","none"],["╭───╮","border"]],
+        [["         ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [["         ","none"],["╰───╯","border"]]
+      ],
+      "width": 20,
+      "warnings": []
+    }
+  },
+  {
+    "name": "final_line_retry",
+    "src": "stateDiagram-v2\n A --> B\n some garbage line",
+    "kind": "state",
+    "art": {
+      "plain": [" ╭───╮"," │ A │"," ╰─┬─╯","   │","   ▼"," ╭───╮"," │ B │"," ╰───╯"],
+      "styled": [
+        [[" ","none"],["╭───╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰─┬─╯","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"]],
+        [[" ","none"],["╭───╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰───╯","border"]]
+      ],
+      "width": 6,
+      "warnings": ["dropped, unreadable final line: \"some garbage line\""]
+    }
+  },
+  {
+    "name": "final_line_retry_trailing_ws",
+    "src": "stateDiagram-v2\n A --> B\n bad line here   \n\n  ",
+    "kind": "state",
+    "art": {
+      "plain": [" ╭───╮"," │ A │"," ╰─┬─╯","   │","   ▼"," ╭───╮"," │ B │"," ╰───╯"],
+      "styled": [
+        [[" ","none"],["╭───╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰─┬─╯","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"]],
+        [[" ","none"],["╭───╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰───╯","border"]]
+      ],
+      "width": 6,
+      "warnings": ["dropped, unreadable final line: \"bad line here\""]
+    }
+  },
+  {"name":"mid_garbage","src":"stateDiagram-v2\n  bad line here\n  A --> B","kind":"state","art":null},
+  {"name":"bad_chain","src":"stateDiagram-v2\n  A --> --> B","kind":"state","art":null},
+  {
+    "name": "empty_desc",
+    "src": "stateDiagram-v2\n  A --> B\n  C:",
+    "kind": "state",
+    "art": {
+      "plain": [" ╭───╮"," │ A │"," ╰─┬─╯","   │","   ▼"," ╭───╮"," │ B │"," ╰───╯"],
+      "styled": [
+        [[" ","none"],["╭───╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰─┬─╯","border"]],
+        [["   ","none"],["│","edge"]],
+        [["   ","none"],["▼","edge"]],
+        [[" ","none"],["╭───╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰───╯","border"]]
+      ],
+      "width": 6,
+      "warnings": ["dropped, unreadable final line: \"C:\""]
+    }
+  },
+  {
+    "name": "bt_direction",
+    "src": "stateDiagram-v2\n  direction BT\n  A --> B\n  B --> C",
+    "kind": "state",
+    "art": {
+      "plain": [
+        " ╭───╮",
+        " │ C │",
+        " ╰───╯",
+        "   ▲",
+        "   │",
+        " ╭─┴─╮",
+        " │ B │",
+        " ╰───╯",
+        "   ▲",
+        "   │",
+        " ╭─┴─╮",
+        " │ A │",
+        " ╰───╯"
+      ],
+      "styled": [
+        [[" ","none"],["╭───╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["C","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰───╯","border"]],
+        [["   ","none"],["▲","edge"]],
+        [["   ","none"],["│","edge"]],
+        [[" ","none"],["╭─┴─╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["B","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰───╯","border"]],
+        [["   ","none"],["▲","edge"]],
+        [["   ","none"],["│","edge"]],
+        [[" ","none"],["╭─┴─╮","border"]],
+        [[" ","none"],["│","border"],[" ","none"],["A","text"],[" ","none"],["│","border"]],
+        [[" ","none"],["╰───╯","border"]]
+      ],
+      "width": 6,
+      "warnings": []
+    }
+  }
+]

@@ -17,19 +17,44 @@ async-trait.workspace = true
 futures.workspace = true
 pi-agent.workspace = true
 pi-ai.workspace = true
+pi-codemode = { path = "../pi-codemode" }
+pi-js = { path = "../pi-js" }
+pi-mcp = { path = "../pi-mcp" }
+pi-tui = { path = "../pi-tui" }
+reqwest.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["float_roundtrip", "unbounded_depth"] }
 tokio.workspace = true
 tokio-util.workspace = true
 base64 = "0.22.1"
+flate2 = "1"
 globset = "0.4.16"
 ignore = "0.4.23"
+nodejs-semver = "7"
+ring.workspace = true
+jiff = { version = "0.2.35", default-features = false, features = ["std", "tz-system", "tzdb-bundle-platform", "tzdb-zoneinfo"] }
+image = { version = "0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
 regex = "1.11.1"
+serde_yaml_ng = "0.10.0"
 similar = "2.7.0"
+tar = { version = "0.4", default-features = false }
+syntect = { version = "5.3.0", default-features = false, features = ["parsing", "default-syntaxes", "regex-fancy"] }
+two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }
+notify = "8.2.0"
+pulldown-cmark = { version = "0.13.0", default-features = false }
+unicode-segmentation = "1.12"
 unicode-normalization = "0.1.24"
+url = "2.5.8"
+zip = { version = "7", default-features = false, features = ["deflate-flate2"] }
+semver = "1.0.26"
+agent-client-protocol-schema = { version = "=0.13.7", features = ["unstable_auth_methods"] }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.5", features = ["stdio", "process"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

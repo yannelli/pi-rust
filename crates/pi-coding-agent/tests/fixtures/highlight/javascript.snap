@@ -1,0 +1,16 @@
+«syntaxKeyword:import» { readFile } «syntaxKeyword:from» «syntaxString:"node:fs/promises"»;
+
+«syntaxComment:// Read a config file»
+«syntaxKeyword:export» «syntaxKeyword:async» «syntaxKeyword:function» «syntaxFunction:loadConfig»(«syntaxVariable:path», «syntaxVariable:options» = {}) {
+  «syntaxKeyword:const» re = «syntaxString:/foo+/gi»;
+  «syntaxKeyword:let» count = «syntaxNumber:0x10» + «syntaxNumber:42.5»;
+  «syntaxKeyword:const» text = «syntaxKeyword:await» readFile(path, «syntaxString:"utf8"»);
+  «syntaxKeyword:if» (text === «syntaxNumber:null» || «syntaxKeyword:typeof» text !== «syntaxString:"string"») {
+    «syntaxKeyword:throw» «syntaxKeyword:new» «syntaxType:Error»(«syntaxString:`Bad config: »«text:${path}»«syntaxString:`»);
+  }
+  «syntaxKeyword:return» { ...JSON.parse(text), count, «syntaxVariable:valid»: «syntaxNumber:true» };
+}
+
+«syntaxKeyword:class» «syntaxFunction:Loader» «syntaxKeyword:extends» «syntaxFunction:Base» {
+  «syntaxFunction:constructor»() { «syntaxType:super»(); «syntaxType:this».items = []; }
+}

@@ -1,0 +1,24 @@
+«syntaxKeyword:use» std::collections::HashMap;
+
+«syntaxComment:/// A point.»
+«muted:#[derive(Debug, Clone)]»
+«syntaxKeyword:pub» «syntaxKeyword:struct» «syntaxFunction:Point»<T> {
+    x: T,
+    y: T,
+}
+
+«syntaxKeyword:impl» Point<«syntaxType:i32»> {
+    «syntaxKeyword:pub» «syntaxKeyword:fn» «syntaxFunction:new»«syntaxVariable:(x:» «syntaxType:i32»«syntaxVariable:, y:» «syntaxType:i32»«syntaxVariable:)» -> «syntaxType:Self» {
+        «syntaxComment:// Build it»
+        «syntaxKeyword:let» «syntaxKeyword:mut» map: HashMap<&«syntaxType:str», «syntaxType:u8»> = HashMap::new();
+        map.insert(«syntaxString:"a"», «syntaxNumber:0xFF»);
+        «syntaxType:println!»(«syntaxString:"{} {}"», x, «syntaxNumber:1.5»);
+        «syntaxType:Self» { x, y }
+    }
+}
+
+«syntaxKeyword:fn» «syntaxFunction:main»«syntaxVariable:()» -> «syntaxType:Result»<(), «syntaxType:Box»<dyn std::error::Error>> {
+    «syntaxKeyword:let» p = Point::new(«syntaxNumber:1», «syntaxNumber:2»);
+    «syntaxKeyword:if» p.x > «syntaxNumber:0» && «syntaxNumber:true» { «syntaxKeyword:return» «syntaxNumber:Ok»(()); }
+    «syntaxNumber:Err»(«syntaxString:"bad"».into())
+}

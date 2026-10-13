@@ -1,0 +1,42 @@
+[package]
+name = "pi-js"
+description = "Embedded QuickJS runtime with TypeScript loading and Node compatibility for pi extensions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+base64.workspace = true
+futures.workspace = true
+reqwest.workspace = true
+ring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+md-5 = "0.10.6"
+oxc_allocator = "0.153.0"
+oxc_codegen = "0.153.0"
+oxc_diagnostics = "0.153.0"
+oxc_parser = "0.153.0"
+oxc_semantic = "0.153.0"
+oxc_sourcemap = "9.0.0"
+oxc_span = "0.153.0"
+oxc_transformer = "0.153.0"
+unicode-segmentation = "1.12"
+url = "2.5.8"
+
+# rquickjs-sys ships pregenerated bindings for every release target except armv7 musl.
+[target.'cfg(not(all(target_arch = "arm", target_env = "musl")))'.dependencies]
+rquickjs = { version = "0.14.0", default-features = false, features = ["std", "loader"] }
+
+[target.'cfg(all(target_arch = "arm", target_env = "musl"))'.dependencies]
+rquickjs = { version = "0.14.0", default-features = false, features = ["std", "loader", "bindgen"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

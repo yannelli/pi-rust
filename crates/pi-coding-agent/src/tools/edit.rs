@@ -1,7 +1,7 @@
 //! `edit` tool: exact text replacement with uniqueness checks and a diff in `details`.
 
-use std::io::ErrorKind;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
@@ -15,6 +15,7 @@ use super::edit_diff::{
     normalize_to_lf, restore_line_endings,
 };
 use super::mutation_queue::with_file_mutation_queue;
+use super::operations::{EditOperations, EditToolOptions, describe_error};
 use super::path_utils::resolve_to_cwd;
 use super::{check_aborted, parse_args};
 
@@ -22,6 +23,7 @@ const BOM: char = '\u{FEFF}';
 
 pub struct EditTool {
     cwd: PathBuf,
+    operations: Arc<dyn EditOperations>,
 }
 
 #[derive(Deserialize)]
@@ -33,7 +35,11 @@ struct EditArgs {
 
 impl EditTool {
     pub fn new(cwd: PathBuf) -> Self {
-        Self { cwd }
+        Self::with_options(cwd, EditToolOptions::default())
+    }
+
+    pub fn with_options(cwd: PathBuf, options: EditToolOptions) -> Self {
+        Self { cwd, operations: options.resolve() }
     }
 }
 
@@ -73,15 +79,6 @@ fn prepare_edit_arguments(mut args: Value) -> Value {
     args
 }
 
-fn error_code(kind: ErrorKind) -> String {
-    match kind {
-        ErrorKind::NotFound => "ENOENT".into(),
-        ErrorKind::PermissionDenied => "EACCES".into(),
-        ErrorKind::IsADirectory => "EISDIR".into(),
-        other => format!("{other:?}"),
-    }
-}
-
 #[async_trait]
 impl AgentTool for EditTool {
     fn name(&self) -> &str {
@@ -117,6 +114,22 @@ impl AgentTool for EditTool {
         })
     }
 
+    fn prompt_snippet(&self) -> Option<&str> {
+        super::builtin_snippet("edit")
+    }
+
+    fn prompt_guidelines(&self) -> Vec<String> {
+        super::builtin_guidelines("edit")
+    }
+
+    fn constrained_sampling(&self) -> Option<Value> {
+        Some(super::prefer_json_schema())
+    }
+
+    fn prepare_arguments(&self, args: Value) -> anyhow::Result<Value> {
+        Ok(prepare_edit_arguments(args))
+    }
+
     async fn execute(
         &self,
         _tool_call_id: &str,
@@ -133,18 +146,16 @@ impl AgentTool for EditTool {
 
         with_file_mutation_queue(&absolute, || async {
             check_aborted(&cancel)?;
-            let meta = tokio::fs::metadata(&absolute)
-                .await
-                .map_err(|e| anyhow!("Could not edit file: {path}. Error code: {}.", error_code(e.kind())))?;
-            if meta.is_dir() {
-                bail!("Could not edit file: {path}. Error code: EISDIR.");
+            let ops = &self.operations;
+            if let Err(error) = ops.access(&absolute).await {
+                check_aborted(&cancel)?;
+                bail!("Could not edit file: {path}. {}.", describe_error(&error));
             }
-            if meta.permissions().readonly() {
-                bail!("Could not edit file: {path}. Error code: EACCES.");
-            }
-            let buffer = tokio::fs::read(&absolute)
+            check_aborted(&cancel)?;
+            let buffer = ops
+                .read_file(&absolute)
                 .await
-                .map_err(|e| anyhow!("Could not edit file: {path}. Error code: {}.", error_code(e.kind())))?;
+                .map_err(|e| anyhow!("Could not edit file: {path}. {}.", describe_error(&e)))?;
             check_aborted(&cancel)?;
 
             let raw = String::from_utf8_lossy(&buffer);
@@ -158,7 +169,7 @@ impl AgentTool for EditTool {
             check_aborted(&cancel)?;
 
             let final_content = format!("{bom}{}", restore_line_endings(&new_content, ending));
-            tokio::fs::write(&absolute, final_content.as_bytes())
+            ops.write_file(&absolute, &final_content)
                 .await
                 .map_err(|e| anyhow!("Could not write file: {path}. {e}"))?;
             check_aborted(&cancel)?;

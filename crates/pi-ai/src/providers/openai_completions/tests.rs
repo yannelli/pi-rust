@@ -1,6 +1,9 @@
-use serde_json::{Value, json};
+//! Streaming basics, request conversion, and HTTP failures.
+
+use serde_json::json;
 
 use super::OpenAICompletions;
+use super::test_support::{API, chunk, done, finish, options};
 use crate::providers::mock_server::{
     MockResponse, MockServer, cancel_after_first_text, collect, frame, kinds, test_model,
 };
@@ -9,20 +12,6 @@ use crate::types::{
     AssistantMessage, ContentBlock, Context, Message, StopReason, ThinkingLevel, Tool, ToolCall, ToolResultMessage,
     Usage, UserContent, UserMessage,
 };
-
-const API: &str = "openai-completions";
-
-fn chunk(delta: Value) -> String {
-    frame(None, &json!({"id": "chatcmpl-1", "choices": [{"index": 0, "delta": delta}]}))
-}
-
-fn finish(reason: &str) -> String {
-    frame(None, &json!({"id": "chatcmpl-1", "choices": [{"index": 0, "delta": {}, "finish_reason": reason}]}))
-}
-
-fn done() -> String {
-    "data: [DONE]\n\n".to_string()
-}
 
 fn context() -> Context {
     Context { messages: vec![Message::user("hi")], ..Context::default() }
@@ -43,7 +32,7 @@ async fn streams_text_with_usage_and_cost() {
     ]))
     .await;
     let model = test_model(API, "local", &server.base_url);
-    let (events, message) = collect(OpenAICompletions.stream(&model, &context(), StreamOptions::default())).await;
+    let (events, message) = collect(OpenAICompletions.stream(&model, &context(), options())).await;
     assert_eq!(kinds(&events), ["start", "text_start", "text_delta", "text_delta", "text_end", "done"]);
     assert_eq!(message.text(), "Hello");
     assert_eq!(message.stop_reason, StopReason::Stop);
@@ -53,7 +42,8 @@ async fn streams_text_with_usage_and_cost() {
     assert!((message.usage.cost.total - (60.0 + 40.0 * 0.5 + 20.0 * 2.0) / 1e6).abs() < 1e-12);
     let request = server.request().await;
     assert_eq!(request.path, "/chat/completions");
-    assert!(!request.headers.contains_key("authorization"), "local servers get no auth header without a key");
+    assert_eq!(request.headers["authorization"], "Bearer test-key");
+    assert_eq!(request.headers["user-agent"], crate::http::pi_user_agent());
 }
 
 #[tokio::test]
@@ -79,7 +69,7 @@ async fn interleaved_tool_calls_are_assembled_by_index() {
     ]))
     .await;
     let model = test_model(API, "local", &server.base_url);
-    let (events, message) = collect(OpenAICompletions.stream(&model, &context(), StreamOptions::default())).await;
+    let (events, message) = collect(OpenAICompletions.stream(&model, &context(), options())).await;
     assert_eq!(message.stop_reason, StopReason::ToolUse);
     let calls: Vec<_> = message.tool_calls().collect();
     assert_eq!(calls.len(), 2);
@@ -101,7 +91,7 @@ async fn reasoning_content_becomes_signed_thinking() {
     ]))
     .await;
     let model = test_model(API, "local", &server.base_url);
-    let (_, message) = collect(OpenAICompletions.stream(&model, &context(), StreamOptions::default())).await;
+    let (_, message) = collect(OpenAICompletions.stream(&model, &context(), options())).await;
     let ContentBlock::Thinking { thinking, thinking_signature, .. } = &message.content[0] else { panic!("thinking") };
     assert_eq!(thinking, "Let me think.");
     assert_eq!(thinking_signature.as_deref(), Some("reasoning_content"));
@@ -114,6 +104,7 @@ fn history(model_id: &str) -> Vec<Message> {
         name: "read".into(),
         arguments: json!({"path": "a.png"}).as_object().cloned().unwrap(),
         thought_signature: None,
+        ..Default::default()
     };
     vec![
         Message::User(UserMessage {
@@ -142,6 +133,7 @@ fn history(model_id: &str) -> Vec<Message> {
             error_message: None,
             timestamp: 2,
             duration_ms: None,
+            ..Default::default()
         }),
         Message::ToolResult(ToolResultMessage {
             tool_call_id: "call_1".into(),
@@ -154,6 +146,7 @@ fn history(model_id: &str) -> Vec<Message> {
             is_error: false,
             timestamp: 3,
             duration_ms: None,
+            ..Default::default()
         }),
     ]
 }
@@ -172,6 +165,7 @@ async fn request_body_converts_messages_tools_and_options() {
             name: "read".into(),
             description: "Read a file".into(),
             parameters: json!({"type": "object", "properties": {"path": {"type": "string"}}}),
+            ..Default::default()
         }],
     };
     let mut options = StreamOptions {
@@ -221,7 +215,7 @@ async fn http_errors_report_the_provider_message() {
 async fn missing_finish_reason_is_an_error() {
     let server = MockServer::start(MockResponse::Sse(vec![chunk(json!({"content": "partial"})), done()])).await;
     let model = test_model(API, "local", &server.base_url);
-    let (_, message) = collect(OpenAICompletions.stream(&model, &context(), StreamOptions::default())).await;
+    let (_, message) = collect(OpenAICompletions.stream(&model, &context(), options())).await;
     assert_eq!(message.stop_reason, StopReason::Error);
     assert_eq!(message.error_message.as_deref(), Some("Stream ended without finish_reason"));
     assert_eq!(message.text(), "partial");
@@ -231,7 +225,7 @@ async fn missing_finish_reason_is_an_error() {
 async fn cancellation_mid_stream_aborts() {
     let server = MockServer::start(MockResponse::SseThenHang(vec![chunk(json!({"content": "Hi"}))])).await;
     let model = test_model(API, "local", &server.base_url);
-    let options = StreamOptions::default();
+    let options = options();
     let cancel = options.cancel.clone();
     let message = cancel_after_first_text(OpenAICompletions.stream(&model, &context(), options), cancel).await;
     assert_eq!(message.stop_reason, StopReason::Aborted);

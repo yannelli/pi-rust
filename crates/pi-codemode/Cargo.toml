@@ -1,0 +1,33 @@
+[package]
+name = "pi-codemode"
+description = "Codemode sandbox, declarations, and tool search for the pi agent harness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+pi-agent.workspace = true
+pi-ai.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+base64 = "0.22.1"
+
+# rquickjs-sys ships pregenerated bindings for every release target except armv7 musl.
+[target.'cfg(not(all(target_arch = "arm", target_env = "musl")))'.dependencies]
+rquickjs = { version = "0.14.0", default-features = false, features = ["std"] }
+
+[target.'cfg(all(target_arch = "arm", target_env = "musl"))'.dependencies]
+rquickjs = { version = "0.14.0", default-features = false, features = ["std", "bindgen"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

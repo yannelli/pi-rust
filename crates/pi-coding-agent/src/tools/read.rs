@@ -1,28 +1,64 @@
 //! `read` tool: text files with offset/limit and head truncation, images as attachments.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
-use base64::Engine;
-use pi_agent::{AgentTool, AgentToolResult, ToolUpdateCallback};
-use pi_ai::ContentBlock;
+use pi_agent::{AgentTool, AgentToolResult, ToolContext, ToolUpdateCallback};
+use pi_ai::{ContentBlock, ImageResizeOptions, Model};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
+use super::operations::{LocalFileOperations, ReadOperations};
 use super::path_utils::resolve_read_path;
 use super::truncate::{
     DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, TruncatedBy, TruncationOptions, format_size, truncate_head,
 };
 use super::{as_count, check_aborted, parse_args};
+use crate::images::{ProcessImageOptions, process_image};
 
-const IMAGE_TYPE_SNIFF_BYTES: usize = 4100;
+const NON_VISION_IMAGE_NOTE: &str =
+    "[Current model does not support images. The image will be omitted from this request.]";
 const PNG_SIGNATURE: &[u8] = &[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 pub struct ReadTool {
     cwd: PathBuf,
     description: String,
+    auto_resize: bool,
+    /// Resize profile for calls without a model.
+    resize: Option<ImageResizeOptions>,
+    /// Note that images are dropped, for calls without a model.
+    non_vision_note: bool,
+    operations: Arc<dyn ReadOperations>,
+}
+
+/// Options of the read tool (upstream `ReadToolOptions`).
+#[derive(Clone)]
+pub struct ReadToolOptions {
+    /// Resize images to the model's limits (`images.autoResize`). Default: true.
+    pub auto_resize_images: bool,
+    /// Resize profile when the call's model has none.
+    pub resize_options: Option<ImageResizeOptions>,
+    /// Custom backend. Default: the local file system.
+    pub operations: Option<Arc<dyn ReadOperations>>,
+}
+
+impl Default for ReadToolOptions {
+    fn default() -> Self {
+        Self { auto_resize_images: true, resize_options: None, operations: None }
+    }
+}
+
+impl std::fmt::Debug for ReadToolOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReadToolOptions")
+            .field("auto_resize_images", &self.auto_resize_images)
+            .field("resize_options", &self.resize_options)
+            .field("custom_operations", &self.operations.is_some())
+            .finish()
+    }
 }
 
 #[derive(Deserialize)]
@@ -34,12 +70,120 @@ struct ReadArgs {
 
 impl ReadTool {
     pub fn new(cwd: PathBuf) -> Self {
+        Self::with_options(cwd, ReadToolOptions::default())
+    }
+
+    /// Calls inside the agent loop use their turn's model for the resize profile and the
+    /// note about models without image input; `options` cover calls without one.
+    pub fn with_options(cwd: PathBuf, options: ReadToolOptions) -> Self {
         let description = format!(
             "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to {DEFAULT_MAX_LINES} lines or {}KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
             DEFAULT_MAX_BYTES / 1024
         );
-        Self { cwd, description }
+        Self {
+            cwd,
+            description,
+            auto_resize: options.auto_resize_images,
+            resize: options.resize_options,
+            non_vision_note: false,
+            operations: options.operations.unwrap_or_else(|| Arc::new(LocalFileOperations)),
+        }
     }
+
+    /// Images are processed with `options`, for example [`ProcessImageOptions::for_model`].
+    pub fn with_image_options(cwd: PathBuf, image_options: ProcessImageOptions) -> Self {
+        let options = ReadToolOptions {
+            auto_resize_images: image_options.auto_resize,
+            resize_options: image_options.resize,
+            operations: None,
+        };
+        Self::with_options(cwd, options)
+    }
+
+    /// Resize profile from the model's `inputLimits`, plus the note for models without vision.
+    pub fn for_model(cwd: PathBuf, model: &pi_ai::Model, auto_resize: bool) -> Self {
+        let mut tool = Self::with_image_options(cwd, ProcessImageOptions::for_model(model, auto_resize));
+        tool.non_vision_note = !supports_images(model);
+        tool
+    }
+
+    async fn read(
+        &self,
+        args: Value,
+        model: Option<&Model>,
+        cancel: CancellationToken,
+    ) -> anyhow::Result<AgentToolResult> {
+        let args: ReadArgs = parse_args("read", args)?;
+        check_aborted(&cancel)?;
+        let absolute = resolve_read_path(&args.path, &self.cwd);
+        let ops = &self.operations;
+        let unreadable = |e: anyhow::Error| anyhow!("Could not read file {}: {e}", absolute.display());
+        ops.access(&absolute).await.map_err(unreadable)?;
+        check_aborted(&cancel)?;
+        let mime_type = ops.detect_image_mime_type(&absolute).await.map_err(unreadable)?;
+        check_aborted(&cancel)?;
+        let buffer = ops.read_file(&absolute).await.map_err(unreadable)?;
+        check_aborted(&cancel)?;
+        let Some(mime_type) = mime_type else {
+            return read_text(&String::from_utf8_lossy(&buffer), &args);
+        };
+        let resize = model.and_then(|model| ProcessImageOptions::for_model(model, self.auto_resize).resize);
+        let options = ProcessImageOptions { auto_resize: self.auto_resize, resize: resize.or(self.resize) };
+        let image_mime = mime_type.clone();
+        let processed = tokio::task::spawn_blocking(move || process_image(&buffer, &image_mime, &options)).await?;
+        check_aborted(&cancel)?;
+        let non_vision = model.map_or(self.non_vision_note, |model| !supports_images(model));
+        let vision_note = if non_vision { format!("\n{NON_VISION_IMAGE_NOTE}") } else { String::new() };
+        let content = match processed {
+            Ok(image) => {
+                let mut note = format!("Read image file [{}]", image.mime_type);
+                if !image.hints.is_empty() {
+                    note.push('\n');
+                    note.push_str(&image.hints.join("\n"));
+                }
+                note.push_str(&vision_note);
+                vec![ContentBlock::text(note), ContentBlock::Image { data: image.data, mime_type: image.mime_type }]
+            }
+            Err(message) => vec![ContentBlock::text(format!("Read image file [{mime_type}]\n{message}{vision_note}"))],
+        };
+        Ok(AgentToolResult { content, ..Default::default() })
+    }
+}
+
+fn supports_images(model: &Model) -> bool {
+    model.input.iter().any(|input| input == "image")
+}
+
+/// The image and its note, or the text for text files and images that could not be processed.
+fn to_read_output(content: &[ContentBlock]) -> Value {
+    let text = content.iter().find_map(ContentBlock::as_text).unwrap_or_default();
+    let image = content.iter().find_map(|block| match block {
+        ContentBlock::Image { data, mime_type } => Some((data, mime_type)),
+        _ => None,
+    });
+    match image {
+        Some((data, mime_type)) => json!({ "type": "image", "data": data, "mimeType": mime_type, "note": text }),
+        None => json!(text),
+    }
+}
+
+/// Schema of the read tool's `structured_content`.
+pub fn read_output_schema() -> Value {
+    json!({
+        "anyOf": [
+            { "type": "string" },
+            {
+                "type": "object",
+                "properties": {
+                    "type": { "const": "image", "type": "string" },
+                    "data": { "type": "string" },
+                    "mimeType": { "type": "string" },
+                    "note": { "type": "string" }
+                },
+                "required": ["type", "data", "mimeType", "note"]
+            }
+        ]
+    })
 }
 
 #[async_trait]
@@ -64,6 +208,22 @@ impl AgentTool for ReadTool {
         })
     }
 
+    fn output_schema(&self) -> Option<Value> {
+        Some(read_output_schema())
+    }
+
+    fn constrained_sampling(&self) -> Option<Value> {
+        Some(super::prefer_json_schema())
+    }
+
+    fn prompt_snippet(&self) -> Option<&str> {
+        super::builtin_snippet("read")
+    }
+
+    fn prompt_guidelines(&self) -> Vec<String> {
+        super::builtin_guidelines("read")
+    }
+
     async fn execute(
         &self,
         _tool_call_id: &str,
@@ -71,27 +231,21 @@ impl AgentTool for ReadTool {
         cancel: CancellationToken,
         _on_update: ToolUpdateCallback,
     ) -> anyhow::Result<AgentToolResult> {
-        let args: ReadArgs = parse_args("read", args)?;
-        check_aborted(&cancel)?;
-        let absolute = resolve_read_path(&args.path, &self.cwd);
-        let buffer =
-            tokio::fs::read(&absolute).await.map_err(|e| anyhow!("Could not read file {}: {e}", absolute.display()))?;
-        check_aborted(&cancel)?;
+        let result = self.read(args, None, cancel).await?;
+        let structured = to_read_output(&result.content);
+        Ok(result.with_structured_content(structured))
+    }
 
-        let sniff = &buffer[..buffer.len().min(IMAGE_TYPE_SNIFF_BYTES)];
-        if let Some(mime_type) = detect_supported_image_mime_type(sniff) {
-            let data = base64::engine::general_purpose::STANDARD.encode(&buffer);
-            return Ok(AgentToolResult {
-                content: vec![
-                    ContentBlock::text(format!("Read image file [{mime_type}]")),
-                    ContentBlock::Image { data, mime_type: mime_type.to_string() },
-                ],
-                ..Default::default()
-            });
-        }
-
-        let text = String::from_utf8_lossy(&buffer);
-        read_text(&text, &args)
+    async fn execute_with_context(
+        &self,
+        context: &ToolContext,
+        args: Value,
+        cancel: CancellationToken,
+        _on_update: ToolUpdateCallback,
+    ) -> anyhow::Result<AgentToolResult> {
+        let result = self.read(args, context.model(), cancel).await?;
+        let structured = to_read_output(&result.content);
+        Ok(result.with_structured_content(structured))
     }
 }
 

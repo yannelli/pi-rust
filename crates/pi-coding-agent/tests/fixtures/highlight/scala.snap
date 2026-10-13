@@ -1,0 +1,18 @@
+«syntaxKeyword:package» demo
+
+«syntaxKeyword:import» scala.collection.mutable
+
+«syntaxComment:// A greeter»
+«syntaxKeyword:case class»«syntaxFunction: Greeter»(«syntaxVariable:name»: «syntaxType:String») «syntaxKeyword:extends» «syntaxFunction:Base» {
+  «syntaxKeyword:val» count: «syntaxType:Int» = «syntaxNumber:42»
+
+  «syntaxKeyword:def» «syntaxFunction:greet»(«syntaxVariable:times»: «syntaxType:Int» = «syntaxNumber:1»): «syntaxType:String» = {
+    «syntaxKeyword:val» parts = mutable.ListBuffer[«syntaxType:String»]()
+    «syntaxKeyword:for» («syntaxVariable:i» <- «syntaxNumber:0» until times) parts += «syntaxType:s»«syntaxString:"Hello »$name«syntaxString: »$i«syntaxString:"»
+    «syntaxKeyword:if» (parts.isEmpty) «syntaxNumber:null» «syntaxKeyword:else» parts.mkString(«syntaxString:", "»)
+  }
+}
+
+«syntaxType:object»«syntaxFunction: Main» «syntaxKeyword:extends» «syntaxFunction:App» {
+  println(«syntaxType:Greeter»(«syntaxString:"world"»).greet(«syntaxNumber:2») + «syntaxNumber:true»)
+}

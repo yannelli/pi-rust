@@ -2,19 +2,22 @@
 //! and reduces loop events into observable state.
 
 use std::collections::{HashSet, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use futures::FutureExt;
-use pi_ai::{ContentBlock, Message, Model, ThinkingLevel, UserContent, UserMessage, now_ms};
+use futures::future::BoxFuture;
+use pi_ai::transcript::{create_initial_system_message, current_system_message, current_system_prompt};
+use pi_ai::{ContentBlock, Message, Model, StreamOptions, ThinkingLevel, UserContent, UserMessage, now_ms};
 use serde::{Deserialize, Serialize};
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::agent_loop::{
-    AfterToolCallFn, AgentContext, AgentLoopConfig, ApiKeyFn, BeforeToolCallFn, EventSink, MessageSource, StreamFn,
-    TransformContextFn, run_agent_loop, run_agent_loop_continue,
+    AfterToolCallFn, AgentContext, AgentLoopConfig, ApiKeyFn, BeforeToolCallFn, CallableToolsFn, ConvertToLlmFn,
+    EventSink, MessageSource, StreamFn, TransformContextFn, run_agent_loop, run_agent_loop_continue,
 };
+use crate::hooks::{AgentEventHookFn, FinishTurnFn, PrepareNextTurnFn, PrepareRequestFn};
 use crate::types::{AgentEvent, SharedTool, ToolExecutionMode};
 
 /// How queued messages are released to the loop.
@@ -33,6 +36,13 @@ struct MessageQueue {
 }
 
 impl MessageQueue {
+    fn peek(&self) -> Vec<Message> {
+        match self.mode {
+            QueueMode::All => self.messages.iter().cloned().collect(),
+            QueueMode::OneAtATime => self.messages.front().cloned().into_iter().collect(),
+        }
+    }
+
     fn drain(&mut self) -> Vec<Message> {
         match self.mode {
             QueueMode::All => self.messages.drain(..).collect(),
@@ -55,6 +65,27 @@ pub struct AgentState {
     pub error_message: Option<String>,
 }
 
+impl AgentState {
+    /// The system prompt: `system_prompt` when set, else replayed from the transcript.
+    pub fn current_system_prompt(&self) -> String {
+        match &self.system_prompt {
+            Some(prompt) => prompt.clone(),
+            None => current_system_prompt(&self.messages),
+        }
+    }
+}
+
+/// Initial state for [`Agent::with_initial_state`]. The prompt and tools become the leading
+/// system message unless `messages` already starts with one.
+#[derive(Clone, Default)]
+pub struct AgentInitialState {
+    pub system_prompt: Option<String>,
+    pub model: Option<Model>,
+    pub thinking_level: ThinkingLevel,
+    pub tools: Vec<SharedTool>,
+    pub messages: Vec<Message>,
+}
+
 /// Hooks and request settings applied to every run.
 #[derive(Clone, Default)]
 pub struct AgentHooks {
@@ -64,6 +95,17 @@ pub struct AgentHooks {
     pub before_tool_call: Option<BeforeToolCallFn>,
     pub after_tool_call: Option<AfterToolCallFn>,
     pub transform_context: Option<TransformContextFn>,
+    pub convert_to_llm: Option<ConvertToLlmFn>,
+    pub finish_turn: Option<FinishTurnFn>,
+    pub prepare_request: Option<PrepareRequestFn>,
+    pub prepare_next_turn: Option<PrepareNextTurnFn>,
+    pub callable_tools: Option<CallableToolsFn>,
+    /// Awaited for every loop event after state is updated and before listeners run, as
+    /// upstream awaits its async listeners. For `MessageEnd`, a returned message with the same
+    /// role replaces the finalized one in the state, the transcript, and the listener event.
+    pub on_event: Option<AgentEventHookFn>,
+    /// Base request options such as transport, thinking budgets, and payload observers.
+    pub stream_options: StreamOptions,
     pub tool_execution: ToolExecutionMode,
     pub max_tokens: Option<u64>,
     pub temperature: Option<f64>,
@@ -71,6 +113,8 @@ pub struct AgentHooks {
 }
 
 pub type Listener = Arc<dyn Fn(&AgentEvent) + Send + Sync>;
+/// A listener the run awaits, with the run's abort signal (upstream async `subscribe`).
+pub type AsyncListener = Arc<dyn Fn(AgentEvent, CancellationToken) -> BoxFuture<'static, ()> + Send + Sync>;
 
 struct Inner {
     state: Mutex<AgentState>,
@@ -78,10 +122,13 @@ struct Inner {
     steering: Mutex<MessageQueue>,
     follow_up: Mutex<MessageQueue>,
     listeners: Mutex<Vec<(u64, Listener)>>,
+    async_listeners: Mutex<Vec<(u64, AsyncListener)>>,
     next_listener: AtomicU64,
     run: Mutex<Option<CancellationToken>>,
     running: watch::Sender<bool>,
 }
+
+type RunEventSender = mpsc::UnboundedSender<Option<AgentEvent>>;
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -113,11 +160,55 @@ impl Agent {
                 steering: Mutex::new(MessageQueue::default()),
                 follow_up: Mutex::new(MessageQueue::default()),
                 listeners: Mutex::new(Vec::new()),
+                async_listeners: Mutex::new(Vec::new()),
                 next_listener: AtomicU64::new(0),
                 run: Mutex::new(None),
                 running: watch::channel(false).0,
             }),
         }
+    }
+
+    /// An agent whose transcript carries the prompt and tool declarations, as upstream.
+    pub fn with_initial_state(initial: AgentInitialState) -> Self {
+        let unknown = || Model {
+            id: "unknown".into(),
+            name: "unknown".into(),
+            api: "unknown".into(),
+            provider: "unknown".into(),
+            ..Model::default()
+        };
+        let agent = Self::new(initial.model.unwrap_or_else(unknown));
+        let declarations: Vec<_> = initial.tools.iter().map(|tool| tool.declaration()).collect();
+        let mut messages = initial.messages;
+        if !matches!(messages.first(), Some(Message::System(_)))
+            && let Some(system) = create_initial_system_message(initial.system_prompt.as_deref(), &declarations)
+        {
+            messages.insert(0, Message::System(system));
+        }
+        agent.update_state(|state| {
+            state.thinking_level = initial.thinking_level;
+            state.tools = initial.tools;
+            state.messages = messages;
+        });
+        agent
+    }
+
+    /// Clear the transcript and queues, keeping the replayed prompt and tool baseline.
+    pub fn reset(&self) -> anyhow::Result<()> {
+        if lock(&self.inner.run).is_some() {
+            anyhow::bail!("Agent is already processing. Wait for completion before resetting.");
+        }
+        {
+            let mut state = lock(&self.inner.state);
+            let baseline = current_system_message(&state.messages);
+            state.messages = baseline.map(Message::System).into_iter().collect();
+            state.is_streaming = false;
+            state.streaming_message = None;
+            state.pending_tool_calls.clear();
+            state.error_message = None;
+        }
+        self.clear_queues();
+        Ok(())
     }
 
     /// A copy of the current state.
@@ -150,8 +241,23 @@ impl Agent {
         id
     }
 
+    /// Register a listener the run awaits. Events reach it in order, one at a time, after the
+    /// sync listeners; the run and [`Self::wait_for_idle`] settle once it has handled
+    /// `agent_end`. It gets the run's abort signal. Returns an id for `unsubscribe`.
+    pub fn subscribe_async<F, Fut>(&self, listener: F) -> u64
+    where
+        F: Fn(AgentEvent, CancellationToken) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let id = self.inner.next_listener.fetch_add(1, Ordering::SeqCst);
+        let listener: AsyncListener = Arc::new(move |event, signal| listener(event, signal).boxed());
+        lock(&self.inner.async_listeners).push((id, listener));
+        id
+    }
+
     pub fn unsubscribe(&self, id: u64) {
         lock(&self.inner.listeners).retain(|(listener_id, _)| *listener_id != id);
+        lock(&self.inner.async_listeners).retain(|(listener_id, _)| *listener_id != id);
     }
 
     /// Queue a message delivered after the current turn's tool calls.
@@ -165,8 +271,35 @@ impl Agent {
     }
 
     pub fn clear_queues(&self) {
+        self.clear_steering_queue();
+        self.clear_follow_up_queue();
+    }
+
+    pub fn clear_steering_queue(&self) {
         lock(&self.inner.steering).messages.clear();
+    }
+
+    pub fn clear_follow_up_queue(&self) {
         lock(&self.inner.follow_up).messages.clear();
+    }
+
+    /// The messages the next drain point would take, without consuming them.
+    pub fn peek_queued_messages(&self) -> Vec<Message> {
+        let steering = lock(&self.inner.steering).peek();
+        if steering.is_empty() { lock(&self.inner.follow_up).peek() } else { steering }
+    }
+
+    pub fn steering_mode(&self) -> QueueMode {
+        lock(&self.inner.steering).mode
+    }
+
+    pub fn follow_up_mode(&self) -> QueueMode {
+        lock(&self.inner.follow_up).mode
+    }
+
+    /// Cancellation token of the active run, if any.
+    pub fn signal(&self) -> Option<CancellationToken> {
+        lock(&self.inner.run).clone()
     }
 
     /// Remove and return all queued messages, steering first.
@@ -191,6 +324,7 @@ impl Agent {
         }
     }
 
+    /// Wait until the run and the async listeners' handling of its events have finished.
     pub async fn wait_for_idle(&self) {
         let mut receiver = self.inner.running.subscribe();
         let _ = receiver.wait_for(|running| !running).await;
@@ -209,30 +343,52 @@ impl Agent {
     }
 
     pub async fn prompt_messages(&self, messages: Vec<Message>) -> anyhow::Result<()> {
+        self.run_prompt(messages, false).await
+    }
+
+    async fn run_prompt(&self, messages: Vec<Message>, skip_initial_steering_poll: bool) -> anyhow::Result<()> {
         let cancel = self.begin_run()?;
-        let (mut context, config) = self.snapshot();
-        run_agent_loop(messages, &mut context, &config, self.sink(), cancel).await;
+        let (mut context, config) = self.snapshot(skip_initial_steering_poll);
+        let (sink, deliver, close) = self.sink(cancel.clone());
+        let run = async {
+            run_agent_loop(messages, &mut context, &config, sink, cancel).await;
+            let _ = close.send(None);
+        };
+        tokio::join!(run, deliver);
         self.finish_run();
         Ok(())
     }
 
     /// Continue from the transcript; after an assistant message, queued input is used.
     pub async fn continue_run(&self) -> anyhow::Result<()> {
-        let last_is_assistant = match lock(&self.inner.state).messages.last() {
-            None => anyhow::bail!("No messages to continue from"),
-            Some(message) => matches!(message, Message::Assistant(_)),
+        let last_is_assistant = {
+            let state = lock(&self.inner.state);
+            if state.messages.iter().all(|message| matches!(message, Message::System(_))) {
+                anyhow::bail!("No messages to continue from");
+            }
+            matches!(state.messages.last(), Some(Message::Assistant(_)))
         };
         if last_is_assistant {
-            let steering: Vec<Message> = lock(&self.inner.steering).messages.drain(..).collect();
-            let queued = if steering.is_empty() { lock(&self.inner.follow_up).drain() } else { steering };
-            if queued.is_empty() {
+            // Steering already delivered here is not polled again when the run starts.
+            let steering = lock(&self.inner.steering).drain();
+            if !steering.is_empty() {
+                return self.run_prompt(steering, true).await;
+            }
+            let follow_ups = lock(&self.inner.follow_up).drain();
+            if follow_ups.is_empty() {
                 anyhow::bail!("Cannot continue from message role: assistant");
             }
-            return self.prompt_messages(queued).await;
+            return self.run_prompt(follow_ups, false).await;
         }
         let cancel = self.begin_run()?;
-        let (mut context, config) = self.snapshot();
-        let result = run_agent_loop_continue(&mut context, &config, self.sink(), cancel).await;
+        let (mut context, config) = self.snapshot(false);
+        let (sink, deliver, close) = self.sink(cancel.clone());
+        let run = async {
+            let result = run_agent_loop_continue(&mut context, &config, sink, cancel).await;
+            let _ = close.send(None);
+            result
+        };
+        let (result, ()) = tokio::join!(run, deliver);
         self.finish_run();
         result.map(|_| ())
     }
@@ -265,14 +421,16 @@ impl Agent {
         self.inner.running.send_replace(false);
     }
 
-    fn snapshot(&self) -> (AgentContext, AgentLoopConfig) {
+    fn snapshot(&self, skip_initial_steering_poll: bool) -> (AgentContext, AgentLoopConfig) {
         let state = lock(&self.inner.state).clone();
         let hooks = lock(&self.inner.hooks).clone();
         let context = AgentContext { system_prompt: state.system_prompt, messages: state.messages, tools: state.tools };
         let steering = self.inner.clone();
         let follow_up = self.inner.clone();
+        let skip = Arc::new(AtomicBool::new(skip_initial_steering_poll));
         let get_steering_messages: MessageSource = Arc::new(move || {
-            let messages = lock(&steering.steering).drain();
+            let messages =
+                if skip.swap(false, Ordering::SeqCst) { Vec::new() } else { lock(&steering.steering).drain() };
             async move { messages }.boxed()
         });
         let get_follow_up_messages: MessageSource = Arc::new(move || {
@@ -294,43 +452,91 @@ impl Agent {
             before_tool_call: hooks.before_tool_call,
             after_tool_call: hooks.after_tool_call,
             transform_context: hooks.transform_context,
+            convert_to_llm: hooks.convert_to_llm,
+            finish_turn: hooks.finish_turn,
+            prepare_request: hooks.prepare_request,
+            prepare_next_turn: hooks.prepare_next_turn,
+            callable_tools: hooks.callable_tools,
+            stream_options: hooks.stream_options,
         };
         (context, config)
     }
 
-    fn sink(&self) -> EventSink {
-        let inner = self.inner.clone();
-        Arc::new(move |event| {
-            {
-                let mut state = lock(&inner.state);
-                match &event {
-                    AgentEvent::MessageStart { message } | AgentEvent::MessageUpdate { message, .. } => {
-                        state.streaming_message = Some(message.clone());
-                    }
-                    AgentEvent::MessageEnd { message } => {
-                        state.streaming_message = None;
-                        state.messages.push(message.clone());
-                    }
-                    AgentEvent::ToolExecutionStart { tool_call_id, .. } => {
-                        state.pending_tool_calls.insert(tool_call_id.clone());
-                    }
-                    AgentEvent::ToolExecutionEnd { tool_call_id, .. } => {
-                        state.pending_tool_calls.remove(tool_call_id);
-                    }
-                    AgentEvent::TurnEnd { message: Message::Assistant(message), .. }
-                        if message.error_message.is_some() =>
-                    {
-                        state.error_message = message.error_message.clone();
-                    }
-                    AgentEvent::AgentEnd { .. } => state.streaming_message = None,
-                    _ => {}
+    /// The run's event sink, the future that hands its events to the async listeners, and the
+    /// sender that ends that future (`None`) after the events queued before it.
+    fn sink(&self, cancel: CancellationToken) -> (EventSink, BoxFuture<'static, ()>, RunEventSender) {
+        let (sender, mut receiver) = mpsc::unbounded_channel::<Option<AgentEvent>>();
+        let close = sender.clone();
+        let listeners = self.inner.clone();
+        let signal = cancel.clone();
+        let deliver = async move {
+            while let Some(Some(event)) = receiver.recv().await {
+                let current: Vec<AsyncListener> =
+                    lock(&listeners.async_listeners).iter().map(|(_, listener)| listener.clone()).collect();
+                for listener in current {
+                    listener(event.clone(), signal.clone()).await;
                 }
             }
-            let listeners: Vec<Listener> =
-                lock(&inner.listeners).iter().map(|(_, listener)| listener.clone()).collect();
-            for listener in listeners {
-                listener(&event);
+        };
+        let inner = self.inner.clone();
+        let hook = lock(&self.inner.hooks).on_event.clone();
+        let sink: EventSink = Arc::new(move |event| {
+            let (inner, hook, cancel, sender) = (inner.clone(), hook.clone(), cancel.clone(), sender.clone());
+            async move {
+                reduce(&inner, &event);
+                let replacement = match &hook {
+                    Some(hook) => hook(event.clone(), cancel).await,
+                    None => None,
+                };
+                let event = match (event, replacement) {
+                    (AgentEvent::MessageEnd { message }, Some(replaced)) if replaced.role() == message.role() => {
+                        if let Some(last) = lock(&inner.state).messages.last_mut() {
+                            *last = replaced.clone();
+                        }
+                        AgentEvent::MessageEnd { message: replaced }
+                    }
+                    (event, _) => event,
+                };
+                let listeners: Vec<Listener> =
+                    lock(&inner.listeners).iter().map(|(_, listener)| listener.clone()).collect();
+                for listener in listeners {
+                    listener(&event);
+                }
+                if !lock(&inner.async_listeners).is_empty() {
+                    let _ = sender.send(Some(event.clone()));
+                }
+                match event {
+                    AgentEvent::MessageEnd { message } => Some(message),
+                    _ => None,
+                }
             }
-        })
+            .boxed()
+        });
+        (sink, deliver.boxed(), close)
+    }
+}
+
+/// Reduce a loop event into the observable state before hooks and listeners see it.
+fn reduce(inner: &Inner, event: &AgentEvent) {
+    let mut state = lock(&inner.state);
+    match event {
+        AgentEvent::MessageStart { message } | AgentEvent::MessageUpdate { message, .. } => {
+            state.streaming_message = Some(message.clone());
+        }
+        AgentEvent::MessageEnd { message } => {
+            state.streaming_message = None;
+            state.messages.push(message.clone());
+        }
+        AgentEvent::ToolExecutionStart { tool_call_id, .. } => {
+            state.pending_tool_calls.insert(tool_call_id.clone());
+        }
+        AgentEvent::ToolExecutionEnd { tool_call_id, .. } => {
+            state.pending_tool_calls.remove(tool_call_id);
+        }
+        AgentEvent::TurnEnd { message: Message::Assistant(message), .. } if message.error_message.is_some() => {
+            state.error_message = message.error_message.clone();
+        }
+        AgentEvent::AgentEnd { .. } => state.streaming_message = None,
+        _ => {}
     }
 }

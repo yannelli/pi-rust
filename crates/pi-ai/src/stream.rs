@@ -10,7 +10,7 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 
 use crate::json::parse_streaming_json;
-use crate::types::{AssistantMessage, ContentBlock, JsonObject, Model, StopReason, ToolCall};
+use crate::types::{AssistantMessage, ContentBlock, DeferredHandle, JsonObject, Model, StopReason, ToolCall};
 
 /// Streaming events. A stream emits `Start` first and ends with exactly one
 /// `Done` or `Error`; setup failures may emit `Error` without `Start`.
@@ -114,6 +114,19 @@ pub fn error_stream(model: &Model, reason: StopReason, error: impl Into<String>)
     stream
 }
 
+/// An assistant message diagnostic (`{type, timestamp, error?, details?}`), as upstream
+/// `createAssistantMessageDiagnostic` builds it.
+pub fn diagnostic(kind: &str, error: Option<&str>, details: Option<JsonObject>) -> Value {
+    let mut value = serde_json::json!({"type": kind, "timestamp": crate::types::now_ms()});
+    if let Some(message) = error {
+        value["error"] = serde_json::json!({"message": message});
+    }
+    if let Some(details) = details {
+        value["details"] = Value::Object(details);
+    }
+    value
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum OpenBlock {
     Text(usize),
@@ -123,6 +136,7 @@ enum OpenBlock {
 struct PendingToolCall {
     content_index: usize,
     json: String,
+    ended: bool,
 }
 
 /// Builds the partial message and emits ordered events. Providers call the
@@ -271,9 +285,10 @@ impl MessageBuilder {
             name: name.into(),
             arguments: JsonObject::new(),
             thought_signature: None,
+            ..Default::default()
         }));
         let content_index = self.message.content.len() - 1;
-        self.tool_calls.push(PendingToolCall { content_index, json: String::new() });
+        self.tool_calls.push(PendingToolCall { content_index, json: String::new(), ended: false });
         self.sender.push(AssistantMessageEvent::ToolcallStart { content_index, partial: self.message.clone() });
         self.tool_calls.len() - 1
     }
@@ -314,24 +329,46 @@ impl MessageBuilder {
         }
     }
 
+    /// Finish one tool call: parse its arguments and emit `ToolcallEnd`. Calls that are still
+    /// open when the message finishes end automatically.
+    pub fn end_tool_call(&mut self, handle: usize) {
+        let Some(pending) = self.tool_calls.get_mut(handle).filter(|pending| !pending.ended) else { return };
+        pending.ended = true;
+        let content_index = pending.content_index;
+        let arguments = match parse_streaming_json(&pending.json) {
+            Some(Value::Object(arguments)) => Some(arguments),
+            _ => None,
+        };
+        let ContentBlock::ToolCall(call) = &mut self.message.content[content_index] else { return };
+        if let Some(arguments) = arguments {
+            call.arguments = arguments;
+        }
+        let tool_call = call.clone();
+        self.sender.push(AssistantMessageEvent::ToolcallEnd {
+            content_index,
+            tool_call,
+            partial: self.message.clone(),
+        });
+    }
+
     fn end_tool_calls(&mut self) {
-        for pending in std::mem::take(&mut self.tool_calls) {
-            let ContentBlock::ToolCall(call) = &mut self.message.content[pending.content_index] else { continue };
-            if !pending.json.trim().is_empty()
-                && let Ok(Value::Object(arguments)) = serde_json::from_str::<Value>(&pending.json)
-            {
-                call.arguments = arguments;
-            }
-            let tool_call = call.clone();
-            self.sender.push(AssistantMessageEvent::ToolcallEnd {
-                content_index: pending.content_index,
-                tool_call,
-                partial: self.message.clone(),
-            });
+        for handle in 0..self.tool_calls.len() {
+            self.end_tool_call(handle);
         }
     }
 
-    /// Emit `Done`. `reason` must be `Stop`, `Length`, or `ToolUse`; a `Stop`
+    /// Emit `Done` with reason `Deferred`: the provider continues the request later.
+    pub fn defer(mut self, handle: DeferredHandle) {
+        self.message.deferred = Some(handle);
+        self.finish(StopReason::Deferred);
+    }
+
+    /// Append a redacted diagnostic to the message, see [`diagnostic`].
+    pub fn add_diagnostic(&mut self, diagnostic: Value) {
+        self.message.diagnostics.push(diagnostic);
+    }
+
+    /// Emit `Done`. `reason` must be `Stop`, `Length`, `ToolUse`, or `Deferred`; a `Stop`
     /// response that contains tool calls is reported as `ToolUse`.
     pub fn finish(mut self, reason: StopReason) {
         self.close_open_block();
@@ -389,6 +426,7 @@ mod tests {
             max_tokens: 100,
             headers: Default::default(),
             compat: None,
+            ..Default::default()
         }
     }
 

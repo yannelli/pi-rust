@@ -1,9 +1,30 @@
 //! Built-in wire protocols.
 
 pub mod anthropic;
+pub mod aws;
+pub mod azure_openai_responses;
+pub mod bedrock;
+pub mod cloudflare;
 mod common;
+pub mod constrained_sampling;
+mod emitter;
 pub mod faux;
+pub mod github_copilot;
+pub mod google;
+pub mod google_vertex;
 #[cfg(test)]
-mod mock_server;
+mod http_mock;
+mod http_stream;
+pub mod mistral;
+#[cfg(test)]
+mod mock_http;
+#[cfg(test)]
+pub(crate) mod mock_server;
+pub mod openai_codex;
 pub mod openai_completions;
 pub mod openai_responses;
+pub mod pi_messages;
+#[cfg(test)]
+mod plumbing_tests;
+mod provider_env;
+mod transform;

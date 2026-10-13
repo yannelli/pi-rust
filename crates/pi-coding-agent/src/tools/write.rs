@@ -1,6 +1,7 @@
 //! `write` tool: create or overwrite a file, creating parent directories.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Context;
 use async_trait::async_trait;
@@ -10,11 +11,13 @@ use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use super::mutation_queue::with_file_mutation_queue;
+use super::operations::{WriteOperations, WriteToolOptions};
 use super::path_utils::resolve_to_cwd;
 use super::{check_aborted, parse_args};
 
 pub struct WriteTool {
     cwd: PathBuf,
+    operations: Arc<dyn WriteOperations>,
 }
 
 #[derive(Deserialize)]
@@ -25,7 +28,11 @@ struct WriteArgs {
 
 impl WriteTool {
     pub fn new(cwd: PathBuf) -> Self {
-        Self { cwd }
+        Self::with_options(cwd, WriteToolOptions::default())
+    }
+
+    pub fn with_options(cwd: PathBuf, options: WriteToolOptions) -> Self {
+        Self { cwd, operations: options.resolve() }
     }
 }
 
@@ -50,6 +57,18 @@ impl AgentTool for WriteTool {
         })
     }
 
+    fn prompt_snippet(&self) -> Option<&str> {
+        super::builtin_snippet("write")
+    }
+
+    fn prompt_guidelines(&self) -> Vec<String> {
+        super::builtin_guidelines("write")
+    }
+
+    fn constrained_sampling(&self) -> Option<Value> {
+        Some(super::prefer_json_schema())
+    }
+
     async fn execute(
         &self,
         _tool_call_id: &str,
@@ -62,12 +81,14 @@ impl AgentTool for WriteTool {
         with_file_mutation_queue(&absolute, || async {
             check_aborted(&cancel)?;
             if let Some(dir) = absolute.parent() {
-                tokio::fs::create_dir_all(dir)
+                self.operations
+                    .mkdir(dir)
                     .await
                     .with_context(|| format!("Could not create directory {}", dir.display()))?;
             }
             check_aborted(&cancel)?;
-            tokio::fs::write(&absolute, args.content.as_bytes())
+            self.operations
+                .write_file(&absolute, &args.content)
                 .await
                 .with_context(|| format!("Could not write file {}", absolute.display()))?;
             check_aborted(&cancel)?;

@@ -2,7 +2,7 @@
 
 use std::fs::File;
 use std::hash::{BuildHasher, Hasher};
-use std::io::Write;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
 use super::truncate::{
@@ -55,6 +55,14 @@ pub struct OutputSnapshot {
     pub content: String,
     pub truncation: TruncationResult,
     pub full_output_path: Option<PathBuf>,
+}
+
+/// The complete output, or its head and tail when it is too long.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FullOutput {
+    pub content: String,
+    /// Whether `content` omits part of the output.
+    pub truncated: bool,
 }
 
 pub struct OutputAccumulator {
@@ -152,6 +160,16 @@ impl OutputAccumulator {
         }
     }
 
+    /// The complete output for callers that take more than the display snapshot. Call after
+    /// `finish` and `close_temp_file`. Output over `max_bytes` keeps its first and last
+    /// `max_bytes / 2` bytes around an omission marker.
+    pub fn read_full_output(&self, max_bytes: usize) -> FullOutput {
+        let Some(path) = &self.temp_path else {
+            return FullOutput { content: String::from_utf8_lossy(&self.raw_chunks).into_owned(), truncated: false };
+        };
+        read_file_output(path, max_bytes).unwrap_or_else(|_| FullOutput { content: String::new(), truncated: false })
+    }
+
     pub fn last_line_bytes(&self) -> usize {
         self.current_line_bytes
     }
@@ -215,6 +233,50 @@ impl OutputAccumulator {
         self.temp_path = Some(path);
         self.temp_file = Some(file);
     }
+}
+
+/// Length of `bytes` without an incomplete UTF-8 sequence at the end.
+fn complete_prefix_len(bytes: &[u8]) -> usize {
+    let len = bytes.len();
+    for back in 1..=len.min(4) {
+        let byte = bytes[len - back];
+        if byte & 0xc0 == 0x80 {
+            continue;
+        }
+        let needed = match byte {
+            0xf0.. => 4,
+            0xe0.. => 3,
+            0xc0.. => 2,
+            _ => 1,
+        };
+        return if needed > back { len - back } else { len };
+    }
+    len
+}
+
+fn read_file_output(path: &std::path::Path, max_bytes: usize) -> std::io::Result<FullOutput> {
+    let mut file = File::open(path)?;
+    let size = file.metadata()?.len() as usize;
+    if size <= max_bytes {
+        let mut bytes = Vec::with_capacity(size);
+        file.read_to_end(&mut bytes)?;
+        return Ok(FullOutput { content: String::from_utf8_lossy(&bytes).into_owned(), truncated: false });
+    }
+    let head_bytes = max_bytes / 2;
+    let tail_bytes = max_bytes - head_bytes;
+    let mut head = vec![0; head_bytes];
+    file.read_exact(&mut head)?;
+    let mut tail = vec![0; tail_bytes];
+    file.seek(SeekFrom::Start((size - tail_bytes) as u64))?;
+    file.read_exact(&mut tail)?;
+    // Cut at character boundaries: drop an incomplete trailing sequence of the head and
+    // leading continuation bytes of the tail.
+    let head_text = String::from_utf8_lossy(&head[..complete_prefix_len(&head)]);
+    let tail_start = tail.iter().take_while(|byte| *byte & 0xc0 == 0x80).count();
+    let tail_text = String::from_utf8_lossy(&tail[tail_start..]);
+    let omitted = size - head_bytes - tail_bytes;
+    let content = format!("{head_text}\n\n[... {omitted} bytes omitted ...]\n\n{tail_text}");
+    Ok(FullOutput { content, truncated: true })
 }
 
 /// Create `<tmp>/<prefix>-<random hex><ext>` readable only by the user.

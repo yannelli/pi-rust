@@ -1,0 +1,18 @@
+«syntaxKeyword:package» com.example;
+
+«syntaxKeyword:import» java.util.List;
+
+«syntaxComment:/** A greeter. */»
+«syntaxKeyword:public» «syntaxKeyword:class» «syntaxFunction:Greeter»<«syntaxVariable:T»> «syntaxKeyword:extends» «syntaxFunction:Base» «syntaxKeyword:implements» «syntaxFunction:Runnable» {
+    «syntaxKeyword:private» «syntaxKeyword:static» «syntaxKeyword:final» «syntaxKeyword:int» COUNT = «syntaxNumber:42»;
+
+    «muted:@Override»
+«muted:    »«syntaxKeyword:public» «syntaxKeyword:void» «syntaxFunction:run»() {
+        «syntaxComment:// Print greetings»
+        «syntaxKeyword:for» («syntaxKeyword:int» i = «syntaxNumber:0»; i < COUNT; i++) {
+            System.out.println(«syntaxString:"Hello "» + i + «syntaxString:'c'»);
+        }
+        List<String> names = «syntaxNumber:null»;
+        «syntaxKeyword:boolean» ok = «syntaxNumber:true»;
+    }
+}
