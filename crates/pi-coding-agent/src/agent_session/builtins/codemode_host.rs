@@ -198,7 +198,7 @@ impl CodemodeModels for SessionModels {
         let result = match self.request(&model, cancel).await {
             Ok((resolved, request)) => {
                 let options = ClassifierOptions { request, temperature: None };
-                pi_ai::classify::classify(&resolved, &context, options).await
+                self.runtime.classify(&resolved, &context, options).await
             }
             Err(message) => classifier_error_result(&model, message, aborted.is_cancelled()),
         };
@@ -212,7 +212,7 @@ impl CodemodeModels for SessionModels {
         let result = match self.request(&model, cancel).await {
             Ok((resolved, request)) => {
                 let options = ImagesOptions { request, metadata: None };
-                pi_ai::images::generate_images(&resolved, &context, options).await
+                self.runtime.generate_images(&resolved, &context, options).await
             }
             Err(message) => image_error_result(&model, message, aborted.is_cancelled()),
         };

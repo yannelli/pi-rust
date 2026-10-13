@@ -14,6 +14,7 @@ mod ops_host;
 mod ops_session;
 mod ops_ui;
 mod provider;
+mod provider_hooks;
 pub mod registry;
 mod replace;
 pub mod rpc;

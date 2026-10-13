@@ -32,5 +32,7 @@ pub use output_guard::{
     write_raw_stdout,
 };
 pub use redact::{redact_json_value, redact_url};
-pub use stack::{ExtensionStackInfo, find_extension_stack_matches, format_crash_extension_hint};
+pub use stack::{
+    ExtensionStackInfo, StackError, error_stack, find_extension_stack_matches, format_crash_extension_hint,
+};
 pub use timings::{print_timings, reset_timings, time, time_in};

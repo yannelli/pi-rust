@@ -188,3 +188,42 @@ async fn extensions_see_the_child_process_environment_overlay() {
     h.session.prompt("x", Vec::new()).await.unwrap();
     assert_eq!(h.last_prompt(), "x proxy-from-settings");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn queued_input_runs_input_handlers_and_refuses_extension_commands() {
+    use pi_coding_agent::agent_session::{PromptDisposition, StreamingBehavior};
+    let source = r#"export default function (pi) {
+	pi.on("input", (event) => {
+		if (event.text === "drop") return { action: "handled" };
+		return { action: "transform", text: `${event.text} (${event.source}/${event.streamingBehavior})` };
+	});
+	pi.registerCommand("cmd", { handler: async () => {} });
+}
+"#;
+    let h = harness(Setup {
+        files: vec![("input.ts", source.into())],
+        load: vec!["input.ts"],
+        responses: vec![FauxResponse::Hang],
+        ..Setup::default()
+    })
+    .await;
+    let session = h.session.clone();
+    let running = tokio::spawn(async move { session.prompt("start", Vec::new()).await });
+    crate::harness::eventually(|| h.session.is_streaming()).await;
+    let queue = |text: &'static str, behavior| {
+        let session = h.session.clone();
+        async move { session.queue_user_input(text, Vec::new(), behavior, "rpc").await }
+    };
+    assert_eq!(queue("drop", StreamingBehavior::Steer).await.unwrap(), PromptDisposition::Handled);
+    assert_eq!(queue("go", StreamingBehavior::FollowUp).await.unwrap(), PromptDisposition::Queued);
+    assert_eq!(h.session.follow_up_messages(), ["go (rpc/followUp)"]);
+    assert_eq!(h.session.steer("turn", Vec::new()).await.unwrap(), PromptDisposition::Queued);
+    assert_eq!(h.session.steering_messages(), ["turn (interactive/steer)"]);
+    let error = queue("/cmd now", StreamingBehavior::Steer).await.unwrap_err().to_string();
+    assert_eq!(
+        error,
+        "Extension command \"/cmd\" cannot be queued. Use prompt() or execute the command when not streaming."
+    );
+    h.session.abort().await;
+    let _ = running.await;
+}

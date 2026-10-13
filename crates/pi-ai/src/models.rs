@@ -63,6 +63,8 @@ pub struct ModelRegistry {
     provider_names: HashMap<String, String>,
     /// Providers known to have usable auth; replaces the key heuristic when set.
     configured: Option<HashSet<String>>,
+    /// `models.json` `modelOverrides` per provider, applied again after extension providers.
+    model_overrides: HashMap<String, std::collections::BTreeMap<String, serde_json::Map<String, serde_json::Value>>>,
 }
 
 impl ModelRegistry {
@@ -111,6 +113,9 @@ impl ModelRegistry {
             models = rest;
             models.extend(applied);
             auth_configs.insert(provider.clone(), json::auth_config(config));
+            if let Some(overrides) = config.model_overrides.as_ref().filter(|overrides| !overrides.is_empty()) {
+                self.model_overrides.insert(provider.clone(), overrides.clone());
+            }
             if let Some(name) = &config.name {
                 self.provider_names.insert(provider.clone(), name.clone());
             }
@@ -131,6 +136,42 @@ impl ModelRegistry {
             Some(existing) => *existing = model,
             None => self.models.push(model),
         }
+    }
+
+    /// Every model of `provider`, of every type, in catalog order.
+    pub fn provider_models(&self, provider: &str) -> Vec<Model> {
+        self.models.iter().filter(|model| model.provider == provider).cloned().collect()
+    }
+
+    /// Replace the models of `provider` with `models`.
+    pub fn replace_provider_models(&mut self, provider: &str, models: Vec<Model>) {
+        self.models.retain(|model| model.provider != provider);
+        self.models.extend(models);
+    }
+
+    /// Apply the `models.json` `modelOverrides` of `provider` to its chat models (upstream
+    /// applies them last, after custom models and extension providers). Merging is idempotent.
+    pub fn apply_model_overrides(&mut self, provider: &str) -> Result<(), String> {
+        let Some(overrides) = self.model_overrides.get(provider) else { return Ok(()) };
+        for (id, patch) in overrides {
+            for model in self.models.iter_mut().filter(|model| model.provider == provider && &model.id == id) {
+                if is_chat_model(model) {
+                    *model = json::apply_override(model, patch)
+                        .map_err(|error| format!("Provider {provider}, model {id}: {error}"))?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The auth settings of `provider`, created empty when missing.
+    pub fn auth_config_mut(&mut self, provider: &str) -> &mut ProviderAuthConfig {
+        self.auth_configs.entry(provider.to_string()).or_default()
+    }
+
+    /// Set the display name of `provider`.
+    pub fn set_provider_name(&mut self, provider: &str, name: &str) {
+        self.provider_names.insert(provider.to_string(), name.to_string());
     }
 
     /// Keep only the models `keep` accepts.

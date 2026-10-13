@@ -11,5 +11,6 @@ mod host;
 mod http_mock;
 mod loading;
 mod provider;
+mod provider_compose;
 mod provider_hooks;
 mod runtime;

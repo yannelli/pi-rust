@@ -166,15 +166,21 @@ impl ModelRuntime {
         Some(auth.resolve(stored.as_ref()).await)
     }
 
-    /// Recompose the registry: bundled models, catalogs, `models.json`, then virtual models.
-    pub(super) fn rebuild_registry(&self) {
+    /// Bundled models, catalogs, and `models.json`, before extension providers.
+    pub(super) fn base_registry(&self) -> ModelRegistry {
         let catalogs = read(&self.catalogs).all();
         let (registry, _) = if catalogs.is_empty() {
             ModelRegistry::load_lenient(self.models_path())
         } else {
             build_registry(builtin_models(), &catalogs, Some(self.models_path()))
         };
-        let mut registry = registry;
+        registry
+    }
+
+    /// Recompose the registry: bundled models, catalogs, `models.json`, extension providers,
+    /// `modelOverrides`, then virtual models.
+    pub(super) fn rebuild_registry(&self) {
+        let mut registry = self.base_registry();
         self.apply_extension_providers(&mut registry);
         self.resolver().set_provider_configs(registry.auth_configs());
         *self.registry_mut() = registry;
@@ -198,10 +204,13 @@ impl ModelRuntime {
             let state = read(&self.catalogs);
             (state.refresher.clone(), state.all())
         };
-        let result = match refresher {
+        let mut result = match refresher {
             Some(refresher) => refresher.refresh(&catalogs, &options).await,
             None => RefreshResult::default(),
         };
+        if !result.aborted {
+            self.refresh_extension_providers(&options, &mut result).await;
+        }
         self.rebuild_registry();
         self.refresh_configured_providers().await;
         result
@@ -222,12 +231,25 @@ impl ModelRuntime {
         }
         let (refresher, catalogs) = {
             let state = read(&self.catalogs);
-            (state.refresher.clone()?, state.all())
+            (state.refresher.clone(), state.all())
         };
+        if refresher.is_none() && !self.has_extension_refresh() {
+            return None;
+        }
         let runtime = self.clone();
         Some(tokio::spawn(async move {
             let cancel = CancellationToken::new();
-            let result = refresh_with_timeout(&refresher, &catalogs, true, false, timeout, &cancel).await;
+            let mut result = match &refresher {
+                Some(refresher) => refresh_with_timeout(refresher, &catalogs, true, false, timeout, &cancel).await,
+                None => RefreshResult::default(),
+            };
+            if !result.aborted {
+                let options = RefreshOptions { allow_network: true, providers: None, force: false, cancel };
+                let refresh = runtime.refresh_extension_providers(&options, &mut result);
+                if tokio::time::timeout(timeout, refresh).await.is_err() {
+                    result.aborted = true;
+                }
+            }
             runtime.rebuild_registry();
             runtime.refresh_configured_providers().await;
             result

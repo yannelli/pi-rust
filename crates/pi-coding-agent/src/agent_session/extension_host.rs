@@ -286,6 +286,19 @@ impl AgentSession {
         matches!(runner.call_json("runCommand", vec![json!(name), json!(args)]).await, Ok(Value::Bool(true)))
     }
 
+    /// Upstream `_throwIfExtensionCommand`: extension commands run, they are never queued.
+    pub(crate) fn ensure_not_extension_command(&self, text: &str) -> anyhow::Result<()> {
+        let Some(runner) = self.extension_runner() else { return Ok(()) };
+        let body = text.strip_prefix('/').unwrap_or(text);
+        let name = body.split_once(' ').map_or(body, |(name, _)| name);
+        if runner.registry().command(name).is_some() {
+            anyhow::bail!(
+                "Extension command \"/{name}\" cannot be queued. Use prompt() or execute the command when not streaming."
+            );
+        }
+        Ok(())
+    }
+
     /// `input` handlers: `None` when one handled the input, else the text and images to use.
     pub(crate) async fn run_input_handlers(
         &self,

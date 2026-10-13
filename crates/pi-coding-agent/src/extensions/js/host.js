@@ -261,6 +261,27 @@ export function createHost(config) {
 			for await (const event of stream) call("stream.event", sink, event);
 			return null;
 		},
+		async providerRefreshModels(name, context) {
+			const provider = runtime.providers.get(name)?.config;
+			if (typeof provider?.refreshModels !== "function") throw new Error(`Provider ${name} has no refreshModels`);
+			const signal = signalFor(context.signal);
+			return (await provider.refreshModels({ ...context, signal, publish: async ({ update }) => (update?.(), true) })) ?? [];
+		},
+		async providerModifyModels(name, models, credential) {
+			const modify = runtime.providers.get(name)?.config.oauth?.modifyModels;
+			if (typeof modify !== "function") throw new Error(`Provider ${name} has no OAuth modifyModels`);
+			return modify(models, credential);
+		},
+		async providerImages(name, api, model, context, options) {
+			const implementation = runtime.providers.get(name)?.config.images?.[api];
+			if (!implementation) throw new Error(`Provider ${name} has no image implementation for "${api}"`);
+			return implementation.generateImages(model, context, { ...options, signal: signalFor(options.signal) });
+		},
+		async providerClassify(name, api, model, context, options) {
+			const implementation = runtime.providers.get(name)?.config.classifiers?.[api];
+			if (!implementation) throw new Error(`Provider ${name} has no classifier implementation for "${api}"`);
+			return implementation.classify(model, context, { ...options, signal: signalFor(options.signal) });
+		},
 		async providerHeaders(name, model) {
 			const headers = runtime.providers.get(name)?.config.headers;
 			return typeof headers === "function" ? await headers(model) : headers;

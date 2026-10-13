@@ -231,3 +231,19 @@ async fn resume_gives_project_trust_handlers_the_live_ui() {
     let store = pi_coding_agent::resources::trust::ProjectTrustStore::new(&agent_dir);
     assert_eq!(store.get(&other).unwrap(), Some(true));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failing_new_session_setup_reports_the_extension_stack() {
+    let source = r#"export default function (pi) {
+	pi.registerCommand("broken", { handler: async (_args, ctx) => {
+		await ctx.newSession({ setup: async () => { throw new Error("setup broke"); } });
+	} });
+}
+"#;
+    let r = runtime(source, vec![FauxResponse::text("ok")], ExtensionMode::Tui).await;
+    r.runtime.session().prompt("/broken", Vec::new()).await.unwrap();
+    let calls = r.ui.calls();
+    let fatal = calls.iter().find(|call| call.starts_with("fatal: ")).expect("a fatal error");
+    assert!(fatal.starts_with("fatal: Failed to create session: setup broke | "), "{fatal}");
+    assert!(fatal.contains(&r.extension.display().to_string()), "{fatal}");
+}

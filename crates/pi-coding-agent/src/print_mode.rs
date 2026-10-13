@@ -60,8 +60,10 @@ pub async fn run_print_mode(
         })),
         ..ExtensionBindings::default()
     };
-    runtime.session().bind_extensions(bindings).await;
+    // Binding runs inside the signal guard below: upstream installs its listeners first, so a
+    // signal during `session_start` handlers still disposes the runtime.
     let result = async {
+        runtime.session().bind_extensions(bindings).await;
         if let Some(text) = initial_message {
             let options = PromptOptions { images: initial_images, ..PromptOptions::default() };
             runtime.session().prompt_with(&text, options).await?;

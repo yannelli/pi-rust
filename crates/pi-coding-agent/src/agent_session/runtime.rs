@@ -69,7 +69,7 @@ pub type InvalidateFn = Arc<dyn Fn() -> BoxFuture<'static, ()> + Send + Sync>;
 pub type SessionSetupFn = Box<dyn FnOnce(&mut SessionManager) + Send>;
 
 /// Runs on a new session after it is created and before it is bound, as upstream `setup`.
-pub type AsyncSetupFn = Box<dyn FnOnce(Arc<AgentSession>) -> BoxFuture<'static, ()> + Send>;
+pub type AsyncSetupFn = Box<dyn FnOnce(Arc<AgentSession>) -> BoxFuture<'static, anyhow::Result<()>> + Send>;
 
 /// Whether a `session_before_switch` handler cancelled the switch.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -251,7 +251,7 @@ impl AgentSessionRuntime {
         session.set_session_start_event(start);
         *lock(&self.current) = parts;
         if let Some(setup) = setup {
-            setup(session.clone()).await;
+            setup(session.clone()).await?;
             session.refresh_context();
         }
         // The new session's extensions bind with the mode's bindings before the mode rebinds.
@@ -305,7 +305,7 @@ impl AgentSessionRuntime {
         let setup = setup.map(|setup| -> AsyncSetupFn {
             Box::new(move |session: Arc<AgentSession>| {
                 setup(&mut session.session_manager());
-                Box::pin(async {})
+                Box::pin(async { Ok(()) })
             })
         });
         self.new_session_with(parent_session, setup).await

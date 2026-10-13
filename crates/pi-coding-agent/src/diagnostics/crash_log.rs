@@ -126,6 +126,9 @@ impl CrashContext {
     }
 }
 
+/// The crash kind of a panic, upstream's `uncaughtException`.
+pub const UNCAUGHT_EXCEPTION: &str = "uncaught_exception";
+
 /// The panic payload text.
 pub fn panic_message(info: &std::panic::PanicHookInfo<'_>) -> String {
     let payload = info.payload();
@@ -150,17 +153,19 @@ pub fn crash_report_instructions(session_file: Option<&str>) -> String {
     format!("To report this crash: {resume} run /bug. The crash details are attached automatically.")
 }
 
-/// Record panics as `fatal_error` crashes in `path`, then run the earlier hook. A terminal a
-/// TUI left in raw mode is restored first, and the report instructions follow the panic text.
+/// Record panics as `uncaught_exception` crashes in `path` (upstream `uncaughtCrash`), then run
+/// the earlier hook. Tracked detached children are killed and a terminal a TUI left in raw
+/// mode is restored first; the report instructions follow the panic text.
 pub fn install_crash_hook(path: PathBuf, context: CrashContext) {
     let earlier = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        crate::signals::kill_tracked_detached_children();
         pi_tui::process_terminal::restore_terminal_after_crash();
         let (session_file, cwd) = context.snapshot();
         let stack = std::backtrace::Backtrace::force_capture().to_string();
         let instructions = crash_report_instructions(session_file.as_deref());
-        let crash =
-            Crash { kind: "fatal_error".into(), message: panic_message(info), stack: Some(stack), session_file, cwd };
+        let message = panic_message(info);
+        let crash = Crash { kind: UNCAUGHT_EXCEPTION.into(), message, stack: Some(stack), session_file, cwd };
         let recorded = record_crash(crash, &path).is_some();
         earlier(info);
         if recorded {
@@ -174,7 +179,7 @@ pub fn install_crash_hook(path: PathBuf, context: CrashContext) {
 pub fn record_fatal_error(path: &Path, context: &CrashContext, error: &anyhow::Error) -> Option<String> {
     let (session_file, cwd) = context.snapshot();
     let instructions = crash_report_instructions(session_file.as_deref());
-    let stack = Some(format!("{error:?}"));
+    let stack = Some(super::stack::error_stack(error));
     let crash = Crash { kind: "fatal_error".into(), message: format!("{error:#}"), stack, session_file, cwd };
     record_crash(crash, path).map(|_| instructions)
 }

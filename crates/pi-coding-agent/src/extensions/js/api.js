@@ -177,8 +177,11 @@ export function createRuntime(onChange) {
 
 /** Provider config without its functions; Rust calls those back by provider name. */
 function providerJson(config) {
-	const { streamSimple, oauth, headers, ...rest } = config;
+	const { streamSimple, oauth, headers, refreshModels, images, classifiers, ...rest } = config;
 	const json = { ...rest, hasStreamSimple: typeof streamSimple === "function" };
+	json.hasRefreshModels = typeof refreshModels === "function";
+	json.imageApis = Object.keys(images ?? {});
+	json.classifierApis = Object.keys(classifiers ?? {});
 	if (headers !== undefined) json.headers = typeof headers === "function" ? undefined : headers;
 	json.hasHeaderFunction = typeof headers === "function";
 	if (oauth) {

@@ -72,6 +72,27 @@ fn contains_path(stack: &str, target: &str, descendants: bool) -> bool {
     })
 }
 
+/// An error from JavaScript with its stack, shown by its message (upstream `Error.stack`).
+#[derive(Debug, Clone)]
+pub struct StackError {
+    pub message: String,
+    pub stack: Option<String>,
+}
+
+impl std::fmt::Display for StackError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for StackError {}
+
+/// The JavaScript stack in `error`'s chain, else its debug text.
+pub fn error_stack(error: &anyhow::Error) -> String {
+    let stack = error.chain().find_map(|cause| cause.downcast_ref::<StackError>()).and_then(|e| e.stack.clone());
+    stack.unwrap_or_else(|| format!("{error:?}"))
+}
+
 /// Labels (package source or extension path) of extensions with files in the stack frames.
 pub fn find_extension_stack_matches(stack: Option<&str>, extensions: &[ExtensionStackInfo]) -> Vec<String> {
     let Some(stack) = stack else { return Vec::new() };
