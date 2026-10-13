@@ -117,6 +117,22 @@ impl AgentTool for EditTool {
         })
     }
 
+    fn prompt_snippet(&self) -> Option<&str> {
+        super::builtin_snippet("edit")
+    }
+
+    fn prompt_guidelines(&self) -> Vec<String> {
+        super::builtin_guidelines("edit")
+    }
+
+    fn constrained_sampling(&self) -> Option<Value> {
+        Some(super::prefer_json_schema())
+    }
+
+    fn prepare_arguments(&self, args: Value) -> anyhow::Result<Value> {
+        Ok(prepare_edit_arguments(args))
+    }
+
     async fn execute(
         &self,
         _tool_call_id: &str,

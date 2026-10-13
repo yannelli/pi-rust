@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
-use pi_agent::{AgentTool, AgentToolResult, ToolUpdateCallback};
-use pi_ai::ContentBlock;
+use pi_agent::{AgentTool, AgentToolResult, ToolContext, ToolUpdateCallback};
+use pi_ai::{ContentBlock, ImageResizeOptions, Model};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -25,9 +25,26 @@ const PNG_SIGNATURE: &[u8] = &[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 pub struct ReadTool {
     cwd: PathBuf,
     description: String,
-    image_options: ProcessImageOptions,
-    /// Set when the model has no image input, so the model hears the image is dropped.
+    auto_resize: bool,
+    /// Resize profile for calls without a model.
+    resize: Option<ImageResizeOptions>,
+    /// Note that images are dropped, for calls without a model.
     non_vision_note: bool,
+}
+
+/// Options of the read tool (upstream `ReadToolOptions`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ReadToolOptions {
+    /// Resize images to the model's limits (`images.autoResize`). Default: true.
+    pub auto_resize_images: bool,
+    /// Resize profile when the call's model has none.
+    pub resize_options: Option<ImageResizeOptions>,
+}
+
+impl Default for ReadToolOptions {
+    fn default() -> Self {
+        Self { auto_resize_images: true, resize_options: None }
+    }
 }
 
 #[derive(Deserialize)]
@@ -39,24 +56,112 @@ struct ReadArgs {
 
 impl ReadTool {
     pub fn new(cwd: PathBuf) -> Self {
-        Self::with_image_options(cwd, ProcessImageOptions::default())
+        Self::with_options(cwd, ReadToolOptions::default())
     }
 
-    /// Images are processed with `options`, for example [`ProcessImageOptions::for_model`].
-    pub fn with_image_options(cwd: PathBuf, image_options: ProcessImageOptions) -> Self {
+    /// Calls inside the agent loop use their turn's model for the resize profile and the
+    /// note about models without image input; `options` cover calls without one.
+    pub fn with_options(cwd: PathBuf, options: ReadToolOptions) -> Self {
         let description = format!(
             "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to {DEFAULT_MAX_LINES} lines or {}KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
             DEFAULT_MAX_BYTES / 1024
         );
-        Self { cwd, description, image_options, non_vision_note: false }
+        Self {
+            cwd,
+            description,
+            auto_resize: options.auto_resize_images,
+            resize: options.resize_options,
+            non_vision_note: false,
+        }
+    }
+
+    /// Images are processed with `options`, for example [`ProcessImageOptions::for_model`].
+    pub fn with_image_options(cwd: PathBuf, image_options: ProcessImageOptions) -> Self {
+        let options =
+            ReadToolOptions { auto_resize_images: image_options.auto_resize, resize_options: image_options.resize };
+        Self::with_options(cwd, options)
     }
 
     /// Resize profile from the model's `inputLimits`, plus the note for models without vision.
     pub fn for_model(cwd: PathBuf, model: &pi_ai::Model, auto_resize: bool) -> Self {
         let mut tool = Self::with_image_options(cwd, ProcessImageOptions::for_model(model, auto_resize));
-        tool.non_vision_note = !model.input.iter().any(|input| input == "image");
+        tool.non_vision_note = !supports_images(model);
         tool
     }
+
+    async fn read(
+        &self,
+        args: Value,
+        model: Option<&Model>,
+        cancel: CancellationToken,
+    ) -> anyhow::Result<AgentToolResult> {
+        let args: ReadArgs = parse_args("read", args)?;
+        check_aborted(&cancel)?;
+        let absolute = resolve_read_path(&args.path, &self.cwd);
+        let buffer =
+            tokio::fs::read(&absolute).await.map_err(|e| anyhow!("Could not read file {}: {e}", absolute.display()))?;
+        check_aborted(&cancel)?;
+
+        let sniff = &buffer[..buffer.len().min(IMAGE_TYPE_SNIFF_BYTES)];
+        let Some(mime_type) = detect_supported_image_mime_type(sniff) else {
+            return read_text(&String::from_utf8_lossy(&buffer), &args);
+        };
+        let resize = model.and_then(|model| ProcessImageOptions::for_model(model, self.auto_resize).resize);
+        let options = ProcessImageOptions { auto_resize: self.auto_resize, resize: resize.or(self.resize) };
+        let processed = tokio::task::spawn_blocking(move || process_image(&buffer, mime_type, &options)).await?;
+        check_aborted(&cancel)?;
+        let non_vision = model.map_or(self.non_vision_note, |model| !supports_images(model));
+        let vision_note = if non_vision { format!("\n{NON_VISION_IMAGE_NOTE}") } else { String::new() };
+        let content = match processed {
+            Ok(image) => {
+                let mut note = format!("Read image file [{}]", image.mime_type);
+                if !image.hints.is_empty() {
+                    note.push('\n');
+                    note.push_str(&image.hints.join("\n"));
+                }
+                note.push_str(&vision_note);
+                vec![ContentBlock::text(note), ContentBlock::Image { data: image.data, mime_type: image.mime_type }]
+            }
+            Err(message) => vec![ContentBlock::text(format!("Read image file [{mime_type}]\n{message}{vision_note}"))],
+        };
+        Ok(AgentToolResult { content, ..Default::default() })
+    }
+}
+
+fn supports_images(model: &Model) -> bool {
+    model.input.iter().any(|input| input == "image")
+}
+
+/// The image and its note, or the text for text files and images that could not be processed.
+fn to_read_output(content: &[ContentBlock]) -> Value {
+    let text = content.iter().find_map(ContentBlock::as_text).unwrap_or_default();
+    let image = content.iter().find_map(|block| match block {
+        ContentBlock::Image { data, mime_type } => Some((data, mime_type)),
+        _ => None,
+    });
+    match image {
+        Some((data, mime_type)) => json!({ "type": "image", "data": data, "mimeType": mime_type, "note": text }),
+        None => json!(text),
+    }
+}
+
+/// Schema of the read tool's `structured_content`.
+pub fn read_output_schema() -> Value {
+    json!({
+        "anyOf": [
+            { "type": "string" },
+            {
+                "type": "object",
+                "properties": {
+                    "type": { "const": "image", "type": "string" },
+                    "data": { "type": "string" },
+                    "mimeType": { "type": "string" },
+                    "note": { "type": "string" }
+                },
+                "required": ["type", "data", "mimeType", "note"]
+            }
+        ]
+    })
 }
 
 #[async_trait]
@@ -81,6 +186,22 @@ impl AgentTool for ReadTool {
         })
     }
 
+    fn output_schema(&self) -> Option<Value> {
+        Some(read_output_schema())
+    }
+
+    fn constrained_sampling(&self) -> Option<Value> {
+        Some(super::prefer_json_schema())
+    }
+
+    fn prompt_snippet(&self) -> Option<&str> {
+        super::builtin_snippet("read")
+    }
+
+    fn prompt_guidelines(&self) -> Vec<String> {
+        super::builtin_guidelines("read")
+    }
+
     async fn execute(
         &self,
         _tool_call_id: &str,
@@ -88,38 +209,21 @@ impl AgentTool for ReadTool {
         cancel: CancellationToken,
         _on_update: ToolUpdateCallback,
     ) -> anyhow::Result<AgentToolResult> {
-        let args: ReadArgs = parse_args("read", args)?;
-        check_aborted(&cancel)?;
-        let absolute = resolve_read_path(&args.path, &self.cwd);
-        let buffer =
-            tokio::fs::read(&absolute).await.map_err(|e| anyhow!("Could not read file {}: {e}", absolute.display()))?;
-        check_aborted(&cancel)?;
+        let result = self.read(args, None, cancel).await?;
+        let structured = to_read_output(&result.content);
+        Ok(result.with_structured_content(structured))
+    }
 
-        let sniff = &buffer[..buffer.len().min(IMAGE_TYPE_SNIFF_BYTES)];
-        if let Some(mime_type) = detect_supported_image_mime_type(sniff) {
-            let options = self.image_options;
-            let processed = tokio::task::spawn_blocking(move || process_image(&buffer, mime_type, &options)).await?;
-            check_aborted(&cancel)?;
-            let vision_note = if self.non_vision_note { format!("\n{NON_VISION_IMAGE_NOTE}") } else { String::new() };
-            let content = match processed {
-                Ok(image) => {
-                    let mut note = format!("Read image file [{}]", image.mime_type);
-                    if !image.hints.is_empty() {
-                        note.push('\n');
-                        note.push_str(&image.hints.join("\n"));
-                    }
-                    note.push_str(&vision_note);
-                    vec![ContentBlock::text(note), ContentBlock::Image { data: image.data, mime_type: image.mime_type }]
-                }
-                Err(message) => {
-                    vec![ContentBlock::text(format!("Read image file [{mime_type}]\n{message}{vision_note}"))]
-                }
-            };
-            return Ok(AgentToolResult { content, ..Default::default() });
-        }
-
-        let text = String::from_utf8_lossy(&buffer);
-        read_text(&text, &args)
+    async fn execute_with_context(
+        &self,
+        context: &ToolContext,
+        args: Value,
+        cancel: CancellationToken,
+        _on_update: ToolUpdateCallback,
+    ) -> anyhow::Result<AgentToolResult> {
+        let result = self.read(args, context.model(), cancel).await?;
+        let structured = to_read_output(&result.content);
+        Ok(result.with_structured_content(structured))
     }
 }
 

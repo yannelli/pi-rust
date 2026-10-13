@@ -189,3 +189,56 @@ pub fn check_saved_images(text: &str) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+
+/// A registered tool built from its script view, for loadout tests. It never runs.
+pub struct InfoTool {
+    pub info: CodemodeToolInfo,
+    pub exposure: pi_agent::ToolExposure,
+}
+
+impl InfoTool {
+    pub fn shared(info: CodemodeToolInfo, exposure: pi_agent::ToolExposure) -> pi_agent::SharedTool {
+        Arc::new(Self { info, exposure })
+    }
+}
+
+#[async_trait]
+impl pi_agent::AgentTool for InfoTool {
+    fn name(&self) -> &str {
+        &self.info.name
+    }
+
+    fn description(&self) -> &str {
+        &self.info.description
+    }
+
+    fn parameters(&self) -> Value {
+        self.info.parameters.clone()
+    }
+
+    fn output_schema(&self) -> Option<Value> {
+        self.info.output_schema.clone()
+    }
+
+    fn exposure(&self) -> pi_agent::ToolExposure {
+        self.exposure
+    }
+
+    fn namespace(&self) -> Option<&pi_agent::ToolNamespace> {
+        self.info.namespace.as_ref()
+    }
+
+    fn prompt_guidelines(&self) -> Vec<String> {
+        self.info.prompt_guidelines.clone()
+    }
+
+    async fn execute(
+        &self,
+        _id: &str,
+        _args: Value,
+        _cancel: CancellationToken,
+        _on_update: pi_agent::ToolUpdateCallback,
+    ) -> anyhow::Result<pi_agent::AgentToolResult> {
+        anyhow::bail!("{} is not executable in tests", self.info.name)
+    }
+}
