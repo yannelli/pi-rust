@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.1.2] - 2026-10-13
+
+### Fixed
+
+- **agent:** await async listeners for each event before the loop continues ([e8b7168](https://github.com/yannelli/pi-rust/commit/e8b7168c392ee277d96e74bcb1a08e9b3289d9fc))
+
 ## [0.1.1] - 2026-10-13
 
 ### Added

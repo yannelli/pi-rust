@@ -2201,7 +2201,7 @@ dependencies = [
 
 [[package]]
 name = "pi-agent"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2217,7 +2217,7 @@ dependencies = [
 
 [[package]]
 name = "pi-ai"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -2240,7 +2240,7 @@ dependencies = [
 
 [[package]]
 name = "pi-codemode"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2258,7 +2258,7 @@ dependencies = [
 
 [[package]]
 name = "pi-coding-agent"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "agent-client-protocol-schema",
  "anyhow",
@@ -2302,7 +2302,7 @@ dependencies = [
 
 [[package]]
 name = "pi-js"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "base64 0.22.1",
  "futures",
@@ -2329,7 +2329,7 @@ dependencies = [
 
 [[package]]
 name = "pi-mcp"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2351,7 +2351,7 @@ dependencies = [
 
 [[package]]
 name = "pi-tui"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "arboard",
  "base64 0.22.1",
