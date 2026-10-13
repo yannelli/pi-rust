@@ -104,7 +104,8 @@ pub use components::{
     ScrollViewScrollToOptions, ScrollViewScrollbar, StackChild, StackEntryOptions, StackOptions, VStack,
 };
 pub use components::{
-    BoxComponent, CancellableLoader, Image, Loader, MouseRegion, SelectList, SettingsList, Spacer, Text, TruncatedText,
+    BoxComponent, CancellableLoader, Image, Loader, Markdown, MouseRegion, SelectList, SettingsList, Spacer, Text,
+    TruncatedText,
 };
 pub use editor_component::EditorComponent;
 pub use keybindings::{KeybindingsManager, get_keybindings, set_keybindings};

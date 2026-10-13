@@ -6,6 +6,7 @@ pub mod cancellable_loader;
 pub mod image;
 pub mod input;
 pub mod loader;
+pub mod markdown;
 pub mod mouse_region;
 pub mod scroll_view;
 pub mod select_list;
@@ -22,6 +23,7 @@ pub use cancellable_loader::CancellableLoader;
 pub use image::{Image, ImageOptions, ImageTheme, ImageTranscoder, set_image_transcoder};
 pub use input::{Input, InputOptions};
 pub use loader::{Loader, LoaderIndicatorOptions};
+pub use markdown::{DefaultTextStyle, HighlightCodeFn, Markdown, MarkdownOptions, MarkdownTheme, MarkdownTransformFn};
 pub use mouse_region::{MouseRegion, MouseRegionHandler};
 pub use scroll_view::{
     ScrollFollow, ScrollOverscroll, ScrollView, ScrollViewHandle, ScrollViewOptions, ScrollViewScrollToOptions,
