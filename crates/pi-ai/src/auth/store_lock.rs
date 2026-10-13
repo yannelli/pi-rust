@@ -37,6 +37,12 @@ fn is_stale(dir: &Path, stale: Duration) -> bool {
     }
 }
 
+/// Windows denies access to create a directory another holder removed while a handle to it is
+/// still open, so that error means the lock is busy, like `AlreadyExists`.
+fn is_pending_delete(error: &std::io::Error) -> bool {
+    cfg!(windows) && error.kind() == ErrorKind::PermissionDenied
+}
+
 fn touch(dir: &Path) {
     #[cfg(unix)]
     if let Ok(handle) = std::fs::File::open(dir) {
@@ -62,12 +68,13 @@ impl FileLock {
                     let _ = std::fs::remove_dir(&dir);
                     return match std::fs::create_dir(&dir) {
                         Ok(()) => Ok(Some(Self { dir, keepalive: None })),
-                        Err(error) if error.kind() == ErrorKind::AlreadyExists => Ok(None),
+                        Err(error) if error.kind() == ErrorKind::AlreadyExists || is_pending_delete(&error) => Ok(None),
                         Err(error) => Err(error),
                     };
                 }
                 Ok(None)
             }
+            Err(error) if is_pending_delete(&error) => Ok(None),
             Err(error) => Err(error),
         }
     }
