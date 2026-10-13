@@ -57,6 +57,17 @@ pub async fn show_startup_selector(
 /// Asks whether to trust `cwd` when nothing else decides it, saving a remembered answer.
 /// `None` when no prompt was needed; otherwise whether the project is trusted.
 pub async fn prompt_project_trust(cwd: &Path, agent_dir: &Path, trust_override: Option<bool>) -> Option<bool> {
+    let terminal: TerminalRef = Rc::new(RefCell::new(ProcessTerminal::new()));
+    prompt_project_trust_on(terminal, cwd, agent_dir, trust_override).await
+}
+
+/// [`prompt_project_trust`] on `terminal`.
+pub async fn prompt_project_trust_on(
+    terminal: TerminalRef,
+    cwd: &Path,
+    agent_dir: &Path,
+    trust_override: Option<bool>,
+) -> Option<bool> {
     let global = SettingsManager::create(cwd, agent_dir, SettingsOptions { project_trusted: false });
     let store = ProjectTrustStore::new(agent_dir);
     let home = home_dir();
@@ -70,7 +81,6 @@ pub async fn prompt_project_trust(cwd: &Path, agent_dir: &Path, trust_override: 
     };
     let Ok(ProjectTrustResolution::Prompt(prompt)) = resolve_project_trust(&store, &request) else { return None };
     let labels: Vec<String> = prompt.options.iter().map(|option| option.label.clone()).collect();
-    let terminal: TerminalRef = Rc::new(RefCell::new(ProcessTerminal::new()));
     let chosen = show_startup_selector(terminal, &global, &prompt.message, labels).await;
     let option = chosen.and_then(|label| prompt.options.iter().find(|option| option.label == label));
     Some(apply_project_trust_choice(&store, option).unwrap_or(false))

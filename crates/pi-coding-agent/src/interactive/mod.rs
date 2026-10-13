@@ -67,6 +67,8 @@ pub struct InteractiveOptions {
     pub terminal: Option<TerminalRef>,
     /// The agent directory; `PI_CODING_AGENT_DIR` or `~/.pi/agent` when `None`.
     pub agent_dir: Option<PathBuf>,
+    /// Skip the release and package update checks after startup, as tests do.
+    pub skip_update_checks: bool,
 }
 
 /// Run the interactive mode for `runtime` until the user quits. Installs the keybindings and

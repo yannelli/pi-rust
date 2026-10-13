@@ -54,6 +54,8 @@ pub(super) struct LastStatus {
 /// Mutable state of the mode. Borrow it briefly, never across calls into components.
 pub(super) struct ModeState {
     pub initialized: bool,
+    /// Set once startup finished and keys and commands work.
+    pub ready: bool,
     pub shutting_down: bool,
     pub exit: bool,
     pub last_sigint: Option<Instant>,
@@ -91,6 +93,7 @@ impl ModeState {
     fn new(settings: &SettingsManager) -> Self {
         Self {
             initialized: false,
+            ready: false,
             shutting_down: false,
             exit: false,
             last_sigint: None,
@@ -215,6 +218,11 @@ impl InteractiveMode {
         self.runtime.session()
     }
 
+    /// The session shown now; `/new`, `/resume`, and forks replace it.
+    pub fn current_session(&self) -> Arc<AgentSession> {
+        self.runtime.session()
+    }
+
     pub(super) fn settings(&self) -> Arc<SettingsManager> {
         self.session().settings().clone()
     }
@@ -226,6 +234,11 @@ impl InteractiveMode {
 
     pub(super) fn tui_mode(&self) -> TuiMode {
         self.options.borrow().tui_mode.unwrap_or_default()
+    }
+
+    /// Whether startup finished, so prompts, keys, and commands are handled.
+    pub fn is_ready(&self) -> bool {
+        self.state.borrow().ready
     }
 
     /// Whether the mode finished (`/quit`, Ctrl+D, double Ctrl+C).

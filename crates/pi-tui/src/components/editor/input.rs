@@ -209,6 +209,11 @@ impl EditorCore {
         }
         let is_tab = kb.matches(data, ids::INPUT_TAB);
         if is_tab || kb.matches(data, ids::SELECT_CONFIRM) {
+            // Text typed since the list was built makes it stale; the key then acts as without it.
+            if !self.text_before_cursor().ends_with(self.autocomplete_prefix.as_str()) {
+                self.cancel_autocomplete();
+                return false;
+            }
             let selected = self.autocomplete_list.as_ref().and_then(|list| list.selected_item().cloned());
             if let Some(item) = selected.filter(|_| self.provider.is_some()) {
                 let is_command = self.autocomplete_prefix.starts_with('/');

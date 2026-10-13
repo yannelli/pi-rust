@@ -41,6 +41,9 @@ impl InteractiveMode {
 
     /// The new release and package update checks; each shows a notice when it finds something.
     pub(super) fn start_version_check(&self) {
+        if self.options.borrow().skip_update_checks {
+            return;
+        }
         let skip = crate::platform::version_check::version_check_skipped();
         self.spawn(move |mode| async move {
             let check = async move { check_for_new_pi_version(VERSION, &VersionCheckOptions::default(), skip).await };

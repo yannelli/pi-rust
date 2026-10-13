@@ -73,6 +73,7 @@ impl InteractiveMode {
                 mode.request_render();
             }
         });
+        self.state.borrow_mut().ready = true;
         self.request_render();
     }
 
