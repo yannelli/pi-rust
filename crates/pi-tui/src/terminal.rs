@@ -127,10 +127,26 @@ pub fn is_apple_terminal_session_with(env: &dyn EnvLookup) -> bool {
 /// Refreshes terminal dimensions on POSIX by sending SIGWINCH to this process. Best effort:
 /// environments that forbid signal delivery are ignored.
 pub fn refresh_terminal_dimensions() {
-    #[cfg(unix)]
-    {
-        let _ = signal_hook::low_level::raise(signal_hook::consts::SIGWINCH);
+    refresh_terminal_dimensions_with(cfg!(windows), || {
+        #[cfg(unix)]
+        {
+            signal_hook::low_level::raise(signal_hook::consts::SIGWINCH)
+        }
+        #[cfg(not(unix))]
+        {
+            Ok(())
+        }
+    });
+}
+
+/// [`refresh_terminal_dimensions`] with the platform check and the self-signal injected, so tests
+/// can simulate Windows and failed signal delivery. Errors from `signal_self` are ignored.
+#[doc(hidden)]
+pub fn refresh_terminal_dimensions_with(is_windows: bool, signal_self: impl FnOnce() -> std::io::Result<()>) {
+    if is_windows {
+        return;
     }
+    let _ = signal_self();
 }
 
 const NATIVE_SHIFT_ENTER_SEQUENCE: &str = "\x1b[13;2u";
