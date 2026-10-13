@@ -4,7 +4,10 @@
 use std::time::Duration;
 
 use super::mode::InteractiveMode;
-use crate::diagnostics::{CrashContext, crash_log_path, record_fatal_error};
+use crate::diagnostics::{
+    CrashContext, ExtensionStackInfo, crash_log_path, find_extension_stack_matches, format_crash_extension_hint,
+    record_fatal_error,
+};
 use crate::settings::schema::FullscreenExitOutput;
 use crate::theme::{ThemeColor, theme};
 
@@ -46,6 +49,10 @@ impl InteractiveMode {
     pub(super) fn handle_fatal_runtime_error(&self, prefix: &str, error: &anyhow::Error) {
         let message = format!("{prefix}: {error:#}");
         self.show_error(&message);
+        if let Some(hint) = self.crash_extension_hint(error) {
+            let pad = self.state.borrow().output_pad;
+            self.add_text(move || theme().fg(ThemeColor::Warning, &hint), pad, 0);
+        }
         let session = self.session();
         let context = CrashContext::default();
         context.set_session_file(session.session_file().as_deref());
@@ -65,6 +72,33 @@ impl InteractiveMode {
             state.fatal_error = Some(message);
         }
         self.bridge.waker().wake();
+    }
+}
+
+impl InteractiveMode {
+    /// Loaded extensions whose files appear in the error's JavaScript stack, as a warning.
+    fn crash_extension_hint(&self, error: &anyhow::Error) -> Option<String> {
+        let entries = self.session().services().resources().resources().extensions.clone();
+        let extensions: Vec<ExtensionStackInfo> = crate::extensions::load_entries(&entries)
+            .into_iter()
+            .map(|entry| {
+                let (source, origin, base_dir) = match entry.source_info {
+                    Some(info) => {
+                        let package = info.origin == crate::resources::SourceOrigin::Package;
+                        (info.source, if package { "package" } else { "top-level" }, info.base_dir)
+                    }
+                    None => (String::new(), "top-level", None),
+                };
+                ExtensionStackInfo {
+                    path: entry.path,
+                    resolved_path: entry.resolved_path.display().to_string(),
+                    source,
+                    origin: origin.to_string(),
+                    base_dir,
+                }
+            })
+            .collect();
+        format_crash_extension_hint(&find_extension_stack_matches(Some(&format!("{error:#}")), &extensions))
     }
 }
 
