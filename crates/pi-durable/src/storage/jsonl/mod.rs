@@ -4,6 +4,7 @@
 
 mod commit;
 mod format;
+mod local;
 mod recover;
 mod store;
 
@@ -13,10 +14,11 @@ use std::sync::{Arc, Mutex};
 use pi_chord::Context;
 
 use super::memory::MemoryStorage;
-use crate::env::{FileError, FileSystem, LocalEnvOptions, LocalExecutionEnv};
+use crate::env::{FileError, FileSystem};
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{DocumentId, TaskId};
 use format::MAIN_FILE;
+pub use local::open_local_jsonl_storage;
 
 /// Options of a JSONL storage.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -100,15 +102,4 @@ impl JsonlStorage {
         let parts = [self.directory.clone(), file.to_string()];
         self.fs.join_path(&parts, context).await.map_err(|e| error_from_file("path join", e))
     }
-}
-
-/// Open or create a JSONL storage directory on the local file system (upstream `openNodeJsonlStorage`).
-pub async fn open_local_jsonl_storage(
-    directory: &str,
-    context: &Context,
-    options: JsonlStorageOptions,
-) -> DurableResult<JsonlStorage> {
-    let cwd = std::env::current_dir().map_err(|error| DurableError::storage(error.to_string()))?;
-    let env = LocalExecutionEnv::new(LocalEnvOptions::new(cwd.to_string_lossy().into_owned()));
-    JsonlStorage::open(directory, Arc::new(env), context, options).await
 }
