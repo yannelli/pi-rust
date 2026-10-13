@@ -1,5 +1,8 @@
-//! Port of upstream `test/harness-conversations.test.ts` (root, conversations, forks, and lifecycle).
+//! Port of upstream `test/harness-conversations.test.ts`. This file holds the root, conversation, and lifecycle
+//! cases; `harness_conversations/agents.rs` holds forks, history paging, and the agent cases.
 
+#[path = "harness_conversations/agents.rs"]
+mod agents;
 mod support;
 
 use std::sync::{Arc, LazyLock, Mutex};
@@ -28,18 +31,18 @@ static NOTE_DOC: LazyLock<DocToken<Note, RewindableConversation>> = LazyLock::ne
     define_doc(DocSpec::new("test.note", 1, RewindableConversation(DocumentFork::AsOf), Note::default)).unwrap()
 });
 
-fn user(text: &str) -> Message {
+pub fn user(text: &str) -> Message {
     Message::User(UserMessage { content: UserContent::Text(text.into()), timestamp: 1 })
 }
 
-fn noop_tool(name: &str) -> ToolRegistration {
+pub fn noop_tool(name: &str) -> ToolRegistration {
     define_tool(name, format!("{name} tool"), json!({ "type": "object" }), |_, _, _| async {
         Ok(ToolExecutionResult { output: Some(Vec::new()), ..ToolExecutionResult::default() })
     })
 }
 
 /// Open a Harness with a fresh registry holding the named tools.
-async fn open_harness(storage: Arc<dyn Storage>, tools: &[&str]) -> (Harness, Arc<Registry>) {
+pub async fn open_harness(storage: Arc<dyn Storage>, tools: &[&str]) -> (Harness, Arc<Registry>) {
     let registry = Arc::new(create_registry());
     if !tools.is_empty() {
         let extension = tools.iter().fold(Extension::new("tools"), |extension, name| extension.tool(noop_tool(name)));
@@ -50,14 +53,14 @@ async fn open_harness(storage: Arc<dyn Storage>, tools: &[&str]) -> (Harness, Ar
     (Harness::open(storage, options, &context()).await.unwrap(), registry)
 }
 
-async fn append(conversation: &Conversation, text: &str) -> EntryRecord {
+pub async fn append(conversation: &Conversation, text: &str) -> EntryRecord {
     let (id, model) = (conversation.id, vec![user(text)]);
     let draft = EntryDraft { model: Some(model), ..EntryDraft::new("message") };
     conversation.commit(move |tx: Tx| async move { tx.append_entry(id, draft).await }, &context()).await.unwrap()
 }
 
 /// Message texts of every entry, newest first, paging two at a time.
-async fn texts(conversation: &Conversation) -> Vec<String> {
+pub async fn texts(conversation: &Conversation) -> Vec<String> {
     let mut texts = Vec::new();
     let mut cursor = None;
     loop {
@@ -74,7 +77,7 @@ fn write_types(writes: &[StorageWrite]) -> Vec<String> {
     writes.iter().map(|write| serde_json::to_value(write).unwrap()["type"].as_str().unwrap().to_owned()).collect()
 }
 
-fn is_uuid_v7(value: &str) -> bool {
+pub fn is_uuid_v7(value: &str) -> bool {
     let parts: Vec<&str> = value.split('-').collect();
     parts.iter().map(|part| part.len()).eq([8, 4, 4, 4, 12]) && parts[2].starts_with('7')
 }
