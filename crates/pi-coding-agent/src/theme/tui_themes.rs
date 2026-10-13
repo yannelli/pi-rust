@@ -1,5 +1,4 @@
-//! Component theme structs: re-exports of the pi-tui component types, so theme builders hand
-//! their results straight to `Markdown`, `SelectList`, `SettingsList`, and `Editor`.
+//! Component theme structs, re-exported from the pi-tui components that take them.
 
 pub use pi_tui::components::StyleFn;
 pub use pi_tui::components::editor::EditorTheme;
