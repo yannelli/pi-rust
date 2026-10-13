@@ -68,6 +68,8 @@ pub struct ControlledStorage {
     commit_filter: Mutex<Option<CommitFilter>>,
     find_gate: Mutex<Option<Gate>>,
     commit_failure: Mutex<Option<DurableError>>,
+    /// When set, `close()` closes and then fails with this error.
+    pub close_failure: Mutex<Option<DurableError>>,
     closed: AtomicBool,
 }
 
@@ -292,7 +294,10 @@ impl Storage for ControlledStorage {
 
     async fn close(&self, _context: &Context) -> DurableResult<()> {
         self.closed.store(true, Ordering::SeqCst);
-        Ok(())
+        match self.close_failure.lock().unwrap().clone() {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 }
 
