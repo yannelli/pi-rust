@@ -25,7 +25,10 @@ pub use custom_editor::{CustomEditor, EditorHandle};
 pub use footer::FooterComponent;
 pub use messages::{AssistantMessageComponent, UserMessageComponent};
 pub use status_indicator::{IdleStatus, SharedIndicator, StatusIndicator, StatusKind};
-pub use summaries::{Collapsible, CollapsibleMessage, CustomMessageComponent, CustomMessageRenderer};
+pub use summaries::{
+    Collapsible, CollapsibleMessage, CustomEntryComponent, CustomEntryRenderer, CustomMessageComponent,
+    CustomMessageRenderer,
+};
 pub use themed_text::{ExpandableText, ThemedText};
 pub use tool_execution::{ToolDisplay, ToolExecutionComponent, ToolExecutionOptions};
 
@@ -55,6 +58,8 @@ pub fn set_component_expanded(component: &ComponentRef, expanded: bool) -> bool 
         message.set_expanded(expanded);
     } else if let Some(message) = any.downcast_mut::<CustomMessageComponent>() {
         message.set_expanded(expanded);
+    } else if let Some(entry) = any.downcast_mut::<CustomEntryComponent>() {
+        entry.set_expanded(expanded);
     } else if let Some(text) = any.downcast_mut::<ExpandableText>() {
         text.set_expanded(expanded);
     } else {
@@ -75,6 +80,8 @@ pub fn set_component_output_pad(component: &ComponentRef, padding: usize) {
         message.set_output_pad(padding);
     } else if let Some(message) = any.downcast_mut::<CollapsibleMessage>() {
         message.set_output_pad(padding);
+    } else if let Some(entry) = any.downcast_mut::<CustomEntryComponent>() {
+        entry.set_output_pad(padding);
     }
 }
 

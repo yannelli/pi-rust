@@ -104,6 +104,17 @@ impl ExtensionRunner {
         }
     }
 
+    /// Remove this runner's tools from its session, before it shuts down for a reload.
+    pub(crate) fn remove_tools(&self) {
+        let Some(session) = self.session() else { return };
+        let registry = self.registry().clone();
+        let paths = std::mem::take(&mut *lock(&self.tool_paths));
+        for path in paths {
+            let source = ToolSource::extension(path.clone(), registry.source_of(&path));
+            session.replace_source_tools(Vec::new(), &source);
+        }
+    }
+
     /// Run the handlers of `event`; the result is what `session_before_*` handlers returned.
     pub async fn emit(&self, event: Value) -> Value {
         let kind = event["type"].as_str().unwrap_or_default().to_string();

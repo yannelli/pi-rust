@@ -274,6 +274,34 @@ pub async fn extension_help_flags(options: &AppOptions, cwd: &Path) -> Vec<crate
     flags
 }
 
+/// The `project_trust` decision of the extensions that load without project trust, for a
+/// startup prompt; `None` when no handler decided or `cwd` needs no decision.
+pub async fn extension_trust_decision(
+    options: &AppOptions,
+    cwd: &Path,
+) -> (Option<crate::resources::trust::ExtensionTrustDecision>, Vec<RuntimeDiagnostic>) {
+    let needs_decision = options.project_trust_override.is_none()
+        && crate::resources::trust::has_trust_requiring_project_resources(cwd, &home_dir());
+    if !needs_decision {
+        return (None, Vec::new());
+    }
+    extensions::trust_decision(options, cwd, &options.agent_dir).await
+}
+
+/// `PackageCommandOptions.trust_extensions`: `pi install` and `pi config` ask the extensions'
+/// `project_trust` handlers before the saved decision.
+pub fn package_trust_extensions(agent_dir: PathBuf) -> crate::packages::TrustExtensionsFn {
+    let options = AppOptions { agent_dir, ..AppOptions::default() };
+    Arc::new(move |cwd: PathBuf| {
+        let options = options.clone();
+        async move {
+            let (decision, diagnostics) = extension_trust_decision(&options, &cwd).await;
+            (decision, diagnostics.into_iter().map(|diagnostic| diagnostic.message).collect())
+        }
+        .boxed()
+    })
+}
+
 /// The factory that applies `options` to every session the runtime creates.
 pub fn runtime_factory(options: AppOptions) -> RuntimeFactory {
     let decided = options.project_trust_decisions.iter().cloned().collect();

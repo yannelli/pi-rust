@@ -86,6 +86,28 @@ pub struct Registry {
     pub extensions: Vec<LoadedExtension>,
 }
 
+/// An extension registration that keeps a built-in extension from loading.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BuiltinReplacement {
+    /// `tool` or `command`.
+    pub kind: &'static str,
+    /// `/mcp` for a command, the tool name for a tool.
+    pub registered: String,
+    pub extension_path: String,
+}
+
+impl BuiltinReplacement {
+    /// Upstream's warning for the built-in extension `builtin` left out.
+    pub fn warning(&self, builtin: &str) -> String {
+        format!(
+            "Extension {} registers {} `{}`, so built-in extension `{builtin}` was not loaded. To use `{builtin}`, run \
+             `pi config` and make sure it is enabled under Built-in extensions, then disable or remove the existing \
+             extension. We recommend only having one or the other loaded at a time.",
+            self.extension_path, self.kind, self.registered
+        )
+    }
+}
+
 impl Registry {
     pub fn command(&self, invocation_name: &str) -> Option<&CommandInfo> {
         self.commands.iter().find(|command| command.invocation_name == invocation_name)
@@ -93,6 +115,27 @@ impl Registry {
 
     pub fn flag(&self, name: &str) -> Option<&FlagInfo> {
         self.flags.iter().find(|flag| flag.name == name)
+    }
+
+    /// The tool or command an extension registered that replaces built-in extension `builtin`
+    /// (`mcp`, `codemode`, `tool-search`), as upstream `omitReplacedExtensions` finds it.
+    pub fn builtin_replacement(&self, builtin: &str) -> Option<BuiltinReplacement> {
+        let (kind, name) = match builtin {
+            "mcp" => ("command", "mcp"),
+            "codemode" => ("tool", "codemode"),
+            "tool-search" => ("tool", "tool_search"),
+            _ => return None,
+        };
+        let extension_path = match kind {
+            "command" => self
+                .commands
+                .iter()
+                .find(|command| command.name == name)
+                .map(|command| command.source_info["path"].as_str().unwrap_or_default().to_string()),
+            _ => self.tools.iter().find(|tool| tool.name == name).map(|tool| tool.extension_path.clone()),
+        }?;
+        let registered = if kind == "command" { format!("/{name}") } else { name.to_string() };
+        Some(BuiltinReplacement { kind, registered, extension_path })
     }
 
     /// The `source` of an extension's source info (`local`, a package source, ...).

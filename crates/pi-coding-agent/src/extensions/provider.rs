@@ -194,14 +194,28 @@ impl OAuthAuth for JsOAuth {
     }
 }
 
-/// `oauth.callback`: a login callback forwarded to the waiting login.
-pub(crate) async fn oauth_callback(runner: &Arc<ExtensionRunner>, args: &Args) -> Result<Value, JsError> {
+/// Queues a login callback in call order; the receiver gets its answer.
+fn queue_login_callback(
+    runner: &ExtensionRunner,
+    args: &Args,
+) -> Result<oneshot::Receiver<Result<Value, String>>, JsError> {
     let key = args.json(0)["key"].as_u64().unwrap_or(0);
     let name = args.str(1)?;
     let rest = args.0.iter().skip(2).cloned().map(HostValue::into_json).collect();
     let sender = lock(&runner.logins).get(&key).cloned().ok_or_else(|| error("The login has finished"))?;
     let (reply, answer) = oneshot::channel();
     sender.send(LoginRequest { name, args: rest, reply }).map_err(|_| error("The login has finished"))?;
+    Ok(answer)
+}
+
+/// `oauth.notify`: a login callback with no answer, such as `onAuth` or `onProgress`.
+pub(crate) fn oauth_notify(runner: &ExtensionRunner, args: &Args) -> Result<Value, JsError> {
+    queue_login_callback(runner, args).map(|_| Value::Null)
+}
+
+/// `oauth.callback`: a login callback forwarded to the waiting login.
+pub(crate) async fn oauth_callback(runner: &Arc<ExtensionRunner>, args: &Args) -> Result<Value, JsError> {
+    let answer = queue_login_callback(runner, args)?;
     answer.await.map_err(|_| error("The login has finished"))?.map_err(error)
 }
 
@@ -352,12 +366,8 @@ impl ExtensionRunner {
         let text = |key: &str| definition[key].as_str().unwrap_or_default().to_string();
         let (provider, id) = (text("provider"), text("id"));
         let router = JsRouter { runner: self.weak(), key: format!("{provider}/{id}") };
-        let mut model = VirtualModelDefinition::new(
-            &provider,
-            &id,
-            &definition["name"].as_str().unwrap_or(&id).to_string(),
-            Arc::new(router),
-        );
+        let mut model =
+            VirtualModelDefinition::new(&provider, &id, definition["name"].as_str().unwrap_or(&id), Arc::new(router));
         model.thinking_levels = definition["thinkingLevels"]
             .as_array()
             .map(|levels| levels.iter().filter_map(super::convert::thinking_level).collect());

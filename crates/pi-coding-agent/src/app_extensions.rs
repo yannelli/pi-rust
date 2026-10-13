@@ -18,7 +18,19 @@ use crate::resources::trust::ExtensionTrustDecision;
 /// Load the extensions of `services` with the program's inline extensions.
 pub(super) async fn load(options: &AppOptions, services: &AgentSessionServices) -> LoadedExtensions {
     let load_options = LoadOptions { inline: options.inline_extensions.clone(), ..LoadOptions::default() };
-    load_extensions(services, &load_options).await
+    let mut loaded = load_extensions(services, &load_options).await;
+    if let Some(runner) = &loaded.runner {
+        let listed = services.resources().resources().extensions.clone();
+        let registry = runner.registry();
+        for entry in listed {
+            let path = entry.path.to_string_lossy().to_string();
+            let Some(builtin) = path.strip_prefix(crate::resources::source_info::BUILTIN_PATH_PREFIX) else { continue };
+            if let Some(replacement) = registry.builtin_replacement(builtin) {
+                loaded.diagnostics.push(RuntimeDiagnostic::warning(replacement.warning(builtin)));
+            }
+        }
+    }
+    loaded
 }
 
 /// Apply `--name [value]` flags extensions registered; the rest are unknown options.

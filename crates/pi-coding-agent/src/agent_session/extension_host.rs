@@ -82,6 +82,23 @@ fn resource_paths(found: &Value, key: &str) -> Vec<(PathBuf, PathMetadata)> {
         .collect()
 }
 
+/// `cache_warming_decision` handlers: the action they settle on, when any is registered.
+fn cache_warming_decider(runner: &Arc<ExtensionRunner>) -> super::CacheWarmingDecider {
+    let runner = Arc::downgrade(runner);
+    Arc::new(move |event: crate::cache_warmer::CacheWarmingDecisionEvent| {
+        let runner = runner.upgrade().filter(|runner| runner.has_handlers("cache_warming_decision"));
+        async move {
+            let action = runner?.call_json("emitCacheWarmingDecision", vec![event.to_json()]).await.ok()?;
+            match action.as_str()? {
+                "warm" => Some(crate::cache_warmer::CacheWarmingAction::Warm),
+                "stop" => Some(crate::cache_warmer::CacheWarmingAction::Stop),
+                _ => None,
+            }
+        }
+        .boxed()
+    })
+}
+
 impl AgentSession {
     /// The extensions of this session, when it has any.
     pub fn extension_runner(&self) -> Option<Arc<ExtensionRunner>> {
@@ -93,9 +110,12 @@ impl AgentSession {
         let Some(this) = self.weak.upgrade() else { return };
         runner.set_session(&this);
         *self.extensions.runner.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(runner.clone());
+        // Built-in tools an extension replaces leave before its tools register.
+        self.install_builtin_tools();
         runner.sync_tools();
         let _ = runner.call_json("bind", Vec::new()).await;
         self.install_request_hooks(&runner);
+        self.set_cache_warming_decider(Some(cache_warming_decider(&runner)));
     }
 
     /// The `session_start` event the next [`Self::bind_extensions`] emits.
@@ -417,6 +437,7 @@ impl AgentSession {
         self.shutdown_extensions("reload", None).await;
         if let Some(old) = &old {
             old.unregister_models();
+            old.remove_tools();
             old.shutdown();
         }
         *self.extensions.runner.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;

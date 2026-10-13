@@ -107,7 +107,15 @@ pub struct Setup {
     pub settings: Value,
     pub mode: ExtensionMode,
     pub inline: Vec<Arc<dyn InlineExtension>>,
+    /// Extension flag values, as from the command line.
+    pub flags: Vec<(&'static str, Value)>,
+    /// `models.json` in place of the faux provider's.
+    pub models: Option<Value>,
+    /// List `load` in the `extensions` setting instead of passing the files, as a reload reads it.
+    pub from_settings: bool,
     pub bind: bool,
+    /// The SDK `session_start_event`.
+    pub start_event: Option<Value>,
 }
 
 impl Default for Setup {
@@ -119,11 +127,16 @@ impl Default for Setup {
             settings: json!({}),
             mode: ExtensionMode::Tui,
             inline: Vec::new(),
+            flags: Vec::new(),
+            models: None,
+            from_settings: false,
             bind: true,
+            start_event: None,
         }
     }
 }
 
+#[allow(dead_code)]
 pub struct Harness {
     pub _root: TempDir,
     pub cwd: PathBuf,
@@ -138,6 +151,7 @@ pub struct Harness {
     pub events: Arc<Mutex<Vec<Value>>>,
 }
 
+#[allow(dead_code)]
 impl Harness {
     pub fn errors(&self) -> Vec<String> {
         self.errors.lock().unwrap().iter().map(|error| format!("{}: {}", error.event, error.error)).collect()
@@ -150,6 +164,19 @@ impl Harness {
     pub fn entries(&self) -> Vec<Value> {
         let manager = self.session.session_manager();
         manager.entries().iter().map(|entry| Value::Object(entry.raw().clone())).collect()
+    }
+
+    /// The user text of the last request the model received.
+    pub fn last_prompt(&self) -> String {
+        let requests = self.provider.requests();
+        let Some(context) = requests.last() else { return String::new() };
+        let user = context.messages.iter().rev().find(|message| message.role() == "user");
+        let value = user.map(|message| serde_json::to_value(message).unwrap()).unwrap_or_default();
+        match &value["content"] {
+            Value::String(text) => text.clone(),
+            Value::Array(blocks) => blocks.iter().filter_map(|block| block["text"].as_str()).collect(),
+            _ => String::new(),
+        }
     }
 
     /// Text of every user and assistant message in the transcript.
@@ -193,9 +220,16 @@ pub async fn harness(setup: Setup) -> Harness {
     }
     let api = format!("faux-ext-{}", NEXT_API.fetch_add(1, Ordering::Relaxed));
     write_models(&agent_dir, &api);
+    if let Some(models) = &setup.models {
+        std::fs::write(agent_dir.join("models.json"), models.to_string()).unwrap();
+    }
     let provider = FauxProvider::new(setup.responses.clone());
     register_api_provider(api, provider.clone());
     let mut values = json!({"defaultProvider": "local", "defaultModel": "tiny"});
+    if setup.from_settings {
+        let paths: Vec<String> = setup.load.iter().map(|path| extension_dir.join(path).display().to_string()).collect();
+        values["extensions"] = json!(paths);
+    }
     for (key, value) in setup.settings.as_object().unwrap() {
         values[key] = value.clone();
     }
@@ -207,7 +241,9 @@ pub async fn harness(setup: Setup) -> Harness {
     })
     .await;
     let entries = setup.load.iter().map(|path| LoadEntry::file(extension_dir.join(path))).collect();
-    let options = LoadOptions { entries: Some(entries), inline: setup.inline.clone(), ..LoadOptions::default() };
+    let flag_values = setup.flags.iter().map(|(name, value)| (name.to_string(), value.clone())).collect();
+    let entries = (!setup.from_settings).then_some(entries);
+    let options = LoadOptions { entries, inline: setup.inline.clone(), flag_values };
     let loaded = load_extensions(&services, &options).await;
     let runner = loaded.runner.expect("extensions loaded");
     let errors = Arc::new(Mutex::new(Vec::new()));
@@ -222,7 +258,10 @@ pub async fn harness(setup: Setup) -> Harness {
     let manager = SessionManager::create(&cwd, Some(&agent_dir.join("sessions")));
     let mut create = CreateAgentSessionOptions::new(services.clone(), manager);
     create.extensions = Some(runner.clone());
-    let session = create_agent_session(create).await.unwrap().session;
+    create.session_start_event = setup.start_event.clone();
+    let created = create_agent_session(create).await.unwrap();
+    assert!(created.extensions.is_some_and(|attached| Arc::ptr_eq(&attached, &runner)));
+    let session = created.session;
     let events = Arc::new(Mutex::new(Vec::new()));
     let sink = events.clone();
     session.subscribe(move |event| sink.lock().unwrap().push(event.to_json()));
@@ -244,4 +283,13 @@ pub async fn harness(setup: Setup) -> Harness {
 pub fn example(path: &str) -> String {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/extensions");
     std::fs::read_to_string(root.join(path)).unwrap()
+}
+
+/// Wait until `condition` holds, for work extensions start without awaiting it.
+pub async fn eventually(condition: impl Fn() -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !condition() {
+        assert!(std::time::Instant::now() < deadline, "condition not reached in time");
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
 }

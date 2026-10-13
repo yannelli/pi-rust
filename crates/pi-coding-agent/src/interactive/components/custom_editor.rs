@@ -16,6 +16,9 @@ use super::status_indicator::{SharedIndicator, StatusIndicator};
 /// must not render the TUI synchronously.
 pub type Action = Rc<dyn Fn()>;
 
+/// Runs an extension shortcut for the input; true when one matched.
+pub type ShortcutHandler = Rc<dyn Fn(&str) -> bool>;
+
 #[derive(Default)]
 struct Handlers {
     actions: Vec<(String, Action)>,
@@ -23,7 +26,7 @@ struct Handlers {
     on_ctrl_d: Option<Action>,
     on_paste_image: Option<Action>,
     /// Extension shortcuts, checked before everything else; true when one ran.
-    on_extension_shortcut: Option<Rc<dyn Fn(&str) -> bool>>,
+    on_extension_shortcut: Option<ShortcutHandler>,
 }
 
 /// Shared state of one custom editor.
@@ -100,7 +103,7 @@ impl EditorHandle {
         self.handlers.borrow_mut().on_paste_image = handler;
     }
 
-    pub fn set_on_extension_shortcut(&self, handler: Option<Rc<dyn Fn(&str) -> bool>>) {
+    pub fn set_on_extension_shortcut(&self, handler: Option<ShortcutHandler>) {
         self.handlers.borrow_mut().on_extension_shortcut = handler;
     }
 

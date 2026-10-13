@@ -128,8 +128,7 @@ impl AgentSession {
         model: &Model,
         instructions: Option<&str>,
         cancel: CancellationToken,
-        reason: CompactionReason,
-        will_retry: bool,
+        (reason, will_retry): (CompactionReason, bool),
         from_extension: &mut bool,
     ) -> anyhow::Result<CompactionResult> {
         let hooked = self.before_compact(preparation, instructions, reason, will_retry, &cancel).await?;
@@ -294,7 +293,7 @@ impl AgentSession {
                 None => anyhow::bail!("Nothing to compact (session too small)"),
             }
         };
-        self.summarize(&preparation, &model, instructions, cancel, CompactionReason::Manual, false, from_extension)
+        self.summarize(&preparation, &model, instructions, cancel, (CompactionReason::Manual, false), from_extension)
             .await
     }
 
@@ -389,7 +388,7 @@ impl AgentSession {
         lock(&self.state).compaction_cancelled_by_extension = false;
         let mut from_extension = false;
         let result =
-            self.summarize(&preparation, &model, None, cancel.clone(), reason, will_retry, &mut from_extension).await;
+            self.summarize(&preparation, &model, None, cancel.clone(), (reason, will_retry), &mut from_extension).await;
         lock(&self.state).auto_compaction = None;
         self.notify_idle();
         match result {

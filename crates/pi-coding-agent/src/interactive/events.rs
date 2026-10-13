@@ -182,6 +182,10 @@ impl InteractiveMode {
                 self.render_session_items(items, false, false);
             }
             crate::session::entry::EntryData::Compaction(_) => self.on_compaction_entry(&entry),
+            crate::session::entry::EntryData::Custom { .. } => {
+                self.add_custom_entry_to_chat(&Value::Object(entry.raw().clone()));
+                self.tui().request_render(false);
+            }
             _ => {}
         }
     }

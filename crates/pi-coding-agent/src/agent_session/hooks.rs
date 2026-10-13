@@ -12,7 +12,7 @@ use pi_agent::{
 };
 use pi_ai::Message;
 
-use super::AgentSession;
+use super::{AgentSession, lock};
 use crate::images::{ProcessImageOptions, block_images, normalize_tool_result_images};
 
 impl AgentSession {
@@ -128,10 +128,31 @@ fn transform_context_hook(weak: Weak<AgentSession>) -> TransformContextFn {
         async move {
             let Some(session) = weak.upgrade() else { return messages };
             let messages = session.extension_context(messages).await;
-            hide_tool_declarations(messages, &session.hidden_declarations())
+            let messages = hide_tool_declarations(messages, &session.hidden_declarations());
+            let forced = lock(&session.state).run_prompt.as_ref().and_then(|run| run.force_system_prompt.clone());
+            match forced {
+                Some(forced) => force_system_prompt(messages, forced),
+                None => messages,
+            }
         }
         .boxed()
     })
+}
+
+/// A `before_agent_start` handler's `systemPrompt` as the request's only system message, with
+/// the current tool declarations; the transcript keeps its sections (upstream
+/// `_installAgentForcedPromptProjection`).
+fn force_system_prompt(messages: Vec<Message>, forced: String) -> Vec<Message> {
+    let current = pi_ai::transcript::current_system_message(&messages);
+    let head = pi_ai::SystemMessage {
+        content: pi_ai::UserContent::Text(forced),
+        sections: None,
+        tools_added: current.as_ref().and_then(|current| current.tools_added.clone()),
+        tools_removed: None,
+        timestamp: current.as_ref().map_or_else(pi_ai::now_ms, |current| current.timestamp),
+    };
+    let rest = messages.into_iter().filter(|message| !matches!(message, Message::System(_)));
+    std::iter::once(Message::System(head)).chain(rest).collect()
 }
 
 /// A call waits for the MCP servers it needs (upstream MCP `tool_call` handler).

@@ -101,6 +101,7 @@ pub(crate) fn sync(runner: &ExtensionRunner, op: &str, args: &Args) -> Result<Ho
             lock(&runner.signals).insert(id, token);
             json!(id)
         }
+        "oauth.notify" => super::provider::oauth_notify(runner, args)?,
         "signal.abort" => {
             if let Some(token) = lock(&runner.signals).remove(&args.u64(0)) {
                 token.cancel();

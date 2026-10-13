@@ -59,7 +59,10 @@ impl AgentSession {
         let path = format!("{BUILTIN_PATH_PREFIX}{name}");
         let services = self.services();
         let loader = services.resources();
-        loader.resources().extensions.iter().any(|entry| entry.path.to_string_lossy() == path)
+        let listed = loader.resources().extensions.iter().any(|entry| entry.path.to_string_lossy() == path);
+        let replaced =
+            self.extension_runner().is_some_and(|runner| runner.registry().builtin_replacement(name).is_some());
+        listed && !replaced
     }
 
     /// Where messages for the user go (upstream `ctx.ui.notify`). Messages sent before a handler

@@ -10,7 +10,7 @@ use pi_tui::{AutocompleteItem, ComponentRef, SlashCommand, component};
 use serde_json::{Value, json};
 
 use super::autocomplete::{BUILTIN_SLASH_COMMANDS, prefixed_description};
-use super::components::{CustomMessageRenderer, ThemedText};
+use super::components::{CustomEntryComponent, CustomEntryRenderer, CustomMessageRenderer, ThemedText};
 use super::extension_ui::TuiExtensionUi;
 use super::mode::InteractiveMode;
 use super::renderers::{
@@ -191,9 +191,13 @@ impl InteractiveMode {
     pub(super) fn extension_slash_commands(&self) -> Vec<CommandEntry> {
         let Some(runner) = self.session().extension_runner() else { return Vec::new() };
         let commands = runner.registry().commands.clone();
+        let mcp = self.session().builtin_extension_enabled("mcp");
+        let builtin = |name: &str| {
+            BUILTIN_SLASH_COMMANDS.iter().any(|(builtin, _, _)| *builtin == name && (name != "mcp" || mcp))
+        };
         commands
             .into_iter()
-            .filter(|command| !BUILTIN_SLASH_COMMANDS.iter().any(|(name, _, _)| *name == command.name))
+            .filter(|command| !builtin(&command.name))
             .map(|command| {
                 let mut entry = SlashCommand::new(command.invocation_name.clone(), None);
                 let description = command.description.clone().unwrap_or_default();
@@ -227,6 +231,40 @@ impl InteractiveMode {
             let js = runner.upgrade()?.render_message(&custom_type, &value, expanded, output_pad)?;
             Some(component(js) as ComponentRef)
         }))
+    }
+
+    /// A `custom` entry drawn by its extension renderer, before the streaming message if one
+    /// is open (upstream `addCustomEntryToChat`).
+    pub(super) fn add_custom_entry_to_chat(&self, entry: &Value) {
+        let custom_type = entry["customType"].as_str().unwrap_or_default();
+        let Some(runner) = self.session().extension_runner().filter(|runner| runner.has_entry_renderer(custom_type))
+        else {
+            return;
+        };
+        let (runner, value) = (Arc::downgrade(&runner), entry.clone());
+        let renderer: CustomEntryRenderer = Rc::new(move |expanded: bool| {
+            let Some(runner) = runner.upgrade() else { return Ok(None) };
+            Ok(runner.render_entry(&value, expanded)?.map(|js| component(js) as ComponentRef))
+        });
+        let (expanded, pad) = {
+            let state = self.state.borrow();
+            (state.tool_output_expanded, state.output_pad)
+        };
+        let mut drawn = CustomEntryComponent::new(custom_type, renderer, pad);
+        drawn.set_expanded(expanded);
+        if !drawn.has_content() {
+            return;
+        }
+        let drawn = pi_tui::component(drawn);
+        let streaming = self.state.borrow().streaming_component.clone();
+        let mut chat = self.ui.chat.borrow_mut();
+        let index = streaming.and_then(|streaming| {
+            chat.children.iter().position(|child| std::ptr::addr_eq(Rc::as_ptr(child), Rc::as_ptr(&streaming)))
+        });
+        match index {
+            Some(index) => chat.children.insert(index, drawn),
+            None => chat.children.push(drawn),
+        }
     }
 
     /// An extension's renderer for `tool_name`, over the built-in one.

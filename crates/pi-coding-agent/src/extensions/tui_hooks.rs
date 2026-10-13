@@ -217,6 +217,22 @@ impl ExtensionRunner {
         self.blocking_component("renderMessage", vec![json!(custom_type), message.clone(), options])
     }
 
+    /// Whether an extension draws `custom` entries of `custom_type` (`registerEntryRenderer`).
+    pub fn has_entry_renderer(&self, custom_type: &str) -> bool {
+        self.registry().entry_renderers.iter().any(|name| name == custom_type)
+    }
+
+    /// The component of an entry renderer; `Ok(None)` when it draws nothing, `Err` when it throws.
+    pub fn render_entry(&self, entry: &Value, expanded: bool) -> Result<Option<JsComponent>, String> {
+        let custom_type = entry["customType"].as_str().unwrap_or_default();
+        if !self.has_entry_renderer(custom_type) {
+            return Ok(None);
+        }
+        let args = values(vec![json!(custom_type), entry.clone(), json!({"expanded": expanded})]);
+        let component = self.host().blocking_call_method_opt_ref("renderEntry", args);
+        component.map(|component| component.map(JsComponent::new)).map_err(|error| error.message)
+    }
+
     /// The renderers of `tool_name`: its own or those of `registerToolRenderer` resolvers.
     pub fn tool_renderer_info(&self, tool_name: &str) -> Option<ToolRendererInfo> {
         let registry = self.registry();

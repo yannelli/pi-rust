@@ -118,7 +118,9 @@ impl InteractiveMode {
         } else if text == "/resume" {
             clear();
             self.show_session_selector();
-        } else if let Some(args) = argument(text, "mcp") {
+        } else if let Some(args) = argument(text, "mcp")
+            && self.session().builtin_extension_enabled("mcp")
+        {
             clear();
             self.handle_mcp_command(args.map(str::to_string));
         } else if text == "/llama" {

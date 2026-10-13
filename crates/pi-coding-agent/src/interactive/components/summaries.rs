@@ -229,6 +229,75 @@ impl Component for CustomMessageComponent {
     }
 }
 
+/// Draws a `custom` session entry for `expanded`: a component, nothing, or the renderer's error
+/// (upstream `EntryRenderer`).
+pub type CustomEntryRenderer = Rc<dyn Fn(bool) -> Result<Option<ComponentRef>, String>>;
+
+/// A `custom` entry drawn by an extension renderer (upstream `custom-entry.ts`).
+pub struct CustomEntryComponent {
+    custom_type: String,
+    renderer: CustomEntryRenderer,
+    container: Container,
+    expanded: bool,
+    output_pad: usize,
+    has_content: bool,
+}
+
+impl CustomEntryComponent {
+    pub fn new(custom_type: &str, renderer: CustomEntryRenderer, output_pad: usize) -> Self {
+        let container = Container::new();
+        let custom_type = custom_type.to_string();
+        let mut entry = Self { custom_type, renderer, container, expanded: false, output_pad, has_content: false };
+        entry.rebuild();
+        entry
+    }
+
+    /// Whether the renderer drew anything.
+    pub fn has_content(&self) -> bool {
+        self.has_content
+    }
+
+    pub fn set_expanded(&mut self, expanded: bool) {
+        if self.expanded != expanded {
+            self.expanded = expanded;
+            self.rebuild();
+        }
+    }
+
+    pub fn set_output_pad(&mut self, output_pad: usize) {
+        self.output_pad = output_pad;
+        self.rebuild();
+    }
+
+    fn rebuild(&mut self) {
+        self.container.clear();
+        let drawn = match (self.renderer)(self.expanded) {
+            Ok(drawn) => drawn,
+            Err(message) => {
+                let mut body = BoxComponent::new(self.output_pad, 1, Some(custom_bg()));
+                let text = format!("[{}] renderer failed: {message}", self.custom_type);
+                body.add_child(component(Text::new(&theme().fg(ThemeColor::Error, &text), 0, 0)));
+                Some(component(body) as ComponentRef)
+            }
+        };
+        self.has_content = drawn.is_some();
+        if let Some(drawn) = drawn {
+            self.container.add_child(component(Spacer::new(1)));
+            self.container.add_child(drawn);
+        }
+    }
+}
+
+impl Component for CustomEntryComponent {
+    fn render(&mut self, width: usize) -> Vec<String> {
+        self.container.render(width)
+    }
+
+    fn invalidate(&mut self) {
+        self.rebuild();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::format_thousands;

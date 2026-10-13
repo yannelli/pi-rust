@@ -115,7 +115,9 @@ impl InteractiveMode {
     /// Commands, templates, and skills for the editor, plus `@` file search without `fd`.
     pub(super) fn setup_autocomplete_provider(&self) {
         let mut commands: Vec<CommandEntry> = Vec::new();
-        for (name, description, hint) in BUILTIN_SLASH_COMMANDS {
+        // `/mcp` belongs to the built-in MCP extension; an extension may replace it.
+        let mcp = self.session().builtin_extension_enabled("mcp");
+        for (name, description, hint) in BUILTIN_SLASH_COMMANDS.iter().filter(|(name, _, _)| *name != "mcp" || mcp) {
             let mut command = SlashCommand::new(*name, Some(description));
             if let Some(hint) = hint {
                 command = command.with_argument_hint(*hint);

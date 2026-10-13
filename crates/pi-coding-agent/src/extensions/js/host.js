@@ -368,12 +368,14 @@ async function runOperations(operations, command, cwd, options) {
 }
 
 function loginCallbacks(keys) {
-	const forward = (name) => (...args) => callAsync("oauth.callback", keys, name, ...args.map((arg) => (typeof arg === "function" ? null : arg)));
+	const plain = (args) => args.map((arg) => (typeof arg === "function" ? null : arg));
+	const forward = (name) => (...args) => callAsync("oauth.callback", keys, name, ...plain(args));
+	const notify = (name) => (...args) => void call("oauth.notify", keys, name, ...plain(args));
 	return {
-		onAuth: (info) => void forward("onAuth")(info),
-		onDeviceCode: (info) => void forward("onDeviceCode")(info),
+		onAuth: notify("onAuth"),
+		onDeviceCode: notify("onDeviceCode"),
 		onPrompt: (prompt) => forward("onPrompt")(prompt),
-		onProgress: (message) => void forward("onProgress")(message),
+		onProgress: notify("onProgress"),
 		onManualCodeInput: () => forward("onManualCodeInput")(),
 		onSelect: (prompt) => forward("onSelect")(prompt),
 		signal: signalFor(keys.signal),

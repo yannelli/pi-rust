@@ -71,6 +71,9 @@ impl Default for ExtensionBindings {
 
 pub(crate) type DataFn = Arc<dyn Fn(&str) + Send + Sync>;
 
+/// An API implementation a runner replaced, and the provider that owns the replacement.
+pub(crate) type ReplacedApi = (Option<Arc<dyn ApiProvider>>, Option<String>);
+
 /// One loaded set of extensions. Always held in an `Arc`.
 pub struct ExtensionRunner {
     js: JsHandle,
@@ -94,7 +97,7 @@ pub struct ExtensionRunner {
     /// Providers this runner registered, with the extension that registered each.
     pub(crate) providers: Mutex<Vec<(String, String)>>,
     /// APIs this runner replaced: the replaced implementation and the owning provider.
-    pub(crate) apis: Mutex<HashMap<String, (Option<Arc<dyn ApiProvider>>, Option<String>)>>,
+    pub(crate) apis: Mutex<HashMap<String, ReplacedApi>>,
     pub(crate) logins: Mutex<HashMap<u64, mpsc::UnboundedSender<LoginRequest>>>,
     pub(crate) virtual_models: Mutex<Vec<(String, String)>>,
     pub(crate) inline: Mutex<Vec<Arc<dyn InlineExtension>>>,

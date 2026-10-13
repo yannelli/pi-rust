@@ -61,7 +61,7 @@ async fn custom_anthropic_provider_streams_through_its_sdk() {
     h.session.prompt("hi", Vec::new()).await.unwrap();
     assert_eq!(h.session.last_assistant_text().as_deref(), Some("Hello from fake Claude"));
     let usage = h.session.messages().iter().rev().find_map(|message| match message {
-        pi_ai::Message::Assistant(assistant) => Some(assistant.usage.clone()),
+        pi_ai::Message::Assistant(assistant) => Some(assistant.usage),
         _ => None,
     });
     assert_eq!(usage.map(|usage| (usage.input, usage.output)), Some((10, 5)));

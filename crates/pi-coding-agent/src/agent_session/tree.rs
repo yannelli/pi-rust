@@ -83,7 +83,7 @@ type PendingSummary = (String, Option<Value>, Option<Usage>);
 enum BeforeTree {
     Continue,
     Cancelled,
-    Summary(PendingSummary),
+    Summary(Box<PendingSummary>),
 }
 
 impl AgentSession {
@@ -128,7 +128,7 @@ impl AgentSession {
         let from_extension = matches!(hooked, BeforeTree::Summary(_));
         let summary = match hooked {
             BeforeTree::Cancelled => Ok(Some(Err(NavigateTreeResult { cancelled: true, ..Default::default() }))),
-            BeforeTree::Summary(summary) => Ok(Some(Ok(summary))),
+            BeforeTree::Summary(summary) => Ok(Some(Ok(*summary))),
             BeforeTree::Continue => match (options.summarize && !entries.is_empty(), model) {
                 (true, Some(model)) => self.branch_summary(&entries, &model, &options, cancel).await,
                 _ => Ok(None),
@@ -207,7 +207,7 @@ impl AgentSession {
             Some(text) if options.summarize => {
                 let details = result["summary"].get("details").filter(|details| !details.is_null()).cloned();
                 let usage = serde_json::from_value(result["summary"]["usage"].clone()).ok();
-                BeforeTree::Summary((text.to_string(), details, usage))
+                BeforeTree::Summary(Box::new((text.to_string(), details, usage)))
             }
             _ => BeforeTree::Continue,
         }

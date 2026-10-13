@@ -54,6 +54,8 @@ pub struct CreateAgentSessionOptions {
     pub restore_tools: bool,
     /// Extensions loaded for this session ([`crate::extensions::load_extensions`]).
     pub extensions: Option<Arc<crate::extensions::ExtensionRunner>>,
+    /// The `session_start` event the extensions get when they bind; unset sends `startup`.
+    pub session_start_event: Option<serde_json::Value>,
     /// Options of the built-in tools: custom backends, the bash spawn hook, and whether the
     /// shell tools expose the session's `PI_*` variables. Unset uses
     /// [`ToolsOptions::from_settings`]; start from it to keep the settings.
@@ -76,6 +78,7 @@ impl CreateAgentSessionOptions {
             mcp: McpSessionOptions::default(),
             restore_tools: false,
             extensions: None,
+            session_start_event: None,
             tool_options: None,
         }
     }
@@ -83,6 +86,8 @@ impl CreateAgentSessionOptions {
 
 pub struct CreateAgentSessionResult {
     pub session: Arc<AgentSession>,
+    /// The extensions attached to the session (upstream `extensionsResult`).
+    pub extensions: Option<Arc<crate::extensions::ExtensionRunner>>,
     /// Why the restored or saved model was not used.
     pub model_fallback_message: Option<String>,
 }
@@ -261,9 +266,13 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
         }
     });
     *lock(&session.agent_listener) = Some(id);
-    if let Some(runner) = options.extensions {
+    if let Some(event) = options.session_start_event {
+        session.set_session_start_event(event);
+    }
+    let extensions = options.extensions;
+    if let Some(runner) = extensions.clone() {
         session.attach_extensions(runner).await;
     }
     session.start_builtin_extensions();
-    Ok(CreateAgentSessionResult { session, model_fallback_message })
+    Ok(CreateAgentSessionResult { session, extensions, model_fallback_message })
 }

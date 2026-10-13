@@ -26,7 +26,9 @@ pub mod vendor;
 pub use component::{ComponentFactory, ComponentKind, CustomRequest, JsComponent};
 pub use inline::{InlineExtension, inline_path};
 pub use loader::{LoadEntry, discover_extensions_in_dir, load_entries, resolve_extension_entries};
-pub use registry::{CommandInfo, FlagInfo, LoadedExtension, Registry, ShortcutInfo, ToolDescriptor};
+pub use registry::{
+    BuiltinReplacement, CommandInfo, FlagInfo, LoadedExtension, Registry, ShortcutInfo, ToolDescriptor,
+};
 pub use runner::{
     ExtensionBindings, ExtensionError, ExtensionErrorFn, ExtensionLoadError, ExtensionRunner, ShutdownFn,
 };
