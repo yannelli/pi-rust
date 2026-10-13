@@ -59,8 +59,40 @@ impl Default for ProcessTerminal {
 
 fn stdout_write(data: &str) {
     let mut out = std::io::stdout().lock();
-    let _ = out.write_all(data.as_bytes());
-    let _ = out.flush();
+    if let Err(error) = out.write_all(data.as_bytes()).and_then(|()| out.flush()) {
+        report_terminal_error(&error);
+    }
+}
+
+static DEAD_TERMINAL_HANDLER: std::sync::Mutex<Option<fn()>> = std::sync::Mutex::new(None);
+
+/// Run `handler` when terminal I/O fails because the terminal is gone (see
+/// [`is_dead_terminal_error`]); `None` removes it. The handler is expected to exit.
+pub fn set_dead_terminal_handler(handler: Option<fn()>) {
+    *DEAD_TERMINAL_HANDLER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = handler;
+}
+
+/// Whether an I/O error means the terminal is gone: EIO from an orphaned process group, EPIPE,
+/// ENOTCONN, or ENOTTY from a revoked tty.
+pub fn is_dead_terminal_error(error: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    if let Some(code) = error.raw_os_error()
+        && [rustix::io::Errno::IO, rustix::io::Errno::NOTTY].iter().any(|errno| errno.raw_os_error() == code)
+    {
+        return true;
+    }
+    matches!(error.kind(), std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::NotConnected)
+}
+
+/// Call the dead terminal handler when `error` is a dead terminal error.
+pub(crate) fn report_terminal_error(error: &std::io::Error) {
+    if !is_dead_terminal_error(error) {
+        return;
+    }
+    let handler = *DEAD_TERMINAL_HANDLER.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(handler) = handler {
+        handler();
+    }
 }
 
 fn real_size() -> Option<(usize, usize)> {

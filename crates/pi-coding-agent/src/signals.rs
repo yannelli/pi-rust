@@ -118,23 +118,22 @@ pub async fn termination_signal() -> i32 {
     std::future::pending().await
 }
 
-/// Whether an I/O error means the terminal is gone (EIO from an orphaned process group,
-/// ENOTTY from a revoked tty, or a closed pipe), so pi must exit without touching it.
-pub fn is_dead_terminal_error(error: &std::io::Error) -> bool {
-    #[cfg(unix)]
-    if let Some(code) = error.raw_os_error()
-        && (code == rustix::io::Errno::IO.raw_os_error() || code == rustix::io::Errno::NOTTY.raw_os_error())
-    {
-        return true;
-    }
-    error.kind() == std::io::ErrorKind::BrokenPipe
-}
+pub use pi_tui::process_terminal::is_dead_terminal_error;
 
 /// Exit at once after the terminal died: kill tracked children and skip all cleanup, which
 /// would write restore sequences to the dead terminal (upstream `emergencyTerminalExit`).
 pub fn emergency_terminal_exit() -> ! {
     kill_tracked_detached_children();
     std::process::exit(SIGHUP_EXIT_CODE)
+}
+
+/// Exit through [`emergency_terminal_exit`] when terminal reads or writes fail with a dead
+/// terminal error, as upstream does for the interactive mode.
+pub fn install_dead_terminal_exit() {
+    fn exit_on_dead_terminal() {
+        emergency_terminal_exit()
+    }
+    pi_tui::process_terminal::set_dead_terminal_handler(Some(exit_on_dead_terminal));
 }
 
 #[cfg(test)]
@@ -156,6 +155,7 @@ mod tests {
     #[test]
     fn classifies_dead_terminal_errors() {
         assert!(is_dead_terminal_error(&std::io::Error::from(std::io::ErrorKind::BrokenPipe)));
+        assert!(is_dead_terminal_error(&std::io::Error::from(std::io::ErrorKind::NotConnected)));
         assert!(!is_dead_terminal_error(&std::io::Error::from(std::io::ErrorKind::NotFound)));
         #[cfg(unix)]
         {

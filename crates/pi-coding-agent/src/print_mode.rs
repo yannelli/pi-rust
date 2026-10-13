@@ -60,13 +60,22 @@ pub async fn run_print_mode(
         }
         anyhow::Ok(())
     };
-    // SIGTERM and SIGHUP (Ctrl+Break and console close on Windows) stop the run.
+    // SIGTERM and SIGHUP (Ctrl+Break and console close on Windows) stop the run. The prompts
+    // keep running while the runtime is disposed, so the abort can settle the agent loop.
+    let mut work = std::pin::pin!(result);
     let result = tokio::select! {
-        result = result => result,
+        result = &mut work => result,
         code = crate::signals::termination_signal() => {
             crate::signals::kill_tracked_detached_children();
             runtime.set_rebind_session(None);
-            runtime.dispose().await;
+            let mut dispose = std::pin::pin!(runtime.dispose());
+            let mut work_done = false;
+            loop {
+                tokio::select! {
+                    () = &mut dispose => break,
+                    _ = &mut work, if !work_done => work_done = true,
+                }
+            }
             let _ = crate::diagnostics::flush_raw_stdout();
             std::process::exit(code);
         }

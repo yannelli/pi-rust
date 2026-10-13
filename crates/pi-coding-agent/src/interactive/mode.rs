@@ -435,6 +435,17 @@ impl InteractiveMode {
 
     /// Set up the UI, send the startup messages, and run until the user quits.
     pub async fn run(self: &Rc<Self>) -> anyhow::Result<()> {
+        if self.uses_process_terminal {
+            crate::signals::install_dead_terminal_exit();
+            let weak = self.weak.clone();
+            tokio::task::spawn_local(async move {
+                crate::signals::termination_signal().await;
+                crate::signals::kill_tracked_detached_children();
+                if let Some(mode) = weak.upgrade() {
+                    mode.request_shutdown();
+                }
+            });
+        }
         self.init().await;
         self.start_prompt_worker();
         self.show_startup_warnings();

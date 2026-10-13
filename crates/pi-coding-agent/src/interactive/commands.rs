@@ -325,7 +325,26 @@ impl InteractiveMode {
             if let Some(error) = mode.session().model_runtime().load_error() {
                 mode.show_error(&format!("models.json error: {error}"));
             }
-            mode.show_status("Reloaded keybindings, extensions, skills, prompts, themes, and context files");
+            let cwd = mode.runtime.cwd();
+            let trusted = mode.settings().is_project_trusted();
+            let home = crate::config::home_dir();
+            let saved = {
+                let auto_cwd = &mut mode.options.borrow_mut().auto_trust_on_reload_cwd;
+                crate::startup::save_implicit_project_trust_after_reload(
+                    auto_cwd,
+                    &cwd,
+                    trusted,
+                    &mode.agent_dir,
+                    &home,
+                )
+            };
+            match saved {
+                Ok(saved) => mode.show_status(crate::startup::reload_status(saved)),
+                Err(warning) => {
+                    mode.show_warning(&warning);
+                    mode.show_status(crate::startup::reload_status(false));
+                }
+            }
             mode.selector.restore_editor();
         });
     }

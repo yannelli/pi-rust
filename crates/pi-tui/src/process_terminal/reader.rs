@@ -109,7 +109,10 @@ pub fn spawn_reader(core: Arc<Mutex<Core>>, _sink: TerminalSink) -> ReaderThread
                             }
                         }
                         Err(rustix::io::Errno::INTR | rustix::io::Errno::AGAIN) => {}
-                        Err(_) => std::thread::sleep(POLL_INTERVAL),
+                        Err(errno) => {
+                            super::report_terminal_error(&std::io::Error::from(errno));
+                            std::thread::sleep(POLL_INTERVAL);
+                        }
                     }
                 }
                 poll_timers(&core);

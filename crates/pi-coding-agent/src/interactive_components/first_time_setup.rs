@@ -7,7 +7,6 @@ use pi_tui::{Component, Container, get_keybindings};
 
 use super::common::{border, spacer, text};
 use super::{key_hint, raw_key_hint};
-use crate::config::ENV_AGENT_DIR;
 use crate::resources::brand::{APP_NAME, CONFIG_DIR_NAME};
 use crate::settings::SettingsManager;
 use crate::theme::{SYSTEM_THEME_NAME, ThemeColor, theme};
@@ -217,7 +216,7 @@ pub fn should_run_first_time_setup_with(
     if env("PI_EXPERIMENTAL").as_deref() != Some("1") {
         return false;
     }
-    if env(ENV_AGENT_DIR).is_some_and(|dir| !dir.is_empty()) {
+    if env(&crate::resources::brand::agent_dir_env_var()).is_some_and(|dir| !dir.is_empty()) {
         return false;
     }
     !settings_path.exists()
