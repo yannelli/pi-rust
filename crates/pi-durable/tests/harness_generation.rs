@@ -1,5 +1,10 @@
-//! Port of upstream `test/harness-generation.test.ts` (the core cases).
+//! Port of upstream `test/harness-generation.test.ts`. This file holds the core cases; `harness_generation/` holds
+//! the streaming and deferred cases (`streams.rs`) and the request option and settings cases (`options.rs`).
 
+#[path = "harness_generation/options.rs"]
+mod options;
+#[path = "harness_generation/streams.rs"]
+mod streams;
 mod support;
 
 use std::sync::Arc;
@@ -14,7 +19,7 @@ use pi_durable::{SubmissionStatus, TaskOutcome};
 use serde_json::json;
 use support::harness_support::*;
 
-fn error_503() -> pi_ai::AssistantMessage {
+pub fn error_503() -> pi_ai::AssistantMessage {
     let options = FauxMessageOptions {
         stop_reason: Some(StopReason::Error),
         error_message: Some("503 Service Unavailable".into()),
@@ -23,15 +28,15 @@ fn error_503() -> pi_ai::AssistantMessage {
     faux_assistant_message(Vec::new(), options)
 }
 
-fn answer(text: &str) -> pi_ai::AssistantMessage {
+pub fn answer(text: &str) -> pi_ai::AssistantMessage {
     faux_assistant_message(text, FauxMessageOptions::default())
 }
 
-async fn live(harness: &Harness, conversation: &Conversation) -> Option<Json> {
+pub async fn live(harness: &Harness, conversation: &Conversation) -> Option<Json> {
     harness.snapshot(&LIVE_DOC, conversation.id, &ctx()).await.unwrap()
 }
 
-fn empty() -> Option<Json> {
+pub fn empty() -> Option<Json> {
     Some(Json::from(json!({})))
 }
 
