@@ -2387,6 +2387,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "url",
+ "winapi-util",
 ]
 
 [[package]]

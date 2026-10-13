@@ -84,20 +84,27 @@ fn since_epoch_ns(time: io::Result<SystemTime>) -> u128 {
 }
 
 #[cfg(unix)]
-fn identity(metadata: &std::fs::Metadata) -> (u64, u64) {
+fn identity(_path: &str, metadata: &std::fs::Metadata) -> (u64, u64) {
     use std::os::unix::fs::MetadataExt;
     (metadata.dev(), metadata.ino())
 }
 
-/// Without stable inode numbers, a creation time stands in for the identity.
-#[cfg(not(unix))]
-fn identity(metadata: &std::fs::Metadata) -> (u64, u64) {
-    (0, since_epoch_ns(metadata.created()) as u64)
+/// The volume serial and file index, as Node reports `dev` and `ino`. NTFS gives a directory recreated under the
+/// same name the old creation time, so that time alone cannot tell the two apart.
+#[cfg(windows)]
+fn identity(path: &str, metadata: &std::fs::Metadata) -> (u64, u64) {
+    let information = (!metadata.file_type().is_symlink())
+        .then(|| winapi_util::Handle::from_path_any(path).and_then(winapi_util::file::information).ok())
+        .flatten();
+    match information {
+        Some(information) => (information.volume_serial_number(), information.file_index()),
+        None => (0, since_epoch_ns(metadata.created()) as u64),
+    }
 }
 
-pub(crate) fn entry_of(metadata: &std::fs::Metadata, hash: Option<u64>) -> Entry {
+pub(crate) fn kind_of(metadata: &std::fs::Metadata) -> EntryKind {
     let file_type = metadata.file_type();
-    let kind = if file_type.is_file() {
+    if file_type.is_file() {
         EntryKind::File
     } else if file_type.is_dir() {
         EntryKind::Directory
@@ -105,8 +112,12 @@ pub(crate) fn entry_of(metadata: &std::fs::Metadata, hash: Option<u64>) -> Entry
         EntryKind::Symlink
     } else {
         EntryKind::Other
-    };
-    let (dev, ino) = identity(metadata);
+    }
+}
+
+pub(crate) fn entry_of(path: &str, metadata: &std::fs::Metadata, hash: Option<u64>) -> Entry {
+    let kind = kind_of(metadata);
+    let (dev, ino) = identity(path, metadata);
     let directory = kind == EntryKind::Directory;
     Entry {
         kind,
@@ -178,7 +189,7 @@ impl Scanner<'_> {
         let recent = age < HASH_RECENT_MS * 1_000_000;
         let hashed = self.polling && metadata.is_file() && metadata.len() <= HASH_MAX_BYTES && recent;
         let hash = if hashed { content_hash(path) } else { None };
-        self.scan.snapshot.insert(path.to_string(), entry_of(metadata, hash));
+        self.scan.snapshot.insert(path.to_string(), entry_of(path, metadata, hash));
     }
 
     fn scan_directory(&mut self, index: usize, directory: &str) -> Result<(), ScanError> {
@@ -211,7 +222,7 @@ impl Scanner<'_> {
                 Some(kind) => *kind,
                 None => {
                     let Ok(metadata) = std::fs::symlink_metadata(&path) else { continue };
-                    let kind = entry_of(&metadata, None).kind;
+                    let kind = kind_of(&metadata);
                     self.listed.insert(path.clone(), kind);
                     // A target's own entry (following links) wins over its listing by another target.
                     if !self.scan.snapshot.contains_key(&path) {
@@ -236,7 +247,7 @@ impl Scanner<'_> {
             }
             // Identity only: an ancestor's own timestamps change with every unrelated sibling.
             if let Ok(metadata) = std::fs::symlink_metadata(&ancestor) {
-                let entry = Entry { size: 0, mtime_ns: 0, ..entry_of(&metadata, None) };
+                let entry = Entry { size: 0, mtime_ns: 0, ..entry_of(&ancestor, &metadata, None) };
                 self.scan.snapshot.insert(ancestor, entry);
             }
         }
