@@ -2330,13 +2330,16 @@ version = "0.1.2"
 dependencies = [
  "async-trait",
  "futures",
+ "pi-agent",
  "pi-ai",
  "pi-chord",
+ "ring",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
