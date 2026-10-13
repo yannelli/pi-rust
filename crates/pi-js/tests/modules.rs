@@ -186,6 +186,8 @@ async fn registered_source_files_load_with_relative_imports() {
     runtime.register_source_files([
         (base.join("index.mjs"), "export * from './lib/math.mjs';\nexport default 'pkg';\n".to_string()),
         (base.join("lib/math.mjs"), "export const triple = (n) => n * 3;\n".to_string()),
+        (base.join("cjs/index.js"), "exports.inc = require('./helper').inc;\n".to_string()),
+        (base.join("cjs/helper.js"), "\"use strict\";\nexports.inc = (n) => n + 1;\n".to_string()),
     ]);
     let entry = serde_json::to_string(&base.join("index.mjs").display().to_string()).unwrap();
     runtime.register_virtual_module(
@@ -197,4 +199,8 @@ async fn registered_source_files_load_with_relative_imports() {
     assert_eq!(namespace.get("out").await.unwrap().into_json(), json!("pkg:12"));
     let required = run_cjs(&runtime, &root, &format!("return require({entry}).triple(2);")).await;
     assert_eq!(required, json!(6));
+    let cjs_dir = serde_json::to_string(&base.join("cjs").display().to_string()).unwrap();
+    let imported =
+        run_cjs(&runtime, &root, &format!("const m = await import({cjs_dir} + '/index.js'); return m.inc(1);")).await;
+    assert_eq!(imported, json!(2));
 }

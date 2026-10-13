@@ -45,6 +45,9 @@ pub(crate) fn resolve_kind(
         if has_inline_source(&state, &candidate) {
             return Ok(("file", candidate));
         }
+        if let Some(found) = probe_source_file(&state, &candidate) {
+            return Ok(("file", found));
+        }
     }
     let virtual_modules = state.shared.virtual_modules.read().unwrap_or_else(|poison| poison.into_inner());
     let lookup = |name: &str| virtual_modules.canonical_name(name);
@@ -60,6 +63,25 @@ pub(crate) fn resolve_kind(
 pub(crate) fn has_inline_source(state: &LoopState, key: &str) -> bool {
     state.inline_sources.borrow().contains_key(key)
         || state.shared.source_files.read().unwrap_or_else(|poison| poison.into_inner()).contains_key(key)
+}
+
+/// A registered source file for an extensionless or directory specifier, probed like Node.
+fn probe_source_file(state: &LoopState, base: &str) -> Option<String> {
+    const SUFFIXES: [&str; 8] = [".js", ".mjs", ".cjs", ".ts", ".json", "/index.js", "/index.mjs", "/index.ts"];
+    let files = state.shared.source_files.read().unwrap_or_else(|poison| poison.into_inner());
+    if files.is_empty() {
+        return None;
+    }
+    let base = base.trim_end_matches(['/', '\\']);
+    SUFFIXES
+        .iter()
+        .map(|suffix| normalize(Path::new(&format!("{base}{suffix}"))).display().to_string())
+        .find(|key| files.contains_key(key))
+}
+
+/// The source of a file registered with `register_source_files`.
+pub(crate) fn registered_source(state: &LoopState, key: &str) -> Option<std::sync::Arc<str>> {
+    state.shared.source_files.read().unwrap_or_else(|poison| poison.into_inner()).get(key).cloned()
 }
 
 fn inline_source(state: &LoopState, key: &str) -> Option<String> {
