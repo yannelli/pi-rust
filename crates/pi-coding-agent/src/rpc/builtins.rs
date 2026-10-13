@@ -57,6 +57,12 @@ pub(super) fn bind_builtins(session: &AgentSession, ui: &Arc<RpcExtensionUi>) {
     session.set_mcp_sign_in_prompt(Some(Arc::new(RpcMcpSignIn { ui: ui.clone() })));
 }
 
+/// Detach `session` from the client once RPC mode stops serving it.
+pub(super) fn unbind_builtins(session: &AgentSession) {
+    session.set_notify_handler(None);
+    session.set_mcp_sign_in_prompt(None);
+}
+
 /// Commands of the built-in extensions: `/mcp` while MCP runs for the session.
 pub fn builtin_commands(session: &AgentSession) -> Vec<RpcSlashCommand> {
     if session.mcp_manager().is_none() {

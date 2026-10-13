@@ -79,6 +79,7 @@ impl RpcServer {
             let mut current = lock(&self.subscription);
             if let Some((old, id)) = current.take() {
                 old.unsubscribe(id);
+                super::builtins::unbind_builtins(&old);
             }
             let output = self.output.clone();
             let shutdown = self.shutdown.clone();
@@ -168,6 +169,7 @@ impl RpcServer {
         self.runtime.set_rebind_session(None);
         if let Some((session, id)) = lock(&self.subscription).take() {
             session.unsubscribe(id);
+            super::builtins::unbind_builtins(&session);
         }
         self.runtime.dispose().await;
         if code != 143 {
