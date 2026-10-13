@@ -2302,6 +2302,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-embedded"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures",
+ "pi-agent",
+ "pi-ai",
+ "reqwest",
+ "ring",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "pi-js"
 version = "0.1.1"
 dependencies = [
