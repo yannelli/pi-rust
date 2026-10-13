@@ -16,6 +16,7 @@ mod types;
 mod ui;
 
 pub use builtins::builtin_commands;
+pub(crate) use builtins::{bind_builtins, unbind_builtins};
 pub use client::{RpcClient, RpcClientOptions};
 pub use client_api::collect_until_settled;
 pub use client_types::{

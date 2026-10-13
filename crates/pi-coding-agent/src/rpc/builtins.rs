@@ -50,7 +50,7 @@ impl McpSignInPrompt for RpcMcpSignIn {
 }
 
 /// Route the built-in extensions' notices and sign-in prompts of `session` to the client.
-pub(super) fn bind_builtins(session: &AgentSession, ui: &Arc<RpcExtensionUi>) {
+pub(crate) fn bind_builtins(session: &AgentSession, ui: &Arc<RpcExtensionUi>) {
     let notify_ui = ui.clone();
     session.set_notify_handler(Some(Arc::new(move |message: &str, level: NotifyLevel| {
         notify_ui.notify(message, Some(notify_type(level)));
@@ -59,7 +59,7 @@ pub(super) fn bind_builtins(session: &AgentSession, ui: &Arc<RpcExtensionUi>) {
 }
 
 /// Detach `session` from the client once RPC mode stops serving it.
-pub(super) fn unbind_builtins(session: &AgentSession) {
+pub(crate) fn unbind_builtins(session: &AgentSession) {
     session.set_notify_handler(None);
     session.set_mcp_sign_in_prompt(None);
 }

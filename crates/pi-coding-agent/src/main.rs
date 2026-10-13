@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use pi_ai::auth::OAuthLookup;
 use pi_ai::env::{process_env_value, set_child_process_env};
+use pi_coding_agent::acp::{AcpModeOptions, run_acp_mode};
 use pi_coding_agent::agent_session::auth::configure_http_from_settings;
 use pi_coding_agent::agent_session::{
     BUILTIN_EXTENSIONS, CreateServicesOptions, DiagnosticLevel, RuntimeDiagnostic, create_agent_session_services,
@@ -368,6 +369,11 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
     if let Some(error) = unknown_flags_error(&args.unknown_flags) {
         eprintln!("Error: {error}");
         return Ok(1);
+    }
+    if args.terminal_login {
+        args.mode = None;
+    } else if args.mode == Some(OutputMode::Acp) {
+        return Ok(run_acp_mode(AcpModeOptions::from_args(&args, &cwd, &agent_dir, oauth_lookup())).await);
     }
     let mut mode = app_mode(&args, std::io::stdin().is_terminal(), std::io::stdout().is_terminal());
     if mode == AppMode::Rpc {
