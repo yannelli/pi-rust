@@ -5,6 +5,7 @@ members = [
     "crates/pi-agent",
     "crates/pi-codemode",
     "crates/pi-coding-agent",
+    "crates/pi-js",
     "crates/pi-mcp",
     "crates/pi-tui",
     "xtask",

@@ -2,6 +2,7 @@
 //! `docs/rpc-extension-ui.md`): Pi as a long-lived subprocess driven by JSONL commands on
 //! stdin, with responses, session events, and extension UI requests on stdout.
 
+mod builtins;
 mod client;
 mod client_api;
 mod client_types;
@@ -14,6 +15,7 @@ mod tree;
 mod types;
 mod ui;
 
+pub use builtins::builtin_commands;
 pub use client::{RpcClient, RpcClientOptions};
 pub use client_api::collect_until_settled;
 pub use client_types::{
@@ -22,7 +24,7 @@ pub use client_types::{
 };
 pub use commands::{resource_commands, session_state};
 pub use host::{ExtensionErrorRecord, RpcExtensionBinding, RpcExtensionHost, RpcShutdownHandle};
-pub use output::{RpcOutput, take_over_stdout};
+pub use output::{RawStdout, RpcOutput};
 pub use server::{RpcModeOptions, run_rpc_mode, serve_rpc};
 pub use tree::{RpcSessionTree, RpcTreeNode, parse_json_line, tree_data_json};
 pub use types::{

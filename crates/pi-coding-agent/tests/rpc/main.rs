@@ -6,8 +6,12 @@ mod cli_support;
 #[allow(dead_code)]
 #[path = "../agent_session/harness.rs"]
 mod harness;
+#[allow(dead_code)]
+#[path = "../agent_session/mcp_fake.rs"]
+mod mcp_fake;
 
 mod binary;
+mod builtins;
 mod client;
 mod extension_ui;
 mod framing;

@@ -61,7 +61,9 @@ async fn drives_prompts_bash_and_session_commands() {
     assert!(stats.session_file.is_some() && stats.context_usage.is_some());
     let exported = client.export_html(None).await.unwrap();
     assert!(exported.ends_with(".html") && root.path().join("work").join(&exported).exists(), "{exported}");
-    assert!(client.get_commands().await.unwrap().is_empty());
+    let commands = client.get_commands().await.unwrap();
+    let names: Vec<&str> = commands.iter().map(|command| command.name.as_str()).collect();
+    assert_eq!(names, ["mcp"], "only the built-in MCP command");
     assert!(client.get_available_models().await.unwrap().iter().any(|model| model.id == "mock-model"));
     client.set_thinking_level(ThinkingLevel::High).await.unwrap();
     assert_eq!(client.cycle_thinking_level().await.unwrap(), None, "the mock model has no reasoning");

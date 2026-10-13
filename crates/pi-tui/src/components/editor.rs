@@ -27,15 +27,8 @@ use crate::editor_component::{EditorComponent, EditorTextCallback};
 use crate::tui::Tui;
 use state::EditorCore;
 
-/// Styles for the autocomplete popup (the fields of upstream `SelectListTheme`).
-#[derive(Clone)]
-pub struct SelectListTheme {
-    pub selected_prefix: StyleFn,
-    pub selected_text: StyleFn,
-    pub description: StyleFn,
-    pub scroll_info: StyleFn,
-    pub no_match: StyleFn,
-}
+/// Styles for the autocomplete popup.
+pub use crate::components::select_list::SelectListTheme;
 
 /// Editor styles.
 #[derive(Clone)]

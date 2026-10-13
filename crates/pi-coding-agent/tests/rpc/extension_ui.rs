@@ -227,8 +227,11 @@ async fn fire_and_forget_requests_and_extension_errors() {
 async fn host_commands_bash_and_rebinding() {
     let (mut rpc, host) = start_host(Options::default()).await;
     let commands = rpc.data(json!({"id": "c", "type": "get_commands"})).await["commands"].clone();
+    let names: Vec<&str> =
+        commands.as_array().unwrap().iter().map(|command| command["name"].as_str().unwrap()).collect();
+    assert_eq!(names[..2], ["mcp", "deploy"], "built-in commands, then the host's");
     assert_eq!(
-        commands[0],
+        commands[1],
         json!({"name": "deploy", "source": "extension", "sourceInfo": {"path": "/ext/deploy.ts", "source": "local", "scope": "user", "origin": "top-level"}})
     );
 

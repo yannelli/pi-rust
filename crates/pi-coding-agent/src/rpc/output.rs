@@ -120,27 +120,18 @@ fn write_all_retrying(writer: &mut dyn Write, mut bytes: &[u8]) -> io::Result<()
     Ok(())
 }
 
-/// Reserve stdout for protocol records and return a writer for them; later calls return the
-/// same stream. On Unix, descriptor 1 then points at stderr, so stray prints and inherited
-/// child output stay off the protocol stream.
-pub fn take_over_stdout() -> io::Result<Box<dyn Write + Send>> {
-    #[cfg(unix)]
-    {
-        use std::os::fd::AsFd;
-        static RAW: std::sync::Mutex<Option<std::fs::File>> = std::sync::Mutex::new(None);
-        let mut raw = RAW.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        if raw.is_none() {
-            io::stdout().flush()?;
-            let saved = rustix::io::fcntl_dupfd_cloexec(io::stdout().as_fd(), 3)?;
-            rustix::stdio::dup2_stdout(io::stderr().as_fd())?;
-            *raw = Some(std::fs::File::from(saved));
-        }
-        let file = raw.as_ref().expect("stdout was saved").try_clone()?;
-        Ok(Box::new(file))
+/// The real stdout behind the guard of [`crate::diagnostics::take_over_stdout`], which keeps
+/// stray prints and inherited child output off the protocol stream.
+pub struct RawStdout;
+
+impl Write for RawStdout {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        crate::diagnostics::write_raw_stdout(&String::from_utf8_lossy(buf))?;
+        Ok(buf.len())
     }
-    #[cfg(not(unix))]
-    {
-        Ok(Box::new(io::stdout()))
+
+    fn flush(&mut self) -> io::Result<()> {
+        crate::diagnostics::flush_raw_stdout()
     }
 }
 

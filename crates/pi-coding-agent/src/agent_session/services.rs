@@ -52,6 +52,8 @@ pub struct ResourceOptions {
     pub system_prompt: Option<String>,
     /// `--append-system-prompt` values: replace `APPEND_SYSTEM.md`.
     pub append_system_prompt: Option<Vec<String>>,
+    /// Built-in extensions turned off for this run, such as `mcp` for `--no-mcp`.
+    pub disabled_builtin_extensions: Vec<String>,
 }
 
 /// Inputs of [`create_agent_session_services`]. Defaults load everything from `agent_dir`.
@@ -125,6 +127,8 @@ pub fn resource_loader_options(
     options.no_context_files = resources.no_context_files;
     options.system_prompt = resources.system_prompt.clone();
     options.append_system_prompt = resources.append_system_prompt.clone();
+    options.builtin_extensions = super::builtins::BUILTIN_EXTENSIONS.iter().map(|name| name.to_string()).collect();
+    options.disabled_builtin_extensions = resources.disabled_builtin_extensions.clone();
     options
 }
 

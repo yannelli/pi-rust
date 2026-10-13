@@ -14,7 +14,7 @@ use pi_tui::terminal_image::{
 };
 use pi_tui::{Component, Terminal};
 use render_common::{LoggingTerminal, erased, main_tui, strings, test_component, wait_for_render};
-use support::{Image, ImageOptions};
+use support::{Image, ImageOptions, ImageTheme};
 
 /// Holds the global state lock and restores capabilities and cell dimensions on drop.
 struct KittyGuard {
@@ -38,7 +38,7 @@ fn kitty_terminal() -> KittyGuard {
 fn image_lines(max_width_cells: usize, size_px: u32) -> Vec<String> {
     let options = ImageOptions { max_width_cells: Some(max_width_cells), ..ImageOptions::default() };
     let dimensions = ImageDimensions { width_px: size_px, height_px: size_px };
-    Image::new("AAAA", "image/png", options, Some(dimensions)).render(40)
+    Image::new("AAAA", "image/png", ImageTheme::default(), options, Some(dimensions)).render(40)
 }
 
 fn kitty(data: &str, columns: usize, rows: usize, image_id: u32) -> String {

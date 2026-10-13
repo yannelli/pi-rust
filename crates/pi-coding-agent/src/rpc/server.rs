@@ -90,6 +90,7 @@ impl RpcServer {
             });
             *current = Some((session.clone(), id));
         }
+        super::builtins::bind_builtins(session, &self.ui);
         if let Some(host) = &self.host {
             let binding = RpcExtensionBinding::new(
                 self.runtime.clone(),
@@ -206,13 +207,10 @@ pub async fn serve_rpc(
 
 /// `pi --mode rpc`: take over stdout and serve stdin until it closes.
 pub async fn run_rpc_mode(runtime: Arc<AgentSessionRuntime>, options: RpcModeOptions) -> i32 {
-    let output = match super::output::take_over_stdout() {
-        Ok(output) => output,
-        Err(failure) => {
-            eprintln!("Error: could not reserve stdout for RPC mode: {failure}");
-            return 1;
-        }
-    };
+    if let Err(failure) = crate::diagnostics::take_over_stdout() {
+        eprintln!("Error: could not reserve stdout for RPC mode: {failure}");
+        return 1;
+    }
     let options = RpcModeOptions { handle_signals: true, ..options };
-    serve_rpc(runtime, tokio::io::stdin(), output, options).await
+    serve_rpc(runtime, tokio::io::stdin(), Box::new(super::output::RawStdout), options).await
 }

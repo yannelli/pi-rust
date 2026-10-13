@@ -16,6 +16,8 @@ impl AgentSession {
 
     /// Run `messages` and every automatic continuation, then emit `agent_settled`.
     pub(crate) async fn run_agent_prompt(&self, messages: Vec<Message>) -> anyhow::Result<()> {
+        // The run records the loadout; restored tools that did not register by now are dropped.
+        lock(&self.tools).pending.clear();
         {
             let mut state = lock(&self.state);
             state.abort_requested = false;

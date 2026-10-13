@@ -235,10 +235,10 @@ impl RpcServer {
                 ok(id, "set_session_name", None)
             }
             RpcCommand::GetCommands => {
-                let mut commands = match &self.host {
-                    Some(host) => host.commands(session),
-                    None => Vec::new(),
-                };
+                let mut commands = super::builtins::builtin_commands(session);
+                if let Some(host) = &self.host {
+                    commands.extend(host.commands(session));
+                }
                 commands.extend(resource_commands(session));
                 ok(id, "get_commands", Some(json!({"commands": commands})))
             }

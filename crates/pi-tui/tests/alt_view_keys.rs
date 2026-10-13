@@ -13,7 +13,7 @@ use pi_tui::terminal_image::{ImageDimensions, ImageProtocol, TerminalCapabilitie
 use pi_tui::{
     KeybindingsManager, ScrollViewOptions, StackOptions, VStack, component, get_keybindings, set_keybindings,
 };
-use support::{Image, ImageOptions};
+use support::{Image, ImageOptions, ImageTheme};
 
 const OSC133_ZONE_START: &str = "\x1b]133;A\x07";
 
@@ -215,7 +215,7 @@ fn does_not_emit_kitty_graphics_commands_or_osc_133_zones_in_iterm2() {
     h.tui.add_child(fn_component(|_| vec!["\x1b]133;B\x07\x1b]133;C\x07\x1b]133;A\x07content".to_string()]));
     let image_options = ImageOptions { filename: Some("example.png".into()), ..ImageOptions::default() };
     let dimensions = ImageDimensions { width_px: 10, height_px: 10 };
-    h.tui.add_child(component(Image::new("AAAA", "image/png", image_options, Some(dimensions))));
+    h.tui.add_child(component(Image::new("AAAA", "image/png", ImageTheme::default(), image_options, Some(dimensions))));
     h.tui.start();
     h.wait();
     h.stop();
