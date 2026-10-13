@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use pi_chord::Context;
 
 pub use commit::PreparedMemoryCommit;
-use state::is_alive_at;
+pub(crate) use state::{is_alive_at, is_current_only};
 
 use super::scan::{MAX_SAFE_INTEGER, cursor_id, next_cursor, scan_start};
 use crate::errors::{DurableError, DurableResult};
