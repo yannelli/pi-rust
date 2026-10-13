@@ -9,6 +9,7 @@ mod node;
 pub mod resolve;
 pub mod runtime;
 pub mod transpile;
+pub mod unsupported;
 pub mod virtual_modules;
 
 pub use error::{JsError, UNSUPPORTED_CODE};

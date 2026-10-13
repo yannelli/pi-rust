@@ -40,6 +40,11 @@ pub(crate) fn install(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
     Ok(())
 }
 
+/// Built-in modules that load, without the `node:` prefix.
+pub(crate) fn supported_modules() -> impl Iterator<Item = &'static str> {
+    builtins::supported()
+}
+
 /// Define `name` on `object` as a native function.
 pub(crate) fn set_fn<'js, P>(
     object: &Object<'js>,
