@@ -67,14 +67,8 @@ impl StatusIndicator {
             format!("Retrying ({attempt}/{max_attempts}) in {seconds}s... ({} to cancel)", key_text("app.interrupt"))
         };
         let initial = message(delay_ms.div_ceil(1000));
-        let shared = Self::shared(
-            StatusKind::Retry,
-            tui,
-            style(ThemeColor::Warning),
-            style(ThemeColor::Muted),
-            &initial,
-            None,
-        );
+        let shared =
+            Self::shared(StatusKind::Retry, tui, style(ThemeColor::Warning), style(ThemeColor::Muted), &initial, None);
         let weak: Weak<RefCell<StatusIndicator>> = Rc::downgrade(&shared);
         let countdown = CountdownTimer::new(
             Duration::from_millis(delay_ms),

@@ -71,7 +71,7 @@ fn percent_encode_path(path: &str) -> String {
 }
 
 /// A `file://` URL for an absolute path, encoded like Node's `pathToFileURL`.
-fn path_to_file_url(path: &str) -> String {
+pub fn path_to_file_url(path: &str) -> String {
     if cfg!(windows) {
         let bytes = path.as_bytes();
         if bytes.len() >= 2 && bytes[1] == b':' {

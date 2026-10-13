@@ -16,7 +16,7 @@ pub use capabilities::{
 pub use dimensions::{
     get_gif_dimensions, get_image_dimensions, get_jpeg_dimensions, get_png_dimensions, get_webp_dimensions,
 };
-pub use fallback::{hyperlink, image_fallback, image_fallback_with_home};
+pub use fallback::{hyperlink, image_fallback, image_fallback_with_home, path_to_file_url};
 pub use iterm2::{Iterm2EncodeOptions, encode_iterm2};
 pub use kitty::{
     KittyEncodeOptions, KittyImageMetadata, KittyImagePlacement, allocate_image_id, crop_kitty_image_line,

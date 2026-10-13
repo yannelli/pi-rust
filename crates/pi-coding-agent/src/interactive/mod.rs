@@ -2,7 +2,11 @@
 //! works is queued as steering, or as a follow-up with `/follow`. `!cmd` runs a shell command
 //! for the model to see and `!!cmd` runs one it does not see.
 
+pub mod components;
+pub mod footer_data;
+pub mod renderers;
 pub mod selector;
+pub mod util;
 
 use std::io::Write;
 use std::sync::{Arc, Mutex};
