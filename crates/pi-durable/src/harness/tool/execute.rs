@@ -174,7 +174,6 @@ async fn run(
     };
     let reported = Reported { output: OutputBuffer::new(limits), limits, diagnostics: Vec::new(), details: None };
     let state = Arc::new(CallState {
-        call: call.clone(),
         reported: Mutex::new(reported),
         ended: AtomicBool::new(false),
         admissions: Mutex::new(Vec::new()),

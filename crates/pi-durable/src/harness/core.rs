@@ -94,7 +94,6 @@ pub(crate) struct HarnessCore {
     pub registry: Arc<dyn RegistryReader>,
     pub settings: Option<SettingsSource>,
     pub env: Option<EnvBuilder>,
-    pub conversation_created: Option<ConversationCreatedHook>,
     pub now: NowFn,
     pub report: ReportFn,
 }

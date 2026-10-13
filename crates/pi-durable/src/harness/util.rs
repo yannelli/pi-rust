@@ -103,11 +103,6 @@ pub fn closed_error(session: &Session) -> DurableError {
     }
 }
 
-/// The message of an error, as upstream `errorMessage` renders it.
-pub fn error_message(error: &DurableError) -> String {
-    error.to_string()
-}
-
 /// Serde adapter for [`pi_chord::JsonMap`] fields: an object, through [`Json`].
 pub(crate) mod json_map {
     use pi_chord::{Json, JsonMap};

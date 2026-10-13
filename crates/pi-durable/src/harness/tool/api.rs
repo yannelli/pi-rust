@@ -11,7 +11,7 @@ use pi_ai::JsonObject;
 use pi_chord::{Context, Json};
 
 use super::result::{check_key, fallback_result};
-use super::{NESTED_RESULT_DOC, NestedResult, ToolHookCall};
+use super::{NESTED_RESULT_DOC, NestedResult};
 use crate::documents::{DocScope, DocToken, DocValue};
 use crate::env::{SharedEnv, ShellOutputSkip, ShellOutputWindow};
 use crate::errors::{DurableError, DurableResult};
@@ -40,7 +40,6 @@ pub(crate) type Admission = Shared<BoxFuture<'static, DurableResult<TaskId>>>;
 
 /// State one execution shares between its api and the tool task.
 pub(crate) struct CallState {
-    pub call: ToolHookCall,
     pub reported: Mutex<Reported>,
     pub ended: AtomicBool,
     /// Nested call admissions this invocation started; cleanup waits for them.
