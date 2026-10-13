@@ -1,6 +1,9 @@
 //! Upstream `test/tools.test.ts`: the coding tools run against a call api without a Harness (`FakeApi`), with the
 //! environment hooks of `support/tools_support.rs`. The bash and powershell cases are in `tools/shell.rs`.
+//! `tools/harness.rs` runs them once through a Harness.
 
+#[path = "tools/harness.rs"]
+mod harness;
 #[path = "tools/shell.rs"]
 mod shell;
 #[path = "support/tools_support.rs"]
