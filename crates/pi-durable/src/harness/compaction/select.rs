@@ -15,7 +15,8 @@ const TOOL_RESULT_MAX_CHARS: usize = 2000;
 pub fn select_cut(view: &ContextView, keep_recent_tokens: u64) -> Option<usize> {
     let contributions = &view.contributions;
     let start = usize::from(view.head.is_some());
-    let candidates: Vec<usize> = (start..contributions.len()).filter(|&index| is_candidate(contributions, index)).collect();
+    let candidates: Vec<usize> =
+        (start..contributions.len()).filter(|&index| is_candidate(contributions, index)).collect();
     let mut kept = 0;
     let mut cut = None;
     for index in (start..contributions.len()).rev() {
@@ -78,9 +79,8 @@ pub fn estimate_context(view: &ContextView, extra: &[Message]) -> u64 {
         if after.is_some_and(|after| view.entries[index].id <= after) {
             continue;
         }
-        measured = view.contributions[index].iter().rev().find_map(|message| match message {
-            Message::Assistant(assistant) if calculate_context_tokens(&assistant.usage) > 0 => Some(message),
-            _ => None,
+        measured = view.contributions[index].iter().rev().find(|message| {
+            matches!(message, Message::Assistant(assistant) if calculate_context_tokens(&assistant.usage) > 0)
         });
         if measured.is_some() {
             break;
@@ -137,8 +137,11 @@ pub fn serialize_conversation(messages: &[Message]) -> String {
                         ContentBlock::Thinking { thinking: value, .. } => thinking.push(value.clone()),
                         ContentBlock::Text { text: value, .. } => text.push(value.clone()),
                         ContentBlock::ToolCall(call) => {
-                            let args: Vec<String> =
-                                call.arguments.iter().map(|(key, value)| format!("{key}={}", pi_chord::Json::from(value))).collect();
+                            let args: Vec<String> = call
+                                .arguments
+                                .iter()
+                                .map(|(key, value)| format!("{key}={}", pi_chord::Json::from(value)))
+                                .collect();
                             calls.push(format!("{}({})", call.name, args.join(", ")));
                         }
                         ContentBlock::Image { .. } => {}

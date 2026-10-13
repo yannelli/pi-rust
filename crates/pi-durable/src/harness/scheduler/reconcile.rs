@@ -144,7 +144,10 @@ impl Scheduler {
                 let state = lock(&self.state);
                 let owned = state.owned_live(Some(&overlay));
                 let records = state.live_records(Some(&overlay));
-                records.into_iter().filter(|r| r.status() == TaskStatus::Completing && !owned.contains_key(&r.id)).collect()
+                records
+                    .into_iter()
+                    .filter(|r| r.status() == TaskStatus::Completing && !owned.contains_key(&r.id))
+                    .collect()
             };
             if done.is_empty() {
                 return Ok(());
@@ -201,7 +204,8 @@ impl Scheduler {
     pub(crate) fn schedule_expiry(&self) {
         let retention = self.context_retention_ms();
         let mut state = lock(&self.state);
-        let at = state.contexts.values().filter_map(|kept| kept.idle_since).map(|since| since + retention).reduce(f64::min);
+        let at =
+            state.contexts.values().filter_map(|kept| kept.idle_since).map(|since| since + retention).reduce(f64::min);
         if state.expiry.as_ref().map(|(at, _)| *at) == at && at.is_some() {
             return;
         }

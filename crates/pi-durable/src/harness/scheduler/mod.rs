@@ -17,7 +17,7 @@ use pi_chord::{AbortController, Context};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
-pub use runtime::{ConversationHandle, TaskRuntime};
+pub use runtime::{ConversationHandle, HookApi, TaskRuntime};
 
 pub(crate) use ownership::{TaskNode, Up};
 

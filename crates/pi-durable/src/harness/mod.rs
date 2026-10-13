@@ -1,0 +1,39 @@
+//! The durable harness (upstream `harness/`): agents, model turns, tool calls, compaction, and the task scheduler
+//! over a [`crate::session::Session`].
+
+// Removed once the Harness entry point uses every scheduler part.
+#![allow(dead_code)]
+
+pub mod agent;
+pub mod compaction;
+pub mod context;
+mod core;
+pub mod define;
+pub mod generation;
+pub mod inbox;
+pub mod live;
+pub mod output;
+pub mod progress;
+pub mod prompt;
+pub mod registry;
+pub mod scheduler;
+pub mod settings;
+pub mod submissions;
+pub mod task;
+pub mod tool;
+pub mod tool_registration;
+pub mod types;
+pub mod usage;
+pub(crate) mod util;
+
+pub use agent::{AGENT_DOC, INSTRUCTIONS_KEY, add_tools, configure, create_agent};
+pub use core::{ConversationCreatedHook, EnvBuilder, EnvTarget, HarnessOptions, NowFn, ReportFn};
+pub use define::*;
+pub use registry::{Registry, RegistryReader, RegistrySnapshot, builtin_tasks, create_registry};
+pub use scheduler::{ConversationHandle, HookApi, TaskRuntime};
+pub use settings::*;
+pub use submissions::Submission;
+pub use task::{NextTaskState, Task, TaskDefinition, define_task, handler};
+pub use tool::{ExecuteToolOptions, ToolExecutionApi};
+pub use tool_registration::*;
+pub use types::*;

@@ -7,13 +7,17 @@ use std::sync::{Arc, LazyLock};
 
 use futures::future::BoxFuture;
 use pi_ai::retry::{is_retryable_assistant_error, retry_delay_ms};
-use pi_ai::{AssistantMessage, ContentBlock, Message, StopReason, SystemMessage, ThinkingLevel, UserContent, UserMessage};
+use pi_ai::{
+    AssistantMessage, ContentBlock, Message, StopReason, SystemMessage, ThinkingLevel, UserContent, UserMessage,
+};
 use pi_chord::{Context, Json, JsonMap};
 use serde::{Deserialize, Serialize};
 
 pub use select::{estimate_context, select_cut, serialize_conversation, summarized_messages};
 
-use super::live::{CompactionStatus, LIVE_DOC, LiveState, add_compaction_status, compaction_status, remove_compaction_status};
+use super::live::{
+    CompactionStatus, LIVE_DOC, LiveState, add_compaction_status, compaction_status, remove_compaction_status,
+};
 use super::scheduler::{HookApi, TaskRuntime};
 use super::settings::ConversationStreamOptions;
 use super::submissions::admit_submission;
@@ -127,7 +131,9 @@ async fn select_phase(task: TaskRecord, runtime: TaskRuntime, context: Context) 
     };
     let policy = settings.compaction;
     let view = runtime.context(conversation_id, &context, None).await?;
-    let Some(cut) = select_cut(&view, policy.keep_recent_tokens) else { return finish(&runtime, &context, Some(Json::empty_object())).await };
+    let Some(cut) = select_cut(&view, policy.keep_recent_tokens) else {
+        return finish(&runtime, &context, Some(Json::empty_object())).await;
+    };
     let first_kept = view.entries[cut].id;
     let input: CompactionInput = task.input.deserialize_into()?;
     let selection = CompactionSelection {
@@ -321,7 +327,9 @@ fn failed(message: &str, reason: &str) -> Option<TaskState> {
 /// Place a summary supplied by a hook in its own commit.
 async fn place(runtime: &TaskRuntime, first_kept: EntryId, summary: String, context: &Context) -> DurableResult<()> {
     let runtime2 = runtime.clone();
-    let change = move |tx: Tx, current: TaskRecord| async move { place_summary(&tx, &runtime2, &current, first_kept, &summary).await };
+    let change = move |tx: Tx, current: TaskRecord| async move {
+        place_summary(&tx, &runtime2, &current, first_kept, &summary).await
+    };
     runtime.commit(change, context).await
 }
 
@@ -341,7 +349,8 @@ async fn place_summary(
     let input: CompactionInput = current.input.deserialize_into()?;
     let mut data = JsonMap::new();
     data.insert("reason", input.reason.as_str());
-    let message = UserMessage { content: UserContent::Blocks(vec![ContentBlock::text(text)]), timestamp: runtime.now() as i64 };
+    let message =
+        UserMessage { content: UserContent::Blocks(vec![ContentBlock::text(text)]), timestamp: runtime.now() as i64 };
     let entry = EntryDraft {
         model: Some(vec![Message::User(message)]),
         data: Some(Json::from(data)),
@@ -355,7 +364,9 @@ async fn place_summary(
             let id = admit_submission(tx, conversation_id, draft, core.now(), &core.settings()).await?;
             CompactionResult { submission_id: Some(id), entry_id: None }
         }
-        Some(_) => CompactionResult { entry_id: Some(tx.append_entry(conversation_id, entry).await?.id), submission_id: None },
+        Some(_) => {
+            CompactionResult { entry_id: Some(tx.append_entry(conversation_id, entry).await?.id), submission_id: None }
+        }
     };
     Ok(Some(TaskState::Terminal { outcome: TaskOutcome::Completed { result: Some(encode(&result)?) } }))
 }

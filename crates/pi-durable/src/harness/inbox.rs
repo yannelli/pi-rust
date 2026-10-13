@@ -25,7 +25,11 @@ pub enum InboxItem {
     FollowUp { id: SubmissionId, content: UserInput },
     /// `entry` is an `EntryDraft` stored as plain JSON.
     #[serde(rename = "write")]
-    Write { id: SubmissionId, entry: JsonMap },
+    Write {
+        id: SubmissionId,
+        #[serde(with = "crate::harness::util::json_map")]
+        entry: JsonMap,
+    },
 }
 
 impl InboxItem {
@@ -83,7 +87,8 @@ pub fn entry_draft_json(draft: &EntryDraft) -> DurableResult<JsonMap> {
 
 /// The entry draft an inbox item stores.
 pub fn entry_draft_from_json(map: &JsonMap) -> DurableResult<EntryDraft> {
-    let kind = map.get("kind").and_then(Json::as_str).ok_or_else(|| DurableError::type_error("Entry draft without kind"))?;
+    let kind =
+        map.get("kind").and_then(Json::as_str).ok_or_else(|| DurableError::type_error("Entry draft without kind"))?;
     let head = match map.get("head") {
         None => None,
         Some(head) if head.as_str() == Some("self") => Some(DraftHead::SelfEntry),
@@ -122,7 +127,11 @@ pub enum BoundaryAt {
 }
 
 /// Read what a boundary needs. Table reads come before the commit's first table write.
-pub async fn prepare_boundary(tx: &Tx, conversation_id: ConversationId, settings: &Settings) -> DurableResult<Boundary> {
+pub async fn prepare_boundary(
+    tx: &Tx,
+    conversation_id: ConversationId,
+    settings: &Settings,
+) -> DurableResult<Boundary> {
     let head = tx.latest_head_marker(conversation_id).await?.and_then(|marker| marker.head);
     let inbox = tx.doc(&INBOX_DOC, conversation_id).await?;
     Ok(Boundary {
@@ -140,7 +149,12 @@ fn is_reset(item: &InboxItem) -> bool {
 
 /// Place the queued items a boundary selects: every write, the first or all steers, and at `Final` the first or
 /// all follow-ups. A selected reset makes a post-tools boundary final. Writes go first and user items after them.
-pub async fn apply_boundary(tx: &Tx, boundary: &mut Boundary, at: BoundaryAt, now: f64) -> DurableResult<BoundaryResult> {
+pub async fn apply_boundary(
+    tx: &Tx,
+    boundary: &mut Boundary,
+    at: BoundaryAt,
+    now: f64,
+) -> DurableResult<BoundaryResult> {
     let items = boundary.inbox.get()?.items;
     let reset = items.iter().any(is_reset);
     let last = at == BoundaryAt::Final || reset;
@@ -195,7 +209,12 @@ pub async fn apply_boundary(tx: &Tx, boundary: &mut Boundary, at: BoundaryAt, no
 }
 
 /// Append a `pi.user` entry with one user message.
-pub async fn append_user(tx: &Tx, conversation_id: ConversationId, content: UserInput, now: f64) -> DurableResult<EntryId> {
+pub async fn append_user(
+    tx: &Tx,
+    conversation_id: ConversationId,
+    content: UserInput,
+    now: f64,
+) -> DurableResult<EntryId> {
     let message = Message::User(UserMessage { content, timestamp: now as i64 });
     let draft = TypedEntryDraft { model: Some(vec![message]), ..TypedEntryDraft::new(()) };
     Ok(tx.append_typed_entry(&USER_ENTRY, conversation_id, draft).await?.record.id)

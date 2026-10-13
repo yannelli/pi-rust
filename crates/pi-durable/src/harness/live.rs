@@ -87,6 +87,7 @@ pub struct NestedToolSlot {
     pub parent_task_id: TaskId,
     pub name: String,
     pub task_id: TaskId,
+    #[serde(with = "crate::harness::util::json_map")]
     pub arguments: JsonMap,
     pub status: SlotStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -377,7 +378,9 @@ pub async fn settle_scheduler_outcome(tx: &Tx, record: &TaskRecord, outcome: &Ta
                     reason: "faulted".into(),
                     detail: Some(Json::from(error.message.as_str())),
                 },
-                TaskOutcome::Orphaned { reason } => SubmissionSettlement::Unanswered { reason: reason.clone(), detail: None },
+                TaskOutcome::Orphaned { reason } => {
+                    SubmissionSettlement::Unanswered { reason: reason.clone(), detail: None }
+                }
                 _ => SubmissionSettlement::Unanswered { reason: outcome.status().into(), detail: None },
             };
             end_run(tx, &mut live, record.id, settlement)?;

@@ -87,7 +87,8 @@ impl Scheduler {
             let (skip, below) = {
                 let state = lock(&self.state);
                 let owned = state.owned_live(None);
-                let busy = state.invocations.contains_key(&record.id) || !waiting_on(&state, &record, &owned).is_empty();
+                let busy =
+                    state.invocations.contains_key(&record.id) || !waiting_on(&state, &record, &owned).is_empty();
                 let below = !record.abort_requested && !record.background && state.below_cancelled(Up::of(&record));
                 (busy || record.status() == TaskStatus::Completing, below)
             };
@@ -174,7 +175,10 @@ impl Scheduler {
     }
 
     /// Scheduling state and every live task with its derived state. Runs no task code.
-    pub(crate) async fn inspect(&self, snapshot: &RegistrySnapshot) -> DurableResult<(Scheduling, Vec<TaskInspection>)> {
+    pub(crate) async fn inspect(
+        &self,
+        snapshot: &RegistrySnapshot,
+    ) -> DurableResult<(Scheduling, Vec<TaskInspection>)> {
         self.load_scopes(false).await?;
         let records: Vec<TaskRecord> = lock(&self.state).live.values().cloned().collect();
         let tasks = records

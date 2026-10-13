@@ -223,7 +223,10 @@ impl SchedState {
     /// No live non-background task in the scope; a task whose owner edges are not loaded yet counts as inside.
     pub fn idle(&self, conversation_id: Option<ConversationId>) -> bool {
         let scope = conversation_id.map_or(Scope::Roots, Scope::Conversation);
-        !self.live.values().any(|record| !record.background && self.in_scope(Up::of(record), scope, false) != Some(false))
+        !self
+            .live
+            .values()
+            .any(|record| !record.background && self.in_scope(Up::of(record), scope, false) != Some(false))
     }
 }
 

@@ -44,7 +44,10 @@ pub(super) async fn call(task: TaskRecord, runtime: TaskRuntime, context: Contex
     let checked = prepare(&tool, &call.call.arguments).and_then(|args| validate(&tool, &call.call, args));
     let mut args = match checked {
         Ok(args) => args,
-        Err(message) => return settle(&runtime, &input, &call, Ending::Completed, move |_| invalid(&message), &context, None).await,
+        Err(message) => {
+            return settle(&runtime, &input, &call, Ending::Completed, move |_| invalid(&message), &context, None)
+                .await;
+        }
     };
     let mut block: Option<String> = None;
     for hooks in runtime.hooks::<ToolHooks>(&context).await? {
@@ -52,7 +55,10 @@ pub(super) async fn call(task: TaskRecord, runtime: TaskRuntime, context: Contex
         if block.is_some() {
             break;
         }
-        let seen = ToolHookCall { call: pi_ai::ToolCall { arguments: args.clone(), ..call.call.clone() }, parent: call.parent.clone() };
+        let seen = ToolHookCall {
+            call: pi_ai::ToolCall { arguments: args.clone(), ..call.call.clone() },
+            parent: call.parent.clone(),
+        };
         match hook(seen, runtime.clone(), context.clone()).await {
             Ok(Some(BeforeToolDecision { block: Some(reason), .. })) => block = Some(reason),
             Ok(Some(BeforeToolDecision { arguments: Some(replaced), .. })) => args = replaced,
@@ -71,7 +77,10 @@ pub(super) async fn call(task: TaskRecord, runtime: TaskRuntime, context: Contex
     }
     let args = match validate(&tool, &call.call, args) {
         Ok(args) => args,
-        Err(message) => return settle(&runtime, &input, &call, Ending::Completed, move |_| invalid(&message), &context, None).await,
+        Err(message) => {
+            return settle(&runtime, &input, &call, Ending::Completed, move |_| invalid(&message), &context, None)
+                .await;
+        }
     };
     let (conversation_id, task_id) = (runtime.conversation_id(), runtime.task_id());
     let replay = tool.replay.unwrap_or_default();

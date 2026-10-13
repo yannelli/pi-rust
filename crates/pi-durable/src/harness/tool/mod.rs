@@ -22,7 +22,9 @@ use super::scheduler::{HookApi, TaskRuntime};
 use super::task::{Task, TaskDefinition, define_task};
 use super::tool_registration::{ToolRegistration, ToolReplay};
 use super::types::{NestedToolExecutionResult, ToolControl, ToolExecutionResult};
-use crate::documents::{DocFamilySpec, DocFamilyToken, DocSpec, DocToken, TaskScope, define_doc, define_doc_family, encode};
+use crate::documents::{
+    DocFamilySpec, DocFamilyToken, DocSpec, DocToken, TaskScope, define_doc, define_doc_family, encode,
+};
 use crate::entries::ASSISTANT_ENTRY;
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{EntryId, TaskId};
@@ -113,6 +115,7 @@ pub struct ToolHooks {
 /// Index of a call's nested calls by key, so a rerun finds the nested calls it already made.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct NestedCalls {
+    #[serde(with = "crate::harness::util::json_map")]
     pub calls: pi_chord::JsonMap,
 }
 
@@ -171,7 +174,11 @@ pub(crate) async fn resolve_tool(
 }
 
 /// The call: from the input for a nested call, else from the assistant entry.
-pub(crate) async fn read_call(runtime: &TaskRuntime, input: &ToolTaskInput, context: &Context) -> DurableResult<ToolHookCall> {
+pub(crate) async fn read_call(
+    runtime: &TaskRuntime,
+    input: &ToolTaskInput,
+    context: &Context,
+) -> DurableResult<ToolHookCall> {
     match input {
         ToolTaskInput::Nested { call, parent, parent_call_id, .. } => {
             Ok(ToolHookCall { call: call.clone(), parent: Some((*parent, parent_call_id.clone())) })
@@ -180,10 +187,13 @@ pub(crate) async fn read_call(runtime: &TaskRuntime, input: &ToolTaskInput, cont
             let entry = runtime.typed_entry(&ASSISTANT_ENTRY, *assistant, context).await?;
             let model = entry.as_ref().and_then(|entry| entry.record.model.as_ref()).and_then(|model| model.first());
             let call = match model {
-                Some(pi_ai::Message::Assistant(message)) => message.tool_calls().find(|call| call.id == *call_id).cloned(),
+                Some(pi_ai::Message::Assistant(message)) => {
+                    message.tool_calls().find(|call| call.id == *call_id).cloned()
+                }
                 _ => None,
             };
-            let call = call.ok_or_else(|| DurableError::error(format!("Entry {assistant} has no tool call {call_id}")))?;
+            let call =
+                call.ok_or_else(|| DurableError::error(format!("Entry {assistant} has no tool call {call_id}")))?;
             Ok(ToolHookCall { call, parent: None })
         }
     }

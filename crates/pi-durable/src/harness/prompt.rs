@@ -46,7 +46,7 @@ pub async fn render_sections(
     sections: &[Arc<PromptSection>],
     input: &PromptInput,
     shown: &Sections,
-    report: &dyn Fn(&DurableError),
+    report: &(dyn Fn(&DurableError) + Sync),
     context: &Context,
 ) -> DurableResult<Sections> {
     let mut wanted = Vec::new();

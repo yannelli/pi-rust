@@ -107,3 +107,36 @@ pub fn closed_error(session: &Session) -> DurableError {
 pub fn error_message(error: &DurableError) -> String {
     error.to_string()
 }
+
+/// Serde adapter for [`pi_chord::JsonMap`] fields: an object, through [`Json`].
+pub(crate) mod json_map {
+    use pi_chord::{Json, JsonMap};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(map: &JsonMap, serializer: S) -> Result<S::Ok, S::Error> {
+        Json::object(map.clone()).serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<JsonMap, D::Error> {
+        match Json::deserialize(deserializer)? {
+            Json::Object(map) => Ok((*map).clone()),
+            _ => Err(serde::de::Error::custom("expected an object")),
+        }
+    }
+
+    pub mod option {
+        use super::*;
+
+        pub fn serialize<S: Serializer>(map: &Option<JsonMap>, serializer: S) -> Result<S::Ok, S::Error> {
+            map.clone().map(Json::object).serialize(serializer)
+        }
+
+        pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<JsonMap>, D::Error> {
+            match Option::<Json>::deserialize(deserializer)? {
+                None | Some(Json::Null) => Ok(None),
+                Some(Json::Object(map)) => Ok(Some((*map).clone())),
+                Some(_) => Err(serde::de::Error::custom("expected an object")),
+            }
+        }
+    }
+}

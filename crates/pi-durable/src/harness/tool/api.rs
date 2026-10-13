@@ -160,7 +160,13 @@ impl ToolExecutionApi {
     }
 
     /// Create a task in one commit. A child of a tool that is not replay-safe is abandoned on restart.
-    pub async fn create_task(&self, task: Task, input: Json, options: TaskOptions, context: &Context) -> DurableResult<TaskId> {
+    pub async fn create_task(
+        &self,
+        task: Task,
+        input: Json,
+        options: TaskOptions,
+        context: &Context,
+    ) -> DurableResult<TaskId> {
         let mut options = TaskOptions { conversation_id: None, ..options };
         if matches!(options.ownership, TaskOwnership::Task(_)) && !self.state.resumes {
             options.abandon_on_restart = true;
@@ -176,7 +182,11 @@ impl ToolExecutionApi {
         self.runtime.wait_for_task(id, context).await
     }
 
-    pub async fn conversation(&self, id: ConversationId, context: &Context) -> DurableResult<Option<ConversationHandle>> {
+    pub async fn conversation(
+        &self,
+        id: ConversationId,
+        context: &Context,
+    ) -> DurableResult<Option<ConversationHandle>> {
         self.runtime.conversation(id, context).await
     }
 
@@ -209,8 +219,17 @@ impl ToolExecutionApi {
         let abandon = !self.state.resumes;
         let admission_context = context.clone();
         let admission: Admission = async move {
-            super::settle::start_nested_call(&runtime, &parent, &name_owned, args, &key, options.progress, abandon, &admission_context)
-                .await
+            super::settle::start_nested_call(
+                &runtime,
+                &parent,
+                &name_owned,
+                args,
+                &key,
+                options.progress,
+                abandon,
+                &admission_context,
+            )
+            .await
         }
         .boxed()
         .shared();

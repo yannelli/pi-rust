@@ -1,9 +1,9 @@
 //! Bounded tool output (upstream `harness/output.ts`): sanitizing, slicing to line and byte limits, and the
 //! running output buffer of one call. Progress commit pacing lives in [`super::progress`].
 
+use super::tool_registration::Retain;
 use crate::env::{ShellOutputSkip, StreamDecoder};
 use crate::errors::{DurableError, DurableResult};
-use super::tool_registration::Retain;
 
 /// Retention limits of one tool's output.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -297,11 +297,8 @@ impl OutputBuffer {
 /// The shortest suffix of `text` with more than `max_bytes` bytes or more than `max_lines` newlines, or all of it.
 fn tail_margin(text: &str, limits: OutputLimits) -> String {
     let bytes = text.as_bytes();
-    let byte_start = if bytes.len() > limits.max_bytes {
-        character_end(bytes, bytes.len() - limits.max_bytes - 1)
-    } else {
-        0
-    };
+    let byte_start =
+        if bytes.len() > limits.max_bytes { character_end(bytes, bytes.len() - limits.max_bytes - 1) } else { 0 };
     let mut line_start = 0;
     let mut newlines = 0;
     for (index, _) in bytes.iter().enumerate().rev().filter(|(_, b)| **b == NEWLINE) {

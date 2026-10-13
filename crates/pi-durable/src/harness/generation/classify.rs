@@ -12,7 +12,7 @@ use tokio::time::Instant;
 
 use super::{
     GenerationCheckpoint, GenerationHooks, append_assistant, completed, convert_partial, create_generation, decode,
-    edit_live, fail_model_error, fail_no_model, hand_over, running, unanswered, waiting,
+    edit_live, fail_no_model, hand_over, running, unanswered, waiting,
 };
 use crate::documents::encode;
 use crate::errors::{DurableError, DurableResult};
@@ -78,19 +78,25 @@ pub(super) async fn request(task: TaskRecord, runtime: TaskRuntime, context: Con
         max_retry_delay_ms: stream_options.max_retry_delay_ms,
         transport: stream_options.transport,
         cache_retention: stream_options.cache_retention,
-        metadata: stream_options.metadata.as_ref().map(|m| Json::from(m.clone()).to_serde()).and_then(|v| v.as_object().cloned()),
+        metadata: stream_options
+            .metadata
+            .as_ref()
+            .map(|m| Json::from(m.clone()).to_serde())
+            .and_then(|v| v.as_object().cloned()),
         deferred: stream_options.deferred.clone(),
         session_id: Some(ensure_provider_session_id(&runtime, &context).await?),
         reasoning: (thinking_level != pi_ai::ThinkingLevel::Off).then_some(thinking_level),
         ..SimpleStreamOptions::default()
     };
     let message = stream_response(&runtime, &model, messages, options, attempt, &context).await?;
-    let request = Request { attempt, compacted, model: model_ref, cutoff, messages: Some(view.messages), poll_at: None };
+    let request =
+        Request { attempt, compacted, model: model_ref, cutoff, messages: Some(view.messages), poll_at: None };
     classify(&runtime, request, message, &context).await
 }
 
 pub(super) async fn poll(task: TaskRecord, runtime: TaskRuntime, context: Context) -> DurableResult<()> {
-    let GenerationCheckpoint::Poll { attempt, compacted, model: model_ref, cutoff, handle, poll_at } = decode(&task)? else {
+    let GenerationCheckpoint::Poll { attempt, compacted, model: model_ref, cutoff, handle, poll_at } = decode(&task)?
+    else {
         return Err(DurableError::error("Generation checkpoint is not in phase poll"));
     };
     let Some(model) = runtime.models().get_model(&model_ref.provider, &model_ref.model_id) else {
@@ -110,7 +116,9 @@ async fn commit_partial(runtime: TaskRuntime, partial: AssistantMessage, attempt
         let message = encode(&partial)?;
         let change = move |tx: Tx, _| async move {
             let draft = tx.doc(&LIVE_DOC, conversation_id).await?;
-            draft.edit(|live| live.generation.get_or_insert_with(|| LiveGeneration::new(attempt)).message = Some(message))?;
+            draft.edit(|live| {
+                live.generation.get_or_insert_with(|| LiveGeneration::new(attempt)).message = Some(message)
+            })?;
             Ok(None)
         };
         runtime.commit(change, &context).await
@@ -232,7 +240,8 @@ pub(super) async fn classify(
         let poll_at = (runtime.now() + after).max(request.poll_at.map_or(f64::NEG_INFINITY, |at| at + 1.0));
         let change = move |tx: Tx, _| async move {
             let draft = tx.doc(&LIVE_DOC, conversation_id).await?;
-            let generation = LiveGeneration { deferred: Some(DeferredPoll { poll_at }), ..LiveGeneration::new(attempt) };
+            let generation =
+                LiveGeneration { deferred: Some(DeferredPoll { poll_at }), ..LiveGeneration::new(attempt) };
             draft.edit(|live| live.generation = Some(generation))?;
             running(&GenerationCheckpoint::Poll { attempt, compacted, model, cutoff, handle, poll_at })
         };
@@ -263,7 +272,8 @@ pub(super) async fn classify(
                 tx.doc(&LIVE_DOC, conversation_id).await?.edit(|live| live.generation = None)?;
                 let input = CompactionInput { reason: CompactionReason::Overflow, instructions: None };
                 let child = create_compaction(&tx, conversation_id, input, Some(owner)).await?;
-                let checkpoint = GenerationCheckpoint::Prepare { attempt, compacted: Some(child), overflow: Some(text) };
+                let checkpoint =
+                    GenerationCheckpoint::Prepare { attempt, compacted: Some(child), overflow: Some(text) };
                 waiting(&checkpoint, vec![child])
             };
             return runtime.commit(change, context).await;
@@ -285,7 +295,8 @@ pub(super) async fn classify(
         append_assistant(&tx, conversation_id, &message).await?;
         if retry {
             let error = message.error_message.clone().unwrap_or_default();
-            let generation = LiveGeneration { retry: Some(RetryState { at: until, error }), ..LiveGeneration::new(attempt) };
+            let generation =
+                LiveGeneration { retry: Some(RetryState { at: until, error }), ..LiveGeneration::new(attempt) };
             tx.doc(&LIVE_DOC, conversation_id).await?.edit(|live| live.generation = Some(generation))?;
             return running(&GenerationCheckpoint::Retry { attempt, compacted, until });
         }
@@ -358,4 +369,3 @@ async fn answer(runtime: &TaskRuntime, message: AssistantMessage, context: &Cont
     };
     runtime.commit(change, context).await
 }
-

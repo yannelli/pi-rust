@@ -63,8 +63,11 @@ pub struct ToolOutputLimits {
     pub retain: Option<Retain>,
 }
 
-pub type ExecuteFn =
-    Arc<dyn Fn(JsonObject, ToolExecutionApi, Context) -> BoxFuture<'static, DurableResult<ToolExecutionResult>> + Send + Sync>;
+pub type ExecuteFn = Arc<
+    dyn Fn(JsonObject, ToolExecutionApi, Context) -> BoxFuture<'static, DurableResult<ToolExecutionResult>>
+        + Send
+        + Sync,
+>;
 pub type PrepareArgumentsFn = Arc<dyn Fn(&Value) -> DurableResult<Value> + Send + Sync>;
 
 /// Executable tool. Only the pi-ai `Tool` fields enter the transcript; `args` are validated against `parameters`.

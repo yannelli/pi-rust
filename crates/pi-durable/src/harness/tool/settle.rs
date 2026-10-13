@@ -9,11 +9,14 @@ use pi_chord::{Context, Json};
 use super::api::CallState;
 use super::result::{append_tool_result, nested_result, summary_of};
 use super::{
-    NESTED_CALLS_DOC, NESTED_RESULT_DOC, NestedResult, ToolHookCall, ToolTaskInput, ToolTaskResult, json_equal, tool_task,
+    NESTED_CALLS_DOC, NESTED_RESULT_DOC, NestedResult, ToolHookCall, ToolTaskInput, ToolTaskResult, json_equal,
+    tool_task,
 };
 use crate::documents::encode;
 use crate::errors::{DurableError, DurableResult};
-use crate::harness::live::{LIVE_DOC, NestedToolSlot, SlotProgress, SlotRef, SlotStatus, remove_nested_slots, tool_slot};
+use crate::harness::live::{
+    LIVE_DOC, NestedToolSlot, SlotProgress, SlotRef, SlotStatus, remove_nested_slots, tool_slot,
+};
 use crate::harness::progress::Progress;
 use crate::harness::scheduler::TaskRuntime;
 use crate::harness::types::{ToolDiagnostic, ToolExecutionResult};
@@ -51,10 +54,12 @@ pub(crate) async fn settle(
 ) -> DurableResult<()> {
     let task_id = runtime.task_id();
     let index = runtime.snapshot(&NESTED_CALLS_DOC, task_id, context).await?;
-    let nested_ids = index.and_then(|index| index.get("calls").and_then(Json::as_object).map(task_ids)).unwrap_or_default();
+    let nested_ids =
+        index.and_then(|index| index.get("calls").and_then(Json::as_object).map(task_ids)).unwrap_or_default();
     // Mark them all before waiting for any: one may run until a sibling is cancelled.
     try_join_all(nested_ids.iter().map(|id| runtime.abort_owned(*id, context))).await?;
-    let (input, call, conversation_id, now) = (input.clone(), call.call.clone(), runtime.conversation_id(), runtime.now());
+    let (input, call, conversation_id, now) =
+        (input.clone(), call.call.clone(), runtime.conversation_id(), runtime.now());
     let change = move |tx: Tx, _| async move {
         let draft = tx.doc(&LIVE_DOC, conversation_id).await?;
         let mut live = draft.get()?;
@@ -121,14 +126,20 @@ pub(crate) async fn start_nested_call(
     abandon_on_restart: bool,
     context: &Context,
 ) -> DurableResult<TaskId> {
-    let call = ToolCall { id: format!("{parent_call_id}/{key}"), name: name.to_owned(), arguments: args, ..ToolCall::default() };
+    let call = ToolCall {
+        id: format!("{parent_call_id}/{key}"),
+        name: name.to_owned(),
+        arguments: args,
+        ..ToolCall::default()
+    };
     let (owner, conversation_id) = (runtime.task_id(), runtime.conversation_id());
     let (key, parent_call_id) = (key.to_owned(), parent_call_id.to_owned());
     let change = move |tx: Tx| async move {
         let index = tx.doc(&NESTED_CALLS_DOC, owner).await?;
         let existing: Option<TaskId> = index.get()?.calls.get(&key).and_then(|v| v.deserialize_into().ok());
         if let Some(existing) = existing {
-            let input = tx.task(existing).await?.and_then(|record| record.input.deserialize_into::<ToolTaskInput>().ok());
+            let input =
+                tx.task(existing).await?.and_then(|record| record.input.deserialize_into::<ToolTaskInput>().ok());
             let same = matches!(&input, Some(ToolTaskInput::Nested { parent, call: made, .. })
                 if *parent == owner && made.name == call.name && json_equal(&made.arguments, &call.arguments));
             if !same {
@@ -137,7 +148,8 @@ pub(crate) async fn start_nested_call(
             }
             return Ok(existing);
         }
-        let arguments = Json::from(serde_json::Value::Object(call.arguments.clone())).as_object().cloned().unwrap_or_default();
+        let arguments =
+            Json::from(serde_json::Value::Object(call.arguments.clone())).as_object().cloned().unwrap_or_default();
         let slot = NestedToolSlot {
             call_id: call.id.clone(),
             parent_call_id: parent_call_id.clone(),
@@ -164,7 +176,9 @@ pub(crate) async fn start_nested_call(
         let created = tx.create_task(tool_task(), encode(&input)?, options).await?;
         index.edit(|index| index.calls.insert(key, encode(&created).unwrap_or(Json::Null)))?;
         let live = tx.doc(&LIVE_DOC, conversation_id).await?;
-        live.edit(|live| live.nested_tools.get_or_insert_with(Vec::new).push(NestedToolSlot { task_id: created, ..slot }))?;
+        live.edit(|live| {
+            live.nested_tools.get_or_insert_with(Vec::new).push(NestedToolSlot { task_id: created, ..slot })
+        })?;
         Ok(created)
     };
     runtime.commit_map(change, context).await

@@ -26,9 +26,10 @@ use crate::entries::{ASSISTANT_ENTRY, TypedEntryDraft};
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{ConversationId, EntryId, SubmissionId, TaskId};
 use crate::session::{Draft, Tx};
+use crate::tasks::TaskOptions;
 use crate::types::{
-    EntryDraft, EntryQuery, EntryRecord, JoinPolicy, SubmissionSettlement, TaskOptions, TaskOutcome, TaskOutcomeError,
-    TaskRecord, TaskState,
+    EntryDraft, EntryQuery, EntryRecord, JoinPolicy, SubmissionSettlement, TaskOutcome, TaskOutcomeError, TaskRecord,
+    TaskState,
 };
 
 /// Checkpoint of a generation task.
@@ -288,7 +289,11 @@ pub(crate) async fn fail_model_error(runtime: &TaskRuntime, text: &str, context:
 }
 
 /// Settle the run's inputs `unanswered` with `no_model` and fail.
-pub(crate) async fn fail_no_model(runtime: &TaskRuntime, model: Option<&ModelRef>, context: &Context) -> DurableResult<()> {
+pub(crate) async fn fail_no_model(
+    runtime: &TaskRuntime,
+    model: Option<&ModelRef>,
+    context: &Context,
+) -> DurableResult<()> {
     let message = match model {
         None => "No model is configured".to_owned(),
         Some(m) => format!("Model {}/{} is not available", m.provider, m.model_id),
@@ -315,7 +320,11 @@ pub(crate) async fn edit_live<R>(
 }
 
 /// Append a committed partial left by an interrupted request as an aborted assistant entry.
-pub(crate) async fn convert_partial(tx: &Tx, live: &mut LiveState, conversation_id: ConversationId) -> DurableResult<()> {
+pub(crate) async fn convert_partial(
+    tx: &Tx,
+    live: &mut LiveState,
+    conversation_id: ConversationId,
+) -> DurableResult<()> {
     let Some(partial) = live.generation.as_ref().and_then(|generation| generation.message.clone()) else {
         return Ok(());
     };

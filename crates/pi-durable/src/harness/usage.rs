@@ -55,8 +55,10 @@ pub async fn ensure_provider_session_id(runtime: &TaskRuntime, context: &Context
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct UsageState {
     /// Assistant entries and summarization requests, keyed `provider/modelId`.
+    #[serde(with = "crate::harness::util::json_map")]
     pub models: JsonMap,
     /// Tool results, keyed by tool name.
+    #[serde(with = "crate::harness::util::json_map")]
     pub tools: JsonMap,
 }
 

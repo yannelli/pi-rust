@@ -47,11 +47,7 @@ pub async fn add_tools(tx: &Tx, conversation_id: ConversationId, added: &[String
                         }
                     }
                 }
-                Some(ToolFilter::Remove { remove }) => {
-                    if remove.iter().any(|name| added.contains(name)) {
-                        remove.retain(|name| !added.contains(name));
-                    }
-                }
+                Some(ToolFilter::Remove { remove }) => remove.retain(|name| !added.contains(name)),
             }
         }
     })
@@ -90,7 +86,9 @@ pub async fn create_agent(tx: &Tx, conversation: &ConversationRecord) -> Durable
 /// Handlers of the selected extensions' hooks for a task name, in extension order.
 pub fn agent_hooks(agent: &Agent, task_name: &str) -> Vec<Arc<dyn std::any::Any + Send + Sync>> {
     let extensions = agent.extensions.iter();
-    extensions.flat_map(|e| e.hooks.iter().filter(|hook| hook.task == task_name).map(|hook| hook.handlers.clone())).collect()
+    extensions
+        .flat_map(|e| e.hooks.iter().filter(|hook| hook.task == task_name).map(|hook| hook.handlers.clone()))
+        .collect()
 }
 
 /// Resolve an agent from its stored state, a registry snapshot, and resolved settings. A wrapper that fails or
@@ -99,7 +97,7 @@ pub fn resolve_agent(
     state: Option<&AgentState>,
     snapshot: &RegistrySnapshot,
     settings: &Settings,
-    report: &dyn Fn(&DurableError),
+    report: &(dyn Fn(&DurableError) + Sync),
 ) -> Agent {
     let extensions = select_extensions(state.and_then(|s| s.extensions.as_ref()), snapshot, settings);
     let mut composed: Vec<(String, Arc<ToolRegistration>)> = Vec::new();
@@ -159,9 +157,15 @@ fn filter_tools(tools: Vec<Arc<ToolRegistration>>, filter: Option<&ToolFilter>) 
         Some(ToolFilter::List(names)) => {
             let by_name: HashMap<&str, &Arc<ToolRegistration>> = tools.iter().map(|t| (t.name(), t)).collect();
             let mut seen = HashSet::new();
-            names.iter().filter(|name| seen.insert(name.as_str())).filter_map(|n| by_name.get(n.as_str()).map(|t| (*t).clone())).collect()
+            names
+                .iter()
+                .filter(|name| seen.insert(name.as_str()))
+                .filter_map(|n| by_name.get(n.as_str()).map(|t| (*t).clone()))
+                .collect()
         }
-        Some(ToolFilter::Remove { remove }) => tools.into_iter().filter(|t| !remove.iter().any(|n| n == t.name())).collect(),
+        Some(ToolFilter::Remove { remove }) => {
+            tools.into_iter().filter(|t| !remove.iter().any(|n| n == t.name())).collect()
+        }
     }
 }
 
@@ -179,7 +183,9 @@ fn select_extensions(
                 None => snapshot.installed().iter().map(|e| e.name.clone()).collect(),
             };
             let (add, remove) = match edit {
-                Some(ExtensionSelection::Edit { add, remove }) => (add.clone().unwrap_or_default(), remove.clone().unwrap_or_default()),
+                Some(ExtensionSelection::Edit { add, remove }) => {
+                    (add.clone().unwrap_or_default(), remove.clone().unwrap_or_default())
+                }
                 _ => (Vec::new(), Vec::new()),
             };
             base.into_iter().chain(add).filter(|name| !remove.contains(name)).collect()
@@ -194,7 +200,7 @@ fn apply_wrap<T: Clone>(
     target: &str,
     wrap: impl Fn(T) -> DurableResult<T>,
     name_of: impl Fn(&T) -> &str,
-    report: &dyn Fn(&DurableError),
+    report: &(dyn Fn(&DurableError) + Sync),
 ) {
     let Some(index) = items.iter().position(|(key, _)| key == target) else { return };
     let wrapped = wrap(items[index].1.clone()).and_then(|wrapped| {

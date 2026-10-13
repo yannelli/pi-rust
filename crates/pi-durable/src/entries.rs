@@ -1,7 +1,8 @@
-//! Typed entry kinds (upstream `defineEntry`). The built-in `pi.*` entries come with the Harness.
+//! Typed entry kinds (upstream `defineEntry`) and the built-in `pi.*` entries the Harness writes.
 
 use std::fmt;
 use std::marker::PhantomData;
+use std::sync::LazyLock;
 
 use pi_ai::Message;
 use pi_chord::Json;
@@ -92,3 +93,32 @@ impl<D: Serialize + DeserializeOwned> Entry<D> {
         })
     }
 }
+
+fn builtin<D: Serialize + DeserializeOwned>(kind: &str) -> Entry<D> {
+    Entry { kind: kind.to_owned(), _marker: PhantomData }
+}
+
+/// Data of a `pi.tool-result` entry: the structured diagnostics, possibly none.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ToolResultData {
+    pub diagnostics: Vec<crate::harness::ToolDiagnostic>,
+}
+
+/// Data of a `pi.compaction` entry.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CompactionData {
+    pub reason: crate::harness::CompactionReason,
+}
+
+/// User input: `model` is `[UserMessage]`. Written by submissions.
+pub static USER_ENTRY: LazyLock<Entry> = LazyLock::new(|| builtin("pi.user"));
+/// Provider result with any stop reason: `model` is `[AssistantMessage]`. Written by generation.
+pub static ASSISTANT_ENTRY: LazyLock<Entry> = LazyLock::new(|| builtin("pi.assistant"));
+/// Positional prompt and tool change: `model` is `[SystemMessage]` with empty `content`.
+pub static SYSTEM_ENTRY: LazyLock<Entry> = LazyLock::new(|| builtin("pi.system"));
+/// Tool result: `model` is `[ToolResultMessage]`, whose content ends with the rendered diagnostics block.
+pub static TOOL_RESULT_ENTRY: LazyLock<Entry<ToolResultData>> = LazyLock::new(|| builtin("pi.tool-result"));
+/// Start of a new context: always `head: "self"`, with an optional user message carrying the handoff text.
+pub static RESET_ENTRY: LazyLock<Entry> = LazyLock::new(|| builtin("pi.reset"));
+/// Compaction summary: `model` is `[UserMessage]` with the wrapped summary, `head` the first kept entry.
+pub static COMPACTION_ENTRY: LazyLock<Entry<CompactionData>> = LazyLock::new(|| builtin("pi.compaction"));

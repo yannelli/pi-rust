@@ -20,7 +20,7 @@ use crate::harness::registry::RegistrySnapshot;
 use crate::harness::settings::Settings;
 use crate::harness::submissions::Submission;
 use crate::harness::task::NextTaskState;
-use crate::harness::types::{Agent, AbortTaskResult, ContextView, SubmissionDraft};
+use crate::harness::types::{AbortTaskResult, Agent, ContextView, SubmissionDraft};
 use crate::harness::util::{lock, with_context};
 use crate::ids::{ConversationId, EntryId, TaskId};
 use crate::models::Models;
@@ -167,7 +167,8 @@ impl TaskRuntime {
     {
         self.invocation.check()?;
         let (scheduler, invocation) = (self.scheduler.clone(), self.invocation.clone());
-        let scope = TransactionScope { conversation_id: Some(invocation.conversation_id), task_id: Some(invocation.task_id) };
+        let scope =
+            TransactionScope { conversation_id: Some(invocation.conversation_id), task_id: Some(invocation.task_id) };
         let committed = self.scheduler.core.session.commit_with(
             move |tx| async move {
                 invocation.check()?;
@@ -269,12 +270,24 @@ impl TaskRuntime {
     }
 
     /// Invocation-bound handle of an existing conversation; `None` when absent.
-    pub async fn conversation(&self, id: ConversationId, context: &Context) -> DurableResult<Option<ConversationHandle>> {
+    pub async fn conversation(
+        &self,
+        id: ConversationId,
+        context: &Context,
+    ) -> DurableResult<Option<ConversationHandle>> {
         self.invocation.check()?;
         let (storage, read_context) = (self.scheduler.core.session.storage(), context.clone());
-        let record =
-            self.scheduler.core.session.read_on_line(async move { storage.conversation(id, &read_context).await }).await?;
-        Ok(record.map(|_| ConversationHandle { id, invocation: self.invocation.clone(), scheduler: self.scheduler.clone() }))
+        let record = self
+            .scheduler
+            .core
+            .session
+            .read_on_line(async move { storage.conversation(id, &read_context).await })
+            .await?;
+        Ok(record.map(|_| ConversationHandle {
+            id,
+            invocation: self.invocation.clone(),
+            scheduler: self.scheduler.clone(),
+        }))
     }
 
     /// Committed entry visible from the task's conversation.
@@ -287,7 +300,12 @@ impl TaskRuntime {
     }
 
     /// `None` when the entry is absent, not visible, or has another kind.
-    pub async fn typed_entry<D>(&self, token: &Entry<D>, id: EntryId, context: &Context) -> DurableResult<Option<TypedEntry<D>>>
+    pub async fn typed_entry<D>(
+        &self,
+        token: &Entry<D>,
+        id: EntryId,
+        context: &Context,
+    ) -> DurableResult<Option<TypedEntry<D>>>
     where
         D: serde::Serialize + serde::de::DeserializeOwned,
     {
@@ -298,7 +316,12 @@ impl TaskRuntime {
     }
 
     /// Committed raw active transcript and model context, optionally cut off at the visible entry `at`.
-    pub async fn context(&self, conversation_id: ConversationId, context: &Context, at: Option<EntryId>) -> DurableResult<ContextView> {
+    pub async fn context(
+        &self,
+        conversation_id: ConversationId,
+        context: &Context,
+        at: Option<EntryId>,
+    ) -> DurableResult<ContextView> {
         self.invocation.check()?;
         let scheduler = &self.scheduler;
         let kept = lock(&scheduler.state).contexts.get(&conversation_id).map(|kept| kept.range.clone());
@@ -432,7 +455,8 @@ impl ConversationHandle {
         }
         let bound = self.bind(context)?;
         let submissions = self.scheduler.submissions.get().and_then(std::sync::Weak::upgrade);
-        let submissions = submissions.ok_or_else(|| crate::harness::util::closed_error(&self.scheduler.core.session))?;
+        let submissions =
+            submissions.ok_or_else(|| crate::harness::util::closed_error(&self.scheduler.core.session))?;
         let submission = submissions.submit(self.id, draft, &bound).await?;
         Ok(submission.bound(self.invocation.clone()))
     }

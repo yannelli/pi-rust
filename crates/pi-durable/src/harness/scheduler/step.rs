@@ -275,7 +275,10 @@ impl Scheduler {
             .collect();
         for id in on {
             if *id == current.id || owners.contains(id) {
-                return Err(DurableError::error(format!("Task {} cannot wait on itself or its owner {id}", current.id)));
+                return Err(DurableError::error(format!(
+                    "Task {} cannot wait on itself or its owner {id}",
+                    current.id
+                )));
             }
             let known = overlay.tasks.get(id).cloned().or_else(|| lock(&self.state).live.get(id).cloned());
             let member = match known {

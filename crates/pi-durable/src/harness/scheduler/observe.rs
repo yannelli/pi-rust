@@ -108,7 +108,8 @@ impl Scheduler {
             }
         }
         for record in resolved {
-            self.task_waiters.resolve(&record.id, record);
+            let id = record.id;
+            self.task_waiters.resolve(&id, record);
         }
         for invocation in signal {
             invocation.controller.abort(None);

@@ -26,7 +26,7 @@ pub struct ConversationStreamOptions {
     pub max_retry_delay_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub headers: Option<BTreeMap<String, String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "crate::harness::util::json_map::option")]
     pub metadata: Option<JsonMap>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_retention: Option<CacheRetention>,
@@ -69,7 +69,8 @@ pub const DEFAULT_RETRY_POLICY: ConversationRetryPolicy =
 pub const DEFAULT_COMPACTION_POLICY: CompactionPolicy =
     CompactionPolicy { enabled: true, reserve_tokens: 16384, keep_recent_tokens: 20000, background_tokens: 32768 };
 
-pub const DEFAULT_PROGRESS_POLICY: ProgressPolicy = ProgressPolicy { partial_interval_ms: 100, output_interval_ms: 100 };
+pub const DEFAULT_PROGRESS_POLICY: ProgressPolicy =
+    ProgressPolicy { partial_interval_ms: 100, output_interval_ms: 100 };
 
 /// Default `context_retention_ms`: ten minutes.
 pub const DEFAULT_CONTEXT_RETENTION_MS: f64 = 600_000.0;

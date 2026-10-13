@@ -21,7 +21,8 @@ use crate::harness::types::{ToolControl, ToolExecutionMode};
 use crate::ids::{ConversationId, EntryId, TaskId};
 use crate::models::DeferredCancelOptions;
 use crate::session::Tx;
-use crate::types::{DraftHead, SubmissionSettlement, TaskOptions, TaskOutcome, TaskRecord, TaskState};
+use crate::tasks::TaskOptions;
+use crate::types::{DraftHead, SubmissionSettlement, TaskOutcome, TaskRecord, TaskState};
 
 /// A tool task for call `call_id`, owned by the generation.
 async fn create_tool_task(tx: &Tx, owner: TaskId, assistant: EntryId, call_id: String) -> DurableResult<TaskId> {
@@ -60,7 +61,8 @@ pub(super) async fn start_tool_round(
             if !offered.contains(&call.name) {
                 let unavailable = harness_error("tool_unavailable", &format!("Tool {} is not available", call.name));
                 let result = append_tool_result(&tx, conversation_id, &call, &unavailable, core.now(), None).await?;
-                slots.push(ToolSlot { entry: Some(result.id), ..ToolSlot::new(&call.id, &call.name, SlotStatus::Done) });
+                slots
+                    .push(ToolSlot { entry: Some(result.id), ..ToolSlot::new(&call.id, &call.name, SlotStatus::Done) });
                 continue;
             }
             if sequential && !tasks.is_empty() {
@@ -90,7 +92,8 @@ pub(super) async fn tools_phase(task: TaskRecord, runtime: TaskRuntime, context:
         return finish_tool_round(&runtime, assistant, tools, &context).await;
     };
     // Sequential round: start the next call and wait for it.
-    let (next, rest, owner, conversation_id) = (next.clone(), rest.to_vec(), runtime.task_id(), runtime.conversation_id());
+    let (next, rest, owner, conversation_id) =
+        (next.clone(), rest.to_vec(), runtime.task_id(), runtime.conversation_id());
     let change = move |tx: Tx, _| async move {
         let live = tx.doc(&LIVE_DOC, conversation_id).await?;
         let task_id = create_tool_task(&tx, owner, assistant, next.clone()).await?;
@@ -122,7 +125,9 @@ async fn finish_tool_round(
         .zip(outcomes)
         .map(|(id, outcome)| {
             let control = match outcome {
-                TaskOutcome::Completed { result: Some(result) } if result.get("kind").and_then(Json::as_str) != Some("nested") => {
+                TaskOutcome::Completed { result: Some(result) }
+                    if result.get("kind").and_then(Json::as_str) != Some("nested") =>
+                {
                     result.get("control").and_then(|control| control.deserialize_into::<ToolControl>().ok())
                 }
                 _ => None,
@@ -144,7 +149,8 @@ async fn finish_tool_round(
     // Every call of the round, including those answered without a task, must ask to terminate.
     let terminate = !slots.is_empty()
         && slots.iter().all(|slot| slot.task_id.and_then(control_of).is_some_and(|c| c.terminate == Some(true)));
-    let added: Vec<String> = controls.iter().flat_map(|(_, c)| c.iter().flat_map(|c| c.add_tools.clone().unwrap_or_default())).collect();
+    let added: Vec<String> =
+        controls.iter().flat_map(|(_, c)| c.iter().flat_map(|c| c.add_tools.clone().unwrap_or_default())).collect();
     // The last handoff in call order wins.
     let handoff = controls.iter().rev().find_map(|(_, c)| c.as_ref().and_then(|c| c.handoff.clone()));
     let (owner, core) = (runtime.task_id(), runtime.scheduler.core.clone());
@@ -159,7 +165,11 @@ async fn finish_tool_round(
         if terminate || handoff.is_some() {
             if let Some(handoff) = handoff {
                 let message = Message::User(UserMessage { content: UserContent::Text(handoff), timestamp: now as i64 });
-                let draft = TypedEntryDraft { model: Some(vec![message]), head: Some(DraftHead::SelfEntry), ..TypedEntryDraft::new(()) };
+                let draft = TypedEntryDraft {
+                    model: Some(vec![message]),
+                    head: Some(DraftHead::SelfEntry),
+                    ..TypedEntryDraft::new(())
+                };
                 let entry = tx.append_typed_entry(&RESET_ENTRY, conversation_id, draft).await?;
                 boundary.head = Some(entry.record.id);
             }
@@ -232,7 +242,13 @@ pub(super) async fn abort(task: TaskRecord, runtime: TaskRuntime, context: Conte
     runtime.commit(change, &context).await
 }
 
-async fn abort_in(tx: &Tx, conversation_id: ConversationId, owner: TaskId, unstarted: Vec<ToolCall>, now: f64) -> DurableResult<()> {
+async fn abort_in(
+    tx: &Tx,
+    conversation_id: ConversationId,
+    owner: TaskId,
+    unstarted: Vec<ToolCall>,
+    now: f64,
+) -> DurableResult<()> {
     let draft = tx.doc(&LIVE_DOC, conversation_id).await?;
     let mut live = draft.get()?;
     convert_partial(tx, &mut live, conversation_id).await?;

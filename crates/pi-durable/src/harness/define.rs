@@ -55,7 +55,11 @@ where
     F: Fn(PromptInput, Context) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = DurableResult<Option<String>>> + Send + 'static,
 {
-    Arc::new(PromptSection { key: key.into(), render: Arc::new(move |input, context| Box::pin(render(input, context))), tag })
+    Arc::new(PromptSection {
+        key: key.into(),
+        render: Arc::new(move |input, context| Box::pin(render(input, context))),
+        tag,
+    })
 }
 
 /// A section that always renders `text`.

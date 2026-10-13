@@ -104,7 +104,8 @@ pub struct Registry(Arc<Mutex<RegistryInner>>);
 
 /// Create a registry holding only the built-in tasks.
 pub fn create_registry() -> Registry {
-    let current = RegistrySnapshot::build(Vec::new()).unwrap_or_else(|_| unreachable!("built-in task names are unique"));
+    let current =
+        RegistrySnapshot::build(Vec::new()).unwrap_or_else(|_| unreachable!("built-in task names are unique"));
     Registry(Arc::new(Mutex::new(RegistryInner { current, listeners: Vec::new(), next: 0 })))
 }
 
@@ -172,7 +173,11 @@ impl RegistryReader for Registry {
         let weak = Arc::downgrade(&self.0);
         Box::new(move || {
             if let Some(inner) = weak.upgrade() {
-                inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).listeners.retain(|(other, _)| *other != id);
+                inner
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .listeners
+                    .retain(|(other, _)| *other != id);
             }
         })
     }
@@ -189,7 +194,11 @@ fn validate_extension(extension: &Extension) -> DurableResult<()> {
     let mut tools = HashSet::new();
     for tool in &extension.tools {
         if !tools.insert(tool.name()) {
-            return Err(DurableError::error(format!("Extension {} has two tools named {}", extension.name, tool.name())));
+            return Err(DurableError::error(format!(
+                "Extension {} has two tools named {}",
+                extension.name,
+                tool.name()
+            )));
         }
     }
     let mut sections = HashSet::new();

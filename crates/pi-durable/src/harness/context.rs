@@ -218,7 +218,11 @@ fn range_query(conversation_id: ConversationId, bounds: &ContextBounds) -> Entry
 }
 
 /// Visible entries within `query`, oldest first.
-async fn scan_range(storage: &dyn Storage, mut query: EntryQuery, context: &Context) -> DurableResult<Vec<EntryRecord>> {
+async fn scan_range(
+    storage: &dyn Storage,
+    mut query: EntryQuery,
+    context: &Context,
+) -> DurableResult<Vec<EntryRecord>> {
     query.order = Some(ScanOrder::Ascending);
     let query = &query;
     scan_all(|cursor| async move { storage.scan_entries(query, SCAN_PAGE_SIZE, cursor.as_ref(), context).await }).await

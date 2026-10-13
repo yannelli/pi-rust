@@ -68,17 +68,24 @@ impl Submissions {
     }
 
     /// Admit a submission in one commit; see [`admit_submission`].
-    pub async fn submit(&self, conversation_id: ConversationId, draft: SubmissionDraft, context: &Context) -> DurableResult<Submission> {
+    pub async fn submit(
+        &self,
+        conversation_id: ConversationId,
+        draft: SubmissionDraft,
+        context: &Context,
+    ) -> DurableResult<Submission> {
         self.scheduler.resume();
         let core = self.scheduler.core.clone();
-        let id = self
-            .session
-            .commit_with(
-                move |tx| async move { admit_submission(&tx, conversation_id, draft, core.now(), &core.settings()).await },
-                context,
-                TransactionScope::default(),
-            )
-            .await?;
+        let id =
+            self.session
+                .commit_with(
+                    move |tx| async move {
+                        admit_submission(&tx, conversation_id, draft, core.now(), &core.settings()).await
+                    },
+                    context,
+                    TransactionScope::default(),
+                )
+                .await?;
         self.handle(id)
     }
 
@@ -233,7 +240,9 @@ pub async fn admit_submission(
     if queued_items {
         let record = tx.create_submission(create(SubmissionStatus::Queued, None)).await?;
         let item = match draft {
-            SubmissionDraft::Write { entry, .. } => InboxItem::Write { id: record.id, entry: entry_draft_json(&entry)? },
+            SubmissionDraft::Write { entry, .. } => {
+                InboxItem::Write { id: record.id, entry: entry_draft_json(&entry)? }
+            }
             SubmissionDraft::Input { content, when_busy, .. } => match when_busy {
                 Some(WhenBusy::Steer) => InboxItem::Steer { id: record.id, content },
                 _ => InboxItem::FollowUp { id: record.id, content },
@@ -255,10 +264,8 @@ pub async fn admit_submission(
     match draft {
         SubmissionDraft::Write { entry, .. } => {
             if is_stale(&boundary, &entry) {
-                let stale = SubmissionCreate {
-                    reason: Some("stale".into()),
-                    ..create(SubmissionStatus::Unanswered, None)
-                };
+                let stale =
+                    SubmissionCreate { reason: Some("stale".into()), ..create(SubmissionStatus::Unanswered, None) };
                 return Ok(tx.create_submission(stale).await?.id);
             }
             let appended = tx.append_entry(conversation_id, entry).await?;

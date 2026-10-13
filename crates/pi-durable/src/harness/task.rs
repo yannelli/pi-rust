@@ -56,14 +56,7 @@ impl TaskDefinition {
         version: u32,
         first: impl Fn(&Json) -> DurableResult<Json> + Send + Sync + 'static,
     ) -> Self {
-        Self {
-            name: name.into(),
-            version,
-            first: Arc::new(first),
-            phases: HashMap::new(),
-            abort: None,
-            migrate: None,
-        }
+        Self { name: name.into(), version, first: Arc::new(first), phases: HashMap::new(), abort: None, migrate: None }
     }
 
     pub fn phase<F, Fut>(mut self, name: impl Into<String>, run: F) -> Self
