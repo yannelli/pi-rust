@@ -119,7 +119,7 @@ async fn model_op(runner: &Arc<ExtensionRunner>, name: &str, args: Args) -> Resu
             options.request.headers = auth.auth.headers;
             options.request.cancel = runner.token(options_json["signal"].as_u64());
             options.temperature = options_json["temperature"].as_f64();
-            json!(pi_ai::classify::classify(&auth.model, &context, options).await)
+            json!(runtime.classify(&auth.model, &context, options).await)
         }
         "generateImages" => {
             let model = model(args.json(1))?;
@@ -130,7 +130,7 @@ async fn model_op(runner: &Arc<ExtensionRunner>, name: &str, args: Args) -> Resu
             options.request.api_key = auth.auth.api_key;
             options.request.headers = auth.auth.headers;
             options.request.cancel = runner.token(options_json["signal"].as_u64());
-            json!(pi_ai::images::generate_images(&auth.model, &context, options).await)
+            json!(runtime.generate_images(&auth.model, &context, options).await)
         }
         other => return Err(error(format!("Unknown model operation: {other}"))),
     })

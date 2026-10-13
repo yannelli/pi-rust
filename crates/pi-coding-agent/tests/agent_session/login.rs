@@ -122,3 +122,30 @@ async fn logs_in_with_an_oauth_flow() {
     let empty = runtime.login("local", AuthType::ApiKey, &answers, &options, CancellationToken::new()).await;
     assert_eq!(empty.unwrap_err().to_string(), "API key cannot be empty");
 }
+
+struct OutsideAuth;
+
+#[async_trait]
+impl pi_coding_agent::agent_session::ProviderAuth for OutsideAuth {
+    async fn check(&self, _stored: Option<&Credential>) -> bool {
+        false
+    }
+
+    async fn resolve(&self, _stored: Option<&Credential>) -> Result<Option<pi_ai::auth::ResolvedAuth>, String> {
+        Ok(None)
+    }
+}
+
+#[tokio::test]
+async fn providers_configured_outside_pi_are_ambient_login_options() {
+    let h = harness(Options::default()).await;
+    let runtime = h.session.model_runtime().clone();
+    runtime.register_provider_auth("outside-cloud", Some(Arc::new(OutsideAuth)));
+    let options = runtime.find_login_providers("outside-cloud").await;
+    assert_eq!(options.len(), 1, "{options:?}");
+    assert_eq!((options[0].auth_type, options[0].ambient), (AuthType::ApiKey, true));
+    let local = runtime.find_login_providers("local").await;
+    assert!(local.iter().all(|option| !option.ambient));
+    runtime.register_provider_auth("outside-cloud", None);
+    assert!(runtime.find_login_providers("outside-cloud").await.is_empty());
+}

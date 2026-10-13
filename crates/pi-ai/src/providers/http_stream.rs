@@ -101,7 +101,8 @@ pub(crate) fn hooked_events<'a>(
 pub(crate) fn spawn_builder_stream<H: SseHandler>(
     model: &Model,
     options: StreamOptions,
-    request: HttpRequest,
+    mut request: HttpRequest,
+    wire: fn(Value) -> Value,
     config: SendConfig,
     format: fn(ProviderRequestError) -> String,
     mut handler: H,
@@ -109,6 +110,9 @@ pub(crate) fn spawn_builder_stream<H: SseHandler>(
     let (sender, stream) = event_channel();
     let model = model.clone();
     tokio::spawn(async move {
+        // `request.body` is the payload `on_payload` sees; `wire` turns it into the sent body.
+        let payload = std::mem::take(&mut request.body);
+        request.body = wire(crate::request::apply_payload_hook(payload, options.on_payload.as_ref(), &model).await);
         let mut builder = MessageBuilder::new(&model, sender);
         let drive = async {
             let response = send(&request, &model, &options, &config).await.map_err(format)?;

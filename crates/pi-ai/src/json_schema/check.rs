@@ -12,7 +12,7 @@ const MAX_ERRORS: usize = 8;
 
 /// One failed keyword: where, and the message TypeBox prints for it.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct SchemaError {
+pub struct SchemaError {
     pub keyword: &'static str,
     pub instance_path: String,
     pub message: String,
@@ -23,13 +23,13 @@ pub(crate) struct SchemaError {
 /// A numeric bound keyword, its comparison as TypeBox prints it, and the passing test.
 type BoundCheck = (&'static str, &'static str, fn(f64, f64) -> bool);
 
-pub(crate) struct Checker<'a> {
+pub struct Checker<'a> {
     root: &'a Value,
     pub errors: Vec<SchemaError>,
 }
 
 /// Numbers as JavaScript prints them: integers without a fraction.
-pub(crate) fn js_number(value: f64) -> String {
+pub fn js_number(value: f64) -> String {
     if value.fract() == 0.0 && value.abs() < 1e21 { format!("{}", value as i64) } else { value.to_string() }
 }
 
@@ -41,7 +41,7 @@ fn schema_types(schema: &Map<String, Value>) -> Option<Vec<&str>> {
     }
 }
 
-pub(crate) fn matches_type(value: &Value, kind: &str) -> bool {
+pub fn matches_type(value: &Value, kind: &str) -> bool {
     match kind {
         "string" => value.is_string(),
         "number" => value.is_number(),
@@ -55,7 +55,7 @@ pub(crate) fn matches_type(value: &Value, kind: &str) -> bool {
 }
 
 /// Deep equality where `1` equals `1.0`, as in JavaScript.
-pub(crate) fn json_equal(left: &Value, right: &Value) -> bool {
+pub fn json_equal(left: &Value, right: &Value) -> bool {
     match (left, right) {
         (Value::Number(a), Value::Number(b)) => a.as_f64() == b.as_f64(),
         (Value::Array(a), Value::Array(b)) => a.len() == b.len() && a.iter().zip(b).all(|(a, b)| json_equal(a, b)),

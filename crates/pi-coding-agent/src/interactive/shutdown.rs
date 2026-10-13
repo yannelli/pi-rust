@@ -98,7 +98,8 @@ impl InteractiveMode {
                 }
             })
             .collect();
-        format_crash_extension_hint(&find_extension_stack_matches(Some(&format!("{error:#}")), &extensions))
+        let stack = crate::diagnostics::error_stack(error);
+        format_crash_extension_hint(&find_extension_stack_matches(Some(&stack), &extensions))
     }
 }
 

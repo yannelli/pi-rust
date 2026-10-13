@@ -65,7 +65,7 @@ pub(super) async fn capture(model: &Model, context: &Context, mut options: Strea
     let captured: Arc<Mutex<Option<Value>>> = Arc::default();
     let slot = captured.clone();
     let cancel = options.cancel.clone();
-    options.on_payload = Some(Arc::new(move |payload, _| {
+    options.on_payload = Some(crate::registry::payload_hook(move |payload, _| {
         *slot.lock().unwrap() = Some(payload.clone());
         cancel.cancel();
         None

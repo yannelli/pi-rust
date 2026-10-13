@@ -3,7 +3,6 @@
 //! `anthropic-temperature-compat`, `anthropic-cache-write-1h-cost`, and `anthropic-sse-parsing` tests.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use serde_json::{Value, json};
 
@@ -292,7 +291,7 @@ async fn payload_replacements_keep_streaming_and_error_events_fail() {
     let mut server = MockServer::start(MockResponse::Sse(frames)).await;
     model.base_url = server.base_url.clone();
     let options = StreamOptions {
-        on_payload: Some(Arc::new(|payload: &Value, _: &Model| {
+        on_payload: Some(crate::registry::payload_hook(|payload: &Value, _: &Model| {
             let mut next = payload.clone();
             next["stream"] = json!(false);
             Some(next)

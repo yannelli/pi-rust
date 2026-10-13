@@ -41,6 +41,7 @@ fn serve() {
             "tools/call" => {
                 let arguments = &params["arguments"];
                 let text = match params["name"].as_str().unwrap_or_default() {
+                    "env" => std::env::var(arguments["name"].as_str().unwrap_or_default()).unwrap_or_default(),
                     "cwd" => std::env::current_dir().map(|dir| dir.display().to_string()).unwrap_or_default(),
                     "log" => {
                         let data = arguments.get("data").cloned().unwrap_or(json!("log line"));

@@ -64,17 +64,23 @@ pub(crate) async fn run(runner: &Arc<ExtensionRunner>, name: &str, args: &Args) 
                 let weak = Arc::downgrade(runner);
                 let setup: crate::agent_session::AsyncSetupFn = Box::new(move |session: Arc<AgentSession>| {
                     async move {
-                        let Some(runner) = weak.upgrade() else { return };
+                        let Some(runner) = weak.upgrade() else { return Ok(()) };
                         let id = add_target(&runner, &session);
-                        let _ = runner.call_json("invokeCallback", vec![json!(key), json!(id)]).await;
+                        let result = runner.call_json("invokeCallback", vec![json!(key), json!(id)]).await;
                         session.refresh_context();
+                        // The JavaScript stack stays in the error, so the crash hint can name the extension.
+                        result.map(drop).map_err(|error| {
+                            let stack = error.stack.clone();
+                            anyhow::Error::new(crate::diagnostics::StackError { message: error.message.clone(), stack })
+                        })
                     }
                     .boxed()
                 });
                 setup
             });
             let result = runtime.new_session_with(parent, setup).await.map_err(|error| {
-                runner.target_ui(target).fatal_runtime_error("Failed to create session", &format!("{error:#}"));
+                let stack = crate::diagnostics::error_stack(&error);
+                runner.target_ui(target).fatal_runtime_error("Failed to create session", &format!("{error:#}"), &stack);
                 failure(error)
             })?;
             Ok(replaced(runner, &runtime, result.cancelled))
@@ -86,7 +92,8 @@ pub(crate) async fn run(runner: &Arc<ExtensionRunner>, name: &str, args: &Args) 
                 _ => ForkPosition::Before,
             };
             let result = runtime.fork(&args.str(1)?, position).await.map_err(|error| {
-                runner.target_ui(target).fatal_runtime_error("Failed to fork session", &format!("{error:#}"));
+                let stack = crate::diagnostics::error_stack(&error);
+                runner.target_ui(target).fatal_runtime_error("Failed to fork session", &format!("{error:#}"), &stack);
                 failure(error)
             })?;
             Ok(replaced(runner, &runtime, result.cancelled))

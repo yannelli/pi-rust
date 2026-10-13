@@ -171,7 +171,7 @@ async fn delivers_follow_ups_after_the_run_and_aborts_cleanly() {
     let session = h.session.clone();
     let running = tokio::spawn(async move { session.prompt("one", Vec::new()).await });
     wait_until(|| h.session.is_streaming()).await;
-    h.session.follow_up("two", Vec::new());
+    h.session.follow_up("two", Vec::new()).await.unwrap();
     running.await.unwrap().unwrap();
     let users: Vec<String> = h.session.messages().iter().filter(|m| m.role() == "user").map(text).collect();
     assert_eq!(users, ["one", "two"]);

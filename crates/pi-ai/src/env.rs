@@ -133,6 +133,14 @@ pub fn child_process_env() -> BTreeMap<String, String> {
     CHILD_PROCESS_ENV.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
 }
 
+/// The whole environment as seen by this process: the real environment with the child overlay
+/// on top, as upstream's mutated `process.env`.
+pub fn process_env() -> BTreeMap<String, String> {
+    let mut env: BTreeMap<String, String> = std::env::vars().collect();
+    env.extend(child_process_env());
+    env
+}
+
 /// Value of `name` as seen by this process: the child overlay first, then the real environment.
 pub fn process_env_value(name: &str) -> Option<String> {
     let overlay = CHILD_PROCESS_ENV.read().unwrap_or_else(|poisoned| poisoned.into_inner()).get(name).cloned();

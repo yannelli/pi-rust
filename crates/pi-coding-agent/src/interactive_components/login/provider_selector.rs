@@ -22,6 +22,8 @@ pub struct AuthSelectorProvider {
     pub status: Option<AuthCheck>,
     /// `Some(false)` labels OAuth as an account; otherwise it is a subscription.
     pub subscription: Option<bool>,
+    /// An API key method configured outside pi, with no login to run.
+    pub ambient: bool,
 }
 
 impl From<&LoginProvider> for AuthSelectorProvider {
@@ -33,6 +35,7 @@ impl From<&LoginProvider> for AuthSelectorProvider {
             method_name: provider.login_label.clone(),
             status: provider.status.clone(),
             subscription: Some(provider.subscription),
+            ambient: provider.ambient,
         }
     }
 }

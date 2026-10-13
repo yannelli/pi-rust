@@ -67,13 +67,10 @@ pub fn build_registry(
     for model in compose_catalog(builtin, catalogs) {
         registry.upsert(model);
     }
-    let Some(path) = models_json.filter(|path| path.exists()) else { return (registry, None) };
-    let display = path.display().to_string();
-    match std::fs::read_to_string(path) {
-        Err(source) => (registry, Some(ModelsFileError::Read { path: display, source })),
-        Ok(text) => match registry.apply_json(&text) {
-            Ok(()) => (registry, None),
-            Err(message) => (registry, Some(ModelsFileError::Parse { path: display, message })),
-        },
+    let Some(path) = models_json else { return (registry, None) };
+    let mut applied = registry.clone();
+    match applied.apply_models_file(path) {
+        Ok(()) => (applied, None),
+        Err(error) => (registry, Some(error)),
     }
 }

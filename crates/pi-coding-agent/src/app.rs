@@ -150,6 +150,7 @@ impl TrustCache {
         cwd: &Path,
         agent_dir: &Path,
         trust_prompt: Option<&TrustPromptFn>,
+        trust_ui: Option<&crate::agent_session::TrustUi>,
     ) -> (bool, Vec<RuntimeDiagnostic>) {
         if let Some(settings) = &options.settings {
             return (settings.is_project_trusted(), Vec::new());
@@ -161,8 +162,14 @@ impl TrustCache {
         let home = home_dir();
         let needs_decision = options.project_trust_override.is_none()
             && crate::resources::trust::has_trust_requiring_project_resources(cwd, &home);
-        let (extension_decision, mut diagnostics) =
-            if needs_decision { extensions::trust_decision(options, cwd, agent_dir).await } else { (None, Vec::new()) };
+        let (extension_decision, mut diagnostics) = match (needs_decision, trust_ui) {
+            (false, _) => (None, Vec::new()),
+            (true, None) => extensions::trust_decision(options, cwd, agent_dir).await,
+            (true, Some(ui)) => {
+                let options = AppOptions { project_trust_ui: Some(ui.clone()), ..options.clone() };
+                extensions::trust_decision(&options, cwd, agent_dir).await
+            }
+        };
         let request = ProjectTrustRequest {
             cwd,
             home: &home,
@@ -196,8 +203,15 @@ async fn create_runtime_parts(
     trust: &TrustCache,
     target: RuntimeTarget,
 ) -> anyhow::Result<RuntimeParts> {
-    let (project_trusted, trust_diagnostics) =
-        trust.project_trusted(options, &target.cwd, &target.agent_dir, target.trust_prompt.as_ref()).await;
+    let (project_trusted, trust_diagnostics) = trust
+        .project_trusted(
+            options,
+            &target.cwd,
+            &target.agent_dir,
+            target.trust_prompt.as_ref(),
+            target.trust_ui.as_ref(),
+        )
+        .await;
     let services = create_agent_session_services(CreateServicesOptions {
         cwd: target.cwd.clone(),
         agent_dir: target.agent_dir.clone(),
@@ -256,7 +270,7 @@ async fn create_runtime_parts(
 /// Flags the extensions of `cwd` register, for `--help`.
 pub async fn extension_help_flags(options: &AppOptions, cwd: &Path) -> Vec<crate::cli::HelpFlag> {
     let trust = TrustCache { store: ProjectTrustStore::new(&options.agent_dir), decided: Mutex::default() };
-    let (project_trusted, _) = trust.project_trusted(options, cwd, &options.agent_dir, None).await;
+    let (project_trusted, _) = trust.project_trusted(options, cwd, &options.agent_dir, None, None).await;
     let services = create_agent_session_services(CreateServicesOptions {
         cwd: cwd.to_path_buf(),
         agent_dir: options.agent_dir.clone(),

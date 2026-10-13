@@ -138,6 +138,7 @@ impl ExtensionRunner {
         let mut options = JsRuntimeOptions::new(&cwd);
         options.name = "pi-extensions".into();
         options.virtual_modules = modules::virtual_modules();
+        options.env = Some(pi_ai::env::process_env());
         // Host work runs on the caller's runtime, so operations survive the runner they started from.
         options.tokio = tokio::runtime::Handle::try_current().ok();
         let runtime = JsRuntime::new(options).map_err(js_error)?;

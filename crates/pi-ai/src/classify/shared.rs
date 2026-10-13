@@ -67,7 +67,8 @@ pub(crate) async fn post_classifier_request(
         &options.headers,
         &options.suppressed_headers,
     );
-    let request = HttpRequest { url, headers, body: apply_payload_hook(body, options.on_payload.as_ref(), model) };
+    let request =
+        HttpRequest { url, headers, body: apply_payload_hook(body, options.on_payload.as_ref(), model).await };
     let send =
         SendOptions { label: Some(label), no_retry_statuses, ..SendOptions::from_request(options, DEFAULT_RETRIES) };
     let (response, json) = post_json(&request, &send).await?;

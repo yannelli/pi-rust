@@ -19,7 +19,7 @@ use crate::providers::constrained_sampling::{
 use crate::providers::http_stream::{ResponseReport, SendConfig, spawn_builder_stream};
 use crate::providers::openai_responses::{ConvertOptions, ResponsesStream, convert_messages};
 use crate::registry::{ApiProvider, StreamOptions};
-use crate::request::{MAX_PROVIDER_ERROR_BODY_CHARS, apply_payload_hook, truncate_error_text};
+use crate::request::{MAX_PROVIDER_ERROR_BODY_CHARS, truncate_error_text};
 use crate::retry::ProviderRequestError;
 use crate::simple_options::{
     MappedLevel, clamp_max_tokens_to_context, clamp_openai_prompt_cache_key, clamp_thinking_level,
@@ -53,7 +53,6 @@ impl ApiProvider for AzureOpenAIResponses {
             Ok(built) => built,
             Err(error) => return error_stream(model, StopReason::Error, error),
         };
-        let body = apply_payload_hook(body, options.on_payload.as_ref(), model);
         let defaults = vec![("user-agent", pi_user_agent()), ("api-key", api_key)];
         let request = HttpRequest { url, headers: header_map(defaults, model, &options), body };
         let config = SendConfig {
@@ -62,7 +61,7 @@ impl ApiProvider for AzureOpenAIResponses {
             report: ResponseReport::SuccessOnly,
         };
         let handler = ResponsesStream::new(model).with_grammar_tool_input_properties(grammar);
-        spawn_builder_stream(model, options, request, config, azure_error, handler)
+        spawn_builder_stream(model, options, request, std::convert::identity, config, azure_error, handler)
     }
 }
 

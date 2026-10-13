@@ -202,7 +202,7 @@ async fn payload_hook_and_stream_events_see_sdk_shapes() {
     let payloads = Arc::new(Mutex::new(Vec::<Value>::new()));
     let (seen_hook, payload_hook) = (seen.clone(), payloads.clone());
     let options = StreamOptions {
-        on_payload: Some(Arc::new(move |payload: &Value, _: &Model| {
+        on_payload: Some(crate::registry::payload_hook(move |payload: &Value, _: &Model| {
             payload_hook.lock().unwrap().push(payload.clone());
             let mut next = payload.clone();
             next["config"]["topK"] = json!(5);

@@ -140,7 +140,7 @@ fn shallow_merge(target: &mut Map<String, Value>, key: &str, patch: &Value) {
 }
 
 /// Apply one `modelOverrides` entry the way upstream `applyModelOverride` merges fields.
-fn apply_override(model: &Model, patch: &Map<String, Value>) -> Result<Model, String> {
+pub(crate) fn apply_override(model: &Model, patch: &Map<String, Value>) -> Result<Model, String> {
     let Value::Object(mut target) = serde_json::to_value(model).map_err(|error| error.to_string())? else {
         return Err("model did not serialize to an object".into());
     };

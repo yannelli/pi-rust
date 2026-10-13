@@ -10,6 +10,7 @@ use pi_tui::{Spacer, TruncatedText, component};
 use super::components::BashExecutionComponent;
 use super::mode::{CompactionQueued, InteractiveMode};
 use super::util::quote_if_needed;
+use crate::agent_session::{PromptOptions, StreamingBehavior};
 use crate::interactive_components::{ExternalEditorResult, edit_in_external_editor, key_display_text};
 use crate::settings::schema::DoubleEscapeAction;
 use crate::theme::{ThemeColor, theme};
@@ -179,8 +180,7 @@ impl InteractiveMode {
         } else if session.is_streaming() {
             self.editor.add_to_history(&text);
             self.editor.set_text("");
-            session.follow_up(&text, Vec::new());
-            self.update_pending_messages_display();
+            self.prompt_while_streaming(text, StreamingBehavior::FollowUp);
         } else {
             self.editor.set_text("");
             self.handle_submit(&text);
@@ -278,14 +278,40 @@ impl InteractiveMode {
                 }
             }
         }
-        for message in rest {
-            if message.follow_up {
-                session.follow_up(&message.text, Vec::new());
-            } else {
-                session.steer(&message.text, Vec::new());
-            }
+        let rest: Vec<CompactionQueued> = rest.cloned().collect();
+        if rest.is_empty() {
+            return;
         }
-        self.update_pending_messages_display();
+        self.spawn(move |mode| async move {
+            let queue = tokio::spawn(async move {
+                for message in rest {
+                    let behavior =
+                        if message.follow_up { StreamingBehavior::FollowUp } else { StreamingBehavior::Steer };
+                    session.queue_user_input(&message.text, Vec::new(), behavior, "interactive").await?;
+                }
+                anyhow::Ok(())
+            });
+            if let Err(error) = super::shutdown::joined(queue.await) {
+                mode.show_error(&format!("Failed to send queued message: {error:#}"));
+            }
+            mode.update_pending_messages_display();
+        });
+    }
+
+    /// Enter or Alt+Enter while streaming: the prompt path with a streaming behavior, so
+    /// extension commands run, `input` handlers see it, and templates expand (upstream
+    /// `session.prompt(text, { streamingBehavior })`).
+    fn prompt_while_streaming(&self, text: String, behavior: StreamingBehavior) {
+        let session = self.session();
+        self.spawn(move |mode| async move {
+            let options = PromptOptions { streaming_behavior: Some(behavior), ..PromptOptions::default() };
+            let prompt = tokio::spawn(async move { session.prompt_with(&text, options).await });
+            if let Err(error) = super::shutdown::joined(prompt.await) {
+                mode.show_error(&format!("{error:#}"));
+            }
+            mode.update_pending_messages_display();
+            mode.request_render();
+        });
     }
 
     /// Enter in the editor: slash commands, `!` commands, queueing, or a new prompt.
@@ -323,9 +349,7 @@ impl InteractiveMode {
         if session.is_streaming() {
             self.editor.add_to_history(&text);
             self.editor.set_text("");
-            session.steer(&text, Vec::new());
-            self.update_pending_messages_display();
-            self.request_render();
+            self.prompt_while_streaming(text, StreamingBehavior::Steer);
             return;
         }
         self.flush_pending_bash_components();

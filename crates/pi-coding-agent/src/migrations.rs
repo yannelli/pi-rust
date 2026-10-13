@@ -134,11 +134,13 @@ fn migrate_commands_to_prompts(base: &Path, label: &str) -> bool {
     }
     match std::fs::rename(&commands, &prompts) {
         Ok(()) => {
-            println!("\x1b[32mMigrated {label} commands/ → prompts/\x1b[39m");
+            crate::diagnostics::say_stdout(&format!("\x1b[32mMigrated {label} commands/ → prompts/\x1b[39m"));
             true
         }
         Err(error) => {
-            println!("\x1b[33mWarning: Could not migrate {label} commands/ to prompts/: {error}\x1b[39m");
+            crate::diagnostics::say_stdout(&format!(
+                "\x1b[33mWarning: Could not migrate {label} commands/ to prompts/: {error}\x1b[39m"
+            ));
             false
         }
     }
@@ -164,7 +166,7 @@ fn migrate_tools_to_bin(agent_dir: &Path) {
         }
     }
     if moved_any {
-        println!("\x1b[32mMigrated managed binaries tools/ → bin/\x1b[39m");
+        crate::diagnostics::say_stdout("\x1b[32mMigrated managed binaries tools/ → bin/\x1b[39m");
     }
 }
 

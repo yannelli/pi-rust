@@ -13,4 +13,7 @@ pub mod version_check;
 pub(crate) mod test_http;
 
 pub use http::{FetchError, FetchRetryOptions, VERSION, fetch_with_retry, pi_user_agent};
-pub use system::{PlatformEnv, app_key_defaults, is_termux, is_wsl, termux_package_for_tool, use_windows_keybindings};
+pub use system::{
+    PlatformEnv, app_key_defaults, is_termux, is_wsl, termux_package_for_tool, termux_tool_warnings,
+    use_windows_keybindings,
+};
