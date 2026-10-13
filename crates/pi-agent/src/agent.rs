@@ -6,10 +6,11 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use pi_ai::transcript::{create_initial_system_message, current_system_message, current_system_prompt};
 use pi_ai::{ContentBlock, Message, Model, StreamOptions, ThinkingLevel, UserContent, UserMessage, now_ms};
 use serde::{Deserialize, Serialize};
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::agent_loop::{
@@ -108,6 +109,8 @@ pub struct AgentHooks {
 }
 
 pub type Listener = Arc<dyn Fn(&AgentEvent) + Send + Sync>;
+/// A listener the run awaits, with the run's abort signal (upstream async `subscribe`).
+pub type AsyncListener = Arc<dyn Fn(AgentEvent, CancellationToken) -> BoxFuture<'static, ()> + Send + Sync>;
 
 struct Inner {
     state: Mutex<AgentState>,
@@ -115,10 +118,13 @@ struct Inner {
     steering: Mutex<MessageQueue>,
     follow_up: Mutex<MessageQueue>,
     listeners: Mutex<Vec<(u64, Listener)>>,
+    async_listeners: Mutex<Vec<(u64, AsyncListener)>>,
     next_listener: AtomicU64,
     run: Mutex<Option<CancellationToken>>,
     running: watch::Sender<bool>,
 }
+
+type RunEventSender = mpsc::UnboundedSender<Option<AgentEvent>>;
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -150,6 +156,7 @@ impl Agent {
                 steering: Mutex::new(MessageQueue::default()),
                 follow_up: Mutex::new(MessageQueue::default()),
                 listeners: Mutex::new(Vec::new()),
+                async_listeners: Mutex::new(Vec::new()),
                 next_listener: AtomicU64::new(0),
                 run: Mutex::new(None),
                 running: watch::channel(false).0,
@@ -230,8 +237,23 @@ impl Agent {
         id
     }
 
+    /// Register a listener the run awaits. Events reach it in order, one at a time, after the
+    /// sync listeners; the run and [`Self::wait_for_idle`] settle once it has handled
+    /// `agent_end`. It gets the run's abort signal. Returns an id for `unsubscribe`.
+    pub fn subscribe_async<F, Fut>(&self, listener: F) -> u64
+    where
+        F: Fn(AgentEvent, CancellationToken) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let id = self.inner.next_listener.fetch_add(1, Ordering::SeqCst);
+        let listener: AsyncListener = Arc::new(move |event, signal| listener(event, signal).boxed());
+        lock(&self.inner.async_listeners).push((id, listener));
+        id
+    }
+
     pub fn unsubscribe(&self, id: u64) {
         lock(&self.inner.listeners).retain(|(listener_id, _)| *listener_id != id);
+        lock(&self.inner.async_listeners).retain(|(listener_id, _)| *listener_id != id);
     }
 
     /// Queue a message delivered after the current turn's tool calls.
@@ -298,6 +320,7 @@ impl Agent {
         }
     }
 
+    /// Wait until the run and the async listeners' handling of its events have finished.
     pub async fn wait_for_idle(&self) {
         let mut receiver = self.inner.running.subscribe();
         let _ = receiver.wait_for(|running| !running).await;
@@ -322,7 +345,12 @@ impl Agent {
     async fn run_prompt(&self, messages: Vec<Message>, skip_initial_steering_poll: bool) -> anyhow::Result<()> {
         let cancel = self.begin_run()?;
         let (mut context, config) = self.snapshot(skip_initial_steering_poll);
-        run_agent_loop(messages, &mut context, &config, self.sink(), cancel).await;
+        let (sink, deliver, close) = self.sink(cancel.clone());
+        let run = async {
+            run_agent_loop(messages, &mut context, &config, sink, cancel).await;
+            let _ = close.send(None);
+        };
+        tokio::join!(run, deliver);
         self.finish_run();
         Ok(())
     }
@@ -350,7 +378,13 @@ impl Agent {
         }
         let cancel = self.begin_run()?;
         let (mut context, config) = self.snapshot(false);
-        let result = run_agent_loop_continue(&mut context, &config, self.sink(), cancel).await;
+        let (sink, deliver, close) = self.sink(cancel.clone());
+        let run = async {
+            let result = run_agent_loop_continue(&mut context, &config, sink, cancel).await;
+            let _ = close.send(None);
+            result
+        };
+        let (result, ()) = tokio::join!(run, deliver);
         self.finish_run();
         result.map(|_| ())
     }
@@ -424,9 +458,23 @@ impl Agent {
         (context, config)
     }
 
-    fn sink(&self) -> EventSink {
+    /// The run's event sink, the future that hands its events to the async listeners, and the
+    /// sender that ends that future (`None`) after the events queued before it.
+    fn sink(&self, signal: CancellationToken) -> (EventSink, BoxFuture<'static, ()>, RunEventSender) {
+        let (sender, mut receiver) = mpsc::unbounded_channel::<Option<AgentEvent>>();
+        let close = sender.clone();
+        let listeners = self.inner.clone();
+        let deliver = async move {
+            while let Some(Some(event)) = receiver.recv().await {
+                let current: Vec<AsyncListener> =
+                    lock(&listeners.async_listeners).iter().map(|(_, listener)| listener.clone()).collect();
+                for listener in current {
+                    listener(event.clone(), signal.clone()).await;
+                }
+            }
+        };
         let inner = self.inner.clone();
-        Arc::new(move |event| {
+        let sink: EventSink = Arc::new(move |event| {
             {
                 let mut state = lock(&inner.state);
                 match &event {
@@ -457,6 +505,10 @@ impl Agent {
             for listener in listeners {
                 listener(&event);
             }
-        })
+            if !lock(&inner.async_listeners).is_empty() {
+                let _ = sender.send(Some(event));
+            }
+        });
+        (sink, deliver.boxed(), close)
     }
 }
