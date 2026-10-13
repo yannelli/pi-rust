@@ -103,8 +103,9 @@ impl AgentTool for CodemodeTool {
         Ok(AgentToolResult {
             content: output.content,
             details: Some(serde_json::to_value(&output.details)?),
+            usage: output.usage,
             is_error: output.is_error,
-            terminate: false,
+            ..AgentToolResult::default()
         })
     }
 
