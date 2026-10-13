@@ -404,12 +404,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cancel = CancellationToken::new();
         let trigger = cancel.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            trigger.cancel();
-        });
+        // Cancel once the first output arrives: shell startup time varies, notably on Windows.
+        let mut on_data = move |chunk: &str| {
+            if chunk.contains("start") {
+                trigger.cancel();
+            }
+        };
         let result =
-            execute_bash_command("echo start; sleep 30", dir.path(), None, &cancel, &mut |_: &str| {}).await.unwrap();
+            execute_bash_command("echo start; sleep 30", dir.path(), None, &cancel, &mut on_data).await.unwrap();
         assert!(result.cancelled);
         assert_eq!(result.exit_code, None);
         assert_eq!(result.output, "start\n");
