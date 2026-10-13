@@ -6,7 +6,6 @@ pub mod branch;
 pub mod cut_point;
 pub mod prepare;
 pub mod recovery;
-pub mod retry;
 pub mod summarize;
 pub mod utils;
 
@@ -26,12 +25,11 @@ pub use self::cut_point::{CutPointResult, find_cut_point, find_projected_cut_poi
 pub use self::prepare::{CompactionDetails, CompactionPreparation, prepare_compaction, prepare_compaction_entries};
 pub use self::recovery::{
     CompactionCheck, CompactionCheckInput, check_compaction, exceeds_compaction_threshold, find_message_entry_id,
-    is_recoverable_length, is_window_overflow, omit_recovery_attempt,
+    omit_recovery_attempt,
 };
-pub use self::retry::{RetryCallbacks, RetryPolicy, is_retryable_assistant_error, retry_assistant_call};
 pub use self::summarize::{
-    CompactionResult, SummarizationOptions, compact, compact_session, complete_summarization, generate_summary,
-    generate_summary_with_usage, summarization_failure, summarize_compaction,
+    CompactionResult, RetryEventFn, SummarizationOptions, compact, compact_session, complete_summarization,
+    generate_summary, generate_summary_with_usage, summarization_failure, summarize_compaction,
 };
 pub use self::utils::{
     FileOperations, SUMMARIZATION_SYSTEM_PROMPT, compute_file_lists, extract_file_ops_from_message,

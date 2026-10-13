@@ -1,8 +1,10 @@
-//! Plain-terminal rendering of agent events for interactive mode.
+//! Plain-terminal rendering of session events for interactive mode.
 
 use std::io::{IsTerminal, Write};
 
 use pi_agent::{AgentEvent, AgentToolResult};
+
+use crate::agent_session::AgentSessionEvent;
 use pi_ai::{AssistantMessageEvent, ContentBlock, Message, StopReason};
 use serde_json::Value;
 
@@ -72,7 +74,33 @@ impl Renderer {
         self.write(&format!("{text}\n"));
     }
 
-    pub fn render(&mut self, event: &AgentEvent) {
+    /// Render one session event: agent output, retries, and compaction.
+    pub fn render(&mut self, event: &AgentSessionEvent<'_>) {
+        match event {
+            AgentSessionEvent::Agent(event) => self.render_agent(event),
+            AgentSessionEvent::AutoRetryStart { attempt, max_attempts, delay_ms, error_message } => {
+                let seconds = *delay_ms as f64 / 1000.0;
+                let text = format!("Retrying ({attempt}/{max_attempts}) in {seconds:.1}s: {error_message}");
+                let text = self.style.yellow(&text);
+                self.line(&text);
+            }
+            AgentSessionEvent::CompactionStart { reason } => {
+                let text = self.style.dim(&format!("Compacting context ({})...", reason.as_str()));
+                self.line(&text);
+            }
+            AgentSessionEvent::CompactionEnd { result: Some(result), .. } => {
+                let text = self.style.dim(&format!("Compacted {} tokens of history.", result.tokens_before));
+                self.line(&text);
+            }
+            AgentSessionEvent::CompactionEnd { error_message: Some(error), .. } => {
+                let text = self.style.red(error);
+                self.line(&text);
+            }
+            _ => {}
+        }
+    }
+
+    pub fn render_agent(&mut self, event: &AgentEvent) {
         match event {
             AgentEvent::MessageUpdate { assistant_message_event, .. } => match assistant_message_event {
                 AssistantMessageEvent::TextStart { .. } if self.in_thinking => {
@@ -110,14 +138,16 @@ impl Renderer {
                     _ => {}
                 }
             }
-            AgentEvent::ToolExecutionStart { tool_name, args, .. } => {
+            AgentEvent::ToolExecutionStart { tool_name, args, parent_tool_call_id, .. } => {
+                let indent = if parent_tool_call_id.is_some() { "  " } else { "" };
                 let text = format!(
-                    "{} {}",
+                    "{indent}{} {}",
                     self.style.cyan(&format!("→ {tool_name}")),
                     self.style.dim(&summarize_args(tool_name, args))
                 );
                 self.line(&text);
             }
+            AgentEvent::ToolExecutionEnd { parent_tool_call_id: Some(_), .. } => {}
             AgentEvent::ToolExecutionEnd { result, is_error, .. } => {
                 let preview = tool_preview(result);
                 if !preview.is_empty() {

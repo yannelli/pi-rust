@@ -30,7 +30,7 @@ pub use images::{
     AssistantImages, ImagesApi, ImagesContext, ImagesOptions, generate_images, images_api, register_images_api,
 };
 pub use models::ModelRegistry;
-pub use overflow::is_context_overflow;
+pub use overflow::{is_context_overflow, is_recoverable_length};
 pub use registry::{
     ApiProvider, CacheRetention, DeferredOptions, ProviderResponse, StreamOptions, ThinkingBudgets, Transport,
     api_provider, cancel_deferred, complete, fetch_deferred, http_client, register_api_provider, stream,

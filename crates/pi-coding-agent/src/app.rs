@@ -1,51 +1,39 @@
-//! A coding session: the agent with its tools and prompt, settings, credentials, model
-//! selection, auto retry, session persistence, and automatic compaction.
+//! CLI wiring of the session runtime (upstream `main.ts` runtime factory): project trust,
+//! services, the CLI model choice, and `--api-key` for every session the runtime creates.
 
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 
-use pi_agent::{Agent, AgentEvent, AgentHooks, StreamFn};
-use pi_ai::auth::{
-    AuthResolver, Credential, CredentialStore, FileCredentialStore, OAuthLookup, RuntimeCredentialStore,
-};
-use pi_ai::models::clamp_thinking_level;
-use pi_ai::{ContentBlock, Model, ModelRegistry, ThinkingLevel};
-use tokio_util::sync::CancellationToken;
+use futures::FutureExt;
+use pi_agent::{SharedTool, StreamFn};
+use pi_ai::ThinkingLevel;
+use pi_ai::auth::{CredentialStore, OAuthLookup};
 
-use crate::compaction::{
-    self, CompactionResult, CompactionSettings, context_tokens, prepare_compaction, should_compact,
+use crate::agent_session::{
+    AgentSessionRuntime, CreateAgentSessionOptions, CreateServicesOptions, NoTools, ResourceOptions, RuntimeDiagnostic,
+    RuntimeFactory, RuntimeParts, RuntimeTarget, create_agent_session, create_agent_session_services, lock,
 };
-use crate::config::{ContextFile, auth_path, load_context_files, models_path};
-use crate::model_resolver::ScopedModel;
-use crate::session::{SessionManager, session_dir};
+use crate::cli::Args;
+use crate::config::home_dir;
+use crate::resources::paths::{is_local_path, resolve_path};
+use crate::resources::trust::{
+    DefaultProjectTrust, ProjectTrustRequest, ProjectTrustResolution, ProjectTrustStore, resolve_project_trust,
+};
+use crate::session::SessionManager;
 use crate::settings::{SettingsManager, SettingsOptions};
-use crate::system_prompt::{SystemPromptOptions, build_system_prompt};
-use crate::tools;
 
-#[path = "app_auth.rs"]
-mod auth;
-#[path = "app_events.rs"]
-mod events;
-#[path = "app_retry.rs"]
-mod retry;
 #[path = "app_setup.rs"]
 mod setup;
 
-pub use events::SessionEvent;
-pub use retry::{is_retryable_assistant_error, retry_delay_ms};
 pub use setup::{
-    StartupError, configured_providers, format_no_api_key_found_message, format_no_models_available_message,
-    provider_login_help, resolve_prompt_input,
+    configured_providers, format_no_api_key_found_message, format_no_models_available_message, oauth_failed_message,
+    provider_login_help,
 };
 
-/// Receives session events; see [`CodingSession::subscribe`].
-pub type SessionListener = Arc<dyn Fn(&SessionEvent<'_>) + Send + Sync>;
-
+/// What the command line asks of every session the runtime creates.
 #[derive(Clone, Default)]
-pub struct SessionOptions {
-    pub cwd: PathBuf,
+pub struct AppOptions {
     pub agent_dir: PathBuf,
     /// `--provider`; needs `model`.
     pub provider: Option<String>,
@@ -56,383 +44,177 @@ pub struct SessionOptions {
     pub thinking: Option<ThinkingLevel>,
     /// `--models` patterns; `None` uses the `enabledModels` setting.
     pub models: Option<Vec<String>>,
-    /// `--system-prompt`: text, or a file whose contents replace the default prompt.
-    pub system_prompt: Option<String>,
-    /// `--append-system-prompt` texts or files, joined with blank lines.
-    pub append_system_prompt: Vec<String>,
-    /// `--tools`; `None` uses the `defaultTools` setting.
     pub tools: Option<Vec<String>>,
     pub exclude_tools: Vec<String>,
-    pub no_tools: bool,
-    pub no_builtin_tools: bool,
-    pub no_context_files: bool,
-    /// Session file to open.
-    pub session_file: Option<PathBuf>,
-    pub continue_recent: bool,
-    pub persist: bool,
-    pub session_dir: Option<PathBuf>,
-    /// Settings to use in place of `<agent dir>/settings.json` and `<cwd>/.pi/settings.json`.
+    pub no_tools: Option<NoTools>,
+    pub resources: ResourceOptions,
+    /// `--approve` (`Some(true)`) or `--no-approve` (`Some(false)`).
+    pub project_trust_override: Option<bool>,
+    /// Settings for every runtime in place of the settings files.
     pub settings: Option<Arc<SettingsManager>>,
-    /// Credential store to use in place of `<agent dir>/auth.json`.
+    /// Credential store in place of `auth.json`.
     pub credentials: Option<Arc<dyn CredentialStore>>,
-    /// OAuth providers by id; `None` means no OAuth refresh.
+    /// OAuth providers by id; `None` uses the built-in ones.
     pub oauth: Option<OAuthLookup>,
-    /// Model request function in place of `pi_ai::stream`; auth and settings still apply.
+    /// Model request function in place of `pi_ai::stream`.
     pub stream_fn: Option<StreamFn>,
+    pub custom_tools: Vec<SharedTool>,
 }
 
-pub struct CodingSession {
-    pub agent: Agent,
-    session: Arc<Mutex<SessionManager>>,
-    registry: ModelRegistry,
-    settings: Arc<SettingsManager>,
-    resolver: Arc<AuthResolver>,
-    shared: Arc<retry::Shared>,
-    pub compaction: CompactionSettings,
-    cwd: PathBuf,
-    sessions_dir: Option<PathBuf>,
-    pub context_files: Vec<ContextFile>,
-    pub tool_names: Vec<String>,
-    scoped_models: Vec<ScopedModel>,
-    /// Why the restored or saved model was not used (upstream `modelFallbackMessage`).
-    pub model_fallback_message: Option<String>,
-    /// Startup warnings from model resolution and `--models` patterns.
-    pub warnings: Vec<String>,
+fn resolve_cli_paths(cwd: &Path, paths: &[String]) -> Vec<String> {
+    paths
+        .iter()
+        .map(|value| if is_local_path(value) { resolve_path(value, cwd).display().to_string() } else { value.clone() })
+        .collect()
 }
 
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+/// A `--system-prompt` value: an existing file relative to `cwd` becomes its path.
+fn resolve_prompt_arg(input: &str, cwd: &Path) -> String {
+    let path = cwd.join(input);
+    if !input.is_empty() && path.exists() { path.display().to_string() } else { input.to_string() }
 }
 
-impl CodingSession {
-    pub async fn new(options: SessionOptions) -> anyhow::Result<Self> {
-        let settings = options.settings.clone().unwrap_or_else(|| {
-            Arc::new(SettingsManager::create(&options.cwd, &options.agent_dir, SettingsOptions::default()))
-        });
-        let mut registry = ModelRegistry::load(&models_path(&options.agent_dir))?;
-        let store: Arc<dyn CredentialStore> = match &options.credentials {
-            Some(store) => store.clone(),
-            None => Arc::new(FileCredentialStore::new(auth_path(&options.agent_dir))),
+impl AppOptions {
+    /// Options from parsed arguments; local paths resolve against `cwd`.
+    pub fn from_args(args: &Args, cwd: &Path, agent_dir: &Path) -> Self {
+        let no_tools = match (args.no_tools, args.no_builtin_tools) {
+            (true, _) => Some(NoTools::All),
+            (false, true) => Some(NoTools::Builtin),
+            (false, false) => None,
         };
-        let runtime = Arc::new(RuntimeCredentialStore::new(store));
-        let oauth = options.oauth.clone().unwrap_or_else(|| Arc::new(|_: &str| None));
-        let resolver = Arc::new(AuthResolver::new(runtime.clone(), oauth));
-        resolver.set_provider_configs(registry.auth_configs());
-        let mut configured = setup::configured_providers(&resolver, &registry).await;
-        registry.set_configured_providers(configured.clone());
-
-        let sessions_dir = options
-            .persist
-            .then(|| options.session_dir.clone().unwrap_or_else(|| session_dir(&options.agent_dir, &options.cwd)));
-        let session = match (&options.session_file, options.continue_recent, &sessions_dir) {
-            (Some(path), _, _) => SessionManager::open(path)?,
-            (None, true, Some(dir)) => match SessionManager::most_recent(dir) {
-                Some(path) => SessionManager::open(&path)?,
-                None => SessionManager::create(&options.cwd, Some(dir)),
-            },
-            (None, _, dir) => SessionManager::create(&options.cwd, dir.as_deref()),
+        let append = &args.append_system_prompt;
+        let resources = ResourceOptions {
+            skill_paths: resolve_cli_paths(cwd, &args.skills),
+            prompt_template_paths: resolve_cli_paths(cwd, &args.prompt_templates),
+            theme_paths: resolve_cli_paths(cwd, &args.themes),
+            extension_sources: resolve_cli_paths(cwd, &args.extensions),
+            no_extensions: args.no_extensions,
+            no_skills: args.no_skills,
+            no_prompt_templates: args.no_prompt_templates,
+            no_themes: args.no_themes,
+            no_context_files: args.no_context_files,
+            system_prompt: args.system_prompt.as_deref().map(|input| resolve_prompt_arg(input, cwd)),
+            append_system_prompt: (!append.is_empty())
+                .then(|| append.iter().map(|input| resolve_prompt_arg(input, cwd)).collect()),
         };
-        let restored = session.context();
-        let has_existing_session = !restored.messages.is_empty();
-        let inputs = setup::CliInputs {
-            provider: options.provider.as_deref(),
-            model: options.model.as_deref(),
-            thinking: options.thinking,
-            models: options.models.as_deref(),
-            has_existing_session,
+        Self {
+            agent_dir: agent_dir.to_path_buf(),
+            provider: args.provider.clone(),
+            model: args.model.clone(),
+            api_key: args.api_key.clone(),
+            thinking: args.thinking,
+            models: args.models.clone(),
+            tools: args.tools.clone(),
+            exclude_tools: args.exclude_tools.clone(),
+            no_tools,
+            resources,
+            project_trust_override: args.project_trust_override,
+            ..Self::default()
+        }
+    }
+}
+
+/// Trust decisions per cwd, made once per process (upstream `projectTrustByCwd`).
+struct TrustCache {
+    store: ProjectTrustStore,
+    decided: Mutex<HashMap<PathBuf, bool>>,
+}
+
+impl TrustCache {
+    fn project_trusted(&self, options: &AppOptions, cwd: &Path, agent_dir: &Path) -> (bool, Option<RuntimeDiagnostic>) {
+        if let Some(settings) = &options.settings {
+            return (settings.is_project_trusted(), None);
+        }
+        if let Some(trusted) = lock(&self.decided).get(cwd) {
+            return (*trusted, None);
+        }
+        let global = SettingsManager::create(cwd, agent_dir, SettingsOptions { project_trusted: false });
+        let home = home_dir();
+        let request = ProjectTrustRequest {
+            cwd,
+            home: &home,
+            trust_override: options.project_trust_override,
+            default_project_trust: DefaultProjectTrust::parse(global.default_project_trust()),
+            extension_decision: None,
+            has_ui: false,
         };
-        let cli = setup::choose_cli_model(&inputs, &settings, &registry);
-        let mut errors = cli.errors.clone();
-        if let Some(key) = &options.api_key {
-            match &cli.model {
-                Some(model) => {
-                    runtime.set_runtime_api_key(&model.provider, key.clone());
-                    configured.insert(model.provider.clone());
-                    registry.set_configured_providers(configured);
-                }
-                None => errors.push(
-                    "--api-key requires a model to be specified via --model, --provider/--model, or --models".into(),
-                ),
-            }
-        }
-        if !errors.is_empty() {
-            return Err(StartupError { errors, warnings: cli.warnings }.into());
-        }
-        let restored_selection = setup::RestoredSelection {
-            has_existing_session,
-            model: restored.model.as_ref(),
-            thinking: restored.thinking_level,
+        let (trusted, diagnostic) = match resolve_project_trust(&self.store, &request) {
+            Ok(ProjectTrustResolution::Decided(trusted)) => (trusted, None),
+            Ok(ProjectTrustResolution::Prompt(_)) => (false, None),
+            Err(error) => (false, Some(RuntimeDiagnostic::warning(format!("Could not read project trust: {error:#}")))),
         };
-        let choice = setup::choose_session_model(&cli, &restored_selection, &settings, &registry);
-        let Some(model) = choice.model else {
-            return Err(
-                StartupError { errors: vec![format_no_models_available_message()], warnings: cli.warnings }.into()
-            );
-        };
-        let thinking = choice.thinking;
-
-        let no_tools = options.no_tools || options.no_builtin_tools;
-        let tool_names = setup::choose_tools(&settings, options.tools.as_deref(), &options.exclude_tools, no_tools);
-        let agent_tools = setup::build_tools(&tool_names, &options.cwd, &settings)?;
-        let context_files =
-            if options.no_context_files { Vec::new() } else { load_context_files(&options.cwd, &options.agent_dir) };
-        let custom_prompt =
-            options.system_prompt.as_deref().and_then(|input| resolve_prompt_input(input, &options.cwd));
-        let appended: Vec<String> =
-            options.append_system_prompt.iter().filter_map(|input| resolve_prompt_input(input, &options.cwd)).collect();
-        let append_prompt = (!appended.is_empty()).then(|| appended.join("\n\n"));
-        let system_prompt = build_system_prompt(&SystemPromptOptions {
-            custom_prompt: custom_prompt.as_deref(),
-            append_prompt: append_prompt.as_deref(),
-            selected_tools: &tool_names,
-            context_files: &context_files,
-            cwd: &options.cwd,
-        });
-
-        let agent = Agent::new(model.clone());
-        agent.update_state(|state| {
-            state.system_prompt = Some(system_prompt);
-            state.thinking_level = thinking;
-            state.tools = agent_tools;
-            state.messages = restored.messages.clone();
-        });
-        agent.set_queue_modes(settings.steering_mode(), settings.follow_up_mode());
-        agent.set_hooks(AgentHooks {
-            stream_fn: Some(auth::auth_stream_fn(resolver.clone(), settings.clone(), options.stream_fn.clone())),
-            convert_to_llm: Some(setup::block_images_hook(settings.clone())),
-            session_id: Some(session.id().to_string()),
-            ..AgentHooks::default()
-        });
-
-        let shared = Arc::new(retry::Shared::new(settings.clone(), model.context_window));
-        let events = shared.clone();
-        agent.subscribe(move |event| events.on_agent_event(event));
-        let session = Arc::new(Mutex::new(session));
-        let recorder = session.clone();
-        agent.subscribe(move |event| {
-            if let AgentEvent::MessageEnd { message } = event
-                && let Err(error) = lock(&recorder).append_message(message)
-            {
-                eprintln!("Warning: could not save session: {error:#}");
-            }
-        });
-        let coding = Self {
-            agent,
-            session,
-            registry,
-            compaction: setup::compaction_settings(&settings, &model),
-            settings,
-            resolver,
-            shared,
-            cwd: options.cwd,
-            sessions_dir,
-            context_files,
-            tool_names,
-            scoped_models: cli.scoped,
-            model_fallback_message: choice.fallback_message,
-            warnings: cli.warnings,
-        };
-        {
-            let mut manager = lock(&coding.session);
-            if restored.model.as_ref() != Some(&(model.provider.clone(), model.id.clone())) {
-                manager.append_model_change(&model.provider, &model.id)?;
-            }
-            if restored.thinking_level != Some(thinking) {
-                manager.append_thinking_level_change(thinking)?;
-            }
-        }
-        coding.refresh_environment();
-        Ok(coding)
+        lock(&self.decided).insert(cwd.to_path_buf(), trusted);
+        (trusted, diagnostic)
     }
+}
 
-    /// Publish the session, model, and reasoning level to bash commands as `PI_*` variables.
-    fn refresh_environment(&self) {
-        let state = self.agent.state();
-        let mut variables = BTreeMap::new();
-        variables.insert("PI_SESSION_ID".to_string(), self.session_id());
-        if let Some(file) = self.session_file() {
-            variables.insert("PI_SESSION_FILE".to_string(), file.display().to_string());
-        }
-        variables.insert("PI_PROVIDER".to_string(), state.model.provider.clone());
-        variables.insert("PI_MODEL".to_string(), state.model.id.clone());
-        variables.insert("PI_REASONING_LEVEL".to_string(), state.thinking_level.as_str().to_string());
-        tools::set_session_environment(variables);
-    }
-
-    pub fn registry(&self) -> &ModelRegistry {
-        &self.registry
-    }
-
-    pub fn settings(&self) -> &Arc<SettingsManager> {
-        &self.settings
-    }
-
-    pub fn auth_resolver(&self) -> &Arc<AuthResolver> {
-        &self.resolver
-    }
-
-    /// Models for cycling, from `--models` or `enabledModels`.
-    pub fn scoped_models(&self) -> &[ScopedModel] {
-        &self.scoped_models
-    }
-
-    pub fn cwd(&self) -> &Path {
-        &self.cwd
-    }
-
-    pub fn model(&self) -> Model {
-        self.agent.state().model
-    }
-
-    pub fn session_file(&self) -> Option<PathBuf> {
-        lock(&self.session).file().map(Path::to_path_buf)
-    }
-
-    pub fn session_id(&self) -> String {
-        lock(&self.session).id().to_string()
-    }
-
-    pub fn sessions_dir(&self) -> Option<&Path> {
-        self.sessions_dir.as_deref()
-    }
-
-    /// The API key a request to `provider` would use now, refreshing OAuth tokens if needed.
-    pub async fn api_key_for(&self, provider: &str) -> Option<String> {
-        let resolved = self.resolver.resolve(provider, &Default::default()).await.ok().flatten();
-        resolved.and_then(|resolved| resolved.auth.api_key)
-    }
-
-    /// Receive session events until [`Self::unsubscribe`].
-    pub fn subscribe(&self, listener: impl Fn(&SessionEvent<'_>) + Send + Sync + 'static) -> u64 {
-        let id = self.shared.next_listener.fetch_add(1, Ordering::Relaxed);
-        lock(&self.shared.listeners).push((id, Arc::new(listener)));
-        id
-    }
-
-    pub fn unsubscribe(&self, id: u64) {
-        lock(&self.shared.listeners).retain(|(listener, _)| *listener != id);
-    }
-
-    /// Switch models. The thinking level becomes the model's `modelThinkingLevels` entry, the
-    /// `defaultThinkingLevel` setting, or the current level, clamped to what the model supports.
-    pub fn set_model(&self, model: Model) -> anyhow::Result<()> {
-        if !self.registry.has_api_key(&model.provider) {
-            anyhow::bail!("No API key for {}/{}", model.provider, model.id);
-        }
-        let current = self.agent.state().thinking_level;
-        let level = self
-            .settings
-            .model_thinking_level(&model.provider, &model.id)
-            .or(self.settings.default_thinking_level())
-            .unwrap_or(current);
-        lock(&self.session).append_model_change(&model.provider, &model.id)?;
-        self.shared.context_window.store(model.context_window, Ordering::Relaxed);
-        self.agent.update_state(|state| state.model = model);
-        self.set_thinking_level(level)
-    }
-
-    /// Set the thinking level, clamped to the current model; recorded when it changes.
-    pub fn set_thinking_level(&self, level: ThinkingLevel) -> anyhow::Result<()> {
-        let level = clamp_thinking_level(&self.model(), level);
-        let previous = self.agent.state().thinking_level;
-        self.agent.update_state(|state| state.thinking_level = level);
-        if level != previous {
-            lock(&self.session).append_thinking_level_change(level)?;
-        }
-        self.refresh_environment();
-        Ok(())
-    }
-
-    /// Start a fresh session with the same model, tools, and prompt.
-    pub fn new_session(&self) -> anyhow::Result<()> {
-        let model = self.model();
-        let thinking = self.agent.state().thinking_level;
-        let mut session = SessionManager::create(&self.cwd, self.sessions_dir.as_deref());
-        session.append_model_change(&model.provider, &model.id)?;
-        session.append_thinking_level_change(thinking)?;
-        self.agent.update_hooks(|hooks| hooks.session_id = Some(session.id().to_string()));
-        *lock(&self.session) = session;
-        self.agent.update_state(|state| state.messages.clear());
-        self.refresh_environment();
-        Ok(())
-    }
-
-    /// Switch to the session stored in `path`.
-    pub fn open_session(&self, path: &Path) -> anyhow::Result<()> {
-        let session = SessionManager::open(path)?;
-        let context = session.context();
-        if let Some(model) = context.model.as_ref().and_then(|(provider, id)| self.registry.find(provider, id)) {
-            let model = model.clone();
-            self.shared.context_window.store(model.context_window, Ordering::Relaxed);
-            self.agent.update_state(|state| state.model = model);
-        }
-        if let Some(level) = context.thinking_level {
-            let level = clamp_thinking_level(&self.model(), level);
-            self.agent.update_state(|state| state.thinking_level = level);
-        }
-        self.agent.update_hooks(|hooks| hooks.session_id = Some(session.id().to_string()));
-        *lock(&self.session) = session;
-        self.agent.update_state(|state| state.messages = context.messages);
-        self.refresh_environment();
-        Ok(())
-    }
-
-    /// Run a prompt. Compacts first when the context is near the window, retries transient
-    /// provider errors per `retry.*`, and compacts once more when the provider reports overflow.
-    pub async fn prompt(&self, text: &str, images: Vec<ContentBlock>) -> anyhow::Result<()> {
-        self.ensure_auth().await?;
-        {
-            let mut retry = lock(&self.shared.retry);
-            retry.abort_requested = false;
-            retry.last_assistant = None;
-        }
-        self.compact_if_needed().await;
-        self.agent.prompt(text, images).await?;
-        self.after_run().await
-    }
-
-    async fn ensure_auth(&self) -> anyhow::Result<()> {
-        let provider = self.model().provider;
-        if self.registry.has_api_key(&provider) || matches!(self.resolver.check(&provider).await, Ok(Some(_))) {
-            return Ok(());
-        }
-        let stored = self.resolver.store().read(&provider).await.ok().flatten();
-        Err(anyhow::anyhow!(match stored {
-            Some(Credential::OAuth(_)) => setup::oauth_failed_message(&provider),
-            _ => format_no_api_key_found_message(&provider),
-        }))
-    }
-
-    async fn compact_if_needed(&self) {
-        let state = self.agent.state();
-        if should_compact(context_tokens(&state.messages), state.model.context_window, &self.compaction)
-            && let Err(error) = self.compact(None).await
-        {
-            eprintln!("Warning: automatic compaction failed: {error:#}");
+async fn create_runtime_parts(
+    options: &AppOptions,
+    trust: &TrustCache,
+    target: RuntimeTarget,
+) -> anyhow::Result<RuntimeParts> {
+    let (project_trusted, trust_diagnostic) = trust.project_trusted(options, &target.cwd, &target.agent_dir);
+    let services = create_agent_session_services(CreateServicesOptions {
+        cwd: target.cwd.clone(),
+        agent_dir: target.agent_dir.clone(),
+        settings: options.settings.clone(),
+        project_trusted: Some(project_trusted),
+        model_runtime: None,
+        credentials: options.credentials.clone(),
+        oauth: options.oauth.clone(),
+        resources: options.resources.clone(),
+    })
+    .await;
+    let mut diagnostics: Vec<RuntimeDiagnostic> = trust_diagnostic.into_iter().collect();
+    diagnostics.extend(services.diagnostics.iter().cloned());
+    let inputs = setup::CliInputs {
+        provider: options.provider.as_deref(),
+        model: options.model.as_deref(),
+        thinking: options.thinking,
+        models: options.models.as_deref(),
+        has_existing_session: !target.session_manager.build_session_context().messages.is_empty(),
+    };
+    let choice = setup::choose_cli_model(&inputs, &services.settings, services.model_runtime.as_ref());
+    diagnostics.extend(choice.warnings.iter().map(RuntimeDiagnostic::warning));
+    diagnostics.extend(choice.errors.iter().map(RuntimeDiagnostic::error));
+    if let Some(key) = &options.api_key {
+        match &choice.model {
+            Some(model) => services.model_runtime.set_runtime_api_key(&model.provider, key),
+            None => diagnostics.push(RuntimeDiagnostic::error(
+                "--api-key requires a model to be specified via --model, --provider/--model, or --models",
+            )),
         }
     }
+    let mut create = CreateAgentSessionOptions::new(services, target.session_manager);
+    create.model = choice.model;
+    create.thinking_level = choice.thinking;
+    create.scoped_models = choice.scoped;
+    create.tools = options.tools.clone();
+    create.exclude_tools = options.exclude_tools.clone();
+    create.no_tools = options.no_tools;
+    create.custom_tools = options.custom_tools.clone();
+    create.stream_fn = options.stream_fn.clone();
+    let created = create_agent_session(create).await?;
+    Ok(RuntimeParts { session: created.session, model_fallback_message: created.model_fallback_message, diagnostics })
+}
 
-    /// Summarize older history now. `instructions` focuses the summary.
-    pub async fn compact(&self, instructions: Option<&str>) -> anyhow::Result<CompactionResult> {
-        let plan = prepare_compaction(&lock(&self.session), &self.compaction)
-            .ok_or_else(|| anyhow::anyhow!("Nothing to compact yet"))?;
-        let request = auth::request_auth(&self.resolver, &self.model()).await.map_err(anyhow::Error::msg)?;
-        let mut model = request.model;
-        model.headers.extend(request.auth.headers);
-        let mut session = lock(&self.session).clone();
-        let result = compaction::compact(
-            &mut session,
-            plan,
-            &model,
-            request.auth.api_key,
-            instructions,
-            &self.compaction,
-            CancellationToken::new(),
-        )
-        .await?;
-        let messages = session.context().messages;
-        *lock(&self.session) = session;
-        self.agent.update_state(|state| state.messages = messages);
-        Ok(result)
-    }
+/// The factory that applies `options` to every session the runtime creates.
+pub fn runtime_factory(options: AppOptions) -> RuntimeFactory {
+    let trust =
+        Arc::new(TrustCache { store: ProjectTrustStore::new(&options.agent_dir), decided: Mutex::new(HashMap::new()) });
+    let options = Arc::new(options);
+    Arc::new(move |target: RuntimeTarget| {
+        let (options, trust) = (options.clone(), trust.clone());
+        async move { create_runtime_parts(&options, &trust, target).await }.boxed()
+    })
+}
+
+/// Create the runtime for `session_manager` with the command-line options.
+pub async fn create_app_runtime(
+    options: AppOptions,
+    session_manager: SessionManager,
+) -> anyhow::Result<AgentSessionRuntime> {
+    let cwd = session_manager.cwd().to_path_buf();
+    let agent_dir = options.agent_dir.clone();
+    AgentSessionRuntime::create(runtime_factory(options), &cwd, &agent_dir, session_manager).await
 }

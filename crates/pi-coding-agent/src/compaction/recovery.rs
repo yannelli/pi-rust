@@ -2,29 +2,13 @@
 //! overflow or early `length` recovery with `context_edit` omissions. Port of upstream
 //! `AgentSession._checkCompaction` and `_omitRecoveryAttempt`; the app runs the compaction.
 
-use pi_ai::{AssistantMessage, Message, Model, StopReason, is_context_overflow};
+use pi_ai::{AssistantMessage, Message, Model, StopReason, is_context_overflow, is_recoverable_length};
 
 use super::{
     CompactionSettings, calculate_context_tokens, estimate_context_tokens, estimate_projected_context_tokens,
     should_compact,
 };
 use crate::session::{EntryData, SessionManager, parse_iso};
-
-/// A `length` stop below the model's own output limit, which a compact-and-retry can fix.
-pub fn is_recoverable_length(message: &AssistantMessage, desired_max_output: u64) -> bool {
-    message.stop_reason == StopReason::Length && desired_max_output > 0 && message.usage.output < desired_max_output
-}
-
-/// [`is_context_overflow`] plus upstream's length-stop case: a provider that truncates oversized
-/// input to fit the window stops with `length`, no output, and input filling the window.
-pub fn is_window_overflow(message: &AssistantMessage, context_window: u64) -> bool {
-    let input = (message.usage.input + message.usage.cache_read) as f64;
-    is_context_overflow(message, Some(context_window).filter(|window| *window > 0))
-        || (context_window > 0
-            && message.stop_reason == StopReason::Length
-            && message.usage.output == 0
-            && input >= context_window as f64 * 0.99)
-}
 
 /// Whether the projected context of the current branch crosses `model`'s threshold. This is
 /// the check before each assistant response, including between turns of one run.
@@ -107,7 +91,7 @@ pub fn check_compaction(session: &SessionManager, input: CompactionCheckInput) -
     let explicit_overflow = assistant.stop_reason == StopReason::Error && is_context_overflow(assistant, None);
     let context_overflow = same_model
         && ((explicit_overflow && retained)
-            || (projected && !edited_after && is_window_overflow(assistant, context_window)));
+            || (projected && !edited_after && is_context_overflow(assistant, Some(context_window))));
     let recoverable_length =
         projected && input.message_model.is_some_and(|model| is_recoverable_length(assistant, model.max_tokens));
     if context_overflow || recoverable_length {

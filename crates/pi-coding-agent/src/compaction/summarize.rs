@@ -2,9 +2,10 @@
 //! calls. Prompts match upstream `compaction.ts`.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
-use futures::future::BoxFuture;
 use pi_agent::StreamFn;
+use pi_ai::retry::{RetryEvent, RetryPolicy, retry_assistant_call};
 use pi_ai::{
     AssistantMessage, CacheRetention, ContentBlock, Context, Message, Model, StopReason, StreamOptions, ThinkingLevel,
     Usage, UserContent, UserMessage,
@@ -13,7 +14,6 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use super::prepare::{CompactionDetails, CompactionPreparation};
-use super::retry::{RetryCallbacks, RetryPolicy, retry_assistant_call};
 use super::utils::{SUMMARIZATION_SYSTEM_PROMPT, blocks_text, compute_file_lists, format_file_operations};
 use super::{CompactionSettings, estimate_tokens, serialize_conversation};
 use crate::messages::convert_to_llm;
@@ -29,6 +29,9 @@ const UPDATE_SUMMARIZATION_PROMPT: &str = "The messages above are NEW conversati
 
 const TURN_PREFIX_SUMMARIZATION_PROMPT: &str = "The messages above are earlier context from an ongoing conversation. Later messages are stored separately and do not need to be reconstructed.\n\nCreate a concise checkpoint of the user's request and the progress shown above. This checkpoint will be placed before the later messages so the conversation can continue with the necessary context.\n\n## Original Request\n[What did the user ask for?]\n\n## Progress So Far\n- [Key decisions and work completed in these messages]\n\n## Context Needed to Continue\n- [Information from these messages needed to understand the later work]\n\nOnly summarize information explicitly present above. Do not infer or recreate later messages.";
 
+/// Receives retry progress of summarization calls.
+pub type RetryEventFn = Arc<dyn Fn(RetryEvent) + Send + Sync>;
+
 /// Request settings shared by every summarization call.
 #[derive(Clone, Default)]
 pub struct SummarizationOptions {
@@ -41,7 +44,8 @@ pub struct SummarizationOptions {
     /// The session's stream function, so requests behave like agent requests.
     pub stream_fn: Option<StreamFn>,
     pub retry: Option<RetryPolicy>,
-    pub callbacks: RetryCallbacks,
+    /// Retry progress, for example the session's `summarization_retry_*` events.
+    pub on_retry: Option<RetryEventFn>,
     /// Routing id; a fresh one is used when absent.
     pub session_id: Option<String>,
 }
@@ -94,22 +98,27 @@ pub async fn complete_summarization(
     mut options: StreamOptions,
     stream_fn: Option<&StreamFn>,
     retry: Option<&RetryPolicy>,
-    callbacks: &RetryCallbacks,
+    on_retry: Option<&RetryEventFn>,
 ) -> AssistantMessage {
     options.cache_retention = Some(CacheRetention::None);
     options.session_id = options.session_id.or_else(|| Some(crate::session::uuid_v7()));
     let cancel = options.cancel.clone();
-    let (model, context, stream_fn) = (model.clone(), context.clone(), stream_fn.cloned());
-    let produce = move || -> BoxFuture<'static, AssistantMessage> {
-        let (model, context, options, stream_fn) = (model.clone(), context.clone(), options.clone(), stream_fn.clone());
-        Box::pin(async move {
+    let produce = || {
+        let (model, context, options, stream_fn) =
+            (model.clone(), context.clone(), options.clone(), stream_fn.cloned());
+        async move {
             match stream_fn {
                 Some(stream_fn) => stream_fn(&model, &context, options).result(&model).await,
                 None => pi_ai::complete(&model, &context, options).await,
             }
-        })
+        }
     };
-    retry_assistant_call(produce, retry, &cancel, callbacks).await
+    let mut on_event = |event: RetryEvent| {
+        if let Some(callback) = on_retry {
+            callback(event);
+        }
+    };
+    retry_assistant_call(produce, retry, &cancel, &mut on_event).await
 }
 
 pub(crate) fn summarization_context(prompt: String) -> Context {
@@ -166,7 +175,7 @@ pub async fn generate_summary_with_usage(
         request,
         options.stream_fn.as_ref(),
         options.retry.as_ref(),
-        &options.callbacks,
+        options.on_retry.as_ref(),
     )
     .await;
     checked_text(&response, "Summarization")
@@ -202,7 +211,7 @@ async fn generate_turn_prefix_summary(
         request,
         options.stream_fn.as_ref(),
         options.retry.as_ref(),
-        &options.callbacks,
+        options.on_retry.as_ref(),
     )
     .await;
     checked_text(&response, "Turn prefix summarization")

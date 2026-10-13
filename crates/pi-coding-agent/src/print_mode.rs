@@ -1,53 +1,79 @@
 //! Non-interactive mode (upstream `modes/print-mode.ts`): run the prompts, then print the
-//! final response (text), or stream every session event as one JSON object per line (json).
+//! final response (text), or the session header and every session event as JSON lines (json).
 
 use std::io::Write;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use pi_ai::{ContentBlock, Message, StopReason};
 
-use crate::app::CodingSession;
+use crate::agent_session::{AgentSession, AgentSessionRuntime, PromptOptions};
 use crate::cli::OutputMode;
+
+fn write_line(line: &str) {
+    let mut stdout = std::io::stdout().lock();
+    let _ = writeln!(stdout, "{line}");
+    let _ = stdout.flush();
+}
+
+/// The session that prints events, with its listener id.
+type Subscribed = Option<(Arc<AgentSession>, u64)>;
+
+/// Subscribe the active session to stdout; the runtime rebinds it after session switches.
+fn bind_json_output(runtime: &AgentSessionRuntime) {
+    let current: Arc<Mutex<Subscribed>> = Arc::new(Mutex::new(None));
+    let bind = move |session: &Arc<AgentSession>| {
+        let mut current = current.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((previous, id)) = current.take() {
+            previous.unsubscribe(id);
+        }
+        let id = session.subscribe(|event| write_line(&event.to_json().to_string()));
+        *current = Some((session.clone(), id));
+    };
+    bind(&runtime.session());
+    runtime.set_rebind_session(Some(Arc::new(bind)));
+}
 
 /// Run `initial_message` with `initial_images`, then each of `messages`. Returns the exit code:
 /// 1 when a prompt fails or, in text mode, when the last response is an error or aborted.
 pub async fn run_print_mode(
-    session: Arc<CodingSession>,
+    runtime: &AgentSessionRuntime,
     mode: OutputMode,
     initial_message: Option<String>,
     initial_images: Vec<ContentBlock>,
     messages: Vec<String>,
 ) -> i32 {
     let json = mode == OutputMode::Json;
-    let subscription = json.then(|| {
-        session.subscribe(|event| {
-            let mut stdout = std::io::stdout().lock();
-            let _ = writeln!(stdout, "{}", event.to_json());
-            let _ = stdout.flush();
-        })
-    });
+    if json {
+        let header = serde_json::Value::Object(runtime.session().session_manager().header_raw().clone());
+        write_line(&header.to_string());
+        bind_json_output(runtime);
+    }
     let result = async {
         if let Some(text) = initial_message {
-            session.prompt(&text, initial_images).await?;
+            let options = PromptOptions { images: initial_images, ..PromptOptions::default() };
+            runtime.session().prompt_with(&text, options).await?;
         }
         for message in &messages {
-            session.prompt(message, Vec::new()).await?;
+            runtime.session().prompt(message, Vec::new()).await?;
         }
         anyhow::Ok(())
     }
     .await;
-    if let Some(id) = subscription {
-        session.unsubscribe(id);
-    }
-    if let Err(error) = result {
-        eprintln!("{error:#}");
-        return 1;
-    }
-    if json {
-        return 0;
-    }
-    let state = session.agent.state();
-    let Some(Message::Assistant(last)) = state.messages.last() else { return 0 };
+    let code = match result {
+        Err(error) => {
+            eprintln!("{error:#}");
+            1
+        }
+        Ok(()) if json => 0,
+        Ok(()) => print_final_response(&runtime.session()),
+    };
+    runtime.set_rebind_session(None);
+    runtime.dispose().await;
+    code
+}
+
+fn print_final_response(session: &AgentSession) -> i32 {
+    let Some(Message::Assistant(last)) = session.messages().pop() else { return 0 };
     if matches!(last.stop_reason, StopReason::Error | StopReason::Aborted) {
         let reason = if last.stop_reason == StopReason::Error { "error" } else { "aborted" };
         let message = last.error_message.clone().filter(|message| !message.is_empty());

@@ -178,7 +178,7 @@ pub async fn generate_branch_summary(
         request,
         summarization.stream_fn.as_ref(),
         summarization.retry.as_ref(),
-        &summarization.callbacks,
+        summarization.on_retry.as_ref(),
     )
     .await;
     if response.stop_reason == StopReason::Aborted {

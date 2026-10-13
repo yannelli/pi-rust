@@ -5,10 +5,10 @@ mod common;
 
 use common::*;
 use pi_ai::providers::faux::FauxProvider;
-use pi_ai::{AssistantMessage, Message, Model, StopReason};
+use pi_ai::{AssistantMessage, Message, Model, StopReason, is_context_overflow, is_recoverable_length};
 use pi_coding_agent::compaction::{
     CompactionCheck, CompactionCheckInput, CompactionSettings, check_compaction, exceeds_compaction_threshold,
-    find_message_entry_id, is_recoverable_length, is_window_overflow, omit_recovery_attempt,
+    find_message_entry_id, omit_recovery_attempt,
 };
 use pi_coding_agent::session::SessionManager;
 
@@ -106,7 +106,7 @@ fn length_stops_filling_the_window_keep_overflow_wording() {
     let session = memory();
     let mut check = Check::new(Model { context_window: 100, max_tokens: 100, ..FauxProvider::model() });
     let full = reply(&check.model, StopReason::Length, None, 100, pi_ai::now_ms());
-    assert!(is_window_overflow(&full, 100) && !is_window_overflow(&full, 200));
+    assert!(is_context_overflow(&full, Some(100)) && !is_context_overflow(&full, Some(200)));
     assert_eq!(check.run(&session, &full), CompactionCheck::Overflow { will_retry: true });
     check.recovery_attempted = true;
     let exhausted = CompactionCheck::RecoveryExhausted { error_message: OVERFLOW_FAILED.into() };
