@@ -43,14 +43,11 @@ fn backward_path() {
 
 #[test]
 fn backward_cjk_mixed() {
-    // Each ideograph is 3 bytes. ICU's dictionary groups "你好" and "世界" (upstream stops at 2 and 0);
-    // without a dictionary, UAX #29 stops at every ideograph.
+    // Each ideograph is 3 bytes; the dictionary groups "你好" and "世界" (upstream 5, 2, 0).
     let text = "你好世界 test";
     assert_eq!(back(text, text.len()), 13);
-    assert_eq!(back(text, 13), 9);
-    assert_eq!(back(text, 9), 6);
-    assert_eq!(back(text, 6), 3);
-    assert_eq!(back(text, 3), 0);
+    assert_eq!(back(text, 13), 6);
+    assert_eq!(back(text, 6), 0);
 }
 
 #[test]
