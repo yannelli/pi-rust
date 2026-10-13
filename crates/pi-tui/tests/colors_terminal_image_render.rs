@@ -312,12 +312,17 @@ fn home_path(parts: &[&str]) -> PathBuf {
     path
 }
 
+/// `~/.pi/agent/shot.png` with native separators, as the fallback shows it.
+fn short_shot() -> String {
+    ["~", ".pi", "agent", "shot.png"].join(std::path::MAIN_SEPARATOR_STR)
+}
+
 #[test]
 fn shortens_home_prefixed_absolute_paths_without_hyperlinks() {
     let _state = setup(None, false, (9, 18));
     let abs = home_path(&[".pi", "agent", "shot.png"]);
     let result = image_fallback("image/png", Some(dims(1280, 720)), Some(&abs.to_string_lossy()));
-    assert_eq!(result, "[Image: ~/.pi/agent/shot.png [image/png] 1280x720]");
+    assert_eq!(result, format!("[Image: {} [image/png] 1280x720]", short_shot()));
 }
 
 #[test]
@@ -328,7 +333,7 @@ fn wraps_shortened_absolute_paths_in_osc_8_file_links_when_hyperlinks_are_enable
     assert!(result.contains("\x1b]8;;file://"), "expected OSC 8 file link");
     assert!(result.contains(&abs.replace('\\', "/")) || result.contains(&abs), "file URL should target the path");
     let visible = Regex::new(r"\x1b\]8;;.*?\x1b\\").unwrap().replace_all(&result, "");
-    assert_eq!(visible, "[Image: ~/.pi/agent/shot.png [image/png] 10x10]");
+    assert_eq!(visible, format!("[Image: {} [image/png] 10x10]", short_shot()));
 }
 
 #[test]

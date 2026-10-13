@@ -131,9 +131,12 @@ fn shows_unavailable_models_footer_and_saves() {
     assert!(screen.contains("→ ✓ a1 [alpha]"));
     assert!(screen.contains("    gone/old [unavailable]"), "{screen}");
     assert!(screen.contains("  Refreshing…"));
-    assert!(screen.contains(
-        "Enter toggle · Ctrl+A all · Ctrl+X clear · Ctrl+P provider · Alt+Up/Alt+Down reorder · Ctrl+S save · 1/3 enabled · 1 unavailable"
-    ));
+    // Alt shows as Option on macOS, as upstream `formatKeyText` does.
+    let alt = if cfg!(target_os = "macos") { "Option" } else { "Alt" };
+    let footer = format!(
+        "Enter toggle · Ctrl+A all · Ctrl+X clear · Ctrl+P provider · {alt}+Up/{alt}+Down reorder · Ctrl+S save · 1/3 enabled · 1 unavailable"
+    );
+    assert!(screen.contains(&footer), "{screen}");
     harness.send(&keys::ctrl('p'));
     assert!(harness.screen().contains("(unsaved)"));
     assert!(harness.screen().contains("2/3 enabled"));

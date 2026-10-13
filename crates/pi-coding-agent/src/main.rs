@@ -1,4 +1,4 @@
-use std::io::{IsTerminal, Read};
+use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -12,7 +12,7 @@ use pi_coding_agent::app::{AppOptions, create_app_runtime, format_no_models_avai
 use pi_coding_agent::auth_cli::run_auth_command;
 use pi_coding_agent::cli::{Args, OutputMode, help_text, normalize_session_name, parse_args, unknown_flags_error};
 use pi_coding_agent::config::{ENV_SESSION_DIR, agent_dir, env_flag, expand_tilde};
-use pi_coding_agent::diagnostics::{print_timings, take_over_stdout, time};
+use pi_coding_agent::diagnostics::{guarded_stdout, print_timings, take_over_stdout, time};
 use pi_coding_agent::export::{ExportTheme, export_from_file};
 use pi_coding_agent::files::process_file_args;
 use pi_coding_agent::interactive::startup_ui::prompt_project_trust;
@@ -132,10 +132,15 @@ fn pick_session(dir: &Path) -> anyhow::Result<Option<PathBuf>> {
         .map(|info| info.path.clone()))
 }
 
+/// A startup message for stdout, or stderr when RPC or JSON mode owns stdout.
+fn say(line: &str) {
+    let _ = writeln!(guarded_stdout(), "{line}");
+}
+
 /// Print `question` and read one trimmed line from the terminal.
 fn ask(question: &str) -> anyhow::Result<String> {
     print!("{question}");
-    std::io::Write::flush(&mut std::io::stdout())?;
+    std::io::stdout().flush()?;
     let mut answer = String::new();
     std::io::stdin().read_line(&mut answer)?;
     Ok(answer.trim().to_string())
@@ -233,14 +238,14 @@ fn create_session_manager(args: &Args, place: &SessionPlace<'_>) -> Result<Sessi
                 SessionManager::open_with(&path, place.dir_override, None).map_err(fail)
             }
             ResolvedSession::Global { path, cwd } => {
-                println!("Session found in different project: {cwd}");
+                say(&format!("Session found in different project: {cwd}"));
                 let answer = if place.interactive {
                     ask("Fork this session into current directory? [y/N] ")
                 } else {
                     Ok(String::new())
                 };
                 if !answer.is_ok_and(|answer| answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes")) {
-                    println!("Aborted.");
+                    say("Aborted.");
                     return Err(Exit(0));
                 }
                 place.fork(&path, None)
