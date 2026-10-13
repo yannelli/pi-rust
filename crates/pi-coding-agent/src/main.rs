@@ -16,6 +16,7 @@ use pi_coding_agent::files::process_file_args;
 use pi_coding_agent::interactive::run_interactive;
 use pi_coding_agent::packages::{PackageCommandOptions, run_config_command, run_package_command};
 use pi_coding_agent::print_mode::run_print_mode;
+use pi_coding_agent::rpc::{RpcModeOptions, run_rpc_mode, take_over_stdout};
 use pi_coding_agent::session::branching::missing_session_cwd;
 use pi_coding_agent::session::ids::assert_valid_session_id;
 use pi_coding_agent::session::{
@@ -358,15 +359,18 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
     }
     let mut mode = app_mode(&args, std::io::stdin().is_terminal(), std::io::stdout().is_terminal());
     if mode == AppMode::Rpc {
-        eprintln!("Error: RPC mode is not supported yet");
-        return Ok(1);
+        take_over_stdout()?;
+        if !args.file_args.is_empty() {
+            eprintln!("Error: @file arguments are not supported in RPC mode");
+            return Ok(1);
+        }
     }
     validate_session_flags(&args)?;
     let startup_diagnostics: Vec<RuntimeDiagnostic> =
         startup_settings.drain_errors().iter().map(|error| RuntimeDiagnostic::warning(error.diagnostic())).collect();
 
     let mut stdin_content = None;
-    if !std::io::stdin().is_terminal() {
+    if mode != AppMode::Rpc && !std::io::stdin().is_terminal() {
         let mut piped = String::new();
         std::io::stdin().read_to_string(&mut piped)?;
         stdin_content = Some(piped.trim().to_string()).filter(|text| !text.is_empty());
@@ -423,6 +427,7 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
     }
 
     match mode {
+        AppMode::Rpc => Ok(run_rpc_mode(Arc::new(runtime), RpcModeOptions::default()).await),
         AppMode::Print | AppMode::Json => {
             let output = if mode == AppMode::Json { OutputMode::Json } else { OutputMode::Text };
             Ok(run_print_mode(&runtime, output, initial_message, files.images, args.messages).await)
