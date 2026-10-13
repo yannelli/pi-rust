@@ -47,6 +47,7 @@ const SOURCES: &[(&str, &str)] = &[
     ("fs/promises", include_str!("../js/fs_promises.js")),
     ("readline", include_str!("../js/readline.js")),
     ("readline/promises", include_str!("../js/readline_promises.js")),
+    ("child_process", include_str!("../js/child_process.js")),
 ];
 
 /// Every module name `require` accepts, for `module.builtinModules`.

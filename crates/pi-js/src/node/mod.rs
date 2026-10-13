@@ -1,6 +1,7 @@
 //! Node and web compatibility: native functions plus the JavaScript built-in modules.
 
 mod builtins;
+mod child;
 mod core;
 mod crypto;
 pub(crate) mod encoding;
@@ -25,6 +26,7 @@ pub(crate) fn install(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
     native.set("crypto", crypto::natives(ctx)?)?;
     native.set("fs", fs::natives(ctx)?)?;
     native.set("os", os::natives(ctx)?)?;
+    native.set("child", child::natives(ctx)?)?;
     core::install(ctx, &native)?;
     let config = core::config(ctx)?;
     let mut options = EvalOptions::default();
