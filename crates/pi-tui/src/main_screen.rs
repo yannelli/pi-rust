@@ -132,7 +132,7 @@ pub(crate) fn do_render(inner: &TuiInner) -> Result<(), TuiError> {
 }
 
 fn crash(inner: &TuiInner, lines: &[String], width: usize, overflow: Overflow) -> TuiError {
-    let dir = inner.log_directory.clone().unwrap_or_else(std::env::temp_dir);
+    let dir = inner.log_directory.clone().unwrap_or_else(|| debug_log::temp_dir(&*inner.env));
     let crash_log = dir.join("pi-tui-crash.log");
     let mut data = vec![
         format!("Crash at {}", debug_log::iso_timestamp()),

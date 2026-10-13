@@ -179,11 +179,14 @@ impl TuiInner {
     }
 
     pub(crate) fn show_overlay(&self, component: ComponentRef, options: OverlayOptions) -> OverlayHandle {
+        // Read the focus first: a state borrow held across `next_focus_order` would panic.
+        let pre_focus = self.state.borrow().focused.clone();
+        let focus_order = self.next_focus_order();
         let entry = Rc::new(OverlayEntry {
             component: component.clone(),
-            pre_focus: RefCell::new(self.state.borrow().focused.clone()),
+            pre_focus: RefCell::new(pre_focus),
             hidden: Cell::new(false),
-            focus_order: Cell::new(self.next_focus_order()),
+            focus_order: Cell::new(focus_order),
             bounds: Cell::new(None),
             options,
         });

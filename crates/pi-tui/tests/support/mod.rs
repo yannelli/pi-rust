@@ -180,7 +180,8 @@ impl Component for Image {
             ((max_width as f64 * f64::from(cell.width_px)) / f64::from(cell.height_px)).ceil().max(1.0) as usize;
         let max_height = self.options.max_height_cells.unwrap_or(default_max_height);
         let caps = get_capabilities();
-        let usable = caps.images.is_some() && (caps.images != Some(ImageProtocol::Kitty) || self.mime_type == "image/png");
+        let usable =
+            caps.images.is_some() && (caps.images != Some(ImageProtocol::Kitty) || self.mime_type == "image/png");
         if usable && caps.images == Some(ImageProtocol::Kitty) && self.image_id.is_none() {
             self.image_id = Some(allocate_image_id());
         }

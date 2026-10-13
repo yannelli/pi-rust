@@ -1,8 +1,10 @@
 //! Timestamps and append helpers for debug and crash logs.
 
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::env::EnvLookup;
 
 /// Current UTC time as ISO 8601 with milliseconds, like JavaScript `toISOString()`.
 pub(crate) fn iso_timestamp() -> String {
@@ -17,6 +19,12 @@ pub(crate) fn iso_timestamp() -> String {
         rem % 60,
         now.subsec_millis()
     )
+}
+
+/// The temp directory like Node `os.tmpdir()`, read through `env` so tests can inject it.
+pub(crate) fn temp_dir(env: &dyn EnvLookup) -> PathBuf {
+    let names: &[&str] = if cfg!(windows) { &["TEMP", "TMP"] } else { &["TMPDIR", "TMP", "TEMP"] };
+    names.iter().find_map(|name| env.non_empty(name)).map(PathBuf::from).unwrap_or_else(std::env::temp_dir)
 }
 
 /// Milliseconds since the Unix epoch.
