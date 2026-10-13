@@ -2223,6 +2223,7 @@ dependencies = [
  "base64 0.22.1",
  "crc32fast",
  "futures",
+ "pi-telemetry",
  "reqwest",
  "ring",
  "rustls",
@@ -2301,6 +2302,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-embedded"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures",
+ "pi-agent",
+ "pi-ai",
+ "reqwest",
+ "ring",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "pi-js"
 version = "0.1.2"
 dependencies = [
@@ -2347,6 +2366,16 @@ dependencies = [
  "tokio",
  "tokio-util",
  "url",
+]
+
+[[package]]
+name = "pi-telemetry"
+version = "0.1.1"
+dependencies = [
+ "futures",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

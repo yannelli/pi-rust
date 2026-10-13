@@ -1,0 +1,38 @@
+[package]
+name = "pi-embedded"
+description = "In-process pi sessions for native and Rust applications"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+# rlib for Rust hosts; staticlib carries the C ABI in `src/ffi.rs` for native hosts. Build a
+# cdylib with `cargo rustc -p pi-embedded --release --crate-type cdylib`: a debug cdylib exceeds
+# the Windows 65535-symbol export limit because unoptimized dependencies share generics.
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+pi-agent.workspace = true
+pi-ai.workspace = true
+reqwest.workspace = true
+ring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+# Same lints as the workspace, except `unsafe_code` is `deny` instead of `forbid`: the C ABI
+# module must allow it locally, and `forbid` cannot be relaxed by an inner `allow`.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
