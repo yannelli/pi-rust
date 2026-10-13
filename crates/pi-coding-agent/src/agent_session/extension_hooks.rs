@@ -52,24 +52,28 @@ pub(crate) fn install_request_observers(slot: &RequestHooksSlot, options: &mut S
             result.ok().map(pi_js::HostValue::into_json).filter(|changed| changed != payload)
         }));
     }
-    if runner.has_handlers("after_provider_response") {
-        let weak = Arc::downgrade(&runner);
+    let wants_response = runner.has_handlers("after_provider_response");
+    let wants_stream = runner.has_handlers("provider_stream_event");
+    if !wants_response && !wants_stream {
+        return;
+    }
+    // One ordered queue, so handlers see the response before its stream events, as upstream awaits each.
+    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<Value>();
+    let forward = runner.clone();
+    tokio::spawn(async move {
+        while let Some(event) = receiver.recv().await {
+            forward.emit(event).await;
+        }
+    });
+    if wants_response {
+        let sender = sender.clone();
         options.on_response = Some(Arc::new(move |response: &pi_ai::ProviderResponse, _model: &Model| {
-            if let Some(runner) = weak.upgrade() {
-                let event =
-                    json!({"type": "after_provider_response", "status": response.status, "headers": response.headers});
-                runner.emit_detached(event);
-            }
+            let event =
+                json!({"type": "after_provider_response", "status": response.status, "headers": response.headers});
+            let _ = sender.send(event);
         }));
     }
-    if runner.has_handlers("provider_stream_event") {
-        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<Value>();
-        let forward = runner.clone();
-        tokio::spawn(async move {
-            while let Some(event) = receiver.recv().await {
-                forward.emit(event).await;
-            }
-        });
+    if wants_stream {
         options.on_provider_stream_event = Some(Arc::new(move |data: &Value, model: &Model| {
             let event = json!({
                 "type": "provider_stream_event",
