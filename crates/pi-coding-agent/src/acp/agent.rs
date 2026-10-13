@@ -224,7 +224,7 @@ impl AcpAgent {
     }
 
     pub async fn new_session(&self, params: NewSessionRequest) -> AcpResult<Handled<Value>> {
-        if !params.cwd.is_absolute() {
+        if !super::settings::node_is_absolute(&params.cwd) {
             return Err(invalid_params(format!("cwd must be an absolute path: {}", params.cwd.display())));
         }
         let cwd = params.cwd.display().to_string();

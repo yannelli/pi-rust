@@ -274,7 +274,7 @@ async fn prompts_restore_stored_sessions() {
 #[tokio::test]
 async fn config_changes_restore_sessions_found_by_discovery() {
     let env = Env::new();
-    let dir = env.agent_dir().join("sessions/--tmp--fallback-project--");
+    let dir = env.agent_dir().join("sessions").join("--tmp--fallback-project--");
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("0000_restore_fallback.jsonl");
     let header = json!({"type": "session", "version": 3, "id": "fallback-session",
@@ -331,11 +331,12 @@ async fn startup_info_lists_resources_unless_quiet() {
     let handled = agent.new_session(new_request(&env.work())).await.unwrap();
     let info = startup_info(&handled.response);
     assert!(info.starts_with("pi v1.2.3\n---\n"), "{info}");
+    let skill = std::path::Path::new("skills").join("demo").join("SKILL.md");
     for expected in [
         "## Context",
         "AGENTS.md",
         "## Skills",
-        "skills/demo/SKILL.md",
+        &skill.display().to_string(),
         "## Prompts",
         "- /review",
         "## Extensions",

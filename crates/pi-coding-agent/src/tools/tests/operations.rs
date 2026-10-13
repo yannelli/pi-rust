@@ -170,12 +170,14 @@ async fn edit_reports_eacces_for_read_only_files() {
 #[tokio::test]
 async fn ls_uses_custom_operations() {
     let fs = MemoryFs::with(&[("/r/b.txt", ""), ("/r/A.md", "")], &["/r", "/r/src"]);
-    let ls = tool("ls", "/r", ToolsOptions { ls: LsToolOptions::with_operations(fs.clone()), ..Default::default() });
+    let root = Path::new(std::path::MAIN_SEPARATOR_STR).join("r");
+    let options = ToolsOptions { ls: LsToolOptions::with_operations(fs.clone()), ..Default::default() };
+    let ls = tool("ls", root.to_str().unwrap(), options);
     assert_eq!(text(&exec(&ls, json!({})).await.unwrap()), "A.md\nb.txt\nsrc/");
     let err = exec(&ls, json!({ "path": "b.txt" })).await.unwrap_err().to_string();
-    assert_eq!(err, "Not a directory: /r/b.txt");
+    assert_eq!(err, format!("Not a directory: {}", root.join("b.txt").display()));
     let err = exec(&ls, json!({ "path": "nope" })).await.unwrap_err().to_string();
-    assert_eq!(err, "Path not found: /r/nope");
+    assert_eq!(err, format!("Path not found: {}", root.join("nope").display()));
 }
 
 #[cfg(unix)]

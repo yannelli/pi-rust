@@ -58,7 +58,12 @@ pub fn settings_session_dir(agent_dir: &Path) -> Option<PathBuf> {
     let settings = read_object(&agent_dir.join("settings.json"));
     let dir = settings.get("sessionDir").and_then(Value::as_str).map(str::trim).filter(|dir| !dir.is_empty())?;
     let dir = crate::config::expand_tilde(dir);
-    Some(if dir.is_absolute() { dir } else { agent_dir.join(dir) })
+    Some(if node_is_absolute(&dir) { dir } else { agent_dir.join(dir) })
+}
+
+/// Node's `path.isAbsolute`: on Windows a rooted path like `/tmp` counts, as in pi-acp.
+pub fn node_is_absolute(path: &Path) -> bool {
+    path.has_root()
 }
 
 /// Where pi keeps sessions: the override, the `sessionDir` setting, or `<agent_dir>/sessions`.

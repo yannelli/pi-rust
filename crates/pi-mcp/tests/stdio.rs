@@ -62,21 +62,23 @@ async fn kills_a_server_that_ignores_shutdown_including_its_children() {
     let started = Instant::now();
     client.close().await;
     assert!(started.elapsed() < Duration::from_secs(5));
-    let alive = || std::path::Path::new(&format!("/proc/{grandchild}")).exists() && !is_zombie(grandchild);
+    // Decide once per poll: a killed process passes through zombie (Z) and dead (X) before /proc drops it.
+    let mut alive = true;
     for _ in 0..100 {
-        if !alive() {
+        alive = is_running(grandchild);
+        if !alive {
             break;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     if cfg!(target_os = "linux") {
-        assert!(!alive(), "grandchild {grandchild} survived");
+        assert!(!alive, "grandchild {grandchild} survived");
     }
 }
 
 #[cfg(unix)]
-fn is_zombie(pid: i32) -> bool {
+fn is_running(pid: i32) -> bool {
     std::fs::read_to_string(format!("/proc/{pid}/stat"))
-        .map(|stat| stat.rsplit(')').next().unwrap_or_default().trim_start().starts_with('Z'))
-        .unwrap_or(true)
+        .map(|stat| !matches!(stat.rsplit(')').next().unwrap_or_default().trim_start().chars().next(), Some('Z' | 'X')))
+        .unwrap_or(false)
 }

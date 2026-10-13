@@ -19,6 +19,8 @@ fn pi(root: &Path, args: &[&str]) -> Command {
         .current_dir(root.join("work"))
         .env_clear()
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        // Winsock fails to start without `SystemRoot`, so the mock server would be unreachable.
+        .envs(std::env::var_os("SystemRoot").map(|root| ("SystemRoot", root)))
         .env("HOME", root)
         .env("USERPROFILE", root)
         .env("PI_CODING_AGENT_DIR", root.join("agent"))

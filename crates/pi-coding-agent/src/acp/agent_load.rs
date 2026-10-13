@@ -68,7 +68,7 @@ fn replay_tool_result(message: &Value, cwd: &str) -> Vec<SessionUpdate> {
 
 impl AcpAgent {
     pub async fn load_session(&self, params: LoadSessionRequest) -> AcpResult<Handled<Value>> {
-        if !params.cwd.is_absolute() {
+        if !super::settings::node_is_absolute(&params.cwd) {
             return Err(invalid_params(format!("cwd must be an absolute path: {}", params.cwd.display())));
         }
         let session_id = params.session_id.0.to_string();

@@ -59,7 +59,7 @@ pub fn edit_old_texts(args: &Value) -> Vec<String> {
 
 fn resolve(cwd: &Path, path: &str) -> std::path::PathBuf {
     let path = Path::new(path);
-    if path.is_absolute() { path.to_path_buf() } else { cwd.join(path) }
+    if super::settings::node_is_absolute(path) { path.to_path_buf() } else { cwd.join(path) }
 }
 
 /// The tool's file as a location, resolved against `cwd`.
