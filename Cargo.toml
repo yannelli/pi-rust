@@ -57,3 +57,8 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# Unoptimized QuickJS C frames are large enough on some compilers that deep JS recursion
+# hits the engine stack limit early in debug builds, so the engine is always optimized.
+[profile.dev.package.rquickjs-sys]
+opt-level = 2

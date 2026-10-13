@@ -55,6 +55,8 @@ pub struct ResourceOptions {
     pub append_system_prompt: Option<Vec<String>>,
     /// Built-in extensions turned off for this run, such as `mcp` for `--no-mcp`.
     pub disabled_builtin_extensions: Vec<String>,
+    /// Home directory for user-level resources such as `~/.agents/skills`; `None` uses the real one.
+    pub home: Option<PathBuf>,
 }
 
 /// Inputs of [`create_agent_session_services`]. Defaults load everything from `agent_dir`.
@@ -130,6 +132,9 @@ pub fn resource_loader_options(
     options.append_system_prompt = resources.append_system_prompt.clone();
     options.builtin_extensions = super::builtins::BUILTIN_EXTENSIONS.iter().map(|name| name.to_string()).collect();
     options.disabled_builtin_extensions = resources.disabled_builtin_extensions.clone();
+    if let Some(home) = &resources.home {
+        options.home = home.clone();
+    }
     options
 }
 

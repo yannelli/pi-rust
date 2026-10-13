@@ -10,8 +10,8 @@ use pi_ai::auth::{Credential, InMemoryCredentialStore};
 use pi_ai::providers::faux::{FauxProvider, FauxResponse};
 use pi_ai::{Context, Message, register_api_provider};
 use pi_coding_agent::agent_session::{
-    AgentSession, AgentSessionServices, CreateAgentSessionOptions, CreateServicesOptions, create_agent_session,
-    create_agent_session_services,
+    AgentSession, AgentSessionServices, CreateAgentSessionOptions, CreateServicesOptions, ResourceOptions,
+    create_agent_session, create_agent_session_services,
 };
 use pi_coding_agent::app::AppOptions;
 use pi_coding_agent::session::SessionManager;
@@ -120,6 +120,7 @@ pub async fn harness_with(options: Options, configure: impl FnOnce(&mut CreateAg
     let services = create_agent_session_services(CreateServicesOptions {
         settings: Some(settings.clone()),
         credentials: Some(Arc::new(InMemoryCredentialStore::new(options.credentials.clone()))),
+        resources: ResourceOptions { home: Some(root.path().to_path_buf()), ..ResourceOptions::default() },
         ..CreateServicesOptions::new(&cwd, &agent_dir)
     })
     .await;
