@@ -232,7 +232,8 @@ fn default_model_selection_follows_upstream_priority() {
     assert_eq!(default_model_for("openai-codex"), Some("gpt-6.1-sol"));
     assert_eq!(default_model_for("vercel-ai-gateway"), Some("zai/glm-5.1"));
     assert_eq!(default_model_for("ant-ling"), Some("Ring-2.6-1T"));
-    for provider in pi_ai::models::builtin_models().iter().map(|model| model.provider.as_str()) {
+    let chat = pi_ai::models::builtin_models().iter().filter(|model| pi_ai::models::is_chat_model(model));
+    for provider in chat.map(|model| model.provider.as_str()) {
         let default = default_model_for(provider).unwrap_or_else(|| panic!("{provider} has no default"));
         assert!(
             pi_ai::models::builtin_models().iter().any(|m| m.provider == provider && m.id == default),

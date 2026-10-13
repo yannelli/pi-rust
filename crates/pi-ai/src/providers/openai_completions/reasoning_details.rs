@@ -36,10 +36,12 @@ pub(super) fn append_reasoning_detail(details: &mut Vec<Value>, detail: &Value) 
         let addition = detail[field].as_str().unwrap_or_default();
         let merged = format!("{}{addition}", last[field].as_str().unwrap_or_default());
         last[field] = Value::String(merged);
-        let missing = |value: &Value| value.is_null() || value.as_str() == Some("");
-        let keys: &[&str] = if kind == "reasoning.text" { &["signature", "id", "format"] } else { &["id", "format"] };
-        for key in keys.iter().chain(["index"].iter()) {
-            if missing(&last[*key]) && !detail[*key].is_null() {
+        // `signature` and `format` fill when empty, `id` and `index` only when absent.
+        let empty = |value: &Value| value.is_null() || value.as_str() == Some("");
+        let keys: &[(&str, bool)] = &[("signature", true), ("id", false), ("format", true), ("index", false)];
+        for (key, fill_empty) in keys {
+            let missing = if *fill_empty { empty(&last[*key]) } else { last[*key].is_null() };
+            if (*key != "signature" || kind == "reasoning.text") && missing && !detail[*key].is_null() {
                 last[*key] = detail[*key].clone();
             }
         }

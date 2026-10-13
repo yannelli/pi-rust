@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/pi-ai", "crates/pi-agent", "crates/pi-codemode", "crates/pi-coding-agent", "xtask"]
+members = ["crates/pi-ai", "crates/pi-agent", "crates/pi-codemode", "crates/pi-coding-agent", "crates/pi-mcp", "xtask"]
 
 [workspace.package]
 version = "0.1.0"
@@ -24,6 +24,11 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "str
 ring = "0.17"
 base64 = "0.22"
 tempfile = "3"
+crc32fast = "1"
+ruzstd = "0.8"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake", "__rustls-tls"] }
+webpki-roots = "1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

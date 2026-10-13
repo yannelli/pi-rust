@@ -49,7 +49,11 @@ impl Hooks {
     }
 
     pub fn request(&self, method: Method, url: &str) -> RequestBuilder {
-        crate::registry::http_client().request(method, self.url(url))
+        // The shared client's idle and keepalive timers would move a paused test clock.
+        static PLAIN: std::sync::LazyLock<reqwest::Client> =
+            std::sync::LazyLock::new(|| reqwest::Client::builder().no_proxy().build().expect("TLS backend"));
+        let client = if self.no_timeouts { PLAIN.clone() } else { crate::registry::http_client() };
+        client.request(method, self.url(url))
     }
 
     pub fn get(&self, url: &str) -> RequestBuilder {

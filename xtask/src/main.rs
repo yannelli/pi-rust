@@ -1,6 +1,7 @@
 //! Release tooling: `cargo xtask plan | prepare | notes | check-tag`. Versions come from
 //! conventional commits since the last `v*` tag; see `usage()` for arguments.
 
+mod models;
 mod version;
 
 use std::path::{Path, PathBuf};
@@ -16,7 +17,8 @@ fn usage() -> String {
   plan [--bump auto|patch|minor|major] [--github-output]   next version from conventional commits
   prepare <version>                                        set the version, refresh Cargo.lock, update CHANGELOG.md
   notes <version>                                          print the CHANGELOG.md section for a version
-  check-tag <tag>                                          fail unless the tag matches the workspace version"
+  check-tag <tag>                                          fail unless the tag matches the workspace version
+  models <upstream-data-dir> [--out <path>]                regenerate crates/pi-ai/models.json from upstream"
         .into()
 }
 
@@ -230,6 +232,7 @@ fn run(args: &[String]) -> Result<(), String> {
             println!("Tag {tag} matches the workspace version");
             Ok(())
         }
+        Some("models") => models::run(&args[1..], &root()),
         _ => Err(usage()),
     }
 }
