@@ -9,7 +9,9 @@ pub const EVALUATOR_DIR: &str = "/opt/pi-evals";
 pub const EVALUATOR_BIN: &str = "/opt/pi-evals/pi-evals";
 pub const PI_BIN: &str = "/usr/local/bin/pi";
 pub const DOCS_DIR: &str = "/usr/local/share/pi/docs";
+#[cfg(unix)]
 const AGENT_DIR: &str = "/tmp/pi-eval-host-agent";
+#[cfg(unix)]
 const AUTH_SOURCE: &str = "/run/pi-eval-secrets/auth.json";
 
 fn parse_id(env: &EnvMap, name: &str) -> anyhow::Result<u32> {
