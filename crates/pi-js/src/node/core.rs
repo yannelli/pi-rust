@@ -236,6 +236,7 @@ pub(crate) fn config<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
     object.set("execPath", exec_path.display().to_string())?;
     object.set("platform", platform())?;
     object.set("arch", arch())?;
+    object.set("processStdio", state.shared.output.is_process_stdio())?;
     object.set("pid", std::process::id())?;
     #[cfg(unix)]
     object.set("ppid", std::os::unix::process::parent_id())?;

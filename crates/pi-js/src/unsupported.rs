@@ -54,12 +54,13 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
 
 /// Supported behavior that differs from Node.
 pub const DIFFERENCES: &[&str] = &[
-    "stdio 'inherit' for a child's stdin gives it no input",
+    "child_process: when the embedder sets an output sink, stdio 'inherit' sends a child's stdout and \
+     stderr to the sink instead of the real terminal and gives its stdin no input (with the default \
+     output, children inherit the real descriptors)",
     "child_process.fork, and spawning process.execPath, run the script in this binary's JavaScript runner \
      (PI_JS_FORK); the IPC channel is a Unix socket or Windows named pipe, not an inherited descriptor",
     "tty.ReadStream works only for descriptor 0 (process.stdin); other descriptors fail with ERR_TTY_INIT_FAILED",
     "PerformanceObserver sees function, mark, and measure entries only",
-    "child stdout and stderr with stdio 'inherit' go to the runtime's output sink, not the real terminal",
     "process.exit calls the embedder's on_exit callback when one is set",
     "os.cpus reports no CPU times; os.freemem and os.totalmem come from /proc, sysctl, or vm_stat",
     "readline has no raw terminal editing: lines come from the input stream as text",

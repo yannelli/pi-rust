@@ -25,7 +25,7 @@ pub(crate) struct SpawnOptions {
     args: Vec<String>,
     cwd: String,
     env: Vec<(String, String)>,
-    /// `pipe` or `ignore` for stdin, stdout, and stderr.
+    /// `pipe`, `ignore`, or `inherit` for stdin, stdout, and stderr.
     stdio: [String; 3],
     #[serde(default)]
     #[cfg_attr(not(windows), allow(dead_code))]
@@ -45,7 +45,11 @@ pub(crate) struct SpawnOptions {
 }
 
 fn stdio(kind: &str) -> Stdio {
-    if kind == "pipe" { Stdio::piped() } else { Stdio::null() }
+    match kind {
+        "pipe" => Stdio::piped(),
+        "inherit" => Stdio::inherit(),
+        _ => Stdio::null(),
+    }
 }
 
 fn build(options: &SpawnOptions) -> Command {
