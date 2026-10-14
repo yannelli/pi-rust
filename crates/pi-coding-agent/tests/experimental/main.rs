@@ -3,7 +3,19 @@
 mod agent_controller;
 mod durable_support;
 #[cfg(unix)]
+mod faux_worker;
+#[cfg(unix)]
+mod presentation_facets;
+#[cfg(unix)]
+mod remote_runtime;
+#[cfg(unix)]
+mod remote_runtime_workers;
+#[cfg(unix)]
+mod remote_support;
+#[cfg(unix)]
 mod server_profile;
+#[cfg(unix)]
+mod service_binding;
 mod session_worker_lifecycle;
 #[cfg(unix)]
 mod session_worker_manager;
