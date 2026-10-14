@@ -23,6 +23,7 @@ mod net_server;
 mod os;
 mod pipe;
 mod ports;
+mod shared;
 mod sqlite;
 mod sqlite_fn;
 pub(crate) mod sys;
@@ -47,6 +48,7 @@ const BOOTSTRAP: &str = include_str!("../js/bootstrap.js");
 
 /// Install natives, run the bootstrap, and keep its internal API object.
 pub(crate) fn install(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
+    shared::install(ctx)?;
     let native = Object::new(ctx.clone())?;
     native.set("modules", crate::modules::cjs::natives(ctx)?)?;
     native.set("builtins", builtins::natives(ctx)?)?;

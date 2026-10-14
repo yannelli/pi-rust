@@ -92,8 +92,9 @@ pub const DIFFERENCES: &[&str] = &[
      `this` and `globalThis` inside it are that context's own global, not the object, globals the code \
      declares are copied to the object when each run ends, cached data is accepted but not used, and \
      microtaskMode 'afterEvaluate' runs every pending microtask of the runtime after the script",
-    "worker_threads: a SharedArrayBuffer is copied, not shared, because each worker is a separate QuickJS \
-     runtime; a worker writes straight to the parent's output unless stdout or stderr is set; \
+    "worker_threads: a SharedArrayBuffer shares its memory with workers, but growing it changes its \
+     byteLength only in the thread that grows it; a worker writes straight to the parent's output unless \
+     stdout or stderr is set; \
      MessagePort is an EventEmitter with addEventListener and onmessage rather than an EventTarget; \
      worker.performance reports no event loop use; moveMessagePortToContext returns the same port",
     "zlib: deflate output can differ in bytes from Node's zlib (zlib-rs); memLevel and strategy are \
