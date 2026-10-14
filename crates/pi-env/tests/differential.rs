@@ -68,6 +68,8 @@ fn normalize(value: &Value, root: &tempfile::TempDir) -> String {
     let text = value.to_string();
     let root = root.path().to_string_lossy().into_owned();
     let real = std::fs::canonicalize(&root).map(|path| path.to_string_lossy().into_owned()).unwrap_or(root.clone());
+    // Windows canonical paths carry a `\\?\` prefix that canonical_path results do not.
+    let real = real.strip_prefix(r"\\?\").map_or(real.clone(), str::to_owned);
     let escaped = |path: &str| json!(path).to_string().trim_matches('"').to_string();
     text.replace(&escaped(&real), "<root>").replace(&escaped(&root), "<root>")
 }
