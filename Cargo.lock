@@ -2451,6 +2451,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-env"
+version = "0.1.6"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "futures",
+ "percent-encoding",
+ "pi-ai",
+ "pi-chord",
+ "pi-durable",
+ "ring",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "pi-env-daemon"
 version = "0.1.6"
 dependencies = [

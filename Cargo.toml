@@ -9,6 +9,7 @@ members = [
     "crates/pi-coding-agent",
     "crates/pi-durable",
     "crates/pi-embedded",
+    "crates/pi-env",
     "crates/pi-env-daemon",
     "crates/pi-js",
     "crates/pi-mcp",
