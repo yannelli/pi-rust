@@ -1,4 +1,8 @@
-//! Port of upstream `test/harness-registry.test.ts` (registry, settings, and extension selection).
+//! Port of upstream `test/harness-registry.test.ts`; `harness_registry/wraps.rs` holds the wrapper, section, and
+//! hook cases.
+
+#[path = "harness_registry/wraps.rs"]
+mod wraps;
 
 use std::sync::{Arc, Mutex};
 

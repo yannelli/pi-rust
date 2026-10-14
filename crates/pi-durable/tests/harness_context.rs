@@ -1,10 +1,17 @@
-//! Port of upstream `test/harness-context.test.ts` (context derivation cases).
+//! Port of upstream `test/harness-context.test.ts`. The modules under `harness_context/` hold the derivation cases
+//! with system messages and forks, and the kept context read cases.
 
+#[path = "harness_context/derivation.rs"]
+mod derivation;
+#[path = "harness_context/reads.rs"]
+mod reads;
+#[path = "harness_context/steps.rs"]
+mod steps;
 mod support;
 
 use std::sync::Arc;
 
-use pi_ai::{Message, StopReason, UserContent, UserMessage};
+use pi_ai::{ContentBlock, Message, StopReason, UserContent, UserMessage};
 use pi_chord::Json;
 use pi_durable::harness::*;
 use pi_durable::session::Tx;
@@ -23,15 +30,21 @@ fn assistant(text: &str, stop_reason: StopReason) -> Message {
     Message::Assistant(faux_assistant_message(text, FauxMessageOptions::stop_reason(stop_reason)))
 }
 
+/// Compact message rendering for assertions (upstream `describeMessage`).
 fn describe(message: &Message) -> String {
-    let role = match message {
-        Message::User(_) => "user",
-        Message::Assistant(_) => "assistant",
-        Message::System(_) => "system",
-        Message::ToolResult(_) => "result",
-        _ => "other",
-    };
-    format!("{role}:{}", text_of(Some(message)).unwrap_or_default())
+    let first_text = |content: &[ContentBlock]| content.iter().find_map(ContentBlock::as_text).unwrap_or("").to_owned();
+    match message {
+        Message::User(_) => format!("user:{}", text_of(Some(message)).unwrap_or_default()),
+        Message::Assistant(assistant) => format!("assistant:{}", first_text(&assistant.content)),
+        Message::ToolResult(result) if result.is_error => format!("result:{}:error", result.tool_call_id),
+        Message::ToolResult(result) => format!("result:{}:{}", result.tool_call_id, first_text(&result.content)),
+        Message::System(system) => {
+            let keys: Vec<&str> =
+                system.sections.iter().flat_map(|sections| sections.keys()).map(String::as_str).collect();
+            format!("system:{}", keys.join(","))
+        }
+        _ => "other".to_owned(),
+    }
 }
 
 struct Setup {

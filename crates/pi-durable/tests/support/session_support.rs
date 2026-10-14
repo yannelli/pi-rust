@@ -73,6 +73,8 @@ pub struct ControlledStorage {
     pub commits: Mutex<Vec<Vec<StorageWrite>>>,
     pub mint_count: AtomicUsize,
     pub document_read_count: AtomicUsize,
+    /// Entry rows returned by `scan_entries`.
+    pub scanned_rows: AtomicUsize,
     commit_gate: Mutex<Option<Gate>>,
     /// When set, the commit gate holds only the batches it accepts.
     commit_filter: Mutex<Option<CommitFilter>>,
@@ -255,7 +257,9 @@ impl Storage for ControlledStorage {
     ) -> DurableResult<Page<EntryRecord>> {
         self.hook("scan_entries", limit, cursor.is_none(), context).await?;
         self.open()?;
-        self.inner.scan_entries(query, limit, cursor, context).await
+        let page = self.inner.scan_entries(query, limit, cursor, context).await?;
+        self.scanned_rows.fetch_add(page.items.len(), Ordering::SeqCst);
+        Ok(page)
     }
 
     async fn task(&self, id: TaskId, context: &Context) -> DurableResult<Option<TaskRecord>> {
