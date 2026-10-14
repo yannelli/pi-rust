@@ -19,21 +19,17 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
     "crypto: ciphers other than aes-128-gcm, aes-256-gcm, and chacha20-poly1305 (CBC, CTR, ECB, CFB, OFB, CCM, OCB, \
      aes-192-gcm, DES), AES-GCM IVs other than 12 bytes, encrypted private keys (passphrase or cipher), DSA, Ed448, \
      and X448 keys, webcrypto.subtle except digest, setFips",
-    "fs: glob, lchmod, fchmod, fchown, lutimes, statfs, openAsBlob, bigint Stats, cp with a filter, \
-     FileHandle chmod, chown, and readableWebStream; reading descriptor 0",
+    "fs: lchmod, fchmod, fchown, lutimes, statfs, openAsBlob, FileHandle chmod, chown, and \
+     readableWebStream; reading descriptor 0",
     "child_process: fork, IPC (send and disconnect), stdio entries that are streams or descriptors above 2",
     "process: reading stdin, stdin.setRawMode, cpuUsage, resourceUsage, abort, binding, dlopen, \
      setUncaughtExceptionCaptureCallback",
     "os: networkInterfaces, getPriority, setPriority",
-    "stream: compose, Duplex.from for values that are not iterables; stream/web BYOB readers, \
+    "stream: Duplex.from for promises and web streams; stream/web BYOB readers, \
      ReadableByteStreamController, CompressionStream, DecompressionStream",
     "fetch: Body.formData for multipart bodies, request bodies are buffered before sending",
-    "util: parseArgs, getSystemErrorName, getSystemErrorMap, MIMEType, transferableAbortController, types.isProxy",
-    "module: register, findSourceMap, require.extensions",
-    "perf_hooks: PerformanceObserver, timerify, eventLoopUtilization, monitorEventLoopDelay",
-    "misc: path.matchesGlob, buffer.transcode, buffer.resolveObjectURL, URL.createObjectURL, \
-     URL.revokeObjectURL, assert.CallTracker, events.EventEmitterAsyncResource, tty.ReadStream, \
-     diagnostics_channel.tracingChannel and bindStore",
+    "util: MIMEType",
+    "misc: tty.ReadStream",
 ];
 
 /// Supported behavior that differs from Node.
@@ -45,6 +41,9 @@ pub const DIFFERENCES: &[&str] = &[
     "os.cpus reports no CPU times; os.freemem and os.totalmem come from /proc, sysctl, or vm_stat",
     "fetch does not decompress gzip or brotli bodies and sends no accept-encoding header",
     "readline has no raw terminal editing: lines come from the input stream as text",
+    "module.register hooks run on the importing thread: a hook's promise must settle from microtasks alone, \
+     and hooks apply to import, not require",
+    "events.EventEmitterAsyncResource and diagnostics_channel stores run without async_hooks contexts",
 ];
 
 #[cfg(test)]

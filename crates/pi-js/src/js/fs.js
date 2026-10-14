@@ -238,8 +238,12 @@ Object.assign(fs, {
   W_OK: 2,
   X_OK: 1,
 });
-fs.glob = fs.globSync = () => {
-  throw internal.unsupported("fs.glob");
+fs.globSync = (pattern, options) => require("internal/glob").globSync(pattern, options);
+fs.glob = function glob(pattern, options, callback) {
+  if (typeof options === "function") [callback, options] = [options, undefined];
+  if (typeof callback !== "function") throw utils.invalidArg("callback", "of type function", callback);
+  const matches = fs.globSync(pattern, options);
+  process.nextTick(callback, null, matches);
 };
 Object.defineProperty(fs, "promises", { enumerable: true, configurable: true, get: () => require("fs/promises") });
 fs._toUnixTimestamp = (time) => require("internal/fs_ops").toSeconds(time);

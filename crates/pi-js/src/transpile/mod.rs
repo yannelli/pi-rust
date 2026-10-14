@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 pub use cache::TranspileCache;
 pub use sourcemap::{PositionMap, SourcePosition};
-pub(crate) use sourcemap::{register_source_map, remap_stack};
+pub(crate) use sourcemap::{register_source_map, registered_tokens, remap_stack};
 
 use crate::error::JsError;
 

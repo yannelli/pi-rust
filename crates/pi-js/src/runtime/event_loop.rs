@@ -44,6 +44,7 @@ fn track_rejection<'js>(ctx: Ctx<'js>, promise: Value<'js>, reason: Value<'js>, 
 
 /// Run until shutdown: jobs, due timers, immediates, then messages, sleeping until the next timer.
 pub(crate) fn run(runtime: &Runtime, context: &Context, receiver: &Receiver<Message>, state: &LoopState) {
+    state.loop_start.set(Some(Instant::now()));
     loop {
         state.shared.interrupt.store(false, Ordering::SeqCst);
         drain_jobs(runtime, context, state);
@@ -71,10 +72,14 @@ pub(crate) fn run(runtime: &Runtime, context: &Context, receiver: &Receiver<Mess
             continue;
         }
         let deadline = state.timers.borrow().next_deadline();
+        let waiting = Instant::now();
         let message = match deadline {
             Some(deadline) => match receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
                 Ok(message) => message,
-                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Timeout) => {
+                    state.idle_time.set(state.idle_time.get() + waiting.elapsed());
+                    continue;
+                }
                 Err(RecvTimeoutError::Disconnected) => break,
             },
             None => match receiver.recv() {
@@ -82,6 +87,7 @@ pub(crate) fn run(runtime: &Runtime, context: &Context, receiver: &Receiver<Mess
                 Err(_) => break,
             },
         };
+        state.idle_time.set(state.idle_time.get() + waiting.elapsed());
         handle(message, runtime, context, state);
     }
 }

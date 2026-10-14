@@ -1,6 +1,7 @@
 // node:util.
 const { inspect, format, formatWithOptions, stylize } = require("internal/inspect");
 const { isDeepStrictEqual } = require("internal/deep_equal");
+const errors = require("internal/errors");
 
 const kCustomPromisify = Symbol.for("nodejs.util.promisify.custom");
 
@@ -96,9 +97,7 @@ const types = {
   isBigIntObject: (value) => value instanceof BigInt,
   isSymbolObject: (value) => value instanceof Symbol,
   isWeakRef: (value) => typeof WeakRef !== "undefined" && value instanceof WeakRef,
-  isProxy: () => {
-    throw internal.unsupported("util.types.isProxy");
-  },
+  isProxy: (value) => native.util.isProxy(value),
   isExternal: () => false,
   isModuleNamespaceObject: (value) => tagOf(value) === "Module",
 };
@@ -159,6 +158,11 @@ function unsupported(name) {
   };
 }
 
+function transferableAbortSignal(signal) {
+  if (!(signal instanceof AbortSignal)) throw errors.invalidArgType("signal", "an instance of AbortSignal", signal);
+  return signal;
+}
+
 module.exports = {
   ...legacy,
   inspect,
@@ -182,10 +186,12 @@ module.exports = {
   get TextDecoder() {
     return require("internal/web").TextDecoder;
   },
-  parseArgs: unsupported("parseArgs"),
-  getSystemErrorName: unsupported("getSystemErrorName"),
-  getSystemErrorMap: unsupported("getSystemErrorMap"),
+  parseArgs: (config) => require("internal/parse_args").parseArgs(config),
+  getSystemErrorName: errors.getSystemErrorName,
+  getSystemErrorMap: () => new Map(errors.getSystemErrorMap()),
+  getSystemErrorMessage: errors.getSystemErrorMessage,
   MIMEType: unsupported("MIMEType"),
-  transferableAbortController: unsupported("transferableAbortController"),
+  transferableAbortController: () => new AbortController(),
+  transferableAbortSignal,
   _stylize: stylize,
 };

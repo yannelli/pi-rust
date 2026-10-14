@@ -98,6 +98,21 @@ function dateFromMs(ms) {
 class Stats {
   constructor(raw) {
     Object.assign(this, raw);
+    delete this.exact;
+  }
+}
+
+// Node's BigIntStats: integer fields as bigints, plus nanosecond times.
+const EXACT = ["dev", "ino", "rdev", "size", "blocks", "atimeNs", "mtimeNs", "ctimeNs", "birthtimeNs"];
+class BigIntStats {
+  constructor(raw) {
+    for (const key of ["dev", "mode", "nlink", "uid", "gid", "rdev", "blksize", "ino", "size", "blocks"]) this[key] = BigInt(raw[key]);
+    raw.exact.forEach((value, index) => (this[EXACT[index]] = BigInt(value)));
+    for (const name of ["atime", "mtime", "ctime", "birthtime"]) {
+      const ns = this[`${name}Ns`];
+      this[`${name}Ms`] = ns / 1000000n - (ns < 0n && ns % 1000000n !== 0n ? 1n : 0n);
+      this[name] = new Date(Number(this[`${name}Ms`]));
+    }
   }
 }
 for (const name of ["atime", "mtime", "ctime", "birthtime"]) {
@@ -137,6 +152,9 @@ for (const [name, bits] of Object.entries(TYPE_CHECKS)) {
   Stats.prototype[name] = function () {
     return (this.mode & S_IFMT) === bits;
   };
+  BigIntStats.prototype[name] = function () {
+    return (this.mode & BigInt(S_IFMT)) === BigInt(bits);
+  };
   Dirent.prototype[name] = function () {
     return this[kType] === bits;
   };
@@ -153,8 +171,9 @@ function makeEntries(entries, directory, options) {
   return entries.map(([name]) => name);
 }
 
-function checkBigint(options) {
-  if (options && options.bigint) throw internal.unsupported("fs Stats with bigint: true");
+// The stats mapper for an options object: plain Stats or BigIntStats.
+function statsMapper(options) {
+  return options && options.bigint ? (raw) => new BigIntStats(raw) : (raw) => new Stats(raw);
 }
 
 module.exports = {
@@ -170,7 +189,8 @@ module.exports = {
   decode,
   dataToLatin1,
   makeEntries,
-  checkBigint,
+  statsMapper,
+  BigIntStats,
   sync: nativeFs.sync,
   async: nativeFs.async,
 };

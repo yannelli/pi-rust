@@ -23,6 +23,9 @@ pub(crate) struct StatInfo {
     pub mtime_ms: f64,
     pub ctime_ms: f64,
     pub birthtime_ms: f64,
+    /// Exact `dev`, `ino`, `rdev`, `size`, `blocks`, and the four times in nanoseconds, for
+    /// `bigint: true` stats.
+    pub exact: [i128; 9],
 }
 
 #[cfg(not(unix))]
@@ -32,18 +35,24 @@ const S_IFDIR: u32 = 0o040_000;
 #[cfg(not(unix))]
 const S_IFLNK: u32 = 0o120_000;
 
-fn millis(time: io::Result<std::time::SystemTime>) -> f64 {
-    time.ok()
-        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-        .map_or(0.0, |duration| duration.as_secs_f64() * 1000.0)
+fn nanos(time: io::Result<std::time::SystemTime>) -> i128 {
+    match time {
+        Ok(time) => match time.duration_since(std::time::UNIX_EPOCH) {
+            Ok(duration) => duration.as_nanos() as i128,
+            Err(before) => -(before.duration().as_nanos() as i128),
+        },
+        Err(_) => 0,
+    }
 }
 
 pub(crate) fn stat_info(metadata: &Metadata) -> StatInfo {
+    let (atime, mtime, birthtime) = (nanos(metadata.accessed()), nanos(metadata.modified()), nanos(metadata.created()));
     let mut info = StatInfo {
         size: metadata.len() as f64,
-        atime_ms: millis(metadata.accessed()),
-        mtime_ms: millis(metadata.modified()),
-        birthtime_ms: millis(metadata.created()),
+        atime_ms: atime as f64 / 1e6,
+        mtime_ms: mtime as f64 / 1e6,
+        birthtime_ms: birthtime as f64 / 1e6,
+        exact: [0, 0, 0, i128::from(metadata.len()), 0, atime, mtime, 0, birthtime],
         ..StatInfo::default()
     };
     #[cfg(unix)]
@@ -59,6 +68,11 @@ pub(crate) fn stat_info(metadata: &Metadata) -> StatInfo {
         info.blksize = metadata.blksize() as f64;
         info.blocks = metadata.blocks() as f64;
         info.ctime_ms = metadata.ctime() as f64 * 1000.0 + metadata.ctime_nsec() as f64 / 1e6;
+        info.exact[0] = i128::from(metadata.dev());
+        info.exact[1] = i128::from(metadata.ino());
+        info.exact[2] = i128::from(metadata.rdev());
+        info.exact[4] = i128::from(metadata.blocks());
+        info.exact[7] = i128::from(metadata.ctime()) * 1_000_000_000 + i128::from(metadata.ctime_nsec());
     }
     #[cfg(not(unix))]
     {
@@ -73,9 +87,11 @@ pub(crate) fn stat_info(metadata: &Metadata) -> StatInfo {
         info.mode = f64::from(kind | permissions);
         info.nlink = 1.0;
         info.ctime_ms = info.mtime_ms;
+        info.exact[7] = info.exact[6];
     }
     if info.birthtime_ms == 0.0 {
         info.birthtime_ms = info.ctime_ms;
+        info.exact[8] = info.exact[7];
     }
     info
 }

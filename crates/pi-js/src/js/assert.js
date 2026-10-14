@@ -183,6 +183,66 @@ function failAssert(message = "Failed") {
   throw new AssertionError({ message, operator: "fail", stackStartFn: failAssert });
 }
 
+// Deprecated in Node but still shipped: counts calls to wrapped functions.
+class CallTracker {
+  #contexts = new Set();
+  #tracked = new WeakMap();
+  calls(fn, expected = 1) {
+    if (typeof fn === "number") [fn, expected] = [() => {}, fn];
+    else if (fn === undefined) fn = () => {};
+    else if (typeof fn !== "function") throw Object.assign(new TypeError(`The "fn" argument must be of type function. Received ${typeof fn}`), { code: "ERR_INVALID_ARG_TYPE" });
+    if (!Number.isInteger(expected) || expected < 1 || expected > 4294967295) {
+      throw Object.assign(new RangeError(`The value of "expected" is out of range. It must be >= 1 && <= 4294967295. Received ${expected}`), { code: "ERR_OUT_OF_RANGE" });
+    }
+    const context = { expected, actual: 0, calls: [], stackTrace: new Error(), name: fn.name || "calls" };
+    const contexts = this.#contexts;
+    const tracked = new Proxy(fn, {
+      apply(target, thisArg, args) {
+        context.actual++;
+        context.calls.push(Object.freeze({ thisArg, arguments: args }));
+        if (context.actual === context.expected) contexts.delete(context);
+        else if (context.actual === context.expected + 1) contexts.add(context);
+        return Reflect.apply(target, thisArg, args);
+      },
+    });
+    contexts.add(context);
+    this.#tracked.set(tracked, context);
+    return tracked;
+  }
+  #context(fn) {
+    const context = this.#tracked.get(fn);
+    if (!context) throw Object.assign(new TypeError(`The argument 'fn' must be a tracked function. Received ${inspect(fn)}`), { code: "ERR_INVALID_ARG_VALUE" });
+    return context;
+  }
+  getCalls(fn) {
+    return this.#context(fn).calls.slice();
+  }
+  reset(fn) {
+    const reset = (context) => {
+      context.actual = 0;
+      context.calls = [];
+      this.#contexts.add(context);
+    };
+    if (fn === undefined) for (const context of this.#contexts) reset(context);
+    else reset(this.#context(fn));
+  }
+  report() {
+    return [...this.#contexts].filter((context) => context.actual !== context.expected).map((context) => ({
+      message: `Expected the ${context.name} function to be executed ${context.expected} time(s) but was executed ${context.actual} time(s).`,
+      actual: context.actual,
+      expected: context.expected,
+      operator: context.name,
+      stack: context.stackTrace,
+    }));
+  }
+  verify() {
+    const errors = this.report();
+    if (errors.length === 0) return;
+    const message = errors.length === 1 ? errors[0].message : "Functions were not called the expected number of times";
+    throw Object.assign(new AssertionError({ message }), { details: errors });
+  }
+}
+
 Object.assign(assert, {
   ok,
   fail: failAssert,
@@ -202,11 +262,7 @@ Object.assign(assert, {
   doesNotMatch,
   ifError,
   AssertionError,
-  CallTracker: class CallTracker {
-    constructor() {
-      throw internal.unsupported("assert.CallTracker");
-    }
-  },
+  CallTracker,
 });
 
 const strict = function strict(...args) {

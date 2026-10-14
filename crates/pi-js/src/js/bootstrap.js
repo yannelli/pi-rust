@@ -92,10 +92,34 @@
   }
 
   function requireFrom(id, parent) {
-    const resolved = native.modules.resolve(id, parent ? parent.filename : null, "require");
+    const resolved = resolveRequest(id, parent ? parent.filename : null);
     if (resolved.kind === "builtin") return loadBuiltin(resolved.key);
     if (resolved.kind === "virtual") return virtualValue(resolved.key);
     return requireFile(resolved.key, parent);
+  }
+
+  // Extensions added to require.extensions also resolve extensionless relative requests.
+  function resolveRequest(id, parentFile) {
+    try {
+      return native.modules.resolve(id, parentFile, "require");
+    } catch (error) {
+      if (!/^\.{0,2}[\\/]|^[A-Za-z]:[\\/]/.test(id) && !id.startsWith(".")) throw error;
+      for (const ext of Object.keys(Module._extensions)) {
+        if (Module._extensions[ext][kBuiltinHandler]) continue;
+        try {
+          return native.modules.resolve(id + ext, parentFile, "require");
+        } catch {}
+      }
+      throw error;
+    }
+  }
+
+  function findExtension(filename) {
+    const name = path.basename(filename);
+    for (let index = name.indexOf(".", 1); index !== -1; index = name.indexOf(".", index + 1)) {
+      if (Module._extensions[name.slice(index)]) return name.slice(index);
+    }
+    return ".js";
   }
 
   function requireFile(filename, parent) {
@@ -104,6 +128,8 @@
       if (parent && !parent.children.includes(cached)) parent.children.push(cached);
       return cached.exports;
     }
+    const handler = Module._extensions[findExtension(filename)];
+    if (typeof handler === "function" && !handler[kBuiltinHandler]) return requireWith(handler, filename, parent);
     const compiled = native.modules.compile(filename);
     if (compiled.format === "esm") return esmForRequire(native.modules.importSync(filename));
     const module = new Module(filename, parent);
@@ -129,6 +155,39 @@
     module.loaded = true;
     return module.exports;
   }
+
+  function requireWith(handler, filename, parent) {
+    const module = new Module(filename, parent);
+    module.filename = filename;
+    if (!mainModule && !parent) mainModule = module;
+    moduleCache[filename] = module;
+    let ok = false;
+    try {
+      handler(module, filename);
+      ok = true;
+    } finally {
+      if (!ok) delete moduleCache[filename];
+    }
+    module.loaded = true;
+    return module.exports;
+  }
+
+  // The built-in handlers, also callable from user handlers that wrap them.
+  const kBuiltinHandler = Symbol("builtinHandler");
+  function builtinHandler(module, filename) {
+    const compiled = native.modules.compile(filename);
+    if (compiled.format === "esm") module.exports = esmForRequire(native.modules.importSync(filename));
+    else if (compiled.format === "json") module.exports = JSON.parse(compiled.text.charCodeAt(0) === 0xfeff ? compiled.text.slice(1) : compiled.text);
+    else compiled.fn.call(module.exports, module.exports, makeRequire(module), module, filename, module.path);
+  }
+  builtinHandler[kBuiltinHandler] = true;
+  Module.prototype._compile = function _compile(content, filename) {
+    const compiled = native.modules.compile(filename, String(content));
+    if (compiled.format !== "cjs") {
+      throw Object.assign(new Error(`require() of ES Module ${filename} not supported.`), { code: "ERR_REQUIRE_ESM" });
+    }
+    return compiled.fn.call(this.exports, this.exports, makeRequire(this), this, filename, path.dirname(filename));
+  };
 
   // require() of an ES module returns its namespace, marked for Babel-style default interop.
   const esmWrappers = new WeakMap();
@@ -178,10 +237,11 @@
   Module._cache = moduleCache;
   Module._extensions = Object.create(null);
   for (const ext of [".js", ".json", ".cjs", ".mjs", ".ts", ".tsx", ".mts", ".cts", ".jsx"]) {
-    Module._extensions[ext] = function unsupportedExtension() {
-      throw internal.unsupported("require.extensions");
-    };
+    Module._extensions[ext] = builtinHandler;
   }
+  Module._extensions[".node"] = function loadAddon() {
+    throw internal.unsupported("process.dlopen");
+  };
   Module.createRequire = createRequire;
   Module.isBuiltin = isBuiltin;
   Module.Module = Module;
@@ -195,6 +255,10 @@
   internal.requireFile = requireFile;
 
   internal.resolveUrl = function resolveUrl(specifier, parentPath) {
+    if (internal.hookResolve && native.modules.hooksEnabled()) {
+      const key = internal.hookResolve(String(specifier), parentPath);
+      return path.isAbsolute(key) ? loadBuiltin("url").pathToFileURL(key).href : key;
+    }
     const resolved = native.modules.resolve(String(specifier), parentPath, "import");
     return resolved.kind === "file" ? loadBuiltin("url").pathToFileURL(resolved.key).href : resolved.key;
   };
@@ -217,7 +281,11 @@
     }
     return source;
   }
-  internal.cjsFacade = (filename) => facadeSource(filename, requireFile(filename, null), true);
+  internal.cjsFacade = (filename, source) => {
+    const compileSource = (module, file) => module._compile(source, file);
+    const exports = source === undefined || moduleCache[filename] ? requireFile(filename, null) : requireWith(compileSource, filename, null);
+    return facadeSource(filename, exports, true);
+  };
   internal.builtinFacade = (name) => facadeSource(name.includes(":") ? name : "node:" + name, loadBuiltin(name), false);
   internal.virtualFacade = (key) => facadeSource(key, virtualValue(key), false);
   internal.valueFacade = (key, value) => facadeSource(key, value, false);
