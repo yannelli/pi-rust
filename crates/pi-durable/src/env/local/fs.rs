@@ -108,10 +108,14 @@ fn refuse_windows_directory(path: &str, kind: io::ErrorKind) -> io::Result<()> {
     Ok(())
 }
 
-/// libuv renames with `MoveFileExW`, which cannot replace a directory or move one onto an existing path; Rust's
-/// rename on Windows fails differently there.
+/// libuv renames with `MoveFileExW`, which cannot move a directory into itself (`EINVAL`), replace a directory, or
+/// move one onto an existing path (`EPERM`); Rust's rename on Windows fails differently there.
 fn refuse_windows_rename(from: &str, to: &str) -> io::Result<()> {
     if cfg!(windows) && from != to {
+        let source_is_dir = std::fs::symlink_metadata(from).is_ok_and(|metadata| metadata.is_dir());
+        if source_is_dir && Path::new(to).starts_with(from) {
+            return Err(io::ErrorKind::InvalidInput.into());
+        }
         if let (Ok(source), Ok(target)) = (std::fs::symlink_metadata(from), std::fs::symlink_metadata(to)) {
             if source.is_dir() || target.is_dir() {
                 return Err(io::ErrorKind::PermissionDenied.into());
