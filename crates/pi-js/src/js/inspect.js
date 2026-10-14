@@ -227,7 +227,7 @@ function describe(ctx, value, name, prefix, keys) {
     const text = RegExp.prototype.toString.call(value);
     return { base: stylize(ctx, text, "regexp"), keys: keys.filter((key) => key !== "lastIndex"), alone: true };
   }
-  if (value instanceof Error) {
+  if (value instanceof Error || Object.prototype.toString.call(value) === "[object Error]") {
     return { base: formatError(value), keys: keys.filter((key) => key !== "stack" && key !== "message"), alone: true };
   }
   if (value instanceof Promise) {

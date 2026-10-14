@@ -105,6 +105,7 @@ const SOURCES: &[(&str, &str)] = &[
     ("internal/test_mock", include_str!("../js/test_mock.js")),
     ("test/reporters", include_str!("../js/test_reporters.js")),
     ("test", include_str!("../js/test.js")),
+    ("repl", include_str!("../js/repl.js")),
     (
         "constants",
         "module.exports = { ...require('os').constants.errno, ...require('os').constants.signals, ...require('os').constants.priority, ...require('internal/fs_utils').constants };",

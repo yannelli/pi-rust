@@ -78,7 +78,7 @@ const types = {
   isWeakSet: (value) => value instanceof WeakSet,
   isMapIterator: (value) => tagOf(value) === "Map Iterator",
   isSetIterator: (value) => tagOf(value) === "Set Iterator",
-  isNativeError: (value) => value instanceof Error,
+  isNativeError: (value) => value instanceof Error || Object.prototype.toString.call(value) === "[object Error]",
   isAsyncFunction: (value) => typeof value === "function" && value[Symbol.toStringTag] === "AsyncFunction",
   isGeneratorFunction: (value) => typeof value === "function" &&
     (value[Symbol.toStringTag] === "GeneratorFunction" || value[Symbol.toStringTag] === "AsyncGeneratorFunction"),
