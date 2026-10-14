@@ -30,6 +30,7 @@ function normalizeStdio(stdio) {
     if (typeof entry === "number" && STDIO_NAMES[entry]) return "inherit";
     if (entry === process.stdin || entry === process.stdout || entry === process.stderr) return "inherit";
     if (entry === "pipe" || entry === "ignore" || entry === "inherit") return entry;
+    if (entry === "ipc") return "ignore";
     throw internal.unsupported(`child_process stdio[${index}] value ${typeof entry === "object" ? "stream" : String(entry)}`);
   });
 }
@@ -69,12 +70,23 @@ function normalizeSpawn(file, args, options) {
     }
   }
   if (options.argv0 !== undefined && typeof options.argv0 !== "string") throw invalidArg("options.argv0", "of type string", options.argv0);
+  const ipcCount = Array.isArray(options.stdio) ? options.stdio.filter((entry) => entry === "ipc").length : 0;
+  if (ipcCount > 1) throw Object.assign(new Error("Child process can have only one IPC pipe"), { code: "ERR_IPC_ONE_PIPE" });
+  const serialization = options.serialization ?? "json";
+  if (serialization !== "json" && serialization !== "advanced") {
+    throw Object.assign(new TypeError(`The property 'options.serialization' must be one of: 'json', 'advanced'. Received ${require("util").inspect(serialization)}`), { code: "ERR_INVALID_ARG_VALUE" });
+  }
+  // The pi binary runs JavaScript like node when it spawns itself, as Node code expects.
+  const extraEnv = [];
+  if (!options.shell && path.resolve(file) === process.execPath) extraEnv.push(["PI_JS_FORK", "1"]);
   return {
+    ipc: ipcCount === 1,
+    serialization,
     native: {
       file: command,
       args: argv,
       cwd: resolveCwd(options.cwd),
-      env: Object.keys(env).filter((key) => env[key] !== undefined).map((key) => [key, String(env[key])]),
+      env: [...Object.keys(env).filter((key) => env[key] !== undefined).map((key) => [key, String(env[key])]), ...extraEnv],
       stdio: stdio.map(nativeStdio),
       windowsHide: !!options.windowsHide,
       windowsVerbatimArguments: verbatim,
@@ -125,8 +137,19 @@ class ChildProcess extends EventEmitter {
       readable.on("close", () => this._streamClosed());
     }
     this.stdio = [null, this.stdout, this.stderr];
+    if (spec.ipc) {
+      const ipc = require("internal/ipc");
+      this._channelId = ipc.setupChannel(this, (callback) => {
+        const listening = native.pipe.listen(callback);
+        spec.native.env.push(["PI_JS_IPC", listening.path], ["PI_JS_IPC_SERIALIZATION", spec.serialization]);
+        return listening.id;
+      }, spec.serialization);
+      this._pending++;
+      this.once("disconnect", () => this._streamClosed());
+    }
     const result = nativeChild.spawn(spec.native, (kind, value, signal) => this._event(kind, value, signal, outputs));
     if (result.error) {
+      if (this._closeChannel) this._closeChannel();
       Object.assign(result.error, { spawnargs: spec.spawnargs.slice(1) });
       process.nextTick(() => {
         this.emit("error", result.error);
@@ -172,6 +195,8 @@ class ChildProcess extends EventEmitter {
     }
     this.emit("exit", this.exitCode, this.signalCode);
     this._exited = true;
+    // A child that never connected its channel will not close it either.
+    if (this.connected && this._closeChannel && !this._channelConnected) this._closeChannel();
     this._maybeClose();
   }
   _streamClosed() {
@@ -198,12 +223,6 @@ class ChildProcess extends EventEmitter {
   unref() {
     if (this._id !== null) nativeChild.ref(this._id, false);
   }
-  disconnect() {
-    throw internal.unsupported("child_process IPC (disconnect)");
-  }
-  send() {
-    throw internal.unsupported("child_process IPC (send)");
-  }
   [Symbol.dispose]() {
     if (!this.killed) this.kill();
   }
@@ -225,6 +244,24 @@ function spawn(file, args, options) {
     const timer = setTimeout(() => child.kill(spec.options.killSignal || "SIGTERM"), spec.options.timeout);
     child.once("exit", () => clearTimeout(timer));
   }
+  return child;
+}
+
+function fork(modulePath, args, options) {
+  if (modulePath instanceof URL) modulePath = require("url").fileURLToPath(modulePath);
+  if (typeof modulePath !== "string") throw invalidArg("modulePath", "of type string or an instance of URL", modulePath);
+  if (args === undefined || args === null) args = [];
+  else if (typeof args === "object" && !Array.isArray(args)) [options, args] = [args, []];
+  else if (!Array.isArray(args)) throw invalidArg("args", "an instance of Array", args);
+  options = { ...options };
+  const execArgv = options.execArgv || process.execArgv;
+  if (typeof options.stdio === "string") options.stdio = [options.stdio, options.stdio, options.stdio, "ipc"];
+  else if (!Array.isArray(options.stdio)) options.stdio = options.silent ? ["pipe", "pipe", "pipe", "ipc"] : ["inherit", "inherit", "inherit", "ipc"];
+  else if (!options.stdio.includes("ipc")) {
+    throw Object.assign(new Error("Forked processes must have an IPC channel, missing value 'ipc' in options.stdio"), { code: "ERR_CHILD_PROCESS_IPC_REQUIRED" });
+  }
+  const execPath = options.execPath || process.execPath;
+  const child = spawn(execPath, [...execArgv, modulePath, ...args.map(String)], { ...options, shell: false });
   return child;
 }
 
@@ -361,10 +398,8 @@ module.exports = {
   spawnSync,
   execSync,
   execFileSync,
-  fork() {
-    throw internal.unsupported("child_process.fork");
-  },
+  fork,
   _forkChild() {
-    throw internal.unsupported("child_process.fork");
+    throw internal.unsupported("child_process._forkChild");
   },
 };

@@ -119,6 +119,11 @@ impl Resolver for PiResolver {
         name: &str,
         _attributes: Option<ImportAttributes<'js>>,
     ) -> rquickjs::Result<String> {
+        if state().module_hooks.get() {
+            let internal = state().internal(ctx)?;
+            let hook: Function = internal.get("hookResolve")?;
+            return hook.call((name, base));
+        }
         resolve_key(name, Some(base)).map_err(|error| throw(ctx, &error))
     }
 }
@@ -138,6 +143,11 @@ impl Loader for PiLoader {
 
 fn load<'js>(ctx: &Ctx<'js>, key: &str) -> Result<Module<'js, Declared>, JsError> {
     let state = state();
+    if state.module_hooks.get()
+        && let Some(module) = hooked_load(ctx, key)?
+    {
+        return Ok(module);
+    }
     if let Some(source) = inline_source(&state, key) {
         return load_source(ctx, key, Path::new(key), &source);
     }
@@ -157,6 +167,26 @@ fn load<'js>(ctx: &Ctx<'js>, key: &str) -> Result<Module<'js, Declared>, JsError
     }
     let source = std::fs::read_to_string(&path).map_err(|error| JsError::from_io(&error, "open", Some(key)))?;
     load_source(ctx, key, &path, &source)
+}
+
+/// Run `module.register` load hooks; `None` when no hook supplied the module.
+fn hooked_load<'js>(ctx: &Ctx<'js>, key: &str) -> Result<Option<Module<'js, Declared>>, JsError> {
+    let internal = state().internal(ctx).map_err(|error| caught(ctx, error))?;
+    let hook: Function = internal.get("hookLoad").map_err(|error| caught(ctx, error))?;
+    let result: Option<rquickjs::Object> = hook.call((key,)).map_err(|error| caught(ctx, error))?;
+    let Some(result) = result else { return Ok(None) };
+    let format: String = result.get("format").map_err(|error| caught(ctx, error))?;
+    let source: Option<String> = result.get("source").map_err(|error| caught(ctx, error))?;
+    let module = match (format.as_str(), source) {
+        ("builtin", _) => facade(ctx, key, "builtinFacade", (key.strip_prefix("node:").unwrap_or(key).to_string(),))?,
+        ("commonjs", source) => facade(ctx, key, "cjsFacade", (key.to_string(), source))?,
+        ("json", Some(source)) => {
+            let value = ctx.json_parse(source).map_err(|error| caught(ctx, error))?;
+            facade(ctx, key, "valueFacade", (key.to_string(), value))?
+        }
+        (_, source) => load_source(ctx, key, Path::new(key), &source.unwrap_or_default())?,
+    };
+    Ok(Some(module))
 }
 
 fn load_source<'js>(ctx: &Ctx<'js>, key: &str, path: &Path, source: &str) -> Result<Module<'js, Declared>, JsError> {

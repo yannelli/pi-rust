@@ -44,6 +44,12 @@ impl PositionMap {
     }
 }
 
+/// The tokens of the map registered for `file`, for `module.findSourceMap`.
+pub(crate) fn registered_tokens(file: &str) -> Option<Vec<[u32; 4]>> {
+    REGISTRY
+        .with(|registry| registry.borrow().get(file).and_then(|entry| entry.map.as_ref().map(|map| map.tokens.clone())))
+}
+
 struct Registered {
     map: Option<Rc<PositionMap>>,
     /// Characters the loader put before the code on the first line.

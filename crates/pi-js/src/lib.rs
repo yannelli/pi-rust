@@ -7,6 +7,7 @@ pub mod host;
 mod modules;
 mod node;
 pub mod resolve;
+pub mod runner;
 pub mod runtime;
 pub mod transpile;
 pub mod unsupported;

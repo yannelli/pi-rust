@@ -16,35 +16,36 @@ pub fn supported_modules() -> Vec<&'static str> {
 
 /// APIs inside supported modules that throw the unsupported error.
 pub const UNSUPPORTED_APIS: &[&str] = &[
-    "crypto: createCipheriv, createDecipheriv, createSign, createVerify, sign, verify, key pairs and key objects \
-     beyond createSecretKey, Diffie-Hellman and ECDH, public and private encrypt, scrypt, hkdf, primes, \
-     webcrypto.subtle except digest, setFips",
-    "fs: glob, lchmod, fchmod, fchown, lutimes, statfs, openAsBlob, bigint Stats, cp with a filter, \
-     FileHandle chmod, chown, and readableWebStream; reading descriptor 0",
-    "child_process: fork, IPC (send and disconnect), stdio entries that are streams or descriptors above 2",
-    "process: reading stdin, stdin.setRawMode, cpuUsage, resourceUsage, abort, binding, dlopen, \
-     setUncaughtExceptionCaptureCallback",
-    "os: networkInterfaces, getPriority, setPriority",
-    "stream: compose, Duplex.from for values that are not iterables; stream/web BYOB readers, \
+    "crypto: ciphers outside AES (CBC, CTR, ECB, CFB, OFB, GCM, CCM, OCB), DES, 3DES, and ChaCha20-Poly1305 \
+     (for example aes-128-cfb8, aes-*-xts, camellia, bf, rc4), AES-GCM IVs longer than 16 bytes other than \
+     32 or 64, AES-OCB IVs other than 8, 12, or 15 bytes and tags other than 8, 12, or 16, RSA-OAEP labels \
+     that are not UTF-8, DSA sizes other than 1024/160, 2048/224, 2048/256, and 3072/256, private key encryption \
+     with ciphers other than AES-CBC and 3DES-CBC (or PBES1), webcrypto.subtle except digest, setFips",
+    "fs: lchmod, fchmod, fchown, lutimes, statfs, openAsBlob, FileHandle chmod, chown, and readableWebStream",
+    "child_process: stdio entries that are streams or descriptors above 2, sending handles over IPC \
+     (ERR_INVALID_HANDLE_TYPE, as there is no net module)",
+    "process: binding, dlopen, setUncaughtExceptionCaptureCallback, and running code after process.exit when \
+     the embedder's on_exit callback returns (the runtime is shutting down)",
+    "stream: Duplex.from for promises and web streams; stream/web BYOB readers, \
      ReadableByteStreamController, CompressionStream, DecompressionStream",
     "fetch: Body.formData for multipart bodies, request bodies are buffered before sending",
-    "util: parseArgs, getSystemErrorName, getSystemErrorMap, MIMEType, transferableAbortController, types.isProxy",
-    "module: register, findSourceMap, require.extensions",
-    "perf_hooks: PerformanceObserver, timerify, eventLoopUtilization, monitorEventLoopDelay",
-    "misc: path.matchesGlob, buffer.transcode, buffer.resolveObjectURL, URL.createObjectURL, \
-     URL.revokeObjectURL, assert.CallTracker, events.EventEmitterAsyncResource, tty.ReadStream, \
-     diagnostics_channel.tracingChannel and bindStore",
 ];
 
 /// Supported behavior that differs from Node.
 pub const DIFFERENCES: &[&str] = &[
-    "fs.watch polls every 100 ms (or options.interval) and fs.watchFile every 5007 ms by default",
-    "process.stdin is empty, and stdio 'inherit' for a child's stdin gives it no input",
+    "stdio 'inherit' for a child's stdin gives it no input",
+    "child_process.fork, and spawning process.execPath, run the script in this binary's JavaScript runner \
+     (PI_JS_FORK); the IPC channel is a Unix socket or Windows named pipe, not an inherited descriptor",
+    "tty.ReadStream works only for descriptor 0 (process.stdin); other descriptors fail with ERR_TTY_INIT_FAILED",
+    "PerformanceObserver sees function, mark, and measure entries only",
     "child stdout and stderr with stdio 'inherit' go to the runtime's output sink, not the real terminal",
     "process.exit calls the embedder's on_exit callback when one is set",
     "os.cpus reports no CPU times; os.freemem and os.totalmem come from /proc, sysctl, or vm_stat",
     "fetch does not decompress gzip or brotli bodies and sends no accept-encoding header",
     "readline has no raw terminal editing: lines come from the input stream as text",
+    "module.register hooks run on the importing thread: a hook's promise must settle from microtasks alone, \
+     and hooks apply to import, not require",
+    "events.EventEmitterAsyncResource and diagnostics_channel stores run without async_hooks contexts",
 ];
 
 #[cfg(test)]

@@ -84,9 +84,9 @@ function copyInto(buffer, offset, bytes) {
 }
 
 fs.readSync = function readSync(fd, buffer, offsetOrOptions, length, position) {
-  if (fd === 0) throw internal.unsupported("Reading standard input");
   const args = readArgs(buffer, offsetOrOptions, length, position);
   if (args.length === 0) return 0;
+  if (fd === 0) return copyInto(buffer, args.offset, native.pipe.readStdinSync(args.length));
   return copyInto(buffer, args.offset, utils.sync({ op: "read", fd: utils.toFd(fd), length: args.length, position: args.position }));
 };
 fs.read = function read(fd, buffer, offsetOrOptions, length, position, callback) {
@@ -238,8 +238,12 @@ Object.assign(fs, {
   W_OK: 2,
   X_OK: 1,
 });
-fs.glob = fs.globSync = () => {
-  throw internal.unsupported("fs.glob");
+fs.globSync = (pattern, options) => require("internal/glob").globSync(pattern, options);
+fs.glob = function glob(pattern, options, callback) {
+  if (typeof options === "function") [callback, options] = [options, undefined];
+  if (typeof callback !== "function") throw utils.invalidArg("callback", "of type function", callback);
+  const matches = fs.globSync(pattern, options);
+  process.nextTick(callback, null, matches);
 };
 Object.defineProperty(fs, "promises", { enumerable: true, configurable: true, get: () => require("fs/promises") });
 fs._toUnixTimestamp = (time) => require("internal/fs_ops").toSeconds(time);

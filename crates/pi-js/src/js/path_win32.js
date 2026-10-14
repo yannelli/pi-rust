@@ -284,8 +284,8 @@ module.exports = function createWin32({ normalizeString, format, scanSegment, ba
       ret.dir = startPart > 0 && startPart !== rootEnd ? path.slice(0, startPart - 1) : ret.root;
       return ret;
     },
-    matchesGlob() {
-      throw internal.unsupported("path.matchesGlob");
+    matchesGlob(path, pattern) {
+      return require("internal/glob").matchesGlob(path, pattern, true);
     },
   };
   return win32;

@@ -148,70 +148,42 @@ WriteStream.prototype.close = function close(callback) {
 };
 WriteStream.prototype.destroySoon = WriteStream.prototype.end;
 
-// fs.watch polls: compare a snapshot of names, sizes, and modification times.
-// A path that is missing or unreadable is an empty snapshot, so its return shows as 'rename'.
-function snapshot(target, recursive) {
-  const entries = new Map();
-  let stats;
-  try {
-    stats = runSync(ops.stat(target));
-  } catch {
-    return entries;
-  }
-  if (!stats.isDirectory()) {
-    entries.set(path.basename(target), `${stats.mtimeMs}:${stats.size}`);
-    return entries;
-  }
-  let names = [];
-  try {
-    names = runSync(ops.readdir(target, { recursive }));
-  } catch {
-    return entries;
-  }
-  for (const name of names) {
-    try {
-      const entry = runSync(ops.lstat(path.join(target, name)));
-      entries.set(name, `${entry.mtimeMs}:${entry.size}`);
-    } catch {
-      entries.set(name, "gone");
-    }
-  }
-  return entries;
-}
-
+// fs.watch on native file events; `persistent: false` lets the process exit while watching.
 class FSWatcher extends EventEmitter {
-  #timer;
-  #entries;
+  #id = null;
+  #persistent = true;
   constructor(target, options, listener) {
     super();
-    const recursive = !!options.recursive;
-    this.#entries = snapshot(target, recursive);
     if (listener) this.on("change", listener);
-    this.#timer = setInterval(() => this.#poll(target, recursive), options.interval || 100);
-    if (options.persistent === false) this.#timer.unref();
-    if (options.signal) options.signal.addEventListener("abort", () => this.close(), { once: true });
-  }
-  #poll(target, recursive) {
-    const next = snapshot(target, recursive);
-    for (const [name, value] of next) {
-      if (!this.#entries.has(name)) this.emit("change", "rename", name);
-      else if (this.#entries.get(name) !== value) this.emit("change", "change", name);
+    const encoding = options.encoding || "utf8";
+    this.#id = native.watch.watch(target, !!options.recursive, (eventType, value) => {
+      if (eventType === "error") {
+        this.emit("error", value);
+        this.close();
+        return;
+      }
+      const name = encoding === "buffer" ? require("buffer").Buffer.from(value) : value;
+      this.emit("change", eventType, name);
+    });
+    this.#persistent = options.persistent !== false;
+    native.watch.ref(this.#id, this.#persistent);
+    if (options.signal) {
+      if (options.signal.aborted) process.nextTick(() => this.close());
+      else options.signal.addEventListener("abort", () => this.close(), { once: true });
     }
-    for (const name of this.#entries.keys()) if (!next.has(name)) this.emit("change", "rename", name);
-    this.#entries = next;
   }
   close() {
-    if (!this.#timer) return;
-    clearInterval(this.#timer);
-    this.#timer = null;
+    if (this.#id === null) return;
+    native.watch.close(this.#id);
+    this.#id = null;
     process.nextTick(() => this.emit("close"));
   }
   ref() {
-    if (this.#timer) this.#timer.ref();
+    if (this.#id !== null) native.watch.ref(this.#id, true);
     return this;
   }
   unref() {
-    if (this.#timer) this.#timer.unref();
+    if (this.#id !== null) native.watch.ref(this.#id, false);
     return this;
   }
 }

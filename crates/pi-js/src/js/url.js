@@ -135,11 +135,13 @@ class URL {
   static parse(input, base) {
     return URL.canParse(input, base) ? new URL(input, base) : null;
   }
-  static createObjectURL() {
-    throw internal.unsupported("URL.createObjectURL");
+  static createObjectURL(obj) {
+    require("buffer");
+    return internal.createObjectURL(obj);
   }
-  static revokeObjectURL() {
-    throw internal.unsupported("URL.revokeObjectURL");
+  static revokeObjectURL(...args) {
+    require("buffer");
+    return internal.revokeObjectURL(...args);
   }
   #set(field, value) {
     const parts = encoding.urlSet(this.#parts[0], field, String(value));

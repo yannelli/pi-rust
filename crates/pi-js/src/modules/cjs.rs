@@ -38,14 +38,29 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
     object.set("compile", Function::new(ctx.clone(), compile)?)?;
     object.set("importSync", Function::new(ctx.clone(), |ctx: Ctx<'js>, key: String| import_sync(&ctx, &key))?)?;
     object.set("virtualValue", Function::new(ctx.clone(), virtual_value)?)?;
+    crate::node::set_fn(&object, "settle", |promise: rquickjs::Promise<'js>| promise.finish::<Value<'js>>())?;
+    crate::node::set_fn(&object, "enableHooks", || state().module_hooks.set(true))?;
+    crate::node::set_fn(&object, "hooksEnabled", || state().module_hooks.get())?;
+    crate::node::set_fn(&object, "sourceMapTokens", |file: String| {
+        crate::transpile::registered_tokens(&file).map(|tokens| tokens.into_iter().map(Vec::from).collect::<Vec<_>>())
+    })?;
+    crate::node::set_fn(&object, "detectFormat", |ctx: Ctx<'js>, file: String, source: String| {
+        let transpiled = state()
+            .shared
+            .transpiler
+            .get_or_transpile(Path::new(&file), &source)
+            .map_err(|error| throw(&ctx, &error))?;
+        Ok::<_, rquickjs::Error>(if transpiled.format == ModuleFormat::Esm { "module" } else { "commonjs" })
+    })?;
     Ok(object)
 }
 
 /// `{ format: "cjs", fn }`, `{ format: "esm" }`, or `{ format: "json", text }` for a file.
-fn compile<'js>(ctx: Ctx<'js>, filename: String) -> rquickjs::Result<Object<'js>> {
+/// `source`, when given, replaces the file's text (`module._compile`, `load` hooks).
+fn compile<'js>(ctx: Ctx<'js>, filename: String, source: Opt<String>) -> rquickjs::Result<Object<'js>> {
     let result = Object::new(ctx.clone())?;
     let state = state();
-    let registered = super::registered_source(&state, &filename);
+    let registered = source.0.map(Into::into).or_else(|| super::registered_source(&state, &filename));
     if registered.is_none() && super::has_inline_source(&state, &filename) {
         result.set("format", "esm")?;
         return Ok(result);

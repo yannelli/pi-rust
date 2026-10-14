@@ -88,3 +88,43 @@ async fn timers_assert_path_util_events_and_process_match_node() {
     assert_eq!(capture.stdout(), "log line { k: 1 }\n");
     assert_eq!(capture.stderr(), "err\n");
 }
+
+const MIME_SCRIPT: &str = r##"
+const { MIMEType, MIMEParams } = require("node:util");
+const mime = new MIMEType("text/ecmascript;key=value");
+const before = [mime.type, mime.subtype, mime.essence, mime.params.get("key"), String(mime)];
+mime.type = "Application";
+const quoted = new MIMEType(' Text/Plain ; charset="utf-8"; Foo=Bar; foo=dup; empty=; "x" ');
+quoted.params.set("q", "a b\"c");
+const params = new MIMEParams();
+params.set("a", "1");
+let error;
+try { new MIMEType("text/plain/x"); } catch (e) { error = [e.code, e.message, e instanceof TypeError]; }
+return {
+  before,
+  after: [mime.toString(), mime.essence],
+  quoted: [quoted.toString(), [...quoted.params.keys()], quoted.params.has("empty"), JSON.stringify({ m: quoted })],
+  params: [params.toString(), [...params], params.get("b")],
+  error,
+};
+"##;
+
+#[tokio::test]
+async fn util_mime_type_parses_like_node() {
+    let (_dir, root) = tempdir();
+    let (runtime, _capture) = runtime(&root);
+    let actual = run_cjs(&runtime, &root, MIME_SCRIPT).await;
+    let expected = serde_json::json!({
+        "before": ["text", "ecmascript", "text/ecmascript", "value", "text/ecmascript;key=value"],
+        "after": ["application/ecmascript;key=value", "application/ecmascript"],
+        "quoted": [
+            "text/plain;charset=utf-8;foo=Bar;q=\"a b\\\"c\"",
+            ["charset", "foo", "q"],
+            false,
+            "{\"m\":\"text/plain;charset=utf-8;foo=Bar;q=\\\"a b\\\\\\\"c\\\"\"}"
+        ],
+        "params": ["a=1", [["a", "1"]], null],
+        "error": ["ERR_INVALID_MIME_SYNTAX", "The MIME syntax for a subtype in \"text/plain/x\" is invalid at 5", true]
+    });
+    assert_same_keys(&actual, &expected);
+}

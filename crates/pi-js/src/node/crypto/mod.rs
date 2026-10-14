@@ -1,4 +1,20 @@
-//! Natives for `node:crypto`: incremental hashes and HMACs, random bytes, and PBKDF2.
+//! Natives for `node:crypto`: hashes and HMACs, random bytes, KDFs, ciphers, and asymmetric keys.
+
+mod aead;
+mod bigint;
+mod cipher;
+mod der;
+mod dsa;
+mod ec;
+mod jwk;
+mod kdf;
+mod keyenc;
+mod keys;
+mod modes;
+mod natives_keys;
+mod okp;
+mod ops;
+mod rsa;
 
 use md5::Digest as _;
 use ring::rand::{SecureRandom, SystemRandom};
@@ -92,10 +108,37 @@ impl HashState {
     }
 }
 
+/// Constant-time comparison of two equal-length byte strings.
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
 fn random_bytes(length: usize) -> Result<Vec<u8>, JsError> {
     let mut bytes = vec![0; length];
     SystemRandom::new().fill(&mut bytes).map_err(|_| JsError::new("The system random generator failed"))?;
     Ok(bytes)
+}
+
+/// Node's digest name in canonical form: `RSA-SHA256`, `sha256WithRSAEncryption`, `SHA-256` -> `sha256`.
+fn normalize_hash(name: &str) -> Result<&'static str, JsError> {
+    let lower = name.to_ascii_lowercase();
+    let lower = lower.strip_prefix("rsa-").or_else(|| lower.strip_prefix("ecdsa-with-")).unwrap_or(&lower);
+    let lower = lower.strip_suffix("withrsaencryption").unwrap_or(lower);
+    Ok(match lower.replace(['-', '/'], "").as_str() {
+        "md5" => "md5",
+        "sha1" => "sha1",
+        "sha256" => "sha256",
+        "sha384" => "sha384",
+        "sha512" => "sha512",
+        "sha512256" => "sha512-256",
+        _ => return Err(JsError::type_error(format!("Invalid digest: {name}")).with_code("ERR_CRYPTO_INVALID_DIGEST")),
+    })
+}
+
+fn digest(hash: &str, data: &[u8]) -> Result<Vec<u8>, JsError> {
+    let mut hasher = Hasher::new(normalize_hash(hash)?)?;
+    hasher.update(data);
+    Ok(hasher.finish())
 }
 
 fn pbkdf2(password: &[u8], salt: &[u8], iterations: u32, length: usize, digest: &str) -> Result<Vec<u8>, JsError> {
@@ -153,6 +196,7 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
                 .and_then(|bytes| bytes_to_js(&ctx, bytes))
         },
     )?;
+    natives_keys::register(&object)?;
     Ok(object)
 }
 

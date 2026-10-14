@@ -582,6 +582,10 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
 const STACK_SIZE: usize = 8 * 1024 * 1024;
 
 fn main() {
+    // child_process.fork in an extension starts this binary to run a script like node.
+    if let Some(code) = pi_js::runner::child_main() {
+        std::process::exit(code);
+    }
     let raw: Vec<String> = std::env::args().skip(1).collect();
     let driver = std::thread::Builder::new().name("main".into()).stack_size(STACK_SIZE).spawn(move || {
         let runtime = tokio::runtime::Builder::new_multi_thread()

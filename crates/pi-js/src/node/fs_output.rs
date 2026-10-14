@@ -13,7 +13,7 @@ pub(crate) enum Output {
     Text(String),
     MaybeText(Option<String>),
     Bytes(Vec<u8>),
-    Stat(StatInfo),
+    Stat(Box<StatInfo>),
     /// `(name, type)` pairs; names are relative paths for recursive listings.
     Entries(Vec<(String, u8)>),
 }
@@ -48,6 +48,7 @@ pub(crate) fn to_js<'js>(ctx: &Ctx<'js>, output: Output) -> Result<Value<'js>, J
             for (key, value) in fields {
                 object.set(key, value)?;
             }
+            object.set("exact", info.exact.iter().map(i128::to_string).collect::<Vec<_>>())?;
             Ok(object.into_value())
         }
         Output::Entries(entries) => {

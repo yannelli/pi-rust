@@ -303,7 +303,9 @@ pub(crate) fn run(request: Request, data: Option<Vec<u8>>, cwd: &Path, shared: &
         Request::Fstat { fd } => {
             let file = files.get(fd, "fstat")?;
             let file = file.lock().unwrap_or_else(|poison| poison.into_inner());
-            Output::Stat(fs_ops::stat_info(&file.metadata().map_err(|error| JsError::from_io(&error, "fstat", None))?))
+            Output::Stat(Box::new(fs_ops::stat_info(
+                &file.metadata().map_err(|error| JsError::from_io(&error, "fstat", None))?,
+            )))
         }
         Request::Futimes { fd, atime, mtime } => {
             let file = files.get(fd, "futime")?;
@@ -314,7 +316,9 @@ pub(crate) fn run(request: Request, data: Option<Vec<u8>>, cwd: &Path, shared: &
         Request::Stat { path, follow } => {
             let target = resolve(&path);
             let metadata = if follow { fs::metadata(target) } else { fs::symlink_metadata(target) };
-            Output::Stat(fs_ops::stat_info(&metadata.map_err(io_error(if follow { "stat" } else { "lstat" }, &path))?))
+            Output::Stat(Box::new(fs_ops::stat_info(
+                &metadata.map_err(io_error(if follow { "stat" } else { "lstat" }, &path))?,
+            )))
         }
         Request::Exists { path } => Output::Bool(resolve(&path).exists()),
         Request::Access { path, mode } => {

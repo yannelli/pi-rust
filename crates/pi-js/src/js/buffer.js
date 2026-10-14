@@ -415,10 +415,53 @@ module.exports = {
   INSPECT_MAX_BYTES: 50,
   isUtf8: (value) => encoding.isUtf8(internal.bytesToLatin1(value)),
   isAscii: (value) => Array.prototype.every.call(new Uint8Array(value.buffer || value, value.byteOffset, value.byteLength), (byte) => byte < 128),
-  transcode() {
-    throw internal.unsupported("buffer.transcode");
-  },
-  resolveObjectURL() {
-    throw internal.unsupported("buffer.resolveObjectURL");
-  },
+  transcode,
+  resolveObjectURL,
 };
+
+// ICU's converters as Node uses them: characters the target cannot hold become "?".
+const TRANSCODE_NAMES = { utf8: "utf8", "utf-8": "utf8", ucs2: "utf16le", "ucs-2": "utf16le", utf16le: "utf16le", "utf-16le": "utf16le", latin1: "latin1", binary: "latin1", ascii: "ascii" };
+function transcode(source, fromEncoding, toEncoding) {
+  if (!(source instanceof Uint8Array)) {
+    throw require("internal/errors").invalidArgType("source", "an instance of Buffer or Uint8Array", source);
+  }
+  if (source.length === 0) return Buffer.alloc(0);
+  const from = TRANSCODE_NAMES[String(fromEncoding).toLowerCase()];
+  const to = TRANSCODE_NAMES[String(toEncoding).toLowerCase()];
+  if (!from || !to) {
+    throw Object.assign(new Error("Unable to transcode Buffer [U_ILLEGAL_ARGUMENT_ERROR]"), { code: "U_ILLEGAL_ARGUMENT_ERROR", errno: 1 });
+  }
+  let text = Buffer.from(source.buffer, source.byteOffset, source.byteLength).toString(from === "ascii" ? "latin1" : from);
+  if (from === "ascii") text = text.replace(/[\u0080-\u00ff]/g, "\ufffd");
+  if (to === "ascii") text = text.replace(/[^\x00-\x7f]/gu, "?");
+  else if (to === "latin1") text = text.replace(/[^\x00-\xff]/gu, "?");
+  return Buffer.from(text, to);
+}
+
+// Blob URLs: blob:nodedata:<uuid>, registered by URL.createObjectURL.
+const blobUrls = new Map();
+internal.createObjectURL = function createObjectURL(blob) {
+  if (!(blob instanceof Blob)) throw require("internal/errors").invalidArgType("obj", "an instance of Blob", blob);
+  const id = require("crypto").randomUUID();
+  blobUrls.set(id, blob);
+  return `blob:nodedata:${id}`;
+};
+function blobId(target) {
+  let parsed;
+  try {
+    parsed = new URL(`${target}`);
+  } catch {
+    return undefined;
+  }
+  if (parsed.protocol !== "blob:" || !parsed.pathname.startsWith("nodedata:")) return undefined;
+  return parsed.pathname.slice("nodedata:".length);
+}
+internal.revokeObjectURL = function revokeObjectURL(target) {
+  if (arguments.length === 0) throw require("internal/errors").missingArgs("url");
+  const id = blobId(target);
+  if (id !== undefined) blobUrls.delete(id);
+};
+function resolveObjectURL(target) {
+  const id = blobId(target);
+  return id === undefined ? undefined : blobUrls.get(id);
+}

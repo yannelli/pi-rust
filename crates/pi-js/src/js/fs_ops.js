@@ -1,7 +1,7 @@
 // internal/fs_ops: each fs operation as a native request plus a result mapper, shared by the
 // sync, callback, and promise APIs.
 const utils = require("internal/fs_utils");
-const { toPath, toFd, getOptions, flagString, parseMode, decode, dataToLatin1, Stats, makeEntries, checkBigint } = utils;
+const { toPath, toFd, getOptions, flagString, parseMode, decode, dataToLatin1, Stats, makeEntries, statsMapper } = utils;
 
 function toSeconds(time) {
   if (time instanceof Date) return time.getTime() / 1000;
@@ -15,13 +15,13 @@ function encoded(options) {
   return (text) => (encoding === "buffer" ? require("buffer").Buffer.from(text) : text);
 }
 
-const toStats = (raw) => new Stats(raw);
 
 const ops = {
   access: (path, mode = 0) => ({ request: { op: "access", path: toPath(path), mode } }),
   exists: (path) => ({ request: { op: "exists", path: toPath(path) } }),
   readFile(path, options) {
     options = getOptions(options, { flag: "r" });
+    if (path === 0) return { custom: () => native.pipe.readStdinSync(), map: (bytes) => decode(bytes, options.encoding) };
     const request = typeof path === "number" ? { op: "readFile", fd: toFd(path) } : { op: "readFile", path: toPath(path) };
     return { request, map: (bytes) => decode(bytes, options.encoding) };
   },
@@ -36,16 +36,13 @@ const ops = {
     return ops.writeFile(path, data, getOptions(options, { encoding: "utf8", mode: 0o666, flag: "a" }));
   },
   stat(path, options) {
-    checkBigint(options);
-    return { request: { op: "stat", path: toPath(path), follow: true }, map: toStats };
+    return { request: { op: "stat", path: toPath(path), follow: true }, map: statsMapper(options) };
   },
   lstat(path, options) {
-    checkBigint(options);
-    return { request: { op: "stat", path: toPath(path), follow: false }, map: toStats };
+    return { request: { op: "stat", path: toPath(path), follow: false }, map: statsMapper(options) };
   },
   fstat(fd, options) {
-    checkBigint(options);
-    return { request: { op: "fstat", fd: toFd(fd) }, map: toStats };
+    return { request: { op: "fstat", fd: toFd(fd) }, map: statsMapper(options) };
   },
   readdir(path, options) {
     options = getOptions(options, { encoding: "utf8" });
@@ -67,7 +64,6 @@ const ops = {
   copyFile: (from, to, mode = 0) => ({ request: { op: "copyFile", from: toPath(from, "src"), to: toPath(to, "dest"), flags: mode } }),
   cp(from, to, options) {
     options = options || {};
-    if (options.filter) throw internal.unsupported("fs.cp with a filter option");
     const request = {
       op: "cp",
       from: toPath(from, "src"),
@@ -76,7 +72,9 @@ const ops = {
       force: options.force !== false,
       errorOnExist: !!options.errorOnExist,
     };
-    return { request };
+    if (options.filter === undefined) return { request };
+    if (typeof options.filter !== "function") throw utils.invalidArg("options.filter", "of type function", options.filter);
+    return { walk: () => Object.assign(cpWalk(request.from, request.to, request, options), { options }) };
   },
   realpath: (path, options) => ({ request: { op: "realpath", path: toPath(path) }, map: encoded(options) }),
   readlink: (path, options) => ({ request: { op: "readlink", path: toPath(path) }, map: encoded(options) }),
@@ -110,12 +108,51 @@ for (const name of ["lchmod", "fchmod", "fchown", "lutimes", "statfs", "openAsBl
   };
 }
 
+// fs.cp with a filter: ask the filter about each item, then copy files one by one.
+function* cpWalk(from, to, request, options) {
+  if (!(yield ["filter", from, to])) return;
+  const path = require("path");
+  const stats = yield ["op", options.dereference ? ops.stat(from) : ops.lstat(from)];
+  if (!stats.isDirectory() || !request.recursive) {
+    yield ["op", { request: { ...request, from, to, recursive: false } }];
+    return;
+  }
+  yield ["op", ops.mkdir(to, { recursive: true })];
+  for (const name of yield ["op", ops.readdir(from)]) yield* cpWalk(path.join(from, name), path.join(to, name), request, options);
+}
+
+function filterResult(value, sync) {
+  if (sync && value && typeof value.then === "function") {
+    throw Object.assign(new TypeError('Expected boolean to be returned from the "filter" function but got instance of Promise.'), { code: "ERR_INVALID_RETURN_VALUE" });
+  }
+  return value;
+}
+
 function runSync(spec) {
+  if (spec.custom) return spec.map(spec.custom());
+  if (spec.walk) {
+    const steps = spec.walk();
+    for (let input, step; !(step = steps.next(input)).done;) {
+      const [kind, a, b] = step.value;
+      input = kind === "filter" ? filterResult(steps.options.filter(a, b), true) : runSync(a);
+    }
+    return undefined;
+  }
   const result = utils.sync(spec.request, spec.data);
   return spec.map ? spec.map(result) : result;
 }
 
+async function runWalk(spec) {
+  const steps = spec.walk();
+  for (let input, step; !(step = steps.next(input)).done;) {
+    const [kind, a, b] = step.value;
+    input = kind === "filter" ? await steps.options.filter(a, b) : await runAsync(a);
+  }
+}
+
 function runAsync(spec) {
+  if (spec.custom) return Promise.resolve().then(() => spec.map(spec.custom()));
+  if (spec.walk) return runWalk(spec);
   const promise = utils.async(spec.request, spec.data);
   return spec.map ? promise.then(spec.map) : promise;
 }

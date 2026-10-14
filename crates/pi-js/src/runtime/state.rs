@@ -79,6 +79,12 @@ pub(crate) struct LoopState {
     /// `process.nextTick` callbacks are queued; they run before the next microtasks.
     pub ticks_pending: Cell<bool>,
     pub cwd: RefCell<PathBuf>,
+    /// When the event loop started and how long it has waited for work, for
+    /// `performance.eventLoopUtilization`.
+    pub loop_start: Cell<Option<std::time::Instant>>,
+    pub idle_time: Cell<std::time::Duration>,
+    /// `module.register` added resolve or load hooks.
+    pub module_hooks: Cell<bool>,
 }
 
 thread_local! {
@@ -106,6 +112,9 @@ impl LoopState {
             shutting_down: Cell::new(false),
             ticks_pending: Cell::new(false),
             cwd: RefCell::new(cwd),
+            loop_start: Cell::new(None),
+            idle_time: Cell::new(std::time::Duration::ZERO),
+            module_hooks: Cell::new(false),
         });
         STATE.with(|slot| *slot.borrow_mut() = Some(state.clone()));
         state

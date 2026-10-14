@@ -304,8 +304,8 @@ const posix = {
     else if (isAbsolute) ret.dir = "/";
     return ret;
   },
-  matchesGlob() {
-    throw internal.unsupported("path.matchesGlob");
+  matchesGlob(path, pattern) {
+    return require("internal/glob").matchesGlob(path, pattern, false);
   },
 };
 

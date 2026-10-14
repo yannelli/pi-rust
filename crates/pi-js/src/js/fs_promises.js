@@ -120,6 +120,10 @@ promises.opendir = async function opendir(target, options) {
   return new (require("fs").Dir)(directory, entries);
 };
 
+promises.glob = async function* glob(pattern, options) {
+  yield* require("internal/glob").globSync(pattern, options);
+};
+
 promises.watch = function watch(filename, options = {}) {
   const queue = [];
   let wake = null;
