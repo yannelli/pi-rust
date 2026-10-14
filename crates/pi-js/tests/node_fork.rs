@@ -35,6 +35,7 @@ async fn fork_cases() {
     let (_dir, root) = tempdir();
     let _ = STAGE.set(root.join("stage"));
     let capture = std::sync::Arc::new(Capture::default());
+    let _ = CAPTURE.set(capture.clone());
     let mut options = options(&root, &capture);
     let mut env: std::collections::BTreeMap<String, String> = std::env::vars().collect();
     env.insert(GUARD.into(), "1".into());
@@ -52,6 +53,11 @@ const script = path.join(__dirname, "child.js");
 const events = [];
 fs.writeFileSync(path.join(__dirname, "stage"), "const child = fork(script, [echo, x]);");
 const child = fork(script, ["echo", "x"]);
+const mark = (text) => fs.appendFileSync(path.join(__dirname, "stage"), ` | ${text}`);
+child.on("spawn", () => mark("spawn"));
+child.on("exit", (code, signal) => mark(`exit ${code} ${signal}`));
+child.on("disconnect", () => mark("disconnect"));
+child.on("message", (message) => mark(`message ${JSON.stringify(message).slice(0, 24)}`));
 const replies = [];
 child.on("message", (message) => {
   replies.push(message);
@@ -158,6 +164,7 @@ const GUARD: &str = "PI_JS_FORK_TEST_CHILD";
 
 /// Where the parent script records the step it is on, for the timeout message.
 static STAGE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+static CAPTURE: std::sync::OnceLock<std::sync::Arc<Capture>> = std::sync::OnceLock::new();
 
 fn main() {
     if let Some(code) = pi_js::runner::child_main() {
@@ -170,7 +177,8 @@ fn main() {
     std::thread::spawn(|| {
         std::thread::sleep(std::time::Duration::from_secs(240));
         let stage = STAGE.get().and_then(|path| std::fs::read_to_string(path).ok()).unwrap_or_default();
-        eprintln!("test fork_cases ... FAILED: timed out at: {stage}");
+        let (out, err) = CAPTURE.get().map(|capture| (capture.stdout(), capture.stderr())).unwrap_or_default();
+        eprintln!("test fork_cases ... FAILED: timed out at: {stage}\nstdout: {out}\nstderr: {err}");
         std::process::exit(101);
     });
     let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
