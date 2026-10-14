@@ -8,7 +8,14 @@ pub mod prompt;
 pub mod runtime;
 pub mod sessions;
 pub mod subagent;
+mod tui;
+mod tui_parts;
+mod tui_run;
+mod tui_sync;
+#[cfg(test)]
+mod tui_tests;
 
 pub use controller::DurableController;
 pub use open::{DurableApp, OpenDurableOptions, OpenDurableResult, open_durable, parse_durable_args};
 pub use runtime::{DurableView, ViewStore, agent_of};
+pub use tui_run::{run_durable_main, run_durable_tui};
