@@ -128,6 +128,8 @@ function snapshotText() {
   return JSON.stringify({ snapshot: { meta, node_count: 0, edge_count: 0, trace_function_count: 0 }, nodes: [], edges: [], strings: [] });
 }
 
+internal.heapSnapshotText = snapshotText;
+
 let snapshotSeq = 0;
 function writeHeapSnapshot(filename, options) {
   if (filename !== undefined) validate.string(filename, "filename");
