@@ -2,6 +2,17 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.1.8] - 2026-10-14
+
+### Added
+
+- **experimental:** get the client TUI's server service handles before it waits for readiness ([f78f0ce](https://github.com/yannelli/pi-rust/commit/f78f0ce848e5c930f02ba2df75d1c0074729abf1))
+- **experimental:** port the client, client runtime, client TUI, and the pi experimental command ([4592143](https://github.com/yannelli/pi-rust/commit/4592143f25ad9272373c5d967f82033802bfdb28))
+- **experimental:** port the durable TUI shared by durable/ and vacation/ ([7e9dc2a](https://github.com/yannelli/pi-rust/commit/7e9dc2a25fd8327bea889f2368de3463a7af6416))
+- **experimental:** port the Radius relay host, client transport, reconnect, and auth resolver ([5307c4c](https://github.com/yannelli/pi-rust/commit/5307c4ce0507fb70387837c95f6ad7f43ae43c91))
+- **experimental:** port durable/, vacation/, and the coding agent Session worker Harness ([db07608](https://github.com/yannelli/pi-rust/commit/db07608b813f58816862d6b5a6798a36f185cecb))
+- **experimental:** port the experimental server, coordinator, Session workers, plugins, and services ([37cd35d](https://github.com/yannelli/pi-rust/commit/37cd35d1b595d692d4fa3e02b054d791a81ee6e2))
+
 ## [0.1.7] - 2026-10-14
 
 ### Added
