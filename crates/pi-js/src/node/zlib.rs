@@ -10,7 +10,7 @@ use zstd::stream::raw::{CParameter, DParameter, InBuffer, Operation, OutBuffer};
 
 use super::set_fn;
 use crate::error::JsError;
-use crate::runtime::convert::{bytes_to_js, throw};
+use crate::runtime::convert::{bytes_of, bytes_to_js, throw};
 use crate::runtime::state::state;
 
 // Node's mode numbers (zlib.constants.DEFLATE and so on).
@@ -430,13 +430,6 @@ fn zstd_encode(
             return Ok(out);
         }
     }
-}
-
-/// A copy of a typed array's bytes; empty when its buffer is detached.
-#[allow(unsafe_code)]
-pub(crate) fn bytes_of(array: &TypedArray<'_, u8>) -> Vec<u8> {
-    // SAFETY: the slice is copied at once, before any JavaScript can run and detach it.
-    unsafe { array.as_bytes() }.map(<[u8]>::to_vec).unwrap_or_default()
 }
 
 fn settings<'js>(options: &Object<'js>) -> rquickjs::Result<Settings> {
