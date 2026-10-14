@@ -66,16 +66,20 @@ pub(super) async fn prepare_client_session(
         opened.push((server, open_services(server.server.as_ref(), &services)?));
     }
     let result = async {
-        let mut candidates = Vec::new();
+        let mut acquired = Vec::new();
         for (server, services) in &opened {
-            services.ready(&BACKGROUND_CONTEXT).await?;
             let directory = services.use_service(&SESSION_DIRECTORY)?;
-            candidates.push(Candidate {
-                server,
-                management: SessionManagementClient(services.use_service(&SESSION_MANAGEMENT)?),
-                plugins: PresentationPluginsClient(services.use_service(&PRESENTATION_PLUGINS)?),
-                sessions: session_directory_state(&directory)?.map(|state| state.sessions).unwrap_or_default(),
-            });
+            let management = SessionManagementClient(services.use_service(&SESSION_MANAGEMENT)?);
+            let plugins = PresentationPluginsClient(services.use_service(&PRESENTATION_PLUGINS)?);
+            acquired.push((*server, directory, management, plugins));
+        }
+        // Readiness covers the services acquired so far, so every handle exists before it.
+        let ready = futures::future::join_all(opened.iter().map(|(_, services)| services.ready(&BACKGROUND_CONTEXT)));
+        ready.await.into_iter().collect::<ChordResult<Vec<()>>>()?;
+        let mut candidates = Vec::new();
+        for (server, directory, management, plugins) in acquired {
+            let sessions = session_directory_state(&directory)?.map(|state| state.sessions).unwrap_or_default();
+            candidates.push(Candidate { server, management, plugins, sessions });
         }
         let mut selected: Option<(&Candidate, SessionSummary)> = None;
         if let Some(session_id) = &command.session_id {
