@@ -2,6 +2,29 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.1.11] - 2026-10-14
+
+### Added
+
+- **js:** add node:cluster with round-robin and shared servers, and pass TCP sockets and servers over IPC ([b45f092](https://github.com/yannelli/pi-rust/commit/b45f09262e6bece10e53393614a7443c69af2b04))
+- **js:** add node:worker_threads with workers on their own runtime threads, cross-thread message ports, and BroadcastChannel ([1c3800f](https://github.com/yannelli/pi-rust/commit/1c3800fadd0ebd0b76f739b83007a048c0795c35))
+- **js:** add node:vm with separate QuickJS contexts, interrupt-based timeouts, and compileFunction ([c059cd0](https://github.com/yannelli/pi-rust/commit/c059cd075421225387682d87b85eb1652c850df8))
+- **js:** add node:http2 sessions, streams, and the compat API on the h2 crate over net and tls sockets ([81a854a](https://github.com/yannelli/pi-rust/commit/81a854a6802725749d139bc224c9746ccfe7cb26))
+- **js:** add node:http and node:https in JavaScript over net and tls sockets, with an httparse head parser ([8d7a7be](https://github.com/yannelli/pi-rust/commit/8d7a7be4c798bdb7b9adfca159d637ca9ba181f7))
+- **js:** add node:tls on rustls with ALPN, SNI, custom CAs, and Node's hostname checks ([22f8808](https://github.com/yannelli/pi-rust/commit/22f88086f72167990774ab68cd9bf10234f841dc))
+- **js:** add node:dgram UDP sockets, with dgram and dns tests on localhost ([6f55b26](https://github.com/yannelli/pi-rust/commit/6f55b267555819efb305acb181cef76558ece3f2))
+- **js:** add node:dns and dns/promises with system lookup and hickory-resolver queries ([2f53c9d](https://github.com/yannelli/pi-rust/commit/2f53c9dcff6dedb2bb786cc2230e5d34d9d891f0))
+- **js:** add node:net sockets and servers over TCP, Unix sockets, and named pipes ([38c142d](https://github.com/yannelli/pi-rust/commit/38c142dc88f5e0e9ef102d38f8c1ffdd22e6c9ba))
+- **js:** move the typed array byte copy into convert, keeping zlib.rs under 480 lines ([6875294](https://github.com/yannelli/pi-rust/commit/6875294f1e2a935868af05c0e805342357700c84))
+- **js:** list zlib, async_hooks, and v8 in the README's Node support line ([d7be223](https://github.com/yannelli/pi-rust/commit/d7be2237817a35f8b2854aae38dee0dd4d2a22cb))
+- **js:** add node:v8 with V8 wire-format serialize and deserialize, and heap statistics from QuickJS ([b8f6abd](https://github.com/yannelli/pi-rust/commit/b8f6abde399d11483c6cded5aad7973490c3af19))
+- **js:** add zlib (deflate, gzip, brotli, zstd, crc32), async_hooks with async context, domain, punycode, sea, and trace_events ([851c4dd](https://github.com/yannelli/pi-rust/commit/851c4dd4ee6487f3afdedd4b5240e5588d6ba279))
+
+### Fixed
+
+- **js:** check the platform when IPC messages flow, since a forked child loads internal/ipc before process is built ([2564b08](https://github.com/yannelli/pi-rust/commit/2564b08149ee5a0f8cf2b089f274449c84f4877d))
+- **js:** close listeners at once, defer reads on accepted sockets, ack passed handles, and end Windows pipes like libuv ([8a315e3](https://github.com/yannelli/pi-rust/commit/8a315e36f475a866237a6e7024b6dec0b730464f))
+
 ## [0.1.10] - 2026-10-14
 
 ### Added
