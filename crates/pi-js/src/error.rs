@@ -138,6 +138,13 @@ pub(crate) fn io_code(error: &io::Error) -> (&'static str, &'static str) {
         K::InvalidFilename => ("ENAMETOOLONG", "name too long"),
         K::ConnectionRefused => ("ECONNREFUSED", "connection refused"),
         K::ConnectionReset => ("ECONNRESET", "connection reset by peer"),
+        K::ConnectionAborted => ("ECONNABORTED", "software caused connection abort"),
+        K::AddrInUse => ("EADDRINUSE", "address already in use"),
+        K::AddrNotAvailable => ("EADDRNOTAVAIL", "address not available"),
+        K::NotConnected => ("ENOTCONN", "socket is not connected"),
+        K::HostUnreachable => ("EHOSTUNREACH", "host is unreachable"),
+        K::NetworkUnreachable => ("ENETUNREACH", "network is unreachable"),
+        K::NetworkDown => ("ENETDOWN", "network is down"),
         K::Unsupported => ("ENOSYS", "function not implemented"),
         _ => ("EIO", "i/o error"),
     }

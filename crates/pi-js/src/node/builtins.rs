@@ -78,6 +78,9 @@ const SOURCES: &[(&str, &str)] = &[
     ("v8", include_str!("../js/v8.js")),
     ("internal/zlib_constants", include_str!("../js/zlib_constants.js")),
     ("zlib", include_str!("../js/zlib.js")),
+    ("internal/net_address", include_str!("../js/net_address.js")),
+    ("internal/net_socket", include_str!("../js/net_socket.js")),
+    ("net", include_str!("../js/net.js")),
     (
         "constants",
         "module.exports = { ...require('os').constants.errno, ...require('os').constants.signals, ...require('os').constants.priority, ...require('internal/fs_utils').constants };",

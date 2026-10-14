@@ -23,7 +23,8 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
      with ciphers other than AES-CBC and 3DES-CBC (or PBES1), webcrypto.subtle except digest, setFips",
     "fs: lchmod, fchmod, fchown, lutimes, statfs, openAsBlob, FileHandle chmod, chown, and readableWebStream",
     "child_process: stdio entries that are streams or descriptors above 2, sending handles over IPC \
-     (ERR_INVALID_HANDLE_TYPE, as there is no net module)",
+     (ERR_INVALID_HANDLE_TYPE)",
+    "net: sockets and servers from a file descriptor or an existing handle, reusePort",
     "process: binding, dlopen, setUncaughtExceptionCaptureCallback, and running code after process.exit when \
      the embedder's on_exit callback returns (the runtime is shutting down)",
     "stream: Duplex.from for promises and web streams; stream/web BYOB readers, \
@@ -61,13 +62,22 @@ mod tests {
     #[test]
     fn lists_unsupported_modules() {
         let unsupported = unsupported_modules();
-        for name in ["http", "https", "net", "worker_threads", "vm"] {
+        for name in ["http", "https", "worker_threads", "vm"] {
             assert!(unsupported.contains(&name), "{name}");
         }
         let supported = supported_modules();
-        for name in
-            ["fs", "fs/promises", "child_process", "crypto", "stream/web", "assert/strict", "readline", "zlib", "v8"]
-        {
+        for name in [
+            "fs",
+            "fs/promises",
+            "child_process",
+            "crypto",
+            "stream/web",
+            "assert/strict",
+            "readline",
+            "zlib",
+            "v8",
+            "net",
+        ] {
             assert!(supported.contains(&name) && !unsupported.contains(&name), "{name}");
         }
     }

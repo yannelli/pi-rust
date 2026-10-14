@@ -10,10 +10,14 @@ pub(crate) mod fetch;
 pub(crate) mod fs;
 mod fs_ops;
 mod fs_output;
+mod net;
+mod net_server;
 mod os;
 mod pipe;
 pub(crate) mod sys;
+mod tls;
 mod watch;
+mod x509;
 mod zlib;
 
 use rquickjs::context::EvalOptions;
@@ -37,6 +41,8 @@ pub(crate) fn install(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
     native.set("watch", watch::natives(ctx)?)?;
     native.set("fetch", fetch::natives(ctx)?)?;
     native.set("zlib", zlib::natives(ctx)?)?;
+    native.set("net", net::natives(ctx)?)?;
+    native.set("tls", tls::natives(ctx)?)?;
     native.set("asyncContext", context::natives(ctx)?)?;
     core::install(ctx, &native)?;
     let config = core::config(ctx)?;
