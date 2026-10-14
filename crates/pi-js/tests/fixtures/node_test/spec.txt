@@ -1,0 +1,26 @@
+✔ sync pass (Xms)
+﹣ skipped (Xms) # why
+✔ todo one (Xms) # TODO
+▶ parent
+  ✔ child 1 (Xms)
+  ✖ child 2 (Xms)
+✖ parent (Xms)
+▶ suite
+  ✔ a (Xms)
+  ✔ b (Xms) # TODO
+  ✔ c (Xms)
+  ℹ diag
+✔ suite (Xms)
+ℹ tests 9
+ℹ suites 1
+ℹ pass 4
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 2
+ℹ duration_ms X
+
+✖ failing tests:
+
+✖ child 2 (Xms)
+  Error: boom

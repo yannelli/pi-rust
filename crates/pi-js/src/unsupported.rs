@@ -45,6 +45,7 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
     "fetch: Body.formData for multipart bodies, request bodies are buffered before sending",
     "sqlite: createSession, applyChangeset, enableLoadExtension(true), and loadExtension (the bundled SQLite \
      has no session extension, and native extensions do not load)",
+    "test: snapshot assertions (t.assert.snapshot and t.assert.fileSnapshot) and coverage (the lcov reporter)",
 ];
 
 /// Supported behavior that differs from Node.
@@ -95,6 +96,12 @@ pub const DIFFERENCES: &[&str] = &[
      validated but not applied; brotli error codes come from the Rust decoder",
     "sqlite: statement.iterate() reads every row when it is called rather than one row per next(), and \
      a StatementSync prepares its SQL through the connection's statement cache on each call",
+    "test: each result prints as soon as its test finishes, so console output from tests interleaves with \
+     the report differently than in Node; subtests run one at a time (concurrency is accepted and \
+     ignored); --test-only, --experimental-test-coverage, and module mocks are not available; run() loads \
+     test files in this runtime instead of child processes, so an ES module file runs only on its first \
+     load; the spec reporter prints no colors; source locations come from QuickJS stack frames, whose \
+     columns can differ from V8's",
 ];
 
 #[cfg(test)]
@@ -126,6 +133,8 @@ mod tests {
             "worker_threads",
             "cluster",
             "sqlite",
+            "test",
+            "test/reporters",
         ] {
             assert!(supported.contains(&name) && !unsupported.contains(&name), "{name}");
         }

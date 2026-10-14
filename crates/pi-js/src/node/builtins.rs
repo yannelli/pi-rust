@@ -101,6 +101,10 @@ const SOURCES: &[(&str, &str)] = &[
     ("worker_threads", include_str!("../js/worker_threads.js")),
     ("cluster", include_str!("../js/cluster.js")),
     ("sqlite", include_str!("../js/sqlite.js")),
+    ("internal/test_harness", include_str!("../js/test_harness.js")),
+    ("internal/test_mock", include_str!("../js/test_mock.js")),
+    ("test/reporters", include_str!("../js/test_reporters.js")),
+    ("test", include_str!("../js/test.js")),
     (
         "constants",
         "module.exports = { ...require('os').constants.errno, ...require('os').constants.signals, ...require('os').constants.priority, ...require('internal/fs_utils').constants };",
