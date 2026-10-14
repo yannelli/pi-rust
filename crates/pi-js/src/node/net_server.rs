@@ -46,7 +46,7 @@ fn accepted(sender: &Sender, id: u64, conn: super::net::Conn, tls: Option<Tls>) 
     let Some(tls) = tls else { return post(sender, id, Event::Connection(conn)) };
     let sender = sender.clone();
     tokio::spawn(async move {
-        match secure(Ok(conn), Some(tls)).await {
+        match secure(Ok(conn), Some(tls), &sender, id).await {
             Ok(conn) => post(&sender, id, Event::Connection(conn)),
             Err(error) => post(&sender, id, Event::ClientError(error)),
         }

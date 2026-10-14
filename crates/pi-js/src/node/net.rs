@@ -65,6 +65,11 @@ pub(super) enum Event {
     AttemptTimeout(SocketAddr, JsError),
     /// No address of an autoSelectFamily connect could be reached.
     Exhausted,
+    /// A TLS session handle for the client socket.
+    Session(Vec<u8>),
+    /// Ciphertext to send on, and the end of, a JavaScript stream under TLS.
+    Wire(Vec<u8>),
+    WireEnd,
 }
 
 /// Node's network error: `connect ECONNREFUSED 127.0.0.1:80`, with `address` and `port`.
@@ -113,10 +118,20 @@ pub(super) fn pipe_conn(io: BoxIo, path: &str) -> Conn {
     Conn { io, tcp: None, info: json!({ "path": path }) }
 }
 
-pub(super) async fn secure(conn: Result<Conn, JsError>, tls: Option<Tls>) -> Result<Conn, JsError> {
+/// A connection with no address of its own, such as TLS over a JavaScript stream.
+pub(super) fn plain_conn(io: BoxIo) -> Conn {
+    Conn { io, tcp: None, info: json!({}) }
+}
+
+pub(super) async fn secure(
+    conn: Result<Conn, JsError>,
+    tls: Option<Tls>,
+    sender: &Sender,
+    id: u64,
+) -> Result<Conn, JsError> {
     let conn = conn?;
     let Some(tls) = tls else { return Ok(conn) };
-    let (io, extra) = tls.handshake(conn.io).await?;
+    let (io, extra) = tls.handshake(conn.io, sender, id).await?;
     let mut info = conn.info;
     info["tls"] = extra;
     Ok(Conn { io, tcp: conn.tcp, info })
@@ -194,6 +209,9 @@ fn deliver(ctx: &Ctx<'_>, id: u64, event: Event) {
         Event::AttemptFailed(target, error) => report_attempt(ctx, &function, "attemptFailed", target, &error),
         Event::AttemptTimeout(target, error) => report_attempt(ctx, &function, "attemptTimeout", target, &error),
         Event::Exhausted => function.call::<_, ()>(("exhausted",)),
+        Event::Session(bytes) => bytes_to_js(ctx, bytes).and_then(|bytes| function.call::<_, ()>(("session", bytes))),
+        Event::Wire(bytes) => bytes_to_js(ctx, bytes).and_then(|bytes| function.call::<_, ()>(("wire", bytes))),
+        Event::WireEnd => function.call::<_, ()>(("wireEnd",)),
     };
     if let Err(error) = result {
         report_error(ctx, UncaughtKind::Exception, error);

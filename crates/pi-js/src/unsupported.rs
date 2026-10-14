@@ -27,8 +27,7 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
      servers, TLS sockets, and dgram sockets",
     "cluster: workers sharing Unix socket or named pipe servers, and TLS servers (each worker listens on its own)",
     "net: sockets and servers from a file descriptor or an existing handle, reusePort",
-    "tls: TLSSocket over an existing socket or stream (and tls.connect's socket option), SNICallback, \
-     addContext, pfx, encrypted private keys, session resumption, exportKeyingMaterial, and TLS before 1.2",
+    "tls: pfx (no PKCS#12 parser is bundled), encrypted private keys, exportKeyingMaterial, and TLS before 1.2",
     "http: the insecureHTTPParser option (accepted and ignored)",
     "http2: server push (pushStream and createPushResponse fail with ERR_HTTP2_PUSH_DISABLED), \
      performServerHandshake, altsvc and origin frames (ignored), custom settings, and stream priority",
@@ -75,7 +74,9 @@ pub const DIFFERENCES: &[&str] = &[
      never uses search domains, and Resolver.setLocalAddress does nothing",
     "tls: servers emit secureConnection but no connection event before the handshake; getCertificate \
      returns null and getX509Certificate and getPeerX509Certificate return undefined; ciphers, ecdhCurve, \
-     and other OpenSSL tuning options are ignored",
+     and other OpenSSL tuning options are ignored; a session Buffer is an opaque handle that works only in \
+     this process, as rustls cannot serialize sessions; SNICallback gets the server as `this` and also \
+     runs for handshakes that resume a session",
     "http: the parser is httparse, so malformed messages can fail with a different HPE_* code than llhttp; \
      server headersTimeout and requestTimeout use per-connection timers instead of a periodic check, and \
      setMaxIdleHTTPParsers only validates its argument",
