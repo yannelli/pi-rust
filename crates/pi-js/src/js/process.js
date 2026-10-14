@@ -80,7 +80,7 @@ process.nextTick = function nextTick(callback, ...args) {
   if (typeof callback !== "function") {
     throw Object.assign(new TypeError('The "callback" argument must be of type function'), { code: "ERR_INVALID_ARG_TYPE" });
   }
-  tickQueue.push([callback, args]);
+  tickQueue.push([internal.bindContext(callback), args]);
   nativeProcess.scheduleTicks();
 };
 

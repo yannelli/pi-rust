@@ -2,6 +2,7 @@
 
 mod builtins;
 mod child;
+mod context;
 mod core;
 mod crypto;
 pub(crate) mod encoding;
@@ -13,6 +14,7 @@ mod os;
 mod pipe;
 pub(crate) mod sys;
 mod watch;
+mod zlib;
 
 use rquickjs::context::EvalOptions;
 use rquickjs::{Ctx, Function, Object, Persistent};
@@ -34,6 +36,8 @@ pub(crate) fn install(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
     native.set("pipe", pipe::natives(ctx)?)?;
     native.set("watch", watch::natives(ctx)?)?;
     native.set("fetch", fetch::natives(ctx)?)?;
+    native.set("zlib", zlib::natives(ctx)?)?;
+    native.set("asyncContext", context::natives(ctx)?)?;
     core::install(ctx, &native)?;
     let config = core::config(ctx)?;
     let mut options = EvalOptions::default();

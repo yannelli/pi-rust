@@ -21,12 +21,15 @@ aes-gcm = { version = "0.11.1", default-features = false, features = ["aes", "al
 cbc = "0.2.1"
 ccm = { version = "0.6.1", default-features = false, features = ["alloc"] }
 cfb-mode = "0.9.1"
+crc32fast = "1.5.2"
 crypto-bigint = { version = "0.7.5", default-features = false, features = ["alloc"] }
 ctr = "0.10.1"
 des = "0.9.0"
 dsa = { version = "0.7.0", default-features = false, features = ["hazmat"] }
 ecb = "0.2.1"
+brotli = "8.0.2"
 ed448-goldilocks = { version = "=0.14.0-pre.15", default-features = false, features = ["signing", "std"] }
+flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs"] }
 getrandom = { version = "0.4.3", features = ["sys_rng"] }
 k256 = { version = "0.14.0", default-features = false, features = ["ecdsa", "ecdh", "std"] }
 md-5 = "0.10.6"
@@ -36,6 +39,8 @@ num-traits = "0.2.19"
 ocb3 = { version = "0.2.0", default-features = false, features = ["alloc"] }
 ofb = "0.7.1"
 oxc_allocator = "0.153.0"
+oxc_ast = "0.153.0"
+oxc_ast_visit = "0.153.0"
 oxc_codegen = "0.153.0"
 oxc_diagnostics = "0.153.0"
 oxc_parser = "0.153.0"
@@ -52,6 +57,7 @@ sha1 = "0.10.6"
 unicode-segmentation = "1.12"
 url = "2.5.8"
 x25519-dalek = { version = "3.0.0", features = ["static_secrets"] }
+zstd = { version = "0.13.3", default-features = false }
 x448 = { version = "=0.14.0-pre.12", default-features = false }
 
 [target.'cfg(unix)'.dependencies]

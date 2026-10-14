@@ -45,7 +45,10 @@ pub const DIFFERENCES: &[&str] = &[
     "readline has no raw terminal editing: lines come from the input stream as text",
     "module.register hooks run on the importing thread: a hook's promise must settle from microtasks alone, \
      and hooks apply to import, not require",
-    "events.EventEmitterAsyncResource and diagnostics_channel stores run without async_hooks contexts",
+    "async_hooks: createHook sees AsyncResource objects only, not timers, promises, or I/O; async context \
+     follows awaits through a source rewrite, and an await with a store set takes one extra microtask",
+    "zlib: deflate output can differ in bytes from Node's zlib (zlib-rs); memLevel and strategy are \
+     validated but not applied; brotli error codes come from the Rust decoder",
 ];
 
 #[cfg(test)]
@@ -55,11 +58,12 @@ mod tests {
     #[test]
     fn lists_unsupported_modules() {
         let unsupported = unsupported_modules();
-        for name in ["http", "https", "net", "zlib", "worker_threads", "vm"] {
+        for name in ["http", "https", "net", "worker_threads", "vm"] {
             assert!(unsupported.contains(&name), "{name}");
         }
         let supported = supported_modules();
-        for name in ["fs", "fs/promises", "child_process", "crypto", "stream/web", "assert/strict", "readline"] {
+        for name in ["fs", "fs/promises", "child_process", "crypto", "stream/web", "assert/strict", "readline", "zlib"]
+        {
             assert!(supported.contains(&name) && !unsupported.contains(&name), "{name}");
         }
     }

@@ -103,6 +103,7 @@ fn handle(message: Message, runtime: &Runtime, context: &Context, state: &LoopSt
     match message {
         Message::Task(task) => {
             context.with(|ctx| task(&ctx));
+            state.async_frame.borrow_mut().take();
             drain_jobs(runtime, context, state);
         }
         Message::Release(id) => {
@@ -121,13 +122,19 @@ pub(crate) fn drain_jobs(runtime: &Runtime, context: &Context, state: &LoopState
             run_ticks(context, state);
         }
         loop {
-            match runtime.execute_pending_job() {
-                Ok(true) => {}
-                Ok(false) => break,
-                Err(exception) => exception.0.with(|ctx| {
-                    let value = ctx.catch();
-                    report_value(&ctx, UncaughtKind::Exception, value);
-                }),
+            let more = match runtime.execute_pending_job() {
+                Ok(more) => more,
+                Err(exception) => {
+                    exception.0.with(|ctx| {
+                        let value = ctx.catch();
+                        report_value(&ctx, UncaughtKind::Exception, value);
+                    });
+                    true
+                }
+            };
+            state.async_frame.borrow_mut().take();
+            if !more {
+                break;
             }
         }
         if !state.ticks_pending.get() {
@@ -167,6 +174,7 @@ fn run_timers(runtime: &Runtime, context: &Context, state: &LoopState) {
     loop {
         let Some(callback) = state.timers.borrow_mut().pop_due(now) else { break };
         call_callback(context, callback);
+        state.async_frame.borrow_mut().take();
         drain_jobs(runtime, context, state);
         if state.shutting_down.get() {
             return;
@@ -178,6 +186,7 @@ fn run_immediates(runtime: &Runtime, context: &Context, state: &LoopState) {
     let batch: Vec<_> = state.immediates.borrow_mut().drain(..).collect();
     for (_, callback) in batch {
         call_callback(context, callback);
+        state.async_frame.borrow_mut().take();
         drain_jobs(runtime, context, state);
         if state.shutting_down.get() {
             return;

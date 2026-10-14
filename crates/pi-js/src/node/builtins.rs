@@ -68,6 +68,13 @@ const SOURCES: &[(&str, &str)] = &[
     ("tty", include_str!("../js/tty.js")),
     ("diagnostics_channel", include_str!("../js/diagnostics_channel.js")),
     ("stream/consumers", include_str!("../js/stream_consumers.js")),
+    ("async_hooks", include_str!("../js/async_hooks.js")),
+    ("domain", include_str!("../js/domain.js")),
+    ("punycode", include_str!("../js/punycode.js")),
+    ("sea", include_str!("../js/sea.js")),
+    ("trace_events", include_str!("../js/trace_events.js")),
+    ("internal/zlib_constants", include_str!("../js/zlib_constants.js")),
+    ("zlib", include_str!("../js/zlib.js")),
     (
         "constants",
         "module.exports = { ...require('os').constants.errno, ...require('os').constants.signals, ...require('os').constants.priority, ...require('internal/fs_utils').constants };",
@@ -98,8 +105,7 @@ fn compile<'js>(ctx: Ctx<'js>, name: String) -> rquickjs::Result<Function<'js>> 
     let mut options = EvalOptions::default();
     options.strict = false;
     options.filename = Some(if name.contains(':') { name.clone() } else { format!("node:{name}") });
-    ctx.eval_with_options(
-        format!("(function (module, exports, require, native, internal) {{ \"use strict\"; {source}\n}})"),
-        options,
-    )
+    let wrapped = format!("(function (module, exports, require, native, internal) {{ \"use strict\"; {source}\n}})");
+    let wrapped = crate::transpile::instrument_script(&wrapped).unwrap_or(wrapped);
+    ctx.eval_with_options(wrapped, options)
 }

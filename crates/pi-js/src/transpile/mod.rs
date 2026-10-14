@@ -2,6 +2,7 @@
 //!
 //! JavaScript files are parsed only to tell ES modules from CommonJS; their text is kept as is.
 
+mod await_context;
 mod cache;
 mod sourcemap;
 
@@ -114,6 +115,17 @@ pub fn transpile(path: &Path, source: &str, options: &TranspileOptions) -> Resul
         return Err(diagnostics_error(path, source, &parsed.diagnostics, "SyntaxError"));
     }
     let format = if parsed.program.source_type.is_module() { ModuleFormat::Esm } else { ModuleFormat::CommonJs };
+    let source = match await_context::instrument(source, &parsed.program) {
+        Some(text) => {
+            let text = allocator.alloc_str(&text);
+            parsed = parse(&allocator, text, parsed.program.source_type);
+            if parsed.fatal_error || !parsed.diagnostics.is_empty() {
+                return Err(diagnostics_error(path, text, &parsed.diagnostics, "SyntaxError"));
+            }
+            text
+        }
+        None => source,
+    };
     let mut program = parsed.program;
 
     if !needs_transform(path) {
@@ -151,6 +163,16 @@ fn transform_options(options: &TranspileOptions) -> TransformOptions {
     transform.typescript.jsx_pragma = options.jsx_pragma.clone().into();
     transform.typescript.jsx_pragma_frag = options.jsx_fragment.clone().into();
     transform
+}
+
+/// A built-in module's wrapped source with its awaits instrumented for async context.
+pub(crate) fn instrument_script(source: &str) -> Option<String> {
+    if !source.contains("await") {
+        return None;
+    }
+    let allocator = Allocator::default();
+    let parsed = parse(&allocator, source, SourceType::cjs());
+    await_context::instrument(source, &parsed.program)
 }
 
 fn mentions_cjs_globals(source: &str) -> bool {

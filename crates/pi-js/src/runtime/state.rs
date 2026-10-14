@@ -85,6 +85,8 @@ pub(crate) struct LoopState {
     pub idle_time: Cell<std::time::Duration>,
     /// `module.register` added resolve or load hooks.
     pub module_hooks: Cell<bool>,
+    /// The current async context frame (AsyncLocalStorage values); `None` is the empty frame.
+    pub async_frame: RefCell<Option<Persistent<Value<'static>>>>,
 }
 
 thread_local! {
@@ -115,6 +117,7 @@ impl LoopState {
             loop_start: Cell::new(None),
             idle_time: Cell::new(std::time::Duration::ZERO),
             module_hooks: Cell::new(false),
+            async_frame: RefCell::default(),
         });
         STATE.with(|slot| *slot.borrow_mut() = Some(state.clone()));
         state
@@ -130,6 +133,7 @@ impl LoopState {
         self.immediates.borrow_mut().clear();
         self.rejections.borrow_mut().clear();
         self.internal.borrow_mut().take();
+        self.async_frame.borrow_mut().take();
         STATE.with(|slot| slot.borrow_mut().take());
     }
 
