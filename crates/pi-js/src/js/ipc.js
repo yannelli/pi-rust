@@ -118,6 +118,9 @@ function setupChannel(target, open, serialization = "json", peerPid = () => 0) {
   let explicitRef = null;
   let writes = Promise.resolve();
   const received = [];
+  // Windows: a copy of each sent socket stays open until the peer acknowledges it, as in Node. Closing the
+  // last copy before the peer imports its duplicate would reset the connection.
+  const kept = [];
   const id = open((kind, value, handles) => {
     if (kind === "connect") target._channelConnected = true;
     else if (kind === "data") {
@@ -134,9 +137,14 @@ function setupChannel(target, open, serialization = "json", peerPid = () => 0) {
           const handleId = windows ? native.net.importHandle(parsed.wsa) : received.shift();
           handle = handleId === undefined ? undefined : adoptHandle(parsed.type, handleId);
           parsed = parsed.msg;
+          if (target.connected) target.send({ cmd: "NODE_HANDLE_ACK" });
         }
         const message = advanced ? decodeAdvanced(parsed) : parsed;
         const internalMessage = message !== null && typeof message === "object" && typeof message.cmd === "string" && message.cmd.startsWith("NODE_");
+        if (internalMessage && message.cmd === "NODE_HANDLE_ACK") {
+          if (kept.length) native.net.closeHandle(kept.shift());
+          continue;
+        }
         if (!internalMessage && held) held.push([message, handle]);
         else target.emit(internalMessage ? "internalMessage" : "message", message, handle);
       }
@@ -170,6 +178,7 @@ function setupChannel(target, open, serialization = "json", peerPid = () => 0) {
   refs = target.listenerCount("message") + target.listenerCount("disconnect");
   updateRef();
   function finishDisconnect() {
+    kept.splice(0).forEach((keep) => native.net.closeHandle(keep));
     target.connected = false;
     target.channel = undefined;
     nativePipe.close(id);
@@ -210,7 +219,10 @@ function setupChannel(target, open, serialization = "json", peerPid = () => 0) {
     if (type) {
       handleId = native.net.exportHandle(handle._handle);
       payload = { cmd: "NODE_HANDLE", type, msg: payload };
-      if (windows) payload.wsa = native.net.duplicateHandle(handleId, peerPid());
+      if (windows) {
+        kept.push(native.net.exportHandle(handle._handle));
+        payload.wsa = native.net.duplicateHandle(handleId, peerPid());
+      }
       if (type === "net.Socket" && !(options && options.keepOpen)) handle.destroy();
     }
     const line = JSON.stringify(payload) + "\n";
