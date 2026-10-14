@@ -125,9 +125,18 @@ fn refuse_windows_rename(from: &str, to: &str) -> io::Result<()> {
     Ok(())
 }
 
+/// Node's recursive `mkdir`: a file above the last directory fails with `ENOTDIR` on every platform, where Rust on
+/// Windows reports that the file already exists.
+fn create_dir_recursive(path: &Path) -> io::Result<()> {
+    if path.ancestors().skip(1).any(|ancestor| std::fs::metadata(ancestor).is_ok_and(|metadata| !metadata.is_dir())) {
+        return Err(io::ErrorKind::NotADirectory.into());
+    }
+    std::fs::create_dir_all(path)
+}
+
 fn create_parent(path: &str) -> io::Result<()> {
     match Path::new(path).parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => std::fs::create_dir_all(parent),
+        Some(parent) if !parent.as_os_str().is_empty() => create_dir_recursive(parent),
         _ => Ok(()),
     }
 }
@@ -421,7 +430,7 @@ impl FileSystem for LocalExecutionEnv {
 
     async fn create_dir(&self, path: &str, recursive: bool, context: &Context) -> FileResult<()> {
         self.run(self.resolve(path), context, move |path| {
-            if recursive { std::fs::create_dir_all(path) } else { std::fs::create_dir(path) }
+            if recursive { create_dir_recursive(Path::new(path)) } else { std::fs::create_dir(path) }
         })
         .await
     }

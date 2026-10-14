@@ -168,6 +168,8 @@ async fn run(env: &SharedEnv, operation: &Operation, contents: &[Vec<u8>]) -> Va
 async fn gives_the_same_results_for_random_file_operation_sequences() {
     let connection = support::connection();
     let contents = contents();
+    // Each seed stops at its first difference, since the two trees differ after it; all seeds still run.
+    let mut differences = Vec::new();
     for seed in 1..=60 {
         let mut next = random(seed);
         let pair = pair(&connection);
@@ -175,10 +177,15 @@ async fn gives_the_same_results_for_random_file_operation_sequences() {
             let operation = random_operation(&mut next);
             let expected = normalize(&run(&pair.local, &operation, &contents).await, &pair.roots[0]);
             let actual = normalize(&run(&pair.remote, &operation, &contents).await, &pair.roots[1]);
-            assert_eq!(actual, expected, "seed {seed} step {step} {operation:?}");
+            if actual != expected {
+                differences
+                    .push(format!("seed {seed} step {step} {operation:?}\n  remote: {actual}\n  local:  {expected}"));
+                break;
+            }
         }
     }
     connection.close();
+    assert!(differences.is_empty(), "{}", differences.join("\n"));
 }
 
 /// FIFOs and `/dev/null` exist on Unix only.
