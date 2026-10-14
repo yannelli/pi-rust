@@ -1,0 +1,340 @@
+TAP version 13
+# Subtest: sync pass
+ok 1 - sync pass
+  ---
+  duration_ms: X
+  type: 'test'
+  ...
+# Subtest: async pass
+ok 2 - async pass
+  ---
+  duration_ms: X
+  type: 'test'
+  ...
+# Subtest: fails
+not ok 3 - fails
+  ---
+  duration_ms: X
+  type: 'test'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    1 !== 2
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 2
+  actual: 1
+  operator: 'strictEqual'
+  ...
+# Subtest: skipped
+ok 4 - skipped # SKIP why
+  ---
+  duration_ms: X
+  type: 'test'
+  ...
+# Subtest: todo one
+ok 5 - todo one # TODO
+  ---
+  duration_ms: X
+  type: 'test'
+  ...
+# Subtest: parent
+    # Subtest: child 1
+    ok 1 - child 1
+      ---
+      duration_ms: X
+      type: 'test'
+      ...
+    # Subtest: child 2
+    not ok 2 - child 2
+      ---
+      duration_ms: X
+      type: 'test'
+      failureType: 'testCodeFailure'
+      error: 'boom'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    1..2
+not ok 6 - parent
+  ---
+  duration_ms: X
+  type: 'test'
+  failureType: 'subtestsFailed'
+  error: '1 subtest failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: suite
+    # Subtest: a
+    ok 1 - a
+      ---
+      duration_ms: X
+      type: 'test'
+      ...
+    # Subtest: b
+    ok 2 - b # TODO
+      ---
+      duration_ms: X
+      type: 'test'
+      ...
+    # Subtest: c
+    ok 3 - c
+      ---
+      duration_ms: X
+      type: 'test'
+      ...
+    # diag
+    1..3
+ok 7 - suite
+  ---
+  duration_ms: X
+  type: 'suite'
+  ...
+# Subtest: unawaited
+    # Subtest: sub a
+    ok 1 - sub a
+      ---
+      duration_ms: X
+      type: 'test'
+      ...
+    # Subtest: sub b
+    not ok 2 - sub b
+      ---
+      duration_ms: X
+      type: 'test'
+      failureType: 'cancelledByParent'
+      error: 'test did not finish before its parent and was cancelled'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    1..2
+not ok 8 - unawaited
+  ---
+  duration_ms: X
+  type: 'test'
+  failureType: 'subtestsFailed'
+  error: '1 subtest failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: only one
+ok 9 - only one
+  ---
+  duration_ms: X
+  type: 'test'
+  ...
+# 'only' and 'runOnly' require the --test-only command-line option.
+# Subtest: hookfail
+    # Subtest: x
+    not ok 1 - x
+      ---
+      duration_ms: X
+      type: 'test'
+      failureType: 'cancelledByParent'
+      error: 'test did not finish before its parent and was cancelled'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: y
+    not ok 2 - y
+      ---
+      duration_ms: X
+      type: 'test'
+      failureType: 'cancelledByParent'
+      error: 'test did not finish before its parent and was cancelled'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    1..2
+not ok 10 - hookfail
+  ---
+  duration_ms: X
+  type: 'suite'
+  failureType: 'hookFailed'
+  error: 'bad before'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: timeout
+not ok 11 - timeout
+  ---
+  duration_ms: X
+  type: 'test'
+  failureType: 'testTimeoutFailure'
+  error: 'test timed out after 20ms'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: plan
+not ok 12 - plan
+  ---
+  duration_ms: X
+  type: 'test'
+  failureType: 'testCodeFailure'
+  error: 'plan expected 2 assertions but received 1'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: cb fail
+not ok 13 - cb fail
+  ---
+  duration_ms: X
+  type: 'test'
+  failureType: 'testCodeFailure'
+  error: 'cb err'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: cb pass
+ok 14 - cb pass
+  ---
+  duration_ms: X
+  type: 'test'
+  ...
+# Subtest: runtime skip
+ok 15 - runtime skip # SKIP nope
+  ---
+  duration_ms: X
+  type: 'test'
+  ...
+# Subtest: runtime todo
+not ok 16 - runtime todo # TODO
+  ---
+  duration_ms: X
+  type: 'test'
+  failureType: 'testCodeFailure'
+  error: 'todo fails'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: rejects
+not ok 17 - rejects
+  ---
+  duration_ms: X
+  type: 'test'
+  failureType: 'testCodeFailure'
+  error: 'async bad'
+  code: 'ERR_TEST_FAILURE'
+  name: 'TypeError'
+  ...
+# Subtest: name with \# hash\\nnewline
+ok 18 - name with \# hash\\nnewline
+  ---
+  duration_ms: X
+  type: 'test'
+  ...
+# Subtest: throws string
+not ok 19 - throws string
+  ---
+  duration_ms: X
+  type: 'test'
+  failureType: 'testCodeFailure'
+  error: 'str'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: nested deep
+    # Subtest: lvl1
+        # Subtest: lvl2
+        ok 1 - lvl2
+          ---
+          duration_ms: X
+          type: 'test'
+          ...
+        1..1
+    ok 1 - lvl1
+      ---
+      duration_ms: X
+      type: 'test'
+      ...
+    1..1
+ok 20 - nested deep
+  ---
+  duration_ms: X
+  type: 'test'
+  ...
+# Subtest: be fails
+    # Subtest: t1
+    not ok 1 - t1
+      ---
+      duration_ms: X
+      type: 'test'
+      failureType: 'hookFailed'
+      error: 'be'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    1..1
+not ok 21 - be fails
+  ---
+  duration_ms: X
+  type: 'suite'
+  failureType: 'subtestsFailed'
+  error: '1 subtest failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: ae fails
+    # Subtest: t2
+    not ok 1 - t2
+      ---
+      duration_ms: X
+      type: 'test'
+      failureType: 'hookFailed'
+      error: 'ae'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    1..1
+not ok 22 - ae fails
+  ---
+  duration_ms: X
+  type: 'suite'
+  failureType: 'subtestsFailed'
+  error: '1 subtest failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: t.after fails
+not ok 23 - t.after fails
+  ---
+  duration_ms: X
+  type: 'test'
+  failureType: 'hookFailed'
+  error: 'after'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: body throws
+    # Subtest: never
+    not ok 1 - never
+      ---
+      duration_ms: X
+      type: 'test'
+      failureType: 'cancelledByParent'
+      error: 'test did not finish before its parent and was cancelled'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    1..1
+not ok 24 - body throws
+  ---
+  duration_ms: X
+  type: 'suite'
+  failureType: 'testCodeFailure'
+  error: 'body'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: async body
+    # Subtest: late it
+    ok 1 - late it
+      ---
+      duration_ms: X
+      type: 'test'
+      ...
+    1..1
+ok 25 - async body
+  ---
+  duration_ms: X
+  type: 'suite'
+  ...
+# Subtest: skipped suite
+ok 26 - skipped suite # SKIP
+  ---
+  duration_ms: X
+  type: 'suite'
+  ...
+1..26
+# tests 34
+# suites 7
+# pass 13
+# fail 11
+# cancelled 5
+# skipped 2
+# todo 3
+# duration_ms X

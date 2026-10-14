@@ -1,0 +1,80 @@
+const { test, mock } = require("node:test");
+const assert = require("node:assert");
+test("mock.fn", () => {
+  const sum = mock.fn((a, b) => a + b);
+  assert.strictEqual(sum(1, 2), 3);
+  sum.mock.mockImplementationOnce(() => 10);
+  assert.strictEqual(sum(1, 2), 10);
+  assert.strictEqual(sum(2, 2), 4);
+  assert.strictEqual(sum.mock.callCount(), 3);
+  assert.deepStrictEqual(sum.mock.calls.map((c) => [c.arguments, c.result, c.error, c.this]), [[[1, 2], 3, undefined, undefined], [[1, 2], 10, undefined, undefined], [[2, 2], 4, undefined, undefined]]);
+  sum.mock.resetCalls();
+  assert.strictEqual(sum.mock.callCount(), 0);
+  const thrower = mock.fn(() => { throw new Error("x"); });
+  assert.throws(() => thrower());
+  assert.strictEqual(thrower.mock.calls[0].error.message, "x");
+  const times = mock.fn(() => "orig", () => "mocked", { times: 2 });
+  assert.deepStrictEqual([times(), times(), times()], ["mocked", "mocked", "orig"]);
+  class Point { constructor(x) { this.x = x; } }
+  const Mocked = mock.fn(Point);
+  const point = new Mocked(3);
+  assert.strictEqual(point.x, 3);
+  assert.strictEqual(Mocked.mock.calls[0].target, Point);
+});
+test("mock.method", (t) => {
+  const obj = { value: 2, double(x) { return x * this.value; }, get prop() { return "real"; } };
+  const spy = t.mock.method(obj, "double");
+  assert.strictEqual(obj.double(3), 6);
+  assert.strictEqual(spy.mock.calls[0].this, obj);
+  t.mock.method(obj, "double", () => 42);
+  assert.strictEqual(obj.double(3), 42);
+  const getter = t.mock.getter(obj, "prop", () => "fake");
+  assert.strictEqual(obj.prop, "fake");
+  assert.strictEqual(getter.mock.callCount(), 1);
+  t.mock.restoreAll();
+  assert.strictEqual(obj.double(3), 6);
+  assert.strictEqual(obj.prop, "real");
+  assert.throws(() => t.mock.method(obj, "value"), { code: "ERR_INVALID_ARG_VALUE" });
+  globalThis.restoredLater = { fn() { return "orig"; } };
+  t.mock.method(globalThis.restoredLater, "fn", () => "mocked");
+});
+test("restored after the test", () => {
+  assert.strictEqual(globalThis.restoredLater.fn(), "orig");
+});
+test("mock timers", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 1000 });
+  const calls = [];
+  setTimeout(() => calls.push("t50"), 50);
+  setTimeout(() => calls.push("t10"), 10);
+  const id = setInterval(() => calls.push("i20"), 20);
+  t.mock.timers.tick(45);
+  clearInterval(id);
+  t.mock.timers.tick(10);
+  assert.deepStrictEqual(calls, ["t10", "i20", "i20", "t50"]);
+  assert.strictEqual(Date.now(), 1055);
+  assert.strictEqual(new Date().getTime(), 1055);
+  setTimeout(() => calls.push("late"), 1000);
+  t.mock.timers.runAll();
+  assert.strictEqual(calls.at(-1), "late");
+  t.mock.timers.reset();
+  assert.ok(Date.now() > 1e12);
+  assert.throws(() => t.mock.timers.tick(1), { code: "ERR_INVALID_STATE" });
+});
+test("property", (t) => {
+  const obj = { a: 1 };
+  const m = t.mock.property(obj, "a", 5);
+  assert.strictEqual(obj.a, 5);
+  obj.a = 7;
+  assert.strictEqual(obj.a, 7);
+  assert.strictEqual(m.mock.accessCount(), 3);
+  m.mock.restore();
+  assert.strictEqual(obj.a, 1);
+});
+test("context api", async (t) => {
+  assert.strictEqual(t.name, "context api");
+  assert.strictEqual(typeof t.signal.aborted, "boolean");
+  await t.test("child", (c) => { assert.strictEqual(c.fullName, "context api > child"); assert.strictEqual(c.signal.aborted, false); });
+  let tries = 0;
+  const value = await t.waitFor(() => { if (++tries < 3) throw new Error("no"); return "ok"; }, { interval: 1 });
+  assert.strictEqual(value, "ok");
+});

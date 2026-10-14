@@ -113,7 +113,9 @@ function formatError(value) {
   const head = message ? `${name}: ${message}` : name;
   const stack = typeof value.stack === "string" ? value.stack : "";
   if (!stack) return `[${head}]`;
-  return stack.startsWith(head) ? stack.trimEnd() : `${head}\n${stack.trimEnd()}`;
+  const coded = typeof value.code === "string" ? `${name} [${value.code}]${message ? `: ${message}` : ""}` : null;
+  if (stack.startsWith(head) || (coded && stack.startsWith(coded))) return stack.trimEnd();
+  return `${head}\n${stack.trimEnd()}`;
 }
 
 function fitsOnOneLine(ctx, output, start, base) {
