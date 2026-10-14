@@ -1,5 +1,6 @@
 // node:os.
 const nativeOs = native.os;
+const { validate } = require("internal/errors");
 const config = internal.config;
 const platform = config.platform;
 
@@ -96,13 +97,40 @@ module.exports = {
   endianness: () => "LE",
   cpus,
   userInfo,
-  networkInterfaces() {
-    throw internal.unsupported("os.networkInterfaces");
+  networkInterfaces,
+  getPriority(pid = 0) {
+    validate.integer(pid, "pid", -2147483648, 2147483647);
+    return nativeOs.getPriority(pid);
   },
-  getPriority() {
-    throw internal.unsupported("os.getPriority");
-  },
-  setPriority() {
-    throw internal.unsupported("os.setPriority");
+  setPriority(pid, priority) {
+    if (priority === undefined) [priority, pid] = [pid, 0];
+    validate.integer(pid, "pid", -2147483648, 2147483647);
+    validate.integer(priority, "priority", -20, 19);
+    nativeOs.setPriority(pid, priority);
   },
 };
+
+// The prefix length of a contiguous netmask, else null, as Node computes cidr.
+function prefixLength(netmask, family) {
+  let bits = "";
+  if (family === "IPv4") bits = netmask.split(".").map((part) => Number(part).toString(2).padStart(8, "0")).join("");
+  else {
+    const [head, tail = ""] = netmask.split("::");
+    const left = head ? head.split(":") : [];
+    const right = tail ? tail.split(":") : [];
+    const groups = netmask.includes("::") ? [...left, ...Array(8 - left.length - right.length).fill("0"), ...right] : left;
+    bits = groups.map((group) => parseInt(group || "0", 16).toString(2).padStart(16, "0")).join("");
+  }
+  return /^1*0*$/.test(bits) ? bits.indexOf("0") === -1 ? bits.length : bits.indexOf("0") : null;
+}
+
+function networkInterfaces() {
+  const result = {};
+  for (const { name, address, netmask, family, mac, internal, scopeid } of nativeOs.networkInterfaces()) {
+    const bits = prefixLength(netmask, family);
+    const entry = { address, netmask, family, mac, internal, cidr: bits === null ? null : `${address}/${bits}` };
+    if (family === "IPv6") entry.scopeid = scopeid;
+    (result[name] ||= []).push(entry);
+  }
+  return result;
+}

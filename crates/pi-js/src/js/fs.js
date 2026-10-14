@@ -84,9 +84,9 @@ function copyInto(buffer, offset, bytes) {
 }
 
 fs.readSync = function readSync(fd, buffer, offsetOrOptions, length, position) {
-  if (fd === 0) throw internal.unsupported("Reading standard input");
   const args = readArgs(buffer, offsetOrOptions, length, position);
   if (args.length === 0) return 0;
+  if (fd === 0) return copyInto(buffer, args.offset, native.pipe.readStdinSync(args.length));
   return copyInto(buffer, args.offset, utils.sync({ op: "read", fd: utils.toFd(fd), length: args.length, position: args.position }));
 };
 fs.read = function read(fd, buffer, offsetOrOptions, length, position, callback) {

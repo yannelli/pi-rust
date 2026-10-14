@@ -2512,7 +2512,9 @@ version = "0.1.9"
 dependencies = [
  "base64 0.22.1",
  "futures",
+ "libc",
  "md-5",
+ "notify",
  "num-bigint",
  "num-traits",
  "oxc_allocator",
@@ -2533,6 +2535,7 @@ dependencies = [
  "tokio-util",
  "unicode-segmentation",
  "url",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

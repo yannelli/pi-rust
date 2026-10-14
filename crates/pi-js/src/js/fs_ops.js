@@ -21,6 +21,7 @@ const ops = {
   exists: (path) => ({ request: { op: "exists", path: toPath(path) } }),
   readFile(path, options) {
     options = getOptions(options, { flag: "r" });
+    if (path === 0) return { custom: () => native.pipe.readStdinSync(), map: (bytes) => decode(bytes, options.encoding) };
     const request = typeof path === "number" ? { op: "readFile", fd: toFd(path) } : { op: "readFile", path: toPath(path) };
     return { request, map: (bytes) => decode(bytes, options.encoding) };
   },
@@ -128,6 +129,7 @@ function filterResult(value, sync) {
 }
 
 function runSync(spec) {
+  if (spec.custom) return spec.map(spec.custom());
   if (spec.walk) {
     const steps = spec.walk();
     for (let input, step; !(step = steps.next(input)).done;) {
@@ -149,6 +151,7 @@ async function runWalk(spec) {
 }
 
 function runAsync(spec) {
+  if (spec.custom) return Promise.resolve().then(() => spec.map(spec.custom()));
   if (spec.walk) return runWalk(spec);
   const promise = utils.async(spec.request, spec.data);
   return spec.map ? promise.then(spec.map) : promise;

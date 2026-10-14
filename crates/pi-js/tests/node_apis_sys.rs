@@ -72,3 +72,118 @@ return {
     assert_eq!(actual["big"], json!(["bigint", true, "bigint", true, true, true, true, false, false]));
     assert_eq!(actual["globError"], "ERR_INVALID_ARG_TYPE");
 }
+
+#[tokio::test]
+async fn os_priority_interfaces_and_process_usage() {
+    let (_dir, root) = tempdir();
+    let (runtime, _capture) = runtime(&root);
+    let actual = run_cjs(
+        &runtime,
+        &root,
+        r#"
+const os = require("os");
+const tty = require("tty");
+const { spawn } = require("child_process");
+const err = (fn) => { try { fn(); return "no error"; } catch (e) { return [e.code, e.name === "SystemError" || e.info !== undefined]; } };
+const interfaces = os.networkInterfaces();
+const all = Object.values(interfaces).flat();
+const loopback = all.find((entry) => entry.internal && entry.family === "IPv4");
+let child;
+let childPriority = null;
+if (process.platform !== "win32") {
+  child = spawn("sleep", ["5"]);
+  await new Promise((resolve) => child.on("spawn", resolve));
+  os.setPriority(child.pid, 12);
+  childPriority = os.getPriority(child.pid);
+  child.kill();
+}
+const usage = process.cpuUsage();
+let spin = 0;
+for (let i = 0; i < 2e5; i++) spin += i;
+const delta = process.cpuUsage(usage);
+const resources = process.resourceUsage();
+return {
+  shape: all.every((entry) => ["address", "netmask", "family", "mac", "internal", "cidr"].every((key) => key in entry) && (entry.family === "IPv4" || typeof entry.scopeid === "number")),
+  loopback: loopback && [loopback.address, loopback.netmask, loopback.cidr, loopback.mac],
+  priority: typeof os.getPriority(), childPriority,
+  priorityErrors: [err(() => os.getPriority(2 ** 31 - 2)), err(() => os.setPriority(0, 20)), err(() => os.getPriority("1"))],
+  usage: [usage.user >= 0, usage.system >= 0, delta.user >= 0 && delta.system >= 0, spin > 0],
+  usageErrors: [err(() => process.cpuUsage(1)), err(() => process.cpuUsage({ user: "1", system: 0 })), err(() => process.cpuUsage({ user: -1, system: 0 }))],
+  resources: [Object.keys(resources).length, resources.maxRSS > 0, resources.userCPUTime >= 0],
+  tty: [typeof tty.isatty(0), err(() => new tty.ReadStream(5))[0], typeof process.abort],
+};
+"#,
+    )
+    .await;
+    assert_eq!(actual["shape"], true);
+    if cfg!(unix) {
+        assert_eq!(actual["loopback"], json!(["127.0.0.1", "255.0.0.0", "127.0.0.1/8", "00:00:00:00:00:00"]));
+        assert_eq!(actual["childPriority"], 12);
+    }
+    assert_eq!(actual["priority"], "number");
+    assert_eq!(
+        actual["priorityErrors"],
+        json!([["ERR_SYSTEM_ERROR", true], ["ERR_OUT_OF_RANGE", false], ["ERR_INVALID_ARG_TYPE", false]])
+    );
+    assert_eq!(actual["usage"], json!([true, true, true, true]));
+    assert_eq!(
+        actual["usageErrors"],
+        json!([["ERR_INVALID_ARG_TYPE", false], ["ERR_INVALID_ARG_TYPE", false], ["ERR_INVALID_ARG_VALUE", false]])
+    );
+    assert_eq!(actual["resources"], json!([16, true, true]));
+    assert_eq!(actual["tty"], json!(["boolean", "ERR_TTY_INIT_FAILED", "function"]));
+}
+
+#[tokio::test]
+async fn fs_watch_reports_native_events() {
+    let (_dir, root) = tempdir();
+    let (runtime, _capture) = runtime(&root);
+    write(&root, "watched/existing.txt", "a");
+    let actual = run_cjs(
+        &runtime,
+        &root,
+        r#"
+const fs = require("fs");
+const path = require("path");
+const dir = path.join(__dirname, "watched");
+const events = [];
+const watcher = fs.watch(dir);
+const wait = (predicate) => new Promise((resolve) => {
+  const check = () => (predicate() ? resolve() : setTimeout(check, 10));
+  check();
+});
+watcher.on("change", (type, name) => events.push([type, name]));
+await new Promise((resolve) => setTimeout(resolve, 50));
+fs.writeFileSync(path.join(dir, "new.txt"), "x");
+await wait(() => events.some(([type, name]) => type === "rename" && name === "new.txt"));
+fs.appendFileSync(path.join(dir, "existing.txt"), "more");
+await wait(() => events.some(([type, name]) => type === "change" && name === "existing.txt"));
+const closed = new Promise((resolve) => watcher.on("close", () => resolve("closed")));
+watcher.close();
+let missing;
+try { fs.watch(path.join(dir, "missing")); } catch (e) { missing = [e.code, e.syscall]; }
+const controller = new AbortController();
+const iterator = fs.promises.watch(path.join(dir, "existing.txt"), { signal: controller.signal });
+setTimeout(() => fs.appendFileSync(path.join(dir, "existing.txt"), "!"), 50);
+let first;
+let aborted;
+try {
+  for await (const event of iterator) {
+    first = event;
+    controller.abort();
+  }
+} catch (e) {
+  aborted = e.name;
+}
+const quiet = fs.watch(dir, { persistent: false });
+quiet.close();
+return { closed: await closed, missing, first: [first.eventType, first.filename], aborted, unref: quiet instanceof fs.FSWatcher };
+"#,
+    )
+    .await;
+    assert_eq!(actual["closed"], "closed");
+    assert_eq!(actual["missing"], json!(["ENOENT", "watch"]));
+    assert_eq!(actual["first"], json!(["change", "existing.txt"]));
+    assert_eq!(actual["aborted"], "AbortError");
+    assert_eq!(actual["unref"], true);
+}

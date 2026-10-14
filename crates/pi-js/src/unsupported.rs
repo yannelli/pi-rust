@@ -19,23 +19,24 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
     "crypto: ciphers other than aes-128-gcm, aes-256-gcm, and chacha20-poly1305 (CBC, CTR, ECB, CFB, OFB, CCM, OCB, \
      aes-192-gcm, DES), AES-GCM IVs other than 12 bytes, encrypted private keys (passphrase or cipher), DSA, Ed448, \
      and X448 keys, webcrypto.subtle except digest, setFips",
-    "fs: lchmod, fchmod, fchown, lutimes, statfs, openAsBlob, FileHandle chmod, chown, and \
-     readableWebStream; reading descriptor 0",
-    "child_process: fork, IPC (send and disconnect), stdio entries that are streams or descriptors above 2",
-    "process: reading stdin, stdin.setRawMode, cpuUsage, resourceUsage, abort, binding, dlopen, \
-     setUncaughtExceptionCaptureCallback",
-    "os: networkInterfaces, getPriority, setPriority",
+    "fs: lchmod, fchmod, fchown, lutimes, statfs, openAsBlob, FileHandle chmod, chown, and readableWebStream",
+    "child_process: stdio entries that are streams or descriptors above 2, sending handles over IPC \
+     (ERR_INVALID_HANDLE_TYPE, as there is no net module)",
+    "process: binding, dlopen, setUncaughtExceptionCaptureCallback, and running code after process.exit when \
+     the embedder's on_exit callback returns (the runtime is shutting down)",
     "stream: Duplex.from for promises and web streams; stream/web BYOB readers, \
      ReadableByteStreamController, CompressionStream, DecompressionStream",
     "fetch: Body.formData for multipart bodies, request bodies are buffered before sending",
     "util: MIMEType",
-    "misc: tty.ReadStream",
 ];
 
 /// Supported behavior that differs from Node.
 pub const DIFFERENCES: &[&str] = &[
-    "fs.watch polls every 100 ms (or options.interval) and fs.watchFile every 5007 ms by default",
-    "process.stdin is empty, and stdio 'inherit' for a child's stdin gives it no input",
+    "stdio 'inherit' for a child's stdin gives it no input",
+    "child_process.fork, and spawning process.execPath, run the script in this binary's JavaScript runner \
+     (PI_JS_FORK); the IPC channel is a Unix socket or Windows named pipe, not an inherited descriptor",
+    "tty.ReadStream works only for descriptor 0 (process.stdin); other descriptors fail with ERR_TTY_INIT_FAILED",
+    "PerformanceObserver sees function, mark, and measure entries only",
     "child stdout and stderr with stdio 'inherit' go to the runtime's output sink, not the real terminal",
     "process.exit calls the embedder's on_exit callback when one is set",
     "os.cpus reports no CPU times; os.freemem and os.totalmem come from /proc, sysctl, or vm_stat",

@@ -56,8 +56,9 @@ pub struct StdOutput;
 
 impl OutputSink for StdOutput {
     fn write(&self, stream: OutputStream, bytes: &[u8]) {
+        // Flushed at once: process.exit ends the process without running destructors.
         let _ = match stream {
-            OutputStream::Stdout => std::io::stdout().lock().write_all(bytes),
+            OutputStream::Stdout => std::io::stdout().lock().write_all(bytes).and_then(|()| std::io::stdout().flush()),
             OutputStream::Stderr => std::io::stderr().lock().write_all(bytes),
         };
     }

@@ -147,6 +147,7 @@ fn process<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
         kill(pid, signal.0.as_deref().unwrap_or("SIGTERM")).map_err(|error| throw(&ctx, &error))
     })?;
     set_fn(&process, "rss", resident_memory)?;
+    set_fn(&process, "abort", abort)?;
     set_fn(&process, "loopTimes", || {
         let state = state();
         let start = state.loop_start.get().map_or(0.0, |start| start.duration_since(started()).as_secs_f64() * 1000.0);
@@ -154,6 +155,11 @@ fn process<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
     })?;
     set_fn(&process, "uid", |name: String| user_id(&name))?;
     Ok(process)
+}
+
+/// `process.abort`: end the process at once, as Node's abort() does.
+fn abort() {
+    std::process::abort()
 }
 
 /// `process.exit`: hand the code to the embedder (or exit), then stop running JavaScript.

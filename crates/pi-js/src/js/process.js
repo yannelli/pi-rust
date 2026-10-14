@@ -53,9 +53,7 @@ process.exit = function exit(code) {
   throw internal.unsupported("continuing after process.exit");
 };
 process.reallyExit = process.exit;
-process.abort = () => {
-  throw internal.unsupported("process.abort");
-};
+process.abort = () => native.process.abort();
 process.kill = (pid, signal = "SIGTERM") => {
   let name = String(signal);
   if (typeof signal === "number") {
@@ -108,11 +106,26 @@ function memoryUsage() {
 }
 memoryUsage.rss = () => nativeProcess.rss();
 process.memoryUsage = memoryUsage;
-process.cpuUsage = () => {
-  throw internal.unsupported("process.cpuUsage");
+process.cpuUsage = function cpuUsage(previous) {
+  const [user, system] = native.os.resourceUsage();
+  if (previous === undefined) return { user, system };
+  const errors = require("internal/errors");
+  if (previous === null || typeof previous !== "object") throw errors.invalidArgType("prevValue", "of type object", previous);
+  for (const key of ["user", "system"]) {
+    const value = previous[key];
+    if (typeof value !== "number") throw errors.invalidArgType(`prevValue.${key}`, "of type number", value);
+    if (!(value >= 0 && value <= Number.MAX_SAFE_INTEGER)) {
+      throw errors.codeError(RangeError, "ERR_INVALID_ARG_VALUE", `The property 'prevValue.${key}' is invalid. Received ${value}`);
+    }
+  }
+  return { user: user - previous.user, system: system - previous.system };
 };
-process.resourceUsage = () => {
-  throw internal.unsupported("process.resourceUsage");
+const RESOURCE_FIELDS = ["userCPUTime", "systemCPUTime", "maxRSS", "sharedMemorySize", "unsharedDataSize", "unsharedStackSize",
+  "minorPageFault", "majorPageFault", "swappedOut", "fsRead", "fsWrite", "ipcSent", "ipcReceived", "signalsCount",
+  "voluntaryContextSwitches", "involuntaryContextSwitches"];
+process.resourceUsage = function resourceUsage() {
+  const values = native.os.resourceUsage();
+  return Object.fromEntries(RESOURCE_FIELDS.map((key, index) => [key, values[index]]));
 };
 for (const name of ["binding", "_linkedBinding", "dlopen", "setUncaughtExceptionCaptureCallback"]) {
   process[name] = () => {
@@ -145,7 +158,7 @@ process.emitWarning = function emitWarning(warning, type, code) {
   native.io.writeText("stderr", `(node:${process.pid}) ${prefix}${warning.name}: ${warning.message}\n`);
 };
 
-// Standard streams are created on first use; stdin cannot be read inside pi.
+// Standard streams are created on first use.
 let stdout;
 let stderr;
 let stdin;
@@ -181,23 +194,61 @@ Object.defineProperty(process, "stderr", { enumerable: true, configurable: true,
 Object.defineProperty(process, "stdin", {
   enumerable: true,
   configurable: true,
-  get() {
-    if (!stdin) {
-      const { Readable } = require("stream");
-      stdin = new Readable({
-        read() {
-          this.destroy(internal.unsupported("Reading process.stdin"));
-        },
-      });
-      stdin.fd = 0;
-      stdin.isTTY = false;
-      stdin.setRawMode = () => {
-        throw internal.unsupported("process.stdin.setRawMode");
-      };
-    }
-    return stdin;
-  },
+  get: () => (stdin ??= inputStream()),
 });
+
+// Reading starts on first read and keeps the process alive only while the stream flows.
+function inputStream() {
+  const { Readable } = require("stream");
+  const { Buffer } = require("buffer");
+  let id = null;
+  let ended = false;
+  const close = () => {
+    if (id !== null) native.pipe.close(id);
+    id = null;
+  };
+  const stream = new Readable({
+    read() {
+      if (ended) return;
+      id ??= native.pipe.stdin((kind, value) => {
+        if (kind === "data") stream.push(Buffer.from(value.buffer, value.byteOffset, value.byteLength));
+        else if (kind === "end") {
+          ended = true;
+          close();
+          stream.push(null);
+        } else if (kind === "error") stream.destroy(value);
+      });
+      native.pipe.ref(id, true);
+    },
+    destroy(error, callback) {
+      ended = true;
+      close();
+      callback(error);
+    },
+  });
+  stream.on("pause", () => id !== null && native.pipe.ref(id, false));
+  stream.fd = 0;
+  if (native.pipe.stdinIsTTY()) {
+    stream.isTTY = true;
+    stream.isRaw = false;
+    stream.setRawMode = function setRawMode(flag) {
+      native.pipe.setRawMode(!!flag);
+      if (flag && !this.isRaw) process.once("exit", () => this.isRaw && native.pipe.setRawMode(false));
+      this.isRaw = !!flag;
+      return this;
+    };
+  }
+  return stream;
+}
+
+// A forked child talks to its parent over the channel named in PI_JS_IPC.
+if (config.env.PI_JS_IPC) {
+  const path = config.env.PI_JS_IPC;
+  const serialization = config.env.PI_JS_IPC_SERIALIZATION || "json";
+  delete config.env.PI_JS_IPC;
+  delete config.env.PI_JS_IPC_SERIALIZATION;
+  require("internal/ipc").setupChannel(process, (callback) => native.pipe.connect(path, callback), serialization);
+}
 
 process[Symbol.toStringTag] = "process";
 module.exports = process;

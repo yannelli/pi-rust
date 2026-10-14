@@ -10,6 +10,9 @@ pub(crate) mod fs;
 mod fs_ops;
 mod fs_output;
 mod os;
+mod pipe;
+pub(crate) mod sys;
+mod watch;
 
 use rquickjs::context::EvalOptions;
 use rquickjs::{Ctx, Function, Object, Persistent};
@@ -28,6 +31,8 @@ pub(crate) fn install(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
     native.set("fs", fs::natives(ctx)?)?;
     native.set("os", os::natives(ctx)?)?;
     native.set("child", child::natives(ctx)?)?;
+    native.set("pipe", pipe::natives(ctx)?)?;
+    native.set("watch", watch::natives(ctx)?)?;
     native.set("fetch", fetch::natives(ctx)?)?;
     core::install(ctx, &native)?;
     let config = core::config(ctx)?;

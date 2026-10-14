@@ -6,6 +6,20 @@ use rquickjs::{Ctx, Object};
 
 use super::core::platform;
 use super::set_fn;
+use crate::error::JsError;
+use crate::runtime::convert::throw;
+
+/// Node's `SystemError` for a failed libuv call: code `ERR_SYSTEM_ERROR` with an `info` object.
+pub(crate) fn system_error(error: &std::io::Error, syscall: &str) -> JsError {
+    let (code, description) = crate::error::io_code(error);
+    let errno = error.raw_os_error().map_or(0, |errno| -errno);
+    let info = serde_json::json!({ "errno": errno, "code": code, "message": description, "syscall": syscall });
+    JsError::with_name("SystemError", format!("A system error occurred: {syscall} returned {code} ({description})"))
+        .with_code("ERR_SYSTEM_ERROR")
+        .with_data("errno", errno)
+        .with_data("syscall", syscall)
+        .with_data("info", info)
+}
 
 fn command_output(program: &str, args: &[&str]) -> Option<String> {
     let output = Command::new(program).args(args).output().ok()?;
@@ -160,6 +174,37 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
     set_fn(&object, "username", username)?;
     set_fn(&object, "shell", || std::env::var("SHELL").ok())?;
     set_fn(&object, "parallelism", || std::thread::available_parallelism().map_or(1, |count| count.get()))?;
+    set_fn(&object, "getPriority", |ctx: Ctx<'js>, pid: i32| {
+        super::sys::get_priority(pid).map_err(|error| throw(&ctx, &system_error(&error, "uv_os_getpriority")))
+    })?;
+    set_fn(&object, "setPriority", |ctx: Ctx<'js>, pid: i32, priority: i32| {
+        super::sys::set_priority(pid, priority).map_err(|error| throw(&ctx, &system_error(&error, "uv_os_setpriority")))
+    })?;
+    set_fn(&object, "resourceUsage", |ctx: Ctx<'js>| {
+        super::sys::resource_usage()
+            .map(|usage| usage.to_vec())
+            .map_err(|error| throw(&ctx, &system_error(&error, "uv_getrusage")))
+    })?;
+    set_fn(&object, "networkInterfaces", |ctx: Ctx<'js>| {
+        let entries = super::sys::network_interfaces()
+            .map_err(|error| throw(&ctx, &system_error(&error, "uv_interface_addresses")))?;
+        let list = rquickjs::Array::new(ctx.clone())?;
+        for (index, entry) in entries.into_iter().enumerate() {
+            let item = Object::new(ctx.clone())?;
+            item.set("name", entry.name)?;
+            item.set("address", entry.address.to_string())?;
+            item.set("netmask", entry.netmask.to_string())?;
+            item.set("family", if entry.address.is_ipv6() { "IPv6" } else { "IPv4" })?;
+            let mac = entry.mac.iter().map(|byte| format!("{byte:02x}")).collect::<Vec<_>>().join(":");
+            item.set("mac", mac)?;
+            item.set("internal", entry.internal)?;
+            if entry.address.is_ipv6() {
+                item.set("scopeid", entry.scope_id)?;
+            }
+            list.set(index, item)?;
+        }
+        Ok::<_, rquickjs::Error>(list)
+    })?;
     set_fn(&object, "cpus", |ctx: Ctx<'js>| {
         let list = rquickjs::Array::new(ctx.clone())?;
         for (index, (model, speed)) in cpus().into_iter().enumerate() {
