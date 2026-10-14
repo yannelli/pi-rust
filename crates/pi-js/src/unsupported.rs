@@ -83,7 +83,6 @@ pub const DIFFERENCES: &[&str] = &[
      settings after connect apply only initialWindowSize, remoteSettings shows defaults except \
      maxConcurrentStreams, a client's goaway sends no GOAWAY frame, received data is not flow-controlled \
      by the reader, and session and stream state objects are approximate",
-    "net: connecting to several looked-up addresses tries them one after another, not in parallel",
     "child_process: messages sent after a handle do not wait for the peer's NODE_HANDLE_ACK (Node queues \
      them, and resends the handle after a NODE_HANDLE_NACK), and bytes that a sent socket had read in the \
      sender but not yet emitted as 'data' are dropped instead of emitted there",

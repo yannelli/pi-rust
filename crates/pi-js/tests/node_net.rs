@@ -105,3 +105,13 @@ async fn net_matches_node() {
     assert_same_keys(&actual, &expected);
     assert!(capture.uncaught.lock().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn auto_select_family_matches_node() {
+    let (_dir, root) = tempdir();
+    let (runtime, capture) = runtime(&root);
+    let actual = run_cjs_within(&runtime, &root, include_str!("fixtures/node_net/autoselect.js"), 120).await;
+    let expected = serde_json::from_str(include_str!("fixtures/node_net/autoselect.json")).unwrap();
+    assert_same_keys(&actual, &expected);
+    assert!(capture.uncaught.lock().unwrap().is_empty());
+}
