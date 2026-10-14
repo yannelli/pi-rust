@@ -5,6 +5,10 @@
 mod automatic;
 #[path = "harness_compaction/chat.rs"]
 mod chat;
+#[path = "harness_compaction/edges.rs"]
+mod edges;
+#[path = "harness_compaction/inbox.rs"]
+mod inbox;
 #[path = "harness_compaction/interactions.rs"]
 mod interactions;
 #[path = "harness_compaction/manual.rs"]
@@ -13,6 +17,8 @@ mod manual;
 mod outcomes;
 #[path = "harness_compaction/overflow.rs"]
 mod overflow;
+#[path = "harness_compaction/recovery.rs"]
+mod recovery;
 mod support;
 
 use std::collections::VecDeque;
