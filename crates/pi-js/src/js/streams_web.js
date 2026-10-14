@@ -242,13 +242,27 @@ class ReadableStream {
   }
   values(options = {}) {
     const reader = this.getReader();
+    // The spec's "is finished" flag: QuickJS calls return() after next() rejects in for await.
+    let finished = false;
     return {
       async next() {
-        const result = await reader.read();
-        if (result.done) reader.releaseLock();
-        return result;
+        if (finished) return { value: undefined, done: true };
+        try {
+          const result = await reader.read();
+          if (result.done) {
+            finished = true;
+            reader.releaseLock();
+          }
+          return result;
+        } catch (error) {
+          finished = true;
+          reader.releaseLock();
+          throw error;
+        }
       },
       async return(value) {
+        if (finished) return { value, done: true };
+        finished = true;
         if (!options.preventCancel) await reader.cancel(value);
         reader.releaseLock();
         return { value, done: true };
