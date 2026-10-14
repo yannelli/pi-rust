@@ -107,19 +107,28 @@ function setupChannel(target, open, serialization = "json") {
         const parsed = JSON.parse(line);
         const message = advanced ? decodeAdvanced(parsed) : parsed;
         const internalMessage = message !== null && typeof message === "object" && typeof message.cmd === "string" && message.cmd.startsWith("NODE_");
-        target.emit(internalMessage ? "internalMessage" : "message", message, undefined);
+        if (!internalMessage && held) held.push(message);
+        else target.emit(internalMessage ? "internalMessage" : "message", message, undefined);
       }
     } else if (kind === "end" || kind === "error") {
       if (target.connected) finishDisconnect();
       else nativePipe.close(id);
     }
   });
+  // Node reads the channel only after the main script has run, so its listeners are in place. Here data can
+  // arrive first: hold messages until the first 'message' listener exists.
+  let held = target.listenerCount("message") > 0 ? null : [];
   const updateRef = () => nativePipe.ref(id, explicitRef ?? refs > 0);
   const counted = (name) => name === "message" || name === "disconnect";
   target.on("newListener", (name) => {
     if (counted(name)) {
       refs++;
       updateRef();
+    }
+    if (name === "message" && held) {
+      const messages = held;
+      held = null;
+      process.nextTick(() => messages.forEach((message) => target.emit("message", message, undefined)));
     }
   });
   target.on("removeListener", (name) => {
