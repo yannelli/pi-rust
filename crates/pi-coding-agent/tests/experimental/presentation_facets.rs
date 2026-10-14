@@ -98,7 +98,9 @@ async fn builds_conventional_plugin_entries_into_the_server_owned_plugin_cache()
         "tui.ts",
         second_source,
     );
-    let server_directory = directory.path().join("server");
+    // macOS limits a Unix socket path to 104 bytes, and its temp folder alone takes about half of that.
+    let server_root = tempfile::Builder::new().prefix("pi").tempdir_in("/tmp").unwrap();
+    let server_directory = server_root.path().join("server");
     let running = start_server(StartServerOptions {
         directory: Some(server_directory.display().to_string()),
         session_dir: Some(directory.path().join("sessions").display().to_string()),
