@@ -33,6 +33,7 @@ if (mode === "echo") {
 
 async fn fork_cases() {
     let (_dir, root) = tempdir();
+    let _ = STAGE.set(root.join("stage"));
     let capture = std::sync::Arc::new(Capture::default());
     let mut options = options(&root, &capture);
     let mut env: std::collections::BTreeMap<String, String> = std::env::vars().collect();
@@ -45,9 +46,11 @@ async fn fork_cases() {
         &root,
         r#"
 const { fork, spawn, execFileSync } = require("child_process");
+const fs = require("fs");
 const path = require("path");
 const script = path.join(__dirname, "child.js");
 const events = [];
+fs.writeFileSync(path.join(__dirname, "stage"), "const child = fork(script, [echo, x]);");
 const child = fork(script, ["echo", "x"]);
 const replies = [];
 child.on("message", (message) => {
@@ -56,8 +59,11 @@ child.on("message", (message) => {
 });
 child.on("disconnect", () => events.push("disconnect"));
 const sent = child.send("hi");
+fs.writeFileSync(path.join(__dirname, "stage"), "const closed = await new Promise((resolve) => child.on(close");
 const closed = await new Promise((resolve) => child.on("close", (code, signal) => resolve([code, signal])));
+fs.writeFileSync(path.join(__dirname, "stage"), "const afterSend = await new Promise((resolve) => child.send(");
 const afterSend = await new Promise((resolve) => child.send("late", (error) => resolve(error.code)));
+fs.writeFileSync(path.join(__dirname, "stage"), "const disconnectError = await new Promise((resolve) => { chi");
 const disconnectError = await new Promise((resolve) => { child.once("error", (error) => resolve(error.code)); child.disconnect(); });
 
 const exiting = fork(script, ["exit"]);
@@ -66,19 +72,23 @@ exiting.on("message", (message) => exitMessages.push(message));
 const exitOrder = [];
 exiting.on("disconnect", () => exitOrder.push("disconnect"));
 exiting.on("exit", (code) => exitOrder.push(["exit", code]));
+fs.writeFileSync(path.join(__dirname, "stage"), "await new Promise((resolve) => exiting.on(close, resolve));");
 await new Promise((resolve) => exiting.on("close", resolve));
 
 const advanced = fork(script, ["advanced"], { serialization: "advanced" });
 const payload = { map: new Map([[1, { deep: [1n, undefined] }]]), date: new Date(0), set: new Set(["a"]), nan: NaN, buf: Buffer.from("hi") };
 payload.self = payload;
 advanced.send(payload);
+fs.writeFileSync(path.join(__dirname, "stage"), "const back = await new Promise((resolve) => advanced.once(me");
 const back = await new Promise((resolve) => advanced.once("message", resolve));
 advanced.disconnect();
+fs.writeFileSync(path.join(__dirname, "stage"), "await new Promise((resolve) => advanced.on(close, resolve));");
 await new Promise((resolve) => advanced.on("close", resolve));
 
 const silent = fork(script, ["silent"], { silent: true });
 let silentOut = "";
 silent.stdout.on("data", (chunk) => (silentOut += chunk));
+fs.writeFileSync(path.join(__dirname, "stage"), "const silentCode = await new Promise((resolve) => silent.on(");
 const silentCode = await new Promise((resolve) => silent.on("close", resolve));
 
 const reader = spawn(process.execPath, [script, "stdin"]);
@@ -86,15 +96,19 @@ let readerOut = "";
 reader.stdout.on("data", (chunk) => (readerOut += chunk));
 reader.stdin.write("abc ");
 reader.stdin.end("def");
+fs.writeFileSync(path.join(__dirname, "stage"), "await new Promise((resolve) => reader.on(close, resolve));");
 await new Promise((resolve) => reader.on("close", resolve));
-const reversed = execFileSync(process.execPath, [script, "stdin-sync"], { input: "pi-js" }).toString();
-const printed = execFileSync(process.execPath, ["-p", "[1 + 2, process.argv.length, typeof require]", "extra"]).toString();
+fs.writeFileSync(path.join(__dirname, "stage"), "const reversed = execFileSync(process.execPath, [script, std");
+const reversed = execFileSync(process.execPath, [script, "stdin-sync"], { input: "pi-js", timeout: 60000 }).toString();
+fs.writeFileSync(path.join(__dirname, "stage"), "const printed = execFileSync(process.execPath, [-p, [1 + 2, ");
+const printed = execFileSync(process.execPath, ["-p", "[1 + 2, process.argv.length, typeof require]", "extra"], { timeout: 60000 }).toString();
 
 const err = (fn) => { try { fn(); return "no error"; } catch (e) { return e.code; } };
 const probe = fork(script, ["advanced"]);
 const errors = [err(() => probe.send()), err(() => probe.send(Symbol("s"))), err(() => probe.send("x", {})),
   err(() => fork(script, [], { stdio: ["pipe", "pipe", "pipe"] })), err(() => fork(script, [], { serialization: "v8" }))];
 probe.kill();
+fs.writeFileSync(path.join(__dirname, "stage"), "await new Promise((resolve) => probe.on(close, resolve));");
 await new Promise((resolve) => probe.on("close", resolve));
 return {
   sent, replies, closed, events, afterSend, disconnectError, exitMessages, exitOrder,
@@ -142,6 +156,9 @@ return {
 /// Set for children, so one that is not asked to run JavaScript cannot rerun the tests.
 const GUARD: &str = "PI_JS_FORK_TEST_CHILD";
 
+/// Where the parent script records the step it is on, for the timeout message.
+static STAGE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
 fn main() {
     if let Some(code) = pi_js::runner::child_main() {
         std::process::exit(code);
@@ -149,6 +166,13 @@ fn main() {
     if std::env::var_os(GUARD).is_some() {
         std::process::exit(97);
     }
+    // A hung child would block CI until its job times out; fail with the last step reached instead.
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_secs(240));
+        let stage = STAGE.get().and_then(|path| std::fs::read_to_string(path).ok()).unwrap_or_default();
+        eprintln!("test fork_cases ... FAILED: timed out at: {stage}");
+        std::process::exit(101);
+    });
     let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
     runtime.block_on(fork_cases());
     println!("test fork_cases ... ok\n\ntest result: ok. 1 passed; 0 failed");

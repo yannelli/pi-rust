@@ -57,6 +57,21 @@ fn event_type(kind: &EventKind) -> Option<&'static str> {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn file_identity(metadata: &std::fs::Metadata) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    Some((metadata.dev(), metadata.ino()))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn file_identity(_metadata: &std::fs::Metadata) -> Option<(u64, u64)> {
+    None
+}
+
+fn same_file(path: &Path, identity: Option<(u64, u64)>) -> bool {
+    identity.is_some() && std::fs::metadata(path).ok().as_ref().and_then(file_identity) == identity
+}
+
 fn watch<'js>(ctx: Ctx<'js>, path: String, recursive: bool, callback: Function<'js>) -> rquickjs::Result<u64> {
     let state = state();
     let target = crate::resolve::canonical(&state.cwd.borrow().join(&path));
@@ -64,6 +79,7 @@ fn watch<'js>(ctx: Ctx<'js>, path: String, recursive: bool, callback: Function<'
         throw(&ctx, &JsError::from_io(&error, "watch", Some(&path)).with_data("filename", path.clone()))
     })?;
     let is_dir = metadata.is_dir();
+    let identity = file_identity(&metadata);
     let id = state.next_id();
     let sender = state.sender.clone();
     let root = target.clone();
@@ -73,7 +89,12 @@ fn watch<'js>(ctx: Ctx<'js>, path: String, recursive: bool, callback: Function<'
     };
     let handler = move |result: notify::Result<notify::Event>| match result {
         Ok(event) => {
-            let Some(kind) = event_type(&event.kind) else { return };
+            let Some(mut kind) = event_type(&event.kind) else { return };
+            // libuv watches a single file with kqueue on macOS, so a write is `change`. FSEvents can repeat a
+            // stale "created" flag on a write; the same inode means the file was not replaced.
+            if !is_dir && matches!(event.kind, EventKind::Create(_)) && same_file(&root, identity) {
+                kind = "change";
+            }
             for changed in &event.paths {
                 if !is_dir && changed != &root {
                     continue;
