@@ -28,6 +28,7 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
      the embedder's on_exit callback returns (the runtime is shutting down)",
     "stream: Duplex.from for promises and web streams; stream/web BYOB readers, \
      ReadableByteStreamController, CompressionStream, DecompressionStream",
+    "v8: queryObjects",
     "fetch: Body.formData for multipart bodies, request bodies are buffered before sending",
 ];
 
@@ -47,6 +48,8 @@ pub const DIFFERENCES: &[&str] = &[
      and hooks apply to import, not require",
     "async_hooks: createHook sees AsyncResource objects only, not timers, promises, or I/O; async context \
      follows awaits through a source rewrite, and an await with a store set takes one extra microtask",
+    "v8: heap statistics come from QuickJS memory use, heap snapshots have no nodes, setFlagsFromString \
+     and promiseHooks do nothing, and strings with only Latin-1 characters always count as one-byte",
     "zlib: deflate output can differ in bytes from Node's zlib (zlib-rs); memLevel and strategy are \
      validated but not applied; brotli error codes come from the Rust decoder",
 ];
@@ -62,7 +65,8 @@ mod tests {
             assert!(unsupported.contains(&name), "{name}");
         }
         let supported = supported_modules();
-        for name in ["fs", "fs/promises", "child_process", "crypto", "stream/web", "assert/strict", "readline", "zlib"]
+        for name in
+            ["fs", "fs/promises", "child_process", "crypto", "stream/web", "assert/strict", "readline", "zlib", "v8"]
         {
             assert!(supported.contains(&name) && !unsupported.contains(&name), "{name}");
         }

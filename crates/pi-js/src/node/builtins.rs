@@ -73,6 +73,9 @@ const SOURCES: &[(&str, &str)] = &[
     ("punycode", include_str!("../js/punycode.js")),
     ("sea", include_str!("../js/sea.js")),
     ("trace_events", include_str!("../js/trace_events.js")),
+    ("internal/v8_serdes", include_str!("../js/v8_serdes.js")),
+    ("internal/v8_deserializer", include_str!("../js/v8_deserializer.js")),
+    ("v8", include_str!("../js/v8.js")),
     ("internal/zlib_constants", include_str!("../js/zlib_constants.js")),
     ("zlib", include_str!("../js/zlib.js")),
     (

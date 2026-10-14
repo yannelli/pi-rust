@@ -1,9 +1,9 @@
 // node:punycode (deprecated): RFC 3492 Punycode and IDNA labels, as in punycode.js 2.1.0.
-process.emitWarning(
+process.nextTick(() => process.emitWarning(
   "The `punycode` module is deprecated. Please use a userland alternative instead.",
   "DeprecationWarning",
   "DEP0040",
-);
+));
 
 const maxInt = 2147483647;
 const base = 36;
