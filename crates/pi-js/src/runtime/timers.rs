@@ -69,7 +69,8 @@ impl Timers {
         let timer = self.entries.get_mut(&id)?;
         let callback = timer.callback.clone();
         if timer.repeat {
-            timer.deadline = now + timer.delay.max(Duration::from_millis(1));
+            // From when the callback runs, not when the batch began, so a late batch cannot bunch the ticks.
+            timer.deadline = Instant::now().max(now) + timer.delay.max(Duration::from_millis(1));
             self.queue.insert((timer.deadline, id));
         } else {
             self.entries.remove(&id);
