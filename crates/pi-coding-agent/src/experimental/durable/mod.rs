@@ -9,7 +9,7 @@ pub mod runtime;
 pub mod sessions;
 pub mod subagent;
 mod tui;
-mod tui_parts;
+pub(crate) mod tui_parts;
 mod tui_run;
 mod tui_sync;
 #[cfg(test)]

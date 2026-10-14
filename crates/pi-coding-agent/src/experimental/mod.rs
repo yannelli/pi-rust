@@ -1,6 +1,21 @@
 //! Experimental client/server runtime (upstream `src/experimental`). Behind `PI_EXPERIMENTAL=1`.
 //! Upstream's `source-resolver.ts` is a Node module-resolution hook and has no Rust counterpart.
 
+pub mod cli;
+#[cfg(unix)]
+pub mod client;
+#[cfg(unix)]
+pub mod client_runtime;
+#[cfg(unix)]
+pub mod client_tui;
+#[cfg(unix)]
+mod client_tui_chat;
+#[cfg(unix)]
+pub mod client_tui_parts;
+#[cfg(unix)]
+pub mod client_tui_run;
+#[cfg(unix)]
+mod client_tui_session;
 #[cfg(unix)]
 pub mod commands;
 #[cfg(unix)]
@@ -10,6 +25,7 @@ pub mod coordinator;
 #[cfg(unix)]
 pub mod coordinator_process;
 pub mod durable;
+pub mod entry;
 pub mod lockfile;
 pub mod plugin;
 pub mod plugins;

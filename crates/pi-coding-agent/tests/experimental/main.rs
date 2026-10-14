@@ -1,6 +1,7 @@
 //! Ports of upstream `test/experimental-*.test.ts` for the server, coordinator, workers, and services.
 
 mod agent_controller;
+mod cli_command;
 mod durable_app;
 mod durable_support;
 #[cfg(unix)]

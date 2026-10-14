@@ -14,11 +14,7 @@ pub use crate::diagnostics::bug_upload::ENV_RADIUS_GATEWAY;
 use crate::diagnostics::bug_upload::radius_gateway_url;
 
 /// Upstream `AuthInput` of the experimental command options: a token, or a file holding one.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RadiusAuthInput {
-    Token(String),
-    File(String),
-}
+pub use super::cli::AuthInput as RadiusAuthInput;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RadiusRelayAuth {

@@ -313,6 +313,9 @@ async fn run(raw: Vec<String>) -> anyhow::Result<i32> {
     if pi_coding_agent::experimental::process::run_internal_process_from_env(&raw).await? {
         return Ok(0);
     }
+    if let Some(code) = pi_coding_agent::experimental::entry::run_experimental_entry(&raw).await {
+        return Ok(code);
+    }
     start(raw).await.or_else(|error| error.downcast::<Exit>().map(|exit| exit.0))
 }
 

@@ -1,29 +1,20 @@
 //! Development-only experimental command handlers (upstream `experimental/commands.ts`).
-//! TODO(step 3): `runClientCommand` and `runExperimentalCommand` need client.ts, client-tui.ts, and the
-//! `cli/experimental` parser; step 3 adds them and builds [`ServerCommand`] from parsed options.
 
 use std::sync::{Arc, Mutex};
 
 use pi_chord::ChordResult;
 
+use super::cli::{ClientCommand, ExperimentalCommand, parse};
+use super::client::{ClientResult, run_client};
+use super::client_tui_run::run_client_tui;
 use super::control::signals;
 use super::process::lock;
-use super::radius_auth::{RadiusAuthInput, RadiusRelayAuthResolver};
+use super::radius_auth::RadiusRelayAuthResolver;
 use super::radius_relay::radius_relay_host_factory;
 use super::relay::RadiusRelayHostStatus;
 use super::server_runtime::{StartServerOptions, start_foreground_server};
 
-/// Options of `pi server`.
-#[derive(Clone, Debug, Default)]
-pub struct ServerCommand {
-    pub server_id: Option<String>,
-    pub session_dir: Option<String>,
-    pub provider: Option<String>,
-    pub model: Option<String>,
-    pub plugin_packages: Option<Vec<String>>,
-    /// Explicit Radius credential. Stored Radius auth is used when omitted.
-    pub auth: Option<RadiusAuthInput>,
-}
+pub use super::cli::ServerCommand;
 
 fn describe(status: &RadiusRelayHostStatus) -> Option<String> {
     match status {
@@ -87,4 +78,51 @@ pub async fn run_server_command(command: ServerCommand) -> ChordResult<()> {
     };
     let closed = runtime.close().await;
     finished.and(closed)
+}
+
+/// Open the TUI on a terminal without a prompt; otherwise list, attach, or print the answer.
+pub async fn run_client_command(command: ClientCommand) -> ChordResult<()> {
+    use std::io::IsTerminal;
+    if command.prompt.is_none() && std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+        return run_client_tui(&command, Default::default()).await;
+    }
+    match run_client(&command, Default::default()).await? {
+        ClientResult::Attached { server_id, session_id } => println!("{server_id}\t{session_id}\tattached"),
+        ClientResult::Prompted { text, .. } => println!("{text}"),
+        ClientResult::List { sessions } => {
+            for session in sessions {
+                println!("{}\t{}", session.server_id, session.session_id);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn print_error(error: &str) {
+    use std::io::IsTerminal;
+    match std::io::stderr().is_terminal() {
+        true => eprintln!("\x1b[31mError: {error}\x1b[39m"),
+        false => eprintln!("Error: {error}"),
+    }
+}
+
+/// Upstream `runExperimentalCommand` for the arguments after `pi experimental`; returns the exit code.
+pub async fn run_experimental_command(args: &[String]) -> i32 {
+    let result = match parse(args) {
+        Ok(ExperimentalCommand::Server(command)) => run_server_command(command).await,
+        Ok(ExperimentalCommand::Client(command)) => run_client_command(command).await,
+        Err(errors) => {
+            for error in errors {
+                print_error(&error);
+            }
+            return 1;
+        }
+    };
+    match result {
+        Ok(()) => 0,
+        Err(error) => {
+            print_error(&error.to_string());
+            1
+        }
+    }
 }
