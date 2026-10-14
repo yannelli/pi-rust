@@ -155,8 +155,7 @@ async fn write_chunks(handle: &Handle, rest: &[u8], check: bool, context: &Conte
             }
             return Err(aborted(Some(&handle.path)).into());
         }
-        let (writer, payload) = (handle.clone(), chunk.to_vec());
-        let task = tokio::spawn(async move { writer.request("writeChunk", Json::new(), payload, None).await });
+        let task = tokio::spawn(handle.send_now("writeChunk", chunk.to_vec()));
         in_flight.0.push_back((0, task));
         if in_flight.0.len() >= WRITE_DEPTH
             && let Some((_, task)) = in_flight.0.pop_front()

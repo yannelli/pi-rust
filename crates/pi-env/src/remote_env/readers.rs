@@ -65,14 +65,36 @@ impl Handle {
     }
 
     pub async fn pread(&self, offset: Option<u64>, length: u64) -> Result<Vec<u8>, RemoteError> {
+        self.pread_now(offset, length).await
+    }
+
+    /// Send a `pread` now; the future waits for its bytes.
+    pub fn pread_now(
+        &self,
+        offset: Option<u64>,
+        length: u64,
+    ) -> impl Future<Output = Result<Vec<u8>, RemoteError>> + Send + use<> {
         let mut json = Json::new();
         json.insert("handle".into(), self.id.into());
         if let Some(offset) = offset {
             json.insert("offset".into(), offset.into());
         }
         json.insert("length".into(), length.into());
-        let options = RequestOptions { session: Some(self.session), ..Default::default() };
-        Ok(self.connection.request("pread", json, options).await?.payload)
+        let reply = self.connection.request_now("pread", json, self.session, RequestOptions::default());
+        async move { Ok(reply.await?.payload) }
+    }
+
+    /// Send a request with a payload now, so chunks reach the daemon in order.
+    pub fn send_now(
+        &self,
+        op: &str,
+        payload: Vec<u8>,
+    ) -> impl Future<Output = Result<Json, RemoteError>> + Send + use<> {
+        let mut json = Json::new();
+        json.insert("handle".into(), self.id.into());
+        let options = RequestOptions { payload, ..Default::default() };
+        let reply = self.connection.request_now(op, json, self.session, options);
+        async move { Ok(reply.await?.json) }
     }
 
     pub async fn close(&self) {
@@ -110,8 +132,7 @@ pub(crate) async fn read_range(
     while (bytes.len() as u64) < length {
         while in_flight.0.len() < READ_DEPTH && next < offset + length {
             let size = (offset + length - next).min(chunk);
-            let (reader, at) = (handle.clone(), next);
-            in_flight.0.push_back((size, tokio::spawn(async move { reader.pread(Some(at), size).await })));
+            in_flight.0.push_back((size, tokio::spawn(handle.pread_now(Some(next), size))));
             next += size;
         }
         let Some((size, task)) = in_flight.0.pop_front() else { break };

@@ -324,6 +324,25 @@ impl Connection {
         self.send(ready.session, op, json, options).await
     }
 
+    /// Send a request on the handles of session `session` now, so requests started one after another reach the daemon
+    /// in that order; the returned future waits for the reply.
+    pub fn request_now(
+        &self,
+        op: &str,
+        mut json: Json,
+        session: u64,
+        options: RequestOptions,
+    ) -> impl Future<Output = Result<Reply, RemoteError>> + Send + use<> {
+        let current = lock(&self.inner.state).session.clone();
+        let started = match current {
+            Some(current) if current.id == session && current.live.load(Ordering::SeqCst) => {
+                begin(&self.inner, current, op, &mut json, options)
+            }
+            _ => Err(RemoteError::lost("pi-env connection lost")),
+        };
+        async move { started?.await }
+    }
+
     /// Stop the daemon; it kills everything it started.
     pub fn close(&self) {
         let session = {
@@ -400,6 +419,17 @@ async fn send(
     json: &mut Json,
     options: RequestOptions,
 ) -> Result<Reply, RemoteError> {
+    begin(inner, session, op, json, options)?.await
+}
+
+/// Register and write a request now; the returned future waits for its reply.
+fn begin(
+    inner: &Inner,
+    session: Arc<Session>,
+    op: &str,
+    json: &mut Json,
+    options: RequestOptions,
+) -> Result<impl Future<Output = Result<Reply, RemoteError>> + Send + use<>, RemoteError> {
     if !session.live.load(Ordering::SeqCst) {
         return Err(RemoteError::lost("pi-env connection lost"));
     }
@@ -421,9 +451,12 @@ async fn send(
         let listener = signal.add_listener(move |_| write_frame(&target, frame(CANCEL, id, &Json::new(), &[])));
         guard.listener = Some((signal, listener));
     }
-    let result = receiver.await.unwrap_or_else(|_| Err(RemoteError::lost("pi-env connection lost")));
-    guard.done = true;
-    result
+    Ok(async move {
+        let mut guard = guard;
+        let result = receiver.await.unwrap_or_else(|_| Err(RemoteError::lost("pi-env connection lost")));
+        guard.done = true;
+        result
+    })
 }
 
 async fn start(inner: Arc<Inner>) -> Result<Ready, RemoteError> {
