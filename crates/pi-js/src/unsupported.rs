@@ -102,6 +102,10 @@ pub const DIFFERENCES: &[&str] = &[
      test files in this runtime instead of child processes, so an ES module file runs only on its first \
      load; the spec reporter prints no colors; source locations come from QuickJS stack frames, whose \
      columns can differ from V8's",
+    "repl: input is read line by line with no terminal editing, completion, history file, or .editor \
+     mode; top-level await keeps a single const, let, or var declaration per line visible afterwards; \
+     lines that arrive during an asynchronous evaluation wait for it; the context is a vm context, so \
+     globalThis inside it is not the context object (see vm), and error messages come from QuickJS",
 ];
 
 #[cfg(test)]
@@ -111,9 +115,7 @@ mod tests {
     #[test]
     fn lists_unsupported_modules() {
         let unsupported = unsupported_modules();
-        for name in ["inspector", "repl"] {
-            assert!(unsupported.contains(&name), "{name}");
-        }
+        assert!(unsupported.contains(&"inspector"));
         let supported = supported_modules();
         for name in [
             "fs",
@@ -135,6 +137,7 @@ mod tests {
             "sqlite",
             "test",
             "test/reporters",
+            "repl",
         ] {
             assert!(supported.contains(&name) && !unsupported.contains(&name), "{name}");
         }
