@@ -20,6 +20,8 @@ mod overflow;
 #[path = "harness_compaction/recovery.rs"]
 mod recovery;
 mod support;
+#[path = "harness_compaction/together.rs"]
+mod together;
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
