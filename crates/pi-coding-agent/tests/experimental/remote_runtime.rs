@@ -115,8 +115,8 @@ async fn serializes_concurrent_cold_activation_and_retires_after_both_clients_le
 }
 
 // "passes client plugin packages to a cold server" uses `openClientRuntime` (step 3).
-// "retires a cold server after its only Session attachment disconnects" uses `runClient` (step 3) and
-// the coding agent Session worker (step 2).
+// "retires a cold server after its only Session attachment disconnects" uses `runClient` (step 3); the
+// coding agent Session worker it also needs is ported.
 
 #[tokio::test]
 async fn runs_and_discovers_multiple_logical_servers_from_one_directory() {
