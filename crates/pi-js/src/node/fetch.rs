@@ -9,6 +9,7 @@ use rquickjs::{Ctx, Function, Object, Persistent, Value};
 use serde::Deserialize;
 
 use super::set_fn;
+use super::zlib::{self, Codec};
 use crate::error::JsError;
 use crate::runtime::convert::{bytes_to_js, error_value, latin1_to_bytes, throw, to_json};
 use crate::runtime::state::{Message, Task, state};
@@ -62,6 +63,62 @@ enum Event {
     Chunk(Vec<u8>),
     End,
     Error(JsError),
+    /// A body decoding failure, which undici reports as `TypeError: terminated`.
+    Terminated(JsError),
+}
+
+/// One content coding to undo. `deflate` picks zlib or raw deflate from the first byte.
+enum Stage {
+    Deflate(Option<Codec>),
+    Ready(Codec),
+}
+
+/// The decoders undici applies: codings in reverse order, none for HEAD, CONNECT, or null-body
+/// statuses, and none at all when any coding is unknown.
+fn decoders(method: &str, status: u16, headers: &reqwest::header::HeaderMap) -> Result<Vec<Stage>, JsError> {
+    if method == "HEAD" || method == "CONNECT" || [101, 204, 205, 304].contains(&status) {
+        return Ok(Vec::new());
+    }
+    let values: Vec<String> = headers
+        .get_all(reqwest::header::CONTENT_ENCODING)
+        .iter()
+        .map(|value| String::from_utf8_lossy(value.as_bytes()).to_ascii_lowercase())
+        .collect();
+    if values.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut stages = Vec::new();
+    for coding in values.join(", ").split(',').rev().map(str::trim) {
+        stages.push(match coding {
+            "gzip" | "x-gzip" => Stage::Ready(zlib::decoder(zlib::GUNZIP)?),
+            "deflate" => Stage::Deflate(None),
+            "br" => Stage::Ready(zlib::decoder(zlib::BROTLI_DECODE)?),
+            _ => return Ok(Vec::new()),
+        });
+    }
+    Ok(stages)
+}
+
+/// Run a chunk through every decoder. Input that ends early is not an error, as undici
+/// decodes with Z_SYNC_FLUSH.
+fn decode(stages: &mut [Stage], mut data: Vec<u8>) -> Result<Vec<u8>, JsError> {
+    for stage in stages {
+        if data.is_empty() {
+            break;
+        }
+        let codec = match stage {
+            Stage::Ready(codec) => codec,
+            Stage::Deflate(slot) => match slot {
+                Some(codec) => codec,
+                None => {
+                    let mode = if data[0] & 0x0f == 0x08 { zlib::INFLATE } else { zlib::INFLATERAW };
+                    slot.insert(zlib::decoder(mode)?)
+                }
+            },
+        };
+        data = codec.process(&data, 0)?;
+    }
+    Ok(data)
 }
 
 /// Node reports network failures as `TypeError: fetch failed` with the cause attached.
@@ -113,6 +170,10 @@ async fn run(client: reqwest::Client, request: FetchRequest, body: Option<Vec<u8
     if request.redirect == "error" && response.status().is_redirection() {
         return emit(Event::Error(JsError::type_error("fetch failed").with_data("cause", "unexpected redirect")));
     }
+    let mut stages = match decoders(&request.method, response.status().as_u16(), response.headers()) {
+        Ok(stages) => stages,
+        Err(error) => return emit(Event::Error(error)),
+    };
     let headers = response
         .headers()
         .iter()
@@ -126,8 +187,10 @@ async fn run(client: reqwest::Client, request: FetchRequest, body: Option<Vec<u8
     }));
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
-        match chunk {
-            Ok(bytes) => emit(Event::Chunk(bytes.to_vec())),
+        match chunk.map(|bytes| decode(&mut stages, bytes.to_vec())) {
+            Ok(Ok(bytes)) if bytes.is_empty() => {}
+            Ok(Ok(bytes)) => emit(Event::Chunk(bytes)),
+            Ok(Err(error)) => return emit(Event::Terminated(error)),
             Err(error) => return emit(Event::Error(network_error(&error))),
         }
     }
@@ -148,7 +211,7 @@ fn deliver(ctx: &Ctx<'_>, id: u64, event: Event) {
     else {
         return;
     };
-    let finished = matches!(event, Event::End | Event::Error(_));
+    let finished = matches!(event, Event::End | Event::Error(_) | Event::Terminated(_));
     let result = (|| match event {
         Event::Head(head) => {
             let object = Object::new(ctx.clone())?;
@@ -165,6 +228,7 @@ fn deliver(ctx: &Ctx<'_>, id: u64, event: Event) {
         Event::Chunk(bytes) => function.call::<_, ()>(("chunk", bytes_to_js(ctx, bytes)?)),
         Event::End => function.call::<_, ()>(("end",)),
         Event::Error(error) => function.call::<_, ()>(("error", error_value(ctx, &error)?)),
+        Event::Terminated(error) => function.call::<_, ()>(("terminated", error_value(ctx, &error)?)),
     })();
     if finished {
         release(id);
