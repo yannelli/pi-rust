@@ -11,6 +11,7 @@ members = [
     "crates/pi-embedded",
     "crates/pi-env",
     "crates/pi-env-daemon",
+    "crates/pi-evals",
     "crates/pi-js",
     "crates/pi-mcp",
     "crates/pi-protocol",

@@ -2489,6 +2489,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-evals"
+version = "0.1.8"
+dependencies = [
+ "anyhow",
+ "futures",
+ "pi-ai",
+ "pi-coding-agent",
+ "pi-tui",
+ "regex",
+ "reqwest",
+ "ring",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "pi-js"
 version = "0.1.8"
 dependencies = [

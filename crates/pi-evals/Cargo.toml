@@ -1,0 +1,32 @@
+[package]
+name = "pi-evals"
+description = "Behavioral evals for the pi coding agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "pi-evals"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+pi-ai.workspace = true
+pi-coding-agent = { path = "../pi-coding-agent" }
+pi-tui = { path = "../pi-tui" }
+regex = "1"
+ring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+reqwest.workspace = true
+
+[lints]
+workspace = true
