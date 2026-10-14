@@ -49,7 +49,7 @@ class Domain extends EventEmitter {
     if (index === -1) return;
     stack.splice(index);
     const top = stack.length > 0 ? stack[stack.length - 1] : undefined;
-    exports.active = top || null;
+    exports.active = top;
     storage.enterWith(top);
   }
   add(emitter) {
