@@ -206,8 +206,9 @@ impl Inner {
         let (sender, applied) = oneshot::channel();
         let weak = Arc::downgrade(self);
         let timer_request = request_id.clone();
+        let sleep = tokio::time::sleep(WORKER_DEMAND_TIMEOUT);
         let timer = tokio::spawn(async move {
-            tokio::time::sleep(WORKER_DEMAND_TIMEOUT).await;
+            sleep.await;
             let Some(inner) = weak.upgrade() else { return };
             if compensate_on_timeout {
                 tokio::spawn(inner.reconcile_demand_timeout(timer_request));

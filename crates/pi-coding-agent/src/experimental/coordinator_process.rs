@@ -293,8 +293,9 @@ impl Coordinator {
             return;
         }
         let weak = Arc::downgrade(self);
+        let sleep = tokio::time::sleep(delay);
         state.empty_timer = Some(tokio::spawn(async move {
-            tokio::time::sleep(delay).await;
+            sleep.await;
             let Some(this) = weak.upgrade() else { return };
             let empty = {
                 let mut state = lock(&this.state);

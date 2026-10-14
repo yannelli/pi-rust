@@ -320,8 +320,9 @@ impl Inner {
         let promise = async move { receiver.await.unwrap_or_else(|_| abandoned()) }.boxed().shared();
         let weak = Arc::downgrade(self);
         let timer_key = session_key.clone();
+        let sleep = tokio::time::sleep(WORKER_STARTUP_TIMEOUT);
         let timer = tokio::spawn(async move {
-            tokio::time::sleep(WORKER_STARTUP_TIMEOUT).await;
+            sleep.await;
             if let Some(inner) = weak.upgrade() {
                 inner.fail_pending(&timer_key, ChordError::error("Session worker startup timed out"));
             }

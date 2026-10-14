@@ -155,8 +155,9 @@ impl ServerLifetime {
         state.retire = Some(retire);
         if state.startup_held {
             let weak = Arc::downgrade(&self.0);
+            let sleep = tokio::time::sleep(AUTO_SERVER_STARTUP_GRACE);
             state.startup_timer = Some(tokio::spawn(async move {
-                tokio::time::sleep(AUTO_SERVER_STARTUP_GRACE).await;
+                sleep.await;
                 let Some(inner) = weak.upgrade() else { return };
                 {
                     let mut state = lock(&inner.1);
@@ -214,8 +215,9 @@ impl ServerLifetime {
             return;
         }
         let weak = Arc::downgrade(&self.0);
+        let sleep = tokio::time::sleep(AUTO_SERVER_IDLE_GRACE);
         state.retirement_timer = Some(tokio::spawn(async move {
-            tokio::time::sleep(AUTO_SERVER_IDLE_GRACE).await;
+            sleep.await;
             let Some(inner) = weak.upgrade() else { return };
             let idle = {
                 let mut state = lock(&inner.1);

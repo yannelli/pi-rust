@@ -253,8 +253,9 @@ impl WorkerLifecycle {
         });
         let weak = Arc::downgrade(&inner);
         let grace = options.initial_demand_grace;
+        let sleep = tokio::time::sleep(grace);
         let timer = tokio::spawn(async move {
-            tokio::time::sleep(grace).await;
+            sleep.await;
             let Some(inner) = weak.upgrade() else { return };
             {
                 let mut state = lock(&inner.state);
@@ -294,8 +295,9 @@ impl WorkerLifecycle {
             let weak = Arc::downgrade(&self.0);
             let grace = self.0.orphan_demand_grace;
             let timer_key = key.clone();
+            let sleep = tokio::time::sleep(grace);
             let timer = tokio::spawn(async move {
-                tokio::time::sleep(grace).await;
+                sleep.await;
                 let Some(inner) = weak.upgrade() else { return };
                 let removed = {
                     let mut state = lock(&inner.state);
