@@ -187,3 +187,27 @@ return { closed: await closed, missing, first: [first.eventType, first.filename]
     assert_eq!(actual["aborted"], "AbortError");
     assert_eq!(actual["unref"], true);
 }
+
+#[tokio::test]
+async fn os_cpus_report_times() {
+    let (_dir, root) = tempdir();
+    let (runtime, _capture) = runtime(&root);
+    let actual = run_cjs_within(
+        &runtime,
+        &root,
+        r#"
+const os = require("os");
+const cpus = os.cpus();
+const total = (cpu) => Object.values(cpu.times).reduce((sum, value) => sum + value, 0);
+return {
+  keys: cpus.every((cpu) => JSON.stringify(Object.keys(cpu)) === '["model","speed","times"]' && JSON.stringify(Object.keys(cpu.times)) === '["user","nice","sys","idle","irq"]'),
+  integers: cpus.every((cpu) => Object.values(cpu.times).every((value) => Number.isInteger(value) && value >= 0)),
+  counted: cpus.some((cpu) => total(cpu) > 0),
+  count: cpus.length >= os.availableParallelism(),
+};
+"#,
+        60,
+    )
+    .await;
+    assert_eq!(actual, json!({ "keys": true, "integers": true, "counted": true, "count": true }));
+}

@@ -60,7 +60,8 @@ pub const DIFFERENCES: &[&str] = &[
     "tty.ReadStream works only for descriptor 0 (process.stdin); other descriptors fail with ERR_TTY_INIT_FAILED",
     "PerformanceObserver sees function, mark, and measure entries only",
     "process.exit calls the embedder's on_exit callback when one is set",
-    "os.cpus reports no CPU times; os.freemem and os.totalmem come from /proc, sysctl, or vm_stat",
+    "os.freemem and os.totalmem come from /proc, sysctl, or vm_stat; os.cpus reports zero times on \
+     platforms other than Linux, macOS, and Windows",
     "readline has no raw terminal editing: lines come from the input stream as text",
     "module.register hooks run on the importing thread: a hook's promise must settle from microtasks alone, \
      and hooks apply to import, not require",

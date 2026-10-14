@@ -21,6 +21,7 @@ mod net;
 mod net_connect;
 mod net_server;
 mod os;
+mod os_cpus;
 mod pipe;
 mod ports;
 mod shared;
