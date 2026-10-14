@@ -1,0 +1,70 @@
+hello
+args_sizes_get 0 3 12
+args_get 0 [ 0, 5, 9 ] "prog\u0000a b\u0000ü\u0000"
+environ_sizes_get 0 2 20
+environ_get 0 "HOME=/home/x\u0000EMPTY=\u0000"
+clock_res_get 0 true 28
+clock_time_get 0 true 28
+random_get 0 61
+fd_prestat_get 0 0 8 8 28
+fd_prestat_dir_name 0 "/sandbox" 0 "rel"
+fd_prestat_dir_name short 42
+fd_fdstat_get dir 0 3 264240792n 268435455n
+path_open rights 76
+path_open 0 5
+fd_fdstat_get file 0 4
+fd_read 0 14 "file " "contents\n"
+fd_read eof 0 0
+fd_seek 0 5n 0 5n
+fd_seek end 0 11n 28
+fd_pread 0 5 "file "
+fd_filestat_get 0 4 14n
+fd_close 0 8
+path_open create 0
+fd_write 0 9
+fd_pwrite 0 9
+fd_filestat_set_size 0
+fd_sync 0 0
+fd_close 0 "wrwr"
+path_open exclusive 20
+path_open missing 44
+path_open escape 76
+path_open absolute 76
+path_open dir for write 31
+path_open dir 0 5
+fd_close dir 0
+path_open not dir 54
+path_create_directory 0 true
+path_create_directory again 20
+path_filestat_get 0 4 14n
+path_filestat_get dir 0 3
+path_rename 0 true
+path_unlink_file 0 44
+path_remove_directory 0
+path_link 0 14
+path_unlink_file link 0
+fd_readdir 0
+readdir names in.txt:4,sub:3
+fd_readdir small 0 10
+fd_renumber 0 0 8
+sched_yield 0 28
+bad fd 8 8 8
+out of bounds 61
+keys 46
+start 0
+ERR_WASI_ALREADY_STARTED WASI instance has already started
+import object [ 'wasi_unstable' ]
+proc_exit 3
+no version TypeError ERR_INVALID_ARG_TYPE The "options.version" property must be of type string. Received undefined
+bad version TypeError ERR_INVALID_ARG_VALUE The property 'options.version' unsupported WASI version. Received 'x'
+args TypeError ERR_INVALID_ARG_TYPE The "options.args" property must be an instance of Array. Received type string ('x')
+stdin RangeError ERR_OUT_OF_RANGE The value of "options.stdin" is out of range. It must be >= 0 && <= 2147483647. Received -1
+returnOnExit TypeError ERR_INVALID_ARG_TYPE The "options.returnOnExit" property must be of type boolean. Received type number (1)
+not started Error ERR_WASI_NOT_STARTED wasi.start() has not been called
+start number TypeError ERR_INVALID_ARG_TYPE The "instance" argument must be of type object. Received type number (5)
+no memory TypeError ERR_INVALID_ARG_TYPE "instance.exports.memory" property must be a WebAssembly.Memory object
+no _start TypeError ERR_INVALID_ARG_TYPE The "instance.exports._start" property must be of type function. Received undefined
+with _initialize TypeError ERR_INVALID_ARG_TYPE The "instance.exports._initialize" property must be undefined. Received function _initialize
+initialize with _start TypeError ERR_INVALID_ARG_TYPE The "instance.exports._start" property must be undefined. Received function _start
+init ran
+initialize undefined

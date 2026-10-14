@@ -47,6 +47,9 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
      has no session extension, and native extensions do not load)",
     "test: snapshot assertions (t.assert.snapshot and t.assert.fileSnapshot) and coverage (the lcov reporter)",
     "inspector: open (there is no DevTools server to attach to)",
+    "WebAssembly: shared memories (Memory with shared: true, and modules using threads and atomics fail to \
+     compile), and exception handling (Tag and Exception throw, JSTag is absent, and modules using it fail \
+     to compile)",
 ];
 
 /// Supported behavior that differs from Node.
@@ -111,6 +114,15 @@ pub const DIFFERENCES: &[&str] = &[
      calls, console notifications), HeapProfiler (an empty snapshot), Schema, and NodeRuntime; Debugger, \
      Profiler, and Network methods fail with error -32601 because QuickJS has no V8 inspector; console \
      messages from before Runtime.enable are not replayed; url() returns undefined",
+    "WebAssembly: modules run on the wasmi interpreter, which is much slower than V8 and also accepts \
+     memory64; messages for compile errors (other than bad headers), instantiation failures, and \
+     float-to-integer overflow traps use wasmi's wording; error stacks have no Wasm frames; modules, \
+     instances, and values passed as externref stay alive until the runtime ends",
+    "wasi: the system calls are JavaScript over the fs module: symbolic links inside a preopened \
+     directory are followed without a sandbox check, poll_oneoff reports descriptors ready at once and \
+     blocks the thread for clock subscriptions, proc_raise returns ENOSYS, sockets are not available, \
+     stdio descriptors report the rights of a character device when the runtime's output is not a real \
+     descriptor, and returnOnExit: false exits through process.exit (so 'exit' listeners run)",
 ];
 
 #[cfg(test)]
@@ -120,7 +132,7 @@ mod tests {
     #[test]
     fn lists_unsupported_modules() {
         let unsupported = unsupported_modules();
-        assert!(unsupported.contains(&"wasi"));
+        assert!(unsupported.is_empty(), "{unsupported:?}");
         let supported = supported_modules();
         for name in [
             "fs",
@@ -145,6 +157,7 @@ mod tests {
             "repl",
             "inspector",
             "inspector/promises",
+            "wasi",
         ] {
             assert!(supported.contains(&name) && !unsupported.contains(&name), "{name}");
         }

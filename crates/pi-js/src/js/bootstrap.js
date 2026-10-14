@@ -425,6 +425,7 @@
     for (const name of names) defineLazy(name, () => loadBuiltin(module)[name]);
   }
   defineLazy("crypto", () => loadBuiltin("crypto").webcrypto);
+  defineLazy("WebAssembly", () => loadBuiltin("internal/webassembly"));
   if (typeof globalThis.Intl === "undefined") defineLazy("Intl", () => loadBuiltin("internal/intl"));
   defineLazy("navigator", () => ({
     hardwareConcurrency: loadBuiltin("os").availableParallelism(),
