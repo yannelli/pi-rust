@@ -92,6 +92,10 @@ const SOURCES: &[(&str, &str)] = &[
     ("internal/http_client", include_str!("../js/http_client.js")),
     ("http", include_str!("../js/http.js")),
     ("https", include_str!("../js/https.js")),
+    ("internal/http2_core", include_str!("../js/http2_core.js")),
+    ("internal/http2_session", include_str!("../js/http2_session.js")),
+    ("internal/http2_compat", include_str!("../js/http2_compat.js")),
+    ("http2", include_str!("../js/http2.js")),
     (
         "constants",
         "module.exports = { ...require('os').constants.errno, ...require('os').constants.signals, ...require('os').constants.priority, ...require('internal/fs_utils').constants };",

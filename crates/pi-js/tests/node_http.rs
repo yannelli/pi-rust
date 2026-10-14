@@ -30,3 +30,11 @@ async fn https_matches_node() {
         .replace("__CERT__", &format!("{:?}", include_str!("fixtures/node_http/cert.pem")));
     check(&script, include_str!("fixtures/node_http/https.json")).await;
 }
+
+#[tokio::test]
+async fn http2_matches_node() {
+    let script = include_str!("fixtures/node_http/http2.js")
+        .replace("__KEY__", &format!("{:?}", include_str!("fixtures/node_http/key.pem")))
+        .replace("__CERT__", &format!("{:?}", include_str!("fixtures/node_http/cert.pem")));
+    check(&script, include_str!("fixtures/node_http/http2.json")).await;
+}
