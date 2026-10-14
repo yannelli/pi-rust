@@ -15,6 +15,7 @@ mod fs_output;
 mod handles;
 mod http;
 mod http2;
+mod http2_settings;
 mod http2_stream;
 mod net;
 mod net_connect;
