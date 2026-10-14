@@ -26,6 +26,8 @@ mod sqlite_fn;
 pub(crate) mod sys;
 mod tls;
 pub(crate) mod vm;
+mod wasm;
+mod wasm_objects;
 mod watch;
 mod worker;
 mod x509;
@@ -61,6 +63,7 @@ pub(crate) fn install(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
     native.set("vm", vm::natives(ctx)?)?;
     native.set("worker", ports::natives(ctx)?)?;
     native.set("sqlite", sqlite::natives(ctx)?)?;
+    native.set("wasm", wasm::natives(ctx)?)?;
     native.set("asyncContext", context::natives(ctx)?)?;
     core::install(ctx, &native)?;
     let config = core::config(ctx)?;

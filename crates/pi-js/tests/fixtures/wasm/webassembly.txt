@@ -1,0 +1,97 @@
+validate => [ true, false ]
+validate type !! TypeError "WebAssembly.validate(): Argument 0 must be a buffer source"
+bad magic !! CompileError "WebAssembly.Module(): expected magic word 00 61 73 6d, found 01 02 03 04 @+0"
+bad version !! CompileError "WebAssembly.Module(): expected version 01 00 00 00, found 02 00 00 00 @+4"
+empty !! CompileError "WebAssembly.Module(): BufferSource argument is empty"
+not a buffer !! TypeError "WebAssembly.Module(): Argument 0 must be a buffer source"
+without new !! TypeError "WebAssembly.Module(): WebAssembly.Module must be invoked with 'new'"
+imports => [
+  { module: 'env', name: 'triple', kind: 'function' },
+  { module: 'env', name: 'offset', kind: 'global' }
+]
+exports => [
+  { name: 'add', kind: 'function' },
+  { name: 'double', kind: 'function' },
+  { name: 'trap', kind: 'function' },
+  { name: 'callJs', kind: 'function' },
+  { name: 'div', kind: 'function' },
+  { name: 'square', kind: 'function' },
+  { name: 'memory', kind: 'memory' }
+]
+custom => [ [ 1, 2, 3 ] ]
+no imports !! TypeError "WebAssembly.Instance(): Imports argument must be present and must be an object"
+missing module !! TypeError "WebAssembly.Instance(): Import #0 module=\"env\": module is not an object or function"
+not callable !! LinkError "WebAssembly.Instance(): Import #0 module=\"env\" function=\"triple\": function import requires a callable"
+bad global !! LinkError "WebAssembly.Instance(): Import #1 module=\"env\" function=\"offset\": global import must be a number, valid Wasm reference, or WebAssembly.Global object"
+exports object => [ null, true, 'add,double,trap,callJs,div,square,memory' ]
+add => [ 5, '1', 2, -2147483647, 7 ]
+add bigint !! TypeError "Cannot convert a BigInt value to a number"
+i64 => [ 42n, 10n, 2n, 0n ]
+i64 number !! TypeError "Cannot convert 21 to a BigInt"
+floats => 2.25
+unreachable !! RuntimeError "unreachable"
+divide by zero !! RuntimeError "divide by zero"
+overflow !! RuntimeError "divide result unrepresentable"
+call js => 112
+identity => [ true, true ]
+tags => [
+  '[object WebAssembly.Module]',
+  '[object WebAssembly.Memory]',
+  '[object WebAssembly]'
+]
+errors => [ 'RuntimeError', 'CompileError: y', true ]
+memory => [ 65536, 1, 0, 131072 ]
+grow past maximum !! RangeError "WebAssembly.Memory.grow(): Maximum memory size exceeded"
+grow negative !! TypeError "WebAssembly.Memory.grow(): Argument 0 must be non-negative"
+memory descriptor !! TypeError "WebAssembly.Memory(): Property 'initial' is required"
+memory bounds !! RangeError "WebAssembly.Memory(): Property 'initial': value 70000 is above the upper bound 65536"
+memory maximum !! RangeError "WebAssembly.Memory(): Property 'maximum': value 1 is below the lower bound 3"
+data segment => 'hello'
+shared bytes => [ 42, 7, undefined ]
+wasm grow => [ 1, 0, 131072, -1 ]
+peek 0 196608
+out of bounds !! RuntimeError "memory access out of bounds"
+multi value => [ [ 2n, 1 ], [ 7, 1.5 ] ]
+externref => [ true, undefined, null, 5, 1, 0 ]
+funcref => [ true, 3, '6' ]
+table => [ 2, true, null, 2, 3 ]
+table index !! RangeError "WebAssembly.Table.get(): invalid index 9 into funcref table of size 3"
+table value !! TypeError "WebAssembly.Table.set(): Argument 1 is invalid for table: function-typed object must be null (if nullable) or a Wasm function object"
+globals => [ 5, 9, 9, -7n, -7n ]
+immutable !! TypeError "set WebAssembly.Global.value: Can't set the value of an immutable global."
+linked => [ 12, 10 ]
+wrong type !! LinkError "WebAssembly.Instance(): Import #0 module=\"env\" function=\"three\": imported function does not match the expected type"
+mutable value !! LinkError "WebAssembly.Instance(): Import #2 module=\"env\" function=\"counter\": imported mutable global must be a WebAssembly.Global object"
+multi mismatch !! TypeError "multi-return length mismatch"
+reentrant => 1275
+stack overflow !! RangeError "Maximum call stack size exceeded"
+js throws !! Error "boom"
+start ran 99
+start => true
+new table => [ 2, 'x', 2, undefined, '[object WebAssembly.Table]' ]
+table element !! TypeError "WebAssembly.Table(): Descriptor property 'element' must be a WebAssembly reference type"
+new globals => [ 0.10000000149011612, 0n, undefined ]
+global type !! TypeError "WebAssembly.Global(): Descriptor property 'value' must be a WebAssembly type"
+v128 global !! TypeError "WebAssembly.Global(): A global of type 'v128' cannot be created in JavaScript"
+descriptors => [ 'constructor', 'length', 'grow', 'set', 'get' ]
+instantiate module => true
+instantiate type !! TypeError undefined "WebAssembly.instantiate(): Argument 0 must be a buffer source or a WebAssembly.Module object"
+instantiate imports !! TypeError undefined "WebAssembly.instantiate(): Imports argument must be present and must be an object"
+compile => '[object WebAssembly.Module]'
+compile bad !! CompileError undefined "WebAssembly.compile(): expected version 01 00 00 00, found 02 00 00 00 @+4"
+streaming => [ 'module', 'instance' ]
+streaming type !! TypeError ERR_WEBASSEMBLY_RESPONSE "WebAssembly response has unsupported MIME type 'null'"
+streaming status !! TypeError ERR_WEBASSEMBLY_RESPONSE "WebAssembly response has status code 404"
+streaming source !! TypeError ERR_INVALID_ARG_TYPE "The \"source\" argument must be an instance of Response or an Promise resolving to Response. Received type number (5)"
+Object [WebAssembly] {
+  compile: [Function: compile],
+  validate: [Function: validate],
+  instantiate: [Function: instantiate],
+  compileStreaming: [Function: compileStreaming],
+  instantiateStreaming: [Function: instantiateStreaming]
+}
+Global [WebAssembly.Global] {} Instance [WebAssembly.Instance] {} [Function: Module] {
+  imports: [Function: imports],
+  exports: [Function: exports],
+  customSections: [Function: customSections]
+}

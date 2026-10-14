@@ -255,9 +255,12 @@ function formatRaw(ctx, value, recurseTimes) {
     return `ArrayBuffer { [Uint8Contents]: <${bytes.join(" ")}${value.byteLength > 50 ? " ..." : ""}>, byteLength: ${value.byteLength} }`;
   }
   if (value instanceof WeakMap || value instanceof WeakSet) return `${name} { <items unknown> }`;
-  const tag = value[Symbol.toStringTag];
-  let prefix = name === null ? "[Object: null prototype] " : name !== "Object" ? `${name} ` : "";
-  if (typeof tag === "string" && tag !== "" && tag !== name) prefix = `${prefix}[${tag}] `;
+  // Like Node, list the tag only when it is not an own enumerable property (shown as a key).
+  let tag = value[Symbol.toStringTag];
+  const own = ctx.showHidden ? Object.prototype.hasOwnProperty : Object.prototype.propertyIsEnumerable;
+  if (typeof tag !== "string" || own.call(value, Symbol.toStringTag)) tag = "";
+  let prefix = name === null ? "[Object: null prototype] " : name !== "Object" || tag !== "" ? `${name} ` : "";
+  if (tag !== "" && tag !== name) prefix = `${prefix}[${tag}] `;
   const shape = describe(ctx, value, name, prefix, ownKeys(ctx, value));
   if (shape.alone && shape.keys.length === 0) return shape.base;
   if (!shape.entries && shape.keys.length === 0 && !shape.base) return `${shape.braces[0]}}`;

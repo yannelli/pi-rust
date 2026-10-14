@@ -108,6 +108,11 @@ const SOURCES: &[(&str, &str)] = &[
     ("repl", include_str!("../js/repl.js")),
     ("inspector", include_str!("../js/inspector.js")),
     ("inspector/promises", "module.exports = require('inspector').promises;"),
+    ("internal/wasm_values", include_str!("../js/wasm_values.js")),
+    ("internal/webassembly", include_str!("../js/webassembly.js")),
+    ("internal/wasi_fds", include_str!("../js/wasi_fds.js")),
+    ("internal/wasi_calls", include_str!("../js/wasi_calls.js")),
+    ("wasi", include_str!("../js/wasi.js")),
     (
         "constants",
         "module.exports = { ...require('os').constants.errno, ...require('os').constants.signals, ...require('os').constants.priority, ...require('internal/fs_utils').constants };",
