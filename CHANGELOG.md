@@ -2,6 +2,30 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.1.7] - 2026-10-14
+
+### Added
+
+- **env:** port the pi-env client as crate pi-env with the conformance suite ([d9fb005](https://github.com/yannelli/pi-rust/commit/d9fb0053029673088b2d28092388c54ac10c2567))
+- **env:** add the pi-env daemon as crate pi-env-daemon ([cef637d](https://github.com/yannelli/pi-rust/commit/cef637d49e2cbac73fca191a5925c20709614cf8))
+- **durable:** port watchEvents and the harness-events tests ([b519ada](https://github.com/yannelli/pi-rust/commit/b519adacb197bfb7ad72cb31c3110a1c138cf877))
+- **durable:** port the task graph view and harness-task-graph tests ([0393841](https://github.com/yannelli/pi-rust/commit/03938414a537a2f484fa234e91eaf6f8d8f336d2))
+- **durable:** port coding tools read, write, edit, bash, and powershell ([2d4ac92](https://github.com/yannelli/pi-rust/commit/2d4ac929e4e6ab5067ce0d4e6445a4abe76516a5))
+- **durable:** add Harness, Conversation handles, and conversation views ([81e1086](https://github.com/yannelli/pi-rust/commit/81e1086207e9395552f466931d191d16437c1f26))
+- **durable:** wire the harness module and built-in entry kinds ([ae0dcef](https://github.com/yannelli/pi-rust/commit/ae0dcef2fea0a98c599c5f128c9a1bd5d26d2a52))
+- **durable:** add harness scheduler runtime, generation, tool, compaction, and submissions (not yet wired) ([2260159](https://github.com/yannelli/pi-rust/commit/2260159eb99188895938d3078adff62abb37b894))
+- **durable:** add harness data types, documents, context, prompt, and scheduler core (not yet wired) ([f3e736d](https://github.com/yannelli/pi-rust/commit/f3e736d2308a96f3515e9f9a4bedfc2787c0ba71))
+
+### Fixed
+
+- **durable:** report a file above a recursive mkdir as not_directory, and list every seed's first difference ([9abf062](https://github.com/yannelli/pi-rust/commit/9abf0623c0952104830847bdc480aca5dd140e0a))
+- **durable:** refuse moving a directory into itself on Windows, and accept a late-join output that ends with the tool ([511cce0](https://github.com/yannelli/pi-rust/commit/511cce0bec2469025f7f7e4487858f3b6bc7a768))
+- **durable:** refuse directory renames onto existing paths on Windows, as MoveFileExW does ([57da3b0](https://github.com/yannelli/pi-rust/commit/57da3b0833e908d7fdfad8b2f2f92521b8b7a9e2))
+- **durable:** let an empty append to a directory succeed on Windows, as libuv does ([9008dec](https://github.com/yannelli/pi-rust/commit/9008dece83d6e8787244158591b3e391e095bab5))
+- **durable:** map Windows errors through libuv's table, and refuse directory reads as Node does ([466ea88](https://github.com/yannelli/pi-rust/commit/466ea88dd407a7f1295e3dcaa1e495eba689e65b))
+- **durable:** report writes and truncation of a directory on Windows as Node does ([6674980](https://github.com/yannelli/pi-rust/commit/6674980234089b6c7f49a783576a839a5f0b59cd))
+- **durable:** match Node for directory listing order and non-recursive directory removal ([5058d78](https://github.com/yannelli/pi-rust/commit/5058d78e3d8257f38365a40c7ca3a28b2daacdb0))
+
 ## [0.1.6] - 2026-10-13
 
 ### Added
