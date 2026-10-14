@@ -51,22 +51,35 @@ Server.prototype._onNative = function (event, value, id) {
       this.emit("drop", { localAddress: local.address, localPort: local.port, localFamily: local.family, remoteAddress: remote.address, remotePort: remote.port, remoteFamily: remote.family });
       return;
     }
-    const socket = this._makeSocket(id, value);
-    socket.server = socket._server = this;
-    if (this.noDelay) socket.setNoDelay(true);
-    if (this.keepAlive) socket.setKeepAlive(true, this.keepAliveInitialDelay);
-    if (this.pauseOnConnect) socket.pause();
-    this._connections++;
-    socket.once("close", () => {
-      this._connections--;
-      this._emitCloseIfDrained();
-    });
-    this._emitConnection(socket);
+    this._addConnection(this._makeSocket(id, value));
   } else if (event === "clientError") {
     this.emit("tlsClientError", value, null);
   } else if (event === "error") {
     this.emit("error", value);
   }
+};
+
+// Count and emit a connection; cluster workers also call this for sockets from the primary.
+Server.prototype._addConnection = function (socket) {
+  socket.server = socket._server = this;
+  if (this.noDelay) socket.setNoDelay(true);
+  if (this.keepAlive) socket.setKeepAlive(true, this.keepAliveInitialDelay);
+  if (this.pauseOnConnect) socket.pause();
+  this._connections++;
+  socket.once("close", () => {
+    this._connections--;
+    this._emitCloseIfDrained();
+  });
+  this._emitConnection(socket);
+};
+
+// Listen on a TCP listener received over IPC.
+Server.prototype._adoptHandle = function (handleId) {
+  const result = nativeNet.adoptServer(handleId, (event, value, id) => this._onNative(event, value, id));
+  this._handle = result.id;
+  this._address = result.address;
+  process.nextTick(() => this.emit("listening"));
+  return this;
 };
 
 Server.prototype._emitConnection = function (socket) {
@@ -106,6 +119,10 @@ Server.prototype.listen = function (...args) {
   if (callback) this.once("listening", callback);
   if (options.signal) options.signal.addEventListener("abort", () => this.close(), { once: true });
   const start = () => {
+    const clusterWorker = process.env.NODE_UNIQUE_ID !== undefined || internal.clusterWorkerId !== undefined;
+    if (clusterWorker && !options.exclusive && request.path === undefined && !this._tlsListenOptions) {
+      return require("cluster")._getServer(this, request);
+    }
     try {
       const tls = this._tlsListenOptions ? this._tlsListenOptions() : undefined;
       const result = nativeNet.listen(request, tls, (event, value, id) => this._onNative(event, value, id));
@@ -144,8 +161,9 @@ Server.prototype.close = function (callback) {
       this.once("close", () => callback(codeError(Error, "ERR_SERVER_NOT_RUNNING", "Server is not running.")));
     } else this.once("close", () => callback());
   }
+  if (this._clusterKey !== undefined) require("cluster")._closeServer(this);
   if (this._handle !== null) {
-    nativeNet.close(this._handle);
+    if (this._handle !== 0) nativeNet.close(this._handle);
     this._handle = null;
   }
   this._closing = true;

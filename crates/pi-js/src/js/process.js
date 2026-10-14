@@ -272,7 +272,10 @@ if (config.env.PI_JS_IPC) {
   const serialization = config.env.PI_JS_IPC_SERIALIZATION || "json";
   delete config.env.PI_JS_IPC;
   delete config.env.PI_JS_IPC_SERIALIZATION;
-  require("internal/ipc").setupChannel(process, (callback) => native.pipe.connect(path, callback), serialization);
+  require("internal/ipc").setupChannel(process, (callback) => native.pipe.connect(path, callback), serialization,
+    () => process.ppid);
+  // A cluster worker reports online and takes servers from the primary even before it requires cluster.
+  if (config.env.NODE_UNIQUE_ID !== undefined) process.nextTick(() => internal.builtin("cluster"));
 }
 
 process[Symbol.toStringTag] = "process";

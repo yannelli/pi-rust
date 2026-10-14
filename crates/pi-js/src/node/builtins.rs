@@ -99,6 +99,7 @@ const SOURCES: &[(&str, &str)] = &[
     ("vm", include_str!("../js/vm.js")),
     ("internal/worker_ports", include_str!("../js/worker_ports.js")),
     ("worker_threads", include_str!("../js/worker_threads.js")),
+    ("cluster", include_str!("../js/cluster.js")),
     (
         "constants",
         "module.exports = { ...require('os').constants.errno, ...require('os').constants.signals, ...require('os').constants.priority, ...require('internal/fs_utils').constants };",

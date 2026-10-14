@@ -106,3 +106,7 @@ all = { level = "warn", priority = -1 }
 [[test]]
 name = "node_fork"
 harness = false
+
+[[test]]
+name = "node_cluster"
+harness = false

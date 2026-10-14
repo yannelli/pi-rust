@@ -12,6 +12,7 @@ pub(crate) mod fetch;
 pub(crate) mod fs;
 mod fs_ops;
 mod fs_output;
+mod handles;
 mod http;
 mod http2;
 mod http2_stream;

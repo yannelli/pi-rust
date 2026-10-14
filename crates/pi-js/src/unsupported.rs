@@ -22,8 +22,10 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
      that are not UTF-8, DSA sizes other than 1024/160, 2048/224, 2048/256, and 3072/256, private key encryption \
      with ciphers other than AES-CBC and 3DES-CBC (or PBES1), webcrypto.subtle except digest, setFips",
     "fs: lchmod, fchmod, fchown, lutimes, statfs, openAsBlob, FileHandle chmod, chown, and readableWebStream",
-    "child_process: stdio entries that are streams or descriptors above 2, sending handles over IPC \
-     (ERR_INVALID_HANDLE_TYPE)",
+    "child_process: stdio entries that are streams or descriptors above 2, and sending handles other than TCP \
+     net.Socket and net.Server objects over IPC (ERR_INVALID_HANDLE_TYPE), such as Unix socket or pipe \
+     servers, TLS sockets, and dgram sockets",
+    "cluster: workers sharing Unix socket or named pipe servers, and TLS servers (each worker listens on its own)",
     "net: sockets and servers from a file descriptor or an existing handle, reusePort",
     "tls: TLSSocket over an existing socket or stream (and tls.connect's socket option), SNICallback, \
      addContext, pfx, encrypted private keys, session resumption, exportKeyingMaterial, and TLS before 1.2",
@@ -75,6 +77,10 @@ pub const DIFFERENCES: &[&str] = &[
      maxConcurrentStreams, a client's goaway sends no GOAWAY frame, received data is not flow-controlled \
      by the reader, and session and stream state objects are approximate",
     "net: connecting to several looked-up addresses tries them one after another, not in parallel",
+    "child_process: a sent handle carries no NODE_HANDLE_ACK handshake, and data a sent socket had already \
+     read in the sender stays there",
+    "cluster: round-robin hands each connection to the next connected worker in turn rather than to the \
+     next free one, and the primary does not report worker server errors with Node's exact errno text",
     "vm: a context is a separate QuickJS context whose globals forward to the contextified object; \
      `this` and `globalThis` inside it are that context's own global, not the object, globals the code \
      declares are copied to the object when each run ends, cached data is accepted but not used, and \
@@ -114,6 +120,7 @@ mod tests {
             "http2",
             "vm",
             "worker_threads",
+            "cluster",
         ] {
             assert!(supported.contains(&name) && !unsupported.contains(&name), "{name}");
         }

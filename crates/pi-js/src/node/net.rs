@@ -42,6 +42,8 @@ pub(super) enum Kind {
     },
     Listener {
         path: Option<String>,
+        /// A TCP listener's socket, kept so it can be sent to another process.
+        socket: Option<socket2::Socket>,
     },
 }
 
@@ -173,6 +175,23 @@ fn deliver(ctx: &Ctx<'_>, id: u64, event: Event) {
     }
 }
 
+/// A copy of the socket behind a TCP stream or listener, for handle passing.
+pub(super) fn socket_of(id: u64) -> Option<std::io::Result<socket2::Socket>> {
+    let result = state().with_resource(id, |entry: &mut Entry| match &entry.kind {
+        Kind::Stream { tcp: Some(socket), .. } | Kind::Listener { socket: Some(socket), .. } => {
+            Some(socket.try_clone())
+        }
+        _ => None,
+    });
+    result.ok().flatten()
+}
+
+/// Register an open connection that no listener produced; reading starts when JavaScript attaches.
+pub(super) fn adopt(ctx: &Ctx<'_>, conn: Conn) -> (u64, serde_json::Value) {
+    let (kind, info) = stream_kind(Some(conn));
+    (insert(ctx, kind, None), info)
+}
+
 /// Begin reading a stream whose callback is set; reads wait while it is paused.
 fn start(id: u64) {
     let state = state();
@@ -230,7 +249,7 @@ pub(super) fn close(id: u64) {
             }
             state.shared.tokio.spawn(async move { drop(writer.lock().await.take()) });
         }
-        Kind::Listener { path: Some(path) } if cfg!(unix) => {
+        Kind::Listener { path: Some(path), .. } if cfg!(unix) => {
             let _ = std::fs::remove_file(path);
         }
         Kind::Listener { .. } => {}
@@ -386,6 +405,10 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
     let object = Object::new(ctx.clone())?;
     set_fn(&object, "connect", connect)?;
     set_fn(&object, "listen", super::net_server::listen)?;
+    super::handles::natives(&object)?;
+    set_fn(&object, "stopAccepting", |id: u64| {
+        let _ = state().with_resource(id, |entry: &mut Entry| entry.task.take().map(|task| task.abort()));
+    })?;
     set_fn(&object, "start", |ctx: Ctx<'js>, id: u64, callback: Function<'js>| {
         state().callbacks.borrow_mut().insert(id, Persistent::save(&ctx, callback));
         start(id);

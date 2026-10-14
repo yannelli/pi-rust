@@ -8,6 +8,7 @@ use rquickjs::function::Opt;
 use rquickjs::{Ctx, Function, Object, Persistent, Value};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+use super::handles::Received;
 use super::set_fn;
 use crate::error::JsError;
 use crate::runtime::convert::{bytes_to_js, error_value, latin1_to_bytes, throw};
@@ -18,16 +19,23 @@ use crate::runtime::{UncaughtKind, report_error};
 type BoxRead = Box<dyn AsyncRead + Send + Unpin>;
 type BoxWrite = Box<dyn AsyncWrite + Send + Unpin>;
 type Writer = Arc<tokio::sync::Mutex<Option<BoxWrite>>>;
+/// The IPC socket itself, for writes that carry a descriptor.
+#[cfg(unix)]
+type Raw = Arc<std::sync::OnceLock<Arc<tokio::net::UnixStream>>>;
+#[cfg(windows)]
+type Raw = Arc<std::sync::OnceLock<()>>;
 
 struct Pipe {
     referenced: bool,
     reader: tokio::task::AbortHandle,
     writer: Writer,
+    #[cfg_attr(windows, allow(dead_code))]
+    raw: Raw,
 }
 
 enum Event {
     Connect,
-    Data(Vec<u8>),
+    Data(Vec<u8>, Vec<socket2::Socket>),
     End,
     Error(JsError),
 }
@@ -46,7 +54,10 @@ fn deliver(ctx: &Ctx<'_>, id: u64, event: Event) {
     let Some(function) = callback.and_then(|callback| callback.restore(ctx).ok()) else { return };
     let result = match event {
         Event::Connect => function.call::<_, ()>(("connect",)),
-        Event::Data(bytes) => bytes_to_js(ctx, bytes).and_then(|bytes| function.call::<_, ()>(("data", bytes))),
+        Event::Data(bytes, sockets) => {
+            let handles = super::handles::store(sockets);
+            bytes_to_js(ctx, bytes).and_then(|bytes| function.call::<_, ()>(("data", bytes, handles)))
+        }
         Event::End => function.call::<_, ()>(("end",)),
         Event::Error(error) => error_value(ctx, &error).and_then(|error| function.call::<_, ()>(("error", error))),
     };
@@ -56,7 +67,13 @@ fn deliver(ctx: &Ctx<'_>, id: u64, event: Event) {
 }
 
 /// Start reading what `connect` yields; writes wait until it has connected.
-fn open<'js, F>(ctx: &Ctx<'js>, callback: Function<'js>, connect: F) -> rquickjs::Result<u64>
+fn open<'js, F>(
+    ctx: &Ctx<'js>,
+    callback: Function<'js>,
+    raw: Raw,
+    received: Arc<Received>,
+    connect: F,
+) -> rquickjs::Result<u64>
 where
     F: std::future::Future<Output = std::io::Result<(BoxRead, Option<BoxWrite>)>> + Send + 'static,
 {
@@ -81,7 +98,7 @@ where
         loop {
             match read.read(&mut buffer).await {
                 Ok(0) => break,
-                Ok(count) => post(&sender, id, Event::Data(buffer[..count].to_vec())),
+                Ok(count) => post(&sender, id, Event::Data(buffer[..count].to_vec(), received.take())),
                 Err(error) => {
                     post(&sender, id, Event::Error(JsError::from_io(&error, "read", None)));
                     break;
@@ -90,7 +107,7 @@ where
         }
         post(&sender, id, Event::End);
     });
-    let pipe = Pipe { referenced: false, reader: reader.abort_handle(), writer };
+    let pipe = Pipe { referenced: false, reader: reader.abort_handle(), writer, raw };
     state.resources.borrow_mut().insert(id, Box::new(pipe));
     state.callbacks.borrow_mut().insert(id, Persistent::save(ctx, callback));
     Ok(id)
@@ -135,23 +152,36 @@ fn endpoint() -> String {
 }
 
 #[cfg(unix)]
-async fn accept(listener: tokio::net::UnixListener, path: String) -> std::io::Result<(BoxRead, Option<BoxWrite>)> {
-    let accepted = listener.accept().await;
-    let _ = std::fs::remove_file(&path);
-    let (read, write) = accepted?.0.into_split();
-    Ok((Box::new(read), Some(Box::new(write))))
+fn split(stream: tokio::net::UnixStream, raw: &Raw, received: Arc<Received>) -> (BoxRead, Option<BoxWrite>) {
+    use super::handles::unix::{FdReader, FdWriter};
+    let stream = Arc::new(stream);
+    let _ = raw.set(stream.clone());
+    (Box::new(FdReader(stream.clone(), received)), Some(Box::new(FdWriter(stream))))
 }
 
 #[cfg(unix)]
-async fn connect(path: String) -> std::io::Result<(BoxRead, Option<BoxWrite>)> {
-    let (read, write) = tokio::net::UnixStream::connect(path).await?.into_split();
-    Ok((Box::new(read), Some(Box::new(write))))
+async fn accept(
+    listener: tokio::net::UnixListener,
+    path: String,
+    raw: Raw,
+    received: Arc<Received>,
+) -> std::io::Result<(BoxRead, Option<BoxWrite>)> {
+    let accepted = listener.accept().await;
+    let _ = std::fs::remove_file(&path);
+    Ok(split(accepted?.0, &raw, received))
+}
+
+#[cfg(unix)]
+async fn connect(path: String, raw: Raw, received: Arc<Received>) -> std::io::Result<(BoxRead, Option<BoxWrite>)> {
+    Ok(split(tokio::net::UnixStream::connect(path).await?, &raw, received))
 }
 
 #[cfg(windows)]
 async fn accept(
     server: tokio::net::windows::named_pipe::NamedPipeServer,
     _path: String,
+    _raw: Raw,
+    _received: Arc<Received>,
 ) -> std::io::Result<(BoxRead, Option<BoxWrite>)> {
     server.connect().await?;
     let (read, write) = tokio::io::split(server);
@@ -159,7 +189,7 @@ async fn accept(
 }
 
 #[cfg(windows)]
-async fn connect(path: String) -> std::io::Result<(BoxRead, Option<BoxWrite>)> {
+async fn connect(path: String, _raw: Raw, _received: Arc<Received>) -> std::io::Result<(BoxRead, Option<BoxWrite>)> {
     let client = tokio::net::windows::named_pipe::ClientOptions::new().open(path)?;
     let (read, write) = tokio::io::split(client);
     Ok((Box::new(read), Some(Box::new(write))))
@@ -174,11 +204,30 @@ fn listen<'js>(ctx: Ctx<'js>, callback: Function<'js>) -> rquickjs::Result<Objec
     #[cfg(windows)]
     let server = tokio::net::windows::named_pipe::ServerOptions::new().first_pipe_instance(true).create(&path);
     let server = server.map_err(|error| throw(&ctx, &JsError::from_io(&error, "listen", Some(&path))))?;
-    let id = open(&ctx, callback, accept(server, path.clone()))?;
+    let (raw, received) = (Raw::default(), Arc::new(Received::default()));
+    let id = open(&ctx, callback, raw.clone(), received.clone(), accept(server, path.clone(), raw, received))?;
     let result = Object::new(ctx)?;
     result.set("id", id)?;
     result.set("path", path)?;
     Ok(result)
+}
+
+/// Write one IPC message with a socket's descriptor attached (SCM_RIGHTS).
+#[cfg(unix)]
+fn write_handle<'js>(ctx: Ctx<'js>, id: u64, data: String, handle: u64) -> rquickjs::Result<rquickjs::Promise<'js>> {
+    let (writer, raw) = state()
+        .with_resource(id, |pipe: &mut Pipe| (pipe.writer.clone(), pipe.raw.clone()))
+        .map_err(|error| throw(&ctx, &error))?;
+    let socket = super::handles::take(&ctx, handle)?;
+    let bytes = latin1_to_bytes(&data);
+    let work = async move {
+        let _order = writer.lock().await;
+        let stream = raw.get().cloned().ok_or_else(|| JsError::new("write EPIPE").with_code("EPIPE"))?;
+        super::handles::unix::send_handle(stream, bytes, socket)
+            .await
+            .map_err(|error| JsError::from_io(&error, "write", None))
+    };
+    spawn_op(&ctx, work, |ctx, ()| Ok(Value::new_undefined(ctx.clone())))
 }
 
 /// Blocking reads of the real stdin for `fs.readSync(0)` and `fs.readFileSync(0)`.
@@ -203,11 +252,13 @@ fn read_stdin_sync(ctx: &Ctx<'_>, length: Option<usize>) -> rquickjs::Result<Vec
 pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
     let object = Object::new(ctx.clone())?;
     set_fn(&object, "stdin", |ctx: Ctx<'js>, callback: Function<'js>| {
-        open(&ctx, callback, async { Ok((Box::new(tokio::io::stdin()) as BoxRead, None)) })
+        let stdin = async { Ok((Box::new(tokio::io::stdin()) as BoxRead, None)) };
+        open(&ctx, callback, Raw::default(), Arc::default(), stdin)
     })?;
     set_fn(&object, "listen", listen)?;
     set_fn(&object, "connect", |ctx: Ctx<'js>, path: String, callback: Function<'js>| {
-        open(&ctx, callback, connect(path))
+        let (raw, received) = (Raw::default(), Arc::new(Received::default()));
+        open(&ctx, callback, raw.clone(), received.clone(), connect(path, raw, received))
     })?;
     set_fn(&object, "write", |ctx: Ctx<'js>, id: u64, data: String| {
         let writer =
@@ -221,6 +272,8 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
         };
         spawn_op(&ctx, work, |ctx, ()| Ok(Value::new_undefined(ctx.clone())))
     })?;
+    #[cfg(unix)]
+    set_fn(&object, "writeHandle", write_handle)?;
     set_fn(&object, "close", close)?;
     set_fn(&object, "ref", set_ref)?;
     set_fn(&object, "readStdinSync", |ctx: Ctx<'js>, length: Opt<usize>| {

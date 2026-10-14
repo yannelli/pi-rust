@@ -126,7 +126,7 @@ pub(super) fn listen<'js>(
     if let Some(path) = options.path {
         let listener =
             bind_pipe(&path).map_err(|error| throw(&ctx, &net_error(&error, "listen", Some(&path), None)))?;
-        let id = insert(&ctx, Kind::Listener { path: Some(path.clone()) }, Some(callback));
+        let id = insert(&ctx, Kind::Listener { path: Some(path.clone()), socket: None }, Some(callback));
         let task = state.shared.tokio.spawn(accept_pipe(sender, id, listener, path.clone(), tls));
         let _ = state.with_resource(id, |entry: &mut Entry| entry.task = Some(task.abort_handle()));
         return from_json(&ctx, &json!({ "id": id, "address": path }));
@@ -146,8 +146,29 @@ pub(super) fn listen<'js>(
     }
     let listener = bound.map_err(|error| throw(&ctx, &net_error(&error, "listen", Some(hosts[0]), Some(port))))?;
     let address = address_json(listener.local_addr().ok());
-    let id = insert(&ctx, Kind::Listener { path: None }, Some(callback));
+    let socket = socket2::SockRef::from(&listener).try_clone().ok();
+    let id = insert(&ctx, Kind::Listener { path: None, socket }, Some(callback));
     let task = state.shared.tokio.spawn(accept_tcp(sender, id, listener, tls));
+    let _ = state.with_resource(id, |entry: &mut Entry| entry.task = Some(task.abort_handle()));
+    from_json(&ctx, &json!({ "id": id, "address": address }))
+}
+
+/// Accept on a TCP listener received from another process. Returns `{ id, address }`.
+pub(super) fn adopt<'js>(
+    ctx: Ctx<'js>,
+    socket: socket2::Socket,
+    callback: Function<'js>,
+) -> rquickjs::Result<Value<'js>> {
+    let state = state();
+    let _guard = state.shared.tokio.enter();
+    let copy = socket.try_clone().ok();
+    let listener = socket
+        .set_nonblocking(true)
+        .and_then(|()| tokio::net::TcpListener::from_std(socket.into()))
+        .map_err(|error| throw(&ctx, &net_error(&error, "listen", None, None)))?;
+    let address = address_json(listener.local_addr().ok());
+    let id = insert(&ctx, Kind::Listener { path: None, socket: copy }, Some(callback));
+    let task = state.shared.tokio.spawn(accept_tcp(state.sender.clone(), id, listener, None));
     let _ = state.with_resource(id, |entry: &mut Entry| entry.task = Some(task.abort_handle()));
     from_json(&ctx, &json!({ "id": id, "address": address }))
 }
