@@ -148,9 +148,9 @@ jobs:
         shell: bash
         run: |
           if [ "${{ matrix.zig }}" = true ]; then
-            cargo zigbuild --release --locked -p pi-coding-agent --target ${{ matrix.target }}
+            cargo zigbuild --release --locked -p pi-coding-agent -p pi-env-daemon --target ${{ matrix.target }}
           else
-            cargo build --release --locked -p pi-coding-agent --target ${{ matrix.target }}
+            cargo build --release --locked -p pi-coding-agent -p pi-env-daemon --target ${{ matrix.target }}
           fi
       - name: Package
         shell: bash
@@ -171,10 +171,34 @@ jobs:
           fi
           rm -rf "dist/$name"
           ls -l dist
+      - name: Package the pi-env daemon
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          # Folder names follow pi-env's packaged_daemon: pi-env-<platform>-<arch>. Upstream has no 32-bit ARM remote.
+          case "$TARGET" in
+            x86_64-unknown-linux-musl) remote=linux-x64 ;;
+            aarch64-unknown-linux-musl) remote=linux-arm64 ;;
+            x86_64-apple-darwin) remote=darwin-x64 ;;
+            aarch64-apple-darwin) remote=darwin-arm64 ;;
+            x86_64-pc-windows-msvc) remote=windows-x64 ;;
+            aarch64-pc-windows-msvc) remote=windows-arm64 ;;
+            *) exit 0 ;;
+          esac
+          mkdir -p "daemon/pi-env-$remote"
+          exe=pi-env; [ "${{ runner.os }}" = Windows ] && exe=pi-env.exe
+          cp "target/$TARGET/release/$exe" "daemon/pi-env-$remote/"
       - uses: actions/upload-artifact@v4
         with:
           name: pi-${{ matrix.target }}
           path: dist/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: matrix.target != 'armv7-unknown-linux-musleabihf'
+        with:
+          name: daemon-${{ matrix.target }}
+          path: daemon/*
           if-no-files-found: error
 
   publish:
@@ -191,6 +215,18 @@ jobs:
           pattern: pi-*
           path: dist
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: daemon-*
+          path: daemons/pi-env-daemons
+          merge-multiple: true
+      - name: Package the pi-env daemons
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          find daemons -type f -name pi-env -exec chmod +x {} +
+          tar -C daemons -czf "dist/pi-env-daemons-$TAG.tar.gz" pi-env-daemons
+          tar -tzf "dist/pi-env-daemons-$TAG.tar.gz"
       - name: Checksums
         run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
       - name: Create GitHub release
