@@ -128,7 +128,8 @@ pi-rust ports the `pi` CLI and its libraries feature for feature. These parts di
 - CJK and Thai word movement uses ICU4X dictionaries, so a few word boundaries differ from Node's `Intl.Segmenter`.
 - `pi --mode acp` (above) is an addition; the TypeScript pi needs the separate pi-acp adapter.
 - `pi-env` looks for remote daemons in a `pi-env-daemons` folder next to the running program. Each release has a `pi-env-daemons-<tag>.tar.gz` with the daemons for Linux, macOS, and Windows on x86-64 and arm64; extract it next to `pi`. Android remotes have no packaged daemon.
-- Not included yet: `pi experimental`.
+- `pi experimental` (`server`, `client`, `durable`, `vacation`) needs `PI_EXPERIMENTAL=1`, as upstream. Its `server` and `client` use Unix sockets, so on Windows they report that they need Unix; upstream has no Windows transport either.
+- Not ported: upstream's private `evals` package, a Docker and vitest harness that scores the agent against real model providers. It is development tooling and is not published.
 
 ## Development
 
