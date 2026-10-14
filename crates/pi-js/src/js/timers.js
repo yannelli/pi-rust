@@ -29,7 +29,7 @@ class Timeout {
       if (!repeat) this._destroyed = true;
       callback.apply(this, args);
     };
-    this._id = timers.start(run, delay, repeat);
+    this._id = timers.start(internal.bindContext(run), delay, repeat);
   }
   ref() {
     timers.ref(this._id, true);
@@ -90,7 +90,7 @@ function clearTimeout(timeout) {
 class Immediate {
   constructor(callback, args) {
     this._onImmediate = callback;
-    this._id = timers.immediate(() => callback(...args));
+    this._id = timers.immediate(internal.bindContext(() => callback(...args)));
   }
   ref() {
     return this;

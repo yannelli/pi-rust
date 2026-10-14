@@ -68,6 +68,38 @@ const SOURCES: &[(&str, &str)] = &[
     ("tty", include_str!("../js/tty.js")),
     ("diagnostics_channel", include_str!("../js/diagnostics_channel.js")),
     ("stream/consumers", include_str!("../js/stream_consumers.js")),
+    ("async_hooks", include_str!("../js/async_hooks.js")),
+    ("domain", include_str!("../js/domain.js")),
+    ("punycode", include_str!("../js/punycode.js")),
+    ("sea", include_str!("../js/sea.js")),
+    ("trace_events", include_str!("../js/trace_events.js")),
+    ("internal/v8_serdes", include_str!("../js/v8_serdes.js")),
+    ("internal/v8_deserializer", include_str!("../js/v8_deserializer.js")),
+    ("v8", include_str!("../js/v8.js")),
+    ("internal/zlib_constants", include_str!("../js/zlib_constants.js")),
+    ("zlib", include_str!("../js/zlib.js")),
+    ("internal/net_address", include_str!("../js/net_address.js")),
+    ("internal/net_socket", include_str!("../js/net_socket.js")),
+    ("net", include_str!("../js/net.js")),
+    ("dns", include_str!("../js/dns.js")),
+    ("dns/promises", "module.exports = require('dns').promises;"),
+    ("dgram", include_str!("../js/dgram.js")),
+    ("tls", include_str!("../js/tls.js")),
+    ("internal/http_common", include_str!("../js/http_common.js")),
+    ("internal/http_outgoing", include_str!("../js/http_outgoing.js")),
+    ("internal/http_server", include_str!("../js/http_server.js")),
+    ("internal/http_agent", include_str!("../js/http_agent.js")),
+    ("internal/http_client", include_str!("../js/http_client.js")),
+    ("http", include_str!("../js/http.js")),
+    ("https", include_str!("../js/https.js")),
+    ("internal/http2_core", include_str!("../js/http2_core.js")),
+    ("internal/http2_session", include_str!("../js/http2_session.js")),
+    ("internal/http2_compat", include_str!("../js/http2_compat.js")),
+    ("http2", include_str!("../js/http2.js")),
+    ("vm", include_str!("../js/vm.js")),
+    ("internal/worker_ports", include_str!("../js/worker_ports.js")),
+    ("worker_threads", include_str!("../js/worker_threads.js")),
+    ("cluster", include_str!("../js/cluster.js")),
     (
         "constants",
         "module.exports = { ...require('os').constants.errno, ...require('os').constants.signals, ...require('os').constants.priority, ...require('internal/fs_utils').constants };",
@@ -98,8 +130,7 @@ fn compile<'js>(ctx: Ctx<'js>, name: String) -> rquickjs::Result<Function<'js>> 
     let mut options = EvalOptions::default();
     options.strict = false;
     options.filename = Some(if name.contains(':') { name.clone() } else { format!("node:{name}") });
-    ctx.eval_with_options(
-        format!("(function (module, exports, require, native, internal) {{ \"use strict\"; {source}\n}})"),
-        options,
-    )
+    let wrapped = format!("(function (module, exports, require, native, internal) {{ \"use strict\"; {source}\n}})");
+    let wrapped = crate::transpile::instrument_script(&wrapped).unwrap_or(wrapped);
+    ctx.eval_with_options(wrapped, options)
 }

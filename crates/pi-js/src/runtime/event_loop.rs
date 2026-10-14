@@ -24,7 +24,10 @@ pub(crate) fn create(setup: &LoopSetup, state: &LoopState) -> Result<(Runtime, C
     }
     runtime.set_max_stack_size(setup.max_stack_size);
     let flag = state.shared.interrupt.clone();
-    runtime.set_interrupt_handler(Some(Box::new(move || flag.load(Ordering::Relaxed))));
+    let deadline = state.shared.vm_deadline.clone();
+    runtime.set_interrupt_handler(Some(Box::new(move || {
+        flag.load(Ordering::Relaxed) || crate::node::vm::deadline_passed(&deadline)
+    })));
     runtime.set_host_promise_rejection_tracker(Some(Box::new(track_rejection)));
     crate::modules::install_loader(&runtime);
     let context = Context::full(&runtime)
@@ -103,6 +106,7 @@ fn handle(message: Message, runtime: &Runtime, context: &Context, state: &LoopSt
     match message {
         Message::Task(task) => {
             context.with(|ctx| task(&ctx));
+            state.async_frame.borrow_mut().take();
             drain_jobs(runtime, context, state);
         }
         Message::Release(id) => {
@@ -121,13 +125,19 @@ pub(crate) fn drain_jobs(runtime: &Runtime, context: &Context, state: &LoopState
             run_ticks(context, state);
         }
         loop {
-            match runtime.execute_pending_job() {
-                Ok(true) => {}
-                Ok(false) => break,
-                Err(exception) => exception.0.with(|ctx| {
-                    let value = ctx.catch();
-                    report_value(&ctx, UncaughtKind::Exception, value);
-                }),
+            let more = match runtime.execute_pending_job() {
+                Ok(more) => more,
+                Err(exception) => {
+                    exception.0.with(|ctx| {
+                        let value = ctx.catch();
+                        report_value(&ctx, UncaughtKind::Exception, value);
+                    });
+                    true
+                }
+            };
+            state.async_frame.borrow_mut().take();
+            if !more {
+                break;
             }
         }
         if !state.ticks_pending.get() {
@@ -167,6 +177,7 @@ fn run_timers(runtime: &Runtime, context: &Context, state: &LoopState) {
     loop {
         let Some(callback) = state.timers.borrow_mut().pop_due(now) else { break };
         call_callback(context, callback);
+        state.async_frame.borrow_mut().take();
         drain_jobs(runtime, context, state);
         if state.shutting_down.get() {
             return;
@@ -178,6 +189,7 @@ fn run_immediates(runtime: &Runtime, context: &Context, state: &LoopState) {
     let batch: Vec<_> = state.immediates.borrow_mut().drain(..).collect();
     for (_, callback) in batch {
         call_callback(context, callback);
+        state.async_frame.borrow_mut().take();
         drain_jobs(runtime, context, state);
         if state.shutting_down.get() {
             return;

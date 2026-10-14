@@ -346,68 +346,58 @@ EventEmitter.addAbortListener = (signal, listener) => {
   signal.addEventListener("abort", listener, { once: true });
   return { [Symbol.dispose || Symbol.for("Symbol.dispose")]: () => signal.removeEventListener("abort", listener) };
 };
-// No async_hooks here: each resource gets an id, and emit runs in its (only) scope.
-let nextAsyncId = 1;
-class EventEmitterReferencingAsyncResource {
-  #emitter;
-  #asyncId = ++nextAsyncId;
-  #triggerAsyncId;
-  #destroyed = false;
-  constructor(emitter, type, triggerAsyncId) {
-    this.#emitter = emitter;
-    this.type = type;
-    this.#triggerAsyncId = triggerAsyncId ?? 1;
-  }
-  get eventEmitter() {
-    return this.#emitter;
-  }
-  asyncId() {
-    return this.#asyncId;
-  }
-  triggerAsyncId() {
-    return this.#triggerAsyncId;
-  }
-  runInAsyncScope(fn, thisArg, ...args) {
-    return Reflect.apply(fn, thisArg, args);
-  }
-  bind(fn, thisArg) {
-    return (...args) => this.runInAsyncScope(fn, thisArg, ...args);
-  }
-  emitDestroy() {
-    this.#destroyed = true;
-    return this;
-  }
-}
-EventEmitter.EventEmitterAsyncResource = class EventEmitterAsyncResource extends EventEmitter {
-  #resource;
-  constructor(options = undefined) {
-    let name;
-    if (typeof options === "string") {
-      name = options;
-      options = undefined;
-    } else {
-      if (options !== undefined && (options === null || typeof options !== "object")) {
-        throw Object.assign(new TypeError(`The "options" argument must be of type object. Received ${options === null ? "null" : `type ${typeof options} (${String(options)})`}`), { code: "ERR_INVALID_ARG_TYPE" });
-      }
-      name = options?.name || new.target.name;
+// Built on first use, as async_hooks loads after events.
+let asyncResourceClass;
+function eventEmitterAsyncResource() {
+  if (asyncResourceClass) return asyncResourceClass;
+  const { AsyncResource } = require("async_hooks");
+  class EventEmitterReferencingAsyncResource extends AsyncResource {
+    #emitter;
+    constructor(emitter, type, options) {
+      super(type, options);
+      this.#emitter = emitter;
     }
-    super(options);
-    this.#resource = new EventEmitterReferencingAsyncResource(this, name, options?.triggerAsyncId);
+    get eventEmitter() {
+      return this.#emitter;
+    }
   }
-  emit(event, ...args) {
-    return this.#resource.runInAsyncScope(super.emit, this, event, ...args);
-  }
-  emitDestroy() {
-    this.#resource.emitDestroy();
-  }
-  get asyncId() {
-    return this.#resource.asyncId();
-  }
-  get triggerAsyncId() {
-    return this.#resource.triggerAsyncId();
-  }
-  get asyncResource() {
-    return this.#resource;
-  }
-};
+  asyncResourceClass = class EventEmitterAsyncResource extends EventEmitter {
+    #resource;
+    constructor(options = undefined) {
+      let name;
+      if (typeof options === "string") {
+        name = options;
+        options = undefined;
+      } else {
+        if (options !== undefined && (options === null || typeof options !== "object")) {
+          throw Object.assign(new TypeError(`The "options" argument must be of type object. Received ${options === null ? "null" : `type ${typeof options} (${String(options)})`}`), { code: "ERR_INVALID_ARG_TYPE" });
+        }
+        name = options?.name || new.target.name;
+      }
+      super(options);
+      this.#resource = new EventEmitterReferencingAsyncResource(this, name, options);
+    }
+    emit(event, ...args) {
+      return this.#resource.runInAsyncScope(super.emit, this, event, ...args);
+    }
+    emitDestroy() {
+      this.#resource.emitDestroy();
+    }
+    get asyncId() {
+      return this.#resource.asyncId();
+    }
+    get triggerAsyncId() {
+      return this.#resource.triggerAsyncId();
+    }
+    get asyncResource() {
+      return this.#resource;
+    }
+  };
+  return asyncResourceClass;
+}
+Object.defineProperty(EventEmitter, "EventEmitterAsyncResource", {
+  enumerable: true,
+  configurable: true,
+  get: eventEmitterAsyncResource,
+});
 module.exports = EventEmitter;
