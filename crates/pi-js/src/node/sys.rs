@@ -400,3 +400,64 @@ pub(crate) fn network_interfaces() -> io::Result<Vec<InterfaceAddress>> {
 pub(crate) fn set_raw_mode(raw: bool) -> io::Result<()> {
     imp::set_raw_mode(raw)
 }
+
+/// `getnameinfo` with `NI_NAMEREQD`: the host name and service for an address, or the
+/// resolver's error as a Node code (`ENOTFOUND` or `EAI_AGAIN`).
+pub(crate) fn name_info(address: std::net::SocketAddr) -> Result<(String, String), &'static str> {
+    let raw = socket2::SockAddr::from(address);
+    let mut host = [0u8; 1025];
+    let mut service = [0u8; 32];
+    #[cfg(unix)]
+    // SAFETY: the address pointer and length come from one SockAddr, and each buffer's length is passed with it.
+    let code = unsafe {
+        libc::getnameinfo(
+            raw.as_ptr().cast(),
+            raw.len(),
+            host.as_mut_ptr().cast(),
+            host.len() as libc::socklen_t,
+            service.as_mut_ptr().cast(),
+            service.len() as libc::socklen_t,
+            libc::NI_NAMEREQD,
+        )
+    };
+    #[cfg(windows)]
+    // SAFETY: as above; std's networking has already started Winsock for the lookup before this.
+    let code = unsafe {
+        use windows_sys::Win32::Networking::WinSock::{NI_NAMEREQD, getnameinfo};
+        getnameinfo(
+            raw.as_ptr().cast(),
+            raw.len(),
+            host.as_mut_ptr(),
+            host.len() as u32,
+            service.as_mut_ptr(),
+            service.len() as u32,
+            NI_NAMEREQD as i32,
+        )
+    };
+    #[cfg(unix)]
+    let again = libc::EAI_AGAIN;
+    #[cfg(windows)]
+    let again = windows_sys::Win32::Networking::WinSock::WSATRY_AGAIN;
+    match code {
+        0 => {}
+        code if code == again => return Err("EAI_AGAIN"),
+        _ => return Err("ENOTFOUND"),
+    }
+    let text =
+        |bytes: &[u8]| String::from_utf8_lossy(bytes.split(|byte| *byte == 0).next().unwrap_or(&[])).into_owned();
+    Ok((text(&host), text(&service)))
+}
+
+/// Dissolve a UDP socket's default peer by connecting it to an `AF_UNSPEC` address, as libuv does.
+pub(crate) fn udp_disconnect(socket: socket2::SockRef<'_>) -> io::Result<()> {
+    // SAFETY: a zeroed storage is a valid `AF_UNSPEC` address; 16 bytes covers `sockaddr_in`.
+    let address = unsafe { socket2::SockAddr::new(socket2::SockAddrStorage::zeroed(), 16) };
+    #[cfg(unix)]
+    let ignored = Some(libc::EAFNOSUPPORT);
+    #[cfg(windows)]
+    let ignored = None;
+    match socket.connect(&address) {
+        Err(error) if error.raw_os_error() == ignored => Ok(()),
+        result => result,
+    }
+}
