@@ -37,7 +37,7 @@ const constants = {
 };
 
 function cpus() {
-  return nativeOs.cpus().map(({ model, speed }) => ({ model, speed, times: { user: 0, nice: 0, sys: 0, idle: 0, irq: 0 } }));
+  return nativeOs.cpus().map(({ model, speed, times }) => ({ model, speed, times }));
 }
 
 // Node reads these from the environment first; this runtime's environment is process.env.
