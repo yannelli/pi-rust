@@ -12,6 +12,7 @@ pub mod clipboard;
 pub mod compaction;
 pub mod config;
 pub mod diagnostics;
+pub mod experimental;
 pub mod export;
 pub mod extension_ui;
 pub mod extensions;

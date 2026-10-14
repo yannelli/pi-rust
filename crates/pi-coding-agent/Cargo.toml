@@ -17,17 +17,24 @@ async-trait.workspace = true
 futures.workspace = true
 pi-agent.workspace = true
 pi-ai.workspace = true
+pi-chord = { path = "../pi-chord", features = ["js"] }
+pi-client = { path = "../pi-client" }
 pi-codemode = { path = "../pi-codemode" }
+pi-durable = { path = "../pi-durable" }
 pi-js = { path = "../pi-js" }
 pi-mcp = { path = "../pi-mcp" }
+pi-protocol = { path = "../pi-protocol" }
+pi-server = { path = "../pi-server" }
 pi-tui = { path = "../pi-tui" }
 reqwest.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["float_roundtrip", "unbounded_depth"] }
 tokio.workspace = true
 tokio-util.workspace = true
+thiserror.workspace = true
 base64 = "0.22.1"
 flate2 = "1"
+indexmap = "2"
 globset = "0.4.16"
 ignore = "0.4.23"
 nodejs-semver = "7"
