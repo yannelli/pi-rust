@@ -279,6 +279,10 @@ impl FileSystem for LocalExecutionEnv {
         self.run(resolved.clone(), context, create_parent).await?;
         let content = content.to_vec();
         self.run(resolved.clone(), context, move |path| {
+            // libuv opens a directory for appending on Windows, so only a non-empty write to it fails.
+            if cfg!(windows) && content.is_empty() && std::fs::metadata(path).is_ok_and(|metadata| metadata.is_dir()) {
+                return Ok(());
+            }
             refuse_windows_directory(path, io::ErrorKind::IsADirectory)?;
             OpenOptions::new().append(true).create(true).open(path)?.write_all(&content)
         })
