@@ -12,6 +12,7 @@ pub(crate) mod fetch;
 pub(crate) mod fs;
 mod fs_ops;
 mod fs_output;
+mod http;
 mod net;
 mod net_server;
 mod os;
@@ -47,6 +48,7 @@ pub(crate) fn install(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
     native.set("dns", dns::natives(ctx)?)?;
     native.set("dgram", dgram::natives(ctx)?)?;
     native.set("tls", tls::natives(ctx)?)?;
+    native.set("http", http::natives(ctx)?)?;
     native.set("asyncContext", context::natives(ctx)?)?;
     core::install(ctx, &native)?;
     let config = core::config(ctx)?;

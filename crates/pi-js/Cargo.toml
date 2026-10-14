@@ -65,6 +65,10 @@ x25519-dalek = { version = "3.0.0", features = ["static_secrets"] }
 zstd = { version = "0.13.3", default-features = false }
 x448 = { version = "=0.14.0-pre.12", default-features = false }
 hickory-resolver = { version = "0.25.2", default-features = false, features = ["tokio", "system-config"] }
+h2 = "0.4"
+http = "1"
+httparse = "1.10.1"
+bytes = "1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.190"

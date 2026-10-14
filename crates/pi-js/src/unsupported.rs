@@ -27,6 +27,7 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
     "net: sockets and servers from a file descriptor or an existing handle, reusePort",
     "tls: TLSSocket over an existing socket or stream (and tls.connect's socket option), SNICallback, \
      addContext, pfx, encrypted private keys, session resumption, exportKeyingMaterial, and TLS before 1.2",
+    "http: the insecureHTTPParser option (accepted and ignored)",
     "dgram: addSourceSpecificMembership, dropSourceSpecificMembership, and bind with a file descriptor",
     "process: binding, dlopen, setUncaughtExceptionCaptureCallback, and running code after process.exit when \
      the embedder's on_exit callback returns (the runtime is shutting down)",
@@ -60,6 +61,9 @@ pub const DIFFERENCES: &[&str] = &[
     "tls: servers emit secureConnection but no connection event before the handshake; getCertificate \
      returns null and getX509Certificate and getPeerX509Certificate return undefined; ciphers, ecdhCurve, \
      and other OpenSSL tuning options are ignored",
+    "http: the parser is httparse, so malformed messages can fail with a different HPE_* code than llhttp; \
+     server headersTimeout and requestTimeout use per-connection timers instead of a periodic check, and \
+     setMaxIdleHTTPParsers only validates its argument",
     "net: connecting to several looked-up addresses tries them one after another, not in parallel",
     "zlib: deflate output can differ in bytes from Node's zlib (zlib-rs); memLevel and strategy are \
      validated but not applied; brotli error codes come from the Rust decoder",
@@ -72,7 +76,7 @@ mod tests {
     #[test]
     fn lists_unsupported_modules() {
         let unsupported = unsupported_modules();
-        for name in ["http", "https", "worker_threads", "vm"] {
+        for name in ["http2", "worker_threads", "vm"] {
             assert!(unsupported.contains(&name), "{name}");
         }
         let supported = supported_modules();
@@ -87,6 +91,8 @@ mod tests {
             "zlib",
             "v8",
             "net",
+            "http",
+            "https",
         ] {
             assert!(supported.contains(&name) && !unsupported.contains(&name), "{name}");
         }

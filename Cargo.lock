@@ -1433,6 +1433,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "h2"
+version = "0.4.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d29020232d6aa3fb1daca64c1127cf662cf97f254ae16c18c05b8ab635fc118"
+dependencies = [
+ "atomic-waker",
+ "bytes",
+ "fnv",
+ "futures-core",
+ "futures-sink",
+ "http",
+ "indexmap 2.14.2",
+ "slab",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3221,6 +3240,7 @@ dependencies = [
  "aes-gcm",
  "base64 0.22.1",
  "brotli",
+ "bytes",
  "cbc",
  "ccm",
  "cfb-mode",
@@ -3234,7 +3254,10 @@ dependencies = [
  "flate2",
  "futures",
  "getrandom 0.4.3",
+ "h2",
  "hickory-resolver",
+ "http",
+ "httparse",
  "k256",
  "libc",
  "md-5",
@@ -4793,6 +4816,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "libc",
  "pin-project-lite",
  "tokio",
 ]

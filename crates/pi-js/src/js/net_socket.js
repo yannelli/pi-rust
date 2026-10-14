@@ -256,7 +256,7 @@ Socket.prototype.connect = function (...args) {
       process.nextTick(() => this.destroy(error));
     }
   };
-  if (options.path !== undefined) {
+  if (options.path !== undefined && options.path !== null) {
     validate.string(options.path, "options.path");
     this._path = options.path;
     open({ path: options.path });
