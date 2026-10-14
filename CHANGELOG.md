@@ -2,6 +2,15 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.1.9] - 2026-10-14
+
+### Added
+
+- **evals:** gate Unix-only container paths for Windows builds ([95c2975](https://github.com/yannelli/pi-rust/commit/95c29751371e3cba652e0c14edc39744fbe3625d))
+- **evals:** add the docs comparison CLI, container entrypoint, and Docker image ([31c31a1](https://github.com/yannelli/pi-rust/commit/31c31a1cf6de02b792820155159df96d30b44698))
+- **evals:** add the pi harness, eval framework, suites, and fixtures ([18ecaf7](https://github.com/yannelli/pi-rust/commit/18ecaf71ba6c81fc3cabaea06d9df5ef810b2e3a))
+- **evals:** add pi-evals crate with plan and report logic ([00df278](https://github.com/yannelli/pi-rust/commit/00df27819610e2aedb8a1ac56cc51e98b23a9a7c))
+
 ## [0.1.8] - 2026-10-14
 
 ### Added
