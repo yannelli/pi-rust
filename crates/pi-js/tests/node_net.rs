@@ -8,7 +8,9 @@ const net = require("node:net");
 const out = {};
 const once = (emitter, name) => new Promise((resolve) => emitter.once(name, resolve));
 const mark = (text) => require("fs").appendFileSync(require("path").join(__dirname, "stage"), text + "\n");
+let echoClosed;
 const echo = (path) => net.createServer((socket) => {
+  echoClosed = once(socket, "close");
   socket.setNoDelay(true);
   socket.setKeepAlive(true, 1000);
   socket.on("data", (chunk) => socket.write(chunk));
@@ -59,10 +61,8 @@ const pipeServer = echo();
 pipeServer.listen(path);
 await once(pipeServer, "listening");
 out.pipeAddress = pipeServer.address() === path;
-// The server's side closes on its own schedule; count connections once it has.
-const pipeClosed = new Promise((resolve) => pipeServer.once("connection", (socket) => socket.once("close", resolve)));
 out.pipe = (await roundTrip(pipeServer, [path])).slice(0, 2);
-await pipeClosed;
+await echoClosed;
 const counted = await new Promise((resolve) => pipeServer.getConnections((error, count) => resolve([error, count])));
 out.connections = counted;
 mark("pipe close");
