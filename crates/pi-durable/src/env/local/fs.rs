@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use async_trait::async_trait;
 use pi_chord::Context;
 
-use super::paths::{aborted, blocking, file_info, io_error, join_path};
+use super::paths::{aborted, blocking, file_info, io_error, join_path, read_dir};
 use super::readers::{LocalBinaryReader, LocalDirReader, LocalTextLineReader, MAX_SAFE_INTEGER};
 use super::{LOCAL_ENV_ID, LocalExecutionEnv, process, watch};
 use crate::env::{
@@ -99,6 +99,28 @@ fn open_for_binary_reads(path: &str, no_follow: bool) -> FileResult<File> {
     File::open(path).map_err(|error| io_error(error, path))
 }
 
+/// libuv on Windows opens a directory and fails at the read or write, where Rust's open fails with access denied.
+/// `kind` is what Node reports then: `IsADirectory` for reads, writes and appends, `InvalidInput` for truncation.
+fn refuse_windows_directory(path: &str, kind: io::ErrorKind) -> io::Result<()> {
+    if cfg!(windows) && std::fs::metadata(path).is_ok_and(|metadata| metadata.is_dir()) {
+        return Err(io::Error::from(kind));
+    }
+    Ok(())
+}
+
+/// libuv renames with `MoveFileExW`, which cannot replace a directory or move one onto an existing path; Rust's
+/// rename on Windows fails differently there.
+fn refuse_windows_rename(from: &str, to: &str) -> io::Result<()> {
+    if cfg!(windows) && from != to {
+        if let (Ok(source), Ok(target)) = (std::fs::symlink_metadata(from), std::fs::symlink_metadata(to)) {
+            if source.is_dir() || target.is_dir() {
+                return Err(io::ErrorKind::PermissionDenied.into());
+            }
+        }
+    }
+    Ok(())
+}
+
 fn create_parent(path: &str) -> io::Result<()> {
     match Path::new(path).parent() {
         Some(parent) if !parent.as_os_str().is_empty() => std::fs::create_dir_all(parent),
@@ -180,7 +202,12 @@ impl FileSystem for LocalExecutionEnv {
 
     async fn open_text_line_reader(&self, path: &str, context: &Context) -> FileResult<Box<dyn TextLineReader>> {
         let resolved = self.resolve(path);
-        let file = self.run(resolved.clone(), context, |path| File::open(path)).await?;
+        let file = self
+            .run(resolved.clone(), context, |path| {
+                refuse_windows_directory(path, io::ErrorKind::IsADirectory)?;
+                File::open(path)
+            })
+            .await?;
         check(context, &resolved)?;
         Ok(Box::new(LocalTextLineReader::new(file, resolved)))
     }
@@ -212,7 +239,12 @@ impl FileSystem for LocalExecutionEnv {
 
     async fn read_binary_file(&self, path: &str, context: &Context) -> FileResult<Vec<u8>> {
         let resolved = self.resolve(path);
-        let bytes = self.run(resolved.clone(), context, |path| std::fs::read(path)).await?;
+        let bytes = self
+            .run(resolved.clone(), context, |path| {
+                refuse_windows_directory(path, io::ErrorKind::IsADirectory)?;
+                std::fs::read(path)
+            })
+            .await?;
         check(context, &resolved)?;
         Ok(bytes)
     }
@@ -248,7 +280,11 @@ impl FileSystem for LocalExecutionEnv {
         let resolved = self.resolve(path);
         self.run(resolved.clone(), context, create_parent).await?;
         let content = content.to_vec();
-        self.run(resolved, context, move |path| std::fs::write(path, content)).await
+        self.run(resolved, context, move |path| {
+            refuse_windows_directory(path, io::ErrorKind::IsADirectory)?;
+            std::fs::write(path, content)
+        })
+        .await
     }
 
     async fn append_file(&self, path: &str, content: &[u8], context: &Context) -> FileResult<()> {
@@ -256,6 +292,11 @@ impl FileSystem for LocalExecutionEnv {
         self.run(resolved.clone(), context, create_parent).await?;
         let content = content.to_vec();
         self.run(resolved.clone(), context, move |path| {
+            // libuv opens a directory for appending on Windows, so only a non-empty write to it fails.
+            if cfg!(windows) && content.is_empty() && std::fs::metadata(path).is_ok_and(|metadata| metadata.is_dir()) {
+                return Ok(());
+            }
+            refuse_windows_directory(path, io::ErrorKind::IsADirectory)?;
             OpenOptions::new().append(true).create(true).open(path)?.write_all(&content)
         })
         .await?;
@@ -269,8 +310,11 @@ impl FileSystem for LocalExecutionEnv {
             let message = "File size must be a non-negative safe integer";
             return Err(FileError::new(FileErrorCode::Invalid, message, Some(resolved)));
         }
-        self.run(resolved.clone(), context, move |path| OpenOptions::new().write(true).open(path)?.set_len(size))
-            .await?;
+        self.run(resolved.clone(), context, move |path| {
+            refuse_windows_directory(path, io::ErrorKind::InvalidInput)?;
+            OpenOptions::new().write(true).open(path)?.set_len(size)
+        })
+        .await?;
         check(context, &resolved)
     }
 
@@ -294,7 +338,11 @@ impl FileSystem for LocalExecutionEnv {
     async fn rename_file(&self, source: &str, destination: &str, context: &Context) -> FileResult<()> {
         let (source, destination) = (self.resolve(source), self.resolve(destination));
         check(context, &destination)?;
-        self.run(source, context, move |source| std::fs::rename(source, destination)).await
+        self.run(source, context, move |source| {
+            refuse_windows_rename(source, &destination)?;
+            std::fs::rename(source, destination)
+        })
+        .await
     }
 
     async fn file_info(&self, path: &str, context: &Context) -> FileResult<FileInfo> {
@@ -308,7 +356,7 @@ impl FileSystem for LocalExecutionEnv {
         check(context, &resolved)?;
         let context = context.clone();
         blocking(move || {
-            let entries = std::fs::read_dir(&resolved).map_err(|error| io_error(error, &resolved))?;
+            let entries = read_dir(&resolved).map_err(|error| io_error(error, &resolved))?;
             let mut infos = Vec::new();
             for entry in entries {
                 let entry = entry.map_err(|error| io_error(error, &resolved))?;
@@ -330,7 +378,7 @@ impl FileSystem for LocalExecutionEnv {
 
     async fn open_dir_reader(&self, path: &str, context: &Context) -> FileResult<Box<dyn DirReader>> {
         let resolved = self.resolve(path);
-        let entries = self.run(resolved.clone(), context, |path| std::fs::read_dir(path)).await?;
+        let entries = self.run(resolved.clone(), context, read_dir).await?;
         check(context, &resolved)?;
         Ok(Box::new(LocalDirReader::new(entries, resolved)))
     }

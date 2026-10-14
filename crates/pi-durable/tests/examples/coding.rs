@@ -27,8 +27,18 @@ fn local_env(cwd: &str) -> SharedEnv {
     Arc::new(LocalExecutionEnv::new(LocalEnvOptions::new(cwd)))
 }
 
+/// The canonical path, without the `\\?\` prefix Windows adds.
 fn path_of(path: &Path) -> String {
-    path.canonicalize().unwrap().to_string_lossy().into_owned()
+    let path = path.canonicalize().unwrap().to_string_lossy().into_owned();
+    path.strip_prefix(r"\\?\").map_or(path.clone(), str::to_owned)
+}
+
+/// How `pwd` prints a path: Git Bash on Windows shows `C:\a\b` as `/c/a/b`.
+fn shell_path(path: &str) -> String {
+    match path.split_once(":\\") {
+        Some((drive, rest)) if cfg!(windows) => format!("/{}/{}", drive.to_lowercase(), rest.replace('\\', "/")),
+        _ => path.to_owned(),
+    }
 }
 
 async fn ask(conversation: &Conversation, text: &str) {
@@ -82,12 +92,12 @@ async fn ex26_coding_agent_follows_cwd_changes_and_live_settings() {
     let (harness, root) = open_chat_with(memory(), &setup, options).await;
     root.configure(AgentChange { cwd: Change::Set(root_path.clone()), ..Default::default() }, &ctx()).await.unwrap();
     ask(&root, "Where are we?").await;
-    assert_eq!(last_result(&root).await, root_path);
+    assert_eq!(last_result(&root).await, shell_path(&root_path));
     let app = format!("{root_path}/app");
     root.configure(AgentChange { cwd: Change::Set(app.clone()), ..Default::default() }, &ctx()).await.unwrap();
     *parallel_tools.lock().unwrap() = false;
     ask(&root, "And now?").await;
-    assert_eq!(last_result(&root).await, app);
+    assert_eq!(last_result(&root).await, shell_path(&app));
     harness.close(&ctx()).await.unwrap();
 }
 
