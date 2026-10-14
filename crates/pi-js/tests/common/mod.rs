@@ -85,7 +85,10 @@ pub async fn run_cjs(runtime: &JsRuntime, root: &Path, body: &str) -> serde_json
     };
     match function.call(vec![]).await {
         Ok(value) => value.into_json(),
-        Err(error) => panic!("script failed: {}", error.display_with_stack()),
+        Err(error) => {
+            let stage = fs::read_to_string(root.join("stage")).unwrap_or_default();
+            panic!("script failed: {}\nstage: {stage}", error.display_with_stack())
+        }
     }
 }
 

@@ -158,6 +158,12 @@ fn main() {
         eprintln!("test cluster_cases ... FAILED: timed out at: {stage}\nstdout: {out}\nstderr: {err}");
         std::process::exit(101);
     });
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let (out, err) = CAPTURE.get().map(|capture| (capture.stdout(), capture.stderr())).unwrap_or_default();
+        eprintln!("stdout: {out}\nstderr: {err}");
+        default_hook(info);
+    }));
     let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
     runtime.block_on(cases());
     println!("test cluster_cases ... ok\n\ntest result: ok. 1 passed; 0 failed");
