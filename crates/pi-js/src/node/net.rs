@@ -1,6 +1,7 @@
 //! Natives for `node:net` (and the transport under `node:tls`): TCP sockets, Unix sockets or
 //! Windows named pipes on tokio. Events reach a JavaScript callback.
 
+use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -211,7 +212,8 @@ fn start(id: u64) {
                 }
                 match read.read(&mut buffer).await {
                     Ok(0) => break,
-                    Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                    // libuv reports a broken named pipe as EOF.
+                    Err(error) if matches!(error.kind(), ErrorKind::UnexpectedEof | ErrorKind::BrokenPipe) => break,
                     Ok(count) => post(&sender, id, Event::Data(buffer[..count].to_vec())),
                     Err(error) => return post(&sender, id, Event::Error(net_error(&error, "read", None, None))),
                 }
@@ -241,6 +243,14 @@ pub(super) fn close(id: u64) {
     let Entry { task, kind, .. } = *entry;
     if let Some(task) = task {
         task.abort();
+        // The accept task owns the listener. Node closes it at once; without the wait, a connect right after
+        // `close` can still land in the backlog and then be reset.
+        if matches!(kind, Kind::Listener { .. }) {
+            let deadline = std::time::Instant::now() + Duration::from_secs(1);
+            while !task.is_finished() && std::time::Instant::now() < deadline {
+                std::thread::sleep(Duration::from_micros(200));
+            }
+        }
     }
     match kind {
         Kind::Stream { reader, writer, .. } => {
@@ -374,6 +384,32 @@ fn writer(ctx: &Ctx<'_>, id: u64) -> rquickjs::Result<Writer> {
     found.ok().flatten().ok_or_else(|| throw(ctx, &JsError::new("This socket is closed").with_code("EPIPE")))
 }
 
+fn is_pipe(id: u64) -> bool {
+    let found = state().with_resource(id, |entry: &mut Entry| matches!(entry.kind, Kind::Stream { tcp: None, .. }));
+    found.unwrap_or(false)
+}
+
+/// Close a named pipe whose write side was shut down, and report EOF unless the reader already ended.
+fn end_pipe(ctx: &Ctx<'_>, id: u64) {
+    let state = state();
+    let ended = state.with_resource(id, |entry: &mut Entry| {
+        let Kind::Stream { pending, reader, writer, .. } = &mut entry.kind else { return false };
+        if reader.as_ref().is_some_and(|task| task.is_finished()) {
+            return false;
+        }
+        if let Some(task) = reader.take() {
+            task.abort();
+        }
+        pending.take();
+        let writer = writer.clone();
+        state.shared.tokio.spawn(async move { drop(writer.lock().await.take()) });
+        true
+    });
+    if ended.unwrap_or(false) {
+        deliver(ctx, id, Event::End);
+    }
+}
+
 fn with_tcp(ctx: &Ctx<'_>, id: u64, f: impl FnOnce(&socket2::Socket) -> std::io::Result<()>) -> rquickjs::Result<()> {
     let result = state().with_resource(id, |entry: &mut Entry| match &entry.kind {
         Kind::Stream { tcp: Some(tcp), .. } => f(tcp),
@@ -419,9 +455,19 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
     })?;
     set_fn(&object, "shutdown", |ctx: Ctx<'js>, id: u64| {
         let writer = writer(&ctx, id)?;
+        let pipe = cfg!(windows).then(|| state().sender.clone()).filter(|_| is_pipe(id));
         let work = async move {
             if let Some(stream) = writer.lock().await.as_mut() {
                 stream.shutdown().await.map_err(|error| net_error(&error, "shutdown", None, None))?;
+                // A named pipe cannot be half-closed. Like libuv, close it 50 ms after the shutdown and report
+                // EOF, so the peer sees the end of the stream.
+                if let Some(sender) = pipe {
+                    tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                        let task: Task = Box::new(move |ctx| end_pipe(ctx, id));
+                        let _ = sender.send(Message::Task(task));
+                    });
+                }
             }
             Ok(())
         };

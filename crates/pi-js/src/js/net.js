@@ -39,7 +39,7 @@ Object.defineProperty(Server.prototype, "connections", {
 });
 
 Server.prototype._makeSocket = function (id, info) {
-  return new Socket({ [kAccepted]: { id, info }, allowHalfOpen: this.allowHalfOpen });
+  return new Socket({ [kAccepted]: { id, info, deferRead: true }, allowHalfOpen: this.allowHalfOpen });
 };
 
 Server.prototype._onNative = function (event, value, id) {

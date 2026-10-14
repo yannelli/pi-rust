@@ -45,7 +45,7 @@ function Socket(options) {
   Object.assign(this, { connecting: false, _handle: null, _hadError: false, _local: null, _remote: null, _path: null });
   Object.assign(this, { _paused: false, _refed: true, _pendingOptions: [], _timeout: 0, _timer: null });
   Object.assign(this, { bytesRead: 0, _bytesWritten: 0, server: null, _server: null });
-  if (options[kAccepted]) this._attach(options[kAccepted].id, options[kAccepted].info);
+  if (options[kAccepted]) this._attach(options[kAccepted].id, options[kAccepted].info, options[kAccepted].deferRead);
   if (options.signal) {
     const abort = () => this.destroy(Object.assign(new Error("The operation was aborted"), { name: "AbortError", code: "ABORT_ERR", cause: options.signal.reason }));
     if (options.signal.aborted) process.nextTick(abort);
@@ -55,11 +55,14 @@ function Socket(options) {
 Object.setPrototypeOf(Socket.prototype, Duplex.prototype);
 Object.setPrototypeOf(Socket, Duplex);
 
-Socket.prototype._attach = function (id, info) {
+Socket.prototype._attach = function (id, info, deferRead) {
   this._handle = id;
   this._applyInfo(info);
   if (!this._refed) nativeNet.ref(id, false);
-  nativeNet.start(id, (event, value) => this._onNative(event, value));
+  const start = () => this._handle === id && nativeNet.start(id, (event, value) => this._onNative(event, value));
+  // libuv reads an accepted socket on the next loop turn, so a 'connection' handler can still pass it to a child.
+  if (deferRead) setImmediate(start);
+  else start();
 };
 
 Socket.prototype._applyInfo = function (info) {

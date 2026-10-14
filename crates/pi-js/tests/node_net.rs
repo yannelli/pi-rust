@@ -7,6 +7,7 @@ const NET_SCRIPT: &str = r##"
 const net = require("node:net");
 const out = {};
 const once = (emitter, name) => new Promise((resolve) => emitter.once(name, resolve));
+const mark = (text) => require("fs").appendFileSync(require("path").join(__dirname, "stage"), text + "\n");
 const echo = (path) => net.createServer((socket) => {
   socket.setNoDelay(true);
   socket.setKeepAlive(true, 1000);
@@ -28,6 +29,7 @@ async function roundTrip(server, connectArgs) {
   states.push(client.readyState);
   return [text, hadError, states, client.bytesRead, client.bytesWritten];
 }
+mark("tcp");
 const server = echo();
 server.listen(0, "127.0.0.1");
 await once(server, "listening");
@@ -37,6 +39,7 @@ const conn = once(server, "connection");
 out.tcp = await roundTrip(server, [port, "127.0.0.1"]);
 const accepted = await conn;
 out.accepted = [accepted.remoteAddress, accepted.localPort === port, accepted.remoteFamily];
+mark("inUse");
 const busy = net.createServer();
 busy.listen(port, "127.0.0.1");
 const inUse = await once(busy, "error");
@@ -45,11 +48,13 @@ busy.close();
 server.close();
 await once(server, "close");
 out.closed = [server.listening, server.address()];
+mark("refused");
 const refusedClient = net.connect(port, "127.0.0.1");
 const refusedError = await once(refusedClient, "error");
 out.refused = [refusedError.code, refusedError.syscall, refusedError.address, refusedError.message === `connect ECONNREFUSED 127.0.0.1:${port}`];
 const dir = require("fs").mkdtempSync(require("path").join(require("os").tmpdir(), "pi-net-"));
 const path = process.platform === "win32" ? `\\\\.\\pipe\\pi-net-${process.pid}` : require("path").join(dir, "echo.sock");
+mark("pipe");
 const pipeServer = echo();
 pipeServer.listen(path);
 await once(pipeServer, "listening");
@@ -57,8 +62,10 @@ out.pipeAddress = pipeServer.address() === path;
 out.pipe = (await roundTrip(pipeServer, [path])).slice(0, 2);
 const counted = await new Promise((resolve) => pipeServer.getConnections((error, count) => resolve([error, count])));
 out.connections = counted;
+mark("pipe close");
 pipeServer.close();
 await once(pipeServer, "close");
+mark("timeout");
 const timed = net.createServer().listen(0, "127.0.0.1");
 await once(timed, "listening");
 const idle = net.connect(timed.address().port, "127.0.0.1");
@@ -67,6 +74,7 @@ await once(idle, "timeout");
 out.timeout = idle.timeout;
 idle.destroy();
 timed.close();
+mark("helpers");
 const unrefed = net.createServer().listen(0, "127.0.0.1");
 unrefed.unref();
 out.helpers = [net.isIP("::1"), net.isIP("1.2.3.4"), net.isIP("x"), net.isIPv4("10.0.0.1"), net.isIPv6("fe80::1%eth0")];
@@ -88,7 +96,7 @@ const NET_EXPECTED: &str = r##"{"listening":[true,"IPv4","127.0.0.1","number"],"
 async fn net_matches_node() {
     let (_dir, root) = tempdir();
     let (runtime, capture) = runtime(&root);
-    let mut actual = run_cjs(&runtime, &root, NET_SCRIPT).await;
+    let mut actual = run_cjs_within(&runtime, &root, NET_SCRIPT, 120).await;
     let port = actual["inUse"][3].clone();
     let message = actual["inUse"][2].as_str().unwrap().replace(&format!(":{port}"), ":PORT");
     actual["inUse"][2] = message.into();
