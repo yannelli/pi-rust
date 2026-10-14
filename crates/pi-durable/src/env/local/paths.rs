@@ -110,6 +110,11 @@ pub(crate) fn file_info(path: &str, metadata: &std::fs::Metadata) -> FileResult<
 
 /// The error code of an I/O error, as upstream maps Node's error codes.
 pub(crate) fn error_code(error: &io::Error) -> FileErrorCode {
+    // On Windows the OS code decides, through libuv's table, as Node reports it.
+    #[cfg(windows)]
+    if let Some(code) = error.raw_os_error() {
+        return windows_error_code(code);
+    }
     match error.kind() {
         io::ErrorKind::NotFound => FileErrorCode::NotFound,
         io::ErrorKind::PermissionDenied => FileErrorCode::PermissionDenied,
@@ -133,6 +138,25 @@ fn raw_error_code(error: &io::Error) -> FileErrorCode {
 #[cfg(not(unix))]
 fn raw_error_code(_error: &io::Error) -> FileErrorCode {
     FileErrorCode::Unknown
+}
+
+/// libuv's `uv_translate_sys_error`, reduced to the codes Node's env tells apart (as the pi-env daemon has it).
+#[cfg(windows)]
+fn windows_error_code(code: i32) -> FileErrorCode {
+    match code {
+        2 | 3 | 15 | 123 | 126 | 161 | 267 | 4392 => FileErrorCode::NotFound,
+        5 | 740 | 1314 | 1920 => FileErrorCode::PermissionDenied,
+        1 => FileErrorCode::IsDirectory,
+        13 | 87 | 122 | 131 | 1464 => FileErrorCode::Invalid,
+        _ => FileErrorCode::Unknown,
+    }
+}
+
+/// libuv's `scandir` and `opendir` report a file as `ENOTDIR`; elsewhere Windows' `ERROR_DIRECTORY` is `ENOENT`.
+pub(crate) fn read_dir(path: &str) -> io::Result<std::fs::ReadDir> {
+    std::fs::read_dir(path).map_err(|error| {
+        if cfg!(windows) && error.raw_os_error() == Some(267) { io::ErrorKind::NotADirectory.into() } else { error }
+    })
 }
 
 /// A `FileError` for an I/O failure at `path`, keeping the I/O error as its cause.
