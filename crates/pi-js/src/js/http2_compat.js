@@ -1,6 +1,6 @@
 // The http2 compatibility API: Http2ServerRequest and Http2ServerResponse over an Http2Stream.
 const Stream = require("stream");
-const { codeError, invalidArgType } = require("internal/errors");
+const { codeError, invalidArgType, validate } = require("internal/errors");
 const { validateHeaderName, validateHeaderValue } = require("internal/http_common");
 
 const CONNECTION_HEADERS = new Set(["connection", "upgrade", "http2-settings", "transfer-encoding", "keep-alive", "proxy-connection"]);
@@ -181,7 +181,14 @@ class Http2ServerResponse extends Stream {
   }
 
   createPushResponse(headers, callback) {
-    process.nextTick(callback, codeError(Error, "ERR_HTTP2_PUSH_DISABLED", "HTTP/2 Push has been disabled"));
+    validate.function(callback, "callback");
+    if (this.stream.closed || this.stream.destroyed) {
+      return process.nextTick(callback, codeError(Error, "ERR_HTTP2_INVALID_STREAM", "The stream has been destroyed"));
+    }
+    this.stream.pushStream(headers, {}, (error, stream, pushHeaders) => {
+      if (error) return callback(error);
+      callback(null, new Http2ServerResponse(stream, pushHeaders));
+    });
   }
 
   setTimeout(msecs, callback) {

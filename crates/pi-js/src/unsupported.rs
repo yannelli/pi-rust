@@ -29,8 +29,7 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
     "net: sockets and servers from a file descriptor or an existing handle, reusePort",
     "tls: pfx (no PKCS#12 parser is bundled), encrypted private keys, exportKeyingMaterial, and TLS before 1.2",
     "http: the insecureHTTPParser option (accepted and ignored)",
-    "http2: server push (pushStream and createPushResponse fail with ERR_HTTP2_PUSH_DISABLED), \
-     performServerHandshake, altsvc and origin frames (ignored), custom settings, and stream priority",
+    "http2: performServerHandshake, altsvc and origin frames (ignored), custom settings, and stream priority",
     "dgram: addSourceSpecificMembership, dropSourceSpecificMembership, and bind with a file descriptor",
     "process: binding, dlopen, setUncaughtExceptionCaptureCallback, and running code after process.exit when \
      the embedder's on_exit callback returns (the runtime is shutting down)",
@@ -81,9 +80,9 @@ pub const DIFFERENCES: &[&str] = &[
      server headersTimeout and requestTimeout use per-connection timers instead of a periodic check, and \
      setMaxIdleHTTPParsers only validates its argument",
     "http2: sessions run on the h2 crate: ping sends an opaque payload and reports the caller's payload back, \
-     settings after connect apply only initialWindowSize, remoteSettings shows defaults except \
-     maxConcurrentStreams, a client's goaway sends no GOAWAY frame, received data is not flow-controlled \
-     by the reader, and session and stream state objects are approximate",
+     settings after connect apply only initialWindowSize, a client's goaway sends no GOAWAY frame, received \
+     data is not flow-controlled by the reader, closing a pushed stream on the client sends no RST_STREAM, \
+     and session and stream state objects are approximate",
     "child_process: messages sent after a handle do not wait for the peer's NODE_HANDLE_ACK (Node queues \
      them, and resends the handle after a NODE_HANDLE_NACK), and bytes that a sent socket had read in the \
      sender but not yet emitted as 'data' are dropped instead of emitted there",
