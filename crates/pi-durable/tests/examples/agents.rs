@@ -98,7 +98,12 @@ async fn ex21_late_join_sees_running_output_in_the_view_and_the_event_snapshot()
         .unwrap();
     submission.wait(&ctx()).await.unwrap();
     harness.wait_for_idle(&ctx()).await.unwrap();
-    tokio::task::yield_now().await;
+    // Events arrive asynchronously; the end event follows the last output update.
+    let ended = || lines.lock().unwrap().iter().any(|kind| kind == "tool_execution_end");
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !ended() && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
     stream.stop().await;
     view.dispose().unwrap();
     let expected: String = (1..=10).map(|n| format!("{n}\n")).collect();
