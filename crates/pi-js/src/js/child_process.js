@@ -1,5 +1,6 @@
-// node:child_process on Rust process natives. Inherited stdout and stderr go to this
-// runtime's output; inherited stdin is empty because pi owns the terminal.
+// node:child_process on Rust process natives. With the default output, 'inherit' passes the real
+// descriptors. With an embedder's output sink, inherited stdout and stderr go to the sink and
+// inherited stdin is empty, because the embedder owns the terminal.
 const EventEmitter = require("events");
 const { Buffer } = require("buffer");
 const path = require("path");
@@ -41,9 +42,10 @@ function resolveCwd(cwd) {
   return path.resolve(String(cwd));
 }
 
-// Inherited stdin is empty; inherited output is piped here and forwarded to process streams.
+// Without real descriptors to pass, inherited stdin is empty and inherited output is piped here
+// and forwarded to the process streams.
 function nativeStdio(entry, index) {
-  if (entry !== "inherit") return entry;
+  if (entry !== "inherit" || internal.config.processStdio) return entry;
   return index === 0 ? "ignore" : "pipe";
 }
 

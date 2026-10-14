@@ -70,3 +70,23 @@ async fn tls_matches_node() {
         uncaught.iter().map(|(_, error)| error.display_with_stack()).collect::<Vec<_>>()
     );
 }
+
+#[tokio::test]
+async fn tls_sockets_sessions_and_sni_match_node() {
+    let (_dir, root) = tempdir();
+    let (runtime, capture) = runtime(&root);
+    let pem = |text: &str| format!("{text:?}");
+    let script = include_str!("fixtures/node_tls/features.js")
+        .replace("__SNI_KEY__", &pem(include_str!("fixtures/node_tls/sni_key.pem")))
+        .replace("__SNI_CERT__", &pem(include_str!("fixtures/node_tls/sni_cert.pem")))
+        .replace("__KEY__", &pem(include_str!("fixtures/node_http/key.pem")))
+        .replace("__CERT__", &pem(include_str!("fixtures/node_http/cert.pem")));
+    let actual = run_cjs_within(&runtime, &root, &script, 120).await;
+    assert_same_keys(&actual, &serde_json::from_str(include_str!("fixtures/node_tls/features.json")).unwrap());
+    let uncaught = capture.uncaught.lock().unwrap();
+    assert!(
+        uncaught.is_empty(),
+        "{:?}",
+        uncaught.iter().map(|(_, error)| error.display_with_stack()).collect::<Vec<_>>()
+    );
+}

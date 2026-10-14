@@ -15,13 +15,13 @@ use crate::runtime::state::state;
 
 // Node's mode numbers (zlib.constants.DEFLATE and so on).
 const DEFLATE: u8 = 1;
-const INFLATE: u8 = 2;
+pub(crate) const INFLATE: u8 = 2;
 const GZIP: u8 = 3;
-const GUNZIP: u8 = 4;
+pub(crate) const GUNZIP: u8 = 4;
 const DEFLATERAW: u8 = 5;
-const INFLATERAW: u8 = 6;
+pub(crate) const INFLATERAW: u8 = 6;
 const UNZIP: u8 = 7;
-const BROTLI_DECODE: u8 = 8;
+pub(crate) const BROTLI_DECODE: u8 = 8;
 const BROTLI_ENCODE: u8 = 9;
 const ZSTD_COMPRESS: u8 = 10;
 const ZSTD_DECOMPRESS: u8 = 11;
@@ -39,7 +39,7 @@ struct Settings {
 
 type BrotliDecoder = BrotliState<StandardAlloc, StandardAlloc, StandardAlloc>;
 
-enum Codec {
+pub(crate) enum Codec {
     Deflate(Box<Compress>),
     Inflate {
         inner: Option<Box<Decompress>>,
@@ -248,8 +248,13 @@ fn inflate_step(
     }
 }
 
+/// A decoder with default settings, for `fetch` response bodies.
+pub(crate) fn decoder(mode: u8) -> Result<Codec, JsError> {
+    create(mode, Settings { window_bits: 15, ..Settings::default() })
+}
+
 impl Codec {
-    fn process(&mut self, input: &[u8], flush: i32) -> Result<Vec<u8>, JsError> {
+    pub(crate) fn process(&mut self, input: &[u8], flush: i32) -> Result<Vec<u8>, JsError> {
         match self {
             Codec::Deflate(compress) => deflate(compress, input, flush),
             Codec::Inflate { inner, mode, window_bits, dictionary, ended, header } => {

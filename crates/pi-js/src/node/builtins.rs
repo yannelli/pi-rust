@@ -5,7 +5,7 @@ use rquickjs::{Ctx, Function, Object};
 
 use super::set_fn;
 use crate::error::JsError;
-use crate::resolve::NODE_BUILTINS;
+use crate::resolve::{NODE_BUILTINS, PREFIX_ONLY};
 use crate::runtime::convert::throw;
 
 /// `(name, source)`. Names are Node's without `node:`; `internal/` names are private helpers.
@@ -84,6 +84,7 @@ const SOURCES: &[(&str, &str)] = &[
     ("dns", include_str!("../js/dns.js")),
     ("dns/promises", "module.exports = require('dns').promises;"),
     ("dgram", include_str!("../js/dgram.js")),
+    ("internal/tls_wrap", include_str!("../js/tls_wrap.js")),
     ("tls", include_str!("../js/tls.js")),
     ("internal/http_common", include_str!("../js/http_common.js")),
     ("internal/http_outgoing", include_str!("../js/http_outgoing.js")),
@@ -100,6 +101,19 @@ const SOURCES: &[(&str, &str)] = &[
     ("internal/worker_ports", include_str!("../js/worker_ports.js")),
     ("worker_threads", include_str!("../js/worker_threads.js")),
     ("cluster", include_str!("../js/cluster.js")),
+    ("sqlite", include_str!("../js/sqlite.js")),
+    ("internal/test_harness", include_str!("../js/test_harness.js")),
+    ("internal/test_mock", include_str!("../js/test_mock.js")),
+    ("test/reporters", include_str!("../js/test_reporters.js")),
+    ("test", include_str!("../js/test.js")),
+    ("repl", include_str!("../js/repl.js")),
+    ("inspector", include_str!("../js/inspector.js")),
+    ("inspector/promises", "module.exports = require('inspector').promises;"),
+    ("internal/wasm_values", include_str!("../js/wasm_values.js")),
+    ("internal/webassembly", include_str!("../js/webassembly.js")),
+    ("internal/wasi_fds", include_str!("../js/wasi_fds.js")),
+    ("internal/wasi_calls", include_str!("../js/wasi_calls.js")),
+    ("wasi", include_str!("../js/wasi.js")),
     (
         "constants",
         "module.exports = { ...require('os').constants.errno, ...require('os').constants.signals, ...require('os').constants.priority, ...require('internal/fs_utils').constants };",
@@ -115,6 +129,7 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
     let object = Object::new(ctx.clone())?;
     set_fn(&object, "compile", compile)?;
     set_fn(&object, "list", || supported().map(str::to_string).collect::<Vec<_>>())?;
+    set_fn(&object, "prefixOnly", || PREFIX_ONLY.iter().map(|name| name.to_string()).collect::<Vec<_>>())?;
     Ok(object)
 }
 

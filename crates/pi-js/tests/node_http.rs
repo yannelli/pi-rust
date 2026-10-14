@@ -7,7 +7,7 @@ use common::*;
 async fn check(script: &str, expected: &str) {
     let (_dir, root) = tempdir();
     let (runtime, capture) = runtime(&root);
-    let actual = run_cjs(&runtime, &root, script).await;
+    let actual = run_cjs_within(&runtime, &root, script, 120).await;
     println!("{actual}");
     assert_same_keys(&actual, &serde_json::from_str(expected).unwrap());
     let uncaught = capture.uncaught.lock().unwrap();
@@ -37,4 +37,15 @@ async fn http2_matches_node() {
         .replace("__KEY__", &format!("{:?}", include_str!("fixtures/node_http/key.pem")))
         .replace("__CERT__", &format!("{:?}", include_str!("fixtures/node_http/cert.pem")));
     check(&script, include_str!("fixtures/node_http/http2.json")).await;
+}
+
+#[tokio::test]
+async fn fetch_decoding_matches_node() {
+    check(include_str!("fixtures/node_http/fetch_decode.js"), include_str!("fixtures/node_http/fetch_decode.json"))
+        .await;
+}
+
+#[tokio::test]
+async fn http2_push_matches_node() {
+    check(include_str!("fixtures/node_http/http2_push.js"), include_str!("fixtures/node_http/http2_push.json")).await;
 }

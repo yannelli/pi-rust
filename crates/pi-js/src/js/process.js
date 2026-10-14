@@ -101,6 +101,16 @@ internal.runTicks = function runTicks() {
     }
   }
 };
+// Callbacks for the next time the event loop has nothing to do (node:test uses this as Node
+// uses beforeExit); one that schedules work delays the rest of the idle wait.
+const idleQueue = [];
+internal.onIdle = function onIdle(callback) {
+  idleQueue.push(callback);
+  nativeProcess.scheduleIdle();
+};
+internal.runIdle = function runIdle() {
+  for (const callback of idleQueue.splice(0)) callback();
+};
 process.nextTick = function nextTick(callback, ...args) {
   if (typeof callback !== "function") {
     throw Object.assign(new TypeError('The "callback" argument must be of type function'), { code: "ERR_INVALID_ARG_TYPE" });
@@ -180,8 +190,12 @@ process.emitWarning = function emitWarning(warning, type, code) {
     return;
   }
   const prefix = warning.code ? `[${warning.code}] ` : "";
-  native.io.writeText("stderr", `(node:${process.pid}) ${prefix}${warning.name}: ${warning.message}\n`);
+  let text = `(node:${process.pid}) ${prefix}${warning.name}: ${warning.message}\n`;
+  if (!warnedOnce) text += "(Use `node --trace-warnings ...` to show where the warning was created)\n";
+  warnedOnce = true;
+  native.io.writeText("stderr", text);
 };
+let warnedOnce = false;
 
 // Standard streams are created on first use.
 let stdout;

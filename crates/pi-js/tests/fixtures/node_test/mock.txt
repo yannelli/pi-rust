@@ -1,0 +1,53 @@
+TAP version 13
+# Subtest: mock.fn
+ok 1 - mock.fn
+  ---
+  duration_ms: X
+  type: 'test'
+  ...
+# Subtest: mock.method
+ok 2 - mock.method
+  ---
+  duration_ms: X
+  type: 'test'
+  ...
+# Subtest: restored after the test
+ok 3 - restored after the test
+  ---
+  duration_ms: X
+  type: 'test'
+  ...
+# Subtest: mock timers
+ok 4 - mock timers
+  ---
+  duration_ms: X
+  type: 'test'
+  ...
+# Subtest: property
+ok 5 - property
+  ---
+  duration_ms: X
+  type: 'test'
+  ...
+# Subtest: context api
+    # Subtest: child
+    ok 1 - child
+      ---
+      duration_ms: X
+      type: 'test'
+      ...
+    1..1
+ok 6 - context api
+  ---
+  duration_ms: X
+  type: 'test'
+  ...
+1..6
+# tests 7
+# suites 0
+# pass 7
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms X

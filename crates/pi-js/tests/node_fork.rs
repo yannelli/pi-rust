@@ -28,6 +28,22 @@ if (mode === "echo") {
 } else if (mode === "silent") {
   console.log("from child", typeof process.send);
   process.exitCode = 4;
+} else if (mode === "inherit-middle") {
+  // This runner writes to the real stdio, so 'inherit' passes its descriptors on.
+  const { spawn, spawnSync } = require("child_process");
+  spawnSync(process.execPath, [__filename, "inherit-sync"], { stdio: "inherit" });
+  spawn(process.execPath, [__filename, "inherit-leaf"], { stdio: "inherit" });
+  process.on("message", () => process.exit(0));
+} else if (mode === "inherit-sync") {
+  process.stdout.write("sync\n");
+} else if (mode === "inherit-leaf") {
+  let text = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => (text += chunk));
+  process.stdin.on("end", () => {
+    process.stdout.write(`leaf:${text}\n`);
+    process.stderr.write("leaf-err\n");
+  });
 }
 "#;
 
@@ -157,6 +173,33 @@ return {
     );
     assert_eq!(actual["connected"], false);
     assert_eq!(capture.stderr(), "");
+    inherit_case(&runtime, &root).await;
+}
+
+/// The leaf gets its input and writes its output after the middle process exits, so both must
+/// travel on descriptors it inherited rather than through the middle runtime's pipes.
+async fn inherit_case(runtime: &pi_js::JsRuntime, root: &std::path::Path) {
+    let actual = run_cjs_within(
+        runtime,
+        root,
+        r#"
+const { spawn } = require("child_process");
+const fs = require("fs");
+const path = require("path");
+fs.writeFileSync(path.join(__dirname, "stage"), "inherit: spawn middle");
+const middle = spawn(process.execPath, [path.join(__dirname, "child.js"), "inherit-middle"], { stdio: ["pipe", "pipe", "pipe", "ipc"] });
+let out = "";
+let err = "";
+middle.stdout.on("data", (chunk) => (out += chunk));
+middle.stderr.on("data", (chunk) => (err += chunk));
+middle.stdin.end("hello", () => middle.send("exit"));
+const code = await new Promise((resolve) => middle.on("close", resolve));
+return { out, err, code };
+"#,
+        120,
+    )
+    .await;
+    assert_eq!(actual, json!({ "out": "sync\nleaf:hello\n", "err": "leaf-err\n", "code": 0 }));
 }
 
 /// Set for children, so one that is not asked to run JavaScript cannot rerun the tests.

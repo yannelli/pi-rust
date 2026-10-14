@@ -1,0 +1,35 @@
+const { test, describe, it, before, beforeEach, afterEach } = require("node:test");
+const assert = require("node:assert");
+test("sync pass", () => {});
+test("async pass", async () => { await new Promise((resolve) => setImmediate(resolve)); });
+test("fails", () => { assert.strictEqual(1, 2); });
+test("skipped", { skip: "why" }, () => {});
+test("todo one", { todo: true }, () => {});
+test("parent", async (t) => {
+  await t.test("child 1", () => {});
+  await t.test("child 2", () => { throw new Error("boom"); });
+});
+describe("suite", () => {
+  it("a", () => {});
+  it.todo("b");
+  it("c", (t) => { t.diagnostic("diag"); });
+});
+test("unawaited", (t) => { t.test("sub a", () => {}); t.test("sub b", () => new Promise(() => {})); });
+test.only("only one", () => {});
+describe("hookfail", () => { before(() => { throw new Error("bad before"); }); it("x", () => {}); it("y", () => {}); });
+test("timeout", { timeout: 20 }, () => new Promise((resolve) => setTimeout(resolve, 300)));
+test("plan", (t) => { t.plan(2); t.assert.ok(true); });
+test("cb fail", (t, done) => { done(new Error("cb err")); });
+test("cb pass", (t, done) => { setImmediate(done); });
+test("runtime skip", (t) => { t.skip("nope"); });
+test("runtime todo", (t) => { t.todo(); throw new Error("todo fails"); });
+test("rejects", async () => { throw new TypeError("async bad"); });
+test("name with # hash\nnewline", () => {});
+test("throws string", () => { throw "str"; });
+test("nested deep", async (t) => { await t.test("lvl1", async (t) => { await t.test("lvl2", () => {}); }); });
+describe("be fails", () => { beforeEach(() => { throw new Error("be"); }); it("t1", () => {}); });
+describe("ae fails", () => { afterEach(() => { throw new Error("ae"); }); it("t2", () => {}); });
+test("t.after fails", (t) => { t.after(() => { throw new Error("after"); }); });
+describe("body throws", () => { it("never", () => {}); throw new Error("body"); });
+describe("async body", async () => { await null; it("late it", () => {}); });
+describe.skip("skipped suite", () => { it("inner", () => {}); });

@@ -87,7 +87,10 @@ class Http2Stream extends Duplex {
   get pending() { return this.id === undefined; }
   get closed() { return this._closed; }
   get bufferSize() { return this.writableLength; }
-  get pushAllowed() { return false; }
+  get pushAllowed() {
+    const session = this.session;
+    return !this.destroyed && !this.closed && !session.closed && !session.destroyed && !!session.remoteSettings.enablePush;
+  }
   get state() {
     return { localWindowSize: 65535, state: this.closed ? 7 : 2, localClose: this.writableFinished ? 1 : 0, remoteClose: this.readableEnded ? 1 : 0, sumDependencyWeight: 0, weight: 16 };
   }
@@ -231,16 +234,56 @@ class ServerHttp2Stream extends Http2Stream {
   }
 
   pushStream(headers, options, callback) {
-    if (typeof options === "function") callback = options;
-    const error = codeError(Error, "ERR_HTTP2_PUSH_DISABLED", "HTTP/2 Push has been disabled");
-    if (typeof callback === "function") process.nextTick(callback, error);
-    else throw error;
+    if (!this.pushAllowed) throw codeError(Error, "ERR_HTTP2_PUSH_DISABLED", "HTTP/2 client has disabled push streams");
+    if (this.id % 2 === 0) throw codeError(Error, "ERR_HTTP2_NESTED_PUSH", "A push stream cannot initiate another push stream.");
+    if (typeof options === "function") [callback, options] = [options, undefined];
+    validate.function(callback, "callback");
+    if (options !== undefined) validate.object(options, "options");
+    options = { ...options };
+    if (headers === null || typeof headers !== "object") throw invalidArgType("headers", "of type object", headers);
+    headers = Object.assign({ __proto__: null }, headers);
+    if (headers[":method"] === undefined) headers[":method"] = "GET";
+    if (headers[":authority"] === undefined && headers.host === undefined) headers[":authority"] = this._authority;
+    if (headers[":scheme"] === undefined) headers[":scheme"] = this._scheme;
+    if (headers[":path"] === undefined) headers[":path"] = "/";
+    const isHead = headers[":method"] === "HEAD";
+    if (isHead) options.endStream = true;
+    const flat = flatten(headers, [":method", ":path", ":scheme", ":authority"]);
+    const session = this.session;
+    const key = session._pushKey++;
+    const stream = new ServerHttp2Stream(session, key, {});
+    Object.assign(stream, { sentHeaders: headers, _isHead: isHead, _authority: this._authority, _scheme: this._scheme });
+    // The callback runs once the PUSH_PROMISE has its stream id, or with the error.
+    stream._pushCallback = (error) => (error ? callback(error) : callback(null, stream, headers, 0));
+    session._streams.set(key, stream);
+    stream.push(null);
+    if (options.endStream) stream.end();
+    nativeH2.push(session[kNative], this._key, key, flat);
+  }
+
+  _onNative(event, value, end) {
+    const pending = this._pushCallback;
+    if (pending && (event === "open" || event === "streamError")) {
+      this._pushCallback = null;
+      if (event === "streamError") {
+        pending(value);
+        return this.destroy();
+      }
+      this.id = value;
+      return pending(null);
+    }
+    return super._onNative(event, value, end);
   }
 }
 
 class ClientHttp2Stream extends Http2Stream {
   _onNative(event, value, end) {
-    if (event === "open") {
+    if (event === "pushed") {
+      // A pushed stream's response headers.
+      this.headersSent = true;
+      this.emit("push", toHeaders(value), end ? 5 : 4, value);
+      if (end) this.push(null);
+    } else if (event === "open") {
       this.id = value;
       this.emit("ready");
     } else if (event === "headers") this.emit("headers", toHeaders(value), 0, value);

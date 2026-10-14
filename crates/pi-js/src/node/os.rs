@@ -105,9 +105,12 @@ fn loadavg() -> Vec<f64> {
     if values.len() == 3 { values } else { vec![0.0; 3] }
 }
 
-/// `[model, speedMHz]` per logical CPU.
-fn cpus() -> Vec<(String, f64)> {
-    let count = std::thread::available_parallelism().map_or(1, |count| count.get());
+/// `[model, speedMHz, times]` per CPU. The count follows the CPU times, as in libuv, which lists
+/// every online CPU rather than those this process may run on.
+fn cpus() -> Vec<(String, f64, super::os_cpus::Times)> {
+    let times = super::os_cpus::cpu_times().unwrap_or_default();
+    let parallelism = std::thread::available_parallelism().map_or(1, |count| count.get());
+    let count = if times.is_empty() { parallelism } else { times.len() };
     let info = std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
     let field = |name: &str| -> Vec<String> {
         info.lines()
@@ -122,7 +125,7 @@ fn cpus() -> Vec<(String, f64)> {
         .map(|index| {
             let model = models.get(index).cloned().unwrap_or_else(|| fallback_model.clone());
             let speed = speeds.get(index).and_then(|speed| speed.parse::<f64>().ok()).unwrap_or(0.0);
-            (model, speed.floor())
+            (model, speed.floor(), times.get(index).copied().unwrap_or_default())
         })
         .collect()
 }
@@ -207,10 +210,15 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
     })?;
     set_fn(&object, "cpus", |ctx: Ctx<'js>| {
         let list = rquickjs::Array::new(ctx.clone())?;
-        for (index, (model, speed)) in cpus().into_iter().enumerate() {
+        for (index, (model, speed, times)) in cpus().into_iter().enumerate() {
             let cpu = Object::new(ctx.clone())?;
             cpu.set("model", model)?;
             cpu.set("speed", speed)?;
+            let fields = Object::new(ctx.clone())?;
+            for (name, value) in ["user", "nice", "sys", "idle", "irq"].into_iter().zip(times) {
+                fields.set(name, value)?;
+            }
+            cpu.set("times", fields)?;
             list.set(index, cpu)?;
         }
         Ok::<_, rquickjs::Error>(list)

@@ -295,13 +295,20 @@
   }
 
   function isBuiltin(request) {
-    const name = request.startsWith("node:") ? request.slice(5) : request;
-    return builtinNames().includes(name);
+    if (request.startsWith("node:")) return builtinNames(true).includes(request.slice(5));
+    return builtinNames().includes(request);
   }
   let builtinList;
-  function builtinNames() {
-    builtinList ??= native.builtins.list();
-    return builtinList;
+  let prefixedList;
+  // Modules such as node:sqlite and node:test load only with the prefix, so they are listed
+  // only for prefixed names.
+  function builtinNames(prefixed) {
+    if (!builtinList) {
+      const prefixOnly = native.builtins.prefixOnly();
+      prefixedList = native.builtins.list();
+      builtinList = prefixedList.filter((name) => !prefixOnly.includes(name));
+    }
+    return prefixed ? prefixedList : builtinList;
   }
 
   function createRequire(filename) {
@@ -418,6 +425,7 @@
     for (const name of names) defineLazy(name, () => loadBuiltin(module)[name]);
   }
   defineLazy("crypto", () => loadBuiltin("crypto").webcrypto);
+  defineLazy("WebAssembly", () => loadBuiltin("internal/webassembly"));
   if (typeof globalThis.Intl === "undefined") defineLazy("Intl", () => loadBuiltin("internal/intl"));
   defineLazy("navigator", () => ({
     hardwareConcurrency: loadBuiltin("os").availableParallelism(),

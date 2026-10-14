@@ -48,6 +48,11 @@ pub trait OutputSink: Send + Sync {
     fn terminal_size(&self) -> Option<(u16, u16)> {
         None
     }
+    /// True when writes go to this process's own stdout and stderr. Children spawned with stdio
+    /// `'inherit'` then get the real descriptors, as in Node, instead of output piped to the sink.
+    fn is_process_stdio(&self) -> bool {
+        false
+    }
 }
 
 /// Writes to the process's own stdout and stderr.
@@ -73,6 +78,10 @@ impl OutputSink for StdOutput {
     fn terminal_size(&self) -> Option<(u16, u16)> {
         let read = |name: &str| std::env::var(name).ok()?.parse::<u16>().ok();
         Some((read("COLUMNS")?, read("LINES").unwrap_or(24)))
+    }
+
+    fn is_process_stdio(&self) -> bool {
+        true
     }
 }
 
