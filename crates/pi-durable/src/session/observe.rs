@@ -44,7 +44,9 @@ impl SessionCore {
         loaded: &LoadedDocument,
         observer: Arc<dyn CommittedObserver>,
         release: &Release,
-    ) {
+    ) -> DurableResult<()> {
+        // As upstream `observeCommits`, attaching fails once close began.
+        self.assert_usable()?;
         let record_id = loaded.record.id;
         let observed = Mutex::new(loaded.value_version);
         let target = observer.clone();
@@ -75,6 +77,7 @@ impl SessionCore {
             commits.unsubscribe();
             close.unsubscribe();
         });
+        Ok(())
     }
 }
 
@@ -116,7 +119,7 @@ impl Session {
                 check_loaded(&definition, &loaded)?;
                 let release = Release::new();
                 let source = CommittedStateSource::new(loaded.value(), release.clone());
-                core.attach_observer(&loaded, source.clone(), &release);
+                core.attach_observer(&loaded, source.clone(), &release)?;
                 let report = core.clone();
                 let on_error = Arc::new(move |error: pi_chord::ChordError| report.report(&error.into()));
                 let options = ReplicatedStateSourceOptions { on_error: Some(on_error) };
@@ -177,7 +180,7 @@ impl Session {
                 let release = Release::new();
                 let report = core.clone();
                 let watch = CommittedWatch::new(loaded.value(), release.clone(), move |e| report.report(e), None);
-                core.attach_observer(&loaded, Arc::new(watch.clone()), &release);
+                core.attach_observer(&loaded, Arc::new(watch.clone()), &release)?;
                 Ok(Some(watch))
             })
         });

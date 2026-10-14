@@ -1,8 +1,12 @@
-//! The image-processor cases of upstream `test/tools-images.test.ts`. The `read` tool cases and `imageDimensions`
-//! belong to the tools port; the cases that call the processor through `read` call it directly here.
+//! Upstream `test/tools-images.test.ts`: the image processor called directly here, and the `read` tool cases and
+//! `imageDimensions` in `tools_images/read.rs`.
 
 #[path = "support/images.rs"]
 mod images;
+#[path = "tools_images/read.rs"]
+mod read;
+#[path = "support/tools_support.rs"]
+mod support;
 
 use images::*;
 use pi_durable::images::{

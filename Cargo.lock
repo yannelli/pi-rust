@@ -2396,10 +2396,12 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "similar",
  "tempfile",
  "thiserror",
  "tokio",
  "tokio-util",
+ "unicode-normalization",
  "url",
  "winapi-util",
 ]

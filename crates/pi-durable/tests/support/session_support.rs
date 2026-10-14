@@ -53,6 +53,18 @@ impl Gate {
     }
 }
 
+type CommitFilter = Arc<dyn Fn(&[StorageWrite]) -> bool + Send + Sync>;
+
+/// One Storage call a test hook sees: `task`, `scan_entries`, `mint_id`, `submission`, or `close`.
+pub struct StorageCall {
+    pub method: &'static str,
+    pub limit: usize,
+    pub first_page: bool,
+    pub context: Context,
+}
+
+pub type CallHook = Arc<dyn Fn(StorageCall) -> futures::future::BoxFuture<'static, DurableResult<()>> + Send + Sync>;
+
 /// Memory storage with observable commits, held calls, and injected commit failures.
 #[derive(Default)]
 pub struct ControlledStorage {
@@ -61,9 +73,19 @@ pub struct ControlledStorage {
     pub commits: Mutex<Vec<Vec<StorageWrite>>>,
     pub mint_count: AtomicUsize,
     pub document_read_count: AtomicUsize,
+    /// Entry rows returned by `scan_entries`.
+    pub scanned_rows: AtomicUsize,
     commit_gate: Mutex<Option<Gate>>,
+    /// When set, the commit gate holds only the batches it accepts.
+    commit_filter: Mutex<Option<CommitFilter>>,
     find_gate: Mutex<Option<Gate>>,
     commit_failure: Mutex<Option<DurableError>>,
+    /// When set, the first batch the filter accepts fails with the error, once.
+    filtered_failure: Mutex<Option<(CommitFilter, DurableError)>>,
+    /// When set, `close()` closes and then fails with this error.
+    pub close_failure: Mutex<Option<DurableError>>,
+    /// Runs before `task`, `scan_entries`, `mint_id`, `submission`, and `close`; an error fails that call.
+    pub call_hook: Mutex<Option<CallHook>>,
     closed: AtomicBool,
 }
 
@@ -94,10 +116,30 @@ impl ControlledStorage {
         gate
     }
 
+    /// Drop the commit gate as a crash would: a held commit never lands, and later commits pass.
+    pub fn crash(&self) {
+        *self.commit_gate.lock().unwrap() = None;
+        *self.commit_filter.lock().unwrap() = None;
+    }
+
+    /// Hold only the commits whose batch `filter` accepts.
+    pub fn hold_commits_where(&self, filter: impl Fn(&[StorageWrite]) -> bool + Send + Sync + 'static) -> Gate {
+        *self.commit_filter.lock().unwrap() = Some(Arc::new(filter));
+        self.hold_commits()
+    }
+
     pub fn hold_find_document(&self) -> Gate {
         let gate = Gate::new();
         *self.find_gate.lock().unwrap() = Some(gate.clone());
         gate
+    }
+
+    pub fn fail_commit_where(
+        &self,
+        filter: impl Fn(&[StorageWrite]) -> bool + Send + Sync + 'static,
+        error: DurableError,
+    ) {
+        *self.filtered_failure.lock().unwrap() = Some((Arc::new(filter), error));
     }
 
     pub fn fail_next_commit(&self, error: DurableError) {
@@ -108,6 +150,14 @@ impl ControlledStorage {
     pub fn reopen(&self) -> &Self {
         self.closed.store(false, Ordering::SeqCst);
         self
+    }
+
+    async fn hook(&self, method: &'static str, limit: usize, first_page: bool, context: &Context) -> DurableResult<()> {
+        let hook = self.call_hook.lock().unwrap().clone();
+        match hook {
+            Some(hook) => hook(StorageCall { method, limit, first_page, context: context.clone() }).await,
+            None => Ok(()),
+        }
     }
 
     fn open(&self) -> DurableResult<()> {
@@ -131,8 +181,16 @@ impl ControlledStorage {
 #[async_trait]
 impl Storage for ControlledStorage {
     async fn commit(&self, writes: &[StorageWrite], context: &Context) -> DurableResult<Seq> {
+        let failure = self.filtered_failure.lock().unwrap().take();
+        match failure {
+            Some((filter, error)) if filter(writes) => return Err(error),
+            failure => *self.filtered_failure.lock().unwrap() = failure,
+        }
         self.commits.lock().unwrap().push(writes.to_vec());
-        if let Some(gate) = Self::take_gate(&self.commit_gate) {
+        let filter = self.commit_filter.lock().unwrap().clone();
+        if filter.is_none_or(|filter| filter(writes))
+            && let Some(gate) = Self::take_gate(&self.commit_gate)
+        {
             gate.pass().await;
         }
         if let Some(error) = self.commit_failure.lock().unwrap().take() {
@@ -144,6 +202,7 @@ impl Storage for ControlledStorage {
 
     async fn mint_id(&self) -> DurableResult<u64> {
         self.mint_count.fetch_add(1, Ordering::SeqCst);
+        self.hook("mint_id", 0, false, &context()).await?;
         self.open()?;
         self.inner.mint_id().await
     }
@@ -196,11 +255,15 @@ impl Storage for ControlledStorage {
         cursor: Option<&Cursor>,
         context: &Context,
     ) -> DurableResult<Page<EntryRecord>> {
+        self.hook("scan_entries", limit, cursor.is_none(), context).await?;
         self.open()?;
-        self.inner.scan_entries(query, limit, cursor, context).await
+        let page = self.inner.scan_entries(query, limit, cursor, context).await?;
+        self.scanned_rows.fetch_add(page.items.len(), Ordering::SeqCst);
+        Ok(page)
     }
 
     async fn task(&self, id: TaskId, context: &Context) -> DurableResult<Option<TaskRecord>> {
+        self.hook("task", 0, false, context).await?;
         self.open()?;
         self.inner.task(id, context).await
     }
@@ -217,6 +280,7 @@ impl Storage for ControlledStorage {
     }
 
     async fn submission(&self, id: SubmissionId, context: &Context) -> DurableResult<Option<SubmissionRecord>> {
+        self.hook("submission", 0, false, context).await?;
         self.open()?;
         self.inner.submission(id, context).await
     }
@@ -277,9 +341,13 @@ impl Storage for ControlledStorage {
         self.inner.scan_documents(query, limit, cursor, context).await
     }
 
-    async fn close(&self, _context: &Context) -> DurableResult<()> {
+    async fn close(&self, context: &Context) -> DurableResult<()> {
+        self.hook("close", 0, false, context).await?;
         self.closed.store(true, Ordering::SeqCst);
-        Ok(())
+        match self.close_failure.lock().unwrap().clone() {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 }
 

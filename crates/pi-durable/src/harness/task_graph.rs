@@ -1,0 +1,324 @@
+//! The task graph (spec section 9.5): every live task of the Session with its durable status, kept in step with
+//! commit publications (upstream `harness/task-graph.ts`).
+
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+
+use pi_chord::delta::{Op, Path, Seg, apply_immutable};
+use pi_chord::state::{ReplicatedStateSourceOptions, attach_replicated_state_source};
+use pi_chord::{Context, Json, JsonMap, without_abort_signal};
+
+use super::util::{cancellation, closed_error, lock, scan_all};
+use crate::errors::DurableResult;
+use crate::ids::ConversationId;
+use crate::session::{CommittedObserver, CommittedStateSource, CommittedWatch, DocumentState, Release, Session};
+use crate::types::{CommitChange, CommitPublication, ConversationQuery, TaskQuery, TaskRecord, TaskState, TaskStatus};
+
+/// `{ tasks }`: every live task keyed by its decimal ID. A node is `{ id, kind, conversationId, owner?, background,
+/// abortRequested, state, conversations }`; `state` is `{ status, phase }`, `{ status: "waiting", phase, on,
+/// policy }`, or `{ status: "completing", outcome }` with the outcome's status.
+pub type TaskGraph = Json;
+
+/// A serialized exact-frame watch of the task graph.
+pub type TaskGraphWatch = CommittedWatch;
+
+const LIVE_STATUSES: [TaskStatus; 4] =
+    [TaskStatus::Pending, TaskStatus::Running, TaskStatus::Waiting, TaskStatus::Completing];
+const SCAN_PAGE_SIZE: usize = 256;
+
+struct Mount {
+    value: Json,
+    observers: Vec<(u64, Arc<dyn CommittedObserver>)>,
+}
+
+/// The Harness's task graph mount: built on the Session line by its first observer and dropped with its last. It
+/// advances from the Session's commit publications, which are durable.
+pub(crate) struct TaskGraphView {
+    session: Session,
+    mount: Mutex<Option<Mount>>,
+    closed: AtomicBool,
+    next: AtomicU64,
+}
+
+impl TaskGraphView {
+    pub fn new(session: Session) -> DurableResult<Arc<Self>> {
+        let view = Arc::new(Self {
+            session: session.clone(),
+            mount: Mutex::default(),
+            closed: AtomicBool::new(false),
+            next: AtomicU64::new(0),
+        });
+        let weak = Arc::downgrade(&view);
+        session.observe_commits(move |publication, context| {
+            if let Some(view) = weak.upgrade() {
+                view.advance(publication, context);
+            }
+            Ok(())
+        })?;
+        let weak = Arc::downgrade(&view);
+        session.subscribe_close(move || {
+            let Some(view) = weak.upgrade() else { return };
+            view.closed.store(true, Ordering::SeqCst);
+            let mount = lock(&view.mount).take();
+            let failure = view.session.failure();
+            for (_, observer) in mount.into_iter().flat_map(|mount| mount.observers) {
+                observer.close_session(failure.clone());
+            }
+        })?;
+        Ok(view)
+    }
+
+    /// A disposable read-only Chord state of the graph.
+    pub async fn state(self: &Arc<Self>, context: &Context) -> DurableResult<DocumentState> {
+        let (source, release) = self
+            .attach(context, |value, release| {
+                let source = CommittedStateSource::new(value.clone(), release);
+                (source.clone() as Arc<dyn CommittedObserver>, source)
+            })
+            .await?;
+        let session = self.session.clone();
+        let on_error = Arc::new(move |error: pi_chord::ChordError| session.report(&error.into()));
+        match attach_replicated_state_source(source.as_ref(), ReplicatedStateSourceOptions { on_error: Some(on_error) })
+        {
+            Ok(state) => Ok(state),
+            Err(error) => {
+                release.run();
+                Err(error.into())
+            }
+        }
+    }
+
+    /// A serialized exact-frame watch of the graph; cancelling `context` stops it.
+    pub async fn watch(self: &Arc<Self>, context: &Context) -> DurableResult<TaskGraphWatch> {
+        let session = self.session.clone();
+        let (watch, _) = self
+            .attach(context, move |value, release| {
+                let watch = CommittedWatch::new(value.clone(), release, move |error| session.report(error), None);
+                (Arc::new(watch.clone()) as Arc<dyn CommittedObserver>, watch)
+            })
+            .await?;
+        if context.is_cancelled() {
+            watch.cancel();
+            return Err(cancellation(context));
+        }
+        if let Some(signal) = context.abort_signal() {
+            watch.observe_cancellation(&signal)?;
+        }
+        Ok(watch)
+    }
+
+    /// Register an observer created from the current revision, atomically on the Session line.
+    async fn attach<T, F>(self: &Arc<Self>, context: &Context, create: F) -> DurableResult<(T, Arc<Release>)>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Json, Arc<Release>) -> (Arc<dyn CommittedObserver>, T) + Send + 'static,
+    {
+        let view = self.clone();
+        let context = context.clone();
+        self.session
+            .read_on_line(async move {
+                let mounted = lock(&view.mount).as_ref().map(|mount| mount.value.clone());
+                let (value, built) = match mounted {
+                    Some(value) => (value, false),
+                    None => (view.build(&context).await?, true),
+                };
+                let key = view.next.fetch_add(1, Ordering::SeqCst);
+                let release = Release::new();
+                let weak = Arc::downgrade(&view);
+                release.push(move || {
+                    let Some(view) = weak.upgrade() else { return };
+                    let mut mount = lock(&view.mount);
+                    if let Some(current) = mount.as_mut() {
+                        current.observers.retain(|(other, _)| *other != key);
+                        if current.observers.is_empty() {
+                            *mount = None;
+                        }
+                    }
+                });
+                let (observer, result) = create(&value, release.clone());
+                // Close or cancellation may begin while the mount builds; register nothing then.
+                if view.closed.load(Ordering::SeqCst) {
+                    return Err(closed_error(&view.session));
+                }
+                if context.is_cancelled() {
+                    return Err(cancellation(&context));
+                }
+                let mut mount = lock(&view.mount);
+                if built || mount.is_none() {
+                    *mount = Some(Mount { value, observers: Vec::new() });
+                }
+                if let Some(mount) = mount.as_mut() {
+                    mount.observers.push((key, observer));
+                }
+                Ok((result, release))
+            })
+            .await
+    }
+
+    async fn build(&self, context: &Context) -> DurableResult<Json> {
+        let storage = self.session.storage();
+        let mut records = Vec::new();
+        for status in LIVE_STATUSES {
+            let query = TaskQuery { status: Some(status), ..TaskQuery::default() };
+            let storage = &storage;
+            let query = &query;
+            records.extend(
+                scan_all(
+                    |cursor| async move { storage.scan_tasks(query, SCAN_PAGE_SIZE, cursor.as_ref(), context).await },
+                )
+                .await?,
+            );
+        }
+        records.sort_by_key(|record| record.id);
+        let mut tasks = JsonMap::new();
+        for record in records {
+            let query = ConversationQuery { owner_task_id: Some(record.id), ..ConversationQuery::default() };
+            let (storage, query) = (&storage, &query);
+            let owned = scan_all(|cursor| async move {
+                storage.scan_conversations(query, SCAN_PAGE_SIZE, cursor.as_ref(), context).await
+            })
+            .await?;
+            let mut conversations: Vec<ConversationId> = owned.iter().map(|conversation| conversation.id).collect();
+            conversations.sort();
+            tasks.insert(record.id.to_string().as_str(), node_of(&record, &conversations)?);
+        }
+        let mut graph = JsonMap::new();
+        graph.insert("tasks", Json::object(tasks));
+        Ok(Json::object(graph))
+    }
+
+    /// Derive the mount's operations from one publication, apply them, and hand the revision to every observer.
+    fn advance(&self, publication: &CommitPublication, context: &Context) {
+        let delivery = {
+            let mut mount = lock(&self.mount);
+            let Some(mount) = mount.as_mut() else { return };
+            match graph_ops(&mount.value, publication) {
+                Ok(ops) if ops.is_empty() => return,
+                Ok(ops) => match apply_immutable(Some(&mount.value), &ops) {
+                    Ok(value) => {
+                        mount.value = value;
+                        let observers: Vec<_> = mount.observers.iter().map(|(_, observer)| observer.clone()).collect();
+                        (mount.value.clone(), ops, observers)
+                    }
+                    Err(error) => return self.session.report(&error.into()),
+                },
+                Err(error) => return self.session.report(&error),
+            }
+        };
+        let (value, ops, observers) = delivery;
+        let frame_context = without_abort_signal(context);
+        for observer in observers {
+            observer.advance(value.clone(), ops.clone(), frame_context.clone());
+        }
+    }
+}
+
+fn path(keys: &[&str]) -> Path {
+    keys.iter().map(|key| Seg::Key(Arc::from(*key))).collect()
+}
+
+/// The operations one publication makes on `graph`: task nodes set or deleted, then owned conversations added.
+fn graph_ops(graph: &Json, publication: &CommitPublication) -> DurableResult<Vec<Op>> {
+    let mut ops = Vec::new();
+    // Nodes this publication set or deleted, over the mount's value.
+    let mut changed: Vec<(String, Option<Json>)> = Vec::new();
+    let node = |changed: &[(String, Option<Json>)], key: &str| -> Option<Json> {
+        match changed.iter().rev().find(|(other, _)| other == key) {
+            Some((_, value)) => value.clone(),
+            None => graph.get("tasks").and_then(|tasks| tasks.get(key)).cloned(),
+        }
+    };
+    for change in &publication.changes {
+        let CommitChange::Task(record) = change else { continue };
+        let key = record.id.to_string();
+        let previous = node(&changed, &key);
+        if matches!(record.state, TaskState::Terminal { .. }) {
+            if previous.is_none() {
+                continue;
+            }
+            ops.push(Op::Delete(path(&["tasks", &key])));
+            changed.push((key, None));
+            continue;
+        }
+        let conversations = previous.as_ref().map(owned_of).unwrap_or_default();
+        let next = node_of(record, &conversations)?;
+        if previous.as_ref() == Some(&next) {
+            continue;
+        }
+        ops.push(Op::Set(path(&["tasks", &key]), next.clone()));
+        changed.push((key, Some(next)));
+    }
+    // After the tasks, so a conversation created with its owner task in one commit finds the owner's node. Change
+    // order within a publication is unspecified, so each owner's list is sorted again.
+    let mut created: Vec<(String, Vec<ConversationId>)> = Vec::new();
+    for change in &publication.changes {
+        let CommitChange::Conversation(conversation) = change else { continue };
+        let Some(owner) = conversation.owner else { continue };
+        let key = owner.task_id.to_string();
+        if node(&changed, &key).is_none() {
+            continue;
+        }
+        match created.iter_mut().find(|(other, _)| *other == key) {
+            Some((_, ids)) => ids.push(conversation.id),
+            None => created.push((key, vec![conversation.id])),
+        }
+    }
+    for (key, ids) in created {
+        let mut conversations = node(&changed, &key).as_ref().map(owned_of).unwrap_or_default();
+        conversations.extend(ids);
+        conversations.sort();
+        ops.push(Op::Set(path(&["tasks", &key, "conversations"]), crate::documents::encode(&conversations)?));
+    }
+    Ok(ops)
+}
+
+fn owned_of(node: &Json) -> Vec<ConversationId> {
+    let ids = node.get("conversations").and_then(Json::as_array).cloned().unwrap_or_default();
+    ids.iter().filter_map(Json::as_u64).map(ConversationId).collect()
+}
+
+fn node_of(record: &TaskRecord, conversations: &[ConversationId]) -> DurableResult<Json> {
+    use crate::documents::encode;
+    let mut node = JsonMap::new();
+    node.insert("id", encode(&record.id)?);
+    node.insert("kind", Json::from(record.kind.as_str()));
+    node.insert("conversationId", encode(&record.conversation_id)?);
+    if let Some(owner) = record.owner {
+        node.insert("owner", encode(&owner)?);
+    }
+    node.insert("background", Json::from(record.background));
+    node.insert("abortRequested", Json::from(record.abort_requested));
+    node.insert("state", state_of(&record.state)?);
+    node.insert("conversations", encode(&conversations)?);
+    Ok(Json::object(node))
+}
+
+fn state_of(state: &TaskState) -> DurableResult<Json> {
+    let mut value = JsonMap::new();
+    match state {
+        TaskState::Pending { checkpoint } | TaskState::Running { checkpoint } => {
+            value.insert(
+                "status",
+                Json::from(if matches!(state, TaskState::Pending { .. }) { "pending" } else { "running" }),
+            );
+            value.insert("phase", phase_of(checkpoint));
+        }
+        TaskState::Waiting { checkpoint, on, policy } => {
+            value.insert("status", Json::from("waiting"));
+            value.insert("phase", phase_of(checkpoint));
+            value.insert("on", crate::documents::encode(on)?);
+            value.insert("policy", crate::documents::encode(policy)?);
+        }
+        // Terminal records never reach here: they leave the graph.
+        TaskState::Completing { outcome } | TaskState::Terminal { outcome } => {
+            let outcome = crate::documents::encode(outcome)?;
+            value.insert("status", Json::from("completing"));
+            value.insert("outcome", outcome.get("status").cloned().unwrap_or(Json::Null));
+        }
+    }
+    Ok(Json::object(value))
+}
+
+fn phase_of(checkpoint: &Json) -> Json {
+    checkpoint.get("phase").cloned().unwrap_or(Json::Null)
+}
