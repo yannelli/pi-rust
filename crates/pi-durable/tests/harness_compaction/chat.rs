@@ -302,3 +302,56 @@ pub fn roles(messages: &[Message]) -> Vec<&'static str> {
         })
         .collect()
 }
+
+/// Background threshold at 500 and blocking threshold at 1500 tokens of a 2000-token window.
+pub fn background() -> CompactionOverrides {
+    policy(true, 500, 150, 1000)
+}
+
+/// Blocking threshold at 700 tokens of a 1000-token window, no background compaction.
+pub fn blocking() -> CompactionOverrides {
+    policy(true, 300, 150, 0)
+}
+
+pub fn window(context_window: u64) -> OpenOptions {
+    OpenOptions { context_window: Some(context_window), ..OpenOptions::default() }
+}
+
+impl Chat {
+    pub fn set_policy(&self, policy: CompactionOverrides) {
+        self.setup.settings.lock().unwrap().compaction = Some(policy);
+    }
+
+    pub async fn compaction_tasks(&self) -> Vec<pi_durable::TaskRecord> {
+        let inspection = self.harness.inspect(&ctx()).await.unwrap();
+        inspection.tasks.into_iter().map(|task| task.record).filter(|record| record.kind == "pi.compaction").collect()
+    }
+
+    pub async fn first_text(&self) -> String {
+        first_user_text(&self.root.context(&ctx(), None).await.unwrap().messages)
+    }
+
+    pub async fn run_task(&self) -> TaskId {
+        serde_json::from_value(self.live().await["run"]["taskId"].clone()).unwrap()
+    }
+}
+
+pub type Events = Arc<Mutex<Vec<Value>>>;
+
+/// Record every event of the root conversation as upstream JSON.
+pub async fn listen(chat: &Chat) -> (AgentEventStream, Events) {
+    let stream = watch_events(&chat.harness, chat.root.id, &ctx()).await.unwrap();
+    let events = Events::default();
+    let sink = events.clone();
+    stream
+        .start(move |batch, _| {
+            sink.lock().unwrap().extend(batch.iter().map(Value::from));
+            async { Ok(()) }
+        })
+        .unwrap();
+    (stream, events)
+}
+
+pub fn event_types(events: &Events) -> Vec<String> {
+    events.lock().unwrap().iter().map(|event| event["type"].as_str().unwrap_or_default().to_owned()).collect()
+}

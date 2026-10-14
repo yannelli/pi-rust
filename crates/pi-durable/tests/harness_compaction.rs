@@ -1,12 +1,18 @@
 //! Port of upstream `test/harness-compaction.test.ts`: range selection, serialization, and the first manual case.
 //! The modules under `harness_compaction/` hold the rest, sharing `chat.rs`.
 
+#[path = "harness_compaction/automatic.rs"]
+mod automatic;
 #[path = "harness_compaction/chat.rs"]
 mod chat;
+#[path = "harness_compaction/interactions.rs"]
+mod interactions;
 #[path = "harness_compaction/manual.rs"]
 mod manual;
 #[path = "harness_compaction/outcomes.rs"]
 mod outcomes;
+#[path = "harness_compaction/overflow.rs"]
+mod overflow;
 mod support;
 
 use std::collections::VecDeque;
