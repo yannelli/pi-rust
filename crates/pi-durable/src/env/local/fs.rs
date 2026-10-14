@@ -99,6 +99,15 @@ fn open_for_binary_reads(path: &str, no_follow: bool) -> FileResult<File> {
     File::open(path).map_err(|error| io_error(error, path))
 }
 
+/// libuv on Windows opens a directory for writing and fails later, where Rust's open fails with access denied.
+/// `kind` is what Node reports then: `IsADirectory` for writes and appends, `InvalidInput` for truncation.
+fn refuse_windows_directory(path: &str, kind: io::ErrorKind) -> io::Result<()> {
+    if cfg!(windows) && std::fs::metadata(path).is_ok_and(|metadata| metadata.is_dir()) {
+        return Err(io::Error::from(kind));
+    }
+    Ok(())
+}
+
 fn create_parent(path: &str) -> io::Result<()> {
     match Path::new(path).parent() {
         Some(parent) if !parent.as_os_str().is_empty() => std::fs::create_dir_all(parent),
@@ -248,7 +257,11 @@ impl FileSystem for LocalExecutionEnv {
         let resolved = self.resolve(path);
         self.run(resolved.clone(), context, create_parent).await?;
         let content = content.to_vec();
-        self.run(resolved, context, move |path| std::fs::write(path, content)).await
+        self.run(resolved, context, move |path| {
+            refuse_windows_directory(path, io::ErrorKind::IsADirectory)?;
+            std::fs::write(path, content)
+        })
+        .await
     }
 
     async fn append_file(&self, path: &str, content: &[u8], context: &Context) -> FileResult<()> {
@@ -256,6 +269,7 @@ impl FileSystem for LocalExecutionEnv {
         self.run(resolved.clone(), context, create_parent).await?;
         let content = content.to_vec();
         self.run(resolved.clone(), context, move |path| {
+            refuse_windows_directory(path, io::ErrorKind::IsADirectory)?;
             OpenOptions::new().append(true).create(true).open(path)?.write_all(&content)
         })
         .await?;
@@ -269,8 +283,11 @@ impl FileSystem for LocalExecutionEnv {
             let message = "File size must be a non-negative safe integer";
             return Err(FileError::new(FileErrorCode::Invalid, message, Some(resolved)));
         }
-        self.run(resolved.clone(), context, move |path| OpenOptions::new().write(true).open(path)?.set_len(size))
-            .await?;
+        self.run(resolved.clone(), context, move |path| {
+            refuse_windows_directory(path, io::ErrorKind::InvalidInput)?;
+            OpenOptions::new().write(true).open(path)?.set_len(size)
+        })
+        .await?;
         check(context, &resolved)
     }
 
