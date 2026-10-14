@@ -87,7 +87,9 @@ function decodeAdvanced(value, refs = []) {
 
 // Handles (net.Socket, net.Server) travel as {cmd: "NODE_HANDLE", type, msg}: the descriptor
 // rides along with SCM_RIGHTS on Unix, or as WSADuplicateSocket bytes ("wsa") on Windows.
-const windows = process.platform === "win32";
+
+// A forked child loads this module while `process` is still being built, so check the platform on use.
+const windows = () => process.platform === "win32";
 
 function handleType(handle) {
   const net = require("net");
@@ -134,7 +136,7 @@ function setupChannel(target, open, serialization = "json", peerPid = () => 0) {
         let parsed = JSON.parse(line);
         let handle;
         if (parsed !== null && typeof parsed === "object" && parsed.cmd === "NODE_HANDLE" && typeof parsed.type === "string") {
-          const handleId = windows ? native.net.importHandle(parsed.wsa) : received.shift();
+          const handleId = windows() ? native.net.importHandle(parsed.wsa) : received.shift();
           handle = handleId === undefined ? undefined : adoptHandle(parsed.type, handleId);
           parsed = parsed.msg;
           if (target.connected) target.send({ cmd: "NODE_HANDLE_ACK" });
@@ -219,7 +221,7 @@ function setupChannel(target, open, serialization = "json", peerPid = () => 0) {
     if (type) {
       handleId = native.net.exportHandle(handle._handle);
       payload = { cmd: "NODE_HANDLE", type, msg: payload };
-      if (windows) {
+      if (windows()) {
         kept.push(native.net.exportHandle(handle._handle));
         payload.wsa = native.net.duplicateHandle(handleId, peerPid());
       }
@@ -227,7 +229,7 @@ function setupChannel(target, open, serialization = "json", peerPid = () => 0) {
     }
     const line = JSON.stringify(payload) + "\n";
     const bytes = internal.bytesToLatin1(Buffer.from(line));
-    const write = type && !windows ? () => nativePipe.writeHandle(id, bytes, handleId) : () => nativePipe.write(id, bytes);
+    const write = type && !windows() ? () => nativePipe.writeHandle(id, bytes, handleId) : () => nativePipe.write(id, bytes);
     writes = writes.then(write).then(
       () => typeof callback === "function" && process.nextTick(callback, null),
       (error) => (typeof callback === "function" ? process.nextTick(callback, error) : target.emit("error", error)),
