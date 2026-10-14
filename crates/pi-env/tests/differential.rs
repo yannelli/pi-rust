@@ -162,22 +162,6 @@ async fn run(env: &SharedEnv, operation: &Operation, contents: &[Vec<u8>]) -> Va
     }
 }
 
-/// pi-durable's local env differs from Node in two places, so its result becomes Node's: `remove` of a directory
-/// without `recursive` fails with `is_directory`, not `unknown` (ERR_FS_EISDIR), and `list_dir` is not in byte order.
-fn local_as_node(operation: &Operation, expected: String) -> String {
-    match operation {
-        Operation::Remove(..) => expected.replace(r#""code":"is_directory""#, r#""code":"unknown""#),
-        Operation::ListDir(_) => {
-            let mut value: Value = serde_json::from_str(&expected).unwrap();
-            if let Some(Value::Array(entries)) = value.get_mut("value") {
-                entries.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
-            }
-            value.to_string()
-        }
-        _ => expected,
-    }
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn gives_the_same_results_for_random_file_operation_sequences() {
     let connection = support::connection();
@@ -189,7 +173,6 @@ async fn gives_the_same_results_for_random_file_operation_sequences() {
             let operation = random_operation(&mut next);
             let expected = normalize(&run(&pair.local, &operation, &contents).await, &pair.roots[0]);
             let actual = normalize(&run(&pair.remote, &operation, &contents).await, &pair.roots[1]);
-            let expected = local_as_node(&operation, expected);
             assert_eq!(actual, expected, "seed {seed} step {step} {operation:?}");
         }
     }
