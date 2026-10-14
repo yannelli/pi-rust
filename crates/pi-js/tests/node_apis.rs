@@ -247,12 +247,12 @@ await finished;
 let error;
 try { compose(); } catch (e) { error = e.code; }
 return {
-  ids: [resource.asyncResource.type, custom.asyncResource.type, typeof resource.asyncId, resource.asyncResource.eventEmitter === resource, resource instanceof EventEmitter],
+  ids: [resource.asyncResource instanceof require("async_hooks").AsyncResource, custom.asyncResource.type, typeof resource.asyncId, resource.asyncResource.eventEmitter === resource, resource instanceof EventEmitter],
   got, syncResult, promiseResult, log, unsubscribed, hasSubscribers: tc.hasSubscribers, inside, out, error,
 };
 "#)
     .await;
-    assert_eq!(actual["ids"], json!(["Named", "custom", "number", true, true]));
+    assert_eq!(actual["ids"], json!([true, null, "number", true, true]));
     assert_eq!(actual["got"], json!([1]));
     assert_eq!(actual["syncResult"], 42);
     assert_eq!(actual["promiseResult"], "done");

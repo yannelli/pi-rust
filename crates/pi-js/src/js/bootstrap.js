@@ -5,6 +5,86 @@
   internal.config = config;
   Object.defineProperty(globalThis, "__pi_internal", { value: internal, enumerable: false, configurable: false, writable: false });
 
+  // Async context. The frame lives in Rust, which resets it after each job and callback;
+  // promise reactions, ticks, timers, and instrumented awaits restore the frame they captured.
+  const asyncContext = native.asyncContext;
+  const promiseThen = Promise.prototype.then;
+  let contextUsed = false;
+  internal.asyncContext = asyncContext;
+  internal.promiseThen = promiseThen;
+  internal.enableAsyncContext = () => {
+    contextUsed = true;
+  };
+  const thrownFrames = new WeakMap();
+  internal.thrownFrame = (error) => thrownFrames.get(error);
+  function runInFrame(frame, fn, self, args) {
+    const previous = asyncContext.get();
+    asyncContext.set(frame);
+    try {
+      return Reflect.apply(fn, self, args);
+    } catch (error) {
+      if (error !== null && typeof error === "object" && !thrownFrames.has(error)) thrownFrames.set(error, frame);
+      throw error;
+    } finally {
+      asyncContext.set(previous);
+    }
+  }
+  internal.runInFrame = runInFrame;
+  function bindFrame(fn, frame) {
+    return function bound(...args) {
+      return runInFrame(frame, fn, this, args);
+    };
+  }
+  internal.bindContext = function bindContext(fn) {
+    if (!contextUsed || typeof fn !== "function") return fn;
+    const frame = asyncContext.get();
+    return frame === undefined ? fn : bindFrame(fn, frame);
+  };
+  Object.defineProperty(Promise.prototype, "then", {
+    value: function then(onFulfilled, onRejected) {
+      const frame = contextUsed ? asyncContext.get() : undefined;
+      if (frame === undefined) return promiseThen.call(this, onFulfilled, onRejected);
+      const fulfilled = typeof onFulfilled === "function" ? bindFrame(onFulfilled, frame) : onFulfilled;
+      const rejected = typeof onRejected === "function" ? bindFrame(onRejected, frame) : onRejected;
+      return promiseThen.call(this, fulfilled, rejected);
+    },
+    writable: true,
+    configurable: true,
+  });
+  class AwaitResult {
+    constructor(frame, ok, value) {
+      this.frame = frame;
+      this.ok = ok;
+      this.value = value;
+    }
+  }
+  function awaitWrap(value) {
+    const frame = contextUsed ? asyncContext.get() : undefined;
+    if (frame === undefined) return value;
+    if (value === null || (typeof value !== "object" && typeof value !== "function") || typeof value.then !== "function") {
+      return new AwaitResult(frame, true, value);
+    }
+    return promiseThen.call(Promise.resolve(value), (v) => new AwaitResult(frame, true, v), (e) => new AwaitResult(frame, false, e));
+  }
+  function awaitUnwrap(result) {
+    if (!(result instanceof AwaitResult)) return result;
+    asyncContext.set(result.frame);
+    if (!result.ok) throw result.value;
+    return result.value;
+  }
+  Object.defineProperty(globalThis, "__pi_aw", { value: awaitWrap });
+  Object.defineProperty(globalThis, "__pi_au", { value: awaitUnwrap });
+  if (typeof globalThis.queueMicrotask === "function") {
+    const queue = globalThis.queueMicrotask;
+    Object.defineProperty(globalThis, "queueMicrotask", {
+      value: function queueMicrotask(callback) {
+        return queue(internal.bindContext(callback));
+      },
+      writable: true,
+      configurable: true,
+    });
+  }
+
   const builtinCache = new Map();
   function loadBuiltin(name) {
     if (name.startsWith("node:")) name = name.slice(5);
@@ -292,8 +372,9 @@
 
   // Uncaught errors go to process listeners when there are any.
   internal.handleUncaught = function handleUncaught(kind, error) {
+    if (kind === "uncaughtException" && internal.domainHandler && internal.domainHandler(error)) return true;
     const process = builtinCache.get("process");
-    if (!process || process.exports.listenerCount(kind) === 0) return false;
+    if (!process || process.exports.listenerCount(kind) === 0) return internal.workerUncaught ? internal.workerUncaught(error) : false;
     process.exports.emit(kind, error);
     return true;
   };
@@ -324,7 +405,8 @@
     buffer: ["Buffer", "Blob", "atob", "btoa"],
     url: ["URL", "URLSearchParams"],
     "internal/web": ["EventTarget", "Event", "CustomEvent", "AbortController", "AbortSignal", "DOMException",
-      "TextEncoder", "TextDecoder", "structuredClone"],
+      "TextEncoder", "TextDecoder"],
+    "internal/worker_ports": ["MessageChannel", "MessagePort", "BroadcastChannel", "MessageEvent", "structuredClone"],
     "internal/fetch": ["fetch", "Headers", "Request", "Response", "FormData"],
     "stream/web": ["ReadableStream", "ReadableStreamDefaultReader", "ReadableStreamDefaultController", "WritableStream",
       "WritableStreamDefaultWriter", "WritableStreamDefaultController", "TransformStream", "TransformStreamDefaultController",

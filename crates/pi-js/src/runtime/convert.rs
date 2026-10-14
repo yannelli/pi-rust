@@ -112,6 +112,13 @@ pub(crate) fn bytes_to_js<'js>(ctx: &Ctx<'js>, bytes: Vec<u8>) -> rquickjs::Resu
     TypedArray::<u8>::new(ctx.clone(), bytes).map(|array| array.into_value())
 }
 
+/// A copy of a typed array's bytes; empty when its buffer is detached.
+#[allow(unsafe_code)]
+pub(crate) fn bytes_of(array: &TypedArray<'_, u8>) -> Vec<u8> {
+    // SAFETY: the slice is copied at once, before any JavaScript can run and detach it.
+    unsafe { array.as_bytes() }.map(<[u8]>::to_vec).unwrap_or_default()
+}
+
 /// Bytes of a `Uint8Array`, other typed array, `DataView`, or `ArrayBuffer`; `None` otherwise.
 pub(crate) fn js_bytes<'js>(ctx: &Ctx<'js>, value: &Value<'js>) -> rquickjs::Result<Option<Vec<u8>>> {
     if !value.is_object() {

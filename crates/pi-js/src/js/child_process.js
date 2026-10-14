@@ -143,7 +143,7 @@ class ChildProcess extends EventEmitter {
         const listening = native.pipe.listen(callback);
         spec.native.env.push(["PI_JS_IPC", listening.path], ["PI_JS_IPC_SERIALIZATION", spec.serialization]);
         return listening.id;
-      }, spec.serialization);
+      }, spec.serialization, () => this.pid);
       this._pending++;
       this.once("disconnect", () => this._streamClosed());
     }

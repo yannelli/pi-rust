@@ -85,7 +85,20 @@ pub async fn run_cjs(runtime: &JsRuntime, root: &Path, body: &str) -> serde_json
     };
     match function.call(vec![]).await {
         Ok(value) => value.into_json(),
-        Err(error) => panic!("script failed: {}", error.display_with_stack()),
+        Err(error) => {
+            let stage = fs::read_to_string(root.join("stage")).unwrap_or_default();
+            panic!("script failed: {}\nstage: {stage}", error.display_with_stack())
+        }
+    }
+}
+
+/// `run_cjs` with a time limit. Scripts can append progress lines to `stage` in `root`; a timeout panics
+/// with them, so a hang on CI names the step.
+pub async fn run_cjs_within(runtime: &JsRuntime, root: &Path, body: &str, seconds: u64) -> serde_json::Value {
+    let limit = std::time::Duration::from_secs(seconds);
+    match tokio::time::timeout(limit, run_cjs(runtime, root, body)).await {
+        Ok(value) => value,
+        Err(_) => panic!("timed out after: {}", fs::read_to_string(root.join("stage")).unwrap_or_default()),
     }
 }
 

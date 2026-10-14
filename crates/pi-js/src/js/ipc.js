@@ -85,30 +85,70 @@ function decodeAdvanced(value, refs = []) {
   }
 }
 
+// Handles (net.Socket, net.Server) travel as {cmd: "NODE_HANDLE", type, msg}: the descriptor
+// rides along with SCM_RIGHTS on Unix, or as WSADuplicateSocket bytes ("wsa") on Windows.
+
+// A forked child loads this module while `process` is still being built, so check the platform on use.
+const windows = () => process.platform === "win32";
+
+function handleType(handle) {
+  const net = require("net");
+  if (handle instanceof net.Socket && handle._handle !== null) return "net.Socket";
+  if (handle instanceof net.Server && handle._handle !== null) return "net.Server";
+  throw errors.codeError(TypeError, "ERR_INVALID_HANDLE_TYPE", "This handle type cannot be sent");
+}
+
+function adoptHandle(type, id) {
+  const net = require("net");
+  if (type === "net.Socket") {
+    const { kAccepted } = require("internal/net_socket");
+    return new net.Socket({ [kAccepted]: native.net.adoptSocket(id) });
+  }
+  if (type === "net.Server") return net.createServer()._adoptHandle(id);
+  native.net.closeHandle(id);
+  return undefined;
+}
+
 const channelClosed = () => errors.codeError(Error, "ERR_IPC_CHANNEL_CLOSED", "Channel closed");
 
 // Give `target` (a ChildProcess or process) Node's send, disconnect, connected, and channel.
-function setupChannel(target, open, serialization = "json") {
+function setupChannel(target, open, serialization = "json", peerPid = () => 0) {
   const advanced = serialization === "advanced";
   const decoder = new TextDecoder();
   let pending = "";
   let refs = 0;
   let explicitRef = null;
   let writes = Promise.resolve();
-  const id = open((kind, value) => {
+  const received = [];
+  // Windows: a copy of each sent socket stays open until the peer acknowledges it, as in Node. Closing the
+  // last copy before the peer imports its duplicate would reset the connection.
+  const kept = [];
+  const id = open((kind, value, handles) => {
     if (kind === "connect") target._channelConnected = true;
     else if (kind === "data") {
+      if (handles && handles.length) received.push(...handles);
       pending += decoder.decode(value, { stream: true });
       let newline;
       while ((newline = pending.indexOf("\n")) !== -1) {
         const line = pending.slice(0, newline);
         pending = pending.slice(newline + 1);
         if (!line) continue;
-        const parsed = JSON.parse(line);
+        let parsed = JSON.parse(line);
+        let handle;
+        if (parsed !== null && typeof parsed === "object" && parsed.cmd === "NODE_HANDLE" && typeof parsed.type === "string") {
+          const handleId = windows() ? native.net.importHandle(parsed.wsa) : received.shift();
+          handle = handleId === undefined ? undefined : adoptHandle(parsed.type, handleId);
+          parsed = parsed.msg;
+          if (target.connected) target.send({ cmd: "NODE_HANDLE_ACK" });
+        }
         const message = advanced ? decodeAdvanced(parsed) : parsed;
         const internalMessage = message !== null && typeof message === "object" && typeof message.cmd === "string" && message.cmd.startsWith("NODE_");
-        if (!internalMessage && held) held.push(message);
-        else target.emit(internalMessage ? "internalMessage" : "message", message, undefined);
+        if (internalMessage && message.cmd === "NODE_HANDLE_ACK") {
+          if (kept.length) native.net.closeHandle(kept.shift());
+          continue;
+        }
+        if (!internalMessage && held) held.push([message, handle]);
+        else target.emit(internalMessage ? "internalMessage" : "message", message, handle);
       }
     } else if (kind === "end" || kind === "error") {
       if (target.connected) finishDisconnect();
@@ -128,7 +168,7 @@ function setupChannel(target, open, serialization = "json") {
     if (name === "message" && held) {
       const messages = held;
       held = null;
-      process.nextTick(() => messages.forEach((message) => target.emit("message", message, undefined)));
+      process.nextTick(() => messages.forEach(([message, handle]) => target.emit("message", message, handle)));
     }
   });
   target.on("removeListener", (name) => {
@@ -140,6 +180,7 @@ function setupChannel(target, open, serialization = "json") {
   refs = target.listenerCount("message") + target.listenerCount("disconnect");
   updateRef();
   function finishDisconnect() {
+    kept.splice(0).forEach((keep) => native.net.closeHandle(keep));
     target.connected = false;
     target.channel = undefined;
     nativePipe.close(id);
@@ -174,10 +215,22 @@ function setupChannel(target, open, serialization = "json") {
     if (!["string", "object", "number", "boolean"].includes(typeof message)) {
       throw errors.invalidArgType("message", "one of type string, object, number, or boolean", message);
     }
-    if (handle !== undefined && handle !== null) throw errors.codeError(TypeError, "ERR_INVALID_HANDLE_TYPE", "This handle type cannot be sent");
-    const line = JSON.stringify(advanced ? encodeAdvanced(message) : message) + "\n";
+    let payload = advanced ? encodeAdvanced(message) : message;
+    let handleId;
+    const type = handle === undefined || handle === null ? null : handleType(handle);
+    if (type) {
+      handleId = native.net.exportHandle(handle._handle);
+      payload = { cmd: "NODE_HANDLE", type, msg: payload };
+      if (windows()) {
+        kept.push(native.net.exportHandle(handle._handle));
+        payload.wsa = native.net.duplicateHandle(handleId, peerPid());
+      }
+      if (type === "net.Socket" && !(options && options.keepOpen)) handle.destroy();
+    }
+    const line = JSON.stringify(payload) + "\n";
     const bytes = internal.bytesToLatin1(Buffer.from(line));
-    writes = writes.then(() => nativePipe.write(id, bytes)).then(
+    const write = type && !windows() ? () => nativePipe.writeHandle(id, bytes, handleId) : () => nativePipe.write(id, bytes);
+    writes = writes.then(write).then(
       () => typeof callback === "function" && process.nextTick(callback, null),
       (error) => (typeof callback === "function" ? process.nextTick(callback, error) : target.emit("error", error)),
     );

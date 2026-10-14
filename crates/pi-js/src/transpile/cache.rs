@@ -9,7 +9,7 @@ use super::{TranspileOptions, Transpiled, transpile};
 use crate::error::JsError;
 
 /// Bumped when the cached format or the transform changes.
-const CACHE_VERSION: &str = concat!("pi-js-transpile-1-", env!("CARGO_PKG_VERSION"), "-oxc-0.153");
+const CACHE_VERSION: &str = concat!("pi-js-transpile-2-", env!("CARGO_PKG_VERSION"), "-oxc-0.153");
 
 /// Thread-safe transpile cache. Entries are keyed by the SHA-256 of the source text, the file
 /// extension, and the options, so a renamed file with the same content reuses its entry.
