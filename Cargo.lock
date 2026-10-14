@@ -2513,6 +2513,8 @@ dependencies = [
  "base64 0.22.1",
  "futures",
  "md-5",
+ "num-bigint",
+ "num-traits",
  "oxc_allocator",
  "oxc_codegen",
  "oxc_diagnostics",

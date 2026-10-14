@@ -1,6 +1,9 @@
 // node:crypto: hashes, HMAC, random values, PBKDF2, and a webcrypto object with subtle.digest.
+// Keys, signatures, ciphers, Diffie-Hellman, and the other KDFs live in internal/crypto_*.
 const { Buffer } = require("buffer");
 const { Transform } = require("stream");
+const keys = require("internal/crypto_keys");
+const extra = require("internal/crypto_extra");
 const nativeCrypto = native.crypto;
 const HASHES = ["md5", "sha1", "sha256", "sha384", "sha512", "sha512-256"];
 const released = new FinalizationRegistry((id) => nativeCrypto.drop(id));
@@ -173,22 +176,6 @@ function hash(algorithm, data, outputEncoding = "hex") {
   return new Hash(algorithm).update(data).digest(outputEncoding);
 }
 
-class KeyObject {
-  constructor(type, bytes) {
-    this.type = type;
-    this._bytes = bytes;
-  }
-  get symmetricKeySize() {
-    return this._bytes.length;
-  }
-  export() {
-    return Buffer.from(this._bytes, "latin1");
-  }
-  equals(other) {
-    return other instanceof KeyObject && other._bytes === this._bytes;
-  }
-}
-
 function unsupported(name) {
   return function unsupportedCrypto() {
     throw internal.unsupported(`crypto.${name}`);
@@ -218,14 +205,51 @@ const webcrypto = { getRandomValues, randomUUID, subtle, CryptoKey: class Crypto
 module.exports = {
   createHash: (algorithm, options) => new Hash(algorithm, options),
   createHmac: (algorithm, key, options) => new Hmac(algorithm, key, options),
-  createSecretKey: (key, encoding) => new KeyObject("secret", toLatin1(key, encoding, "key")),
+  createSecretKey: keys.createSecretKey,
+  createPublicKey: keys.createPublicKey,
+  createPrivateKey: keys.createPrivateKey,
   Hash,
   Hmac,
-  KeyObject,
+  KeyObject: keys.KeyObject,
+  generateKeyPair: keys.generateKeyPair,
+  generateKeyPairSync: keys.generateKeyPairSync,
+  generateKey: keys.generateKey,
+  generateKeySync: keys.generateKeySync,
+  Sign: keys.Sign,
+  Verify: keys.Verify,
+  createSign: (algorithm, options) => new keys.Sign(algorithm, options),
+  createVerify: (algorithm, options) => new keys.Verify(algorithm, options),
+  sign: keys.sign,
+  verify: keys.verify,
+  publicEncrypt: keys.publicEncrypt,
+  privateDecrypt: keys.privateDecrypt,
+  privateEncrypt: keys.privateEncrypt,
+  publicDecrypt: keys.publicDecrypt,
+  diffieHellman: keys.diffieHellman,
+  Cipheriv: extra.Cipheriv,
+  Decipheriv: extra.Decipheriv,
+  createCipheriv: (cipher, key, iv, options) => new extra.Cipheriv(cipher, key, iv, options),
+  createDecipheriv: (cipher, key, iv, options) => new extra.Decipheriv(cipher, key, iv, options),
+  DiffieHellman: extra.DiffieHellman,
+  DiffieHellmanGroup: extra.DiffieHellmanGroup,
+  ECDH: extra.ECDH,
+  createDiffieHellman: (sizeOrKey, keyEncoding, generator, genEncoding) => new extra.DiffieHellman(sizeOrKey, keyEncoding, generator, genEncoding),
+  createDiffieHellmanGroup: (name) => new extra.DiffieHellmanGroup(name),
+  getDiffieHellman: (name) => new extra.DiffieHellmanGroup(name),
+  createECDH: (curve) => new extra.ECDH(curve),
+  scrypt: extra.scrypt,
+  scryptSync: extra.scryptSync,
+  hkdf: extra.hkdf,
+  hkdfSync: extra.hkdfSync,
+  generatePrime: extra.generatePrime,
+  generatePrimeSync: extra.generatePrimeSync,
+  checkPrime: extra.checkPrime,
+  checkPrimeSync: extra.checkPrimeSync,
+  secureHeapUsed: () => ({ total: 0, min: 0, used: 0, utilization: 0 }),
   hash,
   getHashes: () => HASHES.slice(),
-  getCiphers: () => [],
-  getCurves: () => [],
+  getCiphers: () => extra.CIPHERS.slice(),
+  getCurves: () => extra.CURVES.slice(),
   randomBytes,
   pseudoRandomBytes: randomBytes,
   randomFill,
@@ -238,15 +262,22 @@ module.exports = {
   pbkdf2Sync,
   webcrypto,
   subtle,
-  constants: {},
+  constants: {
+    RSA_PKCS1_PADDING: 1,
+    RSA_NO_PADDING: 3,
+    RSA_PKCS1_OAEP_PADDING: 4,
+    RSA_PKCS1_PSS_PADDING: 6,
+    RSA_PSS_SALTLEN_DIGEST: -1,
+    RSA_PSS_SALTLEN_MAX_SIGN: -2,
+    RSA_PSS_SALTLEN_AUTO: -2,
+    POINT_CONVERSION_COMPRESSED: 2,
+    POINT_CONVERSION_UNCOMPRESSED: 4,
+    POINT_CONVERSION_HYBRID: 6,
+    DH_CHECK_P_NOT_SAFE_PRIME: 2,
+    DH_CHECK_P_NOT_PRIME: 1,
+    DH_UNABLE_TO_CHECK_GENERATOR: 4,
+    DH_NOT_SUITABLE_GENERATOR: 8,
+  },
   getFips: () => 0,
   setFips: unsupported("setFips"),
 };
-for (const name of [
-  "createCipheriv", "createDecipheriv", "createSign", "createVerify", "createDiffieHellman", "createDiffieHellmanGroup",
-  "createECDH", "generateKeyPair", "generateKeyPairSync", "generateKey", "generateKeySync", "createPrivateKey", "createPublicKey",
-  "publicEncrypt", "privateDecrypt", "privateEncrypt", "publicDecrypt", "sign", "verify", "scrypt", "scryptSync", "hkdf",
-  "hkdfSync", "diffieHellman", "generatePrime", "generatePrimeSync", "checkPrime", "checkPrimeSync", "secureHeapUsed",
-]) {
-  module.exports[name] = unsupported(name);
-}

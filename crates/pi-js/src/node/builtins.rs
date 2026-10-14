@@ -40,6 +40,8 @@ const SOURCES: &[(&str, &str)] = &[
     ("stream", include_str!("../js/stream.js")),
     ("stream/promises", "module.exports = require('stream').promises;"),
     ("os", include_str!("../js/os.js")),
+    ("internal/crypto_keys", include_str!("../js/crypto_keys.js")),
+    ("internal/crypto_extra", include_str!("../js/crypto_extra.js")),
     ("crypto", include_str!("../js/crypto.js")),
     ("internal/fs_utils", include_str!("../js/fs_utils.js")),
     ("internal/fs_ops", include_str!("../js/fs_ops.js")),
