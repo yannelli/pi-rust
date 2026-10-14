@@ -149,6 +149,11 @@ jobs:
         run: |
           if [ "${{ matrix.zig }}" = true ]; then
             cargo zigbuild --release --locked -p pi-coding-agent -p pi-env-daemon --target ${{ matrix.target }}
+          elif [ "${{ runner.os }}" = Windows ]; then
+            cargo build --release --locked -p pi-coding-agent --target ${{ matrix.target }}
+            # Static C runtime, so the daemon needs no Visual C++ redistributable on the remote machine (as upstream).
+            RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --locked -p pi-env-daemon \
+              --target ${{ matrix.target }} --target-dir target-daemon
           else
             cargo build --release --locked -p pi-coding-agent -p pi-env-daemon --target ${{ matrix.target }}
           fi
@@ -187,8 +192,11 @@ jobs:
             *) exit 0 ;;
           esac
           mkdir -p "daemon/pi-env-$remote"
-          exe=pi-env; [ "${{ runner.os }}" = Windows ] && exe=pi-env.exe
-          cp "target/$TARGET/release/$exe" "daemon/pi-env-$remote/"
+          if [ "${{ runner.os }}" = Windows ]; then
+            cp "target-daemon/$TARGET/release/pi-env.exe" "daemon/pi-env-$remote/"
+          else
+            cp "target/$TARGET/release/pi-env" "daemon/pi-env-$remote/"
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: pi-${{ matrix.target }}
@@ -201,8 +209,52 @@ jobs:
           path: daemon/*
           if-no-files-found: error
 
+  android-daemons:
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
+    name: daemon (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aarch64-linux-android, name: android-arm64, clang: aarch64-linux-android24 }
+          - { target: x86_64-linux-android, name: android-x64, clang: x86_64-linux-android24 }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Configure the Android NDK linker
+        # A fixed NDK, installed when the runner image does not have it (as upstream's env-daemons workflow).
+        env:
+          NDK_VERSION: 27.2.12479018
+        run: |
+          ndk="$ANDROID_HOME/ndk/$NDK_VERSION"
+          if [ ! -d "$ndk" ]; then
+            { yes || true; } | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" > /dev/null
+          fi
+          linker="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/${{ matrix.clang }}-clang"
+          test -x "$linker"
+          variable="CARGO_TARGET_$(echo '${{ matrix.target }}' | tr 'a-z-' 'A-Z_')_LINKER"
+          echo "$variable=$linker" >> "$GITHUB_ENV"
+          echo "CC_$(echo '${{ matrix.target }}' | tr '-' '_')=$linker" >> "$GITHUB_ENV"
+      - name: Build
+        run: cargo build --release --locked -p pi-env-daemon --target ${{ matrix.target }}
+      - name: Collect
+        run: |
+          mkdir -p "daemon/pi-env-${{ matrix.name }}"
+          cp "target/${{ matrix.target }}/release/pi-env" "daemon/pi-env-${{ matrix.name }}/"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: daemon-${{ matrix.target }}
+          path: daemon/*
+          if-no-files-found: error
+
   publish:
-    needs: [plan, build]
+    needs: [plan, build, android-daemons]
     if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-latest
     steps:
