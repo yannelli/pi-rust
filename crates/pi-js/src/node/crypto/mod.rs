@@ -1,11 +1,18 @@
 //! Natives for `node:crypto`: hashes and HMACs, random bytes, KDFs, ciphers, and asymmetric keys.
 
+mod aead;
 mod bigint;
 mod cipher;
 mod der;
+mod dsa;
 mod ec;
+mod jwk;
+mod kdf;
+mod keyenc;
 mod keys;
+mod modes;
 mod natives_keys;
+mod okp;
 mod ops;
 mod rsa;
 
@@ -99,6 +106,11 @@ impl HashState {
             None => digest,
         }
     }
+}
+
+/// Constant-time comparison of two equal-length byte strings.
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 fn random_bytes(length: usize) -> Result<Vec<u8>, JsError> {

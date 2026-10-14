@@ -1,28 +1,173 @@
-//! Streaming AEAD ciphers (AES-GCM, ChaCha20-Poly1305) over ring, plus scrypt and HKDF.
+//! Streaming `Cipheriv`/`Decipheriv` state: OpenSSL cipher names mapped to the AEAD, block, and
+//! stream modes in `aead` and `modes`.
 
-use ring::aead::{AES_128_GCM, AES_256_GCM, Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
-
-use super::{HashState, pbkdf2};
+use super::aead::{self, Sealer, invalid_tag};
+use super::modes::{self, BlockProcess, Family, Stream};
 use crate::error::JsError;
 
 fn auth_failure() -> JsError {
     JsError::new("Unsupported state or unable to authenticate data")
 }
 
-/// An AEAD cipher fed in chunks. `update` XORs with keystream taken from sealing zeros; the
-/// tag comes from sealing the whole plaintext at `finish`.
+fn unknown_cipher() -> JsError {
+    JsError::new("Unknown cipher").with_code("ERR_CRYPTO_UNKNOWN_CIPHER")
+}
+
+fn invalid_state(operation: &str) -> JsError {
+    JsError::new(format!("Invalid state for operation {operation}")).with_code("ERR_CRYPTO_INVALID_STATE")
+}
+
+fn wrong_final_block() -> JsError {
+    JsError::new("error:1C80006B:Provider routines::wrong final block length")
+        .with_code("ERR_OSSL_WRONG_FINAL_BLOCK_LENGTH")
+}
+
+pub(super) fn bad_decrypt() -> JsError {
+    JsError::new("error:1C800064:Provider routines::bad decrypt").with_code("ERR_OSSL_BAD_DECRYPT")
+}
+
+enum Kind {
+    Blocks(Family, &'static str),
+    Stream(Family, &'static str),
+    /// An AEAD mode and its key length.
+    Aead(&'static str, usize),
+}
+
+const MODES: [&str; 8] = ["cbc", "ecb", "ctr", "cfb", "ofb", "gcm", "ccm", "ocb"];
+
+fn kind(family: Family, mode: &'static str) -> Kind {
+    match (mode, family) {
+        ("cbc" | "ecb", _) => Kind::Blocks(family, mode),
+        ("ctr" | "cfb" | "ofb", _) => Kind::Stream(family, mode),
+        (_, Family::Aes(len) | Family::Des(len)) => Kind::Aead(mode, len),
+    }
+}
+
+/// Map an OpenSSL cipher name (lowercase) to its kind.
+fn parse(name: &str) -> Option<Kind> {
+    let des = |len, mode| Some(kind(Family::Des(len), mode));
+    match name {
+        "chacha20-poly1305" => return Some(Kind::Aead("chacha20-poly1305", 32)),
+        "des" | "des-cbc" => return des(8, "cbc"),
+        "des3" => return des(24, "cbc"),
+        "des-ede" | "des-ede-ecb" => return des(16, "ecb"),
+        "des-ede3" | "des-ede3-ecb" => return des(24, "ecb"),
+        "aes128" | "aes192" | "aes256" => return Some(kind(Family::Aes(name[3..].parse::<usize>().ok()? / 8), "cbc")),
+        _ => {}
+    }
+    for (prefix, len) in [("des-ede3-", 24), ("des-ede-", 16), ("des-", 8)] {
+        if let Some(mode) = name.strip_prefix(prefix) {
+            return des(len, MODES[..5].iter().find(|known| **known == mode)?);
+        }
+    }
+    let (bits, mode) = if let Some(rest) = name.strip_prefix("id-aes") {
+        rest.split_once('-').filter(|(_, mode)| matches!(*mode, "gcm" | "ccm"))?
+    } else {
+        name.strip_prefix("aes-")?.split_once('-')?
+    };
+    let family = Family::Aes(match bits {
+        "128" => 16,
+        "192" => 24,
+        "256" => 32,
+        _ => return None,
+    });
+    Some(kind(family, MODES.iter().find(|known| **known == mode)?))
+}
+
+/// An AEAD fed in chunks. Keystream modes XOR `update` input with keystream taken from sealing
+/// zeros and compute the tag at `finish`; OCB buffers everything until `finish`.
 pub(super) struct Aead {
-    key: LessSafeKey,
-    nonce: [u8; 12],
+    sealer: Box<dyn Sealer>,
+    buffered: bool,
+    truncated_tag: bool,
     decrypt: bool,
     tag_length: Option<usize>,
     aad: Vec<u8>,
-    plaintext: Vec<u8>,
+    data: Vec<u8>,
     keystream: Vec<u8>,
     expected_tag: Option<Vec<u8>>,
 }
 
 impl Aead {
+    fn new(mode: &str, key: &[u8], iv: &[u8], decrypt: bool, tag_length: Option<usize>) -> Result<Self, JsError> {
+        let truncated_tag = matches!(mode, "gcm" | "chacha20-poly1305");
+        if let Some(length) = tag_length {
+            let valid = match mode {
+                "chacha20-poly1305" => (1..=16).contains(&length),
+                "gcm" => matches!(length, 4 | 8 | 12..=16),
+                "ccm" => matches!(length, 4 | 6 | 8 | 10 | 12 | 14 | 16),
+                _ => (1..=16).contains(&length),
+            };
+            if !valid {
+                return Err(invalid_tag(length));
+            }
+        } else if mode == "ccm" {
+            return Err(
+                JsError::type_error("authTagLength required for CCM ciphers").with_code("ERR_CRYPTO_INVALID_AUTH_TAG")
+            );
+        }
+        Ok(Self {
+            sealer: aead::sealer(mode, key, iv, tag_length.unwrap_or(16))?,
+            buffered: mode == "ocb",
+            truncated_tag,
+            decrypt,
+            tag_length,
+            aad: Vec::new(),
+            data: Vec::new(),
+            keystream: Vec::new(),
+            expected_tag: None,
+        })
+    }
+
+    fn update(&mut self, input: &[u8]) -> Result<Vec<u8>, JsError> {
+        if self.buffered {
+            self.data.extend_from_slice(input);
+            return Ok(Vec::new());
+        }
+        let start = self.data.len();
+        let needed = start + input.len();
+        if self.keystream.len() < needed {
+            let mut zeros = vec![0; needed.max(2 * self.keystream.len()).max(256)];
+            self.sealer.seal(&mut zeros, &[]).ok_or_else(auth_failure)?;
+            self.keystream = zeros;
+        }
+        let output: Vec<u8> = input.iter().zip(&self.keystream[start..needed]).map(|(byte, key)| byte ^ key).collect();
+        self.data.extend_from_slice(if self.decrypt { &output } else { input });
+        Ok(output)
+    }
+
+    fn finish(&mut self) -> Result<(Vec<u8>, Vec<u8>), JsError> {
+        let mut data = std::mem::take(&mut self.data);
+        let aad = std::mem::take(&mut self.aad);
+        if self.decrypt {
+            let expected = self.expected_tag.take().ok_or_else(auth_failure)?;
+            if self.tag_length.is_some_and(|length| length != expected.len()) {
+                return Err(auth_failure());
+            }
+            if self.buffered {
+                self.sealer.open(&mut data, &aad, &expected).ok_or_else(auth_failure)?;
+                return Ok((data, Vec::new()));
+            }
+            let tag = self.sealer.seal(&mut data, &aad).ok_or_else(auth_failure)?;
+            let compared = if self.truncated_tag { tag.get(..expected.len()) } else { Some(&tag[..]) };
+            if !compared.is_some_and(|tag| super::ct_eq(tag, &expected)) {
+                return Err(auth_failure());
+            }
+            return Ok((Vec::new(), Vec::new()));
+        }
+        let mut tag = self.sealer.seal(&mut data, &aad).ok_or_else(auth_failure)?;
+        tag.truncate(self.tag_length.unwrap_or(16));
+        Ok((if self.buffered { data } else { Vec::new() }, tag))
+    }
+}
+
+pub(super) enum Cipher {
+    Aead(Aead),
+    Blocks { mode: Box<dyn BlockProcess>, size: usize, decrypt: bool, padding: bool, pending: Vec<u8> },
+    Stream(Box<dyn Stream>),
+}
+
+impl Cipher {
     pub(super) fn new(
         name: &str,
         key: &[u8],
@@ -30,187 +175,103 @@ impl Aead {
         decrypt: bool,
         tag_length: Option<usize>,
     ) -> Result<Self, JsError> {
-        let (algorithm, chacha) = match name {
-            "aes-128-gcm" | "id-aes128-gcm" => (&AES_128_GCM, false),
-            "aes-256-gcm" | "id-aes256-gcm" => (&AES_256_GCM, false),
-            "chacha20-poly1305" => (&CHACHA20_POLY1305, true),
-            _ => return Err(JsError::new("Unknown cipher").with_code("ERR_CRYPTO_UNKNOWN_CIPHER")),
-        };
-        if key.len() != algorithm.key_len() {
-            return Err(JsError::range_error("Invalid key length").with_code("ERR_CRYPTO_INVALID_KEYLEN"));
-        }
-        let nonce: [u8; 12] = match iv.try_into() {
-            Ok(nonce) => nonce,
-            Err(_) if !chacha && !iv.is_empty() => {
-                return Err(JsError::unsupported("crypto AES-GCM with an IV other than 12 bytes"));
+        Ok(match parse(&name.to_ascii_lowercase()).ok_or_else(unknown_cipher)? {
+            Kind::Aead(_, len) if key.len() != len => return Err(modes::invalid_key()),
+            Kind::Aead(mode, _) => Self::Aead(Aead::new(mode, key, iv, decrypt, tag_length)?),
+            Kind::Blocks(family, mode) => {
+                let (size, mode) = modes::blocks(family, mode, key, iv, decrypt)?;
+                Self::Blocks { mode, size, decrypt, padding: true, pending: Vec::new() }
             }
-            Err(_) => {
-                return Err(JsError::type_error("Invalid initialization vector").with_code("ERR_CRYPTO_INVALID_IV"));
-            }
-        };
-        if let Some(length) = tag_length {
-            let valid = if chacha { (1..=16).contains(&length) } else { matches!(length, 4 | 8 | 12..=16) };
-            if !valid {
-                return Err(JsError::type_error(format!("Invalid authentication tag length: {length}"))
-                    .with_code("ERR_CRYPTO_INVALID_AUTH_TAG"));
-            }
-        }
-        let key =
-            LessSafeKey::new(UnboundKey::new(algorithm, key).map_err(|_| JsError::range_error("Invalid key length"))?);
-        Ok(Self {
-            key,
-            nonce,
-            decrypt,
-            tag_length,
-            aad: Vec::new(),
-            plaintext: Vec::new(),
-            keystream: Vec::new(),
-            expected_tag: None,
+            Kind::Stream(family, mode) => Self::Stream(modes::stream(family, mode, key, iv, decrypt)?),
         })
     }
 
-    pub(super) fn set_aad(&mut self, aad: &[u8]) {
-        self.aad.extend_from_slice(aad);
+    pub(super) fn set_aad(&mut self, aad: &[u8]) -> Result<(), JsError> {
+        match self {
+            Self::Aead(aead) => {
+                aead.aad.extend_from_slice(aad);
+                Ok(())
+            }
+            _ => Err(invalid_state("setAAD")),
+        }
     }
 
     pub(super) fn set_tag(&mut self, tag: &[u8]) -> Result<(), JsError> {
-        if !self.decrypt || !(4..=16).contains(&tag.len()) {
-            return Err(JsError::type_error(format!("Invalid authentication tag length: {}", tag.len()))
-                .with_code("ERR_CRYPTO_INVALID_AUTH_TAG"));
+        match self {
+            Self::Aead(aead) if aead.decrypt && (1..=16).contains(&tag.len()) => {
+                aead.expected_tag = Some(tag.to_vec());
+                Ok(())
+            }
+            Self::Aead(_) => Err(invalid_tag(tag.len())),
+            _ => Err(invalid_state("setAuthTag")),
         }
-        self.expected_tag = Some(tag.to_vec());
-        Ok(())
     }
 
-    fn seal(&self, data: &mut [u8], aad: &[u8]) -> Result<Vec<u8>, JsError> {
-        let nonce = Nonce::assume_unique_for_key(self.nonce);
-        let tag = self.key.seal_in_place_separate_tag(nonce, Aad::from(aad), data).map_err(|_| auth_failure())?;
-        Ok(tag.as_ref().to_vec())
+    pub(super) fn set_padding(&mut self, enabled: bool) {
+        if let Self::Blocks { padding, .. } = self {
+            *padding = enabled;
+        }
     }
 
     pub(super) fn update(&mut self, input: &[u8]) -> Result<Vec<u8>, JsError> {
-        let start = self.plaintext.len();
-        let needed = start + input.len();
-        if self.keystream.len() < needed {
-            let mut zeros = vec![0; needed.max(2 * self.keystream.len()).max(256)];
-            self.seal(&mut zeros, &[])?;
-            self.keystream = zeros;
+        match self {
+            Self::Aead(aead) => aead.update(input),
+            Self::Stream(stream) => {
+                let mut data = input.to_vec();
+                stream.apply(&mut data);
+                Ok(data)
+            }
+            Self::Blocks { mode, size, decrypt, padding, pending } => {
+                pending.extend_from_slice(input);
+                let mut ready = pending.len() / *size * *size;
+                // Decryption with padding holds back the last full block for `finish`.
+                if *decrypt && *padding && ready == pending.len() && ready > 0 {
+                    ready -= *size;
+                }
+                let mut data: Vec<u8> = pending.drain(..ready).collect();
+                mode.process(&mut data);
+                Ok(data)
+            }
         }
-        let output: Vec<u8> = input.iter().zip(&self.keystream[start..needed]).map(|(byte, key)| byte ^ key).collect();
-        self.plaintext.extend_from_slice(if self.decrypt { &output } else { input });
-        Ok(output)
     }
 
-    /// Finish and return the authentication tag; decryption checks it against `set_tag`.
-    pub(super) fn finish(&mut self) -> Result<Vec<u8>, JsError> {
-        let mut data = std::mem::take(&mut self.plaintext);
-        let aad = std::mem::take(&mut self.aad);
-        let mut tag = self.seal(&mut data, &aad)?;
-        if !self.decrypt {
-            tag.truncate(self.tag_length.unwrap_or(16));
-            return Ok(tag);
+    /// The remaining output and, for AEAD encryption, the authentication tag.
+    pub(super) fn finish(&mut self) -> Result<(Vec<u8>, Vec<u8>), JsError> {
+        match self {
+            Self::Aead(aead) => aead.finish(),
+            Self::Stream(_) => Ok((Vec::new(), Vec::new())),
+            Self::Blocks { mode, size, decrypt, padding, pending } => {
+                let mut data = std::mem::take(pending);
+                let size = *size;
+                if !*padding {
+                    // Whole blocks already went out from `update`.
+                    return if data.is_empty() { Ok((data, Vec::new())) } else { Err(wrong_final_block()) };
+                }
+                if *decrypt {
+                    if data.len() != size {
+                        return Err(wrong_final_block());
+                    }
+                    mode.process(&mut data);
+                    let length = unpad(&data, size).ok_or_else(bad_decrypt)?;
+                    data.truncate(length);
+                    return Ok((data, Vec::new()));
+                }
+                let fill = size - data.len() % size;
+                data.resize(data.len() + fill, fill as u8);
+                mode.process(&mut data);
+                Ok((data, Vec::new()))
+            }
         }
-        let expected = self.expected_tag.as_ref().ok_or_else(auth_failure)?;
-        let difference = expected.iter().zip(&tag).fold(0u8, |acc, (a, b)| acc | (a ^ b));
-        if difference != 0 || self.tag_length.is_some_and(|length| length != expected.len()) {
-            return Err(auth_failure());
-        }
-        Ok(Vec::new())
     }
 }
 
-fn salsa8(block: &mut [u32; 16]) {
-    let mut x = *block;
-    let quarter = |x: &mut [u32; 16], a: usize, b: usize, c: usize, d: usize| {
-        x[b] ^= x[a].wrapping_add(x[d]).rotate_left(7);
-        x[c] ^= x[b].wrapping_add(x[a]).rotate_left(9);
-        x[d] ^= x[c].wrapping_add(x[b]).rotate_left(13);
-        x[a] ^= x[d].wrapping_add(x[c]).rotate_left(18);
-    };
-    for _ in 0..4 {
-        quarter(&mut x, 0, 4, 8, 12);
-        quarter(&mut x, 5, 9, 13, 1);
-        quarter(&mut x, 10, 14, 2, 6);
-        quarter(&mut x, 15, 3, 7, 11);
-        quarter(&mut x, 0, 1, 2, 3);
-        quarter(&mut x, 5, 6, 7, 4);
-        quarter(&mut x, 10, 11, 8, 9);
-        quarter(&mut x, 15, 12, 13, 14);
+/// The unpadded length of a PKCS#7-padded final block, checked without early exits.
+fn unpad(block: &[u8], size: usize) -> Option<usize> {
+    let pad = *block.last()? as usize;
+    let mut bad = u8::from(pad == 0 || pad > size);
+    for (index, byte) in block.iter().rev().enumerate() {
+        let inside = u8::from(index < pad);
+        bad |= inside & u8::from(*byte as usize != pad);
     }
-    for (word, mixed) in block.iter_mut().zip(x) {
-        *word = word.wrapping_add(mixed);
-    }
-}
-
-fn block_mix(input: &[u32], output: &mut [u32], r: usize) {
-    let mut x: [u32; 16] = input[(2 * r - 1) * 16..].try_into().unwrap_or([0; 16]);
-    for i in 0..2 * r {
-        x.iter_mut().zip(&input[i * 16..(i + 1) * 16]).for_each(|(word, other)| *word ^= other);
-        salsa8(&mut x);
-        let target = (i / 2 + (i % 2) * r) * 16;
-        output[target..target + 16].copy_from_slice(&x);
-    }
-}
-
-fn ro_mix(block: &mut [u8], n: usize, r: usize) {
-    let words = 32 * r;
-    let mut x: Vec<u32> =
-        block.chunks_exact(4).map(|chunk| u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])).collect();
-    let mut table = vec![0u32; n * words];
-    let mut scratch = vec![0u32; words];
-    for i in 0..n {
-        table[i * words..(i + 1) * words].copy_from_slice(&x);
-        block_mix(&x, &mut scratch, r);
-        std::mem::swap(&mut x, &mut scratch);
-    }
-    for _ in 0..n {
-        let j = (x[(2 * r - 1) * 16] as usize) & (n - 1);
-        x.iter_mut().zip(&table[j * words..(j + 1) * words]).for_each(|(word, other)| *word ^= other);
-        block_mix(&x, &mut scratch, r);
-        std::mem::swap(&mut x, &mut scratch);
-    }
-    for (chunk, word) in block.chunks_exact_mut(4).zip(x) {
-        chunk.copy_from_slice(&word.to_le_bytes());
-    }
-}
-
-/// RFC 7914 scrypt; `n` must be a power of two.
-pub(super) fn scrypt(
-    password: &[u8],
-    salt: &[u8],
-    n: usize,
-    r: usize,
-    p: usize,
-    length: usize,
-) -> Result<Vec<u8>, JsError> {
-    let mut blocks = pbkdf2(password, salt, 1, p * 128 * r, "sha256")?;
-    for block in blocks.chunks_exact_mut(128 * r) {
-        ro_mix(block, n, r);
-    }
-    pbkdf2(password, &blocks, 1, length, "sha256")
-}
-
-/// RFC 5869 HKDF over the HMACs that `createHmac` supports.
-pub(super) fn hkdf(hash: &str, ikm: &[u8], salt: &[u8], info: &[u8], length: usize) -> Result<Vec<u8>, JsError> {
-    let hmac = |key: &[u8], parts: &[&[u8]]| -> Result<Vec<u8>, JsError> {
-        let mut state = HashState::hmac(hash, key)?;
-        parts.iter().for_each(|part| state.inner.update(part));
-        Ok(state.finish())
-    };
-    let hash_length = hmac(&[], &[])?.len();
-    if length > 255 * hash_length {
-        return Err(JsError::range_error("Invalid key length").with_code("ERR_CRYPTO_INVALID_KEYLEN"));
-    }
-    let salt = if salt.is_empty() { vec![0; hash_length] } else { salt.to_vec() };
-    let prk = hmac(&salt, &[ikm])?;
-    let mut out = Vec::with_capacity(length);
-    let mut previous = Vec::new();
-    let mut counter = 1u8;
-    while out.len() < length {
-        previous = hmac(&prk, &[&previous, info, &[counter]])?;
-        out.extend_from_slice(&previous);
-        counter = counter.wrapping_add(1);
-    }
-    out.truncate(length);
-    Ok(out)
+    (bad == 0).then(|| block.len() - pad)
 }

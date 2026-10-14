@@ -152,12 +152,6 @@ const legacy = {
   isPrimitive: (value) => value === null || (typeof value !== "object" && typeof value !== "function"),
 };
 
-function unsupported(name) {
-  return () => {
-    throw internal.unsupported(`util.${name}`);
-  };
-}
-
 function transferableAbortSignal(signal) {
   if (!(signal instanceof AbortSignal)) throw errors.invalidArgType("signal", "an instance of AbortSignal", signal);
   return signal;
@@ -190,7 +184,12 @@ module.exports = {
   getSystemErrorName: errors.getSystemErrorName,
   getSystemErrorMap: () => new Map(errors.getSystemErrorMap()),
   getSystemErrorMessage: errors.getSystemErrorMessage,
-  MIMEType: unsupported("MIMEType"),
+  get MIMEType() {
+    return require("internal/mime").MIMEType;
+  },
+  get MIMEParams() {
+    return require("internal/mime").MIMEParams;
+  },
   transferableAbortController: () => new AbortController(),
   transferableAbortSignal,
   _stylize: stylize,

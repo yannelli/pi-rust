@@ -1,4 +1,4 @@
-// node:crypto AEAD ciphers, Diffie-Hellman, ECDH, scrypt, HKDF, and primes.
+// node:crypto ciphers (AES, DES, 3DES, ChaCha20-Poly1305), Diffie-Hellman, ECDH, scrypt, HKDF, and primes.
 const { Buffer } = require("buffer");
 const { Transform } = require("stream");
 const { StringDecoder } = require("string_decoder");
@@ -7,8 +7,15 @@ const { codeError, invalidArg, invalidValue, outOfRange, validateObject, validat
 const nativeCrypto = native.crypto;
 const released = new FinalizationRegistry((id) => nativeCrypto.drop(id));
 
-const CIPHERS = ["aes-128-gcm", "aes-256-gcm", "chacha20-poly1305", "id-aes128-gcm", "id-aes256-gcm"];
-// OpenSSL cipher families that would need another crate (aes, cbc, ctr, des, ...).
+const AES_MODES = ["cbc", "ccm", "cfb", "ctr", "ecb", "gcm", "ocb", "ofb"];
+const DES_NAMES = ["des", "des-cbc", "des-cfb", "des-ecb", "des-ofb", "des3"];
+for (const prefix of ["des-ede", "des-ede3"]) DES_NAMES.push(prefix, `${prefix}-cbc`, `${prefix}-cfb`, `${prefix}-ofb`);
+const CIPHERS = [
+  ...["128", "192", "256"].flatMap((bits) => [`aes${bits}`, `id-aes${bits}-ccm`, `id-aes${bits}-gcm`, ...AES_MODES.map((mode) => `aes-${bits}-${mode}`)]),
+  "chacha20-poly1305",
+  ...DES_NAMES,
+].sort();
+// OpenSSL cipher families and modes that no bundled crate implements (cfb1, cfb8, xts, wrap, ...).
 const MISSING_CIPHERS = /^(aes|id-aes|aria|camellia|des|bf|blowfish|cast|idea|rc2|rc4|rc5|seed|sm4|chacha20|id-smime)/;
 
 function invalidState(operation) {
@@ -61,9 +68,9 @@ CipherBase.prototype.final = function final(outputEncoding) {
   if (this._finalized) throw invalidState("final");
   this._finalized = true;
   released.unregister(this);
-  const tag = nativeCrypto.cipherFinal(this._id);
-  if (!this._decrypt) this._tag = toBuffer(tag);
-  return this._output(new Uint8Array(0), outputEncoding, true);
+  const [data, tag] = nativeCrypto.cipherFinal(this._id);
+  if (!this._decrypt && tag.length > 0) this._tag = toBuffer(tag);
+  return this._output(data, outputEncoding, true);
 };
 CipherBase.prototype.setAAD = function setAAD(buffer, options) {
   if (this._finalized || this._started) throw invalidState("setAAD");
@@ -71,7 +78,9 @@ CipherBase.prototype.setAAD = function setAAD(buffer, options) {
   nativeCrypto.cipherAad(this._id, latin1(buffer));
   return this;
 };
-CipherBase.prototype.setAutoPadding = function setAutoPadding() {
+CipherBase.prototype.setAutoPadding = function setAutoPadding(autoPadding = true) {
+  if (this._finalized) throw invalidState("setAutoPadding");
+  nativeCrypto.cipherPadding(this._id, !!autoPadding);
   return this;
 };
 CipherBase.prototype._transform = function _transform(chunk, encoding, callback) {

@@ -20,6 +20,7 @@ const SOURCES: &[(&str, &str)] = &[
     ("internal/deep_equal", include_str!("../js/deep_equal.js")),
     ("internal/errors", include_str!("../js/errors.js")),
     ("internal/parse_args", include_str!("../js/parse_args.js")),
+    ("internal/mime", include_str!("../js/mime.js")),
     ("internal/glob", include_str!("../js/glob.js")),
     ("util", include_str!("../js/util.js")),
     ("util/types", "module.exports = require('util').types;"),

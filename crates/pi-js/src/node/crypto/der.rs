@@ -42,6 +42,15 @@ pub(super) fn uint(bytes: &[u8]) -> Vec<u8> {
     tlv(0x02, &content)
 }
 
+/// Big-endian bytes without leading zeros, left-padded with zeros to `size`.
+pub(super) fn fixed(bytes: &[u8], size: usize) -> Vec<u8> {
+    let start = bytes.iter().position(|byte| *byte != 0).unwrap_or(bytes.len());
+    let trimmed = &bytes[start..];
+    let mut out = vec![0; size.saturating_sub(trimmed.len())];
+    out.extend_from_slice(trimmed);
+    out
+}
+
 pub(super) fn octets(bytes: &[u8]) -> Vec<u8> {
     tlv(0x04, bytes)
 }
@@ -148,21 +157,32 @@ impl<'a> Der<'a> {
     }
 }
 
-/// The label and DER body of the first PEM block in `text`.
-pub(super) fn pem_decode(text: &str) -> Result<(String, Vec<u8>), JsError> {
+/// The first PEM block in a text: its label, `Name: value` headers, and DER body.
+pub(super) struct Pem {
+    pub label: String,
+    pub headers: Vec<(String, String)>,
+    pub der: Vec<u8>,
+}
+
+pub(super) fn pem_decode(text: &str) -> Result<Pem, JsError> {
     let start = text.find("-----BEGIN ").ok_or_else(unsupported_key)?;
     let rest = &text[start + 11..];
     let label_end = rest.find("-----").ok_or_else(unsupported_key)?;
     let label = rest[..label_end].to_string();
     let body = &rest[label_end + 5..];
     let end = body.find(&format!("-----END {label}-----")).ok_or_else(unsupported_key)?;
-    let body = &body[..end];
-    if body.contains("Proc-Type:") || label == "ENCRYPTED PRIVATE KEY" {
-        return Err(JsError::unsupported("crypto encrypted private keys"));
+    let mut headers = Vec::new();
+    let mut encoded = String::new();
+    for line in body[..end].lines() {
+        match line.split_once(':') {
+            Some((name, value)) if encoded.is_empty() => {
+                headers.push((name.trim().to_string(), value.trim().to_string()))
+            }
+            _ => encoded.extend(line.chars().filter(|character| !character.is_whitespace())),
+        }
     }
-    let cleaned: String = body.chars().filter(|character| !character.is_whitespace()).collect();
-    let der = STANDARD.decode(cleaned).map_err(|_| unsupported_key())?;
-    Ok((label, der))
+    let der = STANDARD.decode(encoded).map_err(|_| unsupported_key())?;
+    Ok(Pem { label, headers, der })
 }
 
 pub(super) fn pem_encode(label: &str, der: &[u8]) -> String {
@@ -191,7 +211,9 @@ mod tests {
         assert_eq!(inner.bits().unwrap(), &[1, 2]);
         assert!(inner.is_empty() && outer.is_empty());
         let pem = pem_encode("PUBLIC KEY", &encoded);
-        assert_eq!(pem_decode(&pem).unwrap(), ("PUBLIC KEY".to_string(), encoded));
+        let decoded = pem_decode(&pem).unwrap();
+        assert_eq!((decoded.label.as_str(), decoded.der), ("PUBLIC KEY", encoded));
+        assert!(decoded.headers.is_empty());
         assert_eq!(tlv(4, &[0; 200])[..3], [4, 0x81, 200]);
     }
 }

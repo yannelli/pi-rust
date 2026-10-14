@@ -16,10 +16,25 @@ serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+aes = "0.9.3"
+aes-gcm = { version = "0.11.1", default-features = false, features = ["aes", "alloc"] }
+cbc = "0.2.1"
+ccm = { version = "0.6.1", default-features = false, features = ["alloc"] }
+cfb-mode = "0.9.1"
+crypto-bigint = { version = "0.7.5", default-features = false, features = ["alloc"] }
+ctr = "0.10.1"
+des = "0.9.0"
+dsa = { version = "0.7.0", default-features = false, features = ["hazmat"] }
+ecb = "0.2.1"
+ed448-goldilocks = { version = "=0.14.0-pre.15", default-features = false, features = ["signing", "std"] }
+getrandom = { version = "0.4.3", features = ["sys_rng"] }
+k256 = { version = "0.14.0", default-features = false, features = ["ecdsa", "ecdh", "std"] }
 md-5 = "0.10.6"
 notify = "8.2.0"
 num-bigint = "0.5.1"
 num-traits = "0.2.19"
+ocb3 = { version = "0.2.0", default-features = false, features = ["alloc"] }
+ofb = "0.7.1"
 oxc_allocator = "0.153.0"
 oxc_codegen = "0.153.0"
 oxc_diagnostics = "0.153.0"
@@ -28,8 +43,16 @@ oxc_semantic = "0.153.0"
 oxc_sourcemap = "9.0.0"
 oxc_span = "0.153.0"
 oxc_transformer = "0.153.0"
+p256 = { version = "0.14.0", default-features = false, features = ["ecdsa", "ecdh", "std"] }
+p384 = { version = "0.14.0", default-features = false, features = ["ecdsa", "ecdh", "std"] }
+p521 = { version = "0.14.0", default-features = false, features = ["ecdsa", "ecdh", "std"] }
+pkcs8 = { version = "0.11.0", default-features = false, features = ["encryption", "3des"] }
+rsa = { version = "0.9.10", default-features = false, features = ["std", "u64_digit", "sha2", "hazmat"] }
+sha1 = "0.10.6"
 unicode-segmentation = "1.12"
 url = "2.5.8"
+x25519-dalek = { version = "3.0.0", features = ["static_secrets"] }
+x448 = { version = "=0.14.0-pre.12", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.190"

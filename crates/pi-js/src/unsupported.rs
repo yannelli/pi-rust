@@ -16,9 +16,11 @@ pub fn supported_modules() -> Vec<&'static str> {
 
 /// APIs inside supported modules that throw the unsupported error.
 pub const UNSUPPORTED_APIS: &[&str] = &[
-    "crypto: ciphers other than aes-128-gcm, aes-256-gcm, and chacha20-poly1305 (CBC, CTR, ECB, CFB, OFB, CCM, OCB, \
-     aes-192-gcm, DES), AES-GCM IVs other than 12 bytes, encrypted private keys (passphrase or cipher), DSA, Ed448, \
-     and X448 keys, webcrypto.subtle except digest, setFips",
+    "crypto: ciphers outside AES (CBC, CTR, ECB, CFB, OFB, GCM, CCM, OCB), DES, 3DES, and ChaCha20-Poly1305 \
+     (for example aes-128-cfb8, aes-*-xts, camellia, bf, rc4), AES-GCM IVs longer than 16 bytes other than \
+     32 or 64, AES-OCB IVs other than 8, 12, or 15 bytes and tags other than 8, 12, or 16, RSA-OAEP labels \
+     that are not UTF-8, DSA sizes other than 1024/160, 2048/224, 2048/256, and 3072/256, private key encryption \
+     with ciphers other than AES-CBC and 3DES-CBC (or PBES1), webcrypto.subtle except digest, setFips",
     "fs: lchmod, fchmod, fchown, lutimes, statfs, openAsBlob, FileHandle chmod, chown, and readableWebStream",
     "child_process: stdio entries that are streams or descriptors above 2, sending handles over IPC \
      (ERR_INVALID_HANDLE_TYPE, as there is no net module)",
@@ -27,7 +29,6 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
     "stream: Duplex.from for promises and web streams; stream/web BYOB readers, \
      ReadableByteStreamController, CompressionStream, DecompressionStream",
     "fetch: Body.formData for multipart bodies, request bodies are buffered before sending",
-    "util: MIMEType",
 ];
 
 /// Supported behavior that differs from Node.

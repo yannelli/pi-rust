@@ -110,10 +110,10 @@ out.chacha = [chacha[0].slice(0, 32), chacha[1]];
 const short = crypto.createCipheriv("aes-256-gcm", Buffer.alloc(32), Buffer.alloc(12), { authTagLength: 8 });
 short.update("hi"); short.final();
 out.shortTag = short.getAuthTag().length;
-out.ciphers = crypto.getCiphers();
+out.ciphers = ["aes-128-gcm", "aes-192-ccm", "aes-256-ocb", "chacha20-poly1305", "des-ede3-cbc", "id-aes256-gcm"].every((name) => crypto.getCiphers().includes(name));
 const codes = [];
 for (const f of [
-  () => crypto.createCipheriv("aes-256-cbc", Buffer.alloc(32), Buffer.alloc(16)),
+  () => crypto.createCipheriv("aes-256-cfb8", Buffer.alloc(32), Buffer.alloc(16)),
   () => crypto.createCipheriv("nope-cipher", Buffer.alloc(32), Buffer.alloc(16)),
   () => crypto.createCipheriv("aes-256-gcm", Buffer.alloc(31), Buffer.alloc(12)),
   () => crypto.createCipheriv("chacha20-poly1305", Buffer.alloc(32), Buffer.alloc(8)),
@@ -139,7 +139,7 @@ async fn aead_ciphers_match_known_vectors() {
         "openBad": "Unsupported state or unable to authenticate data",
         "chacha": ["d31a8d34648e60db7b86afbc53ef7ec2", "1ae10b594f09e26a7e902ecbd0600691"],
         "shortTag": 8,
-        "ciphers": ["aes-128-gcm", "aes-256-gcm", "chacha20-poly1305", "id-aes128-gcm", "id-aes256-gcm"],
+        "ciphers": true,
         "codes": ["ERR_PI_UNSUPPORTED", "ERR_CRYPTO_UNKNOWN_CIPHER", "ERR_CRYPTO_INVALID_KEYLEN", "ERR_CRYPTO_INVALID_IV", "ERR_CRYPTO_INVALID_STATE"]
     });
     assert_same_keys(&run(CIPHER_SCRIPT).await, &expected);
@@ -188,7 +188,7 @@ for (const f of [
   () => crypto.generateKeyPairSync("ec", { namedCurve: "nope" }),
   () => ecdh.computeSecret(Buffer.from("04" + "00".repeat(64), "hex")),
   () => crypto.createPrivateKey("garbage"),
-  () => crypto.generateKeyPairSync("dsa", { modulusLength: 1024 }),
+  () => crypto.generateKeyPairSync("dsa", { modulusLength: 1000 }),
   () => crypto.generateKeyPairSync("nope"),
   () => crypto.createSign("sha256").update("x").sign(ed),
   () => crypto.diffieHellman({ privateKey: ed, publicKey: alice }),

@@ -1,18 +1,19 @@
 //! Operations on asymmetric keys: generation, signatures, RSA encryption, and key agreement.
 
 use num_bigint::BigUint;
-use ring::signature::{ED25519, Ed25519KeyPair, UnparsedPublicKey};
 use serde_json::Value;
 
 use super::bigint::{from_hex, generate_prime, modp_group, random_below, to_fixed};
-use super::der::{self, Der};
+use super::der::{self, Der, fixed};
+use super::dsa::Dsa;
 use super::ec;
-use super::keys::{Key, ec_private, okp_public};
+use super::keys::{Key, ec_private, okp_private};
+use super::okp::Okp;
 use super::random_bytes;
 use super::rsa::{self, Rsa};
 use crate::error::JsError;
 
-fn not_supported_for_key() -> JsError {
+pub(super) fn not_supported_for_key() -> JsError {
     JsError::new("error:1C8000A5:Provider routines::operation not supported for this keytype")
         .with_code("ERR_OSSL_EVP_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE")
 }
@@ -22,19 +23,14 @@ pub(super) fn generate(kind: &str, options: &Value) -> Result<Key, JsError> {
     let text = |name: &str| options.get(name).and_then(Value::as_str).unwrap_or_default();
     match kind {
         "rsa" | "rsa-pss" => {
-            let bits = number("modulusLength").unwrap_or(0);
-            let e = BigUint::from(number("publicExponent").unwrap_or(65537));
-            Ok(Key::Rsa { pss: kind == "rsa-pss", rsa: Rsa::generate(bits, &e)? })
+            let rsa = Rsa::generate(number("modulusLength").unwrap_or(0), number("publicExponent").unwrap_or(65537))?;
+            Ok(Key::Rsa { pss: kind == "rsa-pss", rsa })
         }
         "ec" => {
             let curve = ec::curve(text("namedCurve")).ok_or_else(ec::invalid_curve)?;
-            ec_private(curve, curve.params().random_scalar()?)
+            ec_private(curve, &curve.generate())
         }
-        "ed25519" | "x25519" => {
-            let seed = random_bytes(32)?;
-            let x25519 = kind == "x25519";
-            Ok(Key::Okp { x25519, public: okp_public(x25519, &seed)?, private: Some(seed) })
-        }
+        "dsa" => Ok(Key::Dsa(Dsa::generate(number("modulusLength").unwrap_or(0), number("divisorLength"))?)),
         "dh" => {
             let g = BigUint::from(number("generator").unwrap_or(2));
             let p = if !text("group").is_empty() {
@@ -48,29 +44,32 @@ pub(super) fn generate(kind: &str, options: &Value) -> Result<Key, JsError> {
             let x = random_below(&(&p - 3u8))? + 2u8;
             Ok(Key::Dh { public: g.modpow(&x, &p), p, g, private: Some(x) })
         }
-        other => Err(JsError::unsupported(&format!("crypto {other} keys"))),
+        other => match Okp::from_name(other) {
+            Some(okp) => okp_private(okp, random_bytes(okp.size())?),
+            None => Err(JsError::unsupported(&format!("crypto {other} keys"))),
+        },
     }
 }
 
-fn ecdsa_encode(curve: &ec::Params, (r, s): (BigUint, BigUint), p1363: bool) -> Vec<u8> {
+/// DER `SEQUENCE { r, s }` from `r || s`, or the fixed-size IEEE P1363 form unchanged.
+fn signature_encode(signature: Vec<u8>, p1363: bool) -> Vec<u8> {
     if p1363 {
-        let size = curve.n.bits().div_ceil(8) as usize;
-        [to_fixed(&r, size), to_fixed(&s, size)].concat()
-    } else {
-        der::seq(&[der::uint(&r.to_bytes_be()), der::uint(&s.to_bytes_be())])
+        return signature;
     }
+    let (r, s) = signature.split_at(signature.len() / 2);
+    der::seq(&[der::uint(r), der::uint(s)])
 }
 
-fn ecdsa_decode(curve: &ec::Params, signature: &[u8], p1363: bool) -> Option<(BigUint, BigUint)> {
+/// `r || s` with `half`-byte halves from a DER or IEEE P1363 signature.
+fn signature_decode(signature: &[u8], half: usize, p1363: bool) -> Option<Vec<u8>> {
     if p1363 {
-        let size = curve.n.bits().div_ceil(8) as usize;
-        return (signature.len() == 2 * size)
-            .then(|| (BigUint::from_bytes_be(&signature[..size]), BigUint::from_bytes_be(&signature[size..])));
+        return (signature.len() == 2 * half).then(|| signature.to_vec());
     }
     let mut outer = Der::new(signature);
     let mut inner = outer.seq().ok()?;
-    let pair = (BigUint::from_bytes_be(inner.uint().ok()?), BigUint::from_bytes_be(inner.uint().ok()?));
-    (inner.is_empty() && outer.is_empty()).then_some(pair)
+    let (r, s) = (inner.uint().ok()?, inner.uint().ok()?);
+    let fits = |value: &[u8]| fixed(value, 0).len() <= half;
+    (inner.is_empty() && outer.is_empty() && fits(r) && fits(s)).then(|| [fixed(r, half), fixed(s, half)].concat())
 }
 
 /// Signature options; `padding == 0` and `salt_length == None` select Node's defaults.
@@ -100,14 +99,10 @@ pub(super) fn sign(key: &Key, data: &[u8], options: &SignOptions) -> Result<Vec<
             rsa.sign(hash, data, padding, options.salt_length.unwrap_or(rsa::SALTLEN_MAX))
         }
         Key::Ec { curve, d: Some(d), .. } => {
-            let params = curve.params();
-            let signature = params.sign(d, &super::digest(hash, data)?)?;
-            Ok(ecdsa_encode(&params, signature, options.p1363))
+            Ok(signature_encode(curve.sign(d, &super::digest(hash, data)?)?, options.p1363))
         }
-        Key::Okp { x25519: false, private: Some(seed), .. } => {
-            let pair = Ed25519KeyPair::from_seed_unchecked(seed).map_err(|_| der::unsupported_key())?;
-            Ok(pair.sign(data).as_ref().to_vec())
-        }
+        Key::Dsa(dsa) if dsa.x.is_some() => Ok(signature_encode(dsa.sign(&super::digest(hash, data)?)?, options.p1363)),
+        Key::Okp { kind, private: Some(seed), .. } if kind.is_signing() => kind.sign(seed, data),
         _ => Err(not_supported_for_key()),
     }
 }
@@ -120,14 +115,16 @@ pub(super) fn verify(key: &Key, data: &[u8], signature: &[u8], options: &SignOpt
             rsa.verify(hash, data, signature, padding, options.salt_length.unwrap_or(rsa::SALTLEN_MAX))
         }
         Key::Ec { curve, point, .. } => {
-            let params = curve.params();
             let hashed = super::digest(hash, data)?;
-            Ok(ecdsa_decode(&params, signature, options.p1363)
-                .is_some_and(|(r, s)| params.verify(point, &hashed, &r, &s)))
+            Ok(signature_decode(signature, curve.size, options.p1363)
+                .is_some_and(|signature| curve.verify(point, &hashed, &signature)))
         }
-        Key::Okp { x25519: false, public, .. } => {
-            Ok(UnparsedPublicKey::new(&ED25519, public).verify(data, signature).is_ok())
+        Key::Dsa(dsa) => {
+            let hashed = super::digest(hash, data)?;
+            Ok(signature_decode(signature, dsa.scalar_size(), options.p1363)
+                .is_some_and(|signature| dsa.verify(&hashed, &signature)))
         }
+        Key::Okp { kind, public, .. } if kind.is_signing() => kind.verify(public, data, signature),
         _ => Err(not_supported_for_key()),
     }
 }
@@ -155,11 +152,12 @@ pub(super) fn rsa_crypt(
 pub(super) fn agree(private: &Key, public: &Key) -> Result<Vec<u8>, JsError> {
     match (private, public) {
         (Key::Ec { curve, d: Some(d), .. }, Key::Ec { curve: other, point, .. }) if curve.name == other.name => {
-            let params = curve.params();
-            params.ecdh(d, &params.encode(point, 4))
+            curve.ecdh(d, point)
         }
-        (Key::Okp { x25519: true, private: Some(secret), .. }, Key::Okp { x25519: true, public, .. }) => {
-            ec::x25519(secret, public)
+        (Key::Okp { kind, private: Some(secret), .. }, Key::Okp { kind: other, public, .. })
+            if kind == other && !kind.is_signing() =>
+        {
+            kind.agree(secret, public)
         }
         (Key::Dh { p, g, private: Some(x), .. }, Key::Dh { p: other_p, g: other_g, public, .. })
             if p == other_p && g == other_g =>

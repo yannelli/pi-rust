@@ -153,8 +153,14 @@ class AsymmetricKeyObject extends KeyObject {
     if (format !== "pem" && format !== "der") throw invalidValue("options.format", format);
     const types = isPrivate ? ["pkcs1", "pkcs8", "sec1"] : ["pkcs1", "spki"];
     if (!types.includes(type)) throw invalidValue("options.type", type);
-    if (cipher !== undefined) throw internal.unsupported("crypto encrypted private key export");
-    const bytes = nativeCrypto.keyExport(isPrivate, this._der, format, type);
+    let passphrase;
+    if (cipher !== undefined) {
+      if (!isPrivate) throw codeError(TypeError, "ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS", "The selected key encoding does not support encryption.");
+      validateString(cipher, "options.cipher");
+      if (options.passphrase === undefined) throw invalidValue("options.passphrase", options.passphrase);
+      passphrase = latin1(options.passphrase, undefined, "options.passphrase");
+    }
+    const bytes = nativeCrypto.keyExport(isPrivate, this._der, format, type, cipher, passphrase);
     return format === "pem" ? toBuffer(bytes).toString("latin1") : toBuffer(bytes);
   }
 }
@@ -183,7 +189,8 @@ function parseKeyData(kind, data, options, name) {
   if (format !== "pem" && format !== "der") throw invalidValue(`${name}.format`, format);
   if (typeof data !== "string" && !isBytes(data)) throw invalidArg(name, KEY_INPUT, data);
   const type = options.type === undefined ? "" : options.type;
-  return internal.bytesToLatin1(nativeCrypto.keyParse(kind, format, type, latin1(data, options.encoding, name)));
+  const passphrase = options.passphrase === undefined || options.passphrase === null ? undefined : latin1(options.passphrase, undefined, `${name}.passphrase`);
+  return internal.bytesToLatin1(nativeCrypto.keyParse(kind, format, type, latin1(data, options.encoding, name), passphrase));
 }
 
 function splitKeyInput(key, name) {
@@ -203,7 +210,8 @@ function asymmetricKey(input, kind, name = "key") {
   if (kind === "public") {
     try {
       return { key: new PrivateKeyObject(parseKeyData("private", data, options, name)), options };
-    } catch {
+    } catch (error) {
+      if (error && (error.code === "ERR_MISSING_PASSPHRASE" || error.code === "ERR_OSSL_BAD_DECRYPT")) throw error;
       return { key: new PublicKeyObject(parseKeyData("public", data, options, name)), options };
     }
   }
@@ -257,8 +265,11 @@ function prepareKeyPair(type, options) {
     else validateInteger(opts.primeLength, "options.primeLength", 0, 2 ** 31 - 1);
     params.primeLength = opts.primeLength;
     params.generator = opts.generator;
-  } else if (type === "dsa" || type === "ed448" || type === "x448") {
-    throw internal.unsupported(`crypto.generateKeyPair('${type}')`);
+  } else if (type === "dsa") {
+    validateInteger(opts.modulusLength, "options.modulusLength", 0, 2 ** 32 - 1);
+    if (opts.divisorLength !== undefined && opts.divisorLength !== null) validateInteger(opts.divisorLength, "options.divisorLength", 0, 2 ** 31 - 1);
+    params.modulusLength = opts.modulusLength;
+    params.divisorLength = opts.divisorLength === null ? undefined : opts.divisorLength;
   }
   for (const name of ["publicKeyEncoding", "privateKeyEncoding"]) if (opts[name] !== undefined) validateObject(opts[name], `options.${name}`);
   return () => {
