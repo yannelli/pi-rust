@@ -9,6 +9,9 @@ use pi_chord::facets::{FacetHost, LoadedFacets};
 use pi_chord::services::{RemoteServiceSource, ServiceHandle};
 use pi_chord::state::MutableReplicatedState;
 use pi_chord::{BACKGROUND_CONTEXT, BoxFuture, ChordResult, Unsubscribe};
+use pi_tui::autocomplete::{
+    ArgumentCompleter, AutocompleteItem, CombinedAutocompleteProvider, CommandEntry, SlashCommand,
+};
 use pi_tui::components::select_list::SelectItem;
 use pi_tui::components::{StackChild, StackEntryOptions};
 use pi_tui::layout_node::StackBasis;
@@ -19,7 +22,7 @@ use super::client_runtime::ClientRuntimeServer;
 use super::client_tui::ExperimentalClientTui;
 use super::client_tui_chat::ExperimentalChatView;
 use super::services::agent_controller::AgentControllerClient;
-use super::services::slash_commands::SlashCommandRegistry;
+use super::services::slash_commands::{SlashCommandCompletion, SlashCommandContribution, SlashCommandRegistry};
 
 pub type WhenAttached = Arc<dyn Fn(String) -> BoxFuture<ChordResult<()>> + Send + Sync>;
 
@@ -147,4 +150,34 @@ impl Component for InputAdapter {
     fn is_focusable(&self) -> bool {
         true
     }
+}
+
+/// The editor's completion of the registered slash commands and their arguments.
+pub(super) fn autocomplete_provider(
+    commands: Vec<SlashCommandContribution>,
+    cwd: String,
+) -> CombinedAutocompleteProvider {
+    let item = |completion: SlashCommandCompletion| {
+        let item = AutocompleteItem::new(completion.value, completion.label);
+        match completion.description {
+            Some(description) => item.with_description(description),
+            None => item,
+        }
+    };
+    let entries = commands
+        .into_iter()
+        .map(|command| {
+            let mut entry = SlashCommand::new(&command.name, command.description.as_deref());
+            entry.argument_hint = command.argument_hint.clone();
+            entry.get_argument_completions = command.get_argument_completions.clone().map(|complete| {
+                let complete: ArgumentCompleter = Rc::new(move |prefix: &str| {
+                    let items = complete(prefix).map(|items| items.into_iter().map(item).collect());
+                    Box::pin(async move { items })
+                });
+                complete
+            });
+            CommandEntry::Command(entry)
+        })
+        .collect();
+    CombinedAutocompleteProvider::new(entries, cwd, None)
 }

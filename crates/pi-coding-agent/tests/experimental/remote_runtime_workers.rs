@@ -4,6 +4,8 @@
 use std::time::Duration;
 
 use pi_chord::BACKGROUND_CONTEXT;
+use pi_coding_agent::experimental::cli::ClientCommand;
+use pi_coding_agent::experimental::client::{ClientResult, run_client};
 use pi_coding_agent::experimental::process::{kill_pid, process_exists};
 use pi_coding_agent::experimental::server_runtime::{StartServerOptions, start_server};
 use pi_coding_agent::experimental::services::agent_controller::{
@@ -18,7 +20,9 @@ use pi_coding_agent::experimental::services::sessions::{
 };
 use pi_coding_agent::experimental::services::transcript::TRANSCRIPT;
 
-use super::remote_support::{attach_client, attach_session, connect, fixture, list_sessions, temp_dir, wait_until};
+use super::remote_support::{
+    attach_client, attach_session, client_options, connect, fixture, list_sessions, temp_dir, wait_until,
+};
 use super::service_binding::{Errors, create_server_service_binding, create_session_service_binding};
 
 fn session_ids(handle: &pi_chord::services::ServiceHandle) -> Vec<String> {
@@ -91,8 +95,22 @@ async fn hydrates_and_mutates_server_session_services_across_framed_clients() {
 // The Models, model-default, Session plugin, and attachment-fencing cases run the coding agent Session
 // worker; they are in `remote_runtime_models.rs`.
 
-// "composes management attachment with Session service hydration" and "answers a client prompt through
-// the worker-owned service provider" go through `openClientRuntime` and `runClient` (step 3).
+// "composes management attachment with Session service hydration" reads the Models service of the coding
+// agent Session worker; it is in `remote_runtime_models.rs`.
+
+#[tokio::test]
+async fn answers_a_client_prompt_through_the_worker_owned_service_provider() {
+    let fixture = fixture().await;
+    let (directory, runtime) = fixture.make_server().await;
+    let command =
+        ClientCommand { session_id: Some("demo-1".into()), prompt: Some("question".into()), ..Default::default() };
+    let result = run_client(&command, client_options(directory.path())).await.unwrap();
+    assert!(
+        matches!(&result, ClientResult::Prompted { text, .. } if text == "deterministic remote answer"),
+        "{result:?}"
+    );
+    runtime.close().await.unwrap();
+}
 
 #[tokio::test]
 async fn replicates_the_transcript_after_consecutive_prompts() {
@@ -181,7 +199,7 @@ async fn discovers_workers_after_replacing_the_server() {
     assert!(wait_until(Duration::from_secs(5), || async { first.worker_pids().is_empty() }).await);
     assert!(process_exists(worker_pid));
     let expected: Vec<(String, String)> = ["demo-1", "demo-2"].map(|id| (first.server_id.clone(), id.into())).into();
-    assert_eq!(list_sessions(&replacement.server_id, &replacement.socket_path).await, expected);
+    assert_eq!(list_sessions(directory.path()).await, expected);
     let _again = attach_client(&replacement, "demo-1").await;
     assert_eq!(replacement.worker_pids().get("demo-1"), Some(&worker_pid));
     let _second = attach_client(&replacement, "demo-2").await;
@@ -205,7 +223,7 @@ async fn restores_tracked_sessions_that_are_outside_the_replacement_catalog() {
     };
     let replacement = start_server(options).await.unwrap();
     first.closed().await.unwrap();
-    let listed = list_sessions(&replacement.server_id, &replacement.socket_path).await;
+    let listed = list_sessions(directory.path()).await;
     assert_eq!(listed, [(first.server_id.clone(), "demo-1".to_string())]);
     let _again = attach_client(&replacement, "demo-1").await;
     assert_eq!(replacement.worker_pids().get("demo-1"), Some(&worker_pid));

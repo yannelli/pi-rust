@@ -7,9 +7,12 @@ use std::time::Duration;
 use pi_chord::BACKGROUND_CONTEXT;
 use pi_client::unix::{UnixTransportOptions, create_unix_transport_factory};
 use pi_client::{Client, ClientOptions};
+use pi_coding_agent::experimental::cli::ClientCommand;
+use pi_coding_agent::experimental::client::{ClientResult, run_client};
+use pi_coding_agent::experimental::client_runtime::OpenClientRuntimeOptions;
 use pi_coding_agent::experimental::server_runtime::{RunningServer, StartServerOptions, start_server};
 use pi_coding_agent::experimental::services::sessions::{
-    SESSION_DIRECTORY, SESSION_MANAGEMENT, SessionManagement, SessionManagementClient, session_directory_state,
+    SESSION_MANAGEMENT, SessionManagement, SessionManagementClient,
 };
 use pi_coding_agent::experimental::session_catalog::{SessionCatalogMetadata, create_session};
 
@@ -93,17 +96,19 @@ pub async fn attach_client(runtime: &RunningServer, session_id: &str) -> Client 
     client
 }
 
-/// The `(serverId, sessionId)` pairs one server lists; this stands in for step 3's `runClient` listing.
-pub async fn list_sessions(server_id: &str, socket_path: &Path) -> Vec<(String, String)> {
-    let client = connect(server_id, socket_path).await;
-    let errors = Errors::default();
-    let services = create_server_service_binding(&client, &[&SESSION_DIRECTORY], &errors);
-    let directory = services.use_service(&SESSION_DIRECTORY);
-    services.ready(&BACKGROUND_CONTEXT).await.unwrap();
-    let state = session_directory_state(&directory).unwrap().unwrap();
-    services.dispose(&BACKGROUND_CONTEXT).await.unwrap();
-    client.dispose();
-    state.sessions.into_iter().map(|session| (session.server_id, session.session_id)).collect()
+/// Client options for a server directory; Rust tests name it, as they cannot stub `PI_SERVER_DIR`.
+pub fn client_options(directory: &Path) -> OpenClientRuntimeOptions {
+    OpenClientRuntimeOptions { directory: Some(directory.display().to_string()), ..OpenClientRuntimeOptions::default() }
+}
+
+/// The `(serverId, sessionId)` pairs `runClient` lists for the servers it discovers in `directory`.
+pub async fn list_sessions(directory: &Path) -> Vec<(String, String)> {
+    match run_client(&ClientCommand::default(), client_options(directory)).await.unwrap() {
+        ClientResult::List { sessions } => {
+            sessions.into_iter().map(|session| (session.server_id, session.session_id)).collect()
+        }
+        other => panic!("expected a Session list, got {other:?}"),
+    }
 }
 
 pub async fn wait_until<F, Fut>(timeout: Duration, mut check: F) -> bool

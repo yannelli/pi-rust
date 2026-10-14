@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 
 use pi_chord::node::read_facet_bundle_manifest;
 use pi_chord::{BACKGROUND_CONTEXT, Json};
+use pi_coding_agent::experimental::cli::{ClientCommand, TransportAddress};
+use pi_coding_agent::experimental::client_runtime::{activate_builtin_client_services, open_client_runtime};
 use pi_coding_agent::experimental::plugins::bundled::{
     create_presentation_facet_data, create_presentation_facet_loaders,
 };
@@ -11,15 +13,10 @@ use pi_coding_agent::experimental::plugins::package::{
     create_server_plugin_package, restore_server_plugin_package_profile,
 };
 use pi_coding_agent::experimental::server_runtime::{StartServerOptions, start_server};
-use pi_coding_agent::experimental::services::plugins::{
-    PRESENTATION_PLUGINS, PrepareSessionRequest, PresentationPlugins, PresentationPluginsClient,
-};
-use pi_coding_agent::experimental::services::sessions::{
-    SESSION_MANAGEMENT, SessionCreateOptions, SessionManagement, SessionManagementClient,
-};
+use pi_coding_agent::experimental::services::plugins::{PrepareSessionRequest, PresentationPlugins};
+use pi_coding_agent::experimental::services::sessions::{SessionCreateOptions, SessionManagement};
 
-use super::remote_support::{connect, temp_dir};
-use super::service_binding::{Errors, create_server_service_binding};
+use super::remote_support::{client_options, temp_dir};
 
 const TUI: &str = r#"import { defineFacet } from "@earendil-works/chord"; import { SlashCommands } from "@earendil-works/pi-coding-agent/experimental/plugin"; export default defineFacet({ id: "ID", setup(env) { env.use(SlashCommands); } });
 "#;
@@ -41,7 +38,16 @@ fn write_package(path: &Path, name: &str, peers: &str, entry: &str, source: &str
     std::fs::write(path.join("src").join(entry), source).unwrap();
 }
 
-// "rejects local plugin paths for Radius servers" checks `openClientRuntime` (step 3).
+#[tokio::test]
+async fn rejects_local_plugin_paths_for_radius_servers() {
+    let command = ClientCommand {
+        connect: Some(TransportAddress::Radius { server_id: pi_server::random_uuid() }),
+        plugin_packages: Some(vec!["./local-plugin".into()]),
+        ..ClientCommand::default()
+    };
+    let error = open_client_runtime(&command, Default::default()).await.err().unwrap();
+    assert!(error.to_string().contains("only be configured on a local Unix server"), "{error}");
+}
 
 #[tokio::test]
 async fn restores_plugin_package_selections_for_later_server_generations() {
@@ -100,13 +106,10 @@ async fn builds_conventional_plugin_entries_into_the_server_owned_plugin_cache()
     })
     .await
     .unwrap();
-    // Upstream drives this through `openClientRuntime` (step 3); the same server services are bound here.
-    let client = connect(&running.server_id, &running.socket_path).await;
-    let errors = Errors::default();
-    let services = create_server_service_binding(&client, &[&SESSION_MANAGEMENT, &PRESENTATION_PLUGINS], &errors);
-    let management = SessionManagementClient(services.use_service(&SESSION_MANAGEMENT));
-    let plugins = PresentationPluginsClient(services.use_service(&PRESENTATION_PLUGINS));
-    services.ready(&BACKGROUND_CONTEXT).await.unwrap();
+    let client_runtime =
+        open_client_runtime(&ClientCommand::default(), client_options(&server_directory)).await.unwrap();
+    let activated = activate_builtin_client_services(&client_runtime.servers[0]).await.unwrap();
+    let (management, plugins) = (&activated.management, &activated.plugins);
     let session_id = pi_server::random_uuid();
     management.create(SessionCreateOptions { id: Some(session_id.clone()) }, &BACKGROUND_CONTEXT).await.unwrap();
     let package_paths = vec![package_path.display().to_string(), second_package.display().to_string()];
@@ -120,8 +123,7 @@ async fn builds_conventional_plugin_entries_into_the_server_owned_plugin_cache()
     std::fs::write(&source_path, TUI.replace("ID", "built-c")).unwrap();
     let reloaded = plugins.reload(&BACKGROUND_CONTEXT).await.unwrap();
     assert_eq!(loaded_ids(&reloaded).await, ["built-c", "second-built"]);
-    services.dispose(&BACKGROUND_CONTEXT).await.unwrap();
-    client.dispose();
+    client_runtime.dispose().await.unwrap();
     running.close().await.unwrap();
 }
 

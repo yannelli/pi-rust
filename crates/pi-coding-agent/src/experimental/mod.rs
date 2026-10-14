@@ -16,6 +16,8 @@ pub mod client_tui_parts;
 pub mod client_tui_run;
 #[cfg(unix)]
 mod client_tui_session;
+#[cfg(all(test, unix))]
+mod client_tui_tests;
 #[cfg(unix)]
 pub mod commands;
 #[cfg(unix)]

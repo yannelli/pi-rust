@@ -41,8 +41,23 @@ pub fn install() {
     });
     // Upstream's test environment is offline: background servers then start their Radius relay unauthenticated.
     pi_ai::env::set_child_process_env("PI_OFFLINE", "1");
+    // Cold-activated servers run the real Session worker, which reads the agent directory from the environment.
+    pi_ai::env::set_child_process_env("PI_CODING_AGENT_DIR", child_agent_dir().display().to_string());
     set_internal_process_program(None, Some(PathBuf::from(env!("CARGO_BIN_EXE_pi"))));
     set_internal_process_program(Some(InternalProcessRole::SessionWorker), Some(script.clone()));
+}
+
+/// One agent directory with Anthropic credentials for every child process (upstream stubs the env var).
+fn child_agent_dir() -> &'static PathBuf {
+    static AGENT_DIR: OnceLock<PathBuf> = OnceLock::new();
+    AGENT_DIR.get_or_init(|| {
+        let agent_dir = tempfile::Builder::new().prefix("pi-child-agent-").tempdir_in("/tmp").unwrap().keep();
+        let auth = serde_json::json!({ "anthropic": { "type": "api_key", "key": "test-key" } });
+        std::fs::write(agent_dir.join("auth.json"), auth.to_string()).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(agent_dir.join("auth.json"), std::fs::Permissions::from_mode(0o600)).unwrap();
+        agent_dir
+    })
 }
 
 #[test]

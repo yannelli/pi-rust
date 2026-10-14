@@ -9,7 +9,6 @@ use async_trait::async_trait;
 use pi_chord::facets::{Facet, combine_facet_loaders, define_facet};
 use pi_chord::state::StateListener;
 use pi_chord::{BACKGROUND_CONTEXT, ChordError, ChordResult, Context, Json};
-use pi_tui::autocomplete::{AutocompleteItem, CombinedAutocompleteProvider, CommandEntry, SlashCommand};
 use pi_tui::components::select_list::SelectItem;
 use tokio::sync::oneshot;
 
@@ -18,7 +17,7 @@ use super::client::resolve_path;
 use super::client_runtime::open_services;
 use super::client_tui::ExperimentalClientTui;
 use super::client_tui_chat::{ExperimentalChatView, live_of};
-use super::client_tui_parts::{ActiveServices, ClientTuiServer, FacetState, Lane, Shared};
+use super::client_tui_parts::{ActiveServices, ClientTuiServer, FacetState, Lane, Shared, autocomplete_provider};
 use super::plugins::bundled::create_presentation_facet_loaders;
 use super::services::agent_controller::{
     AGENT_CONTROLLER, AgentController, AgentControllerClient, AgentOperationResponse, AgentPromptRequest,
@@ -253,32 +252,8 @@ fn message(error: &ChordError) -> String {
 impl ExperimentalClientTui {
     pub(super) fn update_autocomplete(&self) {
         let commands = self.shared.services().map(|services| services.commands.list()).unwrap_or_default();
-        let entries = commands
-            .into_iter()
-            .map(|command| {
-                let mut entry = SlashCommand::new(&command.name, command.description.as_deref());
-                entry.argument_hint = command.argument_hint.clone();
-                entry.get_argument_completions = command.get_argument_completions.clone().map(|complete| {
-                    let complete: pi_tui::autocomplete::ArgumentCompleter = Rc::new(move |prefix: &str| {
-                        let items = complete(prefix).map(|items| {
-                            let item = |completion: super::services::slash_commands::SlashCommandCompletion| {
-                                let item = AutocompleteItem::new(completion.value, completion.label);
-                                match completion.description {
-                                    Some(description) => item.with_description(description),
-                                    None => item,
-                                }
-                            };
-                            items.into_iter().map(item).collect()
-                        });
-                        Box::pin(async move { items })
-                    });
-                    complete
-                });
-                CommandEntry::Command(entry)
-            })
-            .collect();
         let cwd = self.cwd.display().to_string();
-        self.editor.set_autocomplete_provider(Rc::new(CombinedAutocompleteProvider::new(entries, cwd, None)));
+        self.editor.set_autocomplete_provider(Rc::new(autocomplete_provider(commands, cwd)));
         (self.request_render)();
     }
 

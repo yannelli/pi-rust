@@ -9,15 +9,13 @@ use std::time::Duration;
 use pi_chord::BACKGROUND_CONTEXT;
 use pi_chord::services::ServiceRef;
 use pi_chord::state::StateListener;
+use pi_coding_agent::experimental::cli::{ClientCommand, TransportAddress};
+use pi_coding_agent::experimental::client_runtime::{activate_builtin_client_services, open_client_runtime};
 use pi_coding_agent::experimental::server_runtime::{RunningServer, StartServerOptions, start_server};
 use pi_coding_agent::experimental::services::connection::SessionAttachmentState;
 use pi_coding_agent::experimental::services::models::{MODELS, ModelRef, Models, ModelsClient};
-use pi_coding_agent::experimental::services::plugins::{
-    PRESENTATION_PLUGINS, PrepareSessionRequest, PresentationPlugins, PresentationPluginsClient,
-};
-use pi_coding_agent::experimental::services::sessions::{
-    SESSION_MANAGEMENT, SessionManagement, SessionManagementClient,
-};
+use pi_coding_agent::experimental::services::plugins::{PrepareSessionRequest, PresentationPlugins};
+use pi_coding_agent::experimental::services::sessions::SessionManagement;
 use pi_coding_agent::experimental::session_catalog::{read_session, session_storage_path};
 use pi_durable::harness::AGENT_DOC;
 use pi_durable::session::{SessionOptions, create_session};
@@ -27,9 +25,9 @@ use serde_json::json;
 
 use super::faux_worker::{self, REAL_AGENT_PREFIX};
 use super::remote_support::{
-    attach_client, attach_session, connect, create_experimental_sessions, temp_dir, wait_until,
+    attach_client, attach_session, client_options, connect, create_experimental_sessions, temp_dir, wait_until,
 };
-use super::service_binding::{Errors, create_server_service_binding, create_session_service_binding};
+use super::service_binding::{Errors, create_session_service_binding};
 
 fn sonnet() -> Option<ModelRef> {
     Some(ModelRef { provider: "anthropic".into(), model_id: "claude-sonnet-4-5".into() })
@@ -168,22 +166,18 @@ async fn loads_conventional_session_facets_from_multiple_configured_plugin_packa
     )
     .unwrap();
     let runtime = start_server(fixture.options(directory.path(), true)).await.unwrap();
-    // Upstream goes through `openClientRuntime` and `activateBuiltinClientServices` (step 3); the server
-    // services they wrap are used directly here.
-    let client = connect(&runtime.server_id, &runtime.socket_path).await;
-    let errors = Errors::default();
-    let server = create_server_service_binding(&client, &[&PRESENTATION_PLUGINS, &SESSION_MANAGEMENT], &errors);
-    let plugins = PresentationPluginsClient(server.use_service(&PRESENTATION_PLUGINS));
-    let management = SessionManagementClient(server.use_service(&SESSION_MANAGEMENT));
-    server.ready(&BACKGROUND_CONTEXT).await.unwrap();
+    let client_runtime =
+        open_client_runtime(&ClientCommand::default(), client_options(directory.path())).await.unwrap();
+    let activated = activate_builtin_client_services(&client_runtime.servers[0]).await.unwrap();
     let example = env!("CARGO_MANIFEST_DIR").to_string() + "/examples/plugins/pi-example-plugin";
     let package_paths = Some(vec![example, second_package.display().to_string()]);
     let request = PrepareSessionRequest { session_id: "demo-1".into(), package_paths };
-    plugins.prepare_session(request, &BACKGROUND_CONTEXT).await.unwrap();
-    management.attach("demo-1".into(), &BACKGROUND_CONTEXT).await.unwrap();
+    activated.plugins.prepare_session(request, &BACKGROUND_CONTEXT).await.unwrap();
+    activated.management.attach("demo-1".into(), &BACKGROUND_CONTEXT).await.unwrap();
+    let (client, errors) = (&client_runtime.servers[0].client, Errors::default());
     let (example_service, second_service) =
         (ServiceRef::remote("pi.example-plugin.greeting"), ServiceRef::remote("test.second-plugin"));
-    let services = create_session_service_binding(&client, &[&example_service, &second_service], &errors);
+    let services = create_session_service_binding(client, &[&example_service, &second_service], &errors);
     services.ready(&BACKGROUND_CONTEXT).await.unwrap();
     let greeting = services.use_service(&example_service);
     let reply = greeting.call("greet", vec![json!({ "name": "Armin" }).into()], &BACKGROUND_CONTEXT).await.unwrap();
@@ -191,8 +185,26 @@ async fn loads_conventional_session_facets_from_multiple_configured_plugin_packa
     let second = services.use_service(&second_service).call("read", Vec::new(), &BACKGROUND_CONTEXT).await.unwrap();
     assert_eq!(second.map(|value| value.to_serde()), Some(json!("second")));
     services.dispose(&BACKGROUND_CONTEXT).await.unwrap();
-    server.dispose(&BACKGROUND_CONTEXT).await.unwrap();
-    client.dispose();
+    client_runtime.dispose().await.unwrap();
+    runtime.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn composes_management_attachment_with_session_service_hydration() {
+    let fixture = real_fixture().await;
+    let directory = temp_dir("pes-compose-");
+    let runtime = start_server(fixture.options(directory.path(), true)).await.unwrap();
+    let connect = TransportAddress::Unix { path: runtime.socket_path.display().to_string() };
+    let command = ClientCommand { connect: Some(connect), ..ClientCommand::default() };
+    let client_runtime = open_client_runtime(&command, Default::default()).await.unwrap();
+    let server = activate_builtin_client_services(&client_runtime.servers[0]).await.unwrap();
+    let request = PrepareSessionRequest { session_id: "demo-1".into(), package_paths: None };
+    server.plugins.prepare_session(request, &BACKGROUND_CONTEXT).await.unwrap();
+    server.management.attach("demo-1".into(), &BACKGROUND_CONTEXT).await.unwrap();
+    let attached = SessionAttachmentState::Attached { session_id: "demo-1".into() };
+    assert_eq!(server.server.session.attachment_state(), Some(attached));
+    assert_eq!(server.models.state().unwrap().unwrap().configuration.model, sonnet());
+    client_runtime.dispose().await.unwrap();
     runtime.close().await.unwrap();
 }
 
