@@ -108,6 +108,19 @@ fn refuse_windows_directory(path: &str, kind: io::ErrorKind) -> io::Result<()> {
     Ok(())
 }
 
+/// libuv renames with `MoveFileExW`, which cannot replace a directory or move one onto an existing path; Rust's
+/// rename on Windows fails differently there.
+fn refuse_windows_rename(from: &str, to: &str) -> io::Result<()> {
+    if cfg!(windows) && from != to {
+        if let (Ok(source), Ok(target)) = (std::fs::symlink_metadata(from), std::fs::symlink_metadata(to)) {
+            if source.is_dir() || target.is_dir() {
+                return Err(io::ErrorKind::PermissionDenied.into());
+            }
+        }
+    }
+    Ok(())
+}
+
 fn create_parent(path: &str) -> io::Result<()> {
     match Path::new(path).parent() {
         Some(parent) if !parent.as_os_str().is_empty() => std::fs::create_dir_all(parent),
@@ -325,7 +338,11 @@ impl FileSystem for LocalExecutionEnv {
     async fn rename_file(&self, source: &str, destination: &str, context: &Context) -> FileResult<()> {
         let (source, destination) = (self.resolve(source), self.resolve(destination));
         check(context, &destination)?;
-        self.run(source, context, move |source| std::fs::rename(source, destination)).await
+        self.run(source, context, move |source| {
+            refuse_windows_rename(source, &destination)?;
+            std::fs::rename(source, destination)
+        })
+        .await
     }
 
     async fn file_info(&self, path: &str, context: &Context) -> FileResult<FileInfo> {
