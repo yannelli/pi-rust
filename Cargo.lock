@@ -3284,6 +3284,7 @@ dependencies = [
  "ring",
  "rquickjs",
  "rsa",
+ "rusqlite",
  "rustls",
  "serde",
  "serde_json",

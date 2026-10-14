@@ -5,7 +5,7 @@ use rquickjs::{Ctx, Function, Object};
 
 use super::set_fn;
 use crate::error::JsError;
-use crate::resolve::NODE_BUILTINS;
+use crate::resolve::{NODE_BUILTINS, PREFIX_ONLY};
 use crate::runtime::convert::throw;
 
 /// `(name, source)`. Names are Node's without `node:`; `internal/` names are private helpers.
@@ -100,6 +100,7 @@ const SOURCES: &[(&str, &str)] = &[
     ("internal/worker_ports", include_str!("../js/worker_ports.js")),
     ("worker_threads", include_str!("../js/worker_threads.js")),
     ("cluster", include_str!("../js/cluster.js")),
+    ("sqlite", include_str!("../js/sqlite.js")),
     (
         "constants",
         "module.exports = { ...require('os').constants.errno, ...require('os').constants.signals, ...require('os').constants.priority, ...require('internal/fs_utils').constants };",
@@ -115,6 +116,7 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
     let object = Object::new(ctx.clone())?;
     set_fn(&object, "compile", compile)?;
     set_fn(&object, "list", || supported().map(str::to_string).collect::<Vec<_>>())?;
+    set_fn(&object, "prefixOnly", || PREFIX_ONLY.iter().map(|name| name.to_string()).collect::<Vec<_>>())?;
     Ok(object)
 }
 

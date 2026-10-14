@@ -21,6 +21,8 @@ mod net_server;
 mod os;
 mod pipe;
 mod ports;
+mod sqlite;
+mod sqlite_fn;
 pub(crate) mod sys;
 mod tls;
 pub(crate) mod vm;
@@ -58,6 +60,7 @@ pub(crate) fn install(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
     native.set("http2", http2::natives(ctx)?)?;
     native.set("vm", vm::natives(ctx)?)?;
     native.set("worker", ports::natives(ctx)?)?;
+    native.set("sqlite", sqlite::natives(ctx)?)?;
     native.set("asyncContext", context::natives(ctx)?)?;
     core::install(ctx, &native)?;
     let config = core::config(ctx)?;
