@@ -2404,6 +2404,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-tungstenite",
  "tokio-util",
  "two-face",
  "unicode-normalization",

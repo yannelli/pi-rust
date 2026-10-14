@@ -14,6 +14,8 @@ use pi_server::transports::unix::{UnixServerOptions, create_unix_server, get_uni
 use super::control::signals;
 use super::coordinator::{CoordinatorConnection, WorkerCoordinator, ensure_coordinator};
 use super::plugins::package::restore_server_plugin_package_profile;
+use super::radius_auth::RadiusRelayAuthResolver;
+use super::radius_relay::radius_relay_host_factory;
 use super::relay::{NoRelayHost, RelayHost, RelayHostFactory, RelayHostOptions, RelayStatusListener};
 use super::server::{
     ENV_SERVER_ID, ServerLifetime, acquire_server_activation, acquire_server_profile, ensure_private_server_directory,
@@ -38,7 +40,7 @@ pub struct StartServerOptions {
     pub keep_alive: Option<bool>,
     /// Explicit plugin packages. `None` restores the server profile; an empty list clears it.
     pub plugin_packages: Option<Vec<String>>,
-    /// TODO(step 2): the Radius relay host from radius-relay.ts and radius-auth.ts. `None` runs local only.
+    /// The relay host, such as `radius_relay::radius_relay_host_factory`. `None` runs local only.
     pub relay: Option<RelayHostFactory>,
     pub on_relay_status: Option<RelayStatusListener>,
 }
@@ -177,6 +179,10 @@ async fn start(
         Some(factory) => factory(RelayHostOptions {
             server_id: server_id.to_string(),
             socket_path: socket_path.clone(),
+            accept: {
+                let server = server.clone();
+                Arc::new(move |connection| server.accept(connection))
+            },
             on_status: options.on_relay_status.clone(),
         }),
         None => Arc::new(NoRelayHost),
@@ -302,6 +308,7 @@ pub async fn run_server_process(args: &[String]) -> ChordResult<()> {
         keep_alive: Some(false),
         provider: model.as_ref().and_then(|(provider, _)| provider.clone()),
         model: model.map(|(_, model)| model),
+        relay: Some(radius_relay_host_factory(Arc::new(RadiusRelayAuthResolver::new(None, None)), None)),
         ..StartServerOptions::default()
     })
     .await?;

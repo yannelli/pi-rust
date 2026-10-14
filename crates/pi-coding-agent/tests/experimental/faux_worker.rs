@@ -39,6 +39,8 @@ pub fn install() {
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         script
     });
+    // Upstream's test environment is offline: background servers then start their Radius relay unauthenticated.
+    pi_ai::env::set_child_process_env("PI_OFFLINE", "1");
     set_internal_process_program(None, Some(PathBuf::from(env!("CARGO_BIN_EXE_pi"))));
     set_internal_process_program(Some(InternalProcessRole::SessionWorker), Some(script.clone()));
 }

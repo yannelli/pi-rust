@@ -8,19 +8,21 @@ use pi_chord::ChordResult;
 
 use super::control::signals;
 use super::process::lock;
-use super::relay::{RadiusRelayHostStatus, RelayHostFactory};
+use super::radius_auth::{RadiusAuthInput, RadiusRelayAuthResolver};
+use super::radius_relay::radius_relay_host_factory;
+use super::relay::RadiusRelayHostStatus;
 use super::server_runtime::{StartServerOptions, start_foreground_server};
 
 /// Options of `pi server`.
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ServerCommand {
     pub server_id: Option<String>,
     pub session_dir: Option<String>,
     pub provider: Option<String>,
     pub model: Option<String>,
     pub plugin_packages: Option<Vec<String>>,
-    /// TODO(step 2): built from the command's Radius auth input by radius-auth.ts.
-    pub relay: Option<RelayHostFactory>,
+    /// Explicit Radius credential. Stored Radius auth is used when omitted.
+    pub auth: Option<RadiusAuthInput>,
 }
 
 fn describe(status: &RadiusRelayHostStatus) -> Option<String> {
@@ -57,7 +59,7 @@ pub async fn run_server_command(command: ServerCommand) -> ChordResult<()> {
         provider: command.provider,
         model: command.model,
         plugin_packages: Some(command.plugin_packages.unwrap_or_default()),
-        relay: command.relay,
+        relay: Some(radius_relay_host_factory(Arc::new(RadiusRelayAuthResolver::new(command.auth, None)), None)),
         on_relay_status: Some(Arc::new(move |status| {
             let mut output = lock(&status_output);
             if output.ready {

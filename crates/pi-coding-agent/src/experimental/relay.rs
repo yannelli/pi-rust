@@ -1,10 +1,10 @@
-//! The minimal relay interface the server needs. TODO(step 2): radius-relay.ts and radius-auth.ts provide
-//! the Radius relay host and its auth resolver behind this interface.
+//! The relay interface the server needs. `radius_relay` provides the Radius relay host behind it.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use pi_chord::{BoxFuture, ChordResult};
+use pi_server::ByteConnectionAcceptor;
 
 /// Relay connection states reported to the operator (upstream `RadiusRelayHostStatus`).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,6 +21,8 @@ pub struct RelayHostOptions {
     pub server_id: String,
     /// The server's public socket, which relayed connections reach.
     pub socket_path: PathBuf,
+    /// The server's `accept`, for connections the relay carries.
+    pub accept: ByteConnectionAcceptor,
     pub on_status: Option<RelayStatusListener>,
 }
 

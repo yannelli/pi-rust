@@ -15,6 +15,14 @@ pub mod plugin;
 pub mod plugins;
 pub mod process;
 #[cfg(unix)]
+pub mod radius_auth;
+#[cfg(unix)]
+pub mod radius_client;
+#[cfg(unix)]
+pub mod radius_relay;
+#[cfg(unix)]
+mod radius_socket;
+#[cfg(unix)]
 pub mod relay;
 #[cfg(unix)]
 pub mod server;
