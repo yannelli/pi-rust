@@ -88,27 +88,8 @@ async fn hydrates_and_mutates_server_session_services_across_framed_clients() {
     runtime.close().await.unwrap();
 }
 
-// The Models, model-default, Session plugin, and attachment-fencing cases need the coding agent Session
-// worker's ModelRuntime and plugin loading. TODO(step 2): port them once durable/harness-setup exists.
-#[tokio::test]
-#[ignore = "TODO(step 2): needs the coding agent Session worker"]
-async fn hydrates_and_updates_the_models_service_across_concurrent_framed_clients() {}
-
-#[tokio::test]
-#[ignore = "TODO(step 2): needs the coding agent Session worker"]
-async fn preserves_an_existing_session_model_when_the_server_default_changes() {}
-
-#[tokio::test]
-#[ignore = "TODO(step 2): needs the coding agent Session worker and plugin loading"]
-async fn loads_conventional_session_facets_from_multiple_configured_plugin_packages() {}
-
-#[tokio::test]
-#[ignore = "TODO(step 2): needs the coding agent Session worker"]
-async fn uses_the_most_recently_selected_model_for_a_new_session() {}
-
-#[tokio::test]
-#[ignore = "TODO(step 2): needs the Models service of the coding agent Session worker"]
-async fn fences_superseded_attachment_hydration_by_attachment_generation() {}
+// The Models, model-default, Session plugin, and attachment-fencing cases run the coding agent Session
+// worker; they are in `remote_runtime_models.rs`.
 
 // "composes management attachment with Session service hydration" and "answers a client prompt through
 // the worker-owned service provider" go through `openClientRuntime` and `runClient` (step 3).

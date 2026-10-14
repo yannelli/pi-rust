@@ -9,6 +9,7 @@ pub mod control;
 pub mod coordinator;
 #[cfg(unix)]
 pub mod coordinator_process;
+pub mod durable;
 pub mod lockfile;
 pub mod plugin;
 pub mod plugins;
@@ -31,6 +32,9 @@ mod session_worker_attach;
 #[cfg(unix)]
 mod session_worker_events;
 #[cfg(unix)]
+pub mod session_worker_harness;
+#[cfg(unix)]
 pub mod session_worker_manager;
 #[cfg(unix)]
 pub mod session_worker_run;
+pub mod vacation;

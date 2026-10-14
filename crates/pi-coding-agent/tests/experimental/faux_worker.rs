@@ -12,6 +12,7 @@ use pi_coding_agent::experimental::process::{
     InternalProcessRole, consume_internal_process_role, set_internal_process_program,
 };
 use pi_coding_agent::experimental::services::worker::SessionWorkerRuntime;
+use pi_coding_agent::experimental::session_worker_harness::create_coding_agent_harness;
 use pi_coding_agent::experimental::session_worker_run::run_session_worker_with_harness;
 use pi_durable::harness::types::{AgentChange, Change, ModelRef};
 use pi_durable::harness::{CreateOptions, Harness, HarnessOptions, RegistryReader, create_registry};
@@ -49,6 +50,11 @@ fn faux_worker_entry() {
     }
     let options = std::env::args().next_back().unwrap_or_default();
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+    if let Some(agent_dir) = real_agent_dir(&options) {
+        let result =
+            runtime.block_on(run_session_worker_with_harness(&[options], create_coding_agent_harness(agent_dir)));
+        std::process::exit(if result.is_ok() { 0 } else { 1 });
+    }
     let result = runtime.block_on(run_session_worker_with_harness(
         &[options],
         Arc::new(|path, options| {
@@ -86,6 +92,19 @@ fn faux_worker_entry() {
         }),
     ));
     std::process::exit(if result.is_ok() { 0 } else { 1 });
+}
+
+/// Prefix of agent directories whose Sessions run the real coding agent worker instead of the faux one.
+pub const REAL_AGENT_PREFIX: &str = "pi-real-agent-";
+
+/// The agent directory of a real-worker Session: Rust tests cannot stub `PI_CODING_AGENT_DIR`, so the worker
+/// takes it from its Session directory, `<agent dir>/experimental/sessions`.
+fn real_agent_dir(options: &str) -> Option<PathBuf> {
+    let options: serde_json::Value = serde_json::from_str(options).ok()?;
+    let sessions = PathBuf::from(options["sessionDir"].as_str()?);
+    let agent_dir = sessions.parent()?.parent()?.to_path_buf();
+    let name = agent_dir.file_name()?.to_string_lossy().into_owned();
+    name.starts_with(REAL_AGENT_PREFIX).then_some(agent_dir)
 }
 
 fn keyed_probe_setup(env: &FacetEnvironment) -> pi_chord::ChordResult<()> {

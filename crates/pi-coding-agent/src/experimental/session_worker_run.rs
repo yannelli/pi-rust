@@ -38,16 +38,16 @@ pub type CreateSessionWorkerHarness =
 
 static DEFAULT_HARNESS: OnceLock<CreateSessionWorkerHarness> = OnceLock::new();
 
-/// Install the coding agent Harness factory the `session-worker` role uses.
+/// Replace the coding agent Harness factory the `session-worker` role uses.
 pub fn set_default_session_worker_harness(create: CreateSessionWorkerHarness) {
     let _ = DEFAULT_HARNESS.set(create);
 }
 
 pub async fn run_session_worker_process(args: &[String]) -> ChordResult<()> {
-    // TODO(step 2): upstream's createCodingAgentHarness needs durable/harness-setup; step 2 installs it here.
-    let create = DEFAULT_HARNESS.get().cloned().unwrap_or_else(|| {
-        Arc::new(|_, _| Box::pin(async { Err(ChordError::error("The coding agent Session worker is not ported yet")) }))
-    });
+    let create = DEFAULT_HARNESS
+        .get()
+        .cloned()
+        .unwrap_or_else(|| super::session_worker_harness::create_coding_agent_harness(crate::config::agent_dir()));
     let result = run_session_worker_with_harness(args, create).await;
     if result.is_err() {
         std::process::exit(1);

@@ -62,7 +62,7 @@ async fn rejects_a_provider_without_a_model() {
 }
 
 // "preserves an existing Session model when the server default changes" needs the coding agent Session
-// worker; it is in `remote_runtime_workers.rs` as an ignored test until step 2.
+// worker; it is in `remote_runtime_models.rs`.
 
 #[tokio::test]
 async fn rejects_model_options_when_discovery_selects_an_existing_server() {

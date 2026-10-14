@@ -1,6 +1,7 @@
 //! Ports of upstream `test/experimental-*.test.ts` for the server, coordinator, workers, and services.
 
 mod agent_controller;
+mod durable_app;
 mod durable_support;
 #[cfg(unix)]
 mod faux_worker;
@@ -8,6 +9,8 @@ mod faux_worker;
 mod presentation_facets;
 #[cfg(unix)]
 mod remote_runtime;
+#[cfg(unix)]
+mod remote_runtime_models;
 #[cfg(unix)]
 mod remote_runtime_workers;
 #[cfg(unix)]
