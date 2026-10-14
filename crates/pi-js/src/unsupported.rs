@@ -43,6 +43,8 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
     "worker_threads: worker.getHeapSnapshot, postMessageToThread, and resourceLimits other than the heap \
      and stack sizes (accepted)",
     "fetch: Body.formData for multipart bodies, request bodies are buffered before sending",
+    "sqlite: createSession, applyChangeset, enableLoadExtension(true), and loadExtension (the bundled SQLite \
+     has no session extension, and native extensions do not load)",
 ];
 
 /// Supported behavior that differs from Node.
@@ -91,6 +93,8 @@ pub const DIFFERENCES: &[&str] = &[
      worker.performance reports no event loop use; moveMessagePortToContext returns the same port",
     "zlib: deflate output can differ in bytes from Node's zlib (zlib-rs); memLevel and strategy are \
      validated but not applied; brotli error codes come from the Rust decoder",
+    "sqlite: statement.iterate() reads every row when it is called rather than one row per next(), and \
+     a StatementSync prepares its SQL through the connection's statement cache on each call",
 ];
 
 #[cfg(test)]
@@ -121,6 +125,7 @@ mod tests {
             "vm",
             "worker_threads",
             "cluster",
+            "sqlite",
         ] {
             assert!(supported.contains(&name) && !unsupported.contains(&name), "{name}");
         }
