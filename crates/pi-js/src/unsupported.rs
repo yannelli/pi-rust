@@ -25,6 +25,7 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
     "child_process: stdio entries that are streams or descriptors above 2, sending handles over IPC \
      (ERR_INVALID_HANDLE_TYPE)",
     "net: sockets and servers from a file descriptor or an existing handle, reusePort",
+    "dgram: addSourceSpecificMembership, dropSourceSpecificMembership, and bind with a file descriptor",
     "process: binding, dlopen, setUncaughtExceptionCaptureCallback, and running code after process.exit when \
      the embedder's on_exit callback returns (the runtime is shutting down)",
     "stream: Duplex.from for promises and web streams; stream/web BYOB readers, \
@@ -51,6 +52,10 @@ pub const DIFFERENCES: &[&str] = &[
      follows awaits through a source rewrite, and an await with a store set takes one extra microtask",
     "v8: heap statistics come from QuickJS memory use, heap snapshots have no nodes, setFlagsFromString \
      and promiseHooks do nothing, and strings with only Latin-1 characters always count as one-byte",
+    "dns: lookup filters getaddrinfo results by family and hints after the call, and every failure other \
+     than a temporary one is ENOTFOUND; the resolve family uses hickory-resolver instead of c-ares, \
+     never uses search domains, and Resolver.setLocalAddress does nothing",
+    "net: connecting to several looked-up addresses tries them one after another, not in parallel",
     "zlib: deflate output can differ in bytes from Node's zlib (zlib-rs); memLevel and strategy are \
      validated but not applied; brotli error codes come from the Rust decoder",
 ];

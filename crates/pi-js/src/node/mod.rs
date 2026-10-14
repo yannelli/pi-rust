@@ -5,6 +5,8 @@ mod child;
 mod context;
 mod core;
 mod crypto;
+mod dgram;
+mod dns;
 pub(crate) mod encoding;
 pub(crate) mod fetch;
 pub(crate) mod fs;
@@ -42,6 +44,8 @@ pub(crate) fn install(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
     native.set("fetch", fetch::natives(ctx)?)?;
     native.set("zlib", zlib::natives(ctx)?)?;
     native.set("net", net::natives(ctx)?)?;
+    native.set("dns", dns::natives(ctx)?)?;
+    native.set("dgram", dgram::natives(ctx)?)?;
     native.set("tls", tls::natives(ctx)?)?;
     native.set("asyncContext", context::natives(ctx)?)?;
     core::install(ctx, &native)?;

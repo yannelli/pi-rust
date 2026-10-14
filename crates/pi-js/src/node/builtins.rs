@@ -81,6 +81,9 @@ const SOURCES: &[(&str, &str)] = &[
     ("internal/net_address", include_str!("../js/net_address.js")),
     ("internal/net_socket", include_str!("../js/net_socket.js")),
     ("net", include_str!("../js/net.js")),
+    ("dns", include_str!("../js/dns.js")),
+    ("dns/promises", "module.exports = require('dns').promises;"),
+    ("dgram", include_str!("../js/dgram.js")),
     (
         "constants",
         "module.exports = { ...require('os').constants.errno, ...require('os').constants.signals, ...require('os').constants.priority, ...require('internal/fs_utils').constants };",
