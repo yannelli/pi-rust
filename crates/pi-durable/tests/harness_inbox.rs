@@ -1,5 +1,12 @@
-//! Port of upstream `test/harness-inbox.test.ts` (queueing, boundaries, resets, and usage).
+//! Port of upstream `test/harness-inbox.test.ts`. The modules under `harness_inbox/` hold the remaining boundary,
+//! continuation, storage, and usage cases.
 
+#[path = "harness_inbox/boundaries.rs"]
+mod boundaries;
+#[path = "harness_inbox/continuations.rs"]
+mod continuations;
+#[path = "harness_inbox/ledger.rs"]
+mod ledger;
 mod support;
 
 use std::sync::{Arc, Mutex};
