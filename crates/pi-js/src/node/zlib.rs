@@ -479,7 +479,7 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
     set_fn(&object, "crc32", |input: TypedArray<'js, u8>, initial: u32| {
         let mut hasher = crc32fast::Hasher::new_with_initial(initial);
         hasher.update(&bytes_of(&input));
-        hasher.finalize()
+        f64::from(hasher.finalize())
     })?;
     Ok(object)
 }
