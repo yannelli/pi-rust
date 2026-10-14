@@ -5,10 +5,16 @@
 mod agents;
 #[path = "examples/chat.rs"]
 mod chat;
+#[path = "examples/coding.rs"]
+mod coding;
+#[path = "examples/compaction.rs"]
+mod compaction;
 #[path = "examples/harness.rs"]
 mod harness;
 #[path = "examples/session.rs"]
 mod session;
+#[path = "examples/subagents.rs"]
+mod subagents;
 mod support;
 #[path = "examples/tools.rs"]
 mod tools;
