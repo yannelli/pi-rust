@@ -4,13 +4,38 @@ const config = internal.config;
 const process = new EventEmitter();
 const nativeProcess = native.process;
 
+// With SHARE_ENV, `internal.envStore` names a native store that workers share.
+const store = () => internal.envStore;
+const nativeEnv = () => native.worker;
 const env = new Proxy(config.env, {
+  get(target, key, receiver) {
+    if (store() === undefined || typeof key !== "string") return Reflect.get(target, key, receiver);
+    return nativeEnv().envGet(store(), key) ?? undefined;
+  },
+  has(target, key) {
+    if (store() === undefined || typeof key !== "string") return Reflect.has(target, key);
+    return nativeEnv().envGet(store(), key) != null;
+  },
+  ownKeys(target) {
+    return store() === undefined ? Reflect.ownKeys(target) : nativeEnv().envKeys(store()) || [];
+  },
+  getOwnPropertyDescriptor(target, key) {
+    if (store() === undefined || typeof key !== "string") return Reflect.getOwnPropertyDescriptor(target, key);
+    const value = nativeEnv().envGet(store(), key);
+    return value == null ? undefined : { value, writable: true, enumerable: true, configurable: true };
+  },
+  deleteProperty(target, key) {
+    if (store() !== undefined && typeof key === "string") nativeEnv().envDelete(store(), key);
+    return Reflect.deleteProperty(target, key);
+  },
   set(target, key, value) {
+    if (store() !== undefined && typeof key === "string") nativeEnv().envSet(store(), key, String(value));
     target[key] = String(value);
     return true;
   },
   defineProperty(target, key, descriptor) {
     if ("value" in descriptor) descriptor.value = String(descriptor.value);
+    if (store() !== undefined && typeof key === "string" && "value" in descriptor) nativeEnv().envSet(store(), key, descriptor.value);
     return Reflect.defineProperty(target, key, descriptor);
   },
 });

@@ -19,10 +19,12 @@ mod net;
 mod net_server;
 mod os;
 mod pipe;
+mod ports;
 pub(crate) mod sys;
 mod tls;
 pub(crate) mod vm;
 mod watch;
+mod worker;
 mod x509;
 mod zlib;
 
@@ -54,6 +56,7 @@ pub(crate) fn install(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
     native.set("http", http::natives(ctx)?)?;
     native.set("http2", http2::natives(ctx)?)?;
     native.set("vm", vm::natives(ctx)?)?;
+    native.set("worker", ports::natives(ctx)?)?;
     native.set("asyncContext", context::natives(ctx)?)?;
     core::install(ctx, &native)?;
     let config = core::config(ctx)?;

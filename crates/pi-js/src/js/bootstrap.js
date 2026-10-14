@@ -374,7 +374,7 @@
   internal.handleUncaught = function handleUncaught(kind, error) {
     if (kind === "uncaughtException" && internal.domainHandler && internal.domainHandler(error)) return true;
     const process = builtinCache.get("process");
-    if (!process || process.exports.listenerCount(kind) === 0) return false;
+    if (!process || process.exports.listenerCount(kind) === 0) return internal.workerUncaught ? internal.workerUncaught(error) : false;
     process.exports.emit(kind, error);
     return true;
   };
@@ -405,7 +405,8 @@
     buffer: ["Buffer", "Blob", "atob", "btoa"],
     url: ["URL", "URLSearchParams"],
     "internal/web": ["EventTarget", "Event", "CustomEvent", "AbortController", "AbortSignal", "DOMException",
-      "TextEncoder", "TextDecoder", "structuredClone"],
+      "TextEncoder", "TextDecoder"],
+    "internal/worker_ports": ["MessageChannel", "MessagePort", "BroadcastChannel", "MessageEvent", "structuredClone"],
     "internal/fetch": ["fetch", "Headers", "Request", "Response", "FormData"],
     "stream/web": ["ReadableStream", "ReadableStreamDefaultReader", "ReadableStreamDefaultController", "WritableStream",
       "WritableStreamDefaultWriter", "WritableStreamDefaultController", "TransformStream", "TransformStreamDefaultController",

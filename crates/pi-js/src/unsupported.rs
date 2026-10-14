@@ -38,6 +38,8 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
     "v8: queryObjects",
     "vm: SourceTextModule, SyntheticModule, and Module (Node needs --experimental-vm-modules for them), \
      and breakOnSigint (accepted and ignored)",
+    "worker_threads: worker.getHeapSnapshot, postMessageToThread, and resourceLimits other than the heap \
+     and stack sizes (accepted)",
     "fetch: Body.formData for multipart bodies, request bodies are buffered before sending",
 ];
 
@@ -77,6 +79,10 @@ pub const DIFFERENCES: &[&str] = &[
      `this` and `globalThis` inside it are that context's own global, not the object, globals the code \
      declares are copied to the object when each run ends, cached data is accepted but not used, and \
      microtaskMode 'afterEvaluate' runs every pending microtask of the runtime after the script",
+    "worker_threads: a SharedArrayBuffer is copied, not shared, because each worker is a separate QuickJS \
+     runtime; a worker writes straight to the parent's output unless stdout or stderr is set; \
+     MessagePort is an EventEmitter with addEventListener and onmessage rather than an EventTarget; \
+     worker.performance reports no event loop use; moveMessagePortToContext returns the same port",
     "zlib: deflate output can differ in bytes from Node's zlib (zlib-rs); memLevel and strategy are \
      validated but not applied; brotli error codes come from the Rust decoder",
 ];
@@ -107,6 +113,7 @@ mod tests {
             "https",
             "http2",
             "vm",
+            "worker_threads",
         ] {
             assert!(supported.contains(&name) && !unsupported.contains(&name), "{name}");
         }

@@ -97,6 +97,8 @@ const SOURCES: &[(&str, &str)] = &[
     ("internal/http2_compat", include_str!("../js/http2_compat.js")),
     ("http2", include_str!("../js/http2.js")),
     ("vm", include_str!("../js/vm.js")),
+    ("internal/worker_ports", include_str!("../js/worker_ports.js")),
+    ("worker_threads", include_str!("../js/worker_threads.js")),
     (
         "constants",
         "module.exports = { ...require('os').constants.errno, ...require('os').constants.signals, ...require('os').constants.priority, ...require('internal/fs_utils').constants };",
