@@ -8,3 +8,11 @@ pub mod reopening;
 pub mod session_support;
 #[allow(unused_imports)]
 pub use session_support::*;
+#[allow(dead_code)]
+pub mod chat;
+#[allow(dead_code)]
+pub mod harness_support;
+#[allow(dead_code)]
+pub mod models_support;
+#[allow(dead_code)]
+pub mod task_support;
