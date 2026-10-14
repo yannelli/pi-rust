@@ -1,6 +1,8 @@
 //! TLS for `node:tls` on rustls: client and server configs built from Node's options (`ca`,
-//! `cert`, `key`, `rejectUnauthorized`, ALPN, SNI, versions) and the handshake info JS reads.
+//! `cert`, `key`, `rejectUnauthorized`, ALPN, SNI, versions, sessions) and the handshake info
+//! JS reads.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rquickjs::{Ctx, Value};
@@ -12,9 +14,12 @@ use rustls::{CertificateError, DigitallySignedStruct, Error as TlsError, RootCer
 use serde::Deserialize;
 use serde_json::json;
 
-use super::net::{BoxIo, parse_options};
+use super::net::{BoxIo, Sender, parse_options};
+use super::tls_session::{Credentials, SessionStore};
+use super::tls_sni::SniFlag;
 use crate::error::JsError;
 use crate::runtime::convert::throw;
+use crate::runtime::state::state;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,13 +35,25 @@ struct Options {
     max_version: Option<String>,
     #[serde(default)]
     request_cert: bool,
+    /// A session handle from an earlier connection, in hex.
+    session: Option<String>,
+    /// The resource that says whether a server asks JavaScript for SNI contexts.
+    sni_flag: Option<u64>,
 }
 
 /// A client or server TLS setup for one connection or listener.
 #[derive(Clone)]
 pub(crate) enum Tls {
-    Client { connector: tokio_rustls::TlsConnector, name: ServerName<'static>, verifier: Arc<Verifier> },
-    Server(tokio_rustls::TlsAcceptor),
+    Client {
+        connector: tokio_rustls::TlsConnector,
+        name: ServerName<'static>,
+        verifier: Arc<Verifier>,
+        session: Arc<SessionStore>,
+    },
+    Server {
+        acceptor: tokio_rustls::TlsAcceptor,
+        sni: Option<Arc<AtomicBool>>,
+    },
 }
 
 /// Checks the chain with webpki and records why it failed; host names are checked in JS.
@@ -160,14 +177,31 @@ fn config_error(error: TlsError) -> JsError {
     JsError::new(error.to_string()).with_code("ERR_SSL_CONFIG")
 }
 
+/// The settings that verification and the client certificate depend on.
+fn credentials_key(options: &Options, reject: bool) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (&options.ca, reject, &options.cert, &options.key).hash(&mut hasher);
+    hasher.finish()
+}
+
 fn client(options: Options) -> Result<Tls, JsError> {
     let provider = provider();
-    let inner =
-        rustls::client::WebPkiServerVerifier::builder_with_provider(Arc::new(roots(&options.ca)?), provider.clone())
-            .build()
-            .map_err(|error| JsError::new(error.to_string()))?;
     let reject = options.reject_unauthorized.unwrap_or(true);
-    let verifier = Arc::new(Verifier { inner, reject, failure: Mutex::new(None) });
+    let handle = options.session.as_deref().and_then(from_hex);
+    let session = SessionStore::new(handle.as_deref());
+    let key = credentials_key(&options, reject);
+    let reused = session.credentials(key);
+    let verifier = match &reused {
+        Some(credentials) => credentials.verifier.clone(),
+        None => {
+            let roots = Arc::new(roots(&options.ca)?);
+            let inner = rustls::client::WebPkiServerVerifier::builder_with_provider(roots, provider.clone())
+                .build()
+                .map_err(|error| JsError::new(error.to_string()))?;
+            Arc::new(Verifier { inner, reject, failure: Mutex::new(None) })
+        }
+    };
     let builder = rustls::ClientConfig::builder_with_provider(provider)
         .with_protocol_versions(&versions(&options))
         .map_err(config_error)?
@@ -178,10 +212,29 @@ fn client(options: Options) -> Result<Tls, JsError> {
         None => builder.with_no_client_auth(),
     };
     config.alpn_protocols = options.alpn.iter().map(|name| name.as_bytes().to_vec()).collect();
+    match reused {
+        Some(credentials) => config.client_auth_cert_resolver = credentials.resolver,
+        None => session.keep_credentials(Credentials {
+            key,
+            verifier: verifier.clone(),
+            resolver: config.client_auth_cert_resolver.clone(),
+        }),
+    }
+    config.resumption = rustls::client::Resumption::store(session.clone());
     let host = options.servername.unwrap_or_else(|| "localhost".into());
     let name = ServerName::try_from(host.trim_start_matches('[').trim_end_matches(']').to_string())
         .map_err(|_| JsError::type_error(format!("Invalid servername: {host}")))?;
-    Ok(Tls::Client { connector: Arc::new(config).into(), name, verifier })
+    Ok(Tls::Client { connector: Arc::new(config).into(), name, verifier, session })
+}
+
+fn from_hex(text: &str) -> Option<Vec<u8>> {
+    let digits = text.as_bytes();
+    let value = |digit: u8| (digit as char).to_digit(16);
+    digits.chunks(2).map(|pair| Some((value(pair[0])? * 16 + value(*pair.get(1)?)?) as u8)).collect()
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn server(options: Options) -> Result<Tls, JsError> {
@@ -202,10 +255,14 @@ fn server(options: Options) -> Result<Tls, JsError> {
     };
     let mut config = builder.with_single_cert(certs, key).map_err(config_error)?;
     config.alpn_protocols = options.alpn.iter().map(|name| name.as_bytes().to_vec()).collect();
-    Ok(Tls::Server(Arc::new(config).into()))
+    let sni = match options.sni_flag {
+        Some(flag) => Some(state().with_resource(flag, |flag: &mut SniFlag| flag.0.clone())?),
+        None => None,
+    };
+    Ok(Tls::Server { acceptor: Arc::new(config).into(), sni })
 }
 
-fn handshake_error(error: &std::io::Error, failure: Option<(String, String)>) -> JsError {
+pub(crate) fn handshake_error(error: &std::io::Error, failure: Option<(String, String)>) -> JsError {
     if let Some((code, message)) = failure {
         return JsError::new(message).with_code(code);
     }
@@ -242,7 +299,8 @@ fn common_info(connection: &rustls::CommonState) -> serde_json::Value {
     let alpn = connection.alpn_protocol().map(|name| String::from_utf8_lossy(name).into_owned());
     let chain: Vec<_> =
         connection.peer_certificates().unwrap_or_default().iter().map(|cert| super::x509::describe(cert)).collect();
-    json!({ "protocol": protocol, "cipher": cipher, "alpnProtocol": alpn, "peerChain": chain })
+    let reused = connection.handshake_kind() == Some(rustls::HandshakeKind::Resumed);
+    json!({ "protocol": protocol, "cipher": cipher, "alpnProtocol": alpn, "peerChain": chain, "reused": reused })
 }
 
 impl Tls {
@@ -256,9 +314,25 @@ impl Tls {
         built.map(Some).map_err(|error| throw(ctx, &error))
     }
 
-    pub(crate) async fn handshake(self, io: BoxIo) -> Result<(BoxIo, serde_json::Value), JsError> {
+    /// The server config, for a context that SNICallback picked.
+    pub(crate) fn server_config(self) -> Option<Arc<rustls::ServerConfig>> {
         match self {
-            Tls::Client { connector, name, verifier } => {
+            Tls::Server { acceptor, .. } => Some(acceptor.config().clone()),
+            Tls::Client { .. } => None,
+        }
+    }
+
+    /// Run the handshake on `io`. `id` is the socket, or for a server the listener that answers
+    /// SNI questions; both get their events through `sender`.
+    pub(crate) async fn handshake(
+        self,
+        io: BoxIo,
+        sender: &Sender,
+        id: u64,
+    ) -> Result<(BoxIo, serde_json::Value), JsError> {
+        match self {
+            Tls::Client { connector, name, verifier, session } => {
+                session.link(sender, id);
                 let servername = name.to_str().into_owned();
                 let take = || verifier.failure.lock().unwrap_or_else(|poison| poison.into_inner()).take();
                 let stream = connector.connect(name, io).await.map_err(|error| handshake_error(&error, take()))?;
@@ -267,13 +341,20 @@ impl Tls {
                 info["servername"] = json!(servername);
                 info["authorized"] = json!(failure.is_none());
                 info["authorizationError"] = failure.map_or(json!(null), |(code, message)| json!([code, message]));
+                info["session"] = json!(to_hex(&session.handle()));
                 Ok((Box::new(stream), info))
             }
-            Tls::Server(acceptor) => {
-                let stream = acceptor.accept(io).await.map_err(|error| handshake_error(&error, None))?;
+            Tls::Server { acceptor, sni } => {
+                let stream = if sni.is_some_and(|flag| flag.load(Ordering::SeqCst)) {
+                    super::tls_sni::accept(acceptor.config().clone(), io, sender, id).await?
+                } else {
+                    acceptor.accept(io).await.map_err(|error| handshake_error(&error, None))?
+                };
                 let connection = stream.get_ref().1;
                 let mut info = common_info(connection);
-                info["servername"] = json!(connection.server_name());
+                // OpenSSL keeps no server name for a resumed TLS 1.2 session, so Node reports none.
+                let resumed12 = info["reused"] == json!(true) && info["protocol"] == json!("TLSv1.2");
+                info["servername"] = if resumed12 { json!(null) } else { json!(connection.server_name()) };
                 info["authorized"] = json!(connection.peer_certificates().is_some_and(|chain| !chain.is_empty()));
                 Ok((Box::new(stream), info))
             }
@@ -297,5 +378,7 @@ pub(crate) fn root_certificates() -> Vec<String> {
 pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<rquickjs::Object<'js>> {
     let object = rquickjs::Object::new(ctx.clone())?;
     super::set_fn(&object, "rootCertificates", root_certificates)?;
+    super::tls_wrap::natives(&object)?;
+    super::tls_sni::natives(&object)?;
     Ok(object)
 }

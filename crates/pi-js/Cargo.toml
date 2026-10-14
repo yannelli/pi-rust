@@ -69,12 +69,15 @@ h2 = "0.4"
 http = "1"
 httparse = "1.10.1"
 bytes = "1"
+rusqlite = { version = "0.40", features = ["bundled", "backup", "column_decltype", "column_metadata", "functions", "window"] }
+wasmi = { version = "0.46.0", default-features = false, features = ["std", "simd"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.190"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [
+    "Wdk_System_SystemInformation",
     "Win32_Foundation",
     "Win32_NetworkManagement_IpHelper",
     "Win32_NetworkManagement_Ndis",

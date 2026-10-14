@@ -6,20 +6,29 @@ const core = require("internal/http2_core");
 const { ServerHttp2Stream, ClientHttp2Stream, kNative, toHeaders, flatten, validateSettings, DEFAULT_SETTINGS, NO_PAYLOAD, nativeH2, EventEmitter } = core;
 
 const sessionError = (message, code = "ERR_HTTP2_INVALID_SESSION") => codeError(Error, code, message);
+// What a peer's settings are until its SETTINGS frame says otherwise.
+const REMOTE_DEFAULTS = { ...DEFAULT_SETTINGS, maxConcurrentStreams: 4294967295, maxHeaderListSize: 4294967295, maxHeaderSize: 4294967295 };
+const SETTING_NAMES = { 1: "headerTableSize", 2: "enablePush", 3: "maxConcurrentStreams", 4: "initialWindowSize", 5: "maxFrameSize", 6: "maxHeaderListSize", 8: "enableConnectProtocol" };
 
 class Http2Session extends EventEmitter {
   constructor(type, options, socket) {
     super();
     const settings = validateSettings(options.settings);
     Object.assign(this, { type, socket, _streams: new Map(), _nextKey: 1, closed: false, destroyed: false, connecting: true, _closeCallback: null, _goawaySent: false });
+    // Pushed stream keys stay clear of the keys the native session gives incoming streams.
+    Object.assign(this, { _pushKey: 2 ** 32, _peerSettings: null, _settingsReady: false });
     this.localSettings = { ...DEFAULT_SETTINGS, ...settings };
-    this.remoteSettings = { ...DEFAULT_SETTINGS };
+    this.remoteSettings = { ...REMOTE_DEFAULTS };
     this.pendingSettingsAck = true;
     this.encrypted = !!socket.encrypted;
     this.alpnProtocol = socket.encrypted ? socket.alpnProtocol || "h2" : "h2c";
     this.originSet = undefined;
     this[kNative] = nativeH2.session(type === 0, settings, (event, key, value, end, id) => this._onNative(event, key, value, end, id));
-    this._onData = (chunk) => this[kNative] !== null && nativeH2.feed(this[kNative], chunk);
+    this._onData = (chunk) => {
+      if (this[kNative] === null) return;
+      const frames = nativeH2.feed(this[kNative], chunk);
+      if (frames) frames.forEach((frame) => this._onSettings(frame));
+    };
     this._onEnd = () => this[kNative] !== null && nativeH2.endInput(this[kNative]);
     this._onClose = () => this.destroy();
     this._onError = (error) => this.destroy(error);
@@ -36,13 +45,15 @@ class Http2Session extends EventEmitter {
     if (event === "out") {
       if (!this.socket.destroyed) this.socket.write(Buffer.from(value.buffer, value.byteOffset, value.length));
     } else if (event === "ready") {
-      this.remoteSettings = { ...DEFAULT_SETTINGS, maxConcurrentStreams: value.maxConcurrentStreams };
+      this.remoteSettings = { ...REMOTE_DEFAULTS, ...this._peerSettings };
+      this._settingsReady = true;
       this.pendingSettingsAck = false;
       this._ready();
       this.emit("localSettings", { ...this.localSettings });
-      this.emit("remoteSettings", { ...this.remoteSettings });
+      if (this._peerSettings) this.emit("remoteSettings", { ...this.remoteSettings });
     } else if (event === "closed") this._onClosed(value);
     else if (event === "stream") this._onStream(key, value, end, id);
+    else if (event === "promise") this._onPromise(key, value, id);
     else {
       const stream = this._streams.get(key);
       if (stream) stream._onNative(event, value, end);
@@ -51,6 +62,21 @@ class Http2Session extends EventEmitter {
 
   _ready() {
     this.connecting = false;
+  }
+
+  // A SETTINGS frame from the peer, read from the bytes fed to the native session.
+  _onSettings(frame) {
+    this._peerSettings ??= {};
+    for (let index = 0; index < frame.length; index += 2) {
+      const name = SETTING_NAMES[frame[index]];
+      if (!name) continue;
+      const value = name === "enablePush" || name === "enableConnectProtocol" ? frame[index + 1] !== 0 : frame[index + 1];
+      this._peerSettings[name] = value;
+      if (name === "maxHeaderListSize") this._peerSettings.maxHeaderSize = value;
+    }
+    if (!this._settingsReady) return;
+    Object.assign(this.remoteSettings, this._peerSettings);
+    this.emit("remoteSettings", { ...this.remoteSettings });
   }
 
   _onClosed(info) {
@@ -169,6 +195,8 @@ class ServerHttp2Session extends Http2Session {
     this._streams.set(key, stream);
     const headers = toHeaders(raw);
     stream._isHead = headers[":method"] === "HEAD";
+    stream._authority = headers[":authority"] || headers.host;
+    stream._scheme = headers[":scheme"];
     if (end) stream.push(null);
     this.emit("stream", stream, headers, end ? 5 : 4, raw);
   }
@@ -191,6 +219,16 @@ class ClientHttp2Session extends Http2Session {
   }
 
   _ready() {}
+
+  // A stream the server pushed: its request headers from the PUSH_PROMISE.
+  _onPromise(key, raw, id) {
+    const stream = new ClientHttp2Stream(this, key, {});
+    stream.id = id;
+    stream._endSent = true;
+    stream.end();
+    this._streams.set(key, stream);
+    process.nextTick(() => this.emit("stream", stream, toHeaders(raw), 4, raw));
+  }
 
   request(headers = {}, options = {}) {
     if (this.destroyed) throw sessionError("The session has been destroyed");

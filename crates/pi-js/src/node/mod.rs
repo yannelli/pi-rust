@@ -15,15 +15,26 @@ mod fs_output;
 mod handles;
 mod http;
 mod http2;
+mod http2_settings;
 mod http2_stream;
 mod net;
+mod net_connect;
 mod net_server;
 mod os;
+mod os_cpus;
 mod pipe;
 mod ports;
+mod shared;
+mod sqlite;
+mod sqlite_fn;
 pub(crate) mod sys;
 mod tls;
+mod tls_session;
+mod tls_sni;
+mod tls_wrap;
 pub(crate) mod vm;
+mod wasm;
+mod wasm_objects;
 mod watch;
 mod worker;
 mod x509;
@@ -38,6 +49,7 @@ const BOOTSTRAP: &str = include_str!("../js/bootstrap.js");
 
 /// Install natives, run the bootstrap, and keep its internal API object.
 pub(crate) fn install(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
+    shared::install(ctx)?;
     let native = Object::new(ctx.clone())?;
     native.set("modules", crate::modules::cjs::natives(ctx)?)?;
     native.set("builtins", builtins::natives(ctx)?)?;
@@ -58,6 +70,8 @@ pub(crate) fn install(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
     native.set("http2", http2::natives(ctx)?)?;
     native.set("vm", vm::natives(ctx)?)?;
     native.set("worker", ports::natives(ctx)?)?;
+    native.set("sqlite", sqlite::natives(ctx)?)?;
+    native.set("wasm", wasm::natives(ctx)?)?;
     native.set("asyncContext", context::natives(ctx)?)?;
     core::install(ctx, &native)?;
     let config = core::config(ctx)?;

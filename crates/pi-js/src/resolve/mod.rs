@@ -69,9 +69,13 @@ pub const NODE_BUILTINS: &[&str] = &[
     "worker_threads",
     "zlib",
     "test",
+    "test/reporters",
     "sqlite",
     "sea",
 ];
+
+/// Built-in modules that load only with the `node:` prefix, as in Node.
+pub const PREFIX_ONLY: &[&str] = &["sea", "sqlite", "test", "test/reporters"];
 
 /// Whether the import is an ES `import` or a CommonJS `require`; this picks `exports` conditions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -131,7 +135,7 @@ impl ModuleResolver {
                 JsError::new(format!("No such built-in module: {specifier}")).with_code("ERR_UNKNOWN_BUILTIN_MODULE")
             );
         }
-        if NODE_BUILTINS.contains(&specifier) {
+        if NODE_BUILTINS.contains(&specifier) && !PREFIX_ONLY.contains(&specifier) {
             return Ok(Resolved::Builtin(format!("node:{specifier}")));
         }
         if specifier == "pi:host" {

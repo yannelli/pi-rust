@@ -67,6 +67,11 @@ pub(crate) fn run(runtime: &Runtime, context: &Context, receiver: &Receiver<Mess
             break;
         }
         if is_idle(runtime, state) {
+            if state.idle_hooks.replace(false) {
+                call_internal(context, state, "runIdle");
+                drain_jobs(runtime, context, state);
+                continue;
+            }
             for waiter in state.idle_waiters.borrow_mut().drain(..) {
                 let _ = waiter.send(());
             }
@@ -161,10 +166,14 @@ pub(crate) fn drain_jobs(runtime: &Runtime, context: &Context, state: &LoopState
 }
 
 fn run_ticks(context: &Context, state: &LoopState) {
+    call_internal(context, state, "runTicks");
+}
+
+fn call_internal(context: &Context, state: &LoopState, name: &str) {
     context.with(|ctx| {
         let result = state
             .internal(&ctx)
-            .and_then(|internal| internal.get::<_, Function>("runTicks"))
+            .and_then(|internal| internal.get::<_, Function>(name))
             .and_then(|run| run.call::<_, ()>(()));
         if let Err(error) = result {
             report_error(&ctx, UncaughtKind::Exception, error);

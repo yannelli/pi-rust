@@ -96,6 +96,11 @@ impl OutputSink for WorkerOutput {
             self.sink.write(stream, bytes);
         }
     }
+
+    /// A worker's children inherit the process's descriptors in Node, whatever the worker's streams.
+    fn is_process_stdio(&self) -> bool {
+        self.sink.is_process_stdio()
+    }
 }
 
 fn run_worker(options: JsRuntimeOptions, init: String, parent: Sender, id: u64, slot: Slot, stop: Arc<AtomicBool>) {

@@ -191,6 +191,7 @@ async function fetch(input, init = undefined) {
   const headers = new Headers(request.headers);
   if (!headers.has("accept")) headers.set("accept", "*/*");
   if (!headers.has("user-agent")) headers.set("user-agent", "node");
+  if (!headers.has("accept-encoding")) headers.set("accept-encoding", url.protocol === "https:" ? "br, gzip, deflate" : "gzip, deflate");
   const body = request.body ? internal.bytesToLatin1(await request.bytes()) : undefined;
   if (signal.aborted) throw abortReason(signal);
   return new Promise((resolve, reject) => {
@@ -225,6 +226,9 @@ async function fetch(input, init = undefined) {
         signal.removeEventListener("abort", onabort);
         if (headReceived) controller.error(value);
         else reject(value);
+      } else if (kind === "terminated") {
+        signal.removeEventListener("abort", onabort);
+        controller.error(new TypeError("terminated", { cause: value }));
       }
     };
     const nativeRequest = { url: request.url, method: request.method, headers: [...headers], redirect: request.redirect };

@@ -10,15 +10,19 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 use rquickjs::{Array, Ctx, Function, Object, Persistent, TypedArray, Value};
 
 use super::set_fn;
+use super::shared::SharedBlock;
 use crate::runtime::convert::{bytes_of, bytes_to_js};
 use crate::runtime::state::{Message, state};
 use crate::runtime::{UncaughtKind, report_error};
 
-/// One message: the serialized value, transferred `ArrayBuffer` contents, and port ids.
+/// One message: the serialized value, transferred `ArrayBuffer` contents, port ids, and the
+/// memory of each SharedArrayBuffer in it.
+#[derive(Clone)]
 struct Envelope {
     data: Vec<u8>,
     buffers: Vec<Vec<u8>>,
     ports: Vec<u64>,
+    shared: Vec<SharedBlock>,
 }
 
 #[derive(Default)]
@@ -81,7 +85,7 @@ fn post_envelope(id: u64, envelope: Envelope) -> bool {
     true
 }
 
-fn broadcast(id: u64, data: Vec<u8>) {
+fn broadcast(id: u64, envelope: Envelope) {
     let mut ports = lock(&PORTS);
     let Some(group) = ports.get(&id).and_then(|endpoint| endpoint.group.clone()) else { return };
     let targets: Vec<u64> = ports
@@ -90,7 +94,7 @@ fn broadcast(id: u64, data: Vec<u8>) {
         .map(|(other, _)| *other)
         .collect();
     for target in targets {
-        queue(&mut ports, target, Envelope { data: data.clone(), buffers: Vec::new(), ports: Vec::new() });
+        queue(&mut ports, target, envelope.clone());
     }
 }
 
@@ -129,12 +133,38 @@ fn receive<'js>(ctx: Ctx<'js>, id: u64) -> rquickjs::Result<Value<'js>> {
     }
     result.set("buffers", buffers)?;
     result.set("ports", envelope.ports)?;
+    let shared = Array::new(ctx.clone())?;
+    for (index, block) in envelope.shared.iter().enumerate() {
+        shared.set(index, block.adopt(&ctx)?)?;
+    }
+    result.set("shared", shared)?;
     Ok(result.into_value())
 }
 
-fn post<'js>(id: u64, data: TypedArray<'js, u8>, buffers: Vec<TypedArray<'js, u8>>, ports: Vec<u64>) -> bool {
+/// References to the memory of `buffers`, whose maxByteLength values (0 when not growable)
+/// come in `maxima`.
+fn shared_blocks<'js>(
+    ctx: &Ctx<'js>,
+    buffers: Vec<Value<'js>>,
+    maxima: Vec<f64>,
+) -> rquickjs::Result<Vec<SharedBlock>> {
+    let max = |index: usize| maxima.get(index).map(|max| *max as usize);
+    buffers.iter().enumerate().map(|(index, buffer)| SharedBlock::of(ctx, buffer, max(index))).collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn post<'js>(
+    ctx: Ctx<'js>,
+    id: u64,
+    data: TypedArray<'js, u8>,
+    buffers: Vec<TypedArray<'js, u8>>,
+    ports: Vec<u64>,
+    shared: Vec<Value<'js>>,
+    maxima: Vec<f64>,
+) -> rquickjs::Result<bool> {
+    let shared = shared_blocks(&ctx, shared, maxima)?;
     let buffers = buffers.iter().map(bytes_of).collect();
-    post_envelope(id, Envelope { data: bytes_of(&data), buffers, ports })
+    Ok(post_envelope(id, Envelope { data: bytes_of(&data), buffers, ports, shared }))
 }
 
 fn join(name: String) -> u64 {
@@ -178,7 +208,19 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
     set_fn(&object, "receive", receive)?;
     set_fn(&object, "close", close)?;
     set_fn(&object, "join", join)?;
-    set_fn(&object, "broadcast", |id: u64, data: TypedArray<'js, u8>| broadcast(id, bytes_of(&data)))?;
+    set_fn(
+        &object,
+        "broadcast",
+        |ctx: Ctx<'js>, id: u64, data: TypedArray<'js, u8>, shared: Vec<Value<'js>>, maxima: Vec<f64>| {
+            let shared = shared_blocks(&ctx, shared, maxima)?;
+            broadcast(id, Envelope { data: bytes_of(&data), buffers: Vec::new(), ports: Vec::new(), shared });
+            Ok::<_, rquickjs::Error>(())
+        },
+    )?;
+    // A new SharedArrayBuffer over the same memory, for structuredClone in this thread.
+    set_fn(&object, "cloneShared", |ctx: Ctx<'js>, buffer: Value<'js>, max: f64| {
+        SharedBlock::of(&ctx, &buffer, Some(max as usize))?.adopt(&ctx)
+    })?;
     set_fn(&object, "busy", |busy: bool| if busy { state().add_busy() } else { state().remove_busy() })?;
     env_natives(&object)?;
     super::worker::natives(&object)?;

@@ -27,11 +27,9 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
      servers, TLS sockets, and dgram sockets",
     "cluster: workers sharing Unix socket or named pipe servers, and TLS servers (each worker listens on its own)",
     "net: sockets and servers from a file descriptor or an existing handle, reusePort",
-    "tls: TLSSocket over an existing socket or stream (and tls.connect's socket option), SNICallback, \
-     addContext, pfx, encrypted private keys, session resumption, exportKeyingMaterial, and TLS before 1.2",
+    "tls: pfx (no PKCS#12 parser is bundled), encrypted private keys, exportKeyingMaterial, and TLS before 1.2",
     "http: the insecureHTTPParser option (accepted and ignored)",
-    "http2: server push (pushStream and createPushResponse fail with ERR_HTTP2_PUSH_DISABLED), \
-     performServerHandshake, altsvc and origin frames (ignored), custom settings, and stream priority",
+    "http2: performServerHandshake, altsvc and origin frames (ignored), custom settings, and stream priority",
     "dgram: addSourceSpecificMembership, dropSourceSpecificMembership, and bind with a file descriptor",
     "process: binding, dlopen, setUncaughtExceptionCaptureCallback, and running code after process.exit when \
      the embedder's on_exit callback returns (the runtime is shutting down)",
@@ -43,19 +41,27 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
     "worker_threads: worker.getHeapSnapshot, postMessageToThread, and resourceLimits other than the heap \
      and stack sizes (accepted)",
     "fetch: Body.formData for multipart bodies, request bodies are buffered before sending",
+    "sqlite: createSession, applyChangeset, enableLoadExtension(true), and loadExtension (the bundled SQLite \
+     has no session extension, and native extensions do not load)",
+    "test: snapshot assertions (t.assert.snapshot and t.assert.fileSnapshot) and coverage (the lcov reporter)",
+    "inspector: open (there is no DevTools server to attach to)",
+    "WebAssembly: shared memories (Memory with shared: true, and modules using threads and atomics fail to \
+     compile), and exception handling (Tag and Exception throw, JSTag is absent, and modules using it fail \
+     to compile)",
 ];
 
 /// Supported behavior that differs from Node.
 pub const DIFFERENCES: &[&str] = &[
-    "stdio 'inherit' for a child's stdin gives it no input",
+    "child_process: when the embedder sets an output sink, stdio 'inherit' sends a child's stdout and \
+     stderr to the sink instead of the real terminal and gives its stdin no input (with the default \
+     output, children inherit the real descriptors)",
     "child_process.fork, and spawning process.execPath, run the script in this binary's JavaScript runner \
      (PI_JS_FORK); the IPC channel is a Unix socket or Windows named pipe, not an inherited descriptor",
     "tty.ReadStream works only for descriptor 0 (process.stdin); other descriptors fail with ERR_TTY_INIT_FAILED",
     "PerformanceObserver sees function, mark, and measure entries only",
-    "child stdout and stderr with stdio 'inherit' go to the runtime's output sink, not the real terminal",
     "process.exit calls the embedder's on_exit callback when one is set",
-    "os.cpus reports no CPU times; os.freemem and os.totalmem come from /proc, sysctl, or vm_stat",
-    "fetch does not decompress gzip or brotli bodies and sends no accept-encoding header",
+    "os.freemem and os.totalmem come from /proc, sysctl, or vm_stat; os.cpus reports zero times on \
+     platforms other than Linux, macOS, and Windows",
     "readline has no raw terminal editing: lines come from the input stream as text",
     "module.register hooks run on the importing thread: a hook's promise must settle from microtasks alone, \
      and hooks apply to import, not require",
@@ -68,29 +74,57 @@ pub const DIFFERENCES: &[&str] = &[
      never uses search domains, and Resolver.setLocalAddress does nothing",
     "tls: servers emit secureConnection but no connection event before the handshake; getCertificate \
      returns null and getX509Certificate and getPeerX509Certificate return undefined; ciphers, ecdhCurve, \
-     and other OpenSSL tuning options are ignored",
+     and other OpenSSL tuning options are ignored; a session Buffer is an opaque handle that works only in \
+     this process, as rustls cannot serialize sessions; SNICallback gets the server as `this` and also \
+     runs for handshakes that resume a session",
     "http: the parser is httparse, so malformed messages can fail with a different HPE_* code than llhttp; \
      server headersTimeout and requestTimeout use per-connection timers instead of a periodic check, and \
      setMaxIdleHTTPParsers only validates its argument",
     "http2: sessions run on the h2 crate: ping sends an opaque payload and reports the caller's payload back, \
-     settings after connect apply only initialWindowSize, remoteSettings shows defaults except \
-     maxConcurrentStreams, a client's goaway sends no GOAWAY frame, received data is not flow-controlled \
-     by the reader, and session and stream state objects are approximate",
-    "net: connecting to several looked-up addresses tries them one after another, not in parallel",
-    "child_process: a sent handle carries no NODE_HANDLE_ACK handshake, and data a sent socket had already \
-     read in the sender stays there",
+     settings after connect apply only initialWindowSize, a client's goaway sends no GOAWAY frame, received \
+     data is not flow-controlled by the reader, closing a pushed stream on the client sends no RST_STREAM, \
+     and session and stream state objects are approximate",
+    "child_process: messages sent after a handle do not wait for the peer's NODE_HANDLE_ACK (Node queues \
+     them, and resends the handle after a NODE_HANDLE_NACK), and bytes that a sent socket had read in the \
+     sender but not yet emitted as 'data' are dropped instead of emitted there",
     "cluster: round-robin hands each connection to the next connected worker in turn rather than to the \
      next free one, and the primary does not report worker server errors with Node's exact errno text",
     "vm: a context is a separate QuickJS context whose globals forward to the contextified object; \
      `this` and `globalThis` inside it are that context's own global, not the object, globals the code \
      declares are copied to the object when each run ends, cached data is accepted but not used, and \
      microtaskMode 'afterEvaluate' runs every pending microtask of the runtime after the script",
-    "worker_threads: a SharedArrayBuffer is copied, not shared, because each worker is a separate QuickJS \
-     runtime; a worker writes straight to the parent's output unless stdout or stderr is set; \
+    "worker_threads: a SharedArrayBuffer shares its memory with workers, but growing it changes its \
+     byteLength only in the thread that grows it; a worker writes straight to the parent's output unless \
+     stdout or stderr is set; \
      MessagePort is an EventEmitter with addEventListener and onmessage rather than an EventTarget; \
      worker.performance reports no event loop use; moveMessagePortToContext returns the same port",
     "zlib: deflate output can differ in bytes from Node's zlib (zlib-rs); memLevel and strategy are \
      validated but not applied; brotli error codes come from the Rust decoder",
+    "sqlite: statement.iterate() reads every row when it is called rather than one row per next(), and \
+     a StatementSync prepares its SQL through the connection's statement cache on each call",
+    "test: each result prints as soon as its test finishes, so console output from tests interleaves with \
+     the report differently than in Node; subtests run one at a time (concurrency is accepted and \
+     ignored); --test-only, --experimental-test-coverage, and module mocks are not available; run() loads \
+     test files in this runtime instead of child processes, so an ES module file runs only on its first \
+     load; the spec reporter prints no colors; source locations come from QuickJS stack frames, whose \
+     columns can differ from V8's",
+    "repl: input is read line by line with no terminal editing, completion, history file, or .editor \
+     mode; top-level await keeps a single const, let, or var declaration per line visible afterwards; \
+     lines that arrive during an asynchronous evaluation wait for it; the context is a vm context, so \
+     globalThis inside it is not the context object (see vm), and error messages come from QuickJS",
+    "inspector: sessions run in this runtime and cover Runtime (evaluation, remote objects, properties, \
+     calls, console notifications), HeapProfiler (an empty snapshot), Schema, and NodeRuntime; Debugger, \
+     Profiler, and Network methods fail with error -32601 because QuickJS has no V8 inspector; console \
+     messages from before Runtime.enable are not replayed; url() returns undefined",
+    "WebAssembly: modules run on the wasmi interpreter, which is much slower than V8 and also accepts \
+     memory64; messages for compile errors (other than bad headers), instantiation failures, and \
+     float-to-integer overflow traps use wasmi's wording; error stacks have no Wasm frames; modules, \
+     instances, and values passed as externref stay alive until the runtime ends",
+    "wasi: the system calls are JavaScript over the fs module: symbolic links inside a preopened \
+     directory are followed without a sandbox check, poll_oneoff reports descriptors ready at once and \
+     blocks the thread for clock subscriptions, proc_raise returns ENOSYS, sockets are not available, \
+     stdio descriptors report the rights of a character device when the runtime's output is not a real \
+     descriptor, and returnOnExit: false exits through process.exit (so 'exit' listeners run)",
 ];
 
 #[cfg(test)]
@@ -100,9 +134,7 @@ mod tests {
     #[test]
     fn lists_unsupported_modules() {
         let unsupported = unsupported_modules();
-        for name in ["inspector", "repl"] {
-            assert!(unsupported.contains(&name), "{name}");
-        }
+        assert!(unsupported.is_empty(), "{unsupported:?}");
         let supported = supported_modules();
         for name in [
             "fs",
@@ -121,6 +153,13 @@ mod tests {
             "vm",
             "worker_threads",
             "cluster",
+            "sqlite",
+            "test",
+            "test/reporters",
+            "repl",
+            "inspector",
+            "inspector/promises",
+            "wasi",
         ] {
             assert!(supported.contains(&name) && !unsupported.contains(&name), "{name}");
         }

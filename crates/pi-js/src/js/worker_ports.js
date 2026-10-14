@@ -1,6 +1,6 @@
 // MessagePort, MessageChannel, and BroadcastChannel over native endpoints that any runtime
-// thread can post to. Messages use the structured clone format of the v8 serializer. Separate
-// runtimes cannot share memory, so a SharedArrayBuffer arrives as a copy.
+// thread can post to. Messages use the structured clone format of the v8 serializer, and a
+// SharedArrayBuffer travels as a reference to memory that both threads then share.
 const EventEmitter = require("events");
 const { Serializer } = require("internal/v8_serdes");
 const { Deserializer } = require("internal/v8_deserializer");
@@ -34,10 +34,13 @@ function dataCloneError(message) {
   return new DOMException(message, "DataCloneError");
 }
 
+const maxOf = (shared) => (shared.growable ? shared.maxByteLength : 0);
+
 class CloneSerializer extends Serializer {
   constructor(ports) {
     super();
     this._ports = ports;
+    this._shared = [];
   }
   _writeObject(value, kind) {
     if (value instanceof MessagePort) {
@@ -49,12 +52,11 @@ class CloneSerializer extends Serializer {
       return this.writeUint32(index);
     }
     if (kind === "SharedArrayBuffer") {
-      const bytes = new Uint8Array(value);
       this._assign(value);
       this._tag("\\");
       this.writeUint32(HOST_SHARED);
-      this.writeUint32(bytes.length);
-      return this.writeRawBytes(bytes);
+      this._shared.push(value);
+      return this.writeUint32(this._shared.length - 1);
     }
     if (value instanceof BroadcastChannel || typeof value === "function") throw dataCloneError(`${String(value)} could not be cloned.`);
     return super._writeObject(value, kind);
@@ -68,18 +70,17 @@ CloneSerializer.prototype._getDataCloneError = function DataCloneError(message) 
 };
 
 class CloneDeserializer extends Deserializer {
-  constructor(buffer, ports) {
+  constructor(buffer, ports, shared) {
     super(buffer);
     this._ports = ports;
+    this._shared = shared || [];
   }
   _readHostObject() {
     const tag = this.readUint32();
     if (tag === HOST_PORT) return this._ports[this.readUint32()];
     if (tag !== HOST_SHARED) throw new Error("Unable to deserialize cloned data.");
-    const length = this.readUint32();
-    const offset = this._readRawBytes(length);
-    const shared = new SharedArrayBuffer(length);
-    new Uint8Array(shared).set(this._bytes.subarray(offset, offset + length));
+    const shared = this._shared[this.readUint32()];
+    if (shared === undefined) throw new Error("Unable to deserialize cloned data.");
     return shared;
   }
 }
@@ -126,12 +127,13 @@ function serialize(value, transferList, source) {
     return copy;
   });
   for (const port of ports) port[kDetach]();
-  return { data, buffers: moved, ports: ports.map((port) => port[kId]) };
+  const shared = serializer._shared;
+  return { data, buffers: moved, ports: ports.map((port) => port[kId]), shared, maxima: shared.map(maxOf) };
 }
 
 function deserialize(envelope) {
   const ports = envelope.ports.map((id) => new MessagePort(kCreate, id));
-  const deserializer = new CloneDeserializer(envelope.data, ports);
+  const deserializer = new CloneDeserializer(envelope.data, ports, envelope.shared);
   envelope.buffers.forEach((bytes, index) => deserializer.transferArrayBuffer(index, bytes.buffer));
   deserializer.readHeader();
   return { value: deserializer.readValue(), ports };
@@ -142,7 +144,10 @@ function structuredClone(value, options) {
   if (options !== undefined && (options === null || typeof options !== "object")) {
     throw invalidArgType("options", "of type object", options);
   }
-  return deserialize(serialize(value, options)).value;
+  const envelope = serialize(value, options);
+  // Node gives the clone a new SharedArrayBuffer object over the same memory.
+  envelope.shared = envelope.shared.map((shared, index) => nativeWorker.cloneShared(shared, envelope.maxima[index]));
+  return deserialize(envelope).value;
 }
 
 class MessageEvent extends Event {
@@ -268,7 +273,7 @@ class MessagePort extends PortBase {
     if (arguments.length === 0) throw missingArgs("message");
     if (this[kClosed]) return;
     const envelope = serialize(value, transferList, this);
-    nativeWorker.post(this[kId], envelope.data, envelope.buffers, envelope.ports);
+    nativeWorker.post(this[kId], envelope.data, envelope.buffers, envelope.ports, envelope.shared, envelope.maxima);
   }
   [kDetach]() {
     this[kDetached] = true;
@@ -301,7 +306,8 @@ class BroadcastChannel extends PortBase {
   postMessage(message) {
     if (arguments.length === 0) throw missingArgs("message");
     if (this[kClosed]) throw new DOMException("BroadcastChannel is closed.", "InvalidStateError");
-    nativeWorker.broadcast(this[kId], serialize(message).data);
+    const envelope = serialize(message);
+    nativeWorker.broadcast(this[kId], envelope.data, envelope.shared, envelope.maxima);
   }
   get [Symbol.toStringTag]() {
     return "BroadcastChannel";

@@ -22,12 +22,21 @@ pub(super) enum StreamCommand {
     Data(Bytes, bool, Done),
     Trailers(Headers),
     Reset(u32),
+    /// Promise a pushed stream with this key and request; its own commands come on the receiver.
+    Push(u64, Headers, mpsc::UnboundedReceiver<StreamCommand>),
 }
 
 pub(super) enum Sender {
     Respond(h2::server::SendResponse<Bytes>),
+    Pushed(h2::server::SendPushedResponse<Bytes>),
     Send(SendStream<Bytes>),
     Done,
+}
+
+/// Keys for streams the server pushes to a client, apart from the keys JavaScript gives requests.
+fn next_push_key() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1 << 40);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 pub(super) fn h2_error(error: &h2::Error) -> JsError {
@@ -147,16 +156,26 @@ async fn send_data(stream: &mut SendStream<Bytes>, mut bytes: Bytes, end: bool) 
 async fn reset_of(sender: &mut Sender) -> Option<Reason> {
     let result = match sender {
         Sender::Respond(respond) => poll_fn(|cx| respond.poll_reset(cx)).await,
+        Sender::Pushed(pushed) => poll_fn(|cx| pushed.poll_reset(cx)).await,
         Sender::Send(stream) => poll_fn(|cx| stream.poll_reset(cx)).await,
         Sender::Done => return std::future::pending().await,
     };
     result.ok()
 }
 
-fn apply(sender: &mut Sender, command: StreamCommand) -> Result<Option<PendingData>, JsError> {
+fn apply(
+    sender: &mut Sender,
+    origin: &mut Option<h2::server::SendResponse<Bytes>>,
+    command: StreamCommand,
+) -> Result<Option<PendingData>, JsError> {
     match (std::mem::replace(sender, Sender::Done), command) {
         (Sender::Respond(mut respond), StreamCommand::Respond(headers, end)) => {
             let stream = respond.send_response(response(&headers)?, end).map_err(|error| h2_error(&error))?;
+            *sender = if end { Sender::Done } else { Sender::Send(stream) };
+            *origin = Some(respond);
+        }
+        (Sender::Pushed(mut pushed), StreamCommand::Respond(headers, end)) => {
+            let stream = pushed.send_response(response(&headers)?, end).map_err(|error| h2_error(&error))?;
             *sender = if end { Sender::Done } else { Sender::Send(stream) };
         }
         (Sender::Respond(mut respond), StreamCommand::Informational(headers)) => {
@@ -171,6 +190,7 @@ fn apply(sender: &mut Sender, command: StreamCommand) -> Result<Option<PendingDa
             stream.send_trailers(header_map(&headers)?).map_err(|error| h2_error(&error))?;
         }
         (Sender::Respond(mut respond), StreamCommand::Reset(code)) => respond.send_reset(Reason::from(code)),
+        (Sender::Pushed(mut pushed), StreamCommand::Reset(code)) => pushed.send_reset(Reason::from(code)),
         (Sender::Send(mut stream), StreamCommand::Reset(code)) => stream.send_reset(Reason::from(code)),
         (_, StreamCommand::Data(_, _, done)) => {
             let _ = done.send(Err(JsError::new("The stream has been destroyed").with_code("ERR_STREAM_DESTROYED")));
@@ -180,13 +200,39 @@ fn apply(sender: &mut Sender, command: StreamCommand) -> Result<Option<PendingDa
     Ok(None)
 }
 
-/// Own the sending half of one stream: run commands from JavaScript in order.
+/// Send a PUSH_PROMISE on the request's stream, then run the pushed stream like any other.
+fn push(
+    sender: &mut Sender,
+    origin: &mut Option<h2::server::SendResponse<Bytes>>,
+    (key, headers, commands): (u64, Headers, mpsc::UnboundedReceiver<StreamCommand>),
+    post: &Poster,
+) {
+    let respond = match sender {
+        Sender::Respond(respond) => Some(respond),
+        _ => origin.as_mut(),
+    };
+    let pushed = match respond {
+        Some(respond) => request(&headers).and_then(|request| respond.push_request(request).map_err(|e| h2_error(&e))),
+        None => Err(JsError::new("The stream has been destroyed").with_code("ERR_HTTP2_INVALID_STREAM")),
+    };
+    match pushed {
+        Ok(pushed) => {
+            post.send(Event::Open(key, pushed.stream_id().as_u32()));
+            tokio::spawn(sender_task(key, Sender::Pushed(pushed), commands, post.clone()));
+        }
+        Err(error) => post.send(Event::StreamError(key, error)),
+    }
+}
+
+/// Own the sending half of one stream: run commands from JavaScript in order. A request's
+/// SendResponse stays in `origin` after the response starts, for later pushes.
 pub(super) async fn sender_task(
     key: u64,
     mut sender: Sender,
     mut commands: mpsc::UnboundedReceiver<StreamCommand>,
     post: Poster,
 ) {
+    let mut origin = None;
     loop {
         let command = tokio::select! {
             command = commands.recv() => command,
@@ -199,7 +245,11 @@ pub(super) async fn sender_task(
             }
         };
         let Some(command) = command else { return };
-        match apply(&mut sender, command) {
+        if let StreamCommand::Push(key, headers, commands) = command {
+            push(&mut sender, &mut origin, (key, headers, commands), &post);
+            continue;
+        }
+        match apply(&mut sender, &mut origin, command) {
             Ok(Some((bytes, end, done))) => {
                 let Sender::Send(stream) = &mut sender else { continue };
                 let result = send_data(stream, bytes, end).await.map_err(|error| h2_error(&error));
@@ -244,8 +294,29 @@ pub(super) fn stream_failure(key: u64, error: &h2::Error) -> Event {
     }
 }
 
+/// Report each stream the server pushes for a request, then its response and body.
+async fn receive_pushes(mut pushes: h2::client::PushPromises, post: Poster) {
+    while let Some(Ok(promise)) = pushes.push_promise().await {
+        let key = next_push_key();
+        let (request, response) = promise.into_parts();
+        post.send(Event::Promise(key, response.stream_id().as_u32(), request_headers(&request)));
+        let post = post.clone();
+        tokio::spawn(async move {
+            match response.await {
+                Ok(response) => {
+                    let end = response.body().is_end_stream();
+                    post.send(Event::Pushed(key, response_headers(&response), end));
+                    receive(key, response.into_body(), &post).await;
+                }
+                Err(error) => post.send(stream_failure(key, &error)),
+            }
+        });
+    }
+}
+
 /// A client stream: informational headers, the response, then its body.
 pub(super) async fn client_response(key: u64, mut future: h2::client::ResponseFuture, post: Poster) {
+    tokio::spawn(receive_pushes(future.push_promises(), post.clone()));
     while let Some(Ok(info)) = poll_fn(|cx| future.poll_informational(cx)).await {
         post.send(Event::Headers(key, response_headers(&info)));
     }

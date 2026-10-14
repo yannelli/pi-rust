@@ -167,3 +167,14 @@ return out;
         })
     );
 }
+
+// Expected values are what Node 22 returns for the same script.
+#[tokio::test]
+async fn shared_array_buffers_share_memory_with_workers() {
+    let (_dir, root) = tempdir();
+    let (runtime, capture) = runtime(&root);
+    let actual = run_cjs_within(&runtime, &root, include_str!("fixtures/node_worker/shared.js"), 120).await;
+    let expected = serde_json::from_str(include_str!("fixtures/node_worker/shared.json")).unwrap();
+    assert_same_keys(&actual, &expected);
+    assert!(capture.uncaught.lock().unwrap().is_empty());
+}
