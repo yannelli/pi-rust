@@ -1,0 +1,35 @@
+[package]
+name = "pi-env-daemon"
+description = "Remote execution environment daemon for Pi Durable (the pi-env binary)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "pi-env"
+path = "src/main.rs"
+
+[dependencies]
+encoding_rs = "0.8.42"
+notify = "8.2.0"
+serde_json.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.190"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
+# The daemon makes system calls through libc and windows-sys, so it cannot take the workspace's `unsafe_code = "forbid"`.
+[lints.clippy]
+all = { level = "warn", priority = -1 }

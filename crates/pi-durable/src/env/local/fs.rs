@@ -113,7 +113,8 @@ fn remove_path(path: &str, options: RemoveOptions) -> io::Result<()> {
     };
     if metadata.is_dir() {
         if !options.recursive {
-            return Err(io::Error::new(io::ErrorKind::IsADirectory, format!("Path is a directory: {path}")));
+            // Node fails with ERR_FS_EISDIR, which its error mapping reports as `unknown`.
+            return Err(io::Error::other(format!("Path is a directory: rm returned EISDIR (is a directory) {path}")));
         }
         return std::fs::remove_dir_all(path);
     }
@@ -317,6 +318,10 @@ impl FileSystem for LocalExecutionEnv {
                 if let Ok(info) = file_info(&entry_path, &metadata) {
                     infos.push(info);
                 }
+            }
+            // libuv sorts directory listings by name bytes on Unix.
+            if cfg!(unix) {
+                infos.sort_by(|a, b| a.name.cmp(&b.name));
             }
             Ok(infos)
         })
