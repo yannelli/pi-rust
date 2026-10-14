@@ -46,6 +46,7 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
     "sqlite: createSession, applyChangeset, enableLoadExtension(true), and loadExtension (the bundled SQLite \
      has no session extension, and native extensions do not load)",
     "test: snapshot assertions (t.assert.snapshot and t.assert.fileSnapshot) and coverage (the lcov reporter)",
+    "inspector: open (there is no DevTools server to attach to)",
 ];
 
 /// Supported behavior that differs from Node.
@@ -106,6 +107,10 @@ pub const DIFFERENCES: &[&str] = &[
      mode; top-level await keeps a single const, let, or var declaration per line visible afterwards; \
      lines that arrive during an asynchronous evaluation wait for it; the context is a vm context, so \
      globalThis inside it is not the context object (see vm), and error messages come from QuickJS",
+    "inspector: sessions run in this runtime and cover Runtime (evaluation, remote objects, properties, \
+     calls, console notifications), HeapProfiler (an empty snapshot), Schema, and NodeRuntime; Debugger, \
+     Profiler, and Network methods fail with error -32601 because QuickJS has no V8 inspector; console \
+     messages from before Runtime.enable are not replayed; url() returns undefined",
 ];
 
 #[cfg(test)]
@@ -115,7 +120,7 @@ mod tests {
     #[test]
     fn lists_unsupported_modules() {
         let unsupported = unsupported_modules();
-        assert!(unsupported.contains(&"inspector"));
+        assert!(unsupported.contains(&"wasi"));
         let supported = supported_modules();
         for name in [
             "fs",
@@ -138,6 +143,8 @@ mod tests {
             "test",
             "test/reporters",
             "repl",
+            "inspector",
+            "inspector/promises",
         ] {
             assert!(supported.contains(&name) && !unsupported.contains(&name), "{name}");
         }
