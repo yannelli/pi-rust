@@ -2,6 +2,20 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.1.10] - 2026-10-14
+
+### Added
+
+- **js:** move node:crypto onto RustCrypto crates and add AES modes, DES, DSA, Ed448, X448, encrypted keys, and util.MIMEType ([9d30a36](https://github.com/yannelli/pi-rust/commit/9d30a36ea8ed776e000afd781c310bdf734320f1))
+- **js:** implement child_process.fork with IPC, process.stdin and setRawMode, tty.ReadStream, native fs.watch, os priorities and interfaces, cpuUsage, resourceUsage, and abort ([19cc389](https://github.com/yannelli/pi-rust/commit/19cc38992e7cba9b50525e295bddc7803e34c54f))
+- **js:** implement parseArgs, system error names, matchesGlob, fs.glob, cp filters, bigint Stats, perf_hooks timing, tracing channels, stream.compose, transcode, blob URLs, CallTracker, and module hooks ([e34eea8](https://github.com/yannelli/pi-rust/commit/e34eea8067ea40dd41acf9436217993d9d2717e2))
+- **js:** implement node:crypto keys, signatures, AEAD ciphers, DH, ECDH, scrypt, hkdf, and primes ([2036fb1](https://github.com/yannelli/pi-rust/commit/2036fb1883bbf4905e551fa549833d0ba708a071))
+
+### Fixed
+
+- **js:** hold IPC messages until a message listener exists, and re-arm intervals from when they run ([4a20c2f](https://github.com/yannelli/pi-rust/commit/4a20c2f8afbdb0ae8dc263af62f35168e24984ae))
+- **js:** report a macOS file write as change in fs.watch, and time out a stuck fork test with its step ([ef06722](https://github.com/yannelli/pi-rust/commit/ef067225667bc5df6ad2332280193d343fe93cae))
+
 ## [0.1.9] - 2026-10-14
 
 ### Added
