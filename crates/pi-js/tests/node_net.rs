@@ -59,7 +59,10 @@ const pipeServer = echo();
 pipeServer.listen(path);
 await once(pipeServer, "listening");
 out.pipeAddress = pipeServer.address() === path;
+// The server's side closes on its own schedule; count connections once it has.
+const pipeClosed = new Promise((resolve) => pipeServer.once("connection", (socket) => socket.once("close", resolve)));
 out.pipe = (await roundTrip(pipeServer, [path])).slice(0, 2);
+await pipeClosed;
 const counted = await new Promise((resolve) => pipeServer.getConnections((error, count) => resolve([error, count])));
 out.connections = counted;
 mark("pipe close");
