@@ -117,6 +117,7 @@ pi-rust has every wire protocol of pi: `anthropic-messages`, `openai-responses`,
 | [`pi-protocol`](crates/pi-protocol), [`pi-client`](crates/pi-client), [`pi-server`](crates/pi-server) | The CBOR wire protocol, its client, and its server over Unix sockets |
 | [`pi-durable`](crates/pi-durable) | Pi Durable: durable sessions on memory, SQLite, or JSONL storage, the harness, and its coding tools |
 | [`pi-env`](crates/pi-env), [`pi-env-daemon`](crates/pi-env-daemon) | Remote execution environments for Pi Durable over SSH, and the `pi-env` daemon that runs on the remote machine |
+| [`pi-evals`](crates/pi-evals) | Behavioral evals for the coding agent: host evals and a documentation-lift comparison in Docker (not published) |
 
 ## Differences from the TypeScript pi
 
@@ -129,7 +130,6 @@ pi-rust ports the `pi` CLI and its libraries feature for feature. These parts di
 - `pi --mode acp` (above) is an addition; the TypeScript pi needs the separate pi-acp adapter.
 - `pi-env` looks for remote daemons in a `pi-env-daemons` folder next to the running program. Each release has a `pi-env-daemons-<tag>.tar.gz` with the daemons for Linux, Android (Termux), macOS, and Windows on x86-64 and arm64; extract it next to `pi`.
 - `pi experimental` (`server`, `client`, `durable`, `vacation`) needs `PI_EXPERIMENTAL=1`, as upstream. Its `server` and `client` use Unix sockets, so on Windows they report that they need Unix; upstream has no Windows transport either.
-- Not ported: upstream's private `evals` package, a Docker and vitest harness that scores the agent against real model providers. It is development tooling and is not published.
 
 ## Development
 
