@@ -26,11 +26,17 @@ impl Scheduler {
     /// Reserve every eligible task in one commit; orphan abort-marked tasks no definition can take.
     pub(super) async fn reserve(&self) -> DurableResult<Vec<Reservation>> {
         let scheduler = self.arc()?;
+        // Invocations reserved by a transaction whose commit then fails never start, so they are forgotten here.
+        let pending: Arc<Mutex<Vec<Arc<Invocation>>>> = Arc::default();
+        let recorded = pending.clone();
         let reserved = self.core.session.commit_with(
             move |tx| async move {
                 let mut reservations = Vec::new();
                 match scheduler.reserve_in(&tx, &mut reservations).await {
-                    Ok(abandoned) => Ok((reservations, abandoned)),
+                    Ok(abandoned) => {
+                        *lock(&recorded) = reservations.iter().map(|r| r.invocation.clone()).collect();
+                        Ok((reservations, abandoned))
+                    }
                     Err(error) => {
                         for reservation in reservations {
                             scheduler.forget(&reservation.invocation);
@@ -42,7 +48,15 @@ impl Scheduler {
             &self.context,
             TransactionScope::default(),
         );
-        let (reservations, abandoned): (Vec<Reservation>, Vec<TaskId>) = reserved.await?;
+        let (reservations, abandoned): (Vec<Reservation>, Vec<TaskId>) = match reserved.await {
+            Ok(reserved) => reserved,
+            Err(error) => {
+                for invocation in std::mem::take(&mut *lock(&pending)) {
+                    self.forget(&invocation);
+                }
+                return Err(error);
+            }
+        };
         if !abandoned.is_empty() {
             let mut state = lock(&self.state);
             for id in &abandoned {

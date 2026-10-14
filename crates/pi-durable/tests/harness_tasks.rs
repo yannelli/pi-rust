@@ -1,5 +1,16 @@
-//! Port of upstream `test/harness-tasks.test.ts` (phases, scheduling, and abort).
+//! Port of upstream `test/harness-tasks.test.ts`. This file holds the shared helpers and the first cases; the
+//! modules under `harness_tasks/` hold the rest.
 
+#[path = "harness_tasks/abort.rs"]
+mod abort;
+#[path = "harness_tasks/close.rs"]
+mod close;
+#[path = "harness_tasks/phases.rs"]
+mod phases;
+#[path = "harness_tasks/runtime.rs"]
+mod runtime;
+#[path = "harness_tasks/scheduling.rs"]
+mod scheduling;
 mod support;
 
 use std::collections::HashMap;
