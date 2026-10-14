@@ -4,6 +4,7 @@ const net = require("net");
 const { codeError, invalidArgType, validate } = require("internal/errors");
 const { isIP } = require("internal/net_address");
 const { Socket, kAccepted, normalizeArgs } = require("internal/net_socket");
+const wrapper = require("internal/tls_wrap");
 const nativeTls = native.tls;
 
 const OPENSSL_NAMES = {
@@ -150,24 +151,67 @@ function certificate(entry, chain, detailed) {
   return cert;
 }
 
+function sessionHex(session) {
+  if (session === undefined || session === null) return undefined;
+  if (!ArrayBuffer.isView(session)) throw invalidArgType("session", "an instance of Buffer, TypedArray, or DataView", session);
+  return Buffer.from(session.buffer, session.byteOffset, session.byteLength).toString("hex");
+}
+
+// Native options for a server-side handshake, from Server or TLSSocket settings.
+function serverTlsOptions(settings) {
+  const rejectUnauthorized = settings.rejectUnauthorized !== false;
+  return { ...contextOptions(settings), requestCert: !!settings.requestCert, rejectUnauthorized, alpn: alpnList(settings.ALPNProtocols) };
+}
+
 function TLSSocket(socket, options) {
   if (!(this instanceof TLSSocket)) return new TLSSocket(socket, options);
-  if (socket !== undefined && socket !== null && !(options && options[kAccepted])) {
-    throw internal.unsupported("tls.TLSSocket over an existing socket or stream");
-  }
   options = { ...options };
+  const wrapped = socket !== undefined && socket !== null && !options[kAccepted];
   this._tlsSettings = options;
   this._tls = this._tls || null;
-  Socket.call(this, options);
+  this._sessions = [];
+  Socket.call(this, wrapped ? { allowHalfOpen: options.allowHalfOpen } : options);
   this.encrypted = true;
   this.authorized = this._tls ? !!this._tls.authorized : false;
   this.authorizationError = null;
   this.alpnProtocol = this._tls ? this._tls.alpnProtocol || false : null;
   this.servername = this._tls ? this._tls.servername || false : null;
   this._secureEstablished = !!this._tls;
+  if (wrapped) {
+    wrapper.attach(this, socket);
+    // A client starts from tls.connect; a server waits for the ClientHello at once.
+    if (options.isServer) wrapper.start(this, () => serverTlsOptions(this._tlsSettings), true);
+  }
 }
 Object.setPrototypeOf(TLSSocket.prototype, Socket.prototype);
 Object.setPrototypeOf(TLSSocket, Socket);
+
+TLSSocket.prototype._start = function () {
+  if (this._wrap) wrapper.start(this, () => this._tlsOptions(this._tlsSettings), false);
+};
+
+TLSSocket.prototype._onNative = function (event, value, error) {
+  if (event === "wire" || event === "wireEnd") return wrapper.wireOut(this, event, value);
+  if (event === "session") {
+    const session = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+    this._session = session;
+    // Node reports sessions after secureConnect, also those from a TLS 1.2 handshake.
+    if (this._secureEstablished) this.emit("session", session);
+    else this._sessions.push(session);
+    return;
+  }
+  return Socket.prototype._onNative.call(this, event, value, error);
+};
+
+TLSSocket.prototype._whenConnected = function (callback) {
+  if (!this._wrap || this._wrap.ready) return Socket.prototype._whenConnected.call(this, callback);
+  wrapper.whenSecure(this, callback);
+};
+
+TLSSocket.prototype._destroy = function (error, callback) {
+  Socket.prototype._destroy.call(this, error, callback);
+  if (this._wrap) wrapper.release(this);
+};
 
 TLSSocket.prototype._applyInfo = function (info) {
   Socket.prototype._applyInfo.call(this, info);
@@ -179,16 +223,31 @@ TLSSocket.prototype._tlsOptions = function (options) {
   const servername = options.servername || host;
   const rejectUnauthorized = options.rejectUnauthorized !== undefined ? options.rejectUnauthorized !== false : process.env.NODE_TLS_REJECT_UNAUTHORIZED !== "0";
   this._tlsSettings = { ...this._tlsSettings, ...options, rejectUnauthorized, servername: options.servername || (isIP(host) ? undefined : host) };
-  return { ...contextOptions(options), servername, rejectUnauthorized, alpn: alpnList(options.ALPNProtocols) };
+  const session = sessionHex(options.session === undefined ? this._tlsSettings.session : options.session);
+  return { ...contextOptions(options), servername, rejectUnauthorized, alpn: alpnList(options.ALPNProtocols), session };
 };
 
 TLSSocket.prototype._onConnect = function (info) {
+  const wrap = this._wrap;
+  if (wrap) info = wrapper.parentInfo(this, info);
   this._applyInfo(info);
   const tls = this._tls || {};
   const settings = this._tlsSettings;
   this.alpnProtocol = tls.alpnProtocol || false;
-  this.servername = settings.servername || false;
+  this.servername = settings.isServer ? tls.servername || false : settings.servername || false;
   this._secureEstablished = true;
+  if (wrap) {
+    // The parent's 'connect' already came; the handshake only ends the connecting state.
+    wrap.ready = true;
+    this.connecting = false;
+    this._touch();
+  } else {
+    Socket.prototype._onConnect.call(this, info);
+  }
+  if (settings.isServer) {
+    this.authorized = !!tls.authorized;
+    return this.emit("secure");
+  }
   let verifyError = null;
   if (tls.authorizationError) {
     verifyError = codeError(Error, tls.authorizationError[0], tls.authorizationError[1]);
@@ -197,15 +256,24 @@ TLSSocket.prototype._onConnect = function (info) {
     const hostname = settings.servername || settings.host || "localhost";
     verifyError = check(hostname, this.getPeerCertificate(true)) || null;
   }
-  Socket.prototype._onConnect.call(this, info);
+  // tls.connect checks the peer in the first 'secure' listener, so secureConnect comes first.
   if (verifyError) {
     this.authorized = false;
     this.authorizationError = verifyError.code || verifyError.message;
-    if (settings.rejectUnauthorized) return this.destroy(verifyError);
+    if (settings.rejectUnauthorized) {
+      this.destroy(verifyError);
+      return this.emit("secure");
+    }
   } else {
     this.authorized = true;
   }
   this.emit("secureConnect");
+  this.emit("secure");
+  this._flushSessions();
+};
+
+TLSSocket.prototype._flushSessions = function () {
+  for (const session of this._sessions.splice(0)) this.emit("session", session);
 };
 
 Object.assign(TLSSocket.prototype, {
@@ -231,13 +299,14 @@ Object.assign(TLSSocket.prototype, {
     return {};
   },
   getSession() {
-    return undefined;
+    if (this._handle === null || !this._tls || !this._tls.session) return undefined;
+    return this._session || Buffer.from(this._tls.session, "hex");
   },
   getTLSTicket() {
     return undefined;
   },
   isSessionReused() {
-    return false;
+    return !!(this._tls && this._tls.reused);
   },
   getFinished() {
     return undefined;
@@ -255,7 +324,10 @@ Object.assign(TLSSocket.prototype, {
     validate.string(name, "name");
     this._tlsSettings.servername = name;
   },
-  setSession() {},
+  setSession(session) {
+    sessionHex(session);
+    this._tlsSettings.session = session;
+  },
   setMaxSendFragment() {
     return true;
   },
@@ -277,7 +349,13 @@ function connect(...args) {
     if (extra) options = { ...extra, ...options };
   }
   options = { ...options };
-  if (options.socket) throw internal.unsupported("tls.connect with the socket option");
+  if (options.socket) {
+    const socket = new TLSSocket(options.socket, { ...options, isServer: false });
+    if (callback) socket.once("secureConnect", callback);
+    if (options.timeout) socket.setTimeout(options.timeout);
+    socket._start();
+    return socket;
+  }
   if (options.host === undefined && options.path === undefined) options.host = "localhost";
   const socket = new TLSSocket(null, options);
   if (callback) socket.once("secureConnect", callback);
@@ -296,16 +374,36 @@ function Server(options, listener) {
   net.Server.call(this, options);
   if (listener) this.on("secureConnection", listener);
   this._tlsSettings = options;
-  if (options.SNICallback !== undefined) throw internal.unsupported("tls.Server SNICallback");
+  this._contexts = [];
+  if (options.SNICallback !== undefined && options.SNICallback !== null && typeof options.SNICallback !== "function") {
+    throw invalidArgType("options.SNICallback", "of type function", options.SNICallback);
+  }
+  this._sniFlag = null;
 }
 Object.setPrototypeOf(Server.prototype, net.Server.prototype);
 Object.setPrototypeOf(Server, net.Server);
 
 Object.assign(Server.prototype, {
   _tlsListenOptions() {
-    const settings = this._tlsSettings;
-    const rejectUnauthorized = settings.rejectUnauthorized !== false;
-    return { ...contextOptions(settings), requestCert: !!settings.requestCert, rejectUnauthorized, alpn: alpnList(settings.ALPNProtocols) };
+    // Asking JavaScript for a context costs a hop per handshake, so only servers with SNI use it.
+    this._sniFlag ??= nativeTls.sniFlag(false);
+    nativeTls.setSni(this._sniFlag, !!this._tlsSettings.SNICallback || this._contexts.length > 0);
+    return { ...serverTlsOptions(this._tlsSettings), sniFlag: this._sniFlag };
+  },
+  _onNative(event, value, id) {
+    if (event !== "sni") return net.Server.prototype._onNative.call(this, event, value, id);
+    let answered = false;
+    const reply = (error, context) => {
+      if (answered) return;
+      answered = true;
+      const options = context ? { ...serverTlsOptions(this._tlsSettings), ...(context instanceof SecureContext ? context : new SecureContext(context))._options } : undefined;
+      nativeTls.sniDone(id, error || null, options);
+    };
+    try {
+      (this._tlsSettings.SNICallback || defaultSNICallback).call(this, value, reply);
+    } catch (error) {
+      reply(error);
+    }
   },
   _makeSocket(id, info) {
     const socket = new TLSSocket(null, { [kAccepted]: { id, info }, allowHalfOpen: this.allowHalfOpen });
@@ -319,14 +417,25 @@ Object.assign(Server.prototype, {
   setSecureContext(options) {
     this._tlsSettings = { ...this._tlsSettings, ...options };
   },
-  addContext() {
-    throw internal.unsupported("tls.Server addContext");
+  addContext(servername, context) {
+    if (!servername) throw codeError(Error, "ERR_TLS_REQUIRED_SERVER_NAME", '"servername" is required parameter for Server.addContext');
+    const pattern = new RegExp(`^${servername.replace(/([.^$+?\-\\[\]{}])/g, "\\$1").replaceAll("*", "[^.]*")}$`);
+    this._contexts.push([pattern, context instanceof SecureContext ? context : createSecureContext(context)]);
+    if (this._sniFlag !== null) nativeTls.setSni(this._sniFlag, true);
   },
   getTicketKeys() {
     return Buffer.alloc(48);
   },
   setTicketKeys() {},
 });
+
+// Node's default SNICallback: the most recently added context whose name pattern matches.
+function defaultSNICallback(servername, callback) {
+  for (let index = this._contexts.length - 1; index >= 0; index--) {
+    if (this._contexts[index][0].test(servername)) return callback(null, this._contexts[index][1]);
+  }
+  callback(null, undefined);
+}
 
 const tlsExports = {
   CLIENT_RENEG_LIMIT: 3,

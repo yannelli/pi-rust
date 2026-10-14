@@ -144,7 +144,7 @@ pub(super) fn connect<'js>(
             None => connect_tcp(sender.clone(), id, targets, local, timeout).await,
         };
         let event = match conn {
-            Ok(conn) => match secure(Ok(conn), tls).await {
+            Ok(conn) => match secure(Ok(conn), tls, &sender, id).await {
                 Ok(conn) => Event::Connect(conn),
                 Err(error) => Event::Error(error),
             },

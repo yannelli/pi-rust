@@ -84,6 +84,7 @@ const SOURCES: &[(&str, &str)] = &[
     ("dns", include_str!("../js/dns.js")),
     ("dns/promises", "module.exports = require('dns').promises;"),
     ("dgram", include_str!("../js/dgram.js")),
+    ("internal/tls_wrap", include_str!("../js/tls_wrap.js")),
     ("tls", include_str!("../js/tls.js")),
     ("internal/http_common", include_str!("../js/http_common.js")),
     ("internal/http_outgoing", include_str!("../js/http_outgoing.js")),
