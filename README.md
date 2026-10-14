@@ -123,7 +123,7 @@ pi-rust has every wire protocol of pi: `anthropic-messages`, `openai-responses`,
 
 pi-rust ports the `pi` CLI and its libraries feature for feature. These parts differ:
 
-- Extensions run on embedded QuickJS, so no Node install is needed. Most Node built-in modules work; the modules and APIs that do not (for example `http`, `net`, `worker_threads`, `crypto.subtle` beyond `digest`, and rare `crypto` ciphers such as Camellia) throw `ERR_PI_UNSUPPORTED`, and `crates/pi-js/src/unsupported.rs` lists them all. Native npm addons cannot load.
+- Extensions run on embedded QuickJS, so no Node install is needed. Most Node built-in modules work, including `zlib` (gzip, brotli, and zstd), `async_hooks` with `AsyncLocalStorage`, and `v8` serialization; the modules and APIs that do not (for example `http`, `net`, `worker_threads`, `crypto.subtle` beyond `digest`, and rare `crypto` ciphers such as Camellia) throw `ERR_PI_UNSUPPORTED`, and `crates/pi-js/src/unsupported.rs` lists them all. Native npm addons cannot load.
 - `grep` and `find` use the Rust `ignore` crate, so pi-rust does not download `rg` or `fd`.
 - The version check and `pi update --self` use this repository's releases.
 - CJK and Thai word movement uses ICU4X dictionaries, so a few word boundaries differ from Node's `Intl.Segmenter`.
