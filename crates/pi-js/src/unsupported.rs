@@ -25,6 +25,8 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
     "child_process: stdio entries that are streams or descriptors above 2, sending handles over IPC \
      (ERR_INVALID_HANDLE_TYPE)",
     "net: sockets and servers from a file descriptor or an existing handle, reusePort",
+    "tls: TLSSocket over an existing socket or stream (and tls.connect's socket option), SNICallback, \
+     addContext, pfx, encrypted private keys, session resumption, exportKeyingMaterial, and TLS before 1.2",
     "dgram: addSourceSpecificMembership, dropSourceSpecificMembership, and bind with a file descriptor",
     "process: binding, dlopen, setUncaughtExceptionCaptureCallback, and running code after process.exit when \
      the embedder's on_exit callback returns (the runtime is shutting down)",
@@ -55,6 +57,9 @@ pub const DIFFERENCES: &[&str] = &[
     "dns: lookup filters getaddrinfo results by family and hints after the call, and every failure other \
      than a temporary one is ENOTFOUND; the resolve family uses hickory-resolver instead of c-ares, \
      never uses search domains, and Resolver.setLocalAddress does nothing",
+    "tls: servers emit secureConnection but no connection event before the handshake; getCertificate \
+     returns null and getX509Certificate and getPeerX509Certificate return undefined; ciphers, ecdhCurve, \
+     and other OpenSSL tuning options are ignored",
     "net: connecting to several looked-up addresses tries them one after another, not in parallel",
     "zlib: deflate output can differ in bytes from Node's zlib (zlib-rs); memLevel and strategy are \
      validated but not applied; brotli error codes come from the Rust decoder",

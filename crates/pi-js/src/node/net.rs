@@ -192,6 +192,7 @@ fn start(id: u64) {
                 }
                 match read.read(&mut buffer).await {
                     Ok(0) => break,
+                    Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => break,
                     Ok(count) => post(&sender, id, Event::Data(buffer[..count].to_vec())),
                     Err(error) => return post(&sender, id, Event::Error(net_error(&error, "read", None, None))),
                 }
