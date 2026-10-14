@@ -39,6 +39,8 @@ pub(crate) struct Shared {
     pub transpiler: TranspileCache,
     pub resolver: ModuleResolver,
     pub interrupt: Arc<AtomicBool>,
+    /// When a `vm` timeout ends, for the interrupt handler; 0 when none is set.
+    pub vm_deadline: Arc<std::sync::atomic::AtomicU64>,
     pub alive: AtomicBool,
     pub config: RuntimeConfig,
     pub output: Arc<dyn OutputSink>,

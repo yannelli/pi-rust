@@ -24,7 +24,10 @@ pub(crate) fn create(setup: &LoopSetup, state: &LoopState) -> Result<(Runtime, C
     }
     runtime.set_max_stack_size(setup.max_stack_size);
     let flag = state.shared.interrupt.clone();
-    runtime.set_interrupt_handler(Some(Box::new(move || flag.load(Ordering::Relaxed))));
+    let deadline = state.shared.vm_deadline.clone();
+    runtime.set_interrupt_handler(Some(Box::new(move || {
+        flag.load(Ordering::Relaxed) || crate::node::vm::deadline_passed(&deadline)
+    })));
     runtime.set_host_promise_rejection_tracker(Some(Box::new(track_rejection)));
     crate::modules::install_loader(&runtime);
     let context = Context::full(&runtime)

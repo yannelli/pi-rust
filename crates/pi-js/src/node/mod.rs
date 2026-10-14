@@ -21,6 +21,7 @@ mod os;
 mod pipe;
 pub(crate) mod sys;
 mod tls;
+pub(crate) mod vm;
 mod watch;
 mod x509;
 mod zlib;
@@ -52,6 +53,7 @@ pub(crate) fn install(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
     native.set("tls", tls::natives(ctx)?)?;
     native.set("http", http::natives(ctx)?)?;
     native.set("http2", http2::natives(ctx)?)?;
+    native.set("vm", vm::natives(ctx)?)?;
     native.set("asyncContext", context::natives(ctx)?)?;
     core::install(ctx, &native)?;
     let config = core::config(ctx)?;

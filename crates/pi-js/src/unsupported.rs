@@ -36,6 +36,8 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
     "stream: Duplex.from for promises and web streams; stream/web BYOB readers, \
      ReadableByteStreamController, CompressionStream, DecompressionStream",
     "v8: queryObjects",
+    "vm: SourceTextModule, SyntheticModule, and Module (Node needs --experimental-vm-modules for them), \
+     and breakOnSigint (accepted and ignored)",
     "fetch: Body.formData for multipart bodies, request bodies are buffered before sending",
 ];
 
@@ -71,6 +73,10 @@ pub const DIFFERENCES: &[&str] = &[
      maxConcurrentStreams, a client's goaway sends no GOAWAY frame, received data is not flow-controlled \
      by the reader, and session and stream state objects are approximate",
     "net: connecting to several looked-up addresses tries them one after another, not in parallel",
+    "vm: a context is a separate QuickJS context whose globals forward to the contextified object; \
+     `this` and `globalThis` inside it are that context's own global, not the object, globals the code \
+     declares are copied to the object when each run ends, cached data is accepted but not used, and \
+     microtaskMode 'afterEvaluate' runs every pending microtask of the runtime after the script",
     "zlib: deflate output can differ in bytes from Node's zlib (zlib-rs); memLevel and strategy are \
      validated but not applied; brotli error codes come from the Rust decoder",
 ];
@@ -82,7 +88,7 @@ mod tests {
     #[test]
     fn lists_unsupported_modules() {
         let unsupported = unsupported_modules();
-        for name in ["worker_threads", "vm", "inspector"] {
+        for name in ["inspector", "repl"] {
             assert!(unsupported.contains(&name), "{name}");
         }
         let supported = supported_modules();
@@ -100,6 +106,7 @@ mod tests {
             "http",
             "https",
             "http2",
+            "vm",
         ] {
             assert!(supported.contains(&name) && !unsupported.contains(&name), "{name}");
         }
