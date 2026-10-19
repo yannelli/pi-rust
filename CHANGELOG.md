@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.2.1] - 2026-10-19
+
+### Fixed
+
+- **experimental:** flush plugin package profile writes ([f5f9e13](https://github.com/yannelli/pi-rust/commit/f5f9e13a9ed6e6205992602ca3646d54e5d5b59c))
+
 ## [0.2.0] - 2026-10-19
 
 ### Breaking Changes
