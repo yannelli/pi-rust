@@ -259,6 +259,9 @@ async fn prepare(
         Ok(prepared) => prepared,
         Err(error) => return immediate(format!("{error:#}"), false),
     };
+    if let Some(error) = &call.arguments_error {
+        return immediate(format!("Invalid arguments for tool \"{}\": {error}", call.name), false);
+    }
     let mut args = match validate_tool_arguments(&call.name, &tool.parameters(), &prepared) {
         Ok(args) => args,
         Err(error) => return immediate(error, false),

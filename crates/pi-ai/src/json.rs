@@ -3,7 +3,9 @@
 
 use serde_json::Value;
 
-const VALID_ESCAPES: &[char] = &['"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u'];
+use crate::types::JsonObject;
+
+const VALID_ESCAPES: &[char] = &['"', '\\', '/', 'b', 'f', 'n', 'r', 't'];
 
 fn surrogate_escape(chars: &[char], index: usize) -> Option<u16> {
     if chars.get(index) != Some(&'\\') || chars.get(index + 1) != Some(&'u') {
@@ -79,6 +81,20 @@ pub fn parse_json_with_repair(json: &str) -> Result<Value, serde_json::Error> {
         let repaired = repair_json(json);
         if repaired == json { Err(error) } else { serde_json::from_str(&repaired) }
     })
+}
+
+/// Parse the complete arguments text of a finished tool call. Unlike [`parse_streaming_json`], a
+/// malformed text keeps no parsed prefix: the arguments are empty and the error names the problem.
+pub fn parse_tool_call_arguments(json: &str) -> (JsonObject, Option<String>) {
+    if json.trim().is_empty() {
+        return (JsonObject::new(), None);
+    }
+    let error = match parse_json_with_repair(json) {
+        Ok(Value::Object(arguments)) => return (arguments, None),
+        Ok(_) => "Tool arguments must be a JSON object".to_string(),
+        Err(error) => error.to_string(),
+    };
+    (JsonObject::new(), Some(format!("{error}\n\nReceived arguments:\n{json}")))
 }
 
 /// Parse `input`, closing open strings, arrays, and objects. Trailing tokens
@@ -171,6 +187,26 @@ mod tests {
         assert_eq!(parse_json_with_repair(r#"{"a":"\u00e9\/"}"#).unwrap(), json!({"a": "\u{e9}/"}));
         assert!(parse_json_with_repair("{").is_err());
         assert_eq!(parse_streaming_json("{\"a\":\"x\\q"), Some(json!({"a": "x\\q"})));
+    }
+
+    #[test]
+    fn invalid_unicode_escapes_stay_literal_text() {
+        let raw = r#"{"tex":"\usepackage{x}","ok":"\u00e9"}"#;
+        assert_eq!(parse_json_with_repair(raw).unwrap(), json!({"tex": "\\usepackage{x}", "ok": "\u{e9}"}));
+    }
+
+    #[test]
+    fn finished_tool_arguments_keep_no_prefix_of_malformed_text() {
+        assert_eq!(
+            parse_tool_call_arguments(r#"{"path":"a"}"#),
+            (json!({"path": "a"}).as_object().cloned().unwrap(), None)
+        );
+        let (arguments, error) = parse_tool_call_arguments(r#"{"path":"a", "content": oops}"#);
+        assert!(arguments.is_empty());
+        assert!(error.unwrap().ends_with("\n\nReceived arguments:\n{\"path\":\"a\", \"content\": oops}"));
+        let (arguments, error) = parse_tool_call_arguments("[1]");
+        assert!(arguments.is_empty() && error.unwrap().starts_with("Tool arguments must be a JSON object"));
+        assert_eq!(parse_tool_call_arguments("  "), (JsonObject::new(), None));
     }
 
     #[test]

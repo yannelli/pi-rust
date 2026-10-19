@@ -27,6 +27,10 @@ pub struct ToolCall {
     /// OpenAI Responses namespace for namespaced or dynamically loaded tools.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub namespace: Option<String>,
+    /// Set when the finished arguments text was not a JSON object; `arguments` is then empty. Holds the
+    /// reason and the text the model sent, and tool argument validation fails with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arguments_error: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

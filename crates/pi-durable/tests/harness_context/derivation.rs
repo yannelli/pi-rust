@@ -13,8 +13,7 @@ pub fn calling(text: &str, calls: &[&str], stop_reason: StopReason) -> Message {
             id: (*id).to_owned(),
             name: format!("tool-{id}"),
             arguments: Default::default(),
-            thought_signature: None,
-            namespace: None,
+            ..ToolCall::default()
         };
         content.push(ContentBlock::ToolCall(call));
     }

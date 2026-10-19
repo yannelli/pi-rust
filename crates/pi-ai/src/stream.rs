@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
-use crate::json::parse_streaming_json;
+use crate::json::{parse_streaming_json, parse_tool_call_arguments};
 use crate::types::{AssistantMessage, ContentBlock, DeferredHandle, JsonObject, Model, StopReason, ToolCall};
 
 /// Streaming events. A stream emits `Start` first and ends with exactly one
@@ -335,13 +335,12 @@ impl MessageBuilder {
         let Some(pending) = self.tool_calls.get_mut(handle).filter(|pending| !pending.ended) else { return };
         pending.ended = true;
         let content_index = pending.content_index;
-        let arguments = match parse_streaming_json(&pending.json) {
-            Some(Value::Object(arguments)) => Some(arguments),
-            _ => None,
-        };
+        // Arguments set through `tool_call_mut` have no JSON text and stay as they are.
+        let parsed = (!pending.json.trim().is_empty()).then(|| parse_tool_call_arguments(&pending.json));
         let ContentBlock::ToolCall(call) = &mut self.message.content[content_index] else { return };
-        if let Some(arguments) = arguments {
+        if let Some((arguments, arguments_error)) = parsed {
             call.arguments = arguments;
+            call.arguments_error = arguments_error;
         }
         let tool_call = call.clone();
         self.sender.push(AssistantMessageEvent::ToolcallEnd {
@@ -428,6 +427,21 @@ mod tests {
             compat: None,
             ..Default::default()
         }
+    }
+
+    #[tokio::test]
+    async fn malformed_finished_tool_arguments_keep_no_partial_fields() {
+        let (sender, stream) = event_channel();
+        let mut builder = MessageBuilder::new(&model(), sender);
+        builder.start();
+        let call = builder.tool_call_start("c1", "write");
+        builder.tool_call_delta(call, r#"{"path":"a.txt","content": oops}"#);
+        builder.finish(StopReason::Stop);
+        let events: Vec<_> = stream.collect().await;
+        let AssistantMessageEvent::Done { message, .. } = events.last().unwrap() else { panic!() };
+        let call = message.tool_calls().next().unwrap();
+        assert!(call.arguments.is_empty(), "{:?}", call.arguments);
+        assert!(call.arguments_error.as_deref().unwrap().contains("Received arguments:\n{\"path\""));
     }
 
     #[tokio::test]
