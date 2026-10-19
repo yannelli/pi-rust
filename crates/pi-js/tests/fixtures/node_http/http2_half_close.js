@@ -1,0 +1,20 @@
+// A client that half-closes right after frames that need answers: the server still replies, without errors.
+const http2 = require("node:http2");
+const net = require("node:net");
+const once = (emitter, name) => new Promise((resolve) => emitter.once(name, resolve));
+const server = http2.createServer();
+const errors = [];
+server.on("session", (session) => session.on("error", (error) => errors.push(`session ${error.message}`)));
+server.on("sessionError", (error) => errors.push(`sessionError ${error.message}`));
+await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+const preface = Buffer.from("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
+const settings = Buffer.from([0, 0, 0, 4, 0, 0, 0, 0, 0]);
+const ping = Buffer.from([0, 0, 8, 6, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8]);
+const raw = net.connect(server.address().port, "127.0.0.1");
+await once(raw, "connect");
+let received = 0;
+raw.on("data", (chunk) => (received += chunk.length));
+raw.end(Buffer.concat([preface, settings, ping]));
+await once(raw, "close");
+server.close();
+return { errors, gotReply: received > 0 };

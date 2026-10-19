@@ -49,3 +49,12 @@ async fn fetch_decoding_matches_node() {
 async fn http2_push_matches_node() {
     check(include_str!("fixtures/node_http/http2_push.js"), include_str!("fixtures/node_http/http2_push.json")).await;
 }
+
+#[tokio::test]
+async fn http2_server_answers_a_half_closed_client() {
+    check(
+        include_str!("fixtures/node_http/http2_half_close.js"),
+        include_str!("fixtures/node_http/http2_half_close.json"),
+    )
+    .await;
+}

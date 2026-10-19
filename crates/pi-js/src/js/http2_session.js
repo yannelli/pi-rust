@@ -33,6 +33,9 @@ class Http2Session extends EventEmitter {
     this._onClose = () => this.destroy();
     this._onError = (error) => this.destroy(error);
     this._onTimeout = () => this.emit("timeout");
+    // Node's native session takes over the socket's handle and keeps writing after the peer half-closes;
+    // the socket ends when the session is destroyed.
+    socket.allowHalfOpen = true;
     socket.on("data", this._onData);
     socket.on("end", this._onEnd);
     socket.on("close", this._onClose);
