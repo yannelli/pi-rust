@@ -46,7 +46,7 @@ out.recoverable = await session({ prompt: "> ", eval: (cmd, ctx, file, cb) => {
   cb(null, done);
 } }, ["a", "b;", "c;"]);
 out.ignore = await session({ prompt: "> ", ignoreUndefined: true }, ["undefined", "void 0", "1"]);
-out.commands = (await session({ prompt: "> " }, ["let keep = 1", ".clear", "typeof keep", `.load ${path.join(__dirname, "load.js")}`, `.save ${path.join(__dirname, "saved.js")}`, ".nope", "1 +", ".break", "2"])).split(__dirname).join("DIR");
+out.commands = (await session({ prompt: "> " }, ["let keep = 1", ".clear", "typeof keep", `.load ${path.join(__dirname, "load.js")}`, `.save ${path.join(__dirname, "saved.js")}`, ".nope", "1 +", ".break", "2"])).split(__dirname + path.sep).join("DIR/");
 out.saved = fs.readFileSync(path.join(__dirname, "saved.js"), "utf8");
 out.define = await session({ prompt: "> " }, [".sayhi Bob", ".help"], (server) => server.defineCommand("sayhi", {
   help: "Say hello",
