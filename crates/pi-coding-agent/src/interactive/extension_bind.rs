@@ -145,6 +145,7 @@ impl InteractiveMode {
     pub(super) fn after_extensions_bound(&self) {
         self.setup_autocomplete_provider();
         self.setup_extension_shortcuts();
+        self.state.borrow_mut().ready = true;
         self.request_render();
     }
 
