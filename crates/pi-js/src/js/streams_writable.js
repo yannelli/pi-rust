@@ -369,8 +369,9 @@ function Duplex(options) {
   }
   if (options && typeof options.construct === "function") common.construct(this, options.construct);
   if (!this.allowHalfOpen) {
+    // Like Node's endReadableNT, read allowHalfOpen when the readable side ends.
     this.once("end", () => {
-      if (!this._writableState.ended) process.nextTick(() => this.end());
+      if (!this.allowHalfOpen && !this._writableState.ended) process.nextTick(() => this.end());
     });
   }
 }
