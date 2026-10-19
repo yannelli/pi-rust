@@ -34,7 +34,12 @@ fn unknown_conversation(id: ConversationId) -> DurableError {
 
 impl SqliteStorage {
     async fn read_conversation(&self, id: ConversationId) -> DurableResult<Option<ConversationRecord>> {
-        record(&*self.db, "SELECT record FROM conversations WHERE id = ?", &[id.0.into()]).await
+        record(
+            &*self.db,
+            &format!("SELECT record FROM {} WHERE id = ?", self.schema.tables.conversations),
+            &[id.0.into()],
+        )
+        .await
     }
 
     async fn ancestor(&self, id: ConversationId) -> DurableResult<ConversationRecord> {
@@ -68,7 +73,11 @@ impl SqliteStorage {
                 params.push(upper.into());
             }
             params.push(((limit + 1 - values.len()) as i64).into());
-            let sql = format!("SELECT record FROM entries WHERE {} ORDER BY id DESC LIMIT ?", clauses.join(" AND "));
+            let sql = format!(
+                "SELECT record FROM {} WHERE {} ORDER BY id DESC LIMIT ?",
+                self.schema.tables.entries,
+                clauses.join(" AND ")
+            );
             values.extend(records::<EntryRecord>(&*self.db, &sql, &params).await?);
             let Some(parent) = conversation.parent else { break };
             if values.len() > limit {
@@ -124,7 +133,11 @@ impl SqliteStorage {
                 params.push(upper.into());
             }
             params.push(((limit + 1 - values.len()) as i64).into());
-            let sql = format!("SELECT record FROM entries WHERE {} ORDER BY id ASC LIMIT ?", clauses.join(" AND "));
+            let sql = format!(
+                "SELECT record FROM {} WHERE {} ORDER BY id ASC LIMIT ?",
+                self.schema.tables.entries,
+                clauses.join(" AND ")
+            );
             values.extend(records::<EntryRecord>(&*self.db, &sql, &params).await?);
             if values.len() > limit {
                 break;
@@ -176,15 +189,21 @@ impl Storage for SqliteStorage {
             params.push(owner.0.into());
         }
         params.push((limit as i64 + 1).into());
-        let sql =
-            format!("SELECT record FROM conversations WHERE {} ORDER BY id {direction} LIMIT ?", clauses.join(" AND "));
+        let sql = format!(
+            "SELECT record FROM {} WHERE {} ORDER BY id {direction} LIMIT ?",
+            self.schema.tables.conversations,
+            clauses.join(" AND ")
+        );
         let values = records(&*self.db, &sql, &params).await?;
         Ok(page(values, limit, start.order, |record: &ConversationRecord| record.id.0))
     }
 
     async fn entry(&self, id: EntryId, _context: &Context) -> DurableResult<Option<StoredEntry>> {
         let _read = self.admit_read()?;
-        let row = self.db.get("SELECT record, commit_seq FROM entries WHERE id = ?", &[id.0.into()]).await?;
+        let row = self
+            .db
+            .get(&format!("SELECT record, commit_seq FROM {} WHERE id = ?", self.schema.tables.entries), &[id.0.into()])
+            .await?;
         let Some(row) = row else { return Ok(None) };
         Ok(Some(StoredEntry {
             entry: decode(row.text("record")?)?,
@@ -224,11 +243,17 @@ impl Storage for SqliteStorage {
         loop {
             let found: Option<EntryRecord> = match upper {
                 None => {
-                    let sql = "SELECT record FROM entries WHERE conversation_id = ? AND head IS NOT NULL ORDER BY id DESC LIMIT 1";
+                    let sql = &format!(
+                        "SELECT record FROM {} WHERE conversation_id = ? AND head IS NOT NULL ORDER BY id DESC LIMIT 1",
+                        self.schema.tables.entries
+                    );
                     record(&*self.db, sql, &[conversation.id.0.into()]).await?
                 }
                 Some(upper) => {
-                    let sql = "SELECT record FROM entries WHERE conversation_id = ? AND head IS NOT NULL AND id <= ? ORDER BY id DESC LIMIT 1";
+                    let sql = &format!(
+                        "SELECT record FROM {} WHERE conversation_id = ? AND head IS NOT NULL AND id <= ? ORDER BY id DESC LIMIT 1",
+                        self.schema.tables.entries
+                    );
                     record(&*self.db, sql, &[conversation.id.0.into(), upper.into()]).await?
                 }
             };
@@ -259,7 +284,8 @@ impl Storage for SqliteStorage {
 
     async fn task(&self, id: TaskId, _context: &Context) -> DurableResult<Option<TaskRecord>> {
         let _read = self.admit_read()?;
-        record(&*self.db, "SELECT record FROM tasks WHERE id = ?", &[id.0.into()]).await
+        record(&*self.db, &format!("SELECT record FROM {} WHERE id = ?", self.schema.tables.tasks), &[id.0.into()])
+            .await
     }
 
     async fn scan_tasks(
@@ -295,14 +321,23 @@ impl Storage for SqliteStorage {
             params.push(background.into());
         }
         params.push((limit as i64 + 1).into());
-        let sql = format!("SELECT record FROM tasks WHERE {} ORDER BY id {direction} LIMIT ?", clauses.join(" AND "));
+        let sql = format!(
+            "SELECT record FROM {} WHERE {} ORDER BY id {direction} LIMIT ?",
+            self.schema.tables.tasks,
+            clauses.join(" AND ")
+        );
         let values = records(&*self.db, &sql, &params).await?;
         Ok(page(values, limit, start.order, |record: &TaskRecord| record.id.0))
     }
 
     async fn submission(&self, id: SubmissionId, _context: &Context) -> DurableResult<Option<SubmissionRecord>> {
         let _read = self.admit_read()?;
-        record(&*self.db, "SELECT record FROM submissions WHERE id = ?", &[id.0.into()]).await
+        record(
+            &*self.db,
+            &format!("SELECT record FROM {} WHERE id = ?", self.schema.tables.submissions),
+            &[id.0.into()],
+        )
+        .await
     }
 
     async fn scan_submissions(
@@ -326,8 +361,11 @@ impl Storage for SqliteStorage {
             params.push(status.as_str().into());
         }
         params.push((limit as i64 + 1).into());
-        let sql =
-            format!("SELECT record FROM submissions WHERE {} ORDER BY id {direction} LIMIT ?", clauses.join(" AND "));
+        let sql = format!(
+            "SELECT record FROM {} WHERE {} ORDER BY id {direction} LIMIT ?",
+            self.schema.tables.submissions,
+            clauses.join(" AND ")
+        );
         let values = records(&*self.db, &sql, &params).await?;
         Ok(page(values, limit, start.order, |record: &SubmissionRecord| record.id.0))
     }
@@ -339,7 +377,10 @@ impl Storage for SqliteStorage {
         _context: &Context,
     ) -> DurableResult<Option<SubmissionRecord>> {
         let _read = self.admit_read()?;
-        let sql = "SELECT record FROM submissions WHERE conversation_id = ? AND request_id = ?";
+        let sql = &format!(
+            "SELECT record FROM {} WHERE conversation_id = ? AND request_id = ?",
+            self.schema.tables.submissions
+        );
         record(&*self.db, sql, &[conversation_id.0.into(), indexed(request_id)]).await
     }
 
@@ -360,19 +401,25 @@ impl Storage for SqliteStorage {
         ];
         let sql = match at {
             DocumentPoint::Current => {
-                "SELECT record FROM documents
+                format!(
+                    "SELECT record FROM {}
 					WHERE kind = ? AND scope_kind = ? AND owner_id = ? AND family = ? AND key_value = ?
-					AND retired_at IS NULL ORDER BY created_at DESC LIMIT 1"
+					AND retired_at IS NULL ORDER BY created_at DESC LIMIT 1",
+                    self.schema.tables.documents
+                )
             }
             DocumentPoint::At(seq) => {
                 params.extend([seq.0.into(), seq.0.into()]);
-                "SELECT record FROM documents
+                format!(
+                    "SELECT record FROM {}
 					WHERE kind = ? AND scope_kind = ? AND owner_id = ? AND family = ? AND key_value = ?
 					AND created_at <= ? AND (retired_at IS NULL OR retired_at > ?)
-					ORDER BY created_at DESC LIMIT 1"
+					ORDER BY created_at DESC LIMIT 1",
+                    self.schema.tables.documents
+                )
             }
         };
-        record(&*self.db, sql, &params).await
+        record(&*self.db, &sql, &params).await
     }
 
     async fn document(
@@ -383,7 +430,9 @@ impl Storage for SqliteStorage {
     ) -> DurableResult<Option<StoredDocument>> {
         let _read = self.admit_read()?;
         // The record and revision queries must see one committed state; a commit between them can replace the base.
-        transaction(&*self.db, move |executor| Box::pin(async move { materialize(&*executor, id, at).await })).await
+        let tables = &self.schema.tables;
+        transaction(&*self.db, move |executor| Box::pin(async move { materialize(&*executor, tables, id, at).await }))
+            .await
     }
 
     async fn scan_documents(
@@ -409,7 +458,11 @@ impl Storage for SqliteStorage {
             }
         }
         params.push((limit as i64 + 1).into());
-        let sql = format!("SELECT record FROM documents WHERE {} ORDER BY id LIMIT ?", clauses.join(" AND "));
+        let sql = format!(
+            "SELECT record FROM {} WHERE {} ORDER BY id LIMIT ?",
+            self.schema.tables.documents,
+            clauses.join(" AND ")
+        );
         let values = records(&*self.db, &sql, &params).await?;
         Ok(page(values, limit, ScanOrder::Ascending, |record: &DocumentRecord| record.id.0))
     }

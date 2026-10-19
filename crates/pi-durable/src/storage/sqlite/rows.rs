@@ -4,6 +4,7 @@ use pi_chord::delta::{apply, parse_ops};
 
 use super::database::{SqliteExecutor, SqliteValue};
 use super::decode;
+use super::schema::SqliteTables;
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::DocumentId;
 use crate::storage::scan::MAX_SAFE_INTEGER;
@@ -33,12 +34,14 @@ pub(crate) async fn record<T: serde::de::DeserializeOwned>(
 /// Materialize one incarnation from its newest applicable base and the delta tail after it.
 pub(crate) async fn materialize(
     executor: &dyn SqliteExecutor,
+    t: &SqliteTables,
     id: DocumentId,
     at: DocumentPoint,
 ) -> DurableResult<Option<StoredDocument>> {
     let id_value = SqliteValue::from(id.0);
     let found: Option<DocumentRecord> =
-        record(executor, "SELECT record FROM documents WHERE id = ?", std::slice::from_ref(&id_value)).await?;
+        record(executor, &format!("SELECT record FROM {} WHERE id = ?", t.documents), std::slice::from_ref(&id_value))
+            .await?;
     let Some(stored) = found else { return Ok(None) };
     if at != DocumentPoint::Current && is_current_only(&stored) {
         return Err(DurableError::storage_request(format!("Document {id} does not retain historical content")));
@@ -52,8 +55,11 @@ pub(crate) async fn materialize(
     });
     let base = executor
         .get(
-            "SELECT seq, kind, version, content FROM document_revisions
+            &format!(
+                "SELECT seq, kind, version, content FROM {}
 				WHERE document_id = ? AND kind = 'base' AND seq <= ? ORDER BY seq DESC LIMIT 1",
+                t.document_revisions
+            ),
             &[id_value.clone(), upper.clone()],
         )
         .await?;
@@ -64,8 +70,11 @@ pub(crate) async fn materialize(
     let mut value = decode::<pi_chord::Json>(base.text("content")?)?;
     let tail = executor
         .all(
-            "SELECT seq, kind, version, content FROM document_revisions
+            &format!(
+                "SELECT seq, kind, version, content FROM {}
 				WHERE document_id = ? AND seq > ? AND seq <= ? ORDER BY seq",
+                t.document_revisions
+            ),
             &[id_value, SqliteValue::Integer(base.integer("seq")?), upper],
         )
         .await?;

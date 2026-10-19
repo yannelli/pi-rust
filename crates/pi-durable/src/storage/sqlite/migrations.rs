@@ -1,45 +1,70 @@
-//! Ordered, immutable schema history of the SQLite storage, byte-for-byte the upstream SQL.
+//! Ordered, immutable schema history of the SQLite storage, byte-for-byte the upstream SQL for a given schema.
+
+use std::sync::LazyLock;
 
 use super::database::{SqliteDatabase, SqliteValue, transaction};
+use super::schema::SqliteSchema;
 use crate::errors::{DurableError, DurableResult};
 
 /// One schema version and the statements that create it.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct SqliteMigration {
     pub version: i64,
-    pub statements: &'static [&'static str],
+    pub statements: Vec<String>,
 }
 
-// next_id is TEXT because node:sqlite rejects INTEGER results outside JavaScript's safe integer range.
-const INITIAL_SCHEMA: &[&str] = &[
-    r#"CREATE TABLE durable_metadata (
+/// Immutable, ordered schema history rendered for `schema`. New migrations are appended after the shipped ones.
+pub fn create_sqlite_migrations(schema: &SqliteSchema) -> Vec<SqliteMigration> {
+    let (t, i) = (&schema.tables, &schema.indexes);
+    // next_id is TEXT because node:sqlite rejects INTEGER results outside JavaScript's safe integer range.
+    let initial_schema = vec![
+        format!(
+            r#"CREATE TABLE {} (
 		singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
 		next_id TEXT NOT NULL,
 		next_seq INTEGER NOT NULL
 	) STRICT"#,
-    r#"INSERT INTO durable_metadata (singleton, next_id, next_seq) VALUES (1, '2', 1)"#,
-    r#"CREATE TABLE record_ids (
+            t.durable_metadata
+        ),
+        format!(r#"INSERT INTO {} (singleton, next_id, next_seq) VALUES (1, '2', 1)"#, t.durable_metadata),
+        format!(
+            r#"CREATE TABLE {} (
 		id INTEGER PRIMARY KEY,
 		record_type TEXT NOT NULL CHECK (record_type IN ('conversation', 'entry', 'task', 'submission', 'document'))
 	) STRICT"#,
-    r#"CREATE TABLE conversations (
+            t.record_ids
+        ),
+        format!(
+            r#"CREATE TABLE {} (
 		id INTEGER PRIMARY KEY,
 		owner_conversation_id INTEGER,
 		owner_task_id INTEGER,
 		record TEXT NOT NULL CHECK (json_valid(record))
 	) STRICT"#,
-    r#"CREATE INDEX conversations_by_owner_conversation ON conversations (owner_conversation_id, id)"#,
-    r#"CREATE INDEX conversations_by_owner_task ON conversations (owner_task_id, id)"#,
-    r#"CREATE TABLE entries (
+            t.conversations
+        ),
+        format!(
+            r#"CREATE INDEX {} ON {} (owner_conversation_id, id)"#,
+            i.conversations_by_owner_conversation, t.conversations
+        ),
+        format!(r#"CREATE INDEX {} ON {} (owner_task_id, id)"#, i.conversations_by_owner_task, t.conversations),
+        format!(
+            r#"CREATE TABLE {} (
 		id INTEGER PRIMARY KEY,
 		conversation_id INTEGER NOT NULL,
 		head INTEGER,
 		commit_seq INTEGER NOT NULL,
 		record TEXT NOT NULL CHECK (json_valid(record))
 	) STRICT"#,
-    r#"CREATE INDEX entries_by_conversation ON entries (conversation_id, id DESC)"#,
-    r#"CREATE INDEX entry_heads_by_conversation ON entries (conversation_id, id DESC) WHERE head IS NOT NULL"#,
-    r#"CREATE TABLE tasks (
+            t.entries
+        ),
+        format!(r#"CREATE INDEX {} ON {} (conversation_id, id DESC)"#, i.entries_by_conversation, t.entries),
+        format!(
+            r#"CREATE INDEX {} ON {} (conversation_id, id DESC) WHERE head IS NOT NULL"#,
+            i.entry_heads_by_conversation, t.entries
+        ),
+        format!(
+            r#"CREATE TABLE {} (
 		id INTEGER PRIMARY KEY,
 		conversation_id INTEGER NOT NULL,
 		kind TEXT NOT NULL,
@@ -48,22 +73,28 @@ const INITIAL_SCHEMA: &[&str] = &[
 		background INTEGER NOT NULL CHECK (background IN (0, 1)),
 		record TEXT NOT NULL CHECK (json_valid(record))
 	) STRICT"#,
-    r#"CREATE INDEX tasks_by_status ON tasks (status, id)"#,
-    r#"CREATE INDEX tasks_by_conversation ON tasks (conversation_id, id)"#,
-    r#"CREATE INDEX tasks_by_kind ON tasks (kind, id)"#,
-    r#"CREATE INDEX tasks_by_abort_requested ON tasks (abort_requested, id)"#,
-    r#"CREATE INDEX tasks_by_background ON tasks (background, id)"#,
-    r#"CREATE TABLE submissions (
+            t.tasks
+        ),
+        format!(r#"CREATE INDEX {} ON {} (status, id)"#, i.tasks_by_status, t.tasks),
+        format!(r#"CREATE INDEX {} ON {} (conversation_id, id)"#, i.tasks_by_conversation, t.tasks),
+        format!(r#"CREATE INDEX {} ON {} (kind, id)"#, i.tasks_by_kind, t.tasks),
+        format!(r#"CREATE INDEX {} ON {} (abort_requested, id)"#, i.tasks_by_abort_requested, t.tasks),
+        format!(r#"CREATE INDEX {} ON {} (background, id)"#, i.tasks_by_background, t.tasks),
+        format!(
+            r#"CREATE TABLE {} (
 		id INTEGER PRIMARY KEY,
 		conversation_id INTEGER NOT NULL,
 		request_id TEXT,
 		status TEXT NOT NULL CHECK (status IN ('queued', 'placed', 'done', 'unanswered')),
 		record TEXT NOT NULL CHECK (json_valid(record))
 	) STRICT"#,
-    r#"CREATE INDEX submissions_by_request ON submissions (conversation_id, request_id)"#,
-    r#"CREATE INDEX submissions_by_conversation ON submissions (conversation_id, id)"#,
-    r#"CREATE INDEX submissions_by_status ON submissions (status, id)"#,
-    r#"CREATE TABLE documents (
+            t.submissions
+        ),
+        format!(r#"CREATE INDEX {} ON {} (conversation_id, request_id)"#, i.submissions_by_request, t.submissions),
+        format!(r#"CREATE INDEX {} ON {} (conversation_id, id)"#, i.submissions_by_conversation, t.submissions),
+        format!(r#"CREATE INDEX {} ON {} (status, id)"#, i.submissions_by_status, t.submissions),
+        format!(
+            r#"CREATE TABLE {} (
 		id INTEGER PRIMARY KEY,
 		kind TEXT NOT NULL,
 		family INTEGER NOT NULL CHECK (family IN (0, 1)),
@@ -74,11 +105,17 @@ const INITIAL_SCHEMA: &[&str] = &[
 		retired_at INTEGER,
 		record TEXT NOT NULL CHECK (json_valid(record))
 	) STRICT"#,
-    r#"CREATE INDEX documents_by_address
-		ON documents (kind, scope_kind, owner_id, family, key_value, created_at DESC, retired_at)"#,
-    r#"CREATE INDEX documents_by_scope ON documents (scope_kind, owner_id, id)"#,
-    r#"CREATE INDEX documents_by_scope_kind ON documents (scope_kind, owner_id, kind, id)"#,
-    r#"CREATE TABLE document_revisions (
+            t.documents
+        ),
+        format!(
+            r#"CREATE INDEX {}
+		ON {} (kind, scope_kind, owner_id, family, key_value, created_at DESC, retired_at)"#,
+            i.documents_by_address, t.documents
+        ),
+        format!(r#"CREATE INDEX {} ON {} (scope_kind, owner_id, id)"#, i.documents_by_scope, t.documents),
+        format!(r#"CREATE INDEX {} ON {} (scope_kind, owner_id, kind, id)"#, i.documents_by_scope_kind, t.documents),
+        format!(
+            r#"CREATE TABLE {} (
 		document_id INTEGER NOT NULL,
 		seq INTEGER NOT NULL,
 		kind TEXT NOT NULL CHECK (kind IN ('base', 'delta')),
@@ -86,22 +123,34 @@ const INITIAL_SCHEMA: &[&str] = &[
 		content TEXT NOT NULL CHECK (json_valid(content)),
 		PRIMARY KEY (document_id, seq)
 	) STRICT"#,
-    r#"CREATE INDEX document_revisions_by_kind ON document_revisions (document_id, kind, seq DESC)"#,
-];
+            t.document_revisions
+        ),
+        format!(
+            r#"CREATE INDEX {} ON {} (document_id, kind, seq DESC)"#,
+            i.document_revisions_by_kind, t.document_revisions
+        ),
+    ];
+    vec![SqliteMigration { version: 1, statements: initial_schema }]
+}
 
-/// Immutable, ordered schema history. New migrations are appended after the shipped ones.
-pub const SQLITE_MIGRATIONS: &[SqliteMigration] = &[SqliteMigration { version: 1, statements: INITIAL_SCHEMA }];
+/// The schema history for the unprefixed names.
+pub static SQLITE_MIGRATIONS: LazyLock<Vec<SqliteMigration>> =
+    LazyLock::new(|| create_sqlite_migrations(&SqliteSchema::default()));
 
 pub const CURRENT_SQLITE_SCHEMA_VERSION: i64 = 1;
 
-const SCHEMA_TABLE: &str = "CREATE TABLE IF NOT EXISTS durable_schema (
-\t\t\tsingleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-\t\t\tversion INTEGER NOT NULL CHECK (version >= 0)
-\t\t) STRICT";
-
-/// Apply all pending schema migrations atomically.
+/// Apply all pending schema migrations for the unprefixed names atomically.
 pub async fn apply_sqlite_migrations(
     database: &dyn SqliteDatabase,
+    migrations: &[SqliteMigration],
+) -> DurableResult<()> {
+    apply_sqlite_migrations_for_schema(database, &SqliteSchema::default(), migrations).await
+}
+
+/// Apply migrations rendered for a particular schema atomically.
+pub async fn apply_sqlite_migrations_for_schema(
+    database: &dyn SqliteDatabase,
+    schema: &SqliteSchema,
     migrations: &[SqliteMigration],
 ) -> DurableResult<()> {
     for (index, migration) in migrations.iter().enumerate() {
@@ -109,11 +158,20 @@ pub async fn apply_sqlite_migrations(
             return Err(DurableError::storage("Durable SQLite migrations must have contiguous versions starting at 1"));
         }
     }
+    let table = schema.tables.durable_schema.clone();
     transaction(database, move |transaction| {
         Box::pin(async move {
-            transaction.exec(SCHEMA_TABLE).await?;
-            transaction.run("INSERT OR IGNORE INTO durable_schema (singleton, version) VALUES (1, 0)", &[]).await?;
-            let row = transaction.get("SELECT version FROM durable_schema WHERE singleton = 1", &[]).await?;
+            transaction
+                .exec(&format!(
+                    "CREATE TABLE IF NOT EXISTS {table} (
+\t\t\tsingleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+\t\t\tversion INTEGER NOT NULL CHECK (version >= 0)
+\t\t) STRICT"
+                ))
+                .await?;
+            let insert = format!("INSERT OR IGNORE INTO {table} (singleton, version) VALUES (1, 0)");
+            transaction.run(&insert, &[]).await?;
+            let row = transaction.get(&format!("SELECT version FROM {table} WHERE singleton = 1"), &[]).await?;
             let Some(row) = row else {
                 return Err(DurableError::storage("Durable SQLite schema metadata is missing"));
             };
@@ -124,12 +182,12 @@ pub async fn apply_sqlite_migrations(
                     "Durable SQLite schema version {stored} is newer than supported version {current}"
                 )));
             }
+            let update = format!("UPDATE {table} SET version = ? WHERE singleton = 1");
             for migration in migrations.iter().filter(|migration| migration.version > stored) {
-                for statement in migration.statements {
+                for statement in &migration.statements {
                     transaction.exec(statement).await?;
                 }
-                let version = SqliteValue::Integer(migration.version);
-                transaction.run("UPDATE durable_schema SET version = ? WHERE singleton = 1", &[version]).await?;
+                transaction.run(&update, &[SqliteValue::Integer(migration.version)]).await?;
             }
             Ok(())
         })

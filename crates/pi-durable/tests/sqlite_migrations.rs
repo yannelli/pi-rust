@@ -32,8 +32,8 @@ const METADATA: &str = "SELECT next_id, next_seq FROM durable_metadata WHERE sin
 async fn creates_the_current_schema_and_can_be_applied_repeatedly() {
     let (_directory, path) = temp_path();
     let database = open(&path).await;
-    apply_sqlite_migrations(&database, SQLITE_MIGRATIONS).await.unwrap();
-    apply_sqlite_migrations(&database, SQLITE_MIGRATIONS).await.unwrap();
+    apply_sqlite_migrations(&database, &SQLITE_MIGRATIONS).await.unwrap();
+    apply_sqlite_migrations(&database, &SQLITE_MIGRATIONS).await.unwrap();
     assert_eq!(integer(&database, VERSION, "version").await, CURRENT_SQLITE_SCHEMA_VERSION);
     assert_eq!(text(&database, METADATA, "next_id").await, "2");
     assert_eq!(integer(&database, METADATA, "next_seq").await, 1);
@@ -44,7 +44,7 @@ async fn creates_the_current_schema_and_can_be_applied_repeatedly() {
 async fn rejects_a_database_newer_than_the_portable_core() {
     let (_directory, path) = temp_path();
     let database = open(&path).await;
-    apply_sqlite_migrations(&database, SQLITE_MIGRATIONS).await.unwrap();
+    apply_sqlite_migrations(&database, &SQLITE_MIGRATIONS).await.unwrap();
     let newer = SqliteValue::Integer(CURRENT_SQLITE_SCHEMA_VERSION + 1);
     database.run("UPDATE durable_schema SET version = ? WHERE singleton = 1", &[newer]).await.unwrap();
     database.close().await.unwrap();
@@ -58,16 +58,16 @@ async fn rolls_bootstrap_and_every_pending_migration_back_together() {
     let database = open(&path).await;
     let first = SqliteMigration {
         version: 1,
-        statements: &[
-            "CREATE TABLE migration_first (value TEXT) STRICT",
-            "INSERT INTO migration_first (value) VALUES ('retained')",
+        statements: vec![
+            "CREATE TABLE migration_first (value TEXT) STRICT".into(),
+            "INSERT INTO migration_first (value) VALUES ('retained')".into(),
         ],
     };
     let failed = [
-        first,
+        first.clone(),
         SqliteMigration {
             version: 2,
-            statements: &["CREATE TABLE migration_second (value TEXT) STRICT", "THIS IS NOT SQL"],
+            statements: vec!["CREATE TABLE migration_second (value TEXT) STRICT".into(), "THIS IS NOT SQL".into()],
         },
     ];
     assert!(apply_sqlite_migrations(&database, &failed).await.is_err());
@@ -75,8 +75,10 @@ async fn rolls_bootstrap_and_every_pending_migration_back_together() {
         WHERE name IN ('durable_schema', 'migration_first', 'migration_second')";
     assert_eq!(integer(&database, count, "count").await, 0);
 
-    let fixed =
-        [first, SqliteMigration { version: 2, statements: &["CREATE TABLE migration_second (value TEXT) STRICT"] }];
+    let fixed = [
+        first,
+        SqliteMigration { version: 2, statements: vec!["CREATE TABLE migration_second (value TEXT) STRICT".into()] },
+    ];
     apply_sqlite_migrations(&database, &fixed).await.unwrap();
     assert_eq!(integer(&database, VERSION, "version").await, 2);
     assert_eq!(text(&database, "SELECT value FROM migration_first", "value").await, "retained");
@@ -107,7 +109,7 @@ async fn rolls_a_failed_migration_back_and_keeps_stored_data_for_a_retry() {
     let mut failed = SQLITE_MIGRATIONS.to_vec();
     failed.push(SqliteMigration {
         version: next_version,
-        statements: &["CREATE TABLE migration_probe (value TEXT) STRICT", "THIS IS NOT SQL"],
+        statements: vec!["CREATE TABLE migration_probe (value TEXT) STRICT".into(), "THIS IS NOT SQL".into()],
     });
     assert!(apply_sqlite_migrations(&database, &failed).await.is_err());
     assert_eq!(integer(&database, VERSION, "version").await, CURRENT_SQLITE_SCHEMA_VERSION);
@@ -117,7 +119,7 @@ async fn rolls_a_failed_migration_back_and_keeps_stored_data_for_a_retry() {
     let mut successful = SQLITE_MIGRATIONS.to_vec();
     successful.push(SqliteMigration {
         version: next_version,
-        statements: &["CREATE TABLE migration_probe (value TEXT) STRICT"],
+        statements: vec!["CREATE TABLE migration_probe (value TEXT) STRICT".into()],
     });
     apply_sqlite_migrations(&database, &successful).await.unwrap();
     assert_eq!(integer(&database, VERSION, "version").await, next_version);
