@@ -33,25 +33,32 @@ pub struct LoadPromptTemplatesResult {
 }
 
 /// Split arguments on whitespace, keeping single- or double-quoted text together. There
-/// is no escape character, and empty quotes produce no argument.
+/// is no escape character, and empty quotes produce an empty argument.
 pub fn parse_command_args(text: &str) -> Vec<String> {
     let mut args = Vec::new();
     let mut current = String::new();
+    let mut started = false;
     let mut quote: Option<char> = None;
     for ch in text.chars() {
         match quote {
             Some(open) if ch == open => quote = None,
             Some(_) => current.push(ch),
-            None if ch == '"' || ch == '\'' => quote = Some(ch),
+            None if ch == '"' || ch == '\'' => {
+                quote = Some(ch);
+                started = true;
+            }
             None if ch.is_whitespace() => {
-                if !current.is_empty() {
+                if std::mem::take(&mut started) {
                     args.push(std::mem::take(&mut current));
                 }
             }
-            None => current.push(ch),
+            None => {
+                current.push(ch);
+                started = true;
+            }
         }
     }
-    if !current.is_empty() {
+    if started {
         args.push(current);
     }
     args
