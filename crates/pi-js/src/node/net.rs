@@ -39,6 +39,8 @@ pub(super) enum Kind {
         writer: Writer,
         paused: watch::Sender<bool>,
         tcp: Option<socket2::Socket>,
+        /// Whether the socket was sent to another process, which may still read it.
+        exported: bool,
     },
     Listener {
         path: Option<String>,
@@ -176,7 +178,7 @@ pub(super) fn stream_kind(conn: Option<Conn>) -> (Kind, serde_json::Value) {
         None => (None, None, None, serde_json::Value::Null),
     };
     let writer = Arc::new(tokio::sync::Mutex::new(writer));
-    (Kind::Stream { pending, reader: None, writer, paused: watch::Sender::new(false), tcp }, info)
+    (Kind::Stream { pending, reader: None, writer, paused: watch::Sender::new(false), tcp, exported: false }, info)
 }
 
 fn deliver(ctx: &Ctx<'_>, id: u64, event: Event) {
@@ -220,10 +222,12 @@ fn deliver(ctx: &Ctx<'_>, id: u64, event: Event) {
 
 /// A copy of the socket behind a TCP stream or listener, for handle passing.
 pub(super) fn socket_of(id: u64) -> Option<std::io::Result<socket2::Socket>> {
-    let result = state().with_resource(id, |entry: &mut Entry| match &entry.kind {
-        Kind::Stream { tcp: Some(socket), .. } | Kind::Listener { socket: Some(socket), .. } => {
+    let result = state().with_resource(id, |entry: &mut Entry| match &mut entry.kind {
+        Kind::Stream { tcp: Some(socket), exported, .. } => {
+            *exported = true;
             Some(socket.try_clone())
         }
+        Kind::Listener { socket: Some(socket), .. } => Some(socket.try_clone()),
         _ => None,
     });
     result.ok().flatten()
@@ -266,6 +270,20 @@ fn start(id: u64) {
     });
 }
 
+/// Drop bytes the peer sent that nobody read. libuv reads them as they arrive, so Node closes with an
+/// empty queue and the peer sees an orderly end; closing over unread bytes makes the kernel reset.
+fn discard_unread(socket: &socket2::Socket) {
+    let mut buffer = [std::mem::MaybeUninit::<u8>::uninit(); 64 * 1024];
+    if socket.set_nonblocking(true).is_err() {
+        return;
+    }
+    for _ in 0..64 {
+        if !socket.recv(&mut buffer).is_ok_and(|count| count > 0) {
+            break;
+        }
+    }
+}
+
 pub(super) fn set_ref(id: u64, referenced: bool) {
     let state = state();
     let changed = state.with_resource(id, |entry: &mut Entry| std::mem::replace(&mut entry.referenced, referenced));
@@ -295,11 +313,19 @@ pub(super) fn close(id: u64) {
         }
     }
     match kind {
-        Kind::Stream { reader, writer, .. } => {
-            if let Some(reader) = reader {
+        Kind::Stream { reader, writer, tcp, exported, .. } => {
+            if let Some(reader) = &reader {
                 reader.abort();
             }
-            state.shared.tokio.spawn(async move { drop(writer.lock().await.take()) });
+            state.shared.tokio.spawn(async move {
+                drop(writer.lock().await.take());
+                let Some(tcp) = tcp.filter(|_| !exported) else { return };
+                // The copy closes last, so nothing can arrive between the discard and the close.
+                while reader.as_ref().is_some_and(|reader| !reader.is_finished()) {
+                    tokio::task::yield_now().await;
+                }
+                discard_unread(&tcp);
+            });
         }
         Kind::Listener { path: Some(path), .. } if cfg!(unix) => {
             let _ = std::fs::remove_file(path);
