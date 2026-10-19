@@ -1,7 +1,11 @@
 //! Spill cases of `NodeExecutionEnv shell`, and upstream `test/env-node-spill.test.ts`.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use pi_durable::env::{
-    ExecutionErrorCode, FileSystem, LocalEnvOptions, LocalExecutionEnv, Shell, ShellExecOptions, ShellSpillOptions,
+    ExecutionErrorCode, FileSystem, LocalEnvOptions, LocalExecutionEnv, OutputCallback, Shell, ShellExecOptions,
+    ShellSpillOptions,
 };
 
 use crate::shell::collect;
@@ -34,12 +38,31 @@ async fn preserves_exact_raw_bytes_in_the_spill_while_streaming_decoded_text() {
 async fn reports_the_spill_of_a_command_that_times_out() {
     let dir = temp_dir();
     let env = local_env(dir.path());
-    let options = ShellExecOptions { timeout: Some(0.3), spill: spill(10, 10), ..Default::default() };
-    let error = env.exec("printf 12345678901234567890; sleep 5".into(), options, &context()).await.unwrap_err();
-    assert_eq!(error.code, ExecutionErrorCode::Timeout);
-    let path = error.spill_path.unwrap();
-    assert_eq!(env.read_text_file(&path, &context()).await.unwrap(), "12345678901234567890");
-    remove_parent(&path);
+    // A loaded Windows runner can take longer than a short timeout to start Git Bash, so only an attempt whose
+    // output arrived counts.
+    for timeout in [0.3, 1.0, 3.0, 10.0] {
+        let printed = Arc::new(AtomicUsize::new(0));
+        let counted = printed.clone();
+        let on_output: OutputCallback = Arc::new(move |text, _, _| {
+            counted.fetch_add(text.len(), Ordering::SeqCst);
+        });
+        let options = ShellExecOptions {
+            timeout: Some(timeout),
+            spill: spill(10, 10),
+            on_output: Some(on_output),
+            ..Default::default()
+        };
+        let error = env.exec("printf 12345678901234567890; sleep 30".into(), options, &context()).await.unwrap_err();
+        assert_eq!(error.code, ExecutionErrorCode::Timeout);
+        if printed.load(Ordering::SeqCst) < 20 {
+            continue;
+        }
+        let path = error.spill_path.unwrap();
+        assert_eq!(env.read_text_file(&path, &context()).await.unwrap(), "12345678901234567890");
+        remove_parent(&path);
+        return;
+    }
+    panic!("the shell printed nothing before any timeout");
 }
 
 /// Upstream overrides `createTempFile` to return a path in a missing directory; here the temporary root is a file.
