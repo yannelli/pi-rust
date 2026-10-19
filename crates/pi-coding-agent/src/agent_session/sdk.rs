@@ -49,9 +49,6 @@ pub struct CreateAgentSessionOptions {
     pub stream_fn: Option<StreamFn>,
     /// How the built-in MCP support loads its config and connects (tests, SDK hosts).
     pub mcp: McpSessionOptions,
-    /// Restore the tools the transcript declares instead of the initial selection, as upstream
-    /// sessions created without `initialActiveToolNames` do.
-    pub restore_tools: bool,
     /// Extensions loaded for this session ([`crate::extensions::load_extensions`]).
     pub extensions: Option<Arc<crate::extensions::ExtensionRunner>>,
     /// The `session_start` event the extensions get when they bind; unset sends `startup`.
@@ -76,7 +73,6 @@ impl CreateAgentSessionOptions {
             custom_tools: Vec::new(),
             stream_fn: None,
             mcp: McpSessionOptions::default(),
-            restore_tools: false,
             extensions: None,
             session_start_event: None,
             tool_options: None,
@@ -192,6 +188,8 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
     let restored = existing.thinking_level.filter(|_| has_thinking_entry);
     let thinking = choose_thinking_level(&options, model.as_ref(), has_existing, restored);
     let (active, selection) = select_tools(&options)?;
+    let (selection_uses_defaults, default_modifiers) =
+        (selection.uses_default_tools, selection.default_tool_modifiers.clone());
 
     let mut session_manager = options.session_manager;
     if has_existing {
@@ -255,8 +253,9 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
     });
     session.install_builtin_tools();
     session.refresh_tools(ActiveSelection { names: Some(active), include_all_registered: true });
-    if options.restore_tools {
-        session.restore_tools_from_transcript();
+    // A resumed session that uses the default tools gets the loadout its transcript records.
+    if selection_uses_defaults {
+        session.restore_tools_from_transcript(&default_modifiers);
     }
     session.install_hooks();
     let weak = Arc::downgrade(&session);

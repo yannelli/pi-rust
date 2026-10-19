@@ -362,3 +362,43 @@ async fn turns_mcp_off_for_the_run_like_no_mcp() {
     assert!(session.mcp_manager().is_none());
     assert!(session.all_tools().iter().any(|tool| tool.name == "codemode"));
 }
+
+/// A session whose transcript records the loadout `names`, as a run records it.
+fn recorded(h: &Harness, names: &[&str]) -> SessionManager {
+    let mut manager = SessionManager::in_memory(&h.cwd);
+    let tools: Vec<Value> = names
+        .iter()
+        .map(|name| json!({"name": name, "description": name, "parameters": {"type": "object", "properties": {}}}))
+        .collect();
+    let system = json!({"role": "system", "content": "", "toolsAdded": tools, "timestamp": 1});
+    manager.append_message(&serde_json::from_value::<Message>(system).unwrap()).unwrap();
+    manager
+}
+
+async fn resume(names: &[&str], select: Select) -> Vec<String> {
+    let h = session_with(Select::default()).await;
+    let manager = recorded(&h, names);
+    let select = Select { custom: vec![tool("inactive_tool", false), tool("active_tool", true)], ..select };
+    let session = open_session_with(&h.services, manager, |create| apply(create, select)).await;
+    sorted(&session)
+}
+
+#[tokio::test]
+async fn a_resumed_session_restores_the_loadout_its_transcript_records() {
+    // active_tool was turned off during the session and inactive_tool turned on.
+    let recorded = ["read", "grep", "inactive_tool"];
+    assert_eq!(resume(&recorded, Select::default()).await, ["grep", "inactive_tool", "read"]);
+    let excluded = Select { exclude: vec!["inactive_tool"], ..Select::default() };
+    assert_eq!(resume(&recorded, excluded).await, ["grep", "read"]);
+    let modified = Select { tools: Some(vec!["-grep", "+write"]), ..Select::default() };
+    assert_eq!(resume(&recorded, modified).await, ["inactive_tool", "read", "write"]);
+}
+
+#[tokio::test]
+async fn explicit_tool_options_replace_the_recorded_loadout() {
+    let recorded = ["read", "grep", "inactive_tool"];
+    let allowlisted = Select { tools: Some(vec!["read", "write"]), ..Select::default() };
+    assert_eq!(resume(&recorded, allowlisted).await, ["read", "write"]);
+    let builtinless = Select { no_tools: Some(NoTools::Builtin), ..Select::default() };
+    assert_eq!(resume(&recorded, builtinless).await, ["active_tool"]);
+}

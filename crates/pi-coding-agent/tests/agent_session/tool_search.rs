@@ -109,11 +109,7 @@ async fn resume(
         fake.session_options("docs", json!({ "url": "http://unused.invalid", "exposure": "deferred" }), json!({}));
     let file = first.h.session.session_file().unwrap();
     let manager = SessionManager::open(&file).unwrap();
-    let session = open_session_with(&first.h.services, manager, |create| {
-        create.mcp = mcp;
-        create.restore_tools = true;
-    })
-    .await;
+    let session = open_session_with(&first.h.services, manager, |create| create.mcp = mcp).await;
     (session, fake)
 }
 

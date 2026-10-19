@@ -8,6 +8,7 @@ use pi_ai::{Message, SystemMessage, UserContent};
 
 use super::tools::{ActiveSelection, ToolInfo, ToolSource, default_tool_names, prompt_options};
 use super::{AgentSession, lock};
+use crate::settings::tools::apply_tool_modifiers;
 use crate::system_prompt::{
     BuildSystemPromptOptions, build_system_prompt_sections, diff_system_prompt_sections, render_system_prompt,
 };
@@ -124,15 +125,18 @@ impl AgentSession {
         if uses { default_tool_names(self.settings(), &modifiers) } else { Vec::new() }
     }
 
-    /// Restore the loadout the transcript declares, if it declares one. Declared tools that are
-    /// not registered yet, such as tools of MCP servers still connecting, stay pending.
-    pub(crate) fn restore_tools_from_transcript(&self) {
+    /// Restore the loadout the transcript declares, if it declares one, with `+name`/`-name`
+    /// `modifiers` applied. Declared tools that are not registered yet, such as tools of MCP servers
+    /// still connecting, stay pending.
+    pub(crate) fn restore_tools_from_transcript(&self, modifiers: &[String]) {
         let messages = self.session_manager().build_session_context().messages;
         let Some(current) = current_system_message(&messages) else {
             lock(&self.tools).pending.clear();
             return;
         };
-        let names: Vec<String> = current.tools_added.unwrap_or_default().into_iter().map(|tool| tool.name).collect();
+        let declared: Vec<String> =
+            current.tools_added.unwrap_or_default().into_iter().map(|tool| tool.name).collect();
+        let names = apply_tool_modifiers(&declared, modifiers);
         {
             let mut tools = lock(&self.tools);
             tools.pending = names.iter().filter(|name| tools.is_allowed(name)).cloned().collect();
