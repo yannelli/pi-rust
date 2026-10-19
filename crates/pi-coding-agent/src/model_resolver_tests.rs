@@ -50,49 +50,179 @@ impl ModelCatalog for Catalog {
     }
 }
 
-fn parse(pattern: &str) -> ParsedModelResult {
-    parse_model_pattern(pattern, &all_models(), true)
+fn reference_catalog() -> Vec<Model> {
+    [
+        ("anthropic", "claude-sonnet-4-5"),
+        ("anthropic", "claude-sonnet-4-5-20250929"),
+        ("anthropic", "claude-opus-4-8"),
+        ("anthropic", "exact"),
+        // Fuzzy-matches "shared"; an ambiguous exact "shared" must not fall through to it.
+        ("anthropic", "shared-pro"),
+        ("openai", "gpt-4o"),
+        ("openrouter", "qwen/qwen3-coder:exacto"),
+        ("openrouter", "openai/gpt-4o:extended"),
+        ("gw-a", "shared"),
+        ("gw-a", "anthropic/future"),
+        ("gw-a", "anthropic/exact"),
+        ("gw-a", "anthropic/claude-opus-4.8"),
+        ("gw-a", "anthropic/claude-opus"),
+        ("gw-b", "shared"),
+        ("gw-b", "anthropic/future"),
+        ("gw-b", "claude-opus-4-8"),
+        ("gw-b", "gw-b/free"),
+        ("gw-b", "zz:free"),
+    ]
+    .into_iter()
+    .map(|(provider, id)| model(provider, id, id, true))
+    .collect()
 }
 
-fn id(result: &ParsedModelResult) -> Option<&str> {
-    result.model.as_ref().map(|model| model.id.as_str())
+struct Case {
+    text: &'static str,
+    usable: &'static [&'static str],
+    provider: Option<&'static str>,
+    suffix: ThinkingSuffix,
+    fuzzy: bool,
+    expected: &'static str,
+}
+
+const fn case(text: &'static str, expected: &'static str) -> Case {
+    Case { text, usable: &[], provider: None, suffix: ThinkingSuffix::Strict, fuzzy: true, expected }
+}
+
+fn describe(result: ModelReferenceResult) -> String {
+    match result {
+        ModelReferenceResult::Resolved { model, thinking_level, warning } => {
+            let level = thinking_level.map(|level| format!(" :{}", level.as_str())).unwrap_or_default();
+            let warning = warning.map(|warning| format!(" ! {warning}")).unwrap_or_default();
+            format!("{}/{}{level}{warning}", model.provider, model.id)
+        }
+        ModelReferenceResult::Ambiguous { candidates, usable_count, .. } => {
+            let mut names: Vec<String> = candidates.iter().map(|m| format!("{}/{}", m.provider, m.id)).collect();
+            names.sort();
+            format!("ambiguous {} ({usable_count} usable)", names.join(", "))
+        }
+        ModelReferenceResult::NotFound { .. } => "not-found".into(),
+    }
 }
 
 #[test]
-fn parse_model_pattern_matches_upstream_cases() {
-    let exact = parse("claude-sonnet-4-5");
-    assert_eq!((id(&exact), exact.thinking_level, exact.warning.as_deref()), (Some("claude-sonnet-4-5"), None, None));
-    assert_eq!(id(&parse("sonnet")), Some("claude-sonnet-4-5"));
-    assert_eq!(parse("nonexistent"), ParsedModelResult::default());
-    for level in ThinkingLevel::ALL {
-        let result = parse(&format!("sonnet:{}", level.as_str()));
-        assert_eq!((id(&result), result.thinking_level), (Some("claude-sonnet-4-5"), Some(level)));
+fn model_references_match_upstream_cases() {
+    let lenient = ThinkingSuffix::Lenient;
+    let cases = [
+        case("claude-sonnet-4-5", "anthropic/claude-sonnet-4-5"),
+        case("GPT-4O", "openai/gpt-4o"),
+        case("sonnet", "anthropic/claude-sonnet-4-5"),
+        case("sonnet:high", "anthropic/claude-sonnet-4-5 :high"),
+        case("qwen/qwen3-coder:exacto", "openrouter/qwen/qwen3-coder:exacto"),
+        case("openrouter/qwen/qwen3-coder:exacto:high", "openrouter/qwen/qwen3-coder:exacto :high"),
+        case("openai/gpt-4o:extended", "openrouter/openai/gpt-4o:extended"),
+        case("openrouter/qwen", "openrouter/qwen/qwen3-coder:exacto"),
+        case("gpt-4o:random", "not-found"),
+        Case {
+            suffix: lenient,
+            ..case(
+                "gpt-4o:random",
+                "openai/gpt-4o ! Invalid thinking level \"random\" in pattern \"gpt-4o:random\". Using default instead.",
+            )
+        },
+        Case {
+            suffix: lenient,
+            ..case(
+                "qwen/qwen3-coder:exacto:high:random",
+                "openrouter/qwen/qwen3-coder:exacto ! Invalid thinking level \"random\" in pattern \"qwen/qwen3-coder:exacto:high:random\". Using default instead.",
+            )
+        },
+        Case { suffix: ThinkingSuffix::None, ..case("gpt-4o:high", "not-found") },
+        Case { fuzzy: false, ..case("sonnet", "not-found") },
+        case("  ", "not-found"),
+        Case { usable: &["gw-b"], ..case("shared", "gw-b/shared") },
+        case("shared", "ambiguous gw-a/shared, gw-b/shared (0 usable)"),
+        Case { usable: &["gw-a", "gw-b"], ..case("shared", "ambiguous gw-a/shared, gw-b/shared (2 usable)") },
+        Case { usable: &["gw-b"], ..case("shared:high", "gw-b/shared :high") },
+        Case { usable: &["gw-a", "gw-b"], ..case("shared:high", "ambiguous gw-a/shared, gw-b/shared (2 usable)") },
+        Case { usable: &["gw-b"], ..case("anthropic/future", "gw-b/anthropic/future") },
+        Case { usable: &["anthropic", "gw-a"], ..case("anthropic/exact", "anthropic/exact") },
+        Case { usable: &["gw-a"], ..case("anthropic/exact", "gw-a/anthropic/exact") },
+        case("anthropic/exact", "anthropic/exact"),
+        Case { usable: &["anthropic"], ..case("anthropic/claude-opus", "anthropic/claude-opus-4-8") },
+        Case { usable: &["gw-a"], ..case("anthropic/claude-opus", "gw-a/anthropic/claude-opus") },
+        case("anthropic/claude-opus", "anthropic/claude-opus-4-8"),
+        case("gw-b/free", "gw-b/gw-b/free"),
+        Case { usable: &["gw-a"], ..case("opus", "gw-a/anthropic/claude-opus-4.8") },
+        Case {
+            usable: &["anthropic", "gw-a", "gw-b"],
+            ..case("opus", "ambiguous anthropic/claude-opus-4-8, gw-b/claude-opus-4-8 (2 usable)")
+        },
+        Case { usable: &["anthropic"], ..case("opus", "anthropic/claude-opus-4-8") },
+        Case { provider: Some("gw-a"), usable: &["gw-b"], ..case("shared", "gw-a/shared") },
+        Case { provider: Some("gw-b"), ..case("GW-B/shared", "gw-b/shared") },
+        Case { provider: Some("openai"), ..case("4o", "openai/gpt-4o") },
+        Case { provider: Some("gw-a"), ..case("gpt-4o", "not-found") },
+    ];
+    let catalog = reference_catalog();
+    let reversed: Vec<Model> = catalog.iter().rev().cloned().collect();
+    for case in cases {
+        let request = ModelReferenceRequest {
+            text: case.text,
+            provider: case.provider,
+            thinking_suffix: case.suffix,
+            fuzzy: case.fuzzy,
+        };
+        // Catalog order must never decide the result.
+        for models in [&catalog, &reversed] {
+            let result = resolve_model_reference(&request, models, &|provider| case.usable.contains(&provider));
+            assert_eq!(describe(result), case.expected, "{}", case.text);
+        }
     }
-    assert_eq!(parse("gpt-4o:medium").thinking_level, Some(ThinkingLevel::Medium));
-    let invalid = parse("sonnet:random");
-    assert_eq!((id(&invalid), invalid.thinking_level), (Some("claude-sonnet-4-5"), None));
-    assert!(invalid.warning.unwrap().contains("Invalid thinking level \"random\""));
-    assert_eq!(id(&parse("qwen/qwen3-coder:exacto")), Some("qwen/qwen3-coder:exacto"));
-    let prefixed = parse("openrouter/qwen/qwen3-coder:exacto:high");
-    assert_eq!((id(&prefixed), prefixed.thinking_level), (Some("qwen/qwen3-coder:exacto"), Some(ThinkingLevel::High)));
-    assert_eq!(id(&parse("openai/gpt-4o:extended")), Some("openai/gpt-4o:extended"));
-    let nested = parse("qwen/qwen3-coder:exacto:high:random");
-    assert_eq!((id(&nested), nested.thinking_level), (Some("qwen/qwen3-coder:exacto"), None));
-    assert!(nested.warning.is_some());
-    assert!(parse("").model.is_some());
-    assert!(parse("sonnet:").warning.unwrap().contains("Invalid thinking level"));
 }
 
 #[test]
 fn fuzzy_matches_prefer_aliases_then_latest_dates() {
+    let fuzzy = |models: &[Model]| {
+        let request = ModelReferenceRequest {
+            text: "3-5-sonnet",
+            provider: None,
+            thinking_suffix: ThinkingSuffix::Strict,
+            fuzzy: true,
+        };
+        match resolve_model_reference(&request, models, &|_| true) {
+            ModelReferenceResult::Resolved { model, .. } => model.id,
+            other => panic!("{other:?}"),
+        }
+    };
     let models = vec![
         model("anthropic", "claude-3-5-sonnet-20240620", "Sonnet old", false),
         model("anthropic", "claude-3-5-sonnet-20241022", "Sonnet new", false),
     ];
-    assert_eq!(id(&parse_model_pattern("3-5-sonnet", &models, true)), Some("claude-3-5-sonnet-20241022"));
+    assert_eq!(fuzzy(&models), "claude-3-5-sonnet-20241022");
     let mut with_alias = models.clone();
     with_alias.push(model("anthropic", "claude-3-5-sonnet-latest", "Sonnet latest", false));
-    assert_eq!(id(&parse_model_pattern("3-5-sonnet", &with_alias, true)), Some("claude-3-5-sonnet-latest"));
+    assert_eq!(fuzzy(&with_alias), "claude-3-5-sonnet-latest");
+}
+
+#[test]
+fn scope_patterns_add_every_provider_of_an_ambiguous_match_with_a_warning() {
+    let mut models = all_models();
+    models.push(model("azure", "gpt-4o", "GPT-4o", false));
+    models.push(model("openai-codex", "gpt-4o-mini", "GPT-4o", false));
+    for (pattern, level) in [("gpt-4o:high", Some(ThinkingLevel::High)), ("GPT-4o", None)] {
+        let (scoped, diagnostics) = resolve_model_scope(&[pattern.to_string()], &models);
+        let mut found: Vec<(String, Option<ThinkingLevel>)> =
+            scoped.iter().map(|s| (format!("{}/{}", s.model.provider, s.model.id), s.thinking_level)).collect();
+        found.sort();
+        assert_eq!(found, [("azure/gpt-4o".to_string(), level), ("openai/gpt-4o".to_string(), level)]);
+        assert_eq!(
+            diagnostics,
+            [ModelScopeDiagnostic {
+                code: ModelScopeCode::Ambiguous,
+                message: format!(
+                    "Pattern \"{pattern}\" matches several providers: azure, openai. Use provider/id to choose one."
+                ),
+                pattern: pattern.to_string(),
+            }]
+        );
+    }
 }
 
 #[test]
@@ -138,7 +268,7 @@ fn cli(
     thinking: Option<ThinkingLevel>,
     catalog: &Catalog,
 ) -> ResolveCliModelResult {
-    resolve_cli_model(provider, Some(pattern), thinking, catalog)
+    resolve_cli_model(provider, Some(pattern), thinking, false, catalog)
 }
 
 fn pair(result: &ResolveCliModelResult) -> (String, String) {
@@ -195,6 +325,19 @@ fn ambiguous_and_authenticated_provider_preferences() {
     models.push(model("xiaomi", "mimo-v2.5-pro", "MiMo", false));
     let catalog = Catalog::with_auth(models, &["commandcode"]);
     assert_eq!(pair(&cli(None, "xiaomi/mimo-v2.5-pro", None, &catalog)).0, "commandcode");
+
+    let direct = model("anthropic", "claude-sonnet-4-5", "Sonnet", true);
+    let openrouter = model("openrouter", "anthropic/claude-opus-5.5", "Opus", true);
+    let vercel = model("vercel-ai-gateway", "anthropic/claude-opus-5.5", "Opus", true);
+    let catalog = Catalog::with_auth(vec![direct, openrouter, vercel], &["vercel-ai-gateway"]);
+    let with_level = cli(None, "anthropic/claude-opus-5.5:high", None, &catalog);
+    assert_eq!(
+        (pair(&with_level).0, with_level.thinking_level),
+        ("vercel-ai-gateway".into(), Some(ThinkingLevel::High))
+    );
+    let inline = resolve_cli_model(None, Some("anthropic/claude-opus-5.5"), None, true, &catalog);
+    assert!(inline.model.is_none());
+    assert!(inline.error.unwrap().contains("--api-key does not choose a provider."));
 }
 
 #[test]

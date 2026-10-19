@@ -137,7 +137,7 @@ pub fn find_initial_agent_model(
     cli: Option<(Option<&str>, &str)>,
 ) -> DurableResult<InitialModel> {
     if let Some((provider, model)) = cli {
-        let resolved = resolve_cli_model(provider, Some(model), None, runtime);
+        let resolved = resolve_cli_model(provider, Some(model), None, false, runtime);
         let Some(found) = resolved.model.filter(|_| resolved.error.is_none()) else {
             let reason = resolved.error.unwrap_or_else(|| model.to_string());
             return Err(DurableError::Error(format!("Could not resolve model: {reason}")));
