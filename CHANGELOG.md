@@ -2,6 +2,31 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.2.2] - 2026-10-19
+
+### Added
+
+- **js:** report os.cpus times from /proc/stat, host_processor_info, and NtQuerySystemInformation ([c11336c](https://github.com/yannelli/pi-rust/commit/c11336c410d5be8430759f24542b9ec80377d843))
+- **js:** share SharedArrayBuffer memory between workers and let Atomics.wait block ([dd1c022](https://github.com/yannelli/pi-rust/commit/dd1c022ee31e9416bc7fe6be0cc4c37e70993f7b))
+- **js:** add HTTP/2 server push and read the peer's SETTINGS frames ([47a07ca](https://github.com/yannelli/pi-rust/commit/47a07ca64505d1965f31fc61fc82d62e54316dec))
+- **js:** add TLS over existing sockets and streams, SNICallback and addContext, and client session resumption ([161b0e3](https://github.com/yannelli/pi-rust/commit/161b0e3fe6614b6fe519bc259fce28f734aa1a8f))
+- **js:** connect to looked-up addresses with Node 22's autoSelectFamily rules and events ([2fedbed](https://github.com/yannelli/pi-rust/commit/2fedbed807dd3677482dce9a04f3d5591f76d6c8))
+- **js:** pass the real stdio descriptors to children with stdio 'inherit' when no output sink is set ([25764c5](https://github.com/yannelli/pi-rust/commit/25764c53b2f8f4858886e5c1a3ccdd814756d9dd))
+- **js:** decode gzip, deflate, and brotli fetch bodies and send accept-encoding like undici ([63d253e](https://github.com/yannelli/pi-rust/commit/63d253e0c9e095164a454fe0fc553f92a03b5781))
+- **js:** add node:wasi and the WebAssembly global on the wasmi interpreter, with resumable calls into JavaScript imports and shared memory buffers ([e332e3a](https://github.com/yannelli/pi-rust/commit/e332e3a571d6e709bd21d3b85441ebe630d51941))
+- **js:** add node:inspector and node:inspector/promises with in-process Runtime, HeapProfiler, and Schema sessions ([2999a61](https://github.com/yannelli/pi-rust/commit/2999a617d64fb36b8e16835171be48161feb3982))
+- **js:** add node:repl with vm contexts, multi-line input, dot commands, custom eval and writer, and top-level await ([bba6b5d](https://github.com/yannelli/pi-rust/commit/bba6b5d0e9960e621e6eb69dd31ba2406107b356))
+- **js:** add node:test and node:test/reporters with suites, hooks, mocks, mock timers, run(), and TAP, spec, dot, and junit output ([879e38e](https://github.com/yannelli/pi-rust/commit/879e38ee12f7fd2a6b8754920a82b4dadc08de34))
+- **js:** add node:sqlite with DatabaseSync, StatementSync, user functions, aggregates, and backup on the bundled SQLite ([9cbb6e8](https://github.com/yannelli/pi-rust/commit/9cbb6e83a84d3b3be09d5a6ee5ba7cddffc38844))
+
+### Fixed
+
+- **js:** keep an HTTP/2 session's socket writable after the peer half-closes ([bc13f0c](https://github.com/yannelli/pi-rust/commit/bc13f0ce6a9520aa9feba34f7faf7716521aa014))
+- **js:** report a missing .load file argument like Node ([842a13f](https://github.com/yannelli/pi-rust/commit/842a13f716491498aa496d7d7c8b6831a9cd0bce))
+- **js:** refuse to transfer WebAssembly.Memory buffers ([31a9705](https://github.com/yannelli/pi-rust/commit/31a9705a010821dd9947b53660001f9384d579ee))
+- **js:** emit 'end' on sockets nothing reads and ignore shutdown failures like Node ([d773bde](https://github.com/yannelli/pi-rust/commit/d773bde3a12767ba3d2ce44dbe91b49ed60751ab))
+- **js:** discard unread bytes before closing a TCP socket ([272a122](https://github.com/yannelli/pi-rust/commit/272a12200a55d791dcf75b121e106f7e676f69f7))
+
 ## [0.2.1] - 2026-10-19
 
 ### Fixed
