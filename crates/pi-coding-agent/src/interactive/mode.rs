@@ -246,7 +246,7 @@ impl InteractiveMode {
         self.options.borrow().tui_mode.unwrap_or_default()
     }
 
-    /// Whether startup finished, so prompts, keys, and commands are handled.
+    /// Whether startup finished, including the first extension bind (upstream `init()` awaits it).
     pub fn is_ready(&self) -> bool {
         self.state.borrow().ready
     }
