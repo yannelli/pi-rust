@@ -147,8 +147,9 @@ async fn openai_format_sends_the_mapped_off_value() {
 
 #[tokio::test]
 async fn deepseek_format_respects_unsupported_off() {
-    let mimo = body(&catalog("xiaomi", "mimo-v2.5-pro"), Some(ThinkingLevel::High)).await;
-    assert_eq!((&mimo["thinking"], &mimo["reasoning_effort"]), (&json!({"type": "enabled"}), &json!("high")));
+    let mimo = body(&catalog("xiaomi", "mimo-v2.6-pro"), Some(ThinkingLevel::High)).await;
+    assert_eq!(mimo["thinking"], json!({"type": "enabled"}));
+    assert!(mimo.get("reasoning_effort").is_none(), "MiMo only toggles thinking");
     let kimi = catalog("opencode", "kimi-k2.6");
     assert_eq!(body(&kimi, None).await["thinking"], json!({"type": "disabled"}));
     let on = body(&kimi, Some(ThinkingLevel::High)).await;
@@ -163,7 +164,7 @@ async fn deepseek_format_respects_unsupported_off() {
 
 #[tokio::test]
 async fn openrouter_and_string_thinking_formats() {
-    let r1 = catalog("openrouter", "deepseek/deepseek-r1");
+    let r1 = catalog("openrouter", "deepseek/deepseek-r1-0528");
     let on = body(&r1, Some(ThinkingLevel::High)).await;
     assert_eq!(on["reasoning"], json!({"effort": "high"}));
     assert!(on.get("reasoning_effort").is_none());

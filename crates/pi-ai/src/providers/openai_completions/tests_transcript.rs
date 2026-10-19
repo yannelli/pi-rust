@@ -203,7 +203,7 @@ async fn reasoning_fields_replay_on_assistant_messages() {
     let body = capture(&zai, &context, high()).await;
     assert_eq!(with_role(&body, "assistant")[0]["reasoning_content"], "prior reasoning");
     assert_eq!(body["thinking"], json!({"type": "enabled", "clear_thinking": false}));
-    let mimo = catalog("xiaomi", "mimo-v2.5-pro");
+    let mimo = catalog("xiaomi", "mimo-v2.6-pro");
     let body = capture(&mimo, &tool_turn(&mimo, vec![call()]), high()).await;
     assert_eq!(with_role(&body, "assistant")[0]["reasoning_content"], "");
     let go = plain_catalog("opencode-go", "kimi-k3");
