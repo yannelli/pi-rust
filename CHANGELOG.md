@@ -2,6 +2,34 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.2.0] - 2026-10-19
+
+### Breaking Changes
+
+- **durable:** support namespaced SQLite storage ([a23c349](https://github.com/yannelli/pi-rust/commit/a23c349ff22f3ffacbc62763457077eb5f818b71))
+- **ai:** remove the unused assistant-message frame API ([1df04eb](https://github.com/yannelli/pi-rust/commit/1df04ebeab79b11c5a9184c686ef17b481d4071e))
+
+### Added
+
+- **durable:** per-model compaction settings via compaction model overrides ([f427319](https://github.com/yannelli/pi-rust/commit/f42731908ef86238a805fa2606380d3cfb5fed7f))
+- **coding-agent:** configure the session share destination ([fc93f71](https://github.com/yannelli/pi-rust/commit/fc93f711bf3a856a870594ff4e6152bc7d2c06e7))
+- **ai:** refresh the model catalog from upstream pi ([f34e4f3](https://github.com/yannelli/pi-rust/commit/f34e4f36c65578f86ddf1ffeb3ad363fc33a7f20))
+- **ai:** keep the prompt cache when changing thinking level on OpenAI GPT-6 ([404bd78](https://github.com/yannelli/pi-rust/commit/404bd7862eeed64224d37d00b3dbdda44a2d634a))
+
+### Fixed
+
+- **durable:** lead with the system baseline after a compaction that keeps assistant messages ([c8b3381](https://github.com/yannelli/pi-rust/commit/c8b33819990fd0951d024c3b7f22bb8cf90561d2))
+- **coding-agent:** resolve model references through one provider selection policy ([e4bd988](https://github.com/yannelli/pi-rust/commit/e4bd988044854c32116ea8c9ede630cdb064340c))
+- **coding-agent:** describe models.json fields and use pi.dev schema URLs ([fd3aabf](https://github.com/yannelli/pi-rust/commit/fd3aabf0ede47c7ff863c50fdcb6d6b6e0e9d440))
+- **codemode:** bound live codemode workers across calls and sessions ([e247d66](https://github.com/yannelli/pi-rust/commit/e247d66bf147eddafd980f8259d224faf796d35b))
+- **coding-agent:** restore active tools on session resume ([d6103de](https://github.com/yannelli/pi-rust/commit/d6103de78b421d6c90f69236cf8535da354212db))
+- **coding-agent:** normalize read line-range labels ([052708f](https://github.com/yannelli/pi-rust/commit/052708f779162557e764708ecb957f9aa18c4ef0))
+- **coding-agent:** keep empty quoted prompt template arguments ([da7f364](https://github.com/yannelli/pi-rust/commit/da7f36479be8cbd1adf17e132777996a2b74b895))
+- **coding-agent:** remove fixed output limits from summary requests ([f6f96de](https://github.com/yannelli/pi-rust/commit/f6f96deb5a0c61368da332a05abadf75bb12f592))
+- **ai:** port provider fixes from upstream pi 1.3.0 ([f8df167](https://github.com/yannelli/pi-rust/commit/f8df167f2c388dfd127b76752e2d21e627597dda))
+- **ai:** report malformed finished tool-call arguments and keep invalid \u escapes ([19d0270](https://github.com/yannelli/pi-rust/commit/19d02707ed0ed480834a0420b8bd205cabf7276f))
+- **ai:** retry more transient gateway and fetch errors ([a7d6676](https://github.com/yannelli/pi-rust/commit/a7d6676529f5fc101ad89b357d83a337e0932bfb))
+
 ## [0.1.11] - 2026-10-14
 
 ### Added
