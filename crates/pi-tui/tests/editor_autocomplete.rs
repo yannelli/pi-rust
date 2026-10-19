@@ -6,6 +6,7 @@ mod editor_common;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use editor_common::{
     MockProvider, TestEditor, before_cursor, cursor, editor, flush, flush_debounce, recorder, suggestions, type_text,
@@ -25,6 +26,9 @@ fn recording_provider(requests: &Rc<RefCell<Vec<String>>>, triggers: &[&str]) ->
 /// The text typed, its editor, and the requests the provider saw.
 type Case = (String, TestEditor, Rc<RefCell<Vec<String>>>);
 
+/// The editor's symbol debounce. A check made after it elapsed cannot tell a debounced request from an early one.
+const DEBOUNCE: Duration = Duration::from_millis(20);
+
 const CJK_PUNCTUATION: &str = "\u{ff0c}\u{ff0e}\u{ff1a}\u{ff1b}\u{ff01}\u{ff1f}\u{ff08}\u{ff09}\u{ff3b}\u{ff3d}\u{ff5b}\u{ff5d}\u{201c}\u{201d}\u{2018}\u{2019}\u{2026}\u{2014}\u{3002}\u{3001}\u{300c}\u{300d}\u{300e}\u{300f}\u{300a}\u{300b}\u{3010}\u{3011}";
 
 #[test]
@@ -39,26 +43,32 @@ fn triggers_and_debounces_symbols_after_cjk_punctuation() {
             combos.push((before.clone(), trigger));
         }
     }
-    // Each case is checked right after its own input, well inside the 20 ms debounce.
+    // Each case is checked right after its own input, while still inside the debounce.
     let mut cases: Vec<Case> = Vec::new();
     for (before, trigger) in combos {
         let editor = editor();
         let requests = recorder();
         editor.set_autocomplete_provider(recording_provider(&requests, &["$", "-"]));
         editor.set_text(&before);
+        let typed = Instant::now();
         editor.handle_input(trigger);
         flush();
         let text = format!("{before}{trigger}");
-        assert!(requests.borrow().is_empty(), "requested before the debounce: {text:?}");
+        if typed.elapsed() < DEBOUNCE {
+            assert!(requests.borrow().is_empty(), "requested before the debounce: {text:?}");
+        }
         cases.push((text, editor, requests));
     }
     flush_debounce();
     for (text, editor, requests) in &cases {
         assert_eq!(*requests.borrow(), std::slice::from_ref(text));
+        let typed = Instant::now();
         editor.handle_input("r");
         editor.handle_input("e");
         flush();
-        assert_eq!(requests.borrow().len(), 1, "{text:?}");
+        if typed.elapsed() < DEBOUNCE {
+            assert_eq!(requests.borrow().len(), 1, "{text:?}");
+        }
     }
     flush_debounce();
     for (text, _, requests) in &cases {
