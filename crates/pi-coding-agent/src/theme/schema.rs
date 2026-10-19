@@ -11,8 +11,7 @@ use super::terminal::TerminalTheme;
 use super::tokens::{THEME_TOKENS, ThemeToken, TokenMap};
 
 /// The published schema URL that built-in themes reference.
-pub const THEME_SCHEMA_URL: &str =
-    "https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/schemas/theme.schema.json";
+pub const THEME_SCHEMA_URL: &str = "https://pi.dev/schemas/theme.schema.json";
 
 /// The `export` section: HTML export backgrounds.
 #[derive(Debug, Clone, Default, PartialEq)]
