@@ -11,6 +11,7 @@ use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
 
+use super::http2_settings::SettingsScanner;
 use super::http2_stream::{self as streams, Headers, Sender, StreamCommand, h2_error};
 use super::net::parse_options;
 use super::set_fn;
@@ -27,6 +28,10 @@ pub(super) enum Event {
     Open(u64, u32),
     Headers(u64, Headers),
     Response(u64, Headers, bool),
+    /// A PUSH_PROMISE the client received: the pushed stream's key, id, and request headers.
+    Promise(u64, u32, Headers),
+    /// The response headers of a pushed stream.
+    Pushed(u64, Headers, bool),
     Data(u64, Vec<u8>),
     Trailers(u64, Headers),
     End(u64),
@@ -52,6 +57,8 @@ impl Poster {
 
 enum Command {
     Request(u64, Headers, bool),
+    /// Push on the stream with the first key, as a new stream with the second key.
+    Push(u64, u64, Headers),
     Stream(u64, StreamCommand),
     Ping(oneshot::Sender<Result<f64, JsError>>),
     Goaway(u32),
@@ -60,6 +67,7 @@ enum Command {
 }
 
 struct Session {
+    scanner: SettingsScanner,
     input: Option<mpsc::UnboundedSender<Bytes>>,
     commands: mpsc::UnboundedSender<Command>,
     tasks: Vec<tokio::task::AbortHandle>,
@@ -94,6 +102,10 @@ fn deliver(ctx: &Ctx<'_>, id: u64, event: Event) {
         Event::Open(key, stream) => function.call::<_, ()>(("open", key, stream)),
         Event::Headers(key, headers) => function.call::<_, ()>(("headers", key, headers_js(ctx, headers)?)),
         Event::Response(key, headers, end) => function.call::<_, ()>(("response", key, headers_js(ctx, headers)?, end)),
+        Event::Promise(key, stream, headers) => {
+            function.call::<_, ()>(("promise", key, headers_js(ctx, headers)?, false, stream))
+        }
+        Event::Pushed(key, headers, end) => function.call::<_, ()>(("pushed", key, headers_js(ctx, headers)?, end)),
         Event::Data(key, bytes) => function.call::<_, ()>(("data", key, bytes_to_js(ctx, bytes)?)),
         Event::Trailers(key, headers) => function.call::<_, ()>(("trailers", key, headers_js(ctx, headers)?)),
         Event::End(key) => function.call::<_, ()>(("end", key)),
@@ -217,6 +229,7 @@ async fn run_client(
                 let ping_pong = ping_pong.clone();
                 tokio::spawn(async move { done.send(ping(ping_pong).await) });
             }
+            Command::Push(_, key, _) => post.send(Event::StreamError(key, JsError::new("Clients cannot push streams"))),
             Command::Goaway(_) => {}
             Command::Forget(key) => {
                 streams.remove(&key);
@@ -279,6 +292,12 @@ async fn run_server(
             },
             command = commands.recv() => match command {
                 Some(Command::Stream(key, command)) => route(&mut streams, key, command),
+                Some(Command::Push(parent, key, headers)) => {
+                    // Commands for the pushed stream wait in its channel until the push is sent.
+                    let (tx, rx) = mpsc::unbounded_channel();
+                    streams.insert(key, tx);
+                    route(&mut streams, parent, StreamCommand::Push(key, headers, rx));
+                }
                 Some(Command::Ping(done)) => {
                     let ping_pong = ping_pong.clone();
                     tokio::spawn(async move { done.send(ping(ping_pong).await) });
@@ -332,7 +351,8 @@ fn session<'js>(ctx: Ctx<'js>, server: bool, settings: Value<'js>, callback: Fun
         tokio.spawn(run_client(h2_io, settings, commands_rx, post))
     };
     let tasks = vec![feed.abort_handle(), drain.abort_handle(), run.abort_handle()];
-    state.resources.borrow_mut().insert(id, Box::new(Session { input: Some(input), commands, tasks }));
+    let scanner = SettingsScanner::new(server);
+    state.resources.borrow_mut().insert(id, Box::new(Session { scanner, input: Some(input), commands, tasks }));
     Ok(id)
 }
 
@@ -364,9 +384,17 @@ fn close(id: u64) {
 pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
     let object = Object::new(ctx.clone())?;
     set_fn(&object, "session", session)?;
+    // Returns the peer's SETTINGS frames found in the bytes, as flat identifier and value lists.
     set_fn(&object, "feed", |ctx: Ctx<'js>, id: u64, data: TypedArray<'js, u8>| {
-        with_session(&ctx, id, |session| session.input.as_ref().map(|input| input.send(Bytes::from(bytes_of(&data)))))
-            .map(|_| ())
+        let bytes = bytes_of(&data);
+        let frames = with_session(&ctx, id, |session| {
+            let frames = session.scanner.scan(&bytes);
+            if let Some(input) = &session.input {
+                let _ = input.send(Bytes::from(bytes));
+            }
+            frames
+        })?;
+        if frames.is_empty() { Ok(Value::new_undefined(ctx.clone())) } else { from_json(&ctx, &json!(frames)) }
     })?;
     set_fn(&object, "endInput", |ctx: Ctx<'js>, id: u64| with_session(&ctx, id, |session| session.input = None))?;
     set_fn(&object, "request", |ctx: Ctx<'js>, id: u64, key: u64, headers: Vec<String>, end: bool| {
@@ -374,6 +402,9 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
     })?;
     set_fn(&object, "respond", |ctx: Ctx<'js>, id: u64, key: u64, headers: Vec<String>, end: bool| {
         command(&ctx, id, Command::Stream(key, StreamCommand::Respond(headers_arg(headers), end)))
+    })?;
+    set_fn(&object, "push", |ctx: Ctx<'js>, id: u64, parent: u64, key: u64, headers: Vec<String>| {
+        command(&ctx, id, Command::Push(parent, key, headers_arg(headers)))
     })?;
     set_fn(&object, "info", |ctx: Ctx<'js>, id: u64, key: u64, headers: Vec<String>| {
         command(&ctx, id, Command::Stream(key, StreamCommand::Informational(headers_arg(headers))))

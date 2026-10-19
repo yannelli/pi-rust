@@ -69,12 +69,15 @@ h2 = "0.4"
 http = "1"
 httparse = "1.10.1"
 bytes = "1"
+rusqlite = { version = "0.40", features = ["bundled", "backup", "column_decltype", "column_metadata", "functions", "window"] }
+wasmi = { version = "0.46.0", default-features = false, features = ["std", "simd"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.190"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [
+    "Wdk_System_SystemInformation",
     "Win32_Foundation",
     "Win32_NetworkManagement_IpHelper",
     "Win32_NetworkManagement_Ndis",
@@ -94,8 +97,10 @@ rquickjs = { version = "0.14.0", default-features = false, features = ["std", "l
 [dev-dependencies]
 tempfile.workspace = true
 
-# Same lints as the workspace, except `unsafe_code` is `deny` instead of `forbid`: the
-# system-call module (`node/sys.rs`) allows it locally, as libuv's calls need FFI.
+# Same lints as the workspace, except `unsafe_code` is `deny` instead of `forbid`: modules that
+# need FFI allow it locally: system calls (`node/sys.rs`, `node/os_cpus.rs`), SharedArrayBuffer
+# memory (`node/shared.rs`), SQLite user functions (`node/sqlite_fn.rs`), and WebAssembly memory
+# buffers (`node/wasm_objects.rs`).
 [lints.rust]
 unsafe_code = "deny"
 

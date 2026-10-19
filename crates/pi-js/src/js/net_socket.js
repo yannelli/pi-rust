@@ -72,7 +72,7 @@ Socket.prototype._applyInfo = function (info) {
   if (info.path) this._path = info.path;
 };
 
-Socket.prototype._onNative = function (event, value) {
+Socket.prototype._onNative = function (event, value, error) {
   if (event === "data") {
     this.bytesRead += value.length;
     this._touch();
@@ -81,14 +81,47 @@ Socket.prototype._onNative = function (event, value) {
       nativeNet.pause(this._handle);
     }
   } else if (event === "end") {
+    // Like Node's onStreamRead, so 'end' comes even when nothing reads the socket.
     this.push(null);
+    this.read(0);
   } else if (event === "connect") {
     this._onConnect(value);
   } else if (event === "error") {
     this._hadError = true;
     this.destroy(value);
+  } else if (event === "attempt") {
+    if (this.autoSelectFamilyAttemptedAddresses) this.autoSelectFamilyAttemptedAddresses.push(`${value.address}:${value.port}`);
+    this.emit("connectionAttempt", value.address, value.port, value.family);
+  } else if (event === "attemptFailed" || event === "attemptTimeout") {
+    (this._attemptErrors ??= []).push(error);
+    if (event === "attemptFailed") this.emit("connectionAttemptFailed", value.address, value.port, value.family, error);
+    else this.emit("connectionAttemptTimeout", value.address, value.port, value.family);
+  } else if (event === "exhausted") {
+    // Node's NodeAggregateError: no message, and the first address's error code.
+    const errors = this._attemptErrors || [];
+    this._hadError = true;
+    this.destroy(Object.assign(new AggregateError(errors), { code: errors[0] && errors[0].code }));
   }
 };
+
+// Node's lookupAndConnectMultiple order: each IP once, the first address's family first, and
+// then the two families alternating.
+function attemptOrder(list) {
+  const groups = [[], []];
+  let first = null;
+  for (const entry of list) {
+    if (!isIP(entry.address) || (entry.family !== 4 && entry.family !== 6)) continue;
+    first ??= entry.family;
+    const group = groups[entry.family === first ? 0 : 1];
+    if (!group.some((other) => other.address === entry.address)) group.push(entry);
+  }
+  const order = [];
+  for (let index = 0; index < Math.max(groups[0].length, groups[1].length); index++) {
+    if (index < groups[0].length) order.push(groups[0][index]);
+    if (index < groups[1].length) order.push(groups[1][index]);
+  }
+  return order;
+}
 
 Socket.prototype._onConnect = function (info) {
   this.connecting = false;
@@ -131,7 +164,8 @@ Socket.prototype._write = function (chunk, encoding, callback) {
 Socket.prototype._final = function (callback) {
   this._whenConnected(() => {
     if (this._handle === null) return callback();
-    nativeNet.shutdown(this._handle).then(() => callback(), (error) => (error.code === "ENOTCONN" ? callback() : callback(error)));
+    // Node's afterShutdown ignores the status, so a peer that already reset the connection is no error.
+    nativeNet.shutdown(this._handle).then(() => callback(), () => callback());
   });
 };
 
@@ -237,7 +271,7 @@ for (const [name, get] of Object.entries(getters)) Object.defineProperty(Socket.
 
 // Start the native connection; TLSSocket passes its TLS options as the second argument.
 Socket.prototype._nativeConnect = function (request, tls) {
-  return nativeNet.connect(request, tls, (event, value) => this._onNative(event, value));
+  return nativeNet.connect(request, tls, (event, value, error) => this._onNative(event, value, error));
 };
 
 Socket.prototype.connect = function (...args) {
@@ -271,23 +305,41 @@ Socket.prototype.connect = function (...args) {
   const portNumber = validatePort(port, "Port", true);
   if (options.localAddress !== undefined && !isIP(options.localAddress)) throw invalidArgValue("options.localAddress", options.localAddress);
   const host = options.host || "localhost";
+  if (options.autoSelectFamily != null) validate.boolean(options.autoSelectFamily, "options.autoSelectFamily");
   const autoSelect = options.autoSelectFamily ?? defaults.autoSelectFamily;
+  if (options.autoSelectFamilyAttemptTimeout != null) validate.integer(options.autoSelectFamilyAttemptTimeout, "options.autoSelectFamilyAttemptTimeout", 1);
   const attemptTimeout = Math.max(10, options.autoSelectFamilyAttemptTimeout ?? defaults.attemptTimeout);
-  const request = { localAddress: options.localAddress, localPort: options.localPort, attemptTimeout };
+  const request = { localAddress: options.localAddress, localPort: options.localPort };
   if (isIP(host)) {
     open({ ...request, addresses: [[host, portNumber]] });
     return this;
   }
-  const lookup = options.lookup || require("dns").lookup;
-  const family = options.family === undefined ? 0 : options.family;
-  lookup(host, { family, hints: options.hints || 0, all: autoSelect && family === 0 }, (error, address, addressFamily) => {
-    if (this.destroyed) return;
+  const dns = require("dns");
+  const lookup = options.lookup || dns.lookup;
+  const family = options.family === "IPv4" ? 4 : options.family === "IPv6" ? 6 : options.family;
+  const dnsOptions = { family, hints: options.hints || 0 };
+  if (process.platform !== "win32" && family !== 4 && family !== 6 && dnsOptions.hints === 0) dnsOptions.hints = dns.ADDRCONFIG;
+  // Node looks up every address, and tries them in turn, only without a family or local address.
+  const multiple = family !== 4 && family !== 6 && !options.localAddress && autoSelect;
+  if (multiple) dnsOptions.all = true;
+  lookup(host, dnsOptions, (error, address, addressFamily) => {
+    if (!this.connecting) return;
     const list = Array.isArray(address) ? address : address ? [{ address, family: addressFamily }] : [];
-    const first = list[0];
-    this.emit("lookup", error || null, first && first.address, first && first.family, host);
-    if (error) return this.destroy(error);
-    if (!first) return this.destroy(codeError(TypeError, "ERR_INVALID_IP_ADDRESS", `Invalid IP address: ${host}`));
-    open({ ...request, addresses: list.map((entry) => [entry.address, portNumber]) });
+    if (error || !multiple) {
+      const first = list[0];
+      this.emit("lookup", error || null, first && first.address, first && first.family, host);
+      if (error) return this.destroy(error);
+      if (!first) return this.destroy(codeError(TypeError, "ERR_INVALID_IP_ADDRESS", `Invalid IP address: ${host}`));
+      return open({ ...request, addresses: list.map((entry) => [entry.address, portNumber]) });
+    }
+    for (const entry of list) {
+      this.emit("lookup", null, entry.address, entry.family, host);
+      if (!this.connecting) return;
+    }
+    const order = attemptOrder(list);
+    if (!order.length) return this.destroy(codeError(TypeError, "ERR_INVALID_IP_ADDRESS", `Invalid IP address: ${list.length ? list[0].address : host}`));
+    if (order.length > 1) this.autoSelectFamilyAttemptedAddresses = [];
+    open({ ...request, addresses: order.map((entry) => [entry.address, portNumber]), attemptTimeout: order.length > 1 ? attemptTimeout : undefined });
   });
   return this;
 };

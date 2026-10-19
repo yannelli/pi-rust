@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rquickjs::{Ctx, Function, Object, Persistent, TypedArray, Value};
-use serde::Deserialize;
 use serde_json::json;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::sync::watch;
@@ -40,6 +39,8 @@ pub(super) enum Kind {
         writer: Writer,
         paused: watch::Sender<bool>,
         tcp: Option<socket2::Socket>,
+        /// Whether the socket was sent to another process, which may still read it.
+        exported: bool,
     },
     Listener {
         path: Option<String>,
@@ -61,6 +62,16 @@ pub(super) enum Event {
     End,
     Error(JsError),
     ClientError(JsError),
+    Attempt(SocketAddr),
+    AttemptFailed(SocketAddr, JsError),
+    AttemptTimeout(SocketAddr, JsError),
+    /// No address of an autoSelectFamily connect could be reached.
+    Exhausted,
+    /// A TLS session handle for the client socket.
+    Session(Vec<u8>),
+    /// Ciphertext to send on, and the end of, a JavaScript stream under TLS.
+    Wire(Vec<u8>),
+    WireEnd,
 }
 
 /// Node's network error: `connect ECONNREFUSED 127.0.0.1:80`, with `address` and `port`.
@@ -109,10 +120,20 @@ pub(super) fn pipe_conn(io: BoxIo, path: &str) -> Conn {
     Conn { io, tcp: None, info: json!({ "path": path }) }
 }
 
-pub(super) async fn secure(conn: Result<Conn, JsError>, tls: Option<Tls>) -> Result<Conn, JsError> {
+/// A connection with no address of its own, such as TLS over a JavaScript stream.
+pub(super) fn plain_conn(io: BoxIo) -> Conn {
+    Conn { io, tcp: None, info: json!({}) }
+}
+
+pub(super) async fn secure(
+    conn: Result<Conn, JsError>,
+    tls: Option<Tls>,
+    sender: &Sender,
+    id: u64,
+) -> Result<Conn, JsError> {
     let conn = conn?;
     let Some(tls) = tls else { return Ok(conn) };
-    let (io, extra) = tls.handshake(conn.io).await?;
+    let (io, extra) = tls.handshake(conn.io, sender, id).await?;
     let mut info = conn.info;
     info["tls"] = extra;
     Ok(Conn { io, tcp: conn.tcp, info })
@@ -134,7 +155,21 @@ pub(super) fn insert<'js>(ctx: &Ctx<'js>, kind: Kind, callback: Option<Function<
     id
 }
 
-fn stream_kind(conn: Option<Conn>) -> (Kind, serde_json::Value) {
+fn attempt_json(target: SocketAddr) -> serde_json::Value {
+    json!({ "address": target.ip().to_string(), "port": target.port(), "family": if target.is_ipv4() { 4 } else { 6 } })
+}
+
+fn report_attempt<'js>(
+    ctx: &Ctx<'js>,
+    function: &Function<'js>,
+    name: &str,
+    target: SocketAddr,
+    error: &JsError,
+) -> rquickjs::Result<()> {
+    function.call((name, from_json(ctx, &attempt_json(target))?, error_value(ctx, error)?))
+}
+
+pub(super) fn stream_kind(conn: Option<Conn>) -> (Kind, serde_json::Value) {
     let (pending, writer, tcp, info) = match conn {
         Some(conn) => {
             let (read, write) = tokio::io::split(conn.io);
@@ -143,7 +178,7 @@ fn stream_kind(conn: Option<Conn>) -> (Kind, serde_json::Value) {
         None => (None, None, None, serde_json::Value::Null),
     };
     let writer = Arc::new(tokio::sync::Mutex::new(writer));
-    (Kind::Stream { pending, reader: None, writer, paused: watch::Sender::new(false), tcp }, info)
+    (Kind::Stream { pending, reader: None, writer, paused: watch::Sender::new(false), tcp, exported: false }, info)
 }
 
 fn deliver(ctx: &Ctx<'_>, id: u64, event: Event) {
@@ -170,6 +205,15 @@ fn deliver(ctx: &Ctx<'_>, id: u64, event: Event) {
         Event::ClientError(error) => {
             error_value(ctx, &error).and_then(|error| function.call::<_, ()>(("clientError", error)))
         }
+        Event::Attempt(target) => {
+            from_json(ctx, &attempt_json(target)).and_then(|target| function.call::<_, ()>(("attempt", target)))
+        }
+        Event::AttemptFailed(target, error) => report_attempt(ctx, &function, "attemptFailed", target, &error),
+        Event::AttemptTimeout(target, error) => report_attempt(ctx, &function, "attemptTimeout", target, &error),
+        Event::Exhausted => function.call::<_, ()>(("exhausted",)),
+        Event::Session(bytes) => bytes_to_js(ctx, bytes).and_then(|bytes| function.call::<_, ()>(("session", bytes))),
+        Event::Wire(bytes) => bytes_to_js(ctx, bytes).and_then(|bytes| function.call::<_, ()>(("wire", bytes))),
+        Event::WireEnd => function.call::<_, ()>(("wireEnd",)),
     };
     if let Err(error) = result {
         report_error(ctx, UncaughtKind::Exception, error);
@@ -178,10 +222,12 @@ fn deliver(ctx: &Ctx<'_>, id: u64, event: Event) {
 
 /// A copy of the socket behind a TCP stream or listener, for handle passing.
 pub(super) fn socket_of(id: u64) -> Option<std::io::Result<socket2::Socket>> {
-    let result = state().with_resource(id, |entry: &mut Entry| match &entry.kind {
-        Kind::Stream { tcp: Some(socket), .. } | Kind::Listener { socket: Some(socket), .. } => {
+    let result = state().with_resource(id, |entry: &mut Entry| match &mut entry.kind {
+        Kind::Stream { tcp: Some(socket), exported, .. } => {
+            *exported = true;
             Some(socket.try_clone())
         }
+        Kind::Listener { socket: Some(socket), .. } => Some(socket.try_clone()),
         _ => None,
     });
     result.ok().flatten()
@@ -224,6 +270,20 @@ fn start(id: u64) {
     });
 }
 
+/// Drop bytes the peer sent that nobody read. libuv reads them as they arrive, so Node closes with an
+/// empty queue and the peer sees an orderly end; closing over unread bytes makes the kernel reset.
+fn discard_unread(socket: &socket2::Socket) {
+    let mut buffer = [std::mem::MaybeUninit::<u8>::uninit(); 64 * 1024];
+    if socket.set_nonblocking(true).is_err() {
+        return;
+    }
+    for _ in 0..64 {
+        if !socket.recv(&mut buffer).is_ok_and(|count| count > 0) {
+            break;
+        }
+    }
+}
+
 pub(super) fn set_ref(id: u64, referenced: bool) {
     let state = state();
     let changed = state.with_resource(id, |entry: &mut Entry| std::mem::replace(&mut entry.referenced, referenced));
@@ -253,28 +313,25 @@ pub(super) fn close(id: u64) {
         }
     }
     match kind {
-        Kind::Stream { reader, writer, .. } => {
-            if let Some(reader) = reader {
+        Kind::Stream { reader, writer, tcp, exported, .. } => {
+            if let Some(reader) = &reader {
                 reader.abort();
             }
-            state.shared.tokio.spawn(async move { drop(writer.lock().await.take()) });
+            state.shared.tokio.spawn(async move {
+                drop(writer.lock().await.take());
+                let Some(tcp) = tcp.filter(|_| !exported) else { return };
+                // The copy closes last, so nothing can arrive between the discard and the close.
+                while reader.as_ref().is_some_and(|reader| !reader.is_finished()) {
+                    tokio::task::yield_now().await;
+                }
+                discard_unread(&tcp);
+            });
         }
         Kind::Listener { path: Some(path), .. } if cfg!(unix) => {
             let _ = std::fs::remove_file(path);
         }
         Kind::Listener { .. } => {}
     }
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ConnectOptions {
-    #[serde(default)]
-    addresses: Vec<(String, u16)>,
-    path: Option<String>,
-    local_address: Option<String>,
-    local_port: Option<u16>,
-    attempt_timeout: Option<u64>,
 }
 
 pub(super) fn parse_options<'js, T: serde::de::DeserializeOwned>(
@@ -289,91 +346,6 @@ pub(super) fn parse_ip(ctx: &Ctx<'_>, address: &str, port: u16) -> rquickjs::Res
     let ip = address.trim_start_matches('[').trim_end_matches(']').parse::<std::net::IpAddr>();
     let ip = ip.map_err(|_| throw(ctx, &JsError::type_error(format!("Invalid IP address: {address}"))))?;
     Ok(SocketAddr::new(ip, port))
-}
-
-async fn connect_tcp(
-    targets: Vec<SocketAddr>,
-    local: Option<SocketAddr>,
-    attempt: Option<u64>,
-) -> Result<Conn, JsError> {
-    let mut last = None;
-    let count = targets.len();
-    for target in targets {
-        let result = async {
-            let socket =
-                if target.is_ipv4() { tokio::net::TcpSocket::new_v4()? } else { tokio::net::TcpSocket::new_v6()? };
-            if let Some(local) = local {
-                socket.bind(local)?;
-            }
-            match attempt.filter(|_| count > 1) {
-                Some(ms) => tokio::time::timeout(Duration::from_millis(ms), socket.connect(target))
-                    .await
-                    .unwrap_or_else(|_| Err(std::io::ErrorKind::TimedOut.into())),
-                None => socket.connect(target).await,
-            }
-        }
-        .await;
-        match result.and_then(tcp_conn) {
-            Ok(conn) => return Ok(conn),
-            Err(error) => {
-                last = Some(net_error(&error, "connect", Some(&target.ip().to_string()), Some(target.port())))
-            }
-        }
-    }
-    Err(last.unwrap_or_else(|| JsError::new("connect EINVAL").with_code("EINVAL")))
-}
-
-#[cfg(unix)]
-async fn connect_pipe(path: String) -> Result<Conn, JsError> {
-    let stream = tokio::net::UnixStream::connect(&path).await;
-    let stream = stream.map_err(|error| net_error(&error, "connect", Some(&path), None))?;
-    Ok(pipe_conn(Box::new(stream), &path))
-}
-
-#[cfg(windows)]
-async fn connect_pipe(path: String) -> Result<Conn, JsError> {
-    const ERROR_PIPE_BUSY: i32 = 231;
-    loop {
-        match tokio::net::windows::named_pipe::ClientOptions::new().open(&path) {
-            Ok(client) => return Ok(pipe_conn(Box::new(client), &path)),
-            Err(error) if error.raw_os_error() == Some(ERROR_PIPE_BUSY) => {
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-            Err(error) => return Err(net_error(&error, "connect", Some(&path), None)),
-        }
-    }
-}
-
-fn connect<'js>(ctx: Ctx<'js>, options: Value<'js>, tls: Value<'js>, callback: Function<'js>) -> rquickjs::Result<u64> {
-    let options: ConnectOptions = parse_options(&ctx, options)?;
-    let tls = Tls::from_js(&ctx, tls, false)?;
-    let mut targets = Vec::new();
-    for (address, port) in &options.addresses {
-        targets.push(parse_ip(&ctx, address, *port)?);
-    }
-    let local = match (&options.local_address, options.local_port) {
-        (None, None) => None,
-        (address, port) => {
-            let fallback = if targets.first().is_some_and(SocketAddr::is_ipv6) { "::" } else { "0.0.0.0" };
-            Some(parse_ip(&ctx, address.as_deref().unwrap_or(fallback), port.unwrap_or(0))?)
-        }
-    };
-    let id = insert(&ctx, stream_kind(None).0, Some(callback));
-    let state = state();
-    let sender = state.sender.clone();
-    let (attempt, path) = (options.attempt_timeout, options.path);
-    let task = state.shared.tokio.spawn(async move {
-        let conn = match path {
-            Some(path) => connect_pipe(path).await,
-            None => connect_tcp(targets, local, attempt).await,
-        };
-        match secure(conn, tls).await {
-            Ok(conn) => post(&sender, id, Event::Connect(conn)),
-            Err(error) => post(&sender, id, Event::Error(error)),
-        }
-    });
-    let _ = state.with_resource(id, |entry: &mut Entry| entry.task = Some(task.abort_handle()));
-    Ok(id)
 }
 
 fn writer(ctx: &Ctx<'_>, id: u64) -> rquickjs::Result<Writer> {
@@ -439,7 +411,7 @@ async fn write_all(writer: Writer, bytes: Vec<u8>) -> Result<(), JsError> {
 
 pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
     let object = Object::new(ctx.clone())?;
-    set_fn(&object, "connect", connect)?;
+    set_fn(&object, "connect", super::net_connect::connect)?;
     set_fn(&object, "listen", super::net_server::listen)?;
     super::handles::natives(&object)?;
     set_fn(&object, "stopAccepting", |id: u64| {

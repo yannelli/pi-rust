@@ -80,6 +80,8 @@ pub(crate) struct LoopState {
     pub shutting_down: Cell<bool>,
     /// `process.nextTick` callbacks are queued; they run before the next microtasks.
     pub ticks_pending: Cell<bool>,
+    /// JavaScript asked to run `internal.runIdle` the next time the loop has no work.
+    pub idle_hooks: Cell<bool>,
     pub cwd: RefCell<PathBuf>,
     /// When the event loop started and how long it has waited for work, for
     /// `performance.eventLoopUtilization`.
@@ -115,6 +117,7 @@ impl LoopState {
             idle_waiters: RefCell::default(),
             shutting_down: Cell::new(false),
             ticks_pending: Cell::new(false),
+            idle_hooks: Cell::new(false),
             cwd: RefCell::new(cwd),
             loop_start: Cell::new(None),
             idle_time: Cell::new(std::time::Duration::ZERO),

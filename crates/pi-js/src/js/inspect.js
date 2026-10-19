@@ -113,7 +113,9 @@ function formatError(value) {
   const head = message ? `${name}: ${message}` : name;
   const stack = typeof value.stack === "string" ? value.stack : "";
   if (!stack) return `[${head}]`;
-  return stack.startsWith(head) ? stack.trimEnd() : `${head}\n${stack.trimEnd()}`;
+  const coded = typeof value.code === "string" ? `${name} [${value.code}]${message ? `: ${message}` : ""}` : null;
+  if (stack.startsWith(head) || (coded && stack.startsWith(coded))) return stack.trimEnd();
+  return `${head}\n${stack.trimEnd()}`;
 }
 
 function fitsOnOneLine(ctx, output, start, base) {
@@ -225,7 +227,7 @@ function describe(ctx, value, name, prefix, keys) {
     const text = RegExp.prototype.toString.call(value);
     return { base: stylize(ctx, text, "regexp"), keys: keys.filter((key) => key !== "lastIndex"), alone: true };
   }
-  if (value instanceof Error) {
+  if (value instanceof Error || Object.prototype.toString.call(value) === "[object Error]") {
     return { base: formatError(value), keys: keys.filter((key) => key !== "stack" && key !== "message"), alone: true };
   }
   if (value instanceof Promise) {
@@ -253,9 +255,12 @@ function formatRaw(ctx, value, recurseTimes) {
     return `ArrayBuffer { [Uint8Contents]: <${bytes.join(" ")}${value.byteLength > 50 ? " ..." : ""}>, byteLength: ${value.byteLength} }`;
   }
   if (value instanceof WeakMap || value instanceof WeakSet) return `${name} { <items unknown> }`;
-  const tag = value[Symbol.toStringTag];
-  let prefix = name === null ? "[Object: null prototype] " : name !== "Object" ? `${name} ` : "";
-  if (typeof tag === "string" && tag !== "" && tag !== name) prefix = `${prefix}[${tag}] `;
+  // Like Node, list the tag only when it is not an own enumerable property (shown as a key).
+  let tag = value[Symbol.toStringTag];
+  const own = ctx.showHidden ? Object.prototype.hasOwnProperty : Object.prototype.propertyIsEnumerable;
+  if (typeof tag !== "string" || own.call(value, Symbol.toStringTag)) tag = "";
+  let prefix = name === null ? "[Object: null prototype] " : name !== "Object" || tag !== "" ? `${name} ` : "";
+  if (tag !== "" && tag !== name) prefix = `${prefix}[${tag}] `;
   const shape = describe(ctx, value, name, prefix, ownKeys(ctx, value));
   if (shape.alone && shape.keys.length === 0) return shape.base;
   if (!shape.entries && shape.keys.length === 0 && !shape.base) return `${shape.braces[0]}}`;

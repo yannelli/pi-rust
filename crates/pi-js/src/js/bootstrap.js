@@ -295,13 +295,20 @@
   }
 
   function isBuiltin(request) {
-    const name = request.startsWith("node:") ? request.slice(5) : request;
-    return builtinNames().includes(name);
+    if (request.startsWith("node:")) return builtinNames(true).includes(request.slice(5));
+    return builtinNames().includes(request);
   }
   let builtinList;
-  function builtinNames() {
-    builtinList ??= native.builtins.list();
-    return builtinList;
+  let prefixedList;
+  // Modules such as node:sqlite and node:test load only with the prefix, so they are listed
+  // only for prefixed names.
+  function builtinNames(prefixed) {
+    if (!builtinList) {
+      const prefixOnly = native.builtins.prefixOnly();
+      prefixedList = native.builtins.list();
+      builtinList = prefixedList.filter((name) => !prefixOnly.includes(name));
+    }
+    return prefixed ? prefixedList : builtinList;
   }
 
   function createRequire(filename) {
@@ -395,6 +402,23 @@
     });
   }
   internal.defineLazy = defineLazy;
+  // A WebAssembly.Memory buffer views the engine's memory, which moves when it grows, so like V8 it
+  // cannot be detached.
+  const nonDetachable = new WeakSet();
+  internal.nonDetachable = nonDetachable;
+  for (const name of ["transfer", "transferToFixedLength", "transferToImmutable"]) {
+    const descriptor = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, name);
+    if (!descriptor) continue;
+    const original = descriptor.value;
+    const method = {
+      [name](...args) {
+        if (nonDetachable.has(this)) throw new TypeError("ArrayBuffer is not detachable and could not be cloned.");
+        return Reflect.apply(original, this, args);
+      },
+    }[name];
+    Object.defineProperty(method, "length", { value: original.length });
+    Object.defineProperty(ArrayBuffer.prototype, name, { ...descriptor, value: method });
+  }
   Object.defineProperty(globalThis, "global", { value: globalThis, writable: true, configurable: true });
   defineLazy("process", () => loadBuiltin("process"));
   defineLazy("console", () => loadBuiltin("console"));
@@ -418,6 +442,7 @@
     for (const name of names) defineLazy(name, () => loadBuiltin(module)[name]);
   }
   defineLazy("crypto", () => loadBuiltin("crypto").webcrypto);
+  defineLazy("WebAssembly", () => loadBuiltin("internal/webassembly"));
   if (typeof globalThis.Intl === "undefined") defineLazy("Intl", () => loadBuiltin("internal/intl"));
   defineLazy("navigator", () => ({
     hardwareConcurrency: loadBuiltin("os").availableParallelism(),

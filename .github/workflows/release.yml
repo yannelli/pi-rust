@@ -233,9 +233,12 @@ jobs:
           NDK_VERSION: 27.2.12479018
         run: |
           ndk="$ANDROID_HOME/ndk/$NDK_VERSION"
-          if [ ! -d "$ndk" ]; then
-            { yes || true; } | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" > /dev/null
-          fi
+          # The NDK download fails now and then (a corrupt archive), so try it up to three times.
+          for attempt in 1 2 3; do
+            [ -d "$ndk/toolchains" ] && break
+            { yes || true; } | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" > /dev/null || true
+            [ -d "$ndk/toolchains" ] || sleep 15
+          done
           linker="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/${{ matrix.clang }}-clang"
           test -x "$linker"
           variable="CARGO_TARGET_$(echo '${{ matrix.target }}' | tr 'a-z-' 'A-Z_')_LINKER"
