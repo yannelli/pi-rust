@@ -130,7 +130,7 @@ pub(super) fn convert_messages(
                     let text = tool_result_text(&result.content);
                     let with_images = has_images(&result.content);
                     let content = match () {
-                        _ if !text.is_empty() => text,
+                        _ if !text.trim().is_empty() => text,
                         _ if with_images => "(see attached image)".to_string(),
                         _ => "(no tool output)".to_string(),
                     };

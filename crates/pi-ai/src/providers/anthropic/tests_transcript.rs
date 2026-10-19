@@ -309,3 +309,74 @@ async fn copilot_models_use_bearer_auth_and_dynamic_headers() {
     assert_eq!(request.headers["openai-intent"], "conversation-edits");
     assert_eq!(request.headers["copilot-vision-request"], "true");
 }
+
+fn tool_result(id: &str, content: Vec<ContentBlock>, is_error: bool) -> Message {
+    Message::ToolResult(crate::types::ToolResultMessage {
+        tool_call_id: id.into(),
+        tool_name: "shot".into(),
+        content,
+        is_error,
+        ..Default::default()
+    })
+}
+
+#[tokio::test]
+async fn error_tool_result_images_follow_all_tool_results() {
+    let image = || ContentBlock::Image { data: "AA==".into(), mime_type: "image/png".into() };
+    let call =
+        |id: &str| ContentBlock::ToolCall(ToolCall { id: id.into(), name: "shot".into(), ..ToolCall::default() });
+    let assistant = Message::Assistant(AssistantMessage {
+        content: vec![call("t1"), call("t2")],
+        api: API.into(),
+        provider: "anthropic".into(),
+        model: "test-model".into(),
+        stop_reason: StopReason::ToolUse,
+        ..Default::default()
+    });
+    let messages = vec![
+        Message::user("go"),
+        assistant,
+        tool_result("t1", vec![ContentBlock::text("failed"), image(), image()], true),
+        tool_result("t2", vec![image()], false),
+    ];
+    let options = StreamOptions { cache_retention: Some(CacheRetention::None), ..options() };
+    let body = capture_payload(&AnthropicMessages, &model(json!({})), &context(messages), options).await;
+    let image_param = json!({"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "AA=="}});
+    assert_eq!(
+        body["messages"][2]["content"],
+        json!([
+            {"type": "tool_result", "tool_use_id": "t1", "is_error": true, "content": "failed\n(image attached after the tool results)"},
+            {"type": "tool_result", "tool_use_id": "t2", "is_error": false,
+                "content": [{"type": "text", "text": "(see attached image)"}, image_param]},
+            {"type": "text", "text": "Images from the error result of tool call t1 (shot):"},
+            image_param,
+            image_param,
+        ])
+    );
+}
+
+#[tokio::test]
+async fn thinking_from_another_model_is_dropped() {
+    let assistant = |model: &str| {
+        Message::Assistant(AssistantMessage {
+            content: vec![
+                ContentBlock::Thinking { thinking: "secret plan".into(), thinking_signature: None, redacted: false },
+                ContentBlock::text("answer"),
+            ],
+            api: API.into(),
+            provider: "anthropic".into(),
+            model: model.into(),
+            stop_reason: StopReason::Stop,
+            ..Default::default()
+        })
+    };
+    let options = StreamOptions { cache_retention: Some(CacheRetention::None), ..options() };
+    for (source, expected) in [
+        ("other-model", json!([{"type": "text", "text": "answer"}])),
+        ("test-model", json!([{"type": "text", "text": "secret plan"}, {"type": "text", "text": "answer"}])),
+    ] {
+        let messages = vec![Message::user("q"), assistant(source), Message::user("next")];
+        let body = capture_payload(&AnthropicMessages, &model(json!({})), &context(messages), options.clone()).await;
+        assert_eq!(body["messages"][1]["content"], expected, "{source}");
+    }
+}

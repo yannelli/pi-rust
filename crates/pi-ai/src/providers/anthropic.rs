@@ -22,7 +22,7 @@ use reqwest::header::{HeaderMap, HeaderValue};
 
 use self::events::AnthropicStream;
 use self::federation::{FederationConfig, OAUTH_API_BETA, access_token, federation_config, invalidate};
-use self::request::{CLAUDE_CODE_VERSION, Compat, Params, build_params, resolve_thinking};
+use self::request::{CLAUDE_CODE_VERSION, Compat, Params, build_params, effort_messages, resolve_thinking};
 use crate::http::pi_user_agent;
 use crate::providers::common::{HttpRequest, endpoint, has_header, header_map_with, spawn_provider_stream};
 use crate::providers::github_copilot::{copilot_anthropic_auth_headers, copilot_dynamic_headers};
@@ -107,7 +107,8 @@ impl ApiProvider for AnthropicMessages {
         }
         let request = HttpRequest { url: endpoint(&model.base_url, "/v1/messages"), headers, body };
         let oauth_tools = if oauth { current_tools(&messages) } else { Vec::new() };
-        let provider_thinking_level = compat.mid_convo_effort.then(|| thinking.effort.unwrap_or_else(|| "high".into()));
+        let provider_thinking_level =
+            effort_messages(model, &compat, &thinking).then(|| thinking.effort.unwrap_or_else(|| "high".into()));
         let handler_model = model.clone();
         let handler =
             move || AnthropicStream::new(&handler_model, oauth_tools.clone(), provider_thinking_level.clone());

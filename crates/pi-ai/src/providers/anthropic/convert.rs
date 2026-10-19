@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use serde_json::{Map, Value, json};
 
-use crate::providers::common::{has_images, sanitize_id, take_chars};
+use crate::providers::common::{has_images, sanitize_id, split_error_tool_result_images, take_chars};
 use crate::providers::constrained_sampling::{json_schema_tool_parameters, resolve_json_schema_strict_sampling};
 use crate::transcript::render_system_message_update;
 use crate::types::{AssistantMessage, ContentBlock, Message, Tool, ToolResultMessage, UserContent};
@@ -211,10 +211,18 @@ pub(super) fn convert_messages(messages: &[Message], options: &ConvertOptions) -
             }
             Message::ToolResult(_) => {
                 let mut results = Vec::new();
+                // Error tool results cannot hold images, and tool results must lead the user message.
+                let mut error_images = Vec::new();
                 while let Some(Message::ToolResult(result)) = messages.get(index) {
-                    results.push(tool_result(result));
+                    let split = split_error_tool_result_images(result);
+                    results.push(tool_result(result, split.as_ref().map_or(&result.content, |split| &split.content)));
+                    if let Some(split) = split {
+                        error_images.push(json!({"type": "text", "text": split.caption}));
+                        error_images.extend(split.images.iter().filter_map(block_param));
+                    }
                     index += 1;
                 }
+                results.append(&mut error_images);
                 params.push(json!({"role": "user", "content": results}));
                 continue;
             }
@@ -291,11 +299,11 @@ fn block_param(block: &ContentBlock) -> Option<Value> {
     }
 }
 
-fn tool_result(result: &ToolResultMessage) -> Value {
+fn tool_result(result: &ToolResultMessage, content: &[ContentBlock]) -> Value {
     json!({
         "type": "tool_result",
         "tool_use_id": result.tool_call_id,
-        "content": content_blocks(&result.content),
+        "content": content_blocks(content),
         "is_error": result.is_error,
     })
 }

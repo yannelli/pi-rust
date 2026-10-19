@@ -9,7 +9,9 @@ use super::model_info::{
     supports_block_binding, supports_prompt_caching,
 };
 use crate::provider_options::BedrockOptions;
-use crate::providers::common::{compat_bool, sanitize_id, take_chars, transform_messages};
+use crate::providers::common::{
+    compat_bool, sanitize_id, split_error_tool_result_images, take_chars, transform_messages,
+};
 use crate::providers::constrained_sampling::{json_schema_tool_parameters, resolve_json_schema_strict_sampling};
 use crate::registry::{CacheRetention, StreamOptions, ThinkingBudgets};
 use crate::simple_options::{
@@ -193,9 +195,9 @@ fn sanitize_document(value: &Value) -> Value {
     }
 }
 
-fn tool_result(result: &ToolResultMessage) -> Result<Value, String> {
+fn tool_result(result: &ToolResultMessage, blocks: &[ContentBlock]) -> Result<Value, String> {
     let mut content = Vec::new();
-    for block in &result.content {
+    for block in blocks {
         match block {
             ContentBlock::Image { data, mime_type } => content.push(image_block(mime_type, data)?),
             ContentBlock::Text { text, .. } => content.extend(non_blank_text(text)),
@@ -280,10 +282,22 @@ fn convert_messages(
             }
             Message::ToolResult(_) => {
                 let mut content = Vec::new();
+                // Claude rejects images in error tool results; other models keep them in place.
+                let mut error_images = Vec::new();
                 while let Some(Message::ToolResult(next)) = messages.get(index) {
-                    content.push(tool_result(next)?);
+                    let split = is_claude(model).then(|| split_error_tool_result_images(next)).flatten();
+                    content.push(tool_result(next, split.as_ref().map_or(&next.content, |split| &split.content))?);
+                    if let Some(split) = split {
+                        error_images.push(json!({"text": split.caption}));
+                        for image in &split.images {
+                            if let ContentBlock::Image { data, mime_type } = image {
+                                error_images.push(image_block(mime_type, data)?);
+                            }
+                        }
+                    }
                     index += 1;
                 }
+                content.append(&mut error_images);
                 result.push(json!({"role": "user", "content": content}));
                 continue;
             }

@@ -25,10 +25,23 @@ fn is_gemini3_pro_or_flash(id: &str) -> bool {
     })
 }
 
+/// `gemini-4` through `gemini-99`, such as `gemini-4-argon`.
+fn is_gemini4_or_later(id: &str) -> bool {
+    id.match_indices("gemini-").any(|(start, _)| {
+        let mut digits = id[start + "gemini-".len()..].bytes();
+        match digits.next() {
+            Some(b'4'..=b'9') => true,
+            Some(b'1'..=b'9') => digits.next().is_some_and(|byte| byte.is_ascii_digit()),
+            _ => false,
+        }
+    })
+}
+
 /// Whether the model uses Gemini's discrete `thinkingLevel` instead of `thinkingBudget`.
 pub(crate) fn uses_thinking_level(model: &Model) -> bool {
     let id = model.id.to_lowercase();
     is_gemini3_pro_or_flash(&id)
+        || is_gemini4_or_later(&id)
         || id == "gemini-flash-latest"
         || id == "gemini-flash-lite-latest"
         || id.contains("gemma-4")

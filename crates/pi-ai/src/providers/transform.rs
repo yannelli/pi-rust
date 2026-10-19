@@ -1,5 +1,5 @@
 //! History normalization before conversion, ported from upstream `api/transform-messages.ts`:
-//! downgrade unsupported images, convert foreign thinking to text, normalize foreign tool call
+//! downgrade unsupported images, drop foreign thinking, normalize foreign tool call
 //! ids, drop failed turns, and close tool calls that never got a result.
 
 use std::collections::HashMap;
@@ -10,6 +10,33 @@ use crate::types::{
 
 const USER_IMAGE_PLACEHOLDER: &str = "(image omitted: model does not support images)";
 const TOOL_IMAGE_PLACEHOLDER: &str = "(tool image omitted: model does not support images)";
+const ERROR_TOOL_IMAGE_PLACEHOLDER: &str = "(image attached after the tool results)";
+
+/// An error tool result split into text-only content and the images to send after all tool results.
+pub(crate) struct SplitErrorToolResult {
+    pub content: Vec<ContentBlock>,
+    /// Names the tool call; goes before `images`.
+    pub caption: String,
+    pub images: Vec<ContentBlock>,
+}
+
+/// Split the images out of an error tool result, for APIs that reject images in error results
+/// (Anthropic, and Claude on Bedrock). `None` when the result needs no split.
+pub(crate) fn split_error_tool_result_images(result: &ToolResultMessage) -> Option<SplitErrorToolResult> {
+    if !result.is_error {
+        return None;
+    }
+    let images: Vec<ContentBlock> =
+        result.content.iter().filter(|block| matches!(block, ContentBlock::Image { .. })).cloned().collect();
+    if images.is_empty() {
+        return None;
+    }
+    Some(SplitErrorToolResult {
+        content: replace_images(&result.content, ERROR_TOOL_IMAGE_PLACEHOLDER),
+        caption: format!("Images from the error result of tool call {} ({}):", result.tool_call_id, result.tool_name),
+        images,
+    })
+}
 
 fn replace_images(content: &[ContentBlock], placeholder: &str) -> Vec<ContentBlock> {
     let mut result = Vec::new();
@@ -84,17 +111,15 @@ fn transform_block(
 ) -> Option<ContentBlock> {
     match block {
         ContentBlock::Thinking { thinking, thinking_signature, redacted } => {
-            let signed = thinking_signature.as_deref().is_some_and(|signature| !signature.is_empty());
-            if *redacted {
-                return same_model.then(|| block.clone());
-            }
-            if same_model && signed {
-                return Some(block.clone());
-            }
-            if thinking.trim().is_empty() {
+            // Another model's thinking would read as part of its visible reply, and its signatures are invalid here.
+            if !same_model {
                 return None;
             }
-            Some(if same_model { block.clone() } else { ContentBlock::text(thinking.clone()) })
+            let signed = thinking_signature.as_deref().is_some_and(|signature| !signature.is_empty());
+            if *redacted || signed {
+                return Some(block.clone());
+            }
+            (!thinking.trim().is_empty()).then(|| block.clone())
         }
         ContentBlock::Text { text, .. } if !same_model => Some(ContentBlock::text(text.clone())),
         ContentBlock::ToolCall(call) if !same_model => {

@@ -144,7 +144,7 @@ fn push_tool_result(model: &Model, result: &ToolResultMessage, needs_ids: bool, 
     };
     let has_images = !images.is_empty();
     let nested_images = supports_multimodal_function_response(&model.id);
-    let value = if !text.is_empty() {
+    let value = if !text.trim().is_empty() {
         text
     } else if has_images {
         "(see attached image)".to_string()

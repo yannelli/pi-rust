@@ -6,7 +6,7 @@ use reqwest::header::HeaderMap;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
-pub(crate) use super::transform::transform_messages;
+pub(crate) use super::transform::{split_error_tool_result_images, transform_messages};
 use crate::registry::StreamOptions;
 pub(crate) use crate::request::HttpRequest;
 use crate::request::{SendOptions, apply_payload_hook, build_headers, provider_response, send_request};
