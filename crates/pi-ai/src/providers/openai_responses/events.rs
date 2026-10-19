@@ -78,6 +78,8 @@ pub(crate) struct ResponsesStream {
     terminal: Option<Result<StopReason, String>>,
     /// Model id and requested service tier, when tier pricing applies.
     service_tier_pricing: Option<(String, Option<String>)>,
+    /// Recorded on the reply so later requests replay its `configuration_update` unchanged.
+    provider_thinking_level: Option<String>,
 }
 
 /// Cost multiplier of an OpenAI service tier.
@@ -100,7 +102,13 @@ impl ResponsesStream {
             unfinished_tools: HashMap::new(),
             terminal: None,
             service_tier_pricing: None,
+            provider_thinking_level: None,
         }
+    }
+
+    pub(crate) fn with_provider_thinking_level(mut self, level: Option<String>) -> Self {
+        self.provider_thinking_level = level;
+        self
     }
 
     /// Price usage by the service tier the response reports, else the requested one.
@@ -117,6 +125,10 @@ impl ResponsesStream {
 }
 
 impl SseHandler for ResponsesStream {
+    fn start(&mut self, builder: &mut MessageBuilder) {
+        builder.message_mut().provider_thinking_level = self.provider_thinking_level.clone();
+    }
+
     fn event(&mut self, builder: &mut MessageBuilder, event: SseEvent) -> Result<bool, String> {
         if event.data.trim().is_empty() || event.data.trim() == "[DONE]" {
             return Ok(true);

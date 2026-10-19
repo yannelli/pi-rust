@@ -345,3 +345,52 @@ async fn service_tiers_are_sent_and_priced() {
         assert_eq!(server.request().await.body["service_tier"], requested);
     }
 }
+
+#[tokio::test]
+async fn mid_convo_effort_sends_levels_as_configuration_updates() {
+    let model = model(json!({"supportsMidConvoEffort": true}));
+    let reply = |level: Option<&str>| {
+        Message::Assistant(crate::types::AssistantMessage {
+            content: vec![crate::types::ContentBlock::text("a")],
+            api: API.into(),
+            provider: "openai".into(),
+            model: "test-model".into(),
+            provider_thinking_level: level.map(str::to_string),
+            stop_reason: StopReason::Stop,
+            ..Default::default()
+        })
+    };
+    let messages =
+        vec![Message::user("one"), reply(Some("low")), Message::user("two"), reply(None), Message::user("three")];
+    let context = Context { messages, ..Context::default() };
+    let high = StreamOptions { reasoning: Some(crate::types::ThinkingLevel::High), ..options() };
+    let payload = capture_payload(&OpenAIResponses, &model, &context, high.clone()).await;
+    assert_eq!(payload["reasoning"]["effort"], "medium", "the request effort stays fixed");
+    let input = payload["input"].as_array().unwrap();
+    let updates: Vec<(usize, &Value)> = input
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| item["type"] == "configuration_update")
+        .map(|(index, item)| (index, &item["reasoning"]["effort"]))
+        .collect();
+    assert_eq!(updates, [(1, &json!("low")), (input.len() - 1, &json!("high"))]);
+
+    let mut server = MockServer::start(MockResponse::Sse(vec![frame(
+        None,
+        &json!({"type": "response.completed",
+        "response": {"status": "completed", "usage": {"input_tokens": 1, "output_tokens": 1}}}),
+    )]))
+    .await;
+    let mut live = model.clone();
+    live.base_url = server.base_url.clone();
+    let (_, message) = collect(OpenAIResponses.stream(&live, &context, high.clone())).await;
+    assert_eq!(message.provider_thinking_level.as_deref(), Some("high"));
+    server.request().await;
+
+    let sign_in = StreamOptions { api_key: Some("chatgpt-token".into()), ..high };
+    let mut openai = model.clone();
+    openai.base_url = "https://api.openai.com/v1".into();
+    let payload = capture_payload(&OpenAIResponses, &openai, &context, sign_in).await;
+    assert_eq!(payload["reasoning"]["effort"], "high");
+    assert!(payload["input"].as_array().unwrap().iter().all(|item| item["type"] != "configuration_update"));
+}
