@@ -8,7 +8,7 @@ use pi_chord::JsonMap;
 use serde::{Deserialize, Serialize};
 
 use super::define::Extension;
-use super::types::{QueueMode, ToolExecutionMode};
+use super::types::{ModelRef, QueueMode, ToolExecutionMode};
 use crate::errors::DurableResult;
 use crate::models::DeferredOption;
 
@@ -85,12 +85,15 @@ pub struct RetryOverrides {
 }
 
 /// Partial compaction policy of [`HarnessSettings`].
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct CompactionOverrides {
     pub enabled: Option<bool>,
     pub reserve_tokens: Option<u64>,
     pub keep_recent_tokens: Option<u64>,
     pub background_tokens: Option<u64>,
+    /// Keyed by exact `"provider/modelId"`; each field set replaces the harness-wide one for that model, so small-
+    /// and large-window models can share a harness. Nested `model_overrides` are ignored.
+    pub model_overrides: Option<BTreeMap<String, CompactionOverrides>>,
 }
 
 /// Partial progress policy of [`HarnessSettings`].
@@ -122,7 +125,10 @@ pub struct Settings {
     pub extensions: Option<Vec<Arc<Extension>>>,
     pub stream: ConversationStreamOptions,
     pub retry: ConversationRetryPolicy,
+    /// Harness-wide policy over the defaults; use [`Settings::compaction_for`] where the model is known.
     pub compaction: CompactionPolicy,
+    /// Per-model compaction overrides by `"provider/modelId"`.
+    pub compaction_model_overrides: BTreeMap<String, CompactionOverrides>,
     pub progress: ProgressPolicy,
     pub tool_execution: ToolExecutionMode,
     pub steering_mode: QueueMode,
@@ -133,6 +139,20 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         resolve_settings(None)
+    }
+}
+
+impl Settings {
+    /// The compaction policy for `model`: its override entry over the harness-wide policy, field by field.
+    pub fn compaction_for(&self, model: &ModelRef) -> CompactionPolicy {
+        let key = format!("{}/{}", model.provider, model.model_id);
+        let Some(entry) = self.compaction_model_overrides.get(&key) else { return self.compaction };
+        CompactionPolicy {
+            enabled: entry.enabled.unwrap_or(self.compaction.enabled),
+            reserve_tokens: entry.reserve_tokens.unwrap_or(self.compaction.reserve_tokens),
+            keep_recent_tokens: entry.keep_recent_tokens.unwrap_or(self.compaction.keep_recent_tokens),
+            background_tokens: entry.background_tokens.unwrap_or(self.compaction.background_tokens),
+        }
     }
 }
 
@@ -149,7 +169,7 @@ pub fn resolve_settings(settings: Option<&HarnessSettings>) -> Settings {
     let default = HarnessSettings::default();
     let settings = settings.unwrap_or(&default);
     let retry = settings.retry.unwrap_or_default();
-    let compaction = settings.compaction.unwrap_or_default();
+    let compaction = settings.compaction.clone().unwrap_or_default();
     let progress = settings.progress.unwrap_or_default();
     Settings {
         extensions: settings.extensions.clone(),
@@ -166,6 +186,7 @@ pub fn resolve_settings(settings: Option<&HarnessSettings>) -> Settings {
             keep_recent_tokens: compaction.keep_recent_tokens.unwrap_or(DEFAULT_COMPACTION_POLICY.keep_recent_tokens),
             background_tokens: compaction.background_tokens.unwrap_or(DEFAULT_COMPACTION_POLICY.background_tokens),
         },
+        compaction_model_overrides: compaction.model_overrides.unwrap_or_default(),
         progress: ProgressPolicy {
             partial_interval_ms: progress.partial_interval_ms.unwrap_or(DEFAULT_PROGRESS_POLICY.partial_interval_ms),
             output_interval_ms: progress.output_interval_ms.unwrap_or(DEFAULT_PROGRESS_POLICY.output_interval_ms),

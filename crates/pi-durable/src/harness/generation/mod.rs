@@ -196,7 +196,7 @@ async fn prepare(task: TaskRecord, runtime: TaskRuntime, context: Context) -> Du
     let tools: Vec<_> = agent.tools.iter().map(|tool| tool.tool.clone()).collect();
     let entries = plan_system_entries(&view, &wanted, &tools, runtime.now());
     let threshold = match compacted {
-        None => threshold_compaction(&view, &entries, resolved.context_window, &settings.compaction),
+        None => threshold_compaction(&view, &entries, resolved.context_window, &settings.compaction_for(&model_ref)),
         Some(_) => None,
     };
     let owner = runtime.task_id();
