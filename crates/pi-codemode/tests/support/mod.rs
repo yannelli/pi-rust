@@ -9,7 +9,7 @@ use futures::future::BoxFuture;
 use pi_ai::ContentBlock;
 use pi_codemode::{
     CodemodeHost, CodemodeModels, CodemodeStoreEntryData, CodemodeToolInfo, CodemodeToolOptions, CodemodeToolOutput,
-    NestedToolOutcome, execute_codemode, read_codemode_store,
+    NestedToolOutcome, execute_codemode, read_codemode_store, set_codemode_worker_limit,
 };
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
@@ -20,13 +20,26 @@ pub const TINY_PNG_BASE64: &str =
 type Handler = Arc<dyn Fn(Value) -> BoxFuture<'static, NestedToolOutcome> + Send + Sync>;
 
 /// A session stand-in: tools with handlers, a branch of `codemode-store` entries, and models.
-#[derive(Default)]
 pub struct FakeHost {
     pub tools: Vec<CodemodeToolInfo>,
     handlers: HashMap<String, Handler>,
     calls: AtomicUsize,
     pub entries: Mutex<Vec<Value>>,
     pub models: Option<Box<dyn CodemodeModels>>,
+}
+
+impl Default for FakeHost {
+    fn default() -> Self {
+        // Tests run scripts in parallel; the worker limit has its own test binary.
+        set_codemode_worker_limit(usize::MAX);
+        Self {
+            tools: Vec::new(),
+            handlers: HashMap::new(),
+            calls: AtomicUsize::new(0),
+            entries: Mutex::new(Vec::new()),
+            models: None,
+        }
+    }
 }
 
 pub fn text_outcome(text: &str) -> NestedToolOutcome {

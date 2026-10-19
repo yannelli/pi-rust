@@ -144,6 +144,8 @@ pub async fn open_session_with(
     manager: SessionManager,
     configure: impl FnOnce(&mut CreateAgentSessionOptions),
 ) -> Arc<AgentSession> {
+    // Tests run codemode scripts in parallel; pi-codemode tests the worker limit.
+    pi_codemode::set_codemode_worker_limit(usize::MAX);
     let mut options = CreateAgentSessionOptions::new(services.clone(), manager);
     configure(&mut options);
     create_agent_session(options).await.unwrap().session

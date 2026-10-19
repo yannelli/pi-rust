@@ -63,9 +63,21 @@ pub(crate) struct WorkerSetup {
     pub replies: mpsc::Receiver<HostReply>,
 }
 
-/// Start the worker thread.
-pub(crate) fn spawn(setup: WorkerSetup) -> std::io::Result<()> {
+struct ReleaseOnDrop(Option<super::WorkerRelease>);
+
+impl Drop for ReleaseOnDrop {
+    fn drop(&mut self) {
+        if let Some(release) = self.0.take() {
+            release();
+        }
+    }
+}
+
+/// Start the worker thread. `release` runs when the thread exits, or at once if it fails to start.
+pub(crate) fn spawn(setup: WorkerSetup, release: Option<super::WorkerRelease>) -> std::io::Result<()> {
+    let release = ReleaseOnDrop(release);
     std::thread::Builder::new().name("codemode".into()).stack_size(THREAD_STACK_BYTES).spawn(move || {
+        let _release = release;
         let to_host = setup.to_host.clone();
         let interrupt = setup.interrupt.clone();
         if let Err(message) = run(setup)

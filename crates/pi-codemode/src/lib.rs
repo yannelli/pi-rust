@@ -32,7 +32,10 @@ pub use description::{
     to_codemode_declaration,
 };
 pub use discovery::is_namespace_name;
-pub use execute::{CODEMODE_MEMORY_LIMIT_BYTES, CodemodeToolOutput, execute_codemode};
+pub use execute::{
+    CODEMODE_MEMORY_LIMIT_BYTES, CodemodeToolOutput, MAX_CONCURRENT_CODEMODE_WORKERS, execute_codemode,
+    set_codemode_worker_limit,
+};
 pub use host::{
     CodemodeHost, CodemodeModels, CodemodeToolInfo, ModelType, NestedToolOutcome, ToolExposure, ToolNamespace,
 };
@@ -42,10 +45,10 @@ pub use loadout::{
 };
 pub use models::MAX_CONCURRENT_MODEL_CALLS;
 pub use sandbox::{
-    CodemodeCall, CodemodeCallStatus, CodemodeError, CodemodeErrorKind, CodemodeOutputItem, CodemodeResult,
-    CodemodeSandbox, CodemodeStoreWrites, CodemodeSuccess, ExecuteOptions, MAX_OUTPUT_CHARS, MAX_OUTPUT_ITEMS,
-    MAX_STORE_TOTAL_CHARS, MAX_STORE_VALUE_CHARS, SandboxError, SandboxExecute, SandboxFunction, SandboxOptions,
-    Timeout,
+    AcquireWorker, CodemodeCall, CodemodeCallStatus, CodemodeError, CodemodeErrorKind, CodemodeOutputItem,
+    CodemodeResult, CodemodeSandbox, CodemodeStoreWrites, CodemodeSuccess, ExecuteOptions, MAX_OUTPUT_CHARS,
+    MAX_OUTPUT_ITEMS, MAX_STORE_TOTAL_CHARS, MAX_STORE_VALUE_CHARS, SandboxError, SandboxExecute, SandboxFunction,
+    SandboxOptions, Timeout, WorkerRelease,
 };
 pub use schema::schema_to_type;
 pub use source::{
