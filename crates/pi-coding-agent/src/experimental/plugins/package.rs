@@ -11,6 +11,7 @@ use pi_chord::node::{
 };
 use pi_chord::{ChordError, ChordResult};
 use serde_json::{Value, json};
+use tokio::io::AsyncWriteExt;
 
 const PLUGIN_PACKAGE_PROFILE_VERSION: u64 = 1;
 
@@ -163,7 +164,9 @@ async fn write_plugin_package_profile(
     #[cfg(unix)]
     options.mode(0o600);
     let mut file = options.open(path).await.map_err(ChordError::other)?;
-    tokio::io::AsyncWriteExt::write_all(&mut file, text.as_bytes()).await.map_err(ChordError::other)
+    file.write_all(text.as_bytes()).await.map_err(ChordError::other)?;
+    // A tokio `File` finishes its last write in the background unless flushed.
+    file.flush().await.map_err(ChordError::other)
 }
 
 fn plugin_build_directory_name(package_path: &Path) -> String {
