@@ -243,7 +243,7 @@ async fn summarize_phase(task: TaskRecord, runtime: TaskRuntime, context: Contex
                 }
             })?;
             let next = encode(&CompactionCheckpoint::Retry { until, request })?;
-            return Ok(Some(TaskState::Running { checkpoint: next }));
+            return Ok(Some(TaskState::Sleeping { checkpoint: next, until }));
         }
         live.edit(|live| remove_compaction_status(live, task_id))?;
         Ok(failed(&summary_failure(&message), "model_error"))
@@ -251,11 +251,15 @@ async fn summarize_phase(task: TaskRecord, runtime: TaskRuntime, context: Contex
     runtime.commit(change, &context).await
 }
 
+/// After the backoff's sleep; a run before `until` (an early wake, or a record of an earlier version) sleeps again.
 async fn retry_phase(task: TaskRecord, runtime: TaskRuntime, context: Context) -> DurableResult<()> {
     let CompactionCheckpoint::Retry { until, request } = checkpoint(&task)? else {
         return Err(DurableError::error("Compaction checkpoint is not in phase retry"));
     };
-    runtime.sleep(until, &context).await?;
+    if until > runtime.now() {
+        let checkpoint = task.state.checkpoint().cloned().unwrap_or_default();
+        return runtime.sleep_until(until, checkpoint, &context).await;
+    }
     let attempt = request.attempt + 1;
     let (conversation_id, task_id) = (runtime.conversation_id(), runtime.task_id());
     let change = move |tx: Tx, _| async move {

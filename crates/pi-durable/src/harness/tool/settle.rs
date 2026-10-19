@@ -17,7 +17,7 @@ use crate::errors::{DurableError, DurableResult};
 use crate::harness::live::{
     LIVE_DOC, NestedToolSlot, SlotProgress, SlotRef, SlotStatus, remove_nested_slots, tool_slot,
 };
-use crate::harness::progress::Progress;
+use crate::harness::progress::{Progress, ProgressClock};
 use crate::harness::scheduler::TaskRuntime;
 use crate::harness::types::{ToolDiagnostic, ToolExecutionResult};
 use crate::harness::usage::{UsageBucket, record_usage};
@@ -195,7 +195,12 @@ pub(crate) fn publish_progress(runtime: &TaskRuntime, state: Arc<CallState>, ena
     let written = Arc::new(Mutex::new(Written { text: String::new(), details: None, diagnostics: 0 }));
     let (writer, reporter) = (runtime.clone(), runtime.clone());
     let interval = runtime.settings().progress.output_interval_ms;
-    Progress::new(
+    let (clock, timers) = (runtime.clone(), runtime.clone());
+    let clock = ProgressClock {
+        now: Arc::new(move || clock.now()),
+        set_timer: Arc::new(move |callback, delay_ms| timers.set_timer(callback, delay_ms)),
+    };
+    Progress::with_clock(
         move || {
             let (runtime, state, written) = (writer.clone(), state.clone(), written.clone());
             Box::pin(async move {
@@ -253,5 +258,6 @@ pub(crate) fn publish_progress(runtime: &TaskRuntime, state: Arc<CallState>, ena
             }
         },
         interval,
+        clock,
     )
 }

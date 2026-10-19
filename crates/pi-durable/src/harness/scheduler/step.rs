@@ -231,6 +231,7 @@ impl Scheduler {
     ) -> DurableResult<()> {
         match &next {
             TaskState::Waiting { on, policy, .. } => self.validate_wait(tx, invocation, current, on, *policy).await?,
+            TaskState::Sleeping { until, .. } => validate_sleep(invocation, current.id, *until)?,
             TaskState::Terminal { outcome } => {
                 let overlay = Overlay::of(tx);
                 self.load_scopes(false).await?;
@@ -309,8 +310,24 @@ impl Scheduler {
         for watch in watches {
             drop(watch.stop());
         }
+        let timers = std::mem::take(&mut *lock(&invocation.timers));
+        for disarm in timers.into_values() {
+            disarm();
+        }
         invocation.controller.abort(Some(invocation.ended_error().into()));
     }
+}
+
+/// A sleep's `until` is a time on the Harness clock; an abort handler cannot sleep.
+fn validate_sleep(invocation: &Invocation, task: TaskId, until: f64) -> DurableResult<()> {
+    if invocation.mode == Mode::Abort {
+        return Err(DurableError::error(format!("Abort handler of task {task} cannot sleep")));
+    }
+    if !until.is_finite() || until < 0.0 {
+        let until = pi_chord::json::format_js_number(until);
+        return Err(DurableError::error(format!("Task {task} cannot sleep until {until}: not a time in milliseconds")));
+    }
+    Ok(())
 }
 
 /// Whether a definition can take the task at reservation: same version, or newer with a migration.

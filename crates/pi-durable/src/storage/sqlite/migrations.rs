@@ -130,14 +130,44 @@ pub fn create_sqlite_migrations(schema: &SqliteSchema) -> Vec<SqliteMigration> {
             i.document_revisions_by_kind, t.document_revisions
         ),
     ];
-    vec![SqliteMigration { version: 1, statements: initial_schema }]
+    // Version 2 adds the `sleeping` task status. SQLite cannot change a CHECK constraint in place, so the table is rebuilt.
+    let rebuilt_tasks = format!("{}_v2", t.tasks);
+    let sleeping_status = vec![
+        format!(
+            r#"CREATE TABLE {rebuilt_tasks} (
+			id INTEGER PRIMARY KEY,
+			conversation_id INTEGER NOT NULL,
+			kind TEXT NOT NULL,
+			status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'waiting', 'sleeping', 'completing', 'terminal')),
+			abort_requested INTEGER NOT NULL CHECK (abort_requested IN (0, 1)),
+			background INTEGER NOT NULL CHECK (background IN (0, 1)),
+			record TEXT NOT NULL CHECK (json_valid(record))
+		) STRICT"#
+        ),
+        format!(
+            r#"INSERT INTO {rebuilt_tasks} (id, conversation_id, kind, status, abort_requested, background, record)
+			SELECT id, conversation_id, kind, status, abort_requested, background, record FROM {}"#,
+            t.tasks
+        ),
+        format!(r#"DROP TABLE {}"#, t.tasks),
+        format!(r#"ALTER TABLE {rebuilt_tasks} RENAME TO {}"#, t.tasks),
+        format!(r#"CREATE INDEX {} ON {} (status, id)"#, i.tasks_by_status, t.tasks),
+        format!(r#"CREATE INDEX {} ON {} (conversation_id, id)"#, i.tasks_by_conversation, t.tasks),
+        format!(r#"CREATE INDEX {} ON {} (kind, id)"#, i.tasks_by_kind, t.tasks),
+        format!(r#"CREATE INDEX {} ON {} (abort_requested, id)"#, i.tasks_by_abort_requested, t.tasks),
+        format!(r#"CREATE INDEX {} ON {} (background, id)"#, i.tasks_by_background, t.tasks),
+    ];
+    vec![
+        SqliteMigration { version: 1, statements: initial_schema },
+        SqliteMigration { version: 2, statements: sleeping_status },
+    ]
 }
 
 /// The schema history for the unprefixed names.
 pub static SQLITE_MIGRATIONS: LazyLock<Vec<SqliteMigration>> =
     LazyLock::new(|| create_sqlite_migrations(&SqliteSchema::default()));
 
-pub const CURRENT_SQLITE_SCHEMA_VERSION: i64 = 1;
+pub const CURRENT_SQLITE_SCHEMA_VERSION: i64 = 2;
 
 /// Apply all pending schema migrations for the unprefixed names atomically.
 pub async fn apply_sqlite_migrations(

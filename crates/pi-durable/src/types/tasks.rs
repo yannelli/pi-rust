@@ -20,6 +20,7 @@ pub enum TaskStatus {
     Pending,
     Running,
     Waiting,
+    Sleeping,
     Completing,
     Terminal,
 }
@@ -30,6 +31,7 @@ impl TaskStatus {
             Self::Pending => "pending",
             Self::Running => "running",
             Self::Waiting => "waiting",
+            Self::Sleeping => "sleeping",
             Self::Completing => "completing",
             Self::Terminal => "terminal",
         }
@@ -40,6 +42,7 @@ impl TaskStatus {
             "pending" => Self::Pending,
             "running" => Self::Running,
             "waiting" => Self::Waiting,
+            "sleeping" => Self::Sleeping,
             "completing" => Self::Completing,
             "terminal" => Self::Terminal,
             _ => return None,
@@ -148,6 +151,9 @@ pub enum TaskState {
     Running { checkpoint: Json },
     /// Parked without an invocation until every task in `on` is terminal; then resumes at `checkpoint`.
     Waiting { checkpoint: Json, on: Vec<TaskId>, policy: JoinPolicy },
+    /// Parked without an invocation until the Harness clock reaches `until`, in milliseconds on the
+    /// `HarnessOptions::now` clock; then resumes at `checkpoint`. An abort mark does not wait for it.
+    Sleeping { checkpoint: Json, until: f64 },
     /// Outcome decided; becomes terminal once no ordinary owned work below is live. Runs no more code.
     Completing { outcome: TaskOutcome },
     /// Permanently settled durable result receipt.
@@ -160,6 +166,7 @@ impl TaskState {
             Self::Pending { .. } => TaskStatus::Pending,
             Self::Running { .. } => TaskStatus::Running,
             Self::Waiting { .. } => TaskStatus::Waiting,
+            Self::Sleeping { .. } => TaskStatus::Sleeping,
             Self::Completing { .. } => TaskStatus::Completing,
             Self::Terminal { .. } => TaskStatus::Terminal,
         }
@@ -168,9 +175,10 @@ impl TaskState {
     /// The checkpoint of a live state that has one.
     pub fn checkpoint(&self) -> Option<&Json> {
         match self {
-            Self::Pending { checkpoint } | Self::Running { checkpoint } | Self::Waiting { checkpoint, .. } => {
-                Some(checkpoint)
-            }
+            Self::Pending { checkpoint }
+            | Self::Running { checkpoint }
+            | Self::Waiting { checkpoint, .. }
+            | Self::Sleeping { checkpoint, .. } => Some(checkpoint),
             Self::Completing { .. } | Self::Terminal { .. } => None,
         }
     }

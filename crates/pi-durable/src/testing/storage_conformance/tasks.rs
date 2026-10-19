@@ -114,6 +114,31 @@ pub async fn scans_waiting_and_completing_tasks(storage: Arc<dyn Storage>) {
     assert_eq!(scan(TaskStatus::Terminal).await, [terminal]);
 }
 
+pub async fn scans_sleeping_tasks(storage: Arc<dyn Storage>) {
+    let storage = &*storage;
+    let ctx = context();
+    let root_id = create_root(storage).await;
+    let sleeping_id: TaskId = mint(storage).await;
+    let mut memos = JsonMap::new();
+    memos.insert("kept", true);
+    let sleeping = TaskRecord {
+        state: TaskState::Sleeping { checkpoint: json(r#"{"phase":"next"}"#), until: 61_000.0 },
+        memos: Some(memos),
+        ..pending_task(sleeping_id, root_id, "ready")
+    };
+    storage.commit(&[task_write(&sleeping)], ctx).await.unwrap();
+    assert_eq!(storage.task(sleeping_id, ctx).await.unwrap(), Some(sleeping.clone()));
+    let scan = |status| async move {
+        let query = TaskQuery { status: Some(status), ..Default::default() };
+        storage.scan_tasks(&query, 10, None, ctx).await.unwrap().items
+    };
+    assert_eq!(scan(TaskStatus::Sleeping).await, std::slice::from_ref(&sleeping));
+    let running = TaskRecord { state: TaskState::Running { checkpoint: json(r#"{"phase":"next"}"#) }, ..sleeping };
+    storage.commit(&[task_write(&running)], ctx).await.unwrap();
+    assert_eq!(scan(TaskStatus::Sleeping).await, []);
+    assert_eq!(scan(TaskStatus::Running).await, [running]);
+}
+
 async fn all_submission_ids(storage: &dyn Storage, query: &SubmissionQuery) -> Vec<u64> {
     let mut found = Vec::new();
     let mut cursor: Option<Cursor> = None;

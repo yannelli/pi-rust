@@ -17,13 +17,14 @@ use super::registry::builtin_tasks;
 use super::scheduler::Scheduler;
 use super::submissions::{Submission, Submissions};
 use super::task_graph::{TaskGraphView, TaskGraphWatch};
-use super::types::{AbortSubmissionResult, AbortTaskResult, HarnessInspection};
+use super::types::{AbortSubmissionResult, AbortTaskResult, HarnessInspection, Wake};
 use super::usage::{PROVIDER_DOC, USAGE_DOC, UsageState, add_usage_state};
 use super::util::{cancellation, scan_all};
 use super::view::ConversationViews;
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{ConversationId, ROOT_CONVERSATION_ID, SubmissionId, TaskId};
 use crate::session::{Session, SessionHooks, SessionOptions, TransactionScope, Tx, create_session};
+use crate::timers::Timers;
 use crate::types::{
     ConversationOwnership, ConversationQuery, ConversationRecord, Storage, SubmissionQuery, SubmissionStatus,
     TaskRecord,
@@ -124,6 +125,8 @@ impl Harness {
             settings: options.settings.clone(),
             env: options.env.clone(),
             now,
+            timers: Timers::new(options.set_timer.clone(), report.clone()),
+            on_wake: options.on_wake.clone(),
             report,
         });
         let scheduler = Scheduler::new(core.clone(), without_abort_signal(context));
@@ -172,6 +175,14 @@ impl Harness {
         self.0.session.assert_usable()?;
         self.0.scheduler.resume();
         Ok(())
+    }
+
+    /// When this Session next needs a running process, from the scheduler's memory: `active` while some task can run
+    /// now or is running, `at` for the earliest sleep. Answers also while scheduling is paused. A host that wakes the
+    /// process itself arms from it and calls `resume()` when woken; see `HarnessOptions::on_wake`.
+    pub fn wake(&self) -> DurableResult<Wake> {
+        self.0.session.assert_usable()?;
+        Ok(self.0.scheduler.wake())
     }
 
     /// The root conversation, created on first use.

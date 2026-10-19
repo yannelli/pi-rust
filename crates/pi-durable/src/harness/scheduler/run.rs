@@ -104,7 +104,9 @@ impl Scheduler {
                 let busy =
                     state.invocations.contains_key(&record.id) || !waiting_on(&state, &record, &owned).is_empty();
                 let below = !record.abort_requested && !record.background && state.below_cancelled(Up::of(&record));
-                (busy || record.status() == TaskStatus::Completing, below)
+                // A sleep returns at the first pass after its time comes, which the timer, `resume()`, or any change starts.
+                let asleep = not_due(&record, self.core.now());
+                (busy || asleep || record.status() == TaskStatus::Completing, below)
             };
             if skip {
                 continue;
@@ -154,6 +156,7 @@ impl Scheduler {
                     TaskState::Waiting { on, policy, .. } => {
                         TaskState::Waiting { checkpoint, on: on.clone(), policy: *policy }
                     }
+                    TaskState::Sleeping { until, .. } => TaskState::Sleeping { checkpoint, until: *until },
                     TaskState::Running { .. } => TaskState::Running { checkpoint },
                     _ => TaskState::Pending { checkpoint },
                 };
@@ -168,7 +171,7 @@ impl Scheduler {
     }
 
     #[allow(clippy::type_complexity)]
-    fn fit(
+    pub(super) fn fit(
         &self,
         record: &TaskRecord,
         task: Option<Task>,
@@ -223,6 +226,11 @@ impl Scheduler {
             if !on.is_empty() {
                 return TaskInspectionState::Waiting { on };
             }
+            if let TaskState::Sleeping { until, .. } = record.state
+                && not_due(record, self.core.now())
+            {
+                return TaskInspectionState::Sleeping { until };
+            }
         }
         match self.fit(record, snapshot.task(&record.kind)) {
             Err((reason, error)) => TaskInspectionState::Blocked { reason, error: error.map(|e| e.to_string()) },
@@ -245,12 +253,19 @@ impl Scheduler {
             controller,
             context,
             watches: Mutex::new(Vec::new()),
+            timers: Mutex::default(),
+            next_timer: Default::default(),
             ended: Default::default(),
             done,
         });
         lock(&self.state).invocations.insert(record.id, invocation.clone());
         invocation
     }
+}
+
+/// A sleep whose `until` the clock has not reached; an abort mark ends a sleep.
+pub(super) fn not_due(record: &TaskRecord, now: f64) -> bool {
+    matches!(record.state, TaskState::Sleeping { until, .. } if !record.abort_requested && until > now)
 }
 
 /// Live tasks a task waits for: its live owned work when abort-marked, else the live part of a wait.

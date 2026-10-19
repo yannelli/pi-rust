@@ -10,12 +10,11 @@ mod runtime;
 mod step;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use pi_chord::{AbortController, Context};
 use tokio::sync::watch;
-use tokio::task::JoinHandle;
 
 pub use runtime::{ConversationHandle, HookApi, TaskRuntime};
 
@@ -26,16 +25,17 @@ use super::core::HarnessCore;
 use super::registry::RegistryUnsubscribe;
 use super::submissions::Submissions;
 use super::task::Task;
-use super::types::AbortTaskResult;
+use super::types::{AbortTaskResult, Wake};
 use super::util::{Waiters, closed_error, lock, scan_all, with_context};
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{ConversationId, TaskId};
 use crate::session::{CommittedWatch, TransactionScope};
+use crate::timers::Disarm;
 use crate::types::{AbortReason, JoinPolicy, TaskOutcome, TaskQuery, TaskRecord, TaskState, TaskStatus};
 
 const SCAN_PAGE_SIZE: usize = 256;
-const LIVE_STATUSES: [TaskStatus; 4] =
-    [TaskStatus::Pending, TaskStatus::Running, TaskStatus::Waiting, TaskStatus::Completing];
+const LIVE_STATUSES: [TaskStatus; 5] =
+    [TaskStatus::Pending, TaskStatus::Running, TaskStatus::Waiting, TaskStatus::Sleeping, TaskStatus::Completing];
 
 /// Whether an invocation runs phases or the abort handler.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,6 +54,9 @@ pub(crate) struct Invocation {
     pub context: Context,
     /// Watches taken through the runtime; stopped at invocation end.
     pub watches: Mutex<Vec<CommittedWatch>>,
+    /// Timers armed through the runtime, by key; disarmed at invocation end.
+    pub timers: Mutex<HashMap<u64, Disarm>>,
+    pub next_timer: AtomicU64,
     pub ended: AtomicBool,
     pub done: watch::Sender<bool>,
 }
@@ -87,7 +90,13 @@ pub(crate) struct KeptContext {
 pub(crate) struct SchedState {
     pub live: BTreeMap<TaskId, TaskRecord>,
     pub contexts: HashMap<ConversationId, KeptContext>,
-    pub expiry: Option<(f64, JoinHandle<()>)>,
+    /// Background timer for the earliest expiry of an idle context, unless the host declined it.
+    pub expiry: Option<(f64, Disarm)>,
+    /// Timer for the earliest sleep, without `on_wake` while scheduling runs.
+    pub timer: Option<(f64, Disarm)>,
+    /// Last value given to `on_wake`, so an unchanged one is not repeated.
+    pub last_wake: Option<Wake>,
+    pub wake_scheduled: bool,
     pub invocations: HashMap<TaskId, Arc<Invocation>>,
     /// Definition whose migration failed per task; retried only once the registry resolves another definition.
     pub failed_migrations: HashMap<TaskId, (Task, DurableError)>,
@@ -198,13 +207,65 @@ impl Scheduler {
         // Derive abort marks a crash left unapplied below cancelled owners, and finalize held outcomes.
         lock(&self.state).cascade_pending = true;
         self.schedule_reconcile();
+        self.schedule_wake();
         Ok(())
     }
 
-    /// Enable scheduling. Idempotent; the kick does nothing once closing.
+    /// Enable scheduling, which also runs sleeping tasks that are due: a host wakeup, such as an alarm, calls this.
+    /// Idempotent; the kick does nothing once closing.
     pub fn resume(&self) {
         lock(&self.state).enabled = true;
         self.kick();
+    }
+
+    /// When the Session next needs a process: `active` while some task can run now or is running, `at` for the
+    /// earliest sleep not yet due. From memory; a task whose chain is not loaded yet counts as it would alone.
+    pub fn wake(&self) -> Wake {
+        let now = self.core.now();
+        let (mut active, at, candidates) = {
+            let state = lock(&self.state);
+            let mut active = !state.invocations.is_empty();
+            let mut at: Option<f64> = None;
+            let mut owned = None;
+            let mut candidates = Vec::new();
+            for record in state.live.values() {
+                match &record.state {
+                    TaskState::Completing { .. } => continue,
+                    TaskState::Waiting { on, .. }
+                        if !record.abort_requested && on.iter().any(|id| state.live.contains_key(id)) =>
+                    {
+                        continue;
+                    }
+                    TaskState::Sleeping { until, .. } if !record.abort_requested && *until > now => {
+                        at = Some(at.map_or(*until, |at| at.min(*until)));
+                        continue;
+                    }
+                    _ => {}
+                }
+                if active {
+                    continue;
+                }
+                if record.abort_requested {
+                    // An abort invocation waits for the live work below it, which counts itself.
+                    let owned = owned.get_or_insert_with(|| state.owned_live(None));
+                    if owned.get(&record.id).is_some_and(|ids| !ids.is_empty()) {
+                        continue;
+                    }
+                    if record.abort_reason.is_none() {
+                        active = true;
+                        continue;
+                    }
+                }
+                candidates.push(record.clone());
+            }
+            (active, at, candidates)
+        };
+        // A task no definition can take waits for a registry change, except an abort-marked one, which is orphaned.
+        if !active && !candidates.is_empty() {
+            let snapshot = self.core.registry.snapshot();
+            active = candidates.iter().any(|record| self.fit(record, snapshot.task(&record.kind)).is_ok());
+        }
+        Wake { active, at }
     }
 
     /// Signal every invocation and wait for them; writes nothing.

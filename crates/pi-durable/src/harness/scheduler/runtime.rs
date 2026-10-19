@@ -2,6 +2,7 @@
 
 use std::any::Any;
 use std::future::Future;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
 use futures::FutureExt;
@@ -25,7 +26,8 @@ use crate::harness::util::{lock, with_context};
 use crate::ids::{ConversationId, EntryId, TaskId};
 use crate::models::Models;
 use crate::session::{CommittedWatch, TransactionScope, Tx};
-use crate::types::{EntryRecord, TaskOutcome, TaskRecord};
+use crate::timers::Disarm;
+use crate::types::{EntryRecord, TaskOutcome, TaskRecord, TaskState};
 
 type AgentFuture = Shared<BoxFuture<'static, DurableResult<Agent>>>;
 
@@ -362,25 +364,56 @@ impl TaskRuntime {
         self.scheduler.core.report(error);
     }
 
-    /// Resolve once the Harness clock reaches `until`; fails when the invocation or `context` is cancelled.
-    pub async fn sleep(&self, until: f64, context: &Context) -> DurableResult<()> {
-        self.invocation.check()?;
-        let bound = with_abort_signal(&self.signal(), context);
-        loop {
-            if bound.is_cancelled() {
-                return Err(crate::harness::util::cancellation(&bound));
-            }
-            let remaining = until - self.now();
-            if remaining <= 0.0 {
-                return Ok(());
-            }
-            let wait = remaining.min(super::reconcile::MAX_TIMER_DELAY_MS) as u64;
-            let sleep = async move {
-                tokio::time::sleep(std::time::Duration::from_millis(wait.max(1))).await;
-                Ok(())
-            };
-            with_context(sleep, &bound).await?;
+    /// Call `callback` once after about `delay_ms` on the Harness's timer (`HarnessOptions::set_timer`), for pacing
+    /// work inside a phase, such as throttled progress commits. Not durable: the invocation's end disarms it, and after
+    /// its end nothing is armed. Returns what disarms it. Wait for time between phases with `sleep_until()`.
+    pub fn set_timer(&self, callback: impl FnOnce() + Send + 'static, delay_ms: f64) -> Disarm {
+        let invocation = self.invocation.clone();
+        if invocation.is_ended() {
+            return Box::new(|| {});
         }
+        let key = invocation.next_timer.fetch_add(1, Ordering::SeqCst);
+        let weak = Arc::downgrade(&invocation);
+        let fire = Box::new(move || {
+            let Some(invocation) = weak.upgrade() else { return };
+            if lock(&invocation.timers).remove(&key).is_some() && !invocation.is_ended() {
+                callback();
+            }
+        });
+        let disarm = self.scheduler.core.timers.foreground(fire, delay_ms);
+        {
+            let mut timers = lock(&invocation.timers);
+            // The invocation may have ended, or the timer fired, while it was armed.
+            if !invocation.is_ended() {
+                timers.insert(key, disarm);
+                drop(timers);
+                let weak = Arc::downgrade(&invocation);
+                return Box::new(move || {
+                    let removed = weak.upgrade().and_then(|invocation| lock(&invocation.timers).remove(&key));
+                    if let Some(disarm) = removed {
+                        disarm();
+                    }
+                });
+            }
+        }
+        disarm();
+        Box::new(|| {})
+    }
+
+    /// Commit a sleep: the task holds no invocation until the Harness clock reaches `until`, then resumes at
+    /// `checkpoint`. Resolves once the sleep is stored, not when the time comes; the phase returns right after.
+    /// Returning `TaskState::Sleeping` from `commit()` is the same sleep, for one that must commit together with other
+    /// writes.
+    pub async fn sleep_until(&self, until: f64, checkpoint: Json, context: &Context) -> DurableResult<()> {
+        let (scheduler, invocation) = (self.scheduler.clone(), self.invocation.clone());
+        self.gated(
+            move |tx, current| async move {
+                let next = TaskState::Sleeping { checkpoint, until };
+                scheduler.commit_state(&tx, &invocation, &current, next).await
+            },
+            context,
+        )
+        .await
     }
 
     /// Snapshot of a committed document.
