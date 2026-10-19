@@ -57,8 +57,8 @@ fn export_from_file_matches_upstream_bytes() {
     let written = export_from_file(fixture().to_str().unwrap(), out.to_str(), &ExportTheme::dark()).unwrap();
     assert_eq!(written, out);
     let bytes = std::fs::read(&out).unwrap();
-    assert_eq!(bytes.len(), 276_772);
-    assert_eq!(fnv1a(&bytes), 0xb20e_7b57_27d8_9d24);
+    assert_eq!(bytes.len(), 277_004);
+    assert_eq!(fnv1a(&bytes), 0x631c_acac_65c5_e5b3);
 }
 
 #[test]
@@ -84,8 +84,8 @@ fn session_export_with_state_matches_upstream_bytes() {
     };
     export_session_html(&fixture(), out.to_str(), &options).unwrap();
     let bytes = std::fs::read(&out).unwrap();
-    assert_eq!(bytes.len(), 277_476);
-    assert_eq!(fnv1a(&bytes), 0x4d67_2059_beeb_2670);
+    assert_eq!(bytes.len(), 277_708);
+    assert_eq!(fnv1a(&bytes), 0xb8e3_12fd_40ce_1c97);
 
     let data = session_data(&String::from_utf8(bytes).unwrap());
     let rendered = &data["renderedTools"];

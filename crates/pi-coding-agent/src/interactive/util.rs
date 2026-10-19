@@ -9,6 +9,30 @@ pub fn js_number(value: f64) -> String {
     if value.fract() == 0.0 && value.abs() < 1e21 { format!("{}", value as i64) } else { format!("{value}") }
 }
 
+fn line_number(value: &serde_json::Value) -> Option<f64> {
+    let number = match value {
+        serde_json::Value::Number(number) => number.as_f64(),
+        serde_json::Value::String(text) if !text.trim().is_empty() => text.trim().parse().ok(),
+        _ => None,
+    };
+    number.filter(|number| number.is_finite())
+}
+
+/// Upstream `formatReadLineRange`: `:start-end` for numbers or numeric strings, `""` when both are
+/// missing or either is malformed. Strict schemas send `null` for omitted arguments.
+pub fn format_read_line_range(offset: Option<&serde_json::Value>, limit: Option<&serde_json::Value>) -> String {
+    let offset = offset.filter(|value| !value.is_null());
+    let limit = limit.filter(|value| !value.is_null());
+    if offset.is_none() && limit.is_none() {
+        return String::new();
+    }
+    let Some(start) = offset.map_or(Some(1.0), line_number) else { return String::new() };
+    let Some(limit) = limit else { return format!(":{}", js_number(start)) };
+    let Some(count) = line_number(limit) else { return String::new() };
+    let end = start + count - 1.0;
+    if end == 0.0 { format!(":{}", js_number(start)) } else { format!(":{}-{}", js_number(start), js_number(end)) }
+}
+
 /// Lexically resolve `path` against `base` (upstream `path.resolve`).
 pub fn resolve_lexically(path: &Path, base: &Path) -> PathBuf {
     let joined = if path.is_absolute() { path.to_path_buf() } else { base.join(path) };

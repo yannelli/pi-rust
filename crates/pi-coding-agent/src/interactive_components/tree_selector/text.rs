@@ -280,18 +280,8 @@ pub(super) fn format_tool_call(name: &str, args: &Map<String, Value>) -> String 
     let path = || shorten_path(&or_string(args, &["path", "file_path"], ""));
     match name {
         "read" => {
-            let mut display = path();
-            let offset = args.get("offset").map(|value| value.as_f64());
-            let limit = args.get("limit").map(|value| value.as_f64().unwrap_or(0.0));
-            if offset.is_some() || limit.is_some() {
-                let start = offset.flatten().unwrap_or(1.0);
-                let end = limit.map(|limit| start + limit - 1.0).filter(|end| *end != 0.0 && !end.is_nan());
-                display += &format!(":{}", js_number(start));
-                if let Some(end) = end {
-                    display += &format!("-{}", js_number(end));
-                }
-            }
-            format!("[read: {display}]")
+            let range = crate::interactive::util::format_read_line_range(args.get("offset"), args.get("limit"));
+            format!("[read: {}{range}]", path())
         }
         "write" => format!("[write: {}]", path()),
         "edit" => format!("[edit: {}]", path()),
