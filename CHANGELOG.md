@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.2.4] - 2026-10-19
+
+### Fixed
+
+- **js:** deliver an HTTP/2 session's last frames before it reports closing ([9892f9b](https://github.com/yannelli/pi-rust/commit/9892f9b6277bbbee4364b9b425bdd8f4e0488bc9))
+
 ## [0.2.3] - 2026-10-19
 
 ### Fixed
