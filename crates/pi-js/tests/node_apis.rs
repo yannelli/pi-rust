@@ -182,7 +182,8 @@ return {
   errors: [err(() => histogram.record(0)), err(() => histogram.record("1")), err(() => histogram.percentile(0)), err(() => performance.timerify(1)), err(() => new PerformanceObserver(1))],
   empty: [empty.count, empty.min === 9223372036854776000, empty.max, Number.isNaN(empty.mean), [...empty.percentiles]],
   elu: [Object.keys(elu1), elu2.idle > 10, elu2.utilization >= 0 && elu2.utilization <= 1],
-  delay: [enabled, disabled, delay.count > 0, delay.min >= 1e6, delay.percentiles instanceof Map],
+  // A late tick shortens the next interval (as in Node), so only the first full interval bounds the samples.
+  delay: [enabled, disabled, delay.count > 0, delay.min > 0 && delay.max >= 5e6, delay.percentiles instanceof Map],
   types: PerformanceObserver.supportedEntryTypes,
 };
 "#)
