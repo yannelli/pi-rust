@@ -77,6 +77,12 @@ await once(idle, "timeout");
 out.timeout = idle.timeout;
 idle.destroy();
 timed.close();
+mark("unread end");
+const quiet = net.createServer((socket) => socket.end()).listen(0, "127.0.0.1");
+await once(quiet, "listening");
+const unread = net.connect(quiet.address().port, "127.0.0.1");
+out.unreadEnd = [await once(unread, "close"), unread.readableEnded];
+quiet.close();
 mark("helpers");
 const unrefed = net.createServer().listen(0, "127.0.0.1");
 unrefed.unref();
@@ -93,7 +99,7 @@ out.autoSelect = [net.getDefaultAutoSelectFamily(), net.setDefaultAutoSelectFami
 return out;
 "##;
 
-const NET_EXPECTED: &str = r##"{"listening":[true,"IPv4","127.0.0.1","number"],"tcp":["hello world",false,["opening","open","closed"],11,11],"accepted":["127.0.0.1",true,"IPv4"],"inUse":["EADDRINUSE","listen","listen EADDRINUSE: address already in use 127.0.0.1:PORT",PORTNUM],"closed":[false,null],"refused":["ECONNREFUSED","connect","127.0.0.1",true],"pipeAddress":true,"pipe":["hello world",false],"connections":[null,0],"timeout":30,"helpers":[6,4,0,true,true],"blockList":[true,true,false,true,true,["Subnet: IPv6 8592:757c:efae:4e45::/64","Range: IPv4 10.0.1.1-10.0.1.10","Address: IPv4 10.0.0.1"]],"socketAddress":["::1",8080,"ipv6",{"address":"127.0.0.1","port":0,"family":"ipv4","flowlabel":0}],"badPort":["ERR_SOCKET_BAD_PORT","Port should be >= 0 and < 65536. Received type number (70000)."],"autoSelect":[true,null,false]}"##;
+const NET_EXPECTED: &str = r##"{"listening":[true,"IPv4","127.0.0.1","number"],"tcp":["hello world",false,["opening","open","closed"],11,11],"accepted":["127.0.0.1",true,"IPv4"],"inUse":["EADDRINUSE","listen","listen EADDRINUSE: address already in use 127.0.0.1:PORT",PORTNUM],"closed":[false,null],"refused":["ECONNREFUSED","connect","127.0.0.1",true],"pipeAddress":true,"pipe":["hello world",false],"connections":[null,0],"timeout":30,"unreadEnd":[false,true],"helpers":[6,4,0,true,true],"blockList":[true,true,false,true,true,["Subnet: IPv6 8592:757c:efae:4e45::/64","Range: IPv4 10.0.1.1-10.0.1.10","Address: IPv4 10.0.0.1"]],"socketAddress":["::1",8080,"ipv6",{"address":"127.0.0.1","port":0,"family":"ipv4","flowlabel":0}],"badPort":["ERR_SOCKET_BAD_PORT","Port should be >= 0 and < 65536. Received type number (70000)."],"autoSelect":[true,null,false]}"##;
 
 #[tokio::test]
 async fn net_matches_node() {

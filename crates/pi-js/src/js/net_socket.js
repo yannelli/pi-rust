@@ -81,7 +81,9 @@ Socket.prototype._onNative = function (event, value, error) {
       nativeNet.pause(this._handle);
     }
   } else if (event === "end") {
+    // Like Node's onStreamRead, so 'end' comes even when nothing reads the socket.
     this.push(null);
+    this.read(0);
   } else if (event === "connect") {
     this._onConnect(value);
   } else if (event === "error") {
@@ -162,7 +164,8 @@ Socket.prototype._write = function (chunk, encoding, callback) {
 Socket.prototype._final = function (callback) {
   this._whenConnected(() => {
     if (this._handle === null) return callback();
-    nativeNet.shutdown(this._handle).then(() => callback(), (error) => (error.code === "ENOTCONN" ? callback() : callback(error)));
+    // Node's afterShutdown ignores the status, so a peer that already reset the connection is no error.
+    nativeNet.shutdown(this._handle).then(() => callback(), () => callback());
   });
 };
 
