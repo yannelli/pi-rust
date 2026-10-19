@@ -381,8 +381,11 @@ function defineDefaultCommands(server) {
   server.defineCommand("load", {
     help: "Load JS from a file into the REPL session",
     action(file) {
+      if (!file) {
+        this.output.write('The "file" argument must be specified\n');
+        return this.displayPrompt();
+      }
       try {
-        if (!file) throw new Error("missing");
         if (fs.statSync(file).isFile()) {
           const data = fs.readFileSync(file, "utf8");
           this.editorMode = true;
