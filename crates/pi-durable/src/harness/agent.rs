@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 
-use super::define::{Extension, PromptSection, Wrap};
+use super::define::{Extension, ExtensionHooks, PromptSection, Wrap};
 use super::registry::RegistrySnapshot;
 use super::settings::Settings;
 use super::tool_registration::{ToolCaller, ToolRegistration};
@@ -84,11 +84,32 @@ pub async fn create_agent(tx: &Tx, conversation: &ConversationRecord) -> Durable
 }
 
 /// Handlers of the selected extensions' hooks for a task name, in extension order.
-pub fn agent_hooks(agent: &Agent, task_name: &str) -> Vec<Arc<dyn std::any::Any + Send + Sync>> {
+pub fn agent_hooks(agent: &Agent, task_name: &str) -> Vec<ExtensionHooks<dyn std::any::Any + Send + Sync>> {
     let extensions = agent.extensions.iter();
     extensions
-        .flat_map(|e| e.hooks.iter().filter(|hook| hook.task == task_name).map(|hook| hook.handlers.clone()))
+        .flat_map(|e| {
+            let hooks = e.hooks.iter().filter(|hook| hook.task == task_name);
+            hooks.map(|hook| ExtensionHooks { extension: e.name.clone(), handlers: hook.handlers.clone() })
+        })
         .collect()
+}
+
+/// The extension whose code a section of `agent` runs: the last selected one that provides or wraps it.
+pub fn section_extension(agent: &Agent, key: &str) -> Option<String> {
+    let runs = |e: &&Arc<Extension>| {
+        e.sections.iter().any(|section| section.key == key)
+            || e.wraps.iter().any(|wrap| matches!(wrap, Wrap::Section { section, .. } if section == key))
+    };
+    agent.extensions.iter().rfind(runs).map(|e| e.name.clone())
+}
+
+/// The extension whose code a tool of `agent` runs: the last selected one that provides or wraps it.
+pub fn tool_extension(agent: &Agent, name: &str) -> Option<String> {
+    let runs = |e: &&Arc<Extension>| {
+        e.tools.iter().any(|tool| tool.name() == name)
+            || e.wraps.iter().any(|wrap| matches!(wrap, Wrap::Tool { tool, .. } if tool == name))
+    };
+    agent.extensions.iter().rfind(runs).map(|e| e.name.clone())
 }
 
 /// Resolve an agent from its stored state, a registry snapshot, and resolved settings. A wrapper that fails or
@@ -97,7 +118,8 @@ pub fn resolve_agent(
     state: Option<&AgentState>,
     snapshot: &RegistrySnapshot,
     settings: &Settings,
-    report: &(dyn Fn(&DurableError) + Sync),
+    // Gets a wrapper's failure with the name of the wrapper's extension.
+    report: &(dyn Fn(&DurableError, &str) + Sync),
 ) -> Agent {
     let extensions = select_extensions(state.and_then(|s| s.extensions.as_ref()), snapshot, settings);
     let mut composed: Vec<(String, Arc<ToolRegistration>)> = Vec::new();
@@ -111,11 +133,12 @@ pub fn resolve_agent(
         }
     }
     for extension in &extensions {
+        let report = |error: &DurableError| report(error, &extension.name);
         for wrap in &extension.wraps {
             match wrap {
-                Wrap::Tool { tool, wrap } => apply_wrap(&mut composed, tool, |t| wrap(t), |t| t.name(), report),
+                Wrap::Tool { tool, wrap } => apply_wrap(&mut composed, tool, |t| wrap(t), |t| t.name(), &report),
                 Wrap::Section { section, wrap } => {
-                    apply_wrap(&mut sections, section, |s| wrap(s), |s| s.key.as_str(), report)
+                    apply_wrap(&mut sections, section, |s| wrap(s), |s| s.key.as_str(), &report)
                 }
             }
         }

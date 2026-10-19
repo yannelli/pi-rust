@@ -151,7 +151,7 @@ async fn select_phase(task: TaskRecord, runtime: TaskRuntime, context: Context) 
         }
         match hook(selection.clone(), runtime.clone(), context.clone()).await {
             Ok(next) => decision = next,
-            Err(error) => runtime.hook_failed(error)?,
+            Err(error) => runtime.hook_failed(&hooks, error)?,
         }
     }
     match decision {

@@ -62,7 +62,7 @@ async fn open_coding_agent_harness(
             Arc::new(create_coding_registry(settings.clone(), agent_dir, &cwd).map_err(chord)?);
         let mut harness_options = HarnessOptions::new(runtime_models(&model_runtime), registry)
             .with_env(envs.builder())
-            .with_on_report(|error| eprintln!("{error}"));
+            .with_on_report(|error, _| eprintln!("{error}"));
         harness_options.settings = Some(create_harness_settings(settings.clone()));
         let storage = Arc::new(open_sqlite_storage(&database_path.display().to_string()).await.map_err(chord)?);
         let harness = opened.insert(Harness::open(storage, harness_options, &TODO_CONTEXT).await.map_err(chord)?);

@@ -1,13 +1,16 @@
 //! The task graph (spec section 9.5): every live task of the Session with its durable status, kept in step with
 //! commit publications (upstream `harness/task-graph.ts`).
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use pi_chord::delta::{Op, Path, Seg, apply_immutable};
 use pi_chord::state::{ReplicatedStateSourceOptions, attach_replicated_state_source};
-use pi_chord::{Context, Json, JsonMap, without_abort_signal};
+use pi_chord::{BACKGROUND_CONTEXT, Context, Json, JsonMap, without_abort_signal};
 
+use super::scheduler::{BlockedSubject, Scheduler};
+use super::types::BlockedReason;
 use super::util::{cancellation, closed_error, lock, scan_all};
 use crate::errors::DurableResult;
 use crate::ids::ConversationId;
@@ -15,8 +18,10 @@ use crate::session::{CommittedObserver, CommittedStateSource, CommittedWatch, Do
 use crate::types::{CommitChange, CommitPublication, ConversationQuery, TaskQuery, TaskRecord, TaskState, TaskStatus};
 
 /// `{ tasks }`: every live task keyed by its decimal ID. A node is `{ id, kind, conversationId, owner?, background,
-/// abortRequested, state, conversations }`; `state` is `{ status, phase }`, `{ status: "waiting", phase, on,
+/// abortRequested, state, blocked?, conversations }`; `state` is `{ status, phase }`, `{ status: "waiting", phase, on,
 /// policy }`, `{ status: "sleeping", phase, until }`, or `{ status: "completing", outcome }` with the outcome's status.
+/// `blocked` says why the task cannot run here, when it cannot: no registered definition takes it (`missing_task`,
+/// `task_too_old`, `migration_failed`), or the restart limit parked it (`restart_limit`). It follows registry changes.
 pub type TaskGraph = Json;
 
 /// A serialized exact-frame watch of the task graph.
@@ -29,21 +34,25 @@ const SCAN_PAGE_SIZE: usize = 256;
 struct Mount {
     value: Json,
     observers: Vec<(u64, Arc<dyn CommittedObserver>)>,
+    /// What the blocked reason reads of each live task, so a registry change can derive it again without payloads.
+    records: HashMap<String, BlockedSubject>,
 }
 
 /// The Harness's task graph mount: built on the Session line by its first observer and dropped with its last. It
 /// advances from the Session's commit publications, which are durable.
 pub(crate) struct TaskGraphView {
     session: Session,
+    scheduler: Weak<Scheduler>,
     mount: Mutex<Option<Mount>>,
     closed: AtomicBool,
     next: AtomicU64,
 }
 
 impl TaskGraphView {
-    pub fn new(session: Session) -> DurableResult<Arc<Self>> {
+    pub fn new(session: Session, scheduler: &Arc<Scheduler>) -> DurableResult<Arc<Self>> {
         let view = Arc::new(Self {
             session: session.clone(),
+            scheduler: Arc::downgrade(scheduler),
             mount: Mutex::default(),
             closed: AtomicBool::new(false),
             next: AtomicU64::new(0),
@@ -55,6 +64,12 @@ impl TaskGraphView {
             }
             Ok(())
         })?;
+        let weak = Arc::downgrade(&view);
+        scheduler.subscribe_blocked(Arc::new(move || {
+            if let Some(view) = weak.upgrade() {
+                view.refresh_blocked();
+            }
+        }));
         let weak = Arc::downgrade(&view);
         session.subscribe_close(move || {
             let Some(view) = weak.upgrade() else { return };
@@ -117,10 +132,10 @@ impl TaskGraphView {
         let context = context.clone();
         self.session
             .read_on_line(async move {
-                let mounted = lock(&view.mount).as_ref().map(|mount| mount.value.clone());
-                let (value, built) = match mounted {
-                    Some(value) => (value, false),
-                    None => (view.build(&context).await?, true),
+                let mounted = lock(&view.mount).as_ref().map(|mount| (mount.value.clone(), mount.records.clone()));
+                let (value, records) = match mounted {
+                    Some(mounted) => mounted,
+                    None => view.build(&context).await?,
                 };
                 let key = view.next.fetch_add(1, Ordering::SeqCst);
                 let release = Release::new();
@@ -144,8 +159,8 @@ impl TaskGraphView {
                     return Err(cancellation(&context));
                 }
                 let mut mount = lock(&view.mount);
-                if built || mount.is_none() {
-                    *mount = Some(Mount { value, observers: Vec::new() });
+                if mount.is_none() {
+                    *mount = Some(Mount { value, observers: Vec::new(), records });
                 }
                 if let Some(mount) = mount.as_mut() {
                     mount.observers.push((key, observer));
@@ -155,7 +170,58 @@ impl TaskGraphView {
             .await
     }
 
-    async fn build(&self, context: &Context) -> DurableResult<Json> {
+    fn blocked(&self, record: &BlockedSubject) -> Option<BlockedReason> {
+        self.scheduler.upgrade().and_then(|scheduler| scheduler.blocked_reason(record))
+    }
+
+    /// On the Session line: derive every node's blocked reason again, and publish the ones that changed.
+    fn refresh_blocked(self: &Arc<Self>) {
+        if lock(&self.mount).is_none() || self.closed.load(Ordering::SeqCst) {
+            return;
+        }
+        let view = self.clone();
+        let refresh = self.session.read_on_line(async move {
+            view.publish_blocked();
+            Ok(())
+        });
+        // Fails only once the Session is closing or failed.
+        tokio::spawn(async move { drop(refresh.await) });
+    }
+
+    fn publish_blocked(&self) {
+        let delivery = {
+            let mut mount = lock(&self.mount);
+            let Some(mount) = mount.as_mut() else { return };
+            let mut ops = Vec::new();
+            for (key, record) in &mount.records {
+                let blocked = self.blocked(record);
+                let shown =
+                    mount.value.get("tasks").and_then(|tasks| tasks.get(key)).and_then(|node| node.get("blocked"));
+                if shown.and_then(Json::as_str) == blocked.map(BlockedReason::as_str) {
+                    continue;
+                }
+                ops.push(match blocked {
+                    Some(reason) => Op::Set(path(&["tasks", key, "blocked"]), Json::from(reason.as_str())),
+                    None => Op::Delete(path(&["tasks", key, "blocked"])),
+                });
+            }
+            if ops.is_empty() {
+                return;
+            }
+            match apply_immutable(Some(&mount.value), &ops) {
+                Ok(value) => mount.value = value,
+                Err(error) => return self.session.report(&error.into()),
+            }
+            let observers: Vec<_> = mount.observers.iter().map(|(_, observer)| observer.clone()).collect();
+            (mount.value.clone(), ops, observers)
+        };
+        let (value, ops, observers) = delivery;
+        for observer in observers {
+            observer.advance(value.clone(), ops.clone(), BACKGROUND_CONTEXT.clone());
+        }
+    }
+
+    async fn build(&self, context: &Context) -> DurableResult<(Json, HashMap<String, BlockedSubject>)> {
         let storage = self.session.storage();
         let mut records = Vec::new();
         for status in LIVE_STATUSES {
@@ -171,6 +237,7 @@ impl TaskGraphView {
         }
         records.sort_by_key(|record| record.id);
         let mut tasks = JsonMap::new();
+        let mut subjects = HashMap::new();
         for record in records {
             let query = ConversationQuery { owner_task_id: Some(record.id), ..ConversationQuery::default() };
             let (storage, query) = (&storage, &query);
@@ -180,11 +247,13 @@ impl TaskGraphView {
             .await?;
             let mut conversations: Vec<ConversationId> = owned.iter().map(|conversation| conversation.id).collect();
             conversations.sort();
-            tasks.insert(record.id.to_string().as_str(), node_of(&record, &conversations)?);
+            let subject = BlockedSubject::of(&record);
+            tasks.insert(record.id.to_string().as_str(), node_of(&record, &conversations, self.blocked(&subject))?);
+            subjects.insert(record.id.to_string(), subject);
         }
         let mut graph = JsonMap::new();
         graph.insert("tasks", Json::object(tasks));
-        Ok(Json::object(graph))
+        Ok((Json::object(graph), subjects))
     }
 
     /// Derive the mount's operations from one publication, apply them, and hand the revision to every observer.
@@ -192,7 +261,7 @@ impl TaskGraphView {
         let delivery = {
             let mut mount = lock(&self.mount);
             let Some(mount) = mount.as_mut() else { return };
-            match graph_ops(&mount.value, publication) {
+            match graph_ops(&mount.value, &mut mount.records, publication, &|record| self.blocked(record)) {
                 Ok(ops) if ops.is_empty() => return,
                 Ok(ops) => match apply_immutable(Some(&mount.value), &ops) {
                     Ok(value) => {
@@ -218,7 +287,12 @@ fn path(keys: &[&str]) -> Path {
 }
 
 /// The operations one publication makes on `graph`: task nodes set or deleted, then owned conversations added.
-fn graph_ops(graph: &Json, publication: &CommitPublication) -> DurableResult<Vec<Op>> {
+fn graph_ops(
+    graph: &Json,
+    records: &mut HashMap<String, BlockedSubject>,
+    publication: &CommitPublication,
+    blocked: &dyn Fn(&BlockedSubject) -> Option<BlockedReason>,
+) -> DurableResult<Vec<Op>> {
     let mut ops = Vec::new();
     // Nodes this publication set or deleted, over the mount's value.
     let mut changed: Vec<(String, Option<Json>)> = Vec::new();
@@ -233,6 +307,7 @@ fn graph_ops(graph: &Json, publication: &CommitPublication) -> DurableResult<Vec
         let key = record.id.to_string();
         let previous = node(&changed, &key);
         if matches!(record.state, TaskState::Terminal { .. }) {
+            records.remove(&key);
             if previous.is_none() {
                 continue;
             }
@@ -241,7 +316,9 @@ fn graph_ops(graph: &Json, publication: &CommitPublication) -> DurableResult<Vec
             continue;
         }
         let conversations = previous.as_ref().map(owned_of).unwrap_or_default();
-        let next = node_of(record, &conversations)?;
+        let subject = BlockedSubject::of(record);
+        let next = node_of(record, &conversations, blocked(&subject))?;
+        records.insert(key.clone(), subject);
         if previous.as_ref() == Some(&next) {
             continue;
         }
@@ -277,7 +354,11 @@ fn owned_of(node: &Json) -> Vec<ConversationId> {
     ids.iter().filter_map(Json::as_u64).map(ConversationId).collect()
 }
 
-fn node_of(record: &TaskRecord, conversations: &[ConversationId]) -> DurableResult<Json> {
+fn node_of(
+    record: &TaskRecord,
+    conversations: &[ConversationId],
+    blocked: Option<BlockedReason>,
+) -> DurableResult<Json> {
     use crate::documents::encode;
     let mut node = JsonMap::new();
     node.insert("id", encode(&record.id)?);
@@ -289,6 +370,9 @@ fn node_of(record: &TaskRecord, conversations: &[ConversationId]) -> DurableResu
     node.insert("background", Json::from(record.background));
     node.insert("abortRequested", Json::from(record.abort_requested));
     node.insert("state", state_of(&record.state)?);
+    if let Some(reason) = blocked {
+        node.insert("blocked", Json::from(reason.as_str()));
+    }
     node.insert("conversations", encode(&conversations)?);
     Ok(Json::object(node))
 }

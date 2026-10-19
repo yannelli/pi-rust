@@ -226,6 +226,12 @@ fn resolves_settings_over_the_built_in_defaults() {
     assert_eq!(settings.tool_execution, ToolExecutionMode::Parallel);
     assert_eq!((settings.steering_mode, settings.follow_up_mode), (QueueMode::OneAtATime, QueueMode::OneAtATime));
     assert_eq!(settings.context_retention_ms, 600_000.0);
+    assert_eq!((settings.after_failed_run, settings.restart_limit), (AfterFailedRun::Keep, 5.0));
+    let limit = |restart_limit: f64| {
+        resolve_settings(Some(&HarnessSettings { restart_limit: Some(restart_limit), ..HarnessSettings::default() }))
+            .restart_limit
+    };
+    assert_eq!((limit(0.0), limit(2.7), limit(f64::INFINITY)), (5.0, 2.0, f64::INFINITY));
 
     let overrides = HarnessSettings {
         retry: Some(RetryOverrides { enabled: Some(false), ..Default::default() }),

@@ -33,8 +33,10 @@ fn task_statuses(storage: &ControlledStorage, id: TaskId) -> Vec<TaskStatus> {
         .collect()
 }
 
-fn last_task_writes(storage: &ControlledStorage) -> Vec<TaskRecord> {
-    let writes = storage.commits().pop().unwrap().into_iter();
+/// Task writes of the commit `back` commits before the last; `0` is the last.
+fn task_writes(storage: &ControlledStorage, back: usize) -> Vec<TaskRecord> {
+    let commits = storage.commits();
+    let writes = commits[commits.len() - 1 - back].clone().into_iter();
     writes.filter_map(|write| if let StorageWrite::Task { value } = write { Some(value) } else { None }).collect()
 }
 
@@ -89,7 +91,12 @@ async fn stops_without_outcomes_and_starts_no_fresh_phase_or_abort_invocation_wh
     proceed.resolve();
     closing.await.unwrap();
     assert_eq!(aborting.await.unwrap().unwrap(), AbortTaskResult::Marked);
-    assert_eq!(storage.commit_count(), commits);
+    // No outcome: close writes only the stopped task back as pending, so a reopen counts no restart.
+    assert_eq!(storage.commit_count(), commits + 1);
+    let written = task_writes(&storage, 0);
+    assert_eq!(written.len(), 1);
+    assert_eq!((written[0].id, written[0].abort_requested, written[0].status()), (id, true, TaskStatus::Pending));
+    assert_eq!(serde_json::to_value(&written[0].state).unwrap()["checkpoint"], json!({ "phase": "two" }));
     assert_eq!(*phases.lock().unwrap(), ["one"]);
     assert!(!*abort_ran.lock().unwrap());
     assert!(record.abort_requested);
@@ -172,7 +179,8 @@ async fn writes_no_fault_when_close_seals_while_the_step_after_a_failed_phase_is
     let closing = harness.close(&context());
     gate.release();
     closing.await.unwrap();
-    assert_eq!(task_statuses(&storage, id), [TaskStatus::Pending, TaskStatus::Running]);
+    // Created, reserved, and written back as pending by close: no fault.
+    assert_eq!(task_statuses(&storage, id), [TaskStatus::Pending, TaskStatus::Running, TaskStatus::Pending]);
 }
 
 #[tokio::test]
@@ -197,9 +205,13 @@ async fn starts_no_abort_handler_whose_reservation_settles_while_closing() {
     held.release();
     closing.await.unwrap();
     assert!(!*ran.lock().unwrap());
-    let writes = last_task_writes(&storage);
-    assert_eq!(writes.len(), 1);
-    assert_eq!((writes[0].id, writes[0].abort_requested, writes[0].state.status()), (id, true, TaskStatus::Running));
+    // The reservation landed; close wrote the task back as pending.
+    let reserved = task_writes(&storage, 1);
+    assert_eq!(reserved.len(), 1);
+    assert_eq!((reserved[0].id, reserved[0].abort_requested, reserved[0].status()), (id, true, TaskStatus::Running));
+    let written = task_writes(&storage, 0);
+    assert_eq!(written.len(), 1);
+    assert_eq!((written[0].id, written[0].abort_requested, written[0].status()), (id, true, TaskStatus::Pending));
 }
 
 #[tokio::test]
@@ -240,7 +252,8 @@ async fn rejects_a_runtime_commit_that_was_queued_on_the_line_when_close_sealed_
     assert!(error.to_string().contains("Harness is closed"), "{error}");
     proceed.resolve();
     closing.await.unwrap().unwrap();
-    assert_eq!(task_statuses(&storage, id).len(), 2);
+    // Created, reserved, and written back as pending by close; the queued outcome never landed.
+    assert_eq!(task_statuses(&storage, id), [TaskStatus::Pending, TaskStatus::Running, TaskStatus::Pending]);
 }
 
 /// A registry reader whose next snapshot, once armed, starts closing the Harness.
@@ -323,7 +336,11 @@ async fn joins_a_reservation_that_settles_while_closing_without_starting_its_han
     held.release();
     closing.await.unwrap();
     assert!(!*ran.lock().unwrap());
-    let writes = last_task_writes(&storage);
-    assert_eq!(writes.len(), 1);
-    assert_eq!((writes[0].id, writes[0].state.status()), (id, TaskStatus::Running));
+    // The reservation landed; close wrote the task back as pending.
+    let reserved = task_writes(&storage, 1);
+    assert_eq!(reserved.len(), 1);
+    assert_eq!((reserved[0].id, reserved[0].status()), (id, TaskStatus::Running));
+    let written = task_writes(&storage, 0);
+    assert_eq!(written.len(), 1);
+    assert_eq!((written[0].id, written[0].status()), (id, TaskStatus::Pending));
 }

@@ -81,7 +81,12 @@ struct Started {
     harness: Harness,
     registry: Arc<Registry>,
     reports: Arc<Mutex<Vec<DurableError>>>,
+    infos: Arc<Mutex<Vec<ReportInfo>>>,
     id: TaskId,
+}
+
+fn handover_report(id: TaskId) -> ReportTask {
+    ReportTask { id, kind: "test.handover".into(), conversation_id: ROOT_CONVERSATION_ID }
 }
 
 async fn start_handover(log: &Log, gates: Gates, storage: Arc<dyn Storage>) -> Started {
@@ -91,7 +96,7 @@ async fn start_handover(log: &Log, gates: Gates, storage: Arc<dyn Storage>) -> S
     let id = create_in(&opened.harness, &handover_task("old", 1, log, Gates::default(), None), Value::Null).await;
     opened.harness.resume().unwrap();
     eventually(|| async { log_of(log).len() == 1 }).await;
-    Started { harness: opened.harness, registry, reports: opened.reports, id }
+    Started { harness: opened.harness, registry, reports: opened.reports, infos: opened.infos, id }
 }
 
 fn gate_a(gate: &Deferred) -> Gates {
@@ -174,12 +179,14 @@ async fn hands_over_to_a_newer_version_with_a_migration() {
 #[tokio::test]
 async fn hands_over_to_a_newer_version_whose_migration_fails_and_leaves_the_task_blocked() {
     let (log, gate) = (Log::default(), Deferred::default());
-    let Started { harness, registry, id, reports } =
+    let Started { harness, registry, id, infos, .. } =
         start_handover(&log, gate_a(&gate), Arc::new(MemoryStorage::new())).await;
     // The same extension name replaces the old one in place.
     add_task(&registry, handover_task("broken", 2, &log, Gates::default(), Some(Err("broken migration"))));
     gate.resolve();
-    eventually(|| async { reports.lock().unwrap().len() == 1 }).await;
+    eventually(|| async { infos.lock().unwrap().len() == 1 }).await;
+    let extension = Some("task:test.handover".to_owned());
+    assert_eq!(*infos.lock().unwrap(), [ReportInfo::MigrationFailed { task: handover_report(id), extension }]);
     flush().await;
     let record = harness.get_task(id, &context()).await.unwrap().unwrap();
     assert_eq!(record.version, 1);
@@ -191,14 +198,13 @@ async fn hands_over_to_a_newer_version_whose_migration_fails_and_leaves_the_task
     harness.close(&context()).await.unwrap();
 }
 
-// Deviation: upstream reports carry the cause "missing_task" then "incompatible_task"; Rust reports carry only the
-// message, so this checks the two messages.
 #[tokio::test]
 async fn keeps_running_under_the_old_definition_when_the_replacement_is_missing_or_cannot_take_the_task() {
     let log = Log::default();
     let (gate_a, gate_b) = (Deferred::default(), Deferred::default());
     let gates = Gates { a: Some(gate_a.clone()), b: Some(gate_b.clone()), on_end: None };
-    let Started { harness, registry, id, reports } = start_handover(&log, gates, Arc::new(MemoryStorage::new())).await;
+    let Started { harness, registry, id, reports, infos } =
+        start_handover(&log, gates, Arc::new(MemoryStorage::new())).await;
     registry.uninstall("task:test.handover").unwrap();
     gate_a.resolve();
     eventually(|| async { log_of(&log).contains(&"old:b start".to_owned()) }).await;
@@ -210,6 +216,13 @@ async fn keeps_running_under_the_old_definition_when_the_replacement_is_missing_
     let reports: Vec<String> = reports.lock().unwrap().iter().map(ToString::to_string).collect();
     let message = format!("Task {id} keeps running under its old test.handover definition");
     assert_eq!(reports, [message.clone(), message]);
+    let outdated = |reason| ReportInfo::TaskOutdated {
+        task: handover_report(id),
+        extension: Some("task:test.handover".into()),
+        reason,
+    };
+    let expected = [outdated(OutdatedReason::MissingTask), outdated(OutdatedReason::IncompatibleTask)];
+    assert_eq!(*infos.lock().unwrap(), expected);
     harness.close(&context()).await.unwrap();
 }
 

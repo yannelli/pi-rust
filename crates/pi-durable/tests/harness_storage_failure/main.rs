@@ -405,7 +405,7 @@ async fn ends_an_abort_that_joins_a_run_ignoring_its_signal_and_a_reentrant_repo
     let cell: Arc<OnceLock<Harness>> = Arc::default();
     let reentered = Arc::new(Mutex::new(None::<tokio::task::JoinHandle<DurableResult<()>>>));
     let (harness_cell, slot) = (cell.clone(), reentered.clone());
-    let options = HarnessOptions::new(Arc::new(create_models()), registry).with_on_report(move |_| {
+    let options = HarnessOptions::new(Arc::new(create_models()), registry).with_on_report(move |_, _| {
         let mut slot = slot.lock().unwrap();
         if slot.is_none()
             && let Some(harness) = harness_cell.get().cloned()

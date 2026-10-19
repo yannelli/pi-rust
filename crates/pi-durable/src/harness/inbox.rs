@@ -235,8 +235,9 @@ pub async fn remove_inbox_item(tx: &Tx, conversation_id: ConversationId, id: Sub
     })
 }
 
-/// Withdraw every queued input of a conversation: each settles `unanswered` with `aborted`; writes stay queued.
-pub async fn withdraw_queued_inputs(tx: &Tx, conversation_id: ConversationId) -> DurableResult<()> {
+/// Withdraw every queued input of a conversation: each settles `unanswered` with `reason`, `aborted` for an abort;
+/// writes stay queued.
+pub async fn withdraw_queued_inputs(tx: &Tx, conversation_id: ConversationId, reason: &str) -> DurableResult<()> {
     let inbox = tx.doc(&INBOX_DOC, conversation_id).await?;
     let items = inbox.get()?.items;
     let withdrawn: Vec<SubmissionId> =
@@ -245,7 +246,7 @@ pub async fn withdraw_queued_inputs(tx: &Tx, conversation_id: ConversationId) ->
         return Ok(());
     }
     for id in withdrawn.iter().rev() {
-        tx.settle_submission(*id, SubmissionSettlement::Unanswered { reason: "aborted".into(), detail: None })?;
+        tx.settle_submission(*id, SubmissionSettlement::Unanswered { reason: reason.into(), detail: None })?;
     }
     inbox.edit(|state| state.items.retain(|item| matches!(item, InboxItem::Write { .. })))
 }

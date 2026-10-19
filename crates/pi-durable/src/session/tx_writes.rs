@@ -188,6 +188,7 @@ impl Tx {
                 memos: None,
                 started_at: None,
                 ended_at: None,
+                restarts: None,
             };
             tx.open_state()?.task_entry(id).write = Some((TaskWriteKind::Create, record));
             Ok(id)

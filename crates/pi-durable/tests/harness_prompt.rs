@@ -109,7 +109,7 @@ fn input(agent: Agent) -> PromptInput {
 
 fn empty_agent() -> Agent {
     let registry = create_registry();
-    resolve_agent(None, &registry.snapshot(), &resolve_settings(None), &|error| panic!("{error}"))
+    resolve_agent(None, &registry.snapshot(), &resolve_settings(None), &|error, _| panic!("{error}"))
 }
 
 #[tokio::test]
@@ -137,8 +137,8 @@ async fn renders_sections_in_order_with_tags_omissions_wrappers_and_failures() {
     registry.install(Extension::new("git").wrap(wrap)).unwrap();
     let reports = Mutex::new(Vec::new());
     let shown = sections(&[("failing", "<failing>\nold\n</failing>"), ("cwd", "stale")]);
-    let agent = resolve_agent(None, &registry.snapshot(), &resolve_settings(None), &|error| panic!("{error}"));
-    let report = |error: &DurableError| reports.lock().unwrap().push(error.to_string());
+    let agent = resolve_agent(None, &registry.snapshot(), &resolve_settings(None), &|error, _| panic!("{error}"));
+    let report = |error: &DurableError, _: &PromptSection| reports.lock().unwrap().push(error.to_string());
     let rendered = render_sections(&agent.sections, &input(agent.clone()), &shown, &report, &context()).await.unwrap();
     let expected = [
         ("preamble", "You are helpful."),
@@ -155,7 +155,8 @@ async fn propagates_section_errors_after_cancellation() {
     controller.abort(Some(ChordError::error("cancelled")));
     let cancelled = with_abort_signal(&controller.signal(), &context());
     let sections = [failing("a", "cancelled")];
-    let error = render_sections(&sections, &input(empty_agent()), &Vec::new(), &|_| {}, &cancelled).await.unwrap_err();
+    let error =
+        render_sections(&sections, &input(empty_agent()), &Vec::new(), &|_, _| {}, &cancelled).await.unwrap_err();
     assert!(error.to_string().contains("cancelled"));
 }
 

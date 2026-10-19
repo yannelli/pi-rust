@@ -29,6 +29,7 @@ fn pending_task_record(conversation_id: ConversationId) -> TaskRecord {
         memos: None,
         started_at: None,
         ended_at: None,
+        restarts: None,
     }
 }
 

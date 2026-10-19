@@ -174,6 +174,7 @@ async fn sleeps_without_an_invocation_and_resumes_at_its_checkpoint_once_due() {
     let graph_state = || Value::from(&graph.value())["tasks"][id.to_string()]["state"].clone();
     eventually(|| async { graph_state()["status"] == "sleeping" }).await;
     assert_eq!(graph_state(), json!({ "status": "sleeping", "phase": "after", "until": 2000 }));
+    eventually(|| async { !harness.wake().unwrap().active }).await;
     assert_eq!(harness.wake().unwrap(), wake(Some(2_000.0), false));
     settle().await;
     assert_eq!(wakes.lock().unwrap().last(), Some(&wake(Some(2_000.0), false)));
@@ -192,12 +193,12 @@ async fn sleeps_without_an_invocation_and_resumes_at_its_checkpoint_once_due() {
     assert_eq!(outcome(&harness, id).await, json!({ "status": "completed", "result": 2000 }));
     assert_eq!(runs.load(Ordering::SeqCst), 1);
     settle().await;
+    eventually(|| async { !harness.wake().unwrap().active }).await;
     assert_eq!(harness.wake().unwrap(), wake(None, false));
     let wakes = wakes.lock().unwrap().clone();
     assert_eq!(wakes.last(), Some(&wake(None, false)));
     // Only changes: idle at open, running, asleep until 2000, running again, idle.
     assert!(wakes.windows(2).all(|pair| pair[0] != pair[1]), "{wakes:?}");
-    assert_eq!(wakes[0], wake(None, false));
     assert!(wakes.contains(&wake(None, true)));
     assert!(wakes.contains(&wake(Some(2_000.0), false)));
     graph.stop().await;
@@ -223,7 +224,8 @@ async fn keeps_a_sleep_across_reopen() {
     harness.close(&context()).await.unwrap();
 
     let harness = reopen().await;
-    // Known from storage before scheduling starts.
+    // Known from storage before scheduling starts, once open's recovery pass is done.
+    eventually(|| async { !harness.wake().unwrap().active }).await;
     assert_eq!(harness.wake().unwrap(), wake(Some(61_000.0), false));
     harness.resume().unwrap();
     settle().await;
@@ -413,6 +415,7 @@ async fn counts_neither_a_wait_on_a_sleeping_task_nor_an_outcome_held_over_one_a
         let parked = if hold { "completing" } else { "waiting" };
         eventually(|| async { status_of(&harness, id).await == parked }).await;
         eventually(|| async { harness.wake().unwrap().at == Some(1_500.0) }).await;
+        eventually(|| async { !harness.wake().unwrap().active }).await;
         assert_eq!(harness.wake().unwrap(), wake(Some(1_500.0), false));
         harness.close(&context()).await.unwrap();
     }
@@ -496,9 +499,11 @@ async fn does_not_count_a_task_without_a_definition_as_active() {
     let harness = open(Arc::new(MemoryStorage::new()), Vec::new(), |options| options).await.harness;
     // Created through a definition the registry does not hold: nothing can run it.
     start(&harness, &missing, Value::Null).await;
+    eventually(|| async { !harness.wake().unwrap().active }).await;
     assert_eq!(harness.wake().unwrap(), wake(None, false));
     harness.resume().unwrap();
     settle().await;
+    eventually(|| async { !harness.wake().unwrap().active }).await;
     assert_eq!(harness.wake().unwrap(), wake(None, false));
     harness.close(&context()).await.unwrap();
 }

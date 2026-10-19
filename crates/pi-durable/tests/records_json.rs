@@ -24,6 +24,7 @@ fn task_record_matches_upstream_layout() {
         memos: None,
         started_at: None,
         ended_at: None,
+        restarts: None,
     };
     let encoded = text(&record);
     assert_eq!(

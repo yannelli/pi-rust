@@ -8,7 +8,7 @@ use pi_chord::Json;
 use super::ownership::{Overlay, Step};
 use super::run::Reservation;
 use super::runtime::{Phase, TaskRuntime};
-use super::{Invocation, Mode, Scheduler, Up, with_state};
+use super::{Invocation, Mode, Scheduler, Up, progressed, report_task, with_state};
 use crate::errors::{DurableError, DurableResult};
 use crate::harness::live::settle_scheduler_outcome;
 use crate::harness::registry::RegistrySnapshot;
@@ -16,7 +16,10 @@ use crate::harness::task::{Task, phase_of};
 use crate::harness::util::lock;
 use crate::ids::TaskId;
 use crate::session::{TransactionScope, Tx};
-use crate::types::{JoinPolicy, TaskOutcome, TaskOutcomeError, TaskRecord, TaskState, TaskStatus};
+use crate::types::{
+    FaultReason, JoinPolicy, OutdatedReason, ReportInfo, TaskOutcome, TaskOutcomeError, TaskRecord, TaskState,
+    TaskStatus,
+};
 
 /// What a running invocation tracks across steps: its definition, its snapshot, and the last reported takeover.
 pub(crate) struct RunState {
@@ -56,7 +59,9 @@ impl Scheduler {
                 Mode::Abort => scheduler.run_abort(reservation).await,
             };
             if let Err(error) = result {
-                scheduler.core.report(&error);
+                let info =
+                    ReportInfo::TaskError { task: invocation.report_task(), extension: invocation.extension.clone() };
+                scheduler.core.report(&error, &info);
             }
             scheduler.end(&invocation);
             invocation.done.send_replace(true);
@@ -74,8 +79,9 @@ impl Scheduler {
         let mut previous: Option<PhaseResult> = None;
         loop {
             let scheduler = self.arc()?;
-            let (run_state, last) = (state.clone(), previous.take());
-            let decide = move |tx: &Tx, current: &TaskRecord| scheduler.decide(tx, current, last, &run_state);
+            let (run_state, last, extension) = (state.clone(), previous.take(), invocation.extension.clone());
+            let decide =
+                move |tx: &Tx, current: &TaskRecord| scheduler.decide(tx, current, last, &run_state, extension);
             let Some(current) = self.step(&invocation, decide).await else { return Ok(()) };
             // Close may seal between the decision and dispatch.
             if self.closing() {
@@ -100,6 +106,7 @@ impl Scheduler {
         current: &TaskRecord,
         previous: Option<PhaseResult>,
         state: &Mutex<RunState>,
+        extension: Option<String>,
     ) -> DurableResult<Decision> {
         // 3. abort mark: end; a fresh abort invocation starts once the owned work is gone.
         if current.abort_requested {
@@ -138,9 +145,11 @@ impl Scheduler {
             return Ok(Decision::End);
         }
         if !run.reported.as_ref().is_some_and(|task| same(task, &next)) {
+            let reason = if next.is_none() { OutdatedReason::MissingTask } else { OutdatedReason::IncompatibleTask };
             run.reported = Some(next);
             let message = format!("Task {} keeps running under its old {} definition", current.id, current.kind);
-            self.core.report(&DurableError::error(message));
+            let info = ReportInfo::TaskOutdated { task: report_task(current), extension, reason };
+            self.core.report(&DurableError::error(message), &info);
         }
         Ok(Decision::Continue)
     }
@@ -174,6 +183,8 @@ impl Scheduler {
     {
         let Ok(scheduler) = self.arc() else { return None };
         let target = invocation.clone();
+        let fault: Arc<Mutex<Option<DurableError>>> = Arc::default();
+        let faulted = fault.clone();
         let committed = self.core.session.commit_with(
             move |tx| async move {
                 let current = {
@@ -192,6 +203,7 @@ impl Scheduler {
                 if let (Decision::Fault(error), Some(current)) = (decision, current) {
                     let outcome = TaskOutcome::Faulted { error: TaskOutcomeError::new(error.to_string()) };
                     scheduler.terminate(&tx, &current, outcome).await?;
+                    *lock(&faulted) = Some(error);
                 }
                 Ok(None)
             },
@@ -199,7 +211,18 @@ impl Scheduler {
             TransactionScope::default(),
         );
         match committed.await {
-            Ok(current) => current,
+            Ok(current) => {
+                // Reported once the fault is durable: a host may count it, for example toward a breaker.
+                if let Some(error) = lock(&fault).take() {
+                    let info = ReportInfo::TaskFaulted {
+                        task: invocation.report_task(),
+                        extension: invocation.extension.clone(),
+                        reason: FaultReason::Threw,
+                    };
+                    self.core.report(&error, &info);
+                }
+                current
+            }
             Err(error) => {
                 // A failed step would leave the task running, to be reserved and run again.
                 self.end(invocation);
@@ -240,7 +263,7 @@ impl Scheduler {
                 }
                 if lock(&self.state).owned_live(Some(&overlay)).contains_key(&current.id) {
                     let completing = TaskState::Completing { outcome: outcome.clone() };
-                    return tx.set_task(with_state(current, completing));
+                    return tx.set_task(with_state(&progressed(current), completing));
                 }
             }
             TaskState::Running { .. } => {}
@@ -249,7 +272,12 @@ impl Scheduler {
                 return Err(DurableError::type_error(format!("A task cannot commit the state {status}")));
             }
         }
-        tx.set_task(with_state(current, next))
+        // A state the task committed that differs from its current one is progress: its restart count starts over.
+        // The same checkpoint committed again, for example as intent before an effect, is not.
+        if current.state == next {
+            return tx.set_task(with_state(current, next));
+        }
+        tx.set_task(with_state(&progressed(current), next))
     }
 
     /// A wait names existing tasks other than the waiter and its owners; `failFast` only tasks it owns.

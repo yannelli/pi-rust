@@ -15,7 +15,9 @@ use super::tx::{TransactionScope, Tx};
 use super::{CommitListener, SessionEnd, SessionHooks};
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::Seq;
-use crate::types::{CommitChange, CommitPublication, DocumentCommitChange, DocumentRecord, Storage, StorageWrite};
+use crate::types::{
+    CommitChange, CommitPublication, DocumentCommitChange, DocumentRecord, ReportInfo, Storage, StorageWrite,
+};
 
 /// One committed document incarnation owned by the tracker cache.
 pub(crate) struct LoadedDocument {
@@ -94,13 +96,14 @@ impl FailureLatch for SessionCore {
             // Seal first, so a report handler that calls back finds the Session failed.
             drop(Session(core).close(&BACKGROUND_CONTEXT));
         }
-        self.report(&error);
+        self.hooks.report(&error, &ReportInfo::SessionFailed);
     }
 }
 
 impl SessionCore {
+    /// A listener's error, which never fails what ran it.
     pub fn report(&self, error: &DurableError) {
-        self.hooks.report(error);
+        self.hooks.report(error, &ReportInfo::ListenerError);
     }
 
     pub fn assert_healthy(&self) -> DurableResult<()> {
@@ -322,6 +325,28 @@ impl Session {
         self.0.report(error);
     }
 
+    /// Internal, for `SessionHooks::before_close()`: on the line, after every commit admitted before the seal has
+    /// settled, write what `writes()` returns then straight to Storage. Nothing is published, since the Session is
+    /// closing; a failed Session writes nothing.
+    pub(crate) async fn write_at_close(
+        &self,
+        writes: impl FnOnce() -> Vec<StorageWrite> + Send + 'static,
+    ) -> DurableResult<()> {
+        let core = self.0.clone();
+        self.0
+            .enqueue(async move {
+                if core.failure().is_some() {
+                    return Ok(());
+                }
+                let batch = writes();
+                if !batch.is_empty() {
+                    core.storage.commit(&batch, &BACKGROUND_CONTEXT).await?;
+                }
+                Ok(())
+            })
+            .await
+    }
+
     /// Seal admission, run close listeners, settle admitted commits, then close Storage.
     pub fn close(&self, context: &Context) -> impl Future<Output = DurableResult<()>> + Send + use<> {
         let (closing, created) = {
@@ -405,7 +430,7 @@ async fn close_session(core: Arc<SessionCore>, cleanup: Context) -> DurableResul
                     first
                 };
                 if first {
-                    job_core.report(error);
+                    job_core.hooks.report(error, &ReportInfo::SessionFailed);
                 }
             }
             result

@@ -84,6 +84,7 @@ fn pending_task(id: TaskId, phase: &str) -> TaskRecord {
         memos: None,
         started_at: None,
         ended_at: None,
+        restarts: None,
     }
 }
 

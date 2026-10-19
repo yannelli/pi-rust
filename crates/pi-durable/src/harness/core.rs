@@ -15,7 +15,7 @@ use crate::ids::ConversationId;
 use crate::models::Models;
 use crate::session::{Session, Tx};
 use crate::timers::{Disarm, SetTimer, TimerCallback, TimerOptions, Timers};
-use crate::types::ConversationRecord;
+use crate::types::{ConversationRecord, HostCallback, ReportInfo};
 
 /// What `HarnessOptions::env` builds an environment for.
 #[derive(Clone)]
@@ -33,7 +33,8 @@ pub type EnvBuilder =
 /// Runs in every commit that creates or forks a conversation, after the built-in documents.
 pub type ConversationCreatedHook =
     Arc<dyn Fn(Tx, ConversationRecord) -> BoxFuture<'static, DurableResult<()>> + Send + Sync>;
-pub type ReportFn = Arc<dyn Fn(&DurableError) + Send + Sync>;
+/// Receives a failure with what it is about.
+pub type ReportFn = Arc<dyn Fn(&DurableError, &ReportInfo) + Send + Sync>;
 pub type NowFn = Arc<dyn Fn() -> f64 + Send + Sync>;
 /// Told when the Session next needs a process (`HarnessOptions::on_wake`); an error is reported.
 pub type WakeFn = Arc<dyn Fn(Wake) -> DurableResult<()> + Send + Sync>;
@@ -60,7 +61,10 @@ pub struct HarnessOptions {
     /// fires. Called off the Session line, after the commit that changed the value. It may call `wake()` and
     /// `resume()`, and must not block. An error is reported, and the value is offered again at the next change.
     pub on_wake: Option<WakeFn>,
-    /// Receives failures that do not fail the calling operation, and the error that fails the Session, once.
+    /// Receives failures that do not fail the calling operation, such as a failing hook or listener, a task that
+    /// faulted, and the error that fails the Session, once. The [`ReportInfo`] says what happened: a host can tell a
+    /// failed Session (`SessionFailed`, often a platform reset) from a faulted task (`TaskFaulted`) or a parked one
+    /// (`TaskParked`).
     pub on_report: Option<ReportFn>,
 }
 
@@ -118,7 +122,7 @@ impl HarnessOptions {
         self
     }
 
-    pub fn with_on_report(mut self, report: impl Fn(&DurableError) + Send + Sync + 'static) -> Self {
+    pub fn with_on_report(mut self, report: impl Fn(&DurableError, &ReportInfo) + Send + Sync + 'static) -> Self {
         self.on_report = Some(Arc::new(report));
         self
     }
@@ -142,8 +146,8 @@ impl HarnessCore {
         (self.now)()
     }
 
-    pub fn report(&self, error: &DurableError) {
-        (self.report)(error);
+    pub fn report(&self, error: &DurableError, info: &ReportInfo) {
+        (self.report)(error, info);
     }
 
     /// The resolved settings. A failing settings source is reported and the defaults apply.
@@ -153,7 +157,7 @@ impl HarnessCore {
             Some(source) => match source() {
                 Ok(settings) => resolve_settings(Some(&settings)),
                 Err(error) => {
-                    self.report(&error);
+                    self.report(&error, &ReportInfo::HostError { callback: HostCallback::Settings, task: None });
                     resolve_settings(None)
                 }
             },
@@ -170,7 +174,11 @@ impl HarnessCore {
         let registry = snapshot.unwrap_or_else(|| self.registry.snapshot());
         let state = self.session.snapshot(&AGENT_DOC, id, context).await?;
         let state: Option<AgentState> = state.map(|value| AGENT_DOC.decode(&value)).transpose()?;
-        Ok(resolve_agent(state.as_ref(), &registry, &self.settings(), &|error| self.report(error)))
+        let report = |error: &DurableError, extension: &str| {
+            let extension = Some(extension.to_owned());
+            self.report(error, &ReportInfo::ExtensionError { extension, task: None, conversation_id: Some(id) });
+        };
+        Ok(resolve_agent(state.as_ref(), &registry, &self.settings(), &report))
     }
 
     /// Build a conversation's environment from its current `cwd`; `None` without an `env` option.

@@ -2,11 +2,13 @@
 
 mod documents;
 mod records;
+mod report;
 mod storage;
 mod tasks;
 
 pub use documents::*;
 pub use records::*;
+pub use report::*;
 pub use storage::*;
 pub use tasks::*;
 

@@ -1,12 +1,12 @@
 //! Reservation of eligible tasks, definition resolution and migration, inspection, and invocation creation.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
 use pi_chord::{AbortController, Json, with_abort_signal};
 use tokio::sync::watch;
 
-use super::{Invocation, Mode, SchedState, Scheduler, Up, with_abort_mark, with_state};
+use super::{Invocation, Mode, SchedState, Scheduler, Up, installer_of, report_task, with_abort_mark, with_state};
 use crate::errors::{DurableError, DurableResult};
 use crate::harness::registry::RegistrySnapshot;
 use crate::harness::task::{Task, missing_migration};
@@ -14,7 +14,20 @@ use crate::harness::types::{BlockedReason, Scheduling, TaskInspection, TaskInspe
 use crate::harness::util::lock;
 use crate::ids::TaskId;
 use crate::session::{TransactionScope, Tx};
-use crate::types::{AbortReason, TaskOutcome, TaskRecord, TaskState, TaskStatus};
+use crate::types::{
+    AbortReason, FaultReason, ReportInfo, TaskOutcome, TaskOutcomeError, TaskRecord, TaskState, TaskStatus,
+};
+
+/// What a reservation pass leaves to do once its commit lands.
+#[derive(Default)]
+struct Pass {
+    /// Abandoned tasks the pass abort-marked.
+    abandoned: Vec<TaskId>,
+    /// Abort-marked tasks faulted by the restart limit, with their messages, to report.
+    faulted: Vec<(TaskRecord, String)>,
+    /// Tasks the pass left out as parked; `None` when it looked at no candidates.
+    parked: Option<BTreeSet<TaskId>>,
+}
 
 pub(crate) struct Reservation {
     pub invocation: Arc<Invocation>,
@@ -33,9 +46,9 @@ impl Scheduler {
             move |tx| async move {
                 let mut reservations = Vec::new();
                 match scheduler.reserve_in(&tx, &mut reservations).await {
-                    Ok(abandoned) => {
+                    Ok(pass) => {
                         *lock(&recorded) = reservations.iter().map(|r| r.invocation.clone()).collect();
-                        Ok((reservations, abandoned))
+                        Ok((reservations, pass))
                     }
                     Err(error) => {
                         for reservation in reservations {
@@ -48,7 +61,7 @@ impl Scheduler {
             &self.context,
             TransactionScope::default(),
         );
-        let (reservations, abandoned): (Vec<Reservation>, Vec<TaskId>) = match reserved.await {
+        let (reservations, pass): (Vec<Reservation>, Pass) = match reserved.await {
             Ok(reserved) => reserved,
             Err(error) => {
                 for invocation in std::mem::take(&mut *lock(&pending)) {
@@ -57,12 +70,29 @@ impl Scheduler {
                 return Err(error);
             }
         };
-        if !abandoned.is_empty() {
+        for (record, message) in pass.faulted {
+            let (task, extension) = self.about_task(&record);
+            let info = ReportInfo::TaskFaulted { task, extension, reason: FaultReason::RestartLimit };
+            self.core.report(&DurableError::error(message), &info);
+        }
+        if !pass.abandoned.is_empty() {
             let mut state = lock(&self.state);
-            for id in &abandoned {
+            for id in &pass.abandoned {
                 state.abandoned.remove(id);
             }
             state.dirty = true;
+        }
+        if let Some(parked) = pass.parked {
+            // Parked or unparked without a commit, as after a changed limit: the graph must hear it.
+            let changed = {
+                let mut state = lock(&self.state);
+                let changed = state.parked != parked;
+                state.parked = parked;
+                changed
+            };
+            if changed {
+                self.notify_blocked();
+            }
         }
         Ok(reservations)
     }
@@ -77,11 +107,12 @@ impl Scheduler {
         invocation.done.send_replace(true);
     }
 
-    async fn reserve_in(&self, tx: &Tx, reservations: &mut Vec<Reservation>) -> DurableResult<Vec<TaskId>> {
+    async fn reserve_in(&self, tx: &Tx, reservations: &mut Vec<Reservation>) -> DurableResult<Pass> {
+        let mut pass = Pass::default();
         {
             let state = lock(&self.state);
             if !state.enabled || state.closing {
-                return Ok(Vec::new());
+                return Ok(pass);
             }
             if !state.abandoned.is_empty() {
                 for id in &state.abandoned {
@@ -91,11 +122,14 @@ impl Scheduler {
                         tx.set_task(with_abort_mark(record, Some(AbortReason::Restart)))?;
                     }
                 }
-                return Ok(state.abandoned.iter().copied().collect());
+                pass.abandoned = state.abandoned.iter().copied().collect();
+                return Ok(pass);
             }
         }
         self.load_scopes(false).await?;
         let candidates: Vec<TaskRecord> = lock(&self.state).live.values().cloned().collect();
+        let limit = self.restart_limit();
+        let mut parked = BTreeSet::new();
         let mut snapshot: Option<RegistrySnapshot> = None;
         for record in candidates {
             let (skip, below) = {
@@ -111,11 +145,29 @@ impl Scheduler {
             if skip {
                 continue;
             }
+            let restarts = record.restarts.unwrap_or(0);
+            // It returns when `retry()` clears its restart count, or at a pass after `settings.restart_limit` rose.
+            if !record.abort_requested && f64::from(restarts) >= limit {
+                parked.insert(record.id);
+                continue;
+            }
             let mode = if record.abort_requested { Mode::Abort } else { Mode::Run };
             if below {
                 // Work below an owner with cancellation intent waits for its cascade mark instead of running.
                 lock(&self.state).cascade_pending = true;
                 self.schedule_reconcile();
+                continue;
+            }
+            // An abort handler cut off `restart_limit` times in a row would run forever; nothing is left to park it for.
+            if mode == Mode::Abort && f64::from(restarts) >= limit {
+                let message =
+                    format!("Abort handler of task {} ({}) was cut off {restarts} times", record.id, record.kind);
+                let error = TaskOutcomeError {
+                    message: message.clone(),
+                    detail: Some(Json::from(serde_json::json!({ "reason": "restart_limit" }))),
+                };
+                self.terminate(tx, &record, TaskOutcome::Faulted { error }).await?;
+                pass.faulted.push((record, message));
                 continue;
             }
             let snapshot = snapshot.get_or_insert_with(|| self.core.registry.snapshot()).clone();
@@ -133,10 +185,11 @@ impl Scheduler {
                 let checkpoint = resolved.state.checkpoint().cloned().unwrap_or(Json::Null);
                 tx.set_task(with_state(&resolved, TaskState::Running { checkpoint }))?;
             }
-            let invocation = self.create_invocation(&record, mode);
+            let invocation = self.create_invocation(&record, mode, installer_of(&snapshot, Some(&task)));
             reservations.push(Reservation { invocation, task, snapshot });
         }
-        Ok(Vec::new())
+        pass.parked = Some(parked);
+        Ok(pass)
     }
 
     /// Resolve the record's definition by kind, migrating an older stored version.
@@ -145,7 +198,8 @@ impl Scheduler {
         record: &TaskRecord,
         snapshot: &RegistrySnapshot,
     ) -> Result<(Task, TaskRecord), BlockedReason> {
-        let (task, migrates) = self.fit(record, snapshot.task(&record.kind)).map_err(|(reason, _)| reason)?;
+        let fit = self.fit(record.id, record.version, snapshot.task(&record.kind));
+        let (task, migrates) = fit.map_err(|(reason, _)| reason)?;
         if !migrates {
             return Ok((task, record.clone()));
         }
@@ -163,8 +217,12 @@ impl Scheduler {
                 Ok((task.clone(), TaskRecord { version: task.version, input, state, ..record.clone() }))
             }
             Err(error) => {
-                self.core.report(&error);
-                lock(&self.state).failed_migrations.insert(record.id, (task, error));
+                let extension = installer_of(snapshot, Some(&task));
+                lock(&self.state).failed_migrations.insert(record.id, (task, error.clone()));
+                // Blocked now without a commit: the graph and the host's wake must hear it.
+                self.notify_blocked();
+                self.schedule_wake();
+                self.core.report(&error, &ReportInfo::MigrationFailed { task: report_task(record), extension });
                 Err(BlockedReason::MigrationFailed)
             }
         }
@@ -173,17 +231,18 @@ impl Scheduler {
     #[allow(clippy::type_complexity)]
     pub(super) fn fit(
         &self,
-        record: &TaskRecord,
+        id: TaskId,
+        version: u32,
         task: Option<Task>,
     ) -> Result<(Task, bool), (BlockedReason, Option<DurableError>)> {
         let Some(task) = task else { return Err((BlockedReason::MissingTask, None)) };
-        if task.version == record.version {
+        if task.version == version {
             return Ok((task, false));
         }
-        if task.version < record.version {
+        if task.version < version {
             return Err((BlockedReason::TaskTooOld, None));
         }
-        if let Some((failed, error)) = lock(&self.state).failed_migrations.get(&record.id)
+        if let Some((failed, error)) = lock(&self.state).failed_migrations.get(&id)
             && Arc::ptr_eq(failed, &task)
         {
             return Err((BlockedReason::MigrationFailed, Some(error.clone())));
@@ -232,7 +291,10 @@ impl Scheduler {
                 return TaskInspectionState::Sleeping { until };
             }
         }
-        match self.fit(record, snapshot.task(&record.kind)) {
+        if self.parked(record.abort_requested, record.restarts) {
+            return TaskInspectionState::Blocked { reason: BlockedReason::RestartLimit, error: None };
+        }
+        match self.fit(record.id, record.version, snapshot.task(&record.kind)) {
             Err((reason, error)) => TaskInspectionState::Blocked { reason, error: error.map(|e| e.to_string()) },
             Ok((task, true)) if !task.has_migrate() => TaskInspectionState::Blocked {
                 reason: BlockedReason::MigrationFailed,
@@ -242,12 +304,14 @@ impl Scheduler {
         }
     }
 
-    fn create_invocation(&self, record: &TaskRecord, mode: Mode) -> Arc<Invocation> {
+    fn create_invocation(&self, record: &TaskRecord, mode: Mode, extension: Option<String>) -> Arc<Invocation> {
         let controller = AbortController::new();
         let context = with_abort_signal(&controller.signal(), &self.context);
         let (done, _) = watch::channel(false);
         let invocation = Arc::new(Invocation {
             task_id: record.id,
+            kind: record.kind.clone(),
+            extension,
             conversation_id: record.conversation_id,
             mode,
             controller,

@@ -11,7 +11,7 @@ use crate::harness::util::lock;
 use crate::ids::TaskId;
 use crate::session::{TransactionScope, Tx};
 use crate::timers::Disarm;
-use crate::types::{AbortReason, TaskOutcome, TaskRecord, TaskState, TaskStatus};
+use crate::types::{AbortReason, HostCallback, ReportInfo, TaskOutcome, TaskRecord, TaskState, TaskStatus};
 
 impl Scheduler {
     pub(crate) fn schedule_reconcile(&self) {
@@ -29,11 +29,13 @@ impl Scheduler {
     /// One commit that applies what committed records imply: cascade and `failFast` marks, withdrawn inputs
     /// below cancelled owners, and the final record of every `completing` task without live owned work.
     async fn reconcile(&self) {
-        let (cascade, checks) = {
+        let (cascade, checks, work) = {
             let mut state = lock(&self.state);
+            let work = state.reconcile_work();
+            state.reconciling += usize::from(work);
             state.reconcile_scheduled = false;
             let cascade = std::mem::take(&mut state.cascade_pending);
-            (cascade, std::mem::take(&mut state.fail_fast_checks).into_iter().collect::<Vec<_>>())
+            (cascade, std::mem::take(&mut state.fail_fast_checks).into_iter().collect::<Vec<_>>(), work)
         };
         let Ok(scheduler) = self.arc() else { return };
         let result = self
@@ -49,6 +51,8 @@ impl Scheduler {
             // No extension code runs in this commit: a failure is a storage failure, a host callback, or a bug.
             self.fail_session(error);
         }
+        lock(&self.state).reconciling -= usize::from(work);
+        self.schedule_wake();
         self.settle_idle();
     }
 
@@ -112,7 +116,7 @@ impl Scheduler {
         for id in queued {
             let below = lock(&self.state).below_cancelled(Up::Conversation(id));
             if below {
-                crate::harness::inbox::withdraw_queued_inputs(tx, id).await?;
+                crate::harness::inbox::withdraw_queued_inputs(tx, id, "aborted").await?;
             }
         }
         self.finalize(tx).await
@@ -265,7 +269,9 @@ impl Scheduler {
         match on_wake(wake) {
             // Only a delivered wake counts: after an error, the next change or kick offers it again.
             Ok(()) => lock(&self.state).last_wake = Some(wake),
-            Err(error) => self.core.report(&error),
+            Err(error) => {
+                self.core.report(&error, &ReportInfo::HostError { callback: HostCallback::OnWake, task: None });
+            }
         }
     }
 

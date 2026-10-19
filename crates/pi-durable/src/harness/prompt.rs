@@ -46,7 +46,7 @@ pub async fn render_sections(
     sections: &[Arc<PromptSection>],
     input: &PromptInput,
     shown: &Sections,
-    report: &(dyn Fn(&DurableError) + Sync),
+    report: &(dyn Fn(&DurableError, &PromptSection) + Sync),
     context: &Context,
 ) -> DurableResult<Sections> {
     let mut wanted = Vec::new();
@@ -57,7 +57,7 @@ pub async fn render_sections(
                 if context.is_cancelled() {
                     return Err(error);
                 }
-                report(&error);
+                report(&error, section);
                 if let Some(kept) = get(shown, &section.key) {
                     wanted.push((section.key.clone(), kept.clone()));
                 }

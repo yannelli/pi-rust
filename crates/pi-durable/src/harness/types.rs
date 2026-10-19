@@ -340,12 +340,15 @@ pub struct ContextView {
     pub messages: Vec<Message>,
 }
 
-/// Why a pending task cannot be reserved under a registry snapshot.
+/// Why a task cannot be reserved: no registered definition can take it, or it was cut off `restart_limit` times in a
+/// row. Derived from the registry, the settings, and the record's `restarts`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BlockedReason {
     MissingTask,
     TaskTooOld,
     MigrationFailed,
+    /// Cut off `HarnessSettings::restart_limit` times in a row; `Harness::retry_task()` runs it again.
+    RestartLimit,
 }
 
 impl BlockedReason {
@@ -354,14 +357,15 @@ impl BlockedReason {
             Self::MissingTask => "missing_task",
             Self::TaskTooOld => "task_too_old",
             Self::MigrationFailed => "migration_failed",
+            Self::RestartLimit => "restart_limit",
         }
     }
 }
 
-/// When a Session next needs a running process (`Harness::wake()`). `active`: some task can run now or is running, so
-/// a process that dies must be woken again soon. `at`: the earliest sleep not yet due, when there is one. Neither:
-/// nothing needs a process until new work is submitted. Tasks blocked on a missing or unmigratable definition,
-/// `completing` tasks, and waits on live tasks do not count; the work they wait for does.
+/// When a Session next needs a running process (`Harness::wake()`). `active`: some task can run now or is running, or
+/// a reconcile pass such as open's recovery has not landed yet, so a process that dies must be woken again soon. `at`:
+/// the earliest sleep not yet due, when there is one. Neither: nothing needs a process until new work is submitted.
+/// Blocked tasks, `completing` tasks, and waits on live tasks do not count; the work they wait for does.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Wake {
     pub active: bool,
@@ -383,6 +387,8 @@ pub enum TaskInspectionState {
         until: f64,
     },
     Completing,
+    /// Cannot run here: no registered definition can take it (aborting it settles it as `orphaned`), or it is parked
+    /// by the restart limit (`retry_task()` runs it again).
     Blocked {
         reason: BlockedReason,
         error: Option<String>,

@@ -17,6 +17,7 @@ use crate::env::SharedEnv;
 use crate::errors::{DurableError, DurableResult};
 use crate::harness::agent::agent_hooks;
 use crate::harness::context::read_context_from;
+use crate::harness::define::ExtensionHooks;
 use crate::harness::registry::RegistrySnapshot;
 use crate::harness::settings::Settings;
 use crate::harness::submissions::Submission;
@@ -27,7 +28,7 @@ use crate::ids::{ConversationId, EntryId, TaskId};
 use crate::models::Models;
 use crate::session::{CommittedWatch, TransactionScope, Tx};
 use crate::timers::Disarm;
-use crate::types::{EntryRecord, TaskOutcome, TaskRecord, TaskState};
+use crate::types::{EntryRecord, ReportFrom, ReportInfo, TaskOutcome, TaskRecord, TaskState};
 
 type AgentFuture = Shared<BoxFuture<'static, DurableResult<Agent>>>;
 
@@ -117,18 +118,24 @@ impl TaskRuntime {
     }
 
     /// Handlers of type `H` for this task's name from the extensions its conversation selects, in order.
-    pub async fn hooks<H: Any + Send + Sync>(&self, context: &Context) -> DurableResult<Vec<Arc<H>>> {
+    pub async fn hooks<H: Any + Send + Sync>(&self, context: &Context) -> DurableResult<Vec<ExtensionHooks<H>>> {
         let agent = self.agent(context).await?;
         let name = lock(&self.phase.state).task.name.clone();
-        Ok(agent_hooks(&agent, &name).into_iter().filter_map(|handlers| handlers.downcast::<H>().ok()).collect())
+        let hooks = agent_hooks(&agent, &name).into_iter();
+        Ok(hooks
+            .filter_map(|hooks| {
+                let handlers = hooks.handlers.downcast::<H>().ok()?;
+                Some(ExtensionHooks { extension: hooks.extension, handlers })
+            })
+            .collect())
     }
 
-    /// A hook's failure: reported, unless the invocation was signalled, which propagates it.
-    pub fn hook_failed(&self, error: DurableError) -> DurableResult<()> {
+    /// A hook's failure: reported with the hook's extension, unless the invocation was signalled, which propagates it.
+    pub fn hook_failed<H: ?Sized>(&self, hooks: &ExtensionHooks<H>, error: DurableError) -> DurableResult<()> {
         if self.signal().aborted() {
             return Err(error);
         }
-        self.scheduler.core.report(&error);
+        self.report_from(&error, ReportFrom::Extension(Some(hooks.extension.clone())));
         Ok(())
     }
 
@@ -359,9 +366,22 @@ impl TaskRuntime {
         self.scheduler.core.now()
     }
 
-    /// Forward a non-fatal failure to `HarnessOptions::on_report`.
+    /// Forward a non-fatal failure of the task's own code to `HarnessOptions::on_report`, as a `TaskError`.
     pub fn report(&self, error: &DurableError) {
-        self.scheduler.core.report(error);
+        let info =
+            ReportInfo::TaskError { task: self.invocation.report_task(), extension: self.invocation.extension.clone() };
+        self.scheduler.core.report(error, &info);
+    }
+
+    /// Forward a non-fatal failure of code the task called to `HarnessOptions::on_report`: an `ExtensionError` for
+    /// extension code, such as a section, or a `HostError` for a host callback, such as the environment builder.
+    pub fn report_from(&self, error: &DurableError, from: ReportFrom) {
+        let task = Some(self.invocation.report_task());
+        let info = match from {
+            ReportFrom::Extension(extension) => ReportInfo::ExtensionError { extension, task, conversation_id: None },
+            ReportFrom::Host(callback) => ReportInfo::HostError { callback, task },
+        };
+        self.scheduler.core.report(error, &info);
     }
 
     /// Call `callback` once after about `delay_ms` on the Harness's timer (`HarnessOptions::set_timer`), for pacing

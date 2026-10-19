@@ -157,7 +157,7 @@ async fn rethrows_the_open_error_and_reports_it_once_though_closing_then_fails_t
     let reports = Arc::new(Mutex::new(Vec::new()));
     let sink = reports.clone();
     let options = HarnessOptions::new(Arc::new(create_models()), Arc::new(create_registry()))
-        .with_on_report(move |error| sink.lock().unwrap().push(error.to_string()));
+        .with_on_report(move |error, _| sink.lock().unwrap().push(error.to_string()));
     let error = Harness::open(storage, options, &context()).await.map(|_| ()).unwrap_err();
     assert!(error.to_string().contains("disk full"), "{error}");
     // The storage failure that failed open is the cause; the close that fails after it adds no report.
