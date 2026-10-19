@@ -158,6 +158,7 @@ async fn run_client(
     settings: Settings,
     mut commands: mpsc::UnboundedReceiver<Command>,
     post: Poster,
+    done: oneshot::Sender<Event>,
 ) {
     let mut builder = h2::client::Builder::new();
     if let Some(size) = settings.header_table_size {
@@ -180,11 +181,10 @@ async fn run_client(
     }
     let (mut client, mut connection) = match builder.handshake::<_, Bytes>(io).await {
         Ok(pair) => pair,
-        Err(error) => return post.send(closed(Err(error))),
+        Err(error) => return drop(done.send(closed(Err(error)))),
     };
     let ping_pong: PingPong = std::sync::Arc::new(tokio::sync::Mutex::new(connection.ping_pong()));
     let (window_tx, mut window_rx) = mpsc::unbounded_channel::<u32>();
-    let driver = post.clone();
     tokio::spawn(async move {
         let result = loop {
             tokio::select! {
@@ -194,7 +194,8 @@ async fn run_client(
                 }
             }
         };
-        driver.send(closed(result));
+        drop(connection);
+        let _ = done.send(closed(result));
     });
     post.send(Event::Ready(json!({ "maxConcurrentStreams": client.current_max_send_streams() })));
     let mut streams = Streams::new();
@@ -246,7 +247,7 @@ async fn run_server(
     settings: Settings,
     mut commands: mpsc::UnboundedReceiver<Command>,
     post: Poster,
-) {
+) -> Event {
     let mut builder = h2::server::Builder::new();
     if let Some(size) = settings.header_table_size {
         builder.header_table_size(size);
@@ -268,7 +269,7 @@ async fn run_server(
     }
     let mut connection = match builder.handshake::<_, Bytes>(io).await {
         Ok(connection) => connection,
-        Err(error) => return post.send(closed(Err(error))),
+        Err(error) => return closed(Err(error)),
     };
     let ping_pong: PingPong = std::sync::Arc::new(tokio::sync::Mutex::new(connection.ping_pong()));
     post.send(Event::Ready(json!({ "maxConcurrentStreams": connection.max_concurrent_send_streams() })));
@@ -315,7 +316,7 @@ async fn run_server(
             },
         }
     };
-    post.send(closed(result));
+    closed(result)
 }
 
 /// Start a session: `callback(event, key, ...)` receives its events, including `out` bytes.
@@ -338,17 +339,26 @@ fn session<'js>(ctx: Ctx<'js>, server: bool, settings: Value<'js>, callback: Fun
         }
         let _ = writer.shutdown().await;
     });
+    let (done, closing) = oneshot::channel();
     let out = post.clone();
     let drain = tokio.spawn(async move {
         let mut buffer = vec![0; 1 << 16];
         while let Ok(count @ 1..) = reader.read(&mut buffer).await {
             out.send(Event::Out(buffer[..count].to_vec()));
         }
+        // The output ends once the connection is dropped, so the frames it wrote last reach the socket
+        // before JavaScript hears that the session closed.
+        if let Ok(event) = closing.await {
+            out.send(event);
+        }
     });
     let run = if server {
-        tokio.spawn(run_server(h2_io, settings, commands_rx, post))
+        tokio.spawn(async move {
+            let event = run_server(h2_io, settings, commands_rx, post).await;
+            let _ = done.send(event);
+        })
     } else {
-        tokio.spawn(run_client(h2_io, settings, commands_rx, post))
+        tokio.spawn(run_client(h2_io, settings, commands_rx, post, done))
     };
     let tasks = vec![feed.abort_handle(), drain.abort_handle(), run.abort_handle()];
     let scanner = SettingsScanner::new(server);
