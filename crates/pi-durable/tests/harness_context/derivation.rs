@@ -13,8 +13,7 @@ pub fn calling(text: &str, calls: &[&str], stop_reason: StopReason) -> Message {
             id: (*id).to_owned(),
             name: format!("tool-{id}"),
             arguments: Default::default(),
-            thought_signature: None,
-            namespace: None,
+            ..ToolCall::default()
         };
         content.push(ContentBlock::ToolCall(call));
     }
@@ -107,6 +106,101 @@ async fn leads_with_a_system_message_that_only_user_messages_precede_and_keeps_l
     setup.kind(system("preamble", "Baseline."), "pi.system").await;
     assert_eq!(described(&setup.view().await), ["system:preamble", "user:handoff"]);
     setup.harness.close(&context()).await.unwrap();
+}
+
+fn summary(head: EntryId) -> EntryDraft {
+    EntryDraft { head: Some(DraftHead::Entry(head)), model: Some(vec![user("summary")]), ..EntryDraft::new("summary") }
+}
+
+fn edit(target: EntryId, messages: Option<Vec<Message>>) -> EntryDraft {
+    let edit = match messages {
+        Some(messages) => ContextEdit { target, action: ContextEditAction::Replace, messages: Some(messages) },
+        None => ContextEdit::omit(target),
+    };
+    EntryDraft { edits: Some(vec![edit]), ..EntryDraft::new("edit") }
+}
+
+#[tokio::test]
+async fn leads_with_the_baseline_after_a_compaction_that_keeps_assistant_messages() {
+    let setup = Setup::new().await;
+    setup.message(user("old")).await;
+    let kept = setup.message(user("kept")).await;
+    setup.message(calling("calling", &["a"], StopReason::Stop)).await;
+    setup.message(tool_result("a")).await;
+    setup.message(assistant("answer", StopReason::Stop)).await;
+    setup.append(summary(kept.id)).await;
+    setup.message(user("next")).await;
+    setup.kind(system("preamble", "Baseline."), "pi.system").await;
+    let expected =
+        ["system:preamble", "user:summary", "user:kept", "assistant:calling", "result:a:result a", "assistant:answer"];
+    assert_eq!(described(&setup.view().await)[..6], expected);
+
+    // Later system messages stay in place.
+    setup.message(assistant("done", StopReason::Stop)).await;
+    setup.kind(system("cwd", "/repo"), "pi.system").await;
+    let view = described(&setup.view().await);
+    assert_eq!(view[..2], expected[..2]);
+    assert_eq!(view[view.len() - 2..], ["assistant:done", "system:cwd"]);
+
+    // Without a head marker, a baseline written after the first answers leads too.
+    let fresh = Setup::new().await;
+    fresh.message(user("first")).await;
+    fresh.message(assistant("answer", StopReason::Stop)).await;
+    fresh.kind(system("plan", "Plan."), "pi.system").await;
+    assert_eq!(described(&fresh.view().await), ["system:plan", "user:first", "assistant:answer"]);
+    setup.harness.close(&context()).await.unwrap();
+    fresh.harness.close(&context()).await.unwrap();
+}
+
+#[tokio::test]
+async fn only_the_baseline_moves_past_assistant_messages() {
+    // Another kind's system message is positional, so the baseline after it is not the first system message.
+    let setup = Setup::new().await;
+    setup.message(user("first")).await;
+    setup.message(assistant("answer", StopReason::Stop)).await;
+    setup.kind(system("note", "From here on."), "host.note").await;
+    setup.kind(system("preamble", "Baseline."), "pi.system").await;
+    assert_eq!(described(&setup.view().await), ["user:first", "assistant:answer", "system:note", "system:preamble"]);
+
+    // A first pi.system entry written after another system message is no baseline, even once that is omitted.
+    let other = Setup::new().await;
+    let host = other.kind(system("legacy", "Use the legacy format."), "host.system").await;
+    other.message(user("first")).await;
+    other.message(assistant("answer", StopReason::Stop)).await;
+    other.kind(system("legacy", ""), "pi.system").await;
+    other.append(edit(host.id, None)).await;
+    assert_eq!(described(&other.view().await), ["user:first", "assistant:answer", "system:legacy"]);
+
+    // A retained system entry stays in place until the baseline after the head marker leads.
+    let third = Setup::new().await;
+    let kept = third.message(user("kept")).await;
+    third.message(assistant("answer", StopReason::Stop)).await;
+    let retained = third.kind(system("cwd", "/repo"), "pi.system").await;
+    third.append(summary(kept.id)).await;
+    third.message(user("next")).await;
+    let before = ["user:summary", "user:kept", "assistant:answer", "system:cwd", "user:next"];
+    assert_eq!(described(&third.view().await), before);
+    let baseline = EntryDraft {
+        model: Some(vec![system("preamble", "Baseline.")]),
+        edits: Some(vec![ContextEdit::omit(retained.id)]),
+        ..EntryDraft::new("pi.system")
+    };
+    let baseline = third.append(baseline).await;
+    third.message(assistant("done", StopReason::Stop)).await;
+    assert_eq!(
+        described(&third.view().await),
+        ["system:preamble", "user:summary", "user:kept", "assistant:answer", "user:next", "assistant:done"]
+    );
+
+    // A replaced baseline is not one.
+    third.append(edit(baseline.id, Some(vec![system("other", "Other.")]))).await;
+    assert_eq!(
+        described(&third.view().await),
+        ["user:summary", "user:kept", "assistant:answer", "user:next", "system:other", "assistant:done"]
+    );
+    for setup in [setup, other, third] {
+        setup.harness.close(&context()).await.unwrap();
+    }
 }
 
 #[tokio::test]

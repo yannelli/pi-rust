@@ -202,13 +202,13 @@ async fn mixed_content_reasoning_and_parallel_tool_deltas_accumulate_independent
         ["toolcall_start", "toolcall_delta", "toolcall_delta", "toolcall_delta", "toolcall_end"]
     );
     assert_eq!(message.content.len(), 6);
-    assert_eq!(message.content[0], ContentBlock::text("answer 1 answer 2\n"));
     let thinking = ContentBlock::Thinking {
         thinking: "think 1 think 2".into(),
         thinking_signature: Some("reasoning_content".into()),
         redacted: false,
     };
-    assert_eq!(message.content[1], thinking);
+    assert_eq!(message.content[0], thinking, "reasoning in the same delta as content comes first");
+    assert_eq!(message.content[1], ContentBlock::text("answer 1 answer 2\n"));
     let calls: Vec<_> =
         message.tool_calls().map(|call| (call.id.clone(), Value::Object(call.arguments.clone()))).collect();
     assert_eq!(

@@ -123,6 +123,12 @@ fn classifies_retryable_assistant_errors() {
         "Rate-limit hit",
         "request timed out",
         "Request time out",
+        "The service is temporarily unavailable",
+        "The upstream provider returned an error",
+        "Unable to forward upstream stream",
+        "upstream_stream_read_error: stream was interrupted",
+        "HTTP/2 stream failed",
+        "request to https://oauth2.googleapis.com/token failed, reason: ",
     ] {
         assert!(is_retryable_assistant_error(&error_message(text)), "{text}");
     }

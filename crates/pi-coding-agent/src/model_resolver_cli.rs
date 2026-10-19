@@ -2,12 +2,11 @@
 
 use std::collections::BTreeMap;
 
-use pi_ai::models::models_are_equal;
 use pi_ai::{Model, ThinkingLevel};
 
 use super::{
-    DEFAULT_THINKING_LEVEL, ModelCatalog, ScopedModel, default_model_for, parse_model_pattern, parse_thinking_level,
-    pick_default_model,
+    DEFAULT_THINKING_LEVEL, ModelCatalog, ModelReferenceRequest, ModelReferenceResult, ScopedModel, ThinkingSuffix,
+    default_model_for, pick_default_model, resolve_model_reference,
 };
 
 /// Result of [`resolve_cli_model`]. `error` is set exactly when `model` is `None`
@@ -22,31 +21,28 @@ pub struct ResolveCliModelResult {
 }
 
 impl ResolveCliModelResult {
-    fn found(model: Model) -> Self {
-        Self { model: Some(model), ..Self::default() }
-    }
-
     fn failed(error: String) -> Self {
         Self { error: Some(error), ..Self::default() }
     }
 }
 
 /// A model id the catalog does not list, built from the provider's default model.
-fn fallback_model(provider: &str, id: &str, models: &[Model]) -> Option<Model> {
-    let own: Vec<&Model> = models.iter().filter(|model| model.provider == provider).collect();
-    let base = default_model_for(provider)
-        .and_then(|default| own.iter().find(|model| model.id == default))
-        .or_else(|| own.first())?;
-    Some(Model { id: id.to_string(), name: id.to_string(), ..(*base).clone() })
+fn fallback_model(provider_models: &[Model], id: &str) -> Model {
+    let base = default_model_for(&provider_models[0].provider)
+        .and_then(|default| provider_models.iter().find(|model| model.id == default))
+        .unwrap_or(&provider_models[0]);
+    Model { id: id.to_string(), name: id.to_string(), ..base.clone() }
 }
 
-/// Resolve `--provider`/`--model`: `provider/pattern`, exact ids (ambiguous ones prefer the
-/// one authenticated provider), fuzzy matches, `:thinking` suffixes, and custom ids for a
+/// Resolve `--provider`/`--model` through [`resolve_model_reference`], with custom ids for a
 /// known provider. Searches all chat models, so `--api-key` works for first-time setup.
+/// `inline_api_key` means `--api-key` was given; it goes to whichever provider is selected, so
+/// stored credentials do not choose the provider.
 pub fn resolve_cli_model(
     cli_provider: Option<&str>,
     cli_model: Option<&str>,
     cli_thinking: Option<ThinkingLevel>,
+    inline_api_key: bool,
     catalog: &dyn ModelCatalog,
 ) -> ResolveCliModelResult {
     let Some(cli_model) = cli_model else { return ResolveCliModelResult::default() };
@@ -56,11 +52,9 @@ pub fn resolve_cli_model(
             "No models available. Check your installation or add models to models.json.".into(),
         );
     }
-    let canonical =
-        |name: &str| models.iter().find(|m| m.provider.eq_ignore_ascii_case(name)).map(|m| m.provider.clone());
-    let mut provider = match cli_provider {
-        Some(name) => match canonical(name) {
-            Some(provider) => Some(provider),
+    let provider = match cli_provider {
+        Some(name) => match models.iter().find(|model| model.provider.eq_ignore_ascii_case(name)) {
+            Some(model) => Some(model.provider.clone()),
             None => {
                 return ResolveCliModelResult::failed(format!(
                     "Unknown provider \"{name}\". Use --list-models to see available providers/models."
@@ -69,122 +63,55 @@ pub fn resolve_cli_model(
         },
         None => None,
     };
-    let mut pattern = cli_model.to_string();
-    let mut inferred = false;
-    if provider.is_none()
-        && let Some((prefix, rest)) = cli_model.split_once('/')
-        && let Some(found) = canonical(prefix)
-    {
-        provider = Some(found);
-        pattern = rest.to_string();
-        inferred = true;
-    }
-    let lower = cli_model.to_lowercase();
-    let is_exact = |model: &Model| {
-        model.id.to_lowercase() == lower || format!("{}/{}", model.provider, model.id).to_lowercase() == lower
+    let request = ModelReferenceRequest {
+        text: cli_model,
+        provider: provider.as_deref(),
+        thinking_suffix: ThinkingSuffix::Strict,
+        fuzzy: true,
     };
-    if provider.is_none() {
-        let exact: Vec<&Model> = models.iter().filter(|model| is_exact(model)).collect();
-        if exact.len() == 1 {
-            return ResolveCliModelResult::found(exact[0].clone());
+    let usable = |provider: &str| !inline_api_key && catalog.has_configured_auth(provider);
+    match resolve_model_reference(&request, &models, &usable) {
+        ModelReferenceResult::Resolved { model, thinking_level, warning } => {
+            ResolveCliModelResult { model: Some(model), thinking_level, warning, error: None }
         }
-        if exact.len() > 1 {
-            let authenticated: Vec<&&Model> =
-                exact.iter().filter(|m| catalog.has_configured_auth(&m.provider)).collect();
-            if authenticated.len() == 1 {
-                return ResolveCliModelResult::found((*authenticated[0]).clone());
-            }
-            let mut names: Vec<String> = exact.iter().map(|m| format!("{}/{}", m.provider, m.id)).collect();
+        ModelReferenceResult::Ambiguous { candidates, usable_count, .. } => {
+            let mut names: Vec<String> = candidates.iter().map(|m| format!("{}/{}", m.provider, m.id)).collect();
             names.sort();
-            let hint = if authenticated.is_empty() {
+            let hint = if inline_api_key {
+                "--api-key does not choose a provider."
+            } else if usable_count == 0 {
                 "No matching provider is authenticated."
             } else {
                 "More than one matching provider is authenticated."
             };
-            return ResolveCliModelResult::failed(format!(
+            ResolveCliModelResult::failed(format!(
                 "Model \"{cli_model}\" is ambiguous across providers: {}. {hint} Use --provider or provider/model.",
                 names.join(", ")
-            ));
+            ))
         }
-    }
-    if let (Some(_), Some(provider)) = (cli_provider, &provider) {
-        let prefix = format!("{}/", provider.to_lowercase());
-        if cli_model.to_lowercase().starts_with(&prefix) {
-            pattern = cli_model[prefix.len()..].to_string();
-        }
-    }
-    let candidates: Vec<Model> = match &provider {
-        Some(provider) => models.iter().filter(|model| &model.provider == provider).cloned().collect(),
-        None => models.clone(),
-    };
-    let parsed = parse_model_pattern(&pattern, &candidates, false);
-    if let Some(model) = parsed.model {
-        if inferred && !catalog.has_configured_auth(&model.provider) {
-            let raw: Vec<&Model> = models
-                .iter()
-                .filter(|m| m.id.to_lowercase() == lower && !models_are_equal(m, &model))
-                .filter(|m| catalog.has_configured_auth(&m.provider))
-                .collect();
-            if raw.len() == 1 {
-                return ResolveCliModelResult::found(raw[0].clone());
-            }
-        }
-        return ResolveCliModelResult {
-            model: Some(model),
-            thinking_level: parsed.thinking_level,
-            warning: parsed.warning,
-            error: None,
-        };
-    }
-    if inferred {
-        if let Some(model) = models.iter().find(|model| is_exact(model)) {
-            return ResolveCliModelResult::found(model.clone());
-        }
-        let fallback = parse_model_pattern(cli_model, &models, false);
-        if fallback.model.is_some() {
-            return fallback_result(fallback);
-        }
-    }
-    if let Some(provider) = &provider {
-        let (mut id, mut level) = (pattern.clone(), None);
-        if cli_thinking.is_none()
-            && let Some((prefix, suffix)) = pattern.rsplit_once(':')
-            && let Some(parsed_level) = parse_thinking_level(suffix)
-        {
-            id = prefix.to_string();
-            level = Some(parsed_level);
-        }
-        if let Some(mut model) = fallback_model(provider, &id, &models) {
+        ModelReferenceResult::NotFound { target: None } => ResolveCliModelResult::failed(format!(
+            "Model \"{cli_model}\" not found. Use --list-models to see available models."
+        )),
+        ModelReferenceResult::NotFound { target: Some(target) } => {
+            // With --thinking the suffix stays part of the custom id.
+            let (id, level) = match cli_thinking {
+                Some(_) => (target.model_text, None),
+                None => (target.model_id, target.thinking_level),
+            };
+            let mut model = fallback_model(&target.provider_models, &id);
             if cli_thinking.or(level).is_some_and(|level| level != ThinkingLevel::Off) {
                 model.reasoning = true;
             }
-            let note = format!("Model \"{id}\" not found for provider \"{provider}\". Using custom model id.");
-            let warning = match parsed.warning {
-                Some(earlier) => format!("{earlier} {note}"),
-                None => note,
-            };
-            return ResolveCliModelResult {
+            ResolveCliModelResult {
                 model: Some(model),
                 thinking_level: level,
-                warning: Some(warning),
+                warning: Some(format!(
+                    "Model \"{id}\" not found for provider \"{}\". Using custom model id.",
+                    target.provider
+                )),
                 error: None,
-            };
+            }
         }
-    }
-    let display = provider.map_or_else(|| cli_model.to_string(), |provider| format!("{provider}/{pattern}"));
-    ResolveCliModelResult {
-        warning: parsed.warning,
-        error: Some(format!("Model \"{display}\" not found. Use --list-models to see available models.")),
-        ..ResolveCliModelResult::default()
-    }
-}
-
-fn fallback_result(parsed: super::ParsedModelResult) -> ResolveCliModelResult {
-    ResolveCliModelResult {
-        model: parsed.model,
-        thinking_level: parsed.thinking_level,
-        warning: parsed.warning,
-        error: None,
     }
 }
 
@@ -214,7 +141,7 @@ pub fn find_initial_model(
     catalog: &dyn ModelCatalog,
 ) -> Result<InitialModelResult, String> {
     if let (Some(_), Some(cli_model)) = (options.cli_provider, options.cli_model) {
-        let resolved = resolve_cli_model(options.cli_provider, Some(cli_model), None, catalog);
+        let resolved = resolve_cli_model(options.cli_provider, Some(cli_model), None, false, catalog);
         if let Some(error) = resolved.error {
             return Err(error);
         }

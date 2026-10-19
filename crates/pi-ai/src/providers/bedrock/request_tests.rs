@@ -174,11 +174,10 @@ fn converts_messages_with_placeholders_grouped_results_and_replay() {
         json!({"toolUseId": "t1", "content": [{"text": "<empty>"}], "status": "success"})
     );
     assert_eq!(results[1]["toolResult"]["status"], "error");
-    assert_eq!(
-        results[1]["toolResult"]["content"][1],
-        json!({"image": {"format": "png", "source": {"bytes": "AA=="}}})
-    );
-    assert_eq!(results[2], json!({"cachePoint": {"type": "default", "ttl": "1h"}}));
+    assert_eq!(results[1]["toolResult"]["content"][1], json!({"text": "(image attached after the tool results)"}));
+    assert_eq!(results[2], json!({"text": "Images from the error result of tool call t2 (edit):"}));
+    assert_eq!(results[3], json!({"image": {"format": "png", "source": {"bytes": "AA=="}}}));
+    assert_eq!(results[4], json!({"cachePoint": {"type": "default", "ttl": "1h"}}));
 }
 
 #[test]

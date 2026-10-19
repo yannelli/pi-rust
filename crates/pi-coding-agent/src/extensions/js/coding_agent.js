@@ -15,6 +15,23 @@ export {
 } from "../pi-coding-agent/src/modes/interactive/components/keybinding-hints.ts";
 export { truncateToVisualLines } from "../pi-coding-agent/src/modes/interactive/components/visual-truncate.ts";
 export { withFileMutationQueue } from "../pi-coding-agent/src/core/tools/file-mutation-queue.ts";
+
+function parseLineNumber(value) {
+	if (typeof value === "string" && value.trim() !== "") value = Number(value);
+	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/** Upstream `formatReadLineRange` from `core/tools/render-utils.ts`. */
+export function formatReadLineRange(offset, limit) {
+	if (offset == null && limit == null) return "";
+	const start = offset == null ? 1 : parseLineNumber(offset);
+	if (start === undefined) return "";
+	if (limit == null) return `:${start}`;
+	const count = parseLineNumber(limit);
+	if (count === undefined) return "";
+	const end = start + count - 1;
+	return `:${start}${end ? `-${end}` : ""}`;
+}
 export {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,

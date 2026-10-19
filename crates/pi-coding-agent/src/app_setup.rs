@@ -57,6 +57,7 @@ pub(crate) struct CliInputs<'a> {
     pub model: Option<&'a str>,
     pub thinking: Option<ThinkingLevel>,
     pub models: Option<&'a [String]>,
+    pub inline_api_key: bool,
     pub has_existing_session: bool,
 }
 
@@ -78,7 +79,8 @@ pub(crate) fn choose_cli_model(
         choice.scoped = scoped;
     }
     if let Some(pattern) = inputs.model {
-        let resolved = resolve_cli_model(inputs.provider, Some(pattern), inputs.thinking, catalog);
+        let resolved =
+            resolve_cli_model(inputs.provider, Some(pattern), inputs.thinking, inputs.inline_api_key, catalog);
         choice.warnings.extend(resolved.warning);
         choice.errors.extend(resolved.error);
         if let Some(model) = resolved.model {

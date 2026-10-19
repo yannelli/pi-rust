@@ -86,9 +86,7 @@ impl SseHandler for CompletionsStream {
             self.finish = Some(map_finish_reason(reason));
         }
         let Some(delta) = choice.get("delta").filter(|delta| delta.is_object()) else { return Ok(true) };
-        if let Some(text) = delta.get("content").and_then(Value::as_str).filter(|text| !text.is_empty()) {
-            self.text_delta(builder, text);
-        }
+        // Reasoning goes first: proxies such as LiteLLM send reasoning and answer in one delta.
         let reasoning = REASONING_FIELDS.iter().find_map(|field| {
             delta.get(*field).and_then(Value::as_str).filter(|text| !text.is_empty()).map(|text| (*field, text))
         });
@@ -96,16 +94,19 @@ impl SseHandler for CompletionsStream {
             let signature = if self.opencode_go && field == "reasoning" { "reasoning_content" } else { field };
             self.thinking_delta(builder, signature, text);
         }
+        let details = delta.get("reasoning_details").and_then(Value::as_array);
+        for detail in details.into_iter().flatten().filter(|detail| is_reasoning_detail(detail)) {
+            self.ensure_thinking(builder, "");
+            append_reasoning_detail(self.reasoning_details.get_or_insert_default(), detail);
+        }
+        if let Some(text) = delta.get("content").and_then(Value::as_str).filter(|text| !text.is_empty()) {
+            self.text_delta(builder, text);
+        }
         for call in delta.get("tool_calls").and_then(Value::as_array).into_iter().flatten() {
             if let Err(error) = self.tools.delta(builder, &self.sender, call) {
                 self.apply_reasoning_details(builder);
                 return Err(error);
             }
-        }
-        let details = delta.get("reasoning_details").and_then(Value::as_array);
-        for detail in details.into_iter().flatten().filter(|detail| is_reasoning_detail(detail)) {
-            self.ensure_thinking(builder, "");
-            append_reasoning_detail(self.reasoning_details.get_or_insert_default(), detail);
         }
         Ok(true)
     }

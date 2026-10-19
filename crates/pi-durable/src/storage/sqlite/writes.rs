@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use super::database::{SqliteExecutor, SqliteValue, transaction};
 use super::rows::{materialize, record};
+use super::schema::SqliteTables;
 use super::{SqliteStorage, encode, indexed, parse_next_id, scope_columns};
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{DocumentId, Seq};
@@ -90,7 +91,11 @@ fn prepare_document_actions(writes: &[StorageWrite]) -> DurableResult<Vec<(Docum
     Ok(actions)
 }
 
-async fn check_global_ids(executor: &dyn SqliteExecutor, writes: &[StorageWrite]) -> DurableResult<()> {
+async fn check_global_ids(
+    executor: &dyn SqliteExecutor,
+    t: &SqliteTables,
+    writes: &[StorageWrite],
+) -> DurableResult<()> {
     let mut claimed: HashMap<u64, &'static str> = HashMap::new();
     for write in writes {
         let table = match write {
@@ -102,7 +107,7 @@ async fn check_global_ids(executor: &dyn SqliteExecutor, writes: &[StorageWrite]
             StorageWrite::Submission { .. } => "submission",
         };
         let id = write_id(write).expect("a record write has an ID");
-        let row = executor.get("SELECT record_type FROM record_ids WHERE id = ?", &[id.into()]).await?;
+        let row = executor.get(&format!("SELECT record_type FROM {} WHERE id = ?", t.record_ids), &[id.into()]).await?;
         let existing = row.map(|row| row.text("record_type").map(str::to_string)).transpose()?;
         let earlier = claimed.get(&id).copied();
         if matches!(table, "conversation" | "entry" | "document") {
@@ -125,12 +130,17 @@ async fn check_global_ids(executor: &dyn SqliteExecutor, writes: &[StorageWrite]
     Ok(())
 }
 
-async fn document_record(executor: &dyn SqliteExecutor, id: DocumentId) -> DurableResult<Option<DocumentRecord>> {
-    record(executor, "SELECT record FROM documents WHERE id = ?", &[id.0.into()]).await
+async fn document_record(
+    executor: &dyn SqliteExecutor,
+    t: &SqliteTables,
+    id: DocumentId,
+) -> DurableResult<Option<DocumentRecord>> {
+    record(executor, &format!("SELECT record FROM {} WHERE id = ?", t.documents), &[id.0.into()]).await
 }
 
 async fn check_document_actions(
     executor: &dyn SqliteExecutor,
+    t: &SqliteTables,
     actions: &[(DocumentId, DocumentAction)],
 ) -> DurableResult<()> {
     let ids: HashSet<DocumentId> = actions.iter().map(|(id, _)| *id).collect();
@@ -139,7 +149,7 @@ async fn check_document_actions(
         if action.copy.is_some_and(|copy| ids.contains(&copy.id)) {
             return Err(error(format!("Document copy {id} source is changed in the copy batch")));
         }
-        let existing = document_record(executor, *id).await?;
+        let existing = document_record(executor, t, *id).await?;
         let address = match (&action.create, &existing) {
             (None, None) => return Err(error(format!("Unknown document: {id}"))),
             (Some(_), Some(_)) => return Err(error(format!("Document {id} already exists"))),
@@ -150,7 +160,10 @@ async fn check_document_actions(
             return Err(error(format!("Document {id} is retired")));
         }
         if let Some(DocumentContent::Delta { version, .. }) = &action.content {
-            let sql = "SELECT version FROM document_revisions WHERE document_id = ? ORDER BY seq DESC LIMIT 1";
+            let sql = &format!(
+                "SELECT version FROM {} WHERE document_id = ? ORDER BY seq DESC LIMIT 1",
+                t.document_revisions
+            );
             let Some(last) = executor.get(sql, &[id.0.into()]).await? else {
                 return Err(error(format!("Document {id} delta has no base")));
             };
@@ -161,9 +174,12 @@ async fn check_document_actions(
         let live = match live_counts.get(&address) {
             Some(live) => *live,
             None => {
-                let sql = "SELECT id FROM documents
+                let sql = &format!(
+                    "SELECT id FROM {}
 				WHERE kind = ? AND scope_kind = ? AND owner_id = ? AND family = ? AND key_value = ? AND retired_at IS NULL
-				LIMIT 1";
+				LIMIT 1",
+                    t.documents
+                );
                 i64::from(executor.get(sql, &address_params(&address)).await?.is_some())
             }
         };
@@ -182,16 +198,28 @@ async fn check_document_actions(
     Ok(())
 }
 
-async fn claim_id(executor: &dyn SqliteExecutor, id: u64, table: &str) -> DurableResult<()> {
-    executor.run("INSERT OR IGNORE INTO record_ids (id, record_type) VALUES (?, ?)", &[id.into(), table.into()]).await
+async fn claim_id(executor: &dyn SqliteExecutor, t: &SqliteTables, id: u64, table: &str) -> DurableResult<()> {
+    executor
+        .run(
+            &format!("INSERT OR IGNORE INTO {} (id, record_type) VALUES (?, ?)", t.record_ids),
+            &[id.into(), table.into()],
+        )
+        .await
 }
 
-async fn apply_table_write(executor: &dyn SqliteExecutor, write: &StorageWrite, seq: Seq) -> DurableResult<()> {
+async fn apply_table_write(
+    executor: &dyn SqliteExecutor,
+    t: &SqliteTables,
+    write: &StorageWrite,
+    seq: Seq,
+) -> DurableResult<()> {
     match write {
         StorageWrite::Conversation { value } => {
-            claim_id(executor, value.id.0, "conversation").await?;
-            let sql =
-                "INSERT INTO conversations (id, owner_conversation_id, owner_task_id, record) VALUES (?, ?, ?, ?)";
+            claim_id(executor, t, value.id.0, "conversation").await?;
+            let sql = &format!(
+                "INSERT INTO {} (id, owner_conversation_id, owner_task_id, record) VALUES (?, ?, ?, ?)",
+                t.conversations
+            );
             let owner = value.owner;
             let params = [
                 value.id.0.into(),
@@ -202,8 +230,11 @@ async fn apply_table_write(executor: &dyn SqliteExecutor, write: &StorageWrite, 
             executor.run(sql, &params).await
         }
         StorageWrite::Entry { value } => {
-            claim_id(executor, value.id.0, "entry").await?;
-            let sql = "INSERT INTO entries (id, conversation_id, head, commit_seq, record) VALUES (?, ?, ?, ?, ?)";
+            claim_id(executor, t, value.id.0, "entry").await?;
+            let sql = &format!(
+                "INSERT INTO {} (id, conversation_id, head, commit_seq, record) VALUES (?, ?, ?, ?, ?)",
+                t.entries
+            );
             let params = [
                 value.id.0.into(),
                 value.conversation_id.0.into(),
@@ -214,12 +245,15 @@ async fn apply_table_write(executor: &dyn SqliteExecutor, write: &StorageWrite, 
             executor.run(sql, &params).await
         }
         StorageWrite::Task { value } => {
-            claim_id(executor, value.id.0, "task").await?;
-            let sql = "INSERT INTO tasks (id, conversation_id, kind, status, abort_requested, background, record)
+            claim_id(executor, t, value.id.0, "task").await?;
+            let sql = &format!(
+                "INSERT INTO {} (id, conversation_id, kind, status, abort_requested, background, record)
 						VALUES (?, ?, ?, ?, ?, ?, ?)
 						ON CONFLICT(id) DO UPDATE SET conversation_id = excluded.conversation_id, kind = excluded.kind,
 						status = excluded.status, abort_requested = excluded.abort_requested,
-						background = excluded.background, record = excluded.record";
+						background = excluded.background, record = excluded.record",
+                t.tasks
+            );
             let params = [
                 value.id.0.into(),
                 value.conversation_id.0.into(),
@@ -232,10 +266,13 @@ async fn apply_table_write(executor: &dyn SqliteExecutor, write: &StorageWrite, 
             executor.run(sql, &params).await
         }
         StorageWrite::Submission { value } => {
-            claim_id(executor, value.id.0, "submission").await?;
-            let sql = "INSERT INTO submissions (id, conversation_id, request_id, status, record) VALUES (?, ?, ?, ?, ?)
+            claim_id(executor, t, value.id.0, "submission").await?;
+            let sql = &format!(
+                "INSERT INTO {} (id, conversation_id, request_id, status, record) VALUES (?, ?, ?, ?, ?)
 						ON CONFLICT(id) DO UPDATE SET conversation_id = excluded.conversation_id,
-						request_id = excluded.request_id, status = excluded.status, record = excluded.record";
+						request_id = excluded.request_id, status = excluded.status, record = excluded.record",
+                t.submissions
+            );
             let request_id = value.request_id.as_deref().map_or(SqliteValue::Null, indexed);
             let params = [
                 value.id.0.into(),
@@ -252,10 +289,11 @@ async fn apply_table_write(executor: &dyn SqliteExecutor, write: &StorageWrite, 
 
 async fn copy_content(
     executor: &dyn SqliteExecutor,
+    t: &SqliteTables,
     create: &DocumentCreate,
     source: DocumentCopySource,
 ) -> DurableResult<DocumentContent> {
-    let Some(stored) = materialize(executor, source.id, source.at).await? else {
+    let Some(stored) = materialize(executor, t, source.id, source.at).await? else {
         return Err(error(format!("Fork source document {} cannot be read", source.id)));
     };
     let matches = matches!(stored.record.scope, DocumentScope::Conversation { .. })
@@ -272,13 +310,14 @@ async fn copy_content(
 
 async fn apply_document_action(
     executor: &dyn SqliteExecutor,
+    t: &SqliteTables,
     id: DocumentId,
     action: &DocumentAction,
     seq: Seq,
 ) -> DurableResult<()> {
     let mut content = action.content.clone();
     if let (Some(source), Some(create)) = (action.copy, &action.create) {
-        let copied = copy_content(executor, create, source).await;
+        let copied = copy_content(executor, t, create, source).await;
         content = Some(copied.map_err(|cause| error(format!("Document copy {id} was rejected: {cause}")))?);
     }
     let mut stored = match &action.create {
@@ -287,11 +326,14 @@ async fn apply_document_action(
             if action.retire {
                 stored.retired_at = Some(seq);
             }
-            claim_id(executor, id.0, "document").await?;
+            claim_id(executor, t, id.0, "document").await?;
             let [kind, scope_kind, owner_id, family, key_value] = address_params(&stored.address());
-            let sql = "INSERT INTO documents
+            let sql = &format!(
+                "INSERT INTO {}
 						(id, kind, family, key_value, scope_kind, owner_id, created_at, retired_at, record)
-						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                t.documents
+            );
             let retired = action.retire.then_some(seq.0);
             let params = [
                 id.0.into(),
@@ -307,28 +349,35 @@ async fn apply_document_action(
             executor.run(sql, &params).await?;
             stored
         }
-        None => document_record(executor, id).await?.ok_or_else(|| error(format!("Unknown document: {id}")))?,
+        None => document_record(executor, t, id).await?.ok_or_else(|| error(format!("Unknown document: {id}")))?,
     };
     if let Some(content) = &content {
         if matches!(content, DocumentContent::Base { .. }) && is_current_only(&stored) {
-            executor.run("DELETE FROM document_revisions WHERE document_id = ?", &[id.0.into()]).await?;
+            executor
+                .run(&format!("DELETE FROM {} WHERE document_id = ?", t.document_revisions), &[id.0.into()])
+                .await?;
         }
         let (kind, encoded) = match content {
             DocumentContent::Base { value, .. } => ("base", encode(value)?),
             DocumentContent::Delta { ops, .. } => ("delta", encode(ops)?),
         };
-        let sql = "INSERT INTO document_revisions (document_id, seq, kind, version, content) VALUES (?, ?, ?, ?, ?)";
+        let sql = &format!(
+            "INSERT INTO {} (document_id, seq, kind, version, content) VALUES (?, ?, ?, ?, ?)",
+            t.document_revisions
+        );
         let params = [id.0.into(), seq.0.into(), kind.into(), content.version().into(), encoded.into()];
         executor.run(sql, &params).await?;
     }
     if action.retire {
         if action.create.is_none() {
             stored.retired_at = Some(seq);
-            let sql = "UPDATE documents SET retired_at = ?, record = ? WHERE id = ?";
+            let sql = &format!("UPDATE {} SET retired_at = ?, record = ? WHERE id = ?", t.documents);
             executor.run(sql, &[seq.0.into(), encode(&stored)?.into(), id.0.into()]).await?;
         }
         if is_current_only(&stored) {
-            executor.run("DELETE FROM document_revisions WHERE document_id = ?", &[id.0.into()]).await?;
+            executor
+                .run(&format!("DELETE FROM {} WHERE document_id = ?", t.document_revisions), &[id.0.into()])
+                .await?;
         }
     }
     Ok(())
@@ -339,24 +388,25 @@ impl SqliteStorage {
         self.assert_open()?;
         let actions = Arc::new(prepare_document_actions(writes)?);
         let candidate = writes.iter().filter_map(write_id).fold(self.next_id(), |next, id| next.max(id + 1));
+        let t = &self.schema.tables;
         let seq = transaction(&*self.db, move |executor| {
             Box::pin(async move {
                 let executor = &*executor;
-                let sql = "SELECT next_id, next_seq FROM durable_metadata WHERE singleton = 1";
+                let sql = &format!("SELECT next_id, next_seq FROM {} WHERE singleton = 1", t.durable_metadata);
                 let metadata = executor.get(sql, &[]).await?;
                 let metadata = metadata.ok_or_else(|| DurableError::storage("Durable SQLite metadata is missing"))?;
                 let stored_next_id = parse_next_id(metadata.text("next_id")?)?;
                 let seq = Seq(metadata.integer("next_seq")? as u64);
-                check_global_ids(executor, writes).await?;
-                check_document_actions(executor, &actions).await?;
+                check_global_ids(executor, t, writes).await?;
+                check_document_actions(executor, t, &actions).await?;
                 for write in writes {
-                    apply_table_write(executor, write, seq).await?;
+                    apply_table_write(executor, t, write, seq).await?;
                 }
                 for (id, action) in actions.iter() {
-                    apply_document_action(executor, *id, action, seq).await?;
+                    apply_document_action(executor, t, *id, action, seq).await?;
                 }
                 let next_id = stored_next_id.max(candidate).to_string();
-                let sql = "UPDATE durable_metadata SET next_id = ?, next_seq = ? WHERE singleton = 1";
+                let sql = &format!("UPDATE {} SET next_id = ?, next_seq = ? WHERE singleton = 1", t.durable_metadata);
                 executor.run(sql, &[next_id.into(), (seq.0 + 1).into()]).await?;
                 Ok(seq)
             })

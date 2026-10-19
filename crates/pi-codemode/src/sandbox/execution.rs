@@ -29,6 +29,7 @@ pub(crate) struct ExecutionParams {
     pub cancel: Option<CancellationToken>,
     pub closed: CancellationToken,
     pub memory_limit: Option<usize>,
+    pub acquire_worker: Option<super::AcquireWorker>,
     pub store: Map<String, Value>,
 }
 
@@ -264,11 +265,13 @@ pub(crate) async fn run(params: ExecutionParams) -> CodemodeResult {
     let outcome = if cancel.is_cancelled() {
         Err(CodemodeError::new(CodemodeErrorKind::Aborted, "Execution aborted"))
     } else {
-        match worker::spawn(setup) {
-            Err(error) => {
+        let release = params.acquire_worker.as_ref().map(|acquire| (acquire.0)()).transpose();
+        match release.map(|release| worker::spawn(setup, release)) {
+            Err(denied) => Err(CodemodeError::new(CodemodeErrorKind::Sandbox, denied)),
+            Ok(Err(error)) => {
                 Err(CodemodeError::new(CodemodeErrorKind::Sandbox, format!("Failed to start worker: {error}")))
             }
-            Ok(()) => drive(&mut execution, &mut messages, params.timeout, &cancel, &params.closed).await,
+            Ok(Ok(())) => drive(&mut execution, &mut messages, params.timeout, &cancel, &params.closed).await,
         }
     };
 

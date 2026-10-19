@@ -21,6 +21,8 @@ use crate::types::{Message, Model, ThinkingLevel};
 
 /// OpenAI rejects `max_output_tokens` below 16.
 const MIN_OUTPUT_TOKENS: u64 = 16;
+/// Fixed `reasoning.effort` while `configuration_update` items carry the thinking level.
+const CONFIGURATION_UPDATE_REQUEST_EFFORT: &str = "medium";
 
 /// Resolved `OpenAIResponsesCompat` flags with upstream defaults.
 pub(crate) struct Compat {
@@ -33,6 +35,7 @@ pub(crate) struct Compat {
     pub supports_tool_search: bool,
     pub supports_explicit_prompt_cache_mode: bool,
     pub supports_max_output_tokens: bool,
+    pub supports_mid_convo_effort: bool,
 }
 
 impl Compat {
@@ -50,6 +53,7 @@ impl Compat {
             supports_tool_search: flag("supportsToolSearch", false),
             supports_explicit_prompt_cache_mode: flag("supportsExplicitPromptCacheMode", false),
             supports_max_output_tokens: flag("supportsMaxOutputTokens", true),
+            supports_mid_convo_effort: flag("supportsMidConvoEffort", false),
         }
     }
 }
@@ -59,6 +63,16 @@ fn chatgpt_sign_in(model: &Model, options: &StreamOptions) -> bool {
     model.provider == "openai"
         && model.base_url == "https://api.openai.com/v1"
         && options.api_key.as_deref().is_some_and(|key| !key.starts_with("sk-"))
+}
+
+/// Effort to send in `configuration_update` items, or `None` to send it as `reasoning.effort`.
+/// Sign in with ChatGPT rejects the items.
+pub(crate) fn configuration_update_effort(model: &Model, options: &StreamOptions, compat: &Compat) -> Option<String> {
+    if !compat.supports_mid_convo_effort || chatgpt_sign_in(model, options) {
+        return None;
+    }
+    let level = reasoning_effort(model, options)?;
+    Some(provider_thinking_value(model, level).unwrap_or_else(|| level.as_str().to_string()))
 }
 
 /// The effort to request: the clamped level, `None` when off.
@@ -93,6 +107,7 @@ pub(crate) fn build_body(
         supports_tool_search: compat.supports_tool_search,
         grammar_tool_input_properties: grammar.clone(),
         tool_options,
+        configuration_update_effort: configuration_update_effort(model, options, compat),
         ..ConvertOptions::default()
     };
     let retention = resolve_cache_retention(options.cache_retention, &options.env);
@@ -138,7 +153,10 @@ pub(crate) fn build_body(
     if model.reasoning {
         match effort {
             Some(level) => {
-                let effort = provider_thinking_value(model, level).unwrap_or_else(|| level.as_str().to_string());
+                let effort = match convert.configuration_update_effort {
+                    Some(_) => CONFIGURATION_UPDATE_REQUEST_EFFORT.to_string(),
+                    None => provider_thinking_value(model, level).unwrap_or_else(|| level.as_str().to_string()),
+                };
                 body.insert("reasoning".into(), json!({"effort": effort, "summary": summary}));
                 body.insert("include".into(), json!(["reasoning.encrypted_content"]));
             }

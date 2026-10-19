@@ -129,7 +129,7 @@ async fn select_phase(task: TaskRecord, runtime: TaskRuntime, context: Context) 
     let (Some(model_ref), Some(model)) = (agent.model.clone(), model) else {
         return fail_no_model(&runtime, agent.model.as_ref(), &context).await;
     };
-    let policy = settings.compaction;
+    let policy = settings.compaction_for(&model_ref);
     let view = runtime.context(conversation_id, &context, None).await?;
     let Some(cut) = select_cut(&view, policy.keep_recent_tokens) else {
         return finish(&runtime, &context, Some(Json::empty_object())).await;

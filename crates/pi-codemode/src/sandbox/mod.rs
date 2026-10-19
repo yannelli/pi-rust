@@ -7,6 +7,7 @@ mod types;
 mod worker;
 
 use std::fmt;
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
@@ -41,6 +42,23 @@ pub struct SandboxOptions {
     pub timeout: Timeout,
     /// Heap limit of the VM. Allocations beyond it throw `InternalError: out of memory` in the script.
     pub memory_limit_bytes: Option<usize>,
+    /// Reserves capacity right before each worker thread starts; see [`AcquireWorker`].
+    pub acquire_worker: Option<AcquireWorker>,
+}
+
+/// Runs when a worker thread exits, or when it fails to start.
+pub type WorkerRelease = Box<dyn FnOnce() + Send>;
+
+/// Admission for worker threads, which can be shared across sandboxes. An error denies the worker
+/// and fails the execution as a sandbox error. The release runs when the thread actually exits,
+/// which can be after the result: a cancelled script stops only at its next interrupt check.
+#[derive(Clone)]
+pub struct AcquireWorker(pub Arc<dyn Fn() -> Result<WorkerRelease, String> + Send + Sync>);
+
+impl fmt::Debug for AcquireWorker {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("AcquireWorker")
+    }
 }
 
 impl Default for SandboxOptions {
@@ -50,6 +68,7 @@ impl Default for SandboxOptions {
             globals: Vec::new(),
             timeout: Timeout::After(Duration::from_millis(DEFAULT_TIMEOUT_MS)),
             memory_limit_bytes: None,
+            acquire_worker: None,
         }
     }
 }
@@ -60,6 +79,7 @@ pub struct CodemodeSandbox {
     globals: Vec<SandboxFunction>,
     timeout: Timeout,
     memory_limit_bytes: Option<usize>,
+    acquire_worker: Option<AcquireWorker>,
     closed: CancellationToken,
 }
 
@@ -70,6 +90,7 @@ impl CodemodeSandbox {
             globals: Vec::new(),
             timeout: options.timeout,
             memory_limit_bytes: options.memory_limit_bytes,
+            acquire_worker: options.acquire_worker,
             closed: CancellationToken::new(),
         };
         for tool in options.tools {
@@ -133,6 +154,7 @@ impl CodemodeSandbox {
             cancel: options.cancel,
             closed: self.closed.clone(),
             memory_limit: self.memory_limit_bytes,
+            acquire_worker: self.acquire_worker.clone(),
             store: options.store,
         })
         .await)

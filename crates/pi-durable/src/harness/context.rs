@@ -9,6 +9,7 @@ use pi_chord::Context;
 
 use super::types::ContextView;
 use super::util::scan_all;
+use crate::entries::SYSTEM_ENTRY;
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{ConversationId, EntryId};
 use crate::session::Session;
@@ -63,7 +64,12 @@ pub struct ContextRange {
     pub settled: Vec<Message>,
     /// Contributed messages from the last assistant message on, before tool result ordering.
     pub open: Vec<Message>,
+    /// The baseline's system message; see [`find_baseline`].
+    baseline: Baseline,
 }
+
+/// A baseline's system message, `Some(None)` when the range cannot have one, or `None` while a later entry may be one.
+type Baseline = Option<Option<Message>>;
 
 /// A context read that reuses an earlier range of the same conversation: with the same head marker, only entries
 /// after its tail are scanned. Returns the view and the range for the next read.
@@ -129,10 +135,11 @@ fn derive_range(bounds: ContextBounds, entries: Vec<EntryRecord>) -> ContextRang
     let (settled, open) = settle(Vec::new(), flat);
     let mut messages = settled.clone();
     messages.extend(order_tool_results(&open));
-    let messages = lead_with_system(messages);
+    let edited: HashSet<EntryId> = edits.keys().copied().collect();
+    let baseline = find_baseline(bounds.head.as_ref(), &active, &edited);
+    let messages = lead_with_system(messages, &baseline);
     let view = ContextView { head: bounds.head.clone(), entries: active, contributions, messages };
-    let edited = edits.keys().copied().collect();
-    ContextRange { bounds, entries, view, edited, settled, open }
+    ContextRange { bounds, entries, view, edited, settled, open, baseline }
 }
 
 fn extend_range(earlier: &ContextRange, bounds: ContextBounds, added: Vec<EntryRecord>) -> ContextRange {
@@ -147,6 +154,10 @@ fn extend_range(earlier: &ContextRange, bounds: ContextBounds, added: Vec<EntryR
     let (settled, open) = settle(earlier.settled.clone(), open);
     let mut messages = settled.clone();
     messages.extend(order_tool_results(&open));
+    let baseline = match &earlier.baseline {
+        Some(baseline) => Some(baseline.clone()),
+        None => find_baseline(bounds.head.as_ref(), &added, &earlier.edited),
+    };
     let mut view_entries = earlier.view.entries.clone();
     view_entries.extend(added);
     let mut view_contributions = earlier.view.contributions.clone();
@@ -155,15 +166,53 @@ fn extend_range(earlier: &ContextRange, bounds: ContextBounds, added: Vec<EntryR
         head: bounds.head.clone(),
         entries: view_entries,
         contributions: view_contributions,
-        messages: lead_with_system(messages),
+        messages: lead_with_system(messages, &baseline),
     };
-    ContextRange { bounds, entries, view, edited: earlier.edited.clone(), settled, open }
+    ContextRange { bounds, entries, view, edited: earlier.edited.clone(), settled, open, baseline }
 }
 
-/// Move a system message that only user messages precede to the front.
-fn lead_with_system(mut messages: Vec<Message>) -> Vec<Message> {
-    let Some(index) = messages.iter().position(|m| !matches!(m, Message::User(_))) else { return messages };
-    if index == 0 || !matches!(messages[index], Message::System(_)) {
+/// The baseline among `entries`, oldest first: the system message of the first `pi.system` entry after the head
+/// marker, or of the transcript without one, when generation wrote it with every section and tool in effect. After a
+/// head marker it always does. Without one it does when no earlier entry carries a system message, even one an edit
+/// omits later. An edited baseline contributes other messages, or none, so none leads.
+fn find_baseline(head: Option<&EntryRecord>, entries: &[EntryRecord], edited: &HashSet<EntryId>) -> Baseline {
+    for entry in entries {
+        if head.is_some_and(|head| entry.id <= head.id) {
+            continue;
+        }
+        if SYSTEM_ENTRY.is(Some(entry)) {
+            let message = entry.model.iter().flatten().find(|message| matches!(message, Message::System(_)));
+            return Some(message.filter(|_| !edited.contains(&entry.id)).cloned());
+        }
+        if head.is_none() && carries_system_message(entry) {
+            return Some(None);
+        }
+    }
+    None
+}
+
+/// Whether an entry's own messages, or the replacement messages of its edits, include a system message.
+fn carries_system_message(entry: &EntryRecord) -> bool {
+    let is_system = |message: &Message| matches!(message, Message::System(_));
+    entry.model.iter().flatten().any(is_system)
+        || entry
+            .edits
+            .iter()
+            .flatten()
+            .any(|edit| edit.action == ContextEditAction::Replace && edit.messages.iter().flatten().any(is_system))
+}
+
+/// Move the first system message to the front when only user messages precede it, or when it is the baseline's. A
+/// run's input is committed before generation renders the system prompt, and after a compaction the kept history,
+/// assistant messages included, precedes the baseline. Providers treat only a leading system message as the initial
+/// prompt and tool set. Any other system message after an assistant message stays where it was committed.
+fn lead_with_system(mut messages: Vec<Message>, baseline: &Baseline) -> Vec<Message> {
+    let Some(index) = messages.iter().position(|m| matches!(m, Message::System(_))) else { return messages };
+    if index == 0 {
+        return messages;
+    }
+    let is_baseline = baseline.as_ref().and_then(Option::as_ref) == Some(&messages[index]);
+    if !is_baseline && messages[..index].iter().any(|m| !matches!(m, Message::User(_))) {
         return messages;
     }
     let system = messages.remove(index);

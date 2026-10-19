@@ -179,6 +179,8 @@ async fn ex25_compaction_summarizes_in_the_background_on_demand_and_after_overfl
     assert_eq!(failed.1.map(|detail| detail.to_serde()), Some(json!("prompt is too long")));
     let (_, _, reason, lines) = show(&root).await;
     assert_eq!(reason.as_deref(), Some("threshold"));
-    assert_eq!(lines[2], "user Summarize the plan for my partner");
+    // The baseline leads the summary and the kept answer.
+    assert_eq!(lines[0], "system (system prompt)");
+    assert_eq!(lines[3], "user Summarize the plan for my partner");
     harness.close(&ctx()).await.unwrap();
 }

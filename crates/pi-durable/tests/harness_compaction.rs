@@ -17,6 +17,8 @@ mod manual;
 mod outcomes;
 #[path = "harness_compaction/overflow.rs"]
 mod overflow;
+#[path = "harness_compaction/overrides.rs"]
+mod overrides;
 #[path = "harness_compaction/recovery.rs"]
 mod recovery;
 mod support;
@@ -360,6 +362,7 @@ async fn places_the_summary_at_once_when_idle_and_keeps_raw_history() {
             reserve_tokens: Some(1000),
             keep_recent_tokens: Some(150),
             background_tokens: Some(0),
+            model_overrides: None,
         });
     }
     harness.resume().unwrap();
@@ -430,6 +433,7 @@ async fn places_the_summary_at_once_when_idle_and_keeps_raw_history() {
             _ => "other",
         })
         .collect();
-    assert_eq!(roles, ["user", "user", "assistant", "user", "system"]);
+    // One complete system baseline leads the summary, the kept turn, and the new input.
+    assert_eq!(roles, ["system", "user", "user", "assistant", "user"]);
     harness.close(&ctx()).await.unwrap();
 }

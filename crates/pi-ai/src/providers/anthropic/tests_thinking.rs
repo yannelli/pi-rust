@@ -131,6 +131,19 @@ async fn thinking_off_disables_unless_the_map_marks_off_unsupported() {
 }
 
 #[tokio::test]
+async fn off_on_a_managed_model_that_can_disable_thinking_sends_no_markers() {
+    let mut model = managed();
+    model.thinking_level_map.as_mut().unwrap().remove("off");
+    let history = vec![Message::user("one"), assistant(Some("low"), "anthropic"), Message::user("two")];
+    let off = payload(&model, history, reasoning(Some(ThinkingLevel::Off))).await;
+    assert_eq!(off["thinking"], json!({"type": "disabled"}));
+    assert!(off.get("output_config").is_none());
+    assert_eq!(markers(&off), Vec::<Value>::new());
+    let on = payload(&model, vec![Message::user("one")], reasoning(Some(ThinkingLevel::Low))).await;
+    assert_eq!(markers(&on), [marker("low")]);
+}
+
+#[tokio::test]
 async fn budget_thinking_uses_custom_budgets_and_leaves_answer_room() {
     let mut model = test_model(API, "anthropic", UNREACHABLE);
     model.max_tokens = 32_000;

@@ -10,7 +10,7 @@ mod tests;
 #[cfg(test)]
 mod tests_transcript;
 
-use self::request::{Compat, build_body, grammar_properties};
+use self::request::{Compat, build_body, configuration_update_effort, grammar_properties};
 use crate::http::pi_user_agent;
 use crate::providers::common::{HttpRequest, endpoint, has_header, header_map_with, spawn_provider_stream};
 use crate::providers::github_copilot::copilot_dynamic_headers;
@@ -69,7 +69,8 @@ impl ApiProvider for OpenAIResponses {
         };
         let handler = ResponsesStream::new(model)
             .with_grammar_tool_input_properties(grammar)
-            .with_service_tier_pricing(model, options.service_tier.clone());
+            .with_service_tier_pricing(model, options.service_tier.clone())
+            .with_provider_thinking_level(configuration_update_effort(model, &options, &compat));
         spawn_provider_stream(model, &options, request, handler)
     }
 }

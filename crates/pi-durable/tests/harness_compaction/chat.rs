@@ -165,6 +165,7 @@ pub fn policy(enabled: bool, reserve: u64, keep: u64, background: u64) -> Compac
         reserve_tokens: Some(reserve),
         keep_recent_tokens: Some(keep),
         background_tokens: Some(background),
+        model_overrides: None,
     }
 }
 

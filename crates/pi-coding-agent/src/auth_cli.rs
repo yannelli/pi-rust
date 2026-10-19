@@ -14,7 +14,10 @@ use serde_json::{Map, Value, json};
 use crate::app::configured_providers;
 use crate::cli::{Args, parse_args};
 use crate::config::{auth_path, models_path};
-use crate::model_resolver::resolve_cli_model;
+use crate::model_resolver::{
+    ModelCatalog, ModelReferenceRequest, ModelReferenceResult, ThinkingSuffix, resolve_cli_model,
+    resolve_model_reference,
+};
 
 const DEFAULT_BEARER_TOKEN_MIN_EXPIRY_MS: i64 = 30 * 60_000;
 
@@ -216,7 +219,7 @@ async fn check_provider(
 ) -> Result<CheckResult, String> {
     let mut provider = cli_provider.map(String::from);
     if let Some(pattern) = cli_model {
-        let resolved = resolve_cli_model(cli_provider, Some(pattern), None, &context.registry);
+        let resolved = resolve_cli_model(cli_provider, Some(pattern), None, false, &context.registry);
         match (resolved.model, resolved.error) {
             (Some(model), None) => provider = Some(model.provider),
             (_, error) => return Err(error.unwrap_or_else(|| format!("Unable to resolve model \"{pattern}\""))),
@@ -328,7 +331,7 @@ async fn run_print(
         }
         let model = match &cli_model {
             Some(pattern) => {
-                let resolved = resolve_cli_model(Some(name), Some(pattern), None, &context.registry);
+                let resolved = resolve_cli_model(Some(name), Some(pattern), None, false, &context.registry);
                 match (resolved.model, resolved.error) {
                     (Some(model), None) => Some(model),
                     (_, error) => {
@@ -342,10 +345,16 @@ async fn run_print(
         providers.push((name.clone(), model));
     } else {
         let pattern = cli_model.as_deref().unwrap_or_default();
+        let models = context.registry.all_chat_models();
         for provider in context.registry.providers().into_iter().filter(|provider| types.contains_key(provider)) {
-            let resolved = resolve_cli_model(Some(&provider), Some(pattern), None, &context.registry);
-            let custom = resolved.warning.as_deref().is_some_and(|warning| warning.contains("Using custom model id"));
-            if let (Some(model), None, false) = (resolved.model, resolved.error, custom) {
+            let request = ModelReferenceRequest {
+                text: pattern,
+                provider: Some(&provider),
+                thinking_suffix: ThinkingSuffix::Strict,
+                fuzzy: true,
+            };
+            if let ModelReferenceResult::Resolved { model, .. } = resolve_model_reference(&request, &models, &|_| true)
+            {
                 providers.push((provider, Some(model)));
             }
         }

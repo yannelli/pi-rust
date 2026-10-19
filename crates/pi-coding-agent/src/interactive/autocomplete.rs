@@ -20,7 +20,7 @@ pub const BUILTIN_SLASH_COMMANDS: &[(&str, &str, Option<&str>)] = &[
     ("scoped-models", "Enable/disable models for Ctrl+P cycling", None),
     ("export", "Export session (HTML default, or specify path: .html/.jsonl)", None),
     ("import", "Import and resume a session from a JSONL file", None),
-    ("share", "Share session as a secret GitHub gist", None),
+    ("share", "Share session via a Radius artifact or a GitHub gist", None),
     ("bug", "Report a bug to the Pi developers", Some("<description>")),
     ("copy", "Copy last agent message to clipboard", None),
     ("name", "Set session display name", None),

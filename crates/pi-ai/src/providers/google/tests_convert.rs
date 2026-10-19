@@ -248,6 +248,10 @@ fn thinking_level_maps_resolve_like_upstream() {
             json!({"includeThoughts": true, "thinkingLevel": "MEDIUM"})
         );
         assert_eq!(thinking_config(&mapped("gemini-2.5-flash", &[]), None, None, vertex), json!({"thinkingBudget": 0}));
+        assert_eq!(
+            thinking_config(&mapped("gemini-4-argon", &[]), Some(ThinkingLevel::High), None, vertex),
+            json!({"includeThoughts": true, "thinkingLevel": "HIGH"})
+        );
     }
     let extended = mapped("gemini-3.7-flash", &[("xhigh", Some("high")), ("max", Some("high"))]);
     assert_eq!(thinking_config(&extended, Some(ThinkingLevel::Max), None, false)["thinkingLevel"], "HIGH");

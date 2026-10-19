@@ -167,9 +167,8 @@ pub async fn generate_branch_summary(
         None => BRANCH_SUMMARY_PROMPT.to_string(),
     };
     let prompt = format!("<conversation>\n{conversation}\n</conversation>\n\n{instructions}");
-    let max_tokens = if model.max_tokens > 0 { model.max_tokens.min(4096) } else { 4096 };
     let summarization = &options.summarization;
-    let mut request = request_options(model, max_tokens, summarization);
+    let mut request = request_options(model, summarization);
     request.reasoning = None;
     request.session_id = None;
     let response = complete_summarization(

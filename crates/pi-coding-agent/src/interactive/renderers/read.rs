@@ -10,7 +10,7 @@ use super::{
     ToolRenderContext, ToolRenderer, ToolResultView, get_text_output, more_lines_hint, path_arg, render_tool_path,
     replace_tabs, text, trim_trailing_empty_lines,
 };
-use crate::interactive::util::format_path_relative_to_cwd_or_absolute;
+use crate::interactive::util::{format_path_relative_to_cwd_or_absolute, format_read_line_range};
 use crate::interactive_components::key_text;
 use crate::theme::{ThemeColor, get_language_from_path, highlight_code, theme};
 use crate::tools::path_utils::resolve_to_cwd;
@@ -27,14 +27,8 @@ enum Compact {
 }
 
 fn line_range(args: &Value) -> String {
-    let offset = args.get("offset").and_then(Value::as_i64);
-    let limit = args.get("limit").and_then(Value::as_i64);
-    if offset.is_none() && limit.is_none() {
-        return String::new();
-    }
-    let start = offset.unwrap_or(1);
-    let end = limit.map(|limit| format!("-{}", start + limit - 1)).unwrap_or_default();
-    theme().fg(ThemeColor::Warning, &format!(":{start}{end}"))
+    let range = format_read_line_range(args.get("offset"), args.get("limit"));
+    if range.is_empty() { range } else { theme().fg(ThemeColor::Warning, &range) }
 }
 
 fn classify(args: &Value, cwd: &Path) -> Option<Compact> {

@@ -145,7 +145,7 @@ impl AgentSession {
         let summarized = summary.is_some();
         let result = self.apply_navigation(target_id, summary, options.label.as_deref(), from_extension)?;
         self.refresh_context();
-        self.restore_tools_from_transcript();
+        self.restore_tools_from_transcript(&[]);
         if let Some(runner) = self.extension_runner() {
             let (new_leaf, summary_entry) = {
                 let session = self.session_manager();

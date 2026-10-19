@@ -10,15 +10,18 @@ use rusqlite::{Connection, params_from_iter};
 
 use super::SqliteStorage;
 use super::database::{SqliteDatabase, SqliteExecutor, SqliteRow, SqliteValue, TransactionCallback};
+use super::schema::validate_sqlite_schema_prefix;
 use crate::errors::{DurableError, DurableResult};
 
 /// Connection settings for a durable storage file.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SqliteStorageOptions {
     /// SQLite WAL auto-checkpoint threshold; default 1,000 pages; 0 disables it.
     pub wal_autocheckpoint_pages: Option<u32>,
     /// Time SQLite waits for a competing file lock; default 5,000 ms.
     pub busy_timeout_ms: Option<u64>,
+    /// Prefix for every table and index of the storage; see [`SqliteStorage::open_with_prefix`].
+    pub prefix: Option<String>,
 }
 
 const DEFAULT_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -236,5 +239,9 @@ pub async fn open_sqlite_storage(path: &str) -> DurableResult<SqliteStorage> {
 
 /// Open or create file-backed durable storage with explicit connection settings.
 pub async fn open_sqlite_storage_with(path: &str, options: SqliteStorageOptions) -> DurableResult<SqliteStorage> {
-    SqliteStorage::open(Arc::new(BundledSqliteDatabase::open(path, options).await?)).await
+    if let Some(prefix) = &options.prefix {
+        validate_sqlite_schema_prefix(prefix)?;
+    }
+    let database = Arc::new(BundledSqliteDatabase::open(path, options.clone()).await?);
+    SqliteStorage::open_with_prefix(database, options.prefix.as_deref()).await
 }

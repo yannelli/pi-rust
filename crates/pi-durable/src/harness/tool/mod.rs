@@ -50,6 +50,7 @@ mod tool_call_block {
 /// A model-issued call, read from its assistant entry, or a nested call whose call the input carries.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[allow(clippy::large_enum_variant)]
 pub enum ToolTaskInput {
     Model {
         assistant: EntryId,

@@ -33,6 +33,11 @@ pub(crate) struct ConvertOptions {
     pub grammar_tool_input_properties: BTreeMap<String, String>,
     /// How tools inside tool additions are declared.
     pub tool_options: ResponsesToolOptions,
+    /// Effort of the reply being generated, sent as `configuration_update` items instead of a changing
+    /// `reasoning.effort` so the prompt cache survives a change. One item goes before every earlier
+    /// same-model reply with its recorded level and one with this effort goes last, so earlier input
+    /// never changes.
+    pub configuration_update_effort: Option<String>,
 }
 
 impl Default for ConvertOptions {
@@ -45,6 +50,7 @@ impl Default for ConvertOptions {
             tool_call_providers: TOOL_CALL_PROVIDERS,
             grammar_tool_input_properties: BTreeMap::new(),
             tool_options: ResponsesToolOptions::default(),
+            configuration_update_effort: None,
         }
     }
 }
@@ -128,6 +134,13 @@ pub(crate) fn convert_messages(
                 if output.is_empty() {
                     continue;
                 }
+                let same_model =
+                    assistant.provider == model.provider && assistant.api == model.api && assistant.model == model.id;
+                if let (Some(_), true, Some(level)) =
+                    (&options.configuration_update_effort, same_model, &assistant.provider_thinking_level)
+                {
+                    items.push(configuration_update(level));
+                }
                 items.extend(output);
             }
             Message::ToolResult(result) => {
@@ -147,7 +160,14 @@ pub(crate) fn convert_messages(
             message_index += 1;
         }
     }
+    if let Some(effort) = &options.configuration_update_effort {
+        items.push(configuration_update(effort));
+    }
     Ok(items)
+}
+
+fn configuration_update(effort: &str) -> Value {
+    json!({"type": "configuration_update", "reasoning": {"effort": effort}})
 }
 
 /// Items that load the tools a later system message adds.
@@ -182,10 +202,10 @@ fn tool_result_output(model: &Model, content: &[ContentBlock]) -> Value {
     let text = tool_result_text(content);
     if !has_images(content) || !model.supports_images() {
         let fallback = if has_images(content) { "(see attached image)" } else { "(no tool output)" };
-        return json!(if text.is_empty() { fallback.to_string() } else { text });
+        return json!(if text.trim().is_empty() { fallback.to_string() } else { text });
     }
     let mut parts = Vec::new();
-    if !text.is_empty() {
+    if !text.trim().is_empty() {
         parts.push(json!({"type": "input_text", "text": text}));
     }
     parts.extend(content.iter().filter(|block| block.as_text().is_none()).filter_map(input_part));

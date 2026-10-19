@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use pi_agent::ToolUpdateCallback;
@@ -25,12 +25,46 @@ use crate::models::{ModelTotals, model_globals};
 use crate::output::{
     DEFAULT_MAX_OUTPUT_TOKENS, format_error, format_output, join_text_runs, save_images, truncate_output, value_text,
 };
-use crate::sandbox::{CodemodeSandbox, CodemodeSuccess, ExecuteOptions, SandboxFunction, SandboxOptions, Timeout};
+use crate::sandbox::{
+    AcquireWorker, CodemodeSandbox, CodemodeSuccess, ExecuteOptions, SandboxFunction, SandboxOptions, Timeout,
+};
 use crate::source::{CodemodeSourceError, parse_codemode_source};
 use crate::store::CodemodeStoreEntryData;
 
 /// Heap limit of the VM. Overruns throw `InternalError: out of memory` inside the script.
 pub const CODEMODE_MEMORY_LIMIT_BYTES: usize = 256 * 1024 * 1024;
+
+/// Worker threads across calls and sessions: one replacement while a cancelled worker still exits.
+pub const MAX_CONCURRENT_CODEMODE_WORKERS: usize = 2;
+static CODEMODE_WORKER_LIMIT: AtomicUsize = AtomicUsize::new(MAX_CONCURRENT_CODEMODE_WORKERS);
+static ACTIVE_CODEMODE_WORKERS: AtomicUsize = AtomicUsize::new(0);
+
+/// Replace the process-wide worker limit, for hosts and test suites that run many scripts at once.
+pub fn set_codemode_worker_limit(limit: usize) {
+    CODEMODE_WORKER_LIMIT.store(limit, Ordering::SeqCst);
+}
+
+fn codemode_worker_admission() -> AcquireWorker {
+    AcquireWorker(Arc::new(|| {
+        let limit = CODEMODE_WORKER_LIMIT.load(Ordering::SeqCst);
+        let mut active = ACTIVE_CODEMODE_WORKERS.load(Ordering::SeqCst);
+        loop {
+            if active >= limit {
+                return Err(format!(
+                    "Codemode worker limit reached ({limit} workers are still running or shutting down). Retry after they exit."
+                ));
+            }
+            match ACTIVE_CODEMODE_WORKERS.compare_exchange_weak(active, active + 1, Ordering::SeqCst, Ordering::SeqCst)
+            {
+                Ok(_) => break,
+                Err(current) => active = current,
+            }
+        }
+        Ok(Box::new(|| {
+            ACTIVE_CODEMODE_WORKERS.fetch_sub(1, Ordering::SeqCst);
+        }))
+    }))
+}
 
 /// The result of one `codemode` call.
 #[derive(Clone, Debug, PartialEq)]
@@ -163,6 +197,7 @@ pub async fn execute_codemode(
         globals,
         timeout,
         memory_limit_bytes: Some(CODEMODE_MEMORY_LIMIT_BYTES),
+        acquire_worker: Some(codemode_worker_admission()),
     })
     .map_err(|error| CodemodeSourceError(error.0))?;
     let store = host.store_snapshot();

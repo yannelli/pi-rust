@@ -84,6 +84,9 @@ fn generate(timestamp_ms: Option<u64>) -> DurableResult<String> {
 /// Upstream `validateToolArguments(tool, call)`: coerce the call's arguments toward the tool's schema and check
 /// them. The error text is pi-ai's, which the model sees as the tool result.
 pub fn validate_tool_arguments(tool: &Tool, call: &ToolCall) -> Result<JsonObject, String> {
+    if let Some(error) = &call.arguments_error {
+        return Err(format!("Invalid arguments for tool \"{}\": {error}", call.name));
+    }
     let arguments = Value::Object(call.arguments.clone());
     match pi_agent::validate::validate_tool_arguments(&tool.name, &tool.parameters, &arguments)? {
         Value::Object(arguments) => Ok(arguments),

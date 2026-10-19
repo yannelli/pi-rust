@@ -48,6 +48,23 @@ mod conformance_across_reopen {
     pi_durable::storage_conformance_tests!(super::with_reopening_sqlite_storage);
 }
 
+fn prefixed() -> SqliteStorageOptions {
+    SqliteStorageOptions { prefix: Some("pi_".into()), ..SqliteStorageOptions::default() }
+}
+
+/// Every storage query against prefixed tables, beside a host table that has an unprefixed storage name.
+async fn with_prefixed_sqlite_storage(test: StorageTest) {
+    let (_directory, path) = temp_path();
+    Connection::open(&path).unwrap().execute_batch("CREATE TABLE tasks (text TEXT)").unwrap();
+    let storage = Arc::new(open_sqlite_storage_with(&path, prefixed()).await.unwrap());
+    test(storage.clone()).await;
+    let _ = storage.close(ctx()).await;
+}
+
+mod conformance_with_prefix {
+    pi_durable::storage_conformance_tests!(super::with_prefixed_sqlite_storage);
+}
+
 fn json(text: &str) -> Json {
     Json::parse(text).unwrap()
 }
@@ -131,6 +148,42 @@ async fn persists_records_and_id_allocation_across_reopen() {
     let task = pending_task(TaskId(reopened.mint_id().await.unwrap()));
     assert_eq!(reopened.commit(&[StorageWrite::Task { value: task }], ctx()).await.unwrap(), Seq(3));
     reopened.close(ctx()).await.unwrap();
+}
+
+#[tokio::test]
+async fn namespaces_tables_and_indexes_with_a_prefix_across_reopen() {
+    let (_directory, path) = temp_path();
+    Connection::open(&path).unwrap().execute_batch("CREATE TABLE tasks (text TEXT)").unwrap();
+    let storage = open_sqlite_storage_with(&path, prefixed()).await.unwrap();
+    assert_eq!(create_root(&storage).await, Seq(1));
+    storage.close(ctx()).await.unwrap();
+
+    let reopened = open_sqlite_storage_with(&path, prefixed()).await.unwrap();
+    let root = ConversationRecord { id: ROOT_CONVERSATION_ID, parent: None, owner: None };
+    assert_eq!(reopened.conversation(ROOT_CONVERSATION_ID, ctx()).await.unwrap(), Some(root));
+    reopened.close(ctx()).await.unwrap();
+    let connection = Connection::open(&path).unwrap();
+    let mut names = connection
+        .prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%'")
+        .unwrap();
+    let names: Vec<String> = names.query_map([], |row| row.get(0)).unwrap().map(Result::unwrap).collect();
+    let unprefixed: Vec<&String> = names.iter().filter(|name| !name.starts_with("pi_")).collect();
+    assert_eq!(unprefixed, ["tasks"]);
+    assert!(names.iter().any(|name| name == "pi_tasks"));
+    assert!(names.iter().any(|name| name == "pi_entry_heads_by_conversation"));
+}
+
+#[tokio::test]
+async fn rejects_an_invalid_prefix_before_creating_the_database() {
+    let directory = tempfile::tempdir().unwrap();
+    let nested = directory.path().join("nested");
+    let path = nested.join("storage.sqlite").to_string_lossy().into_owned();
+    for (prefix, message) in [("bad-prefix", "Invalid SQLite schema prefix"), ("SQLite_x", "is reserved")] {
+        let options = SqliteStorageOptions { prefix: Some(prefix.into()), ..SqliteStorageOptions::default() };
+        let error = open_sqlite_storage_with(&path, options).await.err().expect("an invalid prefix");
+        assert!(error.to_string().contains(message), "{error}");
+    }
+    assert!(!nested.exists());
 }
 
 #[tokio::test]

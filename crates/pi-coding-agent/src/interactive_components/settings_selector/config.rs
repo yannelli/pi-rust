@@ -10,7 +10,7 @@ use crate::settings::QuietStartup;
 use crate::settings::defaults::{DEFAULT_HTTP_IDLE_TIMEOUT_MS, DEFAULT_THINKING_LEVEL};
 use crate::settings::schema::{
     CacheWarmingMode, DoubleEscapeAction, FullscreenExitOutput, FullscreenScrollbar, MermaidRenderingMode,
-    TreeFilterMode, TuiMode, WarningSettings,
+    SessionShareDestination, TreeFilterMode, TuiMode, WarningSettings,
 };
 use crate::theme::{SYSTEM_THEME_NAME, TerminalTheme};
 
@@ -82,6 +82,7 @@ pub struct SettingsConfig {
     pub steering_mode: QueueMode,
     pub follow_up_mode: QueueMode,
     pub transport: Transport,
+    pub session_share_destination: SessionShareDestination,
     pub http_idle_timeout_ms: u64,
     pub cache_warming_mode: CacheWarmingMode,
     /// The global default thinking level.
@@ -134,6 +135,7 @@ impl Default for SettingsConfig {
             steering_mode: QueueMode::OneAtATime,
             follow_up_mode: QueueMode::OneAtATime,
             transport: Transport::Auto,
+            session_share_destination: SessionShareDestination::Auto,
             http_idle_timeout_ms: DEFAULT_HTTP_IDLE_TIMEOUT_MS,
             cache_warming_mode: CacheWarmingMode::Streaming,
             thinking_level: DEFAULT_THINKING_LEVEL,
@@ -188,6 +190,7 @@ pub struct SettingsCallbacks {
     pub on_steering_mode_change: OnChange<QueueMode>,
     pub on_follow_up_mode_change: OnChange<QueueMode>,
     pub on_transport_change: OnChange<Transport>,
+    pub on_session_share_destination_change: OnChange<SessionShareDestination>,
     pub on_http_idle_timeout_ms_change: OnChange<u64>,
     pub on_cache_warming_mode_change: OnChange<CacheWarmingMode>,
     /// Receives the provider, the model id, and the level.
@@ -241,6 +244,7 @@ impl Default for SettingsCallbacks {
             on_steering_mode_change: ignore(),
             on_follow_up_mode_change: ignore(),
             on_transport_change: ignore(),
+            on_session_share_destination_change: ignore(),
             on_http_idle_timeout_ms_change: ignore(),
             on_cache_warming_mode_change: ignore(),
             on_model_thinking_level_change: Box::new(|_, _, _| {}),

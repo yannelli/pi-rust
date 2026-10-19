@@ -109,11 +109,11 @@ async fn ex09_context_derives_request_messages_from_the_raw_transcript() {
     let raw = ["message", "message", "message", "message", "pi.system", "message", "message", "edit", "note"];
     assert_eq!(kinds, raw);
     let request = [
+        r#"system: {"cwd":"<cwd>/repo</cwd>"}"#,
         "user: read files a and b",
         "assistant: reading call(a) call(b)",
         "result(a)",
         "result(b)",
-        r#"system: {"cwd":"<cwd>/repo</cwd>"}"#,
         "assistant: a and b look fine",
     ];
     assert_eq!(view.messages.iter().map(show).collect::<Vec<_>>(), request);

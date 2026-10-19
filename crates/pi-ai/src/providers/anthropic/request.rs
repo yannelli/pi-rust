@@ -99,6 +99,16 @@ pub(super) fn resolve_thinking(
     Thinking { enabled: true, max_tokens, budget_tokens: if budget == 0 { 1024 } else { budget }, effort: None }
 }
 
+fn thinking_disabled(model: &Model, thinking: &Thinking) -> bool {
+    model.reasoning && !thinking.enabled && mapped_thinking_level(model, ThinkingLevel::Off) != MappedLevel::Unsupported
+}
+
+/// Whether the request carries effort markers. Effort cannot change between messages while thinking is
+/// disabled, so `off` sends none.
+pub(super) fn effort_messages(model: &Model, compat: &Compat, thinking: &Thinking) -> bool {
+    compat.mid_convo_effort && !thinking_disabled(model, thinking)
+}
+
 fn adaptive_effort(model: &Model, level: ThinkingLevel) -> String {
     if let MappedLevel::Value(value) = mapped_thinking_level(model, level) {
         return value.to_string();
@@ -148,14 +158,14 @@ pub(super) fn build_params(params: &Params) -> Result<(Value, Vec<String>), Stri
             oauth,
             cache_control: cache_control.as_ref(),
             allow_empty_signature: compat.allow_empty_signature,
-            managed_provider: compat.mid_convo_effort.then_some(model.provider.as_str()),
+            managed_provider: effort_messages(model, compat, thinking).then_some(model.provider.as_str()),
             native_tools: native_tools.then_some(format),
         },
     )?;
     let betas = beta_features(params, native_tools);
     let mut body = Map::new();
     body.insert("model".into(), json!(model.id));
-    let wire_messages = if compat.mid_convo_effort {
+    let wire_messages = if effort_messages(model, compat, thinking) {
         insert_thinking_level_messages(converted, thinking.effort.as_deref().unwrap_or("high"))
     } else {
         converted.messages
@@ -213,8 +223,11 @@ pub(super) fn build_params(params: &Params) -> Result<(Value, Vec<String>), Stri
 }
 
 fn insert_thinking(body: &mut Map<String, Value>, model: &Model, compat: &Compat, thinking: &Thinking) {
-    if compat.mid_convo_effort {
-        // Managed effort models always think adaptively, so prefix mismatches drop blocks.
+    if thinking_disabled(model, thinking) {
+        // Anthropic rejects `block_binding` with disabled thinking, and no effort means the model default.
+        body.insert("thinking".into(), json!({"type": "disabled"}));
+    } else if compat.mid_convo_effort {
+        // Managed effort models think adaptively, so prefix mismatches drop blocks.
         body.insert(
             "thinking".into(),
             json!({"type": "adaptive", "display": "summarized",
@@ -234,8 +247,6 @@ fn insert_thinking(body: &mut Map<String, Value>, model: &Model, compat: &Compat
                 json!({"type": "enabled", "budget_tokens": budget, "display": "summarized"}),
             );
         }
-    } else if model.reasoning && mapped_thinking_level(model, ThinkingLevel::Off) != MappedLevel::Unsupported {
-        body.insert("thinking".into(), json!({"type": "disabled"}));
     }
 }
 

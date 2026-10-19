@@ -193,12 +193,12 @@ fn orders_settings_like_upstream_with_and_without_image_support() {
             "steering-mode",
         ]
     );
-    assert_eq!(ids.len(), 34);
+    assert_eq!(ids.len(), 35);
     assert_eq!(ids.last().map(String::as_str), Some("theme"));
     let without = SettingsSelector::with_image_support(SettingsConfig::default(), SettingsCallbacks::default(), false);
     let without = self::ids(&without);
     assert_eq!(without[..2], ["autocompact", "auto-resize-images"]);
-    assert_eq!(without.len(), 32);
+    assert_eq!(without.len(), 33);
 }
 
 #[test]
@@ -215,7 +215,7 @@ fn renders_between_borders_and_navigates_with_a_terminal() {
     assert!(screen.contains("→ Auto-compact"), "{screen}");
     assert!(screen.contains("Automatically compact context when it gets too large"), "{screen}");
     assert!(screen.contains("Type to search · Enter/Space to change · Esc to cancel"), "{screen}");
-    assert!(screen.contains("(1/32)"), "{screen}");
+    assert!(screen.contains("(1/33)"), "{screen}");
     harness.send(keys::DOWN);
     let screen = harness.screen();
     assert!(screen.contains("→ Auto-resize images"), "{screen}");
@@ -236,7 +236,9 @@ fn dispatches_parsed_values() {
     let trust = Calls::new();
     let pad = Calls::new();
     let auto_compact = Calls::new();
+    let share = Calls::new();
     let callbacks = SettingsCallbacks {
+        on_session_share_destination_change: Box::new(share.recorder()),
         on_steering_mode_change: Box::new(steering.recorder()),
         on_http_idle_timeout_ms_change: Box::new(http.recorder()),
         on_quiet_startup_change: Box::new(quiet.recorder()),
@@ -248,7 +250,9 @@ fn dispatches_parsed_values() {
     let mut selector = SettingsSelector::new(SettingsConfig::default(), callbacks);
     send(&mut selector, &[keys::SPACE]);
     let list = selector.settings_list();
-    for (id, presses) in [("steering-mode", 2), ("http-idle-timeout", 2), ("quiet-startup", 3)] {
+    for (id, presses) in
+        [("steering-mode", 2), ("http-idle-timeout", 2), ("quiet-startup", 3), ("share-destination", 3)]
+    {
         list.borrow_mut().select_item(id);
         for _ in 0..presses {
             list.borrow_mut().handle_input(keys::ENTER);
@@ -267,6 +271,8 @@ fn dispatches_parsed_values() {
     let expected = [DefaultProjectTrust::Always, DefaultProjectTrust::Never, DefaultProjectTrust::Ask];
     assert_eq!(trust.get(), expected);
     assert_eq!(pad.get(), [0, 1]);
+    use crate::settings::schema::SessionShareDestination::{Auto, Gist, Radius};
+    assert_eq!(share.get(), [Gist, Radius, Auto]);
     assert_eq!(format_http_idle_timeout_ms(45_500), "45.5 sec");
     assert_eq!(format_http_idle_timeout_ms(90_000), "90 sec");
     let trust = list.borrow().items().iter().find(|item| item.id == "default-project-trust").cloned();
@@ -306,6 +312,7 @@ fn persisting_callbacks_write_settings_and_config_reads_them() {
         "fullscreenWheelScrollLines": 7,
         "quietStartup": "header",
         "defaultProjectTrust": "never",
+        "sessionShareDestination": "radius",
         "warnings": {"anthropicExtraUsage": false},
     })));
     let config = SettingsConfig::from_settings(&settings);
@@ -313,12 +320,19 @@ fn persisting_callbacks_write_settings_and_config_reads_them() {
     assert_eq!(config.fullscreen_wheel_scroll_lines, Some(7));
     assert_eq!(config.quiet_startup, QuietStartup::Header);
     assert_eq!(config.default_project_trust, DefaultProjectTrust::Never);
+    assert_eq!(config.session_share_destination, crate::settings::schema::SessionShareDestination::Radius);
     assert_eq!(config.warnings.anthropic_extra_usage, Some(false));
     assert!(config.available_themes.iter().any(|theme| theme == "dark"));
 
     let mut selector = SettingsSelector::new(config, SettingsCallbacks::persisting(settings.clone()));
     let list = selector.settings_list();
-    for id in ["fullscreen-wheel-scroll-lines", "default-project-trust", "hide-thinking", "editor-padding"] {
+    for id in [
+        "fullscreen-wheel-scroll-lines",
+        "default-project-trust",
+        "hide-thinking",
+        "editor-padding",
+        "share-destination",
+    ] {
         list.borrow_mut().select_item(id);
         selector.handle_input(keys::ENTER);
     }
@@ -326,4 +340,7 @@ fn persisting_callbacks_write_settings_and_config_reads_them() {
     assert_eq!(settings.default_project_trust(), "ask");
     assert!(settings.hide_thinking_block());
     assert_eq!(settings.editor_padding_x(), 1);
+    assert_eq!(settings.session_share_destination(), crate::settings::schema::SessionShareDestination::Auto);
+    let invalid = SettingsManager::in_memory(json!({"sessionShareDestination": "dropbox"}));
+    assert_eq!(invalid.session_share_destination(), crate::settings::schema::SessionShareDestination::Auto);
 }

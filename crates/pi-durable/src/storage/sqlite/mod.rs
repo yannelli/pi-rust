@@ -7,6 +7,7 @@ pub mod database;
 pub mod migrations;
 mod reads;
 mod rows;
+pub mod schema;
 mod writes;
 
 use std::sync::Arc;
@@ -19,7 +20,11 @@ use tokio::sync::{Notify, OnceCell};
 
 pub use connection::{BundledSqliteDatabase, SqliteStorageOptions, open_sqlite_storage, open_sqlite_storage_with};
 pub use database::{SqliteDatabase, SqliteExecutor, SqliteRow, SqliteValue, TransactionCallback, transaction};
-pub use migrations::{CURRENT_SQLITE_SCHEMA_VERSION, SQLITE_MIGRATIONS, SqliteMigration, apply_sqlite_migrations};
+pub use migrations::{
+    CURRENT_SQLITE_SCHEMA_VERSION, SQLITE_MIGRATIONS, SqliteMigration, apply_sqlite_migrations,
+    apply_sqlite_migrations_for_schema, create_sqlite_migrations,
+};
+pub use schema::{SqliteSchema, validate_sqlite_schema_prefix};
 
 use crate::errors::{DurableError, DurableResult};
 use crate::types::DocumentScope;
@@ -27,6 +32,7 @@ use crate::types::DocumentScope;
 /// SQLite-backed `Storage` over an owned database facade.
 pub struct SqliteStorage {
     db: Arc<dyn SqliteDatabase>,
+    schema: SqliteSchema,
     next_id: std::sync::Mutex<u64>,
     closed: AtomicBool,
     closing: OnceCell<DurableResult<()>>,
@@ -67,16 +73,25 @@ impl Drop for ReadGuard<'_> {
 impl SqliteStorage {
     /// Initialize storage over an owned SQLite database facade; the facade is closed when this fails.
     pub async fn open(db: Arc<dyn SqliteDatabase>) -> DurableResult<Self> {
-        let next_id = async {
-            apply_sqlite_migrations(&*db, SQLITE_MIGRATIONS).await?;
-            let row = db.get("SELECT next_id, next_seq FROM durable_metadata WHERE singleton = 1", &[]).await?;
+        Self::open_with_prefix(db, None).await
+    }
+
+    /// Like [`SqliteStorage::open`], with every table and index name prefixed so the database can hold other
+    /// tables. Changing the prefix does not migrate existing data.
+    pub async fn open_with_prefix(db: Arc<dyn SqliteDatabase>, prefix: Option<&str>) -> DurableResult<Self> {
+        let opened = async {
+            let schema = SqliteSchema::new(prefix)?;
+            apply_sqlite_migrations_for_schema(&*db, &schema, &create_sqlite_migrations(&schema)).await?;
+            let sql = format!("SELECT next_id, next_seq FROM {} WHERE singleton = 1", schema.tables.durable_metadata);
+            let row = db.get(&sql, &[]).await?;
             let row = row.ok_or_else(|| DurableError::storage("Durable SQLite metadata is missing"))?;
-            parse_next_id(row.text("next_id")?)
+            Ok::<_, DurableError>((schema, parse_next_id(row.text("next_id")?)?))
         }
         .await;
-        match next_id {
-            Ok(next_id) => Ok(Self {
+        match opened {
+            Ok((schema, next_id)) => Ok(Self {
                 db,
+                schema,
                 next_id: std::sync::Mutex::new(next_id),
                 closed: AtomicBool::new(false),
                 closing: OnceCell::new(),
