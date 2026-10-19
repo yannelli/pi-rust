@@ -172,6 +172,13 @@ pub(super) fn build_items(config: &SettingsConfig, supports_images: bool, submen
             &["sse", "websocket", "websocket-cached", "auto"],
         ),
         item(
+            "share-destination",
+            "Session share destination",
+            "Where to upload sessions with /share (auto prefers Radius when authenticated, otherwise GitHub Gist)",
+            enum_str(config.session_share_destination),
+            &["auto", "gist", "radius"],
+        ),
+        item(
             "http-idle-timeout",
             "HTTP idle timeout",
             "Maximum idle gap while waiting for HTTP headers or body chunks. Disable for local models that pause longer than five minutes.",
@@ -313,6 +320,9 @@ pub(super) fn dispatch_change(callbacks: &mut SettingsCallbacks, id: &str, value
         "steering-mode" => parse_enum(value).into_iter().for_each(&mut callbacks.on_steering_mode_change),
         "follow-up-mode" => parse_enum(value).into_iter().for_each(&mut callbacks.on_follow_up_mode_change),
         "transport" => parse_enum(value).into_iter().for_each(&mut callbacks.on_transport_change),
+        "share-destination" => {
+            parse_enum(value).into_iter().for_each(&mut callbacks.on_session_share_destination_change)
+        }
         "http-idle-timeout" => {
             let choice = HTTP_IDLE_TIMEOUT_CHOICES.iter().find(|(label, _)| *label == value);
             choice.into_iter().for_each(|(_, ms)| (callbacks.on_http_idle_timeout_ms_change)(*ms));

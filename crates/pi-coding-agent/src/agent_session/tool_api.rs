@@ -134,8 +134,7 @@ impl AgentSession {
             lock(&self.tools).pending.clear();
             return;
         };
-        let declared: Vec<String> =
-            current.tools_added.unwrap_or_default().into_iter().map(|tool| tool.name).collect();
+        let declared: Vec<String> = current.tools_added.unwrap_or_default().into_iter().map(|tool| tool.name).collect();
         let names = apply_tool_modifiers(&declared, modifiers);
         {
             let mut tools = lock(&self.tools);

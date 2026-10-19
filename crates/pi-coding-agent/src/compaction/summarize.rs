@@ -234,14 +234,8 @@ pub async fn summarize_compaction(
         let usage = history_usage.map_or(prefix_usage, |usage| combine_usage(&usage, &prefix_usage));
         (format!("{history}\n\n---\n\n**Turn Context (split turn):**\n\n{prefix}"), usage)
     } else {
-        generate_summary_with_usage(
-            &preparation.messages_to_summarize,
-            model,
-            custom_instructions,
-            previous,
-            options,
-        )
-        .await?
+        generate_summary_with_usage(&preparation.messages_to_summarize, model, custom_instructions, previous, options)
+            .await?
     };
     let (read_files, modified_files) = compute_file_lists(&preparation.file_ops);
     summary.push_str(&format_file_operations(&read_files, &modified_files));

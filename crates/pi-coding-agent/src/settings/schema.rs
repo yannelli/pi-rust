@@ -196,6 +196,16 @@ pub enum TreeFilterMode {
     All,
 }
 
+/// Where `/share` uploads: `auto` uses Radius when signed in, else a GitHub gist.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionShareDestination {
+    #[default]
+    Auto,
+    Gist,
+    Radius,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CacheWarmingMode {
@@ -249,6 +259,8 @@ pub struct Settings {
     pub model_thinking_levels: Option<BTreeMap<String, ThinkingLevel>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport: Option<Transport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_share_destination: Option<SessionShareDestination>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub steering_mode: Option<QueueMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

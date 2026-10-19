@@ -253,6 +253,14 @@ impl SettingsManager {
         self.set_global_value("transport", serde_json::to_value(transport).ok());
     }
 
+    pub fn session_share_destination(&self) -> SessionShareDestination {
+        self.state().merged.session_share_destination.unwrap_or_default()
+    }
+
+    pub fn set_session_share_destination(&self, destination: SessionShareDestination) {
+        self.set_global_value("sessionShareDestination", serde_json::to_value(destination).ok());
+    }
+
     pub fn compaction_enabled(&self) -> bool {
         self.state().merged.compaction.as_ref().and_then(|c| c.enabled).unwrap_or(COMPACTION_ENABLED)
     }

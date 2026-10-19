@@ -27,6 +27,7 @@ impl SettingsConfig {
             steering_mode: settings.steering_mode(),
             follow_up_mode: settings.follow_up_mode(),
             transport: settings.transport(),
+            session_share_destination: settings.session_share_destination(),
             http_idle_timeout_ms: settings.http_idle_timeout_ms().unwrap_or(DEFAULT_HTTP_IDLE_TIMEOUT_MS),
             cache_warming_mode: settings.cache_warming_mode(),
             thinking_level: settings.default_thinking_level().unwrap_or(DEFAULT_THINKING_LEVEL),
@@ -82,6 +83,7 @@ impl SettingsCallbacks {
             on_steering_mode_change: save!(set_steering_mode),
             on_follow_up_mode_change: save!(set_follow_up_mode),
             on_transport_change: save!(set_transport),
+            on_session_share_destination_change: save!(set_session_share_destination),
             on_http_idle_timeout_ms_change: save!(set_http_idle_timeout_ms),
             on_cache_warming_mode_change: save!(set_cache_warming_mode),
             on_model_thinking_level_change: Box::new(move |provider, model_id, level| {

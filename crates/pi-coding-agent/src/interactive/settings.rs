@@ -86,6 +86,7 @@ impl InteractiveMode {
             steering_mode: session.steering_mode(),
             follow_up_mode: session.follow_up_mode(),
             transport: settings.transport(),
+            session_share_destination: settings.session_share_destination(),
             http_idle_timeout_ms: settings.http_idle_timeout_ms().unwrap_or(DEFAULT_HTTP_IDLE_TIMEOUT_MS),
             cache_warming_mode: settings.cache_warming_mode(),
             thinking_level: settings.default_thinking_level().unwrap_or(DEFAULT_THINKING_LEVEL),
@@ -176,6 +177,9 @@ impl InteractiveMode {
             on_steering_mode_change: on!(weak, |mode, queue| mode.session().set_steering_mode(queue)),
             on_follow_up_mode_change: on!(weak, |mode, queue| mode.session().set_follow_up_mode(queue)),
             on_transport_change: on!(weak, |mode, transport| mode.settings().set_transport(transport)),
+            on_session_share_destination_change: on!(weak, |mode, destination| {
+                mode.settings().set_session_share_destination(destination)
+            }),
             on_http_idle_timeout_ms_change: on!(weak, |mode, timeout| {
                 let settings = mode.settings();
                 settings.set_http_idle_timeout_ms(timeout);

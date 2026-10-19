@@ -15,6 +15,7 @@ use crate::export::share::{
     DEFAULT_RADIUS_GATEWAY, ShareOutcome, SystemCommandRunner, check_gh_auth, create_gist, export_session_for_share,
     upload_radius_artifact,
 };
+use crate::settings::schema::SessionShareDestination;
 
 /// Removes the temp directory of the share files when dropped.
 struct ShareDir(PathBuf);
@@ -26,7 +27,8 @@ impl Drop for ShareDir {
 }
 
 impl InteractiveMode {
-    /// `/share`: Radius when signed in, else a secret GitHub gist of the HTML export.
+    /// `/share` to the `sessionShareDestination`: with `auto`, Radius when signed in, else a secret
+    /// GitHub gist of the HTML export.
     pub(super) fn handle_share_command(&self) {
         let session = self.session();
         let dir = ShareDir(std::env::temp_dir().join(format!("pi-share-{}", crate::session::ids::uuid_v4())));
@@ -38,9 +40,15 @@ impl InteractiveMode {
         if let Err(error) = exported {
             return self.show_error(&format!("Failed to export session: {error}"));
         }
+        let destination = self.settings().session_share_destination();
         self.spawn(move |mode| async move {
-            if let Some(token) = mode.radius_share_token().await {
-                return mode.share_via_radius(&jsonl, token).await;
+            if destination != SessionShareDestination::Gist {
+                if let Some(token) = mode.radius_share_token().await {
+                    return mode.share_via_radius(&jsonl, token).await;
+                }
+                if destination == SessionShareDestination::Radius {
+                    return mode.show_error("Radius authentication is not configured. Run '/login radius' first.");
+                }
             }
             if let Err(error) = check_gh_auth(&SystemCommandRunner).await {
                 return mode.show_error(&error.to_string());
