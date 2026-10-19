@@ -34,7 +34,8 @@ async fn compacts_and_retries_with_the_same_attempt_leaving_the_error_out_of_the
     let compaction = entries.iter().find(|record| record.kind == "pi.compaction").unwrap();
     assert_eq!(compaction.data.as_ref().map(Json::to_serde), Some(json!({ "reason": "overflow" })));
     let retry = chat.faux.last_agent_request();
-    assert!(user_text(retry.first()).contains("SUMMARY"));
+    assert!(matches!(retry.first(), Some(Message::System(_))));
+    assert!(user_text(retry.get(1)).contains("SUMMARY"));
     let errored = |message: &Message| matches!(message, Message::Assistant(a) if a.stop_reason == StopReason::Error);
     assert!(!retry.iter().any(errored));
     chat.close().await;

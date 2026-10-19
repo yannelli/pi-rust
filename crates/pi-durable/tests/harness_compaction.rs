@@ -430,6 +430,7 @@ async fn places_the_summary_at_once_when_idle_and_keeps_raw_history() {
             _ => "other",
         })
         .collect();
-    assert_eq!(roles, ["user", "user", "assistant", "user", "system"]);
+    // One complete system baseline leads the summary, the kept turn, and the new input.
+    assert_eq!(roles, ["system", "user", "user", "assistant", "user"]);
     harness.close(&ctx()).await.unwrap();
 }

@@ -81,9 +81,10 @@ async fn places_a_queued_summary_at_post_tools_and_the_run_continues_in_the_comp
     chat.result(task).await;
     gate.resolve();
     assert_eq!(input.wait(&ctx()).await.unwrap().status, SubmissionStatus::Done);
-    // The continuation request starts with the summary.
+    // The continuation request starts with the new baseline, then the summary, ahead of the kept tool call.
     let continuation = chat.faux.last_agent_request();
-    assert!(user_text(continuation.first()).contains("<summary>\nSUMMARY\n</summary>"));
+    assert!(matches!(continuation.first(), Some(Message::System(_))));
+    assert!(user_text(continuation.get(1)).contains("<summary>\nSUMMARY\n</summary>"));
     assert_eq!(tail(&chat.kinds().await, 4), ["pi.tool-result", "pi.compaction", "pi.system", "pi.assistant"]);
     chat.close().await;
 }
