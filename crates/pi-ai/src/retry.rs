@@ -5,8 +5,10 @@
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::hash::{BuildHasher, Hasher};
+use std::sync::LazyLock;
 use std::time::Duration;
 
+use regex::{Regex, RegexBuilder};
 use tokio_util::sync::CancellationToken;
 
 use crate::types::{AssistantMessage, StopReason};
@@ -222,17 +224,23 @@ const RETRYABLE_PATTERNS: &[&str] = &[
     "504",
     "520",
     "524",
-    "service.?unavailable",
+    "service.?(?:is.?)?(?:temporarily.?)?unavailable",
     "server.?error",
     "internal.?error",
-    "provider.?returned.?error",
+    "provider.?returned.?(?:an.?)?error",
     "exceeded request buffer limit while retrying upstream",
+    "unable to forward upstream",
+    "upstream.?request.?failed",
+    "upstream_stream_read_error",
+    "stream was interrupted",
+    "http/?2 stream failed",
     "network.?error",
     "connection.?error",
     "connection.?refused",
     "connection.?lost",
     "other side closed",
     "fetch failed",
+    r"request to \S+ failed, reason:",
     "getaddrinfo",
     "enotfound",
     "eai_again",
@@ -259,23 +267,12 @@ const RETRYABLE_PATTERNS: &[&str] = &[
     "subscription_sharing_user_unavailable",
 ];
 
-/// Whether `pattern` (literal characters, `.` for any character, `?` making the character
-/// before it optional) occurs in `text`. Both are lowercase.
-fn pattern_found(text: &[char], pattern: &[char]) -> bool {
-    fn matches_at(text: &[char], pattern: &[char]) -> bool {
-        let Some((&atom, rest)) = pattern.split_first() else { return true };
-        let optional = rest.first() == Some(&'?');
-        let rest = if optional { &rest[1..] } else { rest };
-        let here = text.first().is_some_and(|&c| atom == '.' || c == atom);
-        (here && matches_at(&text[1..], rest)) || (optional && matches_at(text, rest))
-    }
-    (0..=text.len()).any(|start| matches_at(&text[start..], pattern))
+fn alternation(patterns: &[&str]) -> Regex {
+    RegexBuilder::new(&patterns.join("|")).case_insensitive(true).build().expect("valid retry patterns")
 }
 
-fn matches_any(text: &str, patterns: &[&str]) -> bool {
-    let text: Vec<char> = text.to_lowercase().chars().collect();
-    patterns.iter().any(|pattern| pattern_found(&text, &pattern.chars().collect::<Vec<_>>()))
-}
+static NON_RETRYABLE: LazyLock<Regex> = LazyLock::new(|| alternation(NON_RETRYABLE_PATTERNS));
+static RETRYABLE: LazyLock<Regex> = LazyLock::new(|| alternation(RETRYABLE_PATTERNS));
 
 /// Whether a failed assistant message looks like a transient provider or transport error.
 /// Quota and billing exhaustion never count. Callers handle context overflow first.
@@ -283,7 +280,7 @@ pub fn is_retryable_assistant_error(message: &AssistantMessage) -> bool {
     let Some(error) = message.error_message.as_deref().filter(|_| message.stop_reason == StopReason::Error) else {
         return false;
     };
-    !error.is_empty() && !matches_any(error, NON_RETRYABLE_PATTERNS) && matches_any(error, RETRYABLE_PATTERNS)
+    !error.is_empty() && !NON_RETRYABLE.is_match(error) && RETRYABLE.is_match(error)
 }
 
 /// Progress of [`retry_assistant_call`]. Retry numbers are 1-based.
