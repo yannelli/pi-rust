@@ -69,6 +69,8 @@ show("grow negative", () => e.memory.grow(-1));
 show("memory descriptor", () => new WebAssembly.Memory({}));
 show("memory bounds", () => new WebAssembly.Memory({ initial: 70000 }));
 show("memory maximum", () => new WebAssembly.Memory({ initial: 3, maximum: 1 }));
+show("transfer memory buffer", () => e.memory.buffer.transfer());
+show("transfer memory buffer in a clone", () => structuredClone(e.memory.buffer, { transfer: [e.memory.buffer] }));
 
 const mem = new ModuleBuilder();
 const peek = mem.importFunc("env", "peek", [], []);

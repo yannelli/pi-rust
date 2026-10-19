@@ -196,7 +196,9 @@ const Memory = defineInterface(
       return guard("", () => wasm.memoryGrow(id, unsigned(delta, prefix, "Argument 0")));
     },
     get buffer() {
-      return wasm.memoryBuffer(idOf(this, Memory, "WebAssembly.Memory.buffer", "Receiver is not a WebAssembly.Memory"));
+      const buffer = wasm.memoryBuffer(idOf(this, Memory, "WebAssembly.Memory.buffer", "Receiver is not a WebAssembly.Memory"));
+      internal.nonDetachable.add(buffer);
+      return buffer;
     },
   },
 );

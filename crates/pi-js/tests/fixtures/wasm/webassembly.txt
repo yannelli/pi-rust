@@ -46,6 +46,8 @@ grow negative !! TypeError "WebAssembly.Memory.grow(): Argument 0 must be non-ne
 memory descriptor !! TypeError "WebAssembly.Memory(): Property 'initial' is required"
 memory bounds !! RangeError "WebAssembly.Memory(): Property 'initial': value 70000 is above the upper bound 65536"
 memory maximum !! RangeError "WebAssembly.Memory(): Property 'maximum': value 1 is below the lower bound 3"
+transfer memory buffer !! TypeError "ArrayBuffer is not detachable and could not be cloned."
+transfer memory buffer in a clone !! DOMException "Cannot transfer object of unsupported type."
 data segment => 'hello'
 shared bytes => [ 42, 7, undefined ]
 wasm grow => [ 1, 0, 131072, -1 ]

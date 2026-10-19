@@ -110,6 +110,7 @@ function serialize(value, transferList, source) {
       if (ports.includes(item)) throw dataCloneError("Transfer list contains duplicate MessagePort");
       ports.push(item);
     } else if (item instanceof ArrayBuffer) {
+      if (internal.nonDetachable.has(item)) throw dataCloneError("Cannot transfer object of unsupported type.");
       if (buffers.includes(item)) throw dataCloneError("Transfer list contains duplicate ArrayBuffer");
       buffers.push(item);
     } else {

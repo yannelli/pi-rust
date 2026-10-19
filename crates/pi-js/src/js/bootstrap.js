@@ -402,6 +402,23 @@
     });
   }
   internal.defineLazy = defineLazy;
+  // A WebAssembly.Memory buffer views the engine's memory, which moves when it grows, so like V8 it
+  // cannot be detached.
+  const nonDetachable = new WeakSet();
+  internal.nonDetachable = nonDetachable;
+  for (const name of ["transfer", "transferToFixedLength", "transferToImmutable"]) {
+    const descriptor = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, name);
+    if (!descriptor) continue;
+    const original = descriptor.value;
+    const method = {
+      [name](...args) {
+        if (nonDetachable.has(this)) throw new TypeError("ArrayBuffer is not detachable and could not be cloned.");
+        return Reflect.apply(original, this, args);
+      },
+    }[name];
+    Object.defineProperty(method, "length", { value: original.length });
+    Object.defineProperty(ArrayBuffer.prototype, name, { ...descriptor, value: method });
+  }
   Object.defineProperty(globalThis, "global", { value: globalThis, writable: true, configurable: true });
   defineLazy("process", () => loadBuiltin("process"));
   defineLazy("console", () => loadBuiltin("console"));
