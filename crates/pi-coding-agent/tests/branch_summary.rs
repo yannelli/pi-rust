@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use common::*;
 use pi_agent::StreamFn;
 use pi_ai::providers::faux::{FauxProvider, FauxResponse};
-use pi_ai::{ApiProvider, ContentBlock, Model, StopReason, StreamOptions};
+use pi_ai::{ApiProvider, ContentBlock, StopReason, StreamOptions};
 use pi_coding_agent::compaction::branch::ProvidedSummary;
 use pi_coding_agent::compaction::{
     BranchSummaryOptions, SummarizationOptions, TreeNavigationRequest, collect_entries_for_branch_summary,
@@ -43,17 +43,15 @@ fn abandoned() -> SessionManager {
 }
 
 #[tokio::test]
-async fn caps_output_and_rejects_bad_summaries() {
+async fn leaves_output_to_the_provider_and_rejects_bad_summaries() {
     let session = abandoned();
     let entries: Vec<&Entry> = session.entries().iter().collect();
     let model = FauxProvider::model();
-    let (stream_fn, seen) = recording(vec![FauxResponse::text("summary"), FauxResponse::text("summary")]);
+    let (stream_fn, seen) = recording(vec![FauxResponse::text("summary")]);
     let result = generate_branch_summary(&entries, &model, &options(stream_fn.clone())).await;
     assert!(result.summary.unwrap().starts_with("The user explored a different conversation branch"));
-    let small = Model { max_tokens: 1024, ..model.clone() };
-    generate_branch_summary(&entries, &small, &options(stream_fn)).await;
     let seen = seen.lock().unwrap().clone();
-    assert_eq!((seen[0].max_tokens, seen[1].max_tokens), (Some(4096), Some(1024)));
+    assert_eq!(seen[0].max_tokens, None, "the provider sizes summary output from the request");
     assert!(seen[0].tool_choice.is_none() && seen[0].reasoning.is_none());
     assert_eq!(seen[0].cache_retention, Some(pi_ai::CacheRetention::None));
     assert!(seen[0].session_id.is_some(), "branch summaries get a fresh routing id");

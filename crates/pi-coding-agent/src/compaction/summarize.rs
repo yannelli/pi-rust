@@ -77,12 +77,12 @@ pub fn summarization_failure(response: &AssistantMessage, label: &str) -> Option
     }
 }
 
-pub(crate) fn request_options(model: &Model, max_tokens: u64, options: &SummarizationOptions) -> StreamOptions {
+/// Summary requests set no `max_tokens`: the provider sizes output from the request, as for normal turns.
+pub(crate) fn request_options(model: &Model, options: &SummarizationOptions) -> StreamOptions {
     let reasoning = options.thinking_level.filter(|level| model.reasoning && *level != ThinkingLevel::Off);
     StreamOptions {
         api_key: options.api_key.clone(),
         cancel: options.cancel.clone(),
-        max_tokens: Some(max_tokens),
         reasoning,
         headers: options.headers.clone(),
         env: options.env.clone(),
@@ -132,10 +132,6 @@ pub(crate) fn summarization_context(prompt: String) -> Context {
     }
 }
 
-fn output_cap(model: &Model, budget: u64) -> u64 {
-    if model.max_tokens > 0 { budget.min(model.max_tokens) } else { budget }
-}
-
 fn checked_text(response: &AssistantMessage, label: &str) -> anyhow::Result<(String, Usage)> {
     if let Some(failure) = summarization_failure(response, label) {
         anyhow::bail!(failure);
@@ -150,12 +146,10 @@ fn checked_text(response: &AssistantMessage, label: &str) -> anyhow::Result<(Str
 pub async fn generate_summary_with_usage(
     messages: &[Message],
     model: &Model,
-    reserve_tokens: u64,
     custom_instructions: Option<&str>,
     previous_summary: Option<&str>,
     options: &SummarizationOptions,
 ) -> anyhow::Result<(String, Usage)> {
-    let max_tokens = output_cap(model, reserve_tokens * 8 / 10);
     let mut instructions =
         String::from(if previous_summary.is_some() { UPDATE_SUMMARIZATION_PROMPT } else { SUMMARIZATION_PROMPT });
     instructions.push_str(SUMMARY_FORMAT_TAIL);
@@ -168,7 +162,7 @@ pub async fn generate_summary_with_usage(
         prompt.push_str(&format!("<previous-summary>\n{previous}\n</previous-summary>\n\n"));
     }
     prompt.push_str(&instructions);
-    let request = request_options(model, max_tokens, options);
+    let request = request_options(model, options);
     let response = complete_summarization(
         model,
         &summarization_context(prompt),
@@ -185,26 +179,21 @@ pub async fn generate_summary_with_usage(
 pub async fn generate_summary(
     messages: &[Message],
     model: &Model,
-    reserve_tokens: u64,
     custom_instructions: Option<&str>,
     previous_summary: Option<&str>,
     options: &SummarizationOptions,
 ) -> anyhow::Result<String> {
-    Ok(generate_summary_with_usage(messages, model, reserve_tokens, custom_instructions, previous_summary, options)
-        .await?
-        .0)
+    Ok(generate_summary_with_usage(messages, model, custom_instructions, previous_summary, options).await?.0)
 }
 
 async fn generate_turn_prefix_summary(
     messages: &[Message],
     model: &Model,
-    reserve_tokens: u64,
     options: &SummarizationOptions,
 ) -> anyhow::Result<(String, Usage)> {
-    let max_tokens = output_cap(model, reserve_tokens / 2);
     let conversation = serialize_conversation(&convert_to_llm(messages));
     let prompt = format!("# Conversation\n{conversation}\n\n# Instructions\n{TURN_PREFIX_SUMMARIZATION_PROMPT}");
-    let request = request_options(model, max_tokens, options);
+    let request = request_options(model, options);
     let response = complete_summarization(
         model,
         &summarization_context(prompt),
@@ -225,7 +214,6 @@ pub async fn summarize_compaction(
     custom_instructions: Option<&str>,
     options: &SummarizationOptions,
 ) -> anyhow::Result<CompactionResult> {
-    let reserve = preparation.settings.reserve_tokens;
     let previous = preparation.previous_summary.as_deref();
     let (mut summary, usage) = if preparation.is_split_turn && !preparation.turn_prefix_messages.is_empty() {
         let (history, history_usage) = if preparation.messages_to_summarize.is_empty() {
@@ -234,7 +222,6 @@ pub async fn summarize_compaction(
             let (text, usage) = generate_summary_with_usage(
                 &preparation.messages_to_summarize,
                 model,
-                reserve,
                 custom_instructions,
                 previous,
                 options,
@@ -243,14 +230,13 @@ pub async fn summarize_compaction(
             (text, Some(usage))
         };
         let (prefix, prefix_usage) =
-            generate_turn_prefix_summary(&preparation.turn_prefix_messages, model, reserve, options).await?;
+            generate_turn_prefix_summary(&preparation.turn_prefix_messages, model, options).await?;
         let usage = history_usage.map_or(prefix_usage, |usage| combine_usage(&usage, &prefix_usage));
         (format!("{history}\n\n---\n\n**Turn Context (split turn):**\n\n{prefix}"), usage)
     } else {
         generate_summary_with_usage(
             &preparation.messages_to_summarize,
             model,
-            reserve,
             custom_instructions,
             previous,
             options,
