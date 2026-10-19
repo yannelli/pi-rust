@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.2.3] - 2026-10-19
+
+### Fixed
+
+- **interactive:** report ready only after the first extension bind ([dee9c05](https://github.com/yannelli/pi-rust/commit/dee9c0530f9b91cb74f055aca2cf63427106dfaa))
+
 ## [0.2.2] - 2026-10-19
 
 ### Added
