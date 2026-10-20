@@ -28,7 +28,7 @@ use crate::entries::{ASSISTANT_ENTRY, TypedEntryDraft};
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{ConversationId, EntryId, SubmissionId, TaskId};
 use crate::session::{Draft, Tx};
-use crate::tasks::TaskOptions;
+use crate::tasks::{TaskOptions, TaskTrace};
 use crate::types::{
     EntryDraft, EntryQuery, EntryRecord, HostCallback, JoinPolicy, ReportFrom, SubmissionSettlement, TaskOutcome,
     TaskOutcomeError, TaskRecord, TaskState,
@@ -395,7 +395,17 @@ pub(crate) async fn start_run(
     live: &Draft<LiveState>,
     inputs: Vec<SubmissionId>,
 ) -> DurableResult<()> {
-    let task_id = create_generation(tx, conversation_id).await?;
+    // The run continues the first input's trace, or starts at the root; the other inputs become links.
+    let mut traces = Vec::new();
+    for id in &inputs {
+        traces.push(tx.current_submission(*id).await?.and_then(|record| record.trace));
+    }
+    let mut options = TaskOptions::conversation(conversation_id);
+    if let Some((first, rest)) = traces.split_first_mut() {
+        options.trace = first.take().map_or(TaskTrace::Root, TaskTrace::Carrier);
+        options.links = rest.iter_mut().filter_map(Option::take).collect();
+    }
+    let task_id = tx.create_task(generation_task(), Json::empty_object(), options).await?;
     live.edit(|live| live.run = Some(super::live::LiveRun { task_id, inputs }))
 }
 

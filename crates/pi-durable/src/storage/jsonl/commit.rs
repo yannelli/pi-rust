@@ -81,7 +81,7 @@ pub(crate) fn encode_commit(
                 let ordinal = add(sidecar_file_name("doc", id.0), document_payload(*id, to_json(content)?));
                 MainOperation::DocumentChange { id: *id, ordinal }
             }
-            other => MainOperation::Inline(other.clone()),
+            other => MainOperation::Inline(Box::new(other.clone())),
         };
         main.push(main_operation_json(&operation)?);
     }

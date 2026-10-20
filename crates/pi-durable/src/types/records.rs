@@ -4,6 +4,7 @@
 
 use pi_ai::Message;
 use pi_chord::Json;
+use pi_telemetry::TelemetryCarrier;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{ConversationId, EntryId, SubmissionId, TaskId};
@@ -181,6 +182,9 @@ pub struct SubmissionRecord {
     #[serde(default, deserialize_with = "super::present_json::deserialize", skip_serializing_if = "Option::is_none")]
     pub detail: Option<Json>,
     pub id: SubmissionId,
+    /// Adapter-owned context of the admission span; absent without propagation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace: Option<TelemetryCarrier>,
 }
 
 /// Submission fields supplied before the Session assigns an ID.
@@ -194,6 +198,7 @@ pub struct SubmissionCreate {
     pub answer: Option<EntryId>,
     pub reason: Option<String>,
     pub detail: Option<Json>,
+    pub trace: Option<TelemetryCarrier>,
 }
 
 impl SubmissionCreate {
@@ -208,6 +213,7 @@ impl SubmissionCreate {
             answer: None,
             reason: None,
             detail: None,
+            trace: None,
         }
     }
 
@@ -222,6 +228,7 @@ impl SubmissionCreate {
             reason: self.reason,
             detail: self.detail,
             id,
+            trace: self.trace,
         }
     }
 }

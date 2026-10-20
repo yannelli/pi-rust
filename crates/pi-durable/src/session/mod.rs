@@ -97,8 +97,9 @@ pub trait SessionHooks: Send + Sync {
     /// Runs after close seals admission and before the line closes Storage.
     async fn before_close(&self) {}
 
-    /// The Session's failure, and errors of listeners, which never fail what ran them, with what each is about.
-    fn report(&self, _error: &DurableError, _info: &ReportInfo) {}
+    /// The Session's failure, and errors of listeners, which never fail what ran them, with what each is about and,
+    /// when known, the context of the operation that raised it.
+    fn report(&self, _error: &DurableError, _info: &ReportInfo, _context: Option<&Context>) {}
 }
 
 struct NoHooks;

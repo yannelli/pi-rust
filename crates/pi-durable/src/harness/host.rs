@@ -17,6 +17,7 @@ use super::registry::builtin_tasks;
 use super::scheduler::Scheduler;
 use super::submissions::{Submission, Submissions};
 use super::task_graph::{TaskGraphView, TaskGraphWatch};
+use super::telemetry::DurableTelemetry;
 use super::types::{AbortSubmissionResult, AbortTaskResult, HarnessInspection, Wake};
 use super::usage::{PROVIDER_DOC, USAGE_DOC, UsageState, add_usage_state};
 use super::util::{cancellation, scan_all};
@@ -38,6 +39,7 @@ pub type ConversationInit = Box<dyn FnOnce(Tx, ConversationId) -> BoxFuture<'sta
 /// The Session extension points the Harness fills in.
 struct HarnessHooks {
     options: HarnessOptions,
+    telemetry: Arc<DurableTelemetry>,
     scheduler: OnceLock<Weak<Scheduler>>,
 }
 
@@ -65,10 +67,11 @@ impl SessionHooks for HarnessHooks {
         }
     }
 
-    fn report(&self, error: &DurableError, info: &ReportInfo) {
+    fn report(&self, error: &DurableError, info: &ReportInfo, context: Option<&Context>) {
         if let Some(report) = &self.options.on_report {
             report(error, info);
         }
+        self.telemetry.report(info, context);
     }
 }
 
@@ -111,15 +114,20 @@ impl Harness {
                 "Registry lacks built-in tasks {names}; create it with createRegistry()"
             )));
         }
-        let hooks = Arc::new(HarnessHooks { options: options.clone(), scheduler: OnceLock::new() });
+        let telemetry = Arc::new(DurableTelemetry::new(options.telemetry.clone()));
+        let hooks = Arc::new(HarnessHooks {
+            options: options.clone(),
+            telemetry: telemetry.clone(),
+            scheduler: OnceLock::new(),
+        });
         let session = create_session(
             storage,
             SessionOptions { now: options.now.clone(), hooks: Some(hooks.clone() as Arc<dyn SessionHooks>) },
         );
-        let report = options.on_report.clone().unwrap_or_else(|| Arc::new(|_: &DurableError, _: &ReportInfo| {}));
-        let timer_report = report.clone();
+        let timer_hooks = hooks.clone();
         let timer_report = Arc::new(move |error: &DurableError| {
-            timer_report(error, &ReportInfo::HostError { callback: HostCallback::SetTimer, task: None });
+            let info = ReportInfo::HostError { callback: HostCallback::SetTimer, task: None };
+            timer_hooks.report(error, &info, None);
         });
         let now = options.now.clone().unwrap_or_else(|| Arc::new(system_now));
         let core = Arc::new(HarnessCore {
@@ -131,7 +139,8 @@ impl Harness {
             now,
             timers: Timers::new(options.set_timer.clone(), timer_report),
             on_wake: options.on_wake.clone(),
-            report,
+            on_report: options.on_report.clone(),
+            telemetry,
         });
         let scheduler = Scheduler::new(core.clone(), without_abort_signal(context));
         let _ = hooks.scheduler.set(Arc::downgrade(&scheduler));

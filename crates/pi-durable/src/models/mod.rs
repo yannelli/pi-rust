@@ -5,6 +5,7 @@
 mod registry;
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use pi_ai::registry::{OnPayloadFn, OnResponseFn};
@@ -13,6 +14,7 @@ use pi_ai::{
     ThinkingBudgets, ThinkingLevel, Transport,
 };
 use pi_chord::AbortSignal;
+use pi_telemetry::TelemetryContext;
 use serde::{Deserialize, Serialize};
 
 use crate::errors::DurableResult;
@@ -50,6 +52,8 @@ impl DeferredOption {
 #[derive(Clone, Default)]
 pub struct SimpleStreamOptions {
     pub signal: Option<AbortSignal>,
+    /// Parent of the request's telemetry, such as the calling phase's span.
+    pub telemetry: Option<Arc<dyn TelemetryContext>>,
     pub api_key: Option<String>,
     /// Provider-scoped environment values over the process environment.
     pub env: BTreeMap<String, String>,
@@ -92,6 +96,8 @@ impl std::fmt::Debug for SimpleStreamOptions {
 #[derive(Clone, Default)]
 pub struct DeferredFetchOptions {
     pub signal: Option<AbortSignal>,
+    /// Parent of the request's telemetry, such as the calling phase's span.
+    pub telemetry: Option<Arc<dyn TelemetryContext>>,
     pub api_key: Option<String>,
     pub env: BTreeMap<String, String>,
     pub headers: BTreeMap<String, String>,

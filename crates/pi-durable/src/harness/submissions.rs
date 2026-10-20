@@ -3,7 +3,10 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
-use pi_chord::{Context, with_abort_signal};
+use pi_chord::{Context, with_abort_signal, with_telemetry};
+use pi_telemetry::{
+    SpanAttributes, SpanLink, SpanOptions, SpanStatus, TelemetryContext, TelemetryContextExt, TelemetrySpan,
+};
 
 use super::generation::start_run;
 use super::inbox::{
@@ -76,17 +79,36 @@ impl Submissions {
     ) -> DurableResult<Submission> {
         self.scheduler.resume();
         let core = self.scheduler.core.clone();
-        let id =
-            self.session
-                .commit_with(
-                    move |tx| async move {
-                        admit_submission(&tx, conversation_id, draft, core.now(), &core.settings()).await
-                    },
-                    context,
-                    TransactionScope::default(),
-                )
-                .await?;
-        self.handle(id)
+        let input = matches!(draft, SubmissionDraft::Input { .. });
+        // Each input starts its own trace, linked to its caller; a write is a child of its caller.
+        let parent: Arc<dyn TelemetryContext> = if input { core.telemetry.root.clone() } else { context.telemetry() };
+        let attributes = SpanAttributes::new()
+            .with("submission.type", if input { "input" } else { "write" })
+            .with("conversation.id", conversation_id.get());
+        let options = SpanOptions::new("pi.durable.submit").with_attributes(attributes);
+        let admitted = parent.start_infallible_span(options, |span| async move {
+            if input {
+                span.add_link(SpanLink::new(context.telemetry()));
+            }
+            let admitting = span.clone();
+            let admit = move |tx: Tx| async move {
+                admit_submission(&tx, conversation_id, draft, core.now(), &core.settings(), Some(&admitting)).await
+            };
+            let admitted =
+                self.session.commit_with(admit, &with_telemetry(span.clone(), context), TransactionScope::default());
+            let admitted = admitted.await;
+            match &admitted {
+                Ok(admission) => span.set_attributes(
+                    SpanAttributes::new()
+                        .with("submission.id", admission.id.get())
+                        .with("result", admission.status.as_str()),
+                ),
+                // Error text may contain caller content: only the status is recorded.
+                Err(_) => span.set_status(SpanStatus::Error { error: None }),
+            }
+            admitted
+        });
+        self.handle(admitted.await?.id)
     }
 
     /// Handle for an existing submission, or `None`.
@@ -196,16 +218,42 @@ impl Submission {
     }
 }
 
+/// What admission did with a submission; a stale write reports `Done`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdmissionStatus {
+    Queued,
+    Placed,
+    Done,
+}
+
+impl AdmissionStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Placed => "placed",
+            Self::Done => "done",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Admission {
+    pub id: SubmissionId,
+    pub status: AdmissionStatus,
+}
+
 /// Admit a submission inside a commit (spec section 6). A known request ID returns its submission. A busy
 /// conversation queues it, or rejects `reject` input with `ConversationBusy`. An idle one with queued items queues
 /// it behind them and runs a final boundary. Otherwise idle input starts a run and an idle write appends its entry.
+/// With `span`, the submission stores its carrier, and a steer links the span to the running generation's trace.
 pub async fn admit_submission(
     tx: &Tx,
     conversation_id: ConversationId,
     draft: SubmissionDraft,
     now: f64,
     settings: &Settings,
-) -> DurableResult<SubmissionId> {
+    span: Option<&Arc<dyn TelemetrySpan>>,
+) -> DurableResult<Admission> {
     let kind = match draft {
         SubmissionDraft::Input { .. } => SubmissionType::Input,
         SubmissionDraft::Write { .. } => SubmissionType::Write,
@@ -219,10 +267,24 @@ pub async fn admit_submission(
             let message = format!("Request {request} already identifies a submission of type {existing_kind}");
             return Err(DurableError::error(message));
         }
-        return Ok(existing.id);
+        let status = match existing.status {
+            SubmissionStatus::Queued => AdmissionStatus::Queued,
+            SubmissionStatus::Placed => AdmissionStatus::Placed,
+            SubmissionStatus::Done | SubmissionStatus::Unanswered => AdmissionStatus::Done,
+        };
+        return Ok(Admission { id: existing.id, status });
     }
+    let propagation = span.and_then(|span| span.propagation());
+    let trace = span.zip(propagation.as_ref()).and_then(|(span, propagation)| propagation.inject(span.as_ref()));
     let live_draft = tx.doc(&LIVE_DOC, conversation_id).await?;
-    let busy = live_draft.get()?.run.is_some();
+    let run = live_draft.get()?.run;
+    let busy = run.is_some();
+    if let (Some(span), Some(propagation), Some(run)) = (span, &propagation, &run)
+        && matches!(draft, SubmissionDraft::Input { when_busy: Some(WhenBusy::Steer), .. })
+        && let Some(trace) = tx.task(run.task_id).await?.and_then(|task| task.trace)
+    {
+        span.add_link(SpanLink::new(propagation.extract(Some(&trace))));
+    }
     if busy && matches!(draft, SubmissionDraft::Input { when_busy: Some(WhenBusy::Reject), .. }) {
         return Err(DurableError::ConversationBusy(conversation_id));
     }
@@ -235,6 +297,7 @@ pub async fn admit_submission(
     let create = |status, entry| SubmissionCreate {
         status,
         entry,
+        trace: trace.clone(),
         ..SubmissionCreate::queued(conversation_id, kind, request_id.clone())
     };
     if queued_items {
@@ -253,12 +316,19 @@ pub async fn admit_submission(
             None => tx.doc(&INBOX_DOC, conversation_id).await?,
         };
         inbox.edit(|state| state.items.push(item))?;
-        let Some(boundary) = &mut boundary else { return Ok(record.id) };
+        let Some(boundary) = &mut boundary else {
+            return Ok(Admission { id: record.id, status: AdmissionStatus::Queued });
+        };
         let placed = apply_boundary(tx, boundary, BoundaryAt::Final, now).await?;
+        let status = match kind {
+            SubmissionType::Write => AdmissionStatus::Done,
+            _ if placed.users.last() == Some(&record.id) => AdmissionStatus::Placed,
+            _ => AdmissionStatus::Queued,
+        };
         if !placed.users.is_empty() {
             start_run(tx, conversation_id, &live_draft, placed.users).await?;
         }
-        return Ok(record.id);
+        return Ok(Admission { id: record.id, status });
     }
     let Some(boundary) = boundary else { unreachable!("an idle conversation has a boundary") };
     match draft {
@@ -266,16 +336,18 @@ pub async fn admit_submission(
             if is_stale(&boundary, &entry) {
                 let stale =
                     SubmissionCreate { reason: Some("stale".into()), ..create(SubmissionStatus::Unanswered, None) };
-                return Ok(tx.create_submission(stale).await?.id);
+                let id = tx.create_submission(stale).await?.id;
+                return Ok(Admission { id, status: AdmissionStatus::Done });
             }
             let appended = tx.append_entry(conversation_id, entry).await?;
-            Ok(tx.create_submission(create(SubmissionStatus::Done, Some(appended.id))).await?.id)
+            let id = tx.create_submission(create(SubmissionStatus::Done, Some(appended.id))).await?.id;
+            Ok(Admission { id, status: AdmissionStatus::Done })
         }
         SubmissionDraft::Input { content, .. } => {
             let entry = append_user(tx, conversation_id, content, now).await?;
             let record = tx.create_submission(create(SubmissionStatus::Placed, Some(entry))).await?;
             start_run(tx, conversation_id, &live_draft, vec![record.id]).await?;
-            Ok(record.id)
+            Ok(Admission { id: record.id, status: AdmissionStatus::Placed })
         }
     }
 }

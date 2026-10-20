@@ -73,7 +73,7 @@ impl Scheduler {
         for (record, message) in pass.faulted {
             let (task, extension) = self.about_task(&record);
             let info = ReportInfo::TaskFaulted { task, extension, reason: FaultReason::RestartLimit };
-            self.core.report(&DurableError::error(message), &info);
+            self.core.report(&DurableError::error(message), &info, None);
         }
         if !pass.abandoned.is_empty() {
             let mut state = lock(&self.state);
@@ -222,7 +222,8 @@ impl Scheduler {
                 // Blocked now without a commit: the graph and the host's wake must hear it.
                 self.notify_blocked();
                 self.schedule_wake();
-                self.core.report(&error, &ReportInfo::MigrationFailed { task: report_task(record), extension });
+                let info = ReportInfo::MigrationFailed { task: report_task(record), extension };
+                self.core.report(&error, &info, None);
                 Err(BlockedReason::MigrationFailed)
             }
         }
@@ -315,7 +316,9 @@ impl Scheduler {
             conversation_id: record.conversation_id,
             mode,
             controller,
-            context,
+            context: Mutex::new(context),
+            links: if record.started_at.is_none() { record.links.clone().unwrap_or_default() } else { Vec::new() },
+            record: Mutex::new(record.clone()),
             watches: Mutex::new(Vec::new()),
             timers: Mutex::default(),
             next_timer: Default::default(),

@@ -266,6 +266,7 @@ async fn settles_submissions_by_their_current_record_in_the_transaction() {
         answer: None,
         reason: None,
         detail: None,
+        trace: Default::default(),
     };
     let make = |record: SubmissionCreate| {
         let harness = harness.clone();

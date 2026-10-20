@@ -25,6 +25,8 @@ fn task_record_matches_upstream_layout() {
         started_at: None,
         ended_at: None,
         restarts: None,
+        trace: Default::default(),
+        links: Default::default(),
     };
     let encoded = text(&record);
     assert_eq!(

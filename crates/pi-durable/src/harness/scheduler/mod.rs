@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use pi_chord::{AbortController, Context};
+use pi_telemetry::{SpanAttributes, TelemetryCarrier};
 use tokio::sync::watch;
 
 pub use runtime::{ConversationHandle, HookApi, TaskRuntime};
@@ -56,8 +57,12 @@ pub(crate) struct Invocation {
     pub conversation_id: ConversationId,
     pub mode: Mode,
     pub controller: AbortController,
-    /// Context passed to handlers; cancelled by `controller`.
-    pub context: Context,
+    /// Context passed to handlers; cancelled by `controller`. A phase swaps in one whose telemetry is its span.
+    pub context: Mutex<Context>,
+    /// Creation-time links of the task's first invocation, attached to each of its phase spans.
+    pub links: Vec<TelemetryCarrier>,
+    /// The task's latest committed record, kept once it leaves `live`, for the phase span's outcome.
+    pub record: Mutex<TaskRecord>,
     /// Watches taken through the runtime; stopped at invocation end.
     pub watches: Mutex<Vec<CommittedWatch>>,
     /// Timers armed through the runtime, by key; disarmed at invocation end.
@@ -78,6 +83,10 @@ impl Invocation {
 
     pub fn check(&self) -> DurableResult<()> {
         if self.is_ended() { Err(self.ended_error()) } else { Ok(()) }
+    }
+
+    pub fn context(&self) -> Context {
+        lock(&self.context).clone()
     }
 
     pub fn report_task(&self) -> ReportTask {
@@ -118,6 +127,8 @@ pub(crate) struct SchedState {
     pub fail_fast_checks: BTreeSet<TaskId>,
     /// Live `abandon_on_restart` tasks found at open; the first reservation pass abort-marks them.
     pub abandoned: BTreeSet<TaskId>,
+    /// Tasks loaded at open whose first phase in this process has not started.
+    pub resumed: HashSet<TaskId>,
     pub reconcile_scheduled: bool,
     /// Reconcile passes underway with work; they finalize held outcomes and mark cascades.
     pub reconciling: usize,
@@ -241,6 +252,8 @@ impl Scheduler {
                 let mut state = lock(&scheduler.state);
                 let mut parked = Vec::new();
                 for record in records {
+                    scheduler.count_active(&record.kind, 1.0);
+                    state.resumed.insert(record.id);
                     if record.abandon_on_restart == Some(true) {
                         state.abandoned.insert(record.id);
                     }
@@ -273,7 +286,7 @@ impl Scheduler {
                 record.id, record.kind
             );
             let (task, extension) = self.about_task(&record);
-            self.core.report(&DurableError::error(message), &ReportInfo::TaskParked { task, extension });
+            self.core.report(&DurableError::error(message), &ReportInfo::TaskParked { task, extension }, None);
         }
         // Derive abort marks a crash left unapplied below cancelled owners, and finalize held outcomes.
         lock(&self.state).cascade_pending = true;
@@ -602,10 +615,15 @@ impl Scheduler {
     }
 
     /// Fail the Session for a failure in one of the scheduler's own commits; ignored once closing.
-    pub(crate) fn fail_session(&self, error: DurableError) {
+    pub(crate) fn fail_session(&self, error: DurableError, context: Option<&Context>) {
         if !self.closing() {
-            self.core.session.fail(error);
+            self.core.session.fail(error, context);
         }
+    }
+
+    /// Move `pi.durable.tasks.active` for a task of `kind`.
+    pub(crate) fn count_active(&self, kind: &str, delta: f64) {
+        let _ = self.core.telemetry.active.add(delta, SpanAttributes::new().with("task", kind));
     }
 }
 

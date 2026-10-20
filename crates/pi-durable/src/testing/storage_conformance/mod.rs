@@ -156,6 +156,8 @@ pub(crate) fn pending_task(id: TaskId, conversation_id: ConversationId, phase: &
         started_at: None,
         ended_at: None,
         restarts: None,
+        trace: Default::default(),
+        links: Default::default(),
     }
 }
 

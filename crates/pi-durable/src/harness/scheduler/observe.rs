@@ -21,6 +21,15 @@ impl Scheduler {
                 let CommitChange::Task(record) = change else { continue };
                 changed = true;
                 let previous = state.live.get(&record.id).cloned();
+                if let Some(invocation) = state.invocations.get(&record.id) {
+                    *lock(&invocation.record) = record.clone();
+                }
+                if record.is_terminal() {
+                    state.resumed.remove(&record.id);
+                }
+                if !state.closing && record.is_terminal() != previous.is_none() {
+                    self.count_active(&record.kind, if record.is_terminal() { -1.0 } else { 1.0 });
+                }
                 if failed_outcome(record) && previous.as_ref().is_none_or(|p| !failed_outcome(p)) {
                     failed.push(record.id);
                 }
@@ -128,6 +137,12 @@ impl Scheduler {
     pub(super) fn seal(&self) {
         let (unsubscribe, timers) = {
             let mut state = lock(&self.state);
+            if !state.closing {
+                for record in state.live.values() {
+                    self.count_active(&record.kind, -1.0);
+                }
+            }
+            state.resumed.clear();
             state.closing = true;
             state.contexts.clear();
             let timers = [state.expiry.take(), state.timer.take()];

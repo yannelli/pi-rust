@@ -16,7 +16,7 @@ pub(crate) const RECLAIM_SUFFIX: &str = ".reclaim";
 #[derive(Clone, Debug)]
 pub(crate) enum MainOperation {
     /// Conversation, entry, submission, terminal task, and document retirement writes, stored whole.
-    Inline(StorageWrite),
+    Inline(Box<StorageWrite>),
     TaskSidecar {
         id: TaskId,
         ordinal: u64,
@@ -166,7 +166,7 @@ fn parse_main_operation(value: &Json, description: &str) -> DurableResult<MainOp
             if !is_object(value.get("value")) || safe_integer(value["value"].get("id")).is_none() {
                 return Err(invalid(&format!("{kind} write")));
             }
-            Ok(MainOperation::Inline(typed(value, || format!("Invalid {kind} write in {description}"))?))
+            Ok(MainOperation::Inline(Box::new(typed(value, || format!("Invalid {kind} write in {description}"))?)))
         }
         "task" => {
             let task = &value["value"];
@@ -175,10 +175,12 @@ fn parse_main_operation(value: &Json, description: &str) -> DurableResult<MainOp
             {
                 return Err(invalid("terminal task write"));
             }
-            Ok(MainOperation::Inline(typed(value, || format!("Invalid terminal task write in {description}"))?))
+            Ok(MainOperation::Inline(Box::new(typed(value, || {
+                format!("Invalid terminal task write in {description}")
+            })?)))
         }
         "document.retire" => match safe_integer(value.get("id")) {
-            Some(id) => Ok(MainOperation::Inline(StorageWrite::DocumentRetire { id: DocumentId(id) })),
+            Some(id) => Ok(MainOperation::Inline(Box::new(StorageWrite::DocumentRetire { id: DocumentId(id) }))),
             None => Err(invalid("document retirement")),
         },
         "task.sidecar" => match (safe_integer(value.get("id")), ordinal()) {

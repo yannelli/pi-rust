@@ -85,6 +85,8 @@ fn pending_task(id: TaskId, phase: &str) -> TaskRecord {
         started_at: None,
         ended_at: None,
         restarts: None,
+        trace: Default::default(),
+        links: Default::default(),
     }
 }
 

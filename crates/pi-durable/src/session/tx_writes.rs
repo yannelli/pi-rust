@@ -11,7 +11,7 @@ use crate::documents::address_id;
 use crate::entries::{Entry, TypedEntry, TypedEntryDraft};
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{ConversationId, EntryId, ROOT_CONVERSATION_ID, SubmissionId, TaskId};
-use crate::tasks::{TaskOptions, TaskOwnership, TaskTemplate};
+use crate::tasks::{TaskOptions, TaskOwnership, TaskTemplate, TaskTrace};
 use crate::types::*;
 
 impl Tx {
@@ -189,6 +189,15 @@ impl Tx {
                 started_at: None,
                 ended_at: None,
                 restarts: None,
+                trace: match options.trace {
+                    TaskTrace::Inherit => {
+                        let span = tx.context.telemetry();
+                        span.propagation().and_then(|propagation| propagation.inject(span.as_ref()))
+                    }
+                    TaskTrace::Root => None,
+                    TaskTrace::Carrier(carrier) => Some(carrier),
+                },
+                links: (!options.links.is_empty()).then_some(options.links),
             };
             tx.open_state()?.task_entry(id).write = Some((TaskWriteKind::Create, record));
             Ok(id)
@@ -247,6 +256,15 @@ impl Tx {
         let state = lock(&self.0.state);
         let staged = state.task_order.iter().filter_map(|id| state.tasks.get(id)?.write.as_ref());
         staged.map(|write| write.1.clone()).collect()
+    }
+
+    /// Internal: a submission as this transaction created it, else as committed; allowed after table writes.
+    pub async fn current_submission(&self, id: SubmissionId) -> DurableResult<Option<SubmissionRecord>> {
+        let staged = lock(&self.0.state).submissions.iter().find(|record| record.id == id).cloned();
+        match staged {
+            Some(record) => Ok(Some(record)),
+            None => self.0.core.storage.submission(id, &self.0.context).await,
+        }
     }
 
     /// Internal: conversations this transaction created or forked so far.

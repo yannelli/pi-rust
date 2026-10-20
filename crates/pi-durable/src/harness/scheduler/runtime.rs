@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use futures::FutureExt;
 use futures::future::{BoxFuture, Shared};
 use pi_chord::{AbortSignal, Context, Json, with_abort_signal};
+use pi_telemetry::SpanAttributes;
 
 use super::step::RunState;
 use super::{Invocation, KeptContext, Scheduler};
@@ -21,7 +22,7 @@ use crate::harness::define::ExtensionHooks;
 use crate::harness::registry::RegistrySnapshot;
 use crate::harness::settings::Settings;
 use crate::harness::submissions::Submission;
-use crate::harness::task::NextTaskState;
+use crate::harness::task::{NextTaskState, phase_of};
 use crate::harness::types::{AbortTaskResult, Agent, ContextView, SubmissionDraft};
 use crate::harness::util::{lock, with_context};
 use crate::ids::{ConversationId, EntryId, TaskId};
@@ -100,7 +101,7 @@ impl TaskRuntime {
                 Some(shared) => shared.clone(),
                 None => {
                     let (scheduler, id) = (self.scheduler.clone(), self.invocation.conversation_id);
-                    let (snapshot, context) = (self.registry(), self.invocation.context.clone());
+                    let (snapshot, context) = (self.registry(), self.invocation.context());
                     let resolve = async move { scheduler.core.resolve_agent(id, Some(snapshot), &context).await };
                     let shared = resolve.boxed().shared();
                     *slot = Some(shared.clone());
@@ -146,16 +147,27 @@ impl TaskRuntime {
         Fut: Future<Output = DurableResult<Option<NextTaskState>>> + Send + 'static,
     {
         let (scheduler, invocation) = (self.scheduler.clone(), self.invocation.clone());
-        self.gated(
-            move |tx, current| async move {
-                if let Some(next) = change(tx.clone(), current.clone()).await? {
-                    scheduler.commit_state(&tx, &invocation, &current, next).await?;
-                }
-                Ok(())
-            },
-            context,
-        )
-        .await
+        let checkpoint = self
+            .gated(
+                move |tx, current| async move {
+                    let Some(next) = change(tx.clone(), current.clone()).await? else { return Ok(None) };
+                    scheduler.commit_state(&tx, &invocation, &current, next.clone()).await?;
+                    let phase = match (&current.state, &next) {
+                        (TaskState::Running { checkpoint: from }, TaskState::Running { checkpoint: to }) => {
+                            Some(phase_of(to)).filter(|phase| *phase != phase_of(from))
+                        }
+                        _ => None,
+                    };
+                    Ok(phase)
+                },
+                context,
+            )
+            .await?;
+        if let Some(phase) = checkpoint {
+            let attributes = SpanAttributes::new().with("phase", phase);
+            self.invocation.context().telemetry().add_event("pi.durable.checkpoint", attributes);
+        }
+        Ok(())
     }
 
     /// Commit a change that returns a value and leaves the task's state as it is.
@@ -370,7 +382,7 @@ impl TaskRuntime {
     pub fn report(&self, error: &DurableError) {
         let info =
             ReportInfo::TaskError { task: self.invocation.report_task(), extension: self.invocation.extension.clone() };
-        self.scheduler.core.report(error, &info);
+        self.scheduler.core.report(error, &info, Some(&self.invocation.context()));
     }
 
     /// Forward a non-fatal failure of code the task called to `HarnessOptions::on_report`: an `ExtensionError` for
@@ -381,7 +393,7 @@ impl TaskRuntime {
             ReportFrom::Extension(extension) => ReportInfo::ExtensionError { extension, task, conversation_id: None },
             ReportFrom::Host(callback) => ReportInfo::HostError { callback, task },
         };
-        self.scheduler.core.report(error, &info);
+        self.scheduler.core.report(error, &info, Some(&self.invocation.context()));
     }
 
     /// Call `callback` once after about `delay_ms` on the Harness's timer (`HarnessOptions::set_timer`), for pacing

@@ -2,6 +2,7 @@
 //! [`TaskTemplate`] for its task definitions.
 
 use pi_chord::Json;
+use pi_telemetry::TelemetryCarrier;
 
 use crate::errors::DurableResult;
 use crate::ids::{ConversationId, TaskId};
@@ -25,6 +26,17 @@ pub enum TaskOwnership {
     Task(TaskId),
 }
 
+/// Which telemetry context a new task's phases continue.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum TaskTrace {
+    /// The creator's current span, when the adapter propagates.
+    #[default]
+    Inherit,
+    /// The adapter root, without a stored carrier.
+    Root,
+    Carrier(TelemetryCarrier),
+}
+
 /// Options of `Tx::create_task`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TaskOptions {
@@ -35,6 +47,9 @@ pub struct TaskOptions {
     pub background: bool,
     /// Abort-mark the task with reason `restart` when a later Harness starts scheduling and it is still live.
     pub abandon_on_restart: bool,
+    pub trace: TaskTrace,
+    /// Immutable creation-time links, attached to the phase spans of the task's first invocation.
+    pub links: Vec<TelemetryCarrier>,
 }
 
 impl TaskOptions {
@@ -45,6 +60,8 @@ impl TaskOptions {
             conversation_id: Some(conversation_id),
             background: false,
             abandon_on_restart: false,
+            trace: TaskTrace::Inherit,
+            links: Vec::new(),
         }
     }
 
@@ -55,6 +72,8 @@ impl TaskOptions {
             conversation_id: None,
             background: false,
             abandon_on_restart: false,
+            trace: TaskTrace::Inherit,
+            links: Vec::new(),
         }
     }
 }

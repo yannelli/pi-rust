@@ -4,10 +4,12 @@ use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use pi_chord::Context;
+use pi_telemetry::TelemetryContext;
 
 use super::agent::{AGENT_DOC, resolve_agent};
 use super::registry::{RegistryReader, RegistrySnapshot};
 use super::settings::{Settings, SettingsSource, resolve_settings};
+use super::telemetry::DurableTelemetry;
 use super::types::{Agent, AgentState, Wake};
 use crate::env::SharedEnv;
 use crate::errors::{DurableError, DurableResult};
@@ -42,6 +44,9 @@ pub type WakeFn = Arc<dyn Fn(Wake) -> DurableResult<()> + Send + Sync>;
 /// Options of `Harness::open`.
 #[derive(Clone)]
 pub struct HarnessOptions {
+    /// Host-owned adapter for content-free admission and phase telemetry (`DURABLE_TELEMETRY_SCHEMA`); its
+    /// propagation and metrics capabilities are optional. Default no-op.
+    pub telemetry: Option<Arc<dyn TelemetryContext>>,
     /// pi-ai model access used by generation.
     pub models: Arc<dyn Models>,
     pub registry: Arc<dyn RegistryReader>,
@@ -71,6 +76,7 @@ pub struct HarnessOptions {
 impl HarnessOptions {
     pub fn new(models: Arc<dyn Models>, registry: Arc<dyn RegistryReader>) -> Self {
         Self {
+            telemetry: None,
             models,
             registry,
             settings: None,
@@ -81,6 +87,11 @@ impl HarnessOptions {
             on_wake: None,
             on_report: None,
         }
+    }
+
+    pub fn with_telemetry(mut self, telemetry: Arc<dyn TelemetryContext>) -> Self {
+        self.telemetry = Some(telemetry);
+        self
     }
 
     pub fn with_settings(mut self, settings: super::settings::HarnessSettings) -> Self {
@@ -138,7 +149,8 @@ pub(crate) struct HarnessCore {
     pub now: NowFn,
     pub timers: Timers,
     pub on_wake: Option<WakeFn>,
-    pub report: ReportFn,
+    pub on_report: Option<ReportFn>,
+    pub telemetry: Arc<DurableTelemetry>,
 }
 
 impl HarnessCore {
@@ -146,8 +158,12 @@ impl HarnessCore {
         (self.now)()
     }
 
-    pub fn report(&self, error: &DurableError, info: &ReportInfo) {
-        (self.report)(error, info);
+    /// Report to `HarnessOptions::on_report`, count it, and add a `pi.durable.report` event to the context's span.
+    pub fn report(&self, error: &DurableError, info: &ReportInfo, context: Option<&Context>) {
+        if let Some(on_report) = &self.on_report {
+            on_report(error, info);
+        }
+        self.telemetry.report(info, context);
     }
 
     /// The resolved settings. A failing settings source is reported and the defaults apply.
@@ -157,7 +173,8 @@ impl HarnessCore {
             Some(source) => match source() {
                 Ok(settings) => resolve_settings(Some(&settings)),
                 Err(error) => {
-                    self.report(&error, &ReportInfo::HostError { callback: HostCallback::Settings, task: None });
+                    let info = ReportInfo::HostError { callback: HostCallback::Settings, task: None };
+                    self.report(&error, &info, None);
                     resolve_settings(None)
                 }
             },
@@ -176,7 +193,8 @@ impl HarnessCore {
         let state: Option<AgentState> = state.map(|value| AGENT_DOC.decode(&value)).transpose()?;
         let report = |error: &DurableError, extension: &str| {
             let extension = Some(extension.to_owned());
-            self.report(error, &ReportInfo::ExtensionError { extension, task: None, conversation_id: Some(id) });
+            let info = ReportInfo::ExtensionError { extension, task: None, conversation_id: Some(id) };
+            self.report(error, &info, Some(context));
         };
         Ok(resolve_agent(state.as_ref(), &registry, &self.settings(), &report))
     }
