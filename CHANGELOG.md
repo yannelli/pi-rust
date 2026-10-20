@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.5.0] - 2026-10-20
+
+### Breaking Changes
+
+- **ai:** add pi.ai.request and pi.ai.poll telemetry spans ([0f402d8](https://github.com/yannelli/pi-rust/commit/0f402d8d5c27c98773867d8f2757c467071857b8))
+
 ## [0.4.0] - 2026-10-20
 
 ### Breaking Changes
