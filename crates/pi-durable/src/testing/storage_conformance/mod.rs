@@ -60,6 +60,7 @@ macro_rules! __for_each_storage_conformance_case {
             scans_tables_in_either_order => "scans tables in either ID order and continues a cursor in its order",
             replaces_task_records => "replaces complete task records and pages filtered task scans",
             scans_waiting_and_completing_tasks => "stores owners and scans waiting and completing tasks by status",
+            scans_sleeping_tasks => "stores and scans sleeping tasks by status",
             indexes_request_ids_per_conversation => "indexes request IDs per conversation and replaces complete submission records",
             stores_passive_write_submissions => "stores passive write submissions without input-only lifecycle states",
             reconstructs_rewindable_documents => "reconstructs rewindable documents and preserves half-open incarnations",

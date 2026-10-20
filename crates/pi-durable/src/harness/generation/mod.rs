@@ -113,6 +113,10 @@ pub(crate) fn running(checkpoint: &GenerationCheckpoint) -> DurableResult<Option
     Ok(Some(TaskState::Running { checkpoint: encode(checkpoint)? }))
 }
 
+pub(crate) fn sleeping(checkpoint: &GenerationCheckpoint, until: f64) -> DurableResult<Option<TaskState>> {
+    Ok(Some(TaskState::Sleeping { checkpoint: encode(checkpoint)?, until }))
+}
+
 pub(crate) fn waiting(checkpoint: &GenerationCheckpoint, on: Vec<TaskId>) -> DurableResult<Option<TaskState>> {
     Ok(Some(TaskState::Waiting { checkpoint: encode(checkpoint)?, on, policy: JoinPolicy::AllSettled }))
 }
@@ -233,11 +237,15 @@ async fn prepare(task: TaskRecord, runtime: TaskRuntime, context: Context) -> Du
     runtime.commit(change, &context).await
 }
 
+/// After the backoff's sleep; a run before `until` (an early wake, or a record of an earlier version) sleeps again.
 async fn retry(task: TaskRecord, runtime: TaskRuntime, context: Context) -> DurableResult<()> {
     let GenerationCheckpoint::Retry { attempt, compacted, until } = decode(&task)? else {
         return Err(DurableError::error("Generation checkpoint is not in phase retry"));
     };
-    runtime.sleep(until, &context).await?;
+    if until > runtime.now() {
+        let checkpoint = task.state.checkpoint().cloned().unwrap_or_default();
+        return runtime.sleep_until(until, checkpoint, &context).await;
+    }
     let conversation_id = runtime.conversation_id();
     let change = move |tx: Tx, _| async move {
         let live = tx.doc(&LIVE_DOC, conversation_id).await?;

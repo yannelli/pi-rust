@@ -242,7 +242,7 @@ fn checkout_tasks(log: Lines, charged: Arc<Mutex<BTreeSet<String>>>) -> (Task, T
     let card = |task: &TaskRecord| task.input.get("card").and_then(Json::as_str).unwrap_or_default().to_owned();
     let (refunds, aborts) = (charged.clone(), log.clone());
     let payment = define_task(
-        TaskDefinition::new("example.payment", 1, |_| Ok(Json::from(json!({ "phase": "charge", "at": now() + 100.0 }))))
+        TaskDefinition::new("example.payment", 1, |_| Ok(Json::from(json!({ "phase": "charge" }))))
             .phase("charge", move |task, runtime, context| {
                 let charged = charged.clone();
                 async move {
@@ -252,11 +252,15 @@ fn checkout_tasks(log: Lines, charged: Arc<Mutex<BTreeSet<String>>>) -> (Task, T
                         return runtime.commit(move |_, _| async move { Ok(failed) }, &context).await;
                     }
                     charged.lock().unwrap().insert(card.clone());
-                    let at = task.state.checkpoint().and_then(|c| c.get("at")?.as_f64()).unwrap();
-                    runtime.sleep(at, &context).await?;
-                    let done = next(json!({ "status": "terminal", "outcome": { "status": "completed", "result": { "card": card } } }));
-                    runtime.commit(move |_, _| async move { Ok(done) }, &context).await
+                    // The bank confirms after a moment: wait for it without holding an invocation.
+                    let confirm = Json::from(json!({ "phase": "confirm" }));
+                    runtime.sleep_until(runtime.now() + 100.0, confirm, &context).await
                 }
+            })
+            .phase("confirm", move |task, runtime, context| async move {
+                let card = card(&task);
+                let done = next(json!({ "status": "terminal", "outcome": { "status": "completed", "result": { "card": card } } }));
+                runtime.commit(move |_, _| async move { Ok(done) }, &context).await
             })
             .abort(move |task, runtime, context| {
                 let card = card(&task);
@@ -322,10 +326,6 @@ fn checkout_tasks(log: Lines, charged: Arc<Mutex<BTreeSet<String>>>) -> (Task, T
             }),
     );
     (payment, checkout)
-}
-
-fn now() -> f64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as f64
 }
 
 fn outcome_status(task: &TaskRecord) -> String {

@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use pi_ai::{AssistantMessage, Message, StopReason};
+use pi_chord::Json;
 use pi_durable::harness::live::LIVE_DOC;
 use pi_durable::harness::*;
 use pi_durable::models::{DeferredOption, create_models};
@@ -39,6 +40,19 @@ async fn live(harness: &Harness, root: &Conversation) -> Value {
 async fn checkpoint(harness: &Harness, id: TaskId) -> Option<Value> {
     let record = harness.get_task(id, &ctx()).await.unwrap()?;
     record.state.checkpoint().map(Value::from)
+}
+
+async fn state(harness: &Harness, id: TaskId) -> Value {
+    let state = harness.get_task(id, &ctx()).await.unwrap().unwrap().state;
+    Value::from(&Json::from(serde_json::to_value(state).unwrap()))
+}
+
+/// Rewrite a sleeping task as running, as earlier versions stored a sleep inside a phase.
+fn store_as_running(path: &str, id: TaskId) {
+    let connection = rusqlite::Connection::open(path).unwrap();
+    let update = "UPDATE tasks SET status = 'running',
+        record = json_set(json_remove(record, '$.state.until'), '$.state.status', 'running') WHERE id = ?";
+    connection.execute(update, [id.0 as i64]).unwrap();
 }
 
 async fn settle(harness: &Harness, id: SubmissionId) -> SubmissionRecord {
@@ -231,7 +245,17 @@ async fn resumes_a_retry_backoff_after_reopen() {
     harness.close(&ctx()).await.unwrap();
 
     let (harness, root) = open(&path, &setup).await;
-    assert_eq!(checkpoint(&harness, task_id).await, Some(json!({ "phase": "retry", "attempt": 1, "until": 61_000 })));
+    let expected = json!({
+        "status": "sleeping",
+        "checkpoint": { "phase": "retry", "attempt": 1, "until": 61_000 },
+        "until": 61_000,
+    });
+    assert_eq!(state(&harness, task_id).await, expected);
+    assert_eq!(harness.wake().unwrap(), Wake { active: false, at: Some(61_000.0) });
+    // An early wake retries nothing.
+    harness.resume().unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    assert_eq!(setup.faux.state().call_count, 1);
     let expected = json!({
         "run": { "taskId": task_id, "inputs": [id] },
         "generation": { "attempt": 1, "retry": { "at": 61_000, "error": "503 Service Unavailable" } },
@@ -241,6 +265,48 @@ async fn resumes_a_retry_backoff_after_reopen() {
     harness.resume().unwrap();
     assert_eq!(settle(&harness, id).await.status, SubmissionStatus::Done);
     assert_eq!(entry_kinds(&all_entries(&root).await), ["pi.user", "pi.assistant", "pi.assistant"]);
+    harness.close(&ctx()).await.unwrap();
+}
+
+#[tokio::test]
+async fn sleeps_again_for_a_retry_stored_as_a_running_phase_by_an_earlier_version() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = sqlite_path(&directory);
+    let setup = chat_setup(Default::default());
+    *setup.now.lock().unwrap() = Some(1_000.0);
+    let options = FauxMessageOptions {
+        error_message: Some("503 Service Unavailable".into()),
+        ..FauxMessageOptions::stop_reason(StopReason::Error)
+    };
+    setup.faux.set_responses([faux_assistant_message(Vec::new(), options), message("recovered")]);
+    let (harness, root) = open(&path, &setup).await;
+    harness.resume().unwrap();
+    setup.settings.lock().unwrap().retry = Some(RetryOverrides {
+        enabled: Some(true),
+        max_retries: Some(2),
+        base_delay_ms: Some(60_000),
+        ..Default::default()
+    });
+    let id = submit(&root, "hi").await;
+    wait_for(|| async {
+        let task_id = run_task(&harness, &root).await;
+        state(&harness, task_id).await["status"] == "sleeping"
+    })
+    .await;
+    let task_id = run_task(&harness, &root).await;
+    harness.close(&ctx()).await.unwrap();
+    // Earlier versions slept inside a running `retry` phase.
+    store_as_running(&path, task_id);
+
+    let (harness, _) = open(&path, &setup).await;
+    harness.resume().unwrap();
+    wait_for(|| async { state(&harness, task_id).await["status"] == "sleeping" }).await;
+    assert_eq!(state(&harness, task_id).await["until"], json!(61_000));
+    assert_eq!(setup.faux.state().call_count, 1);
+    *setup.now.lock().unwrap() = Some(61_000.0);
+    harness.resume().unwrap();
+    assert_eq!(settle(&harness, id).await.status, SubmissionStatus::Done);
+    assert_eq!(setup.faux.state().call_count, 2);
     harness.close(&ctx()).await.unwrap();
 }
 
@@ -281,6 +347,9 @@ async fn resumes_polling_a_deferred_response_after_reopen() {
         (pinned["phase"].clone(), pinned["attempt"].clone(), pinned["pollAt"].clone()),
         (json!("poll"), json!(1), json!(61_000))
     );
+    let stored = state(&harness, task_id).await;
+    assert_eq!((stored["status"].clone(), stored["until"].clone()), (json!("sleeping"), json!(61_000)));
+    assert_eq!(harness.wake().unwrap(), Wake { active: false, at: Some(61_000.0) });
     *setup.now.lock().unwrap() = Some(61_000.0);
     harness.resume().unwrap();
     let settled = settle(&harness, id).await;
@@ -295,6 +364,7 @@ async fn fails_no_model_when_the_pinned_model_is_gone_after_reopen_in_request_an
     let directory = tempfile::tempdir().unwrap();
     let path = sqlite_path(&directory);
     let setup = deferred_setup();
+    *setup.now.lock().unwrap() = Some(1_000.0);
     let (busy, reached) = unanswered();
     setup.faux.set_responses([busy, message("deferred").into()]);
     let (harness, root) = open(&path, &setup).await;
@@ -318,6 +388,8 @@ async fn fails_no_model_when_the_pinned_model_is_gone_after_reopen_in_request_an
     wait_for(|| async { live(&harness, &root).await["generation"].get("deferred").is_some() }).await;
     harness.close(&ctx()).await.unwrap();
 
+    // The poll sleeps until it is due; then the model is resolved.
+    *setup.now.lock().unwrap() = Some(61_000.0);
     let (harness, _) = open(&path, &empty).await;
     harness.resume().unwrap();
     let settled = settle(&harness, polling).await;

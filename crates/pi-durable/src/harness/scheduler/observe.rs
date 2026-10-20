@@ -126,15 +126,16 @@ impl Scheduler {
 
     /// Close listener: runs once admission is sealed, before `join()`, or when the Session fails.
     pub(super) fn seal(&self) {
-        let unsubscribe = {
+        let (unsubscribe, timers) = {
             let mut state = lock(&self.state);
             state.closing = true;
             state.contexts.clear();
-            if let Some((_, timer)) = state.expiry.take() {
-                timer.abort();
-            }
-            state.unsubscribe_registry.take()
+            let timers = [state.expiry.take(), state.timer.take()];
+            (state.unsubscribe_registry.take(), timers)
         };
+        for (_, disarm) in timers.into_iter().flatten() {
+            disarm();
+        }
         if let Some(unsubscribe) = unsubscribe {
             unsubscribe();
         }

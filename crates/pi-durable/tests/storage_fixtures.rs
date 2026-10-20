@@ -203,5 +203,7 @@ async fn writes_the_same_sqlite_rows_as_typescript() {
     let golden = tempfile::tempdir().unwrap();
     let golden_path = golden.path().join("storage.sqlite");
     std::fs::copy(fixtures().join("storage.sqlite"), &golden_path).unwrap();
+    // The fixture predates schema version 2; opening it applies the same migration TypeScript does.
+    open_sqlite_storage(&golden_path.to_string_lossy()).await.unwrap().close(ctx()).await.unwrap();
     assert_eq!(rows(&path), rows(&golden_path));
 }

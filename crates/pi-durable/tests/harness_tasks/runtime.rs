@@ -81,7 +81,7 @@ async fn rejects_runtime_operations_after_the_invocation_ends_and_stops_its_watc
     ended(runtime.commit(|_, _| async { Ok(None) }, &context()).await);
     ended(runtime.memo("x").await);
     ended(runtime.memo_or("x", Json::from(1), &context()).await);
-    ended(runtime.sleep(0.0, &context()).await);
+    ended(runtime.sleep_until(0.0, Json::from(json!({ "phase": "run" })), &context()).await);
     ended(runtime.watch_doc(&NOTES, (), &context()).await);
     // The handler's own context is cancelled by now; the ended invocation still wins.
     ended(runtime.agent(&handler_context).await);
@@ -242,77 +242,5 @@ async fn stops_a_watch_whose_acquisition_finishes_after_the_invocation_ended() {
     let error = watching.await.unwrap();
     assert!(error.contains("invocation has ended"), "{error}");
     assert_eq!(outcome(&harness, id).await["status"], "faulted");
-    harness.close(&context()).await.unwrap();
-}
-
-#[tokio::test]
-async fn sleeps_until_the_harness_clock_reaches_the_deadline_rechecking_after_each_timer() {
-    let clock = Arc::new(Mutex::new(1_000.0));
-    let woke = Deferred::default();
-    let signal_woke = woke.clone();
-    let sleeper = one_step("test.sleeper", move |_, runtime, context| {
-        let woke = signal_woke.clone();
-        async move {
-            runtime.sleep(900.0, &context).await?;
-            runtime.sleep(1_005.0, &context).await?;
-            woke.resolve();
-            runtime.commit(|_, _| async { Ok(completed(Value::Null)) }, &context).await
-        }
-    });
-    let now = clock.clone();
-    let registry = Arc::new(create_registry());
-    let opened = open_tasks_with(Arc::new(MemoryStorage::new()), vec![sleeper.clone()], registry, |options| {
-        options.with_now(move || *now.lock().unwrap())
-    })
-    .await;
-    let harness = opened.harness;
-    let root = harness.root(&context(), CreateOptions::default()).await.unwrap();
-    let id = start(&root, &sleeper, false).await;
-    harness.resume().unwrap();
-    // The clock stands still, so real timers keep firing without waking the task.
-    tokio::time::sleep(Duration::from_millis(30)).await;
-    assert!(tokio::time::timeout(Duration::from_millis(1), woke.wait()).await.is_err());
-    *clock.lock().unwrap() = 1_005.0;
-    harness.wait_for_task(id, &context()).await.unwrap();
-    harness.close(&context()).await.unwrap();
-}
-
-#[tokio::test]
-async fn rejects_a_sleep_when_the_invocation_is_signalled_or_the_sleeps_own_context_is_cancelled() {
-    let results = Arc::new(Mutex::new(Vec::new()));
-    let sleeping = Deferred::default();
-    let far =
-        || (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() + 60_000) as f64;
-    let (sink, signal_sleeping) = (results.clone(), sleeping.clone());
-    let signalled = one_step("test.sleep-signalled", move |_, runtime, context| {
-        let (sink, sleeping) = (sink.clone(), signal_sleeping.clone());
-        async move {
-            sleeping.resolve();
-            let error = runtime.sleep(far(), &context).await.unwrap_err();
-            sink.lock().unwrap().push(format!("signalled:{}", error.name()));
-            Err(error)
-        }
-    });
-    let sink = results.clone();
-    let cancelled = one_step("test.sleep-cancelled", move |_, runtime, context| {
-        let sink = sink.clone();
-        async move {
-            let controller = AbortController::new();
-            controller.abort(Some(ChordError::error("stop sleeping")));
-            let own = with_abort_signal(&controller.signal(), &support::context());
-            let error = runtime.sleep(far(), &own).await.unwrap_err();
-            sink.lock().unwrap().push(format!("cancelled:{error}"));
-            runtime.commit(|_, _| async { Ok(completed(Value::Null)) }, &context).await
-        }
-    });
-    let (harness, root, _) = open_root(vec![signalled.clone(), cancelled.clone()]).await;
-    let signalled = start(&root, &signalled, false).await;
-    let cancelled = start(&root, &cancelled, false).await;
-    harness.resume().unwrap();
-    harness.wait_for_task(cancelled, &context()).await.unwrap();
-    sleeping.wait().await;
-    harness.abort_task(signalled, &context()).await.unwrap();
-    assert_eq!(outcome(&harness, signalled).await, json!({ "status": "aborted", "reason": "test" }));
-    assert_eq!(*results.lock().unwrap(), ["cancelled:stop sleeping", "signalled:AbortError"]);
     harness.close(&context()).await.unwrap();
 }

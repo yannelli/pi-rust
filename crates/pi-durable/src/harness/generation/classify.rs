@@ -1,18 +1,15 @@
 //! The `request` and `poll` phases: streaming with throttled partial commits, and classification of the
 //! terminal provider message.
 
-use std::time::Duration;
-
 use futures::StreamExt;
 use pi_ai::retry::{is_retryable_assistant_error, retry_delay_ms};
 use pi_ai::{AssistantMessage, AssistantMessageEvent, Message, Model, StopReason, is_context_overflow};
 use pi_chord::{Context, Json};
 use tokio::task::JoinHandle;
-use tokio::time::Instant;
 
 use super::{
     GenerationCheckpoint, GenerationHooks, append_assistant, completed, convert_partial, create_generation, decode,
-    edit_live, fail_no_model, hand_over, running, unanswered, waiting,
+    edit_live, fail_no_model, hand_over, sleeping, unanswered, waiting,
 };
 use crate::documents::encode;
 use crate::errors::{DurableError, DurableResult};
@@ -25,6 +22,7 @@ use crate::harness::usage::ensure_provider_session_id;
 use crate::ids::{EntryId, TaskId};
 use crate::models::{DeferredFetchOptions, SimpleStreamOptions};
 use crate::session::Tx;
+use crate::timers::Disarm;
 use crate::types::{SubmissionSettlement, TaskRecord};
 
 const DEFAULT_POLL_AFTER_MS: f64 = 5000.0;
@@ -94,15 +92,19 @@ pub(super) async fn request(task: TaskRecord, runtime: TaskRuntime, context: Con
     classify(&runtime, request, message, &context).await
 }
 
+/// After the sleep until `poll_at`; a run before it (an early wake, or a record of an earlier version) sleeps again.
 pub(super) async fn poll(task: TaskRecord, runtime: TaskRuntime, context: Context) -> DurableResult<()> {
     let GenerationCheckpoint::Poll { attempt, compacted, model: model_ref, cutoff, handle, poll_at } = decode(&task)?
     else {
         return Err(DurableError::error("Generation checkpoint is not in phase poll"));
     };
+    if poll_at > runtime.now() {
+        let checkpoint = task.state.checkpoint().cloned().unwrap_or_default();
+        return runtime.sleep_until(poll_at, checkpoint, &context).await;
+    }
     let Some(model) = runtime.models().get_model(&model_ref.provider, &model_ref.model_id) else {
         return fail_no_model(&runtime, Some(&model_ref), &context).await;
     };
-    runtime.sleep(poll_at, &context).await?;
     let options = DeferredFetchOptions { signal: Some(runtime.signal()), ..DeferredFetchOptions::default() };
     let message = runtime.models().fetch_deferred(&model, &handle, options).await;
     let request = Request { attempt, compacted, model: model_ref, cutoff, messages: None, poll_at: Some(poll_at) };
@@ -143,20 +145,25 @@ async fn stream_response(
     attempt: u32,
     context: &Context,
 ) -> DurableResult<AssistantMessage> {
-    let interval = Duration::from_millis(runtime.settings().progress.partial_interval_ms);
+    let interval = runtime.settings().progress.partial_interval_ms as f64;
     let request = pi_ai::Context { system_prompt: None, messages, tools: Vec::new() };
     let mut events = runtime.models().stream_simple(model, &request, options);
     let mut pending: Option<AssistantMessage> = None;
-    let mut deadline: Option<Instant> = None;
+    // Partials commit on the Harness's timer (`TaskRuntime::set_timer`); each firing sends one tick.
+    let (tick, mut ticks) = tokio::sync::mpsc::unbounded_channel::<()>();
+    let arm = |runtime: &TaskRuntime| {
+        let tick = tick.clone();
+        runtime.set_timer(
+            move || {
+                let _ = tick.send(());
+            },
+            interval,
+        )
+    };
+    let mut timer: Option<Disarm> = None;
     let mut in_flight: Option<JoinHandle<()>> = None;
     let mut last: Option<AssistantMessage> = None;
     loop {
-        let timer = async {
-            match deadline {
-                Some(at) => tokio::time::sleep_until(at).await,
-                None => std::future::pending().await,
-            }
-        };
         let flight = async {
             match in_flight.as_mut() {
                 Some(handle) => {
@@ -190,12 +197,12 @@ async fn stream_response(
                     continue;
                 }
                 pending = Some(partial);
-                if deadline.is_none() && in_flight.is_none() {
-                    deadline = Some(Instant::now() + interval);
+                if timer.is_none() && in_flight.is_none() {
+                    timer = Some(arm(runtime));
                 }
             }
-            () = timer => {
-                deadline = None;
+            Some(()) = ticks.recv() => {
+                timer = None;
                 if let Some(partial) = pending.take() {
                     in_flight = Some(tokio::spawn(commit_partial(runtime.clone(), partial, attempt, context.clone())));
                 }
@@ -203,10 +210,13 @@ async fn stream_response(
             () = flight => {
                 in_flight = None;
                 if pending.is_some() {
-                    deadline = Some(Instant::now() + interval);
+                    timer = Some(arm(runtime));
                 }
             }
         }
+    }
+    if let Some(disarm) = timer {
+        disarm();
     }
     if let Some(handle) = in_flight {
         let _ = handle.await;
@@ -244,7 +254,7 @@ pub(super) async fn classify(
             let generation =
                 LiveGeneration { deferred: Some(DeferredPoll { poll_at }), ..LiveGeneration::new(attempt) };
             draft.edit(|live| live.generation = Some(generation))?;
-            running(&GenerationCheckpoint::Poll { attempt, compacted, model, cutoff, handle, poll_at })
+            sleeping(&GenerationCheckpoint::Poll { attempt, compacted, model, cutoff, handle, poll_at }, poll_at)
         };
         return runtime.commit(change, context).await;
     }
@@ -300,7 +310,7 @@ pub(super) async fn classify(
             let generation =
                 LiveGeneration { retry: Some(RetryState { at: until, error }), ..LiveGeneration::new(attempt) };
             tx.doc(&LIVE_DOC, conversation_id).await?.edit(|live| live.generation = Some(generation))?;
-            return running(&GenerationCheckpoint::Retry { attempt, compacted, until });
+            return sleeping(&GenerationCheckpoint::Retry { attempt, compacted, until }, until);
         }
         let text = message.error_message.clone().unwrap_or_else(|| {
             format!("Model response ended with stop reason {}", stop_reason_text(message.stop_reason))

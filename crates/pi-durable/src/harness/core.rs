@@ -8,12 +8,13 @@ use pi_chord::Context;
 use super::agent::{AGENT_DOC, resolve_agent};
 use super::registry::{RegistryReader, RegistrySnapshot};
 use super::settings::{Settings, SettingsSource, resolve_settings};
-use super::types::{Agent, AgentState};
+use super::types::{Agent, AgentState, Wake};
 use crate::env::SharedEnv;
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::ConversationId;
 use crate::models::Models;
 use crate::session::{Session, Tx};
+use crate::timers::{Disarm, SetTimer, TimerCallback, TimerOptions, Timers};
 use crate::types::ConversationRecord;
 
 /// What `HarnessOptions::env` builds an environment for.
@@ -34,6 +35,8 @@ pub type ConversationCreatedHook =
     Arc<dyn Fn(Tx, ConversationRecord) -> BoxFuture<'static, DurableResult<()>> + Send + Sync>;
 pub type ReportFn = Arc<dyn Fn(&DurableError) + Send + Sync>;
 pub type NowFn = Arc<dyn Fn() -> f64 + Send + Sync>;
+/// Told when the Session next needs a process (`HarnessOptions::on_wake`); an error is reported.
+pub type WakeFn = Arc<dyn Fn(Wake) -> DurableResult<()> + Send + Sync>;
 
 /// Options of `Harness::open`.
 #[derive(Clone)]
@@ -44,15 +47,36 @@ pub struct HarnessOptions {
     pub settings: Option<SettingsSource>,
     pub env: Option<EnvBuilder>,
     pub conversation_created: Option<ConversationCreatedHook>,
-    /// Wall clock in milliseconds; default the system clock.
+    /// The Harness clock in epoch milliseconds; default the system clock. Sleeping tasks store deadlines on it, so
+    /// every process that opens the same storage must use the same clock.
     pub now: Option<NowFn>,
+    /// Arms the timers of the scheduler and its tasks: pacing progress commits, freeing idle memory (`background`),
+    /// and, without `on_wake`, resuming sleeping tasks; and the timers of `TaskRuntime::set_timer()`. Default a Tokio
+    /// timer. Tests can pass fake timers; a host can keep timers off a process that should hibernate.
+    pub set_timer: Option<SetTimer>,
+    /// Wakes the process for sleeping tasks instead of a `set_timer` timer. Without it, while scheduling runs, a timer
+    /// resumes sleeping tasks when they are due. With it, the Harness arms no timer for them: it calls `on_wake` after
+    /// open and whenever `Harness::wake()` changes, and the host arms its own wakeup and calls `resume()` when it
+    /// fires. Called off the Session line, after the commit that changed the value. It may call `wake()` and
+    /// `resume()`, and must not block. An error is reported, and the value is offered again at the next change.
+    pub on_wake: Option<WakeFn>,
     /// Receives failures that do not fail the calling operation, and the error that fails the Session, once.
     pub on_report: Option<ReportFn>,
 }
 
 impl HarnessOptions {
     pub fn new(models: Arc<dyn Models>, registry: Arc<dyn RegistryReader>) -> Self {
-        Self { models, registry, settings: None, env: None, conversation_created: None, now: None, on_report: None }
+        Self {
+            models,
+            registry,
+            settings: None,
+            env: None,
+            conversation_created: None,
+            now: None,
+            set_timer: None,
+            on_wake: None,
+            on_report: None,
+        }
     }
 
     pub fn with_settings(mut self, settings: super::settings::HarnessSettings) -> Self {
@@ -81,6 +105,19 @@ impl HarnessOptions {
         self
     }
 
+    pub fn with_set_timer(
+        mut self,
+        set_timer: impl Fn(TimerCallback, f64, TimerOptions) -> Option<Disarm> + Send + Sync + 'static,
+    ) -> Self {
+        self.set_timer = Some(Arc::new(set_timer));
+        self
+    }
+
+    pub fn with_on_wake(mut self, on_wake: impl Fn(Wake) -> DurableResult<()> + Send + Sync + 'static) -> Self {
+        self.on_wake = Some(Arc::new(on_wake));
+        self
+    }
+
     pub fn with_on_report(mut self, report: impl Fn(&DurableError) + Send + Sync + 'static) -> Self {
         self.on_report = Some(Arc::new(report));
         self
@@ -95,6 +132,8 @@ pub(crate) struct HarnessCore {
     pub settings: Option<SettingsSource>,
     pub env: Option<EnvBuilder>,
     pub now: NowFn,
+    pub timers: Timers,
+    pub on_wake: Option<WakeFn>,
     pub report: ReportFn,
 }
 

@@ -96,6 +96,11 @@ impl ToolExecutionApi {
         self.runtime.models()
     }
 
+    /// The Harness clock (`HarnessOptions::now`), for times a rerun after a restart compares against.
+    pub fn now(&self) -> f64 {
+        self.runtime.now()
+    }
+
     /// Append running text output; it becomes the result's output when the result omits it.
     pub fn output(&self, chunk: &str) -> DurableResult<()> {
         self.push(OutputChunk::Text(chunk), None)

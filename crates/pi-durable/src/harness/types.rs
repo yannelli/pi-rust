@@ -358,14 +358,35 @@ impl BlockedReason {
     }
 }
 
+/// When a Session next needs a running process (`Harness::wake()`). `active`: some task can run now or is running, so
+/// a process that dies must be woken again soon. `at`: the earliest sleep not yet due, when there is one. Neither:
+/// nothing needs a process until new work is submitted. Tasks blocked on a missing or unmigratable definition,
+/// `completing` tasks, and waits on live tasks do not count; the work they wait for does.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Wake {
+    pub active: bool,
+    pub at: Option<f64>,
+}
+
 /// What the scheduler would do with a live task under the current registry.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TaskInspectionState {
     Running,
-    Ready { migrates: bool },
-    Waiting { on: Vec<TaskId> },
+    Ready {
+        migrates: bool,
+    },
+    Waiting {
+        on: Vec<TaskId>,
+    },
+    /// Sleeps until the Harness clock reaches `until`.
+    Sleeping {
+        until: f64,
+    },
     Completing,
-    Blocked { reason: BlockedReason, error: Option<String> },
+    Blocked {
+        reason: BlockedReason,
+        error: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]

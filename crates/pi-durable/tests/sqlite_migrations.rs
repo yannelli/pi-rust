@@ -41,6 +41,47 @@ async fn creates_the_current_schema_and_can_be_applied_repeatedly() {
 }
 
 #[tokio::test]
+async fn migrates_a_version_1_database_to_store_sleeping_tasks_keeping_its_tasks_and_indexes() {
+    let (_directory, path) = temp_path();
+    let database = open(&path).await;
+    apply_sqlite_migrations(&database, &SQLITE_MIGRATIONS[..1]).await.unwrap();
+    let waiting = r#"{"id":5,"conversationId":1,"kind":"test.task","version":1,"input":null,"background":false,"abortRequested":false,"state":{"status":"waiting","checkpoint":{"phase":"run"},"on":[],"policy":"allSettled"}}"#;
+    let insert = "INSERT INTO tasks (id, conversation_id, kind, status, abort_requested, background, record)
+        VALUES (?, 1, 'test.task', ?, 0, 0, ?)";
+    let row = |id: i64, status: &str, record: &str| {
+        [SqliteValue::Integer(id), SqliteValue::Text(status.into()), SqliteValue::Text(record.into())]
+    };
+    database.run(insert, &row(5, "waiting", waiting)).await.unwrap();
+    assert!(database.run(insert, &row(6, "sleeping", "{}")).await.is_err());
+    database.close().await.unwrap();
+
+    open_sqlite_storage(&path).await.unwrap().close(&BACKGROUND_CONTEXT).await.unwrap();
+    let migrated = open(&path).await;
+    assert_eq!(integer(&migrated, VERSION, "version").await, 2);
+    assert_eq!(text(&migrated, "SELECT status FROM tasks WHERE id = 5", "status").await, "waiting");
+    assert_eq!(text(&migrated, "SELECT record FROM tasks WHERE id = 5", "record").await, waiting);
+    migrated.run(insert, &row(6, "sleeping", "{}")).await.unwrap();
+    let indexes = migrated
+        .all("SELECT name FROM sqlite_schema WHERE type = 'index' AND tbl_name = 'tasks' ORDER BY name", &[])
+        .await
+        .unwrap();
+    let names: Vec<String> = indexes.iter().map(|row| row.text("name").unwrap().to_string()).collect();
+    assert_eq!(
+        names,
+        [
+            "tasks_by_abort_requested",
+            "tasks_by_background",
+            "tasks_by_conversation",
+            "tasks_by_kind",
+            "tasks_by_status"
+        ]
+    );
+    let leftover = "SELECT count(*) AS count FROM sqlite_schema WHERE name = 'tasks_v2'";
+    assert_eq!(integer(&migrated, leftover, "count").await, 0);
+    migrated.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn rejects_a_database_newer_than_the_portable_core() {
     let (_directory, path) = temp_path();
     let database = open(&path).await;

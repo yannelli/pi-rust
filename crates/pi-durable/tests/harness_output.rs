@@ -1,14 +1,14 @@
 //! Port of upstream `test/harness-output.test.ts` (tool output bounds, OutputBuffer, and Progress).
 
 use std::collections::BTreeSet;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use pi_durable::DurableError;
 use pi_durable::harness::Retain;
 use pi_durable::harness::output::{OutputBuffer, OutputChunk, OutputLimits, bound_output, sanitize_output};
-use pi_durable::harness::progress::Progress;
+use pi_durable::harness::progress::{Progress, ProgressClock};
 use tokio::time::Instant;
 
 fn head(max_lines: usize, max_bytes: usize) -> OutputLimits {
@@ -294,6 +294,58 @@ async fn waits_the_configured_minimum_interval_between_small_commits() {
     assert_eq!(*commits.lock().unwrap(), [0]);
     advance(1).await;
     assert_eq!(*commits.lock().unwrap(), [0, 500]);
+}
+
+#[tokio::test]
+async fn paces_on_the_clock_it_is_given() {
+    type Armed = Vec<(f64, Option<pi_durable::timers::TimerCallback>, Arc<AtomicBool>)>;
+    let now = Arc::new(Mutex::new(1_000.0));
+    let timers: Arc<Mutex<Armed>> = Arc::default();
+    let commits = Arc::new(Mutex::new(Vec::new()));
+    let (time, sink, clock_time, armed) = (now.clone(), commits.clone(), now.clone(), timers.clone());
+    let clock = ProgressClock {
+        now: Arc::new(move || *clock_time.lock().unwrap()),
+        set_timer: Arc::new(move |callback, delay_ms| {
+            let disarmed = Arc::new(AtomicBool::new(false));
+            armed.lock().unwrap().push((delay_ms, Some(callback), disarmed.clone()));
+            Box::new(move || disarmed.store(true, Ordering::SeqCst))
+        }),
+    };
+    let progress = Progress::with_clock(
+        move || {
+            sink.lock().unwrap().push(*time.lock().unwrap());
+            Box::pin(async { Ok(10) })
+        },
+        |_| {},
+        100,
+        clock,
+    );
+    let delays = || timers.lock().unwrap().iter().map(|(delay, _, _)| *delay).collect::<Vec<_>>();
+    let fire = |index: usize| {
+        let callback = timers.lock().unwrap()[index].1.take().unwrap();
+        callback();
+    };
+    progress.mark_and_wait().await.unwrap().unwrap();
+    assert_eq!(*commits.lock().unwrap(), [1_000.0]);
+    // Let the first commit finish settling.
+    advance(0).await;
+    *now.lock().unwrap() = 1_040.0;
+    let second = progress.mark_and_wait();
+    assert_eq!(delays(), [60.0]);
+    // A timer that fires early commits nothing and waits for the rest.
+    *now.lock().unwrap() = 1_080.0;
+    fire(0);
+    assert_eq!(*commits.lock().unwrap(), [1_000.0]);
+    assert_eq!(delays(), [60.0, 20.0]);
+    *now.lock().unwrap() = 1_100.0;
+    fire(1);
+    second.await.unwrap().unwrap();
+    assert_eq!(*commits.lock().unwrap(), [1_000.0, 1_100.0]);
+    advance(0).await;
+    progress.mark();
+    assert_eq!(delays(), [60.0, 20.0, 100.0]);
+    progress.stop().await;
+    assert!(timers.lock().unwrap()[2].2.load(Ordering::SeqCst));
 }
 
 #[tokio::test]

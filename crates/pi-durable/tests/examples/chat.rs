@@ -159,14 +159,15 @@ fn ticker(printed: Arc<Mutex<Vec<u64>>>, reached: Reached) -> Task {
                     {
                         let _ = sender.send(());
                     }
+                    // The final result, or the next tick after a short sleep. The sleep is stored with the
+                    // checkpoint, so the task holds no invocation meanwhile, and a Harness opened later continues it.
                     let to = task.input.get("to").and_then(Json::as_u64).unwrap();
-                    let next = if n == to {
-                        support::task_support::completed(json!(format!("counted to {n}")))
-                    } else {
-                        support::task_support::running(json!({ "phase": "tick", "n": n + 1 }))
-                    };
-                    runtime.commit(move |_, _| async move { Ok(next) }, &context).await?;
-                    runtime.sleep(runtime.now() + 50.0, &context).await
+                    if n == to {
+                        let done = support::task_support::completed(json!(format!("counted to {n}")));
+                        return runtime.commit(move |_, _| async move { Ok(done) }, &context).await;
+                    }
+                    let next = Json::from(json!({ "phase": "tick", "n": n + 1 }));
+                    runtime.sleep_until(runtime.now() + 50.0, next, &context).await
                 }
             })
             .abort(|_, runtime, context| async move {
@@ -204,7 +205,7 @@ async fn ex13_recovery_continues_a_ticker_from_its_saved_checkpoint_after_reopen
     let reader = open().await;
     let saved = reader.get_task(ticker_id, &ctx()).await.unwrap().unwrap();
     reader.close(&ctx()).await.unwrap();
-    assert!(matches!(&saved.state, TaskState::Running { .. } | TaskState::Pending { .. }));
+    assert!(matches!(&saved.state, TaskState::Sleeping { .. } | TaskState::Running { .. } | TaskState::Pending { .. }));
     let n = saved.state.checkpoint().and_then(|c| c.get("n")?.as_u64()).unwrap();
     assert!((2..=3).contains(&n), "{n}");
     let memos: Vec<String> = saved.memos.unwrap_or_default().keys().map(|key| key.to_string()).collect();

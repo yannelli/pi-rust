@@ -160,6 +160,11 @@ async fn resends_an_interrupted_summarization_once_and_counts_only_the_answered_
     chat.close().await;
 }
 
+async fn task_state(chat: &Chat, id: TaskId) -> Value {
+    let state = chat.harness.get_task(id, &ctx()).await.unwrap().unwrap().state;
+    Value::from(&Json::from(serde_json::to_value(state).unwrap()))
+}
+
 #[tokio::test]
 async fn resumes_a_retry_backoff_after_reopen() {
     let (_directory, path) = temp_path();
@@ -174,11 +179,28 @@ async fn resumes_a_retry_backoff_after_reopen() {
     let probe = chat.clone();
     wait_for(move || {
         let chat = probe.clone();
-        async move { !chat.live().await["compactions"][0]["retry"].is_null() }
+        async move { task_state(&chat, task).await["status"] == "sleeping" }
     })
     .await;
-    let state = checkpoint(&chat, task).await;
-    assert_eq!((&state["phase"], &state["attempt"]), (&json!("retry"), &json!(1)));
+    let until = now + 60_000.0;
+    let state = task_state(&chat, task).await;
+    assert_eq!((&state["checkpoint"]["phase"], &state["checkpoint"]["attempt"]), (&json!("retry"), &json!(1)));
+    assert_eq!((state["checkpoint"]["until"].as_f64(), state["until"].as_f64()), (Some(until), Some(until)));
+    chat.close().await;
+    // Earlier versions slept inside a running `retry` phase: reopened before its time, it sleeps again.
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    let update = "UPDATE tasks SET status = 'running',
+        record = json_set(json_remove(record, '$.state.until'), '$.state.status', 'running') WHERE id = ?";
+    connection.execute(update, [task.0 as i64]).unwrap();
+    drop(connection);
+    let chat = reopen(&path, &chat).await;
+    let probe = chat.clone();
+    wait_for(move || {
+        let chat = probe.clone();
+        async move { task_state(&chat, task).await["status"] == "sleeping" }
+    })
+    .await;
+    assert_eq!(chat.faux.summary_requests().len(), 1);
     chat.close().await;
     *chat.setup.now.lock().unwrap() = Some(now + 120_000.0);
     let chat = reopen(&path, &chat).await;

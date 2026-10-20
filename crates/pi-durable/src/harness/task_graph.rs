@@ -16,14 +16,14 @@ use crate::types::{CommitChange, CommitPublication, ConversationQuery, TaskQuery
 
 /// `{ tasks }`: every live task keyed by its decimal ID. A node is `{ id, kind, conversationId, owner?, background,
 /// abortRequested, state, conversations }`; `state` is `{ status, phase }`, `{ status: "waiting", phase, on,
-/// policy }`, or `{ status: "completing", outcome }` with the outcome's status.
+/// policy }`, `{ status: "sleeping", phase, until }`, or `{ status: "completing", outcome }` with the outcome's status.
 pub type TaskGraph = Json;
 
 /// A serialized exact-frame watch of the task graph.
 pub type TaskGraphWatch = CommittedWatch;
 
-const LIVE_STATUSES: [TaskStatus; 4] =
-    [TaskStatus::Pending, TaskStatus::Running, TaskStatus::Waiting, TaskStatus::Completing];
+const LIVE_STATUSES: [TaskStatus; 5] =
+    [TaskStatus::Pending, TaskStatus::Running, TaskStatus::Waiting, TaskStatus::Sleeping, TaskStatus::Completing];
 const SCAN_PAGE_SIZE: usize = 256;
 
 struct Mount {
@@ -308,6 +308,11 @@ fn state_of(state: &TaskState) -> DurableResult<Json> {
             value.insert("phase", phase_of(checkpoint));
             value.insert("on", crate::documents::encode(on)?);
             value.insert("policy", crate::documents::encode(policy)?);
+        }
+        TaskState::Sleeping { checkpoint, until } => {
+            value.insert("status", Json::from("sleeping"));
+            value.insert("phase", phase_of(checkpoint));
+            value.insert("until", Json::from(*until));
         }
         // Terminal records never reach here: they leave the graph.
         TaskState::Completing { outcome } | TaskState::Terminal { outcome } => {

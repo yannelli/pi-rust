@@ -2,7 +2,6 @@
 //! idle settlement, the kept-context expiry, and the reservation drain loop.
 
 use std::collections::HashMap;
-use std::time::Duration;
 
 use super::ownership::Overlay;
 use super::{Scheduler, Up, failed_outcome, with_abort_mark, with_state};
@@ -11,10 +10,8 @@ use crate::harness::live::settle_scheduler_outcome;
 use crate::harness::util::lock;
 use crate::ids::TaskId;
 use crate::session::{TransactionScope, Tx};
+use crate::timers::Disarm;
 use crate::types::{AbortReason, TaskOutcome, TaskRecord, TaskState, TaskStatus};
-
-/// Longest delay one timer waits; longer sleeps wait in several steps.
-pub(crate) const MAX_TIMER_DELAY_MS: f64 = 2_147_483_647.0;
 
 impl Scheduler {
     pub(crate) fn schedule_reconcile(&self) {
@@ -200,36 +197,112 @@ impl Scheduler {
         self.schedule_expiry();
     }
 
-    /// Run `settle_idle()` when the earliest idle context expires.
+    /// Run `settle_idle()` when the earliest idle context expires, on a background timer. Where the host declines it,
+    /// none is kept, and task changes alone check expiry.
     pub(crate) fn schedule_expiry(&self) {
         let retention = self.context_retention_ms();
-        let mut state = lock(&self.state);
-        let at =
-            state.contexts.values().filter_map(|kept| kept.idle_since).map(|since| since + retention).reduce(f64::min);
-        if state.expiry.as_ref().map(|(at, _)| *at) == at && at.is_some() {
-            return;
-        }
-        if let Some((_, timer)) = state.expiry.take() {
-            timer.abort();
+        let (at, replaced) = {
+            let mut state = lock(&self.state);
+            let at = state
+                .contexts
+                .values()
+                .filter_map(|kept| kept.idle_since)
+                .map(|since| since + retention)
+                .reduce(f64::min);
+            if at.is_some() && state.expiry.as_ref().map(|(at, _)| *at) == at {
+                return;
+            }
+            (at.filter(|_| !state.closing), state.expiry.take())
+        };
+        if let Some((_, disarm)) = replaced {
+            disarm();
         }
         let Some(at) = at else { return };
-        if state.closing {
-            return;
-        }
-        let wait = (at - self.core.now()).clamp(0.0, MAX_TIMER_DELAY_MS);
         let weak = self.weak.clone();
-        let timer = tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(wait as u64)).await;
+        let expire = Box::new(move || {
             if let Some(scheduler) = weak.upgrade() {
                 lock(&scheduler.state).expiry = None;
                 scheduler.settle_idle();
             }
         });
-        state.expiry = Some((at, timer));
+        let Some(disarm) = self.core.timers.background(expire, at - self.core.now()) else { return };
+        let stale = lock(&self.state).expiry.replace((at, disarm));
+        if let Some((_, disarm)) = stale {
+            disarm();
+        }
+    }
+
+    /// Recompute the wake off the Session line: arm the timer for the earliest sleep, or tell `on_wake` of a change.
+    pub(crate) fn schedule_wake(&self) {
+        {
+            let mut state = lock(&self.state);
+            if state.wake_scheduled || state.closing {
+                return;
+            }
+            state.wake_scheduled = true;
+        }
+        let Ok(scheduler) = self.arc() else { return };
+        tokio::spawn(async move { scheduler.deliver_wake() });
+    }
+
+    fn deliver_wake(&self) {
+        let enabled = {
+            let mut state = lock(&self.state);
+            state.wake_scheduled = false;
+            if state.closing {
+                return;
+            }
+            state.enabled
+        };
+        let wake = self.wake();
+        let Some(on_wake) = &self.core.on_wake else {
+            self.arm_timer(if enabled { wake.at } else { None });
+            return;
+        };
+        if lock(&self.state).last_wake == Some(wake) {
+            return;
+        }
+        match on_wake(wake) {
+            // Only a delivered wake counts: after an error, the next change or kick offers it again.
+            Ok(()) => lock(&self.state).last_wake = Some(wake),
+            Err(error) => self.core.report(&error),
+        }
+    }
+
+    /// Keep the timer for the earliest sleep. The pass it starts rechecks the clock, so a wake before `until` only
+    /// arms it again.
+    fn arm_timer(&self, at: Option<f64>) {
+        let replaced: Option<Disarm> = {
+            let mut state = lock(&self.state);
+            if state.timer.is_some() && state.timer.as_ref().map(|(at, _)| *at) == at {
+                return;
+            }
+            state.timer.take().map(|(_, disarm)| disarm)
+        };
+        if let Some(disarm) = replaced {
+            disarm();
+        }
+        let Some(at) = at else { return };
+        if self.closing() {
+            return;
+        }
+        let weak = self.weak.clone();
+        let fire = Box::new(move || {
+            if let Some(scheduler) = weak.upgrade() {
+                lock(&scheduler.state).timer = None;
+                scheduler.kick();
+            }
+        });
+        let disarm = self.core.timers.foreground(fire, at - self.core.now());
+        let stale = lock(&self.state).timer.replace((at, disarm));
+        if let Some((_, disarm)) = stale {
+            disarm();
+        }
     }
 
     /// Mark the scheduler dirty and start a drain unless one runs.
     pub(crate) fn kick(&self) {
+        self.schedule_wake();
         {
             let mut state = lock(&self.state);
             state.dirty = true;

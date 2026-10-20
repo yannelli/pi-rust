@@ -129,7 +129,7 @@ pub fn define_task(definition: TaskDefinition) -> Task {
     Arc::new(definition)
 }
 
-/// The next state a task commits for itself: only `Running`, `Waiting`, and `Terminal` are accepted.
+/// The next state a task commits for itself: only `Running`, `Waiting`, `Sleeping`, and `Terminal` are accepted.
 pub type NextTaskState = TaskState;
 
 /// The phase name of a checkpoint.
