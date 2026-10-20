@@ -2,6 +2,13 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.3.0] - 2026-10-20
+
+### Breaking Changes
+
+- **durable:** crash-loop guard, typed reports, and inputs after failed runs ([7acb086](https://github.com/yannelli/pi-rust/commit/7acb086ae37810d9fd99263a1e30e2f5afe98392))
+- **durable:** durable sleeping state replaces runtime.sleep ([cc7380b](https://github.com/yannelli/pi-rust/commit/cc7380b15ac811ff15617ab1367b79fc607c14fb))
+
 ## [0.2.4] - 2026-10-19
 
 ### Fixed
