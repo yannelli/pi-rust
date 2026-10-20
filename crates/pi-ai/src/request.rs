@@ -25,8 +25,8 @@ const MAX_ERROR_MESSAGE_CHARS: usize = 500;
 pub struct RequestOptions {
     pub api_key: Option<String>,
     pub cancel: CancellationToken,
-    /// Explicit parent context for telemetry produced by this logical request.
-    pub telemetry_context: Option<std::sync::Arc<dyn pi_telemetry::TelemetryContext>>,
+    /// Explicit parent span for telemetry produced by this logical request.
+    pub telemetry: Option<std::sync::Arc<dyn pi_telemetry::TelemetrySpan>>,
     /// Provider-scoped environment values, including proxy variables.
     pub env: BTreeMap<String, String>,
     /// Extra headers; later sources replace earlier ones by case-insensitive name.

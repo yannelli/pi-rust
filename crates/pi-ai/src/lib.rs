@@ -20,6 +20,7 @@ pub mod retry;
 pub mod simple_options;
 pub mod sse;
 pub mod stream;
+pub mod telemetry;
 pub mod transcript;
 pub mod types;
 
@@ -46,4 +47,5 @@ pub use request::RequestOptions;
 pub use stream::{
     AssistantMessageEvent, AssistantMessageEventStream, EventSender, MessageBuilder, error_stream, event_channel,
 };
+pub use telemetry::AI_TELEMETRY_SCHEMA;
 pub use types::*;

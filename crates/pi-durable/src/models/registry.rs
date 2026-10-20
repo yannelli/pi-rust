@@ -159,7 +159,7 @@ fn stream_options(options: SimpleStreamOptions, auth: &AppliedAuth, cancel: Canc
     StreamOptions {
         api_key: auth.api_key.clone(),
         cancel,
-        telemetry_context: options.telemetry,
+        telemetry: options.telemetry,
         max_tokens: options.max_tokens,
         temperature: options.temperature,
         reasoning: options.reasoning,
@@ -192,7 +192,7 @@ fn deferred_options(
         request: RequestOptions {
             api_key: auth.api_key.clone(),
             cancel,
-            telemetry_context: options.telemetry,
+            telemetry: options.telemetry,
             env: auth.env.clone(),
             headers: auth.headers.clone(),
             timeout_ms: options.timeout_ms,
