@@ -1,6 +1,7 @@
 //! Durable task records and their state machine (spec section 5).
 
 use pi_chord::{Json, JsonMap};
+use pi_telemetry::TelemetryCarrier;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{ConversationId, TaskId};
@@ -243,6 +244,12 @@ pub struct TaskRecord {
     /// parked as blocked until `Harness::retry_task()`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restarts: Option<u32>,
+    /// Adapter-owned context that created this task; phase invocations extract it as their parent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace: Option<TelemetryCarrier>,
+    /// Immutable creation-time links for the task's first invocation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub links: Option<Vec<TelemetryCarrier>>,
 }
 
 impl TaskRecord {

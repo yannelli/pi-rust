@@ -30,6 +30,7 @@ pub(crate) fn submission(
         reason: None,
         detail: None,
         id,
+        trace: Default::default(),
     }
 }
 

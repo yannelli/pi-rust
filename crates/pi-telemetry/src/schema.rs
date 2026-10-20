@@ -10,7 +10,11 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::attributes::{AttributeValue, SpanAttributes};
-use crate::span::{SpanFuture, SpanOptions, SpanStatus, TelemetryContext, TelemetryContextExt, TelemetrySpan};
+use crate::metrics::{TelemetryMetricDefinition, TelemetryMetrics};
+use crate::span::{
+    SpanFuture, SpanLink, SpanOptions, SpanStatus, TelemetryContext, TelemetryContextExt, TelemetryPropagation,
+    TelemetrySpan,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TelemetryAttributeType {
@@ -107,6 +111,8 @@ pub struct TelemetrySpanDefinition {
 pub struct TelemetrySchemaDefinition {
     pub version: u32,
     pub spans: BTreeMap<String, TelemetrySpanDefinition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metrics: Option<BTreeMap<String, TelemetryMetricDefinition>>,
 }
 
 /// Identity helper kept for parity with upstream `defineTelemetrySchema`.
@@ -162,7 +168,7 @@ fn check_value(
 }
 
 /// Check `attributes` against `definitions`; `enforce_required` honors `required` flags.
-fn check_attributes(
+pub(crate) fn check_attributes(
     definitions: &BTreeMap<String, TelemetryAttributeDefinition>,
     attributes: &SpanAttributes,
     enforce_required: bool,
@@ -224,6 +230,10 @@ impl SchemaTelemetrySpan {
         self.span.set_status(status);
     }
 
+    pub fn add_link(&self, link: SpanLink) {
+        self.span.add_link(link);
+    }
+
     /// The untyped span, for adapters and pass-through parents.
     pub fn raw(&self) -> &Arc<dyn TelemetrySpan> {
         &self.span
@@ -236,6 +246,18 @@ struct ParentSpan(Arc<dyn TelemetrySpan>);
 impl TelemetryContext for ParentSpan {
     fn open_span(&self, options: SpanOptions) -> Arc<dyn TelemetrySpan> {
         self.0.open_span(options)
+    }
+
+    fn metrics(&self) -> Option<Arc<dyn TelemetryMetrics>> {
+        self.0.metrics()
+    }
+
+    fn propagation(&self) -> Option<Arc<dyn TelemetryPropagation>> {
+        self.0.propagation()
+    }
+
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        self.0.as_any()
     }
 }
 

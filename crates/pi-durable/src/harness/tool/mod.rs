@@ -12,6 +12,7 @@ use std::sync::{Arc, LazyLock};
 use futures::future::BoxFuture;
 use pi_ai::{JsonObject, ToolCall};
 use pi_chord::{Context, Json};
+use pi_telemetry::SpanAttributes;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -180,9 +181,9 @@ pub(crate) async fn read_call(
     input: &ToolTaskInput,
     context: &Context,
 ) -> DurableResult<ToolHookCall> {
-    match input {
+    let call = match input {
         ToolTaskInput::Nested { call, parent, parent_call_id, .. } => {
-            Ok(ToolHookCall { call: call.clone(), parent: Some((*parent, parent_call_id.clone())) })
+            ToolHookCall { call: call.clone(), parent: Some((*parent, parent_call_id.clone())) }
         }
         ToolTaskInput::Model { assistant, call_id } => {
             let entry = runtime.typed_entry(&ASSISTANT_ENTRY, *assistant, context).await?;
@@ -195,9 +196,13 @@ pub(crate) async fn read_call(
             };
             let call =
                 call.ok_or_else(|| DurableError::error(format!("Entry {assistant} has no tool call {call_id}")))?;
-            Ok(ToolHookCall { call, parent: None })
+            ToolHookCall { call, parent: None }
         }
-    }
+    };
+    let attributes =
+        SpanAttributes::new().with("tool.name", call.call.name.as_str()).with("tool.call_id", call.call.id.as_str());
+    context.telemetry().set_attributes(attributes);
+    Ok(call)
 }
 
 /// The call's arguments as repaired by the tool; a failing repair makes them invalid.

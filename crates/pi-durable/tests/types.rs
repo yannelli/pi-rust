@@ -45,6 +45,7 @@ fn encodes_discriminator_dependent_fields() {
         reason: None,
         detail: None,
         id: submission,
+        trace: Default::default(),
     };
     let input = json!({ "conversationId": 1, "type": "input", "status": "done", "entry": 2, "answer": 3, "id": 5 });
     assert_eq!(encoded(&done(SubmissionType::Input, Some(answer))), input);

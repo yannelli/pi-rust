@@ -70,6 +70,7 @@ pub(super) async fn request(task: TaskRecord, runtime: TaskRuntime, context: Con
     }
     let options = SimpleStreamOptions {
         signal: Some(runtime.signal()),
+        telemetry: Some(context.telemetry()),
         headers: stream_options.headers.clone().unwrap_or_default(),
         timeout_ms: stream_options.timeout_ms,
         max_retries: stream_options.max_retries,
@@ -105,7 +106,11 @@ pub(super) async fn poll(task: TaskRecord, runtime: TaskRuntime, context: Contex
     let Some(model) = runtime.models().get_model(&model_ref.provider, &model_ref.model_id) else {
         return fail_no_model(&runtime, Some(&model_ref), &context).await;
     };
-    let options = DeferredFetchOptions { signal: Some(runtime.signal()), ..DeferredFetchOptions::default() };
+    let options = DeferredFetchOptions {
+        signal: Some(runtime.signal()),
+        telemetry: Some(context.telemetry()),
+        ..DeferredFetchOptions::default()
+    };
     let message = runtime.models().fetch_deferred(&model, &handle, options).await;
     let request = Request { attempt, compacted, model: model_ref, cutoff, messages: None, poll_at: Some(poll_at) };
     classify(&runtime, request, message, &context).await

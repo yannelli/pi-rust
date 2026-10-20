@@ -4,8 +4,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use pi_telemetry::{
-    InMemoryTelemetryContext, NOOP_TELEMETRY_CONTEXT, SpanAttributes, SpanOptions, SpanStatus, TelemetryContextExt,
-    TelemetrySchemaDefinition, TelemetrySpan, create_typed_span_starter, define_telemetry_schema,
+    HistogramOptions, InMemoryTelemetryContext, InstrumentOptions, NOOP_TELEMETRY_CONTEXT, SpanAttributes, SpanLink,
+    SpanOptions, SpanOutcome, SpanStatus, TelemetryCarrier, TelemetryContext, TelemetryContextExt, TelemetryMetrics,
+    TelemetryPropagation, TelemetrySchemaDefinition, TelemetrySpan, create_typed_metrics, create_typed_span_starter,
+    define_telemetry_schema,
 };
 use serde_json::json;
 
@@ -146,4 +148,98 @@ async fn noop_preserves_errors_and_ignores_payloads() {
             span.set_status(SpanStatus::Ok);
         })
         .await;
+}
+
+#[test]
+fn propagates_known_spans_and_falls_back_to_the_root_for_unknown_carriers() {
+    let telemetry = InMemoryTelemetryContext::new();
+    let parent = telemetry.open_span(SpanOptions::new("parent"));
+    let carrier = telemetry.inject(parent.as_ref()).expect("a recorded span has a carrier");
+    parent.end(SpanOutcome::Ok);
+    assert_eq!(telemetry.inject(&telemetry), None);
+    // A settled span still propagates; its carrier parents a new span in the same recorder.
+    let child = telemetry.extract(Some(&carrier)).open_span(SpanOptions::new("resumed"));
+    assert_eq!(telemetry.inject(child.as_ref()).map(|c| c["pi-memory-span"].clone()), Some("2".into()));
+    let other = InMemoryTelemetryContext::new();
+    other.extract(Some(&carrier)).open_span(SpanOptions::new("foreign")).end(SpanOutcome::Ok);
+    let garbled = TelemetryCarrier::from([("pi-memory-scope".to_owned(), "x".to_owned())]);
+    telemetry.extract(Some(&garbled)).open_span(SpanOptions::new("garbled")).end(SpanOutcome::Ok);
+    child.end(SpanOutcome::Ok);
+
+    let spans = telemetry.get_spans();
+    assert_eq!((spans[1].parent_id, spans[1].parent_context.as_ref()), (Some(1), Some(&carrier)));
+    assert_eq!((spans[2].parent_id, spans[2].parent_context.as_ref()), (None, None));
+    let foreign = &other.get_spans()[0];
+    assert_eq!((foreign.parent_id, foreign.parent_context.as_ref()), (None, Some(&carrier)));
+}
+
+#[test]
+fn records_links_and_keeps_capabilities_under_a_settled_parent() {
+    let telemetry = InMemoryTelemetryContext::new();
+    let target = telemetry.open_span(SpanOptions::new("target"));
+    let attributes = SpanAttributes::new().with("why", "steer");
+    let link = SpanLink { context: target.clone(), attributes: attributes.clone() };
+    let linked = telemetry.open_span(SpanOptions::new("linked").with_links(vec![link]));
+    linked.add_link(SpanLink::new(Arc::new(InMemoryTelemetryContext::new())));
+    linked.add_link(SpanLink::new(target.clone()));
+    target.end(SpanOutcome::Ok);
+    let inert = target.open_span(SpanOptions::new("late"));
+    assert!(inert.metrics().is_some() && inert.propagation().is_some());
+    assert_eq!(telemetry.inject(inert.as_ref()), None);
+    linked.end(SpanOutcome::Ok);
+
+    let spans = telemetry.get_spans();
+    assert_eq!(spans.len(), 2);
+    let links: Vec<_> = spans[1].links.iter().map(|link| (&link.context, link.attributes.len())).collect();
+    assert_eq!(links, [(&spans[0].context, 1), (&spans[0].context, 0)]);
+}
+
+#[test]
+fn records_measurements_and_drops_invalid_ones() {
+    let telemetry = InMemoryTelemetryContext::new();
+    let span = telemetry.open_span(SpanOptions::new("phase"));
+    let counter = telemetry.counter("requests", InstrumentOptions::default());
+    counter.add(1.0, SpanAttributes::new().with("kind", "a"));
+    counter.add(-1.0, SpanAttributes::new());
+    counter.add(f64::NAN, SpanAttributes::new());
+    telemetry.up_down_counter("active", InstrumentOptions::default()).add(-1.0, SpanAttributes::new());
+    let options = HistogramOptions { unit: Some("ms".into()), boundaries: Some(vec![1.0, 10.0]), ..Default::default() };
+    telemetry.histogram("duration", options).record(5.0, SpanAttributes::new(), Some(span.as_ref()));
+    let unordered = HistogramOptions { boundaries: Some(vec![10.0, 1.0]), ..Default::default() };
+    telemetry.histogram("unordered", unordered).record(5.0, SpanAttributes::new(), None);
+
+    let metrics = telemetry.get_metrics();
+    let summary: Vec<_> = metrics.iter().map(|m| (m.name.as_str(), m.value)).collect();
+    assert_eq!(summary, [("requests", 1.0), ("active", -1.0), ("duration", 5.0)]);
+    assert_eq!(metrics[2].context, telemetry.inject(span.as_ref()));
+    assert_eq!((metrics[2].unit.as_deref(), metrics[2].boundaries.as_deref()), (Some("ms"), Some(&[1.0, 10.0][..])));
+}
+
+#[test]
+fn checks_typed_metric_names_kinds_and_attributes() {
+    let metrics = schema(json!({
+        "version": 1,
+        "spans": {},
+        "metrics": {
+            "calls": {"kind": "counter", "description": "Calls", "unit": "1", "attributes": {
+                "kind": {"type": "string", "required": true, "values": ["a", "b"], "description": "Kind"}
+            }},
+            "latency": {"kind": "histogram", "description": "Latency", "boundaries": [1, 2], "attributes": {}}
+        }
+    }));
+    let telemetry = InMemoryTelemetryContext::new();
+    let typed = create_typed_metrics(Arc::new(telemetry.clone()), std::slice::from_ref(&metrics)).unwrap();
+    assert!(create_typed_metrics(Arc::new(telemetry.clone()), &[metrics.clone(), metrics.clone()]).is_err());
+    assert!(typed.histogram("calls").is_err());
+    assert!(typed.counter("missing").is_err());
+    let calls = typed.counter("calls").unwrap();
+    assert!(calls.add(1.0, SpanAttributes::new()).is_err());
+    assert!(calls.add(1.0, SpanAttributes::new().with("kind", "c")).is_err());
+    calls.add(2.0, SpanAttributes::new().with("kind", "a")).unwrap();
+    typed.histogram("latency").unwrap().record(3.0, SpanAttributes::new(), None).unwrap();
+
+    let recorded = telemetry.get_metrics();
+    assert_eq!(recorded.len(), 2);
+    assert_eq!((recorded[0].description.as_deref(), recorded[0].unit.as_deref()), (Some("Calls"), Some("1")));
+    assert_eq!(recorded[1].boundaries.as_deref(), Some(&[1.0, 2.0][..]));
 }

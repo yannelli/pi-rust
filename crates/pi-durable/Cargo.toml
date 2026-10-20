@@ -16,6 +16,7 @@ notify = "8.2.0"
 pi-agent.workspace = true
 pi-ai.workspace = true
 pi-chord = { path = "../pi-chord" }
+pi-telemetry.workspace = true
 rusqlite = { version = "0.40", features = ["bundled"] }
 ring.workspace = true
 serde.workspace = true

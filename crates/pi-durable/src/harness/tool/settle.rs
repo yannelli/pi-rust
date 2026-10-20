@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use futures::future::try_join_all;
 use pi_ai::{JsonObject, ToolCall};
 use pi_chord::{Context, Json};
+use pi_telemetry::SpanAttributes;
 
 use super::api::CallState;
 use super::result::{append_tool_result, nested_result, summary_of};
@@ -25,7 +26,7 @@ use crate::harness::util::lock;
 use crate::ids::TaskId;
 use crate::session::Tx;
 use crate::tasks::{TaskOptions, TaskOwnership};
-use crate::types::{TaskOutcome, TaskOutcomeError, TaskState};
+use crate::types::{TaskOutcome, TaskOutcomeError, TaskRecord, TaskState};
 
 /// How a tool task ends. `Failed` (execution failed or was interrupted) records cancellation intent.
 #[derive(Clone, Debug)]
@@ -138,15 +139,16 @@ pub(crate) async fn start_nested_call(
         let index = tx.doc(&NESTED_CALLS_DOC, owner).await?;
         let existing: Option<TaskId> = index.get()?.calls.get(&key).and_then(|v| v.deserialize_into().ok());
         if let Some(existing) = existing {
-            let input =
-                tx.task(existing).await?.and_then(|record| record.input.deserialize_into::<ToolTaskInput>().ok());
+            let record = tx.task(existing).await?;
+            let replayed = record.as_ref().is_some_and(TaskRecord::is_terminal);
+            let input = record.and_then(|record| record.input.deserialize_into::<ToolTaskInput>().ok());
             let same = matches!(&input, Some(ToolTaskInput::Nested { parent, call: made, .. })
                 if *parent == owner && made.name == call.name && json_equal(&made.arguments, &call.arguments));
             if !same {
                 let message = format!("Nested call {} was already made with another tool or other arguments", call.id);
                 return Err(DurableError::error(message));
             }
-            return Ok(existing);
+            return Ok((existing, replayed));
         }
         let arguments =
             Json::from(serde_json::Value::Object(call.arguments.clone())).as_object().cloned().unwrap_or_default();
@@ -172,6 +174,8 @@ pub(crate) async fn start_nested_call(
             conversation_id: None,
             background: false,
             abandon_on_restart,
+            trace: Default::default(),
+            links: Default::default(),
         };
         let created = tx.create_task(tool_task(), encode(&input)?, options).await?;
         index.edit(|index| index.calls.insert(key, encode(&created).unwrap_or(Json::Null)))?;
@@ -179,9 +183,13 @@ pub(crate) async fn start_nested_call(
         live.edit(|live| {
             live.nested_tools.get_or_insert_with(Vec::new).push(NestedToolSlot { task_id: created, ..slot })
         })?;
-        Ok(created)
+        Ok((created, false))
     };
-    runtime.commit_map(change, context).await
+    let (id, replayed) = runtime.commit_map(change, context).await?;
+    if replayed {
+        context.telemetry().add_event("pi.durable.replay", SpanAttributes::new().with("tool.name", name));
+    }
+    Ok(id)
 }
 
 struct Written {
@@ -246,7 +254,7 @@ pub(crate) fn publish_progress(runtime: &TaskRuntime, state: Arc<CallState>, ena
                         }
                     })
                 };
-                runtime.commit_map(change, &runtime.invocation.context.clone()).await?;
+                runtime.commit_map(change, &runtime.invocation.context()).await?;
                 *lock(&written) = Written { text: snapshot.text, details, diagnostics: count };
                 Ok(bytes as u64)
             })

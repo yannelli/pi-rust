@@ -30,6 +30,8 @@ fn pending_task_record(conversation_id: ConversationId) -> TaskRecord {
         started_at: None,
         ended_at: None,
         restarts: None,
+        trace: Default::default(),
+        links: Default::default(),
     }
 }
 

@@ -200,6 +200,7 @@ async fn summarize_phase(task: TaskRecord, runtime: TaskRuntime, context: Contex
     let stream = &request.stream_options;
     let options = SimpleStreamOptions {
         signal: Some(runtime.signal()),
+        telemetry: Some(context.telemetry()),
         headers: stream.headers.clone().unwrap_or_default(),
         timeout_ms: stream.timeout_ms,
         max_retries: stream.max_retries,
@@ -286,7 +287,14 @@ pub async fn create_compaction(
     let ownership = owner.map_or(TaskOwnership::Conversation, TaskOwnership::Task);
     let background = owner.is_none() && input.reason != CompactionReason::Manual;
     let conversation = owner.is_none().then_some(conversation_id);
-    let options = TaskOptions { ownership, conversation_id: conversation, background, abandon_on_restart: false };
+    let options = TaskOptions {
+        ownership,
+        conversation_id: conversation,
+        background,
+        abandon_on_restart: false,
+        trace: Default::default(),
+        links: Default::default(),
+    };
     let reason = input.reason;
     let task_id = tx.create_task(compaction_task(), encode(&input)?, options).await?;
     let status = CompactionStatus { task_id, reason, blocking: owner.is_some(), attempt: 1, retry: None };
@@ -365,7 +373,7 @@ async fn place_summary(
         None => {
             let draft = SubmissionDraft::Write { request_id: Some(format!("compaction:{task_id}")), entry };
             let core = &runtime.scheduler.core;
-            let id = admit_submission(tx, conversation_id, draft, core.now(), &core.settings()).await?;
+            let id = admit_submission(tx, conversation_id, draft, core.now(), &core.settings(), None).await?.id;
             CompactionResult { submission_id: Some(id), entry_id: None }
         }
         Some(_) => {

@@ -222,7 +222,11 @@ pub(super) async fn abort(task: TaskRecord, runtime: TaskRuntime, context: Conte
     if let GenerationCheckpoint::Poll { model, handle, .. } = &checkpoint
         && let Some(model) = runtime.models().get_model(&model.provider, &model.model_id)
     {
-        let options = DeferredCancelOptions { signal: Some(runtime.signal()), ..DeferredCancelOptions::default() };
+        let options = DeferredCancelOptions {
+            signal: Some(runtime.signal()),
+            telemetry: Some(context.telemetry()),
+            ..DeferredCancelOptions::default()
+        };
         if let Err(error) = runtime.models().cancel_deferred(&model, handle, options).await {
             runtime.report_from(&error, ReportFrom::Host(HostCallback::Models));
         }

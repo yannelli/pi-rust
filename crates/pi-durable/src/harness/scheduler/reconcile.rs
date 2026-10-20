@@ -49,7 +49,7 @@ impl Scheduler {
             .await;
         if let Err(error) = result {
             // No extension code runs in this commit: a failure is a storage failure, a host callback, or a bug.
-            self.fail_session(error);
+            self.fail_session(error, None);
         }
         lock(&self.state).reconciling -= usize::from(work);
         self.schedule_wake();
@@ -270,7 +270,7 @@ impl Scheduler {
             // Only a delivered wake counts: after an error, the next change or kick offers it again.
             Ok(()) => lock(&self.state).last_wake = Some(wake),
             Err(error) => {
-                self.core.report(&error, &ReportInfo::HostError { callback: HostCallback::OnWake, task: None });
+                self.core.report(&error, &ReportInfo::HostError { callback: HostCallback::OnWake, task: None }, None);
             }
         }
     }
@@ -337,7 +337,7 @@ impl Scheduler {
                     }
                 }
                 Err(error) => {
-                    self.fail_session(error);
+                    self.fail_session(error, None);
                     break;
                 }
             }

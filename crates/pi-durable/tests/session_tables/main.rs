@@ -91,6 +91,8 @@ pub fn pending(id: TaskId, conversation_id: ConversationId, path: &str, abort_re
         started_at: None,
         ended_at: None,
         restarts: None,
+        trace: Default::default(),
+        links: Default::default(),
     }
 }
 

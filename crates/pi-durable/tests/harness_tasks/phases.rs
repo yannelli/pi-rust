@@ -68,6 +68,8 @@ async fn commits_results_with_entries_atomically_keeps_memos_until_terminal_and_
                             conversation_id: None,
                             background: false,
                             abandon_on_restart: false,
+                            trace: Default::default(),
+                            links: Default::default(),
                         };
                         *spawned.lock().unwrap() = Some(tx.create_task(child, Json::Null, options).await?);
                         Ok(checkpoint("answer"))

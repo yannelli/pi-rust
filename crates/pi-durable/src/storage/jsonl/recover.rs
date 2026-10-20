@@ -147,10 +147,13 @@ impl JsonlStorage {
                     MainOperation::DocumentCreate { record, .. } if create_is_current_only(record) => {
                         current_only.insert(record.id);
                     }
-                    MainOperation::Inline(StorageWrite::DocumentRetire { id }) => {
-                        retired.insert(*id);
-                    }
-                    MainOperation::Inline(StorageWrite::Task { value }) => set_live(value.id, false),
+                    MainOperation::Inline(write) => match &**write {
+                        StorageWrite::DocumentRetire { id } => {
+                            retired.insert(*id);
+                        }
+                        StorageWrite::Task { value } => set_live(value.id, false),
+                        _ => {}
+                    },
                     MainOperation::TaskSidecar { id, .. } => set_live(*id, true),
                     _ => {}
                 }
@@ -190,7 +193,7 @@ impl JsonlStorage {
             let mut writes = Vec::new();
             for operation in &marker.writes {
                 match operation {
-                    MainOperation::Inline(write) => writes.push(write.clone()),
+                    MainOperation::Inline(write) => writes.push((**write).clone()),
                     MainOperation::TaskSidecar { id, ordinal } => {
                         let optional = terminal_tasks.contains(id);
                         let file = sidecar_file_name("task", id.0);

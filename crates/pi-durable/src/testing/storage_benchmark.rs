@@ -95,6 +95,8 @@ fn task(id: TaskId, index: u64) -> TaskRecord {
         started_at: None,
         ended_at: None,
         restarts: None,
+        trace: Default::default(),
+        links: Default::default(),
     }
 }
 
@@ -411,6 +413,7 @@ pub async fn run_storage_write_benchmark(storage: &dyn Storage, index: usize) ->
                 reason: None,
                 detail: None,
                 id: submission_id,
+                trace: Default::default(),
             };
             let record = DocumentCreate {
                 id: document_id,

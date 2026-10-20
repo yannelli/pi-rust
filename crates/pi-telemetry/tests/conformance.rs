@@ -61,7 +61,8 @@ async fn returns_detached_snapshots_without_exposing_mutable_recording_state() {
     assert_eq!(
         serde_json::to_value(&second).unwrap(),
         serde_json::json!({
-            "id": 1, "parentId": null, "name": "snapshot", "attributes": {"tags": ["initial"]},
+            "id": 1, "parentId": null, "context": second.context, "parentContext": null, "links": [],
+            "name": "snapshot", "attributes": {"tags": ["initial"]},
             "events": [{"name": "event", "attributes": {"value": 1.0}}],
             "status": {"status": "ok"}, "settled": true, "endSequence": 1
         })

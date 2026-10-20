@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex, Weak};
 
 use pi_chord::delta::Tracker;
 use pi_chord::{BACKGROUND_CONTEXT, Context, Json, Unsubscribe, without_abort_signal};
+use pi_telemetry::SpanAttributes;
 use tokio::sync::watch;
 
 use super::guarded::{FailureLatch, GuardedStorage};
@@ -14,7 +15,7 @@ use super::line::{Line, SharedResult, await_with_context, lock, spawn_shared};
 use super::tx::{TransactionScope, Tx};
 use super::{CommitListener, SessionEnd, SessionHooks};
 use crate::errors::{DurableError, DurableResult};
-use crate::ids::Seq;
+use crate::ids::{EntryId, Seq};
 use crate::types::{
     CommitChange, CommitPublication, DocumentCommitChange, DocumentRecord, ReportInfo, Storage, StorageWrite,
 };
@@ -84,6 +85,13 @@ impl FailureLatch for SessionCore {
     }
 
     fn fail(&self, error: DurableError) {
+        self.fail_in(error, None);
+    }
+}
+
+impl SessionCore {
+    /// Fail the Session; the report's telemetry event goes to `context`'s span.
+    pub fn fail_in(&self, error: DurableError, context: Option<&Context>) {
         {
             let mut failure = lock(&self.failure);
             if failure.is_some() {
@@ -96,14 +104,12 @@ impl FailureLatch for SessionCore {
             // Seal first, so a report handler that calls back finds the Session failed.
             drop(Session(core).close(&BACKGROUND_CONTEXT));
         }
-        self.hooks.report(&error, &ReportInfo::SessionFailed);
+        self.hooks.report(&error, &ReportInfo::SessionFailed, context);
     }
-}
 
-impl SessionCore {
     /// A listener's error, which never fails what ran it.
     pub fn report(&self, error: &DurableError) {
-        self.hooks.report(error, &ReportInfo::ListenerError);
+        self.hooks.report(error, &ReportInfo::ListenerError, None);
     }
 
     pub fn assert_healthy(&self) -> DurableResult<()> {
@@ -168,6 +174,24 @@ impl SessionCore {
     }
 
     pub fn publish(&self, seq: Seq, writes: &[StorageWrite], documents: Vec<DocumentCommitChange>, context: &Context) {
+        let telemetry = context.telemetry();
+        for write in writes {
+            match write {
+                StorageWrite::Entry { value } => {
+                    let attributes =
+                        SpanAttributes::new().with("entry.id", value.id.get()).with("entry.kind", value.kind.as_str());
+                    telemetry.add_event("pi.durable.entry", attributes);
+                }
+                StorageWrite::Submission { value } if value.status.is_settled() => {
+                    let attributes = SpanAttributes::new()
+                        .with("submission.id", value.id.get())
+                        .with("status", value.status.as_str())
+                        .with_optional("answer.entry_id", value.answer.map(EntryId::get));
+                    telemetry.add_event("pi.durable.submission", attributes);
+                }
+                _ => {}
+            }
+        }
         let internal: Vec<_> = lock(&self.internal_listeners).iter().map(|(_, l)| l.clone()).collect();
         let host: Vec<_> = lock(&self.commit_listeners).iter().map(|(_, l)| l.clone()).collect();
         if internal.is_empty() && host.is_empty() {
@@ -188,12 +212,12 @@ impl SessionCore {
         // The commit is durable: a failing listener neither fails the commit nor skips the others.
         for listener in internal {
             if let Err(error) = listener(&publication, context) {
-                self.fail(error);
+                self.fail_in(error, Some(context));
             }
         }
         for listener in host {
             if let Err(error) = listener(&publication, context) {
-                self.report(&error);
+                self.hooks.report(&error, &ReportInfo::ListenerError, Some(context));
             }
         }
     }
@@ -283,8 +307,8 @@ impl Session {
     }
 
     /// Internal: fail the Session with `error`; the first wins. Admission ends and close listeners run now.
-    pub fn fail(&self, error: DurableError) {
-        self.0.fail(error);
+    pub fn fail(&self, error: DurableError, context: Option<&Context>) {
+        self.0.fail_in(error, context);
     }
 
     /// Internal: the error that failed the Session, if one did.
@@ -430,7 +454,7 @@ async fn close_session(core: Arc<SessionCore>, cleanup: Context) -> DurableResul
                     first
                 };
                 if first {
-                    job_core.hooks.report(error, &ReportInfo::SessionFailed);
+                    job_core.hooks.report(error, &ReportInfo::SessionFailed, None);
                 }
             }
             result
