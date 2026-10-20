@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, LazyLock, RwLock};
 
 use futures::future::BoxFuture;
-use pi_telemetry::TelemetryContext;
+use pi_telemetry::TelemetrySpan;
 use tokio_util::sync::CancellationToken;
 
 use crate::env::get_env_api_key;
@@ -12,6 +12,7 @@ use crate::provider_options::{AzureOptions, BedrockOptions, ReasoningSummary, Ve
 use crate::providers;
 use crate::request::RequestOptions;
 use crate::stream::{AssistantMessageEventStream, error_stream};
+use crate::telemetry::observe_model_request;
 use crate::types::{AssistantMessage, Context, DeferredHandle, Model, StopReason, ThinkingLevel};
 
 /// Preferred transport for providers that support several.
@@ -76,8 +77,8 @@ pub type OnProviderStreamEventFn = Arc<dyn Fn(&serde_json::Value, &Model) + Send
 pub struct StreamOptions {
     pub api_key: Option<String>,
     pub cancel: CancellationToken,
-    /// Explicit parent context for telemetry produced by this logical request.
-    pub telemetry_context: Option<Arc<dyn TelemetryContext>>,
+    /// Explicit parent span for telemetry produced by this logical request.
+    pub telemetry: Option<Arc<dyn TelemetrySpan>>,
     pub max_tokens: Option<u64>,
     pub temperature: Option<f64>,
     /// Requested reasoning effort; `None` or `Off` disables thinking where the API allows it.
@@ -204,8 +205,14 @@ pub fn api_provider(api: &str) -> Option<Arc<dyn ApiProvider>> {
     REGISTRY.read().unwrap_or_else(|poisoned| poisoned.into_inner()).get(api).cloned()
 }
 
-/// Stream a response from the provider registered for `model.api`.
-pub fn stream(model: &Model, context: &Context, mut options: StreamOptions) -> AssistantMessageEventStream {
+/// Stream a response from the provider registered for `model.api`, inside a `pi.ai.request` span under
+/// `options.telemetry`.
+pub fn stream(model: &Model, context: &Context, options: StreamOptions) -> AssistantMessageEventStream {
+    let (telemetry, reasoning) = (options.telemetry.clone(), options.reasoning);
+    observe_model_request(model, telemetry, reasoning, false, dispatch_stream(model, context, options))
+}
+
+fn dispatch_stream(model: &Model, context: &Context, mut options: StreamOptions) -> AssistantMessageEventStream {
     let Some(provider) = api_provider(&model.api) else {
         return error_stream(model, StopReason::Error, format!("No provider registered for API: {}", model.api));
     };
@@ -239,16 +246,18 @@ fn deferred_provider(model: &Model, options: &mut DeferredOptions) -> Result<Arc
     api_provider(&model.api).ok_or_else(|| format!("No provider registered for API: {}", model.api))
 }
 
-/// Stream the continuation of a deferred response.
+/// Stream the continuation of a deferred response, inside a `pi.ai.poll` span under `options.request.telemetry`.
 pub fn stream_deferred(
     model: &Model,
     handle: &DeferredHandle,
     mut options: DeferredOptions,
 ) -> AssistantMessageEventStream {
-    match deferred_provider(model, &mut options) {
+    let telemetry = options.request.telemetry.clone();
+    let inner = match deferred_provider(model, &mut options) {
         Ok(provider) => provider.fetch_deferred(model, handle, options),
         Err(error) => error_stream(model, StopReason::Error, error),
-    }
+    };
+    observe_model_request(model, telemetry, None, true, inner)
 }
 
 /// Fetch a deferred response; the result has stop reason `Deferred` while it is still pending.

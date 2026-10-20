@@ -1,4 +1,4 @@
-//! Port of upstream `test/telemetry-options.test.ts`: the explicit telemetry parent context
+//! Port of upstream `test/telemetry-options.test.ts`: the explicit telemetry parent span
 //! survives stream, deferred, and image dispatch unchanged.
 
 use std::sync::{Arc, Mutex};
@@ -9,9 +9,9 @@ use pi_ai::{
     DeferredHandle, DeferredOptions, ImagesApi, ImagesContext, ImagesOptions, Model, RequestOptions, StopReason,
     StreamOptions, event_channel,
 };
-use pi_telemetry::{TelemetryContext, noop_telemetry_context};
+use pi_telemetry::{TelemetrySpan, noop_telemetry_span};
 
-type Observed = Arc<Mutex<Vec<Option<Arc<dyn TelemetryContext>>>>>;
+type Observed = Arc<Mutex<Vec<Option<Arc<dyn TelemetrySpan>>>>>;
 
 fn model(api: &str, model_type: Option<&str>) -> Model {
     Model {
@@ -35,7 +35,7 @@ struct Recorder(Observed);
 
 impl ApiProvider for Recorder {
     fn stream(&self, model: &Model, _context: &Context, options: StreamOptions) -> AssistantMessageEventStream {
-        self.0.lock().unwrap().push(options.telemetry_context);
+        self.0.lock().unwrap().push(options.telemetry);
         completed(model)
     }
 
@@ -45,7 +45,7 @@ impl ApiProvider for Recorder {
         _: &DeferredHandle,
         options: DeferredOptions,
     ) -> AssistantMessageEventStream {
-        self.0.lock().unwrap().push(options.request.telemetry_context);
+        self.0.lock().unwrap().push(options.request.telemetry);
         completed(model)
     }
 
@@ -55,7 +55,7 @@ impl ApiProvider for Recorder {
         _: &DeferredHandle,
         options: DeferredOptions,
     ) -> BoxFuture<'static, Result<(), String>> {
-        self.0.lock().unwrap().push(options.request.telemetry_context);
+        self.0.lock().unwrap().push(options.request.telemetry);
         Box::pin(async { Ok(()) })
     }
 }
@@ -67,7 +67,7 @@ impl ImagesApi for Recorder {
         _: &ImagesContext,
         options: ImagesOptions,
     ) -> BoxFuture<'static, AssistantImages> {
-        self.0.lock().unwrap().push(options.request.telemetry_context);
+        self.0.lock().unwrap().push(options.request.telemetry);
         let result = AssistantImages {
             api: model.api.clone(),
             provider: model.provider.clone(),
@@ -78,7 +78,7 @@ impl ImagesApi for Recorder {
     }
 }
 
-fn all_match(observed: &Observed, expected: &Arc<dyn TelemetryContext>, count: usize) {
+fn all_match(observed: &Observed, expected: &Arc<dyn TelemetrySpan>, count: usize) {
     let observed = observed.lock().unwrap();
     assert_eq!(observed.len(), count);
     assert!(observed.iter().all(|value| value.as_ref().is_some_and(|value| Arc::ptr_eq(value, expected))));
@@ -89,18 +89,12 @@ async fn survives_stream_and_deferred_dispatch() {
     let observed: Observed = Arc::default();
     pi_ai::register_api_provider("telemetry-test", Arc::new(Recorder(observed.clone())));
     let model = model("telemetry-test", None);
-    let telemetry = noop_telemetry_context();
-    let options = StreamOptions {
-        api_key: Some("key".into()),
-        telemetry_context: Some(telemetry.clone()),
-        ..StreamOptions::default()
-    };
+    let telemetry = noop_telemetry_span();
+    let options =
+        StreamOptions { api_key: Some("key".into()), telemetry: Some(telemetry.clone()), ..StreamOptions::default() };
     pi_ai::complete(&model, &Context::default(), options).await;
-    let request = RequestOptions {
-        api_key: Some("key".into()),
-        telemetry_context: Some(telemetry.clone()),
-        ..RequestOptions::default()
-    };
+    let request =
+        RequestOptions { api_key: Some("key".into()), telemetry: Some(telemetry.clone()), ..RequestOptions::default() };
     let deferred = DeferredOptions { request, wait_ms: None };
     let handle = DeferredHandle {
         provider: model.provider.clone(),
@@ -121,12 +115,9 @@ async fn survives_image_dispatch() {
     let observed: Observed = Arc::default();
     pi_ai::register_images_api("telemetry-test-images", Arc::new(Recorder(observed.clone())));
     let model = model("telemetry-test-images", Some("image"));
-    let telemetry = noop_telemetry_context();
-    let request = RequestOptions {
-        api_key: Some("key".into()),
-        telemetry_context: Some(telemetry.clone()),
-        ..RequestOptions::default()
-    };
+    let telemetry = noop_telemetry_span();
+    let request =
+        RequestOptions { api_key: Some("key".into()), telemetry: Some(telemetry.clone()), ..RequestOptions::default() };
     let context = ImagesContext { input: vec![pi_ai::ContentBlock::text("circle")] };
     pi_ai::generate_images(&model, &context, ImagesOptions { request, metadata: None }).await;
     all_match(&observed, &telemetry, 1);
