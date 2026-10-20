@@ -5,6 +5,8 @@
 mod boundaries;
 #[path = "harness_inbox/continuations.rs"]
 mod continuations;
+#[path = "harness_inbox/failed_run.rs"]
+mod failed_run;
 #[path = "harness_inbox/ledger.rs"]
 mod ledger;
 mod support;

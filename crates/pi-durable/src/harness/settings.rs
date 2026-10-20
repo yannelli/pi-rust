@@ -75,6 +75,22 @@ pub const DEFAULT_PROGRESS_POLICY: ProgressPolicy =
 /// Default `context_retention_ms`: ten minutes.
 pub const DEFAULT_CONTEXT_RETENTION_MS: f64 = 600_000.0;
 
+/// Default `restart_limit`.
+pub const DEFAULT_RESTART_LIMIT: f64 = 5.0;
+
+/// What a run that fails (`model_error`, `no_model`) does with the inputs queued behind it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AfterFailedRun {
+    /// Leave them queued until the next input or queued write.
+    #[default]
+    Keep,
+    /// Start the next run with them, as an answer would.
+    Continue,
+    /// Settle them `unanswered` with reason `run_failed`.
+    Withdraw,
+}
+
 /// Partial retry policy of [`HarnessSettings`].
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RetryOverrides {
@@ -117,6 +133,12 @@ pub struct HarnessSettings {
     pub follow_up_mode: Option<QueueMode>,
     /// How long an idle conversation keeps its last context read in memory; `0` drops it at once.
     pub context_retention_ms: Option<f64>,
+    /// What a failed run does with the inputs queued behind it; default `Keep`.
+    pub after_failed_run: Option<AfterFailedRun>,
+    /// How many times in a row a task may be cut off by a crash, eviction, or reset (a close does not count) without
+    /// changing its state before it is parked as blocked (`restart_limit`) instead of run again;
+    /// `Harness::retry_task()` runs it again. Default 5; `f64::INFINITY` never parks. Below 1 means the default.
+    pub restart_limit: Option<f64>,
 }
 
 /// Resolved settings: every field over its built-in default.
@@ -134,6 +156,8 @@ pub struct Settings {
     pub steering_mode: QueueMode,
     pub follow_up_mode: QueueMode,
     pub context_retention_ms: f64,
+    pub after_failed_run: AfterFailedRun,
+    pub restart_limit: f64,
 }
 
 impl Default for Settings {
@@ -195,5 +219,15 @@ pub fn resolve_settings(settings: Option<&HarnessSettings>) -> Settings {
         steering_mode: settings.steering_mode.unwrap_or_default(),
         follow_up_mode: settings.follow_up_mode.unwrap_or_default(),
         context_retention_ms: settings.context_retention_ms.unwrap_or(DEFAULT_CONTEXT_RETENTION_MS),
+        after_failed_run: settings.after_failed_run.unwrap_or_default(),
+        restart_limit: restart_limit(settings.restart_limit),
+    }
+}
+
+/// A restart limit as given when it is a number of restarts, 1 or more, rounded down; else the default.
+fn restart_limit(limit: Option<f64>) -> f64 {
+    match limit {
+        Some(limit) if limit >= 1.0 => limit.floor(),
+        _ => DEFAULT_RESTART_LIMIT,
     }
 }

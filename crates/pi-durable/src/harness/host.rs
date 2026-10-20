@@ -26,8 +26,8 @@ use crate::ids::{ConversationId, ROOT_CONVERSATION_ID, SubmissionId, TaskId};
 use crate::session::{Session, SessionHooks, SessionOptions, TransactionScope, Tx, create_session};
 use crate::timers::Timers;
 use crate::types::{
-    ConversationOwnership, ConversationQuery, ConversationRecord, Storage, SubmissionQuery, SubmissionStatus,
-    TaskRecord,
+    ConversationOwnership, ConversationQuery, ConversationRecord, HostCallback, ReportInfo, Storage, SubmissionQuery,
+    SubmissionStatus, TaskRecord,
 };
 
 const SCAN_PAGE_SIZE: usize = 256;
@@ -65,9 +65,9 @@ impl SessionHooks for HarnessHooks {
         }
     }
 
-    fn report(&self, error: &DurableError) {
+    fn report(&self, error: &DurableError, info: &ReportInfo) {
         if let Some(report) = &self.options.on_report {
-            report(error);
+            report(error, info);
         }
     }
 }
@@ -116,7 +116,11 @@ impl Harness {
             storage,
             SessionOptions { now: options.now.clone(), hooks: Some(hooks.clone() as Arc<dyn SessionHooks>) },
         );
-        let report = options.on_report.clone().unwrap_or_else(|| Arc::new(|_: &DurableError| {}));
+        let report = options.on_report.clone().unwrap_or_else(|| Arc::new(|_: &DurableError, _: &ReportInfo| {}));
+        let timer_report = report.clone();
+        let timer_report = Arc::new(move |error: &DurableError| {
+            timer_report(error, &ReportInfo::HostError { callback: HostCallback::SetTimer, task: None });
+        });
         let now = options.now.clone().unwrap_or_else(|| Arc::new(system_now));
         let core = Arc::new(HarnessCore {
             session: session.clone(),
@@ -125,7 +129,7 @@ impl Harness {
             settings: options.settings.clone(),
             env: options.env.clone(),
             now,
-            timers: Timers::new(options.set_timer.clone(), report.clone()),
+            timers: Timers::new(options.set_timer.clone(), timer_report),
             on_wake: options.on_wake.clone(),
             report,
         });
@@ -135,7 +139,7 @@ impl Harness {
             let submissions = Submissions::new(session.clone(), scheduler.clone())?;
             let _ = scheduler.submissions.set(Arc::downgrade(&submissions));
             let views = ConversationViews::new(session.clone())?;
-            let task_graph = TaskGraphView::new(session.clone())?;
+            let task_graph = TaskGraphView::new(session.clone(), &scheduler)?;
             scheduler.open(context).await?;
             Ok::<_, DurableError>(HarnessInner {
                 session: session.clone(),
@@ -247,6 +251,13 @@ impl Harness {
 
     pub async fn abort_task(&self, id: TaskId, context: &Context) -> DurableResult<AbortTaskResult> {
         self.0.scheduler.abort(id, context, false).await
+    }
+
+    /// Run a task parked by `HarnessSettings::restart_limit` again: clears its restart count and enables scheduling.
+    /// Does nothing for a task that is not parked; fails for an unknown one.
+    pub async fn retry_task(&self, id: TaskId, context: &Context) -> DurableResult<()> {
+        self.0.session.assert_usable()?;
+        self.0.scheduler.retry(id, context).await
     }
 
     pub async fn wait_for_task(&self, id: TaskId, context: &Context) -> DurableResult<TaskRecord> {

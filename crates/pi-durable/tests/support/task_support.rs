@@ -16,9 +16,17 @@ pub struct OpenedTasks {
     pub harness: Harness,
     pub registry: Arc<Registry>,
     pub reports: Arc<Mutex<Vec<DurableError>>>,
+    /// The info of each report, in order.
+    pub infos: Arc<Mutex<Vec<ReportInfo>>>,
 }
 
-/// Open a Harness whose registry holds `tasks`; failures passed to `on_report` are collected.
+impl OpenedTasks {
+    pub fn infos(&self) -> Vec<ReportInfo> {
+        self.infos.lock().unwrap().clone()
+    }
+}
+
+/// Open a Harness whose registry holds `tasks`; failures passed to `on_report` are collected, their infos in `infos`.
 pub async fn open_tasks(storage: Arc<dyn Storage>, tasks: Vec<Task>) -> OpenedTasks {
     open_tasks_with(storage, tasks, Arc::new(create_registry()), |options| options).await
 }
@@ -33,12 +41,16 @@ pub async fn open_tasks_with(
         registry.install(tasks.into_iter().fold(Extension::new("tasks"), Extension::task)).unwrap();
     }
     let reports = Arc::new(Mutex::new(Vec::new()));
-    let sink = reports.clone();
+    let infos = Arc::new(Mutex::new(Vec::new()));
+    let (sink, info_sink) = (reports.clone(), infos.clone());
     let options =
         HarnessOptions::new(chat_setup(Default::default()).models, registry.clone() as Arc<dyn RegistryReader>)
-            .with_on_report(move |error| sink.lock().unwrap().push(error.clone()));
+            .with_on_report(move |error, info| {
+                sink.lock().unwrap().push(error.clone());
+                info_sink.lock().unwrap().push(info.clone());
+            });
     let harness = Harness::open(storage, configure(options), &context()).await.unwrap();
-    OpenedTasks { harness, registry, reports }
+    OpenedTasks { harness, registry, reports, infos }
 }
 
 /// Next state that completes a task with `result`.

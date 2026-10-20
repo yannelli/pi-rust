@@ -19,6 +19,7 @@ use super::{
 use crate::documents::encode;
 use crate::env::ShellOutputWindow;
 use crate::errors::{DurableError, DurableResult};
+use crate::harness::agent::tool_extension;
 use crate::harness::live::{LIVE_DOC, SlotRef, SlotStatus, tool_slot};
 use crate::harness::output::{OutputBuffer, OutputLimits};
 use crate::harness::progress::PROGRESS_BYTES_PER_SECOND;
@@ -28,7 +29,7 @@ use crate::harness::types::ToolExecutionResult;
 use crate::harness::util::lock;
 use crate::session::Tx;
 use crate::truncate::{DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES};
-use crate::types::{AbortReason, TaskRecord, TaskState};
+use crate::types::{AbortReason, ReportFrom, TaskRecord, TaskState};
 
 fn invalid(message: &str) -> ToolExecutionResult {
     harness_error("invalid_arguments", message)
@@ -281,7 +282,7 @@ async fn final_result(
         match hook((call.clone(), last.clone()), runtime.clone(), context.clone()).await {
             Ok(Some(replaced)) => last = replaced,
             Ok(None) => {}
-            Err(error) => runtime.hook_failed(error)?,
+            Err(error) => runtime.hook_failed(&hooks, error)?,
         }
     }
     // The kept output's truncation applies only while `after_tool` kept that output.
@@ -302,8 +303,11 @@ async fn final_result(
             last.is_error = Some(true);
             harness.push(tool_diagnostic("invalid_structured_output", &broken));
         } else {
-            // The model never sees structured output, so its call stands; the host learns of the broken tool.
-            runtime.report(&DurableError::error(broken));
+            // The model never sees structured output, so its call stands; the host learns of the broken tool. Only names
+            // the extension: a failed resolution leaves the report without the name.
+            let agent = runtime.agent(context).await.ok();
+            let extension = agent.and_then(|agent| tool_extension(&agent, tool.name()));
+            runtime.report_from(&DurableError::error(broken), ReportFrom::Extension(extension));
         }
     }
     if nested && tool.structured_output_schema.is_none() {

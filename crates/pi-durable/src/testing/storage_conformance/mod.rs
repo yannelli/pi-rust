@@ -155,6 +155,7 @@ pub(crate) fn pending_task(id: TaskId, conversation_id: ConversationId, phase: &
         memos: None,
         started_at: None,
         ended_at: None,
+        restarts: None,
     }
 }
 

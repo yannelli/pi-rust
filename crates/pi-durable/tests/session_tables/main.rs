@@ -68,6 +68,7 @@ pub fn terminal(task: &TaskRecord) -> TaskRecord {
         memos: None,
         started_at: None,
         ended_at: None,
+        restarts: None,
         ..task.clone()
     }
 }
@@ -89,6 +90,7 @@ pub fn pending(id: TaskId, conversation_id: ConversationId, path: &str, abort_re
         memos: None,
         started_at: None,
         ended_at: None,
+        restarts: None,
     }
 }
 

@@ -94,6 +94,7 @@ fn task(id: TaskId, index: u64) -> TaskRecord {
         memos: None,
         started_at: None,
         ended_at: None,
+        restarts: None,
     }
 }
 

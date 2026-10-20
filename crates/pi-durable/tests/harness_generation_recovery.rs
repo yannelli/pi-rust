@@ -19,7 +19,7 @@ use pi_durable::testing::faux::{
 use pi_durable::{EntryRecord, SubmissionId, SubmissionRecord, SubmissionStatus, TaskId};
 use serde_json::{Value, json};
 use support::harness_support::*;
-use support::task_support::aborted;
+use support::task_support::{aborted, eventually};
 
 fn sqlite_path(directory: &tempfile::TempDir) -> String {
     directory.path().join("session.sqlite").to_string_lossy().into_owned()
@@ -251,6 +251,7 @@ async fn resumes_a_retry_backoff_after_reopen() {
         "until": 61_000,
     });
     assert_eq!(state(&harness, task_id).await, expected);
+    eventually(|| async { !harness.wake().unwrap().active }).await;
     assert_eq!(harness.wake().unwrap(), Wake { active: false, at: Some(61_000.0) });
     // An early wake retries nothing.
     harness.resume().unwrap();
@@ -349,6 +350,7 @@ async fn resumes_polling_a_deferred_response_after_reopen() {
     );
     let stored = state(&harness, task_id).await;
     assert_eq!((stored["status"].clone(), stored["until"].clone()), (json!("sleeping"), json!(61_000)));
+    eventually(|| async { !harness.wake().unwrap().active }).await;
     assert_eq!(harness.wake().unwrap(), Wake { active: false, at: Some(61_000.0) });
     *setup.now.lock().unwrap() = Some(61_000.0);
     harness.resume().unwrap();

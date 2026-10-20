@@ -75,6 +75,21 @@ pub struct HookRegistration {
     pub handlers: Arc<dyn Any + Send + Sync>,
 }
 
+/// One selected extension's hook handlers for a task; derefs to the handlers.
+pub struct ExtensionHooks<H: ?Sized> {
+    /// The extension that registered them, named in reports of their failures.
+    pub extension: String,
+    pub handlers: Arc<H>,
+}
+
+impl<H: ?Sized> std::ops::Deref for ExtensionHooks<H> {
+    type Target = H;
+
+    fn deref(&self) -> &H {
+        &self.handlers
+    }
+}
+
 /// Hook handlers for tasks named like `task`.
 pub fn hook<H: Any + Send + Sync>(task: &Task, handlers: H) -> HookRegistration {
     HookRegistration { task: task.name.clone(), handlers: Arc::new(handlers) }

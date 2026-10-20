@@ -9,7 +9,7 @@ use tokio::task::JoinHandle;
 
 use super::{
     GenerationCheckpoint, GenerationHooks, append_assistant, completed, convert_partial, create_generation, decode,
-    edit_live, fail_no_model, hand_over, sleeping, unanswered, waiting,
+    fail_no_model, hand_over, sleeping, unanswered, waiting,
 };
 use crate::documents::encode;
 use crate::errors::{DurableError, DurableResult};
@@ -65,7 +65,7 @@ pub(super) async fn request(task: TaskRecord, runtime: TaskRuntime, context: Con
         match hook(messages.clone(), runtime.clone(), context.clone()).await {
             Ok(Some(replaced)) => messages = replaced,
             Ok(None) => {}
-            Err(error) => runtime.hook_failed(error)?,
+            Err(error) => runtime.hook_failed(&hooks, error)?,
         }
     }
     let options = SimpleStreamOptions {
@@ -261,7 +261,7 @@ pub(super) async fn classify(
     for hooks in runtime.hooks::<GenerationHooks>(context).await? {
         let Some(hook) = &hooks.after_response else { continue };
         if let Err(error) = hook(message.clone(), runtime.clone(), context.clone()).await {
-            runtime.hook_failed(error)?;
+            runtime.hook_failed(&hooks, error)?;
         }
     }
     let calls: Vec<_> = message.tool_calls().cloned().collect();
@@ -303,20 +303,22 @@ pub(super) async fn classify(
     } else {
         0.0
     };
+    let runtime_ = runtime.clone();
     let change = move |tx: Tx, _| async move {
+        // Read before the first table write; only a failure uses it.
+        let failure = if retry { None } else { Some(super::prepare_failure(&tx, &runtime_).await?) };
         append_assistant(&tx, conversation_id, &message).await?;
-        if retry {
+        let Some(failure) = failure else {
             let error = message.error_message.clone().unwrap_or_default();
             let generation =
                 LiveGeneration { retry: Some(RetryState { at: until, error }), ..LiveGeneration::new(attempt) };
             tx.doc(&LIVE_DOC, conversation_id).await?.edit(|live| live.generation = Some(generation))?;
             return sleeping(&GenerationCheckpoint::Retry { attempt, compacted, until }, until);
-        }
+        };
         let text = message.error_message.clone().unwrap_or_else(|| {
             format!("Model response ended with stop reason {}", stop_reason_text(message.stop_reason))
         });
-        let settlement = unanswered("model_error", Some(&text));
-        edit_live(&tx, conversation_id, |tx, live| end_run(tx, live, owner, settlement)).await?;
+        super::end_failed_run(&tx, &runtime_, failure, unanswered("model_error", Some(&text))).await?;
         Ok(super::failed(&text, "model_error"))
     };
     runtime.commit(change, context).await
@@ -346,7 +348,7 @@ async fn answer(runtime: &TaskRuntime, message: AssistantMessage, context: &Cont
         }
         match hook(message.clone(), runtime.clone(), context.clone()).await {
             Ok(next) => continuation = next,
-            Err(error) => runtime.hook_failed(error)?,
+            Err(error) => runtime.hook_failed(&hooks, error)?,
         }
     }
     let (conversation_id, owner, core) = (runtime.conversation_id(), runtime.task_id(), runtime.scheduler.core.clone());

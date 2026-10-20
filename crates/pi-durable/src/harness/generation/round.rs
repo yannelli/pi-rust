@@ -22,7 +22,7 @@ use crate::ids::{ConversationId, EntryId, TaskId};
 use crate::models::DeferredCancelOptions;
 use crate::session::Tx;
 use crate::tasks::TaskOptions;
-use crate::types::{DraftHead, SubmissionSettlement, TaskOutcome, TaskRecord, TaskState};
+use crate::types::{DraftHead, HostCallback, ReportFrom, SubmissionSettlement, TaskOutcome, TaskRecord, TaskState};
 
 /// A tool task for call `call_id`, owned by the generation.
 async fn create_tool_task(tx: &Tx, owner: TaskId, assistant: EntryId, call_id: String) -> DurableResult<TaskId> {
@@ -142,7 +142,7 @@ async fn finish_tool_round(
     for hooks in runtime.hooks::<GenerationHooks>(context).await? {
         let Some(hook) = &hooks.after_tools else { continue };
         if let Err(error) = hook((assistant, results.clone()), runtime.clone(), context.clone()).await {
-            runtime.hook_failed(error)?;
+            runtime.hook_failed(&hooks, error)?;
         }
     }
     let control_of = |id: TaskId| controls.iter().find(|(task, _)| *task == id).and_then(|(_, c)| c.clone());
@@ -224,7 +224,7 @@ pub(super) async fn abort(task: TaskRecord, runtime: TaskRuntime, context: Conte
     {
         let options = DeferredCancelOptions { signal: Some(runtime.signal()), ..DeferredCancelOptions::default() };
         if let Err(error) = runtime.models().cancel_deferred(&model, handle, options).await {
-            runtime.report(&error);
+            runtime.report_from(&error, ReportFrom::Host(HostCallback::Models));
         }
     }
     let unstarted = match &checkpoint {

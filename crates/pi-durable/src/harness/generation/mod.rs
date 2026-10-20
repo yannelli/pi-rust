@@ -12,12 +12,14 @@ use pi_ai::{AssistantMessage, DeferredHandle, Message, ThinkingLevel, ToolCall};
 use pi_chord::{Context, Json};
 use serde::{Deserialize, Serialize};
 
+use super::agent::section_extension;
 use super::compaction::{CompactionInput, create_compaction, estimate_context, select_cut};
-use super::define::PromptInput;
+use super::define::{PromptInput, PromptSection};
+use super::inbox::{Boundary, BoundaryAt, apply_boundary, prepare_boundary, withdraw_queued_inputs};
 use super::live::{LIVE_DOC, LiveGeneration, LiveState, end_run};
 use super::prompt::{plan_system_entries, render_sections, replay_sections};
 use super::scheduler::{HookApi, TaskRuntime};
-use super::settings::{CompactionPolicy, ConversationStreamOptions};
+use super::settings::{AfterFailedRun, CompactionPolicy, ConversationStreamOptions};
 use super::task::{Task, TaskDefinition, define_task};
 use super::types::{CompactionReason, ContextView, ModelRef, UserInput};
 use super::usage::{UsageBucket, record_usage};
@@ -28,8 +30,8 @@ use crate::ids::{ConversationId, EntryId, SubmissionId, TaskId};
 use crate::session::{Draft, Tx};
 use crate::tasks::TaskOptions;
 use crate::types::{
-    EntryDraft, EntryQuery, EntryRecord, JoinPolicy, SubmissionSettlement, TaskOutcome, TaskOutcomeError, TaskRecord,
-    TaskState,
+    EntryDraft, EntryQuery, EntryRecord, HostCallback, JoinPolicy, ReportFrom, SubmissionSettlement, TaskOutcome,
+    TaskOutcomeError, TaskRecord, TaskState,
 };
 
 /// Checkpoint of a generation task.
@@ -178,14 +180,13 @@ async fn prepare(task: TaskRecord, runtime: TaskRuntime, context: Context) -> Du
     }
     let view = runtime.context(conversation_id, &context, None).await?;
     let shown = replay_sections(&view.messages);
-    let report = |error: &DurableError| runtime.report(error);
     let env = match runtime.env(&context).await {
         Ok(env) => env,
         Err(error) => {
             if context.is_cancelled() {
                 return Err(error);
             }
-            report(&error);
+            runtime.report_from(&error, ReportFrom::Host(HostCallback::Env));
             None
         }
     };
@@ -195,6 +196,9 @@ async fn prepare(task: TaskRecord, runtime: TaskRuntime, context: Context) -> Du
         env,
         shown: shown.iter().cloned().collect(),
         read: runtime.scheduler.core.session.clone(),
+    };
+    let report = |error: &DurableError, section: &PromptSection| {
+        runtime.report_from(error, ReportFrom::Extension(section_extension(&agent, &section.key)));
     };
     let wanted = render_sections(&agent.sections, &input, &shown, &report, &context).await?;
     let tools: Vec<_> = agent.tools.iter().map(|tool| tool.tool.clone()).collect();
@@ -287,10 +291,10 @@ fn threshold_compaction(
 
 /// Settle the run's inputs `unanswered` with `model_error` and fail with `text`.
 pub(crate) async fn fail_model_error(runtime: &TaskRuntime, text: &str, context: &Context) -> DurableResult<()> {
-    let (task_id, conversation_id, text) = (runtime.task_id(), runtime.conversation_id(), text.to_owned());
+    let (runtime_, text) = (runtime.clone(), text.to_owned());
     let change = move |tx: Tx, _| async move {
-        let settlement = unanswered("model_error", Some(&text));
-        edit_live(&tx, conversation_id, |tx, live| end_run(tx, live, task_id, settlement)).await?;
+        let failure = prepare_failure(&tx, &runtime_).await?;
+        end_failed_run(&tx, &runtime_, failure, unanswered("model_error", Some(&text))).await?;
         Ok(failed(&text, "model_error"))
     };
     runtime.commit(change, context).await
@@ -306,25 +310,53 @@ pub(crate) async fn fail_no_model(
         None => "No model is configured".to_owned(),
         Some(m) => format!("Model {}/{} is not available", m.provider, m.model_id),
     };
-    let (task_id, conversation_id) = (runtime.task_id(), runtime.conversation_id());
+    let runtime_ = runtime.clone();
     let change = move |tx: Tx, _| async move {
-        edit_live(&tx, conversation_id, |tx, live| end_run(tx, live, task_id, unanswered("no_model", None))).await?;
+        let failure = prepare_failure(&tx, &runtime_).await?;
+        end_failed_run(&tx, &runtime_, failure, unanswered("no_model", None)).await?;
         Ok(failed(&message, "no_model"))
     };
     runtime.commit(change, context).await
 }
 
-/// Read, change, and write back `pi.live` of a conversation.
-pub(crate) async fn edit_live<R>(
+/// What a failed run's end needs from the table, read before the commit's first table write.
+pub(crate) struct Failure {
+    policy: AfterFailedRun,
+    boundary: Option<Boundary>,
+}
+
+pub(crate) async fn prepare_failure(tx: &Tx, runtime: &TaskRuntime) -> DurableResult<Failure> {
+    let settings = runtime.settings();
+    let policy = settings.after_failed_run;
+    if policy != AfterFailedRun::Continue {
+        return Ok(Failure { policy, boundary: None });
+    }
+    let boundary = prepare_boundary(tx, runtime.conversation_id(), &settings).await?;
+    Ok(Failure { policy, boundary: Some(boundary) })
+}
+
+/// End a failed run, settling its inputs with `settlement`, and do with the inputs queued behind it what
+/// `settings.after_failed_run` says: keep them, start the next run with them, or withdraw them.
+pub(crate) async fn end_failed_run(
     tx: &Tx,
-    conversation_id: ConversationId,
-    change: impl FnOnce(&Tx, &mut LiveState) -> DurableResult<R>,
-) -> DurableResult<R> {
-    let draft: Draft<LiveState> = tx.doc(&LIVE_DOC, conversation_id).await?;
-    let mut live = draft.get()?;
-    let result = change(tx, &mut live)?;
-    draft.set(&live)?;
-    Ok(result)
+    runtime: &TaskRuntime,
+    failure: Failure,
+    settlement: SubmissionSettlement,
+) -> DurableResult<()> {
+    let conversation_id = runtime.conversation_id();
+    let live = tx.doc(&LIVE_DOC, conversation_id).await?;
+    let mut state = live.get()?;
+    end_run(tx, &mut state, runtime.task_id(), settlement)?;
+    live.set(&state)?;
+    if failure.policy == AfterFailedRun::Withdraw {
+        withdraw_queued_inputs(tx, conversation_id, "run_failed").await?;
+    }
+    let Some(mut boundary) = failure.boundary else { return Ok(()) };
+    let placed = apply_boundary(tx, &mut boundary, BoundaryAt::Final, runtime.now()).await?;
+    if !placed.users.is_empty() {
+        start_run(tx, conversation_id, &live, placed.users).await?;
+    }
+    Ok(())
 }
 
 /// Append a committed partial left by an interrupted request as an aborted assistant entry.

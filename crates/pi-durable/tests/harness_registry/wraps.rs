@@ -17,7 +17,7 @@ use super::*;
 fn resolve_reporting(state: Option<&AgentState>, snapshot: &RegistrySnapshot) -> (Agent, Vec<String>) {
     let reports = Mutex::new(Vec::<String>::new());
     let settings = resolve_settings(Some(&HarnessSettings::default()));
-    let agent = resolve_agent(state, snapshot, &settings, &|error| reports.lock().unwrap().push(error.to_string()));
+    let agent = resolve_agent(state, snapshot, &settings, &|error, _| reports.lock().unwrap().push(error.to_string()));
     (agent, reports.into_inner().unwrap())
 }
 
@@ -142,8 +142,10 @@ async fn orders_sections_by_extension_replaces_same_keys_in_place_and_renders_in
 
 struct Marker(&'static str);
 
-fn markers(agent: &Agent, task: &str) -> Vec<&'static str> {
-    agent_hooks(agent, task).iter().map(|hooks| hooks.downcast_ref::<Marker>().unwrap().0).collect()
+/// Each hook's extension and marker.
+fn markers(agent: &Agent, task: &str) -> Vec<(String, &'static str)> {
+    let hooks = agent_hooks(agent, task);
+    hooks.iter().map(|hooks| (hooks.extension.clone(), hooks.downcast_ref::<Marker>().unwrap().0)).collect()
 }
 
 #[test]
@@ -159,8 +161,9 @@ fn collects_hooks_of_the_selected_extensions_in_extension_order_and_applies_fiel
         extensions: Some(ExtensionSelection::List(strings(names))),
         ..AgentState::default()
     };
-    assert_eq!(markers(&resolve(None, &local.snapshot(), &none), "pi.tool"), ["first", "second"]);
-    assert_eq!(markers(&resolve(Some(&select(&["b", "a"])), &local.snapshot(), &none), "pi.tool"), ["second", "first"]);
+    let (a, b) = (("a".to_owned(), "first"), ("b".to_owned(), "second"));
+    assert_eq!(markers(&resolve(None, &local.snapshot(), &none), "pi.tool"), [a.clone(), b.clone()]);
+    assert_eq!(markers(&resolve(Some(&select(&["b", "a"])), &local.snapshot(), &none), "pi.tool"), [b, a]);
     assert!(markers(&resolve(Some(&select(&["b"])), &local.snapshot(), &none), "pi.generation").is_empty());
 
     let defaults = resolve(None, &local.snapshot(), &none);

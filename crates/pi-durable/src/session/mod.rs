@@ -30,7 +30,7 @@ pub use tx::{TransactionScope, Tx, TxFuture};
 pub use watch::{CommittedWatch, DocumentWatch, MAX_PENDING_WATCH_FRAMES, ReplaceValue};
 
 use crate::errors::{DurableError, DurableResult};
-use crate::types::{CommitPublication, ConversationRecord, Storage};
+use crate::types::{CommitPublication, ConversationRecord, ReportInfo, Storage};
 
 /// A document state: hydrated, read-only, and bound to one committed incarnation. Retirement publishes `null`.
 pub type DocumentState = pi_chord::state::AttachedReplicatedState;
@@ -97,8 +97,8 @@ pub trait SessionHooks: Send + Sync {
     /// Runs after close seals admission and before the line closes Storage.
     async fn before_close(&self) {}
 
-    /// The Session's failure, and errors of listeners, which never fail what ran them.
-    fn report(&self, _error: &DurableError) {}
+    /// The Session's failure, and errors of listeners, which never fail what ran them, with what each is about.
+    fn report(&self, _error: &DurableError, _info: &ReportInfo) {}
 }
 
 struct NoHooks;

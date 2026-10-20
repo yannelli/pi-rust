@@ -36,7 +36,7 @@ fn text_section(key: &str, text: &str) -> Arc<PromptSection> {
 
 fn resolve(state: Option<&AgentState>, snapshot: &RegistrySnapshot, settings: &HarnessSettings) -> Agent {
     let reports = Mutex::new(Vec::<DurableError>::new());
-    resolve_agent(state, snapshot, &resolve_settings(Some(settings)), &|error| {
+    resolve_agent(state, snapshot, &resolve_settings(Some(settings)), &|error, _| {
         reports.lock().unwrap().push(error.clone())
     })
 }
