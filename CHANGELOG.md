@@ -2,6 +2,13 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.4.0] - 2026-10-20
+
+### Breaking Changes
+
+- **durable:** emit content-free harness telemetry ([13c5895](https://github.com/yannelli/pi-rust/commit/13c589596fec097b4d1320ee69fe1d8e28f0a3e8))
+- **telemetry:** add propagation, span links, and metrics; Context::telemetry ([da0804d](https://github.com/yannelli/pi-rust/commit/da0804de82fa6ad25ca913d9926ccc7a5d7053fa))
+
 ## [0.3.0] - 2026-10-20
 
 ### Breaking Changes
