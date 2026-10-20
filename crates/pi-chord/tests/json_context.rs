@@ -6,8 +6,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use pi_chord::{
     BACKGROUND_CONTEXT, ChordError, CopyJsonOptions, TODO_CONTEXT, await_with_context, copy_json, create_context_key,
-    is_json_value, json, with_abort_signal, with_cancel, with_context_value, without_abort_signal,
+    is_json_value, json, trace_in, with_abort_signal, with_cancel, with_context_value, with_telemetry,
+    without_abort_signal,
 };
+use pi_telemetry::{InMemoryTelemetryContext, SpanAttributes, SpanOptions, SpanOutcome, TelemetryContext};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -143,4 +145,34 @@ async fn stops_waiting_when_the_invocation_is_cancelled() {
     assert!(send.send("completed later").is_err());
     let completed = await_with_context(async { Ok::<_, ChordError>("completed") }, &BACKGROUND_CONTEXT).await;
     assert_eq!(completed.unwrap(), "completed");
+}
+
+#[tokio::test]
+async fn carries_an_explicit_telemetry_span_without_changing_cancellation() {
+    let telemetry = InMemoryTelemetryContext::new();
+    BACKGROUND_CONTEXT.telemetry().add_event("dropped", SpanAttributes::new());
+    let (parent, controller) = with_cancel(&BACKGROUND_CONTEXT);
+    let traced = trace_in(&parent, SpanOptions::new("ignored"), |context| async move {
+        // The parent's NOOP span opens NOOP children, so nothing records.
+        context.telemetry().add_event("dropped", SpanAttributes::new());
+        Ok::<_, ChordError>(context)
+    });
+    traced.await.unwrap();
+    let span = telemetry.open_span(SpanOptions::new("outer"));
+    let context = with_telemetry(span.clone(), &parent);
+    let child = trace_in(&context, SpanOptions::new("inner"), |child| async move {
+        child.telemetry().add_event("inside", SpanAttributes::new());
+        Ok::<_, ChordError>(child)
+    })
+    .await
+    .unwrap();
+    span.end(SpanOutcome::Ok);
+    controller.abort(None);
+    assert!(context.is_cancelled() && child.is_cancelled());
+    assert!(Arc::ptr_eq(&context.telemetry(), &span));
+
+    let spans = telemetry.get_spans();
+    let names: Vec<_> = spans.iter().map(|span| (span.name.as_str(), span.parent_id)).collect();
+    assert_eq!(names, [("outer", None), ("inner", Some(1))]);
+    assert_eq!(spans[1].events.len(), 1);
 }

@@ -14,7 +14,8 @@ mod sync;
 
 pub use context::{
     AbortController, AbortSignal, BACKGROUND_CONTEXT, Context, ContextKey, TODO_CONTEXT, await_with_context,
-    create_context_key, with_abort_signal, with_cancel, with_context_value, without_abort_signal,
+    create_context_key, trace_in, with_abort_signal, with_cancel, with_context_value, with_telemetry,
+    without_abort_signal,
 };
 pub use error::{
     ChordError, ChordResult, REMOTE_SERVICE_ERROR_CODES, RemoteServiceError, RemoteServiceErrorCode,

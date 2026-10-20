@@ -7,6 +7,7 @@ use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, Weak};
 
+use pi_telemetry::{SpanFuture, SpanOptions, TelemetryContextExt, TelemetrySpan, noop_telemetry_span};
 use tokio::sync::Notify;
 
 use crate::error::{ChordError, ChordResult};
@@ -190,6 +191,9 @@ pub struct Context(Arc<Node>);
 static ABORT_SIGNAL_KEY: LazyLock<ContextKey<Option<AbortSignal>>> =
     LazyLock::new(|| create_context_key("chord.abortSignal"));
 
+static TELEMETRY_KEY: LazyLock<ContextKey<Arc<dyn TelemetrySpan>>> =
+    LazyLock::new(|| create_context_key("chord.telemetry"));
+
 /// The root context for work without a caller.
 pub static BACKGROUND_CONTEXT: LazyLock<Context> =
     LazyLock::new(|| Context(Arc::new(Node::Empty("[Context BACKGROUND_CONTEXT]"))));
@@ -221,6 +225,11 @@ impl Context {
 
     pub fn abort_signal(&self) -> Option<AbortSignal> {
         self.value(&ABORT_SIGNAL_KEY).cloned().flatten()
+    }
+
+    /// The current span; the shared no-op span when none was set.
+    pub fn telemetry(&self) -> Arc<dyn TelemetrySpan> {
+        self.value(&TELEMETRY_KEY).cloned().unwrap_or_else(noop_telemetry_span)
     }
 
     /// Whether this context's signal has aborted.
@@ -256,6 +265,22 @@ pub fn with_context_value<T: Send + Sync + 'static>(key: &ContextKey<T>, value: 
         description: key.description.clone(),
         value: Arc::new(value),
     }))
+}
+
+/// Derive an explicit telemetry parent without changing cancellation or application values.
+pub fn with_telemetry(telemetry: Arc<dyn TelemetrySpan>, context: &Context) -> Context {
+    with_context_value(&TELEMETRY_KEY, telemetry, context)
+}
+
+/// Run a child span of the context's span with a derived context whose telemetry is that span.
+pub fn trace_in<F, Fut, T, E>(context: &Context, options: SpanOptions, f: F) -> SpanFuture<Fut>
+where
+    F: FnOnce(Context) -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+    E: fmt::Display,
+{
+    let parent = context.clone();
+    context.telemetry().start_span(options, move |span| f(with_telemetry(span, &parent)))
 }
 
 /// Derive a context cancelled by either the parent signal or `signal`.

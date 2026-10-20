@@ -1,6 +1,8 @@
 //! The callback span contract (upstream `TelemetryContext` and `TelemetrySpan`).
 
-use std::fmt::Display;
+use std::any::Any;
+use std::collections::BTreeMap;
+use std::fmt::{self, Display};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -9,21 +11,54 @@ use std::task::{Context, Poll};
 use serde::{Deserialize, Serialize};
 
 use crate::attributes::SpanAttributes;
+use crate::metrics::TelemetryMetrics;
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+/// Opaque, JSON-serializable adapter-owned propagation data.
+pub type TelemetryCarrier = BTreeMap<String, String>;
+
+/// Optional transport capability implemented by the application's telemetry adapter.
+pub trait TelemetryPropagation: Send + Sync {
+    fn inject(&self, context: &dyn TelemetryContext) -> Option<TelemetryCarrier>;
+    fn extract(&self, carrier: Option<&TelemetryCarrier>) -> Arc<dyn TelemetryContext>;
+}
+
+#[derive(Clone)]
+pub struct SpanLink {
+    pub context: Arc<dyn TelemetryContext>,
+    pub attributes: SpanAttributes,
+}
+
+impl SpanLink {
+    pub fn new(context: Arc<dyn TelemetryContext>) -> Self {
+        Self { context, attributes: SpanAttributes::new() }
+    }
+}
+
+impl fmt::Debug for SpanLink {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SpanLink").field("attributes", &self.attributes).finish_non_exhaustive()
+    }
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct SpanOptions {
     pub name: String,
-    #[serde(default, skip_serializing_if = "SpanAttributes::is_empty")]
     pub attributes: SpanAttributes,
+    pub links: Vec<SpanLink>,
 }
 
 impl SpanOptions {
     pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into(), attributes: SpanAttributes::new() }
+        Self { name: name.into(), attributes: SpanAttributes::new(), links: Vec::new() }
     }
 
     pub fn with_attributes(mut self, attributes: SpanAttributes) -> Self {
         self.attributes = attributes;
+        self
+    }
+
+    pub fn with_links(mut self, links: Vec<SpanLink>) -> Self {
+        self.links = links;
         self
     }
 }
@@ -69,10 +104,25 @@ pub trait TelemetryContext: Send + Sync {
     /// Open a child span. [`TelemetryContextExt::start_span`] settles it through
     /// [`TelemetrySpan::end`]; adapters ignore calls after the first `end`.
     fn open_span(&self, options: SpanOptions) -> Arc<dyn TelemetrySpan>;
+
+    /// Adapter capabilities remain available on child spans and extracted parents.
+    fn metrics(&self) -> Option<Arc<dyn TelemetryMetrics>> {
+        None
+    }
+
+    fn propagation(&self) -> Option<Arc<dyn TelemetryPropagation>> {
+        None
+    }
+
+    /// Lets an adapter's propagation recognize its own contexts; upstream keys them in a `WeakMap`.
+    fn as_any(&self) -> Option<&dyn Any> {
+        None
+    }
 }
 
 /// An open span. It is also the parent context for its children.
 pub trait TelemetrySpan: TelemetryContext {
+    fn add_link(&self, link: SpanLink);
     fn add_event(&self, name: &str, attributes: SpanAttributes);
     fn set_attributes(&self, attributes: SpanAttributes);
     fn set_status(&self, status: SpanStatus);
