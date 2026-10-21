@@ -126,7 +126,7 @@ async fn reuses_the_codex_prompt_cache_across_durable_turns() {
     };
     let options = HarnessOptions::new(models, Arc::new(create_registry())).with_settings(settings);
     let harness = Harness::open(Arc::new(MemoryStorage::new()), options, &context()).await.unwrap();
-    let model = ModelRef { provider: "openai-codex".into(), model_id: "gpt-5.5".into() };
+    let model = ModelRef { provider: "openai-codex".into(), model_id: "gpt-6.1-sol".into() };
     let root = harness.root(&context(), CreateOptions::default().with_agent(AgentChange::model(model))).await.unwrap();
     harness.resume().unwrap();
     let header = [
