@@ -1,12 +1,13 @@
 //! Port of upstream `host.ts`: serving types, facets, objects by address, roots, registries, principals,
-//! links and remote references, and closing. Reloads come in phase 4; their seams are the code version fields
-//! (`pending`, `gating`, `reloading`) and the retirement fields.
+//! links and remote references, reloads with code version retirement, and closing. The reload itself is in
+//! [`crate::host2::reload`].
 
 mod address;
 mod close;
 mod facet;
 mod links;
 mod registry;
+mod retire;
 mod roots;
 
 use std::any::Any;
@@ -17,20 +18,24 @@ use std::time::Duration;
 
 use indexmap::IndexMap;
 use tokio::runtime::Handle;
+use tokio::sync::{Notify, oneshot};
 
 pub use close::PrincipalMatch;
-pub use facet::{Facet, FacetApi, FacetSetup, LoadOptions, define_facet};
+pub use facet::{Facet, FacetApi, FacetSetup, LoadOptions, PluginRef, define_facet};
 pub use links::LingerOptions;
 pub use registry::HostRegistry;
+pub(crate) use retire::{id, modules_for};
 
 use super::connection::{ConnId, ConnectOptions, NetHandle, Route};
 use super::contract::Contract;
 use super::exec::ErrorHandler;
 use super::link::Link;
+use super::loader::FacetLoader;
 use super::object::{
     Ctx, Declare, Decls, HostCore, Implementation, ObjectImpl, Ref, RefOwner, RootFn, RootOptions, ServeOptions,
     Service,
 };
+use super::reload::ChildOperation;
 use super::remote::RemoteBinding;
 use super::schema::canonical_json;
 use super::types::GetOptions;
@@ -67,6 +72,8 @@ pub struct HostOptions {
     pub linger: LingerOptions,
     /// The link to this host's parent (server). Can also be set later with `connect`.
     pub upstream: Option<(Arc<dyn Link>, ConnectOptions)>,
+    /// Loads facet modules by name for `reload` (and for the reloads a parent sends a child host).
+    pub loader: Option<Arc<dyn FacetLoader<Facet>>>,
 }
 
 impl Default for HostOptions {
@@ -82,6 +89,7 @@ impl Default for HostOptions {
             kind: PeerKind::Host,
             linger: LingerOptions::default(),
             upstream: None,
+            loader: None,
         }
     }
 }
@@ -102,7 +110,7 @@ pub(crate) struct CodeVersion {
 }
 
 impl CodeVersion {
-    fn new(id: i64) -> Self {
+    pub(crate) fn new(id: i64) -> Self {
         let tables = Arc::default();
         Self { id, services: IndexMap::new(), tables, roots: HashMap::new(), abort: AbortController::new() }
     }
@@ -114,10 +122,21 @@ pub(crate) struct HostState {
     pub dying: HashMap<String, Arc<ObjectImpl>>,
     pub code_versions: IndexMap<i64, CodeVersion>,
     pub current: i64,
-    /// Reload seams (phase 4): the code version a running reload commits, and the types behind its gate.
+    /// The code version before `current`, kept until it retires (a host keeps two).
+    pub previous: Option<i64>,
+    /// The last code version id issued.
+    pub code_version_seq: i64,
+    /// The code version a running reload commits, and the types behind its gate.
     pub pending: Option<CodeVersion>,
     pub gating: Option<HashSet<String>>,
     pub reloading: bool,
+    /// Resolved when the running reload ends.
+    pub reload_waiters: Vec<oneshot::Sender<()>>,
+    /// Whether the host has a parent link (set by `connect`, cleared when that link closes).
+    pub parent: bool,
+    /// Child facet modules by host-name prefix, from every committed cluster reload (for reconciling children).
+    pub remote_modules: IndexMap<String, Vec<String>>,
+    pub remote_removed: IndexMap<String, Vec<String>>,
     pub facets: IndexMap<String, Facet>,
     /// Aborted when the installed run of a facet is replaced, removed, or the host closes.
     pub facet_runs: HashMap<String, AbortController>,
@@ -139,7 +158,7 @@ pub(crate) struct HostState {
     pub foreign: HashMap<String, HashSet<ConnId>>,
     /// The links calls of a root went out on: they hear when it ends.
     pub root_links: HashMap<String, HashSet<ConnId>>,
-    /// The newest code version the parent allowed to retire (a reload seam).
+    /// The newest code version the parent allowed to retire.
     pub retire_allowed: i64,
 }
 
@@ -166,8 +185,13 @@ pub(crate) struct HostImpl {
     incarnation: String,
     root_seq: AtomicU64,
     failed: Mutex<Option<ChordError>>,
+    loader: Option<Arc<dyn FacetLoader<Facet>>>,
+    /// Notified whenever a root ends, the parent allows a retirement, or a code version retires.
+    retirement: Notify,
+    /// The reload a parent asked this child host to prepare.
+    pub(crate) child_reload: Mutex<Option<Arc<ChildOperation>>>,
     state: Mutex<HostState>,
-    me: Weak<HostImpl>,
+    pub(crate) me: Weak<HostImpl>,
 }
 
 /// Six base-36 characters from the system's random source.
@@ -201,9 +225,15 @@ pub fn create_host(options: HostOptions) -> Host {
         dying: HashMap::new(),
         code_versions,
         current: 1,
+        previous: None,
+        code_version_seq: 1,
         pending: None,
         gating: None,
         reloading: false,
+        reload_waiters: Vec::new(),
+        parent: false,
+        remote_modules: IndexMap::new(),
+        remote_removed: IndexMap::new(),
         facets: IndexMap::new(),
         facet_runs: HashMap::new(),
         host_objects: IndexMap::new(),
@@ -237,6 +267,9 @@ pub fn create_host(options: HostOptions) -> Host {
         incarnation: incarnation(),
         root_seq: AtomicU64::new(0),
         failed: Mutex::default(),
+        loader: options.loader,
+        retirement: Notify::new(),
+        child_reload: Mutex::default(),
         state: Mutex::new(state),
         me: me.clone(),
     }));
@@ -268,8 +301,7 @@ impl HostImpl {
         if self.is_self(identity) { "host".into() } else { format!("p:{}", (self.principal_key)(identity)) }
     }
 
-    /// A commit failed midway: from now on this host admits no work (a reload seam).
-    #[allow(dead_code, reason = "reload commits (phase 4) fail the host")]
+    /// A commit failed midway: from now on this host admits no work.
     pub(crate) fn fail(&self, error: ChordError) {
         lock(&self.failed).get_or_insert_with(|| error.clone());
         self.report(error);
@@ -387,6 +419,10 @@ impl HostCore for HostImpl {
 }
 
 impl Host {
+    pub(crate) fn inner(&self) -> &Arc<HostImpl> {
+        &self.0
+    }
+
     pub fn name(&self) -> &str {
         &self.0.name
     }

@@ -1,6 +1,5 @@
 //! Port of upstream `test/host.test.ts`, part 1: activation, lifetime, declarations and methods. The rest is in
-//! `chord2_host_objects.rs`. Left out: async factories (Rust factories are synchronous) and the reload half of
-//! the listener test (phase 4).
+//! `chord2_host_objects.rs`. Left out: async factories (Rust factories are synchronous).
 
 mod chord2_support;
 
@@ -394,33 +393,40 @@ async fn methods_without_arguments_get_null_and_void_methods_return_nothing() {
 }
 
 #[tokio::test]
-async fn a_listener_on_state_gets_the_current_value_at_start() {
+async fn a_listener_on_state_gets_the_current_value_at_start_and_again_after_a_reload() {
     let _serial = serial().await;
     let host = quiet();
     let doubled = local_type("t.doubled", object(&[]), vec![("set", method(number(), None).into())]);
     let seen: Log<Json> = Log::default();
-    let (served, listened) = (doubled.clone(), seen.clone());
-    let facet = define_facet("doubled", move |api| {
-        let listened = listened.clone();
-        let factory = move |_: &Json, _: &Json, decl: &mut pi_chord::host2::Declare| {
-            let n = decl.state("n", number(), json!(1))?;
-            let twice = |values: &[Json]| Ok(json!(values[0].as_f64().unwrap_or_default() * 2.0));
-            let derived = decl.derive(vec![n.clone() as ReadableRef], twice);
+    let facet = || {
+        let (served, listened) = (doubled.clone(), seen.clone());
+        define_facet("doubled", move |api| {
             let listened = listened.clone();
-            decl.on("doubled", &derived, move |value, _| {
-                listened.push(value);
-                ready(Ok(()))
-            })?;
-            Ok(Implementation::new()
-                .method("set", move |value, ctx| ready(n.replace(&ctx, value).map(|()| Json::Null))))
-        };
-        api.serve(&served, factory, ServeOptions::host())
-    });
-    host.install(&facet, LoadOptions::default()).await.unwrap();
+            let factory = move |_: &Json, _: &Json, decl: &mut pi_chord::host2::Declare| {
+                let n = decl.state("n", number(), json!(1))?;
+                let twice = |values: &[Json]| Ok(json!(values[0].as_f64().unwrap_or_default() * 2.0));
+                let derived = decl.derive(vec![n.clone() as ReadableRef], twice);
+                let listened = listened.clone();
+                decl.on("doubled", &derived, move |value, _| {
+                    listened.push(value);
+                    ready(Ok(()))
+                })?;
+                Ok(Implementation::new()
+                    .method("set", move |value, ctx| ready(n.replace(&ctx, value).map(|()| Json::Null))))
+            };
+            api.serve(&served, factory, ServeOptions::host())
+        })
+    };
+    host.install(&facet(), LoadOptions::default()).await.unwrap();
     until(|| seen.len() == 1).await;
     let reference = hold(&host, &doubled, json!({}));
     let run = move |ctx: pi_chord::host2::Ctx| async move { reference.call("set", Some(json!(5)), Some(&ctx)).await };
     host.root(run, RootOptions::default()).await.unwrap();
     until(|| seen.len() == 2).await;
     assert_eq!(seen.all(), [json!(2), json!(10)]);
+    // The reload makes a new derivation: the listener subscribes again and gets its current value once.
+    host.reload(vec![facet().into()], Default::default()).await.unwrap();
+    until(|| seen.len() == 3).await;
+    tick().await;
+    assert_eq!(seen.all(), [json!(2), json!(10), json!(10)]);
 }

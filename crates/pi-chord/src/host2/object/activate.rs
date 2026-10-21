@@ -110,8 +110,7 @@ impl ObjectImpl {
         self.host.check_registrations(self, &run.decls)?;
         let current = self.host.current_code_version();
         let pending = self.host.pending_code_version();
-        let installed = |code_version| Installed {
-            code_version,
+        let installed = || Installed {
             service: service.clone(),
             implementation: run.implementation.clone(),
             decls: run.decls.clone(),
@@ -122,7 +121,7 @@ impl ObjectImpl {
             state.decls = run.decls.clone();
             for (code_version, served) in retained {
                 if served.is_some_and(|served| Arc::ptr_eq(&served, service)) {
-                    state.implementations.insert(code_version, installed(code_version));
+                    state.implementations.insert(code_version, installed());
                 }
             }
             let serves = |code_version| state.implementations.contains_key(&code_version);
@@ -176,7 +175,7 @@ impl ObjectImpl {
         }
     }
 
-    /// Runs the factory synchronously. With `earlier`, reruns it for a reload (phase 4). The run's
+    /// Runs the factory synchronously. With `earlier`, reruns it for a reload. The run's
     /// declarations stay in `pending` (seen by the cycle check) until the caller installs or discards them.
     pub(crate) fn run(self: &Arc<Self>, service: &Service, earlier: Option<Arc<Decls>>) -> ChordResult<Run> {
         let mut declare = Declare::new(self.clone(), earlier);
@@ -272,7 +271,7 @@ impl ObjectImpl {
     }
 
     /// Waits until the state sources a run exposes or derives from have their values.
-    async fn wait_hydrated(&self, run: &Run) -> ChordResult<()> {
+    pub(crate) async fn wait_hydrated(&self, run: &Run) -> ChordResult<()> {
         let exposed: Vec<(String, ReadableRef)> = run
             .implementation
             .members()
@@ -322,7 +321,7 @@ impl ObjectImpl {
     }
 
     /// Fills the cells `run` created with `init`, each in a root of its own, in parallel; settles all first.
-    async fn init_cells(&self, run: &Run, signal: &AbortSignal) -> ChordResult<()> {
+    pub(crate) async fn init_cells(&self, run: &Run, signal: &AbortSignal) -> ChordResult<()> {
         let work = run.created.inits.iter().map(|(cell, init)| {
             let options = RootOptions { signal: Some(signal.clone()), ..RootOptions::default() };
             let init = init.clone();

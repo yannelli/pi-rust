@@ -28,6 +28,9 @@ pub(crate) type RelayId = u64;
 
 pub(crate) type Reply<T> = oneshot::Sender<ChordResult<T>>;
 
+/// Work run on the link task, with its state.
+pub(crate) struct Work(pub(super) Box<dyn FnOnce(&mut Net) + Send>);
+
 /// What the task does next. `seq` fields name one served hold or feed: a message for a replaced one is dropped.
 pub(crate) enum Msg {
     /// `host`: kept alive from now on while it has connections.
@@ -146,6 +149,8 @@ pub(crate) enum Msg {
     Inspect {
         reply: oneshot::Sender<Vec<ConnectionInfo>>,
     },
+    /// Work on the connections themselves (reloads: participants, prepare and vote, commit, retire).
+    Run(Work),
 }
 
 /// A call a remote reference makes over a hold.
@@ -196,7 +201,7 @@ pub(crate) struct Net {
     pub conns: IndexMap<ConnId, Conn>,
     pub relays: HashMap<RelayId, Relay>,
     pub upstream: Option<ConnId>,
-    /// Child hosts whose hello arrived during a reload (phase 4 decides them when it ends).
+    /// Child hosts whose hello arrived during a reload: synced or reconciled once it ends.
     pub deferred_hellos: IndexMap<ConnId, u64>,
     next_conn: ConnId,
     next_relay: RelayId,
@@ -313,6 +318,7 @@ impl Net {
             Msg::Inspect { reply } => {
                 let _ = reply.send(self.conns.values().map(|conn| conn.info(&self.relays)).collect());
             }
+            Msg::Run(Work(work)) => work(self),
         }
     }
 

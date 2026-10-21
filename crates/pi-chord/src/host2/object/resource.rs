@@ -51,7 +51,6 @@ enum Phase {
     Opening,
     Open,
     /// A close or reopen failed during a reload rollback: the value is gone for good.
-    #[allow(dead_code, reason = "reload rollbacks (phase 4)")]
     Unavailable,
 }
 
@@ -85,6 +84,14 @@ impl ResourceImpl {
 
     pub(crate) fn exclusive(&self) -> bool {
         lock(&self.spec).exclusive
+    }
+
+    pub(crate) fn is_open(&self) -> bool {
+        lock(&self.state).phase == Phase::Open
+    }
+
+    pub(crate) fn is_closed(&self) -> bool {
+        lock(&self.state).phase == Phase::Closed
     }
 
     pub(crate) fn value(&self) -> ChordResult<AnyValue> {
@@ -150,7 +157,6 @@ impl ResourceImpl {
         }
     }
 
-    #[allow(dead_code, reason = "reload rollbacks (phase 4)")]
     pub(crate) fn mark_unavailable(&self) {
         let mut state = lock(&self.state);
         state.phase = Phase::Unavailable;
@@ -158,7 +164,6 @@ impl ResourceImpl {
     }
 
     /// A reload kept this resource: its later `close` is the new declaration's.
-    #[allow(dead_code, reason = "reload commits (phase 4)")]
     pub(crate) fn adopt(&self, spec: ErasedDeclaration) {
         *lock(&self.spec) = spec;
     }
