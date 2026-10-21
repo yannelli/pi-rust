@@ -329,7 +329,9 @@ pub(super) fn close(id: u64) {
             state.shared.tokio.spawn(async move {
                 drop(writer.lock().await.take());
                 let Some(tcp) = tcp.filter(|_| !exported) else { return };
-                // The copy closes last, so nothing can arrive between the discard and the close.
+                // Node's close sends the FIN at once. Send it before the discard: bytes that arrive later
+                // then reset a connection the peer already saw end, and the peer's read gets EOF.
+                let _ = tcp.shutdown(std::net::Shutdown::Write);
                 while reader.as_ref().is_some_and(|reader| !reader.is_finished()) {
                     tokio::task::yield_now().await;
                 }

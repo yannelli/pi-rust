@@ -75,19 +75,11 @@ impl Sshd {
     }
 }
 
-async fn start() -> Option<Sshd> {
-    let Some(sshd) = sshd_program() else {
-        eprintln!("sshd not found; skipped");
-        return None;
-    };
-    let root = tempfile::Builder::new().prefix("pi-env-ssh-").tempdir().unwrap();
-    let home = root.path().join("home");
-    std::fs::create_dir_all(&home).unwrap();
-    keygen(&root.path().join("host_key"));
-    keygen(&root.path().join("client_key"));
-    std::fs::copy(root.path().join("client_key.pub"), root.path().join("authorized_keys")).unwrap();
+/// Start sshd on a free port; `None` if it exits before writing its pid file, which it does once it listens.
+async fn spawn_sshd(sshd: &str, root: &Path, home: &Path) -> Option<(Child, u16)> {
     let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-    let at = |name: &str| root.path().join(name).display().to_string();
+    let at = |name: &str| root.join(name).display().to_string();
+    let _ = std::fs::remove_file(root.join("sshd.pid"));
     let config = [
         format!("Port {port}"),
         "ListenAddress 127.0.0.1".into(),
@@ -100,20 +92,48 @@ async fn start() -> Option<Sshd> {
         format!("SetEnv HOME={}", home.display()),
         String::new(),
     ];
-    std::fs::write(root.path().join("sshd_config"), config.join("\n")).unwrap();
-    std::fs::write(root.path().join("ssh_config"), "").unwrap();
-    let server = Command::new(sshd)
+    std::fs::write(root.join("sshd_config"), config.join("\n")).unwrap();
+    let mut server = Command::new(sshd)
         .args(["-D", "-e", "-f", &at("sshd_config")])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
         .expect("sshd");
-    for _ in 0..100 {
-        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+    for _ in 0..200 {
+        if server.try_wait().unwrap().is_some() {
+            return None;
+        }
+        if root.join("sshd.pid").exists() && std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            return Some((server, port));
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let _ = server.kill();
+    None
+}
+
+async fn start() -> Option<Sshd> {
+    let Some(sshd) = sshd_program() else {
+        eprintln!("sshd not found; skipped");
+        return None;
+    };
+    let root = tempfile::Builder::new().prefix("pi-env-ssh-").tempdir().unwrap();
+    let home = root.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    keygen(&root.path().join("host_key"));
+    keygen(&root.path().join("client_key"));
+    std::fs::copy(root.path().join("client_key.pub"), root.path().join("authorized_keys")).unwrap();
+    std::fs::write(root.path().join("ssh_config"), "").unwrap();
+    let at = |name: &str| root.path().join(name).display().to_string();
+    // Another test can take the port before this sshd binds it; that sshd then exits, so try a new port.
+    let mut started = None;
+    for _ in 0..5 {
+        started = spawn_sshd(&sshd, root.path(), &home).await;
+        if started.is_some() {
             break;
         }
-        tokio::time::sleep(Duration::from_millis(50)).await;
     }
+    let (server, port) = started.expect("sshd did not start on any port");
     let user = String::from_utf8_lossy(&Command::new("id").arg("-un").output().unwrap().stdout).trim().to_string();
     let target = SshTarget {
         port: Some(port),

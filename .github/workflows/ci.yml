@@ -27,3 +27,19 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked --no-fail-fast
+
+  install-scripts:
+    name: install scripts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - if: runner.os != 'Windows'
+        run: sh scripts/test-install.sh
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/test-install.ps1
