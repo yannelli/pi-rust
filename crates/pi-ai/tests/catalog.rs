@@ -36,7 +36,7 @@ const COUNTS: [(&str, usize, usize, usize); 42] = [
     ("moonshotai-cn", 4, 0, 0),
     ("moonshotai", 4, 0, 0),
     ("nvidia", 21, 0, 0),
-    ("openai-codex", 9, 0, 0),
+    ("openai-codex", 7, 0, 0),
     ("openai", 44, 0, 1),
     ("opencode-go", 29, 0, 0),
     ("opencode", 83, 0, 2),
@@ -103,8 +103,8 @@ fn totals_per_type_match_upstream() {
     for model in builtin_models() {
         totals[type_index(model.model_type.as_deref().expect("every bundled model declares its type"))] += 1;
     }
-    assert_eq!(totals, [1626, 63, 46]);
-    assert_eq!(builtin_models().len(), 1735);
+    assert_eq!(totals, [1624, 63, 46]);
+    assert_eq!(builtin_models().len(), 1733);
     assert_eq!(bundled_counts().len(), 42);
 }
 
