@@ -19,7 +19,8 @@ fn fake_upstream() -> tempfile::TempDir {
     write(
         up,
         &format!("{agent}/core/settings-schema.ts"),
-        "export const SettingsSchema = Type.Object({\n\ttheme: Type.Optional(Type.String()),\n\tzzzFake: Type.Optional(Type.String()),\n});",
+        "const TerminalSettingsSchema = Type.Object({\n\tshowImages: Type.Optional(Type.Boolean()),\n\tzzzTerm: Type.Optional(Type.Boolean()),\n});\n\
+         export const SettingsSchema = Type.Object({\n\ttheme: Type.Optional(Type.String()),\n\tzzzFake: Type.Optional(Type.String()),\n});",
     );
     write(
         up,
@@ -83,9 +84,11 @@ fn report_on_a_fake_upstream_tree() {
     assert!(matches!(&find("commits").status, Status::Skipped(reason) if reason.contains("git checkout")));
     assert_eq!(names(&find("cliFlags").missing), ["--zzz-fake"]);
     assert!(names(&find("cliFlags").extra).contains(&"--provider".to_string()));
-    assert_eq!(names(&find("settings").missing), ["zzzFake"]);
+    assert_eq!(names(&find("settings").missing), ["terminal.zzzTerm", "zzzFake"]);
     assert!(names(&find("settings").extra).contains(&"defaultModel".to_string()));
+    assert!(names(&find("settings").extra).contains(&"terminal.notifyOnFinish".to_string()));
     assert!(!names(&find("settings").extra).contains(&"theme".to_string()));
+    assert!(!names(&find("settings").extra).contains(&"terminal.showImages".to_string()));
     assert_eq!(names(&find("slashCommands").missing), ["zzzfake"]);
     assert!(names(&find("slashCommands").extra).contains(&"quit".to_string()));
     assert_eq!(names(&find("tools").missing), ["zzztool"]);

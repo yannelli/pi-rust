@@ -33,6 +33,8 @@ pub struct Options {
     pub files: Vec<(&'static str, &'static str)>,
     /// An agent directory to reuse, so several runs share its files.
     pub agent_dir: Option<PathBuf>,
+    /// The faux provider waits this long between streamed chunks.
+    pub chunk_delay: Duration,
 }
 
 impl Default for Options {
@@ -43,6 +45,7 @@ impl Default for Options {
             tui_mode: TuiMode::Regular,
             files: Vec::new(),
             agent_dir: None,
+            chunk_delay: Duration::ZERO,
         }
     }
 }
@@ -72,7 +75,7 @@ pub async fn start(options: Options) -> Ui {
         "models": [{"id": "tiny", "contextWindow": 128000, "maxTokens": 4000, "reasoning": true},
             {"id": "other", "contextWindow": 128000, "maxTokens": 4000}]}}});
     std::fs::write(agent_dir.join("models.json"), models.to_string()).unwrap();
-    let provider = FauxProvider::new(options.responses);
+    let provider = FauxProvider::with_delay(options.responses, options.chunk_delay);
     register_api_provider(api, provider.clone());
     let mut values = json!({"defaultProvider": "local", "defaultModel": "tiny", "theme": "dark",
         "enableInstallTelemetry": false, "lastChangelogVersion": "999.0.0"});

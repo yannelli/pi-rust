@@ -178,6 +178,8 @@ pub(crate) struct AltScreenState {
     pub on_right_click_paste: Option<Rc<dyn Fn()>>,
     pub copy_on_select: bool,
     pub copy_selection: Option<CopySelectionFn>,
+    /// The last focus report (mode 1004); `None` until the terminal sends one.
+    pub terminal_focused: Option<bool>,
 }
 
 /// The root children of the TUI as one document, scrolled by the implicit scroll view.
@@ -268,6 +270,7 @@ impl AltScreenState {
             on_right_click_paste: options.on_right_click_paste,
             copy_on_select: options.copy_on_select.unwrap_or(true),
             copy_selection: options.copy_selection,
+            terminal_focused: None,
         }
     }
 

@@ -27,6 +27,7 @@ mod mcp;
 mod mode;
 mod model_refresh;
 mod navigation;
+mod notify;
 pub mod prompt_history;
 mod prompts;
 pub mod renderers;
