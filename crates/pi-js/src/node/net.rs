@@ -116,6 +116,13 @@ pub(super) fn tcp_conn(stream: tokio::net::TcpStream) -> std::io::Result<Conn> {
     Ok(Conn { io: Box::new(stream), tcp: Some(tcp), info })
 }
 
+impl Conn {
+    /// Another copy of the socket, which keeps the connection open after `io` is dropped.
+    pub(super) fn socket_copy(&self) -> Option<socket2::Socket> {
+        self.tcp.as_ref().and_then(|socket| socket.try_clone().ok())
+    }
+}
+
 pub(super) fn pipe_conn(io: BoxIo, path: &str) -> Conn {
     Conn { io, tcp: None, info: json!({ "path": path }) }
 }

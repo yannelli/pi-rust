@@ -63,10 +63,14 @@ fn accepted(sender: &Sender, id: u64, conn: super::net::Conn, tls: Option<Tls>) 
     let Some(tls) = tls else { return post(sender, id, Event::Connection(conn)) };
     let sender = sender.clone();
     tokio::spawn(async move {
+        // Node emits tlsClientError before its client can see the close, so a failed handshake
+        // keeps a copy of the socket open until the error is posted.
+        let open = conn.socket_copy();
         match secure(Ok(conn), Some(tls), &sender, id).await {
             Ok(conn) => post(&sender, id, Event::Connection(conn)),
             Err(error) => post(&sender, id, Event::ClientError(error)),
         }
+        drop(open);
     });
 }
 
