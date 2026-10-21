@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, LazyLock, Mutex};
 
-use pi_ai::{Message, ThinkingLevel, UserContent};
+use pi_ai::{ClientAttribution, ClientIdentity, Message, ThinkingLevel, UserAgentMode, UserContent, pi_attribution};
 use pi_chord::Json;
 use pi_durable::documents::{DocSpec, DocToken, LatestConversation, LatestFork, define_doc};
 use pi_durable::harness::usage::PROVIDER_DOC;
@@ -103,6 +103,31 @@ async fn forwards_stream_options_and_the_thinking_level() {
         Seen { timeout_ms: Some(99), headers: BTreeMap::new(), reasoning: None, session_id: session, signal: true };
     assert_eq!(requests[1], second);
     harness.close(&ctx()).await.unwrap();
+}
+
+#[tokio::test]
+async fn attributes_model_requests_to_pi_by_default_and_merges_the_harness_identity_over_it() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let acme = ClientAttribution { name: "acme".into(), url: "https://acme.example".into(), categories: None };
+    let short = ClientIdentity { user_agent: Some(UserAgentMode::Short), ..ClientIdentity::attributed(acme) };
+    for identity in [None, Some(short.clone())] {
+        let setup = chat_setup(Default::default());
+        let sink = seen.clone();
+        setup.faux.set_responses([FauxResponseStep::factory(move |_, options, _, _| {
+            sink.lock().unwrap().push(options.identity.clone());
+            answer("ok")
+        })]);
+        let options = setup.options();
+        let options = match identity {
+            Some(identity) => options.with_identity(identity),
+            None => options,
+        };
+        let (harness, root) = open_chat_with(Arc::new(MemoryStorage::new()), &setup, options).await;
+        harness.resume().unwrap();
+        ask(&root, "hi").await;
+        harness.close(&ctx()).await.unwrap();
+    }
+    assert_eq!(*seen.lock().unwrap(), [Some(ClientIdentity::attributed(pi_attribution())), Some(short)]);
 }
 
 /// The text of the last user message of a request.

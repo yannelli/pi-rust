@@ -23,7 +23,8 @@ fn slot_runner(slot: &RequestHooksSlot) -> Option<Arc<ExtensionRunner>> {
     slot.read().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref().and_then(Weak::upgrade)
 }
 
-/// `before_provider_headers` after the attribution headers merged into `options`.
+/// `before_provider_headers` over the session, configured, and request headers in `options`.
+/// Identity headers are added later by the provider, so handlers do not see them.
 pub(crate) async fn apply_header_hooks(slot: &RequestHooksSlot, options: &mut StreamOptions) {
     let Some(runner) = slot_runner(slot).filter(|runner| runner.has_handlers("before_provider_headers")) else {
         return;
