@@ -107,13 +107,17 @@ pub(crate) fn network_message(error: &reqwest::Error) -> String {
     message
 }
 
+fn format_issuer(issuer: &Option<String>) -> String {
+    issuer.as_ref().map_or_else(|| "none".into(), |value| format!("{value:?}"))
+}
+
 #[derive(Clone, Debug, thiserror::Error)]
 pub enum OAuthError {
     /// An OAuth error response (`error`, `error_description`, `error_uri`).
     #[error("{message}")]
     Server { code: String, message: String, error_uri: Option<String> },
-    #[error("OAuth issuer mismatch: expected {expected:?}, received {}", received.as_ref().map(|value| format!("{value:?}")).unwrap_or_else(|| "none".into()))]
-    IssuerMismatch { expected: String, received: Option<String> },
+    #[error("OAuth issuer mismatch: expected {}, received {}", format_issuer(expected), format_issuer(received))]
+    IssuerMismatch { expected: Option<String>, received: Option<String> },
     #[error("Refusing to send OAuth credentials to non-HTTPS endpoint {0}")]
     InsecureEndpoint(String),
     #[error("OAuth dynamic client registration failed with status {status}: {body}")]
