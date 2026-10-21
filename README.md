@@ -4,6 +4,26 @@ A Rust-only port of the [pi](https://github.com/earendil-works/pi) coding agent 
 
 ## Install
 
+Linux and macOS:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/yannelli/pi-rust/main/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/yannelli/pi-rust/main/install.ps1 | iex
+```
+
+The scripts download the latest release for your platform, check it against `SHA256SUMS`, and install `pi` to `~/.local/bin` (Windows: `%LOCALAPPDATA%\Programs\pi`, which the script adds to your user `Path`). They do not use sudo or send telemetry, and `pi update --self` updates an install made this way. Settings:
+
+- `PI_VERSION`: install this release (for example `0.5.3`) instead of the latest. Example: `curl -fsSL https://raw.githubusercontent.com/yannelli/pi-rust/main/install.sh | PI_VERSION=0.5.3 sh`. In PowerShell, set `$env:PI_VERSION = "0.5.3"` before `irm`.
+- `PI_INSTALL_DIR`: install to this directory instead. Do not use `~/.cargo/bin`, because `pi update --self` treats a binary there as a cargo install.
+- `PI_RELEASES_URL`: download from a mirror of `https://github.com/yannelli/pi-rust/releases`. The mirror must serve `latest/download/SHA256SUMS` and `download/<tag>/<file>`.
+
+### Manual install
+
 Each [release](https://github.com/yannelli/pi-rust/releases) has an archive per platform and a `SHA256SUMS` file. Every archive holds a `pi-vX.Y.Z-<target>/` folder with `pi` (or `pi.exe`), `README.md`, `LICENSE`, and `CHANGELOG.md`.
 
 | Platform | Target |
@@ -163,6 +183,7 @@ Cursor and Grok Build have no public model list API for other harnesses, so pi-r
 | [`pi-coding-agent`](crates/pi-coding-agent) | Tools, sessions, compaction, resources, extensions, the interactive TUI, print, JSON, RPC, and ACP modes, and the `pi` CLI |
 | [`pi-chord`](crates/pi-chord) | Chord: an application composition runtime for services, replicated state, RPC, and plugins |
 | [`pi-telemetry`](crates/pi-telemetry) | Vendor-neutral telemetry contracts and typed schema utilities |
+| [`pi-schema`](crates/pi-schema) | TypeBox-compatible JSON Schema checks, defaults, and cleaning, shared by pi-ai and pi-chord |
 | [`pi-embedded`](crates/pi-embedded) | In-process pi sessions for native and Rust applications, with a C ABI (`include/pi_embedded.h`) |
 | [`pi-protocol`](crates/pi-protocol), [`pi-client`](crates/pi-client), [`pi-server`](crates/pi-server) | The CBOR wire protocol, its client, and its server over Unix sockets |
 | [`pi-durable`](crates/pi-durable) | Pi Durable: durable sessions on memory, SQLite, or JSONL storage, the harness, and its coding tools |
@@ -180,6 +201,7 @@ pi-rust ports the `pi` CLI and its libraries feature for feature. These parts di
 - `pi --mode acp` (above) is an addition; the TypeScript pi needs the separate pi-acp adapter.
 - Account model lists for OpenAI Codex, Anthropic, GitHub Copilot, OpenAI, xAI, and Google (see [Providers](#account-model-lists-pi-rust-extension)) are an addition; upstream pi narrows only OpenRouter.
 - `pi-env` looks for remote daemons in a `pi-env-daemons` folder next to the running program. Each release has a `pi-env-daemons-<tag>.tar.gz` with the daemons for Linux, Android (Termux), macOS, and Windows on x86-64 and arm64; extract it next to `pi`.
+- Notifications: in interactive mode, a run that takes 10 seconds or more ends with a terminal notification titled "pi" that says "Done" or names the error. pi sends OSC 777 in Ghostty, WezTerm, foot, and rxvt, OSC 99 in kitty, OSC 9 in iTerm2 and Windows Terminal, and BEL in tmux, screen, and other terminals. Fullscreen mode skips the notification while the terminal reports focus. Set `terminal.notifyOnFinish` to `"auto"` (the default), `"osc"`, `"bell"`, or `"off"`, and `terminal.notifyMinSeconds` to change the threshold. Upstream pi has this only as the example extension `notify.ts`.
 - `pi experimental` (`server`, `client`, `durable`, `vacation`) needs `PI_EXPERIMENTAL=1`, as upstream. Its `server` and `client` use Unix sockets, so on Windows they report that they need Unix; upstream has no Windows transport either.
 
 ## Development

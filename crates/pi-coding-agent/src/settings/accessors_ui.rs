@@ -1,8 +1,11 @@
 //! Accessors for resources, models, tools, analytics, and terminal display settings.
 
+use std::time::Duration;
+
 use serde_json::{Value, json};
 
 use super::accessors::ResourceKind;
+use super::defaults::NOTIFY_MIN_SECONDS;
 use super::manager::SettingsManager;
 use super::schema::*;
 use super::storage::SettingsScope;
@@ -159,6 +162,18 @@ impl SettingsManager {
 
     pub fn set_clear_on_shrink(&self, enabled: bool) {
         self.set_global_nested("terminal", "clearOnShrink", Some(json!(enabled)));
+    }
+
+    /// `terminal.notifyOnFinish` (pi-rust extension).
+    pub fn notify_on_finish(&self) -> NotifyOnFinish {
+        self.state().merged.terminal.as_ref().and_then(|terminal| terminal.notify_on_finish).unwrap_or_default()
+    }
+
+    /// `terminal.notifyMinSeconds` (pi-rust extension): shorter runs do not notify.
+    pub fn notify_min_duration(&self) -> Duration {
+        let seconds = self.state().merged.terminal.as_ref().and_then(|terminal| terminal.notify_min_seconds);
+        let seconds = seconds.filter(|seconds| seconds.is_finite() && *seconds >= 0.0).unwrap_or(NOTIFY_MIN_SECONDS);
+        Duration::try_from_secs_f64(seconds).unwrap_or(Duration::MAX)
     }
 
     /// `(images, trueColor, hyperlinks)` overrides; `Some(None)` for images disables them.

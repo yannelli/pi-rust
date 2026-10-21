@@ -2,6 +2,7 @@
 //! (OSC 9;4), and program status (OSC 7501, upstream `program-status-reporter.ts`).
 
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use pi_ai::{Message, StopReason};
 use pi_tui::components::StyleFn;
@@ -37,10 +38,20 @@ impl Report {
     }
 }
 
+/// A run that settled on its own, for the run-finished notification.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FinishedRun {
+    pub elapsed: Duration,
+    /// "Done", or the first line of the error.
+    pub summary: String,
+}
+
 /// Working, blocked, done, and error states for terminals that support OSC 7501. Messages are
 /// limited to the session name, dialog titles, and the first line of errors.
 pub struct ProgramStatusReporter {
     run_active: bool,
+    run_started: Option<Instant>,
+    finished_run: Option<FinishedRun>,
     compacting: bool,
     run_result: Report,
     resting: Report,
@@ -52,6 +63,8 @@ impl Default for ProgramStatusReporter {
     fn default() -> Self {
         Self {
             run_active: false,
+            run_started: None,
+            finished_run: None,
             compacting: false,
             run_result: Report::new(ProgramState::Done),
             resting: Report::new(ProgramState::Idle),
@@ -66,6 +79,9 @@ impl ProgramStatusReporter {
     pub fn handle_event(&mut self, event: &UiEvent) -> bool {
         match event {
             UiEvent::AgentStart => {
+                if !self.run_active {
+                    self.run_started = Some(Instant::now());
+                }
                 self.run_active = true;
                 self.run_result = Report::new(ProgramState::Done);
             }
@@ -98,11 +114,24 @@ impl ProgramStatusReporter {
             UiEvent::AgentSettled { aborted } => {
                 self.run_active = false;
                 self.resting = if *aborted { Report::new(ProgramState::Idle) } else { self.run_result.clone() };
+                let summary = match self.resting.state {
+                    ProgramState::Done => Some("Done".to_string()),
+                    ProgramState::Error => self.resting.message.clone(),
+                    _ => None,
+                };
+                let started = self.run_started.take();
+                self.finished_run =
+                    started.zip(summary).map(|(started, summary)| FinishedRun { elapsed: started.elapsed(), summary });
             }
             UiEvent::SessionInfoChanged => {}
             _ => return false,
         }
         true
+    }
+
+    /// The run that settled at the last `AgentSettled`; `None` after an abort.
+    pub fn take_finished_run(&mut self) -> Option<FinishedRun> {
+        self.finished_run.take()
     }
 
     /// Report `blocked` for a dialog until it is cleared with `None`. Reopening a source replaces it.

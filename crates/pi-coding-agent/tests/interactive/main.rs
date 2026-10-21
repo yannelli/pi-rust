@@ -6,6 +6,7 @@ mod extensions;
 mod gaps;
 mod harness;
 mod keys;
+mod notify;
 mod startup;
 
 use harness::{Options, local, start};

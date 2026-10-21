@@ -14,3 +14,5 @@ pub const RETRY_BASE_DELAY_MS: u64 = 2_000;
 pub const RETRY_MAX_AGENT_DELAY_MS: u64 = 60_000;
 pub const PROVIDER_MAX_RETRY_DELAY_MS: u64 = 60_000;
 pub const DEFAULT_HTTP_IDLE_TIMEOUT_MS: u64 = 300_000;
+/// `terminal.notifyMinSeconds` (pi-rust extension).
+pub const NOTIFY_MIN_SECONDS: f64 = 10.0;
