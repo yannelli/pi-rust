@@ -92,7 +92,11 @@ Run `pi --help` for all options. In interactive mode, type `/` to list commands,
 
 `/init [instructions]` (pi-rust extension) asks the agent to look through the project in the working directory and write an `AGENTS.md` there with an overview, build, test, and lint commands, code layout, conventions, and gotchas, based only on what it finds. If the directory already has a context file that pi loads (`AGENTS.md`, `CLAUDE.md`, or `AGENTS.override.md`), the agent improves that file in place. Text after `/init` is added as extra instructions. The prompt goes out as a normal message: it shows in the chat, uses the current model, and is saved in the session. As with other built-in commands, `/init` takes precedence over a prompt template or extension command named `init`. It is available in interactive mode only.
 
+`/review [instructions]` (pi-rust extension) asks the agent to review the uncommitted changes in the working directory. The prompt tells it to run `git status` and `git diff HEAD`, read the untracked files, and report bugs, risky changes, and missing tests, ordered by severity with `path:line` references, without editing files. Text after `/review` is added as extra instructions, for example a focus area or a base branch to compare against. Outside a git repository, `/review` shows an error and sends nothing. As with `/init`, the prompt goes out as a normal message: it shows in the chat, uses the current model, and is saved in the session.
+
 `/undo` (pi-rust extension) restores the files that the edit and write tools changed during the last prompt: it writes back their earlier content and deletes the files the agent created. Run it again to go one more prompt back. A file that changed after the agent wrote it, for example by you or a bash command, is skipped and listed. Limits: only edit and write changes are tracked, not bash commands; checkpoints stay in memory for the last 20 prompts of the current session, files over 4 MB are not kept, and everything is lost on exit or when you switch sessions. The conversation does not change; use `/tree` to move in it.
+
+`/retry` (pi-rust extension) runs the last prompt of the current branch again. It moves to the point before that prompt, as `/tree` does, and sends the same text and images as a new prompt. The new answer starts a new branch, and the old answer stays in the tree, where `/tree` can return to it. Custom messages and prompts that extensions sent are skipped, so `/retry` picks the last prompt you sent; pi knows which prompts came from extensions only while the session that received them is open, not after a resume. While the agent works or compacts, or before the first prompt, `/retry` shows an error and sends nothing.
 
 ### Prompt history (pi-rust extension)
 
@@ -282,8 +286,10 @@ pi-rust ports the `pi` CLI and its libraries feature for feature. These parts di
 - Markdown export (see [Use](#use)) is an addition: `/export notes.md` and `pi --export session.jsonl notes.md` write Markdown. Upstream pi exports only HTML and JSONL.
 - `/diff` (see [Use](#use)) is an addition; upstream pi has no command that shows the git changes in the working directory.
 - `/init` (see [Use](#use)) is an addition; upstream pi has no `/init` command.
+- `/review` (see [Use](#use)) is an addition; upstream pi has no `/review` command.
 - `/context` (see [Use](#use)) is an addition; upstream pi shows context use only in the footer.
 - `/undo` (see [Use](#use)) is an addition; upstream pi has no command that restores the files the agent changed.
+- `/retry` (see [Use](#use)) is an addition; upstream pi has no `/retry` command.
 
 - `pi completion` and `pi doctor` (above) are additions; the TypeScript pi has neither.
 - `pi sessions` and `pi stats` (above) are additions; the TypeScript pi lists and deletes sessions only in its session picker (`pi -r`, `/resume`) and shows usage only for the current session (`/session`).

@@ -54,7 +54,7 @@ pub use self::file_checkpoints::{MAX_CHECKPOINT_FILE_BYTES, MAX_UNDO_PROMPTS, Un
 pub use self::llama_api::LlamaProgressFn;
 pub use self::model::ModelCycleResult;
 pub use self::model_runtime::{ModelRuntime, ModelRuntimeOptions};
-pub use self::prompt::{PromptDisposition, PromptOptions, StreamingBehavior};
+pub use self::prompt::{BranchPrompt, PromptDisposition, PromptOptions, StreamingBehavior};
 pub use self::run_limits::{RUN_LIMIT_EXIT_CODE, RunLimitKind, RunLimitStop, RunLimits};
 pub use self::runtime::{
     AgentSessionRuntime, AsyncSetupFn, ForkPosition, ForkResult, InvalidateFn, RuntimeFactory, RuntimeParts,
@@ -112,6 +112,8 @@ pub(crate) struct RunState {
     pub route_failure: Option<String>,
     /// A `session_before_compact` handler cancelled the running compaction.
     pub compaction_cancelled_by_extension: bool,
+    /// Timestamp and text of each user message an extension sent, so `/retry` can skip them.
+    pub extension_prompts: Vec<(i64, String)>,
 }
 
 /// One conversation. Create it with [`create_agent_session`]; it is always held in an `Arc`.

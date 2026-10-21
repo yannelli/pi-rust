@@ -66,12 +66,20 @@
       "reason": "pi-rust extension: /init"
     },
     {
+      "item": "review",
+      "reason": "pi-rust extension: /review"
+    },
+    {
       "item": "undo",
       "reason": "pi-rust extension: /undo"
     },
     {
       "item": "context",
       "reason": "pi-rust extension: /context"
+    },
+    {
+      "item": "retry",
+      "reason": "pi-rust extension: /retry"
     }
   ],
   "tools": [],

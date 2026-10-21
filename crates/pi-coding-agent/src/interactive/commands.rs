@@ -112,6 +112,9 @@ impl InteractiveMode {
         } else if let Some(instructions) = argument(text, "init") {
             clear();
             self.handle_init_command(text, instructions);
+        } else if let Some(instructions) = argument(text, "review") {
+            clear();
+            self.handle_review_command(text, instructions);
         } else if text == "/reload" {
             clear();
             self.handle_reload_command();
@@ -136,6 +139,9 @@ impl InteractiveMode {
         } else if text == "/undo" {
             clear();
             self.handle_undo_command();
+        } else if text == "/retry" {
+            clear();
+            self.handle_retry_command();
         } else if let Some(args) = argument(text, "mcp")
             && self.session().builtin_extension_enabled("mcp")
         {

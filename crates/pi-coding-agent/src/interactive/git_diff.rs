@@ -15,6 +15,7 @@ use crate::theme::{ThemeColor, theme};
 /// Lines shown in the chat before the rest is cut.
 const MAX_DIFF_LINES: usize = 500;
 const GIT_TIMEOUT: Duration = Duration::from_secs(15);
+const GIT_MISSING: &str = "git not found on PATH";
 
 /// `/diff [--stat] [path]`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -96,7 +97,8 @@ fn command_args<'a>(head: &[&'a str], base: &'a str, pathspec: &[&'a str]) -> Ve
     head.iter().copied().chain([base]).chain(pathspec.iter().copied()).collect()
 }
 
-async fn collect_changes(cwd: &Path, args: &DiffArgs) -> Result<GitChanges, Collected> {
+/// `Ok` when `cwd` is inside a git work tree.
+async fn ensure_work_tree(cwd: &Path) -> Result<(), Collected> {
     if !cwd.is_dir() {
         return Err(Collected::Failed(format!("Working directory not found: {}", cwd.display())));
     }
@@ -107,6 +109,26 @@ async fn collect_changes(cwd: &Path, args: &DiffArgs) -> Result<GitChanges, Coll
         let failed = || Collected::Failed(format!("git rev-parse failed: {error}"));
         return Err(if not_repository { Collected::NotRepository } else { failed() });
     }
+    Ok(())
+}
+
+fn not_repository(cwd: &Path) -> String {
+    format!("Not a git repository: {}", cwd.display())
+}
+
+/// Why `cwd` is not a usable git work tree, as `/diff` words it, or `None` when it is one.
+pub(super) async fn work_tree_problem(cwd: PathBuf) -> Option<String> {
+    match ensure_work_tree(&cwd).await {
+        Ok(()) => None,
+        Err(Collected::GitMissing) => Some(GIT_MISSING.to_string()),
+        Err(Collected::NotRepository) => Some(not_repository(&cwd)),
+        Err(Collected::Failed(error)) => Some(error),
+        Err(Collected::Clean | Collected::Changes(_)) => None,
+    }
+}
+
+async fn collect_changes(cwd: &Path, args: &DiffArgs) -> Result<GitChanges, Collected> {
+    ensure_work_tree(cwd).await?;
     // Before the first commit, compare with the empty tree.
     let head = git(cwd, &["rev-parse", "--verify", "--quiet", "HEAD"]).await?;
     let base = if head.status.success() {
@@ -229,8 +251,8 @@ impl InteractiveMode {
             let collected = task.await.unwrap_or_else(|error| Collected::Failed(error.to_string()));
             let scope = args.path.as_deref().map(|path| format!(" in {path}")).unwrap_or_default();
             match collected {
-                Collected::GitMissing => mode.show_error("git not found on PATH"),
-                Collected::NotRepository => mode.show_status(&format!("Not a git repository: {}", cwd.display())),
+                Collected::GitMissing => mode.show_error(GIT_MISSING),
+                Collected::NotRepository => mode.show_status(&not_repository(&cwd)),
                 Collected::Failed(error) => mode.show_error(&error),
                 Collected::Clean => mode.show_status(&format!("No uncommitted changes{scope}")),
                 Collected::Changes(lines) => {
