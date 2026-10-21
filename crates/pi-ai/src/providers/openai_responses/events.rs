@@ -5,7 +5,6 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde_json::{Value, json};
 
-use crate::json::parse_streaming_json;
 use crate::providers::common::{SseHandler, as_u64};
 use crate::sse::SseEvent;
 use crate::stream::MessageBuilder;
@@ -174,7 +173,7 @@ impl SseHandler for ResponsesStream {
                     match arguments.strip_prefix(json.as_str()) {
                         Some(rest) if !rest.is_empty() => builder.tool_call_delta(*handle, rest),
                         Some(_) => {}
-                        None => builder.tool_call_arguments(*handle, parse_object(arguments)),
+                        None => builder.tool_call_json(*handle, arguments),
                     }
                     *json = arguments.to_string();
                 }
@@ -306,7 +305,7 @@ impl ResponsesStream {
             }
             (Some(Slot::Function { handle, json }), Some("function_call")) => {
                 let arguments = item["arguments"].as_str().filter(|arguments| !arguments.is_empty()).unwrap_or(&json);
-                builder.tool_call_arguments(handle, parse_object(arguments));
+                builder.tool_call_json(handle, arguments);
                 self.finish_tool(builder, handle, item);
             }
             (Some(Slot::Custom { handle, mut grammar }), Some("custom_tool_call")) => {
@@ -399,13 +398,6 @@ fn replace_last_text(builder: &mut MessageBuilder, replacement: String) {
     });
     if let Some(text) = last {
         *text = replacement;
-    }
-}
-
-fn parse_object(json: &str) -> JsonObject {
-    match parse_streaming_json(json) {
-        Some(Value::Object(object)) => object,
-        _ => JsonObject::new(),
     }
 }
 

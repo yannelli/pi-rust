@@ -86,6 +86,18 @@ async fn streams_through_the_responses_handler_with_azure_auth_and_deployments()
     assert_eq!(body["input"][0], json!({"role": "developer", "content": "Be brief"}));
 }
 
+#[test]
+fn additional_tools_models_declare_tools_in_the_input() {
+    let mut target = model();
+    target.compat = Some(json!({"supportsMidConvoSystemMessages": true, "supportsAdditionalTools": true}));
+    let tool = Tool::new("read", "d", json!({"type": "object", "properties": {}}));
+    let context = Context { tools: vec![tool], ..context() };
+    let (body, _) = super::build_body(&target, &context, &StreamOptions::default()).unwrap();
+    assert!(body.get("tools").is_none());
+    assert_eq!(body["input"][0]["type"], "additional_tools");
+    assert_eq!(body["input"][0]["tools"][0]["name"], "read");
+}
+
 #[tokio::test]
 async fn strict_mode_compat_and_disabled_reasoning() {
     let server = MockHttp::start(vec![text_stream("ok", json!([]))]).await;

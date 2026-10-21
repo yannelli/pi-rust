@@ -40,6 +40,36 @@ fn same_length_mask(text: &str, fill: char) -> String {
     std::iter::repeat_n(fill, text.len()).collect()
 }
 
+/// Whether the character before the unread source is punctuation or East Asian text. JavaScript
+/// hands over a single UTF-16 unit as `prev_char`, so the real character is recovered from the
+/// masked source: a variation selector defers to the character it follows.
+fn previous_char_is_cjk(prev_char: &str, masked_prefix: &str) -> bool {
+    if is_match(&rules::PUNCTUATION_CJK, prev_char) {
+        return true;
+    }
+    if prev_char.is_empty() {
+        return false;
+    }
+    let mut chars = masked_prefix.chars().rev();
+    let Some(mut last) = chars.next() else { return false };
+    if ('\u{fe00}'..='\u{fe0e}').contains(&last)
+        && let Some(base) = chars.next()
+    {
+        last = base;
+    }
+    ('\u{e0100}'..='\u{e01ef}').contains(&last) || is_cjk(last)
+}
+
+fn is_cjk(c: char) -> bool {
+    rules::CJK_CHAR.is_match(c.encode_utf8(&mut [0; 4]))
+}
+
+/// Whether the character before a right delimiter match or the one after it is East Asian.
+fn cjk_touches_delimiter(matched: &str, clipped: &str, end: usize) -> bool {
+    matched.chars().next().is_some_and(is_cjk)
+        || clipped.get(end..).and_then(|rest| rest.chars().next()).is_some_and(is_cjk)
+}
+
 fn text_token(text: &str) -> Token {
     Token::Text { raw: text.to_string(), text: text.to_string(), tokens: None }
 }
@@ -193,7 +223,10 @@ impl Lexer {
         self.output_link(&raw, &cap[1], def.href)
     }
 
-    pub(crate) fn em_strong(&mut self, src: &str, masked_tail: &str, prev_char: &str) -> Option<Token> {
+    /// marked's `emStrong` with the `marked-cjk-friendly` flanking rules, which treat East Asian
+    /// characters like punctuation so `**这是测试。**后面` still closes. `masked` is the whole masked
+    /// source and `src` its unread tail.
+    pub(crate) fn em_strong(&mut self, src: &str, masked: &str, prev_char: &str) -> Option<Token> {
         let cap = captures(&rules::EM_STRONG_LDELIM, src)?;
         let group = |i: usize| cap.get(i).is_some_and(|m| !m.as_str().is_empty());
         if !(1..=4).any(group) {
@@ -202,33 +235,45 @@ impl Lexer {
         if group(4) && rules::UNICODE_ALPHANUMERIC.is_match(prev_char) {
             return None;
         }
-        let punctuation_before = !prev_char.is_empty() && !is_match(&rules::PUNCTUATION, prev_char);
-        if (group(1) || group(3)) && punctuation_before {
+        let masked_tail = &masked[masked.len() - src.len()..];
+        let next_char = cap.get(1).or_else(|| cap.get(3)).map_or("", |m| m.as_str());
+        let flanks = next_char.is_empty()
+            || prev_char.is_empty()
+            || is_match(&rules::PUNCTUATION, prev_char)
+            || previous_char_is_cjk(prev_char, &masked[..masked.len() - src.len()])
+            || rules::CJK_CHAR.is_match(next_char);
+        if !flanks {
             return None;
         }
         let left_length = cap[0].chars().count() - 1;
         let delimiter = &cap[0][..1];
         let same_as_prev = prev_char == delimiter;
-        let end_rule = if delimiter == "*" { &*rules::EM_STRONG_RDELIM_AST } else { &*rules::EM_STRONG_RDELIM_UND };
-        let masked = masked_tail.get(left_length..)?;
+        let end_rule =
+            if delimiter == "*" { &*rules::EM_STRONG_RDELIM_AST_CJK } else { &*rules::EM_STRONG_RDELIM_UND_CJK };
+        let clipped = masked_tail.get(left_length..)?;
         let mut delim_total = left_length as i64;
         let mut mid_delim_total = 0i64;
-        for found in end_rule.captures_iter(masked) {
+        for found in end_rule.captures_iter(clipped) {
             let Ok(found) = found else { break };
             let Some(right) = (1..=6).filter_map(|i| found.get(i)).find(|m| !m.as_str().is_empty()) else {
                 continue;
             };
             let mut right_length = right.as_str().chars().count() as i64;
             let is_group = |i: usize| found.get(i).is_some_and(|m| !m.as_str().is_empty());
-            if is_group(3) || is_group(4) {
+            let whole = found.get(0).expect("match");
+            let cjk_adjacent = (1..=4).any(is_group) && cjk_touches_delimiter(whole.as_str(), clipped, whole.end());
+            let left_only = is_group(3) || is_group(4);
+            let both = is_group(5) || is_group(6);
+            if left_only && !cjk_adjacent {
                 delim_total += right_length;
                 continue;
-            } else if is_group(5) || is_group(6) {
+            }
+            if both || cjk_adjacent {
                 if left_length % 3 != 0 && (left_length as i64 + right_length) % 3 == 0 {
                     mid_delim_total += right_length;
                     continue;
                 }
-                if same_as_prev {
+                if same_as_prev && both {
                     break;
                 }
             }
@@ -237,7 +282,6 @@ impl Lexer {
                 continue;
             }
             right_length = right_length.min(right_length + delim_total + mid_delim_total);
-            let whole = found.get(0).expect("match");
             let first_char_len = whole.as_str().chars().next().map_or(0, char::len_utf8);
             let end = left_length + whole.start() + first_char_len + right_length.max(0) as usize;
             let raw = src.get(..end)?;

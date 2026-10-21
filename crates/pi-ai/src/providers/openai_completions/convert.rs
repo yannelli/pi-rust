@@ -76,7 +76,8 @@ pub(super) fn convert_messages(
     grammar: &GrammarInputs,
 ) -> Result<Vec<Value>, String> {
     let transformed = transform_messages(messages, model, &|id, _| normalize_tool_call_id(model, id));
-    let anchors = resolve_transcript_tools(messages, compat.anchors_tool_additions()).anchors_additions;
+    let folded = resolve_transcript_tools(messages, compat.tool_support()).folded_system_messages;
+    let mut system_index = 0;
     let instruction_role = if model.reasoning && compat.supports_developer_role { "developer" } else { "system" };
     let mut params = Vec::new();
     let mut last_role: Option<&str> = None;
@@ -92,7 +93,10 @@ pub(super) fn convert_messages(
         match message {
             Message::System(system) => {
                 let added = system.tools_added.as_deref().unwrap_or_default();
-                if index > 0 && anchors && !added.is_empty() {
+                // `transform_messages` keeps system messages in order, so their position matches the transcript.
+                let anchors = system_index >= folded;
+                system_index += 1;
+                if anchors && !added.is_empty() {
                     params.push(json!({"role": "system", "tools": convert_tools(added, compat)?}));
                 }
                 let text = if index == 0 { system_message_text(system) } else { render_system_message_update(system) };
