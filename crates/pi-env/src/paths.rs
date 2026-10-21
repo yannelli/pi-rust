@@ -1,6 +1,8 @@
 //! Node's `path.posix` and `path.win32` rules that the client applies for the remote system: `resolve`, `join`,
 //! `normalize`, `isAbsolute`, and `basename`. Windows support covers drive, rooted, and UNC paths.
 
+use crate::connection::RemoteInfo;
+
 /// The path rules of a remote system.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PathStyle {
@@ -12,6 +14,11 @@ impl PathStyle {
     /// The rules of a daemon that reported this `os`.
     pub fn of_os(os: &str) -> Self {
         if os == "windows" { Self::Windows } else { Self::Posix }
+    }
+
+    /// The rules of the system a daemon reported in `hello`, by Node's name for it.
+    pub fn of_info(info: &RemoteInfo) -> Self {
+        if info.node_platform().platform == "win32" { Self::Windows } else { Self::Posix }
     }
 
     pub fn separator(self) -> char {
