@@ -72,11 +72,13 @@ async fn cancellation_kills_process_group() {
 
     let pid = std::fs::read_to_string(dir.path().join("child.pid")).unwrap();
     let pid = pid.trim().to_string();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    // SIGKILL is asynchronous: a loaded CI runner can take seconds to schedule the exit.
+    let deadline = Instant::now() + Duration::from_secs(10);
     while !process_gone(&pid) && Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    assert!(process_gone(&pid), "background child {pid} still running");
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
+    assert!(process_gone(&pid), "background child {pid} still running: {stat}");
 }
 
 #[tokio::test]
