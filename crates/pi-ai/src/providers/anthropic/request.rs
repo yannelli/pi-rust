@@ -4,7 +4,7 @@
 use serde_json::{Map, Value, json};
 
 use super::convert::{
-    ConvertOptions, ToolFormat, convert_messages, convert_tools, deferred_tool_placeholder,
+    ConvertOptions, ToolFormat, convert_messages, convert_tools, deferred_tool_placeholder, has_preferred_strict,
     insert_thinking_level_messages, normalize_tool_call_id,
 };
 use crate::providers::common::{compat_bool, compat_str, compat_value, transform_messages};
@@ -26,6 +26,7 @@ const THINKING_BINDING_CONTROLS_BETA: &str = "thinking-binding-controls-2026-08-
 const INLINE_TOOLS_BETA: &str = "inline-tools-2026-09-15";
 
 /// Resolved `AnthropicMessagesCompat` flags with upstream defaults.
+#[derive(Clone)]
 pub(super) struct Compat {
     pub eager_input_streaming: bool,
     pub long_cache_retention: bool,
@@ -71,6 +72,7 @@ impl Compat {
 }
 
 /// Thinking and output settings derived from the request's reasoning level.
+#[derive(Clone)]
 pub(super) struct Thinking {
     pub enabled: bool,
     pub max_tokens: u64,
@@ -138,11 +140,21 @@ pub(super) struct Params<'a> {
     pub compat: &'a Compat,
     pub thinking: &'a Thinking,
     pub oauth: bool,
+    /// Send `strict: "prefer"` tools non-strict, after the provider rejected the strict tool set.
+    pub disable_preferred_strict_tools: bool,
 }
 
-/// The request body and the `anthropic-beta` features.
-pub(super) fn build_params(params: &Params) -> Result<(Value, Vec<String>), String> {
-    let Params { model, messages, options, compat, thinking, oauth } = *params;
+/// A built request.
+pub(super) struct Built {
+    pub body: Value,
+    /// The `anthropic-beta` features.
+    pub betas: Vec<String>,
+    /// Whether a `strict: "prefer"` tool is sent strict.
+    pub preferred_strict_tools: bool,
+}
+
+pub(super) fn build_params(params: &Params) -> Result<Built, String> {
+    let Params { model, messages, options, compat, thinking, oauth, disable_preferred_strict_tools } = *params;
     let cache_control = cache_control(resolve_cache_retention(options.cache_retention, &options.env), compat);
     let initial = initial_system_message(messages);
     let initial_text = initial.map(system_message_text).unwrap_or_default();
@@ -150,8 +162,12 @@ pub(super) fn build_params(params: &Params) -> Result<(Value, Vec<String>), Stri
     let conversation = if initial.is_some() { &transformed[1..] } else { &transformed[..] };
     let initial_tools = initial.and_then(|system| system.tools_added.as_deref()).unwrap_or_default();
     let native_tools = compat.mid_convo_system_messages && compat.mid_convo_tool_changes && !initial_tools.is_empty();
-    let format =
-        ToolFormat { oauth, eager_input_streaming: compat.eager_input_streaming, strict_tools: compat.strict_tools };
+    let format = ToolFormat {
+        oauth,
+        eager_input_streaming: compat.eager_input_streaming,
+        strict_tools: compat.strict_tools,
+        disable_preferred_strict_tools,
+    };
     let converted = convert_messages(
         conversation,
         &ConvertOptions {
@@ -162,6 +178,7 @@ pub(super) fn build_params(params: &Params) -> Result<(Value, Vec<String>), Stri
             native_tools: native_tools.then_some(format),
         },
     )?;
+    let preferred_in_additions = converted.preferred_strict_tools;
     let betas = beta_features(params, native_tools);
     let mut body = Map::new();
     body.insert("model".into(), json!(model.id));
@@ -198,14 +215,18 @@ pub(super) fn build_params(params: &Params) -> Result<(Value, Vec<String>), Stri
         body.insert("temperature".into(), json!(temperature));
     }
     let tool_cache = cache_control.as_ref().filter(|_| compat.cache_control_on_tools);
+    let mut preferred_strict_tools = preferred_in_additions;
     if native_tools {
         let mut tools = convert_tools(initial_tools, format, tool_cache)?;
+        preferred_strict_tools |= has_preferred_strict(initial_tools, &tools);
         tools.push(deferred_tool_placeholder());
         body.insert("tools".into(), Value::Array(tools));
     } else {
         let tools = current_tools(messages);
         if !tools.is_empty() {
-            body.insert("tools".into(), Value::Array(convert_tools(&tools, format, tool_cache)?));
+            let definitions = convert_tools(&tools, format, tool_cache)?;
+            preferred_strict_tools |= has_preferred_strict(&tools, &definitions);
+            body.insert("tools".into(), Value::Array(definitions));
         }
     }
     insert_thinking(&mut body, model, compat, thinking);
@@ -219,7 +240,7 @@ pub(super) fn build_params(params: &Params) -> Result<(Value, Vec<String>), Stri
         let fallbacks: Vec<Value> = compat.fallback_models.iter().map(|model| json!({"model": model})).collect();
         body.insert("fallbacks".into(), Value::Array(fallbacks));
     }
-    Ok((Value::Object(body), betas))
+    Ok(Built { body: Value::Object(body), betas, preferred_strict_tools })
 }
 
 fn insert_thinking(body: &mut Map<String, Value>, model: &Model, compat: &Compat, thinking: &Thinking) {
@@ -253,7 +274,7 @@ fn insert_thinking(body: &mut Map<String, Value>, model: &Model, compat: &Compat
 /// Configured `anthropic-beta` header values replace the computed features; a suppressed
 /// header sends none.
 fn beta_features(params: &Params, native_tools: bool) -> Vec<String> {
-    let Params { model, messages, options, compat, thinking, oauth } = *params;
+    let Params { model, messages, options, compat, thinking, oauth, .. } = *params;
     let is_beta = |name: &String| name.eq_ignore_ascii_case("anthropic-beta");
     if options.suppressed_headers.iter().any(is_beta) {
         return Vec::new();
