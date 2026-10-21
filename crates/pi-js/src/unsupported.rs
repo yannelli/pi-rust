@@ -41,7 +41,7 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
      and stack sizes (accepted)",
     "sqlite: createSession, applyChangeset, enableLoadExtension(true), and loadExtension (the bundled SQLite \
      has no session extension, and native extensions do not load)",
-    "test: snapshot assertions (t.assert.snapshot and t.assert.fileSnapshot) and coverage (the lcov reporter)",
+    "test: coverage (the lcov reporter)",
     "inspector: open (there is no DevTools server to attach to)",
     "WebAssembly: shared memories (Memory with shared: true, and modules using threads and atomics fail to \
      compile), and exception handling (Tag and Exception throw, JSTag is absent, and modules using it fail \
@@ -109,7 +109,8 @@ pub const DIFFERENCES: &[&str] = &[
      the report differently than in Node; subtests run one at a time (concurrency is accepted and \
      ignored); --test-only, --experimental-test-coverage, and module mocks are not available; run() loads \
      test files in this runtime instead of child processes, so an ES module file runs only on its first \
-     load; the spec reporter prints no colors; source locations come from QuickJS stack frames, whose \
+     load; t.filePath, and so the default snapshot file, is the file that declared the test rather than \
+     the entry file; the spec reporter prints no colors; source locations come from QuickJS stack frames, whose \
      columns can differ from V8's",
     "repl: terminal mode edits lines through readline but has no completion, previews, or colors, and \
      there is no history file or .editor mode; top-level await keeps a single const, let, or var declaration per line visible afterwards; \

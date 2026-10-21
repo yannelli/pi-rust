@@ -109,6 +109,7 @@ const SOURCES: &[(&str, &str)] = &[
     ("sqlite", include_str!("../js/sqlite.js")),
     ("internal/test_harness", include_str!("../js/test_harness.js")),
     ("internal/test_mock", include_str!("../js/test_mock.js")),
+    ("internal/test_snapshot", include_str!("../js/test_snapshot.js")),
     ("test/reporters", include_str!("../js/test_reporters.js")),
     ("test", include_str!("../js/test.js")),
     ("repl", include_str!("../js/repl.js")),

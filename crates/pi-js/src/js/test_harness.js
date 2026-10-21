@@ -381,6 +381,7 @@ class Harness {
     const root = this.root;
     try {
       if (root.hooks.after.length > 0) await root.runHook("after", this.contextFor(root));
+      this.snapshotManager?.writeSnapshotFiles();
     } catch (error) {
       root.fail(error);
     }
