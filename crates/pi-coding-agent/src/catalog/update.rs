@@ -28,8 +28,11 @@ pub struct CatalogConfig {
     pub local_generated_at: Option<i64>,
     /// `models.json` text, for its Radius providers and provider base URLs.
     pub models_json: Option<String>,
-    /// HTTP client of the pi.dev overlays and account model lists; the shared client by default.
+    /// HTTP client of the pi.dev overlays; the shared client by default.
     pub client: Option<reqwest::Client>,
+    /// HTTP client of account model lists, which must not follow redirects; by default
+    /// `pi_ai::model_lists::list_client`.
+    pub list_client: Option<reqwest::Client>,
 }
 
 /// The pi.dev overlay for every bundled provider except Radius, narrowed to the account's models
@@ -61,6 +64,9 @@ pub fn builtin_catalogs(builtin: &[Model], config: &CatalogConfig) -> Vec<Arc<dy
                 .with_interval(interval);
             if let Some(client) = &config.client {
                 catalog = catalog.with_client(client.clone());
+            }
+            if let Some(client) = &config.list_client {
+                catalog = catalog.with_list_client(client.clone());
             }
             catalogs.push(Arc::new(catalog));
             continue;

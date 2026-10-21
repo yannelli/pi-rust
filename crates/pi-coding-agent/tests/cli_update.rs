@@ -71,7 +71,7 @@ async fn update_models_refreshes_the_catalog_cache_used_by_offline_starts() {
         "provider": "anthropic", "baseUrl": "https://api.anthropic.com", "contextWindow": 200000, "maxTokens": 8192});
     let server = Server::start(move |request| match request.path() {
         "/api/models/providers/anthropic" => Reply::json(&json!([model])),
-        "/v1/models" => Reply::json(&json!({"data": [{"id": "claude-catalog-test"}], "has_more": false})),
+        "/v1/models" => Reply::json(&json!({"data": [{"id": "claude-opus-4-8"}, {"id": "claude-catalog-test"}]})),
         _ => Reply::json(&json!([])),
     })
     .await;
@@ -88,7 +88,9 @@ async fn update_models_refreshes_the_catalog_cache_used_by_offline_starts() {
     assert_eq!(server.count("/api/models/providers/anthropic"), 1);
     let store: Value =
         serde_json::from_str(&std::fs::read_to_string(root.path().join("agent/models-store.json")).unwrap()).unwrap();
-    assert_eq!(store["anthropic"]["models"][0]["id"], "claude-catalog-test");
+    let ids: Vec<&str> =
+        store["anthropic"]["models"].as_array().unwrap().iter().filter_map(|m| m["id"].as_str()).collect();
+    assert_eq!(ids, ["claude-opus-4-8", "claude-catalog-test"]);
     assert_eq!(server.count("/v1/models"), 1, "the key's model list applies");
     assert!(!store.to_string().contains("sk-test"), "the key is never saved");
 

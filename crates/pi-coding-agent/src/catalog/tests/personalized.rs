@@ -1,14 +1,16 @@
 //! Port of upstream's personalized catalog provider tests, plus the OpenRouter wiring and the
-//! refresh interval of pi-rust's account model lists.
+//! refresh interval, unmatched lists, and version check of pi-rust's account model lists.
 
 use std::sync::{Arc, Mutex};
 
 use pi_ai::Model;
 use pi_ai::auth::{ApiKeyCredential, Credential};
+use pi_ai::model_lists::{ModelListContext, Personalized};
 use serde_json::json;
 
 use super::{RecordingPublisher, ids, model, model_json, refresh_with};
 use crate::catalog::*;
+use crate::platform::http::VERSION;
 use crate::platform::test_http::{TestReply, TestServer, client};
 
 const PROVIDER: &str = "test-provider";
@@ -20,12 +22,18 @@ fn key(key: &str) -> Credential {
 /// A personalize step that records its input and key, and keeps the models in `allowed`.
 fn keep(allowed: &'static [&'static str], seen: &Arc<Mutex<Vec<String>>>) -> Personalize {
     let seen = seen.clone();
-    Arc::new(move |catalog: Vec<Model>, context: pi_ai::model_lists::ModelListContext| {
+    Arc::new(move |catalog: Vec<Model>, context: ModelListContext| {
         let mut log = seen.lock().unwrap();
         log.push(format!("key={}", context.key.unwrap_or_default()));
         log.extend(catalog.iter().map(|model| model.id.clone()));
-        Box::pin(async move { Ok(catalog.into_iter().filter(|model| allowed.contains(&model.id.as_str())).collect()) })
+        let kept = catalog.into_iter().filter(|model| allowed.contains(&model.id.as_str())).collect();
+        Box::pin(async move { Ok(Personalized::Models(kept)) })
     })
+}
+
+/// A list client like pi's that also ignores proxy variables, for the local server.
+fn list_client() -> reqwest::Client {
+    reqwest::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none()).build().unwrap()
 }
 
 fn failing() -> Personalize {
@@ -129,6 +137,7 @@ async fn openrouter_lists_the_keys_models_from_the_configured_base_url() {
         catalog_base_url: Some(server.url.clone()),
         models_json: Some(models_json.to_string()),
         client: Some(client()),
+        list_client: Some(list_client()),
         ..CatalogConfig::default()
     };
     let catalogs = builtin_catalogs(&builtin, &config);
@@ -143,4 +152,57 @@ async fn openrouter_lists_the_keys_models_from_the_configured_base_url() {
     assert_eq!(request.header("authorization"), Some("Bearer sk-or-test"));
     let saved = serde_json::to_string(&publisher.stored().unwrap()).unwrap();
     assert!(!saved.contains("sk-or-test"), "the key is never saved");
+}
+
+#[tokio::test]
+async fn an_unmatched_list_shows_the_catalog_and_keeps_the_saved_list() {
+    let server = TestServer::start(|_| TestReply::status(404, "")).await;
+    let defaults = Arc::new(Mutex::new(Vec::new()));
+    let seen = defaults.clone();
+    let unmatched: Personalize = Arc::new(move |catalog, context: ModelListContext| {
+        seen.lock().unwrap().push(context.default_model);
+        Box::pin(async move { Ok(Personalized::Unmatched(catalog)) })
+    });
+    let builtin = vec![model("anthropic", "claude-opus-4-8"), model("anthropic", "claude-haiku-4-5")];
+    let provider = PersonalizedCatalog::new("anthropic", builtin, unmatched)
+        .with_catalog(Some(&server.url), None)
+        .with_client(client())
+        .with_interval(Some(REMOTE_CATALOG_REFRESH_INTERVAL_MS));
+    let saved = ModelsStoreEntry {
+        pi_version: Some(VERSION.into()),
+        ..ModelsStoreEntry::with_models(vec![model("anthropic", "claude-haiku-4-5")])
+    };
+    let publisher = RecordingPublisher::new(Some(saved.clone()));
+
+    refresh_with(&provider, &publisher, Some(&key("k")), true, true).await.unwrap();
+    assert_eq!(ids(&provider.models()), ["claude-opus-4-8", "claude-haiku-4-5"]);
+    assert_eq!(publisher.stored(), Some(saved), "nothing is saved");
+    let expected = crate::model_resolver::default_model_for("anthropic").map(String::from);
+    assert_eq!(*defaults.lock().unwrap(), [expected], "the list learns the provider's default model");
+}
+
+#[tokio::test]
+async fn a_list_saved_by_another_version_waits_for_a_refresh() {
+    let server = TestServer::start(|_| TestReply::status(404, "")).await;
+    let seen = Arc::default();
+    let builtin = vec![model(PROVIDER, "static"), model(PROVIDER, "new")];
+    let provider = PersonalizedCatalog::new(PROVIDER, builtin, keep(&["static"], &seen))
+        .with_catalog(Some(&server.url), None)
+        .with_client(client())
+        .with_interval(Some(REMOTE_CATALOG_REFRESH_INTERVAL_MS));
+    let models = vec![model(PROVIDER, "static")];
+    for version in [Some("0.0.1-old".to_string()), None] {
+        let entry = ModelsStoreEntry {
+            checked_at: Some(pi_ai::now_ms()),
+            pi_version: version,
+            ..ModelsStoreEntry::with_models(models.clone())
+        };
+        let publisher = RecordingPublisher::new(Some(entry));
+        refresh_with(&provider, &publisher, None, false, false).await.unwrap();
+        assert_eq!(ids(&provider.models()), ["static", "new"], "offline, the full catalog until a refresh");
+        refresh_with(&provider, &publisher, Some(&key("k")), true, false).await.unwrap();
+        assert_eq!(ids(&provider.models()), ["static"], "a recent list of another version is refreshed");
+        assert_eq!(publisher.stored().unwrap().pi_version.as_deref(), Some(VERSION));
+    }
+    assert_eq!(server.requests().len(), 2);
 }

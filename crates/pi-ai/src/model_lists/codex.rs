@@ -4,7 +4,7 @@
 use serde_json::Value;
 
 use super::reconcile::{AddRule, Listed, positive, reconcile};
-use super::{Fetched, ModelListContext, get_json};
+use super::{Fetched, ModelListContext, Personalized, get_json};
 use crate::providers::openai_codex::{DEFAULT_CODEX_BASE_URL, chatgpt_account_id};
 use crate::types::Model;
 
@@ -37,17 +37,19 @@ fn listed(entry: &Value) -> Option<Listed> {
 pub(crate) async fn personalize_codex_catalog(
     catalog: Vec<Model>,
     context: &ModelListContext,
-) -> Result<Vec<Model>, String> {
-    let Some(token) = context.key() else { return Ok(catalog) };
-    let Some(account) = chatgpt_account_id(token) else { return Ok(catalog) };
+) -> Result<Personalized, String> {
+    let Some(token) = context.key() else { return Ok(Personalized::Models(catalog)) };
+    let Some(account) = chatgpt_account_id(token) else { return Ok(Personalized::Models(catalog)) };
     let version = env!("CARGO_PKG_VERSION");
     let url = format!("{}?client_version={version}", models_url(&context.base(DEFAULT_CODEX_BASE_URL)));
     let headers =
         [("authorization", format!("Bearer {token}")), ("chatgpt-account-id", account), ("originator", "pi".into())];
-    let Fetched::Json(body) = get_json(context, "OpenAI Codex", &url, &headers).await? else { return Ok(catalog) };
-    let Some(entries) = body.get("models").and_then(Value::as_array) else { return Ok(catalog) };
+    let Fetched::Json(body) = get_json(context, "OpenAI Codex", &url, &headers).await? else {
+        return Ok(Personalized::Models(catalog));
+    };
+    let Some(entries) = body.get("models").and_then(Value::as_array) else { return Ok(Personalized::Models(catalog)) };
     let listed: Vec<Listed> = entries.iter().filter_map(listed).collect();
-    Ok(reconcile(catalog, &listed, AddRule::Any))
+    Ok(reconcile(catalog, &listed, AddRule::Any, context.default_model.as_deref()))
 }
 
 #[cfg(test)]

@@ -19,6 +19,30 @@ mod reconcile;
 
 pub use openrouter::{OPENROUTER_BASE_URL, openrouter_cost, personalize_openrouter_catalog};
 
+/// What a model list made of the catalog.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Personalized {
+    /// The models for this credential, to show and save.
+    Models(Vec<Model>),
+    /// The list names no catalog chat model, as an unrelated list behind a proxy can: show the
+    /// catalog unchanged and save nothing.
+    Unmatched(Vec<Model>),
+}
+
+impl Personalized {
+    pub fn models(&self) -> &[Model] {
+        match self {
+            Self::Models(models) | Self::Unmatched(models) => models,
+        }
+    }
+
+    pub fn into_models(self) -> Vec<Model> {
+        match self {
+            Self::Models(models) | Self::Unmatched(models) => models,
+        }
+    }
+}
+
 /// Time limit of one model list request, as upstream.
 pub const MODEL_LIST_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -30,7 +54,11 @@ pub struct ModelListContext {
     pub key: Option<String>,
     /// The provider base URL set in `models.json`; the provider default when `None`.
     pub base_url: Option<String>,
+    /// Must not follow redirects, which would carry the key to another host ([`list_client`]).
     pub client: reqwest::Client,
+    /// The provider's default model. A list without it only enriches the catalog and drops
+    /// nothing, since the list may be filtered for another client.
+    pub default_model: Option<String>,
     pub user_agent: Option<String>,
     pub cancel: CancellationToken,
 }
@@ -40,7 +68,8 @@ impl ModelListContext {
         Self {
             key,
             base_url: None,
-            client: crate::http::shared_client(),
+            client: list_client(),
+            default_model: None,
             user_agent: Some(crate::http::pi_user_agent()),
             cancel: CancellationToken::new(),
         }
@@ -55,6 +84,11 @@ impl ModelListContext {
         let configured = self.base_url.as_deref().filter(|url| !url.trim().is_empty());
         configured.unwrap_or(default).trim_end_matches('/').to_string()
     }
+}
+
+/// The client for model list requests: it returns a redirect as a failing status.
+pub fn list_client() -> reqwest::Client {
+    crate::http::no_redirect_client()
 }
 
 /// Providers whose catalog follows the account's model list.
@@ -97,9 +131,9 @@ impl AccountModelList {
 
     /// The catalog narrowed to the account's models. An error means the list could not be read
     /// and nothing should replace the last saved list.
-    pub async fn personalize(self, catalog: Vec<Model>, context: &ModelListContext) -> Result<Vec<Model>, String> {
+    pub async fn personalize(self, catalog: Vec<Model>, context: &ModelListContext) -> Result<Personalized, String> {
         match self {
-            Self::OpenRouter => personalize_openrouter_catalog(catalog, context).await,
+            Self::OpenRouter => personalize_openrouter_catalog(catalog, context).await.map(Personalized::Models),
             Self::OpenAiCodex => codex::personalize_codex_catalog(catalog, context).await,
             Self::Anthropic => anthropic::personalize_anthropic_catalog(catalog, context).await,
             Self::GitHubCopilot => copilot::personalize_copilot_catalog(catalog, context).await,
@@ -123,8 +157,8 @@ pub(crate) enum Fetched {
     Invalid,
 }
 
-/// `GET url` with the context's user agent and `headers`. Other failing statuses, transport
-/// errors, and the time limit are errors labeled with `label`.
+/// `GET url` with the context's user agent and `headers`. Other failing statuses, redirects
+/// included, transport errors, and the time limit are errors labeled with `label`.
 pub(crate) async fn get_json(
     context: &ModelListContext,
     label: &str,
@@ -195,5 +229,7 @@ pub(crate) async fn get_pages(
 
 #[cfg(test)]
 mod tests_accounts;
+#[cfg(test)]
+mod tests_guards;
 #[cfg(test)]
 mod tests_openrouter;

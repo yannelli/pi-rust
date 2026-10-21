@@ -3,7 +3,7 @@
 use serde_json::Value;
 
 use super::reconcile::{AddRule, Listed, reconcile};
-use super::{Fetched, ModelListContext, get_json};
+use super::{Fetched, ModelListContext, Personalized, get_json};
 use crate::types::Model;
 
 pub(crate) const OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
@@ -16,13 +16,15 @@ pub(crate) async fn personalize_openai_compatible_catalog(
     context: &ModelListContext,
     label: &str,
     default_base_url: &str,
-) -> Result<Vec<Model>, String> {
-    let Some(key) = context.key() else { return Ok(catalog) };
+) -> Result<Personalized, String> {
+    let Some(key) = context.key() else { return Ok(Personalized::Models(catalog)) };
     let url = format!("{}/models", context.base(default_base_url));
     let headers = [("authorization", format!("Bearer {key}"))];
-    let Fetched::Json(body) = get_json(context, label, &url, &headers).await? else { return Ok(catalog) };
-    let Some(data) = body.get("data").and_then(Value::as_array) else { return Ok(catalog) };
+    let Fetched::Json(body) = get_json(context, label, &url, &headers).await? else {
+        return Ok(Personalized::Models(catalog));
+    };
+    let Some(data) = body.get("data").and_then(Value::as_array) else { return Ok(Personalized::Models(catalog)) };
     let ids = data.iter().filter_map(|entry| entry.get("id").and_then(Value::as_str)).filter(|id| !id.is_empty());
     let listed: Vec<Listed> = ids.map(Listed::new).collect();
-    Ok(reconcile(catalog, &listed, AddRule::CatalogFamilies))
+    Ok(reconcile(catalog, &listed, AddRule::CatalogFamilies, context.default_model.as_deref()))
 }

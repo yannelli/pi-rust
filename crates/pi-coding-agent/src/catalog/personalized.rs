@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use futures::future::BoxFuture;
 use pi_ai::Model;
 use pi_ai::auth::Credential;
-use pi_ai::model_lists::{AccountModelList, ModelListContext};
+use pi_ai::model_lists::{AccountModelList, ModelListContext, Personalized, list_client};
 
 use super::refresh::{DynamicCatalog, Persist, RefreshContext};
 use super::remote::{
@@ -16,14 +16,19 @@ use super::remote::{
     request_catalog,
 };
 use super::store::ModelsStoreEntry;
+use crate::model_resolver::default_model_for;
 use crate::platform::http::{VERSION, pi_user_agent};
 
 /// Narrows a catalog to a credential's models. An error keeps the last saved list.
 pub type Personalize =
-    Arc<dyn Fn(Vec<Model>, ModelListContext) -> BoxFuture<'static, Result<Vec<Model>, String>> + Send + Sync>;
+    Arc<dyn Fn(Vec<Model>, ModelListContext) -> BoxFuture<'static, Result<Personalized, String>> + Send + Sync>;
 
 fn is_overlay_entry(entry: &ModelsStoreEntry) -> bool {
     entry.last_modified.is_some() || entry.etag.is_some()
+}
+
+fn is_this_version(entry: &ModelsStoreEntry) -> bool {
+    entry.pi_version.as_deref() == Some(VERSION)
 }
 
 /// The account model list of a built-in provider, and the minimum time between its requests:
@@ -44,6 +49,7 @@ pub struct PersonalizedCatalog {
     provider_base_url: Option<String>,
     interval: Option<i64>,
     client: reqwest::Client,
+    list_client: reqwest::Client,
     personal: RwLock<Vec<Model>>,
 }
 
@@ -59,6 +65,7 @@ impl PersonalizedCatalog {
             provider_base_url: None,
             interval: None,
             client: pi_ai::http::shared_client(),
+            list_client: list_client(),
             personal: RwLock::new(Vec::new()),
         }
     }
@@ -82,8 +89,16 @@ impl PersonalizedCatalog {
         self
     }
 
+    /// The client of the pi.dev catalog request.
     pub fn with_client(mut self, client: reqwest::Client) -> Self {
         self.client = client;
+        self
+    }
+
+    /// The client of the model list request. It must not follow redirects, which would carry
+    /// the credential to another host.
+    pub fn with_list_client(mut self, client: reqwest::Client) -> Self {
+        self.list_client = client;
         self
     }
 
@@ -101,17 +116,19 @@ impl PersonalizedCatalog {
     /// validators were saved by the plain overlay and are always refreshed.
     fn is_fresh(&self, context: &RefreshContext<'_>) -> bool {
         let (Some(interval), Some(entry)) = (self.interval, context.stored) else { return false };
-        let saved_here = !is_overlay_entry(entry) && !entry.models.is_empty();
+        let saved_here = !is_overlay_entry(entry) && !entry.models.is_empty() && is_this_version(entry);
         !context.force && saved_here && entry.checked_at.is_some_and(|at| pi_ai::now_ms() - at < interval)
     }
 
-    /// The saved list. pi-rust's lists read an entry of the plain overlay, saved before the
-    /// provider had a list, as an overlay; upstream restores every entry as it is.
+    /// The saved list. pi-rust's lists read an entry of the plain overlay as an overlay, and
+    /// skip a list saved by another pi version, whose catalog differs, until a refresh replaces
+    /// it. Upstream restores every entry as it is.
     fn restore(&self, stored: Option<&ModelsStoreEntry>) -> Vec<Model> {
         let models = match stored {
             Some(entry) if self.interval.is_some() && is_overlay_entry(entry) => {
                 merge_models(self.builtin.clone(), &remote_models(Some(entry), self.local_generated_at))
             }
+            Some(entry) if self.interval.is_some() && !is_this_version(entry) => Vec::new(),
             Some(entry) => entry.models.clone(),
             None => Vec::new(),
         };
@@ -127,7 +144,8 @@ impl PersonalizedCatalog {
         ModelListContext {
             key,
             base_url: self.provider_base_url.clone(),
-            client: self.client.clone(),
+            client: self.list_client.clone(),
+            default_model: default_model_for(&self.provider_id).map(String::from),
             user_agent: Some(pi_user_agent(VERSION)),
             cancel: context.cancel.clone(),
         }
@@ -177,12 +195,19 @@ impl DynamicCatalog for PersonalizedCatalog {
         if context.cancel.is_cancelled() {
             return Ok(());
         }
-        let entry = ModelsStoreEntry {
-            checked_at: Some(pi_ai::now_ms()),
-            ..ModelsStoreEntry::with_models(personalized.clone())
+        let (persist, models) = match personalized {
+            Personalized::Models(models) => {
+                let entry = ModelsStoreEntry {
+                    checked_at: Some(pi_ai::now_ms()),
+                    pi_version: Some(VERSION.to_string()),
+                    ..ModelsStoreEntry::with_models(models.clone())
+                };
+                (Persist::Write(entry), models)
+            }
+            Personalized::Unmatched(catalog) => (Persist::Unchanged, catalog),
         };
-        if context.publisher.publish(Persist::Write(entry)).await {
-            self.set_personal(personalized);
+        if context.publisher.publish(persist).await {
+            self.set_personal(models);
         }
         Ok(())
     }

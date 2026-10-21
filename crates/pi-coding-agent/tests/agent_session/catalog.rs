@@ -47,7 +47,7 @@ async fn startup_restores_the_offline_cache_and_refreshes_from_the_catalog() {
     std::fs::write(dir.path().join("models-store.json"), cached.to_string()).unwrap();
     let server = Server::start(|request| match request.path() {
         "/api/models/providers/anthropic" => Reply::json(&json!([model_json("anthropic", "claude-remote")])),
-        "/v1/models" => Reply::json(&json!({"data": [{"id": "claude-remote"}], "has_more": false})),
+        "/v1/models" => Reply::json(&json!({"data": [{"id": "claude-opus-4-8"}, {"id": "claude-remote"}]})),
         _ => Reply::status(404),
     })
     .await;
@@ -67,8 +67,9 @@ async fn startup_restores_the_offline_cache_and_refreshes_from_the_catalog() {
     assert_eq!(server.count("/api/models/providers/openai"), 0, "providers without credentials stay offline");
     let stored: Value =
         serde_json::from_str(&std::fs::read_to_string(dir.path().join("models-store.json")).unwrap()).unwrap();
-    assert_eq!(stored["anthropic"]["models"][0]["id"], "claude-remote", "the key's model list applies");
-    assert_eq!(stored["anthropic"]["models"].as_array().unwrap().len(), 1);
+    let ids: Vec<&str> =
+        stored["anthropic"]["models"].as_array().unwrap().iter().filter_map(|m| m["id"].as_str()).collect();
+    assert_eq!(ids, ["claude-opus-4-8", "claude-remote"], "the key's model list applies");
     assert!(!stored.to_string().contains("sk-test"), "the key is never saved");
     assert_eq!(stored["openai"]["models"][0]["id"], "gpt-cached");
 

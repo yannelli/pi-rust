@@ -3,7 +3,7 @@
 use serde_json::Value;
 
 use super::reconcile::{AddRule, Listed, positive, reconcile};
-use super::{Fetched, ModelListContext, get_json};
+use super::{Fetched, ModelListContext, Personalized, get_json};
 use crate::auth::oauth::{
     COPILOT_API_VERSION, COPILOT_HEADERS, COPILOT_INDIVIDUAL_BASE_URL, github_copilot_base_url, parse_copilot_catalog,
 };
@@ -33,17 +33,21 @@ fn account_model(entry: &Value) -> Option<Listed> {
 pub(crate) async fn personalize_copilot_catalog(
     catalog: Vec<Model>,
     context: &ModelListContext,
-) -> Result<Vec<Model>, String> {
-    let Some(key) = context.key() else { return Ok(catalog) };
+) -> Result<Personalized, String> {
+    let Some(key) = context.key() else { return Ok(Personalized::Models(catalog)) };
     let base = base_url(key, context);
     let mut headers: Vec<(&str, String)> =
         COPILOT_HEADERS.iter().map(|(name, value)| (*name, value.to_string())).collect();
     headers.push(("authorization", format!("Bearer {key}")));
     headers.push(("X-GitHub-Api-Version", COPILOT_API_VERSION.to_string()));
     let url = format!("{base}/models");
-    let Fetched::Json(body) = get_json(context, "GitHub Copilot", &url, &headers).await? else { return Ok(catalog) };
+    let Fetched::Json(body) = get_json(context, "GitHub Copilot", &url, &headers).await? else {
+        return Ok(Personalized::Models(catalog));
+    };
     let allow_policy_fallback = base == COPILOT_INDIVIDUAL_BASE_URL;
-    let Ok(account) = parse_copilot_catalog(&body, allow_policy_fallback, &|_| false) else { return Ok(catalog) };
+    let Ok(account) = parse_copilot_catalog(&body, allow_policy_fallback, &|_| false) else {
+        return Ok(Personalized::Models(catalog));
+    };
     let data = body.get("data").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
     let is_chat = |entry: &&Value| entry.pointer("/capabilities/type").and_then(Value::as_str) == Some("chat");
     let listed: Vec<Listed> = data
@@ -52,7 +56,7 @@ pub(crate) async fn personalize_copilot_catalog(
         .filter_map(account_model)
         .filter(|model| account.available_model_ids.contains(&model.id))
         .collect();
-    Ok(reconcile(catalog, &listed, AddRule::Any))
+    Ok(reconcile(catalog, &listed, AddRule::Any, context.default_model.as_deref()))
 }
 
 #[cfg(test)]

@@ -151,7 +151,7 @@ pub(super) async fn read_catalog(provider_id: &str, response: reqwest::Response)
     let body: Value = response.json().await?;
     let models = parse_catalog(provider_id, &body).map_err(anyhow::Error::msg)?;
     let last_modified = Some(last_modified.as_deref().and_then(parse_http_date).unwrap_or(0));
-    Ok(ModelsStoreEntry { models, checked_at: None, last_modified, etag })
+    Ok(ModelsStoreEntry { models, checked_at: None, last_modified, etag, pi_version: None })
 }
 
 /// The pi.dev overlay of one built-in provider.

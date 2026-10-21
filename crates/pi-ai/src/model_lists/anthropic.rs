@@ -4,7 +4,7 @@
 use serde_json::Value;
 
 use super::reconcile::{AddRule, Listed, positive, reconcile};
-use super::{ModelListContext, get_pages, with_query};
+use super::{ModelListContext, Personalized, get_pages, with_query};
 use crate::providers::anthropic::OAUTH_API_BETA;
 use crate::types::Model;
 
@@ -37,19 +37,21 @@ fn account_model(entry: &Value) -> Option<Listed> {
 pub(crate) async fn personalize_anthropic_catalog(
     catalog: Vec<Model>,
     context: &ModelListContext,
-) -> Result<Vec<Model>, String> {
-    let Some(key) = context.key() else { return Ok(catalog) };
+) -> Result<Personalized, String> {
+    let Some(key) = context.key() else { return Ok(Personalized::Models(catalog)) };
     let url = format!("{}/v1/models", context.base(ANTHROPIC_BASE_URL));
     let first = with_query(&url, &[("limit", "1000")])?;
     let next = |body: &Value| match (body.get("has_more"), body.get("last_id").and_then(Value::as_str)) {
         (Some(Value::Bool(true)), Some(last)) => with_query(&url, &[("limit", "1000"), ("after_id", last)]).map(Some),
         _ => Ok(None),
     };
-    let Some(pages) = get_pages(context, "Anthropic", first, &headers(key), next).await? else { return Ok(catalog) };
+    let Some(pages) = get_pages(context, "Anthropic", first, &headers(key), next).await? else {
+        return Ok(Personalized::Models(catalog));
+    };
     let mut listed = Vec::new();
     for page in &pages {
-        let Some(data) = page.get("data").and_then(Value::as_array) else { return Ok(catalog) };
+        let Some(data) = page.get("data").and_then(Value::as_array) else { return Ok(Personalized::Models(catalog)) };
         listed.extend(data.iter().filter_map(account_model));
     }
-    Ok(reconcile(catalog, &listed, AddRule::Any))
+    Ok(reconcile(catalog, &listed, AddRule::Any, context.default_model.as_deref()))
 }

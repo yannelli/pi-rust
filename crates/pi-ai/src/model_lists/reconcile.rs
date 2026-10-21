@@ -7,6 +7,7 @@ use std::collections::HashSet;
 
 use serde_json::Value;
 
+use super::Personalized;
 use crate::models::is_chat_model;
 use crate::types::Model;
 
@@ -120,23 +121,32 @@ fn with_limits(mut model: Model, listed: &Listed) -> Model {
 }
 
 /// Keep the catalog's chat models that `listed` names, with its limits, then add the listed
-/// models the catalog lacks. Image and classifier models stay. An empty list changes nothing.
-pub(crate) fn reconcile(catalog: Vec<Model>, listed: &[Listed], rule: AddRule) -> Vec<Model> {
-    if listed.is_empty() {
-        return catalog;
-    }
+/// models the catalog lacks. Image and classifier models stay. A list that names no catalog
+/// chat model is `Unmatched`; one without the catalog's `default_model` drops nothing.
+pub(crate) fn reconcile(
+    catalog: Vec<Model>,
+    listed: &[Listed],
+    rule: AddRule,
+    default_model: Option<&str>,
+) -> Personalized {
     let chats: Vec<Model> = catalog.iter().filter(|model| is_chat_model(model)).cloned().collect();
-    let chat_refs: Vec<&Model> = chats.iter().collect();
-    let families: HashSet<&str> = chats.iter().map(|model| family(&model.id)).collect();
     let find = |id: &str| {
         let exact = listed.iter().find(|entry| entry.id == id);
         exact.or_else(|| listed.iter().find(|entry| same_model(id, &entry.id)))
     };
+    if !chats.iter().any(|model| find(&model.id).is_some()) {
+        return Personalized::Unmatched(catalog);
+    }
+    let catalog_default = default_model.filter(|id| chats.iter().any(|model| model.id == *id));
+    let keep_unlisted = catalog_default.is_some_and(|id| find(id).is_none());
+    let chat_refs: Vec<&Model> = chats.iter().collect();
+    let families: HashSet<&str> = chats.iter().map(|model| family(&model.id)).collect();
     let mut models: Vec<Model> = catalog
         .into_iter()
-        .filter_map(|model| match is_chat_model(&model) {
-            false => Some(model),
-            true => find(&model.id).map(|entry| with_limits(model, entry)),
+        .filter_map(|model| match (is_chat_model(&model), find(&model.id)) {
+            (false, _) => Some(model),
+            (true, Some(entry)) => Some(with_limits(model, entry)),
+            (true, None) => keep_unlisted.then_some(model),
         })
         .collect();
     for entry in listed {
@@ -150,5 +160,5 @@ pub(crate) fn reconcile(catalog: Vec<Model>, listed: &[Listed], rule: AddRule) -
         let model = Model { id: entry.id.clone(), name, ..base.clone() };
         models.push(with_limits(model, entry));
     }
-    models
+    Personalized::Models(models)
 }
