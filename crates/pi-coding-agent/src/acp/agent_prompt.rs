@@ -78,13 +78,14 @@ impl AcpAgent {
             }
         }
         let title = prompt_to_session_title(&params.prompt);
-        let stop = match session.prompt(message, images, title).await? {
+        let (result, usage) = session.prompt_with_usage(message, images, title).await;
+        let stop = match result? {
             TurnEnd::EndTurn => StopReason::EndTurn,
             TurnEnd::Cancelled => StopReason::Cancelled,
             TurnEnd::Error if session.was_cancel_requested() => StopReason::Cancelled,
             TurnEnd::Error => StopReason::EndTurn,
         };
-        Ok(PromptResponse::new(stop))
+        Ok(PromptResponse::new(stop).usage(usage))
     }
 
     /// Run a built-in command; `None` when `command` is not one.
