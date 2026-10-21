@@ -90,6 +90,116 @@ fn puts_property_descriptions_on_comment_lines() {
     assert_eq!(ty(nested), "{\n  // Outer\n  outer?: {\n    // Inner\n    inner?: string;\n  };\n}");
 }
 
+// https://github.com/earendil-works/pi/issues/10707
+#[test]
+fn puts_constraints_the_type_cannot_express_on_property_comment_lines() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "timeoutMs": {
+                "type": "integer", "minimum": 0, "maximum": 30000, "default": 0, "description": "Wait in milliseconds.",
+            },
+            "id": { "type": "string", "pattern": "^[a-z]+$", "maxLength": 8 },
+            "tags": { "type": "array", "items": { "type": "string" }, "maxItems": 5, "uniqueItems": true, "deprecated": true },
+            "name": { "type": "string" },
+        },
+        "required": ["id"],
+    });
+    assert_eq!(
+        ty(schema),
+        [
+            "{",
+            "  // @maxLength 8 @pattern ^[a-z]+$",
+            "  id: string;",
+            "  name?: string;",
+            "  // @maxItems 5 @uniqueItems @deprecated",
+            "  tags?: Array<string>;",
+            "  // Wait in milliseconds.",
+            "  // @integer @minimum 0 @maximum 30000 @default 0",
+            "  timeoutMs?: number;",
+            "}",
+        ]
+        .join("\n")
+    );
+}
+
+#[test]
+fn reads_constraints_of_optional_fields_from_the_non_null_branch() {
+    // Pydantic's `limit: int | None = Field(None, ge=1, le=100)`.
+    let limit = json!({
+        "anyOf": [{ "type": "integer", "minimum": 1, "maximum": 100 }, { "type": "null" }],
+        "default": null,
+        "title": "Limit",
+    });
+    assert_eq!(
+        ty(json!({ "type": "object", "properties": { "limit": limit } })),
+        "{\n  // @integer @minimum 1 @maximum 100\n  limit?: number | null;\n}"
+    );
+    // Constraints of the property and the branch both apply.
+    let n = json!({
+        "anyOf": [{ "type": "integer", "minimum": 10, "maximum": 50, "format": "int32" }, { "type": "null" }],
+        "minimum": 0,
+        "maximum": 20,
+        "format": "port",
+    });
+    assert_eq!(
+        ty(json!({ "type": "object", "properties": { "n": n } })),
+        "{\n  // @integer @minimum 10 @maximum 20 @format port @format int32\n  n?: number | null;\n}"
+    );
+}
+
+#[test]
+fn reads_draft_04_boolean_exclusive_bounds() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "n": { "type": "integer", "minimum": 0, "exclusiveMinimum": true, "maximum": 10, "exclusiveMaximum": false },
+            "m": { "anyOf": [{ "type": "number", "maximum": 5, "exclusiveMaximum": true }, { "type": "null" }], "maximum": 8 },
+        },
+    });
+    assert_eq!(
+        ty(schema),
+        [
+            "{",
+            "  // @maximum 8 @exclusiveMaximum 5",
+            "  m?: number | null;",
+            "  // @integer @exclusiveMinimum 0 @maximum 10",
+            "  n?: number;",
+            "}",
+        ]
+        .join("\n")
+    );
+}
+
+#[test]
+fn leaves_out_long_tags_and_escapes_line_terminators() {
+    let config = json!({ "type": "object", "properties": { "config": { "type": "object", "default": { "text": "x".repeat(100) } } } });
+    assert_eq!(ty(config), "{ config?: { [key: string]: unknown; }; }");
+    let sep = json!({
+        "type": "string", "pattern": "^[\r\n\u{2028}\u{2029}]$", "default": "\u{2028}", "description": "a\u{2028}b",
+    });
+    assert_eq!(
+        ty(json!({ "type": "object", "properties": { "sep": sep } })),
+        [
+            "{",
+            "  // a",
+            "  // b",
+            "  // @pattern ^[\\u000d\\u000a\\u2028\\u2029]$ @default \"\\u2028\"",
+            "  sep?: string;",
+            "}",
+        ]
+        .join("\n")
+    );
+}
+
+#[test]
+fn drops_constraint_tags_before_rendering_a_type_over_the_budget_as_unknown() {
+    let schema = json!({ "type": "object", "properties": { "n": { "type": "integer", "minimum": 1 } } });
+    assert_eq!(schema_to_type(&schema, None), "{\n  // @integer @minimum 1\n  n?: number;\n}");
+    assert_eq!(schema_to_type(&schema, Some(20)), "{ n?: number; }");
+    assert_eq!(schema_to_type(&schema, Some(10)), "unknown");
+}
+
 #[test]
 fn resolves_local_references_and_stops_at_recursive_ones() {
     let schema = json!({
