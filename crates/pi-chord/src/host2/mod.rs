@@ -9,7 +9,10 @@ pub mod errors;
 pub(crate) mod exec;
 pub mod host;
 pub mod link;
+pub mod loader;
+pub mod manager;
 pub mod object;
+pub mod process_lock;
 pub mod publish;
 pub mod registry;
 pub mod schema;
@@ -29,11 +32,20 @@ pub use errors::{
 pub use host::{
     Facet, FacetApi, Host, HostOptions, HostRegistry, LoadOptions, PrincipalMatch, create_host, define_facet,
 };
-pub use link::{Link, MemoryLink, PACK_THRESHOLD, Packed, Received, memory_link_pair, unpack};
+pub use link::{
+    IpcChannel, IpcLink, Link, MemoryLink, PACK_THRESHOLD, Packed, Received, StreamChannel, ipc_link, memory_link_pair,
+    unpack,
+};
+pub use loader::{FacetLoader, InProcessLoader};
+pub use manager::{
+    ChildControl, ControlMessage, Driver, Exit, ForkDriver, ForkDriverOptions, HostManager, HostManagerOptions,
+    Instance, Liveness, Status,
+};
 pub use object::{
     Ctx, Declare, Implementation, Initial, Lifetime, Listen, Listenable, Ref, RefCore, RefOwner, ResourceHandle,
     RootOptions, ServeOptions, StateOptions,
 };
+pub use process_lock::{ProcessLock, process_lock};
 pub use publish::{enqueue, hold_publications};
 pub use registry::{Conflict, Registration, Registry, RegistryTable, RegistryView, define_registry};
 pub use schema::{assert_valid, canonical_identity, canonical_json, fits, hash64, normalize};
