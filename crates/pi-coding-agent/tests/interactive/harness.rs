@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use pi_ai::auth::InMemoryCredentialStore;
 use pi_ai::providers::faux::{FauxProvider, FauxResponse};
 use pi_ai::register_api_provider;
-use pi_coding_agent::app::{AppOptions, create_app_runtime};
+use pi_coding_agent::app::AppOptions;
 use pi_coding_agent::interactive::{InteractiveMode, InteractiveOptions};
 use pi_coding_agent::keybindings::KeybindingsManager;
 use pi_coding_agent::session::SessionManager;
@@ -78,7 +78,7 @@ pub async fn start(options: Options) -> Ui {
             {"id": "other", "contextWindow": 128000, "maxTokens": 4000}]}}});
     std::fs::write(agent_dir.join("models.json"), models.to_string()).unwrap();
     let provider = FauxProvider::with_delay(options.responses, options.chunk_delay);
-    register_api_provider(api, provider.clone());
+    register_api_provider(api.clone(), provider.clone());
     let mut values = json!({"defaultProvider": "local", "defaultModel": "tiny", "theme": "dark",
         "enableInstallTelemetry": false, "lastChangelogVersion": "999.0.0"});
     for (key, value) in options.settings.as_object().unwrap() {
@@ -93,7 +93,8 @@ pub async fn start(options: Options) -> Ui {
         ..AppOptions::default()
     };
     let manager = SessionManager::create(&cwd, Some(&agent_dir.join("sessions")));
-    let runtime = create_app_runtime(app, manager).await.unwrap();
+    let runtime = crate::offline_guard::app_runtime(app, manager).await;
+    crate::offline_guard::assert_faux_model(runtime.session().model().as_ref(), &api);
     KeybindingsManager::create(&agent_dir).install();
     let terminal = VirtualTerminal::shared(100, 30);
     let interactive = InteractiveOptions {

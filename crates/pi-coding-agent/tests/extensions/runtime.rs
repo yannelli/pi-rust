@@ -9,7 +9,7 @@ use pi_ai::auth::InMemoryCredentialStore;
 use pi_ai::providers::faux::{FauxProvider, FauxResponse};
 use pi_ai::register_api_provider;
 use pi_coding_agent::agent_session::{AgentSessionRuntime, ForkPosition};
-use pi_coding_agent::app::{AppOptions, create_app_runtime};
+use pi_coding_agent::app::AppOptions;
 use pi_coding_agent::extension_ui::{ExtensionMode, ExtensionUi, NoOpExtensionUi};
 use pi_coding_agent::extensions::ExtensionBindings;
 use pi_coding_agent::session::SessionManager;
@@ -53,7 +53,7 @@ async fn runtime_with(source: &str, provider: Arc<FauxProvider>, mode: Extension
         ..AppOptions::default()
     };
     let manager = SessionManager::create(&cwd, Some(&agent_dir.join("sessions")));
-    let runtime = Arc::new(create_app_runtime(options, manager).await.unwrap());
+    let runtime = Arc::new(crate::offline_guard::app_runtime(options, manager).await);
     let ui = Arc::new(RecordingUi::default());
     // Modes without a UI bind the no-op UI, as print mode does.
     let bound: Arc<dyn ExtensionUi> = if mode.has_ui() { ui.clone() } else { Arc::new(NoOpExtensionUi) };
@@ -209,7 +209,7 @@ async fn resume_gives_project_trust_handlers_the_live_ui() {
         ..AppOptions::default()
     };
     let manager = SessionManager::create(&work, Some(&agent_dir.join("sessions")));
-    let runtime = Arc::new(create_app_runtime(options, manager).await.unwrap());
+    let runtime = Arc::new(crate::offline_guard::app_runtime(options, manager).await);
     let ui = Arc::new(RecordingUi::default());
     ui.answers.lock().unwrap().push("Trust".into());
     let bindings = ExtensionBindings {

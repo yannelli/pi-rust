@@ -1,17 +1,18 @@
-//! Port of upstream `host.ts`, in-host part: serving types, facets, objects by address, roots, registries,
-//! principals and closing. Links, remote references and reloads come in later phases; their seams are the
-//! code version fields (`pending`, `gating`, `reloading`) and [`HostImpl::acquire_remote`].
+//! Port of upstream `host.ts`: serving types, facets, objects by address, roots, registries, principals,
+//! links and remote references, and closing. Reloads come in phase 4; their seams are the code version fields
+//! (`pending`, `gating`, `reloading`) and the retirement fields.
 
 mod address;
 mod close;
 mod facet;
+mod links;
 mod registry;
 mod roots;
 
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::Duration;
 
 use indexmap::IndexMap;
@@ -19,16 +20,21 @@ use tokio::runtime::Handle;
 
 pub use close::PrincipalMatch;
 pub use facet::{Facet, FacetApi, FacetSetup, LoadOptions, define_facet};
+pub use links::LingerOptions;
 pub use registry::HostRegistry;
 
+use super::connection::{ConnId, ConnectOptions, NetHandle, Route};
 use super::contract::Contract;
 use super::exec::ErrorHandler;
+use super::link::Link;
 use super::object::{
     Ctx, Declare, Decls, HostCore, Implementation, ObjectImpl, Ref, RefOwner, RootFn, RootOptions, ServeOptions,
     Service,
 };
+use super::remote::RemoteBinding;
 use super::schema::canonical_json;
 use super::types::GetOptions;
+use super::wire::PeerKind;
 use crate::context::AbortController;
 use crate::error::{ChordError, ChordResult, report_unhandled};
 use crate::json::Json;
@@ -55,6 +61,12 @@ pub struct HostOptions {
     pub task_stop_deadline: Duration,
     /// How long an activation, or an awaited `get`, waits for its references (default 60 s; `None`: forever).
     pub ready_timeout: Option<Duration>,
+    /// `Client` (browser): never a reload participant, never carries roots or code versions. Default `Host`.
+    pub kind: PeerKind,
+    /// Remote bindings kept after their last reference is released, by type.
+    pub linger: LingerOptions,
+    /// The link to this host's parent (server). Can also be set later with `connect`.
+    pub upstream: Option<(Arc<dyn Link>, ConnectOptions)>,
 }
 
 impl Default for HostOptions {
@@ -67,6 +79,9 @@ impl Default for HostOptions {
             on_error: None,
             task_stop_deadline: Duration::from_secs(5),
             ready_timeout: Some(Duration::from_secs(60)),
+            kind: PeerKind::Host,
+            linger: LingerOptions::default(),
+            upstream: None,
         }
     }
 }
@@ -115,6 +130,17 @@ pub(crate) struct HostState {
     pub order: HashMap<String, HashMap<String, usize>>,
     pub subscribers: HashMap<String, IndexMap<u64, ErasedListener>>,
     pub next_subscriber: u64,
+    /// Shared bindings of this host's remote references, by key (re-held after an upstream reconnect).
+    pub bindings: IndexMap<String, Arc<RemoteBinding>>,
+    /// Bindings without references kept for a while, least recently released first.
+    pub lingering: IndexMap<String, Arc<RemoteBinding>>,
+    pub routes: IndexMap<String, Route>,
+    /// Roots started elsewhere with the links they came over: their leases end once every link ended them.
+    pub foreign: HashMap<String, HashSet<ConnId>>,
+    /// The links calls of a root went out on: they hear when it ends.
+    pub root_links: HashMap<String, HashSet<ConnId>>,
+    /// The newest code version the parent allowed to retire (a reload seam).
+    pub retire_allowed: i64,
 }
 
 static HOST_IDS: AtomicU64 = AtomicU64::new(1);
@@ -131,6 +157,11 @@ pub(crate) struct HostImpl {
     task_stop_deadline: Duration,
     ready_timeout: Option<Duration>,
     handle: Option<Handle>,
+    kind: PeerKind,
+    linger: LingerOptions,
+    linger_seq: AtomicU64,
+    /// The task that owns the links, started with the first one.
+    net: OnceLock<NetHandle>,
     /// Keeps root ids unique across restarts of a host with the same name.
     incarnation: String,
     root_seq: AtomicU64,
@@ -181,8 +212,14 @@ pub fn create_host(options: HostOptions) -> Host {
         order: HashMap::new(),
         subscribers: HashMap::new(),
         next_subscriber: 0,
+        bindings: IndexMap::new(),
+        lingering: IndexMap::new(),
+        routes: IndexMap::new(),
+        foreign: HashMap::new(),
+        root_links: HashMap::new(),
+        retire_allowed: 0,
     };
-    Host(Arc::new_cyclic(|me| HostImpl {
+    let host = Host(Arc::new_cyclic(|me| HostImpl {
         id: HOST_IDS.fetch_add(1, Ordering::Relaxed),
         name: options.name.unwrap_or_else(|| "host".into()),
         dev: options.dev,
@@ -193,12 +230,20 @@ pub fn create_host(options: HostOptions) -> Host {
         task_stop_deadline: options.task_stop_deadline,
         ready_timeout: options.ready_timeout,
         handle: Handle::try_current().ok(),
+        kind: options.kind,
+        linger: options.linger,
+        linger_seq: AtomicU64::new(0),
+        net: OnceLock::new(),
         incarnation: incarnation(),
         root_seq: AtomicU64::new(0),
         failed: Mutex::default(),
         state: Mutex::new(state),
         me: me.clone(),
-    }))
+    }));
+    if let Some((link, options)) = options.upstream {
+        host.connect(link, options);
+    }
+    host
 }
 
 impl HostImpl {

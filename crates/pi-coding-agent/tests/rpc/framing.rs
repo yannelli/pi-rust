@@ -4,7 +4,6 @@ use std::io::Write;
 use std::time::Duration;
 
 use pi_ai::providers::faux::FauxResponse;
-use pi_coding_agent::app::create_app_runtime;
 use pi_coding_agent::rpc::{RpcModeOptions, serve_rpc};
 use pi_coding_agent::session::SessionManager;
 use serde_json::json;
@@ -105,7 +104,7 @@ impl Write for Broken {
 async fn a_closed_output_stops_rpc_mode_with_exit_code_1() {
     let h = harness(Options::default()).await;
     let manager = SessionManager::create(&h.cwd, Some(&h.agent_dir.join("sessions")));
-    let runtime = std::sync::Arc::new(create_app_runtime(h.app_options(), manager).await.unwrap());
+    let runtime = std::sync::Arc::new(crate::offline_guard::app_runtime(h.app_options(), manager).await);
     let (mut client, server) = tokio::io::duplex(1024);
     let task = tokio::spawn(serve_rpc(runtime, server, Box::new(Broken), RpcModeOptions::default()));
     tokio::io::AsyncWriteExt::write_all(&mut client, b"{\"type\":\"get_state\"}\n").await.unwrap();

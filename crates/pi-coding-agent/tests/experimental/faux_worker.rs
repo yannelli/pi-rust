@@ -41,6 +41,10 @@ pub fn install() {
     });
     // Upstream's test environment is offline: background servers then start their Radius relay unauthenticated.
     pi_ai::env::set_child_process_env("PI_OFFLINE", "1");
+    // Child processes get blank provider credentials, which pi treats as unset.
+    for name in pi_ai::env::credential_env_vars().into_iter().filter(|name| std::env::var_os(name).is_some()) {
+        pi_ai::env::set_child_process_env(name, "");
+    }
     // Cold-activated servers run the real Session worker, which reads the agent directory from the environment.
     pi_ai::env::set_child_process_env("PI_CODING_AGENT_DIR", child_agent_dir().display().to_string());
     set_internal_process_program(None, Some(PathBuf::from(env!("CARGO_BIN_EXE_pi"))));

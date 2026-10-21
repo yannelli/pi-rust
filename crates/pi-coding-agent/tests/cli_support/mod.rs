@@ -83,20 +83,27 @@ pub fn setup(root: &Path, url: &str) {
     let models = json!({"providers": {"mock": {"baseUrl": url, "api": "openai-completions", "apiKey": "secret-key",
         "models": [{"id": "mock-model", "contextWindow": 100000, "maxTokens": 4000}]}}});
     std::fs::write(root.join("agent/models.json"), models.to_string()).unwrap();
+    assert_models_file_loads(&root.join("agent/models.json"));
 }
 
-/// Prefixes and suffixes of variables that can hold provider credentials, beyond the API key
-/// variables of the bundled providers.
+/// Panics when the `models.json` at `path` does not load: `pi` would then fall back to a
+/// built-in model.
+pub fn assert_models_file_loads(path: &Path) {
+    if let Err(error) = pi_ai::ModelRegistry::load(path) {
+        panic!("the test models.json does not load, so pi would fall back to a built-in model:\n{error}");
+    }
+}
+
+/// Prefixes and suffixes of inherited variables that look like credentials beyond the ones
+/// the providers read, such as keys for `$VAR` values in a developer's `models.json`.
 const CREDENTIAL_PREFIXES: [&str; 7] = ["AWS_", "AZURE_", "ANTHROPIC_", "CLOUDSDK_", "GCLOUD_", "GOOGLE_", "OPENAI_"];
 const CREDENTIAL_SUFFIXES: [&str; 3] = ["_API_KEY", "_TOKEN", "_CREDENTIALS"];
 
-/// Every variable that can hold a provider credential: the API key variables of the bundled
-/// providers, and inherited variables that look like credentials.
+/// Every variable that can hold a provider credential: the ones the credential resolver and
+/// the providers read ([`pi_ai::env::credential_env_vars`]), and inherited look-alikes.
 pub fn credential_env_vars() -> Vec<String> {
-    let mut names = std::collections::BTreeSet::new();
-    for model in pi_ai::models::builtin_models() {
-        names.extend(pi_ai::env::api_key_env_vars(&model.provider).iter().map(|name| name.to_string()));
-    }
+    let mut names: std::collections::BTreeSet<String> =
+        pi_ai::env::credential_env_vars().into_iter().map(String::from).collect();
     let looks_like_credential = |name: &String| {
         CREDENTIAL_PREFIXES.iter().any(|prefix| name.starts_with(prefix))
             || CREDENTIAL_SUFFIXES.iter().any(|suffix| name.ends_with(suffix))
@@ -105,21 +112,47 @@ pub fn credential_env_vars() -> Vec<String> {
     names.into_iter().collect()
 }
 
-/// A spawned `pi` starts offline and inherits no provider credentials, so no test reaches a
-/// real endpoint. Tests that need the network remove `PI_OFFLINE` afterwards.
-pub fn isolate(command: &mut Command) -> &mut Command {
+/// A spawned `pi` starts offline, inherits no provider credentials, and gets `root` as its
+/// home with `root/agent` as its agent directory, so neither the developer's `auth.json` nor
+/// cloud credential files are found. Tests that need the network remove `PI_OFFLINE` afterwards.
+pub fn isolate<'a>(command: &'a mut Command, root: &Path) -> &'a mut Command {
     for name in credential_env_vars() {
         command.env_remove(name);
     }
-    command.env("PI_OFFLINE", "1")
+    command.env("HOME", root).env("USERPROFILE", root);
+    let homes = [
+        ("APPDATA", "AppData/Roaming"),
+        ("LOCALAPPDATA", "AppData/Local"),
+        ("XDG_CONFIG_HOME", ".config"),
+        ("XDG_DATA_HOME", ".local/share"),
+        ("XDG_STATE_HOME", ".local/state"),
+        ("XDG_CACHE_HOME", ".cache"),
+    ];
+    for (name, path) in homes {
+        command.env(name, root.join(path));
+    }
+    command
+        .env("PI_CODING_AGENT_DIR", root.join("agent"))
+        // No instance metadata credentials for Bedrock or Vertex on cloud machines.
+        .env("AWS_EC2_METADATA_DISABLED", "true")
+        .env("METADATA_SERVER_DETECTION", "none")
+        .env("PI_OFFLINE", "1")
+}
+
+/// What [`isolate`] sets, as pairs for APIs that can only add variables, such as
+/// `RpcClientOptions::env`: removed credential variables become blank, which pi treats as unset.
+pub fn isolated_env(root: &Path) -> Vec<(String, String)> {
+    let mut command = Command::new("pi");
+    isolate(&mut command, root);
+    let text = |value: &std::ffi::OsStr| value.to_string_lossy().into_owned();
+    command.get_envs().map(|(name, value)| (text(name), value.map(text).unwrap_or_default())).collect()
 }
 
 pub fn pi(root: &Path, args: &[&str], stdin: Option<&str>) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_pi"));
-    let mut child = isolate(&mut command)
+    let mut child = isolate(&mut command, root)
         .args(args)
         .current_dir(root.join("work"))
-        .env("PI_CODING_AGENT_DIR", root.join("agent"))
         .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

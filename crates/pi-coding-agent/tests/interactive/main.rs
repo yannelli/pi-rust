@@ -7,6 +7,8 @@ mod gaps;
 mod harness;
 mod keys;
 mod notify;
+#[path = "../offline_guard/mod.rs"]
+mod offline_guard;
 mod prompt_history;
 mod run_limits;
 mod startup;

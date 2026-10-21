@@ -19,6 +19,8 @@ use pi_coding_agent::settings::SettingsManager;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
+use crate::offline_guard;
+
 static NEXT_API: AtomicU64 = AtomicU64::new(1);
 
 pub struct Options {
@@ -111,7 +113,7 @@ pub async fn harness_with(options: Options, configure: impl FnOnce(&mut CreateAg
         Some(delay) => FauxProvider::with_delay(options.responses.clone(), delay),
         None => FauxProvider::new(options.responses.clone()),
     };
-    register_api_provider(api, provider.clone());
+    register_api_provider(api.clone(), provider.clone());
     let mut values = json!({"defaultProvider": "local", "defaultModel": "tiny"});
     for (key, value) in options.settings.as_object().unwrap() {
         values[key] = value.clone();
@@ -129,7 +131,7 @@ pub async fn harness_with(options: Options, configure: impl FnOnce(&mut CreateAg
     } else {
         SessionManager::in_memory(&cwd)
     };
-    let session = open_session_with(&services, manager, configure).await;
+    let session = open_guarded(&services, manager, configure, Some(&api)).await;
     let events = record(&session);
     Harness { _root: root, provider, cwd, agent_dir, settings, services, session, events }
 }
@@ -144,11 +146,29 @@ pub async fn open_session_with(
     manager: SessionManager,
     configure: impl FnOnce(&mut CreateAgentSessionOptions),
 ) -> Arc<AgentSession> {
+    open_guarded(services, manager, configure, None).await
+}
+
+/// Create a session and fail unless its model is offline: the faux model on `faux_api` when
+/// given and the test did not choose a model, a faux or loopback model otherwise.
+async fn open_guarded(
+    services: &AgentSessionServices,
+    manager: SessionManager,
+    configure: impl FnOnce(&mut CreateAgentSessionOptions),
+    faux_api: Option<&str>,
+) -> Arc<AgentSession> {
     // Tests run codemode scripts in parallel; pi-codemode tests the worker limit.
     pi_codemode::set_codemode_worker_limit(usize::MAX);
+    offline_guard::assert_models_loaded(services);
     let mut options = CreateAgentSessionOptions::new(services.clone(), manager);
     configure(&mut options);
-    create_agent_session(options).await.unwrap().session
+    let chosen = options.model.is_some();
+    let session = create_agent_session(options).await.unwrap().session;
+    match faux_api.filter(|_| !chosen) {
+        Some(api) => offline_guard::assert_faux_model(session.model().as_ref(), api),
+        None => offline_guard::assert_offline_model(session.model().as_ref()),
+    }
+    session
 }
 
 impl Harness {

@@ -5,7 +5,6 @@ use std::sync::{Arc, Mutex};
 
 use pi_ai::providers::faux::FauxResponse;
 use pi_coding_agent::agent_session::{AgentSessionRuntime, ForkPosition};
-use pi_coding_agent::app::create_app_runtime;
 use pi_coding_agent::session::SessionManager;
 
 use crate::harness::{Harness, Options, harness, roles, text};
@@ -19,7 +18,7 @@ async fn runtime_with_turns(persist: bool) -> (Harness, AgentSessionRuntime) {
     } else {
         SessionManager::in_memory(&h.cwd)
     };
-    let runtime = create_app_runtime(h.app_options(), manager).await.unwrap();
+    let runtime = crate::offline_guard::app_runtime(h.app_options(), manager).await;
     let session = runtime.session();
     session.prompt("first question", Vec::new()).await.unwrap();
     session.prompt("second question", Vec::new()).await.unwrap();

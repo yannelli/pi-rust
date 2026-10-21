@@ -1,9 +1,10 @@
 //! Port of upstream `link.ts`: the [`Link`] trait, the shared plumbing of every transport ([`BaseLink`]), payload
-//! packing, the in-memory link pair and IPC links. The WebSocket transport comes with the connection layer.
+//! packing, the in-memory link pair, IPC links and WebSocket links.
 
 mod ipc;
 mod memory;
 mod pack;
+mod websocket;
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -17,6 +18,7 @@ pub use pack::{
     BadMessage, Message, PACK_THRESHOLD, Packed, inflate_message, pack_message, pack_object, parse_frame,
     split_message, unpack, unpack_message, unpack_object,
 };
+pub use websocket::{WebSocketLink, WebSocketLinkOptions, WebSocketTransport, connect_web_socket, web_socket_link};
 
 use super::wire::Frame;
 use crate::json::Json;
