@@ -14,11 +14,11 @@ async fn keeps_an_on_yield_continuation_across_a_queued_plain_write_with_the_run
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &setup).await;
     let input = root.submit(SubmissionDraft::input("a"), &ctx()).await.unwrap();
     reached.notified().await;
-    let write = root.submit(SubmissionDraft::write(EntryDraft::new("note")), &ctx()).await.unwrap();
+    let write = root.submit(SubmissionDraft::write(queued_note("w")), &ctx()).await.unwrap();
     release.resolve();
     input.wait(&ctx()).await.unwrap();
     let entries = all_entries(&root).await;
-    let expected = ["pi.user:a", "pi.assistant:first", "note", "pi.user:more", "pi.assistant:second"];
+    let expected = ["pi.user:a", "pi.assistant:first", "note:w", "pi.user:more", "pi.assistant:second"];
     assert_eq!(transcript(&entries), expected);
     let status = input.status(&ctx()).await.unwrap();
     assert_eq!((status.status, status.answer), (SubmissionStatus::Done, Some(entries.last().unwrap().id)));

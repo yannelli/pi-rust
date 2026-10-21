@@ -1,6 +1,5 @@
 //! Session kernel: the mutation line, the loaded document tracker cache, commit, close, and failure.
 
-use std::collections::HashMap;
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
@@ -10,6 +9,7 @@ use pi_chord::{BACKGROUND_CONTEXT, Context, Json, Unsubscribe, without_abort_sig
 use pi_telemetry::SpanAttributes;
 use tokio::sync::watch;
 
+use super::cache::{DocCache, DocumentCacheSizes};
 use super::guarded::{FailureLatch, GuardedStorage};
 use super::line::{Line, SharedResult, await_with_context, lock, spawn_shared};
 use super::tx::{TransactionScope, Tx};
@@ -59,20 +59,22 @@ type CloseListener = Arc<dyn Fn() + Send + Sync>;
 
 pub(crate) struct SessionCore {
     pub storage: Arc<GuardedStorage>,
-    pub documents: Mutex<HashMap<String, Arc<LoadedDocument>>>,
+    pub documents: Mutex<DocCache>,
     commit_listeners: Mutex<Vec<(u64, CommitListener)>>,
     /// The Session's own listeners: they keep memory in step with storage, so a failure fails it.
     internal_listeners: Mutex<Vec<(u64, CommitListener)>>,
     close_listeners: Mutex<Vec<(u64, CloseListener)>>,
     next_listener: AtomicU64,
     line: Line,
-    closing: Mutex<Option<SharedResult<()>>>,
+    pub(super) closing: Mutex<Option<SharedResult<()>>>,
     failure: Mutex<Option<DurableError>>,
     failed: watch::Sender<Option<DurableError>>,
     closed: watch::Sender<Option<SessionEnd>>,
     pub hooks: Arc<dyn SessionHooks>,
     pub now: Arc<dyn Fn() -> f64 + Send + Sync>,
-    weak: Weak<SessionCore>,
+    /// The document retention in milliseconds, read at each use; `None` means the default.
+    pub(super) retention: Arc<dyn Fn() -> Option<f64> + Send + Sync>,
+    pub(super) weak: Weak<SessionCore>,
 }
 
 /// Session kernel handle; cheap to clone. Only committed state is observable.
@@ -136,7 +138,9 @@ impl SessionCore {
     }
 
     pub fn install(&self, document: LoadedDocument) {
-        lock(&self.documents).insert(document.address_id.clone(), Arc::new(document));
+        let address_id = document.address_id.clone();
+        lock(&self.documents).insert(address_id.clone(), Arc::new(document));
+        self.touch_document(&address_id);
     }
 
     /// Remove a retired incarnation if it is still the cached occupant of its address.
@@ -228,6 +232,7 @@ impl Session {
         storage: Arc<dyn Storage>,
         hooks: Arc<dyn SessionHooks>,
         now: Arc<dyn Fn() -> f64 + Send + Sync>,
+        retention: Arc<dyn Fn() -> Option<f64> + Send + Sync>,
     ) -> Self {
         let core = Arc::new_cyclic(|weak: &Weak<SessionCore>| {
             let latch: Weak<dyn FailureLatch> = weak.clone();
@@ -245,6 +250,7 @@ impl Session {
                 closed: watch::channel(None).0,
                 hooks,
                 now,
+                retention,
                 weak: weak.clone(),
             }
         });
@@ -385,6 +391,7 @@ impl Session {
             }
         };
         if created {
+            self.0.cancel_document_sweep();
             let listeners: Vec<_> = std::mem::take(&mut *lock(&self.0.close_listeners));
             for (_, listener) in listeners {
                 listener();
@@ -424,6 +431,12 @@ impl Session {
         Ok(self.0.subscribe_close(Arc::new(listener)))
     }
 
+    /// Internal, for tests: how many documents the cache holds, how many are idle or pinned, and the sweep jobs run.
+    #[doc(hidden)]
+    pub fn document_cache_sizes(&self) -> DocumentCacheSizes {
+        lock(&self.0.documents).sizes()
+    }
+
     /// Drop every loaded tracker on the mutation line; later access cold-loads from Storage.
     pub fn unload_documents(&self) -> impl Future<Output = DurableResult<()>> + Send + use<> {
         let core = self.0.clone();
@@ -441,7 +454,7 @@ async fn close_session(core: Arc<SessionCore>, cleanup: Context) -> DurableResul
         .enqueue(async move {
             lock(&job_core.commit_listeners).clear();
             lock(&job_core.internal_listeners).clear();
-            lock(&job_core.documents).clear();
+            lock(&job_core.documents).clear_all();
             let result = job_core.storage.close(&cleanup).await;
             if let Err(error) = &result {
                 // A Storage that cannot close is a failed one; an earlier failure stays the cause.
@@ -489,12 +502,21 @@ where
         Ok(value) => value,
         Err(error) => {
             tx.settle_failure().await;
+            core.sweep_documents();
             return Err(error);
         }
     };
-    let writes = tx.settle_success().await?;
+    let writes = match tx.settle_success().await {
+        Ok(writes) => writes,
+        Err(error) => {
+            // Settlement aborted every change already.
+            core.sweep_documents();
+            return Err(error);
+        }
+    };
     if writes.is_empty() {
         tx.discard();
+        core.sweep_documents();
         return Ok(value);
     }
     // Once admitted, caller cancellation does not interrupt Storage settlement.
@@ -514,5 +536,6 @@ where
         }
     };
     core.publish(seq, &writes, documents, &context);
+    core.sweep_documents();
     Ok(value)
 }

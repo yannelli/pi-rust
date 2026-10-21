@@ -36,7 +36,7 @@ pub use define::*;
 pub use events::{AgentEvent, AgentEventStream, watch_events};
 pub use host::{ConversationInit, Harness};
 pub use registry::{Registry, RegistryReader, RegistrySnapshot, builtin_tasks, create_registry};
-pub use scheduler::{ConversationHandle, HookApi, TaskRuntime};
+pub use scheduler::{ConversationHandle, HookApi, IndexSizes, TaskRuntime};
 pub use settings::*;
 pub use submissions::Submission;
 pub use task::{NextTaskState, Task, TaskDefinition, define_task, handler};

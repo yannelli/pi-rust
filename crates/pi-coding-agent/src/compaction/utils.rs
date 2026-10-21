@@ -109,6 +109,10 @@ fn tool_call_text(call: &pi_ai::ToolCall) -> String {
 
 /// Render provider messages as labeled text so the summarizer does not continue the
 /// conversation. Run `convert_to_llm` first for custom roles.
+///
+/// Thinking is omitted: providers return summaries of the real reasoning, and replayed thinking
+/// is often not part of the live context, so it could make the request larger than the context
+/// it summarizes. Visible text, tool calls, and tool results record what happened.
 pub fn serialize_conversation(messages: &[Message]) -> String {
     let mut parts = Vec::new();
     for message in messages {
@@ -120,18 +124,14 @@ pub fn serialize_conversation(messages: &[Message]) -> String {
                 }
             }
             Message::Assistant(assistant) => {
-                let mut thinking = Vec::new();
-                let mut calls = Vec::new();
-                for block in &assistant.content {
-                    match block {
-                        ContentBlock::Thinking { thinking: text, .. } => thinking.push(text.as_str()),
-                        ContentBlock::ToolCall(call) => calls.push(tool_call_text(call)),
-                        _ => {}
-                    }
-                }
-                if !thinking.is_empty() {
-                    parts.push(format!("[Assistant thinking]: {}", thinking.join("\n")));
-                }
+                let calls: Vec<String> = assistant
+                    .content
+                    .iter()
+                    .filter_map(|block| match block {
+                        ContentBlock::ToolCall(call) => Some(tool_call_text(call)),
+                        _ => None,
+                    })
+                    .collect();
                 if assistant.content.iter().any(|block| matches!(block, ContentBlock::Text { .. })) {
                     parts.push(format!("[Assistant]: {}", blocks_text(&assistant.content, "\n")));
                 }
@@ -181,6 +181,24 @@ mod tests {
         });
         let text = serialize_conversation(&[user]);
         assert!(!text.contains("truncated") && text.contains(&long));
+    }
+
+    #[test]
+    fn omits_thinking() {
+        let thinking =
+            ContentBlock::Thinking { thinking: "private reasoning".into(), thinking_signature: None, redacted: false };
+        let call = ContentBlock::ToolCall(pi_ai::ToolCall {
+            id: "tc1".into(),
+            name: "read".into(),
+            arguments: json!({ "path": "a.ts" }).as_object().cloned().unwrap(),
+            ..Default::default()
+        });
+        let content = vec![thinking, ContentBlock::text("visible reply"), call];
+        let reply = Message::Assistant(pi_ai::AssistantMessage { content, ..Default::default() });
+        assert_eq!(
+            serialize_conversation(&[reply]),
+            "[Assistant]: visible reply\n\n[Assistant tool calls]: read(path=\"a.ts\")"
+        );
     }
 
     #[test]

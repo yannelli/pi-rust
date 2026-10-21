@@ -57,6 +57,45 @@ fn splice_heads(ops: &[Op]) -> Vec<(u64, u64, usize)> {
 }
 
 #[test]
+fn emits_one_insert_for_an_append_to_a_long_array() {
+    let mut tracker = track(json!({ "values": rows(10_000, |index| json!(index)) }));
+    let mut change = tracker.begin_change();
+    items(change.state().unwrap(), "values").push(json!(-1));
+    let prepared = change.prepare().unwrap();
+    assert_eq!(ops_json(&prepared.ops), json!([["p", ["values"], 10_000, 0, [-1]]]));
+    tracker.adopt(&prepared).unwrap();
+    let values = tracker.value().get("values").unwrap().as_array().unwrap();
+    assert_eq!((values.last(), values.len()), (Some(&json!(-1)), 10_001));
+}
+
+// Upstream asserts the op list its piece tracker records; the diff here chooses its own splices, so these check the
+// replay (`run` compares it with the prepared value) and the final array.
+#[test]
+fn replays_removals_and_inserts_that_keep_the_kept_elements_in_order() {
+    let mut tracker = track(json!({ "values": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] }));
+    run(&mut tracker, |values| {
+        values.remove(0);
+        values.splice(1..3, [json!(20)]);
+        values.remove(5);
+        values.pop();
+        values.push(json!(30));
+    });
+    assert_eq!(tracker.value().get("values").unwrap(), &json!([1, 20, 4, 5, 6, 8, 30]));
+}
+
+#[test]
+fn emits_a_permutation_when_kept_elements_are_reversed_and_replays_a_reordering() {
+    let mut tracker = track(json!({ "values": [0, 1, 2, 3, 4] }));
+    let ops = run(&mut tracker, |values| values.reverse());
+    assert!(ops.iter().any(|op| op.verb() == "m"), "{ops:?}");
+    assert_eq!(tracker.value().get("values").unwrap(), &json!([4, 3, 2, 1, 0]));
+    run(&mut tracker, |values| {
+        values.sort_by_key(|value| (value.as_f64().unwrap() as i64 % 2, value.as_f64().unwrap() as i64))
+    });
+    assert_eq!(tracker.value().get("values").unwrap(), &json!([0, 2, 4, 1, 3]));
+}
+
+#[test]
 fn keeps_adoption_independent_from_changed_permutation_metadata() {
     let mut tracker = track(json!({"values": [3, 1, 2]}));
     let mut change = tracker.begin_change();

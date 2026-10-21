@@ -107,6 +107,18 @@ pub(crate) struct KeptContext {
     pub idle_since: Option<f64>,
 }
 
+/// Sizes of the scheduler's ownership indexes, for tests that bound its memory.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct IndexSizes {
+    pub live: usize,
+    pub settled: usize,
+    pub edges: usize,
+    pub below: usize,
+    pub roots: usize,
+    pub unloaded: usize,
+    pub drop_queue: usize,
+}
+
 #[derive(Default)]
 pub(crate) struct SchedState {
     pub live: BTreeMap<TaskId, TaskRecord>,
@@ -121,14 +133,14 @@ pub(crate) struct SchedState {
     pub invocations: HashMap<TaskId, Arc<Invocation>>,
     /// Definition whose migration failed per task; retried only once the registry resolves another definition.
     pub failed_migrations: HashMap<TaskId, (Task, DurableError)>,
-    /// Owner task of each loaded conversation, `None` when ownerless.
+    /// Owner task of each known conversation, `None` when ownerless.
     pub edges: HashMap<ConversationId, Option<TaskId>>,
-    /// Tasks that own a loaded conversation; their nodes stay in `settled` once terminal, and with them, through
-    /// `known_children`, every task above them. Never cleared.
-    pub conversation_owners: HashSet<TaskId>,
-    /// Ownership fields of terminal tasks that walks pass through: conversation owners, chain loads, owners of known
-    /// tasks, and those with nodes listed below them. `forget` drops the rest.
+    /// Ownership fields of the known terminal tasks, which walks pass through.
     pub settled: HashMap<TaskId, TaskNode>,
+    /// Ended tasks and conversations found unneeded, dropped by `sweep` at the end of the commit's publication unless
+    /// needed again by then: a chain load installs nodes before the work below them is listed.
+    pub drop_queue: BTreeSet<Node>,
+    pub sweep_scheduled: bool,
     /// The tree downward around live work: each node's child nodes that are live tasks or have nodes listed below
     /// them. A conversation's parent is its owner task; ownerless ones with work are in `roots`.
     pub below: BTreeMap<Node, BTreeSet<Node>>,
@@ -145,11 +157,6 @@ pub(crate) struct SchedState {
     pub waiters: BTreeMap<TaskId, BTreeSet<TaskId>>,
     /// Sleeping live tasks, due or not: the candidates of `wake_due`.
     pub sleeping: BTreeSet<TaskId>,
-    /// Terminal tasks a chain load read; kept in `settled`, so loaded chains stay loaded.
-    pub pinned: HashSet<TaskId>,
-    /// Per task, how many known tasks (live, or in `settled`) it owns directly. An ended task stays known while any
-    /// does, so the chain above every known task stays loaded.
-    pub known_children: HashMap<TaskId, usize>,
     pub fail_fast_checks: BTreeSet<TaskId>,
     /// Live `abandon_on_restart` tasks found at open; the first reservation pass abort-marks them.
     pub abandoned: BTreeSet<TaskId>,
@@ -228,6 +235,11 @@ impl Scheduler {
             blocked_listeners: Mutex::default(),
             weak: weak.clone(),
         })
+    }
+
+    /// Sizes of the ownership indexes, for tests that bound the scheduler's memory.
+    pub fn index_sizes(&self) -> IndexSizes {
+        lock(&self.state).index_sizes()
     }
 
     pub fn arc(&self) -> DurableResult<Arc<Self>> {

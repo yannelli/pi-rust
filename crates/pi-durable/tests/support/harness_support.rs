@@ -3,12 +3,12 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use pi_ai::{ContentBlock, Message, UserContent};
+use pi_ai::{ContentBlock, Message, UserContent, UserMessage};
 use pi_chord::Context;
 use pi_durable::harness::*;
 use pi_durable::models::Models;
 use pi_durable::testing::faux::{FauxProviderHandle, FauxResponseStep, RegisterFauxProviderOptions, faux_provider};
-use pi_durable::{DurableError, EntryRecord, Storage, TaskQuery, TaskRecord};
+use pi_durable::{DurableError, EntryDraft, EntryRecord, Storage, TaskQuery, TaskRecord};
 use tokio::sync::Notify;
 
 use super::context;
@@ -84,6 +84,12 @@ pub async fn all_entries(conversation: &Conversation) -> Vec<EntryRecord> {
 
 pub fn kinds(entries: &[EntryRecord]) -> Vec<String> {
     entries.iter().map(|entry| entry.kind.clone()).collect()
+}
+
+/// A write that affects model context, so it queues while busy; a data-only write is appended at once.
+pub fn queued_note(text: &str) -> EntryDraft {
+    let message = Message::User(UserMessage { content: UserContent::Text(text.into()), timestamp: 0 });
+    EntryDraft { model: Some(vec![message]), ..EntryDraft::new("note") }
 }
 
 /// Text of the first text content of a message.

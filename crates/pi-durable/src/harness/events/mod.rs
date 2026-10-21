@@ -105,10 +105,11 @@ fn snapshot_of(view: &Json) -> AgentEvent {
         ("tools", Json::array(list(live.get("tools")))),
         ("nestedTools", Json::array(list(live.get("nestedTools")))),
         ("compactions", Json::array(list(live.get("compactions")))),
-        ("inbox", queued(inbox)),
-        ("agent", agent_or_initial(agent)),
-        ("usage", usage_or_initial(usage)),
     ]);
+    if let Some(failure) = live.get("compactionFailure") {
+        fields.push(("compactionFailure", failure.clone()));
+    }
+    fields.extend([("inbox", queued(inbox)), ("agent", agent_or_initial(agent)), ("usage", usage_or_initial(usage))]);
     object(fields)
 }
 
@@ -391,12 +392,14 @@ fn translate(
     let compactions_before = list(was.live.get("compactions"));
     let compactions = list(now.live.get("compactions"));
     let has = |list: &[Json], status: &Json| list.iter().any(|other| other["taskId"] == status["taskId"]);
+    let failure = now.live.get("compactionFailure");
     for status in &compactions_before {
         if !has(&compactions, status) {
-            events.push(event(
-                "compaction_end",
-                [("taskId", status["taskId"].clone()), ("reason", status["reason"].clone())],
-            ));
+            let mut fields = vec![("taskId", status["taskId"].clone()), ("reason", status["reason"].clone())];
+            if let Some(failure) = failure.filter(|failure| failure["taskId"] == status["taskId"]) {
+                fields.push(("error", failure["error"].clone()));
+            }
+            events.push(event("compaction_end", fields));
         }
     }
     // A generation's turn ends when its outcome is committed: at a `completing` hold or at terminal, whichever comes

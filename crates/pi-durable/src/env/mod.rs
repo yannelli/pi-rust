@@ -91,6 +91,19 @@ pub trait FileSystem: Send + Sync {
     async fn file_info(&self, path: &str, context: &Context) -> FileResult<FileInfo>;
     async fn list_dir(&self, path: &str, context: &Context) -> FileResult<Vec<FileInfo>>;
     async fn open_dir_reader(&self, path: &str, context: &Context) -> FileResult<Box<dyn DirReader>>;
+    /// Optional: the files, directories and symbolic links below a directory, at any depth, for indexes such as file
+    /// completion. Symbolic links are not followed; other kinds of files are not listed; entries that cannot be read
+    /// are skipped. See `ListFilesOptions` for hidden and ignored files and for the bounds. Fails with `not_supported`
+    /// when the environment cannot list right now (an older remote daemon), so callers fall back to their own walk.
+    /// The default is `not_supported`.
+    async fn list_files(
+        &self,
+        path: &str,
+        _options: Option<&ListFilesOptions>,
+        _context: &Context,
+    ) -> FileResult<FileListing> {
+        Err(FileError::new(FileErrorCode::NotSupported, "This environment does not list files", Some(path.into())))
+    }
     /// Report changes to files and directories. Once the watcher exists, coverage is established: a host that watches
     /// before it loads cannot miss a change made during the load.
     async fn watch(

@@ -65,13 +65,14 @@ async fn commits_inbox_changes_as_positional_chord_operations_and_a_base_when_em
     let ops = record_inbox_ops(&harness);
     let input = root.submit(SubmissionDraft::input("a"), &ctx()).await.unwrap();
     reached.notified().await;
-    let note = || SubmissionDraft::write(EntryDraft::new("note"));
+    let note = || SubmissionDraft::write(queued_note("w"));
     let w1 = root.submit(note(), &ctx()).await.unwrap();
     let f1 = root.submit(SubmissionDraft::input("f1"), &ctx()).await.unwrap();
     let w2 = root.submit(note(), &ctx()).await.unwrap();
     let f2 = root.submit(SubmissionDraft::input("f2"), &ctx()).await.unwrap();
     let w3 = root.submit(note(), &ctx()).await.unwrap();
-    let write = |id: SubmissionId| json!({ "id": id, "mode": "write", "entry": { "kind": "note" } });
+    let message = json!([{ "role": "user", "content": "w", "timestamp": 0 }]);
+    let write = |id: SubmissionId| json!({ "id": id, "mode": "write", "entry": { "kind": "note", "model": message } });
     let follow = |id: SubmissionId, text: &str| json!({ "id": id, "mode": "followUp", "content": text });
     let pushes = [write(w1.id), follow(f1.id, "f1"), write(w2.id), follow(f2.id, "f2"), write(w3.id)];
     let expected: Vec<Vec<serde_json::Value>> =

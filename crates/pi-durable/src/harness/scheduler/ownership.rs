@@ -9,7 +9,7 @@ use crate::errors::DurableResult;
 use crate::harness::util::{lock, scan_all};
 use crate::ids::{ConversationId, TaskId};
 use crate::session::Tx;
-use crate::types::{SubmissionQuery, SubmissionStatus, TaskRecord};
+use crate::types::{SubmissionQuery, SubmissionStatus, SubmissionType, TaskRecord};
 
 /// The immutable ownership fields of a task.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -85,11 +85,9 @@ pub(crate) enum Scope {
 impl SchedState {
     pub fn set_edge(&mut self, conversation_id: ConversationId, owner: Option<TaskId>) {
         self.edges.insert(conversation_id, owner);
-        if let Some(owner) = owner {
-            self.conversation_owners.insert(owner);
-        }
-        // The conversation now hangs from its owner, or is a root.
+        // The conversation now hangs from its owner, or is a root; with nothing below it, it waits for the sweep.
         self.relist(Node::Conversation(conversation_id));
+        self.drop_if_unneeded(Node::Conversation(conversation_id));
     }
 
     /// Owner task of a conversation: `Some(None)` when ownerless, `None` while not loaded.
@@ -189,8 +187,32 @@ impl SchedState {
 }
 
 impl Scheduler {
+    /// Sweep in a job of its own on the Session line, after the operation underway: a rejected commit, one with
+    /// nothing to write, and a read publish nothing, so the sweep at the end of `observe` would not run for what they
+    /// loaded.
+    pub(crate) fn schedule_sweep(&self) {
+        {
+            let mut state = lock(&self.state);
+            if state.sweep_scheduled || state.closing || state.drop_queue.is_empty() {
+                return;
+            }
+            state.sweep_scheduled = true;
+        }
+        let Ok(job) = self.arc() else { return };
+        let sweep = self.core.session.read_on_line(async move {
+            let mut state = lock(&job.state);
+            state.sweep_scheduled = false;
+            state.sweep();
+            Ok(())
+        });
+        // Fails only once the Session is closing or failed, when nothing is kept anyway.
+        tokio::spawn(async move {
+            let _ = sweep.await;
+        });
+    }
+
     /// Load the owner chains of the tasks in `unloaded` and, with `queued`, of every conversation with queued
-    /// submissions; returns the latter. Reads committed Storage directly, so it may run inside a commit callback.
+    /// inputs; returns the latter. Reads committed Storage directly, so it may run inside a commit callback.
     pub(crate) async fn load_scopes(&self, queued: bool) -> DurableResult<Vec<ConversationId>> {
         let pending: Vec<TaskId> = lock(&self.state).unloaded.iter().copied().collect();
         for id in pending {
@@ -211,7 +233,7 @@ impl Scheduler {
         })
         .await?;
         let mut conversations: Vec<ConversationId> = Vec::new();
-        for submission in submissions {
+        for submission in submissions.into_iter().filter(|submission| submission.kind == SubmissionType::Input) {
             if !conversations.contains(&submission.conversation_id) {
                 conversations.push(submission.conversation_id);
             }
@@ -226,6 +248,12 @@ impl Scheduler {
     /// the walk, as its chain is loaded; the `unloaded` tasks passed have a loaded chain afterwards. Loading a node can
     /// reveal a cancelled owner, so it makes the next reconcile derive cascade marks.
     pub(crate) async fn load_chain(&self, start: Up, overlay: Option<&Overlay>) -> DurableResult<()> {
+        let loaded = self.load_chain_nodes(start, overlay).await;
+        self.schedule_sweep();
+        loaded
+    }
+
+    async fn load_chain_nodes(&self, start: Up, overlay: Option<&Overlay>) -> DurableResult<()> {
         let storage = self.core.session.storage();
         let mut passed = Vec::new();
         let mut at = Some(start);

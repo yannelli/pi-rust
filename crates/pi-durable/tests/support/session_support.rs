@@ -55,7 +55,7 @@ impl Gate {
 
 type CommitFilter = Arc<dyn Fn(&[StorageWrite]) -> bool + Send + Sync>;
 
-/// One Storage call a test hook sees: `task`, `conversation`, `scan_entries`, `mint_id`, `submission`, or `close`.
+/// One Storage call a test hook sees: `task`, `conversation`, `scan_entries`, `scan_queued_submissions`, `mint_id`, `submission`, or `close`.
 pub struct StorageCall {
     pub method: &'static str,
     /// The id a `conversation` call reads.
@@ -306,6 +306,9 @@ impl Storage for ControlledStorage {
         cursor: Option<&Cursor>,
         context: &Context,
     ) -> DurableResult<Page<SubmissionRecord>> {
+        if query.status == Some(SubmissionStatus::Queued) {
+            self.hook("scan_queued_submissions", limit, cursor.is_none(), context).await?;
+        }
         self.open()?;
         self.inner.scan_submissions(query, limit, cursor, context).await
     }
@@ -384,7 +387,9 @@ impl TestSession {
 
 pub fn open_test_session() -> TestSession {
     let storage = Arc::new(ControlledStorage::default());
-    let session = create_session(storage.clone(), SessionOptions::default());
+    // These tests pin the cache's identities and loads, so documents stay as long as the default keeps them.
+    let options = SessionOptions { document_retention_ms: Some(600_000.0), ..SessionOptions::default() };
+    let session = create_session(storage.clone(), options);
     let publications = Arc::new(Mutex::new(Vec::new()));
     let sink = publications.clone();
     session

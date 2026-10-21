@@ -161,6 +161,20 @@ fn cuts_at_an_assistant_in_the_middle_of_one_long_run_and_never_at_a_tool_result
 }
 
 #[test]
+fn never_cuts_at_a_display_only_entry_where_the_budget_is_reached() {
+    let mut ids = Entries(0);
+    let entries = [
+        ids.entry("pi.user", vec![user(&text("u1", 100))], None),
+        ids.entry("pi.assistant", vec![answer_text(&text("a1", 100))], None),
+        ids.entry("chat.message", Vec::new(), None),
+        ids.entry("pi.assistant", vec![answer_text(&text("a2", 100))], None),
+    ];
+    // The budget is reached at a1; the display-only entry after it is skipped for the assistant a2.
+    assert_eq!(select_cut(&view(&entries, None), 150), Some(1));
+    assert_eq!(select_cut(&view(&entries, None), 50), Some(3));
+}
+
+#[test]
 fn keeps_a_huge_last_tool_result_together_with_its_assistant() {
     let mut ids = Entries(0);
     let entries = [
@@ -259,7 +273,7 @@ fn summarizes_an_earlier_summary_marker_first() {
 }
 
 #[test]
-fn writes_a_transcript_truncates_tool_results_and_omits_system_messages() {
+fn writes_a_transcript_truncates_tool_results_and_omits_system_messages_and_thinking() {
     let mut sections = pi_ai::JsonObject::new();
     sections.insert("s".into(), json!("hidden"));
     let system = Message::System(SystemMessage {
@@ -281,7 +295,8 @@ fn writes_a_transcript_truncates_tool_results_and_omits_system_messages() {
     let serialized = serialize_conversation(&messages);
     assert!(!serialized.contains("hidden"));
     assert!(serialized.contains("[User]: hello"));
-    assert!(serialized.contains("[Assistant thinking]: hmm"));
+    assert!(!serialized.contains("hmm"));
+    assert!(!serialized.contains("[Assistant thinking]"));
     assert!(serialized.contains("[Assistant]: sure"));
     assert!(serialized.contains("[Assistant tool calls]: read(path=\"a.ts\")"), "{serialized}");
     assert!(

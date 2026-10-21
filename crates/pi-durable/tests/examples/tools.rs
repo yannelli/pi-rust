@@ -228,8 +228,7 @@ async fn ex20_inbox_steers_follows_up_writes_withdraws_and_rejects_while_busy() 
     let first = submit(SubmissionDraft::input("First question")).await.unwrap();
     let follow_up = submit(SubmissionDraft::input("A follow-up")).await.unwrap();
     let steer = submit(SubmissionDraft::input("A steer").with_when_busy(WhenBusy::Steer)).await.unwrap();
-    let note = EntryDraft { data: Some(Json::from(json!("noted while busy"))), ..EntryDraft::new("app.note") };
-    let note = submit(SubmissionDraft::write(note)).await.unwrap();
+    let note = submit(SubmissionDraft::write(queued_note("noted while busy"))).await.unwrap();
     let withdrawn = submit(SubmissionDraft::input("Never mind")).await.unwrap();
     let rejected = submit(SubmissionDraft::input("Now or never").with_when_busy(WhenBusy::Reject)).await;
     assert!(rejected.err().unwrap().to_string().contains("busy"));
@@ -248,6 +247,6 @@ async fn ex20_inbox_steers_follows_up_writes_withdraws_and_rejects_while_busy() 
     assert_eq!(statuses, [done.clone(), done.clone(), done.clone(), done, unanswered]);
     let kinds = kinds(&all_entries(&root).await);
     // The note lands at the turn boundary, and the steer goes ahead of the follow-up in one batch.
-    assert_eq!(kinds, ["pi.user", "pi.assistant", "app.note", "pi.user", "pi.user", "pi.assistant"]);
+    assert_eq!(kinds, ["pi.user", "pi.assistant", "note", "pi.user", "pi.user", "pi.assistant"]);
     harness.close(&ctx()).await.unwrap();
 }

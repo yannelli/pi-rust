@@ -289,8 +289,12 @@ pub(super) async fn classify(
                 tx.doc(&LIVE_DOC, conversation_id).await?.edit(|live| live.generation = None)?;
                 let input = CompactionInput { reason: CompactionReason::Overflow, instructions: None };
                 let child = create_compaction(&tx, conversation_id, input, Some(owner)).await?;
-                let checkpoint =
-                    GenerationCheckpoint::Prepare { attempt, compacted: Some(child), overflow: Some(text) };
+                let checkpoint = GenerationCheckpoint::Prepare {
+                    attempt,
+                    compacted: Some(child),
+                    overflow: Some(text),
+                    threshold: false,
+                };
                 waiting(&checkpoint, vec![child])
             };
             return runtime.commit(change, context).await;

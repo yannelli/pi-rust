@@ -16,7 +16,8 @@ use serde::{Deserialize, Serialize};
 pub use select::{estimate_context, select_cut, serialize_conversation, summarized_messages};
 
 use super::live::{
-    CompactionStatus, LIVE_DOC, LiveState, add_compaction_status, compaction_status, remove_compaction_status,
+    CompactionStatus, LIVE_DOC, LiveState, add_compaction_status, compaction_status, fail_compaction_status,
+    remove_compaction_status,
 };
 use super::scheduler::{HookApi, TaskRuntime};
 use super::settings::ConversationStreamOptions;
@@ -246,8 +247,9 @@ async fn summarize_phase(task: TaskRecord, runtime: TaskRuntime, context: Contex
             let next = encode(&CompactionCheckpoint::Retry { until, request })?;
             return Ok(Some(TaskState::Sleeping { checkpoint: next, until }));
         }
-        live.edit(|live| remove_compaction_status(live, task_id))?;
-        Ok(failed(&summary_failure(&message), "model_error"))
+        let text = summary_failure(&message);
+        live.edit(|live| fail_compaction_status(live, task_id, text.as_str()))?;
+        Ok(failed(&text, "model_error"))
     };
     runtime.commit(change, &context).await
 }
@@ -356,7 +358,10 @@ async fn place_summary(
 ) -> DurableResult<Option<TaskState>> {
     let conversation_id = runtime.conversation_id();
     let task_id = runtime.task_id();
-    tx.doc(&LIVE_DOC, conversation_id).await?.edit(|live: &mut LiveState| remove_compaction_status(live, task_id))?;
+    tx.doc(&LIVE_DOC, conversation_id).await?.edit(|live: &mut LiveState| {
+        remove_compaction_status(live, task_id);
+        live.compaction_failure = None;
+    })?;
     let text = format!("{SUMMARY_PREFIX}{summary}{SUMMARY_SUFFIX}");
     let input: CompactionInput = current.input.deserialize_into()?;
     let mut data = JsonMap::new();
@@ -404,7 +409,9 @@ async fn fail_no_model(runtime: &TaskRuntime, model: Option<&ModelRef>, context:
     };
     let (conversation_id, task_id) = (runtime.conversation_id(), runtime.task_id());
     let change = move |tx: Tx, _| async move {
-        tx.doc(&LIVE_DOC, conversation_id).await?.edit(|live| remove_compaction_status(live, task_id))?;
+        tx.doc(&LIVE_DOC, conversation_id)
+            .await?
+            .edit(|live| fail_compaction_status(live, task_id, message.as_str()))?;
         Ok(failed(&message, "no_model"))
     };
     runtime.commit(change, context).await

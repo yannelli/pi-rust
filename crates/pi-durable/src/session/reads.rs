@@ -36,10 +36,13 @@ impl SessionCore {
             let mut documents = lock(&self.documents);
             // A tracker serves only tokens of the version its value was materialized for; others reload.
             match documents.get(address_id) {
-                Some(cached) if cached.value_version == definition.version => return Ok(Some(cached.clone())),
-                Some(_) => {
-                    documents.remove(address_id);
+                Some(cached) if cached.value_version == definition.version => {
+                    let cached = cached.clone();
+                    drop(documents);
+                    self.touch_document(address_id);
+                    return Ok(Some(cached));
                 }
+                Some(_) => documents.remove(address_id),
                 None => {}
             }
         }
@@ -61,6 +64,7 @@ impl SessionCore {
             meta: Mutex::new(meta),
         });
         lock(&self.documents).insert(address_id.to_owned(), loaded.clone());
+        self.touch_document(address_id);
         Ok(Some(loaded))
     }
 
@@ -114,6 +118,9 @@ impl Session {
             .get(&resolved.id)
             .filter(|cached| cached.value_version == definition.version)
             .cloned();
+        if cached.is_some() {
+            self.0.touch_document(&resolved.id);
+        }
         let load = match (&usable, &cached) {
             (Ok(()), None) => Some(self.0.load_on_line(definition.clone(), resolved, context)),
             _ => None,
