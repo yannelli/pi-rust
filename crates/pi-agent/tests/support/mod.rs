@@ -49,6 +49,7 @@ pub struct Request {
     pub session_id: Option<String>,
     pub transport: Option<pi_ai::Transport>,
     pub max_tokens: Option<u64>,
+    pub identity: Option<pi_ai::ClientIdentity>,
 }
 
 pub type Responder = Arc<dyn Fn(usize, &Context) -> AssistantMessage + Send + Sync>;
@@ -70,6 +71,7 @@ pub fn scripted(
                 session_id: options.session_id.clone(),
                 transport: options.transport,
                 max_tokens: options.max_tokens,
+                identity: options.identity.clone(),
             });
             seen.len() - 1
         };

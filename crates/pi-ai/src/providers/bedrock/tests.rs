@@ -217,6 +217,33 @@ async fn bearer_token_option_wins_over_the_api_key() {
 }
 
 #[tokio::test]
+async fn sends_the_client_identity_as_the_user_agent() {
+    let frames = vec![
+        event("messageStart", json!({"role": "assistant"})),
+        event("messageStop", json!({"stopReason": "end_turn"})),
+    ];
+    let server = RouteServer::start(move |_| stream_reply(frames.clone())).await;
+    let model = bedrock_model("anthropic.claude-3-5-sonnet-20240620-v1:0", &server.base_url);
+    let identity = |user_agent| ClientIdentity { user_agent, version: Some("2.0.0".into()), ..Default::default() };
+    for (mode, expected) in [
+        (None, "pi/2.0.0"),
+        (Some(UserAgentMode::Short), "pi"),
+        (Some(UserAgentMode::Custom("acme/1.0".into())), "acme/1.0"),
+    ] {
+        let options = StreamOptions { identity: Some(identity(mode)), ..bearer_options() };
+        let (_, message) = collect(BedrockConverseStream.stream(&model, &context(), options)).await;
+        assert_eq!(message.stop_reason, StopReason::Stop, "{:?}", message.error_message);
+        assert_eq!(server.requests().last().unwrap().headers["user-agent"], expected);
+    }
+    let custom = StreamOptions {
+        headers: BTreeMap::from([("User-Agent".to_string(), "configured".to_string())]),
+        ..bearer_options()
+    };
+    collect(BedrockConverseStream.stream(&model, &context(), custom)).await;
+    assert_eq!(server.requests().last().unwrap().headers["user-agent"], "configured");
+}
+
+#[tokio::test]
 async fn reports_http_errors_with_prefixes_and_diagnostics() {
     let server = RouteServer::start(|_| {
         Reply::json(400, &json!({"message": "data retention mode 'default' is not available"}))

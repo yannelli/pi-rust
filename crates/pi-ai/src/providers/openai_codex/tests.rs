@@ -104,7 +104,7 @@ async fn streams_sse_with_account_headers_zstd_bodies_and_raw_events() {
     assert_eq!(headers["chatgpt-account-id"], "acc_test");
     assert_eq!(headers["openai-beta"], "responses=experimental");
     assert_eq!((headers["originator"].as_str(), headers["accept"].as_str()), ("pi", "text/event-stream"));
-    assert!(headers["user-agent"].starts_with("pi ("), "{}", headers["user-agent"]);
+    assert_eq!(headers["user-agent"], crate::identity::format_user_agent(None));
     assert_eq!(headers["content-encoding"], "zstd");
     assert!(!headers.contains_key("x-api-key") && !headers.contains_key("session-id"));
     let body = decoded_body(request);

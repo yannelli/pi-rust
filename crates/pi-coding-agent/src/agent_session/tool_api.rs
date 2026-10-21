@@ -2,6 +2,8 @@
 //! `setActiveToolsByName`, `_preparePromptAndToolLoadout`, `_restoreToolsFromTranscript`) and the
 //! registration entry points extensions and the built-in extensions use.
 
+use std::collections::HashSet;
+
 use pi_agent::{SharedTool, ToolRegistry};
 use pi_ai::transcript::{current_system_message, current_tools, tool_state_changes};
 use pi_ai::{Message, SystemMessage, UserContent};
@@ -125,18 +127,51 @@ impl AgentSession {
         if uses { default_tool_names(self.settings(), &modifiers) } else { Vec::new() }
     }
 
-    /// Restore the loadout the transcript declares, if it declares one, with `+name`/`-name`
-    /// `modifiers` applied. Declared tools that are not registered yet, such as tools of MCP servers
-    /// still connecting, stay pending.
+    /// Restore the loadout the branch records, if it records one, with `+name`/`-name` `modifiers`
+    /// applied. Extension tools the branch never added or removed were registered after it recorded
+    /// its loadout, so they are activated like newly registered tools.
     pub(crate) fn restore_tools_from_transcript(&self, modifiers: &[String]) {
-        let messages = self.session_manager().build_session_context().messages;
-        let Some(current) = current_system_message(&messages) else {
+        // Every system message on the branch, including those before a compaction.
+        let systems: Vec<Message> = {
+            let session = self.session_manager();
+            let branch = session.get_branch(None);
+            branch
+                .into_iter()
+                .filter_map(|entry| entry.message())
+                .filter(|message| message.role() == "system")
+                .cloned()
+                .collect()
+        };
+        if systems.is_empty() {
             lock(&self.tools).pending.clear();
             return;
-        };
-        let declared: Vec<String> = current.tools_added.unwrap_or_default().into_iter().map(|tool| tool.name).collect();
+        }
+        let mentioned: HashSet<String> = systems
+            .iter()
+            .filter_map(|message| match message {
+                Message::System(system) => Some(system),
+                _ => None,
+            })
+            .flat_map(|system| {
+                let added = system.tools_added.iter().flatten().map(|tool| tool.name.clone());
+                added.chain(system.tools_removed.iter().flatten().map(|tool| tool.name.clone()))
+            })
+            .collect();
+        let mut declared: Vec<String> = current_tools(&systems).into_iter().map(|tool| tool.name).collect();
+        {
+            // Built-in tools follow `defaultTools` instead.
+            let tools = lock(&self.tools);
+            let new_tools = tools.registry.names().into_iter().filter(|name| {
+                !mentioned.contains(name)
+                    && !tools.is_builtin(name)
+                    && tools.registry.is_activated_on_registration(name)
+            });
+            declared.extend(new_tools);
+        }
         let names = apply_tool_modifiers(&declared, modifiers);
         {
+            // Recorded tools that are not registered yet, such as MCP tools of servers still
+            // connecting, become active when they register. Excluded tools never register.
             let mut tools = lock(&self.tools);
             tools.pending = names.iter().filter(|name| tools.is_allowed(name)).cloned().collect();
             tools.set_active(&names);

@@ -28,7 +28,7 @@ use self::federation::{FederationConfig, access_token, federation_config, invali
 use self::request::{
     Built, CLAUDE_CODE_VERSION, Compat, Params, Thinking, build_params, effort_messages, resolve_thinking,
 };
-use crate::http::pi_user_agent;
+use crate::identity::identity_headers;
 use crate::providers::common::{
     HttpRequest, RequestFallback, RequestRewrite, endpoint, has_header, header_map_with,
     spawn_provider_stream_with_fallback,
@@ -90,7 +90,9 @@ impl ApiProvider for AnthropicMessages {
             Ok(built) => built,
             Err(error) => return error_stream(model, StopReason::Error, error),
         };
-        let mut defaults = vec![("user-agent", pi_user_agent()), ("anthropic-version", "2023-06-01".to_string())];
+        // OAuth sends the Claude Code identity headers instead of the client identity.
+        let mut defaults = if oauth { Vec::new() } else { identity_headers(model, options.identity.as_ref()) };
+        defaults.push(("anthropic-version", "2023-06-01".to_string()));
         if copilot {
             defaults.extend(copilot_anthropic_auth_headers(api_key.as_deref()));
         } else {

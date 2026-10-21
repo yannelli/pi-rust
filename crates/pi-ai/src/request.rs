@@ -33,6 +33,8 @@ pub struct RequestOptions {
     pub headers: BTreeMap<String, String>,
     /// Header names removed from the merged request headers.
     pub suppressed_headers: Vec<String>,
+    /// How the request identifies the calling app; unset fields use pi-ai's defaults.
+    pub identity: Option<crate::identity::ClientIdentity>,
     /// Time until the response arrives, per request.
     pub timeout_ms: Option<u64>,
     pub max_retries: Option<u32>,

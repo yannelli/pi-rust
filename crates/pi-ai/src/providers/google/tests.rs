@@ -85,7 +85,7 @@ async fn streams_thinking_and_text_with_signatures_usage_and_cost() {
     let request = server.request(0);
     assert_eq!(request.path, "/models/gemini-2.5-flash:streamGenerateContent?alt=sse");
     assert_eq!(request.headers["x-goog-api-key"], "gem-key");
-    assert!(request.headers["user-agent"].starts_with("pi ("));
+    assert_eq!(request.headers["user-agent"], crate::identity::format_user_agent(None));
     let body = request.json();
     assert_eq!(body["systemInstruction"], json!({"role": "user", "parts": [{"text": "Be brief"}]}));
     assert_eq!(body["contents"], json!([{"role": "user", "parts": [{"text": "hi"}]}]));

@@ -43,7 +43,7 @@ async fn streams_text_with_usage_and_cost() {
     let request = server.request().await;
     assert_eq!(request.path, "/chat/completions");
     assert_eq!(request.headers["authorization"], "Bearer test-key");
-    assert_eq!(request.headers["user-agent"], crate::http::pi_user_agent());
+    assert_eq!(request.headers["user-agent"], crate::identity::format_user_agent(None));
 }
 
 #[tokio::test]

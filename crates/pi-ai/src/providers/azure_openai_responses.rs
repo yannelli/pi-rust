@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use serde_json::{Map, Value, json};
 
 use self::config::{resolve_deployment_name, responses_url};
-use crate::http::pi_user_agent;
+use crate::identity::identity_headers;
 use crate::provider_options::ReasoningSummary;
 use crate::providers::common::{HttpRequest, compat_bool, header_map};
 use crate::providers::constrained_sampling::{
@@ -53,7 +53,8 @@ impl ApiProvider for AzureOpenAIResponses {
             Ok(built) => built,
             Err(error) => return error_stream(model, StopReason::Error, error),
         };
-        let defaults = vec![("user-agent", pi_user_agent()), ("api-key", api_key)];
+        let mut defaults = identity_headers(model, options.identity.as_ref());
+        defaults.push(("api-key", api_key));
         let request = HttpRequest { url, headers: header_map(defaults, model, &options), body };
         let config = SendConfig {
             max_retries: options.max_retries.unwrap_or(0),
