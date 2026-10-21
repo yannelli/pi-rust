@@ -50,6 +50,9 @@ impl SessionCore {
         let record_id = loaded.record.id;
         let observed = Mutex::new(loaded.value_version);
         let target = observer.clone();
+        // Attached, the incarnation stays cached; once its last observer detaches, or it retires, it is idle again.
+        let pin = self.pin_document(&loaded.address_id, record_id);
+        let retired = pin.clone();
         let commits = self.observe_commits(Arc::new(move |publication, context| {
             for change in &publication.changes {
                 let CommitChange::Document(DocumentCommitChange::Document { record, version, value, ops, .. }) = change
@@ -58,6 +61,10 @@ impl SessionCore {
                 };
                 if record.id != record_id {
                     continue;
+                }
+                // A retired incarnation never changes again: its observers keep their last value but pin nothing.
+                if value.is_none() {
+                    retired.release();
                 }
                 let ops = observed_operations(&observed, *version, value.as_ref(), ops);
                 // A migration-only base changes nothing for an observer of the new version.
@@ -76,6 +83,7 @@ impl SessionCore {
         release.push(move || {
             commits.unsubscribe();
             close.unsubscribe();
+            pin.release();
         });
         Ok(())
     }

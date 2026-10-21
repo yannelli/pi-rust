@@ -387,7 +387,9 @@ impl TestSession {
 
 pub fn open_test_session() -> TestSession {
     let storage = Arc::new(ControlledStorage::default());
-    let session = create_session(storage.clone(), SessionOptions::default());
+    // These tests pin the cache's identities and loads, so documents stay as long as the default keeps them.
+    let options = SessionOptions { document_retention_ms: Some(600_000.0), ..SessionOptions::default() };
+    let session = create_session(storage.clone(), options);
     let publications = Arc::new(Mutex::new(Vec::new()));
     let sink = publications.clone();
     session

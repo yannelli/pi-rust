@@ -67,6 +67,12 @@ impl SessionHooks for HarnessHooks {
         }
     }
 
+    /// Read at each use, as all settings are, but only this field: it is read on every commit.
+    fn document_retention_ms(&self) -> Option<f64> {
+        let source = self.options.settings.as_ref()?;
+        source().ok()?.document_retention_ms
+    }
+
     fn report(&self, error: &DurableError, info: &ReportInfo, context: Option<&Context>) {
         if let Some(report) = &self.options.on_report {
             report(error, info);
@@ -122,7 +128,11 @@ impl Harness {
         });
         let session = create_session(
             storage,
-            SessionOptions { now: options.now.clone(), hooks: Some(hooks.clone() as Arc<dyn SessionHooks>) },
+            SessionOptions {
+                now: options.now.clone(),
+                hooks: Some(hooks.clone() as Arc<dyn SessionHooks>),
+                document_retention_ms: None,
+            },
         );
         let timer_hooks = hooks.clone();
         let timer_report = Arc::new(move |error: &DurableError| {

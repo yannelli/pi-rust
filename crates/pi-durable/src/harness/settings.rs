@@ -11,6 +11,7 @@ use super::define::Extension;
 use super::types::{ModelRef, QueueMode, ToolExecutionMode};
 use crate::errors::DurableResult;
 use crate::models::DeferredOption;
+use crate::session::document_retention;
 
 /// Curated pi-ai request options; absent fields use pi-ai defaults.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -133,6 +134,11 @@ pub struct HarnessSettings {
     pub follow_up_mode: Option<QueueMode>,
     /// How long an idle conversation keeps its last context read in memory; `0` drops it at once.
     pub context_retention_ms: Option<f64>,
+    /// How long a loaded document that no watch or document state observes stays in memory after its last read or
+    /// write; the next access loads it from Storage. Observed documents always stay. Default ten minutes; `0` drops
+    /// one right after use; `f64::INFINITY` keeps them. Anything else that is not a count of milliseconds means the
+    /// default.
+    pub document_retention_ms: Option<f64>,
     /// What a failed run does with the inputs queued behind it; default `Keep`.
     pub after_failed_run: Option<AfterFailedRun>,
     /// How many times in a row a task may be cut off by a crash, eviction, or reset (a close does not count) without
@@ -156,6 +162,7 @@ pub struct Settings {
     pub steering_mode: QueueMode,
     pub follow_up_mode: QueueMode,
     pub context_retention_ms: f64,
+    pub document_retention_ms: f64,
     pub after_failed_run: AfterFailedRun,
     pub restart_limit: f64,
 }
@@ -219,6 +226,7 @@ pub fn resolve_settings(settings: Option<&HarnessSettings>) -> Settings {
         steering_mode: settings.steering_mode.unwrap_or_default(),
         follow_up_mode: settings.follow_up_mode.unwrap_or_default(),
         context_retention_ms: settings.context_retention_ms.unwrap_or(DEFAULT_CONTEXT_RETENTION_MS),
+        document_retention_ms: document_retention(settings.document_retention_ms),
         after_failed_run: settings.after_failed_run.unwrap_or_default(),
         restart_limit: restart_limit(settings.restart_limit),
     }
