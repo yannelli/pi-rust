@@ -143,6 +143,19 @@ fn does_not_repaint_idle_or_zero_width_selections_on_focus_loss() {
 }
 
 #[test]
+fn remembers_the_last_focus_report() {
+    let h = harness_with_text(20, 4, SELECTABLE);
+    assert_eq!(h.tui.terminal_focused(), None);
+    h.send("\x1b[O");
+    wait_for_render();
+    assert_eq!(h.tui.terminal_focused(), Some(false));
+    h.send("\x1b[I");
+    wait_for_render();
+    assert_eq!(h.tui.terminal_focused(), Some(true));
+    h.stop();
+}
+
+#[test]
 fn clears_an_active_visible_selection_on_focus_loss_and_ignores_orphan_events() {
     let h = harness_with_text(20, 4, SELECTABLE);
 

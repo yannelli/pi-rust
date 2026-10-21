@@ -82,7 +82,15 @@ pub fn settings(upstream: &Path, root: &Path) -> Section {
         let rust = read_local(root, &format!("{RUST_AGENT}/settings/schema.rs"))?;
         let local = serde_fields(&rust, "Settings").ok_or("no `pub struct Settings` in settings/schema.rs")?;
         section.notes.push(format!("Upstream keys come from `{anchor}`."));
-        compare(section, &set(keys), &set(local), "top-level settings keys");
+        let (mut keys, mut local) = (set(keys), set(local));
+        // pi-rust adds its own `terminal.*` keys, so compare that object's members too.
+        let terminal =
+            ts_members(&source, &["const TerminalSettingsSchema"]).zip(serde_fields(&rust, "TerminalSettings"));
+        if let Some(((_, upstream_terminal), local_terminal)) = terminal {
+            keys.extend(upstream_terminal.iter().map(|key| format!("terminal.{key}")));
+            local.extend(local_terminal.iter().map(|key| format!("terminal.{key}")));
+        }
+        compare(section, &keys, &local, "settings keys (top level and `terminal.*`)");
         Ok(())
     })
 }
