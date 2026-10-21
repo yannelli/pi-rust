@@ -76,6 +76,10 @@
     {
       "item": "context",
       "reason": "pi-rust extension: /context"
+    },
+    {
+      "item": "retry",
+      "reason": "pi-rust extension: /retry"
     }
   ],
   "tools": [],

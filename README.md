@@ -96,6 +96,8 @@ Run `pi --help` for all options. In interactive mode, type `/` to list commands,
 
 `/undo` (pi-rust extension) restores the files that the edit and write tools changed during the last prompt: it writes back their earlier content and deletes the files the agent created. Run it again to go one more prompt back. A file that changed after the agent wrote it, for example by you or a bash command, is skipped and listed. Limits: only edit and write changes are tracked, not bash commands; checkpoints stay in memory for the last 20 prompts of the current session, files over 4 MB are not kept, and everything is lost on exit or when you switch sessions. The conversation does not change; use `/tree` to move in it.
 
+`/retry` (pi-rust extension) runs the last prompt of the current branch again. It moves to the point before that prompt, as `/tree` does, and sends the same text and images as a new prompt. The new answer starts a new branch, and the old answer stays in the tree, where `/tree` can return to it. Custom messages and prompts that extensions sent are skipped, so `/retry` picks the last prompt you sent; pi knows which prompts came from extensions only while the session that received them is open, not after a resume. While the agent works or compacts, or before the first prompt, `/retry` shows an error and sends nothing.
+
 ### Prompt history (pi-rust extension)
 
 The interactive editor keeps your prompts across sessions and projects in `~/.pi/agent/prompt-history.jsonl`, one JSON string per line, readable only by you on Unix. Up and Down go through them, newest first. Ctrl+R starts a reverse search: type to filter (case does not matter), press Ctrl+R again for the next older match, Enter to put the match in the editor without sending it, and Esc to go back to your draft. A prompt that starts with a space is not saved to the file.
@@ -287,6 +289,7 @@ pi-rust ports the `pi` CLI and its libraries feature for feature. These parts di
 - `/review` (see [Use](#use)) is an addition; upstream pi has no `/review` command.
 - `/context` (see [Use](#use)) is an addition; upstream pi shows context use only in the footer.
 - `/undo` (see [Use](#use)) is an addition; upstream pi has no command that restores the files the agent changed.
+- `/retry` (see [Use](#use)) is an addition; upstream pi has no `/retry` command.
 
 - `pi completion` and `pi doctor` (above) are additions; the TypeScript pi has neither.
 - `pi sessions` and `pi stats` (above) are additions; the TypeScript pi lists and deletes sessions only in its session picker (`pi -r`, `/resume`) and shows usage only for the current session (`/session`).

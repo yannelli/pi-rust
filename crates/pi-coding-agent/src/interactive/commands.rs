@@ -139,6 +139,9 @@ impl InteractiveMode {
         } else if text == "/undo" {
             clear();
             self.handle_undo_command();
+        } else if text == "/retry" {
+            clear();
+            self.handle_retry_command();
         } else if let Some(args) = argument(text, "mcp")
             && self.session().builtin_extension_enabled("mcp")
         {

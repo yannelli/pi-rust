@@ -35,6 +35,7 @@ pub mod prompt_history;
 mod prompts;
 pub mod renderers;
 mod resources_view;
+mod retry;
 mod review;
 pub mod selector;
 mod settings;

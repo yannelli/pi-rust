@@ -13,6 +13,7 @@ use crate::compaction::{find_message_entry_id, find_tool_result_entry_ids};
 use crate::images::{ProcessImageOptions, decode_base64_lenient, process_image};
 use crate::messages::{CustomMessage, CustomRole};
 use crate::resources::expand_user_input;
+use crate::session::EntryData;
 
 /// How a prompt sent while streaming is queued.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -77,10 +78,18 @@ fn mcp_command_args(text: &str) -> Option<&str> {
     (rest.is_empty() || rest.starts_with(char::is_whitespace)).then(|| rest.trim())
 }
 
+/// A user message on the current branch with its entry (see [`AgentSession::last_user_prompt`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct BranchPrompt {
+    pub entry_id: String,
+    pub parent_id: Option<String>,
+    pub message: UserMessage,
+}
+
 /// The message that starts a run, as `before_agent_start` handlers see it.
 pub(crate) enum RunTrigger {
     /// A prompt, with its expanded text and images.
-    User { prompt: String, images: Vec<ContentBlock> },
+    User { prompt: String, images: Vec<ContentBlock>, from_extension: bool },
     /// A custom message sent with `triggerTurn` while idle.
     Custom(CustomMessage),
 }
@@ -90,7 +99,7 @@ impl RunTrigger {
     /// user message, `message` for a custom one.
     pub(crate) fn event_fields(&self) -> serde_json::Value {
         match self {
-            Self::User { prompt, images } => {
+            Self::User { prompt, images, .. } => {
                 let mut fields = serde_json::json!({"messageType": "user", "prompt": prompt});
                 if !images.is_empty() {
                     fields["images"] = serde_json::json!(images);
@@ -148,6 +157,7 @@ impl AgentSession {
             self.run_mcp_command(args).await;
             return Ok(PromptDisposition::Handled);
         }
+        let from_extension = source == "extension";
         let behavior = if self.is_streaming() { options.streaming_behavior } else { None };
         let Some((text, input_images)) = self.run_input_handlers(text, options.images.clone(), &source, behavior).await
         else {
@@ -162,7 +172,7 @@ impl AgentSession {
                     "Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message."
                 );
             };
-            self.queue_message(&expanded, input_images, behavior);
+            self.queue_message(&expanded, input_images, behavior, from_extension);
             preflight(PromptDisposition::Queued);
             return Ok(PromptDisposition::Queued);
         }
@@ -171,7 +181,7 @@ impl AgentSession {
             return Ok(PromptDisposition::Handled);
         }
         self.ensure_auth().await?;
-        let trigger = RunTrigger::User { prompt: expanded, images: input_images };
+        let trigger = RunTrigger::User { prompt: expanded, images: input_images, from_extension };
         self.start_run(trigger, || preflight(PromptDisposition::Started)).await?;
         Ok(PromptDisposition::Started)
     }
@@ -224,10 +234,14 @@ impl AgentSession {
         // Before image normalization, so a model chosen by a handler sets the resize profile.
         let (prompt_options, extra) = self.run_before_agent_start(trigger, prompt_options).await;
         let mut messages = match trigger {
-            RunTrigger::User { prompt, images } => {
+            RunTrigger::User { prompt, images, from_extension } => {
                 let (images, hints) = self.normalize_prompt_images(images);
                 let text = if hints.is_empty() { prompt.clone() } else { format!("{prompt}\n\n{}", hints.join("\n")) };
-                vec![user_message(&text, images)]
+                let message = user_message(&text, images);
+                if *from_extension {
+                    self.note_extension_prompt(&message);
+                }
+                vec![message]
             }
             RunTrigger::Custom(message) => vec![message.clone().into_message()],
         };
@@ -320,11 +334,11 @@ impl AgentSession {
             return Ok(PromptDisposition::Handled);
         };
         let expanded = self.expand_input(&text);
-        self.queue_message(&expanded, images, behavior);
+        self.queue_message(&expanded, images, behavior, source == "extension");
         Ok(PromptDisposition::Queued)
     }
 
-    fn queue_message(&self, text: &str, images: Vec<ContentBlock>, behavior: StreamingBehavior) {
+    fn queue_message(&self, text: &str, images: Vec<ContentBlock>, behavior: StreamingBehavior, from_extension: bool) {
         {
             let mut state = lock(&self.state);
             match behavior {
@@ -334,6 +348,9 @@ impl AgentSession {
         }
         self.emit_queue_update();
         let message = user_message(text, images);
+        if from_extension {
+            self.note_extension_prompt(&message);
+        }
         match behavior {
             StreamingBehavior::Steer => self.agent.steer(message),
             StreamingBehavior::FollowUp => self.agent.follow_up(message),
@@ -388,5 +405,30 @@ impl AgentSession {
     /// Context for the next user prompt, sent along with it.
     pub fn queue_next_turn_message(&self, message: CustomMessage) {
         lock(&self.state).pending_next_turn.push(message.into_message());
+    }
+
+    fn note_extension_prompt(&self, message: &Message) {
+        if let Message::User(user) = message {
+            lock(&self.state).extension_prompts.push((user.timestamp, user.content.text()));
+        }
+    }
+
+    /// The newest user message of the current branch that no extension sent while this session
+    /// ran (pi-rust, for `/retry`). Custom messages are not user messages, so they never match.
+    pub fn last_user_prompt(&self) -> Option<BranchPrompt> {
+        let from_extensions = lock(&self.state).extension_prompts.clone();
+        let sent_by_extension = |user: &UserMessage| {
+            let mut sent = from_extensions.iter().filter(|(timestamp, _)| *timestamp == user.timestamp);
+            sent.any(|(_, text)| *text == user.content.text())
+        };
+        let session = self.session_manager();
+        session.get_branch(None).into_iter().rev().find_map(|entry| match entry.data() {
+            EntryData::Message(Message::User(user)) if !sent_by_extension(user) => Some(BranchPrompt {
+                entry_id: entry.id().to_string(),
+                parent_id: entry.parent_id().map(String::from),
+                message: user.clone(),
+            }),
+            _ => None,
+        })
     }
 }

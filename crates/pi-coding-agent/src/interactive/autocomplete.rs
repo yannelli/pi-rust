@@ -40,6 +40,7 @@ pub const BUILTIN_SLASH_COMMANDS: &[(&str, &str, Option<&str>)] = &[
     ("init", "Write or improve the project's AGENTS.md", Some("<instructions>")),
     ("resume", "Resume a different session", None),
     ("undo", "Restore files the agent's edit and write tools changed in the last prompt", None),
+    ("retry", "Run the last prompt again on a new branch", None),
     ("mcp", "Manage MCP servers: sign in, reconnect, enable or disable, and change exposure", None),
     ("llama", "Manage llama.cpp router models", None),
     ("reload", "Reload keybindings, extensions, skills, prompts, themes, and context files", None),
