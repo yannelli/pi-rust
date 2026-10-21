@@ -174,6 +174,13 @@ fn enables_hyperlinks_without_images_for_herdr() {
 }
 
 #[test]
+fn enables_hyperlinks_without_images_for_rex() {
+    let detected = detect(&[("TERM_PROGRAM", "rex"), ("TERM", "xterm-256color"), ("KITTY_WINDOW_ID", "1")]);
+    assert_eq!(detected, caps(None, true, true));
+    assert!(!detect(&[("TERM_PROGRAM", "rex"), ("PI_HYPERLINKS", "0")]).hyperlinks);
+}
+
+#[test]
 fn enables_kitty_images_and_hyperlinks_for_kitty_compatible_terminals() {
     let ghostty = detect(&[("TERM_PROGRAM", "ghostty")]);
     assert!(ghostty.hyperlinks);
