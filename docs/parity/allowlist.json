@@ -89,6 +89,10 @@
   ],
   "packages": [
     {
+      "item": "pi-embedded",
+      "reason": "The embeddable agent API of pi-rust. It comes from the fork snapshot; upstream main never had packages/embedded."
+    },
+    {
       "item": "pi-env-daemon",
       "reason": "The pi-env daemon is Rust code that upstream keeps inside packages/env (daemon/Cargo.toml); here it is its own workspace crate."
     },

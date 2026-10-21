@@ -89,6 +89,11 @@ pub fn section(upstream: &Path, root: &Path) -> Section {
     let Some(providers) = providers.filter(|providers| !providers.is_empty()) else {
         return skipped(format!("upstream file not found or without a MODELS table: {GENERATED}"));
     };
+    if !data.is_dir() {
+        return skipped(format!(
+            "{DATA_DIR} is generated and not in git. Run `npm run hydrate-model-data` in packages/ai of the upstream checkout first"
+        ));
+    }
     let mut catalog = Catalog::new();
     let mut unreadable = Vec::new();
     for provider in &providers {
