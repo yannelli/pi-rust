@@ -172,7 +172,12 @@ async fn runtime(store: Arc<InMemoryCredentialStore>) -> Arc<ModelRuntime> {
     let dir = std::env::temp_dir().join("pi-login-dialog-test-missing");
     let oauth: pi_ai::auth::OAuthLookup =
         Arc::new(|id: &str| (id == "fake").then(|| Arc::new(FakeOAuth) as Arc<dyn OAuthAuth>));
-    let options = ModelRuntimeOptions { models_path: dir.join("models.json"), credentials: store, oauth: Some(oauth) };
+    let options = ModelRuntimeOptions {
+        models_path: dir.join("models.json"),
+        credentials: store,
+        oauth: Some(oauth),
+        credential_env: Arc::new(|_: &str| None::<String>),
+    };
     Arc::new(ModelRuntime::create(options).await)
 }
 

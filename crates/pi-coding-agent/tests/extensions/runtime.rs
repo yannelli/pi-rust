@@ -50,6 +50,7 @@ async fn runtime_with(source: &str, provider: Arc<FauxProvider>, mode: Extension
         agent_dir: agent_dir.clone(),
         settings: Some(Arc::new(SettingsManager::in_memory(settings))),
         credentials: Some(Arc::new(InMemoryCredentialStore::new(BTreeMap::new()))),
+        credential_env: Some(crate::offline_guard::credential_free_env()),
         ..AppOptions::default()
     };
     let manager = SessionManager::create(&cwd, Some(&agent_dir.join("sessions")));
@@ -206,6 +207,7 @@ async fn resume_gives_project_trust_handlers_the_live_ui() {
     let options = AppOptions {
         agent_dir: agent_dir.clone(),
         credentials: Some(Arc::new(InMemoryCredentialStore::new(BTreeMap::new()))),
+        credential_env: Some(crate::offline_guard::credential_free_env()),
         ..AppOptions::default()
     };
     let manager = SessionManager::create(&work, Some(&agent_dir.join("sessions")));

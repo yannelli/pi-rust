@@ -35,7 +35,7 @@ fn escape_regex(value: &str) -> String {
 fn build_fd_path_query(query: &str) -> String {
     let normalized = to_display_path(query);
     if !normalized.contains('/') {
-        return normalized;
+        return escape_regex(&normalized);
     }
     let has_trailing_separator = normalized.ends_with('/');
     let trimmed = normalized.trim_matches('/');
@@ -44,9 +44,6 @@ fn build_fd_path_query(query: &str) -> String {
     }
     let separator = "[\\\\/]";
     let segments: Vec<String> = trimmed.split('/').filter(|s| !s.is_empty()).map(escape_regex).collect();
-    if segments.is_empty() {
-        return normalized;
-    }
     let mut pattern = segments.join(separator);
     if has_trailing_separator {
         pattern.push_str(separator);
@@ -339,6 +336,8 @@ mod tests {
         assert_eq!(build_fd_path_query("components/"), "components[\\\\/]");
         assert_eq!(build_fd_path_query("a.b/c"), "a\\.b[\\\\/]c");
         assert_eq!(build_fd_path_query("/"), "/");
+        assert_eq!(build_fd_path_query("[id"), "\\[id");
+        assert_eq!(build_fd_path_query("(group)"), "\\(group\\)");
     }
 
     #[test]
@@ -400,6 +399,25 @@ mod tests {
             walk_directory_native(&base_dir, "src/comp", &signal, None).into_iter().map(|e| e.path).collect();
         scoped.sort();
         assert_eq!(scoped, ["src/components/", "src/components/editor.rs"]);
+    }
+
+    #[test]
+    fn native_walker_matches_regex_metacharacters_literally() {
+        let root = tempfile::tempdir().unwrap();
+        let base = root.path();
+        fs::create_dir_all(base.join("pages")).unwrap();
+        for file in ["pages/[id].tsx", "pages/index.tsx", "pages/(group).ts"] {
+            fs::write(base.join(file), "").unwrap();
+        }
+        let signal = AbortSignal::default();
+        let base_dir = base.to_string_lossy().to_string();
+        for (query, expected) in
+            [("pages/[", "pages/[id].tsx"), ("pages/(", "pages/(group).ts"), ("[id", "pages/[id].tsx")]
+        {
+            let paths: Vec<String> =
+                walk_directory_native(&base_dir, query, &signal, None).into_iter().map(|e| e.path).collect();
+            assert_eq!(paths, [expected], "{query}");
+        }
     }
 
     #[test]

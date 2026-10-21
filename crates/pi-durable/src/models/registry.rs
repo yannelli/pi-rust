@@ -7,9 +7,10 @@ use std::sync::{Arc, RwLock};
 use futures::StreamExt;
 use futures::future::BoxFuture;
 use pi_ai::auth::{AuthOverrides, AuthResolver, InMemoryCredentialStore, ResolvedAuth};
+use pi_ai::identity::opencode_session_header;
 use pi_ai::{
-    AssistantMessageEventStream, Context, DeferredHandle, Model, ModelRegistry, RequestOptions, StreamOptions,
-    event_channel,
+    AssistantMessageEventStream, ClientIdentity, Context, DeferredHandle, Model, ModelRegistry, RequestOptions,
+    StreamOptions, event_channel, merge_client_identity,
 };
 use pi_chord::AbortSignal;
 use tokio_util::sync::CancellationToken;
@@ -33,13 +34,21 @@ pub struct RegistryModels {
     registry: RwLock<ModelRegistry>,
     resolver: Arc<AuthResolver>,
     providers: RwLock<HashMap<String, Arc<dyn Models>>>,
+    identity: Option<ClientIdentity>,
 }
 
 impl RegistryModels {
     /// Models of `registry`; `resolver` resolves request auth and receives the registry's `models.json` settings.
     pub fn new(registry: ModelRegistry, resolver: Arc<AuthResolver>) -> Self {
         resolver.set_provider_configs(registry.auth_configs());
-        Self { registry: RwLock::new(registry), resolver, providers: RwLock::default() }
+        Self { registry: RwLock::new(registry), resolver, providers: RwLock::default(), identity: None }
+    }
+
+    /// Upstream `CreateModelsOptions.identity`: the default identity of every request. A request's `identity`
+    /// overrides it field by field.
+    pub fn with_identity(mut self, identity: ClientIdentity) -> Self {
+        self.identity = Some(identity);
+        self
     }
 
     /// The bundled catalog with auth from the process environment, for hosts such as `pi experimental`.
@@ -84,13 +93,15 @@ struct AppliedAuth {
     env: BTreeMap<String, String>,
 }
 
-/// Upstream `applyAuth`: explicit request values win per field over the resolved auth.
+/// Upstream `applyAuth`: explicit request values win per field over the resolved auth, which wins over the
+/// OpenCode session header.
 async fn apply_auth(
     resolver: &AuthResolver,
     model: &Model,
     api_key: Option<String>,
     env: &BTreeMap<String, String>,
     headers: &BTreeMap<String, String>,
+    session_id: Option<&str>,
 ) -> Result<AppliedAuth, String> {
     let overrides =
         AuthOverrides { api_key: api_key.clone(), env: (!env.is_empty()).then(|| env.clone()), ..Default::default() };
@@ -101,8 +112,13 @@ async fn apply_auth(
     if let Some(base_url) = &resolved.auth.base_url {
         request_model.base_url = base_url.clone();
     }
-    let mut merged_headers = resolved.auth.headers.clone();
-    merged_headers.extend(headers.iter().map(|(name, value)| (name.clone(), value.clone())));
+    let session = opencode_session_header(&request_model, session_id);
+    let mut merged_headers: BTreeMap<String, String> =
+        session.map(|(name, value)| (name.to_string(), value)).into_iter().collect();
+    for (name, value) in resolved.auth.headers.iter().chain(headers) {
+        merged_headers.retain(|existing, _| !existing.eq_ignore_ascii_case(name));
+        merged_headers.insert(name.clone(), value.clone());
+    }
     let mut merged_env = resolved.env.clone().unwrap_or_default();
     merged_env.extend(env.iter().map(|(name, value)| (name.clone(), value.clone())));
     Ok(AppliedAuth {
@@ -155,8 +171,14 @@ fn lazy_stream(
     stream
 }
 
-fn stream_options(options: SimpleStreamOptions, auth: &AppliedAuth, cancel: CancellationToken) -> StreamOptions {
+fn stream_options(
+    options: SimpleStreamOptions,
+    auth: &AppliedAuth,
+    cancel: CancellationToken,
+    identity: Option<&ClientIdentity>,
+) -> StreamOptions {
     StreamOptions {
+        identity: merge_client_identity([identity, options.identity.as_ref()]),
         api_key: auth.api_key.clone(),
         cancel,
         telemetry: options.telemetry,
@@ -187,9 +209,11 @@ fn deferred_options(
     options: DeferredFetchOptions,
     auth: &AppliedAuth,
     cancel: CancellationToken,
+    identity: Option<&ClientIdentity>,
 ) -> pi_ai::DeferredOptions {
     pi_ai::DeferredOptions {
         request: RequestOptions {
+            identity: merge_client_identity([identity, options.identity.as_ref()]),
             api_key: auth.api_key.clone(),
             cancel,
             telemetry: options.telemetry,
@@ -255,13 +279,15 @@ impl Models for RegistryModels {
             Ok(Some(provider)) => return provider.stream_simple(model, context, options),
             Ok(None) => {}
         }
-        let resolver = self.resolver.clone();
+        let (resolver, identity) = (self.resolver.clone(), self.identity.clone());
         let (cancel, guard) = follow_signal(options.signal.as_ref());
         let (model, context) = (model.clone(), context.clone());
         let setup_model = model.clone();
         let setup = async move {
-            let auth = apply_auth(&resolver, &model, options.api_key.clone(), &options.env, &options.headers).await?;
-            let request = stream_options(options, &auth, cancel);
+            let session = options.session_id.as_deref();
+            let auth =
+                apply_auth(&resolver, &model, options.api_key.clone(), &options.env, &options.headers, session).await?;
+            let request = stream_options(options, &auth, cancel, identity.as_ref());
             Ok(pi_ai::stream(&auth.model, &context, request))
         };
         lazy_stream(&setup_model, setup, guard)
@@ -278,13 +304,14 @@ impl Models for RegistryModels {
             Ok(Some(provider)) => return provider.stream_deferred(model, handle, options),
             Ok(None) => {}
         }
-        let resolver = self.resolver.clone();
+        let (resolver, identity) = (self.resolver.clone(), self.identity.clone());
         let (cancel, guard) = follow_signal(options.signal.as_ref());
         let (model, handle) = (model.clone(), handle.clone());
         let setup_model = model.clone();
         let setup = async move {
-            let auth = apply_auth(&resolver, &model, options.api_key.clone(), &options.env, &options.headers).await?;
-            let request = deferred_options(options, &auth, cancel);
+            let auth =
+                apply_auth(&resolver, &model, options.api_key.clone(), &options.env, &options.headers, None).await?;
+            let request = deferred_options(options, &auth, cancel, identity.as_ref());
             Ok(pi_ai::stream_deferred(&auth.model, &handle, request))
         };
         lazy_stream(&setup_model, setup, guard)
@@ -301,14 +328,14 @@ impl Models for RegistryModels {
             Ok(Some(provider)) => return provider.cancel_deferred(model, handle, options),
             Ok(None) => {}
         }
-        let resolver = self.resolver.clone();
+        let (resolver, identity) = (self.resolver.clone(), self.identity.clone());
         let (model, handle) = (model.clone(), handle.clone());
         Box::pin(async move {
             let (cancel, _guard) = follow_signal(options.signal.as_ref());
-            let auth = apply_auth(&resolver, &model, options.api_key.clone(), &options.env, &options.headers)
+            let auth = apply_auth(&resolver, &model, options.api_key.clone(), &options.env, &options.headers, None)
                 .await
                 .map_err(DurableError::error)?;
-            let request = deferred_options(options, &auth, cancel);
+            let request = deferred_options(options, &auth, cancel, identity.as_ref());
             pi_ai::cancel_deferred(&auth.model, &handle, request).await.map_err(DurableError::error)
         })
     }

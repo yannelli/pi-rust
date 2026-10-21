@@ -254,26 +254,6 @@ pub fn resolve_proxy_url(target: &str, env: &BTreeMap<String, String>) -> Result
     Ok(Some(url))
 }
 
-/// `pi (<platform> <release>; <arch>)` with Node platform and architecture names.
-pub fn pi_user_agent() -> String {
-    let platform = match std::env::consts::OS {
-        "macos" => "darwin",
-        "windows" => "win32",
-        other => other,
-    };
-    let arch = match std::env::consts::ARCH {
-        "x86_64" => "x64",
-        "aarch64" => "arm64",
-        "x86" => "ia32",
-        other => other,
-    };
-    let release = std::fs::read_to_string("/proc/sys/kernel/osrelease").map(|text| text.trim().to_string());
-    match release {
-        Ok(release) if !release.is_empty() => format!("pi ({platform} {release}; {arch})"),
-        _ => format!("pi ({platform}; {arch})"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

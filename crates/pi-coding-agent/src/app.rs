@@ -9,6 +9,7 @@ use futures::FutureExt;
 use pi_agent::{SharedTool, StreamFn};
 use pi_ai::ThinkingLevel;
 use pi_ai::auth::{CredentialStore, OAuthLookup};
+use pi_ai::env::EnvLookup;
 
 use crate::agent_session::{
     AgentSessionRuntime, CreateAgentSessionOptions, CreateServicesOptions, McpSessionOptions, NoTools, ResourceOptions,
@@ -60,6 +61,8 @@ pub struct AppOptions {
     pub credentials: Option<Arc<dyn CredentialStore>>,
     /// OAuth providers by id; `None` uses the built-in ones.
     pub oauth: Option<OAuthLookup>,
+    /// Environment that model runtimes read credentials from; `None` is the process environment.
+    pub credential_env: Option<Arc<dyn EnvLookup>>,
     /// Model request function in place of `pi_ai::stream`.
     pub stream_fn: Option<StreamFn>,
     pub custom_tools: Vec<SharedTool>,
@@ -228,6 +231,7 @@ async fn create_runtime_parts(
         model_runtime: None,
         credentials: options.credentials.clone(),
         oauth: options.oauth.clone(),
+        credential_env: options.credential_env.clone(),
         resources,
     })
     .await;
@@ -293,6 +297,7 @@ pub async fn extension_help_flags(options: &AppOptions, cwd: &Path) -> Vec<crate
         model_runtime: None,
         credentials: options.credentials.clone(),
         oauth: options.oauth.clone(),
+        credential_env: options.credential_env.clone(),
         resources: options.resources.clone(),
     })
     .await;

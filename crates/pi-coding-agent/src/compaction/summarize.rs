@@ -189,10 +189,14 @@ pub async fn generate_summary(
 async fn generate_turn_prefix_summary(
     messages: &[Message],
     model: &Model,
+    custom_instructions: Option<&str>,
     options: &SummarizationOptions,
 ) -> anyhow::Result<(String, Usage)> {
     let conversation = serialize_conversation(&convert_to_llm(messages));
-    let prompt = format!("# Conversation\n{conversation}\n\n# Instructions\n{TURN_PREFIX_SUMMARIZATION_PROMPT}");
+    let mut prompt = format!("# Conversation\n{conversation}\n\n# Instructions\n{TURN_PREFIX_SUMMARIZATION_PROMPT}");
+    if let Some(focus) = custom_instructions.filter(|focus| !focus.is_empty()) {
+        prompt.push_str(&format!("\n\nAdditional focus: {focus}"));
+    }
     let request = request_options(model, options);
     let response = complete_summarization(
         model,
@@ -230,7 +234,8 @@ pub async fn summarize_compaction(
             (text, Some(usage))
         };
         let (prefix, prefix_usage) =
-            generate_turn_prefix_summary(&preparation.turn_prefix_messages, model, options).await?;
+            generate_turn_prefix_summary(&preparation.turn_prefix_messages, model, custom_instructions, options)
+                .await?;
         let usage = history_usage.map_or(prefix_usage, |usage| combine_usage(&usage, &prefix_usage));
         (format!("{history}\n\n---\n\n**Turn Context (split turn):**\n\n{prefix}"), usage)
     } else {

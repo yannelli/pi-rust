@@ -121,6 +121,7 @@ pub(crate) fn stream_options_from_json(value: &Value) -> StreamOptions {
     options.timeout_ms = value["timeoutMs"].as_u64();
     options.max_retries = value["maxRetries"].as_u64().map(|retries| retries as u32);
     options.metadata = value["metadata"].as_object().cloned();
+    options.identity = serde_json::from_value(value["identity"].clone()).ok();
     if let Some(headers) = value["headers"].as_object() {
         for (name, header) in headers {
             match header.as_str() {
@@ -205,6 +206,7 @@ pub(crate) fn stream_options_to_json(options: &StreamOptions, signal: u64) -> Va
     set("timeoutMs", json!(options.timeout_ms));
     set("maxRetries", json!(options.max_retries));
     set("metadata", json!(options.metadata));
+    set("identity", json!(options.identity));
     set("env", if options.env.is_empty() { Value::Null } else { json!(options.env) });
     value
 }

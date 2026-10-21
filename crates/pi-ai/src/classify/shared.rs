@@ -61,12 +61,10 @@ pub(crate) async fn post_classifier_request(
     let Some(api_key) = options.api_key.as_deref().filter(|key| !key.is_empty()) else {
         return Err(failure(format!("No API key for provider: {}", model.provider)));
     };
-    let headers = build_headers(
-        vec![("authorization", format!("Bearer {api_key}")), ("content-type", "application/json".into())],
-        &model.headers,
-        &options.headers,
-        &options.suppressed_headers,
-    );
+    let mut defaults = crate::identity::identity_headers(model, options.identity.as_ref());
+    defaults.push(("authorization", format!("Bearer {api_key}")));
+    defaults.push(("content-type", "application/json".into()));
+    let headers = build_headers(defaults, &model.headers, &options.headers, &options.suppressed_headers);
     let request =
         HttpRequest { url, headers, body: apply_payload_hook(body, options.on_payload.as_ref(), model).await };
     let send =
