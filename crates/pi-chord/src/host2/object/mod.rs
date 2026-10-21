@@ -22,6 +22,7 @@ use indexmap::IndexMap;
 use tokio::runtime::Handle;
 use tokio::sync::Notify;
 
+pub(crate) use calls::clean;
 pub use ctx::{Ctx, RootOptions};
 pub(crate) use ctx::{CtxFields, await_ready, run_root};
 pub use declare::Decls;
