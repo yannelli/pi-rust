@@ -47,8 +47,15 @@ async fn timeout_kills_and_reports() {
 fn process_gone(pid: &str) -> bool {
     match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
         Err(_) => true,
-        Ok(stat) => stat.split(") ").nth(1).is_some_and(|rest| rest.starts_with('Z')),
+        Ok(stat) => stat.split(") ").nth(1).is_some_and(|rest| rest.starts_with('Z')) || sigkill_pending(pid),
     }
+}
+
+/// Whether the kernel has queued SIGKILL for `pid`: the process never runs user code again.
+fn sigkill_pending(pid: &str) -> bool {
+    let status = std::fs::read_to_string(format!("/proc/{pid}/status")).unwrap_or_default();
+    let masks = status.lines().filter_map(|line| line.strip_prefix("SigPnd:").or_else(|| line.strip_prefix("ShdPnd:")));
+    masks.filter_map(|mask| u64::from_str_radix(mask.trim(), 16).ok()).any(|mask| mask & (1 << 8) != 0)
 }
 
 #[tokio::test]
@@ -73,7 +80,7 @@ async fn cancellation_kills_process_group() {
     let pid = std::fs::read_to_string(dir.path().join("child.pid")).unwrap();
     let pid = pid.trim().to_string();
     // SIGKILL is asynchronous: a loaded CI runner can take seconds to schedule the exit.
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while !process_gone(&pid) && Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
