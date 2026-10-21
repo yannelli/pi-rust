@@ -24,7 +24,7 @@ const COUNTS: [(&str, usize, usize, usize); 42] = [
     ("google", 24, 0, 0),
     ("google-vertex", 14, 0, 0),
     ("groq", 7, 0, 0),
-    ("huggingface", 79, 0, 0),
+    ("huggingface", 80, 0, 0),
     ("kimi-coding", 4, 0, 0),
     ("meta", 6, 0, 0),
     ("minimax", 4, 0, 0),
@@ -35,13 +35,13 @@ const COUNTS: [(&str, usize, usize, usize); 42] = [
     ("nvidia", 21, 0, 0),
     ("openai", 42, 0, 1),
     ("openai-codex", 7, 0, 0),
-    ("opencode", 84, 0, 2),
+    ("opencode", 83, 0, 2),
     ("opencode-go", 29, 0, 0),
     ("openrouter", 401, 63, 27),
     ("qwen-token-plan", 21, 0, 0),
     ("qwen-token-plan-cn", 21, 0, 0),
     ("qwen-token-plan-individual", 9, 0, 0),
-    ("radius", 30, 0, 0),
+    ("radius", 32, 0, 0),
     ("together", 15, 0, 0),
     ("typesafe", 0, 0, 1),
     ("vercel-ai-gateway", 305, 0, 12),
@@ -100,8 +100,8 @@ fn totals_per_type_match_upstream() {
     for model in builtin_models() {
         totals[type_index(model.model_type.as_deref().expect("every bundled model declares its type"))] += 1;
     }
-    assert_eq!(totals, [1597, 63, 46]);
-    assert_eq!(builtin_models().len(), 1706);
+    assert_eq!(totals, [1599, 63, 46]);
+    assert_eq!(builtin_models().len(), 1708);
     assert_eq!(bundled_counts().len(), 42);
 }
 
