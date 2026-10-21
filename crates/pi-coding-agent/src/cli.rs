@@ -109,6 +109,9 @@ pub struct Args {
     pub project_trust_override: Option<bool>,
     /// `--max-turns` and `--max-cost` (pi-rust).
     pub run_limits: RunLimits,
+    /// `--output-schema <file>` and `--output-retries <n>` (pi-rust).
+    pub output_schema: Option<String>,
+    pub output_retries: Option<u32>,
     pub messages: Vec<String>,
     /// Paths given as `@path`.
     pub file_args: Vec<String>,
@@ -130,6 +133,21 @@ fn set_run_limit(args: &mut Args, flag: &str, value: &str) {
         _ => RunLimits::parse_max_cost(value).map(|cost| limits.max_cost = Some(cost)),
     };
     args.errors.extend(result.err());
+}
+
+/// `--output-schema` or `--output-retries` with its value, validated.
+fn set_output_option(args: &mut Args, flag: &str, value: &str) {
+    if flag == "--output-schema" {
+        match value.trim() {
+            "" => args.errors.push("--output-schema requires a file path".into()),
+            path => args.output_schema = Some(path.into()),
+        }
+        return;
+    }
+    match value.trim().parse::<u32>() {
+        Ok(retries) => args.output_retries = Some(retries),
+        Err(_) => args.errors.push(format!("--output-retries requires a non-negative integer, got \"{value}\"")),
+    }
 }
 
 /// A display name with surrounding whitespace removed, or `None` when blank.
@@ -275,6 +293,15 @@ pub fn parse_args(raw: &[String]) -> Args {
             _ if arg.starts_with("--max-turns=") || arg.starts_with("--max-cost=") => {
                 let (flag, limit) = arg.split_once('=').unwrap_or_default();
                 set_run_limit(&mut args, flag, limit);
+            }
+            "--output-schema" | "--output-retries" => {
+                if let Some(option) = value(&mut index, arg, &mut args.errors) {
+                    set_output_option(&mut args, arg, &option);
+                }
+            }
+            _ if arg.starts_with("--output-schema=") || arg.starts_with("--output-retries=") => {
+                let (flag, option) = arg.split_once('=').unwrap_or_default();
+                set_output_option(&mut args, flag, option);
             }
             _ if arg.starts_with('@') => args.file_args.push(arg[1..].into()),
             _ if arg.starts_with("--") => {
