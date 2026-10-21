@@ -15,16 +15,60 @@ pub(crate) struct ShellConfig {
     pub command_from_stdin: bool,
 }
 
-fn is_legacy_wsl_bash_path(path: &str) -> bool {
-    let normalized = path.replace('/', "\\").to_lowercase();
-    let Some(rest) = normalized.get(1..) else { return false };
-    let drive = normalized.as_bytes()[0];
-    drive.is_ascii_lowercase()
-        && (rest == ":\\windows\\system32\\bash.exe" || rest == ":\\windows\\sysnative\\bash.exe")
+/// Node's `path.win32.normalize` for drive and rooted paths: `/` becomes `\`, empty and `.`
+/// segments drop, and `..` removes the previous segment.
+fn win32_normalize(path: &str) -> String {
+    let path = path.replace('/', "\\");
+    let bytes = path.as_bytes();
+    let drive = if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' { &path[..2] } else { "" };
+    let after_drive = &path[drive.len()..];
+    let rooted = after_drive.starts_with('\\');
+    let mut segments: Vec<&str> = Vec::new();
+    for segment in after_drive.split('\\') {
+        match segment {
+            "" | "." => {}
+            ".." => match segments.last() {
+                Some(&last) if last != ".." => {
+                    segments.pop();
+                }
+                _ if rooted => {}
+                _ => segments.push(".."),
+            },
+            _ => segments.push(segment),
+        }
+    }
+    let mut tail = segments.join("\\");
+    if tail.is_empty() {
+        if !rooted {
+            tail.push('.');
+        }
+    } else if after_drive.ends_with('\\') {
+        tail.push('\\');
+    }
+    format!("{drive}{}{tail}", if rooted { "\\" } else { "" })
+}
+
+/// The legacy WSL launcher, `bash.exe` under `System32` or `Sysnative` of `system_root`, reads
+/// commands from stdin. Without `system_root` only the conventional `C:\Windows` paths count.
+fn is_legacy_wsl_bash_path(path: &str, system_root: Option<&str>) -> bool {
+    let normalized = win32_normalize(path).to_lowercase();
+    if let Some(root) = system_root.filter(|root| !root.is_empty()) {
+        if !matches!(root.as_bytes(), [letter, b':', b'\\' | b'/', ..] if letter.is_ascii_alphabetic()) {
+            return false;
+        }
+        return ["System32", "Sysnative"]
+            .iter()
+            .any(|directory| normalized == win32_normalize(&format!("{root}\\{directory}\\bash.exe")).to_lowercase());
+    }
+    matches!(
+        normalized.as_bytes(),
+        [b'a'..=b'z', b':', b'\\', rest @ ..]
+            if rest == b"windows\\system32\\bash.exe" || rest == b"windows\\sysnative\\bash.exe"
+    )
 }
 
 fn bash_shell_config(shell: String) -> ShellConfig {
-    if is_legacy_wsl_bash_path(&shell) {
+    if is_legacy_wsl_bash_path(&shell, std::env::var("SystemRoot").ok().as_deref()) {
         ShellConfig { shell, args: vec!["-s".into()], command_from_stdin: true }
     } else {
         ShellConfig { shell, args: vec!["-c".into()], command_from_stdin: false }
@@ -91,12 +135,17 @@ pub(crate) fn kill_process_tree(pid: u32) {
     }
 }
 
+/// `%SystemRoot%`, or `C:\Windows` when it is unset or empty.
+#[cfg(any(windows, test))]
+fn windows_directory(system_root: Option<std::ffi::OsString>) -> std::path::PathBuf {
+    system_root.filter(|root| !root.is_empty()).map(Into::into).unwrap_or_else(|| "C:\\Windows".into())
+}
+
 /// Kill a process and its descendants: its process group on Unix, `taskkill /F /T` on Windows. Best effort.
 #[cfg(windows)]
 pub(crate) fn kill_process_tree(pid: u32) {
     use std::os::windows::process::CommandExt;
-    use std::path::PathBuf;
-    let root = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("C:\\Windows"));
+    let root = windows_directory(std::env::var_os("SystemRoot"));
     let _ = std::process::Command::new(root.join("System32").join("taskkill.exe"))
         .args(["/F", "/T", "/PID", &pid.to_string()])
         .stdin(std::process::Stdio::null())
@@ -113,4 +162,37 @@ pub(crate) fn exit_code(status: std::process::ExitStatus) -> i32 {
         return 128 + signal;
     }
     status.code().unwrap_or(1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_wsl_launchers_follow_the_windows_directory() {
+        let cases = [
+            ("C:\\Windows\\System32\\bash.exe", None, true),
+            ("c:/windows/sysnative/BASH.EXE", None, true),
+            ("D:\\WinNT\\System32\\bash.exe", Some("D:\\WinNT"), true),
+            ("D:\\WinNT\\Sysnative\\bash.exe", Some("D:\\WinNT"), true),
+            ("D:/WinNT/./System32/../System32/bash.exe", Some("D:\\WinNT\\"), true),
+            ("D:\\WinNT\\System32\\bash.exe", Some(""), false),
+            ("D:\\WinNT\\System32\\bash.exe", None, false),
+            ("C:\\Windows\\System32\\bash.exe", Some("D:\\WinNT"), false),
+            ("E:\\Windows\\System32\\bash.exe", Some("D:\\WinNT"), false),
+            ("D:\\WinNT\\System32\\bash.exe", Some("WinNT"), false),
+            ("C:\\Git\\bin\\bash.exe", None, false),
+        ];
+        for (path, root, expected) in cases {
+            assert_eq!(is_legacy_wsl_bash_path(path, root), expected, "{path} with SystemRoot={root:?}");
+        }
+    }
+
+    #[test]
+    fn an_empty_system_root_falls_back_to_the_default_windows_directory() {
+        let default = std::path::PathBuf::from("C:\\Windows");
+        assert_eq!(windows_directory(None), default);
+        assert_eq!(windows_directory(Some("".into())), default);
+        assert_eq!(windows_directory(Some("D:\\WinNT".into())), std::path::PathBuf::from("D:\\WinNT"));
+    }
 }

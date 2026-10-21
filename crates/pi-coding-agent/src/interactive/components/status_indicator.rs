@@ -86,15 +86,18 @@ impl StatusIndicator {
         shared
     }
 
-    /// Manual or automatic compaction.
-    pub fn compaction(tui: &Tui, reason: CompactionReason) -> SharedIndicator {
+    /// Manual or automatic compaction. `color` styles both spinner and message (the editor border
+    /// color).
+    pub fn compaction(tui: &Tui, reason: CompactionReason, color: Option<StyleFn>) -> SharedIndicator {
         let cancel = format!("({} to cancel)", key_text("app.interrupt"));
         let label = match reason {
             CompactionReason::Manual => format!("Compacting context... {cancel}"),
             CompactionReason::Overflow => format!("Context overflow detected, Auto-compacting... {cancel}"),
             CompactionReason::Threshold => format!("Auto-compacting... {cancel}"),
         };
-        Self::shared(StatusKind::Compaction, tui, style(ThemeColor::Accent), style(ThemeColor::Muted), &label, None)
+        let spinner = color.clone().unwrap_or_else(|| style(ThemeColor::Accent));
+        let text = color.unwrap_or_else(|| style(ThemeColor::Muted));
+        Self::shared(StatusKind::Compaction, tui, spinner, text, &label, None)
     }
 
     /// Summarizing the abandoned branch during tree navigation.
@@ -156,5 +159,25 @@ pub struct IdleStatus;
 impl Component for IdleStatus {
     fn render(&mut self, width: usize) -> Vec<String> {
         vec![" ".repeat(width); 2]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pi_tui::TuiOptions;
+    use pi_tui::testing::VirtualTerminal;
+
+    use super::*;
+
+    #[test]
+    fn compaction_color_override_styles_spinner_and_message() {
+        let tui = Tui::new_main_screen(VirtualTerminal::shared(80, 24), TuiOptions::default());
+        let color: StyleFn = Rc::new(|text: &str| format!("<border>{text}</border>"));
+        let indicator = StatusIndicator::compaction(&tui, CompactionReason::Threshold, Some(color));
+        let line = indicator.borrow_mut().render_in_border(60);
+        assert!(line.starts_with("<border>"), "{line}");
+        assert!(line.contains("<border>Auto-compacting..."), "{line}");
+        assert_eq!(line.matches("<border>").count(), 2, "{line}");
+        indicator.borrow_mut().dispose();
     }
 }

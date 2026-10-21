@@ -600,6 +600,8 @@ fn main() {
                 1
             }
         };
+        // `exit` runs no destructors, so a TUI that was never stopped needs its terminal modes reset here.
+        pi_tui::restore_terminals_on_exit();
         std::process::exit(code);
     });
     // The driver exits the process itself; reaching here means it panicked.
