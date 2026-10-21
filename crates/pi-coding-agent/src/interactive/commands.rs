@@ -112,6 +112,9 @@ impl InteractiveMode {
         } else if let Some(instructions) = argument(text, "init") {
             clear();
             self.handle_init_command(text, instructions);
+        } else if let Some(instructions) = argument(text, "review") {
+            clear();
+            self.handle_review_command(text, instructions);
         } else if text == "/reload" {
             clear();
             self.handle_reload_command();
