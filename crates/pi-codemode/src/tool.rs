@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use pi_agent::{
-    AgentTool, AgentToolResult, ExecuteToolOptions, ToolContext, ToolLoadout, ToolLoadoutChanges, ToolUpdateCallback,
+    AgentTool, AgentToolResult, ExecuteToolOptions, ToolContext, ToolLoadout, ToolLoadoutChanges, ToolReach,
+    ToolUpdateCallback,
 };
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
@@ -36,6 +37,32 @@ pub fn codemode_schema() -> Value {
 /// Capable models write the script as raw text instead of a JSON-escaped string.
 pub fn codemode_constrained_sampling() -> Value {
     json!({ "type": "grammar", "variants": { "openai_lark": CODEMODE_SOURCE_GRAMMAR } })
+}
+
+/// Script globals that list or look up tools and namespaces, which the script may then call by any name.
+const DISCOVERY_GLOBALS: [&str; 4] = ["searchTools", "describeNamespace", "describeTool", "ALL_TOOLS"];
+
+fn is_word_char(character: char) -> bool {
+    character.is_ascii_alphanumeric() || character == '_'
+}
+
+/// The tools a script may call (`AgentTool::reaches_tools`): every tool when it uses a discovery
+/// global, else the words of its source, so `tools.mcp__docs__search` and
+/// `tools["mcp__docs__" + name]` both name the `mcp__docs` namespace.
+pub fn codemode_script_reach(code: Option<&Value>) -> ToolReach {
+    let Some(code) = code.and_then(Value::as_str) else { return ToolReach::Words(Vec::new()) };
+    let names_global = DISCOVERY_GLOBALS.iter().any(|global| {
+        code.match_indices(global).any(|(start, _)| {
+            !code[..start].chars().next_back().is_some_and(is_word_char)
+                && !code[start + global.len()..].chars().next().is_some_and(is_word_char)
+        })
+    });
+    if names_global {
+        return ToolReach::All;
+    }
+    ToolReach::Words(
+        code.split(|character| !is_word_char(character)).filter(|word| !word.is_empty()).map(String::from).collect(),
+    )
 }
 
 pub struct CodemodeTool {
@@ -174,6 +201,10 @@ impl AgentTool for CodemodeTool {
         CODEMODE_PROMPT_GUIDELINES.iter().map(|guideline| guideline.to_string()).collect()
     }
 
+    fn reaches_tools(&self, input: &Value) -> Option<ToolReach> {
+        Some(codemode_script_reach(input.get("code")))
+    }
+
     fn prepare_loadout(&self, loadout: &ToolLoadout) -> Option<ToolLoadoutChanges> {
         let options =
             CodemodeToolOptions { models: self.options.models && self.host.models().is_some(), ..self.options.clone() };
@@ -203,5 +234,32 @@ impl AgentTool for CodemodeTool {
             self.host.clone()
         };
         self.run_as_result(host, context.tool_call_id(), args, cancel, on_update).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reach(code: &str) -> ToolReach {
+        codemode_script_reach(Some(&json!(code)))
+    }
+
+    #[test]
+    fn scripts_reach_all_tools_when_they_search_or_list_and_else_the_words_they_use() {
+        for code in
+            ["await searchTools('x')", "return ALL_TOOLS.length", "describeNamespace('docs')", "describeTool(n)"]
+        {
+            assert_eq!(reach(code), ToolReach::All, "{code}");
+        }
+        assert_eq!(
+            reach("await tools.mcp__my_docs__search({})"),
+            ToolReach::Words(["await", "tools", "mcp__my_docs__search"].map(String::from).to_vec())
+        );
+        // A global name inside a longer word is just a word.
+        let ToolReach::Words(words) = reach("mysearchTools(); searchToolsMore()") else { panic!("words") };
+        assert_eq!(words, ["mysearchTools", "searchToolsMore"]);
+        assert_eq!(codemode_script_reach(None), ToolReach::Words(Vec::new()));
+        assert_eq!(codemode_script_reach(Some(&json!(7))), ToolReach::Words(Vec::new()));
     }
 }

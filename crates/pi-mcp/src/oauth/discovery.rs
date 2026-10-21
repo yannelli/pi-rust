@@ -122,7 +122,7 @@ pub async fn discover_authorization_server_metadata(
         let trim = |value: &str| value.strip_suffix('/').unwrap_or(value).to_string();
         if !skip_issuer_validation && trim(&metadata.issuer) != trim(authorization_server_url) {
             return Err(OAuthError::IssuerMismatch {
-                expected: authorization_server_url.to_string(),
+                expected: Some(authorization_server_url.to_string()),
                 received: Some(metadata.issuer),
             });
         }

@@ -220,13 +220,14 @@ async fn run_flow(
     let token_request =
         TokenRequest { metadata, client_information: &client, resource: resource.as_deref(), http: &options.http };
     if let Some(code) = &options.authorization_code {
-        // RFC 9207: never send a code from another authorization server to this one.
-        if let Some(metadata) = metadata
-            && (options.iss.is_some() || metadata.authorization_response_iss_parameter_supported == Some(true))
-            && options.iss.as_deref() != Some(metadata.issuer.as_str())
-        {
+        // RFC 9207: never send a code from another authorization server to this one. Without metadata
+        // there is no issuer to compare with, so any `iss` is rejected.
+        let iss_supported =
+            metadata.is_some_and(|metadata| metadata.authorization_response_iss_parameter_supported == Some(true));
+        let issuer = metadata.map(|metadata| metadata.issuer.as_str());
+        if (options.iss.is_some() || iss_supported) && options.iss.as_deref() != issuer {
             return Err(OAuthError::IssuerMismatch {
-                expected: metadata.issuer.clone(),
+                expected: issuer.map(str::to_string),
                 received: options.iss.clone(),
             });
         }

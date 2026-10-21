@@ -1,6 +1,6 @@
 //! Tool result content and its conversion to model content.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 use crate::types::{JsonObject, ResourceContents};
@@ -64,12 +64,18 @@ impl ContentBlock {
     }
 }
 
+/// A field that is present with any value, `null` included, instead of `None` for `null`.
+fn present<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Value>, D::Error> {
+    Value::deserialize(deserializer).map(Some)
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CallToolResult {
     #[serde(default)]
     pub content: Vec<ContentBlock>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Any JSON value, including arrays and `null` (MCP 2026-07-28; earlier revisions allowed only objects).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     pub structured_content: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_error: Option<bool>,
@@ -187,5 +193,17 @@ mod tests {
             to_llm_content(&[ContentBlock::text("n=1")], Some(&structured)),
             vec![pi_ai::ContentBlock::text("n=1")]
         );
+        // #10416: structured content may be any JSON value.
+        assert_eq!(to_llm_content(&[], Some(&json!([1, 2]))), vec![pi_ai::ContentBlock::text("[\n  1,\n  2\n]")]);
+        assert_eq!(to_llm_content(&[], Some(&Value::Null)), vec![pi_ai::ContentBlock::text("null")]);
+    }
+
+    #[test]
+    fn keeps_null_structured_content_apart_from_missing_structured_content() {
+        let null: CallToolResult = serde_json::from_value(json!({ "content": [], "structuredContent": null })).unwrap();
+        assert_eq!(null.structured_content, Some(Value::Null));
+        assert_eq!(serde_json::to_value(&null).unwrap(), json!({ "content": [], "structuredContent": null }));
+        let missing: CallToolResult = serde_json::from_value(json!({ "content": [] })).unwrap();
+        assert_eq!(missing.structured_content, None);
     }
 }

@@ -1,10 +1,11 @@
-//! Waiting for servers: the first prompt waits for servers with `direct` tools; codemode scripts,
-//! `tool_search`, and the resource tools wait for the servers they need when they run.
+//! Waiting for servers: the first prompt waits for servers with `direct` tools; tools that reach
+//! other tools (codemode scripts, `tool_search`) and the resource tools wait for the servers they need
+//! when they run.
 
-use serde_json::Value;
+use pi_agent::ToolReach;
 use tokio_util::sync::CancellationToken;
 
-use super::{CODEMODE_TOOL_NAME, Inner, McpManager, NotifyLevel, Ready, TOOL_SEARCH_TOOL_NAME};
+use super::{Inner, McpManager, NotifyLevel, Ready};
 use crate::config::mcp_namespace;
 use crate::naming::{LIST_MCP_RESOURCE_TEMPLATES_TOOL, LIST_MCP_RESOURCES_TOOL, READ_MCP_RESOURCE_TOOL};
 use crate::runtime::McpServerConnection;
@@ -13,17 +14,16 @@ use crate::section::{McpServerListing, has_direct_tools, render_servers_section}
 pub const STILL_CONNECTING_MESSAGE: &str =
     "MCP servers are still connecting; their tools become available once connected.";
 
-/// Whether a codemode script needs the server: it names its namespace, or searches, enumerates, or
-/// describes tools, which may name the server in other forms.
-pub fn script_needs_server(code: &str, server: &str) -> bool {
-    let word =
-        |character: Option<char>| character.is_some_and(|character| character.is_alphanumeric() || character == '_');
-    let names_global = ["searchTools", "describeNamespace", "describeTool", "ALL_TOOLS"].iter().any(|global| {
-        code.match_indices(global).any(|(start, _)| {
-            !word(code[..start].chars().next_back()) && !word(code[start + global.len()..].chars().next())
-        })
-    });
-    names_global || code.contains(&mcp_namespace(server))
+/// Whether a call that reaches `reach` (see `AgentTool::reaches_tools`) needs the server: it reaches
+/// every tool, or one of its words contains the server's namespace.
+pub fn reaches_server(reach: &ToolReach, server: &str) -> bool {
+    match reach {
+        ToolReach::All => true,
+        ToolReach::Words(words) => {
+            let namespace = mcp_namespace(server);
+            words.iter().any(|word| word.contains(&namespace))
+        }
+    }
 }
 
 impl McpManager {
@@ -64,18 +64,18 @@ impl McpManager {
         render_servers_section(&listings)
     }
 
-    /// Wait before a tool call for the servers it needs: those a codemode script names, all of them
-    /// for `tool_search` and the resource tools, else the tool's own server.
-    pub async fn wait_for_tool_call(&self, tool_name: &str, input: &Value, cancel: &CancellationToken) {
+    /// Wait before a tool call for the servers it needs: those a tool that reaches other tools may
+    /// reach (`reach`, from `AgentTool::reaches_tools`), all of them for the resource tools, else the
+    /// tool's own server.
+    pub async fn wait_for_tool_call(&self, tool_name: &str, reach: Option<&ToolReach>, cancel: &CancellationToken) {
         let waiting: Vec<u64> = {
             let state = self.inner.lock();
             let ready = state.servers.iter().filter(|server| server.enabled() && server.ready.is_some());
             let resource_tool = [LIST_MCP_RESOURCES_TOOL, LIST_MCP_RESOURCE_TEMPLATES_TOOL, READ_MCP_RESOURCE_TOOL]
                 .contains(&tool_name);
-            if tool_name == CODEMODE_TOOL_NAME {
-                let code = input.get("code").and_then(Value::as_str).unwrap_or_default();
-                ready.filter(|server| script_needs_server(code, &server.entry.name)).map(|server| server.id).collect()
-            } else if tool_name == TOOL_SEARCH_TOOL_NAME || resource_tool {
+            if let Some(reach) = reach {
+                ready.filter(|server| reaches_server(reach, &server.entry.name)).map(|server| server.id).collect()
+            } else if resource_tool {
                 ready.map(|server| server.id).collect()
             } else {
                 let owner = state.registry.owner(tool_name);
@@ -117,14 +117,20 @@ impl Inner {
 
 #[cfg(test)]
 mod tests {
-    use super::script_needs_server;
+    use pi_agent::ToolReach;
+
+    use super::reaches_server;
+
+    fn words(text: &[&str]) -> ToolReach {
+        ToolReach::Words(text.iter().map(|word| word.to_string()).collect())
+    }
 
     #[test]
-    fn scripts_need_the_servers_they_name_or_search() {
-        assert!(script_needs_server("await tools.mcp__my_docs__search({})", "my-docs"));
-        assert!(script_needs_server("const found = await searchTools('x')", "docs"));
-        assert!(script_needs_server("return ALL_TOOLS.length", "docs"));
-        assert!(!script_needs_server("mysearchTools()", "docs"));
-        assert!(!script_needs_server("await tools.mcp__other__x()", "docs"));
+    fn calls_need_the_servers_they_may_reach() {
+        assert!(reaches_server(&words(&["await", "tools", "mcp__my_docs__search"]), "my-docs"));
+        assert!(reaches_server(&ToolReach::All, "docs"));
+        assert!(!reaches_server(&words(&["mysearchTools"]), "docs"));
+        assert!(!reaches_server(&words(&["mcp__other__x"]), "docs"));
+        assert!(!reaches_server(&words(&[]), "docs"));
     }
 }

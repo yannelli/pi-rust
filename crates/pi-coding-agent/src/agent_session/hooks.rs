@@ -163,7 +163,10 @@ fn before_tool_call_hook(weak: Weak<AgentSession>) -> BeforeToolCallFn {
         async move {
             let session = weak.upgrade()?;
             if let Some(manager) = session.mcp_manager() {
-                manager.wait_for_tool_call(&call.tool_call.name, call.args, &cancel).await;
+                let name = &call.tool_call.name;
+                let reach = session
+                    .with_tool_registry(|registry| registry.get(name).and_then(|tool| tool.reaches_tools(call.args)));
+                manager.wait_for_tool_call(name, reach.as_ref(), &cancel).await;
             }
             session.extension_tool_call(&call).await
         }

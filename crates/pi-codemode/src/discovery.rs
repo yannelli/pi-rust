@@ -11,13 +11,12 @@ use crate::identifier::to_codemode_identifier;
 use crate::sandbox::SandboxFunction;
 use crate::tool_search::{DEFAULT_TOOL_SEARCH_LIMIT, search_tools, tool_search_document};
 
-/// Whether `query` names the namespace: its name, its script identifier, or the part after its last
-/// `__` in either form (`mcp__dev-radius` matches `dev-radius` and `dev_radius`).
-pub fn is_namespace_name(namespace: &str, query: &str) -> bool {
-    let id = to_codemode_identifier(namespace);
+/// Whether `query` names the namespace: its name or one of its aliases, as written or as the same
+/// script identifier (`dev-radius` and `dev_radius` are both `dev_radius`).
+pub fn is_namespace_name(namespace: &ToolNamespace, query: &str) -> bool {
     let query_id = to_codemode_identifier(query);
-    let suffix = |name: &str| name.rfind("__").map(|index| name[index + 2..].to_string());
-    namespace == query || id == query_id || suffix(namespace).as_deref() == Some(query) || suffix(&id) == Some(query_id)
+    let names = std::iter::once(&namespace.name).chain(&namespace.aliases);
+    names.into_iter().any(|name| name == query || to_codemode_identifier(name) == query_id)
 }
 
 /// Spread arguments as a list; a missing argument list is empty.
@@ -59,7 +58,7 @@ fn search(
         .iter()
         .filter(|tool| match (namespace, &tool.namespace) {
             (None, _) => true,
-            (Some(query), Some(tool_namespace)) => is_namespace_name(&tool_namespace.name, query),
+            (Some(query), Some(tool_namespace)) => is_namespace_name(tool_namespace, query),
             (Some(_), None) => false,
         })
         .map(tool_search_document)
@@ -93,8 +92,7 @@ fn describe_namespace(tools: &[CodemodeToolInfo], args: Vec<Value>) -> Result<Op
     let mut found: Option<&ToolNamespace> = None;
     let mut names = Vec::new();
     for tool in tools {
-        let Some(namespace) = tool.namespace.as_ref().filter(|namespace| is_namespace_name(&namespace.name, name))
-        else {
+        let Some(namespace) = tool.namespace.as_ref().filter(|namespace| is_namespace_name(namespace, name)) else {
             continue;
         };
         found.get_or_insert(namespace);
@@ -143,13 +141,20 @@ pub(crate) fn discovery_globals(
 mod tests {
     use super::*;
 
+    fn namespace(name: &str, aliases: &[&str]) -> ToolNamespace {
+        ToolNamespace { aliases: aliases.iter().map(|alias| alias.to_string()).collect(), ..ToolNamespace::new(name) }
+    }
+
     #[test]
-    fn matches_namespace_names_identifiers_and_suffixes() {
-        assert!(is_namespace_name("mcp__dev-radius", "mcp__dev-radius"));
-        assert!(is_namespace_name("mcp__dev-radius", "mcp__dev_radius"));
-        assert!(is_namespace_name("mcp__dev-radius", "dev-radius"));
-        assert!(is_namespace_name("mcp__dev-radius", "dev_radius"));
-        assert!(!is_namespace_name("mcp__dev-radius", "radius"));
-        assert!(!is_namespace_name("docs", "mcp"));
+    fn matches_namespace_names_identifiers_and_aliases() {
+        let radius = namespace("mcp__dev-radius", &["dev-radius"]);
+        assert!(is_namespace_name(&radius, "mcp__dev-radius"));
+        assert!(is_namespace_name(&radius, "mcp__dev_radius"));
+        assert!(is_namespace_name(&radius, "dev-radius"));
+        assert!(is_namespace_name(&radius, "dev_radius"));
+        assert!(!is_namespace_name(&radius, "radius"));
+        // Without an alias the part after `__` is no longer a name.
+        assert!(!is_namespace_name(&namespace("mcp__dev-radius", &[]), "dev-radius"));
+        assert!(!is_namespace_name(&namespace("docs", &[]), "mcp"));
     }
 }

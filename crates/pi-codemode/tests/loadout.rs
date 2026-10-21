@@ -86,15 +86,32 @@ fn describes_what_script_calls_resolve_to() {
         describe_script_call(&stats)
             .ends_with("`tools.stats(args)` resolves to `{ output, exit_code, full_output_path? }`.")
     );
+    // The fields of object-typed fields are named one level deep, as for MCP results.
     stats.output_schema = Some(json!({
         "type": "object",
         "properties": {
             "content": { "type": "array", "items": { "type": "object" } },
+            "structuredContent": {
+                "type": "object",
+                "properties": { "hits": { "type": "array" }, "page": { "type": "object", "properties": { "n": {} } } },
+                "required": ["hits"],
+            },
             "isError": { "type": "boolean" },
-            "_meta": { "type": "object" },
         },
+        "required": ["content"],
     }));
-    assert!(describe_script_call(&stats).ends_with("resolves to `CallToolResult`."));
+    assert!(
+        describe_script_call(&stats)
+            .ends_with("resolves to `{ content, structuredContent?: { hits, page? }, isError? }`.")
+    );
+    stats.output_schema = Some(json!({
+        "type": "object",
+        "properties": { "content": { "type": "array" }, "structuredContent": { "type": "object" } },
+        "required": ["content"],
+    }));
+    assert!(describe_script_call(&stats).ends_with("resolves to `{ content, structuredContent? }`."));
+    stats.output_schema = Some(json!({ "type": "array", "items": { "type": "string" } }));
+    assert!(describe_script_call(&stats).ends_with("resolves to `Array<string>`."));
 }
 
 #[tokio::test]
@@ -111,6 +128,7 @@ async fn shows_guidelines_of_unlisted_tools_through_describe_tool() {
 
 fn mcp_host() -> FakeHost {
     let radius = ToolNamespace {
+        aliases: vec!["dev-radius".into()],
         description: Some("Radius server".into()),
         instructions: Some("Use search first.".into()),
         ..ToolNamespace::new("mcp__dev-radius")

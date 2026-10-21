@@ -1,36 +1,80 @@
 //! The host side of one execution: relays calls to tools and globals, collects output, and ends
 //! the run on completion, deadline, or cancellation.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::task::Poll;
 use std::time::Instant;
 
 use futures::future::BoxFuture;
 use futures::stream::{FuturesUnordered, StreamExt};
 use serde_json::{Map, Value};
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_util::sync::CancellationToken;
 
 use super::types::{
-    CodemodeCall, CodemodeCallStatus, CodemodeError, CodemodeErrorKind, CodemodeOutputItem, CodemodeResult,
-    CodemodeStoreWrites, CodemodeSuccess, SandboxFunction, Timeout,
+    CodemodeCall, CodemodeCallStatus, CodemodeCallTarget, CodemodeDeclaredGlobal, CodemodeDeclaredTool, CodemodeDuring,
+    CodemodeError, CodemodeErrorKind, CodemodeHostCall, CodemodeOutcome, CodemodeOutputItem, CodemodeResult,
+    CodemodeStoreWrites, CodemodeSuccess, OnCall, OnIdle, OnStarted, SandboxFunction, Timeout,
 };
-use super::worker::{self, CallTarget, HostReply, WorkerMessage, WorkerSetup};
+use super::worker::{self, CallTarget, Deterministic, HostReply, WorkerMessage, WorkerSetup};
 use crate::identifier::to_codemode_identifier;
 use crate::js::{js_stringify, parse_js_json};
 
+/// What a host-controlled run shares between the run and the handle that answers its calls.
+#[derive(Default)]
+pub(crate) struct RunState {
+    pub finished: bool,
+    /// Result numbers `deliver()` used.
+    pub delivered: HashSet<u64>,
+    /// Calls the script made that no result has answered yet.
+    pub waiting: HashSet<u64>,
+}
+
+pub(crate) type SharedRunState = Arc<Mutex<RunState>>;
+
+pub(crate) fn lock_state(state: &SharedRunState) -> std::sync::MutexGuard<'_, RunState> {
+    state.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// A call's answer, as `deliver()` queued it.
+pub(crate) struct Delivery {
+    pub seq: u64,
+    pub now: f64,
+    pub id: u64,
+    pub outcome: CodemodeOutcome,
+}
+
+/// Callbacks of a host-controlled run: its calls go to the caller, which answers them with `deliver()`.
+pub(crate) struct ControlCallbacks {
+    pub on_started: Option<OnStarted>,
+    pub on_call: OnCall,
+    pub on_idle: Option<OnIdle>,
+    pub state: SharedRunState,
+}
+
+pub(crate) struct Control {
+    pub mode: Deterministic,
+    pub callbacks: ControlCallbacks,
+    pub deliveries: UnboundedReceiver<Delivery>,
+}
+
 pub(crate) struct ExecutionParams {
     pub code: String,
+    /// Runs the script's calls; empty when `control` is set.
     pub tools: Vec<SandboxFunction>,
     pub globals: Vec<SandboxFunction>,
+    /// `[{ name, jsName, description }]` and `[{ name, spread }]`: what the script sees.
+    pub tools_json: Value,
+    pub globals_json: Value,
     pub timeout: Timeout,
     pub cancel: Option<CancellationToken>,
     pub closed: CancellationToken,
     pub memory_limit: Option<usize>,
     pub acquire_worker: Option<super::AcquireWorker>,
     pub store: Map<String, Value>,
+    pub control: Option<Control>,
 }
 
 /// A payload from the worker that does not decode. The execution fails as a sandbox error.
@@ -96,6 +140,8 @@ struct Execution {
     calls: Vec<CodemodeCall>,
     pending: HashMap<u64, PendingCall>,
     replies: Option<mpsc::Sender<HostReply>>,
+    /// Set when the script ended by itself in a host-controlled run.
+    during: Option<CodemodeDuring>,
 }
 
 /// The result of handling one message: `Some` ends the execution.
@@ -145,21 +191,78 @@ impl Execution {
     }
 
     fn complete_call(&mut self, id: u64, result: Result<Option<Value>, String>) {
-        // Already cancelled by finish(): the record keeps "cancelled".
-        let Some(pending) = self.pending.remove(&id) else { return };
-        let (status, reply) = match result {
-            Ok(value) => {
-                (CodemodeCallStatus::Ok, HostReply { id, ok: true, payload: value.as_ref().map(js_stringify) })
-            }
-            Err(message) => (CodemodeCallStatus::Error, HostReply { id, ok: false, payload: Some(message) }),
+        let reply = match result {
+            Ok(value) => HostReply { id, ok: true, payload: value.as_ref().map(js_stringify), ..HostReply::default() },
+            Err(message) => HostReply { id, ok: false, payload: Some(message), ..HostReply::default() },
         };
+        self.finish_call(reply);
+    }
+
+    /// Record the call's status and pass its reply to the worker.
+    fn finish_call(&mut self, reply: HostReply) {
+        // Already cancelled by finish(): the record keeps "cancelled".
+        let Some(pending) = self.pending.remove(&reply.id) else { return };
         if let Some(index) = pending.record {
-            self.calls[index].status = status;
-            self.calls[index].duration_ms = pending.started.elapsed().as_secs_f64() * 1000.0;
+            let call = &mut self.calls[index];
+            call.status = if reply.ok { CodemodeCallStatus::Ok } else { CodemodeCallStatus::Error };
+            call.duration_ms = pending.started.elapsed().as_secs_f64() * 1000.0;
         }
         if let Some(replies) = &self.replies {
             let _ = replies.send(reply);
         }
+    }
+
+    /// A host-controlled run: record the call and hand it to the caller, who answers with `deliver()`.
+    fn forward_call(
+        &mut self,
+        control: &ControlCallbacks,
+        id: u64,
+        target: CallTarget,
+        name: String,
+        args: Option<String>,
+    ) -> Result<(), BridgeError> {
+        if self.pending.contains_key(&id) {
+            return Err(BridgeError(format!("duplicate call id {id}")));
+        }
+        let args = args.map(|json| parse_bridge_json(&json, "call arguments")).transpose()?;
+        let is_tool = target == CallTarget::Tool;
+        let record = is_tool.then(|| {
+            self.calls.push(CodemodeCall {
+                name: name.clone(),
+                status: CodemodeCallStatus::Cancelled,
+                duration_ms: 0.0,
+            });
+            self.calls.len() - 1
+        });
+        self.pending.insert(id, PendingCall { record, started: Instant::now(), token: CancellationToken::new() });
+        lock_state(&control.state).waiting.insert(id);
+        let target = if is_tool { CodemodeCallTarget::Tool } else { CodemodeCallTarget::Global };
+        (control.on_call)(CodemodeHostCall { id, target, name, args });
+        Ok(())
+    }
+
+    /// A result the caller delivered with `deliver()`.
+    fn answer(&mut self, delivery: Delivery) {
+        let Delivery { seq, now, id, outcome } = delivery;
+        let reply = match outcome {
+            CodemodeOutcome::Ok(value) => HostReply {
+                id,
+                ok: true,
+                payload: value.as_ref().map(js_stringify),
+                seq: Some(seq),
+                now: Some(now),
+                properties: None,
+            },
+            CodemodeOutcome::Err { message, properties } => HostReply {
+                id,
+                ok: false,
+                payload: Some(message),
+                seq: Some(seq),
+                now: Some(now),
+                properties: properties.map(|properties| js_stringify(&Value::Object(properties))),
+            },
+        };
+        self.finish_call(reply);
     }
 
     fn handle_done(ok: bool, value: Option<String>, writes: Option<String>, error: Option<String>) -> Step {
@@ -205,6 +308,19 @@ fn function_table(functions: Vec<SandboxFunction>) -> HashMap<String, SandboxFun
     functions.into_iter().map(|function| (function.name().to_string(), function)).collect()
 }
 
+/// `(tools, globals)` as the prelude reads them.
+pub(crate) fn declarations_json(tools: &[CodemodeDeclaredTool], globals: &[CodemodeDeclaredGlobal]) -> (Value, Value) {
+    let tools = tools.iter().map(|tool| {
+        serde_json::json!({
+            "name": tool.name,
+            "jsName": tool.js_name.clone().unwrap_or_else(|| to_codemode_identifier(&tool.name)),
+            "description": tool.description.clone().unwrap_or_default(),
+        })
+    });
+    let globals = globals.iter().map(|global| serde_json::json!({ "name": global.name, "spread": global.spread }));
+    (Value::Array(tools.collect()), Value::Array(globals.collect()))
+}
+
 /// Stops the worker when the execution ends, also when the caller drops the execution future.
 struct InterruptOnDrop(Arc<AtomicBool>);
 
@@ -215,26 +331,6 @@ impl Drop for InterruptOnDrop {
 }
 
 pub(crate) async fn run(params: ExecutionParams) -> CodemodeResult {
-    let tools_json = Value::Array(
-        params
-            .tools
-            .iter()
-            .map(|tool| {
-                serde_json::json!({
-                    "name": tool.name(),
-                    "jsName": to_codemode_identifier(tool.name()),
-                    "description": tool.declaration.description.clone().unwrap_or_default(),
-                })
-            })
-            .collect(),
-    );
-    let globals_json = Value::Array(
-        params
-            .globals
-            .iter()
-            .map(|global| serde_json::json!({ "name": global.name(), "spread": global.spread }))
-            .collect(),
-    );
     let store_json: Map<String, Value> =
         params.store.iter().map(|(key, value)| (key.clone(), Value::String(js_stringify(value)))).collect();
 
@@ -249,14 +345,21 @@ pub(crate) async fn run(params: ExecutionParams) -> CodemodeResult {
         calls: Vec::new(),
         pending: HashMap::new(),
         replies: Some(replies),
+        during: None,
     };
+    let (mode, control) = match params.control {
+        Some(Control { mode, callbacks, deliveries }) => (Some(mode), Some((callbacks, deliveries))),
+        None => (None, None),
+    };
+    let finished = control.as_ref().map(|(callbacks, _)| callbacks.state.clone());
     let setup = WorkerSetup {
         code: params.code,
-        tools_json: tools_json.to_string(),
-        globals_json: globals_json.to_string(),
+        tools_json: params.tools_json.to_string(),
+        globals_json: params.globals_json.to_string(),
         store_json: Value::Object(store_json).to_string(),
         memory_limit: params.memory_limit,
         interrupt: interrupt.clone(),
+        deterministic: mode,
         to_host,
         replies: replies_rx,
     };
@@ -271,16 +374,19 @@ pub(crate) async fn run(params: ExecutionParams) -> CodemodeResult {
             Ok(Err(error)) => {
                 Err(CodemodeError::new(CodemodeErrorKind::Sandbox, format!("Failed to start worker: {error}")))
             }
-            Ok(Ok(())) => drive(&mut execution, &mut messages, params.timeout, &cancel, &params.closed).await,
+            Ok(Ok(())) => drive(&mut execution, &mut messages, params.timeout, &cancel, &params.closed, control).await,
         }
     };
 
     // The worker stops at its next interrupt check and frees its VM on its own thread, so the
     // result does not wait for a large heap to be released.
+    if let Some(state) = finished {
+        lock_state(&state).finished = true;
+    }
     execution.cancel_pending();
     execution.replies = None;
     drop(messages);
-    CodemodeResult { outcome, output: execution.output, calls: execution.calls }
+    CodemodeResult { outcome, output: execution.output, calls: execution.calls, during: execution.during }
 }
 
 async fn drive(
@@ -289,10 +395,15 @@ async fn drive(
     timeout: Timeout,
     cancel: &CancellationToken,
     closed: &CancellationToken,
+    control: Option<(ControlCallbacks, UnboundedReceiver<Delivery>)>,
 ) -> Result<CodemodeSuccess, CodemodeError> {
     let deadline = match timeout {
         Timeout::After(duration) => Some((tokio::time::Instant::now() + duration, duration.as_millis())),
         Timeout::Never => None,
+    };
+    let (callbacks, mut deliveries) = match control {
+        Some((callbacks, deliveries)) => (Some(callbacks), Some(deliveries)),
+        None => (None, None),
     };
     let mut running: FuturesUnordered<CallFuture> = FuturesUnordered::new();
     loop {
@@ -310,19 +421,52 @@ async fn drive(
                     execution.output.push(item);
                     None
                 }
-                Some(WorkerMessage::Call { id, target, name, args }) => match execution.start_call(id, target, name, args) {
-                    Err(error) => bridge_failure(error),
-                    Ok(future) => {
-                        running.push(future);
-                        for (id, result) in poll_ready(&mut running).await {
-                            execution.complete_call(id, result);
+                Some(WorkerMessage::Call { id, target, name, args }) => match &callbacks {
+                    Some(callbacks) => match execution.forward_call(callbacks, id, target, name, args) {
+                        Err(error) => bridge_failure(error),
+                        Ok(()) => None,
+                    },
+                    None => match execution.start_call(id, target, name, args) {
+                        Err(error) => bridge_failure(error),
+                        Ok(future) => {
+                            running.push(future);
+                            for (id, result) in poll_ready(&mut running).await {
+                                execution.complete_call(id, result);
+                            }
+                            None
                         }
-                        None
-                    }
+                    },
                 },
-                Some(WorkerMessage::Done { ok, value, writes, error }) => Execution::handle_done(ok, value, writes, error),
+                Some(WorkerMessage::Started(fingerprint)) => {
+                    if let Some(on_started) = callbacks.as_ref().and_then(|callbacks| callbacks.on_started.as_ref()) {
+                        on_started(&fingerprint);
+                    }
+                    None
+                }
+                Some(WorkerMessage::Idle { seq, issued }) => {
+                    if let Some(on_idle) = callbacks.as_ref().and_then(|callbacks| callbacks.on_idle.as_ref()) {
+                        on_idle(seq, issued);
+                    }
+                    None
+                }
+                Some(WorkerMessage::Done { ok, value, writes, error, during }) => {
+                    execution.during = during;
+                    Execution::handle_done(ok, value, writes, error)
+                }
                 Some(WorkerMessage::Crash(message)) => Some(Err(CodemodeError::new(CodemodeErrorKind::Sandbox, message))),
             },
+            delivery = async {
+                match deliveries.as_mut() {
+                    Some(receiver) => receiver.recv().await,
+                    None => std::future::pending().await,
+                }
+            }, if deliveries.is_some() => {
+                match delivery {
+                    Some(delivery) => execution.answer(delivery),
+                    None => deliveries = None,
+                }
+                None
+            }
             Some((id, result)) = running.next(), if !running.is_empty() => {
                 execution.complete_call(id, result);
                 None

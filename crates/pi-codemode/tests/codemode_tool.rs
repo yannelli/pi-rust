@@ -139,6 +139,18 @@ async fn applies_timeout_ms_and_rejects_invalid_options() {
         invalid.unwrap_err().to_string(),
         "@options only supports `max_output_tokens` and `timeout_ms`; got `yield`"
     );
+
+    // #10631: a misplaced options line fails before the script runs instead of running without a deadline.
+    let misplaced = tool.run(
+        "call-3",
+        "// count\n// @options: {\"timeout_ms\": 200}\nwhile (true) {}",
+        CancellationToken::new(),
+        None,
+    );
+    assert_eq!(
+        misplaced.await.unwrap_err().to_string(),
+        "The // @options: line must be the first line of the input; found one on line 2"
+    );
 }
 
 #[tokio::test]

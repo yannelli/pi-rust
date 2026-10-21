@@ -32,7 +32,7 @@ pub use proxy::{ProxyAssistantMessageEvent, ProxyStreamOptions, proxy_stream_fn,
 pub use registry::{ActivationFilter, RefreshOptions, ToolInfo, ToolRegistry};
 pub use tool_execution::{RunToolCallOptions, run_tool_call};
 pub use tool_model::{
-    ToolAnnotations, ToolExposure, ToolLoadout, ToolLoadoutChanges, ToolNamespace, ToolReplay,
+    ToolAnnotations, ToolExposure, ToolLoadout, ToolLoadoutChanges, ToolNamespace, ToolReach, ToolReplay,
     normalize_prompt_guidelines, normalize_prompt_snippet,
 };
 pub use types::*;
