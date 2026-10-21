@@ -10,6 +10,7 @@ use pi_coding_agent::export::{
     ExportTheme, ExportTool, HtmlExportOptions, RenderedResultHtml, ToolHtmlRenderer, default_html_output_path,
     export_from_file, export_session_html,
 };
+use pi_js::rquickjs::{Context, Function, Runtime};
 use serde_json::{Value, json};
 
 fn fixture() -> PathBuf {
@@ -57,8 +58,8 @@ fn export_from_file_matches_upstream_bytes() {
     let written = export_from_file(fixture().to_str().unwrap(), out.to_str(), &ExportTheme::dark()).unwrap();
     assert_eq!(written, out);
     let bytes = std::fs::read(&out).unwrap();
-    assert_eq!(bytes.len(), 277_004);
-    assert_eq!(fnv1a(&bytes), 0x631c_acac_65c5_e5b3);
+    assert_eq!(bytes.len(), 283_596);
+    assert_eq!(fnv1a(&bytes), 0x0627_f0f5_300d_1eb2);
 }
 
 #[test]
@@ -84,8 +85,8 @@ fn session_export_with_state_matches_upstream_bytes() {
     };
     export_session_html(&fixture(), out.to_str(), &options).unwrap();
     let bytes = std::fs::read(&out).unwrap();
-    assert_eq!(bytes.len(), 277_708);
-    assert_eq!(fnv1a(&bytes), 0xb8e3_12fd_40ce_1c97);
+    assert_eq!(bytes.len(), 284_300);
+    assert_eq!(fnv1a(&bytes), 0x87ac_10d3_1e12_1296);
 
     let data = session_data(&String::from_utf8(bytes).unwrap());
     let rendered = &data["renderedTools"];
@@ -105,14 +106,23 @@ fn page_structure_embedded_data_and_escaping() {
     assert!(html.contains("<title>Session Export</title>"));
     assert!(html.contains("--accent: #a798d7;\n      --border: #5fa8cc;"));
     assert!(html.contains("--exportPageBg: #21252c;"));
-    assert!(html.contains("marked v18.0.5") && html.contains("Highlight.js v11.9.0"));
-    for placeholder in ["{{CSS}}", "{{JS}}", "{{SESSION_DATA}}", "{{MARKED_JS}}", "{{THEME_VARS}}", "{{BODY_BG}}"] {
+    assert!(html.contains("marked v18.0.11") && html.contains("Highlight.js v11.9.0"));
+    assert!(html.contains("marked-cjk-friendly v0.1.2"));
+    for placeholder in [
+        "{{CSS}}",
+        "{{JS}}",
+        "{{SESSION_DATA}}",
+        "{{MARKED_JS}}",
+        "{{MARKED_CJK_FRIENDLY_JS}}",
+        "{{THEME_VARS}}",
+        "{{BODY_BG}}",
+    ] {
         assert!(!html.contains(placeholder), "{placeholder} left in page");
     }
     // Session text only travels base64-encoded, so it cannot close the script element.
     assert!(!html.contains("alert(\"xss\")"));
     assert!(!html.contains("onerror=alert(1)"));
-    assert_eq!(html.matches("</script>").count(), 4);
+    assert_eq!(html.matches("</script>").count(), 5);
 
     let data = session_data(&html);
     let keys: Vec<&String> = data.as_object().unwrap().keys().collect();
@@ -154,4 +164,71 @@ fn default_output_name_uses_the_session_file_name() {
     let path = Path::new("/sessions/2026-01-02T03-04-05-678Z_abc.jsonl");
     assert_eq!(default_html_output_path(path), PathBuf::from("pi-session-2026-01-02T03-04-05-678Z_abc.html"));
     assert_eq!(default_html_output_path(Path::new("/x/notes.txt")), PathBuf::from("pi-session-notes.txt.html"));
+}
+
+/// The DOM the viewer script touches while loading, stubbed for QuickJS.
+const VIEWER_STUBS: &str = r#"
+globalThis.window = { location: { search: "" } };
+globalThis.document = { getElementById: () => ({ textContent: '{"header":{},"entries":[],"leafId":null}' }), querySelector: () => null };
+globalThis.atob = (text) => text;
+globalThis.TextDecoder = class { decode(bytes) { return String.fromCharCode(...bytes); } };
+globalThis.URLSearchParams = class { get() { return null; } };
+"#;
+
+/// Run the exported page's scripts in QuickJS and render each of `inputs` with its `safeMarkedParse`.
+fn render_markdown(html: &str, inputs: &[&str]) -> Vec<String> {
+    let mut scripts = Vec::new();
+    let mut rest = html;
+    while let Some(start) = rest.find("<script>") {
+        let body = &rest[start + "<script>".len()..];
+        let end = body.find("</script>").unwrap();
+        scripts.push(&body[..end]);
+        rest = &body[end..];
+    }
+    let viewer = scripts.pop().expect("viewer script");
+    let viewer = viewer.replace("function safeMarkedParse(", "return safeMarkedParse; function safeMarkedParse(");
+    let runtime = Runtime::new().unwrap();
+    let context = Context::full(&runtime).unwrap();
+    context.with(|ctx| {
+        let run =
+            |source: String| ctx.eval::<(), _>(source).unwrap_or_else(|error| panic!("{error}: {:?}", ctx.catch()));
+        run(VIEWER_STUBS.to_string());
+        for script in scripts {
+            run(script.to_string());
+        }
+        let parse: Function = ctx.eval(viewer).unwrap_or_else(|error| panic!("{error}: {:?}", ctx.catch()));
+        inputs.iter().map(|input| parse.call::<_, String>((*input,)).unwrap()).collect()
+    })
+}
+
+#[test]
+fn html_export_renders_emphasis_next_to_cjk_punctuation() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("cjk.html");
+    export_from_file(fixture().to_str().unwrap(), out.to_str(), &ExportTheme::dark()).unwrap();
+    let html = std::fs::read_to_string(&out).unwrap();
+
+    let rendered = render_markdown(
+        &html,
+        &[
+            "**这是测试。**后面",
+            "**一句话说清：**一台机器",
+            "**要点到此为止。**20 小时",
+            "字**「引用」**字",
+            "*斜体。*后面",
+            // CommonMark flanking rules still apply to non-CJK text.
+            "**end.**Then next",
+        ],
+    );
+    assert_eq!(
+        rendered,
+        [
+            "<p><strong>这是测试。</strong>后面</p>\n",
+            "<p><strong>一句话说清：</strong>一台机器</p>\n",
+            "<p><strong>要点到此为止。</strong>20 小时</p>\n",
+            "<p>字<strong>「引用」</strong>字</p>\n",
+            "<p><em>斜体。</em>后面</p>\n",
+            "<p>**end.**Then next</p>\n",
+        ]
+    );
 }

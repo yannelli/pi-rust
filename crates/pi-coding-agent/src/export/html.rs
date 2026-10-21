@@ -1,5 +1,6 @@
-//! Self-contained HTML export (upstream `core/export-html/index.ts`). The template, its
-//! CSS and JavaScript, and the vendored marked and highlight.js run in the viewer's browser.
+//! Self-contained HTML export (upstream `core/export-html/index.ts`). The template, its CSS and
+//! JavaScript, and the vendored marked, marked-cjk-friendly, and highlight.js run in the
+//! viewer's browser.
 
 use std::path::{Path, PathBuf};
 
@@ -18,6 +19,7 @@ const TEMPLATE_HTML: &str = include_str!("assets/template.html");
 const TEMPLATE_CSS: &str = include_str!("assets/template.css");
 const TEMPLATE_JS: &str = include_str!("assets/template.js");
 const MARKED_JS: &str = include_str!("assets/vendor/marked.min.js");
+const MARKED_CJK_FRIENDLY_JS: &str = include_str!("assets/vendor/marked-cjk-friendly.min.js");
 const HIGHLIGHT_JS: &str = include_str!("assets/vendor/highlight.min.js");
 
 /// A tool definition shown in the export header (`name`, `description`, `parameters`).
@@ -133,6 +135,7 @@ pub fn generate_html(data: &SessionData, theme: &ExportTheme) -> String {
     html = js_replace_first(&html, "{{JS}}", TEMPLATE_JS);
     html = js_replace_first(&html, "{{SESSION_DATA}}", &session_base64);
     html = js_replace_first(&html, "{{MARKED_JS}}", MARKED_JS);
+    html = js_replace_first(&html, "{{MARKED_CJK_FRIENDLY_JS}}", MARKED_CJK_FRIENDLY_JS);
     js_replace_first(&html, "{{HIGHLIGHT_JS}}", HIGHLIGHT_JS)
 }
 
