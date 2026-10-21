@@ -77,6 +77,8 @@ pub struct AppOptions {
     pub extension_mode: Option<crate::extension_ui::ExtensionMode>,
     /// `ctx.ui` of `project_trust` handlers; without one they have no UI.
     pub project_trust_ui: Option<(Arc<dyn crate::extension_ui::ExtensionUi>, crate::extension_ui::ExtensionMode)>,
+    /// `--max-turns` and `--max-cost` (pi-rust).
+    pub run_limits: crate::agent_session::RunLimits,
 }
 
 fn resolve_cli_paths(cwd: &Path, paths: &[String]) -> Vec<String> {
@@ -130,6 +132,7 @@ impl AppOptions {
             resources,
             project_trust_override: args.project_trust_override,
             extension_flags: args.unknown_flags.clone(),
+            run_limits: args.run_limits,
             ..Self::default()
         }
     }
@@ -229,6 +232,7 @@ async fn create_runtime_parts(
     let loaded = extensions::load(options, &services).await;
     diagnostics.extend(loaded.diagnostics);
     diagnostics.extend(extensions::apply_flags(loaded.runner.as_ref(), &options.extension_flags).await);
+    let run_limits = extensions::claim_run_limit_flags(loaded.runner.as_ref(), options.run_limits).await;
     for definition in &options.virtual_models {
         if let Err(error) = services.model_runtime.register_virtual_model(definition.clone()) {
             diagnostics.push(RuntimeDiagnostic::error(format!("{error:#}")));
@@ -264,6 +268,7 @@ async fn create_runtime_parts(
     create.stream_fn = options.stream_fn.clone();
     create.mcp = options.mcp.clone();
     create.extensions = loaded.runner;
+    create.run_limits = run_limits;
     let created = create_agent_session(create).await?;
     Ok(RuntimeParts { session: created.session, model_fallback_message: created.model_fallback_message, diagnostics })
 }

@@ -18,6 +18,7 @@ mod offline;
 mod offline_guard;
 mod prompt;
 mod retry;
+mod run_limits;
 mod runtime;
 mod tool_options;
 mod tool_registry;

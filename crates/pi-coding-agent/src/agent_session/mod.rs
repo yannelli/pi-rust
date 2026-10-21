@@ -23,6 +23,7 @@ mod output_file;
 mod prompt;
 mod routing;
 mod run;
+mod run_limits;
 pub mod runtime;
 mod runtime_catalog;
 mod runtime_extension_ops;
@@ -52,6 +53,7 @@ pub use self::llama_api::LlamaProgressFn;
 pub use self::model::ModelCycleResult;
 pub use self::model_runtime::{ModelRuntime, ModelRuntimeOptions};
 pub use self::prompt::{PromptDisposition, PromptOptions, StreamingBehavior};
+pub use self::run_limits::{RUN_LIMIT_EXIT_CODE, RunLimitKind, RunLimitStop, RunLimits};
 pub use self::runtime::{
     AgentSessionRuntime, AsyncSetupFn, ForkPosition, ForkResult, InvalidateFn, RuntimeFactory, RuntimeParts,
     RuntimeTarget, SessionImportFileNotFound, SwitchResult, TrustPromptFn, TrustUi,
@@ -132,6 +134,7 @@ pub struct AgentSession {
     cache_warmer: Arc<crate::cache_warmer::CacheWarmer>,
     warmer_host: Arc<cache::SessionWarmerHost>,
     pub(crate) extensions: extension_host::ExtensionState,
+    run_limits: run_limits::RunLimitState,
     /// The extensions provider request hooks reach; shared with `stream_fn`.
     request_hooks: RequestHooksSlot,
     weak: Weak<AgentSession>,
