@@ -177,6 +177,33 @@ async fn system_messages_wait_for_the_next_assistant_message() {
 }
 
 #[tokio::test]
+async fn system_messages_skip_assistants_that_convert_to_no_blocks() {
+    let model = model(json!({"supportsMidConvoSystemMessages": true}));
+    let reasoning_only = AssistantMessage {
+        content: vec![ContentBlock::Thinking {
+            thinking: String::new(),
+            thinking_signature: Some(r#"{"type":"reasoning"}"#.into()),
+            redacted: false,
+        }],
+        api: "openai-codex-responses".into(),
+        provider: "openai-codex".into(),
+        model: "gpt-x".into(),
+        ..Default::default()
+    };
+    let messages = vec![
+        system(json!({"role": "system", "content": "base prompt", "timestamp": 0})),
+        Message::user("hi"),
+        system(json!({"role": "system", "content": "late update", "timestamp": 2})),
+        Message::Assistant(reasoning_only),
+        Message::user("again"),
+    ];
+    let body = payload(&model, messages).await;
+    let roles: Vec<&str> = body["messages"].as_array().unwrap().iter().map(|m| m["role"].as_str().unwrap()).collect();
+    assert_eq!(roles, ["user", "user", "system"]);
+    assert_eq!(body["messages"][2]["content"][0]["text"], "late update");
+}
+
+#[tokio::test]
 async fn cache_retention_controls_cache_control_and_affinity() {
     let messages = vec![Message::user("hi")];
     let context = Context { system_prompt: Some("sys".into()), tools: vec![tool("read")], messages };
