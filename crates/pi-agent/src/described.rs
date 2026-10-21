@@ -7,7 +7,9 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use crate::nested::ToolContext;
-use crate::tool_model::{ToolAnnotations, ToolExposure, ToolLoadout, ToolLoadoutChanges, ToolNamespace, ToolReplay};
+use crate::tool_model::{
+    ToolAnnotations, ToolExposure, ToolLoadout, ToolLoadoutChanges, ToolNamespace, ToolReach, ToolReplay,
+};
 use crate::types::{AgentTool, AgentToolResult, SharedTool, ToolExecutionMode, ToolUpdateCallback};
 
 /// Delegates everything to the wrapped tool except the description.
@@ -63,6 +65,14 @@ impl AgentTool for DescribedTool {
 
     fn annotations(&self) -> Option<&ToolAnnotations> {
         self.inner.annotations()
+    }
+
+    fn reaches_tools(&self, input: &Value) -> Option<ToolReach> {
+        self.inner.reaches_tools(input)
+    }
+
+    fn declares_reaches_tools(&self) -> bool {
+        self.inner.declares_reaches_tools()
     }
 
     fn prompt_snippet(&self) -> Option<&str> {

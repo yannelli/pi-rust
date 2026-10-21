@@ -172,21 +172,19 @@ impl AgentSession {
     }
 
     /// Activate codemode or `tool_search` when MCP tools are only reachable through them (upstream
-    /// `ensureDiscoveryActive`), and warn once when neither can be.
+    /// `ensureDiscoveryActive`), and warn once when neither can be. Only a tool of these names that
+    /// declares `reaches_tools` can reach MCP tools; another extension's tool of the same name
+    /// without it is never activated.
     pub(crate) fn ensure_mcp_discovery(&self) {
-        let (manager, codemode, tool_search) = {
-            let builtins = lock(&self.builtins);
-            (builtins.mcp.clone(), builtins.codemode.clone(), builtins.tool_search.clone())
-        };
-        let Some(manager) = manager else { return };
+        let Some(manager) = lock(&self.builtins).mcp.clone() else { return };
         let (has_codemode, has_tool_search, active) = {
             let tools = lock(&self.tools);
-            let ours = |tool: &Option<SharedTool>, name: &str| match (tool, tools.registry.get(name)) {
-                (Some(ours), Some(registered)) => same_tool(ours, registered),
-                _ => false,
+            let reaches = |name: &str| {
+                let tool = tools.registry.get(name);
+                tool.is_some_and(|tool| tool.declares_reaches_tools())
             };
-            let has_codemode = ours(&codemode, pi_codemode::CODEMODE_TOOL_NAME);
-            (has_codemode, ours(&tool_search, pi_codemode::TOOL_SEARCH_TOOL_NAME), tools.registry.active_names())
+            let has_codemode = reaches(pi_codemode::CODEMODE_TOOL_NAME);
+            (has_codemode, reaches(pi_codemode::TOOL_SEARCH_TOOL_NAME), tools.registry.active_names())
         };
         let activate = manager.ensure_discovery_active(has_codemode, has_tool_search, &active);
         if !activate.is_empty() {

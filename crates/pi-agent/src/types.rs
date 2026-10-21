@@ -10,7 +10,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::agent_loop::AgentContext;
 use crate::nested::ToolContext;
-use crate::tool_model::{ToolAnnotations, ToolExposure, ToolLoadout, ToolLoadoutChanges, ToolNamespace, ToolReplay};
+use crate::tool_model::{
+    ToolAnnotations, ToolExposure, ToolLoadout, ToolLoadoutChanges, ToolNamespace, ToolReach, ToolReplay,
+};
 
 /// Result of one tool execution.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -120,6 +122,17 @@ pub trait AgentTool: Send + Sync {
     /// Hints about what the tool does, for example from an MCP server.
     fn annotations(&self) -> Option<&ToolAnnotations> {
         None
+    }
+
+    /// For tools that reach other tools: which ones a call with `input` may reach. `None` for tools
+    /// that do not reach other tools.
+    fn reaches_tools(&self, _input: &Value) -> Option<ToolReach> {
+        None
+    }
+
+    /// Whether the tool has `reaches_tools` at all, which listings report without running it.
+    fn declares_reaches_tools(&self) -> bool {
+        self.reaches_tools(&Value::Object(Default::default())).is_some()
     }
 
     /// One line for the system prompt's tool list. Tools without one are not listed there.

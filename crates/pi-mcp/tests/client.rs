@@ -276,6 +276,18 @@ async fn defaults_missing_tool_result_content_to_an_empty_list() {
     client.close().await;
 }
 
+// #10416: MCP 2026-07-28 allows any JSON value as structured content.
+#[tokio::test]
+async fn accepts_structured_content_that_is_not_an_object() {
+    let (client, server) = connect().await;
+    for structured in [json!([{ "id": 1 }, { "id": 2 }]), Value::Null, json!("text"), json!(3), json!(false)] {
+        server.set_result("tools/call", json!({ "content": [], "structuredContent": structured }));
+        let result = client.call_tool("structured", None, RequestOptions::default()).await.unwrap();
+        assert_eq!(value(result), json!({ "content": [], "structuredContent": structured }));
+    }
+    client.close().await;
+}
+
 #[tokio::test]
 async fn does_not_send_notifications_cancelled_for_a_timed_out_initialize() {
     let (transport, server) = create_server().await;

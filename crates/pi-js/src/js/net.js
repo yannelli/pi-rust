@@ -110,7 +110,7 @@ Server.prototype.listen = function (...args) {
   if (options.handle !== undefined || options.fd !== undefined || options._handle !== undefined) {
     throw internal.unsupported("server.listen with a handle or fd");
   }
-  const request = { backlog: options.backlog, ipv6Only: !!options.ipv6Only };
+  const request = { backlog: options.backlog, ipv6Only: !!options.ipv6Only, reusePort: options.reusePort === true };
   if (options.path !== undefined) validate.string(options.path, "options.path");
   else if (options.port !== undefined && options.port !== null) request.port = validatePort(options.port, "options.port");
   else if (typeof args[0] === "object" && args[0] !== null && !("port" in options) && !("host" in options) && Object.keys(options).length) {
@@ -120,7 +120,7 @@ Server.prototype.listen = function (...args) {
   if (options.signal) options.signal.addEventListener("abort", () => this.close(), { once: true });
   const start = () => {
     const clusterWorker = process.env.NODE_UNIQUE_ID !== undefined || internal.clusterWorkerId !== undefined;
-    if (clusterWorker && !options.exclusive && request.path === undefined && !this._tlsListenOptions) {
+    if (clusterWorker && !options.exclusive && !request.reusePort && request.path === undefined && !this._tlsListenOptions) {
       return require("cluster")._getServer(this, request);
     }
     try {

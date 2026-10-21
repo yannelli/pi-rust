@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use pi_agent::{
     AgentTool, AgentToolResult, RefreshOptions, SharedTool, ToolExposure, ToolLoadout, ToolLoadoutChanges,
-    ToolNamespace, ToolRegistry, ToolUpdateCallback,
+    ToolNamespace, ToolReach, ToolRegistry, ToolUpdateCallback,
 };
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -20,6 +20,7 @@ struct Spec {
     namespace: Option<ToolNamespace>,
     /// Lists the callable tools in its description and hides the named declarations.
     orchestrates: Option<Vec<String>>,
+    reaches: Option<ToolReach>,
 }
 
 struct SpecTool(Spec);
@@ -48,6 +49,9 @@ impl AgentTool for SpecTool {
     }
     fn namespace(&self) -> Option<&ToolNamespace> {
         self.0.namespace.as_ref()
+    }
+    fn reaches_tools(&self, _input: &Value) -> Option<ToolReach> {
+        self.0.reaches.clone()
     }
     fn default_active(&self) -> bool {
         self.0.default_active
@@ -178,4 +182,31 @@ fn prompt_snippets_guidelines_and_infos() {
     let loadout = registry.loadout(registry.active_tools().to_vec());
     assert_eq!(loadout.prompt_guidelines("read"), ["Use read."]);
     assert_eq!(loadout.namespace("read").map(|namespace| namespace.name), Some("fs".to_string()));
+}
+
+#[test]
+fn namespaces_list_their_aliases_and_wrapped_tools_keep_what_they_reach() {
+    let aliased = ToolNamespace { aliases: vec!["files".into()], ..ToolNamespace::new("fs") };
+    let plain = ToolNamespace::new("fs");
+    assert_eq!(serde_json::to_value(&aliased).unwrap(), json!({ "name": "fs", "aliases": ["files"] }));
+    assert_eq!(serde_json::to_value(&plain).unwrap(), json!({ "name": "fs" }));
+    assert_eq!(serde_json::from_value::<ToolNamespace>(json!({ "name": "fs" })).unwrap(), plain);
+
+    let reaching = Spec {
+        orchestrates: Some(Vec::new()),
+        reaches: Some(ToolReach::Words(vec!["docs".into()])),
+        ..spec("codemode", ToolExposure::ModelOnly)
+    };
+    let mut registry = ToolRegistry::new([tool(spec("read", ToolExposure::Direct)), tool(reaching)]);
+    let declared = registry.set_active_tools(&["read", "codemode"]);
+    // The declared tool is a wrapper with another description, which still reaches the same tools.
+    assert_eq!(declared[1].description(), "calls read");
+    assert_eq!(declared[1].reaches_tools(&json!({})), Some(ToolReach::Words(vec!["docs".into()])));
+    assert_eq!(declared[0].reaches_tools(&json!({})), None);
+
+    // Listings report that a tool reaches others without serializing a function.
+    let infos = registry.tool_infos();
+    assert_eq!(infos.iter().map(|info| info.reaches_tools).collect::<Vec<_>>(), [false, true]);
+    assert!(declared[1].declares_reaches_tools() && !declared[0].declares_reaches_tools());
+    assert!(serde_json::to_value(&infos[1]).unwrap().get("reachesTools").is_none());
 }

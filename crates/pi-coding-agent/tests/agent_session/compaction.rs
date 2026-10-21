@@ -2,10 +2,13 @@
 //! and `agent-session-auto-compaction-queue` tests).
 
 use pi_ai::providers::faux::FauxResponse;
-use pi_ai::{ContentBlock, Message, StopReason};
+use pi_ai::{
+    AssistantMessage, ContentBlock, Message, Model, StopReason, ToolCall, ToolResultMessage, UserContent, UserMessage,
+};
+use pi_coding_agent::session::SessionManager;
 use serde_json::{Value, json};
 
-use crate::harness::{Options, harness, roles, text};
+use crate::harness::{Options, harness, open_session, record, roles, text};
 
 const SUMMARY: &str = "## Goal\nSummarized";
 
@@ -180,4 +183,86 @@ async fn compacts_and_resumes_after_a_short_length_stop() {
     assert_eq!(events[1]["willRetry"], true);
     let Some(Message::Assistant(last)) = h.session.messages().pop() else { panic!("assistant") };
     assert_eq!(last.stop_reason, StopReason::Length);
+}
+
+const COPILOT_413: &str = r#"github-copilot API error (413): {"message":"failed to parse request","code":""}"#;
+const REQUEST_LIMIT: usize = 32 * 1024 * 1024;
+
+fn user(content: String, timestamp: i64) -> Message {
+    Message::User(UserMessage { content: UserContent::Text(content), timestamp })
+}
+
+fn assistant(model: &Model, content: Vec<ContentBlock>, stop: StopReason, timestamp: i64) -> Message {
+    Message::Assistant(AssistantMessage { content, stop_reason: stop, timestamp, ..AssistantMessage::empty(model) })
+}
+
+/// A finished image-heavy turn, then a recent text turn that fits the retained tail.
+fn seed_image_history(manager: &mut SessionManager, model: &Model, image: &str) {
+    let timestamp = pi_ai::now_ms() - 10_000;
+    let call = ToolCall { id: "read-images".into(), name: "read".into(), ..ToolCall::default() };
+    let images = (0..89).map(|_| ContentBlock::Image { data: image.into(), mime_type: "image/png".into() }).collect();
+    let history = [
+        user("Review the old images".into(), timestamp),
+        assistant(model, vec![ContentBlock::ToolCall(call)], StopReason::ToolUse, timestamp),
+        Message::ToolResult(ToolResultMessage {
+            tool_call_id: "read-images".into(),
+            tool_name: "read".into(),
+            content: images,
+            timestamp,
+            ..ToolResultMessage::default()
+        }),
+        assistant(model, vec![ContentBlock::text("Finished reviewing the old images")], StopReason::Stop, timestamp),
+        user(format!("Recent task notes: {}", "x".repeat(80_000)), timestamp),
+        assistant(model, vec![ContentBlock::text("Ready to continue")], StopReason::Stop, timestamp),
+    ];
+    for message in &history {
+        manager.append_message(message).unwrap();
+    }
+}
+
+fn has_image(message: &Message) -> bool {
+    let blocks = match message {
+        Message::User(UserMessage { content: UserContent::Blocks(blocks), .. }) => blocks,
+        Message::ToolResult(result) => &result.content,
+        _ => return false,
+    };
+    blocks.iter().any(|block| matches!(block, ContentBlock::Image { .. }))
+}
+
+#[tokio::test]
+async fn compacts_an_image_heavy_history_and_retries_after_a_413() {
+    let h = harness(Options {
+        responses: vec![
+            // The zero-usage error a Copilot request-size rejection leaves.
+            FauxResponse::Error(COPILOT_413.into()),
+            FauxResponse::text(SUMMARY),
+            FauxResponse::text("Continued after compaction"),
+        ],
+        context_window: 1_000_000,
+        ..Options::default()
+    })
+    .await;
+    let model = h.session.model().unwrap();
+    let mut manager = SessionManager::in_memory(&h.cwd);
+    // Synthetic base64 only; nothing decodes an image or reaches a network.
+    seed_image_history(&mut manager, &model, &"A".repeat(384 * 1024));
+    let session = open_session(&h.services, manager).await;
+    let events = record(&session);
+
+    session.prompt("Continue the task using the recent notes.", Vec::new()).await.unwrap();
+
+    let requests = h.requests();
+    assert_eq!(requests.len(), 3, "the 413, the summary, then the retry");
+    assert!(serde_json::to_vec(&requests[0]).unwrap().len() > REQUEST_LIMIT);
+    assert!(is_summary_request(&requests[1]));
+    let retried = &requests[2].messages;
+    assert!(text(&retried[0]).contains("Summarized"));
+    assert!(!retried.iter().any(has_image), "the retry no longer carries the images");
+    assert!(serde_json::to_vec(&requests[2]).unwrap().len() < REQUEST_LIMIT);
+
+    let events = compaction_events(&events.lock().unwrap());
+    assert_eq!(events[0], json!({"type": "compaction_start", "reason": "overflow"}));
+    assert_eq!(events[1]["reason"], "overflow");
+    assert_eq!((events[1]["aborted"].clone(), events[1]["willRetry"].clone()), (json!(false), json!(true)));
+    assert_eq!(session.last_assistant_text().as_deref(), Some("Continued after compaction"));
 }

@@ -4,7 +4,7 @@ mod cli_support;
 
 use serde_json::{Value, json};
 
-use cli_support::{events, mock_server, pi, pi_async, setup, text_body, tool_call_body, write_settings};
+use cli_support::{events, mock_server, pi, pi_async, setup, sse, text_body, tool_call_body, write_settings};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn print_mode_runs_tools_and_saves_the_session() {
@@ -106,6 +106,29 @@ async fn reports_provider_errors_with_a_failing_exit_code() {
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("500") && stderr.contains("upstream exploded"), "{stderr}");
+}
+
+// Upstream #10799: a response cut off at the output token limit still prints, but fails the run.
+#[tokio::test(flavor = "multi_thread")]
+async fn truncated_responses_print_their_text_warn_and_fail() {
+    let root = tempfile::tempdir().unwrap();
+    let body = sse(&[
+        json!({"choices": [{"index": 0, "delta": {"content": "partial answer"}}]}),
+        json!({"choices": [{"index": 0, "delta": {}, "finish_reason": "length"}]}),
+        json!({"choices": [], "usage": {"prompt_tokens": 30, "completion_tokens": 4000, "total_tokens": 4030}}),
+    ]);
+    let (url, _) = mock_server(vec![body]).await;
+    setup(root.path(), &url);
+    let output = tokio::task::spawn_blocking({
+        let root = root.path().to_path_buf();
+        move || pi(&root, &["--model", "mock/mock-model", "--no-session", "-p", "hi"], None)
+    })
+    .await
+    .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "partial answer\n");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Response was truncated: the model reached its output token limit."), "{stderr}");
 }
 
 #[test]

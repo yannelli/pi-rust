@@ -1,5 +1,6 @@
 //! Windows, following libuv (`src/win/error.c`, `src/win/process.c`, `src/win/fs.c`) and Node's `child_process`.
 
+use super::windows_paths::{is_legacy_wsl_bash, windows_directory};
 use super::{OpenMode, ShellConfig, path_exists, synthetic};
 use crate::errors::Failure;
 use serde_json::{Map, Value};
@@ -297,16 +298,8 @@ pub fn resolve_program(program: &str, cwd: &str, env: &Map<String, Value>) -> Re
     Ok(found.to_string_lossy().into_owned())
 }
 
-/// Node's `isLegacyWslBashPath`: `^[a-z]:\\windows\\(system32|sysnative)\\bash\.exe$`, case-insensitive.
-fn is_legacy_wsl_bash(path: &str) -> bool {
-    let normalized = path.replace('/', "\\").to_lowercase();
-    let mut characters = normalized.chars();
-    characters.next().is_some_and(|drive| drive.is_ascii_lowercase())
-        && matches!(characters.as_str(), ":\\windows\\system32\\bash.exe" | ":\\windows\\sysnative\\bash.exe")
-}
-
 fn bash_config(program: &str) -> ShellConfig {
-    if is_legacy_wsl_bash(program) {
+    if is_legacy_wsl_bash(program, std::env::var("SystemRoot").ok().as_deref()) {
         ShellConfig { program: program.into(), args: vec!["-s".into()], command_on_stdin: true }
     } else {
         ShellConfig { program: program.into(), args: vec!["-c".into()], command_on_stdin: false }
@@ -484,7 +477,7 @@ pub fn after_spawn(child: &Child) {
 
 /// Node's `killProcessTree` on Windows: `taskkill /F /T`, not waited for.
 pub fn kill_tree(pid: u32) {
-    let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into());
+    let system_root = windows_directory(std::env::var("SystemRoot").ok());
     let _ = Command::new(format!("{system_root}\\System32\\taskkill.exe"))
         .args(["/F", "/T", "/PID", &pid.to_string()])
         .creation_flags(CREATE_NO_WINDOW)

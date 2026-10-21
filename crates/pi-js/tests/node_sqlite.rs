@@ -185,3 +185,59 @@ return out;
         "listed": [false, false, true], "loads": "function", "esm": "function"}"#;
     check(body, expected).await;
 }
+
+// One row per next(): `tick()` counts the rows SQLite has produced. Iterators of one statement
+// share its cursor, as in Node, and closing the database finalizes them.
+const ITERATE: &str = r##"
+const { DatabaseSync } = require("node:sqlite");
+const db = new DatabaseSync(":memory:");
+db.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT); INSERT INTO t (v) VALUES ('a'), ('b'), ('c');");
+let calls = 0;
+db.function("tick", () => ++calls);
+const stmt = db.prepare("SELECT id, v, tick() AS n FROM t ORDER BY id");
+const it = stmt.iterate();
+const out = {};
+out.proto = [Object.getPrototypeOf(it) === Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]())), Object.getOwnPropertyNames(Object.getPrototypeOf(it)), Object.prototype.toString.call(it), it[Symbol.iterator]() === it, typeof it.next];
+out.first = [it.next(), calls];
+out.second = [it.next(), calls];
+out.all = stmt.all().length;
+try { out.afterAll = it.next(); } catch (e) { out.afterAll = [e.code, e.message]; }
+const it2 = stmt.iterate();
+out.ret = [it2.next().value.id, it2.return(), it2.next()];
+const it3 = stmt.iterate();
+it3.next();
+const it4 = stmt.iterate();
+try { out.interleave = [it3.next(), it4.next()]; } catch (e) { out.interleave = [e.code, e.message]; }
+const spread = [...stmt.iterate()].map((r) => r.v);
+out.spread = spread;
+const bad = db.prepare("SELECT abs(?) AS x");
+const it5 = bad.iterate(-9223372036854775808n);
+try { out.err = it5.next(); } catch (e) { out.err = [e.code, e.message]; }
+const ids = db.prepare("SELECT id FROM t ORDER BY id");
+const it7 = ids.iterate();
+const firstId = it7.next().value.id;
+ids.setReadBigInts(true);
+out.flags = [typeof firstId, typeof it7.next().value.id];
+const fs = require("fs");
+const dbPath = require("path").resolve("iter.db");
+const file = new DatabaseSync(dbPath);
+file.exec("CREATE TABLE IF NOT EXISTS f (x); DELETE FROM f; INSERT INTO f VALUES (1), (2);");
+const open = file.prepare("SELECT x FROM f").iterate();
+out.fileFirst = open.next().value.x;
+try { file.exec("DROP TABLE f"); out.locked = "dropped"; } catch (e) { out.locked = [e.code, e.message]; }
+file.close();
+fs.unlinkSync(dbPath);
+out.unlinked = fs.existsSync(dbPath);
+const it6 = stmt.iterate();
+it6.next();
+db.close();
+try { out.closed = it6.next(); } catch (e) { out.closed = [e.code, e.message]; }
+return out;
+"##;
+
+const ITERATE_EXPECTED: &str = r##"{"proto":[false,["next","return","constructor"],"[object Iterator]",true,"function"],"first":[{"done":false,"value":{"id":1,"v":"a","n":1}},1],"second":[{"done":false,"value":{"id":2,"v":"b","n":2}},2],"all":3,"afterAll":{"done":false,"value":{"id":1,"v":"a","n":6}},"ret":[1,{"done":true,"value":null},{"done":true,"value":null}],"interleave":[{"done":false,"value":{"id":1,"v":"a","n":9}},{"done":false,"value":{"id":2,"v":"b","n":10}}],"spread":["a","b","c"],"err":["ERR_SQLITE_ERROR","integer overflow"],"flags":["number","bigint"],"fileFirst":1,"locked":["ERR_SQLITE_ERROR","database table is locked"],"unlinked":false,"closed":["ERR_INVALID_STATE","statement has been finalized"]}"##;
+
+#[tokio::test]
+async fn sqlite_iterate_steps_one_row_per_next() {
+    check(ITERATE, ITERATE_EXPECTED).await;
+}

@@ -65,3 +65,73 @@ async fn child_process_matches_node() {
     assert_eq!(actual, expected);
     assert_eq!(capture.stdout(), "visible\n");
 }
+
+// Expected values come from running the same script under Node 22.
+const STDIO_SCRIPT: &str = r##"
+const cp = require("node:child_process");
+const fs = require("fs");
+const net = require("net");
+const out = {};
+const child = cp.spawn("sh", ["-c", "echo three >&3; read line <&4; echo \"got $line\" >&3"], { stdio: ["ignore", "ignore", "ignore", "pipe", "pipe", "ignore", undefined] });
+out.shape = [child.stdio.length, child.stdio.map((s) => (s === null ? null : s instanceof net.Socket)), child.stdin, child.stdout, child.stderr];
+let three = "";
+child.stdio[3].setEncoding("utf8");
+child.stdio[3].on("data", (chunk) => {
+  three += chunk;
+  if (three === "three\n") child.stdio[4].end("hi\n");
+});
+fs.appendFileSync("stage", "extra pipes\n");
+out.extra = await new Promise((resolve) => child.on("close", (code) => resolve([code, three, child.stdio[3].destroyed, child.stdio[4].destroyed])));
+fs.writeFileSync("in.txt", "from-file\n");
+const input = fs.openSync("in.txt", "r");
+const output = fs.openSync("out.txt", "w");
+const sync = cp.spawnSync("sh", ["-c", "cat; echo err >&2"], { stdio: [input, output, "pipe"] });
+fs.closeSync(input);
+fs.closeSync(output);
+out.fdSync = [fs.readFileSync("out.txt", "utf8"), sync.stdout, sync.stderr.toString(), sync.output.length, sync.status];
+const extraSync = cp.spawnSync("sh", ["-c", "echo x >&3"], { stdio: ["ignore", "ignore", "ignore", "pipe"], encoding: "utf8" });
+out.extraSync = extraSync.output;
+fs.appendFileSync("stage", "fs stream\n");
+const ws = fs.createWriteStream("stream.txt");
+await new Promise((resolve) => ws.on("open", resolve));
+const viaStream = cp.spawn("sh", ["-c", "echo via-stream; echo fd3 >&3"], { stdio: ["ignore", ws, "ignore", ws] });
+out.streamShape = viaStream.stdio.map((s) => s === null);
+await new Promise((resolve) => viaStream.on("close", resolve));
+await new Promise((resolve) => ws.end(resolve));
+out.stream = fs.readFileSync("stream.txt", "utf8");
+fs.appendFileSync("stage", "socket\n");
+let done;
+const finished = new Promise((resolve) => (done = resolve));
+const server = net.createServer((socket) => {
+  const echo = cp.spawn("sh", ["-c", "read line; echo \"echo:$line\""], { stdio: [socket, socket, "ignore"] });
+  out.socketShape = [echo.stdin, echo.stdout, echo.stdio.length];
+  echo.on("close", (code) => {
+    out.socketCode = code;
+    socket.destroy();
+    server.close();
+  });
+});
+server.listen(0, "127.0.0.1", () => {
+  const client = net.connect(server.address().port, "127.0.0.1", () => client.write("ping\n"));
+  let reply = "";
+  client.on("data", (chunk) => (reply += chunk));
+  client.on("close", () => done(reply));
+});
+out.socket = await finished;
+const errors = [];
+for (const stdio of [[{}], ["pipe", "pipe", "pipe", "bogus"], "bogus", [Buffer.from("x")]]) {
+  try { cp.spawn("sh", ["-c", "true"], { stdio }); errors.push(null); } catch (error) { errors.push([error.code, error.message]); }
+}
+out.errors = errors;
+return out;
+"##;
+
+const STDIO_EXPECTED: &str = r##"{"shape":[7,[null,null,null,true,true,null,null],null,null,null],"extra":[0,"three\ngot hi\n",true,true],"fdSync":["from-file\n",null,"err\n",3,0],"extraSync":[null,null,null,"x\n"],"streamShape":[true,true,true,true],"stream":"via-stream\nfd3\n","socketShape":[null,null,3],"socketCode":0,"socket":"echo:ping\n","errors":[["ERR_INVALID_ARG_VALUE","The argument 'stdio' is invalid. Received {}"],["ERR_INVALID_SYNC_FORK_INPUT","Asynchronous forks do not support Buffer, TypedArray, DataView or string input: 'bogus'"],["ERR_INVALID_ARG_VALUE","The argument 'stdio' is invalid. Received 'bogus'"],["ERR_INVALID_SYNC_FORK_INPUT","Asynchronous forks do not support Buffer, TypedArray, DataView or string input: <Buffer 78>"]]}"##;
+
+#[tokio::test]
+async fn child_process_stdio_entries_match_node() {
+    let (_dir, root) = tempdir();
+    let (runtime, _capture) = runtime(&root);
+    let actual = run_cjs_within(&runtime, &root, STDIO_SCRIPT, 60).await;
+    assert_same_keys(&actual, &serde_json::from_str(STDIO_EXPECTED).unwrap());
+}

@@ -139,6 +139,18 @@ async fn applies_timeout_ms_and_rejects_invalid_options() {
         invalid.unwrap_err().to_string(),
         "@options only supports `max_output_tokens` and `timeout_ms`; got `yield`"
     );
+
+    // #10631: a misplaced options line fails before the script runs instead of running without a deadline.
+    let misplaced = tool.run(
+        "call-3",
+        "// count\n// @options: {\"timeout_ms\": 200}\nwhile (true) {}",
+        CancellationToken::new(),
+        None,
+    );
+    assert_eq!(
+        misplaced.await.unwrap_err().to_string(),
+        "The // @options: line must be the first line of the input; found one on line 2"
+    );
 }
 
 #[tokio::test]
@@ -233,9 +245,11 @@ async fn publishes_nested_call_rows_while_the_script_runs() {
     .await
     .unwrap();
     let updates = updates.lock().unwrap();
-    assert_eq!(updates.len(), 2);
-    assert_eq!(updates[0].as_ref().unwrap()["calls"][0]["status"], json!("running"));
-    assert_eq!(updates[1].as_ref().unwrap()["calls"][0]["status"], json!("ok"));
+    assert_eq!(updates.len(), 3);
+    // The first update comes before any nested call, so the row's timer starts at once.
+    assert_eq!(updates[0], Some(json!({ "calls": [] })));
+    assert_eq!(updates[1].as_ref().unwrap()["calls"][0]["status"], json!("running"));
+    assert_eq!(updates[2].as_ref().unwrap()["calls"][0]["status"], json!("ok"));
 }
 
 #[tokio::test]

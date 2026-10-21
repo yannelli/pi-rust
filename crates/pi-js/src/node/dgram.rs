@@ -155,13 +155,13 @@ fn close(id: u64) {
     }
 }
 
-fn membership(ctx: &Ctx<'_>, id: u64, group: String, interface: Opt<String>, join: bool) -> rquickjs::Result<()> {
+fn membership(ctx: &Ctx<'_>, id: u64, group: String, interface: Option<String>, join: bool) -> rquickjs::Result<()> {
     let syscall = if join { "addMembership" } else { "dropMembership" };
     let group: IpAddr =
         group.parse().map_err(|_| throw(ctx, &JsError::new(format!("{syscall} EINVAL")).with_code("EINVAL")))?;
     option(ctx, id, syscall, |socket| match group {
         IpAddr::V4(group) => {
-            let interface = interface.0.and_then(|text| text.parse().ok()).unwrap_or(Ipv4Addr::UNSPECIFIED);
+            let interface = interface.and_then(|text| text.parse().ok()).unwrap_or(Ipv4Addr::UNSPECIFIED);
             if join {
                 socket.join_multicast_v4(&group, &interface)
             } else {
@@ -174,6 +174,29 @@ fn membership(ctx: &Ctx<'_>, id: u64, group: String, interface: Opt<String>, joi
             } else {
                 socket.leave_multicast_v6(&group, 0)
             }
+        }
+    })
+}
+
+fn source_membership(
+    ctx: &Ctx<'_>,
+    id: u64,
+    addresses: [String; 2],
+    interface: Option<String>,
+    join: bool,
+) -> rquickjs::Result<()> {
+    let syscall = if join { "addSourceSpecificMembership" } else { "dropSourceSpecificMembership" };
+    let [source, group] = addresses;
+    let Some(membership) = super::dgram_ssm::parse(&source, &group, interface.as_deref()) else {
+        let error = JsError::new(format!("{syscall} EINVAL")).with_code("EINVAL");
+        return Err(throw(ctx, &error.with_data("errno", -22).with_data("syscall", syscall)));
+    };
+    let socket = socket(ctx, id, syscall)?;
+    super::dgram_ssm::apply(&SockRef::from(socket.as_ref()), &membership, join).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::Unsupported {
+            throw(ctx, &JsError::unsupported("dgram IPv6 source-specific membership on this platform"))
+        } else {
+            throw(ctx, &net_error(&error, syscall, None, None))
         }
     })
 }
@@ -200,6 +223,32 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
                 sent.map_err(|error| net_error(&error, "send", shown.as_deref(), target.map(|target| target.port())))
             };
             spawn_op(&ctx, work, |ctx, count: usize| Ok(Value::new_number(ctx.clone(), count as f64)))
+        },
+    )?;
+    // Like libuv's uv_udp_try_send: send now, or return undefined when the socket would block.
+    set_fn(
+        &object,
+        "trySend",
+        |ctx: Ctx<'js>, id: u64, data: TypedArray<'js, u8>, address: Opt<String>, port: Opt<u16>| {
+            let socket = socket(&ctx, id, "send")?;
+            let target = match (address.0, port.0) {
+                (Some(address), Some(port)) => Some(parse_ip(&ctx, &address, port)?),
+                _ => None,
+            };
+            let raw = SockRef::from(socket.as_ref());
+            let bytes = bytes_of(&data);
+            let sent = match target {
+                Some(target) => raw.send_to(&bytes, &target.into()),
+                None => raw.send(&bytes),
+            };
+            match sent {
+                Ok(count) => Ok(Value::new_number(ctx.clone(), count as f64)),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(Value::new_undefined(ctx.clone())),
+                Err(error) => {
+                    let shown = target.map(|target| target.ip().to_string());
+                    Err(throw(&ctx, &net_error(&error, "send", shown.as_deref(), target.map(|target| target.port()))))
+                }
+            }
         },
     )?;
     set_fn(&object, "connect", |ctx: Ctx<'js>, id: u64, address: String, port: u16| {
@@ -242,12 +291,19 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
             }
         })
     })?;
-    set_fn(&object, "addMembership", |ctx: Ctx<'js>, id: u64, group: String, interface: Opt<String>| {
+    set_fn(&object, "addMembership", |ctx: Ctx<'js>, id: u64, group: String, interface: Option<String>| {
         membership(&ctx, id, group, interface, true)
     })?;
-    set_fn(&object, "dropMembership", |ctx: Ctx<'js>, id: u64, group: String, interface: Opt<String>| {
+    set_fn(&object, "dropMembership", |ctx: Ctx<'js>, id: u64, group: String, interface: Option<String>| {
         membership(&ctx, id, group, interface, false)
     })?;
+    set_fn(
+        &object,
+        "sourceMembership",
+        |ctx: Ctx<'js>, id: u64, source: String, group: String, interface: Option<String>, join: bool| {
+            source_membership(&ctx, id, [source, group], interface, join)
+        },
+    )?;
     set_fn(&object, "bufferSize", |ctx: Ctx<'js>, id: u64, recv: bool, size: Opt<usize>| -> rquickjs::Result<usize> {
         let socket = socket(&ctx, id, "uv_send_buffer_size")?;
         let sock = SockRef::from(socket.as_ref());

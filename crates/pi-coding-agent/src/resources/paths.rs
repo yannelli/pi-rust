@@ -98,6 +98,29 @@ pub fn resolve_path(input: &str, base: &Path) -> PathBuf {
     if expanded.is_absolute() { normalize(&expanded) } else { normalize(&base.join(expanded)) }
 }
 
+/// Expand a leading `~` and convert a `file://` URL, keeping relative text relative (upstream
+/// `normalizePath` with its default options). Filter patterns go through it.
+pub fn normalize_path_input(input: &str) -> String {
+    let home = home_dir();
+    #[cfg(windows)]
+    let input = &normalize_windows_shell_path(input);
+    if input == "~" {
+        return home.to_string_lossy().into_owned();
+    }
+    let rest = input.strip_prefix("~/").or_else(|| input.strip_prefix("~\\").filter(|_| cfg!(windows)));
+    if let Some(rest) = rest {
+        let mut joined = normalize(&home.join(rest)).to_string_lossy().into_owned();
+        if rest.ends_with(['/', '\\']) && !joined.ends_with(std::path::MAIN_SEPARATOR) {
+            joined.push(std::path::MAIN_SEPARATOR);
+        }
+        return joined;
+    }
+    if input.starts_with("file://") {
+        return file_url_to_path(input).to_string_lossy().into_owned();
+    }
+    input.to_string()
+}
+
 /// An absolute, normalized form of `path` (relative paths resolve against the process cwd).
 pub fn absolute(path: &Path) -> PathBuf {
     if path.is_absolute() {

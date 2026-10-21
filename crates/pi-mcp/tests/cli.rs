@@ -6,6 +6,7 @@ mod common;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use common::fake_mcp::{Fake, FakeOptions};
 use common::oauth_server::{OAuthServerOptions, start_oauth_mcp_server};
 use pi_mcp::runtime::{InMemoryAuthStorageBackend, McpOAuthCredentialStore};
 use pi_mcp::{McpCommandOptions, run_mcp_command};
@@ -81,6 +82,29 @@ async fn lists_servers_with_their_state_tools_and_errors_and_fails_while_anythin
     assert_eq!(run(&["list"], Some(json!({ "fixture": fixture() })), ok.path()).await.code, 0);
 }
 
+// #10526: listing every resource can take long (a large drive), so the list only notes that they exist.
+#[tokio::test]
+async fn notes_that_a_server_offers_resources_without_listing_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let servers = json!({ "docs": { "url": "http://unused.invalid" } });
+    let fake = Fake::new(FakeOptions { resources: true, ..FakeOptions::default() });
+    let factory = fake.factory();
+    let text = run_with(&["list"], Some(servers.clone()), dir.path(), |options| {
+        options.create_transport = Some(factory.clone());
+    })
+    .await;
+    assert!(text.output.contains("docs: connected, 3 tools (codemode, global)\n"), "{}", text.output);
+    assert!(text.output.contains("  offers resources"), "{}", text.output);
+    assert!(!text.output.contains("URI templates"), "{}", text.output);
+    let json_run = run_with(&["list", "--json"], Some(servers), dir.path(), |options| {
+        options.create_transport = Some(factory.clone());
+    })
+    .await;
+    let parsed: Value = serde_json::from_str(&json_run.output).unwrap();
+    assert_eq!(parsed["servers"][0]["resources"], json!(true));
+    assert!(parsed["servers"][0].get("resourceTemplates").is_none());
+}
+
 #[tokio::test]
 async fn prints_json_for_scripts() {
     let dir = tempfile::tempdir().unwrap();
@@ -117,6 +141,7 @@ async fn rejects_unknown_servers_and_servers_without_oauth_for_login_and_logout(
     let help = run(&["--help"], None, dir.path()).await;
     assert_eq!(help.code, 0);
     assert!(help.output.starts_with("Usage:\n  pi mcp add <server> [options] -- <command> [args...]"));
+    assert!(help.output.contains("  --timeout <seconds>     Time limit for the whole sign-in (default: 300)"));
 }
 
 #[tokio::test]
