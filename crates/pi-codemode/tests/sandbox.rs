@@ -112,12 +112,12 @@ async fn rejects_invalid_text_and_image_arguments() {
     let errors: Vec<String> = serde_json::from_value(result.value().cloned().unwrap()).unwrap();
     assert!(errors[0].starts_with("TypeError: ") && errors[0].contains("circular"), "{}", errors[0]);
     let mut expected = vec![
-        "TypeError: image expects a non-empty image URL string, an object with image_url, or a raw MCP image block",
+        r#"TypeError: image expects a non-empty image URL string, an object with image_url, or an image block { type: "image", data, mimeType }"#,
         "TypeError: remote image URLs are not supported in tool outputs. Pass a base64 data URI instead",
         "TypeError: invalid image output. Pass a base64 data URI instead",
-        "TypeError: image only accepts MCP image blocks, got \"text\"",
-        "TypeError: image expected MCP image data",
-        "TypeError: image expects a non-empty image URL string, an object with image_url, or a raw MCP image block",
+        "TypeError: image only accepts image blocks, got \"text\"",
+        "TypeError: image expected image block data",
+        r#"TypeError: image expects a non-empty image URL string, an object with image_url, or an image block { type: "image", data, mimeType }"#,
     ];
     expected
         .extend(["TypeError: invalid image output. The image data is not valid base64 (truncated or corrupted?)"; 6]);

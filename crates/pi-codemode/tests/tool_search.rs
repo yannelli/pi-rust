@@ -121,6 +121,14 @@ fn describe(tools: &[CodemodeToolInfo], budget: Option<usize>, deferred: &[&str]
 }
 
 #[test]
+fn says_that_tools_returning_an_object_also_resolve_on_failure() {
+    let description = describe(&catalog(), None, &[]);
+    assert!(description.contains(
+        "and rejects with an Error on failure. A tool whose declaration returns an object resolves on failure too when it returned that object; check its fields. Calls still running when the script ends are cancelled."
+    ));
+}
+
+#[test]
 fn lists_everything_without_a_budget() {
     let description = describe(&catalog(), None, &[]);
     assert!(description.contains("Nested tools:"));

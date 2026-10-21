@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use common::fake_mcp::{Fake, FakeOptions, docs, entry, setup};
 use common::oauth_server::{Browser, BrowserPrompt, OAuthServerOptions, start_oauth_mcp_server};
 use common::wait_until;
+use pi_agent::ToolReach;
 use pi_mcp::runtime::{InMemoryAuthStorageBackend, McpOAuthCredentialStore, ServerState};
 use pi_mcp::{
     LoadedMcpConfig, McpConfigScope, McpExposure, McpManager, McpManagerOptions, ToolExposure, load_mcp_config,
@@ -66,20 +67,21 @@ async fn holds_the_first_prompt_for_servers_with_direct_tools_only_up_to_the_sta
 async fn waits_for_the_servers_a_codemode_script_names() {
     let setup = slow(json!({}), Duration::from_millis(30), None);
     let cancel = CancellationToken::new();
-    let code = json!({ "code": "return (await tools.mcp__slow__search({ query: \"q\" })).structuredContent;" });
-    setup.manager.wait_for_tool_call("codemode", &code, &cancel).await;
+    let named = ToolReach::Words(["tools", "mcp__slow__search"].map(String::from).to_vec());
+    setup.manager.wait_for_tool_call("codemode", Some(&named), &cancel).await;
     assert!(setup.manager.tool("mcp__slow__search").is_some());
     setup.manager.shutdown().await;
 
     let never = slow(json!({}), Duration::MAX, None);
     let started = Instant::now();
-    never.manager.wait_for_tool_call("codemode", &json!({ "code": "return 1 + 1;" }), &cancel).await;
+    let unrelated = ToolReach::Words(["return", "1", "1"].map(String::from).to_vec());
+    never.manager.wait_for_tool_call("codemode", Some(&unrelated), &cancel).await;
     assert!(started.elapsed() < Duration::from_secs(1));
     // tool_search waits for every server; cancelling stops the wait.
     let stop = CancellationToken::new();
     let waiting = tokio::spawn({
         let (manager, stop) = (never.manager.clone(), stop.clone());
-        async move { manager.wait_for_tool_call("tool_search", &json!({ "query": "x" }), &stop).await }
+        async move { manager.wait_for_tool_call("tool_search", Some(&ToolReach::All), &stop).await }
     });
     tokio::time::sleep(Duration::from_millis(20)).await;
     assert!(!waiting.is_finished());

@@ -382,11 +382,14 @@ async fn exchanges_a_code_only_when_its_iss_parameter_names_the_authorization_se
     let codes = Arc::new(Mutex::new(Vec::new()));
     let seen = codes.clone();
     let origin = serve(move |request, _| {
+        if request.method != "POST" {
+            return std::future::ready(Response::status(404));
+        }
         seen.lock().unwrap().push(request.form().get("code").cloned().unwrap_or_default());
-        async { Response::json(200, &json!({ "access_token": "token", "token_type": "Bearer" })) }
+        std::future::ready(Response::json(200, &json!({ "access_token": "token", "token_type": "Bearer" })))
     })
     .await;
-    let exchange = |code: &str, iss: Option<&str>, iss_supported: bool| {
+    let exchange = |code: &str, iss: Option<&str>, iss_supported: bool, with_metadata: bool| {
         let provider = TestProvider::new("http://127.0.0.1/callback");
         {
             let mut saved = provider.saved();
@@ -398,7 +401,7 @@ async fn exchanges_a_code_only_when_its_iss_parameter_names_the_authorization_se
             };
             saved.discovery = Some(OAuthDiscoveryState {
                 authorization_server_url: origin.clone(),
-                authorization_server_metadata: Some(metadata),
+                authorization_server_metadata: with_metadata.then_some(metadata),
                 ..OAuthDiscoveryState::default()
             });
         }
@@ -407,14 +410,18 @@ async fn exchanges_a_code_only_when_its_iss_parameter_names_the_authorization_se
         options.iss = iss.map(str::to_string);
         async move { authorize_mcp(provider.as_ref(), &options).await }
     };
-    let mismatch = exchange("other", Some("https://attacker.example"), false).await.unwrap_err();
+    let mismatch = exchange("other", Some("https://attacker.example"), false, true).await.unwrap_err();
     assert!(matches!(mismatch, OAuthError::IssuerMismatch { .. }), "{mismatch:?}");
-    let missing = exchange("missing", None, true).await.unwrap_err();
+    let missing = exchange("missing", None, true, true).await.unwrap_err();
     assert!(matches!(missing, OAuthError::IssuerMismatch { .. }), "{missing:?}");
-    assert_eq!(exchange("matching", Some(&origin), true).await.unwrap(), OAuthFlowResult::Authorized);
+    assert_eq!(exchange("matching", Some(&origin), true, true).await.unwrap(), OAuthFlowResult::Authorized);
     // Servers that do not promise the parameter may omit it.
-    assert_eq!(exchange("omitted", None, false).await.unwrap(), OAuthFlowResult::Authorized);
-    assert_eq!(*codes.lock().unwrap(), ["matching", "omitted"]);
+    assert_eq!(exchange("omitted", None, false, true).await.unwrap(), OAuthFlowResult::Authorized);
+    // Without metadata there is no issuer to compare with, so a server cannot skip the check by hiding it.
+    let unverifiable = exchange("unverifiable", Some("https://attacker.example"), false, false).await.unwrap_err();
+    assert!(matches!(unverifiable, OAuthError::IssuerMismatch { expected: None, .. }), "{unverifiable:?}");
+    assert_eq!(exchange("no-metadata", None, false, false).await.unwrap(), OAuthFlowResult::Authorized);
+    assert_eq!(*codes.lock().unwrap(), ["matching", "omitted", "no-metadata"]);
 }
 
 #[tokio::test]

@@ -1,0 +1,104 @@
+{
+  "commits": [],
+  "cliFlags": [
+    {
+      "item": "--terminal-login",
+      "reason": "pi-rust ships ACP mode (pi --mode acp, ported from pi-acp); an ACP client relaunches pi with this flag for Terminal Auth. Upstream pi has no ACP mode."
+    }
+  ],
+  "settings": [
+    {
+      "item": "queueMode",
+      "reason": "Legacy key. pi-rust migrates it to steeringMode when settings load (settings/manager.rs) and keeps no field for it in Settings."
+    },
+    {
+      "item": "websockets",
+      "reason": "Legacy key. pi-rust migrates it to transport when settings load (settings/manager.rs) and keeps no field for it in Settings."
+    }
+  ],
+  "slashCommands": [
+    {
+      "item": "mcp",
+      "reason": "Upstream registers /mcp from its built-in mcp extension (extensions/mcp). pi-rust implements MCP natively and lists /mcp as a built-in command."
+    },
+    {
+      "item": "llama",
+      "reason": "Upstream registers /llama from its built-in llama extension (extensions/llama). pi-rust implements llama.cpp support natively and lists /llama as a built-in command."
+    }
+  ],
+  "tools": [],
+  "models": [],
+  "extensionApi": [],
+  "nodeBuiltins": [
+    {
+      "item": "_http_agent",
+      "reason": "Deprecated internal module behind `http`; it is not a documented API, so pi-js does not provide it."
+    },
+    {
+      "item": "_http_client",
+      "reason": "Deprecated internal module behind `http`; it is not a documented API, so pi-js does not provide it."
+    },
+    {
+      "item": "_http_common",
+      "reason": "Deprecated internal module behind `http`; it is not a documented API, so pi-js does not provide it."
+    },
+    {
+      "item": "_http_incoming",
+      "reason": "Deprecated internal module behind `http`; it is not a documented API, so pi-js does not provide it."
+    },
+    {
+      "item": "_http_outgoing",
+      "reason": "Deprecated internal module behind `http`; it is not a documented API, so pi-js does not provide it."
+    },
+    {
+      "item": "_http_server",
+      "reason": "Deprecated internal module behind `http`; it is not a documented API, so pi-js does not provide it."
+    },
+    {
+      "item": "_stream_duplex",
+      "reason": "Deprecated internal module behind `stream`; it is not a documented API, so pi-js does not provide it."
+    },
+    {
+      "item": "_stream_passthrough",
+      "reason": "Deprecated internal module behind `stream`; it is not a documented API, so pi-js does not provide it."
+    },
+    {
+      "item": "_stream_readable",
+      "reason": "Deprecated internal module behind `stream`; it is not a documented API, so pi-js does not provide it."
+    },
+    {
+      "item": "_stream_transform",
+      "reason": "Deprecated internal module behind `stream`; it is not a documented API, so pi-js does not provide it."
+    },
+    {
+      "item": "_stream_wrap",
+      "reason": "Deprecated internal module behind `stream`; it is not a documented API, so pi-js does not provide it."
+    },
+    {
+      "item": "_stream_writable",
+      "reason": "Deprecated internal module behind `stream`; it is not a documented API, so pi-js does not provide it."
+    },
+    {
+      "item": "_tls_common",
+      "reason": "Deprecated internal module behind `tls`; it is not a documented API, so pi-js does not provide it."
+    },
+    {
+      "item": "_tls_wrap",
+      "reason": "Deprecated internal module behind `tls`; it is not a documented API, so pi-js does not provide it."
+    }
+  ],
+  "packages": [
+    {
+      "item": "pi-embedded",
+      "reason": "The embeddable agent API of pi-rust. It comes from the fork snapshot; upstream main never had packages/embedded."
+    },
+    {
+      "item": "pi-env-daemon",
+      "reason": "The pi-env daemon is Rust code that upstream keeps inside packages/env (daemon/Cargo.toml); here it is its own workspace crate."
+    },
+    {
+      "item": "pi-js",
+      "reason": "pi-rust runs extensions on its own embedded QuickJS runtime. Upstream runs them on Node and has no package for this."
+    }
+  ]
+}

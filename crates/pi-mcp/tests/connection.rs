@@ -316,15 +316,11 @@ async fn resolves_the_oauth_client_secret_lazily() {
 }
 
 #[tokio::test]
-async fn refreshes_tools_and_resources_when_the_server_says_they_changed() {
+async fn refreshes_tools_when_the_server_says_they_changed() {
     let (transport, server) = fake_server().await;
     server.set_result(
         "initialize",
         json!({ "protocolVersion": "2025-06-18", "capabilities": { "tools": {}, "resources": {} }, "serverInfo": { "name": "fake", "version": "1" }, "instructions": "  Docs server.  " }),
-    );
-    server.set_result(
-        "resources/list",
-        json!({ "resources": [{ "uri": "docs://a", "name": "a" }, { "uri": "ui://app", "name": "app" }, { "uri": "docs://b", "name": "b", "mimeType": "text/html;profile=mcp-app" }] }),
     );
     let tool_updates = Arc::new(AtomicUsize::new(0));
     let updates = tool_updates.clone();
@@ -339,19 +335,36 @@ async fn refreshes_tools_and_resources_when_the_server_says_they_changed() {
     connection.get_client().await.unwrap();
     assert!(connection.has_resources());
     assert_eq!(connection.instructions().as_deref(), Some("Docs server."));
-    let uris: Vec<_> = connection.resources().into_iter().map(|resource| resource.uri).collect();
-    assert_eq!(uris, ["docs://a"]);
-    assert!(connection.resource_templates().is_empty());
     assert_eq!(tool_updates.load(Ordering::SeqCst), 1);
 
     server.set_result("tools/list", json!({ "tools": [{ "name": "echo", "inputSchema": { "type": "object" } }] }));
     server.send(JsonRpcMessage::notification("notifications/tools/list_changed", None)).await;
     wait_until(|| connection.tools().len() == 1).await;
-    server.set_result("resources/list", json!({ "resources": [] }));
-    server.send(JsonRpcMessage::notification("notifications/resources/list_changed", None)).await;
-    wait_until(|| connection.resources().is_empty()).await;
     settle().await;
-    assert_eq!(tool_updates.load(Ordering::SeqCst), 3);
+    assert_eq!(tool_updates.load(Ordering::SeqCst), 2);
+    // A change of the resources is no reason to list them.
+    server.send(JsonRpcMessage::notification("notifications/resources/list_changed", None)).await;
+    settle().await;
+    assert_eq!(tool_updates.load(Ordering::SeqCst), 2);
+    assert!(!server.methods().iter().any(|method| method.starts_with("resources/")));
+    connection.close().await;
+}
+
+// #10526: listing every resource can take long (a large drive), so connecting must not wait for it.
+#[tokio::test]
+async fn connects_to_servers_with_resources_without_listing_them() {
+    let (transport, server) = fake_server().await;
+    server.set_result(
+        "initialize",
+        json!({ "protocolVersion": "2025-06-18", "capabilities": { "tools": {}, "resources": {} }, "serverInfo": { "name": "fake", "version": "1" } }),
+    );
+    let (connection, _) = connect_with(stdio(), vec![opener(transport)]);
+    connection.get_client().await.unwrap();
+    assert_eq!(connection.state(), ServerState::Connected);
+    assert!(connection.has_resources());
+    let requests: Vec<String> =
+        server.methods().into_iter().filter(|method| !method.starts_with("notifications/")).collect();
+    assert_eq!(requests, ["initialize", "tools/list"]);
     connection.close().await;
 }
 

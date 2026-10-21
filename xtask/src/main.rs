@@ -2,6 +2,7 @@
 //! conventional commits since the last `v*` tag; see `usage()` for arguments.
 
 mod models;
+mod parity;
 mod vendor_js;
 mod version;
 
@@ -20,7 +21,8 @@ fn usage() -> String {
   notes <version>                                          print the CHANGELOG.md section for a version
   check-tag <tag>                                          fail unless the tag matches the workspace version
   models <upstream-data-dir> [--out <path>]                regenerate crates/pi-ai/models.json from upstream
-  vendor-js <upstream-root> [--out <path>]                 bundle the upstream JavaScript the extension host embeds"
+  vendor-js <upstream-root> [--out <path>]                 bundle the upstream JavaScript the extension host embeds
+  parity --upstream <path> [--out <file>] [--strict]       write a Markdown gap report against an upstream pi checkout"
         .into()
 }
 
@@ -236,6 +238,7 @@ fn run(args: &[String]) -> Result<(), String> {
         }
         Some("models") => models::run(&args[1..], &root()),
         Some("vendor-js") => vendor_js::run(&args[1..], &root()),
+        Some("parity") => parity::run(&args[1..], &root()),
         _ => Err(usage()),
     }
 }

@@ -1,24 +1,10 @@
 //! Ported from upstream `packages/codemode/test/declarations.test.ts`.
 
-use pi_codemode::{
-    ToolDeclaration, mcp_structured_content_schema, render_declarations, render_tool_sample, render_tool_signature,
-    schema_to_type,
-};
+use pi_codemode::{ToolDeclaration, render_declarations, render_tool_sample, render_tool_signature, schema_to_type};
 use serde_json::{Value, json};
 
 fn ty(schema: Value) -> String {
     schema_to_type(&schema, None)
-}
-
-fn mcp_result_schema(structured_content: Option<Value>) -> Value {
-    let mut properties = serde_json::Map::new();
-    properties.insert("content".into(), json!({ "type": "array", "items": { "type": "object" } }));
-    if let Some(structured) = structured_content {
-        properties.insert("structuredContent".into(), structured);
-    }
-    properties.insert("isError".into(), json!({ "type": "boolean" }));
-    properties.insert("_meta".into(), json!({ "type": "object" }));
-    json!({ "type": "object", "properties": properties, "required": ["content"] })
 }
 
 fn declaration(name: &str, input: Option<Value>, output: Option<Value>) -> ToolDeclaration {
@@ -90,6 +76,116 @@ fn puts_property_descriptions_on_comment_lines() {
     assert_eq!(ty(nested), "{\n  // Outer\n  outer?: {\n    // Inner\n    inner?: string;\n  };\n}");
 }
 
+// https://github.com/earendil-works/pi/issues/10707
+#[test]
+fn puts_constraints_the_type_cannot_express_on_property_comment_lines() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "timeoutMs": {
+                "type": "integer", "minimum": 0, "maximum": 30000, "default": 0, "description": "Wait in milliseconds.",
+            },
+            "id": { "type": "string", "pattern": "^[a-z]+$", "maxLength": 8 },
+            "tags": { "type": "array", "items": { "type": "string" }, "maxItems": 5, "uniqueItems": true, "deprecated": true },
+            "name": { "type": "string" },
+        },
+        "required": ["id"],
+    });
+    assert_eq!(
+        ty(schema),
+        [
+            "{",
+            "  // @maxLength 8 @pattern ^[a-z]+$",
+            "  id: string;",
+            "  name?: string;",
+            "  // @maxItems 5 @uniqueItems @deprecated",
+            "  tags?: Array<string>;",
+            "  // Wait in milliseconds.",
+            "  // @integer @minimum 0 @maximum 30000 @default 0",
+            "  timeoutMs?: number;",
+            "}",
+        ]
+        .join("\n")
+    );
+}
+
+#[test]
+fn reads_constraints_of_optional_fields_from_the_non_null_branch() {
+    // Pydantic's `limit: int | None = Field(None, ge=1, le=100)`.
+    let limit = json!({
+        "anyOf": [{ "type": "integer", "minimum": 1, "maximum": 100 }, { "type": "null" }],
+        "default": null,
+        "title": "Limit",
+    });
+    assert_eq!(
+        ty(json!({ "type": "object", "properties": { "limit": limit } })),
+        "{\n  // @integer @minimum 1 @maximum 100\n  limit?: number | null;\n}"
+    );
+    // Constraints of the property and the branch both apply.
+    let n = json!({
+        "anyOf": [{ "type": "integer", "minimum": 10, "maximum": 50, "format": "int32" }, { "type": "null" }],
+        "minimum": 0,
+        "maximum": 20,
+        "format": "port",
+    });
+    assert_eq!(
+        ty(json!({ "type": "object", "properties": { "n": n } })),
+        "{\n  // @integer @minimum 10 @maximum 20 @format port @format int32\n  n?: number | null;\n}"
+    );
+}
+
+#[test]
+fn reads_draft_04_boolean_exclusive_bounds() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "n": { "type": "integer", "minimum": 0, "exclusiveMinimum": true, "maximum": 10, "exclusiveMaximum": false },
+            "m": { "anyOf": [{ "type": "number", "maximum": 5, "exclusiveMaximum": true }, { "type": "null" }], "maximum": 8 },
+        },
+    });
+    assert_eq!(
+        ty(schema),
+        [
+            "{",
+            "  // @maximum 8 @exclusiveMaximum 5",
+            "  m?: number | null;",
+            "  // @integer @exclusiveMinimum 0 @maximum 10",
+            "  n?: number;",
+            "}",
+        ]
+        .join("\n")
+    );
+}
+
+#[test]
+fn leaves_out_long_tags_and_escapes_line_terminators() {
+    let config = json!({ "type": "object", "properties": { "config": { "type": "object", "default": { "text": "x".repeat(100) } } } });
+    assert_eq!(ty(config), "{ config?: { [key: string]: unknown; }; }");
+    let sep = json!({
+        "type": "string", "pattern": "^[\r\n\u{2028}\u{2029}]$", "default": "\u{2028}", "description": "a\u{2028}b",
+    });
+    assert_eq!(
+        ty(json!({ "type": "object", "properties": { "sep": sep } })),
+        [
+            "{",
+            "  // a",
+            "  // b",
+            "  // @pattern ^[\\u000d\\u000a\\u2028\\u2029]$ @default \"\\u2028\"",
+            "  sep?: string;",
+            "}",
+        ]
+        .join("\n")
+    );
+}
+
+#[test]
+fn drops_constraint_tags_before_rendering_a_type_over_the_budget_as_unknown() {
+    let schema = json!({ "type": "object", "properties": { "n": { "type": "integer", "minimum": 1 } } });
+    assert_eq!(schema_to_type(&schema, None), "{\n  // @integer @minimum 1\n  n?: number;\n}");
+    assert_eq!(schema_to_type(&schema, Some(20)), "{ n?: number; }");
+    assert_eq!(schema_to_type(&schema, Some(10)), "unknown");
+}
+
 #[test]
 fn resolves_local_references_and_stops_at_recursive_ones() {
     let schema = json!({
@@ -151,31 +247,77 @@ fn renders_signatures_with_normalized_identifiers() {
 }
 
 #[test]
-fn renders_mcp_call_tool_result_output_schemas() {
-    let input = json!({ "type": "object", "properties": {}, "additionalProperties": false });
+fn renders_output_schemas_shaped_like_an_mcp_call_tool_result_as_plain_types() {
+    let output = json!({
+        "type": "object",
+        "properties": {
+            "content": { "type": "array", "items": { "type": "object" } },
+            "isError": { "type": "boolean" },
+            "_meta": { "type": "object" },
+        },
+        "required": ["content"],
+    });
+    let plain = declaration("plain", Some(json!({ "type": "object", "properties": {} })), Some(output));
+    assert_eq!(
+        render_tool_signature(&plain, None),
+        "plain(args: { [key: string]: unknown; }): Promise<{ _meta?: { [key: string]: unknown; }; content: Array<{ [key: string]: unknown; }>; isError?: boolean; }>;"
+    );
+}
+
+/// What `pi_mcp::tools::create_mcp_result_schema` returns, as a tool's output schema.
+fn mcp_result_schema(structured_content: Option<Value>) -> Value {
+    let block = json!({
+        "type": "object",
+        "properties": {
+            "type": { "enum": ["text", "image", "audio", "resource_link", "resource"] },
+            "text": { "type": "string" },
+            "data": { "type": "string" },
+            "mimeType": { "type": "string" },
+        },
+        "required": ["type"],
+        "additionalProperties": true,
+    });
+    json!({
+        "type": "object",
+        "properties": {
+            "content": { "type": "array", "items": block },
+            "structuredContent": structured_content.unwrap_or_else(|| json!({})),
+            "isError": { "type": "boolean" },
+        },
+        "required": ["content"],
+        "additionalProperties": true,
+    })
+}
+
+#[test]
+fn renders_the_mcp_result_schema_with_references_into_the_servers_output_schema() {
+    let content = "content: Array<{ data?: string; mimeType?: string; text?: string; type: \"text\" | \"image\" | \"audio\" | \"resource_link\" | \"resource\"; [key: string]: unknown; }>; isError?: boolean;";
+    assert_eq!(
+        schema_to_type(&mcp_result_schema(None), None),
+        format!("{{ {content} structuredContent?: unknown; [key: string]: unknown; }}")
+    );
+
+    let hit = json!({ "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] });
+    let prefix = "#/properties/structuredContent";
     let structured = json!({
         "type": "object",
-        "properties": { "results": { "type": "array", "items": { "$ref": "#/definitions/Result~1item~0v1" } } },
-        "required": ["results"],
-        "additionalProperties": false,
-        "definitions": {
-            "Result/item~v1": {
-                "type": "object",
-                "properties": { "id": { "type": "string" }, "score": { "type": "number" } },
-                "required": ["id", "score"],
-                "additionalProperties": false,
-            },
+        "properties": {
+            "hits": { "type": "array", "items": { "$ref": format!("{prefix}/$defs/Hit~1v1") } },
+            "again": { "$ref": format!("{prefix}/properties/hits") },
+            "children": { "type": "array", "items": { "$ref": prefix } },
+            "default": { "$ref": format!("{prefix}/definitions/Hit") },
+            "remote": { "$ref": "https://example.com/schema.json" },
         },
+        "required": ["hits"],
+        "$defs": { "Hit/v1": hit },
+        "definitions": { "Hit": hit },
     });
-    let search = declaration("mcp__sample__search", Some(input.clone()), Some(mcp_result_schema(Some(structured))));
     assert_eq!(
-        render_tool_signature(&search, None),
-        "mcp__sample__search(args: {}): Promise<CallToolResult<{ results: Array<{ id: string; score: number; }>; }>>;"
+        schema_to_type(&mcp_result_schema(Some(structured)), None),
+        format!(
+            "{{ {content} structuredContent?: {{ again?: Array<{{ id: string; }}>; children?: Array<{{ again?: Array<{{ id: string; }}>; children?: Array<unknown>; default?: {{ id: string; }}; hits: Array<{{ id: string; }}>; remote?: unknown; }}>; default?: {{ id: string; }}; hits: Array<{{ id: string; }}>; remote?: unknown; }}; [key: string]: unknown; }}"
+        )
     );
-    let plain = declaration("plain", Some(input), Some(mcp_result_schema(None)));
-    assert_eq!(render_tool_signature(&plain, None), "plain(args: {}): Promise<CallToolResult>;");
-    let not_mcp = json!({ "type": "object", "properties": { "content": { "type": "array" } } });
-    assert_eq!(mcp_structured_content_schema(Some(&not_mcp)), None);
 }
 
 #[test]

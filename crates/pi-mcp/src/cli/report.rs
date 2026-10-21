@@ -37,10 +37,9 @@ struct ServerReport {
     /// Tools whose exposure differs from the server's.
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_exposure: Option<Map<String, Value>>,
+    /// Whether the server offers resources. They are not listed: listing every one can take long.
     #[serde(skip_serializing_if = "Option::is_none")]
-    resources: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    resource_templates: Option<usize>,
+    resources: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
 }
@@ -80,7 +79,6 @@ async fn report(
         tools: Vec::new(),
         tool_exposure: None,
         resources: None,
-        resource_templates: None,
         error: None,
     };
     if !report.enabled {
@@ -100,8 +98,7 @@ async fn report(
         .collect();
     report.tool_exposure = (!overrides.is_empty()).then_some(overrides);
     if connection.has_resources() {
-        report.resources = Some(connection.resources().len());
-        report.resource_templates = Some(connection.resource_templates().len());
+        report.resources = Some(true);
     }
     if connection.state() != ServerState::Connected {
         report.error = connection.error();
@@ -158,8 +155,8 @@ pub(super) async fn list(loaded: &LoadedMcpConfig, json: bool, note: Option<&str
                 .collect();
             log(&format!("  tools: {}", tools.join(", ")));
         }
-        if let Some(resources) = report.resources {
-            log(&format!("  resources: {resources}, URI templates: {}", report.resource_templates.unwrap_or(0)));
+        if report.resources == Some(true) {
+            log("  offers resources");
         }
         if let Some(error) = &report.error {
             log(&format!("  {}", error.split('\n').collect::<Vec<_>>().join("\n  ")));

@@ -107,14 +107,12 @@ pub(crate) fn read_resource_result(value: Value) -> Result<ReadResourceResult, M
 }
 
 /// `content` is required by the spec, but servers that only return `structuredContent` omit it.
+/// `structuredContent` may be any JSON value, as MCP 2026-07-28 allows.
 pub(crate) fn call_tool_result(value: Value) -> Result<CallToolResult, McpError> {
     let invalid = || McpError::invalid("Invalid MCP tools/call result");
     let object = value.as_object().ok_or_else(invalid)?;
     if object.get("content").is_some_and(|content| !content.is_array()) {
         return Err(invalid());
-    }
-    if object.get("structuredContent").is_some_and(|structured| !structured.is_object()) {
-        return Err(McpError::invalid("Invalid MCP tools/call structured content"));
     }
     serde_json::from_value(value).map_err(|_| invalid())
 }

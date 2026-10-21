@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.5.1] - 2026-10-21
+
+### Fixed
+
+- **coding-agent:** remove the Anthropic subscription extra-usage warning ([d50e0a7](https://github.com/yannelli/pi-rust/commit/d50e0a73381657798e0ea70773051cd681fb02c5))
+
 ## [0.5.0] - 2026-10-20
 
 ### Breaking Changes
