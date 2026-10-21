@@ -1,5 +1,6 @@
 //! Dialogs in the editor slot that answer through a channel, so flows can await them (upstream
-//! `showExtensionSelector`, `showExtensionConfirm`, `showExtensionInput`, `showExtensionEditor`).
+//! `showExtensionSelector`, `showExtensionConfirm`, `showExtensionInput`, `showExtensionEditor`,
+//! and `pushExtensionDialog`).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -53,49 +54,108 @@ fn watch_cancel(
     Some(watcher.abort_handle())
 }
 
+/// An open dialog or inline view: the editor slot shows the last one.
+struct DialogEntry {
+    id: u64,
+    component: ComponentRef,
+    focus: ComponentRef,
+    dispose: Option<Box<dyn FnOnce()>>,
+    blocked: Option<(BlockedKind, String)>,
+}
+
+/// Dialogs in the editor slot (upstream `extensionDialogs`). A new dialog hides the visible one,
+/// and closing the visible dialog shows the previous one again, so every dialog stays answerable.
+#[derive(Default)]
+pub(super) struct DialogStack {
+    entries: Vec<DialogEntry>,
+    next_id: u64,
+}
+
 impl InteractiveMode {
-    /// Show `create`'s component in the editor slot, reporting `blocked` until it closes.
+    fn push_dialog(&self, entry: DialogEntry) {
+        self.dialogs.borrow_mut().entries.push(entry);
+        self.show_top_dialog();
+    }
+
+    fn next_dialog_id(&self) -> u64 {
+        let mut dialogs = self.dialogs.borrow_mut();
+        dialogs.next_id += 1;
+        dialogs.next_id
+    }
+
+    /// Remove a dialog. If it was visible, show the previous dialog or the editor.
+    fn close_dialog(&self, id: u64) {
+        let (entry, was_top) = {
+            let mut dialogs = self.dialogs.borrow_mut();
+            let Some(index) = dialogs.entries.iter().position(|entry| entry.id == id) else { return };
+            let entry = dialogs.entries.remove(index);
+            (entry, index == dialogs.entries.len())
+        };
+        if let Some(dispose) = entry.dispose {
+            dispose();
+        }
+        if was_top {
+            self.show_top_dialog();
+        }
+    }
+
+    fn show_top_dialog(&self) {
+        let top = self
+            .dialogs
+            .borrow()
+            .entries
+            .last()
+            .map(|entry| (entry.component.clone(), entry.focus.clone(), entry.blocked.clone()));
+        let Some((component, focus, blocked)) = top else {
+            self.selector.restore_editor();
+            self.set_blocked_status(DIALOG_SOURCE, None);
+            return self.request_render();
+        };
+        self.selector.show(Box::new(move |_done| SelectorSpec::new(component).with_focus(focus)));
+        self.set_blocked_status(DIALOG_SOURCE, blocked);
+        self.request_render();
+    }
+
+    /// Close every dialog without answering it and show the editor (upstream `resetExtensionUI`).
+    pub(super) fn reset_dialogs(&self) {
+        let entries = std::mem::take(&mut self.dialogs.borrow_mut().entries);
+        if entries.is_empty() {
+            return;
+        }
+        for entry in entries {
+            if let Some(dispose) = entry.dispose {
+                dispose();
+            }
+        }
+        self.show_top_dialog();
+    }
+
+    /// Show `create`'s component in the editor slot, reporting `blocked` while it is visible.
     fn show_dialog(
         &self,
         blocked: (BlockedKind, String),
         create: impl FnOnce(SelectorDone) -> (ComponentRef, Option<Box<dyn FnOnce()>>) + 'static,
     ) {
-        self.set_blocked_status(DIALOG_SOURCE, Some(blocked));
+        let id = self.next_dialog_id();
         let weak = self.weak.clone();
-        self.selector.show(Box::new(move |done| {
-            let closing: SelectorDone = Rc::new(move || {
-                done();
-                if let Some(mode) = weak.upgrade() {
-                    mode.set_blocked_status(DIALOG_SOURCE, None);
-                    mode.request_render();
-                }
-            });
-            let (component, dispose) = create(closing);
-            let spec = SelectorSpec::new(component);
-            match dispose {
-                Some(dispose) => spec.with_dispose(dispose),
-                None => spec,
+        let closing: SelectorDone = Rc::new(move || {
+            if let Some(mode) = weak.upgrade() {
+                mode.close_dialog(id);
             }
-        }));
-        self.request_render();
+        });
+        let (component, dispose) = create(closing);
+        let entry = DialogEntry { id, focus: component.clone(), component, dispose, blocked: Some(blocked) };
+        self.push_dialog(entry);
     }
 
     /// Show `view` in the editor slot until the returned function closes it.
     pub(super) fn mount_view(&self, view: ComponentRef) -> Rc<dyn Fn()> {
-        let closer: Rc<RefCell<Option<SelectorDone>>> = Rc::default();
-        let slot = closer.clone();
-        self.selector.show(Box::new(move |done| {
-            *slot.borrow_mut() = Some(done);
-            SelectorSpec::new(view)
-        }));
-        self.request_render();
+        let id = self.next_dialog_id();
+        self.push_dialog(DialogEntry { id, focus: view.clone(), component: view, dispose: None, blocked: None });
         let weak = self.weak.clone();
         Rc::new(move || {
-            let done = closer.borrow_mut().take();
-            if let Some(done) = done {
-                done();
-            }
             if let Some(mode) = weak.upgrade() {
+                mode.close_dialog(id);
                 mode.request_render();
             }
         })

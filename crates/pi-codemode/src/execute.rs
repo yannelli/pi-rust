@@ -1,14 +1,15 @@
 //! Runs one `codemode` script: nested tool calls through the host, discovery and model globals,
 //! the store on the branch, and the formatted result.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use pi_agent::ToolUpdateCallback;
 use pi_ai::{ContentBlock, Usage};
 use serde_json::Value;
+use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 use crate::calls::{
@@ -34,36 +35,170 @@ use crate::store::CodemodeStoreEntryData;
 /// Heap limit of the VM. Overruns throw `InternalError: out of memory` inside the script.
 pub const CODEMODE_MEMORY_LIMIT_BYTES: usize = 256 * 1024 * 1024;
 
-/// Worker threads across calls and sessions: one replacement while a cancelled worker still exits.
+/// Default limit on worker threads across calls and sessions: one replacement while a cancelled
+/// worker still exits. `PI_CODEMODE_MAX_WORKERS` raises it for hosts that run many sessions.
 pub const MAX_CONCURRENT_CODEMODE_WORKERS: usize = 2;
-static CODEMODE_WORKER_LIMIT: AtomicUsize = AtomicUsize::new(MAX_CONCURRENT_CODEMODE_WORKERS);
-static ACTIVE_CODEMODE_WORKERS: AtomicUsize = AtomicUsize::new(0);
+/// How long a script waits for a free worker before it fails without running.
+const CODEMODE_WORKER_WAIT: Duration = Duration::from_secs(60);
+const WORKER_LIMIT_ENV: &str = "PI_CODEMODE_MAX_WORKERS";
+/// Set by [`set_codemode_worker_limit`]; zero means the environment or the default decides.
+static CODEMODE_WORKER_LIMIT: AtomicUsize = AtomicUsize::new(0);
 
-/// Replace the process-wide worker limit, for hosts and test suites that run many scripts at once.
-pub fn set_codemode_worker_limit(limit: usize) {
-    CODEMODE_WORKER_LIMIT.store(limit, Ordering::SeqCst);
+/// Workers alive and the scripts waiting for one, in arrival order.
+struct WorkerSlots {
+    active: usize,
+    next_waiter: u64,
+    waiters: VecDeque<(u64, oneshot::Sender<()>)>,
 }
 
-fn codemode_worker_admission() -> AcquireWorker {
-    AcquireWorker(Arc::new(|| {
-        let limit = CODEMODE_WORKER_LIMIT.load(Ordering::SeqCst);
-        let mut active = ACTIVE_CODEMODE_WORKERS.load(Ordering::SeqCst);
-        loop {
-            if active >= limit {
-                return Err(format!(
-                    "Codemode worker limit reached ({limit} workers are still running or shutting down). Retry after they exit."
-                ));
-            }
-            match ACTIVE_CODEMODE_WORKERS.compare_exchange_weak(active, active + 1, Ordering::SeqCst, Ordering::SeqCst)
-            {
-                Ok(_) => break,
-                Err(current) => active = current,
-            }
+static WORKER_SLOTS: Mutex<WorkerSlots> =
+    Mutex::new(WorkerSlots { active: 0, next_waiter: 0, waiters: VecDeque::new() });
+
+fn worker_slots() -> MutexGuard<'static, WorkerSlots> {
+    WORKER_SLOTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// `PI_CODEMODE_MAX_WORKERS` when it is a positive integer.
+fn parse_worker_limit(value: Option<&str>) -> Option<usize> {
+    let number = value?.trim().parse::<f64>().ok()?;
+    (number.is_finite() && number >= 1.0 && number.fract() == 0.0).then_some(number as usize)
+}
+
+/// Read per call so hosts can set the variable at runtime.
+fn max_codemode_workers() -> usize {
+    match CODEMODE_WORKER_LIMIT.load(Ordering::SeqCst) {
+        0 => parse_worker_limit(std::env::var(WORKER_LIMIT_ENV).ok().as_deref())
+            .unwrap_or(MAX_CONCURRENT_CODEMODE_WORKERS),
+        limit => limit,
+    }
+}
+
+/// Give free slots to waiting scripts in arrival order.
+fn admit_waiting_scripts(slots: &mut WorkerSlots) {
+    let limit = max_codemode_workers();
+    while slots.active < limit {
+        let Some((_, grant)) = slots.waiters.pop_front() else { return };
+        slots.active += 1;
+        if grant.send(()).is_err() {
+            slots.active -= 1;
         }
-        Ok(Box::new(|| {
-            ACTIVE_CODEMODE_WORKERS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+fn release_codemode_worker() {
+    let mut slots = worker_slots();
+    slots.active = slots.active.saturating_sub(1);
+    admit_waiting_scripts(&mut slots);
+}
+
+/// Replace the process-wide worker limit, for hosts and test suites that run many scripts at once.
+/// Zero restores `PI_CODEMODE_MAX_WORKERS` or the default.
+pub fn set_codemode_worker_limit(limit: usize) {
+    CODEMODE_WORKER_LIMIT.store(limit, Ordering::SeqCst);
+    admit_waiting_scripts(&mut worker_slots());
+}
+
+/// Why a script got no worker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Unreserved {
+    Aborted,
+    TimedOut,
+}
+
+/// A script's place in the queue. Leaving it, by a grant that came too late or by dropping the
+/// wait, returns the place and any slot granted meanwhile.
+struct QueuedScript {
+    id: u64,
+    granted: oneshot::Receiver<()>,
+}
+
+impl Drop for QueuedScript {
+    fn drop(&mut self) {
+        worker_slots().waiters.retain(|(id, _)| *id != self.id);
+        if self.granted.try_recv().is_ok() {
+            release_codemode_worker();
+        }
+    }
+}
+
+/// Reserve one worker slot, waiting in arrival order while all are taken.
+async fn reserve_codemode_worker(cancel: &CancellationToken, wait: Duration) -> Result<WorkerReservation, Unreserved> {
+    if cancel.is_cancelled() {
+        return Err(Unreserved::Aborted);
+    }
+    let (grant, granted) = oneshot::channel();
+    let mut queued = {
+        let mut slots = worker_slots();
+        let id = slots.next_waiter;
+        slots.next_waiter += 1;
+        slots.waiters.push_back((id, grant));
+        admit_waiting_scripts(&mut slots);
+        QueuedScript { id, granted }
+    };
+    tokio::select! {
+        biased;
+        result = &mut queued.granted => match result {
+            Ok(()) => Ok(WorkerReservation(Arc::new(AtomicBool::new(true)))),
+            Err(_) => Err(Unreserved::Aborted),
+        },
+        _ = cancel.cancelled() => Err(Unreserved::Aborted),
+        _ = tokio::time::sleep(wait) => Err(Unreserved::TimedOut),
+    }
+}
+
+/// The result of a script that waited for a worker in vain.
+fn worker_wait_failure(
+    why: Unreserved,
+    deadline: Option<Duration>,
+    started: Instant,
+    calls: Vec<CodemodeNestedCall>,
+) -> CodemodeToolOutput {
+    let error = match (why, deadline) {
+        (Unreserved::Aborted, _) => "Script aborted: Execution aborted".to_string(),
+        (Unreserved::TimedOut, Some(deadline)) if deadline <= CODEMODE_WORKER_WAIT => format!(
+            "Script timed out: Execution timed out after {} ms while waiting for a free codemode worker",
+            deadline.as_millis()
+        ),
+        (Unreserved::TimedOut, _) => format!(
+            "No codemode worker became free within {} seconds. All {} workers, shared by every session in this process, are held by other scripts. Retry after they finish.",
+            CODEMODE_WORKER_WAIT.as_secs(),
+            max_codemode_workers()
+        ),
+    };
+    let wall_time = js_to_fixed(started.elapsed().as_secs_f64(), 1);
+    CodemodeToolOutput {
+        content: vec![
+            ContentBlock::text(format!("Script failed\nWall time {wall_time} seconds\nOutput:\n")),
+            ContentBlock::text(format!("Script error:\n{error}\n\nThe script did not start.")),
+        ],
+        details: CodemodeToolDetails { calls, full_output_path: None },
+        usage: None,
+        is_error: true,
+    }
+}
+
+/// The slot reserved for one script. The sandbox takes it when its worker starts and gives it
+/// back when the worker exits; a script that never starts a worker releases it here.
+struct WorkerReservation(Arc<AtomicBool>);
+
+impl WorkerReservation {
+    fn admission(&self) -> AcquireWorker {
+        let held = self.0.clone();
+        AcquireWorker(Arc::new(move || {
+            if !held.swap(false, Ordering::SeqCst) {
+                return Err("The script already settled".to_string());
+            }
+            Ok(Box::new(release_codemode_worker))
         }))
-    }))
+    }
+}
+
+impl Drop for WorkerReservation {
+    fn drop(&mut self) {
+        if self.0.swap(false, Ordering::SeqCst) {
+            release_codemode_worker();
+        }
+    }
 }
 
 /// The result of one `codemode` call.
@@ -191,13 +326,24 @@ pub async fn execute_codemode(
     if options.models && host.models().is_some() {
         globals.extend(model_globals(host.clone(), tool_call_id, &options.docs_path, log.clone(), totals.clone()));
     }
-    let timeout = parsed.options.timeout_ms.map_or(Timeout::Never, |ms| Timeout::After(Duration::from_millis(ms)));
+    // The wait for a worker counts toward the script's deadline.
+    let deadline = parsed.options.timeout_ms.map(Duration::from_millis);
+    let wait_started = Instant::now();
+    let wait = deadline.map_or(CODEMODE_WORKER_WAIT, |deadline| deadline.min(CODEMODE_WORKER_WAIT));
+    let reservation = match reserve_codemode_worker(&cancel, wait).await {
+        Ok(reservation) => reservation,
+        Err(why) => return Ok(worker_wait_failure(why, deadline, started, log.snapshot())),
+    };
+    let waited = wait_started.elapsed();
+    let timeout = deadline.map_or(Timeout::Never, |deadline| {
+        Timeout::After(deadline.saturating_sub(waited).max(Duration::from_millis(1)))
+    });
     let sandbox = CodemodeSandbox::new(SandboxOptions {
         tools,
         globals,
         timeout,
         memory_limit_bytes: Some(CODEMODE_MEMORY_LIMIT_BYTES),
-        acquire_worker: Some(codemode_worker_admission()),
+        acquire_worker: Some(reservation.admission()),
     })
     .map_err(|error| CodemodeSourceError(error.0))?;
     let store = host.store_snapshot();
@@ -245,4 +391,20 @@ pub async fn execute_codemode(
         usage,
         is_error: !result.is_ok(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_worker_limit;
+
+    #[test]
+    fn worker_limit_comes_from_a_positive_integer() {
+        assert_eq!(parse_worker_limit(Some("3")), Some(3));
+        assert_eq!(parse_worker_limit(Some(" 12 ")), Some(12));
+        assert_eq!(parse_worker_limit(Some("4.0")), Some(4));
+        for invalid in ["0", "-1", "2.5", "", "many", "NaN", "inf"] {
+            assert_eq!(parse_worker_limit(Some(invalid)), None, "{invalid:?}");
+        }
+        assert_eq!(parse_worker_limit(None), None);
+    }
 }

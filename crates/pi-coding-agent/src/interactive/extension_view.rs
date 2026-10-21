@@ -327,6 +327,7 @@ impl InteractiveMode {
     /// Drop what extensions put in the UI before their runtime goes away (upstream
     /// `resetExtensionUI`).
     pub(super) fn reset_extension_ui(&self) {
+        self.reset_dialogs();
         self.tui().hide_overlay();
         self.reset_extension_overlays_and_autocomplete();
         self.set_extension_terminal_input(false);

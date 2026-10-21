@@ -34,6 +34,13 @@ pub fn run_clipboard_command(
         .stdin(Stdio::piped())
         .stdout(if input.is_some() { Stdio::null() } else { Stdio::piped() })
         .stderr(Stdio::null());
+    // Leave pi's process group so Ctrl+Z (SIGTSTP to the foreground group) does not stop a
+    // helper that keeps serving the clipboard.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
