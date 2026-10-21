@@ -11,6 +11,7 @@ mod nodes;
 mod recovery;
 mod tool_events;
 mod tools;
+mod wait_cycles;
 mod waiting;
 
 use std::sync::{Arc, Mutex};

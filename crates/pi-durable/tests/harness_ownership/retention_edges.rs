@@ -248,8 +248,10 @@ async fn does_not_scan_queued_submissions_for_an_input_when_nothing_cancels() {
     env.harness.close(&context()).await.unwrap();
 }
 
+// A wait on an ended task closes no cycle (#10411), also when the ended task owns the waiter's conversation and the
+// scheduler forgot it: the wait resumes at once.
 #[tokio::test]
-async fn still_rejects_waiting_on_a_forgotten_ended_owner() {
+async fn lets_a_task_wait_on_a_forgotten_ended_owner() {
     let board = Board::default();
     let Env { harness, root, hold, .. } = open(Arc::new(ControlledStorage::default()), &board).await;
     let (id, held) = (root.id, hold.clone());
@@ -268,7 +270,6 @@ async fn still_rejects_waiting_on_a_forgotten_ended_owner() {
     let waiter = child(&harness, c).await.commit(create, &context()).await.unwrap();
     let settled = harness.wait_for_task(waiter, &context()).await.unwrap();
     let outcome = serde_json::to_value(settled.state.outcome()).unwrap();
-    assert_eq!(outcome["status"], "faulted");
-    assert!(outcome.to_string().contains("cannot wait on itself or its owner"), "{outcome}");
+    assert_eq!(outcome["status"], "completed", "{outcome}");
     harness.close(&context()).await.unwrap();
 }
