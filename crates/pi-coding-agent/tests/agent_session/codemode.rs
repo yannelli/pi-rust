@@ -8,8 +8,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use async_trait::async_trait;
 use base64::Engine as _;
 use pi_agent::{AgentTool, AgentToolResult, SharedTool, ToolUpdateCallback};
-use pi_ai::providers::faux::FauxResponse;
-use pi_ai::{ContentBlock, Cost, Message, ToolResultMessage, Usage};
+use pi_ai::providers::faux::{FauxProvider, FauxResponse};
+use pi_ai::{
+    ApiProvider, AssistantMessageEventStream, ContentBlock, Cost, Message, Model, StreamOptions, ToolResultMessage,
+    Usage, register_api_provider,
+};
 use regex::Regex;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -201,6 +204,54 @@ async fn presents_callable_tools_per_codemode_mode() {
     // Without codemode, tools keep their plain descriptions.
     session.set_active_tools_by_name(&names(&["echo"]));
     assert_eq!(description("echo"), "Echo text back.\n\nSecond paragraph.");
+}
+
+/// Faux responses for a provider that reads system messages itself, like Anthropic's.
+struct TranscriptProvider(Arc<FauxProvider>);
+
+impl ApiProvider for TranscriptProvider {
+    fn stream(&self, model: &Model, context: &pi_ai::Context, options: StreamOptions) -> AssistantMessageEventStream {
+        self.0.stream(model, context, options)
+    }
+
+    fn supports_system_messages(&self) -> bool {
+        true
+    }
+}
+
+/// The tool names each system message of a request adds and removes.
+fn tool_changes(request: &pi_ai::Context) -> Vec<(Vec<&str>, Vec<&str>)> {
+    let systems = request.messages.iter().filter_map(|message| match message {
+        Message::System(system) => Some(system),
+        _ => None,
+    });
+    systems
+        .map(|system| {
+            let added = system.tools_added.iter().flatten().map(|tool| tool.name.as_str()).collect();
+            let removed = system.tools_removed.iter().flatten().map(|tool| tool.name.as_str()).collect();
+            (added, removed)
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn only_keeps_a_deactivated_direct_tool_out_of_the_first_tool_list() {
+    let h = codemode_harness(&["codemode"], test_tools(), Options::default()).await;
+    let api = h.session.model().unwrap().api;
+    register_api_provider(api, Arc::new(TranscriptProvider(h.provider.clone())));
+    h.settings.apply_overrides(json!({ "codemode": { "mode": "only", "inlineBudget": 0 } }));
+    h.session.set_active_tools_by_name(&names(&["read", "echo", "codemode"]));
+    h.provider.push(FauxResponse::text("one"));
+    h.session.prompt("one", Vec::new()).await.unwrap();
+    // An extension switches tool profiles. The model never saw echo, so nothing about it may change.
+    h.session.set_active_tools_by_name(&names(&["read", "codemode"]));
+    h.provider.push(FauxResponse::text("two"));
+    h.session.prompt("two", Vec::new()).await.unwrap();
+    let requests = h.requests();
+    let (first, second) = (tool_changes(&requests[0]), tool_changes(&requests[1]));
+    assert_eq!(first, [(vec!["codemode"], vec![])]);
+    assert_eq!(second[0], first[0], "{second:?}");
+    assert!(second.iter().all(|(added, removed)| !added.contains(&"echo") && !removed.contains(&"echo")), "{second:?}");
 }
 
 #[tokio::test]

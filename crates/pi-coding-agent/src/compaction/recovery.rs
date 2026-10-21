@@ -138,6 +138,26 @@ pub fn find_message_entry_id(session: &SessionManager, message: &Message) -> Opt
     session.get_branch(None).iter().rev().find(|entry| entry.message() == Some(message)).map(|e| e.id().to_string())
 }
 
+/// The ids of the entries after `assistant_entry_id`, and before the next assistant message,
+/// that hold results of `assistant`'s tool calls.
+pub fn find_tool_result_entry_ids(
+    session: &SessionManager,
+    assistant_entry_id: &str,
+    assistant: &AssistantMessage,
+) -> Vec<String> {
+    let branch = session.get_branch(None);
+    let Some(index) = branch.iter().position(|entry| entry.id() == assistant_entry_id) else { return Vec::new() };
+    let calls: Vec<&str> = assistant.tool_calls().map(|call| call.id.as_str()).collect();
+    branch[index + 1..]
+        .iter()
+        .take_while(|entry| !matches!(entry.message(), Some(Message::Assistant(_))))
+        .filter(|entry| {
+            matches!(entry.message(), Some(Message::ToolResult(result)) if calls.contains(&result.tool_call_id.as_str()))
+        })
+        .map(|entry| entry.id().to_string())
+        .collect()
+}
+
 /// Omit a failed response and its tool results from future context with `context_edit`
 /// entries. Returns the ids of the appended edits.
 pub fn omit_recovery_attempt(session: &mut SessionManager, targets: &[&str]) -> anyhow::Result<Vec<String>> {

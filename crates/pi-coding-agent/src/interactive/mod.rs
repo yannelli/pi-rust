@@ -22,6 +22,7 @@ pub mod footer_data;
 mod git_diff;
 mod hotkeys;
 mod info;
+mod init;
 mod input;
 mod layout;
 mod llama;

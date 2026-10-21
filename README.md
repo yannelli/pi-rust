@@ -90,6 +90,8 @@ Run `pi --help` for all options. In interactive mode, type `/` to list commands,
 
 `/export [file]` writes the session to HTML, or to JSONL when the file ends in `.jsonl`, and `pi --export <session.jsonl> [output]` exports a saved session file to HTML. With both, an output path that ends in `.md` writes Markdown (pi-rust extension). The Markdown file has the current branch: a title, the date, models, working directory, tokens, and cost, then each user and assistant turn. Thinking is in collapsed `<details>` blocks, tool calls show their JSON arguments, tool results stop after 200 lines, and images become placeholders.
 
+`/init [instructions]` (pi-rust extension) asks the agent to look through the project in the working directory and write an `AGENTS.md` there with an overview, build, test, and lint commands, code layout, conventions, and gotchas, based only on what it finds. If the directory already has a context file that pi loads (`AGENTS.md`, `CLAUDE.md`, or `AGENTS.override.md`), the agent improves that file in place. Text after `/init` is added as extra instructions. The prompt goes out as a normal message: it shows in the chat, uses the current model, and is saved in the session. As with other built-in commands, `/init` takes precedence over a prompt template or extension command named `init`. It is available in interactive mode only.
+
 `/undo` (pi-rust extension) restores the files that the edit and write tools changed during the last prompt: it writes back their earlier content and deletes the files the agent created. Run it again to go one more prompt back. A file that changed after the agent wrote it, for example by you or a bash command, is skipped and listed. Limits: only edit and write changes are tracked, not bash commands; checkpoints stay in memory for the last 20 prompts of the current session, files over 4 MB are not kept, and everything is lost on exit or when you switch sessions. The conversation does not change; use `/tree` to move in it.
 
 ### Prompt history (pi-rust extension)
@@ -238,7 +240,7 @@ With a Copilot login, pi reads `GET /models` from the login's Copilot endpoint a
 
 #### OpenAI and xAI
 
-With an API key, pi reads `GET <base URL>/models`. This list also names embedding, audio, image, moderation, and realtime models, so pi adds only listed models of a model family that the catalog has, such as `gpt-` or `grok-`, and never models of those kinds. The list has no limits, so the catalog's limits stay.
+With an API key, pi reads `GET <base URL>/models`. This list also names embedding, audio, image, moderation, and realtime models, so pi adds only listed models of a model family that the catalog has, such as `gpt-` or `grok-`, and never models of those kinds. The list has no limits, so the catalog's limits stay. With a ChatGPT login for `openai`, the same request returns the account's models by `slug`, and pi takes each model's `context_window` as its context size. pi does not use the larger `max_context_window`.
 
 #### Google
 
@@ -279,6 +281,7 @@ pi-rust ports the `pi` CLI and its libraries feature for feature. These parts di
 - `pi --mode acp` (above) is an addition; the TypeScript pi needs the separate pi-acp adapter.
 - Markdown export (see [Use](#use)) is an addition: `/export notes.md` and `pi --export session.jsonl notes.md` write Markdown. Upstream pi exports only HTML and JSONL.
 - `/diff` (see [Use](#use)) is an addition; upstream pi has no command that shows the git changes in the working directory.
+- `/init` (see [Use](#use)) is an addition; upstream pi has no `/init` command.
 - `/context` (see [Use](#use)) is an addition; upstream pi shows context use only in the footer.
 
 - `pi completion` and `pi doctor` (above) are additions; the TypeScript pi has neither.

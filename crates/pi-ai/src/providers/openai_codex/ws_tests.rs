@@ -363,3 +363,25 @@ async fn an_unset_transport_uses_websockets_without_cached_context() {
     assert_eq!((stats.connections_reused, stats.cached_context_requests, stats.full_context_requests), (1, 0, 2));
     close_websocket_sessions(Some("default-transport"));
 }
+
+#[tokio::test]
+async fn uncached_retries_fall_back_to_sse_after_a_mid_stream_disconnect() {
+    let partial = events("response.completed", "completed", None)[..3].to_vec();
+    let server = Server::start(Arc::new(move |_, _| Action::ReplyThenStall(partial.clone())), false).await;
+    let model = codex_model(&server.base_url);
+    let summary = |session: &str| StreamOptions {
+        cache_retention: Some(crate::registry::CacheRetention::None),
+        timeout_ms: Some(100),
+        ..options(&mock_token("acc"), Transport::Auto, Some(session))
+    };
+    let failed = OpenAICodexResponses.stream(&model, &context(), summary("uncached-retry")).result(&model).await;
+    assert_eq!(failed.error_message.as_deref(), Some("WebSocket idle timeout after 100ms"));
+    let retried = OpenAICodexResponses.stream(&model, &context(), summary("uncached-retry")).result(&model).await;
+    assert_eq!(retried.text(), "Hello", "{:?}", retried.error_message);
+    assert_eq!(server.seen(|seen| (seen.connections, seen.http_requests)), (1, 1));
+    // Another session still starts on a WebSocket.
+    OpenAICodexResponses.stream(&model, &context(), summary("uncached-other")).result(&model).await;
+    assert_eq!(server.seen(|seen| (seen.connections, seen.http_requests)), (2, 1));
+    reset_websocket_debug_stats(Some("uncached-retry"));
+    reset_websocket_debug_stats(Some("uncached-other"));
+}
