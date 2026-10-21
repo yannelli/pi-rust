@@ -4,6 +4,7 @@
 //! recorder that is also a [`TelemetryStore`], a trace renderer ([`render`]), and adapter conformance cases.
 
 mod attributes;
+mod clock;
 mod memory;
 mod metrics;
 mod noop;
@@ -14,9 +15,10 @@ mod store;
 pub mod testing;
 
 pub use attributes::{AttributeValue, SpanAttributes};
+pub use clock::TelemetryClock;
 pub use memory::{
     InMemoryTelemetryContext, RecordedTelemetryEvent, RecordedTelemetryLink, RecordedTelemetryMeasurement,
-    RecordedTelemetrySpan, TelemetryClock,
+    RecordedTelemetrySpan,
 };
 pub use metrics::{
     HistogramOptions, InstrumentOptions, SchemaTelemetryCounter, SchemaTelemetryHistogram, TelemetryCounter,

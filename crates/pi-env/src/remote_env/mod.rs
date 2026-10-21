@@ -13,14 +13,14 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use pi_chord::Context;
 use pi_durable::env::{
-    BinaryReader, DirReader, FileError, FileErrorCode, FileInfo, FileResult, FileSystem, FileWatcher, RemoveOptions,
-    TempFileOptions, TextLineReader, WatchListener, WatchTarget,
+    BinaryReader, DirReader, FileError, FileErrorCode, FileInfo, FileListing, FileResult, FileSystem, FileWatcher,
+    ListFilesOptions, RemoveOptions, TempFileOptions, TextLineReader, WatchListener, WatchTarget,
 };
 use serde_json::Value;
 
 use crate::connection::{Connection, Json, RemoteError, RequestOptions, lock};
 use crate::errors::{Failure, abort_result, to_file_error};
-use crate::list_files::{FileListing, ListFilesOptions, list_files_over};
+use crate::list_files::list_files_over;
 use crate::paths::{PathStyle, file_url_to_path};
 use crate::session::random_hex;
 use crate::watch::{RemoteWatchOptions, RemoteWatcher};
@@ -124,17 +124,6 @@ impl RemoteExecutionEnv {
             return Ok(style.resolve(&base, &normalized));
         }
         Ok(style.resolve(&self.cwd, &normalized))
-    }
-
-    /// Through the daemon; `not_supported` with a daemon released before `listFiles`.
-    pub async fn list_files(
-        &self,
-        path: &str,
-        options: Option<&ListFilesOptions>,
-        context: &Context,
-    ) -> FileResult<FileListing> {
-        let resolved = self.resolve(path).await.map_err(|error| to_file_error(&error, Some(path)))?;
-        list_files_over(&self.connection, &resolved, options, context).await
     }
 
     /// Resolve `path`, check for an abort, and run `operation`; with `check_after`, check again after it.
@@ -324,6 +313,17 @@ impl FileSystem for RemoteExecutionEnv {
             Box::new(RemoteDirReader { handle, done: AtomicBool::new(false), closed: AtomicBool::new(false) })
         })
         .await
+    }
+
+    /// Through the daemon; `not_supported` with a daemon released before `listFiles`.
+    async fn list_files(
+        &self,
+        path: &str,
+        options: Option<&ListFilesOptions>,
+        context: &Context,
+    ) -> FileResult<FileListing> {
+        let resolved = self.resolve(path).await.map_err(|error| to_file_error(&error, Some(path)))?;
+        list_files_over(&self.connection, &resolved, options, context).await
     }
 
     async fn watch(

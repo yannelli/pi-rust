@@ -2,14 +2,14 @@
 
 use std::any::Any;
 use std::hash::{BuildHasher, RandomState};
-use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
 
 mod store;
 
 use crate::attributes::SpanAttributes;
+use crate::clock::TelemetryClock;
 use crate::metrics::{
     HistogramOptions, InstrumentOptions, TelemetryCounter, TelemetryHistogram, TelemetryMetricKind, TelemetryMetrics,
     TelemetryUpDownCounter,
@@ -24,33 +24,6 @@ pub(crate) const SPAN_KEY: &str = "pi-memory-span";
 pub(crate) const TRACE_KEY: &str = "pi-memory-trace";
 /// Measurements are grouped into ten-second intervals for store queries.
 const INTERVAL_MS: f64 = 10_000.0;
-
-type MillisFn = Arc<dyn Fn() -> f64 + Send + Sync>;
-
-/// Time sources of a recorder: wall-clock epoch milliseconds for span and interval starts, and a monotonic
-/// millisecond counter for durations and event offsets.
-#[derive(Clone)]
-pub struct TelemetryClock {
-    wall_ms: MillisFn,
-    monotonic_ms: MillisFn,
-}
-
-impl TelemetryClock {
-    pub fn new(
-        wall_ms: impl Fn() -> f64 + Send + Sync + 'static,
-        monotonic_ms: impl Fn() -> f64 + Send + Sync + 'static,
-    ) -> Self {
-        Self { wall_ms: Arc::new(wall_ms), monotonic_ms: Arc::new(monotonic_ms) }
-    }
-}
-
-impl Default for TelemetryClock {
-    fn default() -> Self {
-        static START: LazyLock<Instant> = LazyLock::new(Instant::now);
-        let wall = || SystemTime::now().duration_since(UNIX_EPOCH).map_or(0.0, |elapsed| elapsed.as_millis() as f64);
-        Self::new(wall, || START.elapsed().as_secs_f64() * 1000.0)
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RecordedTelemetryEvent {
@@ -225,8 +198,8 @@ impl InMemoryTelemetryContext {
         let recorded = Recorded {
             span,
             explicit_status: false,
-            started_ms: (self.clock.wall_ms)(),
-            started_tick: (self.clock.monotonic_ms)(),
+            started_ms: self.clock.wall_ms(),
+            started_tick: self.clock.monotonic_ms(),
             ended_ms: None,
             event_offsets: Vec::new(),
         };
@@ -321,7 +294,7 @@ impl MemoryInstrument {
             attributes,
             context: context.and_then(carrier_of),
         };
-        let interval = ((self.root.clock.wall_ms)() / INTERVAL_MS).floor() * INTERVAL_MS;
+        let interval = (self.root.clock.wall_ms() / INTERVAL_MS).floor() * INTERVAL_MS;
         self.root.lock().measurements.push((interval, measurement));
     }
 }
@@ -438,7 +411,7 @@ impl TelemetrySpan for MemorySpan {
     }
 
     fn add_event(&self, name: &str, attributes: SpanAttributes) {
-        let tick = (self.root.clock.monotonic_ms)();
+        let tick = self.root.clock.monotonic_ms();
         self.update(|recorded| {
             recorded.event_offsets.push(tick - recorded.started_tick);
             recorded.span.events.push(RecordedTelemetryEvent { name: name.into(), attributes });
@@ -457,7 +430,7 @@ impl TelemetrySpan for MemorySpan {
     }
 
     fn end(&self, outcome: SpanOutcome) {
-        let tick = (self.root.clock.monotonic_ms)();
+        let tick = self.root.clock.monotonic_ms();
         let mut state = self.root.lock();
         let sequence = state.next_end_sequence;
         let recorded = &mut state.spans[self.index];
