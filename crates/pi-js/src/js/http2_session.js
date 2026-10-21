@@ -44,14 +44,7 @@ class Http2Session extends EventEmitter {
     this.originSet = undefined;
     const nativeSettings = { ...settings, customSettings: custom };
     this[kNative] = nativeH2.session(type === 0, nativeSettings, (event, key, value, end, id) => this._onNative(event, key, value, end, id));
-    this._onData = (chunk) => {
-      if (this[kNative] === null) return;
-      for (const seen of nativeH2.feed(this[kNative], chunk) ?? []) {
-        if (this.destroyed) return;
-        if (seen === "ack") this._onSettingsAck();
-        else this._onSettings(seen);
-      }
-    };
+    this._onData = (chunk) => this[kNative] !== null && nativeH2.feed(this[kNative], chunk);
     this._onEnd = () => this[kNative] !== null && nativeH2.endInput(this[kNative]);
     this._onClose = () => this.destroy();
     this._onError = (error) => this.destroy(error);
@@ -73,6 +66,8 @@ class Http2Session extends EventEmitter {
     else if (event === "closed") this._onClosed(value);
     else if (event === "stream") this._onStream(key, value, end, id);
     else if (event === "promise") this._onPromise(key, value, id);
+    else if (event === "settings") this._onSettings(value);
+    else if (event === "settingsAck") this._onSettingsAck();
     else {
       const stream = this._streams.get(key);
       if (stream) stream._onNative(event, value, end);
