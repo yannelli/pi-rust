@@ -138,6 +138,23 @@ In print mode, pi writes a line such as `pi: stopped after 20 turns (--max-turns
 
 `limit` is `maxTurns` or `maxCost`, `max` is the limit, `turns` counts the responses of the run, and `cost` is the session total in US dollars. When the cost limit keeps a prompt from starting a run, the event comes alone and an RPC `prompt` gets the disposition `handled`. Interactive mode shows the message as a status line. An extension that registers its own `--max-turns` or `--max-cost` flag gets the value instead, as with upstream pi.
 
+## Structured output (pi-rust extension)
+
+`--output-schema <file>` makes the final answer of print mode a JSON value that matches a JSON Schema, for scripts. pi adds the schema to the system prompt and checks the last response with the same validator as tool arguments. A single surrounding code fence such as ```` ```json ```` is accepted. When the response is not valid JSON or does not match, pi sends the errors back in the same session and asks for corrected JSON. `--output-retries <n>` sets how many corrective prompts it sends (default 1, `0` for none).
+
+```sh
+pi -p --output-schema review.schema.json "Review the diff in HEAD" > review.json
+echo $?   # 4 when the answer still does not match
+```
+
+On success, text mode prints only the JSON value, compact on one line. `--mode json` ends with an `output` event instead:
+
+```json
+{"type":"output","value":{"verdict":"approve","issues":[]}}
+```
+
+When the answer still does not match after the retries, pi writes the errors to stderr and exits with code 4; text mode prints nothing to stdout. An error or aborted response exits 1, and a run limit exits 3 as above. pi checks the schema file before it starts: it must be valid JSON, use local `$ref`s only, and use keywords and patterns the validator supports. The flag works only in print mode (`-p`, `--mode json`, or when stdin or stdout is not a terminal); interactive, RPC, and ACP mode reject it. An extension that registers its own `--output-schema` or `--output-retries` flag gets the value instead.
+
 ## ACP (Zed and other editors)
 
 `pi --mode acp` runs pi as an [Agent Client Protocol](https://agentclientprotocol.com) server over stdio, so editors such as Zed can use it as an external agent. In Zed, add this to `settings.json`:
@@ -262,6 +279,7 @@ pi-rust ports the `pi` CLI and its libraries feature for feature. These parts di
 - `pi completion` and `pi doctor` (above) are additions; the TypeScript pi has neither.
 - `pi sessions` and `pi stats` (above) are additions; the TypeScript pi lists and deletes sessions only in its session picker (`pi -r`, `/resume`) and shows usage only for the current session (`/session`).
 - The run limits `--max-turns` and `--max-cost` (above) are additions.
+- Structured output with `--output-schema` and `--output-retries` (above) is an addition.
 - Account model lists for OpenAI Codex, Anthropic, GitHub Copilot, OpenAI, xAI, and Google (see [Providers](#account-model-lists-pi-rust-extension)) are an addition; upstream pi narrows only OpenRouter.
 - [Prompt history](#prompt-history-pi-rust-extension) across sessions, with the Ctrl+R search and the `promptHistory` settings, is an addition; upstream pi keeps prompt history only for the running process.
 - `pi-env` looks for remote daemons in a `pi-env-daemons` folder next to the running program. Each release has a `pi-env-daemons-<tag>.tar.gz` with the daemons for Linux, Android (Termux), macOS, and Windows on x86-64 and arm64; extract it next to `pi`.

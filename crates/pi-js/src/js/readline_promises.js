@@ -2,6 +2,11 @@
 const readline = require("readline");
 
 class Interface extends readline.Interface {
+  constructor(input, output, completer, terminal) {
+    super(input, output, completer, terminal);
+    // Node's promises Interface keeps full line editing when TERM=dumb.
+    delete this._ttyWrite;
+  }
   question(query, options = {}) {
     return new Promise((resolve, reject) => {
       const signal = options.signal;

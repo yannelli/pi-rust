@@ -3,12 +3,14 @@
 
 use std::sync::{Arc, Mutex};
 
-use pi_ai::{ContentBlock, Message, StopReason};
+use pi_ai::{AssistantMessage, ContentBlock, Message, StopReason};
+use serde_json::Value;
 
 use crate::agent_session::{AgentSession, AgentSessionRuntime, PromptOptions, RUN_LIMIT_EXIT_CODE};
 use crate::cli::OutputMode;
 use crate::extension_ui::ExtensionMode;
 use crate::extensions::ExtensionBindings;
+use crate::output_schema::{OUTPUT_SCHEMA_EXIT_CODE, OutputSchema, correction_prompt};
 
 /// One JSON line on the real stdout, which the stdout guard keeps for protocol output.
 fn write_line(line: &str) {
@@ -37,15 +39,26 @@ fn bind_json_output(runtime: &AgentSessionRuntime) {
     runtime.set_rebind_session(Some(Arc::new(bind)));
 }
 
+/// What `--output-schema` made of the final response.
+enum Outcome {
+    /// No schema, or a run limit stopped the run.
+    Plain,
+    Valid(Value),
+    Invalid(Vec<String>),
+    /// The last response is an error or aborted.
+    Failed(String),
+}
+
 /// Run `initial_message` with `initial_images`, then each of `messages`. Returns the exit code:
-/// 1 when a prompt fails or, in text mode, when the last response is an error or aborted, and
-/// [`RUN_LIMIT_EXIT_CODE`] when `--max-turns` or `--max-cost` stopped the run.
+/// 1 when a prompt fails or the last response is an error or aborted (text mode or a schema),
+/// [`RUN_LIMIT_EXIT_CODE`] for a run limit, and [`OUTPUT_SCHEMA_EXIT_CODE`] for a schema mismatch.
 pub async fn run_print_mode(
     runtime: &Arc<AgentSessionRuntime>,
     mode: OutputMode,
     initial_message: Option<String>,
     initial_images: Vec<ContentBlock>,
     messages: Vec<String>,
+    output_schema: Option<OutputSchema>,
 ) -> i32 {
     let json = mode == OutputMode::Json;
     if json {
@@ -75,7 +88,13 @@ pub async fn run_print_mode(
             }
             runtime.session().prompt(message, Vec::new()).await?;
         }
-        anyhow::Ok(())
+        let session = runtime.session();
+        let registered =
+            |name: &str| session.extension_runner().is_some_and(|runner| runner.registry().flag(name).is_some());
+        match output_schema.and_then(|schema| schema.unclaimed(registered)) {
+            Some(schema) => structured_output(&session, &schema).await,
+            None => anyhow::Ok(Outcome::Plain),
+        }
     };
     // SIGTERM and SIGHUP (Ctrl+Break and console close on Windows) stop the run. The prompts
     // keep running while the runtime is disposed, so the abort can settle the agent loop.
@@ -97,17 +116,32 @@ pub async fn run_print_mode(
             std::process::exit(code);
         }
     };
+    let app = crate::resources::brand::APP_NAME;
     let code = match (result, runtime.session().run_limit_stop()) {
         (_, Some(stop)) => {
-            eprintln!("{}: {}", crate::resources::brand::APP_NAME, stop.message());
+            eprintln!("{app}: {}", stop.message());
             RUN_LIMIT_EXIT_CODE
         }
         (Err(error), None) => {
             eprintln!("{error:#}");
             1
         }
-        (Ok(()), None) if json => 0,
-        (Ok(()), None) => print_final_response(&runtime.session()),
+        (Ok(Outcome::Valid(value)), None) => {
+            let line = if json { serde_json::json!({ "type": "output", "value": value }) } else { value };
+            write_line(&line.to_string());
+            0
+        }
+        (Ok(Outcome::Invalid(errors)), None) => {
+            let list: String = errors.iter().map(|error| format!("\n  {error}")).collect();
+            eprintln!("{app}: the final response does not match --output-schema:{list}");
+            OUTPUT_SCHEMA_EXIT_CODE
+        }
+        (Ok(Outcome::Failed(message)), None) => {
+            eprintln!("{message}");
+            1
+        }
+        (Ok(Outcome::Plain), None) if json => 0,
+        (Ok(Outcome::Plain), None) => print_final_response(&runtime.session()),
     };
     runtime.set_rebind_session(None);
     runtime.dispose().await;
@@ -115,12 +149,54 @@ pub async fn run_print_mode(
     code
 }
 
+/// `--output-schema`: check the last response, sending corrective prompts with the errors while
+/// retries remain.
+async fn structured_output(session: &AgentSession, schema: &OutputSchema) -> anyhow::Result<Outcome> {
+    let mut retries = schema.retries();
+    loop {
+        if session.run_limit_stop().is_some() {
+            return Ok(Outcome::Plain);
+        }
+        let Some(Message::Assistant(last)) = session.messages().pop() else {
+            return Ok(Outcome::Invalid(vec!["there is no response to check".into()]));
+        };
+        if let Some(message) = failure(&last) {
+            return Ok(Outcome::Failed(message));
+        }
+        let text: Vec<&str> = last
+            .content
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        match schema.check(&text.join("\n")) {
+            Ok(value) => return Ok(Outcome::Valid(value)),
+            Err(errors) if retries == 0 => return Ok(Outcome::Invalid(errors)),
+            Err(errors) => {
+                retries -= 1;
+                session.prompt(&correction_prompt(&errors), Vec::new()).await?;
+            }
+        }
+    }
+}
+
+/// The message to report when `last` is an error or aborted.
+fn failure(last: &AssistantMessage) -> Option<String> {
+    let reason = match last.stop_reason {
+        StopReason::Error => "error",
+        StopReason::Aborted => "aborted",
+        _ => return None,
+    };
+    let message = last.error_message.clone().filter(|message| !message.is_empty());
+    Some(message.unwrap_or_else(|| format!("Request {reason}")))
+}
+
 fn print_final_response(session: &AgentSession) -> i32 {
     let Some(Message::Assistant(last)) = session.messages().pop() else { return 0 };
-    if matches!(last.stop_reason, StopReason::Error | StopReason::Aborted) {
-        let reason = if last.stop_reason == StopReason::Error { "error" } else { "aborted" };
-        let message = last.error_message.clone().filter(|message| !message.is_empty());
-        eprintln!("{}", message.unwrap_or_else(|| format!("Request {reason}")));
+    if let Some(message) = failure(&last) {
+        eprintln!("{message}");
         return 1;
     }
     for block in &last.content {
