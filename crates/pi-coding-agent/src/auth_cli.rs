@@ -180,18 +180,19 @@ fn validate(args: &Args, kind: AuthCommandKind) -> Result<(Option<String>, Optio
     Ok((provider, model))
 }
 
-struct AuthContext {
-    registry: ModelRegistry,
-    models_error: bool,
-    resolver: AuthResolver,
+pub(crate) struct AuthContext {
+    pub(crate) registry: ModelRegistry,
+    /// Why `models.json` could not be loaded.
+    pub(crate) models_error: Option<String>,
+    pub(crate) resolver: AuthResolver,
 }
 
-async fn auth_context(agent_dir: &Path, store: Arc<dyn CredentialStore>, oauth: OAuthLookup) -> AuthContext {
+pub(crate) async fn auth_context(agent_dir: &Path, store: Arc<dyn CredentialStore>, oauth: OAuthLookup) -> AuthContext {
     let (mut registry, error) = ModelRegistry::load_lenient(&models_path(agent_dir));
     let resolver = AuthResolver::new(store, oauth);
     resolver.set_provider_configs(registry.auth_configs());
     registry.set_configured_providers(configured_providers(&resolver, &registry).await);
-    AuthContext { registry, models_error: error.is_some(), resolver }
+    AuthContext { registry, models_error: error.map(|error| error.to_string()), resolver }
 }
 
 struct CheckResult {
@@ -226,7 +227,7 @@ async fn check_provider(
         }
     }
     let provider = provider.ok_or("Unable to resolve an auth provider")?;
-    if context.models_error {
+    if context.models_error.is_some() {
         return Ok(CheckResult::invalid(provider));
     }
     if !context.registry.has_provider(&provider) {
