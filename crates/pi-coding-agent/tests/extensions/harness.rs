@@ -232,7 +232,7 @@ pub async fn harness(setup: Setup) -> Harness {
         std::fs::write(agent_dir.join("models.json"), models.to_string()).unwrap();
     }
     let provider = FauxProvider::new(setup.responses.clone());
-    register_api_provider(api, provider.clone());
+    register_api_provider(api.clone(), provider.clone());
     let mut values = json!({"defaultProvider": "local", "defaultModel": "tiny"});
     if setup.from_settings {
         let paths: Vec<String> = setup.load.iter().map(|path| extension_dir.join(path).display().to_string()).collect();
@@ -248,6 +248,7 @@ pub async fn harness(setup: Setup) -> Harness {
         ..CreateServicesOptions::new(&cwd, &agent_dir)
     })
     .await;
+    crate::offline_guard::assert_models_loaded(&services);
     let entries = setup.load.iter().map(|path| LoadEntry::file(extension_dir.join(path))).collect();
     let flag_values = setup.flags.iter().map(|(name, value)| (name.to_string(), value.clone())).collect();
     let entries = (!setup.from_settings).then_some(entries);
@@ -273,6 +274,11 @@ pub async fn harness(setup: Setup) -> Harness {
     let created = create_agent_session(create).await.unwrap();
     assert!(created.extensions.is_some_and(|attached| Arc::ptr_eq(&attached, &runner)));
     let session = created.session;
+    if setup.models.is_some() {
+        crate::offline_guard::assert_offline_model(session.model().as_ref());
+    } else {
+        crate::offline_guard::assert_faux_model(session.model().as_ref(), &api);
+    }
     let events = Arc::new(Mutex::new(Vec::new()));
     let sink = events.clone();
     session.subscribe(move |event| sink.lock().unwrap().push(event.to_json()));

@@ -13,6 +13,8 @@ mod loading;
 #[path = "../agent_session/mcp_fake.rs"]
 #[allow(dead_code)]
 mod mcp_fake;
+#[path = "../offline_guard/mod.rs"]
+mod offline_guard;
 mod provider;
 mod provider_compose;
 mod provider_hooks;

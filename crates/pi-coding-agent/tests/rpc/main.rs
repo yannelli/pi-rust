@@ -9,6 +9,8 @@ mod harness;
 #[allow(dead_code)]
 #[path = "../agent_session/mcp_fake.rs"]
 mod mcp_fake;
+#[path = "../offline_guard/mod.rs"]
+mod offline_guard;
 
 mod binary;
 mod builtins;

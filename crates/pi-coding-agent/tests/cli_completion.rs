@@ -11,11 +11,7 @@ use pi_coding_agent::cli::table::{CLI_COMMANDS, option_words};
 
 fn run_pi(root: &Path, args: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_pi"));
-    isolate(&mut command)
-        .args(args)
-        .current_dir(root.join("work"))
-        .env("PI_CODING_AGENT_DIR", root.join("agent"))
-        .stdin(Stdio::null());
+    isolate(&mut command, root).args(args).current_dir(root.join("work")).stdin(Stdio::null());
     command.output().unwrap()
 }
 
@@ -104,10 +100,9 @@ t pi --thin; t pi --thinking x; t pi comp; t pi --model mock/; t pi --provider m
             script.display()
         );
         let mut command = Command::new("bash");
-        isolate(&mut command)
+        isolate(&mut command, root.path())
             .args(["--norc", "--noprofile", "-c", &probe])
             .env("PATH", path)
-            .env("PI_CODING_AGENT_DIR", root.path().join("agent"))
             .stdin(Stdio::null());
         let output = command.output().unwrap();
         assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
