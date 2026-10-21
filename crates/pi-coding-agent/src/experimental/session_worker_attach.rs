@@ -344,9 +344,13 @@ impl Inner {
     }
 
     fn reject_demand(&self, request_id: &str, error: ChordError) {
+        self.finish_demand(request_id, Err(error));
+    }
+
+    fn finish_demand(&self, request_id: &str, result: ChordResult<()>) {
         let Some(pending) = lock(&self.state).pending_demand.remove(request_id) else { return };
         pending.timer.abort();
-        let _ = pending.sender.send(Err(error));
+        let _ = pending.sender.send(result);
     }
 
     pub(super) fn reject_operation(&self, request_id: &str, error: ChordError) {
@@ -379,14 +383,20 @@ impl Inner {
         let message = "Session worker disconnected during an operation";
         self.reject_operations(|pending| Arc::ptr_eq(&pending.worker, worker), message);
         self.remove_service_subscriptions(|entry| Arc::ptr_eq(&entry.worker, worker));
-        let demands: Vec<String> = lock(&self.state)
+        let demands: Vec<(String, bool)> = lock(&self.state)
             .pending_demand
             .iter()
             .filter(|(_, pending)| Arc::ptr_eq(&pending.worker, worker))
-            .map(|(id, _)| id.clone())
+            .map(|(id, pending)| (id.clone(), pending.attached))
             .collect();
-        for id in demands {
-            self.reject_demand(&id, ChordError::error("Session worker disconnected during demand update"));
+        for (id, attached) in demands {
+            // A departed worker holds no demand, so a pending release is complete. Its exit can be seen
+            // before the relayed acknowledgement when the release made the worker retire.
+            if attached {
+                self.reject_demand(&id, ChordError::error("Session worker disconnected during demand update"));
+            } else {
+                self.finish_demand(&id, Ok(()));
+            }
         }
         {
             let mut state = lock(&self.state);

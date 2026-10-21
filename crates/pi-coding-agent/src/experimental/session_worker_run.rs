@@ -96,8 +96,12 @@ async fn connect_control() -> ChordResult<Control> {
     Ok(Control { initial_server_connection_id: initial, reader, writer })
 }
 
+fn control_message(event: &SessionWorkerEvent) -> Value {
+    json!({ "type": "send", "to": "server", "payload": event.to_value() })
+}
+
 fn send(writer: &LineWriter, event: &SessionWorkerEvent) {
-    writer.post(&json!({ "type": "send", "to": "server", "payload": event.to_value() }));
+    writer.post(&control_message(event));
 }
 
 /// Parse the worker options, run the worker, and report startup failure to the server.
@@ -262,7 +266,7 @@ async fn run(options: SessionWorkerOptions, create: CreateSessionWorkerHarness) 
         services: services.clone(),
         active: Arc::default(),
     };
-    let announced = writer.write(&json!({ "type": "send", "to": "server", "payload": ready.to_value() })).await;
+    let announced = writer.write(&control_message(&ready)).await;
     let mut signals = signals()?;
     let failed = match announced {
         Err(error) => Some(error),
@@ -362,8 +366,12 @@ impl Worker {
                         SessionWorkerEvent::DemandApplied { token, session_key, request_id, attachment_id, attached }
                     }
                 };
-                send(&self.writer, &event);
+                // Write the reply before releasing the hold: retirement exits the process, dropping queued lines.
+                let written = self.writer.write(&control_message(&event)).await;
                 hold.release();
+                if written.is_err() {
+                    return Break(());
+                }
             }
             SessionWorkerCommand::OperationCancel { request_id, scope } => {
                 if let Some((active, abort)) = lock(&self.active).get(&request_id)
@@ -407,7 +415,8 @@ impl Worker {
                     message: error.to_string(),
                 },
             };
-            send(&writer, &SessionWorkerEvent::OperationResponse { token, session_key, response });
+            let response = SessionWorkerEvent::OperationResponse { token, session_key, response };
+            let _ = writer.write(&control_message(&response)).await;
             drop(hold);
         });
     }
