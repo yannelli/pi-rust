@@ -115,10 +115,10 @@ fn detect_from_environment(
     if term_program == "herdr" {
         return capabilities(None, true_color_hint, true);
     }
-    // Rex supports OSC 8 hyperlinks but only partially implements the Kitty graphics protocol
-    // (no Unicode placeholders), so images stay off. Checked before outer-terminal detection.
+    // Rex supports OSC 8 hyperlinks and only partially implements the Kitty graphics protocol
+    // (no Unicode placeholders), but enough for pi. Checked before outer-terminal detection.
     if term_program == "rex" {
-        return capabilities(None, true, true);
+        return kitty;
     }
     if set("KITTY_WINDOW_ID") || term_program == "kitty" {
         return kitty;
