@@ -220,13 +220,9 @@ const RETRYABLE_PATTERNS: &[&str] = &[
     "model is at capacity",
     "rate.?limit",
     "too many requests",
-    "429",
-    "500",
-    "502",
-    "503",
-    "504",
-    "520",
-    "524",
+    // Status codes must not be part of a longer word or number, e.g. a request id or byte count.
+    // The regex crate has no lookaround, so the boundaries are matched as characters.
+    "(?:^|[^a-z0-9])(?:429|500|502|503|504|520|524)(?:[^a-z0-9]|$)",
     "service.?(?:is.?)?(?:temporarily.?)?unavailable",
     "server.?error",
     "internal.?error",
@@ -260,6 +256,8 @@ const RETRYABLE_PATTERNS: &[&str] = &[
     "stream ended before message_stop",
     "stream ended before a terminal response event",
     "http2 request did not get a response",
+    // Codex CLI mid-stream disconnect, relayed by proxies that wrap the Codex CLI.
+    "stream disconnected before completion",
     "pending stream has been canceled",
     "retry delay",
     "you can retry your request",

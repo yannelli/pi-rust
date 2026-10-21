@@ -129,6 +129,9 @@ fn classifies_retryable_assistant_errors() {
         "upstream_stream_read_error: stream was interrupted",
         "HTTP/2 stream failed",
         "request to https://oauth2.googleapis.com/token failed, reason: ",
+        "stream disconnected before completion: stream closed before response.completed",
+        "503",
+        "(HTTP 502) Bad Gateway",
     ] {
         assert!(is_retryable_assistant_error(&error_message(text)), "{text}");
     }
@@ -136,6 +139,9 @@ fn classifies_retryable_assistant_errors() {
         "429 quota exceeded",
         r#"OpenAI API error (429): {"code":"subscription_sharing_usage_limit_exceeded"}"#,
         "invalid api key",
+        // Status codes inside ids or longer numbers are not status codes.
+        r#"401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"},"request_id":"req_011CU503xyz"}"#,
+        "400 image exceeds 5 MB maximum: 5316784 bytes > 5242880 bytes",
     ] {
         assert!(!is_retryable_assistant_error(&error_message(text)), "{text}");
     }
