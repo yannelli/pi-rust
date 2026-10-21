@@ -62,8 +62,37 @@ fn legacy_wsl_bash_reads_commands_from_stdin() {
     let config = windows(&lookup, None).unwrap();
     assert_eq!(config.args, ["-s"]);
     assert_eq!(config.command_transport, CommandTransport::Stdin);
-    assert!(is_legacy_wsl_bash_path("c:/windows/sysnative/BASH.EXE"));
-    assert!(!is_legacy_wsl_bash_path(r"C:\Program Files\Git\bin\bash.exe"));
+    assert!(is_legacy_wsl_bash_path("c:/windows/sysnative/BASH.EXE", None));
+    assert!(!is_legacy_wsl_bash_path(r"C:\Program Files\Git\bin\bash.exe", None));
+}
+
+#[test]
+fn legacy_wsl_bash_is_found_under_the_windows_directory() {
+    let cases = [
+        (Some(r"D:\WinNT\"), "d:/WINNT/System32/BASH.EXE", true),
+        (Some(r"D:\WinNT"), r"D:\WinNT\Sysnative\bash.exe", true),
+        (Some(r"D:\WinNT"), r"D:\WinNT\.\Tools\..\System32\\bash.exe", true),
+        (None, r"E:\Windows\System32\bash.exe", true),
+        (Some(""), r"E:\Windows\System32\bash.exe", true),
+        (Some(r"D:\WinNT"), r"D:\Git\bin\bash.exe", false),
+        (Some(r"D:\WinNT"), r"E:\Windows\System32\bash.exe", false),
+        (Some(r"D:\WinNT"), r"D:\WinNT\System32\bash.exe\", false),
+        (Some("WinNT"), r"C:\Windows\System32\bash.exe", false),
+        (Some(""), r"D:\WinNT\System32\bash.exe", false),
+    ];
+    for (system_root, shell, expected) in cases {
+        assert_eq!(is_legacy_wsl_bash_path(shell, system_root), expected, "{system_root:?} {shell}");
+    }
+}
+
+#[test]
+fn shell_config_reads_the_windows_directory_from_the_environment() {
+    let files = [r"D:\WinNT\System32\bash.exe"];
+    let custom = |vars: &[(&str, &str)]| windows(&FakeLookup::new(&files, vars), Some(files[0])).unwrap();
+    let config = custom(&[("SystemRoot", r"D:\WinNT")]);
+    assert_eq!((config.args, config.command_transport), (vec!["-s".to_string()], CommandTransport::Stdin));
+    assert_eq!(custom(&[]).command_transport, CommandTransport::Argv);
+    assert_eq!(custom(&[("SystemRoot", r"E:\Windows")]).command_transport, CommandTransport::Argv);
 }
 
 #[test]
@@ -107,6 +136,41 @@ fn powershell_prefers_pwsh_on_windows_only() {
     assert!(resolve_powershell_config(ShellPlatform::Windows, &none).unwrap_err().starts_with("No PowerShell"));
     let error = resolve_powershell_config(ShellPlatform::Unix, &both).unwrap_err();
     assert_eq!(error, "The powershell tool is only available on Windows.");
+}
+
+#[test]
+fn powershell_discovery_checks_installation_directories() {
+    let pwsh7 = r"D:\Applications\PowerShell\7\pwsh.exe";
+    let system = r"E:\WinNT\System32\WindowsPowerShell\v1.0\powershell.exe";
+    let vars = |path: Option<&'static str>| {
+        let mut vars = vec![("ProgramFiles", r"D:\Applications"), ("SystemRoot", r"E:\WinNT")];
+        vars.extend(path.map(|path| ("PATH", path)));
+        vars
+    };
+    let find = |files: &[&str], path: Option<&'static str>| {
+        let lookup = FakeLookup::new(files, &vars(path));
+        resolve_powershell_config(ShellPlatform::Windows, &lookup).map(|config| config.shell)
+    };
+
+    let all = [r"E:\Tools\pwsh.exe", r"E:\Tools\powershell.exe", pwsh7, system];
+    assert_eq!(find(&all, Some(r"E:\Tools")).unwrap(), r"E:\Tools\pwsh.exe");
+    assert_eq!(find(&all[1..], Some(r"E:\Tools")).unwrap(), pwsh7);
+    assert_eq!(find(&[r"E:\Tools\powershell.exe", system], Some(r"E:\Tools")).unwrap(), r"E:\Tools\powershell.exe");
+    assert_eq!(find(&[system], None).unwrap(), system);
+    assert_eq!(
+        find(&[], None).unwrap_err(),
+        "No PowerShell executable found. Install PowerShell or add powershell.exe/pwsh.exe to PATH."
+    );
+    let unset = FakeLookup::new(&[pwsh7, system], &[]);
+    assert!(resolve_powershell_config(ShellPlatform::Windows, &unset).is_err());
+}
+
+#[test]
+fn taskkill_falls_back_when_system_root_is_unset_or_empty() {
+    let expected = |root: &str| Path::new(root).join("System32").join("taskkill.exe");
+    assert_eq!(taskkill_exe(Some(r"D:\CustomWindows".into())), expected(r"D:\CustomWindows"));
+    assert_eq!(taskkill_exe(None), expected(r"C:\Windows"));
+    assert_eq!(taskkill_exe(Some("".into())), expected(r"C:\Windows"));
 }
 
 #[test]

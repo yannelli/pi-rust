@@ -17,7 +17,7 @@ gh api --allow-escape-sequences repos/yannelli/pi-rust/actions/jobs/<job-id>/log
 grep -nE 'panicked|FAILED|timed out|left:|right:|error(\[|:)' job.log
 ```
 
-A job that runs much longer than usual is hung. Cancel the run (`gh run cancel <run-id>`) to get its logs instead of waiting for the timeout.
+A job that runs much longer than usual is hung. Cancel the run (`gh run cancel <run-id> -R yannelli/pi-rust`) to get its logs instead of waiting for the timeout.
 
 ## Hangs and flaky tests
 
@@ -52,4 +52,4 @@ cargo zigbuild --target x86_64-pc-windows-gnu --workspace --tests
 
 ## Release workflow failures
 
-A failed build or daemon job skips the publish. If the cause is outside the code (a download error, a runner problem), rerun only the failed jobs: `gh run rerun <run-id> --failed`. Otherwise fix the code in a new PR. See [the release guide](release.md).
+A failed build or daemon job skips the publish. If the cause is outside the code (a download error, a runner problem), rerun only the failed jobs: `gh run rerun <run-id> -R yannelli/pi-rust --failed`. Otherwise fix the code in a new PR. See [the release guide](release.md).

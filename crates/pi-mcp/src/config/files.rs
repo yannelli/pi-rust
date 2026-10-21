@@ -69,10 +69,15 @@ fn is_override(value: &Map<String, Value>) -> bool {
     !value.contains_key("command") && !value.contains_key("url") && !value.contains_key("type")
 }
 
+/// Windows PowerShell 5.1 starts the files it writes with a UTF-8 BOM, which JSON parsing rejects.
+fn strip_bom(text: &str) -> &str {
+    text.strip_prefix('\u{feff}').unwrap_or(text)
+}
+
 fn read_config_file(path: &Path, scope: McpConfigScope, loaded: &mut LoadedMcpConfig) {
     let Ok(text) = std::fs::read_to_string(path) else { return };
     let shown = path.display().to_string();
-    let parsed: Value = match serde_json::from_str(&text) {
+    let parsed: Value = match serde_json::from_str(strip_bom(&text)) {
         Ok(parsed) => parsed,
         Err(error) => return loaded.errors.push(format!("{shown}: {error}")),
     };
@@ -177,7 +182,8 @@ fn edit_mcp_servers(
 ) -> Result<(), String> {
     let shown = path.display();
     let text = std::fs::read_to_string(path).ok();
-    let mut parsed: Value = match &text {
+    let text = text.as_deref().map(strip_bom);
+    let mut parsed: Value = match text {
         Some(text) => serde_json::from_str(text).map_err(|error| format!("{shown}: {error}"))?,
         None => Value::Object(Map::new()),
     };
@@ -190,7 +196,6 @@ fn edit_mcp_servers(
         return Ok(());
     }
     let indent = text
-        .as_deref()
         .and_then(|text| {
             text.lines().find_map(|line| {
                 let trimmed = line.trim_start_matches([' ', '\t']);

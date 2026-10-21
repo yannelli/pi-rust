@@ -69,8 +69,7 @@ pub fn kill_process_tree(pid: u32) {
 pub fn kill_process_tree(pid: u32) {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
-    let taskkill = std::path::Path::new(&root).join("System32").join("taskkill.exe");
+    let taskkill = crate::platform::shell::taskkill_exe(std::env::var_os("SystemRoot"));
     let _ = std::process::Command::new(taskkill)
         .args(["/F", "/T", "/PID", &pid.to_string()])
         .stdin(std::process::Stdio::null())

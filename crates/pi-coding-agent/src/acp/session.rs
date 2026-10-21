@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use agent_client_protocol_schema::{
-    ContentBlock, ContentChunk, Error, Meta, SessionInfoUpdate, SessionNotification, SessionUpdate, TextContent,
-    UsageUpdate,
+    ContentBlock, ContentChunk, Cost, Error, Meta, SessionInfoUpdate, SessionNotification, SessionUpdate, TextContent,
+    Usage, UsageUpdate,
 };
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
@@ -31,16 +31,20 @@ pub enum TurnEnd {
 
 pub type TurnResult = Result<TurnEnd, Error>;
 
+/// How a turn ended, with the token usage of its assistant messages when there were any.
+pub type TurnReport = (TurnResult, Option<Usage>);
+
 struct PendingTurn {
     generation: u64,
-    sender: oneshot::Sender<TurnResult>,
+    sender: oneshot::Sender<TurnReport>,
+    usage: Option<Usage>,
 }
 
 pub(super) struct QueuedTurn {
     message: String,
     images: Vec<pi_ai::ContentBlock>,
     title: Option<String>,
-    sender: oneshot::Sender<TurnResult>,
+    sender: oneshot::Sender<TurnReport>,
 }
 
 /// A tool call's status; it only moves forward.
@@ -121,7 +125,26 @@ pub fn to_usage_update(stats: &Value) -> Option<UsageUpdate> {
     let usage = stats.get("contextUsage")?;
     let used = safe_integer(usage.get("tokens")?)?;
     let size = safe_integer(usage.get("contextWindow")?).filter(|size| *size > 0)?;
-    Some(UsageUpdate::new(used, size))
+    let cost = stats.get("cost").and_then(Value::as_f64).filter(|cost| cost.is_finite() && *cost >= 0.0);
+    Some(UsageUpdate::new(used, size).cost(cost.map(|amount| Cost::new(amount, "USD"))))
+}
+
+/// Add one assistant message's pi `usage` to the turn's ACP usage.
+pub fn add_turn_usage(total: &mut Option<Usage>, usage: &Value) {
+    let field = |name: &str| usage.get(name).and_then(safe_integer).unwrap_or(0);
+    let total = total.get_or_insert_with(|| Usage::new(0, 0, 0));
+    total.input_tokens += field("input");
+    total.output_tokens += field("output");
+    total.total_tokens += field("totalTokens");
+    for (sum, name) in [
+        (&mut total.cached_read_tokens, "cacheRead"),
+        (&mut total.cached_write_tokens, "cacheWrite"),
+        (&mut total.thought_tokens, "reasoning"),
+    ] {
+        if let Some(value) = usage.get(name).and_then(safe_integer) {
+            *sum = Some(sum.unwrap_or(0) + value);
+        }
+    }
 }
 
 impl AcpSession {
@@ -183,6 +206,16 @@ impl AcpSession {
 
     /// Run a prompt, or queue it behind the running turn; resolves when its turn ends.
     pub async fn prompt(&self, message: String, images: Vec<pi_ai::ContentBlock>, title: Option<String>) -> TurnResult {
+        self.prompt_with_usage(message, images, title).await.0
+    }
+
+    /// [`Self::prompt`], plus the token usage of the turn's assistant messages.
+    pub async fn prompt_with_usage(
+        &self,
+        message: String,
+        images: Vec<pi_ai::ContentBlock>,
+        title: Option<String>,
+    ) -> TurnReport {
         let (sender, receiver) = oneshot::channel();
         let turn = QueuedTurn { message, images, title, sender };
         let queued_at = {
@@ -199,7 +232,7 @@ impl AcpSession {
             self.emit(text_chunk(format!("Queued message (position {position}).")));
             self.emit(queue_info(position, true));
         }
-        receiver.await.unwrap_or(Ok(TurnEnd::Cancelled))
+        receiver.await.unwrap_or((Ok(TurnEnd::Cancelled), None))
     }
 
     fn start_turn(&self, inner: &mut Inner, turn: QueuedTurn) {
@@ -207,7 +240,7 @@ impl AcpSession {
         inner.in_agent_loop = false;
         inner.generation += 1;
         let generation = inner.generation;
-        inner.pending = Some(PendingTurn { generation, sender: turn.sender });
+        inner.pending = Some(PendingTurn { generation, sender: turn.sender, usage: None });
         let depth = inner.queue.len();
         let session = self.this();
         let title = turn.title;
@@ -235,7 +268,7 @@ impl AcpSession {
                 None if inner.cancel_requested => Ok(TurnEnd::Cancelled),
                 None => Ok(TurnEnd::Error),
             };
-            let _ = pending.sender.send(result);
+            let _ = pending.sender.send((result, pending.usage));
             inner.in_agent_loop = false;
             inner.queue.len()
         };
@@ -249,7 +282,7 @@ impl AcpSession {
             let mut inner = lock(&self.inner);
             let reason = if inner.cancel_requested { TurnEnd::Cancelled } else { TurnEnd::EndTurn };
             if let Some(pending) = inner.pending.take() {
-                let _ = pending.sender.send(Ok(reason));
+                let _ = pending.sender.send((Ok(reason), pending.usage));
             }
             inner.in_agent_loop = false;
             inner.queue.pop_front().map(|turn| (turn, inner.queue.len()))
@@ -274,13 +307,20 @@ impl AcpSession {
         };
         if let Some((queued, running)) = cleared {
             for turn in queued {
-                let _ = turn.sender.send(Ok(TurnEnd::Cancelled));
+                let _ = turn.sender.send((Ok(TurnEnd::Cancelled), None));
             }
             self.emit(text_chunk("Cleared queued prompts."));
             self.emit(queue_info(0, running));
         }
         if let Err(error) = self.backend.abort().await {
             eprintln!("Warning: could not abort the pi session: {error:#}");
+        }
+    }
+
+    /// `message_end` of an assistant message: count its usage for the running turn.
+    pub(super) fn record_turn_usage(&self, usage: &Value) {
+        if let Some(pending) = lock(&self.inner).pending.as_mut() {
+            add_turn_usage(&mut pending.usage, usage);
         }
     }
 

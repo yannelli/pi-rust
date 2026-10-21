@@ -112,7 +112,7 @@ fn allowlisted_findings_are_counted_and_listed() {
 #[test]
 fn arguments_are_validated() {
     let strings = |items: &[&str]| items.iter().map(|item| item.to_string()).collect::<Vec<_>>();
-    let options = parse_args(&strings(&["--upstream", "/x", "--out", "r.md", "--strict"])).unwrap();
+    let options = parse_args(&strings(&["--upstream", "/x", "--out", "r.md", "--strict"])).unwrap().unwrap();
     assert!(
         (options.upstream.to_str(), options.out.as_deref(), options.strict)
             == (Some("/x"), Some(Path::new("r.md")), true)
@@ -120,10 +120,11 @@ fn arguments_are_validated() {
     assert!(parse_args(&strings(&["--out", "r.md"])).is_err());
     assert!(parse_args(&strings(&["--upstream"])).is_err());
     assert!(parse_args(&strings(&["--upstream", "/x", "--bogus"])).is_err());
+    assert!(parse_args(&strings(&["--help"])).unwrap().is_none());
 }
 
 #[test]
-fn run_writes_the_report_and_strict_fails_on_findings() {
+fn run_writes_the_report_and_strict_fails_on_skipped_sections() {
     let dir = fake_upstream();
     let out = dir.path().join("out/report.md");
     let args = |extra: &[&str]| {
@@ -134,6 +135,7 @@ fn run_writes_the_report_and_strict_fails_on_findings() {
     };
     run(&args(&[]), root()).unwrap();
     assert!(std::fs::read_to_string(&out).unwrap().starts_with("# Parity report"));
-    assert!(run(&args(&["--strict"]), root()).unwrap_err().contains("not in docs/parity/allowlist.json"));
+    // The fixture is not a git repository, so the commits section cannot run.
+    assert!(run(&args(&["--strict"]), root()).unwrap_err().contains("did not run: commits"));
     assert!(run(&["--upstream".into(), "/definitely/missing".into()], root()).is_err());
 }

@@ -183,8 +183,8 @@ async fn kill_tree_pid(pid: u32) {
 
 #[cfg(windows)]
 fn kill_tree_command(pid: u32) -> tokio::process::Command {
-    let root = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("C:\\Windows"));
-    let mut command = tokio::process::Command::new(root.join("System32").join("taskkill.exe"));
+    let taskkill = crate::platform::shell::taskkill_exe(std::env::var_os("SystemRoot"));
+    let mut command = tokio::process::Command::new(taskkill);
     command.args(["/F", "/T", "/PID", &pid.to_string()]).creation_flags(CREATE_NO_WINDOW);
     command
 }
