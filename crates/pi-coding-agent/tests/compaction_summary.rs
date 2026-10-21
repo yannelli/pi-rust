@@ -10,7 +10,8 @@ use pi_ai::providers::faux::{FauxProvider, FauxResponse};
 use pi_ai::retry::{RetryEvent, RetryPolicy};
 use pi_ai::{ContentBlock, Message, Model, StopReason, ToolCall};
 use pi_coding_agent::compaction::{
-    CompactionSettings, SUMMARIZATION_SYSTEM_PROMPT, SummarizationOptions, compact, compact_session, prepare_compaction,
+    CompactionPreparation, CompactionSettings, FileOperations, SUMMARIZATION_SYSTEM_PROMPT, SummarizationOptions,
+    compact, compact_session, prepare_compaction, summarize_compaction,
 };
 use pi_coding_agent::session::{EntryData, SessionManager};
 use serde_json::json;
@@ -122,6 +123,26 @@ async fn split_turns_merge_a_turn_prefix_summary_and_file_lists() {
     assert_eq!(stored.usage, Some(result.usage));
     let stats = session.session_stats();
     assert_eq!(stats.tokens.output, result.usage.output + 4);
+}
+
+#[tokio::test]
+async fn applies_custom_instructions_to_the_turn_prefix_summary_of_a_split_turn() {
+    let (provider, model) = faux("faux-compact-split-focus", vec![FauxResponse::text("prefix summary")]);
+    let preparation = CompactionPreparation {
+        first_kept_entry_id: "entry-keep".into(),
+        messages_to_summarize: Vec::new(),
+        turn_prefix_messages: vec![user("one long turn"), assistant("working on it")],
+        is_split_turn: true,
+        tokens_before: 100,
+        previous_summary: Some("previous checkpoint".into()),
+        file_ops: FileOperations::default(),
+        settings: CompactionSettings { keep_recent_tokens: 20, ..CompactionSettings::default() },
+    };
+    let options = SummarizationOptions::default();
+    let result = summarize_compaction(&preparation, &model, Some("keep migration decisions"), &options).await.unwrap();
+    assert_eq!(provider.requests().len(), 1);
+    assert!(prompt_of(&provider, 0).ends_with("\n\nAdditional focus: keep migration decisions"));
+    assert!(result.summary.starts_with("previous checkpoint\n\n---\n\n**Turn Context (split turn):**"));
 }
 
 #[tokio::test]
