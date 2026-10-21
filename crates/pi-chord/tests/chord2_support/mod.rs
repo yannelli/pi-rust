@@ -106,6 +106,8 @@ pub fn with(schema: Json, extra: serde_json::Value) -> Json {
     Json::from(schema)
 }
 
+pub mod net;
+
 /// Serializes the runtime tests of one binary: the publish queue is process-wide.
 static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 

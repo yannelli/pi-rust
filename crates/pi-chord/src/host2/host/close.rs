@@ -6,6 +6,7 @@ use futures::future::join_all;
 
 use super::{Host, HostImpl};
 use crate::error::{ChordError, ChordResult};
+use crate::host2::connection::Msg;
 use crate::host2::errors::ChordErrorCode;
 use crate::host2::object::ObjectImpl;
 use crate::host2::schema::deep_equal;
@@ -25,7 +26,7 @@ impl PrincipalMatch {
         Self::Predicate(Arc::new(predicate))
     }
 
-    fn matches(&self, identity: &Json) -> bool {
+    pub(crate) fn matches(&self, identity: &Json) -> bool {
         match self {
             Self::Predicate(predicate) => predicate(identity),
             Self::Pattern(pattern) => {
@@ -63,16 +64,28 @@ async fn dispose_holders_first(objects: Vec<Arc<ObjectImpl>>, reason: ChordError
 impl HostImpl {
     fn invalidate_principal(&self, filter: PrincipalMatch) -> BoxFuture<ChordResult<()>> {
         let reason = ChordError::code_only(ChordErrorCode::Gone, "principal invalidated");
-        // Links acting as a matching identity are restamped or closed, and patterns reach child hosts (phase 3).
+        // Links of a matching identity are restamped or closed (with their relays), and patterns reach child hosts.
+        let links = self.ask_net(|done| Msg::Invalidate { filter: filter.clone(), done });
         let objects: Vec<Arc<ObjectImpl>> = self.state().objects.values().cloned().collect();
         let matching = objects
             .into_iter()
             .filter(|object| !self.is_self(object.principal()) && filter.matches(object.principal()))
             .collect();
-        Box::pin(async move { dispose_holders_first(matching, reason, "invalidatePrincipal: disposal failed").await })
+        Box::pin(async move {
+            links.await;
+            dispose_holders_first(matching, reason, "invalidatePrincipal: disposal failed").await
+        })
+    }
+
+    /// `invalidate_principal`, for a pattern a parent sent.
+    pub(crate) fn invalidate(&self, filter: PrincipalMatch) -> BoxFuture<ChordResult<()>> {
+        self.invalidate_principal(filter)
     }
 
     fn close(&self) -> BoxFuture<ChordResult<()>> {
+        for binding in self.lingering() {
+            binding.close();
+        }
         let names: Vec<String> = {
             let mut state = self.state();
             state.host_objects.clear();
@@ -83,8 +96,14 @@ impl HostImpl {
         }
         let reason = ChordError::code_only(ChordErrorCode::Gone, format!("host {} closed", self.name));
         let objects: Vec<Arc<ObjectImpl>> = self.state().objects.values().cloned().collect();
-        // Links close once every object is disposed (phase 3).
-        Box::pin(async move { dispose_holders_first(objects, reason, "host close: disposal failed").await })
+        let disposed = dispose_holders_first(objects, reason, "host close: disposal failed");
+        // Links close once every object is disposed (a resource's close may still use remote references).
+        let me = self.arc();
+        Box::pin(async move {
+            let result = disposed.await;
+            me.ask_net(|done| Msg::CloseAll { reason: "host closed".into(), done }).await;
+            result
+        })
     }
 }
 
