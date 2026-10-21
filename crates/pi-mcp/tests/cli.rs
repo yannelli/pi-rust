@@ -117,6 +117,7 @@ async fn rejects_unknown_servers_and_servers_without_oauth_for_login_and_logout(
     let help = run(&["--help"], None, dir.path()).await;
     assert_eq!(help.code, 0);
     assert!(help.output.starts_with("Usage:\n  pi mcp add <server> [options] -- <command> [args...]"));
+    assert!(help.output.contains("  --timeout <seconds>     Time limit for the whole sign-in (default: 300)"));
 }
 
 #[tokio::test]
