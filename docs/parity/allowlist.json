@@ -1,14 +1,5 @@
 {
-  "commits": [
-    {
-      "item": "ea25697e9",
-      "reason": "pi update --self here replaces the release binary in place (update/install.rs). pi-rust has no managed install layout or managed-install.json marker to read."
-    },
-    {
-      "item": "16f5f0af4",
-      "reason": "IndexedDbStorage is a browser storage backend. pi-rust has no browser build, so there is no IndexedDB to back it."
-    }
-  ],
+  "commits": [],
   "cliFlags": [
     {
       "item": "--terminal-login",

@@ -8,8 +8,16 @@ None up to `82432219a`. Every commit after the synced commit is ported or listed
 
 ## Deferred work
 
-- **chord2 runtime** (upstream `0104fef1e` and later chord commits). In progress in `crates/pi-chord/src/host2/`, beside the facets runtime: phase 1 (errors, schema, contracts, wire, links), 2 (cells, objects, in-host runtime), 3 (connections, remote refs, WebSocket), 4 (reload, cluster), 5 (host manager, IPC). The last phase names the upstream runtime commits.
+- **chord2 runtime** (upstream `0104fef1e` and later chord commits). pi-chord ports the earlier facets runtime. This is the largest open item; plan it as its own branch.
 - **`HarnessOptions.models` as a function** (upstream `7ec1f648e`). Not planned: settings are already a function here, and a `Models` implementation can change its catalog at runtime. It is older than the synced commit, so the report does not list it.
+
+## Upstream commits that do not apply
+
+Older than the synced commit, so the report no longer lists them.
+
+- `ea25697e9` managed install markers with a BOM: `pi update --self` replaces the release binary in place (update/install.rs); there is no managed-install.json marker.
+- `16f5f0af4` IndexedDbStorage: a browser storage backend, and pi-rust has no browser build.
+- `c661bc574` drops the shared MCP types block from durable code mode: pi-codemode never had it, so the port of `8bb180bec` already renders the section without it.
 
 ## Extension runtime (pi-js)
 
