@@ -307,6 +307,17 @@ fn command_runner_distinguishes_failure_empty_output_and_timeouts() {
     assert!(started.elapsed() < Duration::from_secs(3));
 }
 
+#[cfg(unix)]
+#[test]
+fn command_runner_starts_helpers_outside_the_process_group() {
+    let args = vec!["-c".to_string(), "ps -o pgid= -p $$".to_string()];
+    let output = run_clipboard_command("sh", &args, None, Duration::from_secs(5)).unwrap();
+    let helper_group = String::from_utf8(output).unwrap().trim().to_string();
+    let own_group = rustix::process::getpgrp().as_raw_nonzero().get().to_string();
+    assert!(helper_group.bytes().all(|byte| byte.is_ascii_digit()) && !helper_group.is_empty(), "{helper_group}");
+    assert_ne!(helper_group, own_group);
+}
+
 #[test]
 fn reads_copied_file_paths_on_macos_and_windows() {
     let runner = Mock::new(|_, _| Some(b"/Users/me/a.png\n/Users/me/b c.txt\n".to_vec()));

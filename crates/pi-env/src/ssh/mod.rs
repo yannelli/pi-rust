@@ -18,7 +18,7 @@ use crate::connection::{Connection, ConnectionOptions, LogFn, lock};
 
 pub use deploy::{
     RemoteArch, RemotePlatform, RemoteSystem, WindowsShell, default_daemon_dir, deploy_daemon, detect_platform,
-    packaged_daemon,
+    local_daemon, packaged_daemon,
 };
 pub use host_keys::{ScannedHostKey, accept_host_key, forget_host_key, scan_host_key};
 

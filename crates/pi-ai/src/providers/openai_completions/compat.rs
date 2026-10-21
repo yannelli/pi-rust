@@ -4,6 +4,7 @@
 use serde_json::{Map, Value};
 
 use crate::providers::common::{compat_bool, compat_str, compat_value};
+use crate::transcript::TranscriptToolSupport;
 use crate::types::Model;
 
 pub(crate) struct Compat {
@@ -171,7 +172,11 @@ impl Compat {
     }
 
     /// Tool additions anchor in tool-bearing system messages only when both flags are set.
-    pub fn anchors_tool_additions(&self) -> bool {
-        self.supports_mid_convo_system_messages && self.supports_mid_convo_tool_additions
+    pub fn tool_support(&self) -> TranscriptToolSupport {
+        if self.supports_mid_convo_system_messages && self.supports_mid_convo_tool_additions {
+            TranscriptToolSupport::Additions
+        } else {
+            TranscriptToolSupport::None
+        }
     }
 }

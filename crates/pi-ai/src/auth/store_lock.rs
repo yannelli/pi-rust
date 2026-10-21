@@ -14,6 +14,9 @@ use super::{AuthError, AuthResult};
 pub const SYNC_STALE: Duration = Duration::from_secs(10);
 /// Stale period for async locks held across OAuth refreshes.
 pub const ASYNC_STALE: Duration = Duration::from_secs(30);
+/// Retries of a Windows delete-pending denial, capped apart from the wait for another holder so a
+/// real permission error fails fast.
+const MAX_PENDING_DELETE_RETRIES: u32 = 5;
 
 /// A held lock. Dropping it removes the lock directory.
 #[derive(Debug)]
@@ -52,9 +55,25 @@ fn touch(dir: &Path) {
     let _ = dir;
 }
 
+/// The result of one attempt to take the lock.
+enum Attempt {
+    Acquired(FileLock),
+    /// Another holder has a fresh lock.
+    Held,
+    /// Windows denied access to a lock directory that is delete-pending.
+    PendingDelete(std::io::Error),
+}
+
 impl FileLock {
     /// Take the lock once. `Ok(None)` means another holder has a fresh lock.
     pub fn try_acquire(file: &Path, stale: Duration) -> std::io::Result<Option<Self>> {
+        Ok(match Self::attempt(file, stale)? {
+            Attempt::Acquired(lock) => Some(lock),
+            Attempt::Held | Attempt::PendingDelete(_) => None,
+        })
+    }
+
+    fn attempt(file: &Path, stale: Duration) -> std::io::Result<Attempt> {
         let dir = lock_dir(file);
         if let Some(parent) = dir.parent()
             && !parent.as_os_str().is_empty()
@@ -62,19 +81,20 @@ impl FileLock {
             std::fs::create_dir_all(parent)?;
         }
         match std::fs::create_dir(&dir) {
-            Ok(()) => Ok(Some(Self { dir, keepalive: None })),
+            Ok(()) => Ok(Attempt::Acquired(Self { dir, keepalive: None })),
             Err(error) if error.kind() == ErrorKind::AlreadyExists => {
                 if is_stale(&dir, stale) {
                     let _ = std::fs::remove_dir(&dir);
                     return match std::fs::create_dir(&dir) {
-                        Ok(()) => Ok(Some(Self { dir, keepalive: None })),
-                        Err(error) if error.kind() == ErrorKind::AlreadyExists || is_pending_delete(&error) => Ok(None),
+                        Ok(()) => Ok(Attempt::Acquired(Self { dir, keepalive: None })),
+                        Err(error) if error.kind() == ErrorKind::AlreadyExists => Ok(Attempt::Held),
+                        Err(error) if is_pending_delete(&error) => Ok(Attempt::PendingDelete(error)),
                         Err(error) => Err(error),
                     };
                 }
-                Ok(None)
+                Ok(Attempt::Held)
             }
-            Err(error) if is_pending_delete(&error) => Ok(None),
+            Err(error) if is_pending_delete(&error) => Ok(Attempt::PendingDelete(error)),
             Err(error) => Err(error),
         }
     }
@@ -95,19 +115,35 @@ impl FileLock {
     /// Async acquisition with exponential backoff until the stale period passes. While held,
     /// the lock directory is touched so other processes do not consider it stale.
     pub async fn acquire(file: &Path, cancel: &CancellationToken) -> AuthResult<Self> {
+        Self::acquire_with(file, cancel, || Self::attempt(file, ASYNC_STALE)).await
+    }
+
+    async fn acquire_with(
+        file: &Path,
+        cancel: &CancellationToken,
+        mut attempt: impl FnMut() -> std::io::Result<Attempt>,
+    ) -> AuthResult<Self> {
         let deadline = tokio::time::Instant::now() + ASYNC_STALE;
-        let mut retry = 0u32;
+        let (mut retry, mut pending_deletes) = (0u32, 0u32);
         loop {
             if cancel.is_cancelled() {
                 return Err(AuthError::Cancelled);
             }
-            match Self::try_acquire(file, ASYNC_STALE) {
-                Ok(Some(mut lock)) => {
+            let storage_error =
+                |error: std::io::Error| AuthError::Storage(format!("cannot lock {}: {error}", file.display()));
+            match attempt() {
+                Ok(Attempt::Acquired(mut lock)) => {
                     lock.start_keepalive();
                     return Ok(lock);
                 }
-                Ok(None) => {}
-                Err(error) => return Err(AuthError::Storage(format!("cannot lock {}: {error}", file.display()))),
+                Ok(Attempt::Held) => {}
+                Ok(Attempt::PendingDelete(error)) => {
+                    pending_deletes += 1;
+                    if pending_deletes > MAX_PENDING_DELETE_RETRIES {
+                        return Err(storage_error(error));
+                    }
+                }
+                Err(error) => return Err(storage_error(error)),
             }
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             if remaining.is_zero() {
@@ -169,5 +205,56 @@ mod tests {
         drop(held);
         assert!(!lock_dir(&file).exists());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn denied() -> std::io::Result<Attempt> {
+        Ok(Attempt::PendingDelete(std::io::Error::from(ErrorKind::PermissionDenied)))
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_persistent_delete_pending_denial_fails_after_a_bounded_number_of_retries() {
+        let file = std::env::temp_dir().join("pi-lock-pending/auth.json");
+        let calls = std::cell::Cell::new(0);
+        let attempt = || {
+            calls.set(calls.get() + 1);
+            denied()
+        };
+        let started = tokio::time::Instant::now();
+        let result = FileLock::acquire_with(&file, &CancellationToken::new(), attempt).await;
+        let Err(AuthError::Storage(message)) = result else { panic!("expected a storage error") };
+        assert!(message.starts_with("cannot lock ") && message.contains("permission denied"), "{message}");
+        assert_eq!(calls.get(), 6);
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_transient_delete_pending_denial_is_retried() {
+        let dir = std::env::temp_dir().join(format!("pi-lock-transient-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("auth.json");
+        let calls = std::cell::Cell::new(0);
+        let attempt = || {
+            calls.set(calls.get() + 1);
+            if calls.get() == 1 { denied() } else { FileLock::attempt(&file, ASYNC_STALE) }
+        };
+        let lock = FileLock::acquire_with(&file, &CancellationToken::new(), attempt).await.unwrap();
+        assert_eq!(calls.get(), 2);
+        drop(lock);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_held_lock_keeps_waiting_for_the_stale_period() {
+        let file = std::env::temp_dir().join("pi-lock-held/auth.json");
+        let calls = std::cell::Cell::new(0);
+        let attempt = || {
+            calls.set(calls.get() + 1);
+            Ok(Attempt::Held)
+        };
+        let started = tokio::time::Instant::now();
+        let result = FileLock::acquire_with(&file, &CancellationToken::new(), attempt).await;
+        assert!(matches!(result, Err(AuthError::Storage(message)) if message.contains("locked by another process")));
+        assert!(calls.get() > 6);
+        assert!(started.elapsed() >= ASYNC_STALE);
     }
 }

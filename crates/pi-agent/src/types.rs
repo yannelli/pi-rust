@@ -130,6 +130,11 @@ pub trait AgentTool: Send + Sync {
         None
     }
 
+    /// Whether the tool has `reaches_tools` at all, which listings report without running it.
+    fn declares_reaches_tools(&self) -> bool {
+        self.reaches_tools(&Value::Object(Default::default())).is_some()
+    }
+
     /// One line for the system prompt's tool list. Tools without one are not listed there.
     fn prompt_snippet(&self) -> Option<&str> {
         None

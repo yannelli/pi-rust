@@ -1,7 +1,8 @@
 //! Shell resolution for the bash tool and `!` commands, PowerShell for the Windows
 //! `powershell` tool, and the shell `PATH` (upstream `utils/shell.ts`, `docs/windows.md`).
 
-use std::path::Path;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommandTransport {
@@ -72,18 +73,64 @@ pub fn find_executable_on_path(
     })
 }
 
-/// `C:\Windows\System32\bash.exe` and `Sysnative`, the WSL launcher that reads commands from stdin.
-pub fn is_legacy_wsl_bash_path(path: &str) -> bool {
-    let normalized = path.replace('/', "\\").to_ascii_lowercase();
-    let bytes = normalized.as_bytes();
-    if bytes.len() < 3 || !bytes[0].is_ascii_lowercase() || &bytes[1..3] != b":\\" {
-        return false;
+/// Node's `path.win32.normalize` for drive and rooted paths: `/` becomes `\`, empty and `.`
+/// segments drop, and `..` removes the previous segment.
+fn win32_normalize(path: &str) -> String {
+    let path = path.replace('/', "\\");
+    let bytes = path.as_bytes();
+    let drive = if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' { &path[..2] } else { "" };
+    let after_drive = &path[drive.len()..];
+    let rooted = after_drive.starts_with('\\');
+    let mut segments: Vec<&str> = Vec::new();
+    for segment in after_drive.split('\\') {
+        match segment {
+            "" | "." => {}
+            ".." => match segments.last() {
+                Some(&last) if last != ".." => {
+                    segments.pop();
+                }
+                _ if rooted => {}
+                _ => segments.push(".."),
+            },
+            _ => segments.push(segment),
+        }
     }
-    matches!(&normalized[3..], "windows\\system32\\bash.exe" | "windows\\sysnative\\bash.exe")
+    let mut tail = segments.join("\\");
+    if tail.is_empty() {
+        if !rooted {
+            tail.push('.');
+        }
+    } else if after_drive.ends_with('\\') {
+        tail.push('\\');
+    }
+    format!("{drive}{}{tail}", if rooted { "\\" } else { "" })
 }
 
-fn bash_shell_config(shell: &str) -> ShellConfig {
-    if is_legacy_wsl_bash_path(shell) {
+fn win32_join(parts: &[&str]) -> String {
+    win32_normalize(&parts.join("\\"))
+}
+
+/// The legacy WSL launcher, `bash.exe` under `System32` or `Sysnative` of `system_root`, reads
+/// commands from stdin. Without `system_root` only the conventional `C:\Windows` paths count.
+pub fn is_legacy_wsl_bash_path(path: &str, system_root: Option<&str>) -> bool {
+    let normalized = win32_normalize(path).to_lowercase();
+    if let Some(root) = system_root.filter(|root| !root.is_empty()) {
+        if !matches!(root.as_bytes(), [letter, b':', b'\\' | b'/', ..] if letter.is_ascii_alphabetic()) {
+            return false;
+        }
+        return ["System32", "Sysnative"]
+            .iter()
+            .any(|directory| normalized == win32_join(&[root, directory, "bash.exe"]).to_lowercase());
+    }
+    matches!(
+        normalized.as_bytes(),
+        [b'a'..=b'z', b':', b'\\', rest @ ..]
+            if rest == b"windows\\system32\\bash.exe" || rest == b"windows\\sysnative\\bash.exe"
+    )
+}
+
+fn bash_shell_config(shell: &str, lookup: &dyn ShellLookup) -> ShellConfig {
+    if is_legacy_wsl_bash_path(shell, lookup.var("SystemRoot").as_deref()) {
         ShellConfig { shell: shell.into(), args: vec!["-s".into()], command_transport: CommandTransport::Stdin }
     } else {
         ShellConfig { shell: shell.into(), args: vec!["-c".into()], command_transport: CommandTransport::Argv }
@@ -99,7 +146,7 @@ pub fn resolve_shell_config(
 ) -> Result<ShellConfig, String> {
     if let Some(custom) = custom_shell_path.filter(|path| !path.is_empty()) {
         if lookup.exists(custom) {
-            return Ok(bash_shell_config(custom));
+            return Ok(bash_shell_config(custom, lookup));
         }
         return Err(format!("Custom shell path not found: {custom}"));
     }
@@ -112,10 +159,10 @@ pub fn resolve_shell_config(
             paths.push(format!("{program_files_x86}\\Git\\bin\\bash.exe"));
         }
         if let Some(path) = paths.iter().find(|path| lookup.exists(path)) {
-            return Ok(bash_shell_config(path));
+            return Ok(bash_shell_config(path, lookup));
         }
         if let Some(bash) = lookup.find_on_path("bash.exe", platform) {
-            return Ok(bash_shell_config(&bash));
+            return Ok(bash_shell_config(&bash, lookup));
         }
         let searched: Vec<String> = paths.iter().map(|path| format!("  {path}")).collect();
         return Err(format!(
@@ -126,10 +173,10 @@ pub fn resolve_shell_config(
         ));
     }
     if lookup.exists("/bin/bash") {
-        return Ok(bash_shell_config("/bin/bash"));
+        return Ok(bash_shell_config("/bin/bash", lookup));
     }
     if let Some(bash) = lookup.find_on_path("bash", platform) {
-        return Ok(bash_shell_config(&bash));
+        return Ok(bash_shell_config(&bash, lookup));
     }
     Ok(ShellConfig { shell: "sh".into(), args: vec!["-c".into()], command_transport: CommandTransport::Argv })
 }
@@ -142,14 +189,29 @@ pub fn shell_config(custom_shell_path: Option<&Path>) -> Result<ShellConfig, Str
 
 pub const POWERSHELL_ARGS: [&str; 5] = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"];
 
-/// `pwsh.exe`, then `powershell.exe`, on Windows only.
+/// `join` under the directory named by environment variable `var`, when that file exists.
+fn existing_under_var(lookup: &dyn ShellLookup, var: &str, parts: &[&str]) -> Option<String> {
+    let base = lookup.var(var)?;
+    let mut all = vec![base.as_str()];
+    all.extend_from_slice(parts);
+    let path = win32_join(&all);
+    lookup.exists(&path).then_some(path)
+}
+
+/// On Windows only: `pwsh.exe` on `PATH`, `%ProgramFiles%\PowerShell\7\pwsh.exe`, `powershell.exe`
+/// on `PATH`, then `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`. The
+/// installation directories may be on any drive and need not be on `PATH`.
 pub fn resolve_powershell_config(platform: ShellPlatform, lookup: &dyn ShellLookup) -> Result<ShellConfig, String> {
     if platform != ShellPlatform::Windows {
         return Err("The powershell tool is only available on Windows.".into());
     }
     let shell = lookup
         .find_on_path("pwsh.exe", platform)
+        .or_else(|| existing_under_var(lookup, "ProgramFiles", &["PowerShell", "7", "pwsh.exe"]))
         .or_else(|| lookup.find_on_path("powershell.exe", platform))
+        .or_else(|| {
+            existing_under_var(lookup, "SystemRoot", &["System32", "WindowsPowerShell", "v1.0", "powershell.exe"])
+        })
         .ok_or("No PowerShell executable found. Install PowerShell or add powershell.exe/pwsh.exe to PATH.")?;
     let args = POWERSHELL_ARGS.iter().map(|arg| arg.to_string()).collect();
     Ok(ShellConfig { shell, args, command_transport: CommandTransport::Argv })
@@ -158,6 +220,12 @@ pub fn resolve_powershell_config(platform: ShellPlatform, lookup: &dyn ShellLook
 /// [`resolve_powershell_config`] for this process.
 pub fn powershell_config() -> Result<ShellConfig, String> {
     resolve_powershell_config(ShellPlatform::current(), &SystemShellLookup)
+}
+
+/// `System32\taskkill.exe` under `system_root`, or under `C:\Windows` when it is unset or empty.
+pub fn taskkill_exe(system_root: Option<OsString>) -> PathBuf {
+    let root = system_root.filter(|root| !root.is_empty()).unwrap_or_else(|| "C:\\Windows".into());
+    Path::new(&root).join("System32").join("taskkill.exe")
 }
 
 /// `current` with `bin_dir` prepended unless it is already an entry.

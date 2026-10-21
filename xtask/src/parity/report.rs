@@ -209,6 +209,12 @@ impl Report {
         Self { header, sections, allowlist }
     }
 
+    /// Ids of sections that did not run, except the model catalog, which needs generated data.
+    pub fn skipped_sections(&self) -> Vec<&'static str> {
+        let skipped = |section: &&Section| matches!(section.status, Status::Skipped(_)) && section.id != "models";
+        self.sections.iter().filter(skipped).map(|section| section.id).collect()
+    }
+
     /// Findings that are not allowlisted, over all sections that ran.
     pub fn findings(&self) -> usize {
         self.sections.iter().map(|section| section.counts()).map(|(missing, extra, _)| missing + extra).sum()

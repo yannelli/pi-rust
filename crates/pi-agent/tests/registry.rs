@@ -203,4 +203,10 @@ fn namespaces_list_their_aliases_and_wrapped_tools_keep_what_they_reach() {
     assert_eq!(declared[1].description(), "calls read");
     assert_eq!(declared[1].reaches_tools(&json!({})), Some(ToolReach::Words(vec!["docs".into()])));
     assert_eq!(declared[0].reaches_tools(&json!({})), None);
+
+    // Listings report that a tool reaches others without serializing a function.
+    let infos = registry.tool_infos();
+    assert_eq!(infos.iter().map(|info| info.reaches_tools).collect::<Vec<_>>(), [false, true]);
+    assert!(declared[1].declares_reaches_tools() && !declared[0].declares_reaches_tools());
+    assert!(serde_json::to_value(&infos[1]).unwrap().get("reachesTools").is_none());
 }

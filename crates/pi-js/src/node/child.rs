@@ -11,9 +11,10 @@ use serde::Deserialize;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::ChildStdin;
 
+use super::child_stdio::{Entry, ParentEnd};
 use super::set_fn;
 use crate::error::JsError;
-use crate::runtime::convert::{bytes_to_js, error_value, latin1_to_bytes, throw, to_json};
+use crate::runtime::convert::{bytes_to_js, error_value, from_json, latin1_to_bytes, throw, to_json};
 use crate::runtime::scope::spawn_op;
 use crate::runtime::state::{Message, Task, state};
 use crate::runtime::{UncaughtKind, report_error};
@@ -25,8 +26,8 @@ pub(crate) struct SpawnOptions {
     args: Vec<String>,
     cwd: String,
     env: Vec<(String, String)>,
-    /// `pipe`, `ignore`, or `inherit` for stdin, stdout, and stderr.
-    stdio: [String; 3],
+    /// One entry per child descriptor, at least stdin, stdout, and stderr.
+    stdio: Vec<Entry>,
     #[serde(default)]
     #[cfg_attr(not(windows), allow(dead_code))]
     windows_hide: bool,
@@ -44,15 +45,7 @@ pub(crate) struct SpawnOptions {
     gid: Option<u32>,
 }
 
-fn stdio(kind: &str) -> Stdio {
-    match kind {
-        "pipe" => Stdio::piped(),
-        "inherit" => Stdio::inherit(),
-        _ => Stdio::null(),
-    }
-}
-
-fn build(options: &SpawnOptions) -> Command {
+fn build(options: &SpawnOptions) -> Result<(Command, Vec<(usize, ParentEnd)>), JsError> {
     let mut command = Command::new(&options.file);
     #[cfg(windows)]
     {
@@ -87,8 +80,8 @@ fn build(options: &SpawnOptions) -> Command {
         }
     }
     command.current_dir(&options.cwd).env_clear().envs(options.env.iter().map(|(key, value)| (key, value)));
-    command.stdin(stdio(&options.stdio[0])).stdout(stdio(&options.stdio[1])).stderr(stdio(&options.stdio[2]));
-    command
+    let pipes = super::child_stdio::apply(&mut command, &options.stdio)?;
+    Ok((command, pipes))
 }
 
 /// Node's spawn failure: `spawn <file> ENOENT` with `path` and `spawnargs`.
@@ -209,10 +202,17 @@ fn spawn<'js>(ctx: Ctx<'js>, options: Value<'js>, callback: Function<'js>) -> rq
     let options: SpawnOptions = parse(&ctx, options)?;
     let result = Object::new(ctx.clone())?;
     let state = state();
-    let mut command = tokio::process::Command::from(build(&options));
+    let (command, pipes) = match build(&options) {
+        Ok(built) => built,
+        Err(error) => {
+            result.set("error", error_value(&ctx, &error)?)?;
+            return Ok(result);
+        }
+    };
+    // Dropping the command closes this process's copies of the child's pipe ends.
     let spawned = {
         let _guard = state.shared.tokio.enter();
-        command.spawn()
+        tokio::process::Command::from(command).spawn()
     };
     let mut child = match spawned {
         Ok(child) => child,
@@ -269,6 +269,7 @@ fn spawn<'js>(ctx: Ctx<'js>, options: Value<'js>, callback: Function<'js>) -> rq
     state.add_busy();
     result.set("id", id)?;
     result.set("pid", pid)?;
+    result.set("pipes", from_json(&ctx, &super::child_stdio::adopt(&ctx, pipes)?)?)?;
     Ok(result)
 }
 
@@ -369,17 +370,26 @@ fn spawn_sync<'js>(
     let options: SpawnOptions = parse(&ctx, options)?;
     let result = Object::new(ctx.clone())?;
     let input = input.0.flatten().map(|text| latin1_to_bytes(&text));
-    let mut command = build(&options);
+    let (mut command, pipes) = match build(&options) {
+        Ok(built) => built,
+        Err(error) => {
+            result.set("error", error_value(&ctx, &error)?)?;
+            return Ok(result);
+        }
+    };
     if input.is_some() {
         command.stdin(Stdio::piped());
     }
-    let mut child = match command.spawn() {
+    let spawned = command.spawn();
+    drop(command);
+    let mut child = match spawned {
         Ok(child) => child,
         Err(error) => {
             result.set("error", error_value(&ctx, &spawn_error(&error, &options))?)?;
             return Ok(result);
         }
     };
+    let extra = super::child_stdio::drain(pipes);
     result.set("pid", child.id())?;
     let writer = child.stdin.take().map(|mut stdin| {
         let input = input.unwrap_or_default();
@@ -424,6 +434,11 @@ fn spawn_sync<'js>(
     if let Some(bytes) = collect(stderr) {
         result.set("stderr", bytes_to_js(&ctx, bytes)?)?;
     }
+    let output = Object::new(ctx.clone())?;
+    for (index, reader) in extra {
+        output.set(index as u32, bytes_to_js(&ctx, reader.join().unwrap_or_default())?)?;
+    }
+    result.set("extra", output)?;
     match status {
         Ok(status) => {
             result.set("status", status.code())?;

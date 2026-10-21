@@ -112,6 +112,34 @@ async fn reasoning_summary_and_split_tool_arguments() {
 }
 
 #[tokio::test]
+async fn malformed_final_arguments_are_reported_instead_of_keeping_the_prefix() {
+    let raw = r#"{"path":"README.md","content":"updated","mode":.5}"#;
+    let started = json!({"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "write", "arguments": ""});
+    let finished =
+        json!({"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "write", "arguments": raw});
+    let output = json!([finished.clone()]);
+    let server = MockServer::start(MockResponse::Sse(vec![
+        event(json!({"type": "response.output_item.added", "output_index": 0, "item": started})),
+        event(json!({"type": "response.function_call_arguments.delta", "output_index": 0, "delta": raw})),
+        event(json!({"type": "response.function_call_arguments.done", "output_index": 0, "arguments": raw})),
+        event(json!({"type": "response.output_item.done", "output_index": 0, "item": finished})),
+        event(json!({"type": "response.completed", "response": {"id": "resp_3", "status": "completed", "output": output}})),
+    ]))
+    .await;
+    let model = test_model(API, "openai", &server.base_url);
+    let (events, message) = collect(OpenAIResponses.stream(&model, &context(), options())).await;
+    let call = message.tool_calls().next().unwrap();
+    assert!(call.arguments.is_empty());
+    let error = call.arguments_error.as_deref().unwrap();
+    assert!(error.ends_with(&format!("\n\nReceived arguments:\n{raw}")), "{error}");
+    let ended = events.iter().find_map(|event| match event {
+        crate::stream::AssistantMessageEvent::ToolcallEnd { tool_call, .. } => Some(tool_call),
+        _ => None,
+    });
+    assert_eq!(ended.unwrap().arguments_error.as_deref(), Some(error));
+}
+
+#[tokio::test]
 async fn request_body_converts_history_tools_and_reasoning() {
     let mut server = MockServer::start(MockResponse::Sse(vec![completed(json!({}))])).await;
     let model = test_model(API, "openai", &server.base_url);
@@ -216,6 +244,24 @@ async fn http_errors_and_incomplete_responses_are_reported() {
         message.error_message.as_deref(),
         Some("OpenAI Responses stream ended before a terminal response event")
     );
+}
+
+#[tokio::test]
+async fn copilot_http_413_is_request_size_overflow() {
+    for (status, nested, overflow) in [(413, true, true), (413, false, true), (400, true, false)] {
+        let error = json!({"message": "failed to parse request", "code": ""});
+        let body = if nested { json!({"error": error}) } else { error };
+        let server = MockServer::start(MockResponse::Status(status, body.to_string())).await;
+        let mut model = test_model(API, "github-copilot", &server.base_url);
+        model.context_window = 1_000_000;
+        let (events, message) = collect(OpenAIResponses.stream(&model, &context(), options())).await;
+        assert_eq!(kinds(&events), ["error"]);
+        assert_eq!(message.stop_reason, StopReason::Error);
+        assert_eq!(message.usage.total_tokens, 0);
+        let error = message.error_message.as_deref().unwrap();
+        assert_eq!(error, format!("Provider HTTP {status}: failed to parse request"));
+        assert_eq!(crate::is_context_overflow(&message, Some(model.context_window)), overflow, "HTTP {status}");
+    }
 }
 
 #[tokio::test]

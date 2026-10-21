@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 encoding_rs = "0.8.42"
+ignore = "0.4.23"
 notify = "8.2.0"
 serde_json.workspace = true
 

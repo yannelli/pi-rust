@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use markdown_common::{Capabilities, GRAY, Screen, chalk, default_theme, markdown, plain, strip_ansi, styled_markdown};
-use pi_tui::components::{DefaultTextStyle, Markdown, MarkdownOptions};
+use pi_tui::components::{DefaultTextStyle, Markdown, MarkdownOptions, MarkdownTheme};
 use pi_tui::{Component, ComponentRef};
 
 fn rendered_plain(text: &str) -> Vec<String> {
@@ -87,6 +87,67 @@ fn allows_latex_rendering_to_be_disabled() {
     );
 }
 
+const TABLE: [&str; 3] = ["| A | B |", "|---|---|", "| 1 | 2 |"];
+const RENDERED_TABLE: [&str; 5] = ["┌───┬───┐", "│ A │ B │", "├───┼───┤", "│ 1 │ 2 │", "└───┴───┘"];
+
+/// Joins `before`, the table lines, and `after` with newlines.
+fn with_table(before: &[&str], after: &[&str]) -> String {
+    [before, &TABLE, after].concat().join("\n")
+}
+
+/// The lines `before`, the rendered table, and `after`.
+fn rendered_table(before: &[&str], after: &[&str]) -> Vec<String> {
+    [before, &RENDERED_TABLE, after].concat().into_iter().map(String::from).collect()
+}
+
+#[test]
+fn renders_a_table_after_an_orphan_dollar_opener() {
+    let _caps = Capabilities::plain();
+    let source = ["Intro", "", "$$", "", TABLE[0], TABLE[1], TABLE[2], "", "After"].join("\n");
+    assert_eq!(rendered_plain(&source), rendered_table(&["Intro", "", "$$", ""], &["", "After"]));
+    let source = with_table(&["$$", "x = 1", ""], &[]);
+    assert_eq!(rendered_plain(&source), rendered_table(&["$$", "x = 1", ""], &[]));
+}
+
+#[test]
+fn does_not_pair_an_unclosed_dollar_opener_with_a_later_one_across_a_table() {
+    let _caps = Capabilities::plain();
+    let source = with_table(&["Intro", "", "$$", "x = 1", ""], &["", "$$", "y^2", "$$"]);
+    assert_eq!(rendered_plain(&source), rendered_table(&["Intro", "", "$$", "x = 1", ""], &["", "y²"]));
+}
+
+#[test]
+fn renders_tables_with_pipe_free_delimiters_or_headers_after_an_orphan_dollar_opener() {
+    let _caps = Capabilities::plain();
+    let source = ["$$", "", "| A |", ":---:", "| 1 |"].join("\n");
+    assert_eq!(rendered_plain(&source), ["$$", "", "┌───┐", "│ A │", "├───┤", "│ 1 │", "└───┘"]);
+    let source = ["$$", "x^2", "", "Value", "| --- |", "1"].join("\n");
+    let expected = ["$$", "x^2", "", "┌───────┐", "│ Value │", "├───────┤", "│ 1     │", "└───────┘"];
+    assert_eq!(rendered_plain(&source), expected);
+}
+
+#[test]
+fn renders_a_table_after_an_orphan_bracket_opener() {
+    let _caps = Capabilities::plain();
+    let source = with_table(&["\\\\[", "x^2", ""], &[]);
+    assert_eq!(rendered_plain(&source), rendered_table(&["", "\\[", "x^2", ""], &[]));
+}
+
+#[test]
+fn does_not_pair_an_unclosed_bracket_opener_with_a_later_one_across_a_table() {
+    let _caps = Capabilities::plain();
+    let source = with_table(&["\\\\[", "x = 1", ""], &["", "\\\\[", "y^2", "\\\\]"]);
+    let expected = rendered_table(&["", "\\[", "x = 1", ""], &["", "\\", "", "\\[", "y^2", "\\\\]"]);
+    assert_eq!(rendered_plain(&source), expected);
+}
+
+#[test]
+fn still_renders_closed_multi_line_display_math_followed_by_a_table() {
+    let _caps = Capabilities::plain();
+    let source = with_table(&["$$", "a", "+ b", "$$", ""], &[]);
+    assert_eq!(rendered_plain(&source), rendered_table(&["a + b", ""], &[]));
+}
+
 #[test]
 fn switches_from_raw_to_rendered_math_when_a_streamed_delimiter_closes() {
     let _caps = Capabilities::plain();
@@ -94,6 +155,33 @@ fn switches_from_raw_to_rendered_math_when_a_streamed_delimiter_closes() {
     assert_eq!(plain(&md.render(80)), [r"Map $\mathbb{C}^3"]);
     md.set_text(r"Map $\mathbb{C}^3$");
     assert_eq!(plain(&md.render(80)), ["Map ℂ³"]);
+}
+
+/// Renders with tagged bold and italic so emphasis boundaries show up in the text.
+fn rendered_tagged(text: &str) -> Vec<String> {
+    let theme = MarkdownTheme {
+        bold: Rc::new(|text: &str| format!("<b>{text}</b>")),
+        italic: Rc::new(|text: &str| format!("<i>{text}</i>")),
+        ..default_theme()
+    };
+    let mut md = Markdown::new(text, 0, 0, theme, None, MarkdownOptions::default());
+    md.render(80).iter().map(|line| line.trim_end().to_string()).collect()
+}
+
+#[test]
+fn renders_emphasis_delimited_next_to_cjk_punctuation() {
+    let _caps = Capabilities::plain();
+    assert_eq!(rendered_tagged("**这是测试。**后面"), ["<b>这是测试。</b>后面"]);
+    assert_eq!(rendered_tagged("**一句话说清：**一台机器"), ["<b>一句话说清：</b>一台机器"]);
+    assert_eq!(rendered_tagged("**要点到此为止。**20 小时"), ["<b>要点到此为止。</b>20 小时"]);
+    assert_eq!(rendered_tagged("字**「引用」**字"), ["字<b>「引用」</b>字"]);
+    assert_eq!(rendered_tagged("*斜体。*后面"), ["<i>斜体。</i>后面"]);
+}
+
+#[test]
+fn keeps_commonmark_flanking_rules_for_non_cjk_text() {
+    let _caps = Capabilities::plain();
+    assert_eq!(rendered_tagged("**end.**Then next"), ["**end.**Then next"]);
 }
 
 #[test]

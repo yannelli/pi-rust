@@ -181,7 +181,7 @@ impl AgentSession {
             let tools = lock(&self.tools);
             let reaches = |name: &str| {
                 let tool = tools.registry.get(name);
-                tool.is_some_and(|tool| tool.reaches_tools(&serde_json::json!({})).is_some())
+                tool.is_some_and(|tool| tool.declares_reaches_tools())
             };
             let has_codemode = reaches(pi_codemode::CODEMODE_TOOL_NAME);
             (has_codemode, reaches(pi_codemode::TOOL_SEARCH_TOOL_NAME), tools.registry.active_names())

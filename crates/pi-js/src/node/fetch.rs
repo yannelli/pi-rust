@@ -12,6 +12,7 @@ use super::set_fn;
 use super::zlib::{self, Codec};
 use crate::error::JsError;
 use crate::runtime::convert::{bytes_to_js, error_value, latin1_to_bytes, throw, to_json};
+use crate::runtime::scope::spawn_op;
 use crate::runtime::state::{Message, Task, state};
 use crate::runtime::{UncaughtKind, report_error};
 
@@ -23,6 +24,17 @@ struct FetchRequest {
     headers: Vec<(String, String)>,
     /// `follow`, `manual`, or `error`.
     redirect: String,
+    /// The body arrives in chunks through `write` and `end` instead of with the request.
+    #[serde(default)]
+    stream_body: bool,
+}
+
+type BodySender = tokio::sync::mpsc::Sender<Result<Vec<u8>, std::io::Error>>;
+
+/// A running request: its task, and the sender for a streamed body until `end`.
+struct FetchTask {
+    abort: tokio::task::AbortHandle,
+    body: Option<BodySender>,
 }
 
 /// HTTP clients for one runtime, created on first use. Redirect policy is per client in
@@ -146,7 +158,7 @@ fn network_error(error: &reqwest::Error) -> JsError {
     JsError::type_error("fetch failed").with_data("cause", serde_json::Value::Object(cause))
 }
 
-async fn run(client: reqwest::Client, request: FetchRequest, body: Option<Vec<u8>>, mut emit: impl FnMut(Event)) {
+async fn run(client: reqwest::Client, request: FetchRequest, body: Option<reqwest::Body>, mut emit: impl FnMut(Event)) {
     let method = match reqwest::Method::from_bytes(request.method.as_bytes()) {
         Ok(method) => method,
         Err(_) => {
@@ -247,7 +259,15 @@ fn start<'js>(
     let json = to_json(&ctx, request).map_err(|error| throw(&ctx, &error))?;
     let request: FetchRequest = serde_json::from_value(json)
         .map_err(|error| throw(&ctx, &JsError::type_error(format!("Invalid fetch request: {error}"))))?;
-    let body = body.map(|text| latin1_to_bytes(&text));
+    let mut body_sender = None;
+    let body = if request.stream_body {
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        body_sender = Some(tx);
+        let chunks = futures::stream::unfold(rx, |mut rx| async move { rx.recv().await.map(|item| (item, rx)) });
+        Some(reqwest::Body::wrap_stream(chunks))
+    } else {
+        body.map(|text| reqwest::Body::from(latin1_to_bytes(&text)))
+    };
     let state = state();
     let id = state.next_id();
     let sender = state.sender.clone();
@@ -257,7 +277,7 @@ fn start<'js>(
     };
     let client = state.shared.http.get(request.redirect == "follow");
     let handle = state.shared.tokio.spawn(run(client, request, body, emit));
-    state.resources.borrow_mut().insert(id, Box::new(handle.abort_handle()));
+    state.resources.borrow_mut().insert(id, Box::new(FetchTask { abort: handle.abort_handle(), body: body_sender }));
     state.callbacks.borrow_mut().insert(id, Persistent::save(&ctx, callback));
     state.add_busy();
     Ok(id)
@@ -269,11 +289,24 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
         start(ctx, request, body, callback)
     })?;
     set_fn(&object, "abort", |id: u64| {
-        let handle = state().with_resource(id, |handle: &mut tokio::task::AbortHandle| handle.clone());
+        let handle = state().with_resource(id, |task: &mut FetchTask| task.abort.clone());
         if let Ok(handle) = handle {
             handle.abort();
             release(id);
         }
+    })?;
+    set_fn(&object, "write", |ctx: Ctx<'js>, id: u64, chunk: String| {
+        let sender = state().with_resource(id, |task: &mut FetchTask| task.body.clone()).ok().flatten();
+        let bytes = latin1_to_bytes(&chunk);
+        let work = async move {
+            let sender =
+                sender.ok_or_else(|| JsError::new("The request body is closed").with_code("ERR_INVALID_STATE"))?;
+            sender.send(Ok(bytes)).await.map_err(|_| JsError::new("The request ended").with_code("ERR_INVALID_STATE"))
+        };
+        spawn_op(&ctx, work, |ctx, ()| Ok(Value::new_undefined(ctx.clone())))
+    })?;
+    set_fn(&object, "end", |id: u64| {
+        let _ = state().with_resource(id, |task: &mut FetchTask| task.body.take());
     })?;
     Ok(object)
 }

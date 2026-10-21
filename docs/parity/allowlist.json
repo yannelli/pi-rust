@@ -19,6 +19,10 @@
     {
       "item": "websockets",
       "reason": "Legacy key. pi-rust migrates it to transport when settings load (settings/manager.rs) and keeps no field for it in Settings."
+    },
+    {
+      "item": "warnings",
+      "reason": "pi-rust removed the Anthropic subscription warning and its settings (PR #28). An existing warnings key stays in settings.json as an unknown key."
     }
   ],
   "slashCommands": [

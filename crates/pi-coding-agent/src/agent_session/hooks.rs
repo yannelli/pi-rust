@@ -164,8 +164,8 @@ fn before_tool_call_hook(weak: Weak<AgentSession>) -> BeforeToolCallFn {
             let session = weak.upgrade()?;
             if let Some(manager) = session.mcp_manager() {
                 let name = &call.tool_call.name;
-                let reach = session
-                    .with_tool_registry(|registry| registry.get(name).and_then(|tool| tool.reaches_tools(call.args)));
+                // Outside the tools lock: an extension's `reachesTools` runs JavaScript.
+                let reach = session.tool(name).and_then(|tool| tool.reaches_tools(call.args));
                 manager.wait_for_tool_call(name, reach.as_ref(), &cancel).await;
             }
             session.extension_tool_call(&call).await

@@ -14,9 +14,47 @@ const kNative = Symbol("kNative");
 
 const streamError = (code) => codeError(Error, "ERR_HTTP2_STREAM_ERROR", `Stream closed with error code ${ERROR_NAMES[code] || code}`);
 
+const MAX_CUSTOM_SETTINGS = 10;
+const tooManyCustom = () => codeError(Error, "ERR_HTTP2_TOO_MANY_CUSTOM_SETTINGS", "Number of custom settings exceeds MAX_ADDITIONAL_SETTINGS");
+const invalidSetting = (name, value) => codeError(RangeError, "ERR_HTTP2_INVALID_SETTING_VALUE", `Invalid value for setting "${name}": ${value}`);
+
+function validateCustomSettings(custom) {
+  if (custom === undefined) return;
+  if (custom === null || typeof custom !== "object" || Array.isArray(custom)) throw invalidArgType("customSettings", "an instance of Number", custom);
+  const entries = Object.entries(custom);
+  if (entries.length > MAX_CUSTOM_SETTINGS) throw tooManyCustom();
+  for (const [key, value] of entries) {
+    if (Number(key) < 0 || Number(key) > 0xffff) throw invalidSetting("customSettings:id", Number(key));
+    if (Number(value) < 0 || Number(value) > 2 ** 32 - 1) throw invalidSetting("customSettings:value", Number(value));
+  }
+}
+
+// The entries of a customSettings object for a SETTINGS frame, as flat id and value pairs. Like
+// Node, it skips values that are not numbers; ids of the standard settings are left out.
+function customEntries(custom, known) {
+  const list = [];
+  for (const key in custom) {
+    const value = custom[key];
+    if (typeof value !== "number") continue;
+    const id = Number(key);
+    if (!(id > 0 && id <= 0xffff)) throw invalidSetting("Range Error", id);
+    if (!(value > 0 && value <= 2 ** 32 - 1)) throw invalidSetting("Range Error", value);
+    if (!known[id]) list.push(id, value);
+  }
+  return list;
+}
+
+// remoteCustomSettings: the ids of the peer's custom settings that remoteSettings reports.
+function validateRemoteCustomSettings(list) {
+  if (list === undefined) return;
+  if (!Array.isArray(list)) throw invalidArgType("options.remoteCustomSettings", "an instance of Array", list);
+  if (list.length > MAX_CUSTOM_SETTINGS) throw tooManyCustom();
+}
+
 function validateSettings(settings) {
   if (settings === undefined) return {};
   validate.object(settings, "settings");
+  validateCustomSettings(settings.customSettings);
   for (const [name, [min, max]] of Object.entries(SETTING_RANGES)) {
     const value = settings[name];
     if (value !== undefined && (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max)) {
@@ -297,4 +335,4 @@ class ClientHttp2Stream extends Http2Stream {
   }
 }
 
-module.exports = { Http2Stream, ServerHttp2Stream, ClientHttp2Stream, kNative, toHeaders, flatten, validateSettings, DEFAULT_SETTINGS, ERROR_NAMES, NO_PAYLOAD, nativeH2, EventEmitter };
+module.exports = { Http2Stream, ServerHttp2Stream, ClientHttp2Stream, kNative, toHeaders, flatten, validateSettings, customEntries, validateRemoteCustomSettings, invalidSetting, DEFAULT_SETTINGS, ERROR_NAMES, NO_PAYLOAD, nativeH2, EventEmitter };

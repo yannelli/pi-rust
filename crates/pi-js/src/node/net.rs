@@ -256,7 +256,16 @@ fn start(id: u64) {
                         return;
                     }
                 }
-                match read.read(&mut buffer).await {
+                // A pause also cancels a pending read, so a socket handed to a child is left to it.
+                let result = tokio::select! {
+                    biased;
+                    changed = paused.changed() => match changed {
+                        Ok(()) => continue,
+                        Err(_) => return,
+                    },
+                    result = read.read(&mut buffer) => result,
+                };
+                match result {
                     Ok(0) => break,
                     // libuv reports a broken named pipe as EOF.
                     Err(error) if matches!(error.kind(), ErrorKind::UnexpectedEof | ErrorKind::BrokenPipe) => break,

@@ -288,3 +288,26 @@ fn adds_and_removes_entries_keeping_other_content_and_indentation() {
     let error = add_mcp_server_config(&path, "a", &json!({ "command": "x" })).unwrap_err();
     assert!(error.ends_with("expected an object with an \"mcpServers\" object"));
 }
+
+#[test]
+fn reads_and_edits_mcp_json_files_that_start_with_a_utf8_bom() {
+    let paths = setup(json!({}), json!({}));
+    let global = paths.agent_dir.join("mcp.json");
+    let project = paths.project_file();
+    std::fs::write(&global, "\u{feff}{\"mcpServers\":{\"demo\":{\"command\":\"echo\",\"enabled\":false}}}\n").unwrap();
+    std::fs::write(&project, "\u{feff}{\"mcpServers\":{\"local\":{\"command\":\"local-cmd\"}}}\n").unwrap();
+
+    let loaded = load_mcp_config(&paths.agent_dir, &paths.cwd, true);
+    assert_eq!(loaded.errors, Vec::<String>::new());
+    let servers: Vec<(&str, Option<McpConfigScope>)> =
+        loaded.servers.iter().map(|entry| (entry.name.as_str(), entry.scope)).collect();
+    assert_eq!(servers, [("demo", Some(McpConfigScope::Global)), ("local", Some(McpConfigScope::Project))]);
+
+    assert!(!add_mcp_server_config(&global, "other", &json!({ "command": "other-cmd" })).unwrap());
+    assert_eq!(
+        read(&global)["mcpServers"],
+        json!({ "demo": { "command": "echo", "enabled": false }, "other": { "command": "other-cmd" } })
+    );
+    assert!(remove_mcp_server_config(&project, "local").unwrap());
+    assert_eq!(read(&project)["mcpServers"], json!({}));
+}

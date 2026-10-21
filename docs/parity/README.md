@@ -52,12 +52,19 @@ For each finding:
 2. Decide: port it, record it as accepted in `allowlist.json` with a reason, or list it in `GAPS.md` with what blocks it.
 3. One upstream commit or one gap per change. Large items (for example the chord2 runtime) get their own branch and PR.
 
+Model catalog findings are fixed by regenerating `crates/pi-ai/models.json` from the data of a Parity run, not by hand:
+
+```sh
+gh run download <run-id> -R yannelli/pi-rust -n upstream-model-data -D ../model-data
+cargo xtask models ../model-data
+```
+
 ## Porting an upstream commit
 
 1. Read the upstream diff: `git -C ../pi-upstream show <sha>`.
 2. Find the Rust counterpart with the table above. Keep names, JSON shapes, and error messages the same as upstream.
 3. Port the tests too. Tests use the `faux` provider or a local mock server; never real provider keys or network.
-4. Name the upstream commit in the commit message, for example `fix(ai): recover from Copilot request-size overflow (upstream 73f8de80b)`. The report uses this to mark the commit as ported.
+4. Write `upstream <sha>` with the 9-character SHA in the commit message, for example `fix(ai): recover from Copilot request-size overflow (upstream 73f8de80b)`. The report marks a commit as ported only on that text.
 5. When every commit up to an upstream commit is ported or allowlisted, move `syncedCommit`, `syncedVersion`, and `syncedOn` in `upstream.json` to it.
 
 ## Verification
