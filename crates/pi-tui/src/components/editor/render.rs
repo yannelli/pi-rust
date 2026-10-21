@@ -154,6 +154,9 @@ impl EditorCore {
         }
         let below = layout.len() - end;
         result.push(self.render_border(width, below, false));
+        if let Some(line) = self.render_history_search(content_width) {
+            result.push(format!("{side_padding}{line}{side_padding}"));
+        }
 
         self.rendered_autocomplete_height = 0;
         if self.autocomplete_mode.is_some()

@@ -173,6 +173,16 @@ fn migrations_and_defaults_follow_upstream() {
 }
 
 #[test]
+fn prompt_history_settings_default_to_on_with_1000_entries() {
+    let defaults = SettingsManager::in_memory(json!({}));
+    assert_eq!((defaults.prompt_history_enabled(), defaults.prompt_history_max_entries()), (true, 1000));
+    let custom = SettingsManager::in_memory(json!({"promptHistory": {"enabled": false, "maxEntries": 50}}));
+    assert_eq!((custom.prompt_history_enabled(), custom.prompt_history_max_entries()), (false, 50));
+    let invalid = SettingsManager::in_memory(json!({"promptHistory": {"maxEntries": -3}}));
+    assert_eq!(invalid.prompt_history_max_entries(), 1000);
+}
+
+#[test]
 fn global_only_keys_ignore_project_values() {
     let dirs = Dirs::new();
     write(&dirs.global(), json!({"cacheWarming": "idle", "defaultProjectTrust": "always"}));

@@ -16,7 +16,8 @@ use crate::tui::WeakTui;
 use crate::ui_loop::TimerId;
 use crate::undo_stack::UndoStack;
 
-const MAX_HISTORY: usize = 100;
+/// History entries kept in memory unless [`EditorCore::set_history_limit`] changes it.
+pub(super) const DEFAULT_HISTORY_LIMIT: usize = 100;
 pub(super) const DEFAULT_TRIGGER_CHARACTERS: [&str; 2] = ["@", "#"];
 
 /// Text and cursor.
@@ -103,6 +104,8 @@ pub(crate) struct EditorCore {
     /// `None` when not browsing; 0 is the most recent entry.
     pub history_index: Option<usize>,
     pub history_draft: Option<TextState>,
+    pub history_limit: usize,
+    pub history_search: Option<super::search::HistorySearch>,
 
     pub kill_ring: KillRing,
     pub last_action: Option<LastAction>,
@@ -154,6 +157,8 @@ impl EditorCore {
             history: VecDeque::new(),
             history_index: None,
             history_draft: None,
+            history_limit: DEFAULT_HISTORY_LIMIT,
+            history_search: None,
             kill_ring: KillRing::new(),
             last_action: None,
             jump_mode: None,
@@ -245,6 +250,7 @@ impl EditorCore {
         self.cancel_autocomplete();
         self.last_action = None;
         self.exit_history_browsing();
+        self.history_search = None;
         let normalized = Self::normalize_text(text);
         // Programmatic changes are undoable.
         if self.get_text() != normalized {
@@ -280,9 +286,14 @@ impl EditorCore {
             return;
         }
         self.history.push_front(trimmed.to_string());
-        if self.history.len() > MAX_HISTORY {
-            self.history.pop_back();
-        }
+        self.history.truncate(self.history_limit);
+    }
+
+    /// Keeps at most `limit` entries, dropping the oldest.
+    pub fn set_history_limit(&mut self, limit: usize) {
+        self.history_limit = limit;
+        self.history.truncate(limit);
+        self.exit_history_browsing();
     }
 
     pub fn is_editor_empty(&self) -> bool {

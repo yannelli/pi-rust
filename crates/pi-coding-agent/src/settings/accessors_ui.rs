@@ -218,6 +218,17 @@ impl SettingsManager {
         self.set_global_value("autocompleteMaxVisible", Some(json!(max_visible.clamp(3, 20))));
     }
 
+    /// `promptHistory.enabled`, on by default.
+    pub fn prompt_history_enabled(&self) -> bool {
+        self.state().merged.prompt_history.as_ref().and_then(|history| history.enabled).unwrap_or(true)
+    }
+
+    /// `promptHistory.maxEntries`, 1000 by default.
+    pub fn prompt_history_max_entries(&self) -> usize {
+        let max = self.state().merged.prompt_history.as_ref().and_then(|history| history.max_entries);
+        max.filter(|n| n.is_finite() && *n >= 0.0).map_or(1000, |n| n as usize)
+    }
+
     pub fn code_block_indent(&self) -> String {
         let markdown = self.state().merged.markdown.clone().unwrap_or_default();
         markdown.code_block_indent.unwrap_or_else(|| "  ".into())

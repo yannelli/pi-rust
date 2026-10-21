@@ -30,6 +30,14 @@ fn first_code_unit_at_least_space(data: &str) -> bool {
     data.encode_utf16().next().is_some_and(|unit| unit >= 32)
 }
 
+/// Text that a key or a chunk of typed input inserts, if any.
+pub(super) fn printable_input(data: &str) -> Option<String> {
+    if matches_key(data, "shift+space") {
+        return Some(" ".to_string());
+    }
+    decode_printable_key(data).or_else(|| first_code_unit_at_least_space(data).then(|| data.to_string()))
+}
+
 /// Shift+Enter and the other newline encodings terminals send.
 fn is_new_line(data: &str, kb: &KeybindingsManager) -> bool {
     kb.matches(data, ids::INPUT_NEW_LINE)
@@ -74,7 +82,9 @@ impl EditorCore {
             if let Some(end) = self.paste_buffer.find(PASTE_END) {
                 let content = self.paste_buffer[..end].to_string();
                 let remaining = self.paste_buffer[end + PASTE_END.len()..].to_string();
-                if !content.is_empty() {
+                if self.history_search.is_some() {
+                    self.append_to_search(&content);
+                } else if !content.is_empty() {
                     self.handle_paste(&content);
                 }
                 self.is_in_paste = false;
@@ -86,12 +96,19 @@ impl EditorCore {
             return;
         }
 
+        if self.history_search.is_some() && self.handle_history_search_key(data, &kb) {
+            return;
+        }
         // Ctrl+C is left to the parent (clear or exit).
         if kb.matches(data, ids::INPUT_COPY) {
             return;
         }
         if kb.matches(data, ids::EDITOR_UNDO) {
             self.undo();
+            return;
+        }
+        if kb.matches(data, ids::EDITOR_HISTORY_SEARCH) {
+            self.start_history_search();
             return;
         }
 
@@ -182,16 +199,8 @@ impl EditorCore {
             return;
         }
 
-        if matches_key(data, "shift+space") {
-            self.insert_character(" ");
-            return;
-        }
-        if let Some(text) = decode_printable_key(data) {
+        if let Some(text) = printable_input(data) {
             self.insert_character(&text);
-            return;
-        }
-        if first_code_unit_at_least_space(data) {
-            self.insert_character(data);
         }
     }
 

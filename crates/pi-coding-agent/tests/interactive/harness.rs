@@ -31,11 +31,19 @@ pub struct Options {
     pub settings: Value,
     pub tui_mode: TuiMode,
     pub files: Vec<(&'static str, &'static str)>,
+    /// An agent directory to reuse, so several runs share its files.
+    pub agent_dir: Option<PathBuf>,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Self { responses: Vec::new(), settings: json!({}), tui_mode: TuiMode::Regular, files: Vec::new() }
+        Self {
+            responses: Vec::new(),
+            settings: json!({}),
+            tui_mode: TuiMode::Regular,
+            files: Vec::new(),
+            agent_dir: None,
+        }
     }
 }
 
@@ -51,7 +59,7 @@ pub struct Ui {
 pub async fn start(options: Options) -> Ui {
     let root = tempfile::tempdir().unwrap();
     let cwd = root.path().join("work");
-    let agent_dir = root.path().join("agent");
+    let agent_dir = options.agent_dir.clone().unwrap_or_else(|| root.path().join("agent"));
     std::fs::create_dir_all(&cwd).unwrap();
     std::fs::create_dir_all(&agent_dir).unwrap();
     for (path, content) in &options.files {

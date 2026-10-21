@@ -6,6 +6,7 @@ mod extensions;
 mod gaps;
 mod harness;
 mod keys;
+mod prompt_history;
 mod startup;
 
 use harness::{Options, local, start};

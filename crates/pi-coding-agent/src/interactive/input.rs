@@ -178,7 +178,7 @@ impl InteractiveMode {
         if session.is_compacting() {
             self.queue_compaction_message(text, true);
         } else if session.is_streaming() {
-            self.editor.add_to_history(&text);
+            self.editor.record_prompt(&text);
             self.editor.set_text("");
             self.prompt_while_streaming(text, StreamingBehavior::FollowUp);
         } else {
@@ -252,7 +252,7 @@ impl InteractiveMode {
     }
 
     fn queue_compaction_message(&self, text: String, follow_up: bool) {
-        self.editor.add_to_history(&text);
+        self.editor.record_prompt(&text);
         self.editor.set_text("");
         self.state.borrow_mut().compaction_queue.push(CompactionQueued { text, follow_up });
         self.update_pending_messages_display();
@@ -334,7 +334,7 @@ impl InteractiveMode {
                     self.editor.set_text(&text);
                     return;
                 }
-                self.editor.add_to_history(&text);
+                self.editor.record_prompt(&text);
                 self.handle_bash_command(command.to_string(), excluded);
                 self.state.borrow_mut().is_bash_mode = false;
                 self.update_editor_border_color();
@@ -347,14 +347,14 @@ impl InteractiveMode {
             return;
         }
         if session.is_streaming() {
-            self.editor.add_to_history(&text);
+            self.editor.record_prompt(&text);
             self.editor.set_text("");
             self.prompt_while_streaming(text, StreamingBehavior::Steer);
             return;
         }
         self.flush_pending_bash_components();
         self.queue_prompt(text.clone(), Vec::new());
-        self.editor.add_to_history(&text);
+        self.editor.record_prompt(&text);
     }
 
     fn flush_pending_bash_components(&self) {
