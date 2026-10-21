@@ -3237,6 +3237,7 @@ name = "pi-env-daemon"
 version = "0.5.1"
 dependencies = [
  "encoding_rs",
+ "ignore",
  "libc",
  "notify",
  "serde_json",
