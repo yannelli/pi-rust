@@ -12,7 +12,8 @@ use pi_coding_agent::app::{
 };
 use pi_coding_agent::auth_cli::run_auth_command;
 use pi_coding_agent::cli::help_text_with_flags;
-use pi_coding_agent::cli::{Args, OutputMode, normalize_session_name, parse_args};
+use pi_coding_agent::cli::{Args, CommandOutput, OutputMode, normalize_session_name, parse_args};
+use pi_coding_agent::completion::run_completion_command;
 use pi_coding_agent::config::{agent_dir, env_flag, expand_tilde};
 use pi_coding_agent::diagnostics::{
     guarded_stdout, print_timings, record_fatal_error, reset_timings, say_stdout, take_over_stdout, time,
@@ -135,6 +136,13 @@ async fn list_models(search: &str, args: &Args, cwd: &Path, agent_dir: &Path) ->
     }
     runtime.dispose().await;
     Ok(())
+}
+
+/// Print the output of a subcommand and return its exit code.
+fn print_output(output: CommandOutput) -> i32 {
+    print!("{}", output.stdout);
+    eprint!("{}", output.stderr);
+    output.code
 }
 
 /// A startup message for stdout, or stderr when RPC or JSON mode owns stdout.
@@ -328,6 +336,9 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
         set_child_process_env("PI_SKIP_VERSION_CHECK", "1");
     }
     let agent_dir = agent_dir();
+    if let Some(output) = run_completion_command(&raw, &agent_dir) {
+        return Ok(print_output(output));
+    }
     let crash_context = prepare_process(&agent_dir);
     if let Some(output) = run_auth_command(&raw, &agent_dir, oauth_lookup()).await {
         print!("{}", output.stdout);

@@ -62,6 +62,15 @@ pi install npm:<package>            # install a pi package (extensions, skills, 
 
 Run `pi --help` for all options. In interactive mode, type `/` to list commands, for example `/login`, `/model`, `/settings`, `/tree`, `/fork`, `/compact`, `/export`, `/share`, `/mcp`, and `/hotkeys`. Input typed while the agent works is queued as steering, and Alt+Enter (Ctrl+Q on Windows) queues a follow-up.
 
+## Shell completion (pi-rust extension)
+
+`pi completion bash|zsh|fish|powershell` prints a completion script for options, subcommands, and file paths. For `--model` and `--provider` it asks pi for the models of the built-in catalog and `models.json`. `pi completion --help` shows how to install each script, for example:
+
+```sh
+echo 'eval "$(pi completion bash)"' >> ~/.bashrc
+pi completion fish > ~/.config/fish/completions/pi.fish
+```
+
 ## ACP (Zed and other editors)
 
 `pi --mode acp` runs pi as an [Agent Client Protocol](https://agentclientprotocol.com) server over stdio, so editors such as Zed can use it as an external agent. In Zed, add this to `settings.json`:
@@ -178,6 +187,7 @@ pi-rust ports the `pi` CLI and its libraries feature for feature. These parts di
 - The version check and `pi update --self` use this repository's releases.
 - CJK and Thai word movement uses ICU4X dictionaries, so a few word boundaries differ from Node's `Intl.Segmenter`.
 - `pi --mode acp` (above) is an addition; the TypeScript pi needs the separate pi-acp adapter.
+- `pi completion` (above) is an addition; the TypeScript pi has none.
 - Account model lists for OpenAI Codex, Anthropic, GitHub Copilot, OpenAI, xAI, and Google (see [Providers](#account-model-lists-pi-rust-extension)) are an addition; upstream pi narrows only OpenRouter.
 - `pi-env` looks for remote daemons in a `pi-env-daemons` folder next to the running program. Each release has a `pi-env-daemons-<tag>.tar.gz` with the daemons for Linux, Android (Termux), macOS, and Windows on x86-64 and arm64; extract it next to `pi`.
 - `pi experimental` (`server`, `client`, `durable`, `vacation`) needs `PI_EXPERIMENTAL=1`, as upstream. Its `server` and `client` use Unix sockets, so on Windows they report that they need Unix; upstream has no Windows transport either.

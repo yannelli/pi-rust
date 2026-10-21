@@ -10,6 +10,7 @@ pub mod catalog;
 pub mod cli;
 pub mod clipboard;
 pub mod compaction;
+pub mod completion;
 pub mod config;
 pub mod diagnostics;
 pub mod experimental;
