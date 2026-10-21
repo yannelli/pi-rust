@@ -15,6 +15,7 @@ use crate::settings::SettingsManager;
 mod bash;
 mod edit;
 pub mod edit_diff;
+mod file_changes;
 mod find;
 mod grep;
 mod ls;
@@ -34,6 +35,7 @@ mod tests;
 
 pub use bash::{BASH_TOOL_CONFIG, BashTool, BashToolOptions};
 pub use edit::EditTool;
+pub use file_changes::{FileChangeRecorder, PriorContent, SharedFileChangeRecorder, too_large_reason};
 pub use find::{FindTool, relativize_find_result_path};
 pub use grep::GrepTool;
 pub use ls::LsTool;

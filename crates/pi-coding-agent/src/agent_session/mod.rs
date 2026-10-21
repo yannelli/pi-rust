@@ -12,6 +12,7 @@ pub mod events;
 mod export_tools;
 mod extension_hooks;
 mod extension_host;
+mod file_checkpoints;
 mod hooks;
 mod listener;
 mod llama_api;
@@ -49,6 +50,7 @@ pub use self::builtins::{BUILTIN_EXTENSIONS, McpSessionOptions, NotifyFn, Notify
 pub use self::cache::CacheWarmingDecider;
 pub use self::events::{AgentSessionEvent, CompactionReason, SummarizationSource, compaction_result_json};
 pub use self::extension_hooks::RequestHooksSlot;
+pub use self::file_checkpoints::{MAX_CHECKPOINT_FILE_BYTES, MAX_UNDO_PROMPTS, UndoReport, UndoSkip};
 pub use self::llama_api::LlamaProgressFn;
 pub use self::model::ModelCycleResult;
 pub use self::model_runtime::{ModelRuntime, ModelRuntimeOptions};
@@ -137,6 +139,8 @@ pub struct AgentSession {
     run_limits: run_limits::RunLimitState,
     /// The extensions provider request hooks reach; shared with `stream_fn`.
     request_hooks: RequestHooksSlot,
+    /// Files the edit and write tools changed, per prompt, for `/undo`.
+    file_checkpoints: file_checkpoints::FileCheckpoints,
     weak: Weak<AgentSession>,
 }
 

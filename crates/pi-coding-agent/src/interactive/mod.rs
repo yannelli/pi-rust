@@ -39,6 +39,7 @@ mod startup;
 pub mod startup_ui;
 mod status;
 mod tmux;
+mod undo;
 pub mod util;
 
 use std::path::PathBuf;

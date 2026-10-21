@@ -11,6 +11,7 @@ mod notify;
 mod offline_guard;
 mod run_limits;
 mod startup;
+mod undo;
 
 use harness::{Options, local, start};
 use pi_ai::providers::faux::FauxResponse;

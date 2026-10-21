@@ -300,6 +300,14 @@ pub(crate) fn builtin_tools(
     session: Weak<AgentSession>,
 ) -> Vec<SharedTool> {
     let mut options = custom.cloned().unwrap_or_else(|| ToolsOptions::from_settings(settings));
+    // `/undo` restores local files, so custom backends are not recorded.
+    let recorder = super::file_checkpoints::session_recorder(session.clone());
+    if options.write.operations.is_none() {
+        options.write.recorder.get_or_insert_with(|| recorder.clone());
+    }
+    if options.edit.operations.is_none() {
+        options.edit.recorder.get_or_insert(recorder);
+    }
     let environment = session_environment_fn(session);
     options.bash.session_environment.get_or_insert_with(|| environment.clone());
     options.powershell.session_environment.get_or_insert(environment);
