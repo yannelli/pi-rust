@@ -18,6 +18,24 @@ static TERMINAL_REPLY_HEADER: LazyLock<Regex> = LazyLock::new(|| {
         .expect("valid regex")
 });
 
+/// An SGR mouse report cut short: `ESC [ <` and up to three numbers. Bounded so typed text
+/// cannot grow it.
+static SGR_MOUSE_HEAD: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\x1b\[<[0-9]{0,4}(?:;[0-9]{0,5}){0,2}$").expect("valid regex"));
+
+/// Whether `data` starts with the rest of a timed-out SGR mouse `head`: digits and separators up
+/// to the final `M` or `m`, so that the joined text is still a valid report or report prefix.
+fn continues_sgr_mouse_head(head: &str, data: &str) -> bool {
+    let end = data.find(['M', 'm']).map_or(data.len(), |index| index + 1);
+    let continuation = &data[..end];
+    let numbers = continuation.trim_end_matches(['M', 'm']);
+    if continuation.is_empty() || !numbers.bytes().all(|byte| byte.is_ascii_digit() || byte == b';') {
+        return false;
+    }
+    let joined = format!("{head}{continuation}");
+    SGR_MOUSE_HEAD.is_match(&joined) || is_sgr_mouse_payload(&joined[2..])
+}
+
 fn is_control_string(data: &str) -> bool {
     data.starts_with("\x1b]") || data.starts_with("\x1bP") || data.starts_with("\x1b_")
 }
@@ -188,6 +206,9 @@ pub struct StdinBuffer {
     paste_mode: bool,
     paste_buffer: String,
     pending_kitty_printable_codepoint: Option<u32>,
+    /// An SGR mouse head that the timeout flushed. A busy reader can split a report, and its tail
+    /// must not reach the editor as text, so input that completes the head rejoins it.
+    flushed_mouse_head: Option<String>,
 }
 
 impl Default for StdinBuffer {
@@ -207,6 +228,7 @@ impl StdinBuffer {
             paste_mode: false,
             paste_buffer: String::new(),
             pending_kitty_printable_codepoint: None,
+            flushed_mouse_head: None,
         }
     }
 
@@ -248,7 +270,12 @@ impl StdinBuffer {
                         self.emit_data(sequence[..tail].to_string(), &mut events);
                         self.process_str(&sequence[tail..], now, &mut events);
                     }
-                    _ => self.emit_data(sequence, &mut events),
+                    _ => {
+                        if SGR_MOUSE_HEAD.is_match(&sequence) {
+                            self.flushed_mouse_head = Some(sequence.clone());
+                        }
+                        self.emit_data(sequence, &mut events);
+                    }
                 }
             }
         }
@@ -263,6 +290,13 @@ impl StdinBuffer {
             return;
         }
 
+        if let Some(head) = self.flushed_mouse_head.take()
+            && self.buffer.is_empty()
+            && !self.paste_mode
+            && continues_sgr_mouse_head(&head, data)
+        {
+            self.buffer = head;
+        }
         self.buffer.push_str(data);
 
         if self.paste_mode {
@@ -347,6 +381,7 @@ impl StdinBuffer {
     /// Drops buffered input, any partial paste, and the pending deadline.
     pub fn clear(&mut self) {
         self.deadline = None;
+        self.flushed_mouse_head = None;
         self.buffer.clear();
         self.paste_mode = false;
         self.paste_buffer.clear();
