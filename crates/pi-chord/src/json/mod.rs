@@ -12,9 +12,7 @@ use std::sync::Arc;
 pub use map::JsonMap;
 pub(crate) use map::array_index_key;
 pub use number::{Number, format_js_number};
-#[cfg(feature = "js")]
-pub(crate) use text::write_json_string;
-pub(crate) use text::{utf16_len, utf16_offset};
+pub(crate) use text::{utf16_len, utf16_offset, write_json_string};
 
 use crate::error::{ChordError, ChordResult};
 

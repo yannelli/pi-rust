@@ -1,0 +1,100 @@
+[
+	{
+		"sent": {
+			"code": "gone",
+			"message": "gone: object disposed"
+		},
+		"back": {
+			"code": "gone",
+			"reason": null,
+			"message": "gone: object disposed",
+			"retryable": false
+		}
+	},
+	{
+		"sent": {
+			"code": "invalid",
+			"message": "invalid/input: t.chat input: /session must be string",
+			"reason": "input"
+		},
+		"back": {
+			"code": "invalid",
+			"reason": "input",
+			"message": "invalid/input: t.chat input: /session must be string",
+			"retryable": false
+		}
+	},
+	{
+		"sent": {
+			"code": "unavailable",
+			"message": "unavailable/reload_running: reload aborted: x",
+			"reason": "reload_running"
+		},
+		"back": {
+			"code": "unavailable",
+			"reason": "reload_running",
+			"message": "unavailable/reload_running: reload aborted: x",
+			"retryable": false
+		}
+	},
+	{
+		"sent": {
+			"code": "aborted",
+			"message": "aborted: superseded: nested prefix"
+		},
+		"back": {
+			"code": "aborted",
+			"reason": null,
+			"message": "aborted: superseded: nested prefix",
+			"retryable": false
+		}
+	},
+	{
+		"sent": {
+			"code": "contract_mismatch",
+			"message": "contract_mismatch: "
+		},
+		"back": {
+			"code": "contract_mismatch",
+			"reason": null,
+			"message": "contract_mismatch: ",
+			"retryable": false
+		}
+	},
+	{
+		"sent": {
+			"code": "forbidden",
+			"message": "forbidden: Forbidden: Capitalized"
+		},
+		"back": {
+			"code": "forbidden",
+			"reason": null,
+			"message": "forbidden: Forbidden: Capitalized",
+			"retryable": false
+		}
+	},
+	{
+		"sent": {
+			"code": "unavailable",
+			"message": "plain error"
+		},
+		"back": {
+			"code": "unavailable",
+			"reason": null,
+			"message": "unavailable: plain error",
+			"retryable": false
+		}
+	},
+	{
+		"sent": {
+			"code": "unavailable",
+			"message": "type error"
+		},
+		"back": {
+			"code": "unavailable",
+			"reason": null,
+			"message": "unavailable: type error",
+			"retryable": false
+		}
+	}
+]

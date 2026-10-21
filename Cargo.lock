@@ -3042,6 +3042,7 @@ dependencies = [
  "base64 0.22.1",
  "crc32fast",
  "futures",
+ "pi-schema",
  "pi-telemetry",
  "regex",
  "reqwest",
@@ -3065,6 +3066,7 @@ version = "0.6.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
+ "flate2",
  "futures",
  "indexmap 2.14.2",
  "oxc_allocator",
@@ -3073,6 +3075,7 @@ dependencies = [
  "oxc_semantic",
  "oxc_span",
  "pi-js",
+ "pi-schema",
  "pi-telemetry",
  "ring",
  "ryu",
@@ -3365,6 +3368,14 @@ version = "0.6.0"
 dependencies = [
  "pi-chord",
  "thiserror",
+]
+
+[[package]]
+name = "pi-schema"
+version = "0.5.3"
+dependencies = [
+ "regex",
+ "serde_json",
 ]
 
 [[package]]
