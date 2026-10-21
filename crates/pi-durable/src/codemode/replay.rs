@@ -47,10 +47,18 @@ impl CodemodeCall {
         }
     }
 
-    fn outcome(&self, call: &CodemodeHostCall, result: CallResult) -> (CodemodeOutcome, Option<JournalGlobal>) {
+    /// What the script gets for a call; a tool call's row gets its status.
+    fn outcome(&mut self, call: &CodemodeHostCall, result: CallResult) -> (CodemodeOutcome, Option<JournalGlobal>) {
         match result {
-            CallResult::Tool(result) => (outcome_of(&call.name, &result), None),
-            CallResult::Rejected(outcome) => (outcome, None),
+            CallResult::Tool(result) => {
+                let outcome = outcome_of(&call.name, &result);
+                self.rows.finish(call.id, &outcome, result.duration_ms);
+                (outcome, None)
+            }
+            CallResult::Rejected(outcome) => {
+                self.rows.finish(call.id, &outcome, None);
+                (outcome, None)
+            }
             CallResult::Global(outcome) => {
                 let global =
                     JournalGlobal { name: call.name.clone(), args: call.args.clone(), outcome: outcome_json(&outcome) };
@@ -111,8 +119,12 @@ impl CodemodeCall {
     }
 
     fn on_call(&mut self, call: CodemodeHostCall) {
-        if self.stopped() {
+        // The VM made this call before it finished, so only the call's own end stops it.
+        if self.ended.is_some() || self.failure.is_some() {
             return;
+        }
+        if call.target == CodemodeCallTarget::Tool {
+            self.rows.started(&call);
         }
         self.issued = self.issued.max(call.id);
         let index = if self.replaying { self.replay_index.get(&call.id).copied() } else { None };

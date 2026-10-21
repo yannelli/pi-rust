@@ -3,9 +3,11 @@
 //! results each script got, written before each delivery.
 
 mod call;
+mod details;
 mod docs;
 mod outcome;
 mod replay;
+mod run;
 
 use std::sync::Arc;
 
@@ -14,6 +16,7 @@ use pi_chord::Context;
 use pi_codemode::{CodemodeRun, CodemodeRunOptions, CodemodeSandbox, SandboxError};
 use serde_json::{Value, json};
 
+pub use details::{CodemodeNestedCall, CodemodeNestedCallStatus, CodemodeToolDetails};
 pub use docs::{
     CODEMODE_JOURNAL_DOC, CODEMODE_RUN_DOC, CODEMODE_STORE_DOC, CodemodeStart, DeclaredGlobal, DeclaredTool,
     JournalEntry, JournalGlobal, JournalState, RunState, StoreState, StoredResult,
@@ -110,7 +113,7 @@ pub fn create_codemode_tool(options: CodemodeToolOptions) -> ToolRegistration {
             let Some(Value::String(code)) = args.get("code") else {
                 return Err(DurableError::type_error("codemode expects a code string"));
             };
-            call::execute(options, api, context, code).await
+            run::execute(options, api, context, code).await
         }
     })
     .with_callers(vec![ToolCaller::Model])

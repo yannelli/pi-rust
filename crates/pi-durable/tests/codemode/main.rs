@@ -4,6 +4,7 @@
 #[path = "../support/mod.rs"]
 mod support;
 
+mod bench;
 mod divergence;
 mod restarts;
 
@@ -16,7 +17,10 @@ use pi_ai::{ContentBlock, Message};
 use pi_chord::{Context, Json};
 use pi_codemode::js::js_stringify;
 use pi_codemode::{CodemodeRun, CodemodeRunOptions, CodemodeSandbox, SandboxError, SandboxOptions};
-use pi_durable::codemode::{CodemodeGlobal, CodemodeSandboxBase, CodemodeToolOptions, create_codemode_tool};
+use pi_durable::codemode::{
+    CodemodeGlobal, CodemodeNestedCallStatus, CodemodeSandboxBase, CodemodeToolDetails, CodemodeToolOptions,
+    create_codemode_tool,
+};
 use pi_durable::harness::*;
 use pi_durable::storage::sqlite::open_sqlite_storage;
 use pi_durable::testing::faux::FauxResponseStep;
@@ -252,6 +256,43 @@ async fn runs_a_script_that_calls_tools_as_nested_calls_and_journals_each_result
     harness.close(&ctx()).await.unwrap();
 }
 
+fn fails_tool() -> ToolRegistration {
+    tool("fails", |_, _, _| async {
+        Ok(ToolExecutionResult { is_error: Some(true), ..ToolExecutionResult::text("permission denied") })
+    })
+}
+
+#[tokio::test]
+async fn lists_the_script_s_tool_calls_in_its_result_s_details() {
+    let chat = codemode_chat(vec![]);
+    add_tool(&chat.setup, fails_tool());
+    let code =
+        r#"await tools.echo({ text: "a" }); try { await tools.fails({}); } catch {} tools.hold({ id: 9 }); return 1;"#;
+    chat.setup.faux.set_responses([script(code), done()]);
+    let directory = tempfile::tempdir().unwrap();
+    let (harness, root) = run_once(&chat, &directory).await;
+    let entries = all_entries(&root).await;
+    let entry = entries.iter().find(|entry| entry.kind == "pi.tool-result").unwrap();
+    let Some(Message::ToolResult(result)) = entry.model.as_ref().and_then(|model| model.first()) else { panic!() };
+    let details: CodemodeToolDetails = serde_json::from_value(result.details.clone().unwrap()).unwrap();
+    let rows: Vec<_> = details
+        .calls
+        .iter()
+        .map(|call| (call.id, call.name.as_str(), call.args.as_str(), call.status, call.error.as_deref()))
+        .collect();
+    // A call still running, or not yet launched, when the script ended shows as cancelled.
+    assert_eq!(
+        rows,
+        [
+            (1, "echo", r#"{"text":"a"}"#, CodemodeNestedCallStatus::Ok, None),
+            (2, "fails", "{}", CodemodeNestedCallStatus::Error, Some("permission denied")),
+            (3, "hold", r#"{"id":9}"#, CodemodeNestedCallStatus::Cancelled, None),
+        ]
+    );
+    assert!(details.calls[0].duration_ms.is_some());
+    harness.close(&ctx()).await.unwrap();
+}
+
 #[tokio::test]
 async fn aborts_a_call_still_running_when_the_script_ends() {
     let chat = codemode_chat(vec![]);
@@ -300,10 +341,7 @@ async fn admits_no_call_once_the_script_has_ended_even_one_it_made_before_ending
 #[tokio::test]
 async fn rejects_a_failed_tool_call_with_its_error_text_and_structured_output() {
     let chat = codemode_chat(vec![]);
-    let fails = tool("fails", |_, _, _| async {
-        Ok(ToolExecutionResult { is_error: Some(true), ..ToolExecutionResult::text("permission denied") })
-    });
-    add_tool(&chat.setup, fails);
+    add_tool(&chat.setup, fails_tool());
     chat.holds.block.store(false, Ordering::SeqCst);
     let code = "try { await tools.fails({}); } catch (e) { return [e.message, e.structuredOutput]; }";
     chat.setup.faux.set_responses([script(code), done()]);
