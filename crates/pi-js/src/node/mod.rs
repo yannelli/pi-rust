@@ -29,6 +29,7 @@ mod ports;
 mod shared;
 mod sqlite;
 mod sqlite_fn;
+mod sqlite_iter;
 pub(crate) mod sys;
 mod tls;
 mod tls_session;

@@ -103,8 +103,8 @@ pub const DIFFERENCES: &[&str] = &[
      worker.performance reports no event loop use; moveMessagePortToContext returns the same port",
     "zlib: deflate output can differ in bytes from Node's zlib (zlib-rs); memLevel and strategy are \
      validated but not applied; brotli error codes come from the Rust decoder",
-    "sqlite: statement.iterate() reads every row when it is called rather than one row per next(), and \
-     a StatementSync prepares its SQL through the connection's statement cache on each call",
+    "sqlite: all(), get(), and run() prepare a StatementSync's SQL through the connection's statement \
+     cache on each call, and iterate() prepares its own copy that the statement's iterators share",
     "test: each result prints as soon as its test finishes, so console output from tests interleaves with \
      the report differently than in Node; subtests run one at a time (concurrency is accepted and \
      ignored); --test-only, --experimental-test-coverage, and module mocks are not available; run() loads \
