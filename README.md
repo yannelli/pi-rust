@@ -93,6 +93,25 @@ pi completion fish > ~/.config/fish/completions/pi.fish
 
 `pi doctor` prints a short report: the version and target, the install method and path, other `pi` programs earlier on `PATH` (such as the npm pi), errors in `settings.json`, `models.json`, `auth.json`, and `mcp.json`, the providers that have credentials (names and sources, never the secrets), MCP servers whose commands are missing, and what the terminal supports. `pi doctor --json` prints the same report as JSON. It makes no network calls, starts no MCP servers, and exits 1 when it finds a problem.
 
+## Run limits (pi-rust extension)
+
+`--max-turns <n>` stops a run after n assistant responses to one prompt. Tool results do not count, and each prompt counts from zero. `--max-cost <usd>` stops the run once the session's total cost, as the footer shows it, reaches the limit; after that, a new prompt does not start a run. Both limits apply in every mode, for the current process only.
+
+A limit stops the run like Esc does, after the tool results of the last turn, so the session file stays valid and `pi -c` resumes it. A run that ends by itself on its last allowed turn is not stopped.
+
+```sh
+pi -p --max-turns 20 --max-cost 0.50 "Fix the failing tests"
+echo $?   # 3 when a limit stopped the run
+```
+
+In print mode, pi writes a line such as `pi: stopped after 20 turns (--max-turns)` to stderr, skips the remaining messages, and exits with code 3; `--mode json` does the same. JSON and RPC mode also send a `run_limit` event before `agent_end`:
+
+```json
+{"type":"run_limit","limit":"maxTurns","max":20,"turns":20,"cost":0.1234,"message":"stopped after 20 turns (--max-turns)"}
+```
+
+`limit` is `maxTurns` or `maxCost`, `max` is the limit, `turns` counts the responses of the run, and `cost` is the session total in US dollars. When the cost limit keeps a prompt from starting a run, the event comes alone and an RPC `prompt` gets the disposition `handled`. Interactive mode shows the message as a status line. An extension that registers its own `--max-turns` or `--max-cost` flag gets the value instead, as with upstream pi.
+
 ## ACP (Zed and other editors)
 
 `pi --mode acp` runs pi as an [Agent Client Protocol](https://agentclientprotocol.com) server over stdio, so editors such as Zed can use it as an external agent. In Zed, add this to `settings.json`:
@@ -211,6 +230,7 @@ pi-rust ports the `pi` CLI and its libraries feature for feature. These parts di
 - CJK and Thai word movement uses ICU4X dictionaries, so a few word boundaries differ from Node's `Intl.Segmenter`.
 - `pi --mode acp` (above) is an addition; the TypeScript pi needs the separate pi-acp adapter.
 - `pi completion` and `pi doctor` (above) are additions; the TypeScript pi has neither.
+- The run limits `--max-turns` and `--max-cost` (above) are additions.
 - Account model lists for OpenAI Codex, Anthropic, GitHub Copilot, OpenAI, xAI, and Google (see [Providers](#account-model-lists-pi-rust-extension)) are an addition; upstream pi narrows only OpenRouter.
 - `pi-env` looks for remote daemons in a `pi-env-daemons` folder next to the running program. Each release has a `pi-env-daemons-<tag>.tar.gz` with the daemons for Linux, Android (Termux), macOS, and Windows on x86-64 and arm64; extract it next to `pi`.
 - Notifications: in interactive mode, a run that takes 10 seconds or more ends with a terminal notification titled "pi" that says "Done" or names the error. pi sends OSC 777 in Ghostty, WezTerm, foot, and rxvt, OSC 99 in kitty, OSC 9 in iTerm2 and Windows Terminal, and BEL in tmux, screen, and other terminals. Fullscreen mode skips the notification while the terminal reports focus. Set `terminal.notifyOnFinish` to `"auto"` (the default), `"osc"`, `"bell"`, or `"off"`, and `terminal.notifyMinSeconds` to change the threshold. Upstream pi has this only as the example extension `notify.ts`.

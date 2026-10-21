@@ -174,3 +174,24 @@ async fn retries_report_auto_retry_events_and_abort_retry_stops_them() {
     assert!(!rpc.h.settings.retry_enabled());
     rpc.finish().await;
 }
+
+#[tokio::test]
+async fn a_run_limit_streams_a_run_limit_event_and_aborts_the_run() {
+    let read = |id: &str| FauxResponse::tool_call(id, "read", json!({"path": "notes.txt"}));
+    let options = Options {
+        responses: vec![read("r1"), read("r2"), FauxResponse::text("done")],
+        files: vec![("notes.txt", "hi")],
+        ..Options::default()
+    };
+    let mut rpc = crate::support::start_with(options, Default::default(), |_, app| {
+        app.run_limits = pi_coding_agent::agent_session::RunLimits { max_turns: Some(1), max_cost: None };
+    })
+    .await;
+    rpc.send(json!({"id": "p1", "type": "prompt", "message": "Loop"})).await;
+    assert_eq!(rpc.settled(1).await, json!({"type": "agent_settled", "aborted": true}));
+    let limit = rpc.records_of("run_limit").pop().expect("a run_limit event");
+    assert_eq!((limit["limit"].as_str(), limit["turns"].as_u64()), (Some("maxTurns"), Some(1)));
+    assert_eq!(limit["message"], "stopped after 1 turn (--max-turns)");
+    assert_eq!(rpc.h.requests().len(), 1);
+    assert_eq!(rpc.finish().await, 0);
+}
