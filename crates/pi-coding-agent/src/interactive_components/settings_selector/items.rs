@@ -60,7 +60,6 @@ const BOOL: &[&str] = &["true", "false"];
 
 /// Submenu factories of the items that open one.
 pub(super) struct Submenus {
-    pub warnings: SubmenuFactory,
     pub model_thinking: SubmenuFactory,
     pub model_thinking_summary: String,
     pub theme: SubmenuFactory,
@@ -249,7 +248,6 @@ pub(super) fn build_items(config: &SettingsConfig, supports_images: bool, submen
             enum_str(config.tree_filter_mode),
             &["default", "no-tools", "user-only", "labeled-only", "all"],
         ),
-        submenu_item("warnings", "Warnings", "Enable or disable individual warnings", "configure".into(), submenus.warnings),
         submenu_item(
             "model-thinking",
             "Default thinking level per model",

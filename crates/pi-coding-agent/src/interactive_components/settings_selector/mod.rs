@@ -28,7 +28,7 @@ pub use submenu::{
 use super::common::border;
 use crate::theme::get_settings_list_theme;
 use items::{Submenus, build_items, dispatch_change};
-use submenus::{ModelThinkingData, model_setting_key, model_thinking_factory, overrides_summary, warnings_factory};
+use submenus::{ModelThinkingData, model_setting_key, model_thinking_factory, overrides_summary};
 use theme_submenu::{PreviewFn, ThemeSubmenu};
 
 type SharedCallbacks = Rc<RefCell<SettingsCallbacks>>;
@@ -51,7 +51,6 @@ impl SettingsSelector {
     /// Like [`Self::new`], with image support given instead of detected.
     pub fn with_image_support(config: SettingsConfig, callbacks: SettingsCallbacks, supports_images: bool) -> Self {
         let callbacks: SharedCallbacks = Rc::new(RefCell::new(callbacks));
-        let warnings = Rc::new(RefCell::new(config.warnings.clone()));
         let overrides = Rc::new(RefCell::new(config.model_thinking_levels.clone()));
         let current_default_model_key = config
             .available_default_models
@@ -66,7 +65,6 @@ impl SettingsSelector {
             overrides: overrides.clone(),
         });
         let submenus = Submenus {
-            warnings: warnings_factory(warnings, callbacks.clone()),
             model_thinking: model_thinking_factory(thinking, callbacks.clone()),
             model_thinking_summary: overrides_summary(&overrides.borrow()),
             theme: theme_factory(&config, &callbacks),

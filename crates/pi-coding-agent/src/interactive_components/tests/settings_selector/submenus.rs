@@ -10,7 +10,6 @@ use crate::interactive_components::settings_selector::{
     SteppedSubmenu, SteppedSubmenuOptions, SteppedSubmenuStep,
 };
 use crate::interactive_components::test_support::{Calls, Harness, keys, render_text, setup};
-use crate::settings::schema::WarningSettings;
 use crate::theme::TerminalTheme;
 
 fn theme_selector(current: &str, previews: &Calls<String>, changes: &Calls<String>) -> SettingsSelector {
@@ -92,25 +91,6 @@ fn automatic_theme_mode_switches_back_to_a_single_theme() {
     send(&mut selector, &[keys::ESCAPE]);
     assert_eq!(previews.take(), ["dark/light"]);
     assert!(changes.is_empty());
-}
-
-#[test]
-fn warnings_submenu_toggles_and_reports_warnings() {
-    let _kb = setup();
-    let warnings: Calls<WarningSettings> = Calls::new();
-    let recorder = warnings.clone();
-    let callbacks = SettingsCallbacks {
-        on_warnings_change: Box::new(move |value: &WarningSettings| recorder.push(value.clone())),
-        ..SettingsCallbacks::default()
-    };
-    let mut selector = SettingsSelector::new(SettingsConfig::default(), callbacks);
-    selector.settings_list().borrow_mut().select_item("warnings");
-    send(&mut selector, &[keys::ENTER]);
-    let text = list_text(&selector, 100);
-    assert!(text.contains("→ Anthropic extra usage  true"), "{text}");
-    send(&mut selector, &[keys::ENTER, keys::ESCAPE, keys::ENTER]);
-    assert_eq!(warnings.get(), [WarningSettings { anthropic_extra_usage: Some(false) }]);
-    assert!(list_text(&selector, 100).contains("Anthropic extra usage  false"));
 }
 
 #[test]

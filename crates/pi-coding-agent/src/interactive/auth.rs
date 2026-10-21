@@ -24,7 +24,6 @@ use crate::llama::LLAMA_PROVIDER_ID;
 use crate::model_resolver::default_model_for;
 
 const RADIUS_PROVIDER_ID: &str = "radius";
-const ANTHROPIC_SUBSCRIPTION_AUTH_WARNING: &str = "Anthropic subscription auth is active. Third-party harness usage draws from extra usage and is billed per token, not your Claude plan limits. Manage extra usage at https://claude.ai/settings/usage. Disable this warning in /settings.";
 
 type OnBack = Option<Rc<dyn Fn()>>;
 
@@ -385,36 +384,11 @@ impl InteractiveMode {
             Some(model) => self.show_status(&format!("{action}. Selected {}. {saved}", model.id)),
             None => self.show_status(&format!("{action}. {saved}")),
         }
-        match selection_error {
-            Some(error) if selected.is_none() => self.show_error(&error),
-            _ => self.maybe_warn_about_anthropic_subscription_auth(selected),
+        if let Some(error) = selection_error
+            && selected.is_none()
+        {
+            self.show_error(&error);
         }
-    }
-
-    /// Warns once when Anthropic requests use subscription auth.
-    pub(super) fn maybe_warn_about_anthropic_subscription_auth(&self, model: Option<Model>) {
-        if !self.settings().warn_anthropic_extra_usage() || self.state.borrow().anthropic_warning_shown {
-            return;
-        }
-        let Some(model) = model.or_else(|| self.session().model()) else { return };
-        if model.provider != "anthropic" {
-            return;
-        }
-        let runtime = self.session().model_runtime().clone();
-        self.spawn(move |mode| async move {
-            let check = async move {
-                if let Ok(Some(check)) = runtime.resolver().check("anthropic").await
-                    && check.auth_type == AuthType::OAuth
-                {
-                    return true;
-                }
-                runtime.api_key_for(&model.provider).await.is_some_and(|key| key.starts_with("sk-ant-oat"))
-            };
-            if tokio::spawn(check).await.unwrap_or(false) && !mode.state.borrow().anthropic_warning_shown {
-                mode.state.borrow_mut().anthropic_warning_shown = true;
-                mode.show_warning(ANTHROPIC_SUBSCRIPTION_AUTH_WARNING);
-            }
-        });
     }
 
     /// `/logout`: remove a credential saved by `/login`.

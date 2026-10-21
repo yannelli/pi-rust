@@ -85,7 +85,6 @@ pub(super) struct ModeState {
     pub working_visible: bool,
     pub header: Option<Rc<RefCell<ExpandableText>>>,
     pub bug_hint_shown: bool,
-    pub anthropic_warning_shown: bool,
     /// Login options for `/login` completion, refreshed after each login and logout.
     pub login_providers: Vec<crate::interactive_components::login::AuthSelectorProvider>,
     pub main_screen_state: Option<pi_tui::TuiMainScreenRenderState>,
@@ -125,7 +124,6 @@ impl ModeState {
             working_visible: true,
             header: None,
             bug_hint_shown: false,
-            anthropic_warning_shown: false,
             login_providers: Vec::new(),
             main_screen_state: None,
             extensions: Default::default(),

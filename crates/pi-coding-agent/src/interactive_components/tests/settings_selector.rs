@@ -193,12 +193,12 @@ fn orders_settings_like_upstream_with_and_without_image_support() {
             "steering-mode",
         ]
     );
-    assert_eq!(ids.len(), 35);
+    assert_eq!(ids.len(), 34);
     assert_eq!(ids.last().map(String::as_str), Some("theme"));
     let without = SettingsSelector::with_image_support(SettingsConfig::default(), SettingsCallbacks::default(), false);
     let without = self::ids(&without);
     assert_eq!(without[..2], ["autocompact", "auto-resize-images"]);
-    assert_eq!(without.len(), 33);
+    assert_eq!(without.len(), 32);
 }
 
 #[test]
@@ -215,7 +215,7 @@ fn renders_between_borders_and_navigates_with_a_terminal() {
     assert!(screen.contains("→ Auto-compact"), "{screen}");
     assert!(screen.contains("Automatically compact context when it gets too large"), "{screen}");
     assert!(screen.contains("Type to search · Enter/Space to change · Esc to cancel"), "{screen}");
-    assert!(screen.contains("(1/33)"), "{screen}");
+    assert!(screen.contains("(1/32)"), "{screen}");
     harness.send(keys::DOWN);
     let screen = harness.screen();
     assert!(screen.contains("→ Auto-resize images"), "{screen}");
@@ -321,7 +321,8 @@ fn persisting_callbacks_write_settings_and_config_reads_them() {
     assert_eq!(config.quiet_startup, QuietStartup::Header);
     assert_eq!(config.default_project_trust, DefaultProjectTrust::Never);
     assert_eq!(config.session_share_destination, crate::settings::schema::SessionShareDestination::Radius);
-    assert_eq!(config.warnings.anthropic_extra_usage, Some(false));
+    // The removed warnings setting stays in the file as an unknown key.
+    assert!(settings.settings().extra.contains_key("warnings"));
     assert!(config.available_themes.iter().any(|theme| theme == "dark"));
 
     let mut selector = SettingsSelector::new(config, SettingsCallbacks::persisting(settings.clone()));
