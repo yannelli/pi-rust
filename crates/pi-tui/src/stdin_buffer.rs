@@ -11,10 +11,23 @@ const ESC: &str = "\x1b";
 const BRACKETED_PASTE_START: &str = "\x1b[200~";
 const BRACKETED_PASTE_END: &str = "\x1b[201~";
 
+/// Color and program-status OSC replies, XTVersion, and Kitty graphics replies. Until their
+/// header is complete, the input may be batched legacy Alt keystrokes.
+static TERMINAL_REPLY_HEADER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\x1b(?:\](?:1[01];|4;[0-9]{1,3};|7501;\?)|P>\||_G(?:[a-z]=[0-9]+,)*[a-z]=[0-9]+;)")
+        .expect("valid regex")
+});
+
+fn is_control_string(data: &str) -> bool {
+    data.starts_with("\x1b]") || data.starts_with("\x1bP") || data.starts_with("\x1b_")
+}
+
 /// Timeouts for flushing incomplete input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StdinBufferOptions {
-    /// How long to wait for the rest of an incomplete sequence such as CSI or mouse (default 50ms).
+    /// How long to wait for the rest of an incomplete keyboard or mouse sequence (default 50ms).
+    /// Strings with a recognized terminal reply header wait for their terminator instead, so
+    /// delayed replies cannot become keypresses. Ambiguous legacy Alt-key input still times out.
     pub timeout: Duration,
     /// How long to wait after a lone ESC before it counts as Escape (default 10ms). Raise it for
     /// high-latency Alt+key input over SSH.
@@ -116,9 +129,26 @@ fn extract_complete_sequences(buffer: &str) -> (Vec<String>, String) {
             pos += ch.len_utf8();
             continue;
         }
+        let terminal_reply = is_control_string(rest) && TERMINAL_REPLY_HEADER.is_match(rest);
         let ends = rest.char_indices().map(|(index, ch)| index + ch.len_utf8());
         let mut consumed = None;
-        for end in ends {
+        for (count, end) in ends.enumerate() {
+            if terminal_reply && count >= 2 {
+                match rest[..end].chars().next_back() {
+                    Some('\x18' | '\x1a') => {
+                        // CAN and SUB cancel the string, not subsequent keyboard input.
+                        consumed = Some(end);
+                        break;
+                    }
+                    Some('\x1b') if end < rest.len() && !rest[end..].starts_with('\\') => {
+                        // A new escape sequence aborts an unterminated reply. A trailing ESC stays
+                        // buffered until it can be told apart from ST.
+                        consumed = Some(end - 1);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
             let candidate = &rest[..end];
             match is_complete_sequence(candidate) {
                 SequenceStatus::Incomplete => continue,
@@ -211,7 +241,15 @@ impl StdinBuffer {
         let mut events = Vec::new();
         if self.deadline.is_some_and(|deadline| now >= deadline) {
             for sequence in self.flush() {
-                self.emit_data(sequence, &mut events);
+                match sequence.char_indices().nth(2) {
+                    Some((tail, _)) if is_control_string(&sequence) => {
+                        // Recover the Alt key and reparse its tail so batched text, Enter, and
+                        // control keys are not swallowed as one event.
+                        self.emit_data(sequence[..tail].to_string(), &mut events);
+                        self.process_str(&sequence[tail..], now, &mut events);
+                    }
+                    _ => self.emit_data(sequence, &mut events),
+                }
             }
         }
         events
@@ -256,7 +294,10 @@ impl StdinBuffer {
             self.emit_data(sequence, events);
         }
 
-        if !self.buffer.is_empty() {
+        // Only a recognizable reply header establishes a delimited string. Flushing it would turn
+        // a delayed tail into text, and an OSC's BEL terminator into Ctrl+G. Other input,
+        // including Alt+] followed by text, keeps its bounded recovery.
+        if !self.buffer.is_empty() && !TERMINAL_REPLY_HEADER.is_match(&self.buffer) {
             let wait = if self.buffer == ESC { self.escape_timeout } else { self.timeout };
             self.deadline = Some(now + wait);
         }
