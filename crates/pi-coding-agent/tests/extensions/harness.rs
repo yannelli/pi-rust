@@ -10,8 +10,8 @@ use pi_ai::auth::InMemoryCredentialStore;
 use pi_ai::providers::faux::{FauxProvider, FauxResponse};
 use pi_ai::register_api_provider;
 use pi_coding_agent::agent_session::{
-    AgentSession, AgentSessionServices, CreateAgentSessionOptions, CreateServicesOptions, create_agent_session,
-    create_agent_session_services,
+    AgentSession, AgentSessionServices, CreateAgentSessionOptions, CreateServicesOptions, McpSessionOptions,
+    create_agent_session, create_agent_session_services,
 };
 use pi_coding_agent::extension_ui::{DialogOptions, ExtensionMode, ExtensionUi, NotifyType, WidgetPlacement};
 use pi_coding_agent::extensions::{
@@ -121,6 +121,8 @@ pub struct Setup {
     pub bind: bool,
     /// The SDK `session_start_event`.
     pub start_event: Option<Value>,
+    /// MCP servers for the session, such as the fake server of `mcp_fake`.
+    pub mcp: Option<McpSessionOptions>,
 }
 
 impl Default for Setup {
@@ -137,6 +139,7 @@ impl Default for Setup {
             from_settings: false,
             bind: true,
             start_event: None,
+            mcp: None,
         }
     }
 }
@@ -264,6 +267,9 @@ pub async fn harness(setup: Setup) -> Harness {
     let mut create = CreateAgentSessionOptions::new(services.clone(), manager);
     create.extensions = Some(runner.clone());
     create.session_start_event = setup.start_event.clone();
+    if let Some(mcp) = &setup.mcp {
+        create.mcp = mcp.clone();
+    }
     let created = create_agent_session(create).await.unwrap();
     assert!(created.extensions.is_some_and(|attached| Arc::ptr_eq(&attached, &runner)));
     let session = created.session;

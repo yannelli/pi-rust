@@ -27,6 +27,7 @@ function toolDescriptor(definition, sourceInfo, extensionPath) {
 		executionMode: definition.executionMode,
 		hasPrepareArguments: typeof definition.prepareArguments === "function",
 		hasPrepareLoadout: typeof definition.prepareLoadout === "function",
+		hasReachesTools: typeof definition.reachesTools === "function",
 		hasRenderCall: typeof definition.renderCall === "function",
 		hasRenderResult: typeof definition.renderResult === "function",
 		sourceInfo,
@@ -63,6 +64,7 @@ export function createHost(config) {
 		}
 		return undefined;
 	};
+	runtime.findToolDefinition = findTool;
 
 	const resolveCommands = () => {
 		const commands = runner.extensions.flatMap((ext) => [...ext.commands.values()]);
@@ -204,6 +206,7 @@ export function createHost(config) {
 			return normalizeToolResult(await tool.execute(toolCallId, params, abort, onUpdate, ctx));
 		},
 		prepareArguments: (name, args) => findTool(name)?.prepareArguments?.(args) ?? args,
+		reachesTools: (name, input) => findTool(name)?.reachesTools?.(input) ?? [],
 		prepareLoadout(name, loadout) {
 			const view = {
 				...loadout,

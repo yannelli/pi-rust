@@ -345,7 +345,13 @@ export function createExtensionAPI(extension, runtime, cwd, eventBus) {
 		},
 		getAllTools() {
 			assertActive();
-			return runtime.action("action.getAllTools");
+			return runtime.action("action.getAllTools").map((info) => {
+				if (info.reachesTools !== true) return info;
+				// A tool registered by an extension reports its own function; others ask Rust.
+				const own = runtime.findToolDefinition?.(info.name)?.reachesTools;
+				const reachesTools = typeof own === "function" ? own : (input) => runtime.action("action.toolReaches", info.name, input);
+				return { ...info, reachesTools };
+			});
 		},
 		getSettings() {
 			assertActive();

@@ -53,6 +53,8 @@ pub struct ToolInfo {
     pub exposure: ToolExposure,
     pub namespace: Option<ToolNamespace>,
     pub annotations: Option<ToolAnnotations>,
+    /// The tool declares which tools a call reaches (`AgentTool::reaches_tools`).
+    pub reaches_tools: bool,
     /// `builtin`, `sdk`, or the source of the registering extension.
     pub source: String,
     /// `builtin:<name>`, `<sdk:name>`, or the path of the registering extension.
@@ -274,6 +276,7 @@ impl ToolState {
                 exposure: info.exposure,
                 namespace: info.namespace,
                 annotations: info.annotations,
+                reaches_tools: info.reaches_tools,
                 source: source.source,
                 source_path: source.path,
             }
