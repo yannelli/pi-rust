@@ -58,6 +58,12 @@ fn converts_results_passing_the_call_tool_result_to_scripts_and_flagging_errors(
     let structured =
         convert_mcp_result("docs", "t", &result(json!({ "content": [], "structuredContent": { "n": 1 } })), &options);
     assert_eq!(content(&structured), json!([{ "type": "text", "text": "{\n  \"n\": 1\n}" }]));
+    // #10416: array structured content reaches the model as JSON and scripts as sent.
+    let listed = json!({ "content": [], "structuredContent": [{ "id": 1 }] });
+    let array = convert_mcp_result("docs", "t", &result(listed.clone()), &options);
+    assert_eq!(content(&array), json!([{ "type": "text", "text": "[\n  {\n    \"id\": 1\n  }\n]" }]));
+    assert_eq!(serde_json::to_value(&array.details).unwrap(), json!({ "server": "docs", "tool": "t" }));
+    assert_eq!(array.structured_content, listed);
 
     let failed = convert_mcp_result(
         "docs",
@@ -152,7 +158,8 @@ fn cuts_multi_byte_text_only_at_character_boundaries() {
 #[test]
 fn declares_the_call_tool_result_scripts_receive_keeping_references_in_the_servers_output_schema() {
     let undeclared = create_mcp_result_schema(None);
-    assert_eq!(undeclared["properties"]["structuredContent"], json!({ "type": "object" }));
+    // #10416: without an output schema, structured content may be any JSON value.
+    assert_eq!(undeclared["properties"]["structuredContent"], json!({}));
     assert_eq!(undeclared["required"], json!(["content"]));
     assert_eq!(undeclared["additionalProperties"], json!(true));
     assert!(undeclared["properties"].get("_meta").is_none());

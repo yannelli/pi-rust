@@ -100,11 +100,9 @@ fn relocate_schema(schema: &Value, pointer: &str) -> Value {
 /// Output schema of every MCP tool: the `CallToolResult` scripts receive (without `_meta`, which
 /// [`convert_mcp_result`] drops), with the tool's own output schema as `structuredContent`.
 pub fn create_mcp_result_schema(structured_content_schema: Option<&Value>) -> Value {
-    // Servers may send structured content without declaring a schema for it.
-    let structured = structured_content_schema.map_or_else(
-        || json!({ "type": "object" }),
-        |schema| relocate_schema(schema, "#/properties/structuredContent"),
-    );
+    // Servers may send structured content without declaring a schema for it, and it may be any JSON value.
+    let structured = structured_content_schema
+        .map_or_else(|| json!({}), |schema| relocate_schema(schema, "#/properties/structuredContent"));
     json!({
         "type": "object",
         "properties": {

@@ -281,7 +281,7 @@ fn mcp_result_schema(structured_content: Option<Value>) -> Value {
         "type": "object",
         "properties": {
             "content": { "type": "array", "items": block },
-            "structuredContent": structured_content.unwrap_or_else(|| json!({ "type": "object" })),
+            "structuredContent": structured_content.unwrap_or_else(|| json!({})),
             "isError": { "type": "boolean" },
         },
         "required": ["content"],
@@ -294,7 +294,7 @@ fn renders_the_mcp_result_schema_with_references_into_the_servers_output_schema(
     let content = "content: Array<{ data?: string; mimeType?: string; text?: string; type: \"text\" | \"image\" | \"audio\" | \"resource_link\" | \"resource\"; [key: string]: unknown; }>; isError?: boolean;";
     assert_eq!(
         schema_to_type(&mcp_result_schema(None), None),
-        format!("{{ {content} structuredContent?: {{ [key: string]: unknown; }}; [key: string]: unknown; }}")
+        format!("{{ {content} structuredContent?: unknown; [key: string]: unknown; }}")
     );
 
     let hit = json!({ "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] });
