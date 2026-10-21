@@ -1,10 +1,10 @@
 # Open parity gaps
 
-Last reviewed 2026-10-21 against upstream `main` at `82432219a` (2026-10-21). The daily [parity report](README.md#daily-gap-check) finds new gaps; this file keeps the ones that need a decision or a plan. Remove an entry in the PR that closes it.
+Last reviewed 2026-10-21 against upstream `main` at `bd3c9b823` (2026-10-21). The daily [parity report](README.md#daily-gap-check) finds new gaps; this file keeps the ones that need a decision or a plan. Remove an entry in the PR that closes it.
 
 ## Upstream commits not yet ported
 
-None up to `82432219a`. Every commit after the synced commit is ported or listed in `allowlist.json` with a reason.
+None up to `bd3c9b823`. Every commit after the synced commit is ported or listed in `allowlist.json` with a reason.
 
 ## Deferred work
 
@@ -18,6 +18,7 @@ Older than the synced commit, so the report no longer lists them.
 - `ea25697e9` managed install markers with a BOM: `pi update --self` replaces the release binary in place (update/install.rs); there is no managed-install.json marker.
 - `16f5f0af4` IndexedDbStorage: a browser storage backend, and pi-rust has no browser build.
 - `c661bc574` drops the shared MCP types block from durable code mode: pi-codemode never had it, so the port of `8bb180bec` already renders the section without it.
+- `4c25119f5` replicates durable storages as a commit log, and `cae9fd28a` reverts it: the pair is a net zero change.
 
 ## Extension runtime (pi-js)
 

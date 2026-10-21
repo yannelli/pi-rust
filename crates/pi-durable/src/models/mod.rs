@@ -2,6 +2,7 @@
 //! `streamSimple`, `completeSimple`, `streamDeferred`, `fetchDeferred`, `cancelDeferred`), as an object-safe trait.
 //! [`RegistryModels`] implements it over `pi_ai::ModelRegistry` and the global API provider registry.
 
+mod identity;
 mod registry;
 
 use std::collections::BTreeMap;
@@ -10,8 +11,8 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 use pi_ai::registry::{OnPayloadFn, OnResponseFn};
 use pi_ai::{
-    AssistantMessage, AssistantMessageEventStream, CacheRetention, Context, DeferredHandle, JsonObject, Model,
-    ThinkingBudgets, ThinkingLevel, Transport,
+    AssistantMessage, AssistantMessageEventStream, CacheRetention, ClientIdentity, Context, DeferredHandle, JsonObject,
+    Model, ThinkingBudgets, ThinkingLevel, Transport,
 };
 use pi_chord::AbortSignal;
 use pi_telemetry::TelemetrySpan;
@@ -19,6 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::errors::DurableResult;
 
+pub use identity::with_client_identity;
 pub use registry::{RegistryModels, create_models};
 
 /// Upstream `SimpleStreamOptions["deferred"]`: `true`, or `{ window?: "15m" | "1h" | "24h" }`.
@@ -59,6 +61,8 @@ pub struct SimpleStreamOptions {
     pub env: BTreeMap<String, String>,
     /// Request headers; they win over resolved auth headers.
     pub headers: BTreeMap<String, String>,
+    /// How the request identifies the calling app; overrides the `Models` default field by field.
+    pub identity: Option<ClientIdentity>,
     pub timeout_ms: Option<u64>,
     pub max_retries: Option<u32>,
     pub max_retry_delay_ms: Option<u64>,
@@ -101,6 +105,8 @@ pub struct DeferredFetchOptions {
     pub api_key: Option<String>,
     pub env: BTreeMap<String, String>,
     pub headers: BTreeMap<String, String>,
+    /// How the request identifies the calling app; overrides the `Models` default field by field.
+    pub identity: Option<ClientIdentity>,
     pub timeout_ms: Option<u64>,
     pub max_retries: Option<u32>,
     pub max_retry_delay_ms: Option<u64>,

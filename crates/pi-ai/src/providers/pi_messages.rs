@@ -37,11 +37,10 @@ impl ApiProvider for PiMessages {
             return stream;
         };
         let payload = build_payload(model, context, &options);
-        let defaults = vec![
-            ("authorization", format!("Bearer {api_key}")),
-            ("accept", "text/event-stream".to_string()),
-            ("content-type", "application/json".to_string()),
-        ];
+        let mut defaults = crate::identity::identity_headers(model, options.identity.as_ref());
+        defaults.push(("authorization", format!("Bearer {api_key}")));
+        defaults.push(("accept", "text/event-stream".to_string()));
+        defaults.push(("content-type", "application/json".to_string()));
         let headers = build_headers(defaults, &Default::default(), &options.headers, &options.suppressed_headers);
         let url = messages_url(model, options.debug);
         let mut request = HttpRequest { url, headers, body: payload };

@@ -73,7 +73,7 @@ async fn streams_through_the_responses_handler_with_azure_auth_and_deployments()
     let request = server.request(0);
     assert_eq!(request.path, "/openai/v1/responses?api-version=2025-04-01-preview");
     assert_eq!(request.headers["api-key"], "azure-key");
-    assert!(request.headers["user-agent"].starts_with("pi ("));
+    assert_eq!(request.headers["user-agent"], crate::identity::format_user_agent(None));
     let body = request.json();
     assert_eq!(body["model"], "mini-prod");
     assert_eq!((body["store"].clone(), body["stream"].clone()), (json!(false), json!(true)));

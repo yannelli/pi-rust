@@ -104,7 +104,7 @@ pub struct AgentHooks {
     /// upstream awaits its async listeners. For `MessageEnd`, a returned message with the same
     /// role replaces the finalized one in the state, the transcript, and the listener event.
     pub on_event: Option<AgentEventHookFn>,
-    /// Base request options such as transport, thinking budgets, and payload observers.
+    /// Base request options such as transport, thinking budgets, payload observers, and identity.
     pub stream_options: StreamOptions,
     pub tool_execution: ToolExecutionMode,
     pub max_tokens: Option<u64>,

@@ -12,7 +12,7 @@ mod tests;
 mod tests_transcript;
 
 use self::request::{Compat, build_body, configuration_update_effort, grammar_properties};
-use crate::http::pi_user_agent;
+use crate::identity::identity_headers;
 use crate::providers::common::{HttpRequest, endpoint, has_header, header_map_with, spawn_provider_stream};
 use crate::providers::github_copilot::copilot_dynamic_headers;
 use crate::registry::{ApiProvider, CacheRetention, StreamOptions};
@@ -46,7 +46,7 @@ impl ApiProvider for OpenAIResponses {
             Ok(built) => built,
             Err(error) => return error_stream(model, StopReason::Error, error),
         };
-        let mut defaults = vec![("user-agent", pi_user_agent())];
+        let mut defaults = identity_headers(model, options.identity.as_ref());
         if let Some(key) = api_key {
             defaults.push(("authorization", format!("Bearer {key}")));
         }

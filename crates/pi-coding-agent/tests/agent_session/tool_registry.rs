@@ -57,7 +57,7 @@ impl AgentTool for Plain {
     }
 }
 
-fn tool(name: &'static str, default_active: bool) -> SharedTool {
+pub(crate) fn tool(name: &'static str, default_active: bool) -> SharedTool {
     Arc::new(Plain { name, snippet: None, guidelines: Vec::new(), default_active })
 }
 
@@ -66,15 +66,15 @@ fn strings(names: &[&str]) -> Vec<String> {
 }
 
 #[derive(Default)]
-struct Select {
-    default_tools: Option<Vec<&'static str>>,
-    tools: Option<Vec<&'static str>>,
-    exclude: Vec<&'static str>,
-    no_tools: Option<NoTools>,
-    custom: Vec<SharedTool>,
+pub(crate) struct Select {
+    pub default_tools: Option<Vec<&'static str>>,
+    pub tools: Option<Vec<&'static str>>,
+    pub exclude: Vec<&'static str>,
+    pub no_tools: Option<NoTools>,
+    pub custom: Vec<SharedTool>,
 }
 
-async fn session_with(select: Select) -> Harness {
+pub(crate) async fn session_with(select: Select) -> Harness {
     let settings = match &select.default_tools {
         Some(defaults) => json!({ "defaultTools": defaults }),
         None => json!({}),
@@ -82,7 +82,7 @@ async fn session_with(select: Select) -> Harness {
     harness_with(Options { settings, ..Options::default() }, |create| apply(create, select)).await
 }
 
-fn apply(create: &mut CreateAgentSessionOptions, select: Select) {
+pub(crate) fn apply(create: &mut CreateAgentSessionOptions, select: Select) {
     create.tools = select.tools.map(|tools| strings(&tools));
     create.exclude_tools = strings(&select.exclude);
     create.no_tools = select.no_tools;
@@ -239,7 +239,7 @@ async fn file_session(default_tools: Option<&[&str]>, select: Select) -> (Harnes
     (h, session)
 }
 
-fn sorted(session: &AgentSession) -> Vec<String> {
+pub(crate) fn sorted(session: &AgentSession) -> Vec<String> {
     let mut names = session.active_tool_names();
     names.sort();
     names
@@ -361,44 +361,4 @@ async fn turns_mcp_off_for_the_run_like_no_mcp() {
     let session = open_session_with(&services, SessionManager::in_memory(&h.cwd), |_| {}).await;
     assert!(session.mcp_manager().is_none());
     assert!(session.all_tools().iter().any(|tool| tool.name == "codemode"));
-}
-
-/// A session whose transcript records the loadout `names`, as a run records it.
-fn recorded(h: &Harness, names: &[&str]) -> SessionManager {
-    let mut manager = SessionManager::in_memory(&h.cwd);
-    let tools: Vec<Value> = names
-        .iter()
-        .map(|name| json!({"name": name, "description": name, "parameters": {"type": "object", "properties": {}}}))
-        .collect();
-    let system = json!({"role": "system", "content": "", "toolsAdded": tools, "timestamp": 1});
-    manager.append_message(&serde_json::from_value::<Message>(system).unwrap()).unwrap();
-    manager
-}
-
-async fn resume(names: &[&str], select: Select) -> Vec<String> {
-    let h = session_with(Select::default()).await;
-    let manager = recorded(&h, names);
-    let select = Select { custom: vec![tool("inactive_tool", false), tool("active_tool", true)], ..select };
-    let session = open_session_with(&h.services, manager, |create| apply(create, select)).await;
-    sorted(&session)
-}
-
-#[tokio::test]
-async fn a_resumed_session_restores_the_loadout_its_transcript_records() {
-    // active_tool was turned off during the session and inactive_tool turned on.
-    let recorded = ["read", "grep", "inactive_tool"];
-    assert_eq!(resume(&recorded, Select::default()).await, ["grep", "inactive_tool", "read"]);
-    let excluded = Select { exclude: vec!["inactive_tool"], ..Select::default() };
-    assert_eq!(resume(&recorded, excluded).await, ["grep", "read"]);
-    let modified = Select { tools: Some(vec!["-grep", "+write"]), ..Select::default() };
-    assert_eq!(resume(&recorded, modified).await, ["inactive_tool", "read", "write"]);
-}
-
-#[tokio::test]
-async fn explicit_tool_options_replace_the_recorded_loadout() {
-    let recorded = ["read", "grep", "inactive_tool"];
-    let allowlisted = Select { tools: Some(vec!["read", "write"]), ..Select::default() };
-    assert_eq!(resume(&recorded, allowlisted).await, ["read", "write"]);
-    let builtinless = Select { no_tools: Some(NoTools::Builtin), ..Select::default() };
-    assert_eq!(resume(&recorded, builtinless).await, ["active_tool"]);
 }

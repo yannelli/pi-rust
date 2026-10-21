@@ -156,6 +156,17 @@ fn matches_extensions_case_insensitively_and_ranks_directories_first() {
 }
 
 #[test]
+fn matches_regex_metacharacters_in_queries_literally() {
+    let Some(f) = Fixture::new() else { return };
+    setup_folder(&f.base, &[], &[("pages/[id].tsx", "x"), ("pages/index.tsx", "x"), ("pages/(group).ts", "x")]);
+    for (line, expected) in
+        [("@pages/[", "@pages/[id].tsx"), ("@pages/(", "@pages/(group).ts"), ("@[id", "@pages/[id].tsx")]
+    {
+        assert_eq!(f.values(line), [expected], "{line}");
+    }
+}
+
+#[test]
 fn returns_nested_and_deep_paths() {
     let Some(f) = Fixture::new() else { return };
     setup_folder(
