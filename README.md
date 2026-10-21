@@ -236,7 +236,7 @@ With a Copilot login, pi reads `GET /models` from the login's Copilot endpoint a
 
 #### OpenAI and xAI
 
-With an API key, pi reads `GET <base URL>/models`. This list also names embedding, audio, image, moderation, and realtime models, so pi adds only listed models of a model family that the catalog has, such as `gpt-` or `grok-`, and never models of those kinds. The list has no limits, so the catalog's limits stay.
+With an API key, pi reads `GET <base URL>/models`. This list also names embedding, audio, image, moderation, and realtime models, so pi adds only listed models of a model family that the catalog has, such as `gpt-` or `grok-`, and never models of those kinds. The list has no limits, so the catalog's limits stay. With a ChatGPT login for `openai`, the same request returns the account's models by `slug`, and pi takes each model's `context_window` as its context size. pi does not use the larger `max_context_window`.
 
 #### Google
 

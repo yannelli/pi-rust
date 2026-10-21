@@ -135,6 +135,12 @@ pub(super) fn cache_session_id(options: &StreamOptions) -> Option<String> {
     options.session_id.as_deref().map(clamp_openai_prompt_cache_key)
 }
 
+/// The key of the SSE fallback state. It ignores cache retention, so a retry of an uncached
+/// request (such as a summary) skips the WebSocket that failed.
+pub(super) fn fallback_session_id(options: &StreamOptions) -> Option<String> {
+    options.session_id.as_deref().map(clamp_openai_prompt_cache_key)
+}
+
 /// Codex compat flags that shape the input and tools.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Compat {

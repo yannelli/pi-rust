@@ -220,10 +220,11 @@ pub(super) fn convert_messages(messages: &[Message], options: &ConvertOptions) -
                 }
             },
             Message::Assistant(assistant) => {
-                params.append(&mut pending);
                 let blocks: Vec<Value> =
                     assistant.content.iter().filter_map(|block| assistant_block(block, options)).collect();
+                // A skipped assistant keeps updates pending, so none lands before a user message.
                 if !blocks.is_empty() {
+                    params.append(&mut pending);
                     if let Some(level) = managed_level(assistant, options.managed_provider) {
                         assistant_levels.insert(params.len(), level);
                     }
