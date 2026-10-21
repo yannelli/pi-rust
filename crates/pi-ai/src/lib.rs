@@ -1,11 +1,11 @@
 //! Unified streaming LLM API for the pi agent harness.
 
-pub mod attribution;
 pub mod auth;
 pub mod classify;
 pub mod env;
 pub mod estimate;
 pub mod http;
+pub mod identity;
 pub mod images;
 pub mod json;
 pub mod json_schema;
@@ -30,6 +30,10 @@ pub use classify::{
     register_classifier_api,
 };
 pub use env::get_env_api_key;
+pub use identity::{
+    ClientAttribution, ClientIdentity, PI_AI_VERSION, UserAgentMode, format_user_agent, merge_client_identity,
+    pi_attribution,
+};
 pub use images::{
     AssistantImages, ImagesApi, ImagesContext, ImagesOptions, generate_images, images_api, register_images_api,
 };

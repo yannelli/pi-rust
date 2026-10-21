@@ -17,7 +17,7 @@ use serde_json::{Map, Value, json};
 use self::convert::{convert_messages, convert_tools, function_calling_mode, supports_strict_tool_sampling};
 use self::stream::GoogleStream;
 use self::thinking::thinking_config;
-use crate::http::pi_user_agent;
+use crate::identity::identity_headers;
 use crate::providers::common::{HttpRequest, header_map};
 use crate::providers::emitter::Emitter;
 use crate::providers::http_stream::{ResponseReport, SendConfig, hooked_events, send, status_text};
@@ -56,8 +56,9 @@ impl ApiProvider for GoogleGenerativeAI {
                 let params = apply_payload_hook(params, options.on_payload.as_ref(), &model).await;
                 let (model_id, body) = to_wire(&params)?;
                 let path = model_path(&model_id, false)?;
-                let headers =
-                    header_map(vec![("user-agent", pi_user_agent()), ("x-goog-api-key", api_key)], &model, &options);
+                let mut defaults = identity_headers(&model, options.identity.as_ref());
+                defaults.push(("x-goog-api-key", api_key));
+                let headers = header_map(defaults, &model, &options);
                 Ok(HttpRequest { url: format!("{base_url}/{path}:streamGenerateContent?alt=sse"), headers, body })
             }
         };

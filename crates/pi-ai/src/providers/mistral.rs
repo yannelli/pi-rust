@@ -8,7 +8,7 @@ mod tests;
 
 use self::request::{build_payload, prompt_cache_session, to_wire};
 use self::stream::MistralStream;
-use crate::http::pi_user_agent;
+use crate::identity::identity_headers;
 use crate::providers::common::{HttpRequest, endpoint, header_map};
 use crate::providers::http_stream::{ResponseReport, SendConfig, spawn_builder_stream, status_text};
 use crate::registry::{ApiProvider, StreamOptions};
@@ -36,11 +36,9 @@ impl ApiProvider for MistralConversations {
             Ok(payload) => payload,
             Err(error) => return error_stream(model, StopReason::Error, error),
         };
-        let mut defaults = vec![
-            ("user-agent", pi_user_agent()),
-            ("accept", "text/event-stream".to_string()),
-            ("authorization", format!("Bearer {api_key}")),
-        ];
+        let mut defaults = identity_headers(model, options.identity.as_ref());
+        defaults.push(("accept", "text/event-stream".to_string()));
+        defaults.push(("authorization", format!("Bearer {api_key}")));
         if let Some(session) = prompt_cache_session(&options) {
             defaults.push(("x-affinity", session));
         }

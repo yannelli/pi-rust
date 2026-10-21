@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
+use pi_ai::{ClientIdentity, merge_client_identity, pi_attribution};
 use pi_chord::Context;
 use pi_telemetry::TelemetryContext;
 
@@ -14,10 +15,16 @@ use super::types::{Agent, AgentState, Wake};
 use crate::env::SharedEnv;
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::ConversationId;
-use crate::models::Models;
+use crate::models::{Models, with_client_identity};
 use crate::session::{Session, Tx};
 use crate::timers::{Disarm, SetTimer, TimerCallback, TimerOptions, Timers};
 use crate::types::{ConversationRecord, HostCallback, ReportInfo};
+
+/// Request identity of a Harness's model requests (upstream `DEFAULT_HARNESS_IDENTITY`): pi-ai's defaults with
+/// provider attribution to pi.
+pub fn default_harness_identity() -> ClientIdentity {
+    ClientIdentity::attributed(pi_attribution())
+}
 
 /// What `HarnessOptions::env` builds an environment for.
 #[derive(Clone)]
@@ -49,6 +56,10 @@ pub struct HarnessOptions {
     pub telemetry: Option<Arc<dyn TelemetryContext>>,
     /// pi-ai model access used by generation.
     pub models: Arc<dyn Models>,
+    /// How model requests identify the app to providers, merged field by field over [`default_harness_identity`].
+    /// It applies to every request through the Harness's models, including hooks and tools, and overrides the
+    /// identity the `Models` was created with; a request's own `identity` overrides it.
+    pub identity: Option<ClientIdentity>,
     pub registry: Arc<dyn RegistryReader>,
     pub settings: Option<SettingsSource>,
     pub env: Option<EnvBuilder>,
@@ -78,6 +89,7 @@ impl HarnessOptions {
         Self {
             telemetry: None,
             models,
+            identity: None,
             registry,
             settings: None,
             env: None,
@@ -87,6 +99,19 @@ impl HarnessOptions {
             on_wake: None,
             on_report: None,
         }
+    }
+
+    /// Set [`Self::identity`]. `attribution: Some(None)` sends no attribution headers.
+    pub fn with_identity(mut self, identity: ClientIdentity) -> Self {
+        self.identity = Some(identity);
+        self
+    }
+
+    /// The Harness's models with [`Self::identity`] applied over [`default_harness_identity`].
+    pub(crate) fn identified_models(&self) -> Arc<dyn Models> {
+        let default = default_harness_identity();
+        let identity = merge_client_identity([Some(&default), self.identity.as_ref()]).unwrap_or(default);
+        with_client_identity(self.models.clone(), identity)
     }
 
     pub fn with_telemetry(mut self, telemetry: Arc<dyn TelemetryContext>) -> Self {

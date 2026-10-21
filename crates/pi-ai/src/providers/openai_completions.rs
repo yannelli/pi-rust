@@ -14,6 +14,8 @@ mod tests;
 #[cfg(test)]
 mod tests_cache;
 #[cfg(test)]
+mod tests_identity;
+#[cfg(test)]
 mod tests_request;
 #[cfg(test)]
 mod tests_stream;
@@ -29,7 +31,7 @@ mod tool_calls;
 use self::compat::Compat;
 use self::events::CompletionsStream;
 use self::request::{BodyInput, build_body};
-use crate::http::pi_user_agent;
+use crate::identity::identity_headers;
 use crate::providers::common::{HttpRequest, endpoint, has_header, header_map_with, spawn_provider_stream_with};
 use crate::providers::constrained_sampling::grammar_tool_input_properties;
 use crate::providers::github_copilot::copilot_dynamic_headers;
@@ -65,7 +67,7 @@ impl ApiProvider for OpenAICompletions {
             Ok(built) => built,
             Err(error) => return error_stream(model, StopReason::Error, error),
         };
-        let mut defaults = vec![("user-agent", pi_user_agent())];
+        let mut defaults = identity_headers(model, options.identity.as_ref());
         if let Some(key) = api_key {
             defaults.push(("authorization", format!("Bearer {key}")));
         }

@@ -37,6 +37,7 @@ pub mod print_mode;
 pub mod resources;
 pub mod rpc;
 pub mod session;
+pub mod sessions_cli;
 pub mod settings;
 pub mod signals;
 pub mod startup;

@@ -31,7 +31,9 @@ pub mod view;
 
 pub use agent::{AGENT_DOC, INSTRUCTIONS_KEY, add_tools, configure, create_agent};
 pub use conversation::{Conversation, CreateOptions, EntryRange};
-pub use core::{ConversationCreatedHook, EnvBuilder, EnvTarget, HarnessOptions, NowFn, ReportFn, WakeFn};
+pub use core::{
+    ConversationCreatedHook, EnvBuilder, EnvTarget, HarnessOptions, NowFn, ReportFn, WakeFn, default_harness_identity,
+};
 pub use define::*;
 pub use events::{AgentEvent, AgentEventStream, watch_events};
 pub use host::{ConversationInit, Harness};

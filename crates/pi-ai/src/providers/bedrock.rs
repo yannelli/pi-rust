@@ -16,6 +16,7 @@ use serde_json::Value;
 
 use self::events::{BedrockEvents, Failure, error_prefix, with_retention_hint};
 use crate::http::client_for_env;
+use crate::identity::{ClientIdentity, UserAgentMode, client_version};
 use crate::provider_options::BedrockOptions;
 use crate::providers::aws::credentials::{self, ChainInput, profile_region};
 use crate::providers::aws::endpoint::{regional_endpoint, standard_bedrock_endpoint_region};
@@ -157,6 +158,16 @@ async fn resolve_auth(options: &StreamOptions, target: &Target) -> Result<Auth, 
     }
 }
 
+/// The client identity as the Bedrock `User-Agent`. Upstream appends it to the AWS SDK user agent, which
+/// reduces the detailed form to name and version.
+fn bedrock_user_agent(identity: Option<&ClientIdentity>) -> String {
+    match identity.and_then(|identity| identity.user_agent.as_ref()) {
+        Some(UserAgentMode::Custom(custom)) => custom.clone(),
+        Some(UserAgentMode::Short) => "pi".into(),
+        _ => format!("pi/{}", client_version(identity)),
+    }
+}
+
 /// `host`, `authorization`, and `x-amz-*` belong to SigV4 or the bearer token.
 fn is_reserved_header(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
@@ -193,6 +204,10 @@ impl Run {
             .map_err(|error| Failure::new(format!("Invalid Bedrock endpoint {url}: {error}")))?;
         let payload = serde_json::to_vec(&body).unwrap_or_default();
         let mut headers = vec![("content-type".to_string(), "application/json".to_string())];
+        let named = |name: &String| name.eq_ignore_ascii_case("user-agent");
+        if !options.headers.keys().any(named) && !options.suppressed_headers.iter().any(named) {
+            headers.push(("user-agent".to_string(), bedrock_user_agent(options.identity.as_ref())));
+        }
         let custom = options.headers.iter().filter(|(name, _)| !is_reserved_header(name));
         headers.extend(custom.map(|(name, value)| (name.clone(), value.clone())));
         let auth = resolve_auth(options, &target).await.map_err(Failure::new)?;

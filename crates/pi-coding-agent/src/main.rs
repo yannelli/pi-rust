@@ -351,6 +351,9 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
     if let Some(output) = run_doctor_command(&raw, doctor).await {
         return Ok(print_output(output));
     }
+    if let Some(output) = pi_coding_agent::sessions_cli::run_command(&raw, &cwd, &agent_dir) {
+        return Ok(print_output(output));
+    }
     let bootstrap_settings = SettingsManager::create(&cwd, &agent_dir, SettingsOptions { project_trusted: false });
     configure_http_from_settings(&bootstrap_settings);
     let mut package_options = PackageCommandOptions::from_env(cwd.clone(), agent_dir.clone());
