@@ -1,0 +1,12 @@
+---
+description: Rules for pi-js, the QuickJS runtime with Node 22 built-in modules that runs pi extensions
+globs: crates/pi-js/**
+alwaysApply: false
+---
+
+Follow @crates/pi-js/AGENTS.md and @docs/agents/node-compat.md.
+
+- Match Node 22 return values, error codes, messages, and event order. Get expected output from real Node 22.
+- Update `crates/pi-js/src/unsupported.rs` in the same change that closes or leaves a gap.
+- Tests use localhost and temp dirs, and `run_cjs_within` for scripts that can hang.
+- `cfg(windows)` code must cross-build with `cargo zigbuild --target x86_64-pc-windows-gnu -p pi-js --tests`.
