@@ -115,9 +115,14 @@ async fn reports_the_job_in_the_foreground_not_the_shell_at_its_prompt() {
     output.wait_for("READY").await;
     assert_eq!(terminal.foreground().await.expect("foreground"), None);
     terminal.write("sleep 100\n");
+    // The job is in front before it execs, so its name reads "sh" for a moment.
+    let named = cfg!(any(target_os = "linux", target_os = "macos"));
+    let ready = |job: &Option<pi_env::TerminalForeground>| {
+        job.as_ref().is_some_and(|job| !named || job.name.as_deref() == Some("sleep"))
+    };
     let mut foreground = terminal.foreground().await.expect("foreground");
     for _ in 0..100 {
-        if foreground.is_some() {
+        if ready(&foreground) {
             break;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -125,7 +130,7 @@ async fn reports_the_job_in_the_foreground_not_the_shell_at_its_prompt() {
     }
     let foreground = foreground.expect("a job in front");
     assert!(foreground.pid > 0 && foreground.pid != terminal.pid);
-    if cfg!(any(target_os = "linux", target_os = "macos")) {
+    if named {
         assert_eq!(foreground.name.as_deref(), Some("sleep"));
     }
     terminal.close();
