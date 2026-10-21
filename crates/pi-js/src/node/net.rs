@@ -277,13 +277,21 @@ fn start(id: u64) {
                     // libuv reports a broken named pipe as EOF.
                     Err(error) if matches!(error.kind(), ErrorKind::UnexpectedEof | ErrorKind::BrokenPipe) => break,
                     Ok(count) => post(&sender, id, Event::Data(buffer[..count].to_vec())),
-                    Err(error) => return post(&sender, id, Event::Error(net_error(&error, "read", None, None))),
+                    Err(error) => {
+                        return post(&sender, id, Event::Error(net_error(&read_error(error), "read", None, None)));
+                    }
                 }
             }
             post(&sender, id, Event::End);
         });
         *reader = Some(task.abort_handle());
     });
+}
+
+/// libuv reports a read that Windows aborted (WSAECONNABORTED, 10053) as a reset (WSAECONNRESET,
+/// 10054), as Unix reports a peer reset.
+fn read_error(error: std::io::Error) -> std::io::Error {
+    if cfg!(windows) && error.raw_os_error() == Some(10053) { std::io::Error::from_raw_os_error(10054) } else { error }
 }
 
 /// Drop bytes the peer sent that nobody read. libuv reads them as they arrive, so Node closes with an
@@ -480,4 +488,13 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
         })
     })?;
     Ok(object)
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    #[test]
+    fn an_aborted_read_is_a_reset() {
+        let error = super::read_error(std::io::Error::from_raw_os_error(10053));
+        assert_eq!(super::net_error(&error, "read", None, None).code.as_deref(), Some("ECONNRESET"));
+    }
 }
