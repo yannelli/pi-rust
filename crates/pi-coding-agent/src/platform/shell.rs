@@ -48,7 +48,9 @@ pub struct SystemShellLookup;
 
 impl ShellLookup for SystemShellLookup {
     fn exists(&self, path: &str) -> bool {
-        Path::new(path).is_file()
+        let path = Path::new(path);
+        // Windows Store aliases are reparse points that `metadata()` cannot follow; read the alias itself.
+        path.is_file() || (cfg!(windows) && std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file()))
     }
 
     fn var(&self, name: &str) -> Option<String> {
