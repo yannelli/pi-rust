@@ -95,6 +95,19 @@ async fn native_updates_carry_tool_changes_and_the_placeholder() {
 }
 
 #[tokio::test]
+async fn context_recorded_before_the_prompt_keeps_native_tool_changes() {
+    let mut messages = changing_messages();
+    messages.insert(0, Message::user("memory from session start"));
+    let body = payload(&native(), messages).await;
+    assert_eq!(body["system"][0]["text"], "base prompt\n\n<rules>\nold rules\n</rules>\n\n<docs>\nread docs\n</docs>");
+    assert_eq!(names(&body["tools"]), ["base_tool", "__pi_deferred_placeholder__"]);
+    let sent = body["messages"].as_array().unwrap();
+    assert_eq!(sent[0]["content"], "memory from session start");
+    let update = sent.last().unwrap()["content"].as_array().unwrap();
+    assert_eq!(update[2]["type"], "tool_addition");
+}
+
+#[tokio::test]
 async fn redefinitions_replace_tools_by_value() {
     let mut redefined = tool("base_tool");
     redefined.description = "changed".into();
