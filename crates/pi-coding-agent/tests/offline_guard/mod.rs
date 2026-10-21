@@ -89,7 +89,9 @@ pub fn assert_faux_model(model: Option<&Model>, api: &str) {
 
 /// `create_app_runtime` with the checks above: models loaded, credentials hidden, and an
 /// offline session model.
-pub async fn app_runtime(options: AppOptions, manager: SessionManager) -> AgentSessionRuntime {
+pub async fn app_runtime(mut options: AppOptions, manager: SessionManager) -> AgentSessionRuntime {
+    // User-level resources such as `~/.agents/skills` come from the test's agent dir, not `$HOME`.
+    options.resources.home.get_or_insert_with(|| options.agent_dir.join("home"));
     let runtime = create_app_runtime(options, manager).await.unwrap();
     assert_models_loaded(&runtime.services());
     assert_credentials_hidden(&runtime.services());
