@@ -99,9 +99,9 @@ rquickjs = { version = "0.14.0", default-features = false, features = ["std", "l
 tempfile.workspace = true
 
 # Same lints as the workspace, except `unsafe_code` is `deny` instead of `forbid`: modules that
-# need FFI allow it locally: system calls (`node/sys.rs`, `node/os_cpus.rs`, `node/fs_meta.rs`),
-# SharedArrayBuffer memory (`node/shared.rs`), SQLite user functions (`node/sqlite_fn.rs`), and
-# WebAssembly memory buffers (`node/wasm_objects.rs`).
+# need FFI allow it locally: system calls (`node/sys.rs`, `node/os_cpus.rs`, `node/fs_meta.rs`,
+# `node/child_stdio.rs`), SharedArrayBuffer memory (`node/shared.rs`), SQLite user functions
+# (`node/sqlite_fn.rs`), and WebAssembly memory buffers (`node/wasm_objects.rs`).
 [lints.rust]
 unsafe_code = "deny"
 

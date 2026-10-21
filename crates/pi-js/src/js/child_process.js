@@ -5,6 +5,7 @@ const EventEmitter = require("events");
 const { Buffer } = require("buffer");
 const path = require("path");
 const { Readable, Writable } = require("stream");
+const errors = require("internal/errors");
 const nativeChild = native.child;
 const platform = internal.config.platform;
 const kCustomPromisify = Symbol.for("nodejs.util.promisify.custom");
@@ -19,20 +20,44 @@ function signalName(number) {
   return Object.keys(signals).find((name) => signals[name] === number) || `SIG${number}`;
 }
 
-const STDIO_NAMES = { 0: "inherit", 1: "inherit", 2: "inherit" };
-function normalizeStdio(stdio) {
+// Node's stdio entries as native ones: a kind, an `fs.open` descriptor ({ file }), or a TCP socket
+// ({ socket }) the child gets a copy of. Descriptors 0 to 2 are this process's own stdio.
+function normalizeStdio(stdio, sync) {
   let list;
   if (stdio === undefined || stdio === null) list = ["pipe", "pipe", "pipe"];
-  else if (typeof stdio === "string") list = [stdio, stdio, stdio];
-  else if (Array.isArray(stdio)) list = [0, 1, 2].map((index) => stdio[index] ?? "pipe");
+  else if (typeof stdio === "string") {
+    if (!["ignore", "pipe", "overlapped", "inherit"].includes(stdio)) throw errors.invalidArgValue("stdio", stdio);
+    list = [stdio, stdio, stdio];
+  } else if (Array.isArray(stdio)) list = Array.from(stdio);
   else throw invalidArg("options.stdio", "of type string or Array", stdio);
+  while (list.length < 3) list.push(undefined);
   return list.map((entry, index) => {
-    if (entry === null || entry === undefined || entry === "overlapped") return "pipe";
-    if (typeof entry === "number" && STDIO_NAMES[entry]) return "inherit";
-    if (entry === process.stdin || entry === process.stdout || entry === process.stderr) return "inherit";
-    if (entry === "pipe" || entry === "ignore" || entry === "inherit") return entry;
+    entry ??= index < 3 ? "pipe" : "ignore";
+    if (entry === "overlapped" || (typeof entry === "number" && entry < 0)) entry = "pipe";
     if (entry === "ipc") return "ignore";
-    throw internal.unsupported(`child_process stdio[${index}] value ${typeof entry === "object" ? "stream" : String(entry)}`);
+    if (entry === "ignore" || ((entry === "pipe" || entry === "inherit") && index < 3)) return entry;
+    if (entry === "inherit") return "ignore";
+    if (entry === "pipe") {
+      if (platform === "win32") throw internal.unsupported(`child_process stdio[${index}] 'pipe' on Windows`);
+      return entry;
+    }
+    const own = entry !== null && typeof entry === "object" ? [process.stdin, process.stdout, process.stderr].indexOf(entry) : -1;
+    if (own >= 0) entry = own;
+    const fd = typeof entry === "number" ? entry : entry !== null && typeof entry === "object" && typeof entry.fd === "number" ? entry.fd : undefined;
+    if (fd !== undefined) {
+      if (fd > 2) return { file: fd };
+      if (index < 3) return "inherit";
+      throw internal.unsupported(`child_process stdio[${index}] descriptor ${fd}`);
+    }
+    const net = require("net");
+    if ((entry instanceof net.Socket || entry instanceof net.Server) && typeof entry._handle === "number") {
+      return { socket: entry._handle, stream: entry };
+    }
+    if (ArrayBuffer.isView(entry) || typeof entry === "string") {
+      if (sync) return "pipe";
+      throw errors.codeError(TypeError, "ERR_INVALID_SYNC_FORK_INPUT", `Asynchronous forks do not support Buffer, TypedArray, DataView or string input: ${require("util").inspect(entry)}`);
+    }
+    throw errors.invalidArgValue("stdio", entry);
   });
 }
 
@@ -45,18 +70,19 @@ function resolveCwd(cwd) {
 // Without real descriptors to pass, inherited stdin is empty and inherited output is piped here
 // and forwarded to the process streams.
 function nativeStdio(entry, index) {
+  if (entry.socket !== undefined) return { socket: entry.socket };
   if (entry !== "inherit" || internal.config.processStdio) return entry;
   return index === 0 ? "ignore" : "pipe";
 }
 
 // Command, arguments, and options for the native spawn, including the shell wrapper.
-function normalizeSpawn(file, args, options) {
+function normalizeSpawn(file, args, options, sync = false) {
   if (typeof file !== "string" || file === "") throw invalidArg("file", "of type string", file);
   if (args && !Array.isArray(args)) [options, args] = [args, []];
   args = (args || []).map(String);
   options = { ...options };
   const env = options.env || process.env;
-  const stdio = normalizeStdio(options.stdio);
+  const stdio = normalizeStdio(options.stdio, sync);
   let command = file;
   let argv = args;
   let verbatim = !!options.windowsVerbatimArguments;
@@ -138,7 +164,8 @@ class ChildProcess extends EventEmitter {
       this._pending++;
       readable.on("close", () => this._streamClosed());
     }
-    this.stdio = [null, this.stdout, this.stderr];
+    this.stdio = spec.stdio.map(() => null);
+    [this.stdio[1], this.stdio[2]] = [this.stdout, this.stderr];
     if (spec.ipc) {
       const ipc = require("internal/ipc");
       this._channelId = ipc.setupChannel(this, (callback) => {
@@ -162,6 +189,7 @@ class ChildProcess extends EventEmitter {
     }
     this._id = result.id;
     this.pid = result.pid;
+    this._attachStdio(spec, result.pipes, outputs);
     if (spec.native.stdio[0] === "pipe") {
       this.stdin = new Writable({
         write: (chunk, encoding, callback) => {
@@ -177,6 +205,23 @@ class ChildProcess extends EventEmitter {
     }
     process.nextTick(() => this.emit("spawn"));
     return undefined;
+  }
+  // Extra pipes become sockets that 'close' waits for; a socket handed to the child stops reading.
+  _attachStdio(spec, pipes, outputs) {
+    const { Socket, kAccepted } = require("internal/net_socket");
+    for (const [index, id, info] of pipes) {
+      const socket = new Socket({ [kAccepted]: { id, info } });
+      this.stdio[index] = socket;
+      outputs[`fd${index}`] = socket;
+      this._pending++;
+      socket.on("close", () => this._streamClosed());
+    }
+    for (const entry of spec.stdio) {
+      if (!entry.stream || entry.stream instanceof require("net").Server) continue;
+      entry.stream.pause();
+      entry.stream._paused = true;
+      native.net.pause(entry.socket);
+    }
   }
   _event(kind, value, signal, outputs) {
     if (kind === "stdout" || kind === "stderr") {
@@ -345,7 +390,7 @@ exec[kCustomPromisify] = promisified(exec);
 execFile[kCustomPromisify] = promisified(execFile);
 
 function spawnSync(file, args, options) {
-  const spec = normalizeSpawn(file, args, options);
+  const spec = normalizeSpawn(file, args, options, true);
   options = spec.options;
   let input = options.input;
   if (typeof input === "string") input = Buffer.from(input, options.encoding && options.encoding !== "buffer" ? options.encoding : "utf8");
@@ -361,7 +406,8 @@ function spawnSync(file, args, options) {
   };
   const stdout = decode(raw.stdout, 1);
   const stderr = decode(raw.stderr, 2);
-  const result = { pid: raw.pid || 0, output: [null, stdout, stderr], stdout, stderr, status: raw.status ?? null, signal: signalName(raw.signal) };
+  const output = spec.stdio.map((entry, index) => (index === 1 ? stdout : index === 2 ? stderr : index > 2 && raw.extra && raw.extra[index] ? decode(raw.extra[index], index) : null));
+  const result = { pid: raw.pid || 0, output, stdout, stderr, status: raw.status ?? null, signal: signalName(raw.signal) };
   if (raw.error) result.error = Object.assign(raw.error, { spawnargs: spec.spawnargs.slice(1) });
   else if (raw.timedOut) result.error = Object.assign(new Error(`spawnSync ${spec.file} ETIMEDOUT`), { code: "ETIMEDOUT", syscall: `spawnSync ${spec.file}`, path: spec.file, spawnargs: spec.spawnargs.slice(1) });
   const limit = options.maxBuffer === undefined ? 1024 * 1024 : options.maxBuffer;

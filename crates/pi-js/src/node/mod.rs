@@ -2,6 +2,7 @@
 
 mod builtins;
 mod child;
+mod child_stdio;
 mod context;
 mod core;
 mod crypto;
