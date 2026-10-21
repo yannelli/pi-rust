@@ -1,5 +1,5 @@
 //! Opening a connection: one try per transport, retries after transient HTTP errors, and the
-//! listeners that keep tools and resources current.
+//! listeners that keep tools current.
 
 use std::path::Path;
 use std::sync::{Arc, MutexGuard};
@@ -9,7 +9,7 @@ use super::{CONNECT_RETRY_DELAYS, Inner, McpServerConnection, ServerState, Statu
 use crate::client::{McpClient, McpClientOptions, RequestOptions};
 use crate::error::{McpError, OAuthError};
 use crate::transport::SharedTransport;
-use crate::types::{Resource, ResourceTemplate, Root, Tool};
+use crate::types::{ResourceTemplate, Root, Tool};
 
 const STDERR_TAIL_CHARS: usize = 2_000;
 
@@ -22,18 +22,6 @@ pub(super) async fn list_templates(
         Err(error) if error.is_method_not_found() => Ok(Vec::new()),
         result => result,
     }
-}
-
-/// Resources and templates at connect time, for counts in lists. A server whose lists fail still
-/// connects: the resource tools list and read its resources on demand.
-async fn fetch_resources(client: &McpClient) -> (Vec<Resource>, Vec<ResourceTemplate>) {
-    let (resources, templates) = futures::join!(
-        client.list_resources(RequestOptions::default()),
-        list_templates(client, RequestOptions::default())
-    );
-    let resources = resources.unwrap_or_default().into_iter().filter(|resource| !resource.is_mcp_app());
-    let templates = templates.unwrap_or_default().into_iter().filter(|template| !template.is_mcp_app());
-    (resources.collect(), templates.collect())
 }
 
 fn stderr_tail(transport: &SharedTransport) -> Option<String> {
@@ -52,8 +40,6 @@ fn root(cwd: &Path) -> Root {
 struct Listed {
     tools: Vec<Tool>,
     has_resources: bool,
-    resources: Vec<Resource>,
-    resource_templates: Vec<ResourceTemplate>,
 }
 
 fn is_current(status: &Status, client: &McpClient) -> bool {
@@ -189,8 +175,6 @@ impl Inner {
             status.client = Some(client.clone());
             status.tools = listed.tools;
             status.has_resources = listed.has_resources;
-            status.resources = listed.resources;
-            status.resource_templates = listed.resource_templates;
             status.instructions =
                 client.instructions().map(|text| text.trim().to_string()).filter(|text| !text.is_empty());
             status.state = ServerState::Connected;
@@ -204,19 +188,11 @@ impl Inner {
     async fn initialize(self: &Arc<Self>, client: &McpClient, transport: &SharedTransport) -> Result<Listed, McpError> {
         client.connect(transport.clone()).await?;
         let weak = Arc::downgrade(self);
-        for (method, resources) in
-            [("notifications/tools/list_changed", false), ("notifications/resources/list_changed", true)]
-        {
-            let (weak, weak_client) = (weak.clone(), client.downgrade());
-            client.on_notification(method, move |_| {
-                let (Some(inner), Some(client)) = (weak.upgrade(), weak_client.upgrade()) else { return };
-                if resources {
-                    tokio::spawn(inner.refresh_resources(client));
-                } else {
-                    tokio::spawn(inner.refresh_tools(client));
-                }
-            });
-        }
+        let (weak_tools, weak_client_tools) = (weak.clone(), client.downgrade());
+        client.on_notification("notifications/tools/list_changed", move |_| {
+            let (Some(inner), Some(client)) = (weak_tools.upgrade(), weak_client_tools.upgrade()) else { return };
+            tokio::spawn(inner.refresh_tools(client));
+        });
         let (weak_client, closed_transport) = (client.downgrade(), transport.clone());
         client.on_close(move || {
             if let (Some(inner), Some(client)) = (weak.upgrade(), weak_client.upgrade()) {
@@ -224,14 +200,11 @@ impl Inner {
             }
         });
         // Servers without the tools capability (prompts or resources only) do not answer tools/list.
+        // Resources are not listed here: listing every one can take long (a large drive, say), and the
+        // resource tools list and read them on demand.
         let capabilities = client.server_capabilities().unwrap_or_default();
-        let has_resources = capabilities.resources();
-        let tools = async {
-            if capabilities.tools() { client.list_tools(RequestOptions::default()).await } else { Ok(Vec::new()) }
-        };
-        let resources = async { if has_resources { fetch_resources(client).await } else { (Vec::new(), Vec::new()) } };
-        let (tools, (resources, resource_templates)) = futures::join!(tools, resources);
-        Ok(Listed { tools: tools?, has_resources, resources, resource_templates })
+        let tools = if capabilities.tools() { client.list_tools(RequestOptions::default()).await? } else { Vec::new() };
+        Ok(Listed { tools, has_resources: capabilities.resources() })
     }
 
     fn connect_failed(self: &Arc<Self>, error: McpError) -> McpError {
@@ -285,20 +258,6 @@ impl Inner {
             }
             Err(error) => self.lock().error = Some(format!("Failed to refresh tools: {error}")),
         }
-        self.changed();
-    }
-
-    async fn refresh_resources(self: Arc<Self>, client: McpClient) {
-        let (resources, resource_templates) = fetch_resources(&client).await;
-        {
-            let mut status = self.lock();
-            if self.shutdown.is_cancelled() || !is_current(&status, &client) {
-                return;
-            }
-            status.resources = resources;
-            status.resource_templates = resource_templates;
-        }
-        self.tools_changed();
         self.changed();
     }
 }
