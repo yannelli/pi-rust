@@ -2,6 +2,76 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.6.1] - 2026-10-21
+
+### Added
+
+- **coding-agent:** add /context to show context window usage ([da84781](https://github.com/yannelli/pi-rust/commit/da84781e659f51720ab0431a81b874e787ca1828))
+- **interactive:** add /undo for agent file changes ([ca18774](https://github.com/yannelli/pi-rust/commit/ca18774bb1b2cb6a17a0261ddc025fdac009d70a))
+- **interactive:** add /diff to show uncommitted git changes ([2800be9](https://github.com/yannelli/pi-rust/commit/2800be9b075ec3f1ea23517e6bc541ee50aefa1c))
+- **interactive:** add /init to write or improve AGENTS.md ([0bed88c](https://github.com/yannelli/pi-rust/commit/0bed88c990cb80573c34267b7cd0e8172f75e68c))
+- **coding-agent:** --output-schema for print mode ([b62152a](https://github.com/yannelli/pi-rust/commit/b62152a5579a43b476a1c5e633f2f3abde013389))
+- **ai,agent,coding-agent,durable:** move client identity and provider attribution into pi-ai (upstream adc5fa9f8, upstream 04a93bad8) ([f6198da](https://github.com/yannelli/pi-rust/commit/f6198da459e394ed52f18e5c59bfaf54e348f73e))
+- **chord:** chord2 reload, code version retirement and clusters ([f4e9476](https://github.com/yannelli/pi-rust/commit/f4e9476202c91557a78a0e924864be1aa9a0ee3c))
+- **chord:** chord2 connections, remote refs and WebSocket links ([c238924](https://github.com/yannelli/pi-rust/commit/c238924c9673c9a3943f196437872f1306a139f6))
+- **coding-agent:** pi stats ([a6e9262](https://github.com/yannelli/pi-rust/commit/a6e926209df5ea1160fb289bab3723962c3abea6))
+- **coding-agent:** --max-turns and --max-cost run limits ([a391aac](https://github.com/yannelli/pi-rust/commit/a391aacde24e70659aa3b2f479f099f12528e381))
+- **coding-agent:** pi sessions list, rm and prune ([fd08285](https://github.com/yannelli/pi-rust/commit/fd08285033549cab549a4c32f4358aea643d5a3f))
+- **coding-agent:** export sessions as Markdown ([7907fed](https://github.com/yannelli/pi-rust/commit/7907fed8d4a2046bdaa019e518e61b65beada558))
+- **chord:** chord2 in-host runtime ([0f579c5](https://github.com/yannelli/pi-rust/commit/0f579c516316ff54f6de45a7637167e1480aaa07))
+- **chord:** chord2 cells and objects ([afcf341](https://github.com/yannelli/pi-rust/commit/afcf3414ff4bbf4004ee7e80f812329652c49f07))
+- **tui:** persistent prompt history with Ctrl+R search ([c2ac3e6](https://github.com/yannelli/pi-rust/commit/c2ac3e6b5e51649b89d4251dd229ac5b762626e2))
+- **coding-agent:** pi doctor ([f12d809](https://github.com/yannelli/pi-rust/commit/f12d809816908c0f6fbd612ee9f77ccfb1d7f5c8))
+- **coding-agent:** pi completion for bash, zsh, fish and PowerShell ([a0958ee](https://github.com/yannelli/pi-rust/commit/a0958ee928925a47870dccb2445d7cd982fdd765))
+- **coding-agent:** notify when a long run finishes ([b4b0efe](https://github.com/yannelli/pi-rust/commit/b4b0efef528ed985e696382e27304f06c7bb6d41))
+- install scripts for Linux, macOS and Windows ([7052bcd](https://github.com/yannelli/pi-rust/commit/7052bcdb66595712b028c8b91d54b269532d9615))
+- **chord:** chord2 host manager and IPC links ([6add286](https://github.com/yannelli/pi-rust/commit/6add2863f116482f126a284c7ebdff613f365a3e))
+- **chord:** chord2 wire frames, payload packing and memory links ([b2650b7](https://github.com/yannelli/pi-rust/commit/b2650b788a98069c23e3d37c07efc5f5b0793a3b))
+- **chord:** chord2 errors, schema and contracts ([a5f8b5b](https://github.com/yannelli/pi-rust/commit/a5f8b5b61f5834747070a9184a60a97191361d9f))
+- **schema:** pi-schema crate with the shared TypeBox-compatible validator, Value.Default and Value.Clean ([1e03274](https://github.com/yannelli/pi-rust/commit/1e03274d8ae2e8e2ce40692cccf0a60c42ff61c3))
+- **durable:** SQLite TelemetryStore (upstream d9025a5f5, telemetry-sqlite half) ([fb13de1](https://github.com/yannelli/pi-rust/commit/fb13de1d44658951e90b3f917292a432a4ce4aaa))
+
+### Fixed
+
+- **ai:** sync the model catalog with upstream model data ([de80f34](https://github.com/yannelli/pi-rust/commit/de80f347589c975f8e4e66847cb4b3ae63777b13))
+- **coding-agent:** skip a configured package that fails to install ([f9b4f07](https://github.com/yannelli/pi-rust/commit/f9b4f072e2c0c8c37120785f9414f1952ff30b8d))
+- **ai:** lead with the first system message after session start context ([3ef1a65](https://github.com/yannelli/pi-rust/commit/3ef1a658f0ad4015427c745b9f557948aa6417bd))
+- **coding-agent:** start a triggered extension message after compaction ([32cc54c](https://github.com/yannelli/pi-rust/commit/32cc54c89e83589da9a0bc500c906c9e5a02aa71))
+- **durable:** give the built-in read tool a structured output schema ([130304f](https://github.com/yannelli/pi-rust/commit/130304f791e1b667b2f21c6c2210641a41feb8ac))
+- **coding-agent:** rename the live session from the resume picker ([aa3cf0d](https://github.com/yannelli/pi-rust/commit/aa3cf0d43e8a9a0a843037976827e8d860ffaa6c))
+- **tui:** keep the leading ~ when double-clicking a home path ([d01ca03](https://github.com/yannelli/pi-rust/commit/d01ca03ef830669d751bb238541aa5ae24ddf2b4))
+- **tui:** rejoin a mouse report that the input timeout split ([98bb310](https://github.com/yannelli/pi-rust/commit/98bb310ca3d588203486c6f7bdf5ed8d10d3b7a7))
+- **models:** refresh extension providers offline after a virtual model is removed ([69ba4fc](https://github.com/yannelli/pi-rust/commit/69ba4fc797c466bbf4eddcd1360038331e2581ca))
+- **models:** refresh extension providers offline after registration ([da1a095](https://github.com/yannelli/pi-rust/commit/da1a0956a804747c0360ff37ff0029c4c3c42c6a))
+- **codemode:** drop the bare open-object term next to typed allOf parts ([12f4d03](https://github.com/yannelli/pi-rust/commit/12f4d039189da20ddc19c8409a8735605ec9f8b3))
+- **codemode:** keep deactivated direct tools hidden in only mode ([db0df5e](https://github.com/yannelli/pi-rust/commit/db0df5e23ba03bc607b593724691702a67438f8b))
+- **codemode:** keep the sibling type of allOf constraints in declarations ([b4419e9](https://github.com/yannelli/pi-rust/commit/b4419e9c572686b2da8ce10785e3ba482d667ecf))
+- **coding-agent:** report why pi.exec could not start a command ([2f6b4b2](https://github.com/yannelli/pi-rust/commit/2f6b4b2fb94ba33d2452375e548b29ac51941f02))
+- **ai:** take subscription login context sizes from the OpenAI model list ([98c4720](https://github.com/yannelli/pi-rust/commit/98c4720c2eefff3edc5a4ddc193799ce6ccb19f8))
+- **ai:** let uncached Codex retries fall back to SSE ([71a8760](https://github.com/yannelli/pi-rust/commit/71a876086b850e3de7dee2fc75252ed72d33e25e))
+- **coding-agent:** omit tool results with the response in pre-prompt recovery ([3a3a378](https://github.com/yannelli/pi-rust/commit/3a3a37877deb344e2044b30d49f526511940f238))
+- **ai:** hold Anthropic system updates past assistants with no blocks ([27fd19f](https://github.com/yannelli/pi-rust/commit/27fd19f33389e369d973e8b2358a20e34f71d002))
+- **js:** port node:readline append-only input for TERM=dumb ([82a935a](https://github.com/yannelli/pi-rust/commit/82a935af3cbf75acdcbecddc39b83991f4a15a0f))
+- **durable:** remove the exclusive SQLite operation and the replicated connection (upstream 4759f09fb, upstream 89e309581) ([eb5fac3](https://github.com/yannelli/pi-rust/commit/eb5fac30806a2c2dbf283e6bf199f090fd5734fa))
+- **coding-agent:** activate extension tools registered after the branch recorded its loadout (upstream bd3c9b823) ([7c2c87d](https://github.com/yannelli/pi-rust/commit/7c2c87dc4653edaf8ff7c7cb9a9a7be88694c083))
+- **coding-agent:** apply /compact instructions to the split-turn prefix summary (upstream adfc14461) ([d3a443e](https://github.com/yannelli/pi-rust/commit/d3a443ed402da8c8182d7480c9be96d096103d95))
+- **tui:** escape regex metacharacters in single-segment fd queries (upstream 612a172e6) ([f15fb70](https://github.com/yannelli/pi-rust/commit/f15fb70b7c76c676b74d02692ead16535ce6668e))
+- **ai:** retry relayed stream disconnects and match status codes as standalone numbers ([55a7fc8](https://github.com/yannelli/pi-rust/commit/55a7fc8accaed7423bf664542cacc7d1c7ea8d53))
+- sync Cargo.lock with the v0.6.0 workspace version ([eb35852](https://github.com/yannelli/pi-rust/commit/eb358527684b120a2e0c09ddc93d4b1cec14f0f7))
+- sync Cargo.lock with the v0.6.0 workspace version ([1cfa94e](https://github.com/yannelli/pi-rust/commit/1cfa94ee11df72205e5539af2268322b8db90227))
+- **experimental:** complete a Session release when its worker retires ([bfb5f45](https://github.com/yannelli/pi-rust/commit/bfb5f45d5a195a2f37af7c18573bb5e0b6f59231))
+- sync Cargo.lock with the v0.6.0 workspace version ([9de5692](https://github.com/yannelli/pi-rust/commit/9de5692e5d55a7bf702ce587ea92aa86fe5772c8))
+- sync Cargo.lock with the v0.6.0 workspace version ([c49590f](https://github.com/yannelli/pi-rust/commit/c49590f90825c6755747866531a1e9a524e2c7e3))
+- sync Cargo.lock with the v0.6.0 workspace version ([95ee714](https://github.com/yannelli/pi-rust/commit/95ee714397322df2070b2f9f755db1f9a86af563))
+- **js:** drain a closing Unix socket like TCP ([c5aec1c](https://github.com/yannelli/pi-rust/commit/c5aec1cf7cdcb706bb3f2a2ceda80ff395c5edd6))
+- sync Cargo.lock with the v0.6.0 workspace version ([b8e05af](https://github.com/yannelli/pi-rust/commit/b8e05af2d1ca4eb96cd8d9d30b14290bf95305ce))
+- **js:** report an aborted socket read on Windows as ECONNRESET ([49336fa](https://github.com/yannelli/pi-rust/commit/49336faad2ef777a6d2dd4a99b68def43ff155ee))
+- **js:** keep a closed HTTP/2 session's socket open until the peer ends it ([04623dc](https://github.com/yannelli/pi-rust/commit/04623dca65d88b1c0fd41484fa92fb40ec002e0e))
+- **js:** keep an HTTP/2 session open after its own GOAWAY ([5dfacd8](https://github.com/yannelli/pi-rust/commit/5dfacd8232db377716532d353e65cfeb9d8405ea))
+- **js:** let promise jobs run between HTTP/2 SETTINGS frames ([d9e18ca](https://github.com/yannelli/pi-rust/commit/d9e18ca0e38db87bad6abf0738344b90f007c157))
+- **js:** emit tlsClientError before the TLS client sees the close ([6fffd9f](https://github.com/yannelli/pi-rust/commit/6fffd9f9fccb7c49d079ef537d086cd65f1dfce0))
+- **coding-agent:** accept Windows Store shell aliases (upstream 28bea006b) ([df93a03](https://github.com/yannelli/pi-rust/commit/df93a031743e2e9dffc0e0a80e3ee8e8f867e412))
+
 ## [0.6.0] - 2026-10-21
 
 ### Breaking Changes
