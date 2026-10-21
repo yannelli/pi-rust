@@ -178,16 +178,51 @@ rule!(
     fancy,
     format!(r"^(?:\*+(?:((?!\*)(?!~){PUNCT})|([^\s*]))?)|^_+(?:((?!_)(?!~){PUNCT})|([^\s_]))?")
 );
-rule!(
-    EM_STRONG_RDELIM_AST,
-    fancy,
-    r"^[^_*]*?__[^_*]*?\*[^_*]*?(?=__)|[^*]+(?=[^*])|(?!\*)(?!~)[\p{P}\p{S}](\*+)(?=[\s]|$)|(?:[^\s\p{P}\p{S}]|~)(\*+)(?!\*)(?=(?!~)[\s\p{P}\p{S}]|$)|(?!\*)(?!~)[\s\p{P}\p{S}](\*+)(?=(?:[^\s\p{P}\p{S}]|~))|[\s](\*+)(?!\*)(?=(?!~)[\p{P}\p{S}])|(?!\*)(?!~)[\p{P}\p{S}](\*+)(?!\*)(?=(?!~)[\p{P}\p{S}])|(?:[^\s\p{P}\p{S}]|~)(\*+)(?=(?:[^\s\p{P}\p{S}]|~))"
+
+/// East Asian ranges that `marked-cjk-friendly` treats like punctuation when it decides which
+/// delimiter runs can open or close emphasis.
+const CJK: &str = concat!(
+    r"\x{1100}-\x{11ff}\x{20a9}\x{2329}-\x{232a}\x{2630}-\x{2637}\x{268a}-\x{268f}",
+    r"\x{2e80}-\x{2e99}\x{2e9b}-\x{2ef3}\x{2f00}-\x{2fd5}\x{2ff0}-\x{303e}\x{3041}-\x{3096}",
+    r"\x{3099}-\x{30ff}\x{3105}-\x{312f}\x{3131}-\x{318e}\x{3190}-\x{31e5}\x{31ef}-\x{321e}",
+    r"\x{3220}-\x{3247}\x{3250}-\x{a48c}\x{a490}-\x{a4c6}\x{a960}-\x{a97c}\x{ac00}-\x{d7a3}",
+    r"\x{d7b0}-\x{d7c6}\x{d7cb}-\x{d7fb}\x{f900}-\x{faff}\x{fe10}-\x{fe19}\x{fe30}-\x{fe52}",
+    r"\x{fe54}-\x{fe66}\x{fe68}-\x{fe6b}\x{ff01}-\x{ffbe}\x{ffc2}-\x{ffc7}\x{ffca}-\x{ffcf}",
+    r"\x{ffd2}-\x{ffd7}\x{ffda}-\x{ffdc}\x{ffe0}-\x{ffe6}\x{ffe8}-\x{ffee}\x{16fe0}-\x{16fe4}",
+    r"\x{16ff0}-\x{16ff6}\x{17000}-\x{18cda}\x{18cff}-\x{18d20}\x{18d80}-\x{18df2}",
+    r"\x{18e00}-\x{19191}\x{191a0}-\x{191d2}\x{1aff0}-\x{1aff3}\x{1aff5}-\x{1affb}",
+    r"\x{1affd}-\x{1affe}\x{1b000}-\x{1b128}\x{1b132}\x{1b150}-\x{1b152}\x{1b155}",
+    r"\x{1b164}-\x{1b168}\x{1b170}-\x{1b2fb}\x{1d300}-\x{1d356}\x{1d360}-\x{1d376}\x{1f1ae}",
+    r"\x{1f200}\x{1f202}\x{1f210}-\x{1f219}\x{1f21b}-\x{1f22e}\x{1f230}-\x{1f231}\x{1f237}",
+    r"\x{1f23b}\x{1f240}-\x{1f248}\x{1f260}-\x{1f265}\x{1f7da}\x{20000}-\x{3fffd}",
 );
+
+/// The `marked-cjk-friendly` right-delimiter rule for `*`, built like upstream from the
+/// punctuation, punctuation-or-space, and not-punctuation-or-space classes.
+fn cjk_rdelim_ast(punct: &str, punct_space: &str, not_punct_space: &str) -> String {
+    format!(
+        r"^[^_*]*?__[^_*]*?\*[^_*]*?(?=__)|[^*]+(?=[^*])|(?!\*){punct}(\*+)(?=[\s]|$)|{not_punct_space}(\*+)(?!\*)(?={punct_space}|$)|(?!\*){punct_space}(\*+)(?={not_punct_space})|[\s](\*+)(?!\*)(?={punct})|(?!\*){punct}(\*+)(?!\*)(?={punct})|{not_punct_space}(\*+)(?={not_punct_space})"
+    )
+}
+
+rule!(CJK_CHAR, plain, format!("[{CJK}]"));
+rule!(PUNCTUATION_CJK, fancy, format!(r"^((?![*_])[\s\p{{P}}\p{{S}}{CJK}])"));
 rule!(
-    EM_STRONG_RDELIM_UND,
+    EM_STRONG_RDELIM_AST_CJK,
     fancy,
-    r"^[^_*]*?\*\*[^_*]*?_[^_*]*?(?=\*\*)|[^_]+(?=[^_])|(?!_)[\p{P}\p{S}](_+)(?=[\s]|$)|[^\s\p{P}\p{S}](_+)(?!_)(?=[\s\p{P}\p{S}]|$)|(?!_)[\s\p{P}\p{S}](_+)(?=[^\s\p{P}\p{S}])|[\s](_+)(?!_)(?=[\p{P}\p{S}])|(?!_)[\p{P}\p{S}](_+)(?!_)(?=[\p{P}\p{S}])"
+    cjk_rdelim_ast(
+        &format!(r"(?!~)[\p{{P}}\p{{S}}{CJK}]"),
+        &format!(r"(?!~)[\s\p{{P}}\p{{S}}{CJK}]"),
+        &format!(r"(?:[^\s\p{{P}}\p{{S}}{CJK}]|~)")
+    )
 );
+rule!(EM_STRONG_RDELIM_UND_CJK, fancy, {
+    let (punct, punct_space, not_punct_space) =
+        (format!(r"[\p{{P}}\p{{S}}{CJK}]"), format!(r"[\s\p{{P}}\p{{S}}{CJK}]"), format!(r"[^\s\p{{P}}\p{{S}}{CJK}]"));
+    format!(
+        r"^[^_*]*?\*\*[^_*]*?_[^_*]*?(?=\*\*)|[^_]+(?=[^_])|(?!_){punct}(_+)(?=[\s]|$)|{not_punct_space}(_+)(?!_)(?={punct_space}|$)|(?!_){punct_space}(_+)(?={not_punct_space})|[\s](_+)(?!_)(?={punct})|(?!_){punct}(_+)(?!_)(?={punct})"
+    )
+});
 rule!(PUNCTUATION, fancy, r"^((?![*_])[\s\p{P}\p{S}])");
 rule!(ANY_PUNCTUATION, plain, r"\\([\p{P}\p{S}])");
 rule!(

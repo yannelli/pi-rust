@@ -243,9 +243,8 @@ impl Lexer {
                 push_inline(tokens, token, merge_text);
                 continue;
             }
-            let masked_tail = &masked[masked.len() - src.len()..];
             let found = self
-                .em_strong(src, masked_tail, &prev_char)
+                .em_strong(src, &masked, &prev_char)
                 .or_else(|| self.codespan(src))
                 .or_else(|| self.br(src))
                 .or_else(|| self.del(src))

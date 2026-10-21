@@ -29,14 +29,17 @@ const MODE_EXPAND: u8 = 3;
 
 const MAX_SAFE: u64 = (1 << 53) - 1;
 
-/// An open connection plus the callbacks its user functions hold.
+/// An open connection plus the callbacks its user functions hold and its running iterators.
 pub(crate) struct Db {
     pub conn: Connection,
     pub callbacks: std::cell::RefCell<Vec<u64>>,
+    pub cursors: std::cell::RefCell<HashMap<u64, super::sqlite_iter::Cursor>>,
 }
 
 impl Drop for Db {
     fn drop(&mut self) {
+        // Iterator statements borrow the connection, so they finish before it closes.
+        drop(std::mem::take(&mut *self.cursors.borrow_mut()));
         let callbacks = std::mem::take(&mut *self.callbacks.borrow_mut());
         sqlite_fn::release(&callbacks);
     }
@@ -158,7 +161,7 @@ fn open(
     };
     configure().map_err(|error| sql_error(&ctx, error))?;
     conn.set_prepared_statement_cache_capacity(64);
-    let db = Rc::new(Db { conn, callbacks: Default::default() });
+    let db = Rc::new(Db { conn, callbacks: Default::default(), cursors: Default::default() });
     Ok(state().insert_resource(Box::new(db)))
 }
 
@@ -222,7 +225,7 @@ fn bare_names(stmt: &Statement<'_>) -> Result<HashMap<String, String>, JsError> 
     Ok(names)
 }
 
-fn bind<'js>(
+pub(super) fn bind<'js>(
     ctx: &Ctx<'js>,
     stmt: &mut Statement<'_>,
     args: &Array<'js>,
@@ -279,7 +282,7 @@ pub(crate) fn to_js<'js>(ctx: &Ctx<'js>, value: ValueRef<'_>, big: bool) -> rqui
     })
 }
 
-fn row_value<'js>(
+pub(super) fn row_value<'js>(
     ctx: &Ctx<'js>,
     row: &rusqlite::Row<'_>,
     names: &[String],
@@ -421,5 +424,6 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
         Ok::<_, rquickjs::Error>(!database(&ctx, id)?.conn.is_autocommit())
     })?;
     sqlite_fn::install(&object)?;
+    super::sqlite_iter::install(&object)?;
     Ok(object)
 }

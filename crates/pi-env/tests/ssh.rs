@@ -8,10 +8,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::Duration;
 
-use pi_durable::env::{FileSystem, Shell, ShellCommand, ShellExecOptions};
+use pi_durable::env::{FileKind, FileSystem, LocalEnvOptions, Shell, ShellCommand, ShellExecOptions};
 use pi_env::{
-    Connection, RemoteExecutionEnv, RemoteExecutionEnvOptions, SshConnectOptions, SshError, SshTarget, accept_host_key,
-    connect_ssh, forget_host_key, scan_host_key, ssh_connection,
+    Connection, ConnectionOptions, FileListEntry, FileListing, ListFilesOptions, LocalExecutionEnv, RemoteExecutionEnv,
+    RemoteExecutionEnvOptions, SshConnectOptions, SshError, SshTarget, accept_host_key, connect_ssh, forget_host_key,
+    scan_host_key, ssh_connection,
 };
 use support::ctx;
 
@@ -212,6 +213,42 @@ async fn checks_the_daemon_again_before_starting_it_after_a_lost_connection() {
     assert_ne!(connection.info().await.expect("info").pid, pid);
     assert!(std::fs::read(&file).unwrap() == std::fs::read(support::daemon()).unwrap());
     connection.close();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn lists_files_over_ssh_as_the_local_environment_lists_them() {
+    let Some(sshd) = start().await else { return };
+    sshd.trust().await;
+    let tree = sshd.home.join("tree");
+    for file in ["a/b.txt", "a/c/d.txt", ".hidden", "out/x.js", "skip/y.txt", ".git/HEAD"] {
+        std::fs::create_dir_all(tree.join(file).parent().unwrap()).unwrap();
+        std::fs::write(tree.join(file), "").unwrap();
+    }
+    std::fs::create_dir(tree.join("empty")).unwrap();
+    std::fs::write(tree.join(".gitignore"), "out/\n").unwrap();
+    let (connection, _) = connect_ssh(sshd.options()).await.expect("connect");
+    let local = Connection::new(ConnectionOptions::new(vec![support::daemon()]));
+    let remote = env(&connection, &sshd.home);
+    let options = ListFilesOptions { exclude: Some(vec!["skip".into()]), ..Default::default() };
+    let listing = remote.list_files("tree", Some(&options), &ctx()).await.expect("list over ssh");
+    let entry = |path: &str, kind| FileListEntry { path: path.into(), kind };
+    let expected = FileListing {
+        entries: vec![
+            entry(".gitignore", FileKind::File),
+            entry(".hidden", FileKind::File),
+            entry("a", FileKind::Directory),
+            entry("a/b.txt", FileKind::File),
+            entry("a/c", FileKind::Directory),
+            entry("a/c/d.txt", FileKind::File),
+            entry("empty", FileKind::Directory),
+        ],
+        truncated: false,
+    };
+    assert_eq!(listing, expected);
+    let home = LocalExecutionEnv::new(LocalEnvOptions::new(sshd.home.display().to_string()), local.clone());
+    assert_eq!(home.list_files("tree", Some(&options), &ctx()).await.expect("list locally"), expected);
+    connection.close();
+    local.close();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

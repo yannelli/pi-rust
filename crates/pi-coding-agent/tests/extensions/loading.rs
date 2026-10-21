@@ -144,6 +144,34 @@ async fn flags_and_the_session_start_event_reach_extensions() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn pi_ai_models_entry_point_loads_under_both_scopes() {
+    let source = r#"import { clampThinkingLevel, getSupportedThinkingLevels, hasApi, modelsAreEqual } from "@earendil-works/pi-ai/models";
+import * as legacy from "@mariozechner/pi-ai/models";
+export default function (pi) {
+	pi.on("session_start", (_event, ctx) => {
+		const model = { provider: "p", id: "m", api: "openai-completions", reasoning: true, thinkingLevelMap: { xhigh: "max", minimal: null } };
+		ctx.ui.notify(`levels ${getSupportedThinkingLevels(model).join(",")}`);
+		ctx.ui.notify(`clamp ${clampThinkingLevel(model, "minimal")} ${clampThinkingLevel(model, "max")} ${clampThinkingLevel({ reasoning: false }, "high")}`);
+		ctx.ui.notify(`api ${hasApi(model, "openai-completions")} ${hasApi({ ...model, type: "image" }, "openai-completions")}`);
+		ctx.ui.notify(`equal ${modelsAreEqual(model, { ...model })} ${modelsAreEqual(model, null)} ${legacy.clampThinkingLevel === clampThinkingLevel}`);
+	});
+}
+"#;
+    let h =
+        harness(Setup { files: vec![("models.ts", source.into())], load: vec!["models.ts"], ..Setup::default() }).await;
+    assert_eq!(h.errors(), Vec::<String>::new());
+    assert_eq!(
+        h.ui.calls(),
+        [
+            "notify(info): levels off,low,medium,high,xhigh",
+            "notify(info): clamp low xhigh off",
+            "notify(info): api true false",
+            "notify(info): equal true false true",
+        ]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn project_trust_handlers_decide_with_the_startup_ui() {
     let root = tempfile::tempdir().unwrap();
     let (cwd, agent_dir) = (root.path().join("work"), root.path().join("agent"));

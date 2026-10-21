@@ -2,6 +2,40 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.5.3] - 2026-10-21
+
+### Added
+
+- **tui:** enable Kitty images for Rex (upstream 396ecd7b8) ([18e9ae8](https://github.com/yannelli/pi-rust/commit/18e9ae8756c266cb89c0671449a1cb97e0d4fb77))
+- **tui:** detect Rex terminal for OSC 8 hyperlinks (upstream 0ed1b0431) ([0012227](https://github.com/yannelli/pi-rust/commit/0012227a7583225b62293d4cf918926456840a62))
+
+### Fixed
+
+- **ai:** report malformed final tool call arguments for OpenAI APIs (upstream 87f9a3641) ([b857953](https://github.com/yannelli/pi-rust/commit/b857953935d31c1916a458916a20103fde6cf35c))
+- **ai:** cap Windows delete-pending lock retries separately (upstream e6fb2581d) ([de3144a](https://github.com/yannelli/pi-rust/commit/de3144ae731509c326fe23337acbed50b53d39b6))
+- **ai:** fall back on Anthropic strict tool limits (upstream d4d53612b) ([ac2ad28](https://github.com/yannelli/pi-rust/commit/ac2ad282ef285d38b81c1056574b8e967896a87c))
+- **tui:** let unhandled wheel input scroll the transcript under a focused overlay (upstream 11f991145) ([de25ac8](https://github.com/yannelli/pi-rust/commit/de25ac839586293d77d00959da8b5b5ed9995fd1))
+- **tui:** enable kitty images in herdr (upstream 78a3c10ba) ([27e4b23](https://github.com/yannelli/pi-rust/commit/27e4b234909cca818e3f84c92f50b6e1fdbd6546))
+- **tui:** keep delayed terminal replies out of keyboard input (upstream edb2eb966) ([3902bef](https://github.com/yannelli/pi-rust/commit/3902bef441f6d100a49902fdf43fffc32202c33c))
+- **tui:** restore terminal modes when the process exits without stop() (upstream 9df819de3) ([8b0589b](https://github.com/yannelli/pi-rust/commit/8b0589b54ad3f033588c51599692afe91364b3b5))
+- **tui:** render CJK emphasis next to punctuation (upstream b2d0da6fe) ([4089fb3](https://github.com/yannelli/pi-rust/commit/4089fb3053aee12cb5ccd631dea16c840b9c0e2b))
+- **tui:** stop unclosed display math from swallowing Markdown tables (upstream 2ed3118b0) ([0c95c81](https://github.com/yannelli/pi-rust/commit/0c95c81197adecf3ae03603b928ae819175bf80b))
+- **ai:** drop Codex models the backend rejects for OAuth accounts (upstream fdce48eb4) ([7e98579](https://github.com/yannelli/pi-rust/commit/7e98579fac569f023f235e3ae901780754225304))
+- **ai:** only list announced removals as still unavailable (upstream 530015d93) ([e7fd367](https://github.com/yannelli/pi-rust/commit/e7fd367bc6e691046cf19feb0f81537cb40bd84e))
+- **ai:** keep the prompt cache across tool changes on Responses (upstream caa6967b6) ([9500d62](https://github.com/yannelli/pi-rust/commit/9500d626663514644468eb97afce77383b7d612e))
+- **ai:** recover from Copilot request-size overflow (upstream 73f8de80b) ([460832c](https://github.com/yannelli/pi-rust/commit/460832c07287901ed3044597a753220884fb10ab))
+
+## [0.5.2] - 2026-10-21
+
+### Added
+
+- **xtask:** add the parity report ([1688647](https://github.com/yannelli/pi-rust/commit/16886472405346d7e19f3e81e92f0752aa60b361))
+
+### Fixed
+
+- **xtask:** count node:-only modules on Node 22 and keep upstream model data ([9e8cff5](https://github.com/yannelli/pi-rust/commit/9e8cff5079424f5dc5e1cf09f81e9a0afee7595f))
+- **xtask:** skip the model catalog when upstream model data is not generated ([bcbcde0](https://github.com/yannelli/pi-rust/commit/bcbcde02d9457f0a9e4e46c4ccb0ff768f3b23bb))
+
 ## [0.5.1] - 2026-10-21
 
 ### Fixed

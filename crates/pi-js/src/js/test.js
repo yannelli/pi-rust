@@ -8,6 +8,7 @@ const { Test, Suite, Harness, storage } = require("internal/test_harness");
 const { MockTracker } = require("internal/test_mock");
 const reporters = require("test/reporters");
 const { validate } = require("internal/errors");
+const snapshots = require("internal/test_snapshot");
 
 let globalHarness = null;
 let loadingHarness = null;
@@ -56,7 +57,8 @@ class TestContext {
     return this.#test.fullName;
   }
   get filePath() {
-    return this.#test.loc.file;
+    const file = this.#test.loc.file;
+    return typeof file === "string" && file.startsWith("file:") ? require("url").fileURLToPath(file) : file;
   }
   get signal() {
     return this.#test.controller.signal;
@@ -82,9 +84,12 @@ class TestContext {
         return assert[name](...args);
       };
     }
-    for (const name of ["snapshot", "fileSnapshot"]) {
-      methods[name] = () => {
-        throw internal.unsupported(`node:test t.assert.${name}`);
+    const harness = test.harness;
+    harness.snapshotManager ??= new snapshots.SnapshotManager(harness.updateSnapshots ?? snapshots.updateRequested());
+    for (const [name, fn] of [["snapshot", harness.snapshotManager.createAssert()], ["fileSnapshot", harness.snapshotManager.createFileAssert()]]) {
+      methods[name] = (...args) => {
+        test.assertions++;
+        return fn.apply(this, args);
       };
     }
     for (const [name, fn] of customAssertions) {
@@ -271,6 +276,7 @@ function run(options = {}) {
   validate.array(files, "options.files");
   const stream = new TestsStream();
   const harness = new Harness((type, data) => stream.event(type, data), contextFor, resetMocks);
+  harness.updateSnapshots = snapshots.updateRequested(options.execArgv ?? []);
   (async () => {
     if (typeof options.setup === "function") await options.setup(stream);
     for (const file of files) {
@@ -299,12 +305,8 @@ function run(options = {}) {
 }
 
 const snapshot = {
-  setDefaultSnapshotSerializers(serializers) {
-    validate.array(serializers, "serializers");
-  },
-  setResolveSnapshotPath(fn) {
-    validate.function(fn, "fn");
-  },
+  setDefaultSnapshotSerializers: snapshots.setDefaultSnapshotSerializers,
+  setResolveSnapshotPath: snapshots.setResolveSnapshotPath,
 };
 
 module.exports = test;

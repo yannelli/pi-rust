@@ -95,6 +95,7 @@ function startSession(server, socket) {
 }
 
 function setupServer(server, options, onRequest) {
+  core.validateRemoteCustomSettings(options?.remoteCustomSettings);
   server._h2options = { ...options };
   server.timeout = 0;
   server[kSessions] = new Set();

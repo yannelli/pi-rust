@@ -1,6 +1,7 @@
 // internal/streams_web: WHATWG ReadableStream, WritableStream, TransformStream, and helpers.
-// Byte streams behave as default streams; BYOB readers are not provided.
+// Byte stream controllers and BYOB readers are in internal/streams_web_bytes.
 const kState = Symbol("kState");
+const bytes = () => require("internal/streams_web_bytes");
 
 function typeError(message, code = "ERR_INVALID_STATE") {
   return Object.assign(new TypeError(message), { code });
@@ -53,13 +54,17 @@ class ReadableStreamDefaultController {
   }
 }
 
-function finishClose(stream) {
+// Pending BYOB reads stay pending on close (the source answers them with respond(0)), but a
+// cancel ends them.
+function finishClose(stream, cancelled = false) {
   const state = stream[kState];
   if (state.state !== "readable") return;
   state.state = "closed";
   const reader = state.reader;
   if (!reader) return;
-  for (const request of reader[kState].requests.splice(0)) request.resolve({ value: undefined, done: true });
+  if (cancelled || !reader[kState].byob) {
+    for (const request of reader[kState].requests.splice(0)) request.resolve({ value: undefined, done: true });
+  }
   reader[kState].closed.resolve();
 }
 
@@ -70,6 +75,7 @@ function errorStream(stream, reason) {
   state.storedError = reason;
   state.queue = [];
   state.queueSize = 0;
+  if (state.bytes) bytes().hooks.clear(state.controller);
   const reader = state.reader;
   if (!reader) return;
   for (const request of reader[kState].requests.splice(0)) request.reject(reason);
@@ -97,8 +103,13 @@ function pullIfNeeded(stream) {
     return;
   }
   state.pulling = true;
-  Promise.resolve()
-    .then(() => callSource(state.source, "pull", state.controller))
+  let pulled;
+  try {
+    pulled = Promise.resolve(callSource(state.source, "pull", state.controller));
+  } catch (error) {
+    pulled = Promise.reject(error);
+  }
+  pulled
     .then(
       () => {
         state.pulling = false;
@@ -133,11 +144,11 @@ class ReadableStream {
       storedError: undefined,
       highWaterMark: defaultHighWaterMark(source, strategy),
       size: sizeOf(strategy),
+      bytes: source.type === "bytes",
     };
-    const controller = new ReadableStreamDefaultController(this);
+    const controller = this[kState].bytes ? bytes().hooks.create(this, source) : new ReadableStreamDefaultController(this);
     this[kState].controller = controller;
-    Promise.resolve()
-      .then(() => callSource(source, "start", controller))
+    Promise.resolve(callSource(source, "start", controller))
       .then(
         () => {
           this[kState].started = true;
@@ -163,8 +174,9 @@ class ReadableStream {
     return this[kState].reader !== null;
   }
   getReader(options = {}) {
-    if (options.mode === "byob") throw internal.unsupported("ReadableStream BYOB readers");
-    return new ReadableStreamDefaultReader(this);
+    if (options.mode === undefined) return new ReadableStreamDefaultReader(this);
+    if (`${options.mode}` === "byob") return new (bytes().ReadableStreamBYOBReader)(this);
+    throw require("internal/errors").invalidArgValue("options.mode", options.mode);
   }
   cancel(reason) {
     if (this.locked) return Promise.reject(typeError("ReadableStream is locked"));
@@ -287,7 +299,8 @@ function cancelStream(stream, reason) {
   if (state.state === "errored") return Promise.reject(state.storedError);
   state.queue = [];
   state.queueSize = 0;
-  finishClose(stream);
+  if (state.bytes) bytes().hooks.clear(state.controller);
+  finishClose(stream, true);
   return Promise.resolve(callSource(state.source, "cancel", reason)).then(() => undefined);
 }
 
@@ -317,6 +330,7 @@ class ReadableStreamDefaultReader {
     }
     if (state.state === "closed") return Promise.resolve({ value: undefined, done: true });
     if (state.state === "errored") return Promise.reject(state.storedError);
+    if (state.bytes) bytes().hooks.pullSteps(state.controller);
     const request = deferred();
     this[kState].requests.push(request);
     pullIfNeeded(stream);
@@ -332,9 +346,22 @@ class ReadableStreamDefaultReader {
     if (!stream) return;
     const error = typeError("Reader was released");
     for (const request of this[kState].requests.splice(0)) request.reject(error);
+    if (stream[kState].bytes) bytes().hooks.release(stream[kState].controller);
     stream[kState].reader = null;
     this[kState].stream = null;
   }
 }
 
-module.exports = { ReadableStream, ReadableStreamDefaultReader, ReadableStreamDefaultController, kState, deferred, typeError };
+module.exports = {
+  ReadableStream,
+  ReadableStreamDefaultReader,
+  ReadableStreamDefaultController,
+  kState,
+  deferred,
+  typeError,
+  finishClose,
+  errorStream,
+  pullIfNeeded,
+  cancelStream,
+  rejectClosed,
+};

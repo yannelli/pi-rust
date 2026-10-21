@@ -39,7 +39,9 @@ pub use connection::ClientConnection;
 pub use events::{edit_old_texts, find_unique_line_number, format_auto_retry_message, tool_call_locations};
 pub use ext_ui::{extension_ui_tool_call, option_index};
 pub use runtime::{EventEncoder, RuntimeBackend, RuntimeBackendFactory};
-pub use session::{AcpSession, AcpSessionParams, SESSION_STATS_TIMEOUT, TurnEnd, TurnResult, to_usage_update};
+pub use session::{
+    AcpSession, AcpSessionParams, SESSION_STATS_TIMEOUT, TurnEnd, TurnReport, TurnResult, to_usage_update,
+};
 
 use crate::app::AppOptions;
 use crate::cli::Args;

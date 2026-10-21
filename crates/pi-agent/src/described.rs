@@ -71,6 +71,10 @@ impl AgentTool for DescribedTool {
         self.inner.reaches_tools(input)
     }
 
+    fn declares_reaches_tools(&self) -> bool {
+        self.inner.declares_reaches_tools()
+    }
+
     fn prompt_snippet(&self) -> Option<&str> {
         self.inner.prompt_snippet()
     }

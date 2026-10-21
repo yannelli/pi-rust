@@ -17,7 +17,7 @@ use crate::providers::constrained_sampling::{
     ResponsesToolOptions, convert_responses_tools, resolve_grammar_constrained_sampling,
 };
 use crate::providers::http_stream::{ResponseReport, SendConfig, spawn_builder_stream};
-use crate::providers::openai_responses::{ConvertOptions, ResponsesStream, convert_messages};
+use crate::providers::openai_responses::{ConvertOptions, ResponsesStream, convert_messages, responses_tool_support};
 use crate::registry::{ApiProvider, StreamOptions};
 use crate::request::{MAX_PROVIDER_ERROR_BODY_CHARS, truncate_error_text};
 use crate::retry::ProviderRequestError;
@@ -120,7 +120,7 @@ fn build_body(
     let mid_convo = flag("supportsMidConvoSystemMessages", false);
     let messages = resolve_transcript(normalize_context(context), mid_convo);
     let grammar = grammar_properties(&messages, supports_grammar)?;
-    let tools = resolve_transcript_tools(&messages, additional_tools || tool_search);
+    let tools = resolve_transcript_tools(&messages, responses_tool_support(mid_convo, additional_tools, tool_search));
     let convert = ConvertOptions {
         supports_mid_convo_system_messages: mid_convo,
         supports_additional_tools: additional_tools,

@@ -298,6 +298,45 @@ impl TuiInner {
         }
     }
 
+    /// Mode resets written before the terminal's own when the TUI goes away without `stop`.
+    fn exit_restore_prefix(&self) -> String {
+        let mut prefix =
+            if self.is_alt_unchecked() { crate::alt_screen::exit_restore_prefix(self) } else { String::new() };
+        if self.state.try_borrow().is_ok_and(|state| state.color_scheme_notifications) {
+            prefix.push_str("\x1b[?2031l");
+        }
+        prefix.push_str("\x1b[?25h");
+        prefix
+    }
+
+    /// Mode resets written after the terminal's own.
+    fn exit_restore_suffix(&self) -> String {
+        if self.is_alt_unchecked() { crate::alt_screen::exit_restore_suffix(self) } else { String::new() }
+    }
+
+    fn is_alt_unchecked(&self) -> bool {
+        self.screen.try_borrow().is_ok_and(|screen| matches!(&*screen, Screen::Alt(_)))
+    }
+
+    /// Last-resort restore for exits that skip `stop`: writes the mode resets synchronously, once.
+    /// Does nothing for a TUI that never started or was stopped, and never panics.
+    pub fn restore_on_exit(&self) {
+        let running = match self.state.try_borrow_mut() {
+            Ok(mut state) if state.started && !state.stopped => {
+                state.stopped = true;
+                true
+            }
+            _ => false,
+        };
+        if !running {
+            return;
+        }
+        let (prefix, suffix) = (self.exit_restore_prefix(), self.exit_restore_suffix());
+        if let Ok(mut terminal) = self.terminal.try_borrow_mut() {
+            terminal.restore_on_exit(&prefix, &suffix);
+        }
+    }
+
     pub fn reset_render_state(&self) {
         match &mut *self.screen.borrow_mut() {
             Screen::Main(main) => main.reset(),
@@ -366,6 +405,20 @@ impl TuiInner {
         if !stopped {
             self.write(if enabled { "\x1b[?2031h" } else { "\x1b[?2031l" });
         }
+    }
+}
+
+impl Drop for TuiInner {
+    fn drop(&mut self) {
+        self.restore_on_exit();
+    }
+}
+
+/// Restores the terminal modes of every started TUI of this thread that was not stopped.
+pub(crate) fn restore_all_on_exit() {
+    let tuis: Vec<Rc<TuiInner>> = TUIS.with(|tuis| tuis.borrow().iter().filter_map(Weak::upgrade).collect());
+    for tui in tuis {
+        tui.restore_on_exit();
     }
 }
 

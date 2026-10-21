@@ -17,7 +17,7 @@ These upstream commits come after the newest ported commit (`d2e7d8b7c`, 2026-10
 ## Deferred work
 
 - **chord2 runtime** (upstream `0104fef1e` and later chord commits). pi-chord ports the earlier facets runtime. This is the largest open item; plan it as its own branch.
-- **`HarnessOptions.models` as a function** (upstream `7ec1f648e`). Not planned: settings are already a function here, and a `Models` implementation can change its catalog at runtime. Keep it in `allowlist.json`.
+- **`HarnessOptions.models` as a function** (upstream `7ec1f648e`). Not planned: settings are already a function here, and a `Models` implementation can change its catalog at runtime. It is older than the synced commit, so the report does not list it.
 
 ## Extension runtime (pi-js)
 

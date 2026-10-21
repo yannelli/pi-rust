@@ -13,6 +13,7 @@ use super::net::{
 };
 use super::net::{secure, tcp_conn};
 use super::tls::Tls;
+use crate::error::JsError;
 use crate::runtime::convert::{from_json, throw};
 use crate::runtime::state::state;
 
@@ -25,9 +26,19 @@ struct ListenOptions {
     backlog: Option<i32>,
     #[serde(default)]
     ipv6_only: bool,
+    #[serde(default)]
+    reuse_port: bool,
 }
 
-fn bind_tcp(address: SocketAddr, backlog: i32, ipv6_only: bool) -> std::io::Result<tokio::net::TcpListener> {
+/// Like libuv, `reusePort` works only where SO_REUSEPORT spreads connections across listeners.
+const REUSE_PORT: bool = cfg!(any(target_os = "linux", target_os = "android"));
+
+fn bind_tcp(
+    address: SocketAddr,
+    backlog: i32,
+    ipv6_only: bool,
+    reuse_port: bool,
+) -> std::io::Result<tokio::net::TcpListener> {
     use socket2::{Domain, Protocol, Socket, Type};
     let socket = Socket::new(Domain::for_address(address), Type::STREAM, Some(Protocol::TCP))?;
     if address.is_ipv6() {
@@ -35,6 +46,12 @@ fn bind_tcp(address: SocketAddr, backlog: i32, ipv6_only: bool) -> std::io::Resu
     }
     #[cfg(unix)]
     socket.set_reuse_address(true)?;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    if reuse_port {
+        socket.set_reuse_port(true)?;
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    let _ = reuse_port;
     socket.bind(&address.into())?;
     socket.listen(backlog)?;
     socket.set_nonblocking(true)?;
@@ -137,9 +154,12 @@ pub(super) fn listen<'js>(
         None => vec!["::", "0.0.0.0"],
     };
     let backlog = options.backlog.unwrap_or(511);
+    if options.reuse_port && !REUSE_PORT {
+        return Err(throw(&ctx, &reuse_port_unsupported(hosts[0], port)));
+    }
     let mut bound = Err(std::io::Error::from(std::io::ErrorKind::AddrNotAvailable));
     for host in &hosts {
-        bound = bind_tcp(parse_ip(&ctx, host, port)?, backlog, options.ipv6_only);
+        bound = bind_tcp(parse_ip(&ctx, host, port)?, backlog, options.ipv6_only, options.reuse_port);
         if bound.as_ref().map_or_else(|error| error.kind() == std::io::ErrorKind::AddrInUse, |_| true) {
             break;
         }
@@ -151,6 +171,23 @@ pub(super) fn listen<'js>(
     let task = state.shared.tokio.spawn(accept_tcp(sender, id, listener, tls));
     let _ = state.with_resource(id, |entry: &mut Entry| entry.task = Some(task.abort_handle()));
     from_json(&ctx, &json!({ "id": id, "address": address }))
+}
+
+/// libuv's UV_ENOTSUP for `reusePort` on a platform without load-balancing SO_REUSEPORT.
+fn reuse_port_unsupported(host: &str, port: u16) -> JsError {
+    let errno = if cfg!(windows) {
+        -4049
+    } else if cfg!(target_vendor = "apple") {
+        -45
+    } else {
+        -95
+    };
+    JsError::new(format!("listen ENOTSUP: operation not supported on socket {host}:{port}"))
+        .with_code("ENOTSUP")
+        .with_data("errno", errno)
+        .with_data("syscall", "listen")
+        .with_data("address", host)
+        .with_data("port", port)
 }
 
 /// Accept on a TCP listener received from another process. Returns `{ id, address }`.

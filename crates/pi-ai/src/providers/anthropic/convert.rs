@@ -59,6 +59,22 @@ pub(super) struct ToolFormat {
     pub oauth: bool,
     pub eager_input_streaming: bool,
     pub strict_tools: bool,
+    /// Send `strict: "prefer"` tools with their original schemas, as after a strict tool limit
+    /// rejection.
+    pub disable_preferred_strict_tools: bool,
+}
+
+/// Whether the tool asks for JSON-schema strict sampling only when available.
+fn prefers_strict(tool: &Tool) -> bool {
+    tool.constrained_sampling.as_ref().is_some_and(|config| {
+        config.get("type").and_then(Value::as_str) == Some("json_schema")
+            && config.get("strict").and_then(Value::as_str) == Some("prefer")
+    })
+}
+
+/// Whether any `strict: "prefer"` tool was sent strict, so a retry without strict can help.
+pub(super) fn has_preferred_strict(tools: &[Tool], definitions: &[Value]) -> bool {
+    tools.iter().zip(definitions).any(|(tool, definition)| definition["strict"] == true && prefers_strict(tool))
 }
 
 /// Keywords that Anthropic strict tool use rejects for the whole request.
@@ -105,8 +121,8 @@ pub(super) fn convert_tools(
     let last = tools.len().saturating_sub(1);
     let mut converted = Vec::with_capacity(tools.len());
     for (index, tool) in tools.iter().enumerate() {
-        let strict =
-            resolve_json_schema_strict_sampling(tool, format.strict_tools, Some(&strict_unsupported))? == Some(true);
+        let strict = !(format.disable_preferred_strict_tools && prefers_strict(tool))
+            && resolve_json_schema_strict_sampling(tool, format.strict_tools, Some(&strict_unsupported))? == Some(true);
         let parameters = json_schema_tool_parameters(tool, strict);
         let name = if format.oauth { to_claude_code_name(&tool.name) } else { tool.name.clone() };
         let mut input_schema = if strict { parameters.as_object().cloned().unwrap_or_default() } else { Map::new() };
@@ -141,6 +157,8 @@ pub(super) struct ConvertOptions<'a> {
 
 pub(super) struct Converted {
     pub messages: Vec<Value>,
+    /// Whether a native tool addition sent a preferred-strict tool strict.
+    pub preferred_strict_tools: bool,
     /// Effort of replayed assistant messages, by index in `messages`.
     pub assistant_levels: BTreeMap<usize, String>,
 }
@@ -151,6 +169,7 @@ pub(super) struct Converted {
 pub(super) fn convert_messages(messages: &[Message], options: &ConvertOptions) -> Result<Converted, String> {
     let mut params: Vec<Value> = Vec::new();
     let mut assistant_levels = BTreeMap::new();
+    let mut preferred_strict_tools = false;
     let mut pending: Vec<Value> = Vec::new();
     let mut index = 0;
     while index < messages.len() {
@@ -172,7 +191,9 @@ pub(super) fn convert_messages(messages: &[Message], options: &ConvertOptions) -
                             if options.oauth { to_claude_code_name(&removed.name) } else { removed.name.clone() };
                         blocks.push(json!({"type": "tool_removal", "tool": {"type": "tool_reference", "name": name}}));
                     }
-                    for definition in convert_tools(added, format, None)? {
+                    let definitions = convert_tools(added, format, None)?;
+                    preferred_strict_tools |= has_preferred_strict(added, &definitions);
+                    for definition in definitions {
                         blocks.push(
                             json!({"type": "tool_addition", "tool": {"type": "tool_definition", "definition": definition}}),
                         );
@@ -234,7 +255,7 @@ pub(super) fn convert_messages(messages: &[Message], options: &ConvertOptions) -
     if let Some(cache_control) = options.cache_control {
         cache_last_message(&mut params, cache_control);
     }
-    Ok(Converted { messages: params, assistant_levels })
+    Ok(Converted { messages: params, preferred_strict_tools, assistant_levels })
 }
 
 fn managed_level(assistant: &AssistantMessage, managed_provider: Option<&str>) -> Option<String> {

@@ -1,7 +1,7 @@
 # Development Rules
 
 - Rust-only port of the TypeScript pi harness. Keep JSON field names, session files, and config paths compatible with upstream pi.
-- After code changes run `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test --workspace`. Fix every warning.
+- After code changes run `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, and the tests of the crates you changed. Before a PR run `cargo test --workspace --locked --no-fail-fast`. Fix every warning.
 - Tests must not use real provider APIs or keys: use `pi_ai::providers::faux` or a local mock HTTP server.
 - Providers emit events only through `pi_ai::MessageBuilder`, and every stream must end with `Done` or `Error`.
 - Keep comments short and only where the code cannot say it. No `unsafe` code.
@@ -12,7 +12,7 @@
 # Parity with upstream
 
 - Upstream is `earendil-works/pi` on GitHub. [`docs/parity/upstream.json`](docs/parity/upstream.json) records the upstream commit this port has caught up to.
-- When you port an upstream commit, name its short SHA in the commit message, for example `fix(ai): recover from Copilot request-size overflow (upstream 73f8de80b)`. The parity report uses this to mark it as ported.
+- When you port an upstream commit, write `upstream <sha>` with the 9-character SHA in the commit message, for example `fix(ai): recover from Copilot request-size overflow (upstream 73f8de80b)`. The parity report marks a commit as ported only on that exact text, so do not write `upstream <sha>` for a commit you did not port.
 - Record accepted differences in [`docs/parity/allowlist.json`](docs/parity/allowlist.json) with a reason, and open gaps in [`docs/parity/GAPS.md`](docs/parity/GAPS.md). User-facing differences also go in the README section "Differences from the TypeScript pi".
 - `cargo xtask parity --upstream <checkout>` writes the gap report. The Parity workflow runs it daily and updates the issue labeled `parity-report`.
 

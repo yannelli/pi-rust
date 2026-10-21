@@ -8,9 +8,6 @@ use pi_ai::Model;
 use pi_ai::models::builtin_models;
 use serde_json::Value;
 
-const DEFAULT_UPSTREAM_DIR: &str =
-    "/home/ubuntu/.paseo/worktrees/2y3egpeg/zealous-hyena/packages/ai/src/providers/data";
-
 /// Upstream model counts per provider file: (provider, chat, image, classifier).
 const COUNTS: [(&str, usize, usize, usize); 42] = [
     ("amazon-bedrock", 193, 0, 0),
@@ -36,7 +33,7 @@ const COUNTS: [(&str, usize, usize, usize); 42] = [
     ("moonshotai-cn", 4, 0, 0),
     ("moonshotai", 4, 0, 0),
     ("nvidia", 21, 0, 0),
-    ("openai-codex", 9, 0, 0),
+    ("openai-codex", 7, 0, 0),
     ("openai", 44, 0, 1),
     ("opencode-go", 29, 0, 0),
     ("opencode", 83, 0, 2),
@@ -103,18 +100,16 @@ fn totals_per_type_match_upstream() {
     for model in builtin_models() {
         totals[type_index(model.model_type.as_deref().expect("every bundled model declares its type"))] += 1;
     }
-    assert_eq!(totals, [1626, 63, 46]);
-    assert_eq!(builtin_models().len(), 1735);
+    assert_eq!(totals, [1624, 63, 46]);
+    assert_eq!(builtin_models().len(), 1733);
     assert_eq!(bundled_counts().len(), 42);
 }
 
 #[test]
 fn counts_match_upstream_data_when_present() {
-    let dir = std::env::var_os("PI_UPSTREAM_MODELS_DIR").map(PathBuf::from).unwrap_or(DEFAULT_UPSTREAM_DIR.into());
-    if !dir.is_dir() {
-        eprintln!("skipping upstream comparison: {} does not exist", dir.display());
-        return;
-    }
+    // Set PI_UPSTREAM_MODELS_DIR to upstream packages/ai/src/providers/data or a Parity run's
+    // upstream-model-data artifact.
+    let Some(dir) = std::env::var_os("PI_UPSTREAM_MODELS_DIR").map(PathBuf::from) else { return };
     let mut counts = Counts::new();
     for entry in std::fs::read_dir(&dir).unwrap() {
         let path = entry.unwrap().path();

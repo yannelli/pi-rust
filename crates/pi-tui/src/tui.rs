@@ -349,6 +349,14 @@ impl Tui {
     }
 }
 
+/// Restores the terminal modes of every TUI of this thread that was started and not stopped: mouse
+/// tracking, focus reporting, bracketed paste, the Kitty keyboard protocol, and the alternate
+/// screen. A dropped TUI does this on its own; call this before `std::process::exit`, which runs no
+/// destructors. Hard kills and aborts cannot be covered.
+pub fn restore_terminals_on_exit() {
+    base::restore_all_on_exit();
+}
+
 /// Weak counterpart of [`Tui`].
 #[derive(Clone)]
 pub struct WeakTui(Weak<TuiInner>);

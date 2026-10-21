@@ -162,15 +162,22 @@ fn forces_hyperlinks_off_when_term_starts_with_screen() {
 }
 
 #[test]
-fn enables_hyperlinks_without_images_for_herdr() {
+fn enables_hyperlinks_and_kitty_images_for_herdr() {
     let detected = detect(&[
         ("TERM_PROGRAM", "herdr"),
         ("TERM", "xterm-256color"),
         ("COLORTERM", "truecolor"),
         ("KITTY_WINDOW_ID", "1"),
     ]);
-    assert_eq!(detected, caps(None, true, true));
+    assert_eq!(detected, caps(Some(ImageProtocol::Kitty), true, true));
     assert!(!detect(&[("TERM_PROGRAM", "herdr"), ("PI_HYPERLINKS", "0")]).hyperlinks);
+}
+
+#[test]
+fn enables_hyperlinks_and_kitty_images_for_rex() {
+    let detected = detect(&[("TERM_PROGRAM", "rex"), ("TERM", "xterm-256color"), ("KITTY_WINDOW_ID", "1")]);
+    assert_eq!(detected, caps(Some(ImageProtocol::Kitty), true, true));
+    assert!(!detect(&[("TERM_PROGRAM", "rex"), ("PI_HYPERLINKS", "0")]).hyperlinks);
 }
 
 #[test]

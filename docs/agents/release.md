@@ -18,7 +18,7 @@ A complete release has 9 assets: 7 `pi-<tag>-<target>` archives (x86_64 and aarc
 
 ## When it fails
 
-- A build or daemon job failed: read its log ([CI triage](ci-triage.md)). For a download or runner error, `gh run rerun <run-id> --failed`. The publish job runs after the rerun passes.
+- A build or daemon job failed: read its log ([CI triage](ci-triage.md)). For a download or runner error, `gh run rerun <run-id> -R yannelli/pi-rust --failed`. The publish job runs after the rerun passes.
 - The Android NDK download is retried three times in the workflow. If it still fails, rerun the failed job.
 - Never publish by hand and never move a tag. Fix the cause and let the workflow release the next version.
 

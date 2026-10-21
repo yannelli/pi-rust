@@ -1,6 +1,8 @@
 //! Shared plumbing for the HTTP streaming providers: the request driver (payload and response
 //! hooks, retries, timeouts, proxies), header merging, compat flags, and small helpers.
 
+use std::sync::Arc;
+
 use futures::StreamExt;
 use reqwest::header::HeaderMap;
 use serde_json::Value;
@@ -10,6 +12,7 @@ pub(crate) use super::transform::{split_error_tool_result_images, transform_mess
 use crate::registry::StreamOptions;
 pub(crate) use crate::request::HttpRequest;
 use crate::request::{SendOptions, apply_payload_hook, build_headers, provider_response, send_request};
+use crate::retry::ProviderRequestError;
 use crate::sse::{SseEvent, sse_events};
 use crate::stream::{AssistantMessageEventStream, EventSender, MessageBuilder, event_channel};
 use crate::types::{ContentBlock, Model, StopReason};
@@ -31,6 +34,16 @@ pub(crate) trait SseHandler: Send + 'static {
     }
 }
 
+/// A body for one more attempt, with the diagnostic that records the recovery.
+pub(crate) struct RequestRewrite {
+    pub body: Value,
+    pub diagnostic: Value,
+}
+
+/// Decides, from a rejection that arrived before any stream started, whether to send once more
+/// with a different body. It runs at most once per stream and never after cancellation.
+pub(crate) type RequestFallback = Arc<dyn Fn(&ProviderRequestError) -> Option<RequestRewrite> + Send + Sync>;
+
 /// POST `request` with the hooks, retries, timeout, and proxy settings of `options`, and
 /// stream the SSE response through `handler`. `on_payload` runs before this returns.
 pub(crate) fn spawn_provider_stream<H: SseHandler>(
@@ -47,7 +60,19 @@ pub(crate) fn spawn_provider_stream<H: SseHandler>(
 pub(crate) fn spawn_provider_stream_with<H: SseHandler>(
     model: &Model,
     options: &StreamOptions,
+    request: HttpRequest,
+    make_handler: impl FnOnce(EventSender) -> H,
+) -> AssistantMessageEventStream {
+    spawn_provider_stream_with_fallback(model, options, request, None, make_handler)
+}
+
+/// [`spawn_provider_stream`] that can send a rewritten body once when the server rejects the
+/// first request; `on_payload` runs again for the rewritten body.
+pub(crate) fn spawn_provider_stream_with_fallback<H: SseHandler>(
+    model: &Model,
+    options: &StreamOptions,
     mut request: HttpRequest,
+    fallback: Option<RequestFallback>,
     make_handler: impl FnOnce(EventSender) -> H,
 ) -> AssistantMessageEventStream {
     let (sender, stream) = event_channel();
@@ -67,7 +92,17 @@ pub(crate) fn spawn_provider_stream_with<H: SseHandler>(
             label: None,
         };
         let drive = async {
-            let response = send_request(&request, &send).await.map_err(|error| error.message)?;
+            let mut fallback = fallback;
+            let response = loop {
+                let error = match send_request(&request, &send).await {
+                    Ok(response) => break response,
+                    Err(error) => error,
+                };
+                let rewrite = fallback.take().filter(|_| !options.cancel.is_cancelled()).and_then(|f| f(&error));
+                let Some(rewrite) = rewrite else { return Err(error.message) };
+                builder.add_diagnostic(rewrite.diagnostic);
+                request.body = apply_payload_hook(rewrite.body, options.on_payload.as_ref(), &model).await;
+            };
             if let Some(hook) = &options.on_response {
                 hook(&provider_response(&response), &model);
             }

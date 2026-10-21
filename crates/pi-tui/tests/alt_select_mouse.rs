@@ -9,7 +9,9 @@ use std::rc::Rc;
 
 use alt_select_common::{FnComponent, Harness, TerminalEvent, input_overlay, numbered_lines, wait_for_render};
 use pi_tui::component::same_component_opt;
-use pi_tui::{ComponentRef, OverlayOptions, TuiMouseEventResult, TuiMouseEventType, component};
+use pi_tui::{
+    ComponentRef, OverlayAnchor, OverlayOptions, SizeValue, TuiMouseEventResult, TuiMouseEventType, component,
+};
 use support::{MouseRegion, Text};
 
 fn text(value: &str) -> ComponentRef {
@@ -186,8 +188,33 @@ fn restores_keyboard_state_before_leaving_alt_mode_and_prints_the_full_document(
     assert!(restore.find("first") < restore.find("sixth"));
 }
 
+/// #10769
 #[test]
-fn gives_wheel_and_viewport_keys_to_a_focused_overlay() {
+fn scrolls_the_transcript_on_wheel_input_a_focused_overlay_does_not_handle() {
+    let h = Harness::new(20, 6);
+    h.tui.add_child(text(&numbered_lines(12)));
+    let overlay = input_overlay();
+    h.tui.start();
+    wait_for_render();
+    let top_before = h.tui.viewport_top();
+    let options = OverlayOptions {
+        anchor: Some(OverlayAnchor::TopLeft),
+        width: Some(SizeValue::Absolute(10)),
+        ..Default::default()
+    };
+    h.tui.show_overlay(overlay.clone(), options);
+    wait_for_render();
+    assert!(overlay.borrow().focused);
+
+    h.send("\x1b[<64;3;1M");
+    wait_for_render();
+    assert!(h.tui.viewport_top() < top_before);
+    assert!(overlay.borrow().inputs.is_empty());
+    h.stop();
+}
+
+#[test]
+fn gives_viewport_keys_to_a_focused_overlay() {
     let h = Harness::new(20, 6);
     h.tui.add_child(text(&numbered_lines(12)));
     let overlay = input_overlay();
@@ -198,8 +225,7 @@ fn gives_wheel_and_viewport_keys_to_a_focused_overlay() {
     wait_for_render();
     assert!(overlay.borrow().focused);
 
-    let wheel = "\x1b[<64;10;3M";
-    let keys = ["\x1b[5~", "\x1b[6~", "\x1bOH", "\x1bOF", wheel];
+    let keys = ["\x1b[5~", "\x1b[6~", "\x1bOH", "\x1bOF"];
     for key in keys {
         h.send(key);
     }

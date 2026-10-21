@@ -63,6 +63,50 @@ async fn kimi_additions_anchor_in_tool_bearing_system_messages() {
     assert!(anchored.unwrap().get("content").is_none());
 }
 
+/// Kimi tool messages cannot remove tools, so a removal rewrites the prefix once.
+#[tokio::test]
+async fn kimi_keeps_the_prefix_across_loads_after_a_removal() {
+    let kimi = catalog("kimi-coding", "k3");
+    let steps = [
+        vec![Message::user("first")],
+        vec![
+            system(json!({"role": "system", "content": "", "toolsRemoved": [{"name": "drop_tool"}], "timestamp": 2})),
+            Message::user("after removal"),
+        ],
+        vec![
+            system(json!({"role": "system", "content": "", "toolsAdded": [tool("late_tool")], "timestamp": 4})),
+            Message::user("after first load"),
+        ],
+        vec![
+            system(json!({"role": "system", "content": "", "toolsAdded": [tool("later_tool")], "timestamp": 6})),
+            Message::user("after second load"),
+        ],
+    ];
+    let mut messages = vec![system(json!({"role": "system", "content": "base prompt",
+        "toolsAdded": [tool("base_tool"), tool("drop_tool")], "timestamp": 0}))];
+    let mut bodies = Vec::new();
+    for step in steps {
+        messages.extend(step);
+        bodies.push(capture(&kimi, &Context { messages: messages.clone(), ..Context::default() }, options()).await);
+    }
+    assert_eq!(tool_names(&bodies[0]["tools"]), ["base_tool", "drop_tool"]);
+    for body in &bodies[1..] {
+        assert_eq!(tool_names(&body["tools"]), ["base_tool"]);
+    }
+    for pair in bodies[1..].windows(2) {
+        let (previous, next) = (pair[0]["messages"].as_array().unwrap(), pair[1]["messages"].as_array().unwrap());
+        assert_eq!(&next[..previous.len()], previous.as_slice());
+    }
+    let anchored: Vec<String> = bodies[3]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|message| message.get("tools").is_some())
+        .map(|message| tool_names(&message["tools"])[0].clone())
+        .collect();
+    assert_eq!(anchored, ["late_tool", "later_tool"]);
+}
+
 #[tokio::test]
 async fn kimi_k2_keeps_system_text_inline_without_tool_messages() {
     let kimi = model("kimi-k2.7-code", "moonshotai", json!({"supportsMidConvoSystemMessages": true}));

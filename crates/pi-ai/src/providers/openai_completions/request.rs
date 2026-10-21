@@ -50,7 +50,7 @@ pub(super) fn build_body(
     compat: &Compat,
 ) -> Result<Value, String> {
     let messages = input.messages;
-    let tools = resolve_transcript_tools(messages, compat.anchors_tool_additions());
+    let tools = resolve_transcript_tools(messages, compat.tool_support());
     let mut converted = convert_messages(model, messages, compat, input.grammar)?;
     let retention = resolve_cache_retention(options.cache_retention, &options.env);
     let long = retention == CacheRetention::Long && compat.supports_long_cache_retention;

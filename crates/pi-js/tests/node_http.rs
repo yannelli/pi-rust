@@ -58,3 +58,9 @@ async fn http2_server_answers_a_half_closed_client() {
     )
     .await;
 }
+
+#[tokio::test]
+async fn http2_custom_settings_match_node() {
+    check(include_str!("fixtures/node_http/http2_settings.js"), include_str!("fixtures/node_http/http2_settings.json"))
+        .await;
+}

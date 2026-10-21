@@ -1,6 +1,6 @@
 //! Modules extensions import (upstream `virtual-modules.ts`): typebox and pi-tui as embedded
-//! upstream code, pi-ai, pi-agent-core, and pi-coding-agent as host modules over the session.
-//! Every alias of upstream's table resolves to one shared instance.
+//! upstream code, pi-ai (compat and models), pi-agent-core, and pi-coding-agent as host modules
+//! over the session. Every alias of upstream's table resolves to one shared instance.
 
 use std::path::PathBuf;
 
@@ -16,6 +16,7 @@ const HOST_FILES: &[(&str, &str)] = &[
     ("coding_agent.js", include_str!("js/coding_agent.js")),
     ("context.js", include_str!("js/context.js")),
     ("host.js", include_str!("js/host.js")),
+    ("models.js", include_str!("js/models.js")),
     ("runner.js", include_str!("js/runner.js")),
     ("stream.js", include_str!("js/stream.js")),
     ("theme.js", include_str!("js/theme.js")),
@@ -55,6 +56,7 @@ pub(crate) fn virtual_modules() -> VirtualModules {
     modules.insert("typebox/value", reexport("typebox/build/value/index.mjs"));
     modules.insert("@earendil-works/pi-tui", reexport("pi-tui/src/index.ts"));
     modules.insert("@earendil-works/pi-ai/compat", reexport("host/ai.js"));
+    modules.insert("@earendil-works/pi-ai/models", reexport("host/models.js"));
     modules.insert("@earendil-works/pi-ai/oauth", VirtualModule::Json(serde_json::json!({})));
     modules.insert(
         "@earendil-works/pi-ai/providers/all",
