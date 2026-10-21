@@ -273,7 +273,7 @@ fn summarizes_an_earlier_summary_marker_first() {
 }
 
 #[test]
-fn writes_a_transcript_truncates_tool_results_and_omits_system_messages() {
+fn writes_a_transcript_truncates_tool_results_and_omits_system_messages_and_thinking() {
     let mut sections = pi_ai::JsonObject::new();
     sections.insert("s".into(), json!("hidden"));
     let system = Message::System(SystemMessage {
@@ -295,7 +295,8 @@ fn writes_a_transcript_truncates_tool_results_and_omits_system_messages() {
     let serialized = serialize_conversation(&messages);
     assert!(!serialized.contains("hidden"));
     assert!(serialized.contains("[User]: hello"));
-    assert!(serialized.contains("[Assistant thinking]: hmm"));
+    assert!(!serialized.contains("hmm"));
+    assert!(!serialized.contains("[Assistant thinking]"));
     assert!(serialized.contains("[Assistant]: sure"));
     assert!(serialized.contains("[Assistant tool calls]: read(path=\"a.ts\")"), "{serialized}");
     assert!(

@@ -117,7 +117,9 @@ fn truncate(text: &str, max_chars: usize) -> String {
     format!("{}\n\n[... {} more characters truncated]", String::from_utf16_lossy(&kept), count - max_chars)
 }
 
-/// Messages as plain text, so the summarizer reads a transcript instead of continuing it.
+/// Messages as plain text, so the summarizer reads a transcript instead of continuing it. System messages and thinking
+/// are omitted: replayed thinking is often not part of the live context, so it could make the request larger than the
+/// context it summarizes.
 pub fn serialize_conversation(messages: &[Message]) -> String {
     let mut parts = Vec::new();
     for message in messages {
@@ -129,12 +131,10 @@ pub fn serialize_conversation(messages: &[Message]) -> String {
                 }
             }
             Message::Assistant(assistant) => {
-                let mut thinking = Vec::new();
                 let mut text = Vec::new();
                 let mut calls = Vec::new();
                 for block in &assistant.content {
                     match block {
-                        ContentBlock::Thinking { thinking: value, .. } => thinking.push(value.clone()),
                         ContentBlock::Text { text: value, .. } => text.push(value.clone()),
                         ContentBlock::ToolCall(call) => {
                             let args: Vec<String> = call
@@ -144,11 +144,8 @@ pub fn serialize_conversation(messages: &[Message]) -> String {
                                 .collect();
                             calls.push(format!("{}({})", call.name, args.join(", ")));
                         }
-                        ContentBlock::Image { .. } => {}
+                        ContentBlock::Image { .. } | ContentBlock::Thinking { .. } => {}
                     }
-                }
-                if !thinking.is_empty() {
-                    parts.push(format!("[Assistant thinking]: {}", thinking.join("\n")));
                 }
                 if !text.is_empty() {
                     parts.push(format!("[Assistant]: {}", text.join("\n")));
