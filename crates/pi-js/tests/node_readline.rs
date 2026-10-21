@@ -1,11 +1,13 @@
 //! readline terminal mode (raw input, keypress events, line editing, and history) and the REPL
-//! on top of it. Expected values, including the bytes written to the output, come from Node 22.
+//! on top of it. Expected values, including the bytes written to the output, come from Node 22
+//! (Node 24 for TERM=dumb). Each script sets TERM because readline output depends on it.
 
 mod common;
 
 use common::*;
 
 const READLINE_SCRIPT: &str = r##"
+process.env.TERM = "xterm-256color";
 const readline = require("readline");
 const { PassThrough, Writable } = require("stream");
 const out = {};
@@ -93,6 +95,7 @@ async fn readline_terminal_editing_matches_node() {
 }
 
 const REPL_SCRIPT: &str = r##"
+process.env.TERM = "xterm-256color";
 const repl = require("repl");
 const { PassThrough, Writable } = require("stream");
   const input = new PassThrough();
@@ -125,4 +128,68 @@ async fn repl_terminal_editing_matches_node() {
     let (runtime, _capture) = runtime(&root);
     let actual = run_cjs_within(&runtime, &root, REPL_SCRIPT, 30).await;
     assert_same_keys(&actual, &serde_json::from_str(REPL_EXPECTED).unwrap());
+}
+
+const DUMB_SCRIPT: &str = r##"
+process.env.TERM = "dumb";
+const readline = require("readline");
+const { PassThrough, Writable } = require("stream");
+const out = {};
+  const input = new PassThrough();
+  input.isTTY = true;
+  input.setRawMode = () => {};
+  let written = "";
+  const output = new Writable({ write(chunk, enc, cb) { written += chunk.toString(); cb(); } });
+  output.isTTY = true;
+  output.columns = 80;
+  const rl = readline.createInterface({ input, output, prompt: "> " });
+  const lines = [];
+  rl.on("line", (line) => lines.push(line));
+  const send = async (data) => { input.write(data); await new Promise((r) => setImmediate(r)); };
+  out.terminal = rl.terminal;
+  rl.prompt();
+  await send("ab\x1b[Dc");
+  out.typed = [rl.line, rl.cursor];
+  await send("\x1b");
+  await send("\x7f\x15\x01");
+  out.edited = [rl.line, rl.cursor];
+  await send("\r");
+  await send("x\r\n");
+  await send("y\n");
+  rl.write("z\r");
+  const answer = new Promise((resolve) => rl.question("name? ", resolve));
+  await send("bob\r");
+  out.answer = [await answer, rl.getPrompt()];
+  let sigint = 0;
+  rl.on("SIGINT", () => sigint++);
+  await send("q\x03");
+  out.sigint = [sigint, rl.line];
+  await send("w\x04");
+  out.closed = rl.closed;
+  out.lines = lines;
+  out.written = written;
+  const pin = new PassThrough();
+  pin.isTTY = true;
+  pin.setRawMode = () => {};
+  let pwritten = "";
+  const pout = new Writable({ write(chunk, enc, cb) { pwritten += chunk.toString(); cb(); } });
+  pout.isTTY = true;
+  pout.columns = 80;
+  const prl = require("readline/promises").createInterface({ input: pin, output: pout, prompt: "> " });
+  prl.prompt();
+  pin.write("ab\x1b[D");
+  await new Promise((r) => setImmediate(r));
+  out.promises = [prl.line, prl.cursor, pwritten];
+  prl.close();
+return out;
+"##;
+
+const DUMB_EXPECTED: &str = r##"{"terminal":true,"typed":["abc",3],"edited":["abc\u0015\u0001",5],"answer":["z\rbob","> "],"sigint":[1,"q"],"closed":true,"lines":["abc\u0015\u0001","x","y"],"written":"> abc\u0015\u0001\r\nx\r\ny\r\nz\rname? bob\r\nqw","promises":["ab",1,"> ab\u001b[1D"]}"##;
+
+#[tokio::test]
+async fn readline_dumb_terminal_matches_node() {
+    let (_dir, root) = tempdir();
+    let (runtime, _capture) = runtime(&root);
+    let actual = run_cjs_within(&runtime, &root, DUMB_SCRIPT, 30).await;
+    assert_same_keys(&actual, &serde_json::from_str(DUMB_EXPECTED).unwrap());
 }
