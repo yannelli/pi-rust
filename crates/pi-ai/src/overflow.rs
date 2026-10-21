@@ -1,5 +1,9 @@
 //! Context overflow detection from provider errors, ported from the TypeScript pi patterns.
 
+use std::sync::LazyLock;
+
+use regex::Regex;
+
 use crate::types::{AssistantMessage, StopReason};
 
 /// Lowercase fragments that identify an overflow error across providers.
@@ -35,12 +39,19 @@ const OVERFLOW_FRAGMENTS: &[&str] = &[
 const NON_OVERFLOW_FRAGMENTS: &[&str] =
     &["rate limit", "too many requests", "throttling error:", "service unavailable:"];
 
-/// Cerebras answers an oversized request with a bare `400 (no body)` or `413 (no body)`.
+/// HTTP 413 is a request-size overflow for every provider, whatever the body says. This matches
+/// the `<provider> API error (413):`, `Provider HTTP 413`, and bare `413` prefixes, not a status
+/// mentioned later in the body.
+static HTTP_413: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^(?:[A-Za-z0-9_ -]+ API error \(413\):|Provider HTTP 413(?:\s|:|$)|413(?:\s|:|$))")
+        .expect("valid 413 pattern")
+});
+
+/// Cerebras answers an oversized request with a bare `400 (no body)`; the bare `413` form is
+/// covered by [`HTTP_413`].
 fn is_cerebras_bodyless_overflow(error: &str) -> bool {
-    let rest = match error.strip_prefix("400").or_else(|| error.strip_prefix("413")) {
-        Some(rest) => rest.trim_start(),
-        None => return false,
-    };
+    let Some(rest) = error.strip_prefix("400") else { return false };
+    let rest = rest.trim_start();
     let rest = rest.strip_prefix("status code").map_or(rest, str::trim_start);
     rest.starts_with("(no body)")
 }
@@ -55,6 +66,7 @@ pub fn is_context_overflow(message: &AssistantMessage, context_window: Option<u6
         let lower = error.to_lowercase();
         if !NON_OVERFLOW_FRAGMENTS.iter().any(|fragment| lower.contains(fragment))
             && (OVERFLOW_FRAGMENTS.iter().any(|fragment| lower.contains(fragment))
+                || HTTP_413.is_match(error)
                 || (message.provider == "cerebras" && is_cerebras_bodyless_overflow(&lower)))
         {
             return true;
@@ -119,5 +131,48 @@ mod tests {
         assert!(is_context_overflow(&cerebras, None));
         cerebras.error_message = Some("413 (no body)".into());
         assert!(is_context_overflow(&cerebras, None));
+    }
+
+    #[test]
+    fn treats_http_413_as_request_size_overflow_for_any_provider() {
+        for error in [
+            r#"github-copilot API error (413): {"message":"failed to parse request","code":""}"#,
+            "custom-provider API error (413): Payload Too Large",
+            "Provider HTTP 413: failed to parse request",
+            "Provider HTTP 413",
+            r#"413 {"error":{"message":"failed to parse request","code":""}}"#,
+            "413",
+            "413 status code (no body)",
+        ] {
+            assert!(is_context_overflow(&failed(error), Some(1_000_000)), "{error}");
+            assert!(is_context_overflow(&failed(error), None), "{error}");
+        }
+    }
+
+    #[test]
+    fn ignores_other_statuses_and_413_outside_the_prefix() {
+        for error in [
+            r#"github-copilot API error (400): {"message":"failed to parse request","code":""}"#,
+            "custom-provider API error (429): Too many requests",
+            "Provider HTTP 400: failed to parse request",
+            r#"github-copilot API error (400): {"message":"failed to parse request: invalid value 413"}"#,
+            "custom-provider API error (400): upstream mentioned OpenAI API error (413): invalid input",
+            "Provider HTTP 400: upstream said Provider HTTP 413",
+            "custom-provider API error (4130): invalid input",
+            "Provider HTTP 4130: invalid input",
+            "4130 failed to parse request",
+            "400 status code (no body)",
+        ] {
+            assert!(!is_context_overflow(&failed(error), None), "{error}");
+        }
+    }
+
+    #[test]
+    fn limits_http_413_matching_to_failed_responses() {
+        let mut message = failed("OpenAI API error (413): failed to parse request");
+        for stop_reason in [StopReason::Aborted, StopReason::Stop] {
+            message.stop_reason = stop_reason;
+            assert!(!is_context_overflow(&message, None));
+        }
     }
 }

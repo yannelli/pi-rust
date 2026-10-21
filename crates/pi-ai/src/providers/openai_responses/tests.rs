@@ -219,6 +219,24 @@ async fn http_errors_and_incomplete_responses_are_reported() {
 }
 
 #[tokio::test]
+async fn copilot_http_413_is_request_size_overflow() {
+    for (status, nested, overflow) in [(413, true, true), (413, false, true), (400, true, false)] {
+        let error = json!({"message": "failed to parse request", "code": ""});
+        let body = if nested { json!({"error": error}) } else { error };
+        let server = MockServer::start(MockResponse::Status(status, body.to_string())).await;
+        let mut model = test_model(API, "github-copilot", &server.base_url);
+        model.context_window = 1_000_000;
+        let (events, message) = collect(OpenAIResponses.stream(&model, &context(), options())).await;
+        assert_eq!(kinds(&events), ["error"]);
+        assert_eq!(message.stop_reason, StopReason::Error);
+        assert_eq!(message.usage.total_tokens, 0);
+        let error = message.error_message.as_deref().unwrap();
+        assert_eq!(error, format!("Provider HTTP {status}: failed to parse request"));
+        assert_eq!(crate::is_context_overflow(&message, Some(model.context_window)), overflow, "HTTP {status}");
+    }
+}
+
+#[tokio::test]
 async fn cancellation_mid_stream_aborts() {
     let item = json!({"type": "message", "id": "msg_1", "content": []});
     let server = MockServer::start(MockResponse::SseThenHang(vec![
