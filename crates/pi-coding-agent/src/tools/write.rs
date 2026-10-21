@@ -10,6 +10,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
+use super::file_changes::{SharedFileChangeRecorder, write_recorded};
 use super::mutation_queue::with_file_mutation_queue;
 use super::operations::{WriteOperations, WriteToolOptions};
 use super::path_utils::resolve_to_cwd;
@@ -18,6 +19,7 @@ use super::{check_aborted, parse_args};
 pub struct WriteTool {
     cwd: PathBuf,
     operations: Arc<dyn WriteOperations>,
+    recorder: Option<SharedFileChangeRecorder>,
 }
 
 #[derive(Deserialize)]
@@ -32,7 +34,7 @@ impl WriteTool {
     }
 
     pub fn with_options(cwd: PathBuf, options: WriteToolOptions) -> Self {
-        Self { cwd, operations: options.resolve() }
+        Self { cwd, operations: options.resolve(), recorder: options.recorder }
     }
 }
 
@@ -87,8 +89,8 @@ impl AgentTool for WriteTool {
                     .with_context(|| format!("Could not create directory {}", dir.display()))?;
             }
             check_aborted(&cancel)?;
-            self.operations
-                .write_file(&absolute, &args.content)
+            let write = || self.operations.write_file(&absolute, &args.content);
+            write_recorded(self.recorder.as_ref(), &absolute, None, &args.content, write)
                 .await
                 .with_context(|| format!("Could not write file {}", absolute.display()))?;
             check_aborted(&cancel)?;

@@ -130,6 +130,9 @@ impl InteractiveMode {
         } else if text == "/resume" {
             clear();
             self.show_session_selector();
+        } else if text == "/undo" {
+            clear();
+            self.handle_undo_command();
         } else if let Some(args) = argument(text, "mcp")
             && self.session().builtin_extension_enabled("mcp")
         {

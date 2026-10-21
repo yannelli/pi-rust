@@ -9,6 +9,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::io::AsyncReadExt;
 
+use super::file_changes::SharedFileChangeRecorder;
 use super::read::detect_supported_image_mime_type;
 
 const IMAGE_TYPE_SNIFF_BYTES: usize = 4100;
@@ -185,23 +186,27 @@ impl LsOperations for LocalFileOperations {
 }
 
 macro_rules! tool_options {
-    ($(#[$doc:meta])* $name:ident, $ops:ident) => {
+    ($(#[$doc:meta])* $name:ident, $ops:ident $(, $(#[$field_doc:meta])* $field:ident: $ty:ty)*) => {
         $(#[$doc])*
         #[derive(Clone, Default)]
         pub struct $name {
             /// Custom backend. Default: the local file system.
             pub operations: Option<Arc<dyn $ops>>,
+            $($(#[$field_doc])* pub $field: Option<$ty>,)*
         }
 
         impl $name {
             pub fn with_operations(operations: Arc<dyn $ops>) -> Self {
-                Self { operations: Some(operations) }
+                Self { operations: Some(operations), $($field: None,)* }
             }
         }
 
         impl std::fmt::Debug for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.debug_struct(stringify!($name)).field("custom_operations", &self.operations.is_some()).finish()
+                f.debug_struct(stringify!($name))
+                    .field("custom_operations", &self.operations.is_some())
+                    $(.field(stringify!($field), &self.$field.is_some()))*
+                    .finish()
             }
         }
     };
@@ -210,12 +215,16 @@ macro_rules! tool_options {
 tool_options!(
     /// Options of the write tool (upstream `WriteToolOptions`).
     WriteToolOptions,
-    WriteOperations
+    WriteOperations,
+    /// Receives each change, for the `/undo` checkpoints (pi-rust extension).
+    recorder: SharedFileChangeRecorder
 );
 tool_options!(
     /// Options of the edit tool (upstream `EditToolOptions`).
     EditToolOptions,
-    EditOperations
+    EditOperations,
+    /// Receives each change, for the `/undo` checkpoints (pi-rust extension).
+    recorder: SharedFileChangeRecorder
 );
 tool_options!(
     /// Options of the grep tool (upstream `GrepToolOptions`).
