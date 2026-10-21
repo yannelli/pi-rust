@@ -39,6 +39,7 @@ This commit is older than the synced commit, so the commits section treats it as
 Behavior that pi-rust adds on purpose. The parity review should not report these as gaps.
 
 - Account model list for `openai-codex` from the Codex backend's `/codex/models` (README "Account model lists").
+- Account model list for `anthropic` from `/v1/models` (README "Account model lists").
 
 ## Platform
 

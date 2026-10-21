@@ -9,6 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::types::Model;
 
+mod anthropic;
 mod codex;
 mod openrouter;
 mod reconcile;
@@ -60,6 +61,8 @@ pub enum AccountModelList {
     OpenRouter,
     /// The ChatGPT account's Codex models.
     OpenAiCodex,
+    /// The models of an Anthropic API key or subscription login.
+    Anthropic,
 }
 
 impl AccountModelList {
@@ -67,6 +70,7 @@ impl AccountModelList {
         match provider_id {
             "openrouter" => Some(Self::OpenRouter),
             "openai-codex" => Some(Self::OpenAiCodex),
+            "anthropic" => Some(Self::Anthropic),
             _ => None,
         }
     }
@@ -82,6 +86,7 @@ impl AccountModelList {
         match self {
             Self::OpenRouter => personalize_openrouter_catalog(catalog, context).await,
             Self::OpenAiCodex => codex::personalize_codex_catalog(catalog, context).await,
+            Self::Anthropic => anthropic::personalize_anthropic_catalog(catalog, context).await,
         }
     }
 }
@@ -131,6 +136,38 @@ pub(crate) async fn get_json(
         return Err(failed(status.to_string()));
     }
     Ok(serde_json::from_slice(&body).map_or(Fetched::Invalid, Fetched::Json))
+}
+
+/// Most pages read from one paginated list; a longer list leaves the catalog unchanged.
+const MAX_PAGES: usize = 20;
+
+/// `url` with `pairs` appended to its query.
+pub(crate) fn with_query(url: &str, pairs: &[(&str, &str)]) -> Result<String, String> {
+    let mut url = reqwest::Url::parse(url).map_err(|error| format!("Invalid model list URL {url}: {error}"))?;
+    url.query_pairs_mut().extend_pairs(pairs);
+    Ok(url.into())
+}
+
+/// The bodies of every page, where `next` gives the URL after a page. `None` when a page is
+/// rejected or unreadable, or the pages do not end.
+pub(crate) async fn get_pages(
+    context: &ModelListContext,
+    label: &str,
+    first: String,
+    headers: &[(&str, String)],
+    next: impl Fn(&Value) -> Result<Option<String>, String>,
+) -> Result<Option<Vec<Value>>, String> {
+    let mut bodies = Vec::new();
+    let mut url = Some(first);
+    while let Some(current) = url.take() {
+        if bodies.len() == MAX_PAGES {
+            return Ok(None);
+        }
+        let Fetched::Json(body) = get_json(context, label, &current, headers).await? else { return Ok(None) };
+        url = next(&body)?;
+        bodies.push(body);
+    }
+    Ok(Some(bodies))
 }
 
 #[cfg(test)]

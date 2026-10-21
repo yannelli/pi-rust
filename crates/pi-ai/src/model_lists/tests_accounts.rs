@@ -157,3 +157,53 @@ async fn codex_falls_back_to_the_catalog() {
     assert_eq!(models, codex_catalog());
     assert!(server.requests().is_empty(), "a token without a ChatGPT account is not sent");
 }
+
+fn anthropic_catalog() -> Vec<Model> {
+    let claude = |id| chat("anthropic", "anthropic-messages", id);
+    vec![claude("claude-opus-4-8"), claude("claude-sonnet-5"), claude("claude-haiku-4-5"), claude("claude-fable-5")]
+}
+
+#[tokio::test]
+async fn anthropic_follows_pages_and_sends_the_providers_auth_headers() {
+    let server = RouteServer::start(|request| {
+        let data = if request.path.contains("after_id=claude-sonnet-5") {
+            json!({"data": [{"id": "claude-opus-5-5", "display_name": "Claude Opus 5.5", "max_tokens": 128_000}],
+                   "has_more": false, "last_id": "claude-opus-5-5"})
+        } else {
+            json!({"data": [{"id": "claude-opus-4-8", "max_input_tokens": 1_000_000, "max_tokens": 64_000},
+                            {"id": "claude-sonnet-5", "display_name": "Claude Sonnet 5"}],
+                   "has_more": true, "last_id": "claude-sonnet-5"})
+        };
+        Reply::json(200, &data)
+    })
+    .await;
+    let list = AccountModelList::Anthropic;
+    let models = list.personalize(anthropic_catalog(), &context(&server, Some("sk-ant-api-test"))).await.unwrap();
+
+    assert_eq!(ids(&models), ["claude-opus-4-8", "claude-sonnet-5", "claude-opus-5-5"]);
+    assert_eq!((models[0].context_window, models[0].max_tokens), (1_000_000, 64_000));
+    assert_eq!((models[2].name.as_str(), models[2].max_tokens), ("Claude Opus 5.5", 128_000));
+    assert_eq!(models[2].compat, Some(json!({"flag": "claude-opus-4-8"})));
+    let requests = server.requests();
+    assert_eq!(requests[0].path, "/v1/models?limit=1000");
+    assert_eq!(requests[1].path, "/v1/models?limit=1000&after_id=claude-sonnet-5");
+    assert_eq!(requests[0].headers["x-api-key"], "sk-ant-api-test");
+    assert_eq!(requests[0].headers["anthropic-version"], "2023-06-01");
+    assert!(!requests[0].headers.contains_key("authorization"));
+
+    list.personalize(anthropic_catalog(), &context(&server, Some("sk-ant-oat-test"))).await.unwrap();
+    let oauth = &server.requests()[2];
+    assert_eq!(oauth.headers["authorization"], "Bearer sk-ant-oat-test");
+    assert_eq!(oauth.headers["anthropic-beta"], "oauth-2025-04-20");
+    assert!(!oauth.headers.contains_key("x-api-key"));
+}
+
+#[tokio::test]
+async fn anthropic_falls_back_to_the_catalog() {
+    assert_fallbacks(AccountModelList::Anthropic, "sk-ant-api-test", anthropic_catalog()).await;
+    let endless =
+        RouteServer::start(|_| Reply::json(200, &json!({"data": [], "has_more": true, "last_id": "x"}))).await;
+    let models =
+        AccountModelList::Anthropic.personalize(anthropic_catalog(), &context(&endless, Some("k"))).await.unwrap();
+    assert_eq!(models, anthropic_catalog(), "pages that never end change nothing");
+}

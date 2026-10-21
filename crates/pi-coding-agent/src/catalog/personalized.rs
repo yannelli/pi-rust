@@ -12,7 +12,8 @@ use pi_ai::model_lists::{AccountModelList, ModelListContext};
 
 use super::refresh::{DynamicCatalog, Persist, RefreshContext};
 use super::remote::{
-    DEFAULT_CATALOG_BASE_URL, REMOTE_CATALOG_REFRESH_INTERVAL_MS, is_newer, merge_models, read_catalog, request_catalog,
+    DEFAULT_CATALOG_BASE_URL, REMOTE_CATALOG_REFRESH_INTERVAL_MS, is_newer, merge_models, read_catalog, remote_models,
+    request_catalog,
 };
 use super::store::ModelsStoreEntry;
 use crate::platform::http::{VERSION, pi_user_agent};
@@ -20,6 +21,10 @@ use crate::platform::http::{VERSION, pi_user_agent};
 /// Narrows a catalog to a credential's models. An error keeps the last saved list.
 pub type Personalize =
     Arc<dyn Fn(Vec<Model>, ModelListContext) -> BoxFuture<'static, Result<Vec<Model>, String>> + Send + Sync>;
+
+fn is_overlay_entry(entry: &ModelsStoreEntry) -> bool {
+    entry.last_modified.is_some() || entry.etag.is_some()
+}
 
 /// The account model list of a built-in provider, and the minimum time between its requests:
 /// none for upstream's lists, the catalog interval for pi-rust's.
@@ -96,8 +101,21 @@ impl PersonalizedCatalog {
     /// validators were saved by the plain overlay and are always refreshed.
     fn is_fresh(&self, context: &RefreshContext<'_>) -> bool {
         let (Some(interval), Some(entry)) = (self.interval, context.stored) else { return false };
-        let saved_here = entry.last_modified.is_none() && entry.etag.is_none() && !entry.models.is_empty();
+        let saved_here = !is_overlay_entry(entry) && !entry.models.is_empty();
         !context.force && saved_here && entry.checked_at.is_some_and(|at| pi_ai::now_ms() - at < interval)
+    }
+
+    /// The saved list. pi-rust's lists read an entry of the plain overlay, saved before the
+    /// provider had a list, as an overlay; upstream restores every entry as it is.
+    fn restore(&self, stored: Option<&ModelsStoreEntry>) -> Vec<Model> {
+        let models = match stored {
+            Some(entry) if self.interval.is_some() && is_overlay_entry(entry) => {
+                merge_models(self.builtin.clone(), &remote_models(Some(entry), self.local_generated_at))
+            }
+            Some(entry) => entry.models.clone(),
+            None => Vec::new(),
+        };
+        models.into_iter().filter(|model| model.provider == self.provider_id).collect()
     }
 
     fn list_context(&self, context: &RefreshContext<'_>) -> ModelListContext {
@@ -128,8 +146,7 @@ impl DynamicCatalog for PersonalizedCatalog {
     }
 
     async fn refresh(&self, context: &RefreshContext<'_>) -> anyhow::Result<()> {
-        let stored = context.stored.map(|entry| entry.models.as_slice()).unwrap_or_default();
-        let restored = stored.iter().filter(|model| model.provider == self.provider_id).cloned().collect();
+        let restored = self.restore(context.stored);
         if !context.publisher.publish(Persist::Unchanged).await {
             return Ok(());
         }

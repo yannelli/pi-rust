@@ -130,6 +130,10 @@ To get the full catalog, point the provider's `baseUrl` in `models.json` at an e
 
 With a ChatGPT login, pi reads the account's models from the Codex backend (`<base URL>/codex/models`), the list that Codex shows, and skips hidden models. This endpoint is not a public API, so pi reads it leniently.
 
+#### Anthropic
+
+With an API key or a Claude subscription login, pi reads `GET /v1/models` with the provider's authentication headers and follows its pages. The list gives each model's context size and max output.
+
 ## Crates
 
 | Crate | Contents |
@@ -158,7 +162,7 @@ pi-rust ports the `pi` CLI and its libraries feature for feature. These parts di
 - The version check and `pi update --self` use this repository's releases.
 - CJK and Thai word movement uses ICU4X dictionaries, so a few word boundaries differ from Node's `Intl.Segmenter`.
 - `pi --mode acp` (above) is an addition; the TypeScript pi needs the separate pi-acp adapter.
-- Account model lists for OpenAI Codex (see [Providers](#account-model-lists-pi-rust-extension)) are an addition; upstream pi narrows only OpenRouter.
+- Account model lists for OpenAI Codex and Anthropic (see [Providers](#account-model-lists-pi-rust-extension)) are an addition; upstream pi narrows only OpenRouter.
 - `pi-env` looks for remote daemons in a `pi-env-daemons` folder next to the running program. Each release has a `pi-env-daemons-<tag>.tar.gz` with the daemons for Linux, Android (Termux), macOS, and Windows on x86-64 and arm64; extract it next to `pi`.
 - `pi experimental` (`server`, `client`, `durable`, `vacation`) needs `PI_EXPERIMENTAL=1`, as upstream. Its `server` and `client` use Unix sockets, so on Windows they report that they need Unix; upstream has no Windows transport either.
 

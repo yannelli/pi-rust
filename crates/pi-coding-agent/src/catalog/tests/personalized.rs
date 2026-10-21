@@ -105,6 +105,8 @@ async fn pi_rust_lists_wait_for_the_interval_unless_forced() {
         ModelsStoreEntry { checked_at: Some(pi_ai::now_ms()), last_modified: Some(1), ..ModelsStoreEntry::default() };
     let publisher =
         RecordingPublisher::new(Some(ModelsStoreEntry { models: vec![model(PROVIDER, "old")], ..overlay_entry }));
+    refresh_with(&provider, &publisher, None, false, false).await.unwrap();
+    assert_eq!(ids(&provider.models()), ["static", "old"], "read as an overlay of the bundled models");
     refresh_with(&provider, &publisher, Some(&key("k")), true, false).await.unwrap();
     assert_eq!(server.requests().len(), 1);
     refresh_with(&provider, &publisher, Some(&key("k")), true, false).await.unwrap();

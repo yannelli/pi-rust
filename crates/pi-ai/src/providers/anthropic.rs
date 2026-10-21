@@ -21,7 +21,8 @@ use futures::StreamExt;
 use reqwest::header::{HeaderMap, HeaderValue};
 
 use self::events::AnthropicStream;
-use self::federation::{FederationConfig, OAUTH_API_BETA, access_token, federation_config, invalidate};
+pub(crate) use self::federation::OAUTH_API_BETA;
+use self::federation::{FederationConfig, access_token, federation_config, invalidate};
 use self::request::{CLAUDE_CODE_VERSION, Compat, Params, build_params, effort_messages, resolve_thinking};
 use crate::http::pi_user_agent;
 use crate::providers::common::{HttpRequest, endpoint, has_header, header_map_with, spawn_provider_stream};
