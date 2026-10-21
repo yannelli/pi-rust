@@ -114,7 +114,8 @@ macro_rules! tui_bindings {
             pub const ALL: &[&str] = &[$($id),*];
         }
 
-        /// The built-in TUI keybindings (upstream `TUI_KEYBINDINGS`), in upstream order.
+        /// The built-in TUI keybindings (upstream `TUI_KEYBINDINGS`), in upstream order, plus the
+        /// pi-rust `tui.editor.historySearch`.
         pub fn tui_keybindings() -> KeybindingDefinitions {
             [$(($id, KeybindingDefinition::new(&[$($key),*], $description))),*].into_iter().collect()
         }
@@ -126,6 +127,7 @@ tui_bindings! {
     EDITOR_CURSOR_DOWN = "tui.editor.cursorDown", ["down"], "Move cursor down";
     EDITOR_HISTORY_PREVIOUS = "tui.editor.historyPrevious", [], "Select previous prompt history entry";
     EDITOR_HISTORY_NEXT = "tui.editor.historyNext", [], "Select next prompt history entry";
+    EDITOR_HISTORY_SEARCH = "tui.editor.historySearch", ["ctrl+r"], "Search prompt history";
     EDITOR_CURSOR_LEFT = "tui.editor.cursorLeft", ["left", "ctrl+b"], "Move cursor left";
     EDITOR_CURSOR_RIGHT = "tui.editor.cursorRight", ["right", "ctrl+f"], "Move cursor right";
     EDITOR_CURSOR_WORD_LEFT = "tui.editor.cursorWordLeft", ["alt+left", "ctrl+left", "alt+b"], "Move cursor word left";

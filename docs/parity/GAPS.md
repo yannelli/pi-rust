@@ -8,8 +8,19 @@ None up to `bd3c9b823`. Every commit after the synced commit is ported or listed
 
 ## Deferred work
 
-- **chord2 runtime** (upstream `0104fef1e` and later chord commits). pi-chord ports the earlier facets runtime. Its `host2` module has the chord2 foundation (errors, schemas, contracts, wire frames, and memory links), the host manager with IPC links, process locks, and the `FacetLoader` trait, cells, objects, and hosts, and (phase 3) connections between hosts with remote references, flow control, and the WebSocket link for clients and servers. Still open (phase 4): reload, code version retirement, and clusters. Upstream's Node module loader (`loader.ts`) cannot be ported, so hosts get facets from a `FacetLoader`.
+- **chord2 tutorial test** (upstream `test/tutorial.test.ts`). pi-chord's `host2` module ports the chord2 runtime (upstream `0104fef1e` and later chord commits): errors, schemas, contracts, wire frames and links, the host manager and process locks, cells, objects and hosts, connections with remote references and flow control, the WebSocket link, and reloads, code version retirement and clusters. The tutorial walkthrough is not ported yet.
 - **`HarnessOptions.models` as a function** (upstream `7ec1f648e`). Not planned: settings are already a function here, and a `Models` implementation can change its catalog at runtime. It is older than the synced commit, so the report does not list it.
+
+## chord2 differences
+
+How pi-chord's `host2` differs from upstream chord on purpose:
+
+- Hosts get facets from a `FacetLoader`, because upstream's Node module loader (`loader.ts`) cannot be ported. So `7d75a0e3e` (the loader registers every facet root before it imports one) does not apply. A cluster reload's children load the named modules through their own `FacetLoader`.
+- Factories are synchronous, and `Subscribable::subscribe` cannot fail: a listener's `select` or its resource fails instead.
+- `Declare::on_select` takes a key for the identity of `select`, where upstream compares the function's source text. A reload keeps the subscription while the resource and the key stay the same.
+- `Host::host_object` returns the host's own reference to a `lifetime: "host"` object (upstream tests read the private `hostObjects`).
+- Upstream `4a5d37291` moved `OutputBuffer` and `Progress` into `@earendil-works/chord/output`. pi-rust keeps them in pi-durable (`harness/output.rs` and `harness/progress.rs`).
+- Tests: fake timers are real short timers, and `Weak` sentinels replace `FinalizationRegistry` with a forced GC. The review test "a commit that still fails midway" is not ported: it patches an object's `startTasks`, which Rust code cannot do.
 
 ## Upstream commits that do not apply
 

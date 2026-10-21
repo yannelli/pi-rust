@@ -1,5 +1,5 @@
-//! Port of upstream `test/placement.test.ts`. Left out: the reload parts (phase 4) and the type errors for a
-//! family's input field (typo, number, optional), which `remote` does not check at runtime.
+//! Port of upstream `test/placement.test.ts`. Left out: the type errors for a family's input field (typo, number,
+//! optional), which `remote` does not check at runtime.
 
 mod chord2_support;
 
@@ -110,7 +110,7 @@ async fn a_get_goes_where_the_contract_places_the_input_never_named_by_the_calle
 }
 
 #[tokio::test]
-async fn serve_refuses_a_type_the_host_is_not_the_place_of() {
+async fn serve_refuses_a_type_the_host_is_not_the_place_of_also_at_a_reload() {
     let _serial = serial().await;
     let host = plain("session:S1");
     let error = host.serve(&catalog(), |_, _, _| Ok(at_place(String::new())), ServeOptions::default()).unwrap_err();
@@ -118,6 +118,15 @@ async fn serve_refuses_a_type_the_host_is_not_the_place_of() {
     let server = plain("server");
     let error = server.serve(&note(), |_, _, _| Ok(at_place(String::new())), ServeOptions::default()).unwrap_err();
     assert!(error.to_string().contains("t.note is declared for session:<session>, but server serves it"), "{error}");
+    let misplaced = define_facet("misplaced", |api| {
+        api.serve(
+            &note(),
+            |_: &Json, _: &Json, _: &mut pi_chord::host2::Declare| Ok(at_place(String::new())),
+            ServeOptions::default(),
+        )
+    });
+    let error = server.reload(vec![misplaced.into()], Default::default()).await.unwrap_err();
+    assert!(error.to_string().contains("declared for session:<session>, but server serves it"), "{error}");
     host.close().await.unwrap();
     server.close().await.unwrap();
 }
@@ -205,15 +214,21 @@ async fn placement_is_part_of_the_contract_a_moved_type_is_never_bridged_by_an_a
     let _serial = serial().await;
     assert_ne!(moved(1, "server").fingerprint(), moved(1, "session:S1").fingerprint());
     let host = plain("server");
-    let facet = define_facet("moved", |api| {
-        let implementation = |_: &Json, _: &Json, _: &mut pi_chord::host2::Declare| {
-            Ok(Implementation::variant("main").method("ping", |_, _| ready(Ok(Json::Null))))
-        };
-        let options = ServeOptions { accepts: Some(identity_accepts()), ..ServeOptions::default() };
-        api.serve(&moved(1, "server"), implementation, options)
-    });
-    host.install(&facet, LoadOptions::default()).await.unwrap();
+    let facet = |version: i64, place: &'static str| {
+        define_facet("moved", move |api| {
+            let implementation = |_: &Json, _: &Json, _: &mut pi_chord::host2::Declare| {
+                Ok(Implementation::variant("main").method("ping", |_, _| ready(Ok(Json::Null))))
+            };
+            let options = ServeOptions { accepts: Some(identity_accepts()), ..ServeOptions::default() };
+            api.serve(&moved(version, place), implementation, options)
+        })
+    };
+    host.install(&facet(1, "server"), LoadOptions::default()).await.unwrap();
     host.get(&moved(1, "server"), json!({}), GetOptions::default()).await.unwrap();
+    // Same version, other placement: a forgotten bump.
+    let error = host.reload(vec![facet(1, "session:S1").into()], Default::default()).await.unwrap_err();
+    let message = error.to_string();
+    assert!(message.contains("declared for session:S1") || message.contains("without a version bump"), "{error}");
     // A new version that `accepts` version 1 but lives elsewhere: no adapter makes version 1 consumers bind.
     let accepts = identity_accepts();
     let error = bind(&moved(2, "session:S1"), Some(&accepts), &moved(1, "server")).err().expect("a mismatch");

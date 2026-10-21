@@ -82,9 +82,17 @@ pi install npm:<package>            # install a pi package (extensions, skills, 
 
 Run `pi --help` for all options. In interactive mode, type `/` to list commands, for example `/login`, `/model`, `/settings`, `/tree`, `/fork`, `/compact`, `/export`, `/share`, `/mcp`, and `/hotkeys`. Input typed while the agent works is queued as steering, and Alt+Enter (Ctrl+Q on Windows) queues a follow-up.
 
+`/diff [--stat] [path]` shows the uncommitted git changes in the working directory (pi-rust extension): the `git diff HEAD` stat, the untracked files, and the diff of staged and unstaged changes. `--stat` leaves out the diff, and a path limits the output to that path. Output longer than 500 lines is cut, with a note that gives the number of lines left out.
+
 `/export [file]` writes the session to HTML, or to JSONL when the file ends in `.jsonl`, and `pi --export <session.jsonl> [output]` exports a saved session file to HTML. With both, an output path that ends in `.md` writes Markdown (pi-rust extension). The Markdown file has the current branch: a title, the date, models, working directory, tokens, and cost, then each user and assistant turn. Thinking is in collapsed `<details>` blocks, tool calls show their JSON arguments, tool results stop after 200 lines, and images become placeholders.
 
 `/undo` (pi-rust extension) restores the files that the edit and write tools changed during the last prompt: it writes back their earlier content and deletes the files the agent created. Run it again to go one more prompt back. A file that changed after the agent wrote it, for example by you or a bash command, is skipped and listed. Limits: only edit and write changes are tracked, not bash commands; checkpoints stay in memory for the last 20 prompts of the current session, files over 4 MB are not kept, and everything is lost on exit or when you switch sessions. The conversation does not change; use `/tree` to move in it.
+
+### Prompt history (pi-rust extension)
+
+The interactive editor keeps your prompts across sessions and projects in `~/.pi/agent/prompt-history.jsonl`, one JSON string per line, readable only by you on Unix. Up and Down go through them, newest first. Ctrl+R starts a reverse search: type to filter (case does not matter), press Ctrl+R again for the next older match, Enter to put the match in the editor without sending it, and Esc to go back to your draft. A prompt that starts with a space is not saved to the file.
+
+Set `"promptHistory": {"enabled": false}` in `settings.json` to turn this off, or `"maxEntries"` to keep a different number of prompts (default 1000). To use a different key for the search, set `tui.editor.historySearch` in `keybindings.json`.
 
 ## Shell completion and `pi doctor` (pi-rust extension)
 
@@ -161,6 +169,7 @@ pi-rust reads the same files as the TypeScript pi, so both can share one setup. 
 | `~/.pi/agent/{extensions,skills,prompts,themes}/` | Extensions, skills, prompt templates, and themes; `.pi/` in a project and `~/.agents/skills` work too |
 | `AGENTS.md`, `CLAUDE.md`, `SYSTEM.md`, `APPEND_SYSTEM.md` | Context files and system prompt overrides |
 | `~/.pi/agent/sessions/` | Sessions as JSONL trees in pi's format |
+| `~/.pi/agent/prompt-history.jsonl` | Submitted prompts for Up, Down, and Ctrl+R (pi-rust only) |
 
 On first start, pi-rust moves files from older pi layouts the same way pi does (for example `oauth.json` into `auth.json`).
 
@@ -248,11 +257,13 @@ pi-rust ports the `pi` CLI and its libraries feature for feature. These parts di
 - CJK and Thai word movement uses ICU4X dictionaries, so a few word boundaries differ from Node's `Intl.Segmenter`.
 - `pi --mode acp` (above) is an addition; the TypeScript pi needs the separate pi-acp adapter.
 - Markdown export (see [Use](#use)) is an addition: `/export notes.md` and `pi --export session.jsonl notes.md` write Markdown. Upstream pi exports only HTML and JSONL.
+- `/diff` (see [Use](#use)) is an addition; upstream pi has no command that shows the git changes in the working directory.
 
 - `pi completion` and `pi doctor` (above) are additions; the TypeScript pi has neither.
 - `pi sessions` and `pi stats` (above) are additions; the TypeScript pi lists and deletes sessions only in its session picker (`pi -r`, `/resume`) and shows usage only for the current session (`/session`).
 - The run limits `--max-turns` and `--max-cost` (above) are additions.
 - Account model lists for OpenAI Codex, Anthropic, GitHub Copilot, OpenAI, xAI, and Google (see [Providers](#account-model-lists-pi-rust-extension)) are an addition; upstream pi narrows only OpenRouter.
+- [Prompt history](#prompt-history-pi-rust-extension) across sessions, with the Ctrl+R search and the `promptHistory` settings, is an addition; upstream pi keeps prompt history only for the running process.
 - `pi-env` looks for remote daemons in a `pi-env-daemons` folder next to the running program. Each release has a `pi-env-daemons-<tag>.tar.gz` with the daemons for Linux, Android (Termux), macOS, and Windows on x86-64 and arm64; extract it next to `pi`.
 - Notifications: in interactive mode, a run that takes 10 seconds or more ends with a terminal notification titled "pi" that says "Done" or names the error. pi sends OSC 777 in Ghostty, WezTerm, foot, and rxvt, OSC 99 in kitty, OSC 9 in iTerm2 and Windows Terminal, and BEL in tmux, screen, and other terminals. Fullscreen mode skips the notification while the terminal reports focus. Set `terminal.notifyOnFinish` to `"auto"` (the default), `"osc"`, `"bell"`, or `"off"`, and `terminal.notifyMinSeconds` to change the threshold. Upstream pi has this only as the example extension `notify.ts`.
 - `pi experimental` (`server`, `client`, `durable`, `vacation`) needs `PI_EXPERIMENTAL=1`, as upstream. Its `server` and `client` use Unix sockets, so on Windows they report that they need Unix; upstream has no Windows transport either.

@@ -1,6 +1,7 @@
 //! The interactive mode end to end: a virtual terminal, the faux provider, and the real UI loop.
 
 mod dialogs;
+mod diff;
 mod extension_dialogs;
 mod extensions;
 mod gaps;
@@ -9,6 +10,7 @@ mod keys;
 mod notify;
 #[path = "../offline_guard/mod.rs"]
 mod offline_guard;
+mod prompt_history;
 mod run_limits;
 mod startup;
 mod undo;

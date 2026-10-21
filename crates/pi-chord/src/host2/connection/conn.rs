@@ -20,7 +20,7 @@ use crate::host2::errors::ChordErrorCode;
 use crate::host2::link::Link;
 use crate::host2::object::RefImpl;
 use crate::host2::remote::RemoteBinding;
-use crate::host2::wire::{Frame, PeerKind, StateFrame};
+use crate::host2::wire::{Frame, PeerKind, StateFrame, WireReloadReport};
 use crate::json::Json;
 use crate::sync::Unsubscribe;
 
@@ -168,6 +168,8 @@ pub(crate) struct Conn {
     pub incoming: HashMap<u64, AbortController>,
     pub relayed_refs: HashMap<u64, RelayId>,
     pub relayed_calls: HashMap<u64, (RelayId, u64)>,
+    /// Reload votes awaited from this (child) peer.
+    pub votes: HashMap<u64, Reply<Option<WireReloadReport>>>,
 }
 
 impl Conn {
@@ -215,6 +217,7 @@ impl Conn {
             incoming: HashMap::new(),
             relayed_refs: HashMap::new(),
             relayed_calls: HashMap::new(),
+            votes: HashMap::new(),
         }
     }
 

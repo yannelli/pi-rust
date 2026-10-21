@@ -99,6 +99,7 @@ pub(super) async fn trust_decision(
         model_runtime: None,
         credentials: options.credentials.clone(),
         oauth: options.oauth.clone(),
+        credential_env: options.credential_env.clone(),
         resources: options.resources.clone(),
     })
     .await;

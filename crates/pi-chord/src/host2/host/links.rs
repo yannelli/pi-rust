@@ -61,27 +61,17 @@ impl HostImpl {
         self.net.get_or_init(|| spawn_net(self.me.clone(), self.handle.as_ref()))
     }
 
+    /// The link task, if links were ever used.
+    pub(crate) fn net_if_started(&self) -> Option<&NetHandle> {
+        self.net.get()
+    }
+
     pub(crate) fn bindings(&self) -> Vec<Arc<RemoteBinding>> {
         self.state().bindings.values().cloned().collect()
     }
 
     pub(crate) fn reloading(&self) -> bool {
         self.state().reloading
-    }
-
-    /// The oldest code version this host keeps.
-    pub(crate) fn oldest_code_version(&self) -> i64 {
-        let state = self.state();
-        state.code_versions.keys().copied().min().unwrap_or(state.current)
-    }
-
-    /// The parent retired `code_version`: this host may retire it too (a reload seam).
-    pub(crate) fn allow_retire(&self, code_version: u64) {
-        {
-            let mut state = self.state();
-            state.retire_allowed = state.retire_allowed.max(code_version as i64);
-        }
-        self.maybe_retire();
     }
 
     /// The route for hosts named `host_name`: the one with the longest matching prefix.
@@ -168,7 +158,12 @@ impl HostImpl {
         self.state().lingering.values().cloned().collect()
     }
 
-    pub(crate) fn connection_closed(&self, id: ConnId) {
+    /// A link closed; `upstream`: it was the link to the parent, so a reload it asked for is rolled back.
+    pub(crate) fn connection_closed(&self, id: ConnId, upstream: bool) {
+        if upstream {
+            self.set_parent(false);
+            self.parent_lost();
+        }
         let foreign: Vec<String> = {
             let mut state = self.state();
             state.root_links.values_mut().for_each(|links| {
@@ -211,6 +206,7 @@ impl Host {
     /// Sets (or replaces, after a reconnect) the link to this host's parent; remote references re-hold over it.
     /// The parent's own requests use the identity in `options`; requests it relays use the one it forwards.
     pub fn connect(&self, link: Arc<dyn Link>, options: ConnectOptions) {
+        self.0.set_parent(true);
         self.0.net().post(Msg::Connect { link, options, host: self.0.clone() });
     }
 

@@ -1,5 +1,5 @@
 //! Port of upstream `test/requests.test.ts`, link cases: the link half of #1, #8, #9, and #10 with the server
-//! across a link. The in-host cases are in `chord2_requests.rs`; #3, #5 and #7 need reloads (phase 4).
+//! across a link. The in-host cases are in `chord2_requests.rs`, the reload cases in `chord2_requests_reload.rs`.
 
 mod chord2_support;
 

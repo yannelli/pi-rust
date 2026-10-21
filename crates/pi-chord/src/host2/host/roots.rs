@@ -48,6 +48,7 @@ impl Drop for RootRun {
         }
         if ended {
             host.maybe_retire();
+            host.retirement_changed();
         }
     }
 }
@@ -196,7 +197,4 @@ impl HostImpl {
             self.end_root(root_id);
         }
     }
-
-    /// Retires the older code version once no local roots of it remain (a reload seam: phase 2 has one).
-    pub(crate) fn maybe_retire(&self) {}
 }

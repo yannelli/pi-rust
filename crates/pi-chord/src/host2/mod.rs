@@ -1,6 +1,6 @@
-//! Port of upstream's chord2 host runtime (`packages/chord/src`), beside the older facets/services runtime.
-//! Phase 1 holds the foundation (errors, schemas, contracts, wire frames, links), phase 2 the in-host runtime,
-//! phase 3 connections, remote references and WebSocket links. Upstream's `Self` is [`object::Declare`] here.
+//! Port of upstream's chord2 host runtime (`packages/chord/src`), beside the older facets/services runtime: the
+//! foundation (errors, schemas, contracts, wire frames, links), the in-host runtime, connections, remote references,
+//! WebSocket links, reloads, retirement and clusters. Upstream's `Self` is [`object::Declare`] here.
 
 pub mod cell;
 pub mod connection;
@@ -16,6 +16,7 @@ pub mod object;
 pub mod process_lock;
 pub mod publish;
 pub mod registry;
+pub mod reload;
 pub(crate) mod remote;
 pub mod schema;
 pub mod types;
@@ -37,8 +38,8 @@ pub use errors::{
     CHORD_ERROR_CODES, ChordErrorCode, ErrorOptions, as_chord_error, forbidden, invalid, is_chord_error, run_all,
 };
 pub use host::{
-    Facet, FacetApi, Host, HostOptions, HostRegistry, LingerOptions, LoadOptions, PrincipalMatch, create_host,
-    define_facet,
+    Facet, FacetApi, Host, HostOptions, HostRegistry, LingerOptions, LoadOptions, PluginRef, PrincipalMatch,
+    create_host, define_facet,
 };
 pub use link::{
     IpcChannel, IpcLink, Link, MemoryLink, PACK_THRESHOLD, Packed, Received, StreamChannel, WebSocketLink,
@@ -56,6 +57,7 @@ pub use object::{
 pub use process_lock::{ProcessLock, process_lock};
 pub use publish::{enqueue, hold_publications};
 pub use registry::{Conflict, Registration, Registry, RegistryTable, RegistryView, define_registry};
+pub use reload::{ReloadOptions, ReloadReport};
 pub use schema::{assert_valid, canonical_identity, canonical_json, fits, hash64, normalize};
 pub use types::{GetOptions, Readable, ReadableRef, RefStatus, Shape, StateEvent, on_event, on_value};
 pub use websocket::{Authenticator, WebSocketAcceptOptions, accept_web_sockets};

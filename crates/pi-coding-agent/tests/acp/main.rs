@@ -54,6 +54,7 @@ fn setup(responses: Vec<FauxResponse>) -> Setup {
         agent_dir: agent_dir.clone(),
         settings: Some(Arc::new(settings)),
         credentials: Some(Arc::new(InMemoryCredentialStore::new(BTreeMap::new()))),
+        credential_env: Some(offline_guard::credential_free_env()),
         ..AppOptions::default()
     };
     let mut options = AcpModeOptions::new(app, None);

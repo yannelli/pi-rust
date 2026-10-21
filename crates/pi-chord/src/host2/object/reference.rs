@@ -168,7 +168,6 @@ impl RefImpl {
     }
 
     /// The implementation changed (reload, variant): readables rebind, shape listeners hear it.
-    #[allow(dead_code, reason = "reloads and variant changes (phase 4) change shapes")]
     pub(crate) fn shape_changed(&self) {
         lock(&self.state).shape_seq += 1;
         self.announce_shape();

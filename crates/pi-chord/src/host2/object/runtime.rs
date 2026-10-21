@@ -308,7 +308,6 @@ impl ObjectImpl {
     }
 
     /// Opens the object's gate and replays queued listener events through the current listeners.
-    #[allow(dead_code, reason = "reload gates (phase 4)")]
     pub(crate) fn open_gate(self: &Arc<Self>) {
         let gate = self.state().gate.take();
         for (key, event) in gate.map(|gate| gate.queue).unwrap_or_default() {

@@ -152,7 +152,7 @@ fn resolved_bindings_use_a_string_for_one_key_and_a_list_otherwise() {
 #[test]
 fn tui_definitions_cover_every_id_in_order() {
     let definitions = tui_keybindings();
-    assert_eq!(ids::ALL.len(), 47);
+    assert_eq!(ids::ALL.len(), 48);
     assert_eq!(definitions.ids().collect::<Vec<_>>(), ids::ALL);
     assert_eq!(definitions.get(ids::EDITOR_UNDO).map(|d| d.default_keys.clone()), Some(vec!["ctrl+-".to_string()]));
 }

@@ -1,6 +1,6 @@
-//! Port of upstream `test/requests.test.ts`, in-host cases: #1 and #2 up to their link and reload halves, #4,
-//! #6, and #10 with the server's type on the same host. The link cases are in `chord2_requests_links.rs`.
-//! Left out: #3, #5 and #7 (reloads, phase 4).
+//! Port of upstream `test/requests.test.ts`, in-host cases: #1 up to its link half, #2, #4, #6, and #10 with
+//! the server's type on the same host. The link cases are in `chord2_requests_links.rs`, the reload cases (#3,
+//! #5 and #7) in `chord2_requests_reload.rs`.
 
 mod chord2_support;
 
@@ -80,36 +80,46 @@ async fn r2_facets_reach_their_own_host_through_facet_api_root_and_registry() {
     let settings = local_type("t.settings", object(&[]), vec![]);
     let reader = local_type("t.reader", object(&[]), vec![("read", method(None, string()).into())]);
     let captured: Arc<Mutex<Vec<FacetApi>>> = Arc::default();
-    let (kept, served_reader) = (captured.clone(), reader.clone());
-    let facet = define_facet("config", move |api| {
-        kept.lock().unwrap().push(api.clone());
-        let registered = config.clone();
-        let register = move |_: &Json, _: &Json, decl: &mut Declare| {
-            decl.register(&registered, [("greeting".to_string(), "v1".to_string())])?;
-            Ok(Implementation::new())
-        };
-        api.serve(&settings, register, ServeOptions::host())?;
-        let (reading, read) = (api.clone(), config.clone());
-        let factory = move |_: &Json, _: &Json, _: &mut Declare| {
-            let (api, config) = (reading.clone(), read.clone());
-            Ok(Implementation::new().method("read", move |_, ctx| {
-                let greeting = api.registry(&config).get("greeting", Some(ctx.code_version()));
-                ready(greeting.map(|greeting| json!(greeting.unwrap_or_default())))
-            }))
-        };
-        api.serve(&served_reader, factory, ServeOptions::default())
-    });
+    let facet = |value: &'static str| {
+        let (kept, served_reader, settings, config) =
+            (captured.clone(), reader.clone(), settings.clone(), config.clone());
+        define_facet("config", move |api| {
+            kept.lock().unwrap().push(api.clone());
+            let registered = config.clone();
+            let register = move |_: &Json, _: &Json, decl: &mut Declare| {
+                decl.register(&registered, [("greeting".to_string(), value.to_string())])?;
+                Ok(Implementation::new())
+            };
+            api.serve(&settings, register, ServeOptions::host())?;
+            let (reading, read) = (api.clone(), config.clone());
+            let factory = move |_: &Json, _: &Json, _: &mut Declare| {
+                let (api, config) = (reading.clone(), read.clone());
+                Ok(Implementation::new().method("read", move |_, ctx| {
+                    let greeting = api.registry(&config).get("greeting", Some(ctx.code_version()));
+                    ready(greeting.map(|greeting| json!(greeting.unwrap_or_default())))
+                }))
+            };
+            api.serve(&served_reader, factory, ServeOptions::default())
+        })
+    };
     let host = named("worker");
-    host.install(&facet, LoadOptions::default()).await.unwrap();
+    host.install(&facet("v1"), LoadOptions::default()).await.unwrap();
     sleep_ms(5).await;
     let api = captured.lock().unwrap()[0].clone();
     assert_eq!(api.name(), "worker");
     // A callback outside Chord (a Durable tool, say) starts its own root.
-    let run = move |ctx: Ctx| async move {
-        let reader = ctx.get(&reader, json!({}), GetOptions::default()).await?;
-        reader.call_json("read", Json::Null, Some(&ctx)).await
+    let run = |reader: Contract| {
+        move |ctx: Ctx| async move {
+            let reader = ctx.get(&reader, json!({}), GetOptions::default()).await?;
+            reader.call_json("read", Json::Null, Some(&ctx)).await
+        }
     };
-    assert_eq!(api.root(run, RootOptions::default()).await.unwrap(), json!("v1"));
+    assert_eq!(api.root(run(reader.clone()), RootOptions::default()).await.unwrap(), json!("v1"));
+    host.reload(vec![facet("v2").into()], Default::default()).await.unwrap();
+    sleep_ms(5).await;
+    let latest = captured.lock().unwrap()[1].clone();
+    assert_eq!(latest.registry(&config).get("greeting", None).unwrap().as_deref(), Some("v2"));
+    assert_eq!(api.root(run(reader), RootOptions::default()).await.unwrap(), json!("v2"));
 }
 
 /// `{entries, status}` built without copying `entries` (a new revision that shares structure).

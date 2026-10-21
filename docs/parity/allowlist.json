@@ -24,6 +24,10 @@
       "reason": "Legacy key. pi-rust migrates it to transport when settings load (settings/manager.rs) and keeps no field for it in Settings."
     },
     {
+      "item": "promptHistory",
+      "reason": "pi-rust extension: persistent prompt history"
+    },
+    {
       "item": "warnings",
       "reason": "pi-rust removed the Anthropic subscription warning and its settings (PR #28). An existing warnings key stays in settings.json as an unknown key."
     },
@@ -44,6 +48,10 @@
     {
       "item": "llama",
       "reason": "Upstream registers /llama from its built-in llama extension (extensions/llama). pi-rust implements llama.cpp support natively and lists /llama as a built-in command."
+    },
+    {
+      "item": "diff",
+      "reason": "pi-rust extension: /diff"
     },
     {
       "item": "undo",
