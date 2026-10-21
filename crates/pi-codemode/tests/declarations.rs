@@ -30,6 +30,25 @@ fn renders_primitives_literals_and_unions() {
 }
 
 #[test]
+fn keeps_the_sibling_type_of_all_of_constraints() {
+    // Zod 4 renders a string with several `.regex()` checks this way.
+    let patterns = json!({ "type": "string", "allOf": [{ "pattern": "^a" }, { "pattern": "z$" }] });
+    assert_eq!(ty(patterns.clone()), "string");
+    let edit = json!({ "type": "object", "properties": { "find": patterns }, "required": ["find"] });
+    assert_eq!(ty(edit), "{ find: string; }");
+    let object = json!({
+        "type": "object",
+        "properties": { "find": { "type": "string" } },
+        "required": ["find"],
+        "allOf": [{ "properties": { "replace": { "type": "string" } } }],
+    });
+    assert_eq!(ty(object), "{ find: string; } & { replace?: string; }");
+    let bare = json!({ "type": "object", "allOf": [{ "properties": { "a": { "type": "string" } } }] });
+    assert_eq!(ty(bare), "{ a?: string; }");
+    assert_eq!(ty(json!({ "type": "object", "allOf": [{}] })), "{ [key: string]: unknown; }");
+}
+
+#[test]
 fn renders_objects_on_one_line_with_sorted_properties() {
     let schema = json!({
         "type": "object",

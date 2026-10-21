@@ -60,6 +60,19 @@ fn presents_callable_tools_per_mode() {
 }
 
 #[test]
+fn only_hides_direct_tools_that_are_registered_but_not_active() {
+    // A direct tool deactivated mid-run must stay hidden, or the first request regains its declaration.
+    let mut loadout = loadout();
+    let probe = CodemodeToolInfo::new("probe", "Probe.", json!({ "type": "object" }));
+    loadout.registered.push(InfoTool::shared(probe, ToolExposure::Direct));
+    let options = CodemodeToolOptions { mode: CodemodeMode::Only, ..CodemodeToolOptions::default() };
+    let only = prepare_codemode_loadout(&loadout, &options);
+    assert_eq!(only.hidden_declarations, ["read", "echo", "probe"]);
+    assert!(!only.descriptions["codemode"].contains("### `probe`"));
+    assert!(prepare_codemode_loadout(&loadout, &CodemodeToolOptions::default()).hidden_declarations.is_empty());
+}
+
+#[test]
 fn lists_codemode_and_deferred_exposures_by_exposure_not_activity() {
     let mut loadout = loadout();
     let mut search = CodemodeToolInfo::new("mcp__docs__search", "Search docs.", json!({}));
