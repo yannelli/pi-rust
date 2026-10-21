@@ -66,6 +66,7 @@ impl InteractiveMode {
         self.show_managed_tool_warnings();
         self.setup_key_handlers();
         self.setup_autocomplete_provider();
+        self.load_prompt_history();
         self.rebind_current_session();
         let bridge = std::sync::Arc::downgrade(&self.bridge);
         crate::theme::on_theme_change(move || {

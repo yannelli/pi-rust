@@ -163,6 +163,16 @@ pub struct CodemodeSettings {
     pub inline_budget: Option<f64>,
 }
 
+/// `promptHistory` (pi-rust extension): prompts saved in `<agent dir>/prompt-history.jsonl`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptHistorySettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_entries: Option<f64>,
+}
+
 /// A `packages` entry: a source string, or an object with resource filters.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -345,6 +355,8 @@ pub struct Settings {
     pub output_pad: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub autocomplete_max_visible: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_history: Option<PromptHistorySettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show_hardware_cursor: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
