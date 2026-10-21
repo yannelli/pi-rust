@@ -16,8 +16,9 @@ function parseUrl(input) {
   }
 }
 
-function attachBody(target, init, headers) {
+function attachBody(target, init, headers, duplex) {
   const extracted = extractBody(init);
+  if (extracted.streamed && duplex === undefined) throw new TypeError("RequestInit: duplex option is required when sending a body.");
   if (extracted.type && !headers.has("content-type")) headers.set("content-type", extracted.type);
   target[kBody] = { source: extracted.source, stream: null, used: false };
 }
@@ -43,11 +44,13 @@ class Request extends BodyMixin {
       duplex: init.duplex || "half",
     };
     let body = init.body;
-    if (body === undefined) body = base && !base.bodyUsed ? base.body : null;
+    let duplex = init.duplex;
+    if (body === undefined) [body, duplex] = [base && !base.bodyUsed ? base.body : null, "half"];
     if (body !== null && body !== undefined && (method === "GET" || method === "HEAD")) {
       throw new TypeError("Request with GET/HEAD method cannot have body.");
     }
-    attachBody(this, body, headers);
+    attachBody(this, body, headers, duplex);
+    if (base && init.body === undefined && base[kBody].source) this[kBody].source.sized = base[kBody].source.sized;
   }
   get url() {
     return this[kMeta].url;
@@ -81,8 +84,11 @@ class Request extends BodyMixin {
   }
   clone() {
     if (this.bodyUsed) throw new TypeError("Request.clone: Body has already been consumed.");
+    const sized = !!(this[kBody].source && (this[kBody].source.sized || this[kBody].source.bytes));
     const body = this.body ? teeInto(this) : null;
-    return new Request(this, { body, headers: new Headers(this.headers) });
+    const clone = new Request(this, { body, headers: new Headers(this.headers), duplex: "half" });
+    if (body) clone[kBody].source.sized = sized;
+    return clone;
   }
   get [Symbol.toStringTag]() {
     return "Request";
@@ -91,9 +97,10 @@ class Request extends BodyMixin {
 
 // Split a body stream so the original and the clone can both read it.
 function teeInto(owner) {
+  const source = owner[kBody].source;
   const [left, right] = owner.body.tee();
   owner[kBody].stream = left;
-  owner[kBody].source = { stream: left };
+  owner[kBody].source = { stream: left, sized: !!(source.sized || source.bytes) };
   return right;
 }
 
@@ -106,7 +113,7 @@ class Response extends BodyMixin {
     }
     const headers = new Headers(init.headers);
     this[kMeta] = { status, statusText: init.statusText === undefined ? "" : String(init.statusText), headers, type: "default", url: "", redirected: false };
-    attachBody(this, body, headers);
+    attachBody(this, body, headers, "half");
   }
   static json(data, init = {}) {
     const headers = new Headers(init.headers);
@@ -179,6 +186,25 @@ function abortReason(signal) {
   return signal.reason === undefined ? new DOMException("This operation was aborted", "AbortError") : signal.reason;
 }
 
+// Feed a stream body to the native request chunk by chunk; each write waits for the request to
+// take the previous chunk. A failed read fails the request, as undici does.
+async function sendBody(id, request, fail) {
+  const reader = request.body.getReader();
+  request[kBody].used = true;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const bytes = typeof value === "string" ? Buffer.from(value) : value;
+      await nativeFetch.write(id, internal.bytesToLatin1(bytes));
+    }
+    nativeFetch.end(id);
+  } catch (error) {
+    fail(error);
+    reader.cancel(error).catch(() => {});
+  }
+}
+
 async function fetch(input, init = undefined) {
   const request = new Request(input, init);
   const signal = request.signal;
@@ -192,12 +218,15 @@ async function fetch(input, init = undefined) {
   if (!headers.has("accept")) headers.set("accept", "*/*");
   if (!headers.has("user-agent")) headers.set("user-agent", "node");
   if (!headers.has("accept-encoding")) headers.set("accept-encoding", url.protocol === "https:" ? "br, gzip, deflate" : "gzip, deflate");
-  const body = request.body ? internal.bytesToLatin1(await request.bytes()) : undefined;
+  const source = request[kBody].source;
+  const streamed = !!(source && source.stream && !source.sized && !request.bodyUsed);
+  const body = !streamed && request.body ? internal.bytesToLatin1(await request.bytes()) : undefined;
   if (signal.aborted) throw abortReason(signal);
   return new Promise((resolve, reject) => {
     let controller = null;
     let id = null;
     let headReceived = false;
+    let finished = false;
     const onabort = () => {
       if (id !== null) nativeFetch.abort(id);
       const reason = abortReason(signal);
@@ -214,6 +243,7 @@ async function fetch(input, init = undefined) {
       },
     }, { highWaterMark: 0 });
     const onEvent = (kind, value) => {
+      if (kind === "end" || kind === "error" || kind === "terminated") finished = true;
       if (kind === "head") {
         headReceived = true;
         resolve(networkResponse(value, request, stream));
@@ -231,8 +261,19 @@ async function fetch(input, init = undefined) {
         controller.error(new TypeError("terminated", { cause: value }));
       }
     };
-    const nativeRequest = { url: request.url, method: request.method, headers: [...headers], redirect: request.redirect };
+    const nativeRequest = { url: request.url, method: request.method, headers: [...headers], redirect: request.redirect, streamBody: streamed };
     id = nativeFetch.start(nativeRequest, body, onEvent);
+    if (streamed) {
+      sendBody(id, request, (error) => {
+        if (finished) return;
+        finished = true;
+        nativeFetch.abort(id);
+        signal.removeEventListener("abort", onabort);
+        const failure = new TypeError("fetch failed", { cause: error });
+        if (headReceived) controller.error(failure);
+        else reject(failure);
+      });
+    }
     signal.addEventListener("abort", onabort, { once: true });
   });
 }

@@ -153,7 +153,7 @@ class REPLServer extends Interface {
       : { prompt, stream, eval: evaluate, useGlobal, ignoreUndefined, replMode };
     const input = options.input ?? options.stream ?? process.stdin;
     const output = options.output ?? options.stream ?? process.stdout;
-    super({ input, output, prompt: options.prompt ?? "> ", terminal: options.terminal });
+    super({ input, output, prompt: options.prompt ?? "> ", terminal: options.terminal, historySize: options.historySize });
     this._initialPrompt = options.prompt ?? "> ";
     this.useGlobal = !!options.useGlobal;
     this.ignoreUndefined = !!options.ignoreUndefined;
@@ -169,9 +169,30 @@ class REPLServer extends Interface {
     this.lastError = undefined;
     defineDefaultCommands(this);
     this.resetContext();
+    let sawSigint = false;
     this.on("line", (line) => {
+      sawSigint = false;
       if (this.#pending) this.#queued.push(line);
       else this.#onLine(line);
+    });
+    // Ctrl+C in terminal mode, as Node's REPL handles it: clear the line, or exit on a second press.
+    this.on("SIGINT", () => {
+      const empty = this.line.length === 0;
+      this.clearLine();
+      if (!this.bufferedCommand.length && empty) {
+        if (sawSigint) {
+          sawSigint = false;
+          this.close();
+          return;
+        }
+        this.output.write("(To exit, press Ctrl+C again or Ctrl+D or type .exit)\n");
+        sawSigint = true;
+      } else {
+        sawSigint = false;
+      }
+      this.clearBufferedCommand();
+      this.lines.level = [];
+      this.displayPrompt();
     });
     this.once("close", () => this.emit("exit"));
     this.displayPrompt();

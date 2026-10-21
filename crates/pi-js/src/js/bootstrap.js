@@ -435,7 +435,7 @@
     "stream/web": ["ReadableStream", "ReadableStreamDefaultReader", "ReadableStreamDefaultController", "WritableStream",
       "WritableStreamDefaultWriter", "WritableStreamDefaultController", "TransformStream", "TransformStreamDefaultController",
       "ByteLengthQueuingStrategy", "CountQueuingStrategy", "TextEncoderStream", "TextDecoderStream", "CompressionStream",
-      "DecompressionStream"],
+      "DecompressionStream", "ReadableStreamBYOBReader", "ReadableByteStreamController", "ReadableStreamBYOBRequest"],
     perf_hooks: ["performance", "PerformanceObserver"],
   };
   for (const [module, names] of Object.entries(lazyGlobals)) {

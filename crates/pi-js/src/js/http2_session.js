@@ -3,31 +3,54 @@ const net = require("net");
 const { Buffer } = require("buffer");
 const { codeError, invalidArgType, validate } = require("internal/errors");
 const core = require("internal/http2_core");
-const { ServerHttp2Stream, ClientHttp2Stream, kNative, toHeaders, flatten, validateSettings, DEFAULT_SETTINGS, NO_PAYLOAD, nativeH2, EventEmitter } = core;
+const { ServerHttp2Stream, ClientHttp2Stream, kNative, toHeaders, flatten, validateSettings, customEntries, validateRemoteCustomSettings, invalidSetting, DEFAULT_SETTINGS, NO_PAYLOAD, nativeH2, EventEmitter } = core;
 
 const sessionError = (message, code = "ERR_HTTP2_INVALID_SESSION") => codeError(Error, code, message);
 // What a peer's settings are until its SETTINGS frame says otherwise.
 const REMOTE_DEFAULTS = { ...DEFAULT_SETTINGS, maxConcurrentStreams: 4294967295, maxHeaderListSize: 4294967295, maxHeaderSize: 4294967295 };
 const SETTING_NAMES = { 1: "headerTableSize", 2: "enablePush", 3: "maxConcurrentStreams", 4: "initialWindowSize", 5: "maxFrameSize", 6: "maxHeaderListSize", 8: "enableConnectProtocol" };
+const now = () => Number(process.hrtime.bigint()) / 1e6;
+
+// Apply settings to localSettings; custom settings add to the ones sent before.
+function mergeSettings(target, { customSettings, ...settings }) {
+  Object.assign(target, settings);
+  if (customSettings === undefined) return;
+  const custom = { ...target.customSettings };
+  for (const key in customSettings) if (typeof customSettings[key] === "number") custom[key] = customSettings[key];
+  target.customSettings = custom;
+}
+
+const copySettings = (settings) => (settings.customSettings ? { ...settings, customSettings: { ...settings.customSettings } } : { ...settings });
 
 class Http2Session extends EventEmitter {
   constructor(type, options, socket) {
     super();
     const settings = validateSettings(options.settings);
+    const custom = customEntries(settings.customSettings, SETTING_NAMES);
+    for (const id of options.remoteCustomSettings ?? []) {
+      if (typeof id !== "number" || !(id >= 0 && id <= 0xffff)) throw invalidSetting("Range Error", id);
+    }
     Object.assign(this, { type, socket, _streams: new Map(), _nextKey: 1, closed: false, destroyed: false, connecting: true, _closeCallback: null, _goawaySent: false });
     // Pushed stream keys stay clear of the keys the native session gives incoming streams.
-    Object.assign(this, { _pushKey: 2 ** 32, _peerSettings: null, _settingsReady: false });
-    this.localSettings = { ...DEFAULT_SETTINGS, ...settings };
+    Object.assign(this, { _pushKey: 2 ** 32, _remoteCustom: new Set(options.remoteCustomSettings) });
+    this.localSettings = { ...DEFAULT_SETTINGS };
+    mergeSettings(this.localSettings, settings);
     this.remoteSettings = { ...REMOTE_DEFAULTS };
+    // A callback and start time for each SETTINGS frame sent and not yet acknowledged.
+    this._settingsAcks = [[undefined, now()]];
     this.pendingSettingsAck = true;
     this.encrypted = !!socket.encrypted;
     this.alpnProtocol = socket.encrypted ? socket.alpnProtocol || "h2" : "h2c";
     this.originSet = undefined;
-    this[kNative] = nativeH2.session(type === 0, settings, (event, key, value, end, id) => this._onNative(event, key, value, end, id));
+    const nativeSettings = { ...settings, customSettings: custom };
+    this[kNative] = nativeH2.session(type === 0, nativeSettings, (event, key, value, end, id) => this._onNative(event, key, value, end, id));
     this._onData = (chunk) => {
       if (this[kNative] === null) return;
-      const frames = nativeH2.feed(this[kNative], chunk);
-      if (frames) frames.forEach((frame) => this._onSettings(frame));
+      for (const seen of nativeH2.feed(this[kNative], chunk) ?? []) {
+        if (this.destroyed) return;
+        if (seen === "ack") this._onSettingsAck();
+        else this._onSettings(seen);
+      }
     };
     this._onEnd = () => this[kNative] !== null && nativeH2.endInput(this[kNative]);
     this._onClose = () => this.destroy();
@@ -45,16 +68,9 @@ class Http2Session extends EventEmitter {
 
   _onNative(event, key, value, end, id) {
     if (this.destroyed) return;
-    if (event === "out") {
-      if (!this.socket.destroyed) this.socket.write(Buffer.from(value.buffer, value.byteOffset, value.length));
-    } else if (event === "ready") {
-      this.remoteSettings = { ...REMOTE_DEFAULTS, ...this._peerSettings };
-      this._settingsReady = true;
-      this.pendingSettingsAck = false;
-      this._ready();
-      this.emit("localSettings", { ...this.localSettings });
-      if (this._peerSettings) this.emit("remoteSettings", { ...this.remoteSettings });
-    } else if (event === "closed") this._onClosed(value);
+    if (event === "out") this._write(value);
+    else if (event === "ready") this._ready();
+    else if (event === "closed") this._onClosed(value);
     else if (event === "stream") this._onStream(key, value, end, id);
     else if (event === "promise") this._onPromise(key, value, id);
     else {
@@ -67,19 +83,31 @@ class Http2Session extends EventEmitter {
     this.connecting = false;
   }
 
+  _write(bytes) {
+    if (!this.socket.destroyed) this.socket.write(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length));
+  }
+
   // A SETTINGS frame from the peer, read from the bytes fed to the native session.
   _onSettings(frame) {
-    this._peerSettings ??= {};
+    const remote = this.remoteSettings;
     for (let index = 0; index < frame.length; index += 2) {
-      const name = SETTING_NAMES[frame[index]];
-      if (!name) continue;
-      const value = name === "enablePush" || name === "enableConnectProtocol" ? frame[index + 1] !== 0 : frame[index + 1];
-      this._peerSettings[name] = value;
-      if (name === "maxHeaderListSize") this._peerSettings.maxHeaderSize = value;
+      const [id, value] = [frame[index], frame[index + 1]];
+      const name = SETTING_NAMES[id];
+      if (name === "enablePush" || name === "enableConnectProtocol") remote[name] = value !== 0;
+      else if (name) remote[name] = value;
+      else if (this._remoteCustom.has(id)) remote.customSettings = { ...remote.customSettings, [id]: value };
+      if (name === "maxHeaderListSize") remote.maxHeaderSize = value;
     }
-    if (!this._settingsReady) return;
-    Object.assign(this.remoteSettings, this._peerSettings);
-    this.emit("remoteSettings", { ...this.remoteSettings });
+    this.emit("remoteSettings", copySettings(remote));
+  }
+
+  // The peer acknowledged the first SETTINGS frame or one from settings().
+  _onSettingsAck() {
+    const [callback, start] = this._settingsAcks.shift() ?? [];
+    this.pendingSettingsAck = this._settingsAcks.length > 0;
+    const settings = copySettings(this.localSettings);
+    if (callback) callback(null, settings, now() - start);
+    this.emit("localSettings", settings);
   }
 
   _onClosed(info) {
@@ -109,14 +137,14 @@ class Http2Session extends EventEmitter {
     if (this.destroyed) throw sessionError("The session has been destroyed");
     settings = validateSettings(settings);
     if (callback !== undefined) validate.function(callback, "callback");
-    Object.assign(this.localSettings, settings);
+    const custom = customEntries(settings.customSettings, SETTING_NAMES);
+    mergeSettings(this.localSettings, settings);
     if (settings.initialWindowSize !== undefined) nativeH2.windowSize(this[kNative], settings.initialWindowSize);
+    // The custom settings go in a SETTINGS frame of their own; its ACK runs the callback.
+    this._settingsAcks.push([callback, now()]);
     this.pendingSettingsAck = true;
-    process.nextTick(() => {
-      this.pendingSettingsAck = false;
-      this.emit("localSettings", { ...this.localSettings });
-      if (callback) callback(null, { ...this.localSettings }, 0);
-    });
+    const frame = nativeH2.settings(this[kNative], custom);
+    if (frame) this._write(frame);
   }
 
   setLocalWindowSize(size) {
@@ -151,6 +179,9 @@ class Http2Session extends EventEmitter {
     this.closed = true;
     for (const stream of this._streams.values()) stream.destroy(error);
     this._streams.clear();
+    for (const [callback] of this._settingsAcks.splice(0)) {
+      if (callback) callback(codeError(Error, "ERR_HTTP2_SETTINGS_CANCEL", "HTTP2 session settings canceled"));
+    }
     const id = this[kNative];
     this[kNative] = null;
     if (id !== null) {
@@ -271,6 +302,7 @@ class ClientHttp2Session extends Http2Session {
 function connect(authority, options, listener) {
   if (typeof options === "function") [listener, options] = [options, {}];
   options = { ...options };
+  validateRemoteCustomSettings(options.remoteCustomSettings);
   if (typeof authority === "string") authority = new URL(authority);
   else if (!(authority instanceof URL)) authority = new URL(`${authority.protocol || "http:"}//${authority.host || authority.hostname || "localhost"}${authority.port ? `:${authority.port}` : ""}`);
   const protocol = authority.protocol || options.protocol || "https:";

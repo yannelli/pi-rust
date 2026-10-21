@@ -132,3 +132,53 @@ async fn dns_matches_node() {
     assert_same_keys(&actual, &serde_json::from_str(DNS_EXPECTED).unwrap());
     assert!(capture.uncaught.lock().unwrap().is_empty());
 }
+
+// Joining a source-specific group on the loopback interface is compared on Linux only.
+const SOURCE_MEMBERSHIP_SCRIPT: &str = r##"
+const dgram = require("node:dgram");
+const out = {};
+const attempt = (fn) => {
+  try {
+    fn();
+    return "ok";
+  } catch (error) {
+    return [error.name, error.code, error.message, error.syscall ?? null, typeof error.errno];
+  }
+};
+const socket = dgram.createSocket("udp4");
+await new Promise((resolve) => socket.bind(0, "127.0.0.1", resolve));
+out.noArgs = attempt(() => socket.addSourceSpecificMembership());
+out.groupType = attempt(() => socket.addSourceSpecificMembership("127.0.0.1", 5));
+out.dropNoArgs = attempt(() => socket.dropSourceSpecificMembership());
+out.badSource = attempt(() => socket.addSourceSpecificMembership("nope", "232.1.1.1"));
+out.badGroup = attempt(() => socket.addSourceSpecificMembership("127.0.0.1", "nope"));
+out.badInterface = attempt(() => socket.addSourceSpecificMembership("127.0.0.1", "232.1.1.1", "nope"));
+out.mixedFamilies = attempt(() => socket.addSourceSpecificMembership("127.0.0.1", "ff3e::1234"));
+out.dropBad = attempt(() => socket.dropSourceSpecificMembership("127.0.0.1", "nope"));
+if (process.platform === "linux") {
+  out.join = attempt(() => socket.addSourceSpecificMembership("127.0.0.1", "232.1.1.1", "127.0.0.1"));
+  out.drop = attempt(() => socket.dropSourceSpecificMembership("127.0.0.1", "232.1.1.1", "127.0.0.1"));
+  out.dropAgain = attempt(() => socket.dropSourceSpecificMembership("127.0.0.1", "232.1.1.1", "127.0.0.1"));
+  out.notMulticast = attempt(() => socket.addSourceSpecificMembership("127.0.0.1", "10.1.1.1", "127.0.0.1"));
+}
+await new Promise((resolve) => socket.close(resolve));
+out.closed = attempt(() => socket.addSourceSpecificMembership("127.0.0.1", "232.1.1.1"));
+return out;
+"##;
+
+const SOURCE_MEMBERSHIP_EXPECTED: &str = r##"{"noArgs":["TypeError","ERR_INVALID_ARG_TYPE","The \"sourceAddress\" argument must be of type string. Received undefined",null,"undefined"],"groupType":["TypeError","ERR_INVALID_ARG_TYPE","The \"groupAddress\" argument must be of type string. Received type number (5)",null,"undefined"],"dropNoArgs":["TypeError","ERR_INVALID_ARG_TYPE","The \"sourceAddress\" argument must be of type string. Received undefined",null,"undefined"],"badSource":["Error","EINVAL","addSourceSpecificMembership EINVAL","addSourceSpecificMembership","number"],"badGroup":["Error","EINVAL","addSourceSpecificMembership EINVAL","addSourceSpecificMembership","number"],"badInterface":["Error","EINVAL","addSourceSpecificMembership EINVAL","addSourceSpecificMembership","number"],"mixedFamilies":["Error","EINVAL","addSourceSpecificMembership EINVAL","addSourceSpecificMembership","number"],"dropBad":["Error","EINVAL","dropSourceSpecificMembership EINVAL","dropSourceSpecificMembership","number"],"join":"ok","drop":"ok","dropAgain":["Error","EINVAL","dropSourceSpecificMembership EINVAL","dropSourceSpecificMembership","number"],"notMulticast":["Error","EINVAL","addSourceSpecificMembership EINVAL","addSourceSpecificMembership","number"],"closed":["Error","ERR_SOCKET_DGRAM_NOT_RUNNING","Not running",null,"undefined"]}"##;
+
+#[tokio::test]
+async fn dgram_source_specific_membership_matches_node() {
+    let (_dir, root) = tempdir();
+    let (runtime, capture) = runtime(&root);
+    let actual = run_cjs_within(&runtime, &root, SOURCE_MEMBERSHIP_SCRIPT, 60).await;
+    let mut expected: serde_json::Value = serde_json::from_str(SOURCE_MEMBERSHIP_EXPECTED).unwrap();
+    if !cfg!(target_os = "linux") {
+        for key in ["join", "drop", "dropAgain", "notMulticast"] {
+            expected.as_object_mut().unwrap().remove(key);
+        }
+    }
+    assert_same_keys(&actual, &expected);
+    assert!(capture.uncaught.lock().unwrap().is_empty());
+}

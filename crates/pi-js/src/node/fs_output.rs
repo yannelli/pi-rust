@@ -1,6 +1,6 @@
 //! The results of fs requests and their conversion to JavaScript values.
 
-use rquickjs::{Array, Ctx, Object, Value};
+use rquickjs::{Array, Ctx, IntoJs, Object, Value};
 
 use super::fs_ops::StatInfo;
 use crate::error::JsError;
@@ -16,6 +16,8 @@ pub(crate) enum Output {
     Stat(Box<StatInfo>),
     /// `(name, type)` pairs; names are relative paths for recursive listings.
     Entries(Vec<(String, u8)>),
+    /// Numbers too large for `f64`, as decimal strings.
+    List(Vec<String>),
 }
 
 pub(crate) fn to_js<'js>(ctx: &Ctx<'js>, output: Output) -> Result<Value<'js>, JsError> {
@@ -51,6 +53,7 @@ pub(crate) fn to_js<'js>(ctx: &Ctx<'js>, output: Output) -> Result<Value<'js>, J
             object.set("exact", info.exact.iter().map(i128::to_string).collect::<Vec<_>>())?;
             Ok(object.into_value())
         }
+        Output::List(items) => items.into_js(ctx),
         Output::Entries(entries) => {
             let list = Array::new(ctx.clone())?;
             for (index, (name, kind)) in entries.into_iter().enumerate() {

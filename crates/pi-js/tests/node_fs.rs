@@ -89,3 +89,94 @@ async fn fs_matches_node() {
     let expected: serde_json::Value = serde_json::from_str(FS_EXPECTED).unwrap();
     assert_eq!(actual, expected);
 }
+
+// fchmod, fchown, lutimes, lchmod, and FileHandle chmod and chown. Expected values come from Node 22.
+const FS_META_SCRIPT: &str = r##"
+const fs = require("fs");
+const out = {};
+fs.writeFileSync("f.txt", "hello");
+const fd = fs.openSync("f.txt", "r+");
+fs.fchmodSync(fd, 0o640);
+out.fchmod = (fs.statSync("f.txt").mode & 0o777).toString(8);
+await new Promise((resolve) => fs.fchmod(fd, "600", resolve));
+out.fchmodCb = (fs.statSync("f.txt").mode & 0o777).toString(8);
+const st = fs.statSync("f.txt");
+fs.fchownSync(fd, st.uid, st.gid);
+out.fchownCb = await new Promise((resolve) => fs.fchown(fd, st.uid, st.gid, resolve));
+fs.closeSync(fd);
+try { fs.fchmodSync(fd, 0o600); } catch (e) { out.fchmodClosed = [e.code, e.syscall, e.message]; }
+try { fs.fchmodSync(3, "abc"); } catch (e) { out.badMode = [e.code, e.message]; }
+try { fs.fchownSync(3, "a", 1); } catch (e) { out.badUid = [e.code, e.message]; }
+fs.symlinkSync("f.txt", "link");
+fs.lutimesSync("link", 1000, 2000);
+out.lutimes = [fs.lstatSync("link").mtimeMs, fs.lstatSync("link").atimeMs, fs.statSync("f.txt").mtimeMs === 2000000];
+await fs.promises.lutimes("link", new Date(5000), 6);
+out.lutimesPromise = [fs.lstatSync("link").mtimeMs, fs.lstatSync("link").atimeMs];
+await new Promise((resolve) => fs.lutimes("link", 7, 8.5, resolve));
+out.lutimesCb = fs.lstatSync("link").mtimeMs;
+try { fs.lutimesSync("missing", 1, 2); } catch (e) { out.lutimesMissing = [e.code, e.syscall, e.message]; }
+const handle = await fs.promises.open("f.txt", "r+");
+await handle.chmod(0o644);
+out.handleChmod = (fs.statSync("f.txt").mode & 0o777).toString(8);
+out.handleChown = await handle.chown(st.uid, st.gid);
+await handle.close();
+try { await handle.chmod(0o600); } catch (e) { out.handleClosed = e.code; }
+if (process.platform === "darwin") {
+  fs.lchmodSync("link", 0o700);
+  out.lchmod = typeof fs.lchmod === "function" && (fs.lstatSync("link").mode & 0o777) === 0o700;
+} else {
+  out.lchmod = typeof fs.lchmod === "undefined" && typeof fs.lchmodSync === "undefined";
+  try { await fs.promises.lchmod("link", 0o700); } catch (e) { out.lchmod = out.lchmod && e.code === "ERR_METHOD_NOT_IMPLEMENTED" && e.message === "The lchmod() method is not implemented"; }
+}
+return out;
+"##;
+
+const FS_META_EXPECTED: &str = r##"{"fchmod":"640","fchmodCb":"600","fchownCb":null,"fchmodClosed":["EBADF","fchmod","EBADF: bad file descriptor, fchmod"],"badMode":["ERR_INVALID_ARG_VALUE","The argument 'mode' must be a 32-bit unsigned integer or an octal string. Received 'abc'"],"badUid":["ERR_INVALID_ARG_TYPE","The \"uid\" argument must be of type number. Received type string ('a')"],"lutimes":[2000000,1000000,false],"lutimesPromise":[6000,5000],"lutimesCb":8500,"lutimesMissing":["ENOENT","lutime","ENOENT: no such file or directory, lutime 'missing'"],"handleChmod":"644","handleClosed":"EBADF","lchmod":true}"##;
+
+#[tokio::test]
+#[cfg_attr(windows, ignore = "uses symlinks and Unix permission bits")]
+async fn fs_fd_metadata_and_lutimes_match_node() {
+    let (_dir, root) = tempdir();
+    let (runtime, _capture) = runtime(&root);
+    let actual = run_cjs(&runtime, &root, FS_META_SCRIPT).await;
+    assert_same_keys(&actual, &serde_json::from_str(FS_META_EXPECTED).unwrap());
+}
+
+// statfs, openAsBlob, and FileHandle.readableWebStream. Expected values come from Node 22.
+const FS_STATFS_SCRIPT: &str = r##"
+const fs = require("fs");
+const util = require("util");
+const out = {};
+fs.writeFileSync("f.txt", "hello world");
+const stats = fs.statfsSync(".");
+out.statfs = [util.inspect(stats).split(" ")[0], Object.keys(stats), Object.values(stats).every((v) => typeof v === "number" && v >= 0), stats.bsize > 0, stats.blocks >= stats.bfree];
+const big = fs.statfsSync("f.txt", { bigint: true });
+out.statfsBig = Object.values(big).map((v) => typeof v);
+try { fs.statfsSync("missing"); } catch (e) { out.statfsMissing = [e.code, e.syscall, e.message, e.path]; }
+out.statfsCb = await new Promise((resolve) => fs.statfs(".", (err, s) => resolve([err, typeof s.bavail])));
+out.statfsPromise = typeof (await fs.promises.statfs(".", { bigint: true })).ffree;
+const blob = await fs.openAsBlob("f.txt", { type: "text/plain" });
+out.blob = [blob.constructor.name, blob.size, blob.type, await blob.text(), await blob.slice(6).text()];
+try { fs.openAsBlob("missing"); } catch (e) { out.blobMissing = [e.name, e.code, e.message]; }
+try { fs.openAsBlob("f.txt", { type: 5 }); } catch (e) { out.blobType = [e.code, e.message]; }
+try { fs.openAsBlob(5); } catch (e) { out.blobPath = [e.code, e.message]; }
+const handle = await fs.promises.open("f.txt");
+const stream = handle.readableWebStream();
+const chunks = [];
+for await (const chunk of stream) chunks.push([chunk.constructor.name, Buffer.from(chunk).toString()]);
+out.webStream = [stream.constructor.name, chunks];
+try { handle.readableWebStream(); } catch (e) { out.webLocked = [e.code, e.message]; }
+await handle.close();
+try { handle.readableWebStream(); } catch (e) { out.webClosed = [e.code, e.message]; }
+return out;
+"##;
+
+const FS_STATFS_EXPECTED: &str = r##"{"statfs":["StatFs",["type","bsize","blocks","bfree","bavail","files","ffree"],true,true,true],"statfsBig":["bigint","bigint","bigint","bigint","bigint","bigint","bigint"],"statfsMissing":["ENOENT","statfs","ENOENT: no such file or directory, statfs 'missing'","missing"],"statfsCb":[null,"number"],"statfsPromise":"bigint","blob":["Blob",11,"text/plain","hello world","world"],"blobMissing":["TypeError","ERR_INVALID_ARG_VALUE","Unable to open file as blob"],"blobType":["ERR_INVALID_ARG_TYPE","The \"options.type\" property must be of type string. Received type number (5)"],"blobPath":["ERR_INVALID_ARG_TYPE","The \"path\" argument must be of type string or an instance of Buffer or URL. Received type number (5)"],"webStream":["ReadableStream",[["Uint8Array","hello world"]]],"webLocked":["ERR_INVALID_STATE","Invalid state: The FileHandle is locked"],"webClosed":["ERR_INVALID_STATE","Invalid state: The FileHandle is closed"]}"##;
+
+#[tokio::test]
+async fn fs_statfs_blob_and_web_stream_match_node() {
+    let (_dir, root) = tempdir();
+    let (runtime, _capture) = runtime(&root);
+    let actual = run_cjs(&runtime, &root, FS_STATFS_SCRIPT).await;
+    assert_same_keys(&actual, &serde_json::from_str(FS_STATFS_EXPECTED).unwrap());
+}

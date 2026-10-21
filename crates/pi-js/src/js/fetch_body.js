@@ -175,8 +175,9 @@ function bytesSource(text, type) {
   return { source: { bytes: new TextEncoder().encode(text) }, type };
 }
 
-// A body as `{ source: { bytes } | { stream } | null, type }`, where `type` is the implied
-// Content-Type. Blob and FormData bodies become streams because reading them is async.
+// A body as `{ source: { bytes } | { stream, sized } | null, type, streamed }`, where `type` is
+// the implied Content-Type. Blob and FormData bodies become sized streams because reading them is
+// async; `streamed` marks streams and async iterables, which fetch sends as they are read.
 function extractBody(body) {
   if (body === null || body === undefined) return { source: null, type: null };
   if (typeof body === "string") return bytesSource(body, "text/plain;charset=UTF-8");
@@ -185,14 +186,14 @@ function extractBody(body) {
   if (ArrayBuffer.isView(body)) {
     return { source: { bytes: new Uint8Array(body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength)) }, type: null };
   }
-  if (body instanceof Blob) return { source: { stream: body.stream() }, type: body.type || null };
+  if (body instanceof Blob) return { source: { stream: body.stream(), sized: true }, type: body.type || null };
   if (body instanceof FormData) {
     const random = Array.from(crypto.getRandomValues(new Uint8Array(8)), (byte) => byte.toString(16).padStart(2, "0")).join("");
     const boundary = `----formdata-pi-${random}`;
-    return { source: { stream: streamOf(() => encodeMultipart(body, boundary)) }, type: `multipart/form-data; boundary=${boundary}` };
+    return { source: { stream: streamOf(() => encodeMultipart(body, boundary)), sized: true }, type: `multipart/form-data; boundary=${boundary}` };
   }
-  if (body instanceof ReadableStream) return { source: { stream: body }, type: null };
-  if (typeof body[Symbol.asyncIterator] === "function") return { source: { stream: ReadableStream.from(body) }, type: null };
+  if (body instanceof ReadableStream) return { source: { stream: body }, type: null, streamed: true };
+  if (typeof body[Symbol.asyncIterator] === "function") return { source: { stream: ReadableStream.from(body) }, type: null, streamed: true };
   return bytesSource(String(body), "text/plain;charset=UTF-8");
 }
 
@@ -244,10 +245,11 @@ class BodyMixin {
     return new Blob([await this.bytes()], { type: this.headers.get("content-type") || "" });
   }
   async formData() {
-    const type = this.headers.get("content-type") || "";
-    if (!type.startsWith("application/x-www-form-urlencoded")) throw internal.unsupported("Body.formData for multipart bodies");
+    const bytes = await this.bytes();
     const form = new FormData();
-    for (const [name, value] of new URLSearchParams(await this.text())) form.append(name, value);
+    for (const [name, value] of require("internal/fetch_form").parseFormBody(bytes, this.headers.get("content-type"))) {
+      form.append(name, value);
+    }
     return form;
   }
 }

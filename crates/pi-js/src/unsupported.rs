@@ -21,29 +21,29 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
      32 or 64, AES-OCB IVs other than 8, 12, or 15 bytes and tags other than 8, 12, or 16, RSA-OAEP labels \
      that are not UTF-8, DSA sizes other than 1024/160, 2048/224, 2048/256, and 3072/256, private key encryption \
      with ciphers other than AES-CBC and 3DES-CBC (or PBES1), webcrypto.subtle except digest, setFips",
-    "fs: lchmod, fchmod, fchown, lutimes, statfs, openAsBlob, FileHandle chmod, chown, and readableWebStream",
-    "child_process: stdio entries that are streams or descriptors above 2, and sending handles other than TCP \
+    "child_process: stdio entries that are Unix socket or pipe streams, descriptors 0 to 2 at an index above \
+     2, and on Windows sockets and anything but 'ignore' above index 2; sending handles other than TCP \
      net.Socket and net.Server objects over IPC (ERR_INVALID_HANDLE_TYPE), such as Unix socket or pipe \
      servers, TLS sockets, and dgram sockets",
     "cluster: workers sharing Unix socket or named pipe servers, and TLS servers (each worker listens on its own)",
-    "net: sockets and servers from a file descriptor or an existing handle, reusePort",
+    "net: sockets and servers from a file descriptor or an existing handle, and reusePort outside Linux \
+     (ENOTSUP, as in libuv)",
     "tls: pfx (no PKCS#12 parser is bundled), encrypted private keys, exportKeyingMaterial, and TLS before 1.2",
     "http: the insecureHTTPParser option (accepted and ignored)",
-    "http2: performServerHandshake, altsvc and origin frames (ignored), custom settings, and stream priority",
-    "dgram: addSourceSpecificMembership, dropSourceSpecificMembership, and bind with a file descriptor",
+    "http2: performServerHandshake, altsvc and origin frames (ignored), and stream priority (h2 sends no \
+     PRIORITY frames)",
+    "dgram: IPv6 source-specific membership on Windows, and bind with a file descriptor",
     "process: binding, dlopen, setUncaughtExceptionCaptureCallback, and running code after process.exit when \
      the embedder's on_exit callback returns (the runtime is shutting down)",
-    "stream: Duplex.from for promises and web streams; stream/web BYOB readers, \
-     ReadableByteStreamController, CompressionStream, DecompressionStream",
+    "stream/web: CompressionStream and DecompressionStream",
     "v8: queryObjects",
     "vm: SourceTextModule, SyntheticModule, and Module (Node needs --experimental-vm-modules for them), \
      and breakOnSigint (accepted and ignored)",
     "worker_threads: worker.getHeapSnapshot, postMessageToThread, and resourceLimits other than the heap \
      and stack sizes (accepted)",
-    "fetch: Body.formData for multipart bodies, request bodies are buffered before sending",
     "sqlite: createSession, applyChangeset, enableLoadExtension(true), and loadExtension (the bundled SQLite \
      has no session extension, and native extensions do not load)",
-    "test: snapshot assertions (t.assert.snapshot and t.assert.fileSnapshot) and coverage (the lcov reporter)",
+    "test: coverage (the lcov reporter)",
     "inspector: open (there is no DevTools server to attach to)",
     "WebAssembly: shared memories (Memory with shared: true, and modules using threads and atomics fail to \
      compile), and exception handling (Tag and Exception throw, JSTag is absent, and modules using it fail \
@@ -55,14 +55,19 @@ pub const DIFFERENCES: &[&str] = &[
     "child_process: when the embedder sets an output sink, stdio 'inherit' sends a child's stdout and \
      stderr to the sink instead of the real terminal and gives its stdin no input (with the default \
      output, children inherit the real descriptors)",
+    "child_process: spawnSync treats a Buffer or string stdio entry as 'pipe' (Node drops the entry and \
+     shifts the later ones down)",
     "child_process.fork, and spawning process.execPath, run the script in this binary's JavaScript runner \
      (PI_JS_FORK); the IPC channel is a Unix socket or Windows named pipe, not an inherited descriptor",
+    "fs.openAsBlob reads the whole file when it is called, so later changes to the file do not show \
+     in the Blob (Node reads it lazily and fails the read if the file changed)",
     "tty.ReadStream works only for descriptor 0 (process.stdin); other descriptors fail with ERR_TTY_INIT_FAILED",
     "PerformanceObserver sees function, mark, and measure entries only",
     "process.exit calls the embedder's on_exit callback when one is set",
     "os.freemem and os.totalmem come from /proc, sysctl, or vm_stat; os.cpus reports zero times on \
      platforms other than Linux, macOS, and Windows",
-    "readline has no raw terminal editing: lines come from the input stream as text",
+    "readline: terminal mode has no tab completion, kill ring (Ctrl+Y), undo (Ctrl+_), or Ctrl+Z \
+     suspend, and display widths come from Node's fallback width tables rather than ICU",
     "module.register hooks run on the importing thread: a hook's promise must settle from microtasks alone, \
      and hooks apply to import, not require",
     "async_hooks: createHook sees AsyncResource objects only, not timers, promises, or I/O; async context \
@@ -81,12 +86,15 @@ pub const DIFFERENCES: &[&str] = &[
      server headersTimeout and requestTimeout use per-connection timers instead of a periodic check, and \
      setMaxIdleHTTPParsers only validates its argument",
     "http2: sessions run on the h2 crate: ping sends an opaque payload and reports the caller's payload back, \
-     settings after connect apply only initialWindowSize, a client's goaway sends no GOAWAY frame, received \
+     settings after connect send only initialWindowSize and customSettings, the custom ones in a \
+     SETTINGS frame of their own, a client's goaway sends no GOAWAY frame, received \
      data is not flow-controlled by the reader, closing a pushed stream on the client sends no RST_STREAM, \
      and session and stream state objects are approximate",
     "child_process: messages sent after a handle do not wait for the peer's NODE_HANDLE_ACK (Node queues \
      them, and resends the handle after a NODE_HANDLE_NACK), and bytes that a sent socket had read in the \
      sender but not yet emitted as 'data' are dropped instead of emitted there",
+    "dgram: addMembership, dropMembership, and the source-specific variants need a bound socket (Node \
+     binds an unbound one to a random port first)",
     "cluster: round-robin hands each connection to the next connected worker in turn rather than to the \
      next free one, and the primary does not report worker server errors with Node's exact errno text",
     "vm: a context is a separate QuickJS context whose globals forward to the contextified object; \
@@ -100,16 +108,17 @@ pub const DIFFERENCES: &[&str] = &[
      worker.performance reports no event loop use; moveMessagePortToContext returns the same port",
     "zlib: deflate output can differ in bytes from Node's zlib (zlib-rs); memLevel and strategy are \
      validated but not applied; brotli error codes come from the Rust decoder",
-    "sqlite: statement.iterate() reads every row when it is called rather than one row per next(), and \
-     a StatementSync prepares its SQL through the connection's statement cache on each call",
+    "sqlite: all(), get(), and run() prepare a StatementSync's SQL through the connection's statement \
+     cache on each call, and iterate() prepares its own copy that the statement's iterators share",
     "test: each result prints as soon as its test finishes, so console output from tests interleaves with \
      the report differently than in Node; subtests run one at a time (concurrency is accepted and \
      ignored); --test-only, --experimental-test-coverage, and module mocks are not available; run() loads \
      test files in this runtime instead of child processes, so an ES module file runs only on its first \
-     load; the spec reporter prints no colors; source locations come from QuickJS stack frames, whose \
+     load; t.filePath, and so the default snapshot file, is the file that declared the test rather than \
+     the entry file; the spec reporter prints no colors; source locations come from QuickJS stack frames, whose \
      columns can differ from V8's",
-    "repl: input is read line by line with no terminal editing, completion, history file, or .editor \
-     mode; top-level await keeps a single const, let, or var declaration per line visible afterwards; \
+    "repl: terminal mode edits lines through readline but has no completion, previews, or colors, and \
+     there is no history file or .editor mode; top-level await keeps a single const, let, or var declaration per line visible afterwards; \
      lines that arrive during an asynchronous evaluation wait for it; the context is a vm context, so \
      globalThis inside it is not the context object (see vm), and error messages come from QuickJS",
     "inspector: sessions run in this runtime and cover Runtime (evaluation, remote objects, properties, \

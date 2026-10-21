@@ -194,6 +194,14 @@ function handleOf(socket) {
   return socket._handle === null ? 0 : socket._handle;
 }
 
+function sourceMembership(socket, sourceAddress, groupAddress, interfaceAddress, join) {
+  const handle = handleOf(socket);
+  validate.string(sourceAddress, "sourceAddress");
+  validate.string(groupAddress, "groupAddress");
+  const iface = typeof interfaceAddress === "string" ? interfaceAddress : undefined;
+  nativeDgram.sourceMembership(handle, sourceAddress, groupAddress, iface, join);
+}
+
 Object.assign(Socket.prototype, {
   setBroadcast(flag) {
     nativeDgram.setBroadcast(handleOf(this), !!flag);
@@ -224,11 +232,11 @@ Object.assign(Socket.prototype, {
     if (!multicastAddress) throw codeError(TypeError, "ERR_MISSING_ARGS", 'The "multicastAddress" argument must be specified');
     nativeDgram.dropMembership(handleOf(this), multicastAddress, interfaceAddress);
   },
-  addSourceSpecificMembership() {
-    throw internal.unsupported("dgram socket.addSourceSpecificMembership");
+  addSourceSpecificMembership(sourceAddress, groupAddress, interfaceAddress) {
+    sourceMembership(this, sourceAddress, groupAddress, interfaceAddress, true);
   },
-  dropSourceSpecificMembership() {
-    throw internal.unsupported("dgram socket.dropSourceSpecificMembership");
+  dropSourceSpecificMembership(sourceAddress, groupAddress, interfaceAddress) {
+    sourceMembership(this, sourceAddress, groupAddress, interfaceAddress, false);
   },
   getRecvBufferSize() {
     return nativeDgram.bufferSize(handleOf(this), true);
