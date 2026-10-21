@@ -54,8 +54,52 @@ pub fn create_read_tool(options: ReadToolOptions) -> ToolRegistration {
     let options = Arc::new(options);
     define_tool("read", description, parameters, move |args, api, context| {
         let options = options.clone();
-        async move { execute_read(&options, args, Arc::new(api), context).await }
+        async move { execute_read(&options, args, Arc::new(api), context).await.map(with_read_output) }
     })
+    .with_structured_output_schema(read_output_schema())
+}
+
+/// What a program that calls `read` receives: a text file's text, or the image with its note, which `image()` shows.
+fn read_output_schema() -> Value {
+    json!({
+        "anyOf": [
+            { "type": "string" },
+            {
+                "type": "object",
+                "properties": {
+                    "type": { "const": "image", "type": "string" },
+                    "data": { "type": "string" },
+                    "mimeType": { "type": "string" },
+                    "note": { "type": "string" }
+                },
+                "required": ["type", "data", "mimeType", "note"]
+            }
+        ]
+    })
+}
+
+/// The result with its structured output: the image and its `image` diagnostic as the note, else the text. An error
+/// result keeps none; its diagnostics say what went wrong.
+fn with_read_output(mut result: ToolExecutionResult) -> ToolExecutionResult {
+    if result.is_error == Some(true) {
+        return result;
+    }
+    let output = result.output.as_deref().unwrap_or_default();
+    let image = output.iter().find_map(|block| match block {
+        ContentBlock::Image { data, mime_type } => Some((data, mime_type)),
+        _ => None,
+    });
+    let value = match image {
+        Some((data, mime_type)) => {
+            let note =
+                result.diagnostics.iter().flatten().find(|diagnostic| diagnostic.code.as_deref() == Some("image"));
+            let note = note.map(|diagnostic| diagnostic.message.as_str()).unwrap_or_default();
+            json!({ "type": "image", "data": data, "mimeType": mime_type, "note": note })
+        }
+        None => Value::String(output.iter().filter_map(ContentBlock::as_text).collect::<Vec<_>>().join("\n")),
+    };
+    result.structured_output = Some(value.into());
+    result
 }
 
 /// The `read` tool's execution against any call api.

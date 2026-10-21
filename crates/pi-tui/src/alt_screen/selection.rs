@@ -21,8 +21,9 @@ use crate::utils::{
 
 const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(500);
 const AUTO_SCROLL_INTERVAL: Duration = Duration::from_millis(50);
-/// Fullscreen owns selection, so paths and kebab-case tokens stay whole like terminal word selection.
-const WORD_SELECTION_JOINERS: [&str; 2] = ["/", "-"];
+/// Fullscreen owns selection, so paths (`~/` ones too) and kebab-case tokens stay whole like terminal
+/// word selection.
+const WORD_SELECTION_JOINERS: [&str; 3] = ["/", "-", "~"];
 
 impl AltScreenState {
     fn visible_rows(&self, view: &ScrollViewHandle, rows: usize) -> Option<(i64, i64, &LayoutBox)> {

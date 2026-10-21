@@ -93,3 +93,31 @@ async fn login_explains_providers_configured_outside_pi() {
     })
     .await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn renaming_the_current_session_from_resume_renames_the_live_session() {
+    local(async {
+        let responses = vec![pi_ai::providers::faux::FauxResponse::text("first answer")];
+        let ui = start(Options { responses, ..Options::default() }).await;
+        ui.submit("first question").await;
+        ui.wait_for("first answer").await;
+        ui.submit("/name Before").await;
+        ui.wait_until("named", |ui| ui.session().session_name().as_deref() == Some("Before")).await;
+        ui.submit("/resume").await;
+        ui.wait_for("Resume Session").await;
+        ui.settle(300).await;
+        ui.send("\x12").await;
+        ui.wait_for("Rename Session").await;
+        // The input starts with the current name: Ctrl+E then Ctrl+U clears it.
+        ui.send("\x05").await;
+        ui.send("\x15").await;
+        ui.send("After").await;
+        ui.send("\r").await;
+        ui.wait_until("renamed", |ui| ui.session().session_name().as_deref() == Some("After")).await;
+        let file = ui.session().session_file().unwrap();
+        let stored = pi_coding_agent::session::SessionManager::open(&file).unwrap().session_name();
+        assert_eq!(stored.as_deref(), Some("After"));
+        ui.send("\x1b").await;
+    })
+    .await;
+}

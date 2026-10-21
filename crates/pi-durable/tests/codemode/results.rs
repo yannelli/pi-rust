@@ -101,8 +101,13 @@ async fn open_with_env(path: &str, chat: &Chat, env: SharedEnv) -> (Harness, Con
 
 /// Run `code` once in a chat with a local environment; the result's text and message.
 async fn run_script(code: &str, chat: Chat) -> (String, ToolResultMessage) {
+    run_script_in(code, chat, tempfile::tempdir().unwrap()).await
+}
+
+/// [`run_script`] in the working directory `cwd`.
+async fn run_script_in(code: &str, chat: Chat, cwd: tempfile::TempDir) -> (String, ToolResultMessage) {
     chat.holds.block.store(false, Ordering::SeqCst);
-    let (cwd, directory) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let directory = tempfile::tempdir().unwrap();
     chat.setup.faux.set_responses([script(code), done()]);
     let (harness, root) = open_with_env(&sqlite_path(&directory), &chat, local_env(cwd.path())).await;
     let id = submit(&root, "go").await;
@@ -222,6 +227,25 @@ async fn saves_images_to_files_and_names_them_next_to_the_image() {
     assert_eq!(saved, PNG);
     assert!(result.content.iter().any(|item| matches!(item, ContentBlock::Image { .. })));
     remove_parent(path);
+}
+
+#[tokio::test]
+async fn resolves_read_with_an_image_that_image_shows_and_with_the_text_of_a_text_file() {
+    use base64::Engine;
+    let chat = codemode_chat(vec![]);
+    add_tool(&chat.setup, pi_durable::tools::create_read_tool(Default::default()));
+    let cwd = tempfile::tempdir().unwrap();
+    let png = base64::engine::general_purpose::STANDARD.decode(PNG).unwrap();
+    std::fs::write(cwd.path().join("pixel.png"), png).unwrap();
+    std::fs::write(cwd.path().join("note.txt"), "hello").unwrap();
+    let code = r#"const picture = await tools.read({ path: "pixel.png" });
+        image(picture);
+        return [picture.type, picture.mimeType, picture.data === "PNG", await tools.read({ path: "note.txt" })];"#;
+    let (text, result) = run_script_in(&code.replace("PNG", PNG), chat, cwd).await;
+    assert!(text.contains(r#"["image","image/png",true,"hello"]"#), "{text}");
+    assert!(result.content.iter().any(|item| matches!(item, ContentBlock::Image { .. })), "{text}");
+    let saved = text.split("[Image saved to ").nth(1).and_then(|rest| rest.split_once(" (image/png, "));
+    remove_parent(saved.unwrap_or_else(|| panic!("{text}")).0);
 }
 
 #[tokio::test]

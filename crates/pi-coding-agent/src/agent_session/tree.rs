@@ -321,6 +321,17 @@ impl AgentSession {
         Ok(())
     }
 
+    /// Name the session stored at `path`, as the resume picker does. This session goes through
+    /// [`Self::set_session_name`], so its manager and extensions see the new name at once; any
+    /// other session is renamed on disk only.
+    pub fn rename_session_at(&self, path: &Path, name: &str) -> anyhow::Result<()> {
+        if self.session_file().as_deref() == Some(path) {
+            return self.set_session_name(name);
+        }
+        crate::session::SessionManager::open_with(path, None, None)?.append_session_info(name)?;
+        Ok(())
+    }
+
     /// Bookmark an entry; `None` or an empty label clears it.
     pub fn set_label(&self, entry_id: &str, label: Option<&str>) -> anyhow::Result<()> {
         self.session_manager().append_label_change(entry_id, label)?;
@@ -404,17 +415,17 @@ impl AgentSession {
     }
 
     /// [`Self::reload`] that resolves the `packages` settings again, installing missing ones
-    /// (`/reload`, upstream `ResourceLoader.reload`). Returns the package error, if any.
-    pub async fn reload_resources(&self) -> Option<super::RuntimeDiagnostic> {
+    /// (`/reload`, upstream `ResourceLoader.reload`). Returns the package warnings.
+    pub async fn reload_resources(&self) -> Vec<super::RuntimeDiagnostic> {
         let previous_defaults = self.current_default_tools();
         self.settings().reload();
         let (cwd, agent_dir, settings) = {
             let services = self.services();
             (services.cwd.clone(), services.agent_dir.clone(), services.settings.clone())
         };
-        let (packages, error) = super::services::package_resources(&cwd, &agent_dir, &settings).await;
+        let (packages, diagnostics) = super::services::package_resources(&cwd, &agent_dir, &settings).await;
         self.reload_with_packages(Some(packages), &previous_defaults);
-        error
+        diagnostics
     }
 
     fn reload_with_packages(&self, packages: Option<crate::resources::ResolvedPaths>, previous_defaults: &[String]) {

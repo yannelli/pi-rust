@@ -182,7 +182,7 @@ impl InteractiveMode {
             )
         };
         let agent_dir = self.agent_dir.clone();
-        let (weak, render, exit) = (self.weak.clone(), self.weak.clone(), self.weak.clone());
+        let (weak, render, exit, rename) = (self.weak.clone(), self.weak.clone(), self.weak.clone(), self.weak.clone());
         self.selector.show(Box::new(move |done| {
             let (select, cancel) = (weak.clone(), weak);
             let (done_select, done_cancel) = (done.clone(), done);
@@ -213,10 +213,9 @@ impl InteractiveMode {
                     }
                 },
                 SessionSelectorOptions {
-                    rename_session: Some(Box::new(|path, name| {
-                        let mut manager = SessionManager::open_with(&path, None, None)?;
-                        manager.append_session_info(&name)?;
-                        Ok(())
+                    rename_session: Some(Box::new(move |path, name| {
+                        let mode = rename.upgrade().ok_or_else(|| anyhow::anyhow!("Interactive mode closed"))?;
+                        mode.session().rename_session_at(&path, &name)
                     })),
                     show_rename_hint: Some(true),
                 },

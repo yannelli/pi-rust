@@ -22,10 +22,20 @@ pub fn create_initial_system_message(system_prompt: Option<&str>, tools: &[Tool]
     })
 }
 
-/// Fold `system_prompt` and `tools` into a leading system message.
+/// Fold `system_prompt` and `tools` into a leading system message. Otherwise move the first
+/// system message ahead of context that an extension recorded at session start, so it stays
+/// the prompt; later system updates keep their place.
 pub fn normalize_context(context: &Context) -> Vec<Message> {
     let initial = create_initial_system_message(context.system_prompt.as_deref(), &context.tools);
-    initial.map(Message::System).into_iter().chain(context.messages.iter().cloned()).collect()
+    let mut messages: Vec<Message> =
+        initial.map(Message::System).into_iter().chain(context.messages.iter().cloned()).collect();
+    if let Some(index) = messages.iter().position(|message| matches!(message, Message::System(_)))
+        && index > 0
+    {
+        let first = messages.remove(index);
+        messages.insert(0, first);
+    }
+    messages
 }
 
 fn system_messages(messages: &[Message]) -> impl Iterator<Item = &SystemMessage> {
@@ -363,6 +373,17 @@ mod tests {
         assert_eq!(resolve(5, additions), (vec![base(), dropped(), late("y")], 5));
         assert_eq!(resolve(5, TranscriptToolSupport::Changes), (Vec::new(), 0));
         assert_eq!(resolve(5, TranscriptToolSupport::None), (vec![base(), dropped(), late("y")], 5));
+    }
+
+    #[test]
+    fn leads_with_the_first_system_message_after_session_start_context() {
+        let prompt = system(json!({"role": "system", "content": "base", "toolsAdded": [tool("read")], "timestamp": 1}));
+        let update = system(json!({"role": "system", "content": "more", "timestamp": 3}));
+        let (memory, hi) = (Message::user("memory"), Message::user("hi"));
+        let messages = vec![memory.clone(), prompt.clone(), hi.clone(), update.clone()];
+        let normalized = normalize_context(&Context { messages, ..Context::default() });
+        assert_eq!(normalized, [prompt, memory, hi, update]);
+        assert_eq!(initial_system_message(&normalized).map(system_message_text).as_deref(), Some("base"));
     }
 
     #[test]
