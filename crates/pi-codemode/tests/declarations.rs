@@ -43,6 +43,9 @@ fn keeps_the_sibling_type_of_all_of_constraints() {
         "allOf": [{ "properties": { "replace": { "type": "string" } } }],
     });
     assert_eq!(ty(object), "{ find: string; } & { replace?: string; }");
+    let bare = json!({ "type": "object", "allOf": [{ "properties": { "a": { "type": "string" } } }] });
+    assert_eq!(ty(bare), "{ a?: string; }");
+    assert_eq!(ty(json!({ "type": "object", "allOf": [{}] })), "{ [key: string]: unknown; }");
 }
 
 #[test]

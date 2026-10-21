@@ -30,6 +30,8 @@ const UPPER_BOUNDS: [&str; 4] = ["maximum", "exclusiveMaximum", "maxLength", "ma
 /// Longest property tag; longer ones (large defaults, long patterns) are left out.
 const MAX_TAG_CHARS: usize = 80;
 
+const OPEN_OBJECT: &str = "{ [key: string]: unknown; }";
+
 fn is_line_terminator(c: char) -> bool {
     matches!(c, '\r' | '\n' | '\u{2028}' | '\u{2029}')
 }
@@ -140,12 +142,16 @@ fn to_type(schema: &Value, context: &mut SchemaContext<'_>) -> String {
         return union(variants.iter().map(|variant| to_type(variant, context)).collect());
     }
     if let Some(Value::Array(parts)) = schema.get("allOf") {
-        // Keywords next to `allOf`, such as `type`, apply together with its parts.
+        // Keywords next to `allOf`, such as `type`, apply together with its parts. A bare
+        // open object adds nothing next to parts that render to a type.
         let mut siblings = schema.clone();
         siblings.remove("allOf");
-        let mut rendered = vec![to_type(&Value::Object(siblings), context)];
-        rendered.extend(parts.iter().map(|part| to_type(part, context)));
-        let parts: Vec<String> = rendered.into_iter().filter(|part| part != "unknown").collect();
+        let sibling = to_type(&Value::Object(siblings), context);
+        let mut parts: Vec<String> =
+            parts.iter().map(|part| to_type(part, context)).filter(|part| part != "unknown").collect();
+        if sibling != "unknown" && !(sibling == OPEN_OBJECT && !parts.is_empty()) {
+            parts.insert(0, sibling);
+        }
         if parts.is_empty() {
             return "unknown".into();
         }
