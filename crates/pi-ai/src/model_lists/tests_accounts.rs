@@ -207,3 +207,50 @@ async fn anthropic_falls_back_to_the_catalog() {
         AccountModelList::Anthropic.personalize(anthropic_catalog(), &context(&endless, Some("k"))).await.unwrap();
     assert_eq!(models, anthropic_catalog(), "pages that never end change nothing");
 }
+
+fn copilot_catalog() -> Vec<Model> {
+    vec![
+        chat("github-copilot", "anthropic-messages", "claude-sonnet-4.6"),
+        chat("github-copilot", "openai-responses", "gpt-5.4"),
+        chat("github-copilot", "openai-completions", "gpt-4.1"),
+        chat("github-copilot", "openai-responses", "gpt-5-mini"),
+    ]
+}
+
+fn copilot_entry(id: &str, kind: &str, picker: bool, policy: &str) -> serde_json::Value {
+    json!({"id": id, "name": id.to_uppercase(), "model_picker_enabled": picker, "policy": {"state": policy},
+           "capabilities": {"type": kind, "supports": {"tool_calls": true},
+                            "limits": {"max_context_window_tokens": 144_000, "max_output_tokens": 32_000}}})
+}
+
+#[tokio::test]
+async fn copilot_lists_the_pickers_chat_models() {
+    let mut no_tools = copilot_entry("gpt-5-mini", "chat", true, "enabled");
+    no_tools["capabilities"]["supports"]["tool_calls"] = json!(false);
+    let body = json!({"data": [
+        copilot_entry("claude-sonnet-4.6", "chat", true, "enabled"),
+        copilot_entry("gpt-5.4", "chat", true, "disabled"),
+        copilot_entry("gpt-4.1", "chat", false, "enabled"),
+        copilot_entry("claude-opus-4.8", "chat", true, "unconfigured"),
+        copilot_entry("text-embedding-3-small", "embeddings", true, "enabled"),
+        no_tools,
+    ]});
+    let server = serve(200, body).await;
+    let list = AccountModelList::GitHubCopilot;
+    let models = list.personalize(copilot_catalog(), &context(&server, Some("copilot-test-token"))).await.unwrap();
+
+    assert_eq!(ids(&models), ["claude-sonnet-4.6", "claude-opus-4.8"]);
+    assert_eq!((models[0].context_window, models[0].max_tokens), (144_000, 32_000));
+    assert_eq!((models[1].name.as_str(), models[1].api.as_str()), ("CLAUDE-OPUS-4.8", "anthropic-messages"));
+    let request = &server.requests()[0];
+    assert_eq!(request.path, "/models");
+    assert_eq!(request.headers["authorization"], "Bearer copilot-test-token");
+    assert_eq!(request.headers["user-agent"], "GitHubCopilotChat/0.35.0");
+    assert_eq!(request.headers["copilot-integration-id"], "vscode-chat");
+    assert!(request.headers.contains_key("x-github-api-version"));
+}
+
+#[tokio::test]
+async fn copilot_falls_back_to_the_catalog() {
+    assert_fallbacks(AccountModelList::GitHubCopilot, "copilot-test-token", copilot_catalog()).await;
+}

@@ -40,6 +40,7 @@ Behavior that pi-rust adds on purpose. The parity review should not report these
 
 - Account model list for `openai-codex` from the Codex backend's `/codex/models` (README "Account model lists").
 - Account model list for `anthropic` from `/v1/models` (README "Account model lists").
+- Account model list for `github-copilot` from the Copilot `/models` endpoint (README "Account model lists").
 
 ## Platform
 
