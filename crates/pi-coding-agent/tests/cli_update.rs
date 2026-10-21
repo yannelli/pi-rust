@@ -8,7 +8,7 @@ mod http_mock;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-use cli_support::{mock_server, setup, text_body};
+use cli_support::{isolate, mock_server, setup, text_body};
 use http_mock::{Reply, Server};
 use pi_coding_agent::update::{ArchiveKind, archive_name, binary_name, release_target, sha256_hex};
 use serde_json::{Value, json};
@@ -18,21 +18,15 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Run `executable` in `root/work` with the agent directory `root/agent` and `envs`.
 async fn run(executable: PathBuf, root: &Path, args: &[&str], envs: &[(&str, String)]) -> Output {
     let mut command = Command::new(executable);
-    command
+    // Online, for the local servers, but without inherited credentials for real providers.
+    isolate(&mut command)
+        .env_remove("PI_OFFLINE")
         .args(args)
         .current_dir(root.join("work"))
         .env("PI_CODING_AGENT_DIR", root.join("agent"))
         .env("CARGO_HOME", root.join("cargo-home"))
-        .env_remove("PI_OFFLINE")
-        .env_remove("GITHUB_TOKEN")
-        .env_remove("ANTHROPIC_API_KEY")
         .env_remove("PI_TIMING")
         .stdin(Stdio::null());
-    // With these keys, `pi update --models` would read account model lists from real APIs.
-    let keys = ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_OAUTH_TOKEN", "OPENAI_API_KEY", "XAI_API_KEY", "GEMINI_API_KEY"];
-    for name in keys.into_iter().chain(["OPENROUTER_API_KEY", "COPILOT_GITHUB_TOKEN"]) {
-        command.env_remove(name);
-    }
     for (name, value) in envs {
         command.env(name, value);
     }
