@@ -83,6 +83,7 @@ Options:
   --no-themes                    Disable theme discovery and loading
   --no-context-files, -nc        Disable AGENTS.md and CLAUDE.md discovery and loading
   --export <file>                Export session file to HTML and exit
+                                 An output path ending in .md writes Markdown (pi-rust extension)
   --list-models [search]         List available models (with optional fuzzy search)
   --verbose                      Force verbose startup (overrides quietStartup setting)
   --tui-mode <mode>              TUI mode: fullscreen (default) or regular
@@ -163,6 +164,9 @@ Examples:
   {app} --export ~/{config_dir}/agent/sessions/--path--/session.jsonl
   {app} --export session.jsonl output.html
 
+  # Export a session file to Markdown (pi-rust extension)
+  {app} --export session.jsonl output.md
+
 Environment Variables:
   ANTHROPIC_AUTH_TOKEN             - Anthropic bearer auth token
   ANTHROPIC_API_KEY                - Anthropic Claude API key
@@ -232,6 +236,7 @@ mod tests {
             "# Codemode with only the tools of one MCP server",
             "--tools read,bash,codemode,'mcp__radius__*'",
             "--export session.jsonl output.html",
+            "--export session.jsonl output.md",
         ] {
             assert!(text.contains(example), "missing {example}");
         }
