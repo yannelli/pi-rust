@@ -366,7 +366,8 @@ impl AgentSession {
     }
 
     /// Add a `custom` message to the conversation. While streaming it waits for the end of the
-    /// current turn (or is queued when `trigger_turn`); otherwise `trigger_turn` starts a run.
+    /// current turn (or is queued when `trigger_turn`); otherwise `trigger_turn` starts a run,
+    /// once a running compaction has ended.
     pub async fn send_custom_message(&self, message: CustomMessage, trigger_turn: bool) -> anyhow::Result<()> {
         let custom = message.clone();
         let message = message.into_message();
@@ -379,6 +380,11 @@ impl AgentSession {
             return Ok(());
         }
         if trigger_turn {
+            if self.is_compacting() {
+                // The run starts once compaction ends, as after a run; meanwhile one may have started.
+                self.wait_while_compacting().await;
+                return Box::pin(self.send_custom_message(custom, true)).await;
+            }
             return self.start_run(RunTrigger::Custom(custom), || {}).await;
         }
         self.append_custom_message(message);
