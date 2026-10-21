@@ -183,7 +183,7 @@ async function results(execArgv) {
   for await (const event of run({ files: [file], execArgv })) {
     if (event.type === "test:pass" || event.type === "test:fail") {
       const error = event.data.details.error;
-      events.push([event.type, event.data.name, error ? [error.cause?.code, String(error.cause?.message).split("\n")[0].replaceAll(dir, "<dir>")] : null]);
+      events.push([event.type, event.data.name, error ? [error.cause?.code, String(error.cause?.message).split("\n")[0].replaceAll(dir, "<dir>").replaceAll("\\", "/")] : null]);
     }
   }
   return events;
