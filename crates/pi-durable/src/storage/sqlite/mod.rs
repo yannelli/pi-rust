@@ -6,7 +6,6 @@ mod connection;
 pub mod database;
 pub mod migrations;
 mod reads;
-pub mod replication;
 mod rows;
 pub mod schema;
 mod writes;
