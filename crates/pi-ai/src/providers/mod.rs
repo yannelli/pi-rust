@@ -13,7 +13,7 @@ pub mod github_copilot;
 pub mod google;
 pub mod google_vertex;
 #[cfg(test)]
-mod http_mock;
+pub(crate) mod http_mock;
 mod http_stream;
 pub mod mistral;
 #[cfg(test)]
