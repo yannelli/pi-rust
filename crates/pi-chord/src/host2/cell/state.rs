@@ -26,7 +26,6 @@ struct CellState {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Ops,
-    #[allow(dead_code, reason = "reload commits (phase 4) reset cells")]
     Reset,
 }
 
@@ -137,8 +136,12 @@ impl Cell {
         self.publish(write, prepared, Kind::Ops, true, ops)
     }
 
+    /// The schema a reload commit declared, for a value it kept.
+    pub(crate) fn set_schema(&self, schema: Json) {
+        lock(&self.state).schema = schema;
+    }
+
     /// Installs a migrated value and its schema (reload commit). Subscribers receive a reset.
-    #[allow(dead_code, reason = "reload commits (phase 4) reset cells")]
     pub(crate) fn reset(&self, value: Json, schema: Json) -> ChordResult<()> {
         let write = self.core.options().lock.enter()?;
         let prepared = {

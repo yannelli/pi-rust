@@ -16,7 +16,7 @@ use crate::host2::object::HostCore;
 use crate::host2::remote::StateIn;
 use crate::host2::types::Shape;
 use crate::host2::wire::{
-    CallResult, Frame, Hello, PROTOCOL_VERSION, PeerKind, StateFrame, StateKind, Vote, from_wire_error, to_wire_error,
+    CallResult, Frame, Hello, PROTOCOL_VERSION, PeerKind, StateFrame, StateKind, from_wire_error, to_wire_error,
 };
 use crate::json::Json;
 
@@ -79,11 +79,16 @@ impl Net {
                 }
                 self.on_control(id, frame);
             }
-            Frame::Vote(_) => {
+            Frame::Vote(vote) => {
                 if !conn.child_host() {
-                    self.violation(id, "vote from a non-participant");
+                    return self.violation(id, "vote from a non-participant");
                 }
-                // Votes answer cluster reloads (phase 4); none is awaited yet.
+                if let Some(waiter) = conn.votes.remove(&vote.reload) {
+                    let _ = waiter.send(match vote.error {
+                        Some(error) => Err(from_wire_error(&error)),
+                        None => Ok(vote.report),
+                    });
+                }
             }
         }
     }
@@ -101,13 +106,7 @@ impl Net {
                 });
             }
             Frame::Retire { code_version } => host.allow_retire(code_version),
-            Frame::Prepare(prepare) => {
-                // Cluster reloads arrive in phase 4: the parent's reload fails instead of waiting for this child.
-                let message = format!("{} cannot take part in cluster reloads yet", host.name());
-                let error = ChordError::with_reason(ChordErrorCode::Unavailable, "not_supported", message);
-                let vote = Vote { reload: prepare.reload, error: Some(to_wire_error(&error)), report: None };
-                self.send(id, &Frame::Vote(vote));
-            }
+            frame @ (Frame::Prepare(_) | Frame::Commit { .. } | Frame::Abort { .. }) => host.on_reload_frame(id, frame),
             _ => {}
         }
     }
@@ -147,9 +146,9 @@ impl Net {
         }
     }
 
-    /// A child host announced its code version. In step: usable. Ahead: refused. Behind: fenced, and reconciled
-    /// by a reload of its modules (phase 4); until then such a child is closed.
-    fn peer_hello(&mut self, id: ConnId, code_version: u64) {
+    /// A child host announced its code version. In step: usable. Ahead: refused. Behind: fenced (nothing is
+    /// routed to it) and reconciled by a reload of its modules to this host's code version, never renumbered.
+    pub(super) fn peer_hello(&mut self, id: ConnId, code_version: u64) {
         let (Some(host), Some(conn)) = (self.host(), self.conns.get_mut(&id)) else { return };
         let current = host.current_code_version() as u64;
         if code_version > current {
@@ -158,6 +157,8 @@ impl Net {
             return self.close_link(id, "code version ahead of parent");
         }
         if host.reloading() {
+            // Not a participant of the running reload: decided when it ends. A child behind is fenced now, so the
+            // calls its roots make meanwhile are admitted in this host's code version instead of `superseded`.
             conn.peer_code_version = Some(code_version);
             if code_version < current {
                 conn.fenced.insert(code_version);
@@ -167,17 +168,12 @@ impl Net {
         }
         if code_version == current {
             self.mark_synced(id, code_version);
-            let retired = host.oldest_code_version() - 1;
-            if retired > 0 {
-                self.send(id, &Frame::Retire { code_version: retired as u64 });
-            }
+            self.announce_retired(id);
             return;
         }
         conn.peer_code_version = Some(code_version);
         conn.fenced.insert(code_version);
-        let message = format!("{} runs code version {code_version}, behind {current}", conn.shown_name());
-        host.report(ChordError::with_reason(ChordErrorCode::Unavailable, "not_supported", message));
-        self.close_link(id, "reconciliation failed");
+        self.reconcile(id);
     }
 
     /// Stops talking to a peer of another protocol version: reports it and closes the link. The close reason tells
@@ -287,6 +283,9 @@ impl Net {
             pending.signal.remove_listener(pending.listener);
             let _ = pending.reply.send(Err(error.clone()));
         }
+        for (_, vote) in conn.votes.drain() {
+            let _ = vote.send(Err(error.clone()));
+        }
         for waiter in std::mem::take(&mut conn.sync_waiters) {
             fail_waiter(waiter, error.clone());
         }
@@ -303,11 +302,12 @@ impl Net {
             }
         }
         self.deferred_hellos.shift_remove(&id);
-        if self.upstream == Some(id) {
+        let upstream = self.upstream == Some(id);
+        if upstream {
             self.upstream = None;
         }
         if let Some(host) = self.host() {
-            host.connection_closed(id);
+            host.connection_closed(id, upstream);
         }
     }
 }

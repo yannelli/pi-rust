@@ -1,4 +1,4 @@
-//! Port of upstream `test/state-init.test.ts`. Left out: the `reload` cases (phase 4).
+//! Port of upstream `test/state-init.test.ts`.
 
 mod chord2_support;
 
@@ -189,4 +189,108 @@ async fn init_runs_in_a_root_and_can_call_other_objects() {
     let reference = hold(&host, &notes_type());
     reference.ready().await.unwrap();
     assert_eq!(reference.state("notes").unwrap().value().unwrap(), json!(["from source"]));
+}
+
+type More = Arc<dyn Fn() -> ChordResult<Json> + Send + Sync>;
+
+/// The notes facet of the reload cases: `more` adds an init cell, `count_version` the counter's version.
+fn reload_facet(inits: &Log, more: Option<More>, count_version: i64) -> pi_chord::host2::Facet {
+    let inits = inits.clone();
+    pi_chord::host2::define_facet("notes", move |api| {
+        let (inits, more) = (inits.clone(), more.clone());
+        let factory = move |_: &Json, _: &Json, decl: &mut Declare| {
+            let loaded = inits.clone();
+            let notes = decl.state_init("notes", array(string()), move |_| {
+                loaded.push("notes");
+                ready(Ok(json!(["loaded"])))
+            })?;
+            let options = pi_chord::host2::StateOptions { version: Some(count_version), migrate: None };
+            let counter = decl.state_with("counter", number(), pi_chord::host2::Initial::Value(json!(0)), options)?;
+            let mut sources: Vec<ReadableRef> = vec![notes.clone(), counter];
+            if let Some(more) = more.clone() {
+                let loaded = inits.clone();
+                sources.push(decl.state_init("more", array(string()), move |_| {
+                    loaded.push("more");
+                    ready(more())
+                })?);
+            }
+            let sum = |values: &[Json]| {
+                let size =
+                    |value: &Json| value.as_f64().unwrap_or_else(|| value.as_array().map_or(0, |a| a.len()) as f64);
+                Ok(json!(values.iter().map(size).sum::<f64>()))
+            };
+            let count = decl.derive(sources, sum);
+            let (has, add) = (notes.clone(), notes.clone());
+            Ok(Implementation::new()
+                .state("notes", notes)
+                .state("count", count)
+                .method("has", move |note, _| {
+                    let found = has.value().map(|notes| json!(notes.as_array().is_some_and(|n| n.contains(&note))));
+                    ready(found)
+                })
+                .method("add", move |note, ctx| {
+                    let changed = add.change(&ctx, |draft| draft.push(note));
+                    ready(changed.map(|()| Json::Null))
+                }))
+        };
+        api.serve(&notes_type(), factory, ServeOptions::default())
+    })
+}
+
+async fn reload_with(host: &Host, facet: pi_chord::host2::Facet) -> ChordResult<pi_chord::host2::ReloadReport> {
+    host.reload(vec![facet.into()], Default::default()).await
+}
+
+fn value(reference: &pi_chord::host2::Ref, name: &str) -> Json {
+    reference.state(name).unwrap().value().unwrap()
+}
+
+#[tokio::test]
+async fn reload_keeps_an_existing_cell_without_init_and_runs_init_for_an_added_one() {
+    let _serial = serial().await;
+    let host = host();
+    let inits: Log = Log::default();
+    host.install(&reload_facet(&inits, None, 1), Default::default()).await.unwrap();
+    let reference = hold(&host, &notes_type());
+    reference.ready().await.unwrap();
+    let adding = reference.clone();
+    let run = move |ctx: Ctx| async move { adding.call("add", Some(json!("written")), Some(&ctx)).await };
+    host.root(run, RootOptions::default()).await.unwrap();
+    let more: More = Arc::new(|| Ok(json!(["x", "y"])));
+    reload_with(&host, reload_facet(&inits, Some(more), 1)).await.unwrap();
+    assert_eq!(inits.all(), ["notes", "more"]);
+    assert_eq!(value(&reference, "notes"), json!(["loaded", "written"]));
+    // The new derivation counts the kept cell and the added one: 2 + 0 + 2.
+    assert_eq!(value(&reference, "count"), json!(4));
+}
+
+#[tokio::test]
+async fn reload_with_a_failing_init_of_an_added_cell_is_refused_and_the_old_code_keeps_running() {
+    let _serial = serial().await;
+    let host = host();
+    let inits: Log = Log::default();
+    host.install(&reload_facet(&inits, None, 1), Default::default()).await.unwrap();
+    let reference = hold(&host, &notes_type());
+    reference.ready().await.unwrap();
+    let more: More = Arc::new(|| Err(ChordError::error("cannot load more")));
+    let error = reload_with(&host, reload_facet(&inits, Some(more), 1)).await.unwrap_err();
+    assert!(error.to_string().contains("cannot load more"), "{error}");
+    assert_eq!(value(&reference, "count"), json!(1));
+    let run = move |ctx: Ctx| async move { reference.call("has", Some(json!("loaded")), Some(&ctx)).await };
+    assert_eq!(host.root(run, RootOptions::default()).await.unwrap(), Some(json!(true)));
+}
+
+#[tokio::test]
+async fn in_a_gated_reload_an_added_cell_runs_init_at_the_gate() {
+    let _serial = serial().await;
+    let host = host();
+    let inits: Log = Log::default();
+    host.install(&reload_facet(&inits, None, 1), Default::default()).await.unwrap();
+    let reference = hold(&host, &notes_type());
+    reference.ready().await.unwrap();
+    let more: More = Arc::new(|| Ok(json!(["x"])));
+    let report = reload_with(&host, reload_facet(&inits, Some(more), 2)).await.unwrap();
+    assert_eq!(report.gated.len(), 1);
+    assert_eq!(inits.all(), ["notes", "more"]);
+    assert_eq!(value(&reference, "count"), json!(2));
 }

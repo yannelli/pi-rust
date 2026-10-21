@@ -1,6 +1,6 @@
-//! Port of upstream `test/links-review.test.ts`. Left out: "#1 root_end is honored only from the link the root
-//! came over" and the "cross-host reload" cases (#3, #4, #5, #6). They check leases and code versions with
-//! `reload`, which host2 does not have yet (phase 4).
+//! Port of upstream `test/links-review.test.ts`, the cases without a reload. The reload cases ("#1 root_end is
+//! honored only from the link the root came over" and the cross-host reloads) are in
+//! `chord2_links_review_reload.rs`.
 
 mod chord2_support;
 

@@ -104,7 +104,7 @@ impl HostImpl {
     }
 
     /// Builds registry tables from (object, registrations) pairs. Fails `invalid/registry_conflict`.
-    fn build_tables(
+    pub(crate) fn build_tables(
         &self,
         entries: Vec<(Arc<ObjectImpl>, Vec<Registration>)>,
     ) -> ChordResult<HashMap<String, ErasedTable>> {
