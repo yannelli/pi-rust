@@ -27,6 +27,7 @@ mod mcp;
 mod mode;
 mod model_refresh;
 mod navigation;
+mod notify;
 mod prompts;
 pub mod renderers;
 mod resources_view;
