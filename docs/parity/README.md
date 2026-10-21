@@ -52,6 +52,13 @@ For each finding:
 2. Decide: port it, record it as accepted in `allowlist.json` with a reason, or list it in `GAPS.md` with what blocks it.
 3. One upstream commit or one gap per change. Large items (for example the chord2 runtime) get their own branch and PR.
 
+Model catalog findings are fixed by regenerating `crates/pi-ai/models.json` from the data of a Parity run, not by hand:
+
+```sh
+gh run download <run-id> -R yannelli/pi-rust -n upstream-model-data -D ../model-data
+cargo xtask models ../model-data
+```
+
 ## Porting an upstream commit
 
 1. Read the upstream diff: `git -C ../pi-upstream show <sha>`.

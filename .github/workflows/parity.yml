@@ -68,6 +68,13 @@ jobs:
           name: parity-report
           path: parity-report.md
 
+      # Input for `cargo xtask models <dir>`, which regenerates crates/pi-ai/models.json.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: upstream-model-data
+          path: upstream/packages/ai/src/providers/data
+          if-no-files-found: ignore
+
       - name: Update the parity-report issue
         env:
           GH_TOKEN: ${{ github.token }}
