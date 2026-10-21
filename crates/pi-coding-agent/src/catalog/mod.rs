@@ -1,6 +1,7 @@
-//! Dynamic model catalogs: the pi.dev overlay of bundled providers, Radius gateway catalogs,
-//! llama.cpp, the `models-store.json` offline cache, and `pi update --models`.
+//! Dynamic model catalogs: the pi.dev overlay of bundled providers, account model lists, Radius
+//! gateway catalogs, llama.cpp, the `models-store.json` offline cache, and `pi update --models`.
 
+pub mod personalized;
 pub mod radius;
 pub mod refresh;
 pub mod remote;
@@ -17,6 +18,7 @@ use std::sync::Arc;
 use pi_ai::Model;
 use pi_ai::models::{ModelRegistry, ModelsFileError};
 
+pub use personalized::{Personalize, PersonalizedCatalog, account_model_list};
 pub use radius::{RADIUS_PROVIDER_ID, RadiusCatalog, RadiusProviderConfig, radius_providers_in_models_json};
 pub use refresh::{
     CatalogPublisher, CatalogRefresher, DynamicCatalog, Persist, RefreshContext, RefreshCredentials, RefreshOptions,

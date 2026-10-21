@@ -1,0 +1,129 @@
+//! Account model lists: narrow a provider catalog to the models a key or account may use.
+//! OpenRouter follows upstream `personalizeOpenRouterCatalog`.
+
+use std::time::Duration;
+
+use serde_json::Value;
+use tokio_util::sync::CancellationToken;
+
+use crate::types::Model;
+
+mod openrouter;
+
+pub use openrouter::{OPENROUTER_BASE_URL, openrouter_cost, personalize_openrouter_catalog};
+
+/// Time limit of one model list request, as upstream.
+pub const MODEL_LIST_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// What a model list request needs. The key is only sent in a header; it is never part of a
+/// URL, an error, or a returned model.
+#[derive(Clone)]
+pub struct ModelListContext {
+    /// API key or OAuth access token. Without one the catalog stays as it is.
+    pub key: Option<String>,
+    /// The provider base URL set in `models.json`; the provider default when `None`.
+    pub base_url: Option<String>,
+    pub client: reqwest::Client,
+    pub user_agent: Option<String>,
+    pub cancel: CancellationToken,
+}
+
+impl ModelListContext {
+    pub fn new(key: Option<String>) -> Self {
+        Self {
+            key,
+            base_url: None,
+            client: crate::http::shared_client(),
+            user_agent: Some(crate::http::pi_user_agent()),
+            cancel: CancellationToken::new(),
+        }
+    }
+
+    pub(crate) fn key(&self) -> Option<&str> {
+        self.key.as_deref().filter(|key| !key.is_empty())
+    }
+
+    /// The configured base URL without trailing slashes, else `default`.
+    pub(crate) fn base(&self, default: &str) -> String {
+        let configured = self.base_url.as_deref().filter(|url| !url.trim().is_empty());
+        configured.unwrap_or(default).trim_end_matches('/').to_string()
+    }
+}
+
+/// Providers whose catalog follows the account's model list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AccountModelList {
+    /// Upstream: `GET /models/user`.
+    OpenRouter,
+}
+
+impl AccountModelList {
+    pub fn for_provider(provider_id: &str) -> Option<Self> {
+        match provider_id {
+            "openrouter" => Some(Self::OpenRouter),
+            _ => None,
+        }
+    }
+
+    /// Whether upstream pi has this list; the others are pi-rust extensions.
+    pub fn is_upstream(self) -> bool {
+        matches!(self, Self::OpenRouter)
+    }
+
+    /// The catalog narrowed to the account's models. An error means the list could not be read
+    /// and nothing should replace the last saved list.
+    pub async fn personalize(self, catalog: Vec<Model>, context: &ModelListContext) -> Result<Vec<Model>, String> {
+        match self {
+            Self::OpenRouter => personalize_openrouter_catalog(catalog, context).await,
+        }
+    }
+}
+
+/// The outcome of one model list request.
+pub(crate) enum Fetched {
+    Json(Value),
+    /// 401, 403, or 404: the endpoint rejects the key or does not exist (for example a proxy).
+    Rejected,
+    /// A success status with a body that is not JSON.
+    Invalid,
+}
+
+/// `GET url` with the context's user agent and `headers`. Other failing statuses, transport
+/// errors, and the time limit are errors labeled with `label`.
+pub(crate) async fn get_json(
+    context: &ModelListContext,
+    label: &str,
+    url: &str,
+    headers: &[(&str, String)],
+) -> Result<Fetched, String> {
+    let mut request = context.client.get(url).header("accept", "application/json");
+    if let Some(agent) = &context.user_agent {
+        request = request.header("user-agent", agent);
+    }
+    for (name, value) in headers {
+        request = request.header(*name, value);
+    }
+    let exchange = async {
+        let response = request.send().await?;
+        let status = response.status().as_u16();
+        Ok::<_, reqwest::Error>((status, response.bytes().await?))
+    };
+    let failed = |reason: String| format!("{label} model list request failed: {reason}");
+    let (status, body) = tokio::select! {
+        () = context.cancel.cancelled() => return Err(failed("cancelled".into())),
+        result = tokio::time::timeout(MODEL_LIST_TIMEOUT, exchange) => match result {
+            Err(_) => return Err(failed("timed out".into())),
+            Ok(result) => result.map_err(|error| failed(error.to_string()))?,
+        },
+    };
+    if matches!(status, 401 | 403 | 404) {
+        return Ok(Fetched::Rejected);
+    }
+    if !(200..300).contains(&status) {
+        return Err(failed(status.to_string()));
+    }
+    Ok(serde_json::from_slice(&body).map_or(Fetched::Invalid, Fetched::Json))
+}
+
+#[cfg(test)]
+mod tests_openrouter;
