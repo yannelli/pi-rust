@@ -1,14 +1,17 @@
 {
-  "commits": [
-    {
-      "item": "c661bc574",
-      "reason": "Drops the shared MCP types block from durable code mode's codemode section because pi-codemode stopped exporting MCP_TYPESCRIPT_PREAMBLE and mcpStructuredContentSchema(). pi-codemode here never had them, so the port of 8bb180bec renders the section without that block already."
-    }
-  ],
+  "commits": [],
   "cliFlags": [
     {
       "item": "--terminal-login",
       "reason": "pi-rust ships ACP mode (pi --mode acp, ported from pi-acp); an ACP client relaunches pi with this flag for Terminal Auth. Upstream pi has no ACP mode."
+    },
+    {
+      "item": "--max-turns",
+      "reason": "pi-rust extension: run limits"
+    },
+    {
+      "item": "--max-cost",
+      "reason": "pi-rust extension: run limits"
     }
   ],
   "settings": [
@@ -110,6 +113,10 @@
   ],
   "packages": [
     {
+      "item": "pi-client",
+      "reason": "Kept as a pi-rust extra by the maintainer's choice: upstream 7472cda0d deleted the experimental server stack, while pi-rust keeps pi experimental (server, client, durable, vacation) and the old chord runtime it uses."
+    },
+    {
       "item": "pi-embedded",
       "reason": "The embeddable agent API of pi-rust. It comes from the fork snapshot; upstream main never had packages/embedded."
     },
@@ -120,6 +127,14 @@
     {
       "item": "pi-js",
       "reason": "pi-rust runs extensions on its own embedded QuickJS runtime. Upstream runs them on Node and has no package for this."
+    },
+    {
+      "item": "pi-protocol",
+      "reason": "Kept as a pi-rust extra by the maintainer's choice: upstream 7472cda0d deleted the experimental server stack, while pi-rust keeps pi experimental (server, client, durable, vacation) and the old chord runtime it uses."
+    },
+    {
+      "item": "pi-server",
+      "reason": "Kept as a pi-rust extra by the maintainer's choice: upstream 7472cda0d deleted the experimental server stack, while pi-rust keeps pi experimental (server, client, durable, vacation) and the old chord runtime it uses."
     },
     {
       "item": "pi-schema",

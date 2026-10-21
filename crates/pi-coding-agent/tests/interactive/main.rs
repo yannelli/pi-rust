@@ -8,6 +8,7 @@ mod harness;
 mod keys;
 mod notify;
 mod prompt_history;
+mod run_limits;
 mod startup;
 
 use harness::{Options, local, start};

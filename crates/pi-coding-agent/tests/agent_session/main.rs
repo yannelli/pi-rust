@@ -15,6 +15,7 @@ mod mcp_discovery;
 mod mcp_fake;
 mod prompt;
 mod retry;
+mod run_limits;
 mod runtime;
 mod tool_options;
 mod tool_registry;

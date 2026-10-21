@@ -21,6 +21,7 @@ impl AgentSession {
         lock(&self.tools).pending.clear();
         // Compaction before the prompt may have scheduled a retry; the new prompt replaces it.
         lock(&self.state).failed_response = None;
+        self.reset_run_turns();
         self.record_selection();
         let result = self.drive_run(messages).await;
         if self.abort_requested() {

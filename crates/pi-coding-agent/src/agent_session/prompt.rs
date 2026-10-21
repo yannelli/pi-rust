@@ -165,6 +165,10 @@ impl AgentSession {
             preflight(PromptDisposition::Queued);
             return Ok(PromptDisposition::Queued);
         }
+        if self.cost_limit_reached() {
+            preflight(PromptDisposition::Handled);
+            return Ok(PromptDisposition::Handled);
+        }
         self.ensure_auth().await?;
         let trigger = RunTrigger::User { prompt: expanded, images: input_images };
         self.start_run(trigger, || preflight(PromptDisposition::Started)).await?;

@@ -35,6 +35,7 @@ pub struct Options {
     pub agent_dir: Option<PathBuf>,
     /// The faux provider waits this long between streamed chunks.
     pub chunk_delay: Duration,
+    pub run_limits: pi_coding_agent::agent_session::RunLimits,
 }
 
 impl Default for Options {
@@ -46,6 +47,7 @@ impl Default for Options {
             files: Vec::new(),
             agent_dir: None,
             chunk_delay: Duration::ZERO,
+            run_limits: Default::default(),
         }
     }
 }
@@ -87,6 +89,7 @@ pub async fn start(options: Options) -> Ui {
         agent_dir: agent_dir.clone(),
         settings: Some(settings),
         credentials: Some(Arc::new(InMemoryCredentialStore::new(BTreeMap::new()))),
+        run_limits: options.run_limits,
         ..AppOptions::default()
     };
     let manager = SessionManager::create(&cwd, Some(&agent_dir.join("sessions")));
