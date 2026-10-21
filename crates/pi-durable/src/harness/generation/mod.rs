@@ -46,6 +46,9 @@ pub enum GenerationCheckpoint {
         /// Error text of the overflow that started `compacted`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         overflow: Option<String>,
+        /// Set when the blocking threshold started `compacted`; its outcome is checked once when `prepare` resumes.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        threshold: bool,
     },
     Request {
         attempt: u32,
@@ -139,7 +142,7 @@ pub(crate) fn unanswered(reason: &str, detail: Option<&str>) -> SubmissionSettle
 }
 
 static GENERATION_TASK: LazyLock<Task> = LazyLock::new(|| {
-    let first = GenerationCheckpoint::Prepare { attempt: 1, compacted: None, overflow: None };
+    let first = GenerationCheckpoint::Prepare { attempt: 1, compacted: None, overflow: None, threshold: false };
     let definition = TaskDefinition::new("pi.generation", 1, move |_| encode(&first))
         .phase("prepare", prepare)
         .phase("request", classify::request)
@@ -165,7 +168,7 @@ async fn prepare(task: TaskRecord, runtime: TaskRuntime, context: Context) -> Du
     let (Some(model_ref), Some(resolved)) = (model_ref.clone(), resolved) else {
         return fail_no_model(&runtime, model_ref.as_ref(), &context).await;
     };
-    let GenerationCheckpoint::Prepare { attempt, compacted, overflow } = decode(&task)? else {
+    let GenerationCheckpoint::Prepare { attempt, compacted, overflow, threshold: blocked } = decode(&task)? else {
         return Err(DurableError::error("Generation checkpoint is not in phase prepare"));
     };
     if let (Some(compacted), Some(overflow)) = (compacted, &overflow) {
@@ -176,6 +179,14 @@ async fn prepare(task: TaskRecord, runtime: TaskRuntime, context: Context) -> Du
         };
         if !summarized {
             return fail_model_error(&runtime, overflow, &context).await;
+        }
+    }
+    // A threshold compaction that found nothing to compact or was declined leaves a request that may still fit. One
+    // that failed left a context it judged too large: sending it would at best leave no room for the answer.
+    if let (Some(compacted), true) = (compacted, blocked) {
+        let outcomes = runtime.outcomes(&[compacted], &context).await?;
+        if let Some(text) = outcomes.first().and_then(compaction_failure) {
+            return fail_model_error(&runtime, &text, &context).await;
         }
     }
     let view = runtime.context(conversation_id, &context, None).await?;
@@ -213,7 +224,8 @@ async fn prepare(task: TaskRecord, runtime: TaskRuntime, context: Context) -> Du
         let change = move |tx: Tx, _| async move {
             let input = CompactionInput { reason: CompactionReason::Threshold, instructions: None };
             let child = create_compaction(&tx, conversation_id, input, Some(owner)).await?;
-            let checkpoint = GenerationCheckpoint::Prepare { attempt, compacted: Some(child), overflow: None };
+            let checkpoint =
+                GenerationCheckpoint::Prepare { attempt, compacted: Some(child), overflow: None, threshold: true };
             waiting(&checkpoint, vec![child])
         };
         return runtime.commit(change, &context).await;
@@ -254,7 +266,7 @@ async fn retry(task: TaskRecord, runtime: TaskRuntime, context: Context) -> Dura
     let change = move |tx: Tx, _| async move {
         let live = tx.doc(&LIVE_DOC, conversation_id).await?;
         live.edit(|live| live.generation = Some(LiveGeneration::new(attempt + 1)))?;
-        running(&GenerationCheckpoint::Prepare { attempt: attempt + 1, compacted, overflow: None })
+        running(&GenerationCheckpoint::Prepare { attempt: attempt + 1, compacted, overflow: None, threshold: false })
     };
     runtime.commit(change, &context).await
 }
@@ -287,6 +299,18 @@ fn threshold_compaction(
         return None;
     };
     select_cut(view, policy.keep_recent_tokens).map(|_| over)
+}
+
+/// Error text for a generation whose blocking compaction ended without completing; `None` when it completed.
+fn compaction_failure(outcome: &TaskOutcome) -> Option<String> {
+    match outcome {
+        TaskOutcome::Completed { .. } => None,
+        TaskOutcome::Failed { error, .. } | TaskOutcome::Faulted { error } => {
+            Some(format!("Compaction failed: {}", error.message))
+        }
+        TaskOutcome::Orphaned { reason } => Some(format!("Compaction failed: {reason}")),
+        TaskOutcome::Aborted { .. } => Some("Compaction was aborted".into()),
+    }
 }
 
 /// Settle the run's inputs `unanswered` with `model_error` and fail with `text`.
