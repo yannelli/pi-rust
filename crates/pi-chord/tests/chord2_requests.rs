@@ -1,6 +1,6 @@
 //! Port of upstream `test/requests.test.ts`, in-host cases: #1 and #2 up to their link and reload halves, #4,
-//! #6, and #10 with the server's type served on the same host (closing links is phase 3). Left out: #3 and #7
-//! (reloads), #5, #8 and #9 (links and clusters).
+//! #6, and #10 with the server's type on the same host. The link cases are in `chord2_requests_links.rs`.
+//! Left out: #3, #5 and #7 (reloads, phase 4).
 
 mod chord2_support;
 

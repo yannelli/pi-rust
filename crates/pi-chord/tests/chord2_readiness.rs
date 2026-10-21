@@ -1,5 +1,5 @@
-//! Port of upstream `test/readiness.test.ts`. Left out: deferring eager readiness until a parent host admits a
-//! worker (links, phase 3).
+//! Port of upstream `test/readiness.test.ts`, every case. The deferred case runs a worker whose parent link is
+//! accepted only after its facets load.
 
 mod chord2_support;
 
@@ -10,8 +10,9 @@ use std::sync::{Arc, Mutex};
 use chord2_support::*;
 use pi_chord::host2::declare::{OpenOptions, ResourceDeclaration};
 use pi_chord::host2::{
-    Contract, Declare, Facet, GetOptions, Host, Implementation, LoadOptions, RefStatus, RegistryView, ServeOptions,
-    define_facet, define_registry, forbidden,
+    AcceptOptions, ConnectOptions, Contract, Declare, Facet, GetOptions, Host, HostOptions, Implementation, Link,
+    LoadOptions, RefStatus, RegistryView, RemoteDef, ServeOptions, VariantDef, create_host, define_facet,
+    define_registry, forbidden, host_named, memory_link_pair, remote,
 };
 use pi_chord::{BoxFuture, ChordError, ChordResult, Json, json};
 use tokio::sync::oneshot;
@@ -209,4 +210,76 @@ async fn ready_includes_direct_host_serves_but_not_later_serves() {
     let error = host.ready().await.unwrap_err();
     assert!(error.to_string().contains("later"), "{error}");
     host.close().await.unwrap();
+}
+
+/// Starts loading `facet` without awaiting its host objects.
+fn start_deferred(host: &Host, operation: Operation, facet: Facet) -> BoxFuture<ChordResult<()>> {
+    let options = LoadOptions { await_host_objects: false };
+    match operation {
+        Operation::Install => host.install(&facet, options),
+        Operation::Load => host.load(&[facet], options),
+    }
+}
+
+async fn defers_eager_readiness_until_the_parent_admits_the_worker(operation: Operation) {
+    let _serial = serial().await;
+    let errors = Log::default();
+    let server = create_host(HostOptions { name: Some("server".into()), ..quiet_options(&errors) });
+    let (parent, upstream) = memory_link_pair();
+    let upstream: Option<(Arc<dyn Link>, ConnectOptions)> =
+        Some((upstream, ConnectOptions::new(json!({"kind": "server"}))));
+    let worker = create_host(HostOptions { name: Some("worker".into()), upstream, ..quiet_options(&errors) });
+    let host = host_named("server").unwrap();
+    let variants = vec![("default".to_string(), VariantDef::new())];
+    let status = remote("ready.status", &RemoteDef { version: 1, input: object(&[]), host, variants }).unwrap();
+    server.serve(&status, |_, _, _| Ok(Implementation::variant("default")), ServeOptions::default()).unwrap();
+    let (bootstrap, reported) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+    let (booted, opened, wanted) = (bootstrap.clone(), reported.clone(), status.clone());
+    let facet = define_facet("worker", move |api| {
+        let booted = booted.clone();
+        let boot = move |_: &Json, _: &Json, _: &mut Declare| {
+            booted.fetch_add(1, Ordering::SeqCst);
+            Ok(Implementation::new())
+        };
+        api.serve(&lazy(), boot, ServeOptions::host())?;
+        let (opened, wanted) = (opened.clone(), wanted.clone());
+        let factory = move |_: &Json, _: &Json, decl: &mut Declare| {
+            let status = decl.get(&wanted, json!({}), GetOptions::default())?;
+            let opened = opened.clone();
+            let open = move |_: OpenOptions| {
+                opened.fetch_add(1, Ordering::SeqCst);
+                ready(Ok(()))
+            };
+            decl.resource("r", ResourceDeclaration::new(1, open).with_deps(vec![(&status).into()]))?;
+            Ok(Implementation::new())
+        };
+        api.serve(&eager(), factory, ServeOptions::host())
+    });
+    let run = async {
+        start_deferred(&worker, operation, facet).await.unwrap();
+        worker.hold(&lazy(), json!({}), GetOptions::default()).unwrap().ready().await.unwrap();
+        assert_eq!(bootstrap.load(Ordering::SeqCst), 1);
+        let ready = tokio::spawn(worker.ready());
+        sleep_ms(30).await;
+        assert!(!ready.is_finished());
+        assert_eq!(reported.load(Ordering::SeqCst), 0);
+        // Control-ready announcement allows the parent to accept the queued upstream holds.
+        server.accept(parent, AcceptOptions::host("worker", json!({"host": "worker"}))).unwrap();
+        ready.await.unwrap().unwrap();
+        assert_eq!(reported.load(Ordering::SeqCst), 1);
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(2), run).await.expect("within 2 s");
+    worker.close().await.unwrap();
+    server.close().await.unwrap();
+    assert!(errors.is_empty(), "{:?}", errors.all());
+}
+
+#[tokio::test]
+async fn install_can_defer_eager_readiness_until_the_parent_admits_the_worker() {
+    defers_eager_readiness_until_the_parent_admits_the_worker(Operation::Install).await;
+}
+
+#[tokio::test]
+async fn load_can_defer_eager_readiness_until_the_parent_admits_the_worker() {
+    defers_eager_readiness_until_the_parent_admits_the_worker(Operation::Load).await;
 }

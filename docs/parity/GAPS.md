@@ -8,7 +8,7 @@ None up to `82432219a`. Every commit after the synced commit is ported or listed
 
 ## Deferred work
 
-- **chord2 runtime** (upstream `0104fef1e` and later chord commits). pi-chord ports the earlier facets runtime. Its `host2` module has the chord2 foundation (errors, schemas, contracts, wire frames, and memory links) and the host manager with IPC links, process locks, and the `FacetLoader` trait. Still open: cells, objects, and hosts; connections, remotes, and the WebSocket link; reload and clusters. Upstream's Node module loader (`loader.ts`) cannot be ported, so hosts get facets from a `FacetLoader`.
+- **chord2 runtime** (upstream `0104fef1e` and later chord commits). pi-chord ports the earlier facets runtime. Its `host2` module has the chord2 foundation (errors, schemas, contracts, wire frames, and memory links), the host manager with IPC links, process locks, and the `FacetLoader` trait, cells, objects, and hosts, and (phase 3) connections between hosts with remote references, flow control, and the WebSocket link for clients and servers. Still open (phase 4): reload, code version retirement, and clusters. Upstream's Node module loader (`loader.ts`) cannot be ported, so hosts get facets from a `FacetLoader`.
 - **`HarnessOptions.models` as a function** (upstream `7ec1f648e`). Not planned: settings are already a function here, and a `Models` implementation can change its catalog at runtime. It is older than the synced commit, so the report does not list it.
 
 ## Upstream commits that do not apply
@@ -40,6 +40,7 @@ Behavior that pi-rust adds on purpose. The parity review should not report these
 - Account model list for `anthropic` from `/v1/models` (README "Account model lists").
 - Account model list for `github-copilot` from the Copilot `/models` endpoint (README "Account model lists").
 - Account model lists for `openai` and `xai` from `/models`, and for `google` from the Gemini API `/models` (README "Account model lists"). Cursor and Grok Build have no public model list, so they are not narrowed.
+- Markdown export: `/export` and `pi --export` write Markdown when the output path ends in `.md` (README "Use").
 
 ## Platform
 

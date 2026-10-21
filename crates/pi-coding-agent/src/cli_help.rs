@@ -140,6 +140,9 @@ Examples:
   {app} --export ~/{config_dir}/agent/sessions/--path--/session.jsonl
   {app} --export session.jsonl output.html
 
+  # Export a session file to Markdown (pi-rust extension)
+  {app} --export session.jsonl output.md
+
 Environment Variables:
   ANTHROPIC_AUTH_TOKEN             - Anthropic bearer auth token
   ANTHROPIC_API_KEY                - Anthropic Claude API key
@@ -211,6 +214,7 @@ mod tests {
             "# Codemode with only the tools of one MCP server",
             "--tools read,bash,codemode,'mcp__radius__*'",
             "--export session.jsonl output.html",
+            "--export session.jsonl output.md",
         ] {
             assert!(text.contains(example), "missing {example}");
         }
