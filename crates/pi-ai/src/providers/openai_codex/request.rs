@@ -16,7 +16,7 @@ use crate::simple_options::{clamp_openai_prompt_cache_key, clamp_thinking_level}
 use crate::transcript::{initial_system_message, resolve_transcript_tools, system_message_text};
 use crate::types::{Message, Model, ThinkingLevel};
 
-pub(super) const DEFAULT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api";
+pub(crate) const DEFAULT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api";
 const JWT_CLAIM_PATH: &str = "https://api.openai.com/auth";
 pub(super) const OPENAI_BETA_RESPONSES_WEBSOCKETS: &str = "responses_websockets=2026-02-06";
 
