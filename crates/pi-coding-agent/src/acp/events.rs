@@ -111,6 +111,10 @@ impl AcpSession {
                 Some(_) => {}
             },
             "message_update" => self.on_message_update(&event["assistantMessageEvent"]),
+            "message_end" if event["message"]["role"] == "assistant" => {
+                self.record_turn_usage(&event["message"]["usage"]);
+                self.publish_context_usage().await;
+            }
             "tool_execution_start" => self.on_tool_start(&event),
             "tool_execution_update" => self.on_tool_update(&event),
             "tool_execution_end" => self.on_tool_end(&event),

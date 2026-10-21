@@ -192,6 +192,55 @@ async fn usage_updates_follow_context_usage_and_skip_bad_values() {
 }
 
 #[tokio::test]
+async fn usage_updates_carry_the_session_cost() {
+    let stats = |cost: Value| json!({"cost": cost, "contextUsage": {"tokens": 10, "contextWindow": 100}});
+    let update = |cost| serde_json::to_value(crate::acp::to_usage_update(&stats(cost)).unwrap()).unwrap();
+    assert_eq!(update(json!(0.125)), json!({"used": 10, "size": 100, "cost": {"amount": 0.125, "currency": "USD"}}));
+    assert_eq!(update(json!(-1)), json!({"used": 10, "size": 100}));
+    assert_eq!(update(json!("free")), json!({"used": 10, "size": 100}));
+}
+
+#[tokio::test]
+async fn the_prompt_response_reports_the_turns_token_usage() {
+    let (client, backend) = (FakeClient::new(), FakeBackend::new());
+    backend.config().stats = Box::new(|_| Ok(json!({"contextUsage": {"tokens": 7, "contextWindow": 100}})));
+    let session = session_with(&backend, &client, &here());
+    let turn = {
+        let session = session.clone();
+        tokio::spawn(async move { session.prompt_with_usage("hello".into(), Vec::new(), None).await })
+    };
+    settle().await;
+    let usage = |input, output, reasoning: Option<u64>| {
+        let mut usage = json!({"input": input, "output": output, "cacheRead": 5, "cacheWrite": 0, "totalTokens": input + output + 5});
+        if let Some(reasoning) = reasoning {
+            usage["reasoning"] = json!(reasoning);
+        }
+        usage
+    };
+    let end = |role, usage| json!({"type": "message_end", "message": {"role": role, "usage": usage}});
+    session.handle_pi_event(end("user", usage(1000, 1000, None))).await;
+    session.handle_pi_event(end("assistant", usage(100, 20, Some(8)))).await;
+    assert_eq!(client.of_kind("usage_update").len(), 1, "an assistant message publishes context usage");
+    session.handle_pi_event(end("assistant", usage(300, 40, None))).await;
+    session.handle_pi_event(json!({"type": "agent_settled"})).await;
+    let (result, usage) = turn.await.unwrap();
+    assert_eq!(result.unwrap(), TurnEnd::EndTurn);
+    assert_eq!(
+        serde_json::to_value(usage.unwrap()).unwrap(),
+        json!({"totalTokens": 470, "inputTokens": 400, "outputTokens": 60, "thoughtTokens": 8, "cachedReadTokens": 10, "cachedWriteTokens": 0})
+    );
+    assert_eq!(client.of_kind("usage_update").len(), 3);
+
+    let quiet = {
+        let session = session.clone();
+        tokio::spawn(async move { session.prompt_with_usage("quiet".into(), Vec::new(), None).await })
+    };
+    settle().await;
+    session.handle_pi_event(json!({"type": "agent_settled"})).await;
+    assert_eq!(quiet.await.unwrap().1, None, "a turn without assistant messages reports no usage");
+}
+
+#[tokio::test]
 async fn failing_or_slow_stats_do_not_block_the_turn() {
     let (client, backend) = (FakeClient::new(), FakeBackend::new());
     backend.config().stats = Box::new(|_| Err(anyhow::anyhow!("pi get_session_stats failed: unsupported")));
