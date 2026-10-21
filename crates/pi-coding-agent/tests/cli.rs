@@ -280,7 +280,9 @@ async fn print_mode_exits_143_on_sigterm_and_kills_detached_children() {
     let (url, _) = mock_server(vec![tool_call_body("call_1", "bash", command), text_body("unused")]).await;
     setup(root.path(), &url);
     std::fs::write(root.path().join("agent/oauth.json"), r#"{"legacy": {"access": "a"}}"#).unwrap();
-    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_pi"))
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_pi"));
+    cli_support::isolate(command.as_std_mut());
+    let mut child = command
         .args(["--model", "mock/mock-model", "-p", "Run it"])
         .current_dir(root.path().join("work"))
         .env("PI_CODING_AGENT_DIR", root.path().join("agent"))

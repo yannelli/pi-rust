@@ -7,6 +7,7 @@ use std::sync::{Arc, LazyLock, Mutex, RwLock};
 use std::time::Duration;
 
 use reqwest::Url;
+use reqwest::redirect::Policy;
 
 /// Default idle timeout for response headers and body reads (5 minutes).
 pub const DEFAULT_HTTP_IDLE_TIMEOUT_MS: u64 = 300_000;
@@ -69,6 +70,7 @@ pub fn format_http_idle_timeout_ms(timeout_ms: u64) -> String {
 
 static SETTINGS: LazyLock<RwLock<HttpSettings>> = LazyLock::new(|| RwLock::new(HttpSettings::default()));
 static SHARED: LazyLock<RwLock<Option<reqwest::Client>>> = LazyLock::new(|| RwLock::new(None));
+static NO_REDIRECTS: LazyLock<RwLock<Option<reqwest::Client>>> = LazyLock::new(|| RwLock::new(None));
 /// Proxy-related variables of a scoped environment, as a cache key.
 type ProxyEnvKey = Vec<(String, String)>;
 static SCOPED: LazyLock<Mutex<HashMap<ProxyEnvKey, reqwest::Client>>> = LazyLock::new(Default::default);
@@ -77,6 +79,7 @@ static SCOPED: LazyLock<Mutex<HashMap<ProxyEnvKey, reqwest::Client>>> = LazyLock
 pub fn configure_http(settings: HttpSettings) {
     *SETTINGS.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = settings;
     *SHARED.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+    *NO_REDIRECTS.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
     SCOPED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clear();
 }
 
@@ -89,8 +92,18 @@ pub fn shared_client() -> reqwest::Client {
     if let Some(client) = SHARED.read().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref() {
         return client.clone();
     }
-    let client = build_client(Arc::new(BTreeMap::new()));
+    let client = build_client(Arc::new(BTreeMap::new()), Policy::default());
     SHARED.write().unwrap_or_else(|poisoned| poisoned.into_inner()).get_or_insert(client).clone()
+}
+
+/// A pooled client that returns redirects instead of following them, for requests whose
+/// credential headers a redirect would carry to another host.
+pub fn no_redirect_client() -> reqwest::Client {
+    if let Some(client) = NO_REDIRECTS.read().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref() {
+        return client.clone();
+    }
+    let client = build_client(Arc::new(BTreeMap::new()), Policy::none());
+    NO_REDIRECTS.write().unwrap_or_else(|poisoned| poisoned.into_inner()).get_or_insert(client).clone()
 }
 
 /// Proxy-related variable names; lookups try lowercase first, as upstream does.
@@ -111,16 +124,17 @@ pub fn client_for_env(env: &BTreeMap<String, String>) -> reqwest::Client {
     if let Some(client) = cache.get(&key) {
         return client.clone();
     }
-    let client = build_client(Arc::new(key.iter().cloned().collect()));
+    let client = build_client(Arc::new(key.iter().cloned().collect()), Policy::default());
     cache.insert(key, client.clone());
     client
 }
 
-fn build_client(env: Arc<BTreeMap<String, String>>) -> reqwest::Client {
+fn build_client(env: Arc<BTreeMap<String, String>>, redirects: Policy) -> reqwest::Client {
     let settings = http_settings();
     let proxy = reqwest::Proxy::custom(move |url| resolve_proxy_url(url.as_str(), &env).ok().flatten());
     let mut builder = reqwest::Client::builder()
         .user_agent(concat!("pi-rust/", env!("CARGO_PKG_VERSION")))
+        .redirect(redirects)
         .proxy(proxy)
         .pool_idle_timeout(Duration::from_secs(90))
         .tcp_keepalive(Duration::from_secs(60))

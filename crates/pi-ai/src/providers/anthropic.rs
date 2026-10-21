@@ -23,7 +23,8 @@ use futures::StreamExt;
 use reqwest::header::{HeaderMap, HeaderValue};
 
 use self::events::AnthropicStream;
-use self::federation::{FederationConfig, OAUTH_API_BETA, access_token, federation_config, invalidate};
+pub(crate) use self::federation::OAUTH_API_BETA;
+use self::federation::{FederationConfig, access_token, federation_config, invalidate};
 use self::request::{
     Built, CLAUDE_CODE_VERSION, Compat, Params, Thinking, build_params, effort_messages, resolve_thinking,
 };

@@ -3,6 +3,8 @@
 
 #[path = "../cli_support/mod.rs"]
 mod cli_support;
+#[path = "../agent_session/http_mock.rs"]
+mod http_mock;
 
 mod binary;
 mod client;
