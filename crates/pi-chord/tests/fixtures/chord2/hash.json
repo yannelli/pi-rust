@@ -1,0 +1,138 @@
+{
+	"hash64": [
+		{
+			"text": "",
+			"hash": "811c9dc55ad1e806"
+		},
+		{
+			"text": "a",
+			"hash": "e40c292c41cbd47c"
+		},
+		{
+			"text": "hello world",
+			"hash": "d58b3fa7003f1fcb"
+		},
+		{
+			"text": "été",
+			"hash": "a39e1b7be2b83c91"
+		},
+		{
+			"text": "中文",
+			"hash": "5132b5ad1e613e43"
+		},
+		{
+			"text": "😀 smile",
+			"hash": "b314f9ec223a87fe"
+		},
+		{
+			"text": "￿𐀀",
+			"hash": "93b9c8fe80a836ef"
+		},
+		{
+			"text": "{\"name\":\"t.chat\",\"scope\":\"remote\"}",
+			"hash": "71de6018aabc5df1"
+		},
+		{
+			"text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+			"hash": "07d1816515dd0eaa"
+		}
+	],
+	"canonical": [
+		{
+			"value": null,
+			"canonical": "null"
+		},
+		{
+			"value": true,
+			"canonical": "true"
+		},
+		{
+			"value": 0,
+			"canonical": "0"
+		},
+		{
+			"value": 0,
+			"canonical": "0"
+		},
+		{
+			"value": 1.5,
+			"canonical": "1.5"
+		},
+		{
+			"value": 1e+21,
+			"canonical": "1e+21"
+		},
+		{
+			"value": 1e-7,
+			"canonical": "1e-7"
+		},
+		{
+			"value": 0.30000000000000004,
+			"canonical": "0.30000000000000004"
+		},
+		{
+			"value": 123456789012345680000,
+			"canonical": "123456789012345680000"
+		},
+		{
+			"value": "quote \" backslash \\ newline \n tab \t ctrl \u0001 sep  ",
+			"canonical": "\"quote \\\" backslash \\\\ newline \\n tab \\t ctrl \\u0001 sep  \""
+		},
+		{
+			"value": [
+				3,
+				1,
+				2
+			],
+			"canonical": "[3,1,2]"
+		},
+		{
+			"value": {
+				"b": 1,
+				"a": 2,
+				"c": {
+					"z": [],
+					"y": {}
+				}
+			},
+			"canonical": "{\"a\":2,\"b\":1,\"c\":{\"y\":{},\"z\":[]}}"
+		},
+		{
+			"value": {
+				"2": 2,
+				"10": 1,
+				"b": 3,
+				"a": 4,
+				"": 5
+			},
+			"canonical": "{\"\":5,\"10\":1,\"2\":2,\"a\":4,\"b\":3}"
+		},
+		{
+			"value": {
+				"😀": 1,
+				"￿": 2,
+				"é": 3,
+				"e": 4,
+				"E": 5
+			},
+			"canonical": "{\"E\":5,\"e\":4,\"é\":3,\"😀\":1,\"￿\":2}"
+		},
+		{
+			"value": {
+				"nested": [
+					{
+						"y": 1,
+						"x": 2
+					},
+					[
+						{
+							"b": null,
+							"a": false
+						}
+					]
+				]
+			},
+			"canonical": "{\"nested\":[{\"x\":2,\"y\":1},[{\"a\":false,\"b\":null}]]}"
+		}
+	]
+}

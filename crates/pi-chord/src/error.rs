@@ -3,6 +3,7 @@
 use std::fmt;
 use std::sync::{Arc, RwLock};
 
+use crate::host2::ChordErrorCode;
 use crate::json::Json;
 
 /// Service errors that may cross a remote boundary, in upstream order.
@@ -111,6 +112,17 @@ pub enum ChordError {
     /// An application-defined failure.
     #[error("{0}")]
     Other(Arc<dyn std::error::Error + Send + Sync>),
+    /// A host runtime error (upstream chord2 `ChordError`): `message` starts with `code/reason: `.
+    /// Build it with [`ChordError::coded`] so the prefix matches the fields.
+    #[error("{message}")]
+    Coded {
+        code: ChordErrorCode,
+        reason: Option<Arc<str>>,
+        message: Arc<str>,
+        details: Option<Json>,
+        #[source]
+        cause: Option<Arc<ChordError>>,
+    },
 }
 
 impl ChordError {
@@ -128,6 +140,35 @@ impl ChordError {
 
     pub fn other(error: impl std::error::Error + Send + Sync + 'static) -> Self {
         Self::Other(Arc::new(error))
+    }
+
+    /// The host runtime code, when this is a [`ChordError::Coded`] error.
+    pub fn code(&self) -> Option<ChordErrorCode> {
+        match self {
+            Self::Coded { code, .. } => Some(*code),
+            _ => None,
+        }
+    }
+
+    /// The finer cause inside the code, such as `args` for `invalid`.
+    pub fn reason(&self) -> Option<&str> {
+        match self {
+            Self::Coded { reason, .. } => reason.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// Structured detail of a coded error, such as the schema errors of `invalid`.
+    pub fn details(&self) -> Option<&Json> {
+        match self {
+            Self::Coded { details, .. } => details.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Whether a new root may succeed: `superseded` and `upgrade_conflict`.
+    pub fn retryable(&self) -> bool {
+        self.code().is_some_and(ChordErrorCode::retryable)
     }
 
     /// The remote error code, when this is a remote service error.

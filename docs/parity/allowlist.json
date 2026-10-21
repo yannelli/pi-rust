@@ -108,6 +108,10 @@
     {
       "item": "pi-js",
       "reason": "pi-rust runs extensions on its own embedded QuickJS runtime. Upstream runs them on Node and has no package for this."
+    },
+    {
+      "item": "pi-schema",
+      "reason": "The TypeBox-compatible JSON Schema validator shared by pi-ai and pi-chord (checks, defaults, cleaning). Upstream uses the typebox npm package and has no package for this."
     }
   ]
 }

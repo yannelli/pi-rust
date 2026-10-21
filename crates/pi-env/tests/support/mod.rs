@@ -1,8 +1,6 @@
 //! The daemon the tests run (upstream `test/daemon.ts`): `PI_ENV_DAEMON`, else `pi-env` built in this target dir.
 #![allow(dead_code)]
 
-pub mod list_cases;
-
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
