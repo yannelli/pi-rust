@@ -13,45 +13,45 @@ const COUNTS: [(&str, usize, usize, usize); 42] = [
     ("amazon-bedrock", 193, 0, 0),
     ("ant-ling", 3, 0, 0),
     ("anthropic", 17, 0, 0),
-    ("azure", 45, 0, 0),
-    ("baseten", 24, 0, 0),
+    ("azure", 43, 0, 0),
+    ("baseten", 14, 0, 0),
     ("cerebras", 2, 0, 0),
-    ("cloudflare-ai-gateway", 57, 0, 0),
-    ("cloudflare-workers-ai", 18, 0, 3),
+    ("cloudflare-ai-gateway", 58, 0, 0),
+    ("cloudflare-workers-ai", 19, 0, 3),
     ("deepseek", 2, 0, 0),
     ("fireworks", 24, 0, 0),
-    ("github-copilot", 36, 0, 0),
+    ("github-copilot", 26, 0, 0),
+    ("google", 24, 0, 0),
     ("google-vertex", 14, 0, 0),
-    ("google", 23, 0, 0),
     ("groq", 7, 0, 0),
-    ("huggingface", 78, 0, 0),
+    ("huggingface", 79, 0, 0),
     ("kimi-coding", 4, 0, 0),
     ("meta", 6, 0, 0),
-    ("minimax-cn", 4, 0, 0),
     ("minimax", 4, 0, 0),
-    ("mistral", 40, 0, 0),
-    ("moonshotai-cn", 4, 0, 0),
+    ("minimax-cn", 4, 0, 0),
+    ("mistral", 37, 0, 0),
     ("moonshotai", 4, 0, 0),
+    ("moonshotai-cn", 4, 0, 0),
     ("nvidia", 21, 0, 0),
+    ("openai", 42, 0, 1),
     ("openai-codex", 7, 0, 0),
-    ("openai", 44, 0, 1),
+    ("opencode", 84, 0, 2),
     ("opencode-go", 29, 0, 0),
-    ("opencode", 83, 0, 2),
-    ("openrouter", 402, 63, 27),
+    ("openrouter", 401, 63, 27),
+    ("qwen-token-plan", 21, 0, 0),
     ("qwen-token-plan-cn", 21, 0, 0),
     ("qwen-token-plan-individual", 9, 0, 0),
-    ("qwen-token-plan", 20, 0, 0),
     ("radius", 30, 0, 0),
-    ("together", 20, 0, 0),
+    ("together", 15, 0, 0),
     ("typesafe", 0, 0, 1),
     ("vercel-ai-gateway", 305, 0, 12),
     ("xai", 4, 0, 0),
+    ("xiaomi", 3, 0, 0),
     ("xiaomi-token-plan-ams", 2, 0, 0),
     ("xiaomi-token-plan-cn", 2, 0, 0),
     ("xiaomi-token-plan-sgp", 2, 0, 0),
-    ("xiaomi", 3, 0, 0),
-    ("zai-coding-cn", 4, 0, 0),
     ("zai", 7, 0, 0),
+    ("zai-coding-cn", 4, 0, 0),
 ];
 
 /// Provider to `[chat, image, classifier]` counts.
@@ -100,8 +100,8 @@ fn totals_per_type_match_upstream() {
     for model in builtin_models() {
         totals[type_index(model.model_type.as_deref().expect("every bundled model declares its type"))] += 1;
     }
-    assert_eq!(totals, [1624, 63, 46]);
-    assert_eq!(builtin_models().len(), 1733);
+    assert_eq!(totals, [1597, 63, 46]);
+    assert_eq!(builtin_models().len(), 1706);
     assert_eq!(bundled_counts().len(), 42);
 }
 
@@ -183,4 +183,14 @@ fn bundled_json_keeps_radius_only_fields() {
     for model in radius {
         assert!(model["lab"].is_string() && model["enabled"].is_boolean() && model["providers"].is_array(), "{model}");
     }
+}
+
+#[test]
+fn grok_thinking_levels_include_xhigh() {
+    use pi_ai::ThinkingLevel::{High, Low, Medium, Off, Xhigh};
+    let levels = |id| pi_ai::simple_options::supported_thinking_levels(find("xai", id));
+    for id in ["grok-4.5", "grok-4.6", "grok-4.7"] {
+        assert_eq!(levels(id), [Low, Medium, High, Xhigh], "{id}");
+    }
+    assert_eq!(levels("grok-4.3"), [Off, Low, Medium, High, Xhigh]);
 }

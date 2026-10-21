@@ -366,14 +366,23 @@ async fn finalizes_many_held_siblings_that_end_together_in_one_pass() {
         for n in (0..count).rev() {
             leaves.push(owned_task(&tx, &held, &format!("l{n}"), siblings[n]).await?);
         }
-        Ok((top, leaves))
+        Ok((top, siblings, leaves))
     };
-    let (top, leaves) = root.commit(stage, &context()).await.unwrap();
+    let (top, siblings, leaves) = root.commit(stage, &context()).await.unwrap();
     for n in 0..count {
         board.open(&format!("s{n}"), Ending::Completed);
     }
     board.open("top", Ending::Completed);
-    eventually_slow(|| async { status(&harness, top).await == TaskStatus::Completing }).await;
+    // Every holder must be completing before the leaves end; a sibling still running would finalize on its own.
+    eventually_slow(|| async {
+        for &id in siblings.iter().chain([&top]) {
+            if status(&harness, id).await != TaskStatus::Completing {
+                return false;
+            }
+        }
+        true
+    })
+    .await;
     let before = storage.commit_count();
     let finish = move |tx: Tx| async move {
         let mut records = Vec::new();

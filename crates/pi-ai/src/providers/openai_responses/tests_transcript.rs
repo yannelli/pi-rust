@@ -355,14 +355,22 @@ async fn terminal_events_set_raw_stop_reasons() {
         assert_eq!(message.error_message.as_deref(), error);
         assert_eq!((message.usage.input, message.usage.cache_read, message.usage.cache_write), (15, 2, 3));
     }
-    let failed = json!({"type": "response.failed", "response": {"status": "failed",
-        "error": {"code": "subscription_sharing_usage_limit_exceeded", "message": "Usage limit reached."}}});
-    let server = MockServer::start(MockResponse::Sse(vec![frame(None, &failed)])).await;
-    let model = test_model(API, "openai", &server.base_url);
-    let context = Context { messages: vec![Message::user("x")], ..Context::default() };
-    let (_, message) = collect(OpenAIResponses.stream(&model, &context, options())).await;
-    assert_eq!(message.raw_stop_reason.as_deref(), Some("failed"));
-    assert!(message.error_message.unwrap().ends_with("Check your ChatGPT usage: https://chatgpt.com/settings/usage"));
+    for (code, hint) in [
+        ("subscription_sharing_usage_limit_exceeded", "Check your ChatGPT usage: https://chatgpt.com/settings/usage"),
+        (
+            "subscription_sharing_workplace_individual_usage_limit_exceeded",
+            "Ask your workspace admin to increase it at admin.openai.com → Workspace → Usage limits.",
+        ),
+    ] {
+        let failed = json!({"type": "response.failed", "response": {"status": "failed",
+            "error": {"code": code, "message": "Usage limit reached."}}});
+        let server = MockServer::start(MockResponse::Sse(vec![frame(None, &failed)])).await;
+        let model = test_model(API, "openai", &server.base_url);
+        let context = Context { messages: vec![Message::user("x")], ..Context::default() };
+        let (_, message) = collect(OpenAIResponses.stream(&model, &context, options())).await;
+        assert_eq!(message.raw_stop_reason.as_deref(), Some("failed"));
+        assert!(message.error_message.unwrap().ends_with(hint), "{code}");
+    }
 }
 
 #[tokio::test]

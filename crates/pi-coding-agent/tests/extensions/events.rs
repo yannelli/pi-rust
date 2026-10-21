@@ -1,6 +1,8 @@
 //! Extension events with their upstream payloads and return semantics.
 
 use pi_ai::providers::faux::FauxResponse;
+use pi_ai::{Message, StopReason, UserContent};
+use pi_coding_agent::messages::CustomMessage;
 use serde_json::{Value, json};
 
 use crate::harness::{Setup, eventually, harness};
@@ -183,4 +185,153 @@ async fn model_and_thinking_changes_report_their_source() {
     };
     assert_eq!(data("model"), vec![json!({"id": "other", "previous": "tiny", "source": "set"})]);
     assert_eq!(data("thinking")[0], json!({"level": "high", "previous": "low"}));
+}
+
+fn custom_message(custom_type: &str, text: &str) -> CustomMessage {
+    CustomMessage {
+        custom_type: custom_type.into(),
+        content: UserContent::Text(text.into()),
+        display: true,
+        details: None,
+        timestamp: 0,
+    }
+}
+
+/// Extension that holds `before_agent_start` of the `first` custom message until `/release`.
+const HOLD_FIRST: &str = r#"
+	let release = () => {};
+	pi.on("before_agent_start", async (event) => {
+		if (event.messageType !== "custom" || event.message.customType !== "first") return;
+		pi.appendEntry("handler-started", {});
+		await new Promise((resolve) => { release = resolve; });
+	});
+	pi.registerCommand("release", { handler: async () => { release(); } });
+"#;
+
+fn user_texts(request: &pi_ai::Context) -> Vec<String> {
+    request
+        .messages
+        .iter()
+        .filter(|message| message.role() == "user")
+        .map(|message| text_of(&serde_json::to_value(message).unwrap()))
+        .collect()
+}
+
+// Upstream #10267 and #5581: a run started by sendMessage with triggerTurn skipped
+// before_agent_start, so its second request patched away the sections handlers had added.
+#[tokio::test(flavor = "multi_thread")]
+async fn custom_message_runs_emit_before_agent_start_and_keep_one_system_prompt() {
+    let body = r#"
+	pi.on("before_agent_start", (event) => {
+		pi.appendEntry("start", { messageType: event.messageType, customType: event.message?.customType ?? null });
+		event.systemPromptOptions.sections.extension_rules = "Answer in one word.";
+	});
+"#;
+    let h = harness(Setup {
+        files: vec![("custom-start.ts", with_probe(body))],
+        load: vec!["custom-start.ts"],
+        responses: vec![
+            FauxResponse::text("hi"),
+            FauxResponse::tool_call("c1", "probe", json!({"text": "a"})),
+            FauxResponse::text("done"),
+        ],
+        ..Setup::default()
+    })
+    .await;
+    h.session.prompt("hello", Vec::new()).await.unwrap();
+    h.session.send_custom_message(custom_message("task-done", "background task finished"), true).await.unwrap();
+
+    let prompts: Vec<String> = h
+        .provider
+        .requests()
+        .iter()
+        .map(|request| pi_ai::transcript::flatten_context(request).system_prompt.unwrap_or_default())
+        .collect();
+    assert_eq!(prompts.len(), 3);
+    assert!(prompts[0].contains("Answer in one word."), "{}", prompts[0]);
+    assert!(prompts.iter().all(|prompt| *prompt == prompts[0]), "{prompts:?}");
+    let starts: Vec<Value> = h
+        .entries()
+        .into_iter()
+        .filter(|entry| entry["customType"] == "start")
+        .map(|entry| entry["data"].clone())
+        .collect();
+    assert_eq!(
+        starts,
+        [
+            json!({"messageType": "user", "customType": null}),
+            json!({"messageType": "custom", "customType": "task-done"})
+        ]
+    );
+    assert_eq!(h.errors(), Vec::<String>::new());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_custom_message_sent_while_before_agent_start_runs_joins_the_starting_run() {
+    let h = harness(Setup {
+        files: vec![("hold.ts", with_probe(HOLD_FIRST))],
+        load: vec!["hold.ts"],
+        responses: vec![FauxResponse::text("handled both")],
+        ..Setup::default()
+    })
+    .await;
+    let session = h.session.clone();
+    let first =
+        tokio::spawn(
+            async move { session.send_custom_message(custom_message("first", "task one finished"), true).await },
+        );
+    eventually(|| h.entries().iter().any(|entry| entry["customType"] == "handler-started")).await;
+    assert!(!h.session.is_idle());
+    h.session.send_custom_message(custom_message("second", "task two finished"), true).await.unwrap();
+    h.session.prompt("/release", Vec::new()).await.unwrap();
+    first.await.unwrap().unwrap();
+
+    let requests = h.provider.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(user_texts(&requests[0]), ["task one finished", "task two finished"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_sent_without_trigger_while_the_run_starts_reaches_its_first_request() {
+    let body = r#"
+	pi.on("before_agent_start", () => {
+		pi.sendMessage({ customType: "note", content: "context from handler", display: true }, { triggerTurn: false });
+	});
+"#;
+    let h = harness(Setup {
+        files: vec![("note.ts", with_probe(body))],
+        load: vec!["note.ts"],
+        responses: vec![FauxResponse::text("done")],
+        ..Setup::default()
+    })
+    .await;
+    h.session.prompt("hello", Vec::new()).await.unwrap();
+    let requests = h.provider.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(user_texts(&requests[0]), ["context from handler", "hello"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_abort_requested_while_before_agent_start_runs_aborts_the_run() {
+    let h = harness(Setup {
+        files: vec![("hold.ts", with_probe(HOLD_FIRST))],
+        load: vec!["hold.ts"],
+        responses: vec![FauxResponse::text("should not complete")],
+        ..Setup::default()
+    })
+    .await;
+    let session = h.session.clone();
+    let run = tokio::spawn(async move {
+        session.send_custom_message(custom_message("first", "background task finished"), true).await
+    });
+    eventually(|| h.entries().iter().any(|entry| entry["customType"] == "handler-started")).await;
+    let session = h.session.clone();
+    let abort = tokio::spawn(async move { session.abort().await });
+    h.session.prompt("/release", Vec::new()).await.unwrap();
+    run.await.unwrap().unwrap();
+    abort.await.unwrap();
+
+    let last = h.session.messages().pop().expect("messages");
+    assert!(matches!(&last, Message::Assistant(message) if message.stop_reason == StopReason::Aborted), "{last:?}");
+    assert!(h.session.is_idle());
 }

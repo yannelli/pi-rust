@@ -45,6 +45,9 @@ pub struct ModelsStoreEntry {
     /// The remote `ETag`, quotes included, sent back as `If-None-Match`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub etag: Option<String>,
+    /// The pi version that saved an account model list (pi-rust extension).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pi_version: Option<String>,
 }
 
 impl ModelsStoreEntry {
@@ -236,6 +239,7 @@ mod tests {
             last_modified: Some(1),
             checked_at: Some(2),
             etag: Some("\"v1\"".into()),
+            pi_version: None,
         };
         store.write("p", &entry, &cancel).await.unwrap();
         assert_eq!(store.read("p", &cancel).await.unwrap(), Some(entry));

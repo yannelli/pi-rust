@@ -9,17 +9,16 @@ use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
-use crate::cli_support::{mock_server, setup, text_body};
+use crate::cli_support::{isolate, mock_server, setup, text_body};
 
 pub fn pi_command(root: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_pi"));
+    isolate(command.as_std_mut());
     command
         .args(args)
         .current_dir(root.join("work"))
         .env("PI_CODING_AGENT_DIR", root.join("agent"))
         .env("HOME", root)
-        .env_remove("OPENAI_API_KEY")
-        .env_remove("ANTHROPIC_API_KEY")
         .stdin(Stdio::null())
         .kill_on_drop(true);
     command

@@ -100,6 +100,56 @@ On first start, pi-rust moves files from older pi layouts the same way pi does (
 
 pi-rust has every wire protocol of pi: `anthropic-messages`, `openai-responses`, `openai-completions`, `openai-codex-responses` (SSE and WebSocket), `azure-openai-responses`, `google-generative-ai`, `google-vertex`, `bedrock-converse-stream`, `mistral-conversations`, and `pi-messages`. The bundled catalog is pi's, and `pi update --models` refreshes it. `/login` supports OAuth for Anthropic, OpenAI Codex, GitHub Copilot, OpenRouter, xAI, Kimi, Meta, and Radius, plus API keys and ambient AWS and Google credentials. llama.cpp servers and virtual models work as in pi.
 
+### OpenRouter
+
+Authenticate with `/login openrouter` or `OPENROUTER_API_KEY`.
+
+With a key, pi lists only the OpenRouter chat models that key may use, with the key's context size, max output, and prices. These come from OpenRouter's `/models/user` endpoint and reflect guardrails and provider restrictions set in OpenRouter. Image and classifier models are not filtered.
+
+pi refreshes the list in the background at startup in interactive, RPC, and ACP modes, when `/model` opens, after `/login`, and on `pi update --models`. The last list is saved in `models-store.json` and used offline, in `pi -p`, and until a refresh finishes. After you switch keys outside `/login`, the list of the old key stays until the next refresh.
+
+Regional endpoints filter models to their region. To use one, set the base URL in `models.json`:
+
+```json
+{
+  "providers": {
+    "openrouter": { "baseUrl": "https://us.openrouter.ai/api/v1" }
+  }
+}
+```
+
+If the base URL rejects the key at `/models/user` or does not have that endpoint, for example a proxy configured as the OpenRouter base URL, pi lists every OpenRouter model.
+
+### Account model lists (pi-rust extension)
+
+pi-rust narrows more providers to the models your account or key may use, like OpenRouter above. Upstream pi does not. With a credential, pi requests the provider's model list at most once every 4 hours, and at once after `/login` and on `pi update --models`. It drops catalog chat models that the list does not name, takes context size and max output from the list when it has them, and adds listed chat models that the catalog lacks as copies of the closest catalog model. Image and classifier models are not filtered. If the list does not name the provider's default model, pi drops nothing and only takes limits and adds models. The list is saved in `models-store.json` with the pi version and without the credential, and the base URL set in `models.json` applies. After an upgrade, pi shows the full catalog until a new list arrives. Model list requests do not follow redirects, so the credential goes only to the configured host.
+
+To get the full catalog, point the provider's `baseUrl` in `models.json` at an endpoint without the model list, such as a proxy. pi lists every catalog model when the model list answers 401, 403, or 404, or when its body cannot be read. A list that names no catalog chat model, or an empty list, shows the full catalog and is not saved. Other failures, redirects included, keep the last saved list.
+
+#### OpenAI Codex
+
+With a ChatGPT login, pi reads the account's models from the Codex backend (`<base URL>/codex/models`), the list that Codex shows, and skips hidden models. This endpoint is not a public API, so pi reads it leniently.
+
+#### Anthropic
+
+With an API key or a Claude subscription login, pi reads `GET /v1/models` with the provider's authentication headers and follows its pages. The list gives each model's context size and max output.
+
+#### GitHub Copilot
+
+With a Copilot login, pi reads `GET /models` from the login's Copilot endpoint and keeps the chat models that support tools, that the model picker shows, and that a policy does not disable, as `/login` chooses them. The token's endpoint comes before the `models.json` base URL, as for requests.
+
+#### OpenAI and xAI
+
+With an API key, pi reads `GET <base URL>/models`. This list also names embedding, audio, image, moderation, and realtime models, so pi adds only listed models of a model family that the catalog has, such as `gpt-` or `grok-`, and never models of those kinds. The list has no limits, so the catalog's limits stay.
+
+#### Google
+
+With a Gemini API key, pi reads `GET <base URL>/models` with `x-goog-api-key`, follows its pages, and uses only the models that support `generateContent`, with their input and output token limits. New models are added only for a model family that the catalog has.
+
+#### Not covered
+
+Cursor and Grok Build have no public model list API for other harnesses, so pi-rust does not narrow them. Other providers show the full catalog.
+
 ## Crates
 
 | Crate | Contents |
@@ -128,6 +178,7 @@ pi-rust ports the `pi` CLI and its libraries feature for feature. These parts di
 - The version check and `pi update --self` use this repository's releases.
 - CJK and Thai word movement uses ICU4X dictionaries, so a few word boundaries differ from Node's `Intl.Segmenter`.
 - `pi --mode acp` (above) is an addition; the TypeScript pi needs the separate pi-acp adapter.
+- Account model lists for OpenAI Codex, Anthropic, GitHub Copilot, OpenAI, xAI, and Google (see [Providers](#account-model-lists-pi-rust-extension)) are an addition; upstream pi narrows only OpenRouter.
 - `pi-env` looks for remote daemons in a `pi-env-daemons` folder next to the running program. Each release has a `pi-env-daemons-<tag>.tar.gz` with the daemons for Linux, Android (Termux), macOS, and Windows on x86-64 and arm64; extract it next to `pi`.
 - `pi experimental` (`server`, `client`, `durable`, `vacation`) needs `PI_EXPERIMENTAL=1`, as upstream. Its `server` and `client` use Unix sockets, so on Windows they report that they need Unix; upstream has no Windows transport either.
 
