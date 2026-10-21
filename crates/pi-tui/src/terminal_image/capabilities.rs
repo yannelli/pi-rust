@@ -110,10 +110,10 @@ fn detect_from_environment(
     if term.starts_with("screen") {
         return capabilities(None, true_color_hint, false);
     }
-    // Herdr forwards hyperlinks but runs inside another terminal whose variables
-    // (such as KITTY_WINDOW_ID) can leak into its panes, so it is checked first.
+    // Herdr forwards hyperlinks and supports the Kitty graphics protocol. It is checked before
+    // outer-terminal detection because variables like KITTY_WINDOW_ID can leak into its panes.
     if term_program == "herdr" {
-        return capabilities(None, true_color_hint, true);
+        return capabilities(Some(ImageProtocol::Kitty), true_color_hint, true);
     }
     // Rex supports OSC 8 hyperlinks and only partially implements the Kitty graphics protocol
     // (no Unicode placeholders), but enough for pi. Checked before outer-terminal detection.
