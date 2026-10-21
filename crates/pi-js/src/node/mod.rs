@@ -2,14 +2,17 @@
 
 mod builtins;
 mod child;
+mod child_stdio;
 mod context;
 mod core;
 mod crypto;
 mod dgram;
+mod dgram_ssm;
 mod dns;
 pub(crate) mod encoding;
 pub(crate) mod fetch;
 pub(crate) mod fs;
+mod fs_meta;
 mod fs_ops;
 mod fs_output;
 mod handles;
@@ -27,6 +30,7 @@ mod ports;
 mod shared;
 mod sqlite;
 mod sqlite_fn;
+mod sqlite_iter;
 pub(crate) mod sys;
 mod tls;
 mod tls_session;

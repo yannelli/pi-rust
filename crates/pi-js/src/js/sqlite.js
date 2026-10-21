@@ -183,7 +183,7 @@ function bindable(value) {
 
 function StatementSync(token, db, handle, sql) {
   if (token !== kInternal) throw codeError(TypeError, "ERR_ILLEGAL_CONSTRUCTOR", "Illegal constructor");
-  Object.defineProperty(this, kStatement, { value: { db, handle, sql, flags: db[kConfig].flags, last: [[], undefined] } });
+  Object.defineProperty(this, kStatement, { value: { db, handle, sql, flags: db[kConfig].flags, last: [[], undefined], cursor: null } });
   Object.defineProperty(this, "sourceSQL", { get: () => sql, enumerable: true, configurable: true });
   Object.defineProperty(this, "expandedSQL", {
     get: () => {
@@ -200,9 +200,9 @@ function liveHandle(state) {
   return state.handle;
 }
 
-function execute(statement, args, mode) {
-  const state = statement[kStatement];
+function prepareArgs(state, args) {
   const handle = liveHandle(state);
+  resetCursor(state);
   let named;
   let positional = args;
   const first = args[0];
@@ -213,6 +213,12 @@ function execute(statement, args, mode) {
   }
   positional = positional.map(bindable);
   state.last = [positional, named];
+  return [handle, positional, named];
+}
+
+function execute(statement, args, mode) {
+  const state = statement[kStatement];
+  const [handle, positional, named] = prepareArgs(state, args);
   return nativeSqlite.query(handle, state.sql, positional, named, state.flags, mode);
 }
 
@@ -230,25 +236,52 @@ StatementSync.prototype.run = function run(...args) {
 
 const IteratorPrototype = Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]()));
 
-function StatementSyncIterator(rows) {
-  Object.defineProperty(this, kStatement, { value: { rows, index: 0 } });
+// Node keeps one SQLite statement per StatementSync, so its iterators share a cursor: running
+// the statement again resets it, and the next step starts over with the latest bindings.
+function resetCursor(state) {
+  if (state.cursor !== null && state.db[kHandle] === state.handle) nativeSqlite.finish(state.handle, state.cursor);
+  state.cursor = null;
 }
-StatementSyncIterator.prototype = Object.create(IteratorPrototype, {
-  constructor: { value: StatementSyncIterator, writable: true, configurable: true },
-});
+
+function StatementSyncIterator(statement) {
+  Object.defineProperty(this, kStatement, { value: { statement, done: false } });
+}
+const done = () => ({ __proto__: null, done: true, value: null });
+StatementSyncIterator.prototype = Object.create(IteratorPrototype);
 StatementSyncIterator.prototype.next = function next() {
-  const state = this[kStatement];
-  if (state.index >= state.rows.length) return { __proto__: null, done: true, value: null };
-  return { __proto__: null, done: false, value: state.rows[state.index++] };
+  const iterator = this[kStatement];
+  const state = iterator.statement;
+  const handle = liveHandle(state);
+  if (iterator.done) return done();
+  state.cursor ??= nativeSqlite.iterate(handle, state.sql, state.last[0], state.last[1], state.flags);
+  let value;
+  try {
+    value = nativeSqlite.step(handle, state.cursor, state.flags);
+  } catch (error) {
+    state.cursor = null;
+    throw error;
+  }
+  if (value === undefined) {
+    state.cursor = null;
+    iterator.done = true;
+    return done();
+  }
+  return { __proto__: null, done: false, value };
 };
 StatementSyncIterator.prototype.return = function iteratorReturn() {
-  const state = this[kStatement];
-  state.index = state.rows.length;
-  return { __proto__: null, done: true, value: null };
+  const iterator = this[kStatement];
+  liveHandle(iterator.statement);
+  iterator.done = true;
+  resetCursor(iterator.statement);
+  return done();
 };
+Object.defineProperty(StatementSyncIterator.prototype, "constructor", { value: StatementSyncIterator, writable: true, configurable: true });
 
 StatementSync.prototype.iterate = function iterate(...args) {
-  return new StatementSyncIterator(execute(this, args, 0));
+  const state = this[kStatement];
+  const [handle, positional, named] = prepareArgs(state, args);
+  state.cursor = nativeSqlite.iterate(handle, state.sql, positional, named, state.flags);
+  return new StatementSyncIterator(state);
 };
 
 StatementSync.prototype.columns = function columns() {

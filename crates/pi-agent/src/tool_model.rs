@@ -72,6 +72,10 @@ pub struct ToolAnnotations {
 #[serde(rename_all = "camelCase")]
 pub struct ToolNamespace {
     pub name: String,
+    /// Other names that refer to the namespace where tools look it up by name (codemode's
+    /// `describeNamespace()` and the `namespace` option of `searchTools()`), for example `docs`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
     /// Short summary shown once with the group in tool listings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -84,6 +88,18 @@ impl ToolNamespace {
     pub fn new(name: impl Into<String>) -> Self {
         Self { name: name.into(), ..Self::default() }
     }
+}
+
+/// For tools that reach other tools (such as `codemode`, which calls them, and `tool_search`, which
+/// loads them): which tools a call may reach. Extensions that register tools late, such as MCP
+/// servers that are still connecting, use it to finish registering those tools before the call runs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ToolReach {
+    /// Every tool.
+    All,
+    /// The words of the input that may name tools. A word refers to a tool or namespace whose name
+    /// contains it, so words may over-match.
+    Words(Vec<String>),
 }
 
 /// Recovery policy for an effect whose durable intent exists but whose outcome is unknown.

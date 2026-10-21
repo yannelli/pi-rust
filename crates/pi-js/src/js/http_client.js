@@ -212,7 +212,11 @@ function tickOnSocket(req, socket) {
         req._ended = true;
         if (!req.shouldKeepAlive) {
           if (socket.writable) socket.destroySoon();
-        } else if (req.writableFinished && !req.aborted) keepAlive();
+        } else if (!req.aborted && (req.writableFinished || (req.finished && req._pending.length === 0))) {
+          // Node's socket writes finish before the response can arrive, but ours finish on another
+          // thread; the socket keeps the request's last bytes in order ahead of the next request's.
+          keepAlive();
+        }
         process.nextTick(() => done.destroy());
       });
       done.push(null);
@@ -306,15 +310,20 @@ function tickOnSocket(req, socket) {
   function keepAlive() {
     detach();
     socket.parser = null;
-    req.destroyed = true;
     if (req.timeout !== undefined) socket.setTimeout(0);
     if (req.agent && socket.listenerCount("free")) socket.emit("free");
     else if (req.agent) req.agent.emit("free", socket, req[kOptions]);
     else socket.destroy();
-    process.nextTick(() => {
-      req._closed = true;
-      req.emit("close");
-    });
+    const close = () => {
+      req.destroyed = true;
+      process.nextTick(() => {
+        req._closed = true;
+        req.emit("close");
+      });
+    };
+    // As in Node, 'close' follows 'finish'.
+    if (req.writableFinished) close();
+    else req.once("finish", close);
   }
   socket.on("data", onData);
   socket.on("end", onEnd);

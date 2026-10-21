@@ -59,7 +59,7 @@ Options for add:
 
 Other options:
   --json                  Print the list as JSON
-  --timeout <seconds>     How long login waits for the browser (default: 300)"#;
+  --timeout <seconds>     Time limit for the whole sign-in (default: 300)"#;
 
 /// `pi mcp --help` with the brand's name and configuration directory.
 pub fn help_text() -> String {

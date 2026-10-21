@@ -11,7 +11,7 @@ use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
 
-use super::http2_settings::SettingsScanner;
+use super::http2_settings::{Seen, SettingsTracker};
 use super::http2_stream::{self as streams, Headers, Sender, StreamCommand, h2_error};
 use super::net::parse_options;
 use super::set_fn;
@@ -67,7 +67,7 @@ enum Command {
 }
 
 struct Session {
-    scanner: SettingsScanner,
+    settings: SettingsTracker,
     input: Option<mpsc::UnboundedSender<Bytes>>,
     commands: mpsc::UnboundedSender<Command>,
     tasks: Vec<tokio::task::AbortHandle>,
@@ -83,6 +83,9 @@ struct Settings {
     max_concurrent_streams: Option<u32>,
     max_header_list_size: Option<u32>,
     enable_connect_protocol: Option<bool>,
+    /// Custom settings for the first SETTINGS frame, as identifier and value pairs.
+    #[serde(default)]
+    custom_settings: Vec<u32>,
 }
 
 fn headers_js<'js>(ctx: &Ctx<'js>, headers: Headers) -> rquickjs::Result<Value<'js>> {
@@ -95,7 +98,14 @@ fn deliver(ctx: &Ctx<'_>, id: u64, event: Event) {
     let undefined = || Value::new_undefined(ctx.clone());
     let result = (|| match event {
         Event::Ready(info) => function.call::<_, ()>(("ready", 0, from_json(ctx, &info)?)),
-        Event::Out(bytes) => function.call::<_, ()>(("out", 0, bytes_to_js(ctx, bytes)?)),
+        Event::Out(bytes) => {
+            let bytes = state().with_resource(id, |session: &mut Session| session.settings.outgoing(&bytes));
+            match bytes {
+                Ok(bytes) if bytes.is_empty() => Ok(()),
+                Ok(bytes) => function.call::<_, ()>(("out", 0, bytes_to_js(ctx, bytes)?)),
+                Err(_) => Ok(()),
+            }
+        }
         Event::Stream(key, stream, headers, end) => {
             function.call::<_, ()>(("stream", key, headers_js(ctx, headers)?, end, stream))
         }
@@ -322,6 +332,7 @@ async fn run_server(
 /// Start a session: `callback(event, key, ...)` receives its events, including `out` bytes.
 fn session<'js>(ctx: Ctx<'js>, server: bool, settings: Value<'js>, callback: Function<'js>) -> rquickjs::Result<u64> {
     let settings: Settings = parse_options(&ctx, settings)?;
+    let tracker = SettingsTracker::new(server, &settings.custom_settings);
     let state = state();
     let id = state.next_id();
     state.callbacks.borrow_mut().insert(id, Persistent::save(&ctx, callback));
@@ -361,8 +372,10 @@ fn session<'js>(ctx: Ctx<'js>, server: bool, settings: Value<'js>, callback: Fun
         tokio.spawn(run_client(h2_io, settings, commands_rx, post, done))
     };
     let tasks = vec![feed.abort_handle(), drain.abort_handle(), run.abort_handle()];
-    let scanner = SettingsScanner::new(server);
-    state.resources.borrow_mut().insert(id, Box::new(Session { scanner, input: Some(input), commands, tasks }));
+    state
+        .resources
+        .borrow_mut()
+        .insert(id, Box::new(Session { settings: tracker, input: Some(input), commands, tasks }));
     Ok(id)
 }
 
@@ -394,17 +407,34 @@ fn close(id: u64) {
 pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
     let object = Object::new(ctx.clone())?;
     set_fn(&object, "session", session)?;
-    // Returns the peer's SETTINGS frames found in the bytes, as flat identifier and value lists.
+    // Returns the peer's SETTINGS frames in the bytes as flat identifier and value lists, and
+    // "ack" for each ACK of the session's first frame or of a `settings` frame.
     set_fn(&object, "feed", |ctx: Ctx<'js>, id: u64, data: TypedArray<'js, u8>| {
-        let bytes = bytes_of(&data);
-        let frames = with_session(&ctx, id, |session| {
-            let frames = session.scanner.scan(&bytes);
-            if let Some(input) = &session.input {
+        let seen = with_session(&ctx, id, |session| {
+            let (bytes, seen) = session.settings.incoming(&bytes_of(&data));
+            if let Some(input) = &session.input
+                && !bytes.is_empty()
+            {
                 let _ = input.send(Bytes::from(bytes));
             }
-            frames
+            seen
         })?;
-        if frames.is_empty() { Ok(Value::new_undefined(ctx.clone())) } else { from_json(&ctx, &json!(frames)) }
+        if seen.is_empty() {
+            return Ok(Value::new_undefined(ctx.clone()));
+        }
+        let list = seen.into_iter().map(|seen| match seen {
+            Seen::Settings(frame) => json!(frame),
+            Seen::Ack => json!("ack"),
+        });
+        from_json(&ctx, &serde_json::Value::Array(list.collect()))
+    })?;
+    // A SETTINGS frame with custom entries: the bytes to write now, or undefined when they
+    // follow the frame h2 is writing.
+    set_fn(&object, "settings", |ctx: Ctx<'js>, id: u64, entries: Vec<u32>| {
+        match with_session(&ctx, id, |session| session.settings.send(&entries))? {
+            Some(frame) => bytes_to_js(&ctx, frame),
+            None => Ok(Value::new_undefined(ctx.clone())),
+        }
     })?;
     set_fn(&object, "endInput", |ctx: Ctx<'js>, id: u64| with_session(&ctx, id, |session| session.input = None))?;
     set_fn(&object, "request", |ctx: Ctx<'js>, id: u64, key: u64, headers: Vec<String>, end: bool| {

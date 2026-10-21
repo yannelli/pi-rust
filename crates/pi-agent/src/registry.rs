@@ -31,6 +31,10 @@ pub struct ToolInfo {
     pub namespace: Option<ToolNamespace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub annotations: Option<ToolAnnotations>,
+    /// The tool has `reaches_tools`. Upstream's `reachesTools` is a function, so listings that
+    /// serialize leave it out.
+    #[serde(skip)]
+    pub reaches_tools: bool,
 }
 
 /// Options for [`ToolRegistry::refresh`].
@@ -211,6 +215,7 @@ impl ToolRegistry {
             exposure: tool.exposure(),
             namespace: tool.namespace().cloned(),
             annotations: tool.annotations().cloned(),
+            reaches_tools: tool.declares_reaches_tools(),
         };
         self.tools.iter().map(info).collect()
     }
