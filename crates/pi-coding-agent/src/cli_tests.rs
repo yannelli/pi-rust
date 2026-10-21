@@ -96,3 +96,21 @@ fn parses_and_validates_run_limits() {
         assert_eq!(parse(line).errors, [error], "{line}");
     }
 }
+
+#[test]
+fn parses_and_validates_the_output_schema_flags() {
+    let args = parse("--output-schema out.json --output-retries 2 --plan -p hi");
+    assert!(args.errors.is_empty(), "{:?}", args.errors);
+    assert_eq!((args.output_schema.as_deref(), args.output_retries), (Some("out.json"), Some(2)));
+    assert_eq!(args.unknown_flags, [("plan".to_string(), FlagValue::Bool)]);
+    let equals = parse("--output-schema=dir/s.json --output-retries=0");
+    assert_eq!((equals.output_schema.as_deref(), equals.output_retries), (Some("dir/s.json"), Some(0)));
+    for (line, error) in [
+        ("--output-retries -1", "--output-retries requires a non-negative integer, got \"-1\""),
+        ("--output-retries=x", "--output-retries requires a non-negative integer, got \"x\""),
+        ("--output-schema=", "--output-schema requires a file path"),
+        ("--output-schema", "--output-schema requires a value"),
+    ] {
+        assert_eq!(parse(line).errors, [error], "{line}");
+    }
+}

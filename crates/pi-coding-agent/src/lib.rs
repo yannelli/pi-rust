@@ -31,6 +31,7 @@ pub mod mermaid;
 pub mod messages;
 pub mod migrations;
 pub mod model_resolver;
+pub mod output_schema;
 pub mod packages;
 pub mod platform;
 pub mod print_mode;

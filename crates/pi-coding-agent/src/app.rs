@@ -79,6 +79,8 @@ pub struct AppOptions {
     pub project_trust_ui: Option<(Arc<dyn crate::extension_ui::ExtensionUi>, crate::extension_ui::ExtensionMode)>,
     /// `--max-turns` and `--max-cost` (pi-rust).
     pub run_limits: crate::agent_session::RunLimits,
+    /// `--output-schema`, whose instructions every session's system prompt gets (pi-rust).
+    pub output_schema: Option<crate::output_schema::OutputSchema>,
 }
 
 fn resolve_cli_paths(cwd: &Path, paths: &[String]) -> Vec<String> {
@@ -117,6 +119,7 @@ impl AppOptions {
             append_system_prompt: (!append.is_empty())
                 .then(|| append.iter().map(|input| resolve_prompt_arg(input, cwd)).collect()),
             disabled_builtin_extensions: if args.no_mcp { vec!["mcp".into()] } else { Vec::new() },
+            output_schema_prompt: None,
             home: None,
         };
         Self {
@@ -215,6 +218,8 @@ async fn create_runtime_parts(
             target.trust_ui.as_ref(),
         )
         .await;
+    let mut resources = options.resources.clone();
+    resources.output_schema_prompt = options.output_schema.as_ref().map(|schema| schema.instruction());
     let services = create_agent_session_services(CreateServicesOptions {
         cwd: target.cwd.clone(),
         agent_dir: target.agent_dir.clone(),
@@ -223,7 +228,7 @@ async fn create_runtime_parts(
         model_runtime: None,
         credentials: options.credentials.clone(),
         oauth: options.oauth.clone(),
-        resources: options.resources.clone(),
+        resources,
     })
     .await;
     let mut diagnostics: Vec<RuntimeDiagnostic> = trust_diagnostics;
@@ -233,6 +238,9 @@ async fn create_runtime_parts(
     diagnostics.extend(loaded.diagnostics);
     diagnostics.extend(extensions::apply_flags(loaded.runner.as_ref(), &options.extension_flags).await);
     let run_limits = extensions::claim_run_limit_flags(loaded.runner.as_ref(), options.run_limits).await;
+    if extensions::claim_output_schema_flags(loaded.runner.as_ref(), options.output_schema.as_ref()).await {
+        services.resources().set_output_schema_prompt(None);
+    }
     for definition in &options.virtual_models {
         if let Err(error) = services.model_runtime.register_virtual_model(definition.clone()) {
             diagnostics.push(RuntimeDiagnostic::error(format!("{error:#}")));

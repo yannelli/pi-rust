@@ -26,6 +26,7 @@ use pi_coding_agent::interactive::startup_ui::startup_project_trust;
 use pi_coding_agent::interactive::{InteractiveOptions, run_interactive};
 use pi_coding_agent::interactive_components::first_time_setup::should_run_first_time_setup;
 use pi_coding_agent::mcp_cli::run_mcp_cli;
+use pi_coding_agent::output_schema::OutputSchema;
 use pi_coding_agent::packages::{PackageCommandOptions, run_config_command, run_package_command};
 use pi_coding_agent::print_mode::run_print_mode;
 use pi_coding_agent::rpc::{RpcModeOptions, run_rpc_mode};
@@ -429,6 +430,8 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
         list_models(search, &args, &cwd, &agent_dir).await?;
         return Ok(0);
     }
+    let print_mode = !acp && matches!(mode, AppMode::Print | AppMode::Json);
+    let output_schema = OutputSchema::from_args(&args, &cwd, print_mode).map_err(fail)?;
     if acp {
         let options = AcpModeOptions {
             extension_host: Some(ExtensionRpcHost::shared()),
@@ -470,7 +473,11 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
         session_manager.append_session_info(&name)?;
     }
 
-    let mut options = AppOptions { oauth: Some(oauth_lookup()), ..AppOptions::from_args(&args, &cwd, &agent_dir) };
+    let mut options = AppOptions {
+        oauth: Some(oauth_lookup()),
+        output_schema: output_schema.clone(),
+        ..AppOptions::from_args(&args, &cwd, &agent_dir)
+    };
     time("createSessionManager");
     let mut trust_diagnostics = Vec::new();
     let home = pi_coding_agent::config::home_dir();
@@ -550,7 +557,8 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
         AppMode::Print | AppMode::Json => {
             print_timings();
             let output = if mode == AppMode::Json { OutputMode::Json } else { OutputMode::Text };
-            Ok(run_print_mode(&Arc::new(runtime), output, initial_message, files.images, args.messages).await)
+            let runtime = Arc::new(runtime);
+            Ok(run_print_mode(&runtime, output, initial_message, files.images, args.messages, output_schema).await)
         }
         _ => {
             session.model_runtime().refresh_in_background();

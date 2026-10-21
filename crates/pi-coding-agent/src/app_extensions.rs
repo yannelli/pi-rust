@@ -13,6 +13,7 @@ use crate::agent_session::{
 };
 use crate::cli::FlagValue;
 use crate::extensions::{ExtensionBindings, ExtensionRunner, LoadOptions, LoadedExtensions, load_extensions};
+use crate::output_schema::OutputSchema;
 use crate::resources::trust::ExtensionTrustDecision;
 
 /// Load the extensions of `services` with the program's inline extensions.
@@ -62,26 +63,39 @@ pub(super) async fn apply_flags(
     diagnostics
 }
 
+/// Give a pi-rust flag that was set to the extension that registered a flag of that name, as
+/// upstream pi would; returns whether one did, which turns the pi-rust option off.
+async fn claim_flag(runner: &ExtensionRunner, name: &str, value: Option<String>) -> bool {
+    let Some(value) = value else { return false };
+    let Some(kind) = runner.registry().flag(name).map(|flag| flag.kind.clone()) else { return false };
+    let value = if kind == "boolean" { json!(true) } else { json!(value) };
+    let _ = runner.call_json("setFlag", vec![json!(name), value]).await;
+    true
+}
+
 /// An extension that registers `--max-turns` or `--max-cost` gets the value as with upstream pi,
 /// and the pi-rust run limit of that name stays off.
 pub(super) async fn claim_run_limit_flags(runner: Option<&Arc<ExtensionRunner>>, limits: RunLimits) -> RunLimits {
     let Some(runner) = runner else { return limits };
     let mut kept = limits;
-    let flags = [
-        ("max-turns", limits.max_turns.map(|turns| turns.to_string())),
-        ("max-cost", limits.max_cost.map(|cost| cost.to_string())),
-    ];
-    for (name, value) in flags {
-        let Some(value) = value else { continue };
-        let Some(kind) = runner.registry().flag(name).map(|flag| flag.kind.clone()) else { continue };
-        let value = if kind == "boolean" { json!(true) } else { json!(value) };
-        let _ = runner.call_json("setFlag", vec![json!(name), value]).await;
-        match name {
-            "max-turns" => kept.max_turns = None,
-            _ => kept.max_cost = None,
-        }
+    if claim_flag(runner, "max-turns", limits.max_turns.map(|turns| turns.to_string())).await {
+        kept.max_turns = None;
+    }
+    if claim_flag(runner, "max-cost", limits.max_cost.map(|cost| cost.to_string())).await {
+        kept.max_cost = None;
     }
     kept
+}
+
+/// [`claim_flag`] for `--output-retries` and `--output-schema`; returns whether an extension
+/// registered `--output-schema`.
+pub(super) async fn claim_output_schema_flags(
+    runner: Option<&Arc<ExtensionRunner>>,
+    schema: Option<&OutputSchema>,
+) -> bool {
+    let (Some(runner), Some(schema)) = (runner, schema) else { return false };
+    claim_flag(runner, "output-retries", schema.retries_flag.map(|retries| retries.to_string())).await;
+    claim_flag(runner, "output-schema", Some(schema.path.clone())).await
 }
 
 /// `project_trust` handlers of the extensions that load without project trust: the first

@@ -12,6 +12,14 @@
     {
       "item": "--max-cost",
       "reason": "pi-rust extension: run limits"
+    },
+    {
+      "item": "--output-schema",
+      "reason": "pi-rust extension: structured output"
+    },
+    {
+      "item": "--output-retries",
+      "reason": "pi-rust extension: structured output"
     }
   ],
   "settings": [

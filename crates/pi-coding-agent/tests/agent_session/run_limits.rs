@@ -115,7 +115,7 @@ async fn print_mode_exits_3_and_skips_the_remaining_messages() {
     let session = runtime.session();
     assert_eq!(session.model().unwrap().id, "tiny");
     let first = Some("Read notes.txt.".to_string());
-    let code = run_print_mode(&runtime, OutputMode::Text, first, Vec::new(), vec!["Second.".into()]).await;
+    let code = run_print_mode(&runtime, OutputMode::Text, first, Vec::new(), vec!["Second.".into()], None).await;
     assert_eq!(code, RUN_LIMIT_EXIT_CODE);
     assert_eq!(h.requests().len(), 1, "the second message is not sent");
     assert_eq!(session.run_limit_stop().unwrap().message(), "stopped after 1 turn (--max-turns)");
