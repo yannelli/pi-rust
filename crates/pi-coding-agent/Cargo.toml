@@ -55,7 +55,7 @@ unicode-normalization = "0.1.24"
 url = "2.5.8"
 zip = { version = "7", default-features = false, features = ["deflate-flate2"] }
 semver = "1.0.26"
-agent-client-protocol-schema = { version = "=0.13.7", features = ["unstable_auth_methods"] }
+agent-client-protocol-schema = { version = "=0.13.7", features = ["unstable_auth_methods", "unstable_end_turn_token_usage"] }
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1.1.5", features = ["stdio", "process"] }
