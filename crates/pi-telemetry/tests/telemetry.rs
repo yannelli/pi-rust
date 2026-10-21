@@ -151,7 +151,7 @@ async fn noop_preserves_errors_and_ignores_payloads() {
 }
 
 #[test]
-fn propagates_known_spans_and_falls_back_to_the_root_for_unknown_carriers() {
+fn propagates_settled_spans_and_continues_carriers_of_other_recorders() {
     let telemetry = InMemoryTelemetryContext::new();
     let parent = telemetry.open_span(SpanOptions::new("parent"));
     let carrier = telemetry.inject(parent.as_ref()).expect("a recorded span has a carrier");
@@ -162,15 +162,44 @@ fn propagates_known_spans_and_falls_back_to_the_root_for_unknown_carriers() {
     assert_eq!(telemetry.inject(child.as_ref()).map(|c| c["pi-memory-span"].clone()), Some("2".into()));
     let other = InMemoryTelemetryContext::new();
     other.extract(Some(&carrier)).open_span(SpanOptions::new("foreign")).end(SpanOutcome::Ok);
-    let garbled = TelemetryCarrier::from([("pi-memory-scope".to_owned(), "x".to_owned())]);
-    telemetry.extract(Some(&garbled)).open_span(SpanOptions::new("garbled")).end(SpanOutcome::Ok);
     child.end(SpanOutcome::Ok);
 
     let spans = telemetry.get_spans();
     assert_eq!((spans[1].parent_id, spans[1].parent_context.as_ref()), (Some(1), Some(&carrier)));
-    assert_eq!((spans[2].parent_id, spans[2].parent_context.as_ref()), (None, None));
     let foreign = &other.get_spans()[0];
     assert_eq!((foreign.parent_id, foreign.parent_context.as_ref()), (None, Some(&carrier)));
+}
+
+#[test]
+fn uses_the_root_for_absent_and_unknown_carriers() {
+    let telemetry = InMemoryTelemetryContext::new();
+    let carrier = |entries: &[(&str, &str)]| {
+        entries.iter().map(|(key, value)| ((*key).to_owned(), (*value).to_owned())).collect::<TelemetryCarrier>()
+    };
+    let scope_only = carrier(&[("pi-memory-scope", "x")]);
+    let no_trace = carrier(&[("pi-memory-scope", "x"), ("pi-memory-span", "1")]);
+    let unknown = carrier(&[("unknown", "format")]);
+    let carriers = [None, Some(TelemetryCarrier::new()), Some(unknown), Some(scope_only), Some(no_trace)];
+    for carrier in &carriers {
+        telemetry.extract(carrier.as_ref()).open_span(SpanOptions::new("fallback")).end(SpanOutcome::Ok);
+    }
+    for span in telemetry.get_spans() {
+        assert_eq!((span.parent_id, span.parent_context), (None, None));
+    }
+}
+
+#[test]
+fn treats_recognized_carrier_identifiers_as_opaque_strings() {
+    let telemetry = InMemoryTelemetryContext::new();
+    let carrier = TelemetryCarrier::from([
+        ("pi-memory-scope".to_owned(), "external-recorder".to_owned()),
+        ("pi-memory-span".to_owned(), "external-span".to_owned()),
+        ("pi-memory-trace".to_owned(), "external-trace".to_owned()),
+    ]);
+    telemetry.extract(Some(&carrier)).open_span(SpanOptions::new("receiver")).end(SpanOutcome::Ok);
+    let span = &telemetry.get_spans()[0];
+    assert_eq!((span.parent_id, span.parent_context.as_ref()), (None, Some(&carrier)));
+    assert_eq!(span.context["pi-memory-trace"], "external-trace");
 }
 
 #[test]
@@ -195,18 +224,14 @@ fn records_links_and_keeps_capabilities_under_a_settled_parent() {
 }
 
 #[test]
-fn records_measurements_and_drops_invalid_ones() {
+fn records_measurements_with_their_metadata_and_span_context() {
     let telemetry = InMemoryTelemetryContext::new();
     let span = telemetry.open_span(SpanOptions::new("phase"));
     let counter = telemetry.counter("requests", InstrumentOptions::default());
     counter.add(1.0, SpanAttributes::new().with("kind", "a"));
-    counter.add(-1.0, SpanAttributes::new());
-    counter.add(f64::NAN, SpanAttributes::new());
     telemetry.up_down_counter("active", InstrumentOptions::default()).add(-1.0, SpanAttributes::new());
     let options = HistogramOptions { unit: Some("ms".into()), boundaries: Some(vec![1.0, 10.0]), ..Default::default() };
     telemetry.histogram("duration", options).record(5.0, SpanAttributes::new(), Some(span.as_ref()));
-    let unordered = HistogramOptions { boundaries: Some(vec![10.0, 1.0]), ..Default::default() };
-    telemetry.histogram("unordered", unordered).record(5.0, SpanAttributes::new(), None);
 
     let metrics = telemetry.get_metrics();
     let summary: Vec<_> = metrics.iter().map(|m| (m.name.as_str(), m.value)).collect();

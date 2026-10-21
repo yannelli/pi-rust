@@ -1,20 +1,22 @@
 //! Vendor-neutral telemetry contracts and typed schema utilities for pi.
 //! Port of upstream `@earendil-works/pi-telemetry`: callback-scoped spans over an explicit parent
 //! context, optional propagation and metrics capabilities, a no-op context, an in-memory reference
-//! recorder, and adapter conformance cases.
+//! recorder that is also a [`TelemetryStore`], a trace renderer ([`render`]), and adapter conformance cases.
 
 mod attributes;
 mod memory;
 mod metrics;
 mod noop;
+pub mod render;
 mod schema;
 mod span;
+mod store;
 pub mod testing;
 
 pub use attributes::{AttributeValue, SpanAttributes};
 pub use memory::{
     InMemoryTelemetryContext, RecordedTelemetryEvent, RecordedTelemetryLink, RecordedTelemetryMeasurement,
-    RecordedTelemetrySpan,
+    RecordedTelemetrySpan, TelemetryClock,
 };
 pub use metrics::{
     HistogramOptions, InstrumentOptions, SchemaTelemetryCounter, SchemaTelemetryHistogram, TelemetryCounter,
@@ -34,4 +36,8 @@ pub use schema::{
 pub use span::{
     SpanErrorInfo, SpanFuture, SpanLink, SpanOptions, SpanOutcome, SpanStatus, TelemetryCarrier, TelemetryContext,
     TelemetryContextExt, TelemetryPropagation, TelemetrySpan,
+};
+pub use store::{
+    MetricQuery, StoreError, StoredEvent, StoredLink, StoredMetric, StoredSpan, StoredTrace, TelemetryStore, TracePage,
+    TraceQuery,
 };
