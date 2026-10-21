@@ -55,6 +55,8 @@ const SOURCES: &[(&str, &str)] = &[
     ("internal/fs_streams", include_str!("../js/fs_streams.js")),
     ("fs", include_str!("../js/fs.js")),
     ("fs/promises", include_str!("../js/fs_promises.js")),
+    ("internal/readline_keys", include_str!("../js/readline_keys.js")),
+    ("internal/readline_tty", include_str!("../js/readline_tty.js")),
     ("readline", include_str!("../js/readline.js")),
     ("readline/promises", include_str!("../js/readline_promises.js")),
     ("internal/ipc", include_str!("../js/ipc.js")),

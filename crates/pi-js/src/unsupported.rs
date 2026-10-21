@@ -61,7 +61,8 @@ pub const DIFFERENCES: &[&str] = &[
     "process.exit calls the embedder's on_exit callback when one is set",
     "os.freemem and os.totalmem come from /proc, sysctl, or vm_stat; os.cpus reports zero times on \
      platforms other than Linux, macOS, and Windows",
-    "readline has no raw terminal editing: lines come from the input stream as text",
+    "readline: terminal mode has no tab completion, kill ring (Ctrl+Y), undo (Ctrl+_), or Ctrl+Z \
+     suspend, and display widths come from Node's fallback width tables rather than ICU",
     "module.register hooks run on the importing thread: a hook's promise must settle from microtasks alone, \
      and hooks apply to import, not require",
     "async_hooks: createHook sees AsyncResource objects only, not timers, promises, or I/O; async context \
@@ -107,8 +108,8 @@ pub const DIFFERENCES: &[&str] = &[
      test files in this runtime instead of child processes, so an ES module file runs only on its first \
      load; the spec reporter prints no colors; source locations come from QuickJS stack frames, whose \
      columns can differ from V8's",
-    "repl: input is read line by line with no terminal editing, completion, history file, or .editor \
-     mode; top-level await keeps a single const, let, or var declaration per line visible afterwards; \
+    "repl: terminal mode edits lines through readline but has no completion, previews, or colors, and \
+     there is no history file or .editor mode; top-level await keeps a single const, let, or var declaration per line visible afterwards; \
      lines that arrive during an asynchronous evaluation wait for it; the context is a vm context, so \
      globalThis inside it is not the context object (see vm), and error messages come from QuickJS",
     "inspector: sessions run in this runtime and cover Runtime (evaluation, remote objects, properties, \

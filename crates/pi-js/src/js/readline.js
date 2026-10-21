@@ -1,7 +1,9 @@
 // node:readline: line splitting over any readable stream, questions, and cursor helpers.
-// Raw terminal editing is not available because pi owns the terminal.
+// Terminal mode (line editing over raw input) is in internal/readline_tty.
 const EventEmitter = require("events");
 const { StringDecoder } = require("string_decoder");
+const tty = require("internal/readline_tty");
+const { validate } = require("internal/errors");
 
 const LINE_BREAK = /\r\n|\n|\r/;
 
@@ -12,22 +14,37 @@ class Interface extends EventEmitter {
   #closed = false;
   #paused = false;
   #sawReturn = false;
+  #oldPrompt = null;
   constructor(input, output, completer, terminal) {
     super();
     const options = input && typeof input.on === "function" ? { input, output, completer, terminal } : input || {};
     this.input = options.input;
     this.output = options.output;
-    this.terminal = false;
     this.line = "";
     this.cursor = 0;
-    this.history = [];
+    if (options.history !== undefined) validate.array(options.history, "history");
+    this.history = options.history === undefined ? [] : options.history;
+    const historySize = options.historySize === undefined ? 30 : options.historySize;
+    if (typeof historySize !== "number") throw require("internal/errors").invalidArgType("historySize", "of type number", historySize);
+    if (Number.isNaN(historySize) || historySize < 0) throw require("internal/errors").outOfRange("historySize", ">= 0", historySize);
+    this.historySize = historySize;
+    this.removeHistoryDuplicates = !!options.removeHistoryDuplicates;
+    this.completer = options.completer;
+    this.tabSize = options.tabSize === undefined ? 8 : options.tabSize;
+    this.escapeCodeTimeout = options.escapeCodeTimeout === undefined ? 500 : options.escapeCodeTimeout;
+    this.isCompletionEnabled = true;
     this.crlfDelay = Math.max(100, options.crlfDelay || 100);
     this._prompt = options.prompt === undefined ? "> " : String(options.prompt);
+    let isTerminal = options.terminal;
+    if (isTerminal === undefined && this.output !== null && this.output !== undefined) isTerminal = !!this.output.isTTY;
+    this.terminal = !!isTerminal && !!this.input;
     if (options.signal) {
       if (options.signal.aborted) process.nextTick(() => this.close());
       else options.signal.addEventListener("abort", () => this.close(), { once: true });
     }
-    if (this.input) {
+    if (this.terminal) {
+      tty.attach(this);
+    } else if (this.input) {
       this._ondata = (chunk) => this.#receive(typeof chunk === "string" ? chunk : this.#decoder.write(chunk));
       this._onend = () => {
         this.#receive(this.#decoder.end());
@@ -53,8 +70,15 @@ class Interface extends EventEmitter {
     if (this.#closed) return;
     this.line = "";
     const question = this.#questions.shift();
+    if (question && this.#questions.length === 0 && this.#oldPrompt !== null) {
+      this._prompt = this.#oldPrompt;
+      this.#oldPrompt = null;
+    }
     if (question) question(line);
     else this.emit("line", line);
+  }
+  _onLine(line) {
+    this.#emitLine(line);
   }
   get closed() {
     return this.#closed;
@@ -65,10 +89,15 @@ class Interface extends EventEmitter {
   getPrompt() {
     return this._prompt;
   }
-  prompt() {
+  prompt(preserveCursor) {
     if (this.#closed) throw Object.assign(new Error("readline was closed"), { code: "ERR_USE_AFTER_CLOSE" });
     if (this.#paused) this.resume();
-    if (this.output && typeof this.output.write === "function") this.output.write(this._prompt);
+    if (this.terminal && process.env.TERM !== "dumb") {
+      if (!preserveCursor) this.cursor = 0;
+      this._refreshLine();
+    } else if (this.output && typeof this.output.write === "function") {
+      this.output.write(this._prompt);
+    }
   }
   question(query, options, callback) {
     if (typeof options === "function") [callback, options] = [options, {}];
@@ -87,11 +116,19 @@ class Interface extends EventEmitter {
         if (!answered) this.#questions = this.#questions.filter((entry) => entry !== answer);
       }, { once: true });
     }
-    if (this.output && typeof this.output.write === "function") this.output.write(String(query));
+    if (this.terminal) {
+      if (this.#oldPrompt === null) this.#oldPrompt = this._prompt;
+      this._prompt = String(query);
+      this.prompt();
+    } else if (this.output && typeof this.output.write === "function") {
+      this.output.write(String(query));
+    }
   }
-  write(data) {
+  write(data, key) {
     if (this.#closed) throw Object.assign(new Error("readline was closed"), { code: "ERR_USE_AFTER_CLOSE" });
-    if (typeof data === "string") this.#receive(data);
+    if (this.#paused) this.resume();
+    if (this.terminal) this._ttyWrite(data, key);
+    else if (typeof data === "string") this.#receive(data);
   }
   pause() {
     if (this.#paused || this.#closed) return this;
@@ -110,15 +147,13 @@ class Interface extends EventEmitter {
   close() {
     if (this.#closed) return;
     this.pause();
+    if (this.terminal) this._setRawMode(false);
     this.#closed = true;
-    if (this.input) {
+    if (this.input && this._ondata) {
       this.input.removeListener("data", this._ondata);
       this.input.removeListener("end", this._onend);
     }
     this.emit("close");
-  }
-  getCursorPos() {
-    return { rows: 0, cols: this.cursor };
   }
   [Symbol.asyncIterator]() {
     return lineIterator(this);
@@ -160,6 +195,8 @@ function lineIterator(lineReader) {
   };
 }
 
+tty.install(Interface);
+
 function createInterface(input, output, completer, terminal) {
   return new Interface(input, output, completer, terminal);
 }
@@ -197,30 +234,6 @@ function clearScreenDown(stream, callback) {
   return writeAndCallback(stream, "\x1b[0J", callback);
 }
 
-// Keypress events for already-decoded input; escape sequences arrive as single characters.
-function emitKeypressEvents(stream) {
-  if (!stream || stream._piKeypress) return;
-  stream._piKeypress = true;
-  const decoder = new StringDecoder("utf8");
-  stream.on("data", (chunk) => {
-    const text = typeof chunk === "string" ? chunk : decoder.write(chunk);
-    for (const sequence of text) {
-      const code = sequence.charCodeAt(0);
-      const key = { sequence, name: sequence.toLowerCase(), ctrl: false, meta: false, shift: sequence !== sequence.toLowerCase() };
-      if (sequence === "\r") key.name = "return";
-      else if (sequence === "\n") key.name = "enter";
-      else if (sequence === "\t") key.name = "tab";
-      else if (sequence === "\x7f" || sequence === "\b") key.name = "backspace";
-      else if (sequence === "\x1b") key.name = "escape";
-      else if (code < 27) {
-        key.ctrl = true;
-        key.name = String.fromCharCode(code + 96);
-      }
-      stream.emit("keypress", sequence, key);
-    }
-  });
-}
-
 module.exports = {
   Interface,
   createInterface,
@@ -228,5 +241,5 @@ module.exports = {
   moveCursor,
   clearLine,
   clearScreenDown,
-  emitKeypressEvents,
+  emitKeypressEvents: require("internal/readline_keys").emitKeypressEvents,
 };
