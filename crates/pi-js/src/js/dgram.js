@@ -124,7 +124,18 @@ Socket.prototype.send = function (buffer, offset, length, port, address, callbac
   };
   this._ensureBound();
   this._afterBind(() => {
-    const deliver = (ip) => (ip === undefined ? nativeDgram.send(this._handle, bytes) : nativeDgram.send(this._handle, bytes, ip, port)).then((sent) => report(null, sent), (error) => report(error));
+    const target = (ip) => (ip === undefined ? [this._handle, bytes] : [this._handle, bytes, ip, port]);
+    // As in Node, a datagram the OS takes at once reports on the next tick, before any reply arrives.
+    const deliver = (ip) => {
+      let sent;
+      try {
+        sent = nativeDgram.trySend(...target(ip));
+      } catch (error) {
+        return process.nextTick(report, error);
+      }
+      if (sent !== undefined) return process.nextTick(report, null, sent);
+      nativeDgram.send(...target(ip)).then((sent) => report(null, sent), (error) => report(error));
+    };
     if (connected || this._connectState === 2) return deliver(undefined);
     this._resolve(address || (this.type === "udp6" ? "::1" : "127.0.0.1"), (error, ip) => (error ? report(error) : deliver(ip)));
   });
