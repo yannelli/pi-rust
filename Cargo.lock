@@ -3042,6 +3042,7 @@ dependencies = [
  "base64 0.22.1",
  "crc32fast",
  "futures",
+ "pi-schema",
  "pi-telemetry",
  "regex",
  "reqwest",
@@ -3365,6 +3366,14 @@ version = "0.5.3"
 dependencies = [
  "pi-chord",
  "thiserror",
+]
+
+[[package]]
+name = "pi-schema"
+version = "0.5.3"
+dependencies = [
+ "regex",
+ "serde_json",
 ]
 
 [[package]]

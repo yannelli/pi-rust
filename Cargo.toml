@@ -15,6 +15,7 @@ members = [
     "crates/pi-js",
     "crates/pi-mcp",
     "crates/pi-protocol",
+    "crates/pi-schema",
     "crates/pi-server",
     "crates/pi-telemetry",
     "crates/pi-tui",
@@ -31,6 +32,7 @@ rust-version = "1.85"
 [workspace.dependencies]
 pi-ai = { path = "crates/pi-ai" }
 pi-agent = { path = "crates/pi-agent" }
+pi-schema = { path = "crates/pi-schema" }
 pi-telemetry = { path = "crates/pi-telemetry" }
 anyhow = "1"
 async-trait = "0.1"
