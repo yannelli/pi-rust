@@ -92,6 +92,25 @@ async fn api_methods_reach_the_session() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn exec_reports_why_a_command_could_not_start() {
+    let source = r#"export default function (pi) {
+	pi.registerCommand("missing", { handler: async (_args, ctx) => {
+		const result = await pi.exec("pi-test-missing-binary", [], { timeout: 5000 });
+		ctx.ui.notify(`exec ${result.code} ${result.killed} ${result.stdout === ""} ${result.stderr}`);
+	} });
+}
+"#;
+    let h = harness(Setup { files: vec![("missing.ts", source.into())], load: vec!["missing.ts"], ..Setup::default() })
+        .await;
+    h.session.prompt("/missing", Vec::new()).await.unwrap();
+    let calls = h.ui.calls();
+    let [call] = calls.as_slice() else { panic!("{calls:?}") };
+    // A command that is not installed must differ from one that exits 1 without output.
+    assert!(call.starts_with("notify(info): exec 1 false true "), "{call}");
+    assert!(call.contains("ENOENT"), "{call}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn completions_shortcuts_and_renderers_come_from_the_registry() {
     let h = harness(Setup { files: vec![("probe.ts", probe_extension())], load: vec!["probe.ts"], ..Setup::default() })
         .await;

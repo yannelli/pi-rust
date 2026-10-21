@@ -51,12 +51,13 @@ export function execCommand(command, args, cwd, options) {
 		proc.stderr?.on("data", (data) => {
 			stderr += data.toString();
 		});
-		const finish = (code) => {
+		const finish = (code, error) => {
 			clearTimeout(timer);
 			options?.signal?.removeEventListener("abort", kill);
-			resolve({ stdout, stderr, code, killed });
+			// A command that could not start reports why, unlike one that exits 1 without output.
+			resolve({ stdout, stderr: stderr || (error?.message ?? ""), code, killed });
 		};
-		proc.on("error", () => finish(1));
+		proc.on("error", (error) => finish(1, error));
 		proc.on("close", (code) => finish(code ?? 0));
 	});
 }
