@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use futures::future::BoxFuture;
 use rusqlite::types::{Value, ValueRef};
 use rusqlite::{Connection, params_from_iter};
 
@@ -98,24 +99,25 @@ fn run(connection: &SharedConnection, sql: &str, params: &[SqliteValue]) -> Dura
     })
 }
 
-/// One active transaction's handle; it fails once its transaction has settled.
-struct TransactionHandle {
+/// The handle of a transaction or exclusive operation; it fails once that scope has settled.
+struct ScopedHandle {
     connection: SharedConnection,
     active: Arc<AtomicBool>,
+    kind: &'static str,
 }
 
-impl TransactionHandle {
+impl ScopedHandle {
     fn check(&self) -> DurableResult<()> {
         if self.active.load(Ordering::SeqCst) {
             Ok(())
         } else {
-            Err(DurableError::storage("SQLite transaction handle is no longer active"))
+            Err(DurableError::storage(format!("SQLite {} handle is no longer active", self.kind)))
         }
     }
 }
 
 #[async_trait]
-impl SqliteExecutor for TransactionHandle {
+impl SqliteExecutor for ScopedHandle {
     async fn exec(&self, sql: &str) -> DurableResult<()> {
         self.check()?;
         exec(&self.connection, sql)
@@ -174,6 +176,39 @@ impl BundledSqliteDatabase {
         }
         Ok(database)
     }
+
+    /// Run `operation` alone on the connection, outside a transaction (upstream `NodeSqliteDatabase.exclusive`).
+    /// It starts after every earlier call has settled and later calls wait until it settles. Its handle runs SQL
+    /// at once and fails afterwards. Use it for work that cannot run in a transaction, such as
+    /// `PRAGMA wal_checkpoint`. Calling the database itself from inside the operation never settles.
+    ///
+    /// A transaction the operation leaves open would swallow later statements, so it is rolled back and the call
+    /// fails, naming the operation's own error when it failed.
+    pub async fn exclusive<'a, T, F>(&'a self, operation: F) -> DurableResult<T>
+    where
+        T: Send + 'a,
+        F: FnOnce(Arc<dyn SqliteExecutor>) -> BoxFuture<'a, DurableResult<T>> + Send + 'a,
+    {
+        let _access = self.access.lock().await;
+        let active = Arc::new(AtomicBool::new(true));
+        let handle =
+            Arc::new(ScopedHandle { connection: self.connection.clone(), active: active.clone(), kind: "exclusive" });
+        let outcome = operation(handle).await;
+        active.store(false, Ordering::SeqCst);
+        if with_connection(&self.connection, |connection| Ok(connection.is_autocommit()))? {
+            return outcome;
+        }
+        let left_open = match &outcome {
+            Ok(_) => "SQLite exclusive operation left a transaction open; it was rolled back".to_owned(),
+            Err(cause) => format!("SQLite exclusive operation left a transaction open; it was rolled back ({cause})"),
+        };
+        Err(match exec(&self.connection, "ROLLBACK") {
+            Ok(()) => DurableError::storage(left_open),
+            Err(rollback) => DurableError::storage(format!(
+                "SQLite exclusive operation left a transaction open and rollback failed: {left_open}; {rollback}"
+            )),
+        })
+    }
 }
 
 #[async_trait]
@@ -206,7 +241,8 @@ impl SqliteDatabase for BundledSqliteDatabase {
         let _access = self.access.lock().await;
         exec(&self.connection, "BEGIN IMMEDIATE")?;
         let active = Arc::new(AtomicBool::new(true));
-        let handle = Arc::new(TransactionHandle { connection: self.connection.clone(), active: active.clone() });
+        let handle =
+            Arc::new(ScopedHandle { connection: self.connection.clone(), active: active.clone(), kind: "transaction" });
         let result = callback(handle).await;
         active.store(false, Ordering::SeqCst);
         match result {
