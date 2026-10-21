@@ -253,7 +253,6 @@ impl InteractiveMode {
         }
         self.start_version_check();
         self.check_tmux_keyboard_setup();
-        self.maybe_warn_about_anthropic_subscription_auth(None);
     }
 
     pub(super) fn register_resource_themes(&self) {

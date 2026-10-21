@@ -55,7 +55,6 @@ impl SettingsConfig {
             fullscreen_scrollbar: settings.fullscreen_scrollbar(),
             fullscreen_copy_on_select: settings.fullscreen_copy_on_select(),
             fullscreen_wheel_scroll_lines: settings.fullscreen_wheel_scroll_lines(),
-            warnings: settings.settings().warnings.unwrap_or_default(),
             ..Self::default()
         }
     }
@@ -71,8 +70,7 @@ impl SettingsCallbacks {
                 Box::new(move |value| settings.$setter(value))
             }};
         }
-        let (change, remove, theme, trust, warnings) =
-            (settings.clone(), settings.clone(), settings.clone(), settings.clone(), settings.clone());
+        let (change, remove, theme, trust) = (settings.clone(), settings.clone(), settings.clone(), settings.clone());
         Self {
             on_auto_compact_change: save!(set_compaction_enabled),
             on_show_images_change: save!(set_show_images),
@@ -114,7 +112,6 @@ impl SettingsCallbacks {
             on_fullscreen_scrollbar_change: save!(set_fullscreen_scrollbar),
             on_fullscreen_copy_on_select_change: save!(set_fullscreen_copy_on_select),
             on_fullscreen_wheel_scroll_lines_change: save!(set_fullscreen_wheel_scroll_lines),
-            on_warnings_change: Box::new(move |value| warnings.set_warnings(value)),
             on_cancel: Box::new(|| {}),
         }
     }

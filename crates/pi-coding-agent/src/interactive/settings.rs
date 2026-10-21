@@ -120,7 +120,6 @@ impl InteractiveMode {
             fullscreen_scrollbar: settings.fullscreen_scrollbar(),
             fullscreen_copy_on_select: settings.fullscreen_copy_on_select(),
             fullscreen_wheel_scroll_lines: settings.fullscreen_wheel_scroll_lines(),
-            warnings: settings.settings().warnings.unwrap_or_default(),
         }
     }
 
@@ -320,10 +319,6 @@ impl InteractiveMode {
                     tui.set_wheel_scroll_lines(wheel_lines(&settings));
                 }
             }),
-            on_warnings_change: {
-                let weak = weak.clone();
-                Box::new(move |warnings| with(&weak, |mode| mode.settings().set_warnings(warnings)))
-            },
             on_cancel: Box::new(move || {
                 done();
                 with(&weak, |mode| mode.request_render());

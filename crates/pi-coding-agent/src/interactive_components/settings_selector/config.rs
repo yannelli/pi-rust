@@ -10,7 +10,7 @@ use crate::settings::QuietStartup;
 use crate::settings::defaults::{DEFAULT_HTTP_IDLE_TIMEOUT_MS, DEFAULT_THINKING_LEVEL};
 use crate::settings::schema::{
     CacheWarmingMode, DoubleEscapeAction, FullscreenExitOutput, FullscreenScrollbar, MermaidRenderingMode,
-    SessionShareDestination, TreeFilterMode, TuiMode, WarningSettings,
+    SessionShareDestination, TreeFilterMode, TuiMode,
 };
 use crate::theme::{SYSTEM_THEME_NAME, TerminalTheme};
 
@@ -116,7 +116,6 @@ pub struct SettingsConfig {
     pub fullscreen_copy_on_select: bool,
     /// Lines per wheel event; `None` is `auto`.
     pub fullscreen_wheel_scroll_lines: Option<u64>,
-    pub warnings: WarningSettings,
 }
 
 /// Upstream `SETTINGS_DEFAULTS`, with no models and no themes.
@@ -164,7 +163,6 @@ impl Default for SettingsConfig {
             fullscreen_scrollbar: FullscreenScrollbar::Auto,
             fullscreen_copy_on_select: true,
             fullscreen_wheel_scroll_lines: None,
-            warnings: WarningSettings::default(),
         }
     }
 }
@@ -223,7 +221,6 @@ pub struct SettingsCallbacks {
     pub on_fullscreen_copy_on_select_change: OnChange<bool>,
     /// `None` is `auto`.
     pub on_fullscreen_wheel_scroll_lines_change: OnChange<Option<u64>>,
-    pub on_warnings_change: Box<dyn FnMut(&WarningSettings)>,
     pub on_cancel: Box<dyn FnMut()>,
 }
 
@@ -271,7 +268,6 @@ impl Default for SettingsCallbacks {
             on_fullscreen_scrollbar_change: ignore(),
             on_fullscreen_copy_on_select_change: ignore(),
             on_fullscreen_wheel_scroll_lines_change: ignore(),
-            on_warnings_change: Box::new(|_| {}),
             on_cancel: Box::new(|| {}),
         }
     }

@@ -1,4 +1,4 @@
-//! The warnings submenu and the per-model thinking level submenu of the settings selector.
+//! The per-model thinking level submenu of the settings selector.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -6,16 +6,15 @@ use std::rc::Rc;
 
 use pi_ai::simple_options::supported_thinking_levels;
 use pi_ai::{Model, ThinkingLevel};
+use pi_tui::components::SelectItem;
 use pi_tui::components::SelectListLayoutOptions;
-use pi_tui::components::settings_list::{SettingItem, SettingsListOptions, SubmenuDone, SubmenuFactory};
-use pi_tui::components::{SelectItem, SettingsList};
+use pi_tui::components::settings_list::{SubmenuDone, SubmenuFactory};
 use pi_tui::{ComponentRef, component};
 
 use super::super::common::fg;
 use super::SharedCallbacks;
 use super::submenu::{StepContext, StepText, SteppedSubmenu, SteppedSubmenuOptions, SteppedSubmenuStep};
-use crate::settings::schema::WarningSettings;
-use crate::theme::{ThemeColor, get_settings_list_theme};
+use crate::theme::ThemeColor;
 
 const CLEAR_OVERRIDE_VALUE: &str = "__clear__";
 
@@ -51,36 +50,6 @@ pub(super) fn overrides_summary(overrides: &BTreeMap<String, ThinkingLevel>) -> 
 
 fn locale_compare(a: &str, b: &str) -> std::cmp::Ordering {
     a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| a.cmp(b))
-}
-
-/// The warnings submenu: one toggle per warning.
-pub(super) fn warnings_factory(warnings: Rc<RefCell<WarningSettings>>, callbacks: SharedCallbacks) -> SubmenuFactory {
-    Rc::new(move |_current: &str, done: SubmenuDone| -> ComponentRef {
-        let enabled = warnings.borrow().anthropic_extra_usage.unwrap_or(true);
-        let items = vec![SettingItem {
-            id: "anthropic-extra-usage".into(),
-            label: "Anthropic extra usage".into(),
-            description: Some("Warn when Anthropic subscription auth may use paid extra usage".into()),
-            current_value: enabled.to_string(),
-            values: Some(vec!["true".into(), "false".into()]),
-            submenu: None,
-        }];
-        let (state, callbacks) = (warnings.clone(), callbacks.clone());
-        component(SettingsList::new(
-            items.clone(),
-            items.len().min(10),
-            get_settings_list_theme(),
-            move |id: &str, value: &str| {
-                if id == "anthropic-extra-usage" {
-                    let updated = WarningSettings { anthropic_extra_usage: Some(value == "true") };
-                    *state.borrow_mut() = updated.clone();
-                    (callbacks.borrow_mut().on_warnings_change)(&updated);
-                }
-            },
-            move || done.done(None),
-            SettingsListOptions::default(),
-        ))
-    })
 }
 
 /// Models and overrides that the per-model thinking submenu reads and updates.

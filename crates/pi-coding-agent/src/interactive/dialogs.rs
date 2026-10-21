@@ -101,13 +101,11 @@ impl InteractiveMode {
         self.spawn(move |mode| async move {
             let id = format!("{}/{}", model.provider, model.id);
             let short = model.id.clone();
-            let selected = model.clone();
             match tokio::spawn(async move { session.set_model(model, persist).await }).await {
                 Ok(Ok(())) => {
                     mode.update_available_provider_count();
                     mode.update_editor_border_color();
                     mode.show_status(&if persist { format!("Default model: {id}") } else { format!("Model: {short}") });
-                    mode.maybe_warn_about_anthropic_subscription_auth(Some(selected));
                 }
                 Ok(Err(error)) => mode.show_error(&error.to_string()),
                 Err(error) => mode.show_error(&error.to_string()),

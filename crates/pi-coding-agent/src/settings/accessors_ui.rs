@@ -231,16 +231,6 @@ impl SettingsManager {
         self.set_global_nested("markdown", "mermaid", serde_json::to_value(mode).ok());
     }
 
-    /// `warnings.anthropicExtraUsage`, default on.
-    pub fn warn_anthropic_extra_usage(&self) -> bool {
-        let warnings = self.state().merged.warnings.clone().unwrap_or_default();
-        warnings.anthropic_extra_usage.unwrap_or(true)
-    }
-
-    pub fn set_warnings(&self, warnings: &WarningSettings) {
-        self.set_global_value("warnings", serde_json::to_value(warnings).ok());
-    }
-
     pub fn codemode_mode(&self) -> CodemodeMode {
         self.state().merged.codemode.as_ref().and_then(|codemode| codemode.mode).unwrap_or_default()
     }

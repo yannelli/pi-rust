@@ -128,13 +128,6 @@ pub struct MarkdownSettings {
     pub mermaid: Option<MermaidRenderingMode>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WarningSettings {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub anthropic_extra_usage: Option<bool>,
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CodemodeMode {
@@ -338,8 +331,6 @@ pub struct Settings {
     pub show_hardware_cursor: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub markdown: Option<MarkdownSettings>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub warnings: Option<WarningSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codemode: Option<CodemodeSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
