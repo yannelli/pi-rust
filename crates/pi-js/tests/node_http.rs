@@ -60,6 +60,11 @@ async fn http2_server_answers_a_half_closed_client() {
 }
 
 #[tokio::test]
+async fn http2_close_keeps_the_socket_until_the_peer_ends() {
+    check(include_str!("fixtures/node_http/http2_close.js"), include_str!("fixtures/node_http/http2_close.json")).await;
+}
+
+#[tokio::test]
 async fn http2_custom_settings_match_node() {
     check(include_str!("fixtures/node_http/http2_settings.js"), include_str!("fixtures/node_http/http2_settings.json"))
         .await;
