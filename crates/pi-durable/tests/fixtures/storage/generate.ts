@@ -1,10 +1,13 @@
 // Writes golden SQLite and JSONL fixtures with the upstream TypeScript storages. Development-time only.
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { BACKGROUND_CONTEXT } from "/home/ubuntu/.paseo/worktrees/2y3egpeg/zealous-hyena/packages/chord/src/context/index.ts";
-import { NodeExecutionEnv } from "/home/ubuntu/.paseo/worktrees/2y3egpeg/zealous-hyena/packages/durable/src/env/node.ts";
-import { JsonlStorage } from "/home/ubuntu/.paseo/worktrees/2y3egpeg/zealous-hyena/packages/durable/src/storage/jsonl/index.ts";
-import { openNodeSqliteStorage } from "/home/ubuntu/.paseo/worktrees/2y3egpeg/zealous-hyena/packages/durable/src/storage/sqlite/node.ts";
+// Usage: PI_UPSTREAM=<upstream pi checkout> node generate.ts <out-dir>
+const upstream = process.env.PI_UPSTREAM;
+if (!upstream) throw new Error("set PI_UPSTREAM to an upstream pi checkout");
+const { BACKGROUND_CONTEXT } = await import(join(upstream, "packages/chord/src/context/index.ts"));
+const { NodeExecutionEnv } = await import(join(upstream, "packages/durable/src/env/node.ts"));
+const { JsonlStorage } = await import(join(upstream, "packages/durable/src/storage/jsonl/index.ts"));
+const { openNodeSqliteStorage } = await import(join(upstream, "packages/durable/src/storage/sqlite/node.ts"));
 
 const out = process.argv[2]!;
 const context = BACKGROUND_CONTEXT;

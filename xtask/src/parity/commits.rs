@@ -89,12 +89,14 @@ pub struct Triage {
     pub ported: usize,
 }
 
-/// Split commits into ported (their short SHA is in `ported_text`), quiet, and unported.
+/// Split commits into ported (`ported_text` has `upstream <short sha>`), quiet, and unported.
+/// A bare SHA does not count, so a commit that only mentions an upstream commit is not a port.
 pub fn triage(commits: &[Commit], ported_text: &str, repository: &str) -> Triage {
     let mut result = Triage { unported: Vec::new(), quiet: Vec::new(), ported: 0 };
+    let ported_text = ported_text.to_lowercase();
     for commit in commits {
         let sha = short(&commit.sha);
-        if ported_text.contains(sha) {
+        if ported_text.contains(&format!("upstream {sha}")) {
             result.ported += 1;
         } else if is_quiet(commit) {
             result.quiet.push(format!("- `{sha}` {} {}", commit.date, commit.subject.replace('<', "&lt;")));
@@ -217,6 +219,13 @@ mod tests {
             result.unported[0].link.as_deref(),
             Some("https://github.com/earendil-works/pi/commit/aaaaaaaaa1111")
         );
+    }
+
+    #[test]
+    fn a_bare_sha_is_not_a_port() {
+        let commits = parse_log(LOG);
+        assert_eq!(triage(&commits, "docs(parity): review bbbbbbbbb and aaaaaaaaa", "o/r").ported, 0);
+        assert_eq!(triage(&commits, "fix: thing (Upstream bbbbbbbbb)", "o/r").ported, 1);
     }
 
     fn git_commit(dir: &Path, subject: &str) -> String {

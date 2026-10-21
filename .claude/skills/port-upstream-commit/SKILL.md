@@ -11,7 +11,7 @@ Full playbook: `docs/parity/README.md#porting-an-upstream-commit`.
 2. Find the Rust counterpart with the mapping table in `docs/parity/README.md`. Read the Rust code that defines the current behavior before you change it.
 3. Port the behavior with the same names, JSON shapes, and messages as upstream. Port the tests to the Rust style. Tests use the `faux` provider or a local mock server.
 4. Run `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, and the tests of the crates you changed. Cross-build Windows if you touched `cfg(windows)` code.
-5. Commit with a Conventional Commit that names the upstream SHA: `fix(scope): <what> (upstream <short-sha>)`.
-6. If this closes an entry in `docs/parity/GAPS.md`, remove the entry in the same change. When every upstream commit up to a point is ported, move `syncedCommit` in `docs/parity/upstream.json`.
+5. Commit with a Conventional Commit that names the upstream SHA: `fix(scope): <what> (upstream <sha>)`, with the 9-character SHA. Do not write `upstream <sha>` for a commit you did not port.
+6. If this closes an entry in `docs/parity/GAPS.md`, remove the entry in the same change. When every upstream commit up to a point is ported, move `syncedCommit`, `syncedVersion`, and `syncedOn` in `docs/parity/upstream.json`.
 
-If a commit does not apply (browser-only code, a TypeScript build change), add it to `docs/parity/allowlist.json` with the reason.
+If a commit does not apply (browser-only code, a TypeScript build change), add its 9-character SHA to the `commits` list in `docs/parity/allowlist.json` with the reason.
