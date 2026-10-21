@@ -9,7 +9,10 @@ use std::time::{Duration, Instant};
 use futures::FutureExt;
 use pi_chord::{AbortController, with_abort_signal};
 use pi_durable::env::{FileSystem, Shell, ShellCommand, ShellExecOptions, ShellOutputWindow};
-use pi_env::{Connection, ConnectionOptions, RemoteExecutionEnv, RemoteExecutionEnvOptions};
+use pi_env::{
+    Connection, ConnectionOptions, Json, ListFilesOptions, NodePlatform, RemoteExecutionEnv, RemoteExecutionEnvOptions,
+    RequestOptions, node_platform,
+};
 use support::{ctx, environment};
 
 fn argv(parts: &[&str]) -> ShellCommand {
@@ -75,6 +78,89 @@ async fn aborts_commands_cancelled_right_after_they_are_sent() {
         assert_eq!(result.map(|_| "ok".to_string()).unwrap_or_else(|error| error.code.as_str().into()), "aborted");
     }
     assert!(started.elapsed() < Duration::from_secs(10));
+}
+
+fn names(platform: &str, arch: &str) -> NodePlatform {
+    NodePlatform { platform: platform.into(), arch: arch.into() }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reports_the_remote_system_in_nodes_names() {
+    let (_env, guard) = environment();
+    let info = guard.connection.info().await.expect("info");
+    let platform = match () {
+        _ if cfg!(windows) => "win32",
+        _ if cfg!(target_os = "macos") => "darwin",
+        _ if cfg!(target_os = "android") => "android",
+        _ => "linux",
+    };
+    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" };
+    assert_eq!(node_platform(&info.os, &info.arch), names(platform, arch));
+    assert_eq!(info.node_platform(), names(platform, arch));
+    assert_eq!(node_platform("windows", "aarch64"), names("win32", "arm64"));
+    assert_eq!(node_platform("macos", "x86_64"), names("darwin", "x64"));
+    assert_eq!(node_platform("freebsd", "riscv64"), names("freebsd", "riscv64"));
+}
+
+/// A stand-in for a daemon released before `hello.features`: it answers `hello` without `features` and nothing else.
+#[cfg(unix)]
+fn old_daemon(dir: &std::path::Path) -> Connection {
+    let hello = serde_json::json!({
+        "protocol": 1, "version": "1.1.0", "os": "linux", "arch": "x86_64", "home": "/", "separator": "/",
+        "tmpdir": "/tmp", "cwd": "/", "driveCwds": {}, "pid": 1,
+    })
+    .to_string();
+    let mut frame = Vec::new();
+    frame.extend(((9 + hello.len()) as u32).to_be_bytes());
+    frame.push(2);
+    frame.extend(1u32.to_be_bytes());
+    frame.extend((hello.len() as u32).to_be_bytes());
+    frame.extend(hello.as_bytes());
+    let file = dir.join("hello.frame");
+    std::fs::write(&file, frame).expect("write the frame");
+    // Called as `serve --token <hex>`: the token is `$3`. The reply waits for the client's first request.
+    let script = r#"printf 'PI-ENV %s\n' "$3"; head -c 1 >/dev/null; cat "$0"; cat >/dev/null"#;
+    let command = vec!["sh".to_string(), "-c".into(), script.into(), file.to_string_lossy().into_owned()];
+    Connection::new(ConnectionOptions::new(command))
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reports_list_files_as_not_supported_by_daemons_released_before_it() {
+    let (env, guard) = environment();
+    let features = guard.connection.info().await.expect("info").features.clone();
+    assert!(features.is_some_and(|features| features.contains(&"listFiles".to_string())));
+    let connection = old_daemon(guard.dir.path());
+    let old = RemoteExecutionEnv::new(RemoteExecutionEnvOptions::new(connection.clone(), "pi-env:old", env.cwd()));
+    let listed = tokio::time::timeout(Duration::from_secs(20), old.list_files(".", None, &ctx())).await;
+    connection.close();
+    let error = listed.expect("the old daemon answers hello").expect_err("not supported");
+    assert_eq!(error.code.as_str(), "not_supported");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancels_a_listing_in_the_daemon() {
+    let (env, guard) = environment();
+    for dir in 0..100 {
+        let path = guard.dir.path().join(format!("d{dir}"));
+        std::fs::create_dir(&path).unwrap();
+        for file in 0..100 {
+            std::fs::write(path.join(format!("f{file}")), "").unwrap();
+        }
+    }
+    // The cancel follows the request at once, bypassing the client's own abort check, so the daemon stops the walk.
+    let controller = AbortController::new();
+    controller.abort(None);
+    let mut json = Json::new();
+    json.insert("path".into(), env.cwd().into());
+    let options = RequestOptions { signal: Some(controller.signal()), ..Default::default() };
+    let cancelled = guard.connection.request("listFiles", json, options).await;
+    assert_eq!(cancelled.expect_err("aborted").code, "aborted");
+    let listed = env.list_files(".", None, &ctx()).await.expect("list");
+    assert_eq!((listed.entries.len(), listed.truncated), (10_100, false));
+    let bounded = ListFilesOptions { max_entries: Some(5000), ..Default::default() };
+    let bounded = env.list_files(".", Some(&bounded), &ctx()).await.expect("list");
+    assert_eq!((bounded.entries.len(), bounded.truncated), (5000, true));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

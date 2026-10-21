@@ -101,6 +101,41 @@ pub struct RemoteInfo {
     #[serde(default)]
     pub drive_cwds: BTreeMap<String, String>,
     pub pid: u32,
+    /// Operations added to protocol 1 that this daemon supports, such as `listFiles`; absent from older daemons.
+    #[serde(default)]
+    pub features: Option<Vec<String>>,
+}
+
+impl RemoteInfo {
+    /// The remote system in Node's names; see `node_platform`.
+    pub fn node_platform(&self) -> NodePlatform {
+        node_platform(&self.os, &self.arch)
+    }
+}
+
+/// Node's names for the daemon's system and architecture, as `process.platform` and `process.arch` spell them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NodePlatform {
+    pub platform: String,
+    pub arch: String,
+}
+
+/// Node's names for the daemon's system and architecture, which `hello` reports in Rust's spelling: `windows` is
+/// `win32`, `macos` is `darwin`, `x86_64` is `x64`, `aarch64` is `arm64`, so they compare with `process.platform` and
+/// `process.arch`. Other names are kept.
+pub fn node_platform(os: &str, arch: &str) -> NodePlatform {
+    let platform = match os {
+        "windows" => "win32",
+        "macos" => "darwin",
+        other => other,
+    };
+    let arch = match arch {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        "x86" => "ia32",
+        other => other,
+    };
+    NodePlatform { platform: platform.into(), arch: arch.into() }
 }
 
 /// Computes the daemon command at each start; an `Err` message fails that start.

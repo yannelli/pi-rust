@@ -5,6 +5,7 @@
 mod connection;
 mod errors;
 mod frame;
+mod list_files;
 mod paths;
 mod remote_env;
 mod session;
@@ -13,10 +14,11 @@ mod terminal;
 mod watch;
 
 pub use connection::{
-    CommandFn, Connection, ConnectionOptions, DaemonCommand, EventFn, Json, LogFn, RemoteError, RemoteInfo, Reply,
-    RequestOptions, is_connection_lost,
+    CommandFn, Connection, ConnectionOptions, DaemonCommand, EventFn, Json, LogFn, NodePlatform, RemoteError,
+    RemoteInfo, Reply, RequestOptions, is_connection_lost, node_platform,
 };
 pub use errors::to_file_error;
+pub use list_files::{FileListEntry, FileListing, ListFilesOptions, LocalExecutionEnv, list_files_over};
 pub use paths::PathStyle;
 pub use remote_env::{RemoteExecutionEnv, RemoteExecutionEnvOptions, remote_path};
 pub use ssh::{
