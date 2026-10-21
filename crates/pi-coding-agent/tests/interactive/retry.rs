@@ -78,6 +78,23 @@ async fn retry_runs_the_last_prompt_again_on_a_new_branch() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn retry_runs_a_prompt_again_after_a_failed_response() {
+    local(async {
+        let responses = vec![FauxResponse::Error("400 invalid request".into()), FauxResponse::text("works now")];
+        let ui = start(Options { responses, ..Options::default() }).await;
+        ui.submit("flaky question").await;
+        ui.wait_until("the failed run to settle", |ui| ui.provider.requests().len() == 1 && ui.session().is_idle())
+            .await;
+        run_prompt(&ui, "/retry", "works now").await;
+
+        assert_eq!(ui.provider.requests().len(), 2);
+        assert_eq!(request_texts(&ui, 1), ["flaky question"], "the failed answer is not in the new request");
+        assert_eq!(prompt_entries(&ui, "flaky question").len(), 2, "both branches stay in the tree");
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn retry_needs_a_prompt_and_an_idle_agent() {
     local(async {
         let ui = start(Options { responses: vec![FauxResponse::Hang], ..Options::default() }).await;
