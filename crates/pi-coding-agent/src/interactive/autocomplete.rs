@@ -34,6 +34,7 @@ pub const BUILTIN_SLASH_COMMANDS: &[(&str, &str, Option<&str>)] = &[
     ("logout", "Remove provider authentication", None),
     ("new", "Start a new session", None),
     ("compact", "Manually compact the session context", None),
+    ("init", "Write or improve the project's AGENTS.md", Some("<instructions>")),
     ("resume", "Resume a different session", None),
     ("mcp", "Manage MCP servers: sign in, reconnect, enable or disable, and change exposure", None),
     ("llama", "Manage llama.cpp router models", None),

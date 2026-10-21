@@ -20,6 +20,7 @@ mod extension_view;
 pub mod footer_data;
 mod hotkeys;
 mod info;
+mod init;
 mod input;
 mod layout;
 mod llama;
