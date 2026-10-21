@@ -7,7 +7,7 @@ use std::ops::ControlFlow;
 
 use super::ownership::{Node, Overlay, Scope, TaskNode, Up};
 use super::run::not_due;
-use super::{SchedState, cancellation_intent};
+use super::{IndexSizes, SchedState, cancellation_intent};
 use crate::ids::{ConversationId, TaskId};
 use crate::types::{TaskRecord, TaskState, TaskStatus};
 
@@ -90,18 +90,14 @@ impl SchedState {
             self.finalize_checks.remove(&id);
             self.sleeping.remove(&id);
             self.parked.remove(&id);
-            // A task that ended unseen counts as known once, so that forgetting it nets out.
-            if previous.is_none() && !self.settled.contains_key(&id) {
-                self.count_child(&node, 1);
-            }
             self.settled.insert(id, node);
-            // Before anything is forgotten: the walk up to the task it held passes the ended tasks between them. Its chain
+            // Before anything is dropped: the walk up to the task it held passes the ended tasks between them. Its chain
             // is loaded, as every commit that ends a task loads the chains of `unloaded` first.
             self.release(&node, None);
             let waiters: Vec<TaskId> = self.waiters.get(&id).into_iter().flatten().copied().collect();
             self.runnable.extend(waiters);
             self.relist(Node::Task(id));
-            self.forget(id);
+            self.drop_if_unneeded(Node::Task(id));
             return;
         }
         self.live.insert(id, record.clone());
@@ -109,7 +105,6 @@ impl SchedState {
             if !self.known(Node::of(record)) {
                 self.unloaded.insert(id);
             }
-            self.count_child(&TaskNode::of(record), 1);
             self.relist(Node::Task(id));
         }
         if cancellation_intent(record) {
@@ -193,52 +188,62 @@ impl SchedState {
         None
     }
 
-    /// Keep a terminal task a chain load read, so walks pass through it; its own chain is not loaded yet.
+    /// Know a terminal task a chain load read, so walks pass through it; its own chain is not loaded yet.
     pub fn settle(&mut self, id: TaskId, node: TaskNode) {
         self.settled.insert(id, node);
-        self.pinned.insert(id);
         self.unloaded.insert(id);
-        self.count_child(&node, 1);
         self.relist(Node::Task(id));
+        self.drop_if_unneeded(Node::Task(id));
     }
 
-    /// Count a task that became known in its owner task's `known_children`, or one that is forgotten out of it.
-    fn count_child(&mut self, node: &TaskNode, delta: isize) {
-        let Some(owner) = node.owner else { return };
-        let count = self.known_children.get(&owner).copied().unwrap_or(0).saturating_add_signed(delta);
-        if count == 0 {
-            self.known_children.remove(&owner);
-        } else {
-            self.known_children.insert(owner, count);
+    /// Queue an ended task or a conversation for the sweep when nothing is listed below it.
+    pub fn drop_if_unneeded(&mut self, node: Node) {
+        if matches!(node, Node::Task(id) if self.live.contains_key(&id)) || self.below.contains_key(&node) {
+            return;
+        }
+        self.drop_queue.insert(node);
+    }
+
+    /// Drop the queued nodes that are still unneeded: not live, nothing listed below. Runs once a publication is fully
+    /// tracked, and as a job of its own on the line, never inside an operation: work a commit creates below a chain its
+    /// own callback loaded keeps that chain. A flat loop: unlisting already queued every node on the way up that lost
+    /// its last listed node.
+    pub fn sweep(&mut self) {
+        for node in std::mem::take(&mut self.drop_queue) {
+            if self.below.contains_key(&node) {
+                continue;
+            }
+            match node {
+                Node::Conversation(id) => {
+                    self.edges.remove(&id);
+                    self.roots.remove(&id);
+                }
+                Node::Task(id) if !self.live.contains_key(&id) => {
+                    self.settled.remove(&id);
+                    self.unloaded.remove(&id);
+                }
+                Node::Task(_) => {}
+            }
         }
     }
 
-    /// Forget ended task `id` unless walks up still need it: it owns a loaded conversation, a chain load read it, or it
-    /// owns a known task; then its owner, as far up as that changes. A loop: chains can be deeper than the call stack.
-    fn forget(&mut self, id: TaskId) {
-        let mut at = Some(id);
-        while let Some(current) = at {
-            let Some(node) = self.settled.get(&current).copied() else { return };
-            if self.live.contains_key(&current)
-                || self.conversation_owners.contains(&current)
-                || self.pinned.contains(&current)
-                || self.known_children.contains_key(&current)
-                || self.below.contains_key(&Node::Task(current))
-            {
-                return;
-            }
-            self.settled.remove(&current);
-            self.unloaded.remove(&current);
-            self.count_child(&node, -1);
-            at = node.owner;
+    /// Sizes of the ownership indexes, for tests that bound the scheduler's memory.
+    pub fn index_sizes(&self) -> IndexSizes {
+        IndexSizes {
+            live: self.live.len(),
+            settled: self.settled.len(),
+            edges: self.edges.len(),
+            below: self.below.values().map(BTreeSet::len).sum(),
+            roots: self.roots.len(),
+            unloaded: self.unloaded.len(),
+            drop_queue: self.drop_queue.len(),
         }
     }
 
     /// List `start` under its parent node in `below` while it is a live task or has nodes listed below it, and unlist it
-    /// otherwise; then its parent, as far up as that changes. So `below` holds exactly the tree around live work. An
-    /// ended parent that loses its last listed node may be forgotten, once the walk up is done.
+    /// otherwise; then its parent, as far up as that changes. So `below` holds exactly the tree around live work. A
+    /// parent that loses its last listed node is queued for the sweep.
     pub fn relist(&mut self, start: Node) {
-        let mut emptied = Vec::new();
         let mut node = start;
         loop {
             let needed =
@@ -280,14 +285,9 @@ impl SchedState {
                 if self.below.contains_key(&parent) {
                     break;
                 }
-                if let Node::Task(id) = parent {
-                    emptied.push(id);
-                }
+                self.drop_if_unneeded(parent);
             }
             node = parent;
-        }
-        for id in emptied {
-            self.forget(id);
         }
     }
 

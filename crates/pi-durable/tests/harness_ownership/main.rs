@@ -10,6 +10,8 @@ mod handles;
 mod indexes;
 mod marks;
 mod reopen;
+mod retention;
+mod retention_edges;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

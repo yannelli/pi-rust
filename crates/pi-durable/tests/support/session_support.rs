@@ -55,7 +55,7 @@ impl Gate {
 
 type CommitFilter = Arc<dyn Fn(&[StorageWrite]) -> bool + Send + Sync>;
 
-/// One Storage call a test hook sees: `task`, `conversation`, `scan_entries`, `mint_id`, `submission`, or `close`.
+/// One Storage call a test hook sees: `task`, `conversation`, `scan_entries`, `scan_queued_submissions`, `mint_id`, `submission`, or `close`.
 pub struct StorageCall {
     pub method: &'static str,
     /// The id a `conversation` call reads.
@@ -306,6 +306,9 @@ impl Storage for ControlledStorage {
         cursor: Option<&Cursor>,
         context: &Context,
     ) -> DurableResult<Page<SubmissionRecord>> {
+        if query.status == Some(SubmissionStatus::Queued) {
+            self.hook("scan_queued_submissions", limit, cursor.is_none(), context).await?;
+        }
         self.open()?;
         self.inner.scan_submissions(query, limit, cursor, context).await
     }

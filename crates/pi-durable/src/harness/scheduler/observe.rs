@@ -97,6 +97,10 @@ impl Scheduler {
                 if record.status != SubmissionStatus::Queued || record.kind != SubmissionType::Input {
                     continue;
                 }
+                // Only an owner with cancellation intent withdraws it; a later intent's mark runs the cascade then.
+                if state.intent.is_empty() {
+                    continue;
+                }
                 let conversation = Node::Conversation(record.conversation_id);
                 if !state.known(conversation) || state.below_cancelled(conversation) {
                     state.cascade_pending = true;
@@ -113,6 +117,7 @@ impl Scheduler {
             if state.cascade_pending {
                 reconcile = true;
             }
+            state.sweep();
         }
         for record in resolved {
             let id = record.id;

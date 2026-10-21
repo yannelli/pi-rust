@@ -14,7 +14,7 @@ use super::core::{HarnessCore, HarnessOptions};
 use super::inbox::INBOX_DOC;
 use super::live::LIVE_DOC;
 use super::registry::builtin_tasks;
-use super::scheduler::Scheduler;
+use super::scheduler::{IndexSizes, Scheduler};
 use super::submissions::{Submission, Submissions};
 use super::task_graph::{TaskGraphView, TaskGraphWatch};
 use super::telemetry::DurableTelemetry;
@@ -196,6 +196,12 @@ impl Harness {
     pub fn wake(&self) -> DurableResult<Wake> {
         self.0.session.assert_usable()?;
         Ok(self.0.scheduler.wake())
+    }
+
+    /// Internal, for tests: sizes of the scheduler's ownership indexes.
+    #[doc(hidden)]
+    pub fn scheduler_index_sizes(&self) -> IndexSizes {
+        self.0.scheduler.index_sizes()
     }
 
     /// The root conversation, created on first use.
