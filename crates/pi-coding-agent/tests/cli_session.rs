@@ -1,5 +1,6 @@
 //! Session, resource, and trust flags of the `pi` binary: `--session-id`, `--fork`, `--name`,
-//! `--export`, `--skill`, `--prompt-template`, `--no-context-files`, and `-a`/`-na`.
+//! `--export` (HTML, or Markdown for `.md` outputs), `--skill`, `--prompt-template`,
+//! `--no-context-files`, and `-a`/`-na`.
 
 mod cli_support;
 
@@ -7,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use cli_support::{events, mock_server, pi_async, setup, text_body, write_settings};
+use cli_support::{events, mock_server, pi, pi_async, setup, text_body, write_settings};
 
 fn session_files(root: &Path) -> Vec<PathBuf> {
     let sessions = root.join("agent/sessions");
@@ -110,6 +111,20 @@ async fn exports_session_files_to_html() {
     let output = pi_async(root.path(), &["--export", "nope.jsonl"]).await;
     assert_eq!(output.status.code(), Some(1));
     assert!(stderr(&output).contains("Error: File not found:"));
+}
+
+#[test]
+fn exports_session_files_to_markdown() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(root.path().join("agent")).unwrap();
+    std::fs::create_dir_all(root.path().join("work")).unwrap();
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/export_markdown.jsonl");
+    let output = pi(root.path(), &["--export", fixture.to_str().unwrap(), "out.md"], None);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "Exported to: out.md");
+    let text = std::fs::read_to_string(root.path().join("work/out.md")).unwrap();
+    assert!(text.starts_with("# Markdown fixture\n"), "{text}");
+    assert!(text.contains("### Tool call: `bash`") && !text.contains("<html"), "{text}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

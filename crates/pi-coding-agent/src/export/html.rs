@@ -206,11 +206,17 @@ pub fn export_session_html(
 
 /// `pi --export <input> [output]`: export any session file (upstream `exportFromFile`).
 pub fn export_from_file(input: &str, output_path: Option<&str>, theme: &ExportTheme) -> anyhow::Result<PathBuf> {
+    let resolved = resolve_export_input(input)?;
+    let data = SessionData::from_snapshot(SessionSnapshot::load(&resolved)?);
+    write_html(&data, theme, &resolved, output_path)
+}
+
+/// The `--export` input with `~` expanded, against the process directory; it must exist.
+pub(crate) fn resolve_export_input(input: &str) -> anyhow::Result<PathBuf> {
     let expanded = crate::config::expand_tilde(input);
     let resolved = if expanded.is_absolute() { expanded } else { std::env::current_dir()?.join(expanded) };
     if !resolved.exists() {
         bail!("File not found: {}", resolved.display());
     }
-    let data = SessionData::from_snapshot(SessionSnapshot::load(&resolved)?);
-    write_html(&data, theme, &resolved, output_path)
+    Ok(resolved)
 }

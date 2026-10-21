@@ -18,7 +18,7 @@ pub const BUILTIN_SLASH_COMMANDS: &[(&str, &str, Option<&str>)] = &[
     ("tree", "Navigate session tree (switch branches)", None),
     ("thinking", "Set thinking level", Some("<level>")),
     ("scoped-models", "Enable/disable models for Ctrl+P cycling", None),
-    ("export", "Export session (HTML default, or specify path: .html/.jsonl)", None),
+    ("export", "Export session (HTML default, or specify path: .html/.jsonl/.md)", None),
     ("import", "Import and resume a session from a JSONL file", None),
     ("share", "Share session via a Radius artifact or a GitHub gist", None),
     ("bug", "Report a bug to the Pi developers", Some("<description>")),
