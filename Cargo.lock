@@ -3066,6 +3066,7 @@ version = "0.5.3"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
+ "flate2",
  "futures",
  "indexmap 2.14.2",
  "oxc_allocator",

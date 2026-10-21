@@ -8,6 +8,7 @@ mod description;
 use std::sync::Arc;
 
 pub use bind::{Accepts, bind, coverage, takes_no_args};
+pub(crate) use description::safe_integer;
 pub use description::{Description, LOCAL_VARIANT, MemberDescription, Members, Scope};
 
 use super::errors::invalid;

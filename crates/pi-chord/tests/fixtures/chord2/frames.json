@@ -1,0 +1,474 @@
+{
+	"protocol": 4,
+	"packThreshold": 65536,
+	"frames": [
+		{
+			"label": "hello",
+			"object": "{\"t\":\"hello\",\"protocol\":4,\"name\":\"server\",\"kind\":\"host\",\"codeVersion\":1,\"acks\":true}",
+			"ws": {
+				"text": "{\"t\":\"hello\",\"protocol\":4,\"name\":\"server\",\"kind\":\"host\",\"codeVersion\":1,\"acks\":true}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"hello\",\"protocol\":4,\"name\":\"server\",\"kind\":\"host\",\"codeVersion\":1,\"acks\":true}"
+			},
+			"wsSize": 84,
+			"valid": true
+		},
+		{
+			"label": "helloClient",
+			"object": "{\"t\":\"hello\",\"name\":\"browser\",\"kind\":\"client\",\"codeVersion\":0}",
+			"ws": {
+				"text": "{\"t\":\"hello\",\"name\":\"browser\",\"kind\":\"client\",\"codeVersion\":0}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"hello\",\"name\":\"browser\",\"kind\":\"client\",\"codeVersion\":0}"
+			},
+			"wsSize": 62,
+			"valid": true
+		},
+		{
+			"label": "ack",
+			"object": "{\"t\":\"ack\",\"n\":3}",
+			"ws": {
+				"text": "{\"t\":\"ack\",\"n\":3}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"ack\",\"n\":3}"
+			},
+			"wsSize": 17,
+			"valid": true
+		},
+		{
+			"label": "hold",
+			"object": "{\"t\":\"hold\",\"id\":1,\"at\":\"session:S1\",\"token\":{\"name\":\"t.chat\",\"scope\":\"remote\",\"version\":1,\"input\":{\"type\":\"object\",\"required\":[\"session\",\"conversation\"],\"properties\":{\"session\":{\"type\":\"string\"},\"conversation\":{\"type\":\"number\",\"default\":0}}},\"host\":{\"prefix\":\"session:\",\"key\":\"session\"},\"variants\":{\"viewer\":{\"view\":{\"kind\":\"state\",\"schema\":{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"}}}}},\"participant\":{\"view\":{\"kind\":\"state\",\"schema\":{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"}}}},\"send\":{\"kind\":\"method\",\"args\":{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"}}},\"result\":{\"type\":\"object\",\"required\":[\"id\"],\"properties\":{\"id\":{\"type\":\"number\"}}}}}}},\"input\":{\"session\":\"S1\"},\"principal\":{\"worker\":\"session:S1\"},\"origin\":\"c1\",\"state\":false,\"again\":true}",
+			"ws": {
+				"text": "{\"t\":\"hold\",\"id\":1,\"at\":\"session:S1\",\"token\":{\"name\":\"t.chat\",\"scope\":\"remote\",\"version\":1,\"input\":{\"type\":\"object\",\"required\":[\"session\",\"conversation\"],\"properties\":{\"session\":{\"type\":\"string\"},\"conversation\":{\"type\":\"number\",\"default\":0}}},\"host\":{\"prefix\":\"session:\",\"key\":\"session\"},\"variants\":{\"viewer\":{\"view\":{\"kind\":\"state\",\"schema\":{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"}}}}},\"participant\":{\"view\":{\"kind\":\"state\",\"schema\":{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"}}}},\"send\":{\"kind\":\"method\",\"args\":{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"}}},\"result\":{\"type\":\"object\",\"required\":[\"id\"],\"properties\":{\"id\":{\"type\":\"number\"}}}}}}},\"input\":{\"session\":\"S1\"},\"principal\":{\"worker\":\"session:S1\"},\"origin\":\"c1\",\"state\":false,\"again\":true}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"hold\",\"id\":1,\"at\":\"session:S1\",\"token\":{\"name\":\"t.chat\",\"scope\":\"remote\",\"version\":1,\"input\":{\"type\":\"object\",\"required\":[\"session\",\"conversation\"],\"properties\":{\"session\":{\"type\":\"string\"},\"conversation\":{\"type\":\"number\",\"default\":0}}},\"host\":{\"prefix\":\"session:\",\"key\":\"session\"},\"variants\":{\"viewer\":{\"view\":{\"kind\":\"state\",\"schema\":{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"}}}}},\"participant\":{\"view\":{\"kind\":\"state\",\"schema\":{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"}}}},\"send\":{\"kind\":\"method\",\"args\":{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"}}},\"result\":{\"type\":\"object\",\"required\":[\"id\"],\"properties\":{\"id\":{\"type\":\"number\"}}}}}}},\"input\":{\"session\":\"S1\"},\"principal\":{\"worker\":\"session:S1\"},\"origin\":\"c1\",\"state\":false,\"again\":true}"
+			},
+			"wsSize": 846,
+			"valid": true
+		},
+		{
+			"label": "holdLocal",
+			"object": "{\"t\":\"hold\",\"id\":2,\"at\":\"server\",\"token\":{\"name\":\"t.idx\",\"scope\":\"local\",\"version\":1,\"input\":{\"type\":\"object\",\"properties\":{}},\"variants\":{\"\":{\"2\":{\"kind\":\"method\",\"result\":{\"type\":\"integer\",\"minimum\":1}},\"10\":{\"kind\":\"method\"},\"harness\":{\"kind\":\"opaque\",\"id\":\"h@1\"},\"onChange\":{\"kind\":\"method\",\"args\":{\"type\":\"function\",\"parameters\":[{\"type\":\"string\"}],\"returnType\":{\"type\":\"void\"}}},\"progress\":{\"kind\":\"state\",\"schema\":{\"type\":\"object\",\"required\":[\"ready\"],\"properties\":{\"ready\":{\"type\":\"boolean\"}}}}}}},\"input\":{}}",
+			"ws": {
+				"text": "{\"t\":\"hold\",\"id\":2,\"at\":\"server\",\"token\":{\"name\":\"t.idx\",\"scope\":\"local\",\"version\":1,\"input\":{\"type\":\"object\",\"properties\":{}},\"variants\":{\"\":{\"2\":{\"kind\":\"method\",\"result\":{\"type\":\"integer\",\"minimum\":1}},\"10\":{\"kind\":\"method\"},\"harness\":{\"kind\":\"opaque\",\"id\":\"h@1\"},\"onChange\":{\"kind\":\"method\",\"args\":{\"type\":\"function\",\"parameters\":[{\"type\":\"string\"}],\"returnType\":{\"type\":\"void\"}}},\"progress\":{\"kind\":\"state\",\"schema\":{\"type\":\"object\",\"required\":[\"ready\"],\"properties\":{\"ready\":{\"type\":\"boolean\"}}}}}}},\"input\":{}}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"hold\",\"id\":2,\"at\":\"server\",\"token\":{\"name\":\"t.idx\",\"scope\":\"local\",\"version\":1,\"input\":{\"type\":\"object\",\"properties\":{}},\"variants\":{\"\":{\"2\":{\"kind\":\"method\",\"result\":{\"type\":\"integer\",\"minimum\":1}},\"10\":{\"kind\":\"method\"},\"harness\":{\"kind\":\"opaque\",\"id\":\"h@1\"},\"onChange\":{\"kind\":\"method\",\"args\":{\"type\":\"function\",\"parameters\":[{\"type\":\"string\"}],\"returnType\":{\"type\":\"void\"}}},\"progress\":{\"kind\":\"state\",\"schema\":{\"type\":\"object\",\"required\":[\"ready\"],\"properties\":{\"ready\":{\"type\":\"boolean\"}}}}}}},\"input\":{}}"
+			},
+			"wsSize": 517,
+			"valid": true
+		},
+		{
+			"label": "release",
+			"object": "{\"t\":\"release\",\"id\":1}",
+			"ws": {
+				"text": "{\"t\":\"release\",\"id\":1}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"release\",\"id\":1}"
+			},
+			"wsSize": 22,
+			"valid": true
+		},
+		{
+			"label": "shape",
+			"object": "{\"t\":\"shape\",\"id\":1,\"variant\":\"participant\",\"members\":[\"view\",\"send\"],\"contract\":\"e8ee3f28594f8426\",\"state\":[\"view\"]}",
+			"ws": {
+				"text": "{\"t\":\"shape\",\"id\":1,\"variant\":\"participant\",\"members\":[\"view\",\"send\"],\"contract\":\"e8ee3f28594f8426\",\"state\":[\"view\"]}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"shape\",\"id\":1,\"variant\":\"participant\",\"members\":[\"view\",\"send\"],\"contract\":\"e8ee3f28594f8426\",\"state\":[\"view\"]}"
+			},
+			"wsSize": 117,
+			"valid": true
+		},
+		{
+			"label": "shapeLocal",
+			"object": "{\"t\":\"shape\",\"id\":2,\"members\":[],\"contract\":\"27ac3abfbc660efb\",\"state\":[]}",
+			"ws": {
+				"text": "{\"t\":\"shape\",\"id\":2,\"members\":[],\"contract\":\"27ac3abfbc660efb\",\"state\":[]}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"shape\",\"id\":2,\"members\":[],\"contract\":\"27ac3abfbc660efb\",\"state\":[]}"
+			},
+			"wsSize": 74,
+			"valid": true
+		},
+		{
+			"label": "gone",
+			"object": "{\"t\":\"gone\",\"id\":1,\"error\":{\"code\":\"gone\",\"message\":\"gone: object disposed\"}}",
+			"ws": {
+				"text": "{\"t\":\"gone\",\"id\":1,\"error\":{\"code\":\"gone\",\"message\":\"gone: object disposed\"}}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"gone\",\"id\":1,\"error\":{\"code\":\"gone\",\"message\":\"gone: object disposed\"}}"
+			},
+			"wsSize": 77,
+			"valid": true
+		},
+		{
+			"label": "goneReason",
+			"object": "{\"t\":\"gone\",\"id\":1,\"error\":{\"code\":\"unavailable\",\"message\":\"unavailable/unknown_type: no route\",\"reason\":\"unknown_type\"}}",
+			"ws": {
+				"text": "{\"t\":\"gone\",\"id\":1,\"error\":{\"code\":\"unavailable\",\"message\":\"unavailable/unknown_type: no route\",\"reason\":\"unknown_type\"}}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"gone\",\"id\":1,\"error\":{\"code\":\"unavailable\",\"message\":\"unavailable/unknown_type: no route\",\"reason\":\"unknown_type\"}}"
+			},
+			"wsSize": 121,
+			"valid": true
+		},
+		{
+			"label": "call",
+			"object": "{\"t\":\"call\",\"id\":7,\"hold\":1,\"member\":\"send\",\"args\":{\"text\":\"hi\"},\"root\":{\"rootId\":\"r1\",\"codeVersion\":2}}",
+			"ws": {
+				"text": "{\"t\":\"call\",\"id\":7,\"hold\":1,\"member\":\"send\",\"root\":{\"rootId\":\"r1\",\"codeVersion\":2},\"args\":{\"text\":\"hi\"}}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"call\",\"id\":7,\"hold\":1,\"member\":\"send\",\"root\":{\"rootId\":\"r1\",\"codeVersion\":2},\"args\":{\"text\":\"hi\"}}"
+			},
+			"wsSize": 104,
+			"valid": true
+		},
+		{
+			"label": "callNoRoot",
+			"object": "{\"t\":\"call\",\"id\":8,\"hold\":1,\"member\":\"send\",\"args\":{\"text\":\"été 😀 中\",\"ctrl\":\"a\\u0001b\\n\\\"\\\\\",\"sep\":\" \",\"n\":[1e+21,1.5,0,5e-324]}}",
+			"ws": {
+				"text": "{\"t\":\"call\",\"id\":8,\"hold\":1,\"member\":\"send\",\"args\":{\"text\":\"été 😀 中\",\"ctrl\":\"a\\u0001b\\n\\\"\\\\\",\"sep\":\" \",\"n\":[1e+21,1.5,0,5e-324]}}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"call\",\"id\":8,\"hold\":1,\"member\":\"send\",\"args\":{\"text\":\"été 😀 中\",\"ctrl\":\"a\\u0001b\\n\\\"\\\\\",\"sep\":\" \",\"n\":[1e+21,1.5,0,5e-324]}}"
+			},
+			"wsSize": 130,
+			"valid": true
+		},
+		{
+			"label": "callNoArgs",
+			"object": "{\"t\":\"call\",\"id\":9,\"hold\":1,\"member\":\"stop\",\"root\":{\"rootId\":\"r1\",\"codeVersion\":2}}",
+			"ws": {
+				"text": "{\"t\":\"call\",\"id\":9,\"hold\":1,\"member\":\"stop\",\"root\":{\"rootId\":\"r1\",\"codeVersion\":2}}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"call\",\"id\":9,\"hold\":1,\"member\":\"stop\",\"root\":{\"rootId\":\"r1\",\"codeVersion\":2}}"
+			},
+			"wsSize": 83,
+			"valid": true
+		},
+		{
+			"label": "callNull",
+			"object": "{\"t\":\"call\",\"id\":10,\"hold\":1,\"member\":\"send\",\"args\":null}",
+			"ws": {
+				"text": "{\"t\":\"call\",\"id\":10,\"hold\":1,\"member\":\"send\",\"args\":null}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"call\",\"id\":10,\"hold\":1,\"member\":\"send\",\"args\":null}"
+			},
+			"wsSize": 57,
+			"valid": true
+		},
+		{
+			"label": "result",
+			"object": "{\"t\":\"result\",\"id\":7,\"value\":{\"id\":1}}",
+			"ws": {
+				"text": "{\"t\":\"result\",\"id\":7,\"value\":{\"id\":1}}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"result\",\"id\":7,\"value\":{\"id\":1}}"
+			},
+			"wsSize": 38,
+			"valid": true
+		},
+		{
+			"label": "resultVoid",
+			"object": "{\"t\":\"result\",\"id\":9}",
+			"ws": {
+				"text": "{\"t\":\"result\",\"id\":9}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"result\",\"id\":9}"
+			},
+			"wsSize": 21,
+			"valid": true
+		},
+		{
+			"label": "resultError",
+			"object": "{\"t\":\"result\",\"id\":8,\"error\":{\"code\":\"invalid\",\"message\":\"invalid/args: args: / must be object\",\"reason\":\"args\"}}",
+			"ws": {
+				"text": "{\"t\":\"result\",\"id\":8,\"error\":{\"code\":\"invalid\",\"message\":\"invalid/args: args: / must be object\",\"reason\":\"args\"}}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"result\",\"id\":8,\"error\":{\"code\":\"invalid\",\"message\":\"invalid/args: args: / must be object\",\"reason\":\"args\"}}"
+			},
+			"wsSize": 113,
+			"valid": true
+		},
+		{
+			"label": "cancel",
+			"object": "{\"t\":\"cancel\",\"id\":7}",
+			"ws": {
+				"text": "{\"t\":\"cancel\",\"id\":7}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"cancel\",\"id\":7}"
+			},
+			"wsSize": 21,
+			"valid": true
+		},
+		{
+			"label": "sub",
+			"object": "{\"t\":\"sub\",\"hold\":1}",
+			"ws": {
+				"text": "{\"t\":\"sub\",\"hold\":1}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"sub\",\"hold\":1}"
+			},
+			"wsSize": 20,
+			"valid": true
+		},
+		{
+			"label": "unsub",
+			"object": "{\"t\":\"unsub\",\"hold\":1}",
+			"ws": {
+				"text": "{\"t\":\"unsub\",\"hold\":1}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"unsub\",\"hold\":1}"
+			},
+			"wsSize": 22,
+			"valid": true
+		},
+		{
+			"label": "resync",
+			"object": "{\"t\":\"resync\",\"hold\":1,\"m\":\"view\"}",
+			"ws": {
+				"text": "{\"t\":\"resync\",\"hold\":1,\"m\":\"view\"}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"resync\",\"hold\":1,\"m\":\"view\"}"
+			},
+			"wsSize": 34,
+			"valid": true
+		},
+		{
+			"label": "stateSnap",
+			"object": "{\"t\":\"state\",\"hold\":1,\"m\":\"view\",\"as\":\"snap\",\"value\":{\"text\":\"hello\"}}",
+			"ws": {
+				"text": "{\"t\":\"state\",\"hold\":1,\"m\":\"view\",\"as\":\"snap\",\"value\":{\"text\":\"hello\"}}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"state\",\"hold\":1,\"m\":\"view\",\"as\":\"snap\",\"value\":{\"text\":\"hello\"}}"
+			},
+			"wsSize": 70,
+			"valid": true
+		},
+		{
+			"label": "stateSnapUndefined",
+			"object": "{\"t\":\"state\",\"hold\":1,\"m\":\"view\",\"as\":\"snap\"}",
+			"ws": {
+				"text": "{\"t\":\"state\",\"hold\":1,\"m\":\"view\",\"as\":\"snap\"}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"state\",\"hold\":1,\"m\":\"view\",\"as\":\"snap\"}"
+			},
+			"wsSize": 45,
+			"valid": true
+		},
+		{
+			"label": "stateReset",
+			"object": "{\"t\":\"state\",\"hold\":1,\"m\":\"view\",\"as\":\"reset\",\"value\":{\"text\":\"été 😀 中\",\"ctrl\":\"a\\u0001b\\n\\\"\\\\\",\"sep\":\" \",\"n\":[1e+21,1.5,0,5e-324]}}",
+			"ws": {
+				"text": "{\"t\":\"state\",\"hold\":1,\"m\":\"view\",\"as\":\"reset\",\"value\":{\"text\":\"été 😀 中\",\"ctrl\":\"a\\u0001b\\n\\\"\\\\\",\"sep\":\" \",\"n\":[1e+21,1.5,0,5e-324]}}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"state\",\"hold\":1,\"m\":\"view\",\"as\":\"reset\",\"value\":{\"text\":\"été 😀 中\",\"ctrl\":\"a\\u0001b\\n\\\"\\\\\",\"sep\":\" \",\"n\":[1e+21,1.5,0,5e-324]}}"
+			},
+			"wsSize": 133,
+			"valid": true
+		},
+		{
+			"label": "stateOps",
+			"object": "{\"t\":\"state\",\"hold\":1,\"m\":\"view\",\"as\":\"ops\",\"ops\":[[0,[\"text\"],\"x\"],[1,[]]]}",
+			"ws": {
+				"text": "{\"t\":\"state\",\"hold\":1,\"m\":\"view\",\"as\":\"ops\",\"ops\":[[0,[\"text\"],\"x\"],[1,[]]]}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"state\",\"hold\":1,\"m\":\"view\",\"as\":\"ops\",\"ops\":[[0,[\"text\"],\"x\"],[1,[]]]}"
+			},
+			"wsSize": 76,
+			"valid": true
+		},
+		{
+			"label": "stateError",
+			"object": "{\"t\":\"state\",\"hold\":1,\"m\":\"view\",\"as\":\"error\",\"error\":{\"code\":\"invalid\",\"message\":\"invalid/state: state view: bad\",\"reason\":\"state\"}}",
+			"ws": {
+				"text": "{\"t\":\"state\",\"hold\":1,\"m\":\"view\",\"as\":\"error\",\"error\":{\"code\":\"invalid\",\"message\":\"invalid/state: state view: bad\",\"reason\":\"state\"}}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"state\",\"hold\":1,\"m\":\"view\",\"as\":\"error\",\"error\":{\"code\":\"invalid\",\"message\":\"invalid/state: state view: bad\",\"reason\":\"state\"}}"
+			},
+			"wsSize": 133,
+			"valid": true
+		},
+		{
+			"label": "ping",
+			"object": "{\"t\":\"ping\",\"n\":1}",
+			"ws": {
+				"text": "{\"t\":\"ping\",\"n\":1}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"ping\",\"n\":1}"
+			},
+			"wsSize": 18,
+			"valid": true
+		},
+		{
+			"label": "pong",
+			"object": "{\"t\":\"pong\",\"n\":-3}",
+			"ws": {
+				"text": "{\"t\":\"pong\",\"n\":-3}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"pong\",\"n\":-3}"
+			},
+			"wsSize": 19,
+			"valid": true
+		},
+		{
+			"label": "bye",
+			"object": "{\"t\":\"bye\",\"reason\":\"protocol-version 4\"}",
+			"ws": {
+				"text": "{\"t\":\"bye\",\"reason\":\"protocol-version 4\"}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"bye\",\"reason\":\"protocol-version 4\"}"
+			},
+			"wsSize": 41,
+			"valid": true
+		},
+		{
+			"label": "byeBare",
+			"object": "{\"t\":\"bye\"}",
+			"ws": {
+				"text": "{\"t\":\"bye\"}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"bye\"}"
+			},
+			"wsSize": 11,
+			"valid": true
+		},
+		{
+			"label": "rootEnd",
+			"object": "{\"t\":\"root_end\",\"rootId\":\"r1\"}",
+			"ws": {
+				"text": "{\"t\":\"root_end\",\"rootId\":\"r1\"}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"root_end\",\"rootId\":\"r1\"}"
+			},
+			"wsSize": 30,
+			"valid": true
+		},
+		{
+			"label": "invalidate",
+			"object": "{\"t\":\"invalidate\",\"pattern\":{\"user\":\"u1\",\"nested\":{\"a\":[1]}}}",
+			"ws": {
+				"text": "{\"t\":\"invalidate\",\"pattern\":{\"user\":\"u1\",\"nested\":{\"a\":[1]}}}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"invalidate\",\"pattern\":{\"user\":\"u1\",\"nested\":{\"a\":[1]}}}"
+			},
+			"wsSize": 61,
+			"valid": true
+		},
+		{
+			"label": "prepare",
+			"object": "{\"t\":\"prepare\",\"reload\":1,\"codeVersion\":3,\"plugins\":[\"a\",\"b\"],\"options\":{\"remove\":[\"c\"],\"gateDeadline\":5000,\"retireDeadline\":1.5}}",
+			"ws": {
+				"text": "{\"t\":\"prepare\",\"reload\":1,\"codeVersion\":3,\"plugins\":[\"a\",\"b\"],\"options\":{\"remove\":[\"c\"],\"gateDeadline\":5000,\"retireDeadline\":1.5}}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"prepare\",\"reload\":1,\"codeVersion\":3,\"plugins\":[\"a\",\"b\"],\"options\":{\"remove\":[\"c\"],\"gateDeadline\":5000,\"retireDeadline\":1.5}}"
+			},
+			"wsSize": 130,
+			"valid": true
+		},
+		{
+			"label": "prepareSync",
+			"object": "{\"t\":\"prepare\",\"reload\":2,\"codeVersion\":3,\"plugins\":[],\"options\":{\"remove\":[]}}",
+			"ws": {
+				"text": "{\"t\":\"prepare\",\"reload\":2,\"codeVersion\":3,\"plugins\":[],\"options\":{\"remove\":[]}}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"prepare\",\"reload\":2,\"codeVersion\":3,\"plugins\":[],\"options\":{\"remove\":[]}}"
+			},
+			"wsSize": 79,
+			"valid": true
+		},
+		{
+			"label": "voteError",
+			"object": "{\"t\":\"vote\",\"reload\":1,\"error\":{\"code\":\"aborted\",\"message\":\"aborted/gate_deadline: gate deadline\",\"reason\":\"gate_deadline\"}}",
+			"ws": {
+				"text": "{\"t\":\"vote\",\"reload\":1,\"error\":{\"code\":\"aborted\",\"message\":\"aborted/gate_deadline: gate deadline\",\"reason\":\"gate_deadline\"}}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"vote\",\"reload\":1,\"error\":{\"code\":\"aborted\",\"message\":\"aborted/gate_deadline: gate deadline\",\"reason\":\"gate_deadline\"}}"
+			},
+			"wsSize": 124,
+			"valid": true
+		},
+		{
+			"label": "voteReport",
+			"object": "{\"t\":\"vote\",\"reload\":1,\"report\":{\"codeVersion\":3,\"previous\":2,\"changed\":[\"t.a\"],\"removed\":[],\"prepared\":[\"t.a\\u0000{}\\u0000host\"],\"gated\":[]}}",
+			"ws": {
+				"text": "{\"t\":\"vote\",\"reload\":1,\"report\":{\"codeVersion\":3,\"previous\":2,\"changed\":[\"t.a\"],\"removed\":[],\"prepared\":[\"t.a\\u0000{}\\u0000host\"],\"gated\":[]}}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"vote\",\"reload\":1,\"report\":{\"codeVersion\":3,\"previous\":2,\"changed\":[\"t.a\"],\"removed\":[],\"prepared\":[\"t.a\\u0000{}\\u0000host\"],\"gated\":[]}}"
+			},
+			"wsSize": 142,
+			"valid": true
+		},
+		{
+			"label": "commit",
+			"object": "{\"t\":\"commit\",\"reload\":1}",
+			"ws": {
+				"text": "{\"t\":\"commit\",\"reload\":1}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"commit\",\"reload\":1}"
+			},
+			"wsSize": 25,
+			"valid": true
+		},
+		{
+			"label": "retire",
+			"object": "{\"t\":\"retire\",\"codeVersion\":2}",
+			"ws": {
+				"text": "{\"t\":\"retire\",\"codeVersion\":2}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"retire\",\"codeVersion\":2}"
+			},
+			"wsSize": 30,
+			"valid": true
+		},
+		{
+			"label": "abort",
+			"object": "{\"t\":\"abort\",\"reload\":1}",
+			"ws": {
+				"text": "{\"t\":\"abort\",\"reload\":1}"
+			},
+			"wsPlain": {
+				"text": "{\"t\":\"abort\",\"reload\":1}"
+			},
+			"wsSize": 24,
+			"valid": true
+		}
+	]
+}

@@ -1,0 +1,1915 @@
+[
+	{
+		"value": {
+			"t": "hello",
+			"protocol": 4,
+			"name": "server",
+			"kind": "host",
+			"codeVersion": 1,
+			"acks": true
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "hello",
+			"name": "browser",
+			"kind": "client",
+			"codeVersion": 0
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "ack",
+			"n": 3
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "hold",
+			"id": 1,
+			"at": "session:S1",
+			"token": {
+				"name": "t.chat",
+				"scope": "remote",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"required": [
+						"session",
+						"conversation"
+					],
+					"properties": {
+						"session": {
+							"type": "string"
+						},
+						"conversation": {
+							"type": "number",
+							"default": 0
+						}
+					}
+				},
+				"host": {
+					"prefix": "session:",
+					"key": "session"
+				},
+				"variants": {
+					"viewer": {
+						"view": {
+							"kind": "state",
+							"schema": {
+								"type": "object",
+								"required": [
+									"text"
+								],
+								"properties": {
+									"text": {
+										"type": "string"
+									}
+								}
+							}
+						}
+					},
+					"participant": {
+						"view": {
+							"kind": "state",
+							"schema": {
+								"type": "object",
+								"required": [
+									"text"
+								],
+								"properties": {
+									"text": {
+										"type": "string"
+									}
+								}
+							}
+						},
+						"send": {
+							"kind": "method",
+							"args": {
+								"type": "object",
+								"required": [
+									"text"
+								],
+								"properties": {
+									"text": {
+										"type": "string"
+									}
+								}
+							},
+							"result": {
+								"type": "object",
+								"required": [
+									"id"
+								],
+								"properties": {
+									"id": {
+										"type": "number"
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			"input": {
+				"session": "S1"
+			},
+			"principal": {
+				"worker": "session:S1"
+			},
+			"origin": "c1",
+			"state": false,
+			"again": true
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "hold",
+			"id": 2,
+			"at": "server",
+			"token": {
+				"name": "t.idx",
+				"scope": "local",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"properties": {}
+				},
+				"variants": {
+					"": {
+						"2": {
+							"kind": "method",
+							"result": {
+								"type": "integer",
+								"minimum": 1
+							}
+						},
+						"10": {
+							"kind": "method"
+						},
+						"harness": {
+							"kind": "opaque",
+							"id": "h@1"
+						},
+						"onChange": {
+							"kind": "method",
+							"args": {
+								"type": "function",
+								"parameters": [
+									{
+										"type": "string"
+									}
+								],
+								"returnType": {
+									"type": "void"
+								}
+							}
+						},
+						"progress": {
+							"kind": "state",
+							"schema": {
+								"type": "object",
+								"required": [
+									"ready"
+								],
+								"properties": {
+									"ready": {
+										"type": "boolean"
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			"input": {}
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "release",
+			"id": 1
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "shape",
+			"id": 1,
+			"variant": "participant",
+			"members": [
+				"view",
+				"send"
+			],
+			"contract": "e8ee3f28594f8426",
+			"state": [
+				"view"
+			]
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "shape",
+			"id": 2,
+			"members": [],
+			"contract": "27ac3abfbc660efb",
+			"state": []
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "gone",
+			"id": 1,
+			"error": {
+				"code": "gone",
+				"message": "gone: object disposed"
+			}
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "gone",
+			"id": 1,
+			"error": {
+				"code": "unavailable",
+				"message": "unavailable/unknown_type: no route",
+				"reason": "unknown_type"
+			}
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "call",
+			"id": 7,
+			"hold": 1,
+			"member": "send",
+			"args": {
+				"text": "hi"
+			},
+			"root": {
+				"rootId": "r1",
+				"codeVersion": 2
+			}
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "call",
+			"id": 8,
+			"hold": 1,
+			"member": "send",
+			"args": {
+				"text": "été 😀 中",
+				"ctrl": "a\u0001b\n\"\\",
+				"sep": " ",
+				"n": [
+					1e+21,
+					1.5,
+					0,
+					5e-324
+				]
+			}
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "call",
+			"id": 9,
+			"hold": 1,
+			"member": "stop",
+			"root": {
+				"rootId": "r1",
+				"codeVersion": 2
+			}
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "call",
+			"id": 10,
+			"hold": 1,
+			"member": "send",
+			"args": null
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "result",
+			"id": 7,
+			"value": {
+				"id": 1
+			}
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "result",
+			"id": 9
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "result",
+			"id": 8,
+			"error": {
+				"code": "invalid",
+				"message": "invalid/args: args: / must be object",
+				"reason": "args"
+			}
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "cancel",
+			"id": 7
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "sub",
+			"hold": 1
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "unsub",
+			"hold": 1
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "resync",
+			"hold": 1,
+			"m": "view"
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "state",
+			"hold": 1,
+			"m": "view",
+			"as": "snap",
+			"value": {
+				"text": "hello"
+			}
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "state",
+			"hold": 1,
+			"m": "view",
+			"as": "snap"
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "state",
+			"hold": 1,
+			"m": "view",
+			"as": "reset",
+			"value": {
+				"text": "été 😀 中",
+				"ctrl": "a\u0001b\n\"\\",
+				"sep": " ",
+				"n": [
+					1e+21,
+					1.5,
+					0,
+					5e-324
+				]
+			}
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "state",
+			"hold": 1,
+			"m": "view",
+			"as": "ops",
+			"ops": [
+				[
+					0,
+					[
+						"text"
+					],
+					"x"
+				],
+				[
+					1,
+					[]
+				]
+			]
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "state",
+			"hold": 1,
+			"m": "view",
+			"as": "error",
+			"error": {
+				"code": "invalid",
+				"message": "invalid/state: state view: bad",
+				"reason": "state"
+			}
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "ping",
+			"n": 1
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "pong",
+			"n": -3
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "bye",
+			"reason": "protocol-version 4"
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "bye"
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "root_end",
+			"rootId": "r1"
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "invalidate",
+			"pattern": {
+				"user": "u1",
+				"nested": {
+					"a": [
+						1
+					]
+				}
+			}
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "prepare",
+			"reload": 1,
+			"codeVersion": 3,
+			"plugins": [
+				"a",
+				"b"
+			],
+			"options": {
+				"remove": [
+					"c"
+				],
+				"gateDeadline": 5000,
+				"retireDeadline": 1.5
+			}
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "prepare",
+			"reload": 2,
+			"codeVersion": 3,
+			"plugins": [],
+			"options": {
+				"remove": []
+			}
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "vote",
+			"reload": 1,
+			"error": {
+				"code": "aborted",
+				"message": "aborted/gate_deadline: gate deadline",
+				"reason": "gate_deadline"
+			}
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "vote",
+			"reload": 1,
+			"report": {
+				"codeVersion": 3,
+				"previous": 2,
+				"changed": [
+					"t.a"
+				],
+				"removed": [],
+				"prepared": [
+					"t.a\u0000{}\u0000host"
+				],
+				"gated": []
+			}
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "commit",
+			"reload": 1
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "retire",
+			"codeVersion": 2
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "abort",
+			"reload": 1
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "hello",
+			"name": "x",
+			"kind": "host",
+			"codeVersion": 1,
+			"extra": {
+				"anything": true
+			}
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "hello",
+			"name": "",
+			"kind": "host",
+			"codeVersion": 1
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "hello",
+			"name": "x",
+			"kind": "browser",
+			"codeVersion": 1
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "hello",
+			"name": "x",
+			"kind": "host",
+			"codeVersion": -1
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "hello",
+			"name": "x",
+			"kind": "host",
+			"codeVersion": 1.5
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "hello",
+			"name": "x",
+			"kind": "host",
+			"codeVersion": 1,
+			"protocol": 0
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "hello",
+			"name": "x",
+			"kind": "host",
+			"codeVersion": 1,
+			"acks": "yes"
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "ack",
+			"n": 0
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "ack",
+			"n": 2
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "hold",
+			"id": 1,
+			"at": "server",
+			"token": {
+				"name": "t.idx",
+				"scope": "local",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"properties": {}
+				},
+				"variants": {
+					"": {
+						"2": {
+							"kind": "method",
+							"result": {
+								"type": "integer",
+								"minimum": 1
+							}
+						},
+						"10": {
+							"kind": "method"
+						},
+						"harness": {
+							"kind": "opaque",
+							"id": "h@1"
+						},
+						"onChange": {
+							"kind": "method",
+							"args": {
+								"type": "function",
+								"parameters": [
+									{
+										"type": "string"
+									}
+								],
+								"returnType": {
+									"type": "void"
+								}
+							}
+						},
+						"progress": {
+							"kind": "state",
+							"schema": {
+								"type": "object",
+								"required": [
+									"ready"
+								],
+								"properties": {
+									"ready": {
+										"type": "boolean"
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "hold",
+			"id": 1,
+			"at": "server",
+			"token": {
+				"name": "t.idx",
+				"scope": "local",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"properties": {}
+				},
+				"variants": {
+					"": {
+						"2": {
+							"kind": "method",
+							"result": {
+								"type": "integer",
+								"minimum": 1
+							}
+						},
+						"10": {
+							"kind": "method"
+						},
+						"harness": {
+							"kind": "opaque",
+							"id": "h@1"
+						},
+						"onChange": {
+							"kind": "method",
+							"args": {
+								"type": "function",
+								"parameters": [
+									{
+										"type": "string"
+									}
+								],
+								"returnType": {
+									"type": "void"
+								}
+							}
+						},
+						"progress": {
+							"kind": "state",
+							"schema": {
+								"type": "object",
+								"required": [
+									"ready"
+								],
+								"properties": {
+									"ready": {
+										"type": "boolean"
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			"input": null
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "hold",
+			"id": 1,
+			"at": "server",
+			"token": {
+				"name": "t.idx",
+				"scope": "local",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"properties": {}
+				},
+				"variants": {
+					"": {
+						"2": {
+							"kind": "method",
+							"result": {
+								"type": "integer",
+								"minimum": 1
+							}
+						},
+						"10": {
+							"kind": "method"
+						},
+						"harness": {
+							"kind": "opaque",
+							"id": "h@1"
+						},
+						"onChange": {
+							"kind": "method",
+							"args": {
+								"type": "function",
+								"parameters": [
+									{
+										"type": "string"
+									}
+								],
+								"returnType": {
+									"type": "void"
+								}
+							}
+						},
+						"progress": {
+							"kind": "state",
+							"schema": {
+								"type": "object",
+								"required": [
+									"ready"
+								],
+								"properties": {
+									"ready": {
+										"type": "boolean"
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			"input": {},
+			"state": true
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "hold",
+			"id": 1,
+			"at": "server",
+			"token": {
+				"name": "t.idx",
+				"scope": "local",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"properties": {}
+				},
+				"variants": {
+					"": {
+						"2": {
+							"kind": "method",
+							"result": {
+								"type": "integer",
+								"minimum": 1
+							}
+						},
+						"10": {
+							"kind": "method"
+						},
+						"harness": {
+							"kind": "opaque",
+							"id": "h@1"
+						},
+						"onChange": {
+							"kind": "method",
+							"args": {
+								"type": "function",
+								"parameters": [
+									{
+										"type": "string"
+									}
+								],
+								"returnType": {
+									"type": "void"
+								}
+							}
+						},
+						"progress": {
+							"kind": "state",
+							"schema": {
+								"type": "object",
+								"required": [
+									"ready"
+								],
+								"properties": {
+									"ready": {
+										"type": "boolean"
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			"input": {},
+			"again": false
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "hold",
+			"id": 1,
+			"at": "server",
+			"token": {
+				"name": "t.idx",
+				"scope": "local",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"properties": {}
+				},
+				"variants": {
+					"": {
+						"2": {
+							"kind": "method",
+							"result": {
+								"type": "integer",
+								"minimum": 1
+							}
+						},
+						"10": {
+							"kind": "method"
+						},
+						"harness": {
+							"kind": "opaque",
+							"id": "h@1"
+						},
+						"onChange": {
+							"kind": "method",
+							"args": {
+								"type": "function",
+								"parameters": [
+									{
+										"type": "string"
+									}
+								],
+								"returnType": {
+									"type": "void"
+								}
+							}
+						},
+						"progress": {
+							"kind": "state",
+							"schema": {
+								"type": "object",
+								"required": [
+									"ready"
+								],
+								"properties": {
+									"ready": {
+										"type": "boolean"
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			"input": {},
+			"origin": ""
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "hold",
+			"id": 0,
+			"at": "server",
+			"token": {
+				"name": "t.idx",
+				"scope": "local",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"properties": {}
+				},
+				"variants": {
+					"": {
+						"2": {
+							"kind": "method",
+							"result": {
+								"type": "integer",
+								"minimum": 1
+							}
+						},
+						"10": {
+							"kind": "method"
+						},
+						"harness": {
+							"kind": "opaque",
+							"id": "h@1"
+						},
+						"onChange": {
+							"kind": "method",
+							"args": {
+								"type": "function",
+								"parameters": [
+									{
+										"type": "string"
+									}
+								],
+								"returnType": {
+									"type": "void"
+								}
+							}
+						},
+						"progress": {
+							"kind": "state",
+							"schema": {
+								"type": "object",
+								"required": [
+									"ready"
+								],
+								"properties": {
+									"ready": {
+										"type": "boolean"
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			"input": {}
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "hold",
+			"id": 1,
+			"at": "server",
+			"token": {
+				"name": "t.idx",
+				"scope": "global",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"properties": {}
+				},
+				"variants": {
+					"": {
+						"2": {
+							"kind": "method",
+							"result": {
+								"type": "integer",
+								"minimum": 1
+							}
+						},
+						"10": {
+							"kind": "method"
+						},
+						"harness": {
+							"kind": "opaque",
+							"id": "h@1"
+						},
+						"onChange": {
+							"kind": "method",
+							"args": {
+								"type": "function",
+								"parameters": [
+									{
+										"type": "string"
+									}
+								],
+								"returnType": {
+									"type": "void"
+								}
+							}
+						},
+						"progress": {
+							"kind": "state",
+							"schema": {
+								"type": "object",
+								"required": [
+									"ready"
+								],
+								"properties": {
+									"ready": {
+										"type": "boolean"
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			"input": {}
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "hold",
+			"id": 1,
+			"at": "server",
+			"token": {
+				"name": "",
+				"scope": "local",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"properties": {}
+				},
+				"variants": {
+					"": {
+						"2": {
+							"kind": "method",
+							"result": {
+								"type": "integer",
+								"minimum": 1
+							}
+						},
+						"10": {
+							"kind": "method"
+						},
+						"harness": {
+							"kind": "opaque",
+							"id": "h@1"
+						},
+						"onChange": {
+							"kind": "method",
+							"args": {
+								"type": "function",
+								"parameters": [
+									{
+										"type": "string"
+									}
+								],
+								"returnType": {
+									"type": "void"
+								}
+							}
+						},
+						"progress": {
+							"kind": "state",
+							"schema": {
+								"type": "object",
+								"required": [
+									"ready"
+								],
+								"properties": {
+									"ready": {
+										"type": "boolean"
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			"input": {}
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "hold",
+			"id": 1,
+			"at": "server",
+			"token": {
+				"name": "t.idx",
+				"scope": "local",
+				"version": 1.5,
+				"input": {
+					"type": "object",
+					"properties": {}
+				},
+				"variants": {
+					"": {
+						"2": {
+							"kind": "method",
+							"result": {
+								"type": "integer",
+								"minimum": 1
+							}
+						},
+						"10": {
+							"kind": "method"
+						},
+						"harness": {
+							"kind": "opaque",
+							"id": "h@1"
+						},
+						"onChange": {
+							"kind": "method",
+							"args": {
+								"type": "function",
+								"parameters": [
+									{
+										"type": "string"
+									}
+								],
+								"returnType": {
+									"type": "void"
+								}
+							}
+						},
+						"progress": {
+							"kind": "state",
+							"schema": {
+								"type": "object",
+								"required": [
+									"ready"
+								],
+								"properties": {
+									"ready": {
+										"type": "boolean"
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			"input": {}
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "hold",
+			"id": 1,
+			"at": "server",
+			"token": {
+				"name": "t.idx",
+				"scope": "local",
+				"version": 1,
+				"input": [],
+				"variants": {
+					"": {
+						"2": {
+							"kind": "method",
+							"result": {
+								"type": "integer",
+								"minimum": 1
+							}
+						},
+						"10": {
+							"kind": "method"
+						},
+						"harness": {
+							"kind": "opaque",
+							"id": "h@1"
+						},
+						"onChange": {
+							"kind": "method",
+							"args": {
+								"type": "function",
+								"parameters": [
+									{
+										"type": "string"
+									}
+								],
+								"returnType": {
+									"type": "void"
+								}
+							}
+						},
+						"progress": {
+							"kind": "state",
+							"schema": {
+								"type": "object",
+								"required": [
+									"ready"
+								],
+								"properties": {
+									"ready": {
+										"type": "boolean"
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			"input": {}
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "hold",
+			"id": 1,
+			"at": "server",
+			"token": {
+				"name": "t.chat",
+				"scope": "remote",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"required": [
+						"session",
+						"conversation"
+					],
+					"properties": {
+						"session": {
+							"type": "string"
+						},
+						"conversation": {
+							"type": "number",
+							"default": 0
+						}
+					}
+				},
+				"host": {
+					"name": ""
+				},
+				"variants": {
+					"viewer": {
+						"view": {
+							"kind": "state",
+							"schema": {
+								"type": "object",
+								"required": [
+									"text"
+								],
+								"properties": {
+									"text": {
+										"type": "string"
+									}
+								}
+							}
+						}
+					},
+					"participant": {
+						"view": {
+							"kind": "state",
+							"schema": {
+								"type": "object",
+								"required": [
+									"text"
+								],
+								"properties": {
+									"text": {
+										"type": "string"
+									}
+								}
+							}
+						},
+						"send": {
+							"kind": "method",
+							"args": {
+								"type": "object",
+								"required": [
+									"text"
+								],
+								"properties": {
+									"text": {
+										"type": "string"
+									}
+								}
+							},
+							"result": {
+								"type": "object",
+								"required": [
+									"id"
+								],
+								"properties": {
+									"id": {
+										"type": "number"
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			"input": {}
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "hold",
+			"id": 1,
+			"at": "server",
+			"token": {
+				"name": "t.chat",
+				"scope": "remote",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"required": [
+						"session",
+						"conversation"
+					],
+					"properties": {
+						"session": {
+							"type": "string"
+						},
+						"conversation": {
+							"type": "number",
+							"default": 0
+						}
+					}
+				},
+				"host": {
+					"name": "a",
+					"prefix": "b"
+				},
+				"variants": {
+					"viewer": {
+						"view": {
+							"kind": "state",
+							"schema": {
+								"type": "object",
+								"required": [
+									"text"
+								],
+								"properties": {
+									"text": {
+										"type": "string"
+									}
+								}
+							}
+						}
+					},
+					"participant": {
+						"view": {
+							"kind": "state",
+							"schema": {
+								"type": "object",
+								"required": [
+									"text"
+								],
+								"properties": {
+									"text": {
+										"type": "string"
+									}
+								}
+							}
+						},
+						"send": {
+							"kind": "method",
+							"args": {
+								"type": "object",
+								"required": [
+									"text"
+								],
+								"properties": {
+									"text": {
+										"type": "string"
+									}
+								}
+							},
+							"result": {
+								"type": "object",
+								"required": [
+									"id"
+								],
+								"properties": {
+									"id": {
+										"type": "number"
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			"input": {}
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "hold",
+			"id": 1,
+			"at": "server",
+			"token": {
+				"name": "t.chat",
+				"scope": "remote",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"required": [
+						"session",
+						"conversation"
+					],
+					"properties": {
+						"session": {
+							"type": "string"
+						},
+						"conversation": {
+							"type": "number",
+							"default": 0
+						}
+					}
+				},
+				"host": {
+					"prefix": "session:",
+					"key": "session"
+				},
+				"variants": {
+					"viewer": {
+						"view": {
+							"kind": "state",
+							"schema": {
+								"type": "object",
+								"required": [
+									"text"
+								],
+								"properties": {
+									"text": {
+										"type": "string"
+									}
+								}
+							}
+						}
+					},
+					"participant": {
+						"view": {
+							"kind": "state",
+							"schema": {
+								"type": "object",
+								"required": [
+									"text"
+								],
+								"properties": {
+									"text": {
+										"type": "string"
+									}
+								}
+							}
+						},
+						"send": {
+							"kind": "method",
+							"args": {
+								"type": "object",
+								"required": [
+									"text"
+								],
+								"properties": {
+									"text": {
+										"type": "string"
+									}
+								}
+							},
+							"result": {
+								"type": "object",
+								"required": [
+									"id"
+								],
+								"properties": {
+									"id": {
+										"type": "number"
+									}
+								}
+							}
+						}
+					}
+				},
+				"extra": 1
+			},
+			"input": {}
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "hold",
+			"id": 1,
+			"at": "server",
+			"token": {
+				"name": "t.idx",
+				"scope": "local",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"properties": {}
+				},
+				"variants": {
+					"": {
+						"m": {
+							"kind": "method",
+							"args": true
+						}
+					}
+				}
+			},
+			"input": {}
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "hold",
+			"id": 1,
+			"at": "server",
+			"token": {
+				"name": "t.idx",
+				"scope": "local",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"properties": {}
+				},
+				"variants": {
+					"": {
+						"m": {
+							"kind": "event"
+						}
+					}
+				}
+			},
+			"input": {}
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "hold",
+			"id": 1,
+			"at": "server",
+			"token": {
+				"name": "t.idx",
+				"scope": "local",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"properties": {}
+				},
+				"variants": {
+					"": {
+						"m": {
+							"kind": "opaque"
+						}
+					}
+				}
+			},
+			"input": {}
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "hold",
+			"id": 1,
+			"at": "server",
+			"token": {
+				"name": "t.idx",
+				"scope": "local",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"properties": {}
+				},
+				"variants": {
+					"": []
+				}
+			},
+			"input": {}
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "shape",
+			"id": 1,
+			"members": [
+				"a"
+			],
+			"contract": "x",
+			"state": [
+				""
+			]
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "shape",
+			"id": 1,
+			"variant": "",
+			"members": [],
+			"contract": "",
+			"state": []
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "shape",
+			"id": 1,
+			"members": [
+				1
+			],
+			"contract": "x",
+			"state": []
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "gone",
+			"id": 1,
+			"error": {
+				"code": "nope",
+				"message": "x"
+			}
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "gone",
+			"id": 1,
+			"error": {
+				"code": "gone"
+			}
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "call",
+			"id": 1,
+			"hold": 1,
+			"member": ""
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "call",
+			"id": 1,
+			"hold": 1,
+			"member": "m",
+			"root": {
+				"rootId": "r",
+				"codeVersion": 0
+			}
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "result",
+			"id": 1,
+			"error": {
+				"code": "aborted",
+				"message": "m",
+				"reason": 1
+			}
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "state",
+			"hold": 1,
+			"m": "x",
+			"as": "patch"
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "state",
+			"hold": 1,
+			"m": "x",
+			"as": "ops",
+			"ops": [
+				1
+			]
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "state",
+			"hold": 1,
+			"m": "x",
+			"as": "ops",
+			"ops": [
+				[]
+			]
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "ping",
+			"n": -5
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "ping",
+			"n": 1.5
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "bye",
+			"reason": 3
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "root_end",
+			"rootId": ""
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "invalidate",
+			"pattern": []
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "prepare",
+			"reload": 1,
+			"codeVersion": 1,
+			"plugins": [],
+			"options": {}
+		},
+		"valid": true
+	},
+	{
+		"value": {
+			"t": "prepare",
+			"reload": 1,
+			"codeVersion": 1,
+			"plugins": []
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "prepare",
+			"reload": 1,
+			"codeVersion": 1,
+			"plugins": [],
+			"options": {
+				"gateDeadline": "5"
+			}
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "vote",
+			"reload": 1,
+			"report": {
+				"codeVersion": 1,
+				"previous": 0,
+				"changed": [],
+				"removed": [],
+				"prepared": []
+			}
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "vote",
+			"reload": 0
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "retire",
+			"codeVersion": 0
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": "unknown"
+		},
+		"valid": false
+	},
+	{
+		"value": {
+			"t": 5
+		},
+		"valid": false
+	},
+	{
+		"value": {},
+		"valid": false
+	},
+	{
+		"value": [],
+		"valid": false
+	},
+	{
+		"value": null,
+		"valid": false
+	}
+]
