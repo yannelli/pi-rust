@@ -177,6 +177,7 @@ class Http2Session extends EventEmitter {
   destroy(error, code) {
     if (this.destroyed) return;
     if (typeof error === "number") [code, error] = [error, undefined];
+    const graceful = this.closed && !error && !this._peerEnded && !this.socket.readableEnded;
     this.destroyed = true;
     this.closed = true;
     for (const stream of this._streams.values()) stream.destroy(error);
@@ -197,7 +198,14 @@ class Http2Session extends EventEmitter {
     socket.removeListener("timeout", this._onTimeout);
     socket.on("error", () => {});
     socket.removeListener("error", this._onError);
-    if (!socket.destroyed) socket.end(() => socket.destroy());
+    // After close(), Node ends the socket and keeps it open until the peer ends it, so frames
+    // still on the way cannot reach a closed socket and reset the connection.
+    if (socket.destroyed) {
+    } else if (graceful) {
+      socket.once("end", () => socket.destroy());
+      socket.resume();
+      socket.end();
+    } else socket.end(() => socket.destroy());
     process.nextTick(() => {
       if (error) this.emit("error", error);
       this.emit("close");
