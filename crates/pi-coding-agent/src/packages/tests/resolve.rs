@@ -246,6 +246,32 @@ async fn missing_npm_packages_install_unless_offline_or_skipped() {
 }
 
 #[tokio::test]
+async fn a_package_that_fails_to_install_is_skipped_and_reported() {
+    let fixture = Fixture::new();
+    let pkg = fixture.root().join("pkg");
+    conventional_package(&pkg);
+    fixture.set_global(json!({"packages": [pkg.display().to_string()]}));
+    fixture.settings.set_project_packages(&sources(json!(["npm:missing-tools"]))).unwrap();
+    let runner = MockRunner::new(|_| anyhow::bail!("npm install missing-tools failed with code 1"));
+    let manager = fixture.manager(runner.clone());
+    let resolved = manager.resolve_package_resources(None).await.unwrap();
+    assert!(enabled(&resolved.skills, "pkg/skills/review/SKILL.md"));
+    assert_eq!(runner.argvs(CallKind::Run).len(), 1);
+    let failures = manager.take_install_failures();
+    assert_eq!(failures.len(), 1);
+    assert_eq!((failures[0].source.as_str(), failures[0].scope), ("npm:missing-tools", SourceScope::Project));
+    let app = crate::resources::brand::APP_NAME;
+    assert_eq!(
+        failures[0].warning(),
+        format!(
+            "Extension package \"npm:missing-tools\": failed to install (npm install missing-tools failed with code \
+             1). Run \"{app} remove npm:missing-tools --local\" to remove it from settings."
+        )
+    );
+    assert!(manager.take_install_failures().is_empty());
+}
+
+#[tokio::test]
 async fn pinned_npm_packages_reinstall_on_version_mismatch() {
     let fixture = Fixture::new();
     fake_npm_package(&fixture.cwd.join(".pi/npm"), "example", "1.0.0", &[]);

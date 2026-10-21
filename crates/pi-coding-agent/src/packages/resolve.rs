@@ -10,7 +10,7 @@ use super::manifest::read_pi_manifest;
 use super::npm::installed_npm_matches;
 use super::settings_ops::package_source_text;
 use super::source::{LocalSource, ParsedSource, parse_source};
-use super::{MissingSourceAction, MissingSourceHandler, PackageManager};
+use super::{MissingSourceAction, MissingSourceHandler, PackageInstallFailure, PackageManager};
 use crate::resources::discovery::{
     LocalResourceOptions, ResourceAccumulator, collect_resource_files, resolve_local_resources,
 };
@@ -299,7 +299,12 @@ impl PackageManager {
                 MissingSourceAction::Install => {}
             }
         }
-        self.install_parsed_source(parsed, scope).await?;
+        // A package that fails to install is skipped like an offline one, so the others still load.
+        if let Err(error) = self.install_parsed_source(parsed, scope).await {
+            let failure = PackageInstallFailure { source: source.to_string(), scope, message: format!("{error:#}") };
+            self.install_failures.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(failure);
+            return Ok(false);
+        }
         Ok(true)
     }
 

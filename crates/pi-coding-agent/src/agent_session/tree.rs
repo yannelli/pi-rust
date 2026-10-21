@@ -415,17 +415,17 @@ impl AgentSession {
     }
 
     /// [`Self::reload`] that resolves the `packages` settings again, installing missing ones
-    /// (`/reload`, upstream `ResourceLoader.reload`). Returns the package error, if any.
-    pub async fn reload_resources(&self) -> Option<super::RuntimeDiagnostic> {
+    /// (`/reload`, upstream `ResourceLoader.reload`). Returns the package warnings.
+    pub async fn reload_resources(&self) -> Vec<super::RuntimeDiagnostic> {
         let previous_defaults = self.current_default_tools();
         self.settings().reload();
         let (cwd, agent_dir, settings) = {
             let services = self.services();
             (services.cwd.clone(), services.agent_dir.clone(), services.settings.clone())
         };
-        let (packages, error) = super::services::package_resources(&cwd, &agent_dir, &settings).await;
+        let (packages, diagnostics) = super::services::package_resources(&cwd, &agent_dir, &settings).await;
         self.reload_with_packages(Some(packages), &previous_defaults);
-        error
+        diagnostics
     }
 
     fn reload_with_packages(&self, packages: Option<crate::resources::ResolvedPaths>, previous_defaults: &[String]) {
