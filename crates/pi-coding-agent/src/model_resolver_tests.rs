@@ -375,8 +375,8 @@ fn default_model_selection_follows_upstream_priority() {
     assert_eq!(default_model_for("openai-codex"), Some("gpt-6.1-sol"));
     assert_eq!(default_model_for("vercel-ai-gateway"), Some("zai/glm-5.1"));
     assert_eq!(default_model_for("ant-ling"), Some("Ring-2.6-1T"));
-    // Upstream's data no longer lists github-copilot/gpt-5.4, its Copilot default; both fall back
-    // to the first available model. Any other default must be in the catalog.
+    assert_eq!(default_model_for("github-copilot"), Some("gpt-6.1-sol"));
+    // Every provider's default must be in the catalog.
     let chat = pi_ai::models::builtin_models().iter().filter(|model| pi_ai::models::is_chat_model(model));
     let mut absent = std::collections::BTreeSet::new();
     for provider in chat.map(|model| model.provider.as_str()) {
@@ -385,7 +385,7 @@ fn default_model_selection_follows_upstream_priority() {
             absent.insert(format!("{provider}/{default}"));
         }
     }
-    assert_eq!(absent.into_iter().collect::<Vec<_>>(), ["github-copilot/gpt-5.4"]);
+    assert!(absent.is_empty(), "defaults missing from the catalog: {absent:?}");
 
     let catalog = Catalog::new(all_models());
     let options = InitialModelOptions {
