@@ -4,6 +4,26 @@ A Rust-only port of the [pi](https://github.com/earendil-works/pi) coding agent 
 
 ## Install
 
+Linux and macOS:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/yannelli/pi-rust/main/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/yannelli/pi-rust/main/install.ps1 | iex
+```
+
+The scripts download the latest release for your platform, check it against `SHA256SUMS`, and install `pi` to `~/.local/bin` (Windows: `%LOCALAPPDATA%\Programs\pi`, which the script adds to your user `Path`). They do not use sudo or send telemetry, and `pi update --self` updates an install made this way. Settings:
+
+- `PI_VERSION`: install this release (for example `0.5.3`) instead of the latest. Example: `curl -fsSL https://raw.githubusercontent.com/yannelli/pi-rust/main/install.sh | PI_VERSION=0.5.3 sh`. In PowerShell, set `$env:PI_VERSION = "0.5.3"` before `irm`.
+- `PI_INSTALL_DIR`: install to this directory instead. Do not use `~/.cargo/bin`, because `pi update --self` treats a binary there as a cargo install.
+- `PI_RELEASES_URL`: download from a mirror of `https://github.com/yannelli/pi-rust/releases`. The mirror must serve `latest/download/SHA256SUMS` and `download/<tag>/<file>`.
+
+### Manual install
+
 Each [release](https://github.com/yannelli/pi-rust/releases) has an archive per platform and a `SHA256SUMS` file. Every archive holds a `pi-vX.Y.Z-<target>/` folder with `pi` (or `pi.exe`), `README.md`, `LICENSE`, and `CHANGELOG.md`.
 
 | Platform | Target |
