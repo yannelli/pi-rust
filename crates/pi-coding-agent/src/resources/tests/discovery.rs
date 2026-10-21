@@ -82,7 +82,7 @@ fn pattern_text_expands_home_and_file_urls_only() {
     use crate::resources::paths::normalize_path_input;
     let home = crate::resources::paths::home_dir();
     assert_eq!(normalize_path_input("~"), home.to_string_lossy());
-    assert_eq!(normalize_path_input("~/a/../b/*.md"), home.join("b/*.md").to_string_lossy());
+    assert_eq!(normalize_path_input("~/a/../b/*.md"), home.join("b").join("*.md").to_string_lossy());
     for unchanged in ["~user/x", "skills/*", "**/*.md", "x~/y", "/abs/~/z"] {
         assert_eq!(normalize_path_input(unchanged), unchanged);
     }
