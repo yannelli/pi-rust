@@ -1,5 +1,6 @@
 //! The interactive mode end to end: a virtual terminal, the faux provider, and the real UI loop.
 
+mod context;
 mod dialogs;
 mod diff;
 mod extension_dialogs;
