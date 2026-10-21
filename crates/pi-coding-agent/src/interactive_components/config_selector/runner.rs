@@ -7,7 +7,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
-use pi_tui::{ComponentRef, ProcessTerminal, TerminalRef, Tui, TuiOptions, TuiStopOptions, ui_loop};
+use pi_tui::{
+    ComponentRef, ProcessTerminal, TerminalRef, Tui, TuiOptions, TuiStopOptions, restore_terminals_on_exit, ui_loop,
+};
 
 use super::ConfigSelector;
 use crate::config::agent_dir;
@@ -59,6 +61,7 @@ pub fn run_config_selector(request: ConfigSelectorRequest) {
             tui.stop(TuiStopOptions::default());
         }
         stop_theme_watcher();
+        restore_terminals_on_exit();
         std::process::exit(0);
     };
     let render_tui = tui.downgrade();

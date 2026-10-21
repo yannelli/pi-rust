@@ -14,19 +14,14 @@ impl AgentSession {
         lock(&self.state).abort_requested
     }
 
-    /// Run `messages` and every automatic continuation, then emit `agent_settled`.
+    /// Run `messages` and every automatic continuation, then emit `agent_settled`. The run is
+    /// already marked active by [`Self::start_run`].
     pub(crate) async fn run_agent_prompt(&self, messages: Vec<Message>) -> anyhow::Result<()> {
         // The run records the loadout; restored tools that did not register by now are dropped.
         lock(&self.tools).pending.clear();
-        {
-            let mut state = lock(&self.state);
-            state.abort_requested = false;
-            state.run_active = true;
-            // Compaction before the prompt may have scheduled a retry; the new prompt replaces it.
-            state.failed_response = None;
-        }
+        // Compaction before the prompt may have scheduled a retry; the new prompt replaces it.
+        lock(&self.state).failed_response = None;
         self.record_selection();
-        self.notify_idle();
         let result = self.drive_run(messages).await;
         if self.abort_requested() {
             self.finish_cancelled_retry();
