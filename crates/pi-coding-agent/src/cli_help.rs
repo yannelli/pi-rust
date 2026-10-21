@@ -1,5 +1,6 @@
 //! `pi --help` text, following upstream `printHelp`.
 
+use super::table::{CLI_COMMANDS, CLI_OPTIONS};
 use crate::resources::brand::{APP_NAME, CONFIG_DIR_NAME, agent_dir_env_var, session_dir_env_var};
 
 /// An extension flag for the `Extension CLI Flags` section: name, `string` or `boolean`,
@@ -9,6 +10,37 @@ pub struct HelpFlag {
     pub kind: String,
     pub description: Option<String>,
     pub extension_path: String,
+}
+
+/// `  pi install <source> [-l]     Install ...` lines from the command table.
+fn commands_section() -> String {
+    let mut text = String::new();
+    for command in CLI_COMMANDS {
+        let usage = format!("{} {}", command.name, command.usage);
+        text.push_str(&format!("  {APP_NAME} {:<26}{}\n", usage.trim_end(), command.help));
+    }
+    let names: Vec<&str> = CLI_COMMANDS.iter().map(|command| command.name).collect();
+    text.push_str(&format!("  {APP_NAME} {:<26}Show help for {}\n", "<command> --help", names.join("/")));
+    text
+}
+
+/// `  --name, -n <name>   Description` lines from the option table.
+fn options_section() -> String {
+    let mut text = String::new();
+    for option in CLI_OPTIONS {
+        let mut usage = option.long.to_string();
+        if let Some(short) = option.short {
+            usage.push_str(&format!(", {short}"));
+        }
+        if let Some(value) = option.value {
+            usage.push_str(&format!(" {value}"));
+        }
+        for (index, line) in option.help.iter().enumerate() {
+            let first = if index == 0 { usage.as_str() } else { "" };
+            text.push_str(&format!("  {first:<31}{line}\n"));
+        }
+    }
+    text
 }
 
 pub fn help_text() -> String {
@@ -35,65 +67,9 @@ Usage:
   {app} [options] [--] [@files...] [messages...]
 
 Commands:
-  {app} install <source> [-l]     Install extension source and add to settings
-  {app} remove <source> [-l]      Remove extension source from settings
-  {app} uninstall <source> [-l]   Alias for remove
-  {app} update [source|self|pi]   Update pi, extensions, or model catalogs
-  {app} list                      List installed extensions from settings
-  {app} config [-l]               Open TUI to enable/disable package resources (Tab switches scope)
-  {app} auth <command>            Print credentials or check provider readiness
-  {app} mcp <command>             Check MCP servers, sign in to or out of OAuth servers
-  {app} <command> --help          Show help for install/remove/uninstall/update/list/config/auth/mcp
-
+{commands}
 Options:
-  --provider <name>              Provider to search for --model (requires --model)
-  --model <pattern>              Model pattern or ID (supports \"provider/id\" and optional \":<thinking>\")
-  --api-key <key>                API key (defaults to env vars)
-  --system-prompt <text>         System prompt text or file (default: coding assistant prompt)
-  --append-system-prompt <text>  Append text or file contents to the system prompt (can be used multiple times)
-  --mode <mode>                  Output mode: text (default), json, rpc, or acp
-  --print, -p                    Non-interactive mode: process prompt and exit
-  --continue, -c                 Continue previous session
-  --resume, -r                   Select a session to resume
-  --session <path|id>            Use specific session file or partial UUID
-  --session-id <id>              Use exact project session ID, creating it if missing
-  --fork <path|id>               Fork specific session file or partial UUID into a new session
-  --session-dir <dir>            Directory for session storage and lookup
-  --no-session                   Don't save session (ephemeral)
-  --name, -n <name>              Set session display name
-  --models <patterns>            Comma-separated model patterns for Ctrl+P cycling
-                                 Supports globs (anthropic/*, *sonnet*) and fuzzy matching
-  --no-tools, -nt                Disable all tools by default (built-in and extension)
-  --no-builtin-tools, -nbt       Disable built-in tools by default but keep extension/custom tools enabled
-  --tools, -t <tools>            Comma-separated allowlist of tool names or patterns (*) to enable
-                                 Keeps MCP tools unless an entry starts with mcp__
-                                 Only +name/-name entries add to or remove from the defaults
-  --exclude-tools, -xt <tools>   Comma-separated denylist of tool names or patterns (*) to disable
-                                 Applies to all tools, MCP tools included
-  --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh, max
-  --extension, -e <path>         Load an extension file or builtin:<name> (can be used multiple times)
-  --no-extensions, -ne           Disable extension discovery and built-in extensions (explicit -e paths still work)
-  --no-mcp                       Disable built-in MCP support: no servers connect and no MCP tools
-  --skill <path>                 Load a skill file or directory (can be used multiple times)
-  --no-skills, -ns               Disable skills discovery and loading
-  --prompt-template <path>       Load a prompt template file or directory (can be used multiple times)
-  --no-prompt-templates, -np     Disable prompt template discovery and loading
-  --theme <path>                 Load a theme file or directory (can be used multiple times)
-  --use-theme <name[/name]>      Set the interactive theme for this run
-  --no-themes                    Disable theme discovery and loading
-  --no-context-files, -nc        Disable AGENTS.md and CLAUDE.md discovery and loading
-  --export <file>                Export session file to HTML and exit
-                                 An output path ending in .md writes Markdown (pi-rust extension)
-  --list-models [search]         List available models (with optional fuzzy search)
-  --verbose                      Force verbose startup (overrides quietStartup setting)
-  --tui-mode <mode>              TUI mode: fullscreen (default) or regular
-  --approve, -a                  Trust project-local files for this run
-  --no-approve, -na              Ignore project-local files for this run
-  --offline                      Disable startup network operations (same as PI_OFFLINE=1)
-  --                             End option parsing; treat remaining arguments as messages/files
-  --help, -h                     Show this help
-  --version, -v                  Show version number
-
+{options}
 Extensions can register additional flags (e.g., --plan from plan-mode extension).{extension_flags}
 
 Examples:
@@ -214,6 +190,8 @@ Built-in Tool Names:
   find       - Find files by glob pattern (read-only, off by default)
   ls         - List directory contents (read-only, off by default)",
         app = APP_NAME,
+        commands = commands_section(),
+        options = options_section(),
         config_dir = CONFIG_DIR_NAME,
         agent_dir_env = agent_dir_env_var(),
         session_dir_env = session_dir_env_var(),

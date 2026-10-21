@@ -8,8 +8,18 @@ use crate::settings::tools::tool_list_error;
 
 #[path = "cli_help.rs"]
 mod help;
+#[path = "cli_table.rs"]
+pub mod table;
 
 pub use help::{HelpFlag, help_text, help_text_with_flags};
+
+/// Exit code and output of a subcommand that runs before the arguments become a prompt.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CommandOutput {
+    pub code: i32,
+    pub stdout: String,
+    pub stderr: String,
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OutputMode {
