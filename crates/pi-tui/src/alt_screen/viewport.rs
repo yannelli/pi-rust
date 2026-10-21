@@ -273,10 +273,12 @@ fn reset_on_focus_out(inner: &TuiInner) {
 /// The fullscreen input listener. Returns true when the input was consumed.
 pub(crate) fn handle_viewport_input(inner: &TuiInner, data: &str) -> bool {
     if data == FOCUS_OUT {
+        with_alt(inner, |alt| alt.terminal_focused = Some(false));
         reset_on_focus_out(inner);
         return true;
     }
     if data == FOCUS_IN {
+        with_alt(inner, |alt| alt.terminal_focused = Some(true));
         return true;
     }
     if let Some(wheel) = mouse::parse_wheel_event(data) {

@@ -158,6 +158,12 @@ impl Tui {
         with_alt(&self.inner, |alt| alt.wheel_scroll.set_lines(lines));
     }
 
+    /// Fullscreen with mouse support: whether the terminal window has focus, from its last
+    /// focus report. `None` in regular mode or before the terminal reports focus.
+    pub fn terminal_focused(&self) -> Option<bool> {
+        with_alt(&self.inner, |alt| alt.terminal_focused).flatten()
+    }
+
     pub fn get_copy_on_select(&self) -> bool {
         with_alt(&self.inner, |alt| alt.copy_on_select).unwrap_or(false)
     }

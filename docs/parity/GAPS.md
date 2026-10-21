@@ -1,18 +1,10 @@
 # Open parity gaps
 
-Last reviewed 2026-10-21 against upstream `main` at `16f5f0af4` (2026-10-21). The daily [parity report](README.md#daily-gap-check) finds new gaps; this file keeps the ones that need a decision or a plan. Remove an entry in the PR that closes it.
+Last reviewed 2026-10-21 against upstream `main` at `82432219a` (2026-10-21). The daily [parity report](README.md#daily-gap-check) finds new gaps; this file keeps the ones that need a decision or a plan. Remove an entry in the PR that closes it.
 
 ## Upstream commits not yet ported
 
-These upstream commits come after the newest ported commit (`d2e7d8b7c`, 2026-10-19). Some can already be in pi-rust without naming the upstream SHA; confirm before you port.
-
-| Area | Upstream commits |
-| --- | --- |
-| pi-ai | `73f8de80b` Copilot request-size overflow, `caa6967b6` prompt cache across tool changes on Responses, `530015d93` only announced removals stay unavailable, `fdce48eb4` drop Codex models rejected for ChatGPT accounts |
-| pi-coding-agent | `28bea006b` Windows Store shell aliases, `61060ddf8` Windows shells from installation directories, `ea25697e9` managed install markers with a BOM, `26293e74f` CJK emphasis in the HTML export, `38847563f` stack concurrent extension dialogs, `f8ab362cc` clipboard helpers outside pi's process group, `885a564b3` queue codemode scripts at the worker limit, `22dc6c26f` expose `@earendil-works/pi-ai/models` to extensions, `bdd9f0399` `mcp.json` with a BOM |
-| pi-tui | `0ed1b0431` Rex terminal OSC 8 links, `396ecd7b8` Kitty images for Rex, `b2d0da6fe` CJK emphasis next to punctuation, `2ed3118b0` unclosed display math and tables, `9df819de3` restore terminal modes on exit without `stop()` |
-| pi-chord | `d9025a5f5` SQLite telemetry store and trace renderer, `48c8f3228` exclusive SQLite operations and a replicated connection |
-| pi-durable | `5c1736f82` `checkpointWhen` required on document definitions, `16f5f0af4` IndexedDbStorage (browser storage; check whether it applies) |
+None up to `82432219a`. Every commit after the synced commit is ported or listed in `allowlist.json` with a reason.
 
 ## Deferred work
 
@@ -30,6 +22,14 @@ How pi-chord's `host2` differs from upstream chord on purpose:
 - Upstream `4a5d37291` moved `OutputBuffer` and `Progress` into `@earendil-works/chord/output`. pi-rust keeps them in pi-durable (`harness/output.rs` and `harness/progress.rs`).
 - Tests: fake timers are real short timers, and `Weak` sentinels replace `FinalizationRegistry` with a forced GC. The review test "a commit that still fails midway" is not ported: it patches an object's `startTasks`, which Rust code cannot do.
 
+## Upstream commits that do not apply
+
+Older than the synced commit, so the report no longer lists them.
+
+- `ea25697e9` managed install markers with a BOM: `pi update --self` replaces the release binary in place (update/install.rs); there is no managed-install.json marker.
+- `16f5f0af4` IndexedDbStorage: a browser storage backend, and pi-rust has no browser build.
+- `c661bc574` drops the shared MCP types block from durable code mode: pi-codemode never had it, so the port of `8bb180bec` already renders the section without it.
+
 ## Extension runtime (pi-js)
 
 `crates/pi-js/src/unsupported.rs` is the full list. Open items that need a decision:
@@ -41,9 +41,7 @@ How pi-chord's `host2` differs from upstream chord on purpose:
 
 ## Removed upstream, still in pi-rust
 
-Upstream `7472cda0d` (2026-10-12) deleted the experimental server stack: the client, protocol, and server packages, `pi experimental server` and `client`, and the example plugin. pi-rust still ships `pi-client`, `pi-protocol`, `pi-server`, and the `pi experimental` commands, so the parity report lists those crates as only in pi-rust. Decide whether to remove them to match upstream or keep them and add them to `allowlist.json`.
-
-This commit is older than the synced commit, so the commits section treats it as ported. Commits between the fork snapshot (2026-10-09) and `d2e7d8b7c` were ported one at a time. Check that window for other skipped commits.
+Upstream `7472cda0d` (2026-10-12) deleted the experimental server stack: the client, protocol, and server packages and `pi experimental`. pi-rust keeps them on purpose as pi-rust extras (decided 2026-10-21): `pi-client`, `pi-protocol`, `pi-server`, the `pi experimental` commands (`server`, `client`, `durable`, `vacation`), and the facets/services runtime in pi-chord that they use. The three crates are in `allowlist.json`. They get no upstream fixes from now on.
 
 ## pi-rust extensions
 

@@ -3,13 +3,24 @@
 
 use pi_ai::ThinkingLevel;
 
+use crate::agent_session::RunLimits;
 use crate::settings::schema::TuiMode;
 use crate::settings::tools::tool_list_error;
 
 #[path = "cli_help.rs"]
 mod help;
+#[path = "cli_table.rs"]
+pub mod table;
 
 pub use help::{HelpFlag, help_text, help_text_with_flags};
+
+/// Exit code and output of a subcommand that runs before the arguments become a prompt.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CommandOutput {
+    pub code: i32,
+    pub stdout: String,
+    pub stderr: String,
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OutputMode {
@@ -96,6 +107,8 @@ pub struct Args {
     pub verbose: bool,
     /// `-a/--approve` is `Some(true)`, `-na/--no-approve` is `Some(false)` (trust stream).
     pub project_trust_override: Option<bool>,
+    /// `--max-turns` and `--max-cost` (pi-rust).
+    pub run_limits: RunLimits,
     pub messages: Vec<String>,
     /// Paths given as `@path`.
     pub file_args: Vec<String>,
@@ -107,6 +120,16 @@ pub struct Args {
 
 fn split_list(value: &str) -> Vec<String> {
     value.split(',').map(str::trim).filter(|item| !item.is_empty()).map(String::from).collect()
+}
+
+/// `--max-turns` or `--max-cost` with its value, validated.
+fn set_run_limit(args: &mut Args, flag: &str, value: &str) {
+    let limits = &mut args.run_limits;
+    let result = match flag {
+        "--max-turns" => RunLimits::parse_max_turns(value).map(|turns| limits.max_turns = Some(turns)),
+        _ => RunLimits::parse_max_cost(value).map(|cost| limits.max_cost = Some(cost)),
+    };
+    args.errors.extend(result.err());
 }
 
 /// A display name with surrounding whitespace removed, or `None` when blank.
@@ -244,6 +267,15 @@ pub fn parse_args(raw: &[String]) -> Args {
             "-a" | "--approve" => args.project_trust_override = Some(true),
             "-na" | "--no-approve" => args.project_trust_override = Some(false),
             "--offline" => args.offline = true,
+            "--max-turns" | "--max-cost" => {
+                if let Some(limit) = value(&mut index, arg, &mut args.errors) {
+                    set_run_limit(&mut args, arg, &limit);
+                }
+            }
+            _ if arg.starts_with("--max-turns=") || arg.starts_with("--max-cost=") => {
+                let (flag, limit) = arg.split_once('=').unwrap_or_default();
+                set_run_limit(&mut args, flag, limit);
+            }
             _ if arg.starts_with('@') => args.file_args.push(arg[1..].into()),
             _ if arg.starts_with("--") => {
                 let flag = &arg[2..];

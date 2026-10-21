@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use pi_ai::{ContentBlock, Message, StopReason};
 
-use crate::agent_session::{AgentSession, AgentSessionRuntime, PromptOptions};
+use crate::agent_session::{AgentSession, AgentSessionRuntime, PromptOptions, RUN_LIMIT_EXIT_CODE};
 use crate::cli::OutputMode;
 use crate::extension_ui::ExtensionMode;
 use crate::extensions::ExtensionBindings;
@@ -27,7 +27,7 @@ fn bind_json_output(runtime: &AgentSessionRuntime) {
             previous.unsubscribe(id);
         }
         let id = session.subscribe(|event| {
-            if event.is_upstream_event() {
+            if event.is_json_event() {
                 write_line(&event.to_json().to_string());
             }
         });
@@ -38,7 +38,8 @@ fn bind_json_output(runtime: &AgentSessionRuntime) {
 }
 
 /// Run `initial_message` with `initial_images`, then each of `messages`. Returns the exit code:
-/// 1 when a prompt fails or, in text mode, when the last response is an error or aborted.
+/// 1 when a prompt fails or, in text mode, when the last response is an error or aborted, and
+/// [`RUN_LIMIT_EXIT_CODE`] when `--max-turns` or `--max-cost` stopped the run.
 pub async fn run_print_mode(
     runtime: &Arc<AgentSessionRuntime>,
     mode: OutputMode,
@@ -69,6 +70,9 @@ pub async fn run_print_mode(
             runtime.session().prompt_with(&text, options).await?;
         }
         for message in &messages {
+            if runtime.session().run_limit_stop().is_some() {
+                break;
+            }
             runtime.session().prompt(message, Vec::new()).await?;
         }
         anyhow::Ok(())
@@ -93,13 +97,17 @@ pub async fn run_print_mode(
             std::process::exit(code);
         }
     };
-    let code = match result {
-        Err(error) => {
+    let code = match (result, runtime.session().run_limit_stop()) {
+        (_, Some(stop)) => {
+            eprintln!("{}: {}", crate::resources::brand::APP_NAME, stop.message());
+            RUN_LIMIT_EXIT_CODE
+        }
+        (Err(error), None) => {
             eprintln!("{error:#}");
             1
         }
-        Ok(()) if json => 0,
-        Ok(()) => print_final_response(&runtime.session()),
+        (Ok(()), None) if json => 0,
+        (Ok(()), None) => print_final_response(&runtime.session()),
     };
     runtime.set_rebind_session(None);
     runtime.dispose().await;

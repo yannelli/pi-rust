@@ -144,6 +144,11 @@ impl UiEvent {
             AgentSessionEvent::BashExecutionUpdate { .. } => return None,
             AgentSessionEvent::ModelRouted { .. } => UiEvent::ModelRouted,
             AgentSessionEvent::CacheMiss { notice, .. } => UiEvent::CacheMiss(notice.clone()),
+            AgentSessionEvent::RunLimit(stop) => {
+                let mut message = stop.message();
+                message[..1].make_ascii_uppercase();
+                UiEvent::Notify { message, level: pi_mcp::NotifyLevel::Info }
+            }
         })
     }
 

@@ -42,12 +42,13 @@ impl AgentSession {
         }
         match event {
             AgentEvent::MessageEnd { message } => self.persist_message_end(message),
-            AgentEvent::TurnEnd { .. } => {
+            AgentEvent::TurnEnd { message, .. } => {
                 {
                     let mut state = lock(&self.state);
                     state.last_tool_results = std::mem::take(&mut state.turn_tool_results);
                 }
                 self.flush_pending_custom_messages();
+                self.check_run_limits(message);
             }
             _ => {}
         }
@@ -126,7 +127,7 @@ impl AgentSession {
         }
     }
 
-    fn will_retry_after_agent_end(&self, messages: &[Message]) -> bool {
+    pub(super) fn will_retry_after_agent_end(&self, messages: &[Message]) -> bool {
         let settings = self.settings().retry_settings();
         {
             let state = lock(&self.state);

@@ -57,6 +57,8 @@ pub struct CreateAgentSessionOptions {
     /// shell tools expose the session's `PI_*` variables. Unset uses
     /// [`ToolsOptions::from_settings`]; start from it to keep the settings.
     pub tool_options: Option<ToolsOptions>,
+    /// `--max-turns` and `--max-cost` (pi-rust).
+    pub run_limits: super::RunLimits,
 }
 
 impl CreateAgentSessionOptions {
@@ -76,6 +78,7 @@ impl CreateAgentSessionOptions {
             extensions: None,
             session_start_event: None,
             tool_options: None,
+            run_limits: super::RunLimits::default(),
         }
     }
 }
@@ -247,6 +250,7 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
             cache_warmer: CacheWarmer::new(warmer_host.clone()),
             warmer_host,
             extensions: Default::default(),
+            run_limits: super::run_limits::RunLimitState::new(options.run_limits),
             request_hooks,
             weak: weak.clone(),
         }

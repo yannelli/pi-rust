@@ -44,15 +44,12 @@ class Http2Session extends EventEmitter {
     this.originSet = undefined;
     const nativeSettings = { ...settings, customSettings: custom };
     this[kNative] = nativeH2.session(type === 0, nativeSettings, (event, key, value, end, id) => this._onNative(event, key, value, end, id));
-    this._onData = (chunk) => {
-      if (this[kNative] === null) return;
-      for (const seen of nativeH2.feed(this[kNative], chunk) ?? []) {
-        if (this.destroyed) return;
-        if (seen === "ack") this._onSettingsAck();
-        else this._onSettings(seen);
-      }
+    this._onData = (chunk) => this[kNative] !== null && nativeH2.feed(this[kNative], chunk);
+    this._onEnd = () => {
+      this._peerEnded = true;
+      if (this._nativeDone) this.destroy();
+      else if (this[kNative] !== null) nativeH2.endInput(this[kNative]);
     };
-    this._onEnd = () => this[kNative] !== null && nativeH2.endInput(this[kNative]);
     this._onClose = () => this.destroy();
     this._onError = (error) => this.destroy(error);
     this._onTimeout = () => this.emit("timeout");
@@ -73,6 +70,8 @@ class Http2Session extends EventEmitter {
     else if (event === "closed") this._onClosed(value);
     else if (event === "stream") this._onStream(key, value, end, id);
     else if (event === "promise") this._onPromise(key, value, id);
+    else if (event === "settings") this._onSettings(value);
+    else if (event === "settingsAck") this._onSettingsAck();
     else {
       const stream = this._streams.get(key);
       if (stream) stream._onNative(event, value, end);
@@ -113,6 +112,9 @@ class Http2Session extends EventEmitter {
   _onClosed(info) {
     if (info && info[1]) this.emit("goaway", info[0], 0, Buffer.alloc(0));
     else if (!info && this.type === 1 && !this.closed) this.emit("goaway", 0, 0, Buffer.alloc(0));
+    // h2 ends the connection once the session's own GOAWAY is done. Node's session stays open
+    // until it is closed or the peer ends the socket.
+    if (!info && this._goawaySent && !this.closed && !this._peerEnded) return void (this._nativeDone = true);
     const error = info && info[0] !== 0 && !info[1] ? codeError(Error, "ERR_HTTP2_SESSION_ERROR", `Session closed with error code ${info[0]}`) : undefined;
     this.closed = true;
     setImmediate(() => this.destroy(error));
@@ -175,6 +177,7 @@ class Http2Session extends EventEmitter {
   destroy(error, code) {
     if (this.destroyed) return;
     if (typeof error === "number") [code, error] = [error, undefined];
+    const graceful = this.closed && !error && !this._peerEnded && !this.socket.readableEnded;
     this.destroyed = true;
     this.closed = true;
     for (const stream of this._streams.values()) stream.destroy(error);
@@ -195,7 +198,14 @@ class Http2Session extends EventEmitter {
     socket.removeListener("timeout", this._onTimeout);
     socket.on("error", () => {});
     socket.removeListener("error", this._onError);
-    if (!socket.destroyed) socket.end(() => socket.destroy());
+    // After close(), Node ends the socket and keeps it open until the peer ends it, so frames
+    // still on the way cannot reach a closed socket and reset the connection.
+    if (socket.destroyed) {
+    } else if (graceful) {
+      socket.once("end", () => socket.destroy());
+      socket.resume();
+      socket.end();
+    } else socket.end(() => socket.destroy());
     process.nextTick(() => {
       if (error) this.emit("error", error);
       this.emit("close");

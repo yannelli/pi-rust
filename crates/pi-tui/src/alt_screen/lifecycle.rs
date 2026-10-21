@@ -37,6 +37,7 @@ pub(crate) fn before_terminal_start(inner: &TuiInner) {
         alt.scrollbar_drag = None;
         alt.flashes.dispose();
         alt.alt_screen_active = true;
+        alt.terminal_focused = None;
         alt.image_protocol = capabilities.images;
         alt.uploaded_kitty_images.clear();
         let iterm2 = capabilities.images == Some(ImageProtocol::Iterm2);
