@@ -82,6 +82,8 @@ pi install npm:<package>            # install a pi package (extensions, skills, 
 
 Run `pi --help` for all options. In interactive mode, type `/` to list commands, for example `/login`, `/model`, `/settings`, `/tree`, `/fork`, `/compact`, `/export`, `/share`, `/mcp`, and `/hotkeys`. Input typed while the agent works is queued as steering, and Alt+Enter (Ctrl+Q on Windows) queues a follow-up.
 
+`/diff [--stat] [path]` shows the uncommitted git changes in the working directory (pi-rust extension): the `git diff HEAD` stat, the untracked files, and the diff of staged and unstaged changes. `--stat` leaves out the diff, and a path limits the output to that path. Output longer than 500 lines is cut, with a note that gives the number of lines left out.
+
 `/export [file]` writes the session to HTML, or to JSONL when the file ends in `.jsonl`, and `pi --export <session.jsonl> [output]` exports a saved session file to HTML. With both, an output path that ends in `.md` writes Markdown (pi-rust extension). The Markdown file has the current branch: a title, the date, models, working directory, tokens, and cost, then each user and assistant turn. Thinking is in collapsed `<details>` blocks, tool calls show their JSON arguments, tool results stop after 200 lines, and images become placeholders.
 
 `/init [instructions]` (pi-rust extension) asks the agent to look through the project in the working directory and write an `AGENTS.md` there with an overview, build, test, and lint commands, code layout, conventions, and gotchas, based only on what it finds. If the directory already has a context file that pi loads (`AGENTS.md`, `CLAUDE.md`, or `AGENTS.override.md`), the agent improves that file in place. Text after `/init` is added as extra instructions. The prompt goes out as a normal message: it shows in the chat, uses the current model, and is saved in the session. As with other built-in commands, `/init` takes precedence over a prompt template or extension command named `init`. It is available in interactive mode only.
@@ -255,6 +257,7 @@ pi-rust ports the `pi` CLI and its libraries feature for feature. These parts di
 - CJK and Thai word movement uses ICU4X dictionaries, so a few word boundaries differ from Node's `Intl.Segmenter`.
 - `pi --mode acp` (above) is an addition; the TypeScript pi needs the separate pi-acp adapter.
 - Markdown export (see [Use](#use)) is an addition: `/export notes.md` and `pi --export session.jsonl notes.md` write Markdown. Upstream pi exports only HTML and JSONL.
+- `/diff` (see [Use](#use)) is an addition; upstream pi has no command that shows the git changes in the working directory.
 - `/init` (see [Use](#use)) is an addition; upstream pi has no `/init` command.
 
 - `pi completion` and `pi doctor` (above) are additions; the TypeScript pi has neither.
