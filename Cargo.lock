@@ -3074,6 +3074,7 @@ dependencies = [
  "oxc_semantic",
  "oxc_span",
  "pi-js",
+ "pi-schema",
  "pi-telemetry",
  "ring",
  "ryu",

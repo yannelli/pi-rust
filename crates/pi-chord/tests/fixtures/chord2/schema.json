@@ -1,0 +1,1441 @@
+{
+	"fits": [
+		{
+			"sub": {
+				"type": "function",
+				"parameters": [
+					{}
+				],
+				"returnType": {
+					"type": "void"
+				}
+			},
+			"sup": {
+				"type": "function",
+				"parameters": [
+					{
+						"type": "string"
+					}
+				],
+				"returnType": {
+					"type": "void"
+				}
+			},
+			"fits": true
+		},
+		{
+			"sub": {
+				"type": "function",
+				"parameters": [
+					{
+						"type": "string"
+					}
+				],
+				"returnType": {
+					"type": "void"
+				}
+			},
+			"sup": {
+				"type": "function",
+				"parameters": [
+					{}
+				],
+				"returnType": {
+					"type": "void"
+				}
+			},
+			"fits": false
+		},
+		{
+			"sub": {
+				"type": "string"
+			},
+			"sup": {
+				"type": "string",
+				"not": {
+					"const": "x"
+				}
+			},
+			"fits": false
+		},
+		{
+			"sub": {
+				"type": "array",
+				"items": {
+					"type": "number"
+				}
+			},
+			"sup": {
+				"type": "array",
+				"items": {
+					"type": "number"
+				},
+				"contains": {
+					"type": "number",
+					"const": 1
+				}
+			},
+			"fits": false
+		},
+		{
+			"sub": {
+				"type": "object",
+				"required": [
+					"a"
+				],
+				"properties": {
+					"a": {
+						"type": "string"
+					}
+				}
+			},
+			"sup": {
+				"type": "object",
+				"required": [
+					"a"
+				],
+				"properties": {
+					"a": {
+						"type": "string"
+					}
+				},
+				"additionalProperties": {
+					"type": "number"
+				}
+			},
+			"fits": false
+		},
+		{
+			"sub": {
+				"type": "object",
+				"required": [
+					"x"
+				],
+				"properties": {
+					"x": {
+						"type": "string"
+					}
+				}
+			},
+			"sup": {
+				"type": "object",
+				"properties": {},
+				"patternProperties": {
+					"^x$": {
+						"type": "number"
+					}
+				}
+			},
+			"fits": false
+		},
+		{
+			"sub": {
+				"type": "number"
+			},
+			"sup": {
+				"allOf": [
+					{
+						"type": "number"
+					},
+					{
+						"type": "number",
+						"minimum": 1
+					}
+				]
+			},
+			"fits": false
+		},
+		{
+			"sub": {
+				"type": "object",
+				"required": [
+					"a"
+				],
+				"properties": {
+					"a": {
+						"type": "string"
+					}
+				},
+				"additionalProperties": {
+					"type": "number"
+				}
+			},
+			"sup": {
+				"type": "object",
+				"required": [
+					"a"
+				],
+				"properties": {
+					"a": {
+						"type": "string"
+					},
+					"b": {
+						"type": "string"
+					}
+				}
+			},
+			"fits": false
+		},
+		{
+			"sub": {
+				"type": "object",
+				"required": [
+					"a"
+				],
+				"properties": {
+					"a": {
+						"type": "string"
+					}
+				}
+			},
+			"sup": {
+				"type": "object",
+				"required": [
+					"a"
+				],
+				"properties": {
+					"a": {
+						"type": "string"
+					},
+					"b": {
+						"type": "number"
+					}
+				}
+			},
+			"fits": true
+		},
+		{
+			"sub": {
+				"type": "object",
+				"required": [
+					"a",
+					"extra"
+				],
+				"properties": {
+					"a": {
+						"type": "string"
+					},
+					"extra": {
+						"type": "number"
+					}
+				}
+			},
+			"sup": {
+				"type": "object",
+				"required": [
+					"a"
+				],
+				"properties": {
+					"a": {
+						"type": "string"
+					}
+				}
+			},
+			"fits": true
+		},
+		{
+			"sub": {
+				"type": "integer"
+			},
+			"sup": {
+				"type": "number"
+			},
+			"fits": true
+		},
+		{
+			"sub": {
+				"type": "number"
+			},
+			"sup": {
+				"type": "integer"
+			},
+			"fits": false
+		},
+		{
+			"sub": {
+				"type": "string",
+				"const": "a"
+			},
+			"sup": {
+				"type": "string"
+			},
+			"fits": true
+		},
+		{
+			"sub": {
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "a"
+					},
+					{
+						"type": "string",
+						"const": "b"
+					}
+				]
+			},
+			"sup": {
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "a"
+					},
+					{
+						"type": "string",
+						"const": "b"
+					},
+					{
+						"type": "string",
+						"const": "c"
+					}
+				]
+			},
+			"fits": true
+		},
+		{
+			"sub": {
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "a"
+					},
+					{
+						"type": "string",
+						"const": "d"
+					}
+				]
+			},
+			"sup": {
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "a"
+					},
+					{
+						"type": "string",
+						"const": "b"
+					}
+				]
+			},
+			"fits": false
+		},
+		{
+			"sub": {
+				"type": "string",
+				"const": "a"
+			},
+			"sup": {
+				"enum": [
+					"a",
+					"b"
+				]
+			},
+			"fits": true
+		},
+		{
+			"sub": {
+				"enum": [
+					"a",
+					"b"
+				]
+			},
+			"sup": {
+				"enum": [
+					"a"
+				]
+			},
+			"fits": false
+		},
+		{
+			"sub": {
+				"type": "string",
+				"description": "doc"
+			},
+			"sup": {
+				"type": "string",
+				"title": "other"
+			},
+			"fits": true
+		},
+		{
+			"sub": {
+				"type": "string",
+				"minLength": 1
+			},
+			"sup": {
+				"type": "string"
+			},
+			"fits": true
+		},
+		{
+			"sub": {
+				"type": "string"
+			},
+			"sup": {
+				"type": "string",
+				"minLength": 1
+			},
+			"fits": false
+		},
+		{
+			"sub": {
+				"type": "array",
+				"items": {
+					"type": "string"
+				}
+			},
+			"sup": {
+				"type": "array",
+				"items": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "number"
+						}
+					]
+				}
+			},
+			"fits": true
+		},
+		{
+			"sub": {
+				"type": "array",
+				"additionalItems": false,
+				"items": [
+					{
+						"type": "string"
+					},
+					{
+						"type": "number"
+					}
+				],
+				"minItems": 2
+			},
+			"sup": {
+				"type": "array",
+				"additionalItems": false,
+				"items": [
+					{
+						"type": "string"
+					},
+					{
+						"type": "number"
+					}
+				],
+				"minItems": 2
+			},
+			"fits": true
+		},
+		{
+			"sub": {
+				"type": "array",
+				"additionalItems": false,
+				"items": [
+					{
+						"type": "string"
+					}
+				],
+				"minItems": 1
+			},
+			"sup": {
+				"type": "array",
+				"items": {
+					"type": "string"
+				}
+			},
+			"fits": true
+		},
+		{
+			"sub": {},
+			"sup": {
+				"type": "string"
+			},
+			"fits": false
+		},
+		{
+			"sub": {
+				"type": "string"
+			},
+			"sup": {},
+			"fits": true
+		},
+		{
+			"sub": {
+				"type": "object",
+				"required": [
+					"a"
+				],
+				"properties": {
+					"a": {
+						"type": "string"
+					}
+				},
+				"additionalProperties": false
+			},
+			"sup": {
+				"type": "object",
+				"required": [
+					"a"
+				],
+				"properties": {
+					"a": {
+						"type": "string"
+					}
+				},
+				"additionalProperties": false
+			},
+			"fits": true
+		},
+		{
+			"sub": {
+				"type": "object",
+				"required": [
+					"a"
+				],
+				"properties": {
+					"a": {
+						"type": "string"
+					}
+				}
+			},
+			"sup": {
+				"type": "object",
+				"required": [
+					"a"
+				],
+				"properties": {
+					"a": {
+						"type": "string"
+					}
+				},
+				"additionalProperties": false
+			},
+			"fits": false
+		},
+		{
+			"sub": {
+				"type": "object",
+				"required": [
+					"a",
+					"b"
+				],
+				"properties": {
+					"a": {
+						"type": "string"
+					},
+					"b": {
+						"type": "string"
+					}
+				},
+				"additionalProperties": false
+			},
+			"sup": {
+				"type": "object",
+				"required": [
+					"a"
+				],
+				"properties": {
+					"a": {
+						"type": "string"
+					}
+				},
+				"additionalProperties": false
+			},
+			"fits": false
+		},
+		{
+			"sub": {
+				"type": "object",
+				"patternProperties": {
+					"^.*$": {
+						"type": "number"
+					}
+				}
+			},
+			"sup": {
+				"type": "object",
+				"patternProperties": {
+					"^.*$": {
+						"type": "number"
+					}
+				}
+			},
+			"fits": true
+		},
+		{
+			"sub": {
+				"type": "object",
+				"required": [
+					"x"
+				],
+				"properties": {
+					"x": {
+						"type": "number"
+					}
+				},
+				"additionalProperties": false
+			},
+			"sup": {
+				"type": "object",
+				"properties": {},
+				"patternProperties": {
+					"^x$": {
+						"type": "number"
+					}
+				}
+			},
+			"fits": true
+		},
+		{
+			"sub": {
+				"type": "null"
+			},
+			"sup": {
+				"anyOf": [
+					{
+						"type": "null"
+					},
+					{
+						"type": "string"
+					}
+				]
+			},
+			"fits": true
+		},
+		{
+			"sub": {
+				"type": "object",
+				"properties": {}
+			},
+			"sup": {
+				"type": "object",
+				"properties": {
+					"a": {
+						"type": "string"
+					}
+				}
+			},
+			"fits": true
+		},
+		{
+			"sub": {
+				"type": "object",
+				"properties": {}
+			},
+			"sup": {
+				"type": "object",
+				"required": [
+					"a"
+				],
+				"properties": {
+					"a": {
+						"type": "string"
+					}
+				}
+			},
+			"fits": false
+		},
+		{
+			"sub": {
+				"type": "function",
+				"parameters": [],
+				"returnType": {
+					"type": "string"
+				}
+			},
+			"sup": {
+				"type": "function",
+				"parameters": [
+					{
+						"type": "string"
+					}
+				],
+				"returnType": {}
+			},
+			"fits": true
+		},
+		{
+			"sub": {
+				"type": "function",
+				"parameters": [
+					{
+						"type": "string"
+					},
+					{
+						"type": "number"
+					}
+				],
+				"returnType": {
+					"type": "string"
+				}
+			},
+			"sup": {
+				"type": "function",
+				"parameters": [
+					{
+						"type": "string"
+					}
+				],
+				"returnType": {
+					"type": "string"
+				}
+			},
+			"fits": false
+		}
+	],
+	"normalize": [
+		{
+			"schema": {
+				"type": "object",
+				"required": [
+					"session",
+					"conversation"
+				],
+				"properties": {
+					"session": {
+						"type": "string"
+					},
+					"conversation": {
+						"type": "number",
+						"default": 0
+					}
+				}
+			},
+			"input": {
+				"session": "s",
+				"extra": 1
+			},
+			"value": {
+				"session": "s",
+				"conversation": 0
+			},
+			"identity": "{\"session\":\"s\"}"
+		},
+		{
+			"schema": {
+				"type": "object",
+				"required": [
+					"session",
+					"conversation"
+				],
+				"properties": {
+					"session": {
+						"type": "string"
+					},
+					"conversation": {
+						"type": "number",
+						"default": 0
+					}
+				}
+			},
+			"input": {
+				"conversation": 0,
+				"session": "s"
+			},
+			"value": {
+				"conversation": 0,
+				"session": "s"
+			},
+			"identity": "{\"session\":\"s\"}"
+		},
+		{
+			"schema": {
+				"type": "object",
+				"required": [
+					"session",
+					"conversation"
+				],
+				"properties": {
+					"session": {
+						"type": "string"
+					},
+					"conversation": {
+						"type": "number",
+						"default": 0
+					}
+				}
+			},
+			"input": {
+				"conversation": 3,
+				"session": "s"
+			},
+			"value": {
+				"conversation": 3,
+				"session": "s"
+			},
+			"identity": "{\"conversation\":3,\"session\":\"s\"}"
+		},
+		{
+			"schema": {
+				"type": "object",
+				"required": [
+					"session",
+					"conversation"
+				],
+				"properties": {
+					"session": {
+						"type": "string"
+					},
+					"conversation": {
+						"type": "number",
+						"default": 0
+					}
+				}
+			},
+			"input": {
+				"session": 1
+			},
+			"error": {
+				"code": "invalid",
+				"reason": "input",
+				"message": "invalid/input: input: /session must be string"
+			}
+		},
+		{
+			"schema": {
+				"type": "object",
+				"required": [
+					"session",
+					"conversation"
+				],
+				"properties": {
+					"session": {
+						"type": "string"
+					},
+					"conversation": {
+						"type": "number",
+						"default": 0
+					}
+				}
+			},
+			"input": {},
+			"error": {
+				"code": "invalid",
+				"reason": "input",
+				"message": "invalid/input: input: / must have required properties session"
+			}
+		},
+		{
+			"schema": {
+				"type": "object",
+				"required": [
+					"session",
+					"conversation"
+				],
+				"properties": {
+					"session": {
+						"type": "string"
+					},
+					"conversation": {
+						"type": "number",
+						"default": 0
+					}
+				}
+			},
+			"input": null,
+			"error": {
+				"code": "invalid",
+				"reason": "input",
+				"message": "invalid/input: input: / must have required properties session"
+			}
+		},
+		{
+			"schema": {
+				"type": "object",
+				"properties": {}
+			},
+			"input": {},
+			"value": {},
+			"identity": "{}"
+		},
+		{
+			"schema": {
+				"type": "object",
+				"required": [
+					"b"
+				],
+				"properties": {
+					"a": {
+						"type": "number",
+						"default": 1
+					},
+					"b": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"required": [
+								"c"
+							],
+							"properties": {
+								"c": {
+									"type": "string",
+									"default": "x"
+								}
+							}
+						}
+					}
+				}
+			},
+			"input": {
+				"b": [
+					{},
+					{
+						"c": "y",
+						"z": 1
+					}
+				]
+			},
+			"value": {
+				"b": [
+					{
+						"c": "x"
+					},
+					{
+						"c": "y"
+					}
+				],
+				"a": 1
+			},
+			"identity": "{\"b\":[{},{\"c\":\"y\"}]}"
+		},
+		{
+			"schema": {
+				"type": "object",
+				"required": [
+					"o"
+				],
+				"properties": {
+					"o": {
+						"type": "object",
+						"required": [
+							"x"
+						],
+						"properties": {
+							"x": {
+								"type": "number",
+								"default": 1
+							}
+						},
+						"default": {}
+					}
+				}
+			},
+			"input": {},
+			"value": {
+				"o": {
+					"x": 1
+				}
+			},
+			"identity": "{\"o\":{}}"
+		},
+		{
+			"schema": {
+				"type": "object",
+				"required": [
+					"list"
+				],
+				"properties": {
+					"list": {
+						"type": "array",
+						"items": {
+							"type": "number"
+						},
+						"default": [
+							1,
+							2
+						]
+					}
+				}
+			},
+			"input": {},
+			"value": {
+				"list": [
+					1,
+					2
+				]
+			},
+			"identity": "{}"
+		},
+		{
+			"schema": {
+				"type": "object",
+				"required": [
+					"u"
+				],
+				"properties": {
+					"u": {
+						"anyOf": [
+							{
+								"type": "object",
+								"required": [
+									"a"
+								],
+								"properties": {
+									"a": {
+										"type": "string"
+									}
+								}
+							},
+							{
+								"type": "object",
+								"required": [
+									"b"
+								],
+								"properties": {
+									"b": {
+										"type": "number"
+									}
+								}
+							}
+						]
+					}
+				}
+			},
+			"input": {
+				"u": {
+					"b": 1,
+					"c": 2
+				}
+			},
+			"value": {
+				"u": {
+					"b": 1
+				}
+			},
+			"identity": "{\"u\":{\"b\":1}}"
+		},
+		{
+			"schema": {
+				"type": "object",
+				"required": [
+					"r"
+				],
+				"properties": {
+					"r": {
+						"type": "object",
+						"patternProperties": {
+							"^.*$": {
+								"type": "object",
+								"required": [
+									"a"
+								],
+								"properties": {
+									"a": {
+										"type": "string"
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			"input": {
+				"r": {
+					"k": {
+						"a": "x",
+						"z": 1
+					}
+				}
+			},
+			"value": {
+				"r": {
+					"k": {
+						"a": "x"
+					}
+				}
+			},
+			"identity": "{\"r\":{\"k\":{\"a\":\"x\"}}}"
+		},
+		{
+			"schema": {
+				"type": "object",
+				"required": [
+					"a"
+				],
+				"properties": {
+					"a": {
+						"type": "string"
+					}
+				},
+				"additionalProperties": {
+					"type": "number"
+				}
+			},
+			"input": {
+				"a": "x",
+				"z": 1,
+				"y": "s"
+			},
+			"value": {
+				"a": "x",
+				"z": 1
+			},
+			"identity": "{\"a\":\"x\",\"z\":1}"
+		},
+		{
+			"schema": {
+				"type": "object",
+				"required": [
+					"t"
+				],
+				"properties": {
+					"t": {
+						"type": "array",
+						"additionalItems": false,
+						"items": [
+							{
+								"type": "object",
+								"required": [
+									"a"
+								],
+								"properties": {
+									"a": {
+										"type": "string"
+									}
+								}
+							},
+							{
+								"type": "number"
+							}
+						],
+						"minItems": 2
+					}
+				}
+			},
+			"input": {
+				"t": [
+					{
+						"a": "x",
+						"q": 1
+					},
+					2,
+					3
+				]
+			},
+			"value": {
+				"t": [
+					{
+						"a": "x"
+					},
+					2
+				]
+			},
+			"identity": "{\"t\":[{\"a\":\"x\"},2]}"
+		},
+		{
+			"schema": {
+				"type": "object",
+				"required": [
+					"a",
+					"n"
+				],
+				"properties": {
+					"a": {
+						"type": "string",
+						"minLength": 2
+					},
+					"n": {
+						"type": "integer",
+						"minimum": 1
+					}
+				}
+			},
+			"input": {
+				"a": "x",
+				"n": 0.5
+			},
+			"error": {
+				"code": "invalid",
+				"reason": "input",
+				"message": "invalid/input: input: /a must not have fewer than 2 characters; /n must be integer; /n must be >= 1"
+			}
+		},
+		{
+			"schema": {
+				"type": "object",
+				"required": [
+					"a",
+					"b",
+					"c",
+					"d"
+				],
+				"properties": {
+					"a": {
+						"type": "string"
+					},
+					"b": {
+						"type": "string"
+					},
+					"c": {
+						"type": "string"
+					},
+					"d": {
+						"type": "string"
+					}
+				}
+			},
+			"input": {},
+			"error": {
+				"code": "invalid",
+				"reason": "input",
+				"message": "invalid/input: input: / must have required properties a, b, c, d"
+			}
+		},
+		{
+			"schema": {
+				"type": "object",
+				"required": [
+					"u"
+				],
+				"properties": {
+					"u": {
+						"anyOf": [
+							{
+								"type": "object",
+								"required": [
+									"a"
+								],
+								"properties": {
+									"a": {
+										"type": "string"
+									}
+								}
+							},
+							{
+								"type": "object",
+								"required": [
+									"a",
+									"b"
+								],
+								"properties": {
+									"a": {
+										"type": "string"
+									},
+									"b": {
+										"type": "number"
+									}
+								}
+							}
+						]
+					}
+				}
+			},
+			"input": {
+				"u": {
+					"a": "x",
+					"b": 1
+				}
+			},
+			"value": {
+				"u": {
+					"a": "x",
+					"b": 1
+				}
+			},
+			"identity": "{\"u\":{\"a\":\"x\",\"b\":1}}"
+		}
+	],
+	"assertValid": [
+		{
+			"schema": {
+				"type": "string"
+			},
+			"value": 5,
+			"error": {
+				"code": "invalid",
+				"reason": "state",
+				"message": "invalid/state: state s: / must be string"
+			}
+		},
+		{
+			"schema": {
+				"type": "object",
+				"required": [
+					"a",
+					"n"
+				],
+				"properties": {
+					"a": {
+						"type": "string"
+					},
+					"n": {
+						"type": "number"
+					}
+				}
+			},
+			"value": {
+				"a": 1,
+				"n": "x"
+			},
+			"error": {
+				"code": "invalid",
+				"reason": "state",
+				"message": "invalid/state: state s: /a must be string; /n must be number"
+			}
+		},
+		{
+			"schema": {
+				"type": "object",
+				"required": [
+					"a",
+					"b"
+				],
+				"properties": {
+					"a": {
+						"type": "string"
+					},
+					"b": {
+						"type": "string"
+					}
+				}
+			},
+			"value": {},
+			"error": {
+				"code": "invalid",
+				"reason": "state",
+				"message": "invalid/state: state s: / must have required properties a, b"
+			}
+		},
+		{
+			"schema": {
+				"type": "array",
+				"items": {
+					"type": "integer"
+				}
+			},
+			"value": [
+				1,
+				2.5,
+				"x",
+				4.5
+			],
+			"error": {
+				"code": "invalid",
+				"reason": "state",
+				"message": "invalid/state: state s: /1 must be integer; /2 must be integer; /3 must be integer"
+			}
+		},
+		{
+			"schema": {
+				"type": "object",
+				"required": [
+					"a"
+				],
+				"properties": {
+					"a": {
+						"type": "object",
+						"required": [
+							"b"
+						],
+						"properties": {
+							"b": {
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							}
+						}
+					}
+				}
+			},
+			"value": {
+				"a": {
+					"b": [
+						"x",
+						2
+					]
+				}
+			},
+			"error": {
+				"code": "invalid",
+				"reason": "state",
+				"message": "invalid/state: state s: /a/b/1 must be string"
+			}
+		},
+		{
+			"schema": {
+				"anyOf": [
+					{
+						"type": "string"
+					},
+					{
+						"type": "number"
+					}
+				]
+			},
+			"value": true,
+			"error": {
+				"code": "invalid",
+				"reason": "state",
+				"message": "invalid/state: state s: / must be string; / must be number; / must match a schema in anyOf"
+			}
+		},
+		{
+			"schema": {
+				"type": "object",
+				"required": [
+					"a"
+				],
+				"properties": {
+					"a": {
+						"type": "string"
+					}
+				},
+				"additionalProperties": false
+			},
+			"value": {
+				"a": "x",
+				"b": 1
+			},
+			"error": {
+				"code": "invalid",
+				"reason": "state",
+				"message": "invalid/state: state s: /b schema is false; / must not have additional properties"
+			}
+		},
+		{
+			"schema": {
+				"type": "string",
+				"const": "x"
+			},
+			"value": "y",
+			"error": {
+				"code": "invalid",
+				"reason": "state",
+				"message": "invalid/state: state s: / must be equal to constant"
+			}
+		},
+		{
+			"schema": {
+				"type": "number",
+				"minimum": 1,
+				"maximum": 3
+			},
+			"value": 5,
+			"error": {
+				"code": "invalid",
+				"reason": "state",
+				"message": "invalid/state: state s: / must be <= 3"
+			}
+		},
+		{
+			"schema": {
+				"type": "object",
+				"required": [
+					"ok"
+				],
+				"properties": {
+					"ok": {
+						"type": "boolean"
+					}
+				}
+			},
+			"value": {
+				"ok": true
+			},
+			"error": null
+		}
+	]
+}
