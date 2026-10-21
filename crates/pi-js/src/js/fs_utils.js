@@ -14,7 +14,7 @@ const S_IFLNK = 0o120000;
 const S_IFSOCK = 0o140000;
 
 const OPEN = platform === "darwin"
-  ? { O_RDONLY: 0, O_WRONLY: 1, O_RDWR: 2, O_CREAT: 512, O_EXCL: 2048, O_TRUNC: 1024, O_APPEND: 8, O_SYNC: 128, O_NOFOLLOW: 256, O_DIRECTORY: 1048576 }
+  ? { O_RDONLY: 0, O_WRONLY: 1, O_RDWR: 2, O_CREAT: 512, O_EXCL: 2048, O_TRUNC: 1024, O_APPEND: 8, O_SYNC: 128, O_NOFOLLOW: 256, O_DIRECTORY: 1048576, O_SYMLINK: 2097152 }
   : { O_RDONLY: 0, O_WRONLY: 1, O_RDWR: 2, O_CREAT: 64, O_EXCL: 128, O_TRUNC: 512, O_APPEND: 1024, O_SYNC: 1052672, O_NOFOLLOW: 131072, O_DIRECTORY: 65536 };
 
 const constants = {
@@ -29,7 +29,7 @@ const constants = {
 };
 
 function invalidArg(name, expected, value) {
-  return Object.assign(new TypeError(`The "${name}" argument must be ${expected}. Received ${value === null ? "null" : typeof value}`), { code: "ERR_INVALID_ARG_TYPE" });
+  return require("internal/errors").invalidArgType(name, expected, value);
 }
 
 // A path argument: string, Buffer, or file: URL.
@@ -72,7 +72,10 @@ function flagString(flags, fallback) {
 
 function parseMode(mode, fallback) {
   if (mode === undefined || mode === null) return fallback;
-  if (typeof mode === "string") return Number.parseInt(mode, 8);
+  if (typeof mode === "string") {
+    if (!/^[0-7]+$/.test(mode)) throw require("internal/errors").invalidArgValue("mode", mode, "must be a 32-bit unsigned integer or an octal string");
+    return Number.parseInt(mode, 8);
+  }
   return mode;
 }
 

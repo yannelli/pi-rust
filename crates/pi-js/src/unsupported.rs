@@ -21,7 +21,6 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
      32 or 64, AES-OCB IVs other than 8, 12, or 15 bytes and tags other than 8, 12, or 16, RSA-OAEP labels \
      that are not UTF-8, DSA sizes other than 1024/160, 2048/224, 2048/256, and 3072/256, private key encryption \
      with ciphers other than AES-CBC and 3DES-CBC (or PBES1), webcrypto.subtle except digest, setFips",
-    "fs: lchmod, fchmod, fchown, lutimes, statfs, openAsBlob, FileHandle chmod, chown, and readableWebStream",
     "child_process: stdio entries that are streams or descriptors above 2, and sending handles other than TCP \
      net.Socket and net.Server objects over IPC (ERR_INVALID_HANDLE_TYPE), such as Unix socket or pipe \
      servers, TLS sockets, and dgram sockets",
@@ -57,6 +56,8 @@ pub const DIFFERENCES: &[&str] = &[
      output, children inherit the real descriptors)",
     "child_process.fork, and spawning process.execPath, run the script in this binary's JavaScript runner \
      (PI_JS_FORK); the IPC channel is a Unix socket or Windows named pipe, not an inherited descriptor",
+    "fs.openAsBlob reads the whole file when it is called, so later changes to the file do not show \
+     in the Blob (Node reads it lazily and fails the read if the file changed)",
     "tty.ReadStream works only for descriptor 0 (process.stdin); other descriptors fail with ERR_TTY_INIT_FAILED",
     "PerformanceObserver sees function, mark, and measure entries only",
     "process.exit calls the embedder's on_exit callback when one is set",

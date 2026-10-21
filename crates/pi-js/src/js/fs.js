@@ -238,6 +238,21 @@ Object.assign(fs, {
   W_OK: 2,
   X_OK: 1,
 });
+// The file is read when the Blob is made; Node reads it lazily.
+fs.openAsBlob = function openAsBlob(target, options = {}) {
+  const { validate, codeError } = require("internal/errors");
+  validate.object(options, "options");
+  const type = options.type || "";
+  validate.string(type, "options.type");
+  const file = utils.toPath(target);
+  let bytes;
+  try {
+    bytes = runSync(ops.readFile(file));
+  } catch {
+    throw codeError(TypeError, "ERR_INVALID_ARG_VALUE", "Unable to open file as blob");
+  }
+  return Promise.resolve(new (require("buffer").Blob)([bytes], { type }));
+};
 fs.globSync = (pattern, options) => require("internal/glob").globSync(pattern, options);
 fs.glob = function glob(pattern, options, callback) {
   if (typeof options === "function") [callback, options] = [options, undefined];

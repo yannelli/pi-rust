@@ -11,9 +11,9 @@ use rquickjs::function::Opt;
 use rquickjs::{Ctx, Object, Value};
 use serde::Deserialize;
 
-use super::fs_ops;
 use super::fs_output::{Output, to_js};
 use super::set_fn;
+use super::{fs_meta, fs_ops};
 use crate::error::JsError;
 use crate::runtime::convert::{latin1_to_bytes, throw, to_json};
 use crate::runtime::scope::spawn_op;
@@ -38,7 +38,7 @@ impl FileTable {
         fd
     }
 
-    fn get(&self, fd: u64, syscall: &str) -> Result<Arc<Mutex<File>>, JsError> {
+    pub(super) fn get(&self, fd: u64, syscall: &str) -> Result<Arc<Mutex<File>>, JsError> {
         let files = self.files.lock().unwrap_or_else(|poison| poison.into_inner());
         files.get(&fd).cloned().ok_or_else(|| {
             JsError::new(format!("EBADF: bad file descriptor, {syscall}"))
@@ -183,6 +183,8 @@ pub(crate) enum Request {
     Mkdtemp {
         prefix: String,
     },
+    #[serde(untagged)]
+    Meta(fs_meta::MetaRequest),
 }
 
 fn display(path: &Path) -> String {
@@ -416,6 +418,7 @@ pub(crate) fn run(request: Request, data: Option<Vec<u8>>, cwd: &Path, shared: &
                 .map_err(io_error("mkdtemp", &format!("{prefix}XXXXXX")))?;
             Output::Text(display(&path))
         }
+        Request::Meta(request) => fs_meta::run(request, cwd, files)?,
     })
 }
 

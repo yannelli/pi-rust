@@ -10,6 +10,7 @@ mod dns;
 pub(crate) mod encoding;
 pub(crate) mod fetch;
 pub(crate) mod fs;
+mod fs_meta;
 mod fs_ops;
 mod fs_output;
 mod handles;

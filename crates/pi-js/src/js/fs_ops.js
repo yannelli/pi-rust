@@ -81,8 +81,8 @@ const ops = {
   symlink: (target, path, type) => ({ request: { op: "symlink", target: toPath(target, "target"), path: toPath(path), kind: type || undefined } }),
   link: (from, to) => ({ request: { op: "link", from: toPath(from, "existingPath"), to: toPath(to, "newPath") } }),
   chmod: (path, mode) => ({ request: { op: "chmod", path: toPath(path), mode: parseMode(mode) } }),
-  chown: (path, uid, gid) => ({ request: { op: "chown", path: toPath(path), uid, gid, follow: true } }),
-  lchown: (path, uid, gid) => ({ request: { op: "chown", path: toPath(path), uid, gid, follow: false } }),
+  chown: (path, uid, gid) => ({ request: { op: "chown", path: toPath(path), ...ids(uid, gid), follow: true } }),
+  lchown: (path, uid, gid) => ({ request: { op: "chown", path: toPath(path), ...ids(uid, gid), follow: false } }),
   utimes: (path, atime, mtime) => ({ request: { op: "utimes", path: toPath(path), atime: toSeconds(atime), mtime: toSeconds(mtime) } }),
   futimes: (fd, atime, mtime) => ({ request: { op: "futimes", fd: toFd(fd), atime: toSeconds(atime), mtime: toSeconds(mtime) } }),
   truncate(path, len = 0) {
@@ -102,10 +102,31 @@ const ops = {
   close: (fd) => ({ request: { op: "close", fd: toFd(fd) } }),
 };
 
-for (const name of ["lchmod", "fchmod", "fchown", "lutimes", "statfs", "openAsBlob"]) {
-  ops[name] = () => {
-    throw internal.unsupported(`fs.${name}`);
-  };
+function ids(uid, gid) {
+  const { validate } = require("internal/errors");
+  validate.integer(uid, "uid", -1, 4294967295);
+  validate.integer(gid, "gid", -1, 4294967295);
+  return { uid: uid >>> 0, gid: gid >>> 0 };
+}
+
+class StatFs {
+  constructor(type, bsize, blocks, bfree, bavail, files, ffree) {
+    Object.assign(this, { type, bsize, blocks, bfree, bavail, files, ffree });
+  }
+}
+
+Object.assign(ops, {
+  fchmod: (fd, mode) => ({ request: { op: "fchmod", fd: toFd(fd), mode: parseMode(mode) } }),
+  fchown: (fd, uid, gid) => ({ request: { op: "fchown", fd: toFd(fd), ...ids(uid, gid) } }),
+  lutimes: (path, atime, mtime) => ({ request: { op: "lutimes", path: toPath(path), atime: toSeconds(atime), mtime: toSeconds(mtime) } }),
+  statfs(path, options) {
+    const convert = options && options.bigint ? BigInt : Number;
+    return { request: { op: "statfs", path: toPath(path) }, map: (fields) => new StatFs(...fields.map((field) => convert(field))) };
+  },
+});
+// Node defines lchmod only where O_SYMLINK exists, which is macOS.
+if (utils.constants.O_SYMLINK !== undefined) {
+  ops.lchmod = (path, mode) => ({ request: { op: "lchmod", path: toPath(path), mode: parseMode(mode) } });
 }
 
 // fs.cp with a filter: ask the filter about each item, then copy files one by one.

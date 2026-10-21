@@ -14,6 +14,7 @@ for (const name of Object.keys(ops)) {
 
 class FileHandle {
   #fd;
+  #locked = false;
   constructor(fd) {
     this.#fd = fd;
   }
@@ -84,14 +85,27 @@ class FileHandle {
   async utimes(atime, mtime) {
     return runAsync(ops.futimes(this.#check(), atime, mtime));
   }
-  async chmod() {
-    throw internal.unsupported("FileHandle.chmod");
+  async chmod(mode) {
+    return runAsync(ops.fchmod(this.#check(), mode));
   }
-  async chown() {
-    throw internal.unsupported("FileHandle.chown");
+  async chown(uid, gid) {
+    return runAsync(ops.fchown(this.#check(), uid, gid));
   }
-  readableWebStream() {
-    throw internal.unsupported("FileHandle.readableWebStream");
+  readableWebStream(options = {}) {
+    const { codeError, validate } = require("internal/errors");
+    const state = (what) => codeError(Error, "ERR_INVALID_STATE", `Invalid state: The FileHandle is ${what}`);
+    if (this.#fd < 0) throw state("closed");
+    if (this.#locked) throw state("locked");
+    if (options.type !== undefined) validate.string(options.type, "options.type");
+    this.#locked = true;
+    const handle = this;
+    return new ReadableStream({
+      async pull(controller) {
+        const { bytesRead, buffer } = await handle.read(new Uint8Array(16384), 0, 16384, null);
+        if (bytesRead === 0) controller.close();
+        else controller.enqueue(buffer.subarray(0, bytesRead));
+      },
+    });
   }
   createReadStream(options) {
     return new streams.ReadStream(null, { ...options, fd: this.#check(), autoClose: false });
@@ -158,6 +172,12 @@ promises.watch = function watch(filename, options = {}) {
     },
   };
 };
+
+if (!promises.lchmod) {
+  promises.lchmod = async function lchmod() {
+    throw require("internal/errors").codeError(Error, "ERR_METHOD_NOT_IMPLEMENTED", "The lchmod() method is not implemented");
+  };
+}
 
 promises.constants = utils.constants;
 promises.FileHandle = FileHandle;
