@@ -36,7 +36,7 @@ impl Drop for Invocation {
 }
 
 /// `pi_schema::clean` on a JSON value: drops what the schema does not know.
-fn clean(schema: &Json, value: &Json) -> Json {
+pub(crate) fn clean(schema: &Json, value: &Json) -> Json {
     Json::from(pi_schema::clean(&schema.to_serde(), value.to_serde()))
 }
 

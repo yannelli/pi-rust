@@ -17,11 +17,10 @@ fn bin_dir() -> PathBuf {
 /// `pi doctor` with `path` as `PATH` and a terminal that supports Kitty images.
 fn doctor(root: &Path, path: OsString, args: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_pi"));
-    isolate(&mut command)
+    isolate(&mut command, root)
         .arg("doctor")
         .args(args)
         .current_dir(root.join("work"))
-        .env("PI_CODING_AGENT_DIR", root.join("agent"))
         .env("PATH", path)
         .env("TERM", "xterm-256color")
         .env("TERM_PROGRAM", "WezTerm")

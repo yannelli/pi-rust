@@ -30,6 +30,8 @@ struct RefState {
     /// Notified when the reference becomes gone (links forward it).
     gone_listeners: IndexMap<u64, GoneListener>,
     readables: IndexMap<String, Arc<MemberReadable>>,
+    /// Bumped by every shape change: a link that sent a unit for a value skips older notifications.
+    shape_seq: u64,
     /// Weak: a retired code version's service must not be kept alive by its consumers.
     bindings: Vec<(Weak<Service>, Option<Adapter>)>,
     views: Vec<(Weak<Implementation>, Arc<Implementation>)>,
@@ -78,6 +80,8 @@ impl RefImpl {
                 status_listeners: IndexMap::new(),
                 gone_listeners: IndexMap::new(),
                 readables: IndexMap::new(),
+                // A reference born live has its first shape already.
+                shape_seq: u64::from(live),
                 bindings: Vec::new(),
                 views: Vec::new(),
             };
@@ -135,9 +139,10 @@ impl RefImpl {
                 return;
             }
             state.status = RefStatus::Live;
+            state.shape_seq += 1;
         }
         self.status_changed();
-        self.shape_changed();
+        self.announce_shape();
     }
 
     pub(crate) fn gone(&self, error: &ChordError) {
@@ -162,8 +167,24 @@ impl RefImpl {
         self.listen(|state| &mut state.gone_listeners, Arc::new(listener) as GoneListener)
     }
 
-    /// The implementation changed (activation, reload, variant): readables rebind, shape listeners hear it.
+    /// The implementation changed (reload, variant): readables rebind, shape listeners hear it.
+    #[allow(dead_code, reason = "reloads and variant changes (phase 4) change shapes")]
     pub(crate) fn shape_changed(&self) {
+        lock(&self.state).shape_seq += 1;
+        self.announce_shape();
+    }
+
+    /// The number of shape changes so far, when live (taken together with the status).
+    pub(crate) fn live_seq(&self) -> Option<u64> {
+        let state = lock(&self.state);
+        (state.status == RefStatus::Live).then_some(state.shape_seq)
+    }
+
+    pub(crate) fn shape_seq(&self) -> u64 {
+        lock(&self.state).shape_seq
+    }
+
+    fn announce_shape(&self) {
         self.readables().iter().for_each(|readable| readable.bind());
         let Some(shape) = self.shape() else { return };
         let listeners: Vec<ShapeListener> = lock(&self.state).shape_listeners.values().cloned().collect();

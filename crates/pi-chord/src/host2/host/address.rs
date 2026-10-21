@@ -7,7 +7,7 @@ use crate::error::{ChordError, ChordResult};
 use crate::host2::contract::{Contract, Scope, bind, resolve_host};
 use crate::host2::errors::{ChordErrorCode, invalid};
 use crate::host2::object::{
-    HostCore, ObjectIdentity, ObjectImpl, ObjectStatus, Ref, RefOwner, Service, await_ready, reaches,
+    HostCore, ObjectIdentity, ObjectImpl, ObjectStatus, Ref, RefImpl, RefOwner, Service, await_ready, reaches,
 };
 use crate::host2::schema::{canonical_identity, normalize};
 use crate::host2::types::GetOptions;
@@ -75,7 +75,7 @@ impl HostImpl {
     }
 
     /// The key of a remote binding: type, input identity, identity key and the consumer's fingerprint.
-    fn remote_key(&self, contract: &Contract, normalized: &Json, principal: &Json) -> String {
+    pub(super) fn remote_key(&self, contract: &Contract, normalized: &Json, principal: &Json) -> String {
         let identity = canonical_identity(contract.input(), normalized);
         let part = self.principal_part(principal);
         format!("@{}\u{0}{identity}\u{0}{part}\u{0}{}", contract.name(), contract.fingerprint())
@@ -90,12 +90,6 @@ impl HostImpl {
         pending.or_else(|| self.service(type_name))
     }
 
-    /// A reference on an object of another host. Remote references arrive with links (phase 3).
-    fn acquire_remote(&self, contract: &Contract, at: &str) -> ChordResult<Ref> {
-        let message = format!("{} lives on {at}, and {} has no link to it", contract.name(), self.name());
-        Err(ChordError::with_reason(ChordErrorCode::Unavailable, "no_link", message))
-    }
-
     pub(super) fn acquire_ref(
         &self,
         contract: &Contract,
@@ -105,9 +99,34 @@ impl HostImpl {
         from: Option<&Arc<ObjectImpl>>,
         candidate: bool,
     ) -> ChordResult<Ref> {
-        if let Some((at, _)) = self.elsewhere(contract, input)? {
-            return self.acquire_remote(contract, &at);
+        if let Some((at, normalized)) = self.elsewhere(contract, input)? {
+            return self.acquire_remote(contract, at, normalized, options);
         }
+        let reference = self.acquire_local(contract, input, options, owner, from, candidate)?;
+        Ok(Ref::new(reference))
+    }
+
+    /// A reference a link's hold takes on an object of this host (the caller checked its placement).
+    pub(crate) fn acquire_served(
+        &self,
+        contract: &Contract,
+        input: &Json,
+        options: &GetOptions,
+        client: bool,
+    ) -> ChordResult<Arc<RefImpl>> {
+        let owner = if client { RefOwner::Client } else { RefOwner::Connection };
+        self.acquire_local(contract, input, options, owner, None, false)
+    }
+
+    fn acquire_local(
+        &self,
+        contract: &Contract,
+        input: &Json,
+        options: &GetOptions,
+        owner: RefOwner,
+        from: Option<&Arc<ObjectImpl>>,
+        candidate: bool,
+    ) -> ChordResult<Arc<RefImpl>> {
         let service = self.binding_service(contract.name(), candidate);
         let service = service.ok_or_else(|| unknown_type(contract.name(), self.name()))?;
         bind(&service.contract, service.options.accepts.as_ref(), contract)?;
@@ -131,7 +150,7 @@ impl HostImpl {
                     return Err(invalid("cycle", message, None));
                 }
                 match object.new_ref(contract.clone(), owner) {
-                    Some(reference) => return Ok(Ref::new(reference)),
+                    Some(reference) => return Ok(reference),
                     // Failed or disposing, not forgotten yet: forget it here and create the next object.
                     None => self.forget_object(&object),
                 }
@@ -169,7 +188,7 @@ impl HostImpl {
             let reference = object.new_ref(contract.clone(), owner);
             object.launch();
             if let Some(reference) = reference {
-                return Ok(Ref::new(reference));
+                return Ok(reference);
             }
         }
     }

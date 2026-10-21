@@ -3085,6 +3085,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]

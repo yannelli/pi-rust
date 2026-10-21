@@ -1,6 +1,6 @@
-//! Port of upstream `test/review.test.ts`, in-host cases: #5, both #6 cases, and the ctx races for an aborted
-//! task ctx and for expired and foreign ctxs. Left out: the reload cases (#1, #2, #4, #7 to #11 and the commit
-//! observers; phase 4) and the remote reference race (links, phase 3).
+//! Port of upstream `test/review.test.ts`: #5, both #6 cases, and the ctx races (an aborted task ctx, expired and
+//! foreign ctxs, a remote reference's foreign ctx). Left out: the reload cases (#1, #2, #4, #7 to #11 and the
+//! commit observers; phase 4), and the forged ctx (Rust code cannot make a `Ctx`).
 
 mod chord2_support;
 
@@ -10,9 +10,12 @@ use std::sync::{Arc, Mutex};
 
 use chord2_support::*;
 use pi_chord::host2::declare::{OpenOptions, ResourceDeclaration};
+use pi_chord::host2::link::{CloseHandler, FrameHandler, MemoryLink};
+use pi_chord::host2::wire::Frame;
 use pi_chord::host2::{
-    Contract, Ctx, Declare, GetOptions, Host, HostOptions, Implementation, PrincipalMatch, Ref, RefStatus,
-    RegistryView, RootOptions, ServeOptions, create_host, define_registry, method,
+    AcceptOptions, ConnectOptions, Contract, Ctx, Declare, GetOptions, Host, HostOptions, Implementation, Link,
+    PrincipalMatch, Ref, RefStatus, RegistryView, RemoteDef, RootOptions, ServeOptions, VariantDef, create_host,
+    define_registry, host_named, memory_link_pair, method, remote,
 };
 use pi_chord::{ChordError, Json, json};
 
@@ -225,4 +228,89 @@ async fn an_expired_ctx_and_a_foreign_ctx_are_refused() {
         RootOptions::default(),
     );
     assert!(foreign.await.unwrap());
+}
+
+/// A memory link that counts the calls it sends.
+struct CountingLink(Arc<MemoryLink>, Arc<AtomicUsize>);
+
+impl Link for CountingLink {
+    fn closed(&self) -> bool {
+        self.0.closed()
+    }
+
+    fn send(&self, frame: &Frame) -> Option<usize> {
+        if matches!(frame, Frame::Call(_)) {
+            self.1.fetch_add(1, Ordering::SeqCst);
+        }
+        self.0.send(frame)
+    }
+
+    fn receive(&self, handler: FrameHandler) {
+        self.0.receive(handler);
+    }
+
+    fn on_close(&self, handler: CloseHandler) {
+        self.0.on_close(handler);
+    }
+
+    fn close(&self, reason: Option<&str>) {
+        Link::close(self.0.as_ref(), reason);
+    }
+}
+
+fn named(name: &str) -> Host {
+    create_host(HostOptions {
+        name: Some(name.into()),
+        principal: json!({"kind": "host"}),
+        on_error: Some(Arc::new(|_| {})),
+        ..HostOptions::default()
+    })
+}
+
+#[tokio::test]
+async fn a_remote_reference_refuses_a_foreign_ctx_without_calling() {
+    let _serial = serial().await;
+    let main = VariantDef::new().method("hit", method(None, None));
+    let def = RemoteDef {
+        version: 1,
+        input: object(&[]),
+        host: host_named("server").unwrap(),
+        variants: vec![("main".into(), main)],
+    };
+    let remote_target = remote("t.remote-target", &def).unwrap();
+    let hits = Arc::new(AtomicUsize::new(0));
+    let counted = hits.clone();
+    let server = named("server");
+    let factory = move |_: &Json, _: &Json, _: &mut Declare| {
+        let counted = counted.clone();
+        Ok(Implementation::variant("main").method("hit", move |_, _| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            ready(Ok(Json::Null))
+        }))
+    };
+    server.serve(&remote_target, factory, ServeOptions::default()).unwrap();
+    let (down, up) = memory_link_pair();
+    server.accept(down, AcceptOptions::host("worker", json!({"worker": true}))).unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let worker = named("worker");
+    worker.connect(Arc::new(CountingLink(up, calls.clone())), ConnectOptions::new(json!({"kind": "server"})));
+    let other = named("other");
+    let target_ref = worker.hold(&remote_target, json!({}), GetOptions::default()).unwrap();
+    target_ref.ready().await.unwrap();
+    let refused = target_ref.clone();
+    let foreign = other.root(
+        move |ctx: Ctx| async move { Ok(refused.call("hit", None, Some(&ctx)).await.unwrap_err()) },
+        RootOptions::default(),
+    );
+    let error = foreign.await.unwrap();
+    assert!(is(&error, "invalid") && error.reason() == Some("foreign_ctx"), "{error}");
+    ticks(10).await;
+    assert_eq!(hits.load(Ordering::SeqCst), 0);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    let hit = target_ref.clone();
+    worker
+        .root(move |ctx: Ctx| async move { hit.call("hit", None, Some(&ctx)).await }, RootOptions::default())
+        .await
+        .unwrap();
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
 }

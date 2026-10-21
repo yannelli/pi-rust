@@ -2,6 +2,8 @@
 
 #[path = "interactive/harness.rs"]
 mod harness;
+#[path = "offline_guard/mod.rs"]
+mod offline_guard;
 
 use harness::{Options, local, start};
 use pi_coding_agent::keybindings::keybindings;
