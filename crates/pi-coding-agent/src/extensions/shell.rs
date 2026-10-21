@@ -105,6 +105,8 @@ pub(crate) async fn builtin_execute(runner: &Arc<ExtensionRunner>, args: &Args) 
     let mut tools_options = ToolsOptions::default();
     if let Some(session) = runner.session() {
         tools_options = ToolsOptions::from_settings(session.settings());
+        tools_options.write.recorder = Some(session.file_change_recorder());
+        tools_options.edit.recorder = Some(session.file_change_recorder());
     }
     let mut bash = BashToolOptions { ..tools_options.bash.clone() };
     if let Some(prefix) = options["commandPrefix"].as_str() {

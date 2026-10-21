@@ -14,6 +14,7 @@ use super::edit_diff::{
     Edit, apply_edits_to_normalized_content, detect_line_ending, generate_diff_string, generate_unified_patch,
     normalize_to_lf, restore_line_endings,
 };
+use super::file_changes::{SharedFileChangeRecorder, write_recorded};
 use super::mutation_queue::with_file_mutation_queue;
 use super::operations::{EditOperations, EditToolOptions, describe_error};
 use super::path_utils::resolve_to_cwd;
@@ -24,6 +25,7 @@ const BOM: char = '\u{FEFF}';
 pub struct EditTool {
     cwd: PathBuf,
     operations: Arc<dyn EditOperations>,
+    recorder: Option<SharedFileChangeRecorder>,
 }
 
 #[derive(Deserialize)]
@@ -39,7 +41,7 @@ impl EditTool {
     }
 
     pub fn with_options(cwd: PathBuf, options: EditToolOptions) -> Self {
-        Self { cwd, operations: options.resolve() }
+        Self { cwd, operations: options.resolve(), recorder: options.recorder }
     }
 }
 
@@ -169,7 +171,8 @@ impl AgentTool for EditTool {
             check_aborted(&cancel)?;
 
             let final_content = format!("{bom}{}", restore_line_endings(&new_content, ending));
-            ops.write_file(&absolute, &final_content)
+            let write = || ops.write_file(&absolute, &final_content);
+            write_recorded(self.recorder.as_ref(), &absolute, Some(&buffer), &final_content, write)
                 .await
                 .map_err(|e| anyhow!("Could not write file: {path}. {e}"))?;
             check_aborted(&cancel)?;
