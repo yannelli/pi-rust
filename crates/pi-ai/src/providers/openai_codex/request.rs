@@ -10,7 +10,7 @@ use crate::http::pi_user_agent;
 use crate::provider_options::ReasoningSummary;
 use crate::providers::common::compat_bool;
 use crate::providers::constrained_sampling::{ResponsesToolOptions, convert_responses_tools};
-use crate::providers::openai_responses::{ConvertOptions, convert_messages};
+use crate::providers::openai_responses::{ConvertOptions, convert_messages, responses_tool_support};
 use crate::registry::{CacheRetention, StreamOptions};
 use crate::simple_options::{clamp_openai_prompt_cache_key, clamp_thinking_level};
 use crate::transcript::{initial_system_message, resolve_transcript_tools, system_message_text};
@@ -209,8 +209,12 @@ pub(super) fn build_body(
     if let Some(temperature) = options.temperature {
         body.insert("temperature".into(), json!(temperature));
     }
-    let anchors = compat.supports_additional_tools || compat.supports_tool_search;
-    let tools = resolve_transcript_tools(messages, anchors).request_tools;
+    let support = responses_tool_support(
+        compat.supports_mid_convo_system_messages,
+        compat.supports_additional_tools,
+        compat.supports_tool_search,
+    );
+    let tools = resolve_transcript_tools(messages, support).request_tools;
     if !tools.is_empty() {
         body.insert("tools".into(), Value::Array(convert_responses_tools(&tools, compat.tool_options())?));
     }
@@ -268,5 +272,20 @@ mod summary_tests {
         assert_eq!(body(&options)["reasoning"], json!({"effort": "medium", "summary": "off"}));
         let summary_only = StreamOptions { reasoning_summary: Some(ReasoningSummary::On), ..Default::default() };
         assert_eq!(body(&summary_only)["reasoning"], json!({"effort": "none"}));
+    }
+
+    #[test]
+    fn additional_tools_models_declare_tools_in_the_input() {
+        let mut model = test_model("openai-codex-responses", "openai-codex", "https://chatgpt.com/backend-api");
+        model.compat = Some(json!({"supportsMidConvoSystemMessages": true, "supportsAdditionalTools": true}));
+        let tool = crate::types::Tool::new("read", "d", json!({"type": "object", "properties": {}}));
+        let leading = crate::transcript::create_initial_system_message(Some("prompt"), &[tool]).unwrap();
+        let messages = [Message::System(leading), Message::user("hi")];
+        let body = build_body(&model, &messages, &StreamOptions::default(), None, &BTreeMap::new()).unwrap();
+        assert!(body.get("tools").is_none());
+        assert_eq!(body["instructions"], "prompt");
+        assert_eq!(body["input"][0]["type"], "additional_tools");
+        assert_eq!(body["input"][0]["tools"][0]["name"], "read");
+        assert_eq!(body["input"].as_array().unwrap().len(), 2);
     }
 }

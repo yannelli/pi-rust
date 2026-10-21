@@ -24,6 +24,10 @@ pub trait Terminal {
     /// Stops the terminal and restores its state.
     fn stop(&mut self);
 
+    /// Restores terminal modes synchronously when the TUI goes away without [`Terminal::stop`].
+    /// Writes `before`, then this terminal's own mode resets, then `after`.
+    fn restore_on_exit(&mut self, _before: &str, _after: &str) {}
+
     /// Drains stdin before exit so Kitty key release events do not leak to the parent shell.
     /// Waits at most `max`, and returns early when no input arrives within `idle`.
     fn drain_input(&mut self, _max: Duration, _idle: Duration) {}

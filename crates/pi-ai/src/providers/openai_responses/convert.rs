@@ -10,7 +10,8 @@ use crate::providers::common::{
 };
 use crate::providers::constrained_sampling::{ResponsesToolOptions, convert_responses_tools, grammar_tool_input};
 use crate::transcript::{
-    render_system_message_update, resolve_transcript, resolve_transcript_tools, system_message_text,
+    TranscriptToolSupport, render_system_message_update, resolve_transcript, resolve_transcript_tools,
+    system_message_text,
 };
 use crate::types::{AssistantMessage, ContentBlock, Message, Model, SystemMessage, UserContent};
 
@@ -24,7 +25,7 @@ pub(crate) struct ConvertOptions {
     pub include_system_prompt: bool,
     /// Send later system messages in place; otherwise fold them into the leading one.
     pub supports_mid_convo_system_messages: bool,
-    /// Anchor tool additions as `additional_tools` items.
+    /// Declare every tool in `additional_tools` items.
     pub supports_additional_tools: bool,
     /// Anchor tool additions as synthetic client tool search results.
     pub supports_tool_search: bool,
@@ -53,6 +54,61 @@ impl Default for ConvertOptions {
             configuration_update_effort: None,
         }
     }
+}
+
+impl ConvertOptions {
+    fn tool_support(&self) -> TranscriptToolSupport {
+        responses_tool_support(
+            self.supports_mid_convo_system_messages,
+            self.supports_additional_tools,
+            self.supports_tool_search,
+        )
+    }
+}
+
+/// How a Responses transport expresses tool changes.
+///
+/// `additional_tools` items accumulate: a later item adds tools and replaces same-name
+/// definitions from earlier items, but it cannot replace a top-level tool and cannot remove any
+/// tool. Like Codex, every tool is therefore declared in `additional_tools` items, starting with
+/// one at the head of the input, and removals are announced as text. Synthetic tool search can
+/// only add tools. Without mid-conversation system messages there is nothing to anchor.
+pub(crate) fn responses_tool_support(
+    supports_mid_convo_system_messages: bool,
+    supports_additional_tools: bool,
+    supports_tool_search: bool,
+) -> TranscriptToolSupport {
+    if supports_mid_convo_system_messages && supports_additional_tools {
+        TranscriptToolSupport::Changes
+    } else if supports_tool_search {
+        TranscriptToolSupport::Additions
+    } else {
+        TranscriptToolSupport::None
+    }
+}
+
+/// Precedes every `additional_tools` item after the first. Without it, models read the latest item
+/// as the complete tool set once a removal was announced; restating the tools that are still
+/// unavailable keeps smaller models from calling them again after later loads.
+fn incremental_tools_notice(unavailable: &[String]) -> String {
+    let notice = "This is an incremental tools update. Previously declared tools remain available unless explicitly marked unavailable. A tool declared again here is available again, and its latest definition replaces the earlier one.";
+    if unavailable.is_empty() {
+        return notice.to_string();
+    }
+    format!("{notice}\nStill unavailable: {}.", unavailable.join(", "))
+}
+
+fn tool_removal_notice(names: &[&str]) -> String {
+    let lines: Vec<String> = names.iter().map(|name| format!("- {name}")).collect();
+    format!("The following tools are no longer available. Do not call them:\n{}", lines.join("\n"))
+}
+
+/// Tool state the conversion tracks across system messages.
+#[derive(Default)]
+struct ToolNotices {
+    declared_additional_tools: bool,
+    /// Tools announced as removed and not declared again since, in announcement order.
+    unavailable: Vec<String>,
 }
 
 fn normalize_part(part: &str) -> String {
@@ -98,9 +154,10 @@ pub(crate) fn convert_messages(
     let providers = options.tool_call_providers;
     let normalize = |id: &str, source: &AssistantMessage| normalize_tool_call_id(model, providers, id, source);
     let transformed = transform_messages(&messages, model, &normalize);
-    let anchors =
-        resolve_transcript_tools(&messages, options.supports_additional_tools || options.supports_tool_search)
-            .anchors_additions;
+    let support = options.tool_support();
+    let folded = resolve_transcript_tools(&messages, support).folded_system_messages;
+    let mut notices = ToolNotices::default();
+    let mut system_index = 0;
     let developer = model.reasoning && compat_bool(model, "supportsDeveloperRole") != Some(false);
     let instruction_role = if developer { "developer" } else { "system" };
     let mut items = Vec::new();
@@ -109,11 +166,33 @@ pub(crate) fn convert_messages(
         let leading = source_index == 0 && matches!(message, Message::System(_));
         match message {
             Message::System(system) => {
-                if !leading && anchors {
-                    items.extend(tool_additions(system, &format!("system:{message_index}"), options)?);
+                let anchors = system_index >= folded;
+                system_index += 1;
+                if anchors {
+                    let seed = format!("system:{message_index}");
+                    items.extend(tool_additions(system, &seed, support, instruction_role, options, &mut notices)?);
                 }
                 if !leading || options.include_system_prompt {
-                    let text = if leading { system_message_text(system) } else { render_system_message_update(system) };
+                    let mut parts =
+                        vec![if leading { system_message_text(system) } else { render_system_message_update(system) }];
+                    if anchors {
+                        // A redefinition is a removal plus an addition of the same name; only true removals are announced.
+                        let added = system.tools_added.iter().flatten();
+                        let added: Vec<&str> = added.map(|tool| tool.name.as_str()).collect();
+                        let removed = system.tools_removed.iter().flatten().map(|tool| tool.name.as_str());
+                        let removed: Vec<&str> = removed.filter(|name| !added.contains(name)).collect();
+                        if !removed.is_empty() {
+                            parts.push(tool_removal_notice(&removed));
+                        }
+                        // Recorded after this message's additions, whose notice precedes this removal notice.
+                        for name in removed {
+                            if !notices.unavailable.iter().any(|known| known == name) {
+                                notices.unavailable.push(name.to_string());
+                            }
+                        }
+                    }
+                    parts.retain(|part| !part.is_empty());
+                    let text = parts.join("\n\n");
                     if !text.is_empty() {
                         items.push(json!({"role": instruction_role, "content": text}));
                     }
@@ -170,32 +249,49 @@ fn configuration_update(effort: &str) -> Value {
     json!({"type": "configuration_update", "reasoning": {"effort": effort}})
 }
 
-/// Items that load the tools a later system message adds.
-fn tool_additions(system: &SystemMessage, seed: &str, options: &ConvertOptions) -> Result<Vec<Value>, String> {
+/// Items that declare the tools a system message adds, per the transport's `support`.
+fn tool_additions(
+    system: &SystemMessage,
+    seed: &str,
+    support: TranscriptToolSupport,
+    instruction_role: &str,
+    options: &ConvertOptions,
+    notices: &mut ToolNotices,
+) -> Result<Vec<Value>, String> {
     let tools = system.tools_added.as_deref().unwrap_or_default();
+    notices.unavailable.retain(|name| !tools.iter().any(|tool| tool.name == *name));
     if tools.is_empty() {
         return Ok(Vec::new());
     }
-    if options.supports_additional_tools {
-        let tools = convert_responses_tools(tools, options.tool_options)?;
-        return Ok(vec![json!({"type": "additional_tools", "role": "developer", "tools": tools})]);
+    match support {
+        TranscriptToolSupport::Changes => {
+            let mut items = Vec::new();
+            if notices.declared_additional_tools {
+                items
+                    .push(json!({"role": instruction_role, "content": incremental_tools_notice(&notices.unavailable)}));
+            }
+            notices.declared_additional_tools = true;
+            let tools = convert_responses_tools(tools, options.tool_options)?;
+            items.push(json!({"type": "additional_tools", "role": "developer", "tools": tools}));
+            Ok(items)
+        }
+        TranscriptToolSupport::Additions => {
+            let search_options = ResponsesToolOptions { tool_search_result: true, ..options.tool_options };
+            let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_str()).collect();
+            let call_id = format!("pi_tool_load_{}", short_hash(&format!("{seed}:{}", names.join(","))));
+            Ok(vec![
+                json!({
+                    "type": "tool_search_call", "call_id": call_id, "execution": "client", "status": "completed",
+                    "arguments": {"query": names.join(" "), "limit": names.len()},
+                }),
+                json!({
+                    "type": "tool_search_output", "call_id": call_id, "execution": "client", "status": "completed",
+                    "tools": convert_responses_tools(tools, search_options)?,
+                }),
+            ])
+        }
+        TranscriptToolSupport::None => Ok(Vec::new()),
     }
-    if !options.supports_tool_search {
-        return Ok(Vec::new());
-    }
-    let search_options = ResponsesToolOptions { tool_search_result: true, ..options.tool_options };
-    let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_str()).collect();
-    let call_id = format!("pi_tool_load_{}", short_hash(&format!("{seed}:{}", names.join(","))));
-    Ok(vec![
-        json!({
-            "type": "tool_search_call", "call_id": call_id, "execution": "client", "status": "completed",
-            "arguments": {"query": names.join(" "), "limit": names.len()},
-        }),
-        json!({
-            "type": "tool_search_output", "call_id": call_id, "execution": "client", "status": "completed",
-            "tools": convert_responses_tools(tools, search_options)?,
-        }),
-    ])
 }
 
 fn tool_result_output(model: &Model, content: &[ContentBlock]) -> Value {

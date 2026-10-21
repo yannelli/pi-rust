@@ -319,6 +319,19 @@ impl MessageBuilder {
         });
     }
 
+    /// Replace a tool call's raw arguments text. The call parses it strictly when it ends.
+    pub fn tool_call_json(&mut self, handle: usize, json: &str) {
+        let Some(pending) = self.tool_calls.get_mut(handle) else { return };
+        pending.json = json.to_string();
+        let arguments = match parse_streaming_json(json) {
+            Some(Value::Object(arguments)) => arguments,
+            _ => JsonObject::new(),
+        };
+        if let Some(call) = self.tool_call_mut(handle) {
+            call.arguments = arguments;
+        }
+    }
+
     /// Replace a tool call's arguments with a complete object.
     pub fn tool_call_arguments(&mut self, handle: usize, arguments: JsonObject) {
         if let Some(pending) = self.tool_calls.get_mut(handle) {

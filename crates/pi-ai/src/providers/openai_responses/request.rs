@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{Map, Value, json};
 
-use super::convert::{ConvertOptions, convert_messages};
+use super::convert::{ConvertOptions, convert_messages, responses_tool_support};
 use crate::provider_options::ReasoningSummary;
 use crate::providers::common::{compat_bool, compat_str};
 use crate::providers::constrained_sampling::{
@@ -95,7 +95,12 @@ pub(crate) fn build_body(
     compat: &Compat,
     grammar: &BTreeMap<String, String>,
 ) -> Result<Value, String> {
-    let tools = resolve_transcript_tools(messages, compat.supports_additional_tools || compat.supports_tool_search);
+    let support = responses_tool_support(
+        compat.supports_mid_convo_system_messages,
+        compat.supports_additional_tools,
+        compat.supports_tool_search,
+    );
+    let tools = resolve_transcript_tools(messages, support);
     let tool_options = ResponsesToolOptions {
         supports_strict_mode: compat.supports_strict_mode,
         supports_openai_grammar_tools: compat.supports_openai_grammar_tools,

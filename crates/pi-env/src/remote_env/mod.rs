@@ -20,6 +20,7 @@ use serde_json::Value;
 
 use crate::connection::{Connection, Json, RemoteError, RequestOptions, lock};
 use crate::errors::{Failure, abort_result, to_file_error};
+use crate::list_files::{FileListing, ListFilesOptions, list_files_over};
 use crate::paths::{PathStyle, file_url_to_path};
 use crate::session::random_hex;
 use crate::watch::{RemoteWatchOptions, RemoteWatcher};
@@ -68,7 +69,8 @@ pub struct RemoteExecutionEnv {
 
 /// Node's path rules of the remote system.
 pub async fn remote_path(connection: &Connection) -> Result<PathStyle, RemoteError> {
-    Ok(PathStyle::of_os(&connection.info().await?.os))
+    let info = connection.info().await?;
+    Ok(PathStyle::of_info(&info))
 }
 
 fn object(pairs: &[(&str, Value)]) -> Json {
@@ -91,7 +93,7 @@ impl RemoteExecutionEnv {
     /// Node's `resolvePath` on the remote system, with its home directory and working directories.
     async fn resolve(&self, path: &str) -> Result<String, RemoteError> {
         let info = self.connection.info().await?;
-        let style = PathStyle::of_os(&info.os);
+        let style = PathStyle::of_info(&info);
         let windows = style == PathStyle::Windows;
         let mut normalized = path.to_string();
         if path == "~" {
@@ -122,6 +124,17 @@ impl RemoteExecutionEnv {
             return Ok(style.resolve(&base, &normalized));
         }
         Ok(style.resolve(&self.cwd, &normalized))
+    }
+
+    /// Through the daemon; `not_supported` with a daemon released before `listFiles`.
+    pub async fn list_files(
+        &self,
+        path: &str,
+        options: Option<&ListFilesOptions>,
+        context: &Context,
+    ) -> FileResult<FileListing> {
+        let resolved = self.resolve(path).await.map_err(|error| to_file_error(&error, Some(path)))?;
+        list_files_over(&self.connection, &resolved, options, context).await
     }
 
     /// Resolve `path`, check for an abort, and run `operation`; with `check_after`, check again after it.
@@ -383,7 +396,7 @@ impl FileSystem for RemoteExecutionEnv {
         }
         let made = async {
             let info = self.connection.info().await?;
-            let path = PathStyle::of_os(&info.os).join(&[&info.tmpdir, prefix.unwrap_or("tmp-")]);
+            let path = PathStyle::of_info(&info).join(&[&info.tmpdir, prefix.unwrap_or("tmp-")]);
             self.call("mkdtemp", object(&[("path", path.into())])).await
         };
         let json = made.await.map_err(|error| to_file_error(&error, None))?;

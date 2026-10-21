@@ -163,9 +163,25 @@ pub fn default_daemon_dir() -> PathBuf {
 
 /// The daemon binary for a remote system: `<daemon_dir>/pi-env-<platform>-<arch>/pi-env[.exe]`.
 pub fn packaged_daemon(remote: &RemotePlatform, daemon_dir: Option<&Path>) -> PathBuf {
+    packaged_binary(remote.platform, remote.arch, daemon_dir)
+}
+
+fn packaged_binary(platform: RemoteSystem, arch: RemoteArch, daemon_dir: Option<&Path>) -> PathBuf {
     let dir = daemon_dir.map_or_else(default_daemon_dir, Path::to_path_buf);
-    let name = format!("pi-env-{}-{}", remote.platform.as_str(), remote.arch.as_str());
-    dir.join(name).join(if remote.platform == RemoteSystem::Windows { "pi-env.exe" } else { "pi-env" })
+    let name = format!("pi-env-{}-{}", platform.as_str(), arch.as_str());
+    dir.join(name).join(if platform == RemoteSystem::Windows { "pi-env.exe" } else { "pi-env" })
+}
+
+/// The daemon this installation ships for the machine it runs on, e.g. for terminals of local sessions.
+pub fn local_daemon(daemon_dir: Option<&Path>) -> Result<PathBuf, SshError> {
+    let platform = match std::env::consts::OS {
+        "linux" => RemoteSystem::Linux,
+        "android" => RemoteSystem::Android,
+        "macos" => RemoteSystem::Darwin,
+        "windows" => RemoteSystem::Windows,
+        other => return Err(SshError::Other(format!("No pi-env daemon for {other}"))),
+    };
+    Ok(packaged_binary(platform, normalize_arch(std::env::consts::ARCH)?, daemon_dir))
 }
 
 fn quote_posix(text: &str) -> String {
@@ -301,4 +317,23 @@ pub(crate) fn launch_command(remote: &RemotePlatform, file: &str, login_shell: b
         return format!("exec \"$SHELL\" -lc 'exec \"$0\" \"$@\"' {}", quote_posix(file));
     }
     quote_posix(file)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_the_daemon_for_this_machine_like_a_remote_one() {
+        let platform = match () {
+            _ if cfg!(windows) => "windows",
+            _ if cfg!(target_os = "macos") => "darwin",
+            _ if cfg!(target_os = "android") => "android",
+            _ => "linux",
+        };
+        let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" };
+        let program = if cfg!(windows) { "pi-env.exe" } else { "pi-env" };
+        let expected = Path::new("daemons").join(format!("pi-env-{platform}-{arch}")).join(program);
+        assert_eq!(local_daemon(Some(Path::new("daemons"))).unwrap(), expected);
+    }
 }

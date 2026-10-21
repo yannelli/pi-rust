@@ -276,6 +276,26 @@ impl Terminal for ProcessTerminal {
         self.restore_raw_mode();
     }
 
+    fn restore_on_exit(&mut self, before: &str, after: &str) {
+        let mut sequence = before.to_string();
+        if self.progress_timer.is_some() {
+            sequence.push_str(TERMINAL_PROGRESS_CLEAR_SEQUENCE);
+        }
+        sequence.push_str("\x1b[?2004l");
+        {
+            let core = self.core();
+            if core.keyboard_protocol_pushed || core.kitty_active {
+                sequence.push_str("\x1b[<u");
+            }
+            if core.modify_other_keys_active {
+                sequence.push_str("\x1b[>4;0m");
+            }
+        }
+        sequence.push_str(after);
+        self.core().write(&sequence);
+        self.restore_raw_mode();
+    }
+
     fn drain_input(&mut self, max: Duration, idle: Duration) {
         {
             let mut core = self.core();

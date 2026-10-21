@@ -3,8 +3,9 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use pi_tui::stdin_buffer::{StdinBuffer, StdinBufferEvent};
 use pi_tui::terminal_colors::{RgbColor, TerminalColors};
 use pi_tui::ui_loop::{self, TerminalSink};
 use pi_tui::{Component, Terminal, Tui, TuiOptions, TuiStopOptions, component};
@@ -187,4 +188,29 @@ fn reports_late_replies_after_a_timeout_and_consumes_them_until_da1() {
     // With no query pending, color replies are ordinary input again.
     setup.send_input("\x1b]11;#ffffff\x07");
     assert_eq!(setup.inputs(), ["\x1b]11;#ffffff\x07"]);
+}
+
+#[test]
+fn consumes_delayed_ghostty_color_fragments_without_typing_their_tail_or_opening_the_editor() {
+    let setup = Setup::new();
+    let mut buffer = StdinBuffer::default();
+    let mut now = Instant::now();
+    let feed = |events: Vec<StdinBufferEvent>| {
+        for event in events {
+            let StdinBufferEvent::Data(sequence) = event else { panic!("unexpected paste") };
+            setup.send_input(&sequence);
+        }
+    };
+    let query = setup.query(1000, None);
+    // Captured from Ghostty 1.3.1 with Ayu Light, split at the reported tail.
+    feed(buffer.process("\x1b]4;1;rgb:eaea/6c", now));
+    now += Duration::from_millis(100);
+    feed(buffer.on_timeout(now));
+    feed(buffer.process(&format!("6c/6d6d\x07{DA1}"), now));
+    assert_eq!(*query.borrow(), Some(TerminalColors::default()));
+    assert!(setup.inputs().is_empty());
+
+    // A real Ctrl+G must still reach the editor after the reply.
+    feed(buffer.process("\x07", now));
+    assert_eq!(setup.inputs(), ["\x07"]);
 }

@@ -1,6 +1,7 @@
 //! OpenAI Responses (`POST {baseUrl}/responses`) with SSE streaming. Later system messages are
-//! sent in place when `compat.supportsMidConvoSystemMessages` is set; tool additions anchor
-//! as `additional_tools` or client tool search items when the model supports them.
+//! sent in place when `compat.supportsMidConvoSystemMessages` is set. Models with additional
+//! tools declare every tool in `additional_tools` items and announce removals as text; tool
+//! search models anchor additions as client tool search items.
 
 mod convert;
 mod events;
@@ -20,7 +21,7 @@ use crate::stream::{AssistantMessageEventStream, error_stream};
 use crate::transcript::{normalize_context, resolve_transcript};
 use crate::types::{Context, Model, StopReason};
 
-pub(crate) use self::convert::{ConvertOptions, convert_messages};
+pub(crate) use self::convert::{ConvertOptions, convert_messages, responses_tool_support};
 pub(crate) use self::events::ResponsesStream;
 
 pub struct OpenAIResponses;

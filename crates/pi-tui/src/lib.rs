@@ -119,6 +119,7 @@ pub use terminal::{ProcessTerminal, Terminal, TerminalRef, is_apple_terminal_ses
 pub use tui::{
     OverlayAnchor, OverlayBounds, OverlayHandle, OverlayMargin, OverlayOptions, OverlayUnfocusOptions, SizeValue, Tui,
     TuiError, TuiInputListenerResult, TuiListenerId, TuiMode, TuiOptions, TuiStopOptions, WeakTui, composite_tui_line,
+    restore_terminals_on_exit,
 };
 pub use ui_loop::{TerminalSink, TimerId, TuiWaker};
 pub use utils::{

@@ -301,9 +301,6 @@ pub(crate) fn handle_viewport_input(inner: &TuiInner, data: &str) -> bool {
             }
             return true;
         }
-        if should_defer_to_overlay(inner) {
-            return false;
-        }
         mouse::route_wheel(inner, &wheel, delta);
         return true;
     }

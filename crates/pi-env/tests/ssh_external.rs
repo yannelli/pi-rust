@@ -6,13 +6,13 @@ mod support;
 
 use std::sync::Arc;
 
-use pi_durable::env::{FileSystem, RemoveOptions, SharedEnv};
+use pi_durable::env::{FileSystem, RemoveOptions};
 use pi_durable::testing::env_conformance::{self, EnvConformanceOptions};
 use pi_env::{
     Connection, RemoteExecutionEnv, RemoteExecutionEnvOptions, RemotePlatform, RemoteWatchOptions, SshConnectOptions,
     SshTarget, accept_host_key, connect_ssh, deploy_daemon, detect_platform, scan_host_key,
 };
-use support::ctx;
+use support::{ctx, list_cases};
 
 /// Scan and accept the host key, detect, deploy, and connect, logging each stage so a hang shows where it is.
 async fn connect(root: &tempfile::TempDir) -> (Connection, RemotePlatform) {
@@ -49,8 +49,12 @@ async fn reaches_the_remote_system_through_its_default_shell() {
     let root = tempfile::tempdir().unwrap();
     let (connection, remote) = connect(&root).await;
     let info = connection.info().await.expect("info");
-    let expected = if cfg!(target_os = "macos") { "macos" } else { std::env::consts::OS };
-    assert_eq!(info.os, expected);
+    let expected = match () {
+        _ if cfg!(windows) => "win32",
+        _ if cfg!(target_os = "macos") => "darwin",
+        _ => std::env::consts::OS,
+    };
+    assert_eq!(info.node_platform().platform, expected);
     if cfg!(windows) {
         let shell = std::env::var("PI_ENV_SSH_SHELL").unwrap_or_else(|_| "cmd".into());
         let detected = format!("{:?}", remote.shell.expect("shell")).to_lowercase();
@@ -72,7 +76,7 @@ fn options() -> EnvConformanceOptions {
 }
 
 /// A fresh remote directory for one case, removed afterwards.
-async fn with_env(case: impl AsyncFnOnce(SharedEnv)) {
+async fn with_env(case: impl AsyncFnOnce(Arc<RemoteExecutionEnv>)) {
     let root = tempfile::tempdir().unwrap();
     let (connection, _) = connect(&root).await;
     let home_dir = connection.info().await.expect("info").home.clone();
@@ -124,3 +128,32 @@ external_cases!(
     binary_reader_follows_symlinks_unless_no_follow_refuses_the_final_one,
     watch_reports_changes_to_the_file_a_watched_symbolic_link_points_to,
 );
+
+/// The `listFiles` cases of the suite, which Durable's macro does not cover yet.
+macro_rules! external_list_cases {
+    ($($case:ident),* $(,)?) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+            #[ignore = "needs a real SSH server: set PI_ENV_SSH_HOST"]
+            async fn $case() {
+                with_env(async |env| list_cases::$case(env.as_ref()).await).await;
+            }
+        )*
+    };
+}
+
+external_list_cases!(
+    lists_files_and_directories_depth_first_in_name_order,
+    skips_what_git_ignores_in_work_trees_git_and_excluded_names,
+    stops_at_its_bounds_and_reports_truncated,
+    fails_on_missing_directories_files_and_aborts,
+);
+
+/// Git Bash's `ln -s` copies instead of linking unless native symlinks are enabled, so Windows skips this case.
+#[cfg(not(windows))]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs a real SSH server: set PI_ENV_SSH_HOST"]
+async fn lists_symbolic_links_without_following_them() {
+    let shell = options().shell;
+    with_env(async |env| list_cases::lists_symbolic_links_without_following_them(env.as_ref(), &shell).await).await;
+}

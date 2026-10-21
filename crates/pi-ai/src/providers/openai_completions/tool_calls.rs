@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use serde_json::{Value, json};
 
 use super::convert::GrammarInputs;
-use crate::json::parse_streaming_json;
+use crate::json::{parse_streaming_json, parse_tool_call_arguments};
 use crate::providers::constrained_sampling::{GrammarToolInputJsonBuffer, append_grammar_tool_input_json_delta};
 use crate::stream::{AssistantMessageEvent, EventSender, MessageBuilder};
 use crate::types::{ContentBlock, JsonObject, ToolCall};
@@ -171,7 +171,7 @@ impl ToolCalls {
         slot
     }
 
-    /// Finalize the call at `content_index`: parse its arguments, or close its grammar input
+    /// Finalize the call at `content_index`: parse its arguments strictly, or close its grammar input
     /// with a last delta, then emit its end event.
     pub fn finish(
         &mut self,
@@ -191,7 +191,7 @@ impl ToolCalls {
                     sender.push(AssistantMessageEvent::ToolcallDelta { content_index, delta, partial });
                 }
             }
-            None => block.arguments = streaming_arguments(&tool.partial_args),
+            None => (block.arguments, block.arguments_error) = parse_tool_call_arguments(&tool.partial_args),
         }
         let partial = builder.message().clone();
         let ContentBlock::ToolCall(tool_call) = partial.content[content_index].clone() else { return Ok(()) };

@@ -61,20 +61,48 @@ fn names(tools: &Value) -> Vec<String> {
     tools.as_array().into_iter().flatten().map(|tool| tool["name"].as_str().unwrap().to_string()).collect()
 }
 
+/// Compat for models that declare every tool in `additional_tools` items.
+fn additional_tools_model() -> crate::types::Model {
+    model(json!({"supportsMidConvoSystemMessages": true, "supportsAdditionalTools": true}))
+}
+
+/// Names of the first tool in each `additional_tools` item.
+fn additional_tool_names(input: &[Value]) -> Vec<&str> {
+    let items = input.iter().filter(|item| item["type"] == "additional_tools");
+    items.map(|item| item["tools"][0]["name"].as_str().unwrap()).collect()
+}
+
+/// Input items whose text contains `needle`.
+fn texts_containing<'a>(input: &'a [Value], needle: &str) -> Vec<&'a str> {
+    let texts = input.iter().filter_map(|item| item["content"].as_str());
+    texts.filter(|text| text.contains(needle)).collect()
+}
+
 #[tokio::test]
-async fn anchors_additions_at_their_developer_message() {
-    let model = model(json!({"supportsMidConvoSystemMessages": true, "supportsAdditionalTools": true}));
-    let payload = capture_payload(&OpenAIResponses, &model, &addition_context(), options()).await;
-    assert_eq!(names(&payload["tools"]), ["base_tool"]);
+async fn declares_every_tool_in_additional_tools_at_its_developer_message() {
+    let payload = capture_payload(&OpenAIResponses, &additional_tools_model(), &addition_context(), options()).await;
+    // A later additional_tools item cannot replace a top-level tool, so no tool is declared there.
+    assert!(payload.get("tools").is_none());
     let input = payload["input"].as_array().unwrap();
-    let additional = input.iter().find(|item| item["type"] == "additional_tools").unwrap();
-    assert_eq!(names(&additional["tools"]), ["late_tool"]);
-    let developer: Vec<&Value> = input
-        .iter()
-        .filter(|item| item["role"] == "developer" && item["type"].is_null())
-        .map(|item| &item["content"])
-        .collect();
-    assert_eq!(developer, [&json!("base prompt"), &json!("updated guidance")]);
+    assert_eq!(additional_tool_names(input), ["base_tool", "late_tool"]);
+    // The incremental notice keeps models from reading a later item as the complete tool set.
+    let shape: Vec<&Value> = input.iter().map(|item| item.get("type").unwrap_or(&item["content"])).collect();
+    assert_eq!(shape[..2], [&json!("additional_tools"), &json!("base prompt")]);
+    assert!(shape[2].is_array());
+    assert!(shape[3].as_str().unwrap().contains("incremental tools update"));
+    assert_eq!(shape[4..], [&json!("additional_tools"), &json!("updated guidance")]);
+}
+
+#[tokio::test]
+async fn tool_choice_applies_to_tools_declared_in_additional_tools() {
+    let context = Context { tools: vec![tool("ping")], messages: vec![Message::user("x")], ..Context::default() };
+    let options = StreamOptions { tool_choice: Some("required".into()), ..options() };
+    let payload = capture_payload(&OpenAIResponses, &additional_tools_model(), &context, options).await;
+    assert_eq!(payload["tool_choice"], "required");
+    assert!(payload.get("tools").is_none());
+    assert_eq!(payload["input"][0]["type"], "additional_tools");
+    assert_eq!(names(&payload["input"][0]["tools"]), ["ping"]);
+    assert_eq!(payload["input"].as_array().unwrap().len(), 2);
 }
 
 #[tokio::test]
@@ -103,15 +131,150 @@ async fn folds_updates_into_the_leading_message_without_native_support() {
 }
 
 #[tokio::test]
-async fn removals_fall_back_to_the_complete_current_tool_state() {
-    let model = model(json!({"supportsMidConvoSystemMessages": true, "supportsAdditionalTools": true}));
-    let payload = capture_payload(&OpenAIResponses, &model, &changing_context(), options()).await;
-    assert_eq!(names(&payload["tools"]), ["late_tool"]);
+async fn announces_removals_as_text() {
+    let payload = capture_payload(&OpenAIResponses, &additional_tools_model(), &changing_context(), options()).await;
+    assert!(payload.get("tools").is_none());
     let input = payload["input"].as_array().unwrap();
-    assert!(!input.iter().any(|item| item["type"] == "additional_tools"));
-    assert_eq!(input.iter().filter(|item| item["role"] == "developer").count(), 2);
+    assert_eq!(additional_tool_names(input), ["base_tool", "late_tool"]);
     let update = input.last().unwrap()["content"].as_str().unwrap();
     assert!(update.contains("updated guidance") && update.contains("Removed system prompt section \"docs\"."));
+    assert!(update.contains("The following tools are no longer available. Do not call them:\n- base_tool"));
+}
+
+#[tokio::test]
+async fn redefines_a_tool_with_additional_tools_instead_of_announcing_a_removal() {
+    let changed = Tool::new("base_tool", "changed", json!({"type": "object", "properties": {}}));
+    let messages = vec![
+        system(json!({"role": "system", "content": "base prompt", "toolsAdded": [tool("base_tool")], "timestamp": 0})),
+        Message::user("before"),
+        system(json!({"role": "system", "content": "", "toolsRemoved": [{"name": "base_tool"}],
+            "toolsAdded": [changed], "timestamp": 2})),
+    ];
+    let context = Context { messages, ..Context::default() };
+    let payload = capture_payload(&OpenAIResponses, &additional_tools_model(), &context, options()).await;
+    assert!(payload.get("tools").is_none());
+    let input = payload["input"].as_array().unwrap();
+    assert_eq!(input.len(), 5);
+    assert_eq!(input[0]["tools"][0]["description"], "base_tool tool");
+    assert_eq!(input[1], json!({"role": "developer", "content": "base prompt"}));
+    assert_eq!(input[2]["role"], "user");
+    assert!(input[3]["content"].as_str().unwrap().contains("latest definition replaces the earlier one"));
+    assert_eq!(
+        (input[4]["type"].as_str(), input[4]["tools"][0]["description"].as_str()),
+        (Some("additional_tools"), Some("changed"))
+    );
+}
+
+/// One request after each step: the initial tools, the removal of `drop_tool`, then two loads.
+async fn capture_tool_history(model: &crate::types::Model) -> Vec<Value> {
+    let steps = [
+        vec![Message::user("first")],
+        vec![
+            system(json!({"role": "system", "content": "", "toolsRemoved": [{"name": "drop_tool"}], "timestamp": 2})),
+            Message::user("after removal"),
+        ],
+        vec![
+            system(json!({"role": "system", "content": "", "toolsAdded": [tool("late_tool")], "timestamp": 4})),
+            Message::user("after first load"),
+        ],
+        vec![
+            system(json!({"role": "system", "content": "", "toolsAdded": [tool("later_tool")], "timestamp": 6})),
+            Message::user("after second load"),
+        ],
+    ];
+    let mut messages = vec![system(json!({"role": "system", "content": "base prompt",
+        "toolsAdded": [tool("base_tool"), tool("drop_tool")], "timestamp": 0}))];
+    let mut payloads = Vec::new();
+    for step in steps {
+        messages.extend(step);
+        let context = Context { messages: messages.clone(), ..Context::default() };
+        payloads.push(capture_payload(&OpenAIResponses, model, &context, options()).await);
+    }
+    payloads
+}
+
+/// Every request's input starts with the previous request's input.
+fn assert_growing_prefix(payloads: &[Value]) {
+    for pair in payloads.windows(2) {
+        let (previous, next) = (pair[0]["input"].as_array().unwrap(), pair[1]["input"].as_array().unwrap());
+        assert_eq!(&next[..previous.len()], previous.as_slice());
+    }
+}
+
+#[tokio::test]
+async fn keeps_the_request_prefix_across_a_removal_and_later_loads() {
+    let payloads = capture_tool_history(&additional_tools_model()).await;
+    assert!(payloads.iter().all(|payload| payload.get("tools").is_none()));
+    assert_growing_prefix(&payloads);
+    let input = payloads.last().unwrap()["input"].as_array().unwrap();
+    let declared: Vec<Vec<String>> =
+        input.iter().filter(|item| item["type"] == "additional_tools").map(|item| names(&item["tools"])).collect();
+    assert_eq!(declared, [vec!["base_tool", "drop_tool"], vec!["late_tool"], vec!["later_tool"]]);
+    assert_eq!(texts_containing(input, "no longer available. Do not call them:\n- drop_tool").len(), 1);
+    // Each later load restates the tools that are still unavailable.
+    let notices = texts_containing(input, "incremental tools update");
+    assert_eq!(notices.len(), 2);
+    assert!(notices.iter().all(|notice| notice.contains("\nStill unavailable: drop_tool.")));
+}
+
+#[tokio::test]
+async fn stops_listing_a_tool_as_unavailable_once_it_is_declared_again() {
+    let messages = vec![
+        system(json!({"role": "system", "content": "base prompt",
+            "toolsAdded": [tool("base_tool"), tool("drop_tool")], "timestamp": 0})),
+        system(json!({"role": "system", "content": "", "toolsRemoved": [{"name": "drop_tool"}], "timestamp": 1})),
+        system(json!({"role": "system", "content": "", "toolsAdded": [tool("drop_tool")], "timestamp": 2})),
+        Message::user("go"),
+    ];
+    let context = Context { messages, ..Context::default() };
+    let payload = capture_payload(&OpenAIResponses, &additional_tools_model(), &context, options()).await;
+    let input = payload["input"].as_array().unwrap();
+    let notices = texts_containing(input, "incremental tools update");
+    assert_eq!(notices.len(), 1);
+    assert!(!notices[0].contains("Still unavailable"));
+    let before_user = &input[input.len() - 2];
+    assert_eq!(before_user["type"], "additional_tools");
+    assert_eq!(names(&before_user["tools"]), ["drop_tool"]);
+}
+
+#[tokio::test]
+async fn does_not_list_a_tool_as_still_unavailable_before_its_removal_is_announced() {
+    let messages = vec![
+        system(json!({"role": "system", "content": "base prompt",
+            "toolsAdded": [tool("base_tool"), tool("drop_tool")], "timestamp": 0})),
+        system(json!({"role": "system", "content": "", "toolsAdded": [tool("late_tool")],
+            "toolsRemoved": [{"name": "drop_tool"}], "timestamp": 1})),
+        Message::user("go"),
+    ];
+    let context = Context { messages, ..Context::default() };
+    let payload = capture_payload(&OpenAIResponses, &additional_tools_model(), &context, options()).await;
+    let input = payload["input"].as_array().unwrap();
+    // Like Codex: notice, then the tools, then the removal notice.
+    let notice = input[input.len() - 4]["content"].as_str().unwrap();
+    assert!(notice.contains("incremental tools update") && !notice.contains("Still unavailable"));
+    assert_eq!(input[input.len() - 3]["type"], "additional_tools");
+    assert_eq!(names(&input[input.len() - 3]["tools"]), ["late_tool"]);
+    let removal = input[input.len() - 2]["content"].as_str().unwrap();
+    assert!(removal.contains("no longer available. Do not call them:\n- drop_tool"));
+    assert_eq!(input[input.len() - 1]["role"], "user");
+}
+
+#[tokio::test]
+async fn keeps_the_tool_search_prefix_across_loads_after_a_removal() {
+    let model = model(json!({"supportsMidConvoSystemMessages": true, "supportsToolSearch": true}));
+    let payloads = capture_tool_history(&model).await;
+    assert_eq!(names(&payloads[0]["tools"]), ["base_tool", "drop_tool"]);
+    for payload in &payloads[1..] {
+        assert_eq!(names(&payload["tools"]), ["base_tool"]);
+    }
+    assert_growing_prefix(&payloads[1..]);
+    let input = payloads.last().unwrap()["input"].as_array().unwrap();
+    let loaded: Vec<String> = input
+        .iter()
+        .filter(|item| item["type"] == "tool_search_output")
+        .map(|item| item["tools"][0]["name"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(loaded, ["late_tool", "later_tool"]);
 }
 
 #[tokio::test]
