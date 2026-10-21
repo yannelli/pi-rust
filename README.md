@@ -283,6 +283,7 @@ pi-rust ports the `pi` CLI and its libraries feature for feature. These parts di
 - `/diff` (see [Use](#use)) is an addition; upstream pi has no command that shows the git changes in the working directory.
 - `/init` (see [Use](#use)) is an addition; upstream pi has no `/init` command.
 - `/context` (see [Use](#use)) is an addition; upstream pi shows context use only in the footer.
+- `/undo` (see [Use](#use)) is an addition; upstream pi has no command that restores the files the agent changed.
 
 - `pi completion` and `pi doctor` (above) are additions; the TypeScript pi has neither.
 - `pi sessions` and `pi stats` (above) are additions; the TypeScript pi lists and deletes sessions only in its session picker (`pi -r`, `/resume`) and shows usage only for the current session (`/session`).
