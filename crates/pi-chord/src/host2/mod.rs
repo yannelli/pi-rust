@@ -6,6 +6,9 @@ pub mod contract;
 pub mod declare;
 pub mod errors;
 pub mod link;
+pub mod loader;
+pub mod manager;
+pub mod process_lock;
 pub mod publish;
 pub mod registry;
 pub mod schema;
@@ -19,7 +22,16 @@ pub use contract::{
 pub use errors::{
     CHORD_ERROR_CODES, ChordErrorCode, ErrorOptions, as_chord_error, forbidden, invalid, is_chord_error, run_all,
 };
-pub use link::{Link, MemoryLink, PACK_THRESHOLD, Packed, Received, memory_link_pair, unpack};
+pub use link::{
+    IpcChannel, IpcLink, Link, MemoryLink, PACK_THRESHOLD, Packed, Received, StreamChannel, ipc_link, memory_link_pair,
+    unpack,
+};
+pub use loader::{FacetLoader, InProcessLoader};
+pub use manager::{
+    ChildControl, ControlMessage, Driver, Exit, ForkDriver, ForkDriverOptions, HostManager, HostManagerOptions,
+    Instance, Liveness, Status,
+};
+pub use process_lock::{ProcessLock, process_lock};
 pub use publish::{enqueue, hold_publications};
 pub use registry::{Conflict, Registration, Registry, RegistryTable, RegistryView, define_registry};
 pub use schema::{assert_valid, canonical_identity, canonical_json, fits, hash64, normalize};
