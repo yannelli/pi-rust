@@ -1,3 +1,4 @@
+mod markdown;
 mod session;
 mod share;
 

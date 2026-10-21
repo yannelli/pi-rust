@@ -234,6 +234,33 @@ async fn bounds_harness_driven_worker_shutdown() {
     workers.detach();
 }
 
+fn disconnect_on_demand(coordinator: &FakeCoordinator, peer_id: &str, payload: &Value) {
+    if payload["type"] != "session_demand" {
+        return;
+    }
+    let (coordinator, peer_id) = (coordinator.clone(), peer_id.to_string());
+    tokio::spawn(async move { coordinator.emit(CoordinatorConnectionEvent::PeerDisconnected { peer_id }) });
+}
+
+#[tokio::test]
+async fn completes_a_release_when_the_worker_leaves_before_acknowledging_it() {
+    let Attached { coordinator, workers, attachment } = create_attached_worker().await;
+    coordinator.set_on_send(disconnect_on_demand);
+    attachment.release(&BACKGROUND_CONTEXT).await.unwrap();
+    assert!(workers.worker_pids().is_empty());
+    workers.detach();
+}
+
+#[tokio::test]
+async fn fails_an_attachment_when_the_worker_leaves_before_acknowledging_it() {
+    let (coordinator, workers) = discovered().await;
+    let handle = workers.open_session(&metadata(), &BACKGROUND_CONTEXT, &[]).await.unwrap();
+    coordinator.set_on_send(disconnect_on_demand);
+    let Err(error) = handle.attach_client(&BACKGROUND_CONTEXT).await else { panic!("attachment succeeded") };
+    assert!(error.to_string().contains("disconnected during demand update"), "{error}");
+    workers.detach();
+}
+
 fn service_call() -> ServiceCall {
     ServiceCall {
         service_id: "test.session".into(),

@@ -6,6 +6,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# A new push to a PR cancels its older runs. On main, a waiting run gives way to a newer one,
+# and the running one finishes so Release still sees a completed CI run.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.ref_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
 

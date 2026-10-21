@@ -381,6 +381,15 @@ impl AgentSession {
         export_session_html(&file, output_path, &options)
     }
 
+    /// Write the current branch as Markdown (pi-rust extension); returns the written path.
+    pub fn export_to_markdown(&self, output_path: &str) -> anyhow::Result<PathBuf> {
+        let snapshot = crate::export::SessionSnapshot::from_manager(&self.session_manager());
+        if !snapshot.entries.iter().any(|entry| entry.get("type").and_then(Value::as_str) == Some("message")) {
+            anyhow::bail!("Nothing to export yet - start a conversation first");
+        }
+        crate::export::write_markdown(&snapshot, output_path)
+    }
+
     /// Write the header and the current branch to a JSONL file; returns its path.
     pub fn export_to_jsonl(&self, output_path: Option<&Path>) -> anyhow::Result<PathBuf> {
         self.session_manager().export_branch_to_jsonl(output_path)
