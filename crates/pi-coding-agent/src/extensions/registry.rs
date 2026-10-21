@@ -26,6 +26,7 @@ pub struct ToolDescriptor {
     pub execution_mode: Option<String>,
     pub has_prepare_arguments: bool,
     pub has_prepare_loadout: bool,
+    pub has_reaches_tools: bool,
     pub has_render_call: bool,
     pub has_render_result: bool,
     pub source_info: Value,

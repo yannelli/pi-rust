@@ -7,7 +7,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use pi_agent::{
     AgentTool, AgentToolResult, ToolAnnotations, ToolContext, ToolExecutionMode, ToolExposure, ToolLoadout,
-    ToolLoadoutChanges, ToolNamespace, ToolUpdateCallback,
+    ToolLoadoutChanges, ToolNamespace, ToolReach, ToolUpdateCallback,
 };
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
@@ -62,6 +62,15 @@ impl ExtensionTool {
                 None
             }
         }
+    }
+}
+
+/// A `reachesTools` result: `"all"`, or the words of the input that may name tools.
+fn reach_from_json(value: &Value) -> ToolReach {
+    match value {
+        Value::String(all) if all == "all" => ToolReach::All,
+        Value::Array(words) => ToolReach::Words(words.iter().filter_map(Value::as_str).map(str::to_string).collect()),
+        _ => ToolReach::Words(Vec::new()),
     }
 }
 
@@ -153,6 +162,19 @@ impl AgentTool for ExtensionTool {
             Some("parallel") => Some(ToolExecutionMode::Parallel),
             _ => None,
         }
+    }
+
+    fn reaches_tools(&self, input: &Value) -> Option<ToolReach> {
+        if !self.descriptor.has_reaches_tools {
+            return None;
+        }
+        // A handler that throws reaches nothing; the error goes to the extension error listeners.
+        let reach = self.blocking_hook("reachesTools", vec![json!(self.descriptor.name), input.clone()]);
+        Some(reach.as_ref().map_or_else(|| ToolReach::Words(Vec::new()), reach_from_json))
+    }
+
+    fn declares_reaches_tools(&self) -> bool {
+        self.descriptor.has_reaches_tools
     }
 
     fn prepare_arguments(&self, args: Value) -> anyhow::Result<Value> {

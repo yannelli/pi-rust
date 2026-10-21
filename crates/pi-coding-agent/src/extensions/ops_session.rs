@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use pi_agent::AgentToolResult;
+use pi_agent::{AgentToolResult, ToolReach};
 use pi_js::{HostValue, JsError};
 use serde_json::{Value, json};
 
@@ -151,6 +151,25 @@ pub(crate) fn tool_info_json(info: &crate::agent_session::ToolInfo) -> Value {
     value
 }
 
+/// A `getAllTools` entry. `reachesTools` is a function upstream; `api.js` turns the `true` here
+/// into one.
+fn all_tools_entry(info: &crate::agent_session::ToolInfo) -> Value {
+    let mut value = tool_info_json(info);
+    if info.reaches_tools {
+        value["reachesTools"] = json!(true);
+    }
+    value
+}
+
+/// What `reachesTools` of a tool without extension JavaScript returns: `"all"`, the words, or null.
+fn tool_reaches(session: &AgentSession, name: &str, input: &Value) -> Value {
+    match session.tool(name).and_then(|tool| tool.reaches_tools(input)) {
+        Some(ToolReach::All) => json!("all"),
+        Some(ToolReach::Words(words)) => json!(words),
+        None => Value::Null,
+    }
+}
+
 fn report(runner: &ExtensionRunner, event: &str) -> impl Fn(anyhow::Error) + Send + 'static {
     let weak = Arc::downgrade(&runner.this());
     let event = event.to_string();
@@ -203,7 +222,8 @@ fn action(runner: &ExtensionRunner, session: &Arc<AgentSession>, name: &str, arg
         "getSessionName" => Ok(json!(session.session_name())),
         "setLabel" => session.set_label(&args.str(1)?, args.opt_str(2).as_deref()).map(|_| done).map_err(error),
         "getActiveTools" => Ok(json!(session.active_tool_names())),
-        "getAllTools" => Ok(session.all_tools().iter().map(tool_info_json).collect()),
+        "getAllTools" => Ok(session.all_tools().iter().map(all_tools_entry).collect()),
+        "toolReaches" => Ok(tool_reaches(session, &args.str(1)?, &args.json(2))),
         "getSettings" => Ok(serde_json::to_value(session.settings().settings()).unwrap_or(Value::Null)),
         "setActiveTools" => {
             let names: Vec<String> = serde_json::from_value(args.json(1)).unwrap_or_default();
