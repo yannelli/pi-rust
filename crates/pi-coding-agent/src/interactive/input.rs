@@ -176,6 +176,7 @@ impl InteractiveMode {
         }
         let session = self.session();
         if session.is_compacting() {
+            self.editor.record_prompt(&text);
             self.queue_compaction_message(text, true);
         } else if session.is_streaming() {
             self.editor.record_prompt(&text);
@@ -252,7 +253,6 @@ impl InteractiveMode {
     }
 
     fn queue_compaction_message(&self, text: String, follow_up: bool) {
-        self.editor.record_prompt(&text);
         self.editor.set_text("");
         self.state.borrow_mut().compaction_queue.push(CompactionQueued { text, follow_up });
         self.update_pending_messages_display();
@@ -341,20 +341,25 @@ impl InteractiveMode {
                 return;
             }
         }
+        self.send_prompt(text.clone(), &text);
+    }
+
+    /// Send `text` as typed input is sent: queued during compaction, steering while streaming,
+    /// else a new run. `typed` goes to the editor history.
+    pub(super) fn send_prompt(&self, text: String, typed: &str) {
+        self.editor.record_prompt(typed);
         let session = self.session();
         if session.is_compacting() {
             self.queue_compaction_message(text, false);
             return;
         }
         if session.is_streaming() {
-            self.editor.record_prompt(&text);
             self.editor.set_text("");
             self.prompt_while_streaming(text, StreamingBehavior::Steer);
             return;
         }
         self.flush_pending_bash_components();
-        self.queue_prompt(text.clone(), Vec::new());
-        self.editor.record_prompt(&text);
+        self.queue_prompt(text, Vec::new());
     }
 
     fn flush_pending_bash_components(&self) {

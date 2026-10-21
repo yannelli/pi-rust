@@ -62,6 +62,10 @@
       "reason": "pi-rust extension: /diff"
     },
     {
+      "item": "init",
+      "reason": "pi-rust extension: /init"
+    },
+    {
       "item": "undo",
       "reason": "pi-rust extension: /undo"
     }
