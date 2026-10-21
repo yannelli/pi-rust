@@ -37,6 +37,11 @@ mod socket_file {
 
     use super::{assert_locked, unique};
 
+    // macOS temp dirs are deep enough to push a socket path past its 104-byte limit.
+    fn short_tempdir() -> tempfile::TempDir {
+        tempfile::Builder::new().tempdir_in("/tmp").unwrap()
+    }
+
     fn socket_path(dir: &Path, name: &str) -> std::path::PathBuf {
         let digest = ring::digest::digest(&ring::digest::SHA256, name.as_bytes());
         let key: String = digest.as_ref()[..16].iter().map(|byte| format!("{byte:02x}")).collect();
@@ -45,7 +50,7 @@ mod socket_file {
 
     #[tokio::test]
     async fn admits_one_holder_and_removes_its_file_on_release() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = short_tempdir();
         let name = unique("file");
         let held = socket_file_lock(&name, dir.path()).await.unwrap();
         let path = socket_path(dir.path(), &name);
@@ -78,7 +83,7 @@ mod socket_file {
 
     #[tokio::test]
     async fn takes_over_a_leftover_file_nobody_accepts_on() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = short_tempdir();
         let name = unique("stale");
         drop(UnixListener::bind(socket_path(dir.path(), &name)).unwrap());
         assert!(socket_path(dir.path(), &name).exists());
