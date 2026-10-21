@@ -49,6 +49,16 @@ pub(super) struct Reached<'a> {
 }
 
 impl SchedState {
+    /// Copies of the live tasks `owner` owns directly, in id order; each lies listed below its owner.
+    pub fn owned_directly(&self, owner: TaskId) -> Vec<TaskRecord> {
+        let nodes = self.below.get(&Node::Task(owner)).into_iter().flatten();
+        let live = nodes.filter_map(|node| match node {
+            Node::Task(id) => self.live.get(id),
+            Node::Conversation(_) => None,
+        });
+        live.filter(|record| record.owner == Some(owner)).cloned().collect()
+    }
+
     /// Whether the chain above `node` is loaded, without walking: known tasks outside `unloaded` have a loaded chain.
     pub fn known(&self, node: Node) -> bool {
         match node {

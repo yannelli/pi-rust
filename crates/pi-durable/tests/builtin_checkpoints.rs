@@ -4,7 +4,7 @@
 use pi_chord::Json;
 use pi_durable::documents::CheckpointInfo;
 use pi_durable::harness::AGENT_DOC;
-use pi_durable::harness::tool::{NESTED_CALLS_DOC, NESTED_RESULT_DOC};
+use pi_durable::harness::tool::NESTED_CALL_DOC;
 use pi_durable::harness::usage::PROVIDER_DOC;
 use serde_json::json;
 
@@ -15,8 +15,7 @@ fn info() -> CheckpointInfo {
 #[test]
 fn keeps_task_scoped_documents_as_deltas_until_their_task_retires() {
     let empty = Json::from(json!({}));
-    assert!(!NESTED_CALLS_DOC.definition().checkpoint_when(&empty, &[], info()).unwrap());
-    assert!(!NESTED_RESULT_DOC.definition().checkpoint_when(&empty, &[], info()).unwrap());
+    assert!(!NESTED_CALL_DOC.definition().checkpoint_when(&empty, &[], info()).unwrap());
 }
 
 #[test]

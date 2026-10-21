@@ -179,6 +179,7 @@ async fn run(
         ended: AtomicBool::new(false),
         admissions: Mutex::new(Vec::new()),
         sequence: AtomicU32::new(0),
+        made_nested: Mutex::new(None),
         resumes: tool.replay == Some(ToolReplay::Safe),
     });
     let streams = !matches!(input, ToolTaskInput::Nested { progress: Some(false), .. });

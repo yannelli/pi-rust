@@ -1,6 +1,6 @@
 //! Built-in tool task (upstream `harness/tool.ts`): resolves the called tool among its phase agent's tools,
 //! validates, runs `before_tool`, records intent, executes, runs `after_tool`, and settles the result. A
-//! model-issued call appends its result entry; a nested call writes its result to its caller's document.
+//! model-issued call appends its result entry; a nested call writes its result to its caller's `NESTED_CALL_DOC`.
 
 mod api;
 mod execute;
@@ -23,9 +23,7 @@ use super::scheduler::{HookApi, TaskRuntime};
 use super::task::{Task, TaskDefinition, define_task};
 use super::tool_registration::{ToolRegistration, ToolReplay};
 use super::types::{NestedToolExecutionResult, ToolControl, ToolExecutionResult};
-use crate::documents::{
-    DocFamilySpec, DocFamilyToken, DocSpec, DocToken, TaskScope, define_doc, define_doc_family, encode,
-};
+use crate::documents::{DocFamilySpec, DocFamilyToken, TaskScope, define_doc_family, encode};
 use crate::entries::ASSISTANT_ENTRY;
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{EntryId, TaskId};
@@ -114,29 +112,29 @@ pub struct ToolHooks {
     pub after_tool: Option<Hook<(ToolHookCall, ToolExecutionResult), Option<ToolExecutionResult>>>,
 }
 
-/// Index of a call's nested calls by key, so a rerun finds the nested calls it already made.
+/// Memo of a tool task that made a nested call, in any attempt, committed before the first admission of each attempt:
+/// only then can `pi.live` hold slots below it, which settling removes. A crash between the two only costs a scan.
+pub(crate) const MADE_NESTED_CALLS: &str = "pi.tool.madeNestedCalls";
+
+/// One nested call of a running tool: its task, and once it ended, its result.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct NestedCalls {
-    #[serde(with = "crate::harness::util::json_map")]
-    pub calls: pi_chord::JsonMap,
+#[serde(rename_all = "camelCase")]
+pub struct NestedCallState {
+    /// Absent only inside the commit that creates the call; a creation that fails leaves no member.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<TaskId>,
+    /// Exactly what `execute_tool()` returns; absent while running, and for a call the scheduler faulted or orphaned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<NestedToolExecutionResult>,
 }
 
-// The nested-call documents retire with their task, so they never need a base.
-pub static NESTED_CALLS_DOC: LazyLock<DocToken<NestedCalls, TaskScope>> = LazyLock::new(|| {
-    define_doc(DocSpec::new("pi.tool.nested", 1, TaskScope, NestedCalls::default, |_, _, _| Ok(false)))
-        .unwrap_or_else(|_| unreachable!("pi.tool.nested is a valid definition"))
-});
-
-/// The stored result of one nested call, keyed by the nested task ID in its caller's family.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct NestedResult {
-    pub result: NestedToolExecutionResult,
-}
-
-/// The result of one nested call, exactly as `execute_tool()` returns it; retires with the caller.
-pub static NESTED_RESULT_DOC: LazyLock<DocFamilyToken<NestedResult, NestedResult, TaskScope>> = LazyLock::new(|| {
-    define_doc_family(DocFamilySpec::new("pi.tool.nested-result", 1, TaskScope, |seed| seed, |_, _, _| Ok(false)))
-        .unwrap_or_else(|_| unreachable!("pi.tool.nested-result is a valid definition"))
+/// The nested calls of a tool call, a task-scoped family of the calling task keyed by the nested call's key: so a rerun
+/// finds the calls it already made, and the caller reads each result. Created with the nested task; the nested call's
+/// terminal commit adds its result. One document per call, so no commit rewrites the others. Retires with the caller.
+pub static NESTED_CALL_DOC: LazyLock<DocFamilyToken<NestedCallState, (), TaskScope>> = LazyLock::new(|| {
+    let spec =
+        DocFamilySpec::new("pi.tool.nested-call", 1, TaskScope, |()| NestedCallState::default(), |_, _, _| Ok(false));
+    define_doc_family(spec).unwrap_or_else(|_| unreachable!("pi.tool.nested-call is a valid definition"))
 });
 
 static TOOL_TASK: LazyLock<Task> = LazyLock::new(|| {

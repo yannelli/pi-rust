@@ -5,13 +5,12 @@ mod support;
 use std::sync::{Arc, Mutex};
 
 use pi_ai::{ContentBlock, Message, ToolResultMessage};
-use pi_durable::StorageWrite;
 use pi_durable::env::{LocalEnvOptions, LocalExecutionEnv};
 use pi_durable::harness::tool::{ToolHookCall, ToolHooks, tool_task};
 use pi_durable::harness::*;
 use pi_durable::storage::MemoryStorage;
 use pi_durable::tools::{BashToolOptions, create_bash_tool};
-use pi_durable::types::DocumentContent;
+use pi_durable::{CommitChange, DocumentCommitChange};
 use serde_json::{Value, json};
 use support::ControlledStorage;
 use support::chat::{add_tool, answer, call, no_parameters};
@@ -145,6 +144,22 @@ async fn stores_exactly_what_callers_and_events_get_without_the_model_s_output_a
     setup.faux.set_responses([call("probe", "c1"), answer("done")]);
     let storage = Arc::new(ControlledStorage::default());
     let (harness, root) = open_chat(storage.clone(), &setup).await;
+    // The result each nested call's document got, as committed.
+    let stored = Arc::new(Mutex::new(Vec::new()));
+    let sink = stored.clone();
+    let _listener = harness.subscribe_commits(move |publication, _| {
+        for change in &publication.changes {
+            if let CommitChange::Document(DocumentCommitChange::Document { record, value: Some(value), ops, .. }) =
+                change
+                && record.kind == "pi.tool.nested-call"
+                && !ops.is_empty()
+                && !value["result"].is_null()
+            {
+                sink.lock().unwrap().push(Value::from(&value["result"]));
+            }
+        }
+        Ok(())
+    });
     let stream = watch_events(&harness, root.id, &ctx()).await.unwrap();
     let ends = Arc::new(Mutex::new(Vec::new()));
     let sink = ends.clone();
@@ -169,20 +184,7 @@ async fn stores_exactly_what_callers_and_events_get_without_the_model_s_output_a
     assert_eq!((received[1]["structuredOutput"].clone(), received[1]["isError"].clone()), (Value::Null, json!(false)));
     assert!(received[1].as_object().unwrap().contains_key("structuredOutput"));
     assert!(received[0].get("output").is_none());
-    let stored: Vec<Value> = storage
-        .commits()
-        .into_iter()
-        .flatten()
-        .filter_map(|write| match write {
-            StorageWrite::DocumentCreate { record, content: DocumentContent::Base { value, .. } }
-                if record.kind == "pi.tool.nested-result" =>
-            {
-                Some(Value::from(&value["result"]))
-            }
-            _ => None,
-        })
-        .collect();
-    assert_eq!(stored, received);
+    assert_eq!(*stored.lock().unwrap(), received);
     assert_eq!(*ends.lock().unwrap(), received);
 }
 

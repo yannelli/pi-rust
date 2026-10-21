@@ -2,16 +2,19 @@
 //! records imply (spec 5.4, 5.5).
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use pi_durable::harness::*;
 use pi_durable::session::{SessionOptions, Tx, create_session};
 use pi_durable::tasks::TaskOptions;
 use pi_durable::*;
 
-use super::support::task_support::{eventually, open_tasks};
+use super::support::task_support::{aborted, eventually, open_tasks};
 use super::support::{ControlledStorage, Deferred, StorageCall, context};
-use super::{Board, Ending, Opened, child, create_hold, hold_input, hold_task, open_harness, settled, settles, status};
+use super::{
+    Board, Ending, Opened, aborted_state, checkpoint, child, create_hold, hold_input, hold_task, open_harness, settled,
+    settles, status,
+};
 
 /// The commit count, by order, of each write of a task for which `keep` holds.
 fn task_writes(storage: &ControlledStorage, keep: impl Fn(&TaskRecord) -> bool) -> Vec<(usize, TaskRecord)> {
@@ -137,5 +140,99 @@ async fn keeps_a_scope_busy_after_reopen_for_work_below_an_ended_task_whose_chai
     board.open("inner", Ending::Completed);
     assert_eq!(settles(&harness, inner).await, "completed");
     root.wait_for_idle(&context()).await.unwrap();
+    harness.close(&context()).await.unwrap();
+}
+
+type Looked = Arc<Mutex<Option<Vec<TaskId>>>>;
+type Runtimes = Arc<Mutex<Option<TaskRuntime>>>;
+
+/// Records its owned tasks once its `look` gate opens, then holds until it is aborted.
+fn probe_task(looked: &Looked, runtimes: &Runtimes, look: &Deferred) -> Task {
+    let (looked, runtimes, look) = (looked.clone(), runtimes.clone(), look.clone());
+    define_task(
+        TaskDefinition::new("test.index.probe", 1, |_| Ok(checkpoint("look")))
+            .phase("look", move |_, runtime, context| {
+                let (looked, runtimes, look) = (looked.clone(), runtimes.clone(), look.clone());
+                async move {
+                    *runtimes.lock().unwrap() = Some(runtime.clone());
+                    tokio::select! {
+                        () = look.wait() => {}
+                        () = aborted(runtime.signal()) => return Ok(()),
+                    }
+                    let owned = runtime.owned_tasks(&context).await?;
+                    *looked.lock().unwrap() = Some(owned.iter().map(|record| record.id).collect());
+                    aborted(runtime.signal()).await;
+                    Ok(())
+                }
+            })
+            .abort(|_, runtime, context| async move {
+                runtime.commit(|_, _| async { Ok(aborted_state()) }, &context).await
+            }),
+    )
+}
+
+#[tokio::test]
+async fn lists_the_live_tasks_a_task_owns_directly_in_id_order_also_after_a_reopen() {
+    let storage = Arc::new(ControlledStorage::default());
+    let board = Board::default();
+    let hold = hold_task(&board);
+    let (looked, runtimes, look) = (Looked::default(), Runtimes::default(), Deferred::default());
+    let probe = probe_task(&looked, &runtimes, &look);
+    let opened = open_tasks(storage.clone(), vec![hold.clone(), probe.clone()]).await;
+    let harness = opened.harness;
+    let root = harness.root(&context(), CreateOptions::default()).await.unwrap();
+    harness.resume().unwrap();
+    // The probe owns: two held tasks, one that ends, a grandchild below one of them, and a conversation with a task.
+    let (id, held) = (root.id, hold.clone());
+    let stage = move |tx: Tx| async move {
+        let probe = tx.create_task(probe, hold_input("probe", false), TaskOptions::conversation(id)).await?;
+        let first = tx.create_task(held.clone(), hold_input("first", false), TaskOptions::owned_by(probe)).await?;
+        let ends = tx.create_task(held.clone(), hold_input("ends", false), TaskOptions::owned_by(probe)).await?;
+        let second = tx.create_task(held.clone(), hold_input("second", false), TaskOptions::owned_by(probe)).await?;
+        tx.create_task(held.clone(), hold_input("grandchild", false), TaskOptions::owned_by(first)).await?;
+        let child = tx.create_conversation(ConversationOwnership::Task { task_id: probe }).await?;
+        tx.create_task(held, hold_input("inside", false), TaskOptions::conversation(child.id)).await?;
+        Ok((first, ends, second))
+    };
+    let (first, ends, second) = root.commit(stage, &context()).await.unwrap();
+    board.open("ends", Ending::Completed);
+    harness.wait_for_task(ends, &context()).await.unwrap();
+    look.resolve();
+    eventually(|| async { looked.lock().unwrap().is_some() }).await;
+    assert_eq!(looked.lock().unwrap().clone(), Some(vec![first, second]));
+    harness.close(&context()).await.unwrap();
+
+    // After a reopen the rerun sees the same tasks, which an earlier invocation created.
+    storage.reopen();
+    let (looked, runtimes, look) = (Looked::default(), Runtimes::default(), Deferred::default());
+    let opened = open_tasks(storage.clone(), vec![hold, probe_task(&looked, &runtimes, &look)]).await;
+    opened.harness.resume().unwrap();
+    look.resolve();
+    eventually(|| async { looked.lock().unwrap().is_some() }).await;
+    assert_eq!(looked.lock().unwrap().clone(), Some(vec![first, second]));
+    opened.harness.close(&context()).await.unwrap();
+}
+
+#[tokio::test]
+async fn rejects_owned_tasks_once_its_invocation_has_ended() {
+    let storage = Arc::new(ControlledStorage::default());
+    let (looked, runtimes, look) = (Looked::default(), Runtimes::default(), Deferred::default());
+    let probe = probe_task(&looked, &runtimes, &look);
+    let opened = open_tasks(storage, vec![probe.clone()]).await;
+    let harness = opened.harness;
+    let root = harness.root(&context(), CreateOptions::default()).await.unwrap();
+    harness.resume().unwrap();
+    let id = root.id;
+    let create = move |tx: Tx| async move {
+        tx.create_task(probe, hold_input("probe", false), TaskOptions::conversation(id)).await
+    };
+    let probe = root.commit(create, &context()).await.unwrap();
+    eventually(|| async { runtimes.lock().unwrap().is_some() }).await;
+    let runtime = runtimes.lock().unwrap().clone().unwrap();
+    // Aborting joins the run invocation, which has ended by then.
+    harness.abort_task(probe, &context()).await.unwrap();
+    harness.wait_for_task(probe, &context()).await.unwrap();
+    let error = runtime.owned_tasks(&context()).await.unwrap_err();
+    assert!(error.to_string().contains("invocation has ended"), "{error}");
     harness.close(&context()).await.unwrap();
 }

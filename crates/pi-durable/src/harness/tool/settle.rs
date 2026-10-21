@@ -8,11 +8,9 @@ use pi_chord::{Context, Json};
 use pi_telemetry::SpanAttributes;
 
 use super::api::CallState;
+use super::decode_input;
 use super::result::{append_tool_result, nested_result, summary_of};
-use super::{
-    NESTED_CALLS_DOC, NESTED_RESULT_DOC, NestedResult, ToolHookCall, ToolTaskInput, ToolTaskResult, json_equal,
-    tool_task,
-};
+use super::{MADE_NESTED_CALLS, NESTED_CALL_DOC, ToolHookCall, ToolTaskInput, ToolTaskResult, json_equal, tool_task};
 use crate::documents::encode;
 use crate::errors::{DurableError, DurableResult};
 use crate::harness::live::{
@@ -36,12 +34,6 @@ pub(crate) enum Ending {
     Failed(String),
 }
 
-fn task_ids(calls: &pi_chord::JsonMap) -> Vec<TaskId> {
-    let mut ids: Vec<TaskId> = calls.values().filter_map(|value| value.deserialize_into().ok()).collect();
-    ids.sort();
-    ids
-}
-
 /// Commit the tool's terminal state and mark its slot done. Nested calls this call left running are aborted
 /// first. `build` receives the slot's progress so interruption and abort can report it.
 pub(crate) async fn settle(
@@ -54,9 +46,17 @@ pub(crate) async fn settle(
     duration_ms: Option<u64>,
 ) -> DurableResult<()> {
     let task_id = runtime.task_id();
-    let index = runtime.snapshot(&NESTED_CALLS_DOC, task_id, context).await?;
-    let nested_ids =
-        index.and_then(|index| index.get("calls").and_then(Json::as_object).map(task_ids)).unwrap_or_default();
+    // Every live nested call the task owns, also those an earlier attempt made and this one never called again.
+    let name = tool_task().name.clone();
+    let nested_ids: Vec<TaskId> = runtime
+        .owned_tasks(context)
+        .await?
+        .into_iter()
+        .filter(|record| record.kind == name && matches!(decode_input(record), Ok(ToolTaskInput::Nested { .. })))
+        .map(|record| record.id)
+        .collect();
+    // Read before the settling commit: no admission starts after the end, and those underway were awaited.
+    let made_nested = runtime.memo(MADE_NESTED_CALLS).await? == Some(Json::from(true));
     // Mark them all before waiting for any: one may run until a sibling is cancelled.
     try_join_all(nested_ids.iter().map(|id| runtime.abort_owned(*id, context))).await?;
     let (input, call, conversation_id, now) =
@@ -71,14 +71,13 @@ pub(crate) async fn settle(
                 if let Some(usage) = &nested.usage {
                     record_usage(&tx, conversation_id, UsageBucket::Tools, &call.name, usage).await?;
                 }
-                // The caller is never terminal before its owned nested calls; a missing entry is a bug.
-                let index = tx.doc(&NESTED_CALLS_DOC, *parent).await?.get()?;
-                let listed: Option<TaskId> = index.calls.get(key).and_then(|v| v.deserialize_into().ok());
-                if listed != Some(task_id) {
+                // The caller is never terminal before its owned nested calls, so its document is open; another task in
+                // it is a bug, not a race.
+                let state = tx.family_doc(&NESTED_CALL_DOC, *parent, key, &()).await?;
+                if state.get()?.task_id != Some(task_id) {
                     return Err(DurableError::error(format!("Nested call {} is not in its caller's index", call.id)));
                 }
-                let stored = NestedResult { result: nested.clone() };
-                tx.family_doc(&NESTED_RESULT_DOC, *parent, &task_id.to_string(), &stored).await?;
+                state.edit(|state| state.result = Some(nested.clone()))?;
                 if let Some(SlotRef::Nested(slot)) = tool_slot(&mut live, task_id) {
                     SlotRef::Nested(&mut *slot).finish();
                     slot.summary = Some(summary_of(&nested, result.output.as_deref().unwrap_or_default()));
@@ -98,8 +97,9 @@ pub(crate) async fn settle(
                 ToolTaskResult::Model { entry_id: entry.id, control }
             }
         };
-        // A call that made no nested calls has no slots below it.
-        if !nested_ids.is_empty() {
+        // A call that made no nested calls, in any attempt, has no slots below it; skipping the scan keeps many leaves
+        // linear.
+        if made_nested {
             remove_nested_slots(&mut live, task_id);
         }
         draft.set(&live)?;
@@ -114,8 +114,8 @@ pub(crate) async fn settle(
     runtime.commit(change, context).await
 }
 
-/// Create nested call `key` of the call `parent_call_id` in one commit: its tool task, its slot, and its index
-/// entry. A key already in the index returns that call's task when it names the same tool and arguments.
+/// Create nested call `key` of the call `parent_call_id` in one commit: its tool task, its slot, and its
+/// `NESTED_CALL_DOC`. A key already made returns that call's task when it names the same tool and arguments.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn start_nested_call(
     runtime: &TaskRuntime,
@@ -136,8 +136,9 @@ pub(crate) async fn start_nested_call(
     let (owner, conversation_id) = (runtime.task_id(), runtime.conversation_id());
     let (key, parent_call_id) = (key.to_owned(), parent_call_id.to_owned());
     let change = move |tx: Tx| async move {
-        let index = tx.doc(&NESTED_CALLS_DOC, owner).await?;
-        let existing: Option<TaskId> = index.get()?.calls.get(&key).and_then(|v| v.deserialize_into().ok());
+        // Opened, or created empty for a key not made yet.
+        let state = tx.family_doc(&NESTED_CALL_DOC, owner, &key, &()).await?;
+        let existing = state.get()?.task_id;
         if let Some(existing) = existing {
             let record = tx.task(existing).await?;
             let replayed = record.as_ref().is_some_and(TaskRecord::is_terminal);
@@ -178,7 +179,7 @@ pub(crate) async fn start_nested_call(
             links: Default::default(),
         };
         let created = tx.create_task(tool_task(), encode(&input)?, options).await?;
-        index.edit(|index| index.calls.insert(key, encode(&created).unwrap_or(Json::Null)))?;
+        state.edit(|state| state.task_id = Some(created))?;
         let live = tx.doc(&LIVE_DOC, conversation_id).await?;
         live.edit(|live| {
             live.nested_tools.get_or_insert_with(Vec::new).push(NestedToolSlot { task_id: created, ..slot })
