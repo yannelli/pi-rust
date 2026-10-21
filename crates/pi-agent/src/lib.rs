@@ -16,8 +16,8 @@ pub mod validate;
 pub use agent::{Agent, AgentHooks, AgentInitialState, AgentState, AsyncListener, Listener, QueueMode};
 pub use agent_loop::{
     AfterToolCallFn, AgentContext, AgentLoopConfig, ApiKeyFn, BeforeToolCallFn, CallableToolsFn, ConvertToLlmFn,
-    EventSink, MessageSource, StreamFn, TransformContextFn, default_convert_to_llm, run_agent_loop,
-    run_agent_loop_continue, sync_sink,
+    EventSink, MessageSource, StreamFn, TransformContextFn, default_agent_identity, default_convert_to_llm,
+    run_agent_loop, run_agent_loop_continue, sync_sink,
 };
 pub use described::{DescribedTool, with_description};
 pub use hooks::{

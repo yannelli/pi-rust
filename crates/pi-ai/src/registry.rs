@@ -8,6 +8,7 @@ use pi_telemetry::TelemetrySpan;
 use tokio_util::sync::CancellationToken;
 
 use crate::env::get_env_api_key;
+use crate::identity::ClientIdentity;
 use crate::provider_options::{AzureOptions, BedrockOptions, ReasoningSummary, VertexOptions};
 use crate::providers;
 use crate::request::RequestOptions;
@@ -87,6 +88,9 @@ pub struct StreamOptions {
     /// Extra headers; a `None` value suppresses a provider default header.
     pub headers: BTreeMap<String, String>,
     pub suppressed_headers: Vec<String>,
+    /// How the request identifies the calling app: `User-Agent` and provider attribution headers.
+    /// Unset fields use pi-ai's defaults: a detailed `User-Agent` and no attribution.
+    pub identity: Option<ClientIdentity>,
     pub session_id: Option<String>,
     /// Provider-scoped environment values that take precedence over the process environment.
     pub env: BTreeMap<String, String>,
@@ -229,13 +233,13 @@ fn dispatch_stream(model: &Model, context: &Context, mut options: StreamOptions)
     provider.stream(model, context, options)
 }
 
-/// OpenCode routes a conversation by its `x-opencode-session` header.
+/// OpenCode routes a conversation by its `x-opencode-session` header; configured headers win.
 fn add_opencode_session_header(model: &Model, options: &mut StreamOptions) {
-    let session = crate::attribution::session_headers(model, options.session_id.as_deref()).unwrap_or_default();
-    for (name, value) in session {
-        if !options.headers.keys().any(|present| present.eq_ignore_ascii_case(&name)) {
-            options.headers.insert(name, value);
-        }
+    let Some((name, value)) = crate::identity::opencode_session_header(model, options.session_id.as_deref()) else {
+        return;
+    };
+    if !options.headers.keys().any(|present| present.eq_ignore_ascii_case(name)) {
+        options.headers.insert(name.to_string(), value);
     }
 }
 

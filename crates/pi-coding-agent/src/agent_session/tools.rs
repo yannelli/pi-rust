@@ -154,6 +154,11 @@ impl ToolState {
         all.filter(|tool| self.is_allowed(tool.name())).cloned().collect()
     }
 
+    /// Whether `name` is a built-in tool (upstream `_baseToolDefinitions`), allowed or not.
+    pub fn is_builtin(&self, name: &str) -> bool {
+        self.builtin.iter().any(|tool| tool.name() == name)
+    }
+
     pub fn set_builtin(&mut self, tools: Vec<SharedTool>) {
         self.builtin = tools;
     }

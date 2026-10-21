@@ -4,6 +4,7 @@
 use std::fmt;
 use std::time::Duration;
 
+use pi_ai::{ClientIdentity, UserAgentMode};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
@@ -12,20 +13,14 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const RETRYABLE_STATUS_CODES: [u16; 7] = [408, 425, 429, 500, 502, 503, 504];
 
-/// `pi/<version> (<platform>; rust; <arch>)` with Node platform and architecture names.
+/// pi's `User-Agent` for its own network requests; the same detailed form pi-ai sends to providers.
 pub fn pi_user_agent(version: &str) -> String {
-    let platform = match std::env::consts::OS {
-        "macos" => "darwin",
-        "windows" => "win32",
-        other => other,
+    let identity = ClientIdentity {
+        user_agent: Some(UserAgentMode::Detailed),
+        version: Some(version.into()),
+        ..ClientIdentity::default()
     };
-    let arch = match std::env::consts::ARCH {
-        "x86_64" => "x64",
-        "aarch64" => "arm64",
-        "x86" => "ia32",
-        other => other,
-    };
-    format!("pi/{version} ({platform}; rust; {arch})")
+    pi_ai::format_user_agent(Some(&identity))
 }
 
 #[derive(Clone, Debug)]

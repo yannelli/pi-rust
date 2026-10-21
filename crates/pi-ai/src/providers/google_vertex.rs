@@ -5,7 +5,7 @@ mod auth;
 #[cfg(test)]
 mod tests;
 
-use crate::http::pi_user_agent;
+use crate::identity::identity_headers;
 use crate::providers::common::{HttpRequest, header_map};
 use crate::providers::google::{build_params, model_path, spawn_google, to_wire};
 use crate::registry::{ApiProvider, StreamOptions};
@@ -42,18 +42,17 @@ impl ApiProvider for GoogleVertex {
                 let (model_id, body) = to_wire(&params)?;
                 let path = model_path(&model_id, true)?;
                 let url = vertex_url(&model, scope.as_ref(), &path);
-                let auth = match api_key {
-                    Some(key) => vec![("user-agent", pi_user_agent()), ("x-goog-api-key", key)],
+                let mut auth = identity_headers(&model, options.identity.as_ref());
+                match api_key {
+                    Some(key) => auth.push(("x-goog-api-key", key)),
                     None => {
                         let token = auth::application_default_token(&options).await?;
-                        let bearer = format!("Bearer {}", token.token);
-                        let mut auth = vec![("user-agent", pi_user_agent()), ("authorization", bearer)];
+                        auth.push(("authorization", format!("Bearer {}", token.token)));
                         if let Some(quota) = token.quota_project {
                             auth.push(("x-goog-user-project", quota));
                         }
-                        auth
                     }
-                };
+                }
                 Ok(HttpRequest { url, headers: header_map(auth, &model, &options), body })
             }
         };

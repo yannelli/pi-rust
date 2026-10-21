@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use futures::FutureExt;
 use pi_agent::{Agent, AgentEvent, AgentHooks, AgentInitialState, AgentTurnDecision, QueueMode, StreamFn};
-use pi_ai::{Message, StopReason};
+use pi_ai::{ClientAttribution, ClientIdentity, Message, StopReason, UserAgentMode, pi_attribution};
 use support::*;
 
 fn agent(stream_fn: StreamFn, initial: AgentInitialState) -> Agent {
@@ -116,4 +116,23 @@ fn peeks_the_next_selected_queued_messages_without_consuming_them() {
     agent.clear_steering_queue();
     assert_eq!(peek(&agent), ["follow-up"]);
     assert_eq!((agent.steering_mode(), agent.follow_up_mode()), (QueueMode::OneAtATime, QueueMode::All));
+}
+
+#[tokio::test]
+async fn attributes_requests_to_pi_by_default_and_merges_a_configured_identity_over_it() {
+    let (requests, stream_fn) = sequence(Vec::new());
+    let agent = agent(stream_fn, AgentInitialState::default());
+    agent.prompt("hello", Vec::new()).await.unwrap();
+    let acme = ClientAttribution { name: "acme".into(), url: "https://acme.example".into(), categories: None };
+    let short = Some(UserAgentMode::Short);
+    let attributed = ClientIdentity { user_agent: short.clone(), ..ClientIdentity::attributed(acme.clone()) };
+    agent.update_hooks(|hooks| hooks.stream_options.identity = Some(attributed.clone()));
+    agent.prompt("hello again", Vec::new()).await.unwrap();
+    let plain = ClientIdentity { user_agent: short.clone(), ..ClientIdentity::default() };
+    agent.update_hooks(|hooks| hooks.stream_options.identity = Some(plain));
+    agent.prompt("and again", Vec::new()).await.unwrap();
+    let received: Vec<_> = requests.lock().unwrap().iter().map(|request| request.identity.clone()).collect();
+    let pi = ClientIdentity::attributed(pi_attribution());
+    assert_eq!(received, [Some(pi.clone()), Some(attributed), Some(ClientIdentity { user_agent: short, ..pi })]);
+    assert_eq!(pi_agent::default_agent_identity(), ClientIdentity::attributed(pi_attribution()));
 }
