@@ -60,10 +60,11 @@ impl ModelRuntime {
     }
 
     /// Remove a virtual model; false when it was not registered.
-    pub fn unregister_virtual_model(&self, provider: &str, id: &str) -> bool {
+    pub fn unregister_virtual_model(self: &Arc<Self>, provider: &str, id: &str) -> bool {
         let removed = write(&self.virtual_models).remove(&(provider.to_string(), id.to_string())).is_some();
         if removed {
             self.rebuild_registry();
+            self.refresh_offline_in_background();
         }
         removed
     }
