@@ -106,6 +106,7 @@ async fn logs_in_with_an_oauth_flow() {
         models_path: models_path(&h.agent_dir),
         credentials: Arc::new(InMemoryCredentialStore::new(BTreeMap::new())),
         oauth: Some(Arc::new(|id: &str| (id == "local").then(|| Arc::new(FakeOAuth) as Arc<dyn OAuthAuth>))),
+        credential_env: crate::offline_guard::credential_free_env(),
     })
     .await;
     let options = runtime.find_login_providers("local").await;

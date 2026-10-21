@@ -58,6 +58,11 @@ fn env(pairs: &[(&str, &str)]) -> AuthOverrides {
     }
 }
 
+/// An environment lookup over fixed pairs, in place of the process environment.
+fn lookup(pairs: &'static [(&'static str, &'static str)]) -> Arc<dyn EnvLookup> {
+    Arc::new(move |name: &str| pairs.iter().find(|(key, _)| *key == name).map(|(_, value)| value.to_string()))
+}
+
 async fn api_key(resolver: &AuthResolver, provider: &str, overrides: &AuthOverrides) -> Option<String> {
     resolver.resolve(provider, overrides).await.unwrap().and_then(|resolved| resolved.auth.api_key)
 }
@@ -92,7 +97,7 @@ async fn priority_is_runtime_key_then_stored_then_models_json_then_environment()
 
 #[tokio::test]
 async fn anthropic_auth_token_is_sent_as_a_bearer_header() {
-    let resolver = AuthResolver::without_oauth(store(vec![]));
+    let resolver = AuthResolver::without_oauth(store(vec![])).with_env(lookup(&[]));
     let overrides = env(&[(env::ANTHROPIC_AUTH_TOKEN_ENV, "tok"), (env::ANTHROPIC_API_KEY_ENV, "sk-ant")]);
     let resolved = resolver.resolve("anthropic", &overrides).await.unwrap().unwrap();
     assert_eq!(resolved.auth.api_key, None);
@@ -102,9 +107,26 @@ async fn anthropic_auth_token_is_sent_as_a_bearer_header() {
         (env::ANTHROPIC_ORGANIZATION_ID_ENV, "org"),
         (env::ANTHROPIC_IDENTITY_TOKEN_FILE_ENV, "/token"),
     ]);
-    if std::env::var(env::ANTHROPIC_API_KEY_ENV).is_err() && std::env::var(env::ANTHROPIC_OAUTH_TOKEN_ENV).is_err() {
-        let resolved = resolver.resolve("anthropic", &federation).await.unwrap().unwrap();
-        assert_eq!(resolved.env.unwrap()["ANTHROPIC_ORGANIZATION_ID"], "org");
+    let resolved = resolver.resolve("anthropic", &federation).await.unwrap().unwrap();
+    assert_eq!(resolved.env.unwrap()["ANTHROPIC_ORGANIZATION_ID"], "org");
+}
+
+#[tokio::test]
+async fn environment_reads_go_through_the_injected_lookup() {
+    let resolver = AuthResolver::without_oauth(store(vec![]))
+        .with_env(lookup(&[("OPENAI_API_KEY", "sk-lookup"), ("PI_TEST_CUSTOM_KEY", "templated")]));
+    let custom = ProviderAuthConfig { api_key: Some("$PI_TEST_CUSTOM_KEY".into()), ..Default::default() };
+    resolver.set_provider_configs(HashMap::from([("custom".to_string(), custom)]));
+    let none = AuthOverrides::default();
+    assert_eq!(api_key(&resolver, "openai", &none).await.as_deref(), Some("sk-lookup"));
+    assert_eq!(resolver.check("openai").await.unwrap().unwrap().source, "OPENAI_API_KEY");
+    assert_eq!(api_key(&resolver, "openai", &env(&[("OPENAI_API_KEY", "scoped")])).await.as_deref(), Some("scoped"));
+    assert_eq!(api_key(&resolver, "custom", &none).await.as_deref(), Some("templated"));
+    assert_eq!(resolver.check("custom").await.unwrap().unwrap().source, "configured API key");
+    let hidden = AuthResolver::without_oauth(store(vec![])).with_env(lookup(&[]));
+    for provider in ["openai", "anthropic", "amazon-bedrock", "google-vertex", "github-copilot"] {
+        assert!(hidden.check(provider).await.unwrap().is_none(), "{provider}");
+        assert!(hidden.resolve(provider, &none).await.unwrap().is_none(), "{provider}");
     }
 }
 

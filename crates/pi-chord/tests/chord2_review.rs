@@ -1,6 +1,6 @@
 //! Port of upstream `test/review.test.ts`: #5, both #6 cases, and the ctx races (an aborted task ctx, expired and
-//! foreign ctxs, a remote reference's foreign ctx). Left out: the reload cases (#1, #2, #4, #7 to #11 and the
-//! commit observers; phase 4), and the forged ctx (Rust code cannot make a `Ctx`).
+//! foreign ctxs, a remote reference's foreign ctx). The reload cases are in `chord2_review_reload.rs`. Left out:
+//! the forged ctx (Rust code cannot make a `Ctx`).
 
 mod chord2_support;
 

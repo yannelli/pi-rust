@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 use futures::future::try_join_all;
+use indexmap::IndexMap;
 
 use super::{Host, HostImpl, HostRegistry};
 use crate::context::{AbortController, AbortSignal};
@@ -23,7 +24,7 @@ use crate::sync::{BoxFuture, lock};
 /// What a facet runs to serve its types.
 pub type FacetSetup = Arc<dyn Fn(&FacetApi) -> ChordResult<()> + Send + Sync>;
 
-/// A named facet. Reloading a facet (phase 4) replaces everything it served.
+/// A named facet. Reloading a facet replaces everything it served.
 #[derive(Clone)]
 pub struct Facet {
     name: String,
@@ -52,6 +53,40 @@ pub fn define_facet(name: &str, setup: impl Fn(&FacetApi) -> ChordResult<()> + S
     Facet { name: name.to_string(), uses: Vec::new(), setup: Arc::new(setup) }
 }
 
+/// What `reload` loads: a facet, or a module the host's loader turns into one.
+#[derive(Clone)]
+pub enum PluginRef {
+    Facet(Facet),
+    Module(String),
+}
+
+impl From<Facet> for PluginRef {
+    fn from(facet: Facet) -> Self {
+        Self::Facet(facet)
+    }
+}
+
+impl From<&Facet> for PluginRef {
+    fn from(facet: &Facet) -> Self {
+        Self::Facet(facet.clone())
+    }
+}
+
+impl From<&str> for PluginRef {
+    fn from(module: &str) -> Self {
+        Self::Module(module.to_string())
+    }
+}
+
+impl From<String> for PluginRef {
+    fn from(module: String) -> Self {
+        Self::Module(module)
+    }
+}
+
+/// Where a facet's `serve` puts its services: the current code version, or a reload's candidate table.
+pub(crate) type ServeTarget = Arc<Mutex<IndexMap<String, Arc<Service>>>>;
+
 /// `install` and `load` options.
 #[derive(Clone, Copy, Debug)]
 pub struct LoadOptions {
@@ -73,6 +108,7 @@ pub struct FacetApi {
     facet: String,
     signal: AbortSignal,
     added: Arc<Mutex<Vec<Arc<Service>>>>,
+    target: Option<ServeTarget>,
 }
 
 impl FacetApi {
@@ -86,9 +122,27 @@ impl FacetApi {
         F: Fn(&Json, &Json, &mut Declare) -> ChordResult<Implementation> + Send + Sync + 'static,
     {
         let service = make_service(contract, Arc::new(factory), options, &self.facet)?;
-        self.host()?.serve_into(service.clone())?;
+        let host = self.host()?;
+        match &self.target {
+            Some(target) => host.check_served(&lock(target), &service)?,
+            None => host.serve_into(service.clone())?,
+        }
+        if let Some(target) = &self.target {
+            lock(target).insert(service.contract.name().to_string(), service.clone());
+        }
         lock(&self.added).push(service);
         Ok(())
+    }
+
+    /// The API a reload gives a facet it loads: `serve` fills the reload's candidate table.
+    pub(crate) fn for_reload(host: &HostImpl, facet: &str, signal: AbortSignal, target: ServeTarget) -> Self {
+        let (name, added) = (host.name.clone(), Arc::default());
+        Self { host: host.me.clone(), name, facet: facet.to_string(), signal, added, target: Some(target) }
+    }
+
+    /// Runs `facet`'s setup with this API.
+    pub(crate) fn setup(&self, facet: &Facet) -> ChordResult<()> {
+        (facet.setup)(self)
     }
 
     /// The host's name.
@@ -144,7 +198,15 @@ impl HostImpl {
         let mut state = self.state();
         let current = state.current;
         let Some(version) = state.code_versions.get_mut(&current) else { return Ok(()) };
-        if version.services.contains_key(&name) {
+        self.check_served(&version.services, &service)?;
+        version.services.insert(name, service);
+        Ok(())
+    }
+
+    /// Refuses a second service of one type and a service placed on other hosts.
+    fn check_served(&self, services: &IndexMap<String, Arc<Service>>, service: &Service) -> ChordResult<()> {
+        let name = service.contract.name();
+        if services.contains_key(name) {
             return Err(ChordError::error(format!("{name} is already served")));
         }
         if let Some(placement) = service.contract.description().host()
@@ -153,11 +215,10 @@ impl HostImpl {
             let message = format!("{name} is declared for {}, but {} serves it", placement_text(placement), self.name);
             return Err(ChordError::type_error(message));
         }
-        version.services.insert(name, service);
         Ok(())
     }
 
-    fn start_host_object(&self, service: &Service) -> ChordResult<Ref> {
+    pub(crate) fn start_host_object(&self, service: &Service) -> ChordResult<Ref> {
         let options = GetOptions::default();
         let reference =
             self.acquire_ref(&service.contract, &Json::empty_object(), &options, RefOwner::Host, None, false)?;
@@ -187,7 +248,7 @@ impl HostImpl {
         }
         let run = AbortController::new();
         let (host, name, signal) = (self.me.clone(), self.name.clone(), run.signal());
-        let api = FacetApi { host, name, facet: facet.name.clone(), signal, added: Arc::default() };
+        let api = FacetApi { host, name, facet: facet.name.clone(), signal, added: Arc::default(), target: None };
         if let Err(error) = (facet.setup)(&api) {
             run.abort(Some(error.clone()));
             return Err(error);
@@ -202,8 +263,33 @@ impl HostImpl {
         Ok(if options.await_host_objects { ready_all(refs) } else { Box::pin(std::future::ready(Ok(()))) })
     }
 
+    /// Turns plugin references into facets, loading modules through the host's loader.
+    pub(crate) async fn resolve(&self, plugins: Vec<PluginRef>) -> ChordResult<Vec<Facet>> {
+        let modules: Vec<String> = plugins
+            .iter()
+            .filter_map(|plugin| match plugin {
+                PluginRef::Module(module) => Some(module.clone()),
+                PluginRef::Facet(_) => None,
+            })
+            .collect();
+        let mut loaded = Vec::new().into_iter();
+        if !modules.is_empty() {
+            let Some(loader) = self.loader.clone() else {
+                return Err(ChordError::error("loading modules needs a loader (HostOptions::loader)"));
+            };
+            loaded = loader.load(&modules).await?.into_iter();
+        }
+        let facets = plugins.into_iter().map(|plugin| match plugin {
+            PluginRef::Facet(facet) => Ok(facet),
+            PluginRef::Module(module) => {
+                loaded.next().ok_or_else(|| ChordError::error(format!("{module}: the loader returned no facet")))
+            }
+        });
+        facets.collect()
+    }
+
     /// The installed run of facet `name` is now `run` (or none): the run it replaces is aborted.
-    pub(super) fn facet_run_changed(&self, name: &str, run: Option<AbortController>) {
+    pub(crate) fn facet_run_changed(&self, name: &str, run: Option<AbortController>) {
         let replaced = {
             let mut state = self.state();
             match run {
@@ -248,5 +334,10 @@ impl Host {
     /// This host's view of `registry`.
     pub fn registry<V>(&self, registry: &Registry<V>) -> HostRegistry<V> {
         self.0.registry(registry)
+    }
+
+    /// The host's own reference to its `lifetime: "host"` object of `type_name` (upstream `hostObjects`).
+    pub fn host_object(&self, type_name: &str) -> Option<Ref> {
+        self.0.state().host_objects.get(type_name).cloned()
     }
 }

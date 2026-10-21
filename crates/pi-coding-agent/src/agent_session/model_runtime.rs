@@ -8,6 +8,7 @@ use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use pi_ai::auth::{
     AuthResolver, Credential, CredentialStore, FileCredentialStore, OAuthAuth, OAuthLookup, RuntimeCredentialStore,
 };
+use pi_ai::env::{EnvLookup, ProcessEnv};
 use pi_ai::{Model, ModelRegistry};
 
 use super::runtime_catalog::{CatalogState, ProviderAuth};
@@ -23,6 +24,8 @@ pub struct ModelRuntimeOptions {
     pub credentials: Arc<dyn CredentialStore>,
     /// OAuth providers by id for token refresh; `None` disables OAuth refresh.
     pub oauth: Option<OAuthLookup>,
+    /// Environment that credential resolution reads, such as provider key variables.
+    pub credential_env: Arc<dyn EnvLookup>,
 }
 
 impl ModelRuntimeOptions {
@@ -32,6 +35,7 @@ impl ModelRuntimeOptions {
             models_path: models_path(agent_dir),
             credentials: Arc::new(FileCredentialStore::new(auth_path(agent_dir))),
             oauth: Some(Arc::new(pi_ai::auth::oauth::builtin_oauth)),
+            credential_env: Arc::new(ProcessEnv),
         }
     }
 }
@@ -72,7 +76,7 @@ impl ModelRuntime {
         let registered = extension_oauth.clone();
         let oauth: OAuthLookup =
             Arc::new(move |provider: &str| read(&registered).get(provider).cloned().or_else(|| builtin(provider)));
-        let resolver = Arc::new(AuthResolver::new(runtime_store.clone(), oauth));
+        let resolver = Arc::new(AuthResolver::new(runtime_store.clone(), oauth).with_env(options.credential_env));
         resolver.set_provider_configs(registry.auth_configs());
         let runtime = Self {
             registry: RwLock::new(registry),

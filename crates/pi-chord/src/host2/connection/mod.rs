@@ -10,6 +10,7 @@ mod incoming;
 mod net;
 mod receive;
 mod relay;
+mod reload;
 mod route;
 mod serve;
 
@@ -17,6 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub(crate) use net::{ConnId, Msg, NetHandle, OutCall, spawn_net};
+pub(crate) use reload::{Participant, VoteResult, next_reload_id};
 
 use super::link::Link;
 use super::wire::PeerKind;

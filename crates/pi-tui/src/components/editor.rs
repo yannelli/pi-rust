@@ -8,6 +8,7 @@ mod input;
 mod movement;
 mod popup;
 mod render;
+mod search;
 mod segment;
 mod state;
 mod task;
@@ -200,6 +201,16 @@ impl Editor {
     /// Adds a submitted prompt to the history for Up and Down.
     pub fn add_to_history(&self, text: &str) {
         self.with(|core| core.add_to_history(text));
+    }
+
+    /// Keeps at most `limit` history entries (100 by default), dropping the oldest.
+    pub fn set_history_limit(&self, limit: usize) {
+        self.with(|core| core.set_history_limit(limit));
+    }
+
+    /// Whether the reverse history search (`tui.editor.historySearch`) is open.
+    pub fn is_searching_history(&self) -> bool {
+        self.read(|core| core.history_search.is_some())
     }
 
     pub fn set_on_submit(&self, callback: Option<EditorTextCallback>) {

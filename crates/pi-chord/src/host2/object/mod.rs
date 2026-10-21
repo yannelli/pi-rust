@@ -26,12 +26,13 @@ pub(crate) use calls::clean;
 pub use ctx::{Ctx, RootOptions};
 pub(crate) use ctx::{CtxFields, await_ready, run_root};
 pub use declare::Decls;
+pub(crate) use declare::Run;
 pub use declare::{Declare, InitFn, Initial, Listen, Listenable, Migrate, StateOptions, TaskFn};
 pub(crate) use handle::notify_status;
 pub use handle::{Ref, RefCore, RefOwner};
 pub use reference::RefImpl;
 pub use resource::{AnyValue, ResourceHandle, ResourceImpl};
-pub(crate) use runtime::Subscription;
+pub(crate) use runtime::{StagedListeners, Subscription};
 pub use service::{Adapter, Factory, Implementation, Lifetime, Member, MethodFn, ServeOptions, Service};
 pub(crate) use service::{make_service, member_schemas};
 
@@ -112,17 +113,15 @@ impl ObjectStatus {
     }
 }
 
-/// An implementation installed for one code version.
+/// An implementation installed for one code version (the key of `implementations`).
 #[derive(Clone)]
 pub(crate) struct Installed {
-    #[allow(dead_code, reason = "read by reloads (phase 4)")]
-    pub code_version: i64,
     pub service: Arc<Service>,
     pub implementation: Arc<Implementation>,
     pub decls: Arc<Decls>,
 }
 
-/// A reload gate (phase 4): calls of roots not grandfathered are refused, listener events wait.
+/// A reload gate: calls of roots not grandfathered are refused, listener events wait.
 pub(crate) struct Gate {
     pub grandfathered: HashSet<String>,
     pub queue: Vec<(String, Json)>,
@@ -137,7 +136,7 @@ pub(crate) struct RunningTask {
 pub(crate) struct ObjectState {
     pub status: ObjectStatus,
     pub service: Option<Arc<Service>>,
-    /// Calls carrying an older code version are refused `upgrade_conflict` (a reload seam).
+    /// Calls carrying an older code version are refused `upgrade_conflict`.
     pub min_code_version: i64,
     pub decls: Arc<Decls>,
     /// Declarations of factory runs not installed yet (activation or reload candidate).
@@ -249,6 +248,11 @@ impl ObjectImpl {
 
     pub fn status(&self) -> ObjectStatus {
         self.state().status
+    }
+
+    /// How many references hold the object now.
+    pub fn ref_count(&self) -> usize {
+        self.state().refs.len()
     }
 
     pub(crate) fn host(&self) -> &Arc<dyn HostCore> {

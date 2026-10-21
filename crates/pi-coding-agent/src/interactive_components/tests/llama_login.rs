@@ -51,8 +51,12 @@ async fn llama_login_prompts_for_url_and_key_then_stores_the_server() {
     local(async move {
         let store = Arc::new(InMemoryCredentialStore::new(BTreeMap::new()));
         let dir = std::env::temp_dir().join("pi-llama-login-test-missing");
-        let options =
-            ModelRuntimeOptions { models_path: dir.join("models.json"), credentials: store.clone(), oauth: None };
+        let options = ModelRuntimeOptions {
+            models_path: dir.join("models.json"),
+            credentials: store.clone(),
+            oauth: None,
+            credential_env: Arc::new(|_: &str| None::<String>),
+        };
         let runtime = Arc::new(ModelRuntime::create(options).await);
         let harness =
             Harness::new(100, 30, |tui| LoginDialog::new(tui, "llama.cpp", |_, _: Option<&str>| {}, None, None));

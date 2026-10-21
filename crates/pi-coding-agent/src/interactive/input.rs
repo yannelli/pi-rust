@@ -176,10 +176,10 @@ impl InteractiveMode {
         }
         let session = self.session();
         if session.is_compacting() {
-            self.editor.add_to_history(&text);
+            self.editor.record_prompt(&text);
             self.queue_compaction_message(text, true);
         } else if session.is_streaming() {
-            self.editor.add_to_history(&text);
+            self.editor.record_prompt(&text);
             self.editor.set_text("");
             self.prompt_while_streaming(text, StreamingBehavior::FollowUp);
         } else {
@@ -334,7 +334,7 @@ impl InteractiveMode {
                     self.editor.set_text(&text);
                     return;
                 }
-                self.editor.add_to_history(&text);
+                self.editor.record_prompt(&text);
                 self.handle_bash_command(command.to_string(), excluded);
                 self.state.borrow_mut().is_bash_mode = false;
                 self.update_editor_border_color();
@@ -347,7 +347,7 @@ impl InteractiveMode {
     /// Send `text` as typed input is sent: queued during compaction, steering while streaming,
     /// else a new run. `typed` goes to the editor history.
     pub(super) fn send_prompt(&self, text: String, typed: &str) {
-        self.editor.add_to_history(typed);
+        self.editor.record_prompt(typed);
         let session = self.session();
         if session.is_compacting() {
             self.queue_compaction_message(text, false);

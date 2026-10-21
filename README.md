@@ -86,6 +86,12 @@ Run `pi --help` for all options. In interactive mode, type `/` to list commands,
 
 `/init [instructions]` (pi-rust extension) asks the agent to look through the project in the working directory and write an `AGENTS.md` there with an overview, build, test, and lint commands, code layout, conventions, and gotchas, based only on what it finds. If the directory already has a context file that pi loads (`AGENTS.md`, `CLAUDE.md`, or `AGENTS.override.md`), the agent improves that file in place. Text after `/init` is added as extra instructions. The prompt goes out as a normal message: it shows in the chat, uses the current model, and is saved in the session. As with other built-in commands, `/init` takes precedence over a prompt template or extension command named `init`. It is available in interactive mode only.
 
+### Prompt history (pi-rust extension)
+
+The interactive editor keeps your prompts across sessions and projects in `~/.pi/agent/prompt-history.jsonl`, one JSON string per line, readable only by you on Unix. Up and Down go through them, newest first. Ctrl+R starts a reverse search: type to filter (case does not matter), press Ctrl+R again for the next older match, Enter to put the match in the editor without sending it, and Esc to go back to your draft. A prompt that starts with a space is not saved to the file.
+
+Set `"promptHistory": {"enabled": false}` in `settings.json` to turn this off, or `"maxEntries"` to keep a different number of prompts (default 1000). To use a different key for the search, set `tui.editor.historySearch` in `keybindings.json`.
+
 ## Shell completion and `pi doctor` (pi-rust extension)
 
 `pi completion bash|zsh|fish|powershell` prints a completion script for options, subcommands, and file paths. For `--model` and `--provider` it asks pi for the models of the built-in catalog and `models.json`. `pi completion --help` shows how to install each script, for example:
@@ -161,6 +167,7 @@ pi-rust reads the same files as the TypeScript pi, so both can share one setup. 
 | `~/.pi/agent/{extensions,skills,prompts,themes}/` | Extensions, skills, prompt templates, and themes; `.pi/` in a project and `~/.agents/skills` work too |
 | `AGENTS.md`, `CLAUDE.md`, `SYSTEM.md`, `APPEND_SYSTEM.md` | Context files and system prompt overrides |
 | `~/.pi/agent/sessions/` | Sessions as JSONL trees in pi's format |
+| `~/.pi/agent/prompt-history.jsonl` | Submitted prompts for Up, Down, and Ctrl+R (pi-rust only) |
 
 On first start, pi-rust moves files from older pi layouts the same way pi does (for example `oauth.json` into `auth.json`).
 
@@ -254,6 +261,7 @@ pi-rust ports the `pi` CLI and its libraries feature for feature. These parts di
 - `pi sessions` and `pi stats` (above) are additions; the TypeScript pi lists and deletes sessions only in its session picker (`pi -r`, `/resume`) and shows usage only for the current session (`/session`).
 - The run limits `--max-turns` and `--max-cost` (above) are additions.
 - Account model lists for OpenAI Codex, Anthropic, GitHub Copilot, OpenAI, xAI, and Google (see [Providers](#account-model-lists-pi-rust-extension)) are an addition; upstream pi narrows only OpenRouter.
+- [Prompt history](#prompt-history-pi-rust-extension) across sessions, with the Ctrl+R search and the `promptHistory` settings, is an addition; upstream pi keeps prompt history only for the running process.
 - `pi-env` looks for remote daemons in a `pi-env-daemons` folder next to the running program. Each release has a `pi-env-daemons-<tag>.tar.gz` with the daemons for Linux, Android (Termux), macOS, and Windows on x86-64 and arm64; extract it next to `pi`.
 - Notifications: in interactive mode, a run that takes 10 seconds or more ends with a terminal notification titled "pi" that says "Done" or names the error. pi sends OSC 777 in Ghostty, WezTerm, foot, and rxvt, OSC 99 in kitty, OSC 9 in iTerm2 and Windows Terminal, and BEL in tmux, screen, and other terminals. Fullscreen mode skips the notification while the terminal reports focus. Set `terminal.notifyOnFinish` to `"auto"` (the default), `"osc"`, `"bell"`, or `"off"`, and `terminal.notifyMinSeconds` to change the threshold. Upstream pi has this only as the example extension `notify.ts`.
 - `pi experimental` (`server`, `client`, `durable`, `vacation`) needs `PI_EXPERIMENTAL=1`, as upstream. Its `server` and `client` use Unix sockets, so on Windows they report that they need Unix; upstream has no Windows transport either.

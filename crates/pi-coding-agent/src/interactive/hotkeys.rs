@@ -25,6 +25,7 @@ pub fn hotkeys_markdown() -> String {
             codes(&["tui.editor.cursorUp", "tui.editor.cursorDown", "tui.editor.cursorLeft", "tui.editor.cursorRight"]),
             "Move cursor / browse history",
         ),
+        (code("tui.editor.historySearch"), "Search prompt history"),
         (codes(&["tui.editor.cursorWordLeft", "tui.editor.cursorWordRight"]), "Move by word"),
         (code("tui.editor.cursorLineStart"), "Start of line"),
         (code("tui.editor.cursorLineEnd"), "End of line"),

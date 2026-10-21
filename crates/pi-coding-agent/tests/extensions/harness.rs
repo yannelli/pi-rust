@@ -245,10 +245,12 @@ pub async fn harness(setup: Setup) -> Harness {
     let services = create_agent_session_services(CreateServicesOptions {
         settings: Some(settings),
         credentials: Some(Arc::new(InMemoryCredentialStore::new(Default::default()))),
+        credential_env: Some(crate::offline_guard::credential_free_env()),
         ..CreateServicesOptions::new(&cwd, &agent_dir)
     })
     .await;
     crate::offline_guard::assert_models_loaded(&services);
+    crate::offline_guard::assert_credentials_hidden(&services);
     let entries = setup.load.iter().map(|path| LoadEntry::file(extension_dir.join(path))).collect();
     let flag_values = setup.flags.iter().map(|(name, value)| (name.to_string(), value.clone())).collect();
     let entries = (!setup.from_settings).then_some(entries);

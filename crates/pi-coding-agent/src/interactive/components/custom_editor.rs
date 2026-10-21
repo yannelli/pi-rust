@@ -2,7 +2,7 @@
 //! (upstream `components/custom-editor.ts`). [`EditorHandle`] is a cheap clone the mode keeps to
 //! change handlers and text while the TUI holds the component.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use pi_tui::components::editor::{BorderContext, EditorCursor};
@@ -11,6 +11,7 @@ use pi_tui::utils::visible_width;
 use pi_tui::{AutocompleteProvider, Component, Editor, MouseResponse, Tui, TuiMouseEvent, get_keybindings};
 
 use super::status_indicator::{SharedIndicator, StatusIndicator};
+use crate::interactive::prompt_history::PromptHistoryFile;
 
 /// A handler for an app action. Handlers run while the editor component is borrowed, so they
 /// must not render the TUI synchronously.
@@ -36,6 +37,9 @@ pub struct EditorHandle {
     handlers: Rc<RefCell<Handlers>>,
     working: Rc<RefCell<Option<SharedIndicator>>>,
     embed_working_status: bool,
+    history_file: Rc<RefCell<Option<PromptHistoryFile>>>,
+    /// Whether the text was typed with a leading space when submit was last pressed.
+    leading_space: Rc<Cell<bool>>,
 }
 
 impl EditorHandle {
@@ -65,6 +69,26 @@ impl EditorHandle {
 
     pub fn add_to_history(&self, text: &str) {
         self.editor.add_to_history(text);
+    }
+
+    /// Loads the saved prompts and appends prompts submitted from now on to `file`.
+    pub fn set_prompt_history(&self, file: PromptHistoryFile) {
+        self.editor.set_history_limit(file.max_entries().max(100));
+        for entry in file.load() {
+            self.editor.add_to_history(&entry);
+        }
+        *self.history_file.borrow_mut() = Some(file);
+    }
+
+    /// Adds a submitted prompt to the history and the history file. Input typed with a leading
+    /// space stays out of the file, like the shell's `ignorespace`.
+    pub fn record_prompt(&self, text: &str) {
+        self.editor.add_to_history(text);
+        let ignored = self.leading_space.replace(false);
+        if let Some(file) = self.history_file.borrow().as_ref().filter(|_| !ignored) {
+            // History is best effort: a failed write must not interrupt the prompt.
+            let _ = file.append(text);
+        }
     }
 
     pub fn border_color(&self) -> StyleFn {
@@ -160,11 +184,18 @@ impl EditorHandle {
 
     /// Upstream `CustomEditor.handleInput`.
     pub fn handle_input(&self, data: &str) {
+        // The history search takes every key until it closes.
+        if self.editor.is_searching_history() {
+            self.editor.handle_input(data);
+            return;
+        }
         let shortcut = self.handlers.borrow().on_extension_shortcut.clone();
         if shortcut.is_some_and(|shortcut| shortcut(data)) {
             return;
         }
         let keys = get_keybindings();
+        let submits = keys.matches(data, "tui.input.submit") || keys.matches(data, "app.message.followUp");
+        self.leading_space.set(submits && self.editor.get_text().starts_with(' '));
         if keys.matches(data, "app.clipboard.pasteImage") {
             let handler = self.handlers.borrow().on_paste_image.clone();
             if let Some(handler) = handler {
@@ -224,7 +255,14 @@ impl CustomEditor {
                 }
             })));
         }
-        let handle = EditorHandle { editor, handlers: Rc::default(), working, embed_working_status };
+        let handle = EditorHandle {
+            editor,
+            handlers: Rc::default(),
+            working,
+            embed_working_status,
+            history_file: Rc::default(),
+            leading_space: Rc::default(),
+        };
         Self { handle }
     }
 

@@ -16,7 +16,7 @@ use super::{
     ApiKeyCredential, AuthError, AuthResult, AuthType, Credential, CredentialStore, ModelAuth, OAuthAuth,
     OAuthCredential, ProviderEnv, ResolvedAuth,
 };
-use crate::env::{self, api_key_env_vars, provider_env_value};
+use crate::env::{self, EnvLookup, ProcessEnv, api_key_env_vars, env_value_in};
 
 /// Finds the OAuth login method for a provider id, for example `builtin_oauth`.
 pub type OAuthLookup = Arc<dyn Fn(&str) -> Option<Arc<dyn OAuthAuth>> + Send + Sync>;
@@ -57,6 +57,7 @@ pub struct AuthResolver {
     store: Arc<dyn CredentialStore>,
     oauth: OAuthLookup,
     configs: RwLock<HashMap<String, ProviderAuthConfig>>,
+    env: Arc<dyn EnvLookup>,
 }
 
 fn has_builtin_api_key_auth(provider_id: &str) -> bool {
@@ -76,20 +77,21 @@ fn builtin_resolve(
     provider_id: &str,
     credential: Option<&ApiKeyCredential>,
     env: Option<&ProviderEnv>,
+    base: &dyn EnvLookup,
 ) -> Option<ResolvedAuth> {
     if let Some(key) = credential.and_then(|credential| credential.key.clone()) {
         return Some(stored(key, credential.and_then(|credential| credential.env.clone())));
     }
     if provider_id == "anthropic" {
-        return anthropic_env_auth(env);
+        return anthropic_env_auth(env, base);
     }
     for name in api_key_env_vars(provider_id) {
-        if let Some(value) = provider_env_value(name, env) {
+        if let Some(value) = env_value_in(name, env, base) {
             let auth = ModelAuth { api_key: Some(value), ..ModelAuth::default() };
             return Some(ResolvedAuth { auth, env: None, source: Some(name.to_string()) });
         }
     }
-    env::get_env_api_key_with(provider_id, env).map(|value| ResolvedAuth {
+    env::get_env_api_key_in(provider_id, env, base).map(|value| ResolvedAuth {
         auth: ModelAuth { api_key: Some(value), ..ModelAuth::default() },
         env: None,
         source: Some("ambient credentials".into()),
@@ -98,14 +100,15 @@ fn builtin_resolve(
 
 /// `ANTHROPIC_AUTH_TOKEN` as a bearer header, then OAuth token and API key variables, then
 /// workload identity federation ids passed on as provider env.
-fn anthropic_env_auth(env: Option<&ProviderEnv>) -> Option<ResolvedAuth> {
-    if let Some(token) = provider_env_value(env::ANTHROPIC_AUTH_TOKEN_ENV, env) {
+fn anthropic_env_auth(env: Option<&ProviderEnv>, base: &dyn EnvLookup) -> Option<ResolvedAuth> {
+    let value = |name: &str| env_value_in(name, env, base);
+    if let Some(token) = value(env::ANTHROPIC_AUTH_TOKEN_ENV) {
         let mut auth = ModelAuth::default();
         auth.headers.insert("Authorization".into(), format!("Bearer {token}"));
         return Some(ResolvedAuth { auth, env: None, source: Some(env::ANTHROPIC_AUTH_TOKEN_ENV.into()) });
     }
     for name in [env::ANTHROPIC_OAUTH_TOKEN_ENV, env::ANTHROPIC_API_KEY_ENV] {
-        if let Some(value) = provider_env_value(name, env) {
+        if let Some(value) = value(name) {
             let auth = ModelAuth { api_key: Some(value), ..ModelAuth::default() };
             return Some(ResolvedAuth { auth, env: None, source: Some(name.into()) });
         }
@@ -116,10 +119,10 @@ fn anthropic_env_auth(env: Option<&ProviderEnv>) -> Option<ResolvedAuth> {
         env::ANTHROPIC_ORGANIZATION_ID_ENV,
         env::ANTHROPIC_IDENTITY_TOKEN_FILE_ENV,
     ] {
-        federation.insert(name.into(), provider_env_value(name, env)?);
+        federation.insert(name.into(), value(name)?);
     }
     for name in [env::ANTHROPIC_SERVICE_ACCOUNT_ID_ENV, env::ANTHROPIC_WORKSPACE_ID_ENV] {
-        if let Some(value) = provider_env_value(name, env) {
+        if let Some(value) = value(name) {
             federation.insert(name.into(), value);
         }
     }
@@ -143,7 +146,18 @@ fn now_ms() -> i64 {
 
 impl AuthResolver {
     pub fn new(store: Arc<dyn CredentialStore>, oauth: OAuthLookup) -> Self {
-        Self { store, oauth, configs: RwLock::default() }
+        Self { store, oauth, configs: RwLock::default(), env: Arc::new(ProcessEnv) }
+    }
+
+    /// Read environment variables (provider keys, ambient credentials, `$VAR` values) from `env`
+    /// in place of the process environment.
+    pub fn with_env(self, env: Arc<dyn EnvLookup>) -> Self {
+        Self { env, ..self }
+    }
+
+    /// The environment credential lookups read.
+    pub fn env(&self) -> &Arc<dyn EnvLookup> {
+        &self.env
     }
 
     /// A resolver without OAuth methods.
@@ -213,10 +227,8 @@ impl AuthResolver {
         if let Some(headers) = config.model_headers.get(model_id) {
             let env = merged_env(resolved.env.as_ref(), overrides.env.as_ref());
             let description = format!("model \"{provider_id}/{model_id}\"");
-            resolved
-                .auth
-                .headers
-                .extend(resolve_headers_or_err(headers, &description, env.as_ref()).map_err(AuthError::Other)?);
+            let headers = resolve_headers_or_err(headers, &description, env.as_ref(), &*self.env);
+            resolved.auth.headers.extend(headers.map_err(AuthError::Other)?);
         }
         Ok(Some(resolved))
     }
@@ -229,20 +241,21 @@ impl AuthResolver {
         env: Option<&ProviderEnv>,
     ) -> AuthResult<Option<ResolvedAuth>> {
         let builtin = has_builtin_api_key_auth(provider_id);
+        let base = &*self.env;
         let result = match (credential, &config.api_key) {
-            (Some(credential), _) if builtin => builtin_resolve(provider_id, Some(credential), env),
+            (Some(credential), _) if builtin => builtin_resolve(provider_id, Some(credential), env, base),
             (Some(credential), _) => credential.key.clone().map(|key| stored(key, credential.env.clone())),
             (None, Some(raw)) => {
                 let description = format!("API key for provider \"{provider_id}\"");
-                let key = resolve_config_value_or_err(raw, &description, env).map_err(AuthError::Other)?;
+                let key = resolve_config_value_or_err(raw, &description, env, base).map_err(AuthError::Other)?;
                 let mut resolved =
-                    builtin_resolve(provider_id, Some(&ApiKeyCredential { key: Some(key), env: None }), env);
+                    builtin_resolve(provider_id, Some(&ApiKeyCredential { key: Some(key), env: None }), env, base);
                 if let Some(resolved) = resolved.as_mut() {
                     resolved.source = Some("configured API key".into());
                 }
                 resolved
             }
-            (None, None) if builtin => builtin_resolve(provider_id, None, env),
+            (None, None) if builtin => builtin_resolve(provider_id, None, env, base),
             (None, None) => None,
         };
         let Some(mut result) = result else { return Ok(None) };
@@ -259,7 +272,8 @@ impl AuthResolver {
         env: Option<&ProviderEnv>,
     ) -> AuthResult<()> {
         let description = format!("provider \"{provider_id}\"");
-        auth.headers.extend(resolve_headers_or_err(&config.headers, &description, env).map_err(AuthError::Other)?);
+        let headers = resolve_headers_or_err(&config.headers, &description, env, &*self.env);
+        auth.headers.extend(headers.map_err(AuthError::Other)?);
         if config.auth_header {
             let key = auth.api_key.clone().ok_or_else(|| AuthError::other("authHeader requires a resolved API key"))?;
             auth.headers.insert("Authorization".into(), format!("Bearer {key}"));
@@ -307,20 +321,20 @@ impl AuthResolver {
         if !self.has_api_key_auth(provider_id, &config) {
             return Ok(None);
         }
-        let builtin = has_builtin_api_key_auth(provider_id);
+        let (builtin, base) = (has_builtin_api_key_auth(provider_id), &*self.env);
         if let Some(Credential::ApiKey(credential)) = &credential {
             if credential.key.is_some() {
                 return Ok(found("stored credential"));
             }
-            let resolved = if builtin { builtin_resolve(provider_id, Some(credential), None) } else { None };
+            let resolved = if builtin { builtin_resolve(provider_id, Some(credential), None, base) } else { None };
             return Ok(resolved.and_then(|resolved| found(resolved.source.as_deref().unwrap_or("environment"))));
         }
         if let Some(raw) = &config.api_key {
             let configured = is_command_config_value(raw)
-                || config_value_env_var_names(raw).iter().all(|name| provider_env_value(name, None).is_some());
+                || config_value_env_var_names(raw).iter().all(|name| env_value_in(name, None, base).is_some());
             return Ok(if configured { found("configured API key") } else { None });
         }
-        let resolved = if builtin { builtin_resolve(provider_id, None, None) } else { None };
+        let resolved = if builtin { builtin_resolve(provider_id, None, None, base) } else { None };
         Ok(resolved.and_then(|resolved| found(resolved.source.as_deref().unwrap_or("environment"))))
     }
 }

@@ -31,6 +31,8 @@ pub struct Options {
     pub settings: Value,
     pub tui_mode: TuiMode,
     pub files: Vec<(&'static str, &'static str)>,
+    /// An agent directory to reuse, so several runs share its files.
+    pub agent_dir: Option<PathBuf>,
     /// The faux provider waits this long between streamed chunks.
     pub chunk_delay: Duration,
     pub run_limits: pi_coding_agent::agent_session::RunLimits,
@@ -43,6 +45,7 @@ impl Default for Options {
             settings: json!({}),
             tui_mode: TuiMode::Regular,
             files: Vec::new(),
+            agent_dir: None,
             chunk_delay: Duration::ZERO,
             run_limits: Default::default(),
         }
@@ -61,7 +64,7 @@ pub struct Ui {
 pub async fn start(options: Options) -> Ui {
     let root = tempfile::tempdir().unwrap();
     let cwd = root.path().join("work");
-    let agent_dir = root.path().join("agent");
+    let agent_dir = options.agent_dir.clone().unwrap_or_else(|| root.path().join("agent"));
     std::fs::create_dir_all(&cwd).unwrap();
     std::fs::create_dir_all(&agent_dir).unwrap();
     for (path, content) in &options.files {
@@ -86,6 +89,7 @@ pub async fn start(options: Options) -> Ui {
         agent_dir: agent_dir.clone(),
         settings: Some(settings),
         credentials: Some(Arc::new(InMemoryCredentialStore::new(BTreeMap::new()))),
+        credential_env: Some(crate::offline_guard::credential_free_env()),
         run_limits: options.run_limits,
         ..AppOptions::default()
     };
