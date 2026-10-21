@@ -73,3 +73,26 @@ fn reports_bad_input_like_upstream() {
     assert_eq!(normalize_session_name("  name "), Some("name".into()));
     assert_eq!(normalize_session_name("   "), None);
 }
+
+#[test]
+fn parses_and_validates_run_limits() {
+    let args = parse("--max-turns 10 --max-cost 0.50 --plan -p hi");
+    assert!(args.errors.is_empty(), "{:?}", args.errors);
+    assert_eq!(args.run_limits, RunLimits { max_turns: Some(10), max_cost: Some(0.5) });
+    assert_eq!(args.unknown_flags, [("plan".to_string(), FlagValue::Bool)], "extension flags still pass through");
+    let equals = parse("--max-turns=3 --max-cost=0 --level=2");
+    assert_eq!(equals.run_limits, RunLimits { max_turns: Some(3), max_cost: Some(0.0) });
+    assert_eq!(equals.unknown_flags, [("level".to_string(), FlagValue::String("2".into()))]);
+    for (line, error) in [
+        ("--max-turns 0", "--max-turns requires a positive integer, got \"0\""),
+        ("--max-turns 2.5", "--max-turns requires a positive integer, got \"2.5\""),
+        ("--max-turns -1", "--max-turns requires a positive integer, got \"-1\""),
+        ("--max-cost -0.1", "--max-cost requires a non-negative number of US dollars, got \"-0.1\""),
+        ("--max-cost abc", "--max-cost requires a non-negative number of US dollars, got \"abc\""),
+        ("--max-cost inf", "--max-cost requires a non-negative number of US dollars, got \"inf\""),
+        ("--max-cost=", "--max-cost requires a non-negative number of US dollars, got \"\""),
+        ("--max-turns", "--max-turns requires a value"),
+    ] {
+        assert_eq!(parse(line).errors, [error], "{line}");
+    }
+}

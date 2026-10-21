@@ -7,6 +7,7 @@ mod gaps;
 mod harness;
 mod keys;
 mod notify;
+mod run_limits;
 mod startup;
 
 use harness::{Options, local, start};

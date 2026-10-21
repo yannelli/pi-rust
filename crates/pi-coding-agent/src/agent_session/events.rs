@@ -109,6 +109,8 @@ pub enum AgentSessionEvent<'a> {
         miss: CacheMiss,
         notice: String,
     },
+    /// `--max-turns` or `--max-cost` stopped the run, or kept a prompt from starting one (pi-rust).
+    RunLimit(super::RunLimitStop),
 }
 
 impl AgentSessionEvent<'_> {
@@ -132,12 +134,19 @@ impl AgentSessionEvent<'_> {
             Self::BashExecutionUpdate { .. } => "bash_execution_update",
             Self::ModelRouted { .. } => "model_routed",
             Self::CacheMiss { .. } => "cache_miss",
+            Self::RunLimit(_) => "run_limit",
         }
     }
 
     /// Whether upstream pi sends this event too; JSON mode prints only those.
     pub fn is_upstream_event(&self) -> bool {
-        !matches!(self, Self::ModelRouted { .. } | Self::CacheMiss { .. })
+        !matches!(self, Self::ModelRouted { .. } | Self::CacheMiss { .. } | Self::RunLimit(_))
+    }
+
+    /// Whether JSON and RPC mode send this event: upstream events, and `run_limit`, which only
+    /// the pi-rust run limit flags cause.
+    pub fn is_json_event(&self) -> bool {
+        self.is_upstream_event() || matches!(self, Self::RunLimit(_))
     }
 
     /// The JSON record for `--mode json` and RPC. `message_update` drops the cumulative
@@ -234,6 +243,7 @@ impl AgentSessionEvent<'_> {
                 "modelChanged": miss.model_changed,
                 "notice": notice,
             }),
+            Self::RunLimit(stop) => stop.to_json(),
         }
     }
 }

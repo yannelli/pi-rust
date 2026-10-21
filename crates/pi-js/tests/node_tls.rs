@@ -90,3 +90,16 @@ async fn tls_sockets_sessions_and_sni_match_node() {
         uncaught.iter().map(|(_, error)| error.display_with_stack()).collect::<Vec<_>>()
     );
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn tls_over_a_unix_socket_closes_without_a_reset() {
+    let (_dir, root) = tempdir();
+    let (runtime, capture) = runtime(&root);
+    let script = include_str!("fixtures/node_tls/unix_close.js")
+        .replace("__KEY__", &format!("{:?}", include_str!("fixtures/node_http/key.pem")))
+        .replace("__CERT__", &format!("{:?}", include_str!("fixtures/node_http/cert.pem")));
+    let actual = run_cjs_within(&runtime, &root, &script, 120).await;
+    assert_same_keys(&actual, &serde_json::from_str(include_str!("fixtures/node_tls/unix_close.json")).unwrap());
+    assert!(capture.uncaught.lock().unwrap().is_empty());
+}

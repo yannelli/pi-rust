@@ -38,6 +38,10 @@ pub(super) enum Event {
     Reset(u64, u32),
     StreamError(u64, JsError),
     Closed(Option<(u32, bool, String)>),
+    /// A SETTINGS frame from the peer, as identifier and value pairs.
+    Settings(Vec<u32>),
+    /// The ACK of the session's first SETTINGS frame or of a frame from `settings`.
+    SettingsAck,
 }
 
 /// Posts events for one session to the JavaScript thread.
@@ -68,6 +72,7 @@ enum Command {
 
 struct Session {
     settings: SettingsTracker,
+    post: Poster,
     input: Option<mpsc::UnboundedSender<Bytes>>,
     commands: mpsc::UnboundedSender<Command>,
     tasks: Vec<tokio::task::AbortHandle>,
@@ -125,6 +130,8 @@ fn deliver(ctx: &Ctx<'_>, id: u64, event: Event) {
         Event::Closed(Some((code, goaway, message))) => {
             function.call::<_, ()>(("closed", 0, from_json(ctx, &json!([code, goaway, message]))?))
         }
+        Event::Settings(frame) => function.call::<_, ()>(("settings", 0, from_json(ctx, &json!(frame))?)),
+        Event::SettingsAck => function.call::<_, ()>(("settingsAck", 0)),
     })();
     if let Err(error) = result {
         report_error(ctx, UncaughtKind::Exception, error);
@@ -337,6 +344,7 @@ fn session<'js>(ctx: Ctx<'js>, server: bool, settings: Value<'js>, callback: Fun
     let id = state.next_id();
     state.callbacks.borrow_mut().insert(id, Persistent::save(&ctx, callback));
     let post = Poster { id, sender: state.sender.clone() };
+    let session_post = post.clone();
     let (h2_io, js_io) = tokio::io::duplex(1 << 16);
     let (mut reader, mut writer) = tokio::io::split(js_io);
     let (input, mut input_rx) = mpsc::unbounded_channel::<Bytes>();
@@ -375,7 +383,7 @@ fn session<'js>(ctx: Ctx<'js>, server: bool, settings: Value<'js>, callback: Fun
     state
         .resources
         .borrow_mut()
-        .insert(id, Box::new(Session { settings: tracker, input: Some(input), commands, tasks }));
+        .insert(id, Box::new(Session { settings: tracker, post: session_post, input: Some(input), commands, tasks }));
     Ok(id)
 }
 
@@ -407,26 +415,23 @@ fn close(id: u64) {
 pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
     let object = Object::new(ctx.clone())?;
     set_fn(&object, "session", session)?;
-    // Returns the peer's SETTINGS frames in the bytes as flat identifier and value lists, and
-    // "ack" for each ACK of the session's first frame or of a `settings` frame.
+    // Like nghttp2's frame callbacks, each SETTINGS frame and ACK in the bytes reaches JavaScript
+    // in a task of its own, so promise jobs run between them. They go before h2 sees the bytes.
     set_fn(&object, "feed", |ctx: Ctx<'js>, id: u64, data: TypedArray<'js, u8>| {
-        let seen = with_session(&ctx, id, |session| {
+        with_session(&ctx, id, |session| {
             let (bytes, seen) = session.settings.incoming(&bytes_of(&data));
+            for seen in seen {
+                session.post.send(match seen {
+                    Seen::Settings(frame) => Event::Settings(frame),
+                    Seen::Ack => Event::SettingsAck,
+                });
+            }
             if let Some(input) = &session.input
                 && !bytes.is_empty()
             {
                 let _ = input.send(Bytes::from(bytes));
             }
-            seen
-        })?;
-        if seen.is_empty() {
-            return Ok(Value::new_undefined(ctx.clone()));
-        }
-        let list = seen.into_iter().map(|seen| match seen {
-            Seen::Settings(frame) => json!(frame),
-            Seen::Ack => json!("ack"),
-        });
-        from_json(&ctx, &serde_json::Value::Array(list.collect()))
+        })
     })?;
     // A SETTINGS frame with custom entries: the bytes to write now, or undefined when they
     // follow the frame h2 is writing.
