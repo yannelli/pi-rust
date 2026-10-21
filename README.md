@@ -82,6 +82,8 @@ pi install npm:<package>            # install a pi package (extensions, skills, 
 
 Run `pi --help` for all options. In interactive mode, type `/` to list commands, for example `/login`, `/model`, `/settings`, `/tree`, `/fork`, `/compact`, `/export`, `/share`, `/mcp`, and `/hotkeys`. Input typed while the agent works is queued as steering, and Alt+Enter (Ctrl+Q on Windows) queues a follow-up.
 
+`/export [file]` writes the session to HTML, or to JSONL when the file ends in `.jsonl`, and `pi --export <session.jsonl> [output]` exports a saved session file to HTML. With both, an output path that ends in `.md` writes Markdown (pi-rust extension). The Markdown file has the current branch: a title, the date, models, working directory, tokens, and cost, then each user and assistant turn. Thinking is in collapsed `<details>` blocks, tool calls show their JSON arguments, tool results stop after 200 lines, and images become placeholders.
+
 ## Shell completion and `pi doctor` (pi-rust extension)
 
 `pi completion bash|zsh|fish|powershell` prints a completion script for options, subcommands, and file paths. For `--model` and `--provider` it asks pi for the models of the built-in catalog and `models.json`. `pi completion --help` shows how to install each script, for example:
@@ -92,6 +94,20 @@ pi completion fish > ~/.config/fish/completions/pi.fish
 ```
 
 `pi doctor` prints a short report: the version and target, the install method and path, other `pi` programs earlier on `PATH` (such as the npm pi), errors in `settings.json`, `models.json`, `auth.json`, and `mcp.json`, the providers that have credentials (names and sources, never the secrets), MCP servers whose commands are missing, and what the terminal supports. `pi doctor --json` prints the same report as JSON. It makes no network calls, starts no MCP servers, and exits 1 when it finds a problem.
+
+## Sessions and usage stats (pi-rust extension)
+
+`pi sessions` lists the saved sessions of the current project, newest first: a short id, the last activity, the message count, the cost, and the name or first prompt. `--all` lists every project, `--limit <n>` shows the newest n, and `--json` prints an array.
+
+`pi sessions rm <id-prefix|path>...` deletes sessions by a listed id prefix or a file path; it refuses a prefix that matches more than one session and lists the matches. `pi sessions prune --older-than 30d` deletes sessions with no activity for that long (units `s`, `m`, `h`, `d`, `w`) and prints the bytes it frees; `--dry-run` shows what it would delete. Both ask before they delete on a terminal and need `--yes` otherwise.
+
+`pi stats` totals the sessions of the current project (`--all` for every project): sessions, prompts, assistant turns, input, output, and cache tokens, and cost, by model, by provider, and by day for the last 14 days. `--since 7d` counts only recent activity, and `--json` prints the report as JSON. `pi stats` and `pi sessions list` only read session files, and no session command uses the network. All of them honor `--session-dir`, `PI_CODING_AGENT_SESSION_DIR`, and the `sessionDir` setting.
+
+```sh
+pi sessions --all --limit 10
+pi sessions prune --older-than 30d --dry-run
+pi stats --since 7d
+```
 
 ## Run limits (pi-rust extension)
 
@@ -229,7 +245,10 @@ pi-rust ports the `pi` CLI and its libraries feature for feature. These parts di
 - The version check and `pi update --self` use this repository's releases.
 - CJK and Thai word movement uses ICU4X dictionaries, so a few word boundaries differ from Node's `Intl.Segmenter`.
 - `pi --mode acp` (above) is an addition; the TypeScript pi needs the separate pi-acp adapter.
+- Markdown export (see [Use](#use)) is an addition: `/export notes.md` and `pi --export session.jsonl notes.md` write Markdown. Upstream pi exports only HTML and JSONL.
+
 - `pi completion` and `pi doctor` (above) are additions; the TypeScript pi has neither.
+- `pi sessions` and `pi stats` (above) are additions; the TypeScript pi lists and deletes sessions only in its session picker (`pi -r`, `/resume`) and shows usage only for the current session (`/session`).
 - The run limits `--max-turns` and `--max-cost` (above) are additions.
 - Account model lists for OpenAI Codex, Anthropic, GitHub Copilot, OpenAI, xAI, and Google (see [Providers](#account-model-lists-pi-rust-extension)) are an addition; upstream pi narrows only OpenRouter.
 - `pi-env` looks for remote daemons in a `pi-env-daemons` folder next to the running program. Each release has a `pi-env-daemons-<tag>.tar.gz` with the daemons for Linux, Android (Termux), macOS, and Windows on x86-64 and arm64; extract it next to `pi`.

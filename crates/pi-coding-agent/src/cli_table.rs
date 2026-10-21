@@ -187,7 +187,13 @@ pub const CLI_OPTIONS: &[CliOption] = &[
     valued("--use-theme", None, "<name[/name]>", Text, &["Set the interactive theme for this run"]),
     flag("--no-themes", None, &["Disable theme discovery and loading"]),
     flag("--no-context-files", Some("-nc"), &["Disable AGENTS.md and CLAUDE.md discovery and loading"]),
-    valued("--export", None, "<file>", File, &["Export session file to HTML and exit"]),
+    valued(
+        "--export",
+        None,
+        "<file>",
+        File,
+        &["Export session file to HTML and exit", "An output path ending in .md writes Markdown (pi-rust extension)"],
+    ),
     valued("--list-models", None, "[search]", ValueKind::None, &["List available models (with optional fuzzy search)"]),
     flag("--verbose", None, &["Force verbose startup (overrides quietStartup setting)"]),
     valued(
@@ -284,6 +290,18 @@ pub const CLI_COMMANDS: &[CliCommand] = &[
         COMPLETION_SHELLS,
     ),
     command("doctor", "[--json]", "Check the install, config, credentials, MCP servers, and terminal", &["--json"]),
+    command(
+        "sessions",
+        "[list|rm|prune]",
+        "List, delete, or prune saved sessions (--all for every project)",
+        &["list", "rm", "prune", "--all", "--json", "--limit", "--older-than", "--dry-run", "--yes", "--session-dir"],
+    ),
+    command(
+        "stats",
+        "[--all] [--json]",
+        "Session, token, and cost totals by model, provider, and day",
+        &["--all", "--since", "--json", "--session-dir"],
+    ),
 ];
 
 /// The options `pi completion` offers: every option but `--`.

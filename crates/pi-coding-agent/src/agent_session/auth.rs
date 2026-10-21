@@ -1,17 +1,23 @@
 //! Per-request credentials and provider settings. Every model request resolves auth through the
 //! model runtime at send time, so OAuth tokens refresh and `!command` keys run when needed.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use futures::StreamExt;
 use pi_agent::StreamFn;
 use pi_ai::auth::{AuthOverrides, Credential, ModelAuth, ProviderEnv};
 use pi_ai::http::{HttpSettings, configure_http};
-use pi_ai::{Model, StopReason, StreamOptions, ThinkingBudgets, ThinkingLevel, error_stream, event_channel};
+use pi_ai::identity::opencode_session_header;
+use pi_ai::{
+    ClientIdentity, Model, StopReason, StreamOptions, ThinkingBudgets, ThinkingLevel, UserAgentMode, error_stream,
+    event_channel, pi_attribution,
+};
 
 use super::model_runtime::ModelRuntime;
 use super::runtime_virtual::RouteOptions;
 use crate::app::{format_no_api_key_found_message, oauth_failed_message};
+use crate::platform::VERSION;
 use crate::settings::SettingsManager;
 use crate::virtual_models::{ModelRouteReason, is_virtual_model};
 
@@ -59,21 +65,32 @@ pub fn install_telemetry_enabled(settings: &SettingsManager) -> bool {
     }
 }
 
-/// Apply request auth, attribution headers, and the provider settings (`transport`,
+/// How pi's requests identify it to providers (upstream `getClientIdentity`): a detailed
+/// `User-Agent` with pi's version, and attribution to pi while install telemetry is enabled.
+pub fn client_identity(settings: &SettingsManager) -> ClientIdentity {
+    ClientIdentity {
+        user_agent: Some(UserAgentMode::Detailed),
+        version: Some(VERSION.to_string()),
+        attribution: Some(install_telemetry_enabled(settings).then(pi_attribution)),
+    }
+}
+
+/// Apply request auth, the client identity, and the provider settings (`transport`,
 /// `thinkingBudgets`, `retry.provider.*`, `httpIdleTimeoutMs`, `websocketConnectTimeoutMs`).
 pub fn apply_request_settings(options: &mut StreamOptions, request: &RequestAuth, settings: &SettingsManager) {
     options.api_key = request.auth.api_key.clone();
-    // Request headers win over configured provider headers, as in upstream `prepareRequest`.
-    let mut headers = request.auth.headers.clone();
-    headers.extend(std::mem::take(&mut options.headers));
-    let telemetry = install_telemetry_enabled(settings);
-    let merged = pi_ai::attribution::merge_provider_attribution_headers(
-        &request.model,
-        telemetry,
-        options.session_id.as_deref(),
-        &[Some(&headers)],
-    );
-    options.headers = merged.unwrap_or_default();
+    // The OpenCode session header, then configured provider headers, then request headers, as
+    // in upstream `ModelRuntime`.
+    let session = opencode_session_header(&request.model, options.session_id.as_deref());
+    let mut headers: BTreeMap<String, String> =
+        session.map(|(name, value)| (name.to_string(), value)).into_iter().collect();
+    for (name, value) in request.auth.headers.iter().chain(std::mem::take(&mut options.headers).iter()) {
+        headers.retain(|existing, _| !existing.eq_ignore_ascii_case(name));
+        headers.insert(name.clone(), value.clone());
+    }
+    options.headers = headers;
+    // Replaces the agent loop's default identity; read per request so telemetry changes apply at once.
+    options.identity = Some(client_identity(settings));
     if let Some(env) = &request.env {
         options.env.extend(env.clone());
     }
@@ -193,9 +210,8 @@ pub fn apply_http_proxy_env(proxy: Option<&str>) {
 }
 
 #[cfg(test)]
-mod attribution_tests {
-    use std::collections::BTreeMap;
-
+mod request_settings_tests {
+    use pi_ai::identity::attribution_headers;
     use serde_json::json;
 
     use super::*;
@@ -204,20 +220,16 @@ mod attribution_tests {
         pairs.iter().map(|(name, value)| (name.to_string(), value.to_string())).collect()
     }
 
-    fn captured(
-        provider: &str,
-        base_url: &str,
-        telemetry: bool,
-        configured: &[(&str, &str)],
-        request: &[(&str, &str)],
-    ) -> BTreeMap<String, String> {
-        let model = Model { provider: provider.into(), base_url: base_url.into(), ..Model::default() };
+    fn captured(model: &Model, telemetry: bool, configured: &[(&str, &str)]) -> StreamOptions {
         let auth = ModelAuth { api_key: Some("test-api-key".into()), headers: headers(configured), base_url: None };
         let settings = SettingsManager::in_memory(json!({"enableInstallTelemetry": telemetry}));
-        let mut options =
-            StreamOptions { headers: headers(request), session_id: Some("s-1".into()), ..Default::default() };
-        apply_request_settings(&mut options, &RequestAuth { model, auth, env: None }, &settings);
-        options.headers
+        let mut options = StreamOptions { session_id: Some("s-1".into()), ..Default::default() };
+        apply_request_settings(&mut options, &RequestAuth { model: model.clone(), auth, env: None }, &settings);
+        options
+    }
+
+    fn model(provider: &str, base_url: &str) -> Model {
+        Model { provider: provider.into(), base_url: base_url.into(), ..Model::default() }
     }
 
     #[test]
@@ -235,53 +247,35 @@ mod attribution_tests {
         assert_eq!(pi_ai::env::child_process_env().get("HTTP_PROXY"), env.get("HTTP_PROXY"));
     }
 
-    /// Ported from upstream `sdk-openrouter-attribution.test.ts`.
+    /// Ported from upstream `sdk-client-identity.test.ts`.
     #[test]
-    fn attribution_headers_follow_telemetry_and_yield_to_configured_and_request_headers() {
+    fn identifies_pi_and_attributes_requests_while_telemetry_is_enabled() {
         if std::env::var("PI_TELEMETRY").is_ok() {
             return;
         }
-        let openrouter = captured("openrouter", "https://openrouter.ai/api/v1", true, &[], &[]);
-        assert_eq!(openrouter["HTTP-Referer"], "https://pi.dev");
-        assert_eq!(openrouter["X-OpenRouter-Title"], "pi");
-        assert_eq!(openrouter["X-OpenRouter-Categories"], "cli-agent");
-        assert!(captured("openrouter", "https://openrouter.ai/api/v1", false, &[], &[]).is_empty());
-        let legacy = captured("custom-openrouter", "not-a-url-openrouter.ai", true, &[], &[]);
-        assert_eq!(legacy["X-OpenRouter-Title"], "pi");
-        let configured =
-            [("HTTP-Referer", "https://provider.example"), ("X-OpenRouter-Categories", "provider-category")];
-        let overridden = captured(
-            "openrouter",
-            "https://openrouter.ai/api/v1",
-            true,
-            &configured,
-            &[("X-OpenRouter-Title", "request-title")],
-        );
-        assert_eq!(overridden["HTTP-Referer"], "https://provider.example");
-        assert_eq!(overridden["X-OpenRouter-Title"], "request-title");
-        assert_eq!(overridden["X-OpenRouter-Categories"], "provider-category");
-        let nim = captured(
-            "nvidia",
-            "https://integrate.api.nvidia.com/v1",
-            true,
-            &[("X-BILLING-INVOKE-ORIGIN", "Provider")],
-            &[("X-BILLING-INVOKE-ORIGIN", "Request")],
-        );
-        assert_eq!(nim["X-BILLING-INVOKE-ORIGIN"], "Request");
-        assert_eq!(
-            captured("custom-nim", "https://integrate.api.nvidia.com/v1", true, &[], &[])["X-BILLING-INVOKE-ORIGIN"],
-            "Pi"
-        );
-        let opencode = captured(
-            "opencode",
-            "https://opencode.ai/zen/v1",
-            false,
-            &[("x-opencode-client", "configured-client")],
-            &[],
-        );
-        assert_eq!(
-            (opencode["x-opencode-session"].as_str(), opencode["x-opencode-client"].as_str()),
-            ("s-1", "configured-client")
-        );
+        let openrouter = model("openrouter", "https://openrouter.ai/api/v1");
+        let identity = captured(&openrouter, true, &[]).identity;
+        let expected = ClientIdentity {
+            user_agent: Some(UserAgentMode::Detailed),
+            version: Some(VERSION.into()),
+            attribution: Some(Some(pi_attribution())),
+        };
+        assert_eq!(identity.as_ref(), Some(&expected));
+        let names: Vec<_> = attribution_headers(&openrouter, identity.as_ref()).into_iter().map(|h| h.0).collect();
+        assert_eq!(names, ["HTTP-Referer", "X-OpenRouter-Title", "X-OpenRouter-Categories"]);
+        let nim = model("nvidia", "https://integrate.api.nvidia.com/v1");
+        let off = captured(&nim, false, &[]).identity;
+        assert_eq!(off, Some(ClientIdentity { attribution: Some(None), ..expected }));
+        assert!(attribution_headers(&nim, off.as_ref()).is_empty());
+    }
+
+    #[test]
+    fn adds_the_opencode_session_header_below_configured_headers() {
+        let custom = captured(&model("custom-opencode", "https://opencode.ai/zen/v1"), false, &[]);
+        assert_eq!(custom.headers, headers(&[("x-opencode-session", "s-1")]));
+        let configured = [("X-OpenCode-Session", "configured-session")];
+        let opencode = captured(&model("opencode", "https://opencode.ai/zen/v1"), false, &configured);
+        assert_eq!(opencode.headers, headers(&configured));
+        assert!(captured(&model("openai", "https://api.openai.com/v1"), false, &[]).headers.is_empty());
     }
 }

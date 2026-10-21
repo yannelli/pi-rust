@@ -57,6 +57,16 @@ impl SessionSnapshot {
         Self { path: path.into(), header, entries, leaf_id }
     }
 
+    /// The entries and current leaf of a live session, which may differ from its file's last entry.
+    pub fn from_manager(manager: &crate::session::SessionManager) -> Self {
+        Self {
+            path: manager.session_file().map(Path::to_path_buf).unwrap_or_default(),
+            header: manager.header_raw().clone(),
+            entries: manager.entries().iter().map(|entry| Value::Object(entry.raw().clone())).collect(),
+            leaf_id: Some(manager.leaf_id().map_or(Value::Null, Value::from)),
+        }
+    }
+
     pub fn session_id(&self) -> &str {
         self.header.get("id").and_then(Value::as_str).unwrap_or_default()
     }

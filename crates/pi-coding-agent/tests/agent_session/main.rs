@@ -13,10 +13,14 @@ mod login;
 mod mcp;
 mod mcp_discovery;
 mod mcp_fake;
+mod offline;
+#[path = "../offline_guard/mod.rs"]
+mod offline_guard;
 mod prompt;
 mod retry;
 mod run_limits;
 mod runtime;
+mod tool_loadout;
 mod tool_options;
 mod tool_registry;
 mod tool_search;

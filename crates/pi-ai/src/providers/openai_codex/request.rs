@@ -6,7 +6,7 @@ use base64::Engine;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use serde_json::{Map, Value, json};
 
-use crate::http::pi_user_agent;
+use crate::identity::identity_headers;
 use crate::provider_options::ReasoningSummary;
 use crate::providers::common::compat_bool;
 use crate::providers::constrained_sampling::{ResponsesToolOptions, convert_responses_tools};
@@ -77,8 +77,11 @@ impl HeaderList {
 
 fn base_headers(model: &Model, options: &StreamOptions, account_id: &str, token: &str) -> HeaderList {
     let mut headers = HeaderList::default();
+    // Codex expects an originator on every request; it is not attribution.
     headers.set("originator", "pi");
-    headers.set("User-Agent", pi_user_agent());
+    for (name, value) in identity_headers(model, options.identity.as_ref()) {
+        headers.set(name, value);
+    }
     for (name, value) in model.headers.iter().chain(options.headers.iter()) {
         headers.set(name, value.clone());
     }

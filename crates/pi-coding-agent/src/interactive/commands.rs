@@ -147,6 +147,7 @@ impl InteractiveMode {
         let session = self.session();
         let result = match path.as_deref() {
             Some(path) if path.ends_with(".jsonl") => session.export_to_jsonl(Some(std::path::Path::new(path))),
+            Some(path) if crate::export::is_markdown_path(path) => session.export_to_markdown(path),
             path => session.export_to_html(path),
         };
         match result {

@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use pi_coding_agent::agent_session::AgentSessionRuntime;
-use pi_coding_agent::app::{AppOptions, create_app_runtime};
+use pi_coding_agent::app::AppOptions;
 use pi_coding_agent::rpc::{RpcModeOptions, parse_json_line, serve_rpc};
 use pi_coding_agent::session::SessionManager;
 use serde_json::Value;
@@ -47,7 +47,7 @@ pub async fn start_with(options: Options, rpc: RpcModeOptions, prepare: impl FnO
     let mut app = h.app_options();
     prepare(&h, &mut app);
     let manager = SessionManager::create(&h.cwd, Some(&h.agent_dir.join("sessions")));
-    let runtime = Arc::new(create_app_runtime(app, manager).await.unwrap());
+    let runtime = Arc::new(crate::offline_guard::app_runtime(app, manager).await);
     let (client, server) = tokio::io::duplex(1 << 16);
     let output = Sink::default();
     let task = tokio::spawn(serve_rpc(runtime.clone(), server, Box::new(output.clone()), rpc));

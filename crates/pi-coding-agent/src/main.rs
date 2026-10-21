@@ -19,7 +19,7 @@ use pi_coding_agent::diagnostics::{
     guarded_stdout, print_timings, record_fatal_error, reset_timings, say_stdout, take_over_stdout, time,
 };
 use pi_coding_agent::doctor::{DoctorInputs, run_doctor_command};
-use pi_coding_agent::export::{ExportTheme, export_from_file};
+use pi_coding_agent::export::{ExportTheme, export_from_file, export_markdown_from_file, is_markdown_path};
 use pi_coding_agent::extensions::rpc::ExtensionRpcHost;
 use pi_coding_agent::files::process_cli_file_args;
 use pi_coding_agent::interactive::startup_ui::startup_project_trust;
@@ -351,6 +351,9 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
     if let Some(output) = run_doctor_command(&raw, doctor).await {
         return Ok(print_output(output));
     }
+    if let Some(output) = pi_coding_agent::sessions_cli::run_command(&raw, &cwd, &agent_dir) {
+        return Ok(print_output(output));
+    }
     let bootstrap_settings = SettingsManager::create(&cwd, &agent_dir, SettingsOptions { project_trusted: false });
     configure_http_from_settings(&bootstrap_settings);
     let mut package_options = PackageCommandOptions::from_env(cwd.clone(), agent_dir.clone());
@@ -392,7 +395,11 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
     if let Some(input) = &args.export {
         let theme =
             startup_settings.theme().and_then(|name| ExportTheme::builtin(&name)).unwrap_or_else(ExportTheme::dark);
-        return match export_from_file(input, args.messages.first().map(String::as_str), &theme) {
+        let result = match args.messages.first().map(String::as_str) {
+            Some(output) if is_markdown_path(output) => export_markdown_from_file(input, output),
+            output => export_from_file(input, output, &theme),
+        };
+        return match result {
             Ok(path) => {
                 println!("Exported to: {}", path.display());
                 Ok(0)

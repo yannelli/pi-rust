@@ -19,11 +19,10 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 async fn run(executable: PathBuf, root: &Path, args: &[&str], envs: &[(&str, String)]) -> Output {
     let mut command = Command::new(executable);
     // Online, for the local servers, but without inherited credentials for real providers.
-    isolate(&mut command)
+    isolate(&mut command, root)
         .env_remove("PI_OFFLINE")
         .args(args)
         .current_dir(root.join("work"))
-        .env("PI_CODING_AGENT_DIR", root.join("agent"))
         .env("CARGO_HOME", root.join("cargo-home"))
         .env_remove("PI_TIMING")
         .stdin(Stdio::null());
