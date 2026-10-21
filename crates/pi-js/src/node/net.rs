@@ -28,7 +28,9 @@ pub(super) type Sender = std::sync::mpsc::Sender<Message>;
 /// An open connection before it is attached to a JavaScript socket.
 pub(super) struct Conn {
     io: BoxIo,
-    tcp: Option<socket2::Socket>,
+    /// A copy of the TCP or Unix socket under `io`, which close uses to end and drain it.
+    socket: Option<socket2::Socket>,
+    tcp: bool,
     info: serde_json::Value,
 }
 
@@ -38,7 +40,8 @@ pub(super) enum Kind {
         reader: Option<tokio::task::AbortHandle>,
         writer: Writer,
         paused: watch::Sender<bool>,
-        tcp: Option<socket2::Socket>,
+        socket: Option<socket2::Socket>,
+        tcp: bool,
         /// Whether the socket was sent to another process, which may still read it.
         exported: bool,
     },
@@ -113,23 +116,30 @@ pub(super) fn tcp_conn(stream: tokio::net::TcpStream) -> std::io::Result<Conn> {
     let tcp = socket2::SockRef::from(&stream).try_clone()?;
     let info =
         json!({ "local": address_json(stream.local_addr().ok()), "remote": address_json(stream.peer_addr().ok()) });
-    Ok(Conn { io: Box::new(stream), tcp: Some(tcp), info })
+    Ok(Conn { io: Box::new(stream), socket: Some(tcp), tcp: true, info })
 }
 
 impl Conn {
     /// Another copy of the socket, which keeps the connection open after `io` is dropped.
     pub(super) fn socket_copy(&self) -> Option<socket2::Socket> {
-        self.tcp.as_ref().and_then(|socket| socket.try_clone().ok())
+        self.socket.as_ref().and_then(|socket| socket.try_clone().ok())
     }
 }
 
 pub(super) fn pipe_conn(io: BoxIo, path: &str) -> Conn {
-    Conn { io, tcp: None, info: json!({ "path": path }) }
+    Conn { io, socket: None, tcp: false, info: json!({ "path": path }) }
+}
+
+/// A Unix socket connection, with a copy of the socket so close drains it like TCP.
+#[cfg(unix)]
+pub(super) fn unix_conn(stream: tokio::net::UnixStream, path: &str) -> Conn {
+    let socket = socket2::SockRef::from(&stream).try_clone().ok();
+    Conn { io: Box::new(stream), socket, tcp: false, info: json!({ "path": path }) }
 }
 
 /// A connection with no address of its own, such as TLS over a JavaScript stream.
 pub(super) fn plain_conn(io: BoxIo) -> Conn {
-    Conn { io, tcp: None, info: json!({}) }
+    Conn { io, socket: None, tcp: false, info: json!({}) }
 }
 
 pub(super) async fn secure(
@@ -143,7 +153,7 @@ pub(super) async fn secure(
     let (io, extra) = tls.handshake(conn.io, sender, id).await?;
     let mut info = conn.info;
     info["tls"] = extra;
-    Ok(Conn { io, tcp: conn.tcp, info })
+    Ok(Conn { io, info, ..conn })
 }
 
 pub(super) fn post(sender: &Sender, id: u64, event: Event) {
@@ -177,15 +187,16 @@ fn report_attempt<'js>(
 }
 
 pub(super) fn stream_kind(conn: Option<Conn>) -> (Kind, serde_json::Value) {
-    let (pending, writer, tcp, info) = match conn {
+    let (pending, writer, socket, tcp, info) = match conn {
         Some(conn) => {
             let (read, write) = tokio::io::split(conn.io);
-            (Some(read), Some(write), conn.tcp, conn.info)
+            (Some(read), Some(write), conn.socket, conn.tcp, conn.info)
         }
-        None => (None, None, None, serde_json::Value::Null),
+        None => (None, None, None, false, serde_json::Value::Null),
     };
     let writer = Arc::new(tokio::sync::Mutex::new(writer));
-    (Kind::Stream { pending, reader: None, writer, paused: watch::Sender::new(false), tcp, exported: false }, info)
+    let paused = watch::Sender::new(false);
+    (Kind::Stream { pending, reader: None, writer, paused, socket, tcp, exported: false }, info)
 }
 
 fn deliver(ctx: &Ctx<'_>, id: u64, event: Event) {
@@ -230,7 +241,7 @@ fn deliver(ctx: &Ctx<'_>, id: u64, event: Event) {
 /// A copy of the socket behind a TCP stream or listener, for handle passing.
 pub(super) fn socket_of(id: u64) -> Option<std::io::Result<socket2::Socket>> {
     let result = state().with_resource(id, |entry: &mut Entry| match &mut entry.kind {
-        Kind::Stream { tcp: Some(socket), exported, .. } => {
+        Kind::Stream { socket: Some(socket), tcp: true, exported, .. } => {
             *exported = true;
             Some(socket.try_clone())
         }
@@ -337,20 +348,25 @@ pub(super) fn close(id: u64) {
         }
     }
     match kind {
-        Kind::Stream { reader, writer, tcp, exported, .. } => {
+        Kind::Stream { reader, writer, socket, tcp, exported, .. } => {
             if let Some(reader) = &reader {
                 reader.abort();
             }
             state.shared.tokio.spawn(async move {
                 drop(writer.lock().await.take());
-                let Some(tcp) = tcp.filter(|_| !exported) else { return };
+                let Some(socket) = socket.filter(|_| !exported) else { return };
                 // Node's close sends the FIN at once. Send it before the discard: bytes that arrive later
                 // then reset a connection the peer already saw end, and the peer's read gets EOF.
-                let _ = tcp.shutdown(std::net::Shutdown::Write);
+                let _ = socket.shutdown(std::net::Shutdown::Write);
                 while reader.as_ref().is_some_and(|reader| !reader.is_finished()) {
                     tokio::task::yield_now().await;
                 }
-                discard_unread(&tcp);
+                // A Unix socket resets its peer when it closes over unread bytes, even after its FIN.
+                // Shutting its read side stops the peer from sending more, so the discard empties it.
+                if !tcp {
+                    let _ = socket.shutdown(std::net::Shutdown::Read);
+                }
+                discard_unread(&socket);
             });
         }
         Kind::Listener { path: Some(path), .. } if cfg!(unix) => {
@@ -383,7 +399,7 @@ fn writer(ctx: &Ctx<'_>, id: u64) -> rquickjs::Result<Writer> {
 }
 
 fn is_pipe(id: u64) -> bool {
-    let found = state().with_resource(id, |entry: &mut Entry| matches!(entry.kind, Kind::Stream { tcp: None, .. }));
+    let found = state().with_resource(id, |entry: &mut Entry| matches!(entry.kind, Kind::Stream { tcp: false, .. }));
     found.unwrap_or(false)
 }
 
@@ -410,7 +426,7 @@ fn end_pipe(ctx: &Ctx<'_>, id: u64) {
 
 fn with_tcp(ctx: &Ctx<'_>, id: u64, f: impl FnOnce(&socket2::Socket) -> std::io::Result<()>) -> rquickjs::Result<()> {
     let result = state().with_resource(id, |entry: &mut Entry| match &entry.kind {
-        Kind::Stream { tcp: Some(tcp), .. } => f(tcp),
+        Kind::Stream { socket: Some(tcp), tcp: true, .. } => f(tcp),
         _ => Ok(()),
     });
     match result {

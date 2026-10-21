@@ -8,8 +8,7 @@ use rquickjs::{Ctx, Function, Value};
 use serde::Deserialize;
 
 use super::net::{
-    Conn, Entry, Event, Sender, insert, net_error, parse_ip, parse_options, pipe_conn, post, secure, stream_kind,
-    tcp_conn,
+    Conn, Entry, Event, Sender, insert, net_error, parse_ip, parse_options, post, secure, stream_kind, tcp_conn,
 };
 use super::tls::Tls;
 use crate::error::JsError;
@@ -98,7 +97,7 @@ async fn connect_tcp(
 async fn connect_pipe(path: String) -> Result<Conn, JsError> {
     let stream = tokio::net::UnixStream::connect(&path).await;
     let stream = stream.map_err(|error| net_error(&error, "connect", Some(&path), None))?;
-    Ok(pipe_conn(Box::new(stream), &path))
+    Ok(super::net::unix_conn(stream, &path))
 }
 
 #[cfg(windows)]
@@ -106,7 +105,7 @@ async fn connect_pipe(path: String) -> Result<Conn, JsError> {
     const ERROR_PIPE_BUSY: i32 = 231;
     loop {
         match tokio::net::windows::named_pipe::ClientOptions::new().open(&path) {
-            Ok(client) => return Ok(pipe_conn(Box::new(client), &path)),
+            Ok(client) => return Ok(super::net::pipe_conn(Box::new(client), &path)),
             Err(error) if error.raw_os_error() == Some(ERROR_PIPE_BUSY) => {
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }

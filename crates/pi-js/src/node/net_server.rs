@@ -8,9 +8,7 @@ use rquickjs::{Ctx, Function, Value};
 use serde::Deserialize;
 use serde_json::json;
 
-use super::net::{
-    Entry, Event, Kind, Sender, address_json, insert, net_error, parse_ip, parse_options, pipe_conn, post,
-};
+use super::net::{Entry, Event, Kind, Sender, address_json, insert, net_error, parse_ip, parse_options, post};
 use super::net::{secure, tcp_conn};
 use super::tls::Tls;
 use crate::error::JsError;
@@ -98,7 +96,7 @@ fn bind_pipe(path: &str) -> std::io::Result<PipeListener> {
 async fn accept_pipe(sender: Sender, id: u64, listener: PipeListener, path: String, tls: Option<Tls>) {
     loop {
         match listener.accept().await {
-            Ok((stream, _)) => accepted(&sender, id, pipe_conn(Box::new(stream), &path), tls.clone()),
+            Ok((stream, _)) => accepted(&sender, id, super::net::unix_conn(stream, &path), tls.clone()),
             Err(error) => {
                 post(&sender, id, Event::Error(net_error(&error, "accept", None, None)));
                 tokio::time::sleep(Duration::from_millis(50)).await;
@@ -128,7 +126,7 @@ async fn accept_pipe(sender: Sender, id: u64, mut server: PipeListener, path: St
             Err(error) => return post(&sender, id, Event::Error(net_error(&error, "listen", None, None))),
         };
         let connected = std::mem::replace(&mut server, next);
-        accepted(&sender, id, pipe_conn(Box::new(connected), &path), tls.clone());
+        accepted(&sender, id, super::net::pipe_conn(Box::new(connected), &path), tls.clone());
     }
 }
 
