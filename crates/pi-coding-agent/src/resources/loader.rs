@@ -46,6 +46,8 @@ pub struct ResourceLoaderOptions {
     pub system_prompt: Option<String>,
     /// `--append-system-prompt` values: file paths or literal text; replace `APPEND_SYSTEM.md`.
     pub append_system_prompt: Option<Vec<String>>,
+    /// `--output-schema` instructions, appended after those texts (pi-rust).
+    pub output_schema_prompt: Option<String>,
 }
 
 impl ResourceLoaderOptions {
@@ -73,6 +75,7 @@ impl ResourceLoaderOptions {
             no_context_files: false,
             system_prompt: None,
             append_system_prompt: None,
+            output_schema_prompt: None,
         }
     }
 }
@@ -188,6 +191,12 @@ impl ResourceLoader {
 
     pub fn set_project_trusted(&mut self, trusted: bool) {
         self.options.project_trusted = trusted;
+    }
+
+    /// Replace the `--output-schema` instructions and load the system prompt texts again.
+    pub fn set_output_schema_prompt(&mut self, prompt: Option<String>) {
+        self.options.output_schema_prompt = prompt;
+        self.load_prompt_files();
     }
 
     /// Discover and load every resource for the current options.
@@ -315,6 +324,7 @@ impl ResourceLoader {
             options.append_system_prompt.clone().unwrap_or_else(|| discover("APPEND_SYSTEM.md").into_iter().collect());
         self.loaded.append_system_prompt =
             append.iter().filter_map(|source| resolve_prompt_input(source, "append system prompt")).collect();
+        self.loaded.append_system_prompt.extend(options.output_schema_prompt.clone());
         self.loaded.append_system_prompt_sources = append
             .iter()
             .filter(|source| Path::new(source).exists())
