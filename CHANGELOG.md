@@ -2,6 +2,17 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.5.2] - 2026-10-21
+
+### Added
+
+- **xtask:** add the parity report ([1688647](https://github.com/yannelli/pi-rust/commit/16886472405346d7e19f3e81e92f0752aa60b361))
+
+### Fixed
+
+- **xtask:** count node:-only modules on Node 22 and keep upstream model data ([9e8cff5](https://github.com/yannelli/pi-rust/commit/9e8cff5079424f5dc5e1cf09f81e9a0afee7595f))
+- **xtask:** skip the model catalog when upstream model data is not generated ([bcbcde0](https://github.com/yannelli/pi-rust/commit/bcbcde02d9457f0a9e4e46c4ccb0ff768f3b23bb))
+
 ## [0.5.1] - 2026-10-21
 
 ### Fixed
