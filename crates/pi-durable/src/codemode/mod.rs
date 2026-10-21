@@ -3,9 +3,16 @@
 //! results each script got, written before each delivery.
 
 mod call;
+mod calls;
+mod describe;
 mod details;
+mod discover;
 mod docs;
+mod files;
+mod model_checks;
+mod models;
 mod outcome;
+mod output;
 mod replay;
 mod run;
 
@@ -13,21 +20,29 @@ use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use pi_chord::Context;
-use pi_codemode::{CodemodeRun, CodemodeRunOptions, CodemodeSandbox, SandboxError};
+use pi_codemode::{
+    CodemodeModels, CodemodeRun, CodemodeRunOptions, CodemodeSandbox, SandboxError, codemode_constrained_sampling,
+};
 use serde_json::{Value, json};
 
+pub use describe::{CodemodeNamespace, DEFAULT_CODEMODE_INLINE_BUDGET, codemode_description, codemode_section};
 pub use details::{CodemodeNestedCall, CodemodeNestedCallStatus, CodemodeToolDetails};
 pub use docs::{
-    CODEMODE_JOURNAL_DOC, CODEMODE_RUN_DOC, CODEMODE_STORE_DOC, CodemodeStart, DeclaredGlobal, DeclaredTool,
-    JournalEntry, JournalGlobal, JournalState, RunState, StoreState, StoredResult,
+    CODEMODE_JOURNAL_DOC, CODEMODE_RUN_DOC, CODEMODE_STORE_DOC, CodemodeStart, DeclaredGlobal, DeclaredNamespace,
+    DeclaredTool, JournalEntry, JournalGlobal, JournalState, RunState, StoreState, StoredResult,
+};
+pub use models::{
+    CLASSIFY_TOOL, CODEMODE_INTERNAL_PREFIX, GENERATE_IMAGES_TOOL, MODELS_DESCRIPTION, create_model_tools,
 };
 
 use crate::errors::{DurableError, DurableResult};
-use crate::harness::{Extension, ToolCaller, ToolExecutionApi, ToolRegistration, ToolReplay, define_tool};
+use crate::harness::{
+    Extension, ToolCaller, ToolExecutionApi, ToolOutputLimits, ToolRegistration, ToolReplay, define_tool, section,
+};
 
 /// Version of everything in this module that turns stored results into what a script sees: result mapping, globals,
 /// start data. Bump it when that changes, so a call started before an upgrade is not replayed by different code.
-pub const CODEMODE_MODULE_VERSION: u32 = 1;
+pub const CODEMODE_MODULE_VERSION: u32 = 2;
 
 pub const CODEMODE_TOOL_NAME: &str = "codemode";
 
@@ -84,15 +99,24 @@ impl std::fmt::Debug for CodemodeGlobal {
 pub struct CodemodeToolOptions {
     /// Runs the scripts, usually a [`CodemodeSandbox`].
     pub sandbox: Arc<dyn CodemodeSandboxBase>,
+    /// Groups of tools by name prefix, such as MCP servers, for the `codemode` section and tool search.
+    pub namespaces: Vec<CodemodeNamespace>,
+    /// Estimated tokens the tool declarations in the `codemode` section may use. Default 3000.
+    pub inline_budget: Option<usize>,
+    /// Gives scripts `models.*`: the model catalog, classifiers, and image generation. `None`: no `models`.
+    pub models: Option<Arc<dyn CodemodeModels>>,
     /// Host functions scripts call as globals.
     pub globals: Vec<CodemodeGlobal>,
 }
 
 impl CodemodeToolOptions {
     pub fn new(sandbox: Arc<dyn CodemodeSandboxBase>) -> Self {
-        Self { sandbox, globals: Vec::new() }
+        Self { sandbox, namespaces: Vec::new(), inline_budget: None, models: None, globals: Vec::new() }
     }
 }
+
+/// The result's limits: outputs are bounded by the script's own token budget; these only stop a runaway.
+const OUTPUT_LIMITS: output::Limits = output::Limits { max_bytes: 4 * 1024 * 1024, max_lines: 100_000 };
 
 fn codemode_parameters() -> Value {
     json!({
@@ -102,12 +126,16 @@ fn codemode_parameters() -> Value {
     })
 }
 
-const CODEMODE_DESCRIPTION: &str = "Run JavaScript that calls other tools. The input is raw JavaScript, run as an async function body in a QuickJS sandbox: top-level `await` and `return` work. No Node, file system, network, or timers. `await tools.<name>({ ...args })` resolves to the tool's result and rejects with an Error on failure. `text(value)` and `console.log()` add output.";
-
 /// The code mode tool. Scripts call the conversation's callable tools as `tools.<name>(args)`.
 pub fn create_codemode_tool(options: CodemodeToolOptions) -> ToolRegistration {
+    let description = codemode_description(options.models.is_some());
     let options = Arc::new(options);
-    define_tool(CODEMODE_TOOL_NAME, CODEMODE_DESCRIPTION, codemode_parameters(), move |args, api, context| {
+    let limits = ToolOutputLimits {
+        max_bytes: Some(OUTPUT_LIMITS.max_bytes),
+        max_lines: Some(OUTPUT_LIMITS.max_lines),
+        retain: None,
+    };
+    let mut tool = define_tool(CODEMODE_TOOL_NAME, description, codemode_parameters(), move |args, api, context| {
         let options = options.clone();
         async move {
             let Some(Value::String(code)) = args.get("code") else {
@@ -116,11 +144,32 @@ pub fn create_codemode_tool(options: CodemodeToolOptions) -> ToolRegistration {
             run::execute(options, api, context, code).await
         }
     })
+    .with_output_limits(limits)
     .with_callers(vec![ToolCaller::Model])
-    .with_replay(ToolReplay::Safe)
+    .with_replay(ToolReplay::Safe);
+    // Capable models write the script as raw text instead of a JSON-escaped string; pi-ai applies it only for them.
+    tool.tool.constrained_sampling = Some(codemode_constrained_sampling());
+    tool
 }
 
-/// The `codemode` extension: the code mode tool.
+/// The `codemode` extension: the code mode tool, its internal model tools when scripts get `models.*`, and the
+/// `codemode` prompt section listing the tools scripts can call.
 pub fn create_codemode_extension(options: CodemodeToolOptions) -> Extension {
-    Extension::new("codemode").tool(create_codemode_tool(options))
+    let (namespaces, budget) = (options.namespaces.clone(), options.inline_budget);
+    let mut extension = Extension::new("codemode").tool(create_codemode_tool(options.clone()));
+    for tool in options.models.map(create_model_tools).unwrap_or_default() {
+        extension = extension.tool(tool);
+    }
+    let render = move |input: crate::harness::PromptInput, _| {
+        let callable: Vec<Arc<ToolRegistration>> = input
+            .agent
+            .callable
+            .iter()
+            .filter(|tool| !tool.name().starts_with(CODEMODE_INTERNAL_PREFIX))
+            .cloned()
+            .collect();
+        let budget = budget.unwrap_or(DEFAULT_CODEMODE_INLINE_BUDGET);
+        std::future::ready(Ok(codemode_section(&callable, &namespaces, budget)))
+    };
+    extension.section(section("codemode", render, None))
 }

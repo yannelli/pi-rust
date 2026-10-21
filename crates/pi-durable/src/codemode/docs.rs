@@ -12,13 +12,30 @@ use crate::documents::{DocSpec, DocToken, RewindableConversation, TaskScope, def
 use crate::harness::ToolExecutionResult;
 use crate::types::DocumentFork;
 
-/// One tool as the script sees it: `tools.<js_name>`.
+/// One tool as the script sees it: `tools.<js_name>`. `structured`: the tool declares a structured output schema, so
+/// an error result with a value resolves with it. `hidden`: an internal tool (`pi.codemode.*`), which scripts reach
+/// only through a global such as `models.classify()`; never in `tools`, `ALL_TOOLS`, or tool search.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeclaredTool {
     pub name: String,
     pub js_name: String,
     pub description: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub structured: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
+}
+
+/// A namespace of the tools, as `describeNamespace()` and `searchTools()` see it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DeclaredNamespace {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
+    pub tools: Vec<String>,
 }
 
 /// One global as the script sees it.
@@ -42,7 +59,10 @@ pub struct CodemodeStart {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deadline: Option<f64>,
     pub tools: Vec<DeclaredTool>,
+    pub namespaces: Vec<DeclaredNamespace>,
     pub globals: Vec<DeclaredGlobal>,
+    /// `max_output_tokens` of the script's options line, or the default.
+    pub max_output_tokens: u64,
     pub store: Map<String, Value>,
 }
 
@@ -72,9 +92,13 @@ impl StoredResult {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RunState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start: Option<CodemodeStart>,
+    /// Directory of the result's files (the full output, images), created once: a rerun writes the same files again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_dir: Option<String>,
     /// The outcome, decided once.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<StoredResult>,

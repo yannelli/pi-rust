@@ -2,19 +2,17 @@
 
 use std::mem::take;
 
-use pi_chord::{Context, Json};
-use pi_codemode::js::js_stringify;
+use pi_chord::Json;
 use pi_codemode::{CodemodeCallTarget, CodemodeHostCall, CodemodeOutcome};
-use serde_json::{Map, Value};
 
-use super::CodemodeGlobal;
 use super::call::{CallResult, CodemodeCall, Done, Event, Finished, clock};
+use super::calls::{GlobalCall, ModelSlots, call_global, call_tool, first_other, record};
+use super::discover::{DISCOVERY_GLOBALS, as_tool_call, discover};
 use super::docs::{CODEMODE_JOURNAL_DOC, CODEMODE_RUN_DOC, JournalEntry, JournalGlobal, StoredResult};
-use super::outcome::{describe, outcome_json, outcome_of, same_json};
+use super::models::{CATALOG_GLOBALS, CODEMODE_INTERNAL_PREFIX, GENERATE_IMAGES_TOOL, count_images};
+use super::outcome::{describe, error_diagnostics, outcome_json, outcome_of, same_json};
 use crate::documents::encode;
 use crate::errors::{DurableError, DurableResult};
-use crate::harness::tool::{NESTED_CALL_DOC, NestedCallState, ToolTaskInput};
-use crate::harness::{ExecuteToolOptions, ToolExecutionApi};
 use crate::session::Tx;
 
 impl CodemodeCall {
@@ -51,12 +49,22 @@ impl CodemodeCall {
     fn outcome(&mut self, call: &CodemodeHostCall, result: CallResult) -> (CodemodeOutcome, Option<JournalGlobal>) {
         match result {
             CallResult::Tool(result) => {
-                let outcome = outcome_of(&call.name, &result);
-                self.rows.finish(call.id, &outcome, result.duration_ms);
+                if call.name == GENERATE_IMAGES_TOOL {
+                    self.generated_images += count_images(result.structured_output.as_ref());
+                }
+                let tool = self.start.tools.iter().find(|tool| tool.name == call.name);
+                let outcome = outcome_of(&call.name, tool.is_some_and(|tool| tool.structured), &result);
+                let error = match &outcome {
+                    CodemodeOutcome::Err { message, .. } => message.clone(),
+                    CodemodeOutcome::Ok(_) => error_diagnostics(&result),
+                };
+                self.rows.finish(call.id, result.is_error, &error, result.duration_ms);
                 (outcome, None)
             }
             CallResult::Rejected(outcome) => {
-                self.rows.finish(call.id, &outcome, None);
+                if let CodemodeOutcome::Err { message, .. } = &outcome {
+                    self.rows.finish(call.id, true, message, None);
+                }
                 (outcome, None)
             }
             CallResult::Global(outcome) => {
@@ -68,7 +76,11 @@ impl CodemodeCall {
     }
 
     /// A call that failed rather than resolved: the call is aborted, or its key names another tool or arguments.
+    /// Stopped meanwhile, nothing changes: the outcome is decided, or a waiting model call gave up.
     fn call_failed(&mut self, call: &CodemodeHostCall, error: DurableError) {
+        if self.stopped() {
+            return;
+        }
         if self.context.is_cancelled() {
             self.fail(error);
         } else {
@@ -118,11 +130,12 @@ impl CodemodeCall {
         }
     }
 
-    fn on_call(&mut self, call: CodemodeHostCall) {
+    fn on_call(&mut self, made: CodemodeHostCall) {
         // The VM made this call before it finished, so only the call's own end stops it.
         if self.ended.is_some() || self.failure.is_some() {
             return;
         }
+        let call = as_tool_call(made);
         if call.target == CodemodeCallTarget::Tool {
             self.rows.started(&call);
         }
@@ -166,11 +179,33 @@ impl CodemodeCall {
 
     /// Reattach a journaled tool call to its nested call; its result is delivered in journal order.
     fn replay_tool(&mut self, call: CodemodeHostCall) {
-        let (api, context) = (self.api.clone(), self.context.clone());
+        let (api, context, slots) = (self.api.clone(), self.context.clone(), self.model_slots(&call));
         self.calls.push(Box::pin(async move {
-            let result = call_tool(&api, &context, &call).await;
+            let result = call_tool(&api, &context, &call, slots).await;
             Done::Replayed(call, result)
         }));
+    }
+
+    /// A model call's slots; `None` for other calls.
+    fn model_slots(&self, call: &CodemodeHostCall) -> Option<ModelSlots> {
+        call.name.starts_with(CODEMODE_INTERNAL_PREFIX).then(|| ModelSlots {
+            slots: self.model_slots.clone(),
+            halt: self.halt.clone(),
+            run: self.run.clone(),
+        })
+    }
+
+    /// What a global call runs; a discovery global is answered now, from the start data.
+    fn global_call(&self, call: &CodemodeHostCall) -> GlobalCall {
+        let name = call.name.as_str();
+        if DISCOVERY_GLOBALS.contains(&name) {
+            return GlobalCall::Answered(discover(&self.start, call));
+        }
+        if CATALOG_GLOBALS.contains(&name) {
+            return self.options.models.clone().map_or(GlobalCall::Unknown, GlobalCall::Catalog);
+        }
+        let global = self.options.globals.iter().find(|global| global.name == name);
+        global.cloned().map_or(GlobalCall::Unknown, GlobalCall::Option)
     }
 
     /// Replay: deliver journaled results in journal order, each once the VM has issued its call.
@@ -298,14 +333,14 @@ impl CodemodeCall {
             return;
         }
         let (api, context) = (self.api.clone(), self.context.clone());
-        let global = match call.target {
-            CodemodeCallTarget::Global => self.options.globals.iter().find(|global| global.name == call.name).cloned(),
-            CodemodeCallTarget::Tool => None,
+        let (slots, global) = match call.target {
+            CodemodeCallTarget::Tool => (self.model_slots(&call), None),
+            CodemodeCallTarget::Global => (None, Some(self.global_call(&call))),
         };
         self.calls.push(Box::pin(async move {
-            let result = match call.target {
-                CodemodeCallTarget::Tool => call_tool(&api, &context, &call).await,
-                CodemodeCallTarget::Global => call_global(&api, &context, &call, global).await,
+            let result = match global {
+                None => call_tool(&api, &context, &call, slots).await,
+                Some(global) => call_global(&api, &context, &call, global).await,
             };
             Done::Launched(call, result)
         }));
@@ -353,97 +388,4 @@ impl CodemodeCall {
         self.committing = false;
         self.pump();
     }
-}
-
-/// Record acknowledged counts that are still absent, then append the entries; edits the journal in place.
-fn record(journal: &mut Json, acks: &[(u64, u64)], entries: Vec<Json>) {
-    let Some(state) = journal.as_object_mut() else { return };
-    for &(seq, issued) in acks {
-        if seq == 0 {
-            if !state.contains_key("firstIssued") {
-                state.insert("firstIssued", issued as f64);
-            }
-            continue;
-        }
-        let entry = state
-            .get_mut("entries")
-            .and_then(Json::as_array_mut)
-            .and_then(|entries| entries.get_mut(seq as usize - 1))
-            .and_then(Json::as_object_mut);
-        if let Some(entry) = entry
-            && !entry.contains_key("issuedAfter")
-        {
-            entry.insert("issuedAfter", issued as f64);
-        }
-    }
-    if let Some(list) = state.get_mut("entries").and_then(Json::as_array_mut) {
-        list.extend(entries);
-    }
-}
-
-async fn call_tool(api: &ToolExecutionApi, context: &Context, call: &CodemodeHostCall) -> DurableResult<CallResult> {
-    let args = match &call.args {
-        None => Map::new(),
-        Some(Value::Object(args)) => args.clone(),
-        // A nested call takes an object; validation would refuse anything else.
-        Some(other) => {
-            let message =
-                format!("Validation failed for tool \"{}\": arguments must be an object, got {other}", call.name);
-            return Ok(CallResult::Rejected(CodemodeOutcome::Err { message, properties: None }));
-        }
-    };
-    let options = ExecuteToolOptions { key: Some(format!("c{}", call.id)), ..ExecuteToolOptions::default() };
-    Ok(CallResult::Tool(api.execute_tool(&call.name, args, context, options).await?))
-}
-
-async fn call_global(
-    api: &ToolExecutionApi,
-    context: &Context,
-    call: &CodemodeHostCall,
-    global: Option<CodemodeGlobal>,
-) -> DurableResult<CallResult> {
-    let Some(global) = global else {
-        let message = format!("Unknown global {}", call.name);
-        return Ok(CallResult::Global(CodemodeOutcome::Err { message, properties: None }));
-    };
-    // `None` stays undefined: the journal omits the value, and a replay resolves with undefined again.
-    match (global.execute)(call.args.clone(), api.clone(), context.clone()).await {
-        Ok(value) => Ok(CallResult::Global(CodemodeOutcome::Ok(value))),
-        Err(error) if context.is_cancelled() => Err(error),
-        Err(error) => Ok(CallResult::Global(CodemodeOutcome::Err { message: error.to_string(), properties: None })),
-    }
-}
-
-/// The first held call an earlier execution made as another call, as its divergence message.
-async fn first_other(
-    api: &ToolExecutionApi,
-    context: &Context,
-    calls: &[CodemodeHostCall],
-) -> DurableResult<Option<String>> {
-    for call in calls {
-        if let Some(other) = earlier(api, context, call).await? {
-            return Ok(Some(format!("call {} is {}, but was {other}", call.id, describe(call))));
-        }
-    }
-    Ok(None)
-}
-
-/// The call an earlier execution made under this call's key, when it is another one: another target, tool, or
-/// arguments.
-async fn earlier(api: &ToolExecutionApi, context: &Context, call: &CodemodeHostCall) -> DurableResult<Option<String>> {
-    let key = format!("c{}", call.id);
-    let Some(stored) = api.family_snapshot(&NESTED_CALL_DOC, api.task_id, &key, context).await? else {
-        return Ok(None);
-    };
-    let Some(task_id) = stored.deserialize_into::<NestedCallState>()?.task_id else { return Ok(None) };
-    let Some(record) = api.get_task(task_id, context).await? else { return Ok(None) };
-    let Ok(ToolTaskInput::Nested { call: made, .. }) = record.input.deserialize_into::<ToolTaskInput>() else {
-        return Ok(None);
-    };
-    let made_args = Value::Object(made.arguments);
-    let args = call.args.clone().unwrap_or_else(|| Value::Object(Map::new()));
-    if call.target == CodemodeCallTarget::Tool && made.name == call.name && same_json(Some(&made_args), Some(&args)) {
-        return Ok(None);
-    }
-    Ok(Some(format!("tools.{}({})", made.name, js_stringify(&made_args))))
 }

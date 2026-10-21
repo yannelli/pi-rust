@@ -6,7 +6,8 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
 use pi_chord::Context;
-use pi_codemode::{CodemodeHostCall, CodemodeOutcome, RunDeliverer};
+use pi_codemode::{CodemodeHostCall, CodemodeOutcome, MAX_CONCURRENT_MODEL_CALLS, RunDeliverer};
+use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
 use super::CodemodeToolOptions;
@@ -105,6 +106,12 @@ pub(super) struct CodemodeCall {
     pub calls: Pending,
     /// The script's tool calls for `details`.
     pub rows: Rows,
+    /// Cancelled once the call decided an outcome or failed: a model call waiting for a slot gives up.
+    pub halt: CancellationToken,
+    /// `models.classify()`/`generateImages()` calls one script may have in flight; the rest wait.
+    pub model_slots: Arc<Semaphore>,
+    /// Images `models.generateImages()` returned, to notice a script that never shows them.
+    pub generated_images: usize,
 }
 
 /// The Harness clock in whole milliseconds, as `Date.now()` reads.
@@ -174,6 +181,9 @@ impl CodemodeCall {
             commits: FuturesUnordered::new(),
             calls: FuturesUnordered::new(),
             rows: Rows::default(),
+            halt: CancellationToken::new(),
+            model_slots: Arc::new(Semaphore::new(MAX_CONCURRENT_MODEL_CALLS)),
+            generated_images: 0,
         }
     }
 
@@ -199,6 +209,7 @@ impl CodemodeCall {
             return;
         }
         self.failure = Some(error);
+        self.halt.cancel();
         self.cancel.cancel();
     }
 
@@ -215,6 +226,7 @@ impl CodemodeCall {
     pub(super) fn end_with(&mut self, result: StoredResult) {
         let stored = StoredResult { details: Some(self.rows.details()), ..result.clone() };
         self.ended = Some(result);
+        self.halt.cancel();
         let decision = store_decision(&self.api, &self.context, stored);
         self.commits.push(Box::pin(async move { Done::Decided(decision.await) }));
     }

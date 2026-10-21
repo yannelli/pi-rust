@@ -1,39 +1,44 @@
-//! What a script gets for its calls, how the journal stores a global's outcome, and the tool result of a
-//! finished script.
+//! What a script gets for its calls, and how the journal stores a global's outcome.
 
-use pi_ai::ContentBlock;
 use pi_chord::Json;
 use pi_codemode::js::js_stringify;
-use pi_codemode::sandbox::{
-    CodemodeCallTarget, CodemodeErrorKind, CodemodeHostCall, CodemodeOutcome, CodemodeOutputItem, CodemodeResult,
-};
+use pi_codemode::sandbox::{CodemodeCallTarget, CodemodeHostCall, CodemodeOutcome};
 use serde_json::{Map, Value, json};
 
-use super::docs::StoredResult;
 use crate::harness::{DiagnosticSeverity, NestedToolExecutionResult};
 
-/// What a script gets for a nested call: success resolves with its value; every error rejects (design section 4.5).
-pub(super) fn outcome_of(name: &str, result: &NestedToolExecutionResult) -> CodemodeOutcome {
-    let value = result.structured_output.as_ref().map(Value::from);
-    if !result.is_error {
+/// What a script gets for a nested call, as in the coding agent. A tool with a schema resolves with its value, also on
+/// an error result that carries one; a schema-less tool resolves with its text output, images left out. Any other
+/// error rejects, with its text: a schema-less tool's output, else its error diagnostics.
+pub(super) fn outcome_of(name: &str, structured: bool, result: &NestedToolExecutionResult) -> CodemodeOutcome {
+    let stored = result.structured_output.as_ref().map(Value::from);
+    let value = if structured { stored } else { Some(Value::String(text_of(stored))) };
+    if !result.is_error || (structured && value.is_some()) {
         return CodemodeOutcome::Ok(value);
     }
-    let message = match &value {
-        Some(Value::String(text)) => text.clone(),
-        Some(Value::Array(items)) => items.iter().filter_map(text_of_block).collect::<Vec<_>>().join("\n"),
+    let message = match (&value, structured) {
+        (Some(Value::String(text)), false) => text.clone(),
         _ => String::new(),
     };
-    let diagnostics: Vec<&str> = result
-        .diagnostics
-        .iter()
-        .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
-        .map(|diagnostic| diagnostic.message.as_str())
-        .collect();
-    let diagnostics = diagnostics.join("\n");
-    let message = [message, diagnostics].into_iter().find(|text| !text.is_empty());
+    let message = [message, error_diagnostics(result)].into_iter().find(|text| !text.is_empty());
     CodemodeOutcome::Err {
         message: message.unwrap_or_else(|| format!("Tool {name} failed")),
         properties: value.map(|value| Map::from_iter([("structuredOutput".to_owned(), value)])),
+    }
+}
+
+/// The messages of a nested result's error diagnostics, one per line.
+pub(super) fn error_diagnostics(result: &NestedToolExecutionResult) -> String {
+    let errors = result.diagnostics.iter().filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error);
+    errors.map(|diagnostic| diagnostic.message.as_str()).collect::<Vec<_>>().join("\n")
+}
+
+/// The text of a schema-less tool's collapsed output: a string, one image, or an array of text and image blocks.
+fn text_of(value: Option<Value>) -> String {
+    match value {
+        Some(Value::String(text)) => text,
+        Some(Value::Array(items)) => items.iter().filter_map(text_of_block).collect::<Vec<_>>().join("\n"),
+        _ => String::new(),
     }
 }
 
@@ -79,43 +84,4 @@ pub(super) fn same_json(a: Option<&Value>, b: Option<&Value>) -> bool {
         (Some(a), Some(b)) => Json::from(a) == Json::from(b),
         _ => false,
     }
-}
-
-pub(super) fn kind_name(kind: CodemodeErrorKind) -> &'static str {
-    match kind {
-        CodemodeErrorKind::Script => "script",
-        CodemodeErrorKind::Timeout => "timeout",
-        CodemodeErrorKind::Aborted => "aborted",
-        CodemodeErrorKind::Sandbox => "sandbox",
-    }
-}
-
-/// The tool result for a script's result.
-pub(super) fn tool_result(result: &CodemodeResult) -> StoredResult {
-    let mut output: Vec<ContentBlock> = result
-        .output
-        .iter()
-        .map(|item| match item {
-            CodemodeOutputItem::Image { data, mime_type } => {
-                ContentBlock::Image { data: data.clone(), mime_type: mime_type.clone() }
-            }
-            CodemodeOutputItem::Text { text, .. } => ContentBlock::text(text.clone()),
-        })
-        .collect();
-    match &result.outcome {
-        Ok(success) => {
-            if let Some(value) = &success.value {
-                let text = match value {
-                    Value::String(text) => text.clone(),
-                    other => js_stringify(other),
-                };
-                output.push(ContentBlock::text(text));
-            }
-        }
-        Err(error) => {
-            let text = error.stack.clone().unwrap_or_else(|| error.message.clone());
-            output.push(ContentBlock::text(format!("Script error ({}): {text}", kind_name(error.kind))));
-        }
-    }
-    StoredResult { output, is_error: !result.is_ok(), details: None }
 }

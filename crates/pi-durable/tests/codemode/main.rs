@@ -5,8 +5,12 @@
 mod support;
 
 mod bench;
+mod describe;
 mod divergence;
+mod env;
+mod models;
 mod restarts;
+mod results;
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -18,10 +22,11 @@ use pi_chord::{Context, Json};
 use pi_codemode::js::js_stringify;
 use pi_codemode::{CodemodeRun, CodemodeRunOptions, CodemodeSandbox, SandboxError, SandboxOptions};
 use pi_durable::codemode::{
-    CodemodeGlobal, CodemodeNestedCallStatus, CodemodeSandboxBase, CodemodeToolDetails, CodemodeToolOptions,
-    create_codemode_tool,
+    CodemodeGlobal, CodemodeNamespace, CodemodeNestedCallStatus, CodemodeSandboxBase, CodemodeToolDetails,
+    CodemodeToolOptions, create_codemode_tool,
 };
 use pi_durable::harness::*;
+use pi_durable::storage::MemoryStorage;
 use pi_durable::storage::sqlite::open_sqlite_storage;
 use pi_durable::testing::faux::FauxResponseStep;
 use pi_durable::types::DocumentCommitChange;
@@ -133,11 +138,15 @@ pub fn new_sandbox() -> Arc<CodemodeSandbox> {
 }
 
 pub fn codemode_chat(globals: Vec<CodemodeGlobal>) -> Chat {
+    codemode_chat_with(globals, Vec::new())
+}
+
+pub fn codemode_chat_with(globals: Vec<CodemodeGlobal>, namespaces: Vec<CodemodeNamespace>) -> Chat {
     let setup = chat_setup(Default::default());
     let vm = Arc::new(Vm::default());
     let sandbox = new_sandbox();
     let mut options = CodemodeToolOptions::new(Arc::new(CountingSandbox { inner: sandbox.clone(), vm: vm.clone() }));
-    options.globals = globals;
+    (options.globals, options.namespaces) = (globals, namespaces);
     add_tool(&setup, create_codemode_tool(options));
     let echo = Arc::new(Mutex::new(BTreeMap::new()));
     let counts = echo.clone();
@@ -211,6 +220,19 @@ pub async fn nested_count(harness: &Harness) -> usize {
     nested_tasks(harness).await.len()
 }
 
+/// The result's text without the "Script completed" header and its wall time, which tests of it check themselves.
+pub fn without_header(text: &str) -> String {
+    for head in ["Script completed\nWall time ", "Script failed\nWall time "] {
+        if let Some(rest) = text.strip_prefix(head)
+            && let Some((seconds, rest)) = rest.split_once(" seconds\nOutput:\n")
+            && seconds.chars().all(|c| c.is_ascii_digit() || c == '.')
+        {
+            return rest.to_owned();
+        }
+    }
+    text.to_owned()
+}
+
 fn text_and_error(entry: &EntryRecord) -> (String, bool) {
     match entry.model.as_ref().and_then(|model| model.first()) {
         Some(Message::ToolResult(result)) => {
@@ -218,7 +240,7 @@ fn text_and_error(entry: &EntryRecord) -> (String, bool) {
                 ContentBlock::Text { text, .. } => text.as_str(),
                 _ => "",
             });
-            (texts.collect::<Vec<_>>().join("\n"), result.is_error)
+            (without_header(&texts.collect::<String>()), result.is_error)
         }
         _ => (String::new(), false),
     }

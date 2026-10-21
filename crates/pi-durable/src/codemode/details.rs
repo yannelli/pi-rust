@@ -3,9 +3,11 @@
 use std::collections::BTreeMap;
 
 use pi_chord::Json;
+use pi_codemode::CodemodeHostCall;
 use pi_codemode::js::{js_stringify, utf16_len, utf16_slice};
-use pi_codemode::{CodemodeHostCall, CodemodeOutcome};
 use serde::{Deserialize, Serialize};
+
+use super::models::CODEMODE_INTERNAL_PREFIX;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -36,8 +38,12 @@ pub struct CodemodeNestedCall {
 /// The code mode call's details: its tool calls in the order it made them, with their status. Calls to globals are
 /// not listed. While the script runs, UIs show its nested calls from `pi.live.nestedTools`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CodemodeToolDetails {
     pub calls: Vec<CodemodeNestedCall>,
+    /// File with the complete text output, when the output was cut to its token budget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub full_output_path: Option<String>,
 }
 
 const ARGS_PREVIEW_CHARS: usize = 200;
@@ -55,9 +61,10 @@ impl Rows {
     /// The script made a tool call: its row appears, running, also while it waits to launch.
     pub fn started(&mut self, call: &CodemodeHostCall) {
         let args = call.args.as_ref().map(js_stringify).unwrap_or_default();
+        let name = call.name.strip_prefix(CODEMODE_INTERNAL_PREFIX).unwrap_or(&call.name);
         self.0.entry(call.id).or_insert_with(|| CodemodeNestedCall {
             id: call.id,
-            name: call.name.clone(),
+            name: name.to_owned(),
             args: cut(&args, ARGS_PREVIEW_CHARS),
             status: CodemodeNestedCallStatus::Running,
             duration_ms: None,
@@ -65,30 +72,36 @@ impl Rows {
         });
     }
 
-    /// A tool call ended: its row gets its status, duration, and error.
-    pub fn finish(&mut self, id: u64, outcome: &CodemodeOutcome, duration_ms: Option<u64>) {
+    /// A tool call ended: an error result is an error row, also when the script got its value; `error` says why.
+    pub fn finish(&mut self, id: u64, is_error: bool, error: &str, duration_ms: Option<u64>) {
         let Some(row) = self.0.get_mut(&id) else { return };
-        match outcome {
-            CodemodeOutcome::Ok(_) => row.status = CodemodeNestedCallStatus::Ok,
-            CodemodeOutcome::Err { message, .. } => {
-                row.status = CodemodeNestedCallStatus::Error;
-                row.error = Some(cut(message, ERROR_PREVIEW_CHARS));
-            }
-        }
+        row.status = if is_error { CodemodeNestedCallStatus::Error } else { CodemodeNestedCallStatus::Ok };
         if duration_ms.is_some() {
             row.duration_ms = duration_ms;
+        }
+        if is_error && !error.is_empty() {
+            row.error = Some(cut(error, ERROR_PREVIEW_CHARS));
         }
     }
 
     /// The rows in call order; calls still running when the script ended were cancelled.
-    pub fn details(&self) -> Json {
+    pub fn calls(&self) -> Vec<CodemodeNestedCall> {
         let calls = self.0.values().cloned().map(|mut row| {
             if row.status == CodemodeNestedCallStatus::Running {
                 row.status = CodemodeNestedCallStatus::Cancelled;
             }
             row
         });
-        let details = CodemodeToolDetails { calls: calls.collect() };
-        Json::from(serde_json::to_value(details).unwrap_or_default())
+        calls.collect()
+    }
+
+    pub fn details(&self) -> Json {
+        CodemodeToolDetails { calls: self.calls(), full_output_path: None }.to_json()
+    }
+}
+
+impl CodemodeToolDetails {
+    pub(super) fn to_json(&self) -> Json {
+        Json::from(serde_json::to_value(self).unwrap_or_default())
     }
 }
