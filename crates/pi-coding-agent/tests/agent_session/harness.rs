@@ -122,6 +122,7 @@ pub async fn harness_with(options: Options, configure: impl FnOnce(&mut CreateAg
     let services = create_agent_session_services(CreateServicesOptions {
         settings: Some(settings.clone()),
         credentials: Some(Arc::new(InMemoryCredentialStore::new(options.credentials.clone()))),
+        credential_env: Some(offline_guard::credential_free_env()),
         resources: ResourceOptions { home: Some(root.path().to_path_buf()), ..ResourceOptions::default() },
         ..CreateServicesOptions::new(&cwd, &agent_dir)
     })
@@ -160,6 +161,7 @@ async fn open_guarded(
     // Tests run codemode scripts in parallel; pi-codemode tests the worker limit.
     pi_codemode::set_codemode_worker_limit(usize::MAX);
     offline_guard::assert_models_loaded(services);
+    offline_guard::assert_credentials_hidden(services);
     let mut options = CreateAgentSessionOptions::new(services.clone(), manager);
     configure(&mut options);
     let chosen = options.model.is_some();
@@ -190,6 +192,7 @@ impl Harness {
             agent_dir: self.agent_dir.clone(),
             settings: Some(self.settings.clone()),
             credentials: Some(Arc::new(InMemoryCredentialStore::new(BTreeMap::new()))),
+            credential_env: Some(offline_guard::credential_free_env()),
             ..AppOptions::default()
         }
     }

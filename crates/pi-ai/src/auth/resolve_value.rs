@@ -8,6 +8,7 @@ use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::auth::ProviderEnv;
+use crate::env::{EnvLookup, ProcessEnv};
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 static COMMAND_CACHE: LazyLock<Mutex<HashMap<String, Option<String>>>> = LazyLock::new(Default::default);
@@ -79,17 +80,17 @@ fn parse_template(config: &str) -> Vec<Part> {
     parts
 }
 
-fn env_value(name: &str, env: Option<&ProviderEnv>) -> Option<String> {
+fn env_value(name: &str, env: Option<&ProviderEnv>, base: &dyn EnvLookup) -> Option<String> {
     let scoped = env.and_then(|env| env.get(name)).filter(|value| !value.is_empty()).cloned();
-    scoped.or_else(|| std::env::var(name).ok().filter(|value| !value.is_empty()))
+    scoped.or_else(|| base.var(name).filter(|value| !value.is_empty()))
 }
 
-fn resolve_template(parts: &[Part], env: Option<&ProviderEnv>) -> Option<String> {
+fn resolve_template(parts: &[Part], env: Option<&ProviderEnv>, base: &dyn EnvLookup) -> Option<String> {
     let mut resolved = String::new();
     for part in parts {
         match part {
             Part::Literal(text) => resolved.push_str(text),
-            Part::Env(name) => resolved.push_str(&env_value(name, env)?),
+            Part::Env(name) => resolved.push_str(&env_value(name, env, base)?),
         }
     }
     Some(resolved)
@@ -129,7 +130,11 @@ pub fn config_value_env_var_name(config: &str) -> Option<String> {
 
 /// Referenced variables that are unset.
 pub fn missing_config_value_env_var_names(config: &str, env: Option<&ProviderEnv>) -> Vec<String> {
-    config_value_env_var_names(config).into_iter().filter(|name| env_value(name, env).is_none()).collect()
+    missing_env_var_names(config, env, &ProcessEnv)
+}
+
+fn missing_env_var_names(config: &str, env: Option<&ProviderEnv>, base: &dyn EnvLookup) -> Vec<String> {
+    config_value_env_var_names(config).into_iter().filter(|name| env_value(name, env, base).is_none()).collect()
 }
 
 /// Whether every referenced variable is set. Commands count as configured.
@@ -197,30 +202,36 @@ pub fn resolve_config_value(config: &str, env: Option<&ProviderEnv>) -> Option<S
     if is_command_config_value(config) {
         return execute_command(config);
     }
-    resolve_template(&parse_template(config), env)
+    resolve_template(&parse_template(config), env, &ProcessEnv)
 }
 
 /// Like [`resolve_config_value`], but runs commands on every call.
 pub fn resolve_config_value_uncached(config: &str, env: Option<&ProviderEnv>) -> Option<String> {
+    resolve_uncached(config, env, &ProcessEnv)
+}
+
+fn resolve_uncached(config: &str, env: Option<&ProviderEnv>, base: &dyn EnvLookup) -> Option<String> {
     if is_command_config_value(config) {
         return execute_command_uncached(&config[1..]);
     }
-    resolve_template(&parse_template(config), env)
+    resolve_template(&parse_template(config), env, base)
 }
 
-/// Resolve a value or explain why it could not be resolved. Commands run uncached.
+/// Resolve a value or explain why it could not be resolved. Commands run uncached; variables
+/// come from `env`, then `base`.
 pub fn resolve_config_value_or_err(
     config: &str,
     description: &str,
     env: Option<&ProviderEnv>,
+    base: &dyn EnvLookup,
 ) -> Result<String, String> {
-    if let Some(value) = resolve_config_value_uncached(config, env) {
+    if let Some(value) = resolve_uncached(config, env, base) {
         return Ok(value);
     }
     if let Some(command) = config.strip_prefix('!') {
         return Err(format!("Failed to resolve {description} from shell command: {command}"));
     }
-    match missing_config_value_env_var_names(config, env).as_slice() {
+    match missing_env_var_names(config, env, base).as_slice() {
         [name] => Err(format!("Failed to resolve {description} from environment variable: {name}")),
         [] => Err(format!("Failed to resolve {description}")),
         names => Err(format!("Failed to resolve {description} from environment variables: {}", names.join(", "))),
@@ -242,11 +253,12 @@ pub fn resolve_headers_or_err(
     headers: &BTreeMap<String, String>,
     description: &str,
     env: Option<&ProviderEnv>,
+    base: &dyn EnvLookup,
 ) -> Result<BTreeMap<String, String>, String> {
     headers
         .iter()
         .map(|(name, value)| {
-            resolve_config_value_or_err(value, &format!("{description} header \"{name}\""), env)
+            resolve_config_value_or_err(value, &format!("{description} header \"{name}\""), env, base)
                 .map(|value| (name.clone(), value))
         })
         .collect()
@@ -296,7 +308,8 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&counter).unwrap().trim(), "1");
         assert_eq!(resolve_config_value_uncached(&command, None).as_deref(), Some("value"));
         assert_eq!(std::fs::read_to_string(&counter).unwrap().trim(), "2");
-        let error = resolve_config_value_or_err("$PI_RUST_UNSET_A-$PI_RUST_UNSET_B", "API key", None).unwrap_err();
+        let error =
+            resolve_config_value_or_err("$PI_RUST_UNSET_A-$PI_RUST_UNSET_B", "API key", None, &ProcessEnv).unwrap_err();
         assert!(error.contains("environment variables: PI_RUST_UNSET_A, PI_RUST_UNSET_B"), "{error}");
         let _ = std::fs::remove_dir_all(dir);
     }

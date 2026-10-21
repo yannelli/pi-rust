@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use pi_ai::auth::{CredentialStore, OAuthLookup};
+use pi_ai::env::EnvLookup;
 
 use super::model_runtime::{ModelRuntime, ModelRuntimeOptions};
 use super::runtime_catalog::CatalogSetup;
@@ -72,6 +73,8 @@ pub struct CreateServicesOptions {
     pub credentials: Option<Arc<dyn CredentialStore>>,
     /// OAuth providers for a new model runtime; `None` uses the built-in ones.
     pub oauth: Option<OAuthLookup>,
+    /// Environment a new model runtime reads credentials from; `None` is the process environment.
+    pub credential_env: Option<Arc<dyn EnvLookup>>,
     pub resources: ResourceOptions,
 }
 
@@ -209,6 +212,9 @@ pub async fn create_agent_session_services(options: CreateServicesOptions) -> Ag
             }
             if options.oauth.is_some() {
                 runtime_options.oauth = options.oauth;
+            }
+            if let Some(env) = options.credential_env {
+                runtime_options.credential_env = env;
             }
             let runtime = ModelRuntime::create(runtime_options).await;
             runtime.enable_dynamic_catalogs(CatalogSetup::for_agent_dir(&agent_dir)).await;
