@@ -225,6 +225,32 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
             spawn_op(&ctx, work, |ctx, count: usize| Ok(Value::new_number(ctx.clone(), count as f64)))
         },
     )?;
+    // Like libuv's uv_udp_try_send: send now, or return undefined when the socket would block.
+    set_fn(
+        &object,
+        "trySend",
+        |ctx: Ctx<'js>, id: u64, data: TypedArray<'js, u8>, address: Opt<String>, port: Opt<u16>| {
+            let socket = socket(&ctx, id, "send")?;
+            let target = match (address.0, port.0) {
+                (Some(address), Some(port)) => Some(parse_ip(&ctx, &address, port)?),
+                _ => None,
+            };
+            let raw = SockRef::from(socket.as_ref());
+            let bytes = bytes_of(&data);
+            let sent = match target {
+                Some(target) => raw.send_to(&bytes, &target.into()),
+                None => raw.send(&bytes),
+            };
+            match sent {
+                Ok(count) => Ok(Value::new_number(ctx.clone(), count as f64)),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(Value::new_undefined(ctx.clone())),
+                Err(error) => {
+                    let shown = target.map(|target| target.ip().to_string());
+                    Err(throw(&ctx, &net_error(&error, "send", shown.as_deref(), target.map(|target| target.port()))))
+                }
+            }
+        },
+    )?;
     set_fn(&object, "connect", |ctx: Ctx<'js>, id: u64, address: String, port: u16| {
         let socket = socket(&ctx, id, "connect")?;
         let target = parse_ip(&ctx, &address, port)?;

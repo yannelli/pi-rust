@@ -172,6 +172,37 @@ export default function (pi) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn pi_ai_compat_prices_usage_like_upstream() {
+    let source = r#"import { calculateCost, modelsAreEqual } from "@earendil-works/pi-ai";
+export default function (pi) {
+	pi.on("session_start", (_event, ctx) => {
+		const cost = { input: 1, output: 2, cacheRead: 0.5, cacheWrite: 1.25, tiers: [{ inputTokensAbove: 1000, input: 3, output: 4, cacheRead: 1, cacheWrite: 2 }] };
+		const model = { provider: "p", id: "m", cost };
+		const usage = (input) => ({ input, output: 1000, cacheRead: 0, cacheWrite: 100, cacheWrite1h: 40, totalTokens: 0 });
+		const small = usage(500);
+		const large = usage(2000);
+		calculateCost(model, small);
+		const returned = calculateCost(model, large);
+		ctx.ui.notify(`small ${small.cost.input} ${small.cost.output} ${small.cost.cacheWrite} ${small.cost.total.toFixed(6)}`);
+		ctx.ui.notify(`large ${large.cost.input} ${large.cost.output} ${large.cost.cacheWrite} ${returned === large.cost}`);
+		const image = { ...model, type: "image" };
+		ctx.ui.notify(`equal ${modelsAreEqual(model, { ...model })} ${modelsAreEqual(model, image)} ${modelsAreEqual(null, model)}`);
+	});
+}
+"#;
+    let h = harness(Setup { files: vec![("cost.ts", source.into())], load: vec!["cost.ts"], ..Setup::default() }).await;
+    assert_eq!(h.errors(), Vec::<String>::new());
+    assert_eq!(
+        h.ui.calls(),
+        [
+            "notify(info): small 0.0005 0.002 0.000155 0.002655",
+            "notify(info): large 0.006 0.004 0.00036 true",
+            "notify(info): equal true false false",
+        ]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn project_trust_handlers_decide_with_the_startup_ui() {
     let root = tempfile::tempdir().unwrap();
     let (cwd, agent_dir) = (root.path().join("work"), root.path().join("agent"));

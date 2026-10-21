@@ -11,6 +11,7 @@ use crate::stream::MessageBuilder;
 use crate::types::{ContentBlock, JsonObject, Model, ModelCost, StopReason, Usage};
 
 const CHATGPT_USAGE_URL: &str = "https://chatgpt.com/settings/usage";
+const CHATGPT_WORKSPACE_LIMIT_HINT: &str = "You've reached your ChatGPT workspace's usage limit. Ask your workspace admin to increase it at admin.openai.com → Workspace → Usage limits.";
 
 /// Streamed raw input of a grammar (custom) tool, re-encoded as a JSON object delta.
 #[derive(Default)]
@@ -222,8 +223,13 @@ impl SseHandler for ResponsesStream {
     }
 
     fn error_message(&self, message: String) -> String {
+        // Sign in with ChatGPT shares the subscription's usage limit with other apps.
+        // On ChatGPT Business plans, the workspace admin also sets a per-user limit.
         if message.contains("subscription_sharing_usage_limit_exceeded") {
             return format!("{message}\nCheck your ChatGPT usage: {CHATGPT_USAGE_URL}");
+        }
+        if message.contains("subscription_sharing_workplace_individual_usage_limit_exceeded") {
+            return format!("{message}\n{CHATGPT_WORKSPACE_LIMIT_HINT}");
         }
         message
     }

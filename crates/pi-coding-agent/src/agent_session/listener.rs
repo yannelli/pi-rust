@@ -17,6 +17,11 @@ pub(crate) fn content_text(content: &UserContent) -> String {
 
 impl AgentSession {
     pub(crate) fn on_agent_event(&self, event: &AgentEvent) {
+        // An abort requested while the run was starting, such as during `before_agent_start`,
+        // stops it here. `agent_start` is delivered before the first request.
+        if matches!(event, AgentEvent::AgentStart) && self.abort_requested() {
+            self.agent.abort();
+        }
         if let AgentEvent::MessageStart { message: Message::User(user) } = event {
             self.dequeue_user_text(&user.content);
         }

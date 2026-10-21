@@ -12,6 +12,7 @@ use pi_ai::{ContentBlock, Message, UserContent};
 use serde_json::{Value, json};
 use tokio::sync::watch;
 
+use super::prompt::RunTrigger;
 use super::{AgentSession, BashResult, PromptOptions, StreamingBehavior, lock};
 use crate::extensions::convert::{prompt_options_from_json, prompt_options_to_json, user_content};
 use crate::extensions::{ExtensionBindings, ExtensionRunner};
@@ -196,7 +197,7 @@ impl AgentSession {
         let mut custom: CustomMessage =
             serde_json::from_value(message).map_err(|error| format!("Invalid message: {error}"))?;
         custom.timestamp = pi_ai::now_ms();
-        let message = custom.into_message();
+        let message = custom.clone().into_message();
         let deliver_as = options["deliverAs"].as_str();
         let trigger = options["triggerTurn"].as_bool();
         if deliver_as == Some("nextTurn") {
@@ -208,7 +209,7 @@ impl AgentSession {
             }
         } else if trigger == Some(true) {
             let session = self.clone();
-            return Ok(Some(async move { session.run_agent_prompt(vec![message]).await }.boxed()));
+            return Ok(Some(async move { session.start_run(RunTrigger::Custom(custom), || {}).await }.boxed()));
         } else if self.is_streaming() {
             lock(&self.state).pending_custom.push(message);
         } else {
@@ -331,15 +332,13 @@ impl AgentSession {
     /// `before_agent_start`: prompt options to run with and custom messages to send along.
     pub(crate) async fn run_before_agent_start(
         &self,
-        prompt: &str,
-        images: &[ContentBlock],
+        trigger: &RunTrigger,
         options: BuildSystemPromptOptions,
     ) -> (BuildSystemPromptOptions, Vec<Message>) {
         let Some(runner) = self.extension_runner().filter(|runner| runner.has_handlers("before_agent_start")) else {
             return (options, Vec::new());
         };
-        let images_json = if images.is_empty() { Value::Null } else { json!(images) };
-        let args = vec![json!(prompt), images_json, prompt_options_to_json(&options)];
+        let args = vec![trigger.event_fields(), prompt_options_to_json(&options)];
         let Ok(result) = runner.call_json("emitBeforeAgentStart", args).await else { return (options, Vec::new()) };
         let mut edited = prompt_options_from_json(&result["systemPromptOptions"], self.cwd());
         // An explicit edit of `selectedTools` wins; otherwise the live loadout stays.

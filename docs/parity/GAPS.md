@@ -34,6 +34,15 @@ Upstream `7472cda0d` (2026-10-12) deleted the experimental server stack: the cli
 
 This commit is older than the synced commit, so the commits section treats it as ported. Commits between the fork snapshot (2026-10-09) and `d2e7d8b7c` were ported one at a time. Check that window for other skipped commits.
 
+## pi-rust extensions
+
+Behavior that pi-rust adds on purpose. The parity review should not report these as gaps.
+
+- Account model list for `openai-codex` from the Codex backend's `/codex/models` (README "Account model lists").
+- Account model list for `anthropic` from `/v1/models` (README "Account model lists").
+- Account model list for `github-copilot` from the Copilot `/models` endpoint (README "Account model lists").
+- Account model lists for `openai` and `xai` from `/models`, and for `google` from the Gemini API `/models` (README "Account model lists"). Cursor and Grok Build have no public model list, so they are not narrowed.
+
 ## Platform
 
 - `pi experimental server` and `client` use Unix sockets, so they report that they need Unix on Windows.

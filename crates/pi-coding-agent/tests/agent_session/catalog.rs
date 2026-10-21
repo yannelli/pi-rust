@@ -17,6 +17,12 @@ fn model_json(provider: &str, id: &str) -> Value {
         "baseUrl": "https://api.anthropic.com", "contextWindow": 200000, "maxTokens": 8192})
 }
 
+/// Send Anthropic's model list to the local server too, so no test reaches the real API.
+fn route_anthropic(dir: &std::path::Path, url: &str) {
+    let models = json!({"providers": {"anthropic": {"baseUrl": url}}});
+    std::fs::write(dir.join("models.json"), models.to_string()).unwrap();
+}
+
 async fn start(dir: &std::path::Path, catalog_url: &str) -> Arc<ModelRuntime> {
     let anthropic = Credential::ApiKey(ApiKeyCredential { key: Some("sk-test".into()), env: None });
     let credentials = BTreeMap::from([("anthropic".to_string(), anthropic)]);
@@ -41,9 +47,11 @@ async fn startup_restores_the_offline_cache_and_refreshes_from_the_catalog() {
     std::fs::write(dir.path().join("models-store.json"), cached.to_string()).unwrap();
     let server = Server::start(|request| match request.path() {
         "/api/models/providers/anthropic" => Reply::json(&json!([model_json("anthropic", "claude-remote")])),
+        "/v1/models" => Reply::json(&json!({"data": [{"id": "claude-opus-4-8"}, {"id": "claude-remote"}]})),
         _ => Reply::status(404),
     })
     .await;
+    route_anthropic(dir.path(), &server.url);
 
     let runtime = start(dir.path(), &server.url).await;
     assert!(runtime.has_dynamic_catalogs());
@@ -59,7 +67,10 @@ async fn startup_restores_the_offline_cache_and_refreshes_from_the_catalog() {
     assert_eq!(server.count("/api/models/providers/openai"), 0, "providers without credentials stay offline");
     let stored: Value =
         serde_json::from_str(&std::fs::read_to_string(dir.path().join("models-store.json")).unwrap()).unwrap();
-    assert_eq!(stored["anthropic"]["models"][0]["id"], "claude-remote");
+    let ids: Vec<&str> =
+        stored["anthropic"]["models"].as_array().unwrap().iter().filter_map(|m| m["id"].as_str()).collect();
+    assert_eq!(ids, ["claude-opus-4-8", "claude-remote"], "the key's model list applies");
+    assert!(!stored.to_string().contains("sk-test"), "the key is never saved");
     assert_eq!(stored["openai"]["models"][0]["id"], "gpt-cached");
 
     // A new runtime starts from the refreshed cache without network access.
@@ -76,6 +87,7 @@ async fn background_refreshes_update_the_registry() {
         _ => Reply::status(404),
     })
     .await;
+    route_anthropic(dir.path(), &server.url);
     let runtime = start(dir.path(), &server.url).await;
     let Some(task) = runtime.refresh_in_background_within(Duration::from_secs(10)) else {
         // PI_OFFLINE is set in this environment: background refreshes are off.

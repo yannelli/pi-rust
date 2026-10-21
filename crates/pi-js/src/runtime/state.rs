@@ -69,6 +69,8 @@ pub(crate) struct LoopState {
     pub resources: RefCell<HashMap<u64, Box<dyn Any>>>,
     /// Async operations and resources that keep the loop busy.
     pub busy: Cell<usize>,
+    /// Closes once the last spawned async operation was first polled.
+    pub last_start: RefCell<Option<tokio::sync::oneshot::Receiver<()>>>,
     pub timers: RefCell<Timers>,
     pub immediates: RefCell<VecDeque<(u64, Persistent<Function<'static>>)>>,
     pub rejections: RefCell<Vec<(Persistent<Value<'static>>, Persistent<Value<'static>>)>>,
@@ -109,6 +111,7 @@ impl LoopState {
             callbacks: RefCell::default(),
             resources: RefCell::default(),
             busy: Cell::new(0),
+            last_start: RefCell::default(),
             timers: RefCell::default(),
             immediates: RefCell::default(),
             rejections: RefCell::default(),

@@ -176,6 +176,24 @@ fn copy_reports_failures_and_uses_osc52_when_appropriate() {
 }
 
 #[test]
+fn pi_clipboard_osc52_emits_after_the_local_write() {
+    let base = "hello";
+    let sequence = "\x1b]52;c;aGVsbG8=\x07";
+    for (platform, display) in [(Platform::MacOs, None), (Platform::Windows, None), (Platform::Linux, Some(":99"))] {
+        let mut vars = vec![("PI_CLIPBOARD_OSC52", "1")];
+        vars.extend(display.map(|value| ("DISPLAY", value)));
+        let runner = Mock::ok();
+        let (result, osc) = copy(env(platform, &vars), &runner, base);
+        assert!(result.is_ok() && !runner.names().is_empty(), "{platform:?} still writes locally");
+        assert_eq!(osc, [sequence], "{platform:?}");
+    }
+    for value in ["0", "true", ""] {
+        let (result, osc) = copy(env(Platform::MacOs, &[("PI_CLIPBOARD_OSC52", value)]), &Mock::ok(), base);
+        assert!(result.is_ok() && osc.is_empty(), "{value:?} does not force OSC 52");
+    }
+}
+
+#[test]
 fn wsl_without_a_display_writes_through_powershell() {
     let written = std::sync::Arc::new(Mutex::new(None::<(String, String)>));
     let seen = written.clone();
