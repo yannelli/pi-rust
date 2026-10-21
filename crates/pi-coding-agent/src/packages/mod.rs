@@ -117,6 +117,27 @@ pub struct PackageUpdate {
     pub scope: SourceScope,
 }
 
+/// A configured package skipped because installing it failed while resolving resources.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PackageInstallFailure {
+    pub source: String,
+    pub scope: SourceScope,
+    pub message: String,
+}
+
+impl PackageInstallFailure {
+    /// One startup warning that names the source and how to drop it from settings.
+    pub fn warning(&self) -> String {
+        let app = crate::resources::brand::APP_NAME;
+        let hint = match self.scope {
+            SourceScope::Temporary => "Check the source and try again.".to_string(),
+            SourceScope::Project => format!("Run \"{app} remove {} --local\" to remove it from settings.", self.source),
+            SourceScope::User => format!("Run \"{app} remove {}\" to remove it from settings.", self.source),
+        };
+        format!("Extension package \"{}\": failed to install ({}). {hint}", self.source, self.message)
+    }
+}
+
 /// A `packages` entry of user or project settings, for `pi list`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConfiguredPackage {
@@ -169,6 +190,7 @@ pub struct PackageManager {
     offline: Option<bool>,
     progress: Mutex<Option<ProgressCallback>>,
     global_npm_root: Mutex<Option<(String, PathBuf)>>,
+    install_failures: Mutex<Vec<PackageInstallFailure>>,
 }
 
 impl PackageManager {
@@ -184,7 +206,13 @@ impl PackageManager {
             offline: options.offline,
             progress: Mutex::new(None),
             global_npm_root: Mutex::new(None),
+            install_failures: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Packages skipped since the last call because installing them failed.
+    pub fn take_install_failures(&self) -> Vec<PackageInstallFailure> {
+        std::mem::take(&mut *self.install_failures.lock().unwrap_or_else(|poisoned| poisoned.into_inner()))
     }
 
     pub fn settings(&self) -> &Arc<SettingsManager> {

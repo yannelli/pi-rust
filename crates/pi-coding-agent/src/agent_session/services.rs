@@ -177,21 +177,26 @@ pub fn resource_diagnostics(loader: &ResourceLoader) -> Vec<RuntimeDiagnostic> {
         .collect()
 }
 
-/// Resources of the `packages` settings; missing packages install first, as upstream.
+/// Resources of the `packages` settings; missing packages install first, as upstream. A
+/// package that fails to install is left out with one warning, and the others still load.
 pub async fn package_resources(
     cwd: &Path,
     agent_dir: &Path,
     settings: &Arc<SettingsManager>,
-) -> (ResolvedPaths, Option<RuntimeDiagnostic>) {
+) -> (ResolvedPaths, Vec<RuntimeDiagnostic>) {
     let configured = [SettingsScope::Global, SettingsScope::Project];
     if configured.iter().all(|scope| settings.packages(*scope).is_empty()) {
-        return (ResolvedPaths::default(), None);
+        return (ResolvedPaths::default(), Vec::new());
     }
     let manager = PackageManager::new(PackageManagerOptions::new(cwd, agent_dir, settings.clone()));
-    match manager.resolve_package_resources(None).await {
-        Ok(paths) => (paths, None),
+    let resolved = manager.resolve_package_resources(None).await;
+    let mut diagnostics: Vec<RuntimeDiagnostic> =
+        manager.take_install_failures().iter().map(|failure| RuntimeDiagnostic::warning(failure.warning())).collect();
+    match resolved {
+        Ok(paths) => (paths, diagnostics),
         Err(error) => {
-            (ResolvedPaths::default(), Some(RuntimeDiagnostic::warning(format!("Failed to load packages: {error:#}"))))
+            diagnostics.push(RuntimeDiagnostic::warning(format!("Failed to load packages: {error:#}")));
+            (ResolvedPaths::default(), diagnostics)
         }
     }
 }
@@ -227,8 +232,8 @@ pub async fn create_agent_session_services(options: CreateServicesOptions) -> Ag
     if let Some(error) = model_runtime.load_error() {
         diagnostics.push(RuntimeDiagnostic::warning(format!("errors loading models.json:\n{error}")));
     }
-    let (packages, package_error) = package_resources(&cwd, &agent_dir, &settings).await;
-    diagnostics.extend(package_error);
+    let (packages, package_diagnostics) = package_resources(&cwd, &agent_dir, &settings).await;
+    diagnostics.extend(package_diagnostics);
     let mut loader_options = resource_loader_options(&cwd, &agent_dir, &settings, &options.resources);
     loader_options.package_resources = packages;
     let mut loader = ResourceLoader::new(loader_options);

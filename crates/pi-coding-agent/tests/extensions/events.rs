@@ -163,6 +163,37 @@ async fn compaction_can_be_cancelled_by_extensions() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_message_that_triggers_a_turn_during_compaction_runs_after_it() {
+    let body = r#"
+	pi.on("session_before_compact", async () => {
+		pi.sendMessage({ customType: "demo", content: "hello", display: false }, { triggerTurn: true });
+		await new Promise((resolve) => setTimeout(resolve, 100));
+	});
+"#;
+    let h = harness(Setup {
+        files: vec![("compact.ts", with_probe(body))],
+        load: vec!["compact.ts"],
+        responses: ["first", "second", "summary", "prefix summary", "after"].map(FauxResponse::text).to_vec(),
+        settings: json!({"compaction": {"keepRecentTokens": 1}}),
+        ..Setup::default()
+    })
+    .await;
+    h.session.prompt("one", Vec::new()).await.unwrap();
+    h.session.prompt("two", Vec::new()).await.unwrap();
+    h.session.compact(None).await.unwrap();
+    eventually(|| h.transcript().last().map(String::as_str) == Some("assistant: after")).await;
+    h.session.wait_for_idle().await;
+    let kinds: Vec<String> = h.entries().iter().map(|entry| entry["type"].as_str().unwrap().to_string()).collect();
+    let compaction = kinds.iter().position(|kind| kind == "compaction").expect("compaction entry");
+    let custom = kinds.iter().position(|kind| kind == "custom_message").expect("custom message entry");
+    assert!(compaction < custom, "the run starts after compaction: {kinds:?}");
+    let request = h.provider.requests().pop().unwrap();
+    let summary = serde_json::to_string(&request.messages).unwrap();
+    assert!(summary.contains("summary"), "the run sees the compacted context: {summary}");
+    assert!(h.errors().is_empty(), "{:?}", h.errors());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn model_and_thinking_changes_report_their_source() {
     let body = r#"
 	pi.on("model_select", (event) => pi.appendEntry("model", { id: event.model.id, previous: event.previousModel?.id, source: event.source }));

@@ -194,6 +194,7 @@ impl AgentSession {
         message: Value,
         options: &Value,
     ) -> Result<Option<BoxFuture<'static, anyhow::Result<()>>>, String> {
+        let raw = message.clone();
         let mut custom: CustomMessage =
             serde_json::from_value(message).map_err(|error| format!("Invalid message: {error}"))?;
         custom.timestamp = pi_ai::now_ms();
@@ -209,6 +210,21 @@ impl AgentSession {
             }
         } else if trigger == Some(true) {
             let session = self.clone();
+            if self.is_compacting() {
+                // A run now would overlap the compaction and miss its result, so the message is sent again
+                // once compaction ends, as after a run (upstream issue 10982).
+                let options = options.clone();
+                return Ok(Some(
+                    async move {
+                        session.wait_while_compacting().await;
+                        match session.send_extension_message(raw, &options).map_err(anyhow::Error::msg)? {
+                            Some(run) => run.await,
+                            None => Ok(()),
+                        }
+                    }
+                    .boxed(),
+                ));
+            }
             return Ok(Some(async move { session.start_run(RunTrigger::Custom(custom), || {}).await }.boxed()));
         } else if self.is_streaming() {
             lock(&self.state).pending_custom.push(message);

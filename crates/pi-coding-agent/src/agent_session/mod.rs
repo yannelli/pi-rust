@@ -252,6 +252,16 @@ impl AgentSession {
         self.idle.send_replace(self.is_idle());
     }
 
+    /// Wait until no compaction or branch summary runs.
+    pub(crate) async fn wait_while_compacting(&self) {
+        let mut receiver = self.idle.subscribe();
+        while self.is_compacting() {
+            if receiver.changed().await.is_err() {
+                return;
+            }
+        }
+    }
+
     /// Wait until the session is idle.
     pub async fn wait_for_idle(&self) {
         let mut receiver = self.idle.subscribe();
