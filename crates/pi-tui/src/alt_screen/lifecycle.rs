@@ -10,7 +10,7 @@ use crate::terminal_image::{
     get_kitty_image_placement_rows, is_image_line, set_capabilities,
 };
 use crate::tui::{
-    TuiError, TuiInner, TuiStopOptions, extract_cursor_position, normalize_line_resets, resolve_fake_cursors,
+    Screen, TuiError, TuiInner, TuiStopOptions, extract_cursor_position, normalize_line_resets, resolve_fake_cursors,
 };
 use crate::utils::{slice_by_column, visible_width};
 
@@ -77,6 +77,36 @@ pub(crate) fn before_terminal_start(inner: &TuiInner) {
         (true, false) => ENABLE_ALL_MOTION_MOUSE,
     };
     inner.write(&format!("{ENTER_ALT_SCREEN}{DISABLE_AUTOWRAP}{mouse_sequence}\x1b[2J\x1b[H\x1b[?25l"));
+}
+
+/// `(alternate screen active, mouse tracking on)` for the exit fallback, which must not panic on a
+/// borrowed state.
+fn exit_state(inner: &TuiInner) -> Option<(bool, bool)> {
+    match &*inner.screen.try_borrow().ok()? {
+        Screen::Alt(alt) => Some((alt.alt_screen_active, alt.mouse_enabled)),
+        Screen::Main(_) => None,
+    }
+}
+
+/// Resets written before the base ones when the TUI goes away without `stop`: end synchronized
+/// output, mouse tracking, and autowrap, while the alternate screen is active.
+pub(crate) fn exit_restore_prefix(inner: &TuiInner) -> String {
+    match exit_state(inner) {
+        Some((true, mouse)) => {
+            let mouse = if mouse { DISABLE_MOUSE } else { "" };
+            format!("{END_SYNCHRONIZED_OUTPUT}{mouse}{ENABLE_AUTOWRAP}")
+        }
+        _ => String::new(),
+    }
+}
+
+/// Resets written after the terminal's own. Kitty keyboard flags are per screen, so the terminal
+/// pops them before the alternate screen is left.
+pub(crate) fn exit_restore_suffix(inner: &TuiInner) -> String {
+    match exit_state(inner) {
+        Some((true, _)) => format!("{EXIT_ALT_SCREEN}\x1b[?25h"),
+        _ => String::new(),
+    }
 }
 
 pub(crate) fn before_terminal_stop(inner: &TuiInner, _options: TuiStopOptions) {
