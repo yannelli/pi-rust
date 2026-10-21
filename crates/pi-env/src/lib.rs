@@ -9,6 +9,7 @@ mod paths;
 mod remote_env;
 mod session;
 mod ssh;
+mod terminal;
 mod watch;
 
 pub use connection::{
@@ -21,6 +22,7 @@ pub use remote_env::{RemoteExecutionEnv, RemoteExecutionEnvOptions, remote_path}
 pub use ssh::{
     RemoteArch, RemotePlatform, RemoteSystem, ScannedHostKey, SshConnectOptions, SshConnection, SshError, SshTarget,
     WindowsShell, accept_host_key, connect_ssh, default_daemon_dir, deploy_daemon, detect_platform, forget_host_key,
-    packaged_daemon, scan_host_key, ssh_arguments, ssh_connection,
+    local_daemon, packaged_daemon, scan_host_key, ssh_arguments, ssh_connection,
 };
+pub use terminal::{DataFn, RemoteTerminal, TerminalOptions, open_terminal};
 pub use watch::{RemoteWatchOptions, RemoteWatcher};
