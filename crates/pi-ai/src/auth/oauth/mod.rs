@@ -37,6 +37,10 @@ pub use callback_server::{
 pub use device_code::{DeviceCodePollOptions, DevicePoll, cancellable_sleep, poll_device_code_flow};
 pub use github_copilot::GitHubCopilotOAuth;
 pub use github_copilot_models::github_copilot_base_url;
+pub(crate) use github_copilot_models::{
+    COPILOT_API_VERSION, COPILOT_HEADERS, INDIVIDUAL_BASE_URL as COPILOT_INDIVIDUAL_BASE_URL,
+    parse_catalog as parse_copilot_catalog,
+};
 pub use kimi_coding::KimiCodingOAuth;
 pub use meta::MetaOAuth;
 pub use openai_chatgpt::OpenAIChatGPTOAuth;

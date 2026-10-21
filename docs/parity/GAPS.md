@@ -24,6 +24,15 @@ None up to `82432219a`. Every commit after the synced commit is ported or listed
 
 Upstream `7472cda0d` (2026-10-12) deleted the experimental server stack: the client, protocol, and server packages and `pi experimental`. pi-rust keeps them on purpose as pi-rust extras (decided 2026-10-21): `pi-client`, `pi-protocol`, `pi-server`, the `pi experimental` commands (`server`, `client`, `durable`, `vacation`), and the facets/services runtime in pi-chord that they use. The three crates are in `allowlist.json`. They get no upstream fixes from now on.
 
+## pi-rust extensions
+
+Behavior that pi-rust adds on purpose. The parity review should not report these as gaps.
+
+- Account model list for `openai-codex` from the Codex backend's `/codex/models` (README "Account model lists").
+- Account model list for `anthropic` from `/v1/models` (README "Account model lists").
+- Account model list for `github-copilot` from the Copilot `/models` endpoint (README "Account model lists").
+- Account model lists for `openai` and `xai` from `/models`, and for `google` from the Gemini API `/models` (README "Account model lists"). Cursor and Grok Build have no public model list, so they are not narrowed.
+
 ## Platform
 
 - `pi experimental server` and `client` use Unix sockets, so they report that they need Unix on Windows.

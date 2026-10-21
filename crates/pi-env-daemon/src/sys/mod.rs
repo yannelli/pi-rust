@@ -10,6 +10,8 @@ pub use unix::*;
 mod windows;
 #[cfg(windows)]
 pub use windows::*;
+#[cfg(any(windows, test))]
+mod windows_paths;
 
 /// How a string command runs: the shell, its arguments before the command, and whether the command goes to its
 /// stdin instead of its arguments (legacy WSL `bash.exe`).

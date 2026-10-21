@@ -6,6 +6,7 @@ mod extras;
 mod read;
 mod search;
 mod shell;
+mod timer;
 mod write;
 
 use std::any::Any;

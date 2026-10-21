@@ -1,5 +1,5 @@
-//! Catalog refreshes started from `/model` and `/scoped-models` (upstream
-//! `model-catalog-refresh.ts` and `findExactModelMatch`).
+//! Catalog refreshes started from `/model`, `/scoped-models`, and `/login` (upstream
+//! `model-catalog-refresh.ts`, `findExactModelMatch`, and `completeProviderAuthentication`).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -128,6 +128,45 @@ pub(super) async fn refresh_catalogs(runtime: Arc<ModelRuntime>, cancel: Cancell
         () = tokio::time::sleep(MODEL_REFRESH_TIMEOUT) => {
             token.cancel();
             RefreshOutcome::TimedOut
+        }
+    }
+}
+
+/// Refresh one provider's catalog after `/login`, with the 15 s limit. Forced, so a new key's
+/// model list replaces the one saved for the previous key.
+pub(super) async fn refresh_after_login(runtime: Arc<ModelRuntime>, provider: String) -> RefreshOutcome {
+    let cancel = CancellationToken::new();
+    let allow_network = !crate::config::offline();
+    let options =
+        RefreshOptions { allow_network, providers: Some(vec![provider]), force: true, cancel: cancel.clone() };
+    let task = tokio::spawn(async move { runtime.refresh_catalogs_with(options).await });
+    tokio::select! {
+        result = task => match result {
+            Ok(result) => RefreshOutcome::Done(result),
+            Err(error) => RefreshOutcome::Failed(error.to_string()),
+        },
+        () = tokio::time::sleep(MODEL_REFRESH_TIMEOUT) => {
+            cancel.cancel();
+            RefreshOutcome::TimedOut
+        }
+    }
+}
+
+/// The warning after a login whose catalog refresh did not finish (upstream wording).
+pub(super) fn login_refresh_warning(outcome: &RefreshOutcome, action: &str) -> Option<String> {
+    match outcome {
+        RefreshOutcome::Done(result) if result.aborted => {
+            Some(format!("{action}, but its model catalog refresh timed out; using cached models."))
+        }
+        RefreshOutcome::TimedOut => {
+            Some(format!("{action}, but its model catalog refresh timed out; using cached models."))
+        }
+        RefreshOutcome::Done(result) if !result.errors.is_empty() => {
+            Some(format!("{action}, but its model catalog could not be refreshed; using cached models."))
+        }
+        RefreshOutcome::Done(_) => None,
+        RefreshOutcome::Failed(error) => {
+            Some(format!("{action}, but its model catalog could not be refreshed: {error}"))
         }
     }
 }

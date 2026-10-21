@@ -237,12 +237,17 @@ impl InteractiveMode {
         state.active_status.as_ref().and_then(|active| active.try_borrow().ok().map(|active| active.kind()))
     }
 
-    /// The spinner for an agent run, colored like the editor border.
-    pub(super) fn show_working_status_indicator(&self) {
-        let color: Option<StyleFn> = self.embeds_working_status().then(|| {
+    /// The editor border color, for indicators that sit in the border.
+    fn embedded_status_color(&self) -> Option<StyleFn> {
+        self.embeds_working_status().then(|| {
             let editor = self.editor.clone();
             Rc::new(move |text: &str| (editor.border_color())(text)) as StyleFn
-        });
+        })
+    }
+
+    /// The spinner for an agent run, colored like the editor border.
+    pub(super) fn show_working_status_indicator(&self) {
+        let color = self.embedded_status_color();
         let (message, indicator) = {
             let state = &self.state.borrow().extensions;
             (state.working_message.clone(), state.working_indicator.clone())
@@ -253,7 +258,7 @@ impl InteractiveMode {
     }
 
     pub(super) fn show_compaction_indicator(&self, reason: CompactionReason) {
-        self.show_status_indicator(StatusIndicator::compaction(&self.tui(), reason));
+        self.show_status_indicator(StatusIndicator::compaction(&self.tui(), reason, self.embedded_status_color()));
     }
 
     /// Editor border: the bash color in `!` mode, otherwise the thinking level color.

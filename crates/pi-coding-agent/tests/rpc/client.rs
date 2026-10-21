@@ -17,6 +17,8 @@ fn client(root: &Path, args: &[&str]) -> RpcClient {
         env: vec![
             ("PI_CODING_AGENT_DIR".into(), root.join("agent").display().to_string()),
             ("HOME".into(), root.display().to_string()),
+            // RPC mode refreshes catalogs in the background; offline it sends nothing.
+            ("PI_OFFLINE".into(), "1".into()),
         ],
         model: Some("mock-model".into()),
         args: args.iter().map(|arg| arg.to_string()).collect(),

@@ -65,15 +65,20 @@ pub fn parse_catalog(provider_id: &str, value: &Value) -> Result<Vec<Model>, Str
     Ok(models.collect())
 }
 
+/// Whether a pi.dev catalog is newer than the model data bundled with pi.
+pub fn is_newer(last_modified: Option<i64>, local_generated_at: Option<i64>) -> bool {
+    match local_generated_at {
+        None => true,
+        Some(local) => last_modified.is_some_and(|remote| remote > local),
+    }
+}
+
 /// The stored overlay, unless the bundled catalog is at least as new.
 pub fn remote_models(entry: Option<&ModelsStoreEntry>, local_generated_at: Option<i64>) -> Vec<Model> {
-    let Some(entry) = entry else { return Vec::new() };
-    if let Some(local) = local_generated_at
-        && entry.last_modified.is_none_or(|remote| remote <= local)
-    {
-        return Vec::new();
+    match entry {
+        Some(entry) if is_newer(entry.last_modified, local_generated_at) => entry.models.clone(),
+        _ => Vec::new(),
     }
-    entry.models.clone()
 }
 
 fn encode_uri_component(text: &str) -> String {
@@ -116,6 +121,39 @@ pub fn parse_http_date(value: &str) -> Option<i64> {
     Some(((days * 24 + hours) * 60 + minutes) * 60_000 + seconds * 1000)
 }
 
+/// `GET <base>/api/models/providers/<id>?types=...`, revalidating with `validator` when given.
+pub(super) async fn request_catalog(
+    client: &reqwest::Client,
+    base_url: &str,
+    provider_id: &str,
+    validator: Option<&str>,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> anyhow::Result<reqwest::Response> {
+    let types = KNOWN_MODEL_TYPES.join(",");
+    let url = format!("{base_url}/api/models/providers/{}?types={types}", encode_uri_component(provider_id));
+    let agent = pi_user_agent(VERSION);
+    let build = || {
+        let request = client.get(&url).header("accept", "application/json").header("User-Agent", &agent);
+        match validator {
+            Some(etag) => request.header("if-none-match", etag),
+            None => request,
+        }
+    };
+    let options = FetchRetryOptions { attempt_timeout: Some(ATTEMPT_TIMEOUT), ..FetchRetryOptions::default() };
+    Ok(fetch_with_retry(build, &options, cancel).await?)
+}
+
+/// A successful catalog response as a store entry without `checked_at`; a missing or invalid
+/// `Last-Modified` header is 0.
+pub(super) async fn read_catalog(provider_id: &str, response: reqwest::Response) -> anyhow::Result<ModelsStoreEntry> {
+    let header = |name: &str| response.headers().get(name).and_then(|value| value.to_str().ok()).map(String::from);
+    let (last_modified, etag) = (header("last-modified"), header("etag"));
+    let body: Value = response.json().await?;
+    let models = parse_catalog(provider_id, &body).map_err(anyhow::Error::msg)?;
+    let last_modified = Some(last_modified.as_deref().and_then(parse_http_date).unwrap_or(0));
+    Ok(ModelsStoreEntry { models, checked_at: None, last_modified, etag, pi_version: None })
+}
+
 /// The pi.dev overlay of one built-in provider.
 pub struct RemoteCatalogOverlay {
     provider_id: String,
@@ -149,11 +187,6 @@ impl RemoteCatalogOverlay {
     fn set_dynamic(&self, models: Vec<Model>) {
         *self.dynamic.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = models;
     }
-
-    fn catalog_url(&self) -> String {
-        let types = KNOWN_MODEL_TYPES.join(",");
-        format!("{}/api/models/providers/{}?types={}", self.base_url, encode_uri_component(&self.provider_id), types)
-    }
 }
 
 #[async_trait]
@@ -185,18 +218,9 @@ impl DynamicCatalog for RemoteCatalogOverlay {
             return Ok(());
         }
         // Revalidate only when a cached body backs the validator, so a 304 cannot empty the overlay.
-        let validator = stored.filter(|entry| !entry.models.is_empty()).and_then(|entry| entry.etag.clone());
-        let url = self.catalog_url();
-        let agent = pi_user_agent(VERSION);
-        let build = || {
-            let request = self.client.get(&url).header("accept", "application/json").header("User-Agent", &agent);
-            match &validator {
-                Some(etag) => request.header("if-none-match", etag),
-                None => request,
-            }
-        };
-        let options = FetchRetryOptions { attempt_timeout: Some(ATTEMPT_TIMEOUT), ..FetchRetryOptions::default() };
-        let response = fetch_with_retry(build, &options, context.cancel).await?;
+        let validator = stored.filter(|entry| !entry.models.is_empty()).and_then(|entry| entry.etag.as_deref());
+        let response =
+            request_catalog(&self.client, &self.base_url, &self.provider_id, validator, context.cancel).await?;
         if context.cancel.is_cancelled() {
             return Ok(());
         }
@@ -219,15 +243,10 @@ impl DynamicCatalog for RemoteCatalogOverlay {
             context.publisher.publish(Persist::Write(ModelsStoreEntry { checked_at, ..base() })).await;
             anyhow::bail!("Model catalog request failed for {}: {status}", self.provider_id);
         }
-        let header = |name: &str| response.headers().get(name).and_then(|value| value.to_str().ok()).map(String::from);
-        let (last_modified, etag) = (header("last-modified"), header("etag"));
-        let body: Value = response.json().await?;
-        let refreshed = parse_catalog(&self.provider_id, &body).map_err(anyhow::Error::msg)?;
+        let entry = ModelsStoreEntry { checked_at, ..read_catalog(&self.provider_id, response).await? };
         if context.cancel.is_cancelled() {
             return Ok(());
         }
-        let last_modified = Some(last_modified.as_deref().and_then(parse_http_date).unwrap_or(0));
-        let entry = ModelsStoreEntry { models: refreshed, checked_at, last_modified, etag };
         let published = remote_models(Some(&entry), self.local_generated_at);
         if context.publisher.publish(Persist::Write(entry)).await {
             self.set_dynamic(published);

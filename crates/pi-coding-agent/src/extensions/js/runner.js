@@ -327,7 +327,7 @@ export class Runner {
 		return headers;
 	}
 
-	async emitBeforeAgentStart(prompt, images, options) {
+	async emitBeforeAgentStart(trigger, options) {
 		const render = () => call("prompt.build", options);
 		const ctx = Object.defineProperties({}, Object.getOwnPropertyDescriptors(this.createContext()));
 		ctx.getSystemPrompt = () => {
@@ -339,9 +339,8 @@ export class Runner {
 			for (const handler of handlers) {
 				try {
 					const event = {
+						...trigger,
 						type: "before_agent_start",
-						prompt,
-						images,
 						get systemPrompt() {
 							return render();
 						},

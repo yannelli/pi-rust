@@ -302,6 +302,8 @@ pub async fn execute_codemode(
     let started = Instant::now();
     let parsed = parse_codemode_source(code)?;
     let log = CallLog::new(on_update);
+    // Show the script as running before its first nested call, so the row's timer starts.
+    log.publish();
     let totals = Arc::new(ModelTotals::default());
 
     let callable = Arc::new(codemode_callable_tools(&host.tools()));

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use globset::GlobBuilder;
 
-use super::paths::{relative_posix, to_posix};
+use super::paths::{normalize_path_input, relative_posix, to_posix};
 
 /// True for filter entries (`!`, `+`, `-` prefixes or glob characters) rather than paths.
 pub fn is_pattern(entry: &str) -> bool {
@@ -43,7 +43,7 @@ fn candidates(path: &Path, base: &Path) -> (Vec<String>, Vec<String>) {
 pub fn matches_any_pattern(path: &Path, patterns: &[&str], base: &Path) -> bool {
     let (matched, _) = candidates(path, base);
     patterns.iter().any(|pattern| {
-        let pattern = posix_pattern(pattern);
+        let pattern = posix_pattern(&normalize_path_input(pattern));
         matched.iter().any(|candidate| glob_matches(&pattern, candidate))
     })
 }
@@ -55,7 +55,7 @@ pub fn matches_any_exact_pattern(path: &Path, patterns: &[&str], base: &Path) ->
     let (_, exact) = candidates(path, base);
     patterns.iter().any(|pattern| {
         let stripped = pattern.strip_prefix("./").or_else(|| pattern.strip_prefix(".\\")).unwrap_or(pattern);
-        let pattern = posix_pattern(stripped);
+        let pattern = posix_pattern(&normalize_path_input(stripped));
         exact.contains(&pattern)
     })
 }

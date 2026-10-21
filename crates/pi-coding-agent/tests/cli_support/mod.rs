@@ -85,13 +85,41 @@ pub fn setup(root: &Path, url: &str) {
     std::fs::write(root.join("agent/models.json"), models.to_string()).unwrap();
 }
 
+/// Prefixes and suffixes of variables that can hold provider credentials, beyond the API key
+/// variables of the bundled providers.
+const CREDENTIAL_PREFIXES: [&str; 7] = ["AWS_", "AZURE_", "ANTHROPIC_", "CLOUDSDK_", "GCLOUD_", "GOOGLE_", "OPENAI_"];
+const CREDENTIAL_SUFFIXES: [&str; 3] = ["_API_KEY", "_TOKEN", "_CREDENTIALS"];
+
+/// Every variable that can hold a provider credential: the API key variables of the bundled
+/// providers, and inherited variables that look like credentials.
+pub fn credential_env_vars() -> Vec<String> {
+    let mut names = std::collections::BTreeSet::new();
+    for model in pi_ai::models::builtin_models() {
+        names.extend(pi_ai::env::api_key_env_vars(&model.provider).iter().map(|name| name.to_string()));
+    }
+    let looks_like_credential = |name: &String| {
+        CREDENTIAL_PREFIXES.iter().any(|prefix| name.starts_with(prefix))
+            || CREDENTIAL_SUFFIXES.iter().any(|suffix| name.ends_with(suffix))
+    };
+    names.extend(std::env::vars_os().filter_map(|(name, _)| name.into_string().ok()).filter(looks_like_credential));
+    names.into_iter().collect()
+}
+
+/// A spawned `pi` starts offline and inherits no provider credentials, so no test reaches a
+/// real endpoint. Tests that need the network remove `PI_OFFLINE` afterwards.
+pub fn isolate(command: &mut Command) -> &mut Command {
+    for name in credential_env_vars() {
+        command.env_remove(name);
+    }
+    command.env("PI_OFFLINE", "1")
+}
+
 pub fn pi(root: &Path, args: &[&str], stdin: Option<&str>) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_pi"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_pi"));
+    let mut child = isolate(&mut command)
         .args(args)
         .current_dir(root.join("work"))
         .env("PI_CODING_AGENT_DIR", root.join("agent"))
-        .env_remove("OPENAI_API_KEY")
-        .env_remove("ANTHROPIC_API_KEY")
         .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
