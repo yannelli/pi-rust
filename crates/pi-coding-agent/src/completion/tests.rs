@@ -14,6 +14,7 @@ fn the_parser_and_the_help_know_every_option_of_the_table() {
     for option in completable_options() {
         let value = match option.kind {
             ValueKind::Choice(choices) => choices[0],
+            _ if matches!(option.long, "--max-turns" | "--max-cost") => "1",
             _ => "read",
         };
         for spelling in spellings(option) {

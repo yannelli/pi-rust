@@ -9,6 +9,14 @@
     {
       "item": "--terminal-login",
       "reason": "pi-rust ships ACP mode (pi --mode acp, ported from pi-acp); an ACP client relaunches pi with this flag for Terminal Auth. Upstream pi has no ACP mode."
+    },
+    {
+      "item": "--max-turns",
+      "reason": "pi-rust extension: run limits"
+    },
+    {
+      "item": "--max-cost",
+      "reason": "pi-rust extension: run limits"
     }
   ],
   "settings": [

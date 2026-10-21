@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 
 use super::AppOptions;
 use crate::agent_session::{
-    AgentSessionServices, CreateServicesOptions, RuntimeDiagnostic, create_agent_session_services,
+    AgentSessionServices, CreateServicesOptions, RunLimits, RuntimeDiagnostic, create_agent_session_services,
 };
 use crate::cli::FlagValue;
 use crate::extensions::{ExtensionBindings, ExtensionRunner, LoadOptions, LoadedExtensions, load_extensions};
@@ -60,6 +60,28 @@ pub(super) async fn apply_flags(
     }
     diagnostics.extend(crate::cli::unknown_flags_error(&unknown).map(RuntimeDiagnostic::error));
     diagnostics
+}
+
+/// An extension that registers `--max-turns` or `--max-cost` gets the value as with upstream pi,
+/// and the pi-rust run limit of that name stays off.
+pub(super) async fn claim_run_limit_flags(runner: Option<&Arc<ExtensionRunner>>, limits: RunLimits) -> RunLimits {
+    let Some(runner) = runner else { return limits };
+    let mut kept = limits;
+    let flags = [
+        ("max-turns", limits.max_turns.map(|turns| turns.to_string())),
+        ("max-cost", limits.max_cost.map(|cost| cost.to_string())),
+    ];
+    for (name, value) in flags {
+        let Some(value) = value else { continue };
+        let Some(kind) = runner.registry().flag(name).map(|flag| flag.kind.clone()) else { continue };
+        let value = if kind == "boolean" { json!(true) } else { json!(value) };
+        let _ = runner.call_json("setFlag", vec![json!(name), value]).await;
+        match name {
+            "max-turns" => kept.max_turns = None,
+            _ => kept.max_cost = None,
+        }
+    }
+    kept
 }
 
 /// `project_trust` handlers of the extensions that load without project trust: the first

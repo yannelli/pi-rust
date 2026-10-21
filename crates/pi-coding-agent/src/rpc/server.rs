@@ -84,7 +84,7 @@ impl RpcServer {
             let output = self.output.clone();
             let shutdown = self.shutdown.clone();
             let id = session.subscribe(move |event| {
-                if !event.is_upstream_event() {
+                if !event.is_json_event() {
                     return;
                 }
                 output.send(&event.to_json());
