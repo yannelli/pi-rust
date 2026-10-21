@@ -5,6 +5,7 @@ import { failedMessage, rustStream } from "./stream.js";
 import { createAssistantMessageEventStream } from "../pi-ai/src/utils/event-stream.ts";
 
 export { Type } from "typebox";
+export { calculateCost, modelsAreEqual } from "./models.js";
 export * from "../pi-ai/src/utils/assistant-message-frame.ts";
 export * from "../pi-ai/src/utils/diagnostics.ts";
 export * from "../pi-ai/src/utils/event-stream.ts";
@@ -95,24 +96,6 @@ export const getBuiltinModel = getModel;
 export const getBuiltinModels = getModels;
 export const getBuiltinProviders = getProviders;
 export const getEnvApiKey = (provider) => optional(call("ai.envApiKey", provider));
-
-/** Cost of `usage` at the model's per-million-token prices; also stored on `usage.cost`. */
-export function calculateCost(model, usage) {
-	const price = model?.cost ?? {};
-	const cost = {
-		input: ((price.input ?? 0) / 1_000_000) * (usage.input ?? 0),
-		output: ((price.output ?? 0) / 1_000_000) * (usage.output ?? 0),
-		cacheRead: ((price.cacheRead ?? 0) / 1_000_000) * (usage.cacheRead ?? 0),
-		cacheWrite: ((price.cacheWrite ?? 0) / 1_000_000) * (usage.cacheWrite ?? 0),
-	};
-	cost.total = cost.input + cost.output + cost.cacheRead + cost.cacheWrite;
-	usage.cost = cost;
-	return cost;
-}
-
-export function modelsAreEqual(left, right) {
-	return Boolean(left && right && left.provider === right.provider && left.id === right.id);
-}
 
 export function supportsXhigh(model) {
 	return Boolean(model?.thinkingLevelMap?.xhigh);

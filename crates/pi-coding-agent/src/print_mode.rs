@@ -121,5 +121,9 @@ fn print_final_response(session: &AgentSession) -> i32 {
         }
     }
     let _ = crate::diagnostics::flush_raw_stdout();
+    if last.stop_reason == StopReason::Length {
+        eprintln!("Response was truncated: the model reached its output token limit.");
+        return 1;
+    }
     0
 }

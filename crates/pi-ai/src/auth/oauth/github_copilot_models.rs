@@ -16,8 +16,8 @@ pub(crate) const COPILOT_HEADERS: [(&str, &str); 4] = [
     ("Editor-Plugin-Version", "copilot-chat/0.35.0"),
     ("Copilot-Integration-Id", "vscode-chat"),
 ];
-const COPILOT_API_VERSION: &str = "2026-06-01";
-const INDIVIDUAL_BASE_URL: &str = "https://api.individual.githubcopilot.com";
+pub(crate) const COPILOT_API_VERSION: &str = "2026-06-01";
+pub(crate) const INDIVIDUAL_BASE_URL: &str = "https://api.individual.githubcopilot.com";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The API base URL from a Copilot token's `proxy-ep` field, for example

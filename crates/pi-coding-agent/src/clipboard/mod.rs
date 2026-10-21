@@ -90,8 +90,13 @@ pub fn is_wsl(env: &ClipboardEnv) -> bool {
     })
 }
 
+/// Remote sessions also emit OSC 52 so the client terminal receives the copy.
+/// `PI_CLIPBOARD_OSC52=1` covers remote clients that leave no SSH markers.
 fn is_remote_session(env: &ClipboardEnv) -> bool {
-    env.has("SSH_CONNECTION") || env.has("SSH_CLIENT") || env.has("MOSH_CONNECTION")
+    env.has("SSH_CONNECTION")
+        || env.has("SSH_CLIENT")
+        || env.has("MOSH_CONNECTION")
+        || env.var("PI_CLIPBOARD_OSC52") == Some("1")
 }
 
 /// The environment, a command runner, and where OSC 52 sequences are written.

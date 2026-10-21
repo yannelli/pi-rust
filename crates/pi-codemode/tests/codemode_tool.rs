@@ -245,9 +245,11 @@ async fn publishes_nested_call_rows_while_the_script_runs() {
     .await
     .unwrap();
     let updates = updates.lock().unwrap();
-    assert_eq!(updates.len(), 2);
-    assert_eq!(updates[0].as_ref().unwrap()["calls"][0]["status"], json!("running"));
-    assert_eq!(updates[1].as_ref().unwrap()["calls"][0]["status"], json!("ok"));
+    assert_eq!(updates.len(), 3);
+    // The first update comes before any nested call, so the row's timer starts at once.
+    assert_eq!(updates[0], Some(json!({ "calls": [] })));
+    assert_eq!(updates[1].as_ref().unwrap()["calls"][0]["status"], json!("running"));
+    assert_eq!(updates[2].as_ref().unwrap()["calls"][0]["status"], json!("ok"));
 }
 
 #[tokio::test]

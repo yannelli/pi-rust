@@ -20,6 +20,7 @@ use serde_json::{Map, Value, json};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 use self::events::{CodexError, CodexEvents};
+pub(crate) use self::request::DEFAULT_CODEX_BASE_URL;
 use self::request::{Compat, HeaderList, build_body, cache_session_id, codex_input, extract_account_id};
 use self::request::{resolve_codex_websocket_url, sse_headers, uuid_v7, websocket_headers};
 pub use self::websocket::{
@@ -115,6 +116,11 @@ async fn prepare(
         compat,
         grammar,
     })
+}
+
+/// The ChatGPT account id claim of a Codex OAuth access token.
+pub(crate) fn chatgpt_account_id(token: &str) -> Option<String> {
+    extract_account_id(token).ok()
 }
 
 fn new_events(prepared: &Prepared, options: &StreamOptions, started: bool) -> CodexEvents {

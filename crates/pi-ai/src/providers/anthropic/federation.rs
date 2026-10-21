@@ -22,7 +22,7 @@ const WORKSPACE_ID_ENV: &str = "ANTHROPIC_WORKSPACE_ID";
 const TOKEN_ENDPOINT: &str = "/v1/oauth/token";
 const GRANT_TYPE_JWT_BEARER: &str = "urn:ietf:params:oauth:grant-type:jwt-bearer";
 /// `anthropic-beta` value that API requests with an OAuth bearer token carry.
-pub(super) const OAUTH_API_BETA: &str = "oauth-2025-04-20";
+pub(crate) const OAUTH_API_BETA: &str = "oauth-2025-04-20";
 const FEDERATION_BETA: &str = "oidc-federation-2026-04-01";
 const ADVISORY_REFRESH_SECONDS: i64 = 120;
 const MANDATORY_REFRESH_SECONDS: i64 = 30;

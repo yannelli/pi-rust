@@ -1,3 +1,4 @@
+mod personalized;
 mod refresh;
 mod remote;
 

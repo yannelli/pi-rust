@@ -55,6 +55,13 @@ pub fn validate_models_json(text: &str, path: &str) -> Result<(), ModelsFileErro
     if errors.is_empty() { Ok(()) } else { Err(ModelsFileError::Schema { path: path.into(), errors }) }
 }
 
+/// The `baseUrl` of each provider in a `models.json` document; empty when it is invalid.
+pub fn provider_base_urls(text: &str) -> HashMap<String, String> {
+    let Ok(file) = json::parse_models_file(text) else { return HashMap::new() };
+    let urls = file.providers.into_iter().filter_map(|(id, config)| Some((id, config.base_url?)));
+    urls.filter(|(_, url)| !url.trim().is_empty()).collect()
+}
+
 /// Available models and the `models.json` auth settings per provider.
 #[derive(Clone, Debug, Default)]
 pub struct ModelRegistry {
