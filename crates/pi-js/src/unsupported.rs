@@ -38,7 +38,6 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
      and breakOnSigint (accepted and ignored)",
     "worker_threads: worker.getHeapSnapshot, postMessageToThread, and resourceLimits other than the heap \
      and stack sizes (accepted)",
-    "fetch: Body.formData for multipart bodies, request bodies are buffered before sending",
     "sqlite: createSession, applyChangeset, enableLoadExtension(true), and loadExtension (the bundled SQLite \
      has no session extension, and native extensions do not load)",
     "test: snapshot assertions (t.assert.snapshot and t.assert.fileSnapshot) and coverage (the lcov reporter)",

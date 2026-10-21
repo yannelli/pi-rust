@@ -64,6 +64,7 @@ const SOURCES: &[(&str, &str)] = &[
     ("internal/streams_web_writable", include_str!("../js/streams_web_writable.js")),
     ("stream/web", include_str!("../js/stream_web.js")),
     ("internal/fetch_body", include_str!("../js/fetch_body.js")),
+    ("internal/fetch_form", include_str!("../js/fetch_form.js")),
     ("internal/fetch", include_str!("../js/fetch.js")),
     ("assert", include_str!("../js/assert.js")),
     ("assert/strict", "module.exports = require('assert').strict;"),
