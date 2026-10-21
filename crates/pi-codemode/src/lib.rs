@@ -45,10 +45,11 @@ pub use loadout::{
 };
 pub use models::MAX_CONCURRENT_MODEL_CALLS;
 pub use sandbox::{
-    AcquireWorker, CodemodeCall, CodemodeCallStatus, CodemodeError, CodemodeErrorKind, CodemodeOutputItem,
-    CodemodeResult, CodemodeSandbox, CodemodeStoreWrites, CodemodeSuccess, ExecuteOptions, MAX_OUTPUT_CHARS,
-    MAX_OUTPUT_ITEMS, MAX_STORE_TOTAL_CHARS, MAX_STORE_VALUE_CHARS, SandboxError, SandboxExecute, SandboxFunction,
-    SandboxOptions, Timeout, WorkerRelease,
+    AcquireWorker, CodemodeCall, CodemodeCallStatus, CodemodeCallTarget, CodemodeDeclaredGlobal, CodemodeDeclaredTool,
+    CodemodeDuring, CodemodeError, CodemodeErrorKind, CodemodeHostCall, CodemodeOutcome, CodemodeOutputItem,
+    CodemodeResult, CodemodeRun, CodemodeRunOptions, CodemodeSandbox, CodemodeStoreWrites, CodemodeSuccess,
+    ExecuteOptions, MAX_OUTPUT_CHARS, MAX_OUTPUT_ITEMS, MAX_STORE_TOTAL_CHARS, MAX_STORE_VALUE_CHARS, OnCall, OnIdle,
+    OnStarted, RunDeliverer, SandboxError, SandboxExecute, SandboxFunction, SandboxOptions, Timeout, WorkerRelease,
 };
 pub use schema::schema_to_type;
 pub use source::{
