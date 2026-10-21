@@ -13,6 +13,56 @@ fn with(mut base: Json, key: &str, value: &Json) -> Json {
 }
 
 #[test]
+fn appends_to_an_array_not_yet_copied_in_one_copy_sharing_everything_else() {
+    let entries: Vec<Json> = (0..1_000).map(|index| json!({ "index": index })).collect();
+    let base = json!({
+        "log": { "entries": Json::array(entries.clone()), "meta": { "count": 1_000 } }, "other": { "value": 1 },
+    });
+    let appended = ops(json!([
+        ["p", ["log", "entries"], 1_000, 0, [{ "index": 1_000 }]],
+        ["p", ["log", "entries"], 1_001, 0, [{ "index": 1_001 }]],
+    ]));
+    let result = apply_immutable(Some(&base), &appended).unwrap();
+    let list = |value: &Json| value.pointer(&path!["log", "entries"]).unwrap().as_array().unwrap().len();
+    assert_eq!((list(&result), list(&base)), (1_002, 1_000));
+    let last = result.pointer(&path!["log", "entries"]).unwrap().as_array().unwrap();
+    assert_eq!(&last[1_000..], [json!({ "index": 1_000 }), json!({ "index": 1_001 })]);
+    let before = base.pointer(&path!("log", "entries")).unwrap().as_array().unwrap();
+    assert!(last[0].same_ref(&before[0]));
+    assert!(result.pointer(&path!["log", "meta"]).unwrap().same_ref(base.pointer(&path!["log", "meta"]).unwrap()));
+    assert!(result.get("other").unwrap().same_ref(base.get("other").unwrap()));
+    assert!(!result.get("log").unwrap().same_ref(base.get("log").unwrap()));
+
+    let root = json!([1, 2]);
+    assert_eq!(apply_immutable(Some(&root), &ops(json!([["p", [], 2, 0, [3]]]))).unwrap(), json!([1, 2, 3]));
+    assert_eq!(root, json!([1, 2]));
+    // An appended item that is itself an array stays one element.
+    assert_eq!(apply_immutable(Some(&root), &ops(json!([["p", [], 2, 0, [[3, 4]]]]))).unwrap(), json!([1, 2, [3, 4]]));
+    // An insert that is not at the end takes the general path.
+    assert_eq!(apply_immutable(Some(&root), &ops(json!([["p", [], 1, 0, [9]]]))).unwrap(), json!([1, 9, 2]));
+}
+
+#[test]
+fn fails_an_append_on_an_invalid_path_with_the_general_paths_errors() {
+    let document = json!({ "values": [], "list": [[1]], "text": "a" });
+    let invalid = [
+        json!(["p", ["values", "missing"], 0, 0, []]),
+        json!(["p", ["missing"], 0, 0, []]),
+        json!(["p", ["values", 0], 0, 0, []]),
+        json!(["p", ["list", "x"], 0, 0, []]),
+        json!(["p", ["text"], 0, 0, []]),
+    ];
+    for operation in invalid {
+        let result = apply_immutable(Some(&document), &ops(json!([operation.clone()])));
+        assert!(matches!(result, Err(ChordError::Path { .. } | ChordError::UnsafePath { .. })), "{operation}");
+    }
+    for operation in [json!(["p", ["__proto__"], 0, 0, []]), json!(["p", ["list", 0, "constructor"], 0, 0, []])] {
+        let result = parse_ops(&json!([operation.clone()])).and_then(|ops| apply_immutable(Some(&document), &ops));
+        assert!(matches!(result, Err(ChordError::UnsafePath { .. })), "{operation}: {result:?}");
+    }
+}
+
+#[test]
 fn copies_touched_containers_while_preserving_input_and_payload_ownership() {
     let shared = json!({"nested": {"value": 1}});
     let untouched = json!({"value": 9});
