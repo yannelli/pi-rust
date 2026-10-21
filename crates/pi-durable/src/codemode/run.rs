@@ -8,8 +8,8 @@ use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use pi_chord::{AbortSignal, Context};
 use pi_codemode::{
-    CodemodeDeclaredGlobal, CodemodeDeclaredTool, CodemodeResult, CodemodeRunOptions, Timeout, parse_codemode_source,
-    to_codemode_identifier,
+    CodemodeDeclaredGlobal, CodemodeDeclaredTool, CodemodeErrorKind, CodemodeResult, CodemodeRunOptions, Timeout,
+    parse_codemode_source, to_codemode_identifier,
 };
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio_util::sync::CancellationToken;
@@ -202,6 +202,18 @@ impl CodemodeCall {
         }
         if let Some(signal) = self.context.abort_signal() {
             signal.throw_if_aborted()?;
+        }
+        // Aborted, but not by this call: the host closed the sandbox, for example while shutting down. That decides
+        // nothing about the script: store nothing and end with this invocation, so a later execution replays it.
+        if let Err(error) = &result.outcome
+            && error.kind == CodemodeErrorKind::Aborted
+            && !self.cancel.is_cancelled()
+        {
+            if let Some(signal) = self.context.abort_signal() {
+                signal.cancelled().await;
+                signal.throw_if_aborted()?;
+            }
+            return Err(DurableError::error("The code mode sandbox was closed while the script ran"));
         }
         // A replay that ends where the live run went on is a divergence (design section 4.3). Within the replayed
         // part, the first run included: a rerun without journal entries replays that much too.

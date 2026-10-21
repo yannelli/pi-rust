@@ -180,6 +180,34 @@ async fn records_a_count_the_live_run_never_recorded_as_soon_as_a_replay_acknowl
 }
 
 #[tokio::test]
+async fn stores_no_outcome_when_the_host_closes_the_sandbox_and_replays_the_script_after_a_restart() {
+    let chat = codemode_chat(vec![]);
+    let directory = tempfile::tempdir().unwrap();
+    let path = sqlite_path(&directory);
+    let code = r#"await tools.echo({ text: "a" }); await tools.hold({}); return "done";"#;
+    chat.setup.faux.set_responses([script(code), done()]);
+    let (harness, root) = open(&path, &chat.setup).await;
+    let id = submit(&root, "go").await;
+    chat.holds.reached().await;
+    let task = script_task(&harness).await;
+    // A host shutting down closes the sandbox before the Harness.
+    chat.sandbox.close();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let run = harness.snapshot(&CODEMODE_RUN_DOC, task, &ctx()).await.unwrap().unwrap();
+    assert_eq!(run.deserialize_into::<RunState>().unwrap().result, None);
+    harness.close(&ctx()).await.unwrap();
+    // The next process has a new sandbox.
+    chat.holds.block.store(false, Ordering::SeqCst);
+    add_tool(&chat.setup, create_codemode_tool(CodemodeToolOptions::new(new_sandbox())));
+    let (harness, root) = open(&path, &chat.setup).await;
+    harness.resume().unwrap();
+    assert_eq!(wait(&harness, id).await, SubmissionStatus::Done);
+    assert_eq!(result_text(&root).await, ("done".into(), false));
+    assert_eq!(echoes(&chat), BTreeMap::from([("a".into(), 1)]));
+    harness.close(&ctx()).await.unwrap();
+}
+
+#[tokio::test]
 async fn refuses_to_resume_when_the_sandbox_s_fingerprint_or_the_code_mode_version_changed() {
     for field in ["fingerprint", "version"] {
         let chat = codemode_chat(vec![]);

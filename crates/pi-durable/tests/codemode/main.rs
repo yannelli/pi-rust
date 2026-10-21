@@ -70,7 +70,7 @@ pub struct Vm {
 }
 
 struct CountingSandbox {
-    inner: CodemodeSandbox,
+    inner: Arc<CodemodeSandbox>,
     vm: Arc<Vm>,
 }
 
@@ -120,18 +120,23 @@ impl Slows {
 /// (replay-safe) waits while `holds.block` is set, then returns `held <id>`; `slow` returns `slow <id>` once released.
 pub struct Chat {
     pub setup: ChatSetup,
+    pub sandbox: Arc<CodemodeSandbox>,
     pub vm: Arc<Vm>,
     pub echo: Arc<Mutex<BTreeMap<String, usize>>>,
     pub holds: Arc<Holds>,
     pub slows: Arc<Slows>,
 }
 
+pub fn new_sandbox() -> Arc<CodemodeSandbox> {
+    let options = SandboxOptions { memory_limit_bytes: Some(64 * 1024 * 1024), ..SandboxOptions::default() };
+    Arc::new(CodemodeSandbox::new(options).unwrap())
+}
+
 pub fn codemode_chat(globals: Vec<CodemodeGlobal>) -> Chat {
     let setup = chat_setup(Default::default());
-    let options = SandboxOptions { memory_limit_bytes: Some(64 * 1024 * 1024), ..SandboxOptions::default() };
     let vm = Arc::new(Vm::default());
-    let sandbox = CountingSandbox { inner: CodemodeSandbox::new(options).unwrap(), vm: vm.clone() };
-    let mut options = CodemodeToolOptions::new(Arc::new(sandbox));
+    let sandbox = new_sandbox();
+    let mut options = CodemodeToolOptions::new(Arc::new(CountingSandbox { inner: sandbox.clone(), vm: vm.clone() }));
     options.globals = globals;
     add_tool(&setup, create_codemode_tool(options));
     let echo = Arc::new(Mutex::new(BTreeMap::new()));
@@ -172,7 +177,7 @@ pub fn codemode_chat(globals: Vec<CodemodeGlobal>) -> Chat {
             }
         }),
     );
-    Chat { setup, vm, echo, holds, slows }
+    Chat { setup, sandbox, vm, echo, holds, slows }
 }
 
 pub fn echoes(chat: &Chat) -> BTreeMap<String, usize> {
