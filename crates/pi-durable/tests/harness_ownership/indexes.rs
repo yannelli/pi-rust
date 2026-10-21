@@ -182,7 +182,7 @@ async fn lists_the_live_tasks_a_task_owns_directly_in_id_order_also_after_a_reop
     let harness = opened.harness;
     let root = harness.root(&context(), CreateOptions::default()).await.unwrap();
     harness.resume().unwrap();
-    // The probe owns: two held tasks, one that ends, a grandchild below one of them, and a conversation with a task.
+    // The probe owns: two held tasks, one that ends, a grandchild below the first, and a conversation with a task.
     let (id, held) = (root.id, hold.clone());
     let stage = move |tx: Tx| async move {
         let probe = tx.create_task(probe, hold_input("probe", false), TaskOptions::conversation(id)).await?;
@@ -197,6 +197,9 @@ async fn lists_the_live_tasks_a_task_owns_directly_in_id_order_also_after_a_reop
     let (first, ends, second) = root.commit(stage, &context()).await.unwrap();
     board.open("ends", Ending::Completed);
     harness.wait_for_task(ends, &context()).await.unwrap();
+    // The first ends too, but holds its outcome as completing while its grandchild runs: still live, so listed.
+    board.open("first", Ending::Completed);
+    eventually(|| async { status(&harness, first).await == TaskStatus::Completing }).await;
     look.resolve();
     eventually(|| async { looked.lock().unwrap().is_some() }).await;
     assert_eq!(looked.lock().unwrap().clone(), Some(vec![first, second]));

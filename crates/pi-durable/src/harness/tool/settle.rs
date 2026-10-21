@@ -143,8 +143,8 @@ pub(crate) async fn start_nested_call(
             let record = tx.task(existing).await?;
             let replayed = record.as_ref().is_some_and(TaskRecord::is_terminal);
             let input = record.and_then(|record| record.input.deserialize_into::<ToolTaskInput>().ok());
-            let same = matches!(&input, Some(ToolTaskInput::Nested { parent, call: made, .. })
-                if *parent == owner && made.name == call.name && json_equal(&made.arguments, &call.arguments));
+            let same = matches!(&input, Some(ToolTaskInput::Nested { call: made, .. })
+                if made.name == call.name && json_equal(&made.arguments, &call.arguments));
             if !same {
                 let message = format!("Nested call {} was already made with another tool or other arguments", call.id);
                 return Err(DurableError::error(message));
