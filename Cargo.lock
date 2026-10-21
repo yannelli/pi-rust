@@ -3179,6 +3179,7 @@ dependencies = [
  "pi-agent",
  "pi-ai",
  "pi-chord",
+ "pi-codemode",
  "pi-telemetry",
  "ring",
  "rusqlite",

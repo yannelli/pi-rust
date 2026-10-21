@@ -421,6 +421,17 @@ async fn ends_with_an_error_the_script_cannot_catch_when_the_caller_cancels() {
 }
 
 #[tokio::test]
+async fn is_finished_once_it_has_its_outcome() {
+    let recorded = start(&sandbox(vec![]), "await tools.wait(1); return 2");
+    recorded.wait_for(|r| r.calls().len() == 1).await;
+    assert!(!recorded.run.finished());
+    recorded.run.deliver(1, STARTED_AT, 1, ok()).unwrap();
+    let deliverer = recorded.run.deliverer();
+    recorded.run.result.await;
+    assert!(deliverer.finished());
+}
+
+#[tokio::test]
 async fn rejects_a_call_that_is_not_waiting_and_a_result_number_used_twice() {
     let recorded = start(&sandbox(vec![]), "await Promise.all([tools.wait(1), tools.wait(2)])");
     recorded.wait_for(|r| r.calls().len() == 2).await;
