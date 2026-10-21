@@ -1,0 +1,11 @@
+---
+description: Use when comparing pi-rust with upstream pi, porting an upstream commit, or answering what pi-rust is missing
+alwaysApply: false
+---
+
+Read @docs/parity/README.md and @docs/parity/GAPS.md first.
+
+- Find gaps with `cargo xtask parity --upstream <upstream-checkout>` and check each finding in both codebases before acting on it.
+- Port one upstream commit per change and name it in the commit message: `fix(scope): <what> (upstream <short-sha>)`.
+- Record accepted differences in `docs/parity/allowlist.json` with a reason, and open gaps in `docs/parity/GAPS.md`.
+- When the port is complete up to a commit, move `syncedCommit` in `docs/parity/upstream.json`.

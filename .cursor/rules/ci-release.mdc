@@ -1,0 +1,12 @@
+---
+description: Rules for CI, the release workflow, and xtask
+globs: .github/workflows/**,xtask/**,CHANGELOG.md,Cargo.toml
+alwaysApply: false
+---
+
+Follow @docs/agents/release.md and @docs/agents/ci-triage.md.
+
+- Releases come from Conventional Commits through `cargo xtask plan` in the Release workflow. Never set versions, tags, or CHANGELOG.md by hand.
+- A complete release has 9 assets: 7 platform archives, `SHA256SUMS`, and `pi-env-daemons-<tag>.tar.gz`.
+- For a failure outside the code, rerun only the failed jobs. For a failure in the code, fix it in a PR.
+- Read a finished job's log during a run with `gh api repos/yannelli/pi-rust/actions/jobs/<id>/logs`.
