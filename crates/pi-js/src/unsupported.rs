@@ -32,8 +32,7 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
     "dgram: addSourceSpecificMembership, dropSourceSpecificMembership, and bind with a file descriptor",
     "process: binding, dlopen, setUncaughtExceptionCaptureCallback, and running code after process.exit when \
      the embedder's on_exit callback returns (the runtime is shutting down)",
-    "stream: Duplex.from for promises and web streams; stream/web BYOB readers, \
-     ReadableByteStreamController, CompressionStream, DecompressionStream",
+    "stream/web: CompressionStream and DecompressionStream",
     "v8: queryObjects",
     "vm: SourceTextModule, SyntheticModule, and Module (Node needs --experimental-vm-modules for them), \
      and breakOnSigint (accepted and ignored)",

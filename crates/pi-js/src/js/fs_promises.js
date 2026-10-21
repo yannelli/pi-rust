@@ -100,10 +100,13 @@ class FileHandle {
     this.#locked = true;
     const handle = this;
     return new ReadableStream({
+      type: "bytes",
+      autoAllocateChunkSize: 16384,
       async pull(controller) {
-        const { bytesRead, buffer } = await handle.read(new Uint8Array(16384), 0, 16384, null);
+        const view = controller.byobRequest.view;
+        const { bytesRead } = await handle.read(view, 0, view.byteLength, null);
         if (bytesRead === 0) controller.close();
-        else controller.enqueue(buffer.subarray(0, bytesRead));
+        controller.byobRequest.respond(bytesRead);
       },
     });
   }
