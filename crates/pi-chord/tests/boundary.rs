@@ -1,5 +1,5 @@
-//! Port of upstream `test/boundary.test.ts`: Chord stands alone apart from the optional `pi-js` and `pi-telemetry`,
-//! a leaf crate that `Context::telemetry` needs.
+//! Port of upstream `test/boundary.test.ts`: Chord stands alone apart from the optional `pi-js` and the leaf crates
+//! `pi-schema` (the TypeBox-compatible validator) and `pi-telemetry` (which `Context::telemetry` needs).
 
 use std::path::{Path, PathBuf};
 
@@ -17,7 +17,7 @@ fn sources(directory: &Path, found: &mut Vec<PathBuf>) {
 }
 
 #[test]
-fn does_not_depend_on_pi_crates_other_than_pi_telemetry_or_files_outside_chord() {
+fn does_not_depend_on_pi_crates_other_than_leaf_crates_or_files_outside_chord() {
     let manifest = std::fs::read_to_string(Path::new(CRATE).join("Cargo.toml")).unwrap();
     let dependencies: Vec<&str> = manifest
         .lines()
@@ -27,7 +27,7 @@ fn does_not_depend_on_pi_crates_other_than_pi_telemetry_or_files_outside_chord()
         .filter_map(|line| line.split_once('=').map(|(name, _)| name.trim().trim_end_matches(".workspace")))
         .filter(|name| name.starts_with("pi-"))
         .collect();
-    assert_eq!(dependencies, ["pi-js", "pi-telemetry"]);
+    assert_eq!(dependencies, ["pi-js", "pi-schema", "pi-telemetry"]);
     assert!(manifest.contains("pi-js = { path = \"../pi-js\", optional = true }"));
 
     let mut files = Vec::new();
@@ -40,9 +40,9 @@ fn does_not_depend_on_pi_crates_other_than_pi_telemetry_or_files_outside_chord()
             let crate_use =
                 line.contains("pi_") && (line.contains("use pi_") || line.contains(" pi_") || line.contains("(pi_"));
             let foreign = crate_use
-                && line
-                    .split(|char: char| !char.is_alphanumeric() && char != '_')
-                    .any(|word| word.starts_with("pi_") && !["pi_js", "pi_chord", "pi_telemetry"].contains(&word));
+                && line.split(|char: char| !char.is_alphanumeric() && char != '_').any(|word| {
+                    word.starts_with("pi_") && !["pi_js", "pi_chord", "pi_schema", "pi_telemetry"].contains(&word)
+                });
             let outside = line.contains("include_str!(\"..") || line.contains("#[path");
             if foreign || outside {
                 violations.push(format!("{shown}:{}: {}", number + 1, line.trim()));

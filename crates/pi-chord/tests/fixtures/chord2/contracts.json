@@ -1,0 +1,1057 @@
+{
+	"contracts": [
+		{
+			"label": "chatV1",
+			"def": {
+				"scope": "remote",
+				"name": "t.chat",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"required": [
+						"session",
+						"conversation"
+					],
+					"properties": {
+						"session": {
+							"type": "string"
+						},
+						"conversation": {
+							"type": "number",
+							"default": 0
+						}
+					}
+				},
+				"host": {
+					"prefix": "session:",
+					"key": "session"
+				},
+				"variants": [
+					{
+						"kind": "viewer",
+						"state": [
+							[
+								"view",
+								{
+									"kind": "state",
+									"schema": {
+										"type": "object",
+										"required": [
+											"text"
+										],
+										"properties": {
+											"text": {
+												"type": "string"
+											}
+										}
+									}
+								}
+							]
+						],
+						"methods": []
+					},
+					{
+						"kind": "participant",
+						"state": [
+							[
+								"view",
+								{
+									"kind": "state",
+									"schema": {
+										"type": "object",
+										"required": [
+											"text"
+										],
+										"properties": {
+											"text": {
+												"type": "string"
+											}
+										}
+									}
+								}
+							]
+						],
+						"methods": [
+							[
+								"send",
+								{
+									"kind": "method",
+									"args": {
+										"type": "object",
+										"required": [
+											"text"
+										],
+										"properties": {
+											"text": {
+												"type": "string"
+											}
+										}
+									},
+									"result": {
+										"type": "object",
+										"required": [
+											"id"
+										],
+										"properties": {
+											"id": {
+												"type": "number"
+											}
+										}
+									}
+								}
+							]
+						]
+					}
+				]
+			},
+			"description": "{\"name\":\"t.chat\",\"scope\":\"remote\",\"version\":1,\"input\":{\"type\":\"object\",\"required\":[\"session\",\"conversation\"],\"properties\":{\"session\":{\"type\":\"string\"},\"conversation\":{\"type\":\"number\",\"default\":0}}},\"host\":{\"prefix\":\"session:\",\"key\":\"session\"},\"variants\":{\"viewer\":{\"view\":{\"kind\":\"state\",\"schema\":{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"}}}}},\"participant\":{\"view\":{\"kind\":\"state\",\"schema\":{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"}}}},\"send\":{\"kind\":\"method\",\"args\":{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"}}},\"result\":{\"type\":\"object\",\"required\":[\"id\"],\"properties\":{\"id\":{\"type\":\"number\"}}}}}}}",
+			"canonical": "{\"host\":{\"key\":\"session\",\"prefix\":\"session:\"},\"input\":{\"properties\":{\"conversation\":{\"default\":0,\"type\":\"number\"},\"session\":{\"type\":\"string\"}},\"required\":[\"session\",\"conversation\"],\"type\":\"object\"},\"name\":\"t.chat\",\"scope\":\"remote\",\"variants\":{\"participant\":{\"send\":{\"args\":{\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"],\"type\":\"object\"},\"kind\":\"method\",\"result\":{\"properties\":{\"id\":{\"type\":\"number\"}},\"required\":[\"id\"],\"type\":\"object\"}},\"view\":{\"kind\":\"state\",\"schema\":{\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"],\"type\":\"object\"}}},\"viewer\":{\"view\":{\"kind\":\"state\",\"schema\":{\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"],\"type\":\"object\"}}}},\"version\":1}",
+			"fingerprint": "e8ee3f28594f8426"
+		},
+		{
+			"label": "additive",
+			"def": {
+				"scope": "remote",
+				"name": "t.chat",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"required": [
+						"session",
+						"conversation"
+					],
+					"properties": {
+						"session": {
+							"type": "string"
+						},
+						"conversation": {
+							"type": "number",
+							"default": 0
+						}
+					}
+				},
+				"host": {
+					"prefix": "session:",
+					"key": "session"
+				},
+				"variants": [
+					{
+						"kind": "viewer",
+						"state": [
+							[
+								"view",
+								{
+									"kind": "state",
+									"schema": {
+										"type": "object",
+										"required": [
+											"text"
+										],
+										"properties": {
+											"text": {
+												"type": "string"
+											}
+										}
+									}
+								}
+							]
+						],
+						"methods": []
+					},
+					{
+						"kind": "participant",
+						"state": [
+							[
+								"view",
+								{
+									"kind": "state",
+									"schema": {
+										"type": "object",
+										"required": [
+											"text",
+											"extra"
+										],
+										"properties": {
+											"text": {
+												"type": "string"
+											},
+											"extra": {
+												"type": "number"
+											}
+										}
+									}
+								}
+							]
+						],
+						"methods": [
+							[
+								"send",
+								{
+									"kind": "method",
+									"args": {
+										"type": "object",
+										"required": [
+											"text"
+										],
+										"properties": {
+											"text": {
+												"type": "string"
+											},
+											"urgent": {
+												"type": "boolean"
+											}
+										}
+									},
+									"result": {
+										"type": "object",
+										"required": [
+											"id",
+											"at"
+										],
+										"properties": {
+											"id": {
+												"type": "number"
+											},
+											"at": {
+												"type": "number"
+											}
+										}
+									}
+								}
+							]
+						]
+					}
+				]
+			},
+			"description": "{\"name\":\"t.chat\",\"scope\":\"remote\",\"version\":1,\"input\":{\"type\":\"object\",\"required\":[\"session\",\"conversation\"],\"properties\":{\"session\":{\"type\":\"string\"},\"conversation\":{\"type\":\"number\",\"default\":0}}},\"host\":{\"prefix\":\"session:\",\"key\":\"session\"},\"variants\":{\"viewer\":{\"view\":{\"kind\":\"state\",\"schema\":{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"}}}}},\"participant\":{\"view\":{\"kind\":\"state\",\"schema\":{\"type\":\"object\",\"required\":[\"text\",\"extra\"],\"properties\":{\"text\":{\"type\":\"string\"},\"extra\":{\"type\":\"number\"}}}},\"send\":{\"kind\":\"method\",\"args\":{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"},\"urgent\":{\"type\":\"boolean\"}}},\"result\":{\"type\":\"object\",\"required\":[\"id\",\"at\"],\"properties\":{\"id\":{\"type\":\"number\"},\"at\":{\"type\":\"number\"}}}}}}}",
+			"canonical": "{\"host\":{\"key\":\"session\",\"prefix\":\"session:\"},\"input\":{\"properties\":{\"conversation\":{\"default\":0,\"type\":\"number\"},\"session\":{\"type\":\"string\"}},\"required\":[\"session\",\"conversation\"],\"type\":\"object\"},\"name\":\"t.chat\",\"scope\":\"remote\",\"variants\":{\"participant\":{\"send\":{\"args\":{\"properties\":{\"text\":{\"type\":\"string\"},\"urgent\":{\"type\":\"boolean\"}},\"required\":[\"text\"],\"type\":\"object\"},\"kind\":\"method\",\"result\":{\"properties\":{\"at\":{\"type\":\"number\"},\"id\":{\"type\":\"number\"}},\"required\":[\"id\",\"at\"],\"type\":\"object\"}},\"view\":{\"kind\":\"state\",\"schema\":{\"properties\":{\"extra\":{\"type\":\"number\"},\"text\":{\"type\":\"string\"}},\"required\":[\"text\",\"extra\"],\"type\":\"object\"}}},\"viewer\":{\"view\":{\"kind\":\"state\",\"schema\":{\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"],\"type\":\"object\"}}}},\"version\":1}",
+			"fingerprint": "a279a19d1d0c2cd0"
+		},
+		{
+			"label": "required",
+			"def": {
+				"scope": "remote",
+				"name": "t.chat",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"required": [
+						"session",
+						"conversation"
+					],
+					"properties": {
+						"session": {
+							"type": "string"
+						},
+						"conversation": {
+							"type": "number",
+							"default": 0
+						}
+					}
+				},
+				"host": {
+					"prefix": "session:",
+					"key": "session"
+				},
+				"variants": [
+					{
+						"kind": "viewer",
+						"state": [
+							[
+								"view",
+								{
+									"kind": "state",
+									"schema": {
+										"type": "object",
+										"required": [
+											"text"
+										],
+										"properties": {
+											"text": {
+												"type": "string"
+											}
+										}
+									}
+								}
+							]
+						],
+						"methods": []
+					},
+					{
+						"kind": "participant",
+						"state": [
+							[
+								"view",
+								{
+									"kind": "state",
+									"schema": {
+										"type": "object",
+										"required": [
+											"text"
+										],
+										"properties": {
+											"text": {
+												"type": "string"
+											}
+										}
+									}
+								}
+							]
+						],
+						"methods": [
+							[
+								"send",
+								{
+									"kind": "method",
+									"args": {
+										"type": "object",
+										"required": [
+											"text",
+											"urgent"
+										],
+										"properties": {
+											"text": {
+												"type": "string"
+											},
+											"urgent": {
+												"type": "boolean"
+											}
+										}
+									},
+									"result": {
+										"type": "object",
+										"required": [
+											"id"
+										],
+										"properties": {
+											"id": {
+												"type": "number"
+											}
+										}
+									}
+								}
+							]
+						]
+					}
+				]
+			},
+			"description": "{\"name\":\"t.chat\",\"scope\":\"remote\",\"version\":1,\"input\":{\"type\":\"object\",\"required\":[\"session\",\"conversation\"],\"properties\":{\"session\":{\"type\":\"string\"},\"conversation\":{\"type\":\"number\",\"default\":0}}},\"host\":{\"prefix\":\"session:\",\"key\":\"session\"},\"variants\":{\"viewer\":{\"view\":{\"kind\":\"state\",\"schema\":{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"}}}}},\"participant\":{\"view\":{\"kind\":\"state\",\"schema\":{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"}}}},\"send\":{\"kind\":\"method\",\"args\":{\"type\":\"object\",\"required\":[\"text\",\"urgent\"],\"properties\":{\"text\":{\"type\":\"string\"},\"urgent\":{\"type\":\"boolean\"}}},\"result\":{\"type\":\"object\",\"required\":[\"id\"],\"properties\":{\"id\":{\"type\":\"number\"}}}}}}}",
+			"canonical": "{\"host\":{\"key\":\"session\",\"prefix\":\"session:\"},\"input\":{\"properties\":{\"conversation\":{\"default\":0,\"type\":\"number\"},\"session\":{\"type\":\"string\"}},\"required\":[\"session\",\"conversation\"],\"type\":\"object\"},\"name\":\"t.chat\",\"scope\":\"remote\",\"variants\":{\"participant\":{\"send\":{\"args\":{\"properties\":{\"text\":{\"type\":\"string\"},\"urgent\":{\"type\":\"boolean\"}},\"required\":[\"text\",\"urgent\"],\"type\":\"object\"},\"kind\":\"method\",\"result\":{\"properties\":{\"id\":{\"type\":\"number\"}},\"required\":[\"id\"],\"type\":\"object\"}},\"view\":{\"kind\":\"state\",\"schema\":{\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"],\"type\":\"object\"}}},\"viewer\":{\"view\":{\"kind\":\"state\",\"schema\":{\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"],\"type\":\"object\"}}}},\"version\":1}",
+			"fingerprint": "ca376c005785d3f7"
+		},
+		{
+			"label": "retyped",
+			"def": {
+				"scope": "remote",
+				"name": "t.chat",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"required": [
+						"session",
+						"conversation"
+					],
+					"properties": {
+						"session": {
+							"type": "string"
+						},
+						"conversation": {
+							"type": "number",
+							"default": 0
+						}
+					}
+				},
+				"host": {
+					"prefix": "session:",
+					"key": "session"
+				},
+				"variants": [
+					{
+						"kind": "viewer",
+						"state": [
+							[
+								"view",
+								{
+									"kind": "state",
+									"schema": {
+										"type": "object",
+										"required": [
+											"text"
+										],
+										"properties": {
+											"text": {
+												"type": "number"
+											}
+										}
+									}
+								}
+							]
+						],
+						"methods": []
+					},
+					{
+						"kind": "participant",
+						"state": [
+							[
+								"view",
+								{
+									"kind": "state",
+									"schema": {
+										"type": "object",
+										"required": [
+											"text"
+										],
+										"properties": {
+											"text": {
+												"type": "string"
+											}
+										}
+									}
+								}
+							]
+						],
+						"methods": [
+							[
+								"send",
+								{
+									"kind": "method",
+									"args": {
+										"type": "object",
+										"required": [
+											"text"
+										],
+										"properties": {
+											"text": {
+												"type": "string"
+											}
+										}
+									},
+									"result": {
+										"type": "object",
+										"required": [
+											"id"
+										],
+										"properties": {
+											"id": {
+												"type": "number"
+											}
+										}
+									}
+								}
+							]
+						]
+					}
+				]
+			},
+			"description": "{\"name\":\"t.chat\",\"scope\":\"remote\",\"version\":1,\"input\":{\"type\":\"object\",\"required\":[\"session\",\"conversation\"],\"properties\":{\"session\":{\"type\":\"string\"},\"conversation\":{\"type\":\"number\",\"default\":0}}},\"host\":{\"prefix\":\"session:\",\"key\":\"session\"},\"variants\":{\"viewer\":{\"view\":{\"kind\":\"state\",\"schema\":{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"number\"}}}}},\"participant\":{\"view\":{\"kind\":\"state\",\"schema\":{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"}}}},\"send\":{\"kind\":\"method\",\"args\":{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"}}},\"result\":{\"type\":\"object\",\"required\":[\"id\"],\"properties\":{\"id\":{\"type\":\"number\"}}}}}}}",
+			"canonical": "{\"host\":{\"key\":\"session\",\"prefix\":\"session:\"},\"input\":{\"properties\":{\"conversation\":{\"default\":0,\"type\":\"number\"},\"session\":{\"type\":\"string\"}},\"required\":[\"session\",\"conversation\"],\"type\":\"object\"},\"name\":\"t.chat\",\"scope\":\"remote\",\"variants\":{\"participant\":{\"send\":{\"args\":{\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"],\"type\":\"object\"},\"kind\":\"method\",\"result\":{\"properties\":{\"id\":{\"type\":\"number\"}},\"required\":[\"id\"],\"type\":\"object\"}},\"view\":{\"kind\":\"state\",\"schema\":{\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"],\"type\":\"object\"}}},\"viewer\":{\"view\":{\"kind\":\"state\",\"schema\":{\"properties\":{\"text\":{\"type\":\"number\"}},\"required\":[\"text\"],\"type\":\"object\"}}}},\"version\":1}",
+			"fingerprint": "2a57ada023613c34"
+		},
+		{
+			"label": "chatV2",
+			"def": {
+				"scope": "remote",
+				"name": "t.chat",
+				"version": 2,
+				"input": {
+					"type": "object",
+					"required": [
+						"session",
+						"conversation"
+					],
+					"properties": {
+						"session": {
+							"type": "string"
+						},
+						"conversation": {
+							"type": "number",
+							"default": 0
+						}
+					}
+				},
+				"host": {
+					"prefix": "session:",
+					"key": "session"
+				},
+				"variants": [
+					{
+						"kind": "viewer",
+						"state": [
+							[
+								"body",
+								{
+									"kind": "state",
+									"schema": {
+										"type": "object",
+										"required": [
+											"text"
+										],
+										"properties": {
+											"text": {
+												"type": "string"
+											}
+										}
+									}
+								}
+							]
+						],
+						"methods": []
+					}
+				]
+			},
+			"description": "{\"name\":\"t.chat\",\"scope\":\"remote\",\"version\":2,\"input\":{\"type\":\"object\",\"required\":[\"session\",\"conversation\"],\"properties\":{\"session\":{\"type\":\"string\"},\"conversation\":{\"type\":\"number\",\"default\":0}}},\"host\":{\"prefix\":\"session:\",\"key\":\"session\"},\"variants\":{\"viewer\":{\"body\":{\"kind\":\"state\",\"schema\":{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"}}}}}}}",
+			"canonical": "{\"host\":{\"key\":\"session\",\"prefix\":\"session:\"},\"input\":{\"properties\":{\"conversation\":{\"default\":0,\"type\":\"number\"},\"session\":{\"type\":\"string\"}},\"required\":[\"session\",\"conversation\"],\"type\":\"object\"},\"name\":\"t.chat\",\"scope\":\"remote\",\"variants\":{\"viewer\":{\"body\":{\"kind\":\"state\",\"schema\":{\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"],\"type\":\"object\"}}}},\"version\":2}",
+			"fingerprint": "9775999df1a249f2"
+		},
+		{
+			"label": "moved",
+			"def": {
+				"scope": "remote",
+				"name": "t.chat",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"required": [
+						"session",
+						"conversation"
+					],
+					"properties": {
+						"session": {
+							"type": "string"
+						},
+						"conversation": {
+							"type": "number",
+							"default": 0
+						}
+					}
+				},
+				"host": {
+					"name": "server"
+				},
+				"variants": [
+					{
+						"kind": "viewer",
+						"state": [
+							[
+								"view",
+								{
+									"kind": "state",
+									"schema": {
+										"type": "object",
+										"required": [
+											"text"
+										],
+										"properties": {
+											"text": {
+												"type": "string"
+											}
+										}
+									}
+								}
+							]
+						],
+						"methods": []
+					},
+					{
+						"kind": "participant",
+						"state": [
+							[
+								"view",
+								{
+									"kind": "state",
+									"schema": {
+										"type": "object",
+										"required": [
+											"text"
+										],
+										"properties": {
+											"text": {
+												"type": "string"
+											}
+										}
+									}
+								}
+							]
+						],
+						"methods": [
+							[
+								"send",
+								{
+									"kind": "method",
+									"args": {
+										"type": "object",
+										"required": [
+											"text"
+										],
+										"properties": {
+											"text": {
+												"type": "string"
+											}
+										}
+									},
+									"result": {
+										"type": "object",
+										"required": [
+											"id"
+										],
+										"properties": {
+											"id": {
+												"type": "number"
+											}
+										}
+									}
+								}
+							]
+						]
+					}
+				]
+			},
+			"description": "{\"name\":\"t.chat\",\"scope\":\"remote\",\"version\":1,\"input\":{\"type\":\"object\",\"required\":[\"session\",\"conversation\"],\"properties\":{\"session\":{\"type\":\"string\"},\"conversation\":{\"type\":\"number\",\"default\":0}}},\"host\":{\"name\":\"server\"},\"variants\":{\"viewer\":{\"view\":{\"kind\":\"state\",\"schema\":{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"}}}}},\"participant\":{\"view\":{\"kind\":\"state\",\"schema\":{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"}}}},\"send\":{\"kind\":\"method\",\"args\":{\"type\":\"object\",\"required\":[\"text\"],\"properties\":{\"text\":{\"type\":\"string\"}}},\"result\":{\"type\":\"object\",\"required\":[\"id\"],\"properties\":{\"id\":{\"type\":\"number\"}}}}}}}",
+			"canonical": "{\"host\":{\"name\":\"server\"},\"input\":{\"properties\":{\"conversation\":{\"default\":0,\"type\":\"number\"},\"session\":{\"type\":\"string\"}},\"required\":[\"session\",\"conversation\"],\"type\":\"object\"},\"name\":\"t.chat\",\"scope\":\"remote\",\"variants\":{\"participant\":{\"send\":{\"args\":{\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"],\"type\":\"object\"},\"kind\":\"method\",\"result\":{\"properties\":{\"id\":{\"type\":\"number\"}},\"required\":[\"id\"],\"type\":\"object\"}},\"view\":{\"kind\":\"state\",\"schema\":{\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"],\"type\":\"object\"}}},\"viewer\":{\"view\":{\"kind\":\"state\",\"schema\":{\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"],\"type\":\"object\"}}}},\"version\":1}",
+			"fingerprint": "8890562b4c343671"
+		},
+		{
+			"label": "counter",
+			"def": {
+				"scope": "remote",
+				"name": "t.counter",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"required": [
+						"name"
+					],
+					"properties": {
+						"name": {
+							"type": "string"
+						}
+					}
+				},
+				"host": {
+					"name": "server"
+				},
+				"variants": [
+					{
+						"kind": "main",
+						"state": [
+							[
+								"count",
+								{
+									"kind": "state",
+									"schema": {
+										"type": "object",
+										"required": [
+											"n"
+										],
+										"properties": {
+											"n": {
+												"type": "number"
+											}
+										}
+									}
+								}
+							]
+						],
+						"methods": [
+							[
+								"add",
+								{
+									"kind": "method",
+									"args": {
+										"type": "number"
+									},
+									"result": {
+										"type": "number"
+									}
+								}
+							],
+							[
+								"who",
+								{
+									"kind": "method",
+									"result": {}
+								}
+							]
+						]
+					}
+				]
+			},
+			"description": "{\"name\":\"t.counter\",\"scope\":\"remote\",\"version\":1,\"input\":{\"type\":\"object\",\"required\":[\"name\"],\"properties\":{\"name\":{\"type\":\"string\"}}},\"host\":{\"name\":\"server\"},\"variants\":{\"main\":{\"count\":{\"kind\":\"state\",\"schema\":{\"type\":\"object\",\"required\":[\"n\"],\"properties\":{\"n\":{\"type\":\"number\"}}}},\"add\":{\"kind\":\"method\",\"args\":{\"type\":\"number\"},\"result\":{\"type\":\"number\"}},\"who\":{\"kind\":\"method\",\"result\":{}}}}}",
+			"canonical": "{\"host\":{\"name\":\"server\"},\"input\":{\"properties\":{\"name\":{\"type\":\"string\"}},\"required\":[\"name\"],\"type\":\"object\"},\"name\":\"t.counter\",\"scope\":\"remote\",\"variants\":{\"main\":{\"add\":{\"args\":{\"type\":\"number\"},\"kind\":\"method\",\"result\":{\"type\":\"number\"}},\"count\":{\"kind\":\"state\",\"schema\":{\"properties\":{\"n\":{\"type\":\"number\"}},\"required\":[\"n\"],\"type\":\"object\"}},\"who\":{\"kind\":\"method\",\"result\":{}}}},\"version\":1}",
+			"fingerprint": "e17d7bfb1bd19baf"
+		},
+		{
+			"label": "index",
+			"def": {
+				"scope": "local",
+				"name": "t.idx",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"properties": {}
+				},
+				"members": [
+					[
+						"2",
+						{
+							"kind": "method",
+							"result": {
+								"type": "integer",
+								"minimum": 1
+							}
+						}
+					],
+					[
+						"10",
+						{
+							"kind": "method"
+						}
+					],
+					[
+						"harness",
+						{
+							"kind": "opaque",
+							"id": "h@1"
+						}
+					],
+					[
+						"onChange",
+						{
+							"kind": "method",
+							"args": {
+								"type": "function",
+								"parameters": [
+									{
+										"type": "string"
+									}
+								],
+								"returnType": {
+									"type": "void"
+								}
+							}
+						}
+					],
+					[
+						"progress",
+						{
+							"kind": "state",
+							"schema": {
+								"type": "object",
+								"required": [
+									"ready"
+								],
+								"properties": {
+									"ready": {
+										"type": "boolean"
+									}
+								}
+							}
+						}
+					]
+				]
+			},
+			"description": "{\"name\":\"t.idx\",\"scope\":\"local\",\"version\":1,\"input\":{\"type\":\"object\",\"properties\":{}},\"variants\":{\"\":{\"2\":{\"kind\":\"method\",\"result\":{\"type\":\"integer\",\"minimum\":1}},\"10\":{\"kind\":\"method\"},\"harness\":{\"kind\":\"opaque\",\"id\":\"h@1\"},\"onChange\":{\"kind\":\"method\",\"args\":{\"type\":\"function\",\"parameters\":[{\"type\":\"string\"}],\"returnType\":{\"type\":\"void\"}}},\"progress\":{\"kind\":\"state\",\"schema\":{\"type\":\"object\",\"required\":[\"ready\"],\"properties\":{\"ready\":{\"type\":\"boolean\"}}}}}}}",
+			"canonical": "{\"input\":{\"properties\":{},\"type\":\"object\"},\"name\":\"t.idx\",\"scope\":\"local\",\"variants\":{\"\":{\"10\":{\"kind\":\"method\"},\"2\":{\"kind\":\"method\",\"result\":{\"minimum\":1,\"type\":\"integer\"}},\"harness\":{\"id\":\"h@1\",\"kind\":\"opaque\"},\"onChange\":{\"args\":{\"parameters\":[{\"type\":\"string\"}],\"returnType\":{\"type\":\"void\"},\"type\":\"function\"},\"kind\":\"method\"},\"progress\":{\"kind\":\"state\",\"schema\":{\"properties\":{\"ready\":{\"type\":\"boolean\"}},\"required\":[\"ready\"],\"type\":\"object\"}}}},\"version\":1}",
+			"fingerprint": "27ac3abfbc660efb"
+		},
+		{
+			"label": "index2",
+			"def": {
+				"scope": "local",
+				"name": "t.idx",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"properties": {}
+				},
+				"members": [
+					[
+						"2",
+						{
+							"kind": "method",
+							"result": {
+								"type": "integer",
+								"minimum": 1
+							}
+						}
+					],
+					[
+						"10",
+						{
+							"kind": "method"
+						}
+					],
+					[
+						"harness",
+						{
+							"kind": "opaque",
+							"id": "h@2"
+						}
+					],
+					[
+						"onChange",
+						{
+							"kind": "method",
+							"args": {
+								"type": "function",
+								"parameters": [
+									{
+										"type": "string"
+									}
+								],
+								"returnType": {
+									"type": "void"
+								}
+							}
+						}
+					],
+					[
+						"progress",
+						{
+							"kind": "state",
+							"schema": {
+								"type": "object",
+								"required": [
+									"ready"
+								],
+								"properties": {
+									"ready": {
+										"type": "boolean"
+									}
+								}
+							}
+						}
+					]
+				]
+			},
+			"description": "{\"name\":\"t.idx\",\"scope\":\"local\",\"version\":1,\"input\":{\"type\":\"object\",\"properties\":{}},\"variants\":{\"\":{\"2\":{\"kind\":\"method\",\"result\":{\"type\":\"integer\",\"minimum\":1}},\"10\":{\"kind\":\"method\"},\"harness\":{\"kind\":\"opaque\",\"id\":\"h@2\"},\"onChange\":{\"kind\":\"method\",\"args\":{\"type\":\"function\",\"parameters\":[{\"type\":\"string\"}],\"returnType\":{\"type\":\"void\"}}},\"progress\":{\"kind\":\"state\",\"schema\":{\"type\":\"object\",\"required\":[\"ready\"],\"properties\":{\"ready\":{\"type\":\"boolean\"}}}}}}}",
+			"canonical": "{\"input\":{\"properties\":{},\"type\":\"object\"},\"name\":\"t.idx\",\"scope\":\"local\",\"variants\":{\"\":{\"10\":{\"kind\":\"method\"},\"2\":{\"kind\":\"method\",\"result\":{\"minimum\":1,\"type\":\"integer\"}},\"harness\":{\"id\":\"h@2\",\"kind\":\"opaque\"},\"onChange\":{\"args\":{\"parameters\":[{\"type\":\"string\"}],\"returnType\":{\"type\":\"void\"},\"type\":\"function\"},\"kind\":\"method\"},\"progress\":{\"kind\":\"state\",\"schema\":{\"properties\":{\"ready\":{\"type\":\"boolean\"}},\"required\":[\"ready\"],\"type\":\"object\"}}}},\"version\":1}",
+			"fingerprint": "e0957498948a6a67"
+		},
+		{
+			"label": "none",
+			"def": {
+				"scope": "local",
+				"name": "t.methods",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"properties": {}
+				},
+				"members": [
+					[
+						"m",
+						{
+							"kind": "method"
+						}
+					]
+				]
+			},
+			"description": "{\"name\":\"t.methods\",\"scope\":\"local\",\"version\":1,\"input\":{\"type\":\"object\",\"properties\":{}},\"variants\":{\"\":{\"m\":{\"kind\":\"method\"}}}}",
+			"canonical": "{\"input\":{\"properties\":{},\"type\":\"object\"},\"name\":\"t.methods\",\"scope\":\"local\",\"variants\":{\"\":{\"m\":{\"kind\":\"method\"}}},\"version\":1}",
+			"fingerprint": "66f4c99a2f5fdffa"
+		},
+		{
+			"label": "withArgs",
+			"def": {
+				"scope": "local",
+				"name": "t.methods",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"properties": {}
+				},
+				"members": [
+					[
+						"m",
+						{
+							"kind": "method",
+							"args": {
+								"type": "string"
+							}
+						}
+					]
+				]
+			},
+			"description": "{\"name\":\"t.methods\",\"scope\":\"local\",\"version\":1,\"input\":{\"type\":\"object\",\"properties\":{}},\"variants\":{\"\":{\"m\":{\"kind\":\"method\",\"args\":{\"type\":\"string\"}}}}}",
+			"canonical": "{\"input\":{\"properties\":{},\"type\":\"object\"},\"name\":\"t.methods\",\"scope\":\"local\",\"variants\":{\"\":{\"m\":{\"args\":{\"type\":\"string\"},\"kind\":\"method\"}}},\"version\":1}",
+			"fingerprint": "cce0082a72124e95"
+		},
+		{
+			"label": "withResult",
+			"def": {
+				"scope": "local",
+				"name": "t.methods",
+				"version": 1,
+				"input": {
+					"type": "object",
+					"properties": {}
+				},
+				"members": [
+					[
+						"m",
+						{
+							"kind": "method",
+							"result": {
+								"type": "number"
+							}
+						}
+					]
+				]
+			},
+			"description": "{\"name\":\"t.methods\",\"scope\":\"local\",\"version\":1,\"input\":{\"type\":\"object\",\"properties\":{}},\"variants\":{\"\":{\"m\":{\"kind\":\"method\",\"result\":{\"type\":\"number\"}}}}}",
+			"canonical": "{\"input\":{\"properties\":{},\"type\":\"object\"},\"name\":\"t.methods\",\"scope\":\"local\",\"variants\":{\"\":{\"m\":{\"kind\":\"method\",\"result\":{\"type\":\"number\"}}}},\"version\":1}",
+			"fingerprint": "e60eec182e286a4d"
+		}
+	],
+	"coverage": [
+		{
+			"provider": "additive",
+			"consumer": "chatV1",
+			"coverage": null,
+			"bind": "direct",
+			"bindWithoutAdapters": "direct"
+		},
+		{
+			"provider": "chatV1",
+			"consumer": "additive",
+			"coverage": "participant.view state",
+			"bind": {
+				"code": "contract_mismatch",
+				"message": "contract_mismatch: t.chat@1 does not cover the consumer's description (participant.view state); forgotten version bump?"
+			},
+			"bindWithoutAdapters": {
+				"code": "contract_mismatch",
+				"message": "contract_mismatch: t.chat@1 does not cover the consumer's description (participant.view state); forgotten version bump?"
+			}
+		},
+		{
+			"provider": "required",
+			"consumer": "chatV1",
+			"coverage": "participant.send arguments",
+			"bind": {
+				"code": "contract_mismatch",
+				"message": "contract_mismatch: t.chat@1 does not cover the consumer's description (participant.send arguments); forgotten version bump?"
+			},
+			"bindWithoutAdapters": {
+				"code": "contract_mismatch",
+				"message": "contract_mismatch: t.chat@1 does not cover the consumer's description (participant.send arguments); forgotten version bump?"
+			}
+		},
+		{
+			"provider": "retyped",
+			"consumer": "chatV1",
+			"coverage": "viewer.view state",
+			"bind": {
+				"code": "contract_mismatch",
+				"message": "contract_mismatch: t.chat@1 does not cover the consumer's description (viewer.view state); forgotten version bump?"
+			},
+			"bindWithoutAdapters": {
+				"code": "contract_mismatch",
+				"message": "contract_mismatch: t.chat@1 does not cover the consumer's description (viewer.view state); forgotten version bump?"
+			}
+		},
+		{
+			"provider": "chatV2",
+			"consumer": "chatV1",
+			"coverage": "viewer.view missing or of another kind",
+			"bind": "adapter",
+			"bindWithoutAdapters": {
+				"code": "contract_mismatch",
+				"message": "contract_mismatch: t.chat: provider version 2, consumer version 1, no accepts adapter"
+			}
+		},
+		{
+			"provider": "moved",
+			"consumer": "chatV1",
+			"coverage": "host",
+			"bind": {
+				"code": "contract_mismatch",
+				"message": "contract_mismatch: t.chat lives on server, the consumer expects session:<session>"
+			},
+			"bindWithoutAdapters": {
+				"code": "contract_mismatch",
+				"message": "contract_mismatch: t.chat lives on server, the consumer expects session:<session>"
+			}
+		},
+		{
+			"provider": "counter",
+			"consumer": "chatV1",
+			"coverage": "different type",
+			"bind": {
+				"code": "contract_mismatch",
+				"message": "contract_mismatch: t.counter lives on server, the consumer expects session:<session>"
+			},
+			"bindWithoutAdapters": {
+				"code": "contract_mismatch",
+				"message": "contract_mismatch: t.counter lives on server, the consumer expects session:<session>"
+			}
+		},
+		{
+			"provider": "index2",
+			"consumer": "index",
+			"coverage": ".harness opaque h@2 != h@1",
+			"bind": {
+				"code": "contract_mismatch",
+				"message": "contract_mismatch: t.idx@1 does not cover the consumer's description (.harness opaque h@2 != h@1); forgotten version bump?"
+			},
+			"bindWithoutAdapters": {
+				"code": "contract_mismatch",
+				"message": "contract_mismatch: t.idx@1 does not cover the consumer's description (.harness opaque h@2 != h@1); forgotten version bump?"
+			}
+		},
+		{
+			"provider": "none",
+			"consumer": "none",
+			"coverage": null,
+			"bind": "direct",
+			"bindWithoutAdapters": "direct"
+		},
+		{
+			"provider": "withArgs",
+			"consumer": "none",
+			"coverage": ".m arguments",
+			"bind": {
+				"code": "contract_mismatch",
+				"message": "contract_mismatch: t.methods@1 does not cover the consumer's description (.m arguments); forgotten version bump?"
+			},
+			"bindWithoutAdapters": {
+				"code": "contract_mismatch",
+				"message": "contract_mismatch: t.methods@1 does not cover the consumer's description (.m arguments); forgotten version bump?"
+			}
+		},
+		{
+			"provider": "none",
+			"consumer": "withArgs",
+			"coverage": ".m arguments",
+			"bind": {
+				"code": "contract_mismatch",
+				"message": "contract_mismatch: t.methods@1 does not cover the consumer's description (.m arguments); forgotten version bump?"
+			},
+			"bindWithoutAdapters": {
+				"code": "contract_mismatch",
+				"message": "contract_mismatch: t.methods@1 does not cover the consumer's description (.m arguments); forgotten version bump?"
+			}
+		},
+		{
+			"provider": "withResult",
+			"consumer": "none",
+			"coverage": null,
+			"bind": "direct",
+			"bindWithoutAdapters": "direct"
+		},
+		{
+			"provider": "none",
+			"consumer": "withResult",
+			"coverage": ".m result",
+			"bind": {
+				"code": "contract_mismatch",
+				"message": "contract_mismatch: t.methods@1 does not cover the consumer's description (.m result); forgotten version bump?"
+			},
+			"bindWithoutAdapters": {
+				"code": "contract_mismatch",
+				"message": "contract_mismatch: t.methods@1 does not cover the consumer's description (.m result); forgotten version bump?"
+			}
+		}
+	]
+}

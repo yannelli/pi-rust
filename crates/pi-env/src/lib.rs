@@ -18,8 +18,9 @@ pub use connection::{
     RemoteInfo, Reply, RequestOptions, is_connection_lost, node_platform,
 };
 pub use errors::to_file_error;
-pub use list_files::{FileListEntry, FileListing, ListFilesOptions, LocalExecutionEnv, list_files_over};
+pub use list_files::{LocalExecutionEnv, list_files_over};
 pub use paths::PathStyle;
+pub use pi_durable::env::{FileListEntry, FileListing, ListFilesOptions};
 pub use remote_env::{RemoteExecutionEnv, RemoteExecutionEnvOptions, remote_path};
 pub use ssh::{
     RemoteArch, RemotePlatform, RemoteSystem, ScannedHostKey, SshConnectOptions, SshConnection, SshError, SshTarget,

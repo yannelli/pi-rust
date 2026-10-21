@@ -3,7 +3,7 @@
 use std::sync::LazyLock;
 
 use super::database::{SqliteDatabase, SqliteValue, transaction};
-use super::schema::SqliteSchema;
+use super::schema::{SqliteSchema, validate_sqlite_schema_prefix};
 use crate::errors::{DurableError, DurableResult};
 
 /// One schema version and the statements that create it.
@@ -183,12 +183,23 @@ pub async fn apply_sqlite_migrations_for_schema(
     schema: &SqliteSchema,
     migrations: &[SqliteMigration],
 ) -> DurableResult<()> {
+    apply_sqlite_migrations_to_table(database, migrations, &schema.tables.durable_schema).await
+}
+
+/// Apply all pending migrations atomically, tracking their version in the named metadata table (upstream chord
+/// `applySqliteMigrations`). Other components, such as the telemetry store, keep their own history this way.
+pub async fn apply_sqlite_migrations_to_table(
+    database: &dyn SqliteDatabase,
+    migrations: &[SqliteMigration],
+    table: &str,
+) -> DurableResult<()> {
+    validate_sqlite_schema_prefix(table)?;
     for (index, migration) in migrations.iter().enumerate() {
         if migration.version != index as i64 + 1 {
-            return Err(DurableError::storage("Durable SQLite migrations must have contiguous versions starting at 1"));
+            return Err(DurableError::storage("SQLite migrations must have contiguous versions starting at 1"));
         }
     }
-    let table = schema.tables.durable_schema.clone();
+    let table = table.to_owned();
     transaction(database, move |transaction| {
         Box::pin(async move {
             transaction
@@ -203,13 +214,13 @@ pub async fn apply_sqlite_migrations_for_schema(
             transaction.run(&insert, &[]).await?;
             let row = transaction.get(&format!("SELECT version FROM {table} WHERE singleton = 1"), &[]).await?;
             let Some(row) = row else {
-                return Err(DurableError::storage("Durable SQLite schema metadata is missing"));
+                return Err(DurableError::storage("SQLite schema metadata is missing"));
             };
             let stored = row.integer("version")?;
             let current = migrations.last().map_or(0, |migration| migration.version);
             if stored > current {
                 return Err(DurableError::storage(format!(
-                    "Durable SQLite schema version {stored} is newer than supported version {current}"
+                    "SQLite schema version {stored} is newer than supported version {current}"
                 )));
             }
             let update = format!("UPDATE {table} SET version = ? WHERE singleton = 1");

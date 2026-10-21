@@ -5,6 +5,7 @@ pub mod context;
 pub mod delta;
 pub mod error;
 pub mod facets;
+pub mod host2;
 pub mod json;
 pub mod node;
 pub mod services;

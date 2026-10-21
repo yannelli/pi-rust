@@ -23,7 +23,7 @@ pub use connection::{BundledSqliteDatabase, SqliteStorageOptions, open_sqlite_st
 pub use database::{SqliteDatabase, SqliteExecutor, SqliteRow, SqliteValue, TransactionCallback, transaction};
 pub use migrations::{
     CURRENT_SQLITE_SCHEMA_VERSION, SQLITE_MIGRATIONS, SqliteMigration, apply_sqlite_migrations,
-    apply_sqlite_migrations_for_schema, create_sqlite_migrations,
+    apply_sqlite_migrations_for_schema, apply_sqlite_migrations_to_table, create_sqlite_migrations,
 };
 pub use schema::{SqliteSchema, validate_sqlite_schema_prefix};
 
