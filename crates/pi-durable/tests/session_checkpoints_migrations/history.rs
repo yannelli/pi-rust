@@ -11,7 +11,13 @@ type Rewindable = DocToken<Json, RewindableConversation>;
 
 fn rewindable(kind: &str, version: u32, initial: &str) -> DocSpec<Json, RewindableConversation> {
     let initial = json(initial);
-    DocSpec::new(kind, version, RewindableConversation(DocumentFork::AsOf), move || initial.clone())
+    DocSpec::new(
+        kind,
+        version,
+        RewindableConversation(DocumentFork::AsOf),
+        move || initial.clone(),
+        |_, _, _| Ok(false),
+    )
 }
 
 /// Append an entry of `kind`, then run `edit` in the same commit; returns the entry ID.
@@ -45,10 +51,13 @@ async fn as_of(
 #[tokio::test]
 async fn migrates_current_and_historical_rewindable_values_independently_and_follows_fork_ancestry() {
     let v1 = define_doc(rewindable("history.migration", 1, r#"{"count":0}"#)).unwrap();
-    let family_spec =
-        DocFamilySpec::new("history.family", 1, RewindableConversation(DocumentFork::AsOf), |seed: String| {
-            json(&format!(r#"{{"seed":"{seed}","count":0}}"#))
-        });
+    let family_spec = DocFamilySpec::new(
+        "history.family",
+        1,
+        RewindableConversation(DocumentFork::AsOf),
+        |seed: String| json(&format!(r#"{{"seed":"{seed}","count":0}}"#)),
+        |_, _, _| Ok(false),
+    );
     let family = define_doc_family(family_spec).unwrap();
     let migrations: Arc<Mutex<Vec<u32>>> = Arc::default();
     let sink = migrations.clone();

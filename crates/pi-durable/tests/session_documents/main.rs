@@ -42,19 +42,29 @@ pub fn initial_live() -> Live {
 pub static LIVE_INIT_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 pub static LIVE_DOC: LazyLock<DocToken<Live, LatestConversation>> = LazyLock::new(|| {
-    define_doc(DocSpec::new("test.live", 1, LatestConversation(LatestFork::Initial), || {
-        LIVE_INIT_COUNT.fetch_add(1, Ordering::SeqCst);
-        initial_live()
-    }))
+    define_doc(DocSpec::new(
+        "test.live",
+        1,
+        LatestConversation(LatestFork::Initial),
+        || {
+            LIVE_INIT_COUNT.fetch_add(1, Ordering::SeqCst);
+            initial_live()
+        },
+        |_, _, _| Ok(false),
+    ))
     .unwrap()
 });
 
 pub static REWINDABLE_LIVE_DOC: LazyLock<DocToken<Live, RewindableConversation>> = LazyLock::new(|| {
-    define_doc(DocSpec::new("test.live", 1, RewindableConversation(DocumentFork::AsOf), initial_live)).unwrap()
+    define_doc(DocSpec::new("test.live", 1, RewindableConversation(DocumentFork::AsOf), initial_live, |_, _, _| {
+        Ok(false)
+    }))
+    .unwrap()
 });
 
 pub static LIVE_DOC_V2: LazyLock<DocToken<Live, LatestConversation>> = LazyLock::new(|| {
-    define_doc(DocSpec::new("test.live", 2, LatestConversation(LatestFork::Initial), initial_live)).unwrap()
+    define_doc(DocSpec::new("test.live", 2, LatestConversation(LatestFork::Initial), initial_live, |_, _, _| Ok(false)))
+        .unwrap()
 });
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -62,8 +72,9 @@ pub struct Counter {
     pub count: f64,
 }
 
-pub static COUNTER_DOC: LazyLock<DocToken<Counter, SessionScope>> =
-    LazyLock::new(|| define_doc(DocSpec::new("test.counter", 1, SessionScope, || Counter { count: 0.0 })).unwrap());
+pub static COUNTER_DOC: LazyLock<DocToken<Counter, SessionScope>> = LazyLock::new(|| {
+    define_doc(DocSpec::new("test.counter", 1, SessionScope, || Counter { count: 0.0 }, |_, _, _| Ok(false))).unwrap()
+});
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Member {
@@ -72,8 +83,14 @@ pub struct Member {
 }
 
 pub static MEMBER_DOC: LazyLock<DocFamilyToken<Member, String, SessionScope>> = LazyLock::new(|| {
-    define_doc_family(DocFamilySpec::new("test.member", 1, SessionScope, |seed: String| Member { seed, hits: 0.0 }))
-        .unwrap()
+    define_doc_family(DocFamilySpec::new(
+        "test.member",
+        1,
+        SessionScope,
+        |seed: String| Member { seed, hits: 0.0 },
+        |_, _, _| Ok(false),
+    ))
+    .unwrap()
 });
 
 /// A Session with one conversation whose live document holds items `a` and `b`.

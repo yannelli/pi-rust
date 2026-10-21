@@ -28,23 +28,29 @@ fn seeded(seed: i64) -> State {
 }
 
 static SESSION_DOC: LazyLock<DocToken<State, SessionScope>> =
-    LazyLock::new(|| define_doc(DocSpec::new("t.session", 1, SessionScope, initial)).unwrap());
+    LazyLock::new(|| define_doc(DocSpec::new("t.session", 1, SessionScope, initial, |_, _, _| Ok(false))).unwrap());
 static LATEST_DOC: LazyLock<DocToken<State, LatestConversation>> = LazyLock::new(|| {
-    define_doc(DocSpec::new("t.latest", 1, LatestConversation(LatestFork::Current), initial)).unwrap()
+    define_doc(DocSpec::new("t.latest", 1, LatestConversation(LatestFork::Current), initial, |_, _, _| Ok(false)))
+        .unwrap()
 });
 static REWINDABLE_DOC: LazyLock<DocToken<State, RewindableConversation>> = LazyLock::new(|| {
-    define_doc(DocSpec::new("t.rewindable", 1, RewindableConversation(DocumentFork::AsOf), initial)).unwrap()
+    define_doc(DocSpec::new("t.rewindable", 1, RewindableConversation(DocumentFork::AsOf), initial, |_, _, _| {
+        Ok(false)
+    }))
+    .unwrap()
 });
 static TASK_DOC: LazyLock<DocToken<State, TaskScope>> =
-    LazyLock::new(|| define_doc(DocSpec::new("t.task", 1, TaskScope, initial)).unwrap());
-static SESSION_FAMILY: LazyLock<DocFamilyToken<State, i64, SessionScope>> =
-    LazyLock::new(|| define_doc_family(DocFamilySpec::new("t.session-family", 1, SessionScope, seeded)).unwrap());
+    LazyLock::new(|| define_doc(DocSpec::new("t.task", 1, TaskScope, initial, |_, _, _| Ok(false))).unwrap());
+static SESSION_FAMILY: LazyLock<DocFamilyToken<State, i64, SessionScope>> = LazyLock::new(|| {
+    define_doc_family(DocFamilySpec::new("t.session-family", 1, SessionScope, seeded, |_, _, _| Ok(false))).unwrap()
+});
 static CONVERSATION_FAMILY: LazyLock<DocFamilyToken<State, i64, RewindableConversation>> = LazyLock::new(|| {
     let scope = RewindableConversation(DocumentFork::Initial);
-    define_doc_family(DocFamilySpec::new("t.conversation-family", 1, scope, seeded)).unwrap()
+    define_doc_family(DocFamilySpec::new("t.conversation-family", 1, scope, seeded, |_, _, _| Ok(false))).unwrap()
 });
-static TASK_FAMILY: LazyLock<DocFamilyToken<State, i64, TaskScope>> =
-    LazyLock::new(|| define_doc_family(DocFamilySpec::new("t.task-family", 1, TaskScope, seeded)).unwrap());
+static TASK_FAMILY: LazyLock<DocFamilyToken<State, i64, TaskScope>> = LazyLock::new(|| {
+    define_doc_family(DocFamilySpec::new("t.task-family", 1, TaskScope, seeded, |_, _, _| Ok(false))).unwrap()
+});
 
 struct Work;
 
@@ -62,10 +68,13 @@ impl TaskTemplate for Work {
 
 #[test]
 fn validates_persisted_version_semantics() {
-    let zero = define_doc(DocSpec::new("k", 0, SessionScope, initial));
+    let zero = define_doc(DocSpec::new("k", 0, SessionScope, initial, |_, _, _| Ok(false)));
     assert!(message(zero).contains("positive integer"));
     // Upstream also rejects version 1.5; a `u32` version cannot hold a fraction.
-    assert_eq!(define_doc(DocSpec::new("", 1, SessionScope, initial)).unwrap().definition().kind, "");
+    assert_eq!(
+        define_doc(DocSpec::new("", 1, SessionScope, initial, |_, _, _| Ok(false))).unwrap().definition().kind,
+        ""
+    );
     assert_eq!(SESSION_DOC.definition().kind, "t.session");
 }
 

@@ -68,10 +68,16 @@ async fn does_not_initialize_or_mint_for_an_absent_acquisition_that_finishes_aft
     let test = open_test_session();
     let initialized = Arc::new(AtomicUsize::new(0));
     let counter = initialized.clone();
-    let late_doc = define_doc(DocSpec::new("test.late", 1, SessionScope, move || {
-        counter.fetch_add(1, Ordering::SeqCst);
-        Counter { count: 0.0 }
-    }))
+    let late_doc = define_doc(DocSpec::new(
+        "test.late",
+        1,
+        SessionScope,
+        move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+            Counter { count: 0.0 }
+        },
+        |_, _, _| Ok(false),
+    ))
     .unwrap();
     let gate = test.storage.hold_find_document();
     let mints = test.storage.mints();
@@ -151,7 +157,9 @@ async fn rejects_non_json_initializer_values_and_draft_placements_before_storage
     let test = open_test_session();
     let conversation_id = create_conversation(&test.session).await;
     // A non-finite number stands in for upstream's `Date`, which strict JSON rejects the same way.
-    let nan_doc = define_doc(DocSpec::new("test.date", 1, SessionScope, || NotJson { at: f64::NAN })).unwrap();
+    let nan_doc =
+        define_doc(DocSpec::new("test.date", 1, SessionScope, || NotJson { at: f64::NAN }, |_, _, _| Ok(false)))
+            .unwrap();
     let created = test.session.commit(move |tx| async move { tx.doc(&nan_doc, ()).await.map(drop) }, &context()).await;
     assert!(message(created).contains("strict JSON"));
     let commits = test.storage.commit_count();

@@ -211,10 +211,18 @@ async fn settles_listener_failure_on_only_the_affected_watch() {
 
 #[tokio::test]
 async fn hydrates_migration_without_writing_and_observes_the_later_exact_edit() {
-    let old = define_doc(DocSpec::new("watch.migration", 1, SessionScope, || json(r#"{"value":3}"#))).unwrap();
+    let old =
+        define_doc(DocSpec::new("watch.migration", 1, SessionScope, || json(r#"{"value":3}"#), |_, _, _| Ok(false)))
+            .unwrap();
     let current = define_doc(
-        DocSpec::new("watch.migration", 2, SessionScope, || json(r#"{"value":0,"migrated":false}"#))
-            .migrate(|value, _| Ok(json(&format!(r#"{{"value":{},"migrated":true}}"#, value["value"])))),
+        DocSpec::new(
+            "watch.migration",
+            2,
+            SessionScope,
+            || json(r#"{"value":0,"migrated":false}"#),
+            |_, _, _| Ok(false),
+        )
+        .migrate(|value, _| Ok(json(&format!(r#"{{"value":{},"migrated":true}}"#, value["value"])))),
     )
     .unwrap();
     let test = open_test_session();

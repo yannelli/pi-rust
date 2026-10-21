@@ -21,8 +21,10 @@ pub type AgentDocToken = DocToken<AgentState, RewindableConversation>;
 
 /// Built-in agent document; rewindable so forks start from the agent at their fork entry.
 pub static AGENT_DOC: LazyLock<AgentDocToken> = LazyLock::new(|| {
-    let spec = DocSpec::new("pi.agent", 1, RewindableConversation(DocumentFork::AsOf), AgentState::default)
-        .checkpoint_when(|_, _, _| Ok(true));
+    let spec =
+        DocSpec::new("pi.agent", 1, RewindableConversation(DocumentFork::AsOf), AgentState::default, |_, _, _| {
+            Ok(true)
+        });
     define_doc(spec).unwrap_or_else(|_| unreachable!("pi.agent is a valid definition"))
 });
 

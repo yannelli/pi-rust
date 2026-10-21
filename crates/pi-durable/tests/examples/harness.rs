@@ -177,7 +177,14 @@ struct Todos {
 }
 
 static TODOS: LazyLock<DocToken<Todos, RewindableConversation>> = LazyLock::new(|| {
-    define_doc(DocSpec::new("example.todos", 1, RewindableConversation(DocumentFork::AsOf), Todos::default)).unwrap()
+    define_doc(DocSpec::new(
+        "example.todos",
+        1,
+        RewindableConversation(DocumentFork::AsOf),
+        Todos::default,
+        |_, _, _| Ok(false),
+    ))
+    .unwrap()
 });
 
 /// Sections and added tool names of one system message.

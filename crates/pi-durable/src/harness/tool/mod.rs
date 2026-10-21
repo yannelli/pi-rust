@@ -121,8 +121,9 @@ pub struct NestedCalls {
     pub calls: pi_chord::JsonMap,
 }
 
-pub(crate) static NESTED_CALLS_DOC: LazyLock<DocToken<NestedCalls, TaskScope>> = LazyLock::new(|| {
-    define_doc(DocSpec::new("pi.tool.nested", 1, TaskScope, NestedCalls::default))
+// The nested-call documents retire with their task, so they never need a base.
+pub static NESTED_CALLS_DOC: LazyLock<DocToken<NestedCalls, TaskScope>> = LazyLock::new(|| {
+    define_doc(DocSpec::new("pi.tool.nested", 1, TaskScope, NestedCalls::default, |_, _, _| Ok(false)))
         .unwrap_or_else(|_| unreachable!("pi.tool.nested is a valid definition"))
 });
 
@@ -134,7 +135,7 @@ pub struct NestedResult {
 
 /// The result of one nested call, exactly as `execute_tool()` returns it; retires with the caller.
 pub static NESTED_RESULT_DOC: LazyLock<DocFamilyToken<NestedResult, NestedResult, TaskScope>> = LazyLock::new(|| {
-    define_doc_family(DocFamilySpec::new("pi.tool.nested-result", 1, TaskScope, |seed| seed))
+    define_doc_family(DocFamilySpec::new("pi.tool.nested-result", 1, TaskScope, |seed| seed, |_, _, _| Ok(false)))
         .unwrap_or_else(|_| unreachable!("pi.tool.nested-result is a valid definition"))
 });
 

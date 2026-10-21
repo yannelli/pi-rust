@@ -156,8 +156,9 @@ struct Scratch {
     n: u32,
 }
 
-static SCRATCH: LazyLock<DocToken<Scratch, TaskScope>> =
-    LazyLock::new(|| define_doc(DocSpec::new("test.orphan-scratch", 1, TaskScope, Scratch::default)).unwrap());
+static SCRATCH: LazyLock<DocToken<Scratch, TaskScope>> = LazyLock::new(|| {
+    define_doc(DocSpec::new("test.orphan-scratch", 1, TaskScope, Scratch::default, |_, _, _| Ok(false))).unwrap()
+});
 
 #[tokio::test]
 async fn settles_an_aborted_blocked_task_as_orphaned_and_retires_its_documents() {

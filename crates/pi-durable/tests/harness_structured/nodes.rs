@@ -245,7 +245,8 @@ pub fn unregistered() -> Task {
 }
 
 pub static TASK_NOTES: LazyLock<DocToken<Json, TaskScope>> = LazyLock::new(|| {
-    define_doc(DocSpec::new("test.task-notes", 1, TaskScope, || Json::from(json!({ "text": "" })))).unwrap()
+    define_doc(DocSpec::new("test.task-notes", 1, TaskScope, || Json::from(json!({ "text": "" })), |_, _, _| Ok(false)))
+        .unwrap()
 });
 
 pub fn named(name: &str) -> Json {

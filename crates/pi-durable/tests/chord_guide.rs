@@ -39,12 +39,14 @@ struct CanvasState {
     strokes: Vec<Value>,
 }
 
-static CANVAS_DOC: LazyLock<DocToken<CanvasState, SessionScope>> = LazyLock::new(|| {
-    // Store a complete base after at most 99 replayed deltas.
-    let spec = DocSpec::new("app.canvas", 1, SessionScope, CanvasState::default)
-        .checkpoint_when(|_, _, info| Ok(info.deltas_since_base >= 99));
-    define_doc(spec).unwrap()
-});
+static CANVAS_DOC: LazyLock<DocToken<CanvasState, SessionScope>> =
+    LazyLock::new(|| {
+        // Store a complete base after at most 99 replayed deltas.
+        let spec = DocSpec::new("app.canvas", 1, SessionScope, CanvasState::default, |_, _, info| {
+            Ok(info.deltas_since_base >= 99)
+        });
+        define_doc(spec).unwrap()
+    });
 
 struct Canvas;
 
@@ -196,8 +198,10 @@ struct ReviewState {
 static REVIEW_DOC: LazyLock<DocFamilyToken<ReviewState, ReviewInput, LatestConversation>> = LazyLock::new(|| {
     let initial =
         |seed: ReviewInput| ReviewState { path: seed.path.clone(), patch: seed.patch.clone(), comments: Vec::new() };
-    let spec = DocFamilySpec::new("app.diff-review", 1, LatestConversation(LatestFork::Current), initial)
-        .checkpoint_when(|_, _, info| Ok(info.deltas_since_base >= 49));
+    let spec =
+        DocFamilySpec::new("app.diff-review", 1, LatestConversation(LatestFork::Current), initial, |_, _, info| {
+            Ok(info.deltas_since_base >= 49)
+        });
     define_doc_family(spec).unwrap()
 });
 
@@ -315,8 +319,8 @@ struct JobOutput {
 }
 
 static JOB_OUTPUT_DOC: LazyLock<DocToken<JobOutput, TaskScope>> = LazyLock::new(|| {
-    let spec = DocSpec::new("app.job-output", 1, TaskScope, JobOutput::default)
-        .checkpoint_when(|_, _, info| Ok(info.deltas_since_base >= 99));
+    let spec =
+        DocSpec::new("app.job-output", 1, TaskScope, JobOutput::default, |_, _, info| Ok(info.deltas_since_base >= 99));
     define_doc(spec).unwrap()
 });
 

@@ -12,8 +12,9 @@ use super::*;
 async fn calls_checkpoint_when_with_access_to_its_definition() {
     // Upstream binds `this` to the definition; a Rust predicate captures what it needs instead.
     let first = json(r#"{"count":0}"#);
-    let spec = session_doc("checkpoint.receiver", 1, r#"{"count":0}"#)
-        .checkpoint_when(move |value, _, _| Ok(value["count"].as_i64() == Some(first["count"].as_i64().unwrap() + 2)));
+    let spec = session_doc_with("checkpoint.receiver", 1, r#"{"count":0}"#, move |value, _, _| {
+        Ok(value["count"].as_i64() == Some(first["count"].as_i64().unwrap() + 2))
+    });
     let doc = define_doc(spec).unwrap();
     let test = open_test_session();
     for count in 0..=2 {
@@ -26,7 +27,7 @@ type Calls = Arc<Mutex<Vec<(Json, Vec<Op>)>>>;
 
 fn recording(kind: &str, initial: &str, decision: bool, calls: &Calls) -> SessionDoc {
     let sink = calls.clone();
-    define_doc(session_doc(kind, 1, initial).checkpoint_when(move |value, ops, _| {
+    define_doc(session_doc_with(kind, 1, initial, move |value, ops, _| {
         sink.lock().unwrap().push((value.clone(), ops.to_vec()));
         Ok(decision)
     }))
@@ -105,21 +106,18 @@ async fn snapshot_of(test: &TestSession, token: &SessionDoc) -> Json {
 async fn passes_the_stored_delta_count_since_the_newest_base_including_after_unload_and_version_bases() {
     let seen: Arc<Mutex<Vec<u32>>> = Arc::default();
     let sink = seen.clone();
-    let v1 = define_doc(session_doc("checkpoint.deltas-since-base", 1, r#"{"count":0}"#).checkpoint_when(
-        move |_, _, info| {
-            sink.lock().unwrap().push(info.deltas_since_base);
-            Ok(info.deltas_since_base >= 2)
-        },
-    ))
+    let v1 = define_doc(session_doc_with("checkpoint.deltas-since-base", 1, r#"{"count":0}"#, move |_, _, info| {
+        sink.lock().unwrap().push(info.deltas_since_base);
+        Ok(info.deltas_since_base >= 2)
+    }))
     .unwrap();
     let sink = seen.clone();
     let v2 = define_doc(
-        session_doc("checkpoint.deltas-since-base", 2, r#"{"count":0}"#)
-            .migrate(|value, _| Ok(json(&format!(r#"{{"count":{}}}"#, value["count"]))))
-            .checkpoint_when(move |_, _, info| {
-                sink.lock().unwrap().push(info.deltas_since_base);
-                Ok(false)
-            }),
+        session_doc_with("checkpoint.deltas-since-base", 2, r#"{"count":0}"#, move |_, _, info| {
+            sink.lock().unwrap().push(info.deltas_since_base);
+            Ok(false)
+        })
+        .migrate(|value, _| Ok(json(&format!(r#"{{"count":{}}}"#, value["count"])))),
     )
     .unwrap();
     let test = open_test_session();
@@ -147,12 +145,11 @@ async fn passes_the_stored_delta_count_since_the_newest_base_including_after_unl
 async fn skips_the_predicate_for_empty_batches() {
     let calls = Arc::new(AtomicUsize::new(0));
     let counter = calls.clone();
-    let doc =
-        define_doc(session_doc("checkpoint.no-op", 1, r#"{"items":["a","b"]}"#).checkpoint_when(move |_, _, _| {
-            counter.fetch_add(1, Ordering::SeqCst);
-            Ok(false)
-        }))
-        .unwrap();
+    let doc = define_doc(session_doc_with("checkpoint.no-op", 1, r#"{"items":["a","b"]}"#, move |_, _, _| {
+        counter.fetch_add(1, Ordering::SeqCst);
+        Ok(false)
+    }))
+    .unwrap();
     let test = open_test_session();
     touch(&test.session, &doc, ()).await.unwrap();
     let commits = test.storage.commit_count();
@@ -181,21 +178,19 @@ async fn rolls_back_every_prepared_document_when_a_checkpoint_predicate_throws()
     let throw_checkpoint = Arc::new(AtomicBool::new(true));
     let first_calls = Arc::new(AtomicUsize::new(0));
     let counter = first_calls.clone();
-    let first =
-        define_doc(session_doc("checkpoint.rollback.first", 1, r#"{"count":0}"#).checkpoint_when(move |_, _, _| {
-            counter.fetch_add(1, Ordering::SeqCst);
-            Ok(false)
-        }))
-        .unwrap();
+    let first = define_doc(session_doc_with("checkpoint.rollback.first", 1, r#"{"count":0}"#, move |_, _, _| {
+        counter.fetch_add(1, Ordering::SeqCst);
+        Ok(false)
+    }))
+    .unwrap();
     let fail = throw_checkpoint.clone();
-    let second =
-        define_doc(session_doc("checkpoint.rollback.second", 1, r#"{"count":0}"#).checkpoint_when(move |_, _, _| {
-            if fail.load(Ordering::SeqCst) {
-                return Err(DurableError::error("checkpoint failed"));
-            }
-            Ok(false)
-        }))
-        .unwrap();
+    let second = define_doc(session_doc_with("checkpoint.rollback.second", 1, r#"{"count":0}"#, move |_, _, _| {
+        if fail.load(Ordering::SeqCst) {
+            return Err(DurableError::error("checkpoint failed"));
+        }
+        Ok(false)
+    }))
+    .unwrap();
     let test = open_test_session();
     touch(&test.session, &first, ()).await.unwrap();
     touch(&test.session, &second, ()).await.unwrap();
@@ -227,7 +222,7 @@ async fn rolls_back_every_prepared_document_when_a_checkpoint_predicate_throws()
 async fn persists_repeated_false_decisions_as_deltas_and_replays_the_complete_tail() {
     let calls = Arc::new(AtomicUsize::new(0));
     let counter = calls.clone();
-    let doc = define_doc(session_doc("checkpoint.tail", 1, r#"{"values":[]}"#).checkpoint_when(move |_, _, _| {
+    let doc = define_doc(session_doc_with("checkpoint.tail", 1, r#"{"values":[]}"#, move |_, _, _| {
         counter.fetch_add(1, Ordering::SeqCst);
         Ok(false)
     }))
@@ -259,8 +254,9 @@ async fn keeps_a_prepared_root_replacement_as_a_delta_when_the_predicate_is_fals
         initial.insert(format!("field{index}"), 0);
     }
     let initial = Json::object(initial);
-    let spec = DocSpec::new("checkpoint.root-replacement", 1, SessionScope, move || initial.clone());
-    let doc = define_doc(spec.checkpoint_when(|_, _, _| Ok(false))).unwrap();
+    let spec =
+        DocSpec::new("checkpoint.root-replacement", 1, SessionScope, move || initial.clone(), |_, _, _| Ok(false));
+    let doc = define_doc(spec).unwrap();
     let test = open_test_session();
     touch(&test.session, &doc, ()).await.unwrap();
     let token = doc.clone();
@@ -288,7 +284,7 @@ async fn keeps_a_prepared_root_replacement_as_a_delta_when_the_predicate_is_fals
 async fn uses_ordinary_checkpoint_selection_before_retirement() {
     let calls = Arc::new(AtomicUsize::new(0));
     let counter = calls.clone();
-    let doc = define_doc(session_doc("checkpoint.retire", 1, r#"{"count":0}"#).checkpoint_when(move |_, _, _| {
+    let doc = define_doc(session_doc_with("checkpoint.retire", 1, r#"{"count":0}"#, move |_, _, _| {
         counter.fetch_add(1, Ordering::SeqCst);
         Ok(true)
     }))

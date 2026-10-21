@@ -387,7 +387,13 @@ async fn reruns_a_replay_safe_subagent_tool_after_a_restart_with_the_same_child_
 }
 
 static CHILDREN: LazyLock<DocToken<Json, LatestConversation>> = LazyLock::new(|| {
-    let spec = DocSpec::new("test.children", 1, LatestConversation(LatestFork::Initial), || Json::from(json!({})));
+    let spec = DocSpec::new(
+        "test.children",
+        1,
+        LatestConversation(LatestFork::Initial),
+        || Json::from(json!({})),
+        |_, _, _| Ok(false),
+    );
     define_doc(spec).unwrap()
 });
 

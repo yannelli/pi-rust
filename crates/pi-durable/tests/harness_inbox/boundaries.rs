@@ -43,8 +43,9 @@ struct Marker {
     n: u32,
 }
 
-static MARKER_DOC: LazyLock<DocToken<Marker, SessionScope>> =
-    LazyLock::new(|| define_doc(DocSpec::new("test.marker", 1, SessionScope, Marker::default)).unwrap());
+static MARKER_DOC: LazyLock<DocToken<Marker, SessionScope>> = LazyLock::new(|| {
+    define_doc(DocSpec::new("test.marker", 1, SessionScope, Marker::default, |_, _, _| Ok(false))).unwrap()
+});
 
 #[tokio::test]
 async fn reads_queue_modes_when_the_final_boundarys_commit_runs_on_the_session_line() {

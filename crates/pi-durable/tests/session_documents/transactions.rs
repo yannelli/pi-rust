@@ -258,10 +258,16 @@ async fn uses_the_first_family_seed_and_ignores_seeds_for_existing_members() {
     let test = open_test_session();
     let seeds = Arc::new(Mutex::new(Vec::<String>::new()));
     let recorded = seeds.clone();
-    let member_doc = define_doc_family(DocFamilySpec::new("test.member", 1, SessionScope, move |seed: String| {
-        recorded.lock().unwrap().push(seed.clone());
-        Member { seed, hits: 0.0 }
-    }))
+    let member_doc = define_doc_family(DocFamilySpec::new(
+        "test.member",
+        1,
+        SessionScope,
+        move |seed: String| {
+            recorded.lock().unwrap().push(seed.clone());
+            Member { seed, hits: 0.0 }
+        },
+        |_, _, _| Ok(false),
+    ))
     .unwrap();
     let token = member_doc.clone();
     test.session
