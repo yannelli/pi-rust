@@ -242,6 +242,8 @@ async fn create_runtime_parts(
             diagnostics.push(RuntimeDiagnostic::error(format!("{error:#}")));
         }
     }
+    // Virtual models start offline refreshes too; `--model` resolves after they finish.
+    services.model_runtime.wait_for_offline_refreshes().await;
     let inputs = setup::CliInputs {
         provider: options.provider.as_deref(),
         model: options.model.as_deref(),

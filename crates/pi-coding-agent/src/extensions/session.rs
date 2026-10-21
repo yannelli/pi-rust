@@ -56,6 +56,8 @@ pub async fn load_extensions(services: &AgentSessionServices, options: &LoadOpti
         let _ = runner.call_json("setFlag", vec![json!(name), value.clone()]).await;
     }
     let _ = runner.call_json("bindModels", Vec::new()).await;
+    // Registered providers and virtual models started offline refreshes; list their models.
+    services.model_runtime.wait_for_offline_refreshes().await;
     let diagnostics = runner
         .load_errors()
         .into_iter()

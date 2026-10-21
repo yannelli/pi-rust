@@ -3,7 +3,8 @@
 //! (upstream `ModelRuntime.create`, `refresh`, and the llama.cpp built-in extension).
 
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -11,6 +12,7 @@ use pi_ai::auth::{ApiKeyCredential, Credential, ResolvedAuth};
 use pi_ai::models::{ModelRegistry, builtin_models};
 use tokio_util::sync::CancellationToken;
 
+use super::lock;
 use super::model_runtime::{ModelRuntime, read, write};
 use crate::catalog::{
     CatalogConfig, CatalogRefresher, DynamicCatalog, MODEL_REFRESH_TIMEOUT, ModelsStore, RefreshOptions, RefreshResult,
@@ -97,6 +99,16 @@ impl CatalogState {
     }
 }
 
+/// Offline refreshes that registrations start (upstream `void refresh({ allowNetwork: false })`).
+#[derive(Default)]
+pub(crate) struct OfflineRefreshes {
+    /// Requests so far; a refresh covers the requests made before it starts.
+    requested: AtomicU64,
+    /// The last request a finished refresh covered; held while one runs, so they run in order.
+    covered: tokio::sync::Mutex<u64>,
+    tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
+}
+
 impl ModelRuntime {
     /// Compose the catalog from the bundled models, the pi.dev overlay, and Radius gateways, and
     /// restore their last lists from the store without network access.
@@ -181,13 +193,13 @@ impl ModelRuntime {
     }
 
     /// Recompose the registry: bundled models, catalogs, `models.json`, extension providers,
-    /// `modelOverrides`, then virtual models.
+    /// `modelOverrides`, then virtual models. Readers see the old or the new registry.
     pub(super) fn rebuild_registry(&self) {
         let mut registry = self.base_registry();
         self.apply_extension_providers(&mut registry);
         self.resolver().set_provider_configs(registry.auth_configs());
+        self.add_virtual_models(&mut registry);
         *self.registry_mut() = registry;
-        self.apply_virtual_models();
     }
 
     /// Refresh the catalogs (or `providers`), then recompose the registry and recheck auth.
@@ -217,6 +229,54 @@ impl ModelRuntime {
         self.rebuild_registry();
         self.refresh_configured_providers().await;
         result
+    }
+
+    /// Start an offline refresh without waiting for it, as upstream does when a provider or
+    /// virtual model registers: `refreshModels` can list cached models. Refreshes run in order,
+    /// and one that starts later covers the requests before it.
+    pub fn refresh_offline_in_background(self: &Arc<Self>) {
+        let Ok(handle) = tokio::runtime::Handle::try_current() else { return };
+        let request = self.offline_refreshes.requested.fetch_add(1, Ordering::SeqCst) + 1;
+        let runtime = self.clone();
+        let task = handle.spawn(async move {
+            let refreshes = &runtime.offline_refreshes;
+            let mut covered = refreshes.covered.lock().await;
+            if *covered >= request {
+                return;
+            }
+            let covers = refreshes.requested.load(Ordering::SeqCst);
+            runtime.refresh_offline().await;
+            *covered = covers;
+        });
+        let mut tasks = lock(&self.offline_refreshes.tasks);
+        tasks.retain(|task| !task.is_finished());
+        tasks.push(task);
+    }
+
+    /// Wait for the offline refreshes started so far, so their models are listed before a
+    /// model is chosen. Never call it from the extension thread: refreshes call extensions.
+    pub async fn wait_for_offline_refreshes(&self) {
+        loop {
+            let tasks = std::mem::take(&mut *lock(&self.offline_refreshes.tasks));
+            if tasks.is_empty() {
+                return;
+            }
+            for task in tasks {
+                let _ = task.await;
+            }
+        }
+    }
+
+    /// An offline refresh with a time limit, so an extension that never answers holds neither
+    /// later refreshes nor startup.
+    async fn refresh_offline(&self) {
+        let cancel = CancellationToken::new();
+        let options = RefreshOptions { allow_network: false, providers: None, force: false, cancel: cancel.clone() };
+        if tokio::time::timeout(MODEL_REFRESH_TIMEOUT, self.refresh_catalogs_with(options)).await.is_err() {
+            cancel.cancel();
+            self.rebuild_registry();
+            self.refresh_configured_providers().await;
+        }
     }
 
     /// Refresh every catalog from the network with a time limit (`PI_OFFLINE` skips it), as

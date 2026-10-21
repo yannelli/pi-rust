@@ -282,6 +282,8 @@ impl ExtensionRunner {
             let oauth = JsOAuth { runner: self.weak(), provider: name.to_string(), name: display };
             runtime.register_extension_oauth(name, Some(Arc::new(oauth)));
         }
+        // This runs on the extension thread, and `refreshModels` calls back into it: spawn.
+        runtime.refresh_offline_in_background();
         let mut providers = lock(&self.providers);
         providers.retain(|(existing, _)| existing != name);
         providers.push((name.to_string(), extension_path.to_string()));
@@ -305,6 +307,7 @@ impl ExtensionRunner {
         self.model_runtime().unregister_extension_provider(name);
         self.model_runtime().register_extension_hooks(name, None);
         self.model_runtime().register_extension_oauth(name, None);
+        self.model_runtime().refresh_offline_in_background();
         if let Some(session) = self.session() {
             session.refresh_model_from_registry();
         }

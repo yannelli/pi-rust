@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use pi_ai::models::clamp_thinking_level;
-use pi_ai::{AssistantMessage, Message, Model, ThinkingLevel};
+use pi_ai::{AssistantMessage, Message, Model, ModelRegistry, ThinkingLevel};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
@@ -43,7 +43,7 @@ impl RouteOptions {
 impl ModelRuntime {
     /// Register a virtual model under `definition.provider`, which may also list physical models
     /// or several virtual models. Registering the same provider and id again replaces it.
-    pub fn register_virtual_model(&self, definition: VirtualModelDefinition) -> anyhow::Result<()> {
+    pub fn register_virtual_model(self: &Arc<Self>, definition: VirtualModelDefinition) -> anyhow::Result<()> {
         let (provider, id) = (definition.provider.clone(), definition.id.clone());
         anyhow::ensure!(
             !provider.trim().is_empty() && !id.trim().is_empty(),
@@ -55,6 +55,7 @@ impl ModelRuntime {
         let model = create_virtual_model(&definition);
         write(&self.virtual_models).insert((provider, id), RegisteredVirtualModel { model, router: definition.router });
         self.apply_virtual_models();
+        self.refresh_offline_in_background();
         Ok(())
     }
 
@@ -74,12 +75,15 @@ impl ModelRuntime {
 
     /// Providers that list only virtual models; they need no credentials.
     pub(super) fn virtual_only_providers(&self) -> HashSet<String> {
+        self.virtual_only_in(&self.registry())
+    }
+
+    fn virtual_only_in(&self, registry: &ModelRegistry) -> HashSet<String> {
         let providers: HashSet<String> =
             read(&self.virtual_models).keys().map(|(provider, _)| provider.clone()).collect();
         if providers.is_empty() {
             return providers;
         }
-        let registry = self.registry();
         let configs = registry.auth_configs();
         let physical: HashSet<&str> = registry
             .all_models()
@@ -95,15 +99,17 @@ impl ModelRuntime {
 
     /// Add the virtual models to the registry; they hide physical chat models with their id.
     pub(super) fn apply_virtual_models(&self) {
-        let models = self.virtual_models();
-        {
-            let mut registry = self.registry_mut();
-            for model in models {
-                registry.upsert(model);
-            }
+        self.add_virtual_models(&mut self.registry_mut());
+    }
+
+    /// Add the virtual models to `registry` and mark its configured providers.
+    pub(super) fn add_virtual_models(&self, registry: &mut ModelRegistry) {
+        for model in self.virtual_models() {
+            registry.upsert(model);
         }
-        let configured = self.configured_providers();
-        self.registry_mut().set_configured_providers(configured);
+        let mut configured = read(&self.configured).clone();
+        configured.extend(self.virtual_only_in(registry));
+        registry.set_configured_providers(configured);
     }
 
     /// A catalog chat model that is not virtual.
