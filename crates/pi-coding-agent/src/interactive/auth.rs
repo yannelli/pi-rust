@@ -12,6 +12,7 @@ use pi_tui::program_status::BlockedKind;
 use pi_tui::{AutocompleteItem, Component, component};
 
 use super::mode::InteractiveMode;
+use super::model_refresh::{login_refresh_warning, refresh_after_login};
 use super::selector::SelectorSpec;
 use crate::agent_session::login::{NO_STORED_CREDENTIALS, logout_message};
 use crate::interactive_components::login::{
@@ -324,12 +325,42 @@ impl InteractiveMode {
         *close.borrow_mut() = Some(self.mount_view(component(dialog)));
     }
 
-    /// Picks the provider's default model when none was set, then reports where the credential went.
+    /// Reports the login and refreshes the provider's catalog. When the provider's default model
+    /// is not known yet, it is picked after the refresh (upstream `deferSelection`).
     async fn complete_provider_authentication(
         self: &Rc<Self>,
         provider: &AuthSelectorProvider,
         previous: Option<Model>,
     ) {
+        let session = self.session();
+        let runtime = session.model_runtime().clone();
+        let known = |id: &str| runtime.available_models().iter().any(|m| m.provider == provider.id && m.id == id);
+        let defer = previous.is_none() && default_model_for(&provider.id).is_some_and(|id| !known(id));
+        let action = login_action_label(provider.auth_type, &provider.name);
+        if defer {
+            let saved = crate::config::auth_path(&self.agent_dir);
+            self.show_status(&format!("{action}. Credentials saved to {}. Refreshing model catalog…", saved.display()));
+        } else {
+            self.finish_provider_authentication(provider, previous.clone()).await;
+        }
+        let provider = provider.clone();
+        self.spawn(move |mode| async move {
+            let outcome = refresh_after_login(runtime, provider.id.clone()).await;
+            if let Some(warning) = login_refresh_warning(&outcome, &action) {
+                mode.show_warning(&warning);
+            }
+            // Keep a model or session chosen while the refresh ran.
+            if defer && Arc::ptr_eq(&mode.session(), &session) && session.model().is_none() {
+                mode.finish_provider_authentication(&provider, previous).await;
+            }
+            mode.update_available_provider_count();
+            mode.footer.borrow_mut().invalidate();
+            mode.request_render();
+        });
+    }
+
+    /// Picks the provider's default model when none was set, then reports where the credential went.
+    async fn finish_provider_authentication(self: &Rc<Self>, provider: &AuthSelectorProvider, previous: Option<Model>) {
         let action = login_action_label(provider.auth_type, &provider.name);
         let session = self.session();
         let mut selected: Option<Model> = None;

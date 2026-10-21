@@ -8,7 +8,7 @@ mod http_mock;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-use cli_support::{mock_server, setup, text_body};
+use cli_support::{isolate, mock_server, setup, text_body};
 use http_mock::{Reply, Server};
 use pi_coding_agent::update::{ArchiveKind, archive_name, binary_name, release_target, sha256_hex};
 use serde_json::{Value, json};
@@ -18,14 +18,13 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Run `executable` in `root/work` with the agent directory `root/agent` and `envs`.
 async fn run(executable: PathBuf, root: &Path, args: &[&str], envs: &[(&str, String)]) -> Output {
     let mut command = Command::new(executable);
-    command
+    // Online, for the local servers, but without inherited credentials for real providers.
+    isolate(&mut command)
+        .env_remove("PI_OFFLINE")
         .args(args)
         .current_dir(root.join("work"))
         .env("PI_CODING_AGENT_DIR", root.join("agent"))
         .env("CARGO_HOME", root.join("cargo-home"))
-        .env_remove("PI_OFFLINE")
-        .env_remove("GITHUB_TOKEN")
-        .env_remove("ANTHROPIC_API_KEY")
         .env_remove("PI_TIMING")
         .stdin(Stdio::null());
     for (name, value) in envs {
@@ -66,9 +65,15 @@ async fn update_models_refreshes_the_catalog_cache_used_by_offline_starts() {
         "provider": "anthropic", "baseUrl": "https://api.anthropic.com", "contextWindow": 200000, "maxTokens": 8192});
     let server = Server::start(move |request| match request.path() {
         "/api/models/providers/anthropic" => Reply::json(&json!([model])),
+        "/v1/models" => Reply::json(&json!({"data": [{"id": "claude-opus-4-8"}, {"id": "claude-catalog-test"}]})),
         _ => Reply::json(&json!([])),
     })
     .await;
+    // Anthropic's model list goes to the local server, not the real API.
+    let models_path = root.path().join("agent/models.json");
+    let mut models: Value = serde_json::from_str(&std::fs::read_to_string(&models_path).unwrap()).unwrap();
+    models["providers"]["anthropic"] = json!({"baseUrl": server.url});
+    std::fs::write(&models_path, models.to_string()).unwrap();
     let catalog = [("PI_CATALOG_URL", server.url.clone())];
 
     let output = run(pi_binary(), root.path(), &["update", "--models"], &catalog).await;
@@ -77,7 +82,11 @@ async fn update_models_refreshes_the_catalog_cache_used_by_offline_starts() {
     assert_eq!(server.count("/api/models/providers/anthropic"), 1);
     let store: Value =
         serde_json::from_str(&std::fs::read_to_string(root.path().join("agent/models-store.json")).unwrap()).unwrap();
-    assert_eq!(store["anthropic"]["models"][0]["id"], "claude-catalog-test");
+    let ids: Vec<&str> =
+        store["anthropic"]["models"].as_array().unwrap().iter().filter_map(|m| m["id"].as_str()).collect();
+    assert_eq!(ids, ["claude-opus-4-8", "claude-catalog-test"]);
+    assert_eq!(server.count("/v1/models"), 1, "the key's model list applies");
+    assert!(!store.to_string().contains("sk-test"), "the key is never saved");
 
     let output = run(pi_binary(), root.path(), &["--offline", "--list-models", "catalog-test"], &catalog).await;
     let stdout = text(&output.stdout);

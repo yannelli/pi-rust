@@ -7,8 +7,10 @@ use std::time::Duration;
 
 use pi_ai::Model;
 use pi_ai::auth::{AuthResolver, FileCredentialStore};
+use pi_ai::models::provider_base_urls;
 use tokio_util::sync::CancellationToken;
 
+use super::personalized::{PersonalizedCatalog, account_model_list};
 use super::radius::{RADIUS_PROVIDER_ID, RadiusCatalog, radius_providers_in_models_json};
 use super::refresh::{CatalogRefresher, DynamicCatalog, RefreshOptions, RefreshResult, ResolverCredentials};
 use super::remote::RemoteCatalogOverlay;
@@ -24,14 +26,18 @@ pub struct CatalogConfig {
     pub catalog_base_url: Option<String>,
     /// Generation time of the bundled catalog; an older remote overlay is ignored.
     pub local_generated_at: Option<i64>,
-    /// `models.json` text, for its Radius providers.
+    /// `models.json` text, for its Radius providers and provider base URLs.
     pub models_json: Option<String>,
     /// HTTP client of the pi.dev overlays; the shared client by default.
     pub client: Option<reqwest::Client>,
+    /// HTTP client of account model lists, which must not follow redirects; by default
+    /// `pi_ai::model_lists::list_client`.
+    pub list_client: Option<reqwest::Client>,
 }
 
-/// The pi.dev overlay for every bundled provider except Radius, the Radius gateway catalogs
-/// (built-in and `models.json`), and the llama.cpp router.
+/// The pi.dev overlay for every bundled provider except Radius, narrowed to the account's models
+/// where the provider lists them, the Radius gateway catalogs (built-in and `models.json`), and
+/// the llama.cpp router.
 pub fn builtin_catalogs(builtin: &[Model], config: &CatalogConfig) -> Vec<Arc<dyn DynamicCatalog>> {
     let mut providers: Vec<&str> = Vec::new();
     for model in builtin {
@@ -41,12 +47,28 @@ pub fn builtin_catalogs(builtin: &[Model], config: &CatalogConfig) -> Vec<Arc<dy
     }
     let mut catalogs: Vec<Arc<dyn DynamicCatalog>> = Vec::new();
     let custom_radius = config.models_json.as_deref().map(radius_providers_in_models_json).unwrap_or_default();
+    let base_urls = config.models_json.as_deref().map(provider_base_urls).unwrap_or_default();
     for provider in providers {
         if custom_radius.iter().any(|radius| radius.id == provider) {
             continue;
         }
         if provider == RADIUS_PROVIDER_ID {
             catalogs.push(Arc::new(RadiusCatalog::new(RADIUS_PROVIDER_ID, None)));
+            continue;
+        }
+        if let Some((personalize, interval)) = account_model_list(provider) {
+            let own = builtin.iter().filter(|model| model.provider == provider).cloned().collect();
+            let mut catalog = PersonalizedCatalog::new(provider, own, personalize)
+                .with_catalog(config.catalog_base_url.as_deref(), config.local_generated_at)
+                .with_provider_base_url(base_urls.get(provider).cloned())
+                .with_interval(interval);
+            if let Some(client) = &config.client {
+                catalog = catalog.with_client(client.clone());
+            }
+            if let Some(client) = &config.list_client {
+                catalog = catalog.with_list_client(client.clone());
+            }
+            catalogs.push(Arc::new(catalog));
             continue;
         }
         let mut overlay =
