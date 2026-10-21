@@ -254,3 +254,83 @@ async fn copilot_lists_the_pickers_chat_models() {
 async fn copilot_falls_back_to_the_catalog() {
     assert_fallbacks(AccountModelList::GitHubCopilot, "copilot-test-token", copilot_catalog()).await;
 }
+
+fn openai_catalog() -> Vec<Model> {
+    let gpt = |id| chat("openai", "openai-responses", id);
+    vec![gpt("gpt-5.4"), gpt("gpt-5.5"), gpt("o3"), classifier("openai", "judge")]
+}
+
+#[tokio::test]
+async fn openai_and_xai_add_only_chat_models_of_catalog_families() {
+    let body = json!({"object": "list", "data": [
+        {"id": "gpt-5.4", "object": "model"}, {"id": "gpt-5.9"}, {"id": "text-embedding-3-large"},
+        {"id": "gpt-image-2"}, {"id": "gpt-3.5-turbo-instruct"}, {"id": "gpt-4o-mini-search-preview"}, {"id": ""},
+    ]});
+    let server = serve(200, body).await;
+    let models =
+        AccountModelList::OpenAi.personalize(openai_catalog(), &context(&server, Some("sk-test"))).await.unwrap();
+    assert_eq!(ids(&models), ["gpt-5.4", "judge", "gpt-5.9"]);
+    assert_eq!(models[2].compat, Some(json!({"flag": "gpt-5.5"})), "copied from the closest catalog model");
+    let request = &server.requests()[0];
+    assert_eq!((request.path.as_str(), request.headers["authorization"].as_str()), ("/models", "Bearer sk-test"));
+
+    let grok = |id| chat("xai", "openai-responses", id);
+    let body = json!({"data": [{"id": "grok-4.5"}, {"id": "grok-code-fast-1"}, {"id": "grok-imagine-video"}]});
+    let server = serve(200, body).await;
+    let catalog = vec![grok("grok-4.3"), grok("grok-4.5")];
+    let models = AccountModelList::Xai.personalize(catalog, &context(&server, Some("xai-test"))).await.unwrap();
+    assert_eq!(ids(&models), ["grok-4.5", "grok-code-fast-1"]);
+    assert_eq!(server.requests()[0].headers["authorization"], "Bearer xai-test");
+}
+
+#[tokio::test]
+async fn openai_and_xai_fall_back_to_the_catalog() {
+    assert_fallbacks(AccountModelList::OpenAi, "sk-test", openai_catalog()).await;
+    assert_fallbacks(AccountModelList::Xai, "xai-test", vec![chat("xai", "openai-responses", "grok-4.5")]).await;
+}
+
+fn google_catalog() -> Vec<Model> {
+    let gemini = |id| chat("google", "google-generative-ai", id);
+    vec![gemini("gemini-2.5-pro"), gemini("gemini-2.5-flash"), gemini("gemini-3.8-flash")]
+}
+
+#[tokio::test]
+async fn google_follows_pages_and_keeps_generate_content_models() {
+    let server = RouteServer::start(|request| {
+        let body = if request.path.contains("pageToken=page-2") {
+            json!({"models": [
+                {"name": "models/gemini-3.9-flash", "displayName": "Gemini 3.9 Flash",
+                 "supportedGenerationMethods": ["generateContent", "countTokens"]},
+                {"name": "models/gemini-2.5-flash", "supportedGenerationMethods": ["bidiGenerateContent"]},
+                {"name": "models/imagen-4.0-generate-001", "supportedGenerationMethods": ["predict"]},
+            ]})
+        } else {
+            json!({"models": [
+                {"name": "models/gemini-2.5-pro", "inputTokenLimit": 1_048_576, "outputTokenLimit": 65_536,
+                 "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemini-embedding-001", "supportedGenerationMethods": ["embedContent"]},
+            ], "nextPageToken": "page-2"})
+        };
+        Reply::json(200, &body)
+    })
+    .await;
+    let list = AccountModelList::Google;
+    let models = list.personalize(google_catalog(), &context(&server, Some("gemini-test"))).await.unwrap();
+
+    assert_eq!(ids(&models), ["gemini-2.5-pro", "gemini-3.9-flash"]);
+    assert_eq!((models[0].context_window, models[0].max_tokens), (1_048_576, 65_536));
+    assert_eq!(
+        (models[1].name.as_str(), models[1].compat.clone()),
+        ("Gemini 3.9 Flash", Some(json!({"flag": "gemini-3.8-flash"})))
+    );
+    let requests = server.requests();
+    assert_eq!(requests[0].path, "/models?pageSize=1000");
+    assert_eq!(requests[1].path, "/models?pageSize=1000&pageToken=page-2");
+    assert_eq!(requests[0].headers["x-goog-api-key"], "gemini-test");
+    assert!(!requests[0].headers.contains_key("authorization"));
+}
+
+#[tokio::test]
+async fn google_falls_back_to_the_catalog() {
+    assert_fallbacks(AccountModelList::Google, "gemini-test", google_catalog()).await;
+}

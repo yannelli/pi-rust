@@ -31,12 +31,12 @@ pub(crate) enum AddRule {
     /// The list has only chat models of this provider.
     Any,
     /// Only ids of a model family the catalog has, and no embedding, audio, image, video,
-    /// moderation, or realtime models.
+    /// moderation, realtime, instruct, or search models.
     CatalogFamilies,
 }
 
 /// Id parts that mark models pi cannot chat with.
-const NON_CHAT_PARTS: [&str; 18] = [
+const NON_CHAT_PARTS: [&str; 20] = [
     "embed",
     "embedding",
     "tts",
@@ -55,6 +55,8 @@ const NON_CHAT_PARTS: [&str; 18] = [
     "aqa",
     "babbage",
     "davinci",
+    "instruct",
+    "search",
 ];
 
 /// A positive number at `pointer`, as an integer.

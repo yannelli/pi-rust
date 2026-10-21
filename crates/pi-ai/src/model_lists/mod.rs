@@ -12,6 +12,8 @@ use crate::types::Model;
 mod anthropic;
 mod codex;
 mod copilot;
+mod google;
+mod openai;
 mod openrouter;
 mod reconcile;
 
@@ -66,6 +68,12 @@ pub enum AccountModelList {
     Anthropic,
     /// The chat models a GitHub Copilot login's model picker offers.
     GitHubCopilot,
+    /// The models of an OpenAI API key.
+    OpenAi,
+    /// The models of an xAI API key.
+    Xai,
+    /// The `generateContent` models of a Gemini API key.
+    Google,
 }
 
 impl AccountModelList {
@@ -75,6 +83,9 @@ impl AccountModelList {
             "openai-codex" => Some(Self::OpenAiCodex),
             "anthropic" => Some(Self::Anthropic),
             "github-copilot" => Some(Self::GitHubCopilot),
+            "openai" => Some(Self::OpenAi),
+            "xai" => Some(Self::Xai),
+            "google" => Some(Self::Google),
             _ => None,
         }
     }
@@ -92,6 +103,13 @@ impl AccountModelList {
             Self::OpenAiCodex => codex::personalize_codex_catalog(catalog, context).await,
             Self::Anthropic => anthropic::personalize_anthropic_catalog(catalog, context).await,
             Self::GitHubCopilot => copilot::personalize_copilot_catalog(catalog, context).await,
+            Self::OpenAi => {
+                openai::personalize_openai_compatible_catalog(catalog, context, "OpenAI", openai::OPENAI_BASE_URL).await
+            }
+            Self::Xai => {
+                openai::personalize_openai_compatible_catalog(catalog, context, "xAI", openai::XAI_BASE_URL).await
+            }
+            Self::Google => google::personalize_google_catalog(catalog, context).await,
         }
     }
 }

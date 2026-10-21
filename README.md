@@ -138,6 +138,18 @@ With an API key or a Claude subscription login, pi reads `GET /v1/models` with t
 
 With a Copilot login, pi reads `GET /models` from the login's Copilot endpoint and keeps the chat models that support tools, that the model picker shows, and that a policy does not disable, as `/login` chooses them. The token's endpoint comes before the `models.json` base URL, as for requests.
 
+#### OpenAI and xAI
+
+With an API key, pi reads `GET <base URL>/models`. This list also names embedding, audio, image, moderation, and realtime models, so pi adds only listed models of a model family that the catalog has, such as `gpt-` or `grok-`, and never models of those kinds. The list has no limits, so the catalog's limits stay.
+
+#### Google
+
+With a Gemini API key, pi reads `GET <base URL>/models` with `x-goog-api-key`, follows its pages, and uses only the models that support `generateContent`, with their input and output token limits. New models are added only for a model family that the catalog has.
+
+#### Not covered
+
+Cursor and Grok Build have no public model list API for other harnesses, so pi-rust does not narrow them. Other providers show the full catalog.
+
 ## Crates
 
 | Crate | Contents |
@@ -166,7 +178,7 @@ pi-rust ports the `pi` CLI and its libraries feature for feature. These parts di
 - The version check and `pi update --self` use this repository's releases.
 - CJK and Thai word movement uses ICU4X dictionaries, so a few word boundaries differ from Node's `Intl.Segmenter`.
 - `pi --mode acp` (above) is an addition; the TypeScript pi needs the separate pi-acp adapter.
-- Account model lists for OpenAI Codex, Anthropic, and GitHub Copilot (see [Providers](#account-model-lists-pi-rust-extension)) are an addition; upstream pi narrows only OpenRouter.
+- Account model lists for OpenAI Codex, Anthropic, GitHub Copilot, OpenAI, xAI, and Google (see [Providers](#account-model-lists-pi-rust-extension)) are an addition; upstream pi narrows only OpenRouter.
 - `pi-env` looks for remote daemons in a `pi-env-daemons` folder next to the running program. Each release has a `pi-env-daemons-<tag>.tar.gz` with the daemons for Linux, Android (Termux), macOS, and Windows on x86-64 and arm64; extract it next to `pi`.
 - `pi experimental` (`server`, `client`, `durable`, `vacation`) needs `PI_EXPERIMENTAL=1`, as upstream. Its `server` and `client` use Unix sockets, so on Windows they report that they need Unix; upstream has no Windows transport either.
 

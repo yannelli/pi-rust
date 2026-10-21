@@ -41,6 +41,7 @@ Behavior that pi-rust adds on purpose. The parity review should not report these
 - Account model list for `openai-codex` from the Codex backend's `/codex/models` (README "Account model lists").
 - Account model list for `anthropic` from `/v1/models` (README "Account model lists").
 - Account model list for `github-copilot` from the Copilot `/models` endpoint (README "Account model lists").
+- Account model lists for `openai` and `xai` from `/models`, and for `google` from the Gemini API `/models` (README "Account model lists"). Cursor and Grok Build have no public model list, so they are not narrowed.
 
 ## Platform
 
