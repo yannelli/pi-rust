@@ -40,7 +40,7 @@ impl Default for CodemodeToolOptions {
 
 /// `on`: declared tools that scripts can call say how; the description lists callable tools that
 /// are not `direct`. `only`: the description lists every callable tool, and the declarations of
-/// active `direct` tools are hidden. Listing by exposure keeps the description stable across loads.
+/// registered `direct` tools are hidden. Listing by exposure keeps the description stable across loads.
 pub fn prepare_codemode_loadout(loadout: &ToolLoadout, options: &CodemodeToolOptions) -> ToolLoadoutChanges {
     let is_direct = |tool: &CodemodeToolInfo| loadout.exposure(&tool.name) == ToolExposure::Direct;
     // Listings show each tool with the guidelines the session normalized for it.
@@ -76,12 +76,15 @@ pub fn prepare_codemode_loadout(loadout: &ToolLoadout, options: &CodemodeToolOpt
         },
     );
     descriptions.insert(CODEMODE_TOOL_NAME.into(), description);
-    let declared: HashSet<&str> = declared_infos.iter().map(|tool| tool.name.as_str()).collect();
+    // Inactive direct tools stay hidden too: a tool deactivated mid-run was never declared to the
+    // model, and filtering by the active set would bring it back into the first tool list.
     let hidden_declarations = match options.mode {
-        CodemodeMode::Only => callable
+        CodemodeMode::Only => loadout
+            .registered
             .iter()
-            .filter(|tool| is_direct(tool) && declared.contains(tool.name.as_str()))
-            .map(|tool| tool.name.clone())
+            .map(|tool| tool.name())
+            .filter(|name| *name != CODEMODE_TOOL_NAME && loadout.exposure(name) == ToolExposure::Direct)
+            .map(str::to_string)
             .collect(),
         CodemodeMode::On => Vec::new(),
     };
