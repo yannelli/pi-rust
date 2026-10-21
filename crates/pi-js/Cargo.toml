@@ -57,7 +57,7 @@ p521 = { version = "0.14.0", default-features = false, features = ["ecdsa", "ecd
 pkcs8 = { version = "0.11.0", default-features = false, features = ["encryption", "3des"] }
 rsa = { version = "0.9.10", default-features = false, features = ["std", "u64_digit", "sha2", "hazmat"] }
 sha1 = "0.10.6"
-socket2 = "0.6.5"
+socket2 = { version = "0.6.5", features = ["all"] }
 unicode-segmentation = "1.12"
 url = "2.5.8"
 webpki-root-certs = "1"
@@ -100,8 +100,8 @@ tempfile.workspace = true
 
 # Same lints as the workspace, except `unsafe_code` is `deny` instead of `forbid`: modules that
 # need FFI allow it locally: system calls (`node/sys.rs`, `node/os_cpus.rs`, `node/fs_meta.rs`,
-# `node/child_stdio.rs`), SharedArrayBuffer memory (`node/shared.rs`), SQLite user functions and
-# iterators (`node/sqlite_fn.rs`, `node/sqlite_iter.rs`), and WebAssembly memory (`node/wasm_objects.rs`).
+# `node/child_stdio.rs`, `node/dgram_ssm.rs`), SharedArrayBuffer memory (`node/shared.rs`), SQLite
+# functions and iterators (`node/sqlite_fn.rs`, `node/sqlite_iter.rs`), and wasm memory (`node/wasm_objects.rs`).
 [lints.rust]
 unsafe_code = "deny"
 

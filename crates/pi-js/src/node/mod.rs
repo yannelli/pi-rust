@@ -7,6 +7,7 @@ mod context;
 mod core;
 mod crypto;
 mod dgram;
+mod dgram_ssm;
 mod dns;
 pub(crate) mod encoding;
 pub(crate) mod fetch;

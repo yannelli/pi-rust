@@ -124,3 +124,46 @@ async fn auto_select_family_matches_node() {
     assert_same_keys(&actual, &expected);
     assert!(capture.uncaught.lock().unwrap().is_empty());
 }
+
+// reusePort spreads connections only on Linux; elsewhere libuv and pi-js fail with ENOTSUP.
+#[cfg(target_os = "linux")]
+const REUSE_PORT_SCRIPT: &str = r##"
+const net = require("node:net");
+const out = {};
+const listen = (options) => new Promise((resolve) => {
+  const server = net.createServer((socket) => socket.end(String(options.tag)));
+  server.on("error", (error) => resolve([server, [error.code, error.message.replace(/:\d+$/, ":PORT"), error.syscall, error.address]]));
+  server.listen(options, () => resolve([server, "listening"]));
+});
+const read = (port) => new Promise((resolve) => net.connect(port, "127.0.0.1").on("data", (data) => resolve(String(data))));
+const [first, a] = await listen({ port: 0, host: "127.0.0.1", reusePort: true, tag: 1 });
+const port = first.address().port;
+const [second, b] = await listen({ port, host: "127.0.0.1", reusePort: true, tag: 2 });
+const [, c] = await listen({ port, host: "127.0.0.1", tag: 3 });
+const [, d] = await listen({ port, host: "127.0.0.1", reusePort: "yes", tag: 4 });
+out.listen = [a, b, c, d, second.address().port === port];
+// The kernel spreads connections by their source port, so both servers answer within a few tries.
+const tags = new Set();
+for (let i = 0; i < 40 && tags.size < 2; i++) tags.add(await read(port));
+out.spread = [...tags].sort();
+await new Promise((resolve) => first.close(resolve));
+out.afterClose = await read(port);
+await new Promise((resolve) => second.close(resolve));
+const [any, e] = await listen({ port: 0, reusePort: true, tag: 5 });
+out.anyHost = e;
+any.close();
+return out;
+"##;
+
+#[cfg(target_os = "linux")]
+const REUSE_PORT_EXPECTED: &str = r##"{"listen":["listening","listening",["EADDRINUSE","listen EADDRINUSE: address already in use 127.0.0.1:PORT","listen","127.0.0.1"],["EADDRINUSE","listen EADDRINUSE: address already in use 127.0.0.1:PORT","listen","127.0.0.1"],true],"spread":["1","2"],"afterClose":"2","anyHost":"listening"}"##;
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn reuse_port_matches_node() {
+    let (_dir, root) = tempdir();
+    let (runtime, capture) = runtime(&root);
+    let actual = run_cjs_within(&runtime, &root, REUSE_PORT_SCRIPT, 60).await;
+    assert_same_keys(&actual, &serde_json::from_str(REUSE_PORT_EXPECTED).unwrap());
+    assert!(capture.uncaught.lock().unwrap().is_empty());
+}

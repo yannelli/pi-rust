@@ -26,11 +26,13 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
      net.Socket and net.Server objects over IPC (ERR_INVALID_HANDLE_TYPE), such as Unix socket or pipe \
      servers, TLS sockets, and dgram sockets",
     "cluster: workers sharing Unix socket or named pipe servers, and TLS servers (each worker listens on its own)",
-    "net: sockets and servers from a file descriptor or an existing handle, reusePort",
+    "net: sockets and servers from a file descriptor or an existing handle, and reusePort outside Linux \
+     (ENOTSUP, as in libuv)",
     "tls: pfx (no PKCS#12 parser is bundled), encrypted private keys, exportKeyingMaterial, and TLS before 1.2",
     "http: the insecureHTTPParser option (accepted and ignored)",
-    "http2: performServerHandshake, altsvc and origin frames (ignored), and stream priority (h2 sends no PRIORITY frames)",
-    "dgram: addSourceSpecificMembership, dropSourceSpecificMembership, and bind with a file descriptor",
+    "http2: performServerHandshake, altsvc and origin frames (ignored), and stream priority (h2 sends no \
+     PRIORITY frames)",
+    "dgram: IPv6 source-specific membership on Windows, and bind with a file descriptor",
     "process: binding, dlopen, setUncaughtExceptionCaptureCallback, and running code after process.exit when \
      the embedder's on_exit callback returns (the runtime is shutting down)",
     "stream/web: CompressionStream and DecompressionStream",
@@ -91,6 +93,8 @@ pub const DIFFERENCES: &[&str] = &[
     "child_process: messages sent after a handle do not wait for the peer's NODE_HANDLE_ACK (Node queues \
      them, and resends the handle after a NODE_HANDLE_NACK), and bytes that a sent socket had read in the \
      sender but not yet emitted as 'data' are dropped instead of emitted there",
+    "dgram: addMembership, dropMembership, and the source-specific variants need a bound socket (Node \
+     binds an unbound one to a random port first)",
     "cluster: round-robin hands each connection to the next connected worker in turn rather than to the \
      next free one, and the primary does not report worker server errors with Node's exact errno text",
     "vm: a context is a separate QuickJS context whose globals forward to the contextified object; \
