@@ -148,8 +148,20 @@ where
     let loop_state = state();
     loop_state.add_busy();
     let sender = loop_state.sender.clone();
+    let (started, turn) = tokio::sync::oneshot::channel::<()>();
+    let previous = loop_state.last_start.replace(Some(turn));
     loop_state.shared.tokio.spawn(async move {
-        let result = future.await;
+        // Start after the previous call was first polled, so ops begin in JavaScript call order.
+        if let Some(previous) = previous {
+            let _ = previous.await;
+        }
+        let (mut future, mut started) = (std::pin::pin!(future), Some(started));
+        let result = std::future::poll_fn(|cx| {
+            let poll = future.as_mut().poll(cx);
+            started.take();
+            poll
+        })
+        .await;
         let task: super::state::Task = Box::new(move |ctx| {
             state().remove_busy();
             settle_promise(ctx, id, result.and_then(|value| convert(ctx, value)));
