@@ -1,10 +1,5 @@
 {
-  "commits": [
-    {
-      "item": "c661bc574",
-      "reason": "Drops the shared MCP types block from durable code mode's codemode section because pi-codemode stopped exporting MCP_TYPESCRIPT_PREAMBLE and mcpStructuredContentSchema(). pi-codemode here never had them, so the port of 8bb180bec renders the section without that block already."
-    }
-  ],
+  "commits": [],
   "cliFlags": [
     {
       "item": "--terminal-login",
