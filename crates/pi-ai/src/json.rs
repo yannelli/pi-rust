@@ -207,6 +207,11 @@ mod tests {
         let (arguments, error) = parse_tool_call_arguments("[1]");
         assert!(arguments.is_empty() && error.unwrap().starts_with("Tool arguments must be a JSON object"));
         assert_eq!(parse_tool_call_arguments("  "), (JsonObject::new(), None));
+        let (arguments, error) = parse_tool_call_arguments(r#"{"kind":"seek","note":"\url"}"#);
+        assert_eq!((arguments["note"].as_str(), error), (Some("\\url"), None));
+        let cut_off = r#"{"kind":"seek","clipId":"clip-fl"#;
+        let (arguments, error) = parse_tool_call_arguments(cut_off);
+        assert!(arguments.is_empty() && error.unwrap().ends_with(cut_off));
     }
 
     #[test]

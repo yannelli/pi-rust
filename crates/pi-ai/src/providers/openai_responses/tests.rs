@@ -112,6 +112,34 @@ async fn reasoning_summary_and_split_tool_arguments() {
 }
 
 #[tokio::test]
+async fn malformed_final_arguments_are_reported_instead_of_keeping_the_prefix() {
+    let raw = r#"{"path":"README.md","content":"updated","mode":.5}"#;
+    let started = json!({"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "write", "arguments": ""});
+    let finished =
+        json!({"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "write", "arguments": raw});
+    let output = json!([finished.clone()]);
+    let server = MockServer::start(MockResponse::Sse(vec![
+        event(json!({"type": "response.output_item.added", "output_index": 0, "item": started})),
+        event(json!({"type": "response.function_call_arguments.delta", "output_index": 0, "delta": raw})),
+        event(json!({"type": "response.function_call_arguments.done", "output_index": 0, "arguments": raw})),
+        event(json!({"type": "response.output_item.done", "output_index": 0, "item": finished})),
+        event(json!({"type": "response.completed", "response": {"id": "resp_3", "status": "completed", "output": output}})),
+    ]))
+    .await;
+    let model = test_model(API, "openai", &server.base_url);
+    let (events, message) = collect(OpenAIResponses.stream(&model, &context(), options())).await;
+    let call = message.tool_calls().next().unwrap();
+    assert!(call.arguments.is_empty());
+    let error = call.arguments_error.as_deref().unwrap();
+    assert!(error.ends_with(&format!("\n\nReceived arguments:\n{raw}")), "{error}");
+    let ended = events.iter().find_map(|event| match event {
+        crate::stream::AssistantMessageEvent::ToolcallEnd { tool_call, .. } => Some(tool_call),
+        _ => None,
+    });
+    assert_eq!(ended.unwrap().arguments_error.as_deref(), Some(error));
+}
+
+#[tokio::test]
 async fn request_body_converts_history_tools_and_reasoning() {
     let mut server = MockServer::start(MockResponse::Sse(vec![completed(json!({}))])).await;
     let model = test_model(API, "openai", &server.base_url);

@@ -81,6 +81,46 @@ async fn interleaved_tool_calls_are_assembled_by_index() {
 }
 
 #[tokio::test]
+async fn malformed_or_cut_off_final_arguments_are_reported() {
+    for raw in [r#"{"action":"apply","actions":[{"kind":"seek","time":.5}]}"#, r#"{"kind":"seek","clipId":"clip-fl"#] {
+        let (head, tail) = raw.split_at(raw.len() / 2);
+        let call = |arguments: &str| {
+            let function = json!({"name": "edit", "arguments": arguments});
+            chunk(json!({"tool_calls": [{"index": 0, "id": "call_a", "type": "function", "function": function}]}))
+        };
+        let server =
+            MockServer::start(MockResponse::Sse(vec![call(head), call(tail), finish("tool_calls"), done()])).await;
+        let model = test_model(API, "local", &server.base_url);
+        let (events, message) = collect(OpenAICompletions.stream(&model, &context(), options())).await;
+        let call = message.tool_calls().next().unwrap();
+        assert!(call.arguments.is_empty(), "{raw}");
+        let error = call.arguments_error.as_deref().unwrap();
+        assert!(error.ends_with(&format!("\n\nReceived arguments:\n{raw}")), "{error}");
+        let ended = events.iter().filter_map(|event| match event {
+            crate::stream::AssistantMessageEvent::ToolcallEnd { tool_call, .. } => Some(tool_call),
+            _ => None,
+        });
+        assert_eq!(ended.count(), 1);
+    }
+}
+
+#[tokio::test]
+async fn valid_final_arguments_have_no_error() {
+    let function = json!({"name": "read", "arguments": r#"{"path":"a\url"}"#});
+    let tool_call = json!({"index": 0, "id": "call_a", "type": "function", "function": function});
+    let server = MockServer::start(MockResponse::Sse(vec![
+        chunk(json!({"tool_calls": [tool_call]})),
+        finish("tool_calls"),
+        done(),
+    ]))
+    .await;
+    let model = test_model(API, "local", &server.base_url);
+    let (_, message) = collect(OpenAICompletions.stream(&model, &context(), options())).await;
+    let call = message.tool_calls().next().unwrap();
+    assert_eq!((call.arguments["path"].as_str(), call.arguments_error.as_deref()), (Some("a\\url"), None));
+}
+
+#[tokio::test]
 async fn reasoning_content_becomes_signed_thinking() {
     let server = MockServer::start(MockResponse::Sse(vec![
         chunk(json!({"reasoning_content": "Let me "})),
