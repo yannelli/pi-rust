@@ -114,16 +114,48 @@ pub fn credential_env_vars() -> BTreeSet<&'static str> {
     keys.chain(AMBIENT_CREDENTIAL_ENV_VARS.iter().copied()).collect()
 }
 
+/// Reads one environment variable for credential resolution. [`ProcessEnv`] is the default;
+/// test sessions pass a lookup that hides [`credential_env_vars`], so no developer key is found.
+pub trait EnvLookup: Send + Sync {
+    fn var(&self, name: &str) -> Option<String>;
+}
+
+/// The real process environment.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ProcessEnv;
+
+impl EnvLookup for ProcessEnv {
+    fn var(&self, name: &str) -> Option<String> {
+        std::env::var(name).ok()
+    }
+}
+
+impl<F: Fn(&str) -> Option<String> + Send + Sync> EnvLookup for F {
+    fn var(&self, name: &str) -> Option<String> {
+        self(name)
+    }
+}
+
+/// A non-blank environment value. Provider-scoped `env` values win over `base`.
+pub fn env_value_in(name: &str, env: Option<&ProviderEnv>, base: &dyn EnvLookup) -> Option<String> {
+    let scoped = env.and_then(|env| env.get(name)).filter(|value| !value.trim().is_empty()).cloned();
+    scoped.or_else(|| base.var(name).filter(|value| !value.trim().is_empty()))
+}
+
 /// A non-blank environment value. Provider-scoped `env` values win over the process environment.
 pub fn provider_env_value(name: &str, env: Option<&ProviderEnv>) -> Option<String> {
-    let scoped = env.and_then(|env| env.get(name)).filter(|value| !value.trim().is_empty()).cloned();
-    scoped.or_else(|| std::env::var(name).ok().filter(|value| !value.trim().is_empty()))
+    env_value_in(name, env, &ProcessEnv)
 }
 
 /// Key variables for `provider` that are set, or `None` when none are.
 pub fn find_env_keys(provider: &str, env: Option<&ProviderEnv>) -> Option<Vec<&'static str>> {
+    find_env_keys_in(provider, env, &ProcessEnv)
+}
+
+/// Like [`find_env_keys`], reading `base` in place of the process environment.
+pub fn find_env_keys_in(provider: &str, env: Option<&ProviderEnv>, base: &dyn EnvLookup) -> Option<Vec<&'static str>> {
     let found: Vec<&'static str> =
-        api_key_env_vars(provider).iter().copied().filter(|name| provider_env_value(name, env).is_some()).collect();
+        api_key_env_vars(provider).iter().copied().filter(|name| env_value_in(name, env, base).is_some()).collect();
     (!found.is_empty()).then_some(found)
 }
 
@@ -131,16 +163,21 @@ pub fn find_env_keys(provider: &str, env: Option<&ProviderEnv>) -> Option<Vec<&'
 /// requests send as `Authorization: Bearer`. Ambient Vertex and Bedrock credentials yield
 /// [`AMBIENT_CREDENTIAL`].
 pub fn get_env_api_key_with(provider: &str, env: Option<&ProviderEnv>) -> Option<String> {
-    if let Some(keys) = find_env_keys(provider, env) {
+    get_env_api_key_in(provider, env, &ProcessEnv)
+}
+
+/// Like [`get_env_api_key_with`], reading `base` in place of the process environment.
+pub fn get_env_api_key_in(provider: &str, env: Option<&ProviderEnv>, base: &dyn EnvLookup) -> Option<String> {
+    if let Some(keys) = find_env_keys_in(provider, env, base) {
         let name = keys.into_iter().find(|name| provider != "anthropic" || *name != ANTHROPIC_AUTH_TOKEN_ENV);
-        if let Some(value) = name.and_then(|name| provider_env_value(name, env)) {
+        if let Some(value) = name.and_then(|name| env_value_in(name, env, base)) {
             return Some(value);
         }
     }
-    let set = |name: &str| provider_env_value(name, env).is_some();
+    let set = |name: &str| env_value_in(name, env, base).is_some();
     let ambient = match provider {
         "google-vertex" => {
-            vertex_adc_credentials_exist(env)
+            vertex_adc_credentials_exist(env, base)
                 && (set("GOOGLE_CLOUD_PROJECT") || set("GCLOUD_PROJECT"))
                 && set("GOOGLE_CLOUD_LOCATION")
         }
@@ -162,8 +199,8 @@ pub fn get_env_api_key(provider: &str) -> Option<String> {
     get_env_api_key_with(provider, None)
 }
 
-fn vertex_adc_credentials_exist(env: Option<&ProviderEnv>) -> bool {
-    if let Some(path) = provider_env_value("GOOGLE_APPLICATION_CREDENTIALS", env) {
+fn vertex_adc_credentials_exist(env: Option<&ProviderEnv>, base: &dyn EnvLookup) -> bool {
+    if let Some(path) = env_value_in("GOOGLE_APPLICATION_CREDENTIALS", env, base) {
         return PathBuf::from(path).exists();
     }
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));

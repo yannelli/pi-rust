@@ -4,7 +4,9 @@
 #![allow(dead_code)]
 
 use std::path::Path;
+use std::sync::Arc;
 
+use pi_ai::env::{EnvLookup, credential_env_vars};
 use pi_ai::{Model, ModelRegistry};
 use pi_coding_agent::agent_session::{AgentSessionRuntime, AgentSessionServices};
 use pi_coding_agent::app::{AppOptions, create_app_runtime};
@@ -18,6 +20,21 @@ pub fn assert_models_file_loads(path: &Path) {
     if let Err(error) = ModelRegistry::load(path) {
         panic!("the test models.json does not load, so {FALLBACK}:\n{error}");
     }
+}
+
+/// The process environment without provider credentials, for in-process model runtimes. A
+/// developer's keys would otherwise make built-in models available to test sessions.
+pub fn credential_free_env() -> Arc<dyn EnvLookup> {
+    let hidden = credential_env_vars();
+    Arc::new(move |name: &str| if hidden.contains(name) { None } else { std::env::var(name).ok() })
+}
+
+/// Panics when the model runtime of `services` can read a provider credential from the
+/// environment. Only fails where such a variable is set, such as a developer machine.
+pub fn assert_credentials_hidden(services: &AgentSessionServices) {
+    let env = services.model_runtime.resolver().env();
+    let visible: Vec<&str> = credential_env_vars().into_iter().filter(|name| env.var(name).is_some()).collect();
+    assert!(visible.is_empty(), "pass offline_guard::credential_free_env(); the test model runtime reads {visible:?}");
 }
 
 /// Panics when the services recorded a `models.json` error.
@@ -70,10 +87,12 @@ pub fn assert_faux_model(model: Option<&Model>, api: &str) {
     }
 }
 
-/// `create_app_runtime` with the checks above: models loaded and an offline session model.
+/// `create_app_runtime` with the checks above: models loaded, credentials hidden, and an
+/// offline session model.
 pub async fn app_runtime(options: AppOptions, manager: SessionManager) -> AgentSessionRuntime {
     let runtime = create_app_runtime(options, manager).await.unwrap();
     assert_models_loaded(&runtime.services());
+    assert_credentials_hidden(&runtime.services());
     assert_offline_model(runtime.session().model().as_ref());
     runtime
 }

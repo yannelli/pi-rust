@@ -86,6 +86,7 @@ pub async fn start(options: Options) -> Ui {
         agent_dir: agent_dir.clone(),
         settings: Some(settings),
         credentials: Some(Arc::new(InMemoryCredentialStore::new(BTreeMap::new()))),
+        credential_env: Some(crate::offline_guard::credential_free_env()),
         run_limits: options.run_limits,
         ..AppOptions::default()
     };

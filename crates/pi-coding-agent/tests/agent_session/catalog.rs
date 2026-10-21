@@ -30,6 +30,7 @@ async fn start(dir: &std::path::Path, catalog_url: &str) -> Arc<ModelRuntime> {
         models_path: dir.join("models.json"),
         credentials: Arc::new(InMemoryCredentialStore::new(credentials)),
         oauth: None,
+        credential_env: crate::offline_guard::credential_free_env(),
     };
     let runtime = ModelRuntime::create(options).await;
     let setup = CatalogSetup {
