@@ -45,7 +45,11 @@ class Http2Session extends EventEmitter {
     const nativeSettings = { ...settings, customSettings: custom };
     this[kNative] = nativeH2.session(type === 0, nativeSettings, (event, key, value, end, id) => this._onNative(event, key, value, end, id));
     this._onData = (chunk) => this[kNative] !== null && nativeH2.feed(this[kNative], chunk);
-    this._onEnd = () => this[kNative] !== null && nativeH2.endInput(this[kNative]);
+    this._onEnd = () => {
+      this._peerEnded = true;
+      if (this._nativeDone) this.destroy();
+      else if (this[kNative] !== null) nativeH2.endInput(this[kNative]);
+    };
     this._onClose = () => this.destroy();
     this._onError = (error) => this.destroy(error);
     this._onTimeout = () => this.emit("timeout");
@@ -108,6 +112,9 @@ class Http2Session extends EventEmitter {
   _onClosed(info) {
     if (info && info[1]) this.emit("goaway", info[0], 0, Buffer.alloc(0));
     else if (!info && this.type === 1 && !this.closed) this.emit("goaway", 0, 0, Buffer.alloc(0));
+    // h2 ends the connection once the session's own GOAWAY is done. Node's session stays open
+    // until it is closed or the peer ends the socket.
+    if (!info && this._goawaySent && !this.closed && !this._peerEnded) return void (this._nativeDone = true);
     const error = info && info[0] !== 0 && !info[1] ? codeError(Error, "ERR_HTTP2_SESSION_ERROR", `Session closed with error code ${info[0]}`) : undefined;
     this.closed = true;
     setImmediate(() => this.destroy(error));
