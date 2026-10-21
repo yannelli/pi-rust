@@ -281,3 +281,53 @@ fn paste_followed_by_keys_in_one_chunk() {
     assert_eq!(h.pastes, ["one", "two"]);
     assert_eq!(h.data, ["x", "\x1b[A", "y"]);
 }
+
+#[test]
+fn rejoins_a_mouse_report_split_by_the_timeout() {
+    // Upstream issue 11172: the tail of a split report must not become typed text.
+    let mut h = Harness::new();
+    h.process("\x1b[<35;4");
+    h.wait(40);
+    h.process("8;27M");
+    assert_eq!(h.data, ["\x1b[<35;4", "\x1b[<35;48;27M"]);
+}
+
+#[test]
+fn rejoins_a_split_mouse_report_flushed_by_new_input() {
+    let mut h = Harness::new();
+    h.process("\x1b[<0;12");
+    h.now += Duration::from_millis(40);
+    h.process(";3m");
+    assert_eq!(h.data, ["\x1b[<0;12", "\x1b[<0;12;3m"]);
+}
+
+#[test]
+fn rejoins_a_mouse_report_tail_that_arrives_in_pieces() {
+    let mut h = Harness::new();
+    h.process("\x1b[<35;4");
+    h.wait(40);
+    h.process("8;2");
+    assert_eq!(h.data, ["\x1b[<35;4"]);
+    h.process("7Mx");
+    assert_eq!(h.data, ["\x1b[<35;4", "\x1b[<35;48;27M", "x"]);
+}
+
+#[test]
+fn types_input_that_does_not_continue_a_flushed_mouse_report() {
+    let mut h = Harness::new();
+    h.process("\x1b[<35;4");
+    h.wait(40);
+    h.process("ab");
+    h.process("8;27M");
+    assert_eq!(h.data, ["\x1b[<35;4", "a", "b", "8", ";", "2", "7", "M"]);
+}
+
+#[test]
+fn clear_forgets_a_flushed_mouse_report() {
+    let mut h = Harness::new();
+    h.process("\x1b[<35;4");
+    h.wait(40);
+    h.buffer.clear();
+    h.process("8M");
+    assert_eq!(h.data, ["\x1b[<35;4", "8", "M"]);
+}
