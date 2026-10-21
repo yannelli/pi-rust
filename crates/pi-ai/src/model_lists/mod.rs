@@ -1,5 +1,6 @@
 //! Account model lists: narrow a provider catalog to the models a key or account may use.
-//! OpenRouter follows upstream `personalizeOpenRouterCatalog`.
+//! OpenRouter follows upstream `personalizeOpenRouterCatalog`; the other lists are pi-rust
+//! extensions.
 
 use std::time::Duration;
 
@@ -8,7 +9,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::types::Model;
 
+mod codex;
 mod openrouter;
+mod reconcile;
 
 pub use openrouter::{OPENROUTER_BASE_URL, openrouter_cost, personalize_openrouter_catalog};
 
@@ -55,12 +58,15 @@ impl ModelListContext {
 pub enum AccountModelList {
     /// Upstream: `GET /models/user`.
     OpenRouter,
+    /// The ChatGPT account's Codex models.
+    OpenAiCodex,
 }
 
 impl AccountModelList {
     pub fn for_provider(provider_id: &str) -> Option<Self> {
         match provider_id {
             "openrouter" => Some(Self::OpenRouter),
+            "openai-codex" => Some(Self::OpenAiCodex),
             _ => None,
         }
     }
@@ -75,6 +81,7 @@ impl AccountModelList {
     pub async fn personalize(self, catalog: Vec<Model>, context: &ModelListContext) -> Result<Vec<Model>, String> {
         match self {
             Self::OpenRouter => personalize_openrouter_catalog(catalog, context).await,
+            Self::OpenAiCodex => codex::personalize_codex_catalog(catalog, context).await,
         }
     }
 }
@@ -97,7 +104,8 @@ pub(crate) async fn get_json(
     headers: &[(&str, String)],
 ) -> Result<Fetched, String> {
     let mut request = context.client.get(url).header("accept", "application/json");
-    if let Some(agent) = &context.user_agent {
+    let own_agent = headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("user-agent"));
+    if let Some(agent) = context.user_agent.as_ref().filter(|_| !own_agent) {
         request = request.header("user-agent", agent);
     }
     for (name, value) in headers {
@@ -125,5 +133,7 @@ pub(crate) async fn get_json(
     Ok(serde_json::from_slice(&body).map_or(Fetched::Invalid, Fetched::Json))
 }
 
+#[cfg(test)]
+mod tests_accounts;
 #[cfg(test)]
 mod tests_openrouter;

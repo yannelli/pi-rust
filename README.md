@@ -120,6 +120,16 @@ Regional endpoints filter models to their region. To use one, set the base URL i
 
 If the base URL rejects the key at `/models/user` or does not have that endpoint, for example a proxy configured as the OpenRouter base URL, pi lists every OpenRouter model.
 
+### Account model lists (pi-rust extension)
+
+pi-rust narrows more providers to the models your account or key may use, like OpenRouter above. Upstream pi does not. With a credential, pi requests the provider's model list at most once every 4 hours, and at once after `/login` and on `pi update --models`. It drops catalog chat models that the list does not name, takes context size and max output from the list when it has them, and adds listed chat models that the catalog lacks as copies of the closest catalog model. Image and classifier models are not filtered. The list is saved in `models-store.json` without the credential, and the base URL set in `models.json` applies.
+
+To get the full catalog, point the provider's `baseUrl` in `models.json` at an endpoint without the model list, such as a proxy. pi lists every catalog model when the model list answers 401, 403, or 404, when its body cannot be read, or when it is empty. Other failures keep the last saved list.
+
+#### OpenAI Codex
+
+With a ChatGPT login, pi reads the account's models from the Codex backend (`<base URL>/codex/models`), the list that Codex shows, and skips hidden models. This endpoint is not a public API, so pi reads it leniently.
+
 ## Crates
 
 | Crate | Contents |
@@ -148,6 +158,7 @@ pi-rust ports the `pi` CLI and its libraries feature for feature. These parts di
 - The version check and `pi update --self` use this repository's releases.
 - CJK and Thai word movement uses ICU4X dictionaries, so a few word boundaries differ from Node's `Intl.Segmenter`.
 - `pi --mode acp` (above) is an addition; the TypeScript pi needs the separate pi-acp adapter.
+- Account model lists for OpenAI Codex (see [Providers](#account-model-lists-pi-rust-extension)) are an addition; upstream pi narrows only OpenRouter.
 - `pi-env` looks for remote daemons in a `pi-env-daemons` folder next to the running program. Each release has a `pi-env-daemons-<tag>.tar.gz` with the daemons for Linux, Android (Termux), macOS, and Windows on x86-64 and arm64; extract it next to `pi`.
 - `pi experimental` (`server`, `client`, `durable`, `vacation`) needs `PI_EXPERIMENTAL=1`, as upstream. Its `server` and `client` use Unix sockets, so on Windows they report that they need Unix; upstream has no Windows transport either.
 
