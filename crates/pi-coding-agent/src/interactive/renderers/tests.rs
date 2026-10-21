@@ -61,6 +61,14 @@ impl<'a> Call<'a> {
         let lines = component.borrow_mut().render(80);
         plain(&lines)
     }
+
+    /// A progress update of a running call.
+    fn partial(&mut self, result: &ToolResultView) -> Vec<String> {
+        let renderer = self.renderer.clone();
+        let component = renderer.render_result(result, &mut self.context(true, false)).unwrap();
+        let lines = component.borrow_mut().render(80);
+        plain(&lines)
+    }
 }
 
 fn output(text: &str) -> ToolResultView {
@@ -235,9 +243,26 @@ fn codemode_lists_nested_calls_and_drops_the_script_header() {
             "✗ models.complete $0.0012",
             "Model calls: $0.02",
             "",
-            "done"
+            "done",
+            "",
+            "Took 1.5s"
         ]
     );
     call.expanded = true;
     assert!(call.result(&result).contains(&"    boom".to_string()));
+}
+
+// Upstream #10708: codemode rows show `Elapsed` while the script runs and `Took` when it ended.
+#[test]
+fn codemode_rows_show_elapsed_while_running_and_took_when_finished() {
+    let cwd = Path::new("/work");
+    let mut call = Call::new("codemode", json!({"code": ""}), cwd);
+    call.header();
+    let running = ToolResultView { details: Some(json!({"calls": []})), ..ToolResultView::default() };
+    let lines = call.partial(&running);
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(lines[1].starts_with("Elapsed ") && lines[1].ends_with('s'), "{lines:?}");
+
+    let lines = call.result(&running);
+    assert_eq!(lines, ["", "Took 1.5s"]);
 }

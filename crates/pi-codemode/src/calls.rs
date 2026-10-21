@@ -102,7 +102,8 @@ impl CallLog {
         }
     }
 
-    fn publish(&self) {
+    /// Send the current rows to the tool's update callback.
+    pub fn publish(&self) {
         if let Some(on_update) = &self.on_update {
             let details = CodemodeToolDetails { calls: self.snapshot(), full_output_path: None };
             let details = serde_json::to_value(details).unwrap_or(Value::Null);

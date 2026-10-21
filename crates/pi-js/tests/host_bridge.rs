@@ -202,3 +202,37 @@ async fn uncaught_errors_exit_idle_and_interrupt() {
     assert_eq!(*exits.lock().unwrap(), vec![3]);
     assert!(capture.stdout().contains("exiting 3"));
 }
+
+#[tokio::test]
+async fn async_host_calls_start_in_the_order_javascript_made_them() {
+    let (_dir, root) = tempdir();
+    let (runtime, _capture) = runtime(&root);
+    let started: Arc<Mutex<Vec<u64>>> = Arc::default();
+    let sink = started.clone();
+    runtime.register_host_function(
+        "start",
+        HostFunction::asynchronous(move |args| {
+            let sink = sink.clone();
+            async move {
+                // Synchronous work before the op records its start widens the race window.
+                std::thread::sleep(Duration::from_micros(200));
+                sink.lock().unwrap().push(number(&args, 0) as u64);
+                tokio::task::yield_now().await;
+                Ok(HostValue::Undefined)
+            }
+        }),
+    );
+    run_cjs(
+        &runtime,
+        &root,
+        r#"
+const host = require("pi:host");
+for (let round = 0; round < 20; round++) {
+	await Promise.all(Array.from({ length: 5 }, (_, n) => host.call("start", round * 5 + n)));
+}
+"#,
+    )
+    .await;
+    let started = started.lock().unwrap().clone();
+    assert_eq!(started, (0..100).collect::<Vec<u64>>());
+}

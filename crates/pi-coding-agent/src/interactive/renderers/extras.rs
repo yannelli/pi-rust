@@ -5,6 +5,7 @@ use pi_codemode::{CodemodeNestedCall, CodemodeNestedCallStatus};
 use pi_tui::{ComponentRef, Container, Spacer, component};
 use serde_json::Value;
 
+use super::timer::{start_tool_timer, tool_timer_text};
 use super::{
     ToolRenderContext, ToolRenderer, ToolResultView, format_tool_call_with_args, get_text_output, invalid_arg_text,
     replace_tabs, str_arg, text,
@@ -143,6 +144,7 @@ pub struct CodemodeRenderer;
 
 impl ToolRenderer for CodemodeRenderer {
     fn render_call(&self, context: &mut ToolRenderContext<'_>) -> ComponentRef {
+        start_tool_timer(context);
         let theme = theme();
         let title = theme.fg(ThemeColor::ToolTitle, &theme.bold("codemode"));
         let mut container = Container::new();
@@ -167,6 +169,7 @@ impl ToolRenderer for CodemodeRenderer {
     }
 
     fn render_result(&self, result: &ToolResultView, context: &mut ToolRenderContext<'_>) -> Option<ComponentRef> {
+        let timer_text = tool_timer_text(context);
         let theme = theme();
         let mut container = Container::new();
         let mut empty = true;
@@ -197,6 +200,11 @@ impl ToolRenderer for CodemodeRenderer {
         };
         if !output.is_empty() {
             add_output(&mut container, &output, result, context);
+            empty = false;
+        }
+        if let Some(timer_text) = timer_text {
+            container.add_child(component(Spacer::new(1)));
+            container.add_child(text(&theme.fg(ThemeColor::Muted, &timer_text)));
             empty = false;
         }
         (!empty).then(|| component(container) as ComponentRef)

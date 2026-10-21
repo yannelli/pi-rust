@@ -76,6 +76,35 @@ fn mcp_command_args(text: &str) -> Option<&str> {
     (rest.is_empty() || rest.starts_with(char::is_whitespace)).then(|| rest.trim())
 }
 
+/// The message that starts a run, as `before_agent_start` handlers see it.
+pub(crate) enum RunTrigger {
+    /// A prompt, with its expanded text and images.
+    User { prompt: String, images: Vec<ContentBlock> },
+    /// A custom message sent with `triggerTurn` while idle.
+    Custom(CustomMessage),
+}
+
+impl RunTrigger {
+    /// The `messageType` fields of the `before_agent_start` event: `prompt` and `images` for a
+    /// user message, `message` for a custom one.
+    pub(crate) fn event_fields(&self) -> serde_json::Value {
+        match self {
+            Self::User { prompt, images } => {
+                let mut fields = serde_json::json!({"messageType": "user", "prompt": prompt});
+                if !images.is_empty() {
+                    fields["images"] = serde_json::json!(images);
+                }
+                fields
+            }
+            Self::Custom(message) => {
+                let mut message = serde_json::to_value(message).unwrap_or_default();
+                message["role"] = CustomMessage::ROLE.into();
+                serde_json::json!({"messageType": "custom", "message": message})
+            }
+        }
+    }
+}
+
 fn user_message(text: &str, images: Vec<ContentBlock>) -> Message {
     let mut blocks = vec![ContentBlock::text(text)];
     blocks.extend(images);
@@ -136,9 +165,37 @@ impl AgentSession {
             preflight(PromptDisposition::Queued);
             return Ok(PromptDisposition::Queued);
         }
+        self.ensure_auth().await?;
+        let trigger = RunTrigger::User { prompt: expanded, images: input_images };
+        self.start_run(trigger, || preflight(PromptDisposition::Started)).await?;
+        Ok(PromptDisposition::Started)
+    }
+
+    /// Start a run from `trigger`. The session counts as busy from here on, so messages sent
+    /// while `before_agent_start` handlers run join this run, and an abort requested meanwhile
+    /// aborts the run as soon as it exists (upstream `_startRun`). `on_started` runs once the
+    /// run's messages are prepared.
+    pub(crate) async fn start_run(&self, trigger: RunTrigger, on_started: impl FnOnce()) -> anyhow::Result<()> {
+        {
+            let mut state = lock(&self.state);
+            state.abort_requested = false;
+            state.run_active = true;
+        }
+        self.notify_idle();
+        let messages = self.prepare_run(&trigger).await;
+        // Messages held while the run was starting go before its starting messages, as they would
+        // have while idle. No run exists yet, so they cannot split a tool call from its result.
         self.flush_pending_bash_messages();
         self.flush_pending_custom_messages();
-        self.ensure_auth().await?;
+        on_started();
+        self.run_agent_prompt(messages).await
+    }
+
+    /// The starting messages of a run: compact first when needed, emit `before_agent_start`,
+    /// apply the run's prompt options and tool loadout, and build the starting message followed
+    /// by pending `nextTurn` messages (consumed here) and handler messages, with a system patch
+    /// first when the prompt changed (upstream `_prepareRun`).
+    async fn prepare_run(&self, trigger: &RunTrigger) -> Vec<Message> {
         let last_assistant = self.with_state(|state| {
             state.messages.iter().rev().find_map(|message| match message {
                 Message::Assistant(assistant) => Some(assistant.clone()),
@@ -152,10 +209,15 @@ impl AgentSession {
         let mut prompt_options = self.effective_prompt_options();
         set_servers_section(&mut prompt_options, servers_section);
         // Before image normalization, so a model chosen by a handler sets the resize profile.
-        let (prompt_options, extra) = self.run_before_agent_start(&expanded, &input_images, prompt_options).await;
-        let (images, hints) = self.normalize_prompt_images(&input_images);
-        let text = if hints.is_empty() { expanded } else { format!("{expanded}\n\n{}", hints.join("\n")) };
-        let mut messages = vec![user_message(&text, images)];
+        let (prompt_options, extra) = self.run_before_agent_start(trigger, prompt_options).await;
+        let mut messages = match trigger {
+            RunTrigger::User { prompt, images } => {
+                let (images, hints) = self.normalize_prompt_images(images);
+                let text = if hints.is_empty() { prompt.clone() } else { format!("{prompt}\n\n{}", hints.join("\n")) };
+                vec![user_message(&text, images)]
+            }
+            RunTrigger::Custom(message) => vec![message.clone().into_message()],
+        };
         messages.append(&mut lock(&self.state).pending_next_turn);
         messages.extend(extra);
         let update = self.prepare_prompt_and_tool_loadout(&prompt_options, &self.messages());
@@ -163,9 +225,7 @@ impl AgentSession {
         if let Some(update) = update {
             messages.insert(0, Message::System(update));
         }
-        preflight(PromptDisposition::Started);
-        self.run_agent_prompt(messages).await?;
-        Ok(PromptDisposition::Started)
+        messages
     }
 
     /// `/skill:name args` and `/template args` expansion; on an error the text is sent as is.
@@ -295,6 +355,7 @@ impl AgentSession {
     /// Add a `custom` message to the conversation. While streaming it waits for the end of the
     /// current turn (or is queued when `trigger_turn`); otherwise `trigger_turn` starts a run.
     pub async fn send_custom_message(&self, message: CustomMessage, trigger_turn: bool) -> anyhow::Result<()> {
+        let custom = message.clone();
         let message = message.into_message();
         if self.is_streaming() {
             if trigger_turn {
@@ -305,7 +366,7 @@ impl AgentSession {
             return Ok(());
         }
         if trigger_turn {
-            return self.run_agent_prompt(vec![message]).await;
+            return self.start_run(RunTrigger::Custom(custom), || {}).await;
         }
         self.append_custom_message(message);
         Ok(())
