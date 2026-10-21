@@ -8,7 +8,7 @@ None up to `82432219a`. Every commit after the synced commit is ported or listed
 
 ## Deferred work
 
-- **chord2 runtime** (upstream `0104fef1e` and later chord commits). pi-chord ports the earlier facets runtime. Its `host2` module has the chord2 foundation: errors, schemas, contracts, wire frames, and memory links. Still open: cells, objects, and hosts; connections, remotes, and the IPC and WebSocket links; reload and clusters; the manager.
+- **chord2 runtime** (upstream `0104fef1e` and later chord commits). pi-chord ports the earlier facets runtime. Its `host2` module has the chord2 foundation (errors, schemas, contracts, wire frames, and memory links) and the host manager with IPC links, process locks, and the `FacetLoader` trait. Still open: cells, objects, and hosts; connections, remotes, and the WebSocket link; reload and clusters. Upstream's Node module loader (`loader.ts`) cannot be ported, so hosts get facets from a `FacetLoader`.
 - **`HarnessOptions.models` as a function** (upstream `7ec1f648e`). Not planned: settings are already a function here, and a `Models` implementation can change its catalog at runtime. It is older than the synced commit, so the report does not list it.
 
 ## Upstream commits that do not apply
@@ -44,3 +44,4 @@ Behavior that pi-rust adds on purpose. The parity review should not report these
 ## Platform
 
 - `pi experimental server` and `client` use Unix sockets, so they report that they need Unix on Windows.
+- The chord2 host manager gives a child its IPC channel as stdin on Unix (upstream uses an extra file descriptor) and as a named pipe on Windows. On Windows, `kill_tree` ends only the child, as upstream does there.

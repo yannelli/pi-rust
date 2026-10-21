@@ -3078,6 +3078,7 @@ dependencies = [
  "pi-schema",
  "pi-telemetry",
  "ring",
+ "rustix",
  "ryu",
  "serde",
  "serde_json",
