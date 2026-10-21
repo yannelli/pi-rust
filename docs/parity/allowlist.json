@@ -68,6 +68,10 @@
     {
       "item": "undo",
       "reason": "pi-rust extension: /undo"
+    },
+    {
+      "item": "context",
+      "reason": "pi-rust extension: /context"
     }
   ],
   "tools": [],

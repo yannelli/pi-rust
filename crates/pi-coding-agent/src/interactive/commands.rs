@@ -82,6 +82,9 @@ impl InteractiveMode {
         } else if let Some(args) = argument(text, "diff") {
             self.handle_diff_command(args);
             clear();
+        } else if text == "/context" {
+            self.handle_context_command();
+            clear();
         } else if text == "/fork" {
             clear();
             self.show_user_message_selector();
