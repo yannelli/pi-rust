@@ -150,6 +150,7 @@ fn subagent_extension() -> Extension {
             request_id: Some(format!("subagent:{owner}")),
             content: pi_ai::UserContent::Text(task),
             when_busy: None,
+            entry: None,
         };
         let settled = handle.submit(request, &call).await?.wait(&call).await?;
         let Some(answer) = settled.answer.filter(|_| settled.status == SubmissionStatus::Done) else {

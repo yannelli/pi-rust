@@ -10,13 +10,13 @@ use pi_telemetry::{
 
 use super::generation::start_run;
 use super::inbox::{
-    BoundaryAt, INBOX_DOC, InboxItem, append_user, apply_boundary, entry_draft_json, is_stale, prepare_boundary,
-    remove_inbox_item,
+    BoundaryAt, INBOX_DOC, InboxItem, append_input, apply_boundary, entry_draft_json, has_queued_reset,
+    input_entry_json, is_display_only, is_stale, prepare_boundary, remove_inbox_item,
 };
 use super::live::LIVE_DOC;
 use super::scheduler::Scheduler;
 use super::settings::Settings;
-use super::types::{AbortSubmissionResult, SubmissionDraft, WhenBusy};
+use super::types::{AbortSubmissionResult, InputEntry, SubmissionDraft, WhenBusy};
 use super::util::{Waiters, closed_error};
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{ConversationId, SubmissionId};
@@ -242,9 +242,22 @@ pub struct Admission {
     pub status: AdmissionStatus,
 }
 
-/// Admit a submission inside a commit (spec section 6). A known request ID returns its submission. A busy
-/// conversation queues it, or rejects `reject` input with `ConversationBusy`. An idle one with queued items queues
-/// it behind them and runs a final boundary. Otherwise idle input starts a run and an idle write appends its entry.
+/// Reject an input entry the caller got wrong: its kind must be non-empty and outside the `pi.` prefix.
+fn check_input_entry(entry: &InputEntry) -> DurableResult<()> {
+    if entry.kind.is_empty() || entry.kind.starts_with("pi.") {
+        let message =
+            format!("An input entry's kind must be a non-empty string not starting with \"pi.\", got {}", entry.kind);
+        return Err(DurableError::type_error(message));
+    }
+    Ok(())
+}
+
+/// Admit a submission inside a commit (spec section 6). A known request ID returns its submission. A display-only
+/// write (only `kind` and `data`) is appended and settled `done` at once, busy or not, as it changes nothing the model
+/// sees; only behind a queued reset it queues, so it lands after the reset. A busy conversation queues anything else,
+/// or rejects `reject` input with `ConversationBusy`. An idle one with queued items queues it behind them and runs a
+/// final boundary. Otherwise idle input places its entry (`pi.user`, or the input's own) and starts a run, and an
+/// idle write appends its entry.
 /// With `span`, the submission stores its carrier, and a steer links the span to the running generation's trace.
 pub async fn admit_submission(
     tx: &Tx,
@@ -254,6 +267,9 @@ pub async fn admit_submission(
     settings: &Settings,
     span: Option<&Arc<dyn TelemetrySpan>>,
 ) -> DurableResult<Admission> {
+    if let SubmissionDraft::Input { entry: Some(entry), .. } = &draft {
+        check_input_entry(entry)?;
+    }
     let kind = match draft {
         SubmissionDraft::Input { .. } => SubmissionType::Input,
         SubmissionDraft::Write { .. } => SubmissionType::Write,
@@ -276,6 +292,20 @@ pub async fn admit_submission(
     }
     let propagation = span.and_then(|span| span.propagation());
     let trace = span.zip(propagation.as_ref()).and_then(|(span, propagation)| propagation.inject(span.as_ref()));
+    let create = |status, entry| SubmissionCreate {
+        status,
+        entry,
+        trace: trace.clone(),
+        ..SubmissionCreate::queued(conversation_id, kind, request_id.clone())
+    };
+    if let SubmissionDraft::Write { entry, .. } = &draft
+        && is_display_only(entry)
+        && !has_queued_reset(&tx.doc(&INBOX_DOC, conversation_id).await?.get()?.items)
+    {
+        let appended = tx.append_entry(conversation_id, entry.clone()).await?;
+        let id = tx.create_submission(create(SubmissionStatus::Done, Some(appended.id))).await?.id;
+        return Ok(Admission { id, status: AdmissionStatus::Done });
+    }
     let live_draft = tx.doc(&LIVE_DOC, conversation_id).await?;
     let run = live_draft.get()?.run;
     let busy = run.is_some();
@@ -294,22 +324,19 @@ pub async fn admit_submission(
         Some(boundary) => !boundary.inbox.get()?.items.is_empty(),
         None => true,
     };
-    let create = |status, entry| SubmissionCreate {
-        status,
-        entry,
-        trace: trace.clone(),
-        ..SubmissionCreate::queued(conversation_id, kind, request_id.clone())
-    };
     if queued_items {
         let record = tx.create_submission(create(SubmissionStatus::Queued, None)).await?;
         let item = match draft {
             SubmissionDraft::Write { entry, .. } => {
                 InboxItem::Write { id: record.id, entry: entry_draft_json(&entry)? }
             }
-            SubmissionDraft::Input { content, when_busy, .. } => match when_busy {
-                Some(WhenBusy::Steer) => InboxItem::Steer { id: record.id, content },
-                _ => InboxItem::FollowUp { id: record.id, content },
-            },
+            SubmissionDraft::Input { content, when_busy, entry, .. } => {
+                let entry = entry.as_ref().map(input_entry_json);
+                match when_busy {
+                    Some(WhenBusy::Steer) => InboxItem::Steer { id: record.id, content, entry },
+                    _ => InboxItem::FollowUp { id: record.id, content, entry },
+                }
+            }
         };
         let inbox = match &boundary {
             Some(boundary) => boundary.inbox.clone(),
@@ -343,8 +370,8 @@ pub async fn admit_submission(
             let id = tx.create_submission(create(SubmissionStatus::Done, Some(appended.id))).await?.id;
             Ok(Admission { id, status: AdmissionStatus::Done })
         }
-        SubmissionDraft::Input { content, .. } => {
-            let entry = append_user(tx, conversation_id, content, now).await?;
+        SubmissionDraft::Input { content, entry, .. } => {
+            let entry = append_input(tx, conversation_id, content, entry.as_ref(), now).await?;
             let record = tx.create_submission(create(SubmissionStatus::Placed, Some(entry))).await?;
             start_run(tx, conversation_id, &live_draft, vec![record.id]).await?;
             Ok(Admission { id: record.id, status: AdmissionStatus::Placed })

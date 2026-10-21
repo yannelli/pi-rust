@@ -38,17 +38,45 @@ pub enum WhenBusy {
     Reject,
 }
 
+/// The entry an input is placed as, instead of `pi.user`: an application kind, and data the transcript shows, such as
+/// its author. Its model message is still the input's user message.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InputEntry {
+    pub kind: String,
+    pub data: Option<Json>,
+}
+
+impl InputEntry {
+    pub fn new(kind: impl Into<String>) -> Self {
+        Self { kind: kind.into(), data: None }
+    }
+
+    pub fn with_data(mut self, data: impl Into<Json>) -> Self {
+        self.data = Some(data.into());
+        self
+    }
+}
+
 /// Host submission: user input that may start a run, or a passive entry write.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SubmissionDraft {
-    Input { request_id: Option<String>, content: UserInput, when_busy: Option<WhenBusy> },
-    Write { request_id: Option<String>, entry: EntryDraft },
+    Input {
+        request_id: Option<String>,
+        content: UserInput,
+        when_busy: Option<WhenBusy>,
+        /// Place the input as this entry; default `pi.user` without data. The kind must not start with `pi.`.
+        entry: Option<InputEntry>,
+    },
+    Write {
+        request_id: Option<String>,
+        entry: EntryDraft,
+    },
 }
 
 impl SubmissionDraft {
     /// User text with the default busy behavior (`followUp`).
     pub fn input(content: impl Into<String>) -> Self {
-        Self::Input { request_id: None, content: UserContent::Text(content.into()), when_busy: None }
+        Self::Input { request_id: None, content: UserContent::Text(content.into()), when_busy: None, entry: None }
     }
 
     pub fn write(entry: EntryDraft) -> Self {
@@ -71,6 +99,14 @@ impl SubmissionDraft {
     pub fn with_when_busy(mut self, mode: WhenBusy) -> Self {
         if let Self::Input { when_busy, .. } = &mut self {
             *when_busy = Some(mode);
+        }
+        self
+    }
+
+    /// Place an input as `placed` instead of a `pi.user` entry; no effect on a write.
+    pub fn with_entry(mut self, placed: InputEntry) -> Self {
+        if let Self::Input { entry, .. } = &mut self {
+            *entry = Some(placed);
         }
         self
     }

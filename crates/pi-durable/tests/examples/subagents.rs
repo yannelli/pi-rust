@@ -83,6 +83,7 @@ fn reporter() -> Task {
                     request_id: Some(format!("subagent:{}", task.id)),
                     content,
                     when_busy: Some(when_busy),
+                    entry: None,
                 };
                 let settled = subagent.submit(request, &context).await?.wait(&context).await?;
                 let main = runtime.conversation_id();
@@ -119,7 +120,12 @@ fn reporter() -> Task {
                     let content = pi_ai::UserContent::Text(report);
                     let request_id = Some(format!("subagent-report:{}", task.id));
                     main.submit(
-                        SubmissionDraft::Input { request_id, content, when_busy: Some(WhenBusy::FollowUp) },
+                        SubmissionDraft::Input {
+                            request_id,
+                            content,
+                            when_busy: Some(WhenBusy::FollowUp),
+                            entry: None,
+                        },
                         &context,
                     )
                     .await?;

@@ -64,6 +64,7 @@ async fn run_subagent(task: String, api: ToolExecutionApi, context: Context) -> 
         request_id: Some(format!("subagent:{task_id}")),
         content: UserContent::Text(task),
         when_busy: None,
+        entry: None,
     };
     let settled = handle.submit(request, &context).await?.wait(&context).await?;
     let answer = settled.answer.filter(|_| settled.status == SubmissionStatus::Done);
