@@ -27,6 +27,7 @@ pub const BUILTIN_SLASH_COMMANDS: &[(&str, &str, Option<&str>)] = &[
     ("session", "Show session info and stats", None),
     ("changelog", "Show changelog entries", None),
     ("hotkeys", "Show all keyboard shortcuts", None),
+    ("diff", "Show uncommitted git changes in the working directory", Some("[--stat] [path]")),
     ("fork", "Create a new fork from a previous user message", None),
     ("clone", "Duplicate the current session at the current position", None),
     ("trust", "Save project trust decision for future sessions", None),

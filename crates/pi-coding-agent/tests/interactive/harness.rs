@@ -113,6 +113,11 @@ pub async fn start(options: Options) -> Ui {
 }
 
 impl Ui {
+    /// The session's working directory.
+    pub fn cwd(&self) -> PathBuf {
+        self._root.path().join("work")
+    }
+
     /// The visible rows, joined with newlines.
     pub fn screen(&self) -> String {
         self.terminal.borrow().viewport().join("\n")
