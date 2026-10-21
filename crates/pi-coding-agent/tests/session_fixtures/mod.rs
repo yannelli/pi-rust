@@ -143,10 +143,9 @@ impl Root {
     /// `pi <args>` in `work/`, in UTC, with stdin closed.
     pub fn pi(&self, args: &[&str]) -> Output {
         let mut command = Command::new(env!("CARGO_BIN_EXE_pi"));
-        isolate(&mut command)
+        isolate(&mut command, self.dir.path())
             .args(args)
             .current_dir(self.dir.path().join("work"))
-            .env("PI_CODING_AGENT_DIR", self.agent())
             .env_remove("PI_CODING_AGENT_SESSION_DIR")
             .env("TZ", "UTC")
             .stdin(Stdio::null());
