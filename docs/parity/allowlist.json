@@ -60,6 +60,10 @@
     {
       "item": "diff",
       "reason": "pi-rust extension: /diff"
+    },
+    {
+      "item": "context",
+      "reason": "pi-rust extension: /context"
     }
   ],
   "tools": [],

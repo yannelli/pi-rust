@@ -10,6 +10,7 @@ mod bug;
 mod chat;
 mod commands;
 pub mod components;
+mod context_usage;
 mod dialogs;
 mod events;
 mod extension_bind;
