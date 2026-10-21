@@ -1,6 +1,6 @@
-//! Upstream `test/conformance.test.ts`: Durable's env conformance suite against `RemoteExecutionEnv` over a pipe and
-//! against `LocalExecutionEnv`. Each case gets its own connection: a tokio test owns its runtime, so one connection
-//! cannot serve every case.
+//! Upstream `test/conformance.test.ts`: Durable's env conformance suite, with its `listFiles` cases, against
+//! `RemoteExecutionEnv` over a pipe and against `LocalExecutionEnv`. Each case gets its own connection: a tokio test
+//! owns its runtime, so one connection cannot serve every case.
 
 mod support;
 
@@ -43,9 +43,11 @@ fn options() -> EnvConformanceOptions {
 }
 
 pi_durable::env_conformance_tests!(setup(), options());
+pi_durable::env_list_files_conformance_tests!(setup(), options());
 
 mod local {
     use super::*;
 
     pi_durable::env_conformance_tests!(setup_local(), options());
+    pi_durable::env_list_files_conformance_tests!(setup_local(), options());
 }

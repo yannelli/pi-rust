@@ -14,6 +14,7 @@ pub mod models;
 pub mod session;
 pub mod storage;
 pub mod tasks;
+pub mod telemetry_sqlite;
 pub mod testing;
 pub mod timers;
 pub mod tool_search;

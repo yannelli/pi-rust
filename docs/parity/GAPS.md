@@ -46,7 +46,3 @@ Behavior that pi-rust adds on purpose. The parity review should not report these
 ## Platform
 
 - `pi experimental server` and `client` use Unix sockets, so they report that they need Unix on Windows.
-
-## Test reliability
-
-- `crates/pi-js/tests/node_tls.rs` (`tls_matches_node`) can fail with an uncaught `ECONNRESET` under parallel load. A local stress run on 2026-10-14 failed 7 of 60 runs. The likely cause is the client closing before it reads the server's session tickets. Fix it, then stress it with the loop in [CI triage](../agents/ci-triage.md#hangs-and-flaky-tests) before you call it fixed.
