@@ -1,11 +1,11 @@
 //! Reservation of eligible tasks, definition resolution and migration, inspection, and invocation creation.
 
-use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
 use pi_chord::{AbortController, Json, with_abort_signal};
 use tokio::sync::watch;
 
+use super::index::is_parked;
 use super::{Invocation, Mode, SchedState, Scheduler, Up, installer_of, report_task, with_abort_mark, with_state};
 use crate::errors::{DurableError, DurableResult};
 use crate::harness::registry::RegistrySnapshot;
@@ -25,8 +25,8 @@ struct Pass {
     abandoned: Vec<TaskId>,
     /// Abort-marked tasks faulted by the restart limit, with their messages, to report.
     faulted: Vec<(TaskRecord, String)>,
-    /// Tasks the pass left out as parked; `None` when it looked at no candidates.
-    parked: Option<BTreeSet<TaskId>>,
+    /// Whether tasks were parked or unparked without a commit, as after a changed limit: the graph must hear it.
+    parked_changed: bool,
 }
 
 pub(crate) struct Reservation {
@@ -82,17 +82,8 @@ impl Scheduler {
             }
             state.dirty = true;
         }
-        if let Some(parked) = pass.parked {
-            // Parked or unparked without a commit, as after a changed limit: the graph must hear it.
-            let changed = {
-                let mut state = lock(&self.state);
-                let changed = state.parked != parked;
-                state.parked = parked;
-                changed
-            };
-            if changed {
-                self.notify_blocked();
-            }
+        if pass.parked_changed {
+            self.notify_blocked();
         }
         Ok(reservations)
     }
@@ -102,6 +93,7 @@ impl Scheduler {
             let mut state = lock(&self.state);
             if state.invocations.get(&invocation.task_id).is_some_and(|i| Arc::ptr_eq(i, invocation)) {
                 state.invocations.remove(&invocation.task_id);
+                state.runnable.insert(invocation.task_id);
             }
         }
         invocation.done.send_replace(true);
@@ -127,30 +119,45 @@ impl Scheduler {
             }
         }
         self.load_scopes(false).await?;
-        let candidates: Vec<TaskRecord> = lock(&self.state).live.values().cloned().collect();
         let limit = self.restart_limit();
-        let mut parked = BTreeSet::new();
+        let now = self.core.now();
+        {
+            // Every pass picks up sleeps whose time has come: a pass started by any change may be the first to run after
+            // a deadline, and the wake it schedules no longer keeps a timer for a due sleep.
+            let mut state = lock(&self.state);
+            state.wake_due(now);
+            pass.parked_changed = state.unpark_raised(limit);
+        }
+        let candidates: Vec<TaskId> = lock(&self.state).runnable.iter().copied().collect();
         let mut snapshot: Option<RegistrySnapshot> = None;
-        for record in candidates {
-            let (skip, below) = {
-                let state = lock(&self.state);
-                let owned = state.owned_live(None);
-                let busy =
-                    state.invocations.contains_key(&record.id) || !waiting_on(&state, &record, &owned).is_empty();
+        for id in candidates {
+            let (record, below) = {
+                let mut state = lock(&self.state);
+                let Some(record) = state.live.get(&id).cloned() else {
+                    state.runnable.remove(&id);
+                    continue;
+                };
+                // It returns once what it waits for ends, its record changes, or the work below it ends.
+                let busy = state.invocations.contains_key(&id)
+                    || record.status() == TaskStatus::Completing
+                    || !waiting_on(&state, &record, true).is_empty()
+                    // A sleep returns at the first pass after its time comes, which the timer, `resume()`, or any change
+                    // starts.
+                    || not_due(&record, now);
+                if busy {
+                    state.runnable.remove(&id);
+                    continue;
+                }
+                // It returns when `retry()` clears its restart count, or at a pass after the restart limit rose.
+                if is_parked(&record, limit) {
+                    state.runnable.remove(&id);
+                    pass.parked_changed |= state.parked.insert(id);
+                    continue;
+                }
                 let below = !record.abort_requested && !record.background && state.below_cancelled(Up::of(&record));
-                // A sleep returns at the first pass after its time comes, which the timer, `resume()`, or any change starts.
-                let asleep = not_due(&record, self.core.now());
-                (busy || asleep || record.status() == TaskStatus::Completing, below)
+                (record, below)
             };
-            if skip {
-                continue;
-            }
             let restarts = record.restarts.unwrap_or(0);
-            // It returns when `retry()` clears its restart count, or at a pass after `settings.restart_limit` rose.
-            if !record.abort_requested && f64::from(restarts) >= limit {
-                parked.insert(record.id);
-                continue;
-            }
             let mode = if record.abort_requested { Mode::Abort } else { Mode::Run };
             if below {
                 // Work below an owner with cancellation intent waits for its cascade mark instead of running.
@@ -186,9 +193,11 @@ impl Scheduler {
                 tx.set_task(with_state(&resolved, TaskState::Running { checkpoint }))?;
             }
             let invocation = self.create_invocation(&record, mode, installer_of(&snapshot, Some(&task)));
+            // Registered on the line, so marks and later reservations see it and close joins it; `end` makes it a
+            // candidate again.
+            lock(&self.state).runnable.remove(&id);
             reservations.push(Reservation { invocation, task, snapshot });
         }
-        pass.parked = Some(parked);
         Ok(pass)
     }
 
@@ -282,7 +291,7 @@ impl Scheduler {
             if record.status() == TaskStatus::Completing {
                 return TaskInspectionState::Completing;
             }
-            let on = waiting_on(&state, record, &state.owned_live(None));
+            let on = waiting_on(&state, record, false);
             if !on.is_empty() {
                 return TaskInspectionState::Waiting { on };
             }
@@ -335,13 +344,15 @@ pub(super) fn not_due(record: &TaskRecord, now: f64) -> bool {
     matches!(record.state, TaskState::Sleeping { until, .. } if !record.abort_requested && until > now)
 }
 
-/// Live tasks a task waits for: its live owned work when abort-marked, else the live part of a wait.
-fn waiting_on(state: &SchedState, record: &TaskRecord, owned: &HashMap<TaskId, Vec<TaskId>>) -> Vec<TaskId> {
+/// Live tasks a task waits for: its live owned work when abort-marked, else the live part of a wait. With `first`,
+/// at most one, which is all a reservation pass asks.
+fn waiting_on(state: &SchedState, record: &TaskRecord, first: bool) -> Vec<TaskId> {
     if record.abort_requested {
-        return owned.get(&record.id).cloned().unwrap_or_default();
+        let mut owned = state.owned_live(record.id, None, first, None);
+        owned.sort_unstable();
+        return owned;
     }
-    match &record.state {
-        TaskState::Waiting { on, .. } => on.iter().copied().filter(|id| state.live.contains_key(id)).collect(),
-        _ => Vec::new(),
-    }
+    let TaskState::Waiting { on, .. } = &record.state else { return Vec::new() };
+    let mut live = on.iter().copied().filter(|id| state.live.contains_key(id));
+    if first { live.next().into_iter().collect() } else { live.collect() }
 }

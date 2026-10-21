@@ -31,7 +31,14 @@ struct Subagents {
 }
 
 static SUBAGENTS: LazyLock<DocToken<Subagents, LatestConversation>> = LazyLock::new(|| {
-    define_doc(DocSpec::new("app.subagents", 1, LatestConversation(LatestFork::Initial), Subagents::default)).unwrap()
+    define_doc(DocSpec::new(
+        "app.subagents",
+        1,
+        LatestConversation(LatestFork::Initial),
+        Subagents::default,
+        |_, _, _| Ok(false),
+    ))
+    .unwrap()
 });
 
 fn state(value: Value) -> Option<TaskState> {

@@ -16,8 +16,9 @@ struct Progress {
     lines: Vec<String>,
 }
 
-static PROGRESS_DOC: LazyLock<DocToken<Progress, TaskScope>> =
-    LazyLock::new(|| define_doc(DocSpec::new("test.task-progress", 1, TaskScope, Progress::default)).unwrap());
+static PROGRESS_DOC: LazyLock<DocToken<Progress, TaskScope>> = LazyLock::new(|| {
+    define_doc(DocSpec::new("test.task-progress", 1, TaskScope, Progress::default, |_, _, _| Ok(false))).unwrap()
+});
 
 pub fn checkpoint(phase: &str) -> Option<TaskState> {
     running(json!({ "phase": phase }))

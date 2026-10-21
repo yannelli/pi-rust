@@ -24,7 +24,7 @@ use crate::harness::settings::Settings;
 use crate::harness::submissions::Submission;
 use crate::harness::task::{NextTaskState, phase_of};
 use crate::harness::types::{AbortTaskResult, Agent, ContextView, SubmissionDraft};
-use crate::harness::util::{lock, with_context};
+use crate::harness::util::{cancellation, lock, with_context};
 use crate::ids::{ConversationId, EntryId, TaskId};
 use crate::models::Models;
 use crate::session::{CommittedWatch, TransactionScope, Tx};
@@ -270,6 +270,22 @@ impl TaskRuntime {
             return Ok(());
         }
         self.scheduler.wait_for_task(id, &bound).await.map(|_| ())
+    }
+
+    /// Live tasks this task owns directly, in id order: also those an earlier invocation created, before a restart.
+    /// Tasks in conversations it owns are not included. Copies of the committed records.
+    pub async fn owned_tasks(&self, context: &Context) -> DurableResult<Vec<TaskRecord>> {
+        self.invocation.check()?;
+        let (scheduler, invocation, context) = (self.scheduler.clone(), self.invocation.clone(), context.clone());
+        let read = async move {
+            // The step that ends the invocation may have run on the line before this.
+            invocation.check()?;
+            if context.is_cancelled() {
+                return Err(cancellation(&context));
+            }
+            Ok(lock(&scheduler.state).owned_directly(invocation.task_id))
+        };
+        self.scheduler.core.session.read_on_line(read).await
     }
 
     /// Outcomes of terminal tasks, in order; fails when one is missing or not terminal.

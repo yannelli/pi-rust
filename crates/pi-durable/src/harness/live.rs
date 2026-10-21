@@ -183,11 +183,10 @@ fn running(slots: Option<&Json>) -> bool {
 
 /// A complete base whenever nothing runs: no generation and no running slot (spec section 8.2).
 pub static LIVE_DOC: LazyLock<DocToken<LiveState, LatestConversation>> = LazyLock::new(|| {
-    let spec = DocSpec::new("pi.live", 1, LatestConversation(LatestFork::Initial), LiveState::default).checkpoint_when(
-        |value, _, _| {
+    let spec =
+        DocSpec::new("pi.live", 1, LatestConversation(LatestFork::Initial), LiveState::default, |value, _, _| {
             Ok(value.get("generation").is_none() && !running(value.get("tools")) && !running(value.get("nestedTools")))
-        },
-    );
+        });
     define_doc(spec).unwrap_or_else(|_| unreachable!("pi.live is a valid definition"))
 });
 

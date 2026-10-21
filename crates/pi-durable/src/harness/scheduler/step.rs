@@ -331,7 +331,7 @@ impl Scheduler {
     /// Write an outcome the scheduler decided: `completing` while owned work is live, else terminal with cleanup.
     pub(crate) async fn terminate(&self, tx: &Tx, record: &TaskRecord, outcome: TaskOutcome) -> DurableResult<()> {
         self.load_scopes(false).await?;
-        let owned = lock(&self.state).owned_live(Some(&Overlay::of(tx))).contains_key(&record.id);
+        let owned = lock(&self.state).has_owned_live(record.id, Some(&Overlay::of(tx)), None);
         if owned {
             return tx.set_task(with_state(record, TaskState::Completing { outcome }));
         }
@@ -357,7 +357,7 @@ impl Scheduler {
                 for record in overlay.tasks.values() {
                     self.load_chain(Up::of(record), Some(&overlay)).await?;
                 }
-                if lock(&self.state).owned_live(Some(&overlay)).contains_key(&current.id) {
+                if lock(&self.state).has_owned_live(current.id, Some(&overlay), None) {
                     let completing = TaskState::Completing { outcome: outcome.clone() };
                     return tx.set_task(with_state(&progressed(current), completing));
                 }
@@ -428,6 +428,9 @@ impl Scheduler {
             let mut state = lock(&self.state);
             if state.invocations.get(&invocation.task_id).is_some_and(|i| Arc::ptr_eq(i, invocation)) {
                 state.invocations.remove(&invocation.task_id);
+                if state.live.contains_key(&invocation.task_id) {
+                    state.runnable.insert(invocation.task_id);
+                }
             }
         }
         let watches = std::mem::take(&mut *lock(&invocation.watches));

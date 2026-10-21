@@ -25,7 +25,7 @@ use crate::harness::output::{OutputBuffer, OutputLimits};
 use crate::harness::progress::PROGRESS_BYTES_PER_SECOND;
 use crate::harness::scheduler::TaskRuntime;
 use crate::harness::tool_registration::{Retain, ToolRegistration, ToolReplay};
-use crate::harness::types::ToolExecutionResult;
+use crate::harness::types::{DiagnosticSeverity, ToolExecutionResult};
 use crate::harness::util::lock;
 use crate::session::Tx;
 use crate::truncate::{DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES};
@@ -179,6 +179,7 @@ async fn run(
         ended: AtomicBool::new(false),
         admissions: Mutex::new(Vec::new()),
         sequence: AtomicU32::new(0),
+        made_nested: Mutex::new(None),
         resumes: tool.replay == Some(ToolReplay::Safe),
     });
     let streams = !matches!(input, ToolTaskInput::Nested { progress: Some(false), .. });
@@ -312,6 +313,21 @@ async fn final_result(
     }
     if nested && tool.structured_output_schema.is_none() {
         last.structured_output = Some(output_value(&content)?);
+    }
+    // A schema tool's error result without structured output has its text only in the output, which programs never
+    // get: it becomes an error diagnostic, as a thrown error's message does, unless one says what went wrong already.
+    if nested
+        && tool.structured_output_schema.is_some()
+        && last.is_error == Some(true)
+        && last.structured_output.is_none()
+    {
+        let mut diagnostics = last.diagnostics.iter().flatten().chain(&harness);
+        if !diagnostics.any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error) {
+            let text = content.iter().filter_map(ContentBlock::as_text).collect::<Vec<_>>().join("\n");
+            if !text.is_empty() {
+                harness.push(tool_diagnostic("tool_error", &text));
+            }
+        }
     }
     let mut diagnostics = last.diagnostics.take().unwrap_or_default();
     diagnostics.extend(harness);

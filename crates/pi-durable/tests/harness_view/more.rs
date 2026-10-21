@@ -219,7 +219,10 @@ struct Other {
 }
 
 static OTHER_DOC: LazyLock<DocToken<Other, LatestConversation>> = LazyLock::new(|| {
-    define_doc(DocSpec::new("app.other", 1, LatestConversation(LatestFork::Initial), Other::default)).unwrap()
+    define_doc(DocSpec::new("app.other", 1, LatestConversation(LatestFork::Initial), Other::default, |_, _, _| {
+        Ok(false)
+    }))
+    .unwrap()
 });
 
 #[tokio::test]

@@ -7,7 +7,7 @@ use super::define::{Extension, ExtensionHooks, PromptSection, Wrap};
 use super::registry::RegistrySnapshot;
 use super::settings::Settings;
 use super::tool_registration::{ToolCaller, ToolRegistration};
-use super::types::{Agent, AgentChange, AgentState, Change, ExtensionSelection, ToolFilter};
+use super::types::{Agent, AgentChange, AgentState, Change, ExtensionSelection, ModelToolFilter, ToolFilter};
 use crate::documents::{DocSpec, DocToken, RewindableConversation, define_doc};
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::ConversationId;
@@ -21,8 +21,10 @@ pub type AgentDocToken = DocToken<AgentState, RewindableConversation>;
 
 /// Built-in agent document; rewindable so forks start from the agent at their fork entry.
 pub static AGENT_DOC: LazyLock<AgentDocToken> = LazyLock::new(|| {
-    let spec = DocSpec::new("pi.agent", 1, RewindableConversation(DocumentFork::AsOf), AgentState::default)
-        .checkpoint_when(|_, _, _| Ok(true));
+    let spec =
+        DocSpec::new("pi.agent", 1, RewindableConversation(DocumentFork::AsOf), AgentState::default, |_, _, _| {
+            Ok(true)
+        });
     define_doc(spec).unwrap_or_else(|_| unreachable!("pi.agent is a valid definition"))
 });
 
@@ -32,25 +34,40 @@ pub async fn configure(tx: &Tx, conversation_id: ConversationId, change: &AgentC
     state.edit(|state| apply_change(state, change))
 }
 
-/// `addTools` of a tool round, applied to `tools` and `model_tools`: an array gets each missing name appended,
-/// `{ remove }` loses the names, and an unset filter already lets every tool through.
+/// `addTools` of a tool round, applied to `tools` and `model_tools`: a list gets each missing name appended, and
+/// `{ remove }` loses the names. An unset `tools` already enables every tool. An unset or edit `model_tools` gets
+/// each name appended to its `add`, which loads deferred tools; by name, so a tool registered later is offered then.
 pub async fn add_tools(tx: &Tx, conversation_id: ConversationId, added: &[String]) -> DurableResult<()> {
     let state = tx.doc(&AGENT_DOC, conversation_id).await?;
     state.edit(|state| {
-        for filter in [&mut state.tools, &mut state.model_tools] {
-            match filter {
-                None => {}
-                Some(ToolFilter::List(names)) => {
-                    for name in added {
-                        if !names.contains(name) {
-                            names.push(name.clone());
-                        }
-                    }
-                }
-                Some(ToolFilter::Remove { remove }) => remove.retain(|name| !added.contains(name)),
-            }
+        match &mut state.tools {
+            None => {}
+            Some(ToolFilter::List(names)) => append(names, added),
+            Some(ToolFilter::Remove { remove }) => remove.retain(|name| !added.contains(name)),
         }
+        let (remove, mut add) = match state.model_tools.take() {
+            Some(ModelToolFilter::List(mut names)) => {
+                append(&mut names, added);
+                state.model_tools = Some(ModelToolFilter::List(names));
+                return;
+            }
+            Some(ModelToolFilter::Edit { remove, add }) => (remove.unwrap_or_default(), add.unwrap_or_default()),
+            None => (Vec::new(), Vec::new()),
+        };
+        let remove: Vec<String> = remove.into_iter().filter(|name| !added.contains(name)).collect();
+        append(&mut add, added);
+        let remove = (!remove.is_empty()).then_some(remove);
+        state.model_tools = Some(ModelToolFilter::Edit { remove, add: Some(add) });
     })
+}
+
+/// Append each of `added` that `names` lacks.
+fn append(names: &mut Vec<String>, added: &[String]) {
+    for name in added {
+        if !names.contains(name) {
+            names.push(name.clone());
+        }
+    }
 }
 
 fn set<T: Clone>(slot: &mut Option<T>, change: &Change<T>) {
@@ -146,7 +163,9 @@ pub fn resolve_agent(
     let composed: Vec<_> = composed.into_iter().map(|(_, tool)| tool).collect();
     let enabled = filter_tools(composed, state.and_then(|s| s.tools.as_ref()));
     let for_model: Vec<_> = enabled.iter().filter(|t| t.callable_by(ToolCaller::Model)).cloned().collect();
-    let tools = filter_tools(for_model, state.and_then(|s| s.model_tools.as_ref()));
+    let tools = offered_tools(&for_model, state.and_then(|s| s.model_tools.as_ref()));
+    let offered = |tool: &Arc<ToolRegistration>| tools.iter().any(|t| t.name() == tool.name());
+    let deferred = for_model.iter().filter(|t| t.deferred && !offered(t)).cloned().collect();
     let callable = enabled.into_iter().filter(|t| t.callable_by(ToolCaller::Tools)).collect();
     let instructions = state.and_then(|s| s.instructions.clone());
     let mut agent_sections: Vec<_> = sections.into_iter().map(|(_, section)| section).collect();
@@ -159,6 +178,7 @@ pub fn resolve_agent(
         extensions,
         tools,
         callable,
+        deferred,
         sections: agent_sections,
         instructions,
         cwd: state.and_then(|s| s.cwd.clone()),
@@ -171,6 +191,27 @@ fn put<T>(items: &mut Vec<(String, T)>, key: String, value: T) {
         Some(slot) => slot.1 = value,
         None => items.push((key, value)),
     }
+}
+
+/// The tools offered to the model, as `AgentState::model_tools` describes.
+fn offered_tools(tools: &[Arc<ToolRegistration>], filter: Option<&ModelToolFilter>) -> Vec<Arc<ToolRegistration>> {
+    let (remove, add) = match filter {
+        Some(ModelToolFilter::List(names)) => {
+            return filter_tools(tools.to_vec(), Some(&ToolFilter::List(names.clone())));
+        }
+        Some(ModelToolFilter::Edit { remove, add }) => (remove.as_deref(), add.as_deref()),
+        None => (None, None),
+    };
+    let removed = |name: &str| remove.unwrap_or_default().iter().any(|n| n == name);
+    let kept = tools.iter().filter(|t| !t.deferred && !removed(t.name()));
+    // Loaded deferred tools follow in load order, so loading one appends to the declared tools.
+    let mut seen = HashSet::new();
+    let loaded = add
+        .unwrap_or_default()
+        .iter()
+        .filter(|name| seen.insert(name.as_str()))
+        .filter_map(|name| tools.iter().find(|t| t.name() == name && t.deferred && !removed(name)));
+    kept.chain(loaded).cloned().collect()
 }
 
 /// `tools` through a stored filter: a list selects exactly its names, in its order; `{ remove }` drops names.

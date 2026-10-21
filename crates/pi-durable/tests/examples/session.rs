@@ -77,8 +77,13 @@ async fn ex03_owned_conversations_creates_a_task_owned_child_and_records_it() {
             .phase("ready", |_, _, _| async { Ok(()) })
             .abort(|_, _, _| async { Ok(()) }),
     );
-    let spec =
-        DocSpec::new("example.agent-registry", 1, LatestConversation(LatestFork::Initial), AgentRegistry::default);
+    let spec = DocSpec::new(
+        "example.agent-registry",
+        1,
+        LatestConversation(LatestFork::Initial),
+        AgentRegistry::default,
+        |_, _, _| Ok(false),
+    );
     let registry = define_doc(spec).unwrap();
     let session = new_session();
     let main = ownerless(&session).await.id;

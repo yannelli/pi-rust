@@ -55,8 +55,10 @@ pub struct InboxState {
 }
 
 pub static INBOX_DOC: LazyLock<DocToken<InboxState, LatestConversation>> = LazyLock::new(|| {
-    let spec = DocSpec::new("pi.inbox", 1, LatestConversation(LatestFork::Initial), InboxState::default)
-        .checkpoint_when(|value, _, _| Ok(value.get("items").and_then(Json::as_array).is_none_or(Vec::is_empty)));
+    let spec =
+        DocSpec::new("pi.inbox", 1, LatestConversation(LatestFork::Initial), InboxState::default, |value, _, _| {
+            Ok(value.get("items").and_then(Json::as_array).is_none_or(Vec::is_empty))
+        });
     define_doc(spec).unwrap_or_else(|_| unreachable!("pi.inbox is a valid definition"))
 });
 

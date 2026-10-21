@@ -251,7 +251,8 @@ fn resolves_settings_over_the_built_in_defaults() {
 
 static TEST_AGENT: LazyLock<DocToken<Json, LatestConversation>> = LazyLock::new(|| {
     let initial = || Json::from(json!({ "cwd": "/", "kind": "main" }));
-    define_doc(DocSpec::new("test.agent", 1, LatestConversation(LatestFork::Current), initial)).unwrap()
+    define_doc(DocSpec::new("test.agent", 1, LatestConversation(LatestFork::Current), initial, |_, _, _| Ok(false)))
+        .unwrap()
 });
 
 async fn agent_field(input: &PromptInput, context: &pi_chord::Context, field: &str) -> DurableResult<Option<String>> {

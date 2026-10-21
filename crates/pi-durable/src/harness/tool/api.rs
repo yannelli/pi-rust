@@ -11,7 +11,7 @@ use pi_ai::JsonObject;
 use pi_chord::{Context, Json};
 
 use super::result::{check_key, fallback_result};
-use super::{NESTED_RESULT_DOC, NestedResult};
+use super::{MADE_NESTED_CALLS, NESTED_CALL_DOC, NestedCallState};
 use crate::documents::{DocFamilyToken, DocScope, DocToken, DocValue, RewindableDocScope};
 use crate::env::{SharedEnv, ShellOutputSkip, ShellOutputWindow};
 use crate::errors::{DurableError, DurableResult};
@@ -37,6 +37,7 @@ pub(crate) struct Reported {
 }
 
 pub(crate) type Admission = Shared<BoxFuture<'static, DurableResult<TaskId>>>;
+pub(crate) type MemoCommit = Shared<BoxFuture<'static, DurableResult<()>>>;
 
 /// State one execution shares between its api and the tool task.
 pub(crate) struct CallState {
@@ -46,6 +47,8 @@ pub(crate) struct CallState {
     pub admissions: Mutex<Vec<Admission>>,
     /// Default keys: the order of this invocation's nested calls.
     pub sequence: AtomicU32,
+    /// This attempt's commit of the `MADE_NESTED_CALLS` memo; a failed one is tried again by the next call.
+    pub made_nested: Mutex<Option<MemoCommit>>,
     /// Whether the call reruns after a restart (`replay: safe`).
     pub resumes: bool,
 }
@@ -249,16 +252,37 @@ impl ToolExecutionApi {
             }
             None => (self.state.sequence.fetch_add(1, Ordering::SeqCst) + 1).to_string(),
         };
+        // The memo first, once per attempt.
+        let memo = {
+            let mut slot = lock(&self.state.made_nested);
+            slot.get_or_insert_with(|| {
+                let (runtime, memo_context) = (self.runtime.clone(), context.clone());
+                let commit = async move {
+                    runtime.memo_or(MADE_NESTED_CALLS, Json::from(true), &memo_context).await.map(|_| ())
+                };
+                commit.boxed().shared()
+            })
+            .clone()
+        };
         let (runtime, parent, name_owned) = (self.runtime.clone(), self.call_id.clone(), name.to_owned());
         let abandon = !self.state.resumes;
         let admission_context = context.clone();
+        let (state, call_key) = (self.state.clone(), key.clone());
+        // Registered now, so cleanup waits for it.
         let admission: Admission = async move {
+            if let Err(error) = memo.clone().await {
+                let mut slot = lock(&state.made_nested);
+                if slot.as_ref().is_some_and(|current| current.ptr_eq(&memo)) {
+                    *slot = None;
+                }
+                return Err(error);
+            }
             super::settle::start_nested_call(
                 &runtime,
                 &parent,
                 &name_owned,
                 args,
-                &key,
+                &call_key,
                 options.progress,
                 abandon,
                 &admission_context,
@@ -270,9 +294,10 @@ impl ToolExecutionApi {
         lock(&self.state.admissions).push(admission.clone());
         let id = admission.await?;
         let settled = self.runtime.wait_for_task(id, context).await?;
-        let stored = self.runtime.family_snapshot(&NESTED_RESULT_DOC, self.task_id, &id.to_string(), context).await?;
-        match stored {
-            Some(stored) => Ok(stored.deserialize_into::<NestedResult>()?.result),
+        let stored = self.runtime.family_snapshot(&NESTED_CALL_DOC, self.task_id, &key, context).await?;
+        // A nested call the scheduler faulted or orphaned stored no result.
+        match stored.map(|stored| stored.deserialize_into::<NestedCallState>()).transpose()?.and_then(|s| s.result) {
+            Some(result) => Ok(result),
             None => Ok(fallback_result(id, name, settled.state.outcome())),
         }
     }

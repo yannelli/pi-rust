@@ -16,7 +16,7 @@ use support::*;
 
 pub static STATE_DOC: LazyLock<DocToken<Json, SessionScope>> = LazyLock::new(|| {
     let initial = || json(r#"{"value":0,"items":["a","b"],"retained":{"label":"stable"}}"#);
-    define_doc(DocSpec::new("watch.state", 1, SessionScope, initial)).unwrap()
+    define_doc(DocSpec::new("watch.state", 1, SessionScope, initial, |_, _, _| Ok(false))).unwrap()
 });
 
 pub async fn create_state() -> TestSession {

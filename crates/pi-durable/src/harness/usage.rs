@@ -21,10 +21,13 @@ pub struct ProviderState {
 
 /// Built-in provider state; every fork starts with a fresh identity instead of copying its parent.
 pub static PROVIDER_DOC: LazyLock<DocToken<ProviderState, LatestConversation>> = LazyLock::new(|| {
-    let spec = DocSpec::new("pi.provider", 1, LatestConversation(LatestFork::Initial), || ProviderState {
-        session_id: crate::util::uuidv7(),
-    })
-    .checkpoint_when(|_, _, _| Ok(true));
+    let spec = DocSpec::new(
+        "pi.provider",
+        1,
+        LatestConversation(LatestFork::Initial),
+        || ProviderState { session_id: crate::util::uuidv7() },
+        |_, _, _| Ok(true),
+    );
     define_doc(spec).unwrap_or_else(|_| unreachable!("pi.provider is a valid definition"))
 });
 
@@ -70,8 +73,8 @@ pub enum UsageBucket {
 }
 
 pub static USAGE_DOC: LazyLock<DocToken<UsageState, LatestConversation>> = LazyLock::new(|| {
-    let spec = DocSpec::new("pi.usage", 1, LatestConversation(LatestFork::Initial), UsageState::default)
-        .checkpoint_when(|_, _, _| Ok(true));
+    let spec =
+        DocSpec::new("pi.usage", 1, LatestConversation(LatestFork::Initial), UsageState::default, |_, _, _| Ok(true));
     define_doc(spec).unwrap_or_else(|_| unreachable!("pi.usage is a valid definition"))
 });
 

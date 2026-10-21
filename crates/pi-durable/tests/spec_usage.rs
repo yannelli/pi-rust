@@ -134,7 +134,14 @@ struct PlanMode {
 }
 
 static PLAN_MODE_DOC: LazyLock<DocToken<PlanMode, LatestConversation>> = LazyLock::new(|| {
-    define_doc(DocSpec::new("app.plan-mode", 1, LatestConversation(LatestFork::Current), PlanMode::default)).unwrap()
+    define_doc(DocSpec::new(
+        "app.plan-mode",
+        1,
+        LatestConversation(LatestFork::Current),
+        PlanMode::default,
+        |_, _, _| Ok(false),
+    ))
+    .unwrap()
 });
 
 fn plan_mode() -> Extension {
@@ -269,7 +276,8 @@ struct Container {
 
 static CONTAINER_DOC: LazyLock<DocToken<Container, LatestConversation>> = LazyLock::new(|| {
     let initial = || Container { image: "node:22".into() };
-    define_doc(DocSpec::new("app.container", 1, LatestConversation(LatestFork::Current), initial)).unwrap()
+    define_doc(DocSpec::new("app.container", 1, LatestConversation(LatestFork::Current), initial, |_, _, _| Ok(false)))
+        .unwrap()
 });
 
 /// Section 2.2: an environment per conversation.

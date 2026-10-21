@@ -14,12 +14,12 @@ use support::*;
 
 static STATE_DOC: LazyLock<DocToken<Json, SessionScope>> = LazyLock::new(|| {
     let initial = || json(r#"{"value":0,"retained":{"label":"stable"}}"#);
-    define_doc(DocSpec::new("state.state", 1, SessionScope, initial)).unwrap()
+    define_doc(DocSpec::new("state.state", 1, SessionScope, initial, |_, _, _| Ok(false))).unwrap()
 });
 
 static FAMILY_DOC: LazyLock<DocFamilyToken<Json, String, SessionScope>> = LazyLock::new(|| {
     let initial = |seed: String| json(&format!(r#"{{"value":{}}}"#, seed.len()));
-    define_doc_family(DocFamilySpec::new("state.family", 1, SessionScope, initial)).unwrap()
+    define_doc_family(DocFamilySpec::new("state.family", 1, SessionScope, initial, |_, _, _| Ok(false))).unwrap()
 });
 
 async fn create_state() -> TestSession {
@@ -169,9 +169,14 @@ async fn publishes_null_retirement_and_never_follows_a_replacement_incarnation()
 
 #[tokio::test]
 async fn cold_loads_a_definition_free_fork_copy() {
-    let copied =
-        define_doc(DocSpec::new("state.copied", 1, LatestConversation(LatestFork::Current), || json(r#"{"value":0}"#)))
-            .unwrap();
+    let copied = define_doc(DocSpec::new(
+        "state.copied",
+        1,
+        LatestConversation(LatestFork::Current),
+        || json(r#"{"value":0}"#),
+        |_, _, _| Ok(false),
+    ))
+    .unwrap();
     let test = open_test_session();
     let parent_id = create_conversation(&test.session).await;
     let token = copied.clone();
@@ -206,10 +211,18 @@ async fn cold_loads_a_definition_free_fork_copy() {
 
 #[tokio::test]
 async fn hydrates_a_migrated_tracker_without_writing_and_skips_an_equal_version_base_update() {
-    let old = define_doc(DocSpec::new("state.migration", 1, SessionScope, || json(r#"{"value":3}"#))).unwrap();
+    let old =
+        define_doc(DocSpec::new("state.migration", 1, SessionScope, || json(r#"{"value":3}"#), |_, _, _| Ok(false)))
+            .unwrap();
     let current = define_doc(
-        DocSpec::new("state.migration", 2, SessionScope, || json(r#"{"value":0,"migrated":false}"#))
-            .migrate(|value, _| Ok(json(&format!(r#"{{"value":{},"migrated":true}}"#, value["value"])))),
+        DocSpec::new(
+            "state.migration",
+            2,
+            SessionScope,
+            || json(r#"{"value":0,"migrated":false}"#),
+            |_, _, _| Ok(false),
+        )
+        .migrate(|value, _| Ok(json(&format!(r#"{{"value":{},"migrated":true}}"#, value["value"])))),
     )
     .unwrap();
     let test = open_test_session();

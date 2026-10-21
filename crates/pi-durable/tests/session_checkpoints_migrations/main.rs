@@ -16,10 +16,20 @@ use support::*;
 
 pub type SessionDoc = DocToken<Json, SessionScope>;
 
-/// A Session-scoped JSON document with the given first value.
+/// A Session-scoped JSON document with the given first value that never selects a base.
 pub fn session_doc(kind: &str, version: u32, initial: &str) -> DocSpec<Json, SessionScope> {
+    session_doc_with(kind, version, initial, |_, _, _| Ok(false))
+}
+
+/// Like [`session_doc`] with its own checkpoint predicate.
+pub fn session_doc_with(
+    kind: &str,
+    version: u32,
+    initial: &str,
+    checkpoint_when: impl Fn(&Json, &[pi_chord::delta::Op], CheckpointInfo) -> DurableResult<bool> + Send + Sync + 'static,
+) -> DocSpec<Json, SessionScope> {
     let initial = json(initial);
-    DocSpec::new(kind, version, SessionScope, move || initial.clone())
+    DocSpec::new(kind, version, SessionScope, move || initial.clone(), checkpoint_when)
 }
 
 /// Access a document in its own commit, creating or migrating it.

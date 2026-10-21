@@ -1,6 +1,8 @@
-//! Walks of the ownership tree: owner tasks and conversations, cascades, idle scopes, and owned live work.
+//! Walks of the ownership tree: owner tasks and conversations, cascades, idle scopes, and owned live work. The walks
+//! down use the indexes of [`super::index`]; the walks up use the ownership fields of known tasks.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
+use std::sync::OnceLock;
 
 use super::{SchedState, Scheduler, cancellation_intent};
 use crate::errors::DurableResult;
@@ -23,14 +25,18 @@ impl TaskNode {
     }
 }
 
-/// Where a walk up the ownership tree continues: an owner task, or a conversation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Up {
+/// A node of the ownership tree: a task, or a conversation. A walk up continues at the parent of a task, which is
+/// its owner task or its conversation, and at the owner task of a conversation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum Node {
     Task(TaskId),
     Conversation(ConversationId),
 }
 
-impl Up {
+/// Where a walk up the ownership tree continues.
+pub(crate) type Up = Node;
+
+impl Node {
     /// The parent of a task: its owner task, or its conversation.
     pub fn of(record: &TaskRecord) -> Self {
         Self::of_node(&TaskNode::of(record))
@@ -57,13 +63,15 @@ pub(crate) enum Step {
 pub(crate) struct Overlay {
     pub tasks: HashMap<TaskId, TaskRecord>,
     pub edges: HashMap<ConversationId, Option<TaskId>>,
+    /// Links to the staged tasks the index does not list, by parent node, for walks down; built at first use.
+    pub(super) links: OnceLock<HashMap<Node, BTreeSet<Node>>>,
 }
 
 impl Overlay {
     pub fn of(tx: &Tx) -> Self {
         let tasks = tx.staged_tasks().into_iter().map(|record| (record.id, record)).collect();
         let edges = tx.staged_conversations().into_iter().map(|c| (c.id, c.owner.map(|o| o.task_id))).collect();
-        Self { tasks, edges }
+        Self { tasks, edges, links: OnceLock::new() }
     }
 }
 
@@ -80,6 +88,8 @@ impl SchedState {
         if let Some(owner) = owner {
             self.conversation_owners.insert(owner);
         }
+        // The conversation now hangs from its owner, or is a root.
+        self.relist(Node::Conversation(conversation_id));
     }
 
     /// Owner task of a conversation: `Some(None)` when ownerless, `None` while not loaded.
@@ -127,53 +137,6 @@ impl SchedState {
         steps
     }
 
-    /// Whether every owner above `start` is loaded.
-    pub fn chain_known(&self, start: Up, overlay: Option<&Overlay>) -> bool {
-        !self.above(start, overlay).iter().any(|step| matches!(step, Step::Unknown))
-    }
-
-    /// Live records, with the overlay's candidates replacing committed ones; terminal candidates are gone.
-    pub fn live_records(&self, overlay: Option<&Overlay>) -> Vec<TaskRecord> {
-        let mut records = Vec::new();
-        for record in self.live.values() {
-            let candidate = overlay.and_then(|overlay| overlay.tasks.get(&record.id)).unwrap_or(record);
-            if !candidate.is_terminal() {
-                records.push(candidate.clone());
-            }
-        }
-        if let Some(overlay) = overlay {
-            let mut added: Vec<&TaskRecord> =
-                overlay.tasks.values().filter(|r| !self.live.contains_key(&r.id) && !r.is_terminal()).collect();
-            added.sort_by_key(|record| record.id);
-            records.extend(added.into_iter().cloned());
-        }
-        records
-    }
-
-    /// Every task with live ordinary owned work, mapped to that work: each live non-background task counts for
-    /// every owner task above it up to and including the first background one.
-    pub fn owned_live(&self, overlay: Option<&Overlay>) -> HashMap<TaskId, Vec<TaskId>> {
-        let mut owned: HashMap<TaskId, Vec<TaskId>> = HashMap::new();
-        for record in self.live_records(overlay) {
-            if record.background {
-                continue;
-            }
-            for step in self.above(Up::of(&record), overlay) {
-                match step {
-                    Step::Unknown => break,
-                    Step::Conversation(_) => {}
-                    Step::Task(id, node) => {
-                        owned.entry(id).or_default().push(record.id);
-                        if node.background {
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        owned
-    }
-
     /// Whether ordinary traversal from `scope` reaches `start`; `None` while an edge is not loaded.
     pub fn in_scope(&self, start: Up, scope: Scope, cross_background: bool) -> Option<bool> {
         for step in self.above(start, None) {
@@ -201,6 +164,10 @@ impl SchedState {
 
     /// The nearest live owner above `start` whose cancellation intent reaches it, if any.
     pub fn cancelling_owner(&self, start: Up) -> Option<TaskRecord> {
+        // Nothing cancels, the common case: no walk.
+        if self.intent.is_empty() {
+            return None;
+        }
         for step in self.above(start, None) {
             match step {
                 Step::Unknown => return None,
@@ -219,27 +186,19 @@ impl SchedState {
         }
         None
     }
-
-    /// No live non-background task in the scope; a task whose owner edges are not loaded yet counts as inside.
-    pub fn idle(&self, conversation_id: Option<ConversationId>) -> bool {
-        let scope = conversation_id.map_or(Scope::Roots, Scope::Conversation);
-        !self
-            .live
-            .values()
-            .any(|record| !record.background && self.in_scope(Up::of(record), scope, false) != Some(false))
-    }
 }
 
 impl Scheduler {
-    /// Load the owner chains of every live task and, with `queued`, of every conversation with queued submissions;
-    /// returns the latter. Reads committed Storage directly, so it may run inside a commit callback.
+    /// Load the owner chains of the tasks in `unloaded` and, with `queued`, of every conversation with queued
+    /// submissions; returns the latter. Reads committed Storage directly, so it may run inside a commit callback.
     pub(crate) async fn load_scopes(&self, queued: bool) -> DurableResult<Vec<ConversationId>> {
-        let starts: Vec<Up> = {
-            let state = lock(&self.state);
-            state.live.values().map(Up::of).filter(|up| !state.chain_known(*up, None)).collect()
-        };
-        for start in starts {
-            self.load_chain(start, None).await?;
+        let pending: Vec<TaskId> = lock(&self.state).unloaded.iter().copied().collect();
+        for id in pending {
+            // An earlier load in this loop may have passed it.
+            let unloaded = lock(&self.state).unloaded.contains(&id);
+            if unloaded {
+                self.load_chain(Up::Task(id), None).await?;
+            }
         }
         if !queued {
             return Ok(Vec::new());
@@ -263,25 +222,41 @@ impl Scheduler {
         Ok(conversations)
     }
 
-    /// Load the owner edges and task nodes from `start` up to its ownerless root.
+    /// Load the owner edges and task nodes from `start` up to its ownerless root. A known task outside `unloaded` ends
+    /// the walk, as its chain is loaded; the `unloaded` tasks passed have a loaded chain afterwards. Loading a node can
+    /// reveal a cancelled owner, so it makes the next reconcile derive cascade marks.
     pub(crate) async fn load_chain(&self, start: Up, overlay: Option<&Overlay>) -> DurableResult<()> {
         let storage = self.core.session.storage();
+        let mut passed = Vec::new();
         let mut at = Some(start);
         while let Some(current) = at {
             match current {
                 Up::Task(id) => {
-                    let known = lock(&self.state).node(id, overlay);
+                    let known = {
+                        let state = lock(&self.state);
+                        let node = state.live.get(&id).map(TaskNode::of).or_else(|| state.settled.get(&id).copied());
+                        // Created in this commit: the load from its own record covers what is above it.
+                        if node.is_none() && overlay.is_some_and(|overlay| overlay.tasks.contains_key(&id)) {
+                            break;
+                        }
+                        if node.is_some() && !state.unloaded.contains(&id) {
+                            break;
+                        }
+                        node
+                    };
                     let node = match known {
                         Some(node) => node,
                         None => {
                             let Some(record) = storage.task(id, &self.context).await? else { return Ok(()) };
                             let node = TaskNode::of(&record);
                             if record.is_terminal() {
-                                lock(&self.state).settled.insert(record.id, node);
+                                lock(&self.state).settle(id, node);
                             }
+                            self.schedule_reconcile();
                             node
                         }
                     };
+                    passed.push(id);
                     at = Some(Up::of_node(&node));
                 }
                 Up::Conversation(id) => {
@@ -292,12 +267,17 @@ impl Scheduler {
                             let record = storage.conversation(id, &self.context).await?;
                             let edge = record.and_then(|record| record.owner).map(|owner| owner.task_id);
                             lock(&self.state).set_edge(id, edge);
+                            self.schedule_reconcile();
                             edge
                         }
                     };
                     at = edge.map(Up::Task);
                 }
             }
+        }
+        let mut state = lock(&self.state);
+        for id in passed {
+            state.unloaded.remove(&id);
         }
         Ok(())
     }

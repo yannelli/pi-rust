@@ -5,6 +5,8 @@
 mod abandoned;
 #[path = "harness_nested_tools/calls.rs"]
 mod calls;
+#[path = "harness_nested_tools/documents.rs"]
+mod documents;
 #[path = "harness_nested_tools/slots.rs"]
 mod slots;
 mod support;
@@ -16,7 +18,7 @@ use pi_ai::{ContentBlock, Message, StopReason, ToolResultMessage};
 use pi_chord::Json;
 use pi_durable::entries::TOOL_RESULT_ENTRY;
 use pi_durable::harness::live::LIVE_DOC;
-use pi_durable::harness::tool::{BeforeToolDecision, ToolHookCall, ToolHooks, tool_task};
+use pi_durable::harness::tool::{BeforeToolDecision, NESTED_CALL_DOC, ToolHookCall, ToolHooks, tool_task};
 use pi_durable::harness::*;
 use pi_durable::storage::MemoryStorage;
 use pi_durable::testing::faux::{
@@ -159,6 +161,7 @@ async fn runs_a_nested_call_as_its_own_tool_task_and_returns_its_result_to_the_c
         serde_json::to_value(&child.state).unwrap(),
         json!({ "status": "terminal", "outcome": { "status": "completed", "result": { "kind": "nested" } } })
     );
+    assert_eq!(harness.session().family_snapshot(&NESTED_CALL_DOC, parent.id, "1", &ctx()).await.unwrap(), None);
     assert_eq!(harness.snapshot(&LIVE_DOC, root.id, &ctx()).await.unwrap(), Some(Json::from(json!({}))));
     harness.close(&ctx()).await.unwrap();
 }

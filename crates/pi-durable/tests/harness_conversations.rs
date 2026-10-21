@@ -28,7 +28,10 @@ struct Note {
 }
 
 static NOTE_DOC: LazyLock<DocToken<Note, RewindableConversation>> = LazyLock::new(|| {
-    define_doc(DocSpec::new("test.note", 1, RewindableConversation(DocumentFork::AsOf), Note::default)).unwrap()
+    define_doc(DocSpec::new("test.note", 1, RewindableConversation(DocumentFork::AsOf), Note::default, |_, _, _| {
+        Ok(false)
+    }))
+    .unwrap()
 });
 
 pub fn user(text: &str) -> Message {

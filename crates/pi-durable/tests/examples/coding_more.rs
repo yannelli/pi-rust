@@ -13,7 +13,10 @@ struct Sandbox {
 }
 
 static SANDBOX_DOC: LazyLock<DocToken<Sandbox, LatestConversation>> = LazyLock::new(|| {
-    define_doc(DocSpec::new("app.sandbox", 1, LatestConversation(LatestFork::Initial), Sandbox::default)).unwrap()
+    define_doc(DocSpec::new("app.sandbox", 1, LatestConversation(LatestFork::Initial), Sandbox::default, |_, _, _| {
+        Ok(false)
+    }))
+    .unwrap()
 });
 
 #[tokio::test]

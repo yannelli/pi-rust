@@ -19,6 +19,7 @@ async fn copies_as_of_and_current_singleton_and_family_bases_while_leaving_initi
         1,
         RewindableConversation(DocumentFork::AsOf),
         seeded,
+        |_, _, _| Ok(false),
     ))
     .unwrap();
     let current_family = define_doc_family(DocFamilySpec::new(
@@ -26,6 +27,7 @@ async fn copies_as_of_and_current_singleton_and_family_bases_while_leaving_initi
         1,
         LatestConversation(LatestFork::Current),
         seeded,
+        |_, _, _| Ok(false),
     ))
     .unwrap();
     let test = open_test_session();
@@ -174,9 +176,13 @@ async fn selects_the_entry_owning_ancestor_for_as_of_copies_and_the_immediate_pa
 fn versioned(version: u32, migrations: &Arc<AtomicUsize>) -> DocToken<Json, RewindableConversation> {
     let counter = migrations.clone();
     let initial = json(r#"{"count":0,"migrated":false}"#);
-    let spec = DocSpec::new("fork.stored-version", version, RewindableConversation(DocumentFork::AsOf), move || {
-        initial.clone()
-    });
+    let spec = DocSpec::new(
+        "fork.stored-version",
+        version,
+        RewindableConversation(DocumentFork::AsOf),
+        move || initial.clone(),
+        |_, _, _| Ok(false),
+    );
     define_doc(spec.migrate(move |value, from| {
         assert_eq!(from, 1);
         counter.fetch_add(1, Ordering::SeqCst);
@@ -251,10 +257,17 @@ impl TaskTemplate for Work {
 #[tokio::test]
 async fn copies_only_conversation_documents_leaving_session_and_task_documents_in_their_original_scopes() {
     let copied = latest("fork.scope.conversation", LatestFork::Current, r#"{"value":"conversation"}"#);
-    let session_only =
-        define_doc(DocSpec::new("fork.scope.session", 1, SessionScope, || json(r#"{"value":"session"}"#)));
+    let session_only = define_doc(DocSpec::new(
+        "fork.scope.session",
+        1,
+        SessionScope,
+        || json(r#"{"value":"session"}"#),
+        |_, _, _| Ok(false),
+    ));
     let session_only = session_only.unwrap();
-    let task_only = define_doc(DocSpec::new("fork.scope.task", 1, TaskScope, || json(r#"{"value":"task"}"#))).unwrap();
+    let task_only =
+        define_doc(DocSpec::new("fork.scope.task", 1, TaskScope, || json(r#"{"value":"task"}"#), |_, _, _| Ok(false)))
+            .unwrap();
     let test = open_test_session();
     let parent = create_conversation(&test.session).await;
     let tokens = (copied.clone(), session_only.clone(), task_only.clone());
@@ -290,9 +303,14 @@ async fn copies_only_conversation_documents_leaving_session_and_task_documents_i
 #[tokio::test]
 async fn copies_every_family_member_across_storage_scan_pages() {
     let initial = |seed: i64| json(&format!(r#"{{"value":{seed}}}"#));
-    let family =
-        define_doc_family(DocFamilySpec::new("fork.pagination", 1, LatestConversation(LatestFork::Current), initial))
-            .unwrap();
+    let family = define_doc_family(DocFamilySpec::new(
+        "fork.pagination",
+        1,
+        LatestConversation(LatestFork::Current),
+        initial,
+        |_, _, _| Ok(false),
+    ))
+    .unwrap();
     let test = open_test_session();
     let parent = create_conversation(&test.session).await;
     let fork_at = entry_with(&test.session, parent, "point", |_| async { Ok(()) }).await;

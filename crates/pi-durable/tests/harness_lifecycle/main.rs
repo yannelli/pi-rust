@@ -81,7 +81,7 @@ pub async fn settled<T>(future: &mut tokio::task::JoinHandle<T>) -> bool {
 }
 
 pub fn notes_doc(kind: &str) -> DocToken<Json, SessionScope> {
-    define_doc(DocSpec::new(kind, 1, SessionScope, || Json::from(json!({ "text": "" })))).unwrap()
+    define_doc(DocSpec::new(kind, 1, SessionScope, || Json::from(json!({ "text": "" })), |_, _, _| Ok(false))).unwrap()
 }
 
 pub async fn set_text(harness: &Harness, doc: &DocToken<Json, SessionScope>, text: &str) {

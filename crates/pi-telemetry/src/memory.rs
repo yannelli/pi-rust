@@ -2,9 +2,12 @@
 
 use std::any::Any;
 use std::hash::{BuildHasher, RandomState};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+
+mod store;
 
 use crate::attributes::SpanAttributes;
 use crate::metrics::{
@@ -16,8 +19,38 @@ use crate::span::{
     TelemetrySpan,
 };
 
-const SCOPE_KEY: &str = "pi-memory-scope";
-const SPAN_KEY: &str = "pi-memory-span";
+pub(crate) const SCOPE_KEY: &str = "pi-memory-scope";
+pub(crate) const SPAN_KEY: &str = "pi-memory-span";
+pub(crate) const TRACE_KEY: &str = "pi-memory-trace";
+/// Measurements are grouped into ten-second intervals for store queries.
+const INTERVAL_MS: f64 = 10_000.0;
+
+type MillisFn = Arc<dyn Fn() -> f64 + Send + Sync>;
+
+/// Time sources of a recorder: wall-clock epoch milliseconds for span and interval starts, and a monotonic
+/// millisecond counter for durations and event offsets.
+#[derive(Clone)]
+pub struct TelemetryClock {
+    wall_ms: MillisFn,
+    monotonic_ms: MillisFn,
+}
+
+impl TelemetryClock {
+    pub fn new(
+        wall_ms: impl Fn() -> f64 + Send + Sync + 'static,
+        monotonic_ms: impl Fn() -> f64 + Send + Sync + 'static,
+    ) -> Self {
+        Self { wall_ms: Arc::new(wall_ms), monotonic_ms: Arc::new(monotonic_ms) }
+    }
+}
+
+impl Default for TelemetryClock {
+    fn default() -> Self {
+        static START: LazyLock<Instant> = LazyLock::new(Instant::now);
+        let wall = || SystemTime::now().duration_since(UNIX_EPOCH).map_or(0.0, |elapsed| elapsed.as_millis() as f64);
+        Self::new(wall, || START.elapsed().as_secs_f64() * 1000.0)
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RecordedTelemetryEvent {
@@ -65,14 +98,21 @@ pub struct RecordedTelemetryMeasurement {
     pub context: Option<TelemetryCarrier>,
 }
 
+/// A recorded span with the timing that its normalized snapshot leaves out.
 struct Recorded {
     span: RecordedTelemetrySpan,
     explicit_status: bool,
+    started_ms: f64,
+    started_tick: f64,
+    ended_ms: Option<f64>,
+    /// Offsets from the span start, one per recorded event.
+    event_offsets: Vec<f64>,
 }
 
 struct State {
     spans: Vec<Recorded>,
-    measurements: Vec<RecordedTelemetryMeasurement>,
+    /// Each measurement with the start of its ten-second interval.
+    measurements: Vec<(f64, RecordedTelemetryMeasurement)>,
     next_span_id: u64,
     next_end_sequence: u64,
 }
@@ -83,6 +123,7 @@ struct State {
 pub struct InMemoryTelemetryContext {
     state: Arc<Mutex<State>>,
     scope: Arc<str>,
+    clock: TelemetryClock,
 }
 
 impl Default for InMemoryTelemetryContext {
@@ -95,21 +136,6 @@ impl Default for InMemoryTelemetryContext {
 fn random_scope() -> String {
     let hex = format!("{:016x}{:016x}", RandomState::new().hash_one(1u8), RandomState::new().hash_one(2u8));
     format!("{}-{}-{}-{}-{}", &hex[..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..])
-}
-
-fn is_scope(value: &str) -> bool {
-    value.len() == 36
-        && value.char_indices().all(|(index, c)| match index {
-            8 | 13 | 18 | 23 => c == '-',
-            _ => c.is_ascii_digit() || ('a'..='f').contains(&c),
-        })
-}
-
-fn span_id(value: &str) -> Option<u64> {
-    if value.starts_with('0') || !value.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    value.parse().ok().filter(|id| *id < (1u64 << 53))
 }
 
 /// The carrier of a span or extracted parent of any in-memory recorder, including settled spans.
@@ -137,8 +163,13 @@ enum Parent {
 
 impl InMemoryTelemetryContext {
     pub fn new() -> Self {
+        Self::with_clock(TelemetryClock::default())
+    }
+
+    /// A recorder that reads time from `clock`, so tests can fix span and interval times.
+    pub fn with_clock(clock: TelemetryClock) -> Self {
         let state = State { spans: Vec::new(), measurements: Vec::new(), next_span_id: 1, next_end_sequence: 1 };
-        Self { state: Arc::new(Mutex::new(state)), scope: random_scope().into() }
+        Self { state: Arc::new(Mutex::new(state)), scope: random_scope().into(), clock }
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -152,7 +183,7 @@ impl InMemoryTelemetryContext {
 
     /// Detached measurements in recording order, without aggregation.
     pub fn get_metrics(&self) -> Vec<RecordedTelemetryMeasurement> {
-        self.lock().measurements.clone()
+        self.lock().measurements.iter().map(|(_, measurement)| measurement.clone()).collect()
     }
 
     fn open(&self, parent: Parent, options: SpanOptions) -> Arc<dyn TelemetrySpan> {
@@ -169,8 +200,15 @@ impl InMemoryTelemetryContext {
         };
         let id = state.next_span_id;
         state.next_span_id += 1;
-        let carrier =
-            TelemetryCarrier::from([(SCOPE_KEY.into(), self.scope.to_string()), (SPAN_KEY.into(), id.to_string())]);
+        let trace_id = parent_context
+            .as_ref()
+            .and_then(|context| context.get(TRACE_KEY).cloned())
+            .unwrap_or_else(|| format!("{}:{id}", self.scope));
+        let carrier = TelemetryCarrier::from([
+            (SCOPE_KEY.into(), self.scope.to_string()),
+            (SPAN_KEY.into(), id.to_string()),
+            (TRACE_KEY.into(), trace_id),
+        ]);
         let span = RecordedTelemetrySpan {
             id,
             parent_id,
@@ -184,18 +222,22 @@ impl InMemoryTelemetryContext {
             settled: false,
             end_sequence: None,
         };
-        state.spans.push(Recorded { span, explicit_status: false });
+        let recorded = Recorded {
+            span,
+            explicit_status: false,
+            started_ms: (self.clock.wall_ms)(),
+            started_tick: (self.clock.monotonic_ms)(),
+            ended_ms: None,
+            event_offsets: Vec::new(),
+        };
+        state.spans.push(recorded);
         Arc::new(MemorySpan { root: self.clone(), index: state.spans.len() - 1, carrier })
     }
 
     fn instrument(&self, kind: TelemetryMetricKind, name: &str, options: HistogramOptions) -> Arc<MemoryInstrument> {
         let boundaries = options.boundaries.filter(|_| kind == TelemetryMetricKind::Histogram);
-        let increasing = boundaries.as_ref().is_none_or(|boundaries| {
-            boundaries.iter().all(|value| value.is_finite()) && boundaries.windows(2).all(|pair| pair[0] < pair[1])
-        });
         Arc::new(MemoryInstrument {
             root: self.clone(),
-            valid: increasing,
             kind,
             name: name.into(),
             description: options.description,
@@ -224,17 +266,19 @@ impl TelemetryPropagation for InMemoryTelemetryContext {
         carrier_of(context)
     }
 
-    /// Unrecognized carriers fall back to this recorder's root context.
+    /// A carrier without all three identities falls back to this recorder's root context. The identities are
+    /// opaque strings, so any format is accepted.
     fn extract(&self, carrier: Option<&TelemetryCarrier>) -> Arc<dyn TelemetryContext> {
-        let parsed = carrier.and_then(|carrier| {
-            let scope = carrier.get(SCOPE_KEY).filter(|scope| is_scope(scope))?;
-            let id = span_id(carrier.get(SPAN_KEY)?)?;
-            Some((scope.clone(), id))
-        });
-        let Some((scope, id)) = parsed else { return Arc::new(self.clone()) };
-        let local = *scope == *self.scope && self.lock().spans.iter().any(|recorded| recorded.span.id == id);
-        let carrier = TelemetryCarrier::from([(SCOPE_KEY.into(), scope), (SPAN_KEY.into(), id.to_string())]);
-        Arc::new(ExtractedParent { root: self.clone(), carrier, local_id: local.then_some(id) })
+        let identities = carrier
+            .and_then(|carrier| Some([carrier.get(SCOPE_KEY)?, carrier.get(SPAN_KEY)?, carrier.get(TRACE_KEY)?]));
+        let Some([scope, span, trace]) = identities else { return Arc::new(self.clone()) };
+        let local_id = if **scope == *self.scope { span.parse().ok() } else { None };
+        let carrier = TelemetryCarrier::from([
+            (SCOPE_KEY.into(), scope.clone()),
+            (SPAN_KEY.into(), span.clone()),
+            (TRACE_KEY.into(), trace.clone()),
+        ]);
+        Arc::new(ExtractedParent { root: self.clone(), carrier, local_id })
     }
 }
 
@@ -258,8 +302,6 @@ fn histogram_options(options: InstrumentOptions) -> HistogramOptions {
 
 struct MemoryInstrument {
     root: InMemoryTelemetryContext,
-    /// Invalid metadata, such as unordered boundaries, makes the instrument inert.
-    valid: bool,
     kind: TelemetryMetricKind,
     name: String,
     description: Option<String>,
@@ -269,9 +311,6 @@ struct MemoryInstrument {
 
 impl MemoryInstrument {
     fn measure(&self, value: f64, attributes: SpanAttributes, context: Option<&dyn TelemetryContext>) {
-        if !self.valid || !value.is_finite() || (self.kind == TelemetryMetricKind::Counter && value < 0.0) {
-            return;
-        }
         let measurement = RecordedTelemetryMeasurement {
             kind: self.kind,
             name: self.name.clone(),
@@ -282,7 +321,8 @@ impl MemoryInstrument {
             attributes,
             context: context.and_then(carrier_of),
         };
-        self.root.lock().measurements.push(measurement);
+        let interval = ((self.root.clock.wall_ms)() / INTERVAL_MS).floor() * INTERVAL_MS;
+        self.root.lock().measurements.push((interval, measurement));
     }
 }
 
@@ -398,7 +438,11 @@ impl TelemetrySpan for MemorySpan {
     }
 
     fn add_event(&self, name: &str, attributes: SpanAttributes) {
-        self.update(|recorded| recorded.span.events.push(RecordedTelemetryEvent { name: name.into(), attributes }));
+        let tick = (self.root.clock.monotonic_ms)();
+        self.update(|recorded| {
+            recorded.event_offsets.push(tick - recorded.started_tick);
+            recorded.span.events.push(RecordedTelemetryEvent { name: name.into(), attributes });
+        });
     }
 
     fn set_attributes(&self, attributes: SpanAttributes) {
@@ -413,6 +457,7 @@ impl TelemetrySpan for MemorySpan {
     }
 
     fn end(&self, outcome: SpanOutcome) {
+        let tick = (self.root.clock.monotonic_ms)();
         let mut state = self.root.lock();
         let sequence = state.next_end_sequence;
         let recorded = &mut state.spans[self.index];
@@ -425,6 +470,7 @@ impl TelemetrySpan for MemorySpan {
             recorded.span.status = SpanStatus::Error { error };
         }
         recorded.span.settled = true;
+        recorded.ended_ms = Some(recorded.started_ms + tick - recorded.started_tick);
         recorded.span.end_sequence = Some(sequence);
         state.next_end_sequence += 1;
     }

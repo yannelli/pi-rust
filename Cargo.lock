@@ -3171,6 +3171,7 @@ dependencies = [
 name = "pi-durable"
 version = "0.5.3"
 dependencies = [
+ "anyhow",
  "async-trait",
  "base64 0.22.1",
  "futures",
@@ -3179,6 +3180,7 @@ dependencies = [
  "pi-agent",
  "pi-ai",
  "pi-chord",
+ "pi-codemode",
  "pi-telemetry",
  "ring",
  "rusqlite",
