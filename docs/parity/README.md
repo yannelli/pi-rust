@@ -64,7 +64,7 @@ cargo xtask models ../model-data
 1. Read the upstream diff: `git -C ../pi-upstream show <sha>`.
 2. Find the Rust counterpart with the table above. Keep names, JSON shapes, and error messages the same as upstream.
 3. Port the tests too. Tests use the `faux` provider or a local mock server; never real provider keys or network.
-4. Name the upstream commit in the commit message, for example `fix(ai): recover from Copilot request-size overflow (upstream 73f8de80b)`. The report uses this to mark the commit as ported.
+4. Write `upstream <sha>` with the 9-character SHA in the commit message, for example `fix(ai): recover from Copilot request-size overflow (upstream 73f8de80b)`. The report marks a commit as ported only on that text.
 5. When every commit up to an upstream commit is ported or allowlisted, move `syncedCommit`, `syncedVersion`, and `syncedOn` in `upstream.json` to it.
 
 ## Verification

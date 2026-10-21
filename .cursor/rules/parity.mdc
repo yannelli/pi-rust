@@ -6,6 +6,6 @@ alwaysApply: false
 Read @docs/parity/README.md and @docs/parity/GAPS.md first.
 
 - Find gaps with `cargo xtask parity --upstream <upstream-checkout>` and check each finding in both codebases before acting on it.
-- Port one upstream commit per change and name it in the commit message: `fix(scope): <what> (upstream <short-sha>)`.
+- Port one upstream commit per change and name it in the commit message: `fix(scope): <what> (upstream <sha>)`, with the 9-character SHA.
 - Record accepted differences in `docs/parity/allowlist.json` with a reason, and open gaps in `docs/parity/GAPS.md`.
-- When the port is complete up to a commit, move `syncedCommit` in `docs/parity/upstream.json`.
+- When the port is complete up to a commit, move `syncedCommit`, `syncedVersion`, and `syncedOn` in `docs/parity/upstream.json`.

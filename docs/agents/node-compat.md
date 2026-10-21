@@ -6,7 +6,7 @@ Extensions run on pi-js, an embedded QuickJS runtime with Node 22 built-in modul
 
 | What | Where |
 | --- | --- |
-| Native code for a module | `crates/pi-js/src/node/<module>.rs` |
+| Native code for a module | `crates/pi-js/src/node/`: usually `<module>.rs`, plus files such as `net_server.rs` or `tls_wrap.rs` for large modules; `crypto/` is a directory and `worker_threads` is `worker.rs` |
 | JavaScript for a module | `crates/pi-js/src/js/<module>.js` |
 | Modules `require` can load | `NODE_BUILTINS` in `crates/pi-js/src/resolve/mod.rs` |
 | Supported module list | `crates/pi-js/src/node/builtins.rs` |

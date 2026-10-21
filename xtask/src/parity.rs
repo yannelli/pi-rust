@@ -52,7 +52,10 @@ struct Options {
     strict: bool,
 }
 
-fn parse_args(args: &[String]) -> Result<Options, String> {
+const USAGE: &str = "usage: cargo xtask parity --upstream <path> [--out <file>] [--strict]";
+
+/// The options, or `None` for `--help`.
+fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
     let (mut upstream, mut out, mut strict) = (None, None, false);
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
@@ -60,11 +63,12 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             "--upstream" => upstream = Some(PathBuf::from(rest.next().ok_or("--upstream needs a path")?)),
             "--out" => out = Some(PathBuf::from(rest.next().ok_or("--out needs a path")?)),
             "--strict" => strict = true,
+            "--help" | "-h" => return Ok(None),
             other => return Err(format!("parity: unexpected argument {other}")),
         }
     }
     let upstream = upstream.ok_or("parity needs --upstream <path to a checkout of earendil-works/pi>")?;
-    Ok(Options { upstream, out, strict })
+    Ok(Some(Options { upstream, out, strict }))
 }
 
 fn package_version(upstream: &Path) -> Option<String> {
@@ -105,7 +109,10 @@ pub fn build_report(upstream: &Path, root: &Path, synced: &Synced, allowlist: Al
 }
 
 pub fn run(args: &[String], root: &Path) -> Result<(), String> {
-    let options = parse_args(args)?;
+    let Some(options) = parse_args(args)? else {
+        println!("{USAGE}");
+        return Ok(());
+    };
     if !options.upstream.is_dir() {
         return Err(format!("parity: {} is not a directory", options.upstream.display()));
     }
@@ -123,6 +130,10 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
             println!("Wrote {} ({findings} findings not in the allowlist)", out.display());
         }
         None => print!("{text}"),
+    }
+    let skipped = report.skipped_sections();
+    if options.strict && !skipped.is_empty() {
+        return Err(format!("parity sections did not run: {}", skipped.join(", ")));
     }
     if options.strict && findings > 0 {
         return Err(format!("{findings} parity findings are not in docs/parity/allowlist.json"));
