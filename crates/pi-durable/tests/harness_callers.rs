@@ -56,8 +56,8 @@ fn names(list: &[&str]) -> Vec<String> {
     list.iter().map(|name| (*name).to_owned()).collect()
 }
 
-fn model_tools(filter: ToolFilter) -> AgentChange {
-    AgentChange { model_tools: Change::Set(filter), ..AgentChange::default() }
+fn model_tools(filter: impl Into<ModelToolFilter>) -> AgentChange {
+    AgentChange { model_tools: Change::Set(filter.into()), ..AgentChange::default() }
 }
 
 fn first_code(result: Option<&NestedToolExecutionResult>) -> Option<String> {
@@ -117,7 +117,7 @@ async fn never_offers_a_tool_that_is_not_enabled_nor_lets_tools_call_it() {
     // modelTools cannot bring back what tools disabled.
     let change = AgentChange {
         tools: Change::Set(ToolFilter::Remove { remove: names(&["bash"]) }),
-        model_tools: Change::Set(ToolFilter::List(names(&["bash", "probe"]))),
+        model_tools: Change::Set(ModelToolFilter::List(names(&["bash", "probe"]))),
         ..AgentChange::default()
     };
     root.configure(change, &ctx()).await.unwrap();

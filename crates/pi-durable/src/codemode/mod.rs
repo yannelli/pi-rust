@@ -161,13 +161,10 @@ pub fn create_codemode_extension(options: CodemodeToolOptions) -> Extension {
         extension = extension.tool(tool);
     }
     let render = move |input: crate::harness::PromptInput, _| {
-        let callable: Vec<Arc<ToolRegistration>> = input
-            .agent
-            .callable
-            .iter()
-            .filter(|tool| !tool.name().starts_with(CODEMODE_INTERNAL_PREFIX))
-            .cloned()
-            .collect();
+        // Deferred tools are found with `searchTools()`, as the coding agent leaves them out too.
+        let listed =
+            |tool: &&Arc<ToolRegistration>| !tool.name().starts_with(CODEMODE_INTERNAL_PREFIX) && !tool.deferred;
+        let callable: Vec<Arc<ToolRegistration>> = input.agent.callable.iter().filter(listed).cloned().collect();
         let budget = budget.unwrap_or(DEFAULT_CODEMODE_INLINE_BUDGET);
         std::future::ready(Ok(codemode_section(&callable, &namespaces, budget)))
     };

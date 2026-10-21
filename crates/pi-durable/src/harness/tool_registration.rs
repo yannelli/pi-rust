@@ -84,6 +84,9 @@ pub struct ToolRegistration {
     pub structured_output_schema: Option<Value>,
     /// `None`: both callers.
     pub callers: Option<Vec<ToolCaller>>,
+    /// Not offered to the model until `model_tools` names it (in its list or its `add`, which `add_tools` writes).
+    /// Other tools can call it any time.
+    pub deferred: bool,
     pub output_limits: Option<ToolOutputLimits>,
     pub execute: ExecuteFn,
 }
@@ -116,6 +119,11 @@ impl ToolRegistration {
 
     pub fn with_callers(mut self, callers: Vec<ToolCaller>) -> Self {
         self.callers = Some(callers);
+        self
+    }
+
+    pub fn with_deferred(mut self) -> Self {
+        self.deferred = true;
         self
     }
 
@@ -160,6 +168,7 @@ where
         prepare_arguments: None,
         structured_output_schema: None,
         callers: None,
+        deferred: false,
         output_limits: None,
         execute: Arc::new(move |args, api, context| Box::pin(execute(args, api, context))),
     }

@@ -225,6 +225,19 @@ async fn saves_images_to_files_and_names_them_next_to_the_image() {
 }
 
 #[tokio::test]
+async fn calls_a_deferred_tool_the_model_is_not_offered_and_finds_it_in_all_tools() {
+    let chat = codemode_chat(vec![]);
+    let later =
+        define_tool("later", "A deferred tool", json!({ "type": "object", "properties": {} }), |_, _, _| async {
+            Ok(ToolExecutionResult::text("later ran"))
+        });
+    add_tool(&chat.setup, later.with_deferred());
+    let code = r#"return [await tools.later({}), ALL_TOOLS.some((tool) => tool.name === "later")];"#;
+    let (text, _) = run_script(code, chat).await;
+    assert!(text.contains(r#"["later ran",true]"#), "{text}");
+}
+
+#[tokio::test]
 async fn reports_a_failed_script_with_its_error_and_the_calls_already_made() {
     let code = r#"await tools.echo({ text: "a" }); throw new Error("boom");"#;
     let (text, result) = run_script(code, codemode_chat(vec![])).await;

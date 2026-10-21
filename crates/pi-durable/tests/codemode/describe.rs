@@ -74,7 +74,8 @@ async fn renders_the_section_from_the_conversation_s_callable_tools_into_the_sys
     options.namespaces = vec![github()];
     setup.registry.install(create_codemode_extension(options)).unwrap();
     let issues = (*described("mcp__github__list_issues", "List issues.")).clone().with_callers(vec![ToolCaller::Tools]);
-    let tools = Extension::new("tools").tool(described("read", "Read a file.")).tool(issues);
+    let get_issue = (*described("mcp__github__get_issue", "Get an issue.")).clone().with_deferred();
+    let tools = Extension::new("tools").tool(described("read", "Read a file.")).tool(issues).tool(get_issue);
     setup.registry.install(tools).unwrap();
     setup.faux.set_responses([answer("hi")]);
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &setup).await;
@@ -87,6 +88,8 @@ async fn renders_the_section_from_the_conversation_s_callable_tools_into_the_sys
     let codemode = sections["codemode"].as_str().unwrap();
     assert!(codemode.contains("### `read`"), "{codemode}");
     assert!(codemode.contains("### `mcp__github__list_issues`"), "{codemode}");
+    // Deferred tools are found with searchTools(), not listed.
+    assert!(!codemode.contains("mcp__github__get_issue"), "{codemode}");
     // The code mode tool itself is not callable from scripts.
     assert!(!codemode.contains("### `codemode`"), "{codemode}");
     // The tool declaration carries the script grammar; pi-ai applies it only for models that support it.
