@@ -20,6 +20,8 @@ static BRACKET_BLOCK: LazyLock<Regex> =
 static PENDING_BRACKET_BLOCK: LazyLock<Regex> = LazyLock::new(|| plain(r"^ {0,3}\\\[[ \t]*(?:\n)?([\s\S]*)$"));
 static PENDING_DOLLAR_BLOCK: LazyLock<Regex> = LazyLock::new(|| plain(r"^ {0,3}\$\$[ \t]*(?:\n)?([\s\S]*)$"));
 static BLOCK_START: LazyLock<Regex> = LazyLock::new(|| plain(r"(?:^|\n) {0,3}(?:\$\$|\\\[)"));
+static TABLE_DELIMITER_ROW: LazyLock<Regex> =
+    LazyLock::new(|| plain(r"^ {0,3}\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$"));
 
 fn is_escaped(source: &str, index: usize) -> bool {
     source[..index].bytes().rev().take_while(|b| *b == b'\\').count() % 2 == 1
@@ -38,6 +40,16 @@ fn find_closing_delimiter(source: &str, closing: &str, start: usize) -> Option<u
 
 fn looks_like_pending_dollar_math(source: &str) -> bool {
     PENDING_DOLLAR_MATH.is_match(source)
+}
+
+/// Whether `source` has a GFM table start: a header row followed by a delimiter row such as
+/// `|---|---|` or `| --- |`. The header needs a `|` only when the delimiter has none: a pipe-free
+/// delimiter without a pipe in the header is a thematic break, not a table.
+fn contains_table_start(source: &str) -> bool {
+    let lines: Vec<&str> = source.split('\n').collect();
+    lines
+        .windows(2)
+        .any(|pair| (pair[1].contains('|') || pair[0].contains('|')) && TABLE_DELIMITER_ROW.is_match(pair[1]))
 }
 
 /// Upstream `tokenizeInlineLatex`: `$...$`, `$$...$$`, `\(...\)`, and `\[...\]` on one line.
@@ -85,22 +97,29 @@ pub(crate) fn tokenize_inline(source: &str) -> Option<Token> {
 }
 
 /// Upstream `tokenizeBlockLatex`: `$$...$$` and `\[...\]` blocks, possibly still streaming.
+/// Display math never spans a table: without that check an unclosed `$$` or `\[` pairs with a
+/// later opener or stays pending, swallowing the table.
 pub(crate) fn tokenize_block(source: &str) -> Option<Token> {
     for regex in [&*DOLLAR_BLOCK, &*BRACKET_BLOCK] {
         if let Some(captures) = regex.captures(source)
             && !captures[1].is_empty()
+            && !contains_table_start(&captures[1])
         {
             let raw = captures[0].to_string();
             let text = crate::utils::js_trim(&captures[1]).to_string();
             return Some(Token::LatexBlock { raw, text, pending: false });
         }
     }
-    if let Some(captures) = PENDING_BRACKET_BLOCK.captures(source) {
+    if let Some(captures) = PENDING_BRACKET_BLOCK.captures(source)
+        && !captures[1].is_empty()
+        && !contains_table_start(&captures[1])
+    {
         return Some(Token::LatexBlock { raw: captures[0].to_string(), text: captures[1].to_string(), pending: true });
     }
     if let Some(captures) = PENDING_DOLLAR_BLOCK.captures(source)
         && !captures[1].is_empty()
         && looks_like_pending_dollar_math(&captures[1])
+        && !contains_table_start(&captures[1])
     {
         return Some(Token::LatexBlock { raw: captures[0].to_string(), text: captures[1].to_string(), pending: true });
     }

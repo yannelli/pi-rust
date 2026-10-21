@@ -87,6 +87,67 @@ fn allows_latex_rendering_to_be_disabled() {
     );
 }
 
+const TABLE: [&str; 3] = ["| A | B |", "|---|---|", "| 1 | 2 |"];
+const RENDERED_TABLE: [&str; 5] = ["┌───┬───┐", "│ A │ B │", "├───┼───┤", "│ 1 │ 2 │", "└───┴───┘"];
+
+/// Joins `before`, the table lines, and `after` with newlines.
+fn with_table(before: &[&str], after: &[&str]) -> String {
+    [before, &TABLE, after].concat().join("\n")
+}
+
+/// The lines `before`, the rendered table, and `after`.
+fn rendered_table(before: &[&str], after: &[&str]) -> Vec<String> {
+    [before, &RENDERED_TABLE, after].concat().into_iter().map(String::from).collect()
+}
+
+#[test]
+fn renders_a_table_after_an_orphan_dollar_opener() {
+    let _caps = Capabilities::plain();
+    let source = ["Intro", "", "$$", "", TABLE[0], TABLE[1], TABLE[2], "", "After"].join("\n");
+    assert_eq!(rendered_plain(&source), rendered_table(&["Intro", "", "$$", ""], &["", "After"]));
+    let source = with_table(&["$$", "x = 1", ""], &[]);
+    assert_eq!(rendered_plain(&source), rendered_table(&["$$", "x = 1", ""], &[]));
+}
+
+#[test]
+fn does_not_pair_an_unclosed_dollar_opener_with_a_later_one_across_a_table() {
+    let _caps = Capabilities::plain();
+    let source = with_table(&["Intro", "", "$$", "x = 1", ""], &["", "$$", "y^2", "$$"]);
+    assert_eq!(rendered_plain(&source), rendered_table(&["Intro", "", "$$", "x = 1", ""], &["", "y²"]));
+}
+
+#[test]
+fn renders_tables_with_pipe_free_delimiters_or_headers_after_an_orphan_dollar_opener() {
+    let _caps = Capabilities::plain();
+    let source = ["$$", "", "| A |", ":---:", "| 1 |"].join("\n");
+    assert_eq!(rendered_plain(&source), ["$$", "", "┌───┐", "│ A │", "├───┤", "│ 1 │", "└───┘"]);
+    let source = ["$$", "x^2", "", "Value", "| --- |", "1"].join("\n");
+    let expected = ["$$", "x^2", "", "┌───────┐", "│ Value │", "├───────┤", "│ 1     │", "└───────┘"];
+    assert_eq!(rendered_plain(&source), expected);
+}
+
+#[test]
+fn renders_a_table_after_an_orphan_bracket_opener() {
+    let _caps = Capabilities::plain();
+    let source = with_table(&["\\\\[", "x^2", ""], &[]);
+    assert_eq!(rendered_plain(&source), rendered_table(&["", "\\[", "x^2", ""], &[]));
+}
+
+#[test]
+fn does_not_pair_an_unclosed_bracket_opener_with_a_later_one_across_a_table() {
+    let _caps = Capabilities::plain();
+    let source = with_table(&["\\\\[", "x = 1", ""], &["", "\\\\[", "y^2", "\\\\]"]);
+    let expected = rendered_table(&["", "\\[", "x = 1", ""], &["", "\\", "", "\\[", "y^2", "\\\\]"]);
+    assert_eq!(rendered_plain(&source), expected);
+}
+
+#[test]
+fn still_renders_closed_multi_line_display_math_followed_by_a_table() {
+    let _caps = Capabilities::plain();
+    let source = with_table(&["$$", "a", "+ b", "$$", ""], &[]);
+    assert_eq!(rendered_plain(&source), rendered_table(&["a + b", ""], &[]));
+}
+
 #[test]
 fn switches_from_raw_to_rendered_math_when_a_streamed_delimiter_closes() {
     let _caps = Capabilities::plain();
