@@ -18,6 +18,7 @@ use pi_coding_agent::config::{agent_dir, env_flag, expand_tilde};
 use pi_coding_agent::diagnostics::{
     guarded_stdout, print_timings, record_fatal_error, reset_timings, say_stdout, take_over_stdout, time,
 };
+use pi_coding_agent::doctor::{DoctorInputs, run_doctor_command};
 use pi_coding_agent::export::{ExportTheme, export_from_file};
 use pi_coding_agent::extensions::rpc::ExtensionRpcHost;
 use pi_coding_agent::files::process_cli_file_args;
@@ -346,6 +347,10 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
         return Ok(output.code);
     }
     let cwd = std::env::current_dir()?;
+    let doctor = || DoctorInputs::from_env(cwd.clone(), agent_dir.clone(), oauth_lookup());
+    if let Some(output) = run_doctor_command(&raw, doctor).await {
+        return Ok(print_output(output));
+    }
     let bootstrap_settings = SettingsManager::create(&cwd, &agent_dir, SettingsOptions { project_trusted: false });
     configure_http_from_settings(&bootstrap_settings);
     let mut package_options = PackageCommandOptions::from_env(cwd.clone(), agent_dir.clone());

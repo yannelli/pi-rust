@@ -275,6 +275,7 @@ pub const CLI_COMMANDS: &[CliCommand] = &[
         "Print a shell completion script (bash, zsh, fish, powershell)",
         COMPLETION_SHELLS,
     ),
+    command("doctor", "[--json]", "Check the install, config, credentials, MCP servers, and terminal", &["--json"]),
 ];
 
 /// The options `pi completion` offers: every option but `--`.

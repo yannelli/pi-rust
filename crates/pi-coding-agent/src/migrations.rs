@@ -191,11 +191,16 @@ fn check_deprecated_extension_dirs(base: &Path, label: &str) -> Vec<String> {
 }
 
 fn migrate_extension_system(cwd: &Path, agent_dir: &Path) -> Vec<String> {
-    let project = project_config_dir(cwd);
     migrate_commands_to_prompts(agent_dir, "Global");
-    migrate_commands_to_prompts(&project, "Project");
+    migrate_commands_to_prompts(&project_config_dir(cwd), "Project");
+    deprecation_warnings(cwd, agent_dir)
+}
+
+/// The deprecated `hooks/` and custom `tools/` directories [`run_migrations`] warns about, found
+/// without migrating anything.
+pub fn deprecation_warnings(cwd: &Path, agent_dir: &Path) -> Vec<String> {
     let mut warnings = check_deprecated_extension_dirs(agent_dir, "Global");
-    warnings.extend(check_deprecated_extension_dirs(&project, "Project"));
+    warnings.extend(check_deprecated_extension_dirs(&project_config_dir(cwd), "Project"));
     warnings
 }
 

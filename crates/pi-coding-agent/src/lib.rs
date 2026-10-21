@@ -13,6 +13,7 @@ pub mod compaction;
 pub mod completion;
 pub mod config;
 pub mod diagnostics;
+pub mod doctor;
 pub mod experimental;
 pub mod export;
 pub mod extension_ui;
