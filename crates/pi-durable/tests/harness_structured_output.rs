@@ -5,13 +5,12 @@ mod support;
 use std::sync::{Arc, Mutex};
 
 use pi_ai::{ContentBlock, Message, ToolResultMessage};
-use pi_durable::StorageWrite;
 use pi_durable::env::{LocalEnvOptions, LocalExecutionEnv};
 use pi_durable::harness::tool::{ToolHookCall, ToolHooks, tool_task};
 use pi_durable::harness::*;
 use pi_durable::storage::MemoryStorage;
 use pi_durable::tools::{BashToolOptions, create_bash_tool};
-use pi_durable::types::DocumentContent;
+use pi_durable::{CommitChange, DocumentCommitChange, DurableError};
 use serde_json::{Value, json};
 use support::ControlledStorage;
 use support::chat::{add_tool, answer, call, no_parameters};
@@ -145,6 +144,22 @@ async fn stores_exactly_what_callers_and_events_get_without_the_model_s_output_a
     setup.faux.set_responses([call("probe", "c1"), answer("done")]);
     let storage = Arc::new(ControlledStorage::default());
     let (harness, root) = open_chat(storage.clone(), &setup).await;
+    // The result each nested call's document got, as committed.
+    let stored = Arc::new(Mutex::new(Vec::new()));
+    let sink = stored.clone();
+    let _listener = harness.subscribe_commits(move |publication, _| {
+        for change in &publication.changes {
+            if let CommitChange::Document(DocumentCommitChange::Document { record, value: Some(value), ops, .. }) =
+                change
+                && record.kind == "pi.tool.nested-call"
+                && !ops.is_empty()
+                && !value["result"].is_null()
+            {
+                sink.lock().unwrap().push(Value::from(&value["result"]));
+            }
+        }
+        Ok(())
+    });
     let stream = watch_events(&harness, root.id, &ctx()).await.unwrap();
     let ends = Arc::new(Mutex::new(Vec::new()));
     let sink = ends.clone();
@@ -169,20 +184,7 @@ async fn stores_exactly_what_callers_and_events_get_without_the_model_s_output_a
     assert_eq!((received[1]["structuredOutput"].clone(), received[1]["isError"].clone()), (Value::Null, json!(false)));
     assert!(received[1].as_object().unwrap().contains_key("structuredOutput"));
     assert!(received[0].get("output").is_none());
-    let stored: Vec<Value> = storage
-        .commits()
-        .into_iter()
-        .flatten()
-        .filter_map(|write| match write {
-            StorageWrite::DocumentCreate { record, content: DocumentContent::Base { value, .. } }
-                if record.kind == "pi.tool.nested-result" =>
-            {
-                Some(Value::from(&value["result"]))
-            }
-            _ => None,
-        })
-        .collect();
-    assert_eq!(stored, received);
+    assert_eq!(*stored.lock().unwrap(), received);
     assert_eq!(*ends.lock().unwrap(), received);
 }
 
@@ -251,16 +253,60 @@ async fn gives_callers_no_structured_output_for_an_error_result_the_harness_wrot
     assert_eq!(value(&received), None);
 }
 
+fn diagnostics_json(result: &NestedToolExecutionResult) -> Value {
+    serde_json::to_value(&result.diagnostics).unwrap()
+}
+
 #[tokio::test]
-async fn lets_an_error_result_of_a_schema_tool_omit_structured_output_and_keeps_none_of_its_output() {
+async fn gives_callers_a_schema_tool_s_error_text_as_a_diagnostic_never_as_structured_output() {
+    let failing =
+        || returning("fails", ToolExecutionResult::error("nope")).with_structured_output_schema(count_schema());
     let setup = chat_setup(Default::default());
-    add_tool(
-        &setup,
-        returning("fails", ToolExecutionResult::error("nope")).with_structured_output_schema(count_schema()),
-    );
+    add_tool(&setup, failing());
+    // Its text reaches the caller as an error diagnostic: structuredOutput is only ever the tool's own value.
     let received = nested(&setup, "fails").await;
-    assert!(received.is_error && received.diagnostics.is_empty());
+    assert!(received.is_error);
+    assert_eq!(diagnostics_json(&received), json!([{ "severity": "error", "code": "tool_error", "message": "nope" }]));
     assert_eq!(value(&received), None);
+
+    // The model's call keeps the text in its output, without the extra diagnostic.
+    let model_setup = chat_setup(Default::default());
+    add_tool(&model_setup, failing());
+    assert_eq!(direct(&model_setup, "fails").await.content, [text("nope")]);
+
+    // A thrown error's message is in its tool_error diagnostic, not in the output.
+    let thrown = chat_setup(Default::default());
+    let throws = define_tool("throws", "throws", no_parameters(), |_, _, _| async {
+        Err::<ToolExecutionResult, _>(DurableError::error("permission denied"))
+    });
+    add_tool(&thrown, throws.with_structured_output_schema(count_schema()));
+    let thrown_result = nested(&thrown, "throws").await;
+    // One diagnostic: the thrown message, not a second one from its (empty) output.
+    assert!(thrown_result.is_error);
+    assert_eq!(codes(&thrown_result), [Some("tool_error".to_owned())]);
+    assert_eq!(thrown_result.diagnostics[0].message, "permission denied");
+    assert_eq!(value(&thrown_result), None);
+
+    // An error result whose own diagnostics say what went wrong gets no second one from its output.
+    let explained = chat_setup(Default::default());
+    let quota = ToolDiagnostic::new(DiagnosticSeverity::Error, "quota exceeded").with_code("quota");
+    let result = ToolExecutionResult { diagnostics: Some(vec![quota]), ..ToolExecutionResult::error("partial log") };
+    add_tool(&explained, returning("fails", result).with_structured_output_schema(count_schema()));
+    let received = nested(&explained, "fails").await;
+    assert_eq!(
+        diagnostics_json(&received),
+        json!([{ "severity": "error", "code": "quota", "message": "quota exceeded" }])
+    );
+
+    // An error result that has structured output keeps it.
+    let kept = chat_setup(Default::default());
+    let with_value = ToolExecutionResult {
+        structured_output: Some(json!({ "count": 0 }).into()),
+        ..ToolExecutionResult::error("nope")
+    };
+    add_tool(&kept, returning("fails", with_value).with_structured_output_schema(count_schema()));
+    let received = nested(&kept, "fails").await;
+    assert_eq!((received.is_error, value(&received)), (true, Some(json!({ "count": 0 }))));
 }
 
 #[tokio::test]

@@ -4,6 +4,7 @@
 #[path = "../support/mod.rs"]
 mod support;
 
+mod earlier_runs;
 mod recovery;
 
 use std::sync::{Arc, Mutex};

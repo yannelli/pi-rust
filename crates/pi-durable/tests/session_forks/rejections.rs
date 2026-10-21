@@ -14,12 +14,17 @@ async fn coalesces_a_typed_migration_and_override_into_the_copied_creation_base(
     let checkpoints = Arc::new(AtomicUsize::new(0));
     let counter = checkpoints.clone();
     let initial = json(r#"{"count":0,"migrated":false}"#);
-    let spec = DocSpec::new("fork.override", 2, RewindableConversation(DocumentFork::AsOf), move || initial.clone())
-        .migrate(|value, _| Ok(json(&format!(r#"{{"count":{},"migrated":true}}"#, value["count"]))))
-        .checkpoint_when(move |_, _, _| {
+    let spec = DocSpec::new(
+        "fork.override",
+        2,
+        RewindableConversation(DocumentFork::AsOf),
+        move || initial.clone(),
+        move |_, _, _| {
             counter.fetch_add(1, Ordering::SeqCst);
             Ok(false)
-        });
+        },
+    )
+    .migrate(|value, _| Ok(json(&format!(r#"{{"count":{},"migrated":true}}"#, value["count"]))));
     let v2 = define_doc(spec).unwrap();
     let test = open_test_session();
     let parent = create_conversation(&test.session).await;
@@ -168,7 +173,11 @@ async fn rolls_every_copied_base_back_when_later_pre_admission_assembly_fails() 
     let copied = rewindable("fork.rollback.copied", r#"{"value":"copied"}"#);
     let fail_checkpoint = Arc::new(AtomicBool::new(true));
     let fail = fail_checkpoint.clone();
-    let spec = DocSpec::new("fork.rollback.failure", 1, SessionScope, || json(r#"{"count":0}"#)).checkpoint_when(
+    let spec = DocSpec::new(
+        "fork.rollback.failure",
+        1,
+        SessionScope,
+        || json(r#"{"count":0}"#),
         move |_, _, _| match fail.load(Ordering::SeqCst) {
             true => Err(DurableError::error("checkpoint failed")),
             false => Ok(false),

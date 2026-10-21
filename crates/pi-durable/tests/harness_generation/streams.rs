@@ -237,6 +237,7 @@ async fn orphans_a_blocked_run_task_with_full_run_cleanup() {
         request_id: None,
         content: UserContent::Text("busy".into()),
         when_busy: Some(WhenBusy::Reject),
+        entry: None,
     };
     let error = root.submit(busy, &ctx()).await.err().unwrap();
     assert!(error.to_string().contains("is busy"), "{error}");

@@ -302,14 +302,17 @@ impl Tx {
                     change.prepared.abort();
                 }
                 if let Some(loaded) = &change.loaded {
-                    let mut meta = lock(&loaded.meta);
-                    meta.stored_version = meta.stored_version.max(change.version);
-                    if let Some(StorageWrite::DocumentChange { content, .. }) = &plan.content {
-                        match content {
-                            DocumentContent::Base { .. } => meta.deltas_since_base = 0,
-                            DocumentContent::Delta { .. } => meta.deltas_since_base += 1,
+                    {
+                        let mut meta = lock(&loaded.meta);
+                        meta.stored_version = meta.stored_version.max(change.version);
+                        if let Some(StorageWrite::DocumentChange { content, .. }) = &plan.content {
+                            match content {
+                                DocumentContent::Base { .. } => meta.deltas_since_base = 0,
+                                DocumentContent::Delta { .. } => meta.deltas_since_base += 1,
+                            }
                         }
                     }
+                    core.touch_document(&plan.address_id);
                 } else if !plan.retire {
                     core.install(LoadedDocument {
                         address_id: plan.address_id.clone(),

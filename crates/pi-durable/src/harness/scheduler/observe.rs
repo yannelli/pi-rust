@@ -1,6 +1,6 @@
 //! The scheduler's commit and close listeners.
 
-use super::{Mode, Scheduler, TaskNode, Up, cancellation_intent, failed_outcome};
+use super::{Mode, Node, Scheduler, cancellation_intent, failed_outcome};
 use crate::harness::util::{closed_error, lock};
 use crate::types::{
     CommitChange, CommitPublication, JoinPolicy, SubmissionStatus, SubmissionType, TaskRecord, TaskState, TaskStatus,
@@ -17,6 +17,14 @@ impl Scheduler {
             let mut state = lock(&self.state);
             let mut updated = Vec::new();
             let mut failed = Vec::new();
+            // Edges first, so the tasks a commit creates in a new conversation hang from it.
+            for change in &publication.changes {
+                if let CommitChange::Conversation(record) = change
+                    && !state.edges.contains_key(&record.id)
+                {
+                    state.set_edge(record.id, record.owner.map(|owner| owner.task_id));
+                }
+            }
             for change in &publication.changes {
                 let CommitChange::Task(record) = change else { continue };
                 changed = true;
@@ -33,13 +41,10 @@ impl Scheduler {
                 if failed_outcome(record) && previous.as_ref().is_none_or(|p| !failed_outcome(p)) {
                     failed.push(record.id);
                 }
+                state.track(previous.as_ref(), record);
                 if record.is_terminal() {
-                    state.live.remove(&record.id);
                     state.failed_migrations.remove(&record.id);
                     state.fail_fast_checks.remove(&record.id);
-                    if state.conversation_owners.contains(&record.id) {
-                        state.settled.insert(record.id, TaskNode::of(record));
-                    }
                     resolved.push(record.clone());
                     // Its owner may finalize now.
                     reconcile = true;
@@ -71,26 +76,19 @@ impl Scheduler {
                     state.fail_fast_checks.insert(record.id);
                     reconcile = true;
                 }
-                state.live.insert(record.id, record.clone());
-                updated.push(record.clone());
-            }
-            for id in failed {
-                let waiters: Vec<_> = state
-                    .live
-                    .values()
-                    .filter(|r| matches!(&r.state, TaskState::Waiting { policy: JoinPolicy::FailFast, on, .. } if on.contains(&id)))
-                    .map(|record| record.id)
-                    .collect();
-                for waiter in waiters {
-                    state.fail_fast_checks.insert(waiter);
-                    reconcile = true;
+                // Its owners and place never change: what is above it is checked once, when it becomes live.
+                if previous.is_none() {
+                    updated.push(record.clone());
                 }
             }
-            for change in &publication.changes {
-                if let CommitChange::Conversation(record) = change
-                    && !state.edges.contains_key(&record.id)
-                {
-                    state.set_edge(record.id, record.owner.map(|owner| owner.task_id));
+            for id in failed {
+                let waiters: Vec<_> = state.waiters.get(&id).into_iter().flatten().copied().collect();
+                for waiter in waiters {
+                    let waiting = state.live.get(&waiter).map(|record| &record.state);
+                    if matches!(waiting, Some(TaskState::Waiting { policy: JoinPolicy::FailFast, .. })) {
+                        state.fail_fast_checks.insert(waiter);
+                        reconcile = true;
+                    }
                 }
             }
             for change in &publication.changes {
@@ -99,22 +97,27 @@ impl Scheduler {
                 if record.status != SubmissionStatus::Queued || record.kind != SubmissionType::Input {
                     continue;
                 }
-                let up = Up::Conversation(record.conversation_id);
-                if !state.chain_known(up, None) || state.below_cancelled(up) {
+                // Only an owner with cancellation intent withdraws it; a later intent's mark runs the cascade then.
+                if state.intent.is_empty() {
+                    continue;
+                }
+                let conversation = Node::Conversation(record.conversation_id);
+                if !state.known(conversation) || state.below_cancelled(conversation) {
                     state.cascade_pending = true;
                 }
             }
             for record in &updated {
                 // Work created below a cancelled owner, even after its cascade, is aborted too.
-                if !state.chain_known(Up::of(record), None) {
+                if state.unloaded.contains(&record.id) {
                     reconcile = true;
-                } else if !record.background && !record.abort_requested && state.below_cancelled(Up::of(record)) {
+                } else if !record.background && !record.abort_requested && state.below_cancelled(Node::of(record)) {
                     state.cascade_pending = true;
                 }
             }
             if state.cascade_pending {
                 reconcile = true;
             }
+            state.sweep();
         }
         for record in resolved {
             let id = record.id;

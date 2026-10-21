@@ -14,7 +14,7 @@ use super::core::{HarnessCore, HarnessOptions};
 use super::inbox::INBOX_DOC;
 use super::live::LIVE_DOC;
 use super::registry::builtin_tasks;
-use super::scheduler::Scheduler;
+use super::scheduler::{IndexSizes, Scheduler};
 use super::submissions::{Submission, Submissions};
 use super::task_graph::{TaskGraphView, TaskGraphWatch};
 use super::telemetry::DurableTelemetry;
@@ -65,6 +65,12 @@ impl SessionHooks for HarnessHooks {
         if let Some(scheduler) = scheduler {
             scheduler.join().await;
         }
+    }
+
+    /// Read at each use, as all settings are, but only this field: it is read on every commit.
+    fn document_retention_ms(&self) -> Option<f64> {
+        let source = self.options.settings.as_ref()?;
+        source().ok()?.document_retention_ms
     }
 
     fn report(&self, error: &DurableError, info: &ReportInfo, context: Option<&Context>) {
@@ -122,7 +128,11 @@ impl Harness {
         });
         let session = create_session(
             storage,
-            SessionOptions { now: options.now.clone(), hooks: Some(hooks.clone() as Arc<dyn SessionHooks>) },
+            SessionOptions {
+                now: options.now.clone(),
+                hooks: Some(hooks.clone() as Arc<dyn SessionHooks>),
+                document_retention_ms: None,
+            },
         );
         let timer_hooks = hooks.clone();
         let timer_report = Arc::new(move |error: &DurableError| {
@@ -196,6 +206,12 @@ impl Harness {
     pub fn wake(&self) -> DurableResult<Wake> {
         self.0.session.assert_usable()?;
         Ok(self.0.scheduler.wake())
+    }
+
+    /// Internal, for tests: sizes of the scheduler's ownership indexes.
+    #[doc(hidden)]
+    pub fn scheduler_index_sizes(&self) -> IndexSizes {
+        self.0.scheduler.index_sizes()
     }
 
     /// The root conversation, created on first use.

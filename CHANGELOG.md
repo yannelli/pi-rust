@@ -2,6 +2,88 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.6.0] - 2026-10-21
+
+### Breaking Changes
+
+- **durable:** reject waits that close a wait cycle (upstream eb2fce43d) ([8a300b4](https://github.com/yannelli/pi-rust/commit/8a300b4d227875480efce797986f9440ee897c33))
+- **durable:** deferred tools and the tool_search extension (upstream 77332f7a3) ([3b918c9](https://github.com/yannelli/pi-rust/commit/3b918c9ebae7387a03470804682232d242fdd138))
+- **durable:** inputs placed as application entries, display-only writes appended at once (upstream e6b9a6af5) ([5177658](https://github.com/yannelli/pi-rust/commit/5177658b5c18998dbdca2460b15e730c25c05ed7))
+- **durable:** one document per nested call; TaskRuntime::owned_tasks() (upstream 4ac0bd8c7) ([ad16fa4](https://github.com/yannelli/pi-rust/commit/ad16fa44054955c673b4354071eabbf653146cc4))
+- **telemetry:** add TelemetryStore, trace renderer, and trace IDs (upstream d9025a5f5) ([8f9980c](https://github.com/yannelli/pi-rust/commit/8f9980c8570ef8d5a2decdd13908cc6af1203a56))
+- **durable:** require checkpoint_when on document definitions (upstream 5c1736f82) ([a5d0ab4](https://github.com/yannelli/pi-rust/commit/a5d0ab42d7c475101f7e9c2585821fc3734046f6))
+
+### Added
+
+- **durable:** optional FileSystem::list_files for tree listings (upstream abfe62928) ([9d2a8f9](https://github.com/yannelli/pi-rust/commit/9d2a8f95febdea7832eda40461fe1513705ebeb0))
+- **durable:** code mode listing, tool search, output, models.*, grammar; tool error rule (upstream 8bb180bec) ([0065bda](https://github.com/yannelli/pi-rust/commit/0065bda213773c23eb84a32c15fecd7635343bd9))
+- **coding-agent:** add PI_CLIPBOARD_OSC52 to force OSC 52 copies (upstream 3e477eab5) ([6794362](https://github.com/yannelli/pi-rust/commit/679436236f089e5abd59e0ea4ca2c4fbc5c387e2))
+- **coding-agent:** show elapsed and total time on codemode rows (upstream 014873d7d) ([63062b3](https://github.com/yannelli/pi-rust/commit/63062b3900ceb3b1aacb092fa39d75bdf8c73567))
+- **durable:** bound the Session's document cache by use (documentRetentionMs) (upstream f44707e7f) ([d10b7af](https://github.com/yannelli/pi-rust/commit/d10b7affd73cce6ec4750321cb12bff9eab41fff))
+- **durable:** code mode result lists the script's tool calls (upstream 127b77121) ([2eee4de](https://github.com/yannelli/pi-rust/commit/2eee4de5eb342711ebd90d404d43ded9a19aae51))
+- **ai:** list the models of openai, xai, and google API keys (pi-rust extension) ([c02b11b](https://github.com/yannelli/pi-rust/commit/c02b11bbcf490e43812f59b5601945aef1c5240b))
+- **durable:** durable code mode (upstream 7b597d148) ([76046ee](https://github.com/yannelli/pi-rust/commit/76046eeaac36f69d7cbbd626e77d5dc4fba2241c))
+- **ai:** list the chat models of a github-copilot login (pi-rust extension) ([6b8f7c7](https://github.com/yannelli/pi-rust/commit/6b8f7c7eaa1a20bd2b7f8b400057308bf56957f2))
+- **ai,coding-agent:** list the models of an Anthropic key or login (pi-rust extension) ([957acc8](https://github.com/yannelli/pi-rust/commit/957acc8cd9f19e34c8f439de5f0007c2b2839c87))
+- **acp:** report turn token usage and session cost ([516ea20](https://github.com/yannelli/pi-rust/commit/516ea20981472f4685248a5b47512a7cea7c1250))
+- **coding-agent:** wire reachesTools for JS extension tools and the tool listing (upstream 24382bedd) ([797a615](https://github.com/yannelli/pi-rust/commit/797a615bd89b3767a9e42ba4e50a4e30eaedd9ea))
+- **ai:** list the models of the signed-in account for openai-codex ([67cb1cf](https://github.com/yannelli/pi-rust/commit/67cb1cf66acd794f9b69dd1aa98c1c90208b35f9))
+- **ai,coding-agent:** list only the OpenRouter models a key may use (upstream ee409a85f) ([9e55318](https://github.com/yannelli/pi-rust/commit/9e55318bd17a643e9b5b5fde0f9dfc20c75ea43c))
+- **pi-js:** add net listen reusePort on Linux and dgram source-specific multicast membership ([5ebec8e](https://github.com/yannelli/pi-rust/commit/5ebec8e43b8140f0bd9dca65d10042f866d63763))
+- **pi-js:** send and read http2 custom settings, with SETTINGS ACKs driving localSettings and the settings() callback ([fae80c9](https://github.com/yannelli/pi-rust/commit/fae80c999da1b273ce763b5e63d68e6777c448bf))
+- **pi-js:** add node:test snapshot assertions with Node's snapshot files and --test-update-snapshots ([2fca55c](https://github.com/yannelli/pi-rust/commit/2fca55c8b935d7370652b29efee16fdaf82bf29f))
+- **env:** list_files for remote and local environments, node_platform (upstream b6fda579f) ([1261a26](https://github.com/yannelli/pi-rust/commit/1261a26fbcd8ec4d56c65d54ec9ed2098eed2de0))
+- **pi-js:** step sqlite StatementSync.iterate() one row per next() on a cursor shared like Node's statement ([cfabfd6](https://github.com/yannelli/pi-rust/commit/cfabfd691e4ba84492ecec333032593a49e56878))
+- **codemode:** show schema constraints in tool declarations (upstream 8a9c051f8) ([4ce2041](https://github.com/yannelli/pi-rust/commit/4ce2041f7bea7a7de25bea26fc0f89fd14062997))
+- **codemode:** deterministic runs that the host answers (upstream 0fb1aee74) ([69d5c79](https://github.com/yannelli/pi-rust/commit/69d5c79b6e4cda13dd922a559f816c2dd89dc66c))
+- **env:** add the listFiles operation to the daemon (upstream aa499c242) ([caf0a07](https://github.com/yannelli/pi-rust/commit/caf0a0798a1bd669084be2db88b5b5641c44df1d))
+- **env:** report a terminal's foreground job with ptyForeground (upstream 74613de65) ([6df97fc](https://github.com/yannelli/pi-rust/commit/6df97fce0dbdb954caaa0cac493542b26c267120))
+- **env:** add pty operations to the daemon (upstream 367b2bcf5) ([8c8d0f0](https://github.com/yannelli/pi-rust/commit/8c8d0f09efe429fadd54cc5a0751a83cfc51f0fb))
+- **durable:** exclusive SQLite operations and a replicated connection wrapper (upstream 48c8f3228) ([0b4d001](https://github.com/yannelli/pi-rust/commit/0b4d001e07ce5979df86ff72a6e9079dbf1233b9))
+- **pi-js:** support child_process stdio pipes above 2, file descriptors and fs streams, and TCP sockets as stdio entries ([b7d1d11](https://github.com/yannelli/pi-rust/commit/b7d1d11997aa48d85a94fb6c1fce671b099d50c5))
+- **pi-js:** add readline terminal mode with line editing, history, and keypress parsing, used by the REPL ([af0afc0](https://github.com/yannelli/pi-rust/commit/af0afc0f26a9f7a63ca05c40a5d9d46a61fdd919))
+- **pi-js:** parse multipart and urlencoded bodies in Body.formData and stream fetch request bodies ([cf624a6](https://github.com/yannelli/pi-rust/commit/cf624a661860d5f885c46ada4610595d058e2171))
+- **pi-js:** add readable byte streams, BYOB readers, and Duplex.from for promises, functions, Blobs, and web streams ([0c246db](https://github.com/yannelli/pi-rust/commit/0c246dba6d1a632b7bd328db0c2d2c198bfcd806))
+- **pi-js:** add fs fchmod, fchown, lutimes, statfs, lchmod, openAsBlob, and FileHandle chmod, chown, readableWebStream ([dad8ae0](https://github.com/yannelli/pi-rust/commit/dad8ae039dab9ede145a2cb7adcd215edb906a22))
+
+### Fixed
+
+- **js:** send the FIN before discarding unread bytes when a TCP socket closes ([3d5da00](https://github.com/yannelli/pi-rust/commit/3d5da000f48835fedc34721ba7ef45c898db8892))
+- **ai,coding-agent:** drop models retired upstream (upstream e5fe9777b) ([4b29139](https://github.com/yannelli/pi-rust/commit/4b2913943d31aa53f08a1d3ca8ded7a254185444))
+- **ai:** handle ChatGPT Business workspace usage limit errors (upstream cedefc532) ([f74748f](https://github.com/yannelli/pi-rust/commit/f74748f1085dadad42d260eaf051becac1c8e05f))
+- **js:** start async host calls in the order JavaScript made them ([4f869f9](https://github.com/yannelli/pi-rust/commit/4f869f9ff8ea3518e4d3c1c67d301dc3af659669))
+- **durable:** fail a run whose blocking compaction failed; keep compaction failures visible (upstream 89e5c2c07) ([648c61f](https://github.com/yannelli/pi-rust/commit/648c61f7f84efb58439f8ee877bd79a8f22a3ec9))
+- **coding-agent,durable:** omit thinking from compaction summaries (upstream 15e7bdc14) ([ebce4de](https://github.com/yannelli/pi-rust/commit/ebce4de4bb0da06320c02f484a19307610aaabf2))
+- **ai,coding-agent:** guard account model lists against redirects, unrelated lists, and upgrades ([73c3568](https://github.com/yannelli/pi-rust/commit/73c35687d7d70a7b958c9259bbdde1f028a26b68))
+- **ai:** sync the model catalog with upstream model data (upstream fbc456d82) ([12509c0](https://github.com/yannelli/pi-rust/commit/12509c036127611b11f561dc81cb4d8858ef9b5d))
+- **coding-agent:** restore terminal modes before process::exit in main and the config selector (upstream 9df819de3) ([eef6324](https://github.com/yannelli/pi-rust/commit/eef63249799a99ece3910f99a8360f5293013835))
+- **durable:** detect the legacy WSL launcher from SystemRoot and fall back when it is empty (upstream 61060ddf8) ([ae3c129](https://github.com/yannelli/pi-rust/commit/ae3c12989c34bd72583f651ec68a23735e8be4c0))
+- **coding-agent:** use tiered pricing and the model type check in the pi-ai compat helpers ([654a662](https://github.com/yannelli/pi-rust/commit/654a662714afadea7be900d82adaa20a98e371e3))
+- **coding-agent:** warn and exit non-zero in print mode on truncated response (upstream 441f5767c) ([9d519e1](https://github.com/yannelli/pi-rust/commit/9d519e16939f959d9de096cad5d455332b8130cf))
+- **coding-agent:** expand ~ in resource setting patterns (upstream 6a51a39d4) ([03516fb](https://github.com/yannelli/pi-rust/commit/03516fbda4ea52c5beea5470076507dd4d13f319))
+- **coding-agent:** emit before_agent_start for runs started by custom messages (upstream a447ba11f) ([c00e605](https://github.com/yannelli/pi-rust/commit/c00e6057ed842fdd0c4a12b868eb6b091d07ed47))
+- **coding-agent:** color the compaction indicator like the editor border when embedded (upstream dbc7ff87c) ([9c89aeb](https://github.com/yannelli/pi-rust/commit/9c89aebd656ab26702448ec35b3bd9c625cd8e24))
+- **durable:** closing the code mode sandbox does not decide the script's outcome (upstream 04566631c) ([5f9574f](https://github.com/yannelli/pi-rust/commit/5f9574fcac3103ee64ad50b978135b6dd87ddf05))
+- **js:** send a datagram at once when the OS takes it and report it on the next tick, so dgram send callbacks run before any reply as in Node ([6e377de](https://github.com/yannelli/pi-rust/commit/6e377de66ba912964df9827eb4b7128a7164c7af))
+- **durable:** bound the scheduler's ownership indexes by live work (upstream ea448f454) ([2f2e3b7](https://github.com/yannelli/pi-rust/commit/2f2e3b7fe540a8ce75d64b7008eabba210d68d98))
+- **js:** free a keep-alive client socket when the response ends after the request was fully handed to it, so a busy runtime still reuses it as Node does ([dc8a619](https://github.com/yannelli/pi-rust/commit/dc8a6199aaa5d1d1ce8cf9b659987715f7d47d58))
+- **durable:** drop redundant nested-call parent check; test owned_tasks() with a held child (upstream e37cdc420) ([219bc54](https://github.com/yannelli/pi-rust/commit/219bc54c7b39bb54823fd37d2add4652a085640f))
+- **codemode:** reject a misplaced @options line (upstream b6d505cd1) ([50bd9a8](https://github.com/yannelli/pi-rust/commit/50bd9a84b7017a0430348eaba7cb05ab9ef9194e))
+- **mcp:** accept any JSON value as tool structuredContent (upstream 67996ab75) ([b7446ba](https://github.com/yannelli/pi-rust/commit/b7446ba4b11e1a5d0dd2ebb4f0558bbf5b03b31f))
+- **parity:** harden the daily workflow and the report ([aa6932a](https://github.com/yannelli/pi-rust/commit/aa6932aa4408d7b7f86a3b5273db358e4d5cc106))
+- **mcp:** stop listing MCP resources when connecting (upstream f4cca2dc2) ([8238187](https://github.com/yannelli/pi-rust/commit/8238187bfc8f3b8b108b368fcec60b331a85883e))
+- **mcp:** describe pi mcp login --timeout as a limit on the whole sign-in (upstream 148622bc6) ([472aa31](https://github.com/yannelli/pi-rust/commit/472aa31abde3011120d6ff1a35b2cc6fbea58231))
+- **coding-agent:** accept mcp.json files with a UTF-8 BOM (upstream bdd9f0399) ([aad7428](https://github.com/yannelli/pi-rust/commit/aad7428419ca5e672261e29dd955a089a1b69b04))
+- **coding-agent:** expose @earendil-works/pi-ai/models in the extension loader (upstream 22dc6c26f) ([694dc43](https://github.com/yannelli/pi-rust/commit/694dc43964208659aa56fa6330fda1533a179a05))
+- **coding-agent:** queue codemode scripts at the worker limit (upstream 885a564b3) ([299d8ff](https://github.com/yannelli/pi-rust/commit/299d8ffe3cf6bad8e6df22e92cd143ac73515276))
+- **durable:** scheduler no longer visits every live task on each pass (upstream cb4375493) ([1418cce](https://github.com/yannelli/pi-rust/commit/1418cced3fcd0cb32d8808495d49687fb49f6750))
+- **coding-agent:** keep clipboard helpers out of pi's process group so Ctrl+Z does not stop them (upstream f8ab362cc) ([d238187](https://github.com/yannelli/pi-rust/commit/d2381870811389d1d06047fcdbe95e228ba3b5bb))
+- **coding-agent:** stack concurrent extension dialogs instead of replacing them (upstream 38847563f) ([10d464b](https://github.com/yannelli/pi-rust/commit/10d464b70ff389fc39c243e4ba17fb19741c6118))
+- **codemode:** description says schema tools resolve with their value on failure (upstream 427052247) ([9acd33c](https://github.com/yannelli/pi-rust/commit/9acd33ce454897017e4f1b84e7cea91396d4730c))
+- **mcp:** reject iss when no authorization server metadata was discovered (upstream c5f5b3282) ([750837d](https://github.com/yannelli/pi-rust/commit/750837d596172b22e47221c03e8360619a7a0b0c))
+- **coding-agent:** render CJK emphasis in HTML export (upstream 26293e74f) ([9835aee](https://github.com/yannelli/pi-rust/commit/9835aee68001324eccef6bd735999d573b928a99))
+- **coding-agent:** resolve Windows shells from installation directories (upstream 61060ddf8) ([76cfa90](https://github.com/yannelli/pi-rust/commit/76cfa90d533942cabfe43f098a3c949d03ba568b))
+
 ## [0.5.3] - 2026-10-21
 
 ### Added

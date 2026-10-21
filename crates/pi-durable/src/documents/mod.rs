@@ -58,7 +58,7 @@ pub struct DocDefinition {
     pub family: bool,
     initial: InitialFn,
     migrate: Option<MigrateFn>,
-    checkpoint_when: Option<CheckpointFn>,
+    checkpoint_when: CheckpointFn,
 }
 
 impl fmt::Debug for DocDefinition {
@@ -74,35 +74,37 @@ impl fmt::Debug for DocDefinition {
 
 impl DocDefinition {
     /// Build an erased definition from JSON callbacks. Typed code uses [`define_doc`] or [`define_doc_family`].
+    ///
+    /// `checkpoint_when` is required and has no default (spec section 3.5).
     pub fn new(
         kind: impl Into<String>,
         version: u32,
         semantics: DocSemantics,
         family: bool,
         initial: impl Fn(Option<&Json>) -> DurableResult<Json> + Send + Sync + 'static,
+        checkpoint_when: impl Fn(&Json, &[Op], CheckpointInfo) -> DurableResult<bool> + Send + Sync + 'static,
+    ) -> DurableResult<Self> {
+        Self::from_shared(kind, version, semantics, family, Arc::new(initial), Arc::new(checkpoint_when))
+    }
+
+    pub(crate) fn from_shared(
+        kind: impl Into<String>,
+        version: u32,
+        semantics: DocSemantics,
+        family: bool,
+        initial: InitialFn,
+        checkpoint_when: CheckpointFn,
     ) -> DurableResult<Self> {
         let kind = kind.into();
         if version < 1 {
             return Err(DurableError::type_error(format!("Document {kind} version must be a positive integer")));
         }
-        Ok(Self { kind, version, semantics, family, initial: Arc::new(initial), migrate: None, checkpoint_when: None })
+        Ok(Self { kind, version, semantics, family, initial, migrate: None, checkpoint_when })
     }
 
     pub fn with_migrate(mut self, migrate: impl Fn(&Json, u32) -> DurableResult<Json> + Send + Sync + 'static) -> Self {
         self.migrate = Some(Arc::new(migrate));
         self
-    }
-
-    pub fn with_checkpoint_when(
-        mut self,
-        checkpoint_when: impl Fn(&Json, &[Op], CheckpointInfo) -> DurableResult<bool> + Send + Sync + 'static,
-    ) -> Self {
-        self.checkpoint_when = Some(Arc::new(checkpoint_when));
-        self
-    }
-
-    pub(crate) fn set_checkpoint_when(&mut self, checkpoint_when: Option<CheckpointFn>) {
-        self.checkpoint_when = checkpoint_when;
     }
 
     /// The first value of a new incarnation; `seed` is the family creation seed.
@@ -122,12 +124,9 @@ impl DocDefinition {
         }
     }
 
-    /// Whether this change stores a complete base; `false` without a predicate.
+    /// Whether this change stores a complete base.
     pub fn checkpoint_when(&self, value: &Json, ops: &[Op], info: CheckpointInfo) -> DurableResult<bool> {
-        match &self.checkpoint_when {
-            Some(predicate) => predicate(value, ops, info),
-            None => Ok(false),
-        }
+        (self.checkpoint_when)(value, ops, info)
     }
 
     /// Resolve the logical address of a singleton (`key` absent) or family member in `scope`.

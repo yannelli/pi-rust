@@ -17,7 +17,7 @@ struct Notes {
 }
 
 fn session_doc(kind: &str) -> DocToken<Notes, SessionScope> {
-    define_doc(DocSpec::new(kind, 1, SessionScope, Notes::default)).unwrap()
+    define_doc(DocSpec::new(kind, 1, SessionScope, Notes::default, |_, _, _| Ok(false))).unwrap()
 }
 
 static NOTES: LazyLock<DocToken<Notes, SessionScope>> = LazyLock::new(|| session_doc("test.task-notes"));
@@ -25,7 +25,7 @@ static ABSENT: LazyLock<DocToken<Notes, SessionScope>> = LazyLock::new(|| sessio
 static LATE_NOTES: LazyLock<DocToken<Notes, SessionScope>> = LazyLock::new(|| session_doc("test.late-watch"));
 static RUNTIME_NOTES: LazyLock<DocToken<Notes, RewindableConversation>> = LazyLock::new(|| {
     let scope = RewindableConversation(DocumentFork::AsOf);
-    define_doc(DocSpec::new("test.runtime-notes", 1, scope, Notes::default)).unwrap()
+    define_doc(DocSpec::new("test.runtime-notes", 1, scope, Notes::default, |_, _, _| Ok(false))).unwrap()
 });
 
 async fn write_notes(root: &Conversation, token: &'static LazyLock<DocToken<Notes, SessionScope>>, text: &str) {

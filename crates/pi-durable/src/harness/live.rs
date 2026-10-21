@@ -124,6 +124,16 @@ pub struct CompactionStatus {
     pub retry: Option<RetryState>,
 }
 
+/// The newest compaction that failed since a compaction last produced a summary (spec section 8.7).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompactionFailure {
+    pub task_id: TaskId,
+    pub reason: CompactionReason,
+    /// The failed or faulted outcome's error message, or why the scheduler orphaned the task.
+    pub error: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LiveRun {
@@ -174,6 +184,10 @@ pub struct LiveState {
     /// Live compaction tasks in task ID order; absent when none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compactions: Option<Vec<CompactionStatus>>,
+    /// The newest compaction failure, so a client can show it after the task ended. A compaction that produces a
+    /// summary removes it; one that is aborted or finds nothing to compact leaves it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compaction_failure: Option<CompactionFailure>,
 }
 
 fn running(slots: Option<&Json>) -> bool {
@@ -183,11 +197,10 @@ fn running(slots: Option<&Json>) -> bool {
 
 /// A complete base whenever nothing runs: no generation and no running slot (spec section 8.2).
 pub static LIVE_DOC: LazyLock<DocToken<LiveState, LatestConversation>> = LazyLock::new(|| {
-    let spec = DocSpec::new("pi.live", 1, LatestConversation(LatestFork::Initial), LiveState::default).checkpoint_when(
-        |value, _, _| {
+    let spec =
+        DocSpec::new("pi.live", 1, LatestConversation(LatestFork::Initial), LiveState::default, |value, _, _| {
             Ok(value.get("generation").is_none() && !running(value.get("tools")) && !running(value.get("nestedTools")))
-        },
-    );
+        });
     define_doc(spec).unwrap_or_else(|_| unreachable!("pi.live is a valid definition"))
 });
 
@@ -221,6 +234,15 @@ pub fn remove_compaction_status(live: &mut LiveState, task_id: TaskId) {
     if statuses.is_empty() {
         live.compactions = None;
     }
+}
+
+/// Remove the status of compaction task `task_id` and record that it failed with `error`.
+pub fn fail_compaction_status(live: &mut LiveState, task_id: TaskId, error: impl Into<String>) {
+    if let Some(status) = compaction_status(live, task_id) {
+        let failure = CompactionFailure { task_id: status.task_id, reason: status.reason, error: error.into() };
+        live.compaction_failure = Some(failure);
+    }
+    remove_compaction_status(live, task_id);
 }
 
 /// A tool task's slot, model-issued or nested.
@@ -352,7 +374,8 @@ const COMPACTION_TASK_KIND: &str = "pi.compaction";
 const RUN_TASK_KIND: &str = "pi.generation";
 
 /// Harness cleanup for an outcome the scheduler writes itself (`faulted` or `orphaned`): a run task ends its run, a
-/// tool task's slot is marked done without an entry, and a compaction task's status is removed.
+/// tool task's slot is marked done without an entry, and a compaction task's status is removed and its failure
+/// recorded.
 pub async fn settle_scheduler_outcome(tx: &Tx, record: &TaskRecord, outcome: &TaskOutcome) -> DurableResult<()> {
     let kind = record.kind.as_str();
     if kind != TOOL_TASK_KIND && kind != COMPACTION_TASK_KIND && kind != RUN_TASK_KIND {
@@ -367,7 +390,14 @@ pub async fn settle_scheduler_outcome(tx: &Tx, record: &TaskRecord, outcome: &Ta
             }
             remove_nested_slots(&mut live, record.id);
         }
-        COMPACTION_TASK_KIND => remove_compaction_status(&mut live, record.id),
+        COMPACTION_TASK_KIND => {
+            let error = match outcome {
+                TaskOutcome::Faulted { error } => error.message.clone(),
+                TaskOutcome::Orphaned { reason } => reason.clone(),
+                other => other.status().to_owned(),
+            };
+            fail_compaction_status(&mut live, record.id, error);
+        }
         _ => {
             if live.run.as_ref().is_none_or(|run| run.task_id != record.id) {
                 return Ok(());

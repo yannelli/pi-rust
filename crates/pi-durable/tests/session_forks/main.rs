@@ -16,12 +16,19 @@ use support::*;
 
 pub fn rewindable(kind: &str, initial: &str) -> DocToken<Json, RewindableConversation> {
     let initial = json(initial);
-    define_doc(DocSpec::new(kind, 1, RewindableConversation(DocumentFork::AsOf), move || initial.clone())).unwrap()
+    define_doc(DocSpec::new(
+        kind,
+        1,
+        RewindableConversation(DocumentFork::AsOf),
+        move || initial.clone(),
+        |_, _, _| Ok(false),
+    ))
+    .unwrap()
 }
 
 pub fn latest(kind: &str, fork: LatestFork, initial: &str) -> DocToken<Json, LatestConversation> {
     let initial = json(initial);
-    define_doc(DocSpec::new(kind, 1, LatestConversation(fork), move || initial.clone())).unwrap()
+    define_doc(DocSpec::new(kind, 1, LatestConversation(fork), move || initial.clone(), |_, _, _| Ok(false))).unwrap()
 }
 
 /// Set `value` of a conversation document inside a transaction.

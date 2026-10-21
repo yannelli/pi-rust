@@ -5,9 +5,13 @@
 #[path = "../support/mod.rs"]
 mod support;
 
+mod bridges;
 mod handles;
+mod indexes;
 mod marks;
 mod reopen;
+mod retention;
+mod retention_edges;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -22,6 +26,7 @@ use pi_durable::tasks::TaskOptions;
 use pi_durable::*;
 use serde_json::{Value, json};
 use support::context;
+use support::harness_support::queued_note;
 use support::task_support::{aborted, completed, eventually, open_tasks};
 use tokio::sync::watch;
 
@@ -140,7 +145,7 @@ pub struct Opened {
 
 pub async fn open_harness(storage: Arc<dyn Storage>, board: &Board) -> Opened {
     let hold = hold_task(board);
-    let opened = open_tasks(storage, vec![hold.clone(), waiter_task()]).await;
+    let opened = open_tasks(storage, vec![hold.clone(), waiter_task(), bridges::spawner_task(hold.clone())]).await;
     let root = opened.harness.root(&context(), CreateOptions::default()).await.unwrap();
     opened.harness.resume().unwrap();
     Opened { harness: opened.harness, root, reports: opened.reports, hold }
@@ -327,7 +332,7 @@ async fn aborts_a_conversation_queued_inputs_withdrawn_writes_kept_foreground_wo
     let background = owned_child(&root, &hold, "background", BACKGROUND).await;
     busy(&root, foreground.owner).await;
     let queued = input(&root, "later").await;
-    let write = root.submit(SubmissionDraft::write(EntryDraft::new("note")), &context()).await.unwrap().id;
+    let write = root.submit(SubmissionDraft::write(queued_note("w")), &context()).await.unwrap().id;
     root.abort(&context(), false).await.unwrap();
     for id in [foreground.owner, foreground.inner] {
         assert_eq!(status(&harness, id).await, TaskStatus::Terminal);
@@ -370,7 +375,7 @@ async fn withdraws_queued_inputs_below_the_aborted_task_but_keeps_its_own_conver
     busy(&child, tree.inner).await;
     let own = input(&root, "own").await;
     let below = input(&child, "below").await;
-    let write = child.submit(SubmissionDraft::write(EntryDraft::new("note")), &context()).await.unwrap().id;
+    let write = child.submit(SubmissionDraft::write(queued_note("w")), &context()).await.unwrap().id;
     harness.abort_task(tree.owner, &context()).await.unwrap();
     harness.wait_for_task(tree.inner, &context()).await.unwrap();
     assert_eq!(submission(&harness, own).await.status, SubmissionStatus::Queued);

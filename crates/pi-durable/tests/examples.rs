@@ -51,7 +51,14 @@ struct Notes {
 
 /// The `example.notes` document of most examples: rewindable, and a fork starts from its value at the fork entry.
 static NOTES: LazyLock<DocToken<Notes, RewindableConversation>> = LazyLock::new(|| {
-    define_doc(DocSpec::new("example.notes", 1, RewindableConversation(DocumentFork::AsOf), Notes::default)).unwrap()
+    define_doc(DocSpec::new(
+        "example.notes",
+        1,
+        RewindableConversation(DocumentFork::AsOf),
+        Notes::default,
+        |_, _, _| Ok(false),
+    ))
+    .unwrap()
 });
 
 fn notes(value: Option<Json>) -> Option<String> {

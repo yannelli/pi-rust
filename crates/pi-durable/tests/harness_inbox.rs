@@ -129,8 +129,7 @@ async fn queues_busy_submissions_and_places_writes_before_user_items_at_the_fina
     let input = root.submit(SubmissionDraft::input("a"), &ctx()).await.unwrap();
     reached.notified().await;
     let f1 = root.submit(SubmissionDraft::input("f1"), &ctx()).await.unwrap();
-    let note = EntryDraft { data: Some(Json::from("w")), ..EntryDraft::new("note") };
-    let write = root.submit(SubmissionDraft::write(note), &ctx()).await.unwrap();
+    let write = root.submit(SubmissionDraft::write(queued_note("w")), &ctx()).await.unwrap();
     let f2 = root.submit(SubmissionDraft::input("f2").with_when_busy(WhenBusy::FollowUp), &ctx()).await.unwrap();
     for submission in [&f1, &write, &f2] {
         assert_eq!(submission.status(&ctx()).await.unwrap().status, SubmissionStatus::Queued);
@@ -146,7 +145,7 @@ async fn queues_busy_submissions_and_places_writes_before_user_items_at_the_fina
         [
             "pi.user:a",
             "pi.assistant:first",
-            "note",
+            "note:w",
             "pi.user:f1",
             "pi.assistant:second",
             "pi.user:f2",
@@ -319,7 +318,7 @@ async fn withdraws_a_queued_submission_and_removes_its_item() {
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &setup).await;
     let input = root.submit(SubmissionDraft::input("a"), &ctx()).await.unwrap();
     reached.notified().await;
-    let kept = root.submit(SubmissionDraft::write(EntryDraft::new("note")), &ctx()).await.unwrap();
+    let kept = root.submit(SubmissionDraft::write(queued_note("kept")), &ctx()).await.unwrap();
     let withdrawn = root.submit(SubmissionDraft::input("f"), &ctx()).await.unwrap();
     assert_eq!(withdrawn.abort(&ctx()).await.unwrap(), AbortSubmissionResult::Aborted);
     let settled = withdrawn.wait(&ctx()).await.unwrap();

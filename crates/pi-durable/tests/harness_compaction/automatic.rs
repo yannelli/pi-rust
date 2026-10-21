@@ -1,6 +1,9 @@
 //! The upstream "background threshold compaction" and "blocking threshold compaction" cases.
 
+use pi_durable::TaskOutcome;
 use pi_durable::harness::compaction::CompactionDecision;
+use pi_durable::harness::live::settle_scheduler_outcome;
+use pi_durable::session::Tx;
 
 use super::chat::*;
 use super::outcomes::before_compact;
@@ -71,6 +74,80 @@ async fn does_not_start_while_another_compaction_is_listed() {
     assert_eq!(ids, [manual]);
     chat.harness.abort_task(manual, &ctx()).await.unwrap();
     chat.close().await;
+}
+
+#[tokio::test]
+async fn records_a_failure_in_live_the_snapshot_and_compaction_end_until_a_summary_is_produced() {
+    let chat = open(window(2000)).await;
+    chat.history().await;
+    chat.set_policy(background());
+    let (stream, events) = listen(&chat).await;
+    chat.faux.summary(failure("bad request"));
+    chat.turn(&text("u4", 100), &text("a4", 100)).await;
+    let ended = |events: &Events, task: Option<&Value>| {
+        let events = events.lock().unwrap();
+        events
+            .iter()
+            .find(|event| event["type"] == "compaction_end" && task.is_none_or(|id| event["taskId"] == *id))
+            .cloned()
+    };
+    let seen = events.clone();
+    wait_for(move || {
+        let done = seen.lock().unwrap().iter().any(|event| event["type"] == "compaction_end");
+        async move { done }
+    })
+    .await;
+    let recorded = chat.live().await["compactionFailure"].clone();
+    assert_eq!(recorded["reason"], "threshold");
+    assert_eq!(recorded["error"], "Summarization failed: bad request");
+    let expected = json!({
+        "type": "compaction_end", "taskId": recorded["taskId"], "reason": "threshold",
+        "error": "Summarization failed: bad request"
+    });
+    assert_eq!(ended(&events, None), Some(expected));
+    let reopened = watch_events(&chat.harness, chat.root.id, &ctx()).await.unwrap();
+    assert_eq!(Value::from(&reopened.snapshot)["compactionFailure"], recorded);
+    reopened.stop().await;
+    // A compaction that produces a summary removes the failure, and ends without an error.
+    chat.set_policy(manual());
+    chat.faux.summary(summary());
+    let manual_task = chat.compact(None).await;
+    assert_eq!(chat.outcome(manual_task).await["status"], "completed");
+    assert!(chat.live().await.get("compactionFailure").is_none());
+    let seen = events.clone();
+    let id = json!(manual_task);
+    wait_for(move || {
+        let done = seen.lock().unwrap().iter().any(|event| event["type"] == "compaction_end" && event["taskId"] == id);
+        async move { done }
+    })
+    .await;
+    assert!(ended(&events, Some(&json!(manual_task))).unwrap().get("error").is_none());
+    stream.stop().await;
+    chat.close().await;
+}
+
+#[tokio::test]
+async fn records_the_error_of_a_compaction_the_scheduler_faults_or_orphans() {
+    let orphaned = TaskOutcome::Orphaned { reason: "definition removed".into() };
+    for (outcome, error) in
+        [(TaskOutcome::faulted("no credentials"), "no credentials"), (orphaned, "definition removed")]
+    {
+        let chat = open(window(2000)).await;
+        chat.history().await;
+        chat.set_policy(background());
+        let reached = Deferred::default();
+        chat.faux.summary(gated(&Deferred::default(), summary(), Some(&reached)));
+        chat.turn(&text("u4", 100), &text("a4", 100)).await;
+        reached.wait().await;
+        let record = chat.compaction_tasks().await.remove(0);
+        let settle = |tx: Tx| async move { settle_scheduler_outcome(&tx, &record, &outcome).await };
+        chat.root.commit(settle, &ctx()).await.unwrap();
+        let live = chat.live().await;
+        assert!(live.get("compactions").is_none());
+        assert_eq!(live["compactionFailure"]["reason"], "threshold");
+        assert_eq!(live["compactionFailure"]["error"], error);
+        chat.close().await;
+    }
 }
 
 #[tokio::test]
@@ -145,41 +222,62 @@ async fn sends_the_request_once_without_a_second_compaction_when_the_kept_part_i
     chat.close().await;
 }
 
-async fn sends_anyway(prepare: impl FnOnce(&Chat)) {
+#[tokio::test]
+async fn sends_the_request_anyway_when_its_compaction_declines() {
     let chat = open(window(1000)).await;
     chat.history().await;
     chat.set_policy(blocking());
-    prepare(&chat);
+    before_compact(&chat, "declines", |_| Ok(Some(CompactionDecision::Decline)));
     chat.turn(&text("u4", 200), "a4").await;
     assert!(!chat.kinds().await.contains(&"pi.compaction".to_owned()));
     assert_eq!(first_user_text(&chat.faux.last_agent_request()), text("u1", 100));
+    assert!(chat.live().await.get("compactionFailure").is_none());
+    chat.close().await;
+}
+
+/// Wait for the unanswered input and check its model error, with no request sent.
+async fn fails_without_a_request(chat: &Chat, input: &Submission, requests: usize, detail: &str) {
+    let settled = input.wait(&ctx()).await.unwrap();
+    assert_eq!((settled.status, settled.reason.as_deref()), (SubmissionStatus::Unanswered, Some("model_error")));
+    assert_eq!(settled.detail.map(|detail| detail.to_serde()), Some(json!(detail)));
+    assert_eq!(chat.faux.agent_requests().len(), requests);
+}
+
+// A failed compaction leaves a context it judged too large; sending it once filled a 1M window and got an empty
+// `length` answer on every turn while the failure stayed invisible.
+#[tokio::test]
+async fn fails_the_run_with_the_compactions_error_without_a_request_when_its_compaction_fails() {
+    let chat = open(window(1000)).await;
+    chat.history().await;
+    chat.set_policy(blocking());
+    chat.faux.summary(failure("bad request"));
+    let requests = chat.faux.agent_requests().len();
+    let input = chat.submit(&text("u4", 200)).await;
+    fails_without_a_request(&chat, &input, requests, "Compaction failed: Summarization failed: bad request").await;
+    assert_eq!(chat.kinds().await.last().map(String::as_str), Some("pi.user"));
+    let live = chat.live().await;
+    assert!(live.get("compactions").is_none());
+    assert_eq!(live["compactionFailure"]["reason"], "threshold");
+    assert_eq!(live["compactionFailure"]["error"], "Summarization failed: bad request");
     chat.close().await;
 }
 
 #[tokio::test]
-async fn sends_the_request_anyway_when_its_compaction_declines() {
-    sends_anyway(|chat| before_compact(chat, "declines", |_| Ok(Some(CompactionDecision::Decline)))).await;
-}
-
-#[tokio::test]
-async fn sends_the_request_anyway_when_its_compaction_fails() {
-    sends_anyway(|chat| chat.faux.summary(failure("bad request"))).await;
-}
-
-#[tokio::test]
-async fn sends_the_request_anyway_when_its_compaction_is_aborted_directly() {
+async fn fails_the_run_when_its_compaction_is_aborted_directly() {
     let chat = open(window(1000)).await;
     chat.history().await;
     chat.set_policy(blocking());
     let reached = Deferred::default();
     chat.faux.summary(gated(&Deferred::default(), summary(), Some(&reached)));
-    chat.faux.agent(answer("a4"));
+    let requests = chat.faux.agent_requests().len();
     let input = chat.submit(&text("u4", 200)).await;
     reached.wait().await;
     let child = chat.compaction_tasks().await.remove(0);
     chat.harness.abort_task(child.id, &ctx()).await.unwrap();
-    assert_eq!(input.wait(&ctx()).await.unwrap().status, SubmissionStatus::Done);
+    fails_without_a_request(&chat, &input, requests, "Compaction was aborted").await;
     assert!(!chat.kinds().await.contains(&"pi.compaction".to_owned()));
+    // Aborting is not a failure.
+    assert!(chat.live().await.get("compactionFailure").is_none());
     chat.close().await;
 }
 

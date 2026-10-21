@@ -105,10 +105,11 @@ fn snapshot_of(view: &Json) -> AgentEvent {
         ("tools", Json::array(list(live.get("tools")))),
         ("nestedTools", Json::array(list(live.get("nestedTools")))),
         ("compactions", Json::array(list(live.get("compactions")))),
-        ("inbox", queued(inbox)),
-        ("agent", agent_or_initial(agent)),
-        ("usage", usage_or_initial(usage)),
     ]);
+    if let Some(failure) = live.get("compactionFailure") {
+        fields.push(("compactionFailure", failure.clone()));
+    }
+    fields.extend([("inbox", queued(inbox)), ("agent", agent_or_initial(agent)), ("usage", usage_or_initial(usage))]);
     object(fields)
 }
 
@@ -207,7 +208,7 @@ fn translate(
     let mut tasks: Vec<&TaskRecord> = Vec::new();
     let mut submissions = Vec::new();
     // Nested results this commit stored, by nested task ID; read now, since the caller's documents may retire next.
-    let mut nested_results: HashMap<String, Json> = HashMap::new();
+    let mut nested_results: HashMap<u64, Json> = HashMap::new();
     for change in &publication.changes {
         match change {
             CommitChange::Document(DocumentCommitChange::Document {
@@ -215,9 +216,11 @@ fn translate(
                 conversation_id: owner,
                 value: Some(value),
                 ..
-            }) if record.kind == "pi.tool.nested-result" && *owner == Some(conversation_id) => {
-                if let Some(key) = &record.key {
-                    nested_results.insert(key.clone(), value["result"].clone());
+            }) if record.kind == "pi.tool.nested-call" && *owner == Some(conversation_id) => {
+                if let (Some(task_id), result) = (value["taskId"].as_u64(), &value["result"])
+                    && !result.is_null()
+                {
+                    nested_results.insert(task_id, result.clone());
                 }
             }
             CommitChange::Entry(entry) if entry.conversation_id == conversation_id => {
@@ -342,9 +345,8 @@ fn translate(
     // Nested calls that end in this commit, the same way, children before the calls that made them: the lists hold
     // parents first, so walk them backwards.
     let mut end_nested = |slot: &Json| {
-        let key = slot["taskId"].as_u64().map(|id| id.to_string()).unwrap_or_default();
         let mut fields = call_of(slot);
-        if let Some(result) = nested_results.get(&key) {
+        if let Some(result) = slot["taskId"].as_u64().and_then(|id| nested_results.get(&id)) {
             fields.push(("result", result.clone()));
         }
         events.push(event("tool_execution_end", fields));
@@ -390,12 +392,14 @@ fn translate(
     let compactions_before = list(was.live.get("compactions"));
     let compactions = list(now.live.get("compactions"));
     let has = |list: &[Json], status: &Json| list.iter().any(|other| other["taskId"] == status["taskId"]);
+    let failure = now.live.get("compactionFailure");
     for status in &compactions_before {
         if !has(&compactions, status) {
-            events.push(event(
-                "compaction_end",
-                [("taskId", status["taskId"].clone()), ("reason", status["reason"].clone())],
-            ));
+            let mut fields = vec![("taskId", status["taskId"].clone()), ("reason", status["reason"].clone())];
+            if let Some(failure) = failure.filter(|failure| failure["taskId"] == status["taskId"]) {
+                fields.push(("error", failure["error"].clone()));
+            }
+            events.push(event("compaction_end", fields));
         }
     }
     // A generation's turn ends when its outcome is committed: at a `completing` hold or at terminal, whichever comes

@@ -107,7 +107,10 @@ struct Plan {
 }
 
 static PLAN_DOC: LazyLock<DocToken<Plan, RewindableConversation>> = LazyLock::new(|| {
-    define_doc(DocSpec::new("app.plan", 1, RewindableConversation(DocumentFork::AsOf), Plan::default)).unwrap()
+    define_doc(DocSpec::new("app.plan", 1, RewindableConversation(DocumentFork::AsOf), Plan::default, |_, _, _| {
+        Ok(false)
+    }))
+    .unwrap()
 });
 
 fn plan_extension() -> Extension {

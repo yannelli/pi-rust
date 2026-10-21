@@ -42,6 +42,13 @@ mod polling {
 }
 
 #[tokio::test]
+async fn reports_list_files_as_not_supported_until_an_environment_implements_it() {
+    let (env, _dir) = env_in(Default::default());
+    let error = env.list_files(".", None, &context()).await.unwrap_err();
+    assert_eq!(error.code, FileErrorCode::NotSupported);
+}
+
+#[tokio::test]
 async fn refuses_a_tree_over_the_directory_budget_and_stops_with_an_error_when_one_grows_past_it() {
     let dir = temp_dir();
     let watch = LocalWatchOptions { max_directories: Some(3), ..Default::default() };

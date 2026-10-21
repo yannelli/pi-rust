@@ -42,11 +42,13 @@ pub struct Progress {
     pub lines: Vec<String>,
 }
 
-pub static PROGRESS_DOC: LazyLock<DocToken<Progress, TaskScope>> =
-    LazyLock::new(|| define_doc(DocSpec::new("test.progress", 1, TaskScope, Progress::default)).unwrap());
+pub static PROGRESS_DOC: LazyLock<DocToken<Progress, TaskScope>> = LazyLock::new(|| {
+    define_doc(DocSpec::new("test.progress", 1, TaskScope, Progress::default, |_, _, _| Ok(false))).unwrap()
+});
 
 pub static STEP_DOC: LazyLock<DocFamilyToken<Progress, (), TaskScope>> = LazyLock::new(|| {
-    define_doc_family(DocFamilySpec::new("test.step", 1, TaskScope, |(): ()| Progress::default())).unwrap()
+    define_doc_family(DocFamilySpec::new("test.step", 1, TaskScope, |(): ()| Progress::default(), |_, _, _| Ok(false)))
+        .unwrap()
 });
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -55,7 +57,10 @@ pub struct Notes {
 }
 
 pub static NOTES_DOC: LazyLock<DocToken<Notes, RewindableConversation>> = LazyLock::new(|| {
-    define_doc(DocSpec::new("test.notes", 1, RewindableConversation(DocumentFork::AsOf), Notes::default)).unwrap()
+    define_doc(DocSpec::new("test.notes", 1, RewindableConversation(DocumentFork::AsOf), Notes::default, |_, _, _| {
+        Ok(false)
+    }))
+    .unwrap()
 });
 
 /// The same task, terminal with a completed outcome.

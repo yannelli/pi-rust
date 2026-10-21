@@ -50,14 +50,13 @@ async fn writes_the_required_base_on_the_first_successful_transaction_then_write
     let checkpoints = Arc::new(AtomicUsize::new(0));
     let counter = counted(&checkpoints);
     let current = define_doc(
-        session_doc("migration.transition", 3, r#"{"count":0}"#)
-            .migrate(|value, from| {
-                Ok(json(&format!(r#"{{"count":{}}}"#, value["count"].as_i64().unwrap() + i64::from(from) - 1)))
-            })
-            .checkpoint_when(move |_, _, _| {
-                counter.fetch_add(1, Ordering::SeqCst);
-                Ok(false)
-            }),
+        session_doc_with("migration.transition", 3, r#"{"count":0}"#, move |_, _, _| {
+            counter.fetch_add(1, Ordering::SeqCst);
+            Ok(false)
+        })
+        .migrate(|value, from| {
+            Ok(json(&format!(r#"{{"count":{}}}"#, value["count"].as_i64().unwrap() + i64::from(from) - 1)))
+        }),
     )
     .unwrap();
     let test = open_test_session();
@@ -180,7 +179,7 @@ async fn strict_checks_migration_results_before_tracker_ownership_and_remains_us
     let old = define_doc(session_doc("migration.invalid", 1, r#"{"count":1}"#)).unwrap();
     // A non-finite number stands in for upstream's `Date`, which strict JSON rejects the same way.
     let invalid = define_doc(
-        DocSpec::new("migration.invalid", 2, SessionScope, || Invalid { invalid: 0.0 })
+        DocSpec::new("migration.invalid", 2, SessionScope, || Invalid { invalid: 0.0 }, |_, _, _| Ok(false))
             .migrate(|_, _| Ok(Invalid { invalid: f64::NAN })),
     )
     .unwrap();
@@ -218,9 +217,8 @@ async fn rejects_newer_stored_versions_and_older_versions_without_migration_for_
 async fn persists_a_required_migration_base_before_retirement_without_consulting_the_checkpoint_predicate() {
     let old = define_doc(session_doc("migration.retire", 1, r#"{"count":1}"#)).unwrap();
     let current = define_doc(
-        session_doc("migration.retire", 2, r#"{"count":0}"#)
-            .migrate(|value, _| Ok(json(&format!(r#"{{"count":{}}}"#, value["count"]))))
-            .checkpoint_when(|_, _, _| Err(DurableError::error("must not run"))),
+        session_doc_with("migration.retire", 2, r#"{"count":0}"#, |_, _, _| Err(DurableError::error("must not run")))
+            .migrate(|value, _| Ok(json(&format!(r#"{{"count":{}}}"#, value["count"])))),
     )
     .unwrap();
     let test = open_test_session();

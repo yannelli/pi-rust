@@ -103,31 +103,44 @@ pub struct DocSpec<T, S> {
     scope: S,
     initial: Arc<dyn Fn() -> T + Send + Sync>,
     migrate: Option<TypedMigrate<T>>,
-    checkpoint_when: Option<CheckpointFn>,
+    checkpoint_when: CheckpointFn,
 }
 
 impl<T: DocValue, S: DocScope> DocSpec<T, S> {
+    /// `checkpoint_when` is required and has no default: `|_, _, _| Ok(false)` keeps ordinary changes as deltas, and
+    /// returning `Ok(true)` stores the change as a complete base (spec section 3.5).
+    ///
+    /// ```
+    /// # use pi_durable::documents::{DocSpec, SessionScope};
+    /// DocSpec::new("app.doc", 1, SessionScope, pi_chord::Json::default, |_, _, _| Ok(false));
+    /// ```
+    ///
+    /// Leaving it out does not compile:
+    ///
+    /// ```compile_fail
+    /// # use pi_durable::documents::{DocSpec, SessionScope};
+    /// DocSpec::new("app.doc", 1, SessionScope, pi_chord::Json::default);
+    /// ```
     pub fn new(
         kind: impl Into<String>,
         version: u32,
         scope: S,
         initial: impl Fn() -> T + Send + Sync + 'static,
+        checkpoint_when: impl Fn(&Json, &[Op], CheckpointInfo) -> DurableResult<bool> + Send + Sync + 'static,
     ) -> Self {
-        Self { kind: kind.into(), version, scope, initial: Arc::new(initial), migrate: None, checkpoint_when: None }
+        Self {
+            kind: kind.into(),
+            version,
+            scope,
+            initial: Arc::new(initial),
+            migrate: None,
+            checkpoint_when: Arc::new(checkpoint_when),
+        }
     }
 
     /// One callback migrates every supported older stored version to a complete current value.
     pub fn migrate(mut self, migrate: impl Fn(&Json, u32) -> DurableResult<T> + Send + Sync + 'static) -> Self {
         self.migrate = Some(Arc::new(migrate));
-        self
-    }
-
-    /// Select a complete storage base after an ordinary change (spec section 3.5).
-    pub fn checkpoint_when(
-        mut self,
-        predicate: impl Fn(&Json, &[Op], CheckpointInfo) -> DurableResult<bool> + Send + Sync + 'static,
-    ) -> Self {
-        self.checkpoint_when = Some(Arc::new(predicate));
         self
     }
 }
@@ -139,29 +152,35 @@ pub struct DocFamilySpec<T, I, S> {
     scope: S,
     initial: Arc<dyn Fn(I) -> T + Send + Sync>,
     migrate: Option<TypedMigrate<T>>,
-    checkpoint_when: Option<CheckpointFn>,
+    checkpoint_when: CheckpointFn,
 }
 
 impl<T: DocValue, I: DocValue, S: DocScope> DocFamilySpec<T, I, S> {
+    /// `checkpoint_when` is required and has no default; see [`DocSpec::new`].
+    ///
+    /// ```compile_fail
+    /// # use pi_durable::documents::{DocFamilySpec, SessionScope};
+    /// DocFamilySpec::new("app.family", 1, SessionScope, |seed: pi_chord::Json| seed);
+    /// ```
     pub fn new(
         kind: impl Into<String>,
         version: u32,
         scope: S,
         initial: impl Fn(I) -> T + Send + Sync + 'static,
+        checkpoint_when: impl Fn(&Json, &[Op], CheckpointInfo) -> DurableResult<bool> + Send + Sync + 'static,
     ) -> Self {
-        Self { kind: kind.into(), version, scope, initial: Arc::new(initial), migrate: None, checkpoint_when: None }
+        Self {
+            kind: kind.into(),
+            version,
+            scope,
+            initial: Arc::new(initial),
+            migrate: None,
+            checkpoint_when: Arc::new(checkpoint_when),
+        }
     }
 
     pub fn migrate(mut self, migrate: impl Fn(&Json, u32) -> DurableResult<T> + Send + Sync + 'static) -> Self {
         self.migrate = Some(Arc::new(migrate));
-        self
-    }
-
-    pub fn checkpoint_when(
-        mut self,
-        predicate: impl Fn(&Json, &[Op], CheckpointInfo) -> DurableResult<bool> + Send + Sync + 'static,
-    ) -> Self {
-        self.checkpoint_when = Some(Arc::new(predicate));
         self
     }
 }
@@ -171,15 +190,10 @@ pub(crate) fn encode<T: Serialize + ?Sized>(value: &T) -> DurableResult<Json> {
     Ok(copy_json(value, CopyJsonOptions { omit_undefined_properties: true })?)
 }
 
-fn finish<T: DocValue>(
-    mut definition: DocDefinition,
-    migrate: Option<TypedMigrate<T>>,
-    checkpoint_when: Option<CheckpointFn>,
-) -> DocDefinition {
+fn finish<T: DocValue>(mut definition: DocDefinition, migrate: Option<TypedMigrate<T>>) -> DocDefinition {
     if let Some(migrate) = migrate {
         definition = definition.with_migrate(move |value, from| encode(&migrate(value, from)?));
     }
-    definition.set_checkpoint_when(checkpoint_when);
     definition
 }
 
@@ -187,8 +201,15 @@ fn finish<T: DocValue>(
 pub fn define_doc<T: DocValue, S: DocScope>(spec: DocSpec<T, S>) -> DurableResult<DocToken<T, S>> {
     let initial = spec.initial;
     let semantics = spec.scope.semantics();
-    let definition = DocDefinition::new(spec.kind, spec.version, semantics, false, move |_| encode(&initial()))?;
-    let definition = finish(definition, spec.migrate, spec.checkpoint_when);
+    let definition = DocDefinition::from_shared(
+        spec.kind,
+        spec.version,
+        semantics,
+        false,
+        Arc::new(move |_| encode(&initial())),
+        spec.checkpoint_when,
+    )?;
+    let definition = finish(definition, spec.migrate);
     Ok(DocToken::from_definition(Arc::new(definition)))
 }
 
@@ -198,10 +219,17 @@ pub fn define_doc_family<T: DocValue, I: DocValue, S: DocScope>(
 ) -> DurableResult<DocFamilyToken<T, I, S>> {
     let initial = spec.initial;
     let semantics = spec.scope.semantics();
-    let definition = DocDefinition::new(spec.kind, spec.version, semantics, true, move |seed| {
-        let seed = seed.cloned().unwrap_or(Json::Null).deserialize_into::<I>()?;
-        encode(&initial(seed))
-    })?;
-    let definition = finish(definition, spec.migrate, spec.checkpoint_when);
+    let definition = DocDefinition::from_shared(
+        spec.kind,
+        spec.version,
+        semantics,
+        true,
+        Arc::new(move |seed| {
+            let seed = seed.cloned().unwrap_or(Json::Null).deserialize_into::<I>()?;
+            encode(&initial(seed))
+        }),
+        spec.checkpoint_when,
+    )?;
+    let definition = finish(definition, spec.migrate);
     Ok(DocFamilyToken::from_definition(Arc::new(definition)))
 }

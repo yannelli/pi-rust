@@ -1,0 +1,15 @@
+[package]
+name = "pi-schema"
+description = "TypeBox-compatible JSON Schema checks, defaults and cleaning shared by pi-ai and pi-chord"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+regex = "1.11.1"
+serde_json.workspace = true
+
+[lints]
+workspace = true

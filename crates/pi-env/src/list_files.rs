@@ -3,9 +3,9 @@
 use async_trait::async_trait;
 use pi_chord::Context;
 use pi_durable::env::{
-    BinaryReader, DirReader, ExecutionError, FileError, FileErrorCode, FileInfo, FileKind, FileResult, FileSystem,
-    FileWatcher, LocalEnvOptions, RemoveOptions, Shell, ShellCommand, ShellExecOptions, ShellExecResult,
-    TempFileOptions, TextLineReader, WatchListener, WatchTarget,
+    BinaryReader, DirReader, ExecutionError, FileError, FileErrorCode, FileInfo, FileKind, FileListEntry, FileListing,
+    FileResult, FileSystem, FileWatcher, ListFilesOptions, LocalEnvOptions, RemoveOptions, Shell, ShellCommand,
+    ShellExecOptions, ShellExecResult, TempFileOptions, TextLineReader, WatchListener, WatchTarget,
 };
 use serde_json::Value;
 
@@ -13,43 +13,6 @@ use crate::connection::{Connection, Json, RequestOptions};
 use crate::errors::{abort_result, to_file_error};
 
 const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
-
-/// What `list_files` lists.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ListFilesOptions {
-    /// Include names starting with `.` (on Windows also files with the hidden attribute); default true. Entries named
-    /// `.git` are never listed.
-    pub hidden: Option<bool>,
-    /// Inside a git work tree, skip what git ignores: the `.gitignore` files of the directory, its subdirectories and
-    /// its parents, `.git/info/exclude`, and the global excludes file; default true. Outside work trees,
-    /// `.gitignore` files have no effect.
-    pub gitignore: Option<bool>,
-    /// Names of entries to skip with everything below them, such as `node_modules`.
-    pub exclude: Option<Vec<String>>,
-    /// Most entries to list; default 50 000.
-    pub max_entries: Option<u64>,
-    /// Most bytes of the listing: each entry's UTF-8 path plus two; default 4 MiB, at most 15.9 MiB.
-    pub max_bytes: Option<u64>,
-    /// Time after which the listing stops; default 10 000 ms.
-    pub timeout_ms: Option<u64>,
-}
-
-/// One entry of a `FileListing`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FileListEntry {
-    /// Relative to the listed directory, with `/` separators on every system.
-    pub path: String,
-    /// A symbolic link is listed as such and not followed.
-    pub kind: FileKind,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct FileListing {
-    /// Depth first, parents before their entries, siblings in byte order of their names.
-    pub entries: Vec<FileListEntry>,
-    /// A bound in `ListFilesOptions` ended the listing early.
-    pub truncated: bool,
-}
 
 fn kind_of(byte: u8) -> Option<FileKind> {
     match byte {
@@ -146,17 +109,6 @@ impl LocalExecutionEnv {
     pub fn env(&self) -> &pi_durable::env::LocalExecutionEnv {
         &self.env
     }
-
-    /// Through the daemon; `not_supported` with a daemon released before `listFiles`.
-    pub async fn list_files(
-        &self,
-        path: &str,
-        options: Option<&ListFilesOptions>,
-        context: &Context,
-    ) -> FileResult<FileListing> {
-        let resolved = self.env.absolute_path(path, context).await?;
-        list_files_over(&self.connection, &resolved, options, context).await
-    }
 }
 
 #[async_trait]
@@ -237,6 +189,17 @@ impl FileSystem for LocalExecutionEnv {
 
     async fn open_dir_reader(&self, path: &str, context: &Context) -> FileResult<Box<dyn DirReader>> {
         self.env.open_dir_reader(path, context).await
+    }
+
+    /// Through the daemon; `not_supported` with a daemon released before `listFiles`.
+    async fn list_files(
+        &self,
+        path: &str,
+        options: Option<&ListFilesOptions>,
+        context: &Context,
+    ) -> FileResult<FileListing> {
+        let resolved = self.env.absolute_path(path, context).await?;
+        list_files_over(&self.connection, &resolved, options, context).await
     }
 
     async fn watch(

@@ -1,6 +1,10 @@
 //! Invocations: phase handlers and the step before each, the abort handler, and the outcome and wait writes.
 
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::collections::hash_map::Entry;
 use std::future::Future;
+use std::ops::ControlFlow;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -8,7 +12,8 @@ use std::time::Instant;
 use pi_chord::{Context, Json, with_telemetry, without_abort_signal};
 use pi_telemetry::{SpanAttributes, SpanLink, SpanOptions, SpanStatus, TelemetryContextExt, TelemetrySpan};
 
-use super::ownership::{Overlay, Step};
+use super::index::Walk;
+use super::ownership::{Node, Overlay};
 use super::run::Reservation;
 use super::runtime::{Phase, TaskRuntime};
 use super::{Invocation, Mode, Scheduler, Up, progressed, report_task, with_state};
@@ -23,6 +28,32 @@ use crate::types::{
     FaultReason, JoinPolicy, OutdatedReason, ReportInfo, TaskOutcome, TaskOutcomeError, TaskRecord, TaskState,
     TaskStatus,
 };
+
+/// The tasks a wait-cycle search reached, each with the task it was reached from, and those still to visit.
+#[derive(Default)]
+struct Frontier {
+    from: HashMap<TaskId, Option<TaskId>>,
+    pending: Vec<TaskId>,
+}
+
+impl Frontier {
+    fn reach(&mut self, id: TaskId, via: Option<TaskId>) {
+        if let Entry::Vacant(slot) = self.from.entry(id) {
+            slot.insert(via);
+            self.pending.push(id);
+        }
+    }
+
+    /// The tasks from the first one reached to `end`.
+    fn path(&self, end: TaskId) -> Vec<TaskId> {
+        let mut steps = vec![end];
+        while let Some(&Some(via)) = self.from.get(steps.last().unwrap_or(&end)) {
+            steps.push(via);
+        }
+        steps.reverse();
+        steps
+    }
+}
 
 /// What a running invocation tracks across steps: its definition, its snapshot, and the last reported takeover.
 pub(crate) struct RunState {
@@ -331,7 +362,7 @@ impl Scheduler {
     /// Write an outcome the scheduler decided: `completing` while owned work is live, else terminal with cleanup.
     pub(crate) async fn terminate(&self, tx: &Tx, record: &TaskRecord, outcome: TaskOutcome) -> DurableResult<()> {
         self.load_scopes(false).await?;
-        let owned = lock(&self.state).owned_live(Some(&Overlay::of(tx))).contains_key(&record.id);
+        let owned = lock(&self.state).has_owned_live(record.id, Some(&Overlay::of(tx)), None);
         if owned {
             return tx.set_task(with_state(record, TaskState::Completing { outcome }));
         }
@@ -357,7 +388,7 @@ impl Scheduler {
                 for record in overlay.tasks.values() {
                     self.load_chain(Up::of(record), Some(&overlay)).await?;
                 }
-                if lock(&self.state).owned_live(Some(&overlay)).contains_key(&current.id) {
+                if lock(&self.state).has_owned_live(current.id, Some(&overlay), None) {
                     let completing = TaskState::Completing { outcome: outcome.clone() };
                     return tx.set_task(with_state(&progressed(current), completing));
                 }
@@ -376,7 +407,9 @@ impl Scheduler {
         tx.set_task(with_state(&progressed(current), next))
     }
 
-    /// A wait names existing tasks other than the waiter and its owners; `failFast` only tasks it owns.
+    /// A wait names existing tasks, and `failFast` only tasks the waiter owns. It may not close a cycle in the wait-for
+    /// graph (see `wait_cycle`); waiting on itself or on an owner that holds it are the shortest. An abort handler
+    /// cannot wait. Only a wait adds an edge between existing tasks, so checking each one keeps the graph acyclic.
     async fn validate_wait(
         &self,
         tx: &Tx,
@@ -389,22 +422,8 @@ impl Scheduler {
             return Err(DurableError::error(format!("Abort handler of task {} cannot wait", current.id)));
         }
         let overlay = Overlay::of(tx);
-        self.load_chain(Up::of(current), None).await?;
-        let owners: Vec<TaskId> = lock(&self.state)
-            .above(Up::of(current), None)
-            .into_iter()
-            .filter_map(|step| match step {
-                Step::Task(id, _) => Some(id),
-                _ => None,
-            })
-            .collect();
+        let mut targets = Vec::new();
         for id in on {
-            if *id == current.id || owners.contains(id) {
-                return Err(DurableError::error(format!(
-                    "Task {} cannot wait on itself or its owner {id}",
-                    current.id
-                )));
-            }
             let known = overlay.tasks.get(id).cloned().or_else(|| lock(&self.state).live.get(id).cloned());
             let member = match known {
                 Some(member) => Some(member),
@@ -415,8 +434,75 @@ impl Scheduler {
                 let message = format!("Task {} can wait failFast only on tasks it owns; {id} is not one", current.id);
                 return Err(DurableError::error(message));
             }
+            // A live child already holds the waiter (task-owned tasks are never background): waiting on it adds no edge.
+            // A terminal task has no edges.
+            if !member.is_terminal() && member.owner != Some(current.id) {
+                targets.push(*id);
+            }
+        }
+        if targets.is_empty() {
+            return Ok(());
+        }
+        if let Some(cycle) = self.wait_cycle(current.id, &targets, &overlay).await? {
+            let path: Vec<String> =
+                std::iter::once(current.id).chain(cycle.iter().copied()).map(|id| id.to_string()).collect();
+            let message =
+                format!("Task {} cannot wait on {}: {} is a wait cycle", current.id, cycle[0], path.join(" -> "));
+            return Err(DurableError::error(message));
         }
         Ok(())
+    }
+
+    /// The path from a member of `on` back to `task` in the wait-for graph, if the wait would close a cycle (spec
+    /// section 5.1). An edge X -> Y means X cannot settle before Y: Y is in the `on` of waiting X that is not
+    /// abort-marked, or live ordinary owned work of X. Each task is visited once and each subtree walked once.
+    async fn wait_cycle(&self, task: TaskId, on: &[TaskId], overlay: &Overlay) -> DurableResult<Option<Vec<TaskId>>> {
+        // Owned work is found by walks down, which need the chains of every live task loaded.
+        self.load_scopes(false).await?;
+        for record in overlay.tasks.values() {
+            self.load_chain(Up::of(record), Some(overlay)).await?;
+        }
+        let state = lock(&self.state);
+        let mut walked: HashSet<TaskId> = HashSet::new();
+        let mut frontier = Frontier::default();
+        for id in on {
+            frontier.reach(*id, None);
+        }
+        while let Some(id) = frontier.pending.pop() {
+            if id == task {
+                return Ok(Some(frontier.path(id)));
+            }
+            let Some(record) = overlay.tasks.get(&id).or_else(|| state.live.get(&id)) else { continue };
+            if record.is_terminal() {
+                continue;
+            }
+            // An abort-marked task waits only for its owned work, as abort runs bottom-up.
+            if let TaskState::Waiting { on, .. } = &record.state
+                && !record.abort_requested
+            {
+                for member in on {
+                    frontier.reach(*member, Some(id));
+                }
+            }
+            if !walked.insert(id) {
+                continue;
+            }
+            // Below a walked task the walk does not go again: its own walk covered what lies below.
+            let mut found = Vec::new();
+            let enter = |below: TaskId| !walked.contains(&below);
+            let walk = Walk { overlay: Some(overlay), cross_background: false, enter: Some(&enter) };
+            state.walk_down(Node::Task(id), &walk, |reached| {
+                if reached.live.is_some() && !reached.node.background {
+                    found.push(reached.id);
+                }
+                ControlFlow::Continue(())
+            });
+            for below in found {
+                frontier.reach(below, Some(id));
+                walked.insert(below);
+            }
+        }
+        Ok(None)
     }
 
     /// End an invocation: its runtime operations fail from now on, its signal aborts, its watches stop.
@@ -428,6 +514,9 @@ impl Scheduler {
             let mut state = lock(&self.state);
             if state.invocations.get(&invocation.task_id).is_some_and(|i| Arc::ptr_eq(i, invocation)) {
                 state.invocations.remove(&invocation.task_id);
+                if state.live.contains_key(&invocation.task_id) {
+                    state.runnable.insert(invocation.task_id);
+                }
             }
         }
         let watches = std::mem::take(&mut *lock(&invocation.watches));

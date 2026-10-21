@@ -111,8 +111,9 @@ struct Notes {
     text: String,
 }
 
-static CLOSE_NOTES: LazyLock<DocToken<Notes, SessionScope>> =
-    LazyLock::new(|| define_doc(DocSpec::new("test.close-notes", 1, SessionScope, Notes::default)).unwrap());
+static CLOSE_NOTES: LazyLock<DocToken<Notes, SessionScope>> = LazyLock::new(|| {
+    define_doc(DocSpec::new("test.close-notes", 1, SessionScope, Notes::default, |_, _, _| Ok(false))).unwrap()
+});
 
 #[tokio::test]
 async fn seals_admission_before_signalling_handlers_and_stops_watches_before_joining_them() {

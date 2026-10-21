@@ -7,7 +7,7 @@ use pi_chord::{Json, JsonMap};
 use serde::{Deserialize, Serialize};
 
 use super::settings::Settings;
-use super::types::{QueueMode, UserInput};
+use super::types::{InputEntry, QueueMode, UserInput};
 use crate::documents::{DocSpec, DocToken, LatestConversation, LatestFork, define_doc, encode};
 use crate::entries::{TypedEntryDraft, USER_ENTRY};
 use crate::errors::{DurableError, DurableResult};
@@ -15,14 +15,25 @@ use crate::ids::{ConversationId, EntryId, SubmissionId};
 use crate::session::{Draft, Tx};
 use crate::types::{DraftHead, EntryDraft, SubmissionSettlement};
 
-/// A queued submission: user input for a run, or a passive entry write.
+/// A queued submission: user input for a run, with the entry it is placed as when not `pi.user`, or an entry write.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mode")]
 pub enum InboxItem {
+    /// `entry` is the input's `InputEntry` (`kind` and optional `data`) as plain JSON, present when given.
     #[serde(rename = "steer")]
-    Steer { id: SubmissionId, content: UserInput },
+    Steer {
+        id: SubmissionId,
+        content: UserInput,
+        #[serde(default, skip_serializing_if = "Option::is_none", with = "crate::harness::util::json_map::option")]
+        entry: Option<JsonMap>,
+    },
     #[serde(rename = "followUp")]
-    FollowUp { id: SubmissionId, content: UserInput },
+    FollowUp {
+        id: SubmissionId,
+        content: UserInput,
+        #[serde(default, skip_serializing_if = "Option::is_none", with = "crate::harness::util::json_map::option")]
+        entry: Option<JsonMap>,
+    },
     /// `entry` is an `EntryDraft` stored as plain JSON.
     #[serde(rename = "write")]
     Write {
@@ -55,8 +66,10 @@ pub struct InboxState {
 }
 
 pub static INBOX_DOC: LazyLock<DocToken<InboxState, LatestConversation>> = LazyLock::new(|| {
-    let spec = DocSpec::new("pi.inbox", 1, LatestConversation(LatestFork::Initial), InboxState::default)
-        .checkpoint_when(|value, _, _| Ok(value.get("items").and_then(Json::as_array).is_none_or(Vec::is_empty)));
+    let spec =
+        DocSpec::new("pi.inbox", 1, LatestConversation(LatestFork::Initial), InboxState::default, |value, _, _| {
+            Ok(value.get("items").and_then(Json::as_array).is_none_or(Vec::is_empty))
+        });
     define_doc(spec).unwrap_or_else(|_| unreachable!("pi.inbox is a valid definition"))
 });
 
@@ -147,6 +160,34 @@ fn is_reset(item: &InboxItem) -> bool {
     matches!(item, InboxItem::Write { entry, .. } if entry.get("head").and_then(Json::as_str) == Some("self"))
 }
 
+/// Whether a reset (`head: "self"` write) is queued; entries appended before it leave the active range when it lands.
+pub fn has_queued_reset(items: &[InboxItem]) -> bool {
+    items.iter().any(is_reset)
+}
+
+/// Whether a write is display-only: it has no `model`, `head`, or `edits` (present counts, even if empty), so it
+/// changes nothing the model sees and needs no boundary.
+pub fn is_display_only(entry: &EntryDraft) -> bool {
+    entry.model.is_none() && entry.head.is_none() && entry.edits.is_none()
+}
+
+/// The kind and data of an input's entry as plain JSON, as the inbox stores them.
+pub fn input_entry_json(entry: &InputEntry) -> JsonMap {
+    let mut map = JsonMap::new();
+    map.insert("kind", entry.kind.as_str());
+    if let Some(data) = &entry.data {
+        map.insert("data", data.clone());
+    }
+    map
+}
+
+/// The input entry an inbox item stores.
+pub fn input_entry_from_json(map: &JsonMap) -> DurableResult<InputEntry> {
+    let kind = map.get("kind").and_then(Json::as_str);
+    let kind = kind.ok_or_else(|| DurableError::type_error("Input entry without kind"))?;
+    Ok(InputEntry { kind: kind.to_owned(), data: map.get("data").cloned() })
+}
+
 /// Place the queued items a boundary selects: every write, the first or all steers, and at `Final` the first or
 /// all follow-ups. A selected reset makes a post-tools boundary final. Writes go first and user items after them.
 pub async fn apply_boundary(
@@ -156,7 +197,7 @@ pub async fn apply_boundary(
     now: f64,
 ) -> DurableResult<BoundaryResult> {
     let items = boundary.inbox.get()?.items;
-    let reset = items.iter().any(is_reset);
+    let reset = has_queued_reset(&items);
     let last = at == BoundaryAt::Final || reset;
     let pick = |steer: bool, mode: QueueMode| -> Vec<usize> {
         let indexes = items.iter().enumerate().filter(|(_, item)| match item {
@@ -193,8 +234,12 @@ pub async fn apply_boundary(
     }
     let mut placed = Vec::new();
     for &index in &users {
-        let (InboxItem::Steer { id, content } | InboxItem::FollowUp { id, content }) = &items[index] else { continue };
-        let entry = append_user(tx, boundary.conversation_id, content.clone(), now).await?;
+        let (InboxItem::Steer { id, content, entry } | InboxItem::FollowUp { id, content, entry }) = &items[index]
+        else {
+            continue;
+        };
+        let given = entry.as_ref().map(input_entry_from_json).transpose()?;
+        let entry = append_input(tx, boundary.conversation_id, content.clone(), given.as_ref(), now).await?;
         tx.place_submission(*id, entry)?;
         placed.push(*id);
     }
@@ -206,6 +251,25 @@ pub async fn apply_boundary(
         }
     })?;
     Ok(BoundaryResult { users: placed, reset })
+}
+
+/// Append the entry an input is placed as: `entry`'s kind and data, or `pi.user`, with the user message of `content`.
+pub async fn append_input(
+    tx: &Tx,
+    conversation_id: ConversationId,
+    content: UserInput,
+    entry: Option<&InputEntry>,
+    now: f64,
+) -> DurableResult<EntryId> {
+    let Some(entry) = entry else { return append_user(tx, conversation_id, content, now).await };
+    let message = Message::User(UserMessage { content, timestamp: now as i64 });
+    let draft = EntryDraft {
+        kind: entry.kind.clone(),
+        data: entry.data.clone(),
+        model: Some(vec![message]),
+        ..EntryDraft::default()
+    };
+    Ok(tx.append_entry(conversation_id, draft).await?.id)
 }
 
 /// Append a `pi.user` entry with one user message.

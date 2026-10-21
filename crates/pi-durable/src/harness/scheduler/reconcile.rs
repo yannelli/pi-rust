@@ -1,10 +1,12 @@
 //! Reconciliation: cascade marks, `failFast` marks, withdrawn inputs, and final records of held outcomes. Also
 //! idle settlement, the kept-context expiry, and the reservation drain loop.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::ops::ControlFlow;
 
+use super::index::Walk;
 use super::ownership::Overlay;
-use super::{Scheduler, Up, failed_outcome, with_abort_mark, with_state};
+use super::{Node, Scheduler, TaskNode, failed_outcome, with_abort_mark, with_state};
 use crate::errors::DurableResult;
 use crate::harness::live::settle_scheduler_outcome;
 use crate::harness::util::lock;
@@ -79,14 +81,23 @@ impl Scheduler {
         };
         let waiting: Vec<(TaskId, Vec<TaskId>)> = {
             let state = lock(&self.state);
-            for record in state.live.values() {
-                if record.background {
-                    continue;
-                }
-                let Some(owner) = state.cancelling_owner(Up::of(record)) else { continue };
+            // Every live foreground task below a live owner with cancellation intent, which is its nearest one: a walk
+            // down from each owner with intent does not enter another, whose own walk covers what is below it. Derived
+            // again on every pass, as loading edges can reveal a cancelled owner.
+            for id in &state.intent {
+                let Some(owner) = state.live.get(id) else { continue };
                 // Only an owner abandoned after a restart, and nothing else, passes its reason on.
-                let restart = owner.abort_reason == Some(AbortReason::Restart) && !failed_outcome(&owner);
-                mark(record, restart.then_some(AbortReason::Restart));
+                let restart = owner.abort_reason == Some(AbortReason::Restart) && !failed_outcome(owner);
+                let enter = |below: TaskId| !state.intent.contains(&below);
+                let walk = Walk { enter: Some(&enter), ..Walk::default() };
+                state.walk_down(Node::Task(*id), &walk, |reached| {
+                    if let Some(live) = reached.live
+                        && !reached.node.background
+                    {
+                        mark(live, restart.then_some(AbortReason::Restart));
+                    }
+                    ControlFlow::Continue(())
+                });
             }
             checks
                 .iter()
@@ -114,7 +125,7 @@ impl Scheduler {
             }
         }
         for id in queued {
-            let below = lock(&self.state).below_cancelled(Up::Conversation(id));
+            let below = lock(&self.state).below_cancelled(Node::Conversation(id));
             if below {
                 crate::harness::inbox::withdraw_queued_inputs(tx, id, "aborted").await?;
             }
@@ -137,31 +148,48 @@ impl Scheduler {
         Ok(false)
     }
 
-    /// Write the terminal record of every `completing` task without live ordinary owned work, repeatedly.
+    /// Write the terminal record of every `completing` task without live ordinary owned work. A worklist: the tasks
+    /// that started holding, and the holders of work that ended. Finalizing one can free the nearest live task above
+    /// it, which goes on the list. Tasks finalized here have no live work below them, so walks down skip them.
+    /// In rounds: the holders the tasks of one round free are checked once, in the next, so a holder of many tasks that
+    /// end together is walked once, not once per task.
     pub(crate) async fn finalize(&self, tx: &Tx) -> DurableResult<()> {
-        loop {
-            let overlay = Overlay::of(tx);
-            let done: Vec<TaskRecord> = {
-                let state = lock(&self.state);
-                let owned = state.owned_live(Some(&overlay));
-                let records = state.live_records(Some(&overlay));
-                records
-                    .into_iter()
-                    .filter(|r| r.status() == TaskStatus::Completing && !owned.contains_key(&r.id))
-                    .collect()
-            };
-            if done.is_empty() {
-                return Ok(());
-            }
-            for record in done {
+        let mut round: Vec<TaskId> = std::mem::take(&mut lock(&self.state).finalize_checks).into_iter().collect();
+        let mut done: HashSet<TaskId> = HashSet::new();
+        let mut overlay = Overlay::of(tx);
+        while !round.is_empty() {
+            let mut next: BTreeSet<TaskId> = BTreeSet::new();
+            for id in round {
+                let record = {
+                    let state = lock(&self.state);
+                    let record = overlay.tasks.get(&id).or_else(|| state.live.get(&id));
+                    match record {
+                        Some(record) if record.status() == TaskStatus::Completing && !done.contains(&id) => {
+                            if state.has_owned_live(id, Some(&overlay), Some(&done)) {
+                                continue;
+                            }
+                            record.clone()
+                        }
+                        _ => continue,
+                    }
+                };
                 let Some(outcome) = record.state.outcome().cloned() else { continue };
-                tx.set_task(with_state(&record, TaskState::Terminal { outcome: outcome.clone() }))?;
+                let terminal = with_state(&record, TaskState::Terminal { outcome: outcome.clone() });
+                tx.set_task(terminal.clone())?;
+                overlay.tasks.insert(id, terminal);
+                done.insert(id);
                 // Only the scheduler writes `faulted` and `orphaned`; their cleanup waits for this commit.
                 if matches!(outcome, TaskOutcome::Faulted { .. } | TaskOutcome::Orphaned { .. }) {
                     settle_scheduler_outcome(tx, &record, &outcome).await?;
                 }
+                let above = lock(&self.state).nearest_live_above(&TaskNode::of(&record), Some(&overlay));
+                if let Some(above) = above.filter(|above| above.completing) {
+                    next.insert(above.id);
+                }
             }
+            round = next.into_iter().collect();
         }
+        Ok(())
     }
 
     /// `context_retention_ms` of the settings.

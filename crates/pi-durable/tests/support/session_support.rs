@@ -55,9 +55,11 @@ impl Gate {
 
 type CommitFilter = Arc<dyn Fn(&[StorageWrite]) -> bool + Send + Sync>;
 
-/// One Storage call a test hook sees: `task`, `scan_entries`, `mint_id`, `submission`, or `close`.
+/// One Storage call a test hook sees: `task`, `conversation`, `scan_entries`, `scan_queued_submissions`, `mint_id`, `submission`, or `close`.
 pub struct StorageCall {
     pub method: &'static str,
+    /// The id a `conversation` call reads.
+    pub id: Option<u64>,
     pub limit: usize,
     pub first_page: bool,
     pub context: Context,
@@ -153,9 +155,20 @@ impl ControlledStorage {
     }
 
     async fn hook(&self, method: &'static str, limit: usize, first_page: bool, context: &Context) -> DurableResult<()> {
+        self.hook_id(method, limit, first_page, None, context).await
+    }
+
+    async fn hook_id(
+        &self,
+        method: &'static str,
+        limit: usize,
+        first_page: bool,
+        id: Option<u64>,
+        context: &Context,
+    ) -> DurableResult<()> {
         let hook = self.call_hook.lock().unwrap().clone();
         match hook {
-            Some(hook) => hook(StorageCall { method, limit, first_page, context: context.clone() }).await,
+            Some(hook) => hook(StorageCall { method, id, limit, first_page, context: context.clone() }).await,
             None => Ok(()),
         }
     }
@@ -208,6 +221,7 @@ impl Storage for ControlledStorage {
     }
 
     async fn conversation(&self, id: ConversationId, context: &Context) -> DurableResult<Option<ConversationRecord>> {
+        self.hook_id("conversation", 0, false, Some(id.0), context).await?;
         self.open()?;
         self.inner.conversation(id, context).await
     }
@@ -292,6 +306,9 @@ impl Storage for ControlledStorage {
         cursor: Option<&Cursor>,
         context: &Context,
     ) -> DurableResult<Page<SubmissionRecord>> {
+        if query.status == Some(SubmissionStatus::Queued) {
+            self.hook("scan_queued_submissions", limit, cursor.is_none(), context).await?;
+        }
         self.open()?;
         self.inner.scan_submissions(query, limit, cursor, context).await
     }
@@ -370,7 +387,9 @@ impl TestSession {
 
 pub fn open_test_session() -> TestSession {
     let storage = Arc::new(ControlledStorage::default());
-    let session = create_session(storage.clone(), SessionOptions::default());
+    // These tests pin the cache's identities and loads, so documents stay as long as the default keeps them.
+    let options = SessionOptions { document_retention_ms: Some(600_000.0), ..SessionOptions::default() };
+    let session = create_session(storage.clone(), options);
     let publications = Arc::new(Mutex::new(Vec::new()));
     let sink = publications.clone();
     session

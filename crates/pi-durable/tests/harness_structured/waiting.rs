@@ -210,7 +210,7 @@ async fn rejects_waits_on_itself_its_owner_a_missing_task_and_fail_fast_on_a_tas
     let Opened { harness, root, nodes, .. } = open_nodes().await;
     let other = start(&root, &nodes, "other").await;
     let cases: [(&str, Option<TaskId>, JoinPolicy, &str); 3] = [
-        ("self", None, JoinPolicy::AllSettled, "cannot wait on itself or its owner"),
+        ("self", None, JoinPolicy::AllSettled, "is a wait cycle"),
         ("missing", Some(TaskId::from(999_999)), JoinPolicy::AllSettled, "does not exist"),
         ("foreign", Some(other), JoinPolicy::FailFast, "only on tasks it owns"),
     ];
@@ -243,7 +243,7 @@ async fn rejects_waits_on_itself_its_owner_a_missing_task_and_fail_fast_on_a_tas
     });
     let parent = start(&root, &nodes, "parent").await;
     assert_eq!(outcome_of(&harness, parent).await, "completed");
-    assert_faulted(&harness, ids(&child)[0], "cannot wait on itself or its owner").await;
+    assert_faulted(&harness, ids(&child)[0], "is a wait cycle").await;
     nodes.open_ok("other");
     harness.close(&context()).await.unwrap();
 }

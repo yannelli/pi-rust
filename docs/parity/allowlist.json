@@ -1,5 +1,10 @@
 {
-  "commits": [],
+  "commits": [
+    {
+      "item": "c661bc574",
+      "reason": "Drops the shared MCP types block from durable code mode's codemode section because pi-codemode stopped exporting MCP_TYPESCRIPT_PREAMBLE and mcpStructuredContentSchema(). pi-codemode here never had them, so the port of 8bb180bec renders the section without that block already."
+    }
+  ],
   "cliFlags": [
     {
       "item": "--terminal-login",
@@ -115,6 +120,10 @@
     {
       "item": "pi-server",
       "reason": "Kept as a pi-rust extra by the maintainer's choice: upstream 7472cda0d deleted the experimental server stack, while pi-rust keeps pi experimental (server, client, durable, vacation) and the old chord runtime it uses."
+    },
+    {
+      "item": "pi-schema",
+      "reason": "The TypeBox-compatible JSON Schema validator shared by pi-ai and pi-chord (checks, defaults, cleaning). Upstream uses the typebox npm package and has no package for this."
     }
   ]
 }

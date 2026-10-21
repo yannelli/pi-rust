@@ -2,6 +2,7 @@
 //! task record, kept in step by the commit listener on the Session line. Every task change is decided and written
 //! by one callback on the line; handlers and joins run off it.
 
+mod index;
 mod observe;
 mod ownership;
 mod reconcile;
@@ -10,6 +11,7 @@ mod runtime;
 mod step;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::ops::ControlFlow;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
@@ -19,7 +21,7 @@ use tokio::sync::watch;
 
 pub use runtime::{ConversationHandle, HookApi, TaskRuntime};
 
-pub(crate) use ownership::{TaskNode, Up};
+pub(crate) use ownership::{Node, TaskNode, Up};
 
 use super::context::ContextRange;
 use super::core::HarnessCore;
@@ -105,6 +107,18 @@ pub(crate) struct KeptContext {
     pub idle_since: Option<f64>,
 }
 
+/// Sizes of the scheduler's ownership indexes, for tests that bound its memory.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct IndexSizes {
+    pub live: usize,
+    pub settled: usize,
+    pub edges: usize,
+    pub below: usize,
+    pub roots: usize,
+    pub unloaded: usize,
+    pub drop_queue: usize,
+}
+
 #[derive(Default)]
 pub(crate) struct SchedState {
     pub live: BTreeMap<TaskId, TaskRecord>,
@@ -119,11 +133,30 @@ pub(crate) struct SchedState {
     pub invocations: HashMap<TaskId, Arc<Invocation>>,
     /// Definition whose migration failed per task; retried only once the registry resolves another definition.
     pub failed_migrations: HashMap<TaskId, (Task, DurableError)>,
-    /// Owner task of each loaded conversation, `None` when ownerless.
+    /// Owner task of each known conversation, `None` when ownerless.
     pub edges: HashMap<ConversationId, Option<TaskId>>,
-    pub conversation_owners: HashSet<TaskId>,
-    /// Ownership fields of terminal tasks that walks pass through.
+    /// Ownership fields of the known terminal tasks, which walks pass through.
     pub settled: HashMap<TaskId, TaskNode>,
+    /// Ended tasks and conversations found unneeded, dropped by `sweep` at the end of the commit's publication unless
+    /// needed again by then: a chain load installs nodes before the work below them is listed.
+    pub drop_queue: BTreeSet<Node>,
+    pub sweep_scheduled: bool,
+    /// The tree downward around live work: each node's child nodes that are live tasks or have nodes listed below
+    /// them. A conversation's parent is its owner task; ownerless ones with work are in `roots`.
+    pub below: BTreeMap<Node, BTreeSet<Node>>,
+    pub roots: BTreeSet<ConversationId>,
+    /// Known tasks whose chain may not be loaded; every other known task's chain is, and stays, loaded.
+    pub unloaded: BTreeSet<TaskId>,
+    /// Live tasks with cancellation intent, the sources of abort cascades.
+    pub intent: BTreeSet<TaskId>,
+    /// Live tasks that are not `completing`, the candidates of a reservation pass; ones found waiting leave it.
+    pub runnable: BTreeSet<TaskId>,
+    /// `completing` tasks the next finalize pass checks: those that started holding, and holders of ended work.
+    pub finalize_checks: BTreeSet<TaskId>,
+    /// Live waiting tasks by each task in their `on`.
+    pub waiters: BTreeMap<TaskId, BTreeSet<TaskId>>,
+    /// Sleeping live tasks, due or not: the candidates of `wake_due`.
+    pub sleeping: BTreeSet<TaskId>,
     pub fail_fast_checks: BTreeSet<TaskId>,
     /// Live `abandon_on_restart` tasks found at open; the first reservation pass abort-marks them.
     pub abandoned: BTreeSet<TaskId>,
@@ -132,7 +165,7 @@ pub(crate) struct SchedState {
     pub reconcile_scheduled: bool,
     /// Reconcile passes underway with work; they finalize held outcomes and mark cascades.
     pub reconciling: usize,
-    /// Tasks the last reservation pass left out as parked, so the graph hears when that set changes.
+    /// Tasks a pass left out as parked; each pass checks them again, as the restart limit may have risen.
     pub parked: BTreeSet<TaskId>,
     pub cascade_pending: bool,
     pub unsubscribe_registry: Option<RegistryUnsubscribe>,
@@ -145,9 +178,7 @@ pub(crate) struct SchedState {
 impl SchedState {
     /// Whether a reconcile pass would have work: a cascade to derive, held outcomes to finalize, or `failFast` waits.
     pub fn reconcile_work(&self) -> bool {
-        self.cascade_pending
-            || !self.fail_fast_checks.is_empty()
-            || (self.reconcile_scheduled && self.live.values().any(|r| r.status() == TaskStatus::Completing))
+        self.cascade_pending || !self.finalize_checks.is_empty() || !self.fail_fast_checks.is_empty()
     }
 }
 
@@ -204,6 +235,11 @@ impl Scheduler {
             blocked_listeners: Mutex::default(),
             weak: weak.clone(),
         })
+    }
+
+    /// Sizes of the ownership indexes, for tests that bound the scheduler's memory.
+    pub fn index_sizes(&self) -> IndexSizes {
+        lock(&self.state).index_sizes()
     }
 
     pub fn arc(&self) -> DurableResult<Arc<Self>> {
@@ -272,7 +308,7 @@ impl Scheduler {
                         }
                         _ => {}
                     }
-                    state.live.insert(record.id, record);
+                    state.track(None, &record);
                 }
                 Ok(parked)
             },
@@ -391,7 +427,6 @@ impl Scheduler {
             // that dies before it lands must be woken again.
             let mut active = !state.invocations.is_empty() || state.reconciling > 0 || state.reconcile_work();
             let mut at: Option<f64> = None;
-            let mut owned = None;
             let mut candidates = Vec::new();
             for record in state.live.values() {
                 match &record.state {
@@ -415,8 +450,7 @@ impl Scheduler {
                 }
                 if record.abort_requested {
                     // An abort invocation waits for the live work below it, which counts itself.
-                    let owned = owned.get_or_insert_with(|| state.owned_live(None));
-                    if owned.get(&record.id).is_some_and(|ids| !ids.is_empty()) {
+                    if state.has_owned_live(record.id, None, None) {
                         continue;
                     }
                     if record.abort_reason.is_none() {
@@ -489,7 +523,7 @@ impl Scheduler {
                 }
                 if invocation.is_none() && current.status() != TaskStatus::Completing {
                     scheduler.load_scopes(false).await?;
-                    let owned = lock(&scheduler.state).owned_live(None).contains_key(&id);
+                    let owned = lock(&scheduler.state).has_owned_live(id, None, None);
                     if !owned {
                         let snapshot = scheduler.core.registry.snapshot();
                         if let Err(reason) = scheduler.resolve(&current, &snapshot) {
@@ -579,18 +613,20 @@ impl Scheduler {
                 let (reached, withdraw) = {
                     let state = lock(&scheduler.state);
                     let mut reached = Vec::new();
-                    for record in state.live.values() {
-                        if record.background && !background {
-                            continue;
+                    let walk = index::Walk { cross_background: background, ..index::Walk::default() };
+                    let mut marked = Ok(());
+                    state.walk_down(Node::Conversation(conversation_id), &walk, |item| {
+                        let Some(live) = item.live else { return ControlFlow::Continue(()) };
+                        if item.node.background && !background {
+                            return ControlFlow::Continue(());
                         }
-                        if state.in_scope(Up::of(record), scope, background) != Some(true) {
-                            continue;
+                        reached.push(live.id);
+                        if !live.abort_requested || live.abort_reason.is_some() {
+                            marked = tx.set_task(with_abort_mark(live, None));
                         }
-                        reached.push(record.id);
-                        if !record.abort_requested || record.abort_reason.is_some() {
-                            tx.set_task(with_abort_mark(record, None))?;
-                        }
-                    }
+                        if marked.is_ok() { ControlFlow::Continue(()) } else { ControlFlow::Break(()) }
+                    });
+                    marked?;
                     let withdraw: Vec<_> = queued
                         .into_iter()
                         .filter(|id| state.in_scope(Up::Conversation(*id), scope, background) == Some(true))

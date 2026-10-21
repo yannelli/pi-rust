@@ -8,7 +8,7 @@ None up to `82432219a`. Every commit after the synced commit is ported or listed
 
 ## Deferred work
 
-- **chord2 runtime** (upstream `0104fef1e` and later chord commits). pi-chord ports the earlier facets runtime. This is the largest open item; plan it as its own branch.
+- **chord2 runtime** (upstream `0104fef1e` and later chord commits). pi-chord ports the earlier facets runtime. Its `host2` module has the chord2 foundation: errors, schemas, contracts, wire frames, and memory links. Still open: cells, objects, and hosts; connections, remotes, and the IPC and WebSocket links; reload and clusters; the manager.
 - **`HarnessOptions.models` as a function** (upstream `7ec1f648e`). Not planned: settings are already a function here, and a `Models` implementation can change its catalog at runtime. It is older than the synced commit, so the report does not list it.
 
 ## Upstream commits that do not apply
@@ -44,7 +44,3 @@ Behavior that pi-rust adds on purpose. The parity review should not report these
 ## Platform
 
 - `pi experimental server` and `client` use Unix sockets, so they report that they need Unix on Windows.
-
-## Test reliability
-
-- `crates/pi-js/tests/node_tls.rs` (`tls_matches_node`) can fail with an uncaught `ECONNRESET` under parallel load. A local stress run on 2026-10-14 failed 7 of 60 runs. The likely cause is the client closing before it reads the server's session tickets. Fix it, then stress it with the loop in [CI triage](../agents/ci-triage.md#hangs-and-flaky-tests) before you call it fixed.

@@ -12,7 +12,7 @@ use pi_env::{
     Connection, RemoteExecutionEnv, RemoteExecutionEnvOptions, RemotePlatform, RemoteWatchOptions, SshConnectOptions,
     SshTarget, accept_host_key, connect_ssh, deploy_daemon, detect_platform, scan_host_key,
 };
-use support::{ctx, list_cases};
+use support::ctx;
 
 /// Scan and accept the host key, detect, deploy, and connect, logging each stage so a hang shows where it is.
 async fn connect(root: &tempfile::TempDir) -> (Connection, RemotePlatform) {
@@ -127,33 +127,9 @@ external_cases!(
     argv_exec_distinguishes_timeout_from_abort,
     binary_reader_follows_symlinks_unless_no_follow_refuses_the_final_one,
     watch_reports_changes_to_the_file_a_watched_symbolic_link_points_to,
+    list_files_lists_files_and_directories_depth_first_in_name_order,
+    list_files_skips_what_git_ignores_in_work_trees_git_and_excluded_names,
+    list_files_stops_at_its_bounds_and_reports_truncated,
+    list_files_fails_on_missing_directories_files_and_aborts,
+    list_files_lists_symbolic_links_without_following_them,
 );
-
-/// The `listFiles` cases of the suite, which Durable's macro does not cover yet.
-macro_rules! external_list_cases {
-    ($($case:ident),* $(,)?) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-            #[ignore = "needs a real SSH server: set PI_ENV_SSH_HOST"]
-            async fn $case() {
-                with_env(async |env| list_cases::$case(env.as_ref()).await).await;
-            }
-        )*
-    };
-}
-
-external_list_cases!(
-    lists_files_and_directories_depth_first_in_name_order,
-    skips_what_git_ignores_in_work_trees_git_and_excluded_names,
-    stops_at_its_bounds_and_reports_truncated,
-    fails_on_missing_directories_files_and_aborts,
-);
-
-/// Git Bash's `ln -s` copies instead of linking unless native symlinks are enabled, so Windows skips this case.
-#[cfg(not(windows))]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "needs a real SSH server: set PI_ENV_SSH_HOST"]
-async fn lists_symbolic_links_without_following_them() {
-    let shell = options().shell;
-    with_env(async |env| list_cases::lists_symbolic_links_without_following_them(env.as_ref(), &shell).await).await;
-}
