@@ -270,6 +270,33 @@ const methods = {
   },
 };
 
+// With TERM=dumb, node:readline replaces line editing with append-only input.
+function ttyWriteDumb(s, key) {
+  key = key || {};
+  if (key.name === "escape") return;
+  if (this._sawReturnAt && key.name !== "enter") this._sawReturnAt = 0;
+  if (key.ctrl && key.name === "c") {
+    if (this.listenerCount("SIGINT") > 0) this.emit("SIGINT");
+    else this.close();
+    return;
+  }
+  if (key.ctrl && key.name === "d") {
+    this.close();
+    return;
+  }
+  if (key.name === "return") {
+    this._sawReturnAt = Date.now();
+    this._line();
+  } else if (key.name === "enter") {
+    if (this._sawReturnAt === 0 || Date.now() - this._sawReturnAt > this.crlfDelay) this._line();
+    this._sawReturnAt = 0;
+  } else if (typeof s === "string" && s) {
+    this.line += s;
+    this.cursor += s.length;
+    this._writeToOutput(s);
+  }
+}
+
 // Switch `rl` to terminal mode: raw input, keypress events, and an editable line.
 function attach(rl) {
   const { input } = rl;
@@ -308,4 +335,4 @@ function install(Interface) {
   }
 }
 
-module.exports = { attach, install };
+module.exports = { attach, install, ttyWriteDumb };

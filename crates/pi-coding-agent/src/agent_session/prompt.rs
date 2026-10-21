@@ -185,6 +185,7 @@ impl AgentSession {
             state.abort_requested = false;
             state.run_active = true;
         }
+        self.file_checkpoints.begin_prompt(&self.session_id());
         self.notify_idle();
         let messages = self.prepare_run(&trigger).await;
         // Messages held while the run was starting go before its starting messages, as they would
