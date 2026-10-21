@@ -260,6 +260,10 @@ jobs:
     needs: [plan, build, android-daemons]
     if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -303,3 +307,8 @@ jobs:
           else
             gh release create "$TAG" dist/* --title "$TAG" --verify-tag "${flags[@]}"
           fi
+      # Signed build provenance for every file in SHA256SUMS (checked with `gh attestation verify`).
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-checksums: dist/SHA256SUMS
