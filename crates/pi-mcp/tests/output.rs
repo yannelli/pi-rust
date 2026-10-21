@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use pi_mcp::output::{ConvertOptions, OutputSaver, truncate_middle};
+use pi_mcp::tools::create_mcp_result_schema;
 use pi_mcp::{CallToolResult, convert_mcp_result};
 use serde_json::{Value, json};
 
@@ -57,6 +58,12 @@ fn converts_results_passing_the_call_tool_result_to_scripts_and_flagging_errors(
     let structured =
         convert_mcp_result("docs", "t", &result(json!({ "content": [], "structuredContent": { "n": 1 } })), &options);
     assert_eq!(content(&structured), json!([{ "type": "text", "text": "{\n  \"n\": 1\n}" }]));
+    // #10416: array structured content reaches the model as JSON and scripts as sent.
+    let listed = json!({ "content": [], "structuredContent": [{ "id": 1 }] });
+    let array = convert_mcp_result("docs", "t", &result(listed.clone()), &options);
+    assert_eq!(content(&array), json!([{ "type": "text", "text": "[\n  {\n    \"id\": 1\n  }\n]" }]));
+    assert_eq!(serde_json::to_value(&array.details).unwrap(), json!({ "server": "docs", "tool": "t" }));
+    assert_eq!(array.structured_content, listed);
 
     let failed = convert_mcp_result(
         "docs",
@@ -146,4 +153,48 @@ fn cuts_multi_byte_text_only_at_character_boundaries() {
     assert!(head.len() <= 500);
     assert!(tail.len() <= 501);
     assert_eq!(head.chars().count() + tail.chars().count() + result.removed_chars, text.chars().count());
+}
+
+#[test]
+fn declares_the_call_tool_result_scripts_receive_keeping_references_in_the_servers_output_schema() {
+    let undeclared = create_mcp_result_schema(None);
+    // #10416: without an output schema, structured content may be any JSON value.
+    assert_eq!(undeclared["properties"]["structuredContent"], json!({}));
+    assert_eq!(undeclared["required"], json!(["content"]));
+    assert_eq!(undeclared["additionalProperties"], json!(true));
+    assert!(undeclared["properties"].get("_meta").is_none());
+    let block = &undeclared["properties"]["content"]["items"];
+    assert_eq!(block["properties"]["type"]["enum"], json!(["text", "image", "audio", "resource_link", "resource"]));
+    assert_eq!(block["required"], json!(["type"]));
+    let fields: Vec<&String> = undeclared["properties"].as_object().unwrap().keys().collect();
+    assert_eq!(fields, ["content", "structuredContent", "isError"]);
+
+    let hit = json!({ "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] });
+    let mut defined = hit.clone();
+    defined["default"] = json!({ "$ref": "#/stays" });
+    let schema = create_mcp_result_schema(Some(&json!({
+        "type": "object",
+        "properties": {
+            "hits": { "type": "array", "items": { "$ref": "#/$defs/Hit~1v1" } },
+            "again": { "$ref": "#/properties/hits" },
+            "children": { "type": "array", "items": { "$ref": "#" } },
+            // A property named like a keyword whose value is data.
+            "default": { "$ref": "#/definitions/Hit" },
+            "remote": { "$ref": "https://example.com/schema.json" },
+        },
+        "required": ["hits"],
+        "$defs": { "Hit/v1": defined },
+        "definitions": { "Hit": hit },
+    })));
+    let structured = &schema["properties"]["structuredContent"];
+    let prefix = "#/properties/structuredContent";
+    let reference = |value: &Value| value["$ref"].as_str().unwrap().to_string();
+    assert_eq!(reference(&structured["properties"]["hits"]["items"]), format!("{prefix}/$defs/Hit~1v1"));
+    assert_eq!(reference(&structured["properties"]["again"]), format!("{prefix}/properties/hits"));
+    assert_eq!(reference(&structured["properties"]["children"]["items"]), prefix);
+    assert_eq!(reference(&structured["properties"]["default"]), format!("{prefix}/definitions/Hit"));
+    assert_eq!(reference(&structured["properties"]["remote"]), "https://example.com/schema.json");
+    // Data that looks like a reference is kept as is.
+    assert_eq!(structured["$defs"]["Hit/v1"]["default"], json!({ "$ref": "#/stays" }));
+    assert_eq!(structured["required"], json!(["hits"]));
 }

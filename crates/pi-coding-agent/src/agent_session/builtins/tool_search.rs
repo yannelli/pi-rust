@@ -5,7 +5,7 @@
 use std::sync::Weak;
 
 use async_trait::async_trait;
-use pi_agent::{AgentTool, AgentToolResult, ToolExposure, ToolUpdateCallback};
+use pi_agent::{AgentTool, AgentToolResult, ToolExposure, ToolReach, ToolUpdateCallback};
 use pi_codemode::{
     CodemodeToolInfo, TOOL_SEARCH_DESCRIPTION, TOOL_SEARCH_PROMPT_SNIPPET, TOOL_SEARCH_TOOL_NAME,
     format_tool_search_result, search_deferred_tools, tool_search_limit, tool_search_schema,
@@ -42,6 +42,11 @@ impl AgentTool for ToolSearchTool {
     /// Searching changes what the model sees; scripts have no use for it.
     fn exposure(&self) -> ToolExposure {
         ToolExposure::ModelOnly
+    }
+
+    /// A query can match any tool that is not declared yet.
+    fn reaches_tools(&self, _input: &Value) -> Option<ToolReach> {
+        Some(ToolReach::All)
     }
 
     fn prompt_snippet(&self) -> Option<&str> {

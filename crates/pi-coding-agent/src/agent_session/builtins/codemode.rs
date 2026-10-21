@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use pi_agent::{
-    AgentTool, AgentToolResult, ToolContext, ToolExposure, ToolLoadout, ToolLoadoutChanges, ToolUpdateCallback,
+    AgentTool, AgentToolResult, ToolContext, ToolExposure, ToolLoadout, ToolLoadoutChanges, ToolReach,
+    ToolUpdateCallback,
 };
 use pi_codemode::{CODEMODE_TOOL_NAME, CodemodeHost, CodemodeMode, CodemodeTool, CodemodeToolOptions};
 use serde_json::Value;
@@ -93,6 +94,10 @@ impl AgentTool for SessionCodemodeTool {
 
     fn exposure(&self) -> ToolExposure {
         self.inner.exposure()
+    }
+
+    fn reaches_tools(&self, input: &Value) -> Option<ToolReach> {
+        self.inner.reaches_tools(input)
     }
 
     fn prompt_snippet(&self) -> Option<&str> {

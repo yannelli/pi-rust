@@ -69,7 +69,7 @@ pub struct ConnectionOptions {
     pub credentials: McpOAuthCredentialStore,
     /// The current token of a pi provider, for servers with `auth.provider`.
     pub provider_token: Option<ProviderTokenFn>,
-    /// Called when the server's tools or resources were (re)listed.
+    /// Called when the server's tools were (re)listed.
     pub on_tools: Option<ConnectionCallback>,
     /// Called when the state, error, or tools change.
     pub on_change: Option<ConnectionCallback>,
@@ -101,8 +101,6 @@ struct Status {
     error: Option<String>,
     tools: Vec<Tool>,
     has_resources: bool,
-    resources: Vec<Resource>,
-    resource_templates: Vec<ResourceTemplate>,
     instructions: Option<String>,
     challenge: Option<OAuthChallenge>,
     client: Option<McpClient>,
@@ -185,8 +183,6 @@ impl McpServerConnection {
                 error: None,
                 tools: Vec::new(),
                 has_resources: false,
-                resources: Vec::new(),
-                resource_templates: Vec::new(),
                 instructions: None,
                 challenge: None,
                 client: None,
@@ -228,18 +224,10 @@ impl McpServerConnection {
         self.inner.lock().tools.clone()
     }
 
-    /// Whether the server offers resources.
+    /// Whether the server offers resources, which the resource tools list and read on demand. They
+    /// are not listed at connect: listing every resource can take long (a large drive, say).
     pub fn has_resources(&self) -> bool {
         self.inner.lock().has_resources
-    }
-
-    /// Resources listed at the last connect or change, without MCP App resources.
-    pub fn resources(&self) -> Vec<Resource> {
-        self.inner.lock().resources.clone()
-    }
-
-    pub fn resource_templates(&self) -> Vec<ResourceTemplate> {
-        self.inner.lock().resource_templates.clone()
     }
 
     /// Server instructions from `initialize`, describing its tools as a group.

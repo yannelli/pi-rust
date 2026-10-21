@@ -1,0 +1,12 @@
+---
+description: Core rules for the pi-rust repository
+alwaysApply: true
+---
+
+Follow @AGENTS.md. In short:
+
+- pi-rust is a Rust port of upstream pi (earendil-works/pi). Keep JSON field names, session files, settings keys, and config paths compatible with upstream.
+- After code changes run `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, and the tests of the crates you changed. Fix every warning.
+- Tests never use real provider APIs, keys, or network beyond localhost.
+- Conventional Commits set the release version. Never edit versions or CHANGELOG.md by hand.
+- Ask before adding a dependency, pushing to `main`, or merging.

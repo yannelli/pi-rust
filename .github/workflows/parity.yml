@@ -1,0 +1,90 @@
+name: Parity
+
+# Daily gap report against upstream pi. See docs/parity/README.md.
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: earendil-works/pi
+          path: upstream
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Upstream does not commit its model data. Without it the report skips the model catalog.
+      - name: Generate upstream model data
+        continue-on-error: true
+        working-directory: upstream
+        run: |
+          npm ci --ignore-scripts
+          npm run hydrate-model-data -w packages/ai
+
+      - name: Parity report
+        run: cargo xtask parity --upstream upstream --out parity-report.md
+
+      - name: CI and release health
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          since=$(date -u -d '1 day ago' +%Y-%m-%dT%H:%M:%SZ)
+          {
+            echo
+            echo "## CI and release health"
+            echo
+            echo "Failed runs on main since $since:"
+            echo
+            gh run list -R "$REPO" -b main -L 50 --json name,conclusion,createdAt,url \
+              --jq ".[] | select(.createdAt >= \"$since\" and .conclusion == \"failure\") | \"- \(.name): \(.url)\"" \
+              | grep . || echo "- none"
+            echo
+            tag=$(gh release list -R "$REPO" -L 1 --json tagName --jq '.[0].tagName')
+            assets=$(gh release view "$tag" -R "$REPO" --json assets --jq '.assets | length')
+            echo "Latest release $tag has $assets assets (expected 9)."
+          } >> parity-report.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parity-report
+          path: parity-report.md
+
+      - name: Update the parity-report issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create parity-report -R "$REPO" --color 5319e7 \
+            --description "Daily upstream parity report" --force
+          {
+            echo "Updated by [this run]($RUN_URL). Playbook: docs/parity/README.md."
+            echo
+            head -c 60000 parity-report.md
+          } > issue-body.md
+          issue=$(gh issue list -R "$REPO" -l parity-report -s open -L 1 --json number --jq '.[0].number // empty')
+          if [ -n "$issue" ]; then
+            gh issue edit "$issue" -R "$REPO" --body-file issue-body.md
+          else
+            gh issue create -R "$REPO" -l parity-report \
+              --title "Upstream parity report" --body-file issue-body.md
+          fi

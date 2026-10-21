@@ -95,18 +95,34 @@ fn parse_options(directive: &str) -> Result<CodemodeSourceOptions, CodemodeSourc
     Ok(options)
 }
 
-/// Split an optional first-line `// @options: {...}` from the script. Fails for empty input and
-/// invalid options.
+fn is_blank(c: char) -> bool {
+    c.is_whitespace() || c == '\u{feff}'
+}
+
+/// Split an optional first-line `// @options: {...}` from the script. Fails for empty input, invalid
+/// options, and an options line that is not the first line, which would otherwise be ignored
+/// without notice.
 pub fn parse_codemode_source(input: &str) -> Result<ParsedCodemodeSource, CodemodeSourceError> {
     if js_trim(input).is_empty() {
         return fail(
             "Expected JavaScript source text (non-empty). Provide JS only, optionally with a first line `// @options: {\"max_output_tokens\": 1000}`.",
         );
     }
+    let misplaced = input
+        .split('\n')
+        .enumerate()
+        .skip(1)
+        .find(|(_, line)| line.trim_start_matches(is_blank).starts_with(CODEMODE_OPTIONS_PREFIX));
+    if let Some((index, _)) = misplaced {
+        return fail(format!(
+            "The {CODEMODE_OPTIONS_PREFIX} line must be the first line of the input; found one on line {}",
+            index + 1
+        ));
+    }
     let newline = input.find('\n');
     let first_line = newline.map_or(input, |index| &input[..index]);
     let first_line = first_line.strip_suffix('\r').unwrap_or(first_line);
-    let trimmed = first_line.trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
+    let trimmed = first_line.trim_start_matches(is_blank);
     let Some(directive) = trimmed.strip_prefix(CODEMODE_OPTIONS_PREFIX) else {
         return Ok(ParsedCodemodeSource { code: input.into(), options: CodemodeSourceOptions::default() });
     };

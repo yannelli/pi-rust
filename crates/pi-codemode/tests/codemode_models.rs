@@ -293,6 +293,16 @@ async fn reports_provider_errors_as_results_and_invalid_arguments_as_exceptions(
             noState: await attempt(() => models.classify(model, {{ questions: {QUESTIONS} }})),
             badQuestion: await attempt(() => models.classify(model, {{ state: {{}}, questions: {{ kind: {{ type: "choice", instructions: "Kind?", criteria: ["a", "b"] }} }} }})),
             badImage: await attempt(() => models.generateImages({{ provider: "scorer", id: "painter" }}, {{ prompt: "a fox" }})),
+            arrayModel: await attempt(() => models.classify(["scorer", "judge"], {{}})),
+            arrayContext: await attempt(() => models.classify(model, [])),
+            arrayState: await attempt(() => models.classify(model, {{ state: [], questions: {QUESTIONS} }})),
+            arrayQuestions: await attempt(() => models.classify(model, {{ state: {{}}, questions: [] }})),
+            arrayQuestion: await attempt(() => models.classify(model, {{ state: {{}}, questions: {{ kind: [] }} }})),
+            noInstructions: await attempt(() => models.classify(model, {{ state: {{}}, questions: {{ kind: {{ type: "bool", criteria: {{ true: "y", false: "n" }} }} }} }})),
+            badBool: await attempt(() => models.classify(model, {{ state: {{}}, questions: {{ kind: {{ type: "bool", instructions: "Ok?", criteria: ["y", "n"] }} }} }})),
+            badKind: await attempt(() => models.classify(model, {{ state: {{}}, questions: {{ kind: {{ type: "rank", instructions: "Rank?" }} }} }})),
+            arrayImagesContext: await attempt(() => models.generateImages({{ provider: "scorer", id: "painter" }}, [])),
+            badImageBlock: await attempt(() => models.generateImages({{ provider: "scorer", id: "painter" }}, {{ input: [{{ type: "text", text: "a fox" }}, {{ type: "image", data: "aW1hZ2U=" }}] }})),
             badSplit: await attempt(() => models.getModelOfType("classifier", "scorer/judge")),
         }};
         "#
@@ -330,6 +340,39 @@ async fn reports_provider_errors_as_results_and_invalid_arguments_as_exceptions(
             .contains("models.generateImages() context.input must be a non-empty array of blocks, got undefined.")
     );
     assert!(text("badSplit").contains("The provider and the id are separate arguments"));
+    assert!(
+        text("arrayModel")
+            .contains("models.classify() expects a classifier model as its first argument, got an array.")
+    );
+    assert!(
+        text("arrayContext")
+            .contains("models.classify() expects a context object as its second argument, got an empty array.")
+    );
+    assert!(text("arrayState").contains("models.classify() context.state must be an object, got an empty array."));
+    assert!(
+        text("arrayQuestions")
+            .contains("models.classify() context.questions must map question IDs to questions, got an empty array.")
+    );
+    assert!(
+        text("arrayQuestion")
+            .contains("models.classify() context.questions.kind must be a question object, got an empty array.")
+    );
+    assert!(text("noInstructions").contains("models.classify() context.questions.kind.instructions must be a string."));
+    assert!(text("badBool").contains(
+        "context.questions.kind is a \"bool\" question, so criteria must be { true: string, false: string }."
+    ));
+    assert!(
+        text("badKind")
+            .contains("context.questions.kind.type must be \"choice\", \"score\", or \"bool\", got \"rank\".")
+    );
+    assert!(
+        text("arrayImagesContext")
+            .contains("models.generateImages() expects a context object as its second argument, got an empty array.")
+    );
+    assert!(
+        text("badImageBlock")
+            .contains("models.generateImages() context.input[1] must be a text or image block, got { type, data }.")
+    );
     let rows: Vec<_> =
         output.details.calls.iter().map(|call| (call.name.as_str(), call.status, call.error.as_deref())).collect();
     assert_eq!(

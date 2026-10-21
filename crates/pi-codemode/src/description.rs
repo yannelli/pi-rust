@@ -5,10 +5,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::declarations::{
-    MCP_TYPESCRIPT_PREAMBLE, ToolDeclaration, mcp_structured_content_schema, render_tool_output_type,
-    render_tool_sample,
-};
+use crate::declarations::{ToolDeclaration, render_tool_output_type, render_tool_sample};
 use crate::host::{CodemodeToolInfo, ToolNamespace};
 use crate::identifier::to_codemode_identifier;
 use crate::js::{js_trim, locale_compare, utf16_len};
@@ -25,7 +22,7 @@ pub const CODEMODE_PROMPT_GUIDELINES: [&str; 1] = [
 ];
 
 const DESCRIPTION_INTRO: &str = "Run JavaScript that calls other tools. The input is raw JavaScript (not JSON, no code fence), run as an async function body in a QuickJS sandbox: top-level `await` and `return` work. No Node, file system, network, or timers.
-- `await tools.<name>({ ...args })` resolves to a string, or an object if the tool's declaration says so, and rejects with an Error on failure. Calls still running when the script ends are cancelled.
+- `await tools.<name>({ ...args })` resolves to a string, or an object if the tool's declaration says so, and rejects with an Error on failure. A tool whose declaration returns an object resolves on failure too when it returned that object; check its fields. Calls still running when the script ends are cancelled.
 - Optional first line: `// @options: {\"max_output_tokens\": 10000, \"timeout_ms\": 60000}`";
 
 /// How the tool presents the loadout while active (the `codemode.mode` setting).
@@ -143,8 +140,9 @@ fn select_catalog(groups: &[CatalogGroup], budget: Option<usize>) -> HashSet<Str
     shown
 }
 
-/// Model-facing description: the globals, the shared MCP types when listed tools need them, and
-/// one section per listed tool grouped by namespace. Deferred tools never change it.
+/// Model-facing description: the globals and one section per listed tool grouped by namespace.
+/// Deferred tools are never listed and do not affect the description at all, so it stays the same
+/// while tools are registered late (for example by MCP servers that connect).
 pub fn create_codemode_description(tools: &[CodemodeToolInfo], options: &CodemodeDescriptionOptions) -> String {
     let listed: Vec<&CodemodeToolInfo> =
         tools.iter().filter(|tool| tool.name != CODEMODE_TOOL_NAME && !options.deferred.contains(&tool.name)).collect();
@@ -171,11 +169,6 @@ pub fn create_codemode_description(tools: &[CodemodeToolInfo], options: &Codemod
     let shown = select_catalog(&groups, options.inline_budget);
 
     let mut sections = vec![DESCRIPTION_INTRO.to_string(), describe_globals(options.models_docs_path.as_deref())];
-    if declarations.iter().any(|declaration| {
-        shown.contains(&declaration.name) && mcp_structured_content_schema(declaration.output_schema.as_ref()).is_some()
-    }) {
-        sections.push(format!("Shared MCP Types:\n```ts\n{MCP_TYPESCRIPT_PREAMBLE}\n```"));
-    }
     if declarations.is_empty() {
         return sections.join("\n\n");
     }
@@ -202,29 +195,39 @@ pub fn create_codemode_description(tools: &[CodemodeToolInfo], options: &Codemod
     sections.join("\n\n")
 }
 
-/// What a script call resolves to, in one line: `a string`, the field names of an object, or the
-/// rendered type for anything else.
+/// The field names of an object schema, `{ output, exit_code, full_output_path? }`, with the fields
+/// of object-typed fields `depth` levels deep: `{ content, structuredContent?: { results } }`.
+/// `None` for other schemas.
+fn describe_fields(schema: &Value, depth: usize) -> Option<String> {
+    let object = schema.as_object()?;
+    if object.get("type").and_then(Value::as_str) != Some("object") {
+        return None;
+    }
+    let properties = object.get("properties")?.as_object()?;
+    let required: Vec<&str> = match object.get("required") {
+        Some(Value::Array(names)) => names.iter().filter_map(Value::as_str).collect(),
+        _ => Vec::new(),
+    };
+    let fields: Vec<String> = properties
+        .iter()
+        .map(|(name, field)| {
+            let nested = if depth > 0 { describe_fields(field, depth - 1) } else { None };
+            let optional = if required.contains(&name.as_str()) { "" } else { "?" };
+            format!("{name}{optional}{}", nested.map(|nested| format!(": {nested}")).unwrap_or_default())
+        })
+        .collect();
+    Some(format!("{{ {} }}", fields.join(", ")))
+}
+
+/// What a script call resolves to, in one line: `a string`, the field names of an object (see
+/// [`describe_fields`]), or the rendered type for anything else.
 fn describe_output(schema: Option<&Value>) -> String {
     let rendered = render_tool_output_type(schema);
     if rendered == "string" {
         return "a string".into();
     }
-    if let Some(object) = schema.and_then(Value::as_object)
-        && object.get("type").and_then(Value::as_str) == Some("object")
-        && let Some(Value::Object(properties)) = object.get("properties")
-        && mcp_structured_content_schema(schema).is_none()
-    {
-        let required: Vec<&str> = match object.get("required") {
-            Some(Value::Array(names)) => names.iter().filter_map(Value::as_str).collect(),
-            _ => Vec::new(),
-        };
-        let fields: Vec<String> = properties
-            .keys()
-            .map(|name| if required.contains(&name.as_str()) { name.clone() } else { format!("{name}?") })
-            .collect();
-        return format!("`{{ {} }}`", fields.join(", "));
-    }
-    format!("`{}`", rendered.split_whitespace().collect::<Vec<_>>().join(" "))
+    let fields = schema.and_then(|schema| describe_fields(schema, 1));
+    format!("`{}`", fields.unwrap_or_else(|| rendered.split_whitespace().collect::<Vec<_>>().join(" ")))
 }
 
 /// A declared tool's description followed by how scripts call it and what the call resolves to.

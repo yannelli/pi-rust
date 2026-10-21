@@ -29,7 +29,7 @@ use crate::runtime::{
 pub use actions::McpConnectionId;
 pub use registry::McpAgentTool;
 pub use status::{McpServerStatus, describe_state};
-pub use waits::{STILL_CONNECTING_MESSAGE, script_needs_server};
+pub use waits::{STILL_CONNECTING_MESSAGE, reaches_server};
 
 pub const CODEMODE_TOOL_NAME: &str = "codemode";
 pub const TOOL_SEARCH_TOOL_NAME: &str = "tool_search";

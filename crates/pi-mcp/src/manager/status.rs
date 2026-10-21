@@ -16,7 +16,8 @@ pub struct McpServerStatus {
     pub state: Option<ServerState>,
     pub error: Option<String>,
     pub tools: Vec<String>,
-    pub resources: usize,
+    /// Whether the server offers resources.
+    pub has_resources: bool,
     /// Whether the server signs in with OAuth.
     pub oauth: bool,
     /// Result of the last action that failed.
@@ -43,11 +44,7 @@ pub fn describe_state(status: &McpServerStatus, with_error: bool) -> String {
             format!("failed: {}", first_line(status.error.as_deref().unwrap_or("unknown error")))
         }
         Some(ServerState::Connected) => {
-            let resources = if status.resources > 0 {
-                format!(" · {}", plural(status.resources, "resource"))
-            } else {
-                String::new()
-            };
+            let resources = if status.has_resources { " · resources" } else { "" };
             format!("connected · {}{resources}", plural(status.tools.len(), "tool"))
         }
         Some(ServerState::Connecting) => "connecting…".into(),
@@ -79,7 +76,7 @@ fn status_of(server: &Server) -> McpServerStatus {
         tools: connection
             .map(|connection| connection.tools().into_iter().map(|tool| tool.name).collect())
             .unwrap_or_default(),
-        resources: connection.map_or(0, |connection| connection.resources().len()),
+        has_resources: connection.is_some_and(|connection| connection.has_resources()),
         oauth: connection.is_some_and(|connection| connection.oauth_url().is_some()),
         message: server.message.clone(),
     }

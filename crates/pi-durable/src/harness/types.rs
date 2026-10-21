@@ -249,6 +249,30 @@ pub enum ToolFilter {
     Remove { remove: Vec<String> },
 }
 
+/// Stored filter of the tools offered to the model. Unset: every model-callable tool except deferred ones. A list:
+/// exactly these, in order, deferred ones too. An edit: the tools not deferred and not in `remove`, in registry
+/// order, then the deferred tools in `add` that are not in `remove`, in `add` order.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ModelToolFilter {
+    List(Vec<String>),
+    Edit {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        remove: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        add: Option<Vec<String>>,
+    },
+}
+
+impl From<ToolFilter> for ModelToolFilter {
+    fn from(filter: ToolFilter) -> Self {
+        match filter {
+            ToolFilter::List(names) => Self::List(names),
+            ToolFilter::Remove { remove } => Self::Edit { remove: Some(remove), add: None },
+        }
+    }
+}
+
 /// Stored choices of one conversation (`pi.agent`); names, not objects. Unset fields follow the host.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -262,7 +286,7 @@ pub struct AgentState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tools: Option<ToolFilter>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model_tools: Option<ToolFilter>,
+    pub model_tools: Option<ModelToolFilter>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -285,7 +309,8 @@ pub struct AgentChange {
     pub thinking_level: Change<ThinkingLevel>,
     pub extensions: Change<ExtensionSelection>,
     pub tools: Change<ToolFilter>,
-    pub model_tools: Change<ToolFilter>,
+    /// Replaces the stored filter as a whole; tools loaded with `add_tools` are in its `add`.
+    pub model_tools: Change<ModelToolFilter>,
     pub instructions: Change<String>,
     pub cwd: Change<String>,
 }
@@ -306,6 +331,8 @@ pub struct Agent {
     pub tools: Vec<Arc<ToolRegistration>>,
     /// The tools nested calls resolve among, in order.
     pub callable: Vec<Arc<ToolRegistration>>,
+    /// Enabled deferred tools the model may call and is not offered yet, in registry order: what `tool_search` loads.
+    pub deferred: Vec<Arc<ToolRegistration>>,
     /// Extension sections, then `instructions` when set.
     pub sections: Vec<Arc<PromptSection>>,
     pub instructions: Option<String>,
@@ -327,6 +354,7 @@ impl std::fmt::Debug for Agent {
             .field("extensions", &self.extensions.iter().map(|e| e.name.clone()).collect::<Vec<_>>())
             .field("tools", &names(&self.tools))
             .field("callable", &names(&self.callable))
+            .field("deferred", &names(&self.deferred))
             .field("sections", &self.sections.iter().map(|s| s.key.clone()).collect::<Vec<_>>())
             .field("instructions", &self.instructions)
             .field("cwd", &self.cwd)

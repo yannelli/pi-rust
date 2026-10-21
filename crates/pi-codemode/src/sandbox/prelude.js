@@ -323,20 +323,23 @@
 		output("text", rendered);
 	}
 
+	const IMAGE_EXPECTS =
+		'image expects a non-empty image URL string, an object with image_url, or an image block { type: "image", data, mimeType }';
+
 	function imageUrl(value) {
 		if (typeof value === "string") return value;
 		if (typeof value !== "object" || value === null || Array.isArray(value)) {
-			throw new TypeErrorCtor("image expects a non-empty image URL string, an object with image_url, or a raw MCP image block");
+			throw new TypeErrorCtor(IMAGE_EXPECTS);
 		}
 		if (value.image_url !== undefined) {
-			if (typeof value.image_url !== "string") throw new TypeErrorCtor("image expects a non-empty image URL string, an object with image_url, or a raw MCP image block");
+			if (typeof value.image_url !== "string") throw new TypeErrorCtor(IMAGE_EXPECTS);
 			return value.image_url;
 		}
-		if (typeof value.type !== "string") throw new TypeErrorCtor("image expects a non-empty image URL string, an object with image_url, or a raw MCP image block");
+		if (typeof value.type !== "string") throw new TypeErrorCtor(IMAGE_EXPECTS);
 		if (value.type !== "image") {
-			throw new TypeErrorCtor('image only accepts MCP image blocks, got "' + value.type + '"');
+			throw new TypeErrorCtor('image only accepts image blocks, got "' + value.type + '"');
 		}
-		if (typeof value.data !== "string" || value.data === "") throw new TypeErrorCtor("image expected MCP image data");
+		if (typeof value.data !== "string" || value.data === "") throw new TypeErrorCtor("image expected image block data");
 		if (value.data.toLowerCase().startsWith("data:")) return value.data;
 		return "data:;base64," + value.data;
 	}
@@ -352,7 +355,7 @@
 
 	function image(value) {
 		const url = imageUrl(value);
-		if (url === "") throw new TypeErrorCtor("image expects a non-empty image URL string, an object with image_url, or a raw MCP image block");
+		if (url === "") throw new TypeErrorCtor(IMAGE_EXPECTS);
 		const colon = url.indexOf(":");
 		const scheme = colon === -1 ? "" : url.slice(0, colon).toLowerCase();
 		if (scheme === "http" || scheme === "https") {
@@ -406,12 +409,21 @@
 	Object.defineProperty(globalThis, "exit", { value: exit, enumerable: true });
 
 	return {
-		settle(id, ok, payload) {
+		// A rejection's Error gets the own properties of the propertiesJson object, except name, message, and stack.
+		settle(id, ok, payload, propertiesJson) {
 			const entry = pending.get(id);
 			if (!entry) return;
 			pending.delete(id);
 			if (!ok) {
-				entry.reject(new ErrorCtor(payload));
+				const error = new ErrorCtor(payload);
+				if (propertiesJson !== undefined) {
+					const properties = parse(propertiesJson);
+					for (const key of Object.keys(properties)) {
+						if (key === "name" || key === "message" || key === "stack") continue;
+						Object.defineProperty(error, key, { value: properties[key], writable: true, enumerable: true, configurable: true });
+					}
+				}
+				entry.reject(error);
 				return;
 			}
 			let value;

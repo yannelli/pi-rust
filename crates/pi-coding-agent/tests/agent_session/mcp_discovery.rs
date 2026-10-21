@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use pi_agent::{AgentTool, AgentToolResult, ToolUpdateCallback};
+use pi_agent::{AgentTool, AgentToolResult, ToolReach, ToolUpdateCallback};
 use pi_ai::Message;
 use pi_ai::providers::faux::FauxResponse;
 use serde_json::{Value, json};
@@ -135,7 +135,10 @@ async fn warns_when_deferred_mcp_tools_have_neither_tool_search_nor_codemode() {
     );
 }
 
-struct OtherCodemode;
+/// Another extension's `codemode`; `reaches` declares that it reaches other tools.
+struct OtherCodemode {
+    reaches: bool,
+}
 
 #[async_trait]
 impl AgentTool for OtherCodemode {
@@ -150,6 +153,9 @@ impl AgentTool for OtherCodemode {
     }
     fn default_active(&self) -> bool {
         false
+    }
+    fn reaches_tools(&self, _input: &Value) -> Option<ToolReach> {
+        self.reaches.then_some(ToolReach::All)
     }
     async fn execute(
         &self,
@@ -166,12 +172,48 @@ impl AgentTool for OtherCodemode {
 async fn does_not_activate_another_tool_named_codemode() {
     let s =
         setup(json!({ "exposure": "codemode" }), SetupOptions { wait_for_tools: false, ..Default::default() }).await;
-    s.h.session.register_tool(Arc::new(OtherCodemode), pi_coding_agent::agent_session::ToolSource::sdk("codemode"));
+    s.h.session.register_tool(
+        Arc::new(OtherCodemode { reaches: false }),
+        pi_coding_agent::agent_session::ToolSource::sdk("codemode"),
+    );
     s.h.session.set_active_tools_by_name(&[]);
     s.h.provider.push(FauxResponse::text("ready"));
     s.h.session.prompt("start", Vec::new()).await.unwrap();
 
     assert!(s.h.session.active_tool_names().is_empty());
+}
+
+#[tokio::test]
+async fn activates_another_tool_named_codemode_when_it_reaches_other_tools() {
+    let s =
+        setup(json!({ "exposure": "codemode" }), SetupOptions { wait_for_tools: false, ..Default::default() }).await;
+    s.h.session.register_tool(
+        Arc::new(OtherCodemode { reaches: true }),
+        pi_coding_agent::agent_session::ToolSource::sdk("codemode"),
+    );
+    s.h.session.set_active_tools_by_name(&[]);
+    s.h.provider.push(FauxResponse::text("ready"));
+    s.h.session.prompt("start", Vec::new()).await.unwrap();
+
+    assert_eq!(s.h.session.active_tool_names(), ["codemode"]);
+}
+
+#[tokio::test]
+async fn tells_scripts_what_directly_exposed_mcp_tools_resolve_to() {
+    let s = setup(json!({ "exposure": "direct" }), SetupOptions::default()).await;
+    let mut active = s.h.session.active_tool_names();
+    active.push("codemode".into());
+    s.h.session.set_active_tools_by_name(&active);
+    let search = declared_description(&s.h.session, "mcp__docs__search").unwrap();
+    let fail = declared_description(&s.h.session, "mcp__docs__fail").unwrap();
+    assert!(search.contains(
+        "Codemode: `tools.mcp__docs__search(args)` resolves to `{ content, structuredContent?: { hits }, isError? }`."
+    ));
+    assert!(
+        fail.contains(
+            "Codemode: `tools.mcp__docs__fail(args)` resolves to `{ content, structuredContent?, isError? }`."
+        )
+    );
 }
 
 #[tokio::test]
@@ -247,6 +289,28 @@ async fn waits_for_the_servers_a_codemode_script_names() {
     let result = tool_result(&s.h.session, "codemode");
     assert!(!result.is_error, "{}", result_text(&result));
     assert_eq!(serde_json::from_str::<Value>(&last_line(&result)).unwrap(), json!({ "hits": ["q guide", "q faq"] }));
+    assert_eq!(s.fake.calls(), [r#"search:{"query":"q"}"#]);
+}
+
+#[tokio::test]
+async fn waits_for_servers_whose_script_identifiers_differ_from_their_names() {
+    let options = SetupOptions {
+        server: "slow-docs",
+        fake: slow(Duration::from_millis(30)),
+        wait_for_tools: false,
+        ..Default::default()
+    };
+    let s = setup(json!({}), options).await;
+    let code = r#"await tools.mcp__slow_docs__search({ query: "q" });
+const names = ["slow-docs", "slow_docs", "mcp__slow-docs", "mcp__slow_docs"];
+return [...new Set(await Promise.all(names.map(async (name) => (await describeNamespace(name))?.name)))];"#;
+    s.h.provider.push(FauxResponse::tool_call("c1", "codemode", json!({ "code": code })));
+    s.h.provider.push(FauxResponse::text("done"));
+    s.h.session.prompt("go", Vec::new()).await.unwrap();
+
+    let result = tool_result(&s.h.session, "codemode");
+    assert!(!result.is_error, "{}", result_text(&result));
+    assert_eq!(last_line(&result), r#"["mcp__slow_docs"]"#);
     assert_eq!(s.fake.calls(), [r#"search:{"query":"q"}"#]);
 }
 

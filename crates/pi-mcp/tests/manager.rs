@@ -139,6 +139,8 @@ async fn describes_the_server_with_its_description_and_instructions() {
     let tool = setup.manager.tool("mcp__docs__search").unwrap();
     let namespace = tool.namespace().unwrap();
     assert_eq!(namespace.name, "mcp__docs");
+    // `describeNamespace("docs")` finds `mcp__docs`.
+    assert_eq!(namespace.aliases, ["docs"]);
     assert_eq!(namespace.description.as_deref(), Some("Search the product docs"));
     assert_eq!(namespace.instructions.as_deref(), Some("Always search before reading."));
     assert_eq!(tool.exposure(), ToolExposure::Deferred);

@@ -36,9 +36,24 @@ fn parses_the_options_line_and_keeps_line_numbers() {
 
 #[test]
 fn only_treats_the_first_line_as_an_options_line() {
-    let input = "text(1)\n// @options: {\"timeout_ms\": 1}";
-    assert_eq!(parse_codemode_source(input).unwrap(), parsed(input, Default::default()));
     assert_eq!(parse_codemode_source("// @optionsx {}\ntext(1)").unwrap().options, Default::default());
+    assert_eq!(parse_codemode_source("text(\"// @options: {}\")").unwrap().options, Default::default());
+}
+
+// #10631: an options line after the first line used to be ignored, so its timeout never applied.
+#[test]
+fn rejects_an_options_line_that_is_not_the_first_line() {
+    let cases = [
+        ("// count things\n// @options: {\"timeout_ms\": 1000}\nwhile (true) {}", 2),
+        ("\n  // @options: {\"timeout_ms\": 1000}\nwhile (true) {}", 2),
+        ("text(1)\r\n// @options: {\"timeout_ms\": 1}", 2),
+        ("// @options: {\"timeout_ms\": 1}\ntext(1)\n// @options: {\"timeout_ms\": 2}", 3),
+    ];
+    for (input, line) in cases {
+        let error = parse_codemode_source(input).unwrap_err();
+        let expected = format!("The // @options: line must be the first line of the input; found one on line {line}");
+        assert_eq!(error.to_string(), expected, "{input:?}");
+    }
 }
 
 #[test]

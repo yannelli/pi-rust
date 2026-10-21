@@ -45,7 +45,16 @@ fn status(name: &str, config: McpServerConfig, scope: McpConfigScope, state: Opt
     let mut entry = McpServerEntry::new(name, config, format!("/cfg/{scope}/mcp.json"));
     entry.scope = Some(scope);
     let enabled = entry.config.is_enabled();
-    McpServerStatus { entry, enabled, state, error: None, tools: Vec::new(), resources: 0, oauth: false, message: None }
+    McpServerStatus {
+        entry,
+        enabled,
+        state,
+        error: None,
+        tools: Vec::new(),
+        has_resources: false,
+        oauth: false,
+        message: None,
+    }
 }
 
 fn sample() -> Vec<McpServerStatus> {
@@ -59,7 +68,7 @@ fn sample() -> Vec<McpServerStatus> {
     let mut config = McpServerConfig::stdio("docs-server", vec!["--stdio".into()]);
     config.tool_exposure = json!({"fetch": "direct"}).as_object().cloned();
     let mut docs = status("docs", config, McpConfigScope::Project, Some(ServerState::Connected));
-    (docs.tools, docs.resources) = (vec!["search".into(), "fetch".into()], 2);
+    (docs.tools, docs.has_resources) = (vec!["search".into(), "fetch".into()], true);
     let mut config = McpServerConfig::http("https://old.example");
     config.enabled = Some(false);
     let old = status("old", config, McpConfigScope::Global, None);
@@ -194,7 +203,7 @@ fn menus_describe_servers_actions_tools_and_exposures() {
         labels(&menu),
         [
             pair("issues", Some("needs sign-in · codemode · global")),
-            pair("docs", Some("connected · 2 tools · 2 resources · codemode · project")),
+            pair("docs", Some("connected · 2 tools · resources · codemode · project")),
             pair("old", Some("disabled · codemode · global")),
         ]
     );
@@ -208,7 +217,7 @@ fn menus_describe_servers_actions_tools_and_exposures() {
     assert_eq!(menu.title, "MCP server docs");
     assert_eq!(
         menu.details.as_deref(),
-        Some("docs-server --stdio\nproject: /cfg/project/mcp.json\nState: connected · 2 tools · 2 resources")
+        Some("docs-server --stdio\nproject: /cfg/project/mcp.json\nState: connected · 2 tools · resources")
     );
     let saved = Some("saved to the project mcp.json");
     let expected = [
