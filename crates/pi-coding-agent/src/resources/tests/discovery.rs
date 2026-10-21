@@ -48,6 +48,48 @@ fn patterns_include_exclude_and_force() {
     assert!(is_pattern("!a") && is_pattern("a*") && is_pattern("-a") && !is_pattern("dir/file.md"));
 }
 
+// Upstream #10765: `!~/skills/x`, `+~/x`, and `-~/x` were compared with a literal `~`.
+#[test]
+fn patterns_expand_a_leading_tilde() {
+    let home = crate::resources::paths::home_dir();
+    let base = home.join("project");
+    let skills = home.join("extra/skills");
+    let files: Vec<PathBuf> = ["keep", "glob-excluded", "exact-excluded", "exact-included"]
+        .iter()
+        .map(|name| skills.join(name).join("SKILL.md"))
+        .collect();
+    let names = |patterns: &[&str]| {
+        let mut names: Vec<String> = apply_patterns(&files, &strings(patterns), &base)
+            .iter()
+            .map(|path| path.parent().unwrap().file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    };
+    assert_eq!(names(&["!~/extra/skills/glob-*"]), ["exact-excluded", "exact-included", "keep"]);
+    assert_eq!(names(&["-~/extra/skills/exact-excluded"]), ["exact-included", "glob-excluded", "keep"]);
+    assert_eq!(names(&["~/extra/skills/keep"]).len(), 1, "plain include patterns expand too");
+    assert_eq!(names(&["!~/extra/skills/*", "+~/extra/skills/exact-included"]), ["exact-included"]);
+
+    let skill = skills.join("keep/SKILL.md");
+    assert!(!is_enabled_by_overrides(&skill, &strings(&["!~/extra/skills/keep"]), &base));
+    assert!(is_enabled_by_overrides(&skill, &strings(&["!~/extra/skills/*", "+~/extra/skills/keep"]), &base));
+    assert!(!is_enabled_by_overrides(&skill, &strings(&["-~/extra/skills/keep"]), &base));
+}
+
+#[test]
+fn pattern_text_expands_home_and_file_urls_only() {
+    use crate::resources::paths::normalize_path_input;
+    let home = crate::resources::paths::home_dir();
+    assert_eq!(normalize_path_input("~"), home.to_string_lossy());
+    assert_eq!(normalize_path_input("~/a/../b/*.md"), home.join("b/*.md").to_string_lossy());
+    for unchanged in ["~user/x", "skills/*", "**/*.md", "x~/y", "/abs/~/z"] {
+        assert_eq!(normalize_path_input(unchanged), unchanged);
+    }
+    #[cfg(unix)]
+    assert_eq!(normalize_path_input("file:///opt/my%20skills"), "/opt/my skills");
+}
+
 #[test]
 fn agents_skill_dirs_stop_at_the_repo_root() {
     let temp = tempfile::tempdir().unwrap();
