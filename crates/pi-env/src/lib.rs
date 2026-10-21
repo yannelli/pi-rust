@@ -24,5 +24,5 @@ pub use ssh::{
     WindowsShell, accept_host_key, connect_ssh, default_daemon_dir, deploy_daemon, detect_platform, forget_host_key,
     local_daemon, packaged_daemon, scan_host_key, ssh_arguments, ssh_connection,
 };
-pub use terminal::{DataFn, RemoteTerminal, TerminalOptions, open_terminal};
+pub use terminal::{DataFn, RemoteTerminal, TerminalForeground, TerminalOptions, open_terminal};
 pub use watch::{RemoteWatchOptions, RemoteWatcher};

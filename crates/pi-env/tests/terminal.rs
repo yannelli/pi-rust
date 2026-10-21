@@ -103,6 +103,37 @@ async fn runs_a_program_in_a_terminal_with_input_resizing_and_its_exit_code() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reports_the_job_in_the_foreground_not_the_shell_at_its_prompt() {
+    let guard = connect();
+    let output = Collector::default();
+    // Interactive, for job control: the shell puts each job in front of the terminal.
+    let mut options = TerminalOptions::new(cwd(&guard), 80, 24, output.on_data());
+    options.argv = argv(&["/bin/sh", "-i"]);
+    options.env = Some([("PS1".into(), "$ ".into()), ("TERM".into(), "xterm-256color".into())].into());
+    let terminal = timeout(LIMIT, open_terminal(&guard.connection, options)).await.expect("opens").expect("terminal");
+    terminal.write("echo READY\n");
+    output.wait_for("READY").await;
+    assert_eq!(terminal.foreground().await.expect("foreground"), None);
+    terminal.write("sleep 100\n");
+    let mut foreground = terminal.foreground().await.expect("foreground");
+    for _ in 0..100 {
+        if foreground.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        foreground = terminal.foreground().await.expect("foreground");
+    }
+    let foreground = foreground.expect("a job in front");
+    assert!(foreground.pid > 0 && foreground.pid != terminal.pid);
+    if cfg!(any(target_os = "linux", target_os = "macos")) {
+        assert_eq!(foreground.name.as_deref(), Some("sleep"));
+    }
+    terminal.close();
+    assert_eq!(exit_code(&terminal).await.expect_err("aborted").code, "aborted");
+    assert_eq!(terminal.foreground().await.expect_err("ended").code, "EBADF");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn delivers_raw_bytes_not_decoded_text() {
     let guard = connect();
     let output = Collector::default();

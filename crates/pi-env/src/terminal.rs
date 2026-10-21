@@ -38,6 +38,13 @@ impl TerminalOptions {
     }
 }
 
+/// The foreground job of a terminal: its process group id, and its leader's name if the system tells.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TerminalForeground {
+    pub pid: u32,
+    pub name: Option<String>,
+}
+
 /// A program running in a pseudo-terminal of a pi-env daemon. It ends when the program exits, `close()` kills it, or
 /// the connection is lost (the daemon then kills it). Dropping the value does not end the program.
 pub struct RemoteTerminal {
@@ -73,6 +80,18 @@ impl RemoteTerminal {
     /// Kill the program and everything in its session.
     pub fn close(&self) {
         self.abort.abort(None);
+    }
+
+    /// The job in the terminal's foreground when it is not the program itself: what a shell runs, such as an editor.
+    /// `None` while the program is in front (a shell at its prompt). Fails once the terminal has ended.
+    pub async fn foreground(&self) -> Result<Option<TerminalForeground>, RemoteError> {
+        let mut json = Json::new();
+        json.insert("target".into(), self.id.into());
+        let reply = self.connection.request_now("ptyForeground", json, self.session, RequestOptions::default()).await?;
+        let Some(foreground) = reply.json.get("foreground").and_then(Value::as_object) else { return Ok(None) };
+        let pid = foreground.get("pid").and_then(Value::as_u64).unwrap_or(0) as u32;
+        let name = foreground.get("name").and_then(Value::as_str).filter(|name| !name.is_empty());
+        Ok(Some(TerminalForeground { pid, name: name.map(str::to_string) }))
     }
 
     /// Sent at once, so calls made one after another reach the daemon in that order.
