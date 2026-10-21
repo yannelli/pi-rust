@@ -25,15 +25,22 @@ fn node(args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+/// `builtinModules` plus the given names that exist only with the `node:` prefix, such as
+/// `node:sea` and `node:test`, which Node 22 leaves out of `builtinModules`.
+const BUILTINS_SCRIPT: &str = "const m = require('module'); JSON.stringify([...m.builtinModules, \
+     ...process.argv.slice(1).map((n) => 'node:' + n).filter((n) => m.isBuiltin(n))])";
+
 pub fn section(root: &Path) -> super::report::Section {
     build("nodeBuiltins", "Node built-ins", |section| {
-        let up = parse_builtins(&node(&["-p", "JSON.stringify(require('module').builtinModules)"])?)?;
-        let version = node(&["--version"]).unwrap_or_default();
         let source = read_local(root, "crates/pi-js/src/resolve/mod.rs")?;
         let local: BTreeSet<String> = const_array_literals(&source, "NODE_BUILTINS", Lang::Rust)
             .ok_or("no NODE_BUILTINS in resolve/mod.rs")?
             .into_iter()
             .collect();
+        let mut args = vec!["-p", BUILTINS_SCRIPT];
+        args.extend(local.iter().map(String::as_str));
+        let up = parse_builtins(&node(&args)?)?;
+        let version = node(&["--version"]).unwrap_or_default();
         section.notes.push(format!("Node {version} lists {} built-in modules; pi-js lists {}.", up.len(), local.len()));
         let unsupported = read_local(root, "crates/pi-js/src/unsupported.rs").unwrap_or_default();
         let count =
