@@ -222,18 +222,9 @@ pub fn resolve_transcript_tools(messages: &[Message], support: TranscriptToolSup
         },
         TranscriptToolSupport::Changes => TranscriptTools::default(),
         TranscriptToolSupport::Additions => {
-            let mut folded = usize::from(initial_system_message(messages).is_some());
-            // A name declared before counts as a redeclaration even after its removal: Kimi K3
-            // ignores a removed tool that a later tool message declares again.
-            let mut declared = HashSet::new();
-            for (index, system) in system_messages(messages).enumerate() {
-                let added = system.tools_added.as_deref().unwrap_or_default();
-                let removes = system.tools_removed.as_ref().is_some_and(|removed| !removed.is_empty());
-                if removes || added.iter().any(|tool| declared.contains(tool.name.as_str())) {
-                    folded = folded.max(index + 1);
-                }
-                declared.extend(added.iter().map(|tool| tool.name.as_str()));
-            }
+            let leading = usize::from(initial_system_message(messages).is_some());
+            let after_change = last_non_additive_tool_change(system_messages(messages)).map_or(0, |index| index + 1);
+            let folded = leading.max(after_change);
             TranscriptTools {
                 request_tools: tools_after(system_messages(messages).take(folded)),
                 folded_system_messages: folded,
@@ -258,18 +249,26 @@ pub fn tool_state_changes(previous: &[Tool], current: &[Tool]) -> (Vec<Tool>, Ve
 
 /// Whether tool history has a removal or redeclaration an addition-only transport cannot replay.
 pub fn has_non_additive_tool_changes(messages: &[Message]) -> bool {
-    let mut declared = std::collections::HashSet::new();
-    for system in system_messages(messages) {
+    last_non_additive_tool_change(system_messages(messages)).is_some()
+}
+
+/// Index among the system messages of the last one with a removal or same-name redeclaration.
+fn last_non_additive_tool_change<'a>(systems: impl Iterator<Item = &'a SystemMessage>) -> Option<usize> {
+    // A name declared before counts as a redeclaration even after its removal: Kimi K3 ignores a
+    // removed tool that a later tool message declares again.
+    let mut declared = HashSet::new();
+    let mut last = None;
+    for (index, system) in systems.enumerate() {
         if system.tools_removed.as_ref().is_some_and(|removed| !removed.is_empty()) {
-            return true;
+            last = Some(index);
         }
         for tool in system.tools_added.iter().flatten() {
-            if !declared.insert(tool.name.clone()) {
-                return true;
+            if !declared.insert(tool.name.as_str()) {
+                last = Some(index);
             }
         }
     }
-    false
+    last
 }
 
 #[cfg(test)]

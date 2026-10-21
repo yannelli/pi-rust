@@ -184,6 +184,12 @@ pub(crate) fn convert_messages(
                         if !removed.is_empty() {
                             parts.push(tool_removal_notice(&removed));
                         }
+                        // Recorded after this message's additions, whose notice precedes this removal notice.
+                        for name in removed {
+                            if !notices.unavailable.iter().any(|known| known == name) {
+                                notices.unavailable.push(name.to_string());
+                            }
+                        }
                     }
                     parts.retain(|part| !part.is_empty());
                     let text = parts.join("\n\n");
@@ -253,11 +259,6 @@ fn tool_additions(
     notices: &mut ToolNotices,
 ) -> Result<Vec<Value>, String> {
     let tools = system.tools_added.as_deref().unwrap_or_default();
-    for removed in system.tools_removed.iter().flatten() {
-        if !notices.unavailable.contains(&removed.name) {
-            notices.unavailable.push(removed.name.clone());
-        }
-    }
     notices.unavailable.retain(|name| !tools.iter().any(|tool| tool.name == *name));
     if tools.is_empty() {
         return Ok(Vec::new());

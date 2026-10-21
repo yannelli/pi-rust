@@ -238,6 +238,28 @@ async fn stops_listing_a_tool_as_unavailable_once_it_is_declared_again() {
 }
 
 #[tokio::test]
+async fn does_not_list_a_tool_as_still_unavailable_before_its_removal_is_announced() {
+    let messages = vec![
+        system(json!({"role": "system", "content": "base prompt",
+            "toolsAdded": [tool("base_tool"), tool("drop_tool")], "timestamp": 0})),
+        system(json!({"role": "system", "content": "", "toolsAdded": [tool("late_tool")],
+            "toolsRemoved": [{"name": "drop_tool"}], "timestamp": 1})),
+        Message::user("go"),
+    ];
+    let context = Context { messages, ..Context::default() };
+    let payload = capture_payload(&OpenAIResponses, &additional_tools_model(), &context, options()).await;
+    let input = payload["input"].as_array().unwrap();
+    // Like Codex: notice, then the tools, then the removal notice.
+    let notice = input[input.len() - 4]["content"].as_str().unwrap();
+    assert!(notice.contains("incremental tools update") && !notice.contains("Still unavailable"));
+    assert_eq!(input[input.len() - 3]["type"], "additional_tools");
+    assert_eq!(names(&input[input.len() - 3]["tools"]), ["late_tool"]);
+    let removal = input[input.len() - 2]["content"].as_str().unwrap();
+    assert!(removal.contains("no longer available. Do not call them:\n- drop_tool"));
+    assert_eq!(input[input.len() - 1]["role"], "user");
+}
+
+#[tokio::test]
 async fn keeps_the_tool_search_prefix_across_loads_after_a_removal() {
     let model = model(json!({"supportsMidConvoSystemMessages": true, "supportsToolSearch": true}));
     let payloads = capture_tool_history(&model).await;
