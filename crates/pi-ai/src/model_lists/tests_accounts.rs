@@ -306,6 +306,21 @@ async fn openai_and_xai_add_only_chat_models_of_catalog_families() {
 }
 
 #[tokio::test]
+async fn openai_chatgpt_logins_take_the_accounts_default_context_size() {
+    let body = json!({"models": [
+        {"slug": "gpt-5.4", "context_window": 500_000, "max_context_window": 872_000},
+        {"slug": "gpt-5.5", "max_context_window": 872_000}, {"slug": ""}, {"context_window": 1},
+    ]});
+    let server = serve(200, body).await;
+    let models =
+        AccountModelList::OpenAi.personalize(openai_catalog(), &context(&server, Some("oauth-token"))).await.saved();
+    assert_eq!(ids(&models), ["gpt-5.4", "gpt-5.5", "judge"]);
+    let windows: Vec<u64> = models.iter().map(|model| model.context_window).collect();
+    assert_eq!(windows, [500_000, 100_000, 100_000]);
+    assert_eq!(server.requests()[0].headers["authorization"], "Bearer oauth-token");
+}
+
+#[tokio::test]
 async fn openai_and_xai_fall_back_to_the_catalog() {
     assert_fallbacks(AccountModelList::OpenAi, "sk-test", openai_catalog()).await;
     assert_fallbacks(AccountModelList::Xai, "xai-test", vec![chat("xai", "openai-responses", "grok-4.5")]).await;
