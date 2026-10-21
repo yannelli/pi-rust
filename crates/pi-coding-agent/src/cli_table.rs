@@ -276,6 +276,12 @@ pub const CLI_COMMANDS: &[CliCommand] = &[
         COMPLETION_SHELLS,
     ),
     command("doctor", "[--json]", "Check the install, config, credentials, MCP servers, and terminal", &["--json"]),
+    command(
+        "sessions",
+        "[list|rm|prune]",
+        "List, delete, or prune saved sessions (--all for every project)",
+        &["list", "rm", "prune", "--all", "--json", "--limit", "--older-than", "--dry-run", "--yes", "--session-dir"],
+    ),
 ];
 
 /// The options `pi completion` offers: every option but `--`.
