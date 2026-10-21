@@ -142,7 +142,7 @@ impl Harness {
         let now = options.now.clone().unwrap_or_else(|| Arc::new(system_now));
         let core = Arc::new(HarnessCore {
             session: session.clone(),
-            models: options.models.clone(),
+            models: options.identified_models(),
             registry: options.registry.clone(),
             settings: options.settings.clone(),
             env: options.env.clone(),

@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 
-use crate::http::pi_user_agent;
+use crate::identity::format_user_agent;
 use crate::providers::common::endpoint;
 use crate::request::{HttpRequest, SendOptions, send_request};
 use crate::simple_options::provider_env_value;
@@ -183,7 +183,7 @@ async fn exchange(
     let url = endpoint(base_url, TOKEN_ENDPOINT);
     let mut headers = reqwest::header::HeaderMap::new();
     let beta = format!("{OAUTH_API_BETA},{FEDERATION_BETA}");
-    for (name, value) in [("anthropic-beta", beta), ("user-agent", pi_user_agent())] {
+    for (name, value) in [("anthropic-beta", beta), ("user-agent", format_user_agent(None))] {
         if let Ok(value) = reqwest::header::HeaderValue::from_str(&value) {
             headers.insert(name, value);
         }

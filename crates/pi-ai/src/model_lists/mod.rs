@@ -70,7 +70,7 @@ impl ModelListContext {
             base_url: None,
             client: list_client(),
             default_model: None,
-            user_agent: Some(crate::http::pi_user_agent()),
+            user_agent: Some(crate::identity::format_user_agent(None)),
             cancel: CancellationToken::new(),
         }
     }

@@ -132,7 +132,10 @@ enum Download {
 
 impl PackageManager {
     async fn download_archive(&self, url: &str, previous: Option<&ArchiveMeta>) -> anyhow::Result<Download> {
-        let mut request = self.http().get(url).header(reqwest::header::USER_AGENT, pi_ai::http::pi_user_agent());
+        let mut request = self
+            .http()
+            .get(url)
+            .header(reqwest::header::USER_AGENT, crate::platform::pi_user_agent(crate::platform::VERSION));
         if let Some(previous) = previous.filter(|meta| meta.url == url) {
             if let Some(etag) = &previous.etag {
                 request = request.header(reqwest::header::IF_NONE_MATCH, etag);

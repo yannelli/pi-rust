@@ -6,8 +6,8 @@ use std::sync::Arc;
 use futures::StreamExt;
 use futures::future::BoxFuture;
 use pi_ai::{
-    AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, Context, Message, Model, StopReason,
-    StreamOptions, ThinkingLevel, ToolCall, ToolResultMessage,
+    AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, ClientIdentity, Context, Message, Model,
+    StopReason, StreamOptions, ThinkingLevel, ToolCall, ToolResultMessage, merge_client_identity, pi_attribution,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -109,8 +109,15 @@ pub struct AgentLoopConfig {
     /// Tools callable from other tools. Defaults to the context's tools.
     pub callable_tools: Option<CallableToolsFn>,
     /// Base request options (transport, thinking budgets, headers, payload observers, ...).
-    /// The fields above, the cancellation token, and the reasoning level take precedence.
+    /// The fields above, the cancellation token, and the reasoning level take precedence. The
+    /// `identity` is merged over [`default_agent_identity`]; `attribution: Some(None)` sends none.
     pub stream_options: StreamOptions,
+}
+
+/// Request identity of agent loops (upstream `DEFAULT_AGENT_IDENTITY`): pi-ai's defaults with provider
+/// attribution to pi. `AgentLoopConfig::stream_options.identity` overrides it field by field.
+pub fn default_agent_identity() -> ClientIdentity {
+    ClientIdentity::attributed(pi_attribution())
 }
 
 /// The default `convert_to_llm`: keep provider roles, drop custom ones.
@@ -359,6 +366,7 @@ async fn stream_assistant_response(
         temperature: config.temperature.or(base.temperature),
         reasoning: config.reasoning.filter(|level| *level != ThinkingLevel::Off),
         session_id: config.session_id.clone().or_else(|| base.session_id.clone()),
+        identity: merge_client_identity([Some(&default_agent_identity()), base.identity.as_ref()]),
         ..base.clone()
     };
     let mut response = match &config.stream_fn {

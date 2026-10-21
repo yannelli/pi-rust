@@ -20,6 +20,7 @@ use pi_durable::entries::TOOL_RESULT_ENTRY;
 use pi_durable::harness::live::LIVE_DOC;
 use pi_durable::harness::tool::{BeforeToolDecision, ToolHookCall, ToolHooks, tool_task};
 use pi_durable::harness::*;
+use pi_durable::models::Models;
 use pi_durable::storage::MemoryStorage;
 use pi_durable::testing::faux::{
     FauxMessageOptions, FauxResponseStep, RegisterFauxProviderOptions, faux_assistant_message, faux_text,
@@ -162,8 +163,11 @@ async fn gives_tools_and_hooks_the_harness_models() {
     let Run { harness, status, .. } = run(&setup, vec![calls(&[("echo", json!({}), "c1")]), done()]).await;
     assert_eq!(status, SubmissionStatus::Done);
     let seen = seen.lock().unwrap().clone();
+    // One view of the host's Models that adds the Harness identity, shared by tools and hooks.
     assert_eq!(seen.len(), 2);
-    assert!(seen.iter().all(|models| Arc::ptr_eq(models, &setup.models)));
+    assert!(Arc::ptr_eq(&seen[0], &seen[1]));
+    let ids = |models: &Arc<dyn Models>| models.get_models(None).into_iter().map(|model| model.id).collect::<Vec<_>>();
+    assert_eq!(ids(&seen[0]), ids(&setup.models));
     harness.close(&ctx()).await.unwrap();
 }
 
