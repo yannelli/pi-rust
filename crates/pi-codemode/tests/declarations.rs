@@ -1,24 +1,10 @@
 //! Ported from upstream `packages/codemode/test/declarations.test.ts`.
 
-use pi_codemode::{
-    ToolDeclaration, mcp_structured_content_schema, render_declarations, render_tool_sample, render_tool_signature,
-    schema_to_type,
-};
+use pi_codemode::{ToolDeclaration, render_declarations, render_tool_sample, render_tool_signature, schema_to_type};
 use serde_json::{Value, json};
 
 fn ty(schema: Value) -> String {
     schema_to_type(&schema, None)
-}
-
-fn mcp_result_schema(structured_content: Option<Value>) -> Value {
-    let mut properties = serde_json::Map::new();
-    properties.insert("content".into(), json!({ "type": "array", "items": { "type": "object" } }));
-    if let Some(structured) = structured_content {
-        properties.insert("structuredContent".into(), structured);
-    }
-    properties.insert("isError".into(), json!({ "type": "boolean" }));
-    properties.insert("_meta".into(), json!({ "type": "object" }));
-    json!({ "type": "object", "properties": properties, "required": ["content"] })
 }
 
 fn declaration(name: &str, input: Option<Value>, output: Option<Value>) -> ToolDeclaration {
@@ -261,31 +247,77 @@ fn renders_signatures_with_normalized_identifiers() {
 }
 
 #[test]
-fn renders_mcp_call_tool_result_output_schemas() {
-    let input = json!({ "type": "object", "properties": {}, "additionalProperties": false });
+fn renders_output_schemas_shaped_like_an_mcp_call_tool_result_as_plain_types() {
+    let output = json!({
+        "type": "object",
+        "properties": {
+            "content": { "type": "array", "items": { "type": "object" } },
+            "isError": { "type": "boolean" },
+            "_meta": { "type": "object" },
+        },
+        "required": ["content"],
+    });
+    let plain = declaration("plain", Some(json!({ "type": "object", "properties": {} })), Some(output));
+    assert_eq!(
+        render_tool_signature(&plain, None),
+        "plain(args: { [key: string]: unknown; }): Promise<{ _meta?: { [key: string]: unknown; }; content: Array<{ [key: string]: unknown; }>; isError?: boolean; }>;"
+    );
+}
+
+/// What `pi_mcp::tools::create_mcp_result_schema` returns, as a tool's output schema.
+fn mcp_result_schema(structured_content: Option<Value>) -> Value {
+    let block = json!({
+        "type": "object",
+        "properties": {
+            "type": { "enum": ["text", "image", "audio", "resource_link", "resource"] },
+            "text": { "type": "string" },
+            "data": { "type": "string" },
+            "mimeType": { "type": "string" },
+        },
+        "required": ["type"],
+        "additionalProperties": true,
+    });
+    json!({
+        "type": "object",
+        "properties": {
+            "content": { "type": "array", "items": block },
+            "structuredContent": structured_content.unwrap_or_else(|| json!({ "type": "object" })),
+            "isError": { "type": "boolean" },
+        },
+        "required": ["content"],
+        "additionalProperties": true,
+    })
+}
+
+#[test]
+fn renders_the_mcp_result_schema_with_references_into_the_servers_output_schema() {
+    let content = "content: Array<{ data?: string; mimeType?: string; text?: string; type: \"text\" | \"image\" | \"audio\" | \"resource_link\" | \"resource\"; [key: string]: unknown; }>; isError?: boolean;";
+    assert_eq!(
+        schema_to_type(&mcp_result_schema(None), None),
+        format!("{{ {content} structuredContent?: {{ [key: string]: unknown; }}; [key: string]: unknown; }}")
+    );
+
+    let hit = json!({ "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] });
+    let prefix = "#/properties/structuredContent";
     let structured = json!({
         "type": "object",
-        "properties": { "results": { "type": "array", "items": { "$ref": "#/definitions/Result~1item~0v1" } } },
-        "required": ["results"],
-        "additionalProperties": false,
-        "definitions": {
-            "Result/item~v1": {
-                "type": "object",
-                "properties": { "id": { "type": "string" }, "score": { "type": "number" } },
-                "required": ["id", "score"],
-                "additionalProperties": false,
-            },
+        "properties": {
+            "hits": { "type": "array", "items": { "$ref": format!("{prefix}/$defs/Hit~1v1") } },
+            "again": { "$ref": format!("{prefix}/properties/hits") },
+            "children": { "type": "array", "items": { "$ref": prefix } },
+            "default": { "$ref": format!("{prefix}/definitions/Hit") },
+            "remote": { "$ref": "https://example.com/schema.json" },
         },
+        "required": ["hits"],
+        "$defs": { "Hit/v1": hit },
+        "definitions": { "Hit": hit },
     });
-    let search = declaration("mcp__sample__search", Some(input.clone()), Some(mcp_result_schema(Some(structured))));
     assert_eq!(
-        render_tool_signature(&search, None),
-        "mcp__sample__search(args: {}): Promise<CallToolResult<{ results: Array<{ id: string; score: number; }>; }>>;"
+        schema_to_type(&mcp_result_schema(Some(structured)), None),
+        format!(
+            "{{ {content} structuredContent?: {{ again?: Array<{{ id: string; }}>; children?: Array<{{ again?: Array<{{ id: string; }}>; children?: Array<unknown>; default?: {{ id: string; }}; hits: Array<{{ id: string; }}>; remote?: unknown; }}>; default?: {{ id: string; }}; hits: Array<{{ id: string; }}>; remote?: unknown; }}; [key: string]: unknown; }}"
+        )
     );
-    let plain = declaration("plain", Some(input), Some(mcp_result_schema(None)));
-    assert_eq!(render_tool_signature(&plain, None), "plain(args: {}): Promise<CallToolResult>;");
-    let not_mcp = json!({ "type": "object", "properties": { "content": { "type": "array" } } });
-    assert_eq!(mcp_structured_content_schema(Some(&not_mcp)), None);
 }
 
 #[test]

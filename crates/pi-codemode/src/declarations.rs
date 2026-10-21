@@ -9,10 +9,6 @@ use crate::schema::{INDENT, schema_to_type};
 /// Largest rendered input type, in characters, before it becomes `unknown`.
 pub const DEFAULT_INPUT_SCHEMA_MAX_CHARS: usize = 16_000;
 
-/// TypeScript types for MCP results, from the MCP `CallToolResult` schema, so `CallToolResult<T>`
-/// declarations can refer to them.
-pub const MCP_TYPESCRIPT_PREAMBLE: &str = include_str!("mcp-preamble.ts");
-
 /// What a declaration needs of a tool or global. `signature` (globals only) is a TypeScript
 /// parameter list and return type that replaces the rendering from the schemas.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -86,43 +82,8 @@ pub fn render_tool_sample(tool: &ToolDeclaration, input_max_chars: Option<usize>
     format!("{description}\n\ncodemode tool declaration:\n```ts\n{declaration}\n```")
 }
 
-fn is_object(value: Option<&Value>) -> bool {
-    matches!(value, Some(Value::Object(_)))
-}
-
-fn type_is(value: Option<&Value>, expected: &str) -> bool {
-    value.and_then(|value| value.get("type")).and_then(Value::as_str) == Some(expected)
-}
-
-/// The `structuredContent` schema of an MCP `CallToolResult` output schema, `true` when it
-/// declares none, or `None` when the schema is not a `CallToolResult`.
-pub fn mcp_structured_content_schema(schema: Option<&Value>) -> Option<Value> {
-    let properties = schema?.as_object()?.get("properties")?.as_object()?;
-    let content = properties.get("content");
-    if !is_object(content) || !type_is(content, "array") {
-        return None;
-    }
-    let items = content.and_then(|content| content.get("items"));
-    if !is_object(items) || !type_is(items, "object") {
-        return None;
-    }
-    let (is_error, meta) = (properties.get("isError"), properties.get("_meta"));
-    if !is_object(is_error) || !type_is(is_error, "boolean") || !is_object(meta) || !type_is(meta, "object") {
-        return None;
-    }
-    match properties.get("structuredContent") {
-        Some(value @ (Value::Object(_) | Value::Bool(_))) => Some(value.clone()),
-        _ => Some(Value::Bool(true)),
-    }
-}
-
-/// The type a tool call resolves to: `CallToolResult<T>` for MCP output schemas (needs
-/// [`MCP_TYPESCRIPT_PREAMBLE`]), the schema's type otherwise, and `unknown` without a schema.
+/// The type a tool call resolves to: the output schema's type, and `unknown` without a schema.
 pub fn render_tool_output_type(schema: Option<&Value>) -> String {
-    if let Some(structured) = mcp_structured_content_schema(schema) {
-        let rendered = schema_to_type(&structured, None);
-        return if rendered == "unknown" { "CallToolResult".into() } else { format!("CallToolResult<{rendered}>") };
-    }
     schema.map_or_else(|| "unknown".into(), |schema| schema_to_type(schema, None))
 }
 

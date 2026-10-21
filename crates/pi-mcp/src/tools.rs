@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use pi_agent::{AgentTool, AgentToolResult, ToolUpdateCallback};
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use crate::client::RequestOptions;
@@ -46,17 +46,76 @@ impl McpToolCaller for McpServerConnection {
 pub type CallerFn = Arc<dyn Fn() -> Result<Arc<dyn McpToolCaller>, String> + Send + Sync>;
 pub type FlagFn = Arc<dyn Fn() -> bool + Send + Sync>;
 
-/// Output schema of every MCP tool: the `CallToolResult` scripts receive, with the tool's own output
-/// schema as `structuredContent`. Codemode detects this shape.
-pub fn create_mcp_result_schema(structured_content_schema: Option<&Value>) -> Value {
-    let mut properties = Map::new();
-    properties.insert("content".into(), json!({ "type": "array", "items": { "type": "object" } }));
-    if let Some(schema) = structured_content_schema {
-        properties.insert("structuredContent".into(), schema.clone());
+/// MCP content blocks as one compact type with the fields of text and image blocks, which scripts
+/// read most (`image(block)` takes an image block as is). Rendered into every MCP tool's declaration.
+fn content_block_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "type": { "enum": ["text", "image", "audio", "resource_link", "resource"] },
+            "text": { "type": "string" },
+            "data": { "type": "string" },
+            "mimeType": { "type": "string" },
+        },
+        "required": ["type"],
+        "additionalProperties": true,
+    })
+}
+
+/// Keywords whose values are data, so a `$ref` key in them is not a reference.
+const SCHEMA_DATA_KEYWORDS: [&str; 4] = ["const", "enum", "default", "examples"];
+/// Keywords whose values map names to schemas, so their keys are names, not keywords.
+const SCHEMA_MAP_KEYWORDS: [&str; 6] =
+    ["properties", "patternProperties", "dependentSchemas", "dependencies", "$defs", "definitions"];
+
+/// `schema` as a subschema at the JSON pointer `pointer` (`#/properties/structuredContent`) of another
+/// schema: its local references (`#`, `#/$defs/Item`) are rewritten to point below `pointer`, so they
+/// resolve to the same subschemas as before.
+fn relocate_schema(schema: &Value, pointer: &str) -> Value {
+    match schema {
+        Value::Array(items) => Value::Array(items.iter().map(|item| relocate_schema(item, pointer)).collect()),
+        Value::Object(fields) => {
+            let relocated = fields.iter().map(|(key, value)| {
+                let value = match value {
+                    Value::String(reference) if key == "$ref" && (reference == "#" || reference.starts_with("#/")) => {
+                        Value::String(format!("{pointer}{}", &reference[1..]))
+                    }
+                    _ if SCHEMA_DATA_KEYWORDS.contains(&key.as_str()) => value.clone(),
+                    Value::Object(named) if SCHEMA_MAP_KEYWORDS.contains(&key.as_str()) => Value::Object(
+                        named
+                            .iter()
+                            .map(|(name, subschema)| (name.clone(), relocate_schema(subschema, pointer)))
+                            .collect(),
+                    ),
+                    _ => relocate_schema(value, pointer),
+                };
+                (key.clone(), value)
+            });
+            Value::Object(relocated.collect())
+        }
+        other => other.clone(),
     }
-    properties.insert("isError".into(), json!({ "type": "boolean" }));
-    properties.insert("_meta".into(), json!({ "type": "object" }));
-    json!({ "type": "object", "properties": properties, "required": ["content"] })
+}
+
+/// Output schema of every MCP tool: the `CallToolResult` scripts receive (without `_meta`, which
+/// [`convert_mcp_result`] drops), with the tool's own output schema as `structuredContent`.
+pub fn create_mcp_result_schema(structured_content_schema: Option<&Value>) -> Value {
+    // Servers may send structured content without declaring a schema for it.
+    let structured = structured_content_schema.map_or_else(
+        || json!({ "type": "object" }),
+        |schema| relocate_schema(schema, "#/properties/structuredContent"),
+    );
+    json!({
+        "type": "object",
+        "properties": {
+            "content": { "type": "array", "items": content_block_schema() },
+            "structuredContent": structured,
+            "isError": { "type": "boolean" },
+        },
+        "required": ["content"],
+        // Fields newer protocol versions add.
+        "additionalProperties": true,
+    })
 }
 
 /// Input schemas must be objects. Servers may omit `type`, and some providers reject object schemas

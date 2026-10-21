@@ -202,6 +202,8 @@ impl Inner {
             let description = entry.config.description.as_deref().map(str::trim).filter(|text| !text.is_empty());
             let namespace = ToolNamespace {
                 name: mcp_namespace(&server),
+                // `describeNamespace("docs")` finds `mcp__docs`.
+                aliases: vec![server.clone()],
                 description: description.map(str::to_string),
                 instructions,
             };
