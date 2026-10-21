@@ -1,12 +1,15 @@
-//! Unit tests for `pi sessions`: durations, flags, short ids, and the terminal confirmation.
+//! Unit tests for `pi sessions` and `pi stats`: durations, flags, short ids, the terminal
+//! confirmation, and stats over every kind of billed entry.
 
 use std::path::{Path, PathBuf};
 
+use jiff::tz::{TimeZone, offset};
 use serde_json::{Value, json};
 
 use super::list::short_id_len;
 use super::*;
-use crate::session::{format_iso, session_dir};
+use crate::session::usage::usage_totals;
+use crate::session::{Entry, format_iso, parse_iso, session_dir};
 
 const HOUR: i64 = 3_600_000;
 
@@ -44,8 +47,8 @@ fn parses_only_the_flags_a_command_takes() {
     assert_eq!(flags, expected);
     let flags = parse_flags(&strings(&["--older-than", "2d", "--dry-run"]), PRUNE_FLAGS).unwrap();
     assert_eq!((flags.older_than, flags.dry_run), (Some(48 * HOUR), true));
-    let flags = parse_flags(&strings(&["--limit=1", "--json", "-h"]), LIST_FLAGS).unwrap();
-    assert_eq!((flags.limit, flags.json, flags.help), (Some(1), true, true));
+    let flags = parse_flags(&strings(&["--since=1h", "--json", "-h"]), STATS_FLAGS).unwrap();
+    assert_eq!((flags.since, flags.json, flags.help), (Some(HOUR), true, true));
     assert_eq!(parse_flags(&strings(&["--json"]), RM_FLAGS), Err("Unknown option --json".into()));
     assert_eq!(parse_flags(&strings(&["--limit"]), LIST_FLAGS), Err("--limit needs a value".into()));
     assert_eq!(parse_flags(&strings(&["--all=yes"]), LIST_FLAGS), Err("--all takes no value".into()));
@@ -114,4 +117,50 @@ fn rm_and_prune_ask_on_a_terminal() {
     assert_eq!(pruned.code, 0, "{pruned:?}");
     assert!(pruned.stdout.contains("Deleted 1 session, freed "), "{pruned:?}");
     assert!(!path.exists());
+}
+
+#[test]
+fn stats_count_every_billed_entry_and_use_the_local_day() {
+    let root = tempfile::tempdir().unwrap();
+    let (agent, cwd) = (root.path().join("agent"), root.path().join("work"));
+    let day = parse_iso("2026-03-10T02:00:00.000Z").unwrap();
+    let lines = [
+        user("first", day),
+        assistant("anthropic", "claude-x", 100, 0.10, day + 1_000),
+        json!({"type": "usage", "kind": "extension", "provider": "openai", "model": "gpt-z", "usage": usage(50, 0.05)}),
+        json!({"type": "compaction", "summary": "s", "firstKeptEntryId": "e0", "tokensBefore": 9,
+            "usage": usage(20, 0.02)}),
+        json!({"type": "message", "message": {"role": "toolResult", "toolCallId": "c", "toolName": "t",
+            "content": [], "isError": false, "timestamp": day + 2_000}}),
+        json!({"type": "model_change", "provider": "openai", "modelId": "gpt-z"}),
+    ];
+    let path = write_session(&agent, &cwd, "stats-1", day, &lines);
+    let sessions = crate::session::listing::list_project_sessions(&cwd, None, &agent);
+    let now = day + 3 * 24 * HOUR;
+    let zone = TimeZone::fixed(offset(-5));
+    let report = collect_stats(&sessions, false, None, now, &zone);
+
+    let entries: Vec<Entry> = crate::session::storage::parse_session_entries(&std::fs::read_to_string(&path).unwrap())
+        .into_iter()
+        .skip(1)
+        .map(Entry::from_raw)
+        .collect();
+    let expected = usage_totals(&entries);
+    assert!((report.cost - expected.cost).abs() < 1e-12 && (report.cost - 0.17).abs() < 1e-9, "{report:?}");
+    assert_eq!(report.tokens.total, expected.tokens());
+    assert_eq!((report.sessions, report.prompts, report.assistant_turns), (1, 1, 1));
+    let models: Vec<(&str, usize)> =
+        report.by_model.iter().map(|row| (row.name.as_str(), row.assistant_turns)).collect();
+    assert_eq!(models, [("anthropic/claude-x", 1), ("openai/gpt-z", 0), ("Tools/summaries", 0)]);
+    let providers: Vec<&str> = report.by_provider.iter().map(|row| row.name.as_str()).collect();
+    assert_eq!(providers, ["anthropic", "openai", "Tools/summaries"]);
+    let dates: Vec<&str> = report.by_day.iter().map(|day| day.date.as_str()).collect();
+    assert_eq!(dates, ["2026-03-09"], "02:00 UTC is the evening before at UTC-5");
+
+    let later = collect_stats(&sessions, false, Some(day + 500), now, &zone);
+    assert_eq!((later.sessions, later.prompts, later.assistant_turns), (1, 0, 1));
+    let too_old = collect_stats(&sessions, true, None, day + 20 * 24 * HOUR, &zone);
+    assert!(too_old.by_day.is_empty() && too_old.sessions == 1 && too_old.scope == "all");
+    let text = stats::render_text(&report, "Project ~/work");
+    assert!(text.contains("  Tools/summaries ") && text.contains("  2026-03-09  "), "{text}");
 }

@@ -1,6 +1,7 @@
-//! Parsing and formatting for `pi sessions`.
+//! Parsing and formatting shared by `pi sessions` and `pi stats`.
 
 use jiff::Timestamp;
+use jiff::civil::Date;
 use jiff::tz::TimeZone;
 use pi_tui::{truncate_to_width, visible_width};
 
@@ -45,6 +46,11 @@ pub fn local_time(millis: i64, zone: &TimeZone) -> String {
         .unwrap_or_default()
 }
 
+/// The calendar day of `millis` in `zone`.
+pub fn local_date(millis: i64, zone: &TimeZone) -> Option<Date> {
+    Timestamp::from_millisecond(millis).ok().map(|time| time.to_zoned(zone.clone()).date())
+}
+
 /// Dollars: cents from one cent up, four decimals below.
 pub fn format_cost(cost: f64) -> String {
     if cost > 0.0 && cost < 0.01 { format!("${cost:.4}") } else { format!("${cost:.2}") }
@@ -53,6 +59,8 @@ pub fn format_cost(cost: f64) -> String {
 pub fn format_bytes(bytes: u64) -> String {
     crate::tools::truncate::format_size(usize::try_from(bytes).unwrap_or(usize::MAX))
 }
+
+pub use crate::cache_stats::format_tokens;
 
 /// `text` on one line without control characters, cut to `width` cells.
 pub fn one_line(text: &str, width: usize) -> String {

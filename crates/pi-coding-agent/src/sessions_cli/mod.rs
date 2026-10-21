@@ -1,11 +1,12 @@
-//! `pi sessions` (a pi-rust extension): list, delete, and prune saved sessions. It reads session
-//! files only: no network, no runtime, and no extensions. Only `rm` and `prune` write, and only
-//! by deleting files.
+//! `pi sessions` and `pi stats` (pi-rust extensions): list, delete, and prune saved sessions,
+//! and total their prompts, tokens, and cost. They read session files only: no network, no
+//! runtime, and no extensions. Only `rm` and `prune` write, and only by deleting files.
 
 mod format;
 mod list;
 mod remove;
 mod scan;
+mod stats;
 #[cfg(test)]
 mod tests;
 
@@ -17,6 +18,7 @@ use pi_ai::env::process_env_value;
 pub use format::parse_duration;
 pub use list::ListedSession;
 pub use scan::{EventUsage, SessionEvent, scan_session_file, session_cost};
+pub use stats::{Breakdown, DayStats, StatsReport, TokenTotals, collect_stats};
 
 use crate::cli::CommandOutput;
 use crate::config::expand_tilde;
@@ -57,7 +59,7 @@ impl SessionScope {
     }
 }
 
-/// Options of `pi sessions`.
+/// Options of `pi sessions` and `pi stats`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Flags {
     pub all: bool,
@@ -68,6 +70,8 @@ pub struct Flags {
     pub limit: Option<usize>,
     /// `--older-than`, in milliseconds.
     pub older_than: Option<i64>,
+    /// `--since`, in milliseconds.
+    pub since: Option<i64>,
     pub session_dir: Option<String>,
     pub positional: Vec<String>,
 }
@@ -75,7 +79,8 @@ pub struct Flags {
 const LIST_FLAGS: &[&str] = &["--all", "--json", "--limit", "--session-dir"];
 const RM_FLAGS: &[&str] = &["--all", "--yes", "--session-dir"];
 const PRUNE_FLAGS: &[&str] = &["--older-than", "--all", "--dry-run", "--yes", "--session-dir"];
-const VALUED: &[&str] = &["--limit", "--older-than", "--session-dir"];
+const STATS_FLAGS: &[&str] = &["--all", "--since", "--json", "--session-dir"];
+const VALUED: &[&str] = &["--limit", "--older-than", "--since", "--session-dir"];
 
 /// Parse `args`, accepting only the flags in `allowed` (plus `--help`). `--` ends the options.
 pub fn parse_flags(args: &[String], allowed: &[&str]) -> Result<Flags, String> {
@@ -104,6 +109,7 @@ pub fn parse_flags(args: &[String], allowed: &[&str]) -> Result<Flags, String> {
                         flags.limit = Some(limit);
                     }
                     "--older-than" => flags.older_than = Some(parse_duration(&value)?),
+                    "--since" => flags.since = Some(parse_duration(&value)?),
                     _ => flags.session_dir = Some(value),
                 }
             }
@@ -153,6 +159,24 @@ Options:
     )
 }
 
+pub fn stats_help() -> String {
+    format!(
+        "Usage:
+  {APP_NAME} stats [--all] [--since <duration>] [--json]
+
+Totals over the saved sessions of the current project: sessions, prompts, assistant turns,
+input, output, and cache tokens, and cost, by model, by provider, and by day for the last 14
+days. It reads session files only; no network.
+
+Options:
+  --all                  Count the sessions of every project
+  --since <duration>     Count only activity in this period, such as 7d or 24h (s, m, h, d, w)
+  --json                 Print the report as JSON
+  --session-dir <dir>    Directory for session storage and lookup
+"
+    )
+}
+
 /// `pi sessions ...` with the arguments after `sessions`. `confirm` is `None` when stdin or
 /// stdout is not a terminal; deleting then needs `--yes`.
 pub fn run_sessions(args: &[String], cwd: &Path, agent_dir: &Path, confirm: Option<Confirm<'_>>) -> CommandOutput {
@@ -186,6 +210,23 @@ pub fn run_sessions(args: &[String], cwd: &Path, agent_dir: &Path, confirm: Opti
     }
 }
 
+/// `pi stats ...` with the arguments after `stats`.
+pub fn run_stats(args: &[String], cwd: &Path, agent_dir: &Path) -> CommandOutput {
+    let usage = format!("{APP_NAME} stats [--all] [--since <duration>] [--json]");
+    let flags = match parse_flags(args, STATS_FLAGS) {
+        Ok(flags) if flags.help || flags.positional.first().is_some_and(|word| word == "help") => {
+            return help(stats_help());
+        }
+        Ok(flags) if !flags.positional.is_empty() => {
+            return usage_error(&format!("Unexpected argument {}", flags.positional[0]), &usage);
+        }
+        Ok(flags) => flags,
+        Err(error) => return usage_error(&error, &usage),
+    };
+    let scope = SessionScope::resolve(cwd, agent_dir, flags.session_dir.as_deref());
+    stats::stats(&flags, &scope)
+}
+
 /// Read `y` or `yes` from the terminal after printing `question`.
 fn ask_terminal(question: &str) -> bool {
     print!("{question}");
@@ -205,7 +246,12 @@ pub fn run_sessions_command(raw: &[String], cwd: &Path, agent_dir: &Path) -> Opt
     Some(run_sessions(&raw[1..], cwd, agent_dir, confirm))
 }
 
-/// Run `pi sessions ...`; `None` when `raw` is another command.
+/// Run `pi stats ...`; `None` when `raw` is another command.
+pub fn run_stats_command(raw: &[String], cwd: &Path, agent_dir: &Path) -> Option<CommandOutput> {
+    (raw.first().map(String::as_str) == Some("stats")).then(|| run_stats(&raw[1..], cwd, agent_dir))
+}
+
+/// Run `pi sessions ...` or `pi stats ...`; `None` when `raw` is another command.
 pub fn run_command(raw: &[String], cwd: &Path, agent_dir: &Path) -> Option<CommandOutput> {
-    run_sessions_command(raw, cwd, agent_dir)
+    run_sessions_command(raw, cwd, agent_dir).or_else(|| run_stats_command(raw, cwd, agent_dir))
 }

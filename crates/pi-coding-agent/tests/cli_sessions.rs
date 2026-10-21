@@ -182,5 +182,5 @@ fn sessions_help_and_unknown_commands() {
     assert_eq!(unknown.status.code(), Some(1));
     assert!(stderr(&unknown).contains("Unknown command frobnicate"));
     let top = stdout(&ok(root.pi(&["--help"])));
-    assert!(top.contains(" sessions [list|rm|prune]  "), "{top}");
+    assert!(top.contains(" sessions [list|rm|prune]  ") && top.contains(" stats [--all] [--json]  "), "{top}");
 }

@@ -282,6 +282,12 @@ pub const CLI_COMMANDS: &[CliCommand] = &[
         "List, delete, or prune saved sessions (--all for every project)",
         &["list", "rm", "prune", "--all", "--json", "--limit", "--older-than", "--dry-run", "--yes", "--session-dir"],
     ),
+    command(
+        "stats",
+        "[--all] [--json]",
+        "Session, token, and cost totals by model, provider, and day",
+        &["--all", "--since", "--json", "--session-dir"],
+    ),
 ];
 
 /// The options `pi completion` offers: every option but `--`.

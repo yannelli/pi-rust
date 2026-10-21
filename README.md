@@ -93,17 +93,18 @@ pi completion fish > ~/.config/fish/completions/pi.fish
 
 `pi doctor` prints a short report: the version and target, the install method and path, other `pi` programs earlier on `PATH` (such as the npm pi), errors in `settings.json`, `models.json`, `auth.json`, and `mcp.json`, the providers that have credentials (names and sources, never the secrets), MCP servers whose commands are missing, and what the terminal supports. `pi doctor --json` prints the same report as JSON. It makes no network calls, starts no MCP servers, and exits 1 when it finds a problem.
 
-## Session management (pi-rust extension)
+## Sessions and usage stats (pi-rust extension)
 
 `pi sessions` lists the saved sessions of the current project, newest first: a short id, the last activity, the message count, the cost, and the name or first prompt. `--all` lists every project, `--limit <n>` shows the newest n, and `--json` prints an array.
 
 `pi sessions rm <id-prefix|path>...` deletes sessions by a listed id prefix or a file path; it refuses a prefix that matches more than one session and lists the matches. `pi sessions prune --older-than 30d` deletes sessions with no activity for that long (units `s`, `m`, `h`, `d`, `w`) and prints the bytes it frees; `--dry-run` shows what it would delete. Both ask before they delete on a terminal and need `--yes` otherwise.
 
-`pi sessions list` only reads session files, and no session command uses the network. They honor `--session-dir`, `PI_CODING_AGENT_SESSION_DIR`, and the `sessionDir` setting.
+`pi stats` totals the sessions of the current project (`--all` for every project): sessions, prompts, assistant turns, input, output, and cache tokens, and cost, by model, by provider, and by day for the last 14 days. `--since 7d` counts only recent activity, and `--json` prints the report as JSON. `pi stats` and `pi sessions list` only read session files, and no session command uses the network. All of them honor `--session-dir`, `PI_CODING_AGENT_SESSION_DIR`, and the `sessionDir` setting.
 
 ```sh
 pi sessions --all --limit 10
 pi sessions prune --older-than 30d --dry-run
+pi stats --since 7d
 ```
 
 ## ACP (Zed and other editors)
@@ -224,7 +225,7 @@ pi-rust ports the `pi` CLI and its libraries feature for feature. These parts di
 - CJK and Thai word movement uses ICU4X dictionaries, so a few word boundaries differ from Node's `Intl.Segmenter`.
 - `pi --mode acp` (above) is an addition; the TypeScript pi needs the separate pi-acp adapter.
 - `pi completion` and `pi doctor` (above) are additions; the TypeScript pi has neither.
-- `pi sessions` (above) is an addition; the TypeScript pi lists and deletes sessions only in its session picker (`pi -r`, `/resume`).
+- `pi sessions` and `pi stats` (above) are additions; the TypeScript pi lists and deletes sessions only in its session picker (`pi -r`, `/resume`) and shows usage only for the current session (`/session`).
 - Account model lists for OpenAI Codex, Anthropic, GitHub Copilot, OpenAI, xAI, and Google (see [Providers](#account-model-lists-pi-rust-extension)) are an addition; upstream pi narrows only OpenRouter.
 - `pi-env` looks for remote daemons in a `pi-env-daemons` folder next to the running program. Each release has a `pi-env-daemons-<tag>.tar.gz` with the daemons for Linux, Android (Termux), macOS, and Windows on x86-64 and arm64; extract it next to `pi`.
 - Notifications: in interactive mode, a run that takes 10 seconds or more ends with a terminal notification titled "pi" that says "Done" or names the error. pi sends OSC 777 in Ghostty, WezTerm, foot, and rxvt, OSC 99 in kitty, OSC 9 in iTerm2 and Windows Terminal, and BEL in tmux, screen, and other terminals. Fullscreen mode skips the notification while the terminal reports focus. Set `terminal.notifyOnFinish` to `"auto"` (the default), `"osc"`, `"bell"`, or `"off"`, and `terminal.notifyMinSeconds` to change the threshold. Upstream pi has this only as the example extension `notify.ts`.
