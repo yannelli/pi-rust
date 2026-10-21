@@ -180,6 +180,43 @@ pub struct LineRange {
     pub end_line: Option<u64>,
 }
 
+/// What `FileSystem::list_files` lists.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ListFilesOptions {
+    /// Include names starting with `.` (on Windows also files with the hidden attribute); default true. Entries named
+    /// `.git` are never listed.
+    pub hidden: Option<bool>,
+    /// Inside a git work tree, skip what git ignores: the `.gitignore` files of the directory, its subdirectories and
+    /// its parents, `.git/info/exclude`, and the global excludes file; default true. Unlike `git ls-files`, a tracked
+    /// file that matches an ignore rule is skipped too. Outside work trees, `.gitignore` files have no effect.
+    pub gitignore: Option<bool>,
+    /// Names of entries to skip with everything below them, such as `node_modules`.
+    pub exclude: Option<Vec<String>>,
+    /// Most entries to list; default 50 000.
+    pub max_entries: Option<u64>,
+    /// Most bytes of the listing: each entry's UTF-8 path plus two; default 4 MiB, at most 15.9 MiB.
+    pub max_bytes: Option<u64>,
+    /// Time after which the listing stops; default 10 000 ms.
+    pub timeout_ms: Option<u64>,
+}
+
+/// One entry of a `FileListing`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileListEntry {
+    /// Relative to the listed directory, with `/` separators on every system.
+    pub path: String,
+    /// A symbolic link is listed as such and not followed.
+    pub kind: FileKind,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FileListing {
+    /// Depth first, parents before their entries, siblings in byte order of their names.
+    pub entries: Vec<FileListEntry>,
+    /// A bound in `ListFilesOptions` ended the listing early.
+    pub truncated: bool,
+}
+
 /// Where lines of a file are, as `BinaryReader::scan_lines` found them.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

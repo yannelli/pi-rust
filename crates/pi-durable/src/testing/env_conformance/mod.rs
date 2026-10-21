@@ -3,6 +3,7 @@
 
 mod exec;
 mod files;
+mod list_files;
 mod watch;
 
 use std::sync::{Arc, Mutex};
@@ -12,6 +13,7 @@ use pi_chord::{AbortController, BACKGROUND_CONTEXT, Context, with_abort_signal};
 
 pub use exec::*;
 pub use files::*;
+pub use list_files::*;
 pub use watch::*;
 
 use crate::env::{
@@ -76,6 +78,21 @@ macro_rules! env_conformance_tests {
                 $crate::testing::env_conformance::$case(env, &options).await;
             }
         )*
+    };
+}
+
+/// The `list_files` cases, for an environment that implements it (upstream's `listFiles` option). Invoke it like
+/// `env_conformance_tests!`; the symbolic link case checks nothing without `symlinks`.
+#[macro_export]
+macro_rules! env_list_files_conformance_tests {
+    ($setup:expr, $options:expr $(,)?) => {
+        $crate::env_conformance_tests!(@cases $setup, $options;
+            list_files_lists_files_and_directories_depth_first_in_name_order,
+            list_files_skips_what_git_ignores_in_work_trees_git_and_excluded_names,
+            list_files_stops_at_its_bounds_and_reports_truncated,
+            list_files_fails_on_missing_directories_files_and_aborts,
+            list_files_lists_symbolic_links_without_following_them,
+        );
     };
 }
 
