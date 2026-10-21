@@ -197,9 +197,13 @@ async fn runs_in_utc_whatever_the_hosts_timezone_and_without_weakref() {
     let sandbox = sandbox(vec![]);
     let result = start(&sandbox, code).run.result.await;
     assert_eq!(value(&result), json!([0, 0, "undefined", "undefined"]));
-    // execute() is unchanged: the host's timezone and every intrinsic.
-    let result = sandbox.execute(code, ExecuteOptions::default()).await.unwrap();
-    assert_eq!(value(&result), json!([5, -330, "function", "function"]));
+    // execute() is unchanged: the host's timezone and every intrinsic. QuickJS ignores TZ on Windows.
+    let result = value(&sandbox.execute(code, ExecuteOptions::default()).await.unwrap());
+    let result = result.as_array().unwrap();
+    assert_eq!(result[2..4], [json!("function"), json!("function")]);
+    if !cfg!(windows) {
+        assert_eq!(result[0..2], [json!(5), json!(-330)]);
+    }
 }
 
 #[tokio::test]
