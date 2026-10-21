@@ -7,6 +7,7 @@ pub mod contract;
 pub mod declare;
 pub mod errors;
 pub(crate) mod exec;
+pub mod host;
 pub mod link;
 pub mod object;
 pub mod publish;
@@ -24,6 +25,9 @@ pub use contract::{
 };
 pub use errors::{
     CHORD_ERROR_CODES, ChordErrorCode, ErrorOptions, as_chord_error, forbidden, invalid, is_chord_error, run_all,
+};
+pub use host::{
+    Facet, FacetApi, Host, HostOptions, HostRegistry, LoadOptions, PrincipalMatch, create_host, define_facet,
 };
 pub use link::{Link, MemoryLink, PACK_THRESHOLD, Packed, Received, memory_link_pair, unpack};
 pub use object::{
