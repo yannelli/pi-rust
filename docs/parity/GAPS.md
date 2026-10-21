@@ -8,8 +8,7 @@ None up to `82432219a`. Every commit after the synced commit is ported or listed
 
 ## Deferred work
 
-- **chord2 runtime** (upstream `0104fef1e` and later chord commits). pi-chord ports the earlier facets runtime. This is the largest open item; plan it as its own branch.
-- **SQLite telemetry store** (the chord `telemetry-sqlite` half of upstream `d9025a5f5`). pi-telemetry has the in-memory `TelemetryStore` and the trace renderer. Upstream keeps the SQLite facade in chord; here pi-durable owns SQLite, so the store needs a home first.
+- **chord2 runtime** (upstream `0104fef1e` and later chord commits). In progress in `crates/pi-chord/src/host2/`, beside the facets runtime: phase 1 (errors, schema, contracts, wire, links), 2 (cells, objects, in-host runtime), 3 (connections, remote refs, WebSocket), 4 (reload, cluster), 5 (host manager, IPC). The last phase names the upstream runtime commits.
 - **`HarnessOptions.models` as a function** (upstream `7ec1f648e`). Not planned: settings are already a function here, and a `Models` implementation can change its catalog at runtime. It is older than the synced commit, so the report does not list it.
 
 ## Extension runtime (pi-js)
@@ -23,9 +22,7 @@ None up to `82432219a`. Every commit after the synced commit is ported or listed
 
 ## Removed upstream, still in pi-rust
 
-Upstream `7472cda0d` (2026-10-12) deleted the experimental server stack: the client, protocol, and server packages, `pi experimental server` and `client`, and the example plugin. pi-rust still ships `pi-client`, `pi-protocol`, `pi-server`, and the `pi experimental` commands, so the parity report lists those crates as only in pi-rust. Decide whether to remove them to match upstream or keep them and add them to `allowlist.json`.
-
-This commit is older than the synced commit, so the commits section treats it as ported. Commits between the fork snapshot (2026-10-09) and `d2e7d8b7c` were ported one at a time. Check that window for other skipped commits.
+Upstream `7472cda0d` (2026-10-12) deleted the experimental server stack: the client, protocol, and server packages and `pi experimental`. pi-rust keeps them on purpose as pi-rust extras (decided 2026-10-21): `pi-client`, `pi-protocol`, `pi-server`, the `pi experimental` commands (`server`, `client`, `durable`, `vacation`), and the facets/services runtime in pi-chord that they use. The three crates are in `allowlist.json`. They get no upstream fixes from now on.
 
 ## Platform
 

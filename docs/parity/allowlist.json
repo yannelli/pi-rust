@@ -102,6 +102,10 @@
   ],
   "packages": [
     {
+      "item": "pi-client",
+      "reason": "Kept as a pi-rust extra by the maintainer's choice: upstream 7472cda0d deleted the experimental server stack, while pi-rust keeps pi experimental (server, client, durable, vacation) and the old chord runtime it uses."
+    },
+    {
       "item": "pi-embedded",
       "reason": "The embeddable agent API of pi-rust. It comes from the fork snapshot; upstream main never had packages/embedded."
     },
@@ -112,6 +116,14 @@
     {
       "item": "pi-js",
       "reason": "pi-rust runs extensions on its own embedded QuickJS runtime. Upstream runs them on Node and has no package for this."
+    },
+    {
+      "item": "pi-protocol",
+      "reason": "Kept as a pi-rust extra by the maintainer's choice: upstream 7472cda0d deleted the experimental server stack, while pi-rust keeps pi experimental (server, client, durable, vacation) and the old chord runtime it uses."
+    },
+    {
+      "item": "pi-server",
+      "reason": "Kept as a pi-rust extra by the maintainer's choice: upstream 7472cda0d deleted the experimental server stack, while pi-rust keeps pi experimental (server, client, durable, vacation) and the old chord runtime it uses."
     }
   ]
 }
