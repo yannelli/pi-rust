@@ -56,6 +56,7 @@ class Interface extends EventEmitter {
       this.input.on("end", this._onend);
       if (typeof this.input.resume === "function") this.input.resume();
     }
+    if (process.env.TERM === "dumb") this._ttyWrite = tty.ttyWriteDumb.bind(this);
   }
   #receive(text) {
     if (!text) return;
