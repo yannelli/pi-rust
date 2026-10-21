@@ -266,3 +266,43 @@ async fn compacts_an_image_heavy_history_and_retries_after_a_413() {
     assert_eq!((events[1]["aborted"].clone(), events[1]["willRetry"].clone()), (json!(false), json!(true)));
     assert_eq!(session.last_assistant_text().as_deref(), Some("Continued after compaction"));
 }
+
+#[tokio::test]
+async fn pre_prompt_recovery_omits_a_truncated_tool_call_with_its_result() {
+    let h = harness(Options {
+        responses: vec![FauxResponse::text(SUMMARY), FauxResponse::text("continued")],
+        ..Options::default()
+    })
+    .await;
+    let model = h.session.model().unwrap();
+    let timestamp = pi_ai::now_ms() - 10_000;
+    let call = ToolCall { id: "call_test".into(), name: "bash".into(), ..ToolCall::default() };
+    let mut manager = SessionManager::in_memory(&h.cwd);
+    let history = [
+        user("Check status".into(), timestamp),
+        assistant(&model, vec![ContentBlock::ToolCall(call)], StopReason::Length, timestamp),
+        Message::ToolResult(ToolResultMessage {
+            tool_call_id: "call_test".into(),
+            tool_name: "bash".into(),
+            content: vec![ContentBlock::text("Not executed: output token limit reached.")],
+            is_error: true,
+            timestamp,
+            ..ToolResultMessage::default()
+        }),
+    ];
+    for message in &history {
+        manager.append_message(message).unwrap();
+    }
+    let session = open_session(&h.services, manager).await;
+
+    session.prompt("Continue", Vec::new()).await.unwrap();
+
+    let projected = session.session_manager().build_session_context().messages;
+    let stale = |message: &Message| match message {
+        Message::Assistant(assistant) => assistant.stop_reason == StopReason::Length,
+        message => matches!(message, Message::ToolResult(_)),
+    };
+    assert!(!projected.iter().any(stale), "{:?}", roles(&projected));
+    let request = h.requests().pop().unwrap();
+    assert!(!request.messages.iter().any(stale), "{:?}", roles(&request.messages));
+}

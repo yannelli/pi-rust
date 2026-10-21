@@ -9,6 +9,7 @@ use pi_ai::{ContentBlock, Message, UserContent, UserMessage};
 use super::builtins::mcp::set_servers_section;
 use super::{AgentSession, lock};
 use crate::app::{format_no_api_key_found_message, oauth_failed_message};
+use crate::compaction::{find_message_entry_id, find_tool_result_entry_ids};
 use crate::images::{ProcessImageOptions, decode_base64_lenient, process_image};
 use crate::messages::{CustomMessage, CustomRole};
 use crate::resources::expand_user_input;
@@ -207,7 +208,14 @@ impl AgentSession {
             })
         });
         if let Some(last) = last_assistant {
-            self.check_compaction(&last, None, false, &[]).await;
+            // Recovery omits the response with its tool results, as after a run.
+            let (entry_id, tool_results) = {
+                let session = self.session_manager();
+                let entry_id = find_message_entry_id(&session, &Message::Assistant(last.clone()));
+                let results = entry_id.as_deref().map(|id| find_tool_result_entry_ids(&session, id, &last));
+                (entry_id, results.unwrap_or_default())
+            };
+            self.check_compaction(&last, entry_id.as_deref(), false, &tool_results).await;
         }
         let servers_section = self.prepare_mcp_for_prompt().await;
         let mut prompt_options = self.effective_prompt_options();
