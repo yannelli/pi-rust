@@ -324,6 +324,14 @@ async fn applies_the_timeout_option_and_rejects_invalid_options() {
         invalid.content,
         [ContentBlock::text("@options only supports `max_output_tokens` and `timeout_ms`; got `yield`")]
     );
+
+    // #10631: a misplaced options line fails before the script runs instead of running without a deadline.
+    let misplaced = run(&h, "// count\n// @options: {\"timeout_ms\": 200}\nwhile (true) {}").await;
+    assert!(misplaced.is_error);
+    assert_eq!(
+        misplaced.content,
+        [ContentBlock::text("The // @options: line must be the first line of the input; found one on line 2")]
+    );
 }
 
 #[tokio::test]
