@@ -44,6 +44,10 @@
     {
       "item": "llama",
       "reason": "Upstream registers /llama from its built-in llama extension (extensions/llama). pi-rust implements llama.cpp support natively and lists /llama as a built-in command."
+    },
+    {
+      "item": "undo",
+      "reason": "pi-rust extension: /undo"
     }
   ],
   "tools": [],
