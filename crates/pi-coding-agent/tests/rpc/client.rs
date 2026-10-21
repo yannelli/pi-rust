@@ -8,18 +8,14 @@ use pi_coding_agent::agent_session::PromptDisposition;
 use pi_coding_agent::rpc::{RpcClient, RpcClientOptions, RpcUiResponse, collect_until_settled};
 use serde_json::json;
 
-use crate::cli_support::{mock_server, setup, text_body};
+use crate::cli_support::{isolated_env, mock_server, setup, text_body};
 
 fn client(root: &Path, args: &[&str]) -> RpcClient {
     RpcClient::new(RpcClientOptions {
         program: env!("CARGO_BIN_EXE_pi").into(),
         cwd: Some(root.join("work")),
-        env: vec![
-            ("PI_CODING_AGENT_DIR".into(), root.join("agent").display().to_string()),
-            ("HOME".into(), root.display().to_string()),
-            // RPC mode refreshes catalogs in the background; offline it sends nothing.
-            ("PI_OFFLINE".into(), "1".into()),
-        ],
+        // Offline, so the background catalog refresh of RPC mode sends nothing.
+        env: isolated_env(root),
         model: Some("mock-model".into()),
         args: args.iter().map(|arg| arg.to_string()).collect(),
         forward_stderr: false,

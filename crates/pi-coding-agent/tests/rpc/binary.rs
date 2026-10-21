@@ -13,14 +13,8 @@ use crate::cli_support::{isolate, mock_server, setup, text_body};
 
 pub fn pi_command(root: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_pi"));
-    isolate(command.as_std_mut());
-    command
-        .args(args)
-        .current_dir(root.join("work"))
-        .env("PI_CODING_AGENT_DIR", root.join("agent"))
-        .env("HOME", root)
-        .stdin(Stdio::null())
-        .kill_on_drop(true);
+    isolate(command.as_std_mut(), root);
+    command.args(args).current_dir(root.join("work")).stdin(Stdio::null()).kill_on_drop(true);
     command
 }
 

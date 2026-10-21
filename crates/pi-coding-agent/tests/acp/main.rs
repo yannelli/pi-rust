@@ -5,6 +5,8 @@
 mod cli_support;
 #[path = "../agent_session/http_mock.rs"]
 mod http_mock;
+#[path = "../offline_guard/mod.rs"]
+mod offline_guard;
 
 mod binary;
 mod client;
@@ -42,6 +44,9 @@ fn setup(responses: Vec<FauxResponse>) -> Setup {
     let models = json!({"providers": {"local": {"baseUrl": "http://unused", "api": api, "apiKey": "test-key",
         "models": [{"id": "tiny", "contextWindow": 128_000, "maxTokens": 4_000, "reasoning": true}]}}});
     std::fs::write(agent_dir.join("models.json"), models.to_string()).unwrap();
+    offline_guard::assert_models_file_loads(&agent_dir.join("models.json"));
+    // ACP refreshes model catalogs in the background unless offline.
+    offline_guard::offline_process();
     let provider = FauxProvider::with_delay(responses, Duration::from_millis(2));
     register_api_provider(api, provider.clone());
     let settings = SettingsManager::in_memory(json!({"defaultProvider": "local", "defaultModel": "tiny"}));

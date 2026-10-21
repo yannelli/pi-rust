@@ -281,11 +281,10 @@ async fn print_mode_exits_143_on_sigterm_and_kills_detached_children() {
     setup(root.path(), &url);
     std::fs::write(root.path().join("agent/oauth.json"), r#"{"legacy": {"access": "a"}}"#).unwrap();
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_pi"));
-    cli_support::isolate(command.as_std_mut());
+    cli_support::isolate(command.as_std_mut(), root.path());
     let mut child = command
         .args(["--model", "mock/mock-model", "-p", "Run it"])
         .current_dir(root.path().join("work"))
-        .env("PI_CODING_AGENT_DIR", root.path().join("agent"))
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -320,4 +319,57 @@ async fn print_mode_exits_143_on_sigterm_and_kills_detached_children() {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     assert!(!alive, "the bash command survived");
+}
+
+const ISOLATION_PROBE: &str = "PI_TEST_ISOLATION_PROBE";
+const FAKE_OPENAI_KEY: &str = "sk-test-fake-key-for-isolation";
+
+/// `pi auth check --json` for `provider`: through [`cli_support::isolate`], or with only the
+/// home and agent directories set, so inherited variables still reach `pi`.
+fn auth_check(root: &std::path::Path, provider: &str, isolated: bool) -> Value {
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_pi"));
+    if isolated {
+        cli_support::isolate(&mut command, root);
+    } else {
+        command.env("HOME", root).env("PI_CODING_AGENT_DIR", root.join("agent")).env("PI_OFFLINE", "1");
+    }
+    let output = command
+        .args(["auth", "check", "--provider", provider, "--json"])
+        .current_dir(root.join("work"))
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    serde_json::from_slice(&output.stdout).unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&output.stderr)))
+}
+
+/// Runs in a copy of this test binary whose own environment holds fake provider credentials.
+#[test]
+fn isolation_probe() {
+    if std::env::var_os(ISOLATION_PROBE).is_none() {
+        return;
+    }
+    assert_eq!(std::env::var("OPENAI_API_KEY").as_deref(), Ok(FAKE_OPENAI_KEY));
+    let root = tempfile::tempdir().unwrap();
+    setup(root.path(), "http://127.0.0.1:9/v1");
+    for provider in ["openai", "amazon-bedrock"] {
+        let inherited = auth_check(root.path(), provider, false);
+        assert_eq!(inherited["status"], "ready", "the probe sees inherited {provider} credentials: {inherited}");
+        let isolated = auth_check(root.path(), provider, true);
+        assert_eq!(isolated["status"], "not_ready", "isolated pi sees {provider} credentials: {isolated}");
+    }
+}
+
+#[test]
+fn spawned_pi_does_not_inherit_provider_credentials() {
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "isolation_probe", "--nocapture", "--test-threads=1"])
+        .env(ISOLATION_PROBE, "1")
+        .env("OPENAI_API_KEY", FAKE_OPENAI_KEY)
+        .env("AWS_ACCESS_KEY_ID", "AKIATESTFAKE")
+        .env("AWS_SECRET_ACCESS_KEY", "fake-secret")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{stdout}{}", String::from_utf8_lossy(&output.stderr));
+    assert!(stdout.contains("test isolation_probe ... ok"), "the probe ran: {stdout}");
 }
