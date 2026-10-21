@@ -28,6 +28,11 @@ async fn run(executable: PathBuf, root: &Path, args: &[&str], envs: &[(&str, Str
         .env_remove("ANTHROPIC_API_KEY")
         .env_remove("PI_TIMING")
         .stdin(Stdio::null());
+    // With these keys, `pi update --models` would read account model lists from real APIs.
+    let keys = ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_OAUTH_TOKEN", "OPENAI_API_KEY", "XAI_API_KEY", "GEMINI_API_KEY"];
+    for name in keys.into_iter().chain(["OPENROUTER_API_KEY", "COPILOT_GITHUB_TOKEN"]) {
+        command.env_remove(name);
+    }
     for (name, value) in envs {
         command.env(name, value);
     }

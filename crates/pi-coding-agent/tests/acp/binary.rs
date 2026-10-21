@@ -3,13 +3,16 @@
 use std::path::Path;
 use std::process::Stdio;
 
-use serde_json::json;
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::mpsc::unbounded_channel;
 
 use crate::cli_support::{mock_server, setup, text_body, tool_call_body};
 use crate::client::Client;
+use crate::http_mock::{Reply, Server};
 
 /// `pi` with only the environment the test chooses, so ambient API keys stay out.
 fn pi(root: &Path, args: &[&str]) -> Command {
@@ -113,4 +116,56 @@ async fn new_session_requires_auth_without_models() {
     );
     assert_eq!(created["error"]["data"]["authMethods"][0]["id"], "pi_terminal_login");
     assert_eq!(exit(child, client).await, Some(0));
+}
+
+/// A made-up openai-codex login whose token names a test account and expires far ahead.
+fn codex_login() -> (String, Value) {
+    let claims = json!({"https://api.openai.com/auth": {"chatgpt_account_id": "acct-test"}});
+    let token = format!("e30.{}.sig", URL_SAFE_NO_PAD.encode(claims.to_string()));
+    let login = json!({"type": "oauth", "access": token, "refresh": "refresh-test", "expires": 4_102_444_800_000_i64});
+    (token.clone(), json!({"openai-codex": login}))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn new_sessions_list_the_saved_account_models() {
+    let root = tempfile::tempdir().unwrap();
+    let agent = root.path().join("agent");
+    std::fs::create_dir_all(&agent).unwrap();
+    std::fs::create_dir_all(root.path().join("work")).unwrap();
+    let server = Server::start(|request| match request.path() {
+        "/codex/models" => Reply::json(&json!({"models": [{"slug": "gpt-5.5", "visibility": "list"},
+            {"slug": "gpt-6.9-sol", "display_name": "GPT-6.9 Sol", "visibility": "list"}]})),
+        _ => Reply::status(404),
+    })
+    .await;
+    let (token, auth) = codex_login();
+    std::fs::write(agent.join("auth.json"), auth.to_string()).unwrap();
+    let models = json!({"providers": {"openai-codex": {"baseUrl": server.url}}});
+    std::fs::write(agent.join("models.json"), models.to_string()).unwrap();
+    let settings = json!({"defaultProvider": "openai-codex", "defaultModel": "gpt-5.5"});
+    std::fs::write(agent.join("settings.json"), settings.to_string()).unwrap();
+
+    let mut update = pi(root.path(), &["update", "--models"]);
+    update.env_remove("PI_OFFLINE").env("PI_CATALOG_URL", &server.url).stdin(Stdio::null());
+    let output = update.output().await.unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
+    assert_eq!(server.count("/codex/models"), 1);
+    let stored = std::fs::read_to_string(agent.join("models-store.json")).unwrap();
+    assert!(!stored.contains(&token) && !stored.contains("refresh-test"), "the login is never saved");
+    let listing = pi(root.path(), &["--list-models"]).stdin(Stdio::null()).output().await.unwrap();
+    let listing = String::from_utf8_lossy(&listing.stdout).into_owned();
+    assert!(listing.contains("gpt-6.9-sol") && !listing.contains("gpt-6.1-sol"), "{listing}");
+
+    let (child, mut client) = spawn(root.path(), &["--mode", "acp"]);
+    let created = client.request("session/new", json!({"cwd": root.path().join("work"), "mcpServers": []})).await;
+    let listed: Vec<&str> = created["result"]["models"]["availableModels"]
+        .as_array()
+        .expect("models")
+        .iter()
+        .filter_map(|model| model["modelId"].as_str())
+        .collect();
+    assert_eq!(listed, ["openai-codex/gpt-5.5", "openai-codex/gpt-6.9-sol"]);
+    assert_eq!(created["result"]["models"]["currentModelId"], "openai-codex/gpt-5.5");
+    assert_eq!(exit(child, client).await, Some(0));
+    assert_eq!(server.count("/codex/models"), 1, "offline ACP uses the saved list");
 }
