@@ -237,6 +237,35 @@ async fn redirected_stdout_runs_print_mode_with_prompt_flags_and_markers() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn print_mode_selects_a_model_an_extension_provider_lists_only_offline() {
+    let root = tempfile::tempdir().unwrap();
+    let (url, requests) = mock_server(vec![text_body("From the cache")]).await;
+    setup(root.path(), &url);
+    let source = r#"export default function (pi) {
+	pi.registerProvider("cached", {
+		baseUrl: "BASE_URL",
+		api: "openai-completions",
+		apiKey: "secret-key",
+		async refreshModels(context) {
+			if (context.allowNetwork) throw new Error("print mode asked for the network");
+			return [{ id: "cached-model", name: "Cached", reasoning: false, input: ["text"],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100000, maxTokens: 4000 }];
+		},
+	});
+}
+"#;
+    std::fs::write(root.path().join("cached.ts"), source.replace("BASE_URL", &url)).unwrap();
+    let extension = root.path().join("cached.ts").display().to_string();
+    let args = ["-e", &extension, "--model", "cached/cached-model", "--no-session", "-p", "Hi"];
+    let output = pi_async(root.path(), &args).await;
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "From the cache");
+    let requests = requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["model"], "cached-model");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn startup_errors_exit_with_status_one() {
     let root = tempfile::tempdir().unwrap();
     setup(root.path(), "http://127.0.0.1:9/v1");

@@ -11,7 +11,7 @@ use pi_ai::auth::{
 use pi_ai::env::{EnvLookup, ProcessEnv};
 use pi_ai::{Model, ModelRegistry};
 
-use super::runtime_catalog::{CatalogState, ProviderAuth};
+use super::runtime_catalog::{CatalogState, OfflineRefreshes, ProviderAuth};
 use super::runtime_virtual::RegisteredVirtualModel;
 use crate::config::{auth_path, models_path};
 use crate::model_resolver::ModelCatalog;
@@ -56,6 +56,7 @@ pub struct ModelRuntime {
     pub(super) extension_oauth: Arc<RwLock<HashMap<String, Arc<dyn OAuthAuth>>>>,
     /// `refreshModels`, `oauth.modifyModels`, `images`, and `classifiers` of extension providers.
     pub(super) extension_hooks: RwLock<HashMap<String, super::runtime_extension_ops::ExtensionHookState>>,
+    pub(super) offline_refreshes: OfflineRefreshes,
 }
 
 pub(super) fn read<T>(lock: &RwLock<T>) -> RwLockReadGuard<'_, T> {
@@ -91,6 +92,7 @@ impl ModelRuntime {
             extension_providers: RwLock::default(),
             extension_oauth,
             extension_hooks: RwLock::default(),
+            offline_refreshes: OfflineRefreshes::default(),
         };
         runtime.refresh_configured_providers().await;
         runtime

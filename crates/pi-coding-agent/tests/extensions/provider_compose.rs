@@ -63,7 +63,9 @@ async fn extension_providers_refresh_modify_and_run_their_operations() {
         .await;
     assert_eq!(h.errors(), Vec::<String>::new());
     let runtime = h.session.model_runtime().clone();
-    assert_eq!(runtime.get_model("compose-demo", "first").unwrap().name, "First");
+    // Registration ran `refreshModels` offline; without a credential nothing modifies its models.
+    assert!(runtime.get_model("compose-demo", "first").is_none());
+    assert_eq!(runtime.get_model("compose-demo", "refreshed").unwrap().name, "Refreshed");
 
     let oauth = OAuthCredential { refresh: "r".into(), access: "token".into(), expires: 0, extra: Map::new() };
     let credential = Credential::OAuth(oauth);
@@ -102,4 +104,49 @@ async fn extension_providers_refresh_modify_and_run_their_operations() {
     let failed = runtime.classify(&wrong, &context, ClassifierOptions::default()).await;
     let expected = "Provider compose-demo has no classifier implementation for \"missing-judge\"";
     assert_eq!(failed.error_message.as_deref(), Some(expected));
+}
+
+const OFFLINE: &str = r#"const cost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+let refreshes = 0;
+export default function (pi) {
+	pi.registerProvider("offline-demo", {
+		baseUrl: "http://offline.invalid",
+		api: "openai-completions",
+		apiKey: "demo-key",
+		async refreshModels(context) {
+			if (context.allowNetwork) throw new Error("a test refresh asked for the network");
+			refreshes += 1;
+			return [{ id: "cached", name: `Cached ${refreshes}`, reasoning: false, input: ["text"], cost, contextWindow: 1000, maxTokens: 100 }];
+		},
+	});
+	pi.registerCommand("add-virtual", { handler: async () => pi.registerVirtualModel({
+		provider: "router", id: "auto", name: "Auto", route: () => ({ model: { provider: "offline-demo", id: "cached" } }),
+	}) });
+	pi.registerCommand("drop-provider", { handler: async () => pi.unregisterProvider("offline-demo") });
+}
+"#;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn models_from_refresh_models_are_listed_offline_as_providers_and_virtual_models_change() {
+    let h =
+        harness(Setup { files: vec![("offline.ts", OFFLINE.into())], load: vec!["offline.ts"], ..Setup::default() })
+            .await;
+    assert_eq!(h.errors(), Vec::<String>::new());
+    let runtime = h.session.model_runtime().clone();
+    let cached = runtime.get_model("offline-demo", "cached").expect("listed by the offline refresh");
+    assert_eq!(cached.base_url, "http://offline.invalid");
+    assert!(runtime.has_configured_auth("offline-demo"));
+
+    h.session.prompt("/add-virtual", Vec::new()).await.unwrap();
+    runtime.wait_for_offline_refreshes().await;
+    assert!(runtime.get_model("router", "auto").is_some());
+    let renamed = runtime.get_model("offline-demo", "cached").unwrap().name;
+    assert_ne!(renamed, cached.name, "registering a virtual model refreshes offline");
+
+    h.session.prompt("/drop-provider", Vec::new()).await.unwrap();
+    assert!(runtime.get_model("offline-demo", "cached").is_none());
+    runtime.wait_for_offline_refreshes().await;
+    assert!(runtime.get_model("offline-demo", "cached").is_none(), "the refresh does not bring them back");
+    assert!(runtime.get_model("router", "auto").is_some());
+    assert_eq!(h.errors(), Vec::<String>::new());
 }
