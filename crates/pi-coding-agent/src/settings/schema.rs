@@ -87,6 +87,24 @@ pub struct TerminalSettings {
     /// `true`, `false`, or `"auto"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub true_color: Option<Value>,
+    /// pi-rust extension: how to notify when a long run finishes; `auto` by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notify_on_finish: Option<NotifyOnFinish>,
+    /// pi-rust extension: the shortest run in seconds that notifies; 10 by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notify_min_seconds: Option<f64>,
+}
+
+/// `terminal.notifyOnFinish` (pi-rust extension): `auto` picks OSC 777, OSC 99, OSC 9, or BEL
+/// for the terminal, `osc` always sends an OSC notification, and `bell` sends BEL.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NotifyOnFinish {
+    #[default]
+    Auto,
+    Off,
+    Bell,
+    Osc,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
