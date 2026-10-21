@@ -140,8 +140,12 @@ fn to_type(schema: &Value, context: &mut SchemaContext<'_>) -> String {
         return union(variants.iter().map(|variant| to_type(variant, context)).collect());
     }
     if let Some(Value::Array(parts)) = schema.get("allOf") {
-        let parts: Vec<String> =
-            parts.iter().map(|part| to_type(part, context)).filter(|part| part != "unknown").collect();
+        // Keywords next to `allOf`, such as `type`, apply together with its parts.
+        let mut siblings = schema.clone();
+        siblings.remove("allOf");
+        let mut rendered = vec![to_type(&Value::Object(siblings), context)];
+        rendered.extend(parts.iter().map(|part| to_type(part, context)));
+        let parts: Vec<String> = rendered.into_iter().filter(|part| part != "unknown").collect();
         if parts.is_empty() {
             return "unknown".into();
         }
