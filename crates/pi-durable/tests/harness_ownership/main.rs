@@ -5,7 +5,9 @@
 #[path = "../support/mod.rs"]
 mod support;
 
+mod bridges;
 mod handles;
+mod indexes;
 mod marks;
 mod reopen;
 
@@ -140,7 +142,7 @@ pub struct Opened {
 
 pub async fn open_harness(storage: Arc<dyn Storage>, board: &Board) -> Opened {
     let hold = hold_task(board);
-    let opened = open_tasks(storage, vec![hold.clone(), waiter_task()]).await;
+    let opened = open_tasks(storage, vec![hold.clone(), waiter_task(), bridges::spawner_task(hold.clone())]).await;
     let root = opened.harness.root(&context(), CreateOptions::default()).await.unwrap();
     opened.harness.resume().unwrap();
     Opened { harness: opened.harness, root, reports: opened.reports, hold }
