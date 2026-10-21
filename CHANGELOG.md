@@ -2,6 +2,13 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.6.2] - 2026-10-21
+
+### Added
+
+- **interactive:** add /retry to run the last prompt again ([a0f9484](https://github.com/yannelli/pi-rust/commit/a0f948483087058d6d83221768f37892dab1bc43))
+- **interactive:** add /review for uncommitted changes ([87220e8](https://github.com/yannelli/pi-rust/commit/87220e84855d0d33f2fc2c8d9bb01f9231a24cd2))
+
 ## [0.6.1] - 2026-10-21
 
 ### Added
