@@ -1,7 +1,7 @@
 //! [`LoginDialog`]: the login flow UI that replaces the editor during `/login`
 //! (upstream `login-dialog.ts`).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::future::Future;
 use std::rc::Rc;
 
@@ -12,7 +12,7 @@ use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 use super::auth_url::{AuthUrl, BrowserOpenFn, ClipboardCopyFn, click_hint, system_browser, system_clipboard};
-use crate::interactive_components::common::{bold, border, fg, spacer, text};
+use crate::interactive_components::common::{bold, border, fg, spacer, text, truncated};
 use crate::interactive_components::extension_selector::{ExtensionSelector, ExtensionSelectorOptions};
 use crate::interactive_components::key_hint;
 use crate::theme::ThemeColor;
@@ -21,6 +21,47 @@ type Reply = oneshot::Sender<AuthResult<String>>;
 
 /// Called with whether the login succeeded and a message.
 pub type LoginCompleteFn = Box<dyn FnMut(bool, Option<&str>)>;
+
+/// What [`LoginDialog::show_device_code`] shows (upstream `OAuthDeviceCodeInfo`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DeviceCodeInfo {
+    pub user_code: String,
+    pub verification_uri: String,
+    /// Open the verification page on confirm. `None` means true.
+    pub open_browser_on_confirm: Option<bool>,
+    /// Copy the code on confirm, replacing the clipboard. `None` means true.
+    pub copy_code_on_confirm: Option<bool>,
+}
+
+/// The confirm action of a shown device code, until it is used or the content changes.
+struct DeviceCodeAction {
+    user_code: String,
+    verification_uri: String,
+    open_browser: bool,
+    copy_code: bool,
+    hint: Rc<RefCell<Container>>,
+}
+
+/// Writes device-code progress into the hint row while that row is still shown.
+struct DeviceCodeStatus {
+    cancel: CancellationToken,
+    focused: Rc<Cell<bool>>,
+    content: Rc<RefCell<Container>>,
+    hint: Rc<RefCell<Container>>,
+    tui: Tui,
+}
+
+impl DeviceCodeStatus {
+    fn set(&self, message: &str) {
+        let hint: ComponentRef = self.hint.clone();
+        let shown = self.content.borrow().children.iter().any(|child| same_component(child, &hint));
+        if self.cancel.is_cancelled() || !self.focused.get() || !shown {
+            return;
+        }
+        self.hint.borrow_mut().children = vec![truncated(&fg(ThemeColor::Dim, message), 1, 0)];
+        self.tui.request_render(false);
+    }
+}
 
 /// A select prompt shown in place of the dialog until an option is chosen.
 struct ActiveSelect {
@@ -45,6 +86,9 @@ pub struct LoginDialog {
     on_complete: LoginCompleteFn,
     open_browser: BrowserOpenFn,
     clipboard: ClipboardCopyFn,
+    device_code_action: Option<DeviceCodeAction>,
+    device_code_hint: Option<Rc<RefCell<Container>>>,
+    focused: Rc<Cell<bool>>,
 }
 
 impl LoginDialog {
@@ -84,6 +128,9 @@ impl LoginDialog {
             on_complete: Box::new(on_complete),
             open_browser: system_browser(),
             clipboard: system_clipboard(),
+            device_code_action: None,
+            device_code_hint: None,
+            focused: Rc::default(),
         }
     }
 
@@ -114,7 +161,16 @@ impl LoginDialog {
         self.content.borrow_mut().add_child(child);
     }
 
+    fn clear_device_code_action(&mut self) {
+        if let Some(hint) = self.device_code_hint.take() {
+            let hint: ComponentRef = hint;
+            self.content.borrow_mut().remove_child(&hint);
+        }
+        self.device_code_action = None;
+    }
+
     fn cancel(&mut self) {
+        self.clear_device_code_action();
         self.cancel.cancel();
         if let Some(reply) = self.pending.take() {
             let _ = reply.send(Err(AuthError::Cancelled));
@@ -145,6 +201,7 @@ impl LoginDialog {
 
     /// Shows the sign-in URL and instructions, and opens the browser.
     pub fn show_auth(&mut self, url: &str, instructions: Option<&str>) {
+        self.clear_device_code_action();
         self.content.borrow_mut().clear();
         self.add(spacer(1));
         let auth_url = component(AuthUrl::with_clipboard(&self.tui, url, self.clipboard.clone()));
@@ -158,20 +215,70 @@ impl LoginDialog {
         self.tui.request_render(false);
     }
 
-    /// Shows the verification URL and the code to enter.
-    pub fn show_device_code(&mut self, user_code: &str, verification_uri: &str) {
+    /// Shows the verification URL and the code to enter. The confirm key then opens the page
+    /// and copies the code, unless the provider turned either off.
+    pub fn show_device_code(&mut self, info: &DeviceCodeInfo) {
+        let (user_code, verification_uri) = (&info.user_code, &info.verification_uri);
+        let open_browser = info.open_browser_on_confirm.unwrap_or(true);
+        let copy_code = info.copy_code_on_confirm.unwrap_or(true);
         self.auth_url = None;
+        self.clear_device_code_action();
         self.content.borrow_mut().clear();
         self.add(spacer(1));
         self.add(text(&fg(ThemeColor::Accent, &hyperlink_bel(verification_uri, verification_uri)), 1, 0));
         self.add(text(&fg(ThemeColor::Dim, &hyperlink_bel(click_hint(), verification_uri)), 1, 0));
         self.add(spacer(1));
         self.add(text(&fg(ThemeColor::Warning, &format!("Enter code: {user_code}")), 1, 0));
+        if !self.cancel.is_cancelled() && (open_browser || copy_code) {
+            let label = match (open_browser, copy_code) {
+                (true, true) => "to open browser and copy code",
+                (true, false) => "to open browser",
+                _ => "to copy code",
+            };
+            // One row, reused for progress and result text, also in narrow terminals.
+            let hint = component(Container::new());
+            hint.borrow_mut().add_child(truncated(&format!("({})", key_hint("tui.select.confirm", label)), 1, 0));
+            self.add(hint.clone());
+            self.device_code_hint = Some(hint.clone());
+            self.device_code_action = Some(DeviceCodeAction {
+                user_code: user_code.clone(),
+                verification_uri: verification_uri.clone(),
+                open_browser,
+                copy_code,
+                hint,
+            });
+        }
         self.tui.request_render(false);
+    }
+
+    fn activate_device_code(&self, action: DeviceCodeAction) {
+        let status = DeviceCodeStatus {
+            cancel: self.cancel.clone(),
+            focused: self.focused.clone(),
+            content: self.content.clone(),
+            hint: action.hint,
+            tui: self.tui.clone(),
+        };
+        status.set(if action.copy_code { "Copying code..." } else { "Browser open requested" });
+        if action.copy_code {
+            // Do not delay polling or browser opening while clipboard tools run.
+            let copied = (self.clipboard)(action.user_code);
+            tokio::task::spawn_local(async move {
+                status.set(if copied.await.is_ok() { "Code copied to clipboard" } else { "Copy code manually" });
+            });
+        }
+        // The shared launcher also opens files; device-code login must only open web URLs.
+        if action.open_browser
+            && let Ok(url) = url::Url::parse(&action.verification_uri)
+            && matches!(url.scheme(), "http" | "https")
+        {
+            (self.open_browser)(url.as_str());
+        }
     }
 
     /// Asks for a pasted code or redirect URL; resolves with the submitted text.
     pub fn show_manual_input(&mut self, prompt: &str) -> impl Future<Output = AuthResult<String>> + use<> {
+        self.clear_device_code_action();
         self.input.borrow_mut().set_value("");
         self.add(spacer(1));
         self.add(text(&fg(ThemeColor::Dim, prompt), 1, 0));
@@ -187,6 +294,7 @@ impl LoginDialog {
         message: &str,
         placeholder: Option<&str>,
     ) -> impl Future<Output = AuthResult<String>> + use<> {
+        self.clear_device_code_action();
         self.add(spacer(1));
         self.add(text(&fg(ThemeColor::Text, message), 1, 0));
         if let Some(placeholder) = placeholder.filter(|placeholder| !placeholder.is_empty()) {
@@ -207,6 +315,7 @@ impl LoginDialog {
     /// Replaces the content with informational lines.
     pub fn show_details(&mut self, lines: &[String]) {
         self.auth_url = None;
+        self.clear_device_code_action();
         self.content.borrow_mut().clear();
         self.add(spacer(1));
         for line in lines {
@@ -310,6 +419,17 @@ impl Component for LoginDialog {
             auth_url.borrow().copy();
             return;
         }
+        if self.pending.is_none()
+            && !self.cancel.is_cancelled()
+            && self.focused.get()
+            && kb.matches(data, "tui.select.confirm")
+            && let Some(action) = self.device_code_action.take()
+        {
+            // Taken once, so a repeated Enter cannot launch several browsers or clipboard writes.
+            self.activate_device_code(action);
+            self.tui.request_render(false);
+            return;
+        }
         self.input.borrow_mut().handle_input(data);
         let submitted = self.submitted.borrow_mut().take();
         if let Some(value) = submitted {
@@ -326,6 +446,7 @@ impl Component for LoginDialog {
     }
 
     fn set_focused(&mut self, focused: bool) {
+        self.focused.set(focused);
         self.input.borrow_mut().focused = focused;
     }
 

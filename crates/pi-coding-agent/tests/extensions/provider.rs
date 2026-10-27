@@ -98,6 +98,7 @@ export default function (pi) {
 			name: "Echo OAuth",
 			async login(callbacks) {
 				callbacks.onAuth({ url: "https://example.test/auth" });
+				callbacks.onDeviceCode({ userCode: "UC", verificationUri: "https://example.test/device", copyCodeOnConfirm: false });
 				const code = await callbacks.onPrompt({ message: "Code?" });
 				return { refresh: "r-" + code, access: "a-" + code, expires: Date.now() + 3600000 };
 			},
@@ -142,7 +143,9 @@ async fn oauth_login_runs_the_extension_flow_and_its_key_reaches_requests() {
     assert_eq!((oauth.access.as_str(), oauth.refresh.as_str()), ("a-123", "r-123"));
     let events = interaction.events.lock().unwrap().clone();
     assert!(events[0].contains("https://example.test/auth"), "{events:?}");
-    assert!(events[1].contains("Code?"), "{events:?}");
+    let device = &events[1];
+    assert!(device.contains("open_browser_on_confirm: None, copy_code_on_confirm: Some(false)"), "{events:?}");
+    assert!(events[2].contains("Code?"), "{events:?}");
     let model = runtime.get_model("echo-oauth", "echo").unwrap();
     h.session.set_model(model, false).await.unwrap();
     h.session.prompt("hi", Vec::new()).await.unwrap();

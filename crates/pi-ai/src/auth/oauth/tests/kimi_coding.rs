@@ -65,6 +65,8 @@ async fn device_login_polls_until_tokens_arrive() {
         verification_uri: "https://www.kimi.com/code?user_code=ABCD-1234".into(),
         interval_seconds: Some(5),
         expires_in_seconds: Some(600),
+        open_browser_on_confirm: None,
+        copy_code_on_confirm: None,
     };
     assert_eq!(interaction.events(), [expected]);
 }

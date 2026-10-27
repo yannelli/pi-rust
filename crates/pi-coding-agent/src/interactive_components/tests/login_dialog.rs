@@ -13,12 +13,12 @@ use pi_ai::auth::{
 use tokio_util::sync::CancellationToken;
 
 use crate::agent_session::{ModelRuntime, ModelRuntimeOptions};
-use crate::interactive_components::login::{ClipboardCopyFn, LoginDialog, run_dialog_login};
+use crate::interactive_components::login::{ClipboardCopyFn, DeviceCodeInfo, LoginDialog, run_dialog_login};
 use crate::interactive_components::test_support::{Calls, Harness, flush, keys, local};
 
 const URL: &str = "https://auth.example.invalid/authorize?xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
 
-fn dialog_harness(
+pub(super) fn dialog_harness(
     copied: &Calls<String>,
     opened: &Calls<String>,
     completed: &Calls<(bool, Option<String>)>,
@@ -71,7 +71,12 @@ async fn login_dialog_copies_the_auth_url_instead_of_typing_into_the_code_input(
 fn login_dialog_ignores_the_copy_key_without_an_auth_url() {
     let (copied, opened, completed) = (Calls::new(), Calls::new(), Calls::new());
     let harness = dialog_harness(&copied, &opened, &completed);
-    harness.component.borrow_mut().show_device_code("ABCD", "https://example.invalid/device");
+    let device = DeviceCodeInfo {
+        user_code: "ABCD".into(),
+        verification_uri: "https://example.invalid/device".into(),
+        ..DeviceCodeInfo::default()
+    };
+    harness.component.borrow_mut().show_device_code(&device);
     harness.component.borrow_mut().show_waiting("Waiting for authentication...");
     harness.send(&keys::ctrl('x'));
     let screen = harness.screen();

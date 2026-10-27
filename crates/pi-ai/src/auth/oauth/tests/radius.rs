@@ -67,6 +67,8 @@ async fn device_login_uses_gateway_endpoints_directly() {
             verification_uri: "https://r/device".into(),
             interval_seconds: Some(2),
             expires_in_seconds: Some(600),
+            open_browser_on_confirm: None,
+            copy_code_on_confirm: None,
         }]
     );
 }

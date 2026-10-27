@@ -238,6 +238,8 @@ impl RadiusOAuth {
             verification_uri,
             interval_seconds: interval.map(|seconds| seconds as u64),
             expires_in_seconds: Some(expires_in as u64),
+            open_browser_on_confirm: None,
+            copy_code_on_confirm: None,
         });
 
         let options = DeviceCodePollOptions {
