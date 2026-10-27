@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/yannelli/pi-rust">
+    <img alt="pi-rust logo" src="docs/assets/pi-rust-logo.svg" width="128">
+  </a>
+</p>
+
 # pi-rust
 
 A Rust-only port of the [pi](https://github.com/earendil-works/pi) coding agent harness: a streaming multi-provider LLM API, an agent loop with tool calling, and the `pi` coding agent CLI. No Node.js or JavaScript runtime is required.

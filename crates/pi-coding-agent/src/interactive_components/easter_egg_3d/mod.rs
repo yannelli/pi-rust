@@ -21,6 +21,7 @@ pub use math::{Rgb, hash};
 pub use model::{Block, Model, ModelOrigin, armin_model, pi_logo_model, shuffle_steps};
 pub use screen::{ScreenCell, glyph_ink, parse_screen};
 
+use crate::interactive::components::pi_logo::PI_LOGO_COLORS;
 use crate::theme::{ThemeAppearance, ThemeColor, theme};
 
 /// Which easter egg to play. The pi logo lifts off the header logo, whose top-left cell is at `column`, `row`.
@@ -86,7 +87,7 @@ fn start(tui: &Tui, screen: Vec<String>, egg: EasterEgg3d) {
         }
         let model = match egg {
             EasterEgg3d::Armin => armin_model(math::to_rgb(&active.color(ThemeColor::Accent))),
-            EasterEgg3d::PiLogo { column, row } => pi_logo_model(ModelOrigin { column, row }),
+            EasterEgg3d::PiLogo { column, row } => pi_logo_model(ModelOrigin { column, row }, PI_LOGO_COLORS),
         };
         let overlay: Rc<RefCell<Option<OverlayHandle>>> = Rc::default();
         let handle = overlay.clone();

@@ -94,7 +94,7 @@ async fn callback_server_ignores_stray_requests_and_completes_the_code() {
     assert_eq!(response.headers()["content-type"], "text/html; charset=utf-8");
     let body = response.text().await.unwrap();
     assert!(body.contains("Authentication successful") && body.contains("Signed in to Example."));
-    assert!(body.contains(r##"fill="#4D9ABF""##));
+    assert!(body.contains(r##"fill="#5FA0BF""##));
     assert_eq!(server.wait().await.unwrap().as_deref(), Some("completed:the-code"));
 }
 
