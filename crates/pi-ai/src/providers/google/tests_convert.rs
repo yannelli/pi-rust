@@ -309,3 +309,73 @@ fn const_values_become_single_value_enums_in_json_schema() {
     );
     assert_eq!(parameters, original);
 }
+
+// Regression coverage for upstream #11308.
+#[test]
+fn const_rewriting_preserves_literal_data() {
+    for key in ["default", "examples", "enum", "const", "x-custom"] {
+        let literal = json!({"const": "literal-data", "properties": {"nested": {"const": 1}}});
+        let data = if key == "enum" || key == "examples" { json!([literal]) } else { literal };
+        let parameters = json!({"type": "object", "properties": {"value": {"type": "object", key: data}}});
+        assert_eq!(json_schema_declaration(&parameters), parameters, "{key}");
+    }
+}
+
+#[test]
+fn const_rewriting_preserves_names_in_name_maps() {
+    for key in ["properties", "patternProperties", "$defs", "definitions", "dependentSchemas", "dependencies"] {
+        let parameters = json!({
+            "type": "object",
+            key: {"__proto__": {"const": "x"}, "const": {"const": "y"}, "properties": {"const": "z"}}
+        });
+        let expected = json!({
+            "type": "object",
+            key: {"__proto__": {"enum": ["x"]}, "const": {"enum": ["y"]}, "properties": {"enum": ["z"]}}
+        });
+        let result = json_schema_declaration(&parameters);
+        assert_eq!(serde_json::to_string(&result).unwrap(), serde_json::to_string(&expected).unwrap(), "{key}");
+    }
+}
+
+#[test]
+fn const_rewriting_visits_only_schema_bearing_keywords() {
+    let parameters = json!({
+        "type": "object",
+        "additionalProperties": {"const": "x"},
+        "unevaluatedProperties": false,
+        "propertyNames": {"const": "name"},
+        "allOf": [{"if": {"const": "x"}, "then": {"const": "y"}, "else": {"not": {"const": "z"}}}],
+        "properties": {
+            "list": {
+                "type": "array",
+                "items": [{"const": 1}],
+                "prefixItems": [{"const": 2}],
+                "additionalItems": {"const": 3},
+                "contains": {"const": 4},
+                "unevaluatedItems": {"const": 5}
+            }
+        },
+        "dependencies": {"list": ["other"]}
+    });
+    assert_eq!(
+        json_schema_declaration(&parameters),
+        json!({
+            "type": "object",
+            "additionalProperties": {"enum": ["x"]},
+            "unevaluatedProperties": false,
+            "propertyNames": {"enum": ["name"]},
+            "allOf": [{"if": {"enum": ["x"]}, "then": {"enum": ["y"]}, "else": {"not": {"enum": ["z"]}}}],
+            "properties": {
+                "list": {
+                    "type": "array",
+                    "items": [{"enum": [1]}],
+                    "prefixItems": [{"enum": [2]}],
+                    "additionalItems": {"enum": [3]},
+                    "contains": {"enum": [4]},
+                    "unevaluatedItems": {"enum": [5]}
+                }
+            },
+            "dependencies": {"list": ["other"]}
+        })
+    );
+}

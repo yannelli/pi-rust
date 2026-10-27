@@ -189,8 +189,28 @@ fn sanitize_for_open_api(schema: &Value) -> Value {
 }
 
 /// Schema keywords whose values map names to subschemas, so their keys are not schema keywords.
-const JSON_SCHEMA_NAME_MAPS: [&str; 5] =
-    ["properties", "patternProperties", "$defs", "definitions", "dependentSchemas"];
+const JSON_SCHEMA_NAME_MAPS: [&str; 6] =
+    ["properties", "patternProperties", "$defs", "definitions", "dependentSchemas", "dependencies"];
+
+/// Keywords containing a subschema or an array of subschemas, not literal data.
+const JSON_SCHEMA_SUBSCHEMAS: [&str; 16] = [
+    "additionalProperties",
+    "unevaluatedProperties",
+    "propertyNames",
+    "items",
+    "prefixItems",
+    "additionalItems",
+    "unevaluatedItems",
+    "contains",
+    "allOf",
+    "anyOf",
+    "oneOf",
+    "not",
+    "if",
+    "then",
+    "else",
+    "contentSchema",
+];
 
 /// Rewrite string and number `const` values to single-value `enum`s.
 /// Gemini ignores `const` in `parametersJsonSchema` but honors `enum`.
@@ -205,8 +225,14 @@ fn rewrite_const_as_enum(schema: &Value, is_name_map: bool) -> Value {
     let mut result: Map<String, Value> = object
         .iter()
         .map(|(key, value)| {
-            let nested_name_map = !is_name_map && JSON_SCHEMA_NAME_MAPS.contains(&key.as_str());
-            (key.clone(), rewrite_const_as_enum(value, nested_name_map))
+            let value = if is_name_map || JSON_SCHEMA_SUBSCHEMAS.contains(&key.as_str()) {
+                rewrite_const_as_enum(value, false)
+            } else if JSON_SCHEMA_NAME_MAPS.contains(&key.as_str()) {
+                rewrite_const_as_enum(value, true)
+            } else {
+                value.clone()
+            };
+            (key.clone(), value)
         })
         .collect();
     if !is_name_map
