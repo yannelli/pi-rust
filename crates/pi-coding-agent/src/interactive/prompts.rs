@@ -155,8 +155,17 @@ impl InteractiveMode {
 
     /// Show `view` in the editor slot until the returned function closes it.
     pub(super) fn mount_view(&self, view: ComponentRef) -> Rc<dyn Fn()> {
+        self.mount_view_blocked(view, None)
+    }
+
+    /// [`Self::mount_view`] that reports pi as blocked on user input while `view` is visible.
+    pub(super) fn mount_view_blocked(
+        &self,
+        view: ComponentRef,
+        blocked: Option<(BlockedKind, String)>,
+    ) -> Rc<dyn Fn()> {
         let id = self.next_dialog_id();
-        self.push_dialog(DialogEntry { id, focus: view.clone(), component: view, dispose: None, blocked: None });
+        self.push_dialog(DialogEntry { id, focus: view.clone(), component: view, dispose: None, blocked });
         let weak = self.weak.clone();
         Rc::new(move || {
             if let Some(mode) = weak.upgrade() {

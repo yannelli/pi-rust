@@ -56,7 +56,7 @@ impl InteractiveMode {
     pub(super) fn show_extension_custom(&self, request: CustomRequest, sender: oneshot::Sender<Result<Value, String>>) {
         let saved_text = self.current_editor_text();
         self.spawn(move |mode| async move {
-            let CustomRequest { factory, overlay, overlay_options: options, done, handle_key } = request;
+            let CustomRequest { factory, overlay, overlay_options: options, done, handle_key, blocked } = request;
             let js = match factory.create_async().await {
                 Ok(js) => Rc::new(RefCell::new(js)),
                 Err(error) => {
@@ -75,7 +75,7 @@ impl InteractiveMode {
                 }
                 Rc::new(move || handle.hide())
             } else {
-                mode.mount_view(view)
+                mode.mount_view_blocked(view, blocked)
             };
             mode.request_render();
             let result = done.await.unwrap_or(Value::Null);

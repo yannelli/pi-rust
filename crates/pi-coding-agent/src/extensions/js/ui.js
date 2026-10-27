@@ -146,6 +146,7 @@ export function createUiContext(target, prompt) {
 						overlay: Boolean(options?.overlay),
 						overlayOptions: overlay,
 						handleKey,
+						blocked: options?.blocked ?? null,
 					});
 					if (handleKey !== undefined) releaseCallback(handleKey);
 					return optional(result);
