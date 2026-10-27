@@ -19,8 +19,8 @@ use crate::interactive_components::armin::{
 };
 use crate::interactive_components::earendil_announcement::{BLOG_URL, EarendilAnnouncementComponent};
 use crate::interactive_components::easter_egg_3d::{
-    Clock, EasterEgg3d, EasterEgg3dAnimation, ModelOrigin, TerminalDefaults, armin_model, glyph_ink, hash, is_playing,
-    parse_screen, pi_logo_model, play_armin_3d, play_easter_egg_3d, play_pi_logo_3d, shuffle_steps,
+    Clock, EasterEgg3d, EasterEgg3dAnimation, ModelOrigin, Rgb, TerminalDefaults, armin_model, glyph_ink, hash,
+    is_playing, parse_screen, pi_logo_model, play_armin_3d, play_easter_egg_3d, play_pi_logo_3d, shuffle_steps,
 };
 use crate::interactive_components::test_support::{Calls, Harness, keys, plain, setup};
 use crate::theme::tests::global_state;
@@ -28,6 +28,9 @@ use crate::theme::{create_theme, load_theme_json, set_theme_instance};
 
 static FIXTURES: LazyLock<Value> =
     LazyLock::new(|| serde_json::from_str(include_str!("fixtures/easter_eggs.json")).expect("fixture json"));
+
+/// Upstream's logo colors. The fixtures come from upstream, so the logo tests render with these, not pi-rust's.
+const UPSTREAM_LOGO_COLORS: [Rgb; 3] = [[228.0, 138.0, 122.0], [79.0, 142.0, 179.0], [234.0, 182.0, 93.0]];
 
 fn strings(value: &Value) -> Vec<String> {
     value.as_array().expect("array").iter().map(|line| line.as_str().expect("string").to_string()).collect()
@@ -192,8 +195,11 @@ fn check_frames(name: &str, width: usize, height: usize, model_for: bool, colors
     let _kb = setup();
     dark_truecolor();
     let (_terminal, tui) = test_tui(width, height);
-    let model =
-        if model_for { pi_logo_model(ModelOrigin { column: 0, row: 0 }) } else { armin_model([138.0, 190.0, 183.0]) };
+    let model = if model_for {
+        pi_logo_model(ModelOrigin { column: 0, row: 0 }, UPSTREAM_LOGO_COLORS)
+    } else {
+        armin_model([138.0, 190.0, 183.0])
+    };
     let (now, clock) = clock();
     let mut animation = EasterEgg3dAnimation::with_clock(&tui, screen(), model, colors, clock, || {});
     let expected = FIXTURES[name].as_array().expect("frames");
@@ -262,7 +268,7 @@ fn shuffle_is_deterministic_and_never_stacks_blocks() {
             assert!(distance <= 1);
         }
     }
-    let logo = pi_logo_model(ModelOrigin { column: 2, row: 1 });
+    let logo = pi_logo_model(ModelOrigin { column: 2, row: 1 }, UPSTREAM_LOGO_COLORS);
     assert_eq!(logo.blocks.len(), 10);
     let moved =
         |steps: &[Vec<[i64; 3]>], step: usize| steps[step].iter().zip(&steps[step + 1]).filter(|(a, b)| a != b).count();
@@ -319,7 +325,7 @@ fn escape_plays_the_exit_and_a_second_escape_skips_it() {
     let counter = RefCell::new(Some(done.counter()));
     let harness = Harness::new(40, 14, move |tui| {
         let on_done = counter.borrow_mut().take().unwrap();
-        let model = pi_logo_model(ModelOrigin { column: 0, row: 0 });
+        let model = pi_logo_model(ModelOrigin { column: 0, row: 0 }, UPSTREAM_LOGO_COLORS);
         EasterEgg3dAnimation::with_clock(tui, screen(), model, DARK, clock, on_done)
     });
     now.set(4000.0);
@@ -339,7 +345,7 @@ fn ctrl_c_and_clicks_close_and_the_timer_finishes_the_exit() {
     let counter = RefCell::new(Some(done.counter()));
     let harness = Harness::new(40, 14, move |tui| {
         let on_done = counter.borrow_mut().take().unwrap();
-        let model = pi_logo_model(ModelOrigin { column: 0, row: 0 });
+        let model = pi_logo_model(ModelOrigin { column: 0, row: 0 }, UPSTREAM_LOGO_COLORS);
         EasterEgg3dAnimation::with_clock(tui, screen(), model, DARK, clock, on_done)
     });
     harness.send(&keys::ctrl('c'));

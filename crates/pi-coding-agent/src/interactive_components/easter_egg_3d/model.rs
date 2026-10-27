@@ -66,17 +66,14 @@ impl Model {
     }
 }
 
-const CORAL: Rgb = [228.0, 138.0, 122.0];
-const BLUE: Rgb = [79.0, 142.0, 179.0];
-const YELLOW: Rgb = [234.0, 182.0, 93.0];
-const PI_LOGO_PIXELS: [&str; 4] = ["ccc.", "b.c.", "bb.y", "b..y"];
+const PI_LOGO_PIXELS: [&str; 4] = ["ttt.", "l.t.", "ll.r", "l..r"];
 
-/// The pi logo, lifting off the header logo at `origin`.
-pub fn pi_logo_model(origin: ModelOrigin) -> Model {
-    let pixel = |column: usize, row: usize| match PI_LOGO_PIXELS[row].as_bytes()[column] {
-        b'c' => Some(CORAL),
-        b'b' => Some(BLUE),
-        b'y' => Some(YELLOW),
+/// The pi logo with `colors` for its top bar, left leg, and right leg, lifting off the header logo at `origin`.
+pub fn pi_logo_model(origin: ModelOrigin, colors: [Rgb; 3]) -> Model {
+    let pixel = move |column: usize, row: usize| match PI_LOGO_PIXELS[row].as_bytes()[column] {
+        b't' => Some(colors[0]),
+        b'l' => Some(colors[1]),
+        b'r' => Some(colors[2]),
         _ => None,
     };
     Model::new(4, 4, pixel, 10.0, 0.35, |random, _| if random < 0.4 { 2 } else { 1 }, Some(origin))
