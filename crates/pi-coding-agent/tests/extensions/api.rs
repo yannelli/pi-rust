@@ -146,6 +146,31 @@ async fn exec_decodes_output_across_utf8_chunk_boundaries() {
     assert_eq!(result, json!({"stdout": "你好", "stderr": "你好", "code": 0, "killed": false}));
 }
 
+// Upstream issue 11360: unbounded output could exhaust the string limit and crash the host.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn exec_stops_a_command_whose_output_exceeds_the_cap() {
+    let source = r#"export default function (pi) {
+	pi.registerCommand("big", { handler: async (_args, ctx) => {
+		const big = await pi.exec("yes", ["0123456789abcdef0123456789abcdef"]);
+		const small = await pi.exec("sh", ["-c", "printf ok"]);
+		ctx.ui.notify(JSON.stringify({ length: big.stdout.length, code: big.code, killed: big.killed, stderr: big.stderr, small: small.stdout }));
+	} });
+}
+"#;
+    let h = harness(Setup { files: vec![("big.ts", source.into())], load: vec!["big.ts"], ..Setup::default() }).await;
+    h.session.prompt("/big", Vec::new()).await.unwrap();
+    let calls = h.ui.calls();
+    let [call] = calls.as_slice() else { panic!("{calls:?}") };
+    let result: Value = serde_json::from_str(call.strip_prefix("notify(info): ").expect("notify")).unwrap();
+    let cap = 16 * 1024 * 1024;
+    assert_eq!(result["length"], cap);
+    assert_ne!(result["code"], 0);
+    assert_eq!(result["killed"], true);
+    assert_eq!(result["stderr"], format!("[output exceeded {cap} bytes; output is incomplete]"));
+    assert_eq!(result["small"], "ok", "the next command still runs");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn completions_shortcuts_and_renderers_come_from_the_registry() {
     let h = harness(Setup { files: vec![("probe.ts", probe_extension())], load: vec!["probe.ts"], ..Setup::default() })
