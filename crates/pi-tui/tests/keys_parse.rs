@@ -133,7 +133,6 @@ fn rejects_invalid_key_ids_and_ignores_case() {
     assert!(matches_key("\x03", "Ctrl+C"));
     assert!(matches_key("\x1b[5~", "PAGEUP"));
     assert!(matches_key("+", "+"));
-    assert!(!matches_key("\x1b[15;2~", "shift+f5"));
 }
 
 #[test]
