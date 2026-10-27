@@ -1,0 +1,18 @@
+# Third-party licenses
+
+This file gives the licenses of the third-party Rust crates that pi-rust uses. The `pi` and `pi-env-daemon` binaries contain these crates or a part of them. Each section gives one license text and the crates that use it.
+
+{{#each licenses}}
+## {{{name}}}
+
+Used by:
+
+{{#each used_by}}
+- [{{crate.name}} {{crate.version}}]({{#if crate.repository}}{{crate.repository}}{{else}}https://crates.io/crates/{{crate.name}}{{/if}})
+{{/each}}
+
+```text
+{{{text}}}
+```
+
+{{/each}}

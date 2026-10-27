@@ -108,8 +108,27 @@ jobs:
           git push origin HEAD:refs/heads/main "refs/tags/v$VERSION"
           echo "ref=v$VERSION" >> "$GITHUB_OUTPUT"
 
-  build:
+  notices:
     needs: plan
+    if: needs.plan.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      # The licenses of the third-party crates go into every release archive (about.toml, about.hbs).
+      - name: Install cargo-about
+        run: cargo install --locked cargo-about --version 0.9.3 --features cli
+      - name: Write THIRD-PARTY-LICENSES.md
+        run: cargo about generate --workspace --locked --fail -c about.toml about.hbs -o THIRD-PARTY-LICENSES.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: third-party-licenses
+          path: THIRD-PARTY-LICENSES.md
+
+  build:
+    needs: [plan, notices]
     if: needs.plan.outputs.release == 'true'
     name: build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
@@ -128,6 +147,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.plan.outputs.ref }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: third-party-licenses
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -165,7 +187,7 @@ jobs:
         run: |
           name="pi-$TAG-$TARGET"
           mkdir -p "dist/$name"
-          cp README.md LICENSE crates/pi-coding-agent/src/acp/LICENSE-pi-acp "dist/$name/"
+          cp README.md LICENSE THIRD-PARTY-LICENSES.md crates/pi-coding-agent/src/acp/LICENSE-pi-acp "dist/$name/"
           [ -f CHANGELOG.md ] && cp CHANGELOG.md "dist/$name/"
           if [ "${{ runner.os }}" = Windows ]; then
             cp "target/$TARGET/release/pi.exe" "dist/$name/"
@@ -257,7 +279,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [plan, build, android-daemons]
+    needs: [plan, notices, build, android-daemons]
     if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -279,11 +301,16 @@ jobs:
           pattern: daemon-*
           path: daemons/pi-env-daemons
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: third-party-licenses
+          path: daemons/pi-env-daemons
       - name: Package the pi-env daemons
         env:
           TAG: ${{ needs.plan.outputs.tag }}
         run: |
           find daemons -type f -name pi-env -exec chmod +x {} +
+          cp LICENSE daemons/pi-env-daemons/
           tar -C daemons -czf "dist/pi-env-daemons-$TAG.tar.gz" pi-env-daemons
           tar -tzf "dist/pi-env-daemons-$TAG.tar.gz"
       - name: Checksums

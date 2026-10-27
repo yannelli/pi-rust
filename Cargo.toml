@@ -28,6 +28,7 @@ edition = "2024"
 license = "MIT"
 repository = "https://github.com/yannelli/pi-rust"
 rust-version = "1.85"
+publish = false
 
 [workspace.dependencies]
 pi-ai = { path = "crates/pi-ai" }
