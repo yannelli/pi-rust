@@ -19,6 +19,7 @@ How pi-chord's `host2` differs from upstream chord on purpose:
 - `Declare::on_select` takes a key for the identity of `select`, where upstream compares the function's source text. A reload keeps the subscription while the resource and the key stay the same.
 - `Host::host_object` returns the host's own reference to a `lifetime: "host"` object (upstream tests read the private `hostObjects`).
 - Upstream `4a5d37291` moved `OutputBuffer` and `Progress` into `@earendil-works/chord/output`. pi-rust keeps them in pi-durable (`harness/output.rs` and `harness/progress.rs`).
+- `Change::append_text` (upstream `appendText`) records an append op without comparing the strings, but the new string is still a copy: a JSON string is an immutable shared `Arc<str>`, so each append costs O(length), not O(text). It takes the path of the object that holds the key, since a Rust draft is a `&mut Json` and not a proxy.
 - Tests: fake timers are real short timers, and `Weak` sentinels replace `FinalizationRegistry` with a forced GC. The review test "a commit that still fails midway" is not ported: it patches an object's `startTasks`, which Rust code cannot do.
 - The tutorial test (upstream `test/tutorial.test.ts`) is `chord2_tutorial.rs` and `chord2_tutorial_reload.rs`, one test per section. Its drift check, which compares `docs/tutorial.md` with the TypeScript examples in the test, is not ported: pi-rust has no TypeScript copy of the examples.
 
