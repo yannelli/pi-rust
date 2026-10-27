@@ -68,7 +68,7 @@ $bin = "$env:LOCALAPPDATA\pi\pi-$tag-$target"
 
 Open a new terminal afterwards so the `Path` change applies. With the GitHub CLI, `gh release download --repo yannelli/pi-rust --pattern '*<target>*'` fetches the latest archive. A browser download on macOS may need `xattr -d com.apple.quarantine pi` before the first run.
 
-Each release file also has a signed build provenance attestation. With the GitHub CLI, `gh attestation verify pi-$tag-$target.tar.gz --repo yannelli/pi-rust` shows that the file came from this repository's Release workflow.
+Each release file also has a signed build provenance attestation. With the GitHub CLI, `gh attestation verify pi-$tag-$target.tar.gz --repo yannelli/pi-rust` (`.zip` on Windows) shows that the file came from this repository's Release workflow.
 
 `pi update --self` replaces a release install with the latest release, and `pi update --models` refreshes the model catalogs. To build from source (Rust 1.85 or newer): `cargo install --path crates/pi-coding-agent`.
 
