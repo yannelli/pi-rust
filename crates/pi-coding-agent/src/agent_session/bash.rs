@@ -126,12 +126,7 @@ fn spawn_reader(mut stream: impl AsyncRead + Unpin + Send + 'static, sender: mps
 async fn kill_process_tree(child: &mut tokio::process::Child) {
     #[cfg(unix)]
     if let Some(pid) = child.id() {
-        let _ = tokio::process::Command::new("/bin/sh")
-            .args(["-c", &format!("kill -KILL -- -{pid}")])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await;
+        crate::signals::kill_process_tree(pid);
     }
     let _ = child.start_kill();
 }
