@@ -1,13 +1,14 @@
 # Open parity gaps
 
-Last reviewed 2026-10-21 against upstream `main` at `bd3c9b823` (2026-10-21). The daily [parity report](README.md#daily-gap-check) finds new gaps; this file keeps the ones that need a decision or a plan. Remove an entry in the PR that closes it.
+Last reviewed 2026-10-27 against upstream `main` at `531340f10` (2026-10-27). The daily [parity report](README.md#daily-gap-check) finds new gaps; this file keeps the ones that need a decision or a plan. Remove an entry in the PR that closes it.
 
 ## Upstream commits not yet ported
 
-None up to `bd3c9b823`. Every commit after the synced commit is ported or listed in `allowlist.json` with a reason.
+None up to `531340f10`. Every commit after the synced commit is ported or listed in `allowlist.json` with a reason.
 
 ## Deferred work
 
+- **One copy of the partial message per streamed delta.** Since upstream `f715a15c1`, tool-call arguments are parsed once per delta (`pi_ai::streaming_json`). Each `AssistantMessageEvent` still carries a full copy of the partial message, so a very large tool call costs more per delta as it grows. Removing that copy would change the public event API.
 - **`HarnessOptions.models` as a function** (upstream `7ec1f648e`). Not planned: settings are already a function here, and a `Models` implementation can change its catalog at runtime. It is older than the synced commit, so the report does not list it.
 
 ## chord2 differences
@@ -32,6 +33,11 @@ Older than the synced commit, so the report no longer lists them.
 - `16f5f0af4` IndexedDbStorage: a browser storage backend, and pi-rust has no browser build.
 - `c661bc574` drops the shared MCP types block from durable code mode: pi-codemode never had it, so the port of `8bb180bec` already renders the section without it.
 - `4c25119f5` replicates durable storages as a commit log, and `cae9fd28a` reverts it: the pair is a net zero change.
+- `2685de7a1`, `66c2fa3d7`, and `936e5f40a` update or drop npm dependencies. pi-rust has no npm dependencies.
+- `476a303c1` drops an `npm ci` override for managed installs. `pi update --self` downloads release archives, not npm.
+- `c8ec752cf` skips `fd` and `rg` downloads on unsupported architectures. pi-rust never downloads them, because `grep` and `find` use the `ignore` crate.
+- `531340f10` deletes root npm shim files of the TypeScript ai package. pi-rust has no npm package layout.
+- The V8 string retention parts of `f715a15c1` (chord `ownedSlice`, bounded error excerpts) do not apply, because Rust strings own their bytes. The rest of the commit is ported.
 
 ## Extension runtime (pi-js)
 

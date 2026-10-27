@@ -296,13 +296,24 @@ pi-rust ports the `pi` CLI and its libraries feature for feature. These parts di
 - `/context` (see [Use](#use)) is an addition; upstream pi shows context use only in the footer.
 - `/undo` (see [Use](#use)) is an addition; upstream pi has no command that restores the files the agent changed.
 - `/retry` (see [Use](#use)) is an addition; upstream pi has no `/retry` command.
-
 - `pi completion` and `pi doctor` (above) are additions; the TypeScript pi has neither.
 - `pi sessions` and `pi stats` (above) are additions; the TypeScript pi lists and deletes sessions only in its session picker (`pi -r`, `/resume`) and shows usage only for the current session (`/session`).
 - The run limits `--max-turns` and `--max-cost` (above) are additions.
 - Structured output with `--output-schema` and `--output-retries` (above) is an addition.
 - Account model lists for OpenAI Codex, Anthropic, GitHub Copilot, OpenAI, xAI, and Google (see [Providers](#account-model-lists-pi-rust-extension)) are an addition; upstream pi narrows only OpenRouter.
-- pi-rust fixes these open upstream issues: `modelOverrides` in `models.json` also apply to classifier and image models (`name`, `input`, `inputLimits`, and `cost`, plus `contextWindow` and `compat` for classifiers; upstream issue 11223). Removing a tool of the first tool list on Anthropic no longer makes every later request fail (11376). On Bedrock, `strict: "prefer"` tools go non-strict when the strict tools have more than 16 optional parameters (11416).
+- pi-rust fixes these bugs that are still open upstream:
+  - Anthropic: removing a tool from the first tool list no longer breaks every later request (upstream issue 11376).
+  - Bedrock: `strict: "prefer"` tools go non-strict when the strict tools have more than 16 optional parameters (11416).
+  - `modelOverrides` in `models.json` also apply to classifier and image models: `name`, `input`, `inputLimits`, and `cost`, plus `contextWindow` and `compat` for classifiers (11223).
+  - The editor strips escape sequences from pasted text, and a paste whose end marker never arrives ends after 10 seconds without input or at 16 MiB, so Ctrl+C works again (11383).
+  - MCP HTTP replies that are plain JSON respect `maxMessageBytes` (11335).
+  - A code mode script can declare its own top-level `tools` or `console` (11226).
+  - Branch summaries from `/tree` use the selected thinking level (11444), and resuming a session after `/tree` restores the thinking level you were using (11451).
+  - Tool output drops mouse reports and other escape sequences with private parameters, such as `ESC[<35;59;1M` (11377).
+  - In `pi -p`, a prompt that an extension command sends with `sendUserMessage` runs before pi exits (11238).
+  - An unpinned `-e npm:` package updates when npm has a newer version (11375).
+  - `pi.exec` caps a command's output at 16 MiB and stops the command when it reaches the cap (11360).
+  - `pi-env` watches a directory again after the kernel drops the watch and the directory keeps its inode (11342).
 - [Prompt history](#prompt-history-pi-rust-extension) across sessions, with the Ctrl+R search and the `promptHistory` settings, is an addition; upstream pi keeps prompt history only for the running process.
 - `pi-env` looks for remote daemons in a `pi-env-daemons` folder next to the running program. Each release has a `pi-env-daemons-<tag>.tar.gz` with the daemons for Linux, Android (Termux), macOS, and Windows on x86-64 and arm64; extract it next to `pi`.
 - Notifications: in interactive mode, a run that takes 10 seconds or more ends with a terminal notification titled "pi" that says "Done" or names the error. pi sends OSC 777 in Ghostty, WezTerm, foot, and rxvt, OSC 99 in kitty, OSC 9 in iTerm2 and Windows Terminal, and BEL in tmux, screen, and other terminals. Fullscreen mode skips the notification while the terminal reports focus. Set `terminal.notifyOnFinish` to `"auto"` (the default), `"osc"`, `"bell"`, or `"off"`, and `terminal.notifyMinSeconds` to change the threshold. Upstream pi has this only as the example extension `notify.ts`.
