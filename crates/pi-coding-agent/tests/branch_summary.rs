@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use common::*;
 use pi_agent::StreamFn;
 use pi_ai::providers::faux::{FauxProvider, FauxResponse};
-use pi_ai::{ApiProvider, ContentBlock, StopReason, StreamOptions};
+use pi_ai::{ApiProvider, ContentBlock, StopReason, StreamOptions, ThinkingLevel};
 use pi_coding_agent::compaction::branch::ProvidedSummary;
 use pi_coding_agent::compaction::{
     BranchSummaryOptions, SummarizationOptions, TreeNavigationRequest, collect_entries_for_branch_summary,
@@ -66,6 +66,28 @@ async fn leaves_output_to_the_provider_and_rejects_bad_summaries() {
         result.error.as_deref(),
         Some("Branch summarization failed: generation hit the token cap and the summary is incomplete")
     );
+}
+
+// Upstream issue 11444: tree summaries dropped the selected thinking level.
+#[tokio::test]
+async fn branch_summaries_use_the_selected_thinking_level_on_reasoning_models() {
+    let session = abandoned();
+    let entries: Vec<&Entry> = session.entries().iter().collect();
+    let reasoning = pi_ai::Model { reasoning: true, ..FauxProvider::model() };
+    let plain = pi_ai::Model { reasoning: false, ..FauxProvider::model() };
+    let cases = [
+        (&reasoning, ThinkingLevel::Xhigh, Some(ThinkingLevel::Xhigh)),
+        (&reasoning, ThinkingLevel::Off, None),
+        (&plain, ThinkingLevel::High, None),
+    ];
+    for (model, level, expected) in cases {
+        let (stream_fn, seen) = recording(vec![FauxResponse::text("summary")]);
+        let mut options = options(stream_fn);
+        options.summarization.thinking_level = Some(level);
+        let result = generate_branch_summary(&entries, model, &options).await;
+        assert!(result.summary.is_some(), "{:?}", result.error);
+        assert_eq!(seen.lock().unwrap()[0].reasoning, expected, "{level:?} on reasoning={}", model.reasoning);
+    }
 }
 
 #[test]
