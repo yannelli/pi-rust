@@ -42,14 +42,14 @@ pub async fn replaces_task_records(storage: Arc<dyn Storage>) {
     let first = TaskRecord { memos: Some(memos), ..pending_task(first_id, root_id, "ready") };
     let second = TaskRecord { background: true, ..pending_task(second_id, root_id, "ready") };
     let third = TaskRecord { abort_requested: true, ..pending_task(third_id, root_id, "ready") };
-    storage.commit(&[task_write(&first), task_write(&second), task_write(&third)], ctx).await.unwrap();
+    storage.commit(&[task_write(&first), task_write(&second), task_write(&third)], &|_| {}, ctx).await.unwrap();
 
     let running = TaskRecord {
         state: TaskState::Running { checkpoint: json(r#"{"phase":"effect","attempt":1}"#) },
         abort_requested: true,
         ..first.clone()
     };
-    storage.commit(&[task_write(&running)], ctx).await.unwrap();
+    storage.commit(&[task_write(&running)], &|_| {}, ctx).await.unwrap();
     assert_eq!(storage.task(first_id, ctx).await.unwrap(), Some(running));
     let terminal = TaskRecord {
         state: TaskState::Terminal { outcome: TaskOutcome::completed(json(r#"{"entryId":99}"#)) },
@@ -57,7 +57,7 @@ pub async fn replaces_task_records(storage: Arc<dyn Storage>) {
         memos: None,
         ..first
     };
-    storage.commit(&[task_write(&terminal)], ctx).await.unwrap();
+    storage.commit(&[task_write(&terminal)], &|_| {}, ctx).await.unwrap();
     assert_eq!(storage.task(first_id, ctx).await.unwrap(), Some(terminal.clone()));
 
     let pending = TaskQuery { status: Some(TaskStatus::Pending), ..Default::default() };
@@ -98,7 +98,7 @@ pub async fn scans_waiting_and_completing_tasks(storage: Arc<dyn Storage>) {
         state: TaskState::Completing { outcome: outcome.clone() },
         ..pending_task(completing_id, root_id, "ready")
     };
-    storage.commit(&[task_write(&owner), task_write(&waiting), task_write(&completing)], ctx).await.unwrap();
+    storage.commit(&[task_write(&owner), task_write(&waiting), task_write(&completing)], &|_| {}, ctx).await.unwrap();
     assert_eq!(storage.task(waiting_id, ctx).await.unwrap(), Some(waiting.clone()));
     assert_eq!(storage.task(completing_id, ctx).await.unwrap(), Some(completing.clone()));
     let scan = |status| async move {
@@ -109,7 +109,7 @@ pub async fn scans_waiting_and_completing_tasks(storage: Arc<dyn Storage>) {
     assert_eq!(scan(TaskStatus::Completing).await, std::slice::from_ref(&completing));
     assert_eq!(ids(&scan(TaskStatus::Pending).await, |task| task.id.0), [owner_id.0]);
     let terminal = TaskRecord { state: TaskState::Terminal { outcome }, ..completing };
-    storage.commit(&[task_write(&terminal)], ctx).await.unwrap();
+    storage.commit(&[task_write(&terminal)], &|_| {}, ctx).await.unwrap();
     assert_eq!(scan(TaskStatus::Completing).await, []);
     assert_eq!(scan(TaskStatus::Terminal).await, [terminal]);
 }
@@ -126,7 +126,7 @@ pub async fn scans_sleeping_tasks(storage: Arc<dyn Storage>) {
         memos: Some(memos),
         ..pending_task(sleeping_id, root_id, "ready")
     };
-    storage.commit(&[task_write(&sleeping)], ctx).await.unwrap();
+    storage.commit(&[task_write(&sleeping)], &|_| {}, ctx).await.unwrap();
     assert_eq!(storage.task(sleeping_id, ctx).await.unwrap(), Some(sleeping.clone()));
     let scan = |status| async move {
         let query = TaskQuery { status: Some(status), ..Default::default() };
@@ -134,7 +134,7 @@ pub async fn scans_sleeping_tasks(storage: Arc<dyn Storage>) {
     };
     assert_eq!(scan(TaskStatus::Sleeping).await, std::slice::from_ref(&sleeping));
     let running = TaskRecord { state: TaskState::Running { checkpoint: json(r#"{"phase":"next"}"#) }, ..sleeping };
-    storage.commit(&[task_write(&running)], ctx).await.unwrap();
+    storage.commit(&[task_write(&running)], &|_| {}, ctx).await.unwrap();
     assert_eq!(scan(TaskStatus::Sleeping).await, []);
     assert_eq!(scan(TaskStatus::Running).await, [running]);
 }
@@ -158,7 +158,7 @@ pub async fn indexes_request_ids_per_conversation(storage: Arc<dyn Storage>) {
     let root_id = create_root(storage).await;
     let second_conversation: ConversationId = mint(storage).await;
     let record = ConversationRecord { id: second_conversation, parent: None, owner: None };
-    storage.commit(&[StorageWrite::Conversation { value: record }], ctx).await.unwrap();
+    storage.commit(&[StorageWrite::Conversation { value: record }], &|_| {}, ctx).await.unwrap();
     let first_id: SubmissionId = mint(storage).await;
     let second_id: SubmissionId = mint(storage).await;
     let other_id: SubmissionId = mint(storage).await;
@@ -170,13 +170,13 @@ pub async fn indexes_request_ids_per_conversation(storage: Arc<dyn Storage>) {
     let second = queued(second_id, root_id, "other");
     let other = queued(other_id, second_conversation, "same");
     let writes = [submission_write(&first), submission_write(&second), submission_write(&other)];
-    storage.commit(&writes, ctx).await.unwrap();
+    storage.commit(&writes, &|_| {}, ctx).await.unwrap();
     assert_eq!(storage.submission_by_request(root_id, "same", ctx).await.unwrap(), Some(first));
     assert_eq!(storage.submission_by_request(second_conversation, "same", ctx).await.unwrap(), Some(other));
 
     let entry: EntryId = mint(storage).await;
     let placed = SubmissionRecord { status: SubmissionStatus::Placed, entry: Some(entry), ..second };
-    storage.commit(&[submission_write(&placed)], ctx).await.unwrap();
+    storage.commit(&[submission_write(&placed)], &|_| {}, ctx).await.unwrap();
     assert_eq!(storage.submission(second_id, ctx).await.unwrap(), Some(placed.clone()));
     assert_eq!(storage.submission_by_request(root_id, "other", ctx).await.unwrap(), Some(placed.clone()));
 
@@ -208,7 +208,7 @@ pub async fn stores_passive_write_submissions(storage: Arc<dyn Storage>) {
     };
     let queued_done = passive(done_id, "passive-done");
     let queued_failed = passive(failed_id, "passive-failed");
-    storage.commit(&[submission_write(&queued_done), submission_write(&queued_failed)], ctx).await.unwrap();
+    storage.commit(&[submission_write(&queued_done), submission_write(&queued_failed)], &|_| {}, ctx).await.unwrap();
 
     let entry: EntryId = mint(storage).await;
     let done = SubmissionRecord { status: SubmissionStatus::Done, entry: Some(entry), ..queued_done };
@@ -218,7 +218,7 @@ pub async fn stores_passive_write_submissions(storage: Arc<dyn Storage>) {
         detail: Some(json(r#"{"retryable":false}"#)),
         ..queued_failed
     };
-    storage.commit(&[submission_write(&done), submission_write(&unanswered)], ctx).await.unwrap();
+    storage.commit(&[submission_write(&done), submission_write(&unanswered)], &|_| {}, ctx).await.unwrap();
     assert_eq!(storage.submission(done_id, ctx).await.unwrap(), Some(done.clone()));
     assert_eq!(storage.submission_by_request(root_id, "passive-done", ctx).await.unwrap(), Some(done));
     assert_eq!(storage.submission(failed_id, ctx).await.unwrap(), Some(unanswered.clone()));

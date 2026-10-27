@@ -18,7 +18,7 @@ use pi_durable::{EntryRecord, StorageWrite};
 use serde_json::{Value, json};
 use support::chat::{add_tool, answer, call, calls, no_parameters};
 use support::harness_support::*;
-use support::{ControlledStorage, document_changes};
+use support::{ControlledStorage, document_changes, observe_commits};
 
 type Commits = Arc<Mutex<Vec<Vec<Value>>>>;
 type Action = Box<dyn FnOnce(ToolExecutionApi) -> BoxFuture<'static, bool> + Send>;
@@ -27,7 +27,7 @@ type Action = Box<dyn FnOnce(ToolExecutionApi) -> BoxFuture<'static, bool> + Sen
 fn record_live_ops(harness: &Harness) -> Commits {
     let commits = Commits::default();
     let sink = commits.clone();
-    let unsubscribe = harness.subscribe_commits(move |publication, _| {
+    let unsubscribe = observe_commits(harness, move |publication, _| {
         for change in document_changes(publication) {
             if let DocumentCommitChange::Document { record, ops, .. } = change
                 && record.kind == "pi.live"
@@ -413,7 +413,7 @@ async fn commits_the_tool_calling_answer_its_tool_tasks_the_generation_s_wait_an
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &setup).await;
     let handover = Arc::new(Mutex::new(None::<CommitPublication>));
     let sink = handover.clone();
-    let unsubscribe = harness.subscribe_commits(move |publication, _| {
+    let unsubscribe = observe_commits(&harness, move |publication, _| {
         for change in document_changes(publication) {
             if let DocumentCommitChange::Document { record, value: Some(value), .. } = change
                 && record.kind == "pi.live"

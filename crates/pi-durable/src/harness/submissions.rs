@@ -46,7 +46,11 @@ impl Submissions {
         let weak = Arc::downgrade(&submissions);
         session.observe_commits(move |publication, _| {
             let Some(submissions) = weak.upgrade() else { return Ok(()) };
-            for change in &publication.changes {
+            // A commit held in memory changes documents only.
+            if publication.is_memory() {
+                return Ok(());
+            }
+            for change in publication.changes() {
                 if let CommitChange::Submission(record) = change
                     && record.status.is_settled()
                 {
@@ -77,7 +81,7 @@ impl Submissions {
         draft: SubmissionDraft,
         context: &Context,
     ) -> DurableResult<Submission> {
-        self.scheduler.resume();
+        self.scheduler.resume()?;
         let core = self.scheduler.core.clone();
         let input = matches!(draft, SubmissionDraft::Input { .. });
         // Each input starts its own trace, linked to its caller; a write is a child of its caller.
@@ -127,7 +131,7 @@ impl Submissions {
     }
 
     pub async fn wait(&self, id: SubmissionId, context: &Context) -> DurableResult<SubmissionRecord> {
-        self.scheduler.resume();
+        self.scheduler.resume()?;
         let submissions = self.weak.upgrade().ok_or_else(|| closed_error(&self.session))?;
         let (storage, line_context) = (self.session.storage(), context.clone());
         let found = self.session.read_on_line(async move {

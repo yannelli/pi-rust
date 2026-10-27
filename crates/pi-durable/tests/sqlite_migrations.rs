@@ -142,7 +142,7 @@ async fn rolls_a_failed_migration_back_and_keeps_stored_data_for_a_retry() {
     };
     let root = ConversationRecord { id: ROOT_CONVERSATION_ID, parent: None, owner: None };
     let writes = [StorageWrite::Conversation { value: root }, StorageWrite::Entry { value: entry }];
-    storage.commit(&writes, &BACKGROUND_CONTEXT).await.unwrap();
+    storage.commit(&writes, &|_| {}, &BACKGROUND_CONTEXT).await.unwrap();
     storage.close(&BACKGROUND_CONTEXT).await.unwrap();
 
     let database = open(&path).await;

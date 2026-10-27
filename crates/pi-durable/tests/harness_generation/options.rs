@@ -8,10 +8,11 @@ use pi_chord::Json;
 use pi_durable::documents::{DocSpec, DocToken, LatestConversation, LatestFork, define_doc};
 use pi_durable::harness::usage::PROVIDER_DOC;
 use pi_durable::harness::*;
+use pi_durable::models::DeferredOption;
 use pi_durable::models::SimpleStreamOptions;
 use pi_durable::session::Tx;
 use pi_durable::storage::MemoryStorage;
-use pi_durable::testing::faux::FauxResponseStep;
+use pi_durable::testing::faux::{FauxDeferredOptions, FauxResponseStep, RegisterFauxProviderOptions};
 use pi_durable::*;
 use serde_json::json;
 
@@ -246,8 +247,14 @@ fn resolves_settings_over_the_built_in_defaults() {
     let compaction =
         json!({ "enabled": true, "reserveTokens": 16384, "keepRecentTokens": 20000, "backgroundTokens": 32768 });
     assert_eq!(serde_json::to_value(settings.compaction).unwrap(), compaction);
-    let progress = json!({ "partialIntervalMs": 100, "outputIntervalMs": 100 });
+    let progress = json!({ "partialIntervalMs": 100, "outputIntervalMs": 100, "persistWithinMs": 1000.0 });
     assert_eq!(serde_json::to_value(settings.progress).unwrap(), progress);
+    // Not a number of milliseconds, 0 or more: the default.
+    let within = |persist_within_ms: f64| {
+        let progress = Some(ProgressOverrides { persist_within_ms: Some(persist_within_ms), ..Default::default() });
+        resolve_settings(Some(&HarnessSettings { progress, ..HarnessSettings::default() })).progress.persist_within_ms
+    };
+    assert_eq!((within(-1.0), within(0.0)), (1000.0, 0.0));
     assert_eq!(settings.tool_execution, ToolExecutionMode::Parallel);
     assert_eq!((settings.steering_mode, settings.follow_up_mode), (QueueMode::OneAtATime, QueueMode::OneAtATime));
     assert_eq!(settings.context_retention_ms, 600_000.0);
@@ -271,7 +278,7 @@ fn resolves_settings_over_the_built_in_defaults() {
         ..HarnessSettings::default()
     };
     let progress = serde_json::to_value(resolve_settings(Some(&output)).progress).unwrap();
-    assert_eq!(progress, json!({ "partialIntervalMs": 100, "outputIntervalMs": 500 }));
+    assert_eq!(progress, json!({ "partialIntervalMs": 100, "outputIntervalMs": 500, "persistWithinMs": 1000.0 }));
 }
 
 static TEST_AGENT: LazyLock<DocToken<Json, LatestConversation>> = LazyLock::new(|| {
@@ -332,5 +339,33 @@ async fn renders_sections_that_read_conversation_documents_through_input_read() 
     let expected = json!({ "cwd": "<cwd>\n/repo\n</cwd>", "agents": "<agents>\nRead AGENTS.md\n</agents>" });
     assert_eq!(sections(all_entries(&root).await), expected);
     assert_eq!(sections(all_entries(&sub).await), json!({ "cwd": "<cwd>\n/sub\n</cwd>" }));
+    harness.close(&ctx()).await.unwrap();
+}
+
+#[tokio::test]
+async fn records_the_requested_thinking_level_on_answers_streamed_and_polled() {
+    let deferred = Some(FauxDeferredOptions { pending_fetches: 1, poll_after_ms: Some(1) });
+    let setup = chat_setup(RegisterFauxProviderOptions { deferred, ..Default::default() });
+    setup.faux.set_responses([answer("streamed"), answer("polled")]);
+    let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &setup).await;
+    harness.resume().unwrap();
+    let thinking_level = |root: Conversation, content: &'static str| async move {
+        let submission = root.submit(SubmissionDraft::input(content), &ctx()).await.unwrap();
+        let settled = submission.wait(&ctx()).await.unwrap();
+        assert_eq!(settled.status, SubmissionStatus::Done);
+        let answer = settled.answer.unwrap();
+        let entry = root.commit(move |tx: Tx| async move { tx.entry(answer).await }, &ctx()).await.unwrap();
+        match entry.and_then(|entry| entry.model?.into_iter().next()) {
+            Some(Message::Assistant(message)) => message.thinking_level,
+            _ => None,
+        }
+    };
+    let high = AgentChange { thinking_level: Change::Set(ThinkingLevel::High), ..AgentChange::default() };
+    root.configure(high, &ctx()).await.unwrap();
+    assert_eq!(thinking_level(root.clone(), "one").await, Some(ThinkingLevel::High));
+    let stream = ConversationStreamOptions { deferred: Some(DeferredOption::Enabled(true)), ..Default::default() };
+    setup.settings.lock().unwrap().stream = Some(stream);
+    assert_eq!(thinking_level(root.clone(), "two").await, Some(ThinkingLevel::High));
+    assert_eq!(setup.faux.state().deferred_fetch_count, 2);
     harness.close(&ctx()).await.unwrap();
 }

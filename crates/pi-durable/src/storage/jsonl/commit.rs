@@ -13,7 +13,7 @@ use crate::env::RemoveOptions;
 use crate::errors::DurableResult;
 use crate::ids::{DocumentId, Seq, TaskId};
 use crate::storage::is_current_only;
-use crate::types::{DocumentContent, DocumentCreate, StorageWrite, TaskRecord};
+use crate::types::{Adopt, DocumentContent, DocumentCreate, StorageWrite, TaskRecord};
 
 /// The marker line and each affected sidecar's appended text, in first-use order.
 pub(crate) struct EncodedCommit {
@@ -189,7 +189,12 @@ impl JsonlStorage {
         let _ = self.fs.rename_file(&temporary, &path, context).await;
     }
 
-    pub(crate) async fn commit_writes(&self, writes: &[StorageWrite], context: &Context) -> DurableResult<Seq> {
+    pub(crate) async fn commit_writes(
+        &self,
+        writes: &[StorageWrite],
+        adopt: Adopt<'_>,
+        context: &Context,
+    ) -> DurableResult<Seq> {
         let _line = self.commit_line.lock().await;
         self.assert_usable()?;
         let prepared = self.memory.prepare_commit(writes, None)?;
@@ -216,6 +221,8 @@ impl JsonlStorage {
         }
         let seq = self.memory.apply(&prepared);
         self.adopt_sidecar_state(prepared.writes());
+        // The marker is appended: the batch is durable. Reclaiming sidecars comes after adoption.
+        adopt(seq);
         self.reclaim_sidecars(&reclamations, context).await;
         Ok(seq)
     }

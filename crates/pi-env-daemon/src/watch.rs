@@ -555,6 +555,15 @@ impl FileWatcher<'_> {
         }
     }
 
+    /// Forget the watch of `path`, if it has one, and remove it from the backend in case the backend kept it.
+    fn forget_watch(&mut self, path: &str) {
+        if self.installed.remove(path).is_some()
+            && let Some(native) = &mut self.native
+        {
+            let _ = native.unwatch(Path::new(path));
+        }
+    }
+
     /// Note a native event; returns whether it calls for a rescan.
     fn on_event(&mut self, event: notify::Result<Event>) -> bool {
         let event = match event {
@@ -573,6 +582,14 @@ impl FileWatcher<'_> {
         }
         if event.need_rescan() || event.paths.is_empty() {
             return true;
+        }
+        // The backend dropped the watch of a watched path that was removed (inotify's IN_DELETE_SELF, then
+        // IN_IGNORED). Forget it, so the rescan watches the path again even when its inode is the same.
+        if matches!(event.kind, EventKind::Remove(_)) {
+            for path in &event.paths {
+                let path = self.watched_spelling(&path.to_string_lossy());
+                self.forget_watch(&path);
+            }
         }
         let mut flush = false;
         for path in &event.paths {
@@ -701,3 +718,7 @@ pub fn run(id: u32, json: &Value, output: &Output, control: &Control) -> Result<
         }
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "watch_tests.rs"]
+mod tests;

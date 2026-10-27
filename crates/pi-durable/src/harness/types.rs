@@ -120,6 +120,8 @@ pub struct ToolControl {
     pub add_tools: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminate: Option<bool>,
+    /// Start a new context with this text as its user message, as `reset(handoff)` writes, and continue the run there.
+    /// The last handoff in call order wins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handoff: Option<String>,
 }

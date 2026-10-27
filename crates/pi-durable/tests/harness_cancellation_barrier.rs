@@ -147,7 +147,7 @@ async fn lets_a_fail_fast_request_in_the_same_pass_override_a_restart_mark() {
     let failed_record =
         TaskRecord { state: TaskState::Terminal { outcome: failure }, ..record(&storage, failed).await };
     let writes = [StorageWrite::Task { value: owner }, StorageWrite::Task { value: failed_record }];
-    storage.commit(&writes, &context()).await.unwrap();
+    storage.commit(&writes, &|_| {}, &context()).await.unwrap();
     // The child's definition is missing: a restart mark would keep it waiting, a request orphans it.
     let harness = open_tasks(storage, Vec::new()).await.harness;
     harness.resume().unwrap();
@@ -200,7 +200,7 @@ async fn marks_a_flagged_task_that_holds_its_outcome_aborting_its_owned_work_and
     let child = create_child(&session, dormant("test.dormant"), TaskOptions::owned_by(holder)).await;
     let completing = TaskState::Completing { outcome: TaskOutcome::Completed { result: Some(Json::Null) } };
     let value = TaskRecord { state: completing, ..record(&storage, holder).await };
-    storage.commit(&[StorageWrite::Task { value }], &context()).await.unwrap();
+    storage.commit(&[StorageWrite::Task { value }], &|_| {}, &context()).await.unwrap();
     let harness = open_tasks(storage, vec![dormant("test.dormant")]).await.harness;
     harness.resume().unwrap();
     assert_eq!(outcome_status(&harness, child).await, "aborted");

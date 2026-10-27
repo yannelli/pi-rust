@@ -7,6 +7,8 @@ mod boundaries;
 mod continuations;
 #[path = "harness_inbox/failed_run.rs"]
 mod failed_run;
+#[path = "harness_inbox/handoffs.rs"]
+mod handoffs;
 #[path = "harness_inbox/ledger.rs"]
 mod ledger;
 mod support;

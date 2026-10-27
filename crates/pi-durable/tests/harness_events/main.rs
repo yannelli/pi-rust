@@ -18,7 +18,7 @@ use pi_durable::testing::faux::{
 };
 use serde_json::{Value, json};
 use support::harness_support::*;
-use support::{change_record, change_value, document_changes};
+use support::{change_record, change_value, document_changes, observe_commits};
 
 pub type Batches = Arc<Mutex<Vec<Vec<Value>>>>;
 
@@ -28,7 +28,7 @@ pub async fn listen(harness: &Harness, conversation: &Conversation) -> (AgentEve
     let batches = Batches::default();
     let sink = batches.clone();
     stream
-        .start(move |events, _| {
+        .start(move |pi_chord::NativeWatchChange { value: events }, _| {
             sink.lock().unwrap().push(events.iter().map(Value::from).collect());
             async { Ok(()) }
         })
@@ -144,7 +144,7 @@ pub fn apply_changes(message: &Value, changes: &[Value]) -> Value {
 pub fn live_values(harness: &Harness, pick: impl Fn(&Value) -> Option<Value> + Send + Sync + 'static) -> Batches {
     let values = Batches::default();
     let sink = values.clone();
-    let unsubscribe = harness.subscribe_commits(move |publication, _| {
+    let unsubscribe = observe_commits(harness, move |publication, _| {
         for change in document_changes(publication) {
             let Some(value) = change_value(&change) else { continue };
             if change_record(&change).kind == "pi.live"

@@ -8,7 +8,8 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 
 use pi_chord::delta::Op;
-use pi_chord::{Context, Json};
+use pi_chord::watch::Replace;
+use pi_chord::{Context, Json, NativeWatch, NativeWatchChange};
 
 use self::changes::{call_of, message_changes, object, same, tool_update};
 use super::host::Harness;
@@ -19,10 +20,8 @@ use super::view::ViewObserver;
 use crate::documents::encode;
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{ConversationId, TaskId};
-use crate::session::{CommittedObserver, CommittedWatch, WatchEnd};
-use crate::types::{
-    CommitChange, CommitPublication, DocumentCommitChange, TaskQuery, TaskRecord, TaskState, TaskStatus,
-};
+use crate::session::{ObservedCommit, Release, WatchEnd};
+use crate::types::{CommitChange, DocumentCommitChange, TaskQuery, TaskRecord, TaskState, TaskStatus};
 
 /// One agent event as JSON with its upstream `type` (`snapshot`, `run_start`, `message_update`,
 /// `tool_execution_end`, and so on) and camelCase fields, as upstream `AgentEvent` serializes.
@@ -32,18 +31,17 @@ pub type AgentEvent = Json;
 pub struct AgentEventStream {
     /// The `snapshot` event at attachment.
     pub snapshot: AgentEvent,
-    watch: CommittedWatch,
+    watch: NativeWatch<Vec<AgentEvent>, DurableError>,
 }
 
 impl AgentEventStream {
-    /// Install the sole serialized listener; it gets each batch with its delivery context.
+    /// Install the sole listener; each call's `value` is one commit's batch, or a `snapshot` after an overflow.
     pub fn start<F, Fut>(&self, listener: F) -> DurableResult<()>
     where
-        F: Fn(Vec<AgentEvent>, Context) -> Fut + Send + Sync + 'static,
+        F: Fn(NativeWatchChange<Vec<AgentEvent>>, Context) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = DurableResult<()>> + Send + 'static,
     {
-        self.watch
-            .start(move |events: Json, _, context| listener(events.as_array().cloned().unwrap_or_default(), context))
+        self.watch.start(listener)
     }
 
     pub fn stop(&self) -> impl Future<Output = WatchEnd> + Send + use<> {
@@ -116,23 +114,23 @@ fn snapshot_of(view: &Json) -> AgentEvent {
 /// The view observer of one stream: translates each publication into a batch for its watch.
 struct EventsObserver {
     conversation_id: ConversationId,
-    watch: CommittedWatch,
+    watch: NativeWatch<Vec<AgentEvent>, DurableError>,
     current: Arc<Mutex<Json>>,
     /// Generations whose held outcome already ended their turn.
     held: Mutex<HashSet<TaskId>>,
 }
 
 impl ViewObserver for EventsObserver {
-    fn publication(&self, before: &Json, after: &Json, ops: &[Op], publication: &CommitPublication, context: &Context) {
+    fn publication(&self, before: &Json, after: &Json, ops: &[Op], publication: &ObservedCommit, context: &Context) {
         *lock(&self.current) = after.clone();
         let events = translate(self.conversation_id, before, after, ops, publication, &mut lock(&self.held));
         if !events.is_empty() {
-            self.watch.advance(Json::array(events), Vec::new(), context.clone());
+            self.watch.advance(events, context.clone());
         }
     }
 
-    fn close_session(&self, failure: Option<DurableError>) {
-        self.watch.close_session(failure);
+    fn end(&self, failure: Option<DurableError>) {
+        self.watch.end(failure);
     }
 }
 
@@ -157,13 +155,14 @@ pub async fn watch_events(
             scan_all(|cursor| async move { storage.scan_tasks(query, 100, cursor.as_ref(), context).await }).await?;
         Ok(completing.iter().map(|record| record.id).collect::<HashSet<_>>())
     };
-    let create = move |initial: &Json, release, held| {
+    let create = move |initial: &Json, release: Arc<Release>, held| {
         let current = Arc::new(Mutex::new(initial.clone()));
         let latest = current.clone();
-        // Batches are the watch's values; an overflow delivers a snapshot of the newest view instead.
-        let replace = Arc::new(move || Json::array(vec![snapshot_of(&lock(&latest))]));
-        let watch =
-            CommittedWatch::new(Json::array(Vec::new()), release, move |error| session.report(error), Some(replace));
+        // Batches are the watch's values, each delivered (folding would drop events); an overflow delivers a snapshot of
+        // the newest view instead.
+        let replace: Replace<Vec<AgentEvent>> = Arc::new(move || vec![snapshot_of(&lock(&latest))]);
+        let report = move |error: &DurableError| session.report(error);
+        let watch = NativeWatch::new(Vec::new(), move || release.run(), report, Some(replace));
         let observer = EventsObserver { conversation_id, watch: watch.clone(), current, held: Mutex::new(held) };
         (Arc::new(observer) as Arc<dyn ViewObserver>, (watch, snapshot_of(initial)))
     };
@@ -201,7 +200,7 @@ fn translate(
     before: &Json,
     after: &Json,
     view_ops: &[Op],
-    publication: &CommitPublication,
+    publication: &ObservedCommit,
     held: &mut HashSet<TaskId>,
 ) -> Vec<AgentEvent> {
     let mut entries = Vec::new();
@@ -209,7 +208,7 @@ fn translate(
     let mut submissions = Vec::new();
     // Nested results this commit stored, by nested task ID; read now, since the caller's documents may retire next.
     let mut nested_results: HashMap<u64, Json> = HashMap::new();
-    for change in &publication.changes {
+    for change in publication.changes() {
         match change {
             CommitChange::Document(DocumentCommitChange::Document {
                 record,

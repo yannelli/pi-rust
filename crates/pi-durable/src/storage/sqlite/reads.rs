@@ -13,9 +13,9 @@ use crate::ids::{ConversationId, DocumentId, EntryId, Seq, SubmissionId, TaskId}
 use crate::storage::memory::page;
 use crate::storage::scan::{MAX_SAFE_INTEGER, ScanStart, cursor_id, scan_start};
 use crate::types::{
-    ConversationQuery, ConversationRecord, Cursor, DocumentAddress, DocumentPoint, DocumentQuery, DocumentRecord,
-    EntryQuery, EntryRecord, Page, ScanOrder, Storage, StorageWrite, StoredDocument, StoredEntry, SubmissionQuery,
-    SubmissionRecord, TaskQuery, TaskRecord,
+    Adopt, ConversationQuery, ConversationRecord, Cursor, DocumentAddress, DocumentPoint, DocumentQuery,
+    DocumentRecord, EntryQuery, EntryRecord, Page, ScanOrder, Storage, StorageWrite, StoredDocument, StoredEntry,
+    SubmissionQuery, SubmissionRecord, TaskQuery, TaskRecord,
 };
 
 /// The ID condition, its parameter, and the `ORDER BY` direction of a table scan.
@@ -149,8 +149,11 @@ impl SqliteStorage {
 
 #[async_trait]
 impl Storage for SqliteStorage {
-    async fn commit(&self, writes: &[StorageWrite], _context: &Context) -> DurableResult<Seq> {
-        self.commit_writes(writes).await
+    async fn commit(&self, writes: &[StorageWrite], adopt: Adopt<'_>, _context: &Context) -> DurableResult<Seq> {
+        let seq = self.commit_writes(writes).await?;
+        // `COMMIT` returned: the batch is durable.
+        adopt(seq);
+        Ok(seq)
     }
 
     async fn mint_id(&self) -> DurableResult<u64> {

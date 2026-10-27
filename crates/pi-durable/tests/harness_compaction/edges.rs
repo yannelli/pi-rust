@@ -171,7 +171,7 @@ async fn puts_compaction_start_last_in_the_batch_of_the_preparation_commit() {
     let batches: Arc<Mutex<Vec<Vec<String>>>> = Arc::default();
     let sink = batches.clone();
     stream
-        .start(move |batch, _| {
+        .start(move |pi_chord::NativeWatchChange { value: batch }, _| {
             let types = batch.iter().map(|event| Value::from(event)["type"].as_str().unwrap_or_default().to_owned());
             sink.lock().unwrap().push(types.collect());
             async { Ok(()) }

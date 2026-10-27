@@ -7,15 +7,15 @@ use super::JsonlStorage;
 use crate::errors::DurableResult;
 use crate::ids::{ConversationId, DocumentId, EntryId, Seq, SubmissionId, TaskId};
 use crate::types::{
-    ConversationQuery, ConversationRecord, Cursor, DocumentAddress, DocumentPoint, DocumentQuery, DocumentRecord,
-    EntryQuery, EntryRecord, Page, Storage, StorageWrite, StoredDocument, StoredEntry, SubmissionQuery,
+    Adopt, ConversationQuery, ConversationRecord, Cursor, DocumentAddress, DocumentPoint, DocumentQuery,
+    DocumentRecord, EntryQuery, EntryRecord, Page, Storage, StorageWrite, StoredDocument, StoredEntry, SubmissionQuery,
     SubmissionRecord, TaskQuery, TaskRecord,
 };
 
 #[async_trait]
 impl Storage for JsonlStorage {
-    async fn commit(&self, writes: &[StorageWrite], context: &Context) -> DurableResult<Seq> {
-        self.commit_writes(writes, context).await
+    async fn commit(&self, writes: &[StorageWrite], adopt: Adopt<'_>, context: &Context) -> DurableResult<Seq> {
+        self.commit_writes(writes, adopt, context).await
     }
 
     async fn mint_id(&self) -> DurableResult<u64> {

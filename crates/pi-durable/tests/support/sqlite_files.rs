@@ -85,9 +85,9 @@ async fn reclaims_current_only_revisions_only_after_a_base_or_retirement() {
     let storage = open_sqlite_storage(&path).await.unwrap();
     create_root(&storage).await;
     let id = DocumentId(storage.mint_id().await.unwrap());
-    storage.commit(&[create(session_document(id, "latest"), json(r#"{"count":0}"#))], ctx()).await.unwrap();
+    storage.commit(&[create(session_document(id, "latest"), json(r#"{"count":0}"#))], &|_| {}, ctx()).await.unwrap();
     for count in 1..=10 {
-        storage.commit(&[change(id, delta(&format!(r#"[["s",["count"],{count}]]"#)))], ctx()).await.unwrap();
+        storage.commit(&[change(id, delta(&format!(r#"[["s",["count"],{count}]]"#)))], &|_| {}, ctx()).await.unwrap();
     }
     assert_eq!(revision_count(&path, id), 11);
     let connection = Connection::open(&path).unwrap();
@@ -96,11 +96,11 @@ async fn reclaims_current_only_revisions_only_after_a_base_or_retirement() {
     let content: String = connection.query_row(sql, [id.0 as i64], |row| row.get(0)).unwrap();
     assert_eq!(content, r#"[["s",["count"],10]]"#);
     let base = DocumentContent::Base { version: 1, value: json(r#"{"count":11}"#) };
-    storage.commit(&[change(id, base)], ctx()).await.unwrap();
+    storage.commit(&[change(id, base)], &|_| {}, ctx()).await.unwrap();
     assert_eq!(revision_count(&path, id), 1);
-    storage.commit(&[change(id, delta(r#"[["r",{"count":12}]]"#))], ctx()).await.unwrap();
+    storage.commit(&[change(id, delta(r#"[["r",{"count":12}]]"#))], &|_| {}, ctx()).await.unwrap();
     assert_eq!(revision_count(&path, id), 2);
-    storage.commit(&[StorageWrite::DocumentRetire { id }], ctx()).await.unwrap();
+    storage.commit(&[StorageWrite::DocumentRetire { id }], &|_| {}, ctx()).await.unwrap();
     assert_eq!(revision_count(&path, id), 0);
     storage.close(ctx()).await.unwrap();
 }
@@ -114,7 +114,10 @@ async fn auto_checkpoints_wal_frames_and_truncates_the_wal_on_close() {
     for index in 0..20 {
         let id = EntryId(storage.mint_id().await.unwrap());
         let data = serde_json::json!({ "text": "x".repeat(32 * 1024), "index": index });
-        storage.commit(&[StorageWrite::Entry { value: entry(id, Some(Json::from(data))) }], ctx()).await.unwrap();
+        storage
+            .commit(&[StorageWrite::Entry { value: entry(id, Some(Json::from(data))) }], &|_| {}, ctx())
+            .await
+            .unwrap();
     }
     let wal_path = format!("{path}-wal");
     assert!(std::fs::metadata(&wal_path).unwrap().len() < 512 * 1024);
@@ -132,13 +135,13 @@ async fn reuses_pages_released_by_current_only_checkpoints() {
     create_root(&storage).await;
     let id = DocumentId(storage.mint_id().await.unwrap());
     let large = Json::from(serde_json::json!({ "text": "x".repeat(512 * 1024) }));
-    storage.commit(&[create(session_document(id, "reuse"), large.clone())], ctx()).await.unwrap();
+    storage.commit(&[create(session_document(id, "reuse"), large.clone())], &|_| {}, ctx()).await.unwrap();
     let small = DocumentContent::Base { version: 1, value: json(r#"{"text":"small"}"#) };
-    storage.commit(&[change(id, small)], ctx()).await.unwrap();
+    storage.commit(&[change(id, small)], &|_| {}, ctx()).await.unwrap();
     let pages_after_delete = scalar(&path, "SELECT page_count FROM pragma_page_count()");
     let free_after_delete = scalar(&path, "SELECT freelist_count FROM pragma_freelist_count()");
     assert!(free_after_delete > 0);
-    storage.commit(&[change(id, DocumentContent::Base { version: 1, value: large })], ctx()).await.unwrap();
+    storage.commit(&[change(id, DocumentContent::Base { version: 1, value: large })], &|_| {}, ctx()).await.unwrap();
     let pages_after_reuse = scalar(&path, "SELECT page_count FROM pragma_page_count()");
     let free_after_reuse = scalar(&path, "SELECT freelist_count FROM pragma_freelist_count()");
     assert!(pages_after_reuse <= pages_after_delete + 2);
@@ -154,7 +157,10 @@ async fn keeps_representative_row_and_document_storage_bounded() {
     for index in 0..100 {
         let id = EntryId(storage.mint_id().await.unwrap());
         let data = serde_json::json!({ "index": index, "text": "x".repeat(1_024) });
-        storage.commit(&[StorageWrite::Entry { value: entry(id, Some(Json::from(data))) }], ctx()).await.unwrap();
+        storage
+            .commit(&[StorageWrite::Entry { value: entry(id, Some(Json::from(data))) }], &|_| {}, ctx())
+            .await
+            .unwrap();
     }
     let id = DocumentId(storage.mint_id().await.unwrap());
     let record = DocumentCreate {
@@ -165,9 +171,9 @@ async fn keeps_representative_row_and_document_storage_bounded() {
         history: Some(DocumentHistory::Rewindable),
         fork: Some(DocumentFork::AsOf),
     };
-    storage.commit(&[create(record, json(r#"{"count":0}"#))], ctx()).await.unwrap();
+    storage.commit(&[create(record, json(r#"{"count":0}"#))], &|_| {}, ctx()).await.unwrap();
     for count in 1..=100 {
-        storage.commit(&[change(id, delta(&format!(r#"[["s",["count"],{count}]]"#)))], ctx()).await.unwrap();
+        storage.commit(&[change(id, delta(&format!(r#"[["s",["count"],{count}]]"#)))], &|_| {}, ctx()).await.unwrap();
     }
     storage.close(ctx()).await.unwrap();
     assert!(std::fs::metadata(&path).unwrap().len() < 1024 * 1024);

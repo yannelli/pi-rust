@@ -88,7 +88,18 @@ pub struct ControlledStorage {
     pub close_failure: Mutex<Option<DurableError>>,
     /// Runs before `task`, `scan_entries`, `mint_id`, `submission`, and `close`; an error fails that call.
     pub call_hook: Mutex<Option<CallHook>>,
+    /// How the next commit, once durable, misbehaves.
+    pub adoption_fault: Mutex<Option<AdoptionFault>>,
+    /// `adopt`, `adopted`, and `resolve` of every commit, in order.
+    pub adoption_order: Mutex<Vec<&'static str>>,
     closed: AtomicBool,
+}
+
+/// A commit that misbehaves once durable: rejects after it adopted, or returns without adopting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdoptionFault {
+    RejectAfterAdopt,
+    SkipAdopt,
 }
 
 impl ControlledStorage {
@@ -144,6 +155,11 @@ impl ControlledStorage {
         *self.filtered_failure.lock().unwrap() = Some((Arc::new(filter), error));
     }
 
+    /// Whether a commit's `adopt` is running now.
+    pub fn adopting(&self) -> bool {
+        self.adoption_order.lock().unwrap().last() == Some(&"adopt")
+    }
+
     pub fn fail_next_commit(&self, error: DurableError) {
         *self.commit_failure.lock().unwrap() = Some(error);
     }
@@ -193,7 +209,7 @@ impl ControlledStorage {
 
 #[async_trait]
 impl Storage for ControlledStorage {
-    async fn commit(&self, writes: &[StorageWrite], context: &Context) -> DurableResult<Seq> {
+    async fn commit(&self, writes: &[StorageWrite], adopt: Adopt<'_>, context: &Context) -> DurableResult<Seq> {
         let failure = self.filtered_failure.lock().unwrap().take();
         match failure {
             Some((filter, error)) if filter(writes) => return Err(error),
@@ -210,7 +226,22 @@ impl Storage for ControlledStorage {
             return Err(error);
         }
         self.open()?;
-        self.inner.commit(writes, context).await
+        let fault = self.adoption_fault.lock().unwrap().take();
+        if fault == Some(AdoptionFault::SkipAdopt) {
+            return self.inner.commit(writes, &|_| {}, context).await;
+        }
+        let order = &self.adoption_order;
+        let recording = |seq: Seq| {
+            order.lock().unwrap().push("adopt");
+            adopt(seq);
+            order.lock().unwrap().push("adopted");
+        };
+        let seq = self.inner.commit(writes, &recording, context).await?;
+        order.lock().unwrap().push("resolve");
+        if fault == Some(AdoptionFault::RejectAfterAdopt) {
+            return Err(DurableError::error("reclaim failed"));
+        }
+        Ok(seq)
     }
 
     async fn mint_id(&self) -> DurableResult<u64> {
@@ -402,6 +433,23 @@ pub fn open_test_session() -> TestSession {
 }
 
 /// Document value changes of a publication: `(record, conversation, version, value, ops)`.
+/// Upstream `observeCommits()`: every commit as memory adopts it, deferred ones before they are stored. A commit held
+/// in memory comes with `seq` 0.
+pub fn observe_commits(
+    session: &Session,
+    listener: impl Fn(&CommitPublication, &Context) -> DurableResult<()> + Send + Sync + 'static,
+) -> DurableResult<pi_chord::Unsubscribe> {
+    session.observe_commits(move |observed, context| {
+        let publication = match observed {
+            pi_durable::session::ObservedCommit::Stored(publication) => publication.clone(),
+            pi_durable::session::ObservedCommit::Memory(changes) => {
+                CommitPublication { seq: Seq(0), changes: changes.clone() }
+            }
+        };
+        listener(&publication, context)
+    })
+}
+
 pub fn document_changes(publication: &CommitPublication) -> Vec<DocumentCommitChange> {
     let documents = publication.changes.iter().filter_map(|change| match change {
         CommitChange::Document(document @ DocumentCommitChange::Document { .. }) => Some(document.clone()),

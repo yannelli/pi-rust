@@ -70,8 +70,8 @@ impl GuardedStorage {
 
 #[async_trait]
 impl Storage for GuardedStorage {
-    async fn commit(&self, writes: &[StorageWrite], context: &Context) -> DurableResult<Seq> {
-        self.call(None, self.storage.commit(writes, context)).await
+    async fn commit(&self, writes: &[StorageWrite], adopt: Adopt<'_>, context: &Context) -> DurableResult<Seq> {
+        self.call(None, self.storage.commit(writes, adopt, context)).await
     }
 
     async fn mint_id(&self) -> DurableResult<u64> {

@@ -345,7 +345,7 @@ pub async fn listen(chat: &Chat) -> (AgentEventStream, Events) {
     let events = Events::default();
     let sink = events.clone();
     stream
-        .start(move |batch, _| {
+        .start(move |pi_chord::NativeWatchChange { value: batch }, _| {
             sink.lock().unwrap().extend(batch.iter().map(Value::from));
             async { Ok(()) }
         })

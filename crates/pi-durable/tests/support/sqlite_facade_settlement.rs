@@ -5,7 +5,7 @@ use super::*;
 #[tokio::test]
 async fn lets_admitted_multi_query_reads_finish_before_storage_closes() {
     let storage = Arc::new(SqliteStorage::open(memory_database().await).await.unwrap());
-    storage.commit(&[root(), entry(2, "probe")], ctx()).await.unwrap();
+    storage.commit(&[root(), entry(2, "probe")], &|_| {}, ctx()).await.unwrap();
     let (scan_storage, entry_storage, head_storage) = (storage.clone(), storage.clone(), storage.clone());
     let scan = tokio::spawn(async move {
         scan_storage.scan_entries(&EntryQuery::new(ROOT_CONVERSATION_ID), 10, None, ctx()).await
@@ -156,7 +156,7 @@ async fn awaits_async_transaction_settlement_and_adopts_ids_only_after_success()
 
     database.control_next_settlement(Settlement::Delay);
     let committer = storage.clone();
-    let committing = tokio::spawn(async move { committer.commit(&[entry(100, "settled")], ctx()).await });
+    let committing = tokio::spawn(async move { committer.commit(&[entry(100, "settled")], &|_| {}, ctx()).await });
     yield_now().await;
     assert!(!committing.is_finished());
     assert_eq!(storage.mint_id().await.unwrap(), 2);
@@ -166,7 +166,7 @@ async fn awaits_async_transaction_settlement_and_adopts_ids_only_after_success()
 
     database.control_next_settlement(Settlement::Reject);
     let committer = storage.clone();
-    let rejected = tokio::spawn(async move { committer.commit(&[entry(200, "rejected")], ctx()).await });
+    let rejected = tokio::spawn(async move { committer.commit(&[entry(200, "rejected")], &|_| {}, ctx()).await });
     yield_now().await;
     assert_eq!(storage.mint_id().await.unwrap(), 102);
     database.settle();
@@ -192,7 +192,7 @@ async fn reads_a_document_from_one_committed_state_while_a_commit_replaces_its_b
             fork: None,
         };
         let content = DocumentContent::Base { version: 1, value: Json::parse(r#"{"value":1}"#).unwrap() };
-        storage.commit(&[StorageWrite::DocumentCreate { record, content }], ctx()).await.unwrap();
+        storage.commit(&[StorageWrite::DocumentCreate { record, content }], &|_| {}, ctx()).await.unwrap();
         let reader = storage.clone();
         let read = tokio::spawn(async move { reader.document(id, DocumentPoint::Current, ctx()).await });
         for _ in 0..yields {
@@ -202,7 +202,7 @@ async fn reads_a_document_from_one_committed_state_while_a_commit_replaces_its_b
             id,
             content: DocumentContent::Base { version: 1, value: Json::parse(r#"{"value":2}"#).unwrap() },
         };
-        storage.commit(&[replace], ctx()).await.unwrap();
+        storage.commit(&[replace], &|_| {}, ctx()).await.unwrap();
         let stored = read.await.unwrap().unwrap().unwrap().value;
         assert!(stored == Json::parse(r#"{"value":1}"#).unwrap() || stored == Json::parse(r#"{"value":2}"#).unwrap());
         storage.close(ctx()).await.unwrap();

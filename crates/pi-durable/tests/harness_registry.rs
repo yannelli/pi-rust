@@ -123,7 +123,7 @@ fn always_holds_the_built_in_tasks_which_are_not_an_extension() {
 #[test]
 fn keeps_the_default_of_a_progress_interval_given_as_none() {
     let settings = HarnessSettings {
-        progress: Some(ProgressOverrides { partial_interval_ms: None, output_interval_ms: Some(250) }),
+        progress: Some(ProgressOverrides { output_interval_ms: Some(250), ..Default::default() }),
         ..HarnessSettings::default()
     };
     let progress = resolve_settings(Some(&settings)).progress;

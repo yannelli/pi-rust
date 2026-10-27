@@ -27,7 +27,7 @@ async fn appends_a_data_only_write_mid_run_in_time_order_leaving_the_models_mess
     let stream = watch_events(&harness, root.id, &ctx()).await.unwrap();
     let sink = events.clone();
     stream
-        .start(move |batch, _| {
+        .start(move |pi_chord::NativeWatchChange { value: batch }, _| {
             sink.lock().unwrap().extend(batch.iter().map(Value::from));
             async { Ok(()) }
         })
