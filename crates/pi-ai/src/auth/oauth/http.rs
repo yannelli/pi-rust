@@ -185,7 +185,8 @@ pub(crate) fn non_empty_str(value: Option<&Value>) -> Option<&str> {
     value.and_then(Value::as_str).filter(|text| !text.is_empty())
 }
 
-/// The URL's normalized form when it parses with an http(s) scheme.
+/// The URL's normalized form when it parses with an http(s) scheme. Login flows open server-supplied URLs
+/// with the platform URL handler, which would also launch a `file:` URL or a custom protocol handler.
 pub(crate) fn trusted_http_url(value: Option<&Value>) -> Option<String> {
     let url = Url::parse(non_empty_str(value)?).ok()?;
     matches!(url.scheme(), "http" | "https").then(|| url.to_string())

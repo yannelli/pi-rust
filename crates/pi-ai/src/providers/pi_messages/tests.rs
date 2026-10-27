@@ -188,6 +188,29 @@ async fn terminal_events_carry_the_response_model() {
 }
 
 #[tokio::test]
+async fn rejects_content_indexes_that_are_not_the_next_or_an_existing_block() {
+    let cases = [
+        vec![json!({"type": "text_start", "contentIndex": 4_294_967_000u64})],
+        vec![json!({"type": "text_start", "contentIndex": "__proto__"})],
+        vec![
+            json!({"type": "text_start", "contentIndex": 0}),
+            json!({"type": "toolcall_end", "contentIndex": "__proto__", "toolCall": {"polluted": true}}),
+        ],
+        vec![json!({"type": "text_delta", "contentIndex": 0, "delta": "x"})],
+    ];
+    for events in cases {
+        let mut frames = vec![json!({"type": "start"})];
+        frames.extend(events);
+        frames.push(json!({"type": "done", "reason": "stop", "usage": usage()}));
+        let server = MockHttp::start(vec![wire(&frames)]).await;
+        let (_, message) = collect(PiMessages.stream(&model(&server.base_url), &context(), keyed())).await;
+        assert_eq!(message.stop_reason, StopReason::Error);
+        assert!(message.error_message.as_deref().unwrap_or_default().contains("Invalid contentIndex"), "{frames:?}");
+        assert!(message.content.len() <= 1);
+    }
+}
+
+#[tokio::test]
 async fn aborts_and_is_registered() {
     let frames = vec![
         format!("data: {}\n\n", json!({"type": "start"})),

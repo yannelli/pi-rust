@@ -11,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::callback_server::{CallbackServerOptions, start_callback_server};
 use super::device_code::{DeviceCodePollOptions, DevicePoll, poll_device_code_flow};
-use super::http::{Hooks, SendError, expires_at, send};
+use super::http::{Hooks, SendError, expires_at, send, trusted_http_url};
 use super::interact;
 use super::pkce::{generate_pkce, random_uuid};
 use super::radius_config::{gateway_url, normalize_radius_gateway_url};
@@ -137,9 +137,7 @@ impl RadiusOAuth {
             )));
         }
         let discovery = reply.json().map_err(|error| AuthError::other(format!("SyntaxError: {error}")))?;
-        let endpoint = discovery.get("authorizationEndpoint").and_then(Value::as_str);
-        endpoint
-            .map(str::to_string)
+        trusted_http_url(discovery.get("authorizationEndpoint"))
             .ok_or_else(|| AuthError::other(format!("Invalid Radius OAuth config from {gateway}")))
     }
 
@@ -231,6 +229,9 @@ impl RadiusOAuth {
             (text("device_code"), text("user_code"), text("verification_uri"), expires_in)
         else {
             return Err(AuthError::other("Radius OAuth device authorization response is missing required fields"));
+        };
+        let Some(verification_uri) = trusted_http_url(Some(&Value::String(verification_uri))) else {
+            return Err(AuthError::other("Untrusted verification_uri in Radius OAuth device authorization response"));
         };
         let interval = data.get("interval").and_then(Value::as_f64);
         interaction.notify(AuthEvent::DeviceCode {

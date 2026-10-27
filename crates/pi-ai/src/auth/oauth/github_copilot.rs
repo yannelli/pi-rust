@@ -12,7 +12,7 @@ use super::device_code::{DeviceCodePollOptions, DevicePoll, poll_device_code_flo
 use super::github_copilot_models::{
     COPILOT_HEADERS, RetryPolicy, enable_models, fetch_models, github_copilot_base_url,
 };
-use super::http::{Hooks, Reply, send};
+use super::http::{Hooks, Reply, send, trusted_http_url};
 use super::interact;
 use super::pkce::decode_constant;
 use crate::auth::{
@@ -108,16 +108,13 @@ impl GitHubCopilotOAuth {
         if interval.is_some_and(|interval| !interval.is_number()) {
             return Err(AuthError::other("Invalid device code response fields"));
         }
-        // The verification URI is opened in the browser, so it must be an http(s) URL.
-        let untrusted = || AuthError::other("Untrusted verification_uri in device code response");
-        let parsed = Url::parse(&verification_uri).map_err(|_| untrusted())?;
-        if !matches!(parsed.scheme(), "http" | "https") {
-            return Err(untrusted());
-        }
+        let Some(verification_uri) = trusted_http_url(Some(&Value::String(verification_uri))) else {
+            return Err(AuthError::other("Untrusted verification_uri in device code response"));
+        };
         Ok(DeviceCode {
             device_code,
             user_code,
-            verification_uri: parsed.to_string(),
+            verification_uri,
             interval: interval.and_then(Value::as_f64),
             expires_in,
         })

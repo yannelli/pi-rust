@@ -131,6 +131,7 @@ async fn run(
         }
         let wire: Value =
             serde_json::from_str(data).map_err(|error| (format!("Invalid pi-messages event: {error}"), Vec::new()))?;
+        check_content_index(&wire, converter.partial.content.len()).map_err(|error| (error, Vec::new()))?;
         if let Some(event) = converter.convert(&wire) {
             let terminal = event.final_message().is_some();
             sender.push(event);
@@ -173,6 +174,19 @@ fn truncate_diagnostic(body: &str) -> String {
     match body.char_indices().nth(MAX_DIAGNOSTIC_BODY_CHARS) {
         Some((index, _)) => format!("{}…", &body[..index]),
         None => body.to_string(),
+    }
+}
+
+/// The wire `contentIndex` keys the content blocks, so a huge index would pad billions of blocks.
+/// A start adds the next block; other events need an existing one.
+fn check_content_index(event: &Value, blocks: usize) -> Result<(), String> {
+    let Some(index) = event.get("contentIndex") else { return Ok(()) };
+    let kind = event["type"].as_str().unwrap_or_default();
+    let limit = if kind.ends_with("_start") { Some(blocks) } else { blocks.checked_sub(1) };
+    let integer = index.as_u64().or_else(|| index.as_f64().filter(|n| *n >= 0.0 && n.fract() == 0.0).map(|n| n as u64));
+    match (integer, limit) {
+        (Some(index), Some(limit)) if index <= limit as u64 => Ok(()),
+        _ => Err(format!("Invalid contentIndex {index} in pi-messages {kind} event")),
     }
 }
 
