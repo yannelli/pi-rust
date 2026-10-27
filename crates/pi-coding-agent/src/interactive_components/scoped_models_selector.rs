@@ -12,7 +12,7 @@ use pi_tui::{Component, Container, component, get_keybindings};
 
 use super::common::{bold, border, fg, fuzzy_filter_by, spacer, text, visible_window};
 use super::key_display_text;
-use super::model_selector::model_search_text;
+use super::model_selector::{distinct_model_name, model_search_text};
 use crate::theme::{ThemeColor, theme};
 
 /// `None` enables every model; `Some` is an explicit, ordered list of `provider/id`.
@@ -273,11 +273,13 @@ impl ScopedModelsSelector {
             let id = item.model.as_ref().map_or(item.full_id.as_str(), |model| model.id.as_str());
             let styled = if item.model.is_some() { id.to_string() } else { theme().strikethrough(id) };
             let model_text = if selected { fg(ThemeColor::Accent, &styled) } else { styled };
+            let name = item.model.as_ref().and_then(|model| distinct_model_name(&model.id, &model.name));
+            let name = name.map_or_else(String::new, |name| fg(ThemeColor::Muted, &format!(" ({name})")));
             let badge =
                 item.model.as_ref().map_or_else(|| " [unavailable]".to_string(), |m| format!(" [{}]", m.provider));
             let status =
                 if item.model.is_some() && item.enabled { fg(ThemeColor::Accent, "✓ ") } else { "  ".into() };
-            list.add_child(text(&format!("{prefix}{status}{model_text}{}", fg(ThemeColor::Muted, &badge)), 0, 0));
+            list.add_child(text(&format!("{prefix}{status}{model_text}{name}{}", fg(ThemeColor::Muted, &badge)), 0, 0));
         }
         if start > 0 || end < self.filtered.len() {
             let info = format!("  ({}/{})", self.selected_index + 1, self.filtered.len());

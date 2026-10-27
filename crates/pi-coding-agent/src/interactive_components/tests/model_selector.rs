@@ -46,7 +46,7 @@ fn rendered(selector: &Rc<RefCell<ModelSelector>>) -> String {
 fn selected_model_id(rendered: &str) -> Option<String> {
     let line = rendered.lines().find(|line| line.starts_with("→ "))?;
     let rest = line.trim_start_matches("→").trim_start();
-    let id = rest.split(" [").next()?.trim_start_matches("✓").trim();
+    let id = rest.trim_start_matches("✓").trim().split(' ').next()?;
     (!id.is_empty()).then(|| id.to_string())
 }
 
@@ -181,10 +181,10 @@ async fn refresh_reloads_the_snapshot_and_reports_single_failures() {
 
 fn alpha_models() -> Vec<Model> {
     vec![
-        model("faux", "alpha-1", "Alpha One"),
-        model("faux", "alpha-2", "Alpha Two"),
-        model("faux", "alpha-3", "Alpha Three"),
-        model("faux", "beta-1", "Beta One"),
+        model("faux", "alpha-1", "Alpha 1"),
+        model("faux", "alpha-2", "Alpha 2"),
+        model("faux", "alpha-3", "Alpha 3"),
+        model("faux", "beta-1", "Beta 1"),
     ]
 }
 
@@ -331,4 +331,38 @@ fn search_ranks_the_typed_model_above_models_sharing_a_long_provider_prefix() {
         model("fireworks", "accounts/fireworks/routers/firerouter", "FireRouter"),
     ];
     assert_eq!(search_ids(&models, "firerouter")[0], "accounts/fireworks/routers/firerouter");
+}
+
+// Upstream #5916.
+#[test]
+fn distinct_model_names_hide_names_that_restate_the_id() {
+    use crate::interactive_components::model_selector::distinct_model_name;
+    assert_eq!(distinct_model_name("claude-sonnet-4-5", "Claude Sonnet 4.5"), None);
+    assert_eq!(distinct_model_name("openai/gpt-oss-120b", "OpenAI: gpt-oss-120b"), None);
+    assert_eq!(distinct_model_name("eu.anthropic.claude-sonnet-4-5-20250929-v1:0", "Claude Sonnet 4.5 (EU)"), None);
+    assert_eq!(distinct_model_name("gpt-5", ""), None);
+    let name = "MiniMax M3 [rasmus@openrouter, parasail]";
+    assert_eq!(distinct_model_name("minimax/minimax-m3", name).as_deref(), Some(name));
+    assert_eq!(
+        distinct_model_name("gemini-3.1-flash-lite-image", "Nano Banana 2 Lite").as_deref(),
+        Some("Nano Banana 2 Lite")
+    );
+    // Single-character words must match a whole id token.
+    assert_eq!(distinct_model_name("mistral-small-2603", "Mistral Small 4").as_deref(), Some("Mistral Small 4"));
+}
+
+#[test]
+fn shows_model_names_that_differ_from_the_id() {
+    let _kb = setup();
+    let models = vec![
+        model("faux", "minimax/minimax-m3", "MiniMax M3 [parasail]"),
+        model("faux", "claude-sonnet-4-5", "Claude Sonnet 4.5"),
+    ];
+    let harness = Harness::new_shared(120, 30, |tui| {
+        ModelSelector::new(tui, None, source(models.clone()), Vec::new(), |_| {}, || {}, Default::default())
+    });
+    let rows: Vec<String> =
+        harness.render(120).iter().map(|line| line.chars().skip(4).collect::<String>().trim_end().into()).collect();
+    assert!(rows.contains(&"minimax/minimax-m3 (MiniMax M3 [parasail]) [faux]".to_string()), "{rows:?}");
+    assert!(rows.contains(&"claude-sonnet-4-5 [faux]".to_string()), "{rows:?}");
 }
