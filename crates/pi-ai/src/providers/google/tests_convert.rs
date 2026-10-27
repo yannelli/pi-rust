@@ -271,3 +271,41 @@ fn thinking_level_maps_resolve_like_upstream() {
         -1
     );
 }
+
+fn json_schema_declaration(parameters: &Value) -> Value {
+    let tools = vec![Tool::new("test_tool", "A test tool", parameters.clone())];
+    convert_tools(&tools, false, true).unwrap().unwrap()[0]["functionDeclarations"][0]["parametersJsonSchema"].clone()
+}
+
+#[test]
+fn const_values_become_single_value_enums_in_json_schema() {
+    let parameters = json!({
+        "type": "object",
+        "properties": {
+            "origin": {"type": "string", "const": "zq-src-7"},
+            "mode": {"anyOf": [{"type": "string", "const": "a"}, {"type": "string", "const": "b"}]},
+            "level": {"oneOf": [{"const": 1}, {"const": 2}]},
+            "flag": {"type": "boolean", "const": true},
+            "list": {"type": "array", "items": {"const": "x"}},
+            "const": {"type": "string"}
+        },
+        "required": ["origin"]
+    });
+    let original = parameters.clone();
+    assert_eq!(
+        json_schema_declaration(&parameters),
+        json!({
+            "type": "object",
+            "properties": {
+                "origin": {"type": "string", "enum": ["zq-src-7"]},
+                "mode": {"anyOf": [{"type": "string", "enum": ["a"]}, {"type": "string", "enum": ["b"]}]},
+                "level": {"oneOf": [{"enum": [1]}, {"enum": [2]}]},
+                "flag": {"type": "boolean", "const": true},
+                "list": {"type": "array", "items": {"enum": ["x"]}},
+                "const": {"type": "string"}
+            },
+            "required": ["origin"]
+        })
+    );
+    assert_eq!(parameters, original);
+}
