@@ -32,6 +32,7 @@ pub(super) struct Request {
     pub attempt: u32,
     pub compacted: Option<TaskId>,
     pub model: ModelRef,
+    pub thinking_level: Option<pi_ai::ThinkingLevel>,
     pub cutoff: EntryId,
     /// Committed model context through `cutoff`, when the phase already derived it.
     pub messages: Option<Vec<Message>>,
@@ -88,14 +89,15 @@ pub(super) async fn request(task: TaskRecord, runtime: TaskRuntime, context: Con
         ..SimpleStreamOptions::default()
     };
     let message = stream_response(&runtime, &model, messages, options, attempt, &context).await?;
-    let request =
-        Request { attempt, compacted, model: model_ref, cutoff, messages: Some(view.messages), poll_at: None };
+    let (thinking_level, messages) = (Some(thinking_level), Some(view.messages));
+    let request = Request { attempt, compacted, model: model_ref, thinking_level, cutoff, messages, poll_at: None };
     classify(&runtime, request, message, &context).await
 }
 
 /// After the sleep until `poll_at`; a run before it (an early wake, or a record of an earlier version) sleeps again.
 pub(super) async fn poll(task: TaskRecord, runtime: TaskRuntime, context: Context) -> DurableResult<()> {
-    let GenerationCheckpoint::Poll { attempt, compacted, model: model_ref, cutoff, handle, poll_at } = decode(&task)?
+    let GenerationCheckpoint::Poll { attempt, compacted, model: model_ref, thinking_level, cutoff, handle, poll_at } =
+        decode(&task)?
     else {
         return Err(DurableError::error("Generation checkpoint is not in phase poll"));
     };
@@ -112,7 +114,8 @@ pub(super) async fn poll(task: TaskRecord, runtime: TaskRuntime, context: Contex
         ..DeferredFetchOptions::default()
     };
     let message = runtime.models().fetch_deferred(&model, &handle, options).await;
-    let request = Request { attempt, compacted, model: model_ref, cutoff, messages: None, poll_at: Some(poll_at) };
+    let poll_at = Some(poll_at);
+    let request = Request { attempt, compacted, model: model_ref, thinking_level, cutoff, messages: None, poll_at };
     classify(&runtime, request, message, &context).await
 }
 
@@ -248,7 +251,12 @@ pub(super) async fn classify(
     // An abort mark or close: the abort invocation or the reopened run handles the committed state.
     runtime.signal().throw_if_aborted().map_err(DurableError::from)?;
     let conversation_id = runtime.conversation_id();
-    let Request { attempt, compacted, model, cutoff, .. } = request.clone_parts();
+    let Request { attempt, compacted, model, thinking_level, cutoff, .. } = request.clone_parts();
+    // Record the requested level, as pi-agent-core's agent loop does.
+    let mut message = message;
+    if thinking_level.is_some() {
+        message.thinking_level = thinking_level;
+    }
     if message.stop_reason == StopReason::Deferred
         && let Some(handle) = message.deferred.clone()
     {
@@ -259,7 +267,9 @@ pub(super) async fn classify(
             let generation =
                 LiveGeneration { deferred: Some(DeferredPoll { poll_at }), ..LiveGeneration::new(attempt) };
             draft.edit(|live| live.generation = Some(generation))?;
-            sleeping(&GenerationCheckpoint::Poll { attempt, compacted, model, cutoff, handle, poll_at }, poll_at)
+            let checkpoint =
+                GenerationCheckpoint::Poll { attempt, compacted, model, thinking_level, cutoff, handle, poll_at };
+            sleeping(&checkpoint, poll_at)
         };
         return runtime.commit(change, context).await;
     }
@@ -339,6 +349,7 @@ impl Request {
             attempt: self.attempt,
             compacted: self.compacted,
             model: self.model.clone(),
+            thinking_level: self.thinking_level,
             cutoff: self.cutoff,
             messages: None,
             poll_at: self.poll_at,

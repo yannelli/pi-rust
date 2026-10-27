@@ -423,3 +423,48 @@ async fn runs_a_print_style_turn_and_reads_the_durable_answer_after_reopen() {
     assert_eq!(reread, entry);
     harness.close(&ctx()).await.unwrap();
 }
+
+async fn answer_message(root: &Conversation, settled: &SubmissionRecord) -> Option<Message> {
+    let answer = settled.answer.unwrap();
+    let entry = root.commit(move |tx: Tx| async move { tx.entry(answer).await }, &ctx()).await.unwrap();
+    entry.and_then(|entry| entry.model?.into_iter().next())
+}
+
+fn high() -> AgentChange {
+    AgentChange { thinking_level: Change::Set(pi_ai::ThinkingLevel::High), ..AgentChange::default() }
+}
+
+#[tokio::test]
+async fn polls_a_checkpoint_stored_without_a_thinking_level_and_records_none() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = sqlite_path(&directory);
+    let setup = deferred_setup();
+    *setup.now.lock().unwrap() = Some(1_000.0);
+    setup.faux.set_responses([message("deferred answer")]);
+    let (harness, root) = open(&path, &setup).await;
+    root.configure(high(), &ctx()).await.unwrap();
+    harness.resume().unwrap();
+    defer_streams(&setup);
+    let id = submit(&root, "hi").await;
+    wait_for(|| async { live(&harness, &root).await["generation"].get("deferred").is_some() }).await;
+    let task_id = run_task(&harness, &root).await;
+    let pinned = checkpoint(&harness, task_id).await.unwrap();
+    assert_eq!((pinned["phase"].clone(), pinned["thinkingLevel"].clone()), (json!("poll"), json!("high")));
+    harness.close(&ctx()).await.unwrap();
+    // Earlier versions stored poll checkpoints without the field.
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    let update = "UPDATE tasks SET record = json_remove(record, '$.state.checkpoint.thinkingLevel') WHERE id = ?";
+    connection.execute(update, [task_id.0 as i64]).unwrap();
+    drop(connection);
+
+    let (harness, root) = open(&path, &setup).await;
+    assert!(checkpoint(&harness, task_id).await.unwrap().get("thinkingLevel").is_none());
+    *setup.now.lock().unwrap() = Some(61_000.0);
+    harness.resume().unwrap();
+    let settled = settle(&harness, id).await;
+    assert_eq!(settled.status, SubmissionStatus::Done);
+    let Some(Message::Assistant(answer)) = answer_message(&root, &settled).await else { panic!("expected an answer") };
+    assert_eq!(text_of(Some(&Message::Assistant(answer.clone()))).as_deref(), Some("deferred answer"));
+    assert_eq!(answer.thinking_level, None);
+    harness.close(&ctx()).await.unwrap();
+}
