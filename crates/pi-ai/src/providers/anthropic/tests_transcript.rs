@@ -217,6 +217,35 @@ async fn system_messages_skip_assistants_that_convert_to_no_blocks() {
 }
 
 #[tokio::test]
+async fn system_messages_skip_empty_replies_and_land_before_the_next_sent_assistant() {
+    let model = model(json!({"supportsMidConvoSystemMessages": true}));
+    let reply = |text: &str, provider: &str, api: &str, id: &str| {
+        Message::Assistant(AssistantMessage {
+            content: vec![ContentBlock::text(text)],
+            api: api.into(),
+            provider: provider.into(),
+            model: id.into(),
+            ..Default::default()
+        })
+    };
+    // Another model's empty reply: Anthropic rejects empty text blocks, so it is dropped.
+    let mut messages = vec![
+        system(json!({"role": "system", "content": "base prompt", "timestamp": 0})),
+        Message::user("hi"),
+        system(json!({"role": "system", "content": "updated guidance", "timestamp": 2})),
+        reply("", "openai-codex", "openai-codex-responses", "gpt-x"),
+        Message::user("again"),
+    ];
+    let roles = |body: &Value| -> Vec<String> {
+        body["messages"].as_array().unwrap().iter().map(|m| m["role"].as_str().unwrap().to_string()).collect()
+    };
+    assert_eq!(roles(&payload(&model, messages.clone()).await), ["user", "user", "system"]);
+    messages.push(reply("answer", &model.provider, &model.api, &model.id));
+    messages.push(Message::user("third"));
+    assert_eq!(roles(&payload(&model, messages).await), ["user", "user", "system", "assistant", "user"]);
+}
+
+#[tokio::test]
 async fn cache_retention_controls_cache_control_and_affinity() {
     let messages = vec![Message::user("hi")];
     let context = Context { system_prompt: Some("sys".into()), tools: vec![tool("read")], messages };
