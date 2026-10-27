@@ -71,10 +71,15 @@ impl ContentBlock {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Cost {
+    /// Catalog-derived input cost.
     pub input: f64,
+    /// Catalog-derived output cost.
     pub output: f64,
+    /// Catalog-derived cache-read cost.
     pub cache_read: f64,
+    /// Catalog-derived cache-write cost.
     pub cache_write: f64,
+    /// Best available total: provider-reported billed cost when supported, otherwise the catalog estimate.
     pub total: f64,
     /// True when `total` is the billed cost reported by the provider. False when it is a catalog
     /// estimate; absent also means false.

@@ -202,6 +202,10 @@ impl AnthropicStream {
         }
         usage.total_tokens = usage.input + usage.output + usage.cache_read + usage.cache_write;
         usage.apply_cost(&self.cost);
+        // OpenRouter adds billing fields to streamed message_delta usage at runtime.
+        if raw.is_object() && crate::providers::openrouter_cost::is_openrouter_model(&self.model) {
+            crate::providers::openrouter_cost::apply_openrouter_reported_cost(usage, raw);
+        }
         Ok(())
     }
 
