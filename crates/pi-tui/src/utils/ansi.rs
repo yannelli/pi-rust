@@ -91,6 +91,22 @@ pub fn strip_terminal_sequences(s: &str) -> String {
     result
 }
 
+/// Replace each run of C0 and C1 control characters (ESC, BEL, newlines, ...) with one space.
+pub fn replace_control_characters(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut in_run = false;
+    for ch in s.chars() {
+        let control = ch.is_control();
+        if !control {
+            result.push(ch);
+        } else if !in_run {
+            result.push(' ');
+        }
+        in_run = control;
+    }
+    result
+}
+
 /// Prepares text for terminal output: Thai/Lao AM vowels become their same-width decompositions (fewer
 /// stale cells on repaint) and visible tabs become three spaces. Tabs inside escape sequences stay as is.
 pub fn normalize_terminal_output(s: &str) -> String {

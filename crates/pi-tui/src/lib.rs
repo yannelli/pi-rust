@@ -123,7 +123,7 @@ pub use tui::{
 };
 pub use ui_loop::{TerminalSink, TimerId, TuiWaker};
 pub use utils::{
-    get_osc8_link_at_column, slice_by_column, strip_terminal_sequences, truncate_to_width, visible_width,
-    wrap_text_with_ansi,
+    get_osc8_link_at_column, replace_control_characters, slice_by_column, strip_terminal_sequences, truncate_to_width,
+    visible_width, wrap_text_with_ansi,
 };
 pub use wheel_scroll::WheelScrollLines;

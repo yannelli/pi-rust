@@ -156,6 +156,9 @@ struct Registry {
     entries: HashMap<u32, RegisteredMetadata>,
     order: VecDeque<u32>,
     generation: u64,
+    /// Tallest registered image. Bounds backward searches for image lines above a
+    /// viewport: no image line further up than this can reach into it.
+    max_rows: usize,
 }
 
 static REGISTRY: LazyLock<Mutex<Registry>> = LazyLock::new(Mutex::default);
@@ -170,6 +173,7 @@ pub fn register_kitty_image_metadata(metadata: KittyImageMetadata) {
     let mut registry = registry();
     registry.generation += 1;
     let transmission_generation = registry.generation;
+    registry.max_rows = registry.max_rows.max(metadata.rows);
     if registry.entries.remove(&metadata.image_id).is_some() {
         registry.order.retain(|&id| id != metadata.image_id);
     }
@@ -180,6 +184,11 @@ pub fn register_kitty_image_metadata(metadata: KittyImageMetadata) {
             registry.entries.remove(&oldest);
         }
     }
+}
+
+/// Return the row height of the tallest Kitty image registered so far.
+pub fn get_max_kitty_image_rows() -> usize {
+    registry().max_rows
 }
 
 static KITTY_CONTROLS: LazyLock<Regex> =

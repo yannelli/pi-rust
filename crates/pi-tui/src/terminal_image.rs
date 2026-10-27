@@ -21,7 +21,8 @@ pub use iterm2::{Iterm2EncodeOptions, encode_iterm2};
 pub use kitty::{
     KittyEncodeOptions, KittyImageMetadata, KittyImagePlacement, allocate_image_id, crop_kitty_image_line,
     delete_all_kitty_images, delete_all_kitty_placements, delete_kitty_image, encode_kitty, get_kitty_image_metadata,
-    get_kitty_image_placement, get_kitty_image_placement_rows, is_image_line, register_kitty_image_metadata,
+    get_kitty_image_placement, get_kitty_image_placement_rows, get_max_kitty_image_rows, is_image_line,
+    register_kitty_image_metadata,
 };
 pub use render::{RenderedImage, calculate_image_cell_size, calculate_image_rows, render_image};
 
