@@ -136,6 +136,16 @@ async fn exec_keeps_stderr_empty_when_a_command_exits_silently() {
     assert_eq!(result, json!({"stdout": "", "stderr": "", "code": 1, "killed": false}));
 }
 
+// Upstream #11312: a character split across two pipe chunks came back as U+FFFD.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn exec_decodes_output_across_utf8_chunk_boundaries() {
+    let split = r"printf '\344'; sleep 0.1; printf '\275\240\345\245\275'";
+    let script = format!("{split}; ({split}) >&2");
+    let result = exec_result("sh", &["-c", &script]).await;
+    assert_eq!(result, json!({"stdout": "你好", "stderr": "你好", "code": 0, "killed": false}));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn completions_shortcuts_and_renderers_come_from_the_registry() {
     let h = harness(Setup { files: vec![("probe.ts", probe_extension())], load: vec!["probe.ts"], ..Setup::default() })

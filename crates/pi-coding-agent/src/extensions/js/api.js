@@ -3,6 +3,7 @@
 // Rust once the runtime is bound, and throw while extensions are still loading.
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { StringDecoder } from "node:string_decoder";
 import { call, callAsync } from "./bridge.js";
 
 export function createEventBus() {
@@ -30,6 +31,9 @@ export function execCommand(command, args, cwd, options) {
 		const proc = spawn(command, args, { cwd, shell: false, stdio: ["ignore", "pipe", "pipe"] });
 		let stdout = "";
 		let stderr = "";
+		// A multi-byte character can be split between two chunks (upstream #11312).
+		const stdoutDecoder = new StringDecoder("utf8");
+		const stderrDecoder = new StringDecoder("utf8");
 		let killed = false;
 		let timer;
 		const kill = () => {
@@ -46,13 +50,15 @@ export function execCommand(command, args, cwd, options) {
 		}
 		if (options?.timeout > 0) timer = setTimeout(kill, options.timeout);
 		proc.stdout?.on("data", (data) => {
-			stdout += data.toString();
+			stdout += stdoutDecoder.write(data);
 		});
 		proc.stderr?.on("data", (data) => {
-			stderr += data.toString();
+			stderr += stderrDecoder.write(data);
 		});
 		const finish = (code, error) => {
 			clearTimeout(timer);
+			stdout += stdoutDecoder.end();
+			stderr += stderrDecoder.end();
 			options?.signal?.removeEventListener("abort", kill);
 			// A command that could not start reports why, unlike one that exits 1 without output.
 			resolve({ stdout, stderr: stderr || (error?.message ?? ""), code, killed });
