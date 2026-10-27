@@ -63,3 +63,15 @@ pub trait WatchHandle<T = Json, E = ChordError> {
     /// Settle when the watch terminates; an already-running callback remains caller-owned.
     fn closed(&self) -> BoxFuture<WatchEnd<E>>;
 }
+
+/// A value that changes and can be watched: documents, derives, members of references. Values are immutable by
+/// convention (JSON for state); each watch starts at the current value and then gets one frame per change.
+pub trait Watchable<T = Json, E = ChordError> {
+    type Handle: WatchHandle<T, E>;
+
+    /// The current value.
+    fn value(&self) -> T;
+
+    /// A watch holding the current value, then one frame per change; the context's cancellation ends it.
+    fn watch(&self, context: &Context) -> BoxFuture<Result<Self::Handle, E>>;
+}
