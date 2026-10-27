@@ -156,6 +156,14 @@ impl Markdown {
             }
             Token::List(list) => lines.extend(self.render_list(list, 0, width, context)),
             Token::Table(table) => lines.extend(self.render_table(table, width, next, context)),
+            // With no room for another border ("│ " plus one content column), render the nested content
+            // without one. Otherwise each extra level re-wraps every child line at width 1 and the output
+            // grows exponentially with nesting depth.
+            Token::Blockquote { tokens, .. } if width < 3 => {
+                for (index, child) in tokens.iter().enumerate() {
+                    lines.extend(self.render_token(child, width, tokens.get(index + 1).map(Token::kind), context));
+                }
+            }
             Token::Blockquote { tokens, .. } => {
                 lines.extend(self.render_blockquote(tokens, width));
                 Self::spacing(&mut lines, next);
@@ -175,7 +183,7 @@ impl Markdown {
         let theme = self.theme.clone();
         let quote_style: Rc<dyn Fn(&str) -> String> = Rc::new(move |text| (theme.quote)(&(theme.italic)(text)));
         let prefix = style_prefix(quote_style.as_ref());
-        let content_width = width.saturating_sub(2).max(1);
+        let content_width = width - 2;
         // The default message style does not apply inside block quotes.
         let context = StyleContext { apply_text: Rc::new(|text| text.to_string()), style_prefix: prefix.clone() };
         let mut rendered = Vec::new();

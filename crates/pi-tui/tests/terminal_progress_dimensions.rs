@@ -1,5 +1,5 @@
-//! Port of upstream `test/terminal.test.ts`, "ProcessTerminal progress" and "ProcessTerminal
-//! dimensions". The backend `write` and `size` hooks replace `process.stdout`.
+//! Port of upstream `test/terminal.test.ts`, "ProcessTerminal progress", "ProcessTerminal title", and
+//! "ProcessTerminal dimensions". The backend `write` and `size` hooks replace `process.stdout`.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -47,6 +47,13 @@ fn repeats_the_active_progress_sequence_every_second_until_stopped() {
     assert_eq!(after_stop[3], PROGRESS_CLEAR);
     ui_loop::run_for(Duration::from_millis(1100)).unwrap();
     assert_eq!(*writes.lock().unwrap(), after_stop);
+}
+
+#[test]
+fn replaces_control_characters_so_the_title_cannot_end_the_osc_sequence() {
+    let (mut terminal, writes) = terminal_with(MapEnv::default(), Some((80, 24)));
+    terminal.set_title("pi - work\x07\x1b]52;c;Zm9v\x07\u{9b}2J - repo");
+    assert_eq!(*writes.lock().unwrap(), vec!["\x1b]0;pi - work ]52;c;Zm9v 2J - repo\x07".to_string()]);
 }
 
 #[test]

@@ -7,6 +7,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use alt_select_common::{FnComponent, Harness, TerminalEvent, wait_for_render};
+use pi_tui::components::BoxComponent;
+use pi_tui::components::scroll_view::StyleFn;
 use pi_tui::env::{MapEnv, global_state_lock};
 use pi_tui::layout_node::StackBasis;
 use pi_tui::terminal_image::{
@@ -76,6 +78,45 @@ fn crops_a_kitty_image_whose_first_line_is_above_the_viewport() {
     assert_eq!(h.tui.viewport_top(), 3);
     assert!(h.events().iter().any(
         |event| matches!(event, TerminalEvent::Write(data) if data.contains("i=123") && data.contains("y=66,h=34,r=1"))
+    ));
+    h.stop();
+}
+
+#[test]
+fn crops_a_kitty_image_in_a_padded_colored_box_whose_first_line_is_above_the_viewport() {
+    let _guard = global_state_lock();
+    let h = Harness::new(20, 3);
+    let image_line = kitty_line(11271, 3, 100, 100);
+    let bg: StyleFn = Rc::new(|text| format!("\x1b[44m{text}\x1b[49m"));
+    let mut boxed = BoxComponent::new(1, 0, Some(bg));
+    boxed.add_child(component(FnComponent::fixed(&[&image_line, "", ""])));
+    h.tui.add_child(component(FnComponent::fixed(&["before"])));
+    h.tui.add_child(component(boxed));
+    h.tui.add_child(component(FnComponent::fixed(&["after", "end"])));
+    h.tui.start();
+    wait_for_render();
+
+    assert_eq!(h.tui.viewport_top(), 3);
+    assert!(h.events().iter().any(
+        |event| matches!(event, TerminalEvent::Write(data) if data.contains("i=11271") && data.contains("y=66,h=34,r=1"))
+    ));
+    h.stop();
+}
+
+#[test]
+fn crops_a_kitty_image_whose_placeholder_rows_contain_text_when_its_first_line_is_above_the_viewport() {
+    // Regression test for #11271: borders or side-by-side text on placeholder rows stopped the search.
+    let _guard = global_state_lock();
+    let h = Harness::new(20, 3);
+    let image_line = kitty_line(11272, 3, 100, 100);
+    h.tui.add_child(component(FnComponent::fixed(&["before", &image_line, "   | side", "   | side"])));
+    h.tui.add_child(component(FnComponent::fixed(&["after", "end"])));
+    h.tui.start();
+    wait_for_render();
+
+    assert_eq!(h.tui.viewport_top(), 3);
+    assert!(h.events().iter().any(
+        |event| matches!(event, TerminalEvent::Write(data) if data.contains("i=11272") && data.contains("y=66,h=34,r=1"))
     ));
     h.stop();
 }
