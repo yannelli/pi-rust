@@ -72,6 +72,11 @@ pub(super) struct DialogStack {
 }
 
 impl InteractiveMode {
+    /// Whether an extension dialog or inline `custom()` component is open.
+    pub(super) fn dialog_open(&self) -> bool {
+        !self.dialogs.borrow().entries.is_empty()
+    }
+
     fn push_dialog(&self, entry: DialogEntry) {
         self.dialogs.borrow_mut().entries.push(entry);
         self.show_top_dialog();

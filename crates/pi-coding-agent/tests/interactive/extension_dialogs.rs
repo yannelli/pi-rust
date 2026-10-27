@@ -43,6 +43,14 @@ export default function (pi) {
 		}));
 		ctx.ui.notify(`form ${result} discarded ${discarded}`);
 	} });
+	pi.registerCommand("swap-editor", { handler: async (_args, ctx) => {
+		const answer = ctx.ui.confirm("Swap", "swap dialog");
+		await new Promise((resolve) => setTimeout(resolve, 100));
+		ctx.ui.setEditorComponent(() => ({
+			render: () => ["CUSTOM-EDITOR"], invalidate() {}, getText: () => "", setText() {}, handleInput() {},
+		}));
+		ctx.ui.notify(`swap ${await answer}`);
+	} });
 }
 "#;
 
@@ -118,6 +126,22 @@ async fn a_confirm_opened_from_a_custom_component_restores_it() {
         assert!(!showing(&ui, "discard changes"), "{}", ui.screen());
         ui.send("d").await;
         ui.wait_for("form kept discarded false").await;
+    })
+    .await;
+}
+
+// Upstream #11431: replacing the editor while a dialog was open hid the dialog unanswered.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_open_dialog_stays_visible_when_the_editor_component_is_replaced() {
+    local(async {
+        let ui = start_ui().await;
+        ui.submit("/swap-editor").await;
+        ui.wait_until("dialog", |ui| showing(ui, "swap dialog")).await;
+        ui.settle(500).await;
+        assert!(showing(&ui, "swap dialog") && !showing(&ui, "CUSTOM-EDITOR"), "{}", ui.screen());
+        ui.send("\r").await;
+        ui.wait_for("swap true").await;
+        ui.wait_until("custom editor", |ui| showing(ui, "CUSTOM-EDITOR")).await;
     })
     .await;
 }

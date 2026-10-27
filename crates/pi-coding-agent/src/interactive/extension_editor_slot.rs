@@ -50,9 +50,13 @@ impl InteractiveMode {
         self.request_render();
     }
 
+    /// While an extension dialog is open, the new editor waits behind it and shows when the last
+    /// dialog closes, so the dialog stays visible and answerable (upstream #11431).
     pub(super) fn set_custom_editor(&self, factory: Option<ComponentFactory>) {
         let text = self.current_editor_text();
-        self.selector.dispose_active();
+        if !self.dialog_open() {
+            self.selector.dispose_active();
+        }
         {
             let mut state = self.extensions_state();
             if state.default_editor.is_none() && state.editor.is_none() {
@@ -89,10 +93,15 @@ impl InteractiveMode {
     }
 
     fn mount_editor(&self, editor: ComponentRef) {
-        self.selector.dispose_active();
+        let dialog_open = self.dialog_open();
+        if !dialog_open {
+            self.selector.dispose_active();
+        }
         self.selector.set_editor(editor.clone());
         self.place_status_indicator();
-        self.tui().set_focus(Some(editor));
+        if !dialog_open {
+            self.tui().set_focus(Some(editor));
+        }
         self.request_render();
     }
 
