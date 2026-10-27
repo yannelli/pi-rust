@@ -173,6 +173,21 @@ async fn propagates_error_events_and_missing_terminal_events() {
 }
 
 #[tokio::test]
+async fn terminal_events_carry_the_response_model() {
+    let done = json!({"type": "done", "reason": "stop", "usage": usage(), "responseModel": "claude-opus-5-5"});
+    let error = json!({"type": "error", "reason": "error", "usage": usage(), "errorMessage": "Upstream failed",
+        "responseModel": "claude-opus-5-5"});
+    let without = json!({"type": "done", "reason": "stop", "usage": usage(), "responseId": "resp_1"});
+    for (terminal, expected) in [(done, Some("claude-opus-5-5")), (error, Some("claude-opus-5-5")), (without, None)] {
+        let server = MockHttp::start(vec![wire(&[json!({"type": "start"}), terminal])]).await;
+        let (_, message) = collect(PiMessages.stream(&model(&server.base_url), &context(), keyed())).await;
+        assert_eq!((message.model.as_str(), message.response_model.as_deref()), ("auto", expected));
+        let serialized = serde_json::to_value(&message).unwrap();
+        assert_eq!(serialized.get("responseModel").is_some(), expected.is_some());
+    }
+}
+
+#[tokio::test]
 async fn aborts_and_is_registered() {
     let frames = vec![
         format!("data: {}\n\n", json!({"type": "start"})),

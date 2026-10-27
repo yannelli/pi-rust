@@ -207,6 +207,9 @@ impl Converter {
     fn finish(&mut self, event: &Value) {
         self.partial.usage = serde_json::from_value::<Usage>(event["usage"].clone()).unwrap_or_default();
         self.partial.response_id = event["responseId"].as_str().map(str::to_string);
+        if let Some(model) = event["responseModel"].as_str() {
+            self.partial.response_model = Some(model.to_string());
+        }
         if let Some(level) = event["providerThinkingLevel"].as_str() {
             self.partial.provider_thinking_level = Some(level.to_string());
         }

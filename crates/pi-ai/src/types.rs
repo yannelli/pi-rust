@@ -163,7 +163,7 @@ pub struct AssistantMessage {
     pub api: String,
     pub provider: String,
     pub model: String,
-    /// Concrete model reported by the provider when it differs from `model`.
+    /// Concrete model reported by the provider, when reported. May equal the requested `model`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
