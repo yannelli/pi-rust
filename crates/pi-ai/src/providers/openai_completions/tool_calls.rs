@@ -6,9 +6,11 @@ use std::collections::HashMap;
 use serde_json::{Value, json};
 
 use super::convert::GrammarInputs;
-use crate::json::{parse_streaming_json, parse_tool_call_arguments};
-use crate::providers::constrained_sampling::{GrammarToolInputJsonBuffer, append_grammar_tool_input_json_delta};
+use crate::providers::constrained_sampling::{
+    GrammarToolInputJsonBuffer, append_grammar_tool_input_json_delta, close_grammar_tool_input_json,
+};
 use crate::stream::{AssistantMessageEvent, EventSender, MessageBuilder};
+use crate::streaming_json::ToolCallArgumentsStream;
 use crate::types::{ContentBlock, JsonObject, ToolCall};
 
 /// Grammar tool input: the argument property and the JSON re-encoding state.
@@ -17,12 +19,17 @@ struct CustomInput {
     buffer: GrammarToolInputJsonBuffer,
 }
 
-/// A tool call being streamed: where it lives in the content and its raw arguments.
+/// The input of a streaming tool call: JSON arguments, or the raw input of a grammar tool.
+enum ToolInput {
+    Json(Box<ToolCallArgumentsStream>),
+    Custom(CustomInput),
+}
+
+/// A tool call being streamed: where it lives in the content and its input.
 struct StreamingTool {
     content_index: usize,
-    partial_args: String,
     stream_index: Option<u64>,
-    custom: Option<CustomInput>,
+    input: ToolInput,
 }
 
 pub(super) struct ToolCalls {
@@ -32,24 +39,11 @@ pub(super) struct ToolCalls {
     by_id: HashMap<String, usize>,
 }
 
-/// Arguments from partial JSON; an unparseable prefix yields an empty object.
-fn streaming_arguments(partial: &str) -> JsonObject {
-    match parse_streaming_json(partial) {
-        Some(Value::Object(arguments)) => arguments,
-        _ => JsonObject::new(),
-    }
-}
-
 fn tool_call(builder: &mut MessageBuilder, index: usize) -> Option<&mut ToolCall> {
     match &mut builder.message_mut().content[index] {
         ContentBlock::ToolCall(call) => Some(call),
         _ => None,
     }
-}
-
-/// The grammar input accumulated so far.
-fn custom_input(call: &ToolCall, property: &str) -> String {
-    call.arguments.get(property).and_then(Value::as_str).unwrap_or_default().to_string()
 }
 
 impl ToolCalls {
@@ -101,13 +95,12 @@ impl ToolCalls {
             }
             None => String::new(),
         };
-        if custom_only && self.tools[slot].custom.is_none() {
+        if custom_only && !matches!(self.tools[slot].input, ToolInput::Custom(_)) {
             let custom = self.custom_for(&block_name);
             if let Some(block) = tool_call(builder, content_index) {
                 block.arguments = JsonObject::from_iter([(custom.property.clone(), json!(""))]);
             }
-            self.tools[slot].custom = Some(custom);
-            self.tools[slot].partial_args.clear();
+            self.tools[slot].input = ToolInput::Custom(custom);
         }
         let delta = self.apply_input(builder, slot, call)?;
         let partial = builder.message().clone();
@@ -119,22 +112,19 @@ impl ToolCalls {
     fn apply_input(&mut self, builder: &mut MessageBuilder, slot: usize, call: &Value) -> Result<String, String> {
         let tool = &mut self.tools[slot];
         let non_empty = |pointer: &str| call.pointer(pointer).and_then(Value::as_str).filter(|text| !text.is_empty());
-        if let Some(arguments) = non_empty("/function/arguments") {
-            tool.partial_args.push_str(arguments);
-            let parsed = streaming_arguments(&tool.partial_args);
-            if let Some(block) = tool_call(builder, tool.content_index) {
-                block.arguments = parsed;
-            }
-            return Ok(arguments.to_string());
-        }
-        let (Some(input), Some(custom)) = (non_empty("/custom/input"), tool.custom.as_mut()) else {
-            return Ok(String::new());
-        };
         let Some(block) = tool_call(builder, tool.content_index) else { return Ok(String::new()) };
-        let next = custom_input(block, &custom.property) + input;
-        let delta = append_grammar_tool_input_json_delta(&mut custom.buffer, &custom.property, &next, false)?;
-        block.arguments = JsonObject::from_iter([(custom.property.clone(), json!(next))]);
-        Ok(delta.unwrap_or_default())
+        match (&mut tool.input, non_empty("/function/arguments"), non_empty("/custom/input")) {
+            (ToolInput::Json(arguments), Some(delta), _) => {
+                block.arguments = arguments.append(delta).clone();
+                Ok(delta.to_string())
+            }
+            (ToolInput::Custom(custom), _, Some(input)) => {
+                let delta = append_grammar_tool_input_json_delta(&mut custom.buffer, &custom.property, input)?;
+                block.arguments = JsonObject::from_iter([(custom.property.clone(), json!(custom.buffer.input))]);
+                Ok(delta.unwrap_or_default())
+            }
+            _ => Ok(String::new()),
+        }
     }
 
     fn start(
@@ -160,7 +150,11 @@ impl ToolCalls {
         }));
         let content_index = content.len() - 1;
         let slot = self.tools.len();
-        self.tools.push(StreamingTool { content_index, partial_args: String::new(), stream_index, custom });
+        let input = match custom {
+            Some(custom) => ToolInput::Custom(custom),
+            None => ToolInput::Json(Box::default()),
+        };
+        self.tools.push(StreamingTool { content_index, stream_index, input });
         if let Some(index) = stream_index {
             self.by_index.insert(index, slot);
         }
@@ -181,17 +175,16 @@ impl ToolCalls {
     ) -> Result<(), String> {
         let Some(tool) = self.tools.iter_mut().find(|tool| tool.content_index == content_index) else { return Ok(()) };
         let Some(block) = tool_call(builder, content_index) else { return Ok(()) };
-        match tool.custom.as_mut() {
-            Some(custom) => {
-                let input = custom_input(block, &custom.property);
-                let delta = append_grammar_tool_input_json_delta(&mut custom.buffer, &custom.property, &input, true)?;
-                block.arguments = JsonObject::from_iter([(custom.property.clone(), json!(input))]);
+        match &mut tool.input {
+            ToolInput::Custom(custom) => {
+                let delta = close_grammar_tool_input_json(&mut custom.buffer, &custom.property, None)?;
+                block.arguments = JsonObject::from_iter([(custom.property.clone(), json!(custom.buffer.input))]);
                 if let Some(delta) = delta {
                     let partial = builder.message().clone();
                     sender.push(AssistantMessageEvent::ToolcallDelta { content_index, delta, partial });
                 }
             }
-            None => (block.arguments, block.arguments_error) = parse_tool_call_arguments(&tool.partial_args),
+            ToolInput::Json(arguments) => (block.arguments, block.arguments_error) = arguments.finish(),
         }
         let partial = builder.message().clone();
         let ContentBlock::ToolCall(tool_call) = partial.content[content_index].clone() else { return Ok(()) };

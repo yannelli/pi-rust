@@ -113,17 +113,26 @@ fn falls_back_or_rejects_schemas_that_cannot_be_converted() {
 #[test]
 fn keeps_grammar_input_json_deltas_append_only() {
     let mut buffer = GrammarToolInputJsonBuffer::default();
-    let first = append_grammar_tool_input_json_delta(&mut buffer, "payload", "a\"", false).unwrap().unwrap();
-    let second = append_grammar_tool_input_json_delta(&mut buffer, "payload", "a\"\nb", true).unwrap().unwrap();
+    let first = append_grammar_tool_input_json_delta(&mut buffer, "payload", "a\"").unwrap().unwrap();
+    let second = close_grammar_tool_input_json(&mut buffer, "payload", Some("a\"\nb")).unwrap().unwrap();
     let parsed: Value = serde_json::from_str(&format!("{first}{second}")).unwrap();
     assert_eq!(parsed, json!({"payload": "a\"\nb"}));
-    assert_eq!(append_grammar_tool_input_json_delta(&mut buffer, "payload", "a\"\nb", true), Ok(None));
+    assert_eq!(close_grammar_tool_input_json(&mut buffer, "payload", Some("a\"\nb")), Ok(None));
+    let closed = Err("grammar tool input for property \"payload\" changed after it was closed".to_string());
+    assert_eq!(close_grammar_tool_input_json(&mut buffer, "payload", Some("changed")), closed);
+    assert_eq!(append_grammar_tool_input_json_delta(&mut buffer, "payload", "x"), closed);
+}
+
+#[test]
+fn rejects_a_final_grammar_input_that_does_not_continue_the_streamed_input() {
+    let mut buffer = GrammarToolInputJsonBuffer::default();
+    append_grammar_tool_input_json_delta(&mut buffer, "payload", "abc").unwrap();
     assert_eq!(
-        append_grammar_tool_input_json_delta(&mut buffer, "payload", "changed", true),
-        Err("grammar tool input for property \"payload\" changed after it was closed".into())
+        close_grammar_tool_input_json(&mut buffer, "payload", Some("abd")),
+        Err("grammar tool input for property \"payload\" changed non-monotonically".into())
     );
-    let mut fresh = GrammarToolInputJsonBuffer { input: "abc".into(), started: true, closed: false };
-    assert!(append_grammar_tool_input_json_delta(&mut fresh, "payload", "xyz", false).is_err());
+    let mut empty = GrammarToolInputJsonBuffer::default();
+    assert_eq!(close_grammar_tool_input_json(&mut empty, "payload", None), Ok(Some("{\"payload\":\"\"}".into())));
 }
 
 #[test]

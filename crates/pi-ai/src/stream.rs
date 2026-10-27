@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
-use crate::json::{parse_streaming_json, parse_tool_call_arguments};
+use crate::streaming_json::ToolCallArgumentsStream;
 use crate::types::{AssistantMessage, ContentBlock, DeferredHandle, JsonObject, Model, StopReason, ToolCall};
 
 /// Streaming events. A stream emits `Start` first and ends with exactly one
@@ -135,7 +135,7 @@ enum OpenBlock {
 
 struct PendingToolCall {
     content_index: usize,
-    json: String,
+    arguments: ToolCallArgumentsStream,
     ended: bool,
 }
 
@@ -288,7 +288,11 @@ impl MessageBuilder {
             ..Default::default()
         }));
         let content_index = self.message.content.len() - 1;
-        self.tool_calls.push(PendingToolCall { content_index, json: String::new(), ended: false });
+        self.tool_calls.push(PendingToolCall {
+            content_index,
+            arguments: ToolCallArgumentsStream::new(),
+            ended: false,
+        });
         self.sender.push(AssistantMessageEvent::ToolcallStart { content_index, partial: self.message.clone() });
         self.tool_calls.len() - 1
     }
@@ -302,14 +306,12 @@ impl MessageBuilder {
         }
     }
 
-    /// Append a raw JSON fragment of the tool arguments.
+    /// Append a raw JSON fragment of the tool arguments. Each fragment is parsed once.
     pub fn tool_call_delta(&mut self, handle: usize, delta: &str) {
         let Some(pending) = self.tool_calls.get_mut(handle) else { return };
-        pending.json.push_str(delta);
         let content_index = pending.content_index;
-        if let Some(Value::Object(arguments)) = parse_streaming_json(&pending.json)
-            && let ContentBlock::ToolCall(call) = &mut self.message.content[content_index]
-        {
+        let arguments = pending.arguments.append(delta).clone();
+        if let ContentBlock::ToolCall(call) = &mut self.message.content[content_index] {
             call.arguments = arguments;
         }
         self.sender.push(AssistantMessageEvent::ToolcallDelta {
@@ -322,11 +324,7 @@ impl MessageBuilder {
     /// Replace a tool call's raw arguments text. The call parses it strictly when it ends.
     pub fn tool_call_json(&mut self, handle: usize, json: &str) {
         let Some(pending) = self.tool_calls.get_mut(handle) else { return };
-        pending.json = json.to_string();
-        let arguments = match parse_streaming_json(json) {
-            Some(Value::Object(arguments)) => arguments,
-            _ => JsonObject::new(),
-        };
+        let arguments = pending.arguments.replace(json).1.clone();
         if let Some(call) = self.tool_call_mut(handle) {
             call.arguments = arguments;
         }
@@ -335,7 +333,8 @@ impl MessageBuilder {
     /// Replace a tool call's arguments with a complete object.
     pub fn tool_call_arguments(&mut self, handle: usize, arguments: JsonObject) {
         if let Some(pending) = self.tool_calls.get_mut(handle) {
-            pending.json = Value::Object(arguments.clone()).to_string();
+            pending.arguments = ToolCallArgumentsStream::new();
+            pending.arguments.append(&Value::Object(arguments.clone()).to_string());
         }
         if let Some(call) = self.tool_call_mut(handle) {
             call.arguments = arguments;
@@ -349,7 +348,8 @@ impl MessageBuilder {
         pending.ended = true;
         let content_index = pending.content_index;
         // Arguments set through `tool_call_mut` have no JSON text and stay as they are.
-        let parsed = (!pending.json.trim().is_empty()).then(|| parse_tool_call_arguments(&pending.json));
+        let arguments = std::mem::take(&mut pending.arguments);
+        let parsed = (!arguments.text().trim().is_empty()).then(|| arguments.finish());
         let ContentBlock::ToolCall(call) = &mut self.message.content[content_index] else { return };
         if let Some((arguments, arguments_error)) = parsed {
             call.arguments = arguments;

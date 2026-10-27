@@ -6,6 +6,9 @@ use std::collections::{BTreeMap, HashMap};
 use serde_json::{Value, json};
 
 use crate::providers::common::{SseHandler, as_u64};
+use crate::providers::constrained_sampling::{
+    GrammarToolInputJsonBuffer, append_grammar_tool_input_json_delta, close_grammar_tool_input_json,
+};
 use crate::sse::SseEvent;
 use crate::stream::MessageBuilder;
 use crate::types::{ContentBlock, JsonObject, Model, ModelCost, StopReason, Usage};
@@ -13,43 +16,41 @@ use crate::types::{ContentBlock, JsonObject, Model, ModelCost, StopReason, Usage
 const CHATGPT_USAGE_URL: &str = "https://chatgpt.com/settings/usage";
 const CHATGPT_WORKSPACE_LIMIT_HINT: &str = "You've reached your ChatGPT workspace's usage limit. Ask your workspace admin to increase it at admin.openai.com → Workspace → Usage limits.";
 
-/// Streamed raw input of a grammar (custom) tool, re-encoded as a JSON object delta.
-#[derive(Default)]
+/// Streamed raw input of a grammar (custom) tool, re-encoded as JSON argument text.
 struct GrammarInput {
     property: String,
-    input: String,
-    started: bool,
-    closed: bool,
+    buffer: GrammarToolInputJsonBuffer,
+    /// JSON text of the item's initial input, sent with the first delta.
+    unsent: String,
 }
 
 impl GrammarInput {
-    /// The JSON text to append for `next` (the whole input so far), closing the object when `close`.
-    fn append(&mut self, next: &str, close: bool) -> Result<Option<String>, String> {
-        if self.closed {
-            if close && next == self.input {
-                return Ok(None);
-            }
-            return Err(format!("grammar tool input for property \"{}\" changed after it was closed", self.property));
+    fn new(property: String, initial: &str) -> Self {
+        let mut buffer = GrammarToolInputJsonBuffer::default();
+        let unsent = append_grammar_tool_input_json_delta(&mut buffer, &property, initial).ok().flatten();
+        Self { property, buffer, unsent: unsent.unwrap_or_default() }
+    }
+
+    fn append(&mut self, delta: &str) -> Result<Option<String>, String> {
+        let json = append_grammar_tool_input_json_delta(&mut self.buffer, &self.property, delta)?;
+        Ok(self.send(json))
+    }
+
+    /// Close the input with the provider's complete input, if it sent one.
+    fn close(&mut self, input: Option<&str>) -> Result<Option<String>, String> {
+        let json = close_grammar_tool_input_json(&mut self.buffer, &self.property, input)?;
+        Ok(self.send(json))
+    }
+
+    fn send(&mut self, json: Option<String>) -> Option<String> {
+        if self.unsent.is_empty() {
+            return json;
         }
-        let Some(delta) = next.strip_prefix(self.input.as_str()) else {
-            return Err(format!("grammar tool input for property \"{}\" changed non-monotonically", self.property));
-        };
-        if !close && delta.is_empty() {
-            return Ok(None);
-        }
-        let mut text = String::new();
-        if !self.started {
-            text.push_str(&format!("{{{}:\"", json!(self.property)));
-            self.started = true;
-        }
-        let encoded = json!(delta).to_string();
-        text.push_str(&encoded[1..encoded.len() - 1]);
-        self.input = next.to_string();
-        if close {
-            text.push_str("\"}");
-            self.closed = true;
-        }
-        Ok(Some(text))
+        Some(std::mem::take(&mut self.unsent) + &json.unwrap_or_default())
+    }
+
+    fn arguments(&self) -> JsonObject {
+        JsonObject::from_iter([(self.property.clone(), json!(self.buffer.input))])
     }
 }
 
@@ -181,13 +182,12 @@ impl SseHandler for ResponsesStream {
             }
             "response.custom_tool_call_input.delta" | "response.custom_tool_call_input.done" => {
                 if let Some(Slot::Custom { handle, grammar }) = self.slots.get_mut(&output_index) {
-                    let done = kind.ends_with(".done");
-                    let next = if done {
-                        data["input"].as_str().unwrap_or_default().to_string()
+                    let text = if kind.ends_with(".done") {
+                        grammar.close(data["input"].as_str())?
                     } else {
-                        format!("{}{delta}", grammar.input)
+                        grammar.append(delta)?
                     };
-                    if let Some(text) = grammar.append(&next, done)? {
+                    if let Some(text) = text {
                         builder.tool_call_delta(*handle, &text);
                     }
                 }
@@ -259,9 +259,12 @@ impl ResponsesStream {
                     Slot::Function { handle, json }
                 } else {
                     let property = self.grammar_properties.get(&name).cloned().unwrap_or_else(|| "input".into());
-                    let arguments = JsonObject::from_iter([(property.clone(), json!(text("input")))]);
-                    builder.tool_call_arguments(handle, arguments);
-                    Slot::Custom { handle, grammar: GrammarInput { property, ..GrammarInput::default() } }
+                    // Partial arguments come from the JSON deltas, which start with the initial input.
+                    let grammar = GrammarInput::new(property, &text("input"));
+                    if let Some(call) = builder.tool_call_mut(handle) {
+                        call.arguments = grammar.arguments();
+                    }
+                    Slot::Custom { handle, grammar }
                 }
             }
             _ => return,
@@ -315,11 +318,10 @@ impl ResponsesStream {
                 self.finish_tool(builder, handle, item);
             }
             (Some(Slot::Custom { handle, mut grammar }), Some("custom_tool_call")) => {
-                let input = item["input"].as_str().map_or_else(|| grammar.input.clone(), str::to_string);
-                if let Some(text) = grammar.append(&input, true)? {
+                if let Some(text) = grammar.close(item["input"].as_str())? {
                     builder.tool_call_delta(handle, &text);
                 }
-                builder.tool_call_arguments(handle, JsonObject::from_iter([(grammar.property, json!(input))]));
+                builder.tool_call_arguments(handle, grammar.arguments());
                 self.finish_tool(builder, handle, item);
             }
             (Some(slot), _) => {
