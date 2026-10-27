@@ -104,6 +104,24 @@ fn crops_a_kitty_image_in_a_padded_colored_box_whose_first_line_is_above_the_vie
 }
 
 #[test]
+fn crops_a_kitty_image_whose_placeholder_rows_contain_text_when_its_first_line_is_above_the_viewport() {
+    // Regression test for #11271: borders or side-by-side text on placeholder rows stopped the search.
+    let _guard = global_state_lock();
+    let h = Harness::new(20, 3);
+    let image_line = kitty_line(11272, 3, 100, 100);
+    h.tui.add_child(component(FnComponent::fixed(&["before", &image_line, "   | side", "   | side"])));
+    h.tui.add_child(component(FnComponent::fixed(&["after", "end"])));
+    h.tui.start();
+    wait_for_render();
+
+    assert_eq!(h.tui.viewport_top(), 3);
+    assert!(h.events().iter().any(
+        |event| matches!(event, TerminalEvent::Write(data) if data.contains("i=11272") && data.contains("y=66,h=34,r=1"))
+    ));
+    h.stop();
+}
+
+#[test]
 fn redraws_wezterm_kitty_images_after_writes_to_covered_rows() {
     // Regression test for #10319: a scrollbar update below an unchanged image anchor erased its cells.
     let _guard = global_state_lock();

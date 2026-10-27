@@ -1,18 +1,12 @@
 //! Painting laid-out boxes and scrollbars into screen rows.
 
-use std::sync::LazyLock;
-
-use regex::Regex;
-
 use super::{LayoutBox, OSC133_ZONE_PREFIX};
 use crate::components::scroll_view::ScrollViewScrollbar;
-use crate::terminal_image::{crop_kitty_image_line, get_kitty_image_metadata, is_image_line};
+use crate::terminal_image::{crop_kitty_image_line, get_kitty_image_metadata, get_max_kitty_image_rows, is_image_line};
 use crate::tui::composite_tui_line;
 use crate::utils::{
-    extract_ansi_code, get_active_background_ansi, get_grapheme_cell_range, js_trim, slice_by_column, visible_width,
+    extract_ansi_code, get_active_background_ansi, get_grapheme_cell_range, slice_by_column, visible_width,
 };
-
-static SGR_CODE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\x1b\[[0-9;:]*m").expect("valid regex"));
 
 /// Position of a scroll view's scrollbar track and thumb, in screen cells.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,26 +162,27 @@ pub(super) fn paint_box(layout_box: &LayoutBox, screen: &mut [String], total_wid
     if let (Some(scroll_view), Some(content)) = (&layout_box.scroll_view, &layout_box.scroll_content_lines) {
         let scroll_top = scroll_view.scroll_top();
         if scroll_top > 0 && rect.height > 0 {
-            for image_row in (0..scroll_top).rev() {
+            // Find the nearest image line above the viewport. Placeholder rows below an image line may
+            // contain padding, borders, or side-by-side text, so the search is bounded by the tallest
+            // registered image instead of by row content.
+            let min_row = scroll_top.saturating_sub(get_max_kitty_image_rows());
+            for image_row in (min_row..scroll_top).rev() {
                 let image_line = content.get(image_row).map(String::as_str).unwrap_or("");
-                if let Some(metadata) = get_kitty_image_metadata(image_line) {
-                    let hidden_rows = scroll_top - image_row;
-                    if hidden_rows < metadata.rows {
-                        let visible_rows = (rect.height as usize).min(metadata.rows - hidden_rows);
-                        let cropped = crop_kitty_image_line(image_line, hidden_rows, visible_rows);
-                        if rect.x == 0 && rect.width >= total_width as i64 && rect.y >= 0 {
-                            if let Some(slot) = screen.get_mut(rect.y as usize) {
-                                *slot = cropped;
-                            }
+                if !is_image_line(image_line) {
+                    continue;
+                }
+                let Some(metadata) = get_kitty_image_metadata(image_line) else { continue };
+                let hidden_rows = scroll_top - image_row;
+                if hidden_rows < metadata.rows {
+                    let visible_rows = (rect.height as usize).min(metadata.rows - hidden_rows);
+                    let cropped = crop_kitty_image_line(image_line, hidden_rows, visible_rows);
+                    if rect.x == 0 && rect.width >= total_width as i64 && rect.y >= 0 {
+                        if let Some(slot) = screen.get_mut(rect.y as usize) {
+                            *slot = cropped;
                         }
                     }
-                    break;
                 }
-                // Image placeholder rows inside padded or colored boxes contain only
-                // spaces and SGR codes; keep searching past them for the image line.
-                if !js_trim(&SGR_CODE.replace_all(image_line, "")).is_empty() {
-                    break;
-                }
+                break;
             }
         }
     }
