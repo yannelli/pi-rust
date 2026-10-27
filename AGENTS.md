@@ -13,7 +13,7 @@
 
 - Upstream is `earendil-works/pi` on GitHub. [`docs/parity/upstream.json`](docs/parity/upstream.json) records the upstream commit this port has caught up to.
 - When you port an upstream commit, write `upstream <sha>` with the 9-character SHA in the commit message, for example `fix(ai): recover from Copilot request-size overflow (upstream 73f8de80b)`. The parity report marks a commit as ported only on that exact text, so do not write `upstream <sha>` for a commit you did not port.
-- Record accepted differences in [`docs/parity/allowlist.json`](docs/parity/allowlist.json) with a reason, and open gaps in [`docs/parity/GAPS.md`](docs/parity/GAPS.md). User-facing differences also go in the README section "Differences from the TypeScript pi".
+- Record accepted differences in [`docs/parity/allowlist.json`](docs/parity/allowlist.json) with a reason, and open gaps in [`docs/parity/GAPS.md`](docs/parity/GAPS.md). User-facing differences also go in the README section "Differences from upstream pi".
 - `cargo xtask parity --upstream <checkout>` writes the gap report. The Parity workflow runs it daily and updates the issue labeled `parity-report`.
 
 # Playbooks
