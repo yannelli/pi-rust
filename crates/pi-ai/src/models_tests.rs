@@ -147,6 +147,25 @@ fn upsert_keeps_chat_models_and_classifiers_with_one_id_apart() {
     assert!(same.iter().any(|model| models_are_equal(model, &classifier)));
 }
 
+#[test]
+fn provider_compat_applies_to_classifier_models() {
+    let mut registry = ModelRegistry::builtin();
+    registry
+        .apply_json(
+            r#"{"providers":{"typesafe":{"baseUrl":"https://proxy.example.com/v1",
+            "compat":{"imageInput":"state-image-urls","sendImageOptInHeader":false}}}}"#,
+        )
+        .unwrap();
+    let jev = registry.all_models().iter().find(|model| model.provider == "typesafe" && model.id == "jev-latest");
+    let jev = jev.expect("bundled jev-latest");
+    assert_eq!(
+        (jev.model_type.as_deref(), jev.base_url.as_str()),
+        (Some("classifier"), "https://proxy.example.com/v1")
+    );
+    let compat = serde_json::json!({"imageInput": "state-image-urls", "sendImageOptInHeader": false});
+    assert_eq!(jev.compat, Some(compat));
+}
+
 fn schema_error(text: &str) -> String {
     validate_models_json(text, "/tmp/models.json").unwrap_err().to_string()
 }

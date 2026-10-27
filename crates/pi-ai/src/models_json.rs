@@ -282,6 +282,11 @@ pub(crate) fn apply_provider(provider: &str, base: Vec<Model>, config: &Provider
             }
             if is_chat(&model) {
                 model.compat = merge_compat(model.compat.as_ref(), config.compat.as_ref());
+            } else if let (Some("classifier"), Some(patch)) = (model.model_type.as_deref(), &config.compat) {
+                // Classifier APIs read their own compat fields, such as how a System One service takes images.
+                let mut compat = model.compat.as_ref().and_then(Value::as_object).cloned().unwrap_or_default();
+                compat.extend(patch.iter().map(|(key, value)| (key.clone(), value.clone())));
+                model.compat = Some(Value::Object(compat));
             }
             model
         })
