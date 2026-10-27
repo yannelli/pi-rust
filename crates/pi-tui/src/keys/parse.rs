@@ -2,8 +2,8 @@
 
 use super::constants::{
     ALT, CP_BACKSPACE, CP_DELETE, CP_DOWN, CP_END, CP_ENTER, CP_ESCAPE, CP_F1, CP_F12, CP_HOME, CP_INSERT, CP_KP_ENTER,
-    CP_LEFT, CP_PAGE_DOWN, CP_PAGE_UP, CP_RIGHT, CP_SPACE, CP_TAB, CP_UP, CTRL, LOCK_MASK, SHIFT, SHIFTED_SYMBOL_KEYS,
-    SUPER, SYMBOL_KEYS, char_code_unit, int32, is_symbol_code, legacy_sequence_key_id,
+    CP_LEFT, CP_PAGE_DOWN, CP_PAGE_UP, CP_RIGHT, CP_SPACE, CP_TAB, CP_UP, CTRL, KITTY_FUNCTIONAL_PUA, LOCK_MASK, SHIFT,
+    SHIFTED_SYMBOL_KEYS, SUPER, SYMBOL_KEYS, char_code_unit, int32, is_symbol_code, legacy_sequence_key_id,
     logical_shifted_symbol_candidate, normalize_kitty_functional_codepoint,
     normalize_shifted_letter_identity_codepoint,
 };
@@ -58,7 +58,7 @@ fn format_parsed_key(codepoint: i64, modifier: i64, base_layout_key: Option<i64>
         CP_DOWN => "down".to_string(),
         CP_LEFT => "left".to_string(),
         CP_RIGHT => "right".to_string(),
-        CP_F1..=CP_F12 => format!("f{}", effective - CP_F1 + 1),
+        CP_F12..=CP_F1 => format!("f{}", CP_F1 - effective + 1),
         48..=57 | 97..=122 => ascii_name(effective),
         _ if is_symbol_code(effective, SYMBOL_KEYS) => ascii_name(effective),
         _ => return None,
@@ -206,7 +206,9 @@ pub fn decode_kitty_printable(data: &str) -> Option<String> {
         }
     }
     let effective = normalize_kitty_functional_codepoint(effective);
-    if effective < 32 {
+    // Unmapped Kitty functional keys (F13 to F35, media keys) are not text; keypad keys were
+    // normalized to ASCII above.
+    if effective < 32 || KITTY_FUNCTIONAL_PUA.contains(&effective) {
         return None;
     }
     char_from_codepoint(effective)

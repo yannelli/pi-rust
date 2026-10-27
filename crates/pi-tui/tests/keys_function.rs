@@ -4,7 +4,8 @@ use std::sync::MutexGuard;
 
 use pi_tui::env::global_state_lock;
 use pi_tui::keys::{
-    KeyEventType, is_key_release, is_key_repeat, kitty_event_type, matches_key, parse_key, set_kitty_protocol_active,
+    KeyEventType, decode_kitty_printable, decode_printable_key, is_key_release, is_key_repeat, kitty_event_type,
+    matches_key, parse_key, set_kitty_protocol_active,
 };
 
 /// Holds the global state lock with the Kitty flag set; resets the flag on drop.
@@ -96,11 +97,31 @@ fn ignores_lock_modifiers() {
     assert!(matches_key("\x1b[1;69Q", "ctrl+f2"));
 }
 
+// Upstream deb12d78e: Kitty functional codepoints (F13 to F35 and the CSI u codes of other
+// functional keys) are neither keys pi names nor text.
 #[test]
-fn matches_kitty_functional_codepoints() {
+fn ignores_unmapped_kitty_functional_keys() {
     let _state = kitty(true);
-    assert_key("\x1b[57364u", "f1");
-    assert_key("\x1b[57375;5u", "ctrl+f12");
+    for data in ["\x1b[57376u", "\x1b[57398;2u", "\x1b[57364u"] {
+        assert_eq!(decode_kitty_printable(data), None, "{data:?}");
+        assert_eq!(decode_printable_key(data), None, "{data:?}");
+        assert_eq!(parse_key(data), None, "{data:?}");
+    }
+    assert!(!matches_key("\x1b[57364u", "f1"));
+    // Keypad keys still decode.
+    assert_eq!(decode_kitty_printable("\x1b[57399u").as_deref(), Some("0"));
+}
+
+#[test]
+fn matches_upstream_function_key_cases() {
+    let _state = kitty(true);
+    assert!(matches_key("\x1b[1;2S", "shift+f4"));
+    assert!(matches_key("\x1b[15;5~", "ctrl+f5"));
+    assert!(matches_key("\x1b[24;3~", "alt+f12"));
+    assert!(matches_key("\x1b[15;1:2~", "f5"));
+    assert_eq!(parse_key("\x1b[21;2~").as_deref(), Some("shift+f10"));
+    assert_eq!(parse_key("\x1b[1;5R"), None);
+    assert!(is_key_repeat("\x1b[1;1:2S"));
 }
 
 #[test]

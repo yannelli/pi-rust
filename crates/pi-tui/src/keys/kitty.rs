@@ -137,8 +137,8 @@ pub(crate) fn parse_kitty_sequence(data: &str) -> Option<ParsedKittySequence> {
         let event_type = parse_event_type(group(&c, 2));
         let codepoint = match &c[3] {
             "P" => CP_F1,
-            "Q" => CP_F1 + 1,
-            _ => CP_F1 + 3,
+            "Q" => CP_F1 - 1,
+            _ => CP_F1 - 3,
         };
         return Some(simple(codepoint, modifier, event_type));
     }
