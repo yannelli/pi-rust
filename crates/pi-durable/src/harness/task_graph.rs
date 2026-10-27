@@ -77,7 +77,7 @@ impl TaskGraphView {
             let mount = lock(&view.mount).take();
             let failure = view.session.failure();
             for (_, observer) in mount.into_iter().flat_map(|mount| mount.observers) {
-                observer.close_session(failure.clone());
+                observer.end(failure.clone());
             }
         })?;
         Ok(view)

@@ -19,7 +19,7 @@ use super::view::ViewObserver;
 use crate::documents::encode;
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{ConversationId, TaskId};
-use crate::session::{CommittedObserver, CommittedWatch, WatchEnd};
+use crate::session::{CommittedWatch, WatchEnd};
 use crate::types::{
     CommitChange, CommitPublication, DocumentCommitChange, TaskQuery, TaskRecord, TaskState, TaskStatus,
 };
@@ -131,8 +131,8 @@ impl ViewObserver for EventsObserver {
         }
     }
 
-    fn close_session(&self, failure: Option<DurableError>) {
-        self.watch.close_session(failure);
+    fn end(&self, failure: Option<DurableError>) {
+        self.watch.end(failure);
     }
 }
 

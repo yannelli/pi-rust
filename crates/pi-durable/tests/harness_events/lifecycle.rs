@@ -295,7 +295,7 @@ async fn ends_the_stream_with_the_harness() {
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &chat_setup(Default::default())).await;
     let stream = watch_events(&harness, root.id, &ctx()).await.unwrap();
     harness.close(&ctx()).await.unwrap();
-    assert!(matches!(stream.closed().await, WatchEnd::SessionClosed));
+    assert!(matches!(stream.closed().await, WatchEnd::Ended));
 }
 
 #[tokio::test]

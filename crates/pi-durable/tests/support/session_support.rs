@@ -88,7 +88,18 @@ pub struct ControlledStorage {
     pub close_failure: Mutex<Option<DurableError>>,
     /// Runs before `task`, `scan_entries`, `mint_id`, `submission`, and `close`; an error fails that call.
     pub call_hook: Mutex<Option<CallHook>>,
+    /// How the next commit, once durable, misbehaves.
+    pub adoption_fault: Mutex<Option<AdoptionFault>>,
+    /// `adopt`, `adopted`, and `resolve` of every commit, in order.
+    pub adoption_order: Mutex<Vec<&'static str>>,
     closed: AtomicBool,
+}
+
+/// A commit that misbehaves once durable: rejects after it adopted, or returns without adopting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdoptionFault {
+    RejectAfterAdopt,
+    SkipAdopt,
 }
 
 impl ControlledStorage {
@@ -193,7 +204,7 @@ impl ControlledStorage {
 
 #[async_trait]
 impl Storage for ControlledStorage {
-    async fn commit(&self, writes: &[StorageWrite], context: &Context) -> DurableResult<Seq> {
+    async fn commit(&self, writes: &[StorageWrite], adopt: Adopt<'_>, context: &Context) -> DurableResult<Seq> {
         let failure = self.filtered_failure.lock().unwrap().take();
         match failure {
             Some((filter, error)) if filter(writes) => return Err(error),
@@ -210,7 +221,22 @@ impl Storage for ControlledStorage {
             return Err(error);
         }
         self.open()?;
-        self.inner.commit(writes, context).await
+        let fault = self.adoption_fault.lock().unwrap().take();
+        if fault == Some(AdoptionFault::SkipAdopt) {
+            return self.inner.commit(writes, &|_| {}, context).await;
+        }
+        let order = &self.adoption_order;
+        let recording = |seq: Seq| {
+            order.lock().unwrap().push("adopt");
+            adopt(seq);
+            order.lock().unwrap().push("adopted");
+        };
+        let seq = self.inner.commit(writes, &recording, context).await?;
+        order.lock().unwrap().push("resolve");
+        if fault == Some(AdoptionFault::RejectAfterAdopt) {
+            return Err(DurableError::error("reclaim failed"));
+        }
+        Ok(seq)
     }
 
     async fn mint_id(&self) -> DurableResult<u64> {

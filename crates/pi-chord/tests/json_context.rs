@@ -152,18 +152,26 @@ async fn carries_an_explicit_telemetry_span_without_changing_cancellation() {
     let telemetry = InMemoryTelemetryContext::new();
     BACKGROUND_CONTEXT.telemetry().add_event("dropped", SpanAttributes::new());
     let (parent, controller) = with_cancel(&BACKGROUND_CONTEXT);
-    let traced = trace_in(&parent, SpanOptions::new("ignored"), |context| async move {
-        // The parent's NOOP span opens NOOP children, so nothing records.
-        context.telemetry().add_event("dropped", SpanAttributes::new());
-        Ok::<_, ChordError>(context)
-    });
+    let traced = trace_in(
+        SpanOptions::new("ignored"),
+        |context| async move {
+            // The parent's NOOP span opens NOOP children, so nothing records.
+            context.telemetry().add_event("dropped", SpanAttributes::new());
+            Ok::<_, ChordError>(context)
+        },
+        &parent,
+    );
     traced.await.unwrap();
     let span = telemetry.open_span(SpanOptions::new("outer"));
     let context = with_telemetry(span.clone(), &parent);
-    let child = trace_in(&context, SpanOptions::new("inner"), |child| async move {
-        child.telemetry().add_event("inside", SpanAttributes::new());
-        Ok::<_, ChordError>(child)
-    })
+    let child = trace_in(
+        SpanOptions::new("inner"),
+        |child| async move {
+            child.telemetry().add_event("inside", SpanAttributes::new());
+            Ok::<_, ChordError>(child)
+        },
+        &context,
+    )
     .await
     .unwrap();
     span.end(SpanOutcome::Ok);

@@ -39,12 +39,12 @@ impl CrashStorage {
 
 #[async_trait]
 impl Storage for CrashStorage {
-    async fn commit(&self, writes: &[StorageWrite], context: &Context) -> DurableResult<Seq> {
+    async fn commit(&self, writes: &[StorageWrite], adopt: Adopt<'_>, context: &Context) -> DurableResult<Seq> {
         self.alive().await;
         if let Some(error) = self.fail_next.lock().unwrap().take() {
             return Err(error);
         }
-        self.inner.commit(writes, context).await
+        self.inner.commit(writes, adopt, context).await
     }
 
     async fn mint_id(&self) -> DurableResult<u64> {
@@ -331,7 +331,7 @@ async fn keeps_the_hosts_wake_active_until_opens_recovery_pass_has_landed() {
     let record = raw.task(id, &context()).await.unwrap().unwrap();
     let outcome = TaskOutcome::Completed { result: Some(Json::Null) };
     let completing = TaskRecord { memos: None, state: TaskState::Completing { outcome }, ..record };
-    raw.commit(&[StorageWrite::Task { value: completing }], &context()).await.unwrap();
+    raw.commit(&[StorageWrite::Task { value: completing }], &|_| {}, &context()).await.unwrap();
     raw.close(&context()).await.unwrap();
 
     // That pass's commit fails, as on a platform reset.

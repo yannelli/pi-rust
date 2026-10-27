@@ -101,7 +101,7 @@ async fn seed_running_task(storage: &dyn Storage) {
     .unwrap();
     let conversation: ConversationRecord = serde_json::from_value(json!({ "id": conversation_id })).unwrap();
     let writes = [StorageWrite::Conversation { value: conversation }, StorageWrite::Task { value: task }];
-    storage.commit(&writes, &context()).await.unwrap();
+    storage.commit(&writes, &|_| {}, &context()).await.unwrap();
 }
 
 /// A registry reader that counts live subscriptions.
@@ -413,7 +413,7 @@ async fn publishes_no_frame_to_states_and_watches_from_a_commit_that_settles_dur
     assert!(view_state.value().same_ref(&view_value));
     assert_eq!(serde_json::Value::from(&graph_state.value()), json!({ "tasks": {} }));
     for watch in [&graph_watch, &doc_watch, &view_watch] {
-        assert!(matches!(watch.closed().await, WatchEnd::SessionClosed));
+        assert!(matches!(watch.closed().await, WatchEnd::Ended));
     }
     // The commit itself settled.
     assert!(storage.last_commit().iter().any(|write| matches!(write, StorageWrite::Entry { .. })));

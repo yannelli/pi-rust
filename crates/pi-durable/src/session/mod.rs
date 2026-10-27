@@ -28,13 +28,15 @@ pub use draft::{Draft, DraftCore};
 pub use forks::{ForkDocumentCopy, prepare_fork_document_copies};
 pub use line::SharedResult;
 pub use observation::{CommittedObserver, CommittedStateSource, Release, retirement_operations};
+pub use pi_chord::WatchHandle;
 pub use tx::{TransactionScope, Tx, TxFuture};
 pub use watch::{CommittedWatch, DocumentWatch, MAX_PENDING_WATCH_FRAMES, ReplaceValue};
 
 use crate::errors::{DurableError, DurableResult};
 use crate::types::{CommitPublication, ConversationRecord, ReportInfo, Storage};
 
-/// A document state: hydrated, read-only, and bound to one committed incarnation. Retirement publishes `null`.
+/// A document state: hydrated, read-only, and bound to one committed incarnation. Retirement publishes `null`. Upstream
+/// removed document states; pi-rust keeps them for its experimental server stack.
 pub type DocumentState = pi_chord::state::AttachedReplicatedState;
 
 /// How the Session ended: `closed`, or `failed` with the error that failed it.
@@ -53,37 +55,8 @@ impl SessionEnd {
     }
 }
 
-/// Why a watch ended (spec section 9.1).
-#[derive(Clone, Debug)]
-pub enum WatchEnd {
-    Stopped,
-    Cancelled,
-    SessionClosed,
-    Retired,
-    ListenerError(DurableError),
-    /// The Session failed; the error is what failed it, usually a storage error.
-    SessionFailed(DurableError),
-}
-
-impl WatchEnd {
-    pub fn reason(&self) -> &'static str {
-        match self {
-            Self::Stopped => "stopped",
-            Self::Cancelled => "cancelled",
-            Self::SessionClosed => "session_closed",
-            Self::Retired => "retired",
-            Self::ListenerError(_) => "listener_error",
-            Self::SessionFailed(_) => "session_failed",
-        }
-    }
-
-    pub fn error(&self) -> Option<&DurableError> {
-        match self {
-            Self::ListenerError(error) | Self::SessionFailed(error) => Some(error),
-            _ => None,
-        }
-    }
-}
+/// Why a watch ended (spec section 9.1): Chord's `WatchEnd` with the Session's error type.
+pub type WatchEnd = pi_chord::WatchEnd<DurableError>;
 
 /// Synchronous post-adoption commit listener. It must not block or call Session operations.
 pub type CommitListener = Arc<dyn Fn(&CommitPublication, &Context) -> DurableResult<()> + Send + Sync>;

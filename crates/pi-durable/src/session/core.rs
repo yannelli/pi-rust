@@ -370,7 +370,7 @@ impl Session {
                 }
                 let batch = writes();
                 if !batch.is_empty() {
-                    core.storage.commit(&batch, &BACKGROUND_CONTEXT).await?;
+                    core.storage.commit(&batch, &|_| {}, &BACKGROUND_CONTEXT).await?;
                 }
                 Ok(())
             })
@@ -429,6 +429,13 @@ impl Session {
     pub fn subscribe_close(&self, listener: impl Fn() + Send + Sync + 'static) -> DurableResult<Unsubscribe> {
         self.0.assert_usable()?;
         Ok(self.0.subscribe_close(Arc::new(listener)))
+    }
+
+    /// Internal, for tests: a weak reference that upgrades while anything keeps the Session kernel alive.
+    #[doc(hidden)]
+    pub fn downgrade(&self) -> Weak<dyn std::any::Any + Send + Sync> {
+        let weak: Weak<SessionCore> = Arc::downgrade(&self.0);
+        weak
     }
 
     /// Internal, for tests: how many documents the cache holds, how many are idle or pinned, and the sweep jobs run.
@@ -496,6 +503,16 @@ where
         signal.throw_if_aborted()?;
     }
     let tx = Tx::new(core.clone(), context.clone(), scope);
+    let result = commit_tx(&core, &tx, change, context).await;
+    tx.release();
+    result
+}
+
+async fn commit_tx<T, F, Fut>(core: &Arc<SessionCore>, tx: &Tx, change: F, context: Context) -> DurableResult<T>
+where
+    F: FnOnce(Tx) -> Fut,
+    Fut: Future<Output = DurableResult<T>>,
+{
     // A callback that caught a failed read must not commit, nor succeed as if it had.
     let result = change(tx.clone()).await.and_then(|value| core.assert_healthy().map(|()| value));
     let value = match result {
@@ -519,18 +536,36 @@ where
         core.sweep_documents();
         return Ok(value);
     }
+    // Storage adopts the batch synchronously once it is durable, before its next commit; the callback keeps its own
+    // error, so it never reaches Storage.
+    let adoption: Mutex<Option<DurableResult<Vec<DocumentCommitChange>>>> = Mutex::new(None);
+    let adopt_tx = tx.clone();
+    let adopt = |committed: Seq| {
+        let adopted = adopt_tx.adopt(committed);
+        *lock(&adoption) = Some(adopted);
+    };
     // Once admitted, caller cancellation does not interrupt Storage settlement.
-    let seq = match core.storage.commit(&writes, &without_abort_signal(&context)).await {
+    let committed = core.storage.commit(&writes, &adopt, &without_abort_signal(&context)).await;
+    let adoption = lock(&adoption).take();
+    let seq = match committed {
         Ok(seq) => seq,
         Err(error) => {
-            tx.discard();
+            // The guard has failed the Session. A rejection after adoption leaves nothing staged to discard.
+            if adoption.is_none() {
+                tx.discard();
+            }
             return Err(error);
         }
     };
-    let documents = match tx.adopt(seq) {
-        Ok(documents) => documents,
-        Err(error) => {
+    let documents = match adoption {
+        Some(Ok(documents)) => documents,
+        Some(Err(error)) => {
             // Storage already committed; a failed adoption leaves memory behind durable state.
+            core.fail(error.clone());
+            return Err(error);
+        }
+        None => {
+            let error = DurableError::error("Storage committed without adopting the batch");
             core.fail(error.clone());
             return Err(error);
         }

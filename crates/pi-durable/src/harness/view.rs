@@ -39,7 +39,8 @@ pub(crate) trait ViewObserver: Send + Sync {
         _context: &Context,
     ) {
     }
-    fn close_session(&self, failure: Option<DurableError>);
+    /// The Session closed, or failed with `failure`.
+    fn end(&self, failure: Option<DurableError>);
 }
 
 struct Committed(Arc<dyn CommittedObserver>);
@@ -49,8 +50,8 @@ impl ViewObserver for Committed {
         self.0.advance(value.clone(), ops.to_vec(), context.clone());
     }
 
-    fn close_session(&self, failure: Option<DurableError>) {
-        self.0.close_session(failure);
+    fn end(&self, failure: Option<DurableError>) {
+        self.0.end(failure);
     }
 }
 
@@ -94,7 +95,7 @@ impl ConversationViews {
             let mounts: Vec<Mount> = lock(&views.mounts).drain().map(|(_, mount)| mount).collect();
             let failure = views.session.failure();
             for (_, observer) in mounts.into_iter().flat_map(|mount| mount.observers) {
-                observer.close_session(failure.clone());
+                observer.end(failure.clone());
             }
         })?;
         Ok(views)

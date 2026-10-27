@@ -11,7 +11,7 @@ use super::DocumentState;
 use super::core::{LoadedDocument, Session, SessionCore};
 use super::guarded::FailureLatch;
 use super::line::lock;
-use super::observation::{CommittedObserver, CommittedStateSource, Release, retirement_operations};
+use super::observation::{CommittedObserver, CommittedStateSource, Release};
 use super::reads::{Def, check_loaded};
 use super::watch::CommittedWatch;
 use crate::documents::{DocFamilyToken, DocScope, DocToken, DocValue, ResolvedAddress};
@@ -20,8 +20,7 @@ use crate::types::{CommitChange, DocumentCommitChange};
 
 /// Operations an observer applies for one change. An observer hydrated under another definition version holds a
 /// differently shaped value, so it receives the new value as a root replacement instead.
-fn observed_operations(observed: &Mutex<u32>, version: Option<u32>, value: Option<&Json>, ops: &[Op]) -> Vec<Op> {
-    let (Some(version), Some(value)) = (version, value) else { return retirement_operations() };
+fn observed_operations(observed: &Mutex<u32>, version: u32, value: &Json, ops: &[Op]) -> Vec<Op> {
     let mut observed = lock(observed);
     if *observed == version {
         return ops.to_vec();
@@ -62,23 +61,25 @@ impl SessionCore {
                 if record.id != record_id {
                     continue;
                 }
-                // A retired incarnation never changes again: its observers keep their last value but pin nothing.
-                if value.is_none() {
+                let context = if target.keeps_cancellation() { context.clone() } else { without_abort_signal(context) };
+                let (Some(version), Some(value)) = (version, value) else {
+                    // A retired incarnation never changes again: its watch delivers the retirement but pins nothing.
                     retired.release();
-                }
-                let ops = observed_operations(&observed, *version, value.as_ref(), ops);
+                    target.retire(context);
+                    continue;
+                };
+                let ops = observed_operations(&observed, *version, value, ops);
                 // A migration-only base changes nothing for an observer of the new version.
                 if ops.is_empty() {
                     continue;
                 }
-                let context = if target.keeps_cancellation() { context.clone() } else { without_abort_signal(context) };
-                target.advance(value.clone().unwrap_or(Json::Null), ops, context);
+                target.advance(value.clone(), ops, context);
             }
             Ok(())
         }));
         let weak = Arc::downgrade(self);
         let close = self.subscribe_close(Arc::new(move || {
-            observer.close_session(weak.upgrade().and_then(|core| core.failure()));
+            observer.end(weak.upgrade().and_then(|core| core.failure()));
         }));
         release.push(move || {
             commits.unsubscribe();

@@ -146,7 +146,7 @@ async fn writes_the_same_jsonl_bytes_as_typescript() {
     let directory = tempfile::tempdir().unwrap();
     let storage = open_jsonl(directory.path()).await;
     for batch in batches() {
-        storage.commit(&batch, ctx()).await.unwrap();
+        storage.commit(&batch, &|_| {}, ctx()).await.unwrap();
     }
     storage.close(ctx()).await.unwrap();
     let golden = fixtures().join("jsonl");
@@ -197,7 +197,7 @@ async fn writes_the_same_sqlite_rows_as_typescript() {
     let path = directory.path().join("storage.sqlite");
     let storage = open_sqlite_storage(&path.to_string_lossy()).await.unwrap();
     for batch in batches() {
-        storage.commit(&batch, ctx()).await.unwrap();
+        storage.commit(&batch, &|_| {}, ctx()).await.unwrap();
     }
     storage.close(ctx()).await.unwrap();
     let golden = tempfile::tempdir().unwrap();

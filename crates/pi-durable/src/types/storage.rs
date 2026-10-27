@@ -139,7 +139,7 @@ pub enum DocumentCommitChange {
         /// Exact adopted operations for an ordinary update; empty for creation and retirement.
         ops: Vec<Op>,
     },
-    /// Definition-free child initialization; consumers hydrate through state or watch acquisition.
+    /// Definition-free child initialization; consumers hydrate through watch acquisition.
     Copy { record: DocumentRecord, conversation_id: ConversationId, source: DocumentCopySource },
 }
 
@@ -160,14 +160,21 @@ pub struct CommitPublication {
     pub changes: Vec<CommitChange>,
 }
 
+/// The caller's in-memory adoption of one durable batch, so memory always shows a complete prefix of the log. It
+/// must not panic.
+pub type Adopt<'a> = &'a (dyn Fn(Seq) + Send + Sync);
+
 /// Atomic persistence boundary for Session records. An error fails the Session, except a `StorageRequest` error
 /// or a cancellation from a read. Any error from `commit()` or `mint_id()` is fatal.
 #[async_trait]
 pub trait Storage: Send + Sync {
-    /// Atomically persist one batch and return its sequence. Once it returns, later reads see it.
-    async fn commit(&self, writes: &[StorageWrite], context: &Context) -> DurableResult<Seq>;
+    /// Atomically persist one batch and return its sequence. Once the batch is durable, call `adopt(seq)` exactly
+    /// once, synchronously and before this storage's next commit starts, then return `seq`; a commit that fails
+    /// before it is durable never calls `adopt`. Once it returns, later reads see the batch.
+    async fn commit(&self, writes: &[StorageWrite], adopt: Adopt<'_>, context: &Context) -> DurableResult<Seq>;
 
-    /// A fresh ID above every ID minted or stored before, also across reopen: scans order by ID as creation order.
+    /// A fresh ID above every ID minted since this storage was opened and every ID stored, also across reopen: scans
+    /// order by ID as creation order.
     async fn mint_id(&self) -> DurableResult<u64>;
 
     async fn conversation(&self, id: ConversationId, context: &Context) -> DurableResult<Option<ConversationRecord>>;

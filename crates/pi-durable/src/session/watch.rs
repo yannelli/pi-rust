@@ -5,12 +5,12 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 
 use pi_chord::delta::Op;
-use pi_chord::{AbortSignal, BoxFuture, Context, Json, without_abort_signal};
+use pi_chord::{AbortSignal, BoxFuture, Context, Json, WatchHandle, without_abort_signal};
 use tokio::sync::watch;
 
 use super::WatchEnd;
 use super::line::lock;
-use super::observation::{CommittedObserver, Release};
+use super::observation::{CommittedObserver, Release, retirement_operations};
 use crate::errors::{DurableError, DurableResult};
 
 /// Maximum exact committed frames kept behind one unavailable watch listener.
@@ -25,6 +25,8 @@ struct Frame {
     value: Json,
     ops: Vec<Op>,
     context: Context,
+    /// The retirement frame: the watch ends `retired` once it is delivered.
+    retires: bool,
 }
 
 #[derive(Default)]
@@ -38,18 +40,20 @@ struct WatchState {
     retired: bool,
     end: Option<WatchEnd>,
     cancellation: Option<(AbortSignal, u64)>,
+    /// References into the source, dropped on termination.
+    release: Option<Arc<Release>>,
+    report: Option<Report>,
+    replace: Option<ReplaceValue>,
 }
 
 struct Inner {
     state: Mutex<WatchState>,
-    release: Arc<Release>,
-    report: Report,
-    replace: Option<ReplaceValue>,
     closed: watch::Sender<Option<WatchEnd>>,
 }
 
-/// Watch bound to one document incarnation or view (upstream `CommittedWatch` and `WatchHandle`). A `null` value
-/// retires it. Cheap to clone; every clone is the same watch.
+/// Watch bound to one document incarnation or view (upstream `CommittedWatch`). Its source ends it explicitly:
+/// `retire()` for a retired document, `end()` for a closed or failed Session. Termination drops every reference the
+/// watch holds into its source. Cheap to clone; every clone is the same watch.
 #[derive(Clone)]
 pub struct CommittedWatch(Arc<Inner>);
 
@@ -66,8 +70,14 @@ impl CommittedWatch {
         replace: Option<ReplaceValue>,
     ) -> Self {
         let (closed, _) = watch::channel(None);
-        let state = WatchState { value, ..WatchState::default() };
-        Self(Arc::new(Inner { state: Mutex::new(state), release, report: Arc::new(report), replace, closed }))
+        let state = WatchState {
+            value,
+            release: Some(release),
+            report: Some(Arc::new(report)),
+            replace,
+            ..WatchState::default()
+        };
+        Self(Arc::new(Inner { state: Mutex::new(state), closed }))
     }
 
     /// The acquisition revision before `start()`, then the latest delivered immutable revision.
@@ -158,35 +168,40 @@ impl CommittedWatch {
     }
 
     async fn drain(&self) {
-        let listener = {
+        {
             let mut state = lock(&self.0.state);
             if state.running || state.end.is_some() || !state.started {
                 return;
             }
-            let Some(listener) = state.listener.clone() else { return };
             state.running = true;
-            listener
-        };
+        }
         loop {
-            let frame = {
+            let (frame, listener) = {
                 let mut state = lock(&self.0.state);
                 if state.end.is_some() {
                     break;
                 }
+                let Some(listener) = state.listener.clone() else { break };
                 let Some(frame) = state.pending.pop_front() else { break };
                 state.value = frame.value.clone();
-                frame
+                (frame, listener)
             };
-            let retired = frame.value.is_null();
+            let retires = frame.retires;
             let delivery = without_abort_signal(&frame.context);
-            if let Err(error) = listener(frame.value, frame.ops, delivery).await {
-                if lock(&self.0.state).end.is_none() {
-                    (self.0.report)(&error);
+            let delivered = listener(frame.value, frame.ops, delivery).await;
+            drop(listener);
+            if let Err(error) = delivered {
+                let report = {
+                    let state = lock(&self.0.state);
+                    if state.end.is_some() { None } else { state.report.clone() }
+                };
+                if let Some(report) = report {
+                    report(&error);
                     self.terminate(WatchEnd::ListenerError(error));
                 }
                 break;
             }
-            if retired {
+            if retires {
                 self.terminate(WatchEnd::Retired);
                 break;
             }
@@ -201,42 +216,51 @@ impl CommittedWatch {
         }
     }
 
-    /// End the watch once: detach, drop pending frames, and settle `closed`.
+    /// End the watch once: detach, drop pending frames and every reference into the source, and settle `closed`. A
+    /// callback already running keeps running.
     fn terminate(&self, end: WatchEnd) {
-        let cancellation = {
+        let (cancellation, release, dropped) = {
             let mut state = lock(&self.0.state);
             if state.end.is_some() {
                 return;
             }
             state.end = Some(end.clone());
             state.pending.clear();
-            state.cancellation.take()
+            let dropped = (state.report.take(), state.replace.take(), state.listener.take());
+            (state.cancellation.take(), state.release.take(), dropped)
         };
-        self.0.release.run();
+        drop(dropped);
         if let Some((signal, id)) = cancellation {
             signal.remove_listener(id);
         }
+        if let Some(release) = release {
+            release.run();
+        }
         self.0.closed.send_replace(Some(end));
     }
-}
 
-impl CommittedObserver for CommittedWatch {
-    fn advance(&self, value: Json, ops: Vec<Op>, context: Context) {
+    /// The source closed: end with `ended`, or with `failed` and the error when the Session failed.
+    pub fn end(&self, failure: Option<DurableError>) {
+        self.terminate(match failure {
+            Some(error) => WatchEnd::Failed(error),
+            None => WatchEnd::Ended,
+        });
+    }
+
+    /// Queue the frame `ops`, which turn the previous value into `value`.
+    pub fn advance(&self, value: Json, ops: Vec<Op>, context: Context) {
         let started = {
             let mut state = lock(&self.0.state);
             if state.end.is_some() || state.retired {
                 return;
             }
-            if value.is_null() {
-                state.retired = true;
-            }
             if state.pending.len() >= MAX_PENDING_WATCH_FRAMES {
                 state.pending.clear();
-                let replacement = self.0.replace.as_ref().map_or(value, |replace| replace());
+                let replacement = state.replace.as_ref().map_or(value, |replace| replace());
                 let ops = vec![Op::Replace(replacement.clone())];
-                state.pending.push_back(Frame { value: replacement, ops, context });
+                state.pending.push_back(Frame { value: replacement, ops, context, retires: false });
             } else {
-                state.pending.push_back(Frame { value, ops, context });
+                state.pending.push_back(Frame { value, ops, context, retires: false });
             }
             state.started
         };
@@ -245,12 +269,61 @@ impl CommittedObserver for CommittedWatch {
         }
     }
 
-    /// End with `session_closed`, or with `session_failed` and the error when the Session failed.
-    fn close_session(&self, failure: Option<DurableError>) {
-        self.terminate(match failure {
-            Some(error) => WatchEnd::SessionFailed(error),
-            None => WatchEnd::SessionClosed,
-        });
+    /// The document incarnation retired: queue the last frame, `[["r", null]]` with value `null`, after which the
+    /// watch ends `retired`. An overflowing backlog is dropped, since the frame replaces the root anyway.
+    pub fn retire(&self, context: Context) {
+        let started = {
+            let mut state = lock(&self.0.state);
+            if state.end.is_some() || state.retired {
+                return;
+            }
+            state.retired = true;
+            if state.pending.len() >= MAX_PENDING_WATCH_FRAMES {
+                state.pending.clear();
+            }
+            let ops = retirement_operations();
+            state.pending.push_back(Frame { value: Json::Null, ops, context, retires: true });
+            state.started
+        };
+        if started {
+            self.schedule();
+        }
+    }
+}
+
+impl WatchHandle<Json, DurableError> for CommittedWatch {
+    fn value(&self) -> Json {
+        CommittedWatch::value(self)
+    }
+
+    fn start<F, Fut>(&self, listener: F) -> DurableResult<()>
+    where
+        F: Fn(Json, Vec<Op>, Context) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = DurableResult<()>> + Send + 'static,
+    {
+        CommittedWatch::start(self, listener)
+    }
+
+    fn stop(&self) -> BoxFuture<WatchEnd> {
+        Box::pin(CommittedWatch::stop(self))
+    }
+
+    fn closed(&self) -> BoxFuture<WatchEnd> {
+        Box::pin(CommittedWatch::closed(self))
+    }
+}
+
+impl CommittedObserver for CommittedWatch {
+    fn advance(&self, value: Json, ops: Vec<Op>, context: Context) {
+        CommittedWatch::advance(self, value, ops, context);
+    }
+
+    fn retire(&self, context: Context) {
+        CommittedWatch::retire(self, context);
+    }
+
+    fn end(&self, failure: Option<DurableError>) {
+        CommittedWatch::end(self, failure);
     }
 
     fn keeps_cancellation(&self) -> bool {

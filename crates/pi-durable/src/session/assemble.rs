@@ -85,6 +85,16 @@ impl Tx {
         abort_changes(&lock(&self.0.state));
     }
 
+    /// Drop what the settled transaction staged. A draft holds its transaction, so the documents staged here would
+    /// otherwise keep the transaction, and through it the Session, alive.
+    pub(crate) fn release(&self) {
+        let staged = {
+            let mut state = lock(&self.0.state);
+            (std::mem::take(&mut state.documents), std::mem::take(&mut state.plans), std::mem::take(&mut state.tasks))
+        };
+        drop(staged);
+    }
+
     async fn assemble(&self) -> DurableResult<Vec<StorageWrite>> {
         let tx = &self.0;
         let mut plans: Vec<DocumentPlan> = lock(&tx.state).documents.iter().filter_map(plan_document).collect();

@@ -1,0 +1,65 @@
+//! Watch types: the one watch API (upstream `watch.ts`).
+
+use std::future::Future;
+
+use crate::context::Context;
+use crate::delta::Op;
+use crate::error::ChordError;
+use crate::json::Json;
+use crate::sync::BoxFuture;
+
+/// Terminal result of one watch. `E` is the error type of the source; upstream errors are untyped.
+#[derive(Clone, Debug)]
+pub enum WatchEnd<E = ChordError> {
+    /// `stop()` was called.
+    Stopped,
+    /// The context the watch was acquired with was cancelled.
+    Cancelled,
+    /// The source was retired; its last frame was `[["r", null]]`.
+    Retired,
+    /// The source closed (its owner ended or closed).
+    Ended,
+    /// The listener failed with the error.
+    ListenerError(E),
+    /// The source failed with the error.
+    Failed(E),
+}
+
+impl<E> WatchEnd<E> {
+    /// The upstream `reason` string.
+    pub fn reason(&self) -> &'static str {
+        match self {
+            Self::Stopped => "stopped",
+            Self::Cancelled => "cancelled",
+            Self::Retired => "retired",
+            Self::Ended => "ended",
+            Self::ListenerError(_) => "listener_error",
+            Self::Failed(_) => "failed",
+        }
+    }
+
+    pub fn error(&self) -> Option<&E> {
+        match self {
+            Self::ListenerError(error) | Self::Failed(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+/// Serialized exact-frame observation of an immutable value with bounded pending delivery.
+pub trait WatchHandle<T = Json, E = ChordError> {
+    /// Acquisition revision before start; latest delivered immutable revision afterward.
+    fn value(&self) -> T;
+
+    /// Install the sole asynchronous listener. Never invokes it inline.
+    fn start<F, Fut>(&self, listener: F) -> Result<(), E>
+    where
+        F: Fn(T, Vec<Op>, Context) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<(), E>> + Send + 'static;
+
+    /// Idempotently stop future callbacks and return this watch's terminal result.
+    fn stop(&self) -> BoxFuture<WatchEnd<E>>;
+
+    /// Settle when the watch terminates; an already-running callback remains caller-owned.
+    fn closed(&self) -> BoxFuture<WatchEnd<E>>;
+}

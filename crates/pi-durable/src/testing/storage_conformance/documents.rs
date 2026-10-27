@@ -57,9 +57,9 @@ pub async fn reconstructs_rewindable_documents(storage: Arc<dyn Storage>) {
     let first_record =
         conversation_document(first_id, "conversation.notes", root_id, DocumentHistory::Rewindable, DocumentFork::AsOf);
     let mut initial = json(r#"{"items":["a"],"nested":{"count":1}}"#);
-    let created_at = storage.commit(&[create(&first_record, 1, initial.clone())], ctx).await.unwrap();
+    let created_at = storage.commit(&[create(&first_record, 1, initial.clone())], &|_| {}, ctx).await.unwrap();
     let delta = ops(r#"[["p",["items"],1,0,["b"]],["s",["nested","count"],2]]"#);
-    let changed_at = storage.commit(&[change_delta(first_id, 1, delta)], ctx).await.unwrap();
+    let changed_at = storage.commit(&[change_delta(first_id, 1, delta)], &|_| {}, ctx).await.unwrap();
 
     initial.get_mut("items").unwrap().push("caller mutation").unwrap();
     let at_create = read(storage, first_id, DocumentPoint::At(created_at)).await.unwrap();
@@ -73,9 +73,9 @@ pub async fn reconstructs_rewindable_documents(storage: Arc<dyn Storage>) {
     assert_eq!(current, Some(json(r#"{"items":["a","b"],"nested":{"count":2}}"#)));
 
     let checkpoint = json(r#"{"items":["checkpoint"],"nested":{"count":3}}"#);
-    let checkpoint_at = storage.commit(&[change_base(first_id, 2, checkpoint.clone())], ctx).await.unwrap();
+    let checkpoint_at = storage.commit(&[change_base(first_id, 2, checkpoint.clone())], &|_| {}, ctx).await.unwrap();
     let replace = ops(r#"[["r",{"items":["replacement"],"nested":{"count":4}}]]"#);
-    let replaced_at = storage.commit(&[change_delta(first_id, 2, replace)], ctx).await.unwrap();
+    let replaced_at = storage.commit(&[change_delta(first_id, 2, replace)], &|_| {}, ctx).await.unwrap();
     let at_changed = read(storage, first_id, DocumentPoint::At(changed_at)).await.unwrap();
     assert_eq!(at_changed.version, 1);
     assert_eq!(at_changed.value, json(r#"{"items":["a","b"],"nested":{"count":2}}"#));
@@ -93,7 +93,7 @@ pub async fn reconstructs_rewindable_documents(storage: Arc<dyn Storage>) {
         StorageWrite::DocumentRetire { id: first_id },
         change_delta(first_id, 2, ops(r#"[["s",["retiring"],true]]"#)),
     ];
-    let retired_at = storage.commit(&writes, ctx).await.unwrap();
+    let retired_at = storage.commit(&writes, &|_| {}, ctx).await.unwrap();
     let address = DocumentAddress { kind: first_record.kind.clone(), scope: first_record.scope, key: None };
     let found = storage.find_document(&address, DocumentPoint::At(changed_at), ctx).await.unwrap();
     assert_eq!(found.map(|record| record.id), Some(first_id));
@@ -137,13 +137,14 @@ pub async fn streams_long_document_tails(storage: Arc<dyn Storage>) {
     let mut initial = Json::empty_object();
     initial.set("revision", 0).unwrap();
     initial.set("rows", rows(512, |value| (value as i64, format!("row-{value}")))).unwrap();
-    let created_at = storage.commit(&[create(&record, 1, initial.clone())], ctx).await.unwrap();
+    let created_at = storage.commit(&[create(&record, 1, initial.clone())], &|_| {}, ctx).await.unwrap();
     let mut before_replacement = initial.clone();
     let mut before_replacement_at = created_at;
     for revision in 1..=24_i64 {
         let index = (revision as usize * 17) % 512;
         set_row(&mut before_replacement, index, revision);
-        before_replacement_at = storage.commit(&[change_delta(id, 1, row_ops(index, revision))], ctx).await.unwrap();
+        before_replacement_at =
+            storage.commit(&[change_delta(id, 1, row_ops(index, revision))], &|_| {}, ctx).await.unwrap();
     }
 
     let mut replacement = Json::empty_object();
@@ -151,14 +152,14 @@ pub async fn streams_long_document_tails(storage: Arc<dyn Storage>) {
     replacement.set("rows", rows(512, |value| (10_000 + value as i64, format!("new-{value}")))).unwrap();
     let snapshot = replacement.clone();
     let replacement_at =
-        storage.commit(&[change_delta(id, 1, vec![Op::Replace(replacement.clone())])], ctx).await.unwrap();
+        storage.commit(&[change_delta(id, 1, vec![Op::Replace(replacement.clone())])], &|_| {}, ctx).await.unwrap();
     set_row(&mut replacement, 0, 999);
 
     let mut current = snapshot.clone();
     for revision in 101..=124_i64 {
         let index = (revision as usize * 19) % 512;
         set_row(&mut current, index, revision);
-        storage.commit(&[change_delta(id, 1, row_ops(index, revision))], ctx).await.unwrap();
+        storage.commit(&[change_delta(id, 1, row_ops(index, revision))], &|_| {}, ctx).await.unwrap();
     }
 
     assert_eq!(value(storage, id, DocumentPoint::At(created_at)).await, Some(initial));
@@ -177,16 +178,18 @@ pub async fn copies_document_bases_independently(storage: Arc<dyn Storage>) {
     let child_id: ConversationId = mint(storage).await;
     let second_child_id: ConversationId = mint(storage).await;
     let conversation = |id| StorageWrite::Conversation { value: ConversationRecord { id, parent: None, owner: None } };
-    storage.commit(&[conversation(child_id), conversation(second_child_id)], ctx).await.unwrap();
+    storage.commit(&[conversation(child_id), conversation(second_child_id)], &|_| {}, ctx).await.unwrap();
     let source_id: DocumentId = mint(storage).await;
     let rewindable = |id, conversation_id| {
         conversation_document(id, "copy.source", conversation_id, DocumentHistory::Rewindable, DocumentFork::AsOf)
     };
     let source = rewindable(source_id, root_id);
-    let created_at =
-        storage.commit(&[create(&source, 2, json(r#"{"count":1,"rows":[{"value":"base"}]}"#))], ctx).await.unwrap();
+    let created_at = storage
+        .commit(&[create(&source, 2, json(r#"{"count":1,"rows":[{"value":"base"}]}"#))], &|_| {}, ctx)
+        .await
+        .unwrap();
     let delta = ops(r#"[["s",["count"],2],["p",["rows"],1,0,[{"value":"current"}]]]"#);
-    storage.commit(&[change_delta(source_id, 2, delta)], ctx).await.unwrap();
+    storage.commit(&[change_delta(source_id, 2, delta)], &|_| {}, ctx).await.unwrap();
     let historical_copy: DocumentId = mint(storage).await;
     let current_copy: DocumentId = mint(storage).await;
     let retired_copy: DocumentId = mint(storage).await;
@@ -198,7 +201,7 @@ pub async fn copies_document_bases_independently(storage: Arc<dyn Storage>) {
         copy(rewindable(retired_copy, root_id), source_id, DocumentPoint::Current),
         StorageWrite::DocumentRetire { id: retired_copy },
     ];
-    storage.commit(&writes, ctx).await.unwrap();
+    storage.commit(&writes, &|_| {}, ctx).await.unwrap();
     let historical = read(storage, historical_copy, DocumentPoint::Current).await.unwrap();
     assert_eq!((historical.version, historical.value), (2, json(r#"{"count":1,"rows":[{"value":"base"}]}"#)));
     let current_value = json(r#"{"count":2,"rows":[{"value":"base"},{"value":"current"}]}"#);
@@ -208,25 +211,25 @@ pub async fn copies_document_bases_independently(storage: Arc<dyn Storage>) {
 
     let writes =
         [change_base(source_id, 2, json(r#"{"count":99,"rows":[]}"#)), StorageWrite::DocumentRetire { id: source_id }];
-    storage.commit(&writes, ctx).await.unwrap();
+    storage.commit(&writes, &|_| {}, ctx).await.unwrap();
     assert_eq!(value(storage, current_copy, DocumentPoint::Current).await, Some(current_value.clone()));
 
     let latest_source_id: DocumentId = mint(storage).await;
     let latest_copy_id: DocumentId = mint(storage).await;
     let latest_source =
         conversation_document(latest_source_id, "copy.latest", root_id, DocumentHistory::Latest, DocumentFork::Current);
-    storage.commit(&[create(&latest_source, 4, json(r#"{"retained":"copy"}"#))], ctx).await.unwrap();
+    storage.commit(&[create(&latest_source, 4, json(r#"{"retained":"copy"}"#))], &|_| {}, ctx).await.unwrap();
     let latest_copy = DocumentCreate {
         id: latest_copy_id,
         scope: DocumentScope::Conversation { conversation_id: child_id },
         ..latest_source.clone()
     };
-    storage.commit(&[copy(latest_copy, latest_source_id, DocumentPoint::Current)], ctx).await.unwrap();
+    storage.commit(&[copy(latest_copy, latest_source_id, DocumentPoint::Current)], &|_| {}, ctx).await.unwrap();
     let writes = [
         change_base(latest_source_id, 4, json(r#"{"retained":"source-only"}"#)),
         StorageWrite::DocumentRetire { id: latest_source_id },
     ];
-    storage.commit(&writes, ctx).await.unwrap();
+    storage.commit(&writes, &|_| {}, ctx).await.unwrap();
     let copied = read(storage, latest_copy_id, DocumentPoint::Current).await.unwrap();
     assert_eq!((copied.version, copied.value), (4, json(r#"{"retained":"copy"}"#)));
 
@@ -236,13 +239,13 @@ pub async fn copies_document_bases_independently(storage: Arc<dyn Storage>) {
         copy(rewindable(conflict_id, child_id), current_copy, DocumentPoint::Current),
         StorageWrite::DocumentRetire { id: current_copy },
     ];
-    assert!(storage.commit(&writes, ctx).await.is_err());
+    assert!(storage.commit(&writes, &|_| {}, ctx).await.is_err());
     assert_eq!(read(storage, conflict_id, DocumentPoint::Current).await, None);
     assert_eq!(value(storage, current_copy, DocumentPoint::Current).await, Some(current_value));
 
     let mismatch_id: DocumentId = mint(storage).await;
     let mismatched = DocumentCreate { kind: "copy.mismatch".into(), ..rewindable(mismatch_id, child_id) };
-    assert!(storage.commit(&[copy(mismatched, current_copy, DocumentPoint::Current)], ctx).await.is_err());
+    assert!(storage.commit(&[copy(mismatched, current_copy, DocumentPoint::Current)], &|_| {}, ctx).await.is_err());
     assert_eq!(read(storage, mismatch_id, DocumentPoint::Current).await, None);
 }
 
@@ -259,16 +262,16 @@ pub async fn uses_bases_for_version_transitions(storage: Arc<dyn Storage>) {
         history: None,
         fork: None,
     };
-    storage.commit(&[create(&record, 1, json(r#"{"count":1}"#))], ctx).await.unwrap();
-    storage.commit(&[change_delta(id, 1, ops(r#"[["s",["count"],2]]"#))], ctx).await.unwrap();
-    let migrated_at = storage.commit(&[change_base(id, 2, json(r#"{"count":3}"#))], ctx).await.unwrap();
+    storage.commit(&[create(&record, 1, json(r#"{"count":1}"#))], &|_| {}, ctx).await.unwrap();
+    storage.commit(&[change_delta(id, 1, ops(r#"[["s",["count"],2]]"#))], &|_| {}, ctx).await.unwrap();
+    let migrated_at = storage.commit(&[change_base(id, 2, json(r#"{"count":3}"#))], &|_| {}, ctx).await.unwrap();
     let current = read(storage, id, DocumentPoint::Current).await.unwrap();
     assert_eq!((current.version, current.value), (2, json(r#"{"count":3}"#)));
     expect_err(storage.document(id, DocumentPoint::At(migrated_at), ctx).await, "does not retain historical content");
 
-    let stale = storage.commit(&[change_delta(id, 1, ops(r#"[["s",["count"],4]]"#))], ctx).await;
+    let stale = storage.commit(&[change_delta(id, 1, ops(r#"[["s",["count"],4]]"#))], &|_| {}, ctx).await;
     expect_err(stale, "version transition requires a base");
     assert_eq!(value(storage, id, DocumentPoint::Current).await, Some(json(r#"{"count":3}"#)));
-    storage.commit(&[StorageWrite::DocumentRetire { id }], ctx).await.unwrap();
+    storage.commit(&[StorageWrite::DocumentRetire { id }], &|_| {}, ctx).await.unwrap();
     assert_eq!(read(storage, id, DocumentPoint::Current).await, None);
 }

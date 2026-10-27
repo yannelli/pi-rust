@@ -342,7 +342,7 @@ async fn store_version_1(setup: &ChatSetup, directory: &tempfile::TempDir, check
     state["checkpoint"] = checkpoint;
     let old =
         TaskRecord { version: 1, input: Json::from(input), state: serde_json::from_value(state).unwrap(), ..record };
-    storage.commit(&[StorageWrite::Task { value: old }], &ctx()).await.unwrap();
+    storage.commit(&[StorageWrite::Task { value: old }], &|_| {}, &ctx()).await.unwrap();
     storage.close(&ctx()).await.unwrap();
     (path, task_id)
 }

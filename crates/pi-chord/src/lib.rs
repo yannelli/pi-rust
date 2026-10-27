@@ -12,6 +12,7 @@ pub mod services;
 pub mod state;
 mod strict;
 mod sync;
+pub mod watch;
 
 pub use context::{
     AbortController, AbortSignal, BACKGROUND_CONTEXT, Context, ContextKey, TODO_CONTEXT, await_with_context,
@@ -31,6 +32,7 @@ pub use state::{
 };
 pub use strict::{CopyJsonOptions, copy_json, is_json_value};
 pub use sync::{BoxFuture, Unsubscribe};
+pub use watch::{WatchEnd, WatchHandle};
 
 #[doc(hidden)]
 pub mod __private {

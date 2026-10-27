@@ -1,11 +1,14 @@
 //! Watch lifetime: contexts, retirement, Session close, stop, cancellation, listener failure, and reloads.
 
-use std::sync::{Arc, Mutex};
+use std::any::Any;
+use std::sync::{Arc, Mutex, Weak};
 
+use pi_chord::delta::Op;
 use pi_chord::{AbortController, BACKGROUND_CONTEXT, ChordError, Context, create_context_key, with_abort_signal};
 use pi_chord::{with_cancel, with_context_value};
 use pi_durable::DurableError;
-use pi_durable::session::WatchEnd;
+use pi_durable::session::{Release, SessionOptions, WatchEnd, create_session};
+use pi_durable::storage::MemoryStorage;
 
 use super::support::*;
 use super::*;
@@ -105,7 +108,7 @@ async fn session_close_discards_retirement_buffered_before_start() {
     let baseline = watch.value();
     retire_state(&test.session).await;
     test.session.close(&context()).await.unwrap();
-    assert!(matches!(watch.closed().await, WatchEnd::SessionClosed));
+    assert!(matches!(watch.closed().await, WatchEnd::Ended));
     assert!(watch.value().same_ref(&baseline));
     assert!(message(watch.start(|_, _, _| async { Ok(()) })).contains("stopped"));
 }
@@ -132,7 +135,7 @@ async fn session_close_discards_retirement_behind_an_in_flight_callback() {
     entered.wait().await;
     retire_state(&test.session).await;
     test.session.close(&context()).await.unwrap();
-    assert!(matches!(watch.closed().await, WatchEnd::SessionClosed));
+    assert!(matches!(watch.closed().await, WatchEnd::Ended));
     release.resolve();
     flush().await;
     assert_eq!(*values.lock().unwrap(), [Json::from(1)]);
@@ -189,7 +192,7 @@ async fn session_close_stops_future_delivery_without_joining_an_in_flight_callba
     entered.wait().await;
     test.session.close(&context()).await.unwrap();
     assert!(delivered.lock().unwrap().as_ref().unwrap().abort_signal().is_none());
-    assert!(matches!(watch.closed().await, WatchEnd::SessionClosed));
+    assert!(matches!(watch.closed().await, WatchEnd::Ended));
     release.resolve();
 }
 
@@ -265,4 +268,61 @@ async fn continues_after_the_tracker_cache_unloads() {
     flush().await;
     assert_eq!(value_of(&watch.value()), 7);
     watch.stop().await;
+}
+
+#[tokio::test]
+async fn ends_retired_only_on_its_source_s_retirement_never_on_a_null_value() {
+    let watch = CommittedWatch::new(Json::from(1), Release::new(), |_| {}, None);
+    let frames = record(&watch);
+    let end: Arc<Mutex<Option<WatchEnd>>> = Arc::default();
+    let sink = end.clone();
+    let closed = watch.closed();
+    tokio::spawn(async move { *sink.lock().unwrap() = Some(closed.await) });
+    watch.advance(Json::Null, vec![Op::Replace(Json::Null)], context());
+    watch.advance(Json::from(2), vec![Op::Replace(Json::from(2))], context());
+    flush().await;
+    let expected = [(Json::Null, vec![Op::Replace(Json::Null)]), (Json::from(2), vec![Op::Replace(Json::from(2))])];
+    assert_eq!(*frames.lock().unwrap(), expected);
+    assert!(end.lock().unwrap().is_none());
+    assert!(matches!(watch.stop().await, WatchEnd::Stopped));
+}
+
+#[tokio::test]
+async fn retains_neither_its_session_nor_its_listener_once_stopped_while_still_referenced() {
+    // A watch of a Session nothing else references; `stop` says whether to stop it before returning.
+    async fn acquire(stop: bool) -> (CommittedWatch, Weak<dyn Any + Send + Sync>, Weak<()>) {
+        // No eviction timer, so nothing but the watch can keep the Session alive.
+        let options = SessionOptions { document_retention_ms: Some(f64::INFINITY), ..SessionOptions::default() };
+        let session = create_session(Arc::new(MemoryStorage::new()), options);
+        session.commit(|tx| async move { tx.doc(&STATE_DOC, ()).await.map(drop) }, &context()).await.unwrap();
+        let watch = watch_state(&session).await;
+        let sentinel = Arc::new(());
+        let listener = Arc::downgrade(&sentinel);
+        watch
+            .start(move |_, _, _| {
+                let _held = sentinel.clone();
+                async { Ok(()) }
+            })
+            .unwrap();
+        set_value(&session, 1).await;
+        flush().await;
+        if stop {
+            watch.stop().await;
+        }
+        (watch, session.downgrade(), listener)
+    }
+
+    // Control: a running watch keeps its Session, so the drop below is real.
+    let (running, session, _) = acquire(false).await;
+    flush().await;
+    assert!(session.upgrade().is_some());
+    running.stop().await;
+
+    let (stopped, session, listener) = acquire(true).await;
+    flush().await;
+    assert!(session.upgrade().is_none());
+    assert!(listener.upgrade().is_none());
+    // What it delivered last stays readable.
+    assert_eq!(value_of(&stopped.value()), 1);
+    assert!(matches!(stopped.closed().await, WatchEnd::Stopped));
 }

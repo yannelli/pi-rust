@@ -1,4 +1,4 @@
-//! Session-to-Chord bridge for document states and the observer contract shared with watches.
+//! Session-to-Chord bridge for document states (a pi-rust extra) and the observer contract shared with watches.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, Weak};
@@ -13,16 +13,18 @@ use pi_chord::{ChordError, ChordResult, Context, Json};
 use super::line::lock;
 use crate::errors::DurableError;
 
-/// Canonical terminal update for a retired document incarnation.
+/// Canonical terminal frame of a retired document incarnation.
 pub fn retirement_operations() -> Vec<Op> {
     vec![Op::Replace(Json::Null)]
 }
 
-/// A committed observer bound to one incarnation or view: a JSON `null` value retires it.
+/// A committed observer bound to one incarnation or view. Its source ends it explicitly.
 pub trait CommittedObserver: Send + Sync {
     fn advance(&self, value: Json, ops: Vec<Op>, context: Context);
-    /// End with the Session: closed, or failed with its first error.
-    fn close_session(&self, failure: Option<DurableError>);
+    /// The document incarnation retired: its last frame is `[["r", null]]`.
+    fn retire(&self, context: Context);
+    /// The Session closed, or failed with its first error.
+    fn end(&self, failure: Option<DurableError>);
     /// Whether frames carry the commit's cancellation; a document state's frames carry none.
     fn keeps_cancellation(&self) -> bool;
 }
@@ -71,7 +73,7 @@ struct SourceState {
     closed: bool,
 }
 
-/// Session-to-Chord bridge owned one-to-one by one attached state. A `null` value retires it.
+/// Session-to-Chord bridge owned one-to-one by one attached state. A retirement publishes `null` as its last value.
 pub struct CommittedStateSource {
     state: Mutex<SourceState>,
     release: Arc<Release>,
@@ -125,7 +127,6 @@ impl CommittedObserver for CommittedStateSource {
                 return;
             }
             state.cursor += 1;
-            state.retired = value.is_null();
             state.value = Some(value.clone());
             let frame = ReplicatedStateSourceFrame { cursor: state.cursor, value, ops, context };
             (frame, state.attachments.clone())
@@ -135,8 +136,13 @@ impl CommittedObserver for CommittedStateSource {
         }
     }
 
+    fn retire(&self, context: Context) {
+        self.advance(Json::Null, retirement_operations(), context);
+        lock(&self.state).retired = true;
+    }
+
     /// Stop publishing; the attached states keep their last value.
-    fn close_session(&self, _failure: Option<DurableError>) {
+    fn end(&self, _failure: Option<DurableError>) {
         let attachments = {
             let state = lock(&self.state);
             if state.closed {
