@@ -2,9 +2,11 @@
 
 mod markdown_common;
 
-use markdown_common::{CYAN, Capabilities, MAGENTA, YELLOW, chalk, markdown, plain, strip_ansi, styled_markdown};
+use markdown_common::{
+    CYAN, Capabilities, MAGENTA, YELLOW, chalk, default_theme, markdown, plain, strip_ansi, styled_markdown,
+};
 use pi_tui::Component;
-use pi_tui::components::DefaultTextStyle;
+use pi_tui::components::{DefaultTextStyle, Markdown, MarkdownOptions};
 
 fn rendered_plain(text: &str, width: usize) -> Vec<String> {
     plain(&markdown(text).render(width))
@@ -104,6 +106,17 @@ fn wraps_long_blockquote_lines_with_a_border_on_each_line() {
     assert!(lines.iter().all(|line| line.starts_with("│ ")), "{lines:?}");
     let output = raw.join("\n");
     assert!(output.contains("\x1b[3m") && !output.contains("\x1b[33m"), "{output:?}");
+}
+
+// Regression test for https://github.com/earendil-works/pi/issues/11272
+#[test]
+fn renders_quotes_nested_deeper_than_the_width_allows_without_exploding() {
+    let _caps = Capabilities::plain();
+    let mut markdown =
+        Markdown::new(&format!("{}x", ">".repeat(60)), 1, 0, default_theme(), None, MarkdownOptions::default());
+    let lines: Vec<String> = plain(&markdown.render(80)).iter().map(|line| line.trim_end().to_string()).collect();
+    assert_eq!(lines.len(), 1, "Expected a single line: {lines:?}");
+    assert!(lines[0].ends_with('x'), "Expected content to be kept: {lines:?}");
 }
 
 #[test]
