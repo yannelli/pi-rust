@@ -265,7 +265,7 @@ async fn a_package_that_fails_to_install_is_skipped_and_reported() {
         failures[0].warning(),
         format!(
             "Extension package \"npm:missing-tools\": failed to install (npm install missing-tools failed with code \
-             1). Run \"{app} remove npm:missing-tools --local\" to remove it from settings."
+             1). Run \"{app} remove npm:missing-tools --local\" to remove it from settings.json."
         )
     );
     assert!(manager.take_install_failures().is_empty());
