@@ -19,7 +19,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-pub use ansi::{extract_ansi_code, normalize_terminal_output, strip_terminal_sequences};
+pub use ansi::{extract_ansi_code, normalize_terminal_output, replace_control_characters, strip_terminal_sequences};
 pub use emoji::is_rgi_emoji;
 pub use osc8::get_osc8_link_at_column;
 pub use segment::{WordSegment, graphemes, word_segments};

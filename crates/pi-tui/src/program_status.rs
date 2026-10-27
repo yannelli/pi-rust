@@ -8,6 +8,8 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use regex::Regex;
 
+use crate::utils::replace_control_characters;
+
 /// The state a program reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ProgramState {
@@ -88,8 +90,6 @@ static REPLY_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\x1b\]7501;\?[^\x07\x1b]*(?:\x07|\x1b\\)$").expect("valid reply pattern"));
 static APP_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z0-9_.+-]{1,32}$").expect("valid app pattern"));
-static CONTROL_CHARACTERS: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[\x00-\x1f\x7f-\u{9f}]+").expect("valid control pattern"));
 
 /// Decoded `msg` limit. Its base64 encoding stays under the 2732-byte encoded limit.
 const MAX_MESSAGE_BYTES: usize = 2048;
@@ -122,7 +122,7 @@ pub fn format_program_status(status: &ProgramStatus) -> String {
     if let (ProgramState::Blocked, Some(kind)) = (status.state, status.kind) {
         pairs.push(format!("kind={}", kind.as_str()));
     }
-    let cleaned = CONTROL_CHARACTERS.replace_all(status.message.as_deref().unwrap_or(""), " ");
+    let cleaned = replace_control_characters(status.message.as_deref().unwrap_or(""));
     let message = truncate_utf8(cleaned.trim(), MAX_MESSAGE_BYTES);
     if !message.is_empty() {
         pairs.push(format!("msg={}", STANDARD.encode(message)));

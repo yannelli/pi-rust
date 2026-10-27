@@ -10,6 +10,7 @@ use regex::Regex;
 use crate::env::{EnvLookup, ProcessEnv};
 use crate::program_status::ProgramStatus;
 use crate::ui_loop::TerminalSink;
+use crate::utils::replace_control_characters;
 
 pub use crate::process_terminal::ProcessTerminal;
 
@@ -76,9 +77,10 @@ pub trait Terminal {
         self.write("\x1b[2J\x1b[H");
     }
 
-    /// Sets the window title (OSC 0).
+    /// Sets the window title (OSC 0). A BEL or ESC in the title would end the sequence early and send the
+    /// rest to the terminal as escape sequences (session names come from session files).
     fn set_title(&mut self, title: &str) {
-        self.write(&format!("\x1b]0;{title}\x07"));
+        self.write(&format!("\x1b]0;{}\x07", replace_control_characters(title)));
     }
 
     /// Shows or clears the indeterminate progress indicator (OSC 9;4).
