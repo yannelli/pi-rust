@@ -153,6 +153,8 @@ pub(super) struct ConvertOptions<'a> {
     pub managed_provider: Option<&'a str>,
     /// Format for native `tool_addition` blocks; `None` when tool changes are not native.
     pub native_tools: Option<ToolFormat>,
+    /// Leading system messages whose tool changes the top-level tool list already holds.
+    pub folded_tool_changes: usize,
 }
 
 pub(super) struct Converted {
@@ -171,16 +173,18 @@ pub(super) fn convert_messages(messages: &[Message], options: &ConvertOptions) -
     let mut assistant_levels = BTreeMap::new();
     let mut preferred_strict_tools = false;
     let mut pending: Vec<Value> = Vec::new();
+    let mut systems_seen = 0;
     let mut index = 0;
     while index < messages.len() {
         match &messages[index] {
             Message::System(system) => {
+                systems_seen += 1;
                 let mut blocks = Vec::new();
                 let text = render_system_message_update(system);
                 if !text.is_empty() {
                     blocks.push(json!({"type": "text", "text": text}));
                 }
-                if let Some(format) = options.native_tools {
+                if let Some(format) = options.native_tools.filter(|_| systems_seen > options.folded_tool_changes) {
                     let added = system.tools_added.as_deref().unwrap_or_default();
                     let redefined: HashSet<&str> = added.iter().map(|tool| tool.name.as_str()).collect();
                     for removed in system.tools_removed.iter().flatten() {

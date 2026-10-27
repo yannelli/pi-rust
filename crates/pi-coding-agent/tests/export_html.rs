@@ -58,8 +58,8 @@ fn export_from_file_matches_upstream_bytes() {
     let written = export_from_file(fixture().to_str().unwrap(), out.to_str(), &ExportTheme::dark()).unwrap();
     assert_eq!(written, out);
     let bytes = std::fs::read(&out).unwrap();
-    assert_eq!(bytes.len(), 289_375);
-    assert_eq!(fnv1a(&bytes), 0xda6e_0dc8_1e51_4862);
+    assert_eq!(bytes.len(), 289_875);
+    assert_eq!(fnv1a(&bytes), 0xa769_c935_ea99_5432);
 }
 
 #[test]
@@ -85,8 +85,8 @@ fn session_export_with_state_matches_upstream_bytes() {
     };
     export_session_html(&fixture(), out.to_str(), &options).unwrap();
     let bytes = std::fs::read(&out).unwrap();
-    assert_eq!(bytes.len(), 290_079);
-    assert_eq!(fnv1a(&bytes), 0xa0cf_d0c5_7f3f_aa7a);
+    assert_eq!(bytes.len(), 290_579);
+    assert_eq!(fnv1a(&bytes), 0xff0d_eba1_a5ff_1caa);
 
     let data = session_data(&String::from_utf8(bytes).unwrap());
     let rendered = &data["renderedTools"];
@@ -142,6 +142,30 @@ fn page_structure_embedded_data_and_escaping() {
     assert!(json.contains(r#""data":{"x":1,"y":[1,2.5,0]}"#));
     assert!(json.contains(r#""big":1.2345678901234569e+23"#));
     assert!(json.contains(r#""nestedCalls":{"calls":[{"id":"n1","name":"read""#));
+}
+
+// Regression test for upstream #9980: provider-reported totals may differ from catalog components.
+#[test]
+fn header_cost_uses_recorded_totals_and_falls_back_to_component_sums() {
+    let template = include_str!("../src/export/assets/template.js");
+    let start = template.find("function computeStats(entryList)").unwrap();
+    let end = template.find("const globalStats = computeStats(entries);").unwrap();
+    let entries = json!([
+        {"type": "message", "message": {"role": "assistant", "content": [],
+            "usage": {"cost": {"input": 0.1, "output": 0.2, "cacheRead": 0, "cacheWrite": 0, "total": 0.9}}}},
+        {"type": "message", "message": {"role": "assistant", "content": [],
+            "usage": {"cost": {"input": 0.4, "output": 0.1, "cacheRead": 0, "cacheWrite": 0}}}}
+    ]);
+    let source = format!("{}\nJSON.stringify(computeStats({entries}).cost)", &template[start..end]);
+    let runtime = Runtime::new().unwrap();
+    let context = Context::full(&runtime).unwrap();
+    let cost: Value = context.with(|ctx| {
+        let json: String = ctx.eval(source).unwrap_or_else(|error| panic!("{error}: {:?}", ctx.catch()));
+        serde_json::from_str(&json).unwrap()
+    });
+    for (key, expected) in [("input", 0.5), ("output", 0.3), ("total", 1.4)] {
+        assert!((cost[key].as_f64().unwrap() - expected).abs() < 1e-9, "{key}: {cost}");
+    }
 }
 
 #[test]

@@ -123,11 +123,12 @@ pub(super) fn with_usage_estimate(
             Some(previous) => {
                 let cached = common_prompt_prefix_length(previous, &prompt);
                 cache_read = cached.div_ceil(4) as u64;
-                cache_write = (prompt_length - cached).div_ceil(4) as u64;
-                input = prompt_tokens.saturating_sub(cache_read);
+                cache_write = prompt_tokens.saturating_sub(cache_read);
             }
             None => cache_write = prompt_tokens,
         }
+        // Every prompt token is either read from or written to the simulated cache.
+        input = 0;
         cache.insert(session.to_string(), prompt);
     }
     message.usage = Usage {

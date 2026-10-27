@@ -156,16 +156,15 @@ impl ModelRegistry {
         self.models.extend(models);
     }
 
-    /// Apply the `models.json` `modelOverrides` of `provider` to its chat models (upstream
-    /// applies them last, after custom models and extension providers). Merging is idempotent.
+    /// Apply the `models.json` `modelOverrides` of `provider` to its models, each type taking the
+    /// fields it has (upstream applies them last, after custom models and extension providers).
+    /// Merging is idempotent.
     pub fn apply_model_overrides(&mut self, provider: &str) -> Result<(), String> {
         let Some(overrides) = self.model_overrides.get(provider) else { return Ok(()) };
         for (id, patch) in overrides {
             for model in self.models.iter_mut().filter(|model| model.provider == provider && &model.id == id) {
-                if is_chat_model(model) {
-                    *model = json::apply_override(model, patch)
-                        .map_err(|error| format!("Provider {provider}, model {id}: {error}"))?;
-                }
+                *model = json::apply_override(model, patch)
+                    .map_err(|error| format!("Provider {provider}, model {id}: {error}"))?;
             }
         }
         Ok(())

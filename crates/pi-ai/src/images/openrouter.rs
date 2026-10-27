@@ -140,6 +140,7 @@ fn parse_usage(raw: &Value, model: &Model) -> Usage {
         cache_read: (price.cache_read / 1_000_000.0) * cache_read,
         cache_write: (price.cache_write / 1_000_000.0) * cache_write,
         total: 0.0,
+        total_from_provider: Some(false),
     };
     cost.total = cost.input + cost.output + cost.cache_read + cost.cache_write;
     Usage {

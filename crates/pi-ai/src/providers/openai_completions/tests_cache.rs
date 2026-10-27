@@ -63,7 +63,7 @@ async fn other_endpoints_send_prompt_cache_fields_only_for_long_retention() {
     assert!(body.get("prompt_cache_key").is_none());
     let unsupported = [
         proxy(json!({"supportsLongCacheRetention": false})),
-        catalog("opencode", "deepseek-v4-flash"),
+        catalog("opencode", "deepseek-v4.1-flash"),
         catalog("opencode", "kimi-k2.6"),
         catalog("opencode", "minimax-m2.7"),
     ];

@@ -147,6 +147,47 @@ fn upsert_keeps_chat_models_and_classifiers_with_one_id_apart() {
     assert!(same.iter().any(|model| models_are_equal(model, &classifier)));
 }
 
+#[test]
+fn provider_compat_applies_to_classifier_models() {
+    let mut registry = ModelRegistry::builtin();
+    registry
+        .apply_json(
+            r#"{"providers":{"typesafe":{"baseUrl":"https://proxy.example.com/v1",
+            "compat":{"imageInput":"state-image-urls","sendImageOptInHeader":false}}}}"#,
+        )
+        .unwrap();
+    let jev = registry.all_models().iter().find(|model| model.provider == "typesafe" && model.id == "jev-latest");
+    let jev = jev.expect("bundled jev-latest");
+    assert_eq!(
+        (jev.model_type.as_deref(), jev.base_url.as_str()),
+        (Some("classifier"), "https://proxy.example.com/v1")
+    );
+    let compat = serde_json::json!({"imageInput": "state-image-urls", "sendImageOptInHeader": false});
+    assert_eq!(jev.compat, Some(compat));
+}
+
+// Upstream issue 11223: overrides of classifier and image models were silently ignored.
+#[test]
+fn model_overrides_apply_shared_fields_to_every_model_type() {
+    let mut registry = ModelRegistry::builtin();
+    let image =
+        registry.all_models().iter().find(|model| model.model_type.as_deref() == Some("image")).unwrap().clone();
+    let json = format!(
+        r#"{{"providers":{{"typesafe":{{"modelOverrides":{{"jev-latest":{{"name":"Jev (proxy)","contextWindow":8192,
+        "cost":{{"input":0.5}},"compat":{{"imageInput":"images"}},"maxTokens":7,"reasoning":true}}}}}},
+        "{}":{{"modelOverrides":{{"{}":{{"name":"Renamed image","contextWindow":4096}}}}}}}}}}"#,
+        image.provider, image.id
+    );
+    registry.apply_json(&json).unwrap();
+    let jev = registry.all_models().iter().find(|model| model.provider == "typesafe" && model.id == "jev-latest");
+    let jev = jev.unwrap();
+    assert_eq!((jev.name.as_str(), jev.context_window, jev.cost.input), ("Jev (proxy)", 8192, 0.5));
+    assert_eq!(jev.compat.as_ref().unwrap()["imageInput"], "images");
+    assert!(jev.max_tokens != 7 && !jev.reasoning, "chat-only fields stay chat-only");
+    let renamed = registry.all_models().iter().find(|model| models_are_equal(model, &image)).unwrap();
+    assert_eq!((renamed.name.as_str(), renamed.context_window), ("Renamed image", image.context_window));
+}
+
 fn schema_error(text: &str) -> String {
     validate_models_json(text, "/tmp/models.json").unwrap_err().to_string()
 }

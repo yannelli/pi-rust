@@ -18,6 +18,8 @@ mod llama_cpp_tests;
 #[cfg(test)]
 mod openai_decisions_tests;
 #[cfg(test)]
+mod system_one_image_tests;
+#[cfg(test)]
 mod system_one_tests;
 #[cfg(test)]
 mod test_support;

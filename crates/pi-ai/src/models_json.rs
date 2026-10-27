@@ -140,11 +140,23 @@ fn shallow_merge(target: &mut Map<String, Value>, key: &str, patch: &Value) {
 }
 
 /// Apply one `modelOverrides` entry the way upstream `applyModelOverride` merges fields.
+/// `modelOverrides` fields every model type takes; chat models take all of them, and classifier
+/// models also take `contextWindow` and `compat` (upstream issue 11223).
+const SHARED_OVERRIDE_FIELDS: [&str; 4] = ["name", "input", "inputLimits", "cost"];
+
+fn override_applies(model: &Model, key: &str) -> bool {
+    match model.model_type.as_deref().unwrap_or("chat") {
+        "chat" => true,
+        "classifier" => SHARED_OVERRIDE_FIELDS.contains(&key) || matches!(key, "contextWindow" | "compat"),
+        _ => SHARED_OVERRIDE_FIELDS.contains(&key),
+    }
+}
+
 pub(crate) fn apply_override(model: &Model, patch: &Map<String, Value>) -> Result<Model, String> {
     let Value::Object(mut target) = serde_json::to_value(model).map_err(|error| error.to_string())? else {
         return Err("model did not serialize to an object".into());
     };
-    for (key, value) in patch {
+    for (key, value) in patch.iter().filter(|(key, _)| override_applies(model, key)) {
         match key.as_str() {
             "name" | "reasoning" | "input" | "contextWindow" | "maxTokens" => {
                 target.insert(key.clone(), value.clone());
@@ -282,6 +294,11 @@ pub(crate) fn apply_provider(provider: &str, base: Vec<Model>, config: &Provider
             }
             if is_chat(&model) {
                 model.compat = merge_compat(model.compat.as_ref(), config.compat.as_ref());
+            } else if let (Some("classifier"), Some(patch)) = (model.model_type.as_deref(), &config.compat) {
+                // Classifier APIs read their own compat fields, such as how a System One service takes images.
+                let mut compat = model.compat.as_ref().and_then(Value::as_object).cloned().unwrap_or_default();
+                compat.extend(patch.iter().map(|(key, value)| (key.clone(), value.clone())));
+                model.compat = Some(Value::Object(compat));
             }
             model
         })
@@ -296,7 +313,7 @@ pub(crate) fn apply_provider(provider: &str, base: Vec<Model>, config: &Provider
         }
     }
     for (id, patch) in config.model_overrides.iter().flatten() {
-        for model in models.iter_mut().filter(|model| &model.id == id && is_chat(model)) {
+        for model in models.iter_mut().filter(|model| &model.id == id) {
             *model =
                 apply_override(model, patch).map_err(|error| format!("Provider {provider}, model {id}: {error}"))?;
         }

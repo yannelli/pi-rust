@@ -87,7 +87,7 @@ async fn device_login_maps_oauth_errors() {
         let server = MockServer::start(move |request: &Recorded| match request.path.as_str() {
             "/v1/oauth/device" => Reply::Json(
                 200,
-                json!({ "device_code": "d", "user_code": "u", "verification_uri": "v", "expires_in": 60 }),
+                json!({ "device_code": "d", "user_code": "u", "verification_uri": "https://r/device", "expires_in": 60 }),
             ),
             _ => Reply::Json(400, reply.clone()),
         })
@@ -100,6 +100,28 @@ async fn device_login_maps_oauth_errors() {
     let result =
         flow(&server).await.login(&select("device-code"), &LoginOptions::default(), CancellationToken::new()).await;
     assert_eq!(expect_err(result), "Radius OAuth device authorization failed: maintenance");
+}
+
+#[tokio::test]
+async fn logins_reject_server_urls_that_are_not_http() {
+    let payload = "file:///Applications/payload.app";
+    let server = MockServer::start(move |request: &Recorded| match request.path.as_str() {
+        "/v1/oauth" => Reply::Json(200, json!({ "authorizationEndpoint": payload })),
+        "/v1/oauth/device" => Reply::Json(
+            200,
+            json!({ "device_code": "device-code", "user_code": "ABCD-1234", "verification_uri": payload, "expires_in": 600 }),
+        ),
+        other => panic!("unexpected request {other}"),
+    })
+    .await;
+    let browser = select("browser");
+    let result = flow(&server).await.login(&browser, &LoginOptions::default(), CancellationToken::new()).await;
+    assert_eq!(expect_err(result), format!("Invalid Radius OAuth config from {}", server.base));
+    assert_eq!(browser.events(), []);
+    let device = select("device-code");
+    let result = flow(&server).await.login(&device, &LoginOptions::default(), CancellationToken::new()).await;
+    assert!(expect_err(result).contains("Untrusted verification_uri"));
+    assert_eq!(device.events(), []);
 }
 
 #[tokio::test]

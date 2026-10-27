@@ -116,13 +116,11 @@ async fn rejects_models_for_other_classifier_apis_and_image_input_before_sending
     assert_eq!(result.stop_reason, ClassifierStopReason::Error);
     assert!(result.error_message.unwrap().contains("Unsupported classifier API: cloudflare-workers-ai-system-one"));
 
-    let mut with_images = model(&server.base_url);
-    with_images.input.push("image".into());
     let mut context = sample_context();
     context.images = Some(vec![super::ImageContent { data: "aW1hZ2U=".into(), mime_type: "image/png".into() }]);
-    let result = TypeSafeSystemOne.classify(&with_images, &context, with_key("secret")).await;
+    let result = TypeSafeSystemOne.classify(&model(&server.base_url), &context, with_key("secret")).await;
     assert_eq!(result.stop_reason, ClassifierStopReason::Error);
-    assert_eq!(result.error_message.as_deref(), Some("System One API does not support image input"));
+    assert_eq!(result.error_message.as_deref(), Some("System One API does not support image input for jev-latest"));
     assert!(server.requests().is_empty());
 }
 
