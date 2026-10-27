@@ -254,7 +254,9 @@ fn insert_thinking(body: &mut Map<String, Value>, model: &Model, compat: &Compat
             json!({"type": "adaptive", "display": "summarized",
                 "block_binding": {"prefix_mismatch_behavior": "drop_block"}}),
         );
-        body.insert("output_config".into(), json!({"effort": "high"}));
+        // Effort markers set the level for every reply. The top-level effort is part of the cached
+        // prompt, so it stays fixed at "low": organizations can cap effort and reject any level above it.
+        body.insert("output_config".into(), json!({"effort": "low"}));
     } else if model.reasoning && thinking.enabled {
         if compat.force_adaptive_thinking {
             body.insert("thinking".into(), json!({"type": "adaptive", "display": "summarized"}));
