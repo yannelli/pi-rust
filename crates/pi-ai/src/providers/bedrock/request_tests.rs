@@ -218,6 +218,36 @@ fn tools_honor_strict_mode_tool_choice_and_cache_support() {
     );
 }
 
+// Upstream issue 11416: Bedrock allows at most 16 union-typed parameters in a strict tool set.
+#[test]
+fn preferred_strict_tools_go_non_strict_above_the_union_parameter_limit() {
+    let optional = |count: usize, strict: &str| {
+        let properties: serde_json::Map<String, Value> =
+            (0..count).map(|index| (format!("p{index}"), json!({"type": "string"}))).collect();
+        Tool {
+            constrained_sampling: Some(json!({"type": "json_schema", "strict": strict})),
+            ..Tool::new("many_optional", "Optional parameters", json!({"type": "object", "properties": properties}))
+        }
+    };
+    let model = Model {
+        compat: Some(json!({"supportsStrictMode": true})),
+        ..bedrock_model("us.anthropic.claude-opus-5-5", "")
+    };
+    let spec = |tools: Vec<Tool>| {
+        let context = Context { tools, ..hello() };
+        build_body(&model, &context, &StreamOptions::default(), None).unwrap()["toolConfig"]["tools"][0]["toolSpec"]
+            .clone()
+    };
+    let within = spec(vec![optional(16, "prefer")]);
+    assert_eq!(within["strict"], true);
+    assert_eq!(within["inputSchema"]["json"]["properties"]["p0"]["anyOf"][1], json!({"type": "null"}));
+    let above = spec(vec![optional(17, "prefer")]);
+    assert!(above.get("strict").is_none());
+    assert_eq!(above["inputSchema"]["json"], optional(17, "prefer").parameters);
+    // Tools that require strict mode stay strict.
+    assert_eq!(spec(vec![optional(17, "require")])["strict"], true);
+}
+
 #[test]
 fn resolves_regions_and_endpoints_like_the_sdk_config() {
     let eu = bedrock_model(
