@@ -265,6 +265,30 @@ async fn print_mode_selects_a_model_an_extension_provider_lists_only_offline() {
     assert_eq!(requests[0]["model"], "cached-model");
 }
 
+// Upstream issue 11238: print mode disposed the session before the command's turn ran.
+#[tokio::test(flavor = "multi_thread")]
+async fn print_mode_runs_the_turn_an_extension_command_sends() {
+    let root = tempfile::tempdir().unwrap();
+    let (url, requests) = mock_server(vec![text_body("hi")]).await;
+    setup(root.path(), &url);
+    let source = r#"export default function (pi) {
+	pi.registerCommand("sayhi", { handler: async () => { await pi.sendUserMessage("Reply with one word: hi"); } });
+	pi.on("turn_end", () => {});
+}
+"#;
+    std::fs::write(root.path().join("sayhi.ts"), source).unwrap();
+    let extension = root.path().join("sayhi.ts").display().to_string();
+    let args = ["-e", &extension, "--model", "mock/mock-model", "--no-session", "-p", "/sayhi"];
+    let output = pi_async(root.path(), &args).await;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "stderr: {stderr}");
+    assert!(!stderr.contains("Extension error"), "{stderr}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "hi");
+    let requests = requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0]["messages"].to_string().contains("Reply with one word: hi"));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn startup_errors_exit_with_status_one() {
     let root = tempfile::tempdir().unwrap();
