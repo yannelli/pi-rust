@@ -9,7 +9,9 @@ use serde_json::json;
 const CHILD: &str = r#"
 process.on("message", (message, handle) => {
   if (message === "socket") {
-    handle.once("data", (data) => handle.end(`child:${data}`));
+    // Greet first: the client writes only after this, so the parent never reads its bytes.
+    handle.write("child:");
+    handle.once("data", (data) => handle.end(String(data)));
   } else if (message === "server") {
     handle.on("connection", (socket) => socket.end("from child server"));
     process.send("ready");
@@ -52,9 +54,12 @@ const child = fork(path.join(__dirname, "child.js"));
 const server = net.createServer((socket) => child.send("socket", socket));
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const talk = (port, text) => new Promise((resolve, reject) => {
-  const client = net.connect(port, "127.0.0.1", () => text && client.write(text));
+  const client = net.connect(port, "127.0.0.1");
   let data = "";
-  client.on("data", (chunk) => (data += chunk));
+  client.on("data", (chunk) => {
+    if (text && !data) client.write(text);
+    data += chunk;
+  });
   client.on("end", () => resolve(data));
   client.on("error", reject);
 });

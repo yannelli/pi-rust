@@ -16,6 +16,8 @@ const server = tls.createServer({ key: __KEY__, cert: __CERT__, ALPNProtocols: [
   serverSide.push([socket.encrypted, socket.alpnProtocol, socket.servername, socket.getProtocol()]);
   socket.on("data", (chunk) => socket.write(chunk));
   socket.on("end", () => socket.end());
+  // A client that closes with unread session tickets resets the connection, as in Node.
+  socket.on("error", () => {});
 });
 server.listen(0, "127.0.0.1");
 await once(server, "listening");
