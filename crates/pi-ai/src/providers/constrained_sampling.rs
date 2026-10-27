@@ -241,39 +241,64 @@ pub fn grammar_tool_input(tool_name: &str, arguments: &JsonObject, input_propert
     }
 }
 
-/// The JSON fragment that extends the arguments object to `next_input`, closing it when
-/// `close` is set. `None` means nothing to emit.
+/// Append `input_delta` to a streaming grammar tool input and return the matching piece of its JSON
+/// arguments text, or `None` for an empty delta. Costs time linear in the delta, never in the input.
 pub fn append_grammar_tool_input_json_delta(
     buffer: &mut GrammarToolInputJsonBuffer,
     input_property: &str,
-    next_input: &str,
-    close: bool,
+    input_delta: &str,
 ) -> Result<Option<String>, String> {
     if buffer.closed {
-        if close && next_input == buffer.input {
+        return Err(format!("grammar tool input for property \"{input_property}\" changed after it was closed"));
+    }
+    if input_delta.is_empty() {
+        return Ok(None);
+    }
+    buffer.input.push_str(input_delta);
+    Ok(Some(grammar_tool_input_json_start(buffer, input_property) + &json_string_body(input_delta)))
+}
+
+/// Close a streaming grammar tool input and return the rest of its JSON arguments text. `final_input`
+/// is the complete input when the provider sends one; it must continue the input streamed so far.
+/// Closing again with the same input returns `None`.
+pub fn close_grammar_tool_input_json(
+    buffer: &mut GrammarToolInputJsonBuffer,
+    input_property: &str,
+    final_input: Option<&str>,
+) -> Result<Option<String>, String> {
+    if buffer.closed {
+        if final_input.is_none_or(|input| input == buffer.input) {
             return Ok(None);
         }
         return Err(format!("grammar tool input for property \"{input_property}\" changed after it was closed"));
     }
-    let Some(input_delta) = next_input.strip_prefix(buffer.input.as_str()) else {
-        return Err(format!("grammar tool input for property \"{input_property}\" changed non-monotonically"));
+    let rest = match final_input {
+        Some(input) => match input.strip_prefix(buffer.input.as_str()) {
+            Some(rest) => rest.to_string(),
+            None => {
+                return Err(format!("grammar tool input for property \"{input_property}\" changed non-monotonically"));
+            }
+        },
+        None => String::new(),
     };
-    if !close && input_delta.is_empty() {
-        return Ok(None);
+    buffer.input.push_str(&rest);
+    buffer.closed = true;
+    Ok(Some(grammar_tool_input_json_start(buffer, input_property) + &json_string_body(&rest) + "\"}"))
+}
+
+/// The opening of the JSON arguments text, once.
+fn grammar_tool_input_json_start(buffer: &mut GrammarToolInputJsonBuffer, input_property: &str) -> String {
+    if buffer.started {
+        return String::new();
     }
-    let mut delta = String::new();
-    if !buffer.started {
-        delta.push_str(&format!("{{{}:\"", Value::String(input_property.to_string())));
-        buffer.started = true;
-    }
-    let encoded = Value::String(input_delta.to_string()).to_string();
-    delta.push_str(&encoded[1..encoded.len() - 1]);
-    buffer.input = next_input.to_string();
-    if close {
-        delta.push_str("\"}");
-        buffer.closed = true;
-    }
-    Ok(Some(delta))
+    buffer.started = true;
+    format!("{{{}:\"", Value::String(input_property.to_string()))
+}
+
+/// `text` encoded as the inside of a JSON string literal.
+fn json_string_body(text: &str) -> String {
+    let encoded = Value::String(text.to_string()).to_string();
+    encoded[1..encoded.len() - 1].to_string()
 }
 
 fn infer_grammar_input_property(tool: &Tool) -> Result<String, String> {
