@@ -378,7 +378,7 @@ fn custom_model_fallback_handles_thinking_suffixes() {
 
 #[test]
 fn default_model_selection_follows_upstream_priority() {
-    assert_eq!(default_model_for("openai"), Some("gpt-5.5"));
+    assert_eq!(default_model_for("openai"), Some("gpt-6.1-sol"));
     assert_eq!(default_model_for("openai-codex"), Some("gpt-6.1-sol"));
     assert_eq!(default_model_for("vercel-ai-gateway"), Some("zai/glm-5.1"));
     assert_eq!(default_model_for("ant-ling"), Some("Ring-2.6-1T"));
