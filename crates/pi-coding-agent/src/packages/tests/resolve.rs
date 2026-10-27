@@ -312,3 +312,32 @@ fn host_provided_dependencies_produce_warnings() {
     assert_eq!(warnings.len(), 1);
     assert!(warnings[0].1.contains("not dependencies: @earendil-works/pi-ai, typebox."));
 }
+
+// Upstream issue 11375: `-e npm:pkg` reused the first download forever.
+#[tokio::test]
+async fn temporary_npm_sources_refresh_when_a_newer_version_exists() {
+    let fixture = Fixture::new();
+    let runner =
+        MockRunner::new(|call| Ok(if call.kind == CallKind::Capture { "\"2.0.0\"".into() } else { String::new() }));
+    let manager = fixture.manager(runner.clone());
+    let root = manager.npm_install_root(SourceScope::Temporary, true).unwrap();
+    fake_npm_package(&root, "pkg", "1.0.0", &[("extensions/index.ts", EXTENSION)]);
+    let sources = vec!["npm:pkg".to_string()];
+    let resolved = manager.resolve_extension_sources(&sources, false, true).await.unwrap();
+    assert_eq!(resolved.extensions.len(), 1);
+    let root_text = root.display().to_string();
+    assert_eq!(runner.argvs(CallKind::Capture), [["npm", "view", "pkg", "version", "--json"]]);
+    assert_eq!(
+        runner.argvs(CallKind::Run),
+        [["npm", "install", "pkg@latest", "--prefix", &root_text, "--legacy-peer-deps"]]
+    );
+
+    // Pinned versions and offline runs keep the cached install without asking npm.
+    let pinned = MockRunner::new(|_| anyhow::bail!("npm must not run"));
+    fake_npm_package(&root, "pinned", "1.0.0", &[("extensions/index.ts", EXTENSION)]);
+    let manager = fixture.manager(pinned.clone());
+    manager.resolve_extension_sources(&["npm:pinned@1.0.0".to_string()], false, true).await.unwrap();
+    let offline = MockRunner::new(|_| anyhow::bail!("npm must not run"));
+    fixture.offline_manager(offline.clone()).resolve_extension_sources(&sources, false, true).await.unwrap();
+    assert!(pinned.calls().is_empty() && offline.calls().is_empty());
+}
