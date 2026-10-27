@@ -23,13 +23,26 @@ pub enum MarkdownMessageType {
 }
 
 /// Where and how the Markdown is shown (upstream `MarkdownTransformContext`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MarkdownTransformContext {
     pub message_type: MarkdownMessageType,
     pub is_streaming: bool,
     /// Columns available for the rendered content.
     pub available_width: usize,
+    /// Persisted session-entry id. `None` for live messages and live rendering.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
+    /// Persisted session-entry ISO timestamp. `None` for live messages and live rendering.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<String>,
+}
+
+/// The persisted session entry a message is rendered from (upstream `messageMeta`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MessageMeta {
+    pub id: String,
+    pub timestamp: String,
 }
 
 /// Rewrites Markdown. `None` keeps the input, like a transformer that returns a non-string upstream.
@@ -55,14 +68,22 @@ pub fn apply_markdown_transformers(
     transformed
 }
 
-/// The transform hook for one message (upstream `createMarkdownTransform`).
+/// The transform hook for one message (upstream `createMarkdownTransform`). `meta` names the
+/// session entry of a replayed message.
 pub fn create_markdown_transform(
     message_type: MarkdownMessageType,
     is_streaming: bool,
     transformers: Vec<MarkdownTransformer>,
+    meta: Option<MessageMeta>,
 ) -> MarkdownTransformFn {
     Rc::new(move |markdown: &str, available_width: usize| {
-        let context = MarkdownTransformContext { message_type, is_streaming, available_width };
+        let context = MarkdownTransformContext {
+            message_type,
+            is_streaming,
+            available_width,
+            message_id: meta.as_ref().map(|meta| meta.id.clone()),
+            timestamp: meta.as_ref().map(|meta| meta.timestamp.clone()),
+        };
         apply_markdown_transformers(markdown, &context, &transformers)
     })
 }

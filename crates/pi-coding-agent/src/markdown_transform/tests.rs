@@ -37,6 +37,8 @@ fn transform(markdown: &str, options: Options) -> String {
         message_type: options.message_type,
         is_streaming: options.is_streaming,
         available_width: options.max_width,
+        message_id: None,
+        timestamp: None,
     };
     transformer(markdown, &context).expect("transformed")
 }
@@ -164,6 +166,7 @@ fn code_spans_choose_fences_longer_than_inner_backticks() {
             get_mode: Arc::new(|| MermaidRenderingMode::Streaming),
             theme: None,
         })],
+        None,
     );
     let rendered = transformer("```mermaid\nflowchart LR\n  A[plain ` tick] --> B[two `` ticks]\n```", 100);
     assert!(rendered.contains("```│ plain ` tick ├───▶│ two `` ticks │```"), "{rendered}");
@@ -178,6 +181,6 @@ fn transformers_run_in_order_and_failures_keep_the_markdown() {
         let streaming = if context.is_streaming { "streaming" } else { "final" };
         Some(format!("{markdown} {} {streaming} {:?}", context.available_width, context.message_type))
     });
-    let transform = create_markdown_transform(MarkdownMessageType::User, true, vec![upper, skip, failing, width]);
+    let transform = create_markdown_transform(MarkdownMessageType::User, true, vec![upper, skip, failing, width], None);
     assert_eq!(transform("hi", 42), "HI 42 streaming User");
 }

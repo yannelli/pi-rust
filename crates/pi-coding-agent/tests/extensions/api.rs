@@ -36,7 +36,9 @@ export default function (pi) {{
 	pi.registerShortcut("ctrl+shift+p", {{ description: "Probe", handler: async (ctx) => ctx.ui.notify("shortcut ran") }});
 	pi.registerShortcut("ctrl+c", {{ description: "Reserved", handler: () => {{}} }});
 	pi.registerMessageRenderer("probe", (message, options) => new Text(`[${{message.content}}|${{options.expanded}}]`, 0, 0));
-	pi.registerMarkdownTransformer((markdown, context) => markdown.replace("foo", `bar(${{context.messageType}})`));
+	pi.registerMarkdownTransformer((markdown, context) =>
+		markdown.replace("foo", `bar(${{context.messageType}} ${{context.messageId}} ${{context.timestamp}})`),
+	);
 }}
 "#
     )
@@ -138,13 +140,24 @@ async fn completions_shortcuts_and_renderers_come_from_the_registry() {
     assert!(h.runner.render_message("other", &json!({}), false, 1).is_none());
 
     let transformer = h.runner.markdown_transformer().expect("transformer");
-    let context = MarkdownTransformContext {
+    let live = MarkdownTransformContext {
         message_type: MarkdownMessageType::Assistant,
         is_streaming: false,
         available_width: 80,
+        message_id: None,
+        timestamp: None,
     };
-    let transformed = tokio::task::spawn_blocking(move || transformer("a foo b", &context)).await.unwrap();
-    assert_eq!(transformed.as_deref(), Some("a bar(assistant) b"));
+    let restored = MarkdownTransformContext {
+        message_id: Some("entry-abc".into()),
+        timestamp: Some("2025-01-15T10:30:00.000Z".into()),
+        ..live.clone()
+    };
+    let transformed =
+        tokio::task::spawn_blocking(move || [transformer("a foo b", &live), transformer("foo", &restored)])
+            .await
+            .unwrap();
+    assert_eq!(transformed[0].as_deref(), Some("a bar(assistant undefined undefined) b"));
+    assert_eq!(transformed[1].as_deref(), Some("bar(assistant entry-abc 2025-01-15T10:30:00.000Z)"));
 }
 
 #[tokio::test(flavor = "multi_thread")]

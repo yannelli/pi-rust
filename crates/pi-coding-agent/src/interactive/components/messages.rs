@@ -13,7 +13,7 @@ use pi_tui::{
 };
 
 use super::RenderOptions;
-use crate::markdown_transform::{MarkdownMessageType, create_markdown_transform};
+use crate::markdown_transform::{MarkdownMessageType, MessageMeta, create_markdown_transform};
 use crate::theme::{ThemeBg, ThemeColor, theme};
 
 const OSC133_ZONE_START: &str = "\x1b]133;A\x07";
@@ -42,6 +42,11 @@ pub struct UserMessageComponent {
 
 impl UserMessageComponent {
     pub fn new(text: &str, options: &RenderOptions) -> Self {
+        Self::with_meta(text, options, None)
+    }
+
+    /// A message replayed from the session entry `meta`, which Markdown transformers receive.
+    pub fn with_meta(text: &str, options: &RenderOptions, meta: Option<MessageMeta>) -> Self {
         let style = DefaultTextStyle {
             color: Some(fg_style(ThemeColor::UserMessageText)),
             bg_color: Some(Rc::new(|text: &str| theme().bg(ThemeBg::UserMessageBg, text))),
@@ -50,7 +55,12 @@ impl UserMessageComponent {
         let markdown_options = MarkdownOptions {
             preserve_ordered_list_markers: true,
             preserve_backslash_escapes: true,
-            transform: Some(create_markdown_transform(MarkdownMessageType::User, false, options.transformers.clone())),
+            transform: Some(create_markdown_transform(
+                MarkdownMessageType::User,
+                false,
+                options.transformers.clone(),
+                meta,
+            )),
             ..MarkdownOptions::default()
         };
         let markdown =
@@ -78,6 +88,7 @@ pub struct AssistantMessageComponent {
     last_message: Option<AssistantMessage>,
     has_tool_calls: bool,
     is_streaming: bool,
+    meta: Option<MessageMeta>,
     overrides: HashMap<usize, bool>,
     /// A thinking run clicked during mouse dispatch, applied once dispatch returns.
     pending_toggle: Rc<Cell<Option<(usize, bool)>>>,
@@ -90,6 +101,17 @@ impl AssistantMessageComponent {
         hidden_thinking_label: &str,
         options: RenderOptions,
     ) -> Self {
+        Self::with_meta(message, hide_thinking_block, hidden_thinking_label, options, None)
+    }
+
+    /// A message replayed from the session entry `meta`, which Markdown transformers receive.
+    pub fn with_meta(
+        message: Option<&AssistantMessage>,
+        hide_thinking_block: bool,
+        hidden_thinking_label: &str,
+        options: RenderOptions,
+        meta: Option<MessageMeta>,
+    ) -> Self {
         let mut component = Self {
             content: Container::new(),
             options,
@@ -98,6 +120,7 @@ impl AssistantMessageComponent {
             last_message: None,
             has_tool_calls: false,
             is_streaming: false,
+            meta,
             overrides: HashMap::new(),
             pending_toggle: Rc::default(),
         };
@@ -131,7 +154,8 @@ impl AssistantMessageComponent {
     }
 
     fn markdown(&self, text: &str, kind: MarkdownMessageType, style: Option<DefaultTextStyle>) -> Markdown {
-        let transform = create_markdown_transform(kind, self.is_streaming, self.options.transformers.clone());
+        let transformers = self.options.transformers.clone();
+        let transform = create_markdown_transform(kind, self.is_streaming, transformers, self.meta.clone());
         let options = MarkdownOptions { transform: Some(transform), ..MarkdownOptions::default() };
         Markdown::new(text, self.options.output_pad, 0, self.options.markdown_theme.clone(), style, options)
     }
@@ -250,5 +274,58 @@ impl Component for AssistantMessageComponent {
 
     fn container_children(&self) -> Option<Vec<pi_tui::ComponentRef>> {
         Some(self.content.children.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+    use crate::markdown_transform::MarkdownTransformer;
+
+    type Captured = Arc<Mutex<Vec<(MarkdownMessageType, Option<String>, Option<String>)>>>;
+
+    fn capturing_options() -> (RenderOptions, Captured) {
+        let captured = Captured::default();
+        let sink = captured.clone();
+        let capture: MarkdownTransformer = Arc::new(move |_, context| {
+            let seen = (context.message_type, context.message_id.clone(), context.timestamp.clone());
+            sink.lock().unwrap().push(seen);
+            None
+        });
+        (RenderOptions { transformers: vec![capture], ..RenderOptions::default() }, captured)
+    }
+
+    fn meta() -> Option<MessageMeta> {
+        Some(MessageMeta { id: "entry-abc".into(), timestamp: "2025-01-15T10:30:00.000Z".into() })
+    }
+
+    #[test]
+    fn passes_persisted_entry_identity_to_transformers_and_leaves_live_messages_without() {
+        let (options, captured) = capturing_options();
+        UserMessageComponent::with_meta("restored", &options, meta()).render(80);
+        UserMessageComponent::new("live", &options).render(80);
+        let restored = (Some("entry-abc".to_string()), Some("2025-01-15T10:30:00.000Z".to_string()));
+        assert_eq!(
+            *captured.lock().unwrap(),
+            [
+                (MarkdownMessageType::User, restored.0.clone(), restored.1.clone()),
+                (MarkdownMessageType::User, None, None)
+            ]
+        );
+
+        let (options, captured) = capturing_options();
+        let message = AssistantMessage {
+            content: vec![
+                ContentBlock::Thinking { thinking: "hmm".into(), thinking_signature: None, redacted: false },
+                ContentBlock::Text { text: "answer".into(), text_signature: None },
+            ],
+            ..AssistantMessage::default()
+        };
+        AssistantMessageComponent::with_meta(Some(&message), false, "Thinking...", options, meta()).render(80);
+        let kinds = [MarkdownMessageType::AssistantThinking, MarkdownMessageType::Assistant];
+        let expected: Vec<_> = kinds.into_iter().map(|kind| (kind, restored.0.clone(), restored.1.clone())).collect();
+        assert_eq!(*captured.lock().unwrap(), expected);
     }
 }
