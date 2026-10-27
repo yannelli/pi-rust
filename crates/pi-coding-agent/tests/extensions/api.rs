@@ -112,6 +112,30 @@ async fn exec_reports_why_a_command_could_not_start() {
     assert!(call.contains("ENOENT"), "{call}");
 }
 
+/// The JSON result of `pi.exec(command, args)` run from an extension command.
+#[cfg(unix)]
+async fn exec_result(command: &str, args: &[&str]) -> Value {
+    let call = format!("pi.exec({}, {})", json!(command), json!(args));
+    let source = format!(
+        r#"export default function (pi) {{
+	pi.registerCommand("run", {{ handler: async (_args, ctx) => ctx.ui.notify(JSON.stringify(await {call})) }});
+}}
+"#
+    );
+    let h = harness(Setup { files: vec![("run.ts", source)], load: vec!["run.ts"], ..Setup::default() }).await;
+    h.session.prompt("/run", Vec::new()).await.unwrap();
+    let calls = h.ui.calls();
+    let [call] = calls.as_slice() else { panic!("{calls:?}") };
+    serde_json::from_str(call.strip_prefix("notify(info): ").expect("notify")).unwrap()
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn exec_keeps_stderr_empty_when_a_command_exits_silently() {
+    let result = exec_result("sh", &["-c", "exit 1"]).await;
+    assert_eq!(result, json!({"stdout": "", "stderr": "", "code": 1, "killed": false}));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn completions_shortcuts_and_renderers_come_from_the_registry() {
     let h = harness(Setup { files: vec![("probe.ts", probe_extension())], load: vec!["probe.ts"], ..Setup::default() })
