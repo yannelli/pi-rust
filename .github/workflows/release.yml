@@ -187,7 +187,8 @@ jobs:
         run: |
           name="pi-$TAG-$TARGET"
           mkdir -p "dist/$name"
-          cp README.md LICENSE THIRD-PARTY-LICENSES.md crates/pi-coding-agent/src/acp/LICENSE-pi-acp "dist/$name/"
+          cp README.md LICENSE THIRD-PARTY-LICENSES.md crates/pi-coding-agent/src/acp/LICENSE-pi-acp \
+            crates/pi-js/src/js/LICENSE-node crates/pi-mcp/src/oauth/LICENSE-mcp-typescript-sdk "dist/$name/"
           [ -f CHANGELOG.md ] && cp CHANGELOG.md "dist/$name/"
           if [ "${{ runner.os }}" = Windows ]; then
             cp "target/$TARGET/release/pi.exe" "dist/$name/"

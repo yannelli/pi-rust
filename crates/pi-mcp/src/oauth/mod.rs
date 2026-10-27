@@ -1,5 +1,8 @@
 //! OAuth for MCP HTTP servers: discovery, registration, PKCE, code exchange, refresh, and a
 //! loopback callback server.
+//!
+//! Ported from upstream pi's `packages/mcp/src/oauth`, which is adapted from the MCP TypeScript SDK
+//! v1.29.0 (MIT). The SDK license is in `LICENSE-mcp-typescript-sdk` in this directory.
 
 pub mod callback;
 pub mod discovery;

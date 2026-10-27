@@ -38,7 +38,7 @@ To change the installation, set these environment variables:
 
 ### Manual install
 
-Each [release](https://github.com/yannelli/pi-rust/releases) has one archive for each platform and a `SHA256SUMS` file. Each archive contains a `pi-vX.Y.Z-<target>/` folder. The folder contains `pi` or `pi.exe`, `README.md`, `LICENSE`, `LICENSE-pi-acp`, `THIRD-PARTY-LICENSES.md`, and `CHANGELOG.md`.
+Each [release](https://github.com/yannelli/pi-rust/releases) has one archive for each platform and a `SHA256SUMS` file. Each archive contains a `pi-vX.Y.Z-<target>/` folder. The folder contains `pi` or `pi.exe`, `README.md`, `LICENSE`, `LICENSE-pi-acp`, `LICENSE-node`, `LICENSE-mcp-typescript-sdk`, `THIRD-PARTY-LICENSES.md`, and `CHANGELOG.md`.
 
 | Platform | Target |
 | --- | --- |
@@ -441,5 +441,7 @@ cargo xtask notes 0.2.0          # print release notes
 MIT. pi-rust is based on [pi](https://github.com/earendil-works/pi) by Mario Zechner. See [LICENSE](LICENSE).
 
 The ACP mode is a port of [pi-acp](https://github.com/svkozak/pi-acp) by Sergii Kozak, also under the MIT license. Its license is in [`LICENSE-pi-acp`](crates/pi-coding-agent/src/acp/LICENSE-pi-acp), and each release archive includes it.
+
+Some JavaScript modules of the extension runtime are ported from [Node.js](https://github.com/nodejs/node) (MIT). The MCP OAuth code is ported from upstream pi, which adapted it from the [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) (MIT). Their licenses are in [`LICENSE-node`](crates/pi-js/src/js/LICENSE-node) and [`LICENSE-mcp-typescript-sdk`](crates/pi-mcp/src/oauth/LICENSE-mcp-typescript-sdk), and each release archive includes them.
 
 The release archives also include `THIRD-PARTY-LICENSES.md`, with the licenses of the third-party Rust crates in the binaries. The Release workflow writes it with [cargo-about](https://github.com/EmbarkStudios/cargo-about) from `about.toml` and `about.hbs`.
