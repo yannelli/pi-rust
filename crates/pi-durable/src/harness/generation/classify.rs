@@ -19,7 +19,7 @@ use crate::errors::{DurableError, DurableResult};
 use crate::harness::compaction::{CompactionInput, create_compaction, select_cut};
 use crate::harness::inbox::{BoundaryAt, append_user, apply_boundary, prepare_boundary};
 use crate::harness::live::{DeferredPoll, LIVE_DOC, LiveGeneration, PROGRESS_COMMIT, RetryState, end_run};
-use crate::harness::partial_changes::PartialChanges;
+use crate::harness::partial_changes::{PartialChanges, PartialCommit};
 use crate::harness::scheduler::TaskRuntime;
 use crate::harness::types::{CompactionReason, ModelRef, UserInput};
 use crate::harness::usage::ensure_provider_session_id;
@@ -124,43 +124,62 @@ pub(super) async fn poll(task: TaskRecord, runtime: TaskRuntime, context: Contex
     classify(&runtime, request, message, &context).await
 }
 
+/// Copy `partial` and take the changes since the last commit, then commit both in a task. Copy and take happen here,
+/// before the stream loop reads another event, as in upstream's synchronous `flush()`: a delta read between them
+/// would join the taken text without being in the copy, and the commit would append text the copy does not have.
+fn flush(
+    runtime: &TaskRuntime,
+    partial: AssistantMessage,
+    attempt: u32,
+    context: &Context,
+    changes: &Arc<Mutex<PartialChanges>>,
+) -> Option<JoinHandle<()>> {
+    // Stored as a whole `Message`, with its role, as upstream stores the `AssistantMessage`.
+    let mut message = match encode(&pi_ai::Message::Assistant(partial)) {
+        Ok(message) => message,
+        Err(error) => {
+            if !runtime.signal().aborted() {
+                runtime.report(&error);
+            }
+            return None;
+        }
+    };
+    let taken = lock(changes).take(&mut message);
+    let commit = commit_partial(runtime.clone(), message, taken, attempt, context.clone(), changes.clone());
+    Some(tokio::spawn(commit))
+}
+
 /// Commit one partial into `pi.live.generation.message`: what text and thinking grew by is appended, and the argument
 /// changes since the last commit are applied (`PartialChanges`), so the cost follows the new text.
 async fn commit_partial(
     runtime: TaskRuntime,
-    partial: AssistantMessage,
+    message: Json,
+    taken: PartialCommit,
     attempt: u32,
     context: Context,
     changes: Arc<Mutex<PartialChanges>>,
 ) {
     let conversation_id = runtime.conversation_id();
-    let result = async {
-        // Stored as a whole `Message`, with its role, as upstream stores the `AssistantMessage`.
-        let mut message = encode(&pi_ai::Message::Assistant(partial))?;
-        // The changes since the last commit belong to this one.
-        let taken = Arc::new(lock(&changes).take(&mut message));
-        let (tracker, commit) = (changes.clone(), taken.clone());
-        let change = move |tx: Tx, _| async move {
-            let draft = tx.doc(&LIVE_DOC, conversation_id).await?;
-            draft.core().with_change(|change| -> DurableResult<()> {
-                let live = change.state()?;
-                if live.get("generation").is_none_or(Json::is_null) {
-                    live.set("generation", encode(&LiveGeneration::new(attempt))?)?;
-                }
-                lock(&tracker).commit(change, &[Seg::key("generation")], message, &commit)?;
-                Ok(())
-            })??;
-            Ok(None)
-        };
-        let committed = runtime.commit_with_options(change, &context, PROGRESS_COMMIT).await;
-        if committed.is_err() {
-            lock(&changes).restore(&taken);
-        }
-        committed
+    let taken = Arc::new(taken);
+    let (tracker, commit) = (changes.clone(), taken.clone());
+    let change = move |tx: Tx, _| async move {
+        let draft = tx.doc(&LIVE_DOC, conversation_id).await?;
+        draft.core().with_change(|change| -> DurableResult<()> {
+            let live = change.state()?;
+            if live.get("generation").is_none_or(Json::is_null) {
+                live.set("generation", encode(&LiveGeneration::new(attempt))?)?;
+            }
+            lock(&tracker).commit(change, &[Seg::key("generation")], message, &commit)?;
+            Ok(())
+        })??;
+        Ok(None)
+    };
+    let committed = runtime.commit_with_options(change, &context, PROGRESS_COMMIT).await;
+    if committed.is_err() {
+        lock(&changes).restore(&taken);
     }
-    .await;
     // Failures after an abort mark or close are expected; the committed state stays consistent.
-    if let Err(error) = result
+    if let Err(error) = committed
         && !runtime.signal().aborted()
     {
         runtime.report(&error);
@@ -260,8 +279,7 @@ async fn stream_response(
             Some(()) = ticks.recv() => {
                 timer = None;
                 if let Some(partial) = pending.take() {
-                    let commit = commit_partial(runtime.clone(), partial, attempt, context.clone(), changes.clone());
-                    in_flight = Some(tokio::spawn(commit));
+                    in_flight = flush(runtime, partial, attempt, context, &changes);
                 }
             }
             () = flight => {

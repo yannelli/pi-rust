@@ -1,5 +1,8 @@
-//! Port of upstream `test/harness-live-deltas.test.ts` (`pi.live` deltas).
+//! Port of upstream `test/harness-live-deltas.test.ts` (`pi.live` deltas). `harness_live_deltas/streams.rs` holds the
+//! partial commits of a streamed answer.
 
+#[path = "harness_live_deltas/streams.rs"]
+mod streams;
 mod support;
 
 use std::collections::VecDeque;
@@ -12,7 +15,6 @@ use pi_durable::documents::CheckpointInfo;
 use pi_durable::harness::live::LIVE_DOC;
 use pi_durable::harness::*;
 use pi_durable::storage::MemoryStorage;
-use pi_durable::testing::faux::{FauxTokenSize, RegisterFauxProviderOptions};
 use pi_durable::types::{CommitChange, CommitPublication, DocumentCommitChange, DocumentContent};
 use pi_durable::{EntryRecord, StorageWrite};
 use serde_json::{Value, json};
@@ -282,32 +284,6 @@ async fn diffs_details_leaf_by_leaf_and_appends_diagnostics() {
     let expected = [json!(["s", ["tools", 0, "status"], "done"]), json!(["d", path]), json!(["d", diagnostics])];
     assert!(contains_all(&settled, &expected), "{settled:?}");
     run.harness.close(&ctx()).await.unwrap();
-}
-
-#[tokio::test]
-async fn streams_partial_text_as_appends() {
-    let token_size = Some(FauxTokenSize { min: Some(4), max: Some(4) });
-    let setup =
-        chat_setup(RegisterFauxProviderOptions { tokens_per_second: Some(400.0), token_size, ..Default::default() });
-    setup.faux.set_responses([answer(&"word ".repeat(250))]);
-    let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &setup).await;
-    let commits = record_live_ops(&harness);
-    root.submit(SubmissionDraft::input("go"), &ctx()).await.unwrap().wait(&ctx()).await.unwrap();
-    let commits = commits.lock().unwrap().clone();
-    let partials = &commits[2..commits.len() - 1];
-    assert!(partials.len() > 2);
-    assert_eq!(partials[0].len(), 1);
-    assert_eq!((partials[0][0][0].clone(), partials[0][0][1].clone()), (json!("s"), json!(["generation", "message"])));
-    assert!(partials[0][0][2].is_object());
-    for ops in &partials[1..] {
-        assert_eq!(ops.len(), 1, "{ops:?}");
-        assert_eq!(
-            (ops[0][0].clone(), ops[0][1].clone()),
-            (json!("a"), json!(["generation", "message", "content", 0, "text"]))
-        );
-        assert!(ops[0][2].is_string());
-    }
-    harness.close(&ctx()).await.unwrap();
 }
 
 fn nothing_runs(value: &Value) -> bool {

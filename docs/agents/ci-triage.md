@@ -31,6 +31,7 @@ for i in $(seq 1 10); do for k in 1 2 3 4 5 6; do ($bin -q >/dev/null 2>&1 || ec
 ```
 
 - Do not retry a flaky test in CI or loosen its assertion. Find the race. Relax an assertion only when Node itself allows the other result.
+- Windows timers are coarse (about 15 ms), so timers a few ms apart often fire in the same wakeup there. To get the same on Linux, use `#[tokio::test(start_paused = true)]` and give the timers delays that line up.
 
 ## Windows
 
