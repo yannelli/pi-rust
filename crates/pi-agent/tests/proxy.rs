@@ -205,3 +205,49 @@ async fn cancellation_ends_the_stream_as_aborted() {
         (StopReason::Aborted, Some("Request aborted by user"))
     );
 }
+
+// #9265: re-parsing the accumulated arguments on every delta made a long tool call quadratic.
+#[tokio::test]
+async fn shows_growing_partial_arguments_without_keeping_the_raw_text_on_the_block() {
+    let content = "line \"quoted\" \\ end\n".repeat(20_000);
+    let text = json!({"path": "a.ts", "content": content}).to_string();
+    let mut events = vec![
+        json!({"type": "start"}),
+        json!({"type": "toolcall_start", "contentIndex": 0, "id": "call_1", "toolName": "write"}),
+    ];
+    for start in (0..text.len()).step_by(32) {
+        let delta = &text[start..text.len().min(start + 32)];
+        events.push(json!({"type": "toolcall_delta", "contentIndex": 0, "delta": delta}));
+    }
+    let arguments = json!({"path": "a.ts", "content": content});
+    events.push(json!({"type": "toolcall_end", "contentIndex": 0, "toolCall": {"type": "toolCall", "id": "call_1", "name": "write", "arguments": arguments}}));
+    events.push(json!({"type": "done", "reason": "toolUse", "usage": usage()}));
+    let (url, _) = serve("200 OK", frames(&events)).await;
+
+    let started = std::time::Instant::now();
+    let model = pi_ai::providers::faux::FauxProvider::model();
+    let mut stream = stream_proxy(&model, &Context::default(), options(url));
+    let (mut shown, mut deltas, mut result) = (0, 0, None);
+    while let Some(event) = stream.next().await {
+        if let Some(message) = event.final_message() {
+            result = Some(message.clone());
+        }
+        let AssistantMessageEvent::ToolcallDelta { partial, .. } = event else { continue };
+        let block = serde_json::to_value(&partial.content[0]).unwrap();
+        let keys: Vec<&String> = block.as_object().unwrap().keys().collect();
+        assert_eq!(keys, ["type", "id", "name", "arguments"]);
+        let Some(partial) = block["arguments"]["content"].as_str() else { continue };
+        // Comparing the whole text on every delta would make this test itself quadratic.
+        if deltas % 500 == 0 {
+            assert!(content.starts_with(partial));
+        }
+        deltas += 1;
+        assert!(partial.len() >= shown);
+        shown = partial.len();
+    }
+    let result = result.expect("a final event");
+    assert!(shown > content.len() - 64);
+    let ContentBlock::ToolCall(call) = &result.content[0] else { panic!("expected a tool call") };
+    assert_eq!(serde_json::Value::Object(call.arguments.clone()), arguments);
+    assert!(started.elapsed() < std::time::Duration::from_secs(60), "took {:?}", started.elapsed());
+}
