@@ -77,6 +77,31 @@ async fn npm_installs_use_the_configured_command_and_managed_root() {
     assert_eq!(runner.argvs(CallKind::Run), [expected]);
 }
 
+// Upstream #11358: npm writes nested package-lock.json entries for a symlinked --prefix.
+#[cfg(unix)]
+#[tokio::test]
+async fn npm_installs_pass_the_real_path_when_the_agent_dir_is_a_symlink() {
+    let fixture = Fixture::new();
+    let linked = fixture.root().join("linked-agent");
+    std::os::unix::fs::symlink(&fixture.agent_dir, &linked).unwrap();
+    let runner = MockRunner::new(|_| Ok(String::new()));
+    let mut options = PackageManagerOptions::new(&fixture.cwd, &linked, fixture.settings.clone());
+    options.home = fixture.root();
+    options.runner = runner.clone();
+    options.offline = Some(false);
+    let manager = PackageManager::new(options);
+    manager.install("npm:@scope/pkg", false).await.unwrap();
+    manager.remove("npm:@scope/pkg", false).await.unwrap();
+    let root = fixture.agent_dir.join("npm").display().to_string();
+    assert_eq!(
+        runner.argvs(CallKind::Run),
+        [
+            strings(&["npm", "install", "@scope/pkg", "--prefix", &root, "--legacy-peer-deps"]),
+            strings(&["npm", "uninstall", "@scope/pkg", "--prefix", &root, "--legacy-peer-deps"]),
+        ]
+    );
+}
+
 #[tokio::test]
 async fn project_installs_require_trust() {
     let fixture = Fixture::with_trust(false);

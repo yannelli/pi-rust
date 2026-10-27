@@ -204,7 +204,7 @@ impl NpmCommand {
 /// Install arguments for managed npm packages. Peer installation is disabled so package
 /// managers never install or solve the host-provided `@earendil-works/pi-*` peers.
 pub fn npm_install_args(manager: &str, specs: &[String], root: &std::path::Path) -> Vec<String> {
-    let root = root.display().to_string();
+    let root = real_install_root(root);
     let mut args = vec!["install".to_string()];
     args.extend(specs.iter().cloned());
     let tail: Vec<&str> = match manager {
@@ -239,8 +239,14 @@ pub fn git_dependency_install_args(manager: &str) -> Vec<String> {
     args.iter().map(|arg| arg.to_string()).collect()
 }
 
+/// The install root with symlinks resolved: npm writes broken nested package-lock.json paths
+/// when `--prefix` goes through a symlink (upstream #11358).
+fn real_install_root(root: &std::path::Path) -> String {
+    crate::resources::paths::canonicalize(root).display().to_string()
+}
+
 pub fn npm_uninstall_args(manager: &str, name: &str, root: &std::path::Path) -> Vec<String> {
-    let root = root.display().to_string();
+    let root = real_install_root(root);
     match manager {
         "bun" => vec!["uninstall".into(), name.into(), "--cwd".into(), root],
         "pnpm" => vec!["uninstall".into(), name.into(), "--prefix".into(), root],
