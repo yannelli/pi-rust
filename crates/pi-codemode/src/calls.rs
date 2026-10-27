@@ -132,6 +132,7 @@ pub(crate) fn usage_from_value(value: &Value) -> Option<Usage> {
             cache_read: price("cacheRead"),
             cache_write: price("cacheWrite"),
             total: price("total"),
+            total_from_provider: cost.and_then(|cost| cost.get("totalFromProvider")).and_then(Value::as_bool),
         },
     })
 }

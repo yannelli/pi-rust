@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use pi_ai::{Cost, Message, Usage};
+use pi_ai::{Message, Usage};
 
 use super::SessionManager;
 use super::entry::{Entry, EntryData};
@@ -33,29 +33,8 @@ impl UsageTotals {
     }
 }
 
-fn add_optional(first: Option<u64>, second: Option<u64>) -> Option<u64> {
-    (first.is_some() || second.is_some()).then(|| first.unwrap_or(0) + second.unwrap_or(0))
-}
-
-/// Sum of two usages, keeping optional token splits when either side has them.
-pub fn combine_usage(first: &Usage, second: &Usage) -> Usage {
-    Usage {
-        input: first.input + second.input,
-        output: first.output + second.output,
-        cache_read: first.cache_read + second.cache_read,
-        cache_write: first.cache_write + second.cache_write,
-        cache_write_1h: add_optional(first.cache_write_1h, second.cache_write_1h),
-        reasoning: add_optional(first.reasoning, second.reasoning),
-        total_tokens: first.total_tokens + second.total_tokens,
-        cost: Cost {
-            input: first.cost.input + second.cost.input,
-            output: first.cost.output + second.cost.output,
-            cache_read: first.cost.cache_read + second.cost.cache_read,
-            cache_write: first.cost.cache_write + second.cost.cache_write,
-            total: first.cost.total + second.cost.total,
-        },
-    }
-}
+/// Sum of two usages (upstream `combineUsage`); shared with nested tool calls.
+pub use pi_agent::combine_usage;
 
 /// Usage an entry adds to session totals, with its breakdown key: assistant messages and
 /// `usage` entries by `provider/model`, tool results and summaries under `Tools/summaries`.
