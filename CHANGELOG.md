@@ -2,6 +2,84 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.7.0] - 2026-10-27
+
+### Breaking Changes
+
+- **durable,chord:** publish commits at adoption, address-following watches, synchronous observers (upstream 8b0caefc2) ([b4b9f18](https://github.com/yannelli/pi-rust/commit/b4b9f188ea1785ece86f57a0651f7c71e879e998))
+- **ai,agent:** parse streamed tool-call arguments incrementally (upstream f715a15c1) ([cc04d32](https://github.com/yannelli/pi-rust/commit/cc04d329bcb0cd9147c6da604a4183c82baa6a46))
+- **chord,durable:** Storage adopts inside the commit, watch types in Chord, explicit watch retirement (upstream 92ab53602) ([3dd52d4](https://github.com/yannelli/pi-rust/commit/3dd52d4cee8dfdb7105935cafca5af93694a4ff9))
+
+### Added
+
+- **durable:** partial commits append instead of assigning (upstream da412b039, durable part) ([6447346](https://github.com/yannelli/pi-rust/commit/6447346197cc795267dbdbeb919b8a2aa91bf631))
+- **coding-agent:** let inline ctx.ui.custom() components report blocked program status (upstream c1810bf70) ([e8c378d](https://github.com/yannelli/pi-rust/commit/e8c378d42cf508d804059ec6839843e765c702e2))
+- **durable:** deferred storage of throttled commits (upstream 6c2fd73b0) ([d117f73](https://github.com/yannelli/pi-rust/commit/d117f7302406cffedd3e092ff104e7effdfc7b83))
+- **coding-agent:** show model names in model selectors when they add information (upstream 606af8662) ([19c8b2e](https://github.com/yannelli/pi-rust/commit/19c8b2e20d43d19440a50563d04b98f54ed4371c))
+- **coding-agent:** confirm device-code browser and clipboard actions (upstream 7151099d0) ([edd0284](https://github.com/yannelli/pi-rust/commit/edd0284a41d344be33a33855e8d4e5975be3b23b))
+- **coding-agent:** add messageId and timestamp to markdown transformer context (upstream 64627838b) ([284d8f6](https://github.com/yannelli/pi-rust/commit/284d8f647744bcedb589bc9c1d51417d346b4c25))
+- **chord,durable:** PendingOps folds pending ops for slow consumers; Watch delivers one call per busy period (upstream d8d99950a) ([2a7c2a2](https://github.com/yannelli/pi-rust/commit/2a7c2a2ebfab4786f2aa644e50722508ff47ca06))
+- **chord:** append_text records a string append without comparing the strings (chord part of da412b039) ([29aab97](https://github.com/yannelli/pi-rust/commit/29aab973ff1d297a1d0d57af4ca9a36dc3948ccf))
+- **durable:** open a Harness read-only (upstream be14d9732) ([881a73b](https://github.com/yannelli/pi-rust/commit/881a73b46ddc5b6dbe45b8f4ccf12c4a10a9f79a))
+- **ai:** regenerate models.json for Kimi K3.1 Pro and GPT-6.1 Terra (upstream 1de2d7ade, upstream 363ad78bf) ([cc91ffb](https://github.com/yannelli/pi-rust/commit/cc91ffb5b8ebf0be17ef18088b86865deb0ced62))
+- **chord:** NativeWatchable, the in-process counterpart of Watchable (upstream 5e106ab1c) ([cbc6557](https://github.com/yannelli/pi-rust/commit/cbc6557b28b5a20a2ec21d8b2267153f7702384d))
+- **chord:** shared watch-handle implementation (Watch, NativeWatch); Durable uses it (upstream 42cb822f1) ([2b310d0](https://github.com/yannelli/pi-rust/commit/2b310d0b7f6198e2a6c63bcf13b58bef8121e955))
+- **ai:** image input for System One classifiers (upstream 7f225f25d) ([bc9f6f7](https://github.com/yannelli/pi-rust/commit/bc9f6f75ce2716582371589000cf6298d3aabe10))
+- **ai:** add incremental StreamingJsonParser and ToolCallArgumentsStream (upstream f715a15c1) ([db269b2](https://github.com/yannelli/pi-rust/commit/db269b2147880ac8d5cde1f7a2e4660abf17bbac))
+- **chord:** Watchable, the common interface of values that can be watched (upstream a2fd25f56) ([8b104a8](https://github.com/yannelli/pi-rust/commit/8b104a85adc625fdd78c1a6750a01a8e468403a9))
+- **ai:** add totalFromProvider flag to usage cost (upstream 7c22a93d0) ([21a7780](https://github.com/yannelli/pi-rust/commit/21a7780cda83958c1a9683654e1e9db6d237349f))
+- **ai:** carry responseModel on pi-messages terminal events (upstream 14c811841) ([bd8ec76](https://github.com/yannelli/pi-rust/commit/bd8ec761bd59636f59eff6236f4288b15baa9acc))
+
+### Fixed
+
+- **durable:** take a partial's changes when its commit is scheduled ([ba36d68](https://github.com/yannelli/pi-rust/commit/ba36d68b6287cf41f2b95ac91e1a9a84d3e36742))
+- **coding-agent:** hidden thinking with an empty label renders no rows (upstream a6a7bac86) ([3be4239](https://github.com/yannelli/pi-rust/commit/3be42390087055f6a9ebb88e2fe08d7f7effb7e4))
+- **coding-agent:** skip npm audit and fund output when installing pi packages (upstream 5fb9a0b11) ([1e17af4](https://github.com/yannelli/pi-rust/commit/1e17af4d8055c1d0a3e68b4cbfbf345566c4267f))
+- **env:** watch a directory again once the backend dropped its watch (upstream issue 11342) ([05b4a5b](https://github.com/yannelli/pi-rust/commit/05b4a5b283c0a8136ae87a96e59490965896e88e))
+- **tui:** recognize kitty F1-F12 sequences and ignore F13+ keys (upstream deb12d78e) ([2dd5179](https://github.com/yannelli/pi-rust/commit/2dd51796c18801cbc4950ceab5a548660bea41a1))
+- **coding-agent:** default openai provider to gpt-6.1-sol (upstream f049787d9) ([2e7cda6](https://github.com/yannelli/pi-rust/commit/2e7cda6e19cd8b26683615a9a533df4e5de3b3f5))
+- **coding-agent:** keep open extension dialog visible when the editor component is replaced (upstream 7853186d1) ([07caa50](https://github.com/yannelli/pi-rust/commit/07caa5093fa7b8707c53d083f689b66f8356febe))
+- **coding-agent:** keep grep context lines aligned when a file has a lone CR (upstream fecc19e4e) ([7abe518](https://github.com/yannelli/pi-rust/commit/7abe51879fc3d09c2b507675defae3b39795ac5a))
+- **durable:** record the requested thinking level on assistant messages (upstream d5b3de22d) ([f001178](https://github.com/yannelli/pi-rust/commit/f0011781a867f953148e1004bb0ab49c45618747))
+- **durable:** continue runs after tool handoffs (upstream 38ff99177) ([40c3300](https://github.com/yannelli/pi-rust/commit/40c330092fe5862b8f874b44e467bdcf6261492a))
+- **coding-agent:** cap pi.exec output and stop the command at the cap (upstream issue 11360) ([4cb1c6c](https://github.com/yannelli/pi-rust/commit/4cb1c6c1196a5d098a4c9dcf1fb80bda0915633b))
+- **coding-agent:** refresh unpinned -e npm packages when a newer version exists (upstream issue 11375) ([e8171ff](https://github.com/yannelli/pi-rust/commit/e8171ffd09fc15331147bd505ca40b002300479f))
+- **coding-agent:** wait for extension prompts before print mode exits (upstream issue 11238) ([998059c](https://github.com/yannelli/pi-rust/commit/998059ca78c2cceacaa5e79e704eba02dcf3a35a))
+- **coding-agent:** strip CSI sequences with private parameter bytes (upstream issue 11377) ([9188c56](https://github.com/yannelli/pi-rust/commit/9188c5688a0bbd646ed5253f9afc4a0e20f50ebf))
+- **coding-agent:** record the live thinking level after /tree navigation (upstream issue 11451) ([0443e6a](https://github.com/yannelli/pi-rust/commit/0443e6a7ca1e4a0b52deadcfeaca87ba3964cb58))
+- **coding-agent:** pass the selected thinking level to tree branch summaries (upstream issue 11444) ([7a4d18f](https://github.com/yannelli/pi-rust/commit/7a4d18f2f131fb5420466c57e0396df1d6b3f4f4))
+- **coding-agent:** name settings.json in the package install warning (upstream 6dfb54678) ([fb985d2](https://github.com/yannelli/pi-rust/commit/fb985d2fdb1e16c0b1daa01c0243445c6dd6dea8))
+- **examples:** todo renderResult returns undefined on validation errors (upstream 3953e9ef4) ([1bb4686](https://github.com/yannelli/pi-rust/commit/1bb4686d23afa4cf97d41780e27db3e0d048e919))
+- **coding-agent:** render streamed tool-call arguments once per frame, upstream f715a15c1 (tool rendering part) ([469de92](https://github.com/yannelli/pi-rust/commit/469de927d4d659f2a318c0c95af7e7bd3a1dd442))
+- **coding-agent:** rank tools first when the search query is their name (upstream ae823bc0b) ([13e4735](https://github.com/yannelli/pi-rust/commit/13e47354efdcabdee5d1ae206afce04eeee4c870))
+- **coding-agent:** resolve provider/id references when the provider id contains a slash (upstream 984cf6643) ([3ee9265](https://github.com/yannelli/pi-rust/commit/3ee9265ada12f7a4bb9631380716a8a8a9170d73))
+- **coding-agent:** pass real path as npm prefix when agent dir is a symlink (upstream 5f960a0e2) ([7753279](https://github.com/yannelli/pi-rust/commit/77532792a86b6966a13f8b268b98bb40e44f03c0))
+- **tui,coding-agent:** rank contiguous fuzzy matches and search session fields separately (upstream 8c03fef4d) ([5c1ef45](https://github.com/yannelli/pi-rust/commit/5c1ef455960eed2aa1465637681ce8cf5c342ed6))
+- **coding-agent:** login dialog opens only web URLs, upstream 89c921d8b (login dialog part) ([82243d9](https://github.com/yannelli/pi-rust/commit/82243d9cfe6f67c98735af8cbaa47a3eb31412fd))
+- **coding-agent:** decode pi.exec output across UTF-8 chunk boundaries (upstream 36be9c612) ([1281ecd](https://github.com/yannelli/pi-rust/commit/1281ecd793d32302d495af37aa26bf31fe0a84cb))
+- **coding-agent:** render HTML export for sessions deeper than the call stack (upstream 1c720d285) ([97cb781](https://github.com/yannelli/pi-rust/commit/97cb781a7b89b94b0426b96f473b96d646e41b99))
+- **coding-agent:** render system messages in HTML export (upstream 9359adf0c) ([6a48240](https://github.com/yannelli/pi-rust/commit/6a48240516e917425b1558727d76c453778ffce9))
+- **coding-agent:** stop macOS shell groups before killing them (upstream 27cc6bfc0) ([6654a49](https://github.com/yannelli/pi-rust/commit/6654a4979b30699c6d5b5504cf4773b482f0e731))
+- **ai:** apply modelOverrides to classifier and image models (upstream issue 11223) ([2a86741](https://github.com/yannelli/pi-rust/commit/2a86741aac7d0519abc963dbd4c8a580331881bb))
+- **ai:** keep Bedrock strict tool sets within the union parameter limit (upstream issue 11416) ([c181a17](https://github.com/yannelli/pi-rust/commit/c181a17fb290b11c7d88a7245ee862a4329b315b))
+- **ai:** do not send tool_removal for top-level Anthropic tools (upstream issue 11376) ([0de093e](https://github.com/yannelli/pi-rust/commit/0de093e95cbd8f3399f538a225c283e030595827))
+- **ai:** harden OAuth URLs, pi-messages content indexes, and the CLI auth file (upstream 89c921d8b (ai part)) ([ce06cbd](https://github.com/yannelli/pi-rust/commit/ce06cbde8d54e15287230e93a92bedaad9544f80))
+- **tui:** strip pasted escape sequences and end unfinished pastes (upstream issue 11383) ([cbbb8ae](https://github.com/yannelli/pi-rust/commit/cbbb8ae61c60eb35260b7a4212cac652f2848f62))
+- **tui:** match F1 to F12 in Kitty forms and with modifiers (upstream issue 11345) ([6cc491f](https://github.com/yannelli/pi-rust/commit/6cc491fe15272adb4ba50c392a687fb5d09b2388))
+- **mcp:** apply maxMessageBytes to HTTP JSON responses (upstream issue 11335) ([eaaa4dd](https://github.com/yannelli/pi-rust/commit/eaaa4dd4eb11268245951ab121171c9bb8d8e003))
+- **codemode:** let scripts declare top-level tools and console (upstream issue 11226) ([555cb0f](https://github.com/yannelli/pi-rust/commit/555cb0f846b0639202902780041ec24f09c777e5))
+- **ai:** use OpenRouter-reported total cost (upstream cae8d69e5) ([8cdbd99](https://github.com/yannelli/pi-rust/commit/8cdbd99f3c1f09ef3288fefd185b9fea4adb9ce9))
+- **ai:** do not count faux cache writes as input tokens (upstream f3fa8bd92) ([44596ff](https://github.com/yannelli/pi-rust/commit/44596ffe0027404e0d9c589d467d5dc26c610458))
+- **tui:** replace control characters in terminal titles (upstream 89c921d8b (tui part)) ([13a4c26](https://github.com/yannelli/pi-rust/commit/13a4c26eb8ed22632546f677d61fdff514f47650))
+- **tui:** bound image line search by tallest registered image (upstream 1c8cb1781) ([8f87866](https://github.com/yannelli/pi-rust/commit/8f87866560852578251f38687f41aef317fa9efe))
+- **tui:** crop boxed images scrolled above the fullscreen viewport (upstream 4464442f9) ([7f86cf2](https://github.com/yannelli/pi-rust/commit/7f86cf2298283c01a44ee6f44be7375cd7dd1961))
+- **ai:** send fixed low top-level effort with Anthropic per-message effort (upstream e3bc05e87) ([95ee17b](https://github.com/yannelli/pi-rust/commit/95ee17b4c0ef415ebf26580ccfbd8853343c55da))
+- **tui:** use iterm2 word characters for fullscreen double-click selection (upstream ff6896471) ([8aecadc](https://github.com/yannelli/pi-rust/commit/8aecadcd5bb8e8df742b9180073f4c6d04fc53ed))
+- **tui:** stop nested blockquote rendering from growing exponentially (upstream 8a2ebd385) ([276e843](https://github.com/yannelli/pi-rust/commit/276e8439d8a5a5386e5ea1a40598ff33376c5f3f))
+- **ai:** preserve literal data in Gemini tool schemas (upstream a7b94a03f) ([e6e8ed5](https://github.com/yannelli/pi-rust/commit/e6e8ed5f530e5fd7dbd32cc4fa6e2176d76a685b))
+- **mcp:** accept only http and https OAuth URLs (upstream 9ffd27cfa) ([66e1b65](https://github.com/yannelli/pi-rust/commit/66e1b659a54dc887cd7121bcca89b378cd662566))
+- **ai:** send const as enum in Gemini tool schemas (upstream 7314819f0) ([e7e3099](https://github.com/yannelli/pi-rust/commit/e7e3099ccd0ad8f2985cb2ea95d02fce5ddef2fa))
+
 ## [0.6.3] - 2026-10-27
 
 ### Added
