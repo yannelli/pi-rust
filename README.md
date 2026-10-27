@@ -6,7 +6,7 @@
 
 # pi-rust
 
-A Rust-only port of the [pi](https://github.com/earendil-works/pi) coding agent harness: a streaming multi-provider LLM API, an agent loop with tool calling, and the `pi` coding agent CLI. No Node.js or JavaScript runtime is required.
+A Rust-only port of the [pi](https://github.com/earendil-works/pi) coding agent harness: a streaming multi-provider LLM API, an agent loop with tool calling, and the `pi` coding agent CLI. You do not need Node.js or any other JavaScript runtime installed.
 
 ## Install
 
@@ -66,9 +66,9 @@ $bin = "$env:LOCALAPPDATA\pi\pi-$tag-$target"
 [Environment]::SetEnvironmentVariable("Path", "$([Environment]::GetEnvironmentVariable('Path', 'User'));$bin", "User")
 ```
 
-Each release file also has a signed build provenance attestation. With the GitHub CLI, `gh attestation verify pi-$tag-$target.tar.gz --repo yannelli/pi-rust` shows that the file came from this repository's Release workflow.
-
 Open a new terminal afterwards so the `Path` change applies. With the GitHub CLI, `gh release download --repo yannelli/pi-rust --pattern '*<target>*'` fetches the latest archive. A browser download on macOS may need `xattr -d com.apple.quarantine pi` before the first run.
+
+Each release file also has a signed build provenance attestation. With the GitHub CLI, `gh attestation verify pi-$tag-$target.tar.gz --repo yannelli/pi-rust` shows that the file came from this repository's Release workflow.
 
 `pi update --self` replaces a release install with the latest release, and `pi update --models` refreshes the model catalogs. To build from source (Rust 1.85 or newer): `cargo install --path crates/pi-coding-agent`.
 
@@ -290,16 +290,10 @@ pi-rust ports the `pi` CLI and its libraries feature for feature. These parts di
 - CJK and Thai word movement uses ICU4X dictionaries, so a few word boundaries differ from Node's `Intl.Segmenter`.
 - `pi --mode acp` (above) is an addition; the TypeScript pi needs the separate pi-acp adapter.
 - Markdown export (see [Use](#use)) is an addition: `/export notes.md` and `pi --export session.jsonl notes.md` write Markdown. Upstream pi exports only HTML and JSONL.
-- `/diff` (see [Use](#use)) is an addition; upstream pi has no command that shows the git changes in the working directory.
-- `/init` (see [Use](#use)) is an addition; upstream pi has no `/init` command.
-- `/review` (see [Use](#use)) is an addition; upstream pi has no `/review` command.
-- `/context` (see [Use](#use)) is an addition; upstream pi shows context use only in the footer.
-- `/undo` (see [Use](#use)) is an addition; upstream pi has no command that restores the files the agent changed.
-- `/retry` (see [Use](#use)) is an addition; upstream pi has no `/retry` command.
+- The slash commands `/diff`, `/init`, `/review`, `/context`, `/undo`, and `/retry` (see [Use](#use)) are additions. Upstream pi has none of them, and it shows context use only in the footer.
 - `pi completion` and `pi doctor` (above) are additions; the TypeScript pi has neither.
 - `pi sessions` and `pi stats` (above) are additions; the TypeScript pi lists and deletes sessions only in its session picker (`pi -r`, `/resume`) and shows usage only for the current session (`/session`).
-- The run limits `--max-turns` and `--max-cost` (above) are additions.
-- Structured output with `--output-schema` and `--output-retries` (above) is an addition.
+- Run limits (`--max-turns`, `--max-cost`) and structured output (`--output-schema`, `--output-retries`), both above, are additions.
 - Account model lists for OpenAI Codex, Anthropic, GitHub Copilot, OpenAI, xAI, and Google (see [Providers](#account-model-lists-pi-rust-extension)) are an addition; upstream pi narrows only OpenRouter.
 - pi-rust fixes these bugs that are still open upstream:
   - Anthropic: removing a tool from the first tool list no longer breaks every later request (upstream issue 11376).

@@ -52,17 +52,15 @@ Older than the synced commit, so the report no longer lists them.
 
 Upstream `7472cda0d` (2026-10-12) deleted the experimental server stack: the client, protocol, and server packages and `pi experimental`. pi-rust keeps them on purpose as pi-rust extras (decided 2026-10-21): `pi-client`, `pi-protocol`, `pi-server`, the `pi experimental` commands (`server`, `client`, `durable`, `vacation`), and the facets/services runtime in pi-chord that they use. The three crates are in `allowlist.json`. They get no upstream fixes from now on.
 
-Upstream `92ab53602` removed the Chord state getters `Session.documentState()`, `Conversation.viewState()`, and `Harness.taskGraph()` with the `DocumentState` type. pi-durable keeps them because the experimental stack in pi-coding-agent reads conversations and the task graph through them. A retirement publishes `null` to a document state, and a later incarnation at the address its value, as a watch follows its address.
+Upstream `92ab53602` removed the Chord state getters `Session.documentState()`, `Conversation.viewState()`, and `Harness.taskGraph()` with the `DocumentState` type. pi-durable keeps them because the experimental stack in pi-coding-agent reads conversations and the task graph through them. When a document is retired, its document state publishes `null`. When a new document is created at the same address, the state publishes that document's value, the same way a watch follows its address.
 
 ## pi-rust extensions
 
 Behavior that pi-rust adds on purpose. The parity review should not report these as gaps.
 
-- Account model list for `openai-codex` from the Codex backend's `/codex/models` (README "Account model lists").
-- Account model list for `anthropic` from `/v1/models` (README "Account model lists").
-- Account model list for `github-copilot` from the Copilot `/models` endpoint (README "Account model lists").
-- Account model lists for `openai` and `xai` from `/models`, and for `google` from the Gemini API `/models` (README "Account model lists"). Cursor and Grok Build have no public model list, so they are not narrowed.
+- Account model lists (README "Account model lists"): `openai-codex` from the Codex backend's `/codex/models`, `anthropic` from `/v1/models`, `github-copilot` from the Copilot `/models` endpoint, `openai` and `xai` from `/models`, and `google` from the Gemini API `/models`. Cursor and Grok Build have no public model list, so they are not narrowed.
 - Markdown export: `/export` and `pi --export` write Markdown when the output path ends in `.md` (README "Use").
+- The README section "Differences from the TypeScript pi" lists the other additions (slash commands, CLI commands and flags, settings) and the bugs pi-rust fixes that are still open upstream. `allowlist.json` holds the matching parity report entries.
 
 ## Platform
 
