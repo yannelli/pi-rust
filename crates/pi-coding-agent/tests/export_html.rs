@@ -58,8 +58,8 @@ fn export_from_file_matches_upstream_bytes() {
     let written = export_from_file(fixture().to_str().unwrap(), out.to_str(), &ExportTheme::dark()).unwrap();
     assert_eq!(written, out);
     let bytes = std::fs::read(&out).unwrap();
-    assert_eq!(bytes.len(), 283_596);
-    assert_eq!(fnv1a(&bytes), 0x0627_f0f5_300d_1eb2);
+    assert_eq!(bytes.len(), 289_875);
+    assert_eq!(fnv1a(&bytes), 0xa769_c935_ea99_5432);
 }
 
 #[test]
@@ -85,8 +85,8 @@ fn session_export_with_state_matches_upstream_bytes() {
     };
     export_session_html(&fixture(), out.to_str(), &options).unwrap();
     let bytes = std::fs::read(&out).unwrap();
-    assert_eq!(bytes.len(), 284_300);
-    assert_eq!(fnv1a(&bytes), 0x87ac_10d3_1e12_1296);
+    assert_eq!(bytes.len(), 290_579);
+    assert_eq!(fnv1a(&bytes), 0xff0d_eba1_a5ff_1caa);
 
     let data = session_data(&String::from_utf8(bytes).unwrap());
     let rendered = &data["renderedTools"];
@@ -142,6 +142,30 @@ fn page_structure_embedded_data_and_escaping() {
     assert!(json.contains(r#""data":{"x":1,"y":[1,2.5,0]}"#));
     assert!(json.contains(r#""big":1.2345678901234569e+23"#));
     assert!(json.contains(r#""nestedCalls":{"calls":[{"id":"n1","name":"read""#));
+}
+
+// Regression test for upstream #9980: provider-reported totals may differ from catalog components.
+#[test]
+fn header_cost_uses_recorded_totals_and_falls_back_to_component_sums() {
+    let template = include_str!("../src/export/assets/template.js");
+    let start = template.find("function computeStats(entryList)").unwrap();
+    let end = template.find("const globalStats = computeStats(entries);").unwrap();
+    let entries = json!([
+        {"type": "message", "message": {"role": "assistant", "content": [],
+            "usage": {"cost": {"input": 0.1, "output": 0.2, "cacheRead": 0, "cacheWrite": 0, "total": 0.9}}}},
+        {"type": "message", "message": {"role": "assistant", "content": [],
+            "usage": {"cost": {"input": 0.4, "output": 0.1, "cacheRead": 0, "cacheWrite": 0}}}}
+    ]);
+    let source = format!("{}\nJSON.stringify(computeStats({entries}).cost)", &template[start..end]);
+    let runtime = Runtime::new().unwrap();
+    let context = Context::full(&runtime).unwrap();
+    let cost: Value = context.with(|ctx| {
+        let json: String = ctx.eval(source).unwrap_or_else(|error| panic!("{error}: {:?}", ctx.catch()));
+        serde_json::from_str(&json).unwrap()
+    });
+    for (key, expected) in [("input", 0.5), ("output", 0.3), ("total", 1.4)] {
+        assert!((cost[key].as_f64().unwrap() - expected).abs() < 1e-9, "{key}: {cost}");
+    }
 }
 
 #[test]
@@ -231,4 +255,149 @@ fn html_export_renders_emphasis_next_to_cjk_punctuation() {
             "<p>**end.**Then next</p>\n",
         ]
     );
+}
+
+const TEMPLATE_JS: &str = include_str!("../src/export/assets/template.js");
+
+/// The template's system message helpers, run in QuickJS against `entries` (upstream
+/// `export-html-system-messages.test.ts`). Returns each call's string or boolean result as JSON.
+fn system_helpers(entries: &Value, calls: &str) -> Value {
+    let start = TEMPLATE_JS.find("function systemContentText(content)").expect("helpers start");
+    let end = TEMPLATE_JS.find("const hasSystemEntries").expect("helpers end");
+    assert!(end > start);
+    let source = format!(
+        "const entries = {entries};\nconst byId = new Map(entries.map(entry => [entry.id, entry]));\n{}\nJSON.stringify({calls})",
+        &TEMPLATE_JS[start..end]
+    );
+    let runtime = Runtime::new().unwrap();
+    let context = Context::full(&runtime).unwrap();
+    let json: String =
+        context.with(|ctx| ctx.eval(source).unwrap_or_else(|error| panic!("{error}: {:?}", ctx.catch())));
+    serde_json::from_str(&json).unwrap()
+}
+
+fn system_messages() -> (Value, Value) {
+    let initial = json!({
+        "role": "system",
+        "content": "You are a helpful assistant.",
+        "sections": {"rules": "<rules>\nbe concise\n</rules>", "project_context": "<project_context>\nv1\n</project_context>"},
+        "toolsAdded": [{"name": "read", "description": "Read a file", "parameters": {"type": "object", "properties": {}}}],
+        "timestamp": 1,
+    });
+    let update = json!({
+        "role": "system",
+        "content": [{"type": "text", "text": "Extra instructions"}],
+        "sections": {"project_context": "<project_context>\nv2\n</project_context>", "rules": null},
+        "toolsAdded": [{"name": "bash", "description": "Run a command", "parameters": {"type": "object", "properties": {}}}],
+        "toolsRemoved": [{"name": "read"}],
+        "timestamp": 2,
+    });
+    (initial, update)
+}
+
+// Regression tests for upstream #11261: system messages were stored in the export but never rendered.
+#[test]
+fn export_renders_system_message_text_the_way_the_model_receives_it() {
+    let (initial, update) = system_messages();
+    let entries = json!([{"type": "message", "id": "s1", "parentId": null, "message": initial}]);
+    let calls = format!("[getSystemMessageText({initial}), renderSystemMessageUpdate({update})]");
+    let rendered = system_helpers(&entries, &calls);
+    let initial: pi_ai::SystemMessage = serde_json::from_value(initial).unwrap();
+    let update: pi_ai::SystemMessage = serde_json::from_value(update).unwrap();
+    assert_eq!(rendered[0], pi_ai::transcript::system_message_text(&initial));
+    assert_eq!(rendered[1], pi_ai::transcript::render_system_message_update(&update));
+}
+
+#[test]
+fn export_renders_the_first_system_entry_as_the_prompt_and_later_ones_as_updates() {
+    let (initial, update) = system_messages();
+    let entries = json!([
+        {"type": "message", "id": "s1", "parentId": null, "message": initial},
+        {"type": "message", "id": "u1", "parentId": "s1", "message": {"role": "user", "content": "hi"}},
+        {"type": "message", "id": "s2", "parentId": "u1", "message": update},
+    ]);
+    let calls =
+        format!("[isLeadingSystemEntry(entries[0]), isLeadingSystemEntry(entries[2]), describeSystemUpdate({update})]");
+    assert_eq!(
+        system_helpers(&entries, &calls),
+        json!([true, false, "instructions, project_context, -rules, tools +bash -read"])
+    );
+
+    let entries = json!([
+        {"type": "compaction", "id": "c1", "parentId": null, "systemMessage": initial},
+        {"type": "message", "id": "s2", "parentId": "c1", "message": update},
+    ]);
+    let calls = "[isLeadingSystemEntry({ id: 's2', parentId: 'c1' })]";
+    assert_eq!(system_helpers(&entries, calls), json!([false]));
+
+    let opener = "if (msg.role === 'system') {";
+    let renders_entries = TEMPLATE_JS
+        .match_indices(opener)
+        .any(|(at, _)| TEMPLATE_JS[at + opener.len()..].trim_start().starts_with("let html = '';"));
+    assert!(renders_entries);
+    assert!(TEMPLATE_JS.contains("renderSystemPromptBlock('System Prompt', text)"));
+    assert!(TEMPLATE_JS.contains("renderToolsList('Available Tools', msg.toolsAdded)"));
+}
+
+/// The tree functions of an exported page's viewer script, loaded in QuickJS (upstream
+/// `export-html-deep-tree.test.ts`). The session data is decoded here, so `atob` passes it on.
+const TREE_STUBS: &str = r#"
+globalThis.window = { location: { search: "" } };
+globalThis.document = { getElementById: () => ({ textContent: globalThis.sessionJson }), querySelector: () => null };
+globalThis.atob = (text) => text;
+globalThis.TextDecoder = class {
+  decode(bytes) {
+    let text = "";
+    for (let i = 0; i < bytes.length; i += 8192) text += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+    return text;
+  }
+};
+globalThis.URLSearchParams = class { get() { return null; } };
+"#;
+
+// Upstream #11225: recursive tree walks overflowed the call stack on long sessions.
+#[test]
+fn html_export_renders_sessions_deeper_than_the_call_stack() {
+    const DEPTH: usize = 20_000;
+    let dir = tempfile::tempdir().unwrap();
+    let header = json!({"type": "session", "version": 3, "id": "deep-test", "timestamp": "1970-01-01T00:00:00.000Z", "cwd": "/tmp"});
+    let mut lines = vec![header.to_string()];
+    for i in 0..DEPTH {
+        let timestamp = format!("1970-01-01T{:02}:{:02}:{:02}.000Z", i / 3600, i / 60 % 60, i % 60);
+        let parent = if i == 0 { Value::Null } else { json!(format!("e{}", i - 1)) };
+        let message = json!({"role": "user", "content": "x", "timestamp": i * 1000});
+        let entry = json!({"type": "message", "id": format!("e{i}"), "parentId": parent, "timestamp": timestamp, "message": message});
+        lines.push(entry.to_string());
+    }
+    let session = dir.path().join("session.jsonl");
+    std::fs::write(&session, lines.join("\n") + "\n").unwrap();
+    let out = dir.path().join("out.html");
+    export_from_file(session.to_str().unwrap(), out.to_str(), &ExportTheme::dark()).unwrap();
+    let html = std::fs::read_to_string(&out).unwrap();
+
+    let session_json = stringify(&session_data(&html));
+    let viewer_start = html.rfind("<script>").unwrap() + "<script>".len();
+    let viewer = &html[viewer_start..viewer_start + html[viewer_start..].find("</script>").unwrap()];
+    let api = "return { buildTree, buildActivePathIds, flattenTree, findNewestLeaf, getPath };";
+    let viewer = viewer.replace("let treeNodeMap = null;", &format!("let treeNodeMap = null; {api}"));
+    let checks = r#"
+const tree = api.buildTree();
+const leafId = `e${depth - 1}`;
+const flat = api.flattenTree(tree, api.buildActivePathIds(leafId));
+const path = api.getPath(leafId);
+JSON.stringify([tree.length, flat.length, flat[depth - 1].node.entry.id, api.findNewestLeaf("e0"), path.length, path[0].id, path[depth - 1].id])
+"#;
+    let runtime = Runtime::new().unwrap();
+    let context = Context::full(&runtime).unwrap();
+    let result: String = context.with(|ctx| {
+        let run =
+            |source: String| ctx.eval::<(), _>(source).unwrap_or_else(|error| panic!("{error}: {:?}", ctx.catch()));
+        ctx.globals().set("sessionJson", session_json).unwrap();
+        ctx.globals().set("depth", DEPTH).unwrap();
+        run(TREE_STUBS.to_string());
+        run(format!("globalThis.api = {viewer}"));
+        ctx.eval(checks).unwrap_or_else(|error| panic!("{error}: {:?}", ctx.catch()))
+    });
+    let leaf = format!("e{}", DEPTH - 1);
+    assert_eq!(serde_json::from_str::<Value>(&result).unwrap(), json!([1, DEPTH, leaf, leaf, DEPTH, "e0", leaf]));
 }

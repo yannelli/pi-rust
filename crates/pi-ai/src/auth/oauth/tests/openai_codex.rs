@@ -72,6 +72,8 @@ async fn device_code_login_polls_then_exchanges_the_code() {
             verification_uri: "https://auth.openai.com/codex/device".into(),
             interval_seconds: Some(5),
             expires_in_seconds: Some(900),
+            open_browser_on_confirm: None,
+            copy_code_on_confirm: None,
         }]
     );
     let polls: Vec<u128> = server.requests_to("/deviceauth/token").iter().map(|r| (r.at - start).as_millis()).collect();

@@ -10,41 +10,41 @@ use serde_json::Value;
 
 /// Upstream model counts per provider file: (provider, chat, image, classifier).
 const COUNTS: [(&str, usize, usize, usize); 42] = [
-    ("amazon-bedrock", 193, 0, 0),
+    ("amazon-bedrock", 194, 0, 0),
     ("ant-ling", 3, 0, 0),
     ("anthropic", 17, 0, 0),
-    ("azure", 43, 0, 0),
+    ("azure", 44, 0, 0),
     ("baseten", 14, 0, 0),
     ("cerebras", 2, 0, 0),
     ("cloudflare-ai-gateway", 58, 0, 0),
-    ("cloudflare-workers-ai", 19, 0, 3),
+    ("cloudflare-workers-ai", 19, 0, 5),
     ("deepseek", 2, 0, 0),
-    ("fireworks", 24, 0, 0),
-    ("github-copilot", 26, 0, 0),
+    ("fireworks", 29, 0, 0),
+    ("github-copilot", 27, 0, 0),
     ("google", 24, 0, 0),
     ("google-vertex", 14, 0, 0),
     ("groq", 7, 0, 0),
-    ("huggingface", 80, 0, 0),
-    ("kimi-coding", 4, 0, 0),
+    ("huggingface", 78, 0, 0),
+    ("kimi-coding", 6, 0, 0),
     ("meta", 6, 0, 0),
     ("minimax", 4, 0, 0),
     ("minimax-cn", 4, 0, 0),
-    ("mistral", 37, 0, 0),
-    ("moonshotai", 4, 0, 0),
-    ("moonshotai-cn", 4, 0, 0),
-    ("nvidia", 21, 0, 0),
-    ("openai", 42, 0, 1),
-    ("openai-codex", 7, 0, 0),
-    ("opencode", 83, 0, 2),
-    ("opencode-go", 29, 0, 0),
-    ("openrouter", 401, 63, 27),
+    ("mistral", 32, 0, 0),
+    ("moonshotai", 6, 0, 0),
+    ("moonshotai-cn", 6, 0, 0),
+    ("nvidia", 22, 0, 0),
+    ("openai", 43, 0, 1),
+    ("openai-codex", 8, 0, 0),
+    ("opencode", 80, 0, 2),
+    ("opencode-go", 30, 0, 0),
+    ("openrouter", 399, 63, 30),
     ("qwen-token-plan", 21, 0, 0),
     ("qwen-token-plan-cn", 21, 0, 0),
     ("qwen-token-plan-individual", 9, 0, 0),
     ("radius", 32, 0, 0),
     ("together", 15, 0, 0),
     ("typesafe", 0, 0, 1),
-    ("vercel-ai-gateway", 305, 0, 12),
+    ("vercel-ai-gateway", 303, 0, 14),
     ("xai", 4, 0, 0),
     ("xiaomi", 3, 0, 0),
     ("xiaomi-token-plan-ams", 2, 0, 0),
@@ -100,8 +100,8 @@ fn totals_per_type_match_upstream() {
     for model in builtin_models() {
         totals[type_index(model.model_type.as_deref().expect("every bundled model declares its type"))] += 1;
     }
-    assert_eq!(totals, [1599, 63, 46]);
-    assert_eq!(builtin_models().len(), 1708);
+    assert_eq!(totals, [1603, 63, 53]);
+    assert_eq!(builtin_models().len(), 1719);
     assert_eq!(bundled_counts().len(), 42);
 }
 

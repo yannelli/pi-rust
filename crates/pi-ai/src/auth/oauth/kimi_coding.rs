@@ -94,14 +94,15 @@ impl KimiCodingOAuth {
         let (device_code, user_code) = (string("device_code"), string("user_code"));
         let uri = trusted_http_url(field(json.as_ref(), "verification_uri"));
         let complete = trusted_http_url(field(json.as_ref(), "verification_uri_complete"));
-        let (Some(device_code), Some(user_code), Some(_), Some(_)) = (device_code, user_code, uri, complete) else {
+        let (Some(device_code), Some(user_code), Some(_), Some(complete)) = (device_code, user_code, uri, complete)
+        else {
             let json = json_text(json.as_ref());
             return Err(AuthError::other(format!("Invalid Kimi Code device authorization response: {json}")));
         };
         Ok(DeviceAuthorization {
             device_code,
             user_code,
-            verification_uri_complete: string("verification_uri_complete").unwrap_or_default(),
+            verification_uri_complete: complete,
             interval_seconds: positive_number(field(json.as_ref(), "interval"))
                 .unwrap_or(DEFAULT_POLL_INTERVAL_SECONDS),
             expires_in_seconds: positive_number(field(json.as_ref(), "expires_in"))
@@ -247,6 +248,8 @@ impl OAuthAuth for KimiCodingOAuth {
             verification_uri: device.verification_uri_complete.clone(),
             interval_seconds: Some(device.interval_seconds as u64),
             expires_in_seconds: Some(device.expires_in_seconds as u64),
+            open_browser_on_confirm: None,
+            copy_code_on_confirm: None,
         });
         self.poll_for_token(&host, &device, &cancel).await
     }

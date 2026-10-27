@@ -80,6 +80,21 @@ async fn streams_text_with_usage_and_cost() {
     assert!(!request.headers.contains_key("authorization"));
 }
 
+// Regression test for upstream #9980.
+#[tokio::test]
+async fn openrouter_message_delta_cost_replaces_the_catalog_total() {
+    let mut frames = vec![message_start(json!({"input_tokens": 100, "output_tokens": 1}))];
+    let billed = json!({"output_tokens": 25, "cost": 0.004, "is_byok": false,
+        "cost_details": {"upstream_inference_cost": 0.003}});
+    frames.extend(message_end("end_turn", billed));
+    let server = MockServer::start(MockResponse::Sse(frames)).await;
+    let model = test_model(API, "openrouter", &server.base_url);
+    let (_, message) = collect(AnthropicMessages.stream(&model, &context(), options())).await;
+    let cost = message.usage.cost;
+    assert_eq!((cost.total, cost.total_from_provider), (0.004, Some(true)));
+    assert_ne!(cost.input + cost.output + cost.cache_read + cost.cache_write, cost.total);
+}
+
 #[tokio::test]
 async fn thinking_signature_redacted_thinking_and_tool_arguments() {
     let mut frames = vec![

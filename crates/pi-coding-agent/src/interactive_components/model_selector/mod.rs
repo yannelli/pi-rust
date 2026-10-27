@@ -13,8 +13,8 @@ use tokio_util::sync::CancellationToken;
 mod source;
 
 pub use source::{
-    DefaultModelReference, ModelRefreshFn, ModelSelectorSource, ModelsRefreshResult, model_search_text,
-    model_selector_search_text,
+    DefaultModelReference, ModelRefreshFn, ModelSelectorSource, ModelsRefreshResult, distinct_model_name,
+    model_search_text, model_selector_search_text,
 };
 
 use super::common::{border, fg, fuzzy_filter_by, locale_compare, spacer, text, visible_window};
@@ -263,9 +263,11 @@ impl ModelSelector {
             let cursor = if selected { fg(ThemeColor::Accent, "→ ") } else { "  ".into() };
             let marker = if models_equal(current, model) { fg(ThemeColor::Accent, "✓ ") } else { "  ".into() };
             let id = if selected { fg(ThemeColor::Accent, &model.id) } else { model.id.clone() };
+            let name = distinct_model_name(&model.id, &model.name)
+                .map_or_else(String::new, |name| fg(ThemeColor::Muted, &format!(" ({name})")));
             let provider = fg(ThemeColor::Muted, &format!("[{}]", model.provider));
             let badge = if self.is_default_model(model) { fg(ThemeColor::Muted, " · default") } else { String::new() };
-            list.add_child(text(&format!("{cursor}{marker}{id} {provider}{badge}"), 0, 0));
+            list.add_child(text(&format!("{cursor}{marker}{id}{name} {provider}{badge}"), 0, 0));
         }
         if start > 0 || end < self.filtered.len() {
             let info = format!("  ({}/{})", self.selected_index + 1, self.filtered.len());

@@ -71,11 +71,20 @@ impl ContentBlock {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Cost {
+    /// Catalog-derived input cost.
     pub input: f64,
+    /// Catalog-derived output cost.
     pub output: f64,
+    /// Catalog-derived cache-read cost.
     pub cache_read: f64,
+    /// Catalog-derived cache-write cost.
     pub cache_write: f64,
+    /// Best available total: provider-reported billed cost when supported, otherwise the catalog estimate.
     pub total: f64,
+    /// True when `total` is the billed cost reported by the provider. False when it is a catalog
+    /// estimate; absent also means false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_from_provider: Option<bool>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -116,6 +125,7 @@ impl Usage {
         self.cost.cache_read = per_million(self.cache_read, cache_read);
         self.cost.cache_write = per_million(short_write, cache_write) + per_million(long_write, input * 2.0);
         self.cost.total = self.cost.input + self.cost.output + self.cost.cache_read + self.cost.cache_write;
+        self.cost.total_from_provider = Some(false);
     }
 }
 
@@ -163,7 +173,7 @@ pub struct AssistantMessage {
     pub api: String,
     pub provider: String,
     pub model: String,
-    /// Concrete model reported by the provider when it differs from `model`.
+    /// Concrete model reported by the provider, when reported. May equal the requested `model`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -677,5 +687,20 @@ mod tests {
         let mut usage = Usage { cache_write: 1_000_000, cache_write_1h: Some(400_000), ..Usage::default() };
         usage.apply_cost(&ModelCost { input: 3.0, cache_write: 3.75, ..Default::default() });
         assert!((usage.cost.cache_write - (0.6 * 3.75 + 0.4 * 6.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn catalog_derived_totals_are_not_provider_reported() {
+        use serde_json::json;
+        let mut usage = Usage { input: 1_000_000, total_tokens: 1_000_000, ..Usage::default() };
+        usage.cost = Cost { total: 9.0, total_from_provider: Some(true), ..Cost::default() };
+        usage.apply_cost(&ModelCost { input: 1.25, ..Default::default() });
+        assert_eq!(usage.cost.total_from_provider, Some(false));
+        assert_eq!(serde_json::to_value(usage.cost).unwrap()["totalFromProvider"], json!(false));
+        let legacy: Cost = serde_json::from_value(json!({"input": 0, "output": 0, "cacheRead": 0,
+            "cacheWrite": 0, "total": 0}))
+        .unwrap();
+        assert_eq!(legacy.total_from_provider, None);
+        assert!(serde_json::to_value(legacy).unwrap().get("totalFromProvider").is_none());
     }
 }

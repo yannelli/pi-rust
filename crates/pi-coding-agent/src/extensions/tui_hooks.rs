@@ -290,11 +290,15 @@ impl ExtensionRunner {
                 MarkdownMessageType::Assistant => "assistant",
                 MarkdownMessageType::AssistantThinking => "assistant-thinking",
             };
-            let context = json!({
+            let mut context = json!({
                 "messageType": kind,
                 "isStreaming": context.is_streaming,
                 "availableWidth": context.available_width,
+                "messageId": context.message_id,
+                "timestamp": context.timestamp,
             });
+            // Upstream leaves both undefined for live messages.
+            context.as_object_mut()?.retain(|_, value| !value.is_null());
             let result = runner.blocking_json("transformMarkdown", vec![json!(markdown), context])?;
             result.as_str().map(str::to_string)
         }))

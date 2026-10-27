@@ -112,6 +112,8 @@ async fn answer(
             interaction.notify(AuthEvent::DeviceCode {
                 user_code: text("userCode").unwrap_or_default(),
                 verification_uri: text("verificationUri").unwrap_or_default(),
+                open_browser_on_confirm: arg["openBrowserOnConfirm"].as_bool(),
+                copy_code_on_confirm: arg["copyCodeOnConfirm"].as_bool(),
                 interval_seconds: arg["intervalSeconds"].as_u64(),
                 expires_in_seconds: arg["expiresInSeconds"].as_u64(),
             });

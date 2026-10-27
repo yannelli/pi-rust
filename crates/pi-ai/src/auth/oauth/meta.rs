@@ -176,6 +176,8 @@ impl MetaOAuth {
             verification_uri: device.verification_uri.clone(),
             interval_seconds: device.interval_seconds.map(|seconds| seconds as u64),
             expires_in_seconds: device.expires_in_seconds.map(|seconds| seconds as u64),
+            open_browser_on_confirm: None,
+            copy_code_on_confirm: None,
         });
         let identity_token = self.poll_for_identity_token(&device, cancel).await?;
         interaction.notify(AuthEvent::Progress { message: "Enabling Meta Model API access...".into() });

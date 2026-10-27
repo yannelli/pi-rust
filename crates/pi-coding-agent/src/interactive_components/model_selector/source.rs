@@ -64,6 +64,32 @@ impl<T: ModelSelectorSource + ?Sized> ModelSelectorSource for std::sync::Arc<T> 
     }
 }
 
+fn split_model_label(value: &str) -> Vec<String> {
+    value
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(String::from)
+        .collect()
+}
+
+/// The model name when it has words the id lacks, such as a renamed override like
+/// "MiniMax M3 [parasail]" for "minimax/minimax-m3" (upstream `getDistinctModelName`). Names that
+/// only restate the id with other casing, separators, or a dropped namespace or version stay hidden.
+pub fn distinct_model_name(id: &str, name: &str) -> Option<String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return None;
+    }
+    let id_words = split_model_label(id);
+    let compact_id = id_words.concat();
+    // Single-character words must match a whole id token: "4" is not covered by "mistral-small-2603".
+    let covered = |word: &String| {
+        id_words.contains(word) || (word.encode_utf16().count() > 1 && compact_id.contains(word.as_str()))
+    };
+    (!split_model_label(name).iter().all(covered)).then(|| name.to_string())
+}
+
 /// Upstream `getModelSelectorSearchText`.
 pub fn model_selector_search_text(model: &Model) -> String {
     let name = if model.name.is_empty() { String::new() } else { format!(" {}", model.name) };

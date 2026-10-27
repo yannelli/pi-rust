@@ -202,6 +202,8 @@ impl OpenAICodexOAuth {
             verification_uri: DEVICE_VERIFICATION_URI.into(),
             interval_seconds: Some(device.interval_seconds as u64),
             expires_in_seconds: Some(DEVICE_CODE_TIMEOUT_SECONDS),
+            open_browser_on_confirm: None,
+            copy_code_on_confirm: None,
         });
         let (code, verifier) = self.poll_device_auth(&device, cancel).await?;
         self.exchange_code(&code, &verifier, DEVICE_REDIRECT_URI, cancel).await

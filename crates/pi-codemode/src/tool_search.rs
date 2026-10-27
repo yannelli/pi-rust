@@ -146,7 +146,30 @@ pub fn tool_search_document(tool: &CodemodeToolInfo) -> ToolSearchDocument {
     create_tool_search_document(&tool.name, &tool.description, &tool.parameters, tool.namespace.as_ref())
 }
 
-/// Okapi BM25. Ties keep document order.
+/// Lowercase with characters invalid in script identifiers as `_`, so `dev-radius` matches `dev_radius`.
+fn normalize_name(name: &str) -> String {
+    let mut normalized = String::new();
+    for c in js_trim(name).to_lowercase().chars() {
+        if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '$' {
+            normalized.push(c);
+        } else {
+            // One `_` per UTF-16 unit, like the upstream regex replace.
+            normalized.extend(std::iter::repeat_n('_', c.len_utf16()));
+        }
+    }
+    normalized
+}
+
+/// Whether `query` names the tool: its full name or a suffix after a `__` separator, so
+/// `thread_read` and `app__thread_read` both name `mcp__app__thread_read`.
+fn is_name_query(query: &str, name: &str) -> bool {
+    let normalized = normalize_name(name);
+    normalized == query || normalized.ends_with(&format!("__{query}"))
+}
+
+/// Okapi BM25. A query that names a tool ranks that tool first, because length normalization
+/// can otherwise rank a short description sharing the name's words above it. Ties keep
+/// document order.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Bm25Ranker {
     pub k1: f64,
@@ -187,7 +210,8 @@ impl ToolRanker for Bm25Ranker {
                 (term.as_str(), (1.0 + (total - frequency + 0.5) / (frequency + 0.5)).ln())
             })
             .collect();
-        let mut matches: Vec<ToolSearchMatch> = Vec::new();
+        let name_query = normalize_name(query);
+        let mut matches: Vec<(ToolSearchMatch, bool)> = Vec::new();
         for (index, document) in documents.iter().enumerate() {
             let mut score = 0.0;
             for term in &query_terms {
@@ -197,12 +221,14 @@ impl ToolRanker for Bm25Ranker {
                 score += idf[term.as_str()] * (count * (self.k1 + 1.0)) / (count + norm);
             }
             if score > 0.0 {
-                matches.push(ToolSearchMatch { name: document.name.clone(), score });
+                let named = is_name_query(&name_query, &document.name);
+                matches.push((ToolSearchMatch { name: document.name.clone(), score }, named));
             }
         }
-        matches.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-        matches.truncate(limit);
-        matches
+        matches.sort_by(|(a, a_named), (b, b_named)| {
+            b_named.cmp(a_named).then_with(|| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal))
+        });
+        matches.into_iter().take(limit).map(|(found, _)| found).collect()
     }
 }
 

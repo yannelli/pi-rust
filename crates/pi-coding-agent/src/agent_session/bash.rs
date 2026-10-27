@@ -36,9 +36,11 @@ const MAX_PENDING_ANSI_CHARS: usize = 256;
 /// How long to keep reading after the shell exits while descendants still hold the pipes.
 const POST_EXIT_IDLE: Duration = Duration::from_millis(250);
 
+/// A private parameter byte (`<`, `=`, `>`, `?`) may lead the parameters, as in SGR mouse reports
+/// (`ESC[<35;59;1M`) and device attribute replies (`ESC[>0;276;0c`) (upstream issue 11377).
 static ANSI: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?s)\x1b\].*?(?:\x07|\x1b\\|\u{9c})|[\x1b\u{9b}][\[\]()#;?]*(?:\d{1,4}(?:[;:]\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]",
+        r"(?s)\x1b\].*?(?:\x07|\x1b\\|\u{9c})|[\x1b\u{9b}][\[\]()#;?]*[<=>?]?(?:\d{1,4}(?:[;:]\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]",
     )
     .expect("valid ANSI pattern")
 });
@@ -60,6 +62,7 @@ pub fn sanitize_binary_output(text: &str) -> String {
 
 fn is_unfinished_csi(rest: &str) -> bool {
     let rest = rest.trim_start_matches(['[', ']', '(', ')', '#', ';', '?']);
+    let rest = rest.strip_prefix(['<', '=', '>', '?']).unwrap_or(rest);
     let digits = rest.chars().take_while(char::is_ascii_digit).count();
     if digits == 0 {
         return rest.is_empty();
@@ -126,12 +129,7 @@ fn spawn_reader(mut stream: impl AsyncRead + Unpin + Send + 'static, sender: mps
 async fn kill_process_tree(child: &mut tokio::process::Child) {
     #[cfg(unix)]
     if let Some(pid) = child.id() {
-        let _ = tokio::process::Command::new("/bin/sh")
-            .args(["-c", &format!("kill -KILL -- -{pid}")])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await;
+        crate::signals::kill_process_tree(pid);
     }
     let _ = child.start_kill();
 }
@@ -370,6 +368,21 @@ mod tests {
         assert_eq!(split_incomplete_ansi_suffix("ok\x1b[31m"), ("ok\x1b[31m", ""));
         assert_eq!(split_incomplete_ansi_suffix("ok\x1b"), ("ok", "\x1b"));
         assert_eq!(sanitize_binary_output("a\x00b\tc\x07d\n"), "ab\tcd\n");
+    }
+
+    // Upstream issue 11377: private parameter bytes left the parameters in tool output.
+    #[test]
+    fn strips_csi_sequences_with_private_parameter_bytes() {
+        assert_eq!(strip_ansi("\x1b[<35;59;1Mstep 1"), "step 1");
+        assert_eq!(strip_ansi("\x1b[<35;59;1mup"), "up");
+        assert_eq!(strip_ansi("\x1b[>0;276;0cok"), "ok");
+        assert_eq!(strip_ansi("\x1b[=5uok"), "ok");
+        assert_eq!(strip_ansi("\x1b[38;5;196mred"), "red");
+        // Without parameters, the private byte is still a final byte.
+        assert_eq!(strip_ansi("\x1b[<a"), "a");
+        assert_eq!(split_incomplete_ansi_suffix("ok\x1b[<35;5"), ("ok", "\x1b[<35;5"));
+        assert_eq!(split_incomplete_ansi_suffix("ok\x1b[>"), ("ok", "\x1b[>"));
+        assert_eq!(split_incomplete_ansi_suffix("ok\x1b[<35;59;1M"), ("ok\x1b[<35;59;1M", ""));
     }
 
     #[tokio::test]

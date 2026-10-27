@@ -132,6 +132,11 @@ impl Ui {
         self.terminal.borrow().writes()
     }
 
+    /// Program status reports (OSC 7501) so far.
+    pub fn program_statuses(&self) -> Vec<pi_tui::program_status::ProgramStatus> {
+        self.terminal.borrow().program_statuses().to_vec()
+    }
+
     /// Lets the UI loop and session tasks run for `millis`.
     pub async fn settle(&self, millis: u64) {
         tokio::time::sleep(Duration::from_millis(millis)).await;

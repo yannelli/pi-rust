@@ -236,6 +236,17 @@ async fn runs_concurrent_calls_and_lists_tool_names() {
 }
 
 #[tokio::test]
+async fn scripts_may_declare_top_level_tools_and_console() {
+    let sandbox = sandbox(vec![echo()]);
+    let code = "const tools = await globalThis.tools.echo([1, 2]);\nconst console = 'shadowed';\nreturn [tools.length, console];";
+    assert_eq!(attempt(&sandbox, code).await, json!([2, "shadowed"]));
+    let globals = run(&sandbox, "console.log('still global');\nreturn await tools.echo('ok');").await;
+    assert_eq!(globals.value(), Some(&json!("ok")));
+    let CodemodeOutputItem::Text { text, console } = &globals.output[0] else { panic!("text expected") };
+    assert_eq!((text.as_str(), *console), ("still global", true));
+}
+
+#[tokio::test]
 async fn exposes_normalized_identifiers_and_lists_them_in_all_tools() {
     let sandbox = sandbox(vec![
         constant("my-tool", json!("dash")).with_description("Dashes"),

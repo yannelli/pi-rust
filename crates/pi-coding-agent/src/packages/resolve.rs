@@ -334,6 +334,9 @@ impl PackageManager {
                 ParsedSource::Npm(npm) => {
                     let path = self.npm_install_path(npm, resolved_scope).await?;
                     if path.exists() && installed_npm_matches(npm, &path) {
+                        if resolved_scope == SourceScope::Temporary {
+                            self.refresh_temporary_npm_source(npm, &resolved_source, &path).await;
+                        }
                         path
                     } else if self.install_missing(&parsed, &resolved_source, resolved_scope, on_missing).await? {
                         self.npm_install_path(npm, resolved_scope).await?

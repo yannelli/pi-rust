@@ -74,6 +74,8 @@ async fn device_login_delays_polling_and_handles_pending_and_slow_down() {
         verification_uri: "https://accounts.x.ai/oauth2/device".into(),
         interval_seconds: Some(5),
         expires_in_seconds: Some(900),
+        open_browser_on_confirm: None,
+        copy_code_on_confirm: None,
     };
     assert_eq!(device_event(&interaction), expected);
 }

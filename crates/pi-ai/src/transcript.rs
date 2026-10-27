@@ -61,17 +61,40 @@ pub fn current_tools(messages: &[Message]) -> Vec<Tool> {
 fn tools_after<'a>(systems: impl Iterator<Item = &'a SystemMessage>) -> Vec<Tool> {
     let mut tools: Vec<Tool> = Vec::new();
     for system in systems {
-        for removed in system.tools_removed.iter().flatten() {
-            tools.retain(|tool| tool.name != removed.name);
-        }
-        for added in system.tools_added.iter().flatten() {
-            match tools.iter_mut().find(|tool| tool.name == added.name) {
-                Some(existing) => *existing = added.clone(),
-                None => tools.push(added.clone()),
-            }
-        }
+        apply_tool_changes(&mut tools, system);
     }
     tools
+}
+
+fn apply_tool_changes(tools: &mut Vec<Tool>, system: &SystemMessage) {
+    for removed in system.tools_removed.iter().flatten() {
+        tools.retain(|tool| tool.name != removed.name);
+    }
+    for added in system.tools_added.iter().flatten() {
+        match tools.iter_mut().find(|tool| tool.name == added.name) {
+            Some(existing) => *existing = added.clone(),
+            None => tools.push(added.clone()),
+        }
+    }
+}
+
+/// For APIs whose in-place removals resolve only against tools declared in place (Anthropic,
+/// upstream issue 11376): the top-level tools, and how many of the `later` system messages fold
+/// their tool changes into them because they remove a top-level tool without redefining it.
+pub(crate) fn fold_top_level_tool_changes(initial: &[Tool], later: &[&SystemMessage]) -> (Vec<Tool>, usize) {
+    let mut state = initial.to_vec();
+    let (mut top, mut folded) = (state.clone(), 0);
+    for (index, system) in later.iter().enumerate() {
+        let added = system.tools_added.as_deref().unwrap_or_default();
+        let removes_top = system.tools_removed.iter().flatten().any(|removed| {
+            !added.iter().any(|tool| tool.name == removed.name) && top.iter().any(|tool| tool.name == removed.name)
+        });
+        apply_tool_changes(&mut state, system);
+        if removes_top {
+            (top, folded) = (state.clone(), index + 1);
+        }
+    }
+    (top, folded)
 }
 
 /// Replay every system message into one holding the current prompt, sections, and tools.

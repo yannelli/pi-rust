@@ -11,16 +11,41 @@ use super::shared::{
 };
 use super::{
     ClassifierAnswer, ClassifierApi, ClassifierContext, ClassifierOptions, ClassifierQuestion, ClassifierResult,
-    OrderedMap,
+    ImageContent, OrderedMap,
 };
 use crate::retry::ProviderRequestError;
 use crate::types::{JsonObject, Model};
+
+/// How a service takes images (`compat.imageInput`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ImageInput {
+    /// TypeSafe's `assets` map (PNG and JPEG), with the asset names placed before the state.
+    Assets,
+    /// Clef's `images` list of data URLs (PNG, JPEG, and WebP, at most four).
+    Images,
+    /// OpenRouter's form: `image_url` parts placed before the state. OpenRouter drops `assets` silently.
+    StateImageUrls,
+}
+
+/// System One compatibility settings with every field resolved (upstream `SystemOneCompat`).
+struct Compat {
+    image_input: ImageInput,
+    send_image_opt_in_header: bool,
+}
+
+/// TypeSafe's opt-in header for its experimental image input.
+const IMAGE_OPT_IN_HEADER: &str = "TypeSafe-Danger-Zone-Images";
+const DATA_URL_TYPES: [&str; 3] = ["image/png", "image/jpeg", "image/webp"];
+/// Clef accepts at most this many images per request.
+const MAX_DATA_URL_IMAGES: usize = 4;
 
 /// Differences between services that serve System One models.
 struct Transport {
     api: &'static str,
     /// Service name used in error messages.
     label: &'static str,
+    /// Compatibility settings for models that do not set them in `compat`.
+    detect_compat: fn(&Model) -> Compat,
     url: fn(&Model, &BTreeMap<String, String>) -> String,
     /// Wraps the System One request in the service's request envelope.
     payload: fn(&Model, JsonObject) -> Value,
@@ -32,6 +57,14 @@ struct Transport {
 const TYPESAFE: Transport = Transport {
     api: "typesafe-system-one",
     label: "System One API",
+    // OpenRouter by provider ID, which survives baseUrl overrides, or by host, which covers regional endpoints.
+    detect_compat: |model| {
+        if model.provider == "openrouter" || model.base_url.contains("openrouter.ai") {
+            Compat { image_input: ImageInput::StateImageUrls, send_image_opt_in_header: false }
+        } else {
+            Compat { image_input: ImageInput::Assets, send_image_opt_in_header: true }
+        }
+    },
     url: |model, _| endpoint(&model.base_url, "systemone"),
     payload: |model, request| {
         let mut payload = JsonObject::new();
@@ -48,9 +81,14 @@ const TYPESAFE: Transport = Transport {
 const CLOUDFLARE: &str = "Cloudflare Workers AI";
 
 /// Workers AI REST endpoint: `POST /accounts/{account}/ai/run` with `{ model, input }`.
+/// Clef models take `images` data URLs; TypeSafe's models take `assets`, without the opt-in header.
 const CLOUDFLARE_WORKERS_AI: Transport = Transport {
     api: "cloudflare-workers-ai-system-one",
     label: CLOUDFLARE,
+    detect_compat: |model| Compat {
+        image_input: if model.id.starts_with("@cf/cloudflare/clef") { ImageInput::Images } else { ImageInput::Assets },
+        send_image_opt_in_header: false,
+    },
     url: |model, env| endpoint(&resolve_cloudflare_base_url(&model.base_url, env), "run"),
     payload: |model, request| json!({ "model": model.id, "input": request }),
     output: cloudflare_output,
@@ -160,17 +198,100 @@ async fn run(
     if model.api != transport.api {
         return Err(failure(format!("Unsupported classifier API: {}", model.api)));
     }
-    if context.has_images() {
-        return Err(failure(format!("{} does not support image input", transport.label)));
+    let mut wire = wire_request(context);
+    let mut request = std::borrow::Cow::Borrowed(&options.request);
+    if let Some(images) = context.images.as_deref().filter(|images| !images.is_empty()) {
+        if !model.input.iter().any(|input| input == "image") {
+            return Err(failure(format!("{} does not support image input for {}", transport.label, model.id)));
+        }
+        let detected = (transport.detect_compat)(model);
+        let compat =
+            |key: &str| model.compat.as_ref().and_then(|compat| compat.get(key)).filter(|value| !value.is_null());
+        let image_input = match compat("imageInput").map(Value::as_str) {
+            None => detected.image_input,
+            Some(Some("images")) => ImageInput::Images,
+            Some(Some("state-image-urls")) => ImageInput::StateImageUrls,
+            Some(_) => ImageInput::Assets,
+        };
+        add_images(transport.label, model, image_input, images, &mut wire)?;
+        let opt_in =
+            compat("sendImageOptInHeader").and_then(Value::as_bool).unwrap_or(detected.send_image_opt_in_header);
+        if opt_in && !request.headers.keys().any(|name| name.eq_ignore_ascii_case(IMAGE_OPT_IN_HEADER)) {
+            request.to_mut().headers.insert(IMAGE_OPT_IN_HEADER.into(), "true".into());
+        }
     }
-    let request = &options.request;
     let url = (transport.url)(model, &request.env);
-    let payload = (transport.payload)(model, wire_request(context));
-    let body = post_classifier_request(transport.label, url, model, payload, request, &[]).await?;
+    let payload = (transport.payload)(model, wire);
+    let body = post_classifier_request(transport.label, url, model, payload, &request, &[]).await?;
     let result = (transport.output)(body)?;
     // Set before parsing answers: a request with malformed answers was still billed.
     output.usage = parse_classifier_usage(result.get("usage"), model);
     output.answers = parse_answers(transport.label, result.get("answers"), context)?;
+    Ok(())
+}
+
+/// Add the context images to `request` in the service's form.
+fn add_images(
+    label: &str,
+    model: &Model,
+    input: ImageInput,
+    images: &[ImageContent],
+    request: &mut JsonObject,
+) -> Result<(), ProviderRequestError> {
+    let data_url = |image: &ImageContent| format!("data:{};base64,{}", image.mime_type, image.data);
+    let mut prefix: Vec<Value> = Vec::new();
+    match input {
+        ImageInput::Images => {
+            if images.len() > MAX_DATA_URL_IMAGES {
+                let count = images.len();
+                return Err(failure(format!(
+                    "{label} accepts at most {MAX_DATA_URL_IMAGES} images for {}, got {count}",
+                    model.id
+                )));
+            }
+            let mut urls = Vec::with_capacity(images.len());
+            for image in images {
+                if !DATA_URL_TYPES.contains(&image.mime_type.as_str()) {
+                    let message =
+                        format!("{label} accepts PNG, JPEG, and WebP images for {}, got {}", model.id, image.mime_type);
+                    return Err(failure(message));
+                }
+                urls.push(Value::String(data_url(image)));
+            }
+            request.insert("images".into(), Value::Array(urls));
+            return Ok(());
+        }
+        // OpenRouter validates the images against the model that serves the request.
+        ImageInput::StateImageUrls => {
+            prefix.extend(
+                images.iter().map(|image| json!({ "type": "image_url", "image_url": { "url": data_url(image) } })),
+            );
+        }
+        ImageInput::Assets => {
+            let mut assets = JsonObject::new();
+            for (index, image) in images.iter().enumerate() {
+                let format = match image.mime_type.as_str() {
+                    "image/png" => "png",
+                    "image/jpeg" => "jpeg",
+                    other => {
+                        return Err(failure(format!(
+                            "{label} accepts PNG and JPEG images for {}, got {other}",
+                            model.id
+                        )));
+                    }
+                };
+                let asset = json!({ "type": "image", "format": format, "data_base64": image.data });
+                assets.insert(format!("<image-{}>", index + 1), asset);
+            }
+            // Every asset must be referenced from the request; the names go before the state.
+            prefix.extend(assets.keys().map(|name| Value::String(name.clone())));
+            request.insert("assets".into(), Value::Object(assets));
+        }
+    }
+    if let Some(state) = request.get_mut("state") {
+        prefix.push(state.take());
+        *state = Value::Array(prefix);
+    }
     Ok(())
 }
 

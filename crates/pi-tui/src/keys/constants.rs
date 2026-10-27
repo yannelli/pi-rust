@@ -37,6 +37,32 @@ pub(crate) const CP_PAGE_DOWN: i64 = -13;
 pub(crate) const CP_HOME: i64 = -14;
 pub(crate) const CP_END: i64 = -15;
 
+/// F1 to F12 take internal codepoints -21 (F1) down to -32 (F12), as upstream.
+pub(crate) const CP_F1: i64 = -21;
+pub(crate) const CP_F12: i64 = CP_F1 - 11;
+
+/// Kitty reserves this Private Use Area range for functional keys (F13 to F35, media keys,
+/// modifier keys); a CSI u codepoint in it is never text.
+pub(crate) const KITTY_FUNCTIONAL_PUA: std::ops::RangeInclusive<i64> = 57344..=63743;
+
+/// Codepoint of a function key name, `f1` to `f12`.
+pub(crate) fn function_key_codepoint(key: &str) -> Option<i64> {
+    let number: i64 = key.strip_prefix('f')?.parse().ok()?;
+    (1..=12).contains(&number).then(|| CP_F1 - (number - 1))
+}
+
+/// Function key of a `CSI number ~` sequence. Kitty sends F3 as `CSI 13 ~`, since `CSI R`
+/// is also a cursor position report.
+pub(crate) fn tilde_function_key_codepoint(number: i64) -> Option<i64> {
+    let index = match number {
+        11..=15 => number - 11,
+        17..=21 => number - 12,
+        23 | 24 => number - 13,
+        _ => return None,
+    };
+    Some(CP_F1 - index)
+}
+
 /// Applies JavaScript `ToInt32` so bitwise operations wrap the same way as upstream.
 pub(crate) fn int32(value: i64) -> i64 {
     i64::from(value as i32)

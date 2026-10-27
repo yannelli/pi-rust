@@ -10,7 +10,7 @@ mod provider_selector;
 mod radius_menu;
 
 pub use auth_url::{AuthUrl, BrowserOpenFn, ClipboardCopyFn, system_browser, system_clipboard};
-pub use dialog::LoginDialog;
+pub use dialog::{DeviceCodeInfo, LoginDialog};
 pub use interaction::{DialogInteraction, RADIUS_LOGIN_INTRO, dialog_interaction, notify_dialog, run_dialog_login};
 pub use llama_cpp::llama_cpp_post_login_guidance;
 pub use menu::{

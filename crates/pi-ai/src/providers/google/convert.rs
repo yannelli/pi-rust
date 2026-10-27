@@ -188,8 +188,65 @@ fn sanitize_for_open_api(schema: &Value) -> Value {
     }
 }
 
+/// Schema keywords whose values map names to subschemas, so their keys are not schema keywords.
+const JSON_SCHEMA_NAME_MAPS: [&str; 6] =
+    ["properties", "patternProperties", "$defs", "definitions", "dependentSchemas", "dependencies"];
+
+/// Keywords containing a subschema or an array of subschemas, not literal data.
+const JSON_SCHEMA_SUBSCHEMAS: [&str; 16] = [
+    "additionalProperties",
+    "unevaluatedProperties",
+    "propertyNames",
+    "items",
+    "prefixItems",
+    "additionalItems",
+    "unevaluatedItems",
+    "contains",
+    "allOf",
+    "anyOf",
+    "oneOf",
+    "not",
+    "if",
+    "then",
+    "else",
+    "contentSchema",
+];
+
+/// Rewrite string and number `const` values to single-value `enum`s.
+/// Gemini ignores `const` in `parametersJsonSchema` but honors `enum`.
+fn rewrite_const_as_enum(schema: &Value, is_name_map: bool) -> Value {
+    let object = match schema {
+        Value::Array(items) => {
+            return Value::Array(items.iter().map(|item| rewrite_const_as_enum(item, false)).collect());
+        }
+        Value::Object(object) => object,
+        other => return other.clone(),
+    };
+    let mut result: Map<String, Value> = object
+        .iter()
+        .map(|(key, value)| {
+            let value = if is_name_map || JSON_SCHEMA_SUBSCHEMAS.contains(&key.as_str()) {
+                rewrite_const_as_enum(value, false)
+            } else if JSON_SCHEMA_NAME_MAPS.contains(&key.as_str()) {
+                rewrite_const_as_enum(value, true)
+            } else {
+                value.clone()
+            };
+            (key.clone(), value)
+        })
+        .collect();
+    if !is_name_map
+        && !result.contains_key("enum")
+        && result.get("const").is_some_and(|value| value.is_string() || value.is_number())
+        && let Some(value) = result.shift_remove("const")
+    {
+        result.insert("enum".into(), json!([value]));
+    }
+    Value::Object(result)
+}
+
 /// Gemini function declarations. `use_parameters` selects the OpenAPI `parameters` field
-/// instead of full JSON Schema in `parametersJsonSchema`.
+/// instead of full JSON Schema in `parametersJsonSchema`, where `const` is sent as `enum`.
 pub(crate) fn convert_tools(
     tools: &[Tool],
     use_parameters: bool,
@@ -208,7 +265,7 @@ pub(crate) fn convert_tools(
         if use_parameters {
             declaration.insert("parameters".into(), sanitize_for_open_api(&parameters));
         } else {
-            declaration.insert("parametersJsonSchema".into(), parameters);
+            declaration.insert("parametersJsonSchema".into(), rewrite_const_as_enum(&parameters, false));
         }
         declarations.push(Value::Object(declaration));
     }

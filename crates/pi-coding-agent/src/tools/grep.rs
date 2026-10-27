@@ -184,7 +184,8 @@ async fn format_matches(ops: &dyn GrepOperations, matches: &[Match], context: us
         }
         if !cache.contains_key(&m.path) {
             let text = ops.read_file(&m.path).await.unwrap_or_default();
-            let text = text.replace("\r\n", "\n").replace('\r', "\n");
+            // Lines end only at LF, as the match line numbers count them (upstream #11398).
+            let text = text.replace("\r\n", "\n");
             cache.insert(m.path.clone(), split_lines(&text).into_iter().map(str::to_string).collect());
         }
         let lines = &cache[&m.path];
@@ -195,7 +196,7 @@ async fn format_matches(ops: &dyn GrepOperations, matches: &[Match], context: us
         let start = number.saturating_sub(context).max(1);
         let end = (number + context).min(lines.len());
         for current in start..=end {
-            let text = truncate(lines.get(current - 1).map_or("", String::as_str));
+            let text = truncate(&lines.get(current - 1).map_or("", String::as_str).replace('\r', ""));
             if current == number {
                 output.push(format!("{}:{current}: {text}", m.display));
             } else {

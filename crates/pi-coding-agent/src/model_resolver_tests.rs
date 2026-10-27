@@ -71,6 +71,8 @@ fn reference_catalog() -> Vec<Model> {
         ("gw-b", "claude-opus-4-8"),
         ("gw-b", "gw-b/free"),
         ("gw-b", "zz:free"),
+        // URL-derived provider id containing "/" (upstream #11394).
+        ("llama=http://host:10800", "unsloth/qwen-gguf:BF16"),
     ]
     .into_iter()
     .map(|(provider, id)| model(provider, id, id, true))
@@ -116,6 +118,11 @@ fn model_references_match_upstream_cases() {
         case("sonnet:high", "anthropic/claude-sonnet-4-5 :high"),
         case("qwen/qwen3-coder:exacto", "openrouter/qwen/qwen3-coder:exacto"),
         case("openrouter/qwen/qwen3-coder:exacto:high", "openrouter/qwen/qwen3-coder:exacto :high"),
+        case("llama=http://host:10800/unsloth/qwen-gguf:BF16", "llama=http://host:10800/unsloth/qwen-gguf:BF16"),
+        case(
+            "llama=http://host:10800/unsloth/qwen-gguf:BF16:high",
+            "llama=http://host:10800/unsloth/qwen-gguf:BF16 :high",
+        ),
         case("openai/gpt-4o:extended", "openrouter/openai/gpt-4o:extended"),
         case("openrouter/qwen", "openrouter/qwen/qwen3-coder:exacto"),
         case("gpt-4o:random", "not-found"),
@@ -371,7 +378,7 @@ fn custom_model_fallback_handles_thinking_suffixes() {
 
 #[test]
 fn default_model_selection_follows_upstream_priority() {
-    assert_eq!(default_model_for("openai"), Some("gpt-5.5"));
+    assert_eq!(default_model_for("openai"), Some("gpt-6.1-sol"));
     assert_eq!(default_model_for("openai-codex"), Some("gpt-6.1-sol"));
     assert_eq!(default_model_for("vercel-ai-gateway"), Some("zai/glm-5.1"));
     assert_eq!(default_model_for("ant-ling"), Some("Ring-2.6-1T"));

@@ -105,7 +105,24 @@ fn save_credential(path: &Path, provider: &str, credential: OAuthCredential) -> 
     let value = serde_json::to_value(Credential::OAuth(credential)).map_err(|e| e.to_string())?;
     auth.insert(provider.to_string(), value);
     let text = serde_json::to_string_pretty(&Value::Object(auth)).map_err(|e| e.to_string())?;
-    std::fs::write(path, text).map_err(|e| format!("Could not write {}: {e}", path.display()))
+    write_private(path, &text).map_err(|e| format!("Could not write {}: {e}", path.display()))
+}
+
+/// OAuth tokens are readable by the user only. `mode` applies when the file is created; the
+/// chmod covers a file an older version created, before the new tokens are in it.
+fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        options.mode(0o600);
+        if path.exists() {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        }
+    }
+    options.open(path)?.write_all(text.as_bytes())
 }
 
 /// A random version 4 UUID.
@@ -284,6 +301,11 @@ mod tests {
         assert!(output.contains("  1. A\n  2. B\nEnter number (1-2): "));
         assert!(output.contains("Code (paste): "));
         assert!(output.ends_with(&format!("Credentials saved to {}\n", path.display())));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
     }
 
     #[tokio::test]

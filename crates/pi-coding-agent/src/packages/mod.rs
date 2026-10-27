@@ -131,8 +131,10 @@ impl PackageInstallFailure {
         let app = crate::resources::brand::APP_NAME;
         let hint = match self.scope {
             SourceScope::Temporary => "Check the source and try again.".to_string(),
-            SourceScope::Project => format!("Run \"{app} remove {} --local\" to remove it from settings.", self.source),
-            SourceScope::User => format!("Run \"{app} remove {}\" to remove it from settings.", self.source),
+            SourceScope::Project => {
+                format!("Run \"{app} remove {} --local\" to remove it from settings.json.", self.source)
+            }
+            SourceScope::User => format!("Run \"{app} remove {}\" to remove it from settings.json.", self.source),
         };
         format!("Extension package \"{}\": failed to install ({}). {hint}", self.source, self.message)
     }

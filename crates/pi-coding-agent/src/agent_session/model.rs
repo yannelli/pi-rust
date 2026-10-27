@@ -127,15 +127,18 @@ impl AgentSession {
         self.model().is_some_and(|model| model.reasoning)
     }
 
+    /// `level` clamped to the levels the current model supports.
+    pub(crate) fn clamp_thinking_level(&self, level: ThinkingLevel) -> ThinkingLevel {
+        if self.available_thinking_levels().contains(&level) {
+            return level;
+        }
+        self.model().map_or(ThinkingLevel::Off, |model| clamp_thinking_level(&model, level))
+    }
+
     /// Set the thinking level, clamped to the model; recorded when it changes. `persist` saves
     /// the requested level as `defaultThinkingLevel`.
     pub fn set_thinking_level(&self, level: ThinkingLevel, persist: bool) {
-        let available = self.available_thinking_levels();
-        let effective = if available.contains(&level) {
-            level
-        } else {
-            self.model().map_or(ThinkingLevel::Off, |model| clamp_thinking_level(&model, level))
-        };
+        let effective = self.clamp_thinking_level(level);
         let before = self.thinking_level();
         self.agent.update_state(|state| state.thinking_level = effective);
         if persist {

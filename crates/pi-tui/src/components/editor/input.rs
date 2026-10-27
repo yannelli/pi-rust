@@ -1,9 +1,12 @@
 //! Key handling: maps terminal input to editor actions through the `tui.editor.*`,
 //! `tui.input.*`, and `tui.select.*` keybindings.
 
+use std::time::Instant;
+
 use super::state::{EditorCore, JumpDirection};
 use crate::keybindings::{KeybindingsManager, get_keybindings, ids};
 use crate::keys::{decode_printable_key, matches_key};
+use crate::stdin_buffer::{PASTE_IDLE_TIMEOUT, PASTE_MAX_BYTES};
 
 const PASTE_START: &str = "\x1b[200~";
 const PASTE_END: &str = "\x1b[201~";
@@ -49,6 +52,19 @@ fn is_new_line(data: &str, kb: &KeybindingsManager) -> bool {
 }
 
 impl EditorCore {
+    /// Inserts the first `len` bytes of the paste buffer and leaves paste mode.
+    fn end_paste(&mut self, len: usize) {
+        let mut content = std::mem::take(&mut self.paste_buffer);
+        content.truncate(len);
+        self.is_in_paste = false;
+        self.paste_input_at = None;
+        if self.history_search.is_some() {
+            self.append_to_search(&content);
+        } else if !content.is_empty() {
+            self.handle_paste(&content);
+        }
+    }
+
     pub fn handle_input(&mut self, data: &str) {
         let kb = get_keybindings();
 
@@ -68,7 +84,12 @@ impl EditorCore {
             // A control key cancels the jump and is handled normally.
         }
 
-        // Bracketed paste is buffered until its end marker.
+        // Bracketed paste is buffered until its end marker. Without one, it ends after an idle
+        // timeout or at a size cap, so that later keys such as Ctrl+C work again.
+        let now = Instant::now();
+        if self.paste_input_at.is_some_and(|at| now.saturating_duration_since(at) >= PASTE_IDLE_TIMEOUT) {
+            self.end_paste(self.paste_buffer.len());
+        }
         let stripped;
         let mut data = data;
         if data.contains(PASTE_START) {
@@ -79,19 +100,15 @@ impl EditorCore {
         }
         if self.is_in_paste {
             self.paste_buffer.push_str(data);
+            self.paste_input_at = Some(now);
             if let Some(end) = self.paste_buffer.find(PASTE_END) {
-                let content = self.paste_buffer[..end].to_string();
                 let remaining = self.paste_buffer[end + PASTE_END.len()..].to_string();
-                if self.history_search.is_some() {
-                    self.append_to_search(&content);
-                } else if !content.is_empty() {
-                    self.handle_paste(&content);
-                }
-                self.is_in_paste = false;
-                self.paste_buffer.clear();
+                self.end_paste(end);
                 if !remaining.is_empty() {
                     self.handle_input(&remaining);
                 }
+            } else if self.paste_buffer.len() > PASTE_MAX_BYTES {
+                self.end_paste(self.paste_buffer.len());
             }
             return;
         }
@@ -277,5 +294,45 @@ impl EditorCore {
         let submit_keys = kb.get_keys(ids::INPUT_SUBMIT);
         let has_shift_enter = submit_keys.iter().any(|key| key == "shift+enter" || key == "shift+return");
         has_shift_enter && self.char_before_cursor_is_backslash()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+    use std::time::Instant;
+
+    use crate::components::editor::{Editor, EditorOptions, EditorTheme, SelectListTheme};
+    use crate::components::scroll_view::StyleFn;
+    use crate::stdin_buffer::PASTE_IDLE_TIMEOUT;
+    use crate::testing::VirtualTerminal;
+    use crate::{Tui, TuiOptions};
+
+    fn editor() -> (Editor, Tui) {
+        let tui = Tui::new_main_screen(VirtualTerminal::shared(80, 24), TuiOptions::default());
+        let plain: StyleFn = Rc::new(str::to_string);
+        let select_list = SelectListTheme {
+            selected_prefix: plain.clone(),
+            selected_text: plain.clone(),
+            description: plain.clone(),
+            scroll_info: plain.clone(),
+            no_match: plain.clone(),
+        };
+        let theme = EditorTheme { border_color: plain, select_list };
+        (Editor::new(&tui, theme, EditorOptions::default()), tui)
+    }
+
+    /// Upstream issue 11383: a lost end marker must not swallow later keys.
+    #[test]
+    fn ends_a_paste_without_end_marker_after_the_idle_timeout() {
+        let (editor, _tui) = editor();
+        editor.handle_input("\x1b[200~partial");
+        editor.handle_input(" more");
+        assert_eq!(editor.get_text(), "");
+        let idle_since = Instant::now().checked_sub(PASTE_IDLE_TIMEOUT).expect("clock after boot");
+        editor.shared.core.borrow_mut().paste_input_at = Some(idle_since);
+        editor.handle_input("x");
+        assert_eq!(editor.get_text(), "partial morex");
+        assert!(!editor.shared.core.borrow().is_in_paste);
     }
 }

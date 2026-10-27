@@ -192,10 +192,23 @@ pub(crate) async fn custom(runner: &ExtensionRunner, target: u64, id: u64, optio
         overlay_options: options.get("overlayOptions").filter(|value| !value.is_null()).cloned(),
         done,
         handle_key: options["handleKey"].as_u64(),
+        blocked: blocked_status(&options["blocked"]),
     };
     let result = runner.target_ui(target).custom(request).await;
     lock(&runner.custom_done).remove(&id);
     Ok(result.map_err(JsError::new)?.unwrap_or(Value::Null))
+}
+
+/// The `blocked` option of `ctx.ui.custom()`: `{ kind, message }` with a known kind.
+fn blocked_status(value: &Value) -> Option<(pi_tui::program_status::BlockedKind, String)> {
+    use pi_tui::program_status::BlockedKind;
+    let kind = match value["kind"].as_str()? {
+        "permission" => BlockedKind::Permission,
+        "question" => BlockedKind::Question,
+        "auth" => BlockedKind::Auth,
+        _ => return None,
+    };
+    Some((kind, value["message"].as_str().unwrap_or_default().to_string()))
 }
 
 /// Every keybinding id with its effective keys, for the JavaScript `KeybindingsManager`.

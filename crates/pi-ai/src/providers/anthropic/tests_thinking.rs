@@ -76,7 +76,7 @@ async fn managed_effort_replays_markers_and_appends_the_active_one() {
     assert_eq!(second["messages"].as_array().unwrap().last().unwrap(), &marker("high"));
     assert_eq!(
         (&first["output_config"], &second["output_config"]),
-        (&json!({"effort": "high"}), &json!({"effort": "high"}))
+        (&json!({"effort": "low"}), &json!({"effort": "low"}))
     );
     let binding = json!({"type": "adaptive", "display": "summarized", "block_binding": {"prefix_mismatch_behavior": "drop_block"}});
     assert_eq!(second["thinking"], binding);

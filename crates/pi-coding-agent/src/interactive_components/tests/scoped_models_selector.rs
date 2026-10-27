@@ -12,7 +12,7 @@ use crate::interactive_components::scoped_models_selector::{
 use crate::interactive_components::test_support::{Calls, Harness, keys, plain, setup};
 
 fn model(id: &str, provider: &str) -> Model {
-    Model { id: id.into(), name: format!("Model {id}"), provider: provider.into(), ..Default::default() }
+    Model { id: id.into(), name: id.to_uppercase(), provider: provider.into(), ..Default::default() }
 }
 
 struct State {
@@ -182,4 +182,24 @@ fn update_models_keeps_the_selected_row() {
     let screen = harness.screen();
     assert!(screen.contains("→ ✓ a2 [alpha]"), "{screen}");
     assert!(screen.contains("all enabled"));
+}
+
+// Upstream #5916.
+#[test]
+fn shows_model_names_that_differ_from_the_id() {
+    let named = |id: &str, name: &str| Model { name: name.into(), ..model(id, "faux") };
+    let mut selector = ScopedModelsSelector::new(
+        ModelsConfig {
+            all_models: vec![named("model-a", "Model A"), named("model-b", "Renamed B")],
+            enabled_model_ids: Some(vec!["faux/model-a".into(), "faux/model-b".into()]),
+            refresh_status: None,
+        },
+        ModelsCallbacks { on_change: Box::new(|_| {}), on_persist: Box::new(|_| {}), on_cancel: Box::new(|| {}) },
+    );
+    let rows: Vec<String> = plain(&selector.render(120))
+        .iter()
+        .map(|line| line.chars().skip(4).collect::<String>().trim_end().into())
+        .collect();
+    assert!(rows.contains(&"model-a [faux]".to_string()), "{rows:?}");
+    assert!(rows.contains(&"model-b (Renamed B) [faux]".to_string()), "{rows:?}");
 }

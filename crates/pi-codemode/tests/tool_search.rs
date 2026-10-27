@@ -51,6 +51,28 @@ fn ranks_by_term_relevance_and_respects_the_limit() {
     assert_eq!(names(ranker.rank("closed", &documents, 8)), ["mcp__github__list_issues"]);
 }
 
+// Upstream #11331.
+#[test]
+fn ranks_a_tool_first_when_the_query_is_its_name() {
+    let named: Vec<_> = [
+        tool("mcp__app__queue_read", "Read a queued message of this thread.", json!({})),
+        tool(
+            "mcp__dev-app__thread_read",
+            "Read durable state and a paginated timeline from any thread. The default view returns user messages, assistant messages and plans. Continue with afterPosition until hasMore is false.",
+            json!({}),
+        ),
+    ]
+    .iter()
+    .map(tool_search_document)
+    .collect();
+    let ranker = Bm25Ranker::default();
+    for query in ["thread_read", "dev_app__thread_read", "mcp__dev-app__thread_read", "Thread_Read", "thread read"] {
+        assert_eq!(names(ranker.rank(query, &named, 1)), ["mcp__dev-app__thread_read"], "{query}");
+    }
+    // Partial names still rank by BM25.
+    assert_eq!(names(ranker.rank("read", &named, 1)), ["mcp__app__queue_read"]);
+}
+
 #[test]
 fn returns_nothing_for_unknown_or_empty_queries() {
     let ranker = Bm25Ranker::default();

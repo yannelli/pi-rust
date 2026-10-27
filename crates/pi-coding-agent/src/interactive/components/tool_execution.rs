@@ -66,6 +66,8 @@ pub struct ToolExecutionComponent {
     tui: Tui,
     execution_started: bool,
     args_complete: bool,
+    /// `update_args` ran since the last display update; the next render applies it.
+    args_pending: bool,
     is_partial: bool,
     expanded: bool,
     result: Option<ToolResultView>,
@@ -110,6 +112,7 @@ impl ToolExecutionComponent {
             tui: tui.clone(),
             execution_started: false,
             args_complete: false,
+            args_pending: false,
             is_partial: true,
             expanded: false,
             result: None,
@@ -132,9 +135,12 @@ impl ToolExecutionComponent {
         &self.tool_call_id
     }
 
+    /// Show new partial arguments. Applied at the next render, so a call streaming many argument
+    /// deltas between two frames runs its renderer once per frame, not once per delta (upstream #9265).
     pub fn update_args(&mut self, args: Value) {
         self.args = args;
-        self.update_display();
+        self.args_pending = true;
+        self.tui.request_render(false);
     }
 
     pub fn mark_execution_started(&mut self) {
@@ -255,6 +261,7 @@ impl ToolExecutionComponent {
     }
 
     fn update_display(&mut self) {
+        self.args_pending = false;
         let background = match &self.result {
             _ if self.is_partial => bg(ThemeBg::ToolPendingBg),
             Some(result) if result.is_error => bg(ThemeBg::ToolErrorBg),
@@ -369,7 +376,7 @@ impl ToolExecutionComponent {
 
 impl Component for ToolExecutionComponent {
     fn render(&mut self, width: usize) -> Vec<String> {
-        if self.dirty.take() {
+        if self.dirty.take() || self.args_pending {
             self.update_display();
         }
         if self.is_self_shell() {
@@ -421,3 +428,7 @@ impl Component for ToolExecutionComponent {
         self.update_display();
     }
 }
+
+#[cfg(test)]
+#[path = "tool_execution_tests.rs"]
+mod tests;

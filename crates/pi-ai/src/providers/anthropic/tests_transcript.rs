@@ -41,6 +41,15 @@ fn changing_messages() -> Vec<Message> {
     ]
 }
 
+/// `changing_messages` with the update adding a tool in place and removing none of the top-level ones.
+fn in_place_messages() -> Vec<Message> {
+    let mut messages = changing_messages();
+    messages[2] = system(json!({"role": "system", "content": "updated guidance",
+        "sections": {"rules": "<rules>\nnew rules\n</rules>", "docs": null},
+        "toolsAdded": [tool("late_tool")], "timestamp": 2}));
+    messages
+}
+
 fn context(messages: Vec<Message>) -> Context {
     Context { messages, ..Context::default() }
 }
@@ -66,11 +75,11 @@ fn names(tools: &Value) -> Vec<&str> {
 
 #[tokio::test]
 async fn native_updates_carry_tool_changes_and_the_placeholder() {
-    let request = sent(native(), &context(changing_messages()), options()).await;
+    let request = sent(native(), &context(in_place_messages()), options()).await;
     assert!(request.headers["anthropic-beta"].contains("inline-tools-2026-09-15"));
     let body = request.body;
-    let system: Vec<&str> = body["system"].as_array().unwrap().iter().map(|b| b["text"].as_str().unwrap()).collect();
-    assert_eq!(system, ["base prompt\n\n<rules>\nold rules\n</rules>\n\n<docs>\nread docs\n</docs>"]);
+    let prompt: Vec<&str> = body["system"].as_array().unwrap().iter().map(|b| b["text"].as_str().unwrap()).collect();
+    assert_eq!(prompt, ["base prompt\n\n<rules>\nold rules\n</rules>\n\n<docs>\nread docs\n</docs>"]);
     assert_eq!(names(&body["tools"]), ["base_tool", "__pi_deferred_placeholder__"]);
     assert_eq!(body["tools"][0]["cache_control"], json!({"type": "ephemeral"}));
     assert!(body["tools"][0].get("defer_loading").is_none() && body["tools"][1].get("cache_control").is_none());
@@ -81,10 +90,10 @@ async fn native_updates_carry_tool_changes_and_the_placeholder() {
     let text = blocks[0]["text"].as_str().unwrap();
     assert!(text.contains("updated guidance") && text.contains("<rules>\nnew rules\n</rules>"));
     assert!(text.contains("Removed system prompt section \"docs\""));
-    assert_eq!(blocks[1], json!({"type": "tool_removal", "tool": {"type": "tool_reference", "name": "base_tool"}}));
-    assert_eq!(blocks[2]["type"], "tool_addition");
-    assert_eq!(blocks[2]["cache_control"], json!({"type": "ephemeral"}));
-    let definition = &blocks[2]["tool"]["definition"];
+    assert_eq!(blocks.len(), 2);
+    assert_eq!(blocks[1]["type"], "tool_addition");
+    assert_eq!(blocks[1]["cache_control"], json!({"type": "ephemeral"}));
+    let definition = &blocks[1]["tool"]["definition"];
     assert_eq!(
         (definition["name"].as_str(), definition["description"].as_str()),
         (Some("late_tool"), Some("late_tool tool"))
@@ -92,11 +101,41 @@ async fn native_updates_carry_tool_changes_and_the_placeholder() {
     assert!(definition.get("cache_control").is_none() && definition.get("defer_loading").is_none());
     let initial = payload(&native(), changing_messages()[..2].to_vec()).await;
     assert_eq!(names(&initial["tools"]), ["base_tool", "__pi_deferred_placeholder__"]);
+    // A tool declared in place is also removed in place.
+    let mut messages = in_place_messages();
+    messages.push(Message::user("after"));
+    messages.push(system(
+        json!({"role": "system", "content": "", "toolsRemoved": [{"name": "late_tool"}], "timestamp": 4}),
+    ));
+    let body = payload(&native(), messages).await;
+    assert_eq!(names(&body["tools"]), ["base_tool", "__pi_deferred_placeholder__"]);
+    let last = body["messages"].as_array().unwrap().last().unwrap()["content"].clone();
+    assert_eq!((last.as_array().unwrap().len(), last[0]["type"].as_str()), (1, Some("tool_removal")));
+    assert_eq!(last[0]["tool"], json!({"type": "tool_reference", "name": "late_tool"}));
+}
+
+// Upstream issue 11376: Anthropic resolves `tool_removal` only against tools declared in place.
+#[tokio::test]
+async fn removing_a_top_level_tool_moves_the_top_level_list_instead_of_sending_a_removal() {
+    let mut messages = changing_messages();
+    messages.push(Message::user("after"));
+    messages.push(system(json!({"role": "system", "content": "", "toolsAdded": [tool("later_tool")], "timestamp": 4})));
+    let body = payload(&native(), messages).await;
+    assert_eq!(names(&body["tools"]), ["late_tool", "__pi_deferred_placeholder__"]);
+    let updates: Vec<Value> =
+        body["messages"].as_array().unwrap().iter().filter(|m| m["role"] == "system").cloned().collect();
+    let kinds: Vec<Vec<&str>> = updates
+        .iter()
+        .map(|update| update["content"].as_array().unwrap().iter().map(|b| b["type"].as_str().unwrap()).collect())
+        .collect();
+    // The removal's update keeps its text; the addition after it is still declared in place.
+    assert_eq!(kinds, [vec!["text"], vec!["tool_addition"]]);
+    assert_eq!(updates[1]["content"][0]["tool"]["definition"]["name"], "later_tool");
 }
 
 #[tokio::test]
 async fn context_recorded_before_the_prompt_keeps_native_tool_changes() {
-    let mut messages = changing_messages();
+    let mut messages = in_place_messages();
     messages.insert(0, Message::user("memory from session start"));
     let body = payload(&native(), messages).await;
     assert_eq!(body["system"][0]["text"], "base prompt\n\n<rules>\nold rules\n</rules>\n\n<docs>\nread docs\n</docs>");
@@ -104,7 +143,7 @@ async fn context_recorded_before_the_prompt_keeps_native_tool_changes() {
     let sent = body["messages"].as_array().unwrap();
     assert_eq!(sent[0]["content"], "memory from session start");
     let update = sent.last().unwrap()["content"].as_array().unwrap();
-    assert_eq!(update[2]["type"], "tool_addition");
+    assert_eq!(update[1]["type"], "tool_addition");
 }
 
 #[tokio::test]
@@ -214,6 +253,35 @@ async fn system_messages_skip_assistants_that_convert_to_no_blocks() {
     let roles: Vec<&str> = body["messages"].as_array().unwrap().iter().map(|m| m["role"].as_str().unwrap()).collect();
     assert_eq!(roles, ["user", "user", "system"]);
     assert_eq!(body["messages"][2]["content"][0]["text"], "late update");
+}
+
+#[tokio::test]
+async fn system_messages_skip_empty_replies_and_land_before_the_next_sent_assistant() {
+    let model = model(json!({"supportsMidConvoSystemMessages": true}));
+    let reply = |text: &str, provider: &str, api: &str, id: &str| {
+        Message::Assistant(AssistantMessage {
+            content: vec![ContentBlock::text(text)],
+            api: api.into(),
+            provider: provider.into(),
+            model: id.into(),
+            ..Default::default()
+        })
+    };
+    // Another model's empty reply: Anthropic rejects empty text blocks, so it is dropped.
+    let mut messages = vec![
+        system(json!({"role": "system", "content": "base prompt", "timestamp": 0})),
+        Message::user("hi"),
+        system(json!({"role": "system", "content": "updated guidance", "timestamp": 2})),
+        reply("", "openai-codex", "openai-codex-responses", "gpt-x"),
+        Message::user("again"),
+    ];
+    let roles = |body: &Value| -> Vec<String> {
+        body["messages"].as_array().unwrap().iter().map(|m| m["role"].as_str().unwrap().to_string()).collect()
+    };
+    assert_eq!(roles(&payload(&model, messages.clone()).await), ["user", "user", "system"]);
+    messages.push(reply("answer", &model.provider, &model.api, &model.id));
+    messages.push(Message::user("third"));
+    assert_eq!(roles(&payload(&model, messages).await), ["user", "user", "system", "assistant", "user"]);
 }
 
 #[tokio::test]

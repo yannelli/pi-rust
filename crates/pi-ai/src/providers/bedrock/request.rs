@@ -19,7 +19,7 @@ use crate::simple_options::{
     resolve_cache_retention, thinking_budget_for_level,
 };
 use crate::transcript::normalize_context;
-use crate::types::{ContentBlock, Context, Message, Model, ThinkingLevel, ToolResultMessage, UserContent};
+use crate::types::{ContentBlock, Context, Message, Model, ThinkingLevel, Tool, ToolResultMessage, UserContent};
 
 const EMPTY_TEXT_PLACEHOLDER: &str = "<empty>";
 const THINKING_BINDING_CONTROLS_BETA: &str = "thinking-binding-controls-2026-08-01";
@@ -143,15 +143,24 @@ fn tool_config(model: &Model, context: &Context, options: &StreamOptions) -> Res
         return Ok(None);
     }
     let supports_strict = compat_bool(model, "supportsStrictMode").unwrap_or(false);
-    let mut tools = Vec::new();
+    let mut specs = Vec::new();
     for tool in &context.tools {
-        let strict = resolve_json_schema_strict_sampling(tool, supports_strict, None)?;
-        let mut spec = json!({
-            "name": tool.name,
-            "description": tool.description,
-            "inputSchema": {"json": json_schema_tool_parameters(tool, strict == Some(true))},
-        });
-        if strict == Some(true) {
+        let strict = resolve_json_schema_strict_sampling(tool, supports_strict, None)? == Some(true);
+        specs.push((tool, strict, json_schema_tool_parameters(tool, strict)));
+    }
+    // Strict schemas make every optional property a union with null, and Bedrock rejects a strict tool
+    // set with more union parameters than its limit, so `strict: "prefer"` tools then go non-strict.
+    let unions: usize =
+        specs.iter().filter(|(_, strict, _)| *strict).map(|(_, _, schema)| union_parameters(schema)).sum();
+    if unions > MAX_STRICT_UNION_PARAMETERS {
+        for (tool, strict, schema) in specs.iter_mut().filter(|(tool, strict, _)| *strict && !requires_strict(tool)) {
+            (*strict, *schema) = (false, tool.parameters.clone());
+        }
+    }
+    let mut tools = Vec::new();
+    for (tool, strict, schema) in specs {
+        let mut spec = json!({"name": tool.name, "description": tool.description, "inputSchema": {"json": schema}});
+        if strict {
             spec["strict"] = json!(true);
         }
         tools.push(json!({"toolSpec": spec}));
@@ -163,6 +172,32 @@ fn tool_config(model: &Model, context: &Context, options: &StreamOptions) -> Res
         _ => {}
     }
     Ok(Some(config))
+}
+
+/// Bedrock rejects strict tool sets with more parameters with union types than this
+/// ("Schemas contains too many parameters with union types", upstream issue 11416).
+const MAX_STRICT_UNION_PARAMETERS: usize = 16;
+
+fn requires_strict(tool: &Tool) -> bool {
+    tool.constrained_sampling.as_ref().and_then(|config| config.get("strict")?.as_str()) == Some("require")
+}
+
+/// Properties whose schema is a union (`anyOf` or a `type` array), at any depth.
+fn union_parameters(schema: &Value) -> usize {
+    match schema {
+        Value::Object(object) => {
+            let union = |property: &&Value| {
+                property.get("anyOf").is_some() || property.get("type").is_some_and(Value::is_array)
+            };
+            let own = object
+                .get("properties")
+                .and_then(Value::as_object)
+                .map_or(0, |properties| properties.values().filter(union).count());
+            own + object.values().map(union_parameters).sum::<usize>()
+        }
+        Value::Array(items) => items.iter().map(union_parameters).sum(),
+        _ => 0,
+    }
 }
 
 fn normalize_tool_call_id(id: &str) -> String {

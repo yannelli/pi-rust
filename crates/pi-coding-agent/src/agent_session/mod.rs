@@ -91,6 +91,8 @@ pub(crate) struct RunState {
     pub pending_custom: Vec<Message>,
     pub pending_bash: Vec<Message>,
     pub run_active: bool,
+    /// `pi.sendUserMessage` prompts started in the background and not finished yet.
+    pub pending_extension_prompts: usize,
     pub abort_requested: bool,
     pub retry_attempt: u32,
     pub retry_sleep: Option<CancellationToken>,
@@ -239,10 +241,11 @@ impl AgentSession {
         state.manual_compaction.is_some() || state.auto_compaction.is_some() || state.branch_summary.is_some()
     }
 
-    /// No agent run, compaction, branch summary, or retry is active.
+    /// No agent run, extension prompt, compaction, branch summary, or retry is active.
     pub fn is_idle(&self) -> bool {
         let state = lock(&self.state);
         !state.run_active
+            && state.pending_extension_prompts == 0
             && state.manual_compaction.is_none()
             && state.auto_compaction.is_none()
             && state.branch_summary.is_none()

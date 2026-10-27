@@ -254,13 +254,17 @@ async fn publishes_nested_call_rows_while_the_script_runs() {
 
 #[tokio::test]
 async fn cancels_the_script_and_its_nested_calls() {
-    let host = Arc::new(FakeHost::default().async_tool(CodemodeToolInfo::new("hang", "", json!({})), |_| {
+    // Cancel once the nested call has started; a fixed delay can fire before the script runs.
+    let started = Arc::new(tokio::sync::Notify::new());
+    let on_start = started.clone();
+    let host = Arc::new(FakeHost::default().async_tool(CodemodeToolInfo::new("hang", "", json!({})), move |_| {
+        on_start.notify_one();
         Box::pin(futures::future::pending::<NestedToolOutcome>())
     }));
     let cancel = CancellationToken::new();
     let trigger = cancel.clone();
     tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        started.notified().await;
         trigger.cancel();
     });
     let dyn_host: Arc<dyn pi_codemode::CodemodeHost> = host;

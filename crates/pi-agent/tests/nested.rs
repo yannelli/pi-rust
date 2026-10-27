@@ -12,7 +12,7 @@ use futures::future::{BoxFuture, join_all};
 use pi_agent::{
     AgentContext, AgentEvent, AgentTool, AgentToolCallOutcome, AgentToolResult, ExecuteToolOptions, NESTED_CALL_LIMITS,
     NestedCallRecorder, NestedToolCallHost, NestedToolCallRunner, SharedTool, ToolContext, ToolExecutionMode,
-    ToolUpdateCallback, run_agent_loop,
+    ToolUpdateCallback, combine_usage, run_agent_loop,
 };
 use pi_ai::{Message, ToolCall, Usage};
 use serde_json::{Value, json};
@@ -24,6 +24,21 @@ fn usage(input: u64, cost: f64) -> Usage {
     usage.cost.input = cost;
     usage.cost.total = cost;
     usage
+}
+
+#[test]
+fn combined_totals_are_provider_reported_only_when_both_parts_are() {
+    let reported = |total: f64, from_provider: Option<bool>| {
+        let mut usage = usage(1, total);
+        usage.cost.total_from_provider = from_provider;
+        usage
+    };
+    let both = combine_usage(&reported(1.0, Some(true)), &reported(2.0, Some(true)));
+    assert_eq!((both.cost.total, both.cost.total_from_provider), (3.0, Some(true)));
+    for (first, second) in [(Some(true), None), (None, Some(true)), (None, None), (Some(false), Some(true))] {
+        let combined = combine_usage(&reported(1.0, first), &reported(2.0, second));
+        assert_eq!(combined.cost.total_from_provider, Some(false), "{first:?} + {second:?}");
+    }
 }
 
 type Body = Arc<dyn Fn(ToolContext) -> BoxFuture<'static, AgentToolResult> + Send + Sync>;

@@ -169,7 +169,6 @@ pub async fn generate_branch_summary(
     let prompt = format!("<conversation>\n{conversation}\n</conversation>\n\n{instructions}");
     let summarization = &options.summarization;
     let mut request = request_options(model, summarization);
-    request.reasoning = None;
     request.session_id = None;
     let response = complete_summarization(
         model,

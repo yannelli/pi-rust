@@ -20,7 +20,7 @@ use super::renderers::{McpRenderer, ToolResultView, builtin_renderer};
 use super::util::format_tokens;
 use crate::cache_stats::{CacheMiss, cache_miss_notice, collect_cache_misses, format_cache_warming_usage};
 use crate::markdown_transform::create_mermaid_markdown_transformer;
-use crate::markdown_transform::{ActiveThemeStyle, MermaidTransformerOptions};
+use crate::markdown_transform::{ActiveThemeStyle, MermaidTransformerOptions, MessageMeta};
 use crate::messages::{
     BashExecutionMessage, BranchSummaryMessage, CompactionSummaryMessage, CustomMessage, CustomRole,
 };
@@ -33,7 +33,8 @@ use crate::theme::{ThemeColor, get_markdown_theme, theme};
 pub(super) enum RenderItem {
     Message {
         message: Box<Message>,
-        entry_id: Option<String>,
+        /// The session entry the message came from.
+        meta: Option<MessageMeta>,
     },
     CacheWarm(crate::session::entry::UsageEntry),
     SummaryCost {
@@ -187,6 +188,11 @@ impl InteractiveMode {
 
     /// Upstream `addMessageToChat`. Tool results render inside their tool rows.
     pub(super) fn add_message_to_chat(&self, message: &Message, populate_history: bool) {
+        self.add_message_to_chat_with_meta(message, populate_history, None);
+    }
+
+    /// [`Self::add_message_to_chat`] for a message replayed from the session entry `meta`.
+    fn add_message_to_chat_with_meta(&self, message: &Message, populate_history: bool, meta: Option<MessageMeta>) {
         match message {
             Message::User(user) => {
                 let text = user_content_text(&user.content);
@@ -203,10 +209,11 @@ impl InteractiveMode {
                         self.add_collapsible(Collapsible::Skill(block));
                         if let Some(user_message) = user_message.filter(|text| !text.is_empty()) {
                             self.add_spacer();
-                            self.add_to_chat(component(UserMessageComponent::new(&user_message, &options)));
+                            let message = UserMessageComponent::with_meta(&user_message, &options, meta);
+                            self.add_to_chat(component(message));
                         }
                     }
-                    None => self.add_to_chat(component(UserMessageComponent::new(&text, &options))),
+                    None => self.add_to_chat(component(UserMessageComponent::with_meta(&text, &options, meta))),
                 }
                 if populate_history {
                     self.editor.add_to_history(&text);
@@ -217,7 +224,8 @@ impl InteractiveMode {
                     let state = self.state.borrow();
                     (state.hide_thinking_block, state.hidden_thinking_label.clone())
                 };
-                let component = AssistantMessageComponent::new(Some(assistant), hide, &label, self.render_options());
+                let options = self.render_options();
+                let component = AssistantMessageComponent::with_meta(Some(assistant), hide, &label, options, meta);
                 self.add_to_chat(Rc::new(RefCell::new(component)));
             }
             Message::Custom(_) => self.add_custom_role_message(message),
@@ -271,12 +279,10 @@ impl InteractiveMode {
             }
             let messages = session_entry_to_context_messages(entry);
             let has_messages = !messages.is_empty();
-            items.extend(
-                messages.into_iter().map(|message| RenderItem::Message {
-                    message: Box::new(message),
-                    entry_id: Some(entry.id().into()),
-                }),
-            );
+            items.extend(messages.into_iter().map(|message| RenderItem::Message {
+                message: Box::new(message),
+                meta: Some(MessageMeta { id: entry.id().into(), timestamp: entry.timestamp().into() }),
+            }));
             let cost = match entry.data() {
                 EntryData::Compaction(compaction) => compaction.usage.map(|usage| (true, usage)),
                 EntryData::BranchSummary(summary) => summary.usage.map(|usage| (false, usage)),
@@ -316,9 +322,10 @@ impl InteractiveMode {
                 RenderItem::CacheWarm(usage) => self.add_cache_warming_usage(&usage),
                 RenderItem::CustomEntry(entry) => self.add_custom_entry_to_chat(&entry),
                 RenderItem::SummaryCost { compaction, usage } => self.add_summary_cost_notice(compaction, &usage),
-                RenderItem::Message { message, entry_id } => match *message {
+                RenderItem::Message { message, meta } => match *message {
                     Message::Assistant(assistant) => {
-                        self.add_message_to_chat(&Message::Assistant(assistant.clone()), false);
+                        let entry_id = meta.as_ref().map(|meta| meta.id.clone());
+                        self.add_message_to_chat_with_meta(&Message::Assistant(assistant.clone()), false, meta);
                         let failed = matches!(assistant.stop_reason, StopReason::Aborted | StopReason::Error);
                         for block in &assistant.content {
                             let pi_ai::ContentBlock::ToolCall(call) = block else { continue };
@@ -350,7 +357,7 @@ impl InteractiveMode {
                             tool.borrow_mut().update_result(view, false);
                         }
                     }
-                    message => self.add_message_to_chat(&message, populate_history),
+                    message => self.add_message_to_chat_with_meta(&message, populate_history, meta),
                 },
             }
         }
@@ -500,3 +507,7 @@ impl InteractiveMode {
 pub(super) fn error_result(text: &str) -> ToolResultView {
     ToolResultView { content: vec![pi_ai::ContentBlock::text(text)], details: None, is_error: true, duration_ms: None }
 }
+
+#[cfg(test)]
+#[path = "chat_tests.rs"]
+mod tests;

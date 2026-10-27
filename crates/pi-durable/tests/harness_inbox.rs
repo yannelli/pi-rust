@@ -382,7 +382,7 @@ async fn totals_assistant_usage_per_model_and_tool_usage_per_tool_and_sums_the_s
         cache_read: 3,
         cache_write: 4,
         total_tokens: 10,
-        cost: Cost { input: 0.1, output: 0.2, cache_read: 0.3, cache_write: 0.4, total: 1.0 },
+        cost: Cost { input: 0.1, output: 0.2, cache_read: 0.3, cache_write: 0.4, total: 1.0, ..Cost::default() },
         ..Usage::default()
     };
     let gate = Deferred::default();
