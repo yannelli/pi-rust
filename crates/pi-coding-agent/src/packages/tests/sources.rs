@@ -154,10 +154,16 @@ fn npm_command_detection_and_arguments() {
     assert_eq!(NpmCommand::from_argv(None).unwrap().command, "npm");
     let root = Path::new("/r");
     let specs = vec!["a".to_string()];
-    assert_eq!(npm_install_args("npm", &specs, root), ["install", "a", "--prefix", "/r", "--legacy-peer-deps"]);
+    assert_eq!(
+        npm_install_args("npm", &specs, root),
+        ["install", "a", "--prefix", "/r", "--legacy-peer-deps", "--no-audit", "--no-fund"]
+    );
     assert_eq!(npm_install_args("bun", &specs, root), ["install", "a", "--cwd", "/r", "--omit=peer"]);
     assert_eq!(npm_install_args("pnpm", &specs, root)[4], "--config.auto-install-peers=false");
-    assert_eq!(git_dependency_install_args("npm"), ["install", "--omit=dev", "--legacy-peer-deps"]);
+    assert_eq!(
+        git_dependency_install_args("npm"),
+        ["install", "--omit=dev", "--legacy-peer-deps", "--no-audit", "--no-fund"]
+    );
     assert_eq!(git_dependency_install_args("pnpm")[1], "--prod");
     assert_eq!(git_dependency_install_args("yarn"), ["install"]);
 }

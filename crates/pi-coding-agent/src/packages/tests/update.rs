@@ -28,7 +28,7 @@ async fn npm_ranges_update_with_the_configured_spec() {
     let root = project_npm.display().to_string();
     assert_eq!(
         runner.argvs(CallKind::Run),
-        [["npm", "install", "example@^1.0.0", "--prefix", &root, "--legacy-peer-deps"]]
+        [["npm", "install", "example@^1.0.0", "--prefix", &root, "--legacy-peer-deps", "--no-audit", "--no-fund"]]
     );
 
     for (installed, response) in [("1.3.1", "[\"1.0.0\",\"1.3.1\",\"1.0.2\"]"), ("2.0.0", "\"1.9.0\"")] {
@@ -88,7 +88,17 @@ async fn npm_updates_batch_per_scope_and_git_updates_run_in_parallel() {
     let project_root = project_npm.display().to_string();
     assert_eq!(
         npm_runs[0],
-        ["npm", "install", "user-old@latest", "user-unknown@latest", "--prefix", &user_root, "--legacy-peer-deps"]
+        [
+            "npm",
+            "install",
+            "user-old@latest",
+            "user-unknown@latest",
+            "--prefix",
+            &user_root,
+            "--legacy-peer-deps",
+            "--no-audit",
+            "--no-fund"
+        ]
     );
     assert_eq!(
         npm_runs[1],
@@ -99,7 +109,9 @@ async fn npm_updates_batch_per_scope_and_git_updates_run_in_parallel() {
             "project-missing@latest",
             "--prefix",
             &project_root,
-            "--legacy-peer-deps"
+            "--legacy-peer-deps",
+            "--no-audit",
+            "--no-fund"
         ]
     );
     let clones = runner.argvs(CallKind::Run).into_iter().filter(|argv| argv[1] == "clone").count();
@@ -175,7 +187,7 @@ async fn legacy_global_npm_installs_migrate_into_the_managed_root() {
     let root = managed_root.display().to_string();
     assert_eq!(
         runner.argvs(CallKind::Run),
-        [["npm", "install", "legacy-pkg@latest", "--prefix", &root, "--legacy-peer-deps"]]
+        [["npm", "install", "legacy-pkg@latest", "--prefix", &root, "--legacy-peer-deps", "--no-audit", "--no-fund"]]
     );
     let view_calls = runner.argvs(CallKind::Capture).into_iter().filter(|argv| argv[1] == "view").count();
     assert_eq!(view_calls, 0);

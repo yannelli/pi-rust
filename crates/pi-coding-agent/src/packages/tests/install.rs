@@ -53,7 +53,7 @@ async fn npm_installs_use_the_configured_command_and_managed_root() {
     let root = fixture.agent_dir.join("npm").display().to_string();
     assert_eq!(
         runner.argvs(CallKind::Run)[0],
-        strings(&["npm", "install", "@scope/pkg", "--prefix", &root, "--legacy-peer-deps"])
+        strings(&["npm", "install", "@scope/pkg", "--prefix", &root, "--legacy-peer-deps", "--no-audit", "--no-fund"])
     );
     assert!(fixture.agent_dir.join("npm/package.json").exists());
     assert_eq!(std::fs::read_to_string(fixture.agent_dir.join("npm/.gitignore")).unwrap(), "*\n!.gitignore\n");
@@ -73,7 +73,16 @@ async fn npm_installs_use_the_configured_command_and_managed_root() {
     fixture.set_global(json!({}));
     let runner = MockRunner::new(|_| Ok(String::new()));
     fixture.manager(runner.clone()).remove("npm:@scope/pkg", false).await.unwrap();
-    let expected = strings(&["npm", "uninstall", "@scope/pkg", "--prefix", &root, "--legacy-peer-deps"]);
+    let expected = strings(&[
+        "npm",
+        "uninstall",
+        "@scope/pkg",
+        "--prefix",
+        &root,
+        "--legacy-peer-deps",
+        "--no-audit",
+        "--no-fund",
+    ]);
     assert_eq!(runner.argvs(CallKind::Run), [expected]);
 }
 
@@ -96,8 +105,26 @@ async fn npm_installs_pass_the_real_path_when_the_agent_dir_is_a_symlink() {
     assert_eq!(
         runner.argvs(CallKind::Run),
         [
-            strings(&["npm", "install", "@scope/pkg", "--prefix", &root, "--legacy-peer-deps"]),
-            strings(&["npm", "uninstall", "@scope/pkg", "--prefix", &root, "--legacy-peer-deps"]),
+            strings(&[
+                "npm",
+                "install",
+                "@scope/pkg",
+                "--prefix",
+                &root,
+                "--legacy-peer-deps",
+                "--no-audit",
+                "--no-fund"
+            ]),
+            strings(&[
+                "npm",
+                "uninstall",
+                "@scope/pkg",
+                "--prefix",
+                &root,
+                "--legacy-peer-deps",
+                "--no-audit",
+                "--no-fund"
+            ]),
         ]
     );
 }
@@ -137,7 +164,10 @@ async fn git_installs_clone_and_install_dependencies_without_peers() {
             &crate::resources::paths::normalize(&target).display().to_string()
         ])
     );
-    assert_eq!(calls[1].argv(), strings(&["npm", "install", "--omit=dev", "--legacy-peer-deps"]));
+    assert_eq!(
+        calls[1].argv(),
+        strings(&["npm", "install", "--omit=dev", "--legacy-peer-deps", "--no-audit", "--no-fund"])
+    );
     assert_eq!(calls[1].spec.cwd.as_deref(), Some(target.as_path()));
     assert!(fixture.agent_dir.join("git/.gitignore").exists());
     let kinds: Vec<ProgressKind> = events.lock().unwrap().iter().map(|event| event.kind).collect();
@@ -193,7 +223,7 @@ async fn existing_checkouts_reconcile_to_the_configured_ref() {
     assert_eq!(runs[0], strings(&["git", "fetch", "origin", "v2"]));
     assert_eq!(runs[1], strings(&["git", "reset", "--hard", "FETCH_HEAD^{commit}"]));
     assert_eq!(runs[2], strings(&["git", "clean", "-fdx"]));
-    assert_eq!(runs[3], strings(&["npm", "install", "--omit=dev", "--legacy-peer-deps"]));
+    assert_eq!(runs[3], strings(&["npm", "install", "--omit=dev", "--legacy-peer-deps", "--no-audit", "--no-fund"]));
     assert!(!target.with_file_name(".repo.pi-update-incomplete").exists());
 }
 

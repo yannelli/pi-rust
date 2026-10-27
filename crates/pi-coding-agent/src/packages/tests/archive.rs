@@ -149,7 +149,7 @@ async fn zip_packages_without_a_top_directory_install_dependencies() {
     let installed = fixture.cwd.join(".pi/url/127.0.0.1/z");
     assert!(installed.join("prompts/fix.md").exists() && installed.join("themes/t.json").exists());
     let calls = runner.calls();
-    assert_eq!(calls[0].argv(), ["npm", "install", "--omit=dev", "--legacy-peer-deps"]);
+    assert_eq!(calls[0].argv(), ["npm", "install", "--omit=dev", "--legacy-peer-deps", "--no-audit", "--no-fund"]);
     assert_eq!(calls[0].spec.cwd.as_deref(), Some(installed.as_path()));
     let resolved = manager.resolve_extension_sources(&[source], true, false).await.unwrap();
     assert_eq!(resolved.prompts.len(), 1);

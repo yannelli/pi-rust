@@ -329,7 +329,7 @@ async fn temporary_npm_sources_refresh_when_a_newer_version_exists() {
     assert_eq!(runner.argvs(CallKind::Capture), [["npm", "view", "pkg", "version", "--json"]]);
     assert_eq!(
         runner.argvs(CallKind::Run),
-        [["npm", "install", "pkg@latest", "--prefix", &root_text, "--legacy-peer-deps"]]
+        [["npm", "install", "pkg@latest", "--prefix", &root_text, "--legacy-peer-deps", "--no-audit", "--no-fund"]]
     );
 
     // Pinned versions and offline runs keep the cached install without asking npm.
