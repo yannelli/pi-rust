@@ -24,7 +24,7 @@ use crate::harness::types::{Agent, NestedToolExecutionResult, ToolDiagnostic};
 use crate::harness::util::{cancellation, lock, with_context};
 use crate::ids::{ConversationId, EntryId, TaskId};
 use crate::models::Models;
-use crate::session::{CommittedWatch, Tx};
+use crate::session::{DocumentWatch, Tx};
 use crate::tasks::{TaskOptions, TaskOwnership};
 use crate::types::TaskRecord;
 
@@ -158,6 +158,21 @@ impl ToolExecutionApi {
         self.runtime.commit_map(change, context).await
     }
 
+    /// A commit of this call's task; `options` may defer storing it (`CommitPersistence`).
+    pub async fn commit_with_options<T, F, Fut>(
+        &self,
+        change: F,
+        context: &Context,
+        options: crate::types::CommitOptions,
+    ) -> DurableResult<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(Tx) -> Fut + Send + 'static,
+        Fut: Future<Output = DurableResult<T>> + Send + 'static,
+    {
+        self.runtime.commit_map_with_options(change, context, options).await
+    }
+
     pub async fn memo(&self, name: &str) -> DurableResult<Option<Json>> {
         self.runtime.memo(name).await
     }
@@ -232,7 +247,7 @@ impl ToolExecutionApi {
         token: &DocToken<T, S>,
         owner: S::Owner,
         context: &Context,
-    ) -> DurableResult<Option<CommittedWatch>> {
+    ) -> DurableResult<Option<DocumentWatch>> {
         self.runtime.watch_doc(token, owner, context).await
     }
 

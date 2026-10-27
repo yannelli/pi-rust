@@ -139,7 +139,7 @@ pub enum DocumentCommitChange {
         /// Exact adopted operations for an ordinary update; empty for creation and retirement.
         ops: Vec<Op>,
     },
-    /// Definition-free child initialization; consumers hydrate through state or watch acquisition.
+    /// Definition-free child initialization; consumers hydrate through watch acquisition.
     Copy { record: DocumentRecord, conversation_id: ConversationId, source: DocumentCopySource },
 }
 
@@ -153,21 +153,61 @@ pub enum CommitChange {
     Document(DocumentCommitChange),
 }
 
-/// Every immutable change from one successful Session commit. Change order is unspecified.
+/// Every immutable change one Session storage transaction stored, with its `seq`. Change order is unspecified. A
+/// commit held in memory ([`CommitPersistence`]) is published once it is stored: alone, or with the next commit that
+/// reads or writes its document, whose document change then carries the held operations followed by its own.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CommitPublication {
     pub seq: Seq,
     pub changes: Vec<CommitChange>,
 }
 
+/// When a commit reaches Storage. `Immediate`, the default: before the commit returns. `Deferred`: when every write
+/// of the commit changes an existing conversation document with history `latest` and fork `initial` (no creation,
+/// migration, or retirement), the Session adopts it in memory, shows it to watches and views, and returns, but stores
+/// it later: with the next commit that reads or writes that document, before the document leaves memory or retires,
+/// at close, and at the latest about `within_ms` after the commit (default `settings.progress.persist_within_ms`,
+/// 1,000 ms; infinity waits for one of the others). A commit that writes anything else is immediate. A crash loses what
+/// is held, so only state whose loss is acceptable, such as streamed progress, should be deferred.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum CommitPersistence {
+    #[default]
+    Immediate,
+    Deferred {
+        within_ms: Option<f64>,
+    },
+}
+
+/// Options of one Session commit.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CommitOptions {
+    pub persistence: CommitPersistence,
+}
+
+impl CommitOptions {
+    /// A deferred commit with the default window.
+    pub const DEFERRED: Self = Self { persistence: CommitPersistence::Deferred { within_ms: None } };
+
+    pub fn deferred(within_ms: Option<f64>) -> Self {
+        Self { persistence: CommitPersistence::Deferred { within_ms } }
+    }
+}
+
+/// The caller's in-memory adoption of one durable batch, so memory always shows a complete prefix of the log. It
+/// must not panic.
+pub type Adopt<'a> = &'a (dyn Fn(Seq) + Send + Sync);
+
 /// Atomic persistence boundary for Session records. An error fails the Session, except a `StorageRequest` error
 /// or a cancellation from a read. Any error from `commit()` or `mint_id()` is fatal.
 #[async_trait]
 pub trait Storage: Send + Sync {
-    /// Atomically persist one batch and return its sequence. Once it returns, later reads see it.
-    async fn commit(&self, writes: &[StorageWrite], context: &Context) -> DurableResult<Seq>;
+    /// Atomically persist one batch and return its sequence. Once the batch is durable, call `adopt(seq)` exactly
+    /// once, synchronously and before this storage's next commit starts, then return `seq`; a commit that fails
+    /// before it is durable never calls `adopt`. Once it returns, later reads see the batch.
+    async fn commit(&self, writes: &[StorageWrite], adopt: Adopt<'_>, context: &Context) -> DurableResult<Seq>;
 
-    /// A fresh ID above every ID minted or stored before, also across reopen: scans order by ID as creation order.
+    /// A fresh ID above every ID minted since this storage was opened and every ID stored, also across reopen: scans
+    /// order by ID as creation order.
     async fn mint_id(&self) -> DurableResult<u64>;
 
     async fn conversation(&self, id: ConversationId, context: &Context) -> DurableResult<Option<ConversationRecord>>;

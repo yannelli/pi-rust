@@ -11,7 +11,7 @@ use super::define::Extension;
 use super::types::{ModelRef, QueueMode, ToolExecutionMode};
 use crate::errors::DurableResult;
 use crate::models::DeferredOption;
-use crate::session::document_retention;
+use crate::session::{DEFAULT_PERSIST_WITHIN_MS, document_retention, persist_within};
 
 /// Curated pi-ai request options; absent fields use pi-ai defaults.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -56,12 +56,18 @@ pub struct CompactionPolicy {
     pub background_tokens: u64,
 }
 
-/// How often running progress is committed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// How often running progress is committed, and how long it may wait in memory before it is stored. Progress commits
+/// are deferred (`CommitPersistence`): watches see each at once, and Storage gets them together, at the run's next
+/// phase boundary or after `persist_within_ms`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProgressPolicy {
     pub partial_interval_ms: u64,
     pub output_interval_ms: u64,
+    /// How long these commits, and other deferred commits without their own `within_ms`, may stay in memory before
+    /// they are stored; a crash loses at most about this much of an answer or of tool output. Default 1,000; infinity
+    /// stores them only at the next commit that reads or writes their document and at close.
+    pub persist_within_ms: f64,
 }
 
 pub const DEFAULT_RETRY_POLICY: ConversationRetryPolicy =
@@ -71,7 +77,7 @@ pub const DEFAULT_COMPACTION_POLICY: CompactionPolicy =
     CompactionPolicy { enabled: true, reserve_tokens: 16384, keep_recent_tokens: 20000, background_tokens: 32768 };
 
 pub const DEFAULT_PROGRESS_POLICY: ProgressPolicy =
-    ProgressPolicy { partial_interval_ms: 100, output_interval_ms: 100 };
+    ProgressPolicy { partial_interval_ms: 100, output_interval_ms: 100, persist_within_ms: DEFAULT_PERSIST_WITHIN_MS };
 
 /// Default `context_retention_ms`: ten minutes.
 pub const DEFAULT_CONTEXT_RETENTION_MS: f64 = 600_000.0;
@@ -118,6 +124,7 @@ pub struct CompactionOverrides {
 pub struct ProgressOverrides {
     pub partial_interval_ms: Option<u64>,
     pub output_interval_ms: Option<u64>,
+    pub persist_within_ms: Option<f64>,
 }
 
 /// Harness-wide run policy. `HarnessOptions::settings` returns it at every resolution.
@@ -221,6 +228,7 @@ pub fn resolve_settings(settings: Option<&HarnessSettings>) -> Settings {
         progress: ProgressPolicy {
             partial_interval_ms: progress.partial_interval_ms.unwrap_or(DEFAULT_PROGRESS_POLICY.partial_interval_ms),
             output_interval_ms: progress.output_interval_ms.unwrap_or(DEFAULT_PROGRESS_POLICY.output_interval_ms),
+            persist_within_ms: persist_within(progress.persist_within_ms),
         },
         tool_execution: settings.tool_execution.unwrap_or_default(),
         steering_mode: settings.steering_mode.unwrap_or_default(),

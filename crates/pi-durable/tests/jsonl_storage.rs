@@ -101,7 +101,7 @@ fn task(value: TaskRecord) -> StorageWrite {
 
 async fn create_root(storage: &dyn Storage) {
     let root = ConversationRecord { id: ROOT_CONVERSATION_ID, parent: None, owner: None };
-    storage.commit(&[StorageWrite::Conversation { value: root }], ctx()).await.unwrap();
+    storage.commit(&[StorageWrite::Conversation { value: root }], &|_| {}, ctx()).await.unwrap();
 }
 
 fn session_document(id: DocumentId, kind: &str) -> DocumentCreate {
@@ -158,15 +158,18 @@ async fn publishes_every_commit_before_reclaiming_sidecars() {
     create_root(&storage).await;
     let task_id: TaskId = mint(&storage).await;
     let document_id: DocumentId = mint(&storage).await;
-    storage.commit(&[task(pending_task(task_id, "ready"))], ctx()).await.unwrap();
-    storage.commit(&[create(session_document(document_id, "test.document"), r#"{"count":0}"#)], ctx()).await.unwrap();
-    storage.commit(&[delta(document_id, "[]")], ctx()).await.unwrap();
-    storage.commit(&[base(document_id, r#"{"count":1}"#)], ctx()).await.unwrap();
+    storage.commit(&[task(pending_task(task_id, "ready"))], &|_| {}, ctx()).await.unwrap();
+    storage
+        .commit(&[create(session_document(document_id, "test.document"), r#"{"count":0}"#)], &|_| {}, ctx())
+        .await
+        .unwrap();
+    storage.commit(&[delta(document_id, "[]")], &|_| {}, ctx()).await.unwrap();
+    storage.commit(&[base(document_id, r#"{"count":1}"#)], &|_| {}, ctx()).await.unwrap();
     assert_eq!(read_lines(&file(&directory, &format!("task-{task_id}.jsonl"))).len(), 1);
     assert_eq!(read_lines(&file(&directory, &format!("doc-{document_id}.jsonl"))).len(), 1);
 
-    storage.commit(&[StorageWrite::DocumentRetire { id: document_id }], ctx()).await.unwrap();
-    storage.commit(&[task(terminal_task(task_id))], ctx()).await.unwrap();
+    storage.commit(&[StorageWrite::DocumentRetire { id: document_id }], &|_| {}, ctx()).await.unwrap();
+    storage.commit(&[task(terminal_task(task_id))], &|_| {}, ctx()).await.unwrap();
     let main = read_lines(&file(&directory, "main.jsonl"));
     assert_eq!(main.len(), 7);
     assert!(!exists(&file(&directory, &format!("task-{task_id}.jsonl"))));
@@ -181,7 +184,7 @@ async fn orders_multiple_live_task_replacements_by_commit_ordinal() {
     create_root(&storage).await;
     let task_id: TaskId = mint(&storage).await;
     let writes = [task(pending_task(task_id, "first")), task(pending_task(task_id, "second"))];
-    storage.commit(&writes, ctx()).await.unwrap();
+    storage.commit(&writes, &|_| {}, ctx()).await.unwrap();
     assert_eq!(read_lines(&file(&directory, &format!("task-{task_id}.jsonl"))).len(), 2);
     let reopened = open(&directory).await;
     assert_eq!(reopened.task(task_id, ctx()).await.unwrap(), Some(pending_task(task_id, "second")));
@@ -197,7 +200,7 @@ async fn removes_a_complete_plus_torn_unconfirmed_sidecar_append() {
     fs.fail(Failure { operation: Operation::Append, call: 1, mode: Mode::Short });
     let writes =
         [task(pending_task(task_id, "first")), task(pending_task(task_id, &format!("second-{}", "x".repeat(512))))];
-    let error = storage.commit(&writes, ctx()).await.unwrap_err();
+    let error = storage.commit(&writes, &|_| {}, ctx()).await.unwrap_err();
     assert!(error.to_string().contains("poisoned"), "{error}");
     let partial = std::fs::read(file(&directory, &format!("task-{task_id}.jsonl"))).unwrap();
     assert_ne!(partial.last(), Some(&b'\n'));
@@ -231,10 +234,10 @@ async fn serializes_the_candidate_before_io_and_leaves_preparation_failures_usab
     let duplicate = StorageWrite::Conversation {
         value: ConversationRecord { id: ROOT_CONVERSATION_ID, parent: None, owner: None },
     };
-    assert!(storage.commit(&[StorageWrite::Entry { value: entry("bad") }, duplicate], ctx()).await.is_err());
+    assert!(storage.commit(&[StorageWrite::Entry { value: entry("bad") }, duplicate], &|_| {}, ctx()).await.is_err());
     assert_eq!(fs.operations(), Vec::<String>::new());
     assert_eq!(storage.entry(id, ctx()).await.unwrap(), None);
-    assert_eq!(storage.commit(&[StorageWrite::Entry { value: entry("good") }], ctx()).await.unwrap(), Seq(2));
+    assert_eq!(storage.commit(&[StorageWrite::Entry { value: entry("good") }], &|_| {}, ctx()).await.unwrap(), Seq(2));
 }
 
 #[tokio::test]
@@ -253,7 +256,7 @@ async fn poisons_after_append_failures_and_recovers_only_confirmed_state() {
             create(session_document(first, "first"), r#"{"text":"α"}"#),
             create(session_document(second, "second"), r#"{"text":"β"}"#),
         ];
-        assert!(storage.commit(&writes, ctx()).await.unwrap_err().to_string().contains("poisoned"));
+        assert!(storage.commit(&writes, &|_| {}, ctx()).await.unwrap_err().to_string().contains("poisoned"));
         let read = storage.document(first, DocumentPoint::Current, ctx()).await;
         assert!(read.unwrap_err().to_string().contains("poisoned"));
 
@@ -279,7 +282,7 @@ async fn poisons_after_flush_failures_and_never_writes_a_marker() {
             create(session_document(first, "flush.first"), "{}"),
             create(session_document(second, "flush.second"), "{}"),
         ];
-        assert!(storage.commit(&writes, ctx()).await.unwrap_err().to_string().contains("poisoned"));
+        assert!(storage.commit(&writes, &|_| {}, ctx()).await.unwrap_err().to_string().contains("poisoned"));
         let reopened = open(&directory).await;
         assert_eq!(value(&reopened, first).await, None);
         assert_eq!(value(&reopened, second).await, None);

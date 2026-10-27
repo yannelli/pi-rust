@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use super::support::task_support::{open_tasks, open_tasks_with};
 use super::support::{ControlledStorage, Gate};
 use super::*;
-use pi_durable::session::CommittedWatch;
+use pi_durable::session::DocumentWatch;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 struct Notes {
@@ -44,7 +44,7 @@ type Slot<T> = Arc<Mutex<Option<T>>>;
 #[tokio::test]
 async fn rejects_runtime_operations_after_the_invocation_ends_and_stops_its_watches() {
     let captured: Slot<(TaskRuntime, pi_chord::Context)> = Arc::default();
-    let closed: Slot<CommittedWatch> = Arc::default();
+    let closed: Slot<DocumentWatch> = Arc::default();
     let absent: Slot<bool> = Arc::default();
     let delivered = Arc::new(Mutex::new(Vec::<String>::new()));
     let (capture, watch_slot, absent_slot, sink) =
@@ -56,7 +56,7 @@ async fn rejects_runtime_operations_after_the_invocation_ends_and_stops_its_watc
             *capture.lock().unwrap() = Some((runtime.clone(), context.clone()));
             *absent_slot.lock().unwrap() = Some(runtime.watch_doc(&ABSENT, (), &context).await?.is_none());
             let watch = runtime.watch_doc(&NOTES, (), &context).await?.unwrap();
-            watch.start(move |value, _, _| {
+            watch.start(move |pi_chord::WatchChange { value, .. }, _| {
                 let text = value.get("text").and_then(Json::as_str).unwrap_or("retired").to_owned();
                 sink.lock().unwrap().push(text);
                 async { Ok(()) }

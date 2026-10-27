@@ -11,7 +11,7 @@ use pi_durable::harness::inbox::INBOX_DOC;
 use pi_durable::harness::live::LIVE_DOC;
 use pi_durable::harness::usage::{PROVIDER_DOC, USAGE_DOC};
 use pi_durable::harness::*;
-use pi_durable::session::{CommittedWatch, Tx};
+use pi_durable::session::Tx;
 use pi_durable::storage::MemoryStorage;
 use pi_durable::testing::faux::{FauxMessageOptions, RegisterFauxProviderOptions, faux_assistant_message};
 use pi_durable::{EntryDraft, EntryId};
@@ -24,13 +24,13 @@ const MOUNTED: [&str; 5] = ["pi.agent", "pi.inbox", "pi.live", "pi.provider", "p
 type Frames = Arc<Mutex<Vec<(Json, Vec<Op>)>>>;
 
 /// Start a watch of `conversation` that records its acquisition revision and every delivered frame.
-async fn record(conversation: &Conversation) -> (Json, Frames, CommittedWatch) {
+async fn record(conversation: &Conversation) -> (Json, Frames, ConversationWatch) {
     let watch = conversation.watch(&context()).await.unwrap();
     let acquired = watch.value();
     let frames: Frames = Arc::default();
     let sink = frames.clone();
     watch
-        .start(move |value, ops, _| {
+        .start(move |pi_chord::WatchChange { value, ops, .. }, _| {
             sink.lock().unwrap().push((value, ops));
             async { Ok(()) }
         })

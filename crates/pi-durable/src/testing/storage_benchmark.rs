@@ -122,7 +122,7 @@ async fn mint<T: From<u64>>(storage: &dyn Storage) -> DurableResult<T> {
 
 async fn commit_root(storage: &dyn Storage) -> DurableResult<Seq> {
     let root = ConversationRecord { id: ROOT_CONVERSATION_ID, parent: None, owner: None };
-    storage.commit(&[StorageWrite::Conversation { value: root }], ctx()).await
+    storage.commit(&[StorageWrite::Conversation { value: root }], &|_| {}, ctx()).await
 }
 
 /// Seed deterministic representative data through only the public `Storage` contract.
@@ -144,14 +144,14 @@ pub async fn seed_storage_benchmark(
             }
             writes.push(StorageWrite::Entry { value });
         }
-        storage.commit(&writes, ctx()).await?;
+        storage.commit(&writes, &|_| {}, ctx()).await?;
     }
     for start in (0..scale.task_count).step_by(BATCH_SIZE) {
         let mut writes = Vec::new();
         for index in start..(start + BATCH_SIZE).min(scale.task_count) {
             writes.push(StorageWrite::Task { value: task(mint(storage).await?, index as u64) });
         }
-        storage.commit(&writes, ctx()).await?;
+        storage.commit(&writes, &|_| {}, ctx()).await?;
     }
     let mut exact_document_id = DocumentId(0);
     for start in (0..scale.document_count).step_by(BATCH_SIZE) {
@@ -169,7 +169,7 @@ pub async fn seed_storage_benchmark(
             let value = json(serde_json::json!({ "index": index, "text": "x".repeat(128) }));
             writes.push(StorageWrite::DocumentCreate { record, content: DocumentContent::Base { version: 1, value } });
         }
-        storage.commit(&writes, ctx()).await?;
+        storage.commit(&writes, &|_| {}, ctx()).await?;
     }
 
     let mut replay_document_ids = Vec::new();
@@ -187,7 +187,7 @@ pub async fn seed_storage_benchmark(
             },
         })
         .collect();
-    storage.commit(&creates, ctx()).await?;
+    storage.commit(&creates, &|_| {}, ctx()).await?;
     for count in 1..=REPLAY_TAILS[REPLAY_TAILS.len() - 1] {
         let writes: Vec<_> = REPLAY_TAILS
             .iter()
@@ -195,22 +195,22 @@ pub async fn seed_storage_benchmark(
             .filter(|(tail, _)| count <= **tail)
             .map(|(_, id)| set_count(*id, count))
             .collect();
-        storage.commit(&writes, ctx()).await?;
+        storage.commit(&writes, &|_| {}, ctx()).await?;
     }
 
     let historical_document_id: DocumentId = mint(storage).await?;
     let record = root_document(historical_document_id, "benchmark.history", None);
     let base = |count: u64| DocumentContent::Base { version: 1, value: json(serde_json::json!({ "count": count })) };
-    storage.commit(&[StorageWrite::DocumentCreate { record, content: base(0) }], ctx()).await?;
+    storage.commit(&[StorageWrite::DocumentCreate { record, content: base(0) }], &|_| {}, ctx()).await?;
     let mut ancient_at = Seq(0);
     for count in 1..=HISTORY_SEGMENT_LENGTH {
-        ancient_at = storage.commit(&[set_count(historical_document_id, count)], ctx()).await?;
+        ancient_at = storage.commit(&[set_count(historical_document_id, count)], &|_| {}, ctx()).await?;
     }
     let checkpoint = StorageWrite::DocumentChange { id: historical_document_id, content: base(HISTORY_SEGMENT_LENGTH) };
-    storage.commit(&[checkpoint], ctx()).await?;
+    storage.commit(&[checkpoint], &|_| {}, ctx()).await?;
     let mut recent_at = ancient_at;
     for count in HISTORY_SEGMENT_LENGTH + 1..=HISTORY_SEGMENT_LENGTH * 2 {
-        recent_at = storage.commit(&[set_count(historical_document_id, count)], ctx()).await?;
+        recent_at = storage.commit(&[set_count(historical_document_id, count)], &|_| {}, ctx()).await?;
     }
 
     let first_entry_id = first_entry_id.expect("a benchmark scale creates entries");
@@ -222,7 +222,7 @@ pub async fn seed_storage_benchmark(
             parent: Some(ConversationParent { conversation_id: parent, at: parent_at }),
             owner: None,
         };
-        storage.commit(&[StorageWrite::Conversation { value: fork }], ctx()).await?;
+        storage.commit(&[StorageWrite::Conversation { value: fork }], &|_| {}, ctx()).await?;
         let mut writes = Vec::new();
         for index in 0..ENTRIES_PER_FORK {
             let data = json(serde_json::json!({ "depth": depth, "index": index }));
@@ -230,7 +230,7 @@ pub async fn seed_storage_benchmark(
             parent_at = value.id;
             writes.push(StorageWrite::Entry { value });
         }
-        storage.commit(&writes, ctx()).await?;
+        storage.commit(&writes, &|_| {}, ctx()).await?;
         parent = conversation_id;
         deepest = conversation_id;
     }
@@ -375,7 +375,7 @@ pub async fn seed_storage_write_benchmark(storage: &dyn Storage) -> DurableResul
             value: entry(mint(storage).await?, ROOT_CONVERSATION_ID, "benchmark.baseline", Some(data)),
         });
     }
-    storage.commit(&writes, ctx()).await.map(drop)
+    storage.commit(&writes, &|_| {}, ctx()).await.map(drop)
 }
 
 /// The write scenarios: `(name, expected writes)`; run one with [`run_storage_write_benchmark`].
@@ -432,6 +432,6 @@ pub async fn run_storage_write_benchmark(storage: &dyn Storage, index: usize) ->
             ]
         }
     };
-    storage.commit(&writes, ctx()).await?;
+    storage.commit(&writes, &|_| {}, ctx()).await?;
     Ok(writes.len() as u64)
 }

@@ -2,6 +2,7 @@
 //! panics on failure; [`storage_conformance_tests!`](crate::storage_conformance_tests) makes one `#[tokio::test]`
 //! per case from a provider that opens a fresh storage, awaits the test once, and cleans up (upstream `withStorage`).
 
+mod adoption;
 mod document_indexes;
 mod documents;
 mod records;
@@ -15,6 +16,7 @@ use futures::future::BoxFuture;
 use pi_chord::delta::{Op, parse_ops};
 use pi_chord::{BACKGROUND_CONTEXT, Context, Json};
 
+pub use adoption::{adopts_durable_commits_once, check_adoption};
 pub use document_indexes::*;
 pub use documents::{
     copies_document_bases_independently, reconstructs_rewindable_documents, streams_long_document_tails,
@@ -49,6 +51,7 @@ macro_rules! __for_each_storage_conformance_case {
     ($callback:ident ! { $($args:tt)* }) => {
         $crate::$callback! { $($args)*
             reserves_root_conversation_id => "reserves ID 1 for the immutable root conversation",
+            adopts_durable_commits_once => "adopts a durable commit once before resolving, and never a failed one",
             commits_mixed_table_writes_atomically => "commits mixed table writes atomically and rolls all of them back on failure",
             detaches_writes_and_returned_records => "detaches retained writes and every returned record",
             detaches_prototype_like_keys => "detaches prototype-like JSON keys without changing object prototypes",
@@ -83,7 +86,9 @@ macro_rules! __storage_conformance_list {
     ($($case:ident => $name:literal,)*) => {
         vec![$($crate::testing::storage_conformance::StorageConformanceCase {
             name: $name,
-            run: |storage| ::std::boxed::Box::pin($crate::testing::storage_conformance::$case(storage)),
+            run: |storage| ::std::boxed::Box::pin($crate::testing::storage_conformance::$case(
+                $crate::testing::storage_conformance::check_adoption(storage),
+            )),
         },)*]
     };
 }
@@ -96,7 +101,9 @@ macro_rules! __storage_conformance_test_fns {
         #[$crate::testing::__tokio::test(crate = "pi_durable::testing::__tokio")]
         async fn $case() {
             $provider(::std::boxed::Box::new(|storage| {
-                ::std::boxed::Box::pin($crate::testing::storage_conformance::$case(storage))
+                ::std::boxed::Box::pin($crate::testing::storage_conformance::$case(
+                    $crate::testing::storage_conformance::check_adoption(storage),
+                ))
             }))
             .await;
         }
@@ -135,7 +142,7 @@ pub(crate) async fn mint<T: From<u64>>(storage: &dyn Storage) -> T {
 
 pub(crate) async fn create_root(storage: &dyn Storage) -> ConversationId {
     let root = crate::types::ConversationRecord { id: ROOT_CONVERSATION_ID, parent: None, owner: None };
-    storage.commit(&[StorageWrite::Conversation { value: root }], context()).await.expect("create the root");
+    storage.commit(&[StorageWrite::Conversation { value: root }], &|_| {}, context()).await.expect("create the root");
     ROOT_CONVERSATION_ID
 }
 

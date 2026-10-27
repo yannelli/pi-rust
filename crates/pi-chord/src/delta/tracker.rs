@@ -2,11 +2,12 @@
 //! diffs it against the base and materializes the candidate from that batch, so replicas
 //! reproduce it exactly. Adoption is a pointer swap.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
-use super::diff::diff_draft_ordered;
-use super::{Op, apply_immutable};
+use super::diff::{AppendHint, diff_draft_ordered};
+use super::{Op, Path, Seg, apply_immutable};
 use crate::error::{ChordError, ChordResult};
 use crate::json::Json;
 
@@ -65,6 +66,8 @@ pub struct Change {
     draft: Option<Json>,
     settled: bool,
     prepared_status: Option<Status>,
+    /// String members `append_text()` appended to, by path.
+    appends: HashMap<Path, AppendHint>,
 }
 
 impl Change {
@@ -82,6 +85,53 @@ impl Change {
     fn release(&mut self) {
         self.draft = None;
         self.base = None;
+        self.appends.clear();
+    }
+
+    /// Append `text` to the string at `key` of the object at `path` in the draft. The change records it as one append
+    /// op (appends to one key join) without comparing the old and new strings; a plain assignment or deletion of the
+    /// key in the same change falls back to that comparison. The new string is still a copy: JSON strings are shared.
+    pub fn append_text(&mut self, path: &[Seg], key: &str, text: &str) -> ChordResult<()> {
+        let needs = || ChordError::type_error(format!("appendText() needs a string at {}", quoted(key)));
+        let draft = self.state()?;
+        let mut node = draft;
+        for segment in path {
+            node = match segment {
+                Seg::Key(name) => node.get_mut(name),
+                Seg::Index(index) => node.as_array_mut().and_then(|items| items.get_mut(*index as usize)),
+            }
+            .ok_or_else(|| ChordError::type_error("appendText() needs a draft"))?;
+        }
+        let object = match node {
+            Json::Object(_) => node.as_object_mut().expect("an object"),
+            Json::Array(_) => return Err(needs()),
+            _ => return Err(ChordError::type_error("appendText() needs a draft")),
+        };
+        let Some(Json::String(current)) = object.get(key) else { return Err(needs()) };
+        if text.is_empty() {
+            return Ok(());
+        }
+        let current = current.clone();
+        let after: Arc<str> = format!("{current}{text}").into();
+        object.insert(key, Json::String(after.clone()));
+        let mut full = path.to_vec();
+        full.push(Seg::key(key));
+        match self.appends.get_mut(&full).filter(|hint| Arc::ptr_eq(&hint.after, &current)) {
+            Some(hint) => {
+                hint.text = format!("{}{text}", hint.text).into();
+                hint.after = after;
+            }
+            None => match self.base.as_ref().and_then(|base| string_at(base, &full)) {
+                // Unchanged in this change so far: the append is all that differs.
+                Some(base) if Arc::ptr_eq(&base, &current) => {
+                    self.appends.insert(full, AppendHint { base, after, text: text.into() });
+                }
+                _ => {
+                    self.appends.remove(&full);
+                }
+            },
+        }
+        Ok(())
     }
 
     /// Read the draft without changing it.
@@ -107,7 +157,7 @@ impl Change {
         }
         self.settled = true;
         let (Some(draft), Some(base)) = (self.draft.take(), self.base.take()) else { return Err(settled_error()) };
-        let ops = diff_draft_ordered(&base, &draft);
+        let ops = diff_draft_ordered(&base, &draft, std::mem::take(&mut self.appends));
         drop(draft);
         let value = if ops.is_empty() {
             base.clone()
@@ -188,6 +238,7 @@ impl Tracker {
             draft: Some(self.value.clone()),
             settled: false,
             prepared_status: None,
+            appends: HashMap::new(),
         }
     }
 
@@ -234,5 +285,24 @@ impl Tracker {
             }
         }
         Ok(())
+    }
+}
+
+fn quoted(key: &str) -> String {
+    serde_json::to_string(key).unwrap_or_else(|_| key.to_owned())
+}
+
+/// The string at `path` in `value`, when there is one.
+fn string_at(value: &Json, path: &[Seg]) -> Option<Arc<str>> {
+    let mut node = value;
+    for segment in path {
+        node = match segment {
+            Seg::Key(name) => node.get(name)?,
+            Seg::Index(index) => node.as_array()?.get(*index as usize)?,
+        };
+    }
+    match node {
+        Json::String(text) => Some(text.clone()),
+        _ => None,
     }
 }

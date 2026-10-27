@@ -7,15 +7,18 @@ use std::sync::{Arc, Mutex, Weak};
 
 use pi_chord::delta::{Op, Path, Seg, apply_immutable};
 use pi_chord::state::{ReplicatedStateSourceOptions, attach_replicated_state_source};
-use pi_chord::{BACKGROUND_CONTEXT, Context, Json, JsonMap, without_abort_signal};
+use pi_chord::{BACKGROUND_CONTEXT, Context, Json, JsonMap, Watch, WatchChange, without_abort_signal};
 
 use super::scheduler::{BlockedSubject, Scheduler};
 use super::types::BlockedReason;
 use super::util::{cancellation, closed_error, lock, scan_all};
-use crate::errors::DurableResult;
+use crate::errors::{DurableError, DurableResult};
 use crate::ids::ConversationId;
-use crate::session::{CommittedObserver, CommittedStateSource, CommittedWatch, DocumentState, Release, Session};
-use crate::types::{CommitChange, CommitPublication, ConversationQuery, TaskQuery, TaskRecord, TaskState, TaskStatus};
+use crate::session::{
+    CommittedObserver, CommittedStateSource, DocumentState, GuardedObserver, Observation, ObservedCommit, Observer,
+    Release, Session,
+};
+use crate::types::{CommitChange, ConversationQuery, TaskQuery, TaskRecord, TaskState, TaskStatus};
 
 /// `{ tasks }`: every live task keyed by its decimal ID. A node is `{ id, kind, conversationId, owner?, background,
 /// abortRequested, state, blocked?, conversations }`; `state` is `{ status, phase }`, `{ status: "waiting", phase, on,
@@ -25,7 +28,7 @@ use crate::types::{CommitChange, CommitPublication, ConversationQuery, TaskQuery
 pub type TaskGraph = Json;
 
 /// A serialized exact-frame watch of the task graph.
-pub type TaskGraphWatch = CommittedWatch;
+pub type TaskGraphWatch = Watch<DurableError>;
 
 const LIVE_STATUSES: [TaskStatus; 5] =
     [TaskStatus::Pending, TaskStatus::Running, TaskStatus::Waiting, TaskStatus::Sleeping, TaskStatus::Completing];
@@ -33,6 +36,7 @@ const SCAN_PAGE_SIZE: usize = 256;
 
 struct Mount {
     value: Json,
+    /// Watches, states, and guarded host observers (`observe_task_graph()`).
     observers: Vec<(u64, Arc<dyn CommittedObserver>)>,
     /// What the blocked reason reads of each live task, so a registry change can derive it again without payloads.
     records: HashMap<String, BlockedSubject>,
@@ -77,7 +81,7 @@ impl TaskGraphView {
             let mount = lock(&view.mount).take();
             let failure = view.session.failure();
             for (_, observer) in mount.into_iter().flat_map(|mount| mount.observers) {
-                observer.close_session(failure.clone());
+                observer.end(failure.clone());
             }
         })?;
         Ok(view)
@@ -103,12 +107,33 @@ impl TaskGraphView {
         }
     }
 
-    /// A serialized exact-frame watch of the graph; cancelling `context` stops it.
+    /// Attach a synchronous observer of the graph (`Harness::observe_task_graph()`), behind its guard; `context`
+    /// governs only the attachment.
+    pub async fn observe(
+        self: &Arc<Self>,
+        observer: Arc<dyn Observer>,
+        context: &Context,
+    ) -> DurableResult<Observation> {
+        let session = self.session.clone();
+        let ((value, guarded), _) = self
+            .attach(context, move |value, release| {
+                let guarded = GuardedObserver::new(observer, move || release.run(), move |error| session.report(error));
+                (guarded.clone() as Arc<dyn CommittedObserver>, (value.clone(), guarded))
+            })
+            .await?;
+        if context.is_cancelled() {
+            guarded.detach();
+            return Err(cancellation(context));
+        }
+        Ok(Observation::new(value, Arc::new(move || guarded.detach())))
+    }
+
+    /// A serialized exact-frame watch of the graph, an observer of its mount; cancelling `context` stops it.
     pub async fn watch(self: &Arc<Self>, context: &Context) -> DurableResult<TaskGraphWatch> {
         let session = self.session.clone();
         let (watch, _) = self
             .attach(context, move |value, release| {
-                let watch = CommittedWatch::new(value.clone(), release, move |error| session.report(error), None);
+                let watch = Watch::new(value.clone(), move || release.run(), move |error| session.report(error));
                 (Arc::new(watch.clone()) as Arc<dyn CommittedObserver>, watch)
             })
             .await?;
@@ -216,8 +241,9 @@ impl TaskGraphView {
             (mount.value.clone(), ops, observers)
         };
         let (value, ops, observers) = delivery;
+        let change = WatchChange::new(value, ops);
         for observer in observers {
-            observer.advance(value.clone(), ops.clone(), BACKGROUND_CONTEXT.clone());
+            observer.advance(change.clone(), BACKGROUND_CONTEXT.clone());
         }
     }
 
@@ -257,7 +283,11 @@ impl TaskGraphView {
     }
 
     /// Derive the mount's operations from one publication, apply them, and hand the revision to every observer.
-    fn advance(&self, publication: &CommitPublication, context: &Context) {
+    fn advance(&self, publication: &ObservedCommit, context: &Context) {
+        // A commit held in memory changes documents only, which the graph does not show.
+        if publication.is_memory() {
+            return;
+        }
         let delivery = {
             let mut mount = lock(&self.mount);
             let Some(mount) = mount.as_mut() else { return };
@@ -275,9 +305,9 @@ impl TaskGraphView {
             }
         };
         let (value, ops, observers) = delivery;
-        let frame_context = without_abort_signal(context);
+        let (change, frame_context) = (WatchChange::new(value, ops), without_abort_signal(context));
         for observer in observers {
-            observer.advance(value.clone(), ops.clone(), frame_context.clone());
+            observer.advance(change.clone(), frame_context.clone());
         }
     }
 }
@@ -290,7 +320,7 @@ fn path(keys: &[&str]) -> Path {
 fn graph_ops(
     graph: &Json,
     records: &mut HashMap<String, BlockedSubject>,
-    publication: &CommitPublication,
+    publication: &ObservedCommit,
     blocked: &dyn Fn(&BlockedSubject) -> Option<BlockedReason>,
 ) -> DurableResult<Vec<Op>> {
     let mut ops = Vec::new();
@@ -302,7 +332,7 @@ fn graph_ops(
             None => graph.get("tasks").and_then(|tasks| tasks.get(key)).cloned(),
         }
     };
-    for change in &publication.changes {
+    for change in publication.changes() {
         let CommitChange::Task(record) = change else { continue };
         let key = record.id.to_string();
         let previous = node(&changed, &key);
@@ -328,7 +358,7 @@ fn graph_ops(
     // After the tasks, so a conversation created with its owner task in one commit finds the owner's node. Change
     // order within a publication is unspecified, so each owner's list is sorted again.
     let mut created: Vec<(String, Vec<ConversationId>)> = Vec::new();
-    for change in &publication.changes {
+    for change in publication.changes() {
         let CommitChange::Conversation(conversation) = change else { continue };
         let Some(owner) = conversation.owner else { continue };
         let key = owner.task_id.to_string();

@@ -4,14 +4,15 @@
 mod support;
 
 mod delivery;
+mod following;
 mod lifetime;
 
 use std::sync::{Arc, LazyLock, Mutex};
 
-use pi_chord::Json;
 use pi_chord::delta::Op;
+use pi_chord::{Json, WatchChange};
 use pi_durable::documents::*;
-use pi_durable::session::{CommittedWatch, Session};
+use pi_durable::session::{DocumentWatch, Session};
 use support::*;
 
 pub static STATE_DOC: LazyLock<DocToken<Json, SessionScope>> = LazyLock::new(|| {
@@ -42,7 +43,7 @@ pub async fn retire_state(session: &Session) {
     session.commit(|tx| async move { tx.retire_doc(&STATE_DOC, ()).await }, &context()).await.unwrap();
 }
 
-pub async fn watch_state(session: &Session) -> CommittedWatch {
+pub async fn watch_state(session: &Session) -> DocumentWatch {
     session.watch_doc(&STATE_DOC, (), &context()).await.unwrap().unwrap()
 }
 
@@ -51,17 +52,36 @@ pub fn value_of(value: &Json) -> i64 {
     value.get("value").and_then(Json::as_i64).unwrap_or(-1)
 }
 
+pub fn ops(text: &str) -> Vec<Op> {
+    pi_chord::delta::parse_ops(&json(text)).unwrap()
+}
+
 pub type Frames = Arc<Mutex<Vec<(Json, Vec<Op>)>>>;
 
 /// Start `watch` with a listener that records every frame.
-pub fn record(watch: &CommittedWatch) -> Frames {
+pub fn record(watch: &DocumentWatch) -> Frames {
     let frames: Frames = Arc::default();
     let sink = frames.clone();
     watch
-        .start(move |value, ops, _| {
+        .start(move |pi_chord::WatchChange { value, ops, .. }, _| {
             sink.lock().unwrap().push((value, ops));
             async { Ok(()) }
         })
         .unwrap();
     frames
+}
+
+pub type Changes = Arc<Mutex<Vec<WatchChange>>>;
+
+/// Start `watch` with a listener that records every change as it came.
+pub fn record_changes(watch: &DocumentWatch) -> Changes {
+    let changes: Changes = Arc::default();
+    let sink = changes.clone();
+    watch
+        .start(move |change, _| {
+            sink.lock().unwrap().push(change);
+            async { Ok(()) }
+        })
+        .unwrap();
+    changes
 }

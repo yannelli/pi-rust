@@ -176,6 +176,33 @@ fn partial_message(text: &str) -> Value {
 }
 
 #[tokio::test]
+async fn delivers_each_of_100_pending_batches_in_its_own_call_in_order_unlike_state_watches() {
+    let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &chat_setup(Default::default())).await;
+    let stream = watch_events(&harness, root.id, &ctx()).await.unwrap();
+    for index in 0..100 {
+        let id = root.id;
+        let draft = EntryDraft { data: Some(Json::from(json!({ "index": index }))), ..EntryDraft::new("note") };
+        let note = move |tx: Tx| async move { tx.append_entry(id, draft).await.map(|_| ()) };
+        root.commit(note, &ctx()).await.unwrap();
+    }
+    let batches = super::Batches::default();
+    let sink = batches.clone();
+    stream
+        .start(move |pi_chord::NativeWatchChange { value: events }, _| {
+            sink.lock().unwrap().push(events.iter().map(Value::from).collect());
+            async { Ok(()) }
+        })
+        .unwrap();
+    drained().await;
+    let batches = batches.lock().unwrap().clone();
+    let data: Vec<Vec<Value>> =
+        batches.iter().map(|events| events.iter().map(|event| event["entry"]["data"].clone()).collect()).collect();
+    assert_eq!(data, (0..100).map(|index| vec![json!({ "index": index })]).collect::<Vec<_>>());
+    stream.stop().await;
+    harness.close(&ctx()).await.unwrap();
+}
+
+#[tokio::test]
 async fn replaces_undelivered_batches_with_one_snapshot_after_100_pending_batches() {
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &chat_setup(Default::default())).await;
     let stream = watch_events(&harness, root.id, &ctx()).await.unwrap();
@@ -185,7 +212,7 @@ async fn replaces_undelivered_batches_with_one_snapshot_after_100_pending_batche
     let batches = super::Batches::default();
     let sink = batches.clone();
     stream
-        .start(move |events, _| {
+        .start(move |pi_chord::NativeWatchChange { value: events }, _| {
             sink.lock().unwrap().push(events.iter().map(Value::from).collect());
             async { Ok(()) }
         })
@@ -213,7 +240,7 @@ async fn applies_deltas_after_an_overflow_snapshot_that_holds_an_in_flight_parti
     let batches = super::Batches::default();
     let sink = batches.clone();
     stream
-        .start(move |events, _| {
+        .start(move |pi_chord::NativeWatchChange { value: events }, _| {
             sink.lock().unwrap().push(events.iter().map(Value::from).collect());
             async { Ok(()) }
         })
@@ -295,7 +322,7 @@ async fn ends_the_stream_with_the_harness() {
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &chat_setup(Default::default())).await;
     let stream = watch_events(&harness, root.id, &ctx()).await.unwrap();
     harness.close(&ctx()).await.unwrap();
-    assert!(matches!(stream.closed().await, WatchEnd::SessionClosed));
+    assert!(matches!(stream.closed().await, WatchEnd::Ended));
 }
 
 #[tokio::test]

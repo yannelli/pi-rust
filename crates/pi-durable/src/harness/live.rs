@@ -13,7 +13,7 @@ use crate::documents::{DocSpec, DocToken, LatestConversation, LatestFork, define
 use crate::errors::DurableResult;
 use crate::ids::{EntryId, SubmissionId, TaskId};
 use crate::session::{Draft, Tx};
-use crate::types::{SubmissionSettlement, TaskOutcome, TaskRecord};
+use crate::types::{CommitOptions, SubmissionSettlement, TaskOutcome, TaskRecord};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -196,6 +196,11 @@ fn running(slots: Option<&Json>) -> bool {
 }
 
 /// A complete base whenever nothing runs: no generation and no running slot (spec section 8.2).
+/// How the progress throttles commit a partial answer and running tool output into `pi.live`: deferred, so storage gets
+/// them together, at the next commit that reads or writes `pi.live` or after `settings.progress.persist_within_ms`.
+/// Every commit that consumes or clears streamed fields reads `pi.live`, so it stores them with its own changes.
+pub const PROGRESS_COMMIT: CommitOptions = CommitOptions::DEFERRED;
+
 pub static LIVE_DOC: LazyLock<DocToken<LiveState, LatestConversation>> = LazyLock::new(|| {
     let spec =
         DocSpec::new("pi.live", 1, LatestConversation(LatestFork::Initial), LiveState::default, |value, _, _| {

@@ -267,3 +267,26 @@ fn survives_lifecycle_churn() {
     tracker.adopt(&prepared).unwrap();
     assert_eq!(tracker.value(), &json!({"value": 1}));
 }
+
+/// Upstream worker scenario `adopted-changes-flat`: a long run of small adopted changes keeps only the document.
+#[test]
+fn adopted_changes_keep_only_the_document() {
+    let mut tracker = track(json!({ "entries": [{ "id": 0, "text": "" }] }));
+    let commit = |tracker: &mut pi_chord::delta::Tracker| {
+        let mut change = tracker.begin_change();
+        let entry = change.state().unwrap().pointer_mut(&path!["entries", 0]).unwrap();
+        let text = format!("{} tok", entry["text"].as_str().unwrap());
+        entry.set("text", text).unwrap();
+        let prepared = change.prepare().unwrap();
+        tracker.adopt(&prepared).unwrap();
+    };
+    for _ in 0..1_000 {
+        commit(&mut tracker);
+    }
+    let early = Watch::new(&tracker.value()["entries"]);
+    for _ in 0..10_000 {
+        commit(&mut tracker);
+    }
+    assert!(!early.alive());
+    assert_eq!(tracker.value()["entries"][0]["text"].as_str().unwrap().len(), 4 * 11_000);
+}

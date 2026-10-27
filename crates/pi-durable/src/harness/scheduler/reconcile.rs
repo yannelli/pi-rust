@@ -19,7 +19,8 @@ impl Scheduler {
     pub(crate) fn schedule_reconcile(&self) {
         {
             let mut state = lock(&self.state);
-            if state.reconcile_scheduled || state.closing {
+            // A read-only reconcile could only fail: what it writes is refused.
+            if state.reconcile_scheduled || state.closing || self.core.read_only {
                 return;
             }
             state.reconcile_scheduled = true;
@@ -268,7 +269,7 @@ impl Scheduler {
     pub(crate) fn schedule_wake(&self) {
         {
             let mut state = lock(&self.state);
-            if state.wake_scheduled || state.closing {
+            if state.wake_scheduled || state.closing || self.core.read_only {
                 return;
             }
             state.wake_scheduled = true;

@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use super::{EnvConformanceOptions, Watching, context, shell_argv};
-use crate::env::{RemoveOptions, SharedEnv, WatchChange, WatchExclude, WatchMode, WatchTarget};
+use crate::env::{FileChange, RemoveOptions, SharedEnv, WatchExclude, WatchMode, WatchTarget};
 
 fn target(path: &str, recursive: bool) -> WatchTarget {
     WatchTarget { path: path.into(), recursive, exclude: None }
@@ -84,7 +84,7 @@ pub async fn watch_skips_excluded_entries_and_reports_a_rename_out_of_them(
     watching.expect_change("skills/SKILL.md", rename(&env, "skills/.SKILL.md.tmp", "skills/SKILL.md")).await;
     let hidden = [watching.absolute("skills/node_modules").await, watching.absolute("skills/.SKILL.md.tmp").await];
     for change in watching.recorded() {
-        let WatchChange::Paths(paths) = change else { continue };
+        let FileChange::Paths(paths) = change else { continue };
         for path in paths {
             assert!(!hidden.iter().any(|excluded| path.starts_with(excluded.as_str())), "excluded {path}");
         }

@@ -22,10 +22,10 @@ async fn never_reclaims_rewindable_document_history() {
         history: Some(DocumentHistory::Rewindable),
         fork: Some(DocumentFork::AsOf),
     };
-    let created_at = storage.commit(&[create(record, r#"{"count":0}"#)], ctx()).await.unwrap();
-    let changed_at = storage.commit(&[delta(id, r#"[["s",["count"],1]]"#)], ctx()).await.unwrap();
-    storage.commit(&[base(id, r#"{"count":2}"#)], ctx()).await.unwrap();
-    storage.commit(&[StorageWrite::DocumentRetire { id }], ctx()).await.unwrap();
+    let created_at = storage.commit(&[create(record, r#"{"count":0}"#)], &|_| {}, ctx()).await.unwrap();
+    let changed_at = storage.commit(&[delta(id, r#"[["s",["count"],1]]"#)], &|_| {}, ctx()).await.unwrap();
+    storage.commit(&[base(id, r#"{"count":2}"#)], &|_| {}, ctx()).await.unwrap();
+    storage.commit(&[StorageWrite::DocumentRetire { id }], &|_| {}, ctx()).await.unwrap();
     let path = file(&directory, &format!("doc-{id}.jsonl"));
     assert_eq!(read_lines(&path).len(), 3);
     let reopened = &open(&directory).await;
@@ -67,14 +67,14 @@ async fn reclaims_retired_task_session_and_latest_conversation_sidecars() {
         create(latest, "{}"),
         create(task_document, "{}"),
     ];
-    let created_at = storage.commit(&writes, ctx()).await.unwrap();
+    let created_at = storage.commit(&writes, &|_| {}, ctx()).await.unwrap();
     let writes = [
         StorageWrite::DocumentRetire { id: session_id },
         StorageWrite::DocumentRetire { id: latest_id },
         StorageWrite::DocumentRetire { id: task_document_id },
         task(terminal_task(task_id)),
     ];
-    let retired_at = storage.commit(&writes, ctx()).await.unwrap();
+    let retired_at = storage.commit(&writes, &|_| {}, ctx()).await.unwrap();
     for name in [
         format!("doc-{session_id}.jsonl"),
         format!("doc-{latest_id}.jsonl"),
@@ -102,7 +102,7 @@ async fn truncates_torn_utf8_tails_at_exact_byte_offsets_and_reuses_the_sequence
     create_root(&storage).await;
     let document_id: DocumentId = mint(&storage).await;
     storage
-        .commit(&[create(session_document(document_id, "test.document"), r#"{"text":"kept"}"#)], ctx())
+        .commit(&[create(session_document(document_id, "test.document"), r#"{"text":"kept"}"#)], &|_| {}, ctx())
         .await
         .unwrap();
     let sidecar = file(&directory, &format!("doc-{document_id}.jsonl"));
@@ -116,7 +116,7 @@ async fn truncates_torn_utf8_tails_at_exact_byte_offsets_and_reuses_the_sequence
     let reopened = open(&directory).await;
     assert_eq!(std::fs::metadata(&sidecar).unwrap().len(), sidecar_size);
     assert_eq!(std::fs::metadata(&main).unwrap().len(), main_size);
-    assert_eq!(reopened.commit(&[delta(document_id, "[]")], ctx()).await.unwrap(), Seq(3));
+    assert_eq!(reopened.commit(&[delta(document_id, "[]")], &|_| {}, ctx()).await.unwrap(), Seq(3));
 }
 
 #[tokio::test]
@@ -125,8 +125,8 @@ async fn removes_complete_unconfirmed_sidecar_tails_without_resurrecting_termina
     let storage = open(&directory).await;
     create_root(&storage).await;
     let task_id: TaskId = mint(&storage).await;
-    storage.commit(&[task(pending_task(task_id, "ready"))], ctx()).await.unwrap();
-    storage.commit(&[task(terminal_task(task_id))], ctx()).await.unwrap();
+    storage.commit(&[task(pending_task(task_id, "ready"))], &|_| {}, ctx()).await.unwrap();
+    storage.commit(&[task(terminal_task(task_id))], &|_| {}, ctx()).await.unwrap();
     let sidecar = file(&directory, &format!("task-{task_id}.jsonl"));
     assert!(!exists(&sidecar));
     let stale = pi_chord::copy_json(&pending_task(task_id, "stale"), Default::default()).unwrap();
@@ -137,7 +137,7 @@ async fn removes_complete_unconfirmed_sidecar_tails_without_resurrecting_termina
     let reopened = open(&directory).await;
     assert!(!exists(&sidecar));
     assert_eq!(reopened.task(task_id, ctx()).await.unwrap(), Some(terminal_task(task_id)));
-    assert_eq!(reopened.commit(&[], ctx()).await.unwrap(), Seq(4));
+    assert_eq!(reopened.commit(&[], &|_| {}, ctx()).await.unwrap(), Seq(4));
 }
 
 #[tokio::test]
@@ -146,7 +146,7 @@ async fn fails_open_when_confirmed_sidecar_data_is_missing() {
     let storage = open(&directory).await;
     create_root(&storage).await;
     let document_id: DocumentId = mint(&storage).await;
-    storage.commit(&[create(session_document(document_id, "test.document"), "{}")], ctx()).await.unwrap();
+    storage.commit(&[create(session_document(document_id, "test.document"), "{}")], &|_| {}, ctx()).await.unwrap();
     std::fs::write(file(&directory, &format!("doc-{document_id}.jsonl")), "").unwrap();
     assert!(open_err(&directory).await.contains("Missing confirmed sidecar record"));
 }
@@ -157,8 +157,11 @@ async fn rejects_a_confirmed_record_after_an_unconfirmed_sidecar_record() {
     let storage = open(&directory).await;
     create_root(&storage).await;
     let document_id: DocumentId = mint(&storage).await;
-    storage.commit(&[create(session_document(document_id, "test.document"), r#"{"count":0}"#)], ctx()).await.unwrap();
-    storage.commit(&[delta(document_id, r#"[["s",["count"],1]]"#)], ctx()).await.unwrap();
+    storage
+        .commit(&[create(session_document(document_id, "test.document"), r#"{"count":0}"#)], &|_| {}, ctx())
+        .await
+        .unwrap();
+    storage.commit(&[delta(document_id, r#"[["s",["count"],1]]"#)], &|_| {}, ctx()).await.unwrap();
     let path = file(&directory, &format!("doc-{document_id}.jsonl"));
     let lines = read_lines(&path);
     let unconfirmed = format!(
@@ -184,7 +187,7 @@ async fn rejects_structurally_invalid_confirmed_document_content() {
     let storage = open(&directory).await;
     create_root(&storage).await;
     let document_id: DocumentId = mint(&storage).await;
-    storage.commit(&[create(session_document(document_id, "test.document"), "{}")], ctx()).await.unwrap();
+    storage.commit(&[create(session_document(document_id, "test.document"), "{}")], &|_| {}, ctx()).await.unwrap();
     let path = file(&directory, &format!("doc-{document_id}.jsonl"));
     let mut record = json(std::fs::read_to_string(&path).unwrap().trim());
     record.get_mut("payload").unwrap().get_mut("content").unwrap().remove("value");

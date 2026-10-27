@@ -51,7 +51,7 @@ pub async fn indexes_addresses_and_scopes(storage: Arc<dyn Storage>) {
         create(&document(task_family, "task.cache", Some("member"), task), 1, json(r#"{"owner":"family"}"#)),
         create(&document(task_other_kind, "task.other", None, task), 1, json(r#"{"owner":"other"}"#)),
     ];
-    let created_at = storage.commit(&writes, ctx).await.unwrap();
+    let created_at = storage.commit(&writes, &|_| {}, ctx).await.unwrap();
 
     let current = DocumentPoint::Current;
     assert_eq!(find(storage, &address("cache", Some("__proto__"), session), current).await, Some(first_id));
@@ -80,12 +80,12 @@ pub async fn keeps_document_lifecycle_atomic(storage: Arc<dyn Storage>) {
     let first_id: DocumentId = mint(storage).await;
     let second_id: DocumentId = mint(storage).await;
     let record = document(first_id, "singleton", None, DocumentScope::Session);
-    storage.commit(&[create(&record, 1, json(r#"{"value":1}"#))], ctx).await.unwrap();
+    storage.commit(&[create(&record, 1, json(r#"{"value":1}"#))], &|_| {}, ctx).await.unwrap();
     let writes = [
         create(&DocumentCreate { id: second_id, ..record.clone() }, 1, json(r#"{"value":2}"#)),
         change_delta(first_id, 1, Vec::new()),
     ];
-    expect_err(storage.commit(&writes, ctx).await, "already has a current incarnation");
+    expect_err(storage.commit(&writes, &|_| {}, ctx).await, "already has a current incarnation");
     assert_eq!(value(storage, first_id, DocumentPoint::Current).await, Some(json(r#"{"value":1}"#)));
     assert_eq!(read(storage, second_id, DocumentPoint::Current).await, None);
 
@@ -97,7 +97,7 @@ pub async fn keeps_document_lifecycle_atomic(storage: Arc<dyn Storage>) {
         ..document(empty_id, &record.kind, Some("empty"), conversation)
     };
     let writes = [create(&empty, 1, json("{}")), StorageWrite::DocumentRetire { id: empty_id }];
-    let empty_at = storage.commit(&writes, ctx).await.unwrap();
+    let empty_at = storage.commit(&writes, &|_| {}, ctx).await.unwrap();
     assert_eq!(read(storage, empty_id, DocumentPoint::Current).await, None);
     assert_eq!(read(storage, empty_id, DocumentPoint::At(empty_at)).await, None);
     let empty_address = address(&record.kind, Some("empty"), conversation);
@@ -122,7 +122,7 @@ pub async fn rolls_back_tables_on_document_failure(storage: Arc<dyn Storage>) {
         StorageWrite::Submission { value: queued.clone() },
         create(&record, 1, json(r#"{"count":1}"#)),
     ];
-    let baseline_seq = storage.commit(&writes, ctx).await.unwrap();
+    let baseline_seq = storage.commit(&writes, &|_| {}, ctx).await.unwrap();
 
     let entry_id: EntryId = mint(storage).await;
     let conflicting_id: DocumentId = mint(storage).await;
@@ -136,7 +136,7 @@ pub async fn rolls_back_tables_on_document_failure(storage: Arc<dyn Storage>) {
         StorageWrite::Entry { value: entry(entry_id, root_id, "transient") },
         create(&DocumentCreate { id: conflicting_id, ..record.clone() }, 1, json(r#"{"count":2}"#)),
     ];
-    expect_err(storage.commit(&writes, ctx).await, "already has a current incarnation");
+    expect_err(storage.commit(&writes, &|_| {}, ctx).await, "already has a current incarnation");
 
     assert_eq!(storage.task(task_id, ctx).await.unwrap(), Some(task.clone()));
     let pending = TaskQuery { status: Some(crate::types::TaskStatus::Pending), ..Default::default() };
@@ -146,7 +146,8 @@ pub async fn rolls_back_tables_on_document_failure(storage: Arc<dyn Storage>) {
     assert_eq!(read(storage, conflicting_id, DocumentPoint::Current).await, None);
     let atomic_address = address("atomic", None, DocumentScope::Session);
     assert_eq!(find(storage, &atomic_address, DocumentPoint::Current).await, Some(document_id));
-    let after = storage.commit(&[change_delta(document_id, 1, ops(r#"[["s",["count"],3]]"#))], ctx).await.unwrap();
+    let after =
+        storage.commit(&[change_delta(document_id, 1, ops(r#"[["s",["count"],3]]"#))], &|_| {}, ctx).await.unwrap();
     assert!(after > baseline_seq);
 }
 
@@ -187,7 +188,7 @@ pub async fn keeps_string_identities_lossless(storage: Arc<dyn Storage>) {
                 json(r#"{"identity":"second key"}"#),
             ),
         ];
-        storage.commit(&writes, ctx).await.unwrap();
+        storage.commit(&writes, &|_| {}, ctx).await.unwrap();
 
         let by_kind = |kind: &str| TaskQuery { kind: Some(kind.into()), ..Default::default() };
         let page = storage.scan_tasks(&by_kind(first), 10, None, ctx).await.unwrap();

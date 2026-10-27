@@ -18,9 +18,9 @@ use super::scan::{MAX_SAFE_INTEGER, cursor_id, next_cursor, scan_start};
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{ConversationId, DocumentId, EntryId, Seq, SubmissionId, TaskId};
 use crate::types::{
-    ConversationQuery, ConversationRecord, Cursor, DocumentAddress, DocumentPoint, DocumentQuery, DocumentRecord,
-    EntryQuery, EntryRecord, Page, ScanOrder, Storage, StorageWrite, StoredDocument, StoredEntry, SubmissionQuery,
-    SubmissionRecord, TaskQuery, TaskRecord,
+    Adopt, ConversationQuery, ConversationRecord, Cursor, DocumentAddress, DocumentPoint, DocumentQuery,
+    DocumentRecord, EntryQuery, EntryRecord, Page, ScanOrder, Storage, StorageWrite, StoredDocument, StoredEntry,
+    SubmissionQuery, SubmissionRecord, TaskQuery, TaskRecord,
 };
 use state::{State, scan_indexes, upper_bound};
 
@@ -116,9 +116,11 @@ impl MemoryStorage {
 
 #[async_trait]
 impl Storage for MemoryStorage {
-    async fn commit(&self, writes: &[StorageWrite], _context: &Context) -> DurableResult<Seq> {
+    async fn commit(&self, writes: &[StorageWrite], adopt: Adopt<'_>, _context: &Context) -> DurableResult<Seq> {
         let prepared = self.prepare_commit(writes, None)?;
-        Ok(self.apply(&prepared))
+        let seq = self.apply(&prepared);
+        adopt(seq);
+        Ok(seq)
     }
 
     async fn mint_id(&self) -> DurableResult<u64> {

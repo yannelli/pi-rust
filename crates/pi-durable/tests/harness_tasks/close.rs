@@ -150,7 +150,7 @@ async fn seals_admission_before_signalling_handlers_and_stops_watches_before_joi
     let from_listener = from_listener.lock().unwrap().take().unwrap();
     let error = from_listener.await.unwrap().unwrap_err();
     assert!(error.to_string().contains("closed"), "{error}");
-    assert!(matches!(watch_end.lock().unwrap().clone(), Some(WatchEnd::SessionClosed)));
+    assert!(matches!(watch_end.lock().unwrap().clone(), Some(WatchEnd::Ended)));
 }
 
 #[tokio::test]

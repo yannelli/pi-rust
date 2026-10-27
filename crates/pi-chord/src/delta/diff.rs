@@ -1,5 +1,6 @@
 //! Compact operation batches computed from two immutable JSON revisions.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::diff_array::diff_array;
@@ -16,6 +17,17 @@ pub(crate) struct Emitter {
     pub overflowed: bool,
     /// Reproduce the draft's property order too, as the upstream tracker's recorded ops do.
     pub preserve_order: bool,
+    /// String members a change appended to with `append_text()`, by path.
+    pub appends: HashMap<Path, AppendHint>,
+}
+
+/// What `append_text()` appended to one string member: it holds while the base and draft strings are the very ones
+/// it saw, so the batch records `text` without comparing the two strings.
+#[derive(Clone)]
+pub(crate) struct AppendHint {
+    pub base: Arc<str>,
+    pub after: Arc<str>,
+    pub text: Arc<str>,
 }
 
 impl Emitter {
@@ -128,7 +140,16 @@ pub(crate) fn diff_value(before: &Json, after: &Json, path: &[Seg], out: &mut Em
         return;
     }
     match (before, after) {
-        (Json::String(left), Json::String(right)) if !path.is_empty() => emit_string(left, right, path, out),
+        (Json::String(left), Json::String(right)) if !path.is_empty() => {
+            match out.appends.get(path).filter(|hint| Arc::ptr_eq(&hint.base, left) && Arc::ptr_eq(&hint.after, right))
+            {
+                Some(hint) => {
+                    let text = hint.text.clone();
+                    out.emit(Op::Append(path.to_vec(), text));
+                }
+                None => emit_string(left, right, path, out),
+            }
+        }
         (Json::Array(left), Json::Array(right)) => diff_array(left, right, path, out),
         (Json::Object(left), Json::Object(right)) => diff_object(left, right, path, out, after),
         _ => out.emit_set(path, after),
@@ -207,16 +228,16 @@ fn operation_cost(op: &Op) -> usize {
 
 /// Draft batches: like the tracker, they fold to a root replacement only past the operation limit.
 pub(crate) fn diff_draft(before: &Json, after: &Json) -> Vec<Op> {
-    diff_with(before, after, false)
+    diff_with(before, after, false, HashMap::new())
 }
 
-/// The tracker's batch: like [`diff_draft`], keeping the draft's property order.
-pub(crate) fn diff_draft_ordered(before: &Json, after: &Json) -> Vec<Op> {
-    diff_with(before, after, true)
+/// The tracker's batch: like [`diff_draft`], keeping the draft's property order, with the change's appends.
+pub(crate) fn diff_draft_ordered(before: &Json, after: &Json, appends: HashMap<Path, AppendHint>) -> Vec<Op> {
+    diff_with(before, after, true, appends)
 }
 
-fn diff_with(before: &Json, after: &Json, preserve_order: bool) -> Vec<Op> {
-    let mut out = Emitter { preserve_order, ..Emitter::default() };
+fn diff_with(before: &Json, after: &Json, preserve_order: bool, appends: HashMap<Path, AppendHint>) -> Vec<Op> {
+    let mut out = Emitter { preserve_order, appends, ..Emitter::default() };
     diff_value(before, after, &[], &mut out);
     if out.overflowed { vec![Op::Replace(after.clone())] } else { out.ops }
 }

@@ -350,7 +350,7 @@ async fn observe_job(
     log.lock().unwrap().push(json!([value.get("stdout").map_or(json!("retired"), Json::to_serde)]));
     let rendered = rendered.clone();
     watch
-        .start(move |value, _ops, _| {
+        .start(move |pi_chord::WatchChange { value, ops: _ops, .. }, _| {
             let text = value.get("stdout").map_or(json!("retired"), Json::to_serde);
             rendered.lock().unwrap().push(text);
             async { Ok(()) }

@@ -47,7 +47,7 @@ pub async fn indexes_entries_out_of_id_order(storage: Arc<dyn Storage>) {
         entry_write(EntryId(10), root_id),
         marker(EntryId(20), root_id, EntryId(10)),
     ];
-    storage.commit(&writes, context()).await.unwrap();
+    storage.commit(&writes, &|_| {}, context()).await.unwrap();
     assert_eq!(entry_ids(storage, &EntryQuery::new(root_id), 10, None).await.0, [30, 20, 10]);
     let found = storage.find_latest_head_marker(root_id, None, context()).await.unwrap();
     assert_eq!(found.map(|entry| entry.id), Some(EntryId(20)));
@@ -60,11 +60,11 @@ pub async fn continues_entry_cursor_after_newer_commit(storage: Arc<dyn Storage>
     let middle: EntryId = mint(storage).await;
     let newest: EntryId = mint(storage).await;
     let writes = [entry_write(oldest, root_id), entry_write(middle, root_id), entry_write(newest, root_id)];
-    storage.commit(&writes, context()).await.unwrap();
+    storage.commit(&writes, &|_| {}, context()).await.unwrap();
     let (first, next) = entry_ids(storage, &EntryQuery::new(root_id), 2, None).await;
     assert_eq!(first, [newest.0, middle.0]);
     let appended: EntryId = mint(storage).await;
-    storage.commit(&[entry_write(appended, root_id)], context()).await.unwrap();
+    storage.commit(&[entry_write(appended, root_id)], &|_| {}, context()).await.unwrap();
     let (second, next) = entry_ids(storage, &EntryQuery::new(root_id), 2, next.as_ref()).await;
     assert_eq!(second, [oldest.0]);
     assert_eq!(next, None);
@@ -75,7 +75,7 @@ pub async fn paginates_conversations_by_cursor(storage: Arc<dyn Storage>) {
     let root_id = create_root(storage).await;
     let second_id: ConversationId = mint(storage).await;
     let third_id: ConversationId = mint(storage).await;
-    storage.commit(&[conversation(third_id), conversation(second_id)], context()).await.unwrap();
+    storage.commit(&[conversation(third_id), conversation(second_id)], &|_| {}, context()).await.unwrap();
     let query = ConversationQuery::default();
     let first = storage.scan_conversations(&query, 2, None, context()).await.unwrap();
     assert_eq!(ids(&first.items, |record| record.id.0), [root_id.0, second_id.0]);
@@ -103,7 +103,7 @@ pub async fn filters_conversations_by_owner(storage: Arc<dyn Storage>) {
         owned(second_id, root_id, second_task),
         owned(third_id, other_owner_id, first_task),
     ];
-    storage.commit(&writes, context()).await.unwrap();
+    storage.commit(&writes, &|_| {}, context()).await.unwrap();
 
     let by_root = ConversationQuery { owner_conversation_id: Some(root_id), ..Default::default() };
     let first = storage.scan_conversations(&by_root, 1, None, context()).await.unwrap();
@@ -132,26 +132,26 @@ pub async fn scans_deep_fork_history(storage: Arc<dyn Storage>) {
         marker(root_fork_point, root_id, root_first),
         entry_write(root_excluded_same_commit, root_id),
     ];
-    let root_entries_seq = storage.commit(&writes, ctx).await.unwrap();
+    let root_entries_seq = storage.commit(&writes, &|_| {}, ctx).await.unwrap();
     let child_id: ConversationId = mint(storage).await;
     let fork = |id, conversation_id, at| StorageWrite::Conversation {
         value: ConversationRecord { id, parent: Some(ConversationParent { conversation_id, at }), owner: None },
     };
-    storage.commit(&[fork(child_id, root_id, root_fork_point)], ctx).await.unwrap();
+    storage.commit(&[fork(child_id, root_id, root_fork_point)], &|_| {}, ctx).await.unwrap();
     let child_fork_point: EntryId = mint(storage).await;
     let child_excluded: EntryId = mint(storage).await;
     let note = StorageWrite::Entry { value: entry(child_fork_point, child_id, "note") };
-    storage.commit(&[note, entry_write(child_excluded, child_id)], ctx).await.unwrap();
+    storage.commit(&[note, entry_write(child_excluded, child_id)], &|_| {}, ctx).await.unwrap();
     let root_excluded_later: EntryId = mint(storage).await;
-    storage.commit(&[entry_write(root_excluded_later, root_id)], ctx).await.unwrap();
+    storage.commit(&[entry_write(root_excluded_later, root_id)], &|_| {}, ctx).await.unwrap();
     let grandchild_id: ConversationId = mint(storage).await;
-    storage.commit(&[fork(grandchild_id, child_id, child_fork_point)], ctx).await.unwrap();
+    storage.commit(&[fork(grandchild_id, child_id, child_fork_point)], &|_| {}, ctx).await.unwrap();
     let grandchild_head: EntryId = mint(storage).await;
     let grandchild_tail: EntryId = mint(storage).await;
     let writes = [marker(grandchild_head, grandchild_id, grandchild_head), entry_write(grandchild_tail, grandchild_id)];
-    let grandchild_entries_seq = storage.commit(&writes, ctx).await.unwrap();
+    let grandchild_entries_seq = storage.commit(&writes, &|_| {}, ctx).await.unwrap();
     let child_excluded_later: EntryId = mint(storage).await;
-    storage.commit(&[entry_write(child_excluded_later, child_id)], ctx).await.unwrap();
+    storage.commit(&[entry_write(child_excluded_later, child_id)], &|_| {}, ctx).await.unwrap();
 
     let all = EntryQuery::new(grandchild_id);
     let (first, next) = entry_ids(storage, &all, 2, None).await;
@@ -260,7 +260,7 @@ pub async fn scans_tables_in_either_order(storage: Arc<dyn Storage>) {
             StorageWrite::Task { value: pending_task(task_id, root_id, "ready") },
             StorageWrite::Submission { value: submission(submission_id, root_id, SubmissionStatus::Queued) },
         ];
-        storage.commit(&writes, context()).await.unwrap();
+        storage.commit(&writes, &|_| {}, context()).await.unwrap();
         expected[0].push(conversation_id.0);
         expected[1].push(task_id.0);
         expected[2].push(submission_id.0);

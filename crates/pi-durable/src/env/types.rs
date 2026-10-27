@@ -254,7 +254,7 @@ pub struct WatchTarget {
 
 /// What changed below the watched targets.
 #[derive(Clone, Debug)]
-pub enum WatchChange {
+pub enum FileChange {
     /// Something at or below each path may have changed. Calls may be spurious; none is missed while healthy.
     Paths(Vec<String>),
     /// Coverage was uncertain for a while (lost events, reconnect); rescan everything that is watched.
@@ -274,7 +274,7 @@ pub enum WatchMode {
 }
 
 /// Receives watch changes.
-pub type WatchListener = Arc<dyn Fn(WatchChange) + Send + Sync>;
+pub type WatchListener = Arc<dyn Fn(FileChange) + Send + Sync>;
 
 /// Options of `FileSystem::remove`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

@@ -133,7 +133,7 @@ async fn ends_everything_with_the_first_error_the_call_later_calls_waits_watches
     assert!(failed_by(&task.await.unwrap().unwrap_err(), "disk gone"));
     assert!(failed_by(&idle.await.unwrap().unwrap_err(), "disk gone"));
     for end in [watch.closed().await, stream.closed().await] {
-        assert!(matches!(&end, WatchEnd::SessionFailed(error) if error.to_string() == "disk gone"), "{end:?}");
+        assert!(matches!(&end, WatchEnd::Failed(error) if error.to_string() == "disk gone"), "{end:?}");
     }
     // Every later call, and a wait that starts now.
     assert!(failed_by(&harness.get_task(id, &context()).await.unwrap_err(), "disk gone"));
@@ -312,7 +312,7 @@ async fn ends_what_a_task_holds_with_session_failed_not_as_cancelled_by_its_sign
     opened.harness.closed().await;
     support::task_support::eventually(|| async { ends.lock().unwrap().len() == 2 }).await;
     let ends = ends.lock().unwrap().clone();
-    assert!(ends[0].starts_with("SessionFailed("), "{ends:?}");
+    assert!(ends[0].starts_with("Failed("), "{ends:?}");
     assert_eq!(ends[1], "SessionFailed");
     opened.harness.close(&context()).await.ok();
 }

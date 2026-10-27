@@ -21,7 +21,7 @@ use super::watch_scan::{
     reported, scan,
 };
 use crate::env::{
-    FileError, FileErrorCode, FileResult, FileWatcher, WatchChange, WatchListener, WatchMode, WatchTarget,
+    FileChange, FileError, FileErrorCode, FileResult, FileWatcher, WatchListener, WatchMode, WatchTarget,
 };
 
 const DEBOUNCE: Duration = Duration::from_millis(50);
@@ -33,7 +33,11 @@ const DEFAULT_MAX_DIRECTORIES: usize = 10_000;
 const MAX_SYNC_ROUNDS: usize = 10;
 
 enum Message {
-    Event(Vec<PathBuf>),
+    /// Native event paths; `removed` when the event removed them, which drops the backend's watch on each.
+    Event {
+        paths: Vec<PathBuf>,
+        removed: bool,
+    },
     Rescan,
     Close,
 }
@@ -46,7 +50,7 @@ struct Shared {
 }
 
 impl Shared {
-    fn deliver(&self, change: WatchChange) {
+    fn deliver(&self, change: FileChange) {
         let closed = self.closed.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if *closed {
             return;
@@ -221,7 +225,10 @@ impl Core {
                 let messages = self.messages.clone();
                 let handler = move |event: notify::Result<notify::Event>| {
                     let message = match event {
-                        Ok(event) if !event.need_rescan() => Message::Event(event.paths),
+                        Ok(event) if !event.need_rescan() => {
+                            let removed = matches!(event.kind, notify::EventKind::Remove(_));
+                            Message::Event { paths: event.paths, removed }
+                        }
                         _ => Message::Rescan,
                     };
                     let _ = messages.send(message);
@@ -265,22 +272,36 @@ impl Core {
         *self.shared.mode.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = WatchMode::Polling;
         self.watcher = None;
         self.installed.clear();
-        self.shared.deliver(WatchChange::Overflow);
+        self.shared.deliver(FileChange::Overflow);
         self.flush_at = None;
         self.poll_at = Some(Instant::now() + self.poll_interval);
     }
 
-    fn on_event(&mut self, paths: Vec<PathBuf>) {
+    fn on_event(&mut self, paths: Vec<PathBuf>, removed: bool) {
         if paths.is_empty() {
             self.schedule_flush();
         }
         for path in paths {
             let path = self.given_spelling(path.to_string_lossy().into_owned());
+            // The backend dropped the watch of a watched path that was removed (inotify's IN_DELETE_SELF, then
+            // IN_IGNORED). Forget it, so the rescan watches the path again even when its inode is the same.
+            if removed {
+                self.forget_watch(&path);
+            }
             // Events about unrelated siblings of an ancestor, or about excluded entries, are ignored.
             if in_scope(&path, &self.targets) {
                 self.events.insert(reported(&path, &self.targets));
                 self.schedule_flush();
             }
+        }
+    }
+
+    /// Forget the watch of `path`, if it has one, and remove it from the backend in case the backend kept it.
+    fn forget_watch(&mut self, path: &str) {
+        if self.installed.remove(path).is_some()
+            && let Some(watcher) = self.watcher.as_mut()
+        {
+            let _ = watcher.unwatch(Path::new(path));
         }
     }
 
@@ -305,11 +326,11 @@ impl Core {
             Ok(mut changed) => {
                 changed.extend(events);
                 if !changed.is_empty() {
-                    self.shared.deliver(WatchChange::Paths(changed.into_iter().collect()));
+                    self.shared.deliver(FileChange::Paths(changed.into_iter().collect()));
                 }
             }
             Err(error) => {
-                self.shared.deliver(WatchChange::Error(scan_error(error)));
+                self.shared.deliver(FileChange::Error(scan_error(error)));
                 self.shared.close();
                 self.stopped = true;
             }
@@ -322,7 +343,7 @@ impl Core {
             tokio::select! {
                 message = messages.recv() => match message {
                     None | Some(Message::Close) => break,
-                    Some(Message::Event(paths)) => self.on_event(paths),
+                    Some(Message::Event { paths, removed }) => self.on_event(paths, removed),
                     Some(Message::Rescan) => self.schedule_flush(),
                 },
                 () = tokio::time::sleep_until(next.unwrap_or_else(Instant::now)), if next.is_some() => {
@@ -419,3 +440,7 @@ impl Drop for LocalFileWatcher {
         let _ = self.messages.send(Message::Close);
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "watch_tests.rs"]
+mod tests;

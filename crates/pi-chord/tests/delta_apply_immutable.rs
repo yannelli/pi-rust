@@ -227,3 +227,22 @@ fn allows_one_immutable_batch_to_fan_out_without_mutating_shared_payloads() {
     assert!(!first.get("placed").unwrap().same_ref(second.get("placed").unwrap()));
     assert_eq!(payload.pointer(&path!["nested", "value"]), Some(&json!(1)));
 }
+
+#[test]
+fn immutable_container_copies_keep_an_own_proto_member_as_data() {
+    let base = Json::parse(r#"{"__proto__":{"polluted":true},"n":1}"#).unwrap();
+    let checked = apply_immutable(Some(&base), &ops(json!([["s", ["n"], 2]]))).unwrap();
+    // Tracker revisions copy through the trusted path.
+    let mut tracker = track(base.clone());
+    let mut change = tracker.begin_change();
+    change.state().unwrap().set("n", 2).unwrap();
+    let prepared = change.prepare().unwrap();
+    tracker.adopt(&prepared).unwrap();
+    for copy in [checked, tracker.value().clone()] {
+        assert!(!copy.same_ref(&base));
+        let keys: Vec<String> = copy.as_object().unwrap().keys().map(|key| key.to_string()).collect();
+        assert_eq!(keys, ["__proto__", "n"]);
+        assert_eq!(copy["n"], json!(2));
+        assert_eq!(copy["__proto__"], json!({ "polluted": true }));
+    }
+}

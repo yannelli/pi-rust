@@ -19,7 +19,7 @@ mod conformance {
 async fn does_not_expose_retained_state_through_a_prepared_commit() {
     let storage = MemoryStorage::new();
     let root = ConversationRecord { id: ROOT_CONVERSATION_ID, parent: None, owner: None };
-    storage.commit(&[StorageWrite::Conversation { value: root }], &BACKGROUND_CONTEXT).await.unwrap();
+    storage.commit(&[StorageWrite::Conversation { value: root }], &|_| {}, &BACKGROUND_CONTEXT).await.unwrap();
     let entry_id = EntryId(2);
     let mut data = Json::parse(r#"{"nested":[1]}"#).unwrap();
     let entry = EntryRecord {

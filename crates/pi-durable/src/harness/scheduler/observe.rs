@@ -2,13 +2,16 @@
 
 use super::{Mode, Node, Scheduler, cancellation_intent, failed_outcome};
 use crate::harness::util::{closed_error, lock};
-use crate::types::{
-    CommitChange, CommitPublication, JoinPolicy, SubmissionStatus, SubmissionType, TaskRecord, TaskState, TaskStatus,
-};
+use crate::session::ObservedCommit;
+use crate::types::{CommitChange, JoinPolicy, SubmissionStatus, SubmissionType, TaskRecord, TaskState, TaskStatus};
 
 impl Scheduler {
     /// The commit listener: keeps `live` in step with committed task records.
-    pub(super) fn observe(&self, publication: &CommitPublication) {
+    pub(super) fn observe(&self, publication: &ObservedCommit) {
+        // A commit held in memory changes documents only.
+        if publication.is_memory() {
+            return;
+        }
         let mut resolved = Vec::new();
         let mut signal = Vec::new();
         let mut reconcile = false;
@@ -18,14 +21,14 @@ impl Scheduler {
             let mut updated = Vec::new();
             let mut failed = Vec::new();
             // Edges first, so the tasks a commit creates in a new conversation hang from it.
-            for change in &publication.changes {
+            for change in publication.changes() {
                 if let CommitChange::Conversation(record) = change
                     && !state.edges.contains_key(&record.id)
                 {
                     state.set_edge(record.id, record.owner.map(|owner| owner.task_id));
                 }
             }
-            for change in &publication.changes {
+            for change in publication.changes() {
                 let CommitChange::Task(record) = change else { continue };
                 changed = true;
                 let previous = state.live.get(&record.id).cloned();
@@ -91,7 +94,7 @@ impl Scheduler {
                     }
                 }
             }
-            for change in &publication.changes {
+            for change in publication.changes() {
                 // A queued input below a cancelled owner is withdrawn, even after its cascade.
                 let CommitChange::Submission(record) = change else { continue };
                 if record.status != SubmissionStatus::Queued || record.kind != SubmissionType::Input {
@@ -123,8 +126,14 @@ impl Scheduler {
             let id = record.id;
             self.task_waiters.resolve(&id, record);
         }
-        for invocation in signal {
-            invocation.controller.abort(None);
+        // Abort listeners are task code, which never runs inside Storage's `adopt`: the signal follows in a task, after
+        // host commit listeners.
+        if !signal.is_empty() {
+            tokio::spawn(async move {
+                for invocation in signal {
+                    invocation.controller.abort(None);
+                }
+            });
         }
         if reconcile {
             self.schedule_reconcile();

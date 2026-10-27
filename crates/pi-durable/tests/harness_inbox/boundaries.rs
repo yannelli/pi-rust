@@ -142,11 +142,12 @@ pub fn control(control: ToolControl) -> ToolExecutionResult {
 }
 
 #[tokio::test]
-async fn ends_the_run_with_a_pi_reset_entry_when_a_tool_requests_a_handoff() {
+async fn ends_the_run_after_the_handoff_when_the_round_also_terminates() {
     let setup = setup();
     let gate = Deferred::default();
     gate.resolve();
-    hold_tool(&setup, gate, control(ToolControl { handoff: Some("continue here".into()), ..ToolControl::default() }));
+    let both = ToolControl { handoff: Some("continue here".into()), terminate: Some(true), ..ToolControl::default() };
+    hold_tool(&setup, gate, control(both));
     setup.faux.set_responses([hold_call()]);
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &setup).await;
     let settled = root.submit(SubmissionDraft::input("a"), &ctx()).await.unwrap().wait(&ctx()).await.unwrap();
@@ -154,8 +155,6 @@ async fn ends_the_run_with_a_pi_reset_entry_when_a_tool_requests_a_handoff() {
     let calling = entries.iter().find(|entry| entry.kind == "pi.assistant").unwrap();
     assert_eq!((settled.status, settled.answer), (SubmissionStatus::Done, Some(calling.id)));
     assert_eq!(transcript(&entries), ["pi.user:a", "pi.assistant", "pi.tool-result", "pi.reset:continue here"]);
-    let last = entries.last().unwrap();
-    assert_eq!(last.head, Some(last.id));
     assert_eq!(setup.faux.state().call_count, 1);
     assert_eq!(harness.snapshot(&LIVE_DOC, root.id, &ctx()).await.unwrap(), Some(Json::from(json!({}))));
     harness.close(&ctx()).await.unwrap();

@@ -38,6 +38,13 @@ impl DraftCore {
         Ok(mutate(change.state()?))
     }
 
+    /// Run `edit` on the open Chord change of this draft, for edits a JSON draft cannot make, such as
+    /// `Change::append_text()`. `edit` must not use this draft again (the draft is locked while it runs).
+    pub(crate) fn with_change<R>(&self, edit: impl FnOnce(&mut Change) -> R) -> DurableResult<R> {
+        self.tx.assert_open()?;
+        Ok(edit(&mut lock(&self.cell)))
+    }
+
     /// Replace the draft value, keeping every unchanged subtree of the current draft.
     pub fn set(&self, value: Json) -> DurableResult<()> {
         self.update(|draft| assign_shared(draft, value))

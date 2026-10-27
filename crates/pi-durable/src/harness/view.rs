@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use pi_chord::delta::{Op, Path, Seg, apply_immutable};
 use pi_chord::state::{ReplicatedStateSourceOptions, attach_replicated_state_source};
-use pi_chord::{Context, Json, JsonMap, without_abort_signal};
+use pi_chord::{Context, Json, JsonMap, Watch, WatchChange, without_abort_signal};
 
 use super::agent::AGENT_DOC;
 use super::context::{active_entries, capture_context_bounds};
@@ -19,38 +19,46 @@ use super::util::{cancellation, closed_error, lock};
 use crate::documents::encode;
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{ConversationId, DocumentId};
-use crate::session::{CommittedObserver, CommittedStateSource, CommittedWatch, DocumentState, Release, Session};
-use crate::types::{CommitChange, CommitPublication, DocumentCommitChange, Storage};
+use crate::session::{
+    CommittedObserver, CommittedStateSource, DocumentState, GuardedObserver, Observation, ObservedCommit, Observer,
+    Release, Session,
+};
+use crate::types::{CommitChange, DocumentCommitChange, Storage};
 
 /// The view `{ conversation, entries, docs }` as JSON: the conversation record, the raw active entries (as
 /// `ContextView::entries`), and the built-in conversation documents keyed by kind.
 pub type ConversationView = Json;
 
+/// The structural view as a serialized exact-frame watch with bounded pending frames.
+pub type ConversationWatch = Watch<DurableError>;
+
 /// Receives each next revision of a mount, and the Session's close.
 pub(crate) trait ViewObserver: Send + Sync {
-    fn advance(&self, _value: &Json, _ops: &[Op], _context: &Context) {}
+    /// Each next revision; one change is shared by every observer of the mount.
+    fn advance(&self, _change: &WatchChange, _context: &Context) {}
     /// Every publication, after the mount took it; `ops` are the mount's, possibly none.
     fn publication(
         &self,
         _before: &Json,
         _after: &Json,
         _ops: &[Op],
-        _publication: &CommitPublication,
+        _publication: &ObservedCommit,
         _context: &Context,
     ) {
     }
-    fn close_session(&self, failure: Option<DurableError>);
+    /// The Session closed, or failed with `failure`.
+    fn end(&self, failure: Option<DurableError>);
 }
 
 struct Committed(Arc<dyn CommittedObserver>);
 
 impl ViewObserver for Committed {
-    fn advance(&self, value: &Json, ops: &[Op], context: &Context) {
-        self.0.advance(value.clone(), ops.to_vec(), context.clone());
+    fn advance(&self, change: &WatchChange, context: &Context) {
+        self.0.advance(change.clone(), context.clone());
     }
 
-    fn close_session(&self, failure: Option<DurableError>) {
-        self.0.close_session(failure);
+    fn end(&self, failure: Option<DurableError>) {
+        self.0.end(failure);
     }
 }
 
@@ -94,7 +102,7 @@ impl ConversationViews {
             let mounts: Vec<Mount> = lock(&views.mounts).drain().map(|(_, mount)| mount).collect();
             let failure = views.session.failure();
             for (_, observer) in mounts.into_iter().flat_map(|mount| mount.observers) {
-                observer.close_session(failure.clone());
+                observer.end(failure.clone());
             }
         })?;
         Ok(views)
@@ -120,12 +128,34 @@ impl ConversationViews {
         }
     }
 
-    /// A serialized exact-frame watch of the view; cancelling `context` stops it.
-    pub async fn watch(self: &Arc<Self>, id: ConversationId, context: &Context) -> DurableResult<CommittedWatch> {
+    /// Attach a synchronous observer of the view (`Harness::observe_conversation()`), behind its guard; `context`
+    /// governs only the attachment.
+    pub async fn observe(
+        self: &Arc<Self>,
+        id: ConversationId,
+        observer: Arc<dyn Observer>,
+        context: &Context,
+    ) -> DurableResult<Observation> {
+        let session = self.session.clone();
+        let ((value, guarded), _) = self
+            .attach(id, context, move |value, release| {
+                let guarded = GuardedObserver::new(observer, move || release.run(), move |error| session.report(error));
+                (Arc::new(Committed(guarded.clone())) as Arc<dyn ViewObserver>, (value.clone(), guarded))
+            })
+            .await?;
+        if context.is_cancelled() {
+            guarded.detach();
+            return Err(cancellation(context));
+        }
+        Ok(Observation::new(value, Arc::new(move || guarded.detach())))
+    }
+
+    /// A serialized exact-frame watch of the view, an observer of its mount; cancelling `context` stops it.
+    pub async fn watch(self: &Arc<Self>, id: ConversationId, context: &Context) -> DurableResult<ConversationWatch> {
         let session = self.session.clone();
         let (watch, _) = self
             .attach(id, context, move |value, release| {
-                let watch = CommittedWatch::new(value.clone(), release, move |error| session.report(error), None);
+                let watch = Watch::new(value.clone(), move || release.run(), move |error| session.report(error));
                 (Arc::new(Committed(Arc::new(watch.clone()))) as Arc<dyn ViewObserver>, watch)
             })
             .await?;
@@ -240,7 +270,7 @@ impl ConversationViews {
         Ok(Mount { value: Json::object(value), docs: incarnations, observers: Vec::new() })
     }
 
-    fn advance_all(&self, publication: &CommitPublication, context: &Context) {
+    fn advance_all(&self, publication: &ObservedCommit, context: &Context) {
         let mut deliveries = Vec::new();
         {
             let mut mounts = lock(&self.mounts);
@@ -254,8 +284,9 @@ impl ConversationViews {
         let frame_context = without_abort_signal(context);
         for (before, after, ops, observers) in deliveries {
             if !ops.is_empty() {
+                let change = WatchChange::new(after.clone(), ops.clone());
                 for observer in &observers {
-                    observer.advance(&after, &ops, &frame_context);
+                    observer.advance(&change, &frame_context);
                 }
             }
             for observer in &observers {
@@ -272,12 +303,12 @@ fn key_path(keys: &[&str]) -> Path {
 }
 
 /// Derive the mount's operations from one publication and apply them. Entry writes are published in ID order.
-fn advance(id: ConversationId, mount: &mut Mount, publication: &CommitPublication) -> DurableResult<Delivery> {
+fn advance(id: ConversationId, mount: &mut Mount, publication: &ObservedCommit) -> DurableResult<Delivery> {
     let mut doc_ops = Vec::new();
     let mut entry_ops = Vec::new();
     let mut entries: Vec<Json> = mount.value.get("entries").and_then(Json::as_array).cloned().unwrap_or_default();
     let mut entries_changed = false;
-    for change in &publication.changes {
+    for change in publication.changes() {
         match change {
             CommitChange::Entry(entry) if entry.conversation_id == id => {
                 let value = encode(entry)?;

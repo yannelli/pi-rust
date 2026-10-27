@@ -11,11 +11,14 @@ use super::context::read_context;
 use super::host::{ConversationInit, Harness};
 use super::submissions::Submission;
 use super::types::{Agent, AgentChange, CompactionReason, ContextView, SubmissionDraft};
+use super::view::ConversationWatch;
 use crate::entries::RESET_ENTRY;
 use crate::errors::DurableResult;
 use crate::ids::{ConversationId, EntryId, TaskId};
-use crate::session::{CommittedWatch, DocumentState, TransactionScope, Tx};
-use crate::types::{ConversationOwnership, Cursor, DraftHead, EntryDraft, EntryQuery, EntryRecord, Page, ScanOrder};
+use crate::session::{DocumentState, TransactionScope, Tx};
+use crate::types::{
+    CommitOptions, ConversationOwnership, Cursor, DraftHead, EntryDraft, EntryQuery, EntryRecord, Page, ScanOrder,
+};
 
 /// What a create or fork makes.
 pub(crate) enum CreateTarget {
@@ -88,7 +91,7 @@ impl Conversation {
 
     /// Start a manual compaction; `instructions` steer the summary.
     pub async fn compact(&self, instructions: Option<String>, context: &Context) -> DurableResult<TaskId> {
-        self.harness.0.scheduler.resume();
+        self.harness.0.scheduler.resume()?;
         let (id, input) = (self.id, CompactionInput { reason: CompactionReason::Manual, instructions });
         let change = move |tx: Tx| async move { create_compaction(&tx, id, input, None).await };
         self.harness.0.session.commit_with(change, context, TransactionScope::default()).await
@@ -112,8 +115,24 @@ impl Conversation {
         F: FnOnce(Tx) -> Fut + Send + 'static,
         Fut: Future<Output = DurableResult<T>> + Send + 'static,
     {
+        self.commit_with_options(change, context, CommitOptions::default()).await
+    }
+
+    /// Session commit whose `tx.create_task()` defaults to this conversation; `options` as for
+    /// `Session::commit_with_options()`.
+    pub async fn commit_with_options<T, F, Fut>(
+        &self,
+        change: F,
+        context: &Context,
+        options: CommitOptions,
+    ) -> DurableResult<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(Tx) -> Fut + Send + 'static,
+        Fut: Future<Output = DurableResult<T>> + Send + 'static,
+    {
         let scope = TransactionScope { conversation_id: Some(self.id), task_id: None };
-        self.harness.0.session.commit_with(change, context, scope).await
+        self.harness.0.session.commit_scoped(change, context, scope, options).await
     }
 
     /// Committed model context, at `at` when given.
@@ -145,12 +164,12 @@ impl Conversation {
 
     /// Abort the conversation's live work; `background` includes background tasks.
     pub async fn abort(&self, context: &Context, background: bool) -> DurableResult<()> {
-        self.harness.0.scheduler.resume();
+        self.harness.0.scheduler.resume()?;
         self.harness.0.scheduler.abort_conversation(self.id, background, context).await
     }
 
     pub async fn wait_for_idle(&self, context: &Context) -> DurableResult<()> {
-        self.harness.0.scheduler.resume();
+        self.harness.0.scheduler.resume()?;
         self.harness.0.scheduler.wait_for_idle(Some(self.id), context).await
     }
 
@@ -160,7 +179,7 @@ impl Conversation {
     }
 
     /// A serialized exact-frame watch of the [`super::ConversationView`].
-    pub async fn watch(&self, context: &Context) -> DurableResult<CommittedWatch> {
+    pub async fn watch(&self, context: &Context) -> DurableResult<ConversationWatch> {
         self.harness.0.views.watch(self.id, context).await
     }
 }

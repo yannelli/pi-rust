@@ -31,9 +31,9 @@ impl ReopeningStorage {
 
 #[async_trait]
 impl Storage for ReopeningStorage {
-    async fn commit(&self, writes: &[StorageWrite], context: &Context) -> DurableResult<Seq> {
+    async fn commit(&self, writes: &[StorageWrite], adopt: Adopt<'_>, context: &Context) -> DurableResult<Seq> {
         let mut current = self.current.lock().await;
-        let result = current.commit(writes, context).await;
+        let result = current.commit(writes, adopt, context).await;
         if !self.closed.load(std::sync::atomic::Ordering::SeqCst) {
             current.close(&BACKGROUND_CONTEXT).await.unwrap();
             *current = (self.reopen)().await;

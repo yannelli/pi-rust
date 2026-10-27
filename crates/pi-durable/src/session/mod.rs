@@ -7,9 +7,11 @@ mod core;
 mod draft;
 mod forks;
 mod guarded;
+mod holds;
 mod line;
 mod observation;
 mod observe;
+mod observer;
 mod plans;
 mod reads;
 mod tx;
@@ -22,19 +24,25 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use pi_chord::Context;
 
+use self::core::Settings;
 pub use self::core::{OnLineDocument, Session};
 pub use cache::{DEFAULT_DOCUMENT_RETENTION_MS, DocumentCacheSizes, document_retention};
 pub use draft::{Draft, DraftCore};
 pub use forks::{ForkDocumentCopy, prepare_fork_document_copies};
+pub use holds::{DEFAULT_PERSIST_WITHIN_MS, persist_within};
 pub use line::SharedResult;
 pub use observation::{CommittedObserver, CommittedStateSource, Release, retirement_operations};
+pub(crate) use observer::GuardedObserver;
+pub use observer::{Observation, Observer};
+pub use pi_chord::WatchHandle;
 pub use tx::{TransactionScope, Tx, TxFuture};
-pub use watch::{CommittedWatch, DocumentWatch, MAX_PENDING_WATCH_FRAMES, ReplaceValue};
+pub use watch::DocumentWatch;
 
 use crate::errors::{DurableError, DurableResult};
-use crate::types::{CommitPublication, ConversationRecord, ReportInfo, Storage};
+use crate::types::{CommitChange, CommitPublication, ConversationRecord, ReportInfo, Storage};
 
-/// A document state: hydrated, read-only, and bound to one committed incarnation. Retirement publishes `null`.
+/// A document state: hydrated, read-only, and bound to one committed incarnation. Retirement publishes `null`. Upstream
+/// removed document states; pi-rust keeps them for its experimental server stack.
 pub type DocumentState = pi_chord::state::AttachedReplicatedState;
 
 /// How the Session ended: `closed`, or `failed` with the error that failed it.
@@ -53,40 +61,37 @@ impl SessionEnd {
     }
 }
 
-/// Why a watch ended (spec section 9.1).
-#[derive(Clone, Debug)]
-pub enum WatchEnd {
-    Stopped,
-    Cancelled,
-    SessionClosed,
-    Retired,
-    ListenerError(DurableError),
-    /// The Session failed; the error is what failed it, usually a storage error.
-    SessionFailed(DurableError),
-}
-
-impl WatchEnd {
-    pub fn reason(&self) -> &'static str {
-        match self {
-            Self::Stopped => "stopped",
-            Self::Cancelled => "cancelled",
-            Self::SessionClosed => "session_closed",
-            Self::Retired => "retired",
-            Self::ListenerError(_) => "listener_error",
-            Self::SessionFailed(_) => "session_failed",
-        }
-    }
-
-    pub fn error(&self) -> Option<&DurableError> {
-        match self {
-            Self::ListenerError(error) | Self::SessionFailed(error) => Some(error),
-            _ => None,
-        }
-    }
-}
+/// Why a watch ended (spec section 9.1): Chord's `WatchEnd` with the Session's error type.
+pub type WatchEnd = pi_chord::WatchEnd<DurableError>;
 
 /// Synchronous post-adoption commit listener. It must not block or call Session operations.
 pub type CommitListener = Arc<dyn Fn(&CommitPublication, &Context) -> DurableResult<()> + Send + Sync>;
+
+/// What the Session's own components observe of one commit (`observe_commits()`): a stored commit with its own changes,
+/// or a deferred one adopted in memory only ([`crate::CommitPersistence`]), which changes documents only. Memory is
+/// never behind: a later store of held changes is not observed again.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ObservedCommit {
+    Stored(CommitPublication),
+    Memory(Vec<CommitChange>),
+}
+
+impl ObservedCommit {
+    pub fn changes(&self) -> &[CommitChange] {
+        match self {
+            Self::Stored(publication) => &publication.changes,
+            Self::Memory(changes) => changes,
+        }
+    }
+
+    /// A commit held in memory: it changes documents only.
+    pub fn is_memory(&self) -> bool {
+        matches!(self, Self::Memory(_))
+    }
+}
+
+/// The Session's own commit observer; an error fails the Session.
+pub type ObservedCommitListener = Arc<dyn Fn(&ObservedCommit, &Context) -> DurableResult<()> + Send + Sync>;
 
 /// Extension points a layer above the Session (the Harness) supplies; upstream subclasses `SessionImpl`.
 #[async_trait]
@@ -102,6 +107,11 @@ pub trait SessionHooks: Send + Sync {
     /// How long a loaded document that nothing observes stays cached after its last use, read at each use; `None`:
     /// the default. See [`document_retention`] for what a value means.
     fn document_retention_ms(&self) -> Option<f64> {
+        None
+    }
+
+    /// The default window of a deferred commit, read at each use; `None`: the default. See [`persist_within`].
+    fn persist_within_ms(&self) -> Option<f64> {
         None
     }
 
@@ -124,6 +134,12 @@ pub struct SessionOptions {
     /// right after use, `f64::INFINITY` keeps documents; anything else that is not a count of milliseconds means the
     /// default.
     pub document_retention_ms: Option<f64>,
+    /// Refuse every commit with writes with `ReadOnlySession` before it reaches Storage (`HarnessOptions::read_only`).
+    pub read_only: bool,
+    /// Default `within_ms` of a deferred commit ([`crate::CommitPersistence`]); default 1,000.
+    pub persist_within_ms: Option<f64>,
+    /// Arms the Session's foreground timers, such as the store of held documents; default a Tokio timer.
+    pub set_timer: Option<crate::timers::SetTimer>,
 }
 
 /// Open a Session kernel over one storage backend. The first error a Storage method returns fails the Session.
@@ -132,7 +148,10 @@ pub fn create_session(storage: Arc<dyn Storage>, options: SessionOptions) -> Ses
     let now = options.now.unwrap_or_else(|| Arc::new(system_now));
     let (given, source) = (options.document_retention_ms, hooks.clone());
     let retention = Arc::new(move || given.or_else(|| source.document_retention_ms()));
-    Session::open(storage, hooks, now, retention)
+    let (within, source) = (options.persist_within_ms, hooks.clone());
+    let persist_within = Arc::new(move || within.or_else(|| source.persist_within_ms()));
+    let settings = Settings { retention, persist_within, read_only: options.read_only, set_timer: options.set_timer };
+    Session::open(storage, hooks, now, settings)
 }
 
 fn system_now() -> f64 {

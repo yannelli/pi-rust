@@ -50,13 +50,13 @@ fn root() -> StorageWrite {
 #[tokio::test]
 async fn prepares_storage_statements_once_and_reuses_them_across_transactions() {
     let storage = SqliteStorage::open(memory_database().await).await.unwrap();
-    storage.commit(&[root()], ctx()).await.unwrap();
+    storage.commit(&[root()], &|_| {}, ctx()).await.unwrap();
     let writes: Vec<_> = (0..100).map(|index| entry(index + 2, "cached")).collect();
-    storage.commit(&writes, ctx()).await.unwrap();
-    storage.commit(&[entry(102, "cached-again")], ctx()).await.unwrap();
+    storage.commit(&writes, &|_| {}, ctx()).await.unwrap();
+    storage.commit(&[entry(102, "cached-again")], &|_| {}, ctx()).await.unwrap();
     assert_eq!(storage.entry(EntryId(2), ctx()).await.unwrap().unwrap().entry.kind, "cached");
     assert_eq!(storage.entry(EntryId(102), ctx()).await.unwrap().unwrap().entry.kind, "cached-again");
-    let error = storage.commit(&[root()], ctx()).await.unwrap_err();
+    let error = storage.commit(&[root()], &|_| {}, ctx()).await.unwrap_err();
     assert!(error.to_string().contains("ID 1 already belongs to conversation"));
     assert_eq!(storage.entry(EntryId(2), ctx()).await.unwrap().unwrap().entry.kind, "cached");
     storage.close(ctx()).await.unwrap();
@@ -154,7 +154,7 @@ async fn runs_operations_in_call_order_whether_they_start_immediately_or_wait() 
 
     let storage = Arc::new(SqliteStorage::open(database).await.unwrap());
     let committer = storage.clone();
-    let commit = tokio::spawn(async move { committer.commit(&[root()], ctx()).await });
+    let commit = tokio::spawn(async move { committer.commit(&[root()], &|_| {}, ctx()).await });
     let reader = storage.clone();
     let read = tokio::spawn(async move { reader.conversation(ROOT_CONVERSATION_ID, ctx()).await });
     commit.await.unwrap().unwrap();
