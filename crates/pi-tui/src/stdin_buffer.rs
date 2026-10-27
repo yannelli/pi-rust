@@ -11,6 +11,12 @@ const ESC: &str = "\x1b";
 const BRACKETED_PASTE_START: &str = "\x1b[200~";
 const BRACKETED_PASTE_END: &str = "\x1b[201~";
 
+/// How long a bracketed paste waits for more input before it ends without its end marker. A lost
+/// `ESC [201~` (another process read it, or the paste was cut short) must not swallow later keys.
+pub const PASTE_IDLE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Size at which a bracketed paste without its end marker ends.
+pub const PASTE_MAX_BYTES: usize = 16 * 1024 * 1024;
+
 /// Color and program-status OSC replies, XTVersion, and Kitty graphics replies. Until their
 /// header is complete, the input may be batched legacy Alt keystrokes.
 static TERMINAL_REPLY_HEADER: LazyLock<Regex> = LazyLock::new(|| {
@@ -63,7 +69,8 @@ impl Default for StdinBufferOptions {
 pub enum StdinBufferEvent {
     /// One complete sequence (a character, an escape sequence, or a flushed fragment).
     Data(String),
-    /// Text between bracketed paste markers, without the markers.
+    /// Text between bracketed paste markers, without the markers. A paste whose end marker does
+    /// not arrive ends after [`PASTE_IDLE_TIMEOUT`] without input or at [`PASTE_MAX_BYTES`].
     Paste(String),
 }
 
@@ -253,7 +260,7 @@ impl StdinBuffer {
         }
     }
 
-    /// When the pending incomplete sequence must be flushed, if there is one.
+    /// When the pending incomplete sequence must be flushed, or an unfinished paste ended.
     pub fn deadline(&self) -> Option<Instant> {
         self.deadline
     }
@@ -261,7 +268,9 @@ impl StdinBuffer {
     /// Flushes the pending fragment as data when the deadline has passed; otherwise returns nothing.
     pub fn on_timeout(&mut self, now: Instant) -> Vec<StdinBufferEvent> {
         let mut events = Vec::new();
-        if self.deadline.is_some_and(|deadline| now >= deadline) {
+        if self.paste_mode && self.deadline.is_some_and(|deadline| now >= deadline) {
+            self.end_unfinished_paste(&mut events);
+        } else if self.deadline.is_some_and(|deadline| now >= deadline) {
             for sequence in self.flush() {
                 match sequence.char_indices().nth(2) {
                     Some((tail, _)) if is_control_string(&sequence) => {
@@ -339,6 +348,11 @@ impl StdinBuffer {
 
     fn finish_paste_if_complete(&mut self, now: Instant, events: &mut Vec<StdinBufferEvent>) {
         let Some(end) = self.paste_buffer.find(BRACKETED_PASTE_END) else {
+            if self.paste_buffer.len() > PASTE_MAX_BYTES {
+                self.end_unfinished_paste(events);
+            } else {
+                self.deadline = Some(now + PASTE_IDLE_TIMEOUT);
+            }
             return;
         };
         let pasted = self.paste_buffer[..end].to_string();
@@ -350,6 +364,15 @@ impl StdinBuffer {
         if !after.is_empty() {
             self.process_str(&after, now, events);
         }
+    }
+
+    /// Ends a paste whose end marker did not arrive and emits what it holds, so later input
+    /// is read as keys again.
+    fn end_unfinished_paste(&mut self, events: &mut Vec<StdinBufferEvent>) {
+        self.deadline = None;
+        self.paste_mode = false;
+        self.pending_kitty_printable_codepoint = None;
+        events.push(StdinBufferEvent::Paste(std::mem::take(&mut self.paste_buffer)));
     }
 
     /// Kitty can report a printable key as CSI u and then also send the raw character; the

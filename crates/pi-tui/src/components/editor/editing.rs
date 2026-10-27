@@ -13,6 +13,13 @@ use crate::utils::{CJK_BREAK_REGEX, is_whitespace_char};
 static CSI_U_CTRL: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\x1b\[(\d+);5u").unwrap_or_else(|err| panic!("csi-u regex: {err}")));
 
+/// CSI sequences (colors, SGR mouse reports) and OSC sequences (titles, links) in pasted
+/// terminal output. The control character filter would keep their bodies as text.
+static PASTED_ESCAPE_SEQUENCE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\x1b\[[0-9;:<=>?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+        .unwrap_or_else(|err| panic!("pasted escape regex: {err}"))
+});
+
 static AUTOCOMPLETE_WORD_CHAR: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[a-zA-Z0-9.\-_]").unwrap_or_else(|err| panic!("word char regex: {err}")));
 
@@ -108,9 +115,10 @@ impl EditorCore {
                 _ => caps[0].to_string(),
             }
         });
+        let stripped = PASTED_ESCAPE_SEQUENCE.replace_all(&decoded, "");
         // Drop control characters except newlines.
         let mut filtered: String =
-            Self::normalize_text(&decoded).chars().filter(|&c| c == '\n' || u32::from(c) >= 32).collect();
+            Self::normalize_text(&stripped).chars().filter(|&c| c == '\n' || u32::from(c) >= 32).collect();
 
         // A pasted path right after a word character gets a separating space.
         if filtered.starts_with(['/', '~', '.']) {
