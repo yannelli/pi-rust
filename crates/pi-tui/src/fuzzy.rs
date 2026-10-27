@@ -20,26 +20,12 @@ fn is_boundary_unit(unit: u16) -> bool {
     char::from_u32(u32::from(unit)).is_some_and(|c| is_js_whitespace(c) || matches!(c, '-' | '_' | '.' | '/' | ':'))
 }
 
-fn match_query(query: &[u16], text: &[u16]) -> FuzzyMatch {
-    if query.is_empty() {
-        return FuzzyMatch { matches: true, score: 0.0 };
-    }
-    if query.len() > text.len() {
-        return NO_MATCH;
-    }
-
+fn score_positions(text: &[u16], positions: &[usize]) -> f64 {
     let mut score = 0.0;
     // Starts at -1 like upstream, so a first match at index 0 also counts as consecutive.
     let mut last_match: isize = -1;
     let mut consecutive = 0u32;
-    for &unit in query {
-        let from = (last_match + 1) as usize;
-        let Some(offset) = text[from..].iter().position(|&u| u == unit) else {
-            return NO_MATCH;
-        };
-        let i = from + offset;
-        let is_word_boundary = i == 0 || is_boundary_unit(text[i - 1]);
-
+    for &i in positions {
         if last_match == i as isize - 1 {
             // Reward consecutive matches.
             consecutive += 1;
@@ -51,12 +37,49 @@ fn match_query(query: &[u16], text: &[u16]) -> FuzzyMatch {
                 score += (i as isize - last_match - 1) as f64 * 2.0;
             }
         }
-        if is_word_boundary {
+        if i == 0 || is_boundary_unit(text[i - 1]) {
             score -= 10.0;
         }
         // Slight penalty for later matches.
         score += i as f64 * 0.1;
         last_match = i as isize;
+    }
+    score
+}
+
+fn find_units(text: &[u16], query: &[u16], from: usize) -> Option<usize> {
+    text.get(from..)?.windows(query.len()).position(|window| window == query).map(|offset| from + offset)
+}
+
+fn match_query(query: &[u16], text: &[u16]) -> FuzzyMatch {
+    if query.is_empty() {
+        return FuzzyMatch { matches: true, score: 0.0 };
+    }
+    if query.len() > text.len() {
+        return NO_MATCH;
+    }
+
+    // Greedy alignment: each query unit at its first occurrence after the previous one.
+    let mut positions = Vec::with_capacity(query.len());
+    let mut from = 0;
+    for &unit in query {
+        let Some(offset) = text[from..].iter().position(|&u| u == unit) else {
+            return NO_MATCH;
+        };
+        positions.push(from + offset);
+        from += offset + 1;
+    }
+    let mut score = score_positions(text, &positions);
+
+    // The greedy alignment can scatter the query over an earlier, unrelated part of the text
+    // ("opus" takes o, p, u from "openrouter"), so also score every contiguous occurrence.
+    let mut start = find_units(text, query, 0);
+    while let Some(at) = start {
+        for (k, position) in positions.iter_mut().enumerate() {
+            *position = at + k;
+        }
+        score = score.min(score_positions(text, &positions));
+        start = find_units(text, query, at + 1);
     }
 
     if query == text {

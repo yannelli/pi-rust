@@ -69,15 +69,78 @@ mod tests {
     #[test]
     fn relevance_sort_orders_by_score_and_tie_breaks_by_modified_desc() {
         let sessions = [
-            session("late", "2026-01-03T00:00:00.000Z", "xxxx brave", None),
-            session("early", "2026-01-01T00:00:00.000Z", "brave xxxx", None),
+            session("message", "2026-01-03T00:00:00.000Z", "brave", None),
+            session("name", "2026-01-01T00:00:00.000Z", "xxxx", Some("Brave work")),
         ];
-        assert_eq!(ids(&sessions, "\"brave\"", SortMode::Relevance, NameFilter::All), ["early", "late"]);
+        assert_eq!(ids(&sessions, "\"brave\"", SortMode::Relevance, NameFilter::All), ["name", "message"]);
         let ties = [
             session("older", "2026-01-01T00:00:00.000Z", "brave", None),
             session("newer", "2026-01-03T00:00:00.000Z", "brave", None),
         ];
         assert_eq!(ids(&ties, "\"brave\"", SortMode::Relevance, NameFilter::All), ["newer", "older"]);
+    }
+
+    // Upstream #11220.
+    #[test]
+    fn ignores_the_position_of_a_match_in_message_text() {
+        let filler = "lorem ipsum dolor sit amet ".repeat(400);
+        let sessions = [
+            session("early", "2026-01-01T00:00:00.000Z", &format!("opus {filler}"), None),
+            session("deep", "2026-01-02T00:00:00.000Z", &format!("{filler} we discussed the opus model"), None),
+            session("scattered", "2026-01-03T00:00:00.000Z", &filler, None),
+        ];
+        assert_eq!(ids(&sessions, "opus", SortMode::Relevance, NameFilter::All), ["deep", "early"]);
+    }
+
+    // Upstream #11024.
+    #[test]
+    fn does_not_match_scattered_characters_in_session_ids() {
+        let sessions = [
+            session("019e9024-aaaa-7bbb-8ccc-dddddddddddd", "2026-01-03T00:00:00.000Z", "unrelated", None),
+            session(
+                "01a1ffff-aaaa-7bbb-8ccc-dddddddddddd",
+                "2026-01-01T00:00:00.000Z",
+                "unrelated",
+                Some("#1024 TDD bare env"),
+            ),
+        ];
+        let found = filter_and_sort_sessions(&sessions, "1024", SortMode::Relevance, NameFilter::All);
+        let names: Vec<Option<String>> = found.into_iter().map(|session| session.name).collect();
+        assert_eq!(names, [Some("#1024 TDD bare env".to_string())]);
+        assert_eq!(
+            ids(&sessions, "9024-aa", SortMode::Relevance, NameFilter::All),
+            ["019e9024-aaaa-7bbb-8ccc-dddddddddddd"]
+        );
+    }
+
+    #[test]
+    fn ranks_name_text_then_message_text_then_scattered_name_matches() {
+        let sessions = [
+            session("scattered-name", "2026-01-04T00:00:00.000Z", "unrelated", Some("c-a-c-h-e notes")),
+            session("message", "2026-01-03T00:00:00.000Z", "A discussion mentioning the cache.", Some("Other work")),
+            session("name", "2026-01-01T00:00:00.000Z", "Summary", Some("Cache work")),
+        ];
+        assert_eq!(
+            ids(&sessions, "cache", SortMode::Relevance, NameFilter::All),
+            ["name", "message", "scattered-name"]
+        );
+    }
+
+    #[test]
+    fn matches_each_token_within_a_single_field() {
+        let sessions = [session("split", "2026-01-01T00:00:00.000Z", "search ranking", Some("Fuzzy"))];
+        assert_eq!(ids(&sessions, "fuzzy ranking", SortMode::Relevance, NameFilter::All), ["split"]);
+        assert!(ids(&sessions, "zzysea", SortMode::Relevance, NameFilter::All).is_empty());
+        assert!(ids(&sessions, "re:fuzzy search", SortMode::Relevance, NameFilter::All).is_empty());
+    }
+
+    #[test]
+    fn ranks_regex_name_matches_first() {
+        let sessions = [
+            session("message", "2026-01-02T00:00:00.000Z", "brave", None),
+            session("name", "2026-01-01T00:00:00.000Z", "xxxx", Some("Brave")),
+        ];
+        assert_eq!(ids(&sessions, "re:\\bbrave\\b", SortMode::Relevance, NameFilter::All), ["name", "message"]);
     }
 
     #[test]
@@ -137,12 +200,13 @@ mod tests {
     }
 
     #[test]
-    fn matching_scores_regex_position_and_fuzzy_tokens() {
+    fn matching_scores_regex_text_and_fuzzy_tokens_by_tier() {
         let target = session("id1", "2026-01-01T00:00:00.000Z", "hello brave world", None);
         let regex = match_session(&target, &parse_search_query("re:brave"));
-        assert!(regex.matches);
-        assert!((regex.score - "id1  hello ".len() as f64 * 0.1).abs() < 1e-9);
-        assert!(match_session(&target, &parse_search_query("hlo wrld")).matches);
+        assert_eq!(regex, MatchResult { matches: true, score: 1_000_000.0 });
+        assert_eq!(match_session(&target, &parse_search_query("brave")), regex);
+        // Scattered characters only match in the name and cwd, not in message text.
+        assert!(!match_session(&target, &parse_search_query("hlo wrld")).matches);
         assert!(!match_session(&target, &parse_search_query("zebra")).matches);
         let empty = match_session(&target, &parse_search_query(""));
         assert_eq!(empty, MatchResult { matches: true, score: 0.0 });

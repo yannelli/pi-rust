@@ -295,3 +295,40 @@ fn wraps_navigation_and_shows_no_matches_and_cancels() {
     harness.send(keys::ESCAPE);
     assert_eq!(cancelled.len(), 1);
 }
+
+/// Ids of `models` that match `query` with the /model selector text, best first.
+fn search_ids(models: &[Model], query: &str) -> Vec<String> {
+    let texts: Vec<(String, String)> = models
+        .iter()
+        .map(|model| {
+            (model.id.clone(), crate::interactive_components::model_selector::model_selector_search_text(model))
+        })
+        .collect();
+    pi_tui::fuzzy::fuzzy_filter(texts, query, |(_, text)| text.as_str()).into_iter().map(|(id, _)| id).collect()
+}
+
+// Upstream #11220.
+#[test]
+fn search_ranks_models_containing_the_query_above_scattered_matches() {
+    let models = [
+        model("openrouter", "openai/gpt-oss-120b", "OpenAI: gpt-oss-120b"),
+        model("openrouter", "anthropic/claude-sonnet-4.5", "Anthropic: Claude Sonnet 4.5"),
+        model("openrouter", "anthropic/claude-opus-4.1", "Anthropic: Claude Opus 4.1"),
+        model("anthropic", "claude-sonnet-4-5", "Claude Sonnet 4.5"),
+        model("anthropic", "claude-opus-4-1", "Claude Opus 4.1"),
+    ];
+    let mut top = search_ids(&models, "opus")[..2].to_vec();
+    top.sort();
+    assert_eq!(top, ["anthropic/claude-opus-4.1", "claude-opus-4-1"]);
+}
+
+// Upstream #10065.
+#[test]
+fn search_ranks_the_typed_model_above_models_sharing_a_long_provider_prefix() {
+    let models = [
+        model("fireworks", "accounts/fireworks/models/deepseek-v4-flash-0731", ""),
+        model("fireworks", "accounts/fireworks/models/kimi-k3", ""),
+        model("fireworks", "accounts/fireworks/routers/firerouter", "FireRouter"),
+    ];
+    assert_eq!(search_ids(&models, "firerouter")[0], "accounts/fireworks/routers/firerouter");
+}

@@ -51,6 +51,23 @@ fn word_boundary_matches_score_better() {
     assert!(at_boundary.score < not_at_boundary.score);
 }
 
+// Upstream #11220: greedy alignment took o, p, u from "openrouter", so the real "opus" scored worst.
+#[test]
+fn scores_a_contiguous_occurrence_instead_of_an_earlier_scattered_alignment() {
+    let opus = fuzzy_match("opus", "openrouter openrouter/anthropic/claude-opus-4.1");
+    let sonnet = fuzzy_match("opus", "openrouter openrouter/anthropic/claude-sonnet-4.5");
+    let gpt_oss = fuzzy_match("opus", "openrouter openrouter/openai/gpt-oss-120b");
+    assert!(opus.score < sonnet.score);
+    assert!(opus.score < gpt_oss.score);
+}
+
+#[test]
+fn uses_the_best_contiguous_occurrence_not_the_first() {
+    let embedded_first = fuzzy_match("opus", "xxopus opus");
+    let boundary_only = fuzzy_match("opus", "xxxxxx opus");
+    assert_eq!(embedded_first.score, boundary_only.score);
+}
+
 #[test]
 fn matches_swapped_alpha_numeric_tokens() {
     assert!(fuzzy_match("codex52", "gpt-5.2-codex").matches);
@@ -115,4 +132,17 @@ fn matches_slash_separated_provider_model_queries_against_reordered_text() {
     let result = fuzzy_filter(vec![(&model, text)], "openai-codex/gpt-5.5", |(_, text)| text.as_str());
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].0, &model);
+}
+
+// Upstream #11220: "radius radius/gpt" contains a, s, t, r, a in order, so every radius model matched there.
+#[test]
+fn ranks_a_model_containing_the_query_above_models_matching_a_shared_provider_prefix() {
+    let items = vec![
+        "radius radius/gpt-5.4 radius gpt-5.4 GPT 5.4",
+        "radius radius/agentic radius agentic Agentic",
+        "radius radius/gpt-6-sol radius gpt-6-sol GPT 6 Sol",
+        "radius radius/gpt-6-astra radius gpt-6-astra GPT 6 Astra",
+    ];
+    let result = fuzzy_filter(items.clone(), "astra", |item: &&str| item);
+    assert_eq!(result[0], items[3]);
 }

@@ -1,6 +1,7 @@
 //! Resume picker search: fuzzy tokens, quoted phrases, `re:` regex, sort modes, the named
 //! filter, and the threaded (fork tree) order. Port of upstream `session-selector-search.ts`.
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -39,72 +40,8 @@ pub enum ParsedSearchQuery {
     Invalid(String),
 }
 
-/// A fuzzy match result: lower scores are better.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FuzzyMatch {
-    pub matches: bool,
-    pub score: f64,
-}
-
-fn is_boundary(ch: char) -> bool {
-    ch.is_whitespace() || matches!(ch, '-' | '_' | '.' | '/' | ':')
-}
-
-fn match_query(query: &[char], text: &[char]) -> FuzzyMatch {
-    let miss = FuzzyMatch { matches: false, score: 0.0 };
-    if query.is_empty() {
-        return FuzzyMatch { matches: true, score: 0.0 };
-    }
-    if query.len() > text.len() {
-        return miss;
-    }
-    let (mut score, mut last, mut consecutive) = (0.0, None::<usize>, 0.0);
-    for wanted in query {
-        let start = last.map_or(0, |index| index + 1);
-        let Some(offset) = text[start..].iter().position(|ch| ch == wanted) else { return miss };
-        let index = start + offset;
-        if last.is_some_and(|last| last + 1 == index) {
-            consecutive += 1.0;
-            score -= consecutive * 5.0;
-        } else {
-            consecutive = 0.0;
-            if let Some(last) = last {
-                score += (index - last - 1) as f64 * 2.0;
-            }
-        }
-        if index == 0 || is_boundary(text[index - 1]) {
-            score -= 10.0;
-        }
-        score += index as f64 * 0.1;
-        last = Some(index);
-    }
-    if query == text {
-        score -= 100.0;
-    }
-    FuzzyMatch { matches: true, score }
-}
-
-/// Characters of `query` in order within `text`, case-insensitive, as upstream `fuzzyMatch`.
-pub fn fuzzy_match(query: &str, text: &str) -> FuzzyMatch {
-    let query: Vec<char> = query.to_lowercase().chars().collect();
-    let text: Vec<char> = text.to_lowercase().chars().collect();
-    let primary = match_query(&query, &text);
-    if primary.matches {
-        return primary;
-    }
-    // Retry letters+digits as digits+letters (and back), slightly penalized.
-    let split = query.iter().position(|ch| ch.is_ascii_digit() != query[0].is_ascii_digit());
-    let swapped: Option<Vec<char>> = split.and_then(|split| {
-        let (head, tail) = query.split_at(split);
-        let letters_then_digits = head.iter().all(char::is_ascii_lowercase) && tail.iter().all(char::is_ascii_digit);
-        let digits_then_letters = head.iter().all(char::is_ascii_digit) && tail.iter().all(char::is_ascii_lowercase);
-        (letters_then_digits || digits_then_letters).then(|| tail.iter().chain(head).copied().collect())
-    });
-    match swapped.map(|swapped| match_query(&swapped, &text)) {
-        Some(found) if found.matches => FuzzyMatch { matches: true, score: found.score + 5.0 },
-        _ => primary,
-    }
-}
+pub use pi_tui::fuzzy::FuzzyMatch;
+use pi_tui::fuzzy::fuzzy_match;
 
 /// Parse a picker query: `re:<pattern>`, or tokens with `"quoted phrases"`.
 pub fn parse_search_query(query: &str) -> ParsedSearchQuery {
@@ -150,47 +87,112 @@ fn normalize_whitespace_lower(text: &str) -> String {
     text.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Whether a session matches, and its score (lower is better).
+/// Match tiers, best first. Each token scores by the best field it matches; tiers dominate
+/// fuzzy scores, so an exact hit anywhere beats a scattered subsequence in a short field.
+const TIER_NAME: f64 = 0.0; // query text appears in the session name
+const TIER_TEXT: f64 = 1.0; // query text appears in the session id, messages, or cwd
+const TIER_FUZZY: f64 = 2.0; // query characters appear scattered in the session name or cwd
+const TIER_WEIGHT: f64 = 1_000_000.0;
+
+fn tier_score(tier: f64, score: f64) -> f64 {
+    tier * TIER_WEIGHT + score
+}
+
+/// Lowercased fields of one session, computed once per match. The message text can be
+/// megabytes, so it is lowercased only when a token needs it.
+struct SessionFields<'a> {
+    session: &'a SessionInfo,
+    messages: OnceCell<String>,
+    normalized_messages: OnceCell<String>,
+}
+
+impl SessionFields<'_> {
+    fn messages(&self) -> &str {
+        self.messages.get_or_init(|| self.session.all_messages_text.to_lowercase())
+    }
+
+    fn normalized_messages(&self) -> &str {
+        self.normalized_messages.get_or_init(|| self.messages().split_whitespace().collect::<Vec<_>>().join(" "))
+    }
+
+    /// Exact (case-insensitive) text match. Messages and ids only match exactly: scattered
+    /// matches in them are noise.
+    fn literal(&self, value: &str) -> Option<f64> {
+        let session = self.session;
+        let name = session.name.as_deref().unwrap_or_default().to_lowercase();
+        if name.contains(value) {
+            return Some(tier_score(TIER_NAME, fuzzy_match(value, &name).score));
+        }
+        let text = session.id.to_lowercase().contains(value)
+            || self.messages().contains(value)
+            || session.cwd.to_lowercase().contains(value);
+        text.then_some(tier_score(TIER_TEXT, 0.0))
+    }
+
+    fn fuzzy(&self, value: &str) -> Option<f64> {
+        if let Some(score) = self.literal(&value.to_lowercase()) {
+            return Some(score);
+        }
+        let fields = [self.session.name.as_deref().unwrap_or_default(), self.session.cwd.as_str()];
+        let best = fields
+            .into_iter()
+            .map(|field| fuzzy_match(value, field))
+            .filter(|found| found.matches)
+            .map(|found| found.score)
+            .reduce(f64::min)?;
+        Some(tier_score(TIER_FUZZY, best))
+    }
+
+    fn phrase(&self, phrase: &str) -> Option<f64> {
+        let session = self.session;
+        let name = normalize_whitespace_lower(session.name.as_deref().unwrap_or_default());
+        if name.contains(phrase) {
+            return Some(tier_score(TIER_NAME, fuzzy_match(phrase, &name).score));
+        }
+        let text = session.id.to_lowercase().contains(phrase)
+            || self.normalized_messages().contains(phrase)
+            || normalize_whitespace_lower(&session.cwd).contains(phrase);
+        text.then_some(tier_score(TIER_TEXT, 0.0))
+    }
+
+    fn regex(&self, regex: &Regex) -> Option<f64> {
+        let session = self.session;
+        if session.name.as_deref().is_some_and(|name| !name.is_empty() && regex.is_match(name)) {
+            return Some(tier_score(TIER_NAME, 0.0));
+        }
+        let text =
+            regex.is_match(&session.id) || regex.is_match(&session.all_messages_text) || regex.is_match(&session.cwd);
+        text.then_some(tier_score(TIER_TEXT, 0.0))
+    }
+}
+
+/// Whether a session matches, and its score (lower is better). Each field is matched
+/// separately, so a token never matches across field boundaries; different tokens may match
+/// different fields.
 pub fn match_session(session: &SessionInfo, query: &ParsedSearchQuery) -> FuzzyMatch {
     let miss = FuzzyMatch { matches: false, score: 0.0 };
-    let text = format!(
-        "{} {} {} {}",
-        session.id,
-        session.name.as_deref().unwrap_or_default(),
-        session.all_messages_text,
-        session.cwd
-    );
+    let fields = SessionFields { session, messages: OnceCell::new(), normalized_messages: OnceCell::new() };
     let tokens = match query {
         ParsedSearchQuery::Invalid(_) => return miss,
         ParsedSearchQuery::Regex(regex) => {
-            return match regex.find(&text) {
-                Some(found) => FuzzyMatch { matches: true, score: text[..found.start()].chars().count() as f64 * 0.1 },
-                None => miss,
-            };
+            return fields.regex(regex).map_or(miss, |score| FuzzyMatch { matches: true, score });
         }
         ParsedSearchQuery::Tokens(tokens) => tokens,
     };
     let mut total = 0.0;
-    let mut normalized: Option<String> = None;
     for token in tokens {
-        match token {
+        let score = match token {
             SearchToken::Phrase(phrase) => {
-                let haystack = normalized.get_or_insert_with(|| normalize_whitespace_lower(&text));
                 let phrase = normalize_whitespace_lower(phrase);
                 if phrase.is_empty() {
                     continue;
                 }
-                let Some(index) = haystack.find(&phrase) else { return miss };
-                total += haystack[..index].chars().count() as f64 * 0.1;
+                fields.phrase(&phrase)
             }
-            SearchToken::Fuzzy(value) => {
-                let found = fuzzy_match(value, &text);
-                if !found.matches {
-                    return miss;
-                }
-                total += found.score;
-            }
-        }
+            SearchToken::Fuzzy(value) => fields.fuzzy(value),
+        };
+        let Some(score) = score else { return miss };
+        total += score;
     }
     FuzzyMatch { matches: true, score: total }
 }
