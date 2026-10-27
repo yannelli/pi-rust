@@ -104,15 +104,21 @@ async fn todo_keeps_state_in_tool_results_and_renders_them() {
     };
     let result = json!({"content": [{"type": "text", "text": "Added todo #1: write tests"}],
         "details": {"action": "add", "todos": [{"id": 1, "text": "write tests", "done": false}], "nextId": 2}});
+    // A call that fails validation has empty details; it renders the error text (upstream 3953e9ef4).
+    let invalid = json!({"content": [{"type": "text", "text": "Validation failed for tool \"todo\""}], "details": {}});
     let lines = tokio::task::spawn_blocking(move || {
         let mut call = runner.render_tool_call("todo", &request).expect("call component");
         let mut done = runner.render_tool_result("todo", &result, &request).expect("result component");
-        [call.render(60), done.render(60)].concat()
+        let mut failed = runner.render_tool_result("todo", &invalid, &request).expect("error component");
+        [call.render(60), done.render(60), failed.render(60)].concat()
     })
     .await
     .unwrap();
     let lines: Vec<String> = lines.iter().map(|line| plain(line).trim_end().to_string()).collect();
-    assert_eq!(lines, vec!["todo add \"write tests\"", "✓ Added #1 write tests"]);
+    assert_eq!(
+        lines,
+        vec!["todo add \"write tests\"", "✓ Added #1 write tests", "Validation failed for tool \"todo\""]
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
