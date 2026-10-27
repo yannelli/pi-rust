@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.7.3] - 2026-10-27
+
+### Fixed
+
+- **release:** ship the licenses of code ported from Node.js and the MCP TypeScript SDK ([5afaf56](https://github.com/yannelli/pi-rust/commit/5afaf565b471dfcc895778fe73194549721193b1))
+
 ## [0.7.2] - 2026-10-27
 
 ### Fixed
