@@ -4,6 +4,7 @@ description = "Model Context Protocol client, OAuth, and tool adapters for the p
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
