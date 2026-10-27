@@ -24,7 +24,7 @@ use crate::harness::types::{Agent, NestedToolExecutionResult, ToolDiagnostic};
 use crate::harness::util::{cancellation, lock, with_context};
 use crate::ids::{ConversationId, EntryId, TaskId};
 use crate::models::Models;
-use crate::session::{CommittedWatch, Tx};
+use crate::session::{DocumentWatch, Tx};
 use crate::tasks::{TaskOptions, TaskOwnership};
 use crate::types::TaskRecord;
 
@@ -232,7 +232,7 @@ impl ToolExecutionApi {
         token: &DocToken<T, S>,
         owner: S::Owner,
         context: &Context,
-    ) -> DurableResult<Option<CommittedWatch>> {
+    ) -> DurableResult<Option<DocumentWatch>> {
         self.runtime.watch_doc(token, owner, context).await
     }
 

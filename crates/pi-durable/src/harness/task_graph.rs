@@ -7,14 +7,14 @@ use std::sync::{Arc, Mutex, Weak};
 
 use pi_chord::delta::{Op, Path, Seg, apply_immutable};
 use pi_chord::state::{ReplicatedStateSourceOptions, attach_replicated_state_source};
-use pi_chord::{BACKGROUND_CONTEXT, Context, Json, JsonMap, without_abort_signal};
+use pi_chord::{BACKGROUND_CONTEXT, Context, Json, JsonMap, Watch, without_abort_signal};
 
 use super::scheduler::{BlockedSubject, Scheduler};
 use super::types::BlockedReason;
 use super::util::{cancellation, closed_error, lock, scan_all};
-use crate::errors::DurableResult;
+use crate::errors::{DurableError, DurableResult};
 use crate::ids::ConversationId;
-use crate::session::{CommittedObserver, CommittedStateSource, CommittedWatch, DocumentState, Release, Session};
+use crate::session::{CommittedObserver, CommittedStateSource, DocumentState, Release, Session};
 use crate::types::{CommitChange, CommitPublication, ConversationQuery, TaskQuery, TaskRecord, TaskState, TaskStatus};
 
 /// `{ tasks }`: every live task keyed by its decimal ID. A node is `{ id, kind, conversationId, owner?, background,
@@ -25,7 +25,7 @@ use crate::types::{CommitChange, CommitPublication, ConversationQuery, TaskQuery
 pub type TaskGraph = Json;
 
 /// A serialized exact-frame watch of the task graph.
-pub type TaskGraphWatch = CommittedWatch;
+pub type TaskGraphWatch = Watch<DurableError>;
 
 const LIVE_STATUSES: [TaskStatus; 5] =
     [TaskStatus::Pending, TaskStatus::Running, TaskStatus::Waiting, TaskStatus::Sleeping, TaskStatus::Completing];
@@ -108,7 +108,7 @@ impl TaskGraphView {
         let session = self.session.clone();
         let (watch, _) = self
             .attach(context, move |value, release| {
-                let watch = CommittedWatch::new(value.clone(), release, move |error| session.report(error), None);
+                let watch = Watch::new(value.clone(), move || release.run(), move |error| session.report(error), None);
                 (Arc::new(watch.clone()) as Arc<dyn CommittedObserver>, watch)
             })
             .await?;

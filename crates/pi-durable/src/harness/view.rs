@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use pi_chord::delta::{Op, Path, Seg, apply_immutable};
 use pi_chord::state::{ReplicatedStateSourceOptions, attach_replicated_state_source};
-use pi_chord::{Context, Json, JsonMap, without_abort_signal};
+use pi_chord::{Context, Json, JsonMap, Watch, without_abort_signal};
 
 use super::agent::AGENT_DOC;
 use super::context::{active_entries, capture_context_bounds};
@@ -19,12 +19,15 @@ use super::util::{cancellation, closed_error, lock};
 use crate::documents::encode;
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{ConversationId, DocumentId};
-use crate::session::{CommittedObserver, CommittedStateSource, CommittedWatch, DocumentState, Release, Session};
+use crate::session::{CommittedObserver, CommittedStateSource, DocumentState, Release, Session};
 use crate::types::{CommitChange, CommitPublication, DocumentCommitChange, Storage};
 
 /// The view `{ conversation, entries, docs }` as JSON: the conversation record, the raw active entries (as
 /// `ContextView::entries`), and the built-in conversation documents keyed by kind.
 pub type ConversationView = Json;
+
+/// The structural view as a serialized exact-frame watch with bounded pending frames.
+pub type ConversationWatch = Watch<DurableError>;
 
 /// Receives each next revision of a mount, and the Session's close.
 pub(crate) trait ViewObserver: Send + Sync {
@@ -122,11 +125,11 @@ impl ConversationViews {
     }
 
     /// A serialized exact-frame watch of the view; cancelling `context` stops it.
-    pub async fn watch(self: &Arc<Self>, id: ConversationId, context: &Context) -> DurableResult<CommittedWatch> {
+    pub async fn watch(self: &Arc<Self>, id: ConversationId, context: &Context) -> DurableResult<ConversationWatch> {
         let session = self.session.clone();
         let (watch, _) = self
             .attach(id, context, move |value, release| {
-                let watch = CommittedWatch::new(value.clone(), release, move |error| session.report(error), None);
+                let watch = Watch::new(value.clone(), move || release.run(), move |error| session.report(error), None);
                 (Arc::new(Committed(Arc::new(watch.clone()))) as Arc<dyn ViewObserver>, watch)
             })
             .await?;

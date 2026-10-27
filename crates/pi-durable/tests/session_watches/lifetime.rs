@@ -3,18 +3,17 @@
 use std::any::Any;
 use std::sync::{Arc, Mutex, Weak};
 
-use pi_chord::delta::Op;
 use pi_chord::{AbortController, BACKGROUND_CONTEXT, ChordError, Context, create_context_key, with_abort_signal};
 use pi_chord::{with_cancel, with_context_value};
 use pi_durable::DurableError;
-use pi_durable::session::{Release, SessionOptions, WatchEnd, create_session};
+use pi_durable::session::{SessionOptions, WatchEnd, create_session};
 use pi_durable::storage::MemoryStorage;
 
 use super::support::*;
 use super::*;
 
 /// Start `watch` with a listener that records its context, signals entry, and waits for release.
-fn hold(watch: &CommittedWatch) -> (Deferred, Deferred, Arc<Mutex<Option<Context>>>) {
+fn hold(watch: &DocumentWatch) -> (Deferred, Deferred, Arc<Mutex<Option<Context>>>) {
     let (entered, release) = (Deferred::default(), Deferred::default());
     let delivered: Arc<Mutex<Option<Context>>> = Arc::default();
     let (gate_in, gate_out, sink) = (entered.clone(), release.clone(), delivered.clone());
@@ -271,26 +270,9 @@ async fn continues_after_the_tracker_cache_unloads() {
 }
 
 #[tokio::test]
-async fn ends_retired_only_on_its_source_s_retirement_never_on_a_null_value() {
-    let watch = CommittedWatch::new(Json::from(1), Release::new(), |_| {}, None);
-    let frames = record(&watch);
-    let end: Arc<Mutex<Option<WatchEnd>>> = Arc::default();
-    let sink = end.clone();
-    let closed = watch.closed();
-    tokio::spawn(async move { *sink.lock().unwrap() = Some(closed.await) });
-    watch.advance(Json::Null, vec![Op::Replace(Json::Null)], context());
-    watch.advance(Json::from(2), vec![Op::Replace(Json::from(2))], context());
-    flush().await;
-    let expected = [(Json::Null, vec![Op::Replace(Json::Null)]), (Json::from(2), vec![Op::Replace(Json::from(2))])];
-    assert_eq!(*frames.lock().unwrap(), expected);
-    assert!(end.lock().unwrap().is_none());
-    assert!(matches!(watch.stop().await, WatchEnd::Stopped));
-}
-
-#[tokio::test]
 async fn retains_neither_its_session_nor_its_listener_once_stopped_while_still_referenced() {
     // A watch of a Session nothing else references; `stop` says whether to stop it before returning.
-    async fn acquire(stop: bool) -> (CommittedWatch, Weak<dyn Any + Send + Sync>, Weak<()>) {
+    async fn acquire(stop: bool) -> (DocumentWatch, Weak<dyn Any + Send + Sync>, Weak<()>) {
         // No eviction timer, so nothing but the watch can keep the Session alive.
         let options = SessionOptions { document_retention_ms: Some(f64::INFINITY), ..SessionOptions::default() };
         let session = create_session(Arc::new(MemoryStorage::new()), options);

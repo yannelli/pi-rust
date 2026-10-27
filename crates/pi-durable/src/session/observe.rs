@@ -13,7 +13,7 @@ use super::guarded::FailureLatch;
 use super::line::lock;
 use super::observation::{CommittedObserver, CommittedStateSource, Release};
 use super::reads::{Def, check_loaded};
-use super::watch::CommittedWatch;
+use super::watch::DocumentWatch;
 use crate::documents::{DocFamilyToken, DocScope, DocToken, DocValue, ResolvedAddress};
 use crate::errors::{DurableError, DurableResult};
 use crate::types::{CommitChange, DocumentCommitChange};
@@ -150,7 +150,7 @@ impl Session {
         token: &DocToken<T, S>,
         owner: S::Owner,
         context: &Context,
-    ) -> impl Future<Output = DurableResult<Option<CommittedWatch>>> + Send + use<T, S> {
+    ) -> impl Future<Output = DurableResult<Option<DocumentWatch>>> + Send + use<T, S> {
         self.watch_doc_erased(token.definition().clone(), token.resolve(owner), context)
     }
 
@@ -160,7 +160,7 @@ impl Session {
         owner: S::Owner,
         key: &str,
         context: &Context,
-    ) -> impl Future<Output = DurableResult<Option<CommittedWatch>>> + Send + use<T, I, S> {
+    ) -> impl Future<Output = DurableResult<Option<DocumentWatch>>> + Send + use<T, I, S> {
         self.watch_doc_erased(token.definition().clone(), token.resolve(owner, key), context)
     }
 
@@ -169,7 +169,7 @@ impl Session {
         definition: Def,
         resolved: ResolvedAddress,
         context: &Context,
-    ) -> impl Future<Output = DurableResult<Option<CommittedWatch>>> + Send + use<> {
+    ) -> impl Future<Output = DurableResult<Option<DocumentWatch>>> + Send + use<> {
         let usable = self.0.assert_usable();
         let core = self.0.clone();
         let context = context.clone();
@@ -188,7 +188,8 @@ impl Session {
                 check_loaded(&definition, &loaded)?;
                 let release = Release::new();
                 let report = core.clone();
-                let watch = CommittedWatch::new(loaded.value(), release.clone(), move |e| report.report(e), None);
+                let detach = release.clone();
+                let watch = DocumentWatch::new(loaded.value(), move || detach.run(), move |e| report.report(e), None);
                 core.attach_observer(&loaded, Arc::new(watch.clone()), &release)?;
                 Ok(Some(watch))
             })

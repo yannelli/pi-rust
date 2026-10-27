@@ -47,4 +47,4 @@ pub use telemetry::DURABLE_TELEMETRY_SCHEMA;
 pub use tool::{ExecuteToolOptions, ToolExecutionApi};
 pub use tool_registration::*;
 pub use types::*;
-pub use view::ConversationView;
+pub use view::{ConversationView, ConversationWatch};

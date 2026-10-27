@@ -8,7 +8,7 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 
 use pi_chord::delta::Op;
-use pi_chord::{Context, Json};
+use pi_chord::{Context, Json, Watch};
 
 use self::changes::{call_of, message_changes, object, same, tool_update};
 use super::host::Harness;
@@ -19,7 +19,7 @@ use super::view::ViewObserver;
 use crate::documents::encode;
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{ConversationId, TaskId};
-use crate::session::{CommittedWatch, WatchEnd};
+use crate::session::{Release, WatchEnd};
 use crate::types::{
     CommitChange, CommitPublication, DocumentCommitChange, TaskQuery, TaskRecord, TaskState, TaskStatus,
 };
@@ -32,7 +32,7 @@ pub type AgentEvent = Json;
 pub struct AgentEventStream {
     /// The `snapshot` event at attachment.
     pub snapshot: AgentEvent,
-    watch: CommittedWatch,
+    watch: Watch<DurableError>,
 }
 
 impl AgentEventStream {
@@ -116,7 +116,7 @@ fn snapshot_of(view: &Json) -> AgentEvent {
 /// The view observer of one stream: translates each publication into a batch for its watch.
 struct EventsObserver {
     conversation_id: ConversationId,
-    watch: CommittedWatch,
+    watch: Watch<DurableError>,
     current: Arc<Mutex<Json>>,
     /// Generations whose held outcome already ended their turn.
     held: Mutex<HashSet<TaskId>>,
@@ -157,13 +157,17 @@ pub async fn watch_events(
             scan_all(|cursor| async move { storage.scan_tasks(query, 100, cursor.as_ref(), context).await }).await?;
         Ok(completing.iter().map(|record| record.id).collect::<HashSet<_>>())
     };
-    let create = move |initial: &Json, release, held| {
+    let create = move |initial: &Json, release: Arc<Release>, held| {
         let current = Arc::new(Mutex::new(initial.clone()));
         let latest = current.clone();
         // Batches are the watch's values; an overflow delivers a snapshot of the newest view instead.
         let replace = Arc::new(move || Json::array(vec![snapshot_of(&lock(&latest))]));
-        let watch =
-            CommittedWatch::new(Json::array(Vec::new()), release, move |error| session.report(error), Some(replace));
+        let watch = Watch::new(
+            Json::array(Vec::new()),
+            move || release.run(),
+            move |error| session.report(error),
+            Some(replace),
+        );
         let observer = EventsObserver { conversation_id, watch: watch.clone(), current, held: Mutex::new(held) };
         (Arc::new(observer) as Arc<dyn ViewObserver>, (watch, snapshot_of(initial)))
     };

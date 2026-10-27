@@ -32,7 +32,7 @@ use super::types::{AbortTaskResult, BlockedReason, Wake};
 use super::util::{Waiters, closed_error, lock, scan_all, with_context};
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{ConversationId, TaskId};
-use crate::session::{CommittedWatch, TransactionScope};
+use crate::session::{DocumentWatch, TransactionScope};
 use crate::timers::Disarm;
 use crate::types::{
     AbortReason, JoinPolicy, ReportInfo, ReportTask, StorageWrite, TaskOutcome, TaskQuery, TaskRecord, TaskState,
@@ -66,7 +66,7 @@ pub(crate) struct Invocation {
     /// The task's latest committed record, kept once it leaves `live`, for the phase span's outcome.
     pub record: Mutex<TaskRecord>,
     /// Watches taken through the runtime; stopped at invocation end.
-    pub watches: Mutex<Vec<CommittedWatch>>,
+    pub watches: Mutex<Vec<DocumentWatch>>,
     /// Timers armed through the runtime, by key; disarmed at invocation end.
     pub timers: Mutex<HashMap<u64, Disarm>>,
     pub next_timer: AtomicU64,

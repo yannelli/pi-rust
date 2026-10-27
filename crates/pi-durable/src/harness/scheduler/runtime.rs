@@ -27,7 +27,7 @@ use crate::harness::types::{AbortTaskResult, Agent, ContextView, SubmissionDraft
 use crate::harness::util::{cancellation, lock, with_context};
 use crate::ids::{ConversationId, EntryId, TaskId};
 use crate::models::Models;
-use crate::session::{CommittedWatch, TransactionScope, Tx};
+use crate::session::{DocumentWatch, TransactionScope, Tx};
 use crate::timers::Disarm;
 use crate::types::{EntryRecord, ReportFrom, ReportInfo, TaskOutcome, TaskRecord, TaskState};
 
@@ -503,7 +503,7 @@ impl TaskRuntime {
         token: &DocToken<T, S>,
         owner: S::Owner,
         context: &Context,
-    ) -> DurableResult<Option<CommittedWatch>> {
+    ) -> DurableResult<Option<DocumentWatch>> {
         self.invocation.check()?;
         let Some(watch) = self.scheduler.core.session.watch_doc(token, owner, context).await? else { return Ok(None) };
         if self.invocation.is_ended() {

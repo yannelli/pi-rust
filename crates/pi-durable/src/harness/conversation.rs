@@ -11,10 +11,11 @@ use super::context::read_context;
 use super::host::{ConversationInit, Harness};
 use super::submissions::Submission;
 use super::types::{Agent, AgentChange, CompactionReason, ContextView, SubmissionDraft};
+use super::view::ConversationWatch;
 use crate::entries::RESET_ENTRY;
 use crate::errors::DurableResult;
 use crate::ids::{ConversationId, EntryId, TaskId};
-use crate::session::{CommittedWatch, DocumentState, TransactionScope, Tx};
+use crate::session::{DocumentState, TransactionScope, Tx};
 use crate::types::{ConversationOwnership, Cursor, DraftHead, EntryDraft, EntryQuery, EntryRecord, Page, ScanOrder};
 
 /// What a create or fork makes.
@@ -160,7 +161,7 @@ impl Conversation {
     }
 
     /// A serialized exact-frame watch of the [`super::ConversationView`].
-    pub async fn watch(&self, context: &Context) -> DurableResult<CommittedWatch> {
+    pub async fn watch(&self, context: &Context) -> DurableResult<ConversationWatch> {
         self.harness.0.views.watch(self.id, context).await
     }
 }

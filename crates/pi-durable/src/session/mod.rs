@@ -30,7 +30,7 @@ pub use line::SharedResult;
 pub use observation::{CommittedObserver, CommittedStateSource, Release, retirement_operations};
 pub use pi_chord::WatchHandle;
 pub use tx::{TransactionScope, Tx, TxFuture};
-pub use watch::{CommittedWatch, DocumentWatch, MAX_PENDING_WATCH_FRAMES, ReplaceValue};
+pub use watch::DocumentWatch;
 
 use crate::errors::{DurableError, DurableResult};
 use crate::types::{CommitPublication, ConversationRecord, ReportInfo, Storage};

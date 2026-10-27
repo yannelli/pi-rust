@@ -1,4 +1,8 @@
-//! Watch types: the one watch API (upstream `watch.ts`).
+//! Watch handles: the watch types and the one implementation of their lifecycle, for JSON and native values
+//! (upstream `watch.ts`).
+
+mod handle;
+mod lifecycle;
 
 use std::future::Future;
 
@@ -7,6 +11,9 @@ use crate::delta::Op;
 use crate::error::ChordError;
 use crate::json::Json;
 use crate::sync::BoxFuture;
+
+pub use handle::{NativeWatch, Watch};
+pub use lifecycle::Replace;
 
 /// Terminal result of one watch. `E` is the error type of the source; upstream errors are untyped.
 #[derive(Clone, Debug)]
@@ -55,6 +62,24 @@ pub trait WatchHandle<T = Json, E = ChordError> {
     fn start<F, Fut>(&self, listener: F) -> Result<(), E>
     where
         F: Fn(T, Vec<Op>, Context) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<(), E>> + Send + 'static;
+
+    /// Idempotently stop future callbacks and return this watch's terminal result.
+    fn stop(&self) -> BoxFuture<WatchEnd<E>>;
+
+    /// Settle when the watch terminates; an already-running callback remains caller-owned.
+    fn closed(&self) -> BoxFuture<WatchEnd<E>>;
+}
+
+/// Serialized observation of an in-process value: as [`WatchHandle`], but a change is a new value without ops.
+pub trait NativeWatchHandle<T, E = ChordError> {
+    /// Acquisition value before start; latest delivered value afterward.
+    fn value(&self) -> T;
+
+    /// Install the sole asynchronous listener. Never invokes it inline.
+    fn start<F, Fut>(&self, listener: F) -> Result<(), E>
+    where
+        F: Fn(T, Context) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<(), E>> + Send + 'static;
 
     /// Idempotently stop future callbacks and return this watch's terminal result.
