@@ -2,6 +2,10 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.7.1] - 2026-10-27
+
+Maintenance release.
+
 ## [0.7.0] - 2026-10-27
 
 ### Breaking Changes
