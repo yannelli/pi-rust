@@ -97,6 +97,8 @@ pub struct SessionOptions {
     /// right after use, `f64::INFINITY` keeps documents; anything else that is not a count of milliseconds means the
     /// default.
     pub document_retention_ms: Option<f64>,
+    /// Refuse every commit with writes with `ReadOnlySession` before it reaches Storage (`HarnessOptions::read_only`).
+    pub read_only: bool,
 }
 
 /// Open a Session kernel over one storage backend. The first error a Storage method returns fails the Session.
@@ -105,7 +107,7 @@ pub fn create_session(storage: Arc<dyn Storage>, options: SessionOptions) -> Ses
     let now = options.now.unwrap_or_else(|| Arc::new(system_now));
     let (given, source) = (options.document_retention_ms, hooks.clone());
     let retention = Arc::new(move || given.or_else(|| source.document_retention_ms()));
-    Session::open(storage, hooks, now, retention)
+    Session::open(storage, hooks, now, retention, options.read_only)
 }
 
 fn system_now() -> f64 {

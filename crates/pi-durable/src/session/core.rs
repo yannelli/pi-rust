@@ -74,6 +74,8 @@ pub(crate) struct SessionCore {
     pub now: Arc<dyn Fn() -> f64 + Send + Sync>,
     /// The document retention in milliseconds, read at each use; `None` means the default.
     pub(super) retention: Arc<dyn Fn() -> Option<f64> + Send + Sync>,
+    /// Refuse every commit with writes (`HarnessOptions::read_only`).
+    read_only: bool,
     pub(super) weak: Weak<SessionCore>,
 }
 
@@ -233,6 +235,7 @@ impl Session {
         hooks: Arc<dyn SessionHooks>,
         now: Arc<dyn Fn() -> f64 + Send + Sync>,
         retention: Arc<dyn Fn() -> Option<f64> + Send + Sync>,
+        read_only: bool,
     ) -> Self {
         let core = Arc::new_cyclic(|weak: &Weak<SessionCore>| {
             let latch: Weak<dyn FailureLatch> = weak.clone();
@@ -251,6 +254,7 @@ impl Session {
                 hooks,
                 now,
                 retention,
+                read_only,
                 weak: weak.clone(),
             }
         });
@@ -535,6 +539,12 @@ where
         tx.discard();
         core.sweep_documents();
         return Ok(value);
+    }
+    if core.read_only {
+        // Refused before Storage: the Session stays healthy, and the caller sees why.
+        tx.discard();
+        core.sweep_documents();
+        return Err(DurableError::ReadOnlySession("a commit with writes".into()));
     }
     // Storage adopts the batch synchronously once it is durable, before its next commit; the callback keeps its own
     // error, so it never reaches Storage.

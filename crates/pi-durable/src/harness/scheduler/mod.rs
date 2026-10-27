@@ -251,7 +251,8 @@ impl Scheduler {
     }
 
     /// Load live tasks and change surviving `running` tasks back to `pending`, counting the restart. Dispatches nothing.
-    /// A task that reaches the restart limit this way is parked and reported.
+    /// A task that reaches the restart limit this way is parked and reported. Read-only, it only loads them: a
+    /// `running` task stays as committed, running in another process.
     pub async fn open(&self, context: &Context) -> DurableResult<()> {
         let session = &self.core.session;
         let weak = self.weak.clone();
@@ -276,6 +277,7 @@ impl Scheduler {
         }));
         lock(&self.state).unsubscribe_registry = Some(unsubscribe);
         let limit = self.restart_limit();
+        let read_only = self.core.read_only;
         let scheduler = self.arc()?;
         let opened = session.commit_with(
             move |tx| async move {
@@ -290,6 +292,10 @@ impl Scheduler {
                 for record in records {
                     scheduler.count_active(&record.kind, 1.0);
                     state.resumed.insert(record.id);
+                    if read_only {
+                        state.track(None, &record);
+                        continue;
+                    }
                     if record.abandon_on_restart == Some(true) {
                         state.abandoned.insert(record.id);
                     }
@@ -324,6 +330,9 @@ impl Scheduler {
             let (task, extension) = self.about_task(&record);
             self.core.report(&DurableError::error(message), &ReportInfo::TaskParked { task, extension }, None);
         }
+        if read_only {
+            return Ok(());
+        }
         // Derive abort marks a crash left unapplied below cancelled owners, and finalize held outcomes.
         lock(&self.state).cascade_pending = true;
         self.schedule_reconcile();
@@ -333,9 +342,13 @@ impl Scheduler {
 
     /// Enable scheduling, which also runs sleeping tasks that are due: a host wakeup, such as an alarm, calls this.
     /// Idempotent; the kick does nothing once closing.
-    pub fn resume(&self) {
+    pub fn resume(&self) -> DurableResult<()> {
+        if self.core.read_only {
+            return Err(DurableError::ReadOnlySession("running tasks".into()));
+        }
         lock(&self.state).enabled = true;
         self.kick();
+        Ok(())
     }
 
     /// Run a task parked by the restart limit again: clears its restart count and enables scheduling. Does nothing for
@@ -360,8 +373,7 @@ impl Scheduler {
             TransactionScope::default(),
         );
         retried.await?;
-        self.resume();
-        Ok(())
+        self.resume()
     }
 
     /// Why a live task cannot run here, if it cannot: its definition (missing, too old, failed migration) or the
@@ -419,6 +431,10 @@ impl Scheduler {
     /// with work is pending or underway, `at` for the earliest sleep not yet due. From memory; a task whose chain is
     /// not loaded yet counts as it would alone.
     pub fn wake(&self) -> Wake {
+        // A read-only Harness runs nothing, so it never needs a process.
+        if self.core.read_only {
+            return Wake::default();
+        }
         let now = self.core.now();
         let limit = self.restart_limit();
         let (mut active, at, candidates) = {

@@ -89,7 +89,7 @@ impl Conversation {
 
     /// Start a manual compaction; `instructions` steer the summary.
     pub async fn compact(&self, instructions: Option<String>, context: &Context) -> DurableResult<TaskId> {
-        self.harness.0.scheduler.resume();
+        self.harness.0.scheduler.resume()?;
         let (id, input) = (self.id, CompactionInput { reason: CompactionReason::Manual, instructions });
         let change = move |tx: Tx| async move { create_compaction(&tx, id, input, None).await };
         self.harness.0.session.commit_with(change, context, TransactionScope::default()).await
@@ -146,12 +146,12 @@ impl Conversation {
 
     /// Abort the conversation's live work; `background` includes background tasks.
     pub async fn abort(&self, context: &Context, background: bool) -> DurableResult<()> {
-        self.harness.0.scheduler.resume();
+        self.harness.0.scheduler.resume()?;
         self.harness.0.scheduler.abort_conversation(self.id, background, context).await
     }
 
     pub async fn wait_for_idle(&self, context: &Context) -> DurableResult<()> {
-        self.harness.0.scheduler.resume();
+        self.harness.0.scheduler.resume()?;
         self.harness.0.scheduler.wait_for_idle(Some(self.id), context).await
     }
 

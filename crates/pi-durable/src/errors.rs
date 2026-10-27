@@ -28,6 +28,10 @@ pub enum DurableError {
     /// The Session failed, so nothing runs or commits any more; the cause is the first error.
     #[error("Session failed after a storage error; close and reopen it")]
     SessionFailed(Arc<DurableError>),
+    /// The Harness was opened read-only (`HarnessOptions::read_only`): a commit with writes, or a call that would run
+    /// tasks, was refused. Nothing was written, and the Harness stays usable for reads.
+    #[error("Read-only Harness: {0} refused")]
+    ReadOnlySession(String),
     /// A submission reached a busy conversation and was not admitted.
     #[error("Conversation {0} is busy")]
     ConversationBusy(ConversationId),
@@ -92,6 +96,7 @@ impl DurableError {
             Self::StorageRequest(_) => "StorageRequestError",
             Self::ReadAfterWrite(_) => "ReadAfterWrite",
             Self::SessionFailed(_) => "SessionFailed",
+            Self::ReadOnlySession(_) => "ReadOnlySession",
             Self::ConversationBusy(_) => "ConversationBusy",
             Self::Chord(ChordError::Type(_)) => "TypeError",
             Self::Chord(ChordError::Aborted) => "AbortError",
