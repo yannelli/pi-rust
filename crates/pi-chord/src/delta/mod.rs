@@ -8,6 +8,7 @@ mod diff;
 mod diff_array;
 mod ops_json;
 mod overlap;
+mod pending;
 mod tracker;
 
 use std::fmt;
@@ -19,6 +20,7 @@ pub use codec::{Decoder, Encoder, decoder, encoder};
 pub use diff::diff_revisions;
 pub use ops_json::{assert_valid_op, assert_valid_wire_op, parse_op, parse_ops, parse_wire_op, parse_wire_ops};
 pub use overlap::{overlap, overlap_with};
+pub use pending::{MAX_PENDING_OPS, PendingOps, PendingTake};
 pub use tracker::{Change, Prepared, Tracker, track};
 
 use crate::error::ChordError;

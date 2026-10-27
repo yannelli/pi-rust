@@ -129,7 +129,7 @@ impl ConversationViews {
         let session = self.session.clone();
         let (watch, _) = self
             .attach(id, context, move |value, release| {
-                let watch = Watch::new(value.clone(), move || release.run(), move |error| session.report(error), None);
+                let watch = Watch::new(value.clone(), move || release.run(), move |error| session.report(error));
                 (Arc::new(Committed(Arc::new(watch.clone()))) as Arc<dyn ViewObserver>, watch)
             })
             .await?;

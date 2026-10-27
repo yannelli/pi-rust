@@ -1,33 +1,97 @@
 //! The watch handles sources create: `Watch` for JSON values with ops, `NativeWatch` for in-process values.
 
+use std::collections::VecDeque;
 use std::future::Future;
 use std::sync::Arc;
 
-use super::lifecycle::{Lifecycle, Replace};
+use super::lifecycle::{Delivery, Lifecycle, PendingStore, Replace};
 use super::{NativeWatchHandle, WatchEnd, WatchHandle};
 use crate::context::{AbortSignal, Context};
-use crate::delta::Op;
+use crate::delta::{Op, PendingOps, PendingTake};
 use crate::error::ChordError;
 use crate::json::Json;
 use crate::sync::BoxFuture;
 
-/// Canonical terminal frame of a retired source.
-fn retirement_operations() -> Vec<Op> {
-    vec![Op::Replace(Json::Null)]
+/// Frames of a JSON watch waiting for its listener: their ops folded, and the newest value and context.
+#[derive(Default)]
+pub(crate) struct JsonPending {
+    ops: PendingOps,
+    newest: Option<(Json, Context)>,
+    retiring: bool,
 }
 
-fn root_replacement(value: &Json) -> Vec<Op> {
-    vec![Op::Replace(value.clone())]
+impl JsonPending {
+    fn advance(&mut self, value: Json, ops: Vec<Op>, context: Context) -> bool {
+        if self.retiring {
+            return false;
+        }
+        self.ops.push(ops);
+        self.newest = Some((value, context));
+        true
+    }
+
+    fn retire(&mut self, context: Context) -> bool {
+        if self.retiring {
+            return false;
+        }
+        self.retiring = true;
+        // Canonical terminal frame of a retired source.
+        self.ops.push(vec![Op::Replace(Json::Null)]);
+        self.newest = Some((Json::Null, context));
+        true
+    }
 }
 
-fn no_ops<T>(_: &T) -> Vec<Op> {
-    Vec::new()
+impl PendingStore<Json> for JsonPending {
+    fn next(&mut self) -> Option<Delivery<Json>> {
+        let (value, context) = self.newest.take()?;
+        let ops = match self.ops.take() {
+            PendingTake::Ops(ops) => ops,
+            PendingTake::Replace => vec![Op::Replace(value.clone())],
+        };
+        // Nothing is queued after a retirement, so a retiring watch's pending call is its last.
+        Some(Delivery { value, ops, context, retires: self.retiring })
+    }
+
+    fn has_pending(&self) -> bool {
+        self.newest.is_some()
+    }
+
+    fn release(&mut self) {
+        self.ops.take();
+        self.newest = None;
+    }
 }
 
-/// The watch handle of a JSON source: exact frames in order; an overflow becomes one root replacement
-/// `[["r", newest]]`. `detach` unsubscribes it from its source when it ends; `report` gets a listener's error, which
-/// also ends the watch; `replace` gives the value an overflow delivers, by default the newest value. Cheap to clone.
-pub struct Watch<E = ChordError>(Arc<Lifecycle<Json, E>>);
+/// Maximum values kept behind one unavailable native watch listener.
+const MAX_PENDING_NATIVE_VALUES: usize = 100;
+
+/// Values of a native watch waiting for its listener, in order.
+pub(crate) struct NativePending<T> {
+    values: VecDeque<(T, Context)>,
+    replace: Option<Replace<T>>,
+}
+
+impl<T: Send + Sync + 'static> PendingStore<T> for NativePending<T> {
+    fn next(&mut self) -> Option<Delivery<T>> {
+        let (value, context) = self.values.pop_front()?;
+        Some(Delivery { value, ops: Vec::new(), context, retires: false })
+    }
+
+    fn has_pending(&self) -> bool {
+        !self.values.is_empty()
+    }
+
+    fn release(&mut self) {
+        self.values.clear();
+        self.replace = None;
+    }
+}
+
+/// The watch handle of a JSON source. Frames that arrive before `start()` or while the listener runs wait in one
+/// [`PendingOps`] queue; the next call gets the newest value, the folded ops of every frame since the call before it
+/// (or `[["r", newest]]` after the queue overflowed), and the newest frame's context. Cheap to clone.
+pub struct Watch<E = ChordError>(Arc<Lifecycle<Json, E, JsonPending>>);
 
 impl<E> Clone for Watch<E> {
     fn clone(&self) -> Self {
@@ -39,13 +103,13 @@ impl<E> Watch<E>
 where
     E: Clone + Send + Sync + From<ChordError> + 'static,
 {
+    /// `detach` unsubscribes it from its source when it ends; `report` gets a listener's error, which also ends it.
     pub fn new(
         value: Json,
         detach: impl FnOnce() + Send + 'static,
         report: impl Fn(&E) + Send + Sync + 'static,
-        replace: Option<Replace<Json>>,
     ) -> Self {
-        Self(Lifecycle::new(value, Box::new(detach), Arc::new(report), replace, root_replacement))
+        Self(Lifecycle::new(value, JsonPending::default(), Box::new(detach), Arc::new(report)))
     }
 
     /// The acquisition value before `start()`, then the latest delivered value.
@@ -90,12 +154,12 @@ where
 
     /// Queue the frame `ops`, which turn the value before it into `value`.
     pub fn advance(&self, value: Json, ops: Vec<Op>, context: Context) {
-        self.0.enqueue(value, ops, context);
+        self.0.feed(|pending| pending.advance(value, ops, context));
     }
 
     /// The source retired: queue the last frame, `[["r", null]]` with value `null`, then end `retired`.
     pub fn retire(&self, context: Context) {
-        self.0.enqueue_retirement(Json::Null, retirement_operations(), context);
+        self.0.feed(|pending| pending.retire(context));
     }
 }
 
@@ -124,9 +188,9 @@ where
     }
 }
 
-/// The watch handle of a native source: values in order; an overflow collapses to the newest value. `detach` and
-/// `report` as for [`Watch`]. Cheap to clone.
-pub struct NativeWatch<T, E = ChordError>(Arc<Lifecycle<T, E>>);
+/// The watch handle of a native source: every value in order, one call each; past 100 pending values they collapse to
+/// one, `replace()` or by default the newest value. `detach` and `report` as for [`Watch`]. Cheap to clone.
+pub struct NativeWatch<T, E = ChordError>(Arc<Lifecycle<T, E, NativePending<T>>>);
 
 impl<T, E> Clone for NativeWatch<T, E> {
     fn clone(&self) -> Self {
@@ -139,9 +203,14 @@ where
     T: Clone + Send + Sync + 'static,
     E: Clone + Send + Sync + From<ChordError> + 'static,
 {
-    /// No replacement: an overflow delivers the newest value.
-    pub fn new(value: T, detach: impl FnOnce() + Send + 'static, report: impl Fn(&E) + Send + Sync + 'static) -> Self {
-        Self(Lifecycle::new(value, Box::new(detach), Arc::new(report), None, no_ops::<T>))
+    pub fn new(
+        value: T,
+        detach: impl FnOnce() + Send + 'static,
+        report: impl Fn(&E) + Send + Sync + 'static,
+        replace: Option<Replace<T>>,
+    ) -> Self {
+        let pending = NativePending { values: VecDeque::new(), replace };
+        Self(Lifecycle::new(value, pending, Box::new(detach), Arc::new(report)))
     }
 
     pub fn value(&self) -> T {
@@ -180,7 +249,16 @@ where
 
     /// Queue `value`, the source's new value.
     pub fn advance(&self, value: T, context: Context) {
-        self.0.enqueue(value, Vec::new(), context);
+        self.0.feed(|pending| {
+            if pending.values.len() >= MAX_PENDING_NATIVE_VALUES {
+                pending.values.clear();
+                let value = pending.replace.as_ref().map_or(value, |replace| replace());
+                pending.values.push_back((value, context));
+            } else {
+                pending.values.push_back((value, context));
+            }
+            true
+        });
     }
 }
 

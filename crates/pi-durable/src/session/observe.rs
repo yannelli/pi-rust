@@ -189,7 +189,7 @@ impl Session {
                 let release = Release::new();
                 let report = core.clone();
                 let detach = release.clone();
-                let watch = DocumentWatch::new(loaded.value(), move || detach.run(), move |e| report.report(e), None);
+                let watch = DocumentWatch::new(loaded.value(), move || detach.run(), move |e| report.report(e));
                 core.attach_observer(&loaded, Arc::new(watch.clone()), &release)?;
                 Ok(Some(watch))
             })

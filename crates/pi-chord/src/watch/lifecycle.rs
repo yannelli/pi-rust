@@ -1,6 +1,6 @@
-//! The lifecycle both watch handles share: pending frames, serialized delivery, and the end of a watch.
+//! The lifecycle both watch handles share: serialized delivery and the end of a watch. Each handle keeps what is
+//! pending in its own store.
 
-use std::collections::VecDeque;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 
@@ -12,101 +12,95 @@ use crate::delta::Op;
 use crate::error::ChordError;
 use crate::sync::{BoxFuture, lock};
 
-/// Maximum frames kept behind one unavailable watch listener.
-pub(crate) const MAX_PENDING_WATCH_FRAMES: usize = 100;
-
-/// Calls the listener with one frame: its value, its ops, and the delivery context.
-pub(crate) type FrameListener<T, E> = Arc<dyn Fn(T, Vec<Op>, Context) -> BoxFuture<Result<(), E>> + Send + Sync>;
+/// Calls the listener with one delivery: its value, its ops, and the delivery context.
+pub(crate) type DeliveryListener<T, E> = Arc<dyn Fn(T, Vec<Op>, Context) -> BoxFuture<Result<(), E>> + Send + Sync>;
 pub(crate) type Report<E> = Arc<dyn Fn(&E) + Send + Sync>;
 /// Gives the value an overflow delivers instead of the newest one.
 pub type Replace<T> = Arc<dyn Fn() -> T + Send + Sync>;
 
-struct Frame<T> {
-    value: T,
-    ops: Vec<Op>,
-    context: Context,
-    /// The retirement frame: the watch ends `retired` once it is delivered.
-    retires: bool,
+/// One listener call: the value it delivers, its ops, and the context of the newest frame it covers.
+pub(crate) struct Delivery<T> {
+    pub value: T,
+    pub ops: Vec<Op>,
+    pub context: Context,
+    /// The retirement: the watch ends `retired` once it is delivered.
+    pub retires: bool,
 }
 
-struct State<T, E> {
+/// What a handle keeps pending until its listener takes it.
+pub(crate) trait PendingStore<T>: Send + 'static {
+    /// Take the next delivery, or `None` when nothing is pending.
+    fn next(&mut self) -> Option<Delivery<T>>;
+    fn has_pending(&self) -> bool;
+    /// Drop everything pending and every reference into the source; called once, when the watch ends.
+    fn release(&mut self);
+}
+
+struct State<T, E, P> {
     value: T,
-    listener: Option<FrameListener<T, E>>,
-    pending: VecDeque<Frame<T>>,
+    listener: Option<DeliveryListener<T, E>>,
+    pending: P,
     started: bool,
     scheduled: bool,
     running: bool,
-    retired: bool,
     /// Set once, by `terminate()`.
     end: Option<WatchEnd<E>>,
     cancellation: Option<(AbortSignal, u64)>,
     /// References into the source, dropped when the watch ends.
     detach: Option<Box<dyn FnOnce() + Send>>,
     report: Option<Report<E>>,
-    replace: Option<Replace<T>>,
 }
 
 /// A source feeds it and ends it explicitly; the end drops every reference it holds into its source, so a stopped
 /// watch that is still referenced keeps nothing but its last value alive.
-pub(crate) struct Lifecycle<T, E> {
-    state: Mutex<State<T, E>>,
+pub(crate) struct Lifecycle<T, E, P> {
+    state: Mutex<State<T, E, P>>,
     closed: watch::Sender<Option<WatchEnd<E>>>,
-    /// The ops of the frame an overflow delivers instead of the backlog, whose value is the argument.
-    overflow_ops: fn(&T) -> Vec<Op>,
 }
 
-impl<T, E> Lifecycle<T, E>
+impl<T, E, P> Lifecycle<T, E, P>
 where
     T: Clone + Send + Sync + 'static,
     E: Clone + Send + Sync + From<ChordError> + 'static,
+    P: PendingStore<T>,
 {
-    pub fn new(
-        value: T,
-        detach: Box<dyn FnOnce() + Send>,
-        report: Report<E>,
-        replace: Option<Replace<T>>,
-        overflow_ops: fn(&T) -> Vec<Op>,
-    ) -> Arc<Self> {
+    pub fn new(value: T, pending: P, detach: Box<dyn FnOnce() + Send>, report: Report<E>) -> Arc<Self> {
         let state = State {
             value,
             listener: None,
-            pending: VecDeque::new(),
+            pending,
             started: false,
             scheduled: false,
             running: false,
-            retired: false,
             end: None,
             cancellation: None,
             detach: Some(detach),
             report: Some(report),
-            replace,
         };
-        Arc::new(Self { state: Mutex::new(state), closed: watch::channel(None).0, overflow_ops })
+        Arc::new(Self { state: Mutex::new(state), closed: watch::channel(None).0 })
     }
 
     pub fn value(&self) -> T {
         lock(&self.state).value.clone()
     }
 
-    pub fn start(self: &Arc<Self>, listener: FrameListener<T, E>) -> Result<(), E> {
-        let mut state = lock(&self.state);
-        if state.started {
-            return Err(ChordError::error("Watch is already started").into());
+    pub fn start(self: &Arc<Self>, listener: DeliveryListener<T, E>) -> Result<(), E> {
+        {
+            let mut state = lock(&self.state);
+            if state.started {
+                return Err(ChordError::error("Watch is already started").into());
+            }
+            if state.end.is_some() {
+                return Err(ChordError::error("Watch is stopped").into());
+            }
+            state.started = true;
+            state.listener = Some(listener);
         }
-        if state.end.is_some() {
-            return Err(ChordError::error("Watch is stopped").into());
-        }
-        state.started = true;
-        state.listener = Some(listener);
-        let schedule = !state.pending.is_empty();
-        drop(state);
-        if schedule {
-            self.schedule();
-        }
+        self.schedule();
         Ok(())
     }
 
-    pub fn closed(&self) -> impl Future<Output = WatchEnd<E>> + Send + use<T, E> {
+    pub fn closed(&self) -> impl Future<Output = WatchEnd<E>> + Send + use<T, E, P> {
         let mut receiver = self.closed.subscribe();
         async move {
             let end = receiver.wait_for(Option::is_some).await.ok().and_then(|end| end.clone());
@@ -139,44 +133,17 @@ where
         Ok(())
     }
 
-    /// Queue one frame; past the bound the backlog collapses to one frame of `replace()` or the newest value.
-    pub fn enqueue(self: &Arc<Self>, value: T, ops: Vec<Op>, context: Context) {
-        let started = {
+    /// Change what is pending while the watch takes frames; `feed` says whether something became pending, which is
+    /// delivered once started, never inline.
+    pub fn feed(self: &Arc<Self>, feed: impl FnOnce(&mut P) -> bool) {
+        let schedule = {
             let mut state = lock(&self.state);
-            if state.end.is_some() || state.retired {
+            if state.end.is_some() {
                 return;
             }
-            if state.pending.len() >= MAX_PENDING_WATCH_FRAMES {
-                state.pending.clear();
-                let replacement = state.replace.as_ref().map_or(value, |replace| replace());
-                let ops = (self.overflow_ops)(&replacement);
-                state.pending.push_back(Frame { value: replacement, ops, context, retires: false });
-            } else {
-                state.pending.push_back(Frame { value, ops, context, retires: false });
-            }
-            state.started
+            feed(&mut state.pending) && state.started
         };
-        if started {
-            self.schedule();
-        }
-    }
-
-    /// Queue the last frame, after which the watch ends `retired`. An overflowing backlog is dropped, since the frame
-    /// replaces the root anyway.
-    pub fn enqueue_retirement(self: &Arc<Self>, value: T, ops: Vec<Op>, context: Context) {
-        let started = {
-            let mut state = lock(&self.state);
-            if state.end.is_some() || state.retired {
-                return;
-            }
-            state.retired = true;
-            if state.pending.len() >= MAX_PENDING_WATCH_FRAMES {
-                state.pending.clear();
-            }
-            state.pending.push_back(Frame { value, ops, context, retires: true });
-            state.started
-        };
-        if started {
+        if schedule {
             self.schedule();
         }
     }
@@ -196,6 +163,7 @@ where
         });
     }
 
+    /// Deliver until nothing is pending; what arrives during a call is taken after it returns.
     async fn drain(self: &Arc<Self>) {
         {
             let mut state = lock(&self.state);
@@ -205,18 +173,19 @@ where
             state.running = true;
         }
         loop {
-            let (frame, listener) = {
+            let (delivery, listener) = {
                 let mut state = lock(&self.state);
                 if state.end.is_some() {
                     break;
                 }
                 let Some(listener) = state.listener.clone() else { break };
-                let Some(frame) = state.pending.pop_front() else { break };
-                state.value = frame.value.clone();
-                (frame, listener)
+                let Some(delivery) = state.pending.next() else { break };
+                state.value = delivery.value.clone();
+                (delivery, listener)
             };
-            let retires = frame.retires;
-            let delivered = listener(frame.value, frame.ops, without_abort_signal(&frame.context)).await;
+            let retires = delivery.retires;
+            let context = without_abort_signal(&delivery.context);
+            let delivered = listener(delivery.value, delivery.ops, context).await;
             drop(listener);
             if let Err(error) = delivered {
                 let report = {
@@ -234,17 +203,18 @@ where
                 break;
             }
         }
+        // A frame fed after the loop found nothing pending saw the drain running and scheduled nothing.
         let reschedule = {
             let mut state = lock(&self.state);
             state.running = false;
-            state.end.is_none() && !state.pending.is_empty()
+            state.end.is_none() && state.pending.has_pending()
         };
         if reschedule {
             self.schedule();
         }
     }
 
-    /// End the watch once: detach, drop pending frames and every reference into the source, and settle `closed`. A
+    /// End the watch once: detach, drop what is pending and every reference into the source, and settle `closed`. A
     /// callback already running keeps running.
     pub fn terminate(&self, end: WatchEnd<E>) {
         let (cancellation, detach, dropped) = {
@@ -253,8 +223,8 @@ where
                 return;
             }
             state.end = Some(end.clone());
-            let pending = std::mem::take(&mut state.pending);
-            let dropped = (pending, state.report.take(), state.replace.take(), state.listener.take());
+            state.pending.release();
+            let dropped = (state.report.take(), state.listener.take());
             (state.cancellation.take(), state.detach.take(), dropped)
         };
         drop(dropped);

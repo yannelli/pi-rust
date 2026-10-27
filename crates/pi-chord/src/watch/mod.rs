@@ -53,7 +53,8 @@ impl<E> WatchEnd<E> {
     }
 }
 
-/// Serialized exact-frame observation of an immutable value with bounded pending delivery.
+/// Serialized observation of an immutable value: one listener call at a time; frames that arrive meanwhile are folded
+/// into the next call.
 pub trait WatchHandle<T = Json, E = ChordError> {
     /// Acquisition revision before start; latest delivered immutable revision afterward.
     fn value(&self) -> T;

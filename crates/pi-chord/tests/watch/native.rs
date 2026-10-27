@@ -8,7 +8,7 @@ use super::*;
 
 #[tokio::test]
 async fn delivers_values_in_order_with_a_context_never_inline() {
-    let watch = NativeWatch::<Arc<str>>::new("zero".into(), || {}, |_: &ChordError| {});
+    let watch = NativeWatch::<Arc<str>>::new("zero".into(), || {}, |_: &ChordError| {}, None);
     let key = create_context_key::<String>("frame");
     let delivered = Arc::new(Mutex::new(Vec::<(Arc<str>, Option<String>)>::new()));
     let (sink, frame_key) = (delivered.clone(), key.clone());
@@ -32,7 +32,7 @@ async fn delivers_values_in_order_with_a_context_never_inline() {
 
 #[tokio::test]
 async fn collapses_101_pending_values_to_the_newest() {
-    let watch = NativeWatch::<u32>::new(0, || {}, |_: &ChordError| {});
+    let watch = NativeWatch::<u32>::new(0, || {}, |_: &ChordError| {}, None);
     for n in 1..=101 {
         watch.advance(n, context());
     }
@@ -49,8 +49,27 @@ async fn collapses_101_pending_values_to_the_newest() {
 }
 
 #[tokio::test]
+async fn collapses_101_pending_values_to_the_value_of_replace() {
+    let replace: pi_chord::watch::Replace<String> = Arc::new(|| "replacement".into());
+    let watch = NativeWatch::<String>::new(String::new(), || {}, |_: &ChordError| {}, Some(replace));
+    for n in 1..=101 {
+        watch.advance(format!("value {n}"), context());
+    }
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let sink = seen.clone();
+    watch
+        .start(move |value, _| {
+            sink.lock().unwrap().push(value);
+            async { Ok(()) }
+        })
+        .unwrap();
+    flush().await;
+    assert_eq!(*seen.lock().unwrap(), ["replacement"]);
+}
+
+#[tokio::test]
 async fn ends_with_every_reason_of_its_lifecycle() {
-    let create = || NativeWatch::<u32>::new(0, || {}, |_: &ChordError| {});
+    let create = || NativeWatch::<u32>::new(0, || {}, |_: &ChordError| {}, None);
     assert!(matches!(create().stop().await, WatchEnd::Stopped));
 
     let cancelled = create();
@@ -70,7 +89,7 @@ async fn ends_with_every_reason_of_its_lifecycle() {
     let reported = Arc::new(Mutex::new(Vec::<String>::new()));
     let sink = reported.clone();
     let report = move |error: &ChordError| sink.lock().unwrap().push(error.to_string());
-    let throwing = NativeWatch::<u32>::new(0, || {}, report);
+    let throwing = NativeWatch::<u32>::new(0, || {}, report, None);
     throwing.start(|_, _| async { Err(ChordError::error("listener failed")) }).unwrap();
     throwing.advance(1, context());
     let end = throwing.closed().await;
@@ -83,7 +102,8 @@ async fn retains_neither_its_source_nor_its_listener_once_stopped_while_still_re
     async fn acquire(stop: bool) -> (NativeWatch<u32>, Weak<()>, Weak<()>) {
         let source = Arc::new(());
         let (in_detach, in_report) = (source.clone(), source.clone());
-        let watch = NativeWatch::new(0, move || drop(in_detach), move |_: &ChordError| drop(in_report.clone()));
+        let report = move |_: &ChordError| drop(in_report.clone());
+        let watch = NativeWatch::new(0, move || drop(in_detach), report, None);
         let sentinel = Arc::new(());
         let listener = Arc::downgrade(&sentinel);
         watch

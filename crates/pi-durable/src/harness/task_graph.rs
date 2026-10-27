@@ -108,7 +108,7 @@ impl TaskGraphView {
         let session = self.session.clone();
         let (watch, _) = self
             .attach(context, move |value, release| {
-                let watch = Watch::new(value.clone(), move || release.run(), move |error| session.report(error), None);
+                let watch = Watch::new(value.clone(), move || release.run(), move |error| session.report(error));
                 (Arc::new(watch.clone()) as Arc<dyn CommittedObserver>, watch)
             })
             .await?;

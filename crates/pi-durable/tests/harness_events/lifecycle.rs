@@ -176,6 +176,33 @@ fn partial_message(text: &str) -> Value {
 }
 
 #[tokio::test]
+async fn delivers_each_of_100_pending_batches_in_its_own_call_in_order_unlike_state_watches() {
+    let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &chat_setup(Default::default())).await;
+    let stream = watch_events(&harness, root.id, &ctx()).await.unwrap();
+    for index in 0..100 {
+        let id = root.id;
+        let draft = EntryDraft { data: Some(Json::from(json!({ "index": index }))), ..EntryDraft::new("note") };
+        let note = move |tx: Tx| async move { tx.append_entry(id, draft).await.map(|_| ()) };
+        root.commit(note, &ctx()).await.unwrap();
+    }
+    let batches = super::Batches::default();
+    let sink = batches.clone();
+    stream
+        .start(move |events, _| {
+            sink.lock().unwrap().push(events.iter().map(Value::from).collect());
+            async { Ok(()) }
+        })
+        .unwrap();
+    drained().await;
+    let batches = batches.lock().unwrap().clone();
+    let data: Vec<Vec<Value>> =
+        batches.iter().map(|events| events.iter().map(|event| event["entry"]["data"].clone()).collect()).collect();
+    assert_eq!(data, (0..100).map(|index| vec![json!({ "index": index })]).collect::<Vec<_>>());
+    stream.stop().await;
+    harness.close(&ctx()).await.unwrap();
+}
+
+#[tokio::test]
 async fn replaces_undelivered_batches_with_one_snapshot_after_100_pending_batches() {
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &chat_setup(Default::default())).await;
     let stream = watch_events(&harness, root.id, &ctx()).await.unwrap();

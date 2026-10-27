@@ -8,7 +8,8 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 
 use pi_chord::delta::Op;
-use pi_chord::{Context, Json, Watch};
+use pi_chord::watch::Replace;
+use pi_chord::{Context, Json, NativeWatch};
 
 use self::changes::{call_of, message_changes, object, same, tool_update};
 use super::host::Harness;
@@ -32,7 +33,7 @@ pub type AgentEvent = Json;
 pub struct AgentEventStream {
     /// The `snapshot` event at attachment.
     pub snapshot: AgentEvent,
-    watch: Watch<DurableError>,
+    watch: NativeWatch<Vec<AgentEvent>, DurableError>,
 }
 
 impl AgentEventStream {
@@ -42,8 +43,7 @@ impl AgentEventStream {
         F: Fn(Vec<AgentEvent>, Context) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = DurableResult<()>> + Send + 'static,
     {
-        self.watch
-            .start(move |events: Json, _, context| listener(events.as_array().cloned().unwrap_or_default(), context))
+        self.watch.start(listener)
     }
 
     pub fn stop(&self) -> impl Future<Output = WatchEnd> + Send + use<> {
@@ -116,7 +116,7 @@ fn snapshot_of(view: &Json) -> AgentEvent {
 /// The view observer of one stream: translates each publication into a batch for its watch.
 struct EventsObserver {
     conversation_id: ConversationId,
-    watch: Watch<DurableError>,
+    watch: NativeWatch<Vec<AgentEvent>, DurableError>,
     current: Arc<Mutex<Json>>,
     /// Generations whose held outcome already ended their turn.
     held: Mutex<HashSet<TaskId>>,
@@ -127,7 +127,7 @@ impl ViewObserver for EventsObserver {
         *lock(&self.current) = after.clone();
         let events = translate(self.conversation_id, before, after, ops, publication, &mut lock(&self.held));
         if !events.is_empty() {
-            self.watch.advance(Json::array(events), Vec::new(), context.clone());
+            self.watch.advance(events, context.clone());
         }
     }
 
@@ -160,14 +160,11 @@ pub async fn watch_events(
     let create = move |initial: &Json, release: Arc<Release>, held| {
         let current = Arc::new(Mutex::new(initial.clone()));
         let latest = current.clone();
-        // Batches are the watch's values; an overflow delivers a snapshot of the newest view instead.
-        let replace = Arc::new(move || Json::array(vec![snapshot_of(&lock(&latest))]));
-        let watch = Watch::new(
-            Json::array(Vec::new()),
-            move || release.run(),
-            move |error| session.report(error),
-            Some(replace),
-        );
+        // Batches are the watch's values, each delivered (folding would drop events); an overflow delivers a snapshot of
+        // the newest view instead.
+        let replace: Replace<Vec<AgentEvent>> = Arc::new(move || vec![snapshot_of(&lock(&latest))]);
+        let report = move |error: &DurableError| session.report(error);
+        let watch = NativeWatch::new(Vec::new(), move || release.run(), report, Some(replace));
         let observer = EventsObserver { conversation_id, watch: watch.clone(), current, held: Mutex::new(held) };
         (Arc::new(observer) as Arc<dyn ViewObserver>, (watch, snapshot_of(initial)))
     };
