@@ -16,6 +16,7 @@ pub(super) struct CompletionsStream {
     sender: EventSender,
     model_id: String,
     cost: ModelCost,
+    openrouter: bool,
     opencode_go: bool,
     supports_finish_reason: bool,
     text: Option<usize>,
@@ -31,6 +32,7 @@ impl CompletionsStream {
             sender,
             model_id: model.id.clone(),
             cost: model.cost.clone(),
+            openrouter: crate::providers::openrouter_cost::is_openrouter_model(model),
             opencode_go: model.provider == "opencode-go",
             supports_finish_reason,
             text: None,
@@ -72,14 +74,14 @@ impl SseHandler for CompletionsStream {
         }
         let chunk_usage = chunk.get("usage").filter(|usage| usage.is_object());
         if let Some(usage) = chunk_usage {
-            message.usage = parse_usage(usage, &self.cost);
+            message.usage = parse_usage(usage, &self.cost, self.openrouter);
         }
         let Some(choice) = chunk.get("choices").and_then(Value::as_array).and_then(|choices| choices.first()) else {
             return Ok(true);
         };
         // Some providers (for example Moonshot) report usage on the choice instead.
         if let (None, Some(usage)) = (chunk_usage, choice.get("usage").filter(|usage| usage.is_object())) {
-            builder.message_mut().usage = parse_usage(usage, &self.cost);
+            builder.message_mut().usage = parse_usage(usage, &self.cost, self.openrouter);
         }
         if let Some(reason) = choice.get("finish_reason").and_then(Value::as_str).filter(|reason| !reason.is_empty()) {
             builder.message_mut().raw_stop_reason = Some(reason.to_string());
@@ -231,8 +233,8 @@ fn number(value: Option<&Value>) -> Option<u64> {
 }
 
 /// Usage from a chunk. `cached_tokens` counts cache reads and `cache_write_tokens` writes;
-/// `completion_tokens` already includes reasoning tokens.
-fn parse_usage(raw: &Value, cost: &ModelCost) -> Usage {
+/// `completion_tokens` already includes reasoning tokens. OpenRouter adds its billed cost.
+fn parse_usage(raw: &Value, cost: &ModelCost, openrouter: bool) -> Usage {
     let prompt = number(raw.get("prompt_tokens")).unwrap_or_default();
     let cache_read = [
         raw.pointer("/prompt_tokens_details/cached_tokens"),
@@ -256,6 +258,9 @@ fn parse_usage(raw: &Value, cost: &ModelCost) -> Usage {
         ..Usage::default()
     };
     usage.apply_cost(cost);
+    if openrouter {
+        crate::providers::openrouter_cost::apply_openrouter_reported_cost(&mut usage, raw);
+    }
     usage
 }
 

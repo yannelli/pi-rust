@@ -23,6 +23,7 @@ pub(crate) mod mock_server;
 pub mod openai_codex;
 pub mod openai_completions;
 pub mod openai_responses;
+mod openrouter_cost;
 pub mod pi_messages;
 #[cfg(test)]
 mod plumbing_tests;

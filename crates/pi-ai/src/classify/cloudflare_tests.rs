@@ -94,7 +94,9 @@ async fn runs_cloudflare_hosted_models_and_parses_their_direct_output() {
         },
         "usage": { "input_tokens": 222, "output_tokens": 0 },
     });
-    for (id, input_price) in [("@cf/cloudflare/clef", 0.24), ("@cf/cloudflare/clef-flash", 0.09)] {
+    let models =
+        [("@cf/cloudflare/clef", 0.24), ("@cf/cloudflare/clef-flash", 0.038), ("@cf/cloudflare/clef-omni", 0.15)];
+    for (id, input_price) in models {
         let response = json!({ "result": clef_output, "success": true, "errors": [], "messages": [] });
         let mut server = MockServer::start(MockResponse::json(&response)).await;
         let mut model = model(&server, id);

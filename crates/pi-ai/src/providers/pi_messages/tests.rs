@@ -173,6 +173,44 @@ async fn propagates_error_events_and_missing_terminal_events() {
 }
 
 #[tokio::test]
+async fn terminal_events_carry_the_response_model() {
+    let done = json!({"type": "done", "reason": "stop", "usage": usage(), "responseModel": "claude-opus-5-5"});
+    let error = json!({"type": "error", "reason": "error", "usage": usage(), "errorMessage": "Upstream failed",
+        "responseModel": "claude-opus-5-5"});
+    let without = json!({"type": "done", "reason": "stop", "usage": usage(), "responseId": "resp_1"});
+    for (terminal, expected) in [(done, Some("claude-opus-5-5")), (error, Some("claude-opus-5-5")), (without, None)] {
+        let server = MockHttp::start(vec![wire(&[json!({"type": "start"}), terminal])]).await;
+        let (_, message) = collect(PiMessages.stream(&model(&server.base_url), &context(), keyed())).await;
+        assert_eq!((message.model.as_str(), message.response_model.as_deref()), ("auto", expected));
+        let serialized = serde_json::to_value(&message).unwrap();
+        assert_eq!(serialized.get("responseModel").is_some(), expected.is_some());
+    }
+}
+
+#[tokio::test]
+async fn rejects_content_indexes_that_are_not_the_next_or_an_existing_block() {
+    let cases = [
+        vec![json!({"type": "text_start", "contentIndex": 4_294_967_000u64})],
+        vec![json!({"type": "text_start", "contentIndex": "__proto__"})],
+        vec![
+            json!({"type": "text_start", "contentIndex": 0}),
+            json!({"type": "toolcall_end", "contentIndex": "__proto__", "toolCall": {"polluted": true}}),
+        ],
+        vec![json!({"type": "text_delta", "contentIndex": 0, "delta": "x"})],
+    ];
+    for events in cases {
+        let mut frames = vec![json!({"type": "start"})];
+        frames.extend(events);
+        frames.push(json!({"type": "done", "reason": "stop", "usage": usage()}));
+        let server = MockHttp::start(vec![wire(&frames)]).await;
+        let (_, message) = collect(PiMessages.stream(&model(&server.base_url), &context(), keyed())).await;
+        assert_eq!(message.stop_reason, StopReason::Error);
+        assert!(message.error_message.as_deref().unwrap_or_default().contains("Invalid contentIndex"), "{frames:?}");
+        assert!(message.content.len() <= 1);
+    }
+}
+
+#[tokio::test]
 async fn aborts_and_is_registered() {
     let frames = vec![
         format!("data: {}\n\n", json!({"type": "start"})),

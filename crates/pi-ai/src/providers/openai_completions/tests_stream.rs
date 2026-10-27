@@ -62,6 +62,29 @@ async fn routed_chunk_models_become_the_response_model() {
     assert_eq!(run_with(&router, &empty, options()).await.1.response_model, None);
 }
 
+// Regression test for upstream #9980.
+#[tokio::test]
+async fn openrouter_reported_totals_replace_the_catalog_total() {
+    let billed = |usage: Value| {
+        [json!({"id": "c", "model": "openrouter/auto",
+            "choices": [{"index": 0, "delta": {"content": "done"}, "finish_reason": "stop"}], "usage": usage})]
+    };
+    let mut router = test_model(API, "openrouter", "");
+    router.id = "openrouter/auto".into();
+    let non_byok = json!({"prompt_tokens": 100, "completion_tokens": 20, "cost": 0.004, "is_byok": false,
+        "cost_details": {"upstream_inference_cost": 0.003}});
+    let cost = run_with(&router, &billed(non_byok.clone()), options()).await.1.usage.cost;
+    assert_eq!((cost.total, cost.total_from_provider), (0.004, Some(true)), "no double-counted upstream cost");
+    assert!((cost.input - 100.0 / 1e6).abs() < 1e-12 && (cost.output - 40.0 / 1e6).abs() < 1e-12);
+    let byok = json!({"prompt_tokens": 100, "completion_tokens": 20, "cost": 0.0002, "is_byok": true,
+        "cost_details": {"upstream_inference_cost": 0.003}});
+    let cost = run_with(&router, &billed(byok), options()).await.1.usage.cost;
+    assert!((cost.total - 0.0032).abs() < 1e-10);
+    assert_eq!(cost.total_from_provider, Some(true));
+    let cost = run_with(&test_model(API, "openai", ""), &billed(non_byok), options()).await.1.usage.cost;
+    assert_eq!(cost.total_from_provider, Some(false), "other providers keep the catalog total");
+}
+
 #[tokio::test]
 async fn raw_finish_reasons_are_kept_and_unknown_ones_fail() {
     let (_, message) = run(&[choice("c1", json!({}), json!("stop"))]).await;

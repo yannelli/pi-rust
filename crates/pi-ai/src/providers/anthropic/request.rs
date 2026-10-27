@@ -13,8 +13,8 @@ use crate::simple_options::{
     MIN_ANSWER_TOKENS, MappedLevel, adjust_max_tokens_for_thinking, clamp_max_tokens_to_context, mapped_thinking_level,
     resolve_cache_retention,
 };
-use crate::transcript::{current_tools, initial_system_message, system_message_text};
-use crate::types::{Message, Model, ThinkingLevel};
+use crate::transcript::{current_tools, fold_top_level_tool_changes, initial_system_message, system_message_text};
+use crate::types::{Message, Model, SystemMessage, ThinkingLevel};
 
 pub(super) const CLAUDE_CODE_VERSION: &str = "2.1.280";
 const CLAUDE_CODE_IDENTITY: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
@@ -162,6 +162,14 @@ pub(super) fn build_params(params: &Params) -> Result<Built, String> {
     let conversation = if initial.is_some() { &transformed[1..] } else { &transformed[..] };
     let initial_tools = initial.and_then(|system| system.tools_added.as_deref()).unwrap_or_default();
     let native_tools = compat.mid_convo_system_messages && compat.mid_convo_tool_changes && !initial_tools.is_empty();
+    let later_systems: Vec<&SystemMessage> = conversation
+        .iter()
+        .filter_map(|message| match message {
+            Message::System(system) => Some(system),
+            _ => None,
+        })
+        .collect();
+    let (top_level_tools, folded_tool_changes) = fold_top_level_tool_changes(initial_tools, &later_systems);
     let format = ToolFormat {
         oauth,
         eager_input_streaming: compat.eager_input_streaming,
@@ -176,6 +184,7 @@ pub(super) fn build_params(params: &Params) -> Result<Built, String> {
             allow_empty_signature: compat.allow_empty_signature,
             managed_provider: effort_messages(model, compat, thinking).then_some(model.provider.as_str()),
             native_tools: native_tools.then_some(format),
+            folded_tool_changes,
         },
     )?;
     let preferred_in_additions = converted.preferred_strict_tools;
@@ -217,8 +226,8 @@ pub(super) fn build_params(params: &Params) -> Result<Built, String> {
     let tool_cache = cache_control.as_ref().filter(|_| compat.cache_control_on_tools);
     let mut preferred_strict_tools = preferred_in_additions;
     if native_tools {
-        let mut tools = convert_tools(initial_tools, format, tool_cache)?;
-        preferred_strict_tools |= has_preferred_strict(initial_tools, &tools);
+        let mut tools = convert_tools(&top_level_tools, format, tool_cache)?;
+        preferred_strict_tools |= has_preferred_strict(&top_level_tools, &tools);
         tools.push(deferred_tool_placeholder());
         body.insert("tools".into(), Value::Array(tools));
     } else {
@@ -254,7 +263,9 @@ fn insert_thinking(body: &mut Map<String, Value>, model: &Model, compat: &Compat
             json!({"type": "adaptive", "display": "summarized",
                 "block_binding": {"prefix_mismatch_behavior": "drop_block"}}),
         );
-        body.insert("output_config".into(), json!({"effort": "high"}));
+        // Effort markers set the level for every reply. The top-level effort is part of the cached
+        // prompt, so it stays fixed at "low": organizations can cap effort and reject any level above it.
+        body.insert("output_config".into(), json!({"effort": "low"}));
     } else if model.reasoning && thinking.enabled {
         if compat.force_adaptive_thinking {
             body.insert("thinking".into(), json!({"type": "adaptive", "display": "summarized"}));

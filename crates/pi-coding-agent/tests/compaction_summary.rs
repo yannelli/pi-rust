@@ -119,6 +119,7 @@ async fn split_turns_merge_a_turn_prefix_summary_and_file_lists() {
     ));
     assert_eq!(result.details, Some(json!({"readFiles": ["src/a.rs"], "modifiedFiles": ["src/b.rs", "src/old.rs"]})));
     assert!(result.usage.output >= 2, "usage of both calls is combined");
+    assert_eq!(result.usage.cost.total_from_provider, Some(false), "catalog estimates are not provider totals");
     let stored = session.leaf_entry().unwrap().compaction().unwrap().clone();
     assert_eq!(stored.usage, Some(result.usage));
     let stats = session.session_stats();

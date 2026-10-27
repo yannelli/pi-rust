@@ -137,7 +137,7 @@ async fn ex25_compaction_summarizes_in_the_background_on_demand_and_after_overfl
     }
     // Background compaction starts once the context passes the threshold, and the summary heads the context.
     let threshold = Some("threshold".to_owned());
-    assert_eq!(reasons, [None, None, threshold.clone(), threshold.clone(), threshold]);
+    assert_eq!(reasons, [None, None, None, threshold.clone(), threshold]);
 
     // A manual compaction while an answer is held finishes, and its summary waits for the answer.
     let finish = Arc::new(Notify::new());
@@ -171,14 +171,11 @@ async fn ex25_compaction_summarizes_in_the_background_on_demand_and_after_overfl
     // Without background compaction, then after one overflow: the run compacts and answers again.
     *background_tokens.lock().unwrap() = 0;
     ask("What should we pack?").await.unwrap();
-    // The faux usage counts cache writes too, so the next request passes the blocking threshold and compacts first.
-    // The overflow that follows comes after this generation's compaction, so it fails the input.
+    // The provider rejects the next request as too long: generation compacts and retries it once.
     script.lock().unwrap().overflow_once = true;
-    let failed = ask("Summarize the plan for my partner").await.unwrap_err();
-    assert_eq!(failed.0.as_deref(), Some("model_error"));
-    assert_eq!(failed.1.map(|detail| detail.to_serde()), Some(json!("prompt is too long")));
+    ask("Summarize the plan for my partner").await.unwrap();
     let (_, _, reason, lines) = show(&root).await;
-    assert_eq!(reason.as_deref(), Some("threshold"));
+    assert_eq!(reason.as_deref(), Some("overflow"));
     // The baseline leads the summary and the kept answer.
     assert_eq!(lines[0], "system (system prompt)");
     assert_eq!(lines[3], "user Summarize the plan for my partner");
