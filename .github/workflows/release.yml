@@ -165,7 +165,7 @@ jobs:
         run: |
           name="pi-$TAG-$TARGET"
           mkdir -p "dist/$name"
-          cp README.md LICENSE "dist/$name/"
+          cp README.md LICENSE crates/pi-coding-agent/src/acp/LICENSE-pi-acp "dist/$name/"
           [ -f CHANGELOG.md ] && cp CHANGELOG.md "dist/$name/"
           if [ "${{ runner.os }}" = Windows ]; then
             cp "target/$TARGET/release/pi.exe" "dist/$name/"
