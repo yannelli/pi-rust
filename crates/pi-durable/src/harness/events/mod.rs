@@ -20,10 +20,8 @@ use super::view::ViewObserver;
 use crate::documents::encode;
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{ConversationId, TaskId};
-use crate::session::{Release, WatchEnd};
-use crate::types::{
-    CommitChange, CommitPublication, DocumentCommitChange, TaskQuery, TaskRecord, TaskState, TaskStatus,
-};
+use crate::session::{ObservedCommit, Release, WatchEnd};
+use crate::types::{CommitChange, DocumentCommitChange, TaskQuery, TaskRecord, TaskState, TaskStatus};
 
 /// One agent event as JSON with its upstream `type` (`snapshot`, `run_start`, `message_update`,
 /// `tool_execution_end`, and so on) and camelCase fields, as upstream `AgentEvent` serializes.
@@ -123,7 +121,7 @@ struct EventsObserver {
 }
 
 impl ViewObserver for EventsObserver {
-    fn publication(&self, before: &Json, after: &Json, ops: &[Op], publication: &CommitPublication, context: &Context) {
+    fn publication(&self, before: &Json, after: &Json, ops: &[Op], publication: &ObservedCommit, context: &Context) {
         *lock(&self.current) = after.clone();
         let events = translate(self.conversation_id, before, after, ops, publication, &mut lock(&self.held));
         if !events.is_empty() {
@@ -202,7 +200,7 @@ fn translate(
     before: &Json,
     after: &Json,
     view_ops: &[Op],
-    publication: &CommitPublication,
+    publication: &ObservedCommit,
     held: &mut HashSet<TaskId>,
 ) -> Vec<AgentEvent> {
     let mut entries = Vec::new();
@@ -210,7 +208,7 @@ fn translate(
     let mut submissions = Vec::new();
     // Nested results this commit stored, by nested task ID; read now, since the caller's documents may retire next.
     let mut nested_results: HashMap<u64, Json> = HashMap::new();
-    for change in &publication.changes {
+    for change in publication.changes() {
         match change {
             CommitChange::Document(DocumentCommitChange::Document {
                 record,

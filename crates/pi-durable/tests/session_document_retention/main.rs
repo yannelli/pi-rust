@@ -76,7 +76,7 @@ pub fn open(retention_ms: f64) -> Opened {
         now: Some(Arc::new(move || *reader.lock().unwrap())),
         document_retention_ms: Some(retention_ms),
         hooks: None,
-        read_only: false,
+        ..SessionOptions::default()
     };
     Opened { session: create_session(storage.clone(), options), storage, clock }
 }

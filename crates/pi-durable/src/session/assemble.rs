@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::sync::Mutex;
 
-use super::core::{LoadedDocument, LoadedMeta};
+use super::core::{AdoptedDocuments, LoadedDocument, LoadedMeta};
 use super::line::lock;
 use super::plans::{DocumentPlan, PlanRecord, apply_submission_change, plan_document};
 use super::tx::{TaskWriteKind, Tx, TxState};
@@ -286,16 +286,17 @@ impl Tx {
     }
 
     /// Adopt every prepared change by pointer swap after Storage success and describe the publication.
-    pub(crate) fn adopt(&self, seq: Seq) -> DurableResult<Vec<DocumentCommitChange>> {
+    pub(crate) fn adopt(&self, seq: Seq) -> DurableResult<AdoptedDocuments> {
         let core = &self.0.core;
         let plans = std::mem::take(&mut lock(&self.0.state).plans);
         let mut publications = Vec::new();
+        // Only when the commit stored held changes: then what Storage got differs from what memory adopted.
+        let mut stored: Option<Vec<DocumentCommitChange>> = None;
         for plan in plans {
-            let publishes = plan.publishes();
             let committed = matches!(plan.record, PlanRecord::Committed(_));
-            let mut record = match plan.record {
-                PlanRecord::Committed(record) => record,
-                PlanRecord::New(create) => create.into_record(seq),
+            let mut record = match &plan.record {
+                PlanRecord::Committed(record) => record.clone(),
+                PlanRecord::New(create) => create.clone().into_record(seq),
             };
             if plan.retire {
                 record.retired_at = Some(seq);
@@ -333,32 +334,52 @@ impl Tx {
                     });
                 }
             }
-            let conversation_id = plan.conversation_id;
-            if plan.retire {
-                if committed {
-                    core.evict(&plan.address_id, record.id);
+            if plan.retire && committed {
+                core.evict(&plan.address_id, record.id);
+            }
+            let Some(publication) = describe(&plan, record) else { continue };
+            let Some((held_ops, observed)) = plan.held else {
+                if let Some(stored) = &mut stored {
+                    stored.push(publication.clone());
                 }
-                let (version, value, ops) = (None, None, Vec::new());
-                publications.push(DocumentCommitChange::Document { record, conversation_id, version, value, ops });
-            } else if let Some(StorageWrite::DocumentCopy { source, .. }) = &plan.content {
-                let conversation_id = match record.scope {
-                    DocumentScope::Conversation { conversation_id } => conversation_id,
-                    _ => conversation_id.unwrap_or_default(),
-                };
-                publications.push(DocumentCommitChange::Copy { record, conversation_id, source: *source });
-            } else if let Some(change) = plan.change
-                && publishes
-            {
-                let ops = if change.loaded.is_some() { change.prepared.ops.clone() } else { Vec::new() };
-                publications.push(DocumentCommitChange::Document {
-                    record,
-                    conversation_id,
-                    version: Some(change.version),
-                    value: Some(change.prepared.value.clone()),
-                    ops,
-                });
+                publications.push(publication);
+                continue;
+            };
+            let stored = stored.get_or_insert_with(|| publications.clone());
+            // Only a document change of a loaded incarnation carries held operations.
+            let held = match &publication {
+                DocumentCommitChange::Document { record, conversation_id, version, value, .. } => {
+                    let (record, conversation_id, version, value) =
+                        (record.clone(), *conversation_id, *version, value.clone());
+                    DocumentCommitChange::Document { record, conversation_id, version, value, ops: held_ops }
+                }
+                other => other.clone(),
+            };
+            stored.push(held);
+            if observed {
+                publications.push(publication);
             }
         }
-        Ok(publications)
+        Ok(AdoptedDocuments { observed: publications, stored })
     }
+}
+
+/// The publication of one adopted plan, if it publishes, with `record` as committed.
+fn describe(plan: &DocumentPlan, record: DocumentRecord) -> Option<DocumentCommitChange> {
+    let conversation_id = plan.conversation_id;
+    if plan.retire {
+        let (version, value, ops) = (None, None, Vec::new());
+        return Some(DocumentCommitChange::Document { record, conversation_id, version, value, ops });
+    }
+    if let Some(StorageWrite::DocumentCopy { source, .. }) = &plan.content {
+        let conversation_id = match record.scope {
+            DocumentScope::Conversation { conversation_id } => conversation_id,
+            _ => conversation_id.unwrap_or_default(),
+        };
+        return Some(DocumentCommitChange::Copy { record, conversation_id, source: *source });
+    }
+    let change = plan.change.as_ref().filter(|_| plan.publishes())?;
+    let ops = if change.loaded.is_some() { change.prepared.ops.clone() } else { Vec::new() };
+    let (version, value) = (Some(change.version), Some(change.prepared.value.clone()));
+    Some(DocumentCommitChange::Document { record, conversation_id, version, value, ops })
 }

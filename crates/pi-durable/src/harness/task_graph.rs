@@ -14,8 +14,8 @@ use super::types::BlockedReason;
 use super::util::{cancellation, closed_error, lock, scan_all};
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::ConversationId;
-use crate::session::{CommittedObserver, CommittedStateSource, DocumentState, Release, Session};
-use crate::types::{CommitChange, CommitPublication, ConversationQuery, TaskQuery, TaskRecord, TaskState, TaskStatus};
+use crate::session::{CommittedObserver, CommittedStateSource, DocumentState, ObservedCommit, Release, Session};
+use crate::types::{CommitChange, ConversationQuery, TaskQuery, TaskRecord, TaskState, TaskStatus};
 
 /// `{ tasks }`: every live task keyed by its decimal ID. A node is `{ id, kind, conversationId, owner?, background,
 /// abortRequested, state, blocked?, conversations }`; `state` is `{ status, phase }`, `{ status: "waiting", phase, on,
@@ -257,7 +257,11 @@ impl TaskGraphView {
     }
 
     /// Derive the mount's operations from one publication, apply them, and hand the revision to every observer.
-    fn advance(&self, publication: &CommitPublication, context: &Context) {
+    fn advance(&self, publication: &ObservedCommit, context: &Context) {
+        // A commit held in memory changes documents only, which the graph does not show.
+        if publication.is_memory() {
+            return;
+        }
         let delivery = {
             let mut mount = lock(&self.mount);
             let Some(mount) = mount.as_mut() else { return };
@@ -290,7 +294,7 @@ fn path(keys: &[&str]) -> Path {
 fn graph_ops(
     graph: &Json,
     records: &mut HashMap<String, BlockedSubject>,
-    publication: &CommitPublication,
+    publication: &ObservedCommit,
     blocked: &dyn Fn(&BlockedSubject) -> Option<BlockedReason>,
 ) -> DurableResult<Vec<Op>> {
     let mut ops = Vec::new();
@@ -302,7 +306,7 @@ fn graph_ops(
             None => graph.get("tasks").and_then(|tasks| tasks.get(key)).cloned(),
         }
     };
-    for change in &publication.changes {
+    for change in publication.changes() {
         let CommitChange::Task(record) = change else { continue };
         let key = record.id.to_string();
         let previous = node(&changed, &key);
@@ -328,7 +332,7 @@ fn graph_ops(
     // After the tasks, so a conversation created with its owner task in one commit finds the owner's node. Change
     // order within a publication is unspecified, so each owner's list is sorted again.
     let mut created: Vec<(String, Vec<ConversationId>)> = Vec::new();
-    for change in &publication.changes {
+    for change in publication.changes() {
         let CommitChange::Conversation(conversation) = change else { continue };
         let Some(owner) = conversation.owner else { continue };
         let key = owner.task_id.to_string();

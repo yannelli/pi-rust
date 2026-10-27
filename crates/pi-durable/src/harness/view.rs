@@ -19,8 +19,8 @@ use super::util::{cancellation, closed_error, lock};
 use crate::documents::encode;
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{ConversationId, DocumentId};
-use crate::session::{CommittedObserver, CommittedStateSource, DocumentState, Release, Session};
-use crate::types::{CommitChange, CommitPublication, DocumentCommitChange, Storage};
+use crate::session::{CommittedObserver, CommittedStateSource, DocumentState, ObservedCommit, Release, Session};
+use crate::types::{CommitChange, DocumentCommitChange, Storage};
 
 /// The view `{ conversation, entries, docs }` as JSON: the conversation record, the raw active entries (as
 /// `ContextView::entries`), and the built-in conversation documents keyed by kind.
@@ -38,7 +38,7 @@ pub(crate) trait ViewObserver: Send + Sync {
         _before: &Json,
         _after: &Json,
         _ops: &[Op],
-        _publication: &CommitPublication,
+        _publication: &ObservedCommit,
         _context: &Context,
     ) {
     }
@@ -244,7 +244,7 @@ impl ConversationViews {
         Ok(Mount { value: Json::object(value), docs: incarnations, observers: Vec::new() })
     }
 
-    fn advance_all(&self, publication: &CommitPublication, context: &Context) {
+    fn advance_all(&self, publication: &ObservedCommit, context: &Context) {
         let mut deliveries = Vec::new();
         {
             let mut mounts = lock(&self.mounts);
@@ -276,12 +276,12 @@ fn key_path(keys: &[&str]) -> Path {
 }
 
 /// Derive the mount's operations from one publication and apply them. Entry writes are published in ID order.
-fn advance(id: ConversationId, mount: &mut Mount, publication: &CommitPublication) -> DurableResult<Delivery> {
+fn advance(id: ConversationId, mount: &mut Mount, publication: &ObservedCommit) -> DurableResult<Delivery> {
     let mut doc_ops = Vec::new();
     let mut entry_ops = Vec::new();
     let mut entries: Vec<Json> = mount.value.get("entries").and_then(Json::as_array).cloned().unwrap_or_default();
     let mut entries_changed = false;
-    for change in &publication.changes {
+    for change in publication.changes() {
         match change {
             CommitChange::Entry(entry) if entry.conversation_id == id => {
                 let value = encode(entry)?;

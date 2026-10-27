@@ -46,7 +46,11 @@ impl Submissions {
         let weak = Arc::downgrade(&submissions);
         session.observe_commits(move |publication, _| {
             let Some(submissions) = weak.upgrade() else { return Ok(()) };
-            for change in &publication.changes {
+            // A commit held in memory changes documents only.
+            if publication.is_memory() {
+                return Ok(());
+            }
+            for change in publication.changes() {
                 if let CommitChange::Submission(record) = change
                     && record.status.is_settled()
                 {

@@ -49,7 +49,7 @@ async fn event_sequence(document_retention_ms: f64) -> Vec<String> {
     {
         let mut settings = setup.settings.lock().unwrap();
         settings.document_retention_ms = Some(document_retention_ms);
-        settings.progress = Some(ProgressOverrides { partial_interval_ms: None, output_interval_ms: Some(0) });
+        settings.progress = Some(ProgressOverrides { output_interval_ms: Some(0), ..Default::default() });
     }
     let steps = define_tool(
         "steps",

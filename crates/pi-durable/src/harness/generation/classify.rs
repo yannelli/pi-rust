@@ -15,7 +15,7 @@ use crate::documents::encode;
 use crate::errors::{DurableError, DurableResult};
 use crate::harness::compaction::{CompactionInput, create_compaction, select_cut};
 use crate::harness::inbox::{BoundaryAt, append_user, apply_boundary, prepare_boundary};
-use crate::harness::live::{DeferredPoll, LIVE_DOC, LiveGeneration, RetryState, end_run};
+use crate::harness::live::{DeferredPoll, LIVE_DOC, LiveGeneration, PROGRESS_COMMIT, RetryState, end_run};
 use crate::harness::scheduler::TaskRuntime;
 use crate::harness::types::{CompactionReason, ModelRef, UserInput};
 use crate::harness::usage::ensure_provider_session_id;
@@ -129,7 +129,7 @@ async fn commit_partial(runtime: TaskRuntime, partial: AssistantMessage, attempt
             })?;
             Ok(None)
         };
-        runtime.commit(change, &context).await
+        runtime.commit_with_options(change, &context, PROGRESS_COMMIT).await
     }
     .await;
     // Failures after an abort mark or close are expected; the committed state stays consistent.

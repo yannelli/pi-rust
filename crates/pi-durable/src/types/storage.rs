@@ -153,11 +153,44 @@ pub enum CommitChange {
     Document(DocumentCommitChange),
 }
 
-/// Every immutable change from one successful Session commit. Change order is unspecified.
+/// Every immutable change one Session storage transaction stored, with its `seq`. Change order is unspecified. A
+/// commit held in memory ([`CommitPersistence`]) is published once it is stored: alone, or with the next commit that
+/// reads or writes its document, whose document change then carries the held operations followed by its own.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CommitPublication {
     pub seq: Seq,
     pub changes: Vec<CommitChange>,
+}
+
+/// When a commit reaches Storage. `Immediate`, the default: before the commit returns. `Deferred`: when every write
+/// of the commit changes an existing conversation document with history `latest` and fork `initial` (no creation,
+/// migration, or retirement), the Session adopts it in memory, shows it to watches and views, and returns, but stores
+/// it later: with the next commit that reads or writes that document, before the document leaves memory or retires,
+/// at close, and at the latest about `within_ms` after the commit (default `settings.progress.persist_within_ms`,
+/// 1,000 ms; infinity waits for one of the others). A commit that writes anything else is immediate. A crash loses what
+/// is held, so only state whose loss is acceptable, such as streamed progress, should be deferred.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum CommitPersistence {
+    #[default]
+    Immediate,
+    Deferred {
+        within_ms: Option<f64>,
+    },
+}
+
+/// Options of one Session commit.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CommitOptions {
+    pub persistence: CommitPersistence,
+}
+
+impl CommitOptions {
+    /// A deferred commit with the default window.
+    pub const DEFERRED: Self = Self { persistence: CommitPersistence::Deferred { within_ms: None } };
+
+    pub fn deferred(within_ms: Option<f64>) -> Self {
+        Self { persistence: CommitPersistence::Deferred { within_ms } }
+    }
 }
 
 /// The caller's in-memory adoption of one durable batch, so memory always shows a complete prefix of the log. It

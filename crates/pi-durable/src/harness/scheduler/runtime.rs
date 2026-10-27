@@ -29,7 +29,7 @@ use crate::ids::{ConversationId, EntryId, TaskId};
 use crate::models::Models;
 use crate::session::{DocumentWatch, TransactionScope, Tx};
 use crate::timers::Disarm;
-use crate::types::{EntryRecord, ReportFrom, ReportInfo, TaskOutcome, TaskRecord, TaskState};
+use crate::types::{CommitOptions, EntryRecord, ReportFrom, ReportInfo, TaskOutcome, TaskRecord, TaskState};
 
 type AgentFuture = Shared<BoxFuture<'static, DurableResult<Agent>>>;
 
@@ -146,9 +146,24 @@ impl TaskRuntime {
         F: FnOnce(Tx, TaskRecord) -> Fut + Send + 'static,
         Fut: Future<Output = DurableResult<Option<NextTaskState>>> + Send + 'static,
     {
+        self.commit_with_options(change, context, CommitOptions::default()).await
+    }
+
+    /// [`Self::commit`] with options: `options.persistence` may defer storing a commit that changes only documents
+    /// (`CommitPersistence`); one that returns a state is immediate.
+    pub async fn commit_with_options<F, Fut>(
+        &self,
+        change: F,
+        context: &Context,
+        options: CommitOptions,
+    ) -> DurableResult<()>
+    where
+        F: FnOnce(Tx, TaskRecord) -> Fut + Send + 'static,
+        Fut: Future<Output = DurableResult<Option<NextTaskState>>> + Send + 'static,
+    {
         let (scheduler, invocation) = (self.scheduler.clone(), self.invocation.clone());
         let checkpoint = self
-            .gated(
+            .gated_with(
                 move |tx, current| async move {
                     let Some(next) = change(tx.clone(), current.clone()).await? else { return Ok(None) };
                     scheduler.commit_state(&tx, &invocation, &current, next.clone()).await?;
@@ -161,6 +176,7 @@ impl TaskRuntime {
                     Ok(phase)
                 },
                 context,
+                options,
             )
             .await?;
         if let Some(phase) = checkpoint {
@@ -180,7 +196,31 @@ impl TaskRuntime {
         self.gated(move |tx, _| change(tx), context).await
     }
 
+    /// [`Self::commit_map`] with options; see [`Self::commit_with_options`].
+    pub async fn commit_map_with_options<T, F, Fut>(
+        &self,
+        change: F,
+        context: &Context,
+        options: CommitOptions,
+    ) -> DurableResult<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(Tx) -> Fut + Send + 'static,
+        Fut: Future<Output = DurableResult<T>> + Send + 'static,
+    {
+        self.gated_with(move |tx, _| change(tx), context, options).await
+    }
+
     async fn gated<T, F, Fut>(&self, change: F, context: &Context) -> DurableResult<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(Tx, TaskRecord) -> Fut + Send + 'static,
+        Fut: Future<Output = DurableResult<T>> + Send + 'static,
+    {
+        self.gated_with(change, context, CommitOptions::default()).await
+    }
+
+    async fn gated_with<T, F, Fut>(&self, change: F, context: &Context, options: CommitOptions) -> DurableResult<T>
     where
         T: Send + 'static,
         F: FnOnce(Tx, TaskRecord) -> Fut + Send + 'static,
@@ -190,7 +230,7 @@ impl TaskRuntime {
         let (scheduler, invocation) = (self.scheduler.clone(), self.invocation.clone());
         let scope =
             TransactionScope { conversation_id: Some(invocation.conversation_id), task_id: Some(invocation.task_id) };
-        let committed = self.scheduler.core.session.commit_with(
+        let committed = self.scheduler.core.session.commit_scoped(
             move |tx| async move {
                 invocation.check()?;
                 if scheduler.closing() {
@@ -209,6 +249,7 @@ impl TaskRuntime {
             },
             context,
             scope,
+            options,
         );
         committed.await
     }

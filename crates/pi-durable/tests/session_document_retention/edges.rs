@@ -92,7 +92,7 @@ async fn evicts_promptly_once_the_retention_is_shortened() {
         now: Some(Arc::new(move || *reader.lock().unwrap())),
         hooks: Some(Arc::new(Shortened(retention.clone()))),
         document_retention_ms: None,
-        read_only: false,
+        ..SessionOptions::default()
     };
     let session = create_session(Arc::new(ControlledStorage::default()), options);
     let conversation_id = create_conversation(&session).await;

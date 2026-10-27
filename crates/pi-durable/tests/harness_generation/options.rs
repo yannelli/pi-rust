@@ -246,8 +246,14 @@ fn resolves_settings_over_the_built_in_defaults() {
     let compaction =
         json!({ "enabled": true, "reserveTokens": 16384, "keepRecentTokens": 20000, "backgroundTokens": 32768 });
     assert_eq!(serde_json::to_value(settings.compaction).unwrap(), compaction);
-    let progress = json!({ "partialIntervalMs": 100, "outputIntervalMs": 100 });
+    let progress = json!({ "partialIntervalMs": 100, "outputIntervalMs": 100, "persistWithinMs": 1000.0 });
     assert_eq!(serde_json::to_value(settings.progress).unwrap(), progress);
+    // Not a number of milliseconds, 0 or more: the default.
+    let within = |persist_within_ms: f64| {
+        let progress = Some(ProgressOverrides { persist_within_ms: Some(persist_within_ms), ..Default::default() });
+        resolve_settings(Some(&HarnessSettings { progress, ..HarnessSettings::default() })).progress.persist_within_ms
+    };
+    assert_eq!((within(-1.0), within(0.0)), (1000.0, 0.0));
     assert_eq!(settings.tool_execution, ToolExecutionMode::Parallel);
     assert_eq!((settings.steering_mode, settings.follow_up_mode), (QueueMode::OneAtATime, QueueMode::OneAtATime));
     assert_eq!(settings.context_retention_ms, 600_000.0);
@@ -271,7 +277,7 @@ fn resolves_settings_over_the_built_in_defaults() {
         ..HarnessSettings::default()
     };
     let progress = serde_json::to_value(resolve_settings(Some(&output)).progress).unwrap();
-    assert_eq!(progress, json!({ "partialIntervalMs": 100, "outputIntervalMs": 500 }));
+    assert_eq!(progress, json!({ "partialIntervalMs": 100, "outputIntervalMs": 500, "persistWithinMs": 1000.0 }));
 }
 
 static TEST_AGENT: LazyLock<DocToken<Json, LatestConversation>> = LazyLock::new(|| {

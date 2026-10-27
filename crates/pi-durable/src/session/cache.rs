@@ -25,14 +25,15 @@ pub fn document_retention(ms: Option<f64>) -> f64 {
     ms.filter(|ms| *ms >= 0.0).unwrap_or(DEFAULT_DOCUMENT_RETENTION_MS)
 }
 
-/// How many documents the cache holds, how many are idle, how many incarnations are pinned, and how many sweep jobs
-/// were queued on the line so far.
+/// How many documents the cache holds, how many are idle, how many incarnations are pinned, how many sweep jobs
+/// were queued on the line so far, and how many documents have held changes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DocumentCacheSizes {
     pub cached: usize,
     pub idle: usize,
     pub attached: usize,
     pub sweeps: usize,
+    pub held: usize,
 }
 
 /// The pending eviction: a timer for the oldest idle document, or a job on the line at once.
@@ -92,6 +93,7 @@ impl DocCache {
             idle: self.idle.len(),
             attached: self.attached.len(),
             sweeps: self.sweep_jobs,
+            held: 0,
         }
     }
 

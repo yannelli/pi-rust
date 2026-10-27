@@ -428,6 +428,23 @@ pub fn open_test_session() -> TestSession {
 }
 
 /// Document value changes of a publication: `(record, conversation, version, value, ops)`.
+/// Upstream `observeCommits()`: every commit as memory adopts it, deferred ones before they are stored. A commit held
+/// in memory comes with `seq` 0.
+pub fn observe_commits(
+    session: &Session,
+    listener: impl Fn(&CommitPublication, &Context) -> DurableResult<()> + Send + Sync + 'static,
+) -> DurableResult<pi_chord::Unsubscribe> {
+    session.observe_commits(move |observed, context| {
+        let publication = match observed {
+            pi_durable::session::ObservedCommit::Stored(publication) => publication.clone(),
+            pi_durable::session::ObservedCommit::Memory(changes) => {
+                CommitPublication { seq: Seq(0), changes: changes.clone() }
+            }
+        };
+        listener(&publication, context)
+    })
+}
+
 pub fn document_changes(publication: &CommitPublication) -> Vec<DocumentCommitChange> {
     let documents = publication.changes.iter().filter_map(|change| match change {
         CommitChange::Document(document @ DocumentCommitChange::Document { .. }) => Some(document.clone()),

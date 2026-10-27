@@ -16,7 +16,9 @@ use crate::entries::RESET_ENTRY;
 use crate::errors::DurableResult;
 use crate::ids::{ConversationId, EntryId, TaskId};
 use crate::session::{DocumentState, TransactionScope, Tx};
-use crate::types::{ConversationOwnership, Cursor, DraftHead, EntryDraft, EntryQuery, EntryRecord, Page, ScanOrder};
+use crate::types::{
+    CommitOptions, ConversationOwnership, Cursor, DraftHead, EntryDraft, EntryQuery, EntryRecord, Page, ScanOrder,
+};
 
 /// What a create or fork makes.
 pub(crate) enum CreateTarget {
@@ -113,8 +115,24 @@ impl Conversation {
         F: FnOnce(Tx) -> Fut + Send + 'static,
         Fut: Future<Output = DurableResult<T>> + Send + 'static,
     {
+        self.commit_with_options(change, context, CommitOptions::default()).await
+    }
+
+    /// Session commit whose `tx.create_task()` defaults to this conversation; `options` as for
+    /// `Session::commit_with_options()`.
+    pub async fn commit_with_options<T, F, Fut>(
+        &self,
+        change: F,
+        context: &Context,
+        options: CommitOptions,
+    ) -> DurableResult<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(Tx) -> Fut + Send + 'static,
+        Fut: Future<Output = DurableResult<T>> + Send + 'static,
+    {
         let scope = TransactionScope { conversation_id: Some(self.id), task_id: None };
-        self.harness.0.session.commit_with(change, context, scope).await
+        self.harness.0.session.commit_scoped(change, context, scope, options).await
     }
 
     /// Committed model context, at `at` when given.

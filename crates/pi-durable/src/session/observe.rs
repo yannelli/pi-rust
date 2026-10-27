@@ -53,7 +53,7 @@ impl SessionCore {
         let pin = self.pin_document(&loaded.address_id, record_id);
         let retired = pin.clone();
         let commits = self.observe_commits(Arc::new(move |publication, context| {
-            for change in &publication.changes {
+            for change in publication.changes() {
                 let CommitChange::Document(DocumentCommitChange::Document { record, version, value, ops, .. }) = change
                 else {
                     continue;

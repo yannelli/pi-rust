@@ -57,6 +57,9 @@ pub(crate) struct DocumentPlan {
     pub content: Option<StorageWrite>,
     pub change: Option<PlanChange>,
     pub conversation_id: Option<ConversationId>,
+    /// Set when this commit also stores held changes of the incarnation (`take_held()`): the operations its stored
+    /// change publishes, held first, and whether it has a change of its own to show the Session's observers.
+    pub held: Option<(Vec<pi_chord::delta::Op>, bool)>,
 }
 
 impl DocumentPlan {
@@ -74,6 +77,7 @@ impl DocumentPlan {
             content: None,
             change: None,
             conversation_id: None,
+            held: None,
         }
     }
 }
@@ -117,7 +121,7 @@ pub(crate) fn plan_document(document: &DocumentEntry) -> Option<DocumentPlan> {
             (record, content, Some(change))
         }
     };
-    Some(DocumentPlan { address_id, record, retire, content, change, conversation_id: None })
+    Some(DocumentPlan { address_id, record, retire, content, change, conversation_id: None, held: None })
 }
 
 /// Complete record after one change; `None` when the record stays unchanged. Only a placed input is answered.
