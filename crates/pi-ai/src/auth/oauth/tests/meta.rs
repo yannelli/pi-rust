@@ -65,6 +65,8 @@ async fn login_polls_for_an_identity_token_and_mints_a_key() {
             verification_uri: "https://auth.meta.com/oauth/device/?code=ABCD-1234".into(),
             interval_seconds: Some(5),
             expires_in_seconds: Some(600),
+            open_browser_on_confirm: None,
+            copy_code_on_confirm: None,
         }
     );
     assert_eq!(events[1], AuthEvent::Progress { message: "Enabling Meta Model API access...".into() });

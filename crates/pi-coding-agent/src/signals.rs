@@ -54,13 +54,39 @@ pub fn kill_tracked_detached_children() {
     }
 }
 
-/// SIGKILL the process group of `pid`, or the process itself when that fails.
+/// SIGKILL the process group of `pid`, or the process itself when that fails. On macOS the
+/// group is stopped first.
 #[cfg(unix)]
 pub fn kill_process_tree(pid: u32) {
     use rustix::process::{Pid, Signal, kill_process, kill_process_group};
     let Some(pid) = i32::try_from(pid).ok().and_then(Pid::from_raw) else { return };
-    if kill_process_group(pid, Signal::KILL).is_err() {
-        let _ = kill_process(pid, Signal::KILL);
+    kill_tree_steps(cfg!(target_os = "macos"), |step| match step {
+        KillStep::StopGroup => kill_process_group(pid, Signal::STOP).is_ok(),
+        KillStep::KillGroup => kill_process_group(pid, Signal::KILL).is_ok(),
+        KillStep::KillProcess => kill_process(pid, Signal::KILL).is_ok(),
+    });
+}
+
+/// One signal [`kill_process_tree`] sends.
+#[cfg(unix)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KillStep {
+    StopGroup,
+    KillGroup,
+    KillProcess,
+}
+
+/// Runs the kill steps through `send`, which reports whether the signal was delivered.
+#[cfg(unix)]
+fn kill_tree_steps(stop_group_first: bool, mut send: impl FnMut(KillStep) -> bool) {
+    if stop_group_first {
+        // macOS signals group members one by one, so a killed child can wake its shell before
+        // the shell is signalled and `a; b` starts b (upstream #11252). Stopping first narrows
+        // that race; SIGKILL also kills stopped processes. A failed stop must not skip the kill.
+        send(KillStep::StopGroup);
+    }
+    if !send(KillStep::KillGroup) {
+        send(KillStep::KillProcess);
     }
 }
 
@@ -163,6 +189,28 @@ mod tests {
             let enotty = rustix::io::Errno::NOTTY.raw_os_error();
             assert!(is_dead_terminal_error(&std::io::Error::from_raw_os_error(enotty)));
         }
+    }
+
+    #[cfg(unix)]
+    fn kill_steps(stop_group_first: bool, delivered: impl Fn(KillStep) -> bool) -> Vec<KillStep> {
+        let mut sent = Vec::new();
+        kill_tree_steps(stop_group_first, |step| {
+            sent.push(step);
+            delivered(step)
+        });
+        sent
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stops_the_macos_group_before_killing_it() {
+        use KillStep::{KillGroup, KillProcess, StopGroup};
+        assert_eq!(kill_steps(true, |_| true), [StopGroup, KillGroup]);
+        assert_eq!(kill_steps(true, |step| step != StopGroup), [StopGroup, KillGroup]);
+        assert_eq!(kill_steps(true, |step| step != KillGroup), [StopGroup, KillGroup, KillProcess]);
+        assert_eq!(kill_steps(true, |_| false), [StopGroup, KillGroup, KillProcess]);
+        // Linux holds the task list lock across group signalling, so it keeps the plain kill.
+        assert_eq!(kill_steps(false, |_| true), [KillGroup]);
     }
 
     #[cfg(unix)]

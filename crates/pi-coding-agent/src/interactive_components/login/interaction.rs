@@ -9,7 +9,7 @@ use pi_ai::auth::{AuthError, AuthEvent, AuthInteraction, AuthPrompt, AuthResult,
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
-use super::LoginDialog;
+use super::{DeviceCodeInfo, LoginDialog};
 use crate::agent_session::ModelRuntime;
 use crate::llama::{ENV_LLAMA_BASE_URL, LLAMA_PROVIDER_ID, login_llama};
 
@@ -50,8 +50,15 @@ impl AuthInteraction for DialogInteraction {
 pub fn notify_dialog(dialog: &mut LoginDialog, event: &AuthEvent) {
     match event {
         AuthEvent::AuthUrl { url, instructions } => dialog.show_auth(url, instructions.as_deref()),
-        AuthEvent::DeviceCode { user_code, verification_uri, .. } => {
-            dialog.show_device_code(user_code, verification_uri);
+        AuthEvent::DeviceCode {
+            user_code, verification_uri, open_browser_on_confirm, copy_code_on_confirm, ..
+        } => {
+            dialog.show_device_code(&DeviceCodeInfo {
+                user_code: user_code.clone(),
+                verification_uri: verification_uri.clone(),
+                open_browser_on_confirm: *open_browser_on_confirm,
+                copy_code_on_confirm: *copy_code_on_confirm,
+            });
             dialog.show_waiting("Waiting for authentication...");
         }
         AuthEvent::Info { message, links } => dialog.show_info(message, links, false),

@@ -64,6 +64,16 @@ async fn grep_glob_context_limit_and_single_file() {
     assert!(run("grep", dir.path(), json!({ "pattern": "(" })).await.is_err());
 }
 
+// Upstream #11398: a lone CR shifted every later context line by one.
+#[tokio::test]
+async fn grep_context_lines_stay_aligned_when_a_file_has_a_lone_cr() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "lone-cr.txt", "before\rprogress\nneedle\nafter");
+    let args = json!({ "pattern": "needle", "path": "lone-cr.txt", "context": 1 });
+    let out = text(&run("grep", dir.path(), args).await.unwrap());
+    assert_eq!(out, "lone-cr.txt-1- beforeprogress\nlone-cr.txt:2: needle\nlone-cr.txt-3- after");
+}
+
 #[tokio::test]
 async fn grep_truncates_long_lines() {
     let dir = tempfile::tempdir().unwrap();

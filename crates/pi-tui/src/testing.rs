@@ -17,6 +17,7 @@ pub struct VirtualTerminal {
     rows: usize,
     sink: Option<TerminalSink>,
     writes: Vec<String>,
+    program_statuses: Vec<crate::program_status::ProgramStatus>,
     kitty_protocol_active: bool,
 }
 
@@ -28,6 +29,7 @@ impl VirtualTerminal {
             rows,
             sink: None,
             writes: Vec::new(),
+            program_statuses: Vec::new(),
             kitty_protocol_active: true,
         }
     }
@@ -106,6 +108,11 @@ impl VirtualTerminal {
         &self.writes
     }
 
+    /// Program status reports so far (OSC 7501), kept apart from the screen writes.
+    pub fn program_statuses(&self) -> &[crate::program_status::ProgramStatus] {
+        &self.program_statuses
+    }
+
     pub fn clear_writes(&mut self) {
         self.writes.clear();
     }
@@ -142,5 +149,9 @@ impl Terminal for VirtualTerminal {
 
     fn kitty_protocol_active(&self) -> bool {
         self.kitty_protocol_active
+    }
+
+    fn set_program_status(&mut self, status: &crate::program_status::ProgramStatus) {
+        self.program_statuses.push(status.clone());
     }
 }

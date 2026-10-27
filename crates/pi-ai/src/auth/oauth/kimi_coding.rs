@@ -248,6 +248,8 @@ impl OAuthAuth for KimiCodingOAuth {
             verification_uri: device.verification_uri_complete.clone(),
             interval_seconds: Some(device.interval_seconds as u64),
             expires_in_seconds: Some(device.expires_in_seconds as u64),
+            open_browser_on_confirm: None,
+            copy_code_on_confirm: None,
         });
         self.poll_for_token(&host, &device, &cancel).await
     }

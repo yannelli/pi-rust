@@ -1,8 +1,8 @@
 //! Tree navigation, names, labels, stats, and export (upstream `agent-session-tree-navigation`
 //! and `agent-session-stats` tests).
 
-use pi_ai::Message;
 use pi_ai::providers::faux::FauxResponse;
+use pi_ai::{Message, ThinkingLevel};
 use pi_coding_agent::agent_session::NavigateTreeOptions;
 use serde_json::{Value, json};
 
@@ -100,4 +100,26 @@ async fn in_memory_sessions_cannot_export_html() {
     let h = harness(Options { persist: false, ..Options::default() }).await;
     let error = h.session.export_to_html(None).unwrap_err();
     assert_eq!(error.to_string(), "Cannot export in-memory session to HTML");
+}
+
+// Upstream issue 11451: a resume restored the level of a change left on the abandoned branch.
+#[tokio::test]
+async fn prompts_after_tree_navigation_record_the_live_thinking_level() {
+    let responses = ["one", "two", "three"].map(FauxResponse::text).to_vec();
+    let settings = json!({"defaultThinkingLevel": "high"});
+    let h = harness(Options { responses, settings, ..Options::default() }).await;
+    h.session.prompt("first question", Vec::new()).await.unwrap();
+    let first_answer = h.session.session_manager().leaf_id().unwrap().to_string();
+    h.session.set_thinking_level(ThinkingLevel::Low, false);
+    h.session.prompt("second question", Vec::new()).await.unwrap();
+    h.session.navigate_tree(&first_answer, NavigateTreeOptions::default()).await.unwrap();
+    let level = || h.session.session_manager().build_session_context().thinking_level;
+    assert_eq!(level(), Some(ThinkingLevel::High), "the branch still names the old level");
+    h.session.prompt("third question", Vec::new()).await.unwrap();
+    assert_eq!(h.session.thinking_level(), ThinkingLevel::Low);
+    assert_eq!(level(), Some(ThinkingLevel::Low));
+    let changes = |h: &Harness| h.entries().iter().filter(|entry| entry["type"] == "thinking_level_change").count();
+    let before = changes(&h);
+    h.session.prompt("fourth question", Vec::new()).await.unwrap();
+    assert_eq!(changes(&h), before, "an unchanged level is not recorded again");
 }

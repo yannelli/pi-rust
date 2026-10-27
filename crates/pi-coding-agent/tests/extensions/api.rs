@@ -36,7 +36,9 @@ export default function (pi) {{
 	pi.registerShortcut("ctrl+shift+p", {{ description: "Probe", handler: async (ctx) => ctx.ui.notify("shortcut ran") }});
 	pi.registerShortcut("ctrl+c", {{ description: "Reserved", handler: () => {{}} }});
 	pi.registerMessageRenderer("probe", (message, options) => new Text(`[${{message.content}}|${{options.expanded}}]`, 0, 0));
-	pi.registerMarkdownTransformer((markdown, context) => markdown.replace("foo", `bar(${{context.messageType}})`));
+	pi.registerMarkdownTransformer((markdown, context) =>
+		markdown.replace("foo", `bar(${{context.messageType}} ${{context.messageId}} ${{context.timestamp}})`),
+	);
 }}
 "#
     )
@@ -110,6 +112,65 @@ async fn exec_reports_why_a_command_could_not_start() {
     assert!(call.contains("ENOENT"), "{call}");
 }
 
+/// The JSON result of `pi.exec(command, args)` run from an extension command.
+#[cfg(unix)]
+async fn exec_result(command: &str, args: &[&str]) -> Value {
+    let call = format!("pi.exec({}, {})", json!(command), json!(args));
+    let source = format!(
+        r#"export default function (pi) {{
+	pi.registerCommand("run", {{ handler: async (_args, ctx) => ctx.ui.notify(JSON.stringify(await {call})) }});
+}}
+"#
+    );
+    let h = harness(Setup { files: vec![("run.ts", source)], load: vec!["run.ts"], ..Setup::default() }).await;
+    h.session.prompt("/run", Vec::new()).await.unwrap();
+    let calls = h.ui.calls();
+    let [call] = calls.as_slice() else { panic!("{calls:?}") };
+    serde_json::from_str(call.strip_prefix("notify(info): ").expect("notify")).unwrap()
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn exec_keeps_stderr_empty_when_a_command_exits_silently() {
+    let result = exec_result("sh", &["-c", "exit 1"]).await;
+    assert_eq!(result, json!({"stdout": "", "stderr": "", "code": 1, "killed": false}));
+}
+
+// Upstream #11312: a character split across two pipe chunks came back as U+FFFD.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn exec_decodes_output_across_utf8_chunk_boundaries() {
+    let split = r"printf '\344'; sleep 0.1; printf '\275\240\345\245\275'";
+    let script = format!("{split}; ({split}) >&2");
+    let result = exec_result("sh", &["-c", &script]).await;
+    assert_eq!(result, json!({"stdout": "你好", "stderr": "你好", "code": 0, "killed": false}));
+}
+
+// Upstream issue 11360: unbounded output could exhaust the string limit and crash the host.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn exec_stops_a_command_whose_output_exceeds_the_cap() {
+    let source = r#"export default function (pi) {
+	pi.registerCommand("big", { handler: async (_args, ctx) => {
+		const big = await pi.exec("yes", ["0123456789abcdef0123456789abcdef"]);
+		const small = await pi.exec("sh", ["-c", "printf ok"]);
+		ctx.ui.notify(JSON.stringify({ length: big.stdout.length, code: big.code, killed: big.killed, stderr: big.stderr, small: small.stdout }));
+	} });
+}
+"#;
+    let h = harness(Setup { files: vec![("big.ts", source.into())], load: vec!["big.ts"], ..Setup::default() }).await;
+    h.session.prompt("/big", Vec::new()).await.unwrap();
+    let calls = h.ui.calls();
+    let [call] = calls.as_slice() else { panic!("{calls:?}") };
+    let result: Value = serde_json::from_str(call.strip_prefix("notify(info): ").expect("notify")).unwrap();
+    let cap = 16 * 1024 * 1024;
+    assert_eq!(result["length"], cap);
+    assert_ne!(result["code"], 0);
+    assert_eq!(result["killed"], true);
+    assert_eq!(result["stderr"], format!("[output exceeded {cap} bytes; output is incomplete]"));
+    assert_eq!(result["small"], "ok", "the next command still runs");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn completions_shortcuts_and_renderers_come_from_the_registry() {
     let h = harness(Setup { files: vec![("probe.ts", probe_extension())], load: vec!["probe.ts"], ..Setup::default() })
@@ -138,13 +199,24 @@ async fn completions_shortcuts_and_renderers_come_from_the_registry() {
     assert!(h.runner.render_message("other", &json!({}), false, 1).is_none());
 
     let transformer = h.runner.markdown_transformer().expect("transformer");
-    let context = MarkdownTransformContext {
+    let live = MarkdownTransformContext {
         message_type: MarkdownMessageType::Assistant,
         is_streaming: false,
         available_width: 80,
+        message_id: None,
+        timestamp: None,
     };
-    let transformed = tokio::task::spawn_blocking(move || transformer("a foo b", &context)).await.unwrap();
-    assert_eq!(transformed.as_deref(), Some("a bar(assistant) b"));
+    let restored = MarkdownTransformContext {
+        message_id: Some("entry-abc".into()),
+        timestamp: Some("2025-01-15T10:30:00.000Z".into()),
+        ..live.clone()
+    };
+    let transformed =
+        tokio::task::spawn_blocking(move || [transformer("a foo b", &live), transformer("foo", &restored)])
+            .await
+            .unwrap();
+    assert_eq!(transformed[0].as_deref(), Some("a bar(assistant undefined undefined) b"));
+    assert_eq!(transformed[1].as_deref(), Some("bar(assistant entry-abc 2025-01-15T10:30:00.000Z)"));
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -235,6 +235,14 @@ impl AgentSession {
     }
 
     /// `pi.sendUserMessage`: a prompt from an extension (upstream `sendUserMessage`).
+    /// Count a `pi.sendUserMessage` prompt as busy until the guard drops. The action returns before
+    /// the prompt starts, so print mode and `ctx.waitForIdle()` wait for it (upstream issue 11238).
+    pub(crate) fn begin_extension_prompt(self: &Arc<Self>) -> ExtensionPromptGuard {
+        lock(&self.state).pending_extension_prompts += 1;
+        self.notify_idle();
+        ExtensionPromptGuard(self.clone())
+    }
+
     pub(crate) async fn send_extension_user_message(&self, content: Value, options: &Value) -> anyhow::Result<()> {
         let (text, images) = user_content(&content);
         let streaming_behavior = match options["deliverAs"].as_str() {
@@ -506,5 +514,18 @@ impl AgentSession {
             }
         }
         Ok(())
+    }
+}
+
+/// Keeps an extension prompt counted by [`AgentSession::begin_extension_prompt`].
+pub(crate) struct ExtensionPromptGuard(Arc<AgentSession>);
+
+impl Drop for ExtensionPromptGuard {
+    fn drop(&mut self) {
+        {
+            let mut state = lock(&self.0.state);
+            state.pending_extension_prompts = state.pending_extension_prompts.saturating_sub(1);
+        }
+        self.0.notify_idle();
     }
 }

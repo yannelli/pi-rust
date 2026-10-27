@@ -219,6 +219,8 @@ impl GitHubCopilotOAuth {
             verification_uri: device.verification_uri.clone(),
             interval_seconds: device.interval.map(|seconds| seconds as u64),
             expires_in_seconds: Some(device.expires_in as u64),
+            open_browser_on_confirm: None,
+            copy_code_on_confirm: None,
         });
         let github_token = self.poll_access_token(domain, &device, cancel).await?;
         let mut credential = self.copilot_token(&github_token, enterprise.as_deref(), cancel).await?;

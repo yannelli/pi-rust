@@ -194,6 +194,35 @@ fn fork_from_copies_entries_with_a_parent_link() {
     assert_eq!(default.session_dir(), session_dir(&agent, dir.path()));
 }
 
+// Upstream #11253: a fork writes the header and every entry through one open file.
+#[test]
+fn fork_from_copies_every_entry_in_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source.jsonl");
+    let header = json!({"type": "session", "version": 3, "id": "source-id", "timestamp": "2025-01-01T00:00:00Z", "cwd": dir.path()});
+    let mut lines = vec![header.to_string()];
+    let mut parent: Option<String> = None;
+    for i in 0..50 {
+        let id = format!("e{i}");
+        let message = json!({"role": "user", "content": format!("message {i}"), "timestamp": 0});
+        let entry = json!({"type": "message", "id": id, "parentId": parent, "timestamp": "2025-01-01T00:00:00Z", "message": message});
+        lines.push(entry.to_string());
+        parent = Some(id);
+    }
+    std::fs::write(&source, lines.join("\n") + "\n").unwrap();
+    let target = dir.path().join("sessions");
+    let agent = dir.path().join("agent");
+    let forked =
+        SessionManager::fork_from(&source, dir.path(), Some(&target), &agent, NewSessionOptions::default()).unwrap();
+    let written = std::fs::read_to_string(forked.session_file().unwrap()).unwrap();
+    let written: Vec<&str> = written.trim_end().split('\n').collect();
+    assert_eq!(written.len(), 51);
+    let header: serde_json::Value = serde_json::from_str(written[0]).unwrap();
+    assert_eq!(header["parentSession"], source.to_str().unwrap());
+    assert_eq!(written[1..], lines[1..]);
+    assert_eq!(forked.entries().len(), 50);
+}
+
 #[test]
 fn branched_session_files_are_written_once_a_conversation_exists() {
     let dir = tempfile::tempdir().unwrap();

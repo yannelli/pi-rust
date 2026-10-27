@@ -10,7 +10,7 @@ use super::manifest::installed_version;
 use super::paths::ensure_npm_project;
 use super::runner::{NpmCommand, npm_install_args, npm_uninstall_args};
 use super::source::{NpmSource, max_version, version_gt};
-use super::{NETWORK_TIMEOUT, PackageManager};
+use super::{NETWORK_TIMEOUT, PackageManager, ProgressAction};
 use crate::resources::SourceScope;
 
 impl PackageManager {
@@ -148,6 +148,23 @@ impl PackageManager {
             Ok(target) => version_gt(&target, &installed).unwrap_or(true),
             Err(_) => true,
         }
+    }
+
+    /// Refresh an unpinned `-e` package when a newer version exists, as git sources refresh; a
+    /// failed refresh keeps the cached install (upstream issue 11375).
+    pub(crate) async fn refresh_temporary_npm_source(&self, source: &NpmSource, source_text: &str, installed: &Path) {
+        if source.pinned || !self.npm_has_available_update(source, installed).await {
+            return;
+        }
+        let spec = if source.version.is_some() { source.spec.clone() } else { format!("{}@latest", source.name) };
+        let refresh = async {
+            let root = self.npm_install_root(SourceScope::Temporary, true)?;
+            ensure_npm_project(&root)?;
+            let manager = self.package_manager_name()?;
+            self.run_npm(npm_install_args(&manager, &[spec], &root), None).await
+        };
+        let message = format!("Updating {source_text}...");
+        let _ = self.with_progress(ProgressAction::Update, source_text, message, refresh).await;
     }
 
     pub(crate) async fn npm_has_available_update(&self, source: &NpmSource, installed_path: &Path) -> bool {

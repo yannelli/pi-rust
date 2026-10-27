@@ -206,6 +206,12 @@ pub enum AuthEvent {
     DeviceCode {
         user_code: String,
         verification_uri: String,
+        /// Offer best-effort browser opening on user confirmation. Defaults to true; clients may ignore it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        open_browser_on_confirm: Option<bool>,
+        /// Offer copying of `user_code` on user confirmation, replacing the clipboard. Defaults to true.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        copy_code_on_confirm: Option<bool>,
         interval_seconds: Option<u64>,
         expires_in_seconds: Option<u64>,
     },

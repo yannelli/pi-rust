@@ -204,7 +204,7 @@ impl NpmCommand {
 /// Install arguments for managed npm packages. Peer installation is disabled so package
 /// managers never install or solve the host-provided `@earendil-works/pi-*` peers.
 pub fn npm_install_args(manager: &str, specs: &[String], root: &std::path::Path) -> Vec<String> {
-    let root = root.display().to_string();
+    let root = real_install_root(root);
     let mut args = vec!["install".to_string()];
     args.extend(specs.iter().cloned());
     let tail: Vec<&str> = match manager {
@@ -216,7 +216,8 @@ pub fn npm_install_args(manager: &str, specs: &[String], root: &std::path::Path)
             "--config.strict-peer-dependencies=false",
             "--config.strict-dep-builds=false",
         ],
-        _ => vec!["--prefix", &root, "--legacy-peer-deps"],
+        // npm audit fix would run without --legacy-peer-deps and install pi peers, so skip audit advice.
+        _ => vec!["--prefix", &root, "--legacy-peer-deps", "--no-audit", "--no-fund"],
     };
     args.extend(tail.into_iter().map(String::from));
     args
@@ -233,17 +234,25 @@ pub fn git_dependency_install_args(manager: &str) -> Vec<String> {
             "--config.strict-peer-dependencies=false",
             "--config.strict-dep-builds=false",
         ],
-        "npm" => &["install", "--omit=dev", "--legacy-peer-deps"],
+        "npm" => &["install", "--omit=dev", "--legacy-peer-deps", "--no-audit", "--no-fund"],
         _ => &["install"],
     };
     args.iter().map(|arg| arg.to_string()).collect()
 }
 
+/// The install root with symlinks resolved: npm writes broken nested package-lock.json paths
+/// when `--prefix` goes through a symlink (upstream #11358).
+fn real_install_root(root: &std::path::Path) -> String {
+    crate::resources::paths::canonicalize(root).display().to_string()
+}
+
 pub fn npm_uninstall_args(manager: &str, name: &str, root: &std::path::Path) -> Vec<String> {
-    let root = root.display().to_string();
+    let root = real_install_root(root);
     match manager {
         "bun" => vec!["uninstall".into(), name.into(), "--cwd".into(), root],
         "pnpm" => vec!["uninstall".into(), name.into(), "--prefix".into(), root],
-        _ => vec!["uninstall".into(), name.into(), "--prefix".into(), root, "--legacy-peer-deps".into()],
+        _ => ["uninstall", name, "--prefix", &root, "--legacy-peer-deps", "--no-audit", "--no-fund"]
+            .map(String::from)
+            .to_vec(),
     }
 }

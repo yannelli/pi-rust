@@ -107,6 +107,9 @@ pub struct CustomRequest {
     pub done: oneshot::Receiver<Value>,
     /// The `onHandle` callback, called with the overlay id once the overlay is shown.
     pub handle_key: Option<u64>,
+    /// Report pi as blocked on user input while this inline component is visible. Overlays
+    /// ignore it.
+    pub blocked: Option<(pi_tui::program_status::BlockedKind, String)>,
 }
 
 /// A JavaScript component (`render`, optional `handleInput`, `invalidate`, `dispose`). Calls

@@ -13,7 +13,7 @@ use pi_tui::{
 };
 
 use super::RenderOptions;
-use crate::markdown_transform::{MarkdownMessageType, create_markdown_transform};
+use crate::markdown_transform::{MarkdownMessageType, MessageMeta, create_markdown_transform};
 use crate::theme::{ThemeBg, ThemeColor, theme};
 
 const OSC133_ZONE_START: &str = "\x1b]133;A\x07";
@@ -42,6 +42,11 @@ pub struct UserMessageComponent {
 
 impl UserMessageComponent {
     pub fn new(text: &str, options: &RenderOptions) -> Self {
+        Self::with_meta(text, options, None)
+    }
+
+    /// A message replayed from the session entry `meta`, which Markdown transformers receive.
+    pub fn with_meta(text: &str, options: &RenderOptions, meta: Option<MessageMeta>) -> Self {
         let style = DefaultTextStyle {
             color: Some(fg_style(ThemeColor::UserMessageText)),
             bg_color: Some(Rc::new(|text: &str| theme().bg(ThemeBg::UserMessageBg, text))),
@@ -50,7 +55,12 @@ impl UserMessageComponent {
         let markdown_options = MarkdownOptions {
             preserve_ordered_list_markers: true,
             preserve_backslash_escapes: true,
-            transform: Some(create_markdown_transform(MarkdownMessageType::User, false, options.transformers.clone())),
+            transform: Some(create_markdown_transform(
+                MarkdownMessageType::User,
+                false,
+                options.transformers.clone(),
+                meta,
+            )),
             ..MarkdownOptions::default()
         };
         let markdown =
@@ -78,6 +88,7 @@ pub struct AssistantMessageComponent {
     last_message: Option<AssistantMessage>,
     has_tool_calls: bool,
     is_streaming: bool,
+    meta: Option<MessageMeta>,
     overrides: HashMap<usize, bool>,
     /// A thinking run clicked during mouse dispatch, applied once dispatch returns.
     pending_toggle: Rc<Cell<Option<(usize, bool)>>>,
@@ -90,6 +101,17 @@ impl AssistantMessageComponent {
         hidden_thinking_label: &str,
         options: RenderOptions,
     ) -> Self {
+        Self::with_meta(message, hide_thinking_block, hidden_thinking_label, options, None)
+    }
+
+    /// A message replayed from the session entry `meta`, which Markdown transformers receive.
+    pub fn with_meta(
+        message: Option<&AssistantMessage>,
+        hide_thinking_block: bool,
+        hidden_thinking_label: &str,
+        options: RenderOptions,
+        meta: Option<MessageMeta>,
+    ) -> Self {
         let mut component = Self {
             content: Container::new(),
             options,
@@ -98,6 +120,7 @@ impl AssistantMessageComponent {
             last_message: None,
             has_tool_calls: false,
             is_streaming: false,
+            meta,
             overrides: HashMap::new(),
             pending_toggle: Rc::default(),
         };
@@ -131,7 +154,8 @@ impl AssistantMessageComponent {
     }
 
     fn markdown(&self, text: &str, kind: MarkdownMessageType, style: Option<DefaultTextStyle>) -> Markdown {
-        let transform = create_markdown_transform(kind, self.is_streaming, self.options.transformers.clone());
+        let transformers = self.options.transformers.clone();
+        let transform = create_markdown_transform(kind, self.is_streaming, transformers, self.meta.clone());
         let options = MarkdownOptions { transform: Some(transform), ..MarkdownOptions::default() };
         Markdown::new(text, self.options.output_pad, 0, self.options.markdown_theme.clone(), style, options)
     }
@@ -139,14 +163,15 @@ impl AssistantMessageComponent {
     pub fn update_content(&mut self, message: &AssistantMessage, is_streaming: bool) {
         self.is_streaming = is_streaming;
         self.content.clear();
-        let visible = |block: &ContentBlock| match block {
-            ContentBlock::Text { text, .. } => !text.trim().is_empty(),
-            ContentBlock::Thinking { thinking, .. } => !thinking.trim().is_empty(),
-            _ => false,
+        // Spacers go in right before the next visible block: one before the first, and one after
+        // each visible thinking run that more visible content follows (upstream #11402).
+        let mut needs_spacer = true;
+        let add_visible = |content: &mut Container, needs_spacer: &mut bool, child: pi_tui::ComponentRef| {
+            if std::mem::take(needs_spacer) {
+                content.add_child(component(Spacer::new(1)));
+            }
+            content.add_child(child);
         };
-        if message.content.iter().any(visible) {
-            self.content.add_child(component(Spacer::new(1)));
-        }
         let pad = self.options.output_pad;
         let mut run_index = 0;
         let mut i = 0;
@@ -154,7 +179,7 @@ impl AssistantMessageComponent {
             match &message.content[i] {
                 ContentBlock::Text { text, .. } if !text.trim().is_empty() => {
                     let markdown = self.markdown(text.trim(), MarkdownMessageType::Assistant, None);
-                    self.content.add_child(component(markdown));
+                    add_visible(&mut self.content, &mut needs_spacer, component(markdown));
                     i += 1;
                 }
                 ContentBlock::Thinking { .. } => {
@@ -168,10 +193,13 @@ impl AssistantMessageComponent {
                     if blocks.is_empty() {
                         continue;
                     }
-                    let visible_after = message.content[i..].iter().any(visible);
                     let index = run_index;
                     run_index += 1;
                     let hidden = self.overrides.get(&index).copied().unwrap_or(self.hide_thinking_block);
+                    // A hidden run with an empty label renders nothing, not even spacing.
+                    if hidden && self.hidden_thinking_label.trim().is_empty() {
+                        continue;
+                    }
                     let body: pi_tui::ComponentRef = if hidden {
                         let label = theme().italic(&theme().fg(ThemeColor::ThinkingText, &self.hidden_thinking_label));
                         component(Text::new(&label, pad, 0))
@@ -195,10 +223,8 @@ impl AssistantMessageComponent {
                         pending.set(Some((index, !hidden)));
                         Some(TuiMouseEventResult::handled())
                     });
-                    self.content.add_child(component(region));
-                    if visible_after {
-                        self.content.add_child(component(Spacer::new(1)));
-                    }
+                    add_visible(&mut self.content, &mut needs_spacer, component(region));
+                    needs_spacer = true;
                 }
                 _ => i += 1,
             }
@@ -250,5 +276,87 @@ impl Component for AssistantMessageComponent {
 
     fn container_children(&self) -> Option<Vec<pi_tui::ComponentRef>> {
         Some(self.content.children.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use pi_tui::utils::strip_terminal_sequences;
+
+    use super::*;
+    use crate::markdown_transform::MarkdownTransformer;
+
+    type Captured = Arc<Mutex<Vec<(MarkdownMessageType, Option<String>, Option<String>)>>>;
+
+    fn capturing_options() -> (RenderOptions, Captured) {
+        let captured = Captured::default();
+        let sink = captured.clone();
+        let capture: MarkdownTransformer = Arc::new(move |_, context| {
+            let seen = (context.message_type, context.message_id.clone(), context.timestamp.clone());
+            sink.lock().unwrap().push(seen);
+            None
+        });
+        (RenderOptions { transformers: vec![capture], ..RenderOptions::default() }, captured)
+    }
+
+    fn meta() -> Option<MessageMeta> {
+        Some(MessageMeta { id: "entry-abc".into(), timestamp: "2025-01-15T10:30:00.000Z".into() })
+    }
+
+    #[test]
+    fn passes_persisted_entry_identity_to_transformers_and_leaves_live_messages_without() {
+        let (options, captured) = capturing_options();
+        UserMessageComponent::with_meta("restored", &options, meta()).render(80);
+        UserMessageComponent::new("live", &options).render(80);
+        let restored = (Some("entry-abc".to_string()), Some("2025-01-15T10:30:00.000Z".to_string()));
+        assert_eq!(
+            *captured.lock().unwrap(),
+            [
+                (MarkdownMessageType::User, restored.0.clone(), restored.1.clone()),
+                (MarkdownMessageType::User, None, None)
+            ]
+        );
+
+        let (options, captured) = capturing_options();
+        let message = AssistantMessage {
+            content: vec![
+                ContentBlock::Thinking { thinking: "hmm".into(), thinking_signature: None, redacted: false },
+                ContentBlock::Text { text: "answer".into(), text_signature: None },
+            ],
+            ..AssistantMessage::default()
+        };
+        AssistantMessageComponent::with_meta(Some(&message), false, "Thinking...", options, meta()).render(80);
+        let kinds = [MarkdownMessageType::AssistantThinking, MarkdownMessageType::Assistant];
+        let expected: Vec<_> = kinds.into_iter().map(|kind| (kind, restored.0.clone(), restored.1.clone())).collect();
+        assert_eq!(*captured.lock().unwrap(), expected);
+    }
+
+    fn thinking_then(next: ContentBlock, stop_reason: StopReason) -> AssistantMessage {
+        let thinking =
+            ContentBlock::Thinking { thinking: "reasoning".into(), thinking_signature: None, redacted: false };
+        AssistantMessage { content: vec![thinking, next], stop_reason, ..AssistantMessage::default() }
+    }
+
+    fn rows(message: &AssistantMessage, label: &str) -> Vec<String> {
+        let mut component = AssistantMessageComponent::new(Some(message), true, label, RenderOptions::default());
+        component.render(80).iter().map(|line| strip_terminal_sequences(line).trim().to_string()).collect()
+    }
+
+    // Upstream #11402: hidden thinking with an empty label drew blank rows.
+    #[test]
+    fn hidden_thinking_with_an_empty_label_renders_no_rows() {
+        let call = pi_ai::ToolCall {
+            id: "tool-1".into(),
+            name: "read".into(),
+            arguments: serde_json::from_value(serde_json::json!({"path": "file.txt"})).unwrap(),
+            ..pi_ai::ToolCall::default()
+        };
+        let tool = thinking_then(ContentBlock::ToolCall(call), StopReason::ToolUse);
+        assert!(rows(&tool, "").is_empty());
+        let text = thinking_then(ContentBlock::text("answer"), StopReason::Stop);
+        assert_eq!(rows(&text, ""), ["", "answer"]);
+        assert_eq!(rows(&text, "Thinking..."), ["", "Thinking...", "", "answer"]);
     }
 }

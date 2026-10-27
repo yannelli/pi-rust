@@ -1,6 +1,8 @@
 //! Concurrent extension dialogs and inline `custom()` components stack in the editor slot:
 //! closing the visible one shows the one below it again and no dialog is dropped unanswered.
 
+use pi_tui::program_status::{BlockedKind, ProgramState};
+
 use crate::harness::{Options, Ui, local, start};
 
 const EXTENSION: &str = r#"import { Text } from "@earendil-works/pi-tui";
@@ -42,6 +44,28 @@ export default function (pi) {
 			},
 		}));
 		ctx.ui.notify(`form ${result} discarded ${discarded}`);
+	} });
+	pi.registerCommand("blocked-custom", { handler: async (_args, ctx) => {
+		let loader;
+		const first = ctx.ui.custom((_tui, _theme, _keys, done) => ({
+			render: () => ["APPROVAL"], invalidate() {},
+			handleInput: (data) => {
+				if (data === "n") {
+					loader = ctx.ui.custom((_t, _th, _k, finish) => ({
+						render: () => ["LOADING"], invalidate() {}, handleInput: (key) => key === "d" && finish("loaded"),
+					}));
+				} else if (data === "d") done("yes");
+			},
+		}), { blocked: { kind: "permission", message: "Approve?" } });
+		ctx.ui.notify(`blocked ${await first} ${await loader}`);
+	} });
+	pi.registerCommand("swap-editor", { handler: async (_args, ctx) => {
+		const answer = ctx.ui.confirm("Swap", "swap dialog");
+		await new Promise((resolve) => setTimeout(resolve, 100));
+		ctx.ui.setEditorComponent(() => ({
+			render: () => ["CUSTOM-EDITOR"], invalidate() {}, getText: () => "", setText() {}, handleInput() {},
+		}));
+		ctx.ui.notify(`swap ${await answer}`);
 	} });
 }
 "#;
@@ -118,6 +142,52 @@ async fn a_confirm_opened_from_a_custom_component_restores_it() {
         assert!(!showing(&ui, "discard changes"), "{}", ui.screen());
         ui.send("d").await;
         ui.wait_for("form kept discarded false").await;
+    })
+    .await;
+}
+
+// Upstream #11431: replacing the editor while a dialog was open hid the dialog unanswered.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_open_dialog_stays_visible_when_the_editor_component_is_replaced() {
+    local(async {
+        let ui = start_ui().await;
+        ui.submit("/swap-editor").await;
+        ui.wait_until("dialog", |ui| showing(ui, "swap dialog")).await;
+        ui.settle(500).await;
+        assert!(showing(&ui, "swap dialog") && !showing(&ui, "CUSTOM-EDITOR"), "{}", ui.screen());
+        ui.send("\r").await;
+        ui.wait_for("swap true").await;
+        ui.wait_until("custom editor", |ui| showing(ui, "CUSTOM-EDITOR")).await;
+    })
+    .await;
+}
+
+/// Whether the latest program status report is `blocked` with `kind` and `message`.
+fn reports_blocked(ui: &Ui, expected: Option<(BlockedKind, &str)>) -> bool {
+    let Some(last) = ui.program_statuses().pop() else { return expected.is_none() };
+    match expected {
+        Some((kind, message)) => {
+            last.state == ProgramState::Blocked && last.kind == Some(kind) && last.message.as_deref() == Some(message)
+        }
+        None => last.state != ProgramState::Blocked,
+    }
+}
+
+// Upstream #11428: inline custom dialogs could not report blocked program status.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_inline_custom_component_can_report_blocked_status() {
+    local(async {
+        let ui = start_ui().await;
+        let approval = Some((BlockedKind::Permission, "Approve?"));
+        ui.submit("/blocked-custom").await;
+        ui.wait_until("blocked approval", |ui| showing(ui, "APPROVAL") && reports_blocked(ui, approval)).await;
+        ui.send("n").await;
+        ui.wait_until("unblocked loader", |ui| showing(ui, "LOADING") && reports_blocked(ui, None)).await;
+        ui.send("d").await;
+        ui.wait_until("blocked again", |ui| showing(ui, "APPROVAL") && reports_blocked(ui, approval)).await;
+        ui.send("d").await;
+        ui.wait_for("blocked yes loaded").await;
+        ui.wait_until("cleared", |ui| reports_blocked(ui, None)).await;
     })
     .await;
 }

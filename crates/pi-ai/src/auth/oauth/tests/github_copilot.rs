@@ -211,7 +211,7 @@ async fn verification_uris_must_be_http_and_are_normalized() {
     let interaction = interaction("");
     flow(&server).login(&interaction, &LoginOptions::default(), CancellationToken::new()).await.unwrap();
     let event = interaction.events().into_iter().find(|event| matches!(event, AuthEvent::DeviceCode { .. })).unwrap();
-    let AuthEvent::DeviceCode { verification_uri, user_code, interval_seconds, expires_in_seconds } = event else {
+    let AuthEvent::DeviceCode { verification_uri, user_code, interval_seconds, expires_in_seconds, .. } = event else {
         unreachable!()
     };
     assert_eq!(verification_uri, "https://github.com/login/device");

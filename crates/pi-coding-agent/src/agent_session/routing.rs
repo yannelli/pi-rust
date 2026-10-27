@@ -45,8 +45,14 @@ impl AgentSession {
     }
 
     /// Record the selection on the branch when the branch implies another one, so a resume
-    /// restores it. Responses cannot record a virtual selection; they name physical models.
+    /// restores it.
     pub(crate) fn record_selection(&self) {
+        self.record_model_selection();
+        self.record_thinking_level();
+    }
+
+    /// Responses cannot record a virtual selection; they name physical models.
+    fn record_model_selection(&self) {
         let Some(model) = self.model() else { return };
         let runtime = self.model_runtime().clone();
         let get_model = |provider: &str, id: &str| runtime.get_model(provider, id);
@@ -63,6 +69,24 @@ impl AgentSession {
             return;
         }
         if let Err(error) = self.session_manager().append_model_change(&model.provider, &model.id) {
+            eprintln!("Warning: could not save session: {error:#}");
+        }
+    }
+
+    /// A `/tree` move can leave the latest thinking level change on an abandoned branch (upstream
+    /// issue 11451). The branch level is clamped to the model first, so a live level that is only
+    /// its clamped value does not replace it.
+    fn record_thinking_level(&self) {
+        let live = self.thinking_level();
+        let recorded = {
+            let session = self.session_manager();
+            crate::session::context::context_settings(&session.get_branch(None)).1
+        };
+        let Some(recorded) = recorded else { return };
+        if self.clamp_thinking_level(recorded) == live {
+            return;
+        }
+        if let Err(error) = self.session_manager().append_thinking_level_change(live) {
             eprintln!("Warning: could not save session: {error:#}");
         }
     }

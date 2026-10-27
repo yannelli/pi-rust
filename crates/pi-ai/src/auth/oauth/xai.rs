@@ -188,6 +188,8 @@ impl OAuthAuth for XaiOAuth {
                 .unwrap_or_else(|| device.verification_uri.clone()),
             interval_seconds: device.interval_seconds.map(|seconds| seconds as u64),
             expires_in_seconds: Some(device.expires_in_seconds as u64),
+            open_browser_on_confirm: None,
+            copy_code_on_confirm: None,
         });
         self.poll_for_tokens(&device, &cancel).await
     }

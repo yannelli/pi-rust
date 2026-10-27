@@ -88,6 +88,8 @@ pub async fn run_print_mode(
             }
             runtime.session().prompt(message, Vec::new()).await?;
         }
+        // A command can start a turn with `pi.sendUserMessage`, which runs in the background.
+        runtime.session().wait_for_idle().await;
         let session = runtime.session();
         let registered =
             |name: &str| session.extension_runner().is_some_and(|runner| runner.registry().flag(name).is_some());
