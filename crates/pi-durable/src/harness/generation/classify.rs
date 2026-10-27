@@ -1,9 +1,12 @@
 //! The `request` and `poll` phases: streaming with throttled partial commits, and classification of the
 //! terminal provider message.
 
+use std::sync::{Arc, Mutex};
+
 use futures::StreamExt;
 use pi_ai::retry::{is_retryable_assistant_error, retry_delay_ms};
 use pi_ai::{AssistantMessage, AssistantMessageEvent, Message, Model, StopReason, is_context_overflow};
+use pi_chord::delta::Seg;
 use pi_chord::{Context, Json};
 use tokio::task::JoinHandle;
 
@@ -16,9 +19,11 @@ use crate::errors::{DurableError, DurableResult};
 use crate::harness::compaction::{CompactionInput, create_compaction, select_cut};
 use crate::harness::inbox::{BoundaryAt, append_user, apply_boundary, prepare_boundary};
 use crate::harness::live::{DeferredPoll, LIVE_DOC, LiveGeneration, PROGRESS_COMMIT, RetryState, end_run};
+use crate::harness::partial_changes::PartialChanges;
 use crate::harness::scheduler::TaskRuntime;
 use crate::harness::types::{CompactionReason, ModelRef, UserInput};
 use crate::harness::usage::ensure_provider_session_id;
+use crate::harness::util::lock;
 use crate::ids::{EntryId, TaskId};
 use crate::models::{DeferredFetchOptions, SimpleStreamOptions};
 use crate::session::Tx;
@@ -119,20 +124,39 @@ pub(super) async fn poll(task: TaskRecord, runtime: TaskRuntime, context: Contex
     classify(&runtime, request, message, &context).await
 }
 
-/// Commit one partial into `pi.live.generation.message`.
-async fn commit_partial(runtime: TaskRuntime, partial: AssistantMessage, attempt: u32, context: Context) {
+/// Commit one partial into `pi.live.generation.message`: what text and thinking grew by is appended, and the argument
+/// changes since the last commit are applied (`PartialChanges`), so the cost follows the new text.
+async fn commit_partial(
+    runtime: TaskRuntime,
+    partial: AssistantMessage,
+    attempt: u32,
+    context: Context,
+    changes: Arc<Mutex<PartialChanges>>,
+) {
     let conversation_id = runtime.conversation_id();
     let result = async {
         // Stored as a whole `Message`, with its role, as upstream stores the `AssistantMessage`.
-        let message = encode(&pi_ai::Message::Assistant(partial))?;
+        let mut message = encode(&pi_ai::Message::Assistant(partial))?;
+        // The changes since the last commit belong to this one.
+        let taken = Arc::new(lock(&changes).take(&mut message));
+        let (tracker, commit) = (changes.clone(), taken.clone());
         let change = move |tx: Tx, _| async move {
             let draft = tx.doc(&LIVE_DOC, conversation_id).await?;
-            draft.edit(|live| {
-                live.generation.get_or_insert_with(|| LiveGeneration::new(attempt)).message = Some(message)
-            })?;
+            draft.core().with_change(|change| -> DurableResult<()> {
+                let live = change.state()?;
+                if live.get("generation").is_none_or(Json::is_null) {
+                    live.set("generation", encode(&LiveGeneration::new(attempt))?)?;
+                }
+                lock(&tracker).commit(change, &[Seg::key("generation")], message, &commit)?;
+                Ok(())
+            })??;
             Ok(None)
         };
-        runtime.commit_with_options(change, &context, PROGRESS_COMMIT).await
+        let committed = runtime.commit_with_options(change, &context, PROGRESS_COMMIT).await;
+        if committed.is_err() {
+            lock(&changes).restore(&taken);
+        }
+        committed
     }
     .await;
     // Failures after an abort mark or close are expected; the committed state stays consistent.
@@ -143,8 +167,42 @@ async fn commit_partial(runtime: TaskRuntime, partial: AssistantMessage, attempt
     }
 }
 
+/// The partial message an event carries, for the events that change it.
+fn partial_of(event: &AssistantMessageEvent) -> Option<&AssistantMessage> {
+    match event {
+        AssistantMessageEvent::Start { partial }
+        | AssistantMessageEvent::TextStart { partial, .. }
+        | AssistantMessageEvent::TextDelta { partial, .. }
+        | AssistantMessageEvent::TextEnd { partial, .. }
+        | AssistantMessageEvent::ThinkingStart { partial, .. }
+        | AssistantMessageEvent::ThinkingDelta { partial, .. }
+        | AssistantMessageEvent::ThinkingEnd { partial, .. }
+        | AssistantMessageEvent::ToolcallStart { partial, .. }
+        | AssistantMessageEvent::ToolcallDelta { partial, .. }
+        | AssistantMessageEvent::ToolcallEnd { partial, .. } => Some(partial),
+        _ => None,
+    }
+}
+
+fn into_partial(event: AssistantMessageEvent) -> Option<AssistantMessage> {
+    match event {
+        AssistantMessageEvent::Start { partial }
+        | AssistantMessageEvent::TextStart { partial, .. }
+        | AssistantMessageEvent::TextDelta { partial, .. }
+        | AssistantMessageEvent::TextEnd { partial, .. }
+        | AssistantMessageEvent::ThinkingStart { partial, .. }
+        | AssistantMessageEvent::ThinkingDelta { partial, .. }
+        | AssistantMessageEvent::ThinkingEnd { partial, .. }
+        | AssistantMessageEvent::ToolcallStart { partial, .. }
+        | AssistantMessageEvent::ToolcallDelta { partial, .. }
+        | AssistantMessageEvent::ToolcallEnd { partial, .. } => Some(partial),
+        _ => None,
+    }
+}
+
 /// Stream one request and return the terminal message. Partials commit at most every `partial_interval_ms`
-/// with one commit in flight; the end waits for that commit, so no stale partial lands after the outcome.
+/// with one commit in flight; the end waits for that commit, so no stale partial lands after the outcome. A commit
+/// appends what changed since the last one (`PartialChanges`), so its cost follows the new text.
 async fn stream_response(
     runtime: &TaskRuntime,
     model: &Model,
@@ -171,6 +229,7 @@ async fn stream_response(
     let mut timer: Option<Disarm> = None;
     let mut in_flight: Option<JoinHandle<()>> = None;
     let mut last: Option<AssistantMessage> = None;
+    let changes = Arc::new(Mutex::new(PartialChanges::default()));
     loop {
         let flight = async {
             match in_flight.as_mut() {
@@ -187,23 +246,12 @@ async fn stream_response(
                     last = Some(message.clone());
                     continue;
                 }
-                let partial = match event {
-                    AssistantMessageEvent::Start { partial }
-                    | AssistantMessageEvent::TextStart { partial, .. }
-                    | AssistantMessageEvent::TextDelta { partial, .. }
-                    | AssistantMessageEvent::TextEnd { partial, .. }
-                    | AssistantMessageEvent::ThinkingStart { partial, .. }
-                    | AssistantMessageEvent::ThinkingDelta { partial, .. }
-                    | AssistantMessageEvent::ThinkingEnd { partial, .. }
-                    | AssistantMessageEvent::ToolcallStart { partial, .. }
-                    | AssistantMessageEvent::ToolcallDelta { partial, .. }
-                    | AssistantMessageEvent::ToolcallEnd { partial, .. } => partial,
-                    _ => continue,
-                };
                 // A partial without content shows nothing; a deferred response never gets past it.
-                if partial.content.is_empty() {
+                if partial_of(&event).is_none_or(|partial| partial.content.is_empty()) {
                     continue;
                 }
+                lock(&changes).observe(&event);
+                let Some(partial) = into_partial(event) else { continue };
                 pending = Some(partial);
                 if timer.is_none() && in_flight.is_none() {
                     timer = Some(arm(runtime));
@@ -212,7 +260,8 @@ async fn stream_response(
             Some(()) = ticks.recv() => {
                 timer = None;
                 if let Some(partial) = pending.take() {
-                    in_flight = Some(tokio::spawn(commit_partial(runtime.clone(), partial, attempt, context.clone())));
+                    let commit = commit_partial(runtime.clone(), partial, attempt, context.clone(), changes.clone());
+                    in_flight = Some(tokio::spawn(commit));
                 }
             }
             () = flight => {

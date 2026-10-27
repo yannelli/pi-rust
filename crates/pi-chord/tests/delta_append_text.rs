@@ -137,3 +137,22 @@ fn accepts_only_string_members() {
     assert!(change.append_text(&[], "tags", "x").is_err());
     change.abort();
 }
+
+#[test]
+fn records_appends_inside_array_items_that_change_together_or_next_to_new_items() {
+    let mut tracker = track(json!({ "content": [{ "text": "a" }, { "args": { "s": "x" } }] }));
+    let args = [Seg::key("content"), Seg::Index(1), Seg::key("args")];
+    let both = commit(&mut tracker, |change| {
+        change.append_text(&block(0), "text", "b").unwrap();
+        change.append_text(&args, "s", "y").unwrap();
+    });
+    assert_eq!(both, ops(json!([["a", ["content", 0, "text"], "b"], ["a", ["content", 1, "args", "s"], "y"]])));
+    let grown = commit(&mut tracker, |change| {
+        change.append_text(&block(0), "text", "c").unwrap();
+        let content = change.state().unwrap().get_mut("content").unwrap();
+        content.as_array_mut().unwrap().push(json!({ "text": "new" }));
+    });
+    assert_eq!(grown[0], ops(json!([["a", ["content", 0, "text"], "c"]]))[0]);
+    assert_eq!(grown.len(), 2);
+    assert_eq!(text(&tracker, 0), "abc");
+}
