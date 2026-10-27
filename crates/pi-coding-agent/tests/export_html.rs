@@ -58,8 +58,8 @@ fn export_from_file_matches_upstream_bytes() {
     let written = export_from_file(fixture().to_str().unwrap(), out.to_str(), &ExportTheme::dark()).unwrap();
     assert_eq!(written, out);
     let bytes = std::fs::read(&out).unwrap();
-    assert_eq!(bytes.len(), 289_038);
-    assert_eq!(fnv1a(&bytes), 0xca07_190d_e2a0_b9dc);
+    assert_eq!(bytes.len(), 289_375);
+    assert_eq!(fnv1a(&bytes), 0xda6e_0dc8_1e51_4862);
 }
 
 #[test]
@@ -85,8 +85,8 @@ fn session_export_with_state_matches_upstream_bytes() {
     };
     export_session_html(&fixture(), out.to_str(), &options).unwrap();
     let bytes = std::fs::read(&out).unwrap();
-    assert_eq!(bytes.len(), 289_742);
-    assert_eq!(fnv1a(&bytes), 0x81f3_5bd2_6b74_6ab4);
+    assert_eq!(bytes.len(), 290_079);
+    assert_eq!(fnv1a(&bytes), 0xa0cf_d0c5_7f3f_aa7a);
 
     let data = session_data(&String::from_utf8(bytes).unwrap());
     let rendered = &data["renderedTools"];
@@ -313,4 +313,67 @@ fn export_renders_the_first_system_entry_as_the_prompt_and_later_ones_as_updates
     assert!(renders_entries);
     assert!(TEMPLATE_JS.contains("renderSystemPromptBlock('System Prompt', text)"));
     assert!(TEMPLATE_JS.contains("renderToolsList('Available Tools', msg.toolsAdded)"));
+}
+
+/// The tree functions of an exported page's viewer script, loaded in QuickJS (upstream
+/// `export-html-deep-tree.test.ts`). The session data is decoded here, so `atob` passes it on.
+const TREE_STUBS: &str = r#"
+globalThis.window = { location: { search: "" } };
+globalThis.document = { getElementById: () => ({ textContent: globalThis.sessionJson }), querySelector: () => null };
+globalThis.atob = (text) => text;
+globalThis.TextDecoder = class {
+  decode(bytes) {
+    let text = "";
+    for (let i = 0; i < bytes.length; i += 8192) text += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+    return text;
+  }
+};
+globalThis.URLSearchParams = class { get() { return null; } };
+"#;
+
+// Upstream #11225: recursive tree walks overflowed the call stack on long sessions.
+#[test]
+fn html_export_renders_sessions_deeper_than_the_call_stack() {
+    const DEPTH: usize = 20_000;
+    let dir = tempfile::tempdir().unwrap();
+    let header = json!({"type": "session", "version": 3, "id": "deep-test", "timestamp": "1970-01-01T00:00:00.000Z", "cwd": "/tmp"});
+    let mut lines = vec![header.to_string()];
+    for i in 0..DEPTH {
+        let timestamp = format!("1970-01-01T{:02}:{:02}:{:02}.000Z", i / 3600, i / 60 % 60, i % 60);
+        let parent = if i == 0 { Value::Null } else { json!(format!("e{}", i - 1)) };
+        let message = json!({"role": "user", "content": "x", "timestamp": i * 1000});
+        let entry = json!({"type": "message", "id": format!("e{i}"), "parentId": parent, "timestamp": timestamp, "message": message});
+        lines.push(entry.to_string());
+    }
+    let session = dir.path().join("session.jsonl");
+    std::fs::write(&session, lines.join("\n") + "\n").unwrap();
+    let out = dir.path().join("out.html");
+    export_from_file(session.to_str().unwrap(), out.to_str(), &ExportTheme::dark()).unwrap();
+    let html = std::fs::read_to_string(&out).unwrap();
+
+    let session_json = stringify(&session_data(&html));
+    let viewer_start = html.rfind("<script>").unwrap() + "<script>".len();
+    let viewer = &html[viewer_start..viewer_start + html[viewer_start..].find("</script>").unwrap()];
+    let api = "return { buildTree, buildActivePathIds, flattenTree, findNewestLeaf, getPath };";
+    let viewer = viewer.replace("let treeNodeMap = null;", &format!("let treeNodeMap = null; {api}"));
+    let checks = r#"
+const tree = api.buildTree();
+const leafId = `e${depth - 1}`;
+const flat = api.flattenTree(tree, api.buildActivePathIds(leafId));
+const path = api.getPath(leafId);
+JSON.stringify([tree.length, flat.length, flat[depth - 1].node.entry.id, api.findNewestLeaf("e0"), path.length, path[0].id, path[depth - 1].id])
+"#;
+    let runtime = Runtime::new().unwrap();
+    let context = Context::full(&runtime).unwrap();
+    let result: String = context.with(|ctx| {
+        let run =
+            |source: String| ctx.eval::<(), _>(source).unwrap_or_else(|error| panic!("{error}: {:?}", ctx.catch()));
+        ctx.globals().set("sessionJson", session_json).unwrap();
+        ctx.globals().set("depth", DEPTH).unwrap();
+        run(TREE_STUBS.to_string());
+        run(format!("globalThis.api = {viewer}"));
+        ctx.eval(checks).unwrap_or_else(|error| panic!("{error}: {:?}", ctx.catch()))
+    });
+    let leaf = format!("e{}", DEPTH - 1);
+    assert_eq!(serde_json::from_str::<Value>(&result).unwrap(), json!([1, DEPTH, leaf, leaf, DEPTH, "e0", leaf]));
 }
