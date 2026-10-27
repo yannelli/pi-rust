@@ -58,8 +58,8 @@ fn export_from_file_matches_upstream_bytes() {
     let written = export_from_file(fixture().to_str().unwrap(), out.to_str(), &ExportTheme::dark()).unwrap();
     assert_eq!(written, out);
     let bytes = std::fs::read(&out).unwrap();
-    assert_eq!(bytes.len(), 283_596);
-    assert_eq!(fnv1a(&bytes), 0x0627_f0f5_300d_1eb2);
+    assert_eq!(bytes.len(), 289_038);
+    assert_eq!(fnv1a(&bytes), 0xca07_190d_e2a0_b9dc);
 }
 
 #[test]
@@ -85,8 +85,8 @@ fn session_export_with_state_matches_upstream_bytes() {
     };
     export_session_html(&fixture(), out.to_str(), &options).unwrap();
     let bytes = std::fs::read(&out).unwrap();
-    assert_eq!(bytes.len(), 284_300);
-    assert_eq!(fnv1a(&bytes), 0x87ac_10d3_1e12_1296);
+    assert_eq!(bytes.len(), 289_742);
+    assert_eq!(fnv1a(&bytes), 0x81f3_5bd2_6b74_6ab4);
 
     let data = session_data(&String::from_utf8(bytes).unwrap());
     let rendered = &data["renderedTools"];
@@ -231,4 +231,86 @@ fn html_export_renders_emphasis_next_to_cjk_punctuation() {
             "<p>**end.**Then next</p>\n",
         ]
     );
+}
+
+const TEMPLATE_JS: &str = include_str!("../src/export/assets/template.js");
+
+/// The template's system message helpers, run in QuickJS against `entries` (upstream
+/// `export-html-system-messages.test.ts`). Returns each call's string or boolean result as JSON.
+fn system_helpers(entries: &Value, calls: &str) -> Value {
+    let start = TEMPLATE_JS.find("function systemContentText(content)").expect("helpers start");
+    let end = TEMPLATE_JS.find("const hasSystemEntries").expect("helpers end");
+    assert!(end > start);
+    let source = format!(
+        "const entries = {entries};\nconst byId = new Map(entries.map(entry => [entry.id, entry]));\n{}\nJSON.stringify({calls})",
+        &TEMPLATE_JS[start..end]
+    );
+    let runtime = Runtime::new().unwrap();
+    let context = Context::full(&runtime).unwrap();
+    let json: String =
+        context.with(|ctx| ctx.eval(source).unwrap_or_else(|error| panic!("{error}: {:?}", ctx.catch())));
+    serde_json::from_str(&json).unwrap()
+}
+
+fn system_messages() -> (Value, Value) {
+    let initial = json!({
+        "role": "system",
+        "content": "You are a helpful assistant.",
+        "sections": {"rules": "<rules>\nbe concise\n</rules>", "project_context": "<project_context>\nv1\n</project_context>"},
+        "toolsAdded": [{"name": "read", "description": "Read a file", "parameters": {"type": "object", "properties": {}}}],
+        "timestamp": 1,
+    });
+    let update = json!({
+        "role": "system",
+        "content": [{"type": "text", "text": "Extra instructions"}],
+        "sections": {"project_context": "<project_context>\nv2\n</project_context>", "rules": null},
+        "toolsAdded": [{"name": "bash", "description": "Run a command", "parameters": {"type": "object", "properties": {}}}],
+        "toolsRemoved": [{"name": "read"}],
+        "timestamp": 2,
+    });
+    (initial, update)
+}
+
+// Regression tests for upstream #11261: system messages were stored in the export but never rendered.
+#[test]
+fn export_renders_system_message_text_the_way_the_model_receives_it() {
+    let (initial, update) = system_messages();
+    let entries = json!([{"type": "message", "id": "s1", "parentId": null, "message": initial}]);
+    let calls = format!("[getSystemMessageText({initial}), renderSystemMessageUpdate({update})]");
+    let rendered = system_helpers(&entries, &calls);
+    let initial: pi_ai::SystemMessage = serde_json::from_value(initial).unwrap();
+    let update: pi_ai::SystemMessage = serde_json::from_value(update).unwrap();
+    assert_eq!(rendered[0], pi_ai::transcript::system_message_text(&initial));
+    assert_eq!(rendered[1], pi_ai::transcript::render_system_message_update(&update));
+}
+
+#[test]
+fn export_renders_the_first_system_entry_as_the_prompt_and_later_ones_as_updates() {
+    let (initial, update) = system_messages();
+    let entries = json!([
+        {"type": "message", "id": "s1", "parentId": null, "message": initial},
+        {"type": "message", "id": "u1", "parentId": "s1", "message": {"role": "user", "content": "hi"}},
+        {"type": "message", "id": "s2", "parentId": "u1", "message": update},
+    ]);
+    let calls =
+        format!("[isLeadingSystemEntry(entries[0]), isLeadingSystemEntry(entries[2]), describeSystemUpdate({update})]");
+    assert_eq!(
+        system_helpers(&entries, &calls),
+        json!([true, false, "instructions, project_context, -rules, tools +bash -read"])
+    );
+
+    let entries = json!([
+        {"type": "compaction", "id": "c1", "parentId": null, "systemMessage": initial},
+        {"type": "message", "id": "s2", "parentId": "c1", "message": update},
+    ]);
+    let calls = "[isLeadingSystemEntry({ id: 's2', parentId: 'c1' })]";
+    assert_eq!(system_helpers(&entries, calls), json!([false]));
+
+    let opener = "if (msg.role === 'system') {";
+    let renders_entries = TEMPLATE_JS
+        .match_indices(opener)
+        .any(|(at, _)| TEMPLATE_JS[at + opener.len()..].trim_start().starts_with("let html = '';"));
+    assert!(renders_entries);
+    assert!(TEMPLATE_JS.contains("renderSystemPromptBlock('System Prompt', text)"));
+    assert!(TEMPLATE_JS.contains("renderToolsList('Available Tools', msg.toolsAdded)"));
 }
