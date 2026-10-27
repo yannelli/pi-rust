@@ -1,12 +1,18 @@
 //! Painting laid-out boxes and scrollbars into screen rows.
 
+use std::sync::LazyLock;
+
+use regex::Regex;
+
 use super::{LayoutBox, OSC133_ZONE_PREFIX};
 use crate::components::scroll_view::ScrollViewScrollbar;
 use crate::terminal_image::{crop_kitty_image_line, get_kitty_image_metadata, is_image_line};
 use crate::tui::composite_tui_line;
 use crate::utils::{
-    extract_ansi_code, get_active_background_ansi, get_grapheme_cell_range, slice_by_column, visible_width,
+    extract_ansi_code, get_active_background_ansi, get_grapheme_cell_range, js_trim, slice_by_column, visible_width,
 };
+
+static SGR_CODE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\x1b\[[0-9;:]*m").expect("valid regex"));
 
 /// Position of a scroll view's scrollbar track and thumb, in screen cells.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -177,7 +183,9 @@ pub(super) fn paint_box(layout_box: &LayoutBox, screen: &mut [String], total_wid
                     }
                     break;
                 }
-                if !image_line.is_empty() {
+                // Image placeholder rows inside padded or colored boxes contain only
+                // spaces and SGR codes; keep searching past them for the image line.
+                if !js_trim(&SGR_CODE.replace_all(image_line, "")).is_empty() {
                     break;
                 }
             }
