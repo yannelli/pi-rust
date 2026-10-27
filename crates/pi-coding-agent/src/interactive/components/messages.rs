@@ -163,14 +163,15 @@ impl AssistantMessageComponent {
     pub fn update_content(&mut self, message: &AssistantMessage, is_streaming: bool) {
         self.is_streaming = is_streaming;
         self.content.clear();
-        let visible = |block: &ContentBlock| match block {
-            ContentBlock::Text { text, .. } => !text.trim().is_empty(),
-            ContentBlock::Thinking { thinking, .. } => !thinking.trim().is_empty(),
-            _ => false,
+        // Spacers go in right before the next visible block: one before the first, and one after
+        // each visible thinking run that more visible content follows (upstream #11402).
+        let mut needs_spacer = true;
+        let add_visible = |content: &mut Container, needs_spacer: &mut bool, child: pi_tui::ComponentRef| {
+            if std::mem::take(needs_spacer) {
+                content.add_child(component(Spacer::new(1)));
+            }
+            content.add_child(child);
         };
-        if message.content.iter().any(visible) {
-            self.content.add_child(component(Spacer::new(1)));
-        }
         let pad = self.options.output_pad;
         let mut run_index = 0;
         let mut i = 0;
@@ -178,7 +179,7 @@ impl AssistantMessageComponent {
             match &message.content[i] {
                 ContentBlock::Text { text, .. } if !text.trim().is_empty() => {
                     let markdown = self.markdown(text.trim(), MarkdownMessageType::Assistant, None);
-                    self.content.add_child(component(markdown));
+                    add_visible(&mut self.content, &mut needs_spacer, component(markdown));
                     i += 1;
                 }
                 ContentBlock::Thinking { .. } => {
@@ -192,10 +193,13 @@ impl AssistantMessageComponent {
                     if blocks.is_empty() {
                         continue;
                     }
-                    let visible_after = message.content[i..].iter().any(visible);
                     let index = run_index;
                     run_index += 1;
                     let hidden = self.overrides.get(&index).copied().unwrap_or(self.hide_thinking_block);
+                    // A hidden run with an empty label renders nothing, not even spacing.
+                    if hidden && self.hidden_thinking_label.trim().is_empty() {
+                        continue;
+                    }
                     let body: pi_tui::ComponentRef = if hidden {
                         let label = theme().italic(&theme().fg(ThemeColor::ThinkingText, &self.hidden_thinking_label));
                         component(Text::new(&label, pad, 0))
@@ -219,10 +223,8 @@ impl AssistantMessageComponent {
                         pending.set(Some((index, !hidden)));
                         Some(TuiMouseEventResult::handled())
                     });
-                    self.content.add_child(component(region));
-                    if visible_after {
-                        self.content.add_child(component(Spacer::new(1)));
-                    }
+                    add_visible(&mut self.content, &mut needs_spacer, component(region));
+                    needs_spacer = true;
                 }
                 _ => i += 1,
             }
@@ -281,6 +283,8 @@ impl Component for AssistantMessageComponent {
 mod tests {
     use std::sync::{Arc, Mutex};
 
+    use pi_tui::utils::strip_terminal_sequences;
+
     use super::*;
     use crate::markdown_transform::MarkdownTransformer;
 
@@ -327,5 +331,32 @@ mod tests {
         let kinds = [MarkdownMessageType::AssistantThinking, MarkdownMessageType::Assistant];
         let expected: Vec<_> = kinds.into_iter().map(|kind| (kind, restored.0.clone(), restored.1.clone())).collect();
         assert_eq!(*captured.lock().unwrap(), expected);
+    }
+
+    fn thinking_then(next: ContentBlock, stop_reason: StopReason) -> AssistantMessage {
+        let thinking =
+            ContentBlock::Thinking { thinking: "reasoning".into(), thinking_signature: None, redacted: false };
+        AssistantMessage { content: vec![thinking, next], stop_reason, ..AssistantMessage::default() }
+    }
+
+    fn rows(message: &AssistantMessage, label: &str) -> Vec<String> {
+        let mut component = AssistantMessageComponent::new(Some(message), true, label, RenderOptions::default());
+        component.render(80).iter().map(|line| strip_terminal_sequences(line).trim().to_string()).collect()
+    }
+
+    // Upstream #11402: hidden thinking with an empty label drew blank rows.
+    #[test]
+    fn hidden_thinking_with_an_empty_label_renders_no_rows() {
+        let call = pi_ai::ToolCall {
+            id: "tool-1".into(),
+            name: "read".into(),
+            arguments: serde_json::from_value(serde_json::json!({"path": "file.txt"})).unwrap(),
+            ..pi_ai::ToolCall::default()
+        };
+        let tool = thinking_then(ContentBlock::ToolCall(call), StopReason::ToolUse);
+        assert!(rows(&tool, "").is_empty());
+        let text = thinking_then(ContentBlock::text("answer"), StopReason::Stop);
+        assert_eq!(rows(&text, ""), ["", "answer"]);
+        assert_eq!(rows(&text, "Thinking..."), ["", "Thinking...", "", "answer"]);
     }
 }
