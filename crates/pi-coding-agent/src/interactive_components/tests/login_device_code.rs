@@ -1,10 +1,14 @@
-//! Device-code login actions of the login dialog; ports `login-dialog-device-code.test.ts`.
+//! Device-code login actions and URL handling of the login dialog; ports
+//! `login-dialog-device-code.test.ts`.
 
 use std::rc::Rc;
 
+use pi_ai::auth::AuthInfoLink;
+use pi_tui::Component;
+
 use super::login_dialog::dialog_harness;
-use crate::interactive_components::login::{ClipboardCopyFn, DeviceCodeInfo};
-use crate::interactive_components::test_support::{Calls, flush, keys, local};
+use crate::interactive_components::login::{ClipboardCopyFn, DeviceCodeInfo, LoginDialog};
+use crate::interactive_components::test_support::{Calls, Harness, flush, keys, local};
 
 const CODE: &str = "ABCD-EFGH";
 const PAGE: &str = "https://example.com/device";
@@ -129,4 +133,53 @@ async fn keeps_manual_login_available_when_the_clipboard_fails() {
         assert!(completed.is_empty());
     })
     .await;
+}
+
+#[test]
+fn opens_only_http_sign_in_urls() {
+    let (copied, opened, completed) = (Calls::new(), Calls::new(), Calls::new());
+    let harness = dialog_harness(&copied, &opened, &completed);
+    harness.component.borrow_mut().show_auth("file:///tmp/payload.app", None);
+    assert!(opened.is_empty());
+    harness.component.borrow_mut().show_auth("https://example.com/authorize", None);
+    assert_eq!(opened.get(), ["https://example.com/authorize"]);
+}
+
+fn raw_render(harness: &Harness<LoginDialog>) -> String {
+    harness.component.borrow_mut().render(120).join("\n")
+}
+
+#[test]
+fn control_characters_in_urls_cannot_end_terminal_hyperlinks() {
+    let (copied, opened, completed) = (Calls::new(), Calls::new(), Calls::new());
+    let harness = dialog_harness(&copied, &opened, &completed);
+    let info = DeviceCodeInfo { verification_uri: format!("{PAGE}\x07\x1b]52;c;Zm9v\x07"), ..device(None, None) };
+    let help =
+        AuthInfoLink { url: "https://example.com/help\x07\x1b]52;c;Zm9v\x07".into(), label: Some("Help".into()) };
+    harness.component.borrow_mut().show_device_code(&info);
+    harness.component.borrow_mut().show_info("Docs", &[help], false);
+    assert!(!raw_render(&harness).contains("\x1b]52"));
+    let shown = harness.render(120).join("\n");
+    assert!(shown.contains("https://example.com/device%07%1B]52;c;Zm9v"), "{shown}");
+    assert!(shown.contains("Help: https://example.com/help%07%1B]52;c;Zm9v"), "{shown}");
+}
+
+#[test]
+fn control_characters_in_other_urls_are_replaced() {
+    let injected = "x\x07\x1b]52;c;Zm9v\x07";
+    let (copied, opened, completed) = (Calls::new(), Calls::new(), Calls::new());
+    let harness = dialog_harness(&copied, &opened, &completed);
+    harness.component.borrow_mut().show_auth(&format!("file:///tmp/{injected}"), None);
+    assert!(!raw_render(&harness).contains("\x1b]52"));
+
+    let info = DeviceCodeInfo { verification_uri: injected.into(), ..device(None, None) };
+    harness.component.borrow_mut().show_device_code(&info);
+    assert!(!raw_render(&harness).contains("\x1b]52"));
+    assert!(harness.render(120).join("\n").contains("x ]52;c;Zm9v"));
+
+    let help = AuthInfoLink { url: injected.into(), label: Some("Help".into()) };
+    harness.component.borrow_mut().show_info("Docs", &[help], false);
+    assert!(!raw_render(&harness).contains("\x1b]52"));
+    assert!(harness.render(120).join("\n").contains("Help: x ]52;c;Zm9v"));
+    assert!(opened.is_empty());
 }

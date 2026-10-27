@@ -7,6 +7,7 @@ use std::rc::Rc;
 
 use pi_ai::auth::{AuthError, AuthInfoLink, AuthResult};
 use pi_tui::components::Input;
+use pi_tui::terminal_image::hyperlink;
 use pi_tui::{Component, ComponentRef, Container, Tui, component, get_keybindings, same_component};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
@@ -204,14 +205,18 @@ impl LoginDialog {
         self.clear_device_code_action();
         self.content.borrow_mut().clear();
         self.add(spacer(1));
-        let auth_url = component(AuthUrl::with_clipboard(&self.tui, url, self.clipboard.clone()));
+        let target = web_url(url);
+        let shown = target.clone().unwrap_or_else(|| replace_control_characters(url));
+        let auth_url = component(AuthUrl::with_clipboard(&self.tui, &shown, self.clipboard.clone()));
         self.add(auth_url.clone());
         self.auth_url = Some(auth_url);
         if let Some(instructions) = instructions.filter(|instructions| !instructions.is_empty()) {
             self.add(spacer(1));
             self.add(text(&fg(ThemeColor::Warning, instructions), 1, 0));
         }
-        (self.open_browser)(url);
+        if let Some(target) = target {
+            (self.open_browser)(&target);
+        }
         self.tui.request_render(false);
     }
 
@@ -225,8 +230,9 @@ impl LoginDialog {
         self.clear_device_code_action();
         self.content.borrow_mut().clear();
         self.add(spacer(1));
-        self.add(text(&fg(ThemeColor::Accent, &hyperlink_bel(verification_uri, verification_uri)), 1, 0));
-        self.add(text(&fg(ThemeColor::Dim, &hyperlink_bel(click_hint(), verification_uri)), 1, 0));
+        let shown_url = display_url(verification_uri);
+        self.add(text(&fg(ThemeColor::Accent, &web_link(&shown_url, &shown_url)), 1, 0));
+        self.add(text(&fg(ThemeColor::Dim, &web_link(click_hint(), verification_uri)), 1, 0));
         self.add(spacer(1));
         self.add(text(&fg(ThemeColor::Warning, &format!("Enter code: {user_code}")), 1, 0));
         if !self.cancel.is_cancelled() && (open_browser || copy_code) {
@@ -267,12 +273,10 @@ impl LoginDialog {
                 status.set(if copied.await.is_ok() { "Code copied to clipboard" } else { "Copy code manually" });
             });
         }
-        // The shared launcher also opens files; device-code login must only open web URLs.
         if action.open_browser
-            && let Ok(url) = url::Url::parse(&action.verification_uri)
-            && matches!(url.scheme(), "http" | "https")
+            && let Some(target) = web_url(&action.verification_uri)
         {
-            (self.open_browser)(url.as_str());
+            (self.open_browser)(&target);
         }
     }
 
@@ -329,9 +333,9 @@ impl LoginDialog {
         self.add(spacer(1));
         self.add(text(&fg(ThemeColor::Text, message), 1, 0));
         for link in links {
-            let label =
-                link.label.as_deref().map_or_else(|| link.url.clone(), |label| format!("{label}: {}", link.url));
-            self.add(text(&fg(ThemeColor::Accent, &hyperlink_bel(&label, &link.url)), 1, 0));
+            let url = display_url(&link.url);
+            let label = link.label.as_deref().map_or_else(|| url.clone(), |label| format!("{label}: {url}"));
+            self.add(text(&fg(ThemeColor::Accent, &web_link(&label, &url)), 1, 0));
         }
         if show_close_hint {
             self.add(spacer(1));
@@ -390,9 +394,39 @@ impl LoginDialog {
     }
 }
 
-/// An OSC 8 link terminated with BEL, as upstream writes it by hand.
-fn hyperlink_bel(text: &str, url: &str) -> String {
-    format!("\x1b]8;;{url}\x07{text}\x1b]8;;\x07")
+/// The normalized `http:` or `https:` URL `value` names. The shared launcher also opens files
+/// and custom protocols, so login only opens web URLs. Normalizing percent-encodes control
+/// characters, which would otherwise end a terminal hyperlink early.
+fn web_url(value: &str) -> Option<String> {
+    let url = url::Url::parse(value).ok()?;
+    matches!(url.scheme(), "http" | "https").then(|| url.to_string())
+}
+
+/// Replaces each run of C0 and C1 control characters (ESC, BEL, newlines, ...) with one space.
+fn replace_control_characters(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut in_run = false;
+    for c in value.chars() {
+        let control = matches!(c, '\0'..='\u{1f}' | '\u{7f}'..='\u{9f}');
+        if !control {
+            out.push(c);
+        } else if !in_run {
+            out.push(' ');
+        }
+        in_run = control;
+    }
+    out
+}
+
+/// `value` as a normalized web URL, else with control characters replaced: an untrusted string
+/// printed as is could end a hyperlink early or send its own escape sequences to the terminal.
+fn display_url(value: &str) -> String {
+    web_url(value).unwrap_or_else(|| replace_control_characters(value))
+}
+
+/// `text` as a terminal hyperlink to `url` when that is a web URL, else plain `text`.
+fn web_link(text: &str, url: &str) -> String {
+    web_url(url).map_or_else(|| text.to_string(), |target| hyperlink(text, &target))
 }
 
 impl Component for LoginDialog {
