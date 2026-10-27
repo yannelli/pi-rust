@@ -100,3 +100,15 @@ pub trait Watchable<T = Json, E = ChordError> {
     /// A watch holding the current value, then one frame per change; the context's cancellation ends it.
     fn watch(&self, context: &Context) -> BoxFuture<Result<Self::Handle, E>>;
 }
+
+/// An in-process value that changes and can be watched (it may hold anything, errors and functions included): a change
+/// is a new value, delivered without ops.
+pub trait NativeWatchable<T, E = ChordError> {
+    type Handle: NativeWatchHandle<T, E>;
+
+    /// The current value.
+    fn value(&self) -> T;
+
+    /// A watch holding the current value, then one frame per new value; the context's cancellation ends it.
+    fn watch(&self, context: &Context) -> BoxFuture<Result<Self::Handle, E>>;
+}
