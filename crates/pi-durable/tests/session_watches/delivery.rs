@@ -4,15 +4,10 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
 use pi_chord::delta::{Op, apply_immutable};
-use pi_durable::session::WatchEnd;
 use pi_durable::{CommitChange, DocumentCommitChange};
 
 use super::support::*;
 use super::*;
-
-fn ops(text: &str) -> Vec<Op> {
-    pi_chord::delta::parse_ops(&json(text)).unwrap()
-}
 
 #[tokio::test]
 async fn never_creates_an_absent_document() {
@@ -49,7 +44,7 @@ async fn keeps_the_acquisition_revision_until_start_then_delivers_the_commits_si
     let deliveries: Frames = Arc::default();
     let (sink, flag, observed) = (deliveries.clone(), inline.clone(), watch.clone());
     watch
-        .start(move |value, ops, _| {
+        .start(move |pi_chord::WatchChange { value, ops, .. }, _| {
             assert!(!flag.load(Ordering::SeqCst));
             assert!(observed.value().same_ref(&value));
             sink.lock().unwrap().push((value, ops));
@@ -89,7 +84,7 @@ async fn serializes_callbacks_and_folds_the_commits_made_while_one_is_in_flight_
     let (sink, gate_in, gate_out) = (values.clone(), entered.clone(), release.clone());
     let (now, max, seen) = (active.clone(), max_active.clone(), batches.clone());
     watch
-        .start(move |value, ops, _| {
+        .start(move |pi_chord::WatchChange { value, ops, .. }, _| {
             let (sink, gate_in, gate_out, now, max) =
                 (sink.clone(), gate_in.clone(), gate_out.clone(), now.clone(), max.clone());
             seen.lock().unwrap().push(ops);
@@ -132,7 +127,7 @@ async fn allows_a_listener_to_initiate_a_later_session_commit() {
     let values: Arc<Mutex<Vec<i64>>> = Arc::default();
     let (sink, done, session) = (values.clone(), completed.clone(), test.session.clone());
     watch
-        .start(move |value, _, _| {
+        .start(move |pi_chord::WatchChange { value, .. }, _| {
             let (sink, done, session) = (sink.clone(), done.clone(), session.clone());
             async move {
                 let current = value_of(&value);
@@ -209,7 +204,7 @@ async fn never_folds_the_in_flight_frame_into_the_next_call() {
     let frames: Frames = Arc::default();
     let (sink, gate_in, gate_out) = (frames.clone(), entered.clone(), release.clone());
     watch
-        .start(move |value, ops, _| {
+        .start(move |pi_chord::WatchChange { value, ops, .. }, _| {
             let (sink, gate_in, gate_out) = (sink.clone(), gate_in.clone(), gate_out.clone());
             async move {
                 let first = {
@@ -241,16 +236,27 @@ async fn never_folds_the_in_flight_frame_into_the_next_call() {
 }
 
 #[tokio::test]
-async fn folds_retirement_over_pending_commits_and_then_closes() {
+async fn folds_a_retirement_into_the_pending_commits_call_which_reports_it_with_the_last_value_and_goes_on() {
     let test = create_state().await;
     let watch = watch_state(&test.session).await;
     for value in 1..=100 {
         set_value(&test.session, value).await;
     }
+    let last = test.session.snapshot(&STATE_DOC, (), &context()).await.unwrap().unwrap();
     retire_state(&test.session).await;
-    let frames = record(&watch);
-    assert!(matches!(watch.closed().await, WatchEnd::Retired));
-    assert_eq!(*frames.lock().unwrap(), vec![(Json::Null, vec![Op::Replace(Json::Null)])]);
+    let changes = record_changes(&watch);
+    flush().await;
+    let expected = WatchChange { value: last.clone(), ops: ops(r#"[["s",["value"],100]]"#), retired: true };
+    assert_eq!(*changes.lock().unwrap(), [expected]);
+    assert!(changes.lock().unwrap()[0].value.same_ref(&last));
+    assert!(watch.value().same_ref(&last));
+    set_value(&test.session, 7).await;
+    flush().await;
+    let recreated = test.session.snapshot(&STATE_DOC, (), &context()).await.unwrap().unwrap();
+    assert_eq!(value_of(&recreated), 7);
+    let expected = WatchChange { value: recreated.clone(), ops: vec![Op::Replace(recreated)], retired: false };
+    assert_eq!(changes.lock().unwrap()[1], expected);
+    watch.stop().await;
 }
 
 /// Upstream delivers a nonempty no-op batch here. The Rust tracker diffs drafts, so the same shift and unshift is
@@ -288,7 +294,7 @@ async fn can_replay_every_delivered_exact_operation_batch_from_the_acquisition_r
     let replica = Arc::new(Mutex::new(watch.value()));
     let state = replica.clone();
     watch
-        .start(move |value, ops, _| {
+        .start(move |pi_chord::WatchChange { value, ops, .. }, _| {
             let mut replica = state.lock().unwrap();
             *replica = apply_immutable(Some(&replica), &ops).unwrap();
             assert_eq!(*replica, value);

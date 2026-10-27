@@ -3,7 +3,8 @@
 use std::sync::{Arc, Mutex};
 
 use pi_chord::{
-    AbortController, Context, Json, WatchEnd, create_context_key, json, with_abort_signal, with_context_value,
+    AbortController, Context, Json, WatchChange, WatchEnd, create_context_key, json, with_abort_signal,
+    with_context_value,
 };
 
 use super::support::Gate;
@@ -12,9 +13,10 @@ use super::*;
 #[tokio::test]
 async fn keeps_the_acquisition_value_until_start_then_delivers_the_frames_since_in_one_call() {
     let (watch, _) = recorded_watch(json!({ "n": 0, "text": "" }));
-    watch.advance(json!({ "n": 1, "text": "" }), ops(json!([["s", ["n"], 1]])), context());
-    watch.advance(json!({ "n": 2, "text": "a" }), ops(json!([["s", ["n"], 2], ["a", ["text"], "a"]])), context());
-    watch.advance(json!({ "n": 2, "text": "ab" }), ops(json!([["a", ["text"], "b"]])), context());
+    watch.advance(frame(json!({ "n": 1, "text": "" }), ops(json!([["s", ["n"], 1]]))), context());
+    watch
+        .advance(frame(json!({ "n": 2, "text": "a" }), ops(json!([["s", ["n"], 2], ["a", ["text"], "a"]]))), context());
+    watch.advance(frame(json!({ "n": 2, "text": "ab" }), ops(json!([["a", ["text"], "b"]]))), context());
     flush().await;
     assert_eq!(watch.value(), json!({ "n": 0, "text": "" }));
 
@@ -29,9 +31,9 @@ async fn keeps_the_acquisition_value_until_start_then_delivers_the_frames_since_
 #[tokio::test]
 async fn passes_a_frame_s_ops_on_unchanged_to_a_listener_that_keeps_up() {
     let (watch, _, frames) = collecting_watch(json!(0));
-    watch.advance(json!(1), replace(json!(1)), context());
+    watch.advance(frame(json!(1), replace(json!(1))), context());
     flush().await;
-    watch.advance(json!(2), replace(json!(2)), context());
+    watch.advance(frame(json!(2), replace(json!(2))), context());
     flush().await;
     assert_eq!(*frames.lock().unwrap(), [(json!(1), replace(json!(1))), (json!(2), replace(json!(2)))]);
 }
@@ -39,7 +41,7 @@ async fn passes_a_frame_s_ops_on_unchanged_to_a_listener_that_keeps_up() {
 #[tokio::test]
 async fn never_invokes_the_listener_inline() {
     let (watch, _, frames) = collecting_watch(json!(0));
-    watch.advance(json!(1), replace(json!(1)), context());
+    watch.advance(frame(json!(1), replace(json!(1))), context());
     assert!(frames.lock().unwrap().is_empty());
     flush().await;
     assert_eq!(*frames.lock().unwrap(), [(json!(1), replace(json!(1)))]);
@@ -53,7 +55,7 @@ async fn awaits_each_callback_and_folds_frames_advanced_while_one_is_in_flight_i
     let frames: Frames = Arc::default();
     let (sink, held, seen) = (calls.clone(), gate.clone(), frames.clone());
     watch
-        .start(move |value, ops, _| {
+        .start(move |WatchChange { value, ops, .. }, _| {
             let (sink, held, seen) = (sink.clone(), held.clone(), seen.clone());
             async move {
                 sink.lock().unwrap().push(format!("start {value}"));
@@ -70,10 +72,10 @@ async fn awaits_each_callback_and_folds_frames_advanced_while_one_is_in_flight_i
             }
         })
         .unwrap();
-    watch.advance(json!({ "text": "a" }), ops(json!([["a", ["text"], "a"]])), context());
+    watch.advance(frame(json!({ "text": "a" }), ops(json!([["a", ["text"], "a"]]))), context());
     flush().await;
-    watch.advance(json!({ "text": "ab" }), ops(json!([["a", ["text"], "b"]])), context());
-    watch.advance(json!({ "text": "abc" }), ops(json!([["a", ["text"], "c"]])), context());
+    watch.advance(frame(json!({ "text": "ab" }), ops(json!([["a", ["text"], "b"]]))), context());
+    watch.advance(frame(json!({ "text": "abc" }), ops(json!([["a", ["text"], "c"]]))), context());
     flush().await;
     assert_eq!(*calls.lock().unwrap(), [r#"start {"text":"a"}"#]);
     gate.resolve();
@@ -91,14 +93,14 @@ async fn delivers_the_newest_frame_s_context_without_its_abort_signal() {
     let delivered: Arc<Mutex<Vec<Context>>> = Arc::default();
     let sink = delivered.clone();
     watch
-        .start(move |_, _, delivery| {
+        .start(move |_, delivery| {
             sink.lock().unwrap().push(delivery);
             async { Ok(()) }
         })
         .unwrap();
-    watch.advance(json!(1), replace(json!(1)), with_context_value(&key, "first".into(), &context()));
+    watch.advance(frame(json!(1), replace(json!(1))), with_context_value(&key, "first".into(), &context()));
     let second = with_context_value(&key, "second".into(), &with_abort_signal(&controller.signal(), &context()));
-    watch.advance(json!(2), replace(json!(2)), second);
+    watch.advance(frame(json!(2), replace(json!(2))), second);
     flush().await;
     let delivered = delivered.lock().unwrap().clone();
     assert_eq!(delivered.len(), 1);
@@ -106,40 +108,65 @@ async fn delivers_the_newest_frame_s_context_without_its_abort_signal() {
     assert!(delivered[0].abort_signal().is_none());
 }
 
+/// A retirement the source reports with `value`.
+fn retirement(value: Json) -> WatchChange {
+    WatchChange { value, ops: Vec::new(), retired: true }
+}
+
 #[tokio::test]
-async fn delivers_r_null_as_the_last_call_and_then_ends_retired() {
-    let (watch, recorded, frames) = collecting_watch(json!(1));
+async fn reports_a_retirement_in_the_next_call_with_the_value_the_source_gives_and_goes_on() {
+    let (watch, recorded) = recorded_watch(json!(1));
+    let changes = collect_changes(&watch);
     let settled = end_of(&watch);
-    watch.advance(json!(2), replace(json!(2)), context());
+    watch.advance(frame(json!(2), replace(json!(2))), context());
     flush().await;
-    watch.retire(context());
-    watch.advance(json!(3), replace(json!(3)), context());
+    watch.advance(retirement(json!(2)), context());
     flush().await;
-    assert_eq!(*frames.lock().unwrap(), [(json!(2), replace(json!(2))), (Json::Null, replace(Json::Null))]);
-    assert_eq!(watch.value(), Json::Null);
-    assert!(matches!(*settled.lock().unwrap(), Some(WatchEnd::Retired)));
-    assert_eq!(recorded.detached(), 1);
+    watch.advance(frame(json!(3), replace(json!(3))), context());
+    flush().await;
+    let expected = [frame(json!(2), replace(json!(2))), retirement(json!(2)), frame(json!(3), replace(json!(3)))];
+    assert_eq!(*changes.lock().unwrap(), expected);
+    assert_eq!(watch.value(), json!(3));
+    assert!(settled.lock().unwrap().is_none());
+    assert_eq!(recorded.detached(), 0);
+    watch.stop().await;
 }
 
 #[tokio::test]
-async fn drops_pending_frames_also_an_overflow_for_the_retirement() {
-    for pending in [3, pi_chord::delta::MAX_PENDING_OPS + 1] {
-        let (watch, _) = recorded_watch(json!({ "k": [] }));
-        advance_distinct(&watch, pending);
-        watch.retire(context());
-        let frames = collect_frames(&watch);
-        assert!(matches!(watch.closed().await, WatchEnd::Retired));
-        assert_eq!(*frames.lock().unwrap(), [(Json::Null, replace(Json::Null))]);
-    }
+async fn folds_a_retirement_and_the_frames_around_it_into_one_call_that_reports_it() {
+    let (watch, _) = recorded_watch(json!({ "n": 0 }));
+    watch.advance(frame(json!({ "n": 1 }), ops(json!([["s", ["n"], 1]]))), context());
+    watch.advance(retirement(json!({ "n": 1 })), context());
+    watch.advance(frame(json!({ "m": 1 }), replace(json!({ "m": 1 }))), context());
+    let changes = collect_changes(&watch);
+    flush().await;
+    let folded = WatchChange { value: json!({ "m": 1 }), ops: replace(json!({ "m": 1 })), retired: true };
+    assert_eq!(*changes.lock().unwrap(), [folded]);
+    watch.advance(frame(json!({ "m": 2 }), ops(json!([["s", ["m"], 2]]))), context());
+    flush().await;
+    assert_eq!(changes.lock().unwrap()[1], frame(json!({ "m": 2 }), ops(json!([["s", ["m"], 2]]))));
+    watch.stop().await;
 }
 
 #[tokio::test]
-async fn ends_retired_only_on_its_source_s_retirement_never_on_a_null_value() {
+async fn keeps_reporting_the_retirement_past_an_overflow() {
+    let (watch, _) = recorded_watch(json!({ "k": [] }));
+    watch.advance(retirement(json!({ "k": [] })), context());
+    let newest = advance_distinct(&watch, pi_chord::delta::MAX_PENDING_OPS + 1);
+    let changes = collect_changes(&watch);
+    flush().await;
+    let expected = WatchChange { value: newest.clone(), ops: replace(newest), retired: true };
+    assert_eq!(*changes.lock().unwrap(), [expected]);
+    watch.stop().await;
+}
+
+#[tokio::test]
+async fn treats_a_null_value_as_a_value_never_as_a_retirement() {
     let (watch, _, frames) = collecting_watch(json!(1));
     let settled = end_of(&watch);
-    watch.advance(Json::Null, replace(Json::Null), context());
+    watch.advance(frame(Json::Null, replace(Json::Null)), context());
     flush().await;
-    watch.advance(json!(2), replace(json!(2)), context());
+    watch.advance(frame(json!(2), replace(json!(2))), context());
     flush().await;
     assert_eq!(*frames.lock().unwrap(), [(Json::Null, replace(Json::Null)), (json!(2), replace(json!(2)))]);
     assert!(settled.lock().unwrap().is_none());
@@ -149,7 +176,7 @@ async fn ends_retired_only_on_its_source_s_retirement_never_on_a_null_value() {
 #[tokio::test]
 async fn discards_a_retirement_still_pending_when_the_source_ends() {
     let (watch, _) = recorded_watch(json!(1));
-    watch.retire(context());
+    watch.advance(retirement(json!(1)), context());
     watch.end(None);
     assert!(matches!(watch.closed().await, WatchEnd::Ended));
     assert_eq!(watch.value(), json!(1));

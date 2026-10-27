@@ -155,6 +155,11 @@ impl ControlledStorage {
         *self.filtered_failure.lock().unwrap() = Some((Arc::new(filter), error));
     }
 
+    /// Whether a commit's `adopt` is running now.
+    pub fn adopting(&self) -> bool {
+        self.adoption_order.lock().unwrap().last() == Some(&"adopt")
+    }
+
     pub fn fail_next_commit(&self, error: DurableError) {
         *self.commit_failure.lock().unwrap() = Some(error);
     }

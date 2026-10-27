@@ -17,7 +17,7 @@ async fn gets_one_call_per_batch_whose_ops_turn_the_delivered_value_into_the_new
     let calls = Arc::new(Mutex::new(Vec::<usize>::new()));
     let (mirror, sink) = (replica.clone(), calls.clone());
     watch
-        .start(move |value, ops, _| {
+        .start(move |WatchChange { value, ops, .. }, _| {
             let (mirror, sink) = (mirror.clone(), sink.clone());
             async move {
                 let next = apply_immutable(Some(&mirror.lock().unwrap()), &ops).unwrap();
@@ -35,7 +35,7 @@ async fn gets_one_call_per_batch_whose_ops_turn_the_delivered_value_into_the_new
         edit(change.state().unwrap());
         let prepared = change.prepare().unwrap();
         tracker.adopt(&prepared).unwrap();
-        watch.advance(tracker.value().clone(), prepared.ops, context());
+        watch.advance(frame(tracker.value().clone(), prepared.ops), context());
     };
     // Ten seconds of a streamed reply at 60 tokens per second, a new entry every second.
     for tick in 0..600 {
@@ -85,7 +85,7 @@ async fn never_folds_the_in_flight_call_into_an_overflow() {
     let frames: Frames = Arc::default();
     let (seen, held) = (frames.clone(), gate.clone());
     watch
-        .start(move |value, ops, _| {
+        .start(move |WatchChange { value, ops, .. }, _| {
             let (seen, held) = (seen.clone(), held.clone());
             async move {
                 let first = {
@@ -100,7 +100,7 @@ async fn never_folds_the_in_flight_call_into_an_overflow() {
             }
         })
         .unwrap();
-    watch.advance(json!({ "k": [], "first": true }), ops(json!([["s", ["first"], true]])), context());
+    watch.advance(frame(json!({ "k": [], "first": true }), ops(json!([["s", ["first"], true]]))), context());
     flush().await;
     let newest = advance_distinct(&watch, MAX_PENDING_OPS + 1);
     gate.resolve();
@@ -115,8 +115,8 @@ async fn starts_folding_again_after_an_overflow_was_delivered() {
     let (watch, _, frames) = collecting_watch(json!({ "k": [] }));
     advance_distinct(&watch, MAX_PENDING_OPS + 1);
     flush().await;
-    watch.advance(json!({ "n": 1 }), replace(json!({ "n": 1 })), context());
-    watch.advance(json!({ "n": 2 }), ops(json!([["s", ["n"], 2]])), context());
+    watch.advance(frame(json!({ "n": 1 }), replace(json!({ "n": 1 }))), context());
+    watch.advance(frame(json!({ "n": 2 }), ops(json!([["s", ["n"], 2]]))), context());
     flush().await;
     let last = frames.lock().unwrap().last().cloned().unwrap();
     assert_eq!(last, (json!({ "n": 2 }), ops(json!([["r", { "n": 1 }], ["s", ["n"], 2]]))));

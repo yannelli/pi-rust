@@ -2,8 +2,8 @@
 //! cache until a commit that reads or writes the document, its deadline, a drop of its tracker, or close stores them.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use pi_chord::delta::{Op, PendingOps, PendingTake};
 use pi_chord::{BACKGROUND_CONTEXT, Context, Json, without_abort_signal};
@@ -252,7 +252,8 @@ impl SessionCore {
     }
 
     /// On the line: store the held changes of `ids` in one storage transaction. Memory already has them, so only
-    /// `subscribe_commits()` listeners see it. A failure fails the Session, as every Storage failure does.
+    /// `subscribe_commits()` listeners see it, published as Storage adopts it. A failure fails the Session, as every
+    /// Storage failure does.
     pub(crate) async fn store_holds(self: &Arc<Self>, ids: &[DocumentId], context: &Context) -> DurableResult<()> {
         let (mut writes, mut changes, mut stored) = (Vec::new(), Vec::new(), Vec::new());
         {
@@ -278,14 +279,19 @@ impl SessionCore {
             return Ok(());
         }
         let adopted = AtomicBool::new(false);
-        let adopt = |_| {
+        let publication = Mutex::new(Some(changes));
+        let adopt = |seq| {
             adopted.store(true, Ordering::SeqCst);
             for (loaded, base) in &stored {
                 let mut meta = lock(&loaded.meta);
                 meta.deltas_since_base = if *base { 0 } else { meta.deltas_since_base + 1 };
             }
+            let hosts = self.host_listeners();
+            if let Some(changes) = lock(&publication).take().filter(|_| !hosts.is_empty()) {
+                self.publish_stored(&CommitPublication { seq, changes }, &hosts, context);
+            }
         };
-        let seq = self.storage.commit(&writes, &adopt, &without_abort_signal(context)).await?;
+        self.storage.commit(&writes, &adopt, &without_abort_signal(context)).await?;
         if !adopted.load(Ordering::SeqCst) {
             let error = DurableError::error("Storage committed without adopting the batch");
             self.fail_in(error.clone(), Some(context));
@@ -293,7 +299,6 @@ impl SessionCore {
         }
         let ids: Vec<DocumentId> = stored.iter().map(|(loaded, _)| loaded.record.id).collect();
         self.release_holds(&ids);
-        self.publish_stored(&CommitPublication { seq, changes }, &self.host_listeners(), context);
         Ok(())
     }
 

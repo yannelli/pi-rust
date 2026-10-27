@@ -175,7 +175,7 @@ async fn ends_a_turn_at_the_generation_s_hold_before_its_successor_s_turn_starts
     let events = Arc::new(Mutex::new(Vec::<Value>::new()));
     let sink = events.clone();
     stream
-        .start(move |batch, _| {
+        .start(move |pi_chord::NativeWatchChange { value: batch }, _| {
             sink.lock().unwrap().extend(batch.iter().map(Value::from));
             async { Ok(()) }
         })

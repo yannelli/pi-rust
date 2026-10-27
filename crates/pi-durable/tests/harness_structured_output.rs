@@ -164,7 +164,7 @@ async fn stores_exactly_what_callers_and_events_get_without_the_model_s_output_a
     let ends = Arc::new(Mutex::new(Vec::new()));
     let sink = ends.clone();
     stream
-        .start(move |batch, _| {
+        .start(move |pi_chord::NativeWatchChange { value: batch }, _| {
             for event in batch {
                 if event["type"] == "tool_execution_end".into() && event.get("parentToolCallId").is_some() {
                     sink.lock().unwrap().push(Value::from(&event["result"]));

@@ -180,7 +180,7 @@ async fn converts_a_committed_partial_into_an_aborted_entry_and_resends_the_same
     let watched = Arc::new(Mutex::new(None::<String>));
     let sink = watched.clone();
     watch
-        .start(move |value, _, _| {
+        .start(move |pi_chord::WatchChange { value, .. }, _| {
             if let Some(text) = partial_text(&Value::from(&value)) {
                 *sink.lock().unwrap() = Some(text);
             }

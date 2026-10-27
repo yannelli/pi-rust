@@ -304,7 +304,7 @@ fn restart_limit_blocked() -> TaskInspectionState {
 /// Watch the task graph; `blocked` reads one task's `blocked` field.
 async fn watch_graph(harness: &Harness) -> TaskGraphWatch {
     let graph = harness.watch_task_graph(&context()).await.unwrap();
-    graph.start(|_, _, _| async { Ok(()) }).unwrap();
+    graph.start(|pi_chord::WatchChange { .. }, _| async { Ok(()) }).unwrap();
     graph
 }
 

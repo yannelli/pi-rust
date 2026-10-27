@@ -20,6 +20,7 @@ How pi-chord's `host2` differs from upstream chord on purpose:
 - `Host::host_object` returns the host's own reference to a `lifetime: "host"` object (upstream tests read the private `hostObjects`).
 - Upstream `4a5d37291` moved `OutputBuffer` and `Progress` into `@earendil-works/chord/output`. pi-rust keeps them in pi-durable (`harness/output.rs` and `harness/progress.rs`).
 - `Change::append_text` (upstream `appendText`) records an append op without comparing the strings, but the new string is still a copy: a JSON string is an immutable shared `Arc<str>`, so each append costs O(length), not O(text). It takes the path of the object that holds the key, since a Rust draft is a `&mut Json` and not a proxy.
+- Durable calls `subscribe_commits()` listeners inside Storage's `adopt`, right after the Session's own observers, where upstream (`8b0caefc2`) runs them one microtask later: Rust has no microtask queue, and a spawned task could run after the waits that the commit resolves. A telemetry `add_event` or metric cannot fail in Rust, so there is no `host_error` report for `"telemetry"`.
 - Tests: fake timers are real short timers, and `Weak` sentinels replace `FinalizationRegistry` with a forced GC. The review test "a commit that still fails midway" is not ported: it patches an object's `startTasks`, which Rust code cannot do.
 - The tutorial test (upstream `test/tutorial.test.ts`) is `chord2_tutorial.rs` and `chord2_tutorial_reload.rs`, one test per section. Its drift check, which compares `docs/tutorial.md` with the TypeScript examples in the test, is not ported: pi-rust has no TypeScript copy of the examples.
 
@@ -45,7 +46,7 @@ Older than the synced commit, so the report no longer lists them.
 
 Upstream `7472cda0d` (2026-10-12) deleted the experimental server stack: the client, protocol, and server packages and `pi experimental`. pi-rust keeps them on purpose as pi-rust extras (decided 2026-10-21): `pi-client`, `pi-protocol`, `pi-server`, the `pi experimental` commands (`server`, `client`, `durable`, `vacation`), and the facets/services runtime in pi-chord that they use. The three crates are in `allowlist.json`. They get no upstream fixes from now on.
 
-Upstream `92ab53602` removed the Chord state getters `Session.documentState()`, `Conversation.viewState()`, and `Harness.taskGraph()` with the `DocumentState` type. pi-durable keeps them because the experimental stack in pi-coding-agent reads conversations and the task graph through them. A retirement still publishes `null` to a document state.
+Upstream `92ab53602` removed the Chord state getters `Session.documentState()`, `Conversation.viewState()`, and `Harness.taskGraph()` with the `DocumentState` type. pi-durable keeps them because the experimental stack in pi-coding-agent reads conversations and the task graph through them. A retirement publishes `null` to a document state, and a later incarnation at the address its value, as a watch follows its address.
 
 ## pi-rust extensions
 

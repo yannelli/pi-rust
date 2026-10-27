@@ -126,8 +126,14 @@ impl Scheduler {
             let id = record.id;
             self.task_waiters.resolve(&id, record);
         }
-        for invocation in signal {
-            invocation.controller.abort(None);
+        // Abort listeners are task code, which never runs inside Storage's `adopt`: the signal follows in a task, after
+        // host commit listeners.
+        if !signal.is_empty() {
+            tokio::spawn(async move {
+                for invocation in signal {
+                    invocation.controller.abort(None);
+                }
+            });
         }
         if reconcile {
             self.schedule_reconcile();

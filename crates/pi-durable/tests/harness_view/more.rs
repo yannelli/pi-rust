@@ -116,7 +116,7 @@ async fn folds_undelivered_commits_into_one_call_whose_ops_reach_the_newest_view
     let frames: Frames = Arc::default();
     let sink = frames.clone();
     watch
-        .start(move |value, ops, _| {
+        .start(move |pi_chord::WatchChange { value, ops, .. }, _| {
             sink.lock().unwrap().push((value, ops));
             async { Ok(()) }
         })
@@ -205,7 +205,9 @@ async fn shares_one_mount_between_concurrent_observers_and_isolates_a_failing_li
     let shared = root.view_state(&context()).await.unwrap();
     assert!(failing.value().same_ref(&shared.value()));
     shared.dispose().unwrap();
-    failing.start(|_, _, _| async { Err(pi_durable::DurableError::error("listener failed")) }).unwrap();
+    failing
+        .start(|pi_chord::WatchChange { .. }, _| async { Err(pi_durable::DurableError::error("listener failed")) })
+        .unwrap();
     note(&root, "one", None).await;
     note(&root, "two", None).await;
     drained().await;

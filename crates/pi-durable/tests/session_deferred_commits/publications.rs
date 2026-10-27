@@ -142,7 +142,7 @@ async fn show_every_held_commit_to_watches_and_the_session_s_own_observers_once(
     let values: Arc<Mutex<Vec<String>>> = Arc::default();
     let sink = values.clone();
     watch
-        .start(move |value, _, _| {
+        .start(move |pi_chord::WatchChange { value, .. }, _| {
             sink.lock().unwrap().push(value["text"].as_str().unwrap_or_default().to_owned());
             async { Ok(()) }
         })

@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use pi_chord::{AbortController, Context};
-use pi_durable::env::{FileError, FileErrorCode, FileWatcher, WatchChange, WatchListener, WatchMode, WatchTarget};
+use pi_durable::env::{FileChange, FileError, FileErrorCode, FileWatcher, WatchListener, WatchMode, WatchTarget};
 use serde_json::{Value, json};
 use tokio::sync::{Notify, oneshot};
 use tokio::task::JoinHandle;
@@ -43,7 +43,7 @@ struct WatchState {
 }
 
 impl WatchState {
-    fn deliver(&self, change: WatchChange) {
+    fn deliver(&self, change: FileChange) {
         if self.closed.load(Ordering::SeqCst) {
             return;
         }
@@ -156,10 +156,10 @@ fn handle_event(state: &WatchState, event: &Json, ready: &AtomicBool, sender: &R
                 *lock(&state.mode) = WatchMode::Polling;
             }
             if event.get("overflow") == Some(&Value::Bool(true)) {
-                state.deliver(WatchChange::Overflow);
+                state.deliver(FileChange::Overflow);
             } else {
                 let paths = event.get("paths").and_then(Value::as_array).into_iter().flatten();
-                state.deliver(WatchChange::Paths(paths.filter_map(Value::as_str).map(str::to_string).collect()));
+                state.deliver(FileChange::Paths(paths.filter_map(Value::as_str).map(str::to_string).collect()));
             }
         }
         Some("error") => {
@@ -171,7 +171,7 @@ fn handle_event(state: &WatchState, event: &Json, ready: &AtomicBool, sender: &R
                 Some(Value::String(message)) => message.clone(),
                 other => other.map_or("undefined".into(), Value::to_string),
             };
-            state.deliver(WatchChange::Error(FileError::new(code, message, None)));
+            state.deliver(FileChange::Error(FileError::new(code, message, None)));
             state.closed.store(true, Ordering::SeqCst);
         }
         _ => {}
@@ -211,7 +211,7 @@ fn start(state: Arc<WatchState>) -> BoxFuture<'static, Result<(), RemoteError>> 
                 tokio::spawn(reconnect(task_state));
                 return;
             }
-            task_state.deliver(WatchChange::Error(to_file_error(&error, None)));
+            task_state.deliver(FileChange::Error(to_file_error(&error, None)));
             task_state.closed.store(true, Ordering::SeqCst);
         });
         *lock(&state.task) = Some(task);
@@ -233,12 +233,12 @@ async fn reconnect(state: Arc<WatchState>) {
         match start(state.clone()).await {
             Ok(()) => {
                 // Changes while disconnected were not seen.
-                state.deliver(WatchChange::Overflow);
+                state.deliver(FileChange::Overflow);
                 return;
             }
             Err(error) if is_connection_lost(&error) => delay = (delay * 2).min(RECONNECT_MAX),
             Err(error) => {
-                state.deliver(WatchChange::Error(to_file_error(&error, None)));
+                state.deliver(FileChange::Error(to_file_error(&error, None)));
                 state.closed.store(true, Ordering::SeqCst);
                 return;
             }

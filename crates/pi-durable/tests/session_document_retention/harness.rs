@@ -73,7 +73,7 @@ async fn event_sequence(document_retention_ms: f64) -> Vec<String> {
     let events = Arc::new(Mutex::new(Vec::new()));
     let sink = events.clone();
     stream
-        .start(move |batch, _| {
+        .start(move |pi_chord::NativeWatchChange { value: batch }, _| {
             sink.lock().unwrap().extend(batch.iter().map(Value::from));
             async { Ok(()) }
         })

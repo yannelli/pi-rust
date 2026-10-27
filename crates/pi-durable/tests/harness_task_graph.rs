@@ -267,7 +267,7 @@ async fn builds_from_committed_tasks_shows_surviving_tasks_as_pending_after_reop
     let frames = Arc::new(Mutex::new(Vec::<Vec<Op>>::new()));
     let (sink, frame_sink) = (replica.clone(), frames.clone());
     watch
-        .start(move |value, ops, _| {
+        .start(move |pi_chord::WatchChange { value, ops, .. }, _| {
             let next = apply_immutable(Some(&sink.lock().unwrap()), &ops).unwrap();
             assert_eq!(next, value);
             *sink.lock().unwrap() = next;

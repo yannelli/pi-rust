@@ -7,14 +7,17 @@ use std::sync::{Arc, Mutex, Weak};
 
 use pi_chord::delta::{Op, Path, Seg, apply_immutable};
 use pi_chord::state::{ReplicatedStateSourceOptions, attach_replicated_state_source};
-use pi_chord::{BACKGROUND_CONTEXT, Context, Json, JsonMap, Watch, without_abort_signal};
+use pi_chord::{BACKGROUND_CONTEXT, Context, Json, JsonMap, Watch, WatchChange, without_abort_signal};
 
 use super::scheduler::{BlockedSubject, Scheduler};
 use super::types::BlockedReason;
 use super::util::{cancellation, closed_error, lock, scan_all};
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::ConversationId;
-use crate::session::{CommittedObserver, CommittedStateSource, DocumentState, ObservedCommit, Release, Session};
+use crate::session::{
+    CommittedObserver, CommittedStateSource, DocumentState, GuardedObserver, Observation, ObservedCommit, Observer,
+    Release, Session,
+};
 use crate::types::{CommitChange, ConversationQuery, TaskQuery, TaskRecord, TaskState, TaskStatus};
 
 /// `{ tasks }`: every live task keyed by its decimal ID. A node is `{ id, kind, conversationId, owner?, background,
@@ -33,6 +36,7 @@ const SCAN_PAGE_SIZE: usize = 256;
 
 struct Mount {
     value: Json,
+    /// Watches, states, and guarded host observers (`observe_task_graph()`).
     observers: Vec<(u64, Arc<dyn CommittedObserver>)>,
     /// What the blocked reason reads of each live task, so a registry change can derive it again without payloads.
     records: HashMap<String, BlockedSubject>,
@@ -103,7 +107,28 @@ impl TaskGraphView {
         }
     }
 
-    /// A serialized exact-frame watch of the graph; cancelling `context` stops it.
+    /// Attach a synchronous observer of the graph (`Harness::observe_task_graph()`), behind its guard; `context`
+    /// governs only the attachment.
+    pub async fn observe(
+        self: &Arc<Self>,
+        observer: Arc<dyn Observer>,
+        context: &Context,
+    ) -> DurableResult<Observation> {
+        let session = self.session.clone();
+        let ((value, guarded), _) = self
+            .attach(context, move |value, release| {
+                let guarded = GuardedObserver::new(observer, move || release.run(), move |error| session.report(error));
+                (guarded.clone() as Arc<dyn CommittedObserver>, (value.clone(), guarded))
+            })
+            .await?;
+        if context.is_cancelled() {
+            guarded.detach();
+            return Err(cancellation(context));
+        }
+        Ok(Observation::new(value, Arc::new(move || guarded.detach())))
+    }
+
+    /// A serialized exact-frame watch of the graph, an observer of its mount; cancelling `context` stops it.
     pub async fn watch(self: &Arc<Self>, context: &Context) -> DurableResult<TaskGraphWatch> {
         let session = self.session.clone();
         let (watch, _) = self
@@ -216,8 +241,9 @@ impl TaskGraphView {
             (mount.value.clone(), ops, observers)
         };
         let (value, ops, observers) = delivery;
+        let change = WatchChange::new(value, ops);
         for observer in observers {
-            observer.advance(value.clone(), ops.clone(), BACKGROUND_CONTEXT.clone());
+            observer.advance(change.clone(), BACKGROUND_CONTEXT.clone());
         }
     }
 
@@ -279,9 +305,9 @@ impl TaskGraphView {
             }
         };
         let (value, ops, observers) = delivery;
-        let frame_context = without_abort_signal(context);
+        let (change, frame_context) = (WatchChange::new(value, ops), without_abort_signal(context));
         for observer in observers {
-            observer.advance(value.clone(), ops.clone(), frame_context.clone());
+            observer.advance(change.clone(), frame_context.clone());
         }
     }
 }

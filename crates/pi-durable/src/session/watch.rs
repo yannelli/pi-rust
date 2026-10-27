@@ -1,27 +1,27 @@
 //! Document watches: Chord's `Watch` with the Session's error type (spec section 9.2).
 
-use pi_chord::delta::Op;
-use pi_chord::{Context, Json, Watch};
+use pi_chord::{Context, Watch, WatchChange};
 
 use super::observation::CommittedObserver;
 use crate::errors::DurableError;
 
-/// A watch of one committed document incarnation: its value is the document. A retirement delivers `[["r", null]]`
-/// with value `null`, then ends the watch as `retired`; the Session's close ends it as `ended`, its failure as
-/// `failed` with the error that failed it.
+/// A watch of one document address (kind, scope, and key), from the incarnation found at acquisition on. A retirement
+/// is a call with `retired` set and the last value; a document created at the address later arrives as
+/// `[["r", value]]`. It ends `ended` when its task ends (a task document), or at Session close; `failed` on failure.
 pub type DocumentWatch = Watch<DurableError>;
 
 impl CommittedObserver for Watch<DurableError> {
-    fn advance(&self, value: Json, ops: Vec<Op>, context: Context) {
-        Watch::advance(self, value, ops, context);
-    }
-
-    fn retire(&self, context: Context) {
-        Watch::retire(self, context);
+    fn advance(&self, change: WatchChange, context: Context) {
+        Watch::advance(self, change, context);
     }
 
     fn end(&self, failure: Option<DurableError>) {
         Watch::end(self, failure);
+    }
+
+    /// A task document's watch delivers the retirement that ends its task, then ends.
+    fn owner_ended(&self) {
+        self.end_after_delivery();
     }
 
     fn keeps_cancellation(&self) -> bool {

@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex, Weak};
 
-use pi_chord::{AbortController, BACKGROUND_CONTEXT, ChordError, Json, Watch, WatchEnd, json};
+use pi_chord::{AbortController, ChordError, Json, Watch, WatchChange, WatchEnd, json};
 
 use super::support::Gate;
 use super::*;
@@ -10,8 +10,8 @@ use super::*;
 #[tokio::test]
 async fn stops_idempotently_and_rejects_a_repeated_or_late_start() {
     let (watch, recorded) = recorded_watch(json!(0));
-    watch.start(|_, _, _| async { Ok(()) }).unwrap();
-    let repeated = watch.start(|_, _, _| async { Ok(()) }).unwrap_err();
+    watch.start(|_, _| async { Ok(()) }).unwrap();
+    let repeated = watch.start(|_, _| async { Ok(()) }).unwrap_err();
     assert_eq!(repeated.to_string(), "Watch is already started");
     assert!(matches!(watch.stop().await, WatchEnd::Stopped));
     assert!(matches!(watch.stop().await, WatchEnd::Stopped));
@@ -19,13 +19,13 @@ async fn stops_idempotently_and_rejects_a_repeated_or_late_start() {
 
     let (late, _) = recorded_watch(json!(0));
     late.stop().await;
-    assert_eq!(late.start(|_, _, _| async { Ok(()) }).unwrap_err().to_string(), "Watch is stopped");
+    assert_eq!(late.start(|_, _| async { Ok(()) }).unwrap_err().to_string(), "Watch is stopped");
 }
 
 #[tokio::test]
 async fn ends_ended_or_failed_from_its_source_dropping_pending_frames() {
     let (watch, _, frames) = collecting_watch(json!(0));
-    watch.advance(json!(1), replace(json!(1)), context());
+    watch.advance(frame(json!(1), replace(json!(1))), context());
     watch.end(None);
     flush().await;
     assert!(frames.lock().unwrap().is_empty());
@@ -45,7 +45,7 @@ async fn stops_future_delivery_without_aborting_or_awaiting_an_in_flight_callbac
     let calls = Arc::new(Mutex::new(Vec::<String>::new()));
     let (sink, held) = (calls.clone(), gate.clone());
     watch
-        .start(move |value, _, _| {
+        .start(move |WatchChange { value, .. }, _| {
             let (sink, held) = (sink.clone(), held.clone());
             async move {
                 sink.lock().unwrap().push(format!("start {value}"));
@@ -55,9 +55,9 @@ async fn stops_future_delivery_without_aborting_or_awaiting_an_in_flight_callbac
             }
         })
         .unwrap();
-    watch.advance(json!(1), replace(json!(1)), context());
+    watch.advance(frame(json!(1), replace(json!(1))), context());
     flush().await;
-    watch.advance(json!(2), replace(json!(2)), context());
+    watch.advance(frame(json!(2), replace(json!(2))), context());
     assert!(matches!(watch.stop().await, WatchEnd::Stopped));
     gate.resolve();
     flush().await;
@@ -93,7 +93,7 @@ async fn ends_listener_error_on_a_throw_reports_it_and_delivers_nothing_more() {
     let gate = Gate::new();
     let (sink, held) = (seen.clone(), gate.clone());
     watch
-        .start(move |value, _, _| {
+        .start(move |WatchChange { value, .. }, _| {
             sink.lock().unwrap().push(value);
             let held = held.clone();
             async move {
@@ -102,9 +102,9 @@ async fn ends_listener_error_on_a_throw_reports_it_and_delivers_nothing_more() {
             }
         })
         .unwrap();
-    watch.advance(json!(1), replace(json!(1)), context());
+    watch.advance(frame(json!(1), replace(json!(1))), context());
     flush().await;
-    watch.advance(json!(2), replace(json!(2)), context());
+    watch.advance(frame(json!(2), replace(json!(2))), context());
     gate.resolve();
     let end = watch.closed().await;
     assert!(matches!(&end, WatchEnd::ListenerError(error) if error.to_string() == "listener failed"), "{end:?}");
@@ -123,12 +123,12 @@ async fn acquire_watch(end: impl FnOnce(&Watch)) -> (Watch, Weak<()>, Weak<()>) 
     let listener = Arc::downgrade(&sentinel);
     watch.observe_cancellation(&controller.signal()).unwrap();
     watch
-        .start(move |_, _, _| {
+        .start(move |_, _| {
             let _held = sentinel.clone();
             async { Ok(()) }
         })
         .unwrap();
-    watch.advance(json!(1), replace(json!(1)), context());
+    watch.advance(frame(json!(1), replace(json!(1))), context());
     flush().await;
     end(&watch);
     (watch, Arc::downgrade(&source), listener)
@@ -146,7 +146,7 @@ async fn retains_neither_its_source_nor_its_listener_once_ended_while_still_refe
         |watch| drop(watch.stop()),
         |watch| watch.cancel(),
         |watch| watch.end(None),
-        |watch| watch.retire(BACKGROUND_CONTEXT.clone()),
+        |watch| watch.end_after_delivery(),
     ];
     for end in ends {
         let (_ended, source, listener) = acquire_watch(end).await;

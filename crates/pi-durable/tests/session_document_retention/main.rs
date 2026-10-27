@@ -162,7 +162,7 @@ async fn never_evicts_a_document_a_watch_or_a_document_state_observes_and_evicts
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = seen.clone();
     watch
-        .start(move |value, _, _| {
+        .start(move |pi_chord::WatchChange { value, .. }, _| {
             sink.lock().unwrap().push(value["count"].as_f64().unwrap_or(-1.0));
             async { Ok(()) }
         })

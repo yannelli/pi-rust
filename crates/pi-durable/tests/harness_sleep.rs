@@ -160,7 +160,7 @@ async fn sleeps_without_an_invocation_and_resumes_at_its_checkpoint_once_due() {
     .await;
     let harness = opened.harness;
     let graph = harness.watch_task_graph(&context()).await.unwrap();
-    graph.start(|_, _, _| async { Ok(()) }).unwrap();
+    graph.start(|pi_chord::WatchChange { .. }, _| async { Ok(()) }).unwrap();
     let id = start(&harness, &nap, Value::Null).await;
     harness.resume().unwrap();
     eventually(|| async { status_of(&harness, id).await == "sleeping" }).await;

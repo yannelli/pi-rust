@@ -110,18 +110,23 @@ async fn evicts_promptly_once_the_retention_is_shortened() {
 }
 
 #[tokio::test]
-async fn does_not_keep_a_replacement_cached_for_an_observer_of_the_retired_incarnation() {
+async fn pins_only_what_is_at_the_address_a_watch_follows_nothing_while_retired_then_the_new_incarnation() {
     let test = open(0.0);
     let conversation_id = create_conversation(&test.session).await;
     bump(&test.session, conversation_id, 1.0).await;
-    let state = test.session.document_state(&COUNTER, conversation_id, &context()).await.unwrap().unwrap();
+    let watch = test.session.watch_doc(&COUNTER, conversation_id, &context()).await.unwrap().unwrap();
+    watch.start(|_, _| async { Ok(()) }).unwrap();
     let retire = move |tx: session::Tx| async move { tx.retire_doc(&COUNTER, conversation_id).await };
     test.session.commit(retire, &context()).await.unwrap();
-    assert!(state.value().is_null());
-    bump(&test.session, conversation_id, 5.0).await;
     emptied(&test).await;
-    assert_eq!(count_of(&test.session, conversation_id).await, counter_json(5.0));
-    state.dispose().unwrap();
+    assert_eq!(test.sizes().attached, 0);
+    bump(&test.session, conversation_id, 5.0).await;
+    settle_line(&test.session).await;
+    let sizes = test.sizes();
+    assert_eq!((sizes.cached, sizes.attached), (1, 1));
+    eventually(|| async { watch.value() == counter_json(5.0) }).await;
+    watch.stop().await;
+    emptied(&test).await;
     test.session.close(&context()).await.unwrap();
 }
 

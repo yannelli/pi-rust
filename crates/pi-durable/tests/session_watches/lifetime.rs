@@ -18,7 +18,7 @@ fn hold(watch: &DocumentWatch) -> (Deferred, Deferred, Arc<Mutex<Option<Context>
     let delivered: Arc<Mutex<Option<Context>>> = Arc::default();
     let (gate_in, gate_out, sink) = (entered.clone(), release.clone(), delivered.clone());
     watch
-        .start(move |_, _, context| {
+        .start(move |pi_chord::WatchChange { .. }, context| {
             *sink.lock().unwrap() = Some(context);
             let (gate_in, gate_out) = (gate_in.clone(), gate_out.clone());
             async move {
@@ -75,10 +75,10 @@ async fn keeps_earlier_immutable_revisions_stable() {
 }
 
 #[tokio::test]
-async fn delivers_retirement_and_does_not_follow_recreation() {
+async fn follows_its_address_across_a_retirement_and_a_recreation_in_one_commit_in_one_call() {
     let test = create_state().await;
-    let old = watch_state(&test.session).await;
-    let frames = record(&old);
+    let watch = watch_state(&test.session).await;
+    let changes = record_changes(&watch);
     test.session
         .commit(
             |tx| async move {
@@ -89,15 +89,18 @@ async fn delivers_retirement_and_does_not_follow_recreation() {
         )
         .await
         .unwrap();
-    assert!(matches!(old.closed().await, WatchEnd::Retired));
-    assert_eq!(frames.lock().unwrap().iter().map(|f| f.0.clone()).collect::<Vec<_>>(), [Json::Null]);
-    assert!(old.value().is_null());
-    let replacement = watch_state(&test.session).await;
-    assert_eq!(value_of(&replacement.value()), 10);
+    flush().await;
+    let recreated = test.session.snapshot(&STATE_DOC, (), &context()).await.unwrap().unwrap();
+    let expected = WatchChange { value: recreated.clone(), ops: vec![Op::Replace(recreated)], retired: true };
+    assert_eq!(*changes.lock().unwrap(), [expected]);
     set_value(&test.session, 11).await;
     flush().await;
-    assert!(old.value().is_null());
-    replacement.stop().await;
+    let expected = WatchChange { value: watch.value(), ops: ops(r#"[["s",["value"],11]]"#), retired: false };
+    assert_eq!(changes.lock().unwrap()[1], expected);
+    assert_eq!(value_of(&watch.value()), 11);
+    let ended = tokio::time::timeout(std::time::Duration::from_millis(10), watch.closed()).await;
+    assert!(ended.is_err(), "the watch goes on");
+    watch.stop().await;
 }
 
 #[tokio::test]
@@ -109,7 +112,7 @@ async fn session_close_discards_retirement_buffered_before_start() {
     test.session.close(&context()).await.unwrap();
     assert!(matches!(watch.closed().await, WatchEnd::Ended));
     assert!(watch.value().same_ref(&baseline));
-    assert!(message(watch.start(|_, _, _| async { Ok(()) })).contains("stopped"));
+    assert!(message(watch.start(|pi_chord::WatchChange { .. }, _| async { Ok(()) })).contains("stopped"));
 }
 
 #[tokio::test]
@@ -120,7 +123,7 @@ async fn session_close_discards_retirement_behind_an_in_flight_callback() {
     let values: Arc<Mutex<Vec<Json>>> = Arc::default();
     let (sink, gate_in, gate_out) = (values.clone(), entered.clone(), release.clone());
     watch
-        .start(move |value, _, _| {
+        .start(move |pi_chord::WatchChange { value, .. }, _| {
             sink.lock().unwrap().push(value["value"].clone());
             let (gate_in, gate_out) = (gate_in.clone(), gate_out.clone());
             async move {
@@ -144,14 +147,14 @@ async fn session_close_discards_retirement_behind_an_in_flight_callback() {
 async fn supports_idempotent_stop_and_rejects_repeated_or_late_start() {
     let test = create_state().await;
     let started = watch_state(&test.session).await;
-    started.start(|_, _, _| async { Ok(()) }).unwrap();
-    assert!(message(started.start(|_, _, _| async { Ok(()) })).contains("already started"));
+    started.start(|pi_chord::WatchChange { .. }, _| async { Ok(()) }).unwrap();
+    assert!(message(started.start(|pi_chord::WatchChange { .. }, _| async { Ok(()) })).contains("already started"));
     let (first, second) = (started.stop(), started.stop());
     assert!(matches!(first.await, WatchEnd::Stopped));
     assert!(matches!(second.await, WatchEnd::Stopped));
     let stopped = watch_state(&test.session).await;
     stopped.stop().await;
-    assert!(message(stopped.start(|_, _, _| async { Ok(()) })).contains("stopped"));
+    assert!(message(stopped.start(|pi_chord::WatchChange { .. }, _| async { Ok(()) })).contains("stopped"));
 }
 
 #[tokio::test]
@@ -200,7 +203,7 @@ async fn settles_listener_failure_on_only_the_affected_watch() {
     let test = create_state().await;
     let failed = watch_state(&test.session).await;
     let healthy = watch_state(&test.session).await;
-    failed.start(|_, _, _| async { Err(DurableError::error("listener failed")) }).unwrap();
+    failed.start(|pi_chord::WatchChange { .. }, _| async { Err(DurableError::error("listener failed")) }).unwrap();
     let frames = record(&healthy);
     set_value(&test.session, 1).await;
     let end = failed.closed().await;
@@ -262,7 +265,7 @@ async fn continues_after_the_tracker_cache_unloads() {
     let reloaded = test.session.snapshot(&STATE_DOC, (), &context()).await.unwrap().unwrap();
     assert_eq!(reloaded, baseline);
     assert!(test.storage.document_reads() > reads);
-    watch.start(|_, _, _| async { Ok(()) }).unwrap();
+    watch.start(|pi_chord::WatchChange { .. }, _| async { Ok(()) }).unwrap();
     set_value(&test.session, 7).await;
     flush().await;
     assert_eq!(value_of(&watch.value()), 7);
@@ -281,7 +284,7 @@ async fn retains_neither_its_session_nor_its_listener_once_stopped_while_still_r
         let sentinel = Arc::new(());
         let listener = Arc::downgrade(&sentinel);
         watch
-            .start(move |_, _, _| {
+            .start(move |pi_chord::WatchChange { .. }, _| {
                 let _held = sentinel.clone();
                 async { Ok(()) }
             })

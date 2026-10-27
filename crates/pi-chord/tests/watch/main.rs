@@ -5,6 +5,7 @@
 mod support;
 
 mod delivery;
+mod ending;
 mod ends;
 mod native;
 mod overflow;
@@ -14,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use pi_chord::delta::{Op, Seg, parse_ops};
-use pi_chord::{BACKGROUND_CONTEXT, ChordError, Context, Json, Watch, WatchEnd};
+use pi_chord::{BACKGROUND_CONTEXT, ChordError, Context, Json, Watch, WatchChange, WatchEnd};
 
 pub fn context() -> Context {
     BACKGROUND_CONTEXT.clone()
@@ -26,6 +27,11 @@ pub async fn flush() {
 
 pub fn ops(batch: Json) -> Vec<Op> {
     parse_ops(&batch).unwrap()
+}
+
+/// A source's frame that is not a retirement.
+pub fn frame(value: Json, ops: Vec<Op>) -> WatchChange {
+    WatchChange::new(value, ops)
 }
 
 pub fn replace(value: Json) -> Vec<Op> {
@@ -64,7 +70,7 @@ pub fn collect_frames(watch: &Watch) -> Frames {
     let frames: Frames = Arc::default();
     let sink = frames.clone();
     watch
-        .start(move |value, ops, _| {
+        .start(move |WatchChange { value, ops, .. }, _| {
             sink.lock().unwrap().push((value, ops));
             async { Ok(()) }
         })
@@ -77,6 +83,19 @@ pub fn collecting_watch(value: Json) -> (Watch, Recorded, Frames) {
     let (watch, recorded) = recorded_watch(value);
     let frames = collect_frames(&watch);
     (watch, recorded, frames)
+}
+
+/// Start `watch` with a listener that keeps every change it gets.
+pub fn collect_changes(watch: &Watch) -> Arc<Mutex<Vec<WatchChange>>> {
+    let changes: Arc<Mutex<Vec<WatchChange>>> = Arc::default();
+    let sink = changes.clone();
+    watch
+        .start(move |change, _| {
+            sink.lock().unwrap().push(change);
+            async { Ok(()) }
+        })
+        .unwrap();
+    changes
 }
 
 /// The end of `closed`, or `None` while the watch is open.
@@ -94,7 +113,11 @@ pub fn advance_distinct(watch: &Watch, count: usize) -> Json {
     for index in 0..count {
         let value = if index + 1 == count { newest.clone() } else { Json::Null };
         let path = vec![Seg::key("k"), Seg::Index(index as u64)];
-        watch.advance(value, vec![Op::Set(path, Json::from(index as u64))], context());
+        watch.advance(frame(value, vec![Op::Set(path, Json::from(index as u64))]), context());
     }
     newest
+}
+
+pub fn values(frames: &Frames) -> Vec<Json> {
+    frames.lock().unwrap().iter().map(|(value, _)| value.clone()).collect()
 }

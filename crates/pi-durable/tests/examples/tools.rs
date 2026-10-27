@@ -149,7 +149,7 @@ async fn run_json(storage: Arc<dyn Storage>, ops: bool) -> Vec<Value> {
     let stop: Box<dyn FnOnce() -> futures::future::BoxFuture<'static, ()>> = if ops {
         let watch = root.watch(&ctx()).await.unwrap();
         printed.lock().unwrap().push(json!({ "view": watch.value().to_serde() }));
-        let listen = move |_, ops: Vec<pi_chord::delta::Op>, _| {
+        let listen = move |pi_chord::WatchChange { ops, .. }, _| {
             sink.lock().unwrap().push(json!({ "ops": serde_json::to_value(ops).unwrap() }));
             async { Ok(()) }
         };
@@ -163,7 +163,7 @@ async fn run_json(storage: Arc<dyn Storage>, ops: bool) -> Vec<Value> {
         let stream = watch_events(&harness, root.id, &ctx()).await.unwrap();
         printed.lock().unwrap().push(stream.snapshot.to_serde());
         stream
-            .start(move |events, _| {
+            .start(move |pi_chord::NativeWatchChange { value: events }, _| {
                 sink.lock().unwrap().extend(events.iter().map(Json::to_serde));
                 async { Ok(()) }
             })

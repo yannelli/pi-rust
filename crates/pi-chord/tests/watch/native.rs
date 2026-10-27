@@ -2,7 +2,9 @@
 
 use std::sync::{Arc, Mutex, Weak};
 
-use pi_chord::{AbortController, ChordError, NativeWatch, WatchEnd, create_context_key, with_context_value};
+use pi_chord::{
+    AbortController, ChordError, NativeWatch, NativeWatchChange, WatchEnd, create_context_key, with_context_value,
+};
 
 use super::*;
 
@@ -13,7 +15,7 @@ async fn delivers_values_in_order_with_a_context_never_inline() {
     let delivered = Arc::new(Mutex::new(Vec::<(Arc<str>, Option<String>)>::new()));
     let (sink, frame_key) = (delivered.clone(), key.clone());
     watch
-        .start(move |value, delivery| {
+        .start(move |NativeWatchChange { value }, delivery| {
             sink.lock().unwrap().push((value, delivery.value(&frame_key).cloned()));
             async { Ok(()) }
         })
@@ -39,7 +41,7 @@ async fn collapses_101_pending_values_to_the_newest() {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = seen.clone();
     watch
-        .start(move |value, _| {
+        .start(move |NativeWatchChange { value }, _| {
             sink.lock().unwrap().push(value);
             async { Ok(()) }
         })
@@ -58,7 +60,7 @@ async fn collapses_101_pending_values_to_the_value_of_replace() {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = seen.clone();
     watch
-        .start(move |value, _| {
+        .start(move |NativeWatchChange { value }, _| {
             sink.lock().unwrap().push(value);
             async { Ok(()) }
         })

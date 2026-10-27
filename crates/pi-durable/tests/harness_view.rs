@@ -30,7 +30,7 @@ async fn record(conversation: &Conversation) -> (Json, Frames, ConversationWatch
     let frames: Frames = Arc::default();
     let sink = frames.clone();
     watch
-        .start(move |value, ops, _| {
+        .start(move |pi_chord::WatchChange { value, ops, .. }, _| {
             sink.lock().unwrap().push((value, ops));
             async { Ok(()) }
         })

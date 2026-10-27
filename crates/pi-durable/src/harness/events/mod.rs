@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use pi_chord::delta::Op;
 use pi_chord::watch::Replace;
-use pi_chord::{Context, Json, NativeWatch};
+use pi_chord::{Context, Json, NativeWatch, NativeWatchChange};
 
 use self::changes::{call_of, message_changes, object, same, tool_update};
 use super::host::Harness;
@@ -35,10 +35,10 @@ pub struct AgentEventStream {
 }
 
 impl AgentEventStream {
-    /// Install the sole serialized listener; it gets each batch with its delivery context.
+    /// Install the sole listener; each call's `value` is one commit's batch, or a `snapshot` after an overflow.
     pub fn start<F, Fut>(&self, listener: F) -> DurableResult<()>
     where
-        F: Fn(Vec<AgentEvent>, Context) -> Fut + Send + Sync + 'static,
+        F: Fn(NativeWatchChange<Vec<AgentEvent>>, Context) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = DurableResult<()>> + Send + 'static,
     {
         self.watch.start(listener)

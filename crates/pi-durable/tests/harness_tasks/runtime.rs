@@ -56,7 +56,7 @@ async fn rejects_runtime_operations_after_the_invocation_ends_and_stops_its_watc
             *capture.lock().unwrap() = Some((runtime.clone(), context.clone()));
             *absent_slot.lock().unwrap() = Some(runtime.watch_doc(&ABSENT, (), &context).await?.is_none());
             let watch = runtime.watch_doc(&NOTES, (), &context).await?.unwrap();
-            watch.start(move |value, _, _| {
+            watch.start(move |pi_chord::WatchChange { value, .. }, _| {
                 let text = value.get("text").and_then(Json::as_str).unwrap_or("retired").to_owned();
                 sink.lock().unwrap().push(text);
                 async { Ok(()) }

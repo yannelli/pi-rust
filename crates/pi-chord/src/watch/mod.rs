@@ -22,8 +22,6 @@ pub enum WatchEnd<E = ChordError> {
     Stopped,
     /// The context the watch was acquired with was cancelled.
     Cancelled,
-    /// The source was retired; its last frame was `[["r", null]]`.
-    Retired,
     /// The source closed (its owner ended or closed).
     Ended,
     /// The listener failed with the error.
@@ -38,7 +36,6 @@ impl<E> WatchEnd<E> {
         match self {
             Self::Stopped => "stopped",
             Self::Cancelled => "cancelled",
-            Self::Retired => "retired",
             Self::Ended => "ended",
             Self::ListenerError(_) => "listener_error",
             Self::Failed(_) => "failed",
@@ -53,8 +50,31 @@ impl<E> WatchEnd<E> {
     }
 }
 
-/// Serialized observation of an immutable value: one listener call at a time; frames that arrive meanwhile are folded
-/// into the next call.
+/// One call of a JSON watch's listener, and one change a source hands its watch: the newest value, its ops, and
+/// whether the followed document was retired since the call before. A retirement does not end the watch; a document
+/// created at the address later arrives as `[["r", value]]`. Plain data: the frame's context comes apart.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WatchChange<T = Json> {
+    pub value: T,
+    pub ops: Vec<Op>,
+    pub retired: bool,
+}
+
+impl<T> WatchChange<T> {
+    /// A source's frame that is not a retirement.
+    pub fn new(value: T, ops: Vec<Op>) -> Self {
+        Self { value, ops, retired: false }
+    }
+}
+
+/// One call of a native watch's listener: the new value.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeWatchChange<T> {
+    pub value: T,
+}
+
+/// Serialized observation of an immutable value: one listener call at a time; changes made meanwhile arrive folded into
+/// the next call.
 pub trait WatchHandle<T = Json, E = ChordError> {
     /// Acquisition revision before start; latest delivered immutable revision afterward.
     fn value(&self) -> T;
@@ -62,7 +82,7 @@ pub trait WatchHandle<T = Json, E = ChordError> {
     /// Install the sole asynchronous listener. Never invokes it inline.
     fn start<F, Fut>(&self, listener: F) -> Result<(), E>
     where
-        F: Fn(T, Vec<Op>, Context) -> Fut + Send + Sync + 'static,
+        F: Fn(WatchChange<T>, Context) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<(), E>> + Send + 'static;
 
     /// Idempotently stop future callbacks and return this watch's terminal result.
@@ -72,7 +92,8 @@ pub trait WatchHandle<T = Json, E = ChordError> {
     fn closed(&self) -> BoxFuture<WatchEnd<E>>;
 }
 
-/// Serialized observation of an in-process value: as [`WatchHandle`], but a change is a new value without ops.
+/// Serialized observation of an in-process value: as [`WatchHandle`], but each new value is its own call, in order,
+/// without ops.
 pub trait NativeWatchHandle<T, E = ChordError> {
     /// Acquisition value before start; latest delivered value afterward.
     fn value(&self) -> T;
@@ -80,7 +101,7 @@ pub trait NativeWatchHandle<T, E = ChordError> {
     /// Install the sole asynchronous listener. Never invokes it inline.
     fn start<F, Fut>(&self, listener: F) -> Result<(), E>
     where
-        F: Fn(T, Context) -> Fut + Send + Sync + 'static,
+        F: Fn(NativeWatchChange<T>, Context) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<(), E>> + Send + 'static;
 
     /// Idempotently stop future callbacks and return this watch's terminal result.
@@ -91,14 +112,15 @@ pub trait NativeWatchHandle<T, E = ChordError> {
 }
 
 /// A value that changes and can be watched: documents, derives, members of references. Values are immutable by
-/// convention (JSON for state); each watch starts at the current value and then gets one frame per change.
+/// convention (JSON for state); each watch starts at the current value and then gets the changes, folded while its
+/// listener is busy.
 pub trait Watchable<T = Json, E = ChordError> {
     type Handle: WatchHandle<T, E>;
 
     /// The current value.
     fn value(&self) -> T;
 
-    /// A watch holding the current value, then one frame per change; the context's cancellation ends it.
+    /// A watch holding the current value, then its changes; the context's cancellation ends it.
     fn watch(&self, context: &Context) -> BoxFuture<Result<Self::Handle, E>>;
 }
 

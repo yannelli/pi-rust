@@ -8,41 +8,33 @@ use tokio::sync::watch;
 
 use super::WatchEnd;
 use crate::context::{AbortSignal, Context, without_abort_signal};
-use crate::delta::Op;
 use crate::error::ChordError;
 use crate::sync::{BoxFuture, lock};
 
-/// Calls the listener with one delivery: its value, its ops, and the delivery context.
-pub(crate) type DeliveryListener<T, E> = Arc<dyn Fn(T, Vec<Op>, Context) -> BoxFuture<Result<(), E>> + Send + Sync>;
+/// Calls the listener with one change and the delivery context.
+pub(crate) type ChangeListener<C, E> = Arc<dyn Fn(C, Context) -> BoxFuture<Result<(), E>> + Send + Sync>;
 pub(crate) type Report<E> = Arc<dyn Fn(&E) + Send + Sync>;
 /// Gives the value an overflow delivers instead of the newest one.
 pub type Replace<T> = Arc<dyn Fn() -> T + Send + Sync>;
 
-/// One listener call: the value it delivers, its ops, and the context of the newest frame it covers.
-pub(crate) struct Delivery<T> {
-    pub value: T,
-    pub ops: Vec<Op>,
-    pub context: Context,
-    /// The retirement: the watch ends `retired` once it is delivered.
-    pub retires: bool,
-}
-
 /// What a handle keeps pending until its listener takes it.
-pub(crate) trait PendingStore<T>: Send + 'static {
-    /// Take the next delivery, or `None` when nothing is pending.
-    fn next(&mut self) -> Option<Delivery<T>>;
+pub(crate) trait PendingStore<C>: Send + 'static {
+    /// Take the next change and the context of the newest frame it covers, or `None` when nothing is pending.
+    fn next(&mut self) -> Option<(C, Context)>;
     fn has_pending(&self) -> bool;
     /// Drop everything pending and every reference into the source; called once, when the watch ends.
     fn release(&mut self);
 }
 
-struct State<T, E, P> {
+struct State<T, C, E, P> {
     value: T,
-    listener: Option<DeliveryListener<T, E>>,
+    listener: Option<ChangeListener<C, E>>,
     pending: P,
     started: bool,
     scheduled: bool,
     running: bool,
+    /// Set by `end_after_delivery()`: the source sends nothing more; the watch ends `ended` once it delivered the rest.
+    ending: bool,
     /// Set once, by `terminate()`.
     end: Option<WatchEnd<E>>,
     cancellation: Option<(AbortSignal, u64)>,
@@ -53,18 +45,27 @@ struct State<T, E, P> {
 
 /// A source feeds it and ends it explicitly; the end drops every reference it holds into its source, so a stopped
 /// watch that is still referenced keeps nothing but its last value alive.
-pub(crate) struct Lifecycle<T, E, P> {
-    state: Mutex<State<T, E, P>>,
+pub(crate) struct Lifecycle<T, C, E, P> {
+    state: Mutex<State<T, C, E, P>>,
     closed: watch::Sender<Option<WatchEnd<E>>>,
+    /// The value a change delivers.
+    value_of: fn(&C) -> T,
 }
 
-impl<T, E, P> Lifecycle<T, E, P>
+impl<T, C, E, P> Lifecycle<T, C, E, P>
 where
     T: Clone + Send + Sync + 'static,
+    C: Send + 'static,
     E: Clone + Send + Sync + From<ChordError> + 'static,
-    P: PendingStore<T>,
+    P: PendingStore<C>,
 {
-    pub fn new(value: T, pending: P, detach: Box<dyn FnOnce() + Send>, report: Report<E>) -> Arc<Self> {
+    pub fn new(
+        value: T,
+        pending: P,
+        detach: Box<dyn FnOnce() + Send>,
+        report: Report<E>,
+        value_of: fn(&C) -> T,
+    ) -> Arc<Self> {
         let state = State {
             value,
             listener: None,
@@ -72,19 +73,20 @@ where
             started: false,
             scheduled: false,
             running: false,
+            ending: false,
             end: None,
             cancellation: None,
             detach: Some(detach),
             report: Some(report),
         };
-        Arc::new(Self { state: Mutex::new(state), closed: watch::channel(None).0 })
+        Arc::new(Self { state: Mutex::new(state), closed: watch::channel(None).0, value_of })
     }
 
     pub fn value(&self) -> T {
         lock(&self.state).value.clone()
     }
 
-    pub fn start(self: &Arc<Self>, listener: DeliveryListener<T, E>) -> Result<(), E> {
+    pub fn start(self: &Arc<Self>, listener: ChangeListener<C, E>) -> Result<(), E> {
         {
             let mut state = lock(&self.state);
             if state.started {
@@ -100,7 +102,7 @@ where
         Ok(())
     }
 
-    pub fn closed(&self) -> impl Future<Output = WatchEnd<E>> + Send + use<T, E, P> {
+    pub fn closed(&self) -> impl Future<Output = WatchEnd<E>> + Send + use<T, C, E, P> {
         let mut receiver = self.closed.subscribe();
         async move {
             let end = receiver.wait_for(Option::is_some).await.ok().and_then(|end| end.clone());
@@ -133,18 +135,35 @@ where
         Ok(())
     }
 
-    /// Change what is pending while the watch takes frames; `feed` says whether something became pending, which is
-    /// delivered once started, never inline.
+    /// Change what is pending while the watch takes frames: it has not ended, and its source has not ended. `feed`
+    /// says whether something became pending, which is delivered once started, never inline.
     pub fn feed(self: &Arc<Self>, feed: impl FnOnce(&mut P) -> bool) {
         let schedule = {
             let mut state = lock(&self.state);
-            if state.end.is_some() {
+            if state.end.is_some() || state.ending {
                 return;
             }
             feed(&mut state.pending) && state.started
         };
         if schedule {
             self.schedule();
+        }
+    }
+
+    /// The source sends nothing more after its last frames, such as a retirement: take no more frames, deliver what is
+    /// pending, then end `ended`, after the running call returns, if one runs. Until then the watch stays attached, so
+    /// its source's end, `stop()`, cancellation, and a failing listener still end it first.
+    pub fn end_after_delivery(&self) {
+        let now = {
+            let mut state = lock(&self.state);
+            if state.end.is_some() || state.ending {
+                return;
+            }
+            state.ending = true;
+            !state.running && !state.pending.has_pending()
+        };
+        if now {
+            self.terminate(WatchEnd::Ended);
         }
     }
 
@@ -163,7 +182,8 @@ where
         });
     }
 
-    /// Deliver until nothing is pending; what arrives during a call is taken after it returns.
+    /// Deliver until nothing is pending; what arrives during a call is taken after it returns. A watch whose source
+    /// ended ends once it delivered the rest and its last call returned.
     async fn drain(self: &Arc<Self>) {
         {
             let mut state = lock(&self.state);
@@ -173,19 +193,24 @@ where
             state.running = true;
         }
         loop {
-            let (delivery, listener) = {
+            let (change, context, listener) = {
                 let mut state = lock(&self.state);
                 if state.end.is_some() {
                     break;
                 }
                 let Some(listener) = state.listener.clone() else { break };
-                let Some(delivery) = state.pending.next() else { break };
-                state.value = delivery.value.clone();
-                (delivery, listener)
+                let Some((change, context)) = state.pending.next() else {
+                    let ending = state.ending;
+                    drop(state);
+                    if ending {
+                        self.terminate(WatchEnd::Ended);
+                    }
+                    break;
+                };
+                state.value = (self.value_of)(&change);
+                (change, context, listener)
             };
-            let retires = delivery.retires;
-            let context = without_abort_signal(&delivery.context);
-            let delivered = listener(delivery.value, delivery.ops, context).await;
+            let delivered = listener(change, without_abort_signal(&context)).await;
             drop(listener);
             if let Err(error) = delivered {
                 let report = {
@@ -196,10 +221,6 @@ where
                     report(&error);
                     self.terminate(WatchEnd::ListenerError(error));
                 }
-                break;
-            }
-            if retires {
-                self.terminate(WatchEnd::Retired);
                 break;
             }
         }

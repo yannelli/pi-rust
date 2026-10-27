@@ -206,7 +206,16 @@ impl SessionCore {
         })
     }
 
-    pub fn publish(&self, seq: Seq, writes: &[StorageWrite], documents: AdoptedDocuments, context: &Context) {
+    /// Inside `adopt`: publish a stored commit. Its telemetry events, then the Session's own observers, then the
+    /// `subscribe_commits()` listeners, all before the waits the observers wake run. Returns the first error of an own
+    /// observer, which fails the Session once `Storage::commit()` returned.
+    pub fn publish(
+        &self,
+        seq: Seq,
+        writes: &[StorageWrite],
+        documents: AdoptedDocuments,
+        context: &Context,
+    ) -> Option<DurableError> {
         let telemetry = context.telemetry();
         for write in writes {
             match write {
@@ -226,9 +235,9 @@ impl SessionCore {
             }
         }
         let internal: Vec<_> = lock(&self.internal_listeners).iter().map(|(_, l)| l.clone()).collect();
-        let host: Vec<_> = lock(&self.commit_listeners).iter().map(|(_, l)| l.clone()).collect();
-        if internal.is_empty() && host.is_empty() {
-            return;
+        let hosts = !lock(&self.commit_listeners).is_empty();
+        if internal.is_empty() && !hosts {
+            return None;
         }
         let mut changes = Vec::with_capacity(writes.len() + documents.observed.len());
         for write in writes {
@@ -240,21 +249,25 @@ impl SessionCore {
                 _ => {}
             }
         }
-        // One publication for both, unless the commit also stored held changes, which only durable listeners get.
-        let stored = documents.stored.map(|stored| {
+        // One publication for both, unless the commit also stored held changes, which only host listeners get.
+        let stored = documents.stored.filter(|_| hosts).map(|stored| {
             let tables = changes.iter().cloned();
             CommitPublication { seq, changes: tables.chain(stored.into_iter().map(CommitChange::Document)).collect() }
         });
         changes.extend(documents.observed.into_iter().map(CommitChange::Document));
         let observed = ObservedCommit::Stored(CommitPublication { seq, changes });
-        // The commit is durable: a failing listener neither fails the commit nor skips the others.
+        // The commit is durable: a failing observer neither fails the commit nor skips the others.
+        let mut failure = None;
         for listener in internal {
             if let Err(error) = listener(&observed, context) {
-                self.fail_in(error, Some(context));
+                failure.get_or_insert(error);
             }
         }
-        let ObservedCommit::Stored(own) = &observed else { return };
-        self.publish_stored(stored.as_ref().unwrap_or(own), &host, context);
+        let ObservedCommit::Stored(own) = &observed else { return failure };
+        if hosts {
+            self.publish_stored(stored.as_ref().unwrap_or(own), &self.host_listeners(), context);
+        }
+        failure
     }
 
     /// Give `subscribe_commits()` listeners one stored commit; a failing listener is reported.
@@ -492,7 +505,9 @@ impl Session {
         async move { await_with_context(closing, &context).await }
     }
 
-    /// Register a synchronous post-adoption listener. An error it returns is reported.
+    /// Register a synchronous listener for every stored commit, with exactly what it stored. It runs inside Storage's
+    /// `adopt`, after the Session's own observers and before every wait the commit resolves and every abort it queues;
+    /// it must not block or call Session operations, and an error it returns is reported.
     pub fn subscribe_commits(
         &self,
         listener: impl Fn(&CommitPublication, &Context) -> DurableResult<()> + Send + Sync + 'static,
@@ -507,7 +522,9 @@ impl Session {
         }))
     }
 
-    /// Internal: `subscribe_commits` for the Session's own components; an error fails the Session.
+    /// Internal: get every commit as memory adopts it, for the Session's own components; an error fails the
+    /// Session. For a stored commit they run inside Storage's `adopt`, so they call no Storage method and run no task
+    /// code.
     pub fn observe_commits(
         &self,
         listener: impl Fn(&ObservedCommit, &Context) -> DurableResult<()> + Send + Sync + 'static,
@@ -664,29 +681,30 @@ where
     }
     // The last step before Storage: held changes leave their queue only once nothing but Storage can fail.
     let taken = tx.take_held(&mut writes);
-    // Storage adopts the batch synchronously once it is durable, before its next commit; the callback keeps its own
-    // error, so it never reaches Storage.
-    let adoption: Mutex<Option<DurableResult<AdoptedDocuments>>> = Mutex::new(None);
+    // Storage adopts the batch synchronously once it is durable, before its next commit, and the commit is published in
+    // the same step, so every view changes with memory. The callback keeps its own error and the first error of an own
+    // observer, so neither reaches Storage.
+    let adoption: Mutex<Option<DurableResult<Option<DurableError>>>> = Mutex::new(None);
     let adopt_tx = tx.clone();
     let adopt = |committed: Seq| {
-        let adopted = adopt_tx.adopt(committed);
+        let adopted = adopt_tx.adopt(committed).map(|documents| core.publish(committed, &writes, documents, &context));
         *lock(&adoption) = Some(adopted);
     };
     // Once admitted, caller cancellation does not interrupt Storage settlement.
     let committed = core.storage.commit(&writes, &adopt, &without_abort_signal(&context)).await;
     let adoption = lock(&adoption).take();
-    let seq = match committed {
-        Ok(seq) => seq,
-        Err(error) => {
-            // The guard has failed the Session. A rejection after adoption leaves nothing staged to discard.
-            if adoption.is_none() {
-                tx.discard();
-            }
-            return Err(error);
+    if let Err(error) = committed {
+        // The guard has failed the Session with the storage error. A rejection after adoption leaves nothing staged to
+        // discard, and the commit, durable, stays published; an own observer's error is still reported.
+        match adoption {
+            None => tx.discard(),
+            Some(Ok(Some(failure))) => core.hooks.report(&failure, &ReportInfo::ListenerError, Some(&context)),
+            Some(_) => {}
         }
-    };
-    let documents = match adoption {
-        Some(Ok(documents)) => documents,
+        return Err(error);
+    }
+    let failure = match adoption {
+        Some(Ok(failure)) => failure,
         Some(Err(error)) => {
             // Storage already committed; a failed adoption leaves memory behind durable state.
             core.fail(error.clone());
@@ -701,7 +719,10 @@ where
     if !taken.is_empty() {
         core.release_holds(&taken);
     }
-    core.publish(seq, &writes, documents, &context);
+    // The commit is durable and published, so it stands; memory behind an own observer's state fails the Session.
+    if let Some(failure) = failure {
+        core.fail_in(failure, Some(&context));
+    }
     core.sweep_documents();
     Ok(value)
 }

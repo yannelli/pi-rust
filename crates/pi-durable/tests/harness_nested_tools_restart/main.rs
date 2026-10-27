@@ -208,7 +208,7 @@ async fn abandons_a_replay_unsafe_caller_s_unfinished_nested_calls_before_they_r
     let stream = watch_events(&harness, root.id, &ctx()).await.unwrap();
     let sink = ends.clone();
     stream
-        .start(move |batch, _| {
+        .start(move |pi_chord::NativeWatchChange { value: batch }, _| {
             let found = batch.iter().filter(|event| event["type"] == Json::from("tool_execution_end")).map(Value::from);
             sink.lock().unwrap().extend(found);
             async { Ok(()) }

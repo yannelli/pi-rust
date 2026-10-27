@@ -24,7 +24,9 @@ use super::util::{cancellation, scan_all};
 use super::view::ConversationViews;
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{ConversationId, ROOT_CONVERSATION_ID, SubmissionId, TaskId};
-use crate::session::{Session, SessionHooks, SessionOptions, TransactionScope, Tx, create_session};
+use crate::session::{
+    Observation, Observer, Session, SessionHooks, SessionOptions, TransactionScope, Tx, create_session,
+};
 use crate::timers::Timers;
 use crate::types::{
     ConversationOwnership, ConversationQuery, ConversationRecord, HostCallback, ReportInfo, Storage, SubmissionQuery,
@@ -200,6 +202,30 @@ impl Harness {
     /// A serialized exact-frame watch of the [`super::TaskGraph`]; cancelling `context` stops it.
     pub async fn watch_task_graph(&self, context: &Context) -> DurableResult<TaskGraphWatch> {
         self.0.task_graph.watch(context).await
+    }
+
+    /// Attach a synchronous [`Observer`] to a conversation's [`super::ConversationView`], atomically on the Session
+    /// line, for adapters: `advance` gets each next revision with its ops as memory adopts the commit, so it only
+    /// records it. `context` governs only the attachment.
+    pub async fn observe_conversation(
+        &self,
+        id: ConversationId,
+        observer: Arc<dyn Observer>,
+        context: &Context,
+    ) -> DurableResult<Observation> {
+        self.0.session.assert_usable()?;
+        self.0.views.observe(id, observer, context).await
+    }
+
+    /// Attach a synchronous [`Observer`] to the [`super::TaskGraph`], as `observe_conversation()` does to a view. A
+    /// `blocked` reason that changes without a commit advances it on the Session line with the background context.
+    pub async fn observe_task_graph(
+        &self,
+        observer: Arc<dyn Observer>,
+        context: &Context,
+    ) -> DurableResult<Observation> {
+        self.0.session.assert_usable()?;
+        self.0.task_graph.observe(observer, context).await
     }
 
     /// Restart dispatch after a cancellation paused it. Fails after close, and with `ReadOnlySession` on a read-only

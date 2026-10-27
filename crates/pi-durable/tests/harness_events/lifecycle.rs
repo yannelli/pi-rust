@@ -188,7 +188,7 @@ async fn delivers_each_of_100_pending_batches_in_its_own_call_in_order_unlike_st
     let batches = super::Batches::default();
     let sink = batches.clone();
     stream
-        .start(move |events, _| {
+        .start(move |pi_chord::NativeWatchChange { value: events }, _| {
             sink.lock().unwrap().push(events.iter().map(Value::from).collect());
             async { Ok(()) }
         })
@@ -212,7 +212,7 @@ async fn replaces_undelivered_batches_with_one_snapshot_after_100_pending_batche
     let batches = super::Batches::default();
     let sink = batches.clone();
     stream
-        .start(move |events, _| {
+        .start(move |pi_chord::NativeWatchChange { value: events }, _| {
             sink.lock().unwrap().push(events.iter().map(Value::from).collect());
             async { Ok(()) }
         })
@@ -240,7 +240,7 @@ async fn applies_deltas_after_an_overflow_snapshot_that_holds_an_in_flight_parti
     let batches = super::Batches::default();
     let sink = batches.clone();
     stream
-        .start(move |events, _| {
+        .start(move |pi_chord::NativeWatchChange { value: events }, _| {
             sink.lock().unwrap().push(events.iter().map(Value::from).collect());
             async { Ok(()) }
         })

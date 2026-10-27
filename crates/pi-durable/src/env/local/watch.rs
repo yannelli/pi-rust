@@ -21,7 +21,7 @@ use super::watch_scan::{
     reported, scan,
 };
 use crate::env::{
-    FileError, FileErrorCode, FileResult, FileWatcher, WatchChange, WatchListener, WatchMode, WatchTarget,
+    FileChange, FileError, FileErrorCode, FileResult, FileWatcher, WatchListener, WatchMode, WatchTarget,
 };
 
 const DEBOUNCE: Duration = Duration::from_millis(50);
@@ -46,7 +46,7 @@ struct Shared {
 }
 
 impl Shared {
-    fn deliver(&self, change: WatchChange) {
+    fn deliver(&self, change: FileChange) {
         let closed = self.closed.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if *closed {
             return;
@@ -265,7 +265,7 @@ impl Core {
         *self.shared.mode.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = WatchMode::Polling;
         self.watcher = None;
         self.installed.clear();
-        self.shared.deliver(WatchChange::Overflow);
+        self.shared.deliver(FileChange::Overflow);
         self.flush_at = None;
         self.poll_at = Some(Instant::now() + self.poll_interval);
     }
@@ -305,11 +305,11 @@ impl Core {
             Ok(mut changed) => {
                 changed.extend(events);
                 if !changed.is_empty() {
-                    self.shared.deliver(WatchChange::Paths(changed.into_iter().collect()));
+                    self.shared.deliver(FileChange::Paths(changed.into_iter().collect()));
                 }
             }
             Err(error) => {
-                self.shared.deliver(WatchChange::Error(scan_error(error)));
+                self.shared.deliver(FileChange::Error(scan_error(error)));
                 self.shared.close();
                 self.stopped = true;
             }

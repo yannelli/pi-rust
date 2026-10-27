@@ -382,7 +382,7 @@ async fn publishes_no_frame_to_states_and_watches_from_a_commit_that_settles_dur
     for (watch, name) in [(&graph_watch, "graphWatch"), (&doc_watch, "docWatch"), (&view_watch, "viewWatch")] {
         let sink = frames.clone();
         watch
-            .start(move |_, _, _| {
+            .start(move |pi_chord::WatchChange { .. }, _| {
                 sink.lock().unwrap().push(name);
                 async { Ok(()) }
             })

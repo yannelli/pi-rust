@@ -67,7 +67,7 @@ async fn writes_the_required_base_on_the_first_successful_transaction_then_write
     let frames: Frames = Arc::default();
     let sink = frames.clone();
     watch
-        .start(move |value, ops, _| {
+        .start(move |pi_chord::WatchChange { value, ops, .. }, _| {
             sink.lock().unwrap().push((value, ops));
             async { Ok(()) }
         })
@@ -79,7 +79,7 @@ async fn writes_the_required_base_on_the_first_successful_transaction_then_write
     let current_frames: Arc<Mutex<Vec<Json>>> = Arc::default();
     let sink = current_frames.clone();
     watch_current
-        .start(move |value, _, _| {
+        .start(move |pi_chord::WatchChange { value, .. }, _| {
             sink.lock().unwrap().push(value);
             async { Ok(()) }
         })

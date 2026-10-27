@@ -38,7 +38,7 @@ async fn reports_a_throwing_commit_listener_and_runs_the_others_the_commit_stand
 async fn reports_a_throwing_watch_listener_which_ends_that_watch() {
     let Started { harness, root, reports, .. } = started(Arc::new(MemoryStorage::new())).await;
     let watch = harness.watch_doc(&LIVE_DOC, root.id, &context()).await.unwrap().unwrap();
-    watch.start(|_, _, _| async { Err(DurableError::error("listener broke")) }).unwrap();
+    watch.start(|pi_chord::WatchChange { .. }, _| async { Err(DurableError::error("listener broke")) }).unwrap();
     let id = root.id;
     let change =
         move |tx: Tx| async move { tx.doc(&LIVE_DOC, id).await?.edit(|live| live.compactions = Some(Vec::new())) };
