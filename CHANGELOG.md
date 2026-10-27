@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.7.2] - 2026-10-27
+
+### Fixed
+
+- **release:** ship the licenses of third-party crates in the release archives ([28b9bc4](https://github.com/yannelli/pi-rust/commit/28b9bc40089fa4b358cb1fe6ec8a6d6517589646))
+
 ## [0.7.1] - 2026-10-27
 
 Maintenance release.
