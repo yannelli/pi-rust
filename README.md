@@ -6,7 +6,13 @@
 
 # pi-rust
 
-A Rust-only port of the [pi](https://github.com/earendil-works/pi) coding agent harness: a streaming multi-provider LLM API, an agent loop with tool calling, and the `pi` coding agent CLI. You do not need Node.js or any other JavaScript runtime installed.
+pi-rust is a port of the [pi](https://github.com/earendil-works/pi) coding agent harness, written only in Rust. It has these parts:
+
+- A streaming API for large language models (LLMs) from many providers.
+- An agent loop that calls tools.
+- The `pi` coding agent, which has a command-line interface (CLI).
+
+You do not need Node.js or any other JavaScript runtime installed. In this file, "upstream pi" is the original pi, which is written in TypeScript.
 
 ## Install
 
@@ -22,15 +28,17 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/yannelli/pi-rust/main/install.ps1 | iex
 ```
 
-The scripts download the latest release for your platform, check it against `SHA256SUMS`, and install `pi` to `~/.local/bin` (Windows: `%LOCALAPPDATA%\Programs\pi`, which the script adds to your user `Path`). They do not use sudo or send telemetry, and `pi update --self` updates an install made this way. Settings:
+The scripts download the latest release for your platform and compare it with `SHA256SUMS`. Then they install `pi` in `~/.local/bin`. On Windows, they install `pi` in `%LOCALAPPDATA%\Programs\pi` and add that folder to your user `Path`. The scripts do not use sudo and do not send telemetry. `pi update --self` can update an installation from these scripts.
 
-- `PI_VERSION`: install this release (for example `0.5.3`) instead of the latest. Example: `curl -fsSL https://raw.githubusercontent.com/yannelli/pi-rust/main/install.sh | PI_VERSION=0.5.3 sh`. In PowerShell, set `$env:PI_VERSION = "0.5.3"` before `irm`.
-- `PI_INSTALL_DIR`: install to this directory instead. Do not use `~/.cargo/bin`, because `pi update --self` treats a binary there as a cargo install.
+To change the installation, set these environment variables:
+
+- `PI_VERSION`: install this release, for example `0.5.3`, and not the latest release. Example: `curl -fsSL https://raw.githubusercontent.com/yannelli/pi-rust/main/install.sh | PI_VERSION=0.5.3 sh`. In PowerShell, set `$env:PI_VERSION = "0.5.3"` before `irm`.
+- `PI_INSTALL_DIR`: install `pi` in this directory. Do not use `~/.cargo/bin`, because `pi update --self` treats a binary there as a cargo installation.
 - `PI_RELEASES_URL`: download from a mirror of `https://github.com/yannelli/pi-rust/releases`. The mirror must serve `latest/download/SHA256SUMS` and `download/<tag>/<file>`.
 
 ### Manual install
 
-Each [release](https://github.com/yannelli/pi-rust/releases) has an archive per platform and a `SHA256SUMS` file. Every archive holds a `pi-vX.Y.Z-<target>/` folder with `pi` (or `pi.exe`), `README.md`, `LICENSE`, and `CHANGELOG.md`.
+Each [release](https://github.com/yannelli/pi-rust/releases) has one archive for each platform and a `SHA256SUMS` file. Each archive contains a `pi-vX.Y.Z-<target>/` folder. The folder contains `pi` or `pi.exe`, `README.md`, `LICENSE`, and `CHANGELOG.md`.
 
 | Platform | Target |
 | --- | --- |
@@ -42,7 +50,7 @@ Each [release](https://github.com/yannelli/pi-rust/releases) has an archive per 
 | Windows x86_64 | `x86_64-pc-windows-msvc` |
 | Windows arm64 | `aarch64-pc-windows-msvc` |
 
-Linux and macOS (Linux binaries are static and run on any distribution, including Termux):
+Linux and macOS. The Linux binaries are static, so they run on all distributions, including Termux:
 
 ```sh
 target=x86_64-unknown-linux-musl   # pick yours from the table
@@ -66,11 +74,13 @@ $bin = "$env:LOCALAPPDATA\pi\pi-$tag-$target"
 [Environment]::SetEnvironmentVariable("Path", "$([Environment]::GetEnvironmentVariable('Path', 'User'));$bin", "User")
 ```
 
-Open a new terminal afterwards so the `Path` change applies. With the GitHub CLI, `gh release download --repo yannelli/pi-rust --pattern '*<target>*'` fetches the latest archive. A browser download on macOS may need `xattr -d com.apple.quarantine pi` before the first run.
+Then open a new terminal. The `Path` change applies only to new terminals.
 
-Each release file also has a signed build provenance attestation. With the GitHub CLI, `gh attestation verify pi-$tag-$target.tar.gz --repo yannelli/pi-rust` (`.zip` on Windows) shows that the file came from this repository's Release workflow.
+To download the latest archive with the GitHub CLI, use `gh release download --repo yannelli/pi-rust --pattern '*<target>*'`. If macOS stops `pi` after a browser download, run `xattr -d com.apple.quarantine pi`.
 
-`pi update --self` replaces a release install with the latest release, and `pi update --models` refreshes the model catalogs. To build from source (Rust 1.85 or newer): `cargo install --path crates/pi-coding-agent`.
+Each release file has a signed build provenance attestation. To make sure that a file came from the Release workflow of this repository, run `gh attestation verify pi-$tag-$target.tar.gz --repo yannelli/pi-rust`. On Windows, use the `.zip` file name.
+
+`pi update --self` replaces a release installation with the latest release. `pi update --models` updates the model catalogs. To build from source, you need Rust 1.85 or newer. Then run `cargo install --path crates/pi-coding-agent`.
 
 ## Use
 
@@ -88,46 +98,80 @@ cat error.log | pi -p "Explain this error"
 pi install npm:<package>            # install a pi package (extensions, skills, themes)
 ```
 
-Run `pi --help` for all options. In interactive mode, type `/` to list commands, for example `/login`, `/model`, `/settings`, `/tree`, `/fork`, `/compact`, `/export`, `/share`, `/mcp`, and `/hotkeys`. Input typed while the agent works is queued as steering, and Alt+Enter (Ctrl+Q on Windows) queues a follow-up.
+Run `pi --help` to see all options. In interactive mode, type `/` to see the list of commands, for example `/login`, `/model`, `/settings`, `/tree`, `/fork`, `/compact`, `/export`, `/share`, `/mcp`, and `/hotkeys`. If you type while the agent works, pi puts your input in the queue as steering. Alt+Enter puts it in the queue as a follow-up. On Windows, use Ctrl+Q.
 
-`/diff [--stat] [path]` shows the uncommitted git changes in the working directory (pi-rust extension): the `git diff HEAD` stat, the untracked files, and the diff of staged and unstaged changes. `--stat` leaves out the diff, and a path limits the output to that path. Output longer than 500 lines is cut, with a note that gives the number of lines left out.
+`/diff [--stat] [path]` (pi-rust extension) shows the uncommitted git changes in the working directory. It shows the `git diff HEAD` stat, the untracked files, and the diff of the staged and unstaged changes. With `--stat`, it does not show the diff. With a path, it shows only the changes to that path. It shows a maximum of 500 lines, and a note gives the number of lines that it did not show.
 
-`/context` shows how much of the current model's context window the conversation uses (pi-rust extension): the model, the window size, the tokens in use with their percent, and where auto-compaction starts. The tokens in use come from the last response's reported usage, plus estimates for newer messages; before a response reports usage, they are an estimate of the next request. A table then gives the estimated tokens of the system prompt, tool definitions, context files, skills, user messages, assistant messages, and tool results, and the free space.
+`/context` (pi-rust extension) shows how much of the context window of the current model the conversation uses. It shows the model, the window size, the tokens in use and their percentage, and the point where auto-compaction starts. The count of tokens in use comes from the usage that the last response reported, plus estimates for newer messages. Before a response reports usage, the count is an estimate of the next request. Then a table shows the estimated tokens for each part of the context and the free space. The parts are the system prompt, tool definitions, context files, skills, user messages, assistant messages, and tool results.
 
-`/export [file]` writes the session to HTML, or to JSONL when the file ends in `.jsonl`, and `pi --export <session.jsonl> [output]` exports a saved session file to HTML. With both, an output path that ends in `.md` writes Markdown (pi-rust extension). The Markdown file has the current branch: a title, the date, models, working directory, tokens, and cost, then each user and assistant turn. Thinking is in collapsed `<details>` blocks, tool calls show their JSON arguments, tool results stop after 200 lines, and images become placeholders.
+`/export [file]` writes the session to an HTML file. If the file name ends in `.jsonl`, it writes JSONL. `pi --export <session.jsonl> [output]` exports a saved session file to HTML. With both commands, an output path that ends in `.md` gives a Markdown file (pi-rust extension).
 
-`/init [instructions]` (pi-rust extension) asks the agent to look through the project in the working directory and write an `AGENTS.md` there with an overview, build, test, and lint commands, code layout, conventions, and gotchas, based only on what it finds. If the directory already has a context file that pi loads (`AGENTS.md`, `CLAUDE.md`, or `AGENTS.override.md`), the agent improves that file in place. Text after `/init` is added as extra instructions. The prompt goes out as a normal message: it shows in the chat, uses the current model, and is saved in the session. As with other built-in commands, `/init` takes precedence over a prompt template or extension command named `init`. It is available in interactive mode only.
+The Markdown file contains the current branch. It starts with a title, the date, the models, the working directory, the tokens, and the cost. Then it gives each user turn and assistant turn. Thinking is in collapsed `<details>` blocks, and tool calls show their JSON arguments. Tool results stop after 200 lines, and images change to placeholders.
 
-`/review [instructions]` (pi-rust extension) asks the agent to review the uncommitted changes in the working directory. The prompt tells it to run `git status` and `git diff HEAD`, read the untracked files, and report bugs, risky changes, and missing tests, ordered by severity with `path:line` references, without editing files. Text after `/review` is added as extra instructions, for example a focus area or a base branch to compare against. Outside a git repository, `/review` shows an error and sends nothing. As with `/init`, the prompt goes out as a normal message: it shows in the chat, uses the current model, and is saved in the session.
+`/init [instructions]` (pi-rust extension) tells the agent to look through the project in the working directory. Then the agent writes an `AGENTS.md` file there, based only on what it finds. The file contains an overview, the build, test, and lint commands, the code layout, the conventions, and the known problems. If the directory already has a context file that pi loads, the agent improves that file. These context files are `AGENTS.md`, `CLAUDE.md`, and `AGENTS.override.md`.
 
-`/undo` (pi-rust extension) restores the files that the edit and write tools changed during the last prompt: it writes back their earlier content and deletes the files the agent created. Run it again to go one more prompt back. A file that changed after the agent wrote it, for example by you or a bash command, is skipped and listed. Limits: only edit and write changes are tracked, not bash commands; checkpoints stay in memory for the last 20 prompts of the current session, files over 4 MB are not kept, and everything is lost on exit or when you switch sessions. The conversation does not change; use `/tree` to move in it.
+pi adds the text after `/init` to the prompt as more instructions. The prompt is a normal message. It shows in the chat and uses the current model. pi saves it in the session. As with other built-in commands, `/init` has priority over a prompt template or an extension command with the name `init`. You can use `/init` only in interactive mode.
 
-`/retry` (pi-rust extension) runs the last prompt of the current branch again. It moves to the point before that prompt, as `/tree` does, and sends the same text and images as a new prompt. The new answer starts a new branch, and the old answer stays in the tree, where `/tree` can return to it. Custom messages and prompts that extensions sent are skipped, so `/retry` picks the last prompt you sent; pi knows which prompts came from extensions only while the session that received them is open, not after a resume. While the agent works or compacts, or before the first prompt, `/retry` shows an error and sends nothing.
+`/review [instructions]` (pi-rust extension) tells the agent to review the uncommitted changes in the working directory. The prompt tells the agent to run `git status` and `git diff HEAD` and to read the untracked files. The agent then reports bugs, risky changes, and missing tests in order of severity, with `path:line` references, and it does not change files. pi adds the text after `/review` as more instructions, for example an area to look at or a base branch for the comparison. Outside a git repository, `/review` shows an error and sends nothing. As with `/init`, the prompt is a normal message.
+
+`/undo` (pi-rust extension) restores the files that the edit and write tools changed during the last prompt. It writes back the earlier content of these files and deletes the files that the agent created. To go back one more prompt, run `/undo` again. A file can change after the agent writes it, for example when you or a bash command change it. `/undo` does not restore such a file and shows it in a list. `/undo` does not change the conversation, but you can use `/tree` to move in it.
+
+`/undo` has these limits:
+
+- It records only the changes from the edit and write tools, not the changes from bash commands.
+- It keeps checkpoints in memory for the last 20 prompts of the current session.
+- It does not keep files that are larger than 4 MB.
+- It loses all checkpoints when pi stops or when you change to a different session.
+
+`/retry` (pi-rust extension) runs the last prompt of the current branch again. It moves to the point before that prompt, as `/tree` does, and sends the same text and images as a new prompt. The new answer starts a new branch, and you can go back to the old answer with `/tree`. `/retry` ignores custom messages and prompts from extensions, so it uses the last prompt that you sent. pi knows which prompts came from extensions only while the session that received them is open, and not after a resume. If the agent works or compacts, or if there is no prompt yet, `/retry` shows an error and sends nothing.
 
 ### Prompt history (pi-rust extension)
 
-The interactive editor keeps your prompts across sessions and projects in `~/.pi/agent/prompt-history.jsonl`, one JSON string per line, readable only by you on Unix. Up and Down go through them, newest first. Ctrl+R starts a reverse search: type to filter (case does not matter), press Ctrl+R again for the next older match, Enter to put the match in the editor without sending it, and Esc to go back to your draft. A prompt that starts with a space is not saved to the file.
+The interactive editor keeps your prompts from all sessions and projects in `~/.pi/agent/prompt-history.jsonl`. The file has one JSON string on each line. On Unix, only you can read the file. Up and Down move through the prompts, newest first. If a prompt starts with a space, pi does not save it in the file.
 
-Set `"promptHistory": {"enabled": false}` in `settings.json` to turn this off, or `"maxEntries"` to keep a different number of prompts (default 1000). To use a different key for the search, set `tui.editor.historySearch` in `keybindings.json`.
+To search the history:
+
+1. Press Ctrl+R to start a reverse search.
+2. Type text to filter the prompts. The search ignores case.
+3. To go to the next older match, press Ctrl+R again.
+4. To put the match in the editor, press Enter. pi does not send it.
+
+To go back to your draft, press Esc.
+
+To turn off the history, set `"promptHistory": {"enabled": false}` in `settings.json`. To keep a different number of prompts, set `"maxEntries"`. The default is 1000. To use a different key for the search, set `tui.editor.historySearch` in `keybindings.json`.
 
 ## Shell completion and `pi doctor` (pi-rust extension)
 
-`pi completion bash|zsh|fish|powershell` prints a completion script for options, subcommands, and file paths. For `--model` and `--provider` it asks pi for the models of the built-in catalog and `models.json`. `pi completion --help` shows how to install each script, for example:
+`pi completion bash|zsh|fish|powershell` prints a completion script for options and subcommands. The script also completes file paths. For `--model` and `--provider`, the script gets the models of the built-in catalog and `models.json` from pi. `pi completion --help` shows how to install each script. For example:
 
 ```sh
 echo 'eval "$(pi completion bash)"' >> ~/.bashrc
 pi completion fish > ~/.config/fish/completions/pi.fish
 ```
 
-`pi doctor` prints a short report: the version and target, the install method and path, other `pi` programs earlier on `PATH` (such as the npm pi), errors in `settings.json`, `models.json`, `auth.json`, and `mcp.json`, the providers that have credentials (names and sources, never the secrets), MCP servers whose commands are missing, and what the terminal supports. `pi doctor --json` prints the same report as JSON. It makes no network calls, starts no MCP servers, and exits 1 when it finds a problem.
+`pi doctor` prints a short report with these items:
+
+- The version and the target.
+- The installation method and path.
+- Other `pi` programs that come earlier on `PATH`, for example the npm pi.
+- Errors in `settings.json`, `models.json`, `auth.json`, and `mcp.json`.
+- The providers that have credentials. The report shows their names and sources, but never the secrets.
+- Model Context Protocol (MCP) servers whose commands are missing.
+- The features that the terminal supports.
+
+`pi doctor --json` prints the same report as JSON. `pi doctor` does not use the network and does not start MCP servers. If it finds a problem, it exits with code 1.
 
 ## Sessions and usage stats (pi-rust extension)
 
-`pi sessions` lists the saved sessions of the current project, newest first: a short id, the last activity, the message count, the cost, and the name or first prompt. `--all` lists every project, `--limit <n>` shows the newest n, and `--json` prints an array.
+`pi sessions` lists the saved sessions of the current project, newest first. For each session, it shows a short ID, the last activity, the number of messages, the cost, and the name or the first prompt. `--all` lists the sessions of all projects. `--limit <n>` shows the newest n sessions. `--json` prints an array.
 
-`pi sessions rm <id-prefix|path>...` deletes sessions by a listed id prefix or a file path; it refuses a prefix that matches more than one session and lists the matches. `pi sessions prune --older-than 30d` deletes sessions with no activity for that long (units `s`, `m`, `h`, `d`, `w`) and prints the bytes it frees; `--dry-run` shows what it would delete. Both ask before they delete on a terminal and need `--yes` otherwise.
+`pi sessions rm <id-prefix|path>...` deletes sessions by ID prefix or by file path. If a prefix matches more than one session, the command deletes nothing and lists the matches. `pi sessions prune --older-than 30d` deletes the sessions that had no activity for that time. The units are `s`, `m`, `h`, `d`, and `w`. The command also prints the number of bytes that it frees. With `--dry-run`, it shows the sessions that it can delete and does not delete them.
 
-`pi stats` totals the sessions of the current project (`--all` for every project): sessions, prompts, assistant turns, input, output, and cache tokens, and cost, by model, by provider, and by day for the last 14 days. `--since 7d` counts only recent activity, and `--json` prints the report as JSON. `pi stats` and `pi sessions list` only read session files, and no session command uses the network. All of them honor `--session-dir`, `PI_CODING_AGENT_SESSION_DIR`, and the `sessionDir` setting.
+On a terminal, both commands ask before they delete. In other cases, they need `--yes`.
+
+`pi stats` adds up the sessions of the current project, or of all projects with `--all`. It shows the number of sessions, prompts, and assistant turns. It also shows the input tokens, output tokens, cache tokens, and cost. It gives these totals for each model and provider, and for each day of the last 14 days. `--since 7d` counts only the recent activity, and `--json` prints the report as JSON.
+
+`pi stats` and `pi sessions list` only read session files, and no session command uses the network. All session commands obey `--session-dir`, `PI_CODING_AGENT_SESSION_DIR`, and the `sessionDir` setting.
 
 ```sh
 pi sessions --all --limit 10
@@ -137,43 +181,54 @@ pi stats --since 7d
 
 ## Run limits (pi-rust extension)
 
-`--max-turns <n>` stops a run after n assistant responses to one prompt. Tool results do not count, and each prompt counts from zero. `--max-cost <usd>` stops the run once the session's total cost, as the footer shows it, reaches the limit; after that, a new prompt does not start a run. Both limits apply in every mode, for the current process only.
+`--max-turns <n>` stops a run after n assistant responses to one prompt. Tool results do not count, and the count starts at zero for each prompt. `--max-cost <usd>` stops the run when the total cost of the session reaches the limit. This total is the same as the cost in the footer. After the cost limit stops a run, a new prompt does not start a run. Both limits apply in all modes, but only for the current process.
 
-A limit stops the run like Esc does, after the tool results of the last turn, so the session file stays valid and `pi -c` resumes it. A run that ends by itself on its last allowed turn is not stopped.
+A limit stops the run in the same way as Esc, after the tool results of the last turn. Thus the session file stays valid, and `pi -c` can continue it. If a run ends by itself on its last turn under the limit, pi does not stop it.
 
 ```sh
 pi -p --max-turns 20 --max-cost 0.50 "Fix the failing tests"
 echo $?   # 3 when a limit stopped the run
 ```
 
-In print mode, pi writes a line such as `pi: stopped after 20 turns (--max-turns)` to stderr, skips the remaining messages, and exits with code 3; `--mode json` does the same. JSON and RPC mode also send a `run_limit` event before `agent_end`:
+In print mode, pi writes a line such as `pi: stopped after 20 turns (--max-turns)` to stderr. Then it does not print the remaining messages, and it exits with code 3. `--mode json` does the same. JSON mode and remote procedure call (RPC) mode also send a `run_limit` event before `agent_end`:
 
 ```json
 {"type":"run_limit","limit":"maxTurns","max":20,"turns":20,"cost":0.1234,"message":"stopped after 20 turns (--max-turns)"}
 ```
 
-`limit` is `maxTurns` or `maxCost`, `max` is the limit, `turns` counts the responses of the run, and `cost` is the session total in US dollars. When the cost limit keeps a prompt from starting a run, the event comes alone and an RPC `prompt` gets the disposition `handled`. Interactive mode shows the message as a status line. An extension that registers its own `--max-turns` or `--max-cost` flag gets the value instead, as with upstream pi.
+The event has these fields:
+
+- `limit`: `maxTurns` or `maxCost`.
+- `max`: the limit.
+- `turns`: the number of responses in the run.
+- `cost`: the total cost of the session in US dollars.
+
+If the cost limit stops a prompt before its run starts, pi sends only the event, and an RPC `prompt` gets the disposition `handled`. Interactive mode shows the message as a status line. If an extension registers its own `--max-turns` or `--max-cost` flag, the extension gets the value, as in upstream pi.
 
 ## Structured output (pi-rust extension)
 
-`--output-schema <file>` makes the final answer of print mode a JSON value that matches a JSON Schema, for scripts. pi adds the schema to the system prompt and checks the last response with the same validator as tool arguments. A single surrounding code fence such as ```` ```json ```` is accepted. When the response is not valid JSON or does not match, pi sends the errors back in the same session and asks for corrected JSON. `--output-retries <n>` sets how many corrective prompts it sends (default 1, `0` for none).
+`--output-schema <file>` makes the final answer in print mode a JSON value that matches a JSON Schema, so that scripts can read it. pi adds the schema to the system prompt. It checks the last response with the same validator that it uses for tool arguments. pi accepts one code fence around the JSON, such as ```` ```json ````. If the response is not valid JSON or does not match the schema, pi sends the errors back in the same session. Then it asks for correct JSON.
+
+`--output-retries <n>` sets the number of correction prompts that pi sends. The default is 1, and `0` sends none.
 
 ```sh
 pi -p --output-schema review.schema.json "Review the diff in HEAD" > review.json
 echo $?   # 4 when the answer still does not match
 ```
 
-On success, text mode prints only the JSON value, compact on one line. `--mode json` ends with an `output` event instead:
+If the answer matches the schema, text mode prints only the JSON value, on one compact line. `--mode json` ends with an `output` event:
 
 ```json
 {"type":"output","value":{"verdict":"approve","issues":[]}}
 ```
 
-When the answer still does not match after the retries, pi writes the errors to stderr and exits with code 4; text mode prints nothing to stdout. An error or aborted response exits 1, and a run limit exits 3 as above. pi checks the schema file before it starts: it must be valid JSON, use local `$ref`s only, and use keywords and patterns the validator supports. The flag works only in print mode (`-p`, `--mode json`, or when stdin or stdout is not a terminal); interactive, RPC, and ACP mode reject it. An extension that registers its own `--output-schema` or `--output-retries` flag gets the value instead.
+If the answer still does not match after the retries, pi writes the errors to stderr and exits with code 4. In this case, text mode prints nothing to stdout. After an error or an aborted response, pi exits with code 1. After a run limit, it exits with code 3, as in [Run limits](#run-limits-pi-rust-extension). Before pi starts, it checks the schema file. The file must be valid JSON, use only local `$ref`s, and use only keywords and patterns that the validator supports.
+
+The flag works only in print mode: with `-p`, with `--mode json`, or when stdin or stdout is not a terminal. Interactive mode rejects it. RPC mode and Agent Client Protocol (ACP) mode also reject it. If an extension registers its own `--output-schema` or `--output-retries` flag, the extension gets the value.
 
 ## ACP (Zed and other editors)
 
-`pi --mode acp` runs pi as an [Agent Client Protocol](https://agentclientprotocol.com) server over stdio, so editors such as Zed can use it as an external agent. In Zed, add this to `settings.json`:
+`pi --mode acp` runs pi as an [Agent Client Protocol](https://agentclientprotocol.com) server over stdio. Editors such as Zed can then use pi as an external agent. In Zed, add this to `settings.json`:
 
 ```json
 "agent_servers": {
@@ -186,39 +241,48 @@ When the answer still does not match after the retries, pi writes the errors to 
 }
 ```
 
-Each editor session runs a pi session in its project directory, saved in `~/.pi/agent/sessions/` like any other, so the editor can list, resume, and delete them and `pi -r` can resume them too. The editor's model and thinking selectors, slash commands (prompt templates, `/skill:name`, and `/compact`, `/autocompact`, `/export`, `/session`, `/name`, `/steering`, `/follow-up`, `/changelog`), tool call diffs and terminals, and context usage all work. Set `quietStartup: true` in pi's settings to hide the startup info block, and `PI_ACP_ENABLE_EMBEDDED_CONTEXT=true` to accept embedded file contents in prompts. Without configured models, the editor offers to launch pi in a terminal to log in. ACP mode is a port of [pi-acp](https://github.com/svkozak/pi-acp) by Sergii Kozak (MIT).
+Each editor session runs a pi session in its project directory. pi saves it in `~/.pi/agent/sessions/`, as it does all sessions. Thus the editor can show these sessions in a list and resume or delete them. `pi -r` can resume them too. These features of the editor work: the model and thinking selectors, tool call diffs and terminals, context usage, and slash commands. The slash commands are prompt templates, `/skill:name`, `/compact`, `/autocompact`, `/export`, `/session`, `/name`, `/steering`, `/follow-up`, and `/changelog`.
+
+To hide the startup information block, set `quietStartup: true` in the pi settings. To accept embedded file contents in prompts, set `PI_ACP_ENABLE_EMBEDDED_CONTEXT=true`. If no models are configured, the editor offers to start pi in a terminal, where you can log in. ACP mode is a port of [pi-acp](https://github.com/svkozak/pi-acp) by Sergii Kozak (MIT license).
 
 ## Configuration
 
-pi-rust reads the same files as the TypeScript pi, so both can share one setup. `PI_CODING_AGENT_DIR` replaces `~/.pi/agent`.
+pi-rust reads the same files as upstream pi, so the two can use one setup. `PI_CODING_AGENT_DIR` sets a different folder in place of `~/.pi/agent`.
 
 | Path | Purpose |
 | --- | --- |
 | `~/.pi/agent/auth.json` | API keys and OAuth logins from `/login` or `pi auth` |
-| `~/.pi/agent/settings.json` | Settings; `<project>/.pi/settings.json` overrides them for a trusted project |
+| `~/.pi/agent/settings.json` | Settings. In a trusted project, `<project>/.pi/settings.json` overrides them |
 | `~/.pi/agent/models.json` | Custom providers and models |
 | `~/.pi/agent/keybindings.json` | Key bindings |
 | `~/.pi/agent/mcp.json`, `<project>/.pi/mcp.json` | MCP servers |
-| `~/.pi/agent/{extensions,skills,prompts,themes}/` | Extensions, skills, prompt templates, and themes; `.pi/` in a project and `~/.agents/skills` work too |
+| `~/.pi/agent/{extensions,skills,prompts,themes}/` | Extensions, skills, prompt templates, and themes. `.pi/` in a project and `~/.agents/skills` also work |
 | `AGENTS.md`, `CLAUDE.md`, `SYSTEM.md`, `APPEND_SYSTEM.md` | Context files and system prompt overrides |
-| `~/.pi/agent/sessions/` | Sessions as JSONL trees in pi's format |
-| `~/.pi/agent/prompt-history.jsonl` | Submitted prompts for Up, Down, and Ctrl+R (pi-rust only) |
+| `~/.pi/agent/sessions/` | Sessions as JSONL trees in the pi format |
+| `~/.pi/agent/prompt-history.jsonl` | The prompts that you sent, for Up, Down, and Ctrl+R (pi-rust only) |
 
-On first start, pi-rust moves files from older pi layouts the same way pi does (for example `oauth.json` into `auth.json`).
+When pi-rust starts for the first time, it moves files from older pi layouts, as upstream pi does. For example, it moves `oauth.json` into `auth.json`.
 
 ## Providers
 
-pi-rust has every wire protocol of pi: `anthropic-messages`, `openai-responses`, `openai-completions`, `openai-codex-responses` (SSE and WebSocket), `azure-openai-responses`, `google-generative-ai`, `google-vertex`, `bedrock-converse-stream`, `mistral-conversations`, and `pi-messages`. The bundled catalog is pi's, and `pi update --models` refreshes it. `/login` supports OAuth for Anthropic, OpenAI Codex, GitHub Copilot, OpenRouter, xAI, Kimi, Meta, and Radius, plus API keys and ambient AWS and Google credentials. llama.cpp servers and virtual models work as in pi.
+pi-rust has all the wire protocols of upstream pi: `anthropic-messages`, `openai-responses`, `openai-completions`, `openai-codex-responses` (SSE and WebSocket), `azure-openai-responses`, `google-generative-ai`, `google-vertex`, `bedrock-converse-stream`, `mistral-conversations`, and `pi-messages`. The bundled model catalog is the catalog of upstream pi, and `pi update --models` updates it. `/login` supports OAuth for Anthropic, OpenAI Codex, GitHub Copilot, OpenRouter, xAI, Kimi, Meta, and Radius. pi also accepts API keys and the default AWS and Google credentials of your system. llama.cpp servers and virtual models work as in upstream pi.
 
 ### OpenRouter
 
-Authenticate with `/login openrouter` or `OPENROUTER_API_KEY`.
+To log in, use `/login openrouter` or set `OPENROUTER_API_KEY`.
 
-With a key, pi lists only the OpenRouter chat models that key may use, with the key's context size, max output, and prices. These come from OpenRouter's `/models/user` endpoint and reflect guardrails and provider restrictions set in OpenRouter. Image and classifier models are not filtered.
+With a key, pi lists only the OpenRouter chat models that the key can use. For each model, it shows the context size, maximum output, and prices for that key. This data comes from the `/models/user` endpoint of OpenRouter, so it includes the guardrails and provider limits that you set in OpenRouter. pi does not filter image and classifier models.
 
-pi refreshes the list in the background at startup in interactive, RPC, and ACP modes, when `/model` opens, after `/login`, and on `pi update --models`. The last list is saved in `models-store.json` and used offline, in `pi -p`, and until a refresh finishes. After you switch keys outside `/login`, the list of the old key stays until the next refresh.
+pi updates the list in the background at these times:
 
-Regional endpoints filter models to their region. To use one, set the base URL in `models.json`:
+- When it starts in interactive, RPC, or ACP mode.
+- When `/model` opens.
+- After `/login`.
+- When you run `pi update --models`.
+
+pi saves the last list in `models-store.json`. It uses this list offline, in `pi -p`, and until an update finishes. If you change keys outside `/login`, pi keeps the list of the old key until the next update.
+
+Regional endpoints show only the models of their region. To use a regional endpoint, set the base URL in `models.json`:
 
 ```json
 {
@@ -228,37 +292,48 @@ Regional endpoints filter models to their region. To use one, set the base URL i
 }
 ```
 
-If the base URL rejects the key at `/models/user` or does not have that endpoint, for example a proxy configured as the OpenRouter base URL, pi lists every OpenRouter model.
+If the base URL rejects the key at `/models/user`, or does not have that endpoint, pi lists all OpenRouter models. A proxy that you set as the OpenRouter base URL is an example.
 
 ### Account model lists (pi-rust extension)
 
-pi-rust narrows more providers to the models your account or key may use, like OpenRouter above. Upstream pi does not. With a credential, pi requests the provider's model list at most once every 4 hours, and at once after `/login` and on `pi update --models`. It drops catalog chat models that the list does not name, takes context size and max output from the list when it has them, and adds listed chat models that the catalog lacks as copies of the closest catalog model. Image and classifier models are not filtered. If the list does not name the provider's default model, pi drops nothing and only takes limits and adds models. The list is saved in `models-store.json` with the pi version and without the credential, and the base URL set in `models.json` applies. After an upgrade, pi shows the full catalog until a new list arrives. Model list requests do not follow redirects, so the credential goes only to the configured host.
+pi-rust also limits other providers to the models that your account or key can use, as it does for OpenRouter. Upstream pi does this only for OpenRouter. With a credential, pi gets the model list of the provider a maximum of one time in 4 hours. It also gets the list immediately after `/login` and when you run `pi update --models`.
 
-To get the full catalog, point the provider's `baseUrl` in `models.json` at an endpoint without the model list, such as a proxy. pi lists every catalog model when the model list answers 401, 403, or 404, or when its body cannot be read. A list that names no catalog chat model, or an empty list, shows the full catalog and is not saved. Other failures, redirects included, keep the last saved list.
+When pi gets the list, it does these steps:
+
+- It removes the catalog chat models that the list does not name.
+- It uses the context size and maximum output from the list, if the list has them.
+- It adds the listed chat models that the catalog does not have. Each one is a copy of the nearest catalog model.
+- If the list does not name the default model of the provider, pi removes no models. It only uses the limits and adds models.
+
+pi does not filter image and classifier models. pi saves the list in `models-store.json` with the pi version, but without the credential. The base URL that you set in `models.json` applies. After an upgrade, pi shows the full catalog until a new list arrives. Model list requests do not follow redirects, so pi sends the credential only to the configured host.
+
+To get the full catalog, set the `baseUrl` of the provider in `models.json` to an endpoint that has no model list, such as a proxy. pi shows all catalog models when the model list answers 401, 403, or 404, or when pi cannot read its body. If the list is empty or names no catalog chat model, pi shows the full catalog and does not save the list. After other failures, redirects too, pi keeps the last saved list.
 
 #### OpenAI Codex
 
-With a ChatGPT login, pi reads the account's models from the Codex backend (`<base URL>/codex/models`), the list that Codex shows, and skips hidden models. This endpoint is not a public API, so pi reads it leniently.
+With a ChatGPT login, pi reads the models of the account from the Codex backend at `<base URL>/codex/models`. This is the list that Codex shows, and pi skips hidden models. This endpoint is not a public API, so pi accepts some changes in its format. For example, pi uses `id` when `slug` is missing.
 
 #### Anthropic
 
-With an API key or a Claude subscription login, pi reads `GET /v1/models` with the provider's authentication headers and follows its pages. The list gives each model's context size and max output.
+With an API key or a Claude subscription login, pi reads `GET /v1/models` with the authentication headers of the provider. It reads all pages of the list. The list gives the context size and maximum output of each model.
 
 #### GitHub Copilot
 
-With a Copilot login, pi reads `GET /models` from the login's Copilot endpoint and keeps the chat models that support tools, that the model picker shows, and that a policy does not disable, as `/login` chooses them. The token's endpoint comes before the `models.json` base URL, as for requests.
+With a Copilot login, pi reads `GET /models` from the Copilot endpoint of the login. It keeps the chat models that support tools, that the model picker shows, and that no policy disables. `/login` selects models with the same rules. The endpoint of the token has priority over the `models.json` base URL, as it does for requests.
 
 #### OpenAI and xAI
 
-With an API key, pi reads `GET <base URL>/models`. This list also names embedding, audio, image, moderation, and realtime models, so pi adds only listed models of a model family that the catalog has, such as `gpt-` or `grok-`, and never models of those kinds. The list has no limits, so the catalog's limits stay. With a ChatGPT login for `openai`, the same request returns the account's models by `slug`, and pi takes each model's `context_window` as its context size. pi does not use the larger `max_context_window`.
+With an API key, pi reads `GET <base URL>/models`. This list also names embedding, audio, image, moderation, and realtime models. Thus pi adds only listed models of a model family that the catalog has, such as `gpt-` or `grok-`. It never adds models of those other types. The list gives no limits, so pi keeps the limits from the catalog.
+
+With a ChatGPT login for `openai`, the same request returns the models of the account by `slug`. pi uses the `context_window` of each model as its context size. It does not use the larger `max_context_window`.
 
 #### Google
 
-With a Gemini API key, pi reads `GET <base URL>/models` with `x-goog-api-key`, follows its pages, and uses only the models that support `generateContent`, with their input and output token limits. New models are added only for a model family that the catalog has.
+With a Gemini API key, pi reads `GET <base URL>/models` with `x-goog-api-key` and reads all pages. It uses only the models that support `generateContent`, with their input and output token limits. pi adds new models only for a model family that the catalog has.
 
 #### Not covered
 
-Cursor and Grok Build have no public model list API for other harnesses, so pi-rust does not narrow them. Other providers show the full catalog.
+Cursor and Grok Build do not give a public model list API to other harnesses, so pi-rust does not limit their models. Other providers show the full catalog.
 
 ## Crates
 
@@ -280,38 +355,49 @@ Cursor and Grok Build have no public model list API for other harnesses, so pi-r
 | [`pi-env`](crates/pi-env), [`pi-env-daemon`](crates/pi-env-daemon) | Remote execution environments for Pi Durable over SSH, and the `pi-env` daemon that runs on the remote machine |
 | [`pi-evals`](crates/pi-evals) | Behavioral evals for the coding agent: host evals and a documentation-lift comparison in Docker (not published) |
 
-## Differences from the TypeScript pi
+## Differences from upstream pi
 
-pi-rust ports the `pi` CLI and its libraries feature for feature. These parts differ:
+pi-rust has all the features of the upstream `pi` CLI and its libraries. These parts are different:
 
-- Extensions run on embedded QuickJS, so no Node install is needed. Every Node built-in module loads, including `zlib` (gzip, brotli, and zstd), `async_hooks` with `AsyncLocalStorage`, `v8` serialization, and the networking modules `net`, `tls`, `dgram`, `dns`, `http`, `https`, and `http2`, `vm` contexts with timeouts, `worker_threads`, `cluster` (with socket and server handle passing over IPC), `node:sqlite` on the bundled SQLite, `node:test` with TAP and spec output, `repl` over any streams, in-process `inspector` sessions, and `wasi` with a `WebAssembly` global on the wasmi interpreter; the APIs that do not work (for example `crypto.subtle` beyond `digest`, and rare `crypto` ciphers such as Camellia) throw `ERR_PI_UNSUPPORTED`, and `crates/pi-js/src/unsupported.rs` lists them all. Native npm addons cannot load.
+- Extensions run on an embedded QuickJS engine, so you do not need Node.js. All Node built-in modules load. These include:
+  - `zlib` with gzip, brotli, and zstd.
+  - `async_hooks` with `AsyncLocalStorage`, and `v8` serialization.
+  - The network modules `net`, `tls`, `dgram`, `dns`, `http`, `https`, and `http2`.
+  - `vm` contexts with timeouts, `worker_threads`, and `cluster`, which can send socket and server handles over inter-process communication (IPC).
+  - `node:sqlite` on the bundled SQLite, `node:test` with TAP and spec output, and `repl` over any streams.
+  - In-process `inspector` sessions, and `wasi` with a `WebAssembly` global on the wasmi interpreter.
+
+  The APIs that do not work throw `ERR_PI_UNSUPPORTED`. Examples are `crypto.subtle` other than `digest`, and rare `crypto` ciphers such as Camellia. `crates/pi-js/src/unsupported.rs` lists all of them. Native npm addons cannot load.
 - `grep` and `find` use the Rust `ignore` crate, so pi-rust does not download `rg` or `fd`.
-- The version check and `pi update --self` use this repository's releases.
-- CJK and Thai word movement uses ICU4X dictionaries, so a few word boundaries differ from Node's `Intl.Segmenter`.
-- `pi --mode acp` (above) is an addition; the TypeScript pi needs the separate pi-acp adapter.
+- The version check and `pi update --self` use the releases of this repository.
+- Word movement in Chinese, Japanese, Korean (CJK), and Thai text uses ICU4X dictionaries. Thus some word boundaries are different from `Intl.Segmenter` in Node.
+- `pi --mode acp` (see [ACP](#acp-zed-and-other-editors)) is an addition. Upstream pi needs the separate pi-acp adapter.
 - Markdown export (see [Use](#use)) is an addition: `/export notes.md` and `pi --export session.jsonl notes.md` write Markdown. Upstream pi exports only HTML and JSONL.
 - The slash commands `/diff`, `/init`, `/review`, `/context`, `/undo`, and `/retry` (see [Use](#use)) are additions. Upstream pi has none of them, and it shows context use only in the footer.
-- `pi completion` and `pi doctor` (above) are additions; the TypeScript pi has neither.
-- `pi sessions` and `pi stats` (above) are additions; the TypeScript pi lists and deletes sessions only in its session picker (`pi -r`, `/resume`) and shows usage only for the current session (`/session`).
-- Run limits (`--max-turns`, `--max-cost`) and structured output (`--output-schema`, `--output-retries`), both above, are additions.
-- Account model lists for OpenAI Codex, Anthropic, GitHub Copilot, OpenAI, xAI, and Google (see [Providers](#account-model-lists-pi-rust-extension)) are an addition; upstream pi narrows only OpenRouter.
+- `pi completion` and `pi doctor` are additions. Upstream pi has neither command.
+- `pi sessions` and `pi stats` are additions. Upstream pi lists and deletes sessions only in its session picker (`pi -r` and `/resume`). It shows usage only for the current session (`/session`).
+- Run limits (`--max-turns`, `--max-cost`) and structured output (`--output-schema`, `--output-retries`) are additions.
+- Account model lists for OpenAI Codex, Anthropic, GitHub Copilot, OpenAI, xAI, and Google (see [Providers](#account-model-lists-pi-rust-extension)) are an addition. Upstream pi limits only OpenRouter.
 - pi-rust fixes these bugs that are still open upstream:
-  - Anthropic: removing a tool from the first tool list no longer breaks every later request (upstream issue 11376).
-  - Bedrock: `strict: "prefer"` tools go non-strict when the strict tools have more than 16 optional parameters (11416).
+  - If you remove a tool from the first tool list, later Anthropic requests no longer fail (upstream issue 11376).
+  - On Bedrock, `strict: "prefer"` tools change to non-strict when the strict tools have more than 16 optional parameters (11416).
   - `modelOverrides` in `models.json` also apply to classifier and image models: `name`, `input`, `inputLimits`, and `cost`, plus `contextWindow` and `compat` for classifiers (11223).
-  - The editor strips escape sequences from pasted text, and a paste whose end marker never arrives ends after 10 seconds without input or at 16 MiB, so Ctrl+C works again (11383).
-  - MCP HTTP replies that are plain JSON respect `maxMessageBytes` (11335).
+  - The editor removes escape sequences from pasted text. If the end marker of a paste does not arrive, the paste ends after 10 seconds without input or at 16 MiB. Then Ctrl+C works again (11383).
+  - MCP HTTP replies that are plain JSON obey `maxMessageBytes` (11335).
   - A code mode script can declare its own top-level `tools` or `console` (11226).
-  - Branch summaries from `/tree` use the selected thinking level (11444), and resuming a session after `/tree` restores the thinking level you were using (11451).
-  - Tool output drops mouse reports and other escape sequences with private parameters, such as `ESC[<35;59;1M` (11377).
+  - Branch summaries from `/tree` use the selected thinking level (11444). If you resume a session after `/tree`, pi restores the thinking level that you used last (11451).
+  - pi removes mouse reports and other escape sequences with private parameters, such as `ESC[<35;59;1M`, from tool output (11377).
   - In `pi -p`, a prompt that an extension command sends with `sendUserMessage` runs before pi exits (11238).
   - An unpinned `-e npm:` package updates when npm has a newer version (11375).
-  - `pi.exec` caps a command's output at 16 MiB and stops the command when it reaches the cap (11360).
+  - `pi.exec` keeps a maximum of 16 MiB of output from a command, and stops the command when the output reaches that limit (11360).
   - `pi-env` watches a directory again after the kernel drops the watch and the directory keeps its inode (11342).
-- [Prompt history](#prompt-history-pi-rust-extension) across sessions, with the Ctrl+R search and the `promptHistory` settings, is an addition; upstream pi keeps prompt history only for the running process.
-- `pi-env` looks for remote daemons in a `pi-env-daemons` folder next to the running program. Each release has a `pi-env-daemons-<tag>.tar.gz` with the daemons for Linux, Android (Termux), macOS, and Windows on x86-64 and arm64; extract it next to `pi`.
-- Notifications: in interactive mode, a run that takes 10 seconds or more ends with a terminal notification titled "pi" that says "Done" or names the error. pi sends OSC 777 in Ghostty, WezTerm, foot, and rxvt, OSC 99 in kitty, OSC 9 in iTerm2 and Windows Terminal, and BEL in tmux, screen, and other terminals. Fullscreen mode skips the notification while the terminal reports focus. Set `terminal.notifyOnFinish` to `"auto"` (the default), `"osc"`, `"bell"`, or `"off"`, and `terminal.notifyMinSeconds` to change the threshold. Upstream pi has this only as the example extension `notify.ts`.
-- `pi experimental` (`server`, `client`, `durable`, `vacation`) needs `PI_EXPERIMENTAL=1`, as upstream. Its `server` and `client` use Unix sockets, so on Windows they report that they need Unix; upstream has no Windows transport either.
+- [Prompt history](#prompt-history-pi-rust-extension) across sessions, with the Ctrl+R search and the `promptHistory` settings, is an addition. Upstream pi keeps prompt history only for the running process.
+- `pi-env` looks for remote daemons in a `pi-env-daemons` folder next to the running program. Each release has a `pi-env-daemons-<tag>.tar.gz` archive with the daemons for Linux, Android (Termux), macOS, and Windows on x86-64 and arm64. Extract this archive in the folder that contains `pi`.
+- Notifications: in interactive mode, when a run takes 10 seconds or more, pi sends a terminal notification at the end. Its title is "pi", and it says "Done" or gives the error. Upstream pi has this only as the example extension `notify.ts`.
+  - pi sends OSC 777 in Ghostty, WezTerm, foot, and rxvt, OSC 99 in kitty, and OSC 9 in iTerm2 and Windows Terminal. In other terminals, for example tmux and screen, it sends BEL.
+  - In fullscreen mode, pi does not send the notification while the terminal reports focus.
+  - Set `terminal.notifyOnFinish` to `"auto"` (the default), `"osc"`, `"bell"`, or `"off"`. Set `terminal.notifyMinSeconds` to change the time limit.
+- `pi experimental` and its commands `server`, `client`, `durable`, and `vacation` need `PI_EXPERIMENTAL=1`, as in upstream pi. `server` and `client` use Unix sockets, so on Windows they show a message that they need Unix. Upstream pi also has no Windows transport.
 
 ## Development
 
@@ -321,11 +407,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-Tests use the `faux` provider and local mock HTTP servers; they need no API keys or network access.
+The tests use the `faux` provider and local mock HTTP servers. They do not need API keys or network access.
 
 ## Releases
 
-Versions follow [Semantic Versioning](https://semver.org/) and are derived from [Conventional Commits](https://www.conventionalcommits.org/):
+Versions obey [Semantic Versioning](https://semver.org/). The commit messages decide the next version, as in [Conventional Commits](https://www.conventionalcommits.org/):
 
 | Commit | Release |
 | --- | --- |
@@ -334,7 +420,15 @@ Versions follow [Semantic Versioning](https://semver.org/) and are derived from 
 | `feat!:`, `fix!:`, or a `BREAKING CHANGE:` footer | major (minor before 1.0) |
 | `docs:`, `chore:`, `ci:`, `test:`, `refactor:`, `style:`, `build:` | none |
 
-After CI passes on `main`, the Release workflow runs `cargo xtask plan`. When a release is due it bumps the workspace version, prepends the `CHANGELOG.md` section, commits `chore(release): vX.Y.Z`, tags `vX.Y.Z`, builds every target, and publishes the GitHub release with checksums. Pushing a `vX.Y.Z` tag that matches `Cargo.toml` releases that version directly, and `vX.Y.Z-rc.1` tags publish pre-releases. Run the workflow manually with `dry_run` to build all targets without publishing.
+After continuous integration (CI) passes on `main`, the Release workflow runs `cargo xtask plan`. If a release is necessary, the workflow does these steps:
+
+1. It increases the workspace version.
+2. It adds the new section at the top of `CHANGELOG.md`.
+3. It commits `chore(release): vX.Y.Z` and adds the tag `vX.Y.Z`.
+4. It builds all targets.
+5. It publishes the GitHub release with checksums.
+
+If you push a `vX.Y.Z` tag that matches `Cargo.toml`, the workflow releases that version. A `vX.Y.Z-rc.1` tag publishes a pre-release. To build all targets without a release, run the workflow manually with `dry_run`. To release when the commits do not need a release, run the workflow manually. Set `bump` to `patch`, `minor`, or `major`, and turn off `dry_run`.
 
 ```sh
 cargo xtask plan                 # next version and release decision
@@ -344,4 +438,4 @@ cargo xtask notes 0.2.0          # print release notes
 
 ## License
 
-MIT. Based on [pi](https://github.com/earendil-works/pi) by Mario Zechner; see [LICENSE](LICENSE).
+MIT. pi-rust is based on [pi](https://github.com/earendil-works/pi) by Mario Zechner. See [LICENSE](LICENSE).

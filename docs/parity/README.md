@@ -11,7 +11,7 @@ pi-rust ports the TypeScript pi monorepo ([earendil-works/pi](https://github.com
 | Accepted differences | [`allowlist.json`](allowlist.json), each with a reason |
 | Open gaps | [`GAPS.md`](GAPS.md) |
 | Node API gaps in the extension runtime | `crates/pi-js/src/unsupported.rs` (`UNSUPPORTED_APIS`, `DIFFERENCES`) |
-| User-facing differences | "Differences from the TypeScript pi" in the [README](../../README.md) |
+| User-facing differences | "Differences from upstream pi" in the [README](../../README.md) |
 
 Compatibility rules: JSON field names, session files, settings keys, config paths, RPC and JSON event shapes, and the HTML export must match upstream byte for byte where upstream defines them.
 

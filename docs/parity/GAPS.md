@@ -60,7 +60,7 @@ Behavior that pi-rust adds on purpose. The parity review should not report these
 
 - Account model lists (README "Account model lists"): `openai-codex` from the Codex backend's `/codex/models`, `anthropic` from `/v1/models`, `github-copilot` from the Copilot `/models` endpoint, `openai` and `xai` from `/models`, and `google` from the Gemini API `/models`. Cursor and Grok Build have no public model list, so they are not narrowed.
 - Markdown export: `/export` and `pi --export` write Markdown when the output path ends in `.md` (README "Use").
-- The README section "Differences from the TypeScript pi" lists the other additions (slash commands, CLI commands and flags, settings) and the bugs pi-rust fixes that are still open upstream. `allowlist.json` holds the matching parity report entries.
+- The README section "Differences from upstream pi" lists the other additions (slash commands, CLI commands and flags, settings) and the bugs pi-rust fixes that are still open upstream. `allowlist.json` holds the matching parity report entries.
 
 ## Platform
 
