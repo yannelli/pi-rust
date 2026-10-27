@@ -5,9 +5,9 @@ use std::sync::LazyLock;
 use regex::{Captures, Regex};
 
 use super::constants::{
-    CP_DELETE, CP_DOWN, CP_END, CP_HOME, CP_INSERT, CP_LEFT, CP_PAGE_DOWN, CP_PAGE_UP, CP_RIGHT, CP_UP, LOCK_MASK,
-    SHIFTED_SYMBOL_KEYS, SYMBOL_KEYS, int32, is_symbol_code, logical_shifted_symbol_candidate,
-    normalize_kitty_functional_codepoint, normalize_shifted_letter_identity_codepoint,
+    CP_DELETE, CP_DOWN, CP_END, CP_F1, CP_HOME, CP_INSERT, CP_LEFT, CP_PAGE_DOWN, CP_PAGE_UP, CP_RIGHT, CP_UP,
+    LOCK_MASK, SHIFTED_SYMBOL_KEYS, SYMBOL_KEYS, int32, is_symbol_code, logical_shifted_symbol_candidate,
+    normalize_kitty_functional_codepoint, normalize_shifted_letter_identity_codepoint, tilde_function_key_codepoint,
 };
 
 /// Event type reported by the Kitty protocol with flag 2.
@@ -31,6 +31,9 @@ static KITTY_FUNCTIONAL: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\x1b\[([0-9]+)(?:;([0-9]+))?(?::([0-9]+))?~$").expect("valid regex"));
 static KITTY_HOME_END: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\x1b\[1;([0-9]+)(?::([0-9]+))?([HF])$").expect("valid regex"));
+/// F1, F2, and F4 as `CSI P`, `CSI Q`, and `CSI S`, or `CSI 1 ; mod[:event] P` with modifiers.
+static KITTY_FUNCTION_LETTER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\x1b\[(?:1;([0-9]+)(?::([0-9]+))?)?([PQS])$").expect("valid regex"));
 static MODIFY_OTHER_KEYS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\x1b\[27;([0-9]+);([0-9]+)~$").expect("valid regex"));
 
@@ -115,7 +118,7 @@ pub(crate) fn parse_kitty_sequence(data: &str) -> Option<ParsedKittySequence> {
             6 => Some(CP_PAGE_DOWN),
             7 => Some(CP_HOME),
             8 => Some(CP_END),
-            _ => None,
+            _ => tilde_function_key_codepoint(key_number),
         };
         if let Some(codepoint) = codepoint {
             return Some(simple(codepoint, modifier, event_type));
@@ -126,6 +129,17 @@ pub(crate) fn parse_kitty_sequence(data: &str) -> Option<ParsedKittySequence> {
         let modifier = parse_number(&c[1])? - 1;
         let event_type = parse_event_type(group(&c, 2));
         let codepoint = if &c[3] == "H" { CP_HOME } else { CP_END };
+        return Some(simple(codepoint, modifier, event_type));
+    }
+
+    if let Some(c) = KITTY_FUNCTION_LETTER.captures(data) {
+        let modifier = modifier_or_default(group(&c, 1))?;
+        let event_type = parse_event_type(group(&c, 2));
+        let codepoint = match &c[3] {
+            "P" => CP_F1,
+            "Q" => CP_F1 + 1,
+            _ => CP_F1 + 3,
+        };
         return Some(simple(codepoint, modifier, event_type));
     }
 
@@ -150,7 +164,7 @@ pub fn kitty_event_type(data: &str) -> Option<KeyEventType> {
 }
 
 const PASTE_START: &str = "\x1b[200~";
-const EVENT_FINALS: [char; 8] = ['u', '~', 'A', 'B', 'C', 'D', 'H', 'F'];
+const EVENT_FINALS: [char; 11] = ['u', '~', 'A', 'B', 'C', 'D', 'H', 'F', 'P', 'Q', 'S'];
 
 fn has_event_marker(data: &str, event: char) -> bool {
     data.match_indices(':').any(|(index, _)| {

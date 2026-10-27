@@ -2,6 +2,7 @@
 
 use std::collections::VecDeque;
 use std::rc::{Rc, Weak};
+use std::time::Instant;
 
 use regex::{NoExpand, Regex};
 
@@ -99,6 +100,8 @@ pub(crate) struct EditorCore {
     pub paste_counter: u32,
     pub paste_buffer: String,
     pub is_in_paste: bool,
+    /// When the unfinished bracketed paste last received input.
+    pub paste_input_at: Option<Instant>,
 
     pub history: VecDeque<String>,
     /// `None` when not browsing; 0 is the most recent entry.
@@ -154,6 +157,7 @@ impl EditorCore {
             paste_counter: 0,
             paste_buffer: String::new(),
             is_in_paste: false,
+            paste_input_at: None,
             history: VecDeque::new(),
             history_index: None,
             history_draft: None,

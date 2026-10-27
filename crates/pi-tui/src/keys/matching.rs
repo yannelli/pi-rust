@@ -3,7 +3,7 @@
 
 use super::constants::{
     ALT, CP_BACKSPACE, CP_DELETE, CP_DOWN, CP_END, CP_ENTER, CP_ESCAPE, CP_HOME, CP_INSERT, CP_KP_ENTER, CP_LEFT,
-    CP_PAGE_DOWN, CP_PAGE_UP, CP_RIGHT, CP_SPACE, CP_TAB, CP_UP, CTRL, SHIFT, is_symbol_key,
+    CP_PAGE_DOWN, CP_PAGE_UP, CP_RIGHT, CP_SPACE, CP_TAB, CP_UP, CTRL, SHIFT, function_key_codepoint, is_symbol_key,
     matches_legacy_modifier_sequence, matches_legacy_sequence,
 };
 use super::ids::parse_key_id;
@@ -50,6 +50,13 @@ fn matches_navigation(data: &str, name: &str, codepoint: i64, modifier: i64) -> 
         return matches_legacy_sequence(data, name) || matches_kitty_sequence(data, codepoint, 0);
     }
     matches_legacy_modifier_sequence(data, name, modifier) || matches_kitty_sequence(data, codepoint, modifier)
+}
+
+/// Function keys: the legacy forms without modifiers, then the Kitty and xterm forms, such as
+/// `CSI P` for F1, `CSI 1;5P` for Ctrl+F1, and `CSI 15;5~` for Ctrl+F5.
+fn matches_function_key(data: &str, key: &str, modifier: i64) -> bool {
+    (modifier == 0 && matches_legacy_sequence(data, key))
+        || function_key_codepoint(key).is_some_and(|codepoint| matches_kitty_sequence(data, codepoint, modifier))
 }
 
 fn matches_space(data: &str, modifier: i64, kitty: bool) -> bool {
@@ -222,7 +229,7 @@ pub fn matches_key_with_env(data: &str, key_id: &str, env: &dyn EnvLookup) -> bo
         "left" => matches_horizontal_arrow(data, modifier, kitty, true),
         "right" => matches_horizontal_arrow(data, modifier, kitty, false),
         "f1" | "f2" | "f3" | "f4" | "f5" | "f6" | "f7" | "f8" | "f9" | "f10" | "f11" | "f12" => {
-            modifier == 0 && matches_legacy_sequence(data, key)
+            matches_function_key(data, key, modifier)
         }
         _ => matches_printable(data, key, modifier, kitty),
     }

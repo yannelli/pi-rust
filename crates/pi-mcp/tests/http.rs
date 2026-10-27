@@ -13,6 +13,7 @@ use pi_mcp::{
     StreamableHttpOptions, StreamableHttpTransport, UnauthorizedContext,
 };
 use serde_json::{Value, json};
+use tokio::sync::mpsc;
 use url::Url;
 
 type Requests = Arc<Mutex<Vec<Request>>>;
@@ -286,6 +287,77 @@ async fn includes_the_response_body_in_http_errors() {
     let (url, _) = start(|_, _| async move { Response::text(400, "Invalid Accept header") }).await;
     let error = client().connect(transport(&url, |_| {})).await.unwrap_err();
     assert_eq!(error.to_string(), "MCP HTTP request failed with status 400: Invalid Accept header");
+}
+
+/// A tools/list reply with a long description.
+fn long_tools_list(request: &Request) -> String {
+    let tool = json!({ "name": "echo", "description": "x".repeat(2048), "inputSchema": { "type": "object" } });
+    json!({ "jsonrpc": "2.0", "id": request.json()["id"], "result": { "tools": [tool] } }).to_string()
+}
+
+/// JSON sent in chunks without a Content-Length header.
+fn chunked_json(body: &str) -> Response {
+    let (sender, chunks) = mpsc::unbounded_channel();
+    for chunk in body.as_bytes().chunks(256) {
+        sender.send(String::from_utf8(chunk.to_vec()).unwrap()).unwrap();
+    }
+    Response::Stream { status: 200, headers: vec![("content-type".into(), "application/json".into())], chunks }
+}
+
+async fn list_tools_with_limit(url: &Url, max_message_bytes: usize) -> Result<usize, McpError> {
+    let client = client();
+    client
+        .connect(transport(url, |options| {
+            options.open_get_stream = false;
+            options.max_message_bytes = max_message_bytes;
+        }))
+        .await
+        .unwrap();
+    let result = client.list_tools(RequestOptions::default()).await.map(|tools| tools.len());
+    client.close().await;
+    result
+}
+
+#[tokio::test]
+async fn enforces_max_message_bytes_on_json_responses() {
+    let size = Arc::new(AtomicUsize::new(0));
+    let seen = size.clone();
+    let (url, _) = start(move |request, _| {
+        let seen = seen.clone();
+        async move {
+            if request.json()["method"] != "tools/list" {
+                return protocol(&request);
+            }
+            let reply = long_tools_list(&request);
+            seen.store(reply.len(), Ordering::SeqCst);
+            chunked_json(&reply)
+        }
+    })
+    .await;
+    assert_eq!(list_tools_with_limit(&url, 1 << 20).await.unwrap(), 1);
+    let bytes = size.load(Ordering::SeqCst);
+    assert_eq!(list_tools_with_limit(&url, bytes).await.unwrap(), 1);
+    let error = list_tools_with_limit(&url, bytes - 1).await.unwrap_err();
+    assert_eq!(error.to_string(), format!("MCP JSON response exceeds {} bytes", bytes - 1));
+}
+
+#[tokio::test]
+async fn reads_only_the_start_of_an_endless_error_body() {
+    let (url, _) = start(|_, _| async move {
+        let (sender, chunks) = mpsc::unbounded_channel();
+        sender.send("e".repeat(64 * 1024)).unwrap();
+        // The body never ends while the sender is alive.
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(600)).await;
+            drop(sender);
+        });
+        Response::Stream { status: 400, headers: Vec::new(), chunks }
+    })
+    .await;
+    let client = client();
+    let connect = client.connect(transport(&url, |_| {}));
+    let error = tokio::time::timeout(Duration::from_secs(5), connect).await.expect("no wait for the body end");
+    assert_eq!(error.unwrap_err().body().map(str::len), Some(8 * 1024));
 }
 
 struct ScriptedAuth {

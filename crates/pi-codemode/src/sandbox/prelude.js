@@ -438,7 +438,7 @@
 		run(fn) {
 			let promise;
 			try {
-				promise = fn(toolsProxy, console);
+				promise = fn();
 			} catch (error) {
 				done(false, describeError(error));
 				return;
