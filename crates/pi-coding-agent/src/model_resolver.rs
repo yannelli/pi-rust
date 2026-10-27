@@ -200,13 +200,24 @@ fn split_thinking_suffix(text: &str) -> Option<(&str, ThinkingLevel)> {
 }
 
 fn split_provider_prefix<'a>(text: &'a str, models: &[Model]) -> Option<(String, &'a str)> {
-    let (prefix, model_text) = text.split_once('/')?;
-    let (prefix, model_text) = (prefix.trim().to_lowercase(), model_text.trim());
-    if prefix.is_empty() || model_text.is_empty() {
-        return None;
+    // Provider ids may contain "/" themselves (URL-derived ids), so match known ids, longest first.
+    let mut best: Option<(String, &'a str)> = None;
+    for model in models {
+        let provider = &model.provider;
+        let prefix = provider.trim().to_lowercase();
+        if prefix.is_empty() || best.as_ref().is_some_and(|(best, _)| best.len() >= provider.len()) {
+            continue;
+        }
+        let Some((slash, _)) = text.match_indices('/').find(|(index, _)| *index >= prefix.len()) else { continue };
+        if text[..slash].trim().to_lowercase() != prefix {
+            continue;
+        }
+        let model_text = text[slash + 1..].trim();
+        if !model_text.is_empty() {
+            best = Some((provider.clone(), model_text));
+        }
     }
-    let provider = models.iter().find(|model| model.provider.to_lowercase() == prefix)?;
-    Some((provider.provider.clone(), model_text))
+    best
 }
 
 /// Candidates are collected before a provider is chosen, so catalog order never decides the

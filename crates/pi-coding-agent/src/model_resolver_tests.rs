@@ -71,6 +71,8 @@ fn reference_catalog() -> Vec<Model> {
         ("gw-b", "claude-opus-4-8"),
         ("gw-b", "gw-b/free"),
         ("gw-b", "zz:free"),
+        // URL-derived provider id containing "/" (upstream #11394).
+        ("llama=http://host:10800", "unsloth/qwen-gguf:BF16"),
     ]
     .into_iter()
     .map(|(provider, id)| model(provider, id, id, true))
@@ -116,6 +118,11 @@ fn model_references_match_upstream_cases() {
         case("sonnet:high", "anthropic/claude-sonnet-4-5 :high"),
         case("qwen/qwen3-coder:exacto", "openrouter/qwen/qwen3-coder:exacto"),
         case("openrouter/qwen/qwen3-coder:exacto:high", "openrouter/qwen/qwen3-coder:exacto :high"),
+        case("llama=http://host:10800/unsloth/qwen-gguf:BF16", "llama=http://host:10800/unsloth/qwen-gguf:BF16"),
+        case(
+            "llama=http://host:10800/unsloth/qwen-gguf:BF16:high",
+            "llama=http://host:10800/unsloth/qwen-gguf:BF16 :high",
+        ),
         case("openai/gpt-4o:extended", "openrouter/openai/gpt-4o:extended"),
         case("openrouter/qwen", "openrouter/qwen/qwen3-coder:exacto"),
         case("gpt-4o:random", "not-found"),
