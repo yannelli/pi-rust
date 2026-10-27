@@ -362,8 +362,9 @@ fn run(setup: WorkerSetup) -> Result<(), String> {
         let _ = to_host.send(WorkerMessage::Started(fingerprint(memory_limit)));
     }
 
-    // The prefix shares the first line with the script so reported line numbers match it.
-    let wrapped = format!("(async (tools, console) => {{{code}\n}})");
+    // The prefix shares the first line with the script so reported line numbers match it. `tools`
+    // and `console` are globals, not parameters, so a script may declare its own.
+    let wrapped = format!("(async () => {{{code}\n}})");
     let started = context.with(|ctx| -> Result<bool, String> {
         match ctx.eval_with_options::<Value, _>(wrapped, eval_options("codemode.js")).catch(&ctx) {
             Ok(script) => {

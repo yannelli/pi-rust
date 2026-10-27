@@ -140,6 +140,20 @@ pub(crate) fn needs_authorization(status: u16, headers: &HeaderMap) -> bool {
     })
 }
 
+/// Reads the body in chunks and stops after `limit` bytes, so an oversized body is never buffered
+/// whole. Returns the bytes read and whether the body was longer than `limit`.
+async fn read_body_limited(response: &mut Response, limit: usize) -> Result<(Vec<u8>, bool), McpError> {
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(McpError::from_reqwest)? {
+        if chunk.len() > limit - body.len() {
+            body.extend_from_slice(&chunk[..limit - body.len()]);
+            return Ok((body, true));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok((body, false))
+}
+
 fn describe_http_failure(status: u16, body: &str) -> String {
     let text = body.trim();
     let snippet = if text.chars().count() > ERROR_MESSAGE_BODY_CHARS {
@@ -238,7 +252,7 @@ impl Inner {
         unreachable!("the loop returns")
     }
 
-    async fn check_response(&self, response: Response) -> Result<Response, McpError> {
+    async fn check_response(&self, mut response: Response) -> Result<Response, McpError> {
         if response.status().is_success() {
             return Ok(response);
         }
@@ -248,7 +262,10 @@ impl Inner {
             .get(reqwest::header::WWW_AUTHENTICATE)
             .and_then(|value| value.to_str().ok())
             .map(str::to_string);
-        let mut body = response.text().await.unwrap_or_default();
+        // Spare bytes finish a character that the read limit cuts, so the truncation below keeps
+        // whole characters.
+        let (bytes, _) = read_body_limited(&mut response, MAX_ERROR_BODY_BYTES + 3).await.unwrap_or_default();
+        let mut body = String::from_utf8_lossy(&bytes).into_owned();
         if body.len() > MAX_ERROR_BODY_BYTES {
             let mut end = MAX_ERROR_BODY_BYTES;
             while !body.is_char_boundary(end) {
@@ -284,7 +301,7 @@ impl Inner {
             ("content-type", "application/json".to_string()),
         ];
         let response = self.authorized_fetch(Method::POST, &headers, Some(&message.to_json())).await?;
-        let response = self.check_response(response).await?;
+        let mut response = self.check_response(response).await?;
         self.capture_session(&response);
         let JsonRpcMessage::Request { id, method, .. } = message else {
             // Notifications and responses are acknowledged with 202 and carry no reply.
@@ -301,7 +318,13 @@ impl Inner {
         }
         match content_type(&response).as_deref() {
             Some("application/json") => {
-                let body: Value = response.json().await.map_err(McpError::from_reqwest)?;
+                let max = self.options.max_message_bytes;
+                let (bytes, exceeded) = read_body_limited(&mut response, max).await?;
+                if exceeded {
+                    return Err(McpError::other(format!("MCP JSON response exceeds {max} bytes")));
+                }
+                let body: Value = serde_json::from_slice(&bytes)
+                    .map_err(|error| McpError::Network(format!("error decoding response body: {error}")))?;
                 let items = match body {
                     Value::Array(items) => items,
                     body => vec![body],

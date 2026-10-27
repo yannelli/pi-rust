@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-use pi_tui::stdin_buffer::{StdinBuffer, StdinBufferEvent, StdinBufferOptions};
+use pi_tui::stdin_buffer::{PASTE_IDLE_TIMEOUT, PASTE_MAX_BYTES, StdinBuffer, StdinBufferEvent, StdinBufferOptions};
 
 struct Harness {
     buffer: StdinBuffer,
@@ -220,6 +220,60 @@ fn handles_paste_with_unicode() {
     h.process("\x1b[200~Hello \u{4e16}\u{754c} \u{1f389}\x1b[201~");
     assert_eq!(h.pastes, ["Hello \u{4e16}\u{754c} \u{1f389}"]);
     assert!(h.data.is_empty());
+}
+
+fn idle_timeout_ms() -> u64 {
+    PASTE_IDLE_TIMEOUT.as_millis() as u64
+}
+
+#[test]
+fn ends_a_paste_without_end_marker_after_the_idle_timeout() {
+    // Upstream issue 11383: a lost end marker must not swallow later keys such as Ctrl+C.
+    let mut h = Harness::new();
+    h.process("\x1b[200~partial");
+    assert_eq!(h.buffer.deadline(), Some(h.now + PASTE_IDLE_TIMEOUT));
+    h.wait(idle_timeout_ms() - 1);
+    assert!(h.pastes.is_empty());
+    h.wait(1);
+    assert_eq!(h.pastes, ["partial"]);
+    assert_eq!(h.buffer.deadline(), None);
+    h.process("\x03");
+    assert_eq!(h.data, ["\x03"]);
+}
+
+#[test]
+fn paste_input_restarts_the_idle_timeout() {
+    let mut h = Harness::new();
+    h.process("\x1b[200~a");
+    h.wait(idle_timeout_ms() - 1);
+    h.process("b");
+    h.wait(idle_timeout_ms() - 1);
+    assert!(h.pastes.is_empty());
+    h.process("c\x1b[201~");
+    assert_eq!(h.pastes, ["abc"]);
+    assert_eq!(h.buffer.deadline(), None);
+}
+
+#[test]
+fn input_after_the_idle_timeout_ends_the_paste_first() {
+    let mut h = Harness::new();
+    h.process("\x1b[200~lost");
+    h.now += PASTE_IDLE_TIMEOUT;
+    h.process("\x03");
+    assert_eq!(h.pastes, ["lost"]);
+    assert_eq!(h.data, ["\x03"]);
+}
+
+#[test]
+fn ends_a_paste_without_end_marker_at_the_size_cap() {
+    let mut h = Harness::new();
+    h.process("\x1b[200~");
+    h.process(&"x".repeat(PASTE_MAX_BYTES));
+    assert!(h.pastes.is_empty());
+    h.process("y");
+    assert_eq!(h.pastes.iter().map(String::len).collect::<Vec<_>>(), [PASTE_MAX_BYTES + 1]);
+    h.process("\x03");
+    assert_eq!(h.data, ["\x03"]);
 }
 
 #[test]
