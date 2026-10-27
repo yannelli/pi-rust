@@ -287,13 +287,14 @@ async fn counts_cached_characters_up_to_the_first_difference_in_the_joined_promp
     let user_at = |text: &str| Message::User(UserMessage { content: UserContent::Text(text.into()), timestamp: 1 });
     let context = |messages: Vec<Message>| Context { messages, ..Context::default() };
     // Prompt texts: "user:hello world" (16 characters), then 16 + 2 + "user:next" (9) = 27.
-    complete(&faux, &context(vec![user_at("hello world")]), session("session-1")).await;
-    let extended = complete(&faux, &context(vec![user_at("hello world"), user_at("next")]), session("session-1")).await;
+    let first = complete(&faux, &context(vec![user_at("hello world")]), session("session-1")).await;
     let usage = |message: &AssistantMessage| (message.usage.input, message.usage.cache_read, message.usage.cache_write);
-    assert_eq!(usage(&extended), (3, 4, 3));
+    assert_eq!(usage(&first), (0, 0, 4));
+    let extended = complete(&faux, &context(vec![user_at("hello world"), user_at("next")]), session("session-1")).await;
+    assert_eq!(usage(&extended), (0, 4, 3));
     // The first message now differs after "user:hello w" (12 characters): "user:hello wide" + 2 + 9 = 26.
     let edited = complete(&faux, &context(vec![user_at("hello wide"), user_at("next")]), session("session-1")).await;
-    assert_eq!(usage(&edited), (4, 3, 4));
+    assert_eq!(usage(&edited), (0, 3, 4));
 }
 
 #[tokio::test]
