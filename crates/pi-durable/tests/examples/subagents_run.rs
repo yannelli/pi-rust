@@ -39,7 +39,7 @@ async fn follow(harness: &Harness, id: ConversationId, lines: &Lines) -> pi_dura
     let stream = watch_events(harness, id, &ctx()).await.unwrap();
     let sink = lines.clone();
     stream
-        .start(move |events, _| {
+        .start(move |pi_chord::NativeWatchChange { value: events }, _| {
             for event in events.iter().map(Json::to_serde).filter(|event| event["type"] == "message_end") {
                 if let Ok(message) = serde_json::from_value::<Message>(event["entry"]["model"][0].clone()) {
                     sink.lock().unwrap().extend(line(&message));

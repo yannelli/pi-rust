@@ -1,4 +1,4 @@
-//! Session-to-Chord bridge for document states and the observer contract shared with watches.
+//! Session-to-Chord bridge for document states (a pi-rust extra) and the observer contract shared with watches.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, Weak};
@@ -8,21 +8,24 @@ use pi_chord::state::{
     ReplicatedStateSource, ReplicatedStateSourceAttachment, ReplicatedStateSourceFrame, ReplicatedStateSourceSnapshot,
     SourceFrameListener,
 };
-use pi_chord::{ChordError, ChordResult, Context, Json};
+use pi_chord::{ChordError, ChordResult, Context, Json, WatchChange};
 
 use super::line::lock;
 use crate::errors::DurableError;
 
-/// Canonical terminal update for a retired document incarnation.
+/// The frame a document state publishes for a retirement: `null`.
 pub fn retirement_operations() -> Vec<Op> {
     vec![Op::Replace(Json::Null)]
 }
 
-/// A committed observer bound to one incarnation or view: a JSON `null` value retires it.
+/// The Session's own observer of one document address or view: a watch, a document state, or a host observer behind
+/// its guard. Its source ends it explicitly.
 pub trait CommittedObserver: Send + Sync {
-    fn advance(&self, value: Json, ops: Vec<Op>, context: Context);
-    /// End with the Session: closed, or failed with its first error.
-    fn close_session(&self, failure: Option<DurableError>);
+    fn advance(&self, change: WatchChange, context: Context);
+    /// The Session closed, or failed with its first error.
+    fn end(&self, failure: Option<DurableError>);
+    /// The owner of the scope it follows ended (a task document's task): no later commit changes the address.
+    fn owner_ended(&self);
     /// Whether frames carry the commit's cancellation; a document state's frames carry none.
     fn keeps_cancellation(&self) -> bool;
 }
@@ -67,11 +70,11 @@ struct SourceState {
     attachments: Vec<Arc<SourceAttachment>>,
     value: Option<Json>,
     cursor: i64,
-    retired: bool,
     closed: bool,
 }
 
-/// Session-to-Chord bridge owned one-to-one by one attached state. A `null` value retires it.
+/// Session-to-Chord bridge owned one-to-one by one attached state. A retirement publishes `null`, and a document created
+/// at the address later its value.
 pub struct CommittedStateSource {
     state: Mutex<SourceState>,
     release: Arc<Release>,
@@ -81,13 +84,7 @@ pub struct CommittedStateSource {
 impl CommittedStateSource {
     pub fn new(value: Json, release: Arc<Release>) -> Arc<Self> {
         Arc::new_cyclic(|weak| Self {
-            state: Mutex::new(SourceState {
-                attachments: Vec::new(),
-                value: Some(value),
-                cursor: 0,
-                retired: false,
-                closed: false,
-            }),
+            state: Mutex::new(SourceState { attachments: Vec::new(), value: Some(value), cursor: 0, closed: false }),
             release,
             weak: weak.clone(),
         })
@@ -118,14 +115,17 @@ impl CommittedStateSource {
 }
 
 impl CommittedObserver for CommittedStateSource {
-    fn advance(&self, value: Json, ops: Vec<Op>, context: Context) {
+    fn advance(&self, change: WatchChange, context: Context) {
+        let (value, ops) = match change.retired && change.ops.is_empty() {
+            true => (Json::Null, retirement_operations()),
+            false => (change.value, change.ops),
+        };
         let (frame, attachments) = {
             let mut state = lock(&self.state);
-            if state.closed || state.retired {
+            if state.closed {
                 return;
             }
             state.cursor += 1;
-            state.retired = value.is_null();
             state.value = Some(value.clone());
             let frame = ReplicatedStateSourceFrame { cursor: state.cursor, value, ops, context };
             (frame, state.attachments.clone())
@@ -135,8 +135,12 @@ impl CommittedObserver for CommittedStateSource {
         }
     }
 
+    fn owner_ended(&self) {
+        self.end(None);
+    }
+
     /// Stop publishing; the attached states keep their last value.
-    fn close_session(&self, _failure: Option<DurableError>) {
+    fn end(&self, _failure: Option<DurableError>) {
         let attachments = {
             let state = lock(&self.state);
             if state.closed {

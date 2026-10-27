@@ -15,6 +15,7 @@ use crate::request::{apply_payload_hook, build_headers};
 use crate::retry::ProviderRequestError;
 use crate::simple_options::provider_env_value;
 use crate::stream::{AssistantMessageEvent, AssistantMessageEventStream, EventSender, event_channel};
+use crate::streaming_json::ToolCallArgumentsStream;
 use crate::transcript::normalize_context;
 use crate::types::{
     AssistantMessage, ContentBlock, Context, Message, Model, StopReason, ThinkingLevel, ToolCall, Usage, now_ms,
@@ -202,12 +203,13 @@ fn error_event(model: &Model, message: String, aborted: bool, diagnostics: Vec<V
 /// Rebuilds the partial message from wire events.
 struct Converter {
     partial: AssistantMessage,
-    tool_json: std::collections::HashMap<usize, String>,
+    /// Argument streams of open tool calls by content index, kept off the content blocks.
+    tool_arguments: std::collections::HashMap<usize, ToolCallArgumentsStream>,
 }
 
 impl Converter {
     fn new(model: &Model) -> Self {
-        Self { partial: AssistantMessage::empty(model), tool_json: Default::default() }
+        Self { partial: AssistantMessage::empty(model), tool_arguments: Default::default() }
     }
 
     /// The block at `index`, padding with empty text blocks for indices the wire skipped.
@@ -273,21 +275,17 @@ impl Converter {
             "toolcall_start" => {
                 let call = ToolCall { id: text("id"), name: text("toolName"), ..ToolCall::default() };
                 *self.slot(content_index) = ContentBlock::ToolCall(call);
-                self.tool_json.insert(content_index, String::new());
+                self.tool_arguments.insert(content_index, ToolCallArgumentsStream::new());
             }
             "toolcall_delta" => {
-                let json = self.tool_json.entry(content_index).or_default();
-                json.push_str(&text("delta"));
-                let parsed = crate::json::parse_streaming_json(json);
+                let arguments = self.tool_arguments.entry(content_index).or_default();
+                let arguments = arguments.append(event["delta"].as_str().unwrap_or_default()).clone();
                 if let ContentBlock::ToolCall(call) = self.slot(content_index) {
-                    call.arguments = match parsed {
-                        Some(Value::Object(arguments)) => arguments,
-                        _ => Default::default(),
-                    };
+                    call.arguments = arguments;
                 }
             }
             "toolcall_end" => {
-                self.tool_json.remove(&content_index);
+                self.tool_arguments.remove(&content_index);
                 let tool_call: ToolCall = serde_json::from_value(event["toolCall"].clone()).unwrap_or_default();
                 *self.slot(content_index) = ContentBlock::ToolCall(tool_call.clone());
                 let partial = self.partial.clone();

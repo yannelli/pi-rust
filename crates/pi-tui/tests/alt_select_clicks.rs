@@ -36,11 +36,14 @@ fn does_not_append_whitespace_to_double_click_word_highlighting() {
 }
 
 #[test]
-fn coalesces_slash_hyphen_and_tilde_separated_segments_for_double_click_word_selection() {
+fn coalesces_segments_joined_by_iterm2_word_characters_for_double_click_word_selection() {
     for (line, needle) in [
         ("extensions/starline/fixed-editor/compositor.ts", "starline"),
         ("earendil-works/pi-tui", "works"),
         ("~/Documents/pi/extension/pi-temp-session", "Documents"),
+        ("~/.pi/agent/settings.json", "agent"),
+        ("~\\Documents\\pi", "Documents"),
+        ("foo+bar", "bar"),
     ] {
         let copied = Rc::new(RefCell::new(Vec::<String>::new()));
         let options = TuiAltScreenOptions { copy_selection: Some(recording_copy(&copied)), ..Default::default() };

@@ -14,7 +14,7 @@ use super::{MADE_NESTED_CALLS, NESTED_CALL_DOC, ToolHookCall, ToolTaskInput, Too
 use crate::documents::encode;
 use crate::errors::{DurableError, DurableResult};
 use crate::harness::live::{
-    LIVE_DOC, NestedToolSlot, SlotProgress, SlotRef, SlotStatus, remove_nested_slots, tool_slot,
+    LIVE_DOC, NestedToolSlot, PROGRESS_COMMIT, SlotProgress, SlotRef, SlotStatus, remove_nested_slots, tool_slot,
 };
 use crate::harness::progress::{Progress, ProgressClock};
 use crate::harness::scheduler::TaskRuntime;
@@ -255,7 +255,7 @@ pub(crate) fn publish_progress(runtime: &TaskRuntime, state: Arc<CallState>, ena
                         }
                     })
                 };
-                runtime.commit_map(change, &runtime.invocation.context()).await?;
+                runtime.commit_map_with_options(change, &runtime.invocation.context(), PROGRESS_COMMIT).await?;
                 *lock(&written) = Written { text: snapshot.text, details, diagnostics: count };
                 Ok(bytes as u64)
             })

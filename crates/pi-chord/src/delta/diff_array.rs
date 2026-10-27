@@ -254,13 +254,23 @@ impl Regions<'_> {
         }
         let (b, a) = ((bs, be), (as_, ae));
         if before_count == after_count {
+            // An item `append_text()` appended inside was changed in place: it stays at its index.
+            let appended = |index: usize| appended_below(out, self.path, index);
             let positional: Vec<Match> = (0..before_count)
-                .filter(|offset| same_value(&before[bs + offset], &after[as_ + offset]))
+                .filter(|offset| same_value(&before[bs + offset], &after[as_ + offset]) || appended(as_ + offset))
                 .map(|offset| (bs + offset, as_ + offset))
                 .collect();
             if !positional.is_empty() {
                 return self.process(out, b, a, output, &positional);
             }
+        }
+        // Items `append_text()` appended inside, when items were also added or removed after them.
+        let appended: Vec<Match> = (0..before_count.min(after_count))
+            .filter(|offset| appended_below(out, self.path, as_ + offset))
+            .map(|offset| (bs + offset, as_ + offset))
+            .collect();
+        if !appended.is_empty() && before_count != after_count {
+            return self.process(out, b, a, output, &appended);
         }
         if let Some(subsequence) = identity_subsequence(before, b, after, a).filter(|matches| !matches.is_empty()) {
             return self.process(out, b, a, output, &subsequence);
@@ -281,6 +291,12 @@ impl Regions<'_> {
         }
         self.splice(out, output, before_count, a);
     }
+}
+
+/// Whether `append_text()` appended to a string inside the item at `index` of the array at `path`.
+fn appended_below(out: &Emitter, path: &[Seg], index: usize) -> bool {
+    let item = Seg::Index(index as u64);
+    out.appends.keys().any(|key| key.len() > path.len() + 1 && key.starts_with(path) && key[path.len()] == item)
 }
 
 pub(crate) fn diff_array(before: &[Json], after: &[Json], path: &[Seg], out: &mut Emitter) {

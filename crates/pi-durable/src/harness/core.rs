@@ -82,6 +82,12 @@ pub struct HarnessOptions {
     /// failed Session (`SessionFailed`, often a platform reset) from a faulted task (`TaskFaulted`) or a parked one
     /// (`TaskParked`).
     pub on_report: Option<ReportFn>,
+    /// Open for reading only, as a viewer of a session that another process drives, for example a synced copy on a
+    /// device that only shows it. Open recovers nothing: a `running` task stays as committed. Every commit with writes
+    /// rejects with `ReadOnlySession` before it reaches Storage, and so does `resume()` and every call that enables
+    /// scheduling; the Harness stays usable for reads and watches. `wake()` is always inactive, and `on_wake` is never
+    /// called. Reopen without it to write.
+    pub read_only: bool,
 }
 
 impl HarnessOptions {
@@ -98,6 +104,7 @@ impl HarnessOptions {
             set_timer: None,
             on_wake: None,
             on_report: None,
+            read_only: false,
         }
     }
 
@@ -176,6 +183,9 @@ pub(crate) struct HarnessCore {
     pub on_wake: Option<WakeFn>,
     pub on_report: Option<ReportFn>,
     pub telemetry: Arc<DurableTelemetry>,
+    /// `HarnessOptions::read_only`: open loads live tasks as committed, `running` ones included, and the scheduler
+    /// never commits, runs anything, or asks for a wakeup.
+    pub read_only: bool,
 }
 
 impl HarnessCore {

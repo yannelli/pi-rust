@@ -106,16 +106,17 @@ async fn unmounts_a_retired_document_and_mounts_its_recreation_whole() {
 }
 
 #[tokio::test]
-async fn replaces_undelivered_frames_with_the_newest_view_after_100_pending_frames() {
+async fn folds_undelivered_commits_into_one_call_whose_ops_reach_the_newest_view() {
     let (harness, root) = open().await;
     let watch = root.watch(&context()).await.unwrap();
+    let initial = watch.value();
     for _ in 0..101 {
         note(&root, "note", None).await;
     }
     let frames: Frames = Arc::default();
     let sink = frames.clone();
     watch
-        .start(move |value, ops, _| {
+        .start(move |pi_chord::WatchChange { value, ops, .. }, _| {
             sink.lock().unwrap().push((value, ops));
             async { Ok(()) }
         })
@@ -123,7 +124,8 @@ async fn replaces_undelivered_frames_with_the_newest_view_after_100_pending_fram
     drained().await;
     let frames = frames.lock().unwrap().clone();
     assert_eq!(frames.len(), 1);
-    assert_eq!(ops_json(&frames[0].1), [json!(["r", frames[0].0.to_serde()])]);
+    assert!(!frames[0].1[0].is_replace());
+    assert_eq!(pi_chord::delta::apply_immutable(Some(&initial), &frames[0].1).unwrap(), frames[0].0);
     assert_eq!(kinds(&frames[0].0).len(), 101);
     watch.stop().await;
     harness.close(&context()).await.unwrap();
@@ -203,7 +205,9 @@ async fn shares_one_mount_between_concurrent_observers_and_isolates_a_failing_li
     let shared = root.view_state(&context()).await.unwrap();
     assert!(failing.value().same_ref(&shared.value()));
     shared.dispose().unwrap();
-    failing.start(|_, _, _| async { Err(pi_durable::DurableError::error("listener failed")) }).unwrap();
+    failing
+        .start(|pi_chord::WatchChange { .. }, _| async { Err(pi_durable::DurableError::error("listener failed")) })
+        .unwrap();
     note(&root, "one", None).await;
     note(&root, "two", None).await;
     drained().await;

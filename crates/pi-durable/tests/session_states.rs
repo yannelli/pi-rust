@@ -139,11 +139,12 @@ async fn captures_a_late_baseline_without_redelivering_an_already_covered_commit
     state.dispose().unwrap();
 }
 
+/// A state follows its address, as a watch does: a retirement publishes `null`, and a later incarnation its value.
 #[tokio::test]
-async fn publishes_null_retirement_and_never_follows_a_replacement_incarnation() {
+async fn publishes_null_retirement_then_follows_a_replacement_incarnation() {
     let test = create_state().await;
     let old = state_of(&test.session).await;
-    let retirement = operations(&old);
+    let frames = operations(&old);
     test.session
         .commit(
             |tx| async move {
@@ -155,16 +156,13 @@ async fn publishes_null_retirement_and_never_follows_a_replacement_incarnation()
         .await
         .unwrap();
     flush().await;
-    assert!(old.value().is_null());
-    assert_eq!(retirement.lock().unwrap().last().unwrap(), &vec![Op::Replace(Json::Null)]);
-    let replacement = state_of(&test.session).await;
-    assert_eq!(replacement.value()["value"], Json::from(10));
+    let replacement = test.session.snapshot(&STATE_DOC, (), &context()).await.unwrap().unwrap();
+    assert_eq!(*frames.lock().unwrap(), [vec![Op::Replace(Json::Null)], vec![Op::Replace(replacement)]]);
+    assert_eq!(old.value()["value"], Json::from(10));
     set_value(&test.session, 11).await;
     flush().await;
-    assert!(old.value().is_null());
-    assert_eq!(replacement.value()["value"], Json::from(11));
+    assert_eq!(old.value()["value"], Json::from(11));
     old.dispose().unwrap();
-    replacement.dispose().unwrap();
 }
 
 #[tokio::test]

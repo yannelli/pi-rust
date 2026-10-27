@@ -153,7 +153,7 @@ async fn ex05_watches_delivers_committed_values_after_the_baseline() {
     let (sender, delivered) = tokio::sync::oneshot::channel();
     let sender = Mutex::new(Some(sender));
     watch
-        .start(move |value, _, _| {
+        .start(move |pi_chord::WatchChange { value, .. }, _| {
             if let Some(sender) = sender.lock().unwrap().take() {
                 let _ = sender.send(notes(Some(value)));
             }

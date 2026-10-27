@@ -17,7 +17,7 @@ pub use list_files::*;
 pub use watch::*;
 
 use crate::env::{
-    ExecutionError, FileWatcher, OutputStream, SharedEnv, ShellCommand, ShellExecOptions, ShellExecResult, WatchChange,
+    ExecutionError, FileChange, FileWatcher, OutputStream, SharedEnv, ShellCommand, ShellExecOptions, ShellExecResult,
     WatchTarget,
 };
 
@@ -138,20 +138,20 @@ pub(crate) async fn exec_collect(env: &SharedEnv, command: ShellCommand, cwd: Op
 }
 
 /// Whether a change reports `path`: an overflow, or a reported path at or above it.
-fn covers(change: &WatchChange, path: &str) -> bool {
+fn covers(change: &FileChange, path: &str) -> bool {
     match change {
-        WatchChange::Overflow => true,
-        WatchChange::Paths(paths) => paths.iter().any(|reported| {
+        FileChange::Overflow => true,
+        FileChange::Paths(paths) => paths.iter().any(|reported| {
             path == reported || path.starts_with(&format!("{reported}/")) || path.starts_with(&format!("{reported}\\"))
         }),
-        WatchChange::Error(_) => false,
+        FileChange::Error(_) => false,
     }
 }
 
 /// A watch whose changes are recorded, with a helper that waits for a change reporting a path.
 pub(crate) struct Watching {
     env: SharedEnv,
-    pub changes: Arc<Mutex<Vec<WatchChange>>>,
+    pub changes: Arc<Mutex<Vec<FileChange>>>,
     watcher: Box<dyn FileWatcher>,
 }
 
@@ -169,7 +169,7 @@ impl Watching {
         self.env.absolute_path(path, &context()).await.expect("absolute path")
     }
 
-    pub fn recorded(&self) -> Vec<WatchChange> {
+    pub fn recorded(&self) -> Vec<FileChange> {
         self.changes.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
     }
 

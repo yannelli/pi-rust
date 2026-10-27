@@ -6,12 +6,12 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use futures::StreamExt;
-use pi_ai::json::parse_streaming_json;
 use pi_ai::stream::EventSender;
 use pi_ai::transcript::normalize_context;
 use pi_ai::{
     AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, CacheRetention, ContentBlock, Context, Model,
-    StopReason, StreamOptions, ThinkingBudgets, ThinkingLevel, ToolCall, Transport, Usage, event_channel,
+    StopReason, StreamOptions, ThinkingBudgets, ThinkingLevel, ToolCall, ToolCallArgumentsStream, Transport, Usage,
+    event_channel,
 };
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -126,8 +126,8 @@ pub fn proxy_stream_fn(proxy_url: impl Into<String>, auth_token: Arc<dyn Fn() ->
 /// Rebuilds the partial message from proxy events.
 struct PartialMessage {
     message: AssistantMessage,
-    /// Raw argument JSON of tool calls still streaming, by content index.
-    tool_json: HashMap<usize, String>,
+    /// Argument streams of tool calls still streaming, by content index, kept off the content blocks.
+    tool_arguments: HashMap<usize, ToolCallArgumentsStream>,
 }
 
 impl PartialMessage {
@@ -190,15 +190,12 @@ impl PartialMessage {
             Proxy::ToolcallStart { content_index, id, tool_name } => {
                 let call = ToolCall { id, name: tool_name, ..Default::default() };
                 self.set_block(content_index, ContentBlock::ToolCall(call));
-                self.tool_json.insert(content_index, String::new());
+                self.tool_arguments.insert(content_index, ToolCallArgumentsStream::new());
                 AssistantMessageEvent::ToolcallStart { content_index, partial: self.message.clone() }
             }
             Proxy::ToolcallDelta { content_index, delta } => match self.message.content.get_mut(content_index) {
                 Some(ContentBlock::ToolCall(call)) => {
-                    let json = self.tool_json.entry(content_index).or_default();
-                    json.push_str(&delta);
-                    call.arguments =
-                        parse_streaming_json(json).and_then(|value| value.as_object().cloned()).unwrap_or_default();
+                    call.arguments = self.tool_arguments.entry(content_index).or_default().append(&delta).clone();
                     AssistantMessageEvent::ToolcallDelta { content_index, delta, partial: self.message.clone() }
                 }
                 _ => return Err("Received toolcall_delta for non-toolCall content".into()),
@@ -207,7 +204,7 @@ impl PartialMessage {
                 Some(ContentBlock::ToolCall(call)) => {
                     // The end event carries the complete call, including fields such as `namespace`.
                     *call = tool_call.clone();
-                    self.tool_json.remove(&content_index);
+                    self.tool_arguments.remove(&content_index);
                     AssistantMessageEvent::ToolcallEnd { content_index, tool_call, partial: self.message.clone() }
                 }
                 _ => return Ok(None),
@@ -243,7 +240,7 @@ impl PartialMessage {
 /// Stream a response through the proxy's `/api/stream` endpoint.
 pub fn stream_proxy(model: &Model, context: &Context, options: ProxyStreamOptions) -> AssistantMessageEventStream {
     let (sender, stream) = event_channel();
-    let mut partial = PartialMessage { message: AssistantMessage::empty(model), tool_json: HashMap::new() };
+    let mut partial = PartialMessage { message: AssistantMessage::empty(model), tool_arguments: HashMap::new() };
     let body = json!({
         "model": model,
         "context": { "messages": normalize_context(context) },

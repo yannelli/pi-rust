@@ -43,7 +43,7 @@ pub async fn reserves_root_conversation_id(storage: Arc<dyn Storage>) {
         Some(ConversationRecord { id: ROOT_CONVERSATION_ID, parent: None, owner: None })
     );
     expect_err(
-        storage.commit(&[root_write()], context()).await,
+        storage.commit(&[root_write()], &|_| {}, context()).await,
         &format!("ID {ROOT_CONVERSATION_ID} already belongs to conversation"),
     );
 }
@@ -69,6 +69,7 @@ pub async fn commits_mixed_table_writes_atomically(storage: Arc<dyn Storage>) {
                 StorageWrite::Task { value: task.clone() },
                 StorageWrite::Submission { value: input.clone() },
             ],
+            &|_| {},
             context(),
         )
         .await
@@ -93,6 +94,7 @@ pub async fn commits_mixed_table_writes_atomically(storage: Arc<dyn Storage>) {
                 StorageWrite::Entry { value: entry(transient_entry_id, root_id, "assistant") },
                 StorageWrite::Conversation { value: ConversationRecord { id: root_id, parent: None, owner: None } },
             ],
+            &|_| {},
             context(),
         )
         .await;
@@ -103,7 +105,7 @@ pub async fn commits_mixed_table_writes_atomically(storage: Arc<dyn Storage>) {
     assert_eq!(storage.entry(transient_entry_id, context()).await.unwrap(), None);
     let after_id: EntryId = mint(storage).await;
     let after_rollback_seq = storage
-        .commit(&[StorageWrite::Entry { value: entry(after_id, root_id, "after-rollback") }], context())
+        .commit(&[StorageWrite::Entry { value: entry(after_id, root_id, "after-rollback") }], &|_| {}, context())
         .await
         .unwrap();
     assert!(after_rollback_seq > initial_seq);
@@ -135,6 +137,7 @@ pub async fn detaches_writes_and_returned_records(storage: Arc<dyn Storage>) {
                 StorageWrite::Task { value: stored_task },
                 StorageWrite::Submission { value: stored_input },
             ],
+            &|_| {},
             context(),
         )
         .await
@@ -173,7 +176,7 @@ pub async fn detaches_prototype_like_keys(storage: Arc<dyn Storage>) {
     let text = r#"{"__proto__":{"polluted":false},"constructor":{"label":"stored"},"toString":"value"}"#;
     let mut data = json(text);
     let note = crate::types::EntryRecord { data: Some(data.clone()), ..entry(entry_id, root_id, "note") };
-    storage.commit(&[StorageWrite::Entry { value: note }], context()).await.unwrap();
+    storage.commit(&[StorageWrite::Entry { value: note }], &|_| {}, context()).await.unwrap();
 
     data.get_mut("__proto__").unwrap().set("polluted", true).unwrap();
     data.get_mut("constructor").unwrap().set("label", "mutated").unwrap();
@@ -192,18 +195,18 @@ pub async fn keeps_one_global_id_namespace(storage: Arc<dyn Storage>) {
     let root_id = create_root(storage).await;
     let explicit_entry_id = EntryId(100);
     storage
-        .commit(&[StorageWrite::Entry { value: entry(explicit_entry_id, root_id, "message") }], context())
+        .commit(&[StorageWrite::Entry { value: entry(explicit_entry_id, root_id, "message") }], &|_| {}, context())
         .await
         .unwrap();
     assert_eq!(storage.mint_id().await.unwrap(), 101);
     let task = pending_task(TaskId(explicit_entry_id.0), root_id, "ready");
     expect_err(
-        storage.commit(&[StorageWrite::Task { value: task }], context()).await,
+        storage.commit(&[StorageWrite::Task { value: task }], &|_| {}, context()).await,
         &format!("ID {explicit_entry_id} already belongs to entry"),
     );
 
     let last = entry(EntryId(MAX_SAFE_INTEGER), root_id, "last-id");
-    storage.commit(&[StorageWrite::Entry { value: last }], context()).await.unwrap();
+    storage.commit(&[StorageWrite::Entry { value: last }], &|_| {}, context()).await.unwrap();
     expect_err(storage.mint_id().await, "ID space is exhausted");
     expect_err(storage.mint_id().await, "ID space is exhausted");
 }
@@ -213,6 +216,6 @@ pub async fn rejects_operations_after_close(storage: Arc<dyn Storage>) {
     create_root(storage).await;
     storage.close(context()).await.unwrap();
     expect_err(storage.conversation(ROOT_CONVERSATION_ID, context()).await, "closed");
-    expect_err(storage.commit(&[], context()).await, "closed");
+    expect_err(storage.commit(&[], &|_| {}, context()).await, "closed");
     expect_err(storage.mint_id().await, "closed");
 }

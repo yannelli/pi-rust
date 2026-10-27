@@ -24,7 +24,9 @@ use super::util::{cancellation, scan_all};
 use super::view::ConversationViews;
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{ConversationId, ROOT_CONVERSATION_ID, SubmissionId, TaskId};
-use crate::session::{Session, SessionHooks, SessionOptions, TransactionScope, Tx, create_session};
+use crate::session::{
+    Observation, Observer, Session, SessionHooks, SessionOptions, TransactionScope, Tx, create_session,
+};
 use crate::timers::Timers;
 use crate::types::{
     ConversationOwnership, ConversationQuery, ConversationRecord, HostCallback, ReportInfo, Storage, SubmissionQuery,
@@ -67,10 +69,15 @@ impl SessionHooks for HarnessHooks {
         }
     }
 
-    /// Read at each use, as all settings are, but only this field: it is read on every commit.
+    /// Read at each use, as all settings are, but only these fields: they are read on every commit.
     fn document_retention_ms(&self) -> Option<f64> {
         let source = self.options.settings.as_ref()?;
         source().ok()?.document_retention_ms
+    }
+
+    fn persist_within_ms(&self) -> Option<f64> {
+        let source = self.options.settings.as_ref()?;
+        source().ok()?.progress?.persist_within_ms
     }
 
     fn report(&self, error: &DurableError, info: &ReportInfo, context: Option<&Context>) {
@@ -132,6 +139,9 @@ impl Harness {
                 now: options.now.clone(),
                 hooks: Some(hooks.clone() as Arc<dyn SessionHooks>),
                 document_retention_ms: None,
+                read_only: options.read_only,
+                persist_within_ms: None,
+                set_timer: options.set_timer.clone(),
             },
         );
         let timer_hooks = hooks.clone();
@@ -151,6 +161,7 @@ impl Harness {
             on_wake: options.on_wake.clone(),
             on_report: options.on_report.clone(),
             telemetry,
+            read_only: options.read_only,
         });
         let scheduler = Scheduler::new(core.clone(), without_abort_signal(context));
         let _ = hooks.scheduler.set(Arc::downgrade(&scheduler));
@@ -193,11 +204,35 @@ impl Harness {
         self.0.task_graph.watch(context).await
     }
 
-    /// Restart dispatch after a cancellation paused it.
+    /// Attach a synchronous [`Observer`] to a conversation's [`super::ConversationView`], atomically on the Session
+    /// line, for adapters: `advance` gets each next revision with its ops as memory adopts the commit, so it only
+    /// records it. `context` governs only the attachment.
+    pub async fn observe_conversation(
+        &self,
+        id: ConversationId,
+        observer: Arc<dyn Observer>,
+        context: &Context,
+    ) -> DurableResult<Observation> {
+        self.0.session.assert_usable()?;
+        self.0.views.observe(id, observer, context).await
+    }
+
+    /// Attach a synchronous [`Observer`] to the [`super::TaskGraph`], as `observe_conversation()` does to a view. A
+    /// `blocked` reason that changes without a commit advances it on the Session line with the background context.
+    pub async fn observe_task_graph(
+        &self,
+        observer: Arc<dyn Observer>,
+        context: &Context,
+    ) -> DurableResult<Observation> {
+        self.0.session.assert_usable()?;
+        self.0.task_graph.observe(observer, context).await
+    }
+
+    /// Restart dispatch after a cancellation paused it. Fails after close, and with `ReadOnlySession` on a read-only
+    /// Harness.
     pub fn resume(&self) -> DurableResult<()> {
         self.0.session.assert_usable()?;
-        self.0.scheduler.resume();
-        Ok(())
+        self.0.scheduler.resume()
     }
 
     /// When this Session next needs a running process, from the scheduler's memory: `active` while some task can run
@@ -286,13 +321,13 @@ impl Harness {
     }
 
     pub async fn wait_for_task(&self, id: TaskId, context: &Context) -> DurableResult<TaskRecord> {
-        self.0.scheduler.resume();
+        self.0.scheduler.resume()?;
         self.0.scheduler.wait_for_task(id, context).await
     }
 
     /// Wait until no conversation has live non-background work.
     pub async fn wait_for_idle(&self, context: &Context) -> DurableResult<()> {
-        self.0.scheduler.resume();
+        self.0.scheduler.resume()?;
         self.0.scheduler.wait_for_idle(None, context).await
     }
 

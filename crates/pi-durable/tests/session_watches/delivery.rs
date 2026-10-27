@@ -1,10 +1,9 @@
-//! Watch delivery: exact frames, serialization, overflow, and retirement folding.
+//! Watch delivery: commits folded while the listener is busy, serialization, overflow, and retirement.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use pi_chord::delta::{Op, apply_immutable};
-use pi_durable::session::WatchEnd;
 use pi_durable::{CommitChange, DocumentCommitChange};
 
 use super::support::*;
@@ -30,7 +29,7 @@ fn last_document(test: &TestSession) -> (Json, Vec<Op>) {
 }
 
 #[tokio::test]
-async fn keeps_the_acquisition_revision_until_start_and_delivers_exact_committed_frames() {
+async fn keeps_the_acquisition_revision_until_start_then_delivers_the_commits_since_in_one_call() {
     let test = create_state().await;
     let watch = watch_state(&test.session).await;
     let initial = watch.value();
@@ -45,7 +44,7 @@ async fn keeps_the_acquisition_revision_until_start_and_delivers_exact_committed
     let deliveries: Frames = Arc::default();
     let (sink, flag, observed) = (deliveries.clone(), inline.clone(), watch.clone());
     watch
-        .start(move |value, ops, _| {
+        .start(move |pi_chord::WatchChange { value, ops, .. }, _| {
             assert!(!flag.load(Ordering::SeqCst));
             assert!(observed.value().same_ref(&value));
             sink.lock().unwrap().push((value, ops));
@@ -55,29 +54,40 @@ async fn keeps_the_acquisition_revision_until_start_and_delivers_exact_committed
     inline.store(false, Ordering::SeqCst);
     assert!(deliveries.lock().unwrap().is_empty());
     flush().await;
-    let deliveries = deliveries.lock().unwrap().clone();
-    assert_eq!(deliveries.iter().map(|(v, _)| value_of(v)).collect::<Vec<_>>(), [1, 2]);
-    assert!(deliveries[0].0.same_ref(&first.0));
-    assert_eq!(deliveries[0].1, first.1);
-    assert!(deliveries[1].0.same_ref(&second.0));
-    assert_eq!(deliveries[1].1, second.1);
+    // Both commits set `value`: folded, the second set replaces the first.
+    assert_eq!(first.1, ops(r#"[["s",["value"],1]]"#));
+    let delivered = deliveries.lock().unwrap().clone();
+    assert_eq!(delivered.len(), 1);
+    assert!(delivered[0].0.same_ref(&second.0));
+    assert_eq!(delivered[0].1, second.1);
     assert_eq!(value_of(&initial), 0);
+
+    // A listener that keeps up gets each commit's ops as published.
+    set_value(&test.session, 3).await;
+    flush().await;
+    let third = last_document(&test);
+    let delivered = deliveries.lock().unwrap().clone();
+    assert_eq!(delivered.len(), 2);
+    assert!(delivered[1].0.same_ref(&third.0));
+    assert_eq!(delivered[1].1, third.1);
     watch.stop().await;
 }
 
 #[tokio::test]
-async fn serializes_callbacks_and_buffers_exact_frames_committed_while_one_is_in_flight() {
+async fn serializes_callbacks_and_folds_the_commits_made_while_one_is_in_flight_into_the_next() {
     let test = create_state().await;
     let watch = watch_state(&test.session).await;
     let (entered, release) = (Deferred::default(), Deferred::default());
     let values: Arc<Mutex<Vec<i64>>> = Arc::default();
+    let batches: Arc<Mutex<Vec<Vec<Op>>>> = Arc::default();
     let (active, max_active) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
     let (sink, gate_in, gate_out) = (values.clone(), entered.clone(), release.clone());
-    let (now, max) = (active.clone(), max_active.clone());
+    let (now, max, seen) = (active.clone(), max_active.clone(), batches.clone());
     watch
-        .start(move |value, _, _| {
+        .start(move |pi_chord::WatchChange { value, ops, .. }, _| {
             let (sink, gate_in, gate_out, now, max) =
                 (sink.clone(), gate_in.clone(), gate_out.clone(), now.clone(), max.clone());
+            seen.lock().unwrap().push(ops);
             async move {
                 let current = now.fetch_add(1, Ordering::SeqCst) + 1;
                 max.fetch_max(current, Ordering::SeqCst);
@@ -104,7 +114,8 @@ async fn serializes_callbacks_and_buffers_exact_frames_committed_while_one_is_in
     release.resolve();
     flush().await;
     assert_eq!(max_active.load(Ordering::SeqCst), 1);
-    assert_eq!(*values.lock().unwrap(), (1..=20).collect::<Vec<_>>());
+    assert_eq!(*values.lock().unwrap(), [1, 20]);
+    assert_eq!(batches.lock().unwrap()[1], ops(r#"[["s",["value"],20]]"#));
     watch.stop().await;
 }
 
@@ -116,7 +127,7 @@ async fn allows_a_listener_to_initiate_a_later_session_commit() {
     let values: Arc<Mutex<Vec<i64>>> = Arc::default();
     let (sink, done, session) = (values.clone(), completed.clone(), test.session.clone());
     watch
-        .start(move |value, _, _| {
+        .start(move |pi_chord::WatchChange { value, .. }, _| {
             let (sink, done, session) = (sink.clone(), done.clone(), session.clone());
             async move {
                 let current = value_of(&value);
@@ -137,7 +148,7 @@ async fn allows_a_listener_to_initiate_a_later_session_commit() {
 }
 
 #[tokio::test]
-async fn collapses_101_pending_commits_to_one_root_replacement() {
+async fn folds_101_pending_commits_of_one_field_into_one_set() {
     let test = create_state().await;
     let watch = watch_state(&test.session).await;
     for value in 1..=101 {
@@ -148,19 +159,52 @@ async fn collapses_101_pending_commits_to_one_root_replacement() {
     let frames = frames.lock().unwrap().clone();
     assert_eq!(frames.len(), 1);
     assert_eq!(value_of(&frames[0].0), 101);
+    assert_eq!(frames[0].1, ops(r#"[["s",["value"],101]]"#));
+    watch.stop().await;
+}
+
+static KEYS_DOC: LazyLock<DocToken<Json, SessionScope>> = LazyLock::new(|| {
+    define_doc(DocSpec::new("watch.keys", 1, SessionScope, || json(r#"{"keys":{}}"#), |_, _, _| Ok(false))).unwrap()
+});
+
+#[tokio::test]
+async fn replaces_the_root_once_more_than_10_000_ops_are_pending_after_folding() {
+    let test = open_test_session();
+    test.session.commit(|tx| async move { tx.doc(&KEYS_DOC, ()).await.map(drop) }, &context()).await.unwrap();
+    let watch = test.session.watch_doc(&KEYS_DOC, (), &context()).await.unwrap().unwrap();
+    // Sets of distinct keys, in commits small enough to stay ops: 4,000 + 4,000 + 2,001 pending ops.
+    for (from, to) in [(0, 4_000), (4_000, 8_000), (8_000, 10_001)] {
+        let change = move |tx: pi_durable::session::Tx| async move {
+            let draft = tx.doc(&KEYS_DOC, ()).await?;
+            draft.update(|state| {
+                let keys = state.get_mut("keys").unwrap();
+                for index in from..to {
+                    keys.set(format!("k{index}"), index).unwrap();
+                }
+            })?;
+            Ok(())
+        };
+        test.session.commit(change, &context()).await.unwrap();
+    }
+    let frames = record(&watch);
+    flush().await;
+    let frames = frames.lock().unwrap().clone();
+    assert_eq!(frames.len(), 1);
+    assert!(frames[0].0.same_ref(&watch.value()));
     assert_eq!(frames[0].1, vec![Op::Replace(watch.value())]);
+    assert_eq!(watch.value()["keys"].as_object().unwrap().len(), 10_001);
     watch.stop().await;
 }
 
 #[tokio::test]
-async fn never_folds_the_in_flight_frame_into_an_overflow_reset() {
+async fn never_folds_the_in_flight_frame_into_the_next_call() {
     let test = create_state().await;
     let watch = watch_state(&test.session).await;
     let (entered, release) = (Deferred::default(), Deferred::default());
     let frames: Frames = Arc::default();
     let (sink, gate_in, gate_out) = (frames.clone(), entered.clone(), release.clone());
     watch
-        .start(move |value, ops, _| {
+        .start(move |pi_chord::WatchChange { value, ops, .. }, _| {
             let (sink, gate_in, gate_out) = (sink.clone(), gate_in.clone(), gate_out.clone());
             async move {
                 let first = {
@@ -187,21 +231,32 @@ async fn never_folds_the_in_flight_frame_into_an_overflow_reset() {
     assert_eq!(frames.len(), 2);
     assert_eq!(value_of(&frames[0].0), 1);
     assert_eq!(value_of(&frames[1].0), 102);
-    assert_eq!(frames[1].1, vec![Op::Replace(watch.value())]);
+    assert_eq!(frames[1].1, ops(r#"[["s",["value"],102]]"#));
     watch.stop().await;
 }
 
 #[tokio::test]
-async fn folds_retirement_into_an_overflow_reset_and_then_closes() {
+async fn folds_a_retirement_into_the_pending_commits_call_which_reports_it_with_the_last_value_and_goes_on() {
     let test = create_state().await;
     let watch = watch_state(&test.session).await;
     for value in 1..=100 {
         set_value(&test.session, value).await;
     }
+    let last = test.session.snapshot(&STATE_DOC, (), &context()).await.unwrap().unwrap();
     retire_state(&test.session).await;
-    let frames = record(&watch);
-    assert!(matches!(watch.closed().await, WatchEnd::Retired));
-    assert_eq!(*frames.lock().unwrap(), vec![(Json::Null, vec![Op::Replace(Json::Null)])]);
+    let changes = record_changes(&watch);
+    flush().await;
+    let expected = WatchChange { value: last.clone(), ops: ops(r#"[["s",["value"],100]]"#), retired: true };
+    assert_eq!(*changes.lock().unwrap(), [expected]);
+    assert!(changes.lock().unwrap()[0].value.same_ref(&last));
+    assert!(watch.value().same_ref(&last));
+    set_value(&test.session, 7).await;
+    flush().await;
+    let recreated = test.session.snapshot(&STATE_DOC, (), &context()).await.unwrap().unwrap();
+    assert_eq!(value_of(&recreated), 7);
+    let expected = WatchChange { value: recreated.clone(), ops: vec![Op::Replace(recreated)], retired: false };
+    assert_eq!(changes.lock().unwrap()[1], expected);
+    watch.stop().await;
 }
 
 /// Upstream delivers a nonempty no-op batch here. The Rust tracker diffs drafts, so the same shift and unshift is
@@ -239,7 +294,7 @@ async fn can_replay_every_delivered_exact_operation_batch_from_the_acquisition_r
     let replica = Arc::new(Mutex::new(watch.value()));
     let state = replica.clone();
     watch
-        .start(move |value, ops, _| {
+        .start(move |pi_chord::WatchChange { value, ops, .. }, _| {
             let mut replica = state.lock().unwrap();
             *replica = apply_immutable(Some(&replica), &ops).unwrap();
             assert_eq!(*replica, value);

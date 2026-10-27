@@ -8,8 +8,8 @@ use url::Url;
 use super::http::OAuthHttp;
 use super::pkce;
 use super::types::{
-    AuthorizationServerMetadata, OAuthClientInformation, OAuthClientMetadata, OAuthTokens, parse_client_information,
-    parse_oauth_tokens,
+    AuthorizationServerMetadata, OAuthClientInformation, OAuthClientMetadata, OAuthTokens, is_http_url,
+    parse_client_information, parse_oauth_tokens,
 };
 use crate::error::OAuthError;
 
@@ -123,6 +123,10 @@ pub fn start_authorization(
             .map_err(|_| OAuthError::other("Invalid authorization endpoint"))?,
         None => endpoint(authorization_server_url, "/authorize")?,
     };
+    // Callers open this URL with the platform URL handler, which also launches files and custom protocols.
+    if !is_http_url(&url) {
+        return Err(OAuthError::other(format!("Invalid authorization endpoint {url}")));
+    }
     let pkce = pkce::generate();
     set_query(&mut url, "response_type", "code");
     set_query(&mut url, "client_id", &request.client_information.client_id);

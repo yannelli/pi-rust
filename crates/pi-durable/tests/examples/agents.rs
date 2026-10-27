@@ -77,7 +77,7 @@ async fn ex21_late_join_sees_running_output_in_the_view_and_the_event_snapshot()
     let (lines, sink, joined): (Lines, _, _) = (Lines::default(), output.clone(), output.clone());
     let log = lines.clone();
     stream
-        .start(move |events, _| {
+        .start(move |pi_chord::NativeWatchChange { value: events }, _| {
             for event in events.iter().map(Json::to_serde) {
                 let mut output = sink.lock().unwrap();
                 match (event["type"].as_str().unwrap_or_default(), &event["output"]) {
@@ -173,7 +173,7 @@ fn attach(
     Box::pin(async move {
         attached.lock().unwrap().insert(id);
         let stream = watch_events(&harness, id, &ctx()).await.unwrap();
-        let listener = move |events: Vec<Json>, _| {
+        let listener = move |pi_chord::NativeWatchChange::<Vec<Json>> { value: events }, _| {
             let (harness, indent, lines, attached) = (harness.clone(), indent.clone(), lines.clone(), attached.clone());
             async move {
                 for event in events.iter().map(Json::to_serde) {

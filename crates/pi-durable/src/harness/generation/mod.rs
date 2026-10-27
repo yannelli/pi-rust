@@ -72,6 +72,9 @@ pub enum GenerationCheckpoint {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         compacted: Option<TaskId>,
         model: ModelRef,
+        /// Absent in checkpoints of earlier versions.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thinking_level: Option<ThinkingLevel>,
         cutoff: EntryId,
         handle: DeferredHandle,
         poll_at: f64,

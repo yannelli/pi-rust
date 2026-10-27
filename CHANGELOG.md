@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.6.3] - 2026-10-27
+
+### Added
+
+- **coding-agent:** add the pi-rust logo ([7d2a345](https://github.com/yannelli/pi-rust/commit/7d2a34559b5a2c0efcec9a3a302c78d868d7c6f4))
+
 ## [0.6.2] - 2026-10-21
 
 ### Added

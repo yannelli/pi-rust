@@ -273,7 +273,7 @@ pub fn with_telemetry(telemetry: Arc<dyn TelemetrySpan>, context: &Context) -> C
 }
 
 /// Run a child span of the context's span with a derived context whose telemetry is that span.
-pub fn trace_in<F, Fut, T, E>(context: &Context, options: SpanOptions, f: F) -> SpanFuture<Fut>
+pub fn trace_in<F, Fut, T, E>(options: SpanOptions, f: F, context: &Context) -> SpanFuture<Fut>
 where
     F: FnOnce(Context) -> Fut,
     Fut: Future<Output = Result<T, E>>,

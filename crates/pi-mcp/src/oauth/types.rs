@@ -163,13 +163,18 @@ fn optional_strings(value: Option<&Value>, name: &str) -> Result<Option<Vec<Stri
     }
 }
 
+/// Accepts only `http:` and `https:` URLs. Servers supply these URLs, and the authorization endpoint is
+/// opened with the platform URL handler, so a `file:` or custom protocol URL would launch local programs.
 fn safe_url(value: Option<&Value>, name: &str) -> Result<String, OAuthError> {
     let text = required_string(value, name)?;
-    let url = Url::parse(&text).map_err(|_| invalid(name))?;
-    if matches!(url.scheme(), "javascript" | "data" | "vbscript") {
-        return Err(invalid(name));
+    match Url::parse(&text) {
+        Ok(url) if is_http_url(&url) => Ok(text),
+        _ => Err(invalid(name)),
     }
-    Ok(text)
+}
+
+pub fn is_http_url(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https")
 }
 
 fn optional_url(value: Option<&Value>, name: &str) -> Result<Option<String>, OAuthError> {

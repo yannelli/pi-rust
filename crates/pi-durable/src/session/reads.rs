@@ -32,19 +32,23 @@ impl SessionCore {
         address: &DocumentAddress,
         context: &Context,
     ) -> DurableResult<Option<Arc<LoadedDocument>>> {
-        {
-            let mut documents = lock(&self.documents);
-            // A tracker serves only tokens of the version its value was materialized for; others reload.
-            match documents.get(address_id) {
-                Some(cached) if cached.value_version == definition.version => {
-                    let cached = cached.clone();
-                    drop(documents);
-                    self.touch_document(address_id);
-                    return Ok(Some(cached));
-                }
-                Some(_) => documents.remove(address_id),
-                None => {}
+        let cached = lock(&self.documents).get(address_id).cloned();
+        // A tracker serves only tokens of the version its value was materialized for; others reload.
+        match cached {
+            Some(cached) if cached.value_version == definition.version => {
+                self.touch_document(address_id);
+                return Ok(Some(cached));
             }
+            Some(cached) => {
+                // The reload must find what memory holds: held changes are stored before their tracker goes.
+                let id = cached.record.id;
+                let held = lock(&self.holds).contains(id);
+                if held && let Some(core) = self.weak.upgrade() {
+                    core.store_holds(&[id], context).await?;
+                }
+                lock(&self.documents).remove(address_id);
+            }
+            None => {}
         }
         let Some(record) = self.storage.find_document(address, DocumentPoint::Current, context).await? else {
             return Ok(None);

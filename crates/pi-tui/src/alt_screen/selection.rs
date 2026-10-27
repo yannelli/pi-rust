@@ -21,9 +21,9 @@ use crate::utils::{
 
 const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(500);
 const AUTO_SCROLL_INTERVAL: Duration = Duration::from_millis(50);
-/// Fullscreen owns selection, so paths (`~/` ones too) and kebab-case tokens stay whole like terminal
-/// word selection.
-const WORD_SELECTION_JOINERS: [&str; 3] = ["/", "-", "~"];
+/// Fullscreen owns selection, so it uses iTerm2's default "characters considered part of a word" set:
+/// https://github.com/gnachman/iTerm2/blob/7f4ff739721f95d0b93003d8701c4523a7edf261/sources/Settings/iTermPreferences.m#L743
+const WORD_SELECTION_JOINERS: [&str; 7] = ["/", "-", "+", "\\", "~", "_", "."];
 
 impl AltScreenState {
     fn visible_rows(&self, view: &ScrollViewHandle, rows: usize) -> Option<(i64, i64, &LayoutBox)> {

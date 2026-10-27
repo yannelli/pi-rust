@@ -127,7 +127,7 @@ async fn starts_a_queued_follow_up_after_a_terminating_round() {
 }
 
 #[tokio::test]
-async fn writes_the_last_handoff_in_call_order_and_then_runs_queued_follow_ups_in_the_new_context() {
+async fn writes_only_the_last_handoff_in_call_order_and_runs_queued_follow_ups_after_the_continuing_run() {
     let setup = setup();
     let (first_gate, second_gate) = (Deferred::default(), Deferred::default());
     hold_tool(
@@ -147,7 +147,7 @@ async fn writes_the_last_handoff_in_call_order_and_then_runs_queued_follow_ups_i
     let calls = vec![faux_tool_call_with_id("hold", json!({}), "c1"), faux_tool_call_with_id("later", json!({}), "c2")];
     let round: FauxResponseStep =
         faux_assistant_message(calls, FauxMessageOptions::stop_reason(StopReason::ToolUse)).into();
-    setup.faux.set_responses([round, answer("follow-up")]);
+    setup.faux.set_responses([round, answer("after handoff"), answer("follow-up")]);
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &setup).await;
     let input = root.submit(SubmissionDraft::input("a"), &ctx()).await.unwrap();
     tool_running(&harness, &root).await;
@@ -164,10 +164,19 @@ async fn writes_the_last_handoff_in_call_order_and_then_runs_queued_follow_ups_i
     .await;
     first_gate.resolve();
     f.wait(&ctx()).await.unwrap();
-    assert_eq!(input.status(&ctx()).await.unwrap().status, SubmissionStatus::Done);
-    let transcript = transcript(&all_entries(&root).await);
-    let expected = ["pi.tool-result", "pi.reset:two", "pi.user:f", "pi.assistant:follow-up"];
-    assert_eq!(transcript[transcript.len() - 4..], expected);
+    let expected = [
+        "pi.user:a",
+        "pi.assistant",
+        "pi.tool-result",
+        "pi.tool-result",
+        "pi.reset:two",
+        "pi.assistant:after handoff",
+        "pi.user:f",
+        "pi.assistant:follow-up",
+    ];
+    assert_eq!(transcript(&all_entries(&root).await), expected);
+    let status = input.status(&ctx()).await.unwrap();
+    assert_eq!((status.status, status.answer), (SubmissionStatus::Done, Some(answers(&root).await[1])));
     harness.close(&ctx()).await.unwrap();
 }
 

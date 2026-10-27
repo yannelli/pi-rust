@@ -28,4 +28,6 @@ pub mod pi_messages;
 #[cfg(test)]
 mod plumbing_tests;
 mod provider_env;
+#[cfg(test)]
+mod streaming_arguments_tests;
 mod transform;

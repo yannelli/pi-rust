@@ -11,10 +11,11 @@ use common::provider::TestProvider;
 use common::wait_until;
 use pi_mcp::oauth::pkce::challenge_for;
 use pi_mcp::oauth::{
-    AuthorizationServerMetadata, CallbackServer, CallbackServerOptions, LoopbackCallbackServer, McpOAuthProvider,
-    McpOAuthProviderOptions, McpOAuthStateStore, MemoryOAuthStateStore, OAuthClientInformation, OAuthClientMetadata,
-    OAuthClientProvider, OAuthDiscoveryState, OAuthFlowOptions, OAuthFlowResult, OAuthHttp, OAuthProviderAuth,
-    OAuthTokens, authorize_mcp, discover_authorization_server_metadata, register_client,
+    AuthorizationRequest, AuthorizationServerMetadata, CallbackServer, CallbackServerOptions, LoopbackCallbackServer,
+    McpOAuthProvider, McpOAuthProviderOptions, McpOAuthStateStore, MemoryOAuthStateStore, OAuthClientInformation,
+    OAuthClientMetadata, OAuthClientProvider, OAuthDiscoveryState, OAuthFlowOptions, OAuthFlowResult, OAuthHttp,
+    OAuthProviderAuth, OAuthTokens, authorize_mcp, discover_authorization_server_metadata, register_client,
+    start_authorization,
 };
 use pi_mcp::{
     AuthProvider, McpClient, McpClientOptions, McpError, OAuthError, StreamableHttpOptions, StreamableHttpTransport,
@@ -342,6 +343,40 @@ async fn rejects_authorization_metadata_whose_issuer_does_not_match_discovery() 
     .await;
     let error = discover_authorization_server_metadata(&origin, &http(), false).await.unwrap_err();
     assert!(matches!(error, OAuthError::IssuerMismatch { .. }), "{error:?}");
+}
+
+#[tokio::test]
+async fn rejects_non_http_authorization_endpoints_which_the_platform_url_handler_would_launch() {
+    let endpoints = ["file://attacker.example/share/x.exe", "search-ms:query=x", "ms-msdt:/id"];
+    let endpoint = Arc::new(Mutex::new(String::new()));
+    let served = endpoint.clone();
+    let origin = serve(move |_, origin| {
+        let body = json!({
+            "issuer": origin,
+            "authorization_endpoint": *served.lock().unwrap(),
+            "token_endpoint": format!("{origin}/token"),
+            "response_types_supported": ["code"],
+        });
+        async move { Response::json(200, &body) }
+    })
+    .await;
+    for value in endpoints {
+        *endpoint.lock().unwrap() = value.into();
+        let error = discover_authorization_server_metadata(&origin, &http(), false).await.unwrap_err();
+        assert!(error.to_string().contains("Invalid authorization endpoint"), "{error}");
+        let metadata = AuthorizationServerMetadata { authorization_endpoint: value.into(), ..metadata(&origin) };
+        let client = OAuthClientInformation::new("client");
+        let request = AuthorizationRequest {
+            metadata: Some(&metadata),
+            client_information: &client,
+            redirect_url: "http://127.0.0.1/callback",
+            scope: None,
+            state: None,
+            resource: None,
+        };
+        let error = start_authorization(&origin, request).unwrap_err();
+        assert!(error.to_string().contains("Invalid authorization endpoint"), "{error}");
+    }
 }
 
 #[tokio::test]
