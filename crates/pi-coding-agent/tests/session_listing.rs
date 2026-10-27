@@ -154,13 +154,16 @@ fn search_supports_phrases_regex_and_sorting() {
         info("nomatch", "2026-01-04T00:00:00Z", "something else", None),
     ];
     assert_eq!(found(&recent, "\"brave\"", SortMode::Recent, NameFilter::All), ["newer", "older"]);
+    // Name text ranks above message text; the position of a match does not count.
     let relevance = [
-        info("late", "2026-01-03T00:00:00Z", "xxxx brave", None),
-        info("early", "2026-01-01T00:00:00Z", "brave xxxx", None),
+        info("message", "2026-01-03T00:00:00Z", "brave", None),
+        info("name", "2026-01-01T00:00:00Z", "xxxx", Some("Brave work")),
     ];
-    assert_eq!(found(&relevance, "\"brave\"", SortMode::Relevance, NameFilter::All), ["early", "late"]);
+    assert_eq!(found(&relevance, "\"brave\"", SortMode::Relevance, NameFilter::All), ["name", "message"]);
     assert_eq!(found(&recent[..2], "\"brave\"", SortMode::Relevance, NameFilter::All), ["newer", "older"]);
-    assert_eq!(found(&recent, "brv", SortMode::Relevance, NameFilter::All), ["newer", "older"]);
+    // Scattered characters match the name or cwd, never message text.
+    assert!(found(&recent, "brv", SortMode::Relevance, NameFilter::All).is_empty());
+    assert_eq!(found(&relevance, "brv", SortMode::Relevance, NameFilter::All), ["name"]);
 }
 
 #[test]
