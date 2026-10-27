@@ -110,8 +110,9 @@ pub(super) async fn tools_phase(task: TaskRecord, runtime: TaskRuntime, context:
     runtime.commit(change, &context).await
 }
 
-/// The round's tools are terminal: apply their controls and end the run at the final boundary, or hand it to
-/// the next generation at the post-tools boundary.
+/// The round's tools are terminal: apply their controls, append a `handoff`'s reset, and then end the run at the final
+/// boundary (`terminate`), end it at a queued reset, or hand it to the next generation at the post-tools boundary, in
+/// the handoff's new context when there is one.
 async fn finish_tool_round(
     runtime: &TaskRuntime,
     assistant: EntryId,
@@ -162,17 +163,18 @@ async fn finish_tool_round(
         let live = tx.doc(&LIVE_DOC, conversation_id).await?;
         let now = core.now();
         let done = SubmissionSettlement::Done { answer: assistant };
-        if terminate || handoff.is_some() {
-            if let Some(handoff) = handoff {
-                let message = Message::User(UserMessage { content: UserContent::Text(handoff), timestamp: now as i64 });
-                let draft = TypedEntryDraft {
-                    model: Some(vec![message]),
-                    head: Some(DraftHead::SelfEntry),
-                    ..TypedEntryDraft::new(())
-                };
-                let entry = tx.append_typed_entry(&RESET_ENTRY, conversation_id, draft).await?;
-                boundary.head = Some(entry.record.id);
-            }
+        if let Some(handoff) = handoff {
+            // The handoff's reset precedes every queued item, so queued writes and selected steers land in its context.
+            let message = Message::User(UserMessage { content: UserContent::Text(handoff), timestamp: now as i64 });
+            let draft = TypedEntryDraft {
+                model: Some(vec![message]),
+                head: Some(DraftHead::SelfEntry),
+                ..TypedEntryDraft::new(())
+            };
+            let entry = tx.append_typed_entry(&RESET_ENTRY, conversation_id, draft).await?;
+            boundary.head = Some(entry.record.id);
+        }
+        if terminate {
             let placed = apply_boundary(&tx, &mut boundary, BoundaryAt::Final, now).await?;
             end_live(&tx, &live, owner, done)?;
             if !placed.users.is_empty() {
