@@ -2,6 +2,17 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.7.5] - 2026-10-27
+
+### Added
+
+- **coding-agent:** add an optional iTerm2 integration and /terminal-setup ([a152176](https://github.com/yannelli/pi-rust/commit/a1521768b42d5d2bf097beb2ab77758954bc4ae1))
+- **coding-agent:** add a customizable status line ([e36f66f](https://github.com/yannelli/pi-rust/commit/e36f66f44f182c9c55f68205ab62aac78ea4c026))
+
+### Fixed
+
+- **coding-agent:** draw the original pi logo in rust colors ([cc1ba11](https://github.com/yannelli/pi-rust/commit/cc1ba112157b3265dd11564879e97e347926480f))
+
 ## [0.7.4] - 2026-10-27
 
 ### Fixed
