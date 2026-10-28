@@ -144,9 +144,7 @@ fn renders_the_theme_step_first() {
     let (harness, _) = mount();
     let lines = trimmed(&harness);
     assert!(lines[0].starts_with("────"), "{lines:?}");
-    assert_eq!(lines[2], " ██████");
-    assert_eq!(lines[4], " ████  ██");
-    assert_eq!(lines[5], " ██    ██");
+    assert_eq!(&lines[2..6], ["  ▄▄██▄▄", " ▄█▀▀███▄", " ▀██▀███▀", "  ▀▀██▀▀"]);
     assert!(lines.iter().any(|l| l == " Welcome to pi, the minimal coding agent."), "{lines:?}");
     assert!(lines.iter().any(|l| l == " Pick a theme."));
     assert!(lines.iter().any(|l| l == " → System (matches your terminal colors)"));
