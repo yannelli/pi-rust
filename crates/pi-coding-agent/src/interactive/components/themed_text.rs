@@ -131,7 +131,7 @@ mod tests {
         let record = clicks.clone();
         let mut header = ExpandableText::new(String::new, String::new, false, 1, 0);
         header.set_on_logo_click(Some(Box::new(move |column, row| record.borrow_mut().push((column, row)))));
-        for (x, y) in [(1, 0), (8, 3), (0, 0), (9, 0), (1, 4)] {
+        for (x, y) in [(1, 0), (4, 1), (0, 0), (5, 0), (1, 2)] {
             header.handle_mouse(&click(x, y));
         }
         assert_eq!(*clicks.borrow(), [(11, 5), (11, 5)]);
