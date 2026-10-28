@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.7.4] - 2026-10-27
+
+### Fixed
+
+- **coding-agent:** draw the pi-rust gear logo in the TUI ([24a2fbe](https://github.com/yannelli/pi-rust/commit/24a2fbeb00e40d85bdf868982221ee62240426dc))
+
 ## [0.7.3] - 2026-10-27
 
 ### Fixed
