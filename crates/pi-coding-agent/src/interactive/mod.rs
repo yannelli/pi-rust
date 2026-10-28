@@ -44,6 +44,7 @@ mod shutdown;
 mod startup;
 pub mod startup_ui;
 mod status;
+pub mod status_line;
 mod tmux;
 mod undo;
 pub mod util;

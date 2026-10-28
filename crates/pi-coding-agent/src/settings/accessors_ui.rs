@@ -176,6 +176,15 @@ impl SettingsManager {
         Duration::try_from_secs_f64(seconds).unwrap_or(Duration::MAX)
     }
 
+    /// `statusLine` (pi-rust extension). Its `command` comes only from global settings, so a
+    /// project's settings cannot make pi run a command.
+    pub fn status_line(&self) -> Option<StatusLineSettings> {
+        let state = self.state();
+        let mut status_line = state.merged.status_line.clone()?;
+        status_line.command = state.global_typed.status_line.as_ref().and_then(|global| global.command.clone());
+        Some(status_line)
+    }
+
     /// `(images, trueColor, hyperlinks)` overrides; `Some(None)` for images disables them.
     pub fn terminal_capability_overrides(&self) -> (Option<Option<String>>, Option<bool>, Option<bool>) {
         let terminal = self.state().merged.terminal.clone().unwrap_or_default();

@@ -46,9 +46,17 @@
     {
       "item": "terminal.notifyMinSeconds",
       "reason": "pi-rust extension: run-finished notification"
+    },
+    {
+      "item": "statusLine",
+      "reason": "pi-rust extension: custom status line"
     }
   ],
   "slashCommands": [
+    {
+      "item": "statusline",
+      "reason": "pi-rust extension: custom status line"
+    },
     {
       "item": "mcp",
       "reason": "Upstream registers /mcp from its built-in mcp extension (extensions/mcp). pi-rust implements MCP natively and lists /mcp as a built-in command."

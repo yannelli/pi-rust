@@ -202,6 +202,21 @@ fn global_only_keys_ignore_project_values() {
 }
 
 #[test]
+fn status_line_command_comes_only_from_global_settings() {
+    let dirs = Dirs::new();
+    write(&dirs.global(), json!({"statusLine": {"type": "command", "command": "global.sh", "padding": 1}}));
+    write(&dirs.project(), json!({"statusLine": {"command": "project.sh", "padding": 2}}));
+    let status_line = dirs.manager(true).status_line().expect("status line");
+    assert_eq!((status_line.kind.as_deref(), status_line.command.as_deref()), (Some("command"), Some("global.sh")));
+    assert_eq!(status_line.padding, Some(2.0));
+
+    let dirs = Dirs::new();
+    write(&dirs.project(), json!({"statusLine": {"type": "command", "command": "project.sh"}}));
+    assert_eq!(dirs.manager(true).status_line().expect("status line").command, None);
+    assert_eq!(SettingsManager::in_memory(json!({})).status_line(), None);
+}
+
+#[test]
 fn model_scoped_values_and_nested_writes() {
     let dirs = Dirs::new();
     write(

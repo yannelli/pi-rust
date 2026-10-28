@@ -173,6 +173,41 @@ pub struct PromptHistorySettings {
     pub max_entries: Option<f64>,
 }
 
+/// `statusLine` (pi-rust extension): replaces the footer's path and stats lines. `type` is
+/// `"builtin"`, `"command"` (session JSON on stdin, as in Claude Code), `"claude"`, `"cursor"`,
+/// `"codex"`, or `"off"`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusLineSettings {
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub padding: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh_interval: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset: Option<String>,
+    /// The chip shape; `style` is its older name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chip: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icons: Option<String>,
+    /// Segment names for one line, or a list of lines.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub segments: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub separator: Option<String>,
+    /// Segment name to a theme color token or `#rrggbb`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colors: Option<BTreeMap<String, String>>,
+}
+
 /// A `packages` entry: a source string, or an object with resource filters.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -357,6 +392,8 @@ pub struct Settings {
     pub autocomplete_max_visible: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_history: Option<PromptHistorySettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_line: Option<StatusLineSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show_hardware_cursor: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
