@@ -106,6 +106,7 @@ impl InteractiveMode {
         if let Some(method) = select_method(settings.notify_on_finish(), &ProcessEnv) {
             self.terminal.borrow_mut().write(&notification_sequence(method, APP_NAME, &run.summary));
         }
+        self.iterm2_request_attention();
     }
 }
 

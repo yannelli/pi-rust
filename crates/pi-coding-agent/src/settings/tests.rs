@@ -217,6 +217,25 @@ fn status_line_command_comes_only_from_global_settings() {
 }
 
 #[test]
+fn iterm2_features_are_off_unless_turned_on() {
+    let features =
+        |value: serde_json::Value| SettingsManager::in_memory(json!({"terminal": {"iterm2": value}})).iterm2_features();
+    assert!(!SettingsManager::in_memory(json!({})).iterm2_features().any());
+    assert!(!features(json!(false)).any());
+    let all = features(json!(true));
+    assert!(all.tab_color && all.badge && all.user_vars && all.attention && all.cwd);
+    let some = features(json!({"badge": false, "cwd": false}));
+    assert!(some.tab_color && !some.badge && some.user_vars && some.attention && !some.cwd);
+    assert!(!features(json!("yes")).any());
+
+    let dirs = Dirs::new();
+    let settings = dirs.manager(true);
+    assert!(settings.enable_iterm2());
+    assert!(settings.iterm2_features().any());
+    assert!(!settings.enable_iterm2());
+}
+
+#[test]
 fn model_scoped_values_and_nested_writes() {
     let dirs = Dirs::new();
     write(

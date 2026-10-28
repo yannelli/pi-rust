@@ -185,6 +185,20 @@ impl SettingsManager {
         Some(status_line)
     }
 
+    /// `terminal.iterm2` (pi-rust extension).
+    pub fn iterm2_features(&self) -> ITerm2Features {
+        ITerm2Features::from_value(self.state().merged.terminal.as_ref().and_then(|terminal| terminal.iterm2.as_ref()))
+    }
+
+    /// Turns on `terminal.iterm2` in global settings unless it is already set.
+    pub fn enable_iterm2(&self) -> bool {
+        let unset = self.state().global_typed.terminal.as_ref().is_none_or(|terminal| terminal.iterm2.is_none());
+        if unset {
+            self.set_global_nested("terminal", "iterm2", Some(json!(true)));
+        }
+        unset
+    }
+
     /// `(images, trueColor, hyperlinks)` overrides; `Some(None)` for images disables them.
     pub fn terminal_capability_overrides(&self) -> (Option<Option<String>>, Option<bool>, Option<bool>) {
         let terminal = self.state().merged.terminal.clone().unwrap_or_default();

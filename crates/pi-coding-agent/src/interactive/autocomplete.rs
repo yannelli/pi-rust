@@ -35,6 +35,7 @@ pub const BUILTIN_SLASH_COMMANDS: &[(&str, &str, Option<&str>)] = &[
         "Show or switch the footer status line",
         Some("<preset|from-claude|from-cursor|from-codex|command|off>"),
     ),
+    ("terminal-setup", "Set up iTerm2: the integration and clipboard access", None),
     ("fork", "Create a new fork from a previous user message", None),
     ("clone", "Duplicate the current session at the current position", None),
     ("trust", "Save project trust decision for future sessions", None),

@@ -29,8 +29,8 @@ const THEMES: [(&str, [&str; ROLES]); 15] = [
     (
         "pi-rust",
         [
-            "#5FA0BF", "#F2B44C", "#EF6F3A", "#C4552A", "#9A8FBF", "#9A8FBF", "#6FB3B8", "#8FBF7F", "#8FBF7F",
-            "#F2B44C", "#E5534B", "#6FB3B8", "#7A6A60", "#C4552A",
+            "#C9A27E", "#E6984F", "#DE5E28", "#A33B1A", "#B87333", "#C9A27E", "#6FB3B8", "#8FBF7F", "#8FBF7F",
+            "#E6984F", "#E5534B", "#6FB3B8", "#7A6A60", "#DE5E28",
         ],
     ),
     (

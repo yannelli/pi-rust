@@ -93,6 +93,41 @@ pub struct TerminalSettings {
     /// pi-rust extension: the shortest run in seconds that notifies; 10 by default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notify_min_seconds: Option<f64>,
+    /// pi-rust extension: `true`, `false` (the default), or an object of iTerm2 features.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iterm2: Option<Value>,
+}
+
+/// `terminal.iterm2` (pi-rust extension): the iTerm2 features to use. `true` turns on all of them;
+/// in an object, a feature that is not named is on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ITerm2Features {
+    pub tab_color: bool,
+    pub badge: bool,
+    pub user_vars: bool,
+    pub attention: bool,
+    pub cwd: bool,
+}
+
+impl ITerm2Features {
+    pub fn from_value(value: Option<&Value>) -> Self {
+        let on = |key: &str| match value {
+            Some(Value::Bool(enabled)) => *enabled,
+            Some(Value::Object(object)) => object.get(key).and_then(Value::as_bool).unwrap_or(true),
+            _ => false,
+        };
+        Self {
+            tab_color: on("tabColor"),
+            badge: on("badge"),
+            user_vars: on("userVars"),
+            attention: on("attention"),
+            cwd: on("cwd"),
+        }
+    }
+
+    pub fn any(&self) -> bool {
+        self.tab_color || self.badge || self.user_vars || self.attention || self.cwd
+    }
 }
 
 /// `terminal.notifyOnFinish` (pi-rust extension): `auto` picks OSC 777, OSC 99, OSC 9, or BEL
