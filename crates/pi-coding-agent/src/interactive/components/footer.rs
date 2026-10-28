@@ -14,6 +14,9 @@ use crate::agent_session::AgentSession;
 use crate::compaction::ContextUsage;
 use crate::config::home_dir;
 use crate::interactive::footer_data::FooterData;
+use crate::interactive::status_line::{
+    BuiltinStatusLine, CommandStatusLine, RunState, StatusLineConfig, StatusModel, StatusSnapshot,
+};
 use crate::interactive::util::{format_tokens, resolve_lexically};
 use crate::session::EntryData;
 use crate::session::usage::UsageTotals;
@@ -62,11 +65,18 @@ pub struct FooterComponent {
     data: Rc<RefCell<FooterData>>,
     auto_compact_enabled: bool,
     stats: Option<SessionStats>,
+    status_line: Option<ActiveStatusLine>,
+}
+
+/// The `statusLine` that replaces the path and stats lines.
+enum ActiveStatusLine {
+    Builtin(BuiltinStatusLine),
+    Command(CommandStatusLine),
 }
 
 impl FooterComponent {
     pub fn new(session: Arc<AgentSession>, data: Rc<RefCell<FooterData>>) -> Self {
-        Self { session, data, auto_compact_enabled: true, stats: None }
+        Self { session, data, auto_compact_enabled: true, stats: None, status_line: None }
     }
 
     pub fn set_session(&mut self, session: Arc<AgentSession>) {
@@ -75,6 +85,27 @@ impl FooterComponent {
 
     pub fn set_auto_compact_enabled(&mut self, enabled: bool) {
         self.auto_compact_enabled = enabled;
+    }
+
+    /// Applies the `statusLine` setting; an unchanged command keeps its output and timers.
+    pub fn set_status_line(&mut self, config: Option<StatusLineConfig>, request_render: Rc<dyn Fn()>) {
+        let unchanged = match (&self.status_line, &config) {
+            (None, None) => true,
+            (Some(ActiveStatusLine::Builtin(active)), Some(StatusLineConfig::Builtin(config))) => active == config,
+            (Some(ActiveStatusLine::Command(active)), Some(StatusLineConfig::Command(config))) => {
+                active.config() == config
+            }
+            _ => false,
+        };
+        if unchanged {
+            return;
+        }
+        self.status_line = config.map(|config| match config {
+            StatusLineConfig::Builtin(builtin) => ActiveStatusLine::Builtin(builtin),
+            StatusLineConfig::Command(command) => {
+                ActiveStatusLine::Command(CommandStatusLine::new(command, request_render))
+            }
+        });
     }
 
     fn session_stats(&mut self) -> &SessionStats {
@@ -129,12 +160,11 @@ impl FooterComponent {
         self.stats = Some(SessionStats { key, session: session_ptr, totals, latest_cache_hit_rate, context_usage });
         self.stats.as_ref().expect("just set")
     }
-}
 
-impl Component for FooterComponent {
-    fn render(&mut self, width: usize) -> Vec<String> {
-        let theme = theme();
-        let (totals, cache_hit_rate, context_usage) = {
+    /// Everything the footer and a status line show, from the cached stats and the session.
+    fn snapshot(&mut self) -> StatusSnapshot {
+        let auto_compact = self.auto_compact_enabled;
+        let (totals, cache_hit_rate, context) = {
             let stats = self.session_stats();
             (stats.totals, stats.latest_cache_hit_rate, stats.context_usage)
         };
@@ -142,16 +172,55 @@ impl Component for FooterComponent {
         let model = session.model();
         let limits = session.limits_model().or_else(|| model.clone());
         let context_window =
-            context_usage.as_ref().map(|usage| usage.context_window).or(limits.as_ref().map(|m| m.context_window));
-        let percent = context_usage.as_ref().and_then(|usage| usage.percent);
+            context.as_ref().map(|usage| usage.context_window).or(limits.as_ref().map(|m| m.context_window));
+        let mut data = self.data.borrow_mut();
+        let subscription = model
+            .as_ref()
+            .is_some_and(|model| model.provider == "kimi-coding" || data.is_using_subscription(&model.provider));
+        StatusSnapshot {
+            cwd: session.cwd().to_path_buf(),
+            home: Some(home_dir()),
+            project: data.repo_dir().and_then(Path::file_name).map(|name| name.to_string_lossy().into_owned()),
+            branch: data.git_branch(),
+            session_id: session.session_id(),
+            session_name: session.session_name(),
+            session_file: session.session_file(),
+            totals,
+            cache_hit_rate,
+            context,
+            context_window,
+            auto_compact,
+            model: model.map(|model| StatusModel {
+                provider: model.provider,
+                id: model.id,
+                name: model.name,
+                reasoning: model.reasoning,
+            }),
+            thinking: session.thinking_level(),
+            routed: routed_model(&session),
+            subscription,
+            run_state: if session.is_compacting() {
+                RunState::Compacting
+            } else if session.is_streaming() {
+                RunState::Working
+            } else {
+                RunState::Idle
+            },
+        }
+    }
+
+    /// The built-in path and stats lines (upstream `footer.ts`).
+    fn default_lines(snapshot: &StatusSnapshot, provider_count: usize, width: usize) -> Vec<String> {
+        let theme = theme();
+        let totals = snapshot.totals;
+        let percent = snapshot.context_percent();
         let percent_value = percent.unwrap_or(0.0);
 
-        let mut pwd = format_cwd_for_footer(session.cwd(), Some(&home_dir()));
-        let mut data = self.data.borrow_mut();
-        if let Some(branch) = data.git_branch() {
+        let mut pwd = format_cwd_for_footer(&snapshot.cwd, snapshot.home.as_deref());
+        if let Some(branch) = &snapshot.branch {
             pwd = format!("{pwd} ({branch})");
         }
-        if let Some(name) = session.session_name() {
+        if let Some(name) = &snapshot.session_name {
             pwd = format!("{pwd} • {name}");
         }
 
@@ -169,18 +238,15 @@ impl Component for FooterComponent {
             parts.push(format!("W{}", format_tokens(totals.cache_write)));
         }
         if (totals.cache_read > 0 || totals.cache_write > 0)
-            && let Some(rate) = cache_hit_rate
+            && let Some(rate) = snapshot.cache_hit_rate
         {
             parts.push(format!("CH{rate:.1}%"));
         }
-        let subscription = model
-            .as_ref()
-            .is_some_and(|model| model.provider == "kimi-coding" || data.is_using_subscription(&model.provider));
-        if totals.cost != 0.0 || subscription {
-            parts.push(format!("${:.3}{}", totals.cost, if subscription { " (sub)" } else { "" }));
+        if totals.cost != 0.0 || snapshot.subscription {
+            parts.push(format!("${:.3}{}", totals.cost, if snapshot.subscription { " (sub)" } else { "" }));
         }
-        let auto = if self.auto_compact_enabled { " (auto)" } else { "" };
-        let window = format_tokens(context_window.unwrap_or(0));
+        let auto = if snapshot.auto_compact { " (auto)" } else { "" };
+        let window = format_tokens(snapshot.context_window.unwrap_or(0));
         let display = match percent {
             Some(percent) => format!("{percent:.1}%/{window}{auto}"),
             None => format!("?/{window}{auto}"),
@@ -206,21 +272,22 @@ impl Component for FooterComponent {
             stats_left = truncate_to_width_with(&stats_left, width, "...", false);
             stats_left_width = visible_width(&stats_left);
         }
-        let model_name = model.as_ref().map_or("no-model".to_string(), |model| model.id.clone());
+        let model = snapshot.model.as_ref();
+        let model_name = model.map_or("no-model".to_string(), |model| model.id.clone());
         let mut right = model_name.clone();
-        if model.as_ref().is_some_and(|model| model.reasoning) {
-            right = match session.thinking_level() {
+        if model.is_some_and(|model| model.reasoning) {
+            right = match snapshot.thinking {
                 ThinkingLevel::Off => format!("{model_name} • thinking off"),
                 level => format!("{model_name} • {}", level.as_str()),
             };
         }
-        if let Some((routed, level)) = routed_model(&session) {
+        if let Some((routed, level)) = &snapshot.routed {
             let level = level.map(|level| format!(" • {}", level.as_str())).unwrap_or_default();
             right.push_str(&format!(" → {routed}{level}"));
         }
         let min_padding = 2;
-        if data.available_provider_count() > 1
-            && let Some(model) = &model
+        if provider_count > 1
+            && let Some(model) = model
         {
             let with_provider = format!("({}) {right}", model.provider);
             if stats_left_width + min_padding + visible_width(&with_provider) <= width {
@@ -240,11 +307,28 @@ impl Component for FooterComponent {
         let remainder = &stats_line[stats_left.len()..];
         let pwd_line =
             truncate_to_width_with(&theme.fg(ThemeColor::Dim, &pwd), width, &theme.fg(ThemeColor::Dim, "..."), false);
-        let mut lines = vec![
-            pwd_line,
-            format!("{}{}", theme.fg(ThemeColor::Dim, &stats_left), theme.fg(ThemeColor::Dim, remainder)),
-        ];
+        vec![pwd_line, format!("{}{}", theme.fg(ThemeColor::Dim, &stats_left), theme.fg(ThemeColor::Dim, remainder))]
+    }
+}
+
+impl Component for FooterComponent {
+    fn render(&mut self, width: usize) -> Vec<String> {
+        let snapshot = self.snapshot();
+        let custom = match &self.status_line {
+            Some(ActiveStatusLine::Builtin(builtin)) => {
+                Some(builtin.render(&snapshot, width)).filter(|lines| !lines.is_empty())
+            }
+            Some(ActiveStatusLine::Command(command)) => {
+                command.observe(&snapshot, width);
+                command.lines(width)
+            }
+            None => None,
+        };
+        let data = self.data.borrow();
+        let mut lines =
+            custom.unwrap_or_else(|| Self::default_lines(&snapshot, data.available_provider_count(), width));
         if !data.extension_statuses().is_empty() {
+            let theme = theme();
             let line =
                 data.extension_statuses().values().map(|text| sanitize_status_text(text)).collect::<Vec<_>>().join(" ");
             lines.push(truncate_to_width_with(&line, width, &theme.fg(ThemeColor::Dim, "..."), false));

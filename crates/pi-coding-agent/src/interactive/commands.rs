@@ -85,6 +85,9 @@ impl InteractiveMode {
         } else if text == "/context" {
             self.handle_context_command();
             clear();
+        } else if let Some(choice) = argument(text, "statusline") {
+            self.handle_statusline_command(choice);
+            clear();
         } else if text == "/fork" {
             clear();
             self.show_user_message_selector();

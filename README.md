@@ -226,6 +226,86 @@ If the answer still does not match after the retries, pi writes the errors to st
 
 The flag works only in print mode: with `-p`, with `--mode json`, or when stdin or stdout is not a terminal. Interactive mode rejects it. RPC mode and Agent Client Protocol (ACP) mode also reject it. If an extension registers its own `--output-schema` or `--output-retries` flag, the extension gets the value.
 
+## Status line (pi-rust extension)
+
+The `statusLine` setting replaces the two footer lines with the cwd, the token counts, and the model. Lines from extension `setStatus` calls still show below it, and an extension `setFooter` still replaces the whole footer. `/statusline` shows the active status line, and `/statusline <choice>` switches it in `~/.pi/agent/settings.json`.
+
+| `type` | What it shows |
+| --- | --- |
+| `builtin` (the default) | Segments that pi-rust draws itself. It starts no process. |
+| `command` | The output of your command, as in the `statusLine` setting of Claude Code and the Cursor CLI. |
+| `claude` | The `statusLine` command in `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`). |
+| `cursor` | The `statusLine` command in `~/.cursor/cli-config.json`. |
+| `codex` | The `[tui] status_line` items in `~/.codex/config.toml` (or `$CODEX_HOME/config.toml`), drawn as Codex draws them. |
+| `off` | The default footer. |
+
+With `claude`, `cursor`, or `codex`, you can use the status line that you already set up for that agent. Run `/statusline from-claude`, `/statusline from-cursor`, or `/statusline from-codex` to switch to it.
+
+### Builtin status lines
+
+Pick a preset, then change its parts if you want:
+
+```json
+{ "statusLine": { "preset": "powerline", "theme": "catppuccin", "icons": "nerd" } }
+```
+
+| Preset | Look |
+| --- | --- |
+| `minimal` (the default) | One line of text in pi's theme colors: the model, thinking level, context, and cost, with the folder and branch at the right |
+| `pi-rust` | Blocks in the pi-rust logo colors, with a π |
+| `pi` | Blocks in the colors of the upstream pi logo |
+| `claude` | Blocks in Claude colors |
+| `codex` | The Codex status line: model and reasoning, context left, cwd, and branch, joined by `·` |
+| `cursor` | The Cursor CLI footer: model and context use, with the cwd and branch at the right |
+| `pills`, `powerline` | Blocks or Powerline arrows in the pi-rust colors |
+| `rounded`, `slanted` | Round or slanted blocks with Nerd Font icons, in `catppuccin` and `tokyo-night` |
+| `retro`, `dots`, `emoji`, `mono` | Brackets in `gruvbox`, dots in `nord`, emoji icons in `catppuccin`, and gray blocks |
+| `full` | Two lines with every common segment |
+
+| Field | Values |
+| --- | --- |
+| `chip` | The shape of each segment: `plain` (colored text), `block` (text on a colored block), `rounded`, `powerline`, `slanted`, `brackets` (`[text]`), or `dot` (`● text`). `rounded`, `powerline`, and `slanted` need a Nerd Font. |
+| `theme` | `terminal` (pi's theme colors), `pi-rust`, `pi`, `claude`, `codex`, `cursor`, `dracula`, `nord`, `catppuccin`, `gruvbox`, `tokyo-night`, `solarized`, `rose-pine`, `monokai`, `one-dark`, or `mono`. Text on a block is dark or light to match the block color. On a light pi theme, light text colors are darkened. |
+| `icons` | `unicode` (⎇ before the branch and ◷ before the time), `nerd` (Nerd Font icons for most segments), `emoji`, or `none` |
+| `segments` | Segment names for one line, such as `["dir", "branch", "fill", "model"]`, or a list of lines, such as `[["cwd", "branch"], ["model", "contextBar"]]`. An entry can also be `{"segment": "model", "color": "#ff8800", "icon": "◆"}` or literal text, such as `{"text": "🦀", "color": "accent"}`. |
+| `separator` | The text between segments. The default depends on the chip. |
+| `colors` | A segment name to `#rrggbb` or to a pi theme token, such as `"accent"` |
+| `padding` | Spaces before each line |
+
+| Segment | Shows | Codex name |
+| --- | --- | --- |
+| `cwd`, `dir`, `project` | The cwd with `~`, its last folder, or the git repository folder | `current-dir`, `project-name` |
+| `branch` | The git branch | `git-branch` |
+| `session`, `sessionId` | The session name, or the first 8 characters of its ID | `thread-title`, `session-id` |
+| `model`, `modelWithReasoning`, `provider`, `thinking` | The model, the model with its thinking level, the provider, or the thinking level | `model`, `model-with-reasoning`, `reasoning` |
+| `tokens`, `tokensIn`, `tokensOut`, `tokensUsed` | ↑input ↓output, input, output, or all tokens of the session | `total-input-tokens`, `total-output-tokens`, `used-tokens` |
+| `cache`, `cacheHit` | Cache reads and writes with the hit rate, or the hit rate | |
+| `cost` | The session cost | |
+| `context`, `contextUsed`, `contextRemaining`, `contextWindow`, `contextBar` | The footer context text, `3% used`, `97% left`, `500k window`, or a bar such as `▰▰▱▱▱▱▱▱ 23%`. Their color changes at 70% and 90%. | `context-used`, `context-remaining`, `context-window-size` |
+| `runState` | `idle`, `working`, or `compacting` | `run-state` |
+| `version`, `time`, `user`, `host`, `logo` | The pi-rust version, the local time, the user, the host, or π | `codex-version` |
+| `fill` | Moves the segments after it to the right edge | |
+
+A segment with no value, such as `branch` outside a git repository, does not show. pi ignores unknown names, so Codex items that pi does not know, such as `weekly-limit`, do not show. If the right side does not fit, pi cuts it from the end.
+
+### Command status lines
+
+```json
+{ "statusLine": { "type": "command", "command": "~/.pi/agent/statusline.sh", "padding": 0, "refreshInterval": 5 } }
+```
+
+```sh
+#!/bin/sh
+jq -r '"\(.model.id) \(.context_window.used_percentage // 0 | floor)% $\(.cost.total_cost_usd)"'
+```
+
+pi runs the command in the bash shell that the `bash` tool uses. It writes JSON with the session data to the command's stdin, and it shows each line that the command prints. ANSI colors and OSC 8 links work. `COLUMNS` gives the terminal width.
+
+- The JSON uses the Claude Code field names where pi has the same data: `session_id`, `session_name`, `transcript_path` (the session file), `cwd`, `workspace.current_dir`, `model.id`, `model.display_name`, `version`, `cost.total_cost_usd`, `thinking.enabled`, and `context_window` (`total_input_tokens`, `total_output_tokens`, `context_window_size`, `used_percentage`, `remaining_percentage`). Thus scripts for Claude Code and the Cursor CLI work without changes. pi also sends `model.provider`, `git.branch`, `git.project`, `run_state`, `routed_model`, `tokens` (`input`, `output`, `cache_read`, `cache_write`, `cache_hit_percentage`), `thinking.level`, `cost.subscription`, and `context_window.auto_compact`.
+- pi runs the command when the session starts, and 300 ms after the data or the terminal width changes. A new run stops a run that has not finished. `refreshInterval` (at least 1 second) also runs the command on a timer.
+- Until the first run finishes, and when a run fails or takes more than 10 seconds, pi shows the last output. If there is no output yet, it shows the default footer. pi shows a maximum of 8 lines.
+- pi reads `statusLine.command` only from `~/.pi/agent/settings.json`. A project's `.pi/settings.json` can change the other fields, but it cannot set a command.
+
 ## ACP (Zed and other editors)
 
 `pi --mode acp` runs pi as an [Agent Client Protocol](https://agentclientprotocol.com) server over stdio. Editors such as Zed can then use pi as an external agent. In Zed, add this to `settings.json`:
@@ -397,6 +477,7 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. These p
   - pi sends OSC 777 in Ghostty, WezTerm, foot, and rxvt, OSC 99 in kitty, and OSC 9 in iTerm2 and Windows Terminal. In other terminals, for example tmux and screen, it sends BEL.
   - In fullscreen mode, pi does not send the notification while the terminal reports focus.
   - Set `terminal.notifyOnFinish` to `"auto"` (the default), `"osc"`, `"bell"`, or `"off"`. Set `terminal.notifyMinSeconds` to change the time limit.
+- The [status line](#status-line-pi-rust-extension) (`statusLine`) is an addition. Upstream pi changes the footer only through extensions.
 - `pi experimental` and its commands `server`, `client`, `durable`, and `vacation` need `PI_EXPERIMENTAL=1`, as in upstream pi. `server` and `client` use Unix sockets, so on Windows they show a message that they need Unix. Upstream pi also has no Windows transport.
 
 ## Development

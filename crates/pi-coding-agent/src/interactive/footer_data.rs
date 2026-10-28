@@ -120,6 +120,11 @@ impl FooterData {
         self.cached_branch.clone().flatten()
     }
 
+    /// The working tree of the repository that contains the cwd.
+    pub fn repo_dir(&self) -> Option<&Path> {
+        self.git_paths.as_ref().map(|paths| paths.repo_dir.as_path())
+    }
+
     pub fn extension_statuses(&self) -> &BTreeMap<String, String> {
         &self.extension_statuses
     }
