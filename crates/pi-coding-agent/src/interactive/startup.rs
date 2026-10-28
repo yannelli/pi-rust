@@ -7,7 +7,7 @@ use std::time::Duration;
 use pi_tui::{Spacer, Text, component};
 
 use super::components::ExpandableText;
-use super::components::pi_logo::{PI_GLYPH_OFFSET, pi_logo_lines, pi_wordmark, supports_pi_logo};
+use super::components::pi_logo::{pi_logo_lines, pi_wordmark, supports_pi_logo};
 use super::mode::InteractiveMode;
 use super::status_line::StatusLineConfig;
 use crate::interactive_components::{DynamicBorder, key_hint, key_text, raw_key_hint};
@@ -154,18 +154,8 @@ impl InteractiveMode {
             if !show_logo {
                 return format!("{} {version}\n{hints}", pi_wordmark());
             }
-            // The version and the first hints sit beside the logo's middle rows; further hints go below it.
-            let mut text = std::iter::once(version).chain(hints.lines().map(str::to_string));
-            let mut lines: Vec<String> = pi_logo_lines()
-                .into_iter()
-                .enumerate()
-                .map(|(row, logo)| match if row == 0 { None } else { text.next() } {
-                    Some(line) => format!("{logo} {line}"),
-                    None => logo,
-                })
-                .collect();
-            lines.extend(text);
-            lines.join("\n")
+            let [top, bottom] = pi_logo_lines();
+            format!("{top} {version}\n{bottom} {hints}")
         };
         let collapsed = {
             move || {
@@ -198,8 +188,7 @@ impl InteractiveMode {
             header_text.borrow_mut().set_on_logo_click(Some(Box::new(move |column, row| {
                 if let Some(mode) = weak.upgrade() {
                     let (column, row) = (column.max(0) as usize, row.max(0) as usize);
-                    let (glyph_column, glyph_row) = (column + PI_GLYPH_OFFSET.0, row + PI_GLYPH_OFFSET.1);
-                    crate::interactive_components::play_pi_logo_3d(&mode.tui(), glyph_column, glyph_row);
+                    crate::interactive_components::play_pi_logo_3d(&mode.tui(), column, row);
                 }
             })));
         }
