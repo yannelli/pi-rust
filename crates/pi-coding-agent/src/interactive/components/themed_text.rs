@@ -6,6 +6,8 @@ use std::rc::Rc;
 
 use pi_tui::{Component, MouseResponse, Text, TuiMouseEvent, TuiMouseEventResult, TuiMouseEventType};
 
+use super::pi_logo::{PI_LOGO_HEIGHT, PI_LOGO_WIDTH};
+
 /// Builds the text; must return the same content each time apart from colors.
 pub type TextBuilder = Box<dyn Fn() -> String>;
 
@@ -70,7 +72,7 @@ impl ExpandableText {
         self.inner.invalidate();
     }
 
-    /// Makes the first two lines after one column of padding a clickable logo (built-in header).
+    /// Makes the logo's cells at the top left, after one column of padding, clickable (built-in header).
     pub fn set_on_logo_click(&mut self, on_click: Option<LogoClick>) {
         self.on_logo_click = on_click;
     }
@@ -87,10 +89,51 @@ impl Component for ExpandableText {
 
     fn handle_mouse(&mut self, event: &TuiMouseEvent) -> Option<MouseResponse> {
         let on_click = self.on_logo_click.as_mut()?;
-        if event.kind != TuiMouseEventType::Click || event.y > 1 || event.x < 1 || event.x > 4 {
+        let (width, height) = (PI_LOGO_WIDTH as i32, PI_LOGO_HEIGHT as i32);
+        if event.kind != TuiMouseEventType::Click || event.y >= height || event.x < 1 || event.x > width {
             return None;
         }
         on_click(event.screen_x - event.x + 1, event.screen_y - event.y);
         Some(MouseResponse::Handled(TuiMouseEventResult::handled()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use pi_tui::{Component, TuiMouseButton, TuiMouseEvent, TuiMouseEventType};
+
+    use super::ExpandableText;
+
+    fn click(x: i32, y: i32) -> TuiMouseEvent {
+        TuiMouseEvent {
+            kind: TuiMouseEventType::Click,
+            button: TuiMouseButton::Left,
+            x,
+            y,
+            screen_x: x + 10,
+            screen_y: y + 5,
+            width: 80,
+            height: 24,
+            shift: false,
+            alt: false,
+            ctrl: false,
+            wheel_delta: None,
+            click_count: Some(1),
+        }
+    }
+
+    #[test]
+    fn logo_clicks_cover_the_logo_and_report_its_top_left_cell() {
+        let clicks = Rc::new(RefCell::new(Vec::new()));
+        let record = clicks.clone();
+        let mut header = ExpandableText::new(String::new, String::new, false, 1, 0);
+        header.set_on_logo_click(Some(Box::new(move |column, row| record.borrow_mut().push((column, row)))));
+        for (x, y) in [(1, 0), (8, 3), (0, 0), (9, 0), (1, 4)] {
+            header.handle_mouse(&click(x, y));
+        }
+        assert_eq!(*clicks.borrow(), [(11, 5), (11, 5)]);
     }
 }

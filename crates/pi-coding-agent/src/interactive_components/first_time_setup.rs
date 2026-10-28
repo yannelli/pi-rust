@@ -7,6 +7,7 @@ use pi_tui::{Component, Container, get_keybindings};
 
 use super::common::{border, spacer, text};
 use super::{key_hint, raw_key_hint};
+use crate::interactive::components::pi_logo::{pi_logo_lines, supports_pi_logo};
 use crate::resources::brand::{APP_NAME, CONFIG_DIR_NAME};
 use crate::settings::SettingsManager;
 use crate::theme::{SYSTEM_THEME_NAME, ThemeColor, theme};
@@ -23,6 +24,7 @@ const THEME_OPTIONS: [(&str, &str); 3] =
 
 const ANALYTICS_OPTIONS: [(bool, &str); 2] = [(true, "Share anonymous usage data"), (false, "Don't share")];
 
+/// The pi glyph in full blocks, for Apple Terminal, which misaligns the half-block logo.
 const SETUP_LOGO_LINES: [&str; 4] = ["██████", "██  ██", "████  ██", "██    ██"];
 
 const ANALYTICS_DESCRIPTION: &str = "Opting in stores a tracking identifier in settings.json and enables anonymous\nusage analytics. This helps us to better debug, reproduce, and resolve issues\nand bugs within Pi. You can observe what is shared using /privacy and make\nchanges anytime in settings.json.";
@@ -71,7 +73,12 @@ impl FirstTimeSetupComponent {
         container.clear();
         container.add_child(border());
         container.add_child(spacer(1));
-        container.add_child(text(&theme.fg(ThemeColor::Accent, &SETUP_LOGO_LINES.join("\n")), 1, 0));
+        let logo = if supports_pi_logo() {
+            pi_logo_lines().join("\n")
+        } else {
+            theme.fg(ThemeColor::Accent, &SETUP_LOGO_LINES.join("\n"))
+        };
+        container.add_child(text(&logo, 1, 0));
         container.add_child(spacer(1));
         let welcome = format!("Welcome to {APP_NAME}, the minimal coding agent.");
         container.add_child(text(&theme.fg(ThemeColor::Accent, &theme.bold(&welcome)), 1, 0));
