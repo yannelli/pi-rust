@@ -88,6 +88,9 @@ impl InteractiveMode {
         } else if let Some(choice) = argument(text, "statusline") {
             self.handle_statusline_command(choice);
             clear();
+        } else if text == "/terminal-setup" {
+            self.handle_terminal_setup_command();
+            clear();
         } else if text == "/fork" {
             clear();
             self.show_user_message_selector();

@@ -385,6 +385,7 @@ impl InteractiveMode {
         }
         self.selector.dispose_active();
         self.set_terminal_progress(false);
+        self.iterm2_reset();
         self.clear_status_indicator(None);
         if let Some(controller) = self.theme_controller() {
             controller.disable_auto_sync();

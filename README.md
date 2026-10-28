@@ -306,6 +306,34 @@ pi runs the command in the bash shell that the `bash` tool uses. It writes JSON 
 - Until the first run finishes, and when a run fails or takes more than 10 seconds, pi shows the last output. If there is no output yet, it shows the default footer. pi shows a maximum of 8 lines.
 - pi reads `statusLine.command` only from `~/.pi/agent/settings.json`. A project's `.pi/settings.json` can change the other fields, but it cannot set a command.
 
+## iTerm2 integration (pi-rust extension)
+
+The iTerm2 integration is off by default. `/terminal-setup` turns it on, or set `terminal.iterm2` in `settings.json`:
+
+```json
+{ "terminal": { "iterm2": true } }
+```
+
+When pi runs in iTerm2, the integration does these things:
+
+| Feature | Key | What it does |
+| --- | --- | --- |
+| Tab color | `tabColor` | The tab is rust orange while the agent works, copper while a dialog waits for you, green when a run is done, and red after an error. Idle sessions and exit restore the profile color. |
+| Badge | `badge` | The badge shows `π` and the session name, or the folder name when the session has no name. Exit removes it. |
+| User variables | `userVars` | pi sets `user.pi_state` (`idle`, `working`, `blocked`, `done`, or `error`), `user.pi_session`, `user.pi_project`, and `user.pi_model`. Show them in a status bar component, a badge, or a tab title, for example `\(user.pi_state)`. |
+| Attention | `attention` | When a run takes `terminal.notifyMinSeconds` or more (10 by default) and the terminal is not known to have focus, iTerm2 bounces the Dock icon. |
+| Current directory | `cwd` | iTerm2 learns the cwd of the session, so a new tab can open in it. |
+
+`true` turns on all features. In an object, a feature that you do not name is on, so `{ "badge": false }` turns on all features except the badge. pi finds iTerm2 through `TERM_PROGRAM`, `LC_TERMINAL`, or `ITERM_SESSION_ID`, so the integration also works in tmux and over SSH. In tmux, run `tmux set -g allow-passthrough on` so that the sequences reach iTerm2.
+
+`/terminal-setup` (as in Claude Code) does these steps in iTerm2:
+
+- It sets `terminal.iterm2` to `true` in `~/.pi/agent/settings.json`, unless the key is already set.
+- On macOS, it lets programs write the clipboard (`defaults write com.googlecode.iterm2 AllowClipboardAccess -bool true`), so `/copy` works. Restart iTerm2 to apply this change.
+- It shows the steps that it cannot do: Option as Alt (Esc+), notification alerts for escape sequences, and a status bar component for `user.pi_state`.
+
+In other terminals, `/terminal-setup` changes nothing.
+
 ## ACP (Zed and other editors)
 
 `pi --mode acp` runs pi as an [Agent Client Protocol](https://agentclientprotocol.com) server over stdio. Editors such as Zed can then use pi as an external agent. In Zed, add this to `settings.json`:
@@ -478,6 +506,7 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. These p
   - In fullscreen mode, pi does not send the notification while the terminal reports focus.
   - Set `terminal.notifyOnFinish` to `"auto"` (the default), `"osc"`, `"bell"`, or `"off"`. Set `terminal.notifyMinSeconds` to change the time limit.
 - The [status line](#status-line-pi-rust-extension) (`statusLine`) is an addition. Upstream pi changes the footer only through extensions.
+- The [iTerm2 integration](#iterm2-integration-pi-rust-extension) (`terminal.iterm2`) and `/terminal-setup` are additions.
 - `pi experimental` and its commands `server`, `client`, `durable`, and `vacation` need `PI_EXPERIMENTAL=1`, as in upstream pi. `server` and `client` use Unix sockets, so on Windows they show a message that they need Unix. Upstream pi also has no Windows transport.
 
 ## Development

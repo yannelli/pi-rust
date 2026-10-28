@@ -50,9 +50,17 @@
     {
       "item": "statusLine",
       "reason": "pi-rust extension: custom status line"
+    },
+    {
+      "item": "terminal.iterm2",
+      "reason": "pi-rust extension: iTerm2 integration"
     }
   ],
   "slashCommands": [
+    {
+      "item": "terminal-setup",
+      "reason": "pi-rust extension: iTerm2 integration (after Claude Code's /terminal-setup)"
+    },
     {
       "item": "statusline",
       "reason": "pi-rust extension: custom status line"
