@@ -6,6 +6,7 @@ mod agent;
 mod config;
 mod events;
 mod listing;
+mod permissions;
 mod session;
 mod translate;
 
@@ -194,6 +195,18 @@ fn fail(message: &Option<String>) -> anyhow::Result<()> {
 
 #[async_trait]
 impl PiBackend for FakeBackend {
+    fn bind_client(&self, _: &str, _: Arc<dyn AcpClient>) {}
+
+    fn permission_mode(&self) -> crate::acp::permissions::PermissionMode {
+        crate::acp::permissions::PermissionMode::parse(self.config().state["permissionMode"].as_str().unwrap_or("auto"))
+            .unwrap()
+    }
+
+    fn set_permission_mode(&self, mode: crate::acp::permissions::PermissionMode) {
+        self.call(format!("mode:{}", mode.id()));
+        self.config().state["permissionMode"] = json!(mode.id());
+    }
+
     fn take_events(&self) -> Option<UnboundedReceiver<Value>> {
         self.events.lock().unwrap().take()
     }

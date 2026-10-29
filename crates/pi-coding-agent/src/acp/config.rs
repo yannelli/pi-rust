@@ -1,9 +1,8 @@
-//! Model and thinking level as ACP config options and modes (upstream `getSessionConfiguration`,
-//! `buildConfigOptions`, `getModelState`, and `setSessionModel` in `agent.ts`).
+//! ACP model, thinking, and permission selectors. Legacy modes represent permissions only.
 
 use agent_client_protocol_schema::{
     ConfigOptionUpdate, CurrentModeUpdate, Error, SessionConfigOption, SessionConfigOptionCategory,
-    SessionConfigSelectOption, SessionMode, SessionModeState, SessionNotification, SessionUpdate,
+    SessionConfigSelectOption, SessionModeState, SessionNotification, SessionUpdate,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -12,6 +11,7 @@ use super::backend::{AcpClient, PiBackend};
 use super::errors::invalid_params;
 
 pub const MODEL_CONFIG_ID: &str = "model";
+pub const MODE_CONFIG_ID: &str = "mode";
 pub const THOUGHT_LEVEL_CONFIG_ID: &str = "thought_level";
 
 /// A model as advertised: `provider/id`.
@@ -38,15 +38,56 @@ pub struct SessionConfiguration {
     pub modes: SessionModeState,
 }
 
-/// pi's thinking levels as modes; fails when the current level is not among them.
-async fn thinking_state(backend: &dyn PiBackend, state: &Value) -> anyhow::Result<SessionModeState> {
+fn thinking_name(level: &str) -> &str {
+    match level {
+        "off" => "Off",
+        "minimal" => "Minimal",
+        "low" => "Low",
+        "medium" => "Medium",
+        "high" => "High",
+        "xhigh" => "Extra High",
+        "max" => "Max",
+        other => other,
+    }
+}
+
+fn provider_name(provider: &str) -> &str {
+    match provider {
+        "xai" => "xAI",
+        "openai" => "OpenAI",
+        "openai-codex" => "OpenAI Codex",
+        "anthropic" => "Anthropic",
+        "google" => "Google",
+        "google-vertex" => "Google Vertex AI",
+        "google-antigravity" => "Google Antigravity",
+        "github-copilot" => "GitHub Copilot",
+        "amazon-bedrock" => "Amazon Bedrock",
+        "openrouter" => "OpenRouter",
+        "azure-openai-responses" => "Azure OpenAI",
+        "mistral" => "Mistral",
+        "deepseek" => "DeepSeek",
+        "groq" => "Groq",
+        "cerebras" => "Cerebras",
+        "kimi-coding" => "Kimi Coding",
+        "cursor" => "Cursor",
+        "meta" => "Meta",
+        "radius" => "Radius",
+        other => other,
+    }
+}
+
+/// Fail when pi reports a current level absent from the model's available levels.
+async fn thinking_option(backend: &dyn PiBackend, state: &Value) -> anyhow::Result<SessionConfigOption> {
     let available = backend.get_available_thinking_levels().await?;
     let current = state.get("thinkingLevel").and_then(Value::as_str).unwrap_or_default();
     if current.is_empty() || !available.iter().any(|level| level == current) {
         anyhow::bail!("pi returned a thinking level absent from available levels");
     }
-    let modes = available.iter().map(|id| SessionMode::new(id.clone(), format!("Thinking: {id}"))).collect();
-    Ok(SessionModeState::new(current.to_string(), modes))
+    let choices: Vec<_> =
+        available.iter().map(|id| SessionConfigSelectOption::new(id.clone(), thinking_name(id))).collect();
+    Ok(SessionConfigOption::select(THOUGHT_LEVEL_CONFIG_ID, "Thinking", current.to_string(), choices)
+        .category(SessionConfigOptionCategory::ThoughtLevel)
+        .description("Set the reasoning effort for this session"))
 }
 
 /// Available models and the current one; `None` when pi reports neither.
@@ -66,9 +107,15 @@ fn model_state(models: Option<&Value>, state: Option<&Value>) -> Option<ModelSta
                 return None;
             }
             let name = model["name"].as_str().map(String::from).unwrap_or_else(|| id.clone());
+            let display_provider = model["providerName"]
+                .as_str()
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or_else(|| provider_name(&provider));
+            // ACP has no standard icon field; label existing fast variants without inventing support.
+            let fast = id.split('-').any(|part| part == "fast");
             Some(AdvertisedModel {
                 model_id: format!("{provider}/{id}"),
-                name: format!("{provider}/{name}"),
+                name: format!("{display_provider}: {name}{}", if fast { " ⚡" } else { "" }),
                 description: None,
             })
         })
@@ -85,17 +132,24 @@ fn model_state(models: Option<&Value>, state: Option<&Value>) -> Option<ModelSta
     Some(ModelState { available_models: available, current_model_id })
 }
 
-/// The thinking selector, preceded by the model selector when models are known.
-pub fn build_config_options(models: Option<&ModelState>, modes: &SessionModeState) -> Vec<SessionConfigOption> {
-    let thinking: Vec<SessionConfigSelectOption> = modes
+/// Keep permissions separate from model-specific thinking levels.
+fn build_config_options(
+    models: Option<&ModelState>,
+    modes: &SessionModeState,
+    thinking: SessionConfigOption,
+) -> Vec<SessionConfigOption> {
+    let choices: Vec<_> = modes
         .available_modes
         .iter()
-        .map(|mode| SessionConfigSelectOption::new(mode.id.to_string(), mode.name.clone()))
+        .map(|mode| {
+            SessionConfigSelectOption::new(mode.id.to_string(), mode.name.clone()).description(mode.description.clone())
+        })
         .collect();
     let mut options = vec![
-        SessionConfigOption::select(THOUGHT_LEVEL_CONFIG_ID, "Thinking", modes.current_mode_id.to_string(), thinking)
-            .category(SessionConfigOptionCategory::ThoughtLevel)
-            .description("Set the reasoning effort for this session"),
+        thinking,
+        SessionConfigOption::select(MODE_CONFIG_ID, "Mode", modes.current_mode_id.to_string(), choices)
+            .category(SessionConfigOptionCategory::Mode)
+            .description("Control tool approval for this session"),
     ];
     if let Some(models) = models.filter(|models| !models.available_models.is_empty()) {
         let choices: Vec<SessionConfigSelectOption> = models
@@ -126,8 +180,9 @@ pub async fn session_configuration(
         None => backend.get_available_models().await.ok(),
     };
     let model_state = model_state(models.as_ref(), Some(&state));
-    let modes = thinking_state(backend, &state).await?;
-    let config_options = build_config_options(model_state.as_ref(), &modes);
+    let modes = backend.permission_mode().state();
+    let thinking = thinking_option(backend, &state).await?;
+    let config_options = build_config_options(model_state.as_ref(), &modes, thinking);
     Ok(SessionConfiguration { config_options, models: model_state, modes })
 }
 

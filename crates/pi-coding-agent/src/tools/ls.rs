@@ -46,6 +46,10 @@ impl LsTool {
 
 #[async_trait]
 impl AgentTool for LsTool {
+    fn annotations(&self) -> Option<&pi_agent::ToolAnnotations> {
+        Some(&super::READ_ONLY_ANNOTATIONS)
+    }
+
     fn name(&self) -> &str {
         "ls"
     }

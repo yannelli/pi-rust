@@ -15,6 +15,7 @@ pub mod errors;
 mod events;
 mod ext_ui;
 pub mod listing;
+pub mod permissions;
 pub mod runtime;
 mod session;
 pub mod settings;

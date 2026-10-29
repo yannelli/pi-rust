@@ -14,6 +14,10 @@ use tokio::sync::mpsc::UnboundedReceiver;
 pub trait PiBackend: Send + Sync {
     /// Session events and `extension_ui_request` records as RPC JSON; taken once.
     fn take_events(&self) -> Option<UnboundedReceiver<Value>>;
+    /// Bind the ACP approval client before the session accepts prompts.
+    fn bind_client(&self, session_id: &str, client: Arc<dyn AcpClient>);
+    fn permission_mode(&self) -> super::permissions::PermissionMode;
+    fn set_permission_mode(&self, mode: super::permissions::PermissionMode);
     /// Start a prompt; returns once pi accepted it. Completion arrives as `agent_settled`.
     async fn prompt(&self, message: String, images: Vec<pi_ai::ContentBlock>) -> anyhow::Result<()>;
     async fn abort(&self) -> anyhow::Result<()>;

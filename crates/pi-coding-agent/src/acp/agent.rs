@@ -21,7 +21,8 @@ use super::auth::{TerminalLaunch, auth_methods, client_supports_terminal_auth};
 use super::backend::{AcpClient, BackendFactory, PiBackend};
 use super::commands::{builtin_available_commands, commands_from_pi, load_slash_commands, merge_commands};
 use super::config::{
-    MODEL_CONFIG_ID, THOUGHT_LEVEL_CONFIG_ID, emit_config_options_update, session_configuration, set_session_model,
+    MODE_CONFIG_ID, MODEL_CONFIG_ID, THOUGHT_LEVEL_CONFIG_ID, emit_config_options_update, session_configuration,
+    set_session_model,
 };
 use super::errors::{AcpResult, auth_or_internal, auth_required, internal_failure, invalid_params};
 use super::listing::{find_pi_session, list_pi_sessions, read_session_title};
@@ -160,6 +161,7 @@ impl AcpAgent {
     }
 
     fn register(&self, session_id: &str, cwd: &str, backend: Arc<dyn PiBackend>, auto_title: bool) -> Arc<AcpSession> {
+        backend.bind_client(session_id, self.client.clone());
         let session = AcpSession::new(AcpSessionParams {
             session_id: session_id.to_string(),
             cwd: PathBuf::from(cwd),
@@ -384,14 +386,13 @@ impl AcpAgent {
         DeleteSessionResponse::new()
     }
 
-    /// Legacy `session/set_mode`: the mode is the thinking level.
+    /// Legacy `session/set_mode`: change the tool approval policy.
     pub async fn set_session_mode(&self, params: SetSessionModeRequest) -> AcpResult<SetSessionModeResponse> {
         let session = self.restore_session(&params.session_id.0, None).await?;
         let mode = params.mode_id.0.to_string();
-        if mode.is_empty() {
-            return Err(invalid_params("Expected nonempty string modeId"));
-        }
-        session.backend.set_thinking_level(&mode).await.map_err(|error| internal_failure(&error))?;
+        let mode = super::permissions::PermissionMode::parse(&mode)
+            .ok_or_else(|| invalid_params(format!("Unknown permission mode: {mode}")))?;
+        session.backend.set_permission_mode(mode);
         emit_config_options_update(self.client.as_ref(), &session.session_id, session.backend.as_ref())
             .await
             .map_err(|error| internal_failure(&error))?;
@@ -410,6 +411,12 @@ impl AcpAgent {
             MODEL_CONFIG_ID => {
                 set_session_model(backend, &value).await?;
                 true
+            }
+            MODE_CONFIG_ID => {
+                let mode = super::permissions::PermissionMode::parse(&value)
+                    .ok_or_else(|| invalid_params(format!("Unknown permission mode: {value}")))?;
+                backend.set_permission_mode(mode);
+                false
             }
             THOUGHT_LEVEL_CONFIG_ID => {
                 if value.is_empty() {

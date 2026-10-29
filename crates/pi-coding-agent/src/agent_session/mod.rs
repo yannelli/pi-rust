@@ -128,6 +128,7 @@ pub struct AgentSession {
     pub(crate) state: Mutex<RunState>,
     idle: watch::Sender<bool>,
     pub(crate) tools: Mutex<tools::ToolState>,
+    pub(crate) tool_authorizer: Mutex<Option<pi_agent::BeforeToolCallFn>>,
     pub(crate) builtins: Mutex<builtins::BuiltinState>,
     /// The auth-wrapped stream function, shared by session and summarization requests.
     stream_fn: StreamFn,

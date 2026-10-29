@@ -31,6 +31,17 @@ const DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 type Pending = HashMap<i64, oneshot::Sender<Result<Value, Error>>>;
 
+struct PendingRequest<'a> {
+    requests: &'a Mutex<Pending>,
+    id: i64,
+}
+
+impl Drop for PendingRequest<'_> {
+    fn drop(&mut self) {
+        lock(self.requests).remove(&self.id);
+    }
+}
+
 /// The client end of the connection: notifications and requests to the client.
 pub struct ClientConnection {
     output: RpcOutput,
@@ -56,6 +67,7 @@ impl ClientConnection {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (sender, receiver) = oneshot::channel();
         lock(&self.pending).insert(id, sender);
+        let _pending = PendingRequest { requests: &self.pending, id };
         self.output.send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
         receiver.await.unwrap_or_else(|_| Err(Error::internal_error().data(json!("ACP connection closed"))))
     }
@@ -148,6 +160,17 @@ async fn handle_request(agent: Arc<AcpAgent>, client: Arc<ClientConnection>, id:
     if let Some(after) = after {
         after.await;
     }
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn cancelled_client_requests_release_their_pending_entry() {
+    let client = ClientConnection::new(RpcOutput::spawn(Box::new(std::io::sink())));
+    let mut request = Box::pin(client.request("session/request_permission", json!({})));
+    assert!(futures::poll!(request.as_mut()).is_pending());
+    assert_eq!(lock(&client.pending).len(), 1);
+    drop(request);
+    assert!(lock(&client.pending).is_empty());
 }
 
 /// A record that is neither a request, a notification, nor a response.

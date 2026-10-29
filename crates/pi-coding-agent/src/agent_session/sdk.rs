@@ -240,6 +240,7 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
             state: Mutex::new(RunState::default()),
             idle,
             tools: Mutex::new(tools),
+            tool_authorizer: Mutex::new(None),
             builtins: Mutex::new(builtins),
             stream_fn,
             has_custom_stream,

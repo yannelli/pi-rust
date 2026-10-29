@@ -60,23 +60,17 @@ fn assert_updates(client: &FakeClient, level: &str, levels: &[&str]) {
     assert_eq!(updates.len(), 2, "{updates:?}");
     assert_eq!(
         updates[0],
-        json!({"sessionId": "s1", "update": {"sessionUpdate": "current_mode_update", "currentModeId": level}})
+        json!({"sessionId": "s1", "update": {"sessionUpdate": "current_mode_update", "currentModeId": "auto"}})
     );
     let thinking = option(&updates[1]["update"]["configOptions"], "thought_level");
     assert_eq!(thinking["currentValue"], level);
     assert_eq!(values(thinking), levels);
 }
 
-async fn set_thinking(f: &Fixture, legacy: bool, level: &str) -> Result<Value, agent_client_protocol_schema::Error> {
-    if legacy {
-        let request: SetSessionModeRequest =
-            serde_json::from_value(json!({"sessionId": "s1", "modeId": level})).unwrap();
-        f.agent.set_session_mode(request).await.map(|_| Value::Null)
-    } else {
-        let request: SetSessionConfigOptionRequest =
-            serde_json::from_value(json!({"sessionId": "s1", "configId": "thought_level", "value": level})).unwrap();
-        f.agent.set_session_config_option(request).await.map(|response| serde_json::to_value(response).unwrap())
-    }
+async fn set_thinking(f: &Fixture, level: &str) -> Result<Value, agent_client_protocol_schema::Error> {
+    let request: SetSessionConfigOptionRequest =
+        serde_json::from_value(json!({"sessionId": "s1", "configId": "thought_level", "value": level})).unwrap();
+    f.agent.set_session_config_option(request).await.map(|response| serde_json::to_value(response).unwrap())
 }
 
 async fn set_model(f: &Fixture, legacy: bool, model: &str) {
@@ -91,25 +85,70 @@ async fn set_model(f: &Fixture, legacy: bool, model: &str) {
 
 #[tokio::test]
 async fn reasoning_setters_report_the_level_pi_applied() {
-    for legacy in [false, true] {
-        for requested in ["max", "xhigh", "ordinary", " mean ", " "] {
-            let f = fixture();
-            let result = set_thinking(&f, legacy, requested).await.unwrap();
-            if !legacy {
-                assert_eq!(option(&result["configOptions"], "thought_level")["currentValue"], "max");
-            }
-            assert_eq!(f.backend.calls(), [format!("thinking:{requested}")]);
-            assert_updates(&f.client, "max", &["low", "high", "max"]);
-        }
+    for requested in ["max", "xhigh", "ordinary", " mean ", " "] {
         let f = fixture();
-        f.backend.config().levels = Box::new(|_| Ok(vec!["ordinary".into(), "mean".into()]));
-        f.backend.config().set_thinking = Box::new(|state, _| {
-            state["thinkingLevel"] = json!("mean");
-            Ok(())
-        });
-        set_thinking(&f, legacy, "ordinary").await.unwrap();
-        assert_updates(&f.client, "mean", &["ordinary", "mean"]);
+        let result = set_thinking(&f, requested).await.unwrap();
+        assert_eq!(option(&result["configOptions"], "thought_level")["currentValue"], "max");
+        assert_eq!(f.backend.calls(), [format!("thinking:{requested}")]);
+        assert_updates(&f.client, "max", &["low", "high", "max"]);
     }
+    let f = fixture();
+    f.backend.config().levels = Box::new(|_| Ok(vec!["ordinary".into(), "mean".into()]));
+    f.backend.config().set_thinking = Box::new(|state, _| {
+        state["thinkingLevel"] = json!("mean");
+        Ok(())
+    });
+    set_thinking(&f, "ordinary").await.unwrap();
+    assert_updates(&f.client, "mean", &["ordinary", "mean"]);
+}
+
+#[tokio::test]
+async fn permission_modes_do_not_change_thinking() {
+    for legacy in [false, true] {
+        let f = fixture();
+        for mode in ["ask", "bypass", "auto"] {
+            f.client.clear();
+            if legacy {
+                let request: SetSessionModeRequest =
+                    serde_json::from_value(json!({"sessionId": "s1", "modeId": mode})).unwrap();
+                f.agent.set_session_mode(request).await.unwrap();
+            } else {
+                dispatch(
+                    &f.agent,
+                    "session/set_config_option",
+                    json!({"sessionId": "s1", "configId": "mode", "value": mode}),
+                )
+                .await
+                .unwrap();
+            }
+            let updates = f.client.updates();
+            assert_eq!(updates[0]["update"]["currentModeId"], mode);
+            let options = &updates[1]["update"]["configOptions"];
+            assert_eq!(option(options, "mode")["currentValue"], mode);
+            assert_eq!(option(options, "thought_level")["currentValue"], "max");
+        }
+        assert_eq!(f.backend.calls(), ["mode:ask", "mode:bypass", "mode:auto"]);
+        for mode in ["high", "unknown", ""] {
+            let result = dispatch(&f.agent, "session/set_mode", json!({"sessionId": "s1", "modeId": mode})).await;
+            assert_eq!(crate::acp::errors::code(&result.err().unwrap()), -32602);
+        }
+    }
+}
+
+#[tokio::test]
+async fn model_labels_preserve_ids_and_use_provider_names() {
+    let f = fixture();
+    f.backend.config().models = Ok(json!({"models": [
+        {"provider": "xai", "id": "grok-4.7", "name": "Grok 4.7"},
+        {"provider": "xai", "id": "grok-4-fast", "name": "Grok 4 Fast"},
+        {"provider": "work", "providerName": "Work Gateway", "id": "custom", "name": "Custom"}
+    ]}));
+    let config = crate::acp::config::session_configuration(f.backend.as_ref(), None, None).await.unwrap();
+    let models = config.models.unwrap().available_models;
+    assert_eq!(models[0].model_id, "xai/grok-4.7");
+    assert_eq!(models[0].name, "xAI: Grok 4.7");
+    assert_eq!(models[1].name, "xAI: Grok 4 Fast ⚡");
+    assert_eq!(models[2].name, "Work Gateway: Custom");
 }
 
 #[tokio::test]
@@ -120,9 +159,8 @@ async fn model_setters_refresh_model_specific_levels_and_usage() {
             f.client.clear();
             set_model(&f, legacy, &format!("test/{model}")).await;
             let updates: Vec<Value> = f.client.updates().into_iter().take(2).collect();
-            let (level, levels) =
-                if model == "plain" { ("off", vec!["off"]) } else { ("max", vec!["low", "high", "max"]) };
-            assert_eq!(updates[0]["update"]["currentModeId"], level);
+            let levels = if model == "plain" { vec!["off"] } else { vec!["low", "high", "max"] };
+            assert_eq!(updates[0]["update"]["currentModeId"], "auto");
             assert_eq!(values(option(&updates[1]["update"]["configOptions"], "thought_level")), levels);
         }
         assert_eq!(f.backend.calls(), ["model:plain", "model:reasoning"]);
@@ -131,23 +169,21 @@ async fn model_setters_refresh_model_specific_levels_and_usage() {
 
 #[tokio::test]
 async fn failed_reads_after_a_reasoning_change_emit_nothing() {
-    for legacy in [false, true] {
-        for failure in ["state", "discovery", "empty", "inconsistent"] {
-            let f = fixture();
-            match failure {
-                "state" => f.backend.config().state_error = Some("state failed".into()),
-                "discovery" => f.backend.config().levels = Box::new(|_| Err(anyhow::anyhow!("discovery failed"))),
-                _ => {
-                    let level = if failure == "empty" { "" } else { "medium" };
-                    f.backend.config().set_thinking = Box::new(move |state, _| {
-                        state["thinkingLevel"] = json!(level);
-                        Ok(())
-                    });
-                }
+    for failure in ["state", "discovery", "empty", "inconsistent"] {
+        let f = fixture();
+        match failure {
+            "state" => f.backend.config().state_error = Some("state failed".into()),
+            "discovery" => f.backend.config().levels = Box::new(|_| Err(anyhow::anyhow!("discovery failed"))),
+            _ => {
+                let level = if failure == "empty" { "" } else { "medium" };
+                f.backend.config().set_thinking = Box::new(move |state, _| {
+                    state["thinkingLevel"] = json!(level);
+                    Ok(())
+                });
             }
-            assert!(set_thinking(&f, legacy, "max").await.is_err(), "{failure}");
-            assert!(f.client.updates().is_empty(), "{failure}");
         }
+        assert!(set_thinking(&f, "max").await.is_err(), "{failure}");
+        assert!(f.client.updates().is_empty(), "{failure}");
     }
 }
 
@@ -188,7 +224,7 @@ async fn model_changes_refresh_usage_but_thinking_changes_do_not() {
     assert_eq!(f.client.kinds(), ["current_mode_update", "config_option_update", "usage_update"]);
     let calls = f.backend.stats_calls.load(Ordering::SeqCst);
     f.client.clear();
-    set_thinking(&f, false, "high").await.unwrap();
+    set_thinking(&f, "high").await.unwrap();
     assert_eq!(f.backend.stats_calls.load(Ordering::SeqCst), calls);
     assert_eq!(f.client.kinds(), ["current_mode_update", "config_option_update"]);
 }
@@ -209,18 +245,23 @@ async fn new_sessions_advertise_model_and_thinking_selectors() {
     let request: NewSessionRequest = serde_json::from_value(json!({"cwd": env.work(), "mcpServers": []})).unwrap();
     let result = agent.new_session(request).await.unwrap().response;
     assert_eq!(result["models"]["currentModelId"], "test/beta");
-    assert_eq!(result["modes"]["currentModeId"], "high");
+    assert_eq!(result["modes"]["currentModeId"], "auto");
     let levels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+    let names = ["Off", "Minimal", "Low", "Medium", "High", "Extra High", "Max"];
     let thinking: Vec<Value> =
-        levels.iter().map(|level| json!({"value": level, "name": format!("Thinking: {level}")})).collect();
+        levels.iter().zip(names).map(|(level, name)| json!({"value": level, "name": name})).collect();
+    let mode = option(&result["configOptions"], "mode");
+    assert_eq!(mode["category"], "mode");
+    assert_eq!(values(mode), ["auto", "ask", "bypass"]);
     assert_eq!(
         result["configOptions"],
         json!([
             {"type": "select", "id": "model", "category": "model", "name": "Model",
                 "description": "Select the model for this session", "currentValue": "test/beta",
-                "options": [{"value": "test/alpha", "name": "test/Alpha"}, {"value": "test/beta", "name": "test/Beta"}]},
+                "options": [{"value": "test/alpha", "name": "test: Alpha"}, {"value": "test/beta", "name": "test: Beta"}]},
             {"type": "select", "id": "thought_level", "category": "thought_level", "name": "Thinking",
                 "description": "Set the reasoning effort for this session", "currentValue": "high", "options": thinking},
+            mode,
         ])
     );
     assert!(client.updates().is_empty(), "updates wait until the response went out");
@@ -269,7 +310,8 @@ async fn load_advertises_the_exact_levels_too() {
         let request =
             serde_json::from_value(json!({"sessionId": "s2", "cwd": f.env.work(), "mcpServers": []})).unwrap();
         let result = f.agent.load_session(request).await.unwrap().response;
-        assert_eq!(result["modes"]["currentModeId"], last.as_str());
+        assert_eq!(result["modes"]["currentModeId"], "auto");
+        assert_eq!(option(&result["configOptions"], "thought_level")["currentValue"], last);
         assert_eq!(values(option(&result["configOptions"], "thought_level")), levels);
         assert_eq!(result["_meta"]["piAcp"]["startupInfo"], Value::Null);
     }

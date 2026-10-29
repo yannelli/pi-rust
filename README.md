@@ -351,6 +351,16 @@ In other terminals, `/terminal-setup` changes nothing.
 
 Each editor session runs a pi session in its project directory. pi saves it in `~/.pi/agent/sessions/`, as it does all sessions. Thus the editor can show these sessions in a list and resume or delete them. `pi -r` can resume them too. These features of the editor work: the model and thinking selectors, tool call diffs and terminals, context usage, and slash commands. The slash commands are prompt templates, `/skill:name`, `/compact`, `/autocompact`, `/export`, `/session`, `/name`, `/steering`, `/follow-up`, and `/changelog`.
 
+The **Mode** selector controls tool approval independently of **Thinking**:
+
+- **Auto** (default): allow tools marked read-only; ask before other tools.
+- **Ask**: ask before every tool call.
+- **Bypass**: skip ACP tool approvals. Extension dialogs still apply.
+
+Approval failures, rejected requests, and cancellation prevent execution. These modes are not a sandbox: Auto trusts tool authors' read-only annotations, and read-only tools can read outside the project. Use Ask when each call needs review. New connections start in Auto; Bypass is not saved. Model labels use provider display names, and catalog variants with a `fast` segment in their ID have a ⚡ label. ACP has no standard model icon field; this label does not add a fast-mode toggle to other models.
+
+Paseo's error `cannot preapprove exact MCP tools for unattended execution` is a host-side provider-policy restriction, raised before ACP starts. Changing Pi's mode does not remove it; the Paseo ACP adapter needs exact-tool preapproval support. Do not use Bypass as a substitute for an exact-tool allowlist. Client-supplied `mcpServers` are not currently loaded; configure servers in Pi's `mcp.json` files.
+
 To hide the startup information block, set `quietStartup: true` in the pi settings. To accept embedded file contents in prompts, set `PI_ACP_ENABLE_EMBEDDED_CONTEXT=true`. If no models are configured, the editor offers to start pi in a terminal, where you can log in. ACP mode is a port of [pi-acp](https://github.com/svkozak/pi-acp) by Sergii Kozak (MIT license).
 
 ## Configuration
@@ -479,7 +489,7 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. These p
 - `grep` and `find` use the Rust `ignore` crate, so pi-rust does not download `rg` or `fd`.
 - The version check and `pi update --self` use the releases of this repository.
 - Word movement in Chinese, Japanese, Korean (CJK), and Thai text uses ICU4X dictionaries. Thus some word boundaries are different from `Intl.Segmenter` in Node.
-- `pi --mode acp` (see [ACP](#acp-zed-and-other-editors)) is an addition. Upstream pi needs the separate pi-acp adapter.
+- `pi --mode acp` (see [ACP](#acp-zed-and-other-editors)) is an addition. Upstream pi needs the separate pi-acp adapter. Permission modes are separate from thinking levels and gate tool execution.
 - Markdown export (see [Use](#use)) is an addition: `/export notes.md` and `pi --export session.jsonl notes.md` write Markdown. Upstream pi exports only HTML and JSONL.
 - The slash commands `/diff`, `/init`, `/review`, `/context`, `/undo`, and `/retry` (see [Use](#use)) are additions. Upstream pi has none of them, and it shows context use only in the footer.
 - `pi completion` and `pi doctor` are additions. Upstream pi has neither command.
