@@ -64,6 +64,53 @@ async fn settings_change_the_hide_thinking_setting() {
     .await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn statusline_editor_applies_a_preset_and_restores_the_prompt() {
+    local(async {
+        let ui = start(Options::default()).await;
+        ui.submit("/statusline").await;
+        ui.wait_for("Status line · global settings").await;
+        ui.send("\x1b[B").await;
+        ui.send("\r").await;
+        ui.send("compact").await;
+        ui.send("\r").await;
+        ui.wait_until("status line saved", |ui| {
+            ui.session().settings().status_line().is_some_and(|settings| settings.preset.as_deref() == Some("compact"))
+        })
+        .await;
+        ui.send("\x1b").await;
+        ui.wait_until("status line editor closed", |ui| !ui.screen().contains("Status line · global settings")).await;
+        ui.wait_for("work · tiny").await;
+        ui.send("typed after statusline").await;
+        ui.wait_for("typed after statusline").await;
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_empty_module_layout_hides_the_footer_but_keeps_extension_statuses() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use pi_coding_agent::interactive::components::FooterComponent;
+    use pi_coding_agent::interactive::footer_data::FooterData;
+    use pi_coding_agent::interactive::status_line::StatusLineConfig;
+    use pi_tui::Component;
+
+    local(async {
+        let ui = start(Options::default()).await;
+        let data = Rc::new(RefCell::new(FooterData::new(&ui.cwd())));
+        let mut footer = FooterComponent::new(ui.session(), data.clone());
+        let settings = serde_json::from_value(serde_json::json!({"segments": []})).unwrap();
+        footer.set_status_line(StatusLineConfig::from_settings(&settings, None), Rc::new(|| {}));
+        assert!(footer.render(100).is_empty());
+        data.borrow_mut().set_extension_status("test", Some("extension status"));
+        assert_eq!(footer.render(100).len(), 1);
+        assert!(footer.render(100)[0].contains("extension status"));
+    })
+    .await;
+}
+
 struct OutsideAuth;
 
 #[async_trait::async_trait]

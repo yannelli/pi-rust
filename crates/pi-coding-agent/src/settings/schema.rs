@@ -233,6 +233,8 @@ pub struct StatusLineSettings {
     pub theme: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icons: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<String>,
     /// Segment names for one line, or a list of lines.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub segments: Option<Value>,

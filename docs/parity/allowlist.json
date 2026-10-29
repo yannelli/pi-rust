@@ -24,6 +24,10 @@
   ],
   "settings": [
     {
+      "item": "theme",
+      "reason": "pi-rust additionally ships ghostty, darcula-islands, nord, and catppuccin harness themes. The setting remains upstream-compatible."
+    },
+    {
       "item": "queueMode",
       "reason": "Legacy key. pi-rust migrates it to steeringMode when settings load (settings/manager.rs) and keeps no field for it in Settings."
     },
@@ -49,7 +53,7 @@
     },
     {
       "item": "statusLine",
-      "reason": "pi-rust extension: custom status line"
+      "reason": "pi-rust extension: custom status line with editable modules, palettes, alignment, and context headroom"
     },
     {
       "item": "terminal.iterm2",
@@ -63,7 +67,7 @@
     },
     {
       "item": "statusline",
-      "reason": "pi-rust extension: custom status line"
+      "reason": "pi-rust extension: custom status line and TUI editor"
     },
     {
       "item": "mcp",

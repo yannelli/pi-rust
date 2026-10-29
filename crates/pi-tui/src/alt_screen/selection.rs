@@ -382,7 +382,7 @@ fn release_selection(inner: &TuiInner, event: SgrMouseEvent, size: (usize, usize
             && anchor.row == point.row
             && anchor.col == point.col;
         let url = alt.pressed_url.take().filter(|_| is_click);
-        let open = url.and_then(|url| alt.open_url.clone().map(|open| (open, url)));
+        let open = alt.open_url.clone().zip(url);
         if open.is_some() {
             alt.selection_anchor = None;
             alt.selection_focus = None;
