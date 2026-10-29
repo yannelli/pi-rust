@@ -33,6 +33,19 @@ pub fn codex_config_path(home: &Path) -> PathBuf {
     env_dir("CODEX_HOME").unwrap_or_else(|| home.join(".codex")).join("config.toml")
 }
 
+pub(super) fn validate_source(choice: &str, home: &Path) -> Result<(), String> {
+    let missing = match choice {
+        "from-claude" => read_command(&claude_settings_path(home)).is_none().then(|| claude_settings_path(home)),
+        "from-cursor" => read_command(&cursor_config_path(home)).is_none().then(|| cursor_config_path(home)),
+        "from-codex" => read_codex_items(&codex_config_path(home)).is_none().then(|| codex_config_path(home)),
+        _ => None,
+    };
+    match missing {
+        Some(path) => Err(format!("No status line found in {}.", path.display())),
+        None => Ok(()),
+    }
+}
+
 /// The `statusLine` command in a JSON settings file, when it is a non-empty command.
 pub fn read_command(path: &Path) -> Option<ExternalCommand> {
     let value: Value = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;

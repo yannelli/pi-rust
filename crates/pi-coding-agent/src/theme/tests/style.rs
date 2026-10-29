@@ -252,7 +252,10 @@ fn registered_themes_are_listed_and_names_with_slashes_are_rejected() {
     let _state = global_state();
     let theme = Arc::new(load_edited("light", |json| json["name"] = json!("zeta")));
     set_registered_themes(vec![theme.clone()]).expect("register");
-    assert_eq!(get_available_themes(), vec!["system", "dark", "light", "zeta"]);
+    assert_eq!(
+        get_available_themes(),
+        vec!["system", "catppuccin", "darcula-islands", "dark", "ghostty", "light", "nord", "zeta"]
+    );
     assert!(Arc::ptr_eq(&get_theme("zeta").expect("registered"), &theme));
     let invalid = Theme::new(
         TokenMap::from_fn(|_| Some(pi_tui::colors::ColorValue::Text(String::new()))),
