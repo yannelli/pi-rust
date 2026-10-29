@@ -2,6 +2,21 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.7.7] - 2026-10-29
+
+### Added
+
+- **extensions:** add explicit CLI management commands ([50ab381](https://github.com/yannelli/pi-rust/commit/50ab381b0d9e73aafdfd3871c06be880d13c02bd))
+- **iterm2:** offer confirmed current-pane setup with it2 ([314e6b5](https://github.com/yannelli/pi-rust/commit/314e6b58bcd0e4c8ea9ac84f40e6bb2df3c902f2))
+- **models:** support global provider exclusions ([2b596ff](https://github.com/yannelli/pi-rust/commit/2b596ff2b03c01ac9f26cdb35a7172c383df4d95))
+
+### Fixed
+
+- **ai:** use the bound ChatGPT OAuth callback port ([ebdbaed](https://github.com/yannelli/pi-rust/commit/ebdbaed17567cc582d92b71cfec4f8c5c80d2ea3))
+- **statusline:** terminate command input and preserve output on failure ([91f7acf](https://github.com/yannelli/pi-rust/commit/91f7acfedb2a0a91316d0a2b0f5432f175ca23b2))
+- **tui:** recall slash commands and clear drafts with Escape ([5eab54a](https://github.com/yannelli/pi-rust/commit/5eab54a5ba8393fb4db84cd7cfa32c88d0549527))
+- **acp:** separate permission modes from thinking controls ([c616f1c](https://github.com/yannelli/pi-rust/commit/c616f1c23caac15775b3fa48dca23818f7a84649))
+
 ## [0.7.6] - 2026-10-29
 
 ### Added
