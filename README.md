@@ -328,9 +328,10 @@ When pi runs in iTerm2, the integration does these things:
 
 `/terminal-setup` (as in Claude Code) does these steps in iTerm2:
 
-- It sets `terminal.iterm2` to `true` in `~/.pi/agent/settings.json`, unless the key is already set.
-- On macOS, it lets programs write the clipboard (`defaults write com.googlecode.iterm2 AllowClipboardAccess -bool true`), so `/copy` works. Restart iTerm2 to apply this change.
-- It shows the steps that it cannot do: Option as Alt (Esc+), notification alerts for escape sequences, and a status bar component for `user.pi_state`.
+- It sets `terminal.iterm2` to `true` in `~/.pi/agent/settings.json` when unset or `false`. An existing feature-selection object is preserved.
+- On the local Mac (not over SSH), it lets programs write the clipboard (`defaults write com.googlecode.iterm2 AllowClipboardAccess -bool true`), so `/copy` works. Restart iTerm2 to apply this change.
+- If [tmc/it2](https://github.com/tmc/it2) is installed, it offers to configure Option-as-Alt and escape-sequence notification alerts for the current pane. Run `it2 auth check` first and approve API access. Pi asks before changing the pane and leaves saved profiles untouched.
+- It provides manual steps when automation is unavailable, and instructions for a status bar component showing `user.pi_state`. Pi does not install external utilities automatically.
 
 In other terminals, `/terminal-setup` changes nothing.
 

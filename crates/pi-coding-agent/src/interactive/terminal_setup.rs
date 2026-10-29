@@ -11,19 +11,59 @@ use super::mode::InteractiveMode;
 
 const DEFAULTS_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// `defaults write com.googlecode.iterm2 AllowClipboardAccess -bool true`, on macOS only.
-async fn allow_clipboard_access() -> Result<(), String> {
-    if !cfg!(target_os = "macos") {
-        return Err("run /terminal-setup on the Mac that runs iTerm2".into());
-    }
-    let mut command = tokio::process::Command::new("defaults");
-    command.args(["write", "com.googlecode.iterm2", "AllowClipboardAccess", "-bool", "true"]);
-    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(true);
+fn local_mac() -> bool {
+    cfg!(target_os = "macos") && std::env::var_os("SSH_CONNECTION").is_none() && std::env::var_os("SSH_TTY").is_none()
+}
+
+async fn setup_command(program: &str, args: &[&str]) -> Result<String, String> {
+    let mut command = tokio::process::Command::new(program);
+    command.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     let output = tokio::time::timeout(DEFAULTS_TIMEOUT, command.output())
         .await
-        .map_err(|_| "defaults did not finish".to_string())?
-        .map_err(|error| format!("could not run defaults: {error}"))?;
-    if output.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&output.stderr).trim().to_string()) }
+        .map_err(|_| format!("{program} timed out; grant iTerm2 API access if prompted, then retry"))?
+        .map_err(|error| format!("could not run {program}: {error}"))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        Err(format!(
+            "{program} exited with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim().chars().take(1000).collect::<String>()
+        ))
+    }
+}
+
+/// Target this pane, never whichever pane currently has focus.
+fn iterm_session_id(value: &str) -> Option<&str> {
+    let id = value.rsplit(':').next()?;
+    (id.starts_with(|c: char| c.is_ascii_alphanumeric()) && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+        .then_some(id)
+}
+
+const SESSION_PROPERTIES: [(&str, &str); 4] = [
+    ("Option Key Sends", "2"),
+    ("Right Option Key Sends", "2"),
+    ("BM Growl", "true"),
+    ("Send Terminal Generated Alerts", "true"),
+];
+
+async fn configure_it2_session(id: &str) -> Result<(), String> {
+    for (property, value) in SESSION_PROPERTIES {
+        setup_command("it2", &["profile", "session-set-property", id, property, value])
+            .await
+            .map_err(|error| format!("{property}: {error}. Earlier steps may have applied."))?;
+    }
+    Ok(())
+}
+
+/// `defaults write com.googlecode.iterm2 AllowClipboardAccess -bool true`, on macOS only.
+async fn allow_clipboard_access() -> Result<(), String> {
+    if !local_mac() {
+        return Err("run /terminal-setup locally on the Mac that runs iTerm2, not over SSH".into());
+    }
+    setup_command("defaults", &["write", "com.googlecode.iterm2", "AllowClipboardAccess", "-bool", "true"])
+        .await
+        .map(|_| ())
 }
 
 /// What `/terminal-setup` changed, and the steps that it cannot do.
@@ -43,7 +83,9 @@ pub fn setup_report(enabled: bool, clipboard: &Result<(), String>) -> String {
         integration,
         &clipboard,
         "",
-        "Do these steps in iTerm2 if you want them:",
+        "For optional automation, install [tmc/it2](https://github.com/tmc/it2) on your Mac and run `it2 auth check`. Enable iTerm2 Settings > General > Magic > Enable Python API if required, and approve its access prompt. Run `/terminal-setup` again: Pi offers to set Option-as-Alt and notification alerts for this pane only. It does not install utilities or replace saved profiles.",
+        "",
+        "Without it2, or to make the settings permanent, follow these steps:",
         "",
         "- To use Option as Alt in key bindings: Settings > Profiles > Keys > General. Set Left Option key and Right Option key to Esc+.",
         "- To see a notification when a run finishes: Settings > Profiles > Terminal. Turn on Notification Center Alerts, click Filter Alerts, and turn on Send escape sequence-generated alerts.",
@@ -64,6 +106,19 @@ impl InteractiveMode {
         self.spawn(move |mode| async move {
             let clipboard = tokio::spawn(allow_clipboard_access()).await.unwrap_or_else(|error| Err(error.to_string()));
             mode.add_bordered_markdown("Terminal setup", &setup_report(enabled, &clipboard));
+            if !local_mac() { return; }
+            let Some(id) = std::env::var("ITERM_SESSION_ID").ok()
+                .and_then(|value| iterm_session_id(&value).map(str::to_string)) else { return };
+            let help = setup_command("it2", &["profile", "session-set-property", "--help"]).await;
+            if !help.is_ok_and(|text| text.contains("session-set-property")) {
+                mode.show_status("Optional it2 automation unavailable. See Terminal setup above for installation and manual steps.");
+                return;
+            }
+            if !mode.ask_confirm("Configure this iTerm2 pane?", "Use it2 to set both Option keys to Esc+ and enable escape-sequence notifications? Only this pane changes; saved profiles are untouched.").await { return; }
+            match configure_it2_session(&id).await {
+                Ok(()) => mode.show_status("iTerm2 pane configured: Option-as-Alt and terminal notifications enabled. No restart needed for these pane settings."),
+                Err(error) => mode.show_error(&format!("iTerm2 pane setup failed: {error}")),
+            }
         });
     }
 }
@@ -71,6 +126,26 @@ impl InteractiveMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn setup_targets_only_the_explicit_iterm_pane() {
+        assert_eq!(iterm_session_id("w0t0p0:abc-123"), Some("abc-123"));
+        assert_eq!(iterm_session_id("abc-123"), Some("abc-123"));
+        assert_eq!(iterm_session_id(""), None);
+        assert_eq!(iterm_session_id("w0t0p0:"), None);
+        assert_eq!(iterm_session_id("--all"), None);
+        assert_eq!(iterm_session_id("id with spaces"), None);
+        assert_eq!(SESSION_PROPERTIES[0], ("Option Key Sends", "2"));
+        assert_eq!(SESSION_PROPERTIES[3], ("Send Terminal Generated Alerts", "true"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn setup_command_reports_failure_instead_of_claiming_success() {
+        assert_eq!(setup_command("sh", &["-c", "printf ready"]).await.unwrap(), "ready");
+        let error = setup_command("sh", &["-c", "echo denied >&2; exit 1"]).await.unwrap_err();
+        assert!(error.contains("denied"));
+    }
 
     #[test]
     fn report_says_what_changed() {

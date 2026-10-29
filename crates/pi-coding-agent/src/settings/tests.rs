@@ -233,6 +233,12 @@ fn iterm2_features_are_off_unless_turned_on() {
     assert!(settings.enable_iterm2());
     assert!(settings.iterm2_features().any());
     assert!(!settings.enable_iterm2());
+    let disabled = SettingsManager::in_memory(json!({"terminal": {"iterm2": false}}));
+    assert!(disabled.enable_iterm2());
+    assert!(disabled.iterm2_features().any());
+    let custom = SettingsManager::in_memory(json!({"terminal": {"iterm2": {"badge": false}}}));
+    assert!(!custom.enable_iterm2());
+    assert!(!custom.iterm2_features().badge);
 }
 
 #[test]

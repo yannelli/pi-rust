@@ -190,13 +190,19 @@ impl SettingsManager {
         ITerm2Features::from_value(self.state().merged.terminal.as_ref().and_then(|terminal| terminal.iterm2.as_ref()))
     }
 
-    /// Turns on `terminal.iterm2` in global settings unless it is already set.
+    /// Turns on `terminal.iterm2`, preserving an existing feature selection.
     pub fn enable_iterm2(&self) -> bool {
-        let unset = self.state().global_typed.terminal.as_ref().is_none_or(|terminal| terminal.iterm2.is_none());
-        if unset {
+        let enable = self
+            .state()
+            .global_typed
+            .terminal
+            .as_ref()
+            .and_then(|terminal| terminal.iterm2.as_ref())
+            .is_none_or(|value| value == &json!(false));
+        if enable {
             self.set_global_nested("terminal", "iterm2", Some(json!(true)));
         }
-        unset
+        enable
     }
 
     /// `(images, trueColor, hyperlinks)` overrides; `Some(None)` for images disables them.
