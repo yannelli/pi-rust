@@ -265,7 +265,7 @@ fn output_lines_drop_trailing_blank_lines() {
 #[tokio::test]
 async fn command_reads_the_payload_and_sees_the_width() {
     let config = CommandConfig {
-        command: r#"read -r json; printf '%s|%s\n' "$COLUMNS" "${json:0:2}""#.into(),
+        command: r#"set -e; read -r json; printf '%s|%s\n' "$COLUMNS" "${json:0:2}""#.into(),
         padding: 0,
         refresh: None,
         shell_path: None,
@@ -274,6 +274,17 @@ async fn command_reads_the_payload_and_sees_the_width() {
     let lines = run_command(config, payload, 77, std::env::temp_dir()).await.expect("command ran");
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert!(lines[0].starts_with("77|{\""), "{lines:?}");
+}
+
+#[tokio::test]
+async fn failed_status_commands_do_not_replace_the_last_successful_output() {
+    let config = CommandConfig {
+        command: "printf 'partial output'; exit 1".into(),
+        padding: 0,
+        refresh: None,
+        shell_path: None,
+    };
+    assert!(run_command(config, "{}".into(), 80, std::env::temp_dir()).await.is_none());
 }
 
 #[test]
