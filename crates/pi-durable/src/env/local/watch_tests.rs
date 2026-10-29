@@ -1,15 +1,10 @@
 //! The native watch bookkeeping: a watch the backend dropped is installed again (upstream issue 11342).
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use super::*;
 
 /// A new empty directory under the system temp directory.
-fn temp_dir() -> PathBuf {
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let dir = std::env::temp_dir().join(format!("pi-watch-rearm-{}-{nanos}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+fn temp_dir() -> tempfile::TempDir {
+    tempfile::Builder::new().prefix("pi-watch-rearm-").tempdir().unwrap()
 }
 
 /// A native watcher core of `dir`, recursive, and the native events it gets.
@@ -52,7 +47,8 @@ async fn event_about(receiver: &mut mpsc::UnboundedReceiver<Message>, path: &Pat
 
 #[tokio::test]
 async fn watches_a_directory_again_once_the_backend_dropped_its_watch_while_it_kept_its_inode() {
-    let root = temp_dir();
+    let directory = temp_dir();
+    let root = directory.path();
     let child = root.join("a");
     std::fs::create_dir(&child).unwrap();
     let (root_path, child_path) = (root.to_string_lossy().into_owned(), child.to_string_lossy().into_owned());
@@ -69,12 +65,13 @@ async fn watches_a_directory_again_once_the_backend_dropped_its_watch_while_it_k
     std::fs::write(child.join("y.md"), "x").unwrap();
     assert!(event_about(&mut receiver, &child.join("y.md")).await, "no event from the watch of a");
     core.watcher = None;
-    std::fs::remove_dir_all(&root).unwrap();
+    directory.close().unwrap();
 }
 
 #[tokio::test]
 async fn keeps_the_watch_of_a_directory_on_other_events() {
-    let root = temp_dir();
+    let directory = temp_dir();
+    let root = directory.path();
     let child = root.join("a");
     std::fs::create_dir(&child).unwrap();
     let child_path = child.to_string_lossy().into_owned();
@@ -83,5 +80,5 @@ async fn keeps_the_watch_of_a_directory_on_other_events() {
     core.on_event(vec![child.clone()], false);
     assert!(core.installed.contains_key(&child_path));
     core.watcher = None;
-    std::fs::remove_dir_all(&root).unwrap();
+    directory.close().unwrap();
 }
