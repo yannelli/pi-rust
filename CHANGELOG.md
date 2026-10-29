@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.7.6] - 2026-10-29
+
+### Added
+
+- **tui:** add statusline editing and matching themes (#120) ([19bc346](https://github.com/yannelli/pi-rust/commit/19bc3461f027b2720f0475b90a5b48ea3887ba90))
+
 ## [0.7.5] - 2026-10-27
 
 ### Added
