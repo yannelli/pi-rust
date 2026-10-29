@@ -315,9 +315,7 @@ impl Component for FooterComponent {
     fn render(&mut self, width: usize) -> Vec<String> {
         let snapshot = self.snapshot();
         let custom = match &self.status_line {
-            Some(ActiveStatusLine::Builtin(builtin)) => {
-                Some(builtin.render(&snapshot, width)).filter(|lines| !lines.is_empty())
-            }
+            Some(ActiveStatusLine::Builtin(builtin)) => Some(builtin.render(&snapshot, width)),
             Some(ActiveStatusLine::Command(command)) => {
                 command.observe(&snapshot, width);
                 command.lines(width)

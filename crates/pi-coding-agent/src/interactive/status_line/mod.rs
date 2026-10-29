@@ -6,7 +6,10 @@
 mod builtin;
 mod chips;
 mod command;
+mod editor;
+mod editor_items;
 mod external;
+mod layout_editor;
 mod segments;
 mod slash;
 mod themes;
@@ -82,6 +85,10 @@ impl StatusSnapshot {
     /// Context use in percent, when known.
     pub fn context_percent(&self) -> Option<f64> {
         self.context.as_ref().and_then(|usage| usage.percent)
+    }
+
+    pub fn context_headroom(&self) -> Option<u64> {
+        Some(self.context_window?.saturating_sub(self.context.as_ref()?.tokens?))
     }
 }
 
@@ -178,6 +185,7 @@ pub fn status_payload(snapshot: &StatusSnapshot) -> Value {
             "context_window_size": snapshot.context_window,
             "used_percentage": percent,
             "remaining_percentage": percent.map(|percent| (100.0 - percent).max(0.0)),
+            "remaining_tokens": snapshot.context_headroom(),
             "auto_compact": snapshot.auto_compact,
         },
     })
@@ -191,7 +199,7 @@ pub fn status_line_choice(current: Option<Value>, choice: &str) -> Result<Value,
         _ => serde_json::Map::new(),
     };
     if preset_names().any(|preset| preset == choice) {
-        for key in ["chip", "style", "theme", "icons", "segments", "separator"] {
+        for key in ["chip", "style", "theme", "icons", "segments", "separator", "layout"] {
             object.remove(key);
         }
         object.insert("type".into(), json!("builtin"));

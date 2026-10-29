@@ -185,6 +185,35 @@ impl SettingsManager {
         Some(status_line)
     }
 
+    pub fn global_status_line_value(&self) -> Option<Value> {
+        self.state().global.get("statusLine").cloned()
+    }
+
+    pub fn set_status_line(&self, value: Value) -> Result<(), String> {
+        serde_json::from_value::<StatusLineSettings>(value.clone()).map_err(|error| error.to_string())?;
+        if self.state().global_load_failed {
+            return Err("Fix the global settings file before saving the status line.".into());
+        }
+        let previous = self.global_status_line_value();
+        let result = self.write(SettingsScope::Global, |map| {
+            map.insert("statusLine".into(), value.clone());
+        });
+        if result.is_err() {
+            let mut state = self.state.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+            match previous {
+                Some(value) => {
+                    state.global.insert("statusLine".into(), value);
+                }
+                None => {
+                    state.global.remove("statusLine");
+                }
+            }
+            drop(state);
+            self.recompute();
+        }
+        result
+    }
+
     /// `terminal.iterm2` (pi-rust extension).
     pub fn iterm2_features(&self) -> ITerm2Features {
         ITerm2Features::from_value(self.state().merged.terminal.as_ref().and_then(|terminal| terminal.iterm2.as_ref()))
