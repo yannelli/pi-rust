@@ -41,6 +41,10 @@ struct Server {
 
 impl Server {
     async fn start(script: Script, stall_handshake: bool) -> Self {
+        Self::start_with_sse_delay(script, stall_handshake, Duration::ZERO).await
+    }
+
+    async fn start_with_sse_delay(script: Script, stall_handshake: bool, sse_delay: Duration) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base_url = format!("http://{}", listener.local_addr().unwrap());
         let seen: Arc<Mutex<Seen>> = Arc::default();
@@ -51,6 +55,9 @@ impl Server {
                 tokio::spawn(async move {
                     let head = peek_head(&stream).await.to_ascii_lowercase();
                     if !head.contains("upgrade: websocket") {
+                        if !sse_delay.is_zero() {
+                            tokio::time::sleep(sse_delay).await;
+                        }
                         return serve_sse(stream, &seen).await;
                     }
                     if stall_handshake {
@@ -367,20 +374,26 @@ async fn an_unset_transport_uses_websockets_without_cached_context() {
 #[tokio::test]
 async fn uncached_retries_fall_back_to_sse_after_a_mid_stream_disconnect() {
     let partial = events("response.completed", "completed", None)[..3].to_vec();
-    let server = Server::start(Arc::new(move |_, _| Action::ReplyThenStall(partial.clone())), false).await;
+    let server = Server::start_with_sse_delay(
+        Arc::new(move |_, _| Action::ReplyThenStall(partial.clone())),
+        false,
+        Duration::from_millis(200),
+    )
+    .await;
     let model = codex_model(&server.base_url);
-    let summary = |session: &str| StreamOptions {
+    let summary = |session: &str, timeout_ms| StreamOptions {
         cache_retention: Some(crate::registry::CacheRetention::None),
-        timeout_ms: Some(100),
+        timeout_ms,
         ..options(&mock_token("acc"), Transport::Auto, Some(session))
     };
-    let failed = OpenAICodexResponses.stream(&model, &context(), summary("uncached-retry")).result(&model).await;
+    let failed =
+        OpenAICodexResponses.stream(&model, &context(), summary("uncached-retry", Some(100))).result(&model).await;
     assert_eq!(failed.error_message.as_deref(), Some("WebSocket idle timeout after 100ms"));
-    let retried = OpenAICodexResponses.stream(&model, &context(), summary("uncached-retry")).result(&model).await;
+    let retried = OpenAICodexResponses.stream(&model, &context(), summary("uncached-retry", None)).result(&model).await;
     assert_eq!(retried.text(), "Hello", "{:?}", retried.error_message);
     assert_eq!(server.seen(|seen| (seen.connections, seen.http_requests)), (1, 1));
     // Another session still starts on a WebSocket.
-    OpenAICodexResponses.stream(&model, &context(), summary("uncached-other")).result(&model).await;
+    OpenAICodexResponses.stream(&model, &context(), summary("uncached-other", Some(100))).result(&model).await;
     assert_eq!(server.seen(|seen| (seen.connections, seen.http_requests)), (2, 1));
     reset_websocket_debug_stats(Some("uncached-retry"));
     reset_websocket_debug_stats(Some("uncached-other"));
