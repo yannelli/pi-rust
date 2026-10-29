@@ -84,7 +84,7 @@ async fn escape_clears_a_long_draft_without_quitting_or_submitting() {
         assert!(!ui.mode.is_exited());
         assert!(ui.provider.requests().is_empty());
         let bindings = pi_coding_agent::keybindings::keybindings();
-        let undo = match bindings["tui.editor.undo"].default_keys[0].as_str() {
+        let undo = match bindings.get("tui.editor.undo").unwrap().default_keys[0].as_str() {
             "ctrl+z" => "\x1a",
             "alt+z" => "\x1bz",
             "ctrl+-" => "\x1f",
