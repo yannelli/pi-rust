@@ -410,6 +410,9 @@ pub struct Settings {
     pub images: Option<ImageSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled_models: Option<Vec<String>>,
+    /// Global-only provider ids excluded from model selection.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled_providers: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_tools: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

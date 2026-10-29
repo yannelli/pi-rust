@@ -24,6 +24,10 @@
   ],
   "settings": [
     {
+      "item": "disabledProviders",
+      "reason": "pi-rust extension: global-only provider exclusions across model selectors and registry refreshes; credentials are preserved."
+    },
+    {
       "item": "queueMode",
       "reason": "Legacy key. pi-rust migrates it to steeringMode when settings load (settings/manager.rs) and keeps no field for it in Settings."
     },

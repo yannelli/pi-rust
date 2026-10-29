@@ -114,6 +114,20 @@ async fn routed(route: Route, options: Options) -> Routed {
     Routed { h, recorder }
 }
 
+#[tokio::test]
+async fn disabled_virtual_providers_stay_hidden_during_registration() {
+    let h = harness(Options { settings: json!({"disabledProviders": ["router"]}), ..Options::default() }).await;
+    let recorder = Arc::new(Recorder { route: Arc::new(default_route), requests: Mutex::new(Vec::new()) });
+    h.session.register_virtual_model(definition(recorder)).unwrap();
+    let runtime = h.session.model_runtime();
+    assert!(runtime.get_model("router", "auto").is_none());
+    assert!(runtime.available_models().iter().all(|model| model.provider != "router"));
+    runtime.wait_for_offline_refreshes().await;
+    assert!(runtime.get_model("router", "auto").is_none());
+    runtime.set_disabled_providers(Vec::new());
+    assert!(runtime.get_model("router", "auto").is_some());
+}
+
 fn read_call() -> FauxResponse {
     FauxResponse::tool_call("r1", "read", json!({"path": "notes.txt"}))
 }

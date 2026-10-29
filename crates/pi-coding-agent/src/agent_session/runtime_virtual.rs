@@ -111,6 +111,7 @@ impl ModelRuntime {
         let mut configured = read(&self.configured).clone();
         configured.extend(self.virtual_only_in(registry));
         registry.set_configured_providers(configured);
+        self.filter_disabled_providers(registry);
     }
 
     /// A catalog chat model that is not virtual.
