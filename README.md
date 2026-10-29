@@ -226,9 +226,15 @@ If the answer still does not match after the retries, pi writes the errors to st
 
 The flag works only in print mode: with `-p`, with `--mode json`, or when stdin or stdout is not a terminal. Interactive mode rejects it. RPC mode and Agent Client Protocol (ACP) mode also reject it. If an extension registers its own `--output-schema` or `--output-retries` flag, the extension gets the value.
 
+## Themes
+
+Choose a harness theme in `/settings` → Theme: `system`, `dark`, `light`, `ghostty`, `darcula-islands`, `nord`, or `catppuccin`. The added dark palettes are inspired by Ghostty's default colors, JetBrains Darcula/Islands, Nord, and Catppuccin Mocha. Matching status-line palettes are available separately.
+
 ## Status line (pi-rust extension)
 
-The `statusLine` setting replaces the two footer lines with the cwd, the token counts, and the model. Lines from extension `setStatus` calls still show below it, and an extension `setFooter` still replaces the whole footer. `/statusline` shows the active status line, and `/statusline <choice>` switches it in `~/.pi/agent/settings.json`.
+The `statusLine` setting replaces the two footer lines with the cwd, the token counts, and the model. Lines from extension `setStatus` calls still show below it, and an extension `setFooter` still replaces the whole footer. `/statusline` (or `/statusline edit`) opens the editor; `/statusline <choice>` switches presets in `~/.pi/agent/settings.json`.
+
+The editor offers presets, palettes, pill shapes, icons, alignment, separators, padding, and context displays. **Modules / order** lets you add, remove, reorder, and move modules between rows. Choose **Apply layout** to save those edits; Esc discards pending module edits. Other choices save immediately and update the footer. Edits are global; trusted project settings can still override them. Context headroom reports available context tokens, not a provider's subscription quota.
 
 | `type` | What it shows |
 | --- | --- |
@@ -261,14 +267,16 @@ Pick a preset, then change its parts if you want:
 | `rounded`, `slanted` | Round or slanted blocks with Nerd Font icons, in `catppuccin` and `tokyo-night` |
 | `retro`, `dots`, `emoji`, `mono` | Brackets in `gruvbox`, dots in `nord`, emoji icons in `catppuccin`, and gray blocks |
 | `full` | Two lines with every common segment |
+| `compact`, `stacked` | A compact text row or two rows of blocks, with remaining context percent and token headroom |
 
 | Field | Values |
 | --- | --- |
 | `chip` | The shape of each segment: `plain` (colored text), `block` (text on a colored block), `rounded`, `powerline`, `slanted`, `brackets` (`[text]`), or `dot` (`● text`). `rounded`, `powerline`, and `slanted` need a Nerd Font. |
-| `theme` | `terminal` (pi's theme colors), `pi-rust`, `pi`, `claude`, `codex`, `cursor`, `dracula`, `nord`, `catppuccin`, `gruvbox`, `tokyo-night`, `solarized`, `rose-pine`, `monokai`, `one-dark`, or `mono`. Text on a block is dark or light to match the block color. On a light pi theme, light text colors are darkened. |
+| `theme` | `terminal` (pi's theme colors), `pi-rust`, `pi`, `claude`, `codex`, `cursor`, `dracula`, `ghostty`, `darcula-islands`, `nord`, `catppuccin`, `gruvbox`, `tokyo-night`, `solarized`, `rose-pine`, `monokai`, `one-dark`, or `mono`. Text on a block is dark or light to match the block color. On a light pi theme, light text colors are darkened. |
 | `icons` | `unicode` (⎇ before the branch and ◷ before the time), `nerd` (Nerd Font icons for most segments), `emoji`, or `none` |
 | `segments` | Segment names for one line, such as `["dir", "branch", "fill", "model"]`, or a list of lines, such as `[["cwd", "branch"], ["model", "contextBar"]]`. An entry can also be `{"segment": "model", "color": "#ff8800", "icon": "◆"}` or literal text, such as `{"text": "🦀", "color": "accent"}`. |
-| `separator` | The text between segments. The default depends on the chip. |
+| `separator` | The text between segments. The default depends on the chip. Use `""` to remove extra gaps between padded pills. |
+| `layout` | `spread` (default) honors `fill`; `compact` ignores flexible gaps; `stacked` starts a new row at each `fill`. Empty groups never add padding. |
 | `colors` | A segment name to `#rrggbb` or to a pi theme token, such as `"accent"` |
 | `padding` | Spaces before each line |
 
@@ -282,6 +290,7 @@ Pick a preset, then change its parts if you want:
 | `cache`, `cacheHit` | Cache reads and writes with the hit rate, or the hit rate | |
 | `cost` | The session cost | |
 | `context`, `contextUsed`, `contextRemaining`, `contextWindow`, `contextBar` | The footer context text, `3% used`, `97% left`, `500k window`, or a bar such as `▰▰▱▱▱▱▱▱ 23%`. Their color changes at 70% and 90%. | `context-used`, `context-remaining`, `context-window-size` |
+| `contextTokens`, `contextHeadroom` | Tokens currently in context, or tokens left before the context window is full. Unknown usage is hidden; a bar shows `context ?`. | `context-tokens`, `context-headroom` |
 | `runState` | `idle`, `working`, or `compacting` | `run-state` |
 | `version`, `time`, `user`, `host`, `logo` | The pi-rust version, the local time, the user, the host, or π | `codex-version` |
 | `fill` | Moves the segments after it to the right edge | |
@@ -301,7 +310,7 @@ jq -r '"\(.model.id) \(.context_window.used_percentage // 0 | floor)% $\(.cost.t
 
 pi runs the command in the bash shell that the `bash` tool uses. It writes a newline-terminated JSON object with the session data to the command's stdin, and it shows each line that the command prints. ANSI colors and OSC 8 links work. `COLUMNS` gives the terminal width.
 
-- The JSON uses the Claude Code field names where pi has the same data: `session_id`, `session_name`, `transcript_path` (the session file), `cwd`, `workspace.current_dir`, `model.id`, `model.display_name`, `version`, `cost.total_cost_usd`, `thinking.enabled`, and `context_window` (`total_input_tokens`, `total_output_tokens`, `context_window_size`, `used_percentage`, `remaining_percentage`). Scripts using these fields can be reused. Scripts that parse Claude's transcript format or require Claude-only fields need adaptation. pi also sends `model.provider`, `git.branch`, `git.project`, `run_state`, `routed_model`, `tokens` (`input`, `output`, `cache_read`, `cache_write`, `cache_hit_percentage`), `thinking.level`, `cost.subscription`, and `context_window.auto_compact`.
+- The JSON uses the Claude Code field names where pi has the same data: `session_id`, `session_name`, `transcript_path` (the session file), `cwd`, `workspace.current_dir`, `model.id`, `model.display_name`, `version`, `cost.total_cost_usd`, `thinking.enabled`, and `context_window` (`total_input_tokens`, `total_output_tokens`, `context_window_size`, `used_percentage`, `remaining_percentage`). Scripts using these fields can be reused. Scripts that parse Claude's transcript format or require Claude-only fields need adaptation. pi also sends `model.provider`, `git.branch`, `git.project`, `run_state`, `routed_model`, `tokens` (`input`, `output`, `cache_read`, `cache_write`, `cache_hit_percentage`), `thinking.level`, `cost.subscription`, `context_window.auto_compact`, and `context_window.remaining_tokens` (null when unknown).
 - pi runs the command when the session starts, and 300 ms after the data or the terminal width changes. A new run stops a run that has not finished. `refreshInterval` (at least 1 second) also runs the command on a timer.
 - Until the first run finishes, and when a run fails or takes more than 10 seconds, pi shows the last output. If there is no output yet, it shows the default footer. pi shows a maximum of 8 lines.
 - pi reads `statusLine.command` only from `~/.pi/agent/settings.json`. A project's `.pi/settings.json` can change the other fields, but it cannot set a command.
@@ -318,7 +327,7 @@ When pi runs in iTerm2, the integration does these things:
 
 | Feature | Key | What it does |
 | --- | --- | --- |
-| Tab color | `tabColor` | The tab is rust orange while the agent works, copper while a dialog waits for you, green when a run is done, and red after an error. Idle sessions and exit restore the profile color. |
+| Tab color | `tabColor` | Light blue while working, amber while a dialog waits for you, green when done, and rose after an error. These backgrounds favor readable black titles, including when iTerm2 dims inactive tabs. iTerm2 controls title text color; pi does not change profile text colors. Idle sessions and exit restore the profile tab color. |
 | Badge | `badge` | The badge shows `π` and the session name, or the folder name when the session has no name. Exit removes it. |
 | User variables | `userVars` | pi sets `user.pi_state` (`idle`, `working`, `blocked`, `done`, or `error`), `user.pi_session`, `user.pi_project`, and `user.pi_model`. Show them in a status bar component, a badge, or a tab title, for example `\(user.pi_state)`. |
 | Attention | `attention` | When a run takes `terminal.notifyMinSeconds` or more (10 by default) and the terminal is not known to have focus, iTerm2 bounces the Dock icon. |
@@ -531,6 +540,7 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. These p
   - Set `terminal.notifyOnFinish` to `"auto"` (the default), `"osc"`, `"bell"`, or `"off"`. Set `terminal.notifyMinSeconds` to change the time limit.
 - The [status line](#status-line-pi-rust-extension) (`statusLine`) is an addition. Upstream pi changes the footer only through extensions.
 - The [iTerm2 integration](#iterm2-integration-pi-rust-extension) (`terminal.iterm2`) and `/terminal-setup` are additions.
+- Additional [harness themes](#themes) and the `/statusline` module/layout editor are pi-rust extensions.
 - `pi experimental` and its commands `server`, `client`, `durable`, and `vacation` need `PI_EXPERIMENTAL=1`, as in upstream pi. `server` and `client` use Unix sockets, so on Windows they show a message that they need Unix. Upstream pi also has no Windows transport.
 
 ## Development

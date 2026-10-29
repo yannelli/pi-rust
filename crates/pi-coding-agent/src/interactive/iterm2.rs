@@ -14,10 +14,12 @@ use pi_tui::program_status::{ProgramState, ProgramStatus};
 use super::mode::InteractiveMode;
 use crate::settings::schema::ITerm2Features;
 
-const WORKING: [u8; 3] = [222, 94, 40];
-const BLOCKED: [u8; 3] = [230, 152, 79];
-const DONE: [u8; 3] = [143, 191, 127];
-const ERROR: [u8; 3] = [229, 83, 75];
+// iTerm2 picks tab-title ink at a brightness cutoff, not WCAG contrast. Keep backgrounds
+// light enough for black titles, including its inactive-tab blend toward middle gray.
+const WORKING: [u8; 3] = [132, 184, 255];
+const BLOCKED: [u8; 3] = [242, 202, 114];
+const DONE: [u8; 3] = [151, 211, 163];
+const ERROR: [u8; 3] = [245, 160, 164];
 
 thread_local! {
     /// The last value written per key, so an unchanged value is not sent again.
@@ -167,6 +169,25 @@ mod tests {
         assert!(is_iterm2(&env(&[("ITERM_SESSION_ID", "w0t0p0:1")])));
         assert!(!is_iterm2(&env(&[("TERM_PROGRAM", "ghostty")])));
         assert!(!is_iterm2(&env(&[])));
+    }
+
+    #[test]
+    fn state_colors_keep_black_titles_readable_when_tabs_are_dimmed() {
+        let linear = |value: f64| {
+            if value <= 0.04045 { value / 12.92 } else { ((value + 0.055) / 1.055).powf(2.4) }
+        };
+        for state in [ProgramState::Working, ProgramState::Blocked, ProgramState::Done, ProgramState::Error] {
+            let rgb = state_color(state).expect("colored state");
+            // Selected/unselected tabs in active/inactive windows use these blends in iTerm2.
+            for alpha in [1.0, 0.6, 0.4, 0.3] {
+                let [r, g, b] = rgb.map(|c| f64::from(c) / 255.0 * alpha + 0.5 * (1.0 - alpha));
+                assert!(0.299 * r + 0.587 * g + 0.114 * b > 0.5, "{state:?}, alpha {alpha}");
+                let luminance = 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+                assert!((luminance + 0.05) / 0.05 >= 4.5, "{state:?}, alpha {alpha}");
+            }
+        }
+        assert_eq!(state_color(ProgramState::Idle), None);
+        assert_eq!(state_color(ProgramState::Clear), None);
     }
 
     #[test]
