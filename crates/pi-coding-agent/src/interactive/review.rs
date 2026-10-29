@@ -37,15 +37,14 @@ pub(super) fn review_prompt(extra: Option<&str>) -> String {
 impl InteractiveMode {
     /// `/review [instructions]`: outside a git work tree, an error and no prompt. Otherwise the
     /// prompt goes out as if typed, with `/review` in the editor history.
-    pub(super) fn handle_review_command(&self, typed: &str, extra: Option<&str>) {
+    pub(super) fn handle_review_command(&self, extra: Option<&str>) {
         let prompt = review_prompt(extra);
-        let typed = typed.to_string();
         let cwd = self.runtime.cwd();
         self.spawn(move |mode| async move {
             let check = tokio::spawn(work_tree_problem(cwd)).await;
             match check.unwrap_or_else(|error| Some(error.to_string())) {
                 Some(problem) => mode.show_error(&problem),
-                None => mode.send_prompt(prompt, &typed),
+                None => mode.send_prompt(prompt),
             }
         });
     }

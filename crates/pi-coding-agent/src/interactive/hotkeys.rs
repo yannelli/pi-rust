@@ -47,7 +47,7 @@ pub fn hotkeys_markdown() -> String {
     ];
     let other = [
         (code("tui.input.tab"), "Path completion / accept autocomplete"),
-        (code("app.interrupt"), "Cancel autocomplete / abort streaming"),
+        (code("app.interrupt"), "Cancel autocomplete / abort streaming / clear draft"),
         (code("app.clear"), "Clear editor (first) / exit (second)"),
         (code("app.exit"), "Exit (when editor is empty)"),
         (code("app.suspend"), "Suspend to background"),

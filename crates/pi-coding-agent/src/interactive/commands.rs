@@ -117,10 +117,10 @@ impl InteractiveMode {
             self.handle_compact_command(instructions.map(str::to_string));
         } else if let Some(instructions) = argument(text, "init") {
             clear();
-            self.handle_init_command(text, instructions);
+            self.handle_init_command(instructions);
         } else if let Some(instructions) = argument(text, "review") {
             clear();
-            self.handle_review_command(text, instructions);
+            self.handle_review_command(instructions);
         } else if text == "/reload" {
             clear();
             self.handle_reload_command();
