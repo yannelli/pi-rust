@@ -153,7 +153,7 @@ pub(super) async fn run_command(
         format!("{} <<'PI_STATUS_LINE_JSON'\n{payload}\nPI_STATUS_LINE_JSON\n", config.command)
     } else {
         process.arg(&config.command);
-        payload
+        format!("{payload}\n")
     };
     if Path::new(&cwd).is_dir() {
         process.current_dir(&cwd);
@@ -173,6 +173,9 @@ pub(super) async fn run_command(
         });
     }
     let output = tokio::time::timeout(TIMEOUT, child.wait_with_output()).await.ok()?.ok()?;
+    if !output.status.success() {
+        return None;
+    }
     Some(output_lines(&String::from_utf8_lossy(&output.stdout)))
 }
 
