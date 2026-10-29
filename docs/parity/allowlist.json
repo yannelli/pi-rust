@@ -24,6 +24,10 @@
   ],
   "settings": [
     {
+      "item": "disabledProviders",
+      "reason": "pi-rust extension: global-only provider exclusions across model selectors and registry refreshes; credentials are preserved."
+    },
+    {
       "item": "theme",
       "reason": "pi-rust additionally ships ghostty, darcula-islands, nord, and catppuccin harness themes. The setting remains upstream-compatible."
     },

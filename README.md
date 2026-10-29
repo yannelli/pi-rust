@@ -394,6 +394,18 @@ When pi-rust starts for the first time, it moves files from older pi layouts, as
 
 pi-rust has all the wire protocols of upstream pi: `anthropic-messages`, `openai-responses`, `openai-completions`, `openai-codex-responses` (SSE and WebSocket), `azure-openai-responses`, `google-generative-ai`, `google-vertex`, `bedrock-converse-stream`, `mistral-conversations`, and `pi-messages`. The bundled model catalog is the catalog of upstream pi, and `pi update --models` updates it. `/login` supports OAuth for Anthropic, OpenAI Codex, GitHub Copilot, OpenRouter, xAI, Kimi, Meta, and Radius. pi also accepts API keys and the default AWS and Google credentials of your system. llama.cpp servers and virtual models work as in upstream pi.
 
+### Disable providers globally
+
+Add exact provider IDs to `~/.pi/agent/settings.json` (or the directory set by `PI_CODING_AGENT_DIR`):
+
+```json
+{
+  "disabledProviders": ["openrouter", "google-antigravity"]
+}
+```
+
+Restart Pi or its ACP connection after editing. These providers' models are excluded from model selection, including ACP, RPC, the TUI, CLI listings, and completions. The filter survives catalog refreshes and applies to custom and extension models too. Project settings cannot override it. Credentials and cached catalogs are kept; remove an ID to enable its models again.
+
 ### OpenRouter
 
 To log in, use `/login openrouter` or set `OPENROUTER_API_KEY`.
@@ -499,6 +511,7 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. These p
 - The version check and `pi update --self` use the releases of this repository.
 - Word movement in Chinese, Japanese, Korean (CJK), and Thai text uses ICU4X dictionaries. Thus some word boundaries are different from `Intl.Segmenter` in Node.
 - `pi --mode acp` (see [ACP](#acp-zed-and-other-editors)) is an addition. Upstream pi needs the separate pi-acp adapter. Permission modes are separate from thinking levels and gate tool execution.
+- Global `disabledProviders` settings hide whole providers from model selection without deleting credentials.
 - Markdown export (see [Use](#use)) is an addition: `/export notes.md` and `pi --export session.jsonl notes.md` write Markdown. Upstream pi exports only HTML and JSONL.
 - The slash commands `/diff`, `/init`, `/review`, `/context`, `/undo`, and `/retry` (see [Use](#use)) are additions. Upstream pi has none of them, and it shows context use only in the footer.
 - `pi completion` and `pi doctor` are additions. Upstream pi has neither command.

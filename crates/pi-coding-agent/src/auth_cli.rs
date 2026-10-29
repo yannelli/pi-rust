@@ -189,6 +189,8 @@ pub(crate) struct AuthContext {
 
 pub(crate) async fn auth_context(agent_dir: &Path, store: Arc<dyn CredentialStore>, oauth: OAuthLookup) -> AuthContext {
     let (mut registry, error) = ModelRegistry::load_lenient(&models_path(agent_dir));
+    let disabled = crate::settings::disabled_providers(agent_dir);
+    registry.retain_models(|model| !disabled.contains(&model.provider));
     let resolver = AuthResolver::new(store, oauth);
     resolver.set_provider_configs(registry.auth_configs());
     registry.set_configured_providers(configured_providers(&resolver, &registry).await);

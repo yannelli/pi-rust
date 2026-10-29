@@ -212,7 +212,10 @@ pub async fn create_agent_session_services(options: CreateServicesOptions) -> Ag
     let mut diagnostics: Vec<RuntimeDiagnostic> =
         settings.drain_errors().iter().map(|error| RuntimeDiagnostic::warning(error.diagnostic())).collect();
     let model_runtime = match options.model_runtime {
-        Some(runtime) => runtime,
+        Some(runtime) => {
+            runtime.set_disabled_providers(settings.global_settings().disabled_providers.unwrap_or_default());
+            runtime
+        }
         None => {
             let mut runtime_options = ModelRuntimeOptions::for_agent_dir(&agent_dir);
             if let Some(credentials) = options.credentials {
@@ -225,6 +228,7 @@ pub async fn create_agent_session_services(options: CreateServicesOptions) -> Ag
                 runtime_options.credential_env = env;
             }
             let runtime = ModelRuntime::create(runtime_options).await;
+            runtime.set_disabled_providers(settings.global_settings().disabled_providers.unwrap_or_default());
             runtime.enable_dynamic_catalogs(CatalogSetup::for_agent_dir(&agent_dir)).await;
             Arc::new(runtime)
         }

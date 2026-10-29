@@ -42,6 +42,7 @@ impl ModelRuntimeOptions {
 
 pub struct ModelRuntime {
     registry: RwLock<ModelRegistry>,
+    disabled_providers: RwLock<HashSet<String>>,
     resolver: Arc<AuthResolver>,
     runtime_store: Arc<RuntimeCredentialStore>,
     models_path: PathBuf,
@@ -70,7 +71,10 @@ pub(super) fn write<T>(lock: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
 impl ModelRuntime {
     /// Load `models.json` (errors are kept as [`Self::load_error`]) and find configured providers.
     pub async fn create(options: ModelRuntimeOptions) -> Self {
-        let (registry, error) = ModelRegistry::load_lenient(&options.models_path);
+        let (mut registry, error) = ModelRegistry::load_lenient(&options.models_path);
+        let agent_dir = options.models_path.parent().unwrap_or_else(|| Path::new("."));
+        let disabled: HashSet<String> = crate::settings::disabled_providers(agent_dir).into_iter().collect();
+        registry.retain_models(|model| !disabled.contains(&model.provider));
         let runtime_store = Arc::new(RuntimeCredentialStore::new(options.credentials));
         let builtin = options.oauth.unwrap_or_else(|| Arc::new(|_: &str| None));
         let extension_oauth: Arc<RwLock<HashMap<String, Arc<dyn OAuthAuth>>>> = Arc::default();
@@ -81,6 +85,7 @@ impl ModelRuntime {
         resolver.set_provider_configs(registry.auth_configs());
         let runtime = Self {
             registry: RwLock::new(registry),
+            disabled_providers: RwLock::new(disabled),
             resolver,
             runtime_store,
             models_path: options.models_path,
@@ -101,6 +106,24 @@ impl ModelRuntime {
     /// The models.json error found at load time, if any.
     pub fn load_error(&self) -> Option<&str> {
         self.load_error.as_deref()
+    }
+
+    /// Apply global provider exclusions. Credentials and cached catalogs are left intact.
+    pub fn set_disabled_providers(&self, providers: Vec<String>) {
+        let providers = providers.into_iter().collect();
+        {
+            let mut disabled = write(&self.disabled_providers);
+            if *disabled == providers {
+                return;
+            }
+            *disabled = providers;
+        }
+        self.rebuild_registry();
+    }
+
+    pub(super) fn filter_disabled_providers(&self, registry: &mut ModelRegistry) {
+        let disabled = read(&self.disabled_providers);
+        registry.retain_models(|model| !disabled.contains(&model.provider));
     }
 
     pub fn models_path(&self) -> &Path {

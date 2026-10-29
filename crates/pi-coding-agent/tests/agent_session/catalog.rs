@@ -101,6 +101,44 @@ async fn background_refreshes_update_the_registry() {
 }
 
 #[tokio::test]
+async fn disabled_providers_stay_hidden_after_refresh_and_can_be_reenabled() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = Server::start(|_| Reply::status(404)).await;
+    route_anthropic(dir.path(), &server.url);
+    std::fs::write(dir.path().join("settings.json"), r#"{"disabledProviders":["anthropic","openrouter"]}"#).unwrap();
+    // A project cannot undo the global exclusions.
+    std::fs::create_dir(dir.path().join(".pi")).unwrap();
+    std::fs::write(dir.path().join(".pi/settings.json"), r#"{"disabledProviders":[]}"#).unwrap();
+    let cached = json!({"anthropic": {"models": [model_json("anthropic", "cached")], "checkedAt": 1,
+        "piVersion": env!("CARGO_PKG_VERSION")}});
+    std::fs::write(dir.path().join("models-store.json"), cached.to_string()).unwrap();
+    let runtime = start(dir.path(), &server.url).await;
+    for _ in 0..2 {
+        assert!(
+            runtime.all_models().iter().all(|model| !["anthropic", "openrouter"].contains(&model.provider.as_str()))
+        );
+        assert!(runtime.available_models().iter().all(|model| model.provider != "anthropic"));
+        assert!(runtime.registry().models().iter().all(|model| model.provider != "anthropic"));
+        assert!(runtime.get_model("anthropic", "cached").is_none());
+        assert!(runtime.credential_store().read("anthropic").await.unwrap().is_some());
+        runtime.refresh_catalogs(false, None, false).await;
+    }
+    runtime
+        .register_extension_provider(
+            "openrouter",
+            json!({"api": "openai-completions", "baseUrl": server.url,
+        "apiKey": "test-key", "models": [{"id": "extension-model"}]}),
+        )
+        .unwrap();
+    assert!(runtime.get_model("openrouter", "extension-model").is_none());
+    runtime.set_disabled_providers(Vec::new());
+    assert!(runtime.get_model("openrouter", "extension-model").is_some());
+    assert!(runtime.get_model("anthropic", "cached").is_some());
+    assert!(runtime.available_models().iter().any(|model| model.provider == "anthropic"));
+    assert!(server.requests().is_empty());
+}
+
+#[tokio::test]
 async fn models_json_still_applies_over_dynamic_catalogs() {
     let dir = tempfile::tempdir().unwrap();
     let models = json!({"providers": {"local": {"baseUrl": "http://localhost:1", "api": "openai-completions",

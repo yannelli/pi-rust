@@ -71,7 +71,9 @@ pub fn completion_script(shell: Shell) -> String {
 
 /// `providers` or `models` (as `provider/id`) from the built-in catalog and `models.json`.
 pub fn completion_values(kind: &str, agent_dir: &Path) -> Option<Vec<String>> {
-    let (registry, _) = ModelRegistry::load_lenient(&models_path(agent_dir));
+    let (mut registry, _) = ModelRegistry::load_lenient(&models_path(agent_dir));
+    let disabled = crate::settings::disabled_providers(agent_dir);
+    registry.retain_models(|model| !disabled.contains(&model.provider));
     let mut values: Vec<String> = match kind {
         "providers" => registry.providers(),
         "models" => registry.models().iter().map(|model| format!("{}/{}", model.provider, model.id)).collect(),
