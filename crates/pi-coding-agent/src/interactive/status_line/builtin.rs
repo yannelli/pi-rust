@@ -32,6 +32,22 @@ const CHIPS: &[Segment] = &[Dir, Branch, Fill, Model, Thinking, ContextBar, Cost
 
 const PRESETS: &[Preset] = &[
     Preset {
+        name: "compact",
+        chip: Chip::Plain,
+        theme: "terminal",
+        icons: Icons::Unicode,
+        lines: &[&[Dir, Branch, Model, Thinking, ContextRemaining, ContextHeadroom]],
+        separator: " · ",
+    },
+    Preset {
+        name: "stacked",
+        chip: Chip::Block,
+        theme: "pi-rust",
+        icons: Icons::Unicode,
+        lines: &[&[Dir, Branch, Session], &[Model, Thinking, ContextRemaining, ContextHeadroom, Cost]],
+        separator: " ",
+    },
+    Preset {
         name: "minimal",
         chip: Chip::Plain,
         theme: "terminal",
@@ -157,12 +173,16 @@ pub struct BuiltinStatusLine {
     pub separator: String,
     pub colors: BTreeMap<String, String>,
     pub padding: usize,
+    pub layout: String,
 }
 
 impl BuiltinStatusLine {
     pub fn from_settings(settings: &StatusLineSettings, padding: usize) -> Self {
         let name = settings.preset.as_deref().unwrap_or("minimal");
-        let preset = PRESETS.iter().find(|preset| preset.name == name).unwrap_or(&PRESETS[0]);
+        let preset = PRESETS
+            .iter()
+            .find(|preset| preset.name == name)
+            .unwrap_or_else(|| PRESETS.iter().find(|preset| preset.name == "minimal").expect("minimal preset"));
         let chip = settings.chip.as_deref().or(settings.style.as_deref()).and_then(Chip::from_name);
         let theme = settings.theme.as_deref().unwrap_or(preset.theme);
         Self {
@@ -176,6 +196,7 @@ impl BuiltinStatusLine {
             }),
             colors: settings.colors.clone().unwrap_or_default(),
             padding,
+            layout: settings.layout.clone().unwrap_or_else(|| "spread".into()),
         }
     }
 
@@ -191,19 +212,31 @@ impl BuiltinStatusLine {
             separator: codex.separator.to_string(),
             colors: BTreeMap::new(),
             padding,
+            layout: "compact".into(),
         }
     }
 
     /// The status lines for `width` columns; empty when no segment has anything to show.
     pub fn render(&self, snapshot: &StatusSnapshot, width: usize) -> Vec<String> {
+        if width <= self.padding {
+            return Vec::new();
+        }
         let inner = width.saturating_sub(self.padding);
         let pad = " ".repeat(width.min(self.padding));
-        let lines = self.lines.iter().filter_map(|line| self.render_line(line, snapshot, inner));
+        let lines = self.lines.iter().flat_map(|line| {
+            let rows: Vec<&[Item]> =
+                if self.layout == "stacked" { line.split(Item::is_fill).collect() } else { vec![line.as_slice()] };
+            rows.into_iter().filter_map(|row| self.render_line(row, snapshot, inner))
+        });
         lines.map(|line| format!("{pad}{line}")).collect()
     }
 
     fn render_line(&self, line: &[Item], snapshot: &StatusSnapshot, width: usize) -> Option<String> {
-        let split = line.iter().position(Item::is_fill).unwrap_or(line.len());
+        let split = if self.layout == "compact" {
+            line.len()
+        } else {
+            line.iter().position(Item::is_fill).unwrap_or(line.len())
+        };
         let pieces =
             |items: &[Item]| -> Vec<Piece> { items.iter().filter_map(|item| self.piece(item, snapshot)).collect() };
         let (left, right) = (pieces(&line[..split]), pieces(line.get(split + 1..).unwrap_or_default()));
@@ -214,17 +247,20 @@ impl BuiltinStatusLine {
         let left = join(self.chip, &left, &self.separator, false, mode);
         let right = join(self.chip, &right, &self.separator, true, mode);
         let (left_width, right_width) = (visible_width(&left), visible_width(&right));
-        if right_width > 0 && left_width + 1 + right_width <= width {
+        if left_width == 0 || right_width == 0 {
+            let line = if left_width > 0 { left } else { right };
+            return Some(truncate_to_width_with(&line, width, "…", false));
+        }
+        if left_width + 1 + right_width <= width {
             return Some(format!("{left}{}{right}", " ".repeat(width - left_width - right_width)));
         }
         // A right side that does not fit is cut from its end, while at least 8 columns remain for it.
-        if right_width > 0 && left_width > 0 && left_width + 1 + MIN_RIGHT <= width {
+        if left_width + 1 + MIN_RIGHT <= width {
             let right = truncate_to_width_with(&right, width - left_width - 1, "…", false);
             let gap = width - left_width - visible_width(&right);
             return Some(format!("{left}{}{right}", " ".repeat(gap)));
         }
-        let line = if left_width > 0 { left } else { right };
-        Some(truncate_to_width_with(&line, width, "…", false))
+        Some(truncate_to_width_with(&left, width, "…", false))
     }
 
     fn piece(&self, item: &Item, snapshot: &StatusSnapshot) -> Option<Piece> {
@@ -237,6 +273,9 @@ impl BuiltinStatusLine {
             ),
             ItemKind::Text(text) => (text.clone(), Role::Meta, None, None),
         };
+        if text.trim().is_empty() {
+            return None;
+        }
         let icon = item.icon.as_deref().or(icon).filter(|icon| !icon.is_empty());
         let text = icon.map_or(text.clone(), |icon| format!("{icon} {text}"));
         let custom = item.color.as_deref().or_else(|| name.and_then(|name| self.colors.get(name)).map(String::as_str));
@@ -270,7 +309,7 @@ fn parse_lines(value: &Value) -> Option<Vec<Vec<Item>>> {
         vec![items(values)]
     };
     let lines: Vec<Vec<Item>> = lines.into_iter().filter(|line| !line.is_empty()).collect();
-    (!lines.is_empty()).then_some(lines)
+    Some(lines)
 }
 
 /// `#rrggbb` or a pi theme token such as `accent`, as sRGB.

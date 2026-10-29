@@ -17,13 +17,17 @@ use super::tokens::TokenMap;
 use super::watcher::{ThemeWatcher, start_theme_watcher};
 
 /// Names of the themes shipped as JSON (the `system` theme is generated).
-pub const BUILTIN_THEME_NAMES: [&str; 2] = ["dark", "light"];
+pub const BUILTIN_THEME_NAMES: [&str; 6] = ["dark", "light", "ghostty", "darcula-islands", "nord", "catppuccin"];
 
 static BUILTIN_THEMES: LazyLock<HashMap<&'static str, ThemeJson>> = LazyLock::new(|| {
     let parse = |text: &str| theme_json_from_value(&serde_json::from_str(text).unwrap_or_default());
     HashMap::from([
         ("dark", parse(include_str!("builtin/dark.json"))),
         ("light", parse(include_str!("builtin/light.json"))),
+        ("ghostty", parse(include_str!("builtin/ghostty.json"))),
+        ("darcula-islands", parse(include_str!("builtin/darcula-islands.json"))),
+        ("nord", parse(include_str!("builtin/nord.json"))),
+        ("catppuccin", parse(include_str!("builtin/catppuccin.json"))),
     ])
 });
 
@@ -32,6 +36,10 @@ pub fn builtin_theme_source(name: &str) -> Option<&'static str> {
     match name {
         "dark" => Some(include_str!("builtin/dark.json")),
         "light" => Some(include_str!("builtin/light.json")),
+        "ghostty" => Some(include_str!("builtin/ghostty.json")),
+        "darcula-islands" => Some(include_str!("builtin/darcula-islands.json")),
+        "nord" => Some(include_str!("builtin/nord.json")),
+        "catppuccin" => Some(include_str!("builtin/catppuccin.json")),
         _ => None,
     }
 }
