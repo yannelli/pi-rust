@@ -144,10 +144,6 @@ fn is_uuid(text: &str) -> bool {
 }
 
 impl OpenAIChatGPTOAuth {
-    fn redirect_uri(&self) -> String {
-        format!("http://127.0.0.1:{}{CALLBACK_PATH}", self.callback_port)
-    }
-
     async fn request_token(&self, form: &[(&str, &str)], cancel: &CancellationToken) -> AuthResult<Map<String, Value>> {
         let request = self.hooks.post(TOKEN_URL).header("accept", "application/json").form(form);
         let reply = super::http::send(request, cancel, None).await?;
@@ -165,15 +161,15 @@ impl OpenAIChatGPTOAuth {
         &self,
         authorization: &Authorization,
         verifier: &str,
+        redirect_uri: &str,
         cancel: &CancellationToken,
     ) -> AuthResult<OAuthCredential> {
-        let redirect_uri = self.redirect_uri();
         let form = [
             ("grant_type", "authorization_code"),
             ("client_id", authorization.client_id.as_str()),
             ("code", authorization.code.as_str()),
             ("code_verifier", verifier),
-            ("redirect_uri", redirect_uri.as_str()),
+            ("redirect_uri", redirect_uri),
             ("resource", RESOURCE),
         ];
         let token = self.request_token(&form, cancel).await?;
@@ -220,8 +216,8 @@ impl OpenAIChatGPTOAuth {
         let pkce = generate_pkce();
         let state = random_base64url();
         let nonce = random_base64url();
-        let redirect_uri = self.redirect_uri();
         let (server, callback) = self.start_server(&state).await?;
+        let redirect_uri = format!("http://127.0.0.1:{}{CALLBACK_PATH}", server.port);
 
         let mut url = Url::parse(AUTHORIZE_URL).expect("static URL parses");
         url.query_pairs_mut()
@@ -267,7 +263,7 @@ impl OpenAIChatGPTOAuth {
             Ok(authorization) => {
                 interaction
                     .notify(AuthEvent::Progress { message: "Exchanging authorization code for tokens...".into() });
-                self.exchange_code(&authorization, &pkce.verifier, cancel).await
+                self.exchange_code(&authorization, &pkce.verifier, &redirect_uri, cancel).await
             }
             Err(error) => Err(error),
         };
