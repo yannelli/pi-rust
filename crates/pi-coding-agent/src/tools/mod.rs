@@ -77,6 +77,13 @@ pub const CODING_TOOLS: &[&str] = &["read", "bash", "edit", "write"];
 /// Tools of [`create_read_only_tools`].
 pub const READ_ONLY_TOOLS: &[&str] = &["read", "grep", "find", "ls"];
 
+const READ_ONLY_ANNOTATIONS: pi_agent::ToolAnnotations = pi_agent::ToolAnnotations {
+    read_only_hint: Some(true),
+    destructive_hint: Some(false),
+    idempotent_hint: Some(true),
+    open_world_hint: Some(false),
+};
+
 const TOOL_INFOS: &[ToolInfo] = &[
     ToolInfo {
         name: "read",

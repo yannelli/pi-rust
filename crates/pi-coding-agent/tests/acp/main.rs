@@ -108,7 +108,12 @@ async fn drives_sessions_over_acp_with_the_faux_provider() {
     assert_eq!(commands["params"]["sessionId"], session_id.as_str());
 
     let prompt = json!({"sessionId": session_id, "prompt": [{"type": "text", "text": "Change hello to goodbye"}]});
-    let response = client.request("session/prompt", prompt).await;
+    let pending_prompt = client.send_request("session/prompt", prompt).await;
+    let approval = client.until(|message| message["method"] == "session/request_permission").await;
+    assert_eq!(approval["params"]["toolCall"]["toolCallId"], "call-1");
+    assert_eq!(std::fs::read_to_string(work.join("notes.txt")).unwrap(), "first line\nhello\n");
+    client.respond(approval["id"].clone(), json!({"outcome": {"outcome": "selected", "optionId": "allow"}})).await;
+    let response = client.response(pending_prompt).await;
     assert_eq!(response["result"]["stopReason"], "end_turn");
     let updates = client.updates(&session_id);
     let chunks = updates.iter().filter(|update| update["sessionUpdate"] == "agent_message_chunk").count();
@@ -150,7 +155,7 @@ async fn drives_sessions_over_acp_with_the_faux_provider() {
 
     client.clear();
     let loaded = client.request("session/load", json!({"sessionId": session_id, "cwd": work, "mcpServers": []})).await;
-    assert_eq!(loaded["result"]["modes"]["currentModeId"], "medium");
+    assert_eq!(loaded["result"]["modes"]["currentModeId"], "auto");
     let replay = client.updates(&session_id);
     assert_eq!(texts(&replay, "user_message_chunk"), "Change hello to goodbyeWait forever");
     assert!(texts(&replay, "agent_message_chunk").contains("The note now says goodbye."));
@@ -159,6 +164,32 @@ async fn drives_sessions_over_acp_with_the_faux_provider() {
     assert_eq!(deleted["result"], json!({}));
     assert_eq!(client.request("session/list", json!({})).await["result"]["sessions"], json!([]));
     assert_eq!(setup.provider.requests().len(), 3);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn denied_tools_do_not_execute_and_bypass_is_explicit() {
+    let setup = setup(vec![
+        FauxResponse::tool_call("denied", "write", json!({"path": "output.txt", "content": "denied"})),
+        FauxResponse::text("Permission denied."),
+        FauxResponse::tool_call("allowed", "write", json!({"path": "output.txt", "content": "allowed"})),
+        FauxResponse::text("Written."),
+    ]);
+    let work = setup.root.path().join("work");
+    let mut client = start(&setup);
+    let created = client.request("session/new", json!({"cwd": work, "mcpServers": []})).await;
+    let id = created["result"]["sessionId"].clone();
+    let prompt = json!({"sessionId": id, "prompt": [{"type": "text", "text": "Write the file"}]});
+    let pending = client.send_request("session/prompt", prompt.clone()).await;
+    let approval = client.until(|message| message["method"] == "session/request_permission").await;
+    client.respond(approval["id"].clone(), json!({"outcome": {"outcome": "selected", "optionId": "reject"}})).await;
+    assert_eq!(client.response(pending).await["result"]["stopReason"], "end_turn");
+    assert!(!work.join("output.txt").exists());
+    let changed = client.request("session/set_mode", json!({"sessionId": id, "modeId": "bypass"})).await;
+    assert_eq!(changed["result"], json!({}));
+    client.clear();
+    assert_eq!(client.request("session/prompt", prompt).await["result"]["stopReason"], "end_turn");
+    assert_eq!(std::fs::read_to_string(work.join("output.txt")).unwrap(), "allowed");
+    assert!(!client.seen.iter().any(|message| message["method"] == "session/request_permission"));
 }
 
 #[tokio::test(flavor = "multi_thread")]

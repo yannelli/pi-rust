@@ -8,13 +8,15 @@ use std::sync::{Arc, Mutex};
 
 use agent_client_protocol_schema::Error;
 use async_trait::async_trait;
+use futures::FutureExt;
 use pi_agent::{AgentEvent, QueueMode};
 use pi_ai::{AssistantMessageEvent, ContentBlock, ThinkingLevel};
 use serde_json::{Value, json};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
-use super::backend::{BackendFactory, PiBackend};
+use super::backend::{AcpClient, BackendFactory, PiBackend};
 use super::errors::internal_error;
+use super::permissions::{PermissionMode, ToolPermissions};
 use crate::agent_session::{
     AgentSession, AgentSessionEvent, AgentSessionRuntime, DiagnosticLevel, PromptOptions, compaction_result_json, lock,
 };
@@ -126,6 +128,7 @@ pub struct RuntimeBackend {
     ui: Arc<RpcExtensionUi>,
     host: Option<Arc<dyn RpcExtensionHost>>,
     subscription: u64,
+    permissions: Arc<ToolPermissions>,
     events: Mutex<Option<UnboundedReceiver<Value>>>,
 }
 
@@ -134,6 +137,27 @@ impl RuntimeBackend {
     /// extension host binds to the session as in RPC mode, with dialogs mapped to ACP.
     pub fn start(runtime: Arc<AgentSessionRuntime>, host: Option<Arc<dyn RpcExtensionHost>>) -> Arc<Self> {
         let session = runtime.session();
+        let permissions = Arc::new(ToolPermissions::default());
+        let policy = permissions.clone();
+        let weak = Arc::downgrade(&session);
+        *lock(&session.tool_authorizer) = Some(Arc::new(move |call, cancel| {
+            let policy = policy.clone();
+            let read_only = weak
+                .upgrade()
+                .and_then(|session| session.tool(&call.tool_call.name))
+                .and_then(|tool| tool.annotations().cloned())
+                .is_some_and(|annotations| annotations.read_only_hint == Some(true));
+            let tool_call = call.tool_call.clone();
+            let args = call.args.clone();
+            async move {
+                (!policy.authorize(tool_call, args, read_only, cancel).await).then(|| pi_agent::BeforeToolCallResult {
+                    block: true,
+                    reason: Some("Tool execution denied by ACP permission policy".into()),
+                    ..Default::default()
+                })
+            }
+            .boxed()
+        }));
         let (sender, receiver) = unbounded_channel();
         let events = sender.clone();
         let encoder = Mutex::new(EventEncoder::new(session.cwd()));
@@ -150,7 +174,7 @@ impl RuntimeBackend {
             host.bind(RpcExtensionBinding::new(runtime.clone(), session.clone(), ui.clone(), shutdown, output));
         }
         session.model_runtime().refresh_in_background();
-        Arc::new(Self { runtime, session, ui, host, subscription, events: Mutex::new(Some(receiver)) })
+        Arc::new(Self { runtime, session, ui, host, subscription, permissions, events: Mutex::new(Some(receiver)) })
     }
 
     pub fn session(&self) -> &Arc<AgentSession> {
@@ -164,6 +188,18 @@ fn parse_enum<T: serde::de::DeserializeOwned>(text: &str, what: &str) -> anyhow:
 
 #[async_trait]
 impl PiBackend for RuntimeBackend {
+    fn bind_client(&self, session_id: &str, client: Arc<dyn AcpClient>) {
+        self.permissions.bind(session_id, client);
+    }
+
+    fn permission_mode(&self) -> PermissionMode {
+        self.permissions.mode()
+    }
+
+    fn set_permission_mode(&self, mode: PermissionMode) {
+        self.permissions.set_mode(mode);
+    }
+
     fn take_events(&self) -> Option<UnboundedReceiver<Value>> {
         lock(&self.events).take()
     }
@@ -201,7 +237,19 @@ impl PiBackend for RuntimeBackend {
     }
 
     async fn get_available_models(&self) -> anyhow::Result<Value> {
-        Ok(json!({"models": self.session.model_runtime().available_models()}))
+        let runtime = self.session.model_runtime();
+        let models: Vec<Value> = runtime
+            .available_models()
+            .iter()
+            .map(|model| {
+                let mut value = serde_json::to_value(model).expect("model is serializable");
+                if let Some(name) = runtime.registry().provider_name(&model.provider) {
+                    value["providerName"] = json!(name);
+                }
+                value
+            })
+            .collect();
+        Ok(json!({"models": models}))
     }
 
     async fn set_model(&self, provider: &str, model_id: &str) -> anyhow::Result<()> {

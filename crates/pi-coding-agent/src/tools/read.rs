@@ -188,6 +188,10 @@ pub fn read_output_schema() -> Value {
 
 #[async_trait]
 impl AgentTool for ReadTool {
+    fn annotations(&self) -> Option<&pi_agent::ToolAnnotations> {
+        Some(&super::READ_ONLY_ANNOTATIONS)
+    }
+
     fn name(&self) -> &str {
         "read"
     }

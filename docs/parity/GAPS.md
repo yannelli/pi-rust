@@ -62,6 +62,17 @@ Behavior that pi-rust adds on purpose. The parity review should not report these
 - Markdown export: `/export` and `pi --export` write Markdown when the output path ends in `.md` (README "Use").
 - The README section "Differences from upstream pi" lists the other additions (slash commands, CLI commands and flags, settings) and the bugs pi-rust fixes that are still open upstream. `allowlist.json` holds the matching parity report entries.
 
+## Post-release follow-up
+
+Only after the preceding ACP/provider and TUI work is released on `main`: trace why Anthropic Sonnet 4.5 is labeled `(Latest)`. Change the label or its update source only if Pi Rust supplies it; do not override metadata supplied by an external provider. Do not investigate this item before that release.
+
+## ACP and provider integration work
+
+- Paseo rejects exact MCP tool preapproval for generic ACP providers before starting Pi. Its provider contract and ACP permission handler need exact-tool matching; Pi's permission modes alone cannot resolve that host-side error.
+- ACP `session/new` and `session/load` do not load client-supplied `mcpServers`. Pi's own MCP configuration works, but forwarding host MCP definitions needs a separate integration.
+- Native Cursor login and inference are not implemented. The reference provider uses PKCE browser polling plus protobuf/HTTP2, not an OpenAI-compatible Cursor endpoint. A native provider needs the transport, model discovery, tool continuations, and mock-server tests; a login-only entry would not suffice.
+- ACP has no standard model icon field. Fast catalog variants get a lightning-bolt label; a speed toggle for other models needs explicit capability metadata and provider request support.
+
 ## Platform
 
 - `pi experimental server` and `client` use Unix sockets, so they report that they need Unix on Windows.

@@ -168,7 +168,19 @@ fn before_tool_call_hook(weak: Weak<AgentSession>) -> BeforeToolCallFn {
                 let reach = session.tool(name).and_then(|tool| tool.reaches_tools(call.args));
                 manager.wait_for_tool_call(name, reach.as_ref(), &cancel).await;
             }
-            session.extension_tool_call(&call).await
+            let result = session.extension_tool_call(&call).await;
+            if result.as_ref().is_some_and(|result| result.block) {
+                return result;
+            }
+            let authorize = lock(&session.tool_authorizer).clone();
+            if let Some(authorize) = authorize {
+                let args = result.as_ref().and_then(|result| result.args.as_ref()).unwrap_or(call.args);
+                let checked = pi_agent::BeforeToolCall { args, ..call };
+                if let Some(denied) = authorize(checked, cancel).await {
+                    return Some(denied);
+                }
+            }
+            result
         }
         .boxed()
     })
