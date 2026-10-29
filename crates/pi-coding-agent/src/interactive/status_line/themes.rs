@@ -25,7 +25,7 @@ pub enum Role {
 const ROLES: usize = 14;
 
 /// `(name, colors by role in [`Role`] order)`.
-const THEMES: [(&str, [&str; ROLES]); 15] = [
+const THEMES: [(&str, [&str; ROLES]); 17] = [
     (
         "pi-rust",
         [
@@ -66,6 +66,20 @@ const THEMES: [(&str, [&str; ROLES]); 15] = [
         [
             "#6272A4", "#F1FA8C", "#BD93F9", "#FF79C6", "#8BE9FD", "#8BE9FD", "#8BE9FD", "#50FA7B", "#50FA7B",
             "#FFB86C", "#FF5555", "#6272A4", "#44475A", "#FF79C6",
+        ],
+    ),
+    (
+        "ghostty",
+        [
+            "#81A2BE", "#F0C674", "#B294BB", "#C9A5CE", "#C5C8C6", "#C5C8C6", "#8ABEB7", "#B5BD68", "#B5BD68",
+            "#F0C674", "#E58C8C", "#81A2BE", "#969896", "#B294BB",
+        ],
+    ),
+    (
+        "darcula-islands",
+        [
+            "#82B8F8", "#E2C077", "#56A8F5", "#CF8BC5", "#BCBEC4", "#BCBEC4", "#6BC1CA", "#8FBB8B", "#8FBB8B",
+            "#E2C077", "#F78C90", "#A1A5AE", "#868A91", "#56A8F5",
         ],
     ),
     (
@@ -177,5 +191,49 @@ pub fn ink_for([r, g, b]: [u8; 3]) -> [u8; 3] {
         if value <= 0.04045 { value / 12.92 } else { ((value + 0.055) / 1.055).powf(2.4) }
     };
     let luminance = 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
-    if luminance > 0.22 { [27, 27, 27] } else { [245, 245, 245] }
+    let dark_contrast = (luminance + 0.05) / (linear(27) + 0.05);
+    let light_contrast = (linear(245) + 0.05) / (luminance + 0.05);
+    if dark_contrast.max(light_contrast) >= 4.5 {
+        if dark_contrast >= light_contrast { [27, 27, 27] } else { [245, 245, 245] }
+    } else if (luminance + 0.05) / 0.05 >= 1.05 / (luminance + 0.05) {
+        [0, 0, 0]
+    } else {
+        [255, 255, 255]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pi_tui::terminal_colors::RgbColor;
+
+    use super::*;
+    use crate::theme::{TerminalTheme, create_theme, load_theme_json, wcag_contrast};
+
+    #[test]
+    fn matching_palettes_are_discoverable_and_follow_the_harness_accent() {
+        let _state = crate::theme::tests::global_state();
+        for name in ["ghostty", "darcula-islands", "nord", "catppuccin"] {
+            assert_eq!(theme_names().filter(|candidate| *candidate == name).count(), 1, "{name}");
+            let palette = Palette::named(name).expect("built-in palette");
+            let json = load_theme_json(name).expect("harness theme");
+            let theme = create_theme(&json, Some(pi_tui::colors::TerminalColorMode::Truecolor), None)
+                .expect("harness theme loads");
+            assert_eq!(theme.appearance(), TerminalTheme::Dark);
+            assert_eq!(color(palette.rgb(Role::Model)), theme.color(crate::theme::ThemeColor::Accent), "{name}");
+        }
+    }
+
+    #[test]
+    fn palettes_keep_chip_ink_readable_for_every_role() {
+        for name in theme_names() {
+            let palette = Palette::named(name).expect("built-in palette");
+            for (role, rgb) in palette.colors.into_iter().enumerate() {
+                let [r, g, b] = rgb;
+                let background = RgbColor::new(r, g, b);
+                let [r, g, b] = ink_for(rgb);
+                let contrast = wcag_contrast(RgbColor::new(r, g, b), background);
+                assert!(contrast >= 4.5, "{name} role {role}: {contrast}");
+            }
+        }
+    }
 }

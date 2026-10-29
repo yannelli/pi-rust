@@ -277,6 +277,46 @@ async fn command_reads_the_payload_and_sees_the_width() {
 }
 
 #[test]
+fn layout_modes_remove_gaps_and_keep_narrow_lines_bounded() {
+    let _theme = global_state();
+    let config = json!({"chip": "plain", "icons": "none", "separator": " | ",
+        "segments": ["dir", "fill", "model"]});
+    let mut compact = config.clone();
+    compact["layout"] = json!("compact");
+    assert_eq!(plain_line(&first_line(compact.clone(), 120)), "node-cli | gpt-6.1-sol");
+    let mut stacked = config;
+    stacked["layout"] = json!("stacked");
+    assert_eq!(plain(&builtin(stacked.clone()).render(&snapshot(), 120)), ["node-cli", "gpt-6.1-sol"]);
+    for config in [compact, stacked] {
+        for width in 0..40 {
+            assert!(builtin(config.clone()).render(&snapshot(), width).iter().all(|line| visible_width(line) <= width));
+        }
+    }
+    let mut no_branch = snapshot();
+    no_branch.branch = None;
+    let line = builtin(json!({"segments": ["branch", "fill", {"text": ""}, "model"], "icons": "none"}));
+    assert_eq!(plain(&line.render(&no_branch, 120)), ["gpt-6.1-sol"]);
+    assert!(builtin(json!({"segments": []})).render(&snapshot(), 120).is_empty());
+    assert!(builtin(json!({"padding": 3})).render(&snapshot(), 2).is_empty());
+}
+
+#[test]
+fn context_headroom_and_unknown_usage_are_not_fabricated() {
+    let mut data = snapshot();
+    assert_eq!(segment_text(Segment::ContextTokens, &data).as_deref(), Some("14k context"));
+    assert_eq!(segment_text(Segment::ContextHeadroom, &data).as_deref(), Some("487k tokens left"));
+    assert_eq!(status_payload(&data)["context_window"]["remaining_tokens"], 486_500);
+    data.context.as_mut().unwrap().tokens = Some(600_000);
+    assert_eq!(data.context_headroom(), Some(0));
+    data.context = None;
+    assert_eq!(segment_text(Segment::ContextBar, &data).as_deref(), Some("context ?"));
+    assert_eq!(segment_text(Segment::ContextRemaining, &data), None);
+    assert_eq!(segment_text(Segment::ContextHeadroom, &data), None);
+    assert_eq!(segment_text(Segment::ContextTokens, &data), None);
+    assert!(status_payload(&data)["context_window"]["remaining_tokens"].is_null());
+}
+
+#[test]
 fn statusline_command_switches_presets_and_keeps_the_command() {
     let current = json!({"type": "command", "command": "s.sh", "chip": "dot", "theme": "nord", "segments": ["dir"], "colors": {"dir": "#fff"}});
     let pills = status_line_choice(Some(current), "pills").expect("pills");
