@@ -81,11 +81,15 @@ impl InteractiveMode {
             self.restore_queued_messages_to_editor(true, None);
         } else if session.is_bash_running() {
             session.abort_bash();
-        } else if self.state.borrow().is_bash_mode {
+        } else if !self.editor.get_text().is_empty() {
             self.editor.set_text("");
-            self.state.borrow_mut().is_bash_mode = false;
+            let mut state = self.state.borrow_mut();
+            state.is_bash_mode = false;
+            state.last_escape = None;
+            drop(state);
             self.update_editor_border_color();
-        } else if self.editor.get_text().trim().is_empty() {
+            self.request_render();
+        } else {
             let action = self.settings().double_escape_action();
             if action == DoubleEscapeAction::None {
                 return;
@@ -320,6 +324,7 @@ impl InteractiveMode {
         if text.is_empty() {
             return;
         }
+        self.editor.record_prompt(&text);
         if self.run_slash_command(&text) {
             return;
         }
@@ -334,20 +339,17 @@ impl InteractiveMode {
                     self.editor.set_text(&text);
                     return;
                 }
-                self.editor.record_prompt(&text);
                 self.handle_bash_command(command.to_string(), excluded);
                 self.state.borrow_mut().is_bash_mode = false;
                 self.update_editor_border_color();
                 return;
             }
         }
-        self.send_prompt(text.clone(), &text);
+        self.send_prompt(text);
     }
 
-    /// Send `text` as typed input is sent: queued during compaction, steering while streaming,
-    /// else a new run. `typed` goes to the editor history.
-    pub(super) fn send_prompt(&self, text: String, typed: &str) {
-        self.editor.record_prompt(typed);
+    /// Send an already-recorded input, expanding commands before reaching this point.
+    pub(super) fn send_prompt(&self, text: String) {
         let session = self.session();
         if session.is_compacting() {
             self.queue_compaction_message(text, false);

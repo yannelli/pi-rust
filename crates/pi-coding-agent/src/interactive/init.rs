@@ -44,9 +44,9 @@ pub(super) fn init_prompt(cwd: &Path, extra: Option<&str>) -> String {
 
 impl InteractiveMode {
     /// `/init [instructions]`: send the prompt as if typed, keeping `/init` in the editor history.
-    pub(super) fn handle_init_command(&self, typed: &str, extra: Option<&str>) {
+    pub(super) fn handle_init_command(&self, extra: Option<&str>) {
         let prompt = init_prompt(self.session().cwd(), extra);
-        self.send_prompt(prompt, typed);
+        self.send_prompt(prompt);
     }
 }
 

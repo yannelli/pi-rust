@@ -73,6 +73,30 @@ async fn new_session_clears_the_chat() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn escape_clears_a_long_draft_without_quitting_or_submitting() {
+    local(async {
+        let ui = start(Options::default()).await;
+        let draft = "discard this draft ".repeat(40);
+        ui.send(&draft).await;
+        ui.wait_for("discard this draft").await;
+        ui.send("\x1b").await;
+        ui.wait_until("cleared editor", |ui| !ui.screen().contains("discard this draft")).await;
+        assert!(!ui.mode.is_exited());
+        assert!(ui.provider.requests().is_empty());
+        let bindings = pi_coding_agent::keybindings::keybindings();
+        let undo = match bindings.get("tui.editor.undo").unwrap().default_keys[0].as_str() {
+            "ctrl+z" => "\x1a",
+            "alt+z" => "\x1bz",
+            "ctrl+-" => "\x1f",
+            other => panic!("unexpected undo binding: {other}"),
+        };
+        ui.send(undo).await;
+        ui.wait_until("undo restores draft", |ui| ui.screen().contains("discard this draft")).await;
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn ctrl_c_clears_the_editor_and_twice_exits() {
     local(async {
         let ui = start(Options::default()).await;
