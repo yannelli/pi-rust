@@ -105,6 +105,57 @@ async fn builtins_toggle_globally_and_cycle_per_project() {
     }
 }
 
+#[test]
+fn explicit_extension_state_is_idempotent_and_rejects_ambiguous_names() {
+    let fixture = Fixture::new();
+    let settings = memory_settings(json!({"packages": ["npm:pi-tools", "npm:other"]}));
+    let mut resolved = package_extensions(&fixture.root().join("one"), "npm:pi-tools", &["a.ts"]);
+    resolved.extensions.extend(package_extensions(&fixture.root().join("two"), "npm:other", &["a.ts"]).extensions);
+    let target = resolved.extensions[0].path.display().to_string();
+    let mut editor = editor(&fixture, settings.clone(), resolved, ConfigWriteScope::Project);
+    assert!(editor.set_extension_enabled("a.ts", true).unwrap_err().contains("Ambiguous"));
+    assert!(settings.project_settings().packages.is_none());
+    for _ in 0..2 {
+        editor.set_extension_enabled(&target, true).unwrap();
+    }
+    let project = serde_json::to_value(settings.project_settings().packages.unwrap()).unwrap();
+    assert_eq!(project, json!([{"source": "npm:pi-tools", "autoload": false, "extensions": ["+extensions/a.ts"]}]));
+    editor.set_extension_enabled(&target, false).unwrap();
+    let project = serde_json::to_value(settings.project_settings().packages.unwrap()).unwrap();
+    assert_eq!(project, json!([{"source": "npm:pi-tools", "autoload": false, "extensions": ["-extensions/a.ts"]}]));
+}
+
+#[tokio::test]
+async fn extensions_cli_lists_and_sets_builtin_state_without_removing_it() {
+    let fixture = Fixture::new();
+    let mut options = PackageCommandOptions::new(fixture.cwd.clone(), fixture.agent_dir.clone());
+    options.home = fixture.root();
+    options.runner = MockRunner::failing();
+    options.builtin_extensions = vec!["mcp".into(), "llama.cpp".into()];
+    let (stdout, out) = CommandOutput::capture();
+    let (stderr, _) = CommandOutput::capture();
+    (options.stdout, options.stderr) = (stdout, stderr);
+    let args = |args: &[&str]| args.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    for _ in 0..2 {
+        assert_eq!(run_config_command(&args(&["extensions", "disable", "builtin:mcp"]), &options, None).await, Some(0));
+    }
+    assert_eq!(run_config_command(&args(&["extensions", "list"]), &options, None).await, Some(0));
+    let text = String::from_utf8(out.lock().unwrap().clone()).unwrap();
+    assert!(text.contains("[ ] builtin:mcp") && text.contains("[x] builtin:llama.cpp"), "{text}");
+    assert_eq!(run_config_command(&args(&["extensions", "enable", "mcp"]), &options, None).await, Some(0));
+    let saved: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(fixture.agent_dir.join("settings.json")).unwrap()).unwrap();
+    assert_eq!(saved["extensions"], json!(["+builtin:mcp"]));
+    assert_eq!(run_config_command(&args(&["extensions", "enable"]), &options, None).await, Some(1));
+    assert_eq!(run_config_command(&args(&["extensions", "enable", "missing"]), &options, None).await, Some(1));
+    write(&fixture.cwd.join(".pi/settings.json"), "{}");
+    assert_eq!(run_config_command(&args(&["extensions", "disable", "mcp", "-l"]), &options, None).await, Some(1));
+    assert_eq!(
+        run_config_command(&args(&["extensions", "disable", "mcp", "-l", "--approve"]), &options, None).await,
+        Some(0)
+    );
+}
+
 #[tokio::test]
 async fn config_command_prints_resources_without_a_selector() {
     let fixture = Fixture::new();

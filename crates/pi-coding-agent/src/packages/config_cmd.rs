@@ -66,17 +66,65 @@ pub fn render_config_text(editor: &ConfigEditor) -> String {
     lines.join("\n")
 }
 
-/// Run `pi config`; `None` when `args[0]` is not `config`. Returns the exit code.
+fn extensions_help() -> &'static str {
+    "Usage:\n  pi extensions list [-l]\n  pi extensions install <npm:package|git:url|path> [-l]\n  pi extensions remove <source> [-l]\n  pi extensions enable <name-or-path> [-l]\n  pi extensions disable <name-or-path> [-l]\n\nLists built-in and installed extensions, including disabled ones.\nUse pi config for the resource configuration TUI. Restart Pi or run /reload after changes.\nThere is no bundled registry of uninstalled third-party extensions; install a package by source.\n"
+}
+
+fn render_extensions(editor: &ConfigEditor) -> String {
+    let mut lines = vec!["Extensions ([x] enabled, [ ] disabled):".to_string()];
+    for item in editor
+        .groups()
+        .iter()
+        .flat_map(|group| &group.subgroups)
+        .flat_map(|group| &group.items)
+        .filter(|item| item.kind == crate::resources::ResourceType::Extensions)
+    {
+        lines.push(format!(
+            "{} {}  ({})",
+            if item.enabled { "[x]" } else { "[ ]" },
+            item.path.display(),
+            item.metadata.source
+        ));
+    }
+    if lines.len() == 1 {
+        lines.push("No extensions found. Install one with pi extensions install <source>.".into());
+    }
+    lines.join("\n")
+}
+
+/// Run `pi config` or `pi extensions`; returns the exit code.
 pub async fn run_config_command(
     args: &[String],
     options: &PackageCommandOptions,
     selector: Option<&ConfigSelectorFn>,
 ) -> Option<i32> {
     let (command, rest) = args.split_first()?;
-    if command != "config" {
+    if command != "config" && command != "extensions" {
         return None;
     }
     let io = Io { out: options.stdout.clone(), err: options.stderr.clone(), style: Style { enabled: options.color } };
+    if command == "extensions" {
+        if rest.iter().any(|arg| arg == "--help" || arg == "-h") {
+            io.line(extensions_help());
+            return Some(0);
+        }
+        let (action, args) = rest.split_first().map_or(("list", &[][..]), |(action, args)| (action.as_str(), args));
+        if matches!(action, "install" | "remove") {
+            let args = std::iter::once(action.to_string()).chain(args.iter().cloned()).collect::<Vec<_>>();
+            return super::cli::run_package_command(&args, options).await;
+        }
+        let mut translated = vec!["--extensions".to_string()];
+        match action {
+            "list" => {}
+            "enable" | "disable" => translated.push(format!("--{action}")),
+            _ => {
+                io.error(extensions_help());
+                return Some(1);
+            }
+        }
+        translated.extend_from_slice(args);
+        return Some(run(&translated, options, None, &io).await);
+    }
     Some(run(rest, options, selector, &io).await)
 }
 
@@ -86,11 +134,22 @@ async fn run(rest: &[String], options: &PackageCommandOptions, selector: Option<
         return 0;
     }
     let (mut local, mut trust_override) = (false, None);
-    for arg in rest {
+    let mut extensions_only = false;
+    let mut change = None;
+    let mut args = rest.iter();
+    while let Some(arg) = args.next() {
         match arg.as_str() {
             "-l" | "--local" => local = true,
             "-a" | "--approve" => trust_override = Some(true),
             "-na" | "--no-approve" => trust_override = Some(false),
+            "--extensions" => extensions_only = true,
+            "--enable" | "--disable" if extensions_only && change.is_none() => {
+                let Some(reference) = args.next().filter(|value| !value.starts_with('-')) else {
+                    io.error("Expected an extension name or path after enable/disable.");
+                    return 1;
+                };
+                change = Some((reference.clone(), arg == "--enable"));
+            }
             other => {
                 let (message, hint) = if other.starts_with('-') {
                     (
@@ -151,7 +210,29 @@ async fn run(rest: &[String], options: &PackageCommandOptions, selector: Option<
         }
     };
     let scope = if local { ConfigWriteScope::Project } else { ConfigWriteScope::Global };
-    let editor = ConfigEditor::new(&resolved, settings, &options.cwd, &options.agent_dir, &options.home, scope);
+    let mut editor = ConfigEditor::new(&resolved, settings, &options.cwd, &options.agent_dir, &options.home, scope);
+    if let Some((reference, enabled)) = change {
+        if let Err(error) = editor.set_extension_enabled(&reference, enabled) {
+            io.error(&error);
+            return 1;
+        }
+        let errors = editor.settings().drain_errors();
+        if !errors.is_empty() {
+            for error in errors {
+                io.error(&error.diagnostic());
+            }
+            return 1;
+        }
+        io.line(&format!(
+            "{} {reference}. Restart Pi or run /reload to apply.",
+            if enabled { "Enabled" } else { "Disabled" }
+        ));
+        return 0;
+    }
+    if extensions_only {
+        io.line(&render_extensions(&editor));
+        return 0;
+    }
     match selector {
         Some(selector) => selector(ConfigSelectorRequest { editor, project_mode_available: trusted }).await,
         None => io.line(&render_config_text(&editor)),

@@ -364,6 +364,19 @@ Paseo's error `cannot preapprove exact MCP tools for unattended execution` is a 
 
 To hide the startup information block, set `quietStartup: true` in the pi settings. To accept embedded file contents in prompts, set `PI_ACP_ENABLE_EMBEDDED_CONTEXT=true`. If no models are configured, the editor offers to start pi in a terminal, where you can log in. ACP mode is a port of [pi-acp](https://github.com/svkozak/pi-acp) by Sergii Kozak (MIT license).
 
+## Extension management
+
+```sh
+pi extensions list                       # built-in and installed, including disabled
+pi extensions install npm:<package>      # or git URL / local path
+pi extensions disable builtin:mcp
+pi extensions enable builtin:mcp
+pi extensions remove npm:<package>
+pi config                                # TUI for enabling/disabling resources
+```
+
+Use the exact path from `list` if names are ambiguous. Add `-l` for project-local settings; project changes require trust (`--approve`). Restart Pi or run `/reload` after changes. Third-party extensions are executable code: install only sources you trust. There is no bundled catalog of uninstalled third-party extensions.
+
 ## Configuration
 
 pi-rust reads the same files as upstream pi, so the two can use one setup. `PI_CODING_AGENT_DIR` sets a different folder in place of `~/.pi/agent`.
@@ -504,6 +517,7 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. These p
 - Word movement in Chinese, Japanese, Korean (CJK), and Thai text uses ICU4X dictionaries. Thus some word boundaries are different from `Intl.Segmenter` in Node.
 - `pi --mode acp` (see [ACP](#acp-zed-and-other-editors)) is an addition. Upstream pi needs the separate pi-acp adapter. Permission modes are separate from thinking levels and gate tool execution.
 - Global `disabledProviders` settings hide whole providers from model selection without deleting credentials.
+- `pi extensions` lists, installs, removes, enables, and disables extensions through the existing package/resource settings.
 - Idle Escape clears the input draft (undo restores it). Submitted slash commands join prompts and shell commands in Up/Down history.
 - Markdown export (see [Use](#use)) is an addition: `/export notes.md` and `pi --export session.jsonl notes.md` write Markdown. Upstream pi exports only HTML and JSONL.
 - The slash commands `/diff`, `/init`, `/review`, `/context`, `/undo`, and `/retry` (see [Use](#use)) are additions. Upstream pi has none of them, and it shows context use only in the footer.

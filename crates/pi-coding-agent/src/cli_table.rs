@@ -254,6 +254,12 @@ pub const CLI_COMMANDS: &[CliCommand] = &[
     command("list", "", "List installed extensions from settings", TRUST),
     command("config", "[-l]", "Open TUI to enable/disable package resources (Tab switches scope)", &["-l", "--local"]),
     command(
+        "extensions",
+        "[list|install|remove|enable|disable] [source] [-l]",
+        "Manage built-in and installed extensions",
+        &["-l", "--local"],
+    ),
+    command(
         "auth",
         "<command>",
         "Print credentials or check provider readiness",

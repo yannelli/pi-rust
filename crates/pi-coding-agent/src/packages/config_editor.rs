@@ -154,6 +154,44 @@ impl ConfigEditor {
         Some(enabled)
     }
 
+    /// Set one extension by its exact path or unambiguous display name.
+    pub fn set_extension_enabled(&mut self, reference: &str, enabled: bool) -> Result<(), String> {
+        let matches: Vec<_> = self
+            .groups()
+            .iter()
+            .enumerate()
+            .flat_map(|(g, group)| {
+                group.subgroups.iter().enumerate().flat_map(move |(s, subgroup)| {
+                    subgroup.items.iter().enumerate().filter_map(move |(i, item)| {
+                        (item.kind == ResourceType::Extensions
+                            && (item.path.to_string_lossy() == reference || item.display_name == reference))
+                            .then_some((g, s, i, item.clone()))
+                    })
+                })
+            })
+            .collect();
+        let [(g, s, i, item)] = matches.as_slice() else {
+            return Err(if matches.is_empty() {
+                format!("Extension not found: {reference}. Use pi extensions list or install it first.")
+            } else {
+                format!("Ambiguous extension: {reference}. Use the full path from pi extensions list.")
+            });
+        };
+        if !self.can_toggle(item) {
+            return Err("Use --local to change a project extension.".into());
+        }
+        if self.write_scope == ConfigWriteScope::Project {
+            let state = if enabled { ProjectOverrideState::Load } else { ProjectOverrideState::Unload };
+            if !self.set_project_override(item, state) {
+                return Err(format!("Could not update extension: {reference}"));
+            }
+            self.project_groups[*g].subgroups[*s].items[*i].enabled = enabled;
+        } else if item.enabled != enabled && self.toggle(*g, *s, *i).is_none() {
+            return Err(format!("Could not update extension: {reference}"));
+        }
+        Ok(())
+    }
+
     fn toggle_resource(&self, item: &ConfigItem) -> Option<bool> {
         if self.write_scope == ConfigWriteScope::Project {
             let state = self.next_override_state(item);
