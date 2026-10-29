@@ -57,6 +57,8 @@ segments! {
     ContextRemaining => "contextRemaining" | "context-remaining",
     ContextWindow => "contextWindow" | "context-window-size",
     ContextBar => "contextBar",
+    ContextTokens => "contextTokens" | "context-tokens",
+    ContextHeadroom => "contextHeadroom" | "context-headroom" | "tokensRemaining",
     Version => "version" | "codex-version",
     RunState => "runState" | "run-state",
     Time => "time",
@@ -82,6 +84,8 @@ impl Segment {
             | Segment::ContextUsed
             | Segment::ContextRemaining
             | Segment::ContextWindow
+            | Segment::ContextTokens
+            | Segment::ContextHeadroom
             | Segment::ContextBar => {
                 if percent > 90.0 {
                     Role::ContextHigh
@@ -170,7 +174,10 @@ impl Icons {
             (Icons::Nerd, Model | ModelWithReasoning) => Some("\u{f06a9}"),
             (Icons::Nerd, Thinking) => Some("\u{f0335}"),
             (Icons::Nerd, Cost) => Some("\u{f155}"),
-            (Icons::Nerd, Context | ContextUsed | ContextRemaining | ContextWindow | ContextBar) => Some("\u{f080}"),
+            (
+                Icons::Nerd,
+                Context | ContextUsed | ContextRemaining | ContextWindow | ContextBar | ContextTokens | ContextHeadroom,
+            ) => Some("\u{f080}"),
             (Icons::Nerd, Tokens | TokensIn | TokensOut | TokensUsed) => Some("\u{f0e7}"),
             (Icons::Nerd, Time) => Some("\u{f017}"),
             (Icons::Nerd, Session | SessionId) => Some("\u{f075}"),
@@ -181,7 +188,10 @@ impl Icons {
             (Icons::Emoji, Model | ModelWithReasoning) => Some("🤖"),
             (Icons::Emoji, Thinking) => Some("🧠"),
             (Icons::Emoji, Cost) => Some("💰"),
-            (Icons::Emoji, Context | ContextUsed | ContextRemaining | ContextWindow | ContextBar) => Some("📊"),
+            (
+                Icons::Emoji,
+                Context | ContextUsed | ContextRemaining | ContextWindow | ContextBar | ContextTokens | ContextHeadroom,
+            ) => Some("📊"),
             (Icons::Emoji, Tokens | TokensIn | TokensOut | TokensUsed) => Some("⚡"),
             (Icons::Emoji, Time) => Some("⏱"),
             (Icons::Emoji, Session | SessionId) => Some("💬"),
@@ -275,9 +285,16 @@ pub fn segment_text(segment: Segment, snapshot: &StatusSnapshot) -> Option<Strin
         Segment::ContextUsed => percent.map(|percent| format!("{percent:.0}% used")),
         Segment::ContextRemaining => percent.map(|percent| format!("{:.0}% left", (100.0 - percent).max(0.0))),
         Segment::ContextWindow => snapshot.context_window.map(|window| format!("{} window", format_tokens(window))),
+        Segment::ContextTokens => {
+            snapshot.context.as_ref()?.tokens.map(|tokens| format!("{} context", format_tokens(tokens)))
+        }
+        Segment::ContextHeadroom => {
+            snapshot.context_headroom().map(|tokens| format!("{} tokens left", format_tokens(tokens)))
+        }
         Segment::ContextBar => {
             snapshot.context_window?;
-            let percent = percent.unwrap_or(0.0).clamp(0.0, 100.0);
+            let Some(percent) = percent else { return Some("context ?".into()) };
+            let percent = percent.clamp(0.0, 100.0);
             let filled = ((percent / 100.0) * BAR_CELLS as f64).round() as usize;
             Some(format!("{}{} {percent:.0}%", "▰".repeat(filled), "▱".repeat(BAR_CELLS - filled)))
         }
