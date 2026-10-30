@@ -8,6 +8,8 @@ use std::time::{Duration, SystemTime};
 
 use pi_tui::ui_loop::{self, TimerId};
 
+use crate::extensions::ComponentFactory;
+
 /// Where a repository keeps its metadata (worktrees point `.git` at another directory).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GitPaths {
@@ -94,6 +96,7 @@ pub struct FooterData {
     subscriptions: HashMap<String, bool>,
     stamp: Option<(SystemTime, u64)>,
     watcher: Option<TimerId>,
+    branch_listeners: Vec<(u64, ComponentFactory)>,
 }
 
 impl FooterData {
@@ -109,6 +112,7 @@ impl FooterData {
             subscriptions: HashMap::new(),
             stamp,
             watcher: None,
+            branch_listeners: Vec::new(),
         }
     }
 
@@ -155,6 +159,23 @@ impl FooterData {
 
     pub fn set_subscription(&mut self, provider: &str, subscription: bool) {
         self.subscriptions.insert(provider.to_string(), subscription);
+    }
+
+    /// Keep the extension `onBranchChange` callback `key` of `factory`'s runner.
+    pub fn add_branch_listener(&mut self, factory: ComponentFactory, key: u64) {
+        self.branch_listeners.push((key, factory));
+    }
+
+    pub fn remove_branch_listener(&mut self, target: u64, key: u64) {
+        self.branch_listeners.retain(|(existing, factory)| *existing != key || factory.target() != target);
+    }
+
+    pub fn clear_branch_listeners(&mut self) {
+        self.branch_listeners.clear();
+    }
+
+    pub fn branch_listeners(&self) -> Vec<(u64, ComponentFactory)> {
+        self.branch_listeners.clone()
     }
 
     pub fn cwd(&self) -> &Path {

@@ -83,6 +83,19 @@ pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<
             json!([columns, rows])
         }
         "footer" => ui.footer_data(&args.str(1)?),
+        "onBranchChange" => {
+            let key = args.u64(1);
+            ui.on_branch_change(ComponentFactory::new(&runner.this(), key, target, ComponentKind::Footer), key);
+            Value::Null
+        }
+        "offBranchChange" => {
+            ui.off_branch_change(target, args.u64(1));
+            Value::Null
+        }
+        "writeTerminal" => {
+            ui.write_terminal(&args.str(1)?, args.json(2)["tmuxPassthrough"].as_bool().unwrap_or(false));
+            Value::Null
+        }
         "notify" => {
             ui.notify(&args.str(1)?, notify_type(&args.json(2)));
             Value::Null

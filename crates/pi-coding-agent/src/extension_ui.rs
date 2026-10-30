@@ -222,10 +222,22 @@ pub trait ExtensionUi: Send + Sync {
         (80, 24)
     }
 
-    /// Footer data for extension footers: `gitBranch`, `statuses`, or `providerCount`.
+    /// Footer data for extension footers: `gitBranch`, `statuses`, `providerCount`, and the
+    /// pi-rust `sessionStats` and `runState`.
     fn footer_data(&self, _kind: &str) -> Value {
         Value::Null
     }
+
+    /// Call the JavaScript callback `key` of `factory`'s runner when the footer's git branch
+    /// changes (`footerData.onBranchChange`).
+    fn on_branch_change(&self, _factory: ComponentFactory, _key: u64) {}
+
+    /// Stop the `onBranchChange` listener `key` of session `target`.
+    fn off_branch_change(&self, _target: u64, _key: u64) {}
+
+    /// Write raw bytes to the terminal between frames (`ctx.ui.writeTerminal`, pi-rust only),
+    /// wrapped for tmux passthrough inside tmux when `tmux_passthrough` is set.
+    fn write_terminal(&self, _data: &str, _tmux_passthrough: bool) {}
 
     /// A custom editor reports `submit`, `change`, `escape`, `ctrlD`, `pasteImage`, or `action`
     /// (with the app action id) as the default editor would handle it.

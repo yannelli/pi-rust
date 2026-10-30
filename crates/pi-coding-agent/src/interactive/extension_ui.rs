@@ -29,6 +29,8 @@ pub(super) struct UiMirror {
     pub git_branch: Mutex<Option<String>>,
     pub statuses: Mutex<BTreeMap<String, String>>,
     pub provider_count: AtomicUsize,
+    pub session_stats: Mutex<Value>,
+    pub run_state: Mutex<&'static str>,
     pub editor_actions: Mutex<Vec<String>>,
     pub overlays: Mutex<std::collections::HashMap<u64, super::extension_overlay::OverlayMirror>>,
 }
@@ -65,6 +67,49 @@ impl UiMirror {
 
     pub fn set_editor_actions(&self, actions: Vec<String>) {
         *lock(&self.editor_actions) = actions;
+    }
+
+    pub fn set_run_footer(&self, session_stats: Value, run_state: &'static str) {
+        *lock(&self.session_stats) = session_stats;
+        *lock(&self.run_state) = run_state;
+    }
+}
+
+/// `data` as written for `ctx.ui.writeTerminal`: wrapped for tmux when asked and inside tmux.
+pub(super) fn terminal_bytes(data: &str, tmux_passthrough: bool, in_tmux: bool) -> String {
+    super::iterm2::passthrough(data, tmux_passthrough && in_tmux)
+}
+
+impl InteractiveMode {
+    /// Copy the footer's token, cost, and context numbers and the program state into `mirror`.
+    pub(super) fn sync_run_footer(&self, mirror: &UiMirror) {
+        let Ok(mut footer) = self.footer.try_borrow_mut() else { return };
+        let snapshot = footer.snapshot();
+        drop(footer);
+        let totals = snapshot.totals;
+        let stats = json!({
+            "input": totals.input,
+            "output": totals.output,
+            "cacheRead": totals.cache_read,
+            "cacheWrite": totals.cache_write,
+            "cost": totals.cost,
+            "contextTokens": snapshot.context.as_ref().and_then(|usage| usage.tokens),
+            "contextWindow": snapshot.context_window,
+            "contextPercent": snapshot.context_percent(),
+        });
+        let state = self.program_status.borrow().status(None).state;
+        mirror.set_run_footer(stats, super::iterm2::state_name(state));
+    }
+
+    /// Call the extension `onBranchChange` listeners after the mirror has the new branch.
+    pub(super) fn notify_branch_change(&self) {
+        self.sync_extension_mirror();
+        let listeners = self.footer_data.borrow().branch_listeners();
+        for (key, factory) in listeners {
+            tokio::task::spawn_local(async move {
+                let _ = factory.invoke_callback(key, Value::Null).await;
+            });
+        }
     }
 }
 
@@ -324,8 +369,27 @@ impl ExtensionUi for TuiExtensionUi {
             "gitBranch" => json!(*lock(&self.mirror.git_branch)),
             "statuses" => json!(*lock(&self.mirror.statuses)),
             "providerCount" => json!(self.mirror.provider_count.load(Ordering::SeqCst)),
+            "sessionStats" => lock(&self.mirror.session_stats).clone(),
+            "runState" => json!(match *lock(&self.mirror.run_state) {
+                "" => "idle",
+                state => state,
+            }),
             _ => Value::Null,
         }
+    }
+
+    fn on_branch_change(&self, factory: ComponentFactory, key: u64) {
+        self.run(move |mode| mode.footer_data.borrow_mut().add_branch_listener(factory, key));
+    }
+
+    fn off_branch_change(&self, target: u64, key: u64) {
+        self.run(move |mode| mode.footer_data.borrow_mut().remove_branch_listener(target, key));
+    }
+
+    fn write_terminal(&self, data: &str, tmux_passthrough: bool) {
+        let in_tmux = pi_tui::env::EnvLookup::non_empty(&pi_tui::env::ProcessEnv, "TMUX").is_some();
+        let bytes = terminal_bytes(data, tmux_passthrough, in_tmux);
+        self.run(move |mode| mode.terminal.borrow_mut().write(&bytes));
     }
 
     fn editor_event(&self, kind: &str, value: Option<&str>) {
@@ -344,5 +408,17 @@ impl ExtensionUi for TuiExtensionUi {
     fn invalidate_tool(&self, tool_call_id: &str) {
         let id = tool_call_id.to_string();
         self.run(move |mode| mode.invalidate_extension_tool(&id));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::terminal_bytes;
+
+    #[test]
+    fn wraps_terminal_writes_for_tmux_only_when_asked_inside_tmux() {
+        assert_eq!(terminal_bytes("\x1b]9;x\x07", false, true), "\x1b]9;x\x07");
+        assert_eq!(terminal_bytes("\x1b]9;x\x07", true, false), "\x1b]9;x\x07");
+        assert_eq!(terminal_bytes("\x1b]9;x\x07", true, true), "\x1bPtmux;\x1b\x1b]9;x\x07\x1b\\");
     }
 }
