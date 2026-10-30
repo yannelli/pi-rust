@@ -21,6 +21,7 @@ pub(super) async fn load(options: &AppOptions, services: &AgentSessionServices) 
     let load_options = LoadOptions {
         inline: options.inline_extensions.clone(),
         runtime: options.extension_runtime,
+        mode: options.bind_mode,
         ..LoadOptions::default()
     };
     let mut loaded = load_extensions(services, &load_options).await;

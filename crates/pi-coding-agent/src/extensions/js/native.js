@@ -124,8 +124,8 @@ function initializeParams(state) {
 		agentDir: info.agentDir ?? null,
 		extensionPath: state.path,
 		platform: process.platform,
-		mode: safe(() => call("ctx.mode", 0)),
-		hasUI: safe(() => call("ctx.hasUI", 0), false),
+		mode: info.loadMode?.mode ?? safe(() => call("ctx.mode", 0)),
+		hasUI: info.loadMode?.hasUI ?? safe(() => call("ctx.hasUI", 0), false),
 		flags: {},
 	};
 }

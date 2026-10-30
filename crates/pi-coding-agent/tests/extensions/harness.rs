@@ -259,7 +259,13 @@ pub async fn harness(setup: Setup) -> Harness {
     let entries = setup.load.iter().map(|path| LoadEntry::file(extension_dir.join(path))).collect();
     let flag_values = setup.flags.iter().map(|(name, value)| (name.to_string(), value.clone())).collect();
     let entries = (!setup.from_settings).then_some(entries);
-    let options = LoadOptions { entries, inline: setup.inline.clone(), flag_values, runtime: setup.runtime };
+    let options = LoadOptions {
+        entries,
+        inline: setup.inline.clone(),
+        flag_values,
+        runtime: setup.runtime,
+        mode: Some(setup.mode),
+    };
     let loaded = load_extensions(&services, &options).await;
     let runner = loaded.runner.expect("extensions loaded");
     assert_requested_backend(&runner, setup.runtime, &loaded.diagnostics);

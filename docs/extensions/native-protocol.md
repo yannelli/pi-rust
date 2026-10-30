@@ -41,7 +41,7 @@ When the child exits early, pi shows one error notification, fails the pending r
 
 Params: `protocolVersion` (integer), `piVersion`, `cwd`, `agentDir`, `extensionPath`, `platform` (`process.platform`), `mode` (`tui`, `rpc`, `json`, `print`), `hasUI`, `flags`.
 
-pi loads extensions before it binds the session. `mode` and `hasUI` are the values known at load time; the ctx snapshot of each event has the current values. `flags` holds the values pi has at load time and is empty for flags this extension declares in its answer. Read flag values from `ctx.flags` or with `flags.get`.
+pi loads extensions before it binds the session. `mode` and `hasUI` are the mode the session binds the extensions in (`tui` in interactive mode, and `rpc`, `json`, or `print` for the CLI modes). Hosts that do not know the mode at load time, for example SDK sessions, send `print` and `false`. The ctx snapshot of each event has the current values. `flags` holds the values pi has at load time and is empty for flags this extension declares in its answer. Read flag values from `ctx.flags` or with `flags.get`.
 
 Result:
 
