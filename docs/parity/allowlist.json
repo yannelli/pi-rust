@@ -1,5 +1,10 @@
 {
-  "commits": [],
+  "commits": [
+    {
+      "item": "bb65e3e49",
+      "reason": "Only changes which TypeScript module durable code mode imports toCodemodeIdentifier from, so loading it skips the WASM QuickJS runtime. pi-durable calls pi_codemode::to_codemode_identifier from a linked crate and loads no runtime for it."
+    }
+  ],
   "cliFlags": [
     {
       "item": "--terminal-login",
