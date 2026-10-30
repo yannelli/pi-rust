@@ -28,6 +28,7 @@ pub const BUILTIN_SLASH_COMMANDS: &[(&str, &str, Option<&str>)] = &[
     ("session", "Show session info and stats", None),
     ("changelog", "Show changelog entries", None),
     ("hotkeys", "Show all keyboard shortcuts", None),
+    ("widgets", "Show extension widgets in full, or collapse or expand them", Some("[collapse|expand|auto]")),
     ("diff", "Show uncommitted git changes in the working directory", Some("[--stat] [path]")),
     ("review", "Ask the agent to review the uncommitted git changes", Some("<instructions>")),
     ("context", "Show how the model's context window is used", None),

@@ -108,6 +108,10 @@
     {
       "item": "extensions",
       "reason": "pi-rust extension: /extensions browser for installed extensions and the marketplace"
+    },
+    {
+      "item": "widgets",
+      "reason": "pi-rust extension: /widgets shows extension widgets in full and collapses or expands them on short terminals"
     }
   ],
   "tools": [],

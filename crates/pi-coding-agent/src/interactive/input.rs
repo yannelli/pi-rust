@@ -47,6 +47,7 @@ impl InteractiveMode {
         bind("app.model.cycleBackward", |mode| mode.cycle_model(true));
         bind("app.model.select", |mode| mode.show_model_selector(None));
         bind("app.tools.expand", |mode| mode.toggle_tool_output_expansion());
+        bind(super::widget_stack::TOGGLE_KEY, |mode| mode.toggle_widgets());
         bind("app.thinking.toggle", |mode| mode.toggle_thinking_block_visibility());
         bind("app.editor.external", |mode| mode.handle_open_external_editor());
         bind("app.message.copy", |mode| mode.handle_copy_command(true, true));

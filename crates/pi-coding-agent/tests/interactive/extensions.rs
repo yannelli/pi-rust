@@ -65,3 +65,32 @@ async fn extension_ui_shows_in_the_interactive_mode() {
     })
     .await;
 }
+
+const WIDGETS: &str = r#"export default function (pi) {
+	pi.on("session_start", (_event, ctx) => {
+		for (const name of ["one", "two", "three"]) ctx.ui.setWidget(name, [`${name.toUpperCase()}-HEAD`, "a", "b", "c"]);
+		ctx.ui.setWidget("four", ["FOUR-HEAD", "FOUR-BODY", "x", "y"], { placement: "belowEditor" });
+	});
+}
+"#;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn widgets_over_a_third_of_the_rows_collapse_and_toggle() {
+    local(async {
+        let ui = start(Options { files: vec![(".pi/extensions/widgets.ts", WIDGETS)], ..Options::default() }).await;
+        ui.wait_for("FOUR-HEAD +3 lines").await;
+        assert!(ui.screen().contains("ONE-HEAD +3 lines"), "{}", ui.screen());
+        assert!(!ui.screen().contains("FOUR-BODY"), "{}", ui.screen());
+
+        ui.send("\x1bw").await;
+        ui.wait_for("FOUR-BODY").await;
+        assert!(!ui.screen().contains("ONE-HEAD +3"), "{}", ui.screen());
+
+        ui.submit("/widgets collapse").await;
+        ui.wait_until("collapsed", |ui| !ui.screen().contains("FOUR-BODY")).await;
+        ui.submit("/widgets").await;
+        ui.wait_until("full view", |ui| ui.screen().contains("FOUR-BODY")).await;
+        assert!(ui.screen().contains("four"), "{}", ui.screen());
+    })
+    .await;
+}

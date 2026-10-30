@@ -4,7 +4,7 @@ In interactive mode, type `/` to see the list of commands. Examples are `/login`
 
 If you type while the agent works, pi puts your input in the queue as steering. To put it in the queue as a follow-up, press Alt+Enter. On Windows, press Ctrl+Q.
 
-pi-rust adds `/diff`, `/context`, `/init`, `/review`, `/undo`, `/retry`, `/extensions`, and the prompt history. `/export` is also in upstream pi. pi-rust adds its Markdown output.
+pi-rust adds `/diff`, `/context`, `/init`, `/review`, `/undo`, `/retry`, `/extensions`, `/widgets`, and the prompt history. `/export` is also in upstream pi. pi-rust adds its Markdown output.
 
 ## /diff
 
@@ -125,6 +125,14 @@ Changes:
 After a change, the browser shows `Extensions changed. Ctrl+R to reload.` pi loads the change after the reload. While a change runs, the browser shows `busy: changes disabled`. Until the change is complete, you cannot start a different change or close the browser.
 
 If the marketplace index does not load, the Marketplace tab shows `Marketplace unavailable:` and the error. For example, the signature is not correct, or `PI_OFFLINE=1` is set. The Installed tab continues to work. If an install fails, the status line shows `Extension change failed:` and the error. For example, the SHA-256 digest of the archive is not correct. pi does not install the extension or change the settings.
+
+## /widgets
+
+Extensions show widgets above and below the editor, for example the todo list, background tasks, subagents, and goals. All widgets together can use a third of the terminal rows. When they need more rows, each widget shows only its first line and the number of hidden lines. When there are more widgets than rows in the budget, the last row shows `+N more widgets · /widgets`.
+
+- `/widgets` shows all widgets in full in the chat, each under its key.
+- `/widgets collapse` shows one line for each widget, `/widgets expand` shows all lines, and `/widgets auto` collapses the widgets only when they need more rows than the budget.
+- Alt+W (`app.widgets.toggle`) changes between the collapsed and the expanded view. On macOS, Option+W sends Alt+W only when the terminal uses Option as Meta.
 
 ## /statusline and /terminal-setup
 

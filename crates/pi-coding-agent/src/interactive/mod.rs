@@ -49,6 +49,8 @@ mod status;
 mod tmux;
 mod undo;
 pub mod util;
+mod widget_stack;
+mod widgets;
 
 use std::path::PathBuf;
 use std::sync::Arc;

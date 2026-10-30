@@ -55,6 +55,7 @@ pub fn hotkeys_markdown() -> String {
         (codes(&["app.model.cycleForward", "app.model.cycleBackward"]), "Cycle models"),
         (code("app.model.select"), "Open model selector"),
         (code("app.tools.expand"), "Toggle tool output expansion"),
+        (code("app.widgets.toggle"), "Collapse or expand extension widgets"),
         (code("app.thinking.toggle"), "Toggle thinking block visibility"),
         (code("app.editor.external"), "Edit message in external editor"),
         (code("app.message.copy"), "Copy selection or last assistant message"),

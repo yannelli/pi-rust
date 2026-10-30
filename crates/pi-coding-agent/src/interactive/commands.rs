@@ -79,6 +79,9 @@ impl InteractiveMode {
         } else if text == "/changelog" {
             self.handle_changelog_command();
             clear();
+        } else if let Some(argument) = argument(text, "widgets") {
+            clear();
+            self.handle_widgets_command(argument);
         } else if text == "/hotkeys" {
             self.add_bordered_markdown("Keyboard Shortcuts", &super::hotkeys::hotkeys_markdown());
             clear();
