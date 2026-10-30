@@ -22,6 +22,8 @@ mod marketplace_install;
 mod marketplace_test_support;
 #[cfg(test)]
 mod marketplace_tests;
+#[cfg(test)]
+mod marketplace_update_tests;
 mod npm;
 mod paths;
 mod resolve;
