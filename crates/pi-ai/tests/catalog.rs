@@ -73,9 +73,20 @@ fn expected_counts() -> Counts {
         .collect()
 }
 
+/// `models.extra.json` holds the providers only pi-rust has; they are not in the upstream data.
+fn extra_models() -> Vec<Value> {
+    serde_json::from_str(include_str!("../models.extra.json")).unwrap()
+}
+
+fn upstream_models() -> Vec<&'static Model> {
+    let extra: Vec<String> =
+        extra_models().iter().filter_map(|model| model["provider"].as_str().map(str::to_string)).collect();
+    builtin_models().iter().filter(|model| !extra.contains(&model.provider)).collect()
+}
+
 fn bundled_counts() -> Counts {
     let mut counts = Counts::new();
-    for model in builtin_models() {
+    for model in upstream_models() {
         let kind = model.model_type.as_deref().unwrap_or("chat");
         counts.entry(model.provider.clone()).or_default()[type_index(kind)] += 1;
     }
@@ -97,11 +108,11 @@ fn counts_per_provider_and_type_match_the_upstream_table() {
 #[test]
 fn totals_per_type_match_upstream() {
     let mut totals = [0; 3];
-    for model in builtin_models() {
+    for model in upstream_models() {
         totals[type_index(model.model_type.as_deref().expect("every bundled model declares its type"))] += 1;
     }
     assert_eq!(totals, [1603, 63, 53]);
-    assert_eq!(builtin_models().len(), 1719);
+    assert_eq!(upstream_models().len(), 1719);
     assert_eq!(bundled_counts().len(), 42);
 }
 
@@ -177,7 +188,7 @@ fn chat_models_outside_azure_have_a_base_url() {
 #[test]
 fn bundled_json_keeps_radius_only_fields() {
     let raw: Vec<Value> = serde_json::from_str(include_str!("../models.json")).unwrap();
-    assert_eq!(raw.len(), builtin_models().len());
+    assert_eq!(raw.len() + extra_models().len(), builtin_models().len());
     let radius: Vec<&Value> = raw.iter().filter(|model| model["provider"] == "radius").collect();
     assert!(!radius.is_empty());
     for model in radius {

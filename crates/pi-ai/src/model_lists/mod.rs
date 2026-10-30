@@ -12,6 +12,7 @@ use crate::types::Model;
 mod anthropic;
 mod codex;
 mod copilot;
+mod cursor;
 mod google;
 mod openai;
 mod openrouter;
@@ -108,6 +109,8 @@ pub enum AccountModelList {
     Xai,
     /// The `generateContent` models of a Gemini API key.
     Google,
+    /// The model variants of a Cursor login, with their context limits.
+    Cursor,
 }
 
 impl AccountModelList {
@@ -120,6 +123,7 @@ impl AccountModelList {
             "openai" => Some(Self::OpenAi),
             "xai" => Some(Self::Xai),
             "google" => Some(Self::Google),
+            "cursor" => Some(Self::Cursor),
             _ => None,
         }
     }
@@ -144,6 +148,7 @@ impl AccountModelList {
                 openai::personalize_openai_compatible_catalog(catalog, context, "xAI", openai::XAI_BASE_URL).await
             }
             Self::Google => google::personalize_google_catalog(catalog, context).await,
+            Self::Cursor => cursor::personalize_cursor_catalog(catalog, context).await,
         }
     }
 }

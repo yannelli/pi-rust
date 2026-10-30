@@ -70,8 +70,10 @@ pi-rust adds this behavior on purpose. Do not report these items as gaps in the 
   - `github-copilot` from the Copilot `/models` endpoint
   - `openai` and `xai` from `/models`
   - `google` from the Gemini API `/models`
+  - `cursor` from `AvailableModels`
 
-  Cursor and Grok Build have no public model list, so pi-rust does not narrow their models.
+  Grok Build and Google Antigravity use their bundled lists in `crates/pi-ai/models.extra.json`. pi-rust does not read their account model lists yet.
+- Subscription providers `cursor`, `grok-build`, and `google-antigravity` with their logins and the APIs `cursor-agent`, `grok-build-responses`, and `antigravity-acp` ([Subscription providers](../providers/subscription-providers.md)).
 - Markdown export: if the output path ends in `.md`, `/export` and `pi --export` write Markdown ([Export](../../crates/pi-coding-agent/docs/commands.md#export)).
 - The README section "Differences from upstream pi" lists the other additions: slash commands, CLI commands and flags, and settings. It also lists the bugs that pi-rust fixes and that are still open upstream. `allowlist.json` holds the matching parity report entries.
 
@@ -83,7 +85,6 @@ Do this item only after the preceding ACP, provider, and TUI work is released on
 
 - Paseo rejects exact MCP tool preapproval for generic ACP providers before it starts Pi. Its provider contract and ACP permission handler must match tools exactly. Pi's permission modes alone cannot resolve that host-side error.
 - ACP `session/new` and `session/load` do not load client-supplied `mcpServers`. Pi's own MCP configuration works, but a separate integration is necessary to forward host MCP definitions.
-- Native Cursor login and inference are not implemented. The reference provider uses PKCE browser polling and protobuf over HTTP2. It does not use an OpenAI-compatible Cursor endpoint. A native provider needs the transport, model discovery, tool continuations, and mock-server tests. A login-only entry is not enough.
 - ACP has no standard model icon field. Fast catalog variants get a lightning-bolt label. A speed toggle for other models needs explicit capability metadata and provider request support.
 
 ## Platform
