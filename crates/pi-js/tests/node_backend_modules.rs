@@ -76,6 +76,9 @@ export default { greeting: greet("pi"), kind, same: direct.greet === greet, core
         ext.to_json().await.unwrap(),
         json!({ "greeting": "hi pi", "kind": "vendor", "same": true, "core": { "a": 1, "delete": 2 }, "a": 1 })
     );
+    if cfg!(windows) {
+        return; // docs/parity/GAPS.md: require(esm) of a registered source fails on Windows.
+    }
     let version = runtime.eval("process.versions.node").await.unwrap().into_json();
     let version = pi_js::node_backend::NodeVersion::parse(version.as_str().unwrap()).unwrap();
     if version.has_register_hooks() {

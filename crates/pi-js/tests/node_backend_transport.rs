@@ -45,7 +45,11 @@ child.pid"#;
 }
 
 fn kill_node(pid: &serde_json::Value) {
-    let status = std::process::Command::new("kill").args(["-9", &pid.to_string()]).status().unwrap();
+    let pid = pid.to_string();
+    #[cfg(unix)]
+    let status = std::process::Command::new("kill").args(["-9", &pid]).status().unwrap();
+    #[cfg(windows)]
+    let status = std::process::Command::new("taskkill").args(["/F", "/PID", &pid]).status().unwrap();
     assert!(status.success());
 }
 

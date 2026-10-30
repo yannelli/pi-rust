@@ -54,6 +54,8 @@ The Node backend (`extensionRuntime: "node"`, see [Node backend](../agents/node-
 - `process.dlopen` and native `.node` addons load.
 - V8-only modules and features work: `v8` heap snapshots and `queryObjects`, `inspector.open`, and full `async_hooks` coverage.
 
+Open on the Node backend: on Windows with Node 22, `require()` of a registered ESM source fails with `ERR_INTERNAL_ASSERTION` from Node's ESM loader (`getModuleJobForRequire`). An example is `require('@earendil-works/pi-coding-agent')` in a `.cjs` extension after an ESM extension imported it. `virtual_modules_and_registered_sources` in `crates/pi-js/tests/node_backend_modules.rs` skips this check on Windows.
+
 ## Extension module exports
 
 Section 8 of the parity report compares the runtime exports of each module in upstream `virtual-modules.ts` with the bundled module. Run `cargo xtask parity --upstream <checkout>` to get the current list. On 2026-10-29 the report found these gaps.
