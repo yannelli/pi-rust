@@ -1,5 +1,5 @@
 //! The Node backend: JavaScript runs in a `worker_threads` Worker of a `node` child process,
-//! driven over the child's stdin and stdout with one JSON message per line.
+//! driven over a loopback TCP connection with one JSON message per line.
 
 mod bootstrap;
 mod bridge;
@@ -7,6 +7,7 @@ pub(crate) mod client;
 mod executable;
 mod modules;
 pub(crate) mod ops;
+mod transport;
 mod wire;
 
 pub(crate) use bootstrap::start;

@@ -2,6 +2,7 @@
 // hooks thread and ask Rust through the main thread.
 import { isBuiltin } from "node:module";
 import { fileURLToPath } from "node:url";
+import { hideRequireCalls } from "./require_rewrite.mjs";
 
 let port;
 let ownDir;
@@ -57,6 +58,6 @@ export async function load(url, context, nextLoad) {
   const { format } = reply.ok;
   // Node reads re-exported CommonJS files from disk to list their exports, and registered
   // sources are not on disk; `require.call(void 0, x)` hides those calls from its export scan.
-  const source = format === "commonjs" ? reply.ok.source.replace(/(?<![.\w$])require\s*\(/g, "require.call(void 0, ") : reply.ok.source;
+  const source = format === "commonjs" ? hideRequireCalls(reply.ok.source) : reply.ok.source;
   return { format, source, shortCircuit: true };
 }

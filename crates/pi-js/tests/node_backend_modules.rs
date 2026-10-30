@@ -126,3 +126,38 @@ module.exports = new Promise((resolve, reject) => {
     let outcome = module.get("default").await.unwrap().into_json();
     assert_eq!(outcome, json!({ "echo": "ping", "node": true }));
 }
+
+#[test]
+fn require_rewrite_skips_strings_comments_and_regexes() {
+    let Some(node) = node() else { return };
+    let module = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/node_backend/js/require_rewrite.mjs");
+    let cases = json!([
+        ["const a = require(\"x\");", "const a = require.call(void 0, \"x\");"],
+        [
+            "s = \"require(\" + 'require(' + `require(${require(\"y\")})`;",
+            "s = \"require(\" + 'require(' + `require(${require.call(void 0, \"y\")})`;"
+        ],
+        ["// require(a)\n/* require(b) */ x", "// require(a)\n/* require(b) */ x"],
+        ["s.replace(/'/g, \"\\\\'\"); require ( 'z')", "s.replace(/'/g, \"\\\\'\"); require.call(void 0,  'z')"],
+        ["a / b / require('w')", "a / b / require.call(void 0, 'w')"],
+        [
+            "obj.require('q'); o?.require(1); function require(n) {}",
+            "obj.require('q'); o?.require(1); function require(n) {}"
+        ],
+        [
+            "f(...require('s'), { k: require('t') })",
+            "f(...require.call(void 0, 's'), { k: require.call(void 0, 't') })"
+        ],
+        ["#!/usr/bin/env node\nrequire('h')", "#!/usr/bin/env node\nrequire.call(void 0, 'h')"],
+    ]);
+    let script = format!(
+        "import {{ hideRequireCalls }} from {url};\nconst cases = {cases};\nprocess.stdout.write(JSON.stringify(cases.map(([input]) => hideRequireCalls(input))));",
+        url = json!(url::Url::from_file_path(&module).unwrap().to_string()),
+    );
+    let output = std::process::Command::new(node).args(["--input-type=module", "-e", &script]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let actual: Vec<String> = serde_json::from_slice(&output.stdout).unwrap();
+    for (case, actual) in cases.as_array().unwrap().iter().zip(actual) {
+        assert_eq!(actual, case[1].as_str().unwrap(), "input: {}", case[0]);
+    }
+}

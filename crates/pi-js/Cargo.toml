@@ -16,6 +16,7 @@ rustls.workspace = true
 ring.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tempfile.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tokio-rustls.workspace = true
@@ -96,8 +97,6 @@ rquickjs = { version = "0.14.0", default-features = false, features = ["std", "l
 [target.'cfg(all(target_arch = "arm", target_env = "musl"))'.dependencies]
 rquickjs = { version = "0.14.0", default-features = false, features = ["std", "loader", "bindgen"] }
 
-[dev-dependencies]
-tempfile.workspace = true
 
 # Same lints as the workspace, except `unsafe_code` is `deny` instead of `forbid`: modules that
 # need FFI allow it locally: system calls (`node/sys.rs`, `node/os_cpus.rs`, `node/fs_meta.rs`,
