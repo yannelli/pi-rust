@@ -125,6 +125,10 @@
     {
       "item": "acp",
       "reason": "pi-rust extension: browser that installs ACP agents from the ACP registry and logs in, enables, disables, removes, and sets the default; /acp mode selects agent session modes."
+    },
+    {
+      "item": "usage",
+      "reason": "pi-rust extension: /usage shows the subscription limits of the current provider login. See docs/providers/usage.md."
     }
   ],
   "tools": [],
