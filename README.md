@@ -55,6 +55,7 @@ Run `pi --help` to see all options. In interactive mode, type `/` to see the com
 | [Install](crates/pi-coding-agent/docs/install.md) | Script options, manual install, provenance check, update, and build from source |
 | [Interactive commands](crates/pi-coding-agent/docs/commands.md) | `/diff`, `/context`, `/export`, `/init`, `/review`, `/undo`, `/retry`, and prompt history |
 | [CLI commands and flags](crates/pi-coding-agent/docs/cli.md) | `pi completion`, `pi doctor`, `pi sessions`, `pi stats`, run limits, structured output, and `pi extensions` |
+| [Extension marketplace](crates/pi-coding-agent/docs/marketplace.md) | Find, install, update, and remove native Rust extensions |
 | [Providers](crates/pi-coding-agent/docs/providers.md) | Wire protocols, logins, `disabledProviders`, OpenRouter, and account model lists |
 | [Status line](crates/pi-coding-agent/docs/status-line.md) | The `statusLine` setting, presets, segments, and command status lines |
 | [Terminal](crates/pi-coding-agent/docs/terminal.md) | Themes, notifications, the iTerm2 integration, and `/terminal-setup` |
@@ -110,6 +111,7 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. This se
 | `pi completion` and `pi doctor` | Has neither command | [CLI](crates/pi-coding-agent/docs/cli.md) |
 | `pi sessions` and `pi stats` | Lists and deletes sessions only in its session picker (`pi -r` and `/resume`). Shows usage only for the current session (`/session`). | [Sessions](crates/pi-coding-agent/docs/cli.md#sessions) |
 | `pi extensions` lists, installs, removes, enables, and disables extensions through the package and resource settings | | [Extensions](crates/pi-coding-agent/docs/cli.md#extensions) |
+| `marketplace:` package sources and `pi extensions search` and `info` use signed indexes and checksummed native binaries | Has no Rust extension marketplace | [Marketplace](crates/pi-coding-agent/docs/marketplace.md) |
 | Run limits (`--max-turns`, `--max-cost`) and structured output (`--output-schema`, `--output-retries`) | | [Run limits](crates/pi-coding-agent/docs/cli.md#run-limits) |
 | `pi --mode acp`. Permission modes are separate from thinking levels and control tool execution. | Needs the separate pi-acp adapter | [ACP mode](crates/pi-coding-agent/docs/acp.md) |
 | Account model lists for OpenAI Codex, Anthropic, GitHub Copilot, OpenAI, xAI, and Google | Limits only OpenRouter | [Account model lists](crates/pi-coding-agent/docs/providers.md#account-model-lists) |

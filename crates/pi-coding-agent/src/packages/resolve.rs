@@ -326,6 +326,16 @@ impl PackageManager {
             let parsed = parse_source(&resolved_source);
             let mut metadata = PathMetadata::new(source, scope, SourceOrigin::Package);
             let installed = match &parsed {
+                ParsedSource::Marketplace { name, tag } => {
+                    let marketplace = self.marketplace();
+                    let installed = marketplace.installed_package(name)?;
+                    let matches =
+                        installed.as_ref().is_some_and(|package| tag.as_ref().is_none_or(|tag| tag == &package.tag));
+                    if !matches && !self.install_missing(&parsed, &resolved_source, resolved_scope, on_missing).await? {
+                        continue;
+                    }
+                    marketplace.package_path(name)?
+                }
                 ParsedSource::Local(local) => {
                     let base = self.base_dir_for_scope(resolved_scope)?;
                     resolve_local_package(acc, local, filter, metadata, &base);

@@ -93,11 +93,35 @@ fn npm_specs_pin_exact_versions() {
 }
 
 #[test]
+fn marketplace_sources_preserve_names_and_release_pins() {
+    assert_eq!(parse_source("marketplace:todo"), ParsedSource::Marketplace { name: "todo".into(), tag: None });
+    assert_eq!(
+        parse_source("marketplace:todo@v1.2.3"),
+        ParsedSource::Marketplace { name: "todo".into(), tag: Some("v1.2.3".into()) }
+    );
+    assert!(!parse_source("marketplace:todo").is_pinned());
+    assert!(parse_source("marketplace:todo@v1.2.3").is_pinned());
+    assert!(!crate::resources::paths::is_local_path("marketplace:todo"));
+    assert!(crate::resources::paths::is_local_path("./marketplace:todo"));
+    let fixture = Fixture::new();
+    let manager = fixture.manager(MockRunner::failing());
+    assert_eq!(manager.package_identity("marketplace:todo@v1.2.3", None).unwrap(), "marketplace:todo");
+    manager.add_source_to_settings("marketplace:todo@v1.2.3", false).unwrap();
+    manager.add_source_to_settings("marketplace:todo", false).unwrap();
+    assert_eq!(
+        fixture.settings.packages(crate::settings::SettingsScope::Global),
+        sources(serde_json::json!(["marketplace:todo"]))
+    );
+    assert!(manager.remove_source_from_settings("marketplace:todo@v9", false).unwrap());
+}
+
+#[test]
 fn sources_classify_like_the_docs() {
     let kind = |source: &str| match parse_source(source) {
         ParsedSource::Npm(_) => "npm",
         ParsedSource::Git(_) => "git",
         ParsedSource::Archive(_) => "archive",
+        ParsedSource::Marketplace { .. } => "marketplace",
         ParsedSource::Local(_) => "local",
     };
     for source in

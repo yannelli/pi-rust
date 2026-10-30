@@ -158,7 +158,9 @@ fn strip_verbatim(path: PathBuf) -> PathBuf {
 /// False for package sources (`npm:`, `git:`, URLs) and `builtin:` extension paths.
 pub fn is_local_path(value: &str) -> bool {
     let trimmed = value.trim();
-    !["npm:", "git:", "github:", "http:", "https:", "ssh:", "builtin:"].iter().any(|prefix| trimmed.starts_with(prefix))
+    !["npm:", "marketplace:", "git:", "github:", "http:", "https:", "ssh:", "builtin:"]
+        .iter()
+        .any(|prefix| trimmed.starts_with(prefix))
 }
 
 /// True when `target` is `root` or inside it.

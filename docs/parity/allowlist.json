@@ -182,6 +182,10 @@
   ],
   "packages": [
     {
+      "item": "marketplace:",
+      "reason": "pi-rust installs native Rust extensions from signed marketplace indexes and verifies archive checksums. Upstream pi has no marketplace source."
+    },
+    {
       "item": "pi-client",
       "reason": "Kept as a pi-rust extra by the maintainer's choice: upstream 7472cda0d deleted the experimental server stack, while pi-rust keeps pi experimental (server, client, durable, vacation) and the old chord runtime it uses."
     },

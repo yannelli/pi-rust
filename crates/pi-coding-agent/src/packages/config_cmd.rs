@@ -67,7 +67,7 @@ pub fn render_config_text(editor: &ConfigEditor) -> String {
 }
 
 fn extensions_help() -> &'static str {
-    "Usage:\n  pi extensions list [-l]\n  pi extensions install <npm:package|git:url|path> [-l]\n  pi extensions remove <source> [-l]\n  pi extensions enable <name-or-path> [-l]\n  pi extensions disable <name-or-path> [-l]\n\nLists built-in and installed extensions, including disabled ones.\nUse pi config for the resource configuration TUI. Restart Pi or run /reload after changes.\nThere is no bundled registry of uninstalled third-party extensions; install a package by source.\n"
+    "Usage:\n  pi extensions list [-l]\n  pi extensions search [query]\n  pi extensions info <name>\n  pi extensions install <marketplace:name|npm:package|git:url|path> [-l]\n  pi extensions remove <source> [-l]\n  pi extensions enable <name-or-path> [-l]\n  pi extensions disable <name-or-path> [-l]\n\nLists built-in and installed extensions, including disabled ones.\nSearch the marketplace for native Rust extensions.\nUse pi config for the resource configuration TUI. Restart Pi or run /reload after changes.\n"
 }
 
 fn render_extensions(editor: &ConfigEditor) -> String {
@@ -109,6 +109,9 @@ pub async fn run_config_command(
             return Some(0);
         }
         let (action, args) = rest.split_first().map_or(("list", &[][..]), |(action, args)| (action.as_str(), args));
+        if matches!(action, "search" | "info") {
+            return Some(super::cli_marketplace::run(action, args, options, &io).await);
+        }
         if matches!(action, "install" | "remove") {
             let args = std::iter::once(action.to_string()).chain(args.iter().cloned()).collect::<Vec<_>>();
             return super::cli::run_package_command(&args, options).await;
