@@ -197,8 +197,11 @@ fn action(runner: &ExtensionRunner, session: &Arc<AgentSession>, name: &str, arg
             let (message, options) = (args.json(1), args.json(2));
             let on_error = report(runner, "send_message");
             if let Some(run) = session.send_extension_message(message, &options).map_err(error)? {
+                let busy = session.begin_extension_prompt();
                 tokio::spawn(async move {
-                    if let Err(failure) = run.await {
+                    let result = run.await;
+                    drop(busy);
+                    if let Err(failure) = result {
                         on_error(failure);
                     }
                 });

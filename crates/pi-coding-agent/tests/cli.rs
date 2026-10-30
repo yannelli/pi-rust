@@ -290,6 +290,29 @@ async fn print_mode_runs_the_turn_an_extension_command_sends() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn print_mode_runs_the_turn_an_agent_settled_follow_up_triggers() {
+    let root = tempfile::tempdir().unwrap();
+    let (url, requests) = mock_server(vec![text_body("first"), text_body("second")]).await;
+    setup(root.path(), &url);
+    let source = r#"export default function (pi) {
+	let sent = false;
+	pi.on("agent_settled", async () => {
+		if (sent) return;
+		sent = true;
+		await pi.sendMessage({ customType: "nudge", content: "Continue", display: false }, { deliverAs: "followUp", triggerTurn: true });
+	});
+}
+"#;
+    std::fs::write(root.path().join("nudge.ts"), source).unwrap();
+    let extension = root.path().join("nudge.ts").display().to_string();
+    let args = ["-e", &extension, "--model", "mock/mock-model", "--no-session", "-p", "Hi"];
+    let output = pi_async(root.path(), &args).await;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "stderr: {stderr}");
+    assert_eq!(requests.lock().unwrap().len(), 2, "stderr: {stderr}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn startup_errors_exit_with_status_one() {
     let root = tempfile::tempdir().unwrap();
     setup(root.path(), "http://127.0.0.1:9/v1");
