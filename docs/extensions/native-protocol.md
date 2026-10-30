@@ -117,7 +117,7 @@ During `tool.execute` the extension sends `tool.update` notifications `{ toolCal
 
 Dialogs and `ui.custom` return error `-32001` when pi has no UI. `$/cancelRequest` closes an open dialog.
 
-Line-based surfaces: a widget (surface `widget:<key>`), the footer (surface `footer`), and a `ui.custom` panel (surface chosen by the extension). The host renders the last lines the extension pushed, cut to the render width. Each push redraws the screen. When the render width changes, the host sends `ui.resize`. A panel gets each key as `ui.key` (`data` is the raw terminal input). The extension closes a panel with `ui.close`; the `ui.custom` request then answers `{ result }`. When pi removes a surface, it sends `ui.closed`, and an open `ui.custom` answers `{ result: null }`. In modes other than `tui`, widgets go to pi as plain lines and get no `ui.resize`.
+Line-based surfaces: a widget (surface `widget:<key>`), the footer (surface `footer`), and a `ui.custom` panel (surface chosen by the extension). The host renders the last lines the extension pushed, cut to the render width. Each push redraws the screen. When the render width changes, the host sends `ui.resize`. A panel gets each key as `ui.key` (`data` is the raw terminal input). The extension closes a panel with `ui.close`; the `ui.custom` request then answers `{ result }`. When the extension cancels an open `ui.custom` with `$/cancelRequest`, pi closes the panel, sends `ui.closed`, and the request answers `{ result: null }`. `ui.close` on a widget or the footer removes it. In modes other than `tui`, widgets go to pi as plain lines and get no `ui.resize`.
 
 ### Session, model, and tools
 

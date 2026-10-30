@@ -3,6 +3,7 @@
 import { createEventBus, createExtension, createExtensionAPI, createRuntime } from "./api.js";
 import * as bridge from "./bridge.js";
 import { call, callAsync, errorMessage, optional, registerCallback, releaseCallback, signalFor } from "./bridge.js";
+import { nativeFactory } from "./native.js";
 import { Runner } from "./runner.js";
 import { apiProviders } from "./ai.js";
 import { sessionStream } from "./stream.js";
@@ -98,7 +99,9 @@ export function createHost(config) {
 			const errors = [];
 			for (const entry of entries) {
 				try {
-					const module = await import(entry.resolvedPath);
+					const module = entry.native
+						? { default: nativeFactory({ ...entry.native, extensionPath: entry.path }) }
+						: await import(entry.resolvedPath);
 					call("timing", `${entry.path} module import`);
 					const factory = typeof module.default === "function" ? module.default : module;
 					if (typeof factory !== "function") {
