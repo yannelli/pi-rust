@@ -20,7 +20,7 @@ A package declares native extensions in `package.json`:
 ## Transport
 
 - One JSON object per line (UTF-8, `\n`) on the child's stdin (host to extension) and stdout (extension to host). The child writes nothing else to stdout.
-- stderr is the extension log. pi prints each line with the prefix `[<extension path>]` to the extension runtime's stderr.
+- stderr is the extension log. pi prints each line with the prefix `[<extension path>]` to the extension runtime's stderr. In `tui` mode, after the first event, pi shows each line in the chat as a notification instead: lines that start with `error:` as errors, `warn:` as warnings, `info:` and `debug:` as status lines, and other lines as warnings. The level prefix is removed.
 - Both sides send requests, responses, and notifications. Each side numbers its own request ids.
 - `$/cancelRequest` `{ "id": <request id> }` cancels a request of the other side. The receiver still answers it: with a result, or with error `-32800`.
 - An extension-to-host method sent as a notification (no `id`) runs, and the host drops its result.

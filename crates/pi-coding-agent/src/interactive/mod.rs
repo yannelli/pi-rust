@@ -50,6 +50,8 @@ mod tmux;
 mod undo;
 mod usage;
 pub mod util;
+mod widget_stack;
+mod widgets;
 
 use std::path::PathBuf;
 use std::sync::Arc;

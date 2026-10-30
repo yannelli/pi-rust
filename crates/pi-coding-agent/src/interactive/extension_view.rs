@@ -17,6 +17,7 @@ use serde_json::Value;
 use super::components::ThemedText;
 use super::extension_ui::UiMirror;
 use super::mode::InteractiveMode;
+use super::widget_stack::{SharedWidgetStack, WidgetStack};
 use crate::extension_ui::WidgetPlacement;
 use crate::extensions::{ComponentFactory, JsComponent};
 use crate::theme::{ThemeColor, theme};
@@ -63,6 +64,7 @@ pub(super) struct ExtensionUiState {
     pub mirror: Arc<UiMirror>,
     widgets_above: Vec<(String, Mounted)>,
     widgets_below: Vec<(String, Mounted)>,
+    widget_stack: Option<SharedWidgetStack>,
     /// Latest change of each slot; a component built for an older change is dropped.
     generations: HashMap<String, u64>,
     next_generation: u64,
@@ -83,6 +85,11 @@ pub(super) struct ExtensionUiState {
 }
 
 impl ExtensionUiState {
+    pub fn widget_stack(&mut self) -> SharedWidgetStack {
+        let mirror = self.mirror.clone();
+        self.widget_stack.get_or_insert_with(|| WidgetStack::shared(mirror)).clone()
+    }
+
     pub fn bump(&mut self, slot: &str) -> u64 {
         self.next_generation += 1;
         self.generations.insert(slot.to_string(), self.next_generation);
@@ -226,27 +233,34 @@ impl InteractiveMode {
         self.render_widgets();
     }
 
-    /// Fill the widget containers; an empty one above the editor keeps a blank line.
+    /// Fill the widget containers; an empty one above the editor keeps a blank line. The widgets
+    /// of both containers share one [`WidgetStack`] and its height budget.
     pub(super) fn render_widgets(&self) {
-        let (above, below): (Vec<ComponentRef>, Vec<ComponentRef>) = {
-            let state = &self.state.borrow().extensions;
-            let components =
-                |list: &Vec<(String, Mounted)>| list.iter().map(|(_, mounted)| mounted.component.clone()).collect();
-            (components(&state.widgets_above), components(&state.widgets_below))
+        let (stack, has_below) = {
+            let state = &mut self.state.borrow_mut().extensions;
+            let components = |list: &Vec<(String, Mounted)>| {
+                list.iter().map(|(key, mounted)| (key.clone(), mounted.component.clone())).collect()
+            };
+            let (above, below) = (components(&state.widgets_above), components(&state.widgets_below));
+            let stack = state.widget_stack();
+            let has_below = !state.widgets_below.is_empty();
+            let mut shared = stack.borrow_mut();
+            shared.above = above;
+            shared.below = below;
+            drop(shared);
+            (stack, has_below)
         };
         {
             let mut container = self.ui.widgets_above.borrow_mut();
             container.clear();
             container.add_child(component(Spacer::new(1)));
-            for widget in above {
-                container.add_child(widget);
-            }
+            container.add_child(WidgetStack::view_component(&stack, false));
         }
         {
             let mut container = self.ui.widgets_below.borrow_mut();
             container.clear();
-            for widget in below {
-                container.add_child(widget);
+            if has_below {
+                container.add_child(WidgetStack::view_component(&stack, true));
             }
         }
         self.request_render();

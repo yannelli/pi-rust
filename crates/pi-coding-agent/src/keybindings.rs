@@ -57,6 +57,7 @@ pub fn app_keybindings_for(platform: &str, windows: bool) -> KeybindingDefinitio
         ("app.model.cycleBackward", def(&[pick("alt+p", "shift+ctrl+p")], "Cycle to previous model")),
         ("app.model.select", def(&["ctrl+l"], "Open model selector")),
         ("app.tools.expand", def(&["ctrl+o"], "Toggle tool output")),
+        ("app.widgets.toggle", def(&["alt+w"], "Collapse or expand extension widgets")),
         ("app.thinking.toggle", def(&["ctrl+t"], "Toggle thinking blocks")),
         ("app.session.toggleNamedFilter", def(&["ctrl+n"], "Toggle named session filter")),
         ("app.editor.external", def(&["ctrl+g"], "Open external editor")),

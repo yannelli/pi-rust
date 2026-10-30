@@ -22,6 +22,23 @@ const safe = (read, fallback = null) => {
 	}
 };
 
+const LOG_LEVEL = /^(error|warn|info|debug):\s*/;
+const NOTIFY_TYPE = { error: "error", warn: "warning", info: "info", debug: "info" };
+
+/** Whether pi draws the TUI now: stderr output would land in the editor box. */
+const inTui = (state) => safe(() => state.ctx?.mode) === "tui" && safe(() => state.ctx.hasUI, false);
+
+/** A stderr line of the child: a notification in the TUI (like upstream `ctx.ui.notify`), else stderr. */
+function logLine(state, line) {
+	const level = LOG_LEVEL.exec(line);
+	const text = `[${state.path}] ${level ? line.slice(level[0].length) : line}`;
+	if (inTui(state)) {
+		const type = level ? NOTIFY_TYPE[level[1]] : "warning";
+		if (safe(() => (state.ctx.ui.notify(text, type), true), false)) return;
+	}
+	console.error(`[${state.path}] ${line}`);
+}
+
 /** The extension factory of one `pi.native` entry: `{ command, args, env, extensionPath }`. */
 export function nativeFactory(spec) {
 	return (pi) => loadNative(pi, spec);
@@ -43,7 +60,7 @@ function createState(pi, spec) {
 		triggers: [],
 		updates: new Map(),
 		subscriptions: new Map(),
-		log: (line) => console.error(`[${spec.extensionPath}] ${line}`),
+		log: (line) => logLine(state, line),
 		currentCtx() {
 			const ctx = state.commandCtx ?? state.ctx;
 			if (!ctx) throw rpcError(-32002, "No event has reached this extension yet");
@@ -124,7 +141,7 @@ function onExit(state, code, signal) {
 	for (const unsubscribe of state.subscriptions.values()) unsubscribe();
 	state.subscriptions.clear();
 	if (state.stopping || !state.loaded) return;
-	state.log(message);
+	if (!inTui(state)) state.log(message);
 	safe(() => state.ctx?.ui.notify(message, "error"));
 	safe(() => state.pi.setActiveTools(state.pi.getActiveTools().filter((name) => !state.tools.has(name))));
 }
