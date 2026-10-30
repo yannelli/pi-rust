@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.8.2] - 2026-10-30
+
+### Fixed
+
+- **ai:** show the Antigravity sign-in link and accept a pasted redirect ([75570e3](https://github.com/yannelli/pi-rust/commit/75570e33093a0c3ff9294b696a3894820094bdf4))
+
 ## [0.8.1] - 2026-10-30
 
 ### Fixed
