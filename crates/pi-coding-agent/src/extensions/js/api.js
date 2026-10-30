@@ -28,10 +28,15 @@ export function createEventBus() {
 /** Combined stdout and stderr bytes `pi.exec` keeps before it stops the command. */
 const MAX_EXEC_OUTPUT_BYTES = 16 * 1024 * 1024;
 
-/** Run a command without a shell (upstream `execCommand`). */
+/** Run a command without a shell (upstream `execCommand`); pi-rust adds `options.stdin`. */
 export function execCommand(command, args, cwd, options) {
 	return new Promise((resolve) => {
-		const proc = spawn(command, args, { cwd, shell: false, stdio: ["ignore", "pipe", "pipe"] });
+		const stdin = typeof options?.stdin === "string" ? options.stdin : undefined;
+		const proc = spawn(command, args, { cwd, shell: false, stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"] });
+		if (stdin !== undefined) {
+			proc.stdin?.on("error", () => undefined);
+			proc.stdin?.end(stdin);
+		}
 		let stdout = "";
 		let stderr = "";
 		// Unbounded output could exhaust the string limit (upstream issue 11360), so the command

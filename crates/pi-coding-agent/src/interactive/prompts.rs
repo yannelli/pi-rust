@@ -18,6 +18,8 @@ use crate::interactive_components::{
     ExtensionSelectorOptions,
 };
 
+use crate::extension_ui::DialogOptions;
+
 const DIALOG_SOURCE: &str = "extension-dialog";
 
 /// Where the submit and cancel callbacks send a one-shot answer.
@@ -266,17 +268,12 @@ impl InteractiveMode {
         initial: Option<String>,
         cancel: Option<CancellationToken>,
     ) -> oneshot::Receiver<Option<String>> {
-        self.ask_input_within(title, initial, None, cancel)
+        self.ask_input_within(title, DialogOptions { prefill: initial, cancel, ..DialogOptions::default() })
     }
 
-    /// [`InteractiveMode::ask_input_until`] that also closes with `None` after `timeout`.
-    pub(super) fn ask_input_within(
-        &self,
-        title: &str,
-        initial: Option<String>,
-        timeout: Option<Duration>,
-        cancel: Option<CancellationToken>,
-    ) -> oneshot::Receiver<Option<String>> {
+    /// [`InteractiveMode::ask_input_until`] with the `timeout`, `prefill`, and `secret` of `opts`.
+    pub(super) fn ask_input_within(&self, title: &str, opts: DialogOptions) -> oneshot::Receiver<Option<String>> {
+        let DialogOptions { timeout, cancel, prefill: initial, secret } = opts;
         let (slot, receiver) = answer();
         let title = title.to_string();
         let tui = self.tui();
@@ -296,7 +293,7 @@ impl InteractiveMode {
                     send(&on_cancel, None);
                     done_cancel();
                 },
-                ExtensionInputOptions { tui: Some(tui), timeout, initial_value: initial, description: None },
+                ExtensionInputOptions { tui: Some(tui), timeout, initial_value: initial, description: None, secret },
             );
             let dispose_input = input.disposer();
             let dispose = move || {

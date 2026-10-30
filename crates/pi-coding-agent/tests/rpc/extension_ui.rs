@@ -166,7 +166,7 @@ async fn dialogs_resolve_to_defaults_on_timeout_and_cancellation() {
         tokio::time::sleep(Duration::from_millis(30)).await;
         trigger.cancel();
     });
-    let options = DialogOptions { timeout: None, cancel: Some(cancel.clone()) };
+    let options = DialogOptions { cancel: Some(cancel.clone()), ..DialogOptions::default() };
     assert_eq!(ui.input("Name", None, options.clone()).await, None);
     assert_eq!(ui.editor("Text", None, options).await, None, "already cancelled: no request");
     assert_eq!(rpc.records_of("extension_ui_request").iter().filter(|record| record["method"] == "editor").count(), 0);

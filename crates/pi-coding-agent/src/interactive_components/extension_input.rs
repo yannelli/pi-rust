@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use pi_tui::components::{Input, Text};
+use pi_tui::components::{Input, InputOptions, Text};
 use pi_tui::{Component, Container, Tui, component, get_keybindings};
 
 use super::common::{Shared, border, fg, shared, spacer, text};
@@ -17,6 +17,8 @@ pub struct ExtensionInputOptions {
     pub timeout: Option<Duration>,
     pub initial_value: Option<String>,
     pub description: Option<String>,
+    /// Show `*` for each character of the value.
+    pub secret: bool,
 }
 
 pub struct ExtensionInput {
@@ -65,7 +67,7 @@ impl ExtensionInput {
             _ => None,
         };
 
-        let mut input = Input::default();
+        let mut input = Input::new(InputOptions { masked: opts.secret, ..InputOptions::default() });
         if let Some(value) = opts.initial_value.as_deref().filter(|value| !value.is_empty()) {
             input.set_value(value);
         }

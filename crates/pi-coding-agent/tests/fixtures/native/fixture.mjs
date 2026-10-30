@@ -7,6 +7,8 @@ const pending = new Map();
 const cancels = new Map();
 const panelWaiters = new Map();
 let initProbe;
+let settleArmed = false;
+let footerSeen = false;
 
 const send = (message) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
 const notify = (method, params) => send({ method, params });
@@ -28,9 +30,16 @@ const registrations = {
 			parameters: { type: "object", properties: { text: { type: "string" }, wait: { type: "boolean" } } },
 		},
 	],
-	commands: ["native-ask", "native-panel", "native-llm", "native-crash", "native-write", "native-probe"].map((name) => ({ name })),
+	commands: [
+		"native-ask", "native-panel", "native-llm", "native-crash", "native-write", "native-probe",
+		"native-ctx", "native-find", "native-input", "native-exec", "native-settle",
+	].map((name) => ({ name })),
 	flags: [{ name: "native-flag", type: "string", default: "off" }],
-	events: ["session_start", "before_agent_start", "tool_call", "tool_result", "message_end", "context"],
+	events: [
+		"session_start", "before_agent_start", "tool_call", "tool_result", "message_end", "context",
+		"agent_before_settle", "footer_changed",
+	],
+	autocomplete: [{ triggerCharacters: ["@"] }],
 };
 
 async function executeTool(id, { toolCallId, params }) {
@@ -56,6 +65,12 @@ async function initialize() {
 }
 
 function onEvent({ name, event, ctx }) {
+	if (name === "agent_before_settle") {
+		if (!settleArmed) return {};
+		settleArmed = false;
+		const entry = { type: "custom", customType: "native-settle", data: { outcome: event.outcome, before: event.entries.length } };
+		return { result: { entries: [...event.entries, entry], continue: false } };
+	}
 	if (name === "tool_result") {
 		return event.input?.text === "patch!" ? { patch: { content: [{ type: "text", text: "patched result" }] } } : {};
 	}
@@ -79,8 +94,31 @@ function onEvent({ name, event, ctx }) {
 	return { patch: { input: { text: `${event.input.text}!` } } };
 }
 
-async function runCommand({ name }) {
-	if (name === "native-ask") {
+const append = (customType, data) => request("session.appendEntry", { customType, data });
+
+function suggest({ lines, cursorLine, cursorCol }) {
+	const prefix = lines[cursorLine].slice(0, cursorCol).split(/\s/).pop();
+	return { items: [{ value: "@native-one" }, { value: "@native-two" }], prefix, merge: true };
+}
+
+async function runCommand({ name, ctx }) {
+	if (name === "native-ctx") {
+		const model = ctx.model ?? {};
+		const { scopedModels, terminalWidth, isProjectTrusted } = ctx;
+		await append("native-ctx", { scopedModels, terminalWidth, isProjectTrusted, baseUrl: model.baseUrl, compat: model.compat, keys: Object.keys(model) });
+	} else if (name === "native-find") {
+		const found = await request("model.find", { provider: "local", id: "other" });
+		const missing = await request("model.find", { provider: "local", id: "missing" });
+		await append("native-find", { found, missing });
+	} else if (name === "native-input") {
+		const value = await request("ui.input", { title: "Token", placeholder: "tok", prefill: "ab", secret: true });
+		await append("native-input", { value });
+	} else if (name === "native-exec") {
+		const { stdout, code } = await request("exec", { command: "cat", stdin: "piped text" });
+		await append("native-exec", { stdout, code });
+	} else if (name === "native-settle") {
+		settleArmed = true;
+	} else if (name === "native-ask") {
 		const answer = await request("ui.select", { title: "Pick one", options: ["red", "blue"] });
 		await request("session.appendEntry", { customType: "native-answer", data: { answer } });
 	} else if (name === "native-panel") {
@@ -108,13 +146,18 @@ const methods = {
 	"tool.execute": executeTool,
 	event: onEvent,
 	"command.run": runCommand,
+	"autocomplete.suggest": suggest,
 	shutdown: () => null,
 };
 
 function onNotification({ method, params }) {
 	if (method === "$/cancelRequest") cancels.get(params.id)?.();
 	if (method === "ui.resize") notify("ui.update", { surface: params.surface, lines: [`width ${params.width}`] });
-	if (method === "ui.key") panelWaiters.get(params.surface)?.(params.data);
+	if (method === "ui.key") panelWaiters.get(params.surface)?.(`${params.data}/${params.key}`);
+	if (method === "footer.changed" && params.footer.gitBranch === "feature-x" && !footerSeen) {
+		footerSeen = true;
+		void append("native-footer", params.footer);
+	}
 	if (method === "initialized") notify("ui.notify", { message: "native ready" });
 	if (method === "exit") process.exit(0);
 }

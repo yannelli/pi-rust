@@ -97,7 +97,8 @@ export function createRegistrar(state) {
 		for (const name of names ?? []) {
 			if (state.events.has(name)) continue;
 			state.events.add(name);
-			if (name !== "session_start" && name !== "session_shutdown") pi.on(name, (event, ctx) => forward(name, event, ctx));
+			if (name === "footer_changed") state.watchFooter();
+			else if (name !== "session_start" && name !== "session_shutdown") pi.on(name, (event, ctx) => forward(name, event, ctx));
 		}
 	};
 
@@ -147,6 +148,14 @@ export function createRegistrar(state) {
 	return { apply, forward, methods };
 }
 
+/** `reply` with pi's own items after its items when both replace the same prefix. */
+function merged({ items, prefix }, own) {
+	const mine = Array.isArray(items) ? items : [];
+	if (!own || own.prefix !== prefix) return { items: mine, prefix };
+	const values = new Set(mine.map((item) => item.value));
+	return { items: [...mine, ...(own.items ?? []).filter((item) => !values.has(item.value))], prefix };
+}
+
 /** The `addAutocompleteProvider` factory: tokens that start with a trigger go to the child. */
 export function autocompleteFactory(state) {
 	return (current) => ({
@@ -157,6 +166,7 @@ export function autocompleteFactory(state) {
 			if (!state.dead && state.triggers.some((trigger) => token.startsWith(trigger))) {
 				const params = { lines, cursorLine, cursorCol, force: Boolean(options?.force) };
 				const reply = await state.peer.request("autocomplete.suggest", params).catch(() => null);
+				if (reply?.merge) return merged(reply, await current.getSuggestions(lines, cursorLine, cursorCol, options));
 				if (reply) return reply;
 			}
 			return current.getSuggestions(lines, cursorLine, cursorCol, options);

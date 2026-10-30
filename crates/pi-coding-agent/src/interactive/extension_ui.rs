@@ -197,7 +197,7 @@ impl ExtensionUi for TuiExtensionUi {
     async fn input(&self, title: &str, _placeholder: Option<&str>, opts: DialogOptions) -> Option<String> {
         let title = title.to_string();
         let cancelled = is_cancelled(&opts);
-        self.ask(None, cancelled, move |mode| mode.ask_input_within(&title, None, opts.timeout, opts.cancel)).await
+        self.ask(None, cancelled, move |mode| mode.ask_input_within(&title, opts)).await
     }
 
     async fn editor(&self, title: &str, prefill: Option<&str>, _opts: DialogOptions) -> Option<String> {

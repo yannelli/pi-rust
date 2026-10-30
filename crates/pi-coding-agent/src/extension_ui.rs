@@ -52,11 +52,15 @@ pub struct DialogOptions {
     pub timeout: Option<Duration>,
     /// Dismiss the dialog with its default value when cancelled.
     pub cancel: Option<CancellationToken>,
+    /// `input` only (pi-rust): the initial text.
+    pub prefill: Option<String>,
+    /// `input` only (pi-rust): show `*` for each character.
+    pub secret: bool,
 }
 
 impl DialogOptions {
     pub fn with_timeout(timeout: Duration) -> Self {
-        Self { timeout: Some(timeout), cancel: None }
+        Self { timeout: Some(timeout), ..Self::default() }
     }
 }
 

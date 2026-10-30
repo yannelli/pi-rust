@@ -33,11 +33,12 @@ fn factory(runner: &ExtensionRunner, target: u64, id: &Value, kind: ComponentKin
     id.as_u64().map(|id| ComponentFactory::new(&runner.this(), id, target, kind))
 }
 
-/// Dialog options from `{ timeout, signal }`.
+/// Dialog options from `{ timeout, signal, prefill, secret }`.
 pub(crate) fn dialog_options(runner: &ExtensionRunner, value: &Value) -> DialogOptions {
     let timeout = value["timeout"].as_f64().filter(|ms| *ms > 0.0).map(|ms| Duration::from_millis(ms as u64));
     let cancel = value["signal"].as_u64().map(|id| runner.token(Some(id)));
-    DialogOptions { timeout, cancel }
+    let prefill = value["prefill"].as_str().map(str::to_string);
+    DialogOptions { timeout, cancel, prefill, secret: value["secret"].as_bool().unwrap_or(false) }
 }
 
 pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<HostValue, JsError> {

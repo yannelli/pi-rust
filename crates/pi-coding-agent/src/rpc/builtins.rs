@@ -44,7 +44,7 @@ impl McpSignInPrompt for RpcMcpSignIn {
         let title = format!(
             "Waiting for sign-in to \"{server}\". If the browser cannot reach this machine, paste the URL it was redirected to."
         );
-        let options = DialogOptions { timeout: None, cancel: Some(cancel) };
+        let options = DialogOptions { cancel: Some(cancel), ..DialogOptions::default() };
         self.ui.input(&title, Some("http://127.0.0.1:.../callback?code=..."), options).await
     }
 }

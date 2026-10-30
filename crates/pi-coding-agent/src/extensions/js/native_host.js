@@ -39,13 +39,23 @@ const safe = (read, fallback = null) => {
 	}
 };
 
-function modelJson(model) {
+/** A model without headers and keys. */
+export function modelJson(model) {
 	if (!model) return null;
-	const { provider, id, name, api, contextWindow, maxTokens, reasoning } = model;
-	return { provider, id, name, api, contextWindow, maxTokens, reasoning };
+	const { provider, id, name, api, baseUrl, compat, contextWindow, maxTokens, reasoning } = model;
+	return { provider, id, name, api, baseUrl, compat: compat ?? null, contextWindow, maxTokens, reasoning };
 }
 
-function footerJson() {
+function scopedJson(scoped) {
+	return (Array.isArray(scoped) ? scoped : []).flatMap(({ model, thinkingLevel }) => {
+		if (!model) return [];
+		const entry = { provider: model.provider, id: model.id };
+		if (thinkingLevel) entry.thinkingLevel = thinkingLevel;
+		return [entry];
+	});
+}
+
+export function footerJson() {
 	const read = (kind) => safe(() => call("ui.footer", 0, kind));
 	const footer = { gitBranch: read("gitBranch") };
 	const stats = read("sessionStats");
@@ -63,6 +73,7 @@ export function snapshot(state, ctx) {
 		mode: safe(() => ctx.mode),
 		hasUI: safe(() => ctx.hasUI, false),
 		model: modelJson(safe(() => ctx.model)),
+		scopedModels: scopedJson(safe(() => ctx.scopedModels)),
 		thinkingLevel: safe(() => ctx.thinkingLevel),
 		sessionId: safe(() => sessionManager?.getSessionId()),
 		sessionName: safe(() => sessionManager?.getSessionName()),
@@ -70,6 +81,7 @@ export function snapshot(state, ctx) {
 		isIdle: safe(() => ctx.isIdle(), true),
 		isProjectTrusted: safe(() => ctx.isProjectTrusted(), false),
 		contextUsage: toJson(safe(() => ctx.getContextUsage())),
+		terminalWidth: safe(() => ctx.mode) === "tui" ? safe(() => call("ui.terminalSize", 0)[0]) : null,
 		flags: Object.fromEntries(state.flags.map((name) => [name, toJson(safe(() => state.pi.getFlag(name)))])),
 		footer: footerJson(),
 	};
@@ -89,7 +101,8 @@ async function llmComplete(ctx, params, signal) {
 	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 	if (!auth?.ok) throw new Error(auth?.error ?? `No credentials for ${model.provider}`);
 	const messages = params.messages ?? [{ role: "user", content: String(params.prompt ?? ""), timestamp: Date.now() }];
-	const options = { apiKey: auth.apiKey, headers: auth.headers, signal };
+	const headers = { ...(auth.headers ?? {}), ...(params.headers ?? {}) };
+	const options = { apiKey: auth.apiKey, headers, signal };
 	for (const key of ["maxTokens", "temperature", "reasoning"]) if (params[key] !== undefined) options[key] = params[key];
 	const message = await complete(model, { systemPrompt: params.systemPrompt, messages }, options);
 	if (message?.stopReason === "error") throw new Error(message.errorMessage ?? "Completion failed");
@@ -133,6 +146,7 @@ const CTX_METHODS = new Set([
 	"session.getBranch",
 	"model.get",
 	"model.set",
+	"model.find",
 	"ctx.compact",
 	"ctx.abort",
 	"ctx.isIdle",
@@ -160,7 +174,10 @@ export function hostMethods(state) {
 		"ui.notify": (p) => (ctx().ui.notify(String(p.message ?? ""), p.type), done()),
 		"ui.select": async (p, signal) => toJson(await ui().select(p.title, p.options ?? [], dialog(p, signal))),
 		"ui.confirm": async (p, signal) => Boolean(await ui().confirm(p.title, p.message ?? "", dialog(p, signal))),
-		"ui.input": async (p, signal) => toJson(await ui().input(p.title, p.placeholder, dialog(p, signal))),
+		"ui.input": async (p, signal) => {
+			const options = { ...dialog(p, signal), prefill: p.prefill, secret: Boolean(p.secret) };
+			return toJson(await ui().input(p.title, p.placeholder, options));
+		},
 		"ui.editor": async (p) => toJson(await ui().editor(p.title, p.prefill)),
 		"ui.setStatus": (p) => (ctx().ui.setStatus(p.key, p.text ?? undefined), done()),
 		"ui.setTitle": (p) => (ctx().ui.setTitle(p.title), done()),
@@ -183,6 +200,7 @@ export function hostMethods(state) {
 		"session.setName": (p) => (pi.setSessionName(p.name), done()),
 		"session.getName": () => toJson(pi.getSessionName()),
 		"model.get": () => modelJson(ctx().model),
+		"model.find": (p) => modelJson(ctx().modelRegistry.find(p.provider, p.id)),
 		"model.set": async (p) => {
 			const model = ctx().modelRegistry.find(p.provider, p.id);
 			return model ? Boolean(await pi.setModel(model)) : false;
@@ -225,7 +243,10 @@ export function hostMethods(state) {
 			state.subscriptions.delete(p.channel);
 			return done();
 		},
-		exec: async (p, signal) => toJson(await pi.exec(p.command, p.args ?? [], { cwd: p.cwd, timeout: p.timeout, signal })),
+		exec: async (p, signal) => {
+			const options = { cwd: p.cwd, timeout: p.timeout, stdin: p.stdin, signal };
+			return toJson(await pi.exec(p.command, p.args ?? [], options));
+		},
 		"pi.call": (p) => piCall(state, p),
 	};
 }

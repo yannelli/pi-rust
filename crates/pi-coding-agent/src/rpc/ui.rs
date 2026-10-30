@@ -120,7 +120,13 @@ impl ExtensionUi for RpcExtensionUi {
     }
 
     async fn input(&self, title: &str, placeholder: Option<&str>, opts: DialogOptions) -> Option<String> {
-        let fields = json!({"title": title, "placeholder": placeholder, "timeout": timeout_ms(&opts)});
+        let mut fields = json!({"title": title, "placeholder": placeholder, "timeout": timeout_ms(&opts)});
+        if let Some(prefill) = &opts.prefill {
+            fields["prefill"] = json!(prefill);
+        }
+        if opts.secret {
+            fields["secret"] = json!(true);
+        }
         response_value(self.dialog(opts, request("input", fields)).await)
     }
 

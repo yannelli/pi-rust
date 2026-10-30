@@ -7,10 +7,13 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use pi_ai::providers::faux::FauxResponse;
 use pi_coding_agent::extension_ui::{
-    DialogOptions, ExtensionMode, ExtensionUi, NoOpExtensionUi, NotifyType, WidgetPlacement,
+    AutocompleteRequest, DialogOptions, ExtensionMode, ExtensionUi, NoOpExtensionUi, NotifyType, WidgetPlacement,
 };
+use pi_coding_agent::extensions::autocomplete::JsAutocompleteProvider;
 use pi_coding_agent::extensions::{ComponentFactory, CustomRequest, ExtensionBindings};
-use pi_tui::Component;
+use pi_coding_agent::model_resolver::ScopedModel;
+use pi_tui::autocomplete::{AutocompleteProvider, AutocompleteSuggestions, SuggestionOptions};
+use pi_tui::{AutocompleteItem, Component};
 use serde_json::{Value, json};
 
 use crate::harness::{Harness, Setup, eventually, harness};
@@ -20,6 +23,8 @@ struct NativeUi {
     calls: Mutex<Vec<String>>,
     answers: Mutex<Vec<String>>,
     widgets: Mutex<Vec<(String, ComponentFactory)>>,
+    git_branch: Mutex<Value>,
+    autocomplete: Mutex<Vec<ComponentFactory>>,
 }
 
 impl NativeUi {
@@ -62,8 +67,10 @@ impl ExtensionUi for NativeUi {
         false
     }
 
-    async fn input(&self, _title: &str, _placeholder: Option<&str>, _opts: DialogOptions) -> Option<String> {
-        None
+    async fn input(&self, title: &str, placeholder: Option<&str>, opts: DialogOptions) -> Option<String> {
+        let prefill = opts.prefill.unwrap_or_default();
+        self.push(format!("input: {title} {placeholder:?} prefill={prefill} secret={}", opts.secret));
+        Some(format!("{prefill}c"))
     }
 
     async fn editor(&self, _title: &str, _prefill: Option<&str>, _opts: DialogOptions) -> Option<String> {
@@ -92,6 +99,25 @@ impl ExtensionUi for NativeUi {
 
     fn write_terminal(&self, _data: &str, _tmux_passthrough: bool) -> bool {
         true
+    }
+
+    fn terminal_size(&self) -> (u16, u16) {
+        (77, 24)
+    }
+
+    fn footer_data(&self, kind: &str) -> Value {
+        if kind == "gitBranch" { self.git_branch.lock().unwrap().clone() } else { Value::Null }
+    }
+
+    fn add_autocomplete_provider(&self, factory: ComponentFactory) {
+        self.autocomplete.lock().unwrap().push(factory);
+    }
+
+    async fn autocomplete_base(&self, request: AutocompleteRequest) -> Option<AutocompleteSuggestions> {
+        let before = &request.lines[request.cursor_line][..request.cursor_col];
+        let prefix = before.rsplit(' ').next().unwrap_or_default().to_string();
+        let items = ["@native-two", "@pi-own"].map(|value| AutocompleteItem::new(value, value)).to_vec();
+        Some(AutocompleteSuggestions { items, prefix })
     }
 
     async fn custom(&self, request: CustomRequest) -> Result<Option<Value>, String> {
@@ -213,7 +239,7 @@ async fn commands_reach_dialogs_panels_and_the_model() {
     h.session.prompt("/native-llm", Vec::new()).await.unwrap();
     let data = |custom_type: &str| entry_data(&h, custom_type);
     assert_eq!(data("native-answer"), Some(json!({"answer": "blue"})));
-    assert_eq!(data("native-panel"), Some(json!({"result": "closed by q"})));
+    assert_eq!(data("native-panel"), Some(json!({"result": "closed by q/q"})));
     assert_eq!(data("native-llm"), Some(json!({"text": "llm answer"})));
     let calls = ui.calls();
     assert!(calls.contains(&"select: Pick one [red, blue]".to_string()), "{calls:?}");
@@ -292,4 +318,88 @@ async fn requests_without_a_ctx_are_answered_during_initialize() {
     assert_eq!(probe["flag"], json!({"result": null}), "{probe}");
     let commands = probe["commands"]["error"].as_str().unwrap_or_default();
     assert!(commands.contains("cannot be called during extension loading"), "{probe}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_ctx_snapshot_has_scoped_models_model_endpoint_and_terminal_width() {
+    let (h, _ui) = native(Vec::new()).await;
+    let runtime = h.session.model_runtime().clone();
+    let other = runtime.get_model("local", "other").unwrap();
+    let thinking = pi_ai::ThinkingLevel::High;
+    h.session.set_scoped_models(vec![ScopedModel { model: other, thinking_level: Some(thinking) }]);
+    h.session.prompt("/native-ctx", Vec::new()).await.unwrap();
+    let data = entry_data(&h, "native-ctx").unwrap();
+    assert_eq!(data["scopedModels"], json!([{"provider": "local", "id": "other", "thinkingLevel": "high"}]));
+    assert_eq!(data["terminalWidth"], json!(77));
+    assert_eq!(data["baseUrl"], json!("http://unused"));
+    assert_eq!(data["compat"], Value::Null);
+    let keys = data["keys"].to_string();
+    assert!(!keys.contains("headers") && !keys.contains("apiKey"), "{keys}");
+
+    let print = native_with(Vec::new(), ExtensionMode::Print, Arc::new(NoOpExtensionUi), false).await;
+    print.session.prompt("/native-ctx", Vec::new()).await.unwrap();
+    let data = entry_data(&print, "native-ctx").unwrap();
+    assert_eq!(data["terminalWidth"], Value::Null);
+    assert_eq!(data["scopedModels"], json!([]));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn model_find_returns_the_snapshot_model_shape() {
+    let (h, _ui) = native(Vec::new()).await;
+    h.session.prompt("/native-find", Vec::new()).await.unwrap();
+    let data = entry_data(&h, "native-find").unwrap();
+    assert_eq!(data["found"]["id"], json!("other"));
+    assert_eq!(data["found"]["provider"], json!("local"));
+    assert_eq!(data["found"]["baseUrl"], json!("http://unused"));
+    assert!(data["found"].get("headers").is_none() && data["found"].get("apiKey").is_none(), "{data}");
+    assert_eq!(data["missing"], Value::Null);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn input_passes_prefill_and_secret() {
+    let (h, ui) = native(Vec::new()).await;
+    h.session.prompt("/native-input", Vec::new()).await.unwrap();
+    assert_eq!(entry_data(&h, "native-input"), Some(json!({"value": "abc"})));
+    assert!(ui.calls().contains(&r#"input: Token Some("tok") prefill=ab secret=true"#.to_string()), "{:?}", ui.calls());
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn exec_writes_stdin_to_the_process() {
+    let (h, _ui) = native(Vec::new()).await;
+    h.session.prompt("/native-exec", Vec::new()).await.unwrap();
+    assert_eq!(entry_data(&h, "native-exec"), Some(json!({"stdout": "piped text", "code": 0})));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn agent_before_settle_results_append_entries() {
+    let (h, _ui) = native(vec![FauxResponse::text("settled")]).await;
+    h.session.prompt("/native-settle", Vec::new()).await.unwrap();
+    h.session.prompt("settle now", Vec::new()).await.unwrap();
+    let data = entry_data(&h, "native-settle").unwrap();
+    assert_eq!(data["before"], json!(0), "{data}");
+    assert!(data["outcome"].is_string(), "{data}");
+    assert!(h.errors().is_empty(), "{:?}", h.errors());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn footer_changes_reach_footer_changed_subscribers() {
+    let (h, ui) = native(Vec::new()).await;
+    eventually(|| ui.widget("native").is_some()).await;
+    *ui.git_branch.lock().unwrap() = json!("feature-x");
+    eventually(|| entry_data(&h, "native-footer").is_some()).await;
+    assert_eq!(entry_data(&h, "native-footer").unwrap()["gitBranch"], json!("feature-x"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn merged_autocomplete_adds_pi_suggestions_after_the_extension_items() {
+    let (_h, ui) = native(Vec::new()).await;
+    eventually(|| !ui.autocomplete.lock().unwrap().is_empty()).await;
+    let factories = ui.autocomplete.lock().unwrap().clone();
+    let provider = tokio::task::block_in_place(|| JsAutocompleteProvider::build(&factories)).unwrap();
+    let lines = vec!["see @na".to_string()];
+    let suggestions = provider.get_suggestions(&lines, 0, 7, SuggestionOptions::default()).await.unwrap();
+    let values: Vec<&str> = suggestions.items.iter().map(|item| item.value.as_str()).collect();
+    assert_eq!(values, ["@native-one", "@native-two", "@pi-own"]);
+    assert_eq!(suggestions.prefix, "@na");
 }

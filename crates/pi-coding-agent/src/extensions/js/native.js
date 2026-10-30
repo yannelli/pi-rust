@@ -2,7 +2,7 @@
 // stdio, and this factory maps the protocol onto the `pi` API it receives.
 import { spawn } from "node:child_process";
 import { call } from "./bridge.js";
-import { hostMethods, needsCtx } from "./native_host.js";
+import { footerJson, hostMethods, needsCtx } from "./native_host.js";
 import { autocompleteFactory, createRegistrar } from "./native_register.js";
 import { createPeer, readLines, rpcError } from "./native_rpc.js";
 import { createSurfaces } from "./native_ui.js";
@@ -12,6 +12,7 @@ const INITIALIZE_MS = 10000;
 const SHUTDOWN_MS = 2000;
 const KILL_MS = 2000;
 const CTX_WAIT_MS = 30000;
+const FOOTER_POLL_MS = 250;
 
 const safe = (read, fallback = null) => {
 	try {
@@ -53,6 +54,7 @@ function createState(pi, spec) {
 			state.ctx = ctx;
 			for (const resolve of state.ctxWaiters.splice(0)) resolve();
 			state.installAutocomplete();
+			state.startFooterPoll();
 		},
 		ctxWaiters: [],
 		/** Requests sent before the first event wait for its ctx. */
@@ -62,6 +64,29 @@ function createState(pi, spec) {
 				state.ctxWaiters.push(resolve);
 				setTimeout(resolve, CTX_WAIT_MS).unref?.();
 			});
+		},
+		footerWatched: false,
+		footerTimer: undefined,
+		watchFooter() {
+			state.footerWatched = true;
+			state.startFooterPoll();
+		},
+		/** `footer.changed` for `footer_changed` subscribers: one check per FOOTER_POLL_MS in `tui` mode. */
+		startFooterPoll() {
+			if (!state.footerWatched || state.footerTimer || state.dead || safe(() => state.ctx?.mode) !== "tui") return;
+			let last = JSON.stringify(footerJson());
+			state.footerTimer = setInterval(() => {
+				const footer = footerJson();
+				const text = JSON.stringify(footer);
+				if (text === last) return;
+				last = text;
+				state.peer.notify("footer.changed", { footer });
+			}, FOOTER_POLL_MS);
+			state.footerTimer.unref?.();
+		},
+		stopFooterPoll() {
+			clearInterval(state.footerTimer);
+			state.footerTimer = undefined;
 		},
 		installAutocomplete() {
 			if (state.autocompleteInstalled || state.triggers.length === 0 || !safe(() => state.ctx?.hasUI, false)) return;
@@ -90,6 +115,7 @@ function initializeParams(state) {
 function onExit(state, code, signal) {
 	if (state.dead) return;
 	state.dead = true;
+	state.stopFooterPoll();
 	const reason = signal ? `signal ${signal}` : `code ${code}`;
 	const message = `Native extension ${state.path} exited with ${reason}`;
 	state.peer.close(new Error(message));
@@ -105,6 +131,7 @@ function onExit(state, code, signal) {
 async function stop(state) {
 	if (state.dead || state.stopping) return;
 	state.stopping = true;
+	state.stopFooterPoll();
 	await state.peer.request("shutdown", {}, { timeout: SHUTDOWN_MS }).catch(() => undefined);
 	state.peer.notify("exit");
 	state.child.stdin.end();

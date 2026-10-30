@@ -7,6 +7,20 @@ use crate::utils::{graphemes, slice_by_column, truncate_to_width_with, visible_w
 impl Input {
     /// Renders the single input line for `width` columns.
     pub(super) fn render_line(&mut self, width: usize) -> String {
+        if !self.masked {
+            return self.render_value(width);
+        }
+        let masked = "*".repeat(graphemes(&self.value).count());
+        let masked_cursor = graphemes(&self.value[..self.cursor]).count();
+        let value = std::mem::replace(&mut self.value, masked);
+        let cursor = std::mem::replace(&mut self.cursor, masked_cursor);
+        let line = self.render_value(width);
+        self.value = value;
+        self.cursor = cursor;
+        line
+    }
+
+    fn render_value(&mut self, width: usize) -> String {
         let prompt_width = visible_width(&self.prompt);
         if width <= prompt_width {
             return truncate_to_width_with(&self.prompt, width, "", false);
