@@ -174,9 +174,6 @@ pub struct JsRuntime {
 impl JsRuntime {
     /// Start the thread, run the bootstrap, and return once the runtime accepts work.
     pub fn new(options: JsRuntimeOptions) -> Result<Self, JsError> {
-        if let JsBackend::Node { .. } = options.backend {
-            return Err(JsError::new("the Node backend is not available yet").with_code("ERR_PI_NODE_MISSING"));
-        }
         let (owned_tokio, tokio) = match options.tokio.clone() {
             Some(handle) => (None, handle),
             None => {
@@ -211,6 +208,10 @@ impl JsRuntime {
             },
             output: options.output.clone(),
         });
+        if let JsBackend::Node { executable } = &options.backend {
+            let (handle, thread) = crate::node_backend::start(&options, executable, shared)?;
+            return Ok(Self { handle, thread: Some(thread), owned_tokio });
+        }
         let (sender, receiver) = mpsc::channel();
         let (ready_sender, ready) = mpsc::channel();
         let setup = LoopSetup { memory_limit: options.memory_limit, max_stack_size: options.max_stack_size };
@@ -240,7 +241,7 @@ impl std::ops::Deref for JsRuntime {
 
 impl Drop for JsRuntime {
     fn drop(&mut self) {
-        let _ = self.handle.send(Message::Shutdown);
+        self.handle.shutdown();
         if let Some(thread) = self.thread.take()
             && !self.handle.on_js_thread()
         {

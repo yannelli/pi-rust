@@ -1,5 +1,6 @@
-//! What pi-js does not provide from Node. Every listed module and API throws an `Error` with
-//! code `ERR_PI_UNSUPPORTED` and the message "<api> is not supported in pi-rust".
+//! What pi-js does not provide from Node on the QuickJS backend. Every listed module and API
+//! throws an `Error` with code `ERR_PI_UNSUPPORTED` and the message "<api> is not supported in
+//! pi-rust". The Node backend ([`crate::node_backend`]) runs real Node and has none of these gaps.
 
 use crate::resolve::NODE_BUILTINS;
 
@@ -33,8 +34,9 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
     "http2: performServerHandshake, altsvc and origin frames (ignored), and stream priority (h2 sends no \
      PRIORITY frames)",
     "dgram: IPv6 source-specific membership on Windows, and bind with a file descriptor",
-    "process: binding, dlopen, setUncaughtExceptionCaptureCallback, and running code after process.exit when \
-     the embedder's on_exit callback returns (the runtime is shutting down)",
+    "process: binding, dlopen (native .node addons; supported on the Node backend), \
+     setUncaughtExceptionCaptureCallback, and running code after process.exit when the embedder's on_exit \
+     callback returns (the runtime is shutting down)",
     "stream/web: CompressionStream and DecompressionStream",
     "v8: queryObjects",
     "vm: SourceTextModule, SyntheticModule, and Module (Node needs --experimental-vm-modules for them), \
@@ -58,7 +60,8 @@ pub const DIFFERENCES: &[&str] = &[
     "child_process: spawnSync treats a Buffer or string stdio entry as 'pipe' (Node drops the entry and \
      shifts the later ones down)",
     "child_process.fork, and spawning process.execPath, run the script in this binary's JavaScript runner \
-     (PI_JS_FORK); the IPC channel is a Unix socket or Windows named pipe, not an inherited descriptor",
+     (PI_JS_FORK) on the QuickJS backend, with IPC over a Unix socket or Windows named pipe; the Node \
+     backend runs them on real Node",
     "fs.openAsBlob reads the whole file when it is called, so later changes to the file do not show \
      in the Blob (Node reads it lazily and fails the read if the file changed)",
     "tty.ReadStream works only for descriptor 0 (process.stdin); other descriptors fail with ERR_TTY_INIT_FAILED",
