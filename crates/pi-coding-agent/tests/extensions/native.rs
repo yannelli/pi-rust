@@ -186,6 +186,7 @@ async fn native_in(
         from_settings: true,
         flags: vec![("native-flag", json!("on"))],
         bind: false,
+        mode,
         ..setup
     })
     .await;
@@ -346,6 +347,7 @@ async fn requests_without_a_ctx_are_answered_during_initialize() {
     h.session.prompt("/native-probe", Vec::new()).await.unwrap();
     let probe = entry_data(&h, "native-probe").unwrap();
     assert_eq!(probe["flag"], json!({"result": null}), "{probe}");
+    assert_eq!((&probe["mode"], &probe["hasUI"]), (&json!("tui"), &json!(true)), "{probe}");
     let commands = probe["commands"]["error"].as_str().unwrap_or_default();
     assert!(commands.contains("cannot be called during extension loading"), "{probe}");
 }

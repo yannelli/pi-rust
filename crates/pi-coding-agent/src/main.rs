@@ -20,6 +20,7 @@ use pi_coding_agent::diagnostics::{
 };
 use pi_coding_agent::doctor::{DoctorInputs, run_doctor_command};
 use pi_coding_agent::export::{ExportTheme, export_from_file, export_markdown_from_file, is_markdown_path};
+use pi_coding_agent::extension_ui::ExtensionMode;
 use pi_coding_agent::extensions::rpc::ExtensionRpcHost;
 use pi_coding_agent::files::process_cli_file_args;
 use pi_coding_agent::interactive::startup_ui::startup_project_trust;
@@ -482,6 +483,12 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
     let mut options = AppOptions {
         oauth: Some(oauth_lookup()),
         output_schema: output_schema.clone(),
+        bind_mode: Some(match mode {
+            _ if interactive => ExtensionMode::Tui,
+            AppMode::Rpc => ExtensionMode::Rpc,
+            AppMode::Json => ExtensionMode::Json,
+            _ => ExtensionMode::Print,
+        }),
         ..AppOptions::from_args(&args, &cwd, &agent_dir)
     };
     time("createSessionManager");

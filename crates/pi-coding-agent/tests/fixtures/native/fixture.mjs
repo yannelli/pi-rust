@@ -59,8 +59,10 @@ const answer = (method, params) => request(method, params).then(
 	(error) => ({ error: error.message }),
 );
 
-async function initialize() {
+async function initialize(params) {
 	initProbe = {
+		mode: params.mode,
+		hasUI: params.hasUI,
 		flag: await answer("pi.call", { target: "pi", method: "getFlag", args: ["native-flag"] }),
 		commands: await answer("commands.getAll", {}),
 	};

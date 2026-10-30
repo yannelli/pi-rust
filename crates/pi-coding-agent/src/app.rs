@@ -78,6 +78,8 @@ pub struct AppOptions {
     pub inline_extensions: Vec<Arc<dyn crate::extensions::InlineExtension>>,
     /// `ctx.mode` of `project_trust` handlers; print mode when unset.
     pub extension_mode: Option<crate::extension_ui::ExtensionMode>,
+    /// The mode the session binds extensions in; native extensions get it in `initialize`.
+    pub bind_mode: Option<crate::extension_ui::ExtensionMode>,
     /// `ctx.ui` of `project_trust` handlers; without one they have no UI.
     pub project_trust_ui: Option<(Arc<dyn crate::extension_ui::ExtensionUi>, crate::extension_ui::ExtensionMode)>,
     /// `--max-turns` and `--max-cost` (pi-rust).

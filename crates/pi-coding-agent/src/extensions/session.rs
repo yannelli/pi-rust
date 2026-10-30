@@ -25,6 +25,8 @@ pub struct LoadOptions {
     pub entries: Option<Vec<LoadEntry>>,
     /// `--extension-runtime`; `None` reads `PI_EXTENSION_RUNTIME`, then the settings.
     pub runtime: Option<super::backend::ExtensionRuntime>,
+    /// The mode the session binds the extensions in, when known before they load.
+    pub mode: Option<crate::extension_ui::ExtensionMode>,
 }
 
 #[derive(Default)]
@@ -52,6 +54,9 @@ pub async fn load_extensions(services: &AgentSessionServices, options: &LoadOpti
             return LoadedExtensions { runner: None, diagnostics };
         }
     };
+    if let Some(mode) = options.mode {
+        runner.set_load_mode(mode);
+    }
     runner.load_inline(&options.inline).await;
     runner.load_entries(&entries).await;
     for (name, value) in &options.flag_values {
