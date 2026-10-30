@@ -11,7 +11,25 @@ pi-rust has all the wire protocols of upstream pi:
 
 The bundled model catalog is the catalog of upstream pi. `pi update --models` updates it.
 
-`/login` supports OAuth for Anthropic, OpenAI Codex, GitHub Copilot, OpenRouter, xAI, Kimi, Meta, and Radius. pi also accepts API keys and the default AWS and Google credentials of your system. llama.cpp servers and virtual models work as in upstream pi.
+pi-rust also has `cursor-agent`, `grok-build-responses`, and `antigravity-acp` for the subscription providers in the next section.
+
+`/login` supports OAuth for Anthropic, OpenAI Codex, GitHub Copilot, OpenRouter, xAI, Kimi, Meta, Radius, Cursor, Grok Build, and Google Antigravity. pi also accepts API keys and the default AWS and Google credentials of your system. llama.cpp servers and virtual models work as in upstream pi.
+
+## Cursor, Grok Build, and Google Antigravity (pi-rust extension)
+
+These providers use your subscription. Log in with `/login cursor`, `/login grok-build`, or `/login google-antigravity`.
+
+| Provider | Login | Default model |
+| --- | --- | --- |
+| `cursor` | pi opens the Cursor login page and waits until you approve the login. | `claude-opus-5-high` |
+| `grok-build` | Enter the device code from pi at x.ai (SuperGrok or X Premium). | `grok-4.7` |
+| `google-antigravity` | If Google's Antigravity ACP server is not installed, pi asks to install it. Then the server opens the Google sign-in. | `gemini-3.1-pro` |
+
+- Cursor runs the model on Cursor's agent service. pi gives its tools to Cursor as MCP tools and runs them itself. The model list and the context sizes come from your Cursor account.
+- Grok Build sends requests to the Grok CLI chat proxy. If the proxy asks for a newer client version, set `GROK_CLIENT_VERSION`.
+- Google Antigravity runs through the Antigravity ACP server. The agent uses the pi tools, so pi runs each tool. The agent also connects to your MCP servers.
+
+[Subscription providers](../../../docs/providers/subscription-providers.md) has the protocol details.
 
 ## Disable providers
 
@@ -123,6 +141,10 @@ With a ChatGPT login for `openai`, the same request returns the models of the ac
 
 With a Gemini API key, pi reads `GET <base URL>/models` with `x-goog-api-key` and reads all pages. It uses only the models that support `generateContent`, with their input and output token limits. pi adds new models only for a model family that the catalog has.
 
+### Cursor
+
+With a Cursor login, pi reads `AvailableModels` from the Cursor agent service. Each model variant of the account becomes one model. Its context size is the limit that Cursor gives for the variant, with the larger limit for max mode.
+
 ### Other providers
 
-Cursor and Grok Build do not give a public model list API to other harnesses, so pi-rust does not limit their models. Other providers show the full catalog.
+Grok Build and Google Antigravity show their bundled model lists. pi-rust does not read their account model lists yet. Other providers show the full catalog.

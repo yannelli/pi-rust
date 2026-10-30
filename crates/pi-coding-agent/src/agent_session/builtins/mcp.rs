@@ -10,6 +10,7 @@ use futures::FutureExt;
 use pi_agent::{SharedTool, ToolExposure};
 use pi_mcp::manager::UpdateConfigFn;
 use pi_mcp::oauth::CallbackServerFactory;
+use pi_mcp::runtime::transport::acp_passthrough_server;
 use pi_mcp::runtime::{McpOAuthCredentialStore, TransportFactory};
 use pi_mcp::{LoadedMcpConfig, MCP_SERVERS_SECTION, McpManager, McpManagerOptions, McpServerRegistry, load_mcp_config};
 
@@ -120,6 +121,8 @@ impl AgentSession {
             Some(load) => load(&cwd),
             None => load_mcp_config(&self.services.agent_dir, &cwd, self.settings().is_project_trusted()),
         };
+        let passthrough = loaded.servers.iter().filter_map(|entry| acp_passthrough_server(entry).ok().flatten());
+        pi_ai::providers::antigravity_acp::set_passthrough_mcp_servers(passthrough.collect());
         manager.start(cwd, loaded);
         self.ensure_mcp_discovery();
     }

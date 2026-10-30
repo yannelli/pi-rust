@@ -18,6 +18,9 @@ fn builtin_flows_are_keyed_by_upstream_provider_ids() {
         ("openrouter", "OpenRouter OAuth", false, Some("Sign in with OpenRouter")),
         ("radius", "Radius", false, None),
         ("xai", "xAI (Grok/X subscription)", true, Some("Sign in with SuperGrok or X Premium")),
+        ("cursor", "Cursor (subscription)", true, Some("Sign in with Cursor")),
+        ("google-antigravity", "Google Antigravity", true, Some("Sign in with Google (Antigravity ACP)")),
+        ("grok-build", "Grok Build (SuperGrok/X Premium)", true, Some("Sign in with SuperGrok or X Premium")),
     ];
     let expected: Vec<_> = expected
         .into_iter()

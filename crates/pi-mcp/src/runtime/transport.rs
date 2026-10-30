@@ -75,6 +75,46 @@ pub fn default_transport_factory() -> TransportFactory {
     Arc::new(create_default_transport)
 }
 
+/// The `session/new` entry for an agent that connects to this server itself (Antigravity ACP), with
+/// the same value resolution. `None` for disabled or hidden servers and for HTTP servers whose
+/// login pi holds (OAuth or a pi provider credential).
+pub fn acp_passthrough_server(
+    entry: &McpServerEntry,
+) -> Result<Option<pi_ai::providers::antigravity_acp::PassthroughMcpServer>, McpError> {
+    let config = &entry.config;
+    let pi_login = config.is_http() && (config.uses_oauth() || config.auth_provider().is_some());
+    if !config.is_enabled() || config.exposure() == crate::config::McpExposure::Hidden || pi_login {
+        return Ok(None);
+    }
+    let pairs = |values: Vec<(String, String)>| -> Vec<serde_json::Value> {
+        values.into_iter().map(|(name, value)| serde_json::json!({"name": name, "value": value})).collect()
+    };
+    let name = &entry.name;
+    let acp = match &config.url {
+        Some(url) => {
+            let headers = resolve_headers_or_err(config.header_pairs(), &format!("MCP server \"{name}\""))
+                .map_err(McpError::Other)?;
+            let kind = if config.kind.as_deref() == Some("sse") { "sse" } else { "http" };
+            serde_json::json!({"type": kind, "name": name, "url": url, "headers": pairs(headers.into_iter().collect())})
+        }
+        None => {
+            let mut env = Vec::new();
+            for (key, value) in config.env_pairs() {
+                let description = format!("MCP server \"{name}\" env \"{key}\"");
+                env.push((
+                    key.to_string(),
+                    resolve_config_value_or_err(value, &description, None).map_err(McpError::Other)?,
+                ));
+            }
+            let args: Vec<String> = config.args.iter().flatten().map(|arg| expand_home(arg)).collect();
+            let command = expand_home(config.command.as_deref().unwrap_or_default());
+            serde_json::json!({"name": name, "command": command, "args": args, "env": pairs(env)})
+        }
+    };
+    let tool_prefix = crate::naming::create_mcp_tool_name(name, "", |_| false);
+    Ok(Some(pi_ai::providers::antigravity_acp::PassthroughMcpServer { acp, tool_prefix }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -89,5 +129,30 @@ mod tests {
         );
         assert_eq!(expand_home_with("~other/x", Some(home)), "~other/x");
         assert_eq!(expand_home_with("a/~/b", Some(home)), "a/~/b");
+    }
+
+    fn entry(name: &str, config: crate::config::McpServerConfig) -> McpServerEntry {
+        McpServerEntry { name: name.into(), config, source: "test".into(), scope: None, override_path: None }
+    }
+
+    #[test]
+    fn acp_passthrough_keeps_servers_the_agent_can_reach_itself() {
+        use crate::config::McpServerConfig;
+        let mut stdio = McpServerConfig::stdio("docs-mcp", vec!["--port".into()]);
+        stdio.env = Some(serde_json::json!({"MODE": "fast"}).as_object().cloned().unwrap());
+        let server = acp_passthrough_server(&entry("my docs", stdio.clone())).unwrap().unwrap();
+        assert_eq!(server.tool_prefix, "mcp__my_docs__");
+        let expected = serde_json::json!({"name": "my docs", "command": "docs-mcp", "args": ["--port"],
+            "env": [{"name": "MODE", "value": "fast"}]});
+        assert_eq!(server.acp, expected);
+        let disabled = McpServerConfig { enabled: Some(false), ..stdio };
+        assert!(acp_passthrough_server(&entry("off", disabled)).unwrap().is_none());
+        let oauth = McpServerConfig::http("https://mcp.example.com");
+        assert!(acp_passthrough_server(&entry("oauth", oauth)).unwrap().is_none());
+        let mut keyed = McpServerConfig::http("https://mcp.example.com");
+        keyed.headers = Some(serde_json::json!({"Authorization": "Bearer k"}).as_object().cloned().unwrap());
+        let keyed = acp_passthrough_server(&entry("keyed", keyed)).unwrap().unwrap();
+        assert_eq!(keyed.acp["type"], "http");
+        assert_eq!(keyed.acp["headers"], serde_json::json!([{"name": "Authorization", "value": "Bearer k"}]));
     }
 }
