@@ -94,3 +94,27 @@ async fn widgets_over_a_third_of_the_rows_collapse_and_toggle() {
     })
     .await;
 }
+
+const STDERR: &str = r#"export default function (pi) {
+	pi.registerCommand("errs", {
+		description: "Write to stderr",
+		handler: async () => {
+			console.error("console %s", "error");
+			console.warn("console warn");
+			process.stderr.write("raw stderr\n");
+		},
+	});
+}
+"#;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn extension_stderr_shows_as_warnings_in_the_chat() {
+    local(async {
+        let ui = start(Options { files: vec![(".pi/extensions/errs.ts", STDERR)], ..Options::default() }).await;
+        ui.submit("/errs").await;
+        ui.wait_for("Warning: [errs.ts] console error").await;
+        ui.wait_for("Warning: [errs.ts] console warn").await;
+        ui.wait_for("Warning: [errs.ts] raw stderr").await;
+    })
+    .await;
+}

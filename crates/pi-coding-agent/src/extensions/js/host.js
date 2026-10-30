@@ -6,6 +6,7 @@ import { call, callAsync, errorMessage, optional, registerCallback, releaseCallb
 import { nativeFactory } from "./native.js";
 import { Runner } from "./runner.js";
 import { apiProviders } from "./ai.js";
+import { routeStderr } from "./stderr_route.js";
 import { sessionStream } from "./stream.js";
 import { currentTheme } from "./theme.js";
 import * as ui from "./ui.js";
@@ -57,6 +58,8 @@ export function createHost(config) {
 	});
 	const runner = new Runner(runtime, sessionStream);
 	const eventBus = createEventBus();
+	let loading;
+	routeStderr(() => (loading ? [...runner.extensions, loading] : runner.extensions));
 
 	const findTool = (name) => {
 		for (const ext of runner.extensions) {
@@ -98,6 +101,7 @@ export function createHost(config) {
 		async load(entries) {
 			const errors = [];
 			for (const entry of entries) {
+				loading = { path: entry.path, resolvedPath: entry.resolvedPath };
 				try {
 					const module = entry.native
 						? { default: nativeFactory({ ...entry.native, extensionPath: entry.path }) }
@@ -123,6 +127,7 @@ export function createHost(config) {
 					errors.push({ path: entry.path, error: `Failed to load extension: ${errorMessage(error)}` });
 				}
 			}
+			loading = undefined;
 			dirty = true;
 			host.flush();
 			return errors;

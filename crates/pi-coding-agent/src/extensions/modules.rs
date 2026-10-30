@@ -33,6 +33,7 @@ const HOST_FILES: &[(&str, &str)] = &[
     ("sdk_storage.js", include_str!("js/sdk_storage.js")),
     ("sdk_resources.js", include_str!("js/sdk_resources.js")),
     ("session_utils.js", include_str!("js/session_utils.js")),
+    ("stderr_route.js", include_str!("js/stderr_route.js")),
     ("stream.js", include_str!("js/stream.js")),
     ("theme.js", include_str!("js/theme.js")),
     ("ui.js", include_str!("js/ui.js")),
