@@ -27,7 +27,7 @@ const registrations = {
 			parameters: { type: "object", properties: { text: { type: "string" }, wait: { type: "boolean" } } },
 		},
 	],
-	commands: [{ name: "native-ask" }, { name: "native-panel" }, { name: "native-crash" }],
+	commands: [{ name: "native-ask" }, { name: "native-panel" }, { name: "native-llm" }, { name: "native-crash" }],
 	flags: [{ name: "native-flag", type: "string", default: "off" }],
 	events: ["session_start", "before_agent_start", "tool_call"],
 };
@@ -61,6 +61,9 @@ async function runCommand({ name }) {
 		notify("ui.close", { surface: "p1", result: `closed by ${key}` });
 		const { result } = await closed;
 		await request("session.appendEntry", { customType: "native-panel", data: { result } });
+	} else if (name === "native-llm") {
+		const { text } = await request("llm.complete", { prompt: "Say hi", maxTokens: 50 });
+		await request("session.appendEntry", { customType: "native-llm", data: { text } });
 	} else if (name === "native-crash") {
 		process.exit(3);
 	}

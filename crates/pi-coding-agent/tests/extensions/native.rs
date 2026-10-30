@@ -172,17 +172,19 @@ async fn tools_events_and_widgets_cross_the_process_boundary() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn commands_reach_dialogs_and_panels() {
-    let (h, ui) = native(Vec::new()).await;
+async fn commands_reach_dialogs_panels_and_the_model() {
+    let (h, ui) = native(vec![FauxResponse::text("llm answer")]).await;
     ui.answers.lock().unwrap().push("blue".into());
     h.session.prompt("/native-ask", Vec::new()).await.unwrap();
     h.session.prompt("/native-panel", Vec::new()).await.unwrap();
+    h.session.prompt("/native-llm", Vec::new()).await.unwrap();
     let data = |custom_type: &str| {
         let entries = h.entries();
         entries.iter().find(|entry| entry["customType"] == custom_type).map(|entry| entry["data"].clone())
     };
     assert_eq!(data("native-answer"), Some(json!({"answer": "blue"})));
     assert_eq!(data("native-panel"), Some(json!({"result": "closed by q"})));
+    assert_eq!(data("native-llm"), Some(json!({"text": "llm answer"})));
     let calls = ui.calls();
     assert!(calls.contains(&"select: Pick one [red, blue]".to_string()), "{calls:?}");
     assert!(calls.contains(&"panel: Panel one|width 30".to_string()), "{calls:?}");
