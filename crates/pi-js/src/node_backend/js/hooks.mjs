@@ -54,5 +54,9 @@ export async function load(url, context, nextLoad) {
   const reply = await ask({ t: "load", path: fileURLToPath(url) });
   if (reply.err) throw toError(reply.err);
   if (!reply.ok) return nextLoad(url, context);
-  return { format: reply.ok.format, source: reply.ok.source, shortCircuit: true };
+  const { format } = reply.ok;
+  // Node reads re-exported CommonJS files from disk to list their exports, and registered
+  // sources are not on disk; `require.call(void 0, x)` hides those calls from its export scan.
+  const source = format === "commonjs" ? reply.ok.source.replace(/(?<![.\w$])require\s*\(/g, "require.call(void 0, ") : reply.ok.source;
+  return { format, source, shortCircuit: true };
 }
