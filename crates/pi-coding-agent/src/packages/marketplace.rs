@@ -257,7 +257,7 @@ impl Marketplace {
     /// Delete the package directory and the binaries that no other package uses.
     pub fn remove(&self, name: &str) -> anyhow::Result<()> {
         let path = self.package_path(name)?;
-        let _guard = super::marketplace_install::lock();
+        let _lock = self.lock()?;
         remove_path(&path)?;
         self.prune_binaries();
         Ok(())

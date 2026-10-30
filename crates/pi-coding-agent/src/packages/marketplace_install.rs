@@ -4,7 +4,6 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, MutexGuard};
 
 use anyhow::{Context, bail};
 use serde_json::json;
@@ -16,13 +15,7 @@ use super::marketplace_index::{
 };
 use super::source::ArchiveFormat;
 
-static LOCK: Mutex<()> = Mutex::new(());
 static STAGING_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-/// Serializes binary placement, package writes, and pruning in this process.
-pub(crate) fn lock() -> MutexGuard<'static, ()> {
-    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-}
 
 fn unique_suffix() -> String {
     format!("{}-{}", std::process::id(), STAGING_COUNTER.fetch_add(1, Ordering::Relaxed))
@@ -62,6 +55,10 @@ fn real_dirs(dir: &Path) -> Vec<PathBuf> {
 }
 
 impl Marketplace {
+    pub(crate) fn lock(&self) -> anyhow::Result<super::marketplace_lock::InstallLock> {
+        super::marketplace_lock::acquire(&self.root(), super::marketplace_lock::LOCK_TIMEOUT)
+    }
+
     pub(crate) async fn install_from_index(
         &self,
         index: &MarketplaceIndex,
@@ -105,7 +102,7 @@ impl Marketplace {
         staged: Option<Staged>,
         expected: Option<&MarketplaceState>,
     ) -> anyhow::Result<Option<PathBuf>> {
-        let _guard = lock();
+        let _lock = self.lock()?;
         let path = self.package_path(&state.name)?;
         if expected.is_some() && self.read_state(&state.name)?.as_ref() != expected {
             return Ok(Some(path));

@@ -18,6 +18,7 @@ pub mod manifest;
 pub mod marketplace;
 mod marketplace_index;
 mod marketplace_install;
+mod marketplace_lock;
 #[cfg(test)]
 mod marketplace_test_support;
 #[cfg(test)]
