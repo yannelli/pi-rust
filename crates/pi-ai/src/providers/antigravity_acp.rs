@@ -27,7 +27,7 @@ use crate::types::{ContentBlock, Context, Message, Model, ModelCost, StopReason,
 
 pub(crate) use self::install::{install, release, root as install_root};
 pub(crate) use self::process::NOT_INSTALLED;
-pub(crate) use self::runtime::login;
+pub(crate) use self::runtime::{OfferedModel, login, offered_models};
 
 /// Whether pi finds the Antigravity ACP server.
 pub(crate) fn installed() -> bool {

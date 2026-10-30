@@ -6,7 +6,9 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use super::connection::Connection;
-use super::runtime::{PassthroughMcpServer, redirect_target, set_passthrough_mcp_servers, set_test_agent};
+use super::runtime::{
+    OfferedModel, PassthroughMcpServer, offered_models, redirect_target, set_passthrough_mcp_servers, set_test_agent,
+};
 use super::{API, AntigravityAcp};
 use crate::providers::mock_server::{collect, kinds, test_model};
 use crate::registry::{ApiProvider, StreamOptions};
@@ -20,11 +22,12 @@ static SEEN: LazyLock<Mutex<Vec<(String, Value)>>> = LazyLock::new(Mutex::defaul
 static SERIAL: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(tokio::sync::Mutex::default);
 
 fn config(model: &str, thought: &str) -> Value {
+    let levels: &[&str] = if model == "gemini-3.8-flash" { &["low", "medium", "high"] } else { &["low", "high"] };
+    let levels: Vec<Value> = levels.iter().map(|level| json!({"value": level, "name": level})).collect();
     json!([
         {"id": "model", "category": "model", "type": "select", "currentValue": model,
          "options": [{"value": "gemini-3.8-flash", "name": "Flash"}, {"value": "gemini-3.1-pro", "name": "Pro"}]},
-        {"id": "thought", "category": "thought_level", "type": "select", "currentValue": thought,
-         "options": [{"value": "low", "name": "Low"}, {"value": "high", "name": "High"}]},
+        {"id": "thought", "category": "thought_level", "type": "select", "currentValue": thought, "options": levels},
     ])
 }
 
@@ -237,4 +240,23 @@ fn a_pasted_redirect_goes_to_the_loopback_port_of_the_sign_in_url() {
     assert_eq!(redirect_target(sign_in, "state=s&code=c").unwrap().as_str(), "http://127.0.0.1:51234/?state=s&code=c");
     assert!(redirect_target(sign_in, "4/abc").is_err());
     assert!(redirect_target("https://accounts.google.com/o/oauth2/auth", "code=c").is_err());
+}
+
+#[tokio::test]
+async fn lists_each_offered_model_with_its_thinking_levels() {
+    let _serial = SERIAL.lock().await;
+    install_agent();
+    let offered = offered_models().await.unwrap();
+    let levels = |levels: &[&str]| levels.iter().map(|level| level.to_string()).collect::<Vec<_>>();
+    assert_eq!(
+        offered,
+        [
+            OfferedModel {
+                id: "gemini-3.8-flash".into(),
+                name: "Flash".into(),
+                levels: levels(&["low", "medium", "high"])
+            },
+            OfferedModel { id: "gemini-3.1-pro".into(), name: "Pro".into(), levels: levels(&["low", "high"]) },
+        ]
+    );
 }
