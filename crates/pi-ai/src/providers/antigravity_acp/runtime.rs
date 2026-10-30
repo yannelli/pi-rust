@@ -8,15 +8,22 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
+use tokio_util::sync::CancellationToken;
 
 use super::bridge::{BRIDGE_NAME, Bridge, BridgeTool, ParkedCall};
 use super::connection::{Connection, RpcError};
 use super::process::{self, NOT_INSTALLED, Server};
 use super::prompt::PromptCapabilities;
+use crate::auth::oauth::interact;
+use crate::auth::{AuthEvent, AuthInteraction, AuthPrompt};
 
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(30);
 const SESSION_TIMEOUT: Duration = Duration::from_secs(120);
-const AUTHENTICATE_TIMEOUT: Duration = Duration::from_secs(180);
+/// The server waits 300 seconds for the Google redirect.
+const AUTHENTICATE_TIMEOUT: Duration = Duration::from_secs(330);
+const SIGN_IN_INSTRUCTIONS: &str = "Open this link to sign in with Google.";
+const PASTE_MESSAGE: &str =
+    "If the browser cannot open the 127.0.0.1 page after sign-in (a remote machine), paste that page's address here:";
 const ROUTING: &str = "Use the pi_ tools from the pi-bridge MCP server for files, shell commands, and edits. They run in the user's pi session.";
 
 /// A user MCP server that Antigravity connects to itself, with the prefix of pi's own copies of its
@@ -233,11 +240,11 @@ fn google_method(method: &Value) -> bool {
         .any(|needle| text.contains(needle))
 }
 
-/// Runs the server's own Google login (it opens the browser and keeps the credential), then checks
-/// that a session starts. `GEMINI_API_KEY` in the environment replaces the login.
-pub(crate) async fn login(cancel: &tokio_util::sync::CancellationToken) -> Result<(), String> {
+/// Runs the server's own Google login, which keeps the credential, then checks that a session
+/// starts. `GEMINI_API_KEY` in the environment replaces the login.
+pub(crate) async fn login(interaction: &dyn AuthInteraction, cancel: &CancellationToken) -> Result<(), String> {
     let cwd = std::env::current_dir().map_err(|error| format!("Cannot read the working directory: {error}"))?;
-    let (connection, _server, initialize) = connect(&cwd).await?;
+    let (connection, mut server, initialize) = connect(&cwd).await?;
     if std::env::var("GEMINI_API_KEY").map_or(true, |key| key.is_empty()) {
         let methods = initialize["authMethods"].as_array().cloned().unwrap_or_default();
         let method = methods
@@ -245,14 +252,79 @@ pub(crate) async fn login(cancel: &tokio_util::sync::CancellationToken) -> Resul
             .find(|method| google_method(method))
             .ok_or("Antigravity ACP does not offer a Google login")?;
         let request = connection.request("authenticate", json!({"methodId": method["id"]}), AUTHENTICATE_TIMEOUT);
-        tokio::select! {
-            () = cancel.cancelled() => return Err("Login cancelled".into()),
-            result = request => { result.map_err(rpc)?; }
-        }
+        let sign_in = server.as_mut().map(|server| &mut server.sign_in);
+        authenticate(interaction, request, sign_in, cancel).await?;
     }
     let params = json!({"cwd": cwd, "mcpServers": []});
     connection.request("session/new", params, SESSION_TIMEOUT).await.map(|_| ()).map_err(|error| match error.code {
         -32000 => "The Antigravity login did not complete".to_string(),
         _ => rpc(error),
     })
+}
+
+/// Waits for `authenticate` and shows the sign-in URL that the server prints. The user can paste the
+/// redirect address instead, for a browser on another machine.
+async fn authenticate(
+    interaction: &dyn AuthInteraction,
+    request: impl Future<Output = Result<Value, RpcError>>,
+    sign_in: Option<&mut mpsc::UnboundedReceiver<String>>,
+    cancel: &CancellationToken,
+) -> Result<(), String> {
+    let done = |result: Result<Value, RpcError>| result.map(drop).map_err(rpc);
+    let mut request = std::pin::pin!(request);
+    let url = match sign_in {
+        Some(sign_in) => tokio::select! {
+            () = cancel.cancelled() => return Err("Login cancelled".into()),
+            result = &mut request => return done(result),
+            url = sign_in.recv() => url,
+        },
+        None => None,
+    };
+    if let Some(url) = url {
+        interaction.notify(AuthEvent::AuthUrl { url: url.clone(), instructions: Some(SIGN_IN_INSTRUCTIONS.into()) });
+        let prompt = AuthPrompt::ManualCode {
+            message: PASTE_MESSAGE.into(),
+            placeholder: Some("http://127.0.0.1:<port>/?state=...&code=...".into()),
+        };
+        let pasted = tokio::select! {
+            () = cancel.cancelled() => return Err("Login cancelled".into()),
+            result = &mut request => return done(result),
+            input = interact::prompt(interaction, prompt, cancel) => input.map_err(|error| error.to_string())?,
+        };
+        deliver_redirect(&url, &pasted).await?;
+    }
+    tokio::select! {
+        () = cancel.cancelled() => Err("Login cancelled".into()),
+        result = request => done(result),
+    }
+}
+
+/// The server's loopback callback (the `redirect_uri` of `sign_in`) with the query of `pasted`.
+pub(super) fn redirect_target(sign_in: &str, pasted: &str) -> Result<reqwest::Url, String> {
+    let mut target = reqwest::Url::parse(sign_in)
+        .ok()
+        .and_then(|url| url.query_pairs().find(|(key, _)| key == "redirect_uri").map(|(_, value)| value.into_owned()))
+        .and_then(|redirect| reqwest::Url::parse(&redirect).ok())
+        .ok_or("The Google sign-in URL has no redirect address")?;
+    let pasted = pasted.trim();
+    let query = pasted.split_once('?').map_or(pasted, |(_, query)| query);
+    let query = query.split('#').next().unwrap_or_default();
+    if !query.split('&').any(|pair| pair.starts_with("code=") || pair.starts_with("error=")) {
+        return Err("Paste the full address of the 127.0.0.1 page, with its code parameter".into());
+    }
+    target.set_query(Some(query));
+    Ok(target)
+}
+
+/// Sends the pasted redirect to the server's loopback callback on this machine.
+async fn deliver_redirect(sign_in: &str, pasted: &str) -> Result<(), String> {
+    let target = redirect_target(sign_in, pasted)?;
+    let client = reqwest::Client::builder().no_proxy().build().map_err(|error| error.to_string())?;
+    client
+        .get(target)
+        .timeout(Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|error| format!("Cannot reach the Antigravity login callback: {error}"))?;
+    Ok(())
 }

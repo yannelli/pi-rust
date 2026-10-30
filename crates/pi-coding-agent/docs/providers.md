@@ -23,7 +23,7 @@ These providers use your subscription. Log in with `/login cursor`, `/login grok
 | --- | --- | --- |
 | `cursor` | pi opens the Cursor login page and waits until you approve the login. | `claude-opus-5-high` |
 | `grok-build` | Enter the device code from pi at x.ai (SuperGrok or X Premium). | `grok-4.7` |
-| `google-antigravity` | If Google's Antigravity ACP server is not installed, pi asks to install it. Then the server opens the Google sign-in. | `gemini-3.1-pro` |
+| `google-antigravity` | If Google's Antigravity ACP server is not installed, pi asks to install it. Then open the Google sign-in link that pi shows. On a remote machine, paste the `127.0.0.1` address from the browser into pi. | `gemini-3.1-pro` |
 
 - Cursor runs the model on Cursor's agent service. pi gives its tools to Cursor as MCP tools and runs them itself. The model list and the context sizes come from your Cursor account.
 - Grok Build sends requests to the Grok CLI chat proxy. If the proxy asks for a newer client version, set `GROK_CLIENT_VERSION`.
