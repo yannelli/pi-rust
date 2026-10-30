@@ -126,6 +126,17 @@ After a change, the browser shows `Extensions changed. Ctrl+R to reload.` pi loa
 
 If the marketplace index does not load, the Marketplace tab shows `Marketplace unavailable:` and the error. For example, the signature is not correct, or `PI_OFFLINE=1` is set. The Installed tab continues to work. If an install fails, the status line shows `Extension change failed:` and the error. For example, the SHA-256 digest of the archive is not correct. pi does not install the extension or change the settings.
 
+## /statusline and /terminal-setup
+
+These commands are in marketplace extensions:
+
+| Command | Extension | Install |
+| --- | --- | --- |
+| `/statusline` | `marketplace:statusline` | `pi install marketplace:statusline` |
+| `/terminal-setup` | `marketplace:iterm2` | `pi install marketplace:iterm2` |
+
+Without the extension, the command shows the install command. See [Status line](status-line.md) and [iTerm2 integration](terminal.md#iterm2-integration).
+
 ## Prompt history
 
 The interactive editor keeps your prompts from all sessions and projects in `~/.pi/agent/prompt-history.jsonl`. The file has one JSON string on each line. On Unix, only you can read the file. If a prompt starts with a space, pi does not save it in the file.

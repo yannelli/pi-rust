@@ -43,6 +43,11 @@ pub struct Ui {
 /// Starts the mode on a 160x40 terminal with `agent_files` under the agent directory, then
 /// waits for the footer. Call inside a `LocalSet`.
 pub async fn start(agent_files: &[(&str, &str)]) -> Ui {
+    start_with(agent_files, json!({})).await
+}
+
+/// [`start`] with `extra` merged into the global settings.
+pub async fn start_with(agent_files: &[(&str, &str)], extra: Value) -> Ui {
     let root = tempfile::tempdir().unwrap();
     let cwd = root.path().join("work");
     let agent_dir = root.path().join("agent");
@@ -58,8 +63,11 @@ pub async fn start(agent_files: &[(&str, &str)]) -> Ui {
         "models": [{"id": "tiny", "contextWindow": 128000, "maxTokens": 4000}]}}});
     std::fs::write(agent_dir.join("models.json"), models.to_string()).unwrap();
     pi_ai::register_api_provider(api.clone(), FauxProvider::with_delay(Vec::new(), Duration::ZERO));
-    let settings = json!({"defaultProvider": "local", "defaultModel": "tiny", "theme": "dark",
+    let mut settings = json!({"defaultProvider": "local", "defaultModel": "tiny", "theme": "dark",
         "enableInstallTelemetry": false, "lastChangelogVersion": "999.0.0"});
+    if let (Some(settings), Value::Object(extra)) = (settings.as_object_mut(), extra) {
+        settings.extend(extra);
+    }
     let hidden = credential_env_vars();
     let env: Arc<dyn EnvLookup> =
         Arc::new(move |name: &str| if hidden.contains(name) { None } else { std::env::var(name).ok() });

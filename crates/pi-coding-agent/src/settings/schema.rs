@@ -93,13 +93,13 @@ pub struct TerminalSettings {
     /// pi-rust extension: the shortest run in seconds that notifies; 10 by default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notify_min_seconds: Option<f64>,
-    /// pi-rust extension: `true`, `false` (the default), or an object of iTerm2 features.
+    /// Legacy pi-rust key: `true`, `false`, or an object of iTerm2 features. `marketplace:iterm2` reads it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iterm2: Option<Value>,
 }
 
-/// `terminal.iterm2` (pi-rust extension): the iTerm2 features to use. `true` turns on all of them;
-/// in an object, a feature that is not named is on.
+/// Legacy `terminal.iterm2`: the iTerm2 features to use. `true` turns on all of them; in an
+/// object, a feature that is not named is on.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ITerm2Features {
     pub tab_color: bool,
@@ -208,9 +208,8 @@ pub struct PromptHistorySettings {
     pub max_entries: Option<f64>,
 }
 
-/// `statusLine` (pi-rust extension): replaces the footer's path and stats lines. `type` is
-/// `"builtin"`, `"command"` (session JSON on stdin, as in Claude Code), `"claude"`, `"cursor"`,
-/// `"codex"`, or `"off"`.
+/// Legacy pi-rust `statusLine`, read by `marketplace:statusline`. `type` is `"builtin"`,
+/// `"command"`, `"claude"`, `"cursor"`, `"codex"`, or `"off"`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusLineSettings {

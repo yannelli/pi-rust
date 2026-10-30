@@ -20,6 +20,11 @@ pub(super) fn tmux_keyboard_warning(extended_keys: Option<&str>, format: Option<
     (format == Some("xterm")).then_some(XTERM_FORMAT)
 }
 
+/// Wraps an escape sequence for tmux, which passes it on with `set -g allow-passthrough on`.
+pub(super) fn passthrough(sequence: &str, tmux: bool) -> String {
+    if tmux { format!("\x1bPtmux;{}\x1b\\", sequence.replace('\x1b', "\x1b\x1b")) } else { sequence.to_string() }
+}
+
 /// `tmux show -gv <option>`; `None` when it fails or takes longer than two seconds.
 async fn tmux_show(option: &str) -> Option<String> {
     let mut command = tokio::process::Command::new("tmux");
@@ -56,5 +61,12 @@ mod tests {
         assert_eq!(tmux_keyboard_warning(Some("on"), Some("csi-u")), None);
         assert_eq!(tmux_keyboard_warning(Some("always"), None), None);
         assert_eq!(tmux_keyboard_warning(Some("on"), Some("xterm")), Some(XTERM_FORMAT));
+    }
+
+    #[test]
+    fn wraps_sequences_for_tmux_passthrough() {
+        assert_eq!(passthrough("\x1b]9;x\x07", true), "\x1bPtmux;\x1b\x1b]9;x\x07\x1b\\");
+        assert_eq!(passthrough("\x1b]9;x\x07", false), "\x1b]9;x\x07");
+        assert_eq!(passthrough("plain", true), "\x1bPtmux;plain\x1b\\");
     }
 }

@@ -57,8 +57,8 @@ Run `pi --help` to see all options. In interactive mode, type `/` to see the com
 | [CLI commands and flags](crates/pi-coding-agent/docs/cli.md) | `pi completion`, `pi doctor`, `pi sessions`, `pi stats`, run limits, structured output, and `pi extensions` |
 | [Extension marketplace](crates/pi-coding-agent/docs/marketplace.md) | Find, install, update, and remove native Rust extensions |
 | [Providers](crates/pi-coding-agent/docs/providers.md) | Wire protocols, logins, `disabledProviders`, OpenRouter, and account model lists |
-| [Status line](crates/pi-coding-agent/docs/status-line.md) | The `statusLine` setting, presets, segments, and command status lines |
-| [Terminal](crates/pi-coding-agent/docs/terminal.md) | Themes, notifications, the iTerm2 integration, and `/terminal-setup` |
+| [Status line](crates/pi-coding-agent/docs/status-line.md) | The `marketplace:statusline` extension and the move from the built-in status line |
+| [Terminal](crates/pi-coding-agent/docs/terminal.md) | Themes, notifications, and the `marketplace:iterm2` extension |
 | [ACP mode](crates/pi-coding-agent/docs/acp.md) | `pi --mode acp` for Zed and other editors |
 
 ## Configuration
@@ -121,9 +121,9 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. This se
 | The global `disabledProviders` setting hides providers from model selection and keeps their credentials. The TUI `/settings` menu has a **Disabled providers** list. | | [Disable providers](crates/pi-coding-agent/docs/providers.md#disable-providers) |
 | `/settings` items for the `retry.*` and `retry.provider.*` values | Sets these values only in `settings.json` | [Retry settings](crates/pi-coding-agent/docs/providers.md#retry-settings) |
 | A terminal notification when a run takes 10 seconds or more | Has this only as the example extension `notify.ts` | [Notifications](crates/pi-coding-agent/docs/terminal.md#notifications) |
-| The status line (`statusLine`) and the `/statusline` editor for modules and layout | Changes the footer only through extensions | [Status line](crates/pi-coding-agent/docs/status-line.md) |
+| The status line and `/statusline` are the `marketplace:statusline` extension (`pi install marketplace:statusline`). It reads the legacy `statusLine` setting. Interactive mode offers to install it when `statusLine` is set. | Changes the footer only through extensions | [Status line](crates/pi-coding-agent/docs/status-line.md) |
 | More harness themes | | [Themes](crates/pi-coding-agent/docs/terminal.md#themes) |
-| The iTerm2 integration (`terminal.iterm2`) and `/terminal-setup` | | [iTerm2 integration](crates/pi-coding-agent/docs/terminal.md#iterm2-integration) |
+| The iTerm2 integration and `/terminal-setup` are the `marketplace:iterm2` extension (`pi install marketplace:iterm2`). It reads the legacy `terminal.iterm2` setting. Interactive mode offers to install it when `terminal.iterm2` is on. | | [iTerm2 integration](crates/pi-coding-agent/docs/terminal.md#iterm2-integration) |
 | Extension UI calls: `ctx.ui.writeTerminal(data, { tmuxPassthrough })` writes raw bytes to the terminal. Footer data of `ctx.ui.setFooter` also has `getSessionStats()` (`input`, `output`, `cacheRead`, `cacheWrite`, `cost`, `contextTokens`, `contextWindow`, `contextPercent`) and `getRunState()` (`idle`, `working`, `blocked`, `done`, or `error`). | Has none of them | |
 | Native extensions: a package lists programs in `package.json` `pi.native`, and pi runs each one as an extension over a JSON-RPC protocol on stdio | Loads only TypeScript and JavaScript extensions | [Native extension protocol](docs/extensions/native-protocol.md) |
 | A choice of extension engine: the `extensionRuntime` setting, `--extension-runtime`, and `PI_EXTENSION_RUNTIME` (`quickjs`, `node`, or `auto`) | Always runs extensions on Node | [Extension runtime](crates/pi-coding-agent/docs/cli.md#extension-runtime) |

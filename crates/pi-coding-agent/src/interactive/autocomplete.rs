@@ -31,12 +31,6 @@ pub const BUILTIN_SLASH_COMMANDS: &[(&str, &str, Option<&str>)] = &[
     ("diff", "Show uncommitted git changes in the working directory", Some("[--stat] [path]")),
     ("review", "Ask the agent to review the uncommitted git changes", Some("<instructions>")),
     ("context", "Show how the model's context window is used", None),
-    (
-        "statusline",
-        "Edit or switch the footer status line",
-        Some("[edit|preset|from-claude|from-cursor|from-codex|command|off]"),
-    ),
-    ("terminal-setup", "Set up iTerm2: the integration and clipboard access", None),
     ("fork", "Create a new fork from a previous user message", None),
     ("clone", "Duplicate the current session at the current position", None),
     ("trust", "Save project trust decision for future sessions", None),

@@ -157,4 +157,4 @@ fn result_error<T>(result: Result<anyhow::Result<T>, tokio::task::JoinError>) ->
 
 #[cfg(test)]
 #[path = "../../tests/interactive/extensions_browser.rs"]
-mod tests;
+pub(super) mod tests;

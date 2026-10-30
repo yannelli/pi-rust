@@ -22,6 +22,7 @@ mod marketplace_install;
 mod marketplace_test_support;
 #[cfg(test)]
 mod marketplace_tests;
+pub mod moved_features;
 mod npm;
 mod paths;
 mod resolve;

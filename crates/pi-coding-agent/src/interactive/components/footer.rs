@@ -2,7 +2,7 @@
 //! with its thinking level (upstream `components/footer.ts`).
 
 use std::cell::RefCell;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -14,9 +14,6 @@ use crate::agent_session::AgentSession;
 use crate::compaction::ContextUsage;
 use crate::config::home_dir;
 use crate::interactive::footer_data::FooterData;
-use crate::interactive::status_line::{
-    BuiltinStatusLine, CommandStatusLine, RunState, StatusLineConfig, StatusModel, StatusSnapshot,
-};
 use crate::interactive::util::{format_tokens, resolve_lexically};
 use crate::session::EntryData;
 use crate::session::usage::UsageTotals;
@@ -36,6 +33,39 @@ pub fn format_cwd_for_footer(cwd: &Path, home: Option<&Path>) -> String {
         Ok(rest) if rest.as_os_str().is_empty() => "~".to_string(),
         Ok(rest) => format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display()),
         Err(_) => cwd.display().to_string(),
+    }
+}
+
+/// The model fields the footer shows.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FooterModel {
+    pub provider: String,
+    pub id: String,
+    pub reasoning: bool,
+}
+
+/// What the footer knows about the session, rebuilt on every render.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FooterSnapshot {
+    pub cwd: PathBuf,
+    pub home: Option<PathBuf>,
+    pub branch: Option<String>,
+    pub session_name: Option<String>,
+    pub totals: UsageTotals,
+    pub cache_hit_rate: Option<f64>,
+    pub context: Option<ContextUsage>,
+    pub context_window: Option<u64>,
+    pub auto_compact: bool,
+    pub model: Option<FooterModel>,
+    pub thinking: ThinkingLevel,
+    pub routed: Option<(String, Option<ThinkingLevel>)>,
+    pub subscription: bool,
+}
+
+impl FooterSnapshot {
+    /// Context use in percent, when known.
+    pub fn context_percent(&self) -> Option<f64> {
+        self.context.as_ref().and_then(|usage| usage.percent)
     }
 }
 
@@ -65,18 +95,11 @@ pub struct FooterComponent {
     data: Rc<RefCell<FooterData>>,
     auto_compact_enabled: bool,
     stats: Option<SessionStats>,
-    status_line: Option<ActiveStatusLine>,
-}
-
-/// The `statusLine` that replaces the path and stats lines.
-enum ActiveStatusLine {
-    Builtin(BuiltinStatusLine),
-    Command(CommandStatusLine),
 }
 
 impl FooterComponent {
     pub fn new(session: Arc<AgentSession>, data: Rc<RefCell<FooterData>>) -> Self {
-        Self { session, data, auto_compact_enabled: true, stats: None, status_line: None }
+        Self { session, data, auto_compact_enabled: true, stats: None }
     }
 
     pub fn set_session(&mut self, session: Arc<AgentSession>) {
@@ -85,27 +108,6 @@ impl FooterComponent {
 
     pub fn set_auto_compact_enabled(&mut self, enabled: bool) {
         self.auto_compact_enabled = enabled;
-    }
-
-    /// Applies the `statusLine` setting; an unchanged command keeps its output and timers.
-    pub fn set_status_line(&mut self, config: Option<StatusLineConfig>, request_render: Rc<dyn Fn()>) {
-        let unchanged = match (&self.status_line, &config) {
-            (None, None) => true,
-            (Some(ActiveStatusLine::Builtin(active)), Some(StatusLineConfig::Builtin(config))) => active == config,
-            (Some(ActiveStatusLine::Command(active)), Some(StatusLineConfig::Command(config))) => {
-                active.config() == config
-            }
-            _ => false,
-        };
-        if unchanged {
-            return;
-        }
-        self.status_line = config.map(|config| match config {
-            StatusLineConfig::Builtin(builtin) => ActiveStatusLine::Builtin(builtin),
-            StatusLineConfig::Command(command) => {
-                ActiveStatusLine::Command(CommandStatusLine::new(command, request_render))
-            }
-        });
     }
 
     fn session_stats(&mut self) -> &SessionStats {
@@ -161,8 +163,8 @@ impl FooterComponent {
         self.stats.as_ref().expect("just set")
     }
 
-    /// Everything the footer and a status line show, from the cached stats and the session.
-    pub(crate) fn snapshot(&mut self) -> StatusSnapshot {
+    /// Everything the footer shows, from the cached stats and the session.
+    pub(crate) fn snapshot(&mut self) -> FooterSnapshot {
         let auto_compact = self.auto_compact_enabled;
         let (totals, cache_hit_rate, context) = {
             let stats = self.session_stats();
@@ -177,40 +179,29 @@ impl FooterComponent {
         let subscription = model
             .as_ref()
             .is_some_and(|model| model.provider == "kimi-coding" || data.is_using_subscription(&model.provider));
-        StatusSnapshot {
+        FooterSnapshot {
             cwd: session.cwd().to_path_buf(),
             home: Some(home_dir()),
-            project: data.repo_dir().and_then(Path::file_name).map(|name| name.to_string_lossy().into_owned()),
             branch: data.git_branch(),
-            session_id: session.session_id(),
             session_name: session.session_name(),
-            session_file: session.session_file(),
             totals,
             cache_hit_rate,
             context,
             context_window,
             auto_compact,
-            model: model.map(|model| StatusModel {
+            model: model.map(|model| FooterModel {
                 provider: model.provider,
                 id: model.id,
-                name: model.name,
                 reasoning: model.reasoning,
             }),
             thinking: session.thinking_level(),
             routed: routed_model(&session),
             subscription,
-            run_state: if session.is_compacting() {
-                RunState::Compacting
-            } else if session.is_streaming() {
-                RunState::Working
-            } else {
-                RunState::Idle
-            },
         }
     }
 
     /// The built-in path and stats lines (upstream `footer.ts`).
-    fn default_lines(snapshot: &StatusSnapshot, provider_count: usize, width: usize) -> Vec<String> {
+    fn default_lines(snapshot: &FooterSnapshot, provider_count: usize, width: usize) -> Vec<String> {
         let theme = theme();
         let totals = snapshot.totals;
         let percent = snapshot.context_percent();
@@ -314,17 +305,8 @@ impl FooterComponent {
 impl Component for FooterComponent {
     fn render(&mut self, width: usize) -> Vec<String> {
         let snapshot = self.snapshot();
-        let custom = match &self.status_line {
-            Some(ActiveStatusLine::Builtin(builtin)) => Some(builtin.render(&snapshot, width)),
-            Some(ActiveStatusLine::Command(command)) => {
-                command.observe(&snapshot, width);
-                command.lines(width)
-            }
-            None => None,
-        };
         let data = self.data.borrow();
-        let mut lines =
-            custom.unwrap_or_else(|| Self::default_lines(&snapshot, data.available_provider_count(), width));
+        let mut lines = Self::default_lines(&snapshot, data.available_provider_count(), width);
         if !data.extension_statuses().is_empty() {
             let theme = theme();
             let line =
