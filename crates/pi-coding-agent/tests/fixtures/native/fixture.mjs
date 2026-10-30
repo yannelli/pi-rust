@@ -10,6 +10,8 @@ let initProbe;
 let settleArmed = false;
 let footerSeen = false;
 
+const exitDelay = Number(process.env.NATIVE_EXIT_DELAY_MS ?? 0);
+const exit = () => setTimeout(() => process.exit(0), exitDelay);
 const send = (message) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
 const notify = (method, params) => send({ method, params });
 const request = (method, params) =>
@@ -32,12 +34,12 @@ const registrations = {
 	],
 	commands: [
 		"native-ask", "native-panel", "native-llm", "native-crash", "native-write", "native-probe",
-		"native-ctx", "native-find", "native-input", "native-exec", "native-settle",
+		"native-ctx", "native-find", "native-input", "native-exec", "native-settle", "native-llm-headers",
 	].map((name) => ({ name })),
 	flags: [{ name: "native-flag", type: "string", default: "off" }],
 	events: [
 		"session_start", "before_agent_start", "tool_call", "tool_result", "message_end", "context",
-		"agent_before_settle", "footer_changed",
+		"agent_before_settle", ...(process.env.NATIVE_FOOTER === "off" ? [] : ["footer_changed"]),
 	],
 	autocomplete: [{ triggerCharacters: ["@"] }],
 };
@@ -52,11 +54,12 @@ async function executeTool(id, { toolCallId, params }) {
 
 const textOf = (content) => (Array.isArray(content) ? content.map((block) => block.text ?? "").join("") : String(content ?? ""));
 
+const answer = (method, params) => request(method, params).then(
+	(result) => ({ result }),
+	(error) => ({ error: error.message }),
+);
+
 async function initialize() {
-	const answer = (method, params) => request(method, params).then(
-		(result) => ({ result }),
-		(error) => ({ error: error.message }),
-	);
 	initProbe = {
 		flag: await answer("pi.call", { target: "pi", method: "getFlag", args: ["native-flag"] }),
 		commands: await answer("commands.getAll", {}),
@@ -109,7 +112,9 @@ async function runCommand({ name, ctx }) {
 	} else if (name === "native-find") {
 		const found = await request("model.find", { provider: "local", id: "other" });
 		const missing = await request("model.find", { provider: "local", id: "missing" });
-		await append("native-find", { found, missing });
+		const noId = await answer("model.find", { provider: "local" });
+		const noProvider = await answer("model.find", { id: "other", provider: 7 });
+		await append("native-find", { found, missing, noId, noProvider });
 	} else if (name === "native-input") {
 		const value = await request("ui.input", { title: "Token", placeholder: "tok", prefill: "ab", secret: true });
 		await append("native-input", { value });
@@ -130,6 +135,12 @@ async function runCommand({ name, ctx }) {
 	} else if (name === "native-llm") {
 		const { text } = await request("llm.complete", { prompt: "Say hi", maxTokens: 50 });
 		await request("session.appendEntry", { customType: "native-llm", data: { text } });
+	} else if (name === "native-llm-headers") {
+		const headers = { "X-Shared": "from extension", Authorization: "Bearer extension", "x-extra": "1" };
+		const { text } = await request("llm.complete", { prompt: "Say hi", headers });
+		const invalid = await answer("llm.complete", { prompt: "Say hi", headers: { "x-number": 1 } });
+		const list = await answer("llm.complete", { prompt: "Say hi", headers: ["x"] });
+		await append("native-llm-headers", { text, invalid, list });
 	} else if (name === "native-write") {
 		const wrote = await request("ui.writeTerminal", { data: "\u001b]0;native\u0007" });
 		await request("session.appendEntry", { customType: "native-write", data: { wrote } });
@@ -159,7 +170,7 @@ function onNotification({ method, params }) {
 		void append("native-footer", params.footer);
 	}
 	if (method === "initialized") notify("ui.notify", { message: "native ready" });
-	if (method === "exit") process.exit(0);
+	if (method === "exit") exit();
 }
 
 async function serve(message) {
@@ -182,4 +193,4 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 		if (message.error) waiter?.reject(new Error(message.error.message));
 		else waiter?.resolve(message.result);
 	}
-}).on("close", () => process.exit(0));
+}).on("close", exit);

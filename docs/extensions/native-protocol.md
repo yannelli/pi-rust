@@ -178,8 +178,8 @@ Line-based surfaces: a widget (surface `widget:<key>`), the footer (surface `foo
 | `virtualModel.unregister` | `{ provider, id }` | `null` |
 | `pi.call` | `{ target: "pi" \| "ctx" \| "ctx.ui" \| "ctx.sessionManager" \| "ctx.modelRegistry", method, args?: [] }` | the awaited return value as JSON |
 
-- `llm.complete` uses the current model, or `provider/id`, with the credentials of pi. The key stays in pi. `prompt` is one user message; `messages` are pi-ai messages. `headers` go on the request over the headers of pi; a request header with the same name replaces the header of pi. `text` joins the text blocks of the answer.
-- `model.find` returns the model in the shape of the ctx snapshot `model`.
+- `llm.complete` uses the current model, or `provider/id`, with the credentials of pi. The key stays in pi. `prompt` is one user message; `messages` are pi-ai messages. `headers` is an object of string values (else `-32602`) that goes on the request over the headers of pi; a header name of the request replaces the header of pi with the same name, compared without case. `text` joins the text blocks of the answer.
+- `model.find` returns the model in the shape of the ctx snapshot `model`, or `null` when `provider` or `id` is missing or is not a string.
 - `exec` writes `stdin` to the standard input of the process and then closes it. Without `stdin`, the process gets no standard input.
 - `events.subscribe` delivers each `pi.events` message on `channel` as an `events.message` notification.
 - `provider.register` takes the declarative part of `pi.registerProvider`: `baseUrl`, `api` (an existing API id), `apiKey`, `headers`, `models`, `oauth` through the host. Functions are not available.

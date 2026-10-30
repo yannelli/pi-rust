@@ -73,7 +73,8 @@ function createState(pi, spec) {
 		},
 		/** `footer.changed` for `footer_changed` subscribers: one check per FOOTER_POLL_MS in `tui` mode. */
 		startFooterPoll() {
-			if (!state.footerWatched || state.footerTimer || state.dead || safe(() => state.ctx?.mode) !== "tui") return;
+			const idle = !state.footerWatched || state.footerTimer || state.dead || state.stopping;
+			if (idle || safe(() => state.ctx?.mode) !== "tui") return;
 			let last = JSON.stringify(footerJson());
 			state.footerTimer = setInterval(() => {
 				const footer = footerJson();

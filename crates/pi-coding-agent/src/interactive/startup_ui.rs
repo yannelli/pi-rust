@@ -43,8 +43,15 @@ pub async fn show_startup_selector(
     .await
 }
 
-/// A one-line input on the main screen of `terminal` (upstream `showStartupInput`).
-pub async fn show_startup_input(terminal: TerminalRef, settings: &SettingsManager, title: &str) -> Option<String> {
+/// A one-line input on the main screen of `terminal` (upstream `showStartupInput`). `prefill` is
+/// the initial text; `secret` shows `*` for each character.
+pub async fn show_startup_input(
+    terminal: TerminalRef,
+    settings: &SettingsManager,
+    title: &str,
+    prefill: Option<String>,
+    secret: bool,
+) -> Option<String> {
     let title = title.to_string();
     show_startup_dialog(terminal, settings, move |tui, answer| {
         let (submitted, cancelled) = (answer.clone(), answer);
@@ -53,7 +60,12 @@ pub async fn show_startup_input(terminal: TerminalRef, settings: &SettingsManage
             None,
             move |value| *submitted.borrow_mut() = Some(Some(value.to_string())),
             move || *cancelled.borrow_mut() = Some(None),
-            ExtensionInputOptions { tui: Some(tui), ..ExtensionInputOptions::default() },
+            ExtensionInputOptions {
+                tui: Some(tui),
+                initial_value: prefill,
+                secret,
+                ..ExtensionInputOptions::default()
+            },
         ))
     })
     .await
@@ -144,7 +156,7 @@ pub async fn prompt_project_trust_with(
 /// A dialog a `project_trust` handler asked for before the session exists.
 enum StartupRequest {
     Select { title: String, options: Vec<String>, reply: oneshot::Sender<Option<String>> },
-    Input { title: String, reply: oneshot::Sender<Option<String>> },
+    Input { title: String, prefill: Option<String>, secret: bool, reply: oneshot::Sender<Option<String>> },
 }
 
 /// `ctx.ui` of `project_trust` handlers at startup (upstream `createProjectTrustContext`):
@@ -173,9 +185,9 @@ impl ExtensionUi for StartupExtensionUi {
         self.ask(|reply| StartupRequest::Select { title, options, reply }).await.as_deref() == Some("Yes")
     }
 
-    async fn input(&self, title: &str, _placeholder: Option<&str>, _opts: DialogOptions) -> Option<String> {
-        let title = title.to_string();
-        self.ask(|reply| StartupRequest::Input { title, reply }).await
+    async fn input(&self, title: &str, _placeholder: Option<&str>, opts: DialogOptions) -> Option<String> {
+        let (title, prefill, secret) = (title.to_string(), opts.prefill, opts.secret);
+        self.ask(|reply| StartupRequest::Input { title, prefill, secret, reply }).await
     }
 
     async fn editor(&self, _title: &str, _prefill: Option<&str>, _opts: DialogOptions) -> Option<String> {
@@ -210,8 +222,9 @@ pub async fn run_with_startup_ui<T, Fut: Future<Output = T>>(
                 StartupRequest::Select { title, options, reply } => {
                     let _ = reply.send(show_startup_selector(terminal.clone(), settings, &title, options).await);
                 }
-                StartupRequest::Input { title, reply } => {
-                    let _ = reply.send(show_startup_input(terminal.clone(), settings, &title).await);
+                StartupRequest::Input { title, prefill, secret, reply } => {
+                    let answer = show_startup_input(terminal.clone(), settings, &title, prefill, secret).await;
+                    let _ = reply.send(answer);
                 }
             },
         }
@@ -236,4 +249,45 @@ pub async fn startup_project_trust(
     let override_ = options.project_trust_override;
     let trusted = prompt_project_trust_with(terminal, cwd, &options.agent_dir, override_, decision, settings).await;
     (trusted, diagnostics)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use pi_tui::testing::VirtualTerminal;
+
+    use super::*;
+    use crate::theme::tests::global_state;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn startup_input_masks_secret_text_and_keeps_prefill() {
+        let _theme = global_state();
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let dir = tempfile::tempdir().unwrap();
+                let settings =
+                    SettingsManager::create(dir.path(), dir.path(), SettingsOptions { project_trusted: false });
+                let terminal = VirtualTerminal::shared(80, 24);
+                let input = terminal.clone();
+                tokio::task::spawn_local(async move {
+                    for key in ["\x1b[F", "Z", "\r"] {
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                        input.borrow().send_input(key);
+                    }
+                });
+                let answer = run_with_startup_ui(terminal.clone(), &settings, |ui| async move {
+                    let opts =
+                        DialogOptions { prefill: Some("hunter".into()), secret: true, ..DialogOptions::default() };
+                    ui.input("Token", None, opts).await
+                })
+                .await;
+                assert_eq!(answer.as_deref(), Some("hunterZ"));
+                let writes = terminal.borrow().writes();
+                assert!(writes.contains("Token") && writes.contains("******"), "{writes}");
+                assert!(!writes.contains("hunter"), "{writes}");
+            })
+            .await;
+    }
 }

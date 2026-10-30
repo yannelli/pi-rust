@@ -17,6 +17,7 @@ use pi_tui::{AutocompleteItem, Component};
 use serde_json::{Value, json};
 
 use crate::harness::{Harness, Setup, eventually, harness};
+use crate::http_mock::{Reply, Server};
 
 #[derive(Default)]
 struct NativeUi {
@@ -24,6 +25,7 @@ struct NativeUi {
     answers: Mutex<Vec<String>>,
     widgets: Mutex<Vec<(String, ComponentFactory)>>,
     git_branch: Mutex<Value>,
+    footer_reads: std::sync::atomic::AtomicUsize,
     autocomplete: Mutex<Vec<ComponentFactory>>,
 }
 
@@ -106,6 +108,7 @@ impl ExtensionUi for NativeUi {
     }
 
     fn footer_data(&self, kind: &str) -> Value {
+        self.footer_reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if kind == "gitBranch" { self.git_branch.lock().unwrap().clone() } else { Value::Null }
     }
 
@@ -125,7 +128,7 @@ impl ExtensionUi for NativeUi {
         let lines = tokio::task::block_in_place(|| {
             let first = component.render(30);
             let resized = render_until(&mut component, 30, "width 30");
-            component.handle_input("q");
+            component.handle_input("\x1b[A");
             [first, resized].concat()
         });
         self.push(format!("panel: {}", lines.join("|")));
@@ -133,12 +136,16 @@ impl ExtensionUi for NativeUi {
     }
 }
 
-fn package_json() -> String {
+fn package_json(env: &[(&str, &str)]) -> String {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/native/fixture.mjs");
+    let mut vars = json!({"PI_JS_FORK": "1"});
+    for (name, value) in env {
+        vars[*name] = json!(value);
+    }
     json!({"name": "native-fixture", "pi": {"native": [{
         "command": env!("CARGO_BIN_EXE_pi"),
         "args": [fixture.display().to_string()],
-        "env": {"PI_JS_FORK": "1"},
+        "env": vars,
     }]}})
     .to_string()
 }
@@ -156,7 +163,18 @@ async fn native_with(
     ui: Arc<dyn ExtensionUi>,
     observer: bool,
 ) -> Harness {
-    let mut files = vec![("native-pkg/package.json", package_json())];
+    native_in(Setup { responses, ..Setup::default() }, &[], mode, ui, observer).await
+}
+
+/// The fixture loaded into `setup`, with `env` set for the child process.
+async fn native_in(
+    setup: Setup,
+    env: &[(&str, &str)],
+    mode: ExtensionMode,
+    ui: Arc<dyn ExtensionUi>,
+    observer: bool,
+) -> Harness {
+    let mut files = vec![("native-pkg/package.json", package_json(env))];
     let mut load = vec!["native-pkg"];
     if observer {
         files.push(("observer.js", OBSERVER.to_string()));
@@ -167,9 +185,8 @@ async fn native_with(
         load,
         from_settings: true,
         flags: vec![("native-flag", json!("on"))],
-        responses,
         bind: false,
-        ..Setup::default()
+        ..setup
     })
     .await;
     assert!(h.errors().is_empty(), "{:?}", h.errors());
@@ -239,7 +256,7 @@ async fn commands_reach_dialogs_panels_and_the_model() {
     h.session.prompt("/native-llm", Vec::new()).await.unwrap();
     let data = |custom_type: &str| entry_data(&h, custom_type);
     assert_eq!(data("native-answer"), Some(json!({"answer": "blue"})));
-    assert_eq!(data("native-panel"), Some(json!({"result": "closed by q/q"})));
+    assert_eq!(data("native-panel"), Some(json!({"result": "closed by \u{1b}[A/up"})));
     assert_eq!(data("native-llm"), Some(json!({"text": "llm answer"})));
     let calls = ui.calls();
     assert!(calls.contains(&"select: Pick one [red, blue]".to_string()), "{calls:?}");
@@ -353,6 +370,8 @@ async fn model_find_returns_the_snapshot_model_shape() {
     assert_eq!(data["found"]["baseUrl"], json!("http://unused"));
     assert!(data["found"].get("headers").is_none() && data["found"].get("apiKey").is_none(), "{data}");
     assert_eq!(data["missing"], Value::Null);
+    assert_eq!(data["noId"], json!({"result": null}), "{data}");
+    assert_eq!(data["noProvider"], json!({"result": null}), "{data}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -402,4 +421,74 @@ async fn merged_autocomplete_adds_pi_suggestions_after_the_extension_items() {
     let values: Vec<&str> = suggestions.items.iter().map(|item| item.value.as_str()).collect();
     assert_eq!(values, ["@native-one", "@native-two", "@pi-own"]);
     assert_eq!(suggestions.prefix, "@na");
+}
+
+fn footer_reads(ui: &NativeUi) -> usize {
+    ui.footer_reads.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Whether `footer_data` is read within 700 ms (the poll reads it every 250 ms).
+async fn footer_polled(ui: &NativeUi) -> bool {
+    let before = footer_reads(ui);
+    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+    footer_reads(ui) != before
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_footer_poll_needs_a_subscriber_and_stops_on_shutdown() {
+    let ui = Arc::new(NativeUi::default());
+    let setup = Setup::default();
+    let h = native_in(setup, &[("NATIVE_FOOTER", "off")], ExtensionMode::Tui, ui.clone(), false).await;
+    eventually(|| ui.widget("native").is_some()).await;
+    assert!(!footer_polled(&ui).await, "the footer poll ran without a footer_changed subscriber");
+    drop(h);
+
+    let ui = Arc::new(NativeUi::default());
+    let lingering = [("NATIVE_EXIT_DELAY_MS", "1500")];
+    let h = native_in(Setup::default(), &lingering, ExtensionMode::Tui, ui.clone(), false).await;
+    eventually(|| ui.widget("native").is_some()).await;
+    assert!(footer_polled(&ui).await, "the footer poll did not run for a subscriber");
+    h.runner.emit(json!({"type": "session_shutdown", "reason": "quit"})).await;
+    let runner = h.runner.clone();
+    let late = tokio::spawn(async move { runner.emit(json!({"type": "session_start", "reason": "startup"})).await });
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert!(!footer_polled(&ui).await, "the footer poll ran after shutdown");
+    late.await.unwrap();
+}
+
+const STREAM: &str = concat!(
+    "data: {\"id\":\"r1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"mock answer\"},\"finish_reason\":null}]}\n\n",
+    "data: {\"id\":\"r1\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+    "data: [DONE]\n\n",
+);
+
+#[tokio::test(flavor = "multi_thread")]
+async fn llm_complete_headers_replace_pi_headers_without_case() {
+    let server =
+        Server::start(|_| Reply { status: 200, content_type: "text/event-stream", body: STREAM.as_bytes().to_vec() })
+            .await;
+    let models = json!({"providers": {"mock": {"baseUrl": format!("{}/v1", server.url), "api": "openai-completions",
+        "apiKey": "test-key", "headers": {"x-shared": "from pi", "x-pi": "pi"},
+        "models": [{"id": "m1", "contextWindow": 1000, "maxTokens": 100}]}}});
+    let setup = Setup {
+        models: Some(models),
+        settings: json!({"defaultProvider": "mock", "defaultModel": "m1"}),
+        ..Setup::default()
+    };
+    let ui = Arc::new(NativeUi::default());
+    let h = native_in(setup, &[], ExtensionMode::Tui, ui, false).await;
+    h.session.prompt("/native-llm-headers", Vec::new()).await.unwrap();
+    let data = entry_data(&h, "native-llm-headers").unwrap();
+    assert_eq!(data["text"], json!("mock answer"), "{data}");
+    for key in ["invalid", "list"] {
+        let error = data[key]["error"].as_str().unwrap_or_default();
+        assert!(error.contains("headers must be an object of string values"), "{data}");
+    }
+    let requests = server.requests();
+    assert_eq!(requests.len(), 1, "invalid headers reached the server");
+    let request = &requests[0];
+    assert_eq!(request.header("x-shared"), Some("from extension"));
+    assert_eq!(request.header("authorization"), Some("Bearer extension"));
+    assert_eq!(request.header("x-pi"), Some("pi"));
+    assert_eq!(request.header("x-extra"), Some("1"));
 }

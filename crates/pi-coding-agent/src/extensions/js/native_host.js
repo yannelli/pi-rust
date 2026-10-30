@@ -95,13 +95,29 @@ function findModel(ctx, name) {
 	return model;
 }
 
+/** `extra` over `base`; a name in `extra` replaces every `base` name equal to it without case. */
+function mergeHeaders(base, extra) {
+	if (extra === undefined || extra === null) return { ...base };
+	if (!isObject(extra) || Object.values(extra).some((value) => typeof value !== "string")) {
+		throw rpcError(-32602, "headers must be an object of string values");
+	}
+	const headers = { ...base };
+	for (const [name, value] of Object.entries(extra)) {
+		const lower = name.toLowerCase();
+		for (const key of Object.keys(headers)) if (key.toLowerCase() === lower) delete headers[key];
+		headers[name] = value;
+	}
+	return headers;
+}
+
 async function llmComplete(ctx, params, signal) {
+	mergeHeaders({}, params.headers);
 	const model = params.model ? findModel(ctx, params.model) : ctx.model;
 	if (!model) throw rpcError(-32602, "No model is selected");
 	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 	if (!auth?.ok) throw new Error(auth?.error ?? `No credentials for ${model.provider}`);
 	const messages = params.messages ?? [{ role: "user", content: String(params.prompt ?? ""), timestamp: Date.now() }];
-	const headers = { ...(auth.headers ?? {}), ...(params.headers ?? {}) };
+	const headers = mergeHeaders(auth.headers ?? {}, params.headers);
 	const options = { apiKey: auth.apiKey, headers, signal };
 	for (const key of ["maxTokens", "temperature", "reasoning"]) if (params[key] !== undefined) options[key] = params[key];
 	const message = await complete(model, { systemPrompt: params.systemPrompt, messages }, options);
@@ -200,7 +216,10 @@ export function hostMethods(state) {
 		"session.setName": (p) => (pi.setSessionName(p.name), done()),
 		"session.getName": () => toJson(pi.getSessionName()),
 		"model.get": () => modelJson(ctx().model),
-		"model.find": (p) => modelJson(ctx().modelRegistry.find(p.provider, p.id)),
+		"model.find": (p) => {
+			if (typeof p.provider !== "string" || typeof p.id !== "string") return null;
+			return modelJson(ctx().modelRegistry.find(p.provider, p.id));
+		},
 		"model.set": async (p) => {
 			const model = ctx().modelRegistry.find(p.provider, p.id);
 			return model ? Boolean(await pi.setModel(model)) : false;
