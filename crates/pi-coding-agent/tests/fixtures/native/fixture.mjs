@@ -34,7 +34,7 @@ const registrations = {
 	],
 	commands: [
 		"native-ask", "native-panel", "native-llm", "native-crash", "native-write", "native-probe",
-		"native-ctx", "native-find", "native-input", "native-exec", "native-settle", "native-llm-headers",
+		"native-ctx", "native-find", "native-input", "native-exec", "native-settle", "native-llm-headers", "native-log",
 	].map((name) => ({ name })),
 	flags: [{ name: "native-flag", type: "string", default: "off" }],
 	events: [
@@ -121,6 +121,8 @@ async function runCommand({ name, ctx }) {
 	} else if (name === "native-exec") {
 		const { stdout, code } = await request("exec", { command: "cat", stdin: "piped text" });
 		await append("native-exec", { stdout, code });
+	} else if (name === "native-log") {
+		process.stderr.write("warn: careful\nerror: broke\nplain line\n");
 	} else if (name === "native-settle") {
 		settleArmed = true;
 	} else if (name === "native-ask") {

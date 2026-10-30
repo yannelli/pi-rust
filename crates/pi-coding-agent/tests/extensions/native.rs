@@ -293,6 +293,19 @@ async fn a_crashed_child_is_reported_once_and_its_tools_deactivate() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn stderr_lines_become_notifications_in_the_tui() {
+    let (h, ui) = native(Vec::new()).await;
+    h.session.prompt("/native-log", Vec::new()).await.unwrap();
+    let path = "[native:native-fixture/fixture.mjs]";
+    let expected = [
+        format!("notify(warning): {path} careful"),
+        format!("notify(error): {path} broke"),
+        format!("notify(warning): {path} plain line"),
+    ];
+    eventually(|| expected.iter().all(|line| ui.calls().contains(line))).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn patches_reach_tool_results_messages_and_context() {
     let h = native_with(
         vec![
