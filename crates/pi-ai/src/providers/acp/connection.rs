@@ -11,8 +11,6 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWrite
 use tokio::sync::{mpsc, oneshot};
 
 const MAX_FRAME_BYTES: usize = 32 * 1024 * 1024;
-/// Chromium writes this line to stdout while the server runs the Google login.
-const BROWSER_NOTICE: &str = "Opening in existing browser session.";
 
 /// A notification or a request from the agent. `id` is set for requests, which need a reply.
 #[derive(Clone, Debug, PartialEq)]
@@ -37,6 +35,7 @@ impl std::fmt::Display for RpcError {
 type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, RpcError>>>>>;
 
 pub(crate) struct Connection {
+    label: &'static str,
     writer: mpsc::UnboundedSender<String>,
     pending: Pending,
     next_id: AtomicU64,
@@ -45,7 +44,8 @@ pub(crate) struct Connection {
 }
 
 impl Connection {
-    pub fn new<R, W>(reader: R, writer: W) -> Arc<Self>
+    /// `label` names the agent in errors, for example "Antigravity ACP".
+    pub fn new<R, W>(label: &'static str, reader: R, writer: W) -> Arc<Self>
     where
         R: AsyncRead + Unpin + Send + 'static,
         W: AsyncWrite + Unpin + Send + 'static,
@@ -65,7 +65,7 @@ impl Connection {
         });
         let (reader_pending, reader_closed) = (pending.clone(), closed.clone());
         tokio::spawn(async move {
-            let reason = read_loop(reader, &reader_pending, &events).await;
+            let reason = read_loop(label, reader, &reader_pending, &events).await;
             *reader_closed.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(reason.clone());
             let senders: Vec<_> =
                 reader_pending.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).drain().collect();
@@ -74,6 +74,7 @@ impl Connection {
             }
         });
         Arc::new(Self {
+            label,
             writer: out,
             pending,
             next_id: AtomicU64::new(0),
@@ -101,10 +102,10 @@ impl Connection {
         self.send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
         match tokio::time::timeout(timeout, receiver).await {
             Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(RpcError { code: -32099, message: "Antigravity ACP connection closed".into() }),
+            Ok(Err(_)) => Err(RpcError { code: -32099, message: format!("{} connection closed", self.label) }),
             Err(_) => {
                 self.pending.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).remove(&id);
-                Err(RpcError { code: -32098, message: format!("Antigravity ACP {method} timed out") })
+                Err(RpcError { code: -32098, message: format!("{} {method} timed out", self.label) })
             }
         }
     }
@@ -123,6 +124,7 @@ impl Connection {
 }
 
 async fn read_loop<R: AsyncRead + Unpin>(
+    label: &str,
     reader: R,
     pending: &Pending,
     events: &mpsc::UnboundedSender<Incoming>,
@@ -133,21 +135,19 @@ async fn read_loop<R: AsyncRead + Unpin>(
         line.clear();
         let mut limited = (&mut reader).take(MAX_FRAME_BYTES as u64 + 1);
         match limited.read_until(b'\n', &mut line).await {
-            Ok(0) => return "Antigravity ACP server exited".into(),
-            Ok(_) if line.len() > MAX_FRAME_BYTES => return "Antigravity ACP frame exceeds 32 MiB".into(),
+            Ok(0) => return format!("{label} exited"),
+            Ok(_) if line.len() > MAX_FRAME_BYTES => return format!("{label} frame exceeds 32 MiB"),
             Ok(_) => {}
-            Err(error) => return format!("Antigravity ACP read failed: {error}"),
+            Err(error) => return format!("{label} read failed: {error}"),
         }
         let text = String::from_utf8_lossy(&line);
         let text = text.trim_end_matches(['\n', '\r']).trim();
-        if text.is_empty() || text == BROWSER_NOTICE {
+        // Agents and their tools print log lines to stdout, for example Chromium during a login.
+        if !text.starts_with('{') {
             continue;
         }
         let Ok(Value::Object(message)) = serde_json::from_str::<Value>(text) else {
-            return format!(
-                "Antigravity ACP sent a line that is not JSON-RPC: {}",
-                text.chars().take(200).collect::<String>()
-            );
+            return format!("{label} sent a line that is not JSON-RPC: {}", text.chars().take(200).collect::<String>());
         };
         let id = message.get("id").cloned().filter(|id| !id.is_null());
         match (message.get("method").and_then(Value::as_str), id) {
@@ -164,7 +164,7 @@ async fn read_loop<R: AsyncRead + Unpin>(
                 let result = match message.get("error") {
                     Some(error) => Err(RpcError {
                         code: error["code"].as_i64().unwrap_or(-32603),
-                        message: error["message"].as_str().unwrap_or("Antigravity ACP error").to_string(),
+                        message: error["message"].as_str().unwrap_or("ACP agent error").to_string(),
                     }),
                     None => Ok(message.get("result").cloned().unwrap_or(Value::Null)),
                 };
@@ -183,13 +183,13 @@ mod tests {
     async fn requests_resolve_and_agent_messages_arrive() {
         let (client, agent) = tokio::io::duplex(1 << 16);
         let (client_read, client_write) = tokio::io::split(client);
-        let connection = Connection::new(client_read, client_write);
+        let connection = Connection::new("Test ACP", client_read, client_write);
         let (agent_read, mut agent_write) = tokio::io::split(agent);
         tokio::spawn(async move {
             let mut lines = BufReader::new(agent_read).lines();
             let request: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
             assert_eq!(request["method"], "initialize");
-            let notice = format!("{BROWSER_NOTICE}\n");
+            let notice = "Opening in existing browser session.\n";
             let update = json!({"jsonrpc": "2.0", "method": "session/update", "params": {"x": 1}});
             let reply = json!({"jsonrpc": "2.0", "id": request["id"], "result": {"protocolVersion": 1}});
             agent_write.write_all(format!("{notice}{update}\n{reply}\n").as_bytes()).await.unwrap();

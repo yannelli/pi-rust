@@ -2,10 +2,9 @@
 //! user installs and logs in to. pi runs its own tools: the agent calls them over a loopback MCP bridge.
 
 mod bridge;
-mod connection;
 mod install;
 mod process;
-mod prompt;
+pub(crate) mod prompt;
 mod runtime;
 #[cfg(test)]
 mod tests;
@@ -17,8 +16,8 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use self::bridge::{BridgeTool, error_result};
-use self::connection::{Connection, Incoming};
 use self::runtime::{Runtime, rpc, slot};
+use crate::providers::acp::connection::{Connection, Incoming};
 use crate::providers::common::short_hash;
 use crate::registry::{ApiProvider, StreamOptions};
 use crate::simple_options::{clamp_thinking_level, provider_thinking_value};
@@ -36,6 +35,7 @@ pub(crate) fn installed() -> bool {
 pub use self::runtime::{PassthroughMcpServer, set_passthrough_mcp_servers};
 
 pub const API: &str = "antigravity-acp";
+pub(crate) const LABEL: &str = "Antigravity ACP server";
 /// A prompt runs as long as the agent works; pi's cancel ends it sooner.
 const PROMPT_TIMEOUT: Duration = Duration::from_secs(6 * 3600);
 /// Tool calls that arrive this soon after another one join the same pi turn.

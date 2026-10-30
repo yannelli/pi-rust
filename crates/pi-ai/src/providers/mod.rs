@@ -1,5 +1,6 @@
 //! Built-in wire protocols.
 
+pub mod acp;
 pub mod anthropic;
 pub mod antigravity_acp;
 pub mod aws;
