@@ -93,7 +93,8 @@ impl SourceLookup {
     /// recorded directory containing the path.
     pub fn find(&self, path: &Path, extra: &[(PathBuf, SourceInfo)]) -> Option<SourceInfo> {
         let display = path.display().to_string();
-        if is_synthetic_path(&display) {
+        let native = display.starts_with(super::source_info::NATIVE_PATH_PREFIX);
+        if is_synthetic_path(&display) && !native {
             return Some(self.default_for(path));
         }
         let normalized = normalize(path);

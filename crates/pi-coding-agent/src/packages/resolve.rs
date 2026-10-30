@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::bail;
 
 use super::glob::expand_package_glob;
-use super::manifest::read_pi_manifest;
+use super::manifest::{NATIVE_MANIFEST_ENTRY, native_commands, read_pi_manifest};
 use super::npm::installed_npm_matches;
 use super::settings_ops::package_source_text;
 use super::source::{LocalSource, ParsedSource, parse_source};
@@ -57,7 +57,19 @@ fn collect_files_from_manifest_entries(entries: &[String], root: &Path, kind: Re
             paths.push(normalize(&root.join(entry)));
         }
     }
-    collect_files_from_paths(&paths, kind)
+    let files = collect_files_from_paths(&paths, kind);
+    if kind != ResourceType::Extensions {
+        return files;
+    }
+    files.into_iter().flat_map(expand_native).collect()
+}
+
+/// A package's `package.json` extension entry becomes one `native:` path per `pi.native` entry.
+fn expand_native(file: PathBuf) -> Vec<PathBuf> {
+    if file.file_name().is_none_or(|name| name != NATIVE_MANIFEST_ENTRY) {
+        return vec![file];
+    }
+    native_commands(&file).into_iter().map(|command| PathBuf::from(command.extension_path)).collect()
 }
 
 /// Files a package offers for `kind` after its own manifest overrides.

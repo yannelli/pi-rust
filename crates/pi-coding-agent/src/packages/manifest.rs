@@ -1,6 +1,7 @@
 //! The `pi` key of a package's `package.json` (upstream `core/pi-manifest.ts`), gallery
 //! metadata, and the host-provided dependency rules of `docs/packages.md`.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
@@ -10,6 +11,7 @@ use crate::resources::{ResolvedResource, ResourceType};
 /// Resource entries a package declares under `pi` in `package.json`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PiManifest {
+    /// `pi.extensions`, plus [`NATIVE_MANIFEST_ENTRY`] when the package has `pi.native` entries.
     pub extensions: Option<Vec<String>>,
     pub skills: Option<Vec<String>>,
     pub prompts: Option<Vec<String>>,
@@ -64,14 +66,86 @@ pub fn read_pi_manifest(package_json: &Path) -> Option<PiManifest> {
     let package = read_package_json(package_json)?;
     let pi = package.as_object()?.get("pi")?.as_object()?;
     let text = |key: &str| pi.get(key).and_then(Value::as_str).map(String::from);
+    let mut extensions = string_list(pi.get("extensions"));
+    if !native_entries(&package).is_empty() {
+        extensions.get_or_insert_with(Vec::new).push(NATIVE_MANIFEST_ENTRY.into());
+    }
     Some(PiManifest {
-        extensions: string_list(pi.get("extensions")),
+        extensions,
         skills: string_list(pi.get("skills")),
         prompts: string_list(pi.get("prompts")),
         themes: string_list(pi.get("themes")),
         image: text("image"),
         video: text("video"),
     })
+}
+
+/// The extension entry that stands for a package's `pi.native` programs.
+pub const NATIVE_MANIFEST_ENTRY: &str = "package.json";
+
+/// One `pi.native` entry of a `package.json`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NativeEntry {
+    pub command: String,
+    pub args: Vec<String>,
+    pub env: BTreeMap<String, String>,
+}
+
+/// The `pi.native` entries of a parsed `package.json`; entries without `command` are skipped.
+pub fn native_entries(package: &Value) -> Vec<NativeEntry> {
+    let Some(entries) = package.pointer("/pi/native").and_then(Value::as_array) else { return Vec::new() };
+    entries
+        .iter()
+        .filter_map(|entry| {
+            let command = entry.get("command")?.as_str()?.to_string();
+            let args = string_list(entry.get("args")).unwrap_or_default();
+            let env = entry.get("env").and_then(Value::as_object).map(|env| {
+                env.iter().filter_map(|(key, value)| Some((key.clone(), value.as_str()?.to_string()))).collect()
+            });
+            Some(NativeEntry { command, args, env: env.unwrap_or_default() })
+        })
+        .collect()
+}
+
+/// A native entry resolved against its package: the program to start and the extension path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeCommand {
+    /// `native:<package name>/<args[0] or file name>`.
+    pub extension_path: String,
+    pub program: PathBuf,
+    pub args: Vec<String>,
+    pub env: BTreeMap<String, String>,
+}
+
+/// The program of `command`: relative paths start at `dir`; Windows programs get `.exe`.
+pub fn native_program(dir: &Path, command: &str) -> PathBuf {
+    let path = dir.join(command);
+    if cfg!(windows) && path.extension().is_none() { path.with_extension("exe") } else { path }
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default()
+}
+
+/// The native programs of the `package.json` at `package_json`.
+pub fn native_commands(package_json: &Path) -> Vec<NativeCommand> {
+    let Some(package) = read_package_json(package_json) else { return Vec::new() };
+    let dir = package_json.parent().unwrap_or(Path::new("."));
+    let name = package.get("name").and_then(Value::as_str).map(String::from).unwrap_or_else(|| file_name(dir));
+    native_entries(&package)
+        .into_iter()
+        .map(|entry| {
+            let program = native_program(dir, &entry.command);
+            let stem = program.file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default();
+            let label = entry.args.first().map(|arg| file_name(Path::new(arg))).filter(|arg| !arg.is_empty());
+            NativeCommand {
+                extension_path: format!("native:{name}/{}", label.unwrap_or(stem)),
+                program,
+                args: entry.args,
+                env: entry.env,
+            }
+        })
+        .collect()
 }
 
 /// The `version` of the `package.json` in `dir`.

@@ -107,6 +107,8 @@ fn display_name(resource: &ResolvedResource, kind: ResourceType) -> String {
     let parent = name(path.parent()).unwrap_or_default();
     if resource.metadata.source == "builtin" {
         path.display().to_string().trim_start_matches(BUILTIN_PATH_PREFIX).to_string()
+    } else if path.to_string_lossy().starts_with(crate::resources::source_info::NATIVE_PATH_PREFIX) {
+        path.display().to_string()
     } else if kind == ResourceType::Extensions && parent != "extensions" {
         format!("{parent}/{file}")
     } else if kind == ResourceType::Skills && file == "SKILL.md" {
