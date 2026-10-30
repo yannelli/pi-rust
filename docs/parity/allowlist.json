@@ -70,6 +70,10 @@
     {
       "item": "extensionRuntime",
       "reason": "pi-rust extension: \"quickjs\" (default), \"node\", or \"auto\" selects the extension engine. Upstream pi always runs extensions on Node."
+    },
+    {
+      "item": "acpAgents",
+      "reason": "pi-rust extension: ACP agents (Kiro CLI, Amp, ACP registry agents) that pi runs as providers with the acp API. See crates/pi-coding-agent/docs/acp-providers.md."
     }
   ],
   "slashCommands": [
@@ -108,6 +112,10 @@
     {
       "item": "extensions",
       "reason": "pi-rust extension: /extensions browser for installed extensions and the marketplace"
+    },
+    {
+      "item": "acp",
+      "reason": "pi-rust extension: browser that installs ACP agents from the ACP registry and logs in, enables, disables, removes, and sets the default; /acp mode selects agent session modes."
     }
   ],
   "tools": [],

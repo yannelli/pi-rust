@@ -83,7 +83,7 @@ Sources: [amp-acp](https://github.com/tao12345666333/amp-acp) `src/server.ts`, t
 ## Use an ACP agent
 
 1. Run `/acp`. The **Registry** tab lists the agents of the registry, plus Kiro CLI (V3) and Amp.
-2. Select an agent and press Enter to install it. pi asks for the scope: global (`~/.pi/agent/settings.json`) or project (`.pi/settings.json`).
+2. Select an agent and press Enter to install it. pi adds it to the global `~/.pi/agent/settings.json`. To use it in one project only, move the entry to `.pi/settings.json`.
 3. In the **Installed** tab, select the agent and choose **Log in** if the agent needs a login. For Kiro, install Kiro CLI first (`curl -fsSL https://cli.kiro.dev/install | bash`), then log in with `kiro-cli login` or the **Log in** action. Kiro CLI exits before ACP starts when it has no login, so **Log in** runs `kiro-cli login` in the terminal.
 4. Select the model `<provider>/default` with `/model`, or choose **Set as default**. After the first prompt, `/model` also lists the models that the agent advertised.
 5. Run `/acp mode` to change the mode or another setting of the agent session.
@@ -116,6 +116,7 @@ The agent edits files and runs commands with its own tools. pi shows its permiss
 | `name` | The name in `/model`, `/acp`, and dialogs. |
 | `command`, `args`, `env` | The command that starts the agent in ACP mode over stdio. |
 | `enabled` | `false` removes the provider from `/model` and keeps the entry. |
+| `loginCommand` | The login program for agents that exit before ACP starts without a login, for example `["kiro-cli", "login"]`. **Log in** runs it when the agent does not start. |
 | `version`, `description`, `source`, `installDir` | Set by the install. `installDir` is removed with the entry. |
 
 `PI_ACP_REGISTRY_URL` replaces the registry URL.
