@@ -136,7 +136,10 @@ async fn drives_sessions_over_acp_with_the_faux_provider() {
         json!([{"type": "diff", "path": "notes.txt", "oldText": "first line\nhello\n", "newText": "first line\ngoodbye\n"}])
     );
     assert!(updates.iter().any(|update| update["sessionUpdate"] == "usage_update"));
-    let title = updates.iter().find(|update| update["title"].is_string()).expect("auto title");
+    let title = updates
+        .iter()
+        .find(|update| update["sessionUpdate"] == "session_info_update" && update["title"].is_string())
+        .expect("auto title");
     assert_eq!(title["title"], "Change hello to goodbye");
 
     let hang = json!({"sessionId": session_id, "prompt": [{"type": "text", "text": "Wait forever"}]});

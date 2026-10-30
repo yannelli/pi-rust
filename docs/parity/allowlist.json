@@ -20,12 +20,16 @@
     {
       "item": "--output-retries",
       "reason": "pi-rust extension: structured output"
+    },
+    {
+      "item": "--extension-runtime",
+      "reason": "pi-rust extension: selects the extension engine (QuickJS by default, or Node 22+). Upstream pi always runs extensions on Node."
     }
   ],
   "settings": [
     {
       "item": "disabledProviders",
-      "reason": "pi-rust extension: global-only provider exclusions across model selectors and registry refreshes; credentials are preserved."
+      "reason": "pi-rust extension: global-only provider exclusions across model selectors and registry refreshes; credentials are preserved. The TUI /settings menu edits it and applies the change immediately."
     },
     {
       "item": "theme",
@@ -57,22 +61,18 @@
     },
     {
       "item": "statusLine",
-      "reason": "pi-rust extension: custom status line with editable modules, palettes, alignment, and context headroom"
+      "reason": "Legacy pi-rust key: the marketplace:statusline extension reads it; pi-rust offers to install that extension when it is set"
     },
     {
       "item": "terminal.iterm2",
-      "reason": "pi-rust extension: iTerm2 integration"
+      "reason": "Legacy pi-rust key: the marketplace:iterm2 extension reads it; pi-rust offers to install that extension when it is on"
+    },
+    {
+      "item": "extensionRuntime",
+      "reason": "pi-rust extension: \"quickjs\" (default), \"node\", or \"auto\" selects the extension engine. Upstream pi always runs extensions on Node."
     }
   ],
   "slashCommands": [
-    {
-      "item": "terminal-setup",
-      "reason": "pi-rust extension: iTerm2 integration (after Claude Code's /terminal-setup)"
-    },
-    {
-      "item": "statusline",
-      "reason": "pi-rust extension: custom status line and TUI editor"
-    },
     {
       "item": "mcp",
       "reason": "Upstream registers /mcp from its built-in mcp extension (extensions/mcp). pi-rust implements MCP natively and lists /mcp as a built-in command."
@@ -104,11 +104,28 @@
     {
       "item": "retry",
       "reason": "pi-rust extension: /retry"
+    },
+    {
+      "item": "extensions",
+      "reason": "pi-rust extension: /extensions browser for installed extensions and the marketplace"
     }
   ],
   "tools": [],
   "models": [],
-  "extensionApi": [],
+  "extensionApi": [
+    {
+      "item": "writeTerminal",
+      "reason": "pi-rust extension: `ctx.ui.writeTerminal(data, { tmuxPassthrough })` writes raw escape sequences between frames, for the iTerm2 integration as an extension. Upstream has no such call."
+    },
+    {
+      "item": "getSessionStats",
+      "reason": "pi-rust extension: footer data `getSessionStats()` gives the token, cost, and context numbers of the built-in footer, for the status line as an extension."
+    },
+    {
+      "item": "getRunState",
+      "reason": "pi-rust extension: footer data `getRunState()` gives the program state (`idle`, `working`, `blocked`, `done`, `error`) that the iTerm2 tab color uses."
+    }
+  ],
   "nodeBuiltins": [
     {
       "item": "_http_agent",
@@ -168,6 +185,10 @@
     }
   ],
   "packages": [
+    {
+      "item": "marketplace:",
+      "reason": "pi-rust installs native Rust extensions from signed marketplace indexes and verifies archive checksums. Upstream pi has no marketplace source."
+    },
     {
       "item": "pi-client",
       "reason": "Kept as a pi-rust extra by the maintainer's choice: upstream 7472cda0d deleted the experimental server stack, while pi-rust keeps pi experimental (server, client, durable, vacation) and the old chord runtime it uses."

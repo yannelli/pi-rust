@@ -52,11 +52,15 @@ pub struct DialogOptions {
     pub timeout: Option<Duration>,
     /// Dismiss the dialog with its default value when cancelled.
     pub cancel: Option<CancellationToken>,
+    /// `input` only (pi-rust): the initial text.
+    pub prefill: Option<String>,
+    /// `input` only (pi-rust): show `*` for each character.
+    pub secret: bool,
 }
 
 impl DialogOptions {
     pub fn with_timeout(timeout: Duration) -> Self {
-        Self { timeout: Some(timeout), cancel: None }
+        Self { timeout: Some(timeout), ..Self::default() }
     }
 }
 
@@ -222,9 +226,23 @@ pub trait ExtensionUi: Send + Sync {
         (80, 24)
     }
 
-    /// Footer data for extension footers: `gitBranch`, `statuses`, or `providerCount`.
+    /// Footer data for extension footers: `gitBranch`, `statuses`, `providerCount`, and the
+    /// pi-rust `sessionStats` and `runState`.
     fn footer_data(&self, _kind: &str) -> Value {
         Value::Null
+    }
+
+    /// Call the JavaScript callback `key` of `factory`'s runner when the footer's git branch
+    /// changes (`footerData.onBranchChange`).
+    fn on_branch_change(&self, _factory: ComponentFactory, _key: u64) {}
+
+    /// Stop the `onBranchChange` listener `key` of session `target`.
+    fn off_branch_change(&self, _target: u64, _key: u64) {}
+
+    /// Write raw bytes to the terminal between frames (`ctx.ui.writeTerminal`, pi-rust only), wrapped
+    /// for tmux when `tmux_passthrough` is set and inside tmux. Returns whether this UI wrote.
+    fn write_terminal(&self, _data: &str, _tmux_passthrough: bool) -> bool {
+        false
     }
 
     /// A custom editor reports `submit`, `change`, `escape`, `ctrlD`, `pasteImage`, or `action`

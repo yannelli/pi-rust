@@ -41,12 +41,30 @@ To hide a provider from model selection, add its exact ID to `disabledProviders`
 }
 ```
 
-After you edit the file, restart pi or its ACP connection.
+You can also open `/settings` in the TUI and use **Disabled providers**. Press Enter to switch the selected provider between enabled and disabled. Type to search the list; Space also switches the provider when the search box is empty. The change applies immediately and pi saves it to the global settings file.
+
+After you edit the file manually, restart pi or its ACP connection.
 
 - pi removes the models of these providers from model selection. This applies to ACP, RPC, the TUI, CLI lists, and completions.
 - The filter stays after a catalog refresh. It also applies to custom models and extension models.
 - Project settings cannot override the filter.
 - pi keeps the credentials and the cached catalogs. To show the models again, remove the ID.
+
+## Retry settings
+
+The TUI `/settings` menu shows these items after **Cache warming**. Each change applies immediately and pi saves it to the global settings file.
+
+| Item | Setting | Default |
+| --- | --- | --- |
+| Auto-retry | `retry.enabled` | `true` |
+| Max retries | `retry.maxRetries` | `3` |
+| Retry base delay | `retry.baseDelayMs` | 2 sec |
+| Max retry wait | `retry.maxAgentDelayMs` | 1 min |
+| Provider request timeout | `retry.provider.timeoutMs` | `default`: `httpIdleTimeoutMs`, or the provider timeout when that is 0 |
+| Provider max retries | `retry.provider.maxRetries` | `default`: the provider limit |
+| Max server retry delay | `retry.provider.maxRetryDelayMs` | 1 min; `no limit` writes 0 |
+
+When you set **Provider request timeout** or **Provider max retries** to `default`, pi removes the key from `settings.json`. After you edit the file manually, restart pi.
 
 ## OpenRouter
 

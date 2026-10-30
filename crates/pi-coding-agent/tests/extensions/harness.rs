@@ -11,14 +11,16 @@ use pi_ai::providers::faux::{FauxProvider, FauxResponse};
 use pi_ai::register_api_provider;
 use pi_coding_agent::agent_session::{
     AgentSession, AgentSessionServices, CreateAgentSessionOptions, CreateServicesOptions, McpSessionOptions,
-    create_agent_session, create_agent_session_services,
+    RuntimeDiagnostic, create_agent_session, create_agent_session_services,
 };
 use pi_coding_agent::extension_ui::{DialogOptions, ExtensionMode, ExtensionUi, NotifyType, WidgetPlacement};
+use pi_coding_agent::extensions::backend::{ExtensionRuntime, RUNTIME_ENV};
 use pi_coding_agent::extensions::{
     ExtensionBindings, ExtensionError, ExtensionRunner, InlineExtension, LoadEntry, LoadOptions, load_extensions,
 };
 use pi_coding_agent::session::SessionManager;
 use pi_coding_agent::settings::SettingsManager;
+use pi_js::JsBackend;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -123,6 +125,8 @@ pub struct Setup {
     pub start_event: Option<Value>,
     /// MCP servers for the session, such as the fake server of `mcp_fake`.
     pub mcp: Option<McpSessionOptions>,
+    /// `--extension-runtime`; `None` runs on the backend `PI_EXTENSION_RUNTIME` names.
+    pub runtime: Option<ExtensionRuntime>,
 }
 
 impl Default for Setup {
@@ -140,6 +144,7 @@ impl Default for Setup {
             bind: true,
             start_event: None,
             mcp: None,
+            runtime: None,
         }
     }
 }
@@ -254,9 +259,10 @@ pub async fn harness(setup: Setup) -> Harness {
     let entries = setup.load.iter().map(|path| LoadEntry::file(extension_dir.join(path))).collect();
     let flag_values = setup.flags.iter().map(|(name, value)| (name.to_string(), value.clone())).collect();
     let entries = (!setup.from_settings).then_some(entries);
-    let options = LoadOptions { entries, inline: setup.inline.clone(), flag_values };
+    let options = LoadOptions { entries, inline: setup.inline.clone(), flag_values, runtime: setup.runtime };
     let loaded = load_extensions(&services, &options).await;
     let runner = loaded.runner.expect("extensions loaded");
+    assert_requested_backend(&runner, setup.runtime, &loaded.diagnostics);
     let errors = Arc::new(Mutex::new(Vec::new()));
     for error in runner.load_errors() {
         errors.lock().unwrap().push(ExtensionError {
@@ -296,6 +302,19 @@ pub async fn harness(setup: Setup) -> Harness {
         session.bind_extensions(bindings).await;
     }
     Harness { _root: root, cwd, agent_dir, extension_dir, provider, services, session, runner, ui, errors, events }
+}
+
+/// With `PI_EXTENSION_RUNTIME=node` (or `Setup.runtime` Node), a QuickJS fallback fails the test.
+fn assert_requested_backend(
+    runner: &ExtensionRunner,
+    runtime: Option<ExtensionRuntime>,
+    diagnostics: &[RuntimeDiagnostic],
+) {
+    let env = std::env::var(RUNTIME_ENV).ok().and_then(|value| ExtensionRuntime::parse(&value));
+    if runtime.or(env) == Some(ExtensionRuntime::Node) {
+        let messages: Vec<&str> = diagnostics.iter().map(|diagnostic| diagnostic.message.as_str()).collect();
+        assert!(matches!(runner.backend(), JsBackend::Node { .. }), "Node backend not started: {messages:?}");
+    }
 }
 
 /// An upstream example extension from the fixtures.

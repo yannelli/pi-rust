@@ -176,62 +176,16 @@ impl SettingsManager {
         Duration::try_from_secs_f64(seconds).unwrap_or(Duration::MAX)
     }
 
-    /// `statusLine` (pi-rust extension). Its `command` comes only from global settings, so a
-    /// project's settings cannot make pi run a command.
-    pub fn status_line(&self) -> Option<StatusLineSettings> {
+    /// The legacy `statusLine` key is set and not `off`; `marketplace:statusline` reads it now.
+    pub fn legacy_status_line_enabled(&self) -> bool {
         let state = self.state();
-        let mut status_line = state.merged.status_line.clone()?;
-        status_line.command = state.global_typed.status_line.as_ref().and_then(|global| global.command.clone());
-        Some(status_line)
+        state.merged.status_line.as_ref().is_some_and(|status_line| status_line.kind.as_deref() != Some("off"))
     }
 
-    pub fn global_status_line_value(&self) -> Option<Value> {
-        self.state().global.get("statusLine").cloned()
-    }
-
-    pub fn set_status_line(&self, value: Value) -> Result<(), String> {
-        serde_json::from_value::<StatusLineSettings>(value.clone()).map_err(|error| error.to_string())?;
-        if self.state().global_load_failed {
-            return Err("Fix the global settings file before saving the status line.".into());
-        }
-        let previous = self.global_status_line_value();
-        let result = self.write(SettingsScope::Global, |map| {
-            map.insert("statusLine".into(), value.clone());
-        });
-        if result.is_err() {
-            let mut state = self.state.write().unwrap_or_else(|poisoned| poisoned.into_inner());
-            match previous {
-                Some(value) => {
-                    state.global.insert("statusLine".into(), value);
-                }
-                None => {
-                    state.global.remove("statusLine");
-                }
-            }
-            drop(state);
-            self.recompute();
-        }
-        result
-    }
-
-    /// `terminal.iterm2` (pi-rust extension).
-    pub fn iterm2_features(&self) -> ITerm2Features {
-        ITerm2Features::from_value(self.state().merged.terminal.as_ref().and_then(|terminal| terminal.iterm2.as_ref()))
-    }
-
-    /// Turns on `terminal.iterm2`, preserving an existing feature selection.
-    pub fn enable_iterm2(&self) -> bool {
-        let enable = self
-            .state()
-            .global_typed
-            .terminal
-            .as_ref()
-            .and_then(|terminal| terminal.iterm2.as_ref())
-            .is_none_or(|value| value == &json!(false));
-        if enable {
-            self.set_global_nested("terminal", "iterm2", Some(json!(true)));
-        }
-        enable
+    /// The legacy `terminal.iterm2` key turns on a feature; `marketplace:iterm2` reads it now.
+    pub fn legacy_iterm2_enabled(&self) -> bool {
+        let state = self.state();
+        ITerm2Features::from_value(state.merged.terminal.as_ref().and_then(|terminal| terminal.iterm2.as_ref())).any()
     }
 
     /// `(images, trueColor, hyperlinks)` overrides; `Some(None)` for images disables them.

@@ -491,7 +491,8 @@ impl AgentSession {
         *self.extensions.runner.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
         let package_error = self.reload_resources().await;
         let flags = flags.as_object().map(|flags| flags.clone().into_iter().collect()).unwrap_or_default();
-        let options = crate::extensions::LoadOptions { flag_values: flags, inline, ..Default::default() };
+        let runtime = old.as_ref().and_then(|runner| runner.requested_runtime());
+        let options = crate::extensions::LoadOptions { flag_values: flags, inline, runtime, ..Default::default() };
         let loaded = crate::extensions::load_extensions(self.services(), &options).await;
         for diagnostic in package_error.iter().chain(&loaded.diagnostics) {
             if let Some(bindings) = &bindings

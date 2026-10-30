@@ -42,6 +42,8 @@ pub struct InputOptions {
     pub placeholder: Option<String>,
     /// Styles the placeholder text. Defaults to no styling.
     pub placeholder_style: Option<StyleFn>,
+    /// Renders `*` for each grapheme of the value (pi-rust, for secrets).
+    pub masked: bool,
 }
 
 /// Callback for [`Input::on_submit`]; receives the current value.
@@ -57,6 +59,7 @@ pub struct Input {
     prompt: String,
     placeholder: String,
     placeholder_style: StyleFn,
+    masked: bool,
     rendered_start_column: usize,
     /// Called with the value when the submit key (Enter) is pressed.
     pub on_submit: Option<InputSubmitCallback>,
@@ -107,6 +110,7 @@ impl Input {
             prompt: options.prompt.unwrap_or_else(|| "> ".to_string()),
             placeholder: options.placeholder.unwrap_or_default(),
             placeholder_style: options.placeholder_style.unwrap_or_else(|| std::rc::Rc::new(str::to_string)),
+            masked: options.masked,
             rendered_start_column: 0,
             on_submit: None,
             on_escape: None,

@@ -10,14 +10,29 @@ use super::vendor::{self, vendor_root};
 
 /// The host modules, as files under `<vendor root>/host`.
 const HOST_FILES: &[(&str, &str)] = &[
+    ("agent_core.js", include_str!("js/agent_core.js")),
+    ("unsupported.js", include_str!("js/unsupported.js")),
     ("ai.js", include_str!("js/ai.js")),
+    ("ai_extras.js", include_str!("js/ai_extras.js")),
     ("api.js", include_str!("js/api.js")),
     ("bridge.js", include_str!("js/bridge.js")),
     ("coding_agent.js", include_str!("js/coding_agent.js")),
+    ("coding_utils.js", include_str!("js/coding_utils.js")),
+    ("coding_unsupported.js", include_str!("js/coding_unsupported.js")),
+    ("compaction_utils.js", include_str!("js/compaction_utils.js")),
     ("context.js", include_str!("js/context.js")),
     ("host.js", include_str!("js/host.js")),
     ("models.js", include_str!("js/models.js")),
+    ("native.js", include_str!("js/native.js")),
+    ("native_host.js", include_str!("js/native_host.js")),
+    ("native_register.js", include_str!("js/native_register.js")),
+    ("native_rpc.js", include_str!("js/native_rpc.js")),
+    ("native_ui.js", include_str!("js/native_ui.js")),
     ("runner.js", include_str!("js/runner.js")),
+    ("sdk_session.js", include_str!("js/sdk_session.js")),
+    ("sdk_storage.js", include_str!("js/sdk_storage.js")),
+    ("sdk_resources.js", include_str!("js/sdk_resources.js")),
+    ("session_utils.js", include_str!("js/session_utils.js")),
     ("stream.js", include_str!("js/stream.js")),
     ("theme.js", include_str!("js/theme.js")),
     ("ui.js", include_str!("js/ui.js")),
@@ -65,8 +80,7 @@ pub(crate) fn virtual_modules() -> VirtualModules {
             path("host/ai.js")
         )),
     );
-    // Extensions take only types from pi-agent-core; the agent itself runs in Rust.
-    modules.insert("@earendil-works/pi-agent-core", VirtualModule::Json(serde_json::json!({})));
+    modules.insert("@earendil-works/pi-agent-core", reexport("host/agent_core.js"));
     modules.insert("@earendil-works/pi-coding-agent", reexport("host/coding_agent.js"));
     modules
 }

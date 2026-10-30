@@ -242,6 +242,7 @@ impl InteractiveMode {
         let branch = footer.git_branch();
         mirror.set_footer(branch, footer.extension_statuses(), footer.available_provider_count());
         drop(footer);
+        self.sync_run_footer(&mirror);
         self.sync_extension_overlays();
     }
 }

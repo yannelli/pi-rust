@@ -74,6 +74,21 @@ fn doctor_json_reports_a_healthy_setup() {
     assert!(help.status.success() && text(&help.stdout).contains("doctor [--json]"));
 }
 
+#[test]
+fn doctor_warns_when_a_moved_feature_extension_is_missing() {
+    let root = tempfile::tempdir().unwrap();
+    setup(root.path(), "http://127.0.0.1:9/v1");
+    let settings = json!({"statusLine": {"preset": "pills"}, "terminal": {"iterm2": false}});
+    std::fs::write(root.path().join("agent/settings.json"), settings.to_string()).unwrap();
+
+    let output = doctor(root.path(), bin_dir().into_os_string(), &["--json"]);
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let warnings: Vec<&str> = report["warnings"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+    let moved: Vec<&&str> = warnings.iter().filter(|warning| warning.contains("marketplace:")).collect();
+    assert_eq!(moved.len(), 1, "{warnings:?}");
+    assert!(moved[0].contains("`statusLine` is set") && moved[0].contains("`pi install marketplace:statusline`"));
+}
+
 #[cfg(unix)]
 #[test]
 fn doctor_reports_a_pi_earlier_on_path_and_broken_files_without_secrets() {

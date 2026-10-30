@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 
 /// Prefix of built-in extension paths, such as `builtin:mcp`.
 pub const BUILTIN_PATH_PREFIX: &str = "builtin:";
+/// Paths of `pi.native` programs: `native:<package name>/<name>`.
+pub const NATIVE_PATH_PREFIX: &str = "native:";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -102,7 +104,7 @@ pub fn synthetic_path_source(path: &str) -> Option<String> {
 }
 
 pub fn is_synthetic_path(path: &str) -> bool {
-    path.starts_with(BUILTIN_PATH_PREFIX) || path.starts_with('<')
+    path.starts_with(BUILTIN_PATH_PREFIX) || path.starts_with(NATIVE_PATH_PREFIX) || path.starts_with('<')
 }
 
 pub fn create_source_info(path: &str, metadata: &PathMetadata) -> SourceInfo {

@@ -48,6 +48,41 @@ These commits are older than the synced commit, so the report no longer lists th
 - **Byte-identical zlib output**: zlib-rs output can have different bytes from Node's zlib output. `memLevel` and `strategy` have no effect.
 - **V8-only features** depend on V8 internals that QuickJS does not have. These features are heap snapshots with nodes, `v8.queryObjects`, `inspector.open`, and full `async_hooks` coverage of timers, promises, and I/O.
 
+The Node backend (`extensionRuntime: "node"`, see [Node backend](../agents/node-compat.md#node-backend)) closes these items when it is selected. On the default QuickJS backend they stay open.
+
+- `child_process.fork` and spawning `process.execPath` start a real Node process.
+- `process.dlopen` and native `.node` addons load.
+- V8-only modules and features work: `v8` heap snapshots and `queryObjects`, `inspector.open`, and full `async_hooks` coverage.
+
+## Extension module exports
+
+Section 8 of the parity report compares the runtime exports of each module in upstream `virtual-modules.ts` with the bundled module. Run `cargo xtask parity --upstream <checkout>` to get the current list. On 2026-10-29 the report found these gaps.
+
+Missing in pi-rust (13):
+
+- `@earendil-works/pi-ai/compat` and `@earendil-works/pi-ai/models`: `AI_TELEMETRY_SCHEMA`.
+- `@earendil-works/pi-ai/providers/all`: `builtinModels`, `builtinProviders`, `getAllBuiltinModels`, `getBuiltinClassifierModel`, `getBuiltinClassifierModels`, `getBuiltinImageModel`, `getBuiltinImageModels`, `getBuiltinModelDataGeneratedAt`, `radiusProvider`. The module re-exports only the three catalog reads of `host/ai.js`.
+- `@earendil-works/pi-tui`: `getSelectPageIndex`, `replaceControlCharacters`. The embedded pi-tui is older than upstream. Run `cargo xtask vendor-js` to update it.
+
+These exports are present, but they throw `ERR_PI_UNSUPPORTED`:
+
+- `@earendil-works/pi-ai/compat`: faux providers (`createFauxCore`, `fauxProvider`, `registerFauxProvider`), `createModels`, `createProvider`, `setBedrockProviderModule`, and the image API (`generateImages`, `generateImagesOpenRouter`, `getImageModel`, `getImageModels`, `getImageProviders`, `getImagesApiProvider`, `registerImagesApiProvider`, `registerBuiltInImagesApiProviders`). Providers, models, and images run in Rust. `@earendil-works/pi-ai/models` re-exports the same `createModels` and `createProvider`.
+- `@earendil-works/pi-coding-agent`, interactive components: `ArminComponent`, `AssistantMessageComponent`, `BashExecutionComponent`, `BranchSummaryMessageComponent`, `CompactionSummaryMessageComponent`, `CustomMessageComponent`, `ExtensionEditorComponent`, `ExtensionInputComponent`, `ExtensionSelectorComponent`, `FooterComponent`, `LoginDialogComponent`, `ModelSelectorComponent`, `OAuthSelectorComponent`, `SessionSelectorComponent`, `SettingsSelectorComponent`, `ShowImagesSelectorComponent`, `SkillInvocationMessageComponent`, `ThemeSelectorComponent`, `ThinkingSelectorComponent`, `ToolExecutionComponent`, `TreeSelectorComponent`, `UserMessageComponent`, `UserMessageSelectorComponent`. The Rust TUI draws these parts.
+- `@earendil-works/pi-coding-agent`, run modes and CLI: `InteractiveMode`, `RpcClient`, `main`, `parseArgs`, `runPrintMode`, `runRpcMode`, `resolveCliModel`, `resolveModelScopeWithDiagnostics`, `readStoredCredential`.
+- `@earendil-works/pi-coding-agent`, sessions and extensions: `AgentSession` and `AgentSessionRuntime` as constructors, `createAgentSessionFromServices`, `createAgentSessionRuntime`, `createAgentSessionServices`, `ExtensionRunner`, `createExtensionRuntime`, `discoverAndLoadExtensions`, `createCodemodeExtension`, `createMcpExtension`, `createToolSearchExtension`, `DefaultPackageManager`, `ProjectTrustStore`, `hasTrustRequiringProjectResources`, `loadProjectContextFiles`.
+- `@earendil-works/pi-coding-agent`, compaction: `compact`, `generateBranchSummary`, `generateSummary`, `generateSummaryWithUsage`.
+
+Other limits of the exports that work:
+
+- `createAgentSession` makes a child session. It supports `cwd`, `agentDir`, `model`, `thinkingLevel`, tool names, `excludeTools`, `noTools`, `systemPrompt`, `resourceLoader`, and the `SessionManager`, `SettingsManager`, and `ModelRuntime` wrappers. These options throw `ERR_PI_UNSUPPORTED`: `customTools`, `scopedModels`, `sessionStartEvent`, a separate custom `ModelRuntime`, third-party session or settings managers, and a custom `ResourceLoader` with skills, prompts, context files, or extensions. A child session does not load extensions. It uses the runtime and auth of the host.
+- `AgentSession.prompt` supports images, `expandPromptTemplates`, and `source`. `streamingBehavior` throws `ERR_PI_UNSUPPORTED`. A second prompt during a running prompt is rejected.
+- `SDK.extensionsResult.runtime` throws `ERR_PI_UNSUPPORTED`.
+- `SessionManager.appendUsage` throws `ERR_PI_UNSUPPORTED`.
+- `SettingsManager` works through `SettingsManager.create` and `SettingsManager.inMemory`. `new SettingsManager()` and `get*`, `set*`, and `remove*` accessors without a Rust counterpart throw `ERR_PI_UNSUPPORTED` with the member name (`host/sdk_storage.js`).
+- `DefaultResourceLoader` rejects `extensionFactories`, `additionalExtensionPaths`, `additionalThemePaths`, and every override option except `systemPromptOverride` and `appendSystemPromptOverride`. `getExtensions`, `getSkills`, `getPrompts`, `getThemes`, and `getAgentsFiles` throw unless the matching `no*` option is set.
+- `ModelRuntime` and `ModelRegistry` use the runtime of the host session and need a bound session. `ModelRuntime.create` with options, login, credentials, and provider registration throw `ERR_PI_UNSUPPORTED`. These reads work: `getModel`, `getModels`, `getAllModels`, `getAllAvailable`, `getAvailableSnapshot`, `getProviders`.
+- `generateDiffString` and `generateUnifiedPatch` use a fixed value of 4 context lines.
+
 ## Removed upstream, still in pi-rust
 
 Upstream `7472cda0d` (2026-10-12) deleted the experimental server stack: the client, protocol, and server packages and `pi experimental`. A decision on 2026-10-21 keeps these items in pi-rust on purpose as pi-rust extras:
@@ -76,6 +111,17 @@ pi-rust adds this behavior on purpose. Do not report these items as gaps in the 
 - Subscription providers `cursor`, `grok-build`, and `google-antigravity` with their logins and the APIs `cursor-agent`, `grok-build-responses`, and `antigravity-acp` ([Subscription providers](../providers/subscription-providers.md)).
 - Markdown export: if the output path ends in `.md`, `/export` and `pi --export` write Markdown ([Export](../../crates/pi-coding-agent/docs/commands.md#export)).
 - The README section "Differences from upstream pi" lists the other additions: slash commands, CLI commands and flags, and settings. It also lists the bugs that pi-rust fixes and that are still open upstream. `allowlist.json` holds the matching parity report entries.
+
+## Native extension protocol
+
+Requests from extension authors that protocol version 1 does not support yet ([native protocol](../extensions/native-protocol.md#not-yet-supported)):
+
+- Custom renderers for tool calls, tool results, and session entries (`renderCall`, `renderResult`, `registerMessageRenderer`).
+- `prepareArguments` of a tool definition.
+- `provider.register` with `oauth: { builtin }`, to reuse a login flow of pi.
+- An order guarantee for `after_provider_response` before `message_end` of the same response.
+- `settings.set`, to write a settings namespace.
+- Unregistering the tools of a crashed child. pi deactivates them but keeps them in the registry.
 
 ## Post-release follow-up
 

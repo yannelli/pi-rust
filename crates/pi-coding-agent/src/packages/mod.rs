@@ -4,6 +4,7 @@
 
 mod archive;
 mod cli;
+mod cli_marketplace;
 mod cli_parse;
 mod cli_support;
 pub mod config;
@@ -14,6 +15,19 @@ pub mod git_url;
 mod glob;
 mod install;
 pub mod manifest;
+pub mod marketplace;
+#[cfg(all(test, unix))]
+mod marketplace_archive_tests;
+mod marketplace_index;
+mod marketplace_install;
+mod marketplace_lock;
+#[cfg(test)]
+mod marketplace_test_support;
+#[cfg(test)]
+mod marketplace_tests;
+#[cfg(test)]
+mod marketplace_update_tests;
+pub mod moved_features;
 mod npm;
 mod paths;
 mod resolve;
@@ -48,6 +62,7 @@ pub use config_cmd::{ConfigSelectorFn, ConfigSelectorRequest, render_config_text
 pub use config_editor::ConfigEditor;
 pub use git_url::{GitSource, parse_git_url};
 pub use manifest::{PiManifest, collect_extension_package_warnings, read_pi_manifest};
+pub use marketplace::{InstalledPackage, Marketplace, MarketplaceCatalog, MarketplaceEntry, MarketplaceIndex};
 pub use paths::extension_temp_folder;
 pub use runner::{CommandRunner, CommandSpec, ProcessRunner};
 pub use source::{ArchiveSource, LocalSource, NpmSource, ParsedSource, parse_source};
@@ -104,6 +119,7 @@ pub enum PackageKind {
     Npm,
     Git,
     Url,
+    Marketplace,
 }
 
 /// An installed, unpinned package with a newer version available.

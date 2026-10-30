@@ -29,6 +29,10 @@ fn strip_override(entry: &str) -> &str {
     entry.strip_prefix(['!', '+', '-']).unwrap_or(entry)
 }
 
+fn is_native(item: &ConfigItem) -> bool {
+    item.path.to_string_lossy().starts_with(crate::resources::source_info::NATIVE_PATH_PREFIX)
+}
+
 fn is_override(entry: &str) -> bool {
     entry.starts_with(['!', '+', '-'])
 }
@@ -228,7 +232,7 @@ impl ConfigEditor {
     }
 
     fn resource_pattern(&self, item: &ConfigItem) -> String {
-        if item.metadata.source == "builtin" {
+        if item.metadata.source == "builtin" || is_native(item) {
             return item.path.display().to_string();
         }
         let base = item.metadata.base_dir.clone().unwrap_or_else(|| self.base_dir(Self::item_scope(item)));
@@ -236,6 +240,9 @@ impl ConfigEditor {
     }
 
     fn package_pattern(item: &ConfigItem) -> String {
+        if is_native(item) {
+            return item.path.display().to_string();
+        }
         let fallback = item.path.parent().map(Path::to_path_buf).unwrap_or_default();
         relative_or_absolute(item.metadata.base_dir.as_ref().unwrap_or(&fallback), &item.path)
     }

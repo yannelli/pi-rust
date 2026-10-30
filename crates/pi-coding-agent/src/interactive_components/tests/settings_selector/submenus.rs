@@ -244,3 +244,56 @@ fn select_submenu_filters_when_searchable() {
     harness.send(keys::ENTER);
     assert_eq!(selected.get(), ["gamma"]);
 }
+
+#[test]
+fn provider_submenu_toggles_filters_and_keeps_changes_after_escape() {
+    let _kb = setup();
+    let changed = Calls::new();
+    let config = SettingsConfig {
+        available_providers: vec![("alpha".into(), "Alpha Cloud".into()), ("beta".into(), "beta".into())],
+        disabled_providers: vec!["unavailable".into()],
+        ..SettingsConfig::default()
+    };
+    let callbacks = SettingsCallbacks {
+        on_disabled_providers_change: Box::new(changed.recorder()),
+        ..SettingsCallbacks::default()
+    };
+    let mut selector = SettingsSelector::new(config, callbacks);
+    selector.settings_list().borrow_mut().select_item("disabled-providers");
+    send(&mut selector, &[keys::ENTER]);
+    let text = list_text(&selector, 100);
+    assert!(text.contains("alpha (Alpha Cloud)") && text.contains("unavailable"), "{text}");
+    send(&mut selector, &[keys::SPACE, keys::DOWN, keys::ENTER]);
+    assert_eq!(changed.take(), [vec!["alpha", "unavailable"], vec!["alpha", "beta", "unavailable"]]);
+    send(&mut selector, &[keys::ESCAPE]);
+    assert!(list_text(&selector, 100).contains("3 disabled"));
+    send(&mut selector, &[keys::ENTER]);
+    let text = list_text(&selector, 100);
+    assert!(text.lines().find(|line| line.contains("alpha")).unwrap().contains("disabled"), "{text}");
+    type_label(&mut selector, "unavailable");
+    let text = list_text(&selector, 100);
+    assert!(!text.contains("Alpha Cloud"), "{text}");
+    send(&mut selector, &[keys::ENTER, keys::ESCAPE]);
+    assert_eq!(changed.get(), [vec!["alpha", "beta"]]);
+    assert!(list_text(&selector, 100).contains("2 disabled"));
+}
+
+#[test]
+fn provider_submenu_persists_and_returns_to_none() {
+    use std::sync::Arc;
+
+    use crate::settings::SettingsManager;
+
+    let _kb = setup();
+    let settings = Arc::new(SettingsManager::in_memory(serde_json::json!({})));
+    let config =
+        SettingsConfig { available_providers: vec![("local".into(), "Local".into())], ..SettingsConfig::default() };
+    let mut selector = SettingsSelector::new(config, SettingsCallbacks::persisting(settings.clone()));
+    selector.settings_list().borrow_mut().select_item("disabled-providers");
+    send(&mut selector, &[keys::ENTER, keys::ENTER, keys::ESCAPE]);
+    assert_eq!(settings.disabled_providers(), ["local"]);
+    assert!(list_text(&selector, 100).contains("1 disabled"));
+    send(&mut selector, &[keys::ENTER, keys::ENTER, keys::ESCAPE]);
+    assert!(settings.disabled_providers().is_empty());
+    assert!(list_text(&selector, 100).contains("none"));
+}

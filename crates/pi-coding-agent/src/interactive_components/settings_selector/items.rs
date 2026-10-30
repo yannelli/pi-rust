@@ -34,7 +34,7 @@ fn quiet_startup_str(quiet: QuietStartup) -> &'static str {
     }
 }
 
-fn item(id: &str, label: &str, description: &str, current: String, values: &[&str]) -> SettingItem {
+pub(super) fn item(id: &str, label: &str, description: &str, current: String, values: &[&str]) -> SettingItem {
     SettingItem {
         id: id.into(),
         label: label.into(),
@@ -63,6 +63,7 @@ pub(super) struct Submenus {
     pub model_thinking: SubmenuFactory,
     pub model_thinking_summary: String,
     pub theme: SubmenuFactory,
+    pub providers: SubmenuFactory,
 }
 
 /// Every setting in upstream order; image settings follow auto-compact.
@@ -191,6 +192,13 @@ pub(super) fn build_items(config: &SettingsConfig, supports_images: bool, submen
             enum_str(config.cache_warming_mode),
             &["off", "streaming", "idle"],
         ),
+        submenu_item(
+            "disabled-providers",
+            "Disabled providers",
+            "Enable or disable providers. Changes apply now and save to global settings.",
+            super::providers::summary(&config.disabled_providers),
+            submenus.providers,
+        ),
         item("hide-thinking", "Hide thinking", "Hide thinking blocks in assistant responses", bool_str(config.hide_thinking_block), BOOL),
         item(
             "mermaid-rendering",
@@ -292,6 +300,8 @@ pub(super) fn build_items(config: &SettingsConfig, supports_images: bool, submen
         ),
         submenu_item("theme", "Theme", "Color theme for the interface", config.current_theme.clone(), submenus.theme),
     ]);
+    let index = items.iter().position(|item| item.id == "cache-warming-mode").unwrap() + 1;
+    items.splice(index..index, super::retry::build_items(config));
     items
 }
 
@@ -365,6 +375,6 @@ pub(super) fn dispatch_change(callbacks: &mut SettingsCallbacks, id: &str, value
             }
         }
         "theme" => (callbacks.on_theme_change)(value),
-        _ => {}
+        _ => super::retry::dispatch_change(callbacks, id, value),
     }
 }

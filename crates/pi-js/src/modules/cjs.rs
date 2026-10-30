@@ -60,7 +60,7 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
 fn compile<'js>(ctx: Ctx<'js>, filename: String, source: Opt<String>) -> rquickjs::Result<Object<'js>> {
     let result = Object::new(ctx.clone())?;
     let state = state();
-    let registered = source.0.map(Into::into).or_else(|| super::registered_source(&state, &filename));
+    let registered = source.0.map(Into::into).or_else(|| super::registered_source(&state.shared, &filename));
     if registered.is_none() && super::has_inline_source(&state, &filename) {
         result.set("format", "esm")?;
         return Ok(result);

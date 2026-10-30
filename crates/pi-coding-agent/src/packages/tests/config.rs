@@ -187,3 +187,26 @@ async fn config_command_prints_resources_without_a_selector() {
     assert_eq!(unknown, Some(1));
     assert!(run_config_command(&["list".to_string()], &options, None).await.is_none());
 }
+
+#[tokio::test]
+async fn extensions_list_reports_an_invalid_marketplace_entry_and_loads_the_rest() {
+    let fixture = Fixture::new();
+    let pkg = fixture.root().join("local-tools");
+    write(&pkg.join("extensions/index.ts"), "export default function () {}\n");
+    fixture.set_global(json!({"packages": ["marketplace:Todo", pkg.display().to_string()]}));
+    let mut options = PackageCommandOptions::new(fixture.cwd.clone(), fixture.agent_dir.clone());
+    options.home = fixture.root();
+    options.runner = MockRunner::failing();
+    let (stdout, out) = CommandOutput::capture();
+    let (stderr, err) = CommandOutput::capture();
+    (options.stdout, options.stderr) = (stdout, stderr);
+    let code = run_config_command(&["extensions".to_string(), "list".to_string()], &options, None).await;
+    let (text, errors) = (
+        String::from_utf8_lossy(&out.lock().unwrap()).into_owned(),
+        String::from_utf8_lossy(&err.lock().unwrap()).into_owned(),
+    );
+    assert_eq!(code, Some(0), "{errors}");
+    assert!(text.contains("local-tools/extensions/index.ts"), "{text}");
+    assert_eq!(errors.matches("Warning: Extension package").count(), 1, "{errors}");
+    assert!(errors.contains("Extension package \"marketplace:Todo\": failed to install"), "{errors}");
+}

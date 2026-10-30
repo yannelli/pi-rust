@@ -18,7 +18,11 @@ use crate::resources::trust::ExtensionTrustDecision;
 
 /// Load the extensions of `services` with the program's inline extensions.
 pub(super) async fn load(options: &AppOptions, services: &AgentSessionServices) -> LoadedExtensions {
-    let load_options = LoadOptions { inline: options.inline_extensions.clone(), ..LoadOptions::default() };
+    let load_options = LoadOptions {
+        inline: options.inline_extensions.clone(),
+        runtime: options.extension_runtime,
+        ..LoadOptions::default()
+    };
     let mut loaded = load_extensions(services, &load_options).await;
     if let Some(runner) = &loaded.runner {
         let listed = services.resources().resources().extensions.clone();
@@ -118,7 +122,8 @@ pub(super) async fn trust_decision(
     })
     .await;
     let inline: Vec<_> = options.inline_extensions.iter().filter(|extension| !extension.builtin()).cloned().collect();
-    let loaded = load_extensions(&services, &LoadOptions { inline, ..LoadOptions::default() }).await;
+    let load_options = LoadOptions { inline, runtime: options.extension_runtime, ..LoadOptions::default() };
+    let loaded = load_extensions(&services, &load_options).await;
     let Some(runner) = loaded.runner else { return (None, Vec::new()) };
     if !runner.has_handlers("project_trust") {
         runner.shutdown();

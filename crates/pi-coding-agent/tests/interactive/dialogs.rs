@@ -65,48 +65,80 @@ async fn settings_change_the_hide_thinking_setting() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn statusline_editor_applies_a_preset_and_restores_the_prompt() {
+async fn settings_disable_and_re_enable_a_provider_in_the_live_registry() {
     local(async {
         let ui = start(Options::default()).await;
-        ui.submit("/statusline").await;
-        ui.wait_for("Status line · global settings").await;
-        ui.send("\x1b[B").await;
+        let local_models = |ui: &crate::harness::Ui| ui.session().model_runtime().get_model("local", "other").is_some();
+        assert!(local_models(&ui));
+        ui.submit("/settings").await;
+        ui.wait_for("Auto-compact").await;
+        ui.send("disabled providers").await;
+        ui.wait_until("filtered list", |ui| !ui.screen().contains("Auto-compact")).await;
+        ui.wait_for("none").await;
         ui.send("\r").await;
-        ui.send("compact").await;
+        ui.wait_for("enabled").await;
+        ui.send("local").await;
+        ui.wait_until("filtered providers", |ui| !ui.screen().contains("(1/")).await;
         ui.send("\r").await;
-        ui.wait_until("status line saved", |ui| {
-            ui.session().settings().status_line().is_some_and(|settings| settings.preset.as_deref() == Some("compact"))
-        })
-        .await;
+        ui.wait_until("provider disabled", |ui| ui.session().settings().disabled_providers() == ["local"]).await;
+        ui.wait_for("disabled").await;
+        assert!(!ui.screen().contains("Disabled providers"), "submenu stays open: {}", ui.screen());
+        assert!(!local_models(&ui));
+        assert!(ui.session().model_runtime().available_models().iter().all(|model| model.provider != "local"));
+        assert_eq!(ui.session().settings().global_settings().disabled_providers, Some(vec!["local".to_string()]));
         ui.send("\x1b").await;
-        ui.wait_until("status line editor closed", |ui| !ui.screen().contains("Status line · global settings")).await;
-        ui.wait_for("work · tiny").await;
-        ui.send("typed after statusline").await;
-        ui.wait_for("typed after statusline").await;
+        ui.wait_for("1 disabled").await;
+
+        ui.send("\r").await;
+        ui.wait_for("enabled").await;
+        ui.send("local").await;
+        ui.wait_until("filtered providers", |ui| !ui.screen().contains("(1/")).await;
+        ui.send("\r").await;
+        ui.wait_until("provider enabled", |ui| ui.session().settings().disabled_providers().is_empty()).await;
+        ui.send("\x1b").await;
+        ui.wait_for("none").await;
+        assert!(local_models(&ui));
+        assert!(ui.session().model_runtime().has_configured_auth("local"));
+        let models = std::fs::read_to_string(ui.agent_dir.join("models.json")).unwrap();
+        assert!(models.contains("test-key"));
+        assert_eq!(ui.session().settings().global_settings().disabled_providers, None);
+        ui.send("\x1b").await;
     })
     .await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_empty_module_layout_hides_the_footer_but_keeps_extension_statuses() {
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
-    use pi_coding_agent::interactive::components::FooterComponent;
-    use pi_coding_agent::interactive::footer_data::FooterData;
-    use pi_coding_agent::interactive::status_line::StatusLineConfig;
-    use pi_tui::Component;
-
+async fn settings_change_retry_values_from_their_defaults() {
     local(async {
         let ui = start(Options::default()).await;
-        let data = Rc::new(RefCell::new(FooterData::new(&ui.cwd())));
-        let mut footer = FooterComponent::new(ui.session(), data.clone());
-        let settings = serde_json::from_value(serde_json::json!({"segments": []})).unwrap();
-        footer.set_status_line(StatusLineConfig::from_settings(&settings, None), Rc::new(|| {}));
-        assert!(footer.render(100).is_empty());
-        data.borrow_mut().set_extension_status("test", Some("extension status"));
-        assert_eq!(footer.render(100).len(), 1);
-        assert!(footer.render(100)[0].contains("extension status"));
+        let session = ui.session();
+        let settings = session.settings();
+        assert_eq!(settings.retry_settings().max_retries, 3);
+        assert_eq!(settings.provider_retry_settings().timeout_ms, None);
+        ui.submit("/settings").await;
+        ui.wait_for("Auto-compact").await;
+        ui.send("Max retries").await;
+        ui.wait_until("filtered list", |ui| !ui.screen().contains("Auto-compact")).await;
+        ui.send("\r").await;
+        ui.wait_until("max retries saved", |ui| ui.session().settings().retry_settings().max_retries == 5).await;
+        ui.send("\x1b").await;
+        ui.wait_until("settings closed", |ui| !ui.screen().contains("Max retries")).await;
+
+        ui.submit("/settings").await;
+        ui.wait_for("Auto-compact").await;
+        ui.send("Provider request timeout").await;
+        ui.wait_until("filtered list", |ui| !ui.screen().contains("Auto-compact")).await;
+        ui.wait_for("default").await;
+        ui.send("\r").await;
+        let timeout = |ui: &crate::harness::Ui| ui.session().settings().provider_retry_settings().timeout_ms;
+        ui.wait_until("timeout saved", |ui| timeout(ui) == Some(30_000)).await;
+        ui.send("\x1b").await;
+
+        let retry = ui.session().settings().global_settings().retry.unwrap();
+        assert_eq!(retry.max_retries, Some(5.0));
+        assert_eq!(retry.provider.unwrap().timeout_ms, Some(30_000.0));
+        let defaults = ui.session().settings().retry_settings();
+        assert_eq!((defaults.enabled, defaults.base_delay_ms, defaults.max_agent_delay_ms), (true, 2_000, 60_000));
     })
     .await;
 }

@@ -4,6 +4,12 @@
 
 mod catalog;
 mod commits;
+mod exports;
+mod exports_lex;
+#[cfg(test)]
+mod exports_tests;
+mod module_exports;
+mod module_tree;
 mod node;
 mod parse;
 mod report;
@@ -102,6 +108,7 @@ pub fn build_report(upstream: &Path, root: &Path, synced: &Synced, allowlist: Al
         sections::tools(upstream, root),
         catalog::section(upstream, root),
         sections::extension_api(upstream, root),
+        module_exports::section(upstream, root),
         node::section(root),
         sections::packages(upstream, root),
     ];

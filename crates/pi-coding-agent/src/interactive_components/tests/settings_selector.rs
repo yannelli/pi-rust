@@ -1,5 +1,6 @@
 //! Settings selector; ports `settings-selector.test.ts`.
 
+mod retry;
 mod submenus;
 
 use std::cell::RefCell;
@@ -193,12 +194,28 @@ fn orders_settings_like_upstream_with_and_without_image_support() {
             "steering-mode",
         ]
     );
-    assert_eq!(ids.len(), 34);
+    assert_eq!(ids.len(), 42);
+    let network = ids.iter().position(|id| id == "http-idle-timeout").unwrap();
+    assert_eq!(
+        &ids[network..network + 10],
+        [
+            "http-idle-timeout",
+            "cache-warming-mode",
+            "auto-retry",
+            "retry-max-retries",
+            "retry-base-delay",
+            "retry-max-delay",
+            "provider-timeout",
+            "provider-max-retries",
+            "provider-max-retry-delay",
+            "disabled-providers"
+        ]
+    );
     assert_eq!(ids.last().map(String::as_str), Some("theme"));
     let without = SettingsSelector::with_image_support(SettingsConfig::default(), SettingsCallbacks::default(), false);
     let without = self::ids(&without);
     assert_eq!(without[..2], ["autocompact", "auto-resize-images"]);
-    assert_eq!(without.len(), 32);
+    assert_eq!(without.len(), 40);
 }
 
 #[test]
@@ -215,7 +232,7 @@ fn renders_between_borders_and_navigates_with_a_terminal() {
     assert!(screen.contains("→ Auto-compact"), "{screen}");
     assert!(screen.contains("Automatically compact context when it gets too large"), "{screen}");
     assert!(screen.contains("Type to search · Enter/Space to change · Esc to cancel"), "{screen}");
-    assert!(screen.contains("(1/32)"), "{screen}");
+    assert!(screen.contains("(1/40)"), "{screen}");
     harness.send(keys::DOWN);
     let screen = harness.screen();
     assert!(screen.contains("→ Auto-resize images"), "{screen}");

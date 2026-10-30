@@ -33,6 +33,7 @@ impl PackageManager {
             ParsedSource::Npm(npm) => format!("npm:{}", npm.name),
             ParsedSource::Git(git) => format!("git:{}/{}", git.host, git.path),
             ParsedSource::Archive(archive) => format!("url:{}/{}", archive.host, archive.path),
+            ParsedSource::Marketplace { name, .. } => format!("marketplace:{name}"),
             ParsedSource::Local(local) => {
                 let base = local_base.unwrap_or(&self.cwd);
                 format!("local:{}", resolve_path(&local.path, base).display())
@@ -124,6 +125,7 @@ impl PackageManager {
             ParsedSource::Npm(npm) => self.npm_install_path(&npm, scope).await.ok()?,
             ParsedSource::Git(git) => self.git_install_path(&git, scope).ok()?,
             ParsedSource::Archive(archive) => self.archive_install_path(&archive, scope).ok()?,
+            ParsedSource::Marketplace { name, .. } => self.marketplace().installed_package(&name).ok()??.path,
             ParsedSource::Local(local) => resolve_path(&local.path, &self.base_dir_for_scope(scope).ok()?),
         };
         path.exists().then_some(path)
@@ -149,6 +151,7 @@ impl PackageManager {
         let trimmed = source.trim();
         let suggestion = configured.iter().map(package_source_text).find(|text| match parse_source(text) {
             ParsedSource::Npm(npm) => trimmed == npm.name || trimmed == npm.spec,
+            ParsedSource::Marketplace { name, .. } => trimmed == name,
             ParsedSource::Git(git) => {
                 let shorthand = format!("{}/{}", git.host, git.path);
                 trimmed == shorthand || git.git_ref.is_some_and(|git_ref| trimmed == format!("{shorthand}@{git_ref}"))

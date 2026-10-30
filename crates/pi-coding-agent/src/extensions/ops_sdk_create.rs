@@ -1,0 +1,87 @@
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use pi_js::JsError;
+use serde_json::{Value, json};
+
+use super::ops::error;
+use super::ops_sdk::ChildSession;
+use super::runner::ExtensionRunner;
+use crate::agent_session::services::resource_loader_options;
+use crate::agent_session::{
+    AgentSessionServices, CreateAgentSessionOptions, NoTools, ResourceOptions, create_agent_session, lock,
+};
+use crate::resources::ResourceLoader;
+
+struct SessionReservation<'a> {
+    runner: &'a ExtensionRunner,
+    manager_id: u64,
+}
+
+impl Drop for SessionReservation<'_> {
+    fn drop(&mut self) {
+        lock(&self.runner.sdk.storage).cancel_create(self.manager_id);
+    }
+}
+
+fn strings(value: &Value) -> Result<Vec<String>, JsError> {
+    if value.is_null() { Ok(Vec::new()) } else { serde_json::from_value(value.clone()).map_err(error) }
+}
+
+pub(crate) async fn create(runner: &Arc<ExtensionRunner>, options: Value) -> Result<Value, JsError> {
+    let manager_id = options["sessionManagerId"].as_u64().ok_or_else(|| error("Missing SessionManager"))?;
+    let settings_id = options["settingsManagerId"].as_u64().ok_or_else(|| error("Missing SettingsManager"))?;
+    let (manager, settings) = {
+        let mut storage = lock(&runner.sdk.storage);
+        let settings = storage.settings(settings_id).ok_or_else(|| error("Unknown SettingsManager"))?;
+        let manager = storage.take_session(manager_id)?;
+        (manager, settings)
+    };
+    let _reservation = SessionReservation { runner, manager_id };
+    let cwd = PathBuf::from(options["cwd"].as_str().unwrap_or_else(|| runner.cwd().to_str().unwrap_or(".")));
+    let agent_dir = options["agentDir"].as_str().map(PathBuf::from).unwrap_or_else(|| runner.agent_dir().to_owned());
+    let resources = &options["resources"];
+    let resource_options = ResourceOptions {
+        no_extensions: true,
+        no_skills: resources["noSkills"].as_bool().unwrap_or(false),
+        no_prompt_templates: resources["noPromptTemplates"].as_bool().unwrap_or(false),
+        no_themes: resources["noThemes"].as_bool().unwrap_or(false),
+        no_context_files: resources["noContextFiles"].as_bool().unwrap_or(false),
+        system_prompt: resources["systemPrompt"].as_str().map(str::to_owned),
+        append_system_prompt: resources.get("appendSystemPrompt").map(strings).transpose()?,
+        skill_paths: strings(&resources["additionalSkillPaths"])?,
+        prompt_template_paths: strings(&resources["additionalPromptTemplatePaths"])?,
+        disabled_builtin_extensions: crate::agent_session::BUILTIN_EXTENSIONS
+            .iter()
+            .map(|name| name.to_string())
+            .collect(),
+        ..Default::default()
+    };
+    let mut loader = ResourceLoader::new(resource_loader_options(&cwd, &agent_dir, &settings, &resource_options));
+    loader.reload();
+    let services = AgentSessionServices {
+        cwd,
+        agent_dir,
+        settings,
+        model_runtime: runner.model_runtime().clone(),
+        resource_loader: Arc::new(Mutex::new(loader)),
+        diagnostics: Vec::new(),
+    };
+    let mut create = CreateAgentSessionOptions::new(services, manager);
+    create.model = options.get("model").cloned().map(serde_json::from_value).transpose().map_err(error)?;
+    create.thinking_level =
+        options.get("thinkingLevel").cloned().map(serde_json::from_value).transpose().map_err(error)?;
+    create.tools = options.get("tools").map(strings).transpose()?;
+    create.exclude_tools = strings(&options["excludeTools"])?;
+    create.no_tools = match options["noTools"].as_str() {
+        Some("all") => Some(NoTools::All),
+        Some("builtin") => Some(NoTools::Builtin),
+        None => None,
+        Some(other) => return Err(error(format!("Invalid noTools option: {other}"))),
+    };
+    let created = create_agent_session(create).await.map_err(error)?;
+    let id = runner.next_id();
+    lock(&runner.sdk.storage).attach_child(manager_id, &created.session);
+    lock(&runner.sdk.children).insert(id, ChildSession { session: created.session, manager_id });
+    Ok(json!({"id": id, "modelFallbackMessage": created.model_fallback_message}))
+}

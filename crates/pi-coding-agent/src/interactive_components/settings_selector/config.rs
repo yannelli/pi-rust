@@ -6,12 +6,15 @@ use std::collections::BTreeMap;
 use pi_agent::QueueMode;
 use pi_ai::{Model, ThinkingLevel, Transport};
 
-use crate::settings::QuietStartup;
-use crate::settings::defaults::{DEFAULT_HTTP_IDLE_TIMEOUT_MS, DEFAULT_THINKING_LEVEL};
+use crate::settings::defaults::{
+    DEFAULT_HTTP_IDLE_TIMEOUT_MS, DEFAULT_THINKING_LEVEL, PROVIDER_MAX_RETRY_DELAY_MS, RETRY_BASE_DELAY_MS,
+    RETRY_ENABLED, RETRY_MAX_AGENT_DELAY_MS, RETRY_MAX_RETRIES,
+};
 use crate::settings::schema::{
     CacheWarmingMode, DoubleEscapeAction, FullscreenExitOutput, FullscreenScrollbar, MermaidRenderingMode,
     SessionShareDestination, TreeFilterMode, TuiMode,
 };
+use crate::settings::{ProviderRetryConfig, QuietStartup, RetryConfig};
 use crate::theme::{SYSTEM_THEME_NAME, TerminalTheme};
 
 /// HTTP idle timeout choices of the selector, with their labels (upstream `HTTP_IDLE_TIMEOUT_CHOICES`).
@@ -85,6 +88,10 @@ pub struct SettingsConfig {
     pub session_share_destination: SessionShareDestination,
     pub http_idle_timeout_ms: u64,
     pub cache_warming_mode: CacheWarmingMode,
+    pub retry: RetryConfig,
+    pub provider_retry: ProviderRetryConfig,
+    pub disabled_providers: Vec<String>,
+    pub available_providers: Vec<(String, String)>,
     /// The global default thinking level.
     pub thinking_level: ThinkingLevel,
     pub available_thinking_levels: Vec<ThinkingLevel>,
@@ -137,6 +144,18 @@ impl Default for SettingsConfig {
             session_share_destination: SessionShareDestination::Auto,
             http_idle_timeout_ms: DEFAULT_HTTP_IDLE_TIMEOUT_MS,
             cache_warming_mode: CacheWarmingMode::Streaming,
+            retry: RetryConfig {
+                enabled: RETRY_ENABLED,
+                max_retries: RETRY_MAX_RETRIES,
+                base_delay_ms: RETRY_BASE_DELAY_MS,
+                max_agent_delay_ms: RETRY_MAX_AGENT_DELAY_MS,
+            },
+            provider_retry: ProviderRetryConfig {
+                max_retry_delay_ms: PROVIDER_MAX_RETRY_DELAY_MS,
+                ..ProviderRetryConfig::default()
+            },
+            disabled_providers: Vec::new(),
+            available_providers: Vec::new(),
             thinking_level: DEFAULT_THINKING_LEVEL,
             available_thinking_levels: ThinkingLevel::ALL.to_vec(),
             model_thinking_levels: BTreeMap::new(),
@@ -191,6 +210,14 @@ pub struct SettingsCallbacks {
     pub on_session_share_destination_change: OnChange<SessionShareDestination>,
     pub on_http_idle_timeout_ms_change: OnChange<u64>,
     pub on_cache_warming_mode_change: OnChange<CacheWarmingMode>,
+    pub on_retry_enabled_change: OnChange<bool>,
+    pub on_retry_max_retries_change: OnChange<u32>,
+    pub on_retry_base_delay_ms_change: OnChange<u64>,
+    pub on_retry_max_agent_delay_ms_change: OnChange<u64>,
+    pub on_provider_timeout_ms_change: OnChange<Option<u64>>,
+    pub on_provider_max_retries_change: OnChange<Option<u32>>,
+    pub on_provider_max_retry_delay_ms_change: OnChange<u64>,
+    pub on_disabled_providers_change: OnChange<Vec<String>>,
     /// Receives the provider, the model id, and the level.
     pub on_model_thinking_level_change: OnModelLevel,
     /// Receives the provider and the model id.
@@ -244,6 +271,14 @@ impl Default for SettingsCallbacks {
             on_session_share_destination_change: ignore(),
             on_http_idle_timeout_ms_change: ignore(),
             on_cache_warming_mode_change: ignore(),
+            on_retry_enabled_change: ignore(),
+            on_retry_max_retries_change: ignore(),
+            on_retry_base_delay_ms_change: ignore(),
+            on_retry_max_agent_delay_ms_change: ignore(),
+            on_provider_timeout_ms_change: ignore(),
+            on_provider_max_retries_change: ignore(),
+            on_provider_max_retry_delay_ms_change: ignore(),
+            on_disabled_providers_change: ignore(),
             on_model_thinking_level_change: Box::new(|_, _, _| {}),
             on_model_thinking_level_remove: Box::new(|_, _| {}),
             on_theme_change: Box::new(|_| {}),

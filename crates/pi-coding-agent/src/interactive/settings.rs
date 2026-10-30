@@ -89,6 +89,10 @@ impl InteractiveMode {
             session_share_destination: settings.session_share_destination(),
             http_idle_timeout_ms: settings.http_idle_timeout_ms().unwrap_or(DEFAULT_HTTP_IDLE_TIMEOUT_MS),
             cache_warming_mode: settings.cache_warming_mode(),
+            retry: settings.retry_settings(),
+            provider_retry: settings.provider_retry_settings(),
+            disabled_providers: settings.disabled_providers(),
+            available_providers: session.model_runtime().all_providers(),
             thinking_level: settings.default_thinking_level().unwrap_or(DEFAULT_THINKING_LEVEL),
             available_thinking_levels: pi_ai::ThinkingLevel::ALL.to_vec(),
             model_thinking_levels: settings.all_model_thinking_levels(),
@@ -188,6 +192,22 @@ impl InteractiveMode {
             on_cache_warming_mode_change: on!(weak, |mode, warming| {
                 mode.session().set_cache_warming_mode(warming);
                 mode.show_status(&format!("Cache warming: {}", setting_str(warming)));
+            }),
+            on_retry_enabled_change: on!(weak, |mode, value| mode.settings().set_retry_enabled(value)),
+            on_retry_max_retries_change: on!(weak, |mode, value| mode.settings().set_retry_max_retries(value)),
+            on_retry_base_delay_ms_change: on!(weak, |mode, value| mode.settings().set_retry_base_delay_ms(value)),
+            on_retry_max_agent_delay_ms_change: on!(weak, |mode, value| mode
+                .settings()
+                .set_retry_max_agent_delay_ms(value)),
+            on_provider_timeout_ms_change: on!(weak, |mode, value| mode.settings().set_provider_timeout_ms(value)),
+            on_provider_max_retries_change: on!(weak, |mode, value| mode.settings().set_provider_max_retries(value)),
+            on_provider_max_retry_delay_ms_change: on!(weak, |mode, value| mode
+                .settings()
+                .set_provider_max_retry_delay_ms(value)),
+            on_disabled_providers_change: on!(weak, |mode, providers| {
+                mode.settings().set_disabled_providers(providers.clone());
+                mode.session().model_runtime().set_disabled_providers(providers);
+                mode.update_available_provider_count();
             }),
             on_model_thinking_level_change: {
                 let weak = weak.clone();

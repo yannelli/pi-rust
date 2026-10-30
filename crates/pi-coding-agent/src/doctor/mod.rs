@@ -17,6 +17,8 @@ pub use render::render_text;
 
 use crate::cli::CommandOutput;
 use crate::config::{auth_path, models_path};
+use crate::packages::Marketplace;
+use crate::packages::moved_features::doctor_warnings;
 use crate::resources::brand::APP_NAME;
 use crate::settings::{SettingsManager, SettingsOptions, SettingsScope};
 
@@ -201,6 +203,13 @@ async fn config_and_auth(inputs: &DoctorInputs, problems: &mut Vec<String>) -> (
     (config, AuthReport { providers })
 }
 
+/// Legacy `statusLine` and `terminal.iterm2` settings whose marketplace extension is missing.
+fn moved_feature_warnings(inputs: &DoctorInputs) -> Vec<String> {
+    let settings = SettingsManager::create(&inputs.cwd, &inputs.agent_dir, SettingsOptions { project_trusted: true });
+    let marketplace = Marketplace::new(inputs.agent_dir.clone(), reqwest::Client::new(), true);
+    doctor_warnings(&settings, &marketplace)
+}
+
 /// Build the whole report.
 pub async fn collect(inputs: &DoctorInputs) -> DoctorReport {
     let mut problems = Vec::new();
@@ -221,6 +230,7 @@ pub async fn collect(inputs: &DoctorInputs) -> DoctorReport {
             .push(format!("No provider has credentials. Run /login or `{APP_NAME} auth`, or set an API key variable."));
     }
     warnings.extend(crate::migrations::deprecation_warnings(&inputs.cwd, &inputs.agent_dir));
+    warnings.extend(moved_feature_warnings(inputs));
     let mcp = checks::mcp(inputs, &mut problems);
     DoctorReport {
         ok: problems.is_empty(),

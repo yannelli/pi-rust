@@ -189,7 +189,6 @@ impl InteractiveMode {
         let status = self.program_status.borrow_mut().take_report(name);
         if let Some(status) = status {
             self.terminal.borrow_mut().set_program_status(&status);
-            self.iterm2_report_state(&status);
         }
     }
 
@@ -215,7 +214,6 @@ impl InteractiveMode {
             None => format!("{app} - {cwd}"),
         };
         self.terminal.borrow_mut().set_title(&title);
-        self.iterm2_report_session();
     }
 
     /// Show `indicator` in the editor border, replacing the active one.

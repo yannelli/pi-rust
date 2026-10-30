@@ -1,5 +1,5 @@
-//! Package source strings: `npm:<spec>`, git URLs, URL archives (`.tar.gz`, `.tgz`,
-//! `.zip`), and local paths. Ported from `parseSource` in upstream `core/package-manager.ts`.
+//! Package sources: `npm:`, `marketplace:`, git URLs, URL archives, and local paths.
+//! Extends `parseSource` from upstream `core/package-manager.ts`.
 
 use nodejs_semver::{Range, Version};
 use reqwest::Url;
@@ -58,6 +58,7 @@ pub enum ParsedSource {
     Npm(NpmSource),
     Git(GitSource),
     Archive(ArchiveSource),
+    Marketplace { name: String, tag: Option<String> },
     Local(LocalSource),
 }
 
@@ -66,6 +67,7 @@ impl ParsedSource {
         match self {
             Self::Npm(npm) => npm.pinned,
             Self::Git(git) => git.pinned,
+            Self::Marketplace { tag, .. } => tag.is_some(),
             Self::Archive(_) | Self::Local(_) => false,
         }
     }
@@ -149,6 +151,10 @@ pub fn parse_archive_url(source: &str) -> Option<ArchiveSource> {
 /// Classify a package source the way upstream `parseSource` does, with URL archives
 /// recognized before git URLs.
 pub fn parse_source(source: &str) -> ParsedSource {
+    if let Some(spec) = source.strip_prefix("marketplace:") {
+        let (name, tag) = spec.split_once('@').map_or((spec, None), |(name, tag)| (name, Some(tag.to_string())));
+        return ParsedSource::Marketplace { name: name.to_string(), tag };
+    }
     if let Some(spec) = source.strip_prefix("npm:") {
         return ParsedSource::Npm(parse_npm_source(spec));
     }

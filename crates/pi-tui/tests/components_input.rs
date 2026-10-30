@@ -101,6 +101,7 @@ fn render_supports_custom_prompt_and_styled_placeholder() {
         prompt: Some(String::new()),
         placeholder: Some("Find transcript".into()),
         placeholder_style: Some(Rc::new(|text: &str| format!("\x1b[2m{text}\x1b[22m"))),
+        ..InputOptions::default()
     });
     input.focused = true;
 
@@ -111,6 +112,16 @@ fn render_supports_custom_prompt_and_styled_placeholder() {
     input.handle_input("n");
     let populated = render_one(&mut input, 20);
     assert_eq!(strip_terminal_sequences(&populated).trim_end(), "n");
+}
+
+#[test]
+fn masked_input_renders_one_star_per_grapheme() {
+    let _lock = global_state_lock();
+    let mut input = Input::new(InputOptions { masked: true, ..InputOptions::default() });
+    input.handle_input("pé日");
+    assert_eq!(input.get_value(), "pé日");
+    let line = strip_terminal_sequences(&render_one(&mut input, 20));
+    assert_eq!(line.trim_end(), "> ***");
 }
 
 #[test]

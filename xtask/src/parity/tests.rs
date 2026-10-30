@@ -45,6 +45,18 @@ fn fake_upstream() -> tempfile::TempDir {
         "packages/ai/src/providers/data/anthropic.json",
         r#"{"anthropic-messages": {"chat:claude-zzz-fake": {}}}"#,
     );
+    write(
+        up,
+        &format!("{agent}/core/extensions/virtual-modules.ts"),
+        "import * as tui from \"@earendil-works/pi-tui\";\nexport const VIRTUAL_MODULES = {\n\t\"@earendil-works/pi-tui\": tui,\n\t\"@zzz/alias\": tui,\n};",
+    );
+    write(up, "packages/tui/package.json", r#"{"name": "@earendil-works/pi-tui", "main": "dist/index.js"}"#);
+    write(up, "packages/tui/src/text.ts", "export class Text {}\nexport type Zzz = 1;");
+    write(
+        up,
+        "packages/tui/src/index.ts",
+        "export { Text, type Zzz } from \"./text.js\";\nexport const zzzTuiExport = 1;",
+    );
     write(up, "packages/zzzpkg/package.json", "{}");
     write(up, "packages/ai/package.json", "{}");
     dir
@@ -69,7 +81,7 @@ fn report_on_a_fake_upstream_tree() {
     let dir = fake_upstream();
     let report = build_report(dir.path(), root(), &synced(), Allowlist::default());
     let text = report.render();
-    assert_eq!(report.sections.len(), 9);
+    assert_eq!(report.sections.len(), 10);
     for heading in
         ["Upstream commits", "CLI flags", "Settings keys", "Slash commands", "Built-in tools", "Model catalog"]
     {
@@ -97,6 +109,8 @@ fn report_on_a_fake_upstream_tree() {
     assert_eq!(names(&find("models").missing), ["anthropic", "zzzprov"]);
     assert_eq!(names(&find("extensionApi").missing), ["zzzFakeMethod"]);
     assert_eq!(names(&find("packages").missing), ["zzzpkg"]);
+    let exports = names(&find("moduleExports").missing);
+    assert_eq!(exports, ["@zzz/alias: (module)", "@earendil-works/pi-tui: zzzTuiExport"]);
     assert!(names(&find("packages").extra).contains(&"pi-js".to_string()));
     assert!(report.findings() > 0);
 }

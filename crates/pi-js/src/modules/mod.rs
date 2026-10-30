@@ -13,7 +13,7 @@ use rquickjs::{Ctx, Function, Module, Runtime, Value};
 use crate::error::JsError;
 use crate::resolve::{ResolveKind, Resolved, normalize};
 use crate::runtime::convert::{caught, throw};
-use crate::runtime::state::{LoopState, state};
+use crate::runtime::state::{LoopState, Shared, state};
 use crate::transpile::{FreeGlobals, ModuleFormat, register_source_map};
 use crate::virtual_modules::VirtualModule;
 
@@ -34,14 +34,29 @@ pub(crate) fn resolve_kind(
     kind: ResolveKind,
 ) -> Result<(&'static str, String), JsError> {
     let state = state();
-    let from_path = from.map(Path::new).filter(|path| path.is_absolute());
     let base_dir = state.cwd.borrow().clone();
-    if has_inline_source(&state, specifier) {
+    let inline = |key: &str| state.inline_sources.borrow().contains_key(key);
+    resolve_in(&state.shared, &base_dir, &inline, specifier, from, kind)
+}
+
+/// [`resolve_kind`] for any backend: `inline` tells whether a key names a module evaluated from
+/// a string.
+pub(crate) fn resolve_in(
+    shared: &Shared,
+    base_dir: &Path,
+    inline: &dyn Fn(&str) -> bool,
+    specifier: &str,
+    from: Option<&str>,
+    kind: ResolveKind,
+) -> Result<(&'static str, String), JsError> {
+    let from_path = from.map(Path::new).filter(|path| path.is_absolute());
+    let has_source = |key: &str| inline(key) || registered_source(shared, key).is_some();
+    if has_source(specifier) {
         return Ok(("file", specifier.to_string()));
     }
     // Absolute specifiers too: on Windows `C:/x/y.js` and `C:\x/y.js` name the key `C:\x\y.js`.
     let candidate = if specifier.starts_with('.') {
-        let dir = from_path.and_then(Path::parent).unwrap_or(&base_dir);
+        let dir = from_path.and_then(Path::parent).unwrap_or(base_dir);
         Some(normalize(&dir.join(specifier)).display().to_string())
     } else if Path::new(specifier).is_absolute() {
         Some(normalize(Path::new(specifier)).display().to_string())
@@ -49,16 +64,16 @@ pub(crate) fn resolve_kind(
         None
     };
     if let Some(candidate) = candidate {
-        if has_inline_source(&state, &candidate) {
+        if has_source(&candidate) {
             return Ok(("file", candidate));
         }
-        if let Some(found) = probe_source_file(&state, &candidate) {
+        if let Some(found) = probe_source_file(shared, &candidate) {
             return Ok(("file", found));
         }
     }
-    let virtual_modules = state.shared.virtual_modules.read().unwrap_or_else(|poison| poison.into_inner());
+    let virtual_modules = shared.virtual_modules.read().unwrap_or_else(|poison| poison.into_inner());
     let lookup = |name: &str| virtual_modules.canonical_name(name);
-    let resolved = state.shared.resolver.resolve(specifier, from_path, &base_dir, kind, &lookup)?;
+    let resolved = shared.resolver.resolve(specifier, from_path, base_dir, kind, &lookup)?;
     Ok(match resolved {
         Resolved::Builtin(name) => ("builtin", name),
         Resolved::Virtual(name) => ("virtual", name),
@@ -68,14 +83,13 @@ pub(crate) fn resolve_kind(
 
 /// Whether `key` names a module evaluated from a string or a registered source file.
 pub(crate) fn has_inline_source(state: &LoopState, key: &str) -> bool {
-    state.inline_sources.borrow().contains_key(key)
-        || state.shared.source_files.read().unwrap_or_else(|poison| poison.into_inner()).contains_key(key)
+    state.inline_sources.borrow().contains_key(key) || registered_source(&state.shared, key).is_some()
 }
 
 /// A registered source file for an extensionless or directory specifier, probed like Node.
-fn probe_source_file(state: &LoopState, base: &str) -> Option<String> {
+fn probe_source_file(shared: &Shared, base: &str) -> Option<String> {
     const SUFFIXES: [&str; 8] = [".js", ".mjs", ".cjs", ".ts", ".json", "/index.js", "/index.mjs", "/index.ts"];
-    let files = state.shared.source_files.read().unwrap_or_else(|poison| poison.into_inner());
+    let files = shared.source_files.read().unwrap_or_else(|poison| poison.into_inner());
     if files.is_empty() {
         return None;
     }
@@ -87,8 +101,8 @@ fn probe_source_file(state: &LoopState, base: &str) -> Option<String> {
 }
 
 /// The source of a file registered with `register_source_files`.
-pub(crate) fn registered_source(state: &LoopState, key: &str) -> Option<std::sync::Arc<str>> {
-    state.shared.source_files.read().unwrap_or_else(|poison| poison.into_inner()).get(key).cloned()
+pub(crate) fn registered_source(shared: &Shared, key: &str) -> Option<std::sync::Arc<str>> {
+    shared.source_files.read().unwrap_or_else(|poison| poison.into_inner()).get(key).cloned()
 }
 
 fn inline_source(state: &LoopState, key: &str) -> Option<String> {

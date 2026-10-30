@@ -4,6 +4,8 @@
 mod config;
 mod items;
 mod persist;
+mod providers;
+mod retry;
 mod submenu;
 mod submenus;
 mod theme_submenu;
@@ -68,6 +70,7 @@ impl SettingsSelector {
             model_thinking: model_thinking_factory(thinking, callbacks.clone()),
             model_thinking_summary: overrides_summary(&overrides.borrow()),
             theme: theme_factory(&config, &callbacks),
+            providers: providers::factory(&config, callbacks.clone()),
         };
         let items = build_items(&config, supports_images, submenus);
 

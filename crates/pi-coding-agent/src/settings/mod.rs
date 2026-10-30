@@ -19,10 +19,7 @@ pub use storage::{FileSettingsStorage, InMemorySettingsStorage, SettingsEdit, Se
 
 /// Global provider exclusions, including for catalog-only CLI commands.
 pub(crate) fn disabled_providers(agent_dir: &std::path::Path) -> Vec<String> {
-    SettingsManager::create(agent_dir, agent_dir, SettingsOptions { project_trusted: false })
-        .global_settings()
-        .disabled_providers
-        .unwrap_or_default()
+    SettingsManager::create(agent_dir, agent_dir, SettingsOptions { project_trusted: false }).disabled_providers()
 }
 
 #[cfg(test)]

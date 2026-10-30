@@ -34,16 +34,7 @@ fn custom_overlay_options(options: Option<&Value>, js: &JsComponent) -> OverlayO
     if options.is_some() {
         return overlay_options(options);
     }
-    let reference = js.js().clone();
-    let width = js
-        .js()
-        .handle()
-        .blocking_with(move |scope| {
-            let value = scope.value(&reference)?;
-            Ok(value.as_object().and_then(|object| object.get::<_, f64>("width").ok()))
-        })
-        .ok()
-        .flatten();
+    let width = js.js().blocking_get("width").ok().and_then(|value| value.as_json().and_then(Value::as_f64));
     match width {
         Some(width) if width > 0.0 => overlay_options(Some(&json!({"width": width}))),
         _ => OverlayOptions::default(),

@@ -10,12 +10,13 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock, Weak};
 use futures::future::BoxFuture;
 use pi_agent::{ToolContext, ToolUpdateCallback};
 use pi_ai::{ApiProvider, EventSender};
-use pi_js::{HostFunction, HostValue, JsError, JsHandle, JsRef, JsRuntime, JsRuntimeOptions};
+use pi_js::{HostFunction, HostValue, JsBackend, JsError, JsHandle, JsRef, JsRuntime, JsRuntimeOptions};
 use pi_mcp::McpServerRegistry;
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
+use super::backend::ExtensionRuntime;
 use super::inline::InlineExtension;
 use super::provider::LoginRequest;
 use super::registry::Registry;
@@ -79,11 +80,15 @@ pub struct ExtensionRunner {
     js: JsHandle,
     runtime: Mutex<Option<JsRuntime>>,
     host: OnceLock<JsRef>,
+    backend: JsBackend,
+    /// The `--extension-runtime` choice, passed on to the runner a reload starts.
+    requested_runtime: OnceLock<ExtensionRuntime>,
     cwd: PathBuf,
     agent_dir: PathBuf,
     pub(crate) registry: RwLock<Registry>,
     session: RwLock<Weak<AgentSession>>,
     pub(crate) targets: Mutex<HashMap<u64, Weak<AgentSession>>>,
+    pub(crate) sdk: super::ops_sdk::SdkState,
     bindings: RwLock<ExtensionBindings>,
     ids: AtomicU64,
     pub(crate) signals: Mutex<HashMap<u64, CancellationToken>>,
@@ -124,21 +129,31 @@ fn js_error(error: JsError) -> anyhow::Error {
 }
 
 impl ExtensionRunner {
-    /// Start a JavaScript runtime with the host modules; no extension is loaded yet.
+    /// Start a JavaScript runtime on `backend` with the host modules; no extension is loaded yet.
     pub fn start(
         cwd: &Path,
         agent_dir: &Path,
         model_runtime: Arc<ModelRuntime>,
+        backend: JsBackend,
     ) -> BoxFuture<'static, anyhow::Result<Arc<Self>>> {
         let (cwd, agent_dir) = (cwd.to_path_buf(), agent_dir.to_path_buf());
-        Box::pin(async move { Self::start_at(cwd, agent_dir, model_runtime).await })
+        Box::pin(async move { Self::start_at(cwd, agent_dir, model_runtime, backend).await })
     }
 
-    async fn start_at(cwd: PathBuf, agent_dir: PathBuf, model_runtime: Arc<ModelRuntime>) -> anyhow::Result<Arc<Self>> {
+    async fn start_at(
+        cwd: PathBuf,
+        agent_dir: PathBuf,
+        model_runtime: Arc<ModelRuntime>,
+        backend: JsBackend,
+    ) -> anyhow::Result<Arc<Self>> {
         let mut options = JsRuntimeOptions::new(&cwd);
+        options.backend = backend.clone();
         options.name = "pi-extensions".into();
         options.virtual_modules = modules::virtual_modules();
         options.env = Some(pi_ai::env::process_env());
+        if matches!(backend, JsBackend::Node { .. }) {
+            options.cache_dir = Some(agent_dir.join("cache").join("pi-js-node"));
+        }
         // Host work runs on the caller's runtime, so operations survive the runner they started from.
         options.tokio = tokio::runtime::Handle::try_current().ok();
         let runtime = JsRuntime::new(options).map_err(js_error)?;
@@ -170,11 +185,14 @@ impl ExtensionRunner {
                 js: js.clone(),
                 runtime: Mutex::new(Some(runtime)),
                 host: OnceLock::new(),
+                backend,
+                requested_runtime: OnceLock::new(),
                 cwd: cwd.clone(),
                 agent_dir,
                 registry: RwLock::default(),
                 session: RwLock::new(Weak::new()),
                 targets: Mutex::default(),
+                sdk: Default::default(),
                 bindings: RwLock::default(),
                 ids: AtomicU64::new(1),
                 signals: Mutex::default(),
@@ -218,6 +236,19 @@ impl ExtensionRunner {
 
     pub(crate) fn this(&self) -> Arc<Self> {
         self.weak.upgrade().expect("the runner is alive while it is used")
+    }
+
+    /// The engine running this runner's extensions, after any fallback to QuickJS.
+    pub fn backend(&self) -> &JsBackend {
+        &self.backend
+    }
+
+    pub(crate) fn requested_runtime(&self) -> Option<ExtensionRuntime> {
+        self.requested_runtime.get().copied()
+    }
+
+    pub(crate) fn set_requested_runtime(&self, runtime: ExtensionRuntime) {
+        let _ = self.requested_runtime.set(runtime);
     }
 
     pub fn cwd(&self) -> &Path {
@@ -380,6 +411,7 @@ impl ExtensionRunner {
 
     /// Stop the JavaScript runtime and restore the APIs it replaced. Pending calls fail.
     pub fn shutdown(&self) {
+        self.sdk.shutdown();
         self.restore_apis();
         for (_, watcher) in lock(&self.watchers).drain() {
             watcher.cancel();

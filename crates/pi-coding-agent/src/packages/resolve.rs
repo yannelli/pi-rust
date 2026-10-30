@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::bail;
 
 use super::glob::expand_package_glob;
-use super::manifest::read_pi_manifest;
+use super::manifest::{NATIVE_MANIFEST_ENTRY, native_commands, read_pi_manifest};
 use super::npm::installed_npm_matches;
 use super::settings_ops::package_source_text;
 use super::source::{LocalSource, ParsedSource, parse_source};
@@ -57,7 +57,19 @@ fn collect_files_from_manifest_entries(entries: &[String], root: &Path, kind: Re
             paths.push(normalize(&root.join(entry)));
         }
     }
-    collect_files_from_paths(&paths, kind)
+    let files = collect_files_from_paths(&paths, kind);
+    if kind != ResourceType::Extensions {
+        return files;
+    }
+    files.into_iter().flat_map(expand_native).collect()
+}
+
+/// A package's `package.json` extension entry becomes one `native:` path per `pi.native` entry.
+fn expand_native(file: PathBuf) -> Vec<PathBuf> {
+    if file.file_name().is_none_or(|name| name != NATIVE_MANIFEST_ENTRY) {
+        return vec![file];
+    }
+    native_commands(&file).into_iter().map(|command| PathBuf::from(command.extension_path)).collect()
 }
 
 /// Files a package offers for `kind` after its own manifest overrides.
@@ -301,11 +313,15 @@ impl PackageManager {
         }
         // A package that fails to install is skipped like an offline one, so the others still load.
         if let Err(error) = self.install_parsed_source(parsed, scope).await {
-            let failure = PackageInstallFailure { source: source.to_string(), scope, message: format!("{error:#}") };
-            self.install_failures.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(failure);
+            self.record_install_failure(source, scope, &error);
             return Ok(false);
         }
         Ok(true)
+    }
+
+    fn record_install_failure(&self, source: &str, scope: SourceScope, error: &anyhow::Error) {
+        let failure = PackageInstallFailure { source: source.to_string(), scope, message: format!("{error:#}") };
+        self.install_failures.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(failure);
     }
 
     async fn resolve_package_sources(
@@ -326,6 +342,25 @@ impl PackageManager {
             let parsed = parse_source(&resolved_source);
             let mut metadata = PathMetadata::new(source, scope, SourceOrigin::Package);
             let installed = match &parsed {
+                ParsedSource::Marketplace { name, tag } => {
+                    let marketplace = self.marketplace();
+                    let (installed, path) = match marketplace
+                        .installed_package(name)
+                        .and_then(|installed| Ok((installed, marketplace.package_path(name)?)))
+                    {
+                        Ok(found) => found,
+                        Err(error) => {
+                            self.record_install_failure(&resolved_source, resolved_scope, &error);
+                            continue;
+                        }
+                    };
+                    let matches =
+                        installed.as_ref().is_some_and(|package| tag.as_ref().is_none_or(|tag| tag == &package.tag));
+                    if !matches && !self.install_missing(&parsed, &resolved_source, resolved_scope, on_missing).await? {
+                        continue;
+                    }
+                    path
+                }
                 ParsedSource::Local(local) => {
                     let base = self.base_dir_for_scope(resolved_scope)?;
                     resolve_local_package(acc, local, filter, metadata, &base);

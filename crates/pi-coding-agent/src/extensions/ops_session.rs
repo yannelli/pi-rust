@@ -32,9 +32,12 @@ fn tree_json(manager: &SessionManager) -> Value {
     tree.roots.iter().map(|root| node(&tree, *root)).collect()
 }
 
-/// `ctx.sessionManager` methods (upstream `ReadonlySessionManager`).
 fn read_session(session: &AgentSession, method: &str, args: &Args) -> Result<Value, JsError> {
-    let manager = session.session_manager();
+    read_manager(&session.session_manager(), method, args)
+}
+
+/// `ctx.sessionManager` methods (upstream `ReadonlySessionManager`); method arguments start at 2.
+pub(super) fn read_manager(manager: &SessionManager, method: &str, args: &Args) -> Result<Value, JsError> {
     Ok(match method {
         "getCwd" => json!(manager.cwd().display().to_string()),
         "getSessionDir" => json!(manager.session_dir().display().to_string()),
@@ -66,7 +69,7 @@ fn read_session(session: &AgentSession, method: &str, args: &Args) -> Result<Val
         }
         "getHeader" => serde_json::to_value(manager.header_raw()).unwrap_or(Value::Null),
         "getEntries" => manager.entries().iter().map(entry_json).collect(),
-        "getTree" => tree_json(&manager),
+        "getTree" => tree_json(manager),
         "getSessionName" => json!(manager.session_name()),
         other => return Err(error(format!("Unknown session method: {other}"))),
     })
@@ -194,8 +197,11 @@ fn action(runner: &ExtensionRunner, session: &Arc<AgentSession>, name: &str, arg
             let (message, options) = (args.json(1), args.json(2));
             let on_error = report(runner, "send_message");
             if let Some(run) = session.send_extension_message(message, &options).map_err(error)? {
+                let busy = session.begin_extension_prompt();
                 tokio::spawn(async move {
-                    if let Err(failure) = run.await {
+                    let result = run.await;
+                    drop(busy);
+                    if let Err(failure) = result {
                         on_error(failure);
                     }
                 });

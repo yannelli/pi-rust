@@ -95,9 +95,20 @@ pub enum UncaughtKind {
 pub type UncaughtCallback = Arc<dyn Fn(UncaughtKind, &JsError) + Send + Sync>;
 pub type ExitCallback = Arc<dyn Fn(i32) + Send + Sync>;
 
+/// The engine that runs the JavaScript.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum JsBackend {
+    /// QuickJS on a thread of this process.
+    #[default]
+    QuickJs,
+    /// A `node` child process (Node 22 or later); see [`crate::node_backend`].
+    Node { executable: PathBuf },
+}
+
 /// Settings for [`JsRuntime::new`].
 #[derive(Clone)]
 pub struct JsRuntimeOptions {
+    pub backend: JsBackend,
     /// Thread name, also used for the owned tokio runtime's threads.
     pub name: String,
     pub cwd: PathBuf,
@@ -125,6 +136,7 @@ impl JsRuntimeOptions {
     pub fn new(cwd: impl Into<PathBuf>) -> Self {
         let exe = std::env::current_exe().map(|path| path.display().to_string()).unwrap_or_else(|_| "pi".into());
         Self {
+            backend: JsBackend::QuickJs,
             name: "pi-js".into(),
             cwd: cwd.into(),
             argv: vec![exe],
@@ -196,6 +208,10 @@ impl JsRuntime {
             },
             output: options.output.clone(),
         });
+        if let JsBackend::Node { executable } = &options.backend {
+            let (handle, thread) = crate::node_backend::start(&options, executable, shared)?;
+            return Ok(Self { handle, thread: Some(thread), owned_tokio });
+        }
         let (sender, receiver) = mpsc::channel();
         let (ready_sender, ready) = mpsc::channel();
         let setup = LoopSetup { memory_limit: options.memory_limit, max_stack_size: options.max_stack_size };
@@ -225,7 +241,7 @@ impl std::ops::Deref for JsRuntime {
 
 impl Drop for JsRuntime {
     fn drop(&mut self) {
-        let _ = self.handle.send(Message::Shutdown);
+        self.handle.shutdown();
         if let Some(thread) = self.thread.take()
             && !self.handle.on_js_thread()
         {

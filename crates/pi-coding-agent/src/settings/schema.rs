@@ -93,13 +93,13 @@ pub struct TerminalSettings {
     /// pi-rust extension: the shortest run in seconds that notifies; 10 by default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notify_min_seconds: Option<f64>,
-    /// pi-rust extension: `true`, `false` (the default), or an object of iTerm2 features.
+    /// Legacy pi-rust key: `true`, `false`, or an object of iTerm2 features. `marketplace:iterm2` reads it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iterm2: Option<Value>,
 }
 
-/// `terminal.iterm2` (pi-rust extension): the iTerm2 features to use. `true` turns on all of them;
-/// in an object, a feature that is not named is on.
+/// Legacy `terminal.iterm2`: the iTerm2 features to use. `true` turns on all of them; in an
+/// object, a feature that is not named is on.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ITerm2Features {
     pub tab_color: bool,
@@ -208,9 +208,8 @@ pub struct PromptHistorySettings {
     pub max_entries: Option<f64>,
 }
 
-/// `statusLine` (pi-rust extension): replaces the footer's path and stats lines. `type` is
-/// `"builtin"`, `"command"` (session JSON on stdin, as in Claude Code), `"claude"`, `"cursor"`,
-/// `"codex"`, or `"off"`.
+/// Legacy pi-rust `statusLine`, read by `marketplace:statusline`. `type` is `"builtin"`,
+/// `"command"`, `"claude"`, `"cursor"`, `"codex"`, or `"off"`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusLineSettings {
@@ -331,6 +330,38 @@ pub enum FullscreenScrollbar {
     Auto,
     Always,
     Hidden,
+}
+
+/// `extensionRuntime` (pi-rust extension): the engine that runs extensions. `auto` picks Node
+/// when a loaded package asks for it (`pi.runtime: "node"`) or ships a `.node` addon.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExtensionRuntime {
+    #[default]
+    QuickJs,
+    Node,
+    Auto,
+}
+
+impl ExtensionRuntime {
+    pub const NAMES: &[&str] = &["quickjs", "node", "auto"];
+
+    pub fn parse(text: &str) -> Option<Self> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "quickjs" => Some(Self::QuickJs),
+            "node" => Some(Self::Node),
+            "auto" => Some(Self::Auto),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::QuickJs => "quickjs",
+            Self::Node => "node",
+            Self::Auto => "auto",
+        }
+    }
 }
 
 /// Every `settings.json` key. `extra` keeps keys this version does not know.
@@ -465,6 +496,8 @@ pub struct Settings {
     /// Lines per wheel event (1 to 100), or `"auto"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fullscreen_wheel_scroll_lines: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extension_runtime: Option<ExtensionRuntime>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }

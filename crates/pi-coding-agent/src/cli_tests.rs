@@ -61,6 +61,10 @@ fn reports_bad_input_like_upstream() {
     let acp = parse("--mode acp --terminal-login");
     assert_eq!((acp.mode, acp.terminal_login), (Some(OutputMode::Acp), true));
     assert!(parse("--tui-mode wide").errors[0].contains("Invalid TUI mode"));
+    assert_eq!(parse("--extension-runtime node").extension_runtime, Some(ExtensionRuntime::Node));
+    assert_eq!(parse("--extension-runtime AUTO").extension_runtime, Some(ExtensionRuntime::Auto));
+    assert!(parse("--extension-runtime deno").errors[0].contains("Invalid extension runtime \"deno\""));
+    assert_eq!(parse("--extension-runtime").errors, ["--extension-runtime requires quickjs, node, or auto"]);
     assert_eq!(parse("--use-theme").errors, ["--use-theme requires a theme name"]);
     assert_eq!(parse("--name").errors, ["--name requires a value"]);
     assert!(parse("-t read,+bash").errors[0].contains("cannot be mixed"));

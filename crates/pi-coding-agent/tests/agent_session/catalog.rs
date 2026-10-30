@@ -126,11 +126,15 @@ async fn disabled_providers_stay_hidden_after_refresh_and_can_be_reenabled() {
     runtime
         .register_extension_provider(
             "openrouter",
-            json!({"api": "openai-completions", "baseUrl": server.url,
+            json!({"name": "Router", "api": "openai-completions", "baseUrl": server.url,
         "apiKey": "test-key", "models": [{"id": "extension-model"}]}),
         )
         .unwrap();
     assert!(runtime.get_model("openrouter", "extension-model").is_none());
+    let providers = runtime.all_providers();
+    assert!(providers.contains(&("anthropic".into(), "anthropic".into())));
+    assert!(providers.contains(&("openrouter".into(), "Router".into())));
+    assert!(providers.windows(2).all(|pair| pair[0].0 < pair[1].0));
     runtime.set_disabled_providers(Vec::new());
     assert!(runtime.get_model("openrouter", "extension-model").is_some());
     assert!(runtime.get_model("anthropic", "cached").is_some());
@@ -148,5 +152,6 @@ async fn models_json_still_applies_over_dynamic_catalogs() {
     let runtime = start(dir.path(), &server.url).await;
     assert!(runtime.get_model("local", "mine").is_some());
     assert!(runtime.has_configured_auth("local"));
+    assert!(runtime.all_providers().contains(&("local".into(), "local".into())));
     assert!(runtime.all_models().len() > 100, "the bundled catalog stays");
 }

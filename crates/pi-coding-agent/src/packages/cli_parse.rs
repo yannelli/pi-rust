@@ -179,7 +179,7 @@ pub(crate) fn help_text(command: Command) -> String {
     let trust = "  -a, --approve     Trust project-local files for this command\n  -na, --no-approve Ignore project-local files for this command";
     match command {
         Command::Install => format!(
-            "Usage:\n  {usage}\n\nInstall a package and add it to settings.\n\nOptions:\n  -l, --local       Install project-locally ({CONFIG_DIR_NAME}/settings.json)\n{trust}\n\nExamples:\n  {APP_NAME} install npm:@foo/bar\n  {APP_NAME} install git:github.com/user/repo\n  {APP_NAME} install git:git@github.com:user/repo\n  {APP_NAME} install https://github.com/user/repo\n  {APP_NAME} install ssh://git@github.com/user/repo\n  {APP_NAME} install https://example.com/pkg.tar.gz\n  {APP_NAME} install ./local/path\n"
+            "Usage:\n  {usage}\n\nInstall a package and add it to settings.\n\nOptions:\n  -l, --local       Install project-locally ({CONFIG_DIR_NAME}/settings.json)\n{trust}\n\nExamples:\n  {APP_NAME} install marketplace:todo\n  {APP_NAME} install npm:@foo/bar\n  {APP_NAME} install git:github.com/user/repo\n  {APP_NAME} install git:git@github.com:user/repo\n  {APP_NAME} install https://github.com/user/repo\n  {APP_NAME} install ssh://git@github.com/user/repo\n  {APP_NAME} install https://example.com/pkg.tar.gz\n  {APP_NAME} install ./local/path\n"
         ),
         Command::Remove => format!(
             "Usage:\n  {usage}\n\nRemove a package and its source from settings.\nAlias: {APP_NAME} uninstall <source> [-l]\n\nOptions:\n  -l, --local       Remove from project settings ({CONFIG_DIR_NAME}/settings.json)\n{trust}\n\nExamples:\n  {APP_NAME} remove npm:@foo/bar\n  {APP_NAME} uninstall npm:@foo/bar\n"

@@ -7,6 +7,7 @@ mod extension_dialogs;
 mod extensions;
 mod gaps;
 mod harness;
+mod host_additions;
 mod init;
 mod keys;
 mod notify;

@@ -101,6 +101,23 @@ fn extension_input_submits_typed_value() {
 }
 
 #[test]
+fn secret_extension_input_masks_the_value() {
+    let submitted = Calls::new();
+    let on_submit = submitted.recorder();
+    let harness = Harness::new(80, 20, |_| {
+        let mut on_submit = on_submit;
+        let opts = ExtensionInputOptions { initial_value: Some("ab".into()), secret: true, ..Default::default() };
+        ExtensionInput::new("Token", None, move |value: &str| on_submit(value.to_string()), || {}, opts)
+    });
+    harness.type_text("c");
+    let screen = harness.screen();
+    assert!(screen.contains("> ***"), "{screen}");
+    assert!(!screen.contains("cab"), "{screen}");
+    harness.send(keys::ENTER);
+    assert_eq!(submitted.get(), ["cab"]);
+}
+
+#[test]
 fn extension_input_cancels_on_timeout() {
     let cancelled = Calls::new();
     let harness = Harness::new(80, 20, |tui| {
