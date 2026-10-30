@@ -160,16 +160,14 @@ pub fn collect_direct_files(dir: &Path, kind: ResourceType) -> Vec<PathBuf> {
         .collect()
 }
 
-/// The entry files of an extension directory: `package.json` `pi.extensions`, else `index.ts` or `index.js`.
+/// The entry files of an extension directory: `package.json` `pi.extensions` (and the
+/// `package.json` itself for `pi.native`), else `index.ts` or `index.js`.
 pub fn resolve_extension_entries(dir: &Path) -> Option<Vec<PathBuf>> {
-    let manifest = std::fs::read_to_string(dir.join("package.json"))
-        .ok()
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(text.trim_start_matches('\u{feff}')).ok());
-    let declared = manifest.as_ref().and_then(|value| value.pointer("/pi/extensions")?.as_array().cloned());
-    let entries: Vec<PathBuf> = declared
+    let manifest = crate::packages::manifest::read_pi_manifest(&dir.join("package.json"));
+    let entries: Vec<PathBuf> = manifest
+        .and_then(|manifest| manifest.extensions)
         .unwrap_or_default()
         .iter()
-        .filter_map(|entry| entry.as_str())
         .map(|entry| super::paths::normalize(&dir.join(entry)))
         .filter(|path| path.exists())
         .collect();

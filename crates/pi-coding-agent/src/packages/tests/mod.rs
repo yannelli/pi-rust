@@ -7,6 +7,7 @@ mod cli;
 mod config;
 mod git;
 mod install;
+mod native;
 mod resolve;
 mod sources;
 mod update;

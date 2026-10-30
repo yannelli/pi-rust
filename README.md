@@ -123,6 +123,7 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. This se
 | More harness themes | | [Themes](crates/pi-coding-agent/docs/terminal.md#themes) |
 | The iTerm2 integration (`terminal.iterm2`) and `/terminal-setup` | | [iTerm2 integration](crates/pi-coding-agent/docs/terminal.md#iterm2-integration) |
 | Extension UI calls: `ctx.ui.writeTerminal(data, { tmuxPassthrough })` writes raw bytes to the terminal. Footer data of `ctx.ui.setFooter` also has `getSessionStats()` (`input`, `output`, `cacheRead`, `cacheWrite`, `cost`, `contextTokens`, `contextWindow`, `contextPercent`) and `getRunState()` (`idle`, `working`, `blocked`, `done`, or `error`). | Has none of them | |
+| Native extensions: a package lists programs in `package.json` `pi.native`, and pi runs each one as an extension over a JSON-RPC protocol on stdio | Loads only TypeScript and JavaScript extensions | [Native extension protocol](docs/extensions/native-protocol.md) |
 
 ### Bug fixes that are open upstream
 

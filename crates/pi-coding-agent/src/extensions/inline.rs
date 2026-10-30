@@ -99,7 +99,7 @@ impl ExtensionRunner {
             let file = vendor_root().join("inline").join(format!("{index}.js"));
             files.push((file.clone(), factory_source(index, &extension.events())));
             let path = inline_path(extension.as_ref());
-            entries.push(LoadEntry { path, resolved_path: file, source_info: None });
+            entries.push(LoadEntry { path, resolved_path: file, source_info: None, native: None });
         }
         self.js().register_source_files(files);
         self.load_entries(&entries).await;
