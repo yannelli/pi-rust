@@ -56,7 +56,7 @@ Run `pi --help` to see all options. In interactive mode, type `/` to see the com
 | [Interactive commands](crates/pi-coding-agent/docs/commands.md) | `/diff`, `/context`, `/export`, `/init`, `/review`, `/undo`, `/retry`, and prompt history |
 | [CLI commands and flags](crates/pi-coding-agent/docs/cli.md) | `pi completion`, `pi doctor`, `pi sessions`, `pi stats`, run limits, structured output, and `pi extensions` |
 | [Extension marketplace](crates/pi-coding-agent/docs/marketplace.md) | Find, install, update, and remove native Rust extensions |
-| [Providers](crates/pi-coding-agent/docs/providers.md) | Wire protocols, logins, Cursor, Grok Build, Google Antigravity, `disabledProviders`, OpenRouter, and account model lists |
+| [Providers](crates/pi-coding-agent/docs/providers.md) | Wire protocols, logins, Cursor, Google Antigravity, `disabledProviders`, OpenRouter, and account model lists |
 | [Status line](crates/pi-coding-agent/docs/status-line.md) | The `marketplace:statusline` extension and the move from the built-in status line |
 | [Terminal](crates/pi-coding-agent/docs/terminal.md) | Themes, notifications, and the `marketplace:iterm2` extension |
 | [ACP mode](crates/pi-coding-agent/docs/acp.md) | `pi --mode acp` for Zed and other editors |
@@ -119,7 +119,7 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. This se
 | Run limits (`--max-turns`, `--max-cost`) and structured output (`--output-schema`, `--output-retries`) | | [Run limits](crates/pi-coding-agent/docs/cli.md#run-limits) |
 | `pi --mode acp`. Permission modes are separate from thinking levels and control tool execution. | Needs the separate pi-acp adapter | [ACP mode](crates/pi-coding-agent/docs/acp.md) |
 | Account model lists for OpenAI Codex, Anthropic, GitHub Copilot, OpenAI, xAI, Google, and Cursor | Limits only OpenRouter | [Account model lists](crates/pi-coding-agent/docs/providers.md#account-model-lists) |
-| The providers `cursor`, `grok-build`, and `google-antigravity` | Has none of them | [Subscription providers](crates/pi-coding-agent/docs/providers.md#cursor-grok-build-and-google-antigravity-pi-rust-extension) |
+| The providers `cursor` and `google-antigravity` | Has none of them | [Subscription providers](crates/pi-coding-agent/docs/providers.md#cursor-and-google-antigravity-pi-rust-extension) |
 | The global `disabledProviders` setting hides providers from model selection and keeps their credentials. The TUI `/settings` menu has a **Disabled providers** list. | | [Disable providers](crates/pi-coding-agent/docs/providers.md#disable-providers) |
 | `/settings` items for the `retry.*` and `retry.provider.*` values | Sets these values only in `settings.json` | [Retry settings](crates/pi-coding-agent/docs/providers.md#retry-settings) |
 | A terminal notification when a run takes 10 seconds or more | Has this only as the example extension `notify.ts` | [Notifications](crates/pi-coding-agent/docs/terminal.md#notifications) |

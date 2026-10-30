@@ -11,22 +11,20 @@ pi-rust has all the wire protocols of upstream pi:
 
 The bundled model catalog is the catalog of upstream pi. `pi update --models` updates it.
 
-pi-rust also has `cursor-agent`, `grok-build-responses`, and `antigravity-acp` for the subscription providers in the next section.
+pi-rust also has `cursor-agent` and `antigravity-acp` for the subscription providers in the next section.
 
-`/login` supports OAuth for Anthropic, OpenAI Codex, GitHub Copilot, OpenRouter, xAI, Kimi, Meta, Radius, Cursor, Grok Build, and Google Antigravity. pi also accepts API keys and the default AWS and Google credentials of your system. llama.cpp servers and virtual models work as in upstream pi.
+`/login` supports OAuth for Anthropic, OpenAI Codex, GitHub Copilot, OpenRouter, xAI, Kimi, Meta, Radius, Cursor, and Google Antigravity. pi also accepts API keys and the default AWS and Google credentials of your system. llama.cpp servers and virtual models work as in upstream pi.
 
-## Cursor, Grok Build, and Google Antigravity (pi-rust extension)
+## Cursor and Google Antigravity (pi-rust extension)
 
-These providers use your subscription. Log in with `/login cursor`, `/login grok-build`, or `/login google-antigravity`.
+These providers use your subscription. Log in with `/login cursor` or `/login google-antigravity`.
 
 | Provider | Login | Default model |
 | --- | --- | --- |
 | `cursor` | pi opens the Cursor login page and waits until you approve the login. | `claude-opus-5-high` |
-| `grok-build` | Enter the device code from pi at x.ai (SuperGrok or X Premium). | `grok-4.7` |
 | `google-antigravity` | If Google's Antigravity ACP server is not installed, pi asks to install it. Then open the Google sign-in link that pi shows. On a remote machine, paste the `127.0.0.1` address from the browser into pi. | `gemini-3.1-pro` |
 
 - Cursor runs the model on Cursor's agent service. pi gives its tools to Cursor as MCP tools and runs them itself. The model list and the context sizes come from your Cursor account.
-- Grok Build sends requests to the Grok CLI chat proxy. If the proxy asks for a newer client version, set `GROK_CLIENT_VERSION`.
 - Google Antigravity runs through the Antigravity ACP server. The agent uses the pi tools, so pi runs each tool. The agent also connects to your MCP servers.
 
 [Subscription providers](../../../docs/providers/subscription-providers.md) has the protocol details.
@@ -147,4 +145,4 @@ With a Cursor login, pi reads `AvailableModels` from the Cursor agent service. E
 
 ### Other providers
 
-Grok Build and Google Antigravity show their bundled model lists. pi-rust does not read their account model lists yet. Other providers show the full catalog.
+Google Antigravity shows its bundled model list. pi-rust does not read their account model lists yet. Other providers show the full catalog.
