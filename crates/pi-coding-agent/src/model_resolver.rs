@@ -32,7 +32,6 @@ pub const DEFAULT_MODEL_PER_PROVIDER: &[(&str, &str)] = &[
     ("openrouter", "moonshotai/kimi-k2.6"),
     ("vercel-ai-gateway", "zai/glm-5.1"),
     ("xai", "grok-4.7"),
-    ("grok-build", "grok-4.7"),
     ("google-antigravity", "gemini-3.1-pro"),
     ("cursor", "claude-opus-5-high"),
     ("groq", "openai/gpt-oss-120b"),

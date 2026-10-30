@@ -1,13 +1,12 @@
-# Subscription providers: Cursor, Grok Build, and Google Antigravity
+# Subscription providers: Cursor and Google Antigravity
 
 Created: 2026-10-29. Last updated: 2026-10-30.
 
-These three providers are pi-rust extensions. Upstream pi does not have them. Their models are in `crates/pi-ai/models.extra.json`. `cargo xtask models` regenerates `models.json` from the upstream catalog and does not change this file.
+These two providers are pi-rust extensions. Upstream pi does not have them. Their models are in `crates/pi-ai/models.extra.json`. `cargo xtask models` regenerates `models.json` from the upstream catalog and does not change this file.
 
 | Provider ID | API | Login | Code |
 | --- | --- | --- | --- |
 | `cursor` | `cursor-agent` | Cursor CLI browser login, then pi polls for the result | `providers/cursor/`, `auth/oauth/cursor.rs` |
-| `grok-build` | `grok-build-responses` | xAI device code | `providers/grok_build.rs`, `auth/oauth/xai.rs` |
 | `google-antigravity` | `antigravity-acp` | Google login of the installed Antigravity ACP server | `providers/antigravity_acp/`, `auth/oauth/antigravity_acp.rs` |
 
 All paths are in `crates/pi-ai/src`. The tests use local mock servers. No test calls a live service.
@@ -39,21 +38,6 @@ Chat goes over HTTP/1.1. reqwest does not need its `http2` feature.
   - pi does not show hidden models (`is_hidden`).
 - Context use: each `conversation_checkpoint_update` carries `token_details.used_tokens`. pi puts the last value in `usage.totalTokens`, which the footer shows as context use.
 - Model IDs without a `compat` route: a GPT ID with an effort suffix asks for its base model with a `reasoning` parameter, for example `gpt-5.5-high` gives `gpt-5.5` with `reasoning=high`. `composer-2.5` sends `fast=false`. pi sends other IDs unchanged.
-
-## Grok Build
-
-References: Nextvisit/platform `GrokBuildProvider`, `GrokBuildRequestBody`, and `GrokRequestHeaders`; River `subscriptions/grok.ts`.
-
-- Login is the xAI device-code flow of the `xai` provider: client `b1a00492-073a-47ea-816f-4c329264a828`, with the scopes `grok-cli:access api:access`.
-- Requests go to `https://cli-chat-proxy.grok.com/v1/responses` with the Grok CLI headers: `X-XAI-Token-Auth: xai-grok-cli`, `x-grok-client-version`, `x-grok-client-identifier: grok-shell`, `x-grok-client-mode: cli`, `x-grok-model-override`, and `x-grok-conv-id`. The default client version is `1.0.45`. `GROK_CLIENT_VERSION` replaces it.
-- pi changes the OpenAI Responses body for the proxy:
-  - pi moves system and developer items into `instructions`.
-  - pi removes item IDs, and reasoning items that have no `encrypted_content`.
-  - pi removes empty text parts.
-  - pi removes `temperature`, `top_p`, `max_output_tokens`, `prompt_cache_retention`, and `user`.
-  - pi sends tools with `strict: false` and an object schema.
-  - `reasoning` keeps only `effort`. When thinking is off, pi sends no `reasoning`.
-- HTTP 426 means the client version is too old. HTTP 402 and 403 mean the plan does not include Grok Build, or no usage is left.
 
 ## Google Antigravity
 
@@ -94,6 +78,6 @@ pi is an Agent Client Protocol (ACP) client of Google's Antigravity ACP server. 
 
 ## Not done yet
 
-- Account model lists: pi does not read Grok Build `GET /models` yet. Antigravity shows the bundled model rows; the server rejects a model that it does not offer.
+- Account model lists: Antigravity shows the bundled model rows. The server rejects a model that it does not offer.
 - Antigravity: pi does not resume a server session after pi restarts (`session/load`). A new pi process starts a new ACP session with the conversation in the context resource.
 - Cursor: pi does not keep a run open between calls over HTTP/2. pi does not change to a new conversation ID after a `resource_exhausted` error.

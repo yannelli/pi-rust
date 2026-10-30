@@ -192,7 +192,6 @@ static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
     providers.insert("pi-messages".into(), Arc::new(providers::pi_messages::PiMessages));
     providers.insert("antigravity-acp".into(), Arc::new(providers::antigravity_acp::AntigravityAcp));
     providers.insert("cursor-agent".into(), Arc::new(providers::cursor::CursorAgent));
-    providers.insert("grok-build-responses".into(), Arc::new(providers::grok_build::GrokBuildResponses));
     providers
         .insert("azure-openai-responses".into(), Arc::new(providers::azure_openai_responses::AzureOpenAIResponses));
     RwLock::new(providers)

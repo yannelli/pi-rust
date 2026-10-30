@@ -107,8 +107,8 @@ pi-rust adds this behavior on purpose. Do not report these items as gaps in the 
   - `google` from the Gemini API `/models`
   - `cursor` from `AvailableModels`
 
-  Grok Build and Google Antigravity use their bundled lists in `crates/pi-ai/models.extra.json`. pi-rust does not read their account model lists yet.
-- Subscription providers `cursor`, `grok-build`, and `google-antigravity` with their logins and the APIs `cursor-agent`, `grok-build-responses`, and `antigravity-acp` ([Subscription providers](../providers/subscription-providers.md)).
+  Google Antigravity uses its bundled list in `crates/pi-ai/models.extra.json`.
+- Subscription providers `cursor` and `google-antigravity` with their logins and the APIs `cursor-agent` and `antigravity-acp` ([Subscription providers](../providers/subscription-providers.md)).
 - Markdown export: if the output path ends in `.md`, `/export` and `pi --export` write Markdown ([Export](../../crates/pi-coding-agent/docs/commands.md#export)).
 - The README section "Differences from upstream pi" lists the other additions: slash commands, CLI commands and flags, and settings. It also lists the bugs that pi-rust fixes and that are still open upstream. `allowlist.json` holds the matching parity report entries.
 

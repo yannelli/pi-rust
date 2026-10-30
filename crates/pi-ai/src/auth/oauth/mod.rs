@@ -57,7 +57,7 @@ pub use radius_config::{
     DEFAULT_RADIUS_GATEWAY, RadiusGatewayConfig, load_radius_gateway_config, normalize_radius_gateway_url,
     radius_credential_config, radius_models, radius_models_from_config,
 };
-pub use xai::{GrokBuildOAuth, XaiOAuth};
+pub use xai::XaiOAuth;
 
 /// Provider ids with a built-in OAuth flow, in upstream's provider order.
 /// The providers only pi-rust has follow them.
@@ -73,7 +73,6 @@ pub const BUILTIN_OAUTH_PROVIDER_IDS: &[&str] = &[
     "xai",
     "cursor",
     "google-antigravity",
-    "grok-build",
 ];
 
 /// A Radius login for a configured gateway, as upstream's `createRadiusOAuth({ name, gateway })`.
@@ -96,7 +95,6 @@ pub fn builtin_oauth(provider_id: &str) -> Option<Arc<dyn OAuthAuth>> {
         "xai" => Arc::new(XaiOAuth::default()),
         "cursor" => Arc::new(CursorOAuth::default()),
         "google-antigravity" => Arc::new(AntigravityAcpOAuth),
-        "grok-build" => Arc::new(GrokBuildOAuth::default()),
         _ => return None,
     };
     Some(oauth)

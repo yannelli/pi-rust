@@ -14,7 +14,6 @@ pub mod faux;
 pub mod github_copilot;
 pub mod google;
 pub mod google_vertex;
-pub mod grok_build;
 #[cfg(test)]
 pub(crate) mod http_mock;
 mod http_stream;
