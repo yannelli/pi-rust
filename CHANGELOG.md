@@ -2,6 +2,45 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.8.0] - 2026-10-30
+
+### Breaking Changes
+
+- move the status line and iTerm2 integration to marketplace extensions ([62af9ce](https://github.com/yannelli/pi-rust/commit/62af9ce2e394e830764e207b157eb7dad132b3fe))
+
+### Added
+
+- **extensions:** extend native protocol v1 for SDK 1.1 ([3ef0614](https://github.com/yannelli/pi-rust/commit/3ef0614f966bd69d10ae7d84f333a8a0bd70ff85))
+- **extensions:** select the extension runtime (quickjs, node, auto) ([2a314d2](https://github.com/yannelli/pi-rust/commit/2a314d2f51f81616d492aff777808be6fb32bdd0))
+- **extensions:** send isProjectTrusted in the native ctx snapshot ([75ccd5c](https://github.com/yannelli/pi-rust/commit/75ccd5c779696fdb8f67eb1db1a20fdf978c4c4c))
+- **js:** run extensions on a node child process ([f309c1b](https://github.com/yannelli/pi-rust/commit/f309c1b372e420afaefb33ea5dcb7f6cc9019d01))
+- **tui:** browse and manage extensions ([742430d](https://github.com/yannelli/pi-rust/commit/742430ddeb969785b18ee5621aabbe78e7ae245c))
+- **extensions:** expose SDK runtime modules and report export gaps ([6ee6d18](https://github.com/yannelli/pi-rust/commit/6ee6d183c0ea1e71da578a4c29ee4d8638361022))
+- **extensions:** load native extensions through a JavaScript bridge ([79f71bb](https://github.com/yannelli/pi-rust/commit/79f71bb5e288cf80797fd114cfea0e0975678227))
+- **extensions:** resolve pi.native entries as native: extension paths ([61b2474](https://github.com/yannelli/pi-rust/commit/61b2474fbdebeb9867d244011f720b8f1983b03d))
+- **packages:** install signed marketplace extensions ([3fe599b](https://github.com/yannelli/pi-rust/commit/3fe599b5b665f1379b8f9de3e300d8228bdeab3e))
+- **js:** add a backend selector to JsRuntimeOptions ([485c136](https://github.com/yannelli/pi-rust/commit/485c136743c46850295cb5ffef1f077e9d4fc014))
+- **extensions:** add writeTerminal and footer stats, run state, and branch change hooks ([607a438](https://github.com/yannelli/pi-rust/commit/607a438aeb8cd8c217dddd6da75521978d62d5db))
+- **tui:** configure providers and retry settings ([4bb5eae](https://github.com/yannelli/pi-rust/commit/4bb5eaecec884d49d5905689846028f27cb1d27d))
+
+### Fixed
+
+- **js:** make the Node backend and marketplace tests pass on Windows ([f54c65c](https://github.com/yannelli/pi-rust/commit/f54c65c264502905a97cdd4d4057490769fd51e9))
+- **js:** drop an import that only the unix bootstrap test uses ([f3f2005](https://github.com/yannelli/pi-rust/commit/f3f2005f59edf49183eb173b0a7f03f3368f209c))
+- **extensions:** close review gaps in native protocol 1.1 ([86ff4d5](https://github.com/yannelli/pi-rust/commit/86ff4d51a527aa1686ddfa9e1238478d3a8cb214))
+- **extensions:** keep the session busy while a sendMessage-triggered turn starts ([baa0bb3](https://github.com/yannelli/pi-rust/commit/baa0bb36b4afbb0f7142b4a7960aa6e0636dc198))
+- **js:** skip strings, comments, and regexes when hiding require calls ([7465168](https://github.com/yannelli/pi-rust/commit/7465168b5814136563bccbbc951436a0f972a250))
+- **js:** move the Node backend protocol to a loopback socket ([8e44a9a](https://github.com/yannelli/pi-rust/commit/8e44a9a9239581d2c35d4ac51e22ebeb92888bcf))
+- **extensions:** honor native event patches, gate ctx waits, report writeTerminal ([d8c3a0a](https://github.com/yannelli/pi-rust/commit/d8c3a0a1361c8a3a7d5adc54044fb6fa799995d7))
+- **packages:** keep a marketplace install while another settings scope lists it ([2887954](https://github.com/yannelli/pi-rust/commit/2887954f77168eaf9d3a7311a3831e04e5f82ea4))
+- **packages:** lock marketplace installs across processes with a lock file ([8a3069b](https://github.com/yannelli/pi-rust/commit/8a3069b1eeed85356529d10842c1c2e4dbc23dc1))
+- **tui:** show pinned, up-to-date and offline marketplace updates in /extensions ([6525e78](https://github.com/yannelli/pi-rust/commit/6525e78ddf9ac5e0d12712c3061c40839af36364))
+- **packages:** compare marketplace tags as semver and report pinned and offline updates ([8c79db0](https://github.com/yannelli/pi-rust/commit/8c79db00006f2405f38b46331e56ce4315f219d6))
+- **packages:** skip and report an invalid marketplace entry so other packages still load ([c775e1b](https://github.com/yannelli/pi-rust/commit/c775e1b9b640007582cfd3f77298ca19f87c4581))
+- **tui:** add a no limit choice for the server retry delay and fix the timeout description ([6a09112](https://github.com/yannelli/pi-rust/commit/6a09112a124a209982bcb88b8ac523f980a6c6c3))
+- **js:** load registered CommonJS sources on Node before 22.15 ([e276c0c](https://github.com/yannelli/pi-rust/commit/e276c0c1c22fcd1f7e4baf9b8f6d3d2153d06320))
+- **extensions:** hold native host requests until the first ctx ([b397eae](https://github.com/yannelli/pi-rust/commit/b397eae61e79242e056acb7afc8da3e1ef3f6287))
+
 ## [0.7.8] - 2026-10-30
 
 ### Added
