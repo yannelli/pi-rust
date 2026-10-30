@@ -20,9 +20,9 @@ export function extensionName(path) {
 
 /** The extension whose code is on the stack, else `undefined`. */
 function caller(extensions) {
-	const stack = new Error().stack ?? "";
+	const stack = (new Error().stack ?? "").replace(/\\/g, "/");
 	for (const ext of extensions()) {
-		if (ext.resolvedPath && stack.includes(ext.resolvedPath)) return ext;
+		if (ext.resolvedPath && stack.includes(ext.resolvedPath.replace(/\\/g, "/"))) return ext;
 	}
 	return undefined;
 }
