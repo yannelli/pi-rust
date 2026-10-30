@@ -54,6 +54,7 @@ fn thinking_name(level: &str) -> &str {
 fn provider_name(provider: &str) -> &str {
     match provider {
         "xai" => "xAI",
+        "grok-build" => "Grok Build",
         "openai" => "OpenAI",
         "openai-codex" => "OpenAI Codex",
         "anthropic" => "Anthropic",

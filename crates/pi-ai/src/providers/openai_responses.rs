@@ -11,7 +11,8 @@ mod tests;
 #[cfg(test)]
 mod tests_transcript;
 
-use self::request::{Compat, build_body, configuration_update_effort, grammar_properties};
+use self::request::configuration_update_effort;
+pub(crate) use self::request::{Compat, build_body, grammar_properties};
 use crate::identity::identity_headers;
 use crate::providers::common::{HttpRequest, endpoint, has_header, header_map_with, spawn_provider_stream};
 use crate::providers::github_copilot::copilot_dynamic_headers;

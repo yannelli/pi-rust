@@ -25,6 +25,9 @@
 | Diagnose a CI failure or a flaky test | [docs/agents/ci-triage.md](docs/agents/ci-triage.md) |
 | Ship a change | [docs/agents/release.md](docs/agents/release.md) |
 | Run the scheduled gap review | [docs/agents/daily-gap-check.md](docs/agents/daily-gap-check.md) |
+| Change the Cursor, Grok Build, or Google Antigravity provider | [docs/providers/subscription-providers.md](docs/providers/subscription-providers.md) |
+
+All documents are listed in [docs/INDEX.md](docs/INDEX.md).
 
 # Shared state
 
