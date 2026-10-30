@@ -15,6 +15,7 @@ use crate::resources::source_info::{SourceInfo, SourceScope};
 pub const BUILTIN_SLASH_COMMANDS: &[(&str, &str, Option<&str>)] = &[
     ("settings", "Open settings menu", None),
     ("extensions", "Browse installed extensions and the marketplace", None),
+    ("acp", "Manage ACP agents: install from the registry, log in, enable, set default, mode", None),
     ("model", "Select model (opens selector UI)", Some("<provider/model>")),
     ("tree", "Navigate session tree (switch branches)", None),
     ("thinking", "Set thinking level", Some("<level>")),

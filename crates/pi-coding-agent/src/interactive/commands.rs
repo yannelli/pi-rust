@@ -49,6 +49,9 @@ impl InteractiveMode {
         } else if text == "/scoped-models" {
             clear();
             self.show_models_selector();
+        } else if let Some(args) = argument(text, "acp") {
+            clear();
+            self.handle_acp_command(args.map(str::to_string));
         } else if let Some(search) = argument(text, "model") {
             clear();
             self.handle_model_command(search.map(str::to_string));
