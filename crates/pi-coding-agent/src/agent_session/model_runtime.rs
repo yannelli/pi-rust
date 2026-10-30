@@ -58,6 +58,7 @@ pub struct ModelRuntime {
     /// `refreshModels`, `oauth.modifyModels`, `images`, and `classifiers` of extension providers.
     pub(super) extension_hooks: RwLock<HashMap<String, super::runtime_extension_ops::ExtensionHookState>>,
     pub(super) offline_refreshes: OfflineRefreshes,
+    usage: pi_ai::usage::UsageService,
 }
 
 pub(super) fn read<T>(lock: &RwLock<T>) -> RwLockReadGuard<'_, T> {
@@ -83,6 +84,7 @@ impl ModelRuntime {
             Arc::new(move |provider: &str| read(&registered).get(provider).cloned().or_else(|| builtin(provider)));
         let resolver = Arc::new(AuthResolver::new(runtime_store.clone(), oauth).with_env(options.credential_env));
         resolver.set_provider_configs(registry.auth_configs());
+        let usage = pi_ai::usage::UsageService::new(resolver.clone());
         let runtime = Self {
             registry: RwLock::new(registry),
             disabled_providers: RwLock::new(disabled),
@@ -98,6 +100,7 @@ impl ModelRuntime {
             extension_oauth,
             extension_hooks: RwLock::default(),
             offline_refreshes: OfflineRefreshes::default(),
+            usage,
         };
         runtime.refresh_configured_providers().await;
         runtime
@@ -169,6 +172,11 @@ impl ModelRuntime {
     }
 
     /// The persistent credential store (`auth.json`), without runtime keys.
+    /// Subscription usage of the logged-in providers, cached per provider.
+    pub fn usage(&self) -> &pi_ai::usage::UsageService {
+        &self.usage
+    }
+
     pub fn credential_store(&self) -> Arc<dyn CredentialStore> {
         self.runtime_store.inner().clone()
     }

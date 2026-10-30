@@ -47,4 +47,5 @@ pub mod system_prompt;
 pub mod theme;
 pub mod tools;
 pub mod update;
+pub mod usage_cli;
 pub mod virtual_models;

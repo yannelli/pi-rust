@@ -169,6 +169,7 @@ Line-based surfaces: a widget (surface `widget:<key>`), the footer (surface `foo
 | --- | --- | --- |
 | `llm.complete` | `{ model?: "provider/id", systemPrompt?, prompt? \| messages?, maxTokens?, temperature?, reasoning?, headers? }` | `{ message, text }` |
 | `auth.getProviderAuth` | `{ provider }` | `{ apiKey, headers, source }` or `null` |
+| `usage.get` | `{ provider?, refresh? }` | `{ providers: [{ provider, plan, windows: [{ label, usedPercent, resetsAt, windowMinutes }], error, fetchedAt }] }` |
 | `events.emit` | `{ channel, data }` | `null` |
 | `events.subscribe` / `events.unsubscribe` | `{ channel }` | `null` |
 | `exec` | `{ command, args?, cwd?, timeout?, stdin? }` | `{ stdout, stderr, code, killed }` |
@@ -179,6 +180,11 @@ Line-based surfaces: a widget (surface `widget:<key>`), the footer (surface `foo
 | `pi.call` | `{ target: "pi" \| "ctx" \| "ctx.ui" \| "ctx.sessionManager" \| "ctx.modelRegistry", method, args?: [] }` | the awaited return value as JSON |
 
 - `llm.complete` uses the current model, or `provider/id`, with the credentials of pi. The key stays in pi. `prompt` is one user message; `messages` are pi-ai messages. `headers` is an object of string values (else `-32602`) that goes on the request over the headers of pi; a header name of the request replaces the header of pi with the same name, compared without case. `text` joins the text blocks of the answer.
+- `usage.get` returns the subscription limits of pi's logins, as `/usage` shows them. Without `provider`, the list has one entry for each logged-in provider that has a usage fetcher: `anthropic`, `openai-codex`, `cursor`, and `google-antigravity`. With `provider`, the list has one entry for that provider. pi keeps each result for 60 seconds (5 minutes for `google-antigravity`); `refresh: true` fetches again.
+  - `plan` is the plan name, or `null`. `fetchedAt` is the fetch time in Unix milliseconds.
+  - `usedPercent` is a number from 0 to 100. `resetsAt` is an ISO 8601 UTC time (`2026-10-30T17:00:00Z`) or `null`. `windowMinutes` is the window length (`300` for 5 hours, `10080` for a week) or `null`.
+  - `error` is a message, or `null`. A provider without a login, without a usage fetcher, or whose request fails has `error` and no windows. The method itself does not fail for these.
+  - pi-rust 0.8.2 and older answer `-32601`.
 - `model.find` returns the model in the shape of the ctx snapshot `model`, or `null` when `provider` or `id` is missing or is not a string.
 - `exec` writes `stdin` to the standard input of the process and then closes it. Without `stdin`, the process gets no standard input.
 - `events.subscribe` delivers each `pi.events` message on `channel` as an `events.message` notification.

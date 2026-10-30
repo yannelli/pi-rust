@@ -238,3 +238,72 @@ fn a_pasted_redirect_goes_to_the_loopback_port_of_the_sign_in_url() {
     assert!(redirect_target(sign_in, "4/abc").is_err());
     assert!(redirect_target("https://accounts.google.com/o/oauth2/auth", "code=c").is_err());
 }
+
+const USAGE_REPORT: &str = "### Session Usage\n- **Session total:** data not available yet\n\n### Quota Limits\n- **Gemini Models**\n  - **Weekly Limit Remaining:** 91% remaining (resets Oct 02, 2026, 08:22 UTC)\n- **Claude and GPT models**\n  *(Shared pool)*\n  - **Weekly Limit Remaining:** 100% remaining\n  - **Daily Requests:** Disabled\n";
+
+/// Answers `/usage` with the server's Markdown report in two chunks.
+async fn usage_agent(stream: tokio::io::DuplexStream) {
+    let (read, mut write) = tokio::io::split(stream);
+    let mut lines = BufReader::new(read).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        let message: Value = serde_json::from_str(&line).unwrap();
+        let (Some(method), id) = (message["method"].as_str(), message["id"].clone()) else { continue };
+        SEEN.lock().unwrap().push((method.to_string(), message["params"].clone()));
+        let mut out = Vec::new();
+        match method {
+            "initialize" => out.push(json!({"jsonrpc": "2.0", "id": id, "result": {"protocolVersion": 1}})),
+            "session/new" => out.push(json!({"jsonrpc": "2.0", "id": id, "result": {"sessionId": "u1"}})),
+            "session/prompt" => {
+                for text in USAGE_REPORT.split_inclusive("### Quota") {
+                    let update =
+                        json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}});
+                    out.push(json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "u1", "update": update}}));
+                }
+                out.push(json!({"jsonrpc": "2.0", "id": id, "result": {"stopReason": "end_turn"}}));
+            }
+            _ => {}
+        }
+        for message in out {
+            write.write_all(format!("{message}\n").as_bytes()).await.unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn usage_sends_the_usage_command_and_reads_the_quota_report() {
+    let _serial = SERIAL.lock().await;
+    SEEN.lock().unwrap().clear();
+    set_test_agent(Some(Arc::new(|| {
+        let (client, agent_side) = tokio::io::duplex(1 << 20);
+        tokio::spawn(usage_agent(agent_side));
+        let (read, write) = tokio::io::split(client);
+        Connection::new(read, write)
+    })));
+    let windows = super::usage().await.unwrap();
+    set_test_agent(None);
+    let expected =
+        [("Gemini Models: Weekly", 9.0, Some("2026-10-02T08:22:00Z")), ("Claude and GPT models: Weekly", 0.0, None)];
+    let actual: Vec<_> = windows
+        .iter()
+        .map(|window| (window.label.as_str(), window.used_percent, window.resets_at.as_deref()))
+        .collect();
+    assert_eq!(actual, expected);
+    assert!(windows.iter().all(|window| window.window_minutes == Some(10_080)));
+    let seen = SEEN.lock().unwrap().clone();
+    let prompt = seen.iter().find(|(method, _)| method == "session/prompt").unwrap();
+    assert_eq!(prompt.1["prompt"], json!([{"type": "text", "text": "/usage"}]));
+    assert_eq!(seen.iter().find(|(method, _)| method == "session/new").unwrap().1["mcpServers"], json!([]));
+}
+
+#[test]
+fn usage_report_errors_become_messages() {
+    use super::usage::parse_report;
+    let report = |line: &str| format!("### Session Usage\n\n### Quota Limits\n{line}\n");
+    assert_eq!(
+        parse_report(&report("- Unable to retrieve quota status (HTTP 500)")).unwrap_err(),
+        "Antigravity cannot read the quota: HTTP 500"
+    );
+    assert!(parse_report(&report("- Not applicable for current authentication method.")).is_err());
+    assert!(parse_report(&report("- No quota limits reported.")).unwrap().is_empty());
+    assert!(parse_report("Hello").unwrap_err().contains("did not answer /usage"));
+}

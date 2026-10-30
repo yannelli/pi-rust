@@ -19,7 +19,7 @@ pub(crate) mod http_mock;
 mod http_stream;
 pub mod mistral;
 #[cfg(test)]
-mod mock_http;
+pub(crate) mod mock_http;
 #[cfg(test)]
 pub(crate) mod mock_server;
 pub mod openai_codex;

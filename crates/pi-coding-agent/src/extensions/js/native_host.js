@@ -1,7 +1,7 @@
 // Extension-to-host requests of native extensions: each maps onto a `pi.*`, `ctx.*`, or
 // `ctx.ui.*` member of the JavaScript extension API.
 import { complete } from "@earendil-works/pi-ai";
-import { call } from "./bridge.js";
+import { call, callAsync } from "./bridge.js";
 import { rpcError } from "./native_rpc.js";
 
 const isSignal = (value) =>
@@ -249,6 +249,7 @@ export function hostMethods(state) {
 		"ctx.getSystemPrompt": () => ctx().getSystemPrompt(),
 		"llm.complete": (p, signal) => llmComplete(ctx(), p, signal),
 		"auth.getProviderAuth": async (p) => toJson(await ctx().modelRegistry.getProviderAuth(p.provider)),
+		"usage.get": async (p) => toJson(await callAsync("models.usage", 0, p.provider ?? null, Boolean(p.refresh))),
 		"events.emit": (p) => (pi.events.emit(p.channel, p.data), done()),
 		"events.subscribe": (p) => {
 			if (!state.subscriptions.has(p.channel)) {
