@@ -33,7 +33,7 @@ pub const DEFAULT_MODEL_PER_PROVIDER: &[(&str, &str)] = &[
     ("vercel-ai-gateway", "zai/glm-5.1"),
     ("xai", "grok-4.7"),
     ("google-antigravity", "gemini-3.1-pro"),
-    ("cursor", "claude-opus-5-high"),
+    ("cursor", "claude-opus-5"),
     ("groq", "openai/gpt-oss-120b"),
     ("cerebras", "gpt-oss-120b"),
     ("zai", "glm-5.3"),

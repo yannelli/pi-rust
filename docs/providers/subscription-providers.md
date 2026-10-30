@@ -31,11 +31,13 @@ Chat goes over HTTP/1.1. reqwest does not need its `http2` feature.
 - The pi tools go to Cursor as MCP tools of the `pi-agent` server, in the `requestContext` reply. pi answers each `mcp_args` exec with a handoff text, and the turn ends with stop reason `toolUse`. The next call sends a `ResumeAction` with the tool results in the history.
 - pi answers `getBlobArgs`, `setBlobArgs`, `mcp_state`, hook, and interaction queries. It rejects other exec variants with `exec_variant_unsupported`.
 - Requests send `x-cursor-client-version: cli-2026.09.02-c22c1a3`. No environment variable replaces it. To send a different version, set the header in the `headers` of the `cursor` provider in `models.json`.
-- Model list: after the login, pi sends `POST /aiserver.v1.AiService/AvailableModels` with `AvailableModelsRequest{include_long_context_models, use_model_parameters, do_not_use_markdown, use_cloud_agent_effort_modes}`. Each variant becomes one model:
-  - The model ID is the `legacy_slug` of the variant. A model without variants uses its `name`.
-  - The context size is `context_token_limit`. A max mode variant uses `context_token_limit_for_max_mode`.
-  - `compat.cursorModel`, `compat.cursorParameters`, and `compat.cursorMaxMode` keep the route. pi sends them in `RequestedModel`.
-  - pi does not show hidden models (`is_hidden`).
+- Model list: after the login, pi sends `POST /aiserver.v1.AiService/AvailableModels` with `AvailableModelsRequest{include_long_context_models, use_model_parameters, do_not_use_markdown, use_cloud_agent_effort_modes}`. pi groups the variants as the ACP mode of the Cursor CLI does:
+  - pi makes one model for each model `name` and `fast` value. The ID is the `name`, with `-fast` for the variants with `fast=true`. The model name is the `client_display_name`, with ` Fast` for fast variants.
+  - The thinking level of a variant comes from its `effort`, `reasoning_effort`, or `reasoning` parameter. `none` is `off`, and `extra-high` is `xhigh`. With a `thinking` parameter, `thinking=false` is `off`, and `thinking=true` without an effort is `high`. If two variants have the same level, pi keeps the default variant, else the last one.
+  - The default route is the default variant of the group (`is_default`), else the variant with the level of the model's default variant.
+  - The context size is the `context` parameter of the default route (`256k`, `1m`). Without one, pi uses `context_token_limit`.
+  - `compat.cursorModel`, `compat.cursorSlug`, `compat.cursorParameters`, and `compat.cursorLevels` keep the routes. For each request, pi clamps the thinking level to the levels of the model and sends the route of that level in `RequestedModel`.
+  - pi does not show max mode variants and hidden models (`is_hidden`).
 - Context use: each `conversation_checkpoint_update` carries `token_details.used_tokens`. pi puts the last value in `usage.totalTokens`, which the footer shows as context use.
 - Model IDs without a `compat` route: a GPT ID with an effort suffix asks for its base model with a `reasoning` parameter, for example `gpt-5.5-high` gives `gpt-5.5` with `reasoning=high`. `composer-2.5` sends `fast=false`. pi sends other IDs unchanged.
 
@@ -68,6 +70,7 @@ pi is an Agent Client Protocol (ACP) client of Google's Antigravity ACP server. 
   - the MCP servers of the user that the agent can reach itself;
   - `_meta.antigravity` when the server shows `systemPrompt.append`. This holds the system prompt, `eagerMcpServers: ["pi-bridge"]`, and `enabledTools: []`, which turns off the built-in tools of Antigravity.
 - Model and thinking: pi sets the `model` selector to the model ID and the `thought_level` selector to the thinking level of the model row, with `session/set_config_option`. An older server gets `session/set_model`. If the server does not offer the model, the error lists the models that it offers.
+- Model list: the account model list starts the server in the temporary directory and sends `session/new` with no MCP servers. Each option of the `model` selector becomes one model. pi selects each model with `session/set_config_option` and reads the `thought_level` values from the reply. The thinking level map sends each pi level to its server value, for example `xhigh` to `extra_high`. A server without config options gives `models.availableModels` without levels. The list has a time limit of 90 s.
 - Tools: the bridge is a streamable HTTP MCP server on `127.0.0.1`. It accepts only `POST /mcp` with a random bearer token. It shows each pi tool as `pi_<name>`. A `tools/call` stays open while pi runs the tool, with an SSE keepalive every 15 s:
   1. The pi stream ends with stop reason `toolUse`.
   2. The next pi call sends the tool result to the open call.
@@ -78,6 +81,5 @@ pi is an Agent Client Protocol (ACP) client of Google's Antigravity ACP server. 
 
 ## Not done yet
 
-- Account model lists: Antigravity shows the bundled model rows. The server rejects a model that it does not offer.
 - Antigravity: pi does not resume a server session after pi restarts (`session/load`). A new pi process starts a new ACP session with the conversation in the context resource.
 - Cursor: pi does not keep a run open between calls over HTTP/2. pi does not change to a new conversation ID after a `resource_exhausted` error.

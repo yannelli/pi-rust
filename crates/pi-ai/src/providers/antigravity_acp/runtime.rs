@@ -24,6 +24,7 @@ const AUTHENTICATE_TIMEOUT: Duration = Duration::from_secs(330);
 const SIGN_IN_INSTRUCTIONS: &str = "Open this link to sign in with Google.";
 const PASTE_MESSAGE: &str =
     "If the browser cannot open the 127.0.0.1 page after sign-in (a remote machine), paste that page's address here:";
+const THOUGHT_LEVEL: [&str; 3] = ["thought_level", "thinking_level", "reasoning_effort"];
 const ROUTING: &str = "Use the pi_ tools from the pi-bridge MCP server for files, shell commands, and edits. They run in the user's pi session.";
 
 /// A user MCP server that Antigravity connects to itself, with the prefix of pi's own copies of its
@@ -108,13 +109,26 @@ fn selector<'a>(config: &'a [Value], kinds: &[&str]) -> Option<&'a Value> {
     })
 }
 
-fn values(selector: &Value) -> Vec<String> {
+/// The `(value, name)` of each option of `selector`, with grouped options flattened.
+fn named_values(selector: &Value) -> Vec<(String, String)> {
     let options = selector["options"].as_array().into_iter().flatten();
-    let flat = options.flat_map(|option| match option["options"].as_array() {
-        Some(group) => group.iter().filter_map(|item| item["value"].as_str()).map(str::to_string).collect::<Vec<_>>(),
-        None => option["value"].as_str().map(str::to_string).into_iter().collect(),
+    let items = options.flat_map(|option| match option["options"].as_array() {
+        Some(group) => group.iter().collect::<Vec<_>>(),
+        None => vec![option],
     });
-    flat.collect()
+    items
+        .filter_map(|item| {
+            let value = item["value"].as_str()?;
+            Some((
+                value.to_string(),
+                item["name"].as_str().filter(|name| !name.is_empty()).unwrap_or(value).to_string(),
+            ))
+        })
+        .collect()
+}
+
+fn values(selector: &Value) -> Vec<String> {
+    named_values(selector).into_iter().map(|(value, _)| value).collect()
 }
 
 impl Runtime {
@@ -200,7 +214,7 @@ impl Runtime {
         if selector(&self.config, &["model"]).is_some() {
             self.set_option(&["model"], model).await?;
             if let Some(effort) = effort {
-                self.set_option(&["thought_level", "thinking_level", "reasoning_effort"], effort).await?;
+                self.set_option(&THOUGHT_LEVEL, effort).await?;
             }
             return Ok(());
         }
@@ -327,4 +341,46 @@ async fn deliver_redirect(sign_in: &str, pasted: &str) -> Result<(), String> {
         .await
         .map_err(|error| format!("Cannot reach the Antigravity login callback: {error}"))?;
     Ok(())
+}
+
+/// A model of the server's `model` selector, with the `thought_level` values it offers.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct OfferedModel {
+    pub id: String,
+    pub name: String,
+    pub levels: Vec<String>,
+}
+
+/// The models of the login: the `model` selector of a new session and, for each model, its
+/// `thought_level` values. A server without config options gives `models.availableModels`.
+pub(crate) async fn offered_models() -> Result<Vec<OfferedModel>, String> {
+    let cwd = std::env::temp_dir();
+    let (connection, _server, _) = connect(&cwd).await?;
+    let params = json!({"cwd": cwd, "mcpServers": []});
+    let session = connection.request("session/new", params, SESSION_TIMEOUT).await.map_err(rpc)?;
+    let session_id = session["sessionId"].as_str().ok_or("Antigravity ACP returned no session id")?;
+    let mut config = session["configOptions"].as_array().cloned().unwrap_or_default();
+    let Some(models) = selector(&config, &["model"]).cloned() else {
+        let legacy = session.pointer("/models/availableModels").and_then(Value::as_array).into_iter().flatten();
+        let offered = legacy.filter_map(|model| {
+            let id = model["modelId"].as_str()?.to_string();
+            let name = model["name"].as_str().map_or_else(|| id.clone(), str::to_string);
+            Some(OfferedModel { id, name, levels: Vec::new() })
+        });
+        return Ok(offered.collect());
+    };
+    let mut offered = Vec::new();
+    for (id, name) in named_values(&models) {
+        let current = selector(&config, &["model"]).and_then(|option| option["currentValue"].as_str());
+        if current != Some(id.as_str()) {
+            let params = json!({"sessionId": session_id, "configId": models["id"], "value": id});
+            let reply = connection.request("session/set_config_option", params, SESSION_TIMEOUT).await.map_err(rpc)?;
+            if let Some(updated) = reply["configOptions"].as_array() {
+                config = updated.clone();
+            }
+        }
+        let levels = selector(&config, &THOUGHT_LEVEL).map(values).unwrap_or_default();
+        offered.push(OfferedModel { id, name, levels });
+    }
+    Ok(offered)
 }

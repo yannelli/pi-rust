@@ -21,11 +21,11 @@ These providers use your subscription. Log in with `/login cursor` or `/login go
 
 | Provider | Login | Default model |
 | --- | --- | --- |
-| `cursor` | pi opens the Cursor login page and waits until you approve the login. | `claude-opus-5-high` |
+| `cursor` | pi opens the Cursor login page and waits until you approve the login. | `claude-opus-5` |
 | `google-antigravity` | If Google's Antigravity ACP server is not installed, pi asks to install it. Then open the Google sign-in link that pi shows. On a remote machine, paste the `127.0.0.1` address from the browser into pi. | `gemini-3.1-pro` |
 
-- Cursor runs the model on Cursor's agent service. pi gives its tools to Cursor as MCP tools and runs them itself. The model list and the context sizes come from your Cursor account.
-- Google Antigravity runs through the Antigravity ACP server. The agent uses the pi tools, so pi runs each tool. The agent also connects to your MCP servers.
+- Cursor runs the model on Cursor's agent service. pi gives its tools to Cursor as MCP tools and runs them itself. The model list, the thinking levels, and the context sizes come from your Cursor account.
+- Google Antigravity runs through the Antigravity ACP server. The agent uses the pi tools, so pi runs each tool. The agent also connects to your MCP servers. The model list and the thinking levels come from the server.
 
 [Subscription providers](../../../docs/providers/subscription-providers.md) has the protocol details.
 
@@ -145,8 +145,18 @@ With a Gemini API key, pi reads `GET <base URL>/models` with `x-goog-api-key` an
 
 ### Cursor
 
-With a Cursor login, pi reads `AvailableModels` from the Cursor agent service. Each model variant of the account becomes one model. Its context size is the limit that Cursor gives for the variant, with the larger limit for max mode.
+With a Cursor login, pi reads `AvailableModels` from the Cursor agent service. pi shows one model for each Cursor model, for example `grok-4.7`. If Cursor also has fast variants, pi adds a second model, for example `grok-4.7-fast`.
+
+- The effort variants of a model are its thinking levels. `thinking=false` and the effort `none` are the level `off`.
+- The context size is the `context` value of the default variant. If the variant has no `context` value, pi uses the limit that Cursor gives for the model.
+- pi does not show max mode variants.
+
+### Google Antigravity
+
+With a Google Antigravity login, pi starts the Antigravity ACP server and opens a session. pi reads the `model` selector of the session. For each model, pi reads the values of the `thought_level` selector, which become the thinking levels of the model. The value `extra_high` is the level `xhigh`. The context size comes from the bundled model of the same ID, else from the first bundled Antigravity model.
+
+If the server is not installed, pi shows the bundled models.
 
 ### Other providers
 
-Google Antigravity shows its bundled model list. pi-rust does not read their account model lists yet. Other providers show the full catalog.
+Other providers show the full catalog.
