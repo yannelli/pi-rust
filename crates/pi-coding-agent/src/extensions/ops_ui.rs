@@ -93,8 +93,7 @@ pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<
             Value::Null
         }
         "writeTerminal" => {
-            ui.write_terminal(&args.str(1)?, args.json(2)["tmuxPassthrough"].as_bool().unwrap_or(false));
-            Value::Null
+            json!(ui.write_terminal(&args.str(1)?, args.json(2)["tmuxPassthrough"].as_bool().unwrap_or(false)))
         }
         "notify" => {
             ui.notify(&args.str(1)?, notify_type(&args.json(2)));

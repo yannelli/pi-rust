@@ -19,7 +19,7 @@ export function toJson(value) {
 	return text === undefined ? null : JSON.parse(text);
 }
 
-const isObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+export const isObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** RFC 7386 merge patch, applied to `target` in place. */
 export function mergePatch(target, patch) {
@@ -115,6 +115,36 @@ async function piCall(state, { target, method, args = [] }) {
 	return toJson(await member.apply(object, args));
 }
 
+const CTX_METHODS = new Set([
+	"ui.notify",
+	"ui.select",
+	"ui.confirm",
+	"ui.input",
+	"ui.editor",
+	"ui.setStatus",
+	"ui.setTitle",
+	"ui.setEditorText",
+	"ui.getEditorText",
+	"ui.writeTerminal",
+	"ui.setWidget",
+	"ui.setFooter",
+	"ui.custom",
+	"session.getEntries",
+	"session.getBranch",
+	"model.get",
+	"model.set",
+	"ctx.compact",
+	"ctx.abort",
+	"ctx.isIdle",
+	"ctx.getContextUsage",
+	"ctx.getSystemPrompt",
+	"llm.complete",
+	"auth.getProviderAuth",
+]);
+
+/** Whether request `method` reads `state.currentCtx()`, so it waits for the first ctx. */
+export const needsCtx = (method, params) => (method === "pi.call" ? params?.target !== "pi" : CTX_METHODS.has(method));
+
 /** The request handlers; `state.currentCtx()` is the ctx of the newest event or command. */
 export function hostMethods(state) {
 	const { pi } = state;
@@ -139,8 +169,7 @@ export function hostMethods(state) {
 		"ui.writeTerminal": (p) => {
 			const target = ctx().ui;
 			if (typeof target.writeTerminal !== "function") return false;
-			target.writeTerminal(String(p.data ?? ""), { tmuxPassthrough: Boolean(p.tmuxPassthrough) });
-			return true;
+			return Boolean(target.writeTerminal(String(p.data ?? ""), { tmuxPassthrough: Boolean(p.tmuxPassthrough) }));
 		},
 		"session.sendMessage": (p) => {
 			const { deliverAs, triggerTurn, ...message } = p;

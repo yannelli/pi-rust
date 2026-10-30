@@ -2,7 +2,7 @@
 // stdio, and this factory maps the protocol onto the `pi` API it receives.
 import { spawn } from "node:child_process";
 import { call } from "./bridge.js";
-import { hostMethods } from "./native_host.js";
+import { hostMethods, needsCtx } from "./native_host.js";
 import { autocompleteFactory, createRegistrar } from "./native_register.js";
 import { createPeer, readLines, rpcError } from "./native_rpc.js";
 import { createSurfaces } from "./native_ui.js";
@@ -126,7 +126,7 @@ async function loadNative(pi, spec) {
 	const contextual = Object.entries({ ...hostMethods(state), ...state.surfaces.methods }).map(([method, handler]) => [
 		method,
 		async (params, signal) => {
-			await state.whenCtx();
+			if (needsCtx(method, params)) await state.whenCtx();
 			return handler(params, signal);
 		},
 	]);

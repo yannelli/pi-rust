@@ -1,8 +1,17 @@
 // Registrations of native extensions: tools, commands, shortcuts, flags, events, providers,
 // virtual models, and autocomplete triggers become `pi.*` registrations that call the child.
-import { mergePatch, snapshot, toJson } from "./native_host.js";
+import { isObject, mergePatch, snapshot, toJson } from "./native_host.js";
 
 const TOOL_ABORT_MS = 5000;
+const TOOL_RESULT_KEYS = ["content", "details", "structuredContent", "isError", "usage"];
+
+/** The handler result of events whose runner reads only the result, built from a patched event. */
+const PATCHED_RESULTS = {
+	tool_result: (event) => Object.fromEntries(TOOL_RESULT_KEYS.filter((key) => key in event).map((key) => [key, event[key]])),
+	message_end: (event) => ({ message: event.message }),
+	context: (event) => ({ messages: event.messages }),
+	context_with_system: (event) => ({ messages: event.messages }),
+};
 
 function textResult(text) {
 	return { content: [{ type: "text", text }], isError: true };
@@ -20,8 +29,15 @@ export function createRegistrar(state) {
 	const forward = async (name, event, ctx) => {
 		if (state.dead) return undefined;
 		const reply = await request("event", { name, event: toJson(event), ctx: withCtx(ctx) }, { signal: event?.signal });
-		if (reply?.patch && typeof reply.patch === "object") mergePatch(event, reply.patch);
-		return reply?.result ?? undefined;
+		const result = reply?.result ?? undefined;
+		const patch = reply?.patch;
+		if (patch === undefined || patch === null) return result;
+		if (!isObject(patch)) {
+			state.log(`${name}: ignored a patch that is not a JSON object`);
+			return result;
+		}
+		mergePatch(event, patch);
+		return result ?? PATCHED_RESULTS[name]?.(event);
 	};
 
 	const tool = (definition) => {

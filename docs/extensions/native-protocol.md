@@ -1,6 +1,6 @@
 # Native extension protocol
 
-Created 2026-10-29. Last updated 2026-10-29.
+Created 2026-10-29. Last updated 2026-10-30.
 
 A native extension is a program that pi starts as a child process. pi and the child exchange JSON-RPC 2.0 messages. The built-in bridge (`crates/pi-coding-agent/src/extensions/js/native*.js`) runs in the extension runtime and maps each message onto the `pi` and `ctx` objects of the JavaScript extension API. The Rust SDK is `crates/pi-ext-sdk` in `yannelli/pi-rust-extensions`.
 
@@ -24,7 +24,8 @@ A package declares native extensions in `package.json`:
 - Both sides send requests, responses, and notifications. Each side numbers its own request ids.
 - `$/cancelRequest` `{ "id": <request id> }` cancels a request of the other side. The receiver still answers it: with a result, or with error `-32800`.
 - An extension-to-host method sent as a notification (no `id`) runs, and the host drops its result.
-- Error codes: `-32700` parse error, `-32600` invalid request, `-32601` unknown method, `-32602` invalid params, `-32603` internal error, `-32800` cancelled, `-32001` no UI, `-32002` no context (no event reached the extension within 30 seconds). A request that needs a ctx and arrives before the first event waits for that event. The bridge takes the ctx of `session_start` for every extension.
+- Error codes: `-32700` parse error, `-32600` invalid request, `-32601` unknown method, `-32602` invalid params, `-32603` internal error, `-32800` cancelled, `-32001` no UI, `-32002` no context (no event reached the extension within 30 seconds). A request that needs a ctx and arrives before the first event waits for that event; other requests are answered at once, also during `initialize`. The bridge takes the ctx of `session_start` for every extension.
+- Requests that need a ctx: `ui.notify`, `ui.select`, `ui.confirm`, `ui.input`, `ui.editor`, `ui.setStatus`, `ui.setTitle`, `ui.setEditorText`, `ui.getEditorText`, `ui.writeTerminal`, `ui.setWidget`, `ui.setFooter`, `ui.custom`, `session.getEntries`, `session.getBranch`, `model.get`, `model.set`, `ctx.*`, `llm.complete`, `auth.getProviderAuth`, and `pi.call` with a target other than `pi`.
 
 ## Lifecycle
 
@@ -84,8 +85,18 @@ Notifications: `initialized`, `exit`, `events.message` `{ channel, data }`, `ui.
 
 pi sends `event` only for the names the extension subscribed to. `event` is the event object of the JavaScript API without functions and without `signal`. When the event signal aborts, pi sends `$/cancelRequest`.
 
-- `patch` is an RFC 7386 JSON merge patch. pi applies it to the event object in place before the next handler runs. Examples: `{ "systemPromptOptions": { "sections": { "todo": "..." } } }` for `before_agent_start`, `{ "input": { "command": "ls" } }` for `tool_call`, `{ "content": [...] }` for `tool_result`. A `null` value removes the key.
+- `patch` is an RFC 7386 JSON merge patch. pi applies it to the event object in place before the next handler runs. A `null` value removes the key. pi ignores a patch that is not a JSON object and logs a line.
 - `result` is the handler return value: `{ block, reason }` for `tool_call`, `{ action: "transform", text }` for `input`, `{ compaction }` or `{ cancel: true }` for `session_before_compact`, `{ message }` for `message_end`, `{ messages }` for `context`, `{ entries, continue }` for `agent_before_settle`, and the other results of upstream pi.
+
+How each event uses a patch:
+
+| Events | Patch |
+| --- | --- |
+| `tool_call` (`input`), `before_agent_start` (`systemPromptOptions`), `before_provider_request` (`payload`), `before_provider_headers` (`headers`) | pi reads the changed event object. Example: `{ "input": { "command": "ls" } }` for `tool_call`. |
+| `tool_result`, `message_end`, `context`, `context_with_system` | When `result` is absent, pi builds it from the patched event: `{ content, details, structuredContent, isError, usage }` (the keys the event has) for `tool_result`, `{ message }` for `message_end`, `{ messages }` for the context events. Example: `{ "content": [...] }` for `tool_result`. |
+| All other events, including `input`, `turn_end`, `agent_before_settle`, `cache_warming_decision`, `resources_discover`, `user_bash`, `project_trust`, and `session_before_*` | pi reads only `result`; a patch has no effect. |
+
+pi builds no result for `before_agent_start`: a built `systemPrompt` would replace the whole system prompt.
 
 The ctx snapshot: `{ cwd, mode, hasUI, model, thinkingLevel, sessionId, sessionName, sessionFile, isIdle, isProjectTrusted, contextUsage, flags, footer? }`. `model` is `{ provider, id, name, api, contextWindow, maxTokens, reasoning }` or `null`. `flags` maps each flag of this extension to its value. `footer` is `{ gitBranch, sessionStats?, runState? }` when the host supplies it.
 
@@ -110,7 +121,7 @@ During `tool.execute` the extension sends `tool.update` notifications `{ toolCal
 | `ui.setTitle` | `{ title }` | `null` |
 | `ui.setEditorText` | `{ text }` | `null` |
 | `ui.getEditorText` | `{}` | string |
-| `ui.writeTerminal` | `{ data, tmuxPassthrough? }` | `true`, or `false` when the host cannot write |
+| `ui.writeTerminal` | `{ data, tmuxPassthrough? }` | `true` when pi wrote to the terminal (`tui` mode), else `false` |
 | `ui.custom` | `{ surface, lines, overlay?, overlayOptions? }` | `{ result }` when the panel closes |
 | `ui.update` | `{ surface, lines }` | `null` |
 | `ui.close` | `{ surface, result? }` | `null` |

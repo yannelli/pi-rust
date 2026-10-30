@@ -6,7 +6,9 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use pi_ai::providers::faux::FauxResponse;
-use pi_coding_agent::extension_ui::{DialogOptions, ExtensionMode, ExtensionUi, NotifyType, WidgetPlacement};
+use pi_coding_agent::extension_ui::{
+    DialogOptions, ExtensionMode, ExtensionUi, NoOpExtensionUi, NotifyType, WidgetPlacement,
+};
 use pi_coding_agent::extensions::{ComponentFactory, CustomRequest, ExtensionBindings};
 use pi_tui::Component;
 use serde_json::{Value, json};
@@ -88,6 +90,10 @@ impl ExtensionUi for NativeUi {
 
     fn set_editor_text(&self, _text: &str) {}
 
+    fn write_terminal(&self, _data: &str, _tmux_passthrough: bool) -> bool {
+        true
+    }
+
     async fn custom(&self, request: CustomRequest) -> Result<Option<Value>, String> {
         let mut component = request.factory.create_async().await?;
         let lines = tokio::task::block_in_place(|| {
@@ -111,10 +117,28 @@ fn package_json() -> String {
     .to_string()
 }
 
-async fn native(responses: Vec<FauxResponse>) -> (Harness, Arc<NativeUi>) {
+/// Records the numeric keys of `tool_call` events after the native handler ran.
+const OBSERVER: &str = r#"export default function (pi) {
+	pi.on("tool_call", (event) => {
+		if (event.input?.text === "array") pi.appendEntry("array-keys", { keys: Object.keys(event).filter((key) => /^\d+$/.test(key)) });
+	});
+}"#;
+
+async fn native_with(
+    responses: Vec<FauxResponse>,
+    mode: ExtensionMode,
+    ui: Arc<dyn ExtensionUi>,
+    observer: bool,
+) -> Harness {
+    let mut files = vec![("native-pkg/package.json", package_json())];
+    let mut load = vec!["native-pkg"];
+    if observer {
+        files.push(("observer.js", OBSERVER.to_string()));
+        load.push("observer.js");
+    }
     let h = harness(Setup {
-        files: vec![("native-pkg/package.json", package_json())],
-        load: vec!["native-pkg"],
+        files,
+        load,
         from_settings: true,
         flags: vec![("native-flag", json!("on"))],
         responses,
@@ -123,16 +147,24 @@ async fn native(responses: Vec<FauxResponse>) -> (Harness, Arc<NativeUi>) {
     })
     .await;
     assert!(h.errors().is_empty(), "{:?}", h.errors());
-    let ui = Arc::new(NativeUi::default());
     let errors = h.errors.clone();
     let bindings = ExtensionBindings {
-        ui: ui.clone(),
-        mode: ExtensionMode::Tui,
+        ui,
+        mode,
         on_error: Some(Arc::new(move |error| errors.lock().unwrap().push(error.clone()))),
         ..ExtensionBindings::default()
     };
     h.session.bind_extensions(bindings).await;
-    (h, ui)
+    h
+}
+
+async fn native(responses: Vec<FauxResponse>) -> (Harness, Arc<NativeUi>) {
+    let ui = Arc::new(NativeUi::default());
+    (native_with(responses, ExtensionMode::Tui, ui.clone(), false).await, ui)
+}
+
+fn entry_data(h: &Harness, custom_type: &str) -> Option<Value> {
+    h.entries().iter().find(|entry| entry["customType"] == custom_type).map(|entry| entry["data"].clone())
 }
 
 fn texts(h: &Harness, kind: &str) -> Vec<String> {
@@ -179,10 +211,7 @@ async fn commands_reach_dialogs_panels_and_the_model() {
     h.session.prompt("/native-ask", Vec::new()).await.unwrap();
     h.session.prompt("/native-panel", Vec::new()).await.unwrap();
     h.session.prompt("/native-llm", Vec::new()).await.unwrap();
-    let data = |custom_type: &str| {
-        let entries = h.entries();
-        entries.iter().find(|entry| entry["customType"] == custom_type).map(|entry| entry["data"].clone())
-    };
+    let data = |custom_type: &str| entry_data(&h, custom_type);
     assert_eq!(data("native-answer"), Some(json!({"answer": "blue"})));
     assert_eq!(data("native-panel"), Some(json!({"result": "closed by q"})));
     assert_eq!(data("native-llm"), Some(json!({"text": "llm answer"})));
@@ -218,4 +247,49 @@ async fn a_crashed_child_is_reported_once_and_its_tools_deactivate() {
     assert!(h.errors().iter().any(|error| error.contains("exited with code 3")), "{:?}", h.errors());
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     assert_eq!(exited(&ui.calls()), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn patches_reach_tool_results_messages_and_context() {
+    let h = native_with(
+        vec![
+            FauxResponse::tool_call("c1", "native_echo", json!({"text": "patch"})),
+            FauxResponse::tool_call("c2", "native_echo", json!({"text": "array"})),
+            FauxResponse::text("done patch"),
+        ],
+        ExtensionMode::Tui,
+        Arc::new(NativeUi::default()),
+        true,
+    )
+    .await;
+    h.session.prompt("patch context", Vec::new()).await.unwrap();
+    let transcript = h.transcript();
+    assert!(transcript.contains(&"toolResult: patched result".to_string()), "{transcript:?}");
+    assert!(transcript.contains(&"toolResult: echo: array".to_string()), "{transcript:?}");
+    assert!(transcript.contains(&"assistant: message patched".to_string()), "{transcript:?}");
+    let request = serde_json::to_string(&h.provider.requests()[0].messages).unwrap();
+    assert!(request.contains("context patched"), "{request}");
+    assert_eq!(entry_data(&h, "array-keys"), Some(json!({"keys": []})));
+    assert!(h.errors().is_empty(), "{:?}", h.errors());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn write_terminal_reports_whether_the_host_wrote() {
+    let (tui, _ui) = native(Vec::new()).await;
+    tui.session.prompt("/native-write", Vec::new()).await.unwrap();
+    assert_eq!(entry_data(&tui, "native-write"), Some(json!({"wrote": true})));
+
+    let print = native_with(Vec::new(), ExtensionMode::Print, Arc::new(NoOpExtensionUi), false).await;
+    print.session.prompt("/native-write", Vec::new()).await.unwrap();
+    assert_eq!(entry_data(&print, "native-write"), Some(json!({"wrote": false})));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn requests_without_a_ctx_are_answered_during_initialize() {
+    let (h, _ui) = native(Vec::new()).await;
+    h.session.prompt("/native-probe", Vec::new()).await.unwrap();
+    let probe = entry_data(&h, "native-probe").unwrap();
+    assert_eq!(probe["flag"], json!({"result": null}), "{probe}");
+    let commands = probe["commands"]["error"].as_str().unwrap_or_default();
+    assert!(commands.contains("cannot be called during extension loading"), "{probe}");
 }
