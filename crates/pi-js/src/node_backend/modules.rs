@@ -3,6 +3,9 @@
 
 use std::path::{Path, PathBuf};
 
+use oxc_allocator::Allocator;
+use oxc_parser::Parser;
+use oxc_span::SourceType;
 use serde_json::{Value, json};
 
 use super::client::NodeClient;
@@ -41,6 +44,30 @@ fn file_url(path: &Path) -> Result<String, JsError> {
         .map_err(|()| JsError::new(format!("cannot make a file URL of {}", path.display())))
 }
 
+// Node 22's require(ESM) asserts on Windows drive paths before it calls the resolve hook.
+fn file_specifiers(source: &str) -> Result<String, JsError> {
+    let allocator = Allocator::default();
+    let parsed = Parser::new(&allocator, source, SourceType::mjs()).parse();
+    if !parsed.diagnostics.is_empty() {
+        return Err(JsError::with_name("SyntaxError", parsed.diagnostics[0].message.to_string()));
+    }
+    let mut edits = Vec::new();
+    for (specifier, requests) in &parsed.module_record.requested_modules {
+        if Path::new(specifier.as_str()).is_absolute() {
+            let quoted = serde_json::to_string(&file_url(Path::new(specifier.as_str()))?).unwrap();
+            for request in requests {
+                edits.push((request.span, quoted.clone()));
+            }
+        }
+    }
+    edits.sort_by_key(|(span, _)| std::cmp::Reverse(span.start));
+    let mut source = source.to_string();
+    for (span, quoted) in edits {
+        source.replace_range(span.start as usize..span.end as usize, &quoted);
+    }
+    Ok(source)
+}
+
 /// `{ url }` for a specifier imported (or required) by the file `parent`.
 pub(crate) fn resolve(
     shared: &Shared,
@@ -69,7 +96,7 @@ pub(crate) fn resolve(
 pub(crate) fn load(shared: &Shared, client: &NodeClient, path: &str) -> Result<Value, JsError> {
     let path = Path::new(path);
     if let Some(name) = virtual_name(&client.virtual_dir, path) {
-        return Ok(json!({ "format": "module", "source": virtual_source(shared, &name)? }));
+        return Ok(json!({ "format": "module", "source": file_specifiers(&virtual_source(shared, &name)?)? }));
     }
     let key = path.display().to_string();
     let inline = client.inline_sources.read().unwrap_or_else(|poison| poison.into_inner()).get(&key).cloned();
@@ -100,7 +127,7 @@ pub(crate) fn load(shared: &Shared, client: &NodeClient, path: &str) -> Result<V
             if globals.dirname {
                 prefix.push_str("const __dirname = import.meta.dirname; ");
             }
-            json!({ "format": "module", "source": format!("{prefix}{}", transpiled.code) })
+            json!({ "format": "module", "source": format!("{prefix}{}", file_specifiers(&transpiled.code)?) })
         }
         ModuleFormat::CommonJs => json!({ "format": "commonjs", "source": transpiled.code }),
     })
@@ -143,5 +170,18 @@ mod tests {
         for name in ["pi:host", "@earendil-works/pi-ai/compat", "typebox", "a_b"] {
             assert_eq!(virtual_name(&dir, &virtual_path(&dir, name)).as_deref(), Some(name));
         }
+    }
+
+    #[test]
+    fn absolute_module_specifiers_use_file_urls() {
+        let path = std::env::current_dir().unwrap().join("vendor space/#entry.ts");
+        let quoted_path = serde_json::to_string(&path).unwrap();
+        let quoted_url = serde_json::to_string(&file_url(&path).unwrap()).unwrap();
+        let source = format!(
+            "import {{ value }} from {quoted_path};\nexport {{ value }} from {quoted_path};\nexport * from {quoted_path};\nimport {quoted_path};\nconst text = {quoted_path};\nconst load = () => import({quoted_path});\nexport * from './relative.js';\nexport * from 'node:fs';\nexport * from {quoted_url};\n"
+        );
+        let expected = source.replacen(&quoted_path, &quoted_url, 4);
+        assert_eq!(file_specifiers(&source).unwrap(), expected);
+        assert_eq!(file_specifiers(&expected).unwrap(), expected);
     }
 }
