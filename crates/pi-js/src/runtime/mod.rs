@@ -95,9 +95,20 @@ pub enum UncaughtKind {
 pub type UncaughtCallback = Arc<dyn Fn(UncaughtKind, &JsError) + Send + Sync>;
 pub type ExitCallback = Arc<dyn Fn(i32) + Send + Sync>;
 
+/// The engine that runs the JavaScript.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum JsBackend {
+    /// QuickJS on a thread of this process.
+    #[default]
+    QuickJs,
+    /// A `node` child process (Node 22 or later); see [`crate::node_backend`].
+    Node { executable: PathBuf },
+}
+
 /// Settings for [`JsRuntime::new`].
 #[derive(Clone)]
 pub struct JsRuntimeOptions {
+    pub backend: JsBackend,
     /// Thread name, also used for the owned tokio runtime's threads.
     pub name: String,
     pub cwd: PathBuf,
@@ -125,6 +136,7 @@ impl JsRuntimeOptions {
     pub fn new(cwd: impl Into<PathBuf>) -> Self {
         let exe = std::env::current_exe().map(|path| path.display().to_string()).unwrap_or_else(|_| "pi".into());
         Self {
+            backend: JsBackend::QuickJs,
             name: "pi-js".into(),
             cwd: cwd.into(),
             argv: vec![exe],
@@ -162,6 +174,9 @@ pub struct JsRuntime {
 impl JsRuntime {
     /// Start the thread, run the bootstrap, and return once the runtime accepts work.
     pub fn new(options: JsRuntimeOptions) -> Result<Self, JsError> {
+        if let JsBackend::Node { .. } = options.backend {
+            return Err(JsError::new("the Node backend is not available yet").with_code("ERR_PI_NODE_MISSING"));
+        }
         let (owned_tokio, tokio) = match options.tokio.clone() {
             Some(handle) => (None, handle),
             None => {
