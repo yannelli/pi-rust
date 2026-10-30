@@ -123,22 +123,8 @@ pub struct JsComponent {
 
 impl JsComponent {
     pub fn new(component: JsRef) -> Self {
-        let flags = component
-            .handle()
-            .blocking_with({
-                let component = component.clone();
-                move |scope| {
-                    let value = scope.value(&component)?;
-                    let object = value.as_object().cloned();
-                    let has = |name: &str| {
-                        object.as_ref().is_some_and(|object| {
-                            object.get::<_, pi_js::rquickjs::Value>(name).is_ok_and(|value| !value.is_undefined())
-                        })
-                    };
-                    Ok((has("handleInput"), has("wantsKeyRelease"), has("focused")))
-                }
-            })
-            .unwrap_or((false, false, false));
+        let has = |name: &str| component.blocking_get(name).is_ok_and(|value| !value.is_undefined());
+        let flags = (has("handleInput"), has("wantsKeyRelease"), has("focused"));
         Self { component, handles_input: flags.0, wants_key_release: flags.1, focusable: flags.2 }
     }
 
@@ -153,29 +139,21 @@ impl JsComponent {
 
     /// Call `dispose()` when the component has one.
     pub fn dispose(&self) {
-        let _ = self.component.blocking_with_optional_method("dispose");
+        let _ = self.component.blocking_call_optional_method("dispose");
     }
 }
 
 /// Calling a method only when the object has it.
 trait OptionalMethod {
-    fn blocking_with_optional_method(&self, method: &str) -> Result<(), JsError>;
+    fn blocking_call_optional_method(&self, method: &str) -> Result<(), JsError>;
 }
 
 impl OptionalMethod for JsRef {
-    fn blocking_with_optional_method(&self, method: &str) -> Result<(), JsError> {
-        let (target, method) = (self.clone(), method.to_string());
-        self.handle().blocking_with(move |scope| {
-            let value = scope.value(&target)?;
-            let Some(object) = value.as_object() else { return Ok(()) };
-            let function: pi_js::rquickjs::Value = object.get(method.as_str()).map_err(|error| scope.caught(error))?;
-            if let Some(function) = function.as_function() {
-                let _: pi_js::rquickjs::Value = function
-                    .call((pi_js::rquickjs::function::This(value.clone()),))
-                    .map_err(|error| scope.caught(error))?;
-            }
-            Ok(())
-        })
+    fn blocking_call_optional_method(&self, method: &str) -> Result<(), JsError> {
+        if let HostValue::Ref(_) = self.blocking_get(method)? {
+            self.blocking_call_method(method, Vec::new())?;
+        }
+        Ok(())
     }
 }
 
@@ -204,7 +182,7 @@ impl Component for JsComponent {
     }
 
     fn invalidate(&mut self) {
-        let _ = self.component.blocking_with_optional_method("invalidate");
+        let _ = self.component.blocking_call_optional_method("invalidate");
     }
 
     fn is_focusable(&self) -> bool {
@@ -212,14 +190,7 @@ impl Component for JsComponent {
     }
 
     fn set_focused(&mut self, focused: bool) {
-        let target = self.component.clone();
-        let _ = self.component.handle().blocking_with(move |scope| {
-            let value = scope.value(&target)?;
-            if let Some(object) = value.as_object() {
-                object.set("focused", focused).map_err(|error| scope.caught(error))?;
-            }
-            Ok(())
-        });
+        let _ = self.component.blocking_set("focused", json!(focused).into());
     }
 
     fn container_children(&self) -> Option<Vec<ComponentRef>> {

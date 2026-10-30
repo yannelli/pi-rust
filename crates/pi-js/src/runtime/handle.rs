@@ -334,6 +334,20 @@ impl JsRef {
         self.handle().request(self.property(key), to_host).await
     }
 
+    /// [`JsRef::get`] for synchronous callers on other threads.
+    pub fn blocking_get(&self, key: &str) -> Result<HostValue, JsError> {
+        self.handle().blocking_request(self.property(key), to_host)
+    }
+
+    /// Set a property of the object.
+    pub async fn set(&self, key: &str, value: HostValue) -> Result<(), JsError> {
+        self.handle().request(self.assign(key, value), |_, _| Ok(())).await
+    }
+
+    pub fn blocking_set(&self, key: &str, value: HostValue) -> Result<(), JsError> {
+        self.handle().blocking_request(self.assign(key, value), |_, _| Ok(()))
+    }
+
     pub async fn get_ref(&self, key: &str) -> Result<JsRef, JsError> {
         self.handle().request(self.property(key), persist_value).await
     }
@@ -374,6 +388,16 @@ impl JsRef {
 
     pub fn blocking_call_method_opt_ref(&self, name: &str, args: Vec<HostValue>) -> Result<Option<JsRef>, JsError> {
         self.handle().blocking_request(self.invoke(Some(name.into()), args), persist_present)
+    }
+
+    fn assign(&self, key: &str, value: HostValue) -> Produce {
+        let (target, key) = (self.clone(), key.to_string());
+        Box::new(move |ctx| {
+            let object: Object =
+                restore(ctx, &target)?.into_object().ok_or_else(|| JsError::type_error("value is not an object"))?;
+            object.set(key.as_str(), from_host(ctx, value)?).map_err(|error| caught(ctx, error))?;
+            Ok(Value::new_undefined(ctx.clone()))
+        })
     }
 
     fn property(&self, key: &str) -> Produce {
