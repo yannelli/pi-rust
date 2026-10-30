@@ -18,6 +18,7 @@ mod extension_editor_slot;
 mod extension_overlay;
 pub mod extension_ui;
 mod extension_view;
+mod extensions_view;
 pub mod footer_data;
 mod git_diff;
 mod hotkeys;

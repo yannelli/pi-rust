@@ -14,6 +14,7 @@ use crate::resources::source_info::{SourceInfo, SourceScope};
 /// Built-in commands: name, description, and argument hint. `{app}` stands for the CLI name.
 pub const BUILTIN_SLASH_COMMANDS: &[(&str, &str, Option<&str>)] = &[
     ("settings", "Open settings menu", None),
+    ("extensions", "Browse installed extensions and the marketplace", None),
     ("model", "Select model (opens selector UI)", Some("<provider/model>")),
     ("tree", "Navigate session tree (switch branches)", None),
     ("thinking", "Set thinking level", Some("<level>")),

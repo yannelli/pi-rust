@@ -12,6 +12,8 @@ pi extensions info todo
 
 Search checks names, descriptions, and tags. Results show the release tag of each installed extension.
 
+In interactive mode, `/extensions` shows the installed extensions and the marketplace. You can search, install, update, remove, enable, and disable extensions there. The [/extensions](commands.md#extensions) section gives the keys.
+
 ## Install an extension
 
 ```sh
@@ -66,4 +68,4 @@ Set `PI_MARKETPLACE_URL` to use another asset base URL. The public key and signa
 With this override, pi reads `<base>/index.json` for the latest release and `<base>/<tag>/index.json` for a specific release.
 The signature file is `index.json.sig` next to the index. Binary URLs come from the signed index.
 
-With `PI_OFFLINE=1`, pi uses installed extensions without a download. Search and new installs need network access.
+With `PI_OFFLINE=1`, pi uses installed extensions without a download. Search and new installs need network access. In `/extensions`, the Marketplace tab shows `Marketplace unavailable:` with the error, and the Installed tab continues to work.

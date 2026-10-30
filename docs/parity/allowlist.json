@@ -104,6 +104,10 @@
     {
       "item": "retry",
       "reason": "pi-rust extension: /retry"
+    },
+    {
+      "item": "extensions",
+      "reason": "pi-rust extension: /extensions browser for installed extensions and the marketplace"
     }
   ],
   "tools": [],
