@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use serde_json::{Map, Value, json};
 
-use super::{ProviderUsage, UsageEndpoints, UsageService, UsageWindow, anthropic, codex, cursor};
+use super::{ProviderUsage, UsageEndpoints, UsageService, UsageWindow, anthropic, codex, cursor, grok};
 use crate::auth::{AuthResolver, Credential, InMemoryCredentialStore, OAuthCredential};
 use crate::providers::mock_http::{MockHttp, Reply};
 
@@ -17,7 +17,8 @@ fn service(base_url: &str, credentials: Vec<(&str, Credential)>) -> UsageService
         credentials.into_iter().map(|(provider, credential)| (provider.to_string(), credential)).collect();
     let store = Arc::new(InMemoryCredentialStore::new(credentials));
     let resolver = AuthResolver::new(store, Arc::new(crate::auth::oauth::builtin_oauth));
-    let endpoints = UsageEndpoints { anthropic: base_url.into(), chatgpt: base_url.into(), cursor: base_url.into() };
+    let url = || base_url.to_string();
+    let endpoints = UsageEndpoints { anthropic: url(), chatgpt: url(), cursor: url(), grok: url() };
     UsageService::with_endpoints(Arc::new(resolver), endpoints)
 }
 
@@ -151,4 +152,49 @@ fn parsers_skip_absent_windows() {
     assert!(anthropic::windows(&json!({"five_hour": null, "seven_day": {"resets_at": "x"}})).is_empty());
     assert!(codex::windows(&json!({"rate_limit": null})).is_empty());
     assert!(cursor::windows(&json!({})).is_empty());
+    assert!(grok::weekly(&json!({"currentPeriod": {"start": "2026-10-01T00:00:00Z", "end": "2026-11-01T00:00:00Z", "type": "MONTH"}}), 0).is_empty());
+    assert_eq!(grok::monthly(&json!({"monthlyLimit": {"val": 0}, "used": {"val": 3}})), None);
+}
+
+#[tokio::test]
+async fn grok_reads_weekly_credits_and_products_with_the_cli_headers() {
+    let body = json!({"config": {
+        "currentPeriod": {"start": "2026-10-28T17:00:00Z", "end": "2026-11-04T17:00:00.000Z", "type": "BILLING_PERIOD_TYPE_WEEKLY"},
+        "creditUsagePercent": 37.5,
+        "productUsage": [{"product": "GrokBuild", "usagePercent": 12}, {"product": "Api"}],
+    }});
+    let server = MockHttp::start(vec![Reply::json(200, &body)]).await;
+    let usage = service(&server.base_url, vec![("xai", oauth("grok-token", json!({})))]);
+    let result = usage.get("xai", false).await;
+    let reset = Some("2026-11-04T17:00:00Z");
+    assert_eq!(
+        result.windows,
+        vec![
+            window("Weekly", 37.5, reset, Some(10_080)),
+            window("Weekly Grok Build", 12.0, reset, Some(10_080)),
+            window("Weekly API", 0.0, reset, Some(10_080)),
+        ]
+    );
+    let request = server.request(0);
+    assert_eq!((request.method.as_str(), request.path.as_str()), ("GET", "/v1/billing?format=credits"));
+    assert_eq!(request.headers["authorization"], "Bearer grok-token");
+    assert_eq!(request.headers["x-xai-token-auth"], "xai-grok-cli");
+    assert_eq!(server.requests().len(), 1);
+}
+
+#[tokio::test]
+async fn grok_unified_billing_falls_back_to_the_monthly_quota() {
+    let credits = json!({"config": {"isUnifiedBillingUser": true, "monthlyLimit": {"val": 0}}});
+    let monthly = json!({"config": {
+        "billingPeriodStart": "2026-10-01T00:00:00Z", "billingPeriodEnd": "2026-10-31T00:00:00Z",
+        "monthlyLimit": {"val": 2000}, "used": {"val": "500"},
+    }});
+    let server = MockHttp::start(vec![Reply::json(200, &credits), Reply::json(200, &monthly)]).await;
+    let usage = service(&server.base_url, vec![("xai", oauth("grok-token", json!({})))]);
+    let result = usage.get("xai", false).await;
+    assert_eq!(result.windows, vec![window("Monthly", 25.0, Some("2026-10-31T00:00:00Z"), Some(43_200))]);
+    assert_eq!(server.request(1).path, "/v1/billing");
+    let empty = MockHttp::start(vec![Reply::json(200, &json!({"config": {}})), Reply::json(200, &json!({}))]).await;
+    let usage = service(&empty.base_url, vec![("xai", oauth("grok-token", json!({})))]);
+    assert_eq!(usage.get("xai", false).await.error.as_deref(), Some("The Grok billing response has no usage data"));
 }

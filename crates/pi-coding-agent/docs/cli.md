@@ -64,7 +64,7 @@ pi stats --since 7d
 
 ## Subscription limits
 
-`pi usage` shows the limits of the subscription logins: the 5-hour and weekly windows of Claude and ChatGPT (Codex), the billing cycle of Cursor, and the quota of Google Antigravity. For each window it shows the used percentage and the time to the reset. `pi usage <provider>` shows one provider. `--json` prints `{ "providers": [...] }` in the shape of the native extension method `usage.get`. The exit code is 1 when every provider has an error.
+`pi usage` shows the limits of the subscription logins: the 5-hour and weekly windows of Claude and ChatGPT (Codex), the billing cycle of Cursor, the weekly SuperGrok credits and Grok Build use of the `xai` login, and the quota of Google Antigravity. For each window it shows the used percentage and the time to the reset. `pi usage <provider>` shows one provider. `--json` prints `{ "providers": [...] }` in the shape of the native extension method `usage.get`. The exit code is 1 when every provider has an error.
 
 ```sh
 pi usage

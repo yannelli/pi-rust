@@ -31,7 +31,7 @@ The count of tokens in use is the usage that the last response reported, plus es
 
 ## /usage
 
-`/usage` shows the subscription limits of each provider that you are logged in to: `anthropic`, `openai-codex`, `cursor`, and `google-antigravity`. For each window it shows a bar, the used percentage, and the time to the reset. `/usage <provider>` shows one provider. Each `/usage` fetches the limits again. A provider whose request fails shows the error.
+`/usage` shows the subscription limits of each provider that you are logged in to: `anthropic`, `openai-codex`, `cursor`, `xai` (SuperGrok, which includes Grok Build), and `google-antigravity`. For each window it shows a bar, the used percentage, and the time to the reset. `/usage <provider>` shows one provider. Each `/usage` fetches the limits again. A provider whose request fails shows the error.
 
 The status line extension (`marketplace:statusline`) shows the limits of the current provider with its `usage` and `usageReset` segments. [Subscription usage limits](../../../docs/providers/usage.md) lists the endpoints.
 

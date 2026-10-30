@@ -4,6 +4,7 @@
 mod anthropic;
 mod codex;
 mod cursor;
+mod grok;
 #[cfg(test)]
 mod tests;
 mod time;
@@ -21,7 +22,7 @@ use crate::auth::{AuthOverrides, AuthResolver, Credential};
 pub use self::time::{iso_from_unix, unix_from_iso};
 
 /// Providers with a usage fetcher, in display order.
-pub const USAGE_PROVIDERS: &[&str] = &["anthropic", "openai-codex", "cursor", "google-antigravity"];
+pub const USAGE_PROVIDERS: &[&str] = &["anthropic", "openai-codex", "cursor", "xai", "google-antigravity"];
 
 const TTL: Duration = Duration::from_secs(60);
 /// Each Antigravity fetch starts the ACP server.
@@ -74,6 +75,8 @@ pub struct UsageEndpoints {
     pub anthropic: String,
     pub chatgpt: String,
     pub cursor: String,
+    /// The Grok CLI proxy, for the `xai` login.
+    pub grok: String,
 }
 
 impl Default for UsageEndpoints {
@@ -82,6 +85,7 @@ impl Default for UsageEndpoints {
             anthropic: "https://api.anthropic.com".into(),
             chatgpt: crate::providers::openai_codex::DEFAULT_CODEX_BASE_URL.into(),
             cursor: crate::providers::cursor::CURSOR_BASE_URL.into(),
+            grok: "https://cli-chat-proxy.grok.com".into(),
         }
     }
 }
@@ -162,6 +166,7 @@ impl UsageService {
         let result = match provider {
             "anthropic" => anthropic::fetch(&self.endpoints.anthropic, &token).await,
             "cursor" => cursor::fetch(&self.endpoints.cursor, &token).await,
+            "xai" => grok::fetch(&self.endpoints.grok, &token).await,
             _ => codex::fetch(&self.endpoints.chatgpt, &token, credential.extra_str("accountId"), provider).await,
         };
         match result {

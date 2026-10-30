@@ -14,7 +14,7 @@ const BAR_CELLS: usize = 10;
 pub const USAGE_HELP: &str = "Usage: pi usage [provider] [--json]
 
 Show the subscription limits (5-hour, weekly, billing cycle) of the providers you are logged in to:
-anthropic, openai-codex, cursor, and google-antigravity.";
+anthropic, openai-codex, cursor, xai (SuperGrok and Grok Build), and google-antigravity.";
 
 /// How a part of the report is painted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -32,6 +32,7 @@ fn provider_name(provider: &str) -> &str {
         "anthropic" => "Claude",
         "openai-codex" => "ChatGPT Codex",
         "cursor" => "Cursor",
+        "xai" => "SuperGrok",
         "google-antigravity" => "Google Antigravity",
         other => other,
     }
@@ -63,7 +64,7 @@ pub fn report_text(usages: &[ProviderUsage], now: i64, style: &dyn Fn(Tone, &str
     let mut text = style(Tone::Title, "Subscription usage");
     if usages.is_empty() {
         text.push_str(
-            "\n\nNo login with a usage report. Run /login for anthropic, openai-codex, cursor, or google-antigravity.",
+            "\n\nNo login with a usage report. Run /login for anthropic, openai-codex, cursor, xai, or google-antigravity.",
         );
         return text;
     }
