@@ -6,6 +6,7 @@ use super::items::item;
 const BASE_DELAYS: &[u64] = &[1_000, 2_000, 5_000, 10_000];
 const MAX_DELAYS: &[u64] = &[30_000, 60_000, 120_000, 300_000];
 const TIMEOUTS: &[u64] = &[30_000, 60_000, 120_000, 300_000, 600_000];
+const NO_LIMIT: &str = "no limit";
 
 fn duration(ms: u64) -> String {
     if ms > 0 && ms % 60_000 == 0 {
@@ -34,6 +35,10 @@ fn choice(id: &str, label: &str, description: &str, current: String, mut values:
     }
     let values: Vec<_> = values.iter().map(String::as_str).collect();
     item(id, label, description, current, &values)
+}
+
+fn server_delay(ms: u64) -> String {
+    if ms == 0 { NO_LIMIT.into() } else { duration(ms) }
 }
 
 fn durations(values: &[u64]) -> Vec<String> {
@@ -69,7 +74,7 @@ pub(super) fn build_items(config: &SettingsConfig) -> Vec<SettingItem> {
         choice(
             "provider-timeout",
             "Provider request timeout",
-            "Request timeout; default uses the provider's timeout",
+            "Request timeout; default uses httpIdleTimeoutMs, or the provider's timeout when that is 0",
             provider.timeout_ms.map_or_else(|| "default".into(), duration),
             std::iter::once("default".into()).chain(durations(TIMEOUTS)).collect(),
         ),
@@ -84,8 +89,8 @@ pub(super) fn build_items(config: &SettingsConfig) -> Vec<SettingItem> {
             "provider-max-retry-delay",
             "Max server retry delay",
             "Maximum server retry delay the provider will accept",
-            duration(provider.max_retry_delay_ms),
-            durations(MAX_DELAYS),
+            server_delay(provider.max_retry_delay_ms),
+            durations(MAX_DELAYS).into_iter().chain(std::iter::once(NO_LIMIT.into())).collect(),
         ),
     ]
 }
@@ -113,7 +118,8 @@ pub(super) fn dispatch_change(callbacks: &mut SettingsCallbacks, id: &str, value
             }
         }
         "provider-max-retry-delay" => {
-            parse_duration(value).into_iter().for_each(&mut callbacks.on_provider_max_retry_delay_ms_change)
+            let delay = if value == NO_LIMIT { Some(0) } else { parse_duration(value) };
+            delay.into_iter().for_each(&mut callbacks.on_provider_max_retry_delay_ms_change)
         }
         _ => {}
     }

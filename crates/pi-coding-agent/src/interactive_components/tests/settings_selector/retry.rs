@@ -46,7 +46,7 @@ fn retry_controls_dispatch_values_and_defaults() {
         [Some(30_000), Some(60_000), Some(120_000), Some(300_000), Some(600_000), None, Some(30_000)]
     );
     assert_eq!(provider_retries.get(), [Some(0), Some(1), Some(2), Some(3), Some(5), None]);
-    assert_eq!(server_delay.get(), [120_000, 300_000, 30_000]);
+    assert_eq!(server_delay.get(), [120_000, 300_000, 0]);
 }
 
 #[test]
@@ -68,7 +68,7 @@ fn custom_retry_values_stay_selected_and_in_the_cycle() {
         ("retry-max-delay", "45500 ms", 5),
         ("provider-timeout", "7 sec", 7),
         ("provider-max-retries", "4", 7),
-        ("provider-max-retry-delay", "75 sec", 5),
+        ("provider-max-retry-delay", "75 sec", 6),
     ] {
         let list = selector.settings_list();
         list.borrow_mut().select_item(id);
@@ -121,4 +121,23 @@ fn retry_controls_persist_and_reload_config() {
     assert_eq!(config.provider_retry.max_retries, None);
     assert_eq!(config.provider_retry.max_retry_delay_ms, 120_000);
     assert_eq!(config.retry.max_retries, 5);
+}
+
+#[test]
+fn server_retry_delay_zero_shows_and_cycles_no_limit() {
+    let _theme = crate::theme::tests::global_state();
+    let _kb = setup();
+    let settings = Arc::new(SettingsManager::in_memory(json!({ "retry": { "provider": { "maxRetryDelayMs": 0 } } })));
+    let config = SettingsConfig::from_settings(&settings);
+    assert_eq!(config.provider_retry.max_retry_delay_ms, 0);
+    let mut selector = SettingsSelector::new(config, SettingsCallbacks::persisting(settings.clone()));
+    let list = selector.settings_list();
+    list.borrow_mut().select_item("provider-max-retry-delay");
+    assert!(list_text(&selector, 100).contains("no limit"));
+    send(&mut selector, &[keys::ENTER]);
+    assert_eq!(SettingsConfig::from_settings(&settings).provider_retry.max_retry_delay_ms, 30_000);
+    for _ in 0..4 {
+        send(&mut selector, &[keys::ENTER]);
+    }
+    assert_eq!(SettingsConfig::from_settings(&settings).provider_retry.max_retry_delay_ms, 0);
 }
