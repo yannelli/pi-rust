@@ -1,6 +1,6 @@
 # Open parity gaps
 
-Last reviewed 2026-10-27 against upstream `main` at `531340f10` (2026-10-27). The daily [parity report](README.md#daily-gap-check) finds new gaps; this file keeps the ones that need a decision or a plan. Remove an entry in the PR that closes it.
+Last reviewed 2026-10-27 against upstream `main` at `531340f10` (2026-10-27). The daily [parity report](README.md#daily-gap-check) finds new gaps. This file keeps the gaps that need a decision or a plan. Remove an entry in the PR that closes the gap.
 
 ## Upstream commits not yet ported
 
@@ -8,33 +8,33 @@ None up to `531340f10`. Every commit after the synced commit is ported or listed
 
 ## Deferred work
 
-- **One copy of the partial message per streamed delta.** Since upstream `f715a15c1`, tool-call arguments are parsed once per delta (`pi_ai::streaming_json`). Each `AssistantMessageEvent` still carries a full copy of the partial message, so a very large tool call costs more per delta as it grows. Removing that copy would change the public event API.
-- **`HarnessOptions.models` as a function** (upstream `7ec1f648e`). Not planned: settings are already a function here, and a `Models` implementation can change its catalog at runtime. It is older than the synced commit, so the report does not list it.
+- **One copy of the partial message per streamed delta.** Since upstream `f715a15c1`, `pi_ai::streaming_json` parses tool-call arguments once per delta. Each `AssistantMessageEvent` still has a full copy of the partial message. Thus a very large tool call costs more per delta as it grows. A change that removes that copy also changes the public event API.
+- **`HarnessOptions.models` as a function** (upstream `7ec1f648e`). This item is not planned. Settings are already a function here, and a `Models` implementation can change its catalog at runtime. The commit is older than the synced commit, so the report does not list it.
 
 ## chord2 differences
 
-How pi-chord's `host2` differs from upstream chord on purpose:
+These are the intentional differences between pi-chord's `host2` and upstream chord:
 
-- Hosts get facets from a `FacetLoader`, because upstream's Node module loader (`loader.ts`) cannot be ported. So `7d75a0e3e` (the loader registers every facet root before it imports one) does not apply. A cluster reload's children load the named modules through their own `FacetLoader`.
-- Factories are synchronous, and `Subscribable::subscribe` cannot fail: a listener's `select` or its resource fails instead.
-- `Declare::on_select` takes a key for the identity of `select`, where upstream compares the function's source text. A reload keeps the subscription while the resource and the key stay the same.
-- `Host::host_object` returns the host's own reference to a `lifetime: "host"` object (upstream tests read the private `hostObjects`).
+- Hosts get facets from a `FacetLoader`, because upstream's Node module loader (`loader.ts`) cannot be ported. Thus `7d75a0e3e` does not apply. In that commit, the loader registers every facet root before it imports one. The children of a cluster reload load the named modules through their own `FacetLoader`.
+- Factories are synchronous, and `Subscribable::subscribe` cannot fail. A listener's `select` or its resource fails instead.
+- `Declare::on_select` takes a key for the identity of `select`. Upstream compares the source text of the function. A reload keeps the subscription while the resource and the key stay the same.
+- `Host::host_object` returns the host's own reference to a `lifetime: "host"` object. Upstream tests read the private `hostObjects`.
 - Upstream `4a5d37291` moved `OutputBuffer` and `Progress` into `@earendil-works/chord/output`. pi-rust keeps them in pi-durable (`harness/output.rs` and `harness/progress.rs`).
-- `Change::append_text` (upstream `appendText`) records an append op without comparing the strings, but the new string is still a copy: a JSON string is an immutable shared `Arc<str>`, so each append costs O(length), not O(text). It takes the path of the object that holds the key, since a Rust draft is a `&mut Json` and not a proxy.
-- Durable calls `subscribe_commits()` listeners inside Storage's `adopt`, right after the Session's own observers, where upstream (`8b0caefc2`) runs them one microtask later: Rust has no microtask queue, and a spawned task could run after the waits that the commit resolves. A telemetry `add_event` or metric cannot fail in Rust, so there is no `host_error` report for `"telemetry"`.
-- Tests: fake timers are real short timers, and `Weak` sentinels replace `FinalizationRegistry` with a forced GC. The review test "a commit that still fails midway" is not ported: it patches an object's `startTasks`, which Rust code cannot do.
-- The tutorial test (upstream `test/tutorial.test.ts`) is `chord2_tutorial.rs` and `chord2_tutorial_reload.rs`, one test per section. Its drift check, which compares `docs/tutorial.md` with the TypeScript examples in the test, is not ported: pi-rust has no TypeScript copy of the examples.
+- `Change::append_text` (upstream `appendText`) records an append op and does not compare the strings. But the new string is still a copy. A JSON string is an immutable shared `Arc<str>`, so each append costs O(length) instead of O(text). It takes the path of the object that holds the key, because a Rust draft is a `&mut Json` and not a proxy.
+- Durable calls `subscribe_commits()` listeners inside Storage's `adopt`, immediately after the Session's own observers. Upstream (`8b0caefc2`) runs them one microtask later. Rust has no microtask queue, and a spawned task can run after the waits that the commit resolves. A telemetry `add_event` or metric cannot fail in Rust, so there is no `host_error` report for `"telemetry"`.
+- Tests: fake timers are real short timers. `Weak` sentinels replace `FinalizationRegistry` with a forced garbage collection (GC). The review test "a commit that still fails midway" is not ported. That test patches the `startTasks` of an object, and Rust code cannot do that.
+- The tutorial test (upstream `test/tutorial.test.ts`) is in `chord2_tutorial.rs` and `chord2_tutorial_reload.rs`, with one test for each section. Its drift check compares `docs/tutorial.md` with the TypeScript examples in the test. That check is not ported, because pi-rust has no TypeScript copy of the examples.
 
 ## Upstream commits that do not apply
 
-Older than the synced commit, so the report no longer lists them.
+These commits are older than the synced commit, so the report no longer lists them.
 
-- `ea25697e9` managed install markers with a BOM: `pi update --self` replaces the release binary in place (update/install.rs); there is no managed-install.json marker.
-- `16f5f0af4` IndexedDbStorage: a browser storage backend, and pi-rust has no browser build.
-- `c661bc574` drops the shared MCP types block from durable code mode: pi-codemode never had it, so the port of `8bb180bec` already renders the section without it.
-- `4c25119f5` replicates durable storages as a commit log, and `cae9fd28a` reverts it: the pair is a net zero change.
+- `ea25697e9` managed install markers with a byte order mark (BOM). `pi update --self` replaces the release binary in place (update/install.rs). There is no managed-install.json marker.
+- `16f5f0af4` IndexedDbStorage: a browser storage backend. pi-rust has no browser build.
+- `c661bc574` drops the shared MCP types block from durable code mode. pi-codemode never had it, so the port of `8bb180bec` already renders the section without it.
+- `4c25119f5` replicates durable storages as a commit log, and `cae9fd28a` reverts it. The pair is a net zero change.
 - `2685de7a1`, `66c2fa3d7`, and `936e5f40a` update or drop npm dependencies. pi-rust has no npm dependencies.
-- `476a303c1` drops an `npm ci` override for managed installs. `pi update --self` downloads release archives, not npm.
+- `476a303c1` drops an `npm ci` override for managed installs. `pi update --self` downloads release archives and does not use npm.
 - `c8ec752cf` skips `fd` and `rg` downloads on unsupported architectures. pi-rust never downloads them, because `grep` and `find` use the `ignore` crate.
 - `531340f10` deletes root npm shim files of the TypeScript ai package. pi-rust has no npm package layout.
 - The V8 string retention parts of `f715a15c1` (chord `ownedSlice`, bounded error excerpts) do not apply, because Rust strings own their bytes. The rest of the commit is ported.
@@ -44,36 +44,49 @@ Older than the synced commit, so the report no longer lists them.
 `crates/pi-js/src/unsupported.rs` is the full list. Open items that need a decision:
 
 - **TLS `pfx`** needs a PKCS#12 parser, which is a new dependency. Ask before adding one.
-- **TLS before 1.2** cannot work: rustls supports TLS 1.2 and 1.3 only.
-- **Byte-identical zlib output**: zlib-rs output can differ in bytes from Node's zlib, and `memLevel` and `strategy` are not applied.
-- **V8-only features**: heap snapshots with nodes, `v8.queryObjects`, `inspector.open`, and full `async_hooks` coverage of timers, promises, and I/O depend on V8 internals that QuickJS does not have.
+- **TLS before 1.2** cannot work. rustls supports only TLS 1.2 and 1.3.
+- **Byte-identical zlib output**: zlib-rs output can have different bytes from Node's zlib output. `memLevel` and `strategy` have no effect.
+- **V8-only features** depend on V8 internals that QuickJS does not have. These features are heap snapshots with nodes, `v8.queryObjects`, `inspector.open`, and full `async_hooks` coverage of timers, promises, and I/O.
 
 ## Removed upstream, still in pi-rust
 
-Upstream `7472cda0d` (2026-10-12) deleted the experimental server stack: the client, protocol, and server packages and `pi experimental`. pi-rust keeps them on purpose as pi-rust extras (decided 2026-10-21): `pi-client`, `pi-protocol`, `pi-server`, the `pi experimental` commands (`server`, `client`, `durable`, `vacation`), and the facets/services runtime in pi-chord that they use. The three crates are in `allowlist.json`. They get no upstream fixes from now on.
+Upstream `7472cda0d` (2026-10-12) deleted the experimental server stack: the client, protocol, and server packages and `pi experimental`. A decision on 2026-10-21 keeps these items in pi-rust on purpose as pi-rust extras:
 
-Upstream `92ab53602` removed the Chord state getters `Session.documentState()`, `Conversation.viewState()`, and `Harness.taskGraph()` with the `DocumentState` type. pi-durable keeps them because the experimental stack in pi-coding-agent reads conversations and the task graph through them. When a document is retired, its document state publishes `null`. When a new document is created at the same address, the state publishes that document's value, the same way a watch follows its address.
+- `pi-client`, `pi-protocol`, and `pi-server`
+- the `pi experimental` commands (`server`, `client`, `durable`, `vacation`)
+- the facets and services runtime in pi-chord that they use
+
+The three crates are in `allowlist.json`. They get no upstream fixes from now on.
+
+Upstream `92ab53602` removed the Chord state getters `Session.documentState()`, `Conversation.viewState()`, and `Harness.taskGraph()` with the `DocumentState` type. pi-durable keeps them because the experimental stack in pi-coding-agent reads conversations and the task graph through them. When a document is retired, its document state publishes `null`. When a new document is created at the same address, the state publishes the value of that document. A watch on an address works the same way.
 
 ## pi-rust extensions
 
-Behavior that pi-rust adds on purpose. The parity review should not report these as gaps.
+pi-rust adds this behavior on purpose. Do not report these items as gaps in the parity review.
 
-- Account model lists (README "Account model lists"): `openai-codex` from the Codex backend's `/codex/models`, `anthropic` from `/v1/models`, `github-copilot` from the Copilot `/models` endpoint, `openai` and `xai` from `/models`, and `google` from the Gemini API `/models`. Cursor and Grok Build have no public model list, so they are not narrowed.
-- Markdown export: `/export` and `pi --export` write Markdown when the output path ends in `.md` (README "Use").
-- The README section "Differences from upstream pi" lists the other additions (slash commands, CLI commands and flags, settings) and the bugs pi-rust fixes that are still open upstream. `allowlist.json` holds the matching parity report entries.
+- Account model lists ([Account model lists](../../crates/pi-coding-agent/docs/providers.md#account-model-lists)). Each provider gets its list from one endpoint:
+  - `openai-codex` from the Codex backend's `/codex/models`
+  - `anthropic` from `/v1/models`
+  - `github-copilot` from the Copilot `/models` endpoint
+  - `openai` and `xai` from `/models`
+  - `google` from the Gemini API `/models`
+
+  Cursor and Grok Build have no public model list, so pi-rust does not narrow their models.
+- Markdown export: if the output path ends in `.md`, `/export` and `pi --export` write Markdown ([Export](../../crates/pi-coding-agent/docs/commands.md#export)).
+- The README section "Differences from upstream pi" lists the other additions: slash commands, CLI commands and flags, and settings. It also lists the bugs that pi-rust fixes and that are still open upstream. `allowlist.json` holds the matching parity report entries.
 
 ## Post-release follow-up
 
-Only after the preceding ACP/provider and TUI work is released on `main`: trace why Anthropic Sonnet 4.5 is labeled `(Latest)`. Change the label or its update source only if Pi Rust supplies it; do not override metadata supplied by an external provider. Do not investigate this item before that release.
+Do this item only after the preceding ACP, provider, and TUI work is released on `main`. Then find why Anthropic Sonnet 4.5 has the label `(Latest)`. Change the label or its update source only if Pi Rust supplies it. Do not override metadata that an external provider supplies. Do not investigate this item before that release.
 
 ## ACP and provider integration work
 
-- Paseo rejects exact MCP tool preapproval for generic ACP providers before starting Pi. Its provider contract and ACP permission handler need exact-tool matching; Pi's permission modes alone cannot resolve that host-side error.
-- ACP `session/new` and `session/load` do not load client-supplied `mcpServers`. Pi's own MCP configuration works, but forwarding host MCP definitions needs a separate integration.
-- Native Cursor login and inference are not implemented. The reference provider uses PKCE browser polling plus protobuf/HTTP2, not an OpenAI-compatible Cursor endpoint. A native provider needs the transport, model discovery, tool continuations, and mock-server tests; a login-only entry would not suffice.
-- ACP has no standard model icon field. Fast catalog variants get a lightning-bolt label; a speed toggle for other models needs explicit capability metadata and provider request support.
+- Paseo rejects exact MCP tool preapproval for generic ACP providers before it starts Pi. Its provider contract and ACP permission handler must match tools exactly. Pi's permission modes alone cannot resolve that host-side error.
+- ACP `session/new` and `session/load` do not load client-supplied `mcpServers`. Pi's own MCP configuration works, but a separate integration is necessary to forward host MCP definitions.
+- Native Cursor login and inference are not implemented. The reference provider uses PKCE browser polling and protobuf over HTTP2. It does not use an OpenAI-compatible Cursor endpoint. A native provider needs the transport, model discovery, tool continuations, and mock-server tests. A login-only entry is not enough.
+- ACP has no standard model icon field. Fast catalog variants get a lightning-bolt label. A speed toggle for other models needs explicit capability metadata and provider request support.
 
 ## Platform
 
-- `pi experimental server` and `client` use Unix sockets, so they report that they need Unix on Windows.
-- The chord2 host manager gives a child its IPC channel as stdin on Unix (upstream uses an extra file descriptor) and as a named pipe on Windows. On Windows, `kill_tree` ends only the child, as upstream does there.
+- `pi experimental server` and `client` use Unix sockets. On Windows, they report that they need Unix.
+- On Unix, the chord2 host manager gives a child its IPC channel as stdin. Upstream uses an extra file descriptor there. On Windows, the channel is a named pipe. On Windows, `kill_tree` ends only the child, as upstream does there.
