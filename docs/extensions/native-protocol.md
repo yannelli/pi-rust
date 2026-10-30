@@ -24,7 +24,7 @@ A package declares native extensions in `package.json`:
 - Both sides send requests, responses, and notifications. Each side numbers its own request ids.
 - `$/cancelRequest` `{ "id": <request id> }` cancels a request of the other side. The receiver still answers it: with a result, or with error `-32800`.
 - An extension-to-host method sent as a notification (no `id`) runs, and the host drops its result.
-- Error codes: `-32700` parse error, `-32600` invalid request, `-32601` unknown method, `-32602` invalid params, `-32603` internal error, `-32800` cancelled, `-32001` no UI, `-32002` no context yet (no event reached the extension).
+- Error codes: `-32700` parse error, `-32600` invalid request, `-32601` unknown method, `-32602` invalid params, `-32603` internal error, `-32800` cancelled, `-32001` no UI, `-32002` no context (no event reached the extension within 30 seconds). A request that needs a ctx and arrives before the first event waits for that event. The bridge takes the ctx of `session_start` for every extension.
 
 ## Lifecycle
 

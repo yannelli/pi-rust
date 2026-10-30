@@ -11,6 +11,7 @@ export const PROTOCOL_VERSION = 1;
 const INITIALIZE_MS = 10000;
 const SHUTDOWN_MS = 2000;
 const KILL_MS = 2000;
+const CTX_WAIT_MS = 30000;
 
 const safe = (read, fallback = null) => {
 	try {
@@ -50,7 +51,17 @@ function createState(pi, spec) {
 		capture(ctx) {
 			if (!ctx) return;
 			state.ctx = ctx;
+			for (const resolve of state.ctxWaiters.splice(0)) resolve();
 			state.installAutocomplete();
+		},
+		ctxWaiters: [],
+		/** Requests sent before the first event wait for its ctx. */
+		whenCtx() {
+			if (state.ctx || state.commandCtx) return Promise.resolve();
+			return new Promise((resolve) => {
+				state.ctxWaiters.push(resolve);
+				setTimeout(resolve, CTX_WAIT_MS).unref?.();
+			});
 		},
 		installAutocomplete() {
 			if (state.autocompleteInstalled || state.triggers.length === 0 || !safe(() => state.ctx?.hasUI, false)) return;
@@ -112,7 +123,14 @@ async function loadNative(pi, spec) {
 	state.child = child;
 	state.surfaces = createSurfaces(state);
 	const registrar = createRegistrar(state);
-	const handlers = { ...hostMethods(state), ...state.surfaces.methods, ...registrar.methods };
+	const contextual = Object.entries({ ...hostMethods(state), ...state.surfaces.methods }).map(([method, handler]) => [
+		method,
+		async (params, signal) => {
+			await state.whenCtx();
+			return handler(params, signal);
+		},
+	]);
+	const handlers = { ...Object.fromEntries(contextual), ...registrar.methods };
 	state.peer = createPeer({ write: (text) => child.stdin.write(text), handlers, log: state.log });
 	readLines(child.stdout, state.peer.receive);
 	readLines(child.stderr, state.log);

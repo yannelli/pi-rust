@@ -82,6 +82,7 @@ function onNotification({ method, params }) {
 	if (method === "$/cancelRequest") cancels.get(params.id)?.();
 	if (method === "ui.resize") notify("ui.update", { surface: params.surface, lines: [`width ${params.width}`] });
 	if (method === "ui.key") panelWaiters.get(params.surface)?.(params.data);
+	if (method === "initialized") notify("ui.notify", { message: "native ready" });
 	if (method === "exit") process.exit(0);
 }
 

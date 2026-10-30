@@ -151,6 +151,7 @@ async fn tools_events_and_widgets_cross_the_process_boundary() {
     assert!(h.session.active_tool_names().contains(&"native_echo".to_string()));
 
     eventually(|| ui.widget("native").is_some()).await;
+    eventually(|| ui.calls().contains(&"notify(info): native ready".to_string())).await;
     let factory = ui.widget("native").unwrap();
     let widget = tokio::task::block_in_place(|| {
         let mut component = factory.create().unwrap();
