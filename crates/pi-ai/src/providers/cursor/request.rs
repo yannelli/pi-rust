@@ -10,7 +10,8 @@ use super::history::{self, Results, user_images, user_text};
 use super::proto::Writer;
 use super::value;
 use crate::providers::common::{compat_str, compat_value};
-use crate::types::{Context, Message, Model};
+use crate::simple_options::clamp_thinking_level;
+use crate::types::{Context, Message, Model, ThinkingLevel};
 
 pub(crate) const MCP_PROVIDER: &str = "pi-agent";
 const DEFAULT_SYSTEM: &str = "You are a helpful assistant.";
@@ -81,20 +82,27 @@ pub(crate) fn model_ids(id: &str) -> (String, String, Vec<(&'static str, String)
     }
 }
 
-/// The route a discovered model keeps in `compat` (`cursorModel`, `cursorParameters`,
-/// `cursorMaxMode`), else the route [`model_ids`] derives from the id.
-fn route(model: &Model) -> (String, String, Vec<(String, String)>, bool) {
+/// The route a discovered model keeps in `compat`: the `cursorLevels` entry of the thinking
+/// level, else `cursorSlug` and `cursorParameters`. Other models use the route [`model_ids`]
+/// derives from the id.
+fn route(model: &Model, level: Option<ThinkingLevel>) -> (String, String, Vec<(String, String)>, bool) {
     let Some(requested) = compat_str(model, "cursorModel") else {
         let (details, requested, params, max_mode) = model_ids(&model.id);
         let params = params.into_iter().map(|(id, value)| (id.to_string(), value)).collect();
         return (details, requested, params, max_mode);
     };
-    let params = compat_value(model, "cursorParameters").and_then(|params| params.as_array()).into_iter().flatten();
+    let level = clamp_thinking_level(model, level.unwrap_or(ThinkingLevel::Off));
+    let chosen = compat_value(model, "cursorLevels").and_then(|levels| levels.get(level.as_str()));
+    let slug = chosen.and_then(|route| route["slug"].as_str()).or_else(|| compat_str(model, "cursorSlug"));
+    let params = chosen.map(|route| &route["parameters"]).or_else(|| compat_value(model, "cursorParameters"));
     let params = params
+        .and_then(|params| params.as_array())
+        .into_iter()
+        .flatten()
         .filter_map(|param| Some((param["id"].as_str()?.to_string(), param["value"].as_str()?.to_string())))
         .collect();
     let max_mode = compat_value(model, "cursorMaxMode").and_then(|max| max.as_bool()).unwrap_or(false);
-    (model.id.clone(), requested.to_string(), params, max_mode)
+    (slug.unwrap_or(&model.id).to_string(), requested.to_string(), params, max_mode)
 }
 
 /// Every pi tool as an MCP tool of the `pi-agent` server.
@@ -125,7 +133,13 @@ fn action(user: Option<&crate::types::UserMessage>, message_id: &str) -> Writer 
 
 /// A request that ends with a user message sends it as the action; otherwise the run resumes
 /// from the history, whose tool results carry what pi ran.
-pub(crate) fn build(model: &Model, context: &Context, conversation_id: &str, message_id: &str) -> RunRequest {
+pub(crate) fn build(
+    model: &Model,
+    context: &Context,
+    level: Option<ThinkingLevel>,
+    conversation_id: &str,
+    message_id: &str,
+) -> RunRequest {
     let messages: Vec<&Message> =
         context.messages.iter().filter(|message| !matches!(message, Message::Custom(_))).collect();
     let active = match messages.last() {
@@ -153,7 +167,7 @@ pub(crate) fn build(model: &Model, context: &Context, conversation_id: &str, mes
     let turns = history::turns(&history, &results, &mut blobs);
     let state = root.iter().fold(Writer::new(), |state, id| state.bytes(1, id));
     let state = turns.iter().fold(state, |state, id| state.bytes(8, id));
-    let (details_id, requested_id, params, max_mode) = route(model);
+    let (details_id, requested_id, params, max_mode) = route(model, level);
     let mut details = Writer::new().string(1, &details_id).string(3, &model.id).string(4, &model.name);
     let mut requested = Writer::new().string(1, &requested_id);
     if max_mode {
@@ -227,7 +241,7 @@ mod tests {
             tools: Vec::new(),
         };
         let model = Model { id: "claude-opus-5-high".into(), name: "Claude Opus 5".into(), ..Model::default() };
-        let built = build(&model, &context, "conv-1", "msg-1");
+        let built = build(&model, &context, None, "conv-1", "msg-1");
         let run = nested(&built.message, &[1]);
         assert_eq!(nested(run, &[2]), [0x12, 0x00]);
         let state = fields(nested(run, &[1])).unwrap();
@@ -252,10 +266,42 @@ mod tests {
     fn discovered_models_use_their_compat_route() {
         let compat = json!({"cursorModel": "claude-opus-5", "cursorParameters": [{"id": "thinking", "value": "true"}], "cursorMaxMode": true});
         let model = Model { id: "claude-opus-5-high-max".into(), compat: Some(compat), ..Model::default() };
-        let route = route(&model);
+        let route = route(&model, None);
         assert_eq!(
             route,
             ("claude-opus-5-high-max".into(), "claude-opus-5".into(), vec![("thinking".into(), "true".into())], true)
         );
+    }
+
+    #[test]
+    fn the_thinking_level_picks_the_variant_route() {
+        let effort =
+            |effort: &str| json!([{"id": "reasoning_effort", "value": effort}, {"id": "fast", "value": "false"}]);
+        let compat = json!({"cursorModel": "grok-4.7", "cursorSlug": "grok-4.7-high", "cursorParameters": effort("high"),
+            "cursorMaxMode": false, "cursorLevels": {
+                "low": {"slug": "grok-4.7-low", "parameters": effort("low")},
+                "high": {"slug": "grok-4.7-high", "parameters": effort("high")}}});
+        let map = ThinkingLevel::ALL
+            .into_iter()
+            .map(|level| {
+                let offered = matches!(level, ThinkingLevel::Low | ThinkingLevel::High);
+                (level.as_str().to_string(), offered.then(|| level.as_str().to_string()))
+            })
+            .collect();
+        let model = Model {
+            id: "grok-4.7".into(),
+            reasoning: true,
+            thinking_level_map: Some(map),
+            compat: Some(compat),
+            ..Model::default()
+        };
+        let pick = |level| {
+            let (slug, requested, params, _) = route(&model, level);
+            (slug, requested, params[0].1.clone())
+        };
+        assert_eq!(pick(Some(ThinkingLevel::High)), ("grok-4.7-high".into(), "grok-4.7".into(), "high".into()));
+        assert_eq!(pick(Some(ThinkingLevel::Medium)).0, "grok-4.7-high");
+        assert_eq!(pick(Some(ThinkingLevel::Off)).0, "grok-4.7-low");
+        assert_eq!(pick(None).0, "grok-4.7-low");
     }
 }

@@ -106,8 +106,7 @@ pi-rust adds this behavior on purpose. Do not report these items as gaps in the 
   - `openai` and `xai` from `/models`
   - `google` from the Gemini API `/models`
   - `cursor` from `AvailableModels`
-
-  Google Antigravity uses its bundled list in `crates/pi-ai/models.extra.json`.
+  - `google-antigravity` from the `model` and `thought_level` selectors of the Antigravity ACP server
 - Subscription providers `cursor` and `google-antigravity` with their logins and the APIs `cursor-agent` and `antigravity-acp` ([Subscription providers](../providers/subscription-providers.md)).
 - Markdown export: if the output path ends in `.md`, `/export` and `pi --export` write Markdown ([Export](../../crates/pi-coding-agent/docs/commands.md#export)).
 - The README section "Differences from upstream pi" lists the other additions: slash commands, CLI commands and flags, and settings. It also lists the bugs that pi-rust fixes and that are still open upstream. `allowlist.json` holds the matching parity report entries.

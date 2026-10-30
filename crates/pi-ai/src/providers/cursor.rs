@@ -138,7 +138,7 @@ async fn run(
     token: &str,
 ) -> Result<StopReason, String> {
     let request_id = random_uuid();
-    let built = request::build(model, context, &random_uuid(), &random_uuid());
+    let built = request::build(model, context, options.reasoning, &random_uuid(), &random_uuid());
     let base = base_url(model);
     let run_headers = headers(model, options, token, &request_id, "application/connect+proto");
     let open_body = envelope(0, &Writer::new().string(1, &request_id).finish());

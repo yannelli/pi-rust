@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 use crate::types::Model;
 
 mod anthropic;
+mod antigravity;
 mod codex;
 mod copilot;
 mod cursor;
@@ -109,8 +110,10 @@ pub enum AccountModelList {
     Xai,
     /// The `generateContent` models of a Gemini API key.
     Google,
-    /// The model variants of a Cursor login, with their context limits.
+    /// The models of a Cursor login, with their thinking levels and context limits.
     Cursor,
+    /// The models and thinking levels that the Antigravity ACP server offers a login.
+    Antigravity,
 }
 
 impl AccountModelList {
@@ -124,6 +127,7 @@ impl AccountModelList {
             "xai" => Some(Self::Xai),
             "google" => Some(Self::Google),
             "cursor" => Some(Self::Cursor),
+            "google-antigravity" => Some(Self::Antigravity),
             _ => None,
         }
     }
@@ -149,6 +153,7 @@ impl AccountModelList {
             }
             Self::Google => google::personalize_google_catalog(catalog, context).await,
             Self::Cursor => cursor::personalize_cursor_catalog(catalog, context).await,
+            Self::Antigravity => antigravity::personalize_antigravity_catalog(catalog, context).await,
         }
     }
 }
