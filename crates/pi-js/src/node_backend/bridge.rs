@@ -1,8 +1,8 @@
 //! The bridge thread: reads the child's messages and runs sync host functions, as the QuickJS
 //! thread does. Blocking calls into JavaScript from this thread fail, as they do on QuickJS.
 
-use std::io::{BufRead, BufReader, Read};
-use std::process::ChildStdout;
+use std::io::{BufRead, BufReader};
+use std::net::TcpStream;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, mpsc};
 
@@ -24,11 +24,11 @@ pub(crate) struct Bridge {
 }
 
 impl Bridge {
-    pub fn run(mut self, stdout: ChildStdout) {
+    pub fn run(mut self, socket: TcpStream) {
         let _ = self.client.bridge_thread.set(std::thread::current().id());
         let tokio = self.shared.tokio.clone();
         let _entered = tokio.enter();
-        for line in BufReader::new(stdout).lines() {
+        for line in BufReader::new(socket).lines() {
             let Ok(line) = line else { break };
             if let Ok(frame) = serde_json::from_str::<Value>(&line) {
                 self.dispatch(&frame);
@@ -167,16 +167,5 @@ pub(crate) fn deliver(shared: &Shared, kind: UncaughtKind, error: &JsError) {
             let text = format!("{prefix}{}\n", error.display_with_stack());
             shared.output.write(OutputStream::Stderr, text.as_bytes());
         }
-    }
-}
-
-/// Copy the child's own stderr (Node's fatal errors and warnings) to the stderr sink.
-pub(crate) fn forward_stderr(shared: Arc<Shared>, mut stderr: impl Read) {
-    let mut buffer = [0u8; 8192];
-    while let Ok(count) = stderr.read(&mut buffer) {
-        if count == 0 {
-            break;
-        }
-        shared.output.write(OutputStream::Stderr, &buffer[..count]);
     }
 }

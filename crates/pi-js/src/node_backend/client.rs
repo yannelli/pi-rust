@@ -2,8 +2,9 @@
 
 use std::collections::HashMap;
 use std::io::Write;
+use std::net::{Shutdown, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin};
+use std::process::Child;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock, RwLock, mpsc};
 use std::thread::ThreadId;
@@ -40,7 +41,7 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 pub(crate) struct NodeClient {
-    stdin: Mutex<Option<ChildStdin>>,
+    socket: Mutex<Option<TcpStream>>,
     child: Mutex<Option<Child>>,
     pending: Mutex<HashMap<u64, Waiter>>,
     next_id: AtomicU64,
@@ -52,12 +53,14 @@ pub(crate) struct NodeClient {
     /// `interrupt` or `process.exit` ended the worker on purpose.
     pub ending: AtomicBool,
     pub exit_reason: Mutex<Option<String>>,
+    /// The bootstrap scripts, when they are in a directory of their own.
+    bootstrap: Mutex<Option<tempfile::TempDir>>,
 }
 
 impl NodeClient {
-    pub fn new(child: Child, stdin: ChildStdin, virtual_dir: PathBuf) -> Self {
+    pub fn new(child: Child, socket: TcpStream, virtual_dir: PathBuf, bootstrap: Option<tempfile::TempDir>) -> Self {
         Self {
-            stdin: Mutex::new(Some(stdin)),
+            socket: Mutex::new(Some(socket)),
             child: Mutex::new(Some(child)),
             pending: Mutex::default(),
             next_id: AtomicU64::new(1),
@@ -66,6 +69,7 @@ impl NodeClient {
             inline_sources: RwLock::default(),
             ending: AtomicBool::new(false),
             exit_reason: Mutex::default(),
+            bootstrap: Mutex::new(bootstrap),
         }
     }
 
@@ -76,9 +80,9 @@ impl NodeClient {
     pub fn write(&self, frame: &Value) -> Result<(), JsError> {
         let mut line = frame.to_string();
         line.push('\n');
-        let mut stdin = lock(&self.stdin);
-        let stdin = stdin.as_mut().ok_or_else(shut_down)?;
-        stdin.write_all(line.as_bytes()).and_then(|()| stdin.flush()).map_err(|_| shut_down())
+        let mut socket = lock(&self.socket);
+        let socket = socket.as_mut().ok_or_else(shut_down)?;
+        socket.write_all(line.as_bytes()).map_err(|_| shut_down())
     }
 
     /// Send `{t: "req", id, ...frame}`; the bridge hands the reply to `waiter`.
@@ -129,6 +133,21 @@ impl NodeClient {
         lock(&self.exit_reason).get_or_insert(reason);
     }
 
+    /// The error for pending calls when the `node` child has exited or was shut down; the
+    /// waiting calls fail with it.
+    pub fn fail_if_exited(&self) -> Option<JsError> {
+        let exited = match lock(&self.child).as_mut() {
+            Some(child) => !matches!(child.try_wait(), Ok(None)),
+            None => true,
+        };
+        if !exited {
+            return None;
+        }
+        self.set_exit_reason("the Node extension runtime exited".into());
+        self.fail_all();
+        Some(self.exited())
+    }
+
     /// Make `name` (relative to `cwd`) load from `source`; returns its absolute key.
     pub fn register_inline(&self, cwd: &Path, name: &str, source: String) -> String {
         let path = Path::new(name);
@@ -148,21 +167,34 @@ impl NodeClient {
         let _ = self.write(&json!({ "t": "interrupt" }));
     }
 
-    /// Close stdin so the child exits, then wait briefly and kill it if it is still running.
+    /// End the socket so the child exits, wait briefly, and kill it if it is still running.
+    /// Closing the socket after that ends the bridge thread's read.
     pub fn shutdown(&self) {
         self.ending.store(true, Ordering::SeqCst);
-        lock(&self.stdin).take();
-        let Some(mut child) = lock(&self.child).take() else { return };
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while Instant::now() < deadline {
-            if let Ok(Some(_)) = child.try_wait() {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(10));
+        let socket = lock(&self.socket).take();
+        if let Some(socket) = &socket {
+            let _ = socket.shutdown(Shutdown::Write);
         }
-        let _ = child.kill();
-        let _ = child.wait();
+        if let Some(mut child) = lock(&self.child).take() {
+            reap(&mut child);
+        }
+        if let Some(socket) = socket {
+            let _ = socket.shutdown(Shutdown::Both);
+        }
+        lock(&self.bootstrap).take();
     }
+}
+
+fn reap(child: &mut Child) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        if let Ok(Some(_)) = child.try_wait() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 impl Drop for NodeClient {

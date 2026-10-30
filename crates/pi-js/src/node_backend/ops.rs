@@ -1,7 +1,7 @@
 //! Requests [`JsHandle`] and [`JsRef`] send to the Node worker, and their results.
 
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{Map, Value, json};
 
@@ -10,6 +10,9 @@ use super::wire;
 use crate::error::JsError;
 use crate::host::HostValue;
 use crate::runtime::{JsHandle, JsRef};
+
+/// How often a waiting call checks that the `node` child is still running.
+const LIVENESS_POLL: Duration = Duration::from_millis(250);
 
 /// How the worker returns a result.
 #[derive(Clone, Copy)]
@@ -69,9 +72,23 @@ pub(crate) fn json_frame(target: &JsRef) -> Map<String, Value> {
 
 pub(crate) async fn ask(handle: &JsHandle, frame: Result<Map<String, Value>, JsError>) -> Result<HostValue, JsError> {
     let client = handle.node_client().ok_or_else(shut_down)?;
-    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let (sender, mut receiver) = tokio::sync::oneshot::channel();
     client.send_request(&handle.shared().alive, frame?, Waiter::Async(sender))?;
-    receiver.await.map_err(|_| client.exited())?
+    loop {
+        // The timer belongs to the runtime's own tokio, whatever executor polls this future.
+        let poll = {
+            let _entered = handle.shared().tokio.enter();
+            tokio::time::timeout(LIVENESS_POLL, &mut receiver)
+        };
+        match poll.await {
+            Ok(answer) => return answer.map_err(|_| client.exited())?,
+            Err(_) => {
+                if let Some(error) = client.fail_if_exited() {
+                    return Err(error);
+                }
+            }
+        }
+    }
 }
 
 /// [`ask`] for synchronous callers; fails on the bridge thread, which must read the reply.
@@ -84,13 +101,22 @@ pub(crate) fn blocking_ask(
     let client = handle.node_client().ok_or_else(shut_down)?;
     let (sender, receiver) = mpsc::channel();
     client.send_request(&handle.shared().alive, frame?, Waiter::Blocking(sender))?;
-    match timeout {
-        None => receiver.recv().map_err(|_| client.exited())?,
-        Some(timeout) => match receiver.recv_timeout(timeout) {
-            Ok(result) => result,
-            Err(mpsc::RecvTimeoutError::Timeout) => Err(JsError::new("JavaScript call timed out")),
-            Err(mpsc::RecvTimeoutError::Disconnected) => Err(client.exited()),
-        },
+    let deadline = timeout.map(|timeout| Instant::now() + timeout);
+    loop {
+        let wait = deadline
+            .map_or(LIVENESS_POLL, |deadline| deadline.saturating_duration_since(Instant::now()).min(LIVENESS_POLL));
+        match receiver.recv_timeout(wait) {
+            Ok(result) => return result,
+            Err(mpsc::RecvTimeoutError::Disconnected) => return Err(client.exited()),
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if let Some(error) = client.fail_if_exited() {
+                    return Err(error);
+                }
+                if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                    return Err(JsError::new("JavaScript call timed out"));
+                }
+            }
+        }
     }
 }
 

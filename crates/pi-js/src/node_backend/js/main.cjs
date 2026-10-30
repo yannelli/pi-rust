@@ -1,8 +1,17 @@
 "use strict";
-// Main thread of the pi Node backend. It owns stdin and stdout (one JSON message per line) and
-// relays messages to the Worker that runs extension code. It does not block.
+// Main thread of the pi Node backend. It owns the loopback connection to Rust (one JSON message
+// per line) and relays messages to the Worker that runs extension code. It does not block.
+const net = require("node:net");
 const path = require("node:path");
 const { Worker, MessageChannel } = require("node:worker_threads");
+
+const port = Number(process.env.PI_NODE_BACKEND_PORT);
+const token = process.env.PI_NODE_BACKEND_TOKEN;
+delete process.env.PI_NODE_BACKEND_PORT;
+delete process.env.PI_NODE_BACKEND_TOKEN;
+const socket = net.connect({ host: "127.0.0.1", port });
+socket.setNoDelay(true);
+socket.write(token + "\n");
 
 const MIN_MAJOR = 22;
 let worker;
@@ -12,7 +21,7 @@ let hooksPort;
 let exitAnnounced = false;
 
 function send(text) {
-  process.stdout.write(text + "\n");
+  socket.write(text + "\n");
 }
 
 function sendJson(frame) {
@@ -86,8 +95,8 @@ function start(config) {
 }
 
 let buffered = "";
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (chunk) => {
+socket.setEncoding("utf8");
+socket.on("data", (chunk) => {
   buffered += chunk;
   let newline;
   while ((newline = buffered.indexOf("\n")) >= 0) {
@@ -96,4 +105,6 @@ process.stdin.on("data", (chunk) => {
     if (line.trim()) onRust(JSON.parse(line));
   }
 });
-process.stdin.on("end", () => process.exit(0));
+socket.on("end", () => process.exit(0));
+socket.on("close", () => process.exit(0));
+socket.on("error", () => process.exit(1));
