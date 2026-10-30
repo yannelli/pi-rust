@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.7.8] - 2026-10-30
+
+### Added
+
+- **ai:** add Cursor, Grok Build, and Google Antigravity providers ([630f541](https://github.com/yannelli/pi-rust/commit/630f541e84c3df90a36cf19394931617db509bb5))
+
 ## [0.7.7] - 2026-10-29
 
 ### Added
