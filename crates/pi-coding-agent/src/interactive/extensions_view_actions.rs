@@ -41,7 +41,9 @@ impl BrowserBackend {
                 ensure!(scope != SourceScope::Temporary, "This extension is temporary");
                 if let ParsedSource::Marketplace { name, .. } = parse_source(&source) {
                     if removing {
-                        self.marketplace.remove(&name)?;
+                        if !self.manager.marketplace_listed_elsewhere(&name, scope) {
+                            self.marketplace.remove(&name)?;
+                        }
                         self.manager.remove_source_from_settings(&source, scope == SourceScope::Project)?;
                     } else {
                         unchanged = match self.marketplace.update(&name).await? {

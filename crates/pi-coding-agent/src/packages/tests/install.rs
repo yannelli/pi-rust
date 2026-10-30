@@ -252,3 +252,26 @@ async fn install_paths_stay_inside_their_roots() {
         assert_eq!(mode & 0o777, 0o700);
     }
 }
+
+#[tokio::test]
+async fn removing_a_marketplace_package_from_one_scope_keeps_it_for_the_other() {
+    let fixture = Fixture::new();
+    let mock = crate::packages::marketplace_test_support::MockMarketplace::start().await;
+    mock.publish(&mock.release("v1.0.0", &["todo"], "binary-v1"), true);
+    let path = mock.marketplace(&fixture.agent_dir, false).install("todo", None).await.unwrap();
+    fixture.set_global(json!({"packages": ["marketplace:todo"]}));
+    fixture.settings.set_project_packages(&sources(json!(["marketplace:todo@v1.0.0"]))).unwrap();
+    let manager = fixture.manager(MockRunner::failing());
+    let binary = manager.marketplace().installed_package("todo").unwrap().unwrap().binary_path;
+
+    assert!(manager.remove_and_persist("marketplace:todo@v1.0.0", true).await.unwrap());
+    assert_eq!(fixture.project_packages(), json!([]));
+    assert!(path.join("package.json").is_file() && binary.is_file());
+
+    fixture.settings.set_project_packages(&sources(json!(["marketplace:todo"]))).unwrap();
+    assert!(manager.remove_and_persist("marketplace:todo", false).await.unwrap());
+    assert!(path.join("package.json").is_file() && binary.is_file());
+
+    assert!(manager.remove_and_persist("marketplace:todo", true).await.unwrap());
+    assert!(!path.exists() && !binary.exists());
+}
