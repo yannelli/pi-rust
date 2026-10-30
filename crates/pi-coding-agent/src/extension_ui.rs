@@ -235,9 +235,11 @@ pub trait ExtensionUi: Send + Sync {
     /// Stop the `onBranchChange` listener `key` of session `target`.
     fn off_branch_change(&self, _target: u64, _key: u64) {}
 
-    /// Write raw bytes to the terminal between frames (`ctx.ui.writeTerminal`, pi-rust only),
-    /// wrapped for tmux passthrough inside tmux when `tmux_passthrough` is set.
-    fn write_terminal(&self, _data: &str, _tmux_passthrough: bool) {}
+    /// Write raw bytes to the terminal between frames (`ctx.ui.writeTerminal`, pi-rust only), wrapped
+    /// for tmux when `tmux_passthrough` is set and inside tmux. Returns whether this UI wrote.
+    fn write_terminal(&self, _data: &str, _tmux_passthrough: bool) -> bool {
+        false
+    }
 
     /// A custom editor reports `submit`, `change`, `escape`, `ctrlD`, `pasteImage`, or `action`
     /// (with the app action id) as the default editor would handle it.

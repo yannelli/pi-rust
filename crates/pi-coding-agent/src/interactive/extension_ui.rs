@@ -397,10 +397,11 @@ impl ExtensionUi for TuiExtensionUi {
         self.run(move |mode| mode.footer_data.borrow_mut().remove_branch_listener(target, key));
     }
 
-    fn write_terminal(&self, data: &str, tmux_passthrough: bool) {
+    fn write_terminal(&self, data: &str, tmux_passthrough: bool) -> bool {
         let in_tmux = pi_tui::env::EnvLookup::non_empty(&pi_tui::env::ProcessEnv, "TMUX").is_some();
         let bytes = terminal_bytes(data, tmux_passthrough, in_tmux);
         self.run(move |mode| mode.terminal.borrow_mut().write(&bytes));
+        true
     }
 
     fn editor_event(&self, kind: &str, value: Option<&str>) {

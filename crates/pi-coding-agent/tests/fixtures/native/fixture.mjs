@@ -6,6 +6,7 @@ let nextId = 1;
 const pending = new Map();
 const cancels = new Map();
 const panelWaiters = new Map();
+let initProbe;
 
 const send = (message) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
 const notify = (method, params) => send({ method, params });
@@ -27,9 +28,9 @@ const registrations = {
 			parameters: { type: "object", properties: { text: { type: "string" }, wait: { type: "boolean" } } },
 		},
 	],
-	commands: [{ name: "native-ask" }, { name: "native-panel" }, { name: "native-llm" }, { name: "native-crash" }],
+	commands: ["native-ask", "native-panel", "native-llm", "native-crash", "native-write", "native-probe"].map((name) => ({ name })),
 	flags: [{ name: "native-flag", type: "string", default: "off" }],
-	events: ["session_start", "before_agent_start", "tool_call"],
+	events: ["session_start", "before_agent_start", "tool_call", "tool_result", "message_end", "context"],
 };
 
 async function executeTool(id, { toolCallId, params }) {
@@ -40,7 +41,33 @@ async function executeTool(id, { toolCallId, params }) {
 	throw Object.assign(new Error("cancelled by host"), { code: -32800 });
 }
 
+const textOf = (content) => (Array.isArray(content) ? content.map((block) => block.text ?? "").join("") : String(content ?? ""));
+
+async function initialize() {
+	const answer = (method, params) => request(method, params).then(
+		(result) => ({ result }),
+		(error) => ({ error: error.message }),
+	);
+	initProbe = {
+		flag: await answer("pi.call", { target: "pi", method: "getFlag", args: ["native-flag"] }),
+		commands: await answer("commands.getAll", {}),
+	};
+	return registrations;
+}
+
 function onEvent({ name, event, ctx }) {
+	if (name === "tool_result") {
+		return event.input?.text === "patch!" ? { patch: { content: [{ type: "text", text: "patched result" }] } } : {};
+	}
+	if (name === "message_end") {
+		const { role, content } = event.message;
+		return role === "assistant" && textOf(content) === "done patch" ? { patch: { message: { content: [{ type: "text", text: "message patched" }] } } } : {};
+	}
+	if (name === "context") {
+		if (!event.messages.some((message) => message.role === "user" && textOf(message.content) === "patch context")) return {};
+		const extra = { role: "user", content: [{ type: "text", text: "context patched" }], timestamp: Date.now() };
+		return { patch: { messages: [...event.messages, extra] } };
+	}
 	if (name === "session_start") {
 		notify("ui.setWidget", { key: "native", lines: [`widget for ${ctx.mode}`, `flag=${ctx.flags["native-flag"]}`] });
 		return {};
@@ -48,6 +75,7 @@ function onEvent({ name, event, ctx }) {
 	if (name === "before_agent_start") return { patch: { systemPromptOptions: { sections: { native: "From the native fixture." } } } };
 	if (event.toolName !== "native_echo") return {};
 	if (event.input.text === "blocked") return { result: { block: true, reason: "blocked by native" } };
+	if (event.input.text === "array") return { patch: ["array patch"] };
 	return { patch: { input: { text: `${event.input.text}!` } } };
 }
 
@@ -64,6 +92,11 @@ async function runCommand({ name }) {
 	} else if (name === "native-llm") {
 		const { text } = await request("llm.complete", { prompt: "Say hi", maxTokens: 50 });
 		await request("session.appendEntry", { customType: "native-llm", data: { text } });
+	} else if (name === "native-write") {
+		const wrote = await request("ui.writeTerminal", { data: "\u001b]0;native\u0007" });
+		await request("session.appendEntry", { customType: "native-write", data: { wrote } });
+	} else if (name === "native-probe") {
+		await request("session.appendEntry", { customType: "native-probe", data: initProbe });
 	} else if (name === "native-crash") {
 		process.exit(3);
 	}
@@ -71,7 +104,7 @@ async function runCommand({ name }) {
 }
 
 const methods = {
-	initialize: () => registrations,
+	initialize,
 	"tool.execute": executeTool,
 	event: onEvent,
 	"command.run": runCommand,
