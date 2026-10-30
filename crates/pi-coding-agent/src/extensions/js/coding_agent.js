@@ -15,6 +15,21 @@ export {
 } from "../pi-coding-agent/src/modes/interactive/components/keybinding-hints.ts";
 export { truncateToVisualLines } from "../pi-coding-agent/src/modes/interactive/components/visual-truncate.ts";
 export { withFileMutationQueue } from "../pi-coding-agent/src/core/tools/file-mutation-queue.ts";
+export * from "./coding_unsupported.js";
+export * from "./coding_utils.js";
+export * from "./compaction_utils.js";
+export { createAgentSession } from "./sdk_session.js";
+export { DefaultResourceLoader, ModelRegistry, ModelRuntime } from "./sdk_resources.js";
+export { SessionManager, SettingsManager } from "./sdk_storage.js";
+export {
+	buildContextEntries,
+	buildSessionContext,
+	buildSessionProjection,
+	getLatestCompactionEntry,
+	migrateSessionEntries,
+	parseSessionEntries,
+	sessionEntryToContextMessages,
+} from "./session_utils.js";
 
 function parseLineNumber(value) {
 	if (typeof value === "string" && value.trim() !== "") value = Number(value);
