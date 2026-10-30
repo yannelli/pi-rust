@@ -119,6 +119,7 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. This se
 | Run limits (`--max-turns`, `--max-cost`) and structured output (`--output-schema`, `--output-retries`) | | [Run limits](crates/pi-coding-agent/docs/cli.md#run-limits) |
 | `pi --mode acp`. Permission modes are separate from thinking levels and control tool execution. | Needs the separate pi-acp adapter | [ACP mode](crates/pi-coding-agent/docs/acp.md) |
 | Account model lists for OpenAI Codex, Anthropic, GitHub Copilot, OpenAI, xAI, Google, and Cursor | Limits only OpenRouter | [Account model lists](crates/pi-coding-agent/docs/providers.md#account-model-lists) |
+| Fast mode for models that have one: `/fast`, `--fast`, the `fastMode` setting, the ACP **Speed** option, and RPC `set_fast_mode` | Has no fast mode | [Fast mode](crates/pi-coding-agent/docs/providers.md#fast-mode-pi-rust-extension) |
 | The providers `cursor` and `google-antigravity` | Has none of them | [Subscription providers](crates/pi-coding-agent/docs/providers.md#cursor-and-google-antigravity-pi-rust-extension) |
 | The global `disabledProviders` setting hides providers from model selection and keeps their credentials. The TUI `/settings` menu has a **Disabled providers** list. | | [Disable providers](crates/pi-coding-agent/docs/providers.md#disable-providers) |
 | `/settings` items for the `retry.*` and `retry.provider.*` values | Sets these values only in `settings.json` | [Retry settings](crates/pi-coding-agent/docs/providers.md#retry-settings) |

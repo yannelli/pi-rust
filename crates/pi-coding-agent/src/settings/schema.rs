@@ -378,6 +378,9 @@ pub struct Settings {
     pub default_model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_thinking_level: Option<ThinkingLevel>,
+    /// pi-rust extension: fast mode for models that support it; off by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fast_mode: Option<bool>,
     /// Keyed by `provider/modelId`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_thinking_levels: Option<BTreeMap<String, ThinkingLevel>>,

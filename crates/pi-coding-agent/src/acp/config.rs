@@ -13,6 +13,10 @@ use super::errors::invalid_params;
 pub const MODEL_CONFIG_ID: &str = "model";
 pub const MODE_CONFIG_ID: &str = "mode";
 pub const THOUGHT_LEVEL_CONFIG_ID: &str = "thought_level";
+/// pi-rust extension: the "Speed" selector for models with a fast mode.
+pub const FAST_MODE_CONFIG_ID: &str = "fast_mode";
+pub const FAST_MODE_STANDARD: &str = "standard";
+pub const FAST_MODE_FAST: &str = "fast";
 
 /// A model as advertised: `provider/id`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -90,6 +94,23 @@ async fn thinking_option(backend: &dyn PiBackend, state: &Value) -> anyhow::Resu
         .description("Set the reasoning effort for this session"))
 }
 
+/// The "Speed" selector; `None` when the current model has no fast mode.
+fn fast_mode_option(state: &Value) -> Option<SessionConfigOption> {
+    if state.get("fastModeAvailable").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    let fast = state.get("fastMode").and_then(Value::as_bool).unwrap_or(false);
+    let current = if fast { FAST_MODE_FAST } else { FAST_MODE_STANDARD };
+    let choices = vec![
+        SessionConfigSelectOption::new(FAST_MODE_STANDARD, "Standard"),
+        SessionConfigSelectOption::new(FAST_MODE_FAST, "Fast"),
+    ];
+    let option = SessionConfigOption::select(FAST_MODE_CONFIG_ID, "Speed", current, choices)
+        .category(SessionConfigOptionCategory::Other("_speed".into()))
+        .description("Run the model in its fast mode");
+    Some(option)
+}
+
 /// Available models and the current one; `None` when pi reports neither.
 fn model_state(models: Option<&Value>, state: Option<&Value>) -> Option<ModelState> {
     let field = |value: &Value, key: &str| match &value[key] {
@@ -137,6 +158,7 @@ fn build_config_options(
     models: Option<&ModelState>,
     modes: &SessionModeState,
     thinking: SessionConfigOption,
+    fast_mode: Option<SessionConfigOption>,
 ) -> Vec<SessionConfigOption> {
     let choices: Vec<_> = modes
         .available_modes
@@ -151,6 +173,7 @@ fn build_config_options(
             .category(SessionConfigOptionCategory::Mode)
             .description("Control tool approval for this session"),
     ];
+    options.extend(fast_mode);
     if let Some(models) = models.filter(|models| !models.available_models.is_empty()) {
         let choices: Vec<SessionConfigSelectOption> = models
             .available_models
@@ -182,7 +205,7 @@ pub async fn session_configuration(
     let model_state = model_state(models.as_ref(), Some(&state));
     let modes = backend.permission_mode().state();
     let thinking = thinking_option(backend, &state).await?;
-    let config_options = build_config_options(model_state.as_ref(), &modes, thinking);
+    let config_options = build_config_options(model_state.as_ref(), &modes, thinking, fast_mode_option(&state));
     Ok(SessionConfiguration { config_options, models: model_state, modes })
 }
 

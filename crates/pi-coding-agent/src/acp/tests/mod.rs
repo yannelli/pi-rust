@@ -250,6 +250,12 @@ impl PiBackend for FakeBackend {
         (config.set_thinking)(&mut config.state, level.to_string())
     }
 
+    async fn set_fast_mode(&self, enabled: bool) -> anyhow::Result<()> {
+        self.call(format!("fast:{enabled}"));
+        self.config().state["fastMode"] = json!(enabled);
+        Ok(())
+    }
+
     async fn set_steering_mode(&self, mode: &str) -> anyhow::Result<()> {
         self.call(format!("steering:{mode}"));
         self.config().state["steeringMode"] = json!(mode);

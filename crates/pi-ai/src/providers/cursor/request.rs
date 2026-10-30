@@ -83,18 +83,27 @@ pub(crate) fn model_ids(id: &str) -> (String, String, Vec<(&'static str, String)
 }
 
 /// The route a discovered model keeps in `compat`: the `cursorLevels` entry of the thinking
-/// level, else `cursorSlug` and `cursorParameters`. Other models use the route [`model_ids`]
-/// derives from the id.
-fn route(model: &Model, level: Option<ThinkingLevel>) -> (String, String, Vec<(String, String)>, bool) {
+/// level, else `cursorSlug` and `cursorParameters`. With `fast`, the same keys of `cursorFast`
+/// apply when the model has it. Other models use the route [`model_ids`] derives from the id.
+fn route(model: &Model, level: Option<ThinkingLevel>, fast: bool) -> (String, String, Vec<(String, String)>, bool) {
     let Some(requested) = compat_str(model, "cursorModel") else {
         let (details, requested, params, max_mode) = model_ids(&model.id);
         let params = params.into_iter().map(|(id, value)| (id.to_string(), value)).collect();
         return (details, requested, params, max_mode);
     };
     let level = clamp_thinking_level(model, level.unwrap_or(ThinkingLevel::Off));
-    let chosen = compat_value(model, "cursorLevels").and_then(|levels| levels.get(level.as_str()));
-    let slug = chosen.and_then(|route| route["slug"].as_str()).or_else(|| compat_str(model, "cursorSlug"));
-    let params = chosen.map(|route| &route["parameters"]).or_else(|| compat_value(model, "cursorParameters"));
+    let fast_set = compat_value(model, "cursorFast").filter(|set| fast && set.is_object());
+    let (levels, slug, params) = match fast_set {
+        Some(set) => (set.get("levels"), set.get("slug").and_then(|slug| slug.as_str()), set.get("parameters")),
+        None => (
+            compat_value(model, "cursorLevels"),
+            compat_str(model, "cursorSlug"),
+            compat_value(model, "cursorParameters"),
+        ),
+    };
+    let chosen = levels.and_then(|levels| levels.get(level.as_str()));
+    let slug = chosen.and_then(|route| route["slug"].as_str()).or(slug);
+    let params = chosen.map(|route| &route["parameters"]).or(params);
     let params = params
         .and_then(|params| params.as_array())
         .into_iter()
@@ -137,6 +146,7 @@ pub(crate) fn build(
     model: &Model,
     context: &Context,
     level: Option<ThinkingLevel>,
+    fast: bool,
     conversation_id: &str,
     message_id: &str,
 ) -> RunRequest {
@@ -167,7 +177,7 @@ pub(crate) fn build(
     let turns = history::turns(&history, &results, &mut blobs);
     let state = root.iter().fold(Writer::new(), |state, id| state.bytes(1, id));
     let state = turns.iter().fold(state, |state, id| state.bytes(8, id));
-    let (details_id, requested_id, params, max_mode) = route(model, level);
+    let (details_id, requested_id, params, max_mode) = route(model, level, fast);
     let mut details = Writer::new().string(1, &details_id).string(3, &model.id).string(4, &model.name);
     let mut requested = Writer::new().string(1, &requested_id);
     if max_mode {
@@ -195,6 +205,8 @@ pub(crate) fn build(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use serde_json::{Value as Json, json};
 
     use super::*;
@@ -241,7 +253,7 @@ mod tests {
             tools: Vec::new(),
         };
         let model = Model { id: "claude-opus-5-high".into(), name: "Claude Opus 5".into(), ..Model::default() };
-        let built = build(&model, &context, None, "conv-1", "msg-1");
+        let built = build(&model, &context, None, false, "conv-1", "msg-1");
         let run = nested(&built.message, &[1]);
         assert_eq!(nested(run, &[2]), [0x12, 0x00]);
         let state = fields(nested(run, &[1])).unwrap();
@@ -266,7 +278,7 @@ mod tests {
     fn discovered_models_use_their_compat_route() {
         let compat = json!({"cursorModel": "claude-opus-5", "cursorParameters": [{"id": "thinking", "value": "true"}], "cursorMaxMode": true});
         let model = Model { id: "claude-opus-5-high-max".into(), compat: Some(compat), ..Model::default() };
-        let route = route(&model, None);
+        let route = route(&model, None, false);
         assert_eq!(
             route,
             ("claude-opus-5-high-max".into(), "claude-opus-5".into(), vec![("thinking".into(), "true".into())], true)
@@ -296,12 +308,48 @@ mod tests {
             ..Model::default()
         };
         let pick = |level| {
-            let (slug, requested, params, _) = route(&model, level);
+            let (slug, requested, params, _) = route(&model, level, false);
             (slug, requested, params[0].1.clone())
         };
         assert_eq!(pick(Some(ThinkingLevel::High)), ("grok-4.7-high".into(), "grok-4.7".into(), "high".into()));
         assert_eq!(pick(Some(ThinkingLevel::Medium)).0, "grok-4.7-high");
         assert_eq!(pick(Some(ThinkingLevel::Off)).0, "grok-4.7-low");
         assert_eq!(pick(None).0, "grok-4.7-low");
+        assert_eq!(route(&model, Some(ThinkingLevel::High), true).0, "grok-4.7-high", "no cursorFast");
+    }
+
+    #[test]
+    fn fast_picks_the_fast_route() {
+        let params =
+            |effort: &str| json!([{"id": "reasoning_effort", "value": effort}, {"id": "fast", "value": "true"}]);
+        let fast = |levels: bool| {
+            let mut set = json!({"slug": "grok-4.7-high-fast", "parameters": params("high")});
+            if levels {
+                set["levels"] = json!({"low": {"slug": "grok-4.7-low-fast", "parameters": params("low")},
+                    "high": {"slug": "grok-4.7-high-fast", "parameters": params("high")}});
+            }
+            set
+        };
+        let map: BTreeMap<String, Option<String>> = ThinkingLevel::ALL
+            .into_iter()
+            .map(|level| {
+                let offered = matches!(level, ThinkingLevel::Low | ThinkingLevel::High);
+                (level.as_str().to_string(), offered.then(|| level.as_str().to_string()))
+            })
+            .collect();
+        let model = |levels: bool| Model {
+            id: "grok-4.7".into(),
+            reasoning: true,
+            thinking_level_map: Some(map.clone()),
+            compat: Some(json!({"cursorModel": "grok-4.7", "cursorSlug": "grok-4.7-high", "cursorFast": fast(levels),
+                "cursorLevels": {"low": {"slug": "grok-4.7-low", "parameters": []}}})),
+            ..Model::default()
+        };
+        let with_levels = model(true);
+        let (slug, requested, params, _) = route(&with_levels, Some(ThinkingLevel::Low), true);
+        assert_eq!((slug.as_str(), requested.as_str()), ("grok-4.7-low-fast", "grok-4.7"));
+        assert_eq!(params[1], ("fast".to_string(), "true".to_string()));
+        assert_eq!(route(&with_levels, Some(ThinkingLevel::Low), false).0, "grok-4.7-low");
+        assert_eq!(route(&model(false), Some(ThinkingLevel::Low), true).0, "grok-4.7-high-fast");
     }
 }

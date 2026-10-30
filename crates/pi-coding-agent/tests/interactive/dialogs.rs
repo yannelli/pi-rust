@@ -36,6 +36,21 @@ async fn model_command_with_an_exact_reference_skips_the_selector() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fast_command_toggles_and_saves_fast_mode() {
+    local(async {
+        let ui = start(Options::default()).await;
+        ui.submit("/fast").await;
+        ui.wait_for("Fast mode on (the current model has no fast mode)").await;
+        assert!(ui.session().fast_mode() && ui.session().settings().fast_mode());
+        ui.submit("/fast off").await;
+        ui.send("\r").await;
+        ui.wait_for("Fast mode off").await;
+        assert!(!ui.session().fast_mode() && !ui.session().settings().fast_mode());
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn settings_open_and_escape_restores_the_editor() {
     local(async {
         let ui = start(Options::default()).await;

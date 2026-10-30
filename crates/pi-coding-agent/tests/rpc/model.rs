@@ -76,6 +76,29 @@ async fn sets_cycles_and_lists_thinking_levels() {
 }
 
 #[tokio::test]
+async fn sets_fast_mode_and_reports_it_in_state() {
+    let options = Options { tiny: json!({"compat": {"fastMode": true}}), ..Options::default() };
+    let mut rpc = start(options).await;
+    let state = rpc.data(json!({"id": "s0", "type": "get_state"})).await;
+    assert_eq!((state["fastMode"].clone(), state["fastModeAvailable"].clone()), (json!(false), json!(true)));
+
+    let set = rpc.request(json!({"id": "f", "type": "set_fast_mode", "enabled": true})).await;
+    assert_eq!(set, json!({"id": "f", "type": "response", "command": "set_fast_mode", "success": true}));
+    let changed = rpc.wait_for(|record| record["type"] == "fast_mode_changed").await;
+    assert_eq!(changed, json!({"type": "fast_mode_changed", "enabled": true}));
+    assert_eq!(rpc.data(json!({"id": "s1", "type": "get_state"})).await["fastMode"], true);
+    assert!(!rpc.h.settings.fast_mode(), "RPC fast mode changes are not saved");
+
+    rpc.data(json!({"id": "m", "type": "set_model", "provider": "local", "modelId": "other"})).await;
+    let state = rpc.data(json!({"id": "s2", "type": "get_state"})).await;
+    assert_eq!((state["fastMode"].clone(), state["fastModeAvailable"].clone()), (json!(true), json!(false)));
+
+    let bad = rpc.request(json!({"id": "b", "type": "set_fast_mode", "enabled": "yes"})).await;
+    assert_eq!((bad["success"].clone(), bad["command"].clone()), (json!(false), json!("set_fast_mode")));
+    rpc.finish().await;
+}
+
+#[tokio::test]
 async fn sets_queue_modes_and_automatic_behavior() {
     let mut rpc = start(Options::default()).await;
     let state = rpc.data(json!({"id": "s0", "type": "get_state"})).await;

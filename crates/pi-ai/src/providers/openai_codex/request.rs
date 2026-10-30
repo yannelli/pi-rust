@@ -12,7 +12,7 @@ use crate::providers::common::compat_bool;
 use crate::providers::constrained_sampling::{ResponsesToolOptions, convert_responses_tools};
 use crate::providers::openai_responses::{ConvertOptions, convert_messages, responses_tool_support};
 use crate::registry::{CacheRetention, StreamOptions};
-use crate::simple_options::{clamp_openai_prompt_cache_key, clamp_thinking_level};
+use crate::simple_options::{clamp_openai_prompt_cache_key, clamp_thinking_level, supports_fast};
 use crate::transcript::{initial_system_message, resolve_transcript_tools, system_message_text};
 use crate::types::{Message, Model, ThinkingLevel};
 
@@ -218,6 +218,10 @@ pub(super) fn build_body(
     if let Some(temperature) = options.temperature {
         body.insert("temperature".into(), json!(temperature));
     }
+    let fast = options.fast && supports_fast(model);
+    if let Some(tier) = options.service_tier.as_deref().or(fast.then_some("priority")) {
+        body.insert("service_tier".into(), json!(tier));
+    }
     let support = responses_tool_support(
         compat.supports_mid_convo_system_messages,
         compat.supports_additional_tools,
@@ -281,6 +285,22 @@ mod summary_tests {
         assert_eq!(body(&options)["reasoning"], json!({"effort": "medium", "summary": "off"}));
         let summary_only = StreamOptions { reasoning_summary: Some(ReasoningSummary::On), ..Default::default() };
         assert_eq!(body(&summary_only)["reasoning"], json!({"effort": "none"}));
+    }
+
+    #[test]
+    fn fast_mode_requests_the_priority_tier_unless_a_tier_is_set() {
+        let mut model = test_model("openai-codex-responses", "openai-codex", "https://chatgpt.com/backend-api");
+        let messages = [Message::user("hi")];
+        let tier = |model: &Model, options: &StreamOptions| {
+            build_body(model, &messages, options, None, &BTreeMap::new()).unwrap().get("service_tier").cloned()
+        };
+        let fast = StreamOptions { fast: true, ..Default::default() };
+        assert_eq!(tier(&model, &fast), None, "no priority tier listed");
+        model.compat = Some(json!({"serviceTiers": ["priority"]}));
+        assert_eq!(tier(&model, &fast), Some(json!("priority")));
+        assert_eq!(tier(&model, &StreamOptions::default()), None);
+        let flex = StreamOptions { service_tier: Some("flex".into()), ..fast };
+        assert_eq!(tier(&model, &flex), Some(json!("flex")));
     }
 
     #[test]

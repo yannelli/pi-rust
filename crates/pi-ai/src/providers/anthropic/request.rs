@@ -11,7 +11,7 @@ use crate::providers::common::{compat_bool, compat_str, compat_value, transform_
 use crate::registry::{CacheRetention, StreamOptions};
 use crate::simple_options::{
     MIN_ANSWER_TOKENS, MappedLevel, adjust_max_tokens_for_thinking, clamp_max_tokens_to_context, mapped_thinking_level,
-    resolve_cache_retention,
+    resolve_cache_retention, supports_fast,
 };
 use crate::transcript::{current_tools, fold_top_level_tool_changes, initial_system_message, system_message_text};
 use crate::types::{Message, Model, SystemMessage, ThinkingLevel};
@@ -24,6 +24,7 @@ const SERVER_SIDE_FALLBACK_BETA: &str = "server-side-fallback-2026-07-01";
 const MID_CONVERSATION_OUTPUT_CONFIG_BETA: &str = "mid-conversation-output-config-2026-07-01";
 const THINKING_BINDING_CONTROLS_BETA: &str = "thinking-binding-controls-2026-08-01";
 const INLINE_TOOLS_BETA: &str = "inline-tools-2026-09-15";
+const FAST_MODE_BETA: &str = "fast-mode-2026-02-01";
 
 /// Resolved `AnthropicMessagesCompat` flags with upstream defaults.
 #[derive(Clone)]
@@ -144,6 +145,11 @@ pub(super) struct Params<'a> {
     pub disable_preferred_strict_tools: bool,
 }
 
+/// Whether the request asks for fast mode on a model that has it.
+fn fast(params: &Params) -> bool {
+    params.options.fast && supports_fast(params.model)
+}
+
 /// A built request.
 pub(super) struct Built {
     pub body: Value,
@@ -249,6 +255,9 @@ pub(super) fn build_params(params: &Params) -> Result<Built, String> {
         let fallbacks: Vec<Value> = compat.fallback_models.iter().map(|model| json!({"model": model})).collect();
         body.insert("fallbacks".into(), Value::Array(fallbacks));
     }
+    if fast(params) {
+        body.insert("speed".into(), json!("fast"));
+    }
     Ok(Built { body: Value::Object(body), betas, preferred_strict_tools })
 }
 
@@ -320,6 +329,9 @@ fn beta_features(params: &Params, native_tools: bool) -> Vec<String> {
     }
     if native_tools {
         push(INLINE_TOOLS_BETA);
+    }
+    if fast(params) {
+        push(FAST_MODE_BETA);
     }
     features
 }

@@ -64,6 +64,7 @@ pub enum UiEvent {
     EntryAppended(Value),
     SessionInfoChanged,
     ThinkingLevelChanged,
+    FastModeChanged,
     AutoRetryStart {
         attempt: u32,
         max_attempts: u32,
@@ -123,6 +124,7 @@ impl UiEvent {
             AgentSessionEvent::EntryAppended { entry } => UiEvent::EntryAppended(entry.clone()),
             AgentSessionEvent::SessionInfoChanged { .. } => UiEvent::SessionInfoChanged,
             AgentSessionEvent::ThinkingLevelChanged { .. } => UiEvent::ThinkingLevelChanged,
+            AgentSessionEvent::FastModeChanged { .. } => UiEvent::FastModeChanged,
             AgentSessionEvent::AutoRetryStart { attempt, max_attempts, delay_ms, .. } => {
                 UiEvent::AutoRetryStart { attempt: *attempt, max_attempts: *max_attempts, delay_ms: *delay_ms }
             }

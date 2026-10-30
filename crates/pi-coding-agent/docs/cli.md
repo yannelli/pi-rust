@@ -2,6 +2,8 @@
 
 Run `pi --help` to see all options. This page describes `pi completion`, `pi doctor`, `pi sessions`, `pi stats`, `pi extensions`, the run limits, and structured output. pi-rust adds them, and upstream pi does not have them.
 
+pi-rust also adds `--fast`. It turns on fast mode for one run. See [Fast mode](providers.md#fast-mode-pi-rust-extension).
+
 ## Shell completion
 
 `pi completion bash|zsh|fish|powershell` prints a completion script. The script completes options, subcommands, and file paths. For `--model` and `--provider`, the script gets the models of the built-in catalog and `models.json` from pi.

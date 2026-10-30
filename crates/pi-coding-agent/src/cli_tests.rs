@@ -8,6 +8,7 @@ fn parse(line: &str) -> Args {
 fn parses_upstream_flags() {
     let args = parse("-p hello --model anthropic/claude --thinking max -t read,bash -xt bash -nc @a.txt world");
     assert!(args.print && args.no_context_files);
+    assert!(!args.fast);
     assert_eq!(args.messages, ["hello", "world"]);
     assert_eq!(args.model.as_deref(), Some("anthropic/claude"));
     assert_eq!(args.thinking, Some(ThinkingLevel::Max));
@@ -117,4 +118,11 @@ fn parses_and_validates_the_output_schema_flags() {
     ] {
         assert_eq!(parse(line).errors, [error], "{line}");
     }
+}
+
+#[test]
+fn parses_fast_flag() {
+    let args = parse("--fast --model anthropic/claude-opus-5-5");
+    assert!(args.fast);
+    assert!(args.errors.is_empty() && args.unknown_flags.is_empty());
 }

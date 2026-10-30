@@ -72,6 +72,10 @@ pub enum AgentSessionEvent<'a> {
     ThinkingLevelChanged {
         level: ThinkingLevel,
     },
+    /// pi-rust extension.
+    FastModeChanged {
+        enabled: bool,
+    },
     AutoRetryStart {
         attempt: u32,
         max_attempts: u32,
@@ -126,6 +130,7 @@ impl AgentSessionEvent<'_> {
             Self::EntryAppended { .. } => "entry_appended",
             Self::SessionInfoChanged { .. } => "session_info_changed",
             Self::ThinkingLevelChanged { .. } => "thinking_level_changed",
+            Self::FastModeChanged { .. } => "fast_mode_changed",
             Self::AutoRetryStart { .. } => "auto_retry_start",
             Self::AutoRetryEnd { .. } => "auto_retry_end",
             Self::SummarizationRetryScheduled { .. } => "summarization_retry_scheduled",
@@ -192,6 +197,7 @@ impl AgentSessionEvent<'_> {
                 None => json!({"type": "session_info_changed"}),
             },
             Self::ThinkingLevelChanged { level } => json!({"type": "thinking_level_changed", "level": level.as_str()}),
+            Self::FastModeChanged { enabled } => json!({"type": "fast_mode_changed", "enabled": enabled}),
             Self::AutoRetryStart { attempt, max_attempts, delay_ms, error_message } => json!({
                 "type": "auto_retry_start",
                 "attempt": attempt,
