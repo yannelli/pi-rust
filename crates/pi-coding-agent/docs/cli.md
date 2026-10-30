@@ -132,6 +132,9 @@ The flag works only in print mode: with `-p`, with `--mode json`, or when stdin 
 
 ```sh
 pi extensions list                       # built-in and installed, including disabled
+pi extensions search todo
+pi extensions info todo
+pi extensions install marketplace:todo
 pi extensions install npm:<package>      # or a git URL or a local path
 pi extensions disable builtin:mcp
 pi extensions enable builtin:mcp
@@ -143,4 +146,4 @@ pi config                                # TUI to turn resources on and off
 - To change the project-local settings, add `-l`. Project changes need trust (`--approve`).
 - After a change, restart pi or run `/reload`.
 - Third-party extensions are executable code. Install only sources that you trust.
-- pi-rust has no bundled catalog of third-party extensions that are not installed.
+- Use the [marketplace](marketplace.md) to find native Rust extensions in the signed release catalog.

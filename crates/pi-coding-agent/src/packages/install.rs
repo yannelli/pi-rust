@@ -12,6 +12,10 @@ fn scope_for(local: bool) -> SourceScope {
 }
 
 impl PackageManager {
+    pub fn marketplace(&self) -> super::marketplace::Marketplace {
+        super::marketplace::Marketplace::new(self.agent_dir.clone(), self.http(), self.is_offline())
+    }
+
     /// Install a source into user storage, or project storage with `local`. Local paths are
     /// never copied; installing one only checks that it exists.
     pub async fn install(&self, source: &str, local: bool) -> anyhow::Result<()> {
@@ -23,6 +27,9 @@ impl PackageManager {
                 ParsedSource::Npm(npm) => self.install_npm(npm, scope, false).await,
                 ParsedSource::Git(git) => self.install_git(git, scope).await,
                 ParsedSource::Archive(archive) => self.install_archive(archive, scope, false).await,
+                ParsedSource::Marketplace { name, tag } => {
+                    self.marketplace().install(name, tag.as_deref()).await.map(|_| ())
+                }
                 ParsedSource::Local(local) => {
                     let resolved = self.resolve_input_path(&local.path);
                     if !resolved.exists() {
@@ -52,6 +59,7 @@ impl PackageManager {
                 ParsedSource::Npm(npm) => self.uninstall_npm(npm, scope).await,
                 ParsedSource::Git(git) => self.remove_git(git, scope),
                 ParsedSource::Archive(archive) => self.remove_archive(archive, scope),
+                ParsedSource::Marketplace { name, .. } => self.marketplace().remove(name),
                 ParsedSource::Local(_) => Ok(()),
             }
         };
@@ -69,6 +77,9 @@ impl PackageManager {
             ParsedSource::Npm(npm) => self.install_npm(npm, scope, scope == SourceScope::Temporary).await,
             ParsedSource::Git(git) => self.install_git(git, scope).await,
             ParsedSource::Archive(archive) => self.install_archive(archive, scope, false).await,
+            ParsedSource::Marketplace { name, tag } => {
+                self.marketplace().install(name, tag.as_deref()).await.map(|_| ())
+            }
             ParsedSource::Local(_) => Ok(()),
         }
     }

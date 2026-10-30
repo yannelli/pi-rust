@@ -50,6 +50,7 @@ impl PackageManager {
         for (source, scope) in sources {
             match parse_source(&source) {
                 ParsedSource::Npm(parsed) if !parsed.pinned => npm.push((source, scope, parsed)),
+                parsed @ ParsedSource::Marketplace { tag: None, .. } => others.push((source, scope, parsed)),
                 parsed @ (ParsedSource::Git(_) | ParsedSource::Archive(_)) => others.push((source, scope, parsed)),
                 _ => {}
             }
@@ -82,6 +83,7 @@ impl PackageManager {
                     match parsed {
                         ParsedSource::Git(git) => self.update_git(git, *scope).await,
                         ParsedSource::Archive(archive) => self.install_archive(archive, *scope, true).await,
+                        ParsedSource::Marketplace { name, .. } => self.marketplace().update(name).await.map(|_| ()),
                         _ => Ok(()),
                     }
                 };
@@ -148,6 +150,9 @@ impl PackageManager {
                 let path = self.archive_install_path(archive, scope).ok().filter(|path| path.exists())?;
                 let name = format!("{}/{}", archive.host, archive.path);
                 self.archive_has_available_update(archive, &path).await.then_some((name, PackageKind::Url))?
+            }
+            ParsedSource::Marketplace { name, .. } => {
+                self.marketplace().has_update(name).await.ok()?.then(|| (name.clone(), PackageKind::Marketplace))?
             }
             ParsedSource::Local(_) => return None,
         };
