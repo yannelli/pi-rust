@@ -277,7 +277,7 @@ async fn usage_sends_the_usage_command_and_reads_the_quota_report() {
         let (client, agent_side) = tokio::io::duplex(1 << 20);
         tokio::spawn(usage_agent(agent_side));
         let (read, write) = tokio::io::split(client);
-        Connection::new(read, write)
+        Connection::new(super::LABEL, read, write)
     })));
     let windows = super::usage().await.unwrap();
     set_test_agent(None);
