@@ -16,6 +16,8 @@ mod glob;
 mod install;
 pub mod manifest;
 pub mod marketplace;
+#[cfg(all(test, unix))]
+mod marketplace_archive_tests;
 mod marketplace_index;
 mod marketplace_install;
 mod marketplace_lock;
