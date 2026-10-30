@@ -8,7 +8,6 @@ use std::time::{Duration, Instant};
 
 use common::*;
 use node_common::*;
-use pi_js::JsRuntime;
 use serde_json::json;
 
 async fn within<T>(future: impl std::future::Future<Output = T>) -> T {
@@ -94,7 +93,7 @@ async fn bootstrap_directory_is_private() {
 
     std::fs::set_permissions(&cache, std::fs::Permissions::from_mode(0o777)).unwrap();
     options.backend = pi_js::JsBackend::Node { executable: node().unwrap() };
-    let error = JsRuntime::new(options).err().expect("a shared bootstrap directory is refused");
+    let error = pi_js::JsRuntime::new(options).err().expect("a shared bootstrap directory is refused");
     assert_eq!(error.code.as_deref(), Some("ERR_PI_NODE_START"));
     assert!(error.message.contains("permissions"), "{error:?}");
 }
