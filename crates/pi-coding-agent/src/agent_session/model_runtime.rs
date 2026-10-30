@@ -126,6 +126,25 @@ impl ModelRuntime {
         registry.retain_models(|model| !disabled.contains(&model.provider));
     }
 
+    /// Provider ids and display names before global exclusions.
+    pub fn all_providers(&self) -> Vec<(String, String)> {
+        let mut registry = self.base_registry();
+        self.apply_extension_providers(&mut registry);
+        for model in self.virtual_models() {
+            registry.upsert(model);
+        }
+        let mut providers: Vec<_> = registry
+            .providers()
+            .into_iter()
+            .map(|id| {
+                let name = registry.provider_name(&id).unwrap_or(&id).to_string();
+                (id, name)
+            })
+            .collect();
+        providers.sort_by(|left, right| left.0.cmp(&right.0));
+        providers
+    }
+
     pub fn models_path(&self) -> &Path {
         &self.models_path
     }

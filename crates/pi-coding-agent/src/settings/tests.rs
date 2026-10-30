@@ -299,3 +299,63 @@ fn model_scoped_values_and_nested_writes() {
     assert_eq!(saved["shellCommandPrefix"], "shopt -s expand_aliases");
     assert_eq!(saved["enabledModels"], json!(["anthropic/*"]));
 }
+
+#[test]
+fn retry_setters_persist_and_keep_sibling_keys() {
+    let dirs = Dirs::new();
+    write(&dirs.global(), json!({"retry": {"enabled": false, "custom": 1, "provider": {"extra": "x"}}}));
+    let settings = dirs.manager(true);
+    settings.set_retry_max_retries(5);
+    settings.set_retry_base_delay_ms(500);
+    settings.set_retry_max_agent_delay_ms(9_000);
+    settings.set_provider_timeout_ms(Some(30_000));
+    settings.set_provider_max_retries(Some(2));
+    settings.set_provider_max_retry_delay_ms(4_000);
+    let expected = RetryConfig { enabled: false, max_retries: 5, base_delay_ms: 500, max_agent_delay_ms: 9_000 };
+    let provider = ProviderRetryConfig { timeout_ms: Some(30_000), max_retries: Some(2), max_retry_delay_ms: 4_000 };
+    assert_eq!(settings.retry_settings(), expected);
+    assert_eq!(settings.provider_retry_settings(), provider);
+    let file = read(&dirs.global());
+    assert_eq!(file["retry"]["custom"], 1);
+    assert_eq!(file["retry"]["provider"]["extra"], "x");
+    assert_eq!(file["retry"]["provider"]["timeoutMs"], 30_000);
+    let reloaded = dirs.manager(true);
+    assert_eq!(reloaded.retry_settings(), expected);
+    assert_eq!(reloaded.provider_retry_settings(), provider);
+}
+
+#[test]
+fn clearing_provider_retry_values_removes_keys_and_empty_objects() {
+    let dirs = Dirs::new();
+    let settings = dirs.manager(true);
+    settings.set_provider_timeout_ms(Some(1_000));
+    settings.set_provider_max_retries(Some(0));
+    assert_eq!(settings.provider_retry_settings().max_retries, Some(0));
+    settings.set_provider_timeout_ms(None);
+    assert_eq!(read(&dirs.global())["retry"], json!({"provider": {"maxRetries": 0}}));
+    settings.set_provider_max_retries(None);
+    assert!(read(&dirs.global()).get("retry").is_none());
+    assert_eq!(
+        settings.provider_retry_settings(),
+        ProviderRetryConfig { max_retry_delay_ms: 60_000, ..Default::default() }
+    );
+    settings.reload();
+    assert_eq!(settings.provider_retry_settings().timeout_ms, None);
+}
+
+#[test]
+fn disabled_providers_setter_writes_global_scope_only() {
+    let dirs = Dirs::new();
+    write(&dirs.project(), json!({"disabledProviders": ["project-only"]}));
+    let settings = dirs.manager(true);
+    assert!(settings.disabled_providers().is_empty());
+    settings.set_disabled_providers(vec!["openai".into(), "groq".into()]);
+    assert_eq!(read(&dirs.global())["disabledProviders"], json!(["openai", "groq"]));
+    assert_eq!(read(&dirs.project())["disabledProviders"], json!(["project-only"]));
+    assert_eq!(dirs.manager(true).disabled_providers(), vec!["openai", "groq"]);
+    assert_eq!(super::disabled_providers(&dirs.agent), vec!["openai", "groq"]);
+    settings.set_disabled_providers(Vec::new());
+    assert!(read(&dirs.global()).get("disabledProviders").is_none());
+    settings.reload();
+    assert!(settings.disabled_providers().is_empty());
+}

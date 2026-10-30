@@ -25,7 +25,7 @@
   "settings": [
     {
       "item": "disabledProviders",
-      "reason": "pi-rust extension: global-only provider exclusions across model selectors and registry refreshes; credentials are preserved."
+      "reason": "pi-rust extension: global-only provider exclusions across model selectors and registry refreshes; credentials are preserved. The TUI /settings menu edits it and applies the change immediately."
     },
     {
       "item": "theme",

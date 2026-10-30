@@ -341,6 +341,36 @@ impl SettingsManager {
         });
     }
 
+    /// Set (or remove) `key.nested.field` in global settings, keeping sibling keys. Objects
+    /// that a removal leaves empty are removed too.
+    pub fn set_global_nested2(&self, key: &str, nested: &str, field: &str, value: Option<Value>) {
+        let _ = self.write(SettingsScope::Global, |map| {
+            let removing = value.is_none();
+            let outer = map.entry(key.to_string()).or_insert_with(|| Value::Object(Map::new()));
+            if !outer.is_object() {
+                *outer = Value::Object(Map::new());
+            }
+            let Value::Object(outer) = outer else { return };
+            let inner = outer.entry(nested.to_string()).or_insert_with(|| Value::Object(Map::new()));
+            if !inner.is_object() {
+                *inner = Value::Object(Map::new());
+            }
+            let inner_empty = match inner {
+                Value::Object(inner) => {
+                    set_key(inner, field, value.clone());
+                    inner.is_empty()
+                }
+                _ => false,
+            };
+            if removing && inner_empty {
+                outer.remove(nested);
+            }
+            if removing && outer.is_empty() {
+                map.remove(key);
+            }
+        });
+    }
+
     /// Set (or remove) a top-level project key. Fails for untrusted projects.
     pub fn set_project_value(&self, key: &str, value: Option<Value>) -> Result<(), String> {
         self.write(SettingsScope::Project, |map| set_key(map, key, value.clone()))

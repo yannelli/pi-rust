@@ -311,6 +311,43 @@ impl SettingsManager {
         }
     }
 
+    pub fn set_retry_max_retries(&self, max_retries: u32) {
+        self.set_global_nested("retry", "maxRetries", Some(json!(max_retries)));
+    }
+
+    pub fn set_retry_base_delay_ms(&self, delay_ms: u64) {
+        self.set_global_nested("retry", "baseDelayMs", Some(json!(delay_ms)));
+    }
+
+    pub fn set_retry_max_agent_delay_ms(&self, delay_ms: u64) {
+        self.set_global_nested("retry", "maxAgentDelayMs", Some(json!(delay_ms)));
+    }
+
+    /// `None` removes `retry.provider.timeoutMs`.
+    pub fn set_provider_timeout_ms(&self, timeout_ms: Option<u64>) {
+        self.set_global_nested2("retry", "provider", "timeoutMs", timeout_ms.map(|ms| json!(ms)));
+    }
+
+    /// `None` removes `retry.provider.maxRetries`.
+    pub fn set_provider_max_retries(&self, max_retries: Option<u32>) {
+        self.set_global_nested2("retry", "provider", "maxRetries", max_retries.map(|n| json!(n)));
+    }
+
+    pub fn set_provider_max_retry_delay_ms(&self, delay_ms: u64) {
+        self.set_global_nested2("retry", "provider", "maxRetryDelayMs", Some(json!(delay_ms)));
+    }
+
+    /// Global `disabledProviders`; project values are ignored.
+    pub fn disabled_providers(&self) -> Vec<String> {
+        self.state().global_typed.disabled_providers.clone().unwrap_or_default()
+    }
+
+    /// An empty list removes `disabledProviders`.
+    pub fn set_disabled_providers(&self, providers: Vec<String>) {
+        let value = (!providers.is_empty()).then(|| json!(providers));
+        self.set_global_value("disabledProviders", value);
+    }
+
     pub fn provider_retry_settings(&self) -> ProviderRetryConfig {
         let provider = self.state().merged.retry.clone().and_then(|retry| retry.provider).unwrap_or_default();
         ProviderRetryConfig {

@@ -122,6 +122,7 @@ async fn disabled_virtual_providers_stay_hidden_during_registration() {
     let runtime = h.session.model_runtime();
     assert!(runtime.get_model("router", "auto").is_none());
     assert!(runtime.available_models().iter().all(|model| model.provider != "router"));
+    assert!(runtime.all_providers().contains(&("router".into(), "router".into())));
     runtime.wait_for_offline_refreshes().await;
     assert!(runtime.get_model("router", "auto").is_none());
     runtime.set_disabled_providers(Vec::new());
