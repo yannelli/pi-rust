@@ -87,7 +87,7 @@ pi sends `event` only for the names the extension subscribed to. `event` is the 
 - `patch` is an RFC 7386 JSON merge patch. pi applies it to the event object in place before the next handler runs. Examples: `{ "systemPromptOptions": { "sections": { "todo": "..." } } }` for `before_agent_start`, `{ "input": { "command": "ls" } }` for `tool_call`, `{ "content": [...] }` for `tool_result`. A `null` value removes the key.
 - `result` is the handler return value: `{ block, reason }` for `tool_call`, `{ action: "transform", text }` for `input`, `{ compaction }` or `{ cancel: true }` for `session_before_compact`, `{ message }` for `message_end`, `{ messages }` for `context`, `{ entries, continue }` for `agent_before_settle`, and the other results of upstream pi.
 
-The ctx snapshot: `{ cwd, mode, hasUI, model, thinkingLevel, sessionId, sessionName, sessionFile, isIdle, contextUsage, flags, footer? }`. `model` is `{ provider, id, name, api, contextWindow, maxTokens, reasoning }` or `null`. `flags` maps each flag of this extension to its value. `footer` is `{ gitBranch, sessionStats?, runState? }` when the host supplies it.
+The ctx snapshot: `{ cwd, mode, hasUI, model, thinkingLevel, sessionId, sessionName, sessionFile, isIdle, isProjectTrusted, contextUsage, flags, footer? }`. `model` is `{ provider, id, name, api, contextWindow, maxTokens, reasoning }` or `null`. `flags` maps each flag of this extension to its value. `footer` is `{ gitBranch, sessionStats?, runState? }` when the host supplies it.
 
 ### Tools
 

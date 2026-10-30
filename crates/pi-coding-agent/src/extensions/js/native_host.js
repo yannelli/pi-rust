@@ -68,6 +68,7 @@ export function snapshot(state, ctx) {
 		sessionName: safe(() => sessionManager?.getSessionName()),
 		sessionFile: safe(() => sessionManager?.getSessionFile()),
 		isIdle: safe(() => ctx.isIdle(), true),
+		isProjectTrusted: safe(() => ctx.isProjectTrusted(), false),
 		contextUsage: toJson(safe(() => ctx.getContextUsage())),
 		flags: Object.fromEntries(state.flags.map((name) => [name, toJson(safe(() => state.pi.getFlag(name)))])),
 		footer: footerJson(),
