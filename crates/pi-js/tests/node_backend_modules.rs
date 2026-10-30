@@ -47,7 +47,10 @@ async fn virtual_modules_and_registered_sources() {
     runtime.register_source_files([
         (
             vendor.join("lib/index.ts"),
-            "export { greet } from \"./greet\";\nexport const kind: string = 'vendor';\n".into(),
+            format!(
+                "export {{ greet }} from {};\nexport const kind: string = 'vendor';\nglobalThis.vendorLoads = (globalThis.vendorLoads ?? 0) + 1;\n",
+                json!(vendor.join("lib/greet.ts"))
+            ),
         ),
         (vendor.join("lib/greet.ts"), "export const greet = (name: string) => `hi ${name}`;\n".into()),
     ]);
@@ -69,25 +72,68 @@ export default { greeting: greet("pi"), kind, same: direct.greet === greet, core
     write(
         &root,
         "ext.cjs",
-        "const agent = require('@earendil-works/pi-coding-agent');\nmodule.exports = agent.greet('cjs');\n",
+        "const agent = require('@earendil-works/pi-coding-agent');\nmodule.exports = { greeting: agent.greet('cjs'), same: agent === require('@mariozechner/pi-coding-agent'), loads: globalThis.vendorLoads };\n",
     );
     let ext = runtime.import_default("./ext.mjs").await.unwrap();
     assert_eq!(
         ext.to_json().await.unwrap(),
         json!({ "greeting": "hi pi", "kind": "vendor", "same": true, "core": { "a": 1, "delete": 2 }, "a": 1 })
     );
-    if cfg!(windows) {
-        return; // docs/parity/GAPS.md: require(esm) of a registered source fails on Windows.
-    }
     let version = runtime.eval("process.versions.node").await.unwrap().into_json();
     let version = pi_js::node_backend::NodeVersion::parse(version.as_str().unwrap()).unwrap();
     if version.has_register_hooks() {
         let cjs = runtime.import_default("./ext.cjs").await.unwrap();
-        assert_eq!(cjs.to_json().await.unwrap(), json!("hi cjs"));
+        assert_eq!(cjs.to_json().await.unwrap(), json!({ "greeting": "hi cjs", "same": true, "loads": 1 }));
     } else {
         let error = runtime.import_default("./ext.cjs").await.unwrap_err();
         assert!(error.message.contains("22.15"), "{error:?}");
     }
+}
+
+#[tokio::test]
+async fn registered_esm_absolute_imports_share_one_instance() {
+    let (_dir, root) = tempdir();
+    let Some((runtime, _capture)) = node_runtime(&root) else { return };
+    let entry = root.join("vendor space/#entry.ts");
+    let dependency = root.join("vendor space/#dependency.ts");
+    let path = json!(dependency);
+    let url = json!(url::Url::from_file_path(&dependency).unwrap().to_string());
+    runtime.register_source_files([
+        (
+            dependency,
+            "globalThis.dependencyLoads = (globalThis.dependencyLoads ?? 0) + 1;\nexport const value = {};\n".into(),
+        ),
+        (
+            entry.clone(),
+            format!(
+                r#"import {{ value }} from {path};
+import {{ value as viaUrl }} from {url};
+export * from {path};
+export async function check() {{
+    const path = {path};
+    const literal = await import({path});
+    const computed = await import(path);
+    const url = await import({url});
+    return {{ same: [viaUrl, literal.value, computed.value, url.value].every(v => v === value), loads: globalThis.dependencyLoads }};
+}}
+"#
+            ),
+        ),
+    ]);
+    let version = runtime.eval("process.versions.node").await.unwrap().into_json();
+    let version = pi_js::node_backend::NodeVersion::parse(version.as_str().unwrap()).unwrap();
+    if version.has_register_hooks() {
+        write(&root, "require-first.cjs", &format!("module.exports = require({}).check();\n", json!(entry)));
+        let module = runtime.import("./require-first.cjs").await.unwrap();
+        assert_eq!(module.get("default").await.unwrap().into_json(), json!({ "same": true, "loads": 1 }));
+    }
+    write(
+        &root,
+        "import-after.ts",
+        &format!("import {{ check }} from {};\nexport default await check();\n", json!(entry)),
+    );
+    let result = runtime.import_default("./import-after.ts").await.unwrap();
+    assert_eq!(result.to_json().await.unwrap(), json!({ "same": true, "loads": 1 }));
 }
 
 #[tokio::test]
