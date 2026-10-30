@@ -118,6 +118,7 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. This se
 | The status line (`statusLine`) and the `/statusline` editor for modules and layout | Changes the footer only through extensions | [Status line](crates/pi-coding-agent/docs/status-line.md) |
 | More harness themes | | [Themes](crates/pi-coding-agent/docs/terminal.md#themes) |
 | The iTerm2 integration (`terminal.iterm2`) and `/terminal-setup` | | [iTerm2 integration](crates/pi-coding-agent/docs/terminal.md#iterm2-integration) |
+| Native extensions: a package lists programs in `package.json` `pi.native`, and pi runs each one as an extension over a JSON-RPC protocol on stdio | Loads only TypeScript and JavaScript extensions | [Native extension protocol](docs/extensions/native-protocol.md) |
 
 ### Bug fixes that are open upstream
 
