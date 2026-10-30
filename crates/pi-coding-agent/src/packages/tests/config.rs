@@ -206,7 +206,7 @@ async fn extensions_list_reports_an_invalid_marketplace_entry_and_loads_the_rest
         String::from_utf8_lossy(&err.lock().unwrap()).into_owned(),
     );
     assert_eq!(code, Some(0), "{errors}");
-    assert!(text.contains("local-tools/extensions/index.ts"), "{text}");
+    assert!(text.replace('\\', "/").contains("local-tools/extensions/index.ts"), "{text}");
     assert_eq!(errors.matches("Warning: Extension package").count(), 1, "{errors}");
     assert!(errors.contains("Extension package \"marketplace:Todo\": failed to install"), "{errors}");
 }
