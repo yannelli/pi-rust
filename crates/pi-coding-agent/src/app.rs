@@ -84,6 +84,8 @@ pub struct AppOptions {
     pub run_limits: crate::agent_session::RunLimits,
     /// `--output-schema`, whose instructions every session's system prompt gets (pi-rust).
     pub output_schema: Option<crate::output_schema::OutputSchema>,
+    /// `--extension-runtime` (pi-rust); `None` reads `PI_EXTENSION_RUNTIME`, then settings.
+    pub extension_runtime: Option<crate::settings::schema::ExtensionRuntime>,
 }
 
 fn resolve_cli_paths(cwd: &Path, paths: &[String]) -> Vec<String> {
@@ -139,6 +141,7 @@ impl AppOptions {
             project_trust_override: args.project_trust_override,
             extension_flags: args.unknown_flags.clone(),
             run_limits: args.run_limits,
+            extension_runtime: args.extension_runtime,
             ..Self::default()
         }
     }

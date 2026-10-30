@@ -20,6 +20,10 @@
     {
       "item": "--output-retries",
       "reason": "pi-rust extension: structured output"
+    },
+    {
+      "item": "--extension-runtime",
+      "reason": "pi-rust extension: selects the extension engine (QuickJS by default, or Node 22+). Upstream pi always runs extensions on Node."
     }
   ],
   "settings": [
@@ -62,6 +66,10 @@
     {
       "item": "terminal.iterm2",
       "reason": "pi-rust extension: iTerm2 integration"
+    },
+    {
+      "item": "extensionRuntime",
+      "reason": "pi-rust extension: \"quickjs\" (default), \"node\", or \"auto\" selects the extension engine. Upstream pi always runs extensions on Node."
     }
   ],
   "slashCommands": [

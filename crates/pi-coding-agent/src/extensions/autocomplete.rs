@@ -32,17 +32,10 @@ impl JsAutocompleteProvider {
             .blocking_call_method_opt_ref("autocompleteChain", args)
             .map_err(|error| error.message)?
             .ok_or("The autocomplete chain is empty")?;
-        let reference = chain.clone();
         let triggers = chain
-            .handle()
-            .blocking_with(move |scope| {
-                let value = scope.value(&reference)?;
-                let triggers = value
-                    .as_object()
-                    .and_then(|object| object.get::<_, Vec<String>>("triggerCharacters").ok())
-                    .unwrap_or_default();
-                Ok(triggers)
-            })
+            .blocking_get("triggerCharacters")
+            .ok()
+            .and_then(|value| serde_json::from_value::<Vec<String>>(value.into_json()).ok())
             .unwrap_or_default();
         Ok(Self { host, chain, triggers })
     }

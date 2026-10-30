@@ -3,6 +3,7 @@
 //! upstream API and event runner; host operations in Rust reach the session, models, and UI.
 
 pub mod autocomplete;
+pub mod backend;
 pub mod component;
 pub(crate) mod convert;
 pub mod inline;

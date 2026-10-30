@@ -333,6 +333,38 @@ pub enum FullscreenScrollbar {
     Hidden,
 }
 
+/// `extensionRuntime` (pi-rust extension): the engine that runs extensions. `auto` picks Node
+/// when a loaded package asks for it (`pi.runtime: "node"`) or ships a `.node` addon.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExtensionRuntime {
+    #[default]
+    QuickJs,
+    Node,
+    Auto,
+}
+
+impl ExtensionRuntime {
+    pub const NAMES: &[&str] = &["quickjs", "node", "auto"];
+
+    pub fn parse(text: &str) -> Option<Self> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "quickjs" => Some(Self::QuickJs),
+            "node" => Some(Self::Node),
+            "auto" => Some(Self::Auto),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::QuickJs => "quickjs",
+            Self::Node => "node",
+            Self::Auto => "auto",
+        }
+    }
+}
+
 /// Every `settings.json` key. `extra` keeps keys this version does not know.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -465,6 +497,8 @@ pub struct Settings {
     /// Lines per wheel event (1 to 100), or `"auto"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fullscreen_wheel_scroll_lines: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extension_runtime: Option<ExtensionRuntime>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }

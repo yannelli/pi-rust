@@ -139,6 +139,7 @@ impl SettingsManager {
     );
     choice!(tree_filter_mode, set_tree_filter_mode, "treeFilterMode", tree_filter_mode, TreeFilterMode);
     choice!(tui_mode, set_tui_mode, "tuiMode", tui_mode, TuiMode);
+    choice!(extension_runtime, set_extension_runtime, "extensionRuntime", extension_runtime, ExtensionRuntime);
     choice!(
         fullscreen_exit_output,
         set_fullscreen_exit_output,

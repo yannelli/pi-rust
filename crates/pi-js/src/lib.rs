@@ -6,6 +6,7 @@ pub mod error;
 pub mod host;
 mod modules;
 mod node;
+pub mod node_backend;
 pub mod resolve;
 pub mod runner;
 pub mod runtime;
@@ -17,8 +18,8 @@ pub use error::{JsError, UNSUPPORTED_CODE};
 pub use host::{HostFunction, HostFunctions, HostValue};
 pub use rquickjs;
 pub use runtime::{
-    ExitCallback, JsHandle, JsRef, JsRuntime, JsRuntimeOptions, JsScope, OutputSink, OutputStream, StdOutput,
-    UncaughtCallback, UncaughtKind,
+    ExitCallback, JsBackend, JsHandle, JsRef, JsRuntime, JsRuntimeOptions, JsScope, OutputSink, OutputStream,
+    StdOutput, UncaughtCallback, UncaughtKind,
 };
 pub use transpile::{ModuleFormat, TranspileCache, TranspileOptions, Transpiled};
 pub use virtual_modules::{PI_VIRTUAL_MODULES, VIRTUAL_MODULE_ALIASES, VirtualModule, VirtualModules};

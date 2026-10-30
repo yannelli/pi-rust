@@ -14,6 +14,53 @@ Extensions run on pi-js, an embedded QuickJS runtime with Node 22 built-in modul
 | APIs that work but are different from Node | `DIFFERENCES` in the same file |
 | Tests | `crates/pi-js/tests/node_*.rs` |
 
+## Node backend
+
+The Node backend runs extensions on a real `node` process in place of QuickJS. Use it for extensions that need native addons, `child_process.fork`, or V8-only modules. The code is in `crates/pi-js/src/node_backend/`.
+
+### Select the backend
+
+| Where | Value |
+| --- | --- |
+| CLI | `--extension-runtime quickjs\|node\|auto` |
+| Environment | `PI_EXTENSION_RUNTIME=quickjs\|node\|auto` |
+| Settings | `"extensionRuntime": "quickjs"`, `"node"`, or `"auto"` in project or global `settings.json` |
+
+- The order is CLI, then environment, then project settings, then global settings. The default is `quickjs`.
+- `auto` uses Node when a loaded extension package sets `package.json` `pi.runtime: "node"`, or ships a `.node` file within 4 directory levels of its root. Otherwise `auto` uses QuickJS.
+- pi finds `node` in `PI_NODE_PATH`, then on `PATH`. The minimum version is Node 22.
+- If Node is missing, too old, or does not start, pi shows one warning and uses QuickJS.
+- The code that selects the backend is in `crates/pi-coding-agent/src/extensions/backend.rs`.
+
+### How it works
+
+- Extension code runs in a `worker_threads` Worker inside the `node` process. `JsHandle::interrupt` ends the worker.
+- Module hooks resolve `pi` virtual modules and TypeScript files. On Node 22.15+ and 23.5+, pi uses `module.registerHooks`. On older Node 22 releases, pi uses `module.register` for ESM and a `Module._load` patch for CommonJS.
+- TypeScript goes through the oxc transpiler of pi-js, as on QuickJS.
+- The closure APIs `JsHandle::with`, `JsHandle::blocking_with`, and `JsHandle::post` return an error on Node, because the engine is in another process. Use the host function and `JsRef` APIs.
+- pi writes the bootstrap scripts (`crates/pi-js/src/node_backend/js/`) to the cache directory and starts `node` with them. The main thread of `node` sends one JSON message per line on stdout and reads them on stdin.
+- A sync host call from the worker waits on a `SharedArrayBuffer` with `Atomics.wait` until the reply comes back. Sync host functions run on the Rust bridge thread. A blocking `JsRef` call from that thread fails, as it does on the QuickJS thread.
+- A `JsRef` is an id in a table in the worker. Dropping the last clone in Rust releases it.
+- `process.exit` in an extension calls the `on_exit` callback and ends the worker. If `node` exits, pending calls fail with `ERR_PI_NODE_EXITED`.
+- Stack traces show positions in the transpiled code. They are not mapped back to the TypeScript source.
+
+Version-specific workarounds in `worker_modules.cjs` and `hooks.mjs`:
+
+- Node 22.x with `module.registerHooks`: a CommonJS file that `import()` loads gets a `require` that cannot load ES modules (`internal/modules/esm/translators`, `loadCJSModule`). The load hook returns the internal format `"commonjs-sync"` for those files, so the CommonJS loader runs them. This depends on a Node internal name. Check it when a new Node 22 release breaks the tests. Node 23 and later do not need it.
+- Node 22.0 to 22.14 (`module.register`): Node reads re-exported CommonJS files from disk to list their exports, and registered sources are not on disk. The load hook writes `require(x)` as `require.call(void 0, x)` in CommonJS that Rust supplies, so the export scan skips those calls.
+- Node 22.0 to 22.14: the `MessagePort` of the hooks thread must stay referenced. With `port.unref()`, replies do not wake the hooks thread and imports hang.
+
+### Test on Node
+
+Set `PI_EXTENSION_RUNTIME=node` to run the extension tests on Node. The harness in `crates/pi-coding-agent/tests/extensions/harness.rs` then fails a test if the runner fell back to QuickJS.
+
+```sh
+PI_EXTENSION_RUNTIME=node cargo test -p pi-coding-agent --test extensions --no-fail-fast
+cargo test -p pi-js --test node_backend --test node_backend_modules
+```
+
+The pi-js Node tests skip with a message when no Node 22 or later is found. Set `PI_NODE_PATH` to test one Node version, for example Node 22.14 for the `module.register` path.
+
 ## Close a gap
 
 1. Pick an entry from `UNSUPPORTED_APIS` or `DIFFERENCES`. Read how Node 22 behaves. Include the error codes and messages.

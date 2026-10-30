@@ -93,7 +93,9 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. This se
   - `node:sqlite` on the bundled SQLite, `node:test` with TAP and spec output, and `repl` over any streams.
   - In-process `inspector` sessions, and `wasi` with a `WebAssembly` global on the wasmi interpreter.
 
-  The APIs that do not work throw `ERR_PI_UNSUPPORTED`. Examples are `crypto.subtle` other than `digest`, and rare `crypto` ciphers such as Camellia. `crates/pi-js/src/unsupported.rs` lists all of them. Native npm addons cannot load.
+  The APIs that do not work throw `ERR_PI_UNSUPPORTED`. Examples are `crypto.subtle` other than `digest`, and rare `crypto` ciphers such as Camellia. `crates/pi-js/src/unsupported.rs` lists all of them. Native npm addons cannot load on QuickJS.
+
+  To run extensions on Node 22 or later, set `extensionRuntime` to `"node"` or `"auto"`, or use `--extension-runtime` or `PI_EXTENSION_RUNTIME`. On Node, native addons, `child_process.fork`, and V8-only modules work. If Node is missing, pi uses QuickJS. See [Node backend](docs/agents/node-compat.md#node-backend).
 - `grep` and `find` use the Rust `ignore` crate, so pi-rust does not download `rg` or `fd`.
 - The version check and `pi update --self` use the releases of this repository.
 - Word movement in Chinese, Japanese, Korean (CJK), and Thai text uses ICU4X dictionaries. Thus some word boundaries are different from `Intl.Segmenter` in Node.
@@ -124,6 +126,7 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. This se
 | The iTerm2 integration (`terminal.iterm2`) and `/terminal-setup` | | [iTerm2 integration](crates/pi-coding-agent/docs/terminal.md#iterm2-integration) |
 | Extension UI calls: `ctx.ui.writeTerminal(data, { tmuxPassthrough })` writes raw bytes to the terminal. Footer data of `ctx.ui.setFooter` also has `getSessionStats()` (`input`, `output`, `cacheRead`, `cacheWrite`, `cost`, `contextTokens`, `contextWindow`, `contextPercent`) and `getRunState()` (`idle`, `working`, `blocked`, `done`, or `error`). | Has none of them | |
 | Native extensions: a package lists programs in `package.json` `pi.native`, and pi runs each one as an extension over a JSON-RPC protocol on stdio | Loads only TypeScript and JavaScript extensions | [Native extension protocol](docs/extensions/native-protocol.md) |
+| A choice of extension engine: the `extensionRuntime` setting, `--extension-runtime`, and `PI_EXTENSION_RUNTIME` (`quickjs`, `node`, or `auto`) | Always runs extensions on Node | [Extension runtime](crates/pi-coding-agent/docs/cli.md#extension-runtime) |
 
 ### Bug fixes that are open upstream
 

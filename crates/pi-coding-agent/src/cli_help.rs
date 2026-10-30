@@ -180,6 +180,8 @@ Environment Variables:
   {agent_dir_env:<32} - Config directory (default: ~/{config_dir}/agent)
   {session_dir_env:<32} - Session storage directory (overridden by --session-dir)
   PI_OFFLINE                       - Disable startup network operations when set to 1/true/yes
+  PI_EXTENSION_RUNTIME             - Extension engine: quickjs, node, or auto (overridden by --extension-runtime)
+  PI_NODE_PATH                     - Path of the node binary for the Node extension engine (default: node on PATH)
 
 Built-in Tool Names:
   read       - Read file contents

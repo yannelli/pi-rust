@@ -48,6 +48,12 @@ These commits are older than the synced commit, so the report no longer lists th
 - **Byte-identical zlib output**: zlib-rs output can have different bytes from Node's zlib output. `memLevel` and `strategy` have no effect.
 - **V8-only features** depend on V8 internals that QuickJS does not have. These features are heap snapshots with nodes, `v8.queryObjects`, `inspector.open`, and full `async_hooks` coverage of timers, promises, and I/O.
 
+The Node backend (`extensionRuntime: "node"`, see [Node backend](../agents/node-compat.md#node-backend)) closes these items when it is selected. On the default QuickJS backend they stay open.
+
+- `child_process.fork` and spawning `process.execPath` start a real Node process.
+- `process.dlopen` and native `.node` addons load.
+- V8-only modules and features work: `v8` heap snapshots and `queryObjects`, `inspector.open`, and full `async_hooks` coverage.
+
 ## Extension module exports
 
 Section 8 of the parity report compares the runtime exports of each module in upstream `virtual-modules.ts` with the bundled module. Run `cargo xtask parity --upstream <checkout>` to get the current list. On 2026-10-29 the report found these gaps.

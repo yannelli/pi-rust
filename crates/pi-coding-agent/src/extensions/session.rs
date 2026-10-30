@@ -23,6 +23,8 @@ pub struct LoadOptions {
     pub inline: Vec<Arc<dyn InlineExtension>>,
     /// Files to load in place of the resources list.
     pub entries: Option<Vec<LoadEntry>>,
+    /// `--extension-runtime`; `None` reads `PI_EXTENSION_RUNTIME`, then the settings.
+    pub runtime: Option<super::backend::ExtensionRuntime>,
 }
 
 #[derive(Default)]
@@ -42,12 +44,12 @@ pub async fn load_extensions(services: &AgentSessionServices, options: &LoadOpti
     if entries.is_empty() && options.inline.is_empty() {
         return LoadedExtensions::default();
     }
-    let runner = match ExtensionRunner::start(&services.cwd, &services.agent_dir, services.model_runtime.clone()).await
-    {
+    let (started, mut diagnostics) = super::backend::start_runner(services, options.runtime, &entries).await;
+    let runner = match started {
         Ok(runner) => runner,
         Err(error) => {
-            let message = format!("Failed to start the extension host: {error:#}");
-            return LoadedExtensions { runner: None, diagnostics: vec![RuntimeDiagnostic::error(message)] };
+            diagnostics.push(RuntimeDiagnostic::error(format!("Failed to start the extension host: {error:#}")));
+            return LoadedExtensions { runner: None, diagnostics };
         }
     };
     runner.load_inline(&options.inline).await;
@@ -58,11 +60,9 @@ pub async fn load_extensions(services: &AgentSessionServices, options: &LoadOpti
     let _ = runner.call_json("bindModels", Vec::new()).await;
     // Registered providers and virtual models started offline refreshes; list their models.
     services.model_runtime.wait_for_offline_refreshes().await;
-    let diagnostics = runner
-        .load_errors()
-        .into_iter()
-        .map(|error| RuntimeDiagnostic::error(format!("Failed to load extension \"{}\": {}", error.path, error.error)))
-        .collect();
+    diagnostics.extend(runner.load_errors().into_iter().map(|error| {
+        RuntimeDiagnostic::error(format!("Failed to load extension \"{}\": {}", error.path, error.error))
+    }));
     LoadedExtensions { runner: Some(runner), diagnostics }
 }
 
