@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use crate::declarations::{ToolDeclaration, render_tool_output_type, render_tool_sample};
 use crate::host::{CodemodeToolInfo, ToolNamespace};
 use crate::identifier::to_codemode_identifier;
-use crate::js::{js_trim, locale_compare, utf16_len};
+use crate::js::{js_stringify, js_trim, locale_compare, quote, utf16_len};
 
 pub const CODEMODE_TOOL_NAME: &str = "codemode";
 /// Default token budget for tool declarations in the description (`codemode.inlineBudget`).
@@ -196,8 +196,8 @@ pub fn create_codemode_description(tools: &[CodemodeToolInfo], options: &Codemod
 }
 
 /// The field names of an object schema, `{ output, exit_code, full_output_path? }`, with the fields
-/// of object-typed fields `depth` levels deep: `{ content, structuredContent?: { results } }`.
-/// `None` for other schemas.
+/// of object-typed fields `depth` levels deep: `{ content, structuredContent?: { results } }`, and
+/// the value of `const` fields: `{ action: "start", id }`. `None` for other schemas.
 fn describe_fields(schema: &Value, depth: usize) -> Option<String> {
     let object = schema.as_object()?;
     if object.get("type").and_then(Value::as_str) != Some("object") {
@@ -211,7 +211,11 @@ fn describe_fields(schema: &Value, depth: usize) -> Option<String> {
     let fields: Vec<String> = properties
         .iter()
         .map(|(name, field)| {
-            let nested = if depth > 0 { describe_fields(field, depth - 1) } else { None };
+            let nested = match field.get("const") {
+                Some(value) => Some(js_stringify(value)),
+                None if depth > 0 => describe_fields(field, depth - 1),
+                None => None,
+            };
             let optional = if required.contains(&name.as_str()) { "" } else { "?" };
             format!("{name}{optional}{}", nested.map(|nested| format!(": {nested}")).unwrap_or_default())
         })
@@ -219,15 +223,33 @@ fn describe_fields(schema: &Value, depth: usize) -> Option<String> {
     Some(format!("{{ {} }}", fields.join(", ")))
 }
 
+/// The field names of each variant of an `anyOf`/`oneOf` whose variants are all objects, joined by
+/// `|`.
+fn describe_union_fields(schema: &Value) -> Option<String> {
+    let object = schema.as_object()?;
+    let variants = object.get("anyOf").filter(|value| !value.is_null()).or_else(|| object.get("oneOf"))?;
+    let variants = variants.as_array().filter(|variants| !variants.is_empty())?;
+    let described: Option<Vec<String>> = variants.iter().map(|variant| describe_fields(variant, 0)).collect();
+    described.map(|fields| fields.join(" | "))
+}
+
 /// What a script call resolves to, in one line: `a string`, the field names of an object (see
-/// [`describe_fields`]), or the rendered type for anything else.
-fn describe_output(schema: Option<&Value>) -> String {
+/// [`describe_fields`]), the field names of each object in a union, the rendered type when it fits
+/// on one line, or a pointer to `describeTool()` for anything longer, which would otherwise be sent
+/// with every request (upstream #11501).
+fn describe_output(name: &str, schema: Option<&Value>) -> String {
     let rendered = render_tool_output_type(schema);
     if rendered == "string" {
         return "a string".into();
     }
-    let fields = schema.and_then(|schema| describe_fields(schema, 1));
-    format!("`{}`", fields.unwrap_or_else(|| rendered.split_whitespace().collect::<Vec<_>>().join(" ")))
+    let fields = schema.and_then(|schema| describe_fields(schema, 1).or_else(|| describe_union_fields(schema)));
+    if let Some(fields) = fields {
+        return format!("`{fields}`");
+    }
+    if !rendered.contains('\n') {
+        return format!("`{rendered}`");
+    }
+    format!("a value; `await describeTool({})` shows its type", quote(name))
 }
 
 /// A declared tool's description followed by how scripts call it and what the call resolves to.
@@ -237,6 +259,6 @@ pub fn describe_script_call(tool: &CodemodeToolInfo) -> String {
         "{}\n\nCodemode: `tools.{}(args)` resolves to {}.",
         js_trim(&tool.description),
         to_codemode_identifier(&tool.name),
-        describe_output(declaration.output_schema.as_ref())
+        describe_output(&tool.name, declaration.output_schema.as_ref())
     )
 }

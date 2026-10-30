@@ -127,6 +127,62 @@ fn describes_what_script_calls_resolve_to() {
     assert!(describe_script_call(&stats).ends_with("resolves to `Array<string>`."));
 }
 
+// Upstream #11501: union and multi-line output types are summarized instead of inlined.
+#[test]
+fn summarizes_union_and_multi_line_output_types() {
+    let output_tool = |name: &str, output_schema: Value| CodemodeToolInfo {
+        output_schema: Some(output_schema),
+        ..CodemodeToolInfo::new(name, format!("{name} tool"), json!({ "type": "object", "properties": {} }))
+    };
+    let process = output_tool(
+        "process",
+        json!({ "anyOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "action": { "const": "start", "type": "string" },
+                    "process": {
+                        "type": "object",
+                        "properties": { "id": { "type": "string", "description": "Process id" }, "pid": { "type": "integer" } },
+                        "required": ["id", "pid"],
+                    },
+                },
+                "required": ["action", "process"],
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "action": { "const": "list", "type": "string" },
+                    "processes": { "type": "array", "items": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] } },
+                    "truncated": { "type": "boolean" },
+                },
+                "required": ["action", "processes"],
+            },
+        ] }),
+    );
+    let entries = output_tool(
+        "entries",
+        json!({
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": { "id": { "type": "string" }, "size": { "type": "integer" } },
+                "required": ["id", "size"],
+            },
+        }),
+    );
+    let count = output_tool("count", json!({ "type": "number" }));
+    assert_eq!(
+        describe_script_call(&process),
+        "process tool\n\nCodemode: `tools.process(args)` resolves to `{ action: \"start\", process } | { action: \"list\", processes, truncated? }`."
+    );
+    assert_eq!(
+        describe_script_call(&entries),
+        "entries tool\n\nCodemode: `tools.entries(args)` resolves to a value; `await describeTool(\"entries\")` shows its type."
+    );
+    assert_eq!(describe_script_call(&count), "count tool\n\nCodemode: `tools.count(args)` resolves to `number`.");
+}
+
 #[tokio::test]
 async fn shows_guidelines_of_unlisted_tools_through_describe_tool() {
     let host = Arc::new(FakeHost::default().tool(read_tool(), |_| text_outcome("hello")));
