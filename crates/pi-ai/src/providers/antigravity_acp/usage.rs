@@ -15,7 +15,7 @@ const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Au
 
 /// Starts the server, opens a session, and sends `/usage`.
 pub(crate) async fn usage() -> Result<Vec<UsageWindow>, String> {
-    let cwd = std::env::temp_dir();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
     let (connection, _server, _) = connect(&cwd).await?;
     let params = json!({"cwd": cwd, "mcpServers": []});
     let session =
