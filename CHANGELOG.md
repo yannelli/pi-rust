@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.8.1] - 2026-10-30
+
+### Fixed
+
+- **js:** load registered ESM through require on Windows ([e5d109c](https://github.com/yannelli/pi-rust/commit/e5d109cf6cc7e9fff613bf2bac90080be974a39b))
+
 ## [0.8.0] - 2026-10-30
 
 ### Breaking Changes
