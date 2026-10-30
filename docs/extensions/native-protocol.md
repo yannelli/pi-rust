@@ -25,7 +25,7 @@ A package declares native extensions in `package.json`:
 - `$/cancelRequest` `{ "id": <request id> }` cancels a request of the other side. The receiver still answers it: with a result, or with error `-32800`.
 - An extension-to-host method sent as a notification (no `id`) runs, and the host drops its result.
 - Error codes: `-32700` parse error, `-32600` invalid request, `-32601` unknown method, `-32602` invalid params, `-32603` internal error, `-32800` cancelled, `-32001` no UI, `-32002` no context (no event reached the extension within 30 seconds). A request that needs a ctx and arrives before the first event waits for that event; other requests are answered at once, also during `initialize`. The bridge takes the ctx of `session_start` for every extension.
-- Requests that need a ctx: `ui.notify`, `ui.select`, `ui.confirm`, `ui.input`, `ui.editor`, `ui.setStatus`, `ui.setTitle`, `ui.setEditorText`, `ui.getEditorText`, `ui.writeTerminal`, `ui.setWidget`, `ui.setFooter`, `ui.custom`, `session.getEntries`, `session.getBranch`, `model.get`, `model.set`, `ctx.*`, `llm.complete`, `auth.getProviderAuth`, and `pi.call` with a target other than `pi`.
+- Requests that need a ctx: `ui.notify`, `ui.select`, `ui.confirm`, `ui.input`, `ui.editor`, `ui.setStatus`, `ui.setTitle`, `ui.setEditorText`, `ui.getEditorText`, `ui.writeTerminal`, `ui.setWidget`, `ui.setFooter`, `ui.custom`, `session.getEntries`, `session.getBranch`, `model.get`, `model.set`, `model.find`, `ctx.*`, `llm.complete`, `auth.getProviderAuth`, and `pi.call` with a target other than `pi`.
 
 ## Lifecycle
 
@@ -75,15 +75,18 @@ All fields except `protocolVersion` are optional.
 | `command.run` | `{ name, args, ctx }` | `null` |
 | `command.complete` | `{ name, prefix }` | `[{ value, label?, description? }]` or `null` |
 | `shortcut.run` | `{ shortcut, ctx }` | `null` |
-| `autocomplete.suggest` | `{ lines, cursorLine, cursorCol, force }` | `{ items, prefix }` or `null` (pi's own suggestions) |
+| `autocomplete.suggest` | `{ lines, cursorLine, cursorCol, force }` | `{ items, prefix, merge? }` or `null` (pi's own suggestions) |
 | `virtualModel.route` | `{ provider, id, request }` | the route result of the JavaScript API |
 | `shutdown` | `{}` | `null` |
 
-Notifications: `initialized`, `exit`, `events.message` `{ channel, data }`, `ui.resize` `{ surface, width }`, `ui.key` `{ surface, data }`, `ui.closed` `{ surface }`, `$/cancelRequest`.
+Notifications: `initialized`, `exit`, `events.message` `{ channel, data }`, `ui.resize` `{ surface, width }`, `ui.key` `{ surface, data, key }`, `ui.closed` `{ surface }`, `footer.changed` `{ footer }`, `$/cancelRequest`.
+
+- `autocomplete.suggest`: with `merge: true`, pi adds its own suggestions after the extension's items when both use the same `prefix`. When the prefixes differ, pi shows only the extension's items.
+- `footer.changed`: pi sends it to an extension that lists `footer_changed` in `events`, when the `footer` of the ctx snapshot changes in `tui` mode. pi checks the footer data 4 times per second, so it sends at most 4 notifications per second.
 
 ### Events
 
-pi sends `event` only for the names the extension subscribed to. `event` is the event object of the JavaScript API without functions and without `signal`. When the event signal aborts, pi sends `$/cancelRequest`.
+pi sends `event` only for the names the extension subscribed to. `footer_changed` is no event: it subscribes to the `footer.changed` notification. `event` is the event object of the JavaScript API without functions and without `signal`. When the event signal aborts, pi sends `$/cancelRequest`.
 
 - `patch` is an RFC 7386 JSON merge patch. pi applies it to the event object in place before the next handler runs. A `null` value removes the key. pi ignores a patch that is not a JSON object and logs a line.
 - `result` is the handler return value: `{ block, reason }` for `tool_call`, `{ action: "transform", text }` for `input`, `{ compaction }` or `{ cancel: true }` for `session_before_compact`, `{ message }` for `message_end`, `{ messages }` for `context`, `{ entries, continue }` for `agent_before_settle`, and the other results of upstream pi.
@@ -98,7 +101,7 @@ How each event uses a patch:
 
 pi builds no result for `before_agent_start`: a built `systemPrompt` would replace the whole system prompt.
 
-The ctx snapshot: `{ cwd, mode, hasUI, model, thinkingLevel, sessionId, sessionName, sessionFile, isIdle, isProjectTrusted, contextUsage, flags, footer? }`. `model` is `{ provider, id, name, api, contextWindow, maxTokens, reasoning }` or `null`. `flags` maps each flag of this extension to its value. `footer` is `{ gitBranch, sessionStats?, runState? }` when the host supplies it.
+The ctx snapshot: `{ cwd, mode, hasUI, model, scopedModels, thinkingLevel, sessionId, sessionName, sessionFile, isIdle, isProjectTrusted, contextUsage, terminalWidth, flags, footer? }`. `model` is `{ provider, id, name, api, baseUrl, compat, contextWindow, maxTokens, reasoning }` or `null`; it has no headers and no keys. `scopedModels` is `[{ provider, id, thinkingLevel? }]` (the `--models` scope, empty when there is none). `contextUsage` is `{ tokens, contextWindow, percent }` or `null`. `terminalWidth` is the terminal width in columns in `tui` mode, else `null`. `flags` maps each flag of this extension to its value. `footer` is `{ gitBranch, sessionStats?, runState? }` when the host supplies it.
 
 ### Tools
 
@@ -113,7 +116,7 @@ During `tool.execute` the extension sends `tool.update` notifications `{ toolCal
 | `ui.notify` | `{ message, type?: "info" \| "warning" \| "error" }` | `null` |
 | `ui.select` | `{ title, options: string[], timeout? }` | string or `null` |
 | `ui.confirm` | `{ title, message, timeout? }` | boolean |
-| `ui.input` | `{ title, placeholder?, timeout? }` | string or `null` |
+| `ui.input` | `{ title, placeholder?, prefill?, secret?, timeout? }` | string or `null` |
 | `ui.editor` | `{ title, prefill? }` | string or `null` |
 | `ui.setStatus` | `{ key, text \| null }` | `null` |
 | `ui.setWidget` | `{ key, lines: string[] \| null, placement?: "aboveEditor" \| "belowEditor" }` | `null` |
@@ -128,7 +131,9 @@ During `tool.execute` the extension sends `tool.update` notifications `{ toolCal
 
 Dialogs and `ui.custom` return error `-32001` when pi has no UI. `$/cancelRequest` closes an open dialog.
 
-Line-based surfaces: a widget (surface `widget:<key>`), the footer (surface `footer`), and a `ui.custom` panel (surface chosen by the extension). The host renders the last lines the extension pushed, cut to the render width. Each push redraws the screen. When the render width changes, the host sends `ui.resize`. A panel gets each key as `ui.key` (`data` is the raw terminal input). The extension closes a panel with `ui.close`; the `ui.custom` request then answers `{ result }`. When the extension cancels an open `ui.custom` with `$/cancelRequest`, pi closes the panel, sends `ui.closed`, and the request answers `{ result: null }`. `ui.close` on a widget or the footer removes it. In modes other than `tui`, widgets go to pi as plain lines and get no `ui.resize`.
+`ui.input`: `prefill` is the initial text. `secret: true` shows `*` for each character in `tui` mode. In `rpc` mode pi adds `prefill` and `secret` to the `input` request of the client.
+
+Line-based surfaces: a widget (surface `widget:<key>`), the footer (surface `footer`), and a `ui.custom` panel (surface chosen by the extension). The host renders the last lines the extension pushed, cut to the render width. Each push redraws the screen. When the render width changes, the host sends `ui.resize`. A panel gets each key as `ui.key`: `data` is the raw terminal input, and `key` is the key id of pi-tui `parseKey` (for example `shift+enter`, `ctrl+c`, `q`) or `null`. The extension closes a panel with `ui.close`; the `ui.custom` request then answers `{ result }`. When the extension cancels an open `ui.custom` with `$/cancelRequest`, pi closes the panel, sends `ui.closed`, and the request answers `{ result: null }`. `ui.close` on a widget or the footer removes it. In modes other than `tui`, widgets go to pi as plain lines and get no `ui.resize`.
 
 ### Session, model, and tools
 
@@ -141,6 +146,7 @@ Line-based surfaces: a widget (surface `widget:<key>`), the footer (surface `foo
 | `session.getBranch` | `{ fromId? }` | entries from the root to the leaf |
 | `session.setName` / `session.getName` | `{ name }` / `{}` | `null` / string or `null` |
 | `model.get` / `model.set` | `{}` / `{ provider, id }` | model or `null` / boolean |
+| `model.find` | `{ provider, id }` | model or `null` |
 | `thinking.get` / `thinking.set` | `{}` / `{ level }` | level / `null` |
 | `tools.getActive` / `tools.setActive` | `{}` / `{ names }` | names / `null` |
 | `tools.getAll` / `commands.getAll` | `{}` | tool infos / command infos |
@@ -161,18 +167,20 @@ Line-based surfaces: a widget (surface `widget:<key>`), the footer (surface `foo
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `llm.complete` | `{ model?: "provider/id", systemPrompt?, prompt? \| messages?, maxTokens?, temperature?, reasoning? }` | `{ message, text }` |
+| `llm.complete` | `{ model?: "provider/id", systemPrompt?, prompt? \| messages?, maxTokens?, temperature?, reasoning?, headers? }` | `{ message, text }` |
 | `auth.getProviderAuth` | `{ provider }` | `{ apiKey, headers, source }` or `null` |
 | `events.emit` | `{ channel, data }` | `null` |
 | `events.subscribe` / `events.unsubscribe` | `{ channel }` | `null` |
-| `exec` | `{ command, args?, cwd?, timeout? }` | `{ stdout, stderr, code, killed }` |
+| `exec` | `{ command, args?, cwd?, timeout?, stdin? }` | `{ stdout, stderr, code, killed }` |
 | `provider.register` | `{ name, config }` | `null` |
 | `provider.unregister` | `{ name }` | `null` |
 | `virtualModel.register` | `{ provider, id, name?, ... }` | `null` |
 | `virtualModel.unregister` | `{ provider, id }` | `null` |
 | `pi.call` | `{ target: "pi" \| "ctx" \| "ctx.ui" \| "ctx.sessionManager" \| "ctx.modelRegistry", method, args?: [] }` | the awaited return value as JSON |
 
-- `llm.complete` uses the current model, or `provider/id`, with the credentials of pi. The key stays in pi. `prompt` is one user message; `messages` are pi-ai messages. `text` joins the text blocks of the answer.
+- `llm.complete` uses the current model, or `provider/id`, with the credentials of pi. The key stays in pi. `prompt` is one user message; `messages` are pi-ai messages. `headers` go on the request over the headers of pi; a request header with the same name replaces the header of pi. `text` joins the text blocks of the answer.
+- `model.find` returns the model in the shape of the ctx snapshot `model`.
+- `exec` writes `stdin` to the standard input of the process and then closes it. Without `stdin`, the process gets no standard input.
 - `events.subscribe` delivers each `pi.events` message on `channel` as an `events.message` notification.
 - `provider.register` takes the declarative part of `pi.registerProvider`: `baseUrl`, `api` (an existing API id), `apiKey`, `headers`, `models`, `oauth` through the host. Functions are not available.
 - `virtualModel.register` takes the definition of `pi.registerVirtualModel`; pi sends `virtualModel.route` for each request.
@@ -180,6 +188,17 @@ Line-based surfaces: a widget (surface `widget:<key>`), the footer (surface `foo
 ### Later registrations
 
 `register.tool` (one tool definition), `register.command`, `register.shortcut`, `register.flag`, `register.events` (`{ events }`, adds subscriptions), and `register.autocomplete` take the same shapes as the `initialize` result fields. They answer `null`.
+
+## Not yet supported
+
+These requests from extension authors are not in protocol version 1 yet. [GAPS.md](../parity/GAPS.md) lists them too.
+
+- Custom renderers for tool calls, tool results, and session entries (`renderCall`, `renderResult`, `registerMessageRenderer`).
+- `prepareArguments` of a tool definition.
+- `provider.register` with `oauth: { builtin }`, to reuse a login flow of pi.
+- An order guarantee for `after_provider_response` before `message_end` of the same response.
+- `settings.set`, to write a settings namespace.
+- When a child crashes, pi deactivates its tools but keeps them in the registry. The tools are not unregistered.
 
 ## Example transcript
 

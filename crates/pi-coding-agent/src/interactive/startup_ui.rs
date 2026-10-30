@@ -53,7 +53,7 @@ pub async fn show_startup_input(terminal: TerminalRef, settings: &SettingsManage
             None,
             move |value| *submitted.borrow_mut() = Some(Some(value.to_string())),
             move || *cancelled.borrow_mut() = Some(None),
-            ExtensionInputOptions { tui: Some(tui), timeout: None, initial_value: None, description: None },
+            ExtensionInputOptions { tui: Some(tui), ..ExtensionInputOptions::default() },
         ))
     })
     .await

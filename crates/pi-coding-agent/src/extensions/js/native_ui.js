@@ -1,6 +1,6 @@
 // Line-based UI of native extensions: widgets, the footer, and `ui.custom` panels render the last
 // lines the extension pushed. Width changes and keys go to the extension as notifications.
-import { truncateToWidth } from "@earendil-works/pi-tui";
+import { parseKey, truncateToWidth } from "@earendil-works/pi-tui";
 import { rpcError } from "./native_rpc.js";
 
 const lineList = (lines) => (Array.isArray(lines) ? lines.map((line) => String(line ?? "")) : []);
@@ -19,7 +19,9 @@ export function createSurfaces(state) {
 			},
 			invalidate() {},
 		};
-		if (surface.kind === "panel") view.handleInput = (data) => state.peer.notify("ui.key", { surface: id, data });
+		if (surface.kind === "panel") {
+			view.handleInput = (data) => state.peer.notify("ui.key", { surface: id, data, key: parseKey(data) ?? null });
+		}
 		return view;
 	};
 

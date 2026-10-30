@@ -287,6 +287,7 @@ impl AltScreenSearchComponent {
                 prompt: Some(" ".to_string()),
                 placeholder: Some("Find in transcript".to_string()),
                 placeholder_style: Some(placeholder_style),
+                ..InputOptions::default()
             }),
             on_query_change,
             navigation_button_style: navigation_button_style.unwrap_or_else(|| Rc::new(|text, _| text.to_string())),

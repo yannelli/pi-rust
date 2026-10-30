@@ -112,7 +112,10 @@ function footerData(target) {
 
 function dialogOptions(opts) {
 	if (!opts) return {};
-	return { timeout: opts.timeout, signal: signalId(opts.signal) };
+	const options = { timeout: opts.timeout, signal: signalId(opts.signal) };
+	if (typeof opts.prefill === "string") options.prefill = opts.prefill;
+	if (opts.secret) options.secret = true;
+	return options;
 }
 
 const terminalInputHandlers = new Map();
