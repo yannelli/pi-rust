@@ -2,7 +2,7 @@
 //! signed local release server, toggling a JS extension, and inline marketplace errors.
 
 #[path = "extensions_browser_support.rs"]
-mod support;
+pub(in crate::interactive) mod support;
 
 use serde_json::json;
 

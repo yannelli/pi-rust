@@ -46,37 +46,6 @@ impl Dirs {
 }
 
 #[test]
-fn status_line_editor_persists_global_settings_without_project_commands() {
-    let dirs = Dirs::new();
-    write(&dirs.global(), json!({"theme": "dark", "statusLine": {"command": "safe.sh", "custom": true}}));
-    write(&dirs.project(), json!({"statusLine": {"command": "project.sh", "theme": "mono"}}));
-    let settings = dirs.manager(true);
-    let mut value = settings.global_status_line_value().unwrap();
-    value["layout"] = json!("compact");
-    value["segments"] = json!(["model", "contextHeadroom"]);
-    settings.set_status_line(value.clone()).unwrap();
-    assert_eq!(read(&dirs.global())["statusLine"], value);
-    assert_eq!(read(&dirs.global())["theme"], "dark");
-    assert_eq!(settings.status_line().unwrap().command.as_deref(), Some("safe.sh"));
-    assert_eq!(read(&dirs.project())["statusLine"]["command"], "project.sh");
-    assert_eq!(dirs.manager(true).global_status_line_value(), Some(value));
-}
-
-#[test]
-fn status_line_save_errors_do_not_change_memory_or_corrupt_files() {
-    let dirs = Dirs::new();
-    write(&dirs.global(), json!({"statusLine": {"preset": "minimal"}}));
-    let settings = dirs.manager(true);
-    std::fs::write(dirs.global(), "broken JSON").unwrap();
-    assert!(settings.set_status_line(json!({"preset": "compact"})).is_err());
-    assert_eq!(settings.global_status_line_value(), Some(json!({"preset": "minimal"})));
-    assert_eq!(std::fs::read_to_string(dirs.global()).unwrap(), "broken JSON");
-    let failed = dirs.manager(true);
-    assert!(failed.set_status_line(json!({"preset": "compact"})).is_err());
-    assert!(failed.global_status_line_value().is_none());
-}
-
-#[test]
 fn writes_keep_unknown_keys_and_external_edits() {
     let dirs = Dirs::new();
     write(&dirs.global(), json!({"theme": "dark", "enabledModels": ["a/*"], "customKey": {"x": 1}}));
@@ -230,46 +199,6 @@ fn global_only_keys_ignore_project_values() {
     assert_ne!(id, "project-id");
     assert_eq!(id.len(), 36);
     assert_eq!(dirs.manager(true).get_or_create_device_id(), id);
-}
-
-#[test]
-fn status_line_command_comes_only_from_global_settings() {
-    let dirs = Dirs::new();
-    write(&dirs.global(), json!({"statusLine": {"type": "command", "command": "global.sh", "padding": 1}}));
-    write(&dirs.project(), json!({"statusLine": {"command": "project.sh", "padding": 2}}));
-    let status_line = dirs.manager(true).status_line().expect("status line");
-    assert_eq!((status_line.kind.as_deref(), status_line.command.as_deref()), (Some("command"), Some("global.sh")));
-    assert_eq!(status_line.padding, Some(2.0));
-
-    let dirs = Dirs::new();
-    write(&dirs.project(), json!({"statusLine": {"type": "command", "command": "project.sh"}}));
-    assert_eq!(dirs.manager(true).status_line().expect("status line").command, None);
-    assert_eq!(SettingsManager::in_memory(json!({})).status_line(), None);
-}
-
-#[test]
-fn iterm2_features_are_off_unless_turned_on() {
-    let features =
-        |value: serde_json::Value| SettingsManager::in_memory(json!({"terminal": {"iterm2": value}})).iterm2_features();
-    assert!(!SettingsManager::in_memory(json!({})).iterm2_features().any());
-    assert!(!features(json!(false)).any());
-    let all = features(json!(true));
-    assert!(all.tab_color && all.badge && all.user_vars && all.attention && all.cwd);
-    let some = features(json!({"badge": false, "cwd": false}));
-    assert!(some.tab_color && !some.badge && some.user_vars && some.attention && !some.cwd);
-    assert!(!features(json!("yes")).any());
-
-    let dirs = Dirs::new();
-    let settings = dirs.manager(true);
-    assert!(settings.enable_iterm2());
-    assert!(settings.iterm2_features().any());
-    assert!(!settings.enable_iterm2());
-    let disabled = SettingsManager::in_memory(json!({"terminal": {"iterm2": false}}));
-    assert!(disabled.enable_iterm2());
-    assert!(disabled.iterm2_features().any());
-    let custom = SettingsManager::in_memory(json!({"terminal": {"iterm2": {"badge": false}}}));
-    assert!(!custom.enable_iterm2());
-    assert!(!custom.iterm2_features().badge);
 }
 
 #[test]

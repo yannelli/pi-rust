@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use async_trait::async_trait;
-use pi_tui::program_status::BlockedKind;
+use pi_tui::program_status::{BlockedKind, ProgramState};
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
@@ -77,7 +77,18 @@ impl UiMirror {
 
 /// `data` as written for `ctx.ui.writeTerminal`: wrapped for tmux when asked and inside tmux.
 pub(super) fn terminal_bytes(data: &str, tmux_passthrough: bool, in_tmux: bool) -> String {
-    super::iterm2::passthrough(data, tmux_passthrough && in_tmux)
+    super::tmux::passthrough(data, tmux_passthrough && in_tmux)
+}
+
+/// The `getRunState()` name of a program state.
+fn run_state_name(state: ProgramState) -> &'static str {
+    match state {
+        ProgramState::Idle | ProgramState::Clear => "idle",
+        ProgramState::Working => "working",
+        ProgramState::Blocked => "blocked",
+        ProgramState::Done => "done",
+        ProgramState::Error => "error",
+    }
 }
 
 impl InteractiveMode {
@@ -98,7 +109,7 @@ impl InteractiveMode {
             "contextPercent": snapshot.context_percent(),
         });
         let state = self.program_status.borrow().status(None).state;
-        mirror.set_run_footer(stats, super::iterm2::state_name(state));
+        mirror.set_run_footer(stats, run_state_name(state));
     }
 
     /// Call the extension `onBranchChange` listeners after the mirror has the new branch.

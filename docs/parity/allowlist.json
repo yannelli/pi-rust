@@ -57,22 +57,14 @@
     },
     {
       "item": "statusLine",
-      "reason": "pi-rust extension: custom status line with editable modules, palettes, alignment, and context headroom"
+      "reason": "Legacy pi-rust key: the marketplace:statusline extension reads it; pi-rust offers to install that extension when it is set"
     },
     {
       "item": "terminal.iterm2",
-      "reason": "pi-rust extension: iTerm2 integration"
+      "reason": "Legacy pi-rust key: the marketplace:iterm2 extension reads it; pi-rust offers to install that extension when it is on"
     }
   ],
   "slashCommands": [
-    {
-      "item": "terminal-setup",
-      "reason": "pi-rust extension: iTerm2 integration (after Claude Code's /terminal-setup)"
-    },
-    {
-      "item": "statusline",
-      "reason": "pi-rust extension: custom status line and TUI editor"
-    },
     {
       "item": "mcp",
       "reason": "Upstream registers /mcp from its built-in mcp extension (extensions/mcp). pi-rust implements MCP natively and lists /mcp as a built-in command."

@@ -9,7 +9,6 @@ use pi_tui::{Spacer, Text, component};
 use super::components::ExpandableText;
 use super::components::pi_logo::{pi_logo_lines, pi_wordmark, supports_pi_logo};
 use super::mode::InteractiveMode;
-use super::status_line::StatusLineConfig;
 use crate::interactive_components::{DynamicBorder, key_hint, key_text, raw_key_hint};
 use crate::platform::changelog::condensed_changelog_notice;
 use crate::settings::QuietStartup;
@@ -282,19 +281,6 @@ impl InteractiveMode {
             let mut footer = self.footer.borrow_mut();
             footer.set_session(session.clone());
             footer.set_auto_compact_enabled(session.auto_compaction_enabled());
-            let shell_path = settings.shell_path();
-            let status_line = settings
-                .status_line()
-                .and_then(|status_line| StatusLineConfig::from_settings(&status_line, shell_path.as_deref()));
-            let weak = self.weak.clone();
-            footer.set_status_line(
-                status_line,
-                Rc::new(move || {
-                    if let Some(mode) = weak.upgrade() {
-                        mode.request_render();
-                    }
-                }),
-            );
         }
         self.footer_data.borrow_mut().set_cwd(session.cwd());
         {
@@ -337,6 +323,7 @@ impl InteractiveMode {
         self.report_program_status();
         if first_bind {
             self.bind_current_extensions();
+            self.check_moved_features();
         } else {
             self.after_extensions_bound();
         }
@@ -386,7 +373,6 @@ impl InteractiveMode {
         }
         self.selector.dispose_active();
         self.set_terminal_progress(false);
-        self.iterm2_reset();
         self.clear_status_indicator(None);
         if let Some(controller) = self.theme_controller() {
             controller.disable_auto_sync();
