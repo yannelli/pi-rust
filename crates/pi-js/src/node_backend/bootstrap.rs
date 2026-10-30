@@ -23,6 +23,7 @@ const FILES: &[(&str, &str)] = &[
     ("worker_globals.cjs", include_str!("js/worker_globals.cjs")),
     ("worker_modules.cjs", include_str!("js/worker_modules.cjs")),
     ("hooks.mjs", include_str!("js/hooks.mjs")),
+    ("require_rewrite.mjs", include_str!("js/require_rewrite.mjs")),
 ];
 
 const START_TIMEOUT: Duration = Duration::from_secs(60);
