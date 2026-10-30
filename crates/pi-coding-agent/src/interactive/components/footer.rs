@@ -162,7 +162,7 @@ impl FooterComponent {
     }
 
     /// Everything the footer and a status line show, from the cached stats and the session.
-    fn snapshot(&mut self) -> StatusSnapshot {
+    pub(crate) fn snapshot(&mut self) -> StatusSnapshot {
         let auto_compact = self.auto_compact_enabled;
         let (totals, cache_hit_rate, context) = {
             let stats = self.session_stats();

@@ -97,7 +97,16 @@ function footerData(target) {
 		getGitBranch: () => optional(call("ui.footer", target, "gitBranch")),
 		getExtensionStatuses: () => new Map(Object.entries(call("ui.footer", target, "statuses") ?? {})),
 		getAvailableProviderCount: () => call("ui.footer", target, "providerCount") ?? 0,
-		onBranchChange: () => () => {},
+		onBranchChange: (callback) => {
+			const key = registerCallback(() => callback());
+			call("ui.onBranchChange", target, key);
+			return () => {
+				call("ui.offBranchChange", target, key);
+				releaseCallback(key);
+			};
+		},
+		getSessionStats: () => optional(call("ui.footer", target, "sessionStats")),
+		getRunState: () => call("ui.footer", target, "runState") ?? "idle",
 	};
 }
 
@@ -180,6 +189,7 @@ export function createUiContext(target, prompt) {
 		setFooter: (factory) => factoryCall("ui.setFooter", "footer", factory),
 		setHeader: (factory) => factoryCall("ui.setHeader", "header", factory),
 		setTitle: (title) => call("ui.setTitle", target, String(title)),
+		writeTerminal: (data, options) => call("ui.writeTerminal", target, String(data), options ?? null),
 		pasteToEditor: (text) => call("ui.pasteToEditor", target, String(text)),
 		setEditorText: (text) => call("ui.setEditorText", target, String(text)),
 		getEditorText: () => call("ui.getEditorText", target) ?? "",

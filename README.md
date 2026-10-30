@@ -119,6 +119,7 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. This se
 | The status line (`statusLine`) and the `/statusline` editor for modules and layout | Changes the footer only through extensions | [Status line](crates/pi-coding-agent/docs/status-line.md) |
 | More harness themes | | [Themes](crates/pi-coding-agent/docs/terminal.md#themes) |
 | The iTerm2 integration (`terminal.iterm2`) and `/terminal-setup` | | [iTerm2 integration](crates/pi-coding-agent/docs/terminal.md#iterm2-integration) |
+| Extension UI calls: `ctx.ui.writeTerminal(data, { tmuxPassthrough })` writes raw bytes to the terminal. Footer data of `ctx.ui.setFooter` also has `getSessionStats()` (`input`, `output`, `cacheRead`, `cacheWrite`, `cost`, `contextTokens`, `contextWindow`, `contextPercent`) and `getRunState()` (`idle`, `working`, `blocked`, `done`, or `error`). | Has none of them | |
 
 ### Bug fixes that are open upstream
 

@@ -108,7 +108,20 @@
   ],
   "tools": [],
   "models": [],
-  "extensionApi": [],
+  "extensionApi": [
+    {
+      "item": "writeTerminal",
+      "reason": "pi-rust extension: `ctx.ui.writeTerminal(data, { tmuxPassthrough })` writes raw escape sequences between frames, for the iTerm2 integration as an extension. Upstream has no such call."
+    },
+    {
+      "item": "getSessionStats",
+      "reason": "pi-rust extension: footer data `getSessionStats()` gives the token, cost, and context numbers of the built-in footer, for the status line as an extension."
+    },
+    {
+      "item": "getRunState",
+      "reason": "pi-rust extension: footer data `getRunState()` gives the program state (`idle`, `working`, `blocked`, `done`, `error`) that the iTerm2 tab color uses."
+    }
+  ],
   "nodeBuiltins": [
     {
       "item": "_http_agent",

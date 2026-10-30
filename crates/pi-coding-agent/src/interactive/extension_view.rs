@@ -341,6 +341,7 @@ impl InteractiveMode {
             self.set_extension_widget(&key, None, WidgetPlacement::AboveEditor);
         }
         self.footer_data.borrow_mut().clear_extension_statuses();
+        self.footer_data.borrow_mut().clear_branch_listeners();
         let mirror = self.state.borrow().extensions.mirror.clone();
         mirror.set_footer(None, &Default::default(), 0);
         if self.has_custom_editor() {

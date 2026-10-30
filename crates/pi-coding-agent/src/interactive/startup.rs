@@ -78,6 +78,7 @@ impl InteractiveMode {
         let weak = self.weak.clone();
         FooterDataWatch::start(self, move || {
             if let Some(mode) = weak.upgrade() {
+                mode.notify_branch_change();
                 mode.request_render();
             }
         });
