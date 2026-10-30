@@ -84,6 +84,7 @@ pub struct ExtensionRunner {
     pub(crate) registry: RwLock<Registry>,
     session: RwLock<Weak<AgentSession>>,
     pub(crate) targets: Mutex<HashMap<u64, Weak<AgentSession>>>,
+    pub(crate) sdk: super::ops_sdk::SdkState,
     bindings: RwLock<ExtensionBindings>,
     ids: AtomicU64,
     pub(crate) signals: Mutex<HashMap<u64, CancellationToken>>,
@@ -175,6 +176,7 @@ impl ExtensionRunner {
                 registry: RwLock::default(),
                 session: RwLock::new(Weak::new()),
                 targets: Mutex::default(),
+                sdk: Default::default(),
                 bindings: RwLock::default(),
                 ids: AtomicU64::new(1),
                 signals: Mutex::default(),
@@ -380,6 +382,7 @@ impl ExtensionRunner {
 
     /// Stop the JavaScript runtime and restore the APIs it replaced. Pending calls fail.
     pub fn shutdown(&self) {
+        self.sdk.shutdown();
         self.restore_apis();
         for (_, watcher) in lock(&self.watchers).drain() {
             watcher.cancel();

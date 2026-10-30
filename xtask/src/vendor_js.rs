@@ -3,10 +3,11 @@
 //! of `path -> source`, with bare imports between bundled packages rewritten to relative paths.
 
 use std::collections::BTreeMap;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use flate2::Compression;
+use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 
 /// Pure pi-ai utilities the `@earendil-works/pi-ai` shim re-exports.
@@ -25,6 +26,26 @@ const PI_AI_FILES: &[&str] = &[
     "utils/validation.ts",
 ];
 
+const SDK_AI_FILES: &[&str] = &[
+    "env-api-keys.ts",
+    "utils/provider-env.ts",
+    "utils/abort.ts",
+    "auth/helpers.ts",
+    "auth/context.ts",
+    "auth/credential-store.ts",
+    "models-store.ts",
+    "session-resources.ts",
+    "api/lazy.ts",
+    "utils/streaming-json.ts",
+    "utils/json-parse.ts",
+    "utils/identity.ts",
+    "utils/version.ts",
+    "utils/retry.ts",
+    "utils/models-error.ts",
+];
+
+const AGENT_CORE_FILES: &[&str] = &["index.ts", "agent.ts", "agent-loop.ts", "proxy.ts", "stream-fn.ts", "types.ts"];
+
 /// Self-contained coding-agent modules the `@earendil-works/pi-coding-agent` shim re-exports.
 const CODING_AGENT_FILES: &[&str] = &[
     "core/tools/file-mutation-queue.ts",
@@ -41,14 +62,17 @@ const BARE_IMPORTS: &[(&str, &str)] = &[
     ("marked", "marked/lib/marked.esm.js"),
     ("get-east-asian-width", "get-east-asian-width/index.js"),
     ("partial-json", "partial-json/dist/index.js"),
+    ("@earendil-works/pi-ai", "host/ai.js"),
 ];
 
 pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     let mut upstream = None;
     let mut out = None;
+    let mut update_sdk = false;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
+            "--update-sdk" => update_sdk = true,
             "--out" => out = Some(PathBuf::from(rest.next().ok_or("--out needs a path")?)),
             flag if flag.starts_with("--") => return Err(format!("vendor-js: unknown flag {flag}")),
             _ if upstream.is_none() => upstream = Some(PathBuf::from(arg)),
@@ -57,13 +81,32 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     }
     let upstream = upstream.ok_or("vendor-js needs the upstream pi checkout")?;
     let out = out.unwrap_or_else(|| root.join("crates/pi-coding-agent/src/extensions/vendor.json.gz"));
-    let files = collect(&upstream)?;
+    let mut files = if update_sdk { read_archive(&out)? } else { collect(&upstream)? };
+    add_sdk(&upstream, &mut files)?;
     let json = serde_json::to_vec(&files).map_err(|error| error.to_string())?;
     let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
     encoder.write_all(&json).map_err(|error| error.to_string())?;
     let compressed = encoder.finish().map_err(|error| error.to_string())?;
     std::fs::write(&out, &compressed).map_err(|error| format!("{}: {error}", out.display()))?;
     println!("Wrote {} files ({} KiB compressed) to {}", files.len(), compressed.len() / 1024, out.display());
+    Ok(())
+}
+
+fn read_archive(path: &Path) -> Result<BTreeMap<String, String>, String> {
+    let file = std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let mut decoded = String::new();
+    GzDecoder::new(file).read_to_string(&mut decoded).map_err(|error| error.to_string())?;
+    serde_json::from_str(&decoded).map_err(|error| error.to_string())
+}
+
+fn add_sdk(upstream: &Path, files: &mut BTreeMap<String, String>) -> Result<(), String> {
+    for (package, prefix, names) in [("ai", "pi-ai", SDK_AI_FILES), ("agent", "pi-agent-core", AGENT_CORE_FILES)] {
+        for name in names {
+            let key = format!("{prefix}/src/{name}");
+            let source = read(&upstream.join("packages").join(package).join("src").join(name))?;
+            files.insert(key.clone(), rewrite_bare_imports(&key, &source));
+        }
+    }
     Ok(())
 }
 
@@ -152,5 +195,12 @@ mod tests {
         let rewritten = rewrite_bare_imports("pi-tui/src/components/markdown.ts", source);
         assert!(rewritten.contains("from \"../../../marked/lib/marked.esm.js\""), "{rewritten}");
         assert!(rewritten.contains("from \"./x.ts\""));
+    }
+
+    #[test]
+    fn agent_core_imports_the_host_ai_module() {
+        let source = "import { EventStream } from \"@earendil-works/pi-ai\";";
+        let rewritten = rewrite_bare_imports("pi-agent-core/src/agent-loop.ts", source);
+        assert!(rewritten.contains("from \"../../host/ai.js\""));
     }
 }

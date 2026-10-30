@@ -1,5 +1,7 @@
 // `@earendil-works/pi-ai/models`: the helpers of upstream `models.ts` that need no provider
-// runtime. `createModels` and `createProvider` are not available; the host owns the catalog.
+// runtime. `createModels` and `createProvider` throw; the host owns the catalog.
+export { createModels, createProvider } from "./ai_extras.js";
+export { ModelsError } from "../pi-ai/src/utils/models-error.ts";
 
 const EXTENDED_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
