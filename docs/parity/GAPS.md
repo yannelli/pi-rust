@@ -48,6 +48,12 @@ These commits are older than the synced commit, so the report no longer lists th
 - **Byte-identical zlib output**: zlib-rs output can have different bytes from Node's zlib output. `memLevel` and `strategy` have no effect.
 - **V8-only features** depend on V8 internals that QuickJS does not have. These features are heap snapshots with nodes, `v8.queryObjects`, `inspector.open`, and full `async_hooks` coverage of timers, promises, and I/O.
 
+The Node backend (`extensionRuntime: "node"`, see [Node backend](../agents/node-compat.md#node-backend)) closes these items when it is selected. On the default QuickJS backend they stay open.
+
+- `child_process.fork` and spawning `process.execPath` start a real Node process.
+- `process.dlopen` and native `.node` addons load.
+- V8-only modules and features work: `v8` heap snapshots and `queryObjects`, `inspector.open`, and full `async_hooks` coverage.
+
 ## Removed upstream, still in pi-rust
 
 Upstream `7472cda0d` (2026-10-12) deleted the experimental server stack: the client, protocol, and server packages and `pi experimental`. A decision on 2026-10-21 keeps these items in pi-rust on purpose as pi-rust extras:

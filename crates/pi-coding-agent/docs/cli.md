@@ -144,3 +144,26 @@ pi config                                # TUI to turn resources on and off
 - After a change, restart pi or run `/reload`.
 - Third-party extensions are executable code. Install only sources that you trust.
 - pi-rust has no bundled catalog of third-party extensions that are not installed.
+
+## Extension runtime
+
+pi-rust runs extensions on QuickJS by default. It can also run them on Node 22 or later.
+
+```sh
+pi --extension-runtime node              # run extensions on Node
+pi --extension-runtime auto              # Node only for packages that need it
+PI_EXTENSION_RUNTIME=node pi             # the same, from the environment
+PI_NODE_PATH=/opt/node22/bin/node pi --extension-runtime node
+```
+
+| Value | Engine |
+| --- | --- |
+| `quickjs` | The embedded QuickJS engine. This is the default. |
+| `node` | A `node` process. |
+| `auto` | Node when a loaded package sets `package.json` `pi.runtime: "node"` or ships a `.node` addon. Otherwise QuickJS. |
+
+- pi reads the choice from `--extension-runtime`, then `PI_EXTENSION_RUNTIME`, then `extensionRuntime` in the project settings, then in the global settings.
+- pi finds `node` in `PI_NODE_PATH`, then on `PATH`.
+- If Node is missing, older than version 22, or does not start, pi shows one warning and uses QuickJS.
+
+See [Node backend](../../../docs/agents/node-compat.md#node-backend) for how the backend works.

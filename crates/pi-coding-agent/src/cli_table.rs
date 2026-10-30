@@ -203,6 +203,13 @@ pub const CLI_OPTIONS: &[CliOption] = &[
         Choice(&["fullscreen", "regular"]),
         &["TUI mode: fullscreen (default) or regular"],
     ),
+    valued(
+        "--extension-runtime",
+        None,
+        "<runtime>",
+        Choice(&["quickjs", "node", "auto"]),
+        &["Extension engine: quickjs (default), node (Node 22+), or auto (pi-rust extension)"],
+    ),
     flag("--approve", Some("-a"), &["Trust project-local files for this run"]),
     flag("--no-approve", Some("-na"), &["Ignore project-local files for this run"]),
     flag("--offline", None, &["Disable startup network operations (same as PI_OFFLINE=1)"]),

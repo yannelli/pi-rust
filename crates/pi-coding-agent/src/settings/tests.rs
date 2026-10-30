@@ -4,7 +4,7 @@ use pi_agent::QueueMode;
 use pi_ai::{Model, ThinkingLevel, Transport};
 use serde_json::{Value, json};
 
-use super::schema::{CacheWarmingMode, TuiMode};
+use super::schema::{CacheWarmingMode, ExtensionRuntime, TuiMode};
 use super::*;
 
 fn write(path: &Path, value: Value) {
@@ -43,6 +43,17 @@ impl Dirs {
     fn manager(&self, trusted: bool) -> SettingsManager {
         SettingsManager::create(&self.cwd, &self.agent, SettingsOptions { project_trusted: trusted })
     }
+}
+
+#[test]
+fn extension_runtime_defaults_to_quickjs_and_project_wins() {
+    let dirs = Dirs::new();
+    assert_eq!(dirs.manager(true).extension_runtime(), ExtensionRuntime::QuickJs);
+    write(&dirs.global(), json!({"extensionRuntime": "node"}));
+    assert_eq!(dirs.manager(true).extension_runtime(), ExtensionRuntime::Node);
+    write(&dirs.project(), json!({"extensionRuntime": "auto"}));
+    assert_eq!(dirs.manager(true).extension_runtime(), ExtensionRuntime::Auto);
+    assert_eq!(dirs.manager(false).extension_runtime(), ExtensionRuntime::Node);
 }
 
 #[test]

@@ -4,7 +4,7 @@
 use pi_ai::ThinkingLevel;
 
 use crate::agent_session::RunLimits;
-use crate::settings::schema::TuiMode;
+use crate::settings::schema::{ExtensionRuntime, TuiMode};
 use crate::settings::tools::tool_list_error;
 
 #[path = "cli_help.rs"]
@@ -103,6 +103,8 @@ pub struct Args {
     pub offline: bool,
     /// `--tui-mode regular|fullscreen` (TUI stream).
     pub tui_mode: Option<TuiMode>,
+    /// `--extension-runtime quickjs|node|auto` (pi-rust).
+    pub extension_runtime: Option<ExtensionRuntime>,
     /// `--verbose`: force verbose startup over `quietStartup`.
     pub verbose: bool,
     /// `-a/--approve` is `Some(true)`, `-na/--no-approve` is `Some(false)` (trust stream).
@@ -280,6 +282,15 @@ pub fn parse_args(raw: &[String]) -> Args {
                     args.errors.push(format!("Invalid TUI mode \"{other}\". Valid values: regular, fullscreen"))
                 }
                 None => args.errors.push("--tui-mode requires regular or fullscreen".into()),
+            },
+            "--extension-runtime" => match option_value(&mut index) {
+                Some(name) => match ExtensionRuntime::parse(&name) {
+                    Some(runtime) => args.extension_runtime = Some(runtime),
+                    None => args
+                        .errors
+                        .push(format!("Invalid extension runtime \"{name}\". Valid values: quickjs, node, auto")),
+                },
+                None => args.errors.push("--extension-runtime requires quickjs, node, or auto".into()),
             },
             "--verbose" => args.verbose = true,
             "-a" | "--approve" => args.project_trust_override = Some(true),
