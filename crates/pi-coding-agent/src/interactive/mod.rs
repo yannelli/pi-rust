@@ -1,6 +1,8 @@
 //! The interactive TUI (upstream `modes/interactive/interactive-mode.ts`). Tests drive
 //! [`InteractiveMode`] with a virtual terminal through [`InteractiveOptions::terminal`].
 
+mod acp_actions;
+mod acp_view;
 mod auth;
 mod autocomplete;
 mod aws_mfa;

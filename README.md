@@ -60,6 +60,7 @@ Run `pi --help` to see all options. In interactive mode, type `/` to see the com
 | [Status line](crates/pi-coding-agent/docs/status-line.md) | The `marketplace:statusline` extension and the move from the built-in status line |
 | [Terminal](crates/pi-coding-agent/docs/terminal.md) | Themes, notifications, and the `marketplace:iterm2` extension |
 | [ACP mode](crates/pi-coding-agent/docs/acp.md) | `pi --mode acp` for Zed and other editors |
+| [ACP agents](crates/pi-coding-agent/docs/acp-providers.md) | Kiro CLI, Amp, and ACP registry agents as providers, `/acp`, and the `acpAgents` setting |
 | [Docs index](docs/INDEX.md) | Agent playbooks, parity, and the protocol notes of the subscription providers |
 
 ## Configuration
@@ -121,6 +122,7 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. This se
 | Account model lists for OpenAI Codex, Anthropic, GitHub Copilot, OpenAI, xAI, Google, and Cursor | Limits only OpenRouter | [Account model lists](crates/pi-coding-agent/docs/providers.md#account-model-lists) |
 | `/usage`, `pi usage`, and the native extension method `usage.get` show the subscription limits of the Claude, ChatGPT (Codex), Cursor, SuperGrok (`xai`, with Grok Build), and Google Antigravity logins: the 5-hour and weekly windows, the used percentage, and the reset time | Has no usage report | [Subscription usage limits](docs/providers/usage.md) |
 | The providers `cursor` and `google-antigravity` | Has none of them | [Subscription providers](crates/pi-coding-agent/docs/providers.md#cursor-and-google-antigravity-pi-rust-extension) |
+| ACP agents as providers: Kiro CLI (V3), Amp, and the agents of the ACP registry run over stdio with their own tools. `/acp` installs them from the registry, logs in, enables, disables, and sets the default. The `acpAgents` setting stores them. | Has no ACP client | [ACP agents](crates/pi-coding-agent/docs/acp-providers.md) |
 | The global `disabledProviders` setting hides providers from model selection and keeps their credentials. The TUI `/settings` menu has a **Disabled providers** list. | | [Disable providers](crates/pi-coding-agent/docs/providers.md#disable-providers) |
 | `/settings` items for the `retry.*` and `retry.provider.*` values | Sets these values only in `settings.json` | [Retry settings](crates/pi-coding-agent/docs/providers.md#retry-settings) |
 | A terminal notification when a run takes 10 seconds or more | Has this only as the example extension `notify.ts` | [Notifications](crates/pi-coding-agent/docs/terminal.md#notifications) |

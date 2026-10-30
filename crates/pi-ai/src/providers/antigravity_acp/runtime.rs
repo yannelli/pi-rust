@@ -11,11 +11,11 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use super::bridge::{BRIDGE_NAME, Bridge, BridgeTool, ParkedCall};
-use super::connection::{Connection, RpcError};
 use super::process::{self, NOT_INSTALLED, Server};
 use super::prompt::PromptCapabilities;
 use crate::auth::oauth::interact;
 use crate::auth::{AuthEvent, AuthInteraction, AuthPrompt};
+use crate::providers::acp::connection::{Connection, RpcError};
 
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(30);
 const SESSION_TIMEOUT: Duration = Duration::from_secs(120);

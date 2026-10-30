@@ -5,9 +5,9 @@ use std::sync::{Arc, LazyLock, Mutex};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-use super::connection::Connection;
 use super::runtime::{PassthroughMcpServer, redirect_target, set_passthrough_mcp_servers, set_test_agent};
 use super::{API, AntigravityAcp};
+use crate::providers::acp::connection::Connection;
 use crate::providers::mock_server::{collect, kinds, test_model};
 use crate::registry::{ApiProvider, StreamOptions};
 use crate::types::{
@@ -123,7 +123,7 @@ fn install_agent() {
         let (client, agent_side) = tokio::io::duplex(1 << 20);
         tokio::spawn(agent(agent_side));
         let (read, write) = tokio::io::split(client);
-        Connection::new(read, write)
+        Connection::new(super::LABEL, read, write)
     })));
 }
 

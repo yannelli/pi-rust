@@ -244,6 +244,7 @@ pub async fn create_agent_session_services(options: CreateServicesOptions) -> Ag
     loader.reload();
     diagnostics.extend(resource_diagnostics(&loader));
     model_runtime.set_llama_enabled(builtin_enabled(&loader, crate::llama::LLAMA_PROVIDER_ID)).await;
+    crate::acp_client::register::sync(&model_runtime, &settings, &agent_dir);
     AgentSessionServices {
         cwd,
         agent_dir,

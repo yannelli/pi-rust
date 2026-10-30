@@ -128,6 +128,7 @@ impl AgentSession {
     /// connects, and add resources from `resources_discover` (upstream `bindExtensions`).
     pub async fn bind_extensions(&self, bindings: ExtensionBindings) {
         *lock(&self.extensions.bindings) = Some(bindings.clone());
+        crate::acp_client::host::set_ui(bindings.ui.clone(), bindings.mode);
         let Some(runner) = self.extension_runner() else { return };
         runner.set_bindings(bindings);
         if self.extensions.started.swap(true, std::sync::atomic::Ordering::SeqCst) {
