@@ -74,7 +74,11 @@ pi is an Agent Client Protocol (ACP) client of Google's Antigravity ACP server. 
   4. `~/.local/bin/`
   5. `PATH`
 - Process: pi starts the server in the working directory and sends JSON-RPC 2.0 messages as newline-delimited JSON on stdin and stdout. pi adds the loopback addresses to `NO_PROXY`. On Linux, pi gives `--uid=` to a server file that does not start with `#!`.
-- Login: `/login google-antigravity` sends `authenticate` with the Google method of the server (`oauth-personal`). The server opens the browser and keeps the credential. pi stores only the marker `antigravity-acp` in `auth.json`. If `GEMINI_API_KEY` is set, pi does not send `authenticate`.
+- Login: `/login google-antigravity` sends `authenticate` with the Google method of the server (`oauth-personal`). The server keeps the credential. pi stores only the marker `antigravity-acp` in `auth.json`. If `GEMINI_API_KEY` is set, pi does not send `authenticate`.
+  - The server tries to open the browser and writes `Open the following link to authenticate the ACP server: <url>` to stderr. pi reads stderr and shows the URL as the login link.
+  - After the sign-in, Google sends the browser to the server's loopback callback `http://127.0.0.1:<port>/`. The port is in the `redirect_uri` of the URL.
+  - On a remote machine, the browser cannot open that page. Copy the page address from the browser and paste it into pi. pi sends its query to the callback on the machine that runs pi. Proxies do not apply to this request.
+  - The server waits 300 seconds for the callback. pi waits 330 seconds for `authenticate`.
 - Session: pi keeps one ACP session for each pi session. `session/new` gets:
   - the `pi-bridge` MCP server of pi;
   - the MCP servers of the user that the agent can reach itself;

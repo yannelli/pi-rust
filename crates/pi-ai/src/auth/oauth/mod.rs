@@ -14,7 +14,7 @@ mod device_code;
 mod github_copilot;
 mod github_copilot_models;
 mod http;
-mod interact;
+pub(crate) mod interact;
 mod kimi_coding;
 mod loopback;
 mod meta;

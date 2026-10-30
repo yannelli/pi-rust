@@ -4,12 +4,16 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
+use tokio::sync::mpsc;
 
 use super::connection::Connection;
 
 const BINARY_NAMES: [&str; 2] = ["agy_acp_server.par", "agy_acp_server.exe"];
 const LOOPBACK: &str = "localhost,127.0.0.1,::1";
+/// The server prints this line, then the Google sign-in URL, to stderr.
+const SIGN_IN_PREFIX: &str = "Open the following link to authenticate the ACP server: ";
 
 pub(crate) const NOT_INSTALLED: &str = "The Antigravity ACP server is not installed. Run /login google-antigravity to install it, or set PI_ANTIGRAVITY_ACP_SERVER to the path of agy_acp_server.";
 
@@ -60,7 +64,14 @@ fn arguments(binary: &Path) -> Vec<String> {
 /// A running server; dropping it stops the process.
 pub(crate) struct Server {
     pub connection: Arc<Connection>,
+    /// The Google sign-in URLs that the server prints to stderr.
+    pub sign_in: mpsc::UnboundedReceiver<String>,
     _child: Child,
+}
+
+pub(crate) fn sign_in_url(line: &str) -> Option<String> {
+    let url = line.split_once(SIGN_IN_PREFIX)?.1.split_whitespace().next()?;
+    url.starts_with("https://").then(|| url.to_string())
 }
 
 pub(crate) fn spawn(binary: &Path, cwd: &Path) -> std::io::Result<Server> {
@@ -76,14 +87,24 @@ pub(crate) fn spawn(binary: &Path, cwd: &Path) -> std::io::Result<Server> {
         .env("no_proxy", no_proxy("no_proxy"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .kill_on_drop(true);
     #[cfg(unix)]
     command.process_group(0);
     let mut child = command.spawn()?;
     let stdin = child.stdin.take().ok_or_else(|| std::io::Error::other("no stdin"))?;
     let stdout = child.stdout.take().ok_or_else(|| std::io::Error::other("no stdout"))?;
-    Ok(Server { connection: Connection::new(stdout, stdin), _child: child })
+    let stderr = child.stderr.take().ok_or_else(|| std::io::Error::other("no stderr"))?;
+    let (urls, sign_in) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        let mut lines = BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            if let Some(url) = sign_in_url(&line) {
+                let _ = urls.send(url);
+            }
+        }
+    });
+    Ok(Server { connection: Connection::new(stdout, stdin), sign_in, _child: child })
 }
 
 #[cfg(test)]
@@ -111,5 +132,12 @@ mod tests {
         assert_eq!(locate(&override_missing), Some(binary.clone()));
         assert!(arguments(&binary).is_empty());
         assert_eq!(locate(&|_: &str| None), None);
+    }
+
+    #[test]
+    fn reads_the_sign_in_url_from_the_stderr_line() {
+        let line = format!("{SIGN_IN_PREFIX}https://accounts.google.com/o/oauth2/auth?client_id=x");
+        assert_eq!(sign_in_url(&line).as_deref(), Some("https://accounts.google.com/o/oauth2/auth?client_id=x"));
+        assert_eq!(sign_in_url("INFO Could not open a browser automatically"), None);
     }
 }

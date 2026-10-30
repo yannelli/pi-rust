@@ -69,11 +69,8 @@ impl OAuthAuth for AntigravityAcpOAuth {
         if !acp::installed() {
             offer_install(interaction, &cancel).await?;
         }
-        interaction.notify(AuthEvent::Progress {
-            message: "Antigravity opens Google sign-in in your browser. pi continues when the sign-in completes."
-                .into(),
-        });
-        match acp::login(&cancel).await {
+        interaction.notify(AuthEvent::Progress { message: "Starting the Antigravity ACP server".into() });
+        match acp::login(interaction, &cancel).await {
             Ok(()) => Ok(marker()),
             Err(_) if cancel.is_cancelled() => Err(AuthError::Cancelled),
             Err(error) => Err(AuthError::Other(error)),

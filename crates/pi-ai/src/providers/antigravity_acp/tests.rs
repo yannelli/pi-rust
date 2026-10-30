@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use super::connection::Connection;
-use super::runtime::{PassthroughMcpServer, set_passthrough_mcp_servers, set_test_agent};
+use super::runtime::{PassthroughMcpServer, redirect_target, set_passthrough_mcp_servers, set_test_agent};
 use super::{API, AntigravityAcp};
 use crate::providers::mock_server::{collect, kinds, test_model};
 use crate::registry::{ApiProvider, StreamOptions};
@@ -226,4 +226,15 @@ async fn a_missing_login_or_server_fails_the_stream() {
     let no_key = StreamOptions::default();
     let (_, message) = collect(AntigravityAcp.stream(&model("gemini-3.1-pro"), &context, no_key)).await;
     assert!(message.error_message.unwrap().contains("/login google-antigravity"));
+}
+
+#[test]
+fn a_pasted_redirect_goes_to_the_loopback_port_of_the_sign_in_url() {
+    let sign_in =
+        "https://accounts.google.com/o/oauth2/auth?client_id=x&redirect_uri=http%3A%2F%2F127.0.0.1%3A51234%2F&state=s";
+    let target = redirect_target(sign_in, " http://localhost:9/?state=s&code=4%2Fabc&scope=email#x ").unwrap();
+    assert_eq!(target.as_str(), "http://127.0.0.1:51234/?state=s&code=4%2Fabc&scope=email");
+    assert_eq!(redirect_target(sign_in, "state=s&code=c").unwrap().as_str(), "http://127.0.0.1:51234/?state=s&code=c");
+    assert!(redirect_target(sign_in, "4/abc").is_err());
+    assert!(redirect_target("https://accounts.google.com/o/oauth2/auth", "code=c").is_err());
 }
