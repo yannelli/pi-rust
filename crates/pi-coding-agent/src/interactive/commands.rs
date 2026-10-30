@@ -43,6 +43,9 @@ impl InteractiveMode {
         if text == "/settings" {
             clear();
             self.show_settings_selector();
+        } else if text == "/extensions" {
+            clear();
+            self.handle_extensions_command();
         } else if text == "/scoped-models" {
             clear();
             self.show_models_selector();
