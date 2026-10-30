@@ -44,6 +44,12 @@ The Node backend runs extensions on a real `node` process in place of QuickJS. U
 - `process.exit` in an extension calls the `on_exit` callback and ends the worker. If `node` exits, pending calls fail with `ERR_PI_NODE_EXITED`.
 - Stack traces show positions in the transpiled code. They are not mapped back to the TypeScript source.
 
+Version-specific workarounds in `worker_modules.cjs` and `hooks.mjs`:
+
+- Node 22.x with `module.registerHooks`: a CommonJS file that `import()` loads gets a `require` that cannot load ES modules (`internal/modules/esm/translators`, `loadCJSModule`). The load hook returns the internal format `"commonjs-sync"` for those files, so the CommonJS loader runs them. This depends on a Node internal name. Check it when a new Node 22 release breaks the tests. Node 23 and later do not need it.
+- Node 22.0 to 22.14 (`module.register`): Node reads re-exported CommonJS files from disk to list their exports, and registered sources are not on disk. The load hook writes `require(x)` as `require.call(void 0, x)` in CommonJS that Rust supplies, so the export scan skips those calls.
+- Node 22.0 to 22.14: the `MessagePort` of the hooks thread must stay referenced. With `port.unref()`, replies do not wake the hooks thread and imports hang.
+
 ### Test on Node
 
 Set `PI_EXTENSION_RUNTIME=node` to run the extension tests on Node. The harness in `crates/pi-coding-agent/tests/extensions/harness.rs` then fails a test if the runner fell back to QuickJS.

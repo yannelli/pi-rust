@@ -181,6 +181,15 @@ async fn output_uncaught_errors_and_exit_reach_callbacks() {
 }
 
 #[tokio::test]
+async fn idle_waits_for_timers() {
+    let (_dir, root) = tempdir();
+    let Some((runtime, _capture)) = node_runtime(&root) else { return };
+    runtime.eval("setTimeout(() => { globalThis.done = 'yes'; }, 30); void 0").await.unwrap();
+    runtime.idle().await.unwrap();
+    assert_eq!(runtime.eval("globalThis.done").await.unwrap().into_json(), json!("yes"));
+}
+
+#[tokio::test]
 async fn a_child_crash_fails_pending_calls() {
     let (_dir, root) = tempdir();
     let Some((runtime, _capture)) = node_runtime(&root) else { return };
