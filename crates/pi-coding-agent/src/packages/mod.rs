@@ -16,12 +16,17 @@ mod glob;
 mod install;
 pub mod manifest;
 pub mod marketplace;
+#[cfg(all(test, unix))]
+mod marketplace_archive_tests;
 mod marketplace_index;
 mod marketplace_install;
+mod marketplace_lock;
 #[cfg(test)]
 mod marketplace_test_support;
 #[cfg(test)]
 mod marketplace_tests;
+#[cfg(test)]
+mod marketplace_update_tests;
 pub mod moved_features;
 mod npm;
 mod paths;

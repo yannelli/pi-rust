@@ -42,9 +42,9 @@ The TUI `/settings` menu shows these items after **Cache warming**. Each change 
 | Max retries | `retry.maxRetries` | `3` |
 | Retry base delay | `retry.baseDelayMs` | 2 sec |
 | Max retry wait | `retry.maxAgentDelayMs` | 1 min |
-| Provider request timeout | `retry.provider.timeoutMs` | `default`: the provider timeout |
+| Provider request timeout | `retry.provider.timeoutMs` | `default`: `httpIdleTimeoutMs`, or the provider timeout when that is 0 |
 | Provider max retries | `retry.provider.maxRetries` | `default`: the provider limit |
-| Max server retry delay | `retry.provider.maxRetryDelayMs` | 1 min |
+| Max server retry delay | `retry.provider.maxRetryDelayMs` | 1 min; `no limit` writes 0 |
 
 When you set **Provider request timeout** or **Provider max retries** to `default`, pi removes the key from `settings.json`. After you edit the file manually, restart pi.
 

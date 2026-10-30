@@ -127,10 +127,11 @@ impl InteractiveMode {
                                 };
                                 if index.is_some() { view.borrow_mut().set_catalog(catalog.clone(), None); }
                                 match changed {
-                                    Ok(()) => {
+                                    Ok(None) => {
                                         view.borrow_mut().set_status(load_error.or(catalog_error).unwrap_or_else(|| "Extension change saved.".into()), false);
                                         view.borrow_mut().offer_reload();
                                     }
+                                    Ok(Some(message)) => view.borrow_mut().set_status(load_error.or(catalog_error).unwrap_or(message), false),
                                     Err(error) => {
                                         view.borrow_mut().set_status(format!("Extension change failed: {error:#}"), false);
                                     }

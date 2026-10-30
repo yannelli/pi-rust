@@ -2,11 +2,14 @@ use anyhow::{bail, ensure};
 
 use super::component::BrowserAction;
 use super::data::{BrowserBackend, Target};
+use crate::packages::marketplace::UpdateOutcome;
 use crate::packages::{ConfigWriteScope, ParsedSource, parse_source};
 use crate::resources::SourceScope;
 
 impl BrowserBackend {
-    pub async fn apply(&self, action: BrowserAction, target: Option<Target>) -> anyhow::Result<()> {
+    /// Apply `action`; `Some(message)` means nothing changed and says why.
+    pub async fn apply(&self, action: BrowserAction, target: Option<Target>) -> anyhow::Result<Option<String>> {
+        let mut unchanged = None;
         let removing = matches!(action, BrowserAction::Remove(_));
         match action {
             BrowserAction::Install(source) => {
@@ -38,10 +41,18 @@ impl BrowserBackend {
                 ensure!(scope != SourceScope::Temporary, "This extension is temporary");
                 if let ParsedSource::Marketplace { name, .. } = parse_source(&source) {
                     if removing {
-                        self.marketplace.remove(&name)?;
+                        if !self.manager.marketplace_listed_elsewhere(&name, scope) {
+                            self.marketplace.remove(&name)?;
+                        }
                         self.manager.remove_source_from_settings(&source, scope == SourceScope::Project)?;
                     } else {
-                        self.marketplace.update(&name).await?;
+                        unchanged = match self.marketplace.update(&name).await? {
+                            UpdateOutcome::Updated(_) => None,
+                            UpdateOutcome::UpToDate(_) => Some(format!("{name} is up to date.")),
+                            UpdateOutcome::Pinned { tag, .. } => {
+                                Some(format!("{name} is pinned to {tag}; the update was skipped."))
+                            }
+                        };
                     }
                 } else if removing {
                     let source = if let ParsedSource::Local(local) = parse_source(&source) {
@@ -61,6 +72,6 @@ impl BrowserBackend {
         }
         let errors = self.manager.settings().drain_errors();
         ensure!(errors.is_empty(), "{}", errors.iter().map(|error| error.diagnostic()).collect::<Vec<_>>().join("\n"));
-        Ok(())
+        Ok(unchanged)
     }
 }

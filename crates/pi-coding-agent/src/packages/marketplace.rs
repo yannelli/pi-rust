@@ -214,18 +214,31 @@ impl Marketplace {
         self.install_from_index(&index, name, tag.is_some(), None).await
     }
 
-    /// Move an unpinned package to the latest release. Pinned packages and offline mode keep
-    /// the installed release.
-    pub async fn update(&self, name: &str) -> anyhow::Result<PathBuf> {
+    /// Move an unpinned package to a newer latest release. Offline mode and an older latest
+    /// release are errors; pinned packages keep the installed release.
+    pub async fn update(&self, name: &str) -> anyhow::Result<UpdateOutcome> {
         let Some(state) = self.read_state(name)? else {
             bail!("Marketplace extension {name} is not installed");
         };
         let path = self.package_path(name)?;
-        if state.pinned || self.offline {
-            return Ok(path);
+        if self.offline {
+            bail!("Cannot update marketplace extension {name} in offline mode");
+        }
+        if state.pinned {
+            return Ok(UpdateOutcome::Pinned { tag: state.tag, path });
         }
         let index = self.fetch_index(None).await?;
-        self.install_from_index(&index, name, false, Some(state)).await
+        match compare_tags(&index.tag, &state.tag) {
+            Some(std::cmp::Ordering::Greater) => {
+                Ok(UpdateOutcome::Updated(self.install_from_index(&index, name, false, Some(state)).await?))
+            }
+            Some(std::cmp::Ordering::Less) => bail!(
+                "Marketplace release {} is older than the installed {} of {name}; the update was refused",
+                index.tag,
+                state.tag
+            ),
+            _ => Ok(UpdateOutcome::UpToDate(path)),
+        }
     }
 
     /// True when an unpinned installed package has a newer release.
@@ -238,17 +251,38 @@ impl Marketplace {
         let available = index.entry(name).is_some_and(|entry| {
             entry.platforms.contains(&state.target) && index.asset(entry, &state.target).is_some()
         });
-        Ok(available && index.tag != state.tag)
+        Ok(available && is_newer_tag(&index.tag, &state.tag))
     }
 
     /// Delete the package directory and the binaries that no other package uses.
     pub fn remove(&self, name: &str) -> anyhow::Result<()> {
         let path = self.package_path(name)?;
-        let _guard = super::marketplace_install::lock();
+        let _lock = self.lock()?;
         remove_path(&path)?;
         self.prune_binaries();
         Ok(())
     }
+}
+
+/// The result of [`Marketplace::update`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UpdateOutcome {
+    Updated(PathBuf),
+    UpToDate(PathBuf),
+    Pinned { tag: String, path: PathBuf },
+}
+
+fn tag_version(tag: &str) -> Option<semver::Version> {
+    semver::Version::parse(tag.strip_prefix('v').unwrap_or(tag)).ok()
+}
+
+/// Release tags compared as semver without the leading `v`; `None` when either does not parse.
+pub fn compare_tags(tag: &str, installed: &str) -> Option<std::cmp::Ordering> {
+    Some(tag_version(tag)?.cmp(&tag_version(installed)?))
+}
+
+pub fn is_newer_tag(tag: &str, installed: &str) -> bool {
+    compare_tags(tag, installed) == Some(std::cmp::Ordering::Greater)
 }
 
 /// Remove a file, symlink, or directory without following symlinks.

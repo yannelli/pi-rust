@@ -199,12 +199,22 @@ async fn run(rest: &[String], options: &PackageCommandOptions, selector: Option<
         manager_options.offline = options.offline;
         PackageManager::new(manager_options)
     };
+    let (global_manager, project_manager) = (manager(global_settings), manager(settings.clone()));
     let resolved = async {
-        let global = manager(global_settings).resolve(None).await?;
-        let project = if trusted { manager(settings.clone()).resolve(None).await? } else { global.clone() };
+        let global = global_manager.resolve(None).await?;
+        let project = if trusted { project_manager.resolve(None).await? } else { global.clone() };
         anyhow::Ok(ScopedResolvedPaths { global, project })
     }
     .await;
+    let mut failures = global_manager.take_install_failures();
+    for failure in project_manager.take_install_failures() {
+        if !failures.contains(&failure) {
+            failures.push(failure);
+        }
+    }
+    for failure in failures {
+        io.error(&io.style.yellow(&format!("Warning: {}", failure.warning())));
+    }
     let resolved = match resolved {
         Ok(resolved) => resolved,
         Err(error) => {

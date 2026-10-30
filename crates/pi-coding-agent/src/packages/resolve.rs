@@ -313,11 +313,15 @@ impl PackageManager {
         }
         // A package that fails to install is skipped like an offline one, so the others still load.
         if let Err(error) = self.install_parsed_source(parsed, scope).await {
-            let failure = PackageInstallFailure { source: source.to_string(), scope, message: format!("{error:#}") };
-            self.install_failures.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(failure);
+            self.record_install_failure(source, scope, &error);
             return Ok(false);
         }
         Ok(true)
+    }
+
+    fn record_install_failure(&self, source: &str, scope: SourceScope, error: &anyhow::Error) {
+        let failure = PackageInstallFailure { source: source.to_string(), scope, message: format!("{error:#}") };
+        self.install_failures.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(failure);
     }
 
     async fn resolve_package_sources(
@@ -340,13 +344,22 @@ impl PackageManager {
             let installed = match &parsed {
                 ParsedSource::Marketplace { name, tag } => {
                     let marketplace = self.marketplace();
-                    let installed = marketplace.installed_package(name)?;
+                    let (installed, path) = match marketplace
+                        .installed_package(name)
+                        .and_then(|installed| Ok((installed, marketplace.package_path(name)?)))
+                    {
+                        Ok(found) => found,
+                        Err(error) => {
+                            self.record_install_failure(&resolved_source, resolved_scope, &error);
+                            continue;
+                        }
+                    };
                     let matches =
                         installed.as_ref().is_some_and(|package| tag.as_ref().is_none_or(|tag| tag == &package.tag));
                     if !matches && !self.install_missing(&parsed, &resolved_source, resolved_scope, on_missing).await? {
                         continue;
                     }
-                    marketplace.package_path(name)?
+                    path
                 }
                 ParsedSource::Local(local) => {
                     let base = self.base_dir_for_scope(resolved_scope)?;
