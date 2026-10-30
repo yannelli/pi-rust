@@ -40,7 +40,7 @@ fn hello_loaded(ui: &Ui) -> bool {
 async fn installs_and_removes_a_marketplace_extension() {
     local(async {
         let mock = MockMarketplace::start().await;
-        mock.publish(&mock.release("v1", &["todo"], "binary-v1"));
+        mock.publish(&mock.release("v1.0.0", &["todo"], "binary-v1"));
         let ui = start(&[]).await;
         ui.mode.show_extensions_browser(ui.package_manager(), mock.marketplace(&ui.agent_dir, false));
         ui.wait_for("Marketplace (1)").await;
@@ -57,7 +57,7 @@ async fn installs_and_removes_a_marketplace_extension() {
             serde_json::from_slice(&std::fs::read(todo_dir(&ui).join("package.json")).unwrap()).unwrap();
         assert_eq!(manifest["name"], "@pi-rust-extensions/todo");
         assert_eq!(manifest["pi"]["native"][0]["args"], json!(["todo"]));
-        assert_eq!(manifest["piMarketplace"]["tag"], "v1");
+        assert_eq!(manifest["piMarketplace"]["tag"], "v1.0.0");
 
         ui.send(ESCAPE).await;
         ui.send("\t").await;
@@ -67,7 +67,7 @@ async fn installs_and_removes_a_marketplace_extension() {
         ui.send("y").await;
         ui.wait_until("todo removed", |ui| !todo_dir(ui).exists() && !has_source(ui)).await;
         let target = host_target().unwrap();
-        assert!(!ui.agent_dir.join(format!("marketplace/bin/v1/{target}/{BINARY}")).exists());
+        assert!(!ui.agent_dir.join(format!("marketplace/bin/v1.0.0/{target}/{BINARY}")).exists());
 
         ui.send(ESCAPE).await;
         ui.wait_until("browser closed", |ui| !ui.screen().contains("Marketplace (1)")).await;
@@ -79,7 +79,7 @@ async fn installs_and_removes_a_marketplace_extension() {
 async fn ctrl_i_installs_from_the_marketplace_tab() {
     local(async {
         let mock = MockMarketplace::start().await;
-        mock.publish(&mock.release("v1", &["todo", "notes"], "binary-v1"));
+        mock.publish(&mock.release("v1.0.0", &["todo", "notes"], "binary-v1"));
         let ui = start(&[]).await;
         ui.mode.show_extensions_browser(ui.package_manager(), mock.marketplace(&ui.agent_dir, false));
         ui.wait_for("Marketplace (2)").await;
@@ -97,12 +97,12 @@ async fn ctrl_i_installs_from_the_marketplace_tab() {
 async fn ctrl_u_updates_an_installed_marketplace_extension() {
     local(async {
         let mock = MockMarketplace::start().await;
-        mock.publish(&mock.release("v1", &["todo"], "binary-v1"));
+        mock.publish(&mock.release("v1.0.0", &["todo"], "binary-v1"));
         let ui = start(&[]).await;
         mock.marketplace(&ui.agent_dir, false).install("todo", None).await.unwrap();
         let manager = ui.package_manager();
         manager.add_source_to_settings(SOURCE, false).unwrap();
-        mock.publish(&mock.release("v2", &["todo"], "binary-v2"));
+        mock.publish(&mock.release("v2.0.0", &["todo"], "binary-v2"));
         ui.mode.show_extensions_browser(manager, mock.marketplace(&ui.agent_dir, false));
         ui.wait_for("update available").await;
         ui.send(CTRL_U).await;
@@ -110,7 +110,7 @@ async fn ctrl_u_updates_an_installed_marketplace_extension() {
             let manifest = std::fs::read(todo_dir(ui).join("package.json")).unwrap_or_default();
             serde_json::from_slice::<serde_json::Value>(&manifest).unwrap_or_default()["piMarketplace"]["tag"].clone()
         };
-        ui.wait_until("todo on v2", |ui| tag(ui) == "v2").await;
+        ui.wait_until("todo on v2.0.0", |ui| tag(ui) == "v2.0.0").await;
         ui.wait_for("Extension change saved.").await;
         assert!(has_source(&ui));
     })
@@ -147,7 +147,7 @@ async fn disabling_a_js_extension_unloads_it_after_reload() {
 async fn a_bad_index_signature_shows_on_the_marketplace_tab() {
     local(async {
         let mock = MockMarketplace::start().await;
-        mock.publish(&mock.release("v1", &["todo"], "binary-v1"));
+        mock.publish(&mock.release("v1.0.0", &["todo"], "binary-v1"));
         mock.put("/index.json.sig", mock.signature(b"other bytes"));
         let ui = start(&[]).await;
         ui.mode.show_extensions_browser(ui.package_manager(), mock.marketplace(&ui.agent_dir, false));
@@ -162,7 +162,7 @@ async fn a_bad_index_signature_shows_on_the_marketplace_tab() {
 async fn a_checksum_mismatch_fails_the_install_inline() {
     local(async {
         let mock = MockMarketplace::start().await;
-        let mut index = mock.release("v1", &["todo"], "binary-v1");
+        let mut index = mock.release("v1.0.0", &["todo"], "binary-v1");
         index["binaries"][BINARY][host_target().unwrap()]["sha256"] = json!("0".repeat(64));
         mock.publish(&index);
         let ui = start(&[]).await;
@@ -182,7 +182,7 @@ async fn a_checksum_mismatch_fails_the_install_inline() {
 async fn offline_mode_lists_installed_extensions() {
     local(async {
         let mock = MockMarketplace::start().await;
-        mock.publish(&mock.release("v1", &["todo"], "binary-v1"));
+        mock.publish(&mock.release("v1.0.0", &["todo"], "binary-v1"));
         let ui = start(&[]).await;
         mock.marketplace(&ui.agent_dir, false).install("todo", None).await.unwrap();
         let manager = ui.package_manager();
@@ -193,6 +193,34 @@ async fn offline_mode_lists_installed_extensions() {
         ui.send("\t").await;
         ui.wait_for("Marketplace unavailable: Cannot reach the marketplace in offline mode").await;
         assert_eq!(mock.server.requests().len(), requests);
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ctrl_u_reports_a_pinned_extension_and_offline_mode() {
+    local(async {
+        let mock = MockMarketplace::start().await;
+        mock.publish(&mock.release("v1.0.0", &["todo"], "binary-v1"));
+        let ui = start(&[]).await;
+        mock.marketplace(&ui.agent_dir, false).install("todo", Some("v1.0.0")).await.unwrap();
+        let manager = ui.package_manager();
+        manager.add_source_to_settings(SOURCE, false).unwrap();
+        mock.publish(&mock.release("v2.0.0", &["todo"], "binary-v2"));
+        ui.mode.show_extensions_browser(manager, mock.marketplace(&ui.agent_dir, false));
+        ui.wait_for("marketplace:todo").await;
+        ui.send("todo").await;
+        ui.send(CTRL_U).await;
+        ui.wait_for("todo is pinned to v1.0.0; the update was skipped.").await;
+        assert!(!ui.screen().contains("Extension change saved."));
+        ui.send(ESCAPE).await;
+        ui.send(ESCAPE).await;
+
+        ui.mode.show_extensions_browser(ui.package_manager(), mock.marketplace(&ui.agent_dir, true));
+        ui.wait_for("marketplace:todo").await;
+        ui.send("todo").await;
+        ui.send(CTRL_U).await;
+        ui.wait_for("Extension change failed: Cannot update marketplace extension todo in offline mode").await;
     })
     .await;
 }

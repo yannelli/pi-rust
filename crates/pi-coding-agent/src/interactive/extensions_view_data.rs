@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use super::component::ExtensionRow;
 use crate::agent_session::AgentSession;
+use crate::packages::marketplace::is_newer_tag;
 use crate::packages::{
     ConfigEditor, ConfigWriteScope, Marketplace, MarketplaceIndex, MissingSourceAction, MissingSourceHandler,
     PackageManager, PackageManagerOptions, ScopedResolvedPaths,
@@ -181,9 +182,8 @@ impl BrowserBackend {
             .iter()
             .map(|entry| {
                 let package = installed.iter().find(|package| package.name == entry.name);
-                let update_available = package.is_some_and(|package| {
-                    !package.pinned && (package.version != entry.version || package.tag != index.tag)
-                });
+                let update_available =
+                    package.is_some_and(|package| !package.pinned && is_newer_tag(&index.tag, &package.tag));
                 ExtensionRow {
                     id: format!("marketplace:{}", entry.name),
                     name: format!("{} ({})", entry.display_name, entry.name),
