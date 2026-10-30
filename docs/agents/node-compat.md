@@ -1,33 +1,33 @@
 # Node compatibility in pi-js
 
-Extensions run on pi-js, an embedded QuickJS runtime with Node 22 built-in modules. Upstream pi runs extensions on real Node, so every Node API an extension can call is part of parity.
+Extensions run on pi-js, an embedded QuickJS runtime with Node 22 built-in modules. Upstream pi runs extensions on real Node. Thus each Node API that an extension can call is part of parity.
 
 ## Layout
 
 | What | Where |
 | --- | --- |
-| Native code for a module | `crates/pi-js/src/node/`: usually `<module>.rs`, plus files such as `net_server.rs` or `tls_wrap.rs` for large modules; `crypto/` is a directory and `worker_threads` is `worker.rs` |
+| Native code for a module | `crates/pi-js/src/node/`. Usually `<module>.rs`. Large modules add files such as `net_server.rs` or `tls_wrap.rs`. `crypto/` is a directory, and `worker_threads` is in `worker.rs`. |
 | JavaScript for a module | `crates/pi-js/src/js/<module>.js` |
 | Modules `require` can load | `NODE_BUILTINS` in `crates/pi-js/src/resolve/mod.rs` |
 | Supported module list | `crates/pi-js/src/node/builtins.rs` |
 | APIs that throw `ERR_PI_UNSUPPORTED` | `UNSUPPORTED_APIS` in `crates/pi-js/src/unsupported.rs` |
-| APIs that work but differ from Node | `DIFFERENCES` in the same file |
+| APIs that work but are different from Node | `DIFFERENCES` in the same file |
 | Tests | `crates/pi-js/tests/node_*.rs` |
 
-## Closing a gap
+## Close a gap
 
-1. Pick an entry from `UNSUPPORTED_APIS` or `DIFFERENCES`. Read how Node 22 behaves, including error codes and messages.
-2. Follow the structure of a module that already works (for example `net`, `zlib`, or `worker_threads`). Keep new files under 480 lines.
+1. Pick an entry from `UNSUPPORTED_APIS` or `DIFFERENCES`. Read how Node 22 behaves. Include the error codes and messages.
+2. Use the structure of a module that already works (for example `net`, `zlib`, or `worker_threads`). Keep new files under 480 lines.
 3. Remove or reword the entry in `unsupported.rs` in the same change.
-4. Add a test that compares with Node 22 output. Run the script under real Node 22 to get the expected JSON, then paste it into the test.
-5. Do not add a crate without asking. A crate already in `Cargo.lock`, or a feature of an existing dependency, is fine if it builds for every release target.
+4. Add a test that compares the result with the Node 22 output. To get the expected JSON, run the script under real Node 22. Paste the JSON into the test.
+5. Do not add a crate before you ask. You can use a crate that is already in `Cargo.lock`, or a feature of an existing dependency. It must build for every release target.
 
 ## Test rules
 
-- Localhost only, temp dirs from `tempdir()`, and no real AI providers.
-- No tight timing: wait for events instead of sleeping for a fixed delay.
-- Wrap scripts that could hang in `run_cjs_within` and mark progress with a `stage` file ([CI triage](ci-triage.md#hangs-and-flaky-tests)).
-- Windows differs in paths, named pipes, and handle passing. Skip a Windows-only difference the way the other tests do, and say why in the skip message.
+- Use only localhost. Get temporary directories from `tempdir()`. Do not use real AI providers.
+- Do not depend on tight timing. Wait for events. Do not sleep for a fixed delay.
+- If a script can hang, wrap it in `run_cjs_within`. Record each step in a `stage` file ([CI triage](ci-triage.md#hangs-and-flaky-tests)).
+- Windows is different for paths, named pipes, and the transfer of handles. Skip a Windows-only difference as the other tests do. Give the reason in the skip message.
 
 ## Checks
 
