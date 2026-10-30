@@ -347,6 +347,9 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
         eprint!("{}", output.stderr);
         return Ok(output.code);
     }
+    if let Some(output) = pi_coding_agent::usage_cli::run_usage_command(&raw, &agent_dir, oauth_lookup()).await {
+        return Ok(print_output(output));
+    }
     let cwd = std::env::current_dir()?;
     let doctor = || DoctorInputs::from_env(cwd.clone(), agent_dir.clone(), oauth_lookup());
     if let Some(output) = run_doctor_command(&raw, doctor).await {

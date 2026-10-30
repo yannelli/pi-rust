@@ -375,6 +375,19 @@ async fn model_find_returns_the_snapshot_model_shape() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn usage_get_reports_each_provider_with_an_error_state() {
+    let (h, _ui) = native(Vec::new()).await;
+    h.session.prompt("/native-usage", Vec::new()).await.unwrap();
+    let data = entry_data(&h, "native-usage").unwrap();
+    let cursor = &data["one"]["providers"][0];
+    assert_eq!(cursor["provider"], json!("cursor"));
+    assert_eq!(cursor["error"], json!("Not logged in. Run /login cursor."), "{data}");
+    assert_eq!(cursor["windows"], json!([]));
+    assert!(cursor["fetchedAt"].as_i64().is_some_and(|at| at > 0));
+    assert_eq!(data["all"], json!({"providers": []}));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn input_passes_prefill_and_secret() {
     let (h, ui) = native(Vec::new()).await;
     h.session.prompt("/native-input", Vec::new()).await.unwrap();

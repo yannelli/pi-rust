@@ -25,9 +25,8 @@ use reqwest::header::{HeaderMap, HeaderValue};
 use self::events::AnthropicStream;
 pub(crate) use self::federation::OAUTH_API_BETA;
 use self::federation::{FederationConfig, access_token, federation_config, invalidate};
-use self::request::{
-    Built, CLAUDE_CODE_VERSION, Compat, Params, Thinking, build_params, effort_messages, resolve_thinking,
-};
+pub(crate) use self::request::CLAUDE_CODE_VERSION;
+use self::request::{Built, Compat, Params, Thinking, build_params, effort_messages, resolve_thinking};
 use crate::identity::identity_headers;
 use crate::providers::common::{
     HttpRequest, RequestFallback, RequestRewrite, endpoint, has_header, header_map_with,

@@ -4,7 +4,7 @@ In interactive mode, type `/` to see the list of commands. Examples are `/login`
 
 If you type while the agent works, pi puts your input in the queue as steering. To put it in the queue as a follow-up, press Alt+Enter. On Windows, press Ctrl+Q.
 
-pi-rust adds `/diff`, `/context`, `/init`, `/review`, `/undo`, `/retry`, `/extensions`, and the prompt history. `/export` is also in upstream pi. pi-rust adds its Markdown output.
+pi-rust adds `/diff`, `/context`, `/usage`, `/init`, `/review`, `/undo`, `/retry`, `/extensions`, and the prompt history. `/export` is also in upstream pi. pi-rust adds its Markdown output.
 
 ## /diff
 
@@ -28,6 +28,12 @@ With `--stat`, `/diff` does not show the diff. With a path, it shows only the ch
 The parts of the context are the system prompt, tool definitions, context files, skills, user messages, assistant messages, and tool results.
 
 The count of tokens in use is the usage that the last response reported, plus estimates for newer messages. Before a response reports usage, the count is an estimate of the next request.
+
+## /usage
+
+`/usage` shows the subscription limits of each provider that you are logged in to: `anthropic`, `openai-codex`, `cursor`, and `google-antigravity`. For each window it shows a bar, the used percentage, and the time to the reset. `/usage <provider>` shows one provider. Each `/usage` fetches the limits again. A provider whose request fails shows the error.
+
+The status line extension (`marketplace:statusline`) shows the limits of the current provider with its `usage` and `usageReset` segments. [Subscription usage limits](../../../docs/providers/usage.md) lists the endpoints.
 
 ## /export
 

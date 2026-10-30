@@ -34,7 +34,7 @@ const registrations = {
 	],
 	commands: [
 		"native-ask", "native-panel", "native-llm", "native-crash", "native-write", "native-probe",
-		"native-ctx", "native-find", "native-input", "native-exec", "native-settle", "native-llm-headers",
+		"native-ctx", "native-find", "native-usage", "native-input", "native-exec", "native-settle", "native-llm-headers",
 	].map((name) => ({ name })),
 	flags: [{ name: "native-flag", type: "string", default: "off" }],
 	events: [
@@ -115,6 +115,10 @@ async function runCommand({ name, ctx }) {
 		const noId = await answer("model.find", { provider: "local" });
 		const noProvider = await answer("model.find", { id: "other", provider: 7 });
 		await append("native-find", { found, missing, noId, noProvider });
+	} else if (name === "native-usage") {
+		const one = await request("usage.get", { provider: "cursor" });
+		const all = await request("usage.get", { refresh: true });
+		await append("native-usage", { one, all });
 	} else if (name === "native-input") {
 		const value = await request("ui.input", { title: "Token", placeholder: "tok", prefill: "ab", secret: true });
 		await append("native-input", { value });

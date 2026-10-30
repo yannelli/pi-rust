@@ -94,6 +94,14 @@ async fn model_op(runner: &Arc<ExtensionRunner>, name: &str, args: Args) -> Resu
             Err(message) => json!({"ok": false, "error": message}),
         },
         "apiKey" => json!(runtime.api_key_for(&args.str(1)?).await),
+        "usage" => {
+            let refresh = args.bool(2);
+            let usages = match args.opt_str(1) {
+                Some(provider) => vec![runtime.usage().get(&provider, refresh).await],
+                None => runtime.usage().all(refresh).await,
+            };
+            json!({"providers": usages})
+        }
         "providerAuth" => match runtime.resolve_provider_auth(&args.str(1)?).await {
             Some(Ok(Some(resolved))) => {
                 json!({"apiKey": resolved.auth.api_key, "headers": resolved.auth.headers, "source": resolved.source})

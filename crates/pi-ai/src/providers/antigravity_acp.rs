@@ -9,6 +9,7 @@ mod prompt;
 mod runtime;
 #[cfg(test)]
 mod tests;
+mod usage;
 
 use std::time::Duration;
 
@@ -28,6 +29,7 @@ use crate::types::{ContentBlock, Context, Message, Model, ModelCost, StopReason,
 pub(crate) use self::install::{install, release, root as install_root};
 pub(crate) use self::process::NOT_INSTALLED;
 pub(crate) use self::runtime::login;
+pub(crate) use self::usage::usage;
 
 /// Whether pi finds the Antigravity ACP server.
 pub(crate) fn installed() -> bool {

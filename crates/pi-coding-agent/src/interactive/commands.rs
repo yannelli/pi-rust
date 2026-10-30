@@ -88,6 +88,9 @@ impl InteractiveMode {
         } else if text == "/context" {
             self.handle_context_command();
             clear();
+        } else if let Some(provider) = argument(text, "usage") {
+            clear();
+            self.handle_usage_command(provider.map(str::to_string));
         } else if let Some(hint) = self.moved_feature_hint(text) {
             clear();
             self.show_warning(&hint);
