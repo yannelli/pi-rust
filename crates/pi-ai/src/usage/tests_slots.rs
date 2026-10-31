@@ -70,6 +70,8 @@ async fn removing_or_moving_an_alias_drops_the_cached_slot() {
     assert!(!usage.set_alias("anthropic", Some("openai-codex")), "a built-in provider became an alias");
     assert!(!usage.set_alias("anthropic-3", Some("anthropic-2")), "an alias pointed at another alias");
     assert!(!usage.set_alias("anthropic-3", Some("nope")));
+    assert!(!usage.set_alias("antigravity-2", Some("google-antigravity")), "an ACP slot would share the one session");
+    assert_eq!(usage.get("antigravity-2", false).await.error_kind, Some(UsageErrorKind::Unsupported));
     usage.set_alias("anthropic-2", Some("github-copilot"));
     assert_eq!(
         usage.get("anthropic-2", false).await.error_kind,
@@ -82,7 +84,7 @@ async fn removing_or_moving_an_alias_drops_the_cached_slot() {
 async fn a_codex_slot_sends_its_account_and_reads_credits_and_relative_resets() {
     let body = json!({
         "plan_type": "pro",
-        "rate_limit": {"primary_window": {"used_percent": 42, "limit_window_seconds": 18000, "reset_after_seconds": 600},
+        "rate_limit": {"primary_window": {"used_percent": 42, "limit_window_seconds": 301, "reset_after_seconds": 600},
             "secondary_window": {"used_percent": 5, "reset_at": 1_793_379_600}},
         "additional_rate_limits": [{"limit_name": "Spark", "rate_limit": {"primary_window": {"used_percent": 1}}}],
         "credits": {"has_credits": true, "unlimited": false, "balance": "12.50"},
@@ -100,6 +102,8 @@ async fn a_codex_slot_sends_its_account_and_reads_credits_and_relative_resets() 
     let reset = slot.windows[0].resets_at_ms.expect("a relative reset");
     assert!((before + 600_000..=crate::now_ms() + 600_000).contains(&reset), "{reset}");
     assert_eq!((slot.windows[1].resets_at_ms, slot.windows[1].window_minutes), (Some(1_793_379_600_000), None));
+    assert_eq!((slot.windows[0].window_seconds, slot.windows[0].window_minutes), (Some(301), Some(5)));
+    assert_eq!(slot.windows[1].window_seconds, None);
 }
 
 #[tokio::test]
@@ -127,4 +131,34 @@ async fn failures_carry_their_kind_and_retry_after() {
     assert_eq!(none.error_kind, Some(UsageErrorKind::Login));
     let sent = serde_json::to_value(&limited).unwrap();
     assert_eq!((&sent["errorKind"], &sent["retryAfterMs"]), (&json!("rateLimited"), &json!(120_000)));
+}
+
+#[tokio::test]
+async fn invalid_window_lengths_have_no_exact_seconds() {
+    let body = json!({"rate_limit": {
+        "primary_window": {"used_percent": 1, "limit_window_seconds": 0},
+        "secondary_window": {"used_percent": 2, "limit_window_seconds": 300.5}}});
+    let server = MockHttp::start(vec![Reply::json(200, &body)]).await;
+    let usage = service(&server.base_url, vec![("openai-codex", oauth("tok", json!({})))]);
+    let windows = usage.get("openai-codex", false).await.windows;
+    let lengths: Vec<(Option<u64>, Option<u64>)> =
+        windows.iter().map(|w| (w.window_seconds, w.window_minutes)).collect();
+    assert_eq!(lengths, [(None, None), (None, Some(5))]);
+}
+
+#[tokio::test]
+async fn extreme_numbers_give_no_reset_or_length_instead_of_overflowing() {
+    let body = json!({"rate_limit": {
+        "primary_window": {"used_percent": 1, "limit_window_seconds": 1e308, "reset_after_seconds": 1e308},
+        "secondary_window": {"used_percent": 2, "reset_at": 9.3e18}}});
+    let server = MockHttp::start(vec![Reply::json(200, &body)]).await;
+    let usage = service(&server.base_url, vec![("openai-codex", oauth("tok", json!({})))]);
+    let windows = usage.get("openai-codex", false).await.windows;
+    assert_eq!((windows[0].window_seconds, windows[0].resets_at_ms, windows[1].resets_at_ms), (None, None, None));
+    let now = crate::now_ms();
+    for header in ["99999999999999999999", "Wed, 21 Oct 999999999 07:28:00 GMT", "-5", "soon"] {
+        assert_eq!(super::retry_after_ms(header, now), None, "{header}");
+    }
+    assert_eq!(super::time::ms_from_value(&json!("999999999-01-01T00:00:00Z")), None);
+    assert_eq!(super::time::ms_from_value(&json!(f64::MAX)), None);
 }

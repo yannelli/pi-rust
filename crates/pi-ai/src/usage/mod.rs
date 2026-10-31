@@ -26,6 +26,10 @@ pub use self::time::{iso_from_unix, unix_from_iso};
 /// Providers with a usage fetcher, in display order.
 pub const USAGE_PROVIDERS: &[&str] = &["anthropic", "openai-codex", "cursor", "xai", "google-antigravity"];
 
+/// Fetchers that read with the token of the provider they are asked for. The Antigravity fetcher
+/// starts the one ACP session of the process, so a slot cannot have its own.
+pub const ALIAS_BASES: &[&str] = &["anthropic", "openai-codex", "cursor", "xai"];
+
 const TTL: Duration = Duration::from_secs(60);
 /// Each Antigravity fetch starts the ACP server.
 const ANTIGRAVITY_TTL: Duration = Duration::from_secs(300);
@@ -48,6 +52,9 @@ pub struct UsageWindow {
     pub used_percent: f64,
     pub resets_at: Option<String>,
     pub window_minutes: Option<u64>,
+    /// The exact window length in seconds, when the provider reports it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_seconds: Option<u64>,
     /// The provider's name of the window, such as `five_hour` or `primary_window`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
@@ -71,6 +78,7 @@ impl UsageWindow {
             used_percent,
             resets_at,
             window_minutes: minutes,
+            window_seconds: None,
             id: None,
             scope: WindowScope::Provider,
             families: Vec::new(),
@@ -87,6 +95,11 @@ impl UsageWindow {
     pub fn for_family(mut self, family: impl Into<String>) -> Self {
         self.scope = WindowScope::Model;
         self.families = vec![family.into()];
+        self
+    }
+
+    pub fn with_seconds(mut self, seconds: Option<u64>) -> Self {
+        self.window_seconds = seconds;
         self
     }
 
@@ -241,15 +254,13 @@ impl UsageService {
         self.slots.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clear();
     }
 
-    /// Reads `provider` (an extension provider such as `anthropic-2`) with the fetcher of `base`.
-    /// The login, the token refresh, and the cache stay under `provider`. `None` removes the alias.
-    /// A built-in `provider` is refused; a `base` without a fetcher removes the alias. `false`
-    /// when no alias is set.
+    /// Reads `provider` (such as `anthropic-2`) with the fetcher of `base`, under its own login and cache.
+    /// `None` or a base of [`USAGE_PROVIDERS`] outside [`ALIAS_BASES`] removes the alias; `false` when none is set.
     pub fn set_alias(&self, provider: &str, base: Option<&str>) -> bool {
         if USAGE_PROVIDERS.contains(&provider) {
             return false;
         }
-        let base = base.filter(|base| USAGE_PROVIDERS.contains(base));
+        let base = base.filter(|base| ALIAS_BASES.contains(base));
         let mut aliases = self.aliases.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let changed = match base {
             Some(base) => aliases.insert(provider.to_string(), base.to_string()).as_deref() != Some(base),
@@ -389,8 +400,12 @@ pub(crate) async fn json_response(request: reqwest::RequestBuilder, provider: &s
 pub(crate) fn retry_after_ms(header: &str, now: i64) -> Option<i64> {
     let header = header.trim();
     let ms = match header.parse::<i64>() {
-        Ok(seconds) => seconds.saturating_mul(1000),
-        Err(_) => time::unix_from_http_date(header)? * 1000 - now,
+        Ok(seconds) => seconds.checked_mul(1000)?,
+        Err(_) => {
+            let year: i64 = header.split_whitespace().nth(3)?.parse().ok()?;
+            time::plausible_year(year)?;
+            crate::retry::parse_http_date_ms(header)?.checked_sub(now)?
+        }
     };
     (ms > 0).then_some(ms)
 }

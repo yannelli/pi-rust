@@ -2,7 +2,7 @@
 
 use serde_json::Value;
 
-use super::time::{iso_from_epoch, iso_from_unix};
+use super::time::{iso_from_unix, ms_from_f64};
 use super::{UsageCredits, UsageError, UsageWindow, json_response, number};
 use crate::providers::openai_codex::chatgpt_account_id;
 
@@ -32,9 +32,9 @@ fn credits(body: &Value) -> Option<UsageCredits> {
 
 /// `reset_at` (epoch), else `reset_after_seconds` from `now`, in Unix milliseconds.
 fn reset_ms(window: &Value, now: i64) -> Option<i64> {
-    let at = number(&window["reset_at"]).map(|at| if at < 1e11 { at * 1000.0 } else { at } as i64);
+    let at = number(&window["reset_at"]).and_then(|at| ms_from_f64(if at < 1e11 { at * 1000.0 } else { at }));
     let after = number(&window["reset_after_seconds"]).filter(|seconds| *seconds >= 0.0);
-    at.or_else(|| after.map(|seconds| now + (seconds * 1000.0) as i64))
+    at.or_else(|| now.checked_add(ms_from_f64(after? * 1000.0)?))
 }
 
 fn duration_label(minutes: Option<u64>, fallback: &str) -> String {
@@ -52,15 +52,17 @@ fn rate_limit(limit: &Value, prefix: Option<&str>, now: i64, out: &mut Vec<Usage
     for (slot, fallback) in [("primary_window", "Primary"), ("secondary_window", "Secondary")] {
         let window = &limit[slot];
         let Some(used) = number(&window["used_percent"]) else { continue };
-        let minutes = number(&window["limit_window_seconds"]).filter(|seconds| *seconds > 0.0);
-        let minutes = minutes.map(|seconds| (seconds / 60.0).round() as u64);
+        let reported = number(&window["limit_window_seconds"]).filter(|seconds| *seconds > 0.0);
+        let minutes = reported.map(|seconds| (seconds / 60.0).round() as u64);
+        let exact = |seconds: &f64| seconds.fract() == 0.0 && *seconds <= f64::from(u32::MAX);
+        let seconds = reported.filter(exact).map(|seconds| seconds as u64);
         let label = duration_label(minutes, fallback);
         let label = prefix.map_or_else(|| label.clone(), |prefix| format!("{prefix} {label}"));
         let ms = reset_ms(window, now);
-        let resets_at =
-            number(&window["reset_at"]).and_then(iso_from_epoch).or_else(|| ms.map(|ms| iso_from_unix(ms / 1000)));
+        let resets_at = ms.map(|ms| iso_from_unix(ms.div_euclid(1000)));
         let id = prefix.map_or_else(|| slot.to_string(), |prefix| format!("{prefix}/{slot}"));
-        out.push(UsageWindow::new(label, used, resets_at, minutes).with_id(id).with_reset_ms(ms));
+        let window = UsageWindow::new(label, used, resets_at, minutes).with_seconds(seconds);
+        out.push(window.with_id(id).with_reset_ms(ms));
     }
 }
 

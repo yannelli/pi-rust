@@ -26,7 +26,8 @@ fn window(id: &str, label: &str, value: &Value, minutes: u64) -> Option<UsageWin
     let used = number(&value["utilization"]).or_else(|| number(&value["used_percentage"]))?;
     let reset = if value["resets_at"].is_null() { &value["reset_at"] } else { &value["resets_at"] };
     let resets_at = reset.as_str().and_then(normalize);
-    Some(UsageWindow::new(label, used, resets_at, Some(minutes)).with_id(id).with_reset_ms(ms_from_value(reset)))
+    let window = UsageWindow::new(label, used, resets_at, Some(minutes)).with_seconds(Some(minutes * 60));
+    Some(window.with_id(id).with_reset_ms(ms_from_value(reset)))
 }
 
 fn title(name: &str) -> String {
@@ -61,8 +62,9 @@ pub(super) fn windows(body: &Value) -> Vec<UsageWindow> {
             continue;
         }
         let resets_at = limit["resets_at"].as_str().and_then(normalize);
-        let window =
-            UsageWindow::new(label, used, resets_at, Some(WEEK)).with_reset_ms(ms_from_value(&limit["resets_at"]));
+        let window = UsageWindow::new(label, used, resets_at, Some(WEEK))
+            .with_seconds(Some(WEEK * 60))
+            .with_reset_ms(ms_from_value(&limit["resets_at"]));
         windows.push(window.with_id("weekly_scoped").for_family(name.to_lowercase()));
     }
     windows
