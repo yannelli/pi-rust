@@ -60,7 +60,7 @@ Section 8 of the parity report compares the runtime exports of each module in up
 
 These exports are present, but they throw `ERR_PI_UNSUPPORTED`:
 
-- `@earendil-works/pi-ai/compat`: faux providers (`createFauxCore`, `fauxProvider`, `registerFauxProvider`), `setBedrockProviderModule`, and the image API (`generateImages`, `generateImagesOpenRouter`, `getImageModel`, `getImageModels`, `getImageProviders`, `getImagesApiProvider`, `registerImagesApiProvider`, `registerBuiltInImagesApiProviders`). Providers and images run in Rust.
+- `@earendil-works/pi-ai/compat`: `setBedrockProviderModule`. Amazon Bedrock streams in Rust, so there is no Node Bedrock module to inject.
 - `@earendil-works/pi-coding-agent`, run modes and CLI: `InteractiveMode`, `RpcClient`, `main`, `parseArgs`, `runPrintMode`, `runRpcMode`, `resolveCliModel`, `resolveModelScopeWithDiagnostics`, `readStoredCredential`.
 - `@earendil-works/pi-coding-agent`, sessions and extensions: `AgentSession` and `AgentSessionRuntime` as constructors, `createAgentSessionFromServices`, `createAgentSessionRuntime`, `createAgentSessionServices`, `ExtensionRunner`, `createExtensionRuntime`, `discoverAndLoadExtensions`, `createCodemodeExtension`, `createMcpExtension`, `createToolSearchExtension`, `DefaultPackageManager`, `ProjectTrustStore`, `hasTrustRequiringProjectResources`, `loadProjectContextFiles`.
 - `@earendil-works/pi-coding-agent`, compaction: `compact`, `generateBranchSummary`, `generateSummary`, `generateSummaryWithUsage`.

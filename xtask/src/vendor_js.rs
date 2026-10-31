@@ -49,12 +49,15 @@ const SDK_AI_FILES: &[&str] = &[
     "utils/text.ts",
     "utils/transcript.ts",
     "providers/radius-config.ts",
+    "providers/faux.ts",
+    "images-api-registry.ts",
+    "images.ts",
 ];
 
 const TELEMETRY_FILES: &[&str] = &["index.ts", "memory.ts", "metrics.ts", "noop.ts", "render.ts"];
 
 /// pi-tui files that `--update-sdk` refreshes; the rest of pi-tui stays at the `collect` version.
-const TUI_UPDATE_FILES: &[&str] = &["index.ts", "keybindings.ts", "utils.ts"];
+const TUI_UPDATE_FILES: &[&str] = &["index.ts", "keybindings.ts", "utils.ts", "components/markdown.ts"];
 
 const AGENT_CORE_FILES: &[&str] = &["index.ts", "agent.ts", "agent-loop.ts", "proxy.ts", "stream-fn.ts", "types.ts"];
 
@@ -111,6 +114,7 @@ const CODING_AGENT_FILES: &[&str] = &[
 /// Bare specifiers inside bundled files and the bundled file each one resolves to.
 const BARE_IMPORTS: &[(&str, &str)] = &[
     ("marked", "marked/lib/marked.esm.js"),
+    ("marked-cjk-friendly", crate::vendor_assets::CJK_FRIENDLY_MODULE),
     ("get-east-asian-width", "get-east-asian-width/index.js"),
     ("partial-json", "partial-json/dist/index.js"),
     ("@earendil-works/pi-ai", "host/ai.js"),
@@ -136,6 +140,7 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     let out = out.unwrap_or_else(|| root.join("crates/pi-coding-agent/src/extensions/vendor.json.gz"));
     let mut files = if update_sdk { read_archive(&out)? } else { collect(&upstream)? };
     add_sdk(&upstream, &mut files)?;
+    crate::vendor_assets::add_repo_assets(root, &mut files)?;
     let json = serde_json::to_vec(&files).map_err(|error| error.to_string())?;
     let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
     encoder.write_all(&json).map_err(|error| error.to_string())?;
@@ -145,7 +150,7 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn read_archive(path: &Path) -> Result<BTreeMap<String, String>, String> {
+pub(crate) fn read_archive(path: &Path) -> Result<BTreeMap<String, String>, String> {
     let file = std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?;
     let mut decoded = String::new();
     GzDecoder::new(file).read_to_string(&mut decoded).map_err(|error| error.to_string())?;
@@ -238,7 +243,7 @@ fn walk(dir: &Path) -> Result<Vec<PathBuf>, String> {
 }
 
 /// Replace `"<bare>"` import specifiers with the bundled file's path relative to `key`.
-fn rewrite_bare_imports(key: &str, source: &str) -> String {
+pub(crate) fn rewrite_bare_imports(key: &str, source: &str) -> String {
     let up = "../".repeat(key.matches('/').count());
     let mut text = source.to_string();
     for (bare, target) in BARE_IMPORTS {

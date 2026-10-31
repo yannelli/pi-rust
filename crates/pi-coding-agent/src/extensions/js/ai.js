@@ -1,9 +1,11 @@
 // `@earendil-works/pi-ai` (the compat entry point extensions load): upstream utilities run as
 // embedded upstream code; streaming, the catalog, and API providers go to Rust.
-import { call, optional } from "./bridge.js";
+import { call } from "./bridge.js";
 import { failedMessage, rustStream } from "./stream.js";
 import { getBuiltinModel, getBuiltinModels, getBuiltinProviders } from "./providers_all.js";
+import { getEnvApiKey } from "../pi-ai/src/env-api-keys.ts";
 import { createAssistantMessageEventStream } from "../pi-ai/src/utils/event-stream.ts";
+import { normalizeContext } from "../pi-ai/src/utils/transcript.ts";
 
 export { Type } from "typebox";
 export * from "./models.js";
@@ -22,6 +24,7 @@ export {
 	ANTHROPIC_SERVICE_ACCOUNT_ID_ENV,
 	ANTHROPIC_WORKSPACE_ID_ENV,
 	findEnvKeys,
+	getEnvApiKey,
 } from "../pi-ai/src/env-api-keys.ts";
 export * from "../pi-ai/src/models-store.ts";
 export * from "../pi-ai/src/session-resources.ts";
@@ -93,10 +96,24 @@ function failedStream(model, text) {
 	return stream;
 }
 
+const AMBIENT_AUTH_MARKER = "<authenticated>";
+
+const hasExplicitApiKey = (apiKey) => typeof apiKey === "string" && apiKey.trim().length > 0;
+
+/** Upstream compat `withEnvApiKey`: an explicit key wins, else the provider's key from `options.env` or the environment. */
+function withEnvApiKey(model, options) {
+	if (hasExplicitApiKey(options?.apiKey)) return options;
+	const apiKey = getEnvApiKey(model.provider, options?.env);
+	if (!apiKey || apiKey === AMBIENT_AUTH_MARKER) return options;
+	return { ...options, apiKey };
+}
+
+/** Registered JavaScript providers get upstream's normalized transcript and env key; Rust APIs normalize themselves. */
 function dispatch(method) {
 	return (model, context, options) => {
 		const registered = apiProviders.get(model?.api)?.provider;
-		if (registered) return registered[method](model, context, options);
+		if (registered) return registered[method](model, normalizeContext(context), withEnvApiKey(model, options));
+		if (model && !call("ai.hasApi", model.api)) throw new Error(`No API provider registered for api: ${model.api}`);
 		return builtinApi(model?.api)[method](model, context, options);
 	};
 }
@@ -131,7 +148,6 @@ export const [streamOpenAIResponses, streamSimpleOpenAIResponses] = legacy("open
 export const getModel = getBuiltinModel;
 export const getModels = getBuiltinModels;
 export const getProviders = getBuiltinProviders;
-export const getEnvApiKey = (provider) => optional(call("ai.envApiKey", provider));
 
 export function supportsXhigh(model) {
 	return Boolean(model?.thinkingLevelMap?.xhigh);

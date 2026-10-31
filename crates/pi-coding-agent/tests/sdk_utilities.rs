@@ -526,3 +526,115 @@ async fn model_runtime_reports_subscriptions_from_stored_oauth() {
         h.entries().into_iter().find(|entry| entry["customType"] == "subscription").expect("subscription entry");
     assert_eq!(entry["data"], json!([true, false, false, false]));
 }
+
+const AI_COMPAT: &str = r#"
+import * as ai from '@earendil-works/pi-ai';
+import { Agent } from '@earendil-works/pi-agent-core';
+import { scenario } from './ai_compat_scenario.mjs';
+
+export default function (pi) {
+  pi.registerCommand('compat', { handler: async () => {
+    const result = await scenario(ai);
+    const image = { id: 'img-or', name: 'OR', api: 'openrouter-images', provider: 'openrouter', type: 'image',
+      input: ['text'], baseUrl: '__BASE__/api/v1' };
+    const drawn = await ai.generateImagesOpenRouter(image, { input: [{ type: 'text', text: 'a dog' }] }, { apiKey: 'or-key' });
+    const faux = ai.registerFauxProvider({ api: 'faux-agent', provider: 'faux-agent', models: [{ id: 'agent-model' }] });
+    faux.setResponses([ai.fauxAssistantMessage('from the faux provider')]);
+    const agent = new Agent({ initialState: { model: faux.getModel(), systemPrompt: 'Be brief.', thinkingLevel: 'off' } });
+    await agent.prompt('hello');
+    faux.unregister();
+    pi.appendEntry('compat', {
+      ...result,
+      drawn: [drawn.stopReason, drawn.responseId, drawn.output.map((block) => block.type)],
+      agent: agent.state.messages.at(-1).content.map((block) => block.text).join(''),
+      catalog: [ai.getImageProviders(), ai.getImageModels('openrouter').length, ai.getImageModel('openrouter', ai.getImageModels('openrouter')[0].id)?.type],
+    });
+  }});
+}
+"#;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn compat_faux_provider_and_image_api_match_upstream() {
+    let images = json!({"id": "img-1", "choices": [{"message": {"content": "A dog.",
+        "images": [{"image_url": "data:image/png;base64,ZmFrZS1wbmc="}]}}]});
+    let (base, requests) = json_server(vec![images]).await;
+    let files = vec![
+        ("compat.ts", AI_COMPAT.replace("__BASE__", &base)),
+        ("ai_compat_scenario.mjs", include_str!("fixtures/extensions/ai_compat_scenario.mjs").to_string()),
+    ];
+    let h = harness(Setup { files, load: vec!["compat.ts"], ..Setup::default() }).await;
+    assert!(h.errors().is_empty(), "{:?}", h.errors());
+    let prompt = h.session.prompt("/compat", Vec::new());
+    tokio::time::timeout(std::time::Duration::from_secs(20), prompt).await.unwrap().unwrap();
+    assert!(h.errors().is_empty(), "{:?}", h.errors());
+    let entry = h.entries().into_iter().find(|entry| entry["customType"] == "compat").expect("compat entry");
+    let data = &entry["data"];
+
+    let expected: Value = serde_json::from_str(include_str!("fixtures/extensions/ai_compat_scenario.json")).unwrap();
+    assert_eq!(data["faux"], expected["faux"], "{data}");
+    assert_eq!(data["images"], expected["images"], "{data}");
+
+    assert_eq!(data["drawn"], json!(["stop", "img-1", ["text", "image"]]), "{data}");
+    let requests = requests.lock().unwrap().clone();
+    assert_eq!(
+        (&requests[0]["path"], &requests[0]["authorization"]),
+        (&json!("/api/v1/chat/completions"), &json!("bearer or-key"))
+    );
+    assert_eq!(data["agent"], "from the faux provider");
+
+    let with_images: Vec<String> = {
+        let mut providers: Vec<String> = pi_ai::models::builtin_models()
+            .iter()
+            .filter(|model| pi_ai::model_operations::model_type(model) == "image")
+            .map(|model| model.provider.clone())
+            .collect();
+        providers.sort();
+        providers.dedup();
+        providers
+    };
+    let openrouter_images = catalog_counts("openrouter")[1].clone();
+    assert_eq!(data["catalog"], json!([with_images, openrouter_images, "image"]), "{data}");
+}
+
+const CAPTURE: &str = r#"
+import * as ai from '@earendil-works/pi-ai';
+
+export default function (pi) {
+  pi.registerCommand('capture', { handler: async () => {
+    const seen = [];
+    const run = (_model, context, options) => {
+      seen.push({ context, apiKey: options?.apiKey ?? null });
+      const stream = ai.createAssistantMessageEventStream();
+      const message = ai.fauxAssistantMessage('ok');
+      stream.push({ type: 'done', reason: 'stop', message });
+      stream.end(message);
+      return stream;
+    };
+    ai.registerApiProvider({ api: 'capture', stream: run, streamSimple: run }, 'capture-test');
+    delete process.env.GROQ_API_KEY;
+    const model = { id: 'm', name: 'm', api: 'capture', provider: 'groq', baseUrl: 'http://127.0.0.1:9', input: ['text'],
+      reasoning: false, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 1000, maxTokens: 100 };
+    const context = { systemPrompt: 'Be brief', messages: [{ role: 'user', content: 'hi', timestamp: 1 }],
+      tools: [{ name: 't', description: 'd', parameters: { type: 'object', properties: {} } }] };
+    await ai.complete(model, context, { env: { GROQ_API_KEY: 'env-key' } });
+    await ai.completeSimple(model, context, { apiKey: 'explicit', env: { GROQ_API_KEY: 'env-key' } });
+    await ai.complete(model, context, { env: {} });
+    ai.unregisterApiProviders('capture-test');
+    pi.appendEntry('capture', seen);
+  }});
+}
+"#;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn registered_api_providers_get_the_normalized_context_and_env_key() {
+    let (_h, data) = run("capture.ts", CAPTURE.into(), "capture", Vec::new()).await;
+    let tool = json!({"name": "t", "description": "d", "parameters": {"type": "object", "properties": {}}});
+    // Upstream `normalizeContext` output for the same context, from the pinned source under Node.
+    let normalized = json!({"messages": [
+        {"role": "system", "content": "Be brief", "toolsAdded": [tool], "timestamp": 0},
+        {"role": "user", "content": "hi", "timestamp": 1},
+    ]});
+    assert_eq!(data[0]["context"], normalized, "{data}");
+    let keys: Vec<&Value> = data.as_array().unwrap().iter().map(|call| &call["apiKey"]).collect();
+    assert_eq!(keys, [&json!("env-key"), &json!("explicit"), &Value::Null], "{data}");
+}

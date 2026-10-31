@@ -3,6 +3,7 @@
 
 mod models;
 mod parity;
+mod vendor_assets;
 mod vendor_extract;
 mod vendor_js;
 mod version;

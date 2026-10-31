@@ -14,6 +14,7 @@ const HOST_FILES: &[(&str, &str)] = &[
     ("unsupported.js", include_str!("js/unsupported.js")),
     ("ai.js", include_str!("js/ai.js")),
     ("ai_extras.js", include_str!("js/ai_extras.js")),
+    ("ai_images.js", include_str!("js/ai_images.js")),
     ("api.js", include_str!("js/api.js")),
     ("bridge.js", include_str!("js/bridge.js")),
     ("child_wait.js", include_str!("js/child_wait.js")),
@@ -54,6 +55,11 @@ const SHIMS: &[(&str, &str, &str)] = &[
     ("pi-coding-agent/src/utils/clipboard.ts", "{ copyToClipboard }", "host/component_shims.js"),
     ("pi-coding-agent/src/modes/interactive/external-editor.ts", "{ editInExternalEditor }", "host/component_shims.js"),
     ("pi-coding-agent/src/utils/image-convert.ts", "{ ensurePngTranscoder }", "host/component_shims.js"),
+    (
+        "pi-ai/src/providers/images/register-builtins.ts",
+        "{ generateImagesOpenRouter, registerBuiltInImagesApiProviders }",
+        "host/ai_images.js",
+    ),
 ];
 
 fn path(key: &str) -> String {
