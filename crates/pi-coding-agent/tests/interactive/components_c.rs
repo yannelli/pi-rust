@@ -27,7 +27,7 @@ export default function (pi) {
 		ctx.ui.notify(`edited ${text}`);
 	} });
 	pi.registerCommand("show-footer", { handler: async (_args, ctx) => {
-		const session = await createAgentSession({ cwd: ctx.cwd, model: ctx.model });
+		const { session } = await createAgentSession({ cwd: ctx.cwd, model: ctx.model });
 		ctx.ui.setFooter((_tui, _theme, footerData) => new FooterComponent(session, footerData));
 		ctx.ui.notify(`footer ${session.state.model.id}`);
 	} });
@@ -103,7 +103,8 @@ async fn footer_component_shows_a_child_session_model_and_context() {
         let ui = start_ui().await;
         ui.submit("/show-footer").await;
         ui.wait_for("footer ").await;
-        let model = ui.screen().split("footer ").nth(1).and_then(|rest| rest.split_whitespace().next()).unwrap().to_string();
+        let model =
+            ui.screen().split("footer ").nth(1).and_then(|rest| rest.split_whitespace().next()).unwrap().to_string();
         ui.wait_until("footer model", |ui| ui.screen().matches(model.as_str()).count() >= 2).await;
         assert!(ui.screen().contains("%/"), "{}", ui.screen());
     })
@@ -117,7 +118,8 @@ async fn model_selector_component_picks_from_the_host_runtime() {
         ui.submit("/pick-model").await;
         ui.wait_until("models", |ui| ui.screen().contains("Only showing models")).await;
         ui.send("\r").await;
-        ui.wait_until("picked", |ui| ui.screen().contains("picked ") && !ui.screen().contains("picked undefined")).await;
+        ui.wait_until("picked", |ui| ui.screen().contains("picked ") && !ui.screen().contains("picked undefined"))
+            .await;
     })
     .await;
 }

@@ -11,7 +11,12 @@ pub const GENERATED: &[(&str, &str, &[&str])] = &[
     (
         "packages/coding-agent/src/core/http-dispatcher.ts",
         "pi-coding-agent/src/core/http-dispatcher.ts",
-        &["DEFAULT_HTTP_IDLE_TIMEOUT_MS", "HTTP_IDLE_TIMEOUT_CHOICES", "parseHttpIdleTimeoutMs", "formatHttpIdleTimeoutMs"],
+        &[
+            "DEFAULT_HTTP_IDLE_TIMEOUT_MS",
+            "HTTP_IDLE_TIMEOUT_CHOICES",
+            "parseHttpIdleTimeoutMs",
+            "formatHttpIdleTimeoutMs",
+        ],
     ),
 ];
 
@@ -182,6 +187,9 @@ export function viaHelper() {
         assert_eq!(extract("x.ts", SOURCE, &["agent"]).unwrap_err(), "x.ts: agent uses the import undici");
         let error = extract("x.ts", SOURCE, &["viaHelper"]).unwrap_err();
         assert_eq!(error, "x.ts: viaHelper uses helper, which is not extracted");
-        assert_eq!(extract("x.ts", SOURCE, &["format"]).unwrap_err(), "x.ts: format uses CHOICES, which is not extracted");
+        assert_eq!(
+            extract("x.ts", SOURCE, &["format"]).unwrap_err(),
+            "x.ts: format uses CHOICES, which is not extracted"
+        );
     }
 }

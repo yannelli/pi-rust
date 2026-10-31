@@ -74,7 +74,13 @@ export default function (pi) {
 /// built-in themes than upstream (`docs/parity/allowlist.json`); the registry must list the same names.
 fn assert_rust_themes_match(expected: &Value) {
     let rows = expected["rendered"]["themes"]["narrow"].as_array().unwrap();
-    let names: Vec<&str> = rows[1..rows.len() - 1].iter().map(|row| row.as_str().unwrap()[2..].trim_end()).collect();
+    let names: Vec<&str> = rows[1..rows.len() - 1]
+        .iter()
+        .map(|row| {
+            let row = row.as_str().unwrap();
+            row.strip_prefix("→ ").or_else(|| row.strip_prefix("  ")).unwrap().trim_end()
+        })
+        .collect();
     assert_eq!(pi_coding_agent::theme::get_available_themes(), names);
 }
 
