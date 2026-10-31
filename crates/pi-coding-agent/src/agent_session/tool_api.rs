@@ -204,7 +204,7 @@ impl AgentSession {
         let mut options = options.clone();
         let declared: Vec<pi_ai::Tool> = {
             let mut tools = lock(&self.tools);
-            tools.registry.set_active_tools(&options.selected_tools);
+            tools.set_active(&options.selected_tools);
             tools.apply_to_prompt(&mut options);
             tools.registry.active_tools().iter().map(|tool| tool.declaration()).collect()
         };
