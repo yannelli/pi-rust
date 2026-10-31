@@ -60,6 +60,7 @@ Run `pi --help` to see all options. In interactive mode, type `/` to see the com
 | [Status line](crates/pi-coding-agent/docs/status-line.md) | The `marketplace:statusline` extension and the move from the built-in status line |
 | [Terminal](crates/pi-coding-agent/docs/terminal.md) | Themes, notifications, and the `marketplace:iterm2` extension |
 | [ACP mode](crates/pi-coding-agent/docs/acp.md) | `pi --mode acp` for Zed and other editors |
+| [ACP agents](crates/pi-coding-agent/docs/acp-providers.md) | Kiro CLI, Amp, and ACP registry agents as providers, `/acp`, and the `acpAgents` setting |
 | [Docs index](docs/INDEX.md) | Agent playbooks, parity, and the protocol notes of the subscription providers |
 
 ## Configuration
@@ -97,11 +98,13 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. This se
   The APIs that do not work throw `ERR_PI_UNSUPPORTED`. Examples are `crypto.subtle` other than `digest`, and rare `crypto` ciphers such as Camellia. `crates/pi-js/src/unsupported.rs` lists all of them. Native npm addons cannot load on QuickJS.
 
   To run extensions on Node 22 or later, set `extensionRuntime` to `"node"` or `"auto"`, or use `--extension-runtime` or `PI_EXTENSION_RUNTIME`. On Node, native addons, `child_process.fork`, and V8-only modules work. If Node is missing, pi uses QuickJS. See [Node backend](docs/agents/node-compat.md#node-backend).
+- When you quit the interactive mode, pi waits at most 3 seconds for the running turn and the `session_shutdown` handlers, then exits. Upstream pi waits until they finish.
 - `grep` and `find` use the Rust `ignore` crate, so pi-rust does not download `rg` or `fd`.
 - The version check and `pi update --self` use the releases of this repository.
 - Word movement in Chinese, Japanese, Korean (CJK), and Thai text uses ICU4X dictionaries. Thus some word boundaries are different from `Intl.Segmenter` in Node.
 - `pi-env` looks for remote daemons in a `pi-env-daemons` folder next to the `pi` program. Each release has a `pi-env-daemons-<tag>.tar.gz` archive with the daemons for Linux, Android (Termux), macOS, and Windows on x86-64 and arm64. Extract this archive in the folder that contains `pi`.
 - `pi experimental` and its commands `server`, `client`, `durable`, and `vacation` need `PI_EXPERIMENTAL=1`, as in upstream pi. `server` and `client` use Unix sockets. On Windows, they show a message that they need Unix. Upstream pi also has no Windows transport.
+- Extension and login `select` menus show at most 10 options and fewer in short terminals, with a `(n/total)` counter, so the selected option stays visible. Upstream pi shows all options.
 
 ### Additions
 
@@ -119,8 +122,10 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. This se
 | Run limits (`--max-turns`, `--max-cost`) and structured output (`--output-schema`, `--output-retries`) | | [Run limits](crates/pi-coding-agent/docs/cli.md#run-limits) |
 | `pi --mode acp`. Permission modes are separate from thinking levels and control tool execution. | Needs the separate pi-acp adapter | [ACP mode](crates/pi-coding-agent/docs/acp.md) |
 | Account model lists for OpenAI Codex, Anthropic, GitHub Copilot, OpenAI, xAI, Google, and Cursor | Limits only OpenRouter | [Account model lists](crates/pi-coding-agent/docs/providers.md#account-model-lists) |
+| `/usage`, `pi usage`, and the native extension method `usage.get` show the subscription limits of the Claude, ChatGPT (Codex), Cursor, SuperGrok (`xai`, with Grok Build), and Google Antigravity logins: the 5-hour and weekly windows, the used percentage, and the reset time | Has no usage report | [Subscription usage limits](docs/providers/usage.md) |
 | Fast mode for models that have one: `/fast`, `--fast`, the `fastMode` setting, the ACP **Speed** option, and RPC `set_fast_mode` | Has no fast mode | [Fast mode](crates/pi-coding-agent/docs/providers.md#fast-mode-pi-rust-extension) |
 | The providers `cursor` and `google-antigravity` | Has none of them | [Subscription providers](crates/pi-coding-agent/docs/providers.md#cursor-and-google-antigravity-pi-rust-extension) |
+| ACP agents as providers: Kiro CLI (V3), Amp, and the agents of the ACP registry run over stdio with their own tools. `/acp` installs them from the registry, logs in, enables, disables, and sets the default. The `acpAgents` setting stores them. | Has no ACP client | [ACP agents](crates/pi-coding-agent/docs/acp-providers.md) |
 | The global `disabledProviders` setting hides providers from model selection and keeps their credentials. The TUI `/settings` menu has a **Disabled providers** list. | | [Disable providers](crates/pi-coding-agent/docs/providers.md#disable-providers) |
 | `/settings` items for the `retry.*` and `retry.provider.*` values | Sets these values only in `settings.json` | [Retry settings](crates/pi-coding-agent/docs/providers.md#retry-settings) |
 | A terminal notification when a run takes 10 seconds or more | Has this only as the example extension `notify.ts` | [Notifications](crates/pi-coding-agent/docs/terminal.md#notifications) |
@@ -129,6 +134,7 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. This se
 | The iTerm2 integration and `/terminal-setup` are the `marketplace:iterm2` extension (`pi install marketplace:iterm2`). It reads the legacy `terminal.iterm2` setting. Interactive mode offers to install it when `terminal.iterm2` is on. | | [iTerm2 integration](crates/pi-coding-agent/docs/terminal.md#iterm2-integration) |
 | Extension UI calls: `ctx.ui.writeTerminal(data, { tmuxPassthrough })` writes raw bytes to the terminal. Footer data of `ctx.ui.setFooter` also has `getSessionStats()` (`input`, `output`, `cacheRead`, `cacheWrite`, `cost`, `contextTokens`, `contextWindow`, `contextPercent`) and `getRunState()` (`idle`, `working`, `blocked`, `done`, or `error`). | Has none of them | |
 | Native extensions: a package lists programs in `package.json` `pi.native`, and pi runs each one as an extension over a JSON-RPC protocol on stdio | Loads only TypeScript and JavaScript extensions | [Native extension protocol](docs/extensions/native-protocol.md) |
+| Extension widgets above and below the editor share a budget of a third of the terminal rows. Over the budget, each widget shows its first line. Alt+W (`app.widgets.toggle`) and `/widgets collapse`, `expand`, or `auto` change this, and `/widgets` shows all widgets in full in the chat. | Caps only text widgets, at 10 lines each | [/widgets](crates/pi-coding-agent/docs/commands.md#widgets) |
 | A choice of extension engine: the `extensionRuntime` setting, `--extension-runtime`, and `PI_EXTENSION_RUNTIME` (`quickjs`, `node`, or `auto`) | Always runs extensions on Node | [Extension runtime](crates/pi-coding-agent/docs/cli.md#extension-runtime) |
 
 ### Bug fixes that are open upstream

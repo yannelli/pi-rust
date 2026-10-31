@@ -49,6 +49,9 @@ impl InteractiveMode {
         } else if text == "/scoped-models" {
             clear();
             self.show_models_selector();
+        } else if let Some(args) = argument(text, "acp") {
+            clear();
+            self.handle_acp_command(args.map(str::to_string));
         } else if let Some(search) = argument(text, "model") {
             clear();
             self.handle_model_command(search.map(str::to_string));
@@ -82,6 +85,9 @@ impl InteractiveMode {
         } else if text == "/changelog" {
             self.handle_changelog_command();
             clear();
+        } else if let Some(argument) = argument(text, "widgets") {
+            clear();
+            self.handle_widgets_command(argument);
         } else if text == "/hotkeys" {
             self.add_bordered_markdown("Keyboard Shortcuts", &super::hotkeys::hotkeys_markdown());
             clear();
@@ -91,6 +97,9 @@ impl InteractiveMode {
         } else if text == "/context" {
             self.handle_context_command();
             clear();
+        } else if let Some(provider) = argument(text, "usage") {
+            clear();
+            self.handle_usage_command(provider.map(str::to_string));
         } else if let Some(hint) = self.moved_feature_hint(text) {
             clear();
             self.show_warning(&hint);

@@ -352,8 +352,7 @@ impl InteractiveMode {
             }
             mode.terminal.borrow_mut().drain_input(Duration::from_millis(1000), Duration::from_millis(50));
             mode.stop(None);
-            let runtime = mode.runtime.clone();
-            let _ = tokio::spawn(async move { runtime.dispose().await }).await;
+            mode.dispose_runtime_bounded().await;
             if mode.uses_process_terminal
                 && let Some(command) = super::util::resume_command(&mode.session(), &mode.agent_dir)
             {

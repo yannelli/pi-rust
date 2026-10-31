@@ -237,7 +237,10 @@ impl InteractiveMode {
             let terminal = self.terminal.borrow();
             (terminal.columns(), terminal.rows())
         };
-        mirror.set_size(columns, rows);
+        // A render after a resize can run before this sync and read the old size.
+        if mirror.set_size(columns, rows) {
+            self.request_render();
+        }
         let mut footer = self.footer_data.borrow_mut();
         let branch = footer.git_branch();
         mirror.set_footer(branch, footer.extension_statuses(), footer.available_provider_count());

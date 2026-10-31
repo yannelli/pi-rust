@@ -8,7 +8,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 
-use super::connection::Connection;
+use crate::providers::acp::connection::Connection;
 
 const BINARY_NAMES: [&str; 2] = ["agy_acp_server.par", "agy_acp_server.exe"];
 const LOOPBACK: &str = "localhost,127.0.0.1,::1";
@@ -104,7 +104,7 @@ pub(crate) fn spawn(binary: &Path, cwd: &Path) -> std::io::Result<Server> {
             }
         }
     });
-    Ok(Server { connection: Connection::new(stdout, stdin), sign_in, _child: child })
+    Ok(Server { connection: Connection::new(super::LABEL, stdout, stdin), sign_in, _child: child })
 }
 
 #[cfg(test)]

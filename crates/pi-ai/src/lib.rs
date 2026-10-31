@@ -25,6 +25,7 @@ pub mod streaming_json;
 pub mod telemetry;
 pub mod transcript;
 pub mod types;
+pub mod usage;
 
 pub use classify::{
     ClassifierApi, ClassifierContext, ClassifierOptions, ClassifierResult, classifier_api, classify,

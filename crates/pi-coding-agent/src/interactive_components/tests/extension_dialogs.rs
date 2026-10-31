@@ -75,6 +75,37 @@ fn extension_selector_toggles_tools_and_counts_down() {
 }
 
 #[test]
+fn extension_selector_keeps_selection_visible_in_small_terminals() {
+    let selected = Calls::new();
+    let on_select = selected.recorder();
+    let items: Vec<String> = (1..=30).map(|n| format!("Option {n:02}")).collect();
+    let harness = Harness::new(80, 16, |tui| {
+        let mut on_select = on_select;
+        ExtensionSelector::new(
+            "Pick one",
+            items,
+            move |option: &str| on_select(option.to_string()),
+            || {},
+            ExtensionSelectorOptions { tui: Some(tui.clone()), ..Default::default() },
+        )
+    });
+    assert!(harness.screen().contains(" → Option 01"), "{}", harness.screen());
+    harness.send_all(&[keys::DOWN; 15]);
+    let screen = harness.screen();
+    assert!(screen.contains(" → Option 16") && screen.contains("(16/30)"), "{screen}");
+    assert!(screen.contains("↑↓ navigate"), "{screen}");
+    assert!(harness.render(80).len() <= 12, "{screen}");
+
+    harness.terminal.borrow_mut().resize(30, 8);
+    harness.settle();
+    assert!(harness.screen().contains(" → Option 16"), "{}", harness.screen());
+    harness.send_all(&[keys::DOWN; 14]);
+    assert!(harness.screen().contains(" → Option 30"), "{}", harness.screen());
+    harness.send("\n");
+    assert_eq!(selected.get(), ["Option 30"]);
+}
+
+#[test]
 fn extension_input_submits_typed_value() {
     let submitted = Calls::new();
     let on_submit = submitted.recorder();

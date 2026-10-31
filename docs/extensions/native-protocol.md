@@ -20,7 +20,7 @@ A package declares native extensions in `package.json`:
 ## Transport
 
 - One JSON object per line (UTF-8, `\n`) on the child's stdin (host to extension) and stdout (extension to host). The child writes nothing else to stdout.
-- stderr is the extension log. pi prints each line with the prefix `[<extension path>]` to the extension runtime's stderr.
+- stderr is the extension log. pi prints each line with the prefix `[<extension path>]` to the extension runtime's stderr. In `tui` mode, after the first event, pi shows each line in the chat as a notification instead: lines that start with `error:` as errors, `warn:` as warnings, `info:` and `debug:` as status lines, and other lines as warnings. The level prefix is removed.
 - Both sides send requests, responses, and notifications. Each side numbers its own request ids.
 - `$/cancelRequest` `{ "id": <request id> }` cancels a request of the other side. The receiver still answers it: with a result, or with error `-32800`.
 - An extension-to-host method sent as a notification (no `id`) runs, and the host drops its result.
@@ -41,7 +41,7 @@ When the child exits early, pi shows one error notification, fails the pending r
 
 Params: `protocolVersion` (integer), `piVersion`, `cwd`, `agentDir`, `extensionPath`, `platform` (`process.platform`), `mode` (`tui`, `rpc`, `json`, `print`), `hasUI`, `flags`.
 
-pi loads extensions before it binds the session. `mode` and `hasUI` are the values known at load time; the ctx snapshot of each event has the current values. `flags` holds the values pi has at load time and is empty for flags this extension declares in its answer. Read flag values from `ctx.flags` or with `flags.get`.
+pi loads extensions before it binds the session. `mode` and `hasUI` are the mode the session binds the extensions in (`tui` in interactive mode, and `rpc`, `json`, or `print` for the CLI modes). Hosts that do not know the mode at load time, for example SDK sessions, send `print` and `false`. The ctx snapshot of each event has the current values. `flags` holds the values pi has at load time and is empty for flags this extension declares in its answer. Read flag values from `ctx.flags` or with `flags.get`.
 
 Result:
 
@@ -79,7 +79,7 @@ All fields except `protocolVersion` are optional.
 | `virtualModel.route` | `{ provider, id, request }` | the route result of the JavaScript API |
 | `shutdown` | `{}` | `null` |
 
-Notifications: `initialized`, `exit`, `events.message` `{ channel, data }`, `ui.resize` `{ surface, width }`, `ui.key` `{ surface, data, key }`, `ui.closed` `{ surface }`, `footer.changed` `{ footer }`, `$/cancelRequest`.
+Notifications: `initialized`, `exit`, `events.message` `{ channel, data }`, `ui.resize` `{ surface, width, height? }`, `ui.key` `{ surface, data, key }`, `ui.closed` `{ surface }`, `footer.changed` `{ footer }`, `$/cancelRequest`.
 
 - `autocomplete.suggest`: with `merge: true`, pi adds its own suggestions after the extension's items when both use the same `prefix`. When the prefixes differ, pi shows only the extension's items.
 - `footer.changed`: pi sends it to an extension that lists `footer_changed` in `events`, when the `footer` of the ctx snapshot changes in `tui` mode. pi checks the footer data 4 times per second, so it sends at most 4 notifications per second.
@@ -101,7 +101,7 @@ How each event uses a patch:
 
 pi builds no result for `before_agent_start`: a built `systemPrompt` would replace the whole system prompt.
 
-The ctx snapshot: `{ cwd, mode, hasUI, model, scopedModels, thinkingLevel, sessionId, sessionName, sessionFile, isIdle, isProjectTrusted, contextUsage, terminalWidth, flags, footer? }`. `model` is `{ provider, id, name, api, baseUrl, compat, contextWindow, maxTokens, reasoning }` or `null`; it has no headers and no keys. `scopedModels` is `[{ provider, id, thinkingLevel? }]` (the `--models` scope, empty when there is none). `contextUsage` is `{ tokens, contextWindow, percent }` or `null`. `terminalWidth` is the terminal width in columns in `tui` mode, else `null`. `flags` maps each flag of this extension to its value. `footer` is `{ gitBranch, sessionStats?, runState? }` when the host supplies it.
+The ctx snapshot: `{ cwd, mode, hasUI, model, scopedModels, thinkingLevel, sessionId, sessionName, sessionFile, isIdle, isProjectTrusted, contextUsage, terminalWidth, terminalHeight, flags, footer? }`. `model` is `{ provider, id, name, api, baseUrl, compat, contextWindow, maxTokens, reasoning }` or `null`; it has no headers and no keys. `scopedModels` is `[{ provider, id, thinkingLevel? }]` (the `--models` scope, empty when there is none). `contextUsage` is `{ tokens, contextWindow, percent }` or `null`. `terminalWidth` is the terminal width in columns in `tui` mode, else `null`. `terminalHeight` is the terminal height in rows in `tui` mode, else `null`; it is also `null` when the host does not know the height. `flags` maps each flag of this extension to its value. `footer` is `{ gitBranch, sessionStats?, runState? }` when the host supplies it.
 
 ### Tools
 
@@ -133,7 +133,7 @@ Dialogs and `ui.custom` return error `-32001` when pi has no UI. `$/cancelReques
 
 `ui.input`: `prefill` is the initial text. `secret: true` shows `*` for each character in `tui` mode. In `rpc` mode pi adds `prefill` and `secret` to the `input` request of the client.
 
-Line-based surfaces: a widget (surface `widget:<key>`), the footer (surface `footer`), and a `ui.custom` panel (surface chosen by the extension). The host renders the last lines the extension pushed, cut to the render width. Each push redraws the screen. When the render width changes, the host sends `ui.resize`. A panel gets each key as `ui.key`: `data` is the raw terminal input, and `key` is the key id of pi-tui `parseKey` (for example `shift+enter`, `ctrl+c`, `q`) or `null`. The extension closes a panel with `ui.close`; the `ui.custom` request then answers `{ result }`. When the extension cancels an open `ui.custom` with `$/cancelRequest`, pi closes the panel, sends `ui.closed`, and the request answers `{ result: null }`. `ui.close` on a widget or the footer removes it. In modes other than `tui`, widgets go to pi as plain lines and get no `ui.resize`.
+Line-based surfaces: a widget (surface `widget:<key>`), the footer (surface `footer`), and a `ui.custom` panel (surface chosen by the extension). The host renders the last lines the extension pushed, cut to the render width. Each push redraws the screen. When the render width or the terminal height changes, the host sends `ui.resize`: `width` is the render width in columns, and `height` is the number of terminal rows. `height` is a positive integer; the host omits it when it does not know the height. A panel can use `height` to keep its lines on the screen. Hosts before this field send only `width` and do not send `ui.resize` for a height change. A panel gets each key as `ui.key`: `data` is the raw terminal input, and `key` is the key id of pi-tui `parseKey` (for example `shift+enter`, `ctrl+c`, `q`) or `null`. The extension closes a panel with `ui.close`; the `ui.custom` request then answers `{ result }`. When the extension cancels an open `ui.custom` with `$/cancelRequest`, pi closes the panel, sends `ui.closed`, and the request answers `{ result: null }`. `ui.close` on a widget or the footer removes it. In modes other than `tui`, widgets go to pi as plain lines and get no `ui.resize`.
 
 ### Session, model, and tools
 
@@ -169,6 +169,7 @@ Line-based surfaces: a widget (surface `widget:<key>`), the footer (surface `foo
 | --- | --- | --- |
 | `llm.complete` | `{ model?: "provider/id", systemPrompt?, prompt? \| messages?, maxTokens?, temperature?, reasoning?, headers? }` | `{ message, text }` |
 | `auth.getProviderAuth` | `{ provider }` | `{ apiKey, headers, source }` or `null` |
+| `usage.get` | `{ provider?, refresh? }` | `{ providers: [{ provider, plan, windows: [{ label, usedPercent, resetsAt, windowMinutes }], error, fetchedAt }] }` |
 | `events.emit` | `{ channel, data }` | `null` |
 | `events.subscribe` / `events.unsubscribe` | `{ channel }` | `null` |
 | `exec` | `{ command, args?, cwd?, timeout?, stdin? }` | `{ stdout, stderr, code, killed }` |
@@ -179,6 +180,11 @@ Line-based surfaces: a widget (surface `widget:<key>`), the footer (surface `foo
 | `pi.call` | `{ target: "pi" \| "ctx" \| "ctx.ui" \| "ctx.sessionManager" \| "ctx.modelRegistry", method, args?: [] }` | the awaited return value as JSON |
 
 - `llm.complete` uses the current model, or `provider/id`, with the credentials of pi. The key stays in pi. `prompt` is one user message; `messages` are pi-ai messages. `headers` is an object of string values (else `-32602`) that goes on the request over the headers of pi; a header name of the request replaces the header of pi with the same name, compared without case. `text` joins the text blocks of the answer.
+- `usage.get` returns the subscription limits of pi's logins, as `/usage` shows them. Without `provider`, the list has one entry for each logged-in provider that has a usage fetcher: `anthropic`, `openai-codex`, `cursor`, `xai`, and `google-antigravity`. With `provider`, the list has one entry for that provider. pi keeps each result for 60 seconds (5 minutes for `google-antigravity`); `refresh: true` fetches again.
+  - `plan` is the plan name, or `null`. `fetchedAt` is the fetch time in Unix milliseconds.
+  - `usedPercent` is a number from 0 to 100. `resetsAt` is an ISO 8601 UTC time (`2026-10-30T17:00:00Z`) or `null`. `windowMinutes` is the window length (`300` for 5 hours, `10080` for a week) or `null`.
+  - `error` is a message, or `null`. A provider without a login, without a usage fetcher, or whose request fails has `error` and no windows. The method itself does not fail for these.
+  - pi-rust 0.8.2 and older answer `-32601`.
 - `model.find` returns the model in the shape of the ctx snapshot `model`, or `null` when `provider` or `id` is missing or is not a string.
 - `exec` writes `stdin` to the standard input of the process and then closes it. Without `stdin`, the process gets no standard input.
 - `events.subscribe` delivers each `pi.events` message on `channel` as an `events.message` notification.
@@ -217,7 +223,7 @@ These requests from extension authors are not in protocol version 1 yet. [GAPS.m
 < {"jsonrpc":"2.0","id":1,"method":"ui.select","params":{"title":"Pick","options":["a","b"]}}
 > {"jsonrpc":"2.0","id":1,"result":"b"}
 < {"jsonrpc":"2.0","id":2,"method":"ui.custom","params":{"surface":"p1","lines":["Panel","q closes"]}}
-> {"jsonrpc":"2.0","method":"ui.resize","params":{"surface":"p1","width":80}}
+> {"jsonrpc":"2.0","method":"ui.resize","params":{"surface":"p1","width":80,"height":24}}
 > {"jsonrpc":"2.0","method":"ui.key","params":{"surface":"p1","data":"q"}}
 < {"jsonrpc":"2.0","method":"ui.close","params":{"surface":"p1","result":"closed"}}
 > {"jsonrpc":"2.0","id":2,"result":{"result":"closed"}}

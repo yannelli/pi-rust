@@ -11,7 +11,7 @@ const MAX_HISTORY_CHARS: usize = 32_000;
 const CONTINUE: &str =
     "Continue the current Pi user request. Use the tool results above and do not repeat completed tool actions.";
 
-fn user_text(content: &UserContent) -> String {
+pub(crate) fn user_text(content: &UserContent) -> String {
     match content {
         UserContent::Text(text) => text.clone(),
         UserContent::Blocks(blocks) => blocks.iter().filter_map(ContentBlock::as_text).collect::<Vec<_>>().join("\n"),
@@ -60,7 +60,7 @@ fn entry(message: &Message) -> Option<String> {
 }
 
 /// History entries, oldest dropped first to stay within the bound.
-fn history(messages: &[Message]) -> Option<String> {
+pub(crate) fn history(messages: &[Message]) -> Option<String> {
     let mut entries: Vec<String> = messages.iter().filter_map(entry).collect();
     while entries.len() > 1 && entries.iter().map(String::len).sum::<usize>() > MAX_HISTORY_CHARS {
         entries.remove(0);

@@ -29,6 +29,10 @@ These providers use your subscription. Log in with `/login cursor` or `/login go
 
 [Subscription providers](../../../docs/providers/subscription-providers.md) has the protocol details.
 
+## ACP agents (pi-rust extension)
+
+Kiro CLI, Amp, and the agents of the ACP registry run as providers with the API `acp`. Install and manage them with `/acp`. See [ACP agents](acp-providers.md).
+
 ## Fast mode (pi-rust extension)
 
 Some models have a fast mode. The provider runs the model faster and charges more. Upstream pi does not have fast mode.

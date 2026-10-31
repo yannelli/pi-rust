@@ -1,7 +1,7 @@
 // Extension-to-host requests of native extensions: each maps onto a `pi.*`, `ctx.*`, or
 // `ctx.ui.*` member of the JavaScript extension API.
 import { complete } from "@earendil-works/pi-ai";
-import { call } from "./bridge.js";
+import { call, callAsync } from "./bridge.js";
 import { rpcError } from "./native_rpc.js";
 
 const isSignal = (value) =>
@@ -68,6 +68,8 @@ export function footerJson() {
 /** The ctx snapshot sent with events, tool calls, commands, and shortcuts. */
 export function snapshot(state, ctx) {
 	const sessionManager = safe(() => ctx.sessionManager);
+	const size = safe(() => ctx.mode) === "tui" ? safe(() => call("ui.terminalSize", 0)) : null;
+	const rows = size?.[1];
 	return {
 		cwd: safe(() => ctx.cwd),
 		mode: safe(() => ctx.mode),
@@ -81,7 +83,8 @@ export function snapshot(state, ctx) {
 		isIdle: safe(() => ctx.isIdle(), true),
 		isProjectTrusted: safe(() => ctx.isProjectTrusted(), false),
 		contextUsage: toJson(safe(() => ctx.getContextUsage())),
-		terminalWidth: safe(() => ctx.mode) === "tui" ? safe(() => call("ui.terminalSize", 0)[0]) : null,
+		terminalWidth: size?.[0] ?? null,
+		terminalHeight: Number.isInteger(rows) && rows > 0 ? rows : null,
 		flags: Object.fromEntries(state.flags.map((name) => [name, toJson(safe(() => state.pi.getFlag(name)))])),
 		footer: footerJson(),
 	};
@@ -249,6 +252,7 @@ export function hostMethods(state) {
 		"ctx.getSystemPrompt": () => ctx().getSystemPrompt(),
 		"llm.complete": (p, signal) => llmComplete(ctx(), p, signal),
 		"auth.getProviderAuth": async (p) => toJson(await ctx().modelRegistry.getProviderAuth(p.provider)),
+		"usage.get": async (p) => toJson(await callAsync("models.usage", 0, p.provider ?? null, Boolean(p.refresh))),
 		"events.emit": (p) => (pi.events.emit(p.channel, p.data), done()),
 		"events.subscribe": (p) => {
 			if (!state.subscriptions.has(p.channel)) {

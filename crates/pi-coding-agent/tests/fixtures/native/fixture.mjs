@@ -34,7 +34,7 @@ const registrations = {
 	],
 	commands: [
 		"native-ask", "native-panel", "native-llm", "native-crash", "native-write", "native-probe",
-		"native-ctx", "native-find", "native-input", "native-exec", "native-settle", "native-llm-headers",
+		"native-ctx", "native-find", "native-usage", "native-input", "native-exec", "native-settle", "native-llm-headers", "native-log",
 	].map((name) => ({ name })),
 	flags: [{ name: "native-flag", type: "string", default: "off" }],
 	events: [
@@ -59,8 +59,10 @@ const answer = (method, params) => request(method, params).then(
 	(error) => ({ error: error.message }),
 );
 
-async function initialize() {
+async function initialize(params) {
 	initProbe = {
+		mode: params.mode,
+		hasUI: params.hasUI,
 		flag: await answer("pi.call", { target: "pi", method: "getFlag", args: ["native-flag"] }),
 		commands: await answer("commands.getAll", {}),
 	};
@@ -107,20 +109,26 @@ function suggest({ lines, cursorLine, cursorCol }) {
 async function runCommand({ name, ctx }) {
 	if (name === "native-ctx") {
 		const model = ctx.model ?? {};
-		const { scopedModels, terminalWidth, isProjectTrusted } = ctx;
-		await append("native-ctx", { scopedModels, terminalWidth, isProjectTrusted, baseUrl: model.baseUrl, compat: model.compat, keys: Object.keys(model) });
+		const { scopedModels, terminalWidth, terminalHeight, isProjectTrusted } = ctx;
+		await append("native-ctx", { scopedModels, terminalWidth, terminalHeight, isProjectTrusted, baseUrl: model.baseUrl, compat: model.compat, keys: Object.keys(model) });
 	} else if (name === "native-find") {
 		const found = await request("model.find", { provider: "local", id: "other" });
 		const missing = await request("model.find", { provider: "local", id: "missing" });
 		const noId = await answer("model.find", { provider: "local" });
 		const noProvider = await answer("model.find", { id: "other", provider: 7 });
 		await append("native-find", { found, missing, noId, noProvider });
+	} else if (name === "native-usage") {
+		const one = await request("usage.get", { provider: "cursor" });
+		const all = await request("usage.get", { refresh: true });
+		await append("native-usage", { one, all });
 	} else if (name === "native-input") {
 		const value = await request("ui.input", { title: "Token", placeholder: "tok", prefill: "ab", secret: true });
 		await append("native-input", { value });
 	} else if (name === "native-exec") {
 		const { stdout, code } = await request("exec", { command: "cat", stdin: "piped text" });
 		await append("native-exec", { stdout, code });
+	} else if (name === "native-log") {
+		process.stderr.write("warn: careful\nerror: broke\nplain line\n");
 	} else if (name === "native-settle") {
 		settleArmed = true;
 	} else if (name === "native-ask") {
@@ -163,7 +171,7 @@ const methods = {
 
 function onNotification({ method, params }) {
 	if (method === "$/cancelRequest") cancels.get(params.id)?.();
-	if (method === "ui.resize") notify("ui.update", { surface: params.surface, lines: [`width ${params.width}`] });
+	if (method === "ui.resize") notify("ui.update", { surface: params.surface, lines: [`width ${params.width} height ${params.height ?? "none"}`] });
 	if (method === "ui.key") panelWaiters.get(params.surface)?.(`${params.data}/${params.key}`);
 	if (method === "footer.changed" && params.footer.gitBranch === "feature-x" && !footerSeen) {
 		footerSeen = true;

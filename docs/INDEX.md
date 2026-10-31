@@ -10,4 +10,6 @@ Created: 2026-10-29. Last updated: 2026-10-30.
 | [agents/ci-triage.md](agents/ci-triage.md) | You diagnose a CI failure or a flaky test. |
 | [agents/release.md](agents/release.md) | You ship a change. |
 | [agents/daily-gap-check.md](agents/daily-gap-check.md) | You run the scheduled gap review. |
+| [providers/usage.md](providers/usage.md) | You change `/usage`, `pi usage`, or `usage.get`. It records the usage endpoints of each provider and their sources. |
 | [providers/subscription-providers.md](providers/subscription-providers.md) | You change the Cursor or Google Antigravity provider. It records their login flows and wire protocols. |
+| [../crates/pi-coding-agent/docs/acp-providers.md](../crates/pi-coding-agent/docs/acp-providers.md) | You change the ACP client provider, the `/acp` browser, or the `acpAgents` setting. It records the ACP registry format and how Kiro CLI and Amp run over ACP. |

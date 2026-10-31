@@ -139,6 +139,7 @@ pub(crate) fn sync(runner: &ExtensionRunner, op: &str, args: &Args) -> Result<Ho
             "version": env!("CARGO_PKG_VERSION"),
             "agentDir": runner.agent_dir().display().to_string(),
             "packageDir": std::env::current_exe().ok().and_then(|exe| exe.parent().map(|dir| dir.display().to_string())),
+            "loadMode": runner.load_mode().map(|mode| json!({"mode": mode.as_str(), "hasUI": mode.has_ui()})),
         }),
         "messages.convertToLlm" => {
             let messages: Vec<pi_ai::Message> = serde_json::from_value(args.json(0)).map_err(error)?;

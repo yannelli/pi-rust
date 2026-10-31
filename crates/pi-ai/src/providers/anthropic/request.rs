@@ -16,7 +16,7 @@ use crate::simple_options::{
 use crate::transcript::{current_tools, fold_top_level_tool_changes, initial_system_message, system_message_text};
 use crate::types::{Message, Model, SystemMessage, ThinkingLevel};
 
-pub(super) const CLAUDE_CODE_VERSION: &str = "2.1.280";
+pub(crate) const CLAUDE_CODE_VERSION: &str = "2.1.280";
 const CLAUDE_CODE_IDENTITY: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
 const FINE_GRAINED_TOOL_STREAMING_BETA: &str = "fine-grained-tool-streaming-2025-05-14";
 const INTERLEAVED_THINKING_BETA: &str = "interleaved-thinking-2025-05-14";

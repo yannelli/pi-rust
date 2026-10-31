@@ -49,6 +49,7 @@ export function createModelRegistry(target, makeStream) {
 		getApiKeyAndHeaders: (model) => callAsync("models.auth", target, model),
 		getApiKeyForProvider: (provider) => callAsync("models.apiKey", target, provider).then(optional),
 		getProviderAuth: (provider) => callAsync("models.providerAuth", target, provider).then(optional),
+		getUsage: (provider, options) => callAsync("models.usage", target, provider ?? null, Boolean(options?.refresh)),
 		stream: (model, context, options) => makeStream(target, model, context, options),
 		streamSimple: (model, context, options) => makeStream(target, model, context, options),
 		complete: (model, context, options) => makeStream(target, model, context, options).result(),

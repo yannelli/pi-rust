@@ -319,6 +319,12 @@ pub const CLI_COMMANDS: &[CliCommand] = &[
         &["list", "rm", "prune", "--all", "--json", "--limit", "--older-than", "--dry-run", "--yes", "--session-dir"],
     ),
     command(
+        "usage",
+        "[provider] [--json]",
+        "Show subscription limits (5-hour, weekly) of logged-in providers",
+        &["--json"],
+    ),
+    command(
         "stats",
         "[--all] [--json]",
         "Session, token, and cost totals by model, provider, and day",

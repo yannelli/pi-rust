@@ -1,6 +1,8 @@
 //! The `/extensions` browser on a virtual terminal: marketplace install and remove against a
 //! signed local release server, toggling a JS extension, and inline marketplace errors.
 
+#[path = "extensions_browser_rows.rs"]
+mod rows;
 #[path = "extensions_browser_support.rs"]
 pub(in crate::interactive) mod support;
 

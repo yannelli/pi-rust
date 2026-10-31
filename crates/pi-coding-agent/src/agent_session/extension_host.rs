@@ -128,6 +128,7 @@ impl AgentSession {
     /// connects, and add resources from `resources_discover` (upstream `bindExtensions`).
     pub async fn bind_extensions(&self, bindings: ExtensionBindings) {
         *lock(&self.extensions.bindings) = Some(bindings.clone());
+        crate::acp_client::host::set_ui(bindings.ui.clone(), bindings.mode);
         let Some(runner) = self.extension_runner() else { return };
         runner.set_bindings(bindings);
         if self.extensions.started.swap(true, std::sync::atomic::Ordering::SeqCst) {
@@ -492,7 +493,9 @@ impl AgentSession {
         let package_error = self.reload_resources().await;
         let flags = flags.as_object().map(|flags| flags.clone().into_iter().collect()).unwrap_or_default();
         let runtime = old.as_ref().and_then(|runner| runner.requested_runtime());
-        let options = crate::extensions::LoadOptions { flag_values: flags, inline, runtime, ..Default::default() };
+        let mode = bindings.as_ref().map(|bindings| bindings.mode);
+        let options =
+            crate::extensions::LoadOptions { flag_values: flags, inline, runtime, mode, ..Default::default() };
         let loaded = crate::extensions::load_extensions(self.services(), &options).await;
         for diagnostic in package_error.iter().chain(&loaded.diagnostics) {
             if let Some(bindings) = &bindings

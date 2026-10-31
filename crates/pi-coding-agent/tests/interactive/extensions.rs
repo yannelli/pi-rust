@@ -65,3 +65,98 @@ async fn extension_ui_shows_in_the_interactive_mode() {
     })
     .await;
 }
+
+const WIDGETS: &str = r#"export default function (pi) {
+	pi.on("session_start", (_event, ctx) => {
+		for (const name of ["one", "two", "three"]) ctx.ui.setWidget(name, [`${name.toUpperCase()}-HEAD`, "a", "b", "c"]);
+		ctx.ui.setWidget("four", ["FOUR-HEAD", "FOUR-BODY", "x", "y"], { placement: "belowEditor" });
+	});
+}
+"#;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn widgets_over_a_third_of_the_rows_collapse_and_toggle() {
+    local(async {
+        let ui = start(Options { files: vec![(".pi/extensions/widgets.ts", WIDGETS)], ..Options::default() }).await;
+        ui.wait_for("FOUR-HEAD +3 lines").await;
+        assert!(ui.screen().contains("ONE-HEAD +3 lines"), "{}", ui.screen());
+        assert!(!ui.screen().contains("FOUR-BODY"), "{}", ui.screen());
+
+        ui.send("\x1bw").await;
+        ui.wait_for("FOUR-BODY").await;
+        assert!(!ui.screen().contains("ONE-HEAD +3"), "{}", ui.screen());
+
+        ui.submit("/widgets collapse").await;
+        ui.wait_until("collapsed", |ui| !ui.screen().contains("FOUR-BODY")).await;
+        ui.submit("/widgets").await;
+        ui.wait_until("full view", |ui| ui.screen().contains("FOUR-BODY")).await;
+        assert!(ui.screen().contains("four"), "{}", ui.screen());
+    })
+    .await;
+}
+
+const STDERR: &str = r#"export default function (pi) {
+	pi.registerCommand("errs", {
+		description: "Write to stderr",
+		handler: async () => {
+			console.error("console %s", "error");
+			console.warn("console warn");
+			process.stderr.write("raw stderr\n");
+		},
+	});
+}
+"#;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn extension_stderr_shows_as_warnings_in_the_chat() {
+    local(async {
+        let ui = start(Options { files: vec![(".pi/extensions/errs.ts", STDERR)], ..Options::default() }).await;
+        ui.submit("/errs").await;
+        ui.wait_for("Warning: [errs.ts] console error").await;
+        ui.wait_for("Warning: [errs.ts] console warn").await;
+        ui.wait_for("Warning: [errs.ts] raw stderr").await;
+    })
+    .await;
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn extension_stderr_keeps_its_label_through_a_path_alias() {
+    local(async {
+        let root = tempfile::tempdir().unwrap();
+        let agent_dir = root.path().join("agent");
+        let extensions = agent_dir.join("extensions");
+        std::fs::create_dir_all(&extensions).unwrap();
+        let source = root.path().join("source.ts");
+        std::fs::write(&source, STDERR).unwrap();
+        std::os::unix::fs::symlink(source, extensions.join("errs.ts")).unwrap();
+        let ui = start(Options { agent_dir: Some(agent_dir), ..Options::default() }).await;
+        ui.submit("/errs").await;
+        ui.wait_for("Warning: [errs.ts] console error").await;
+        ui.wait_for("Warning: [errs.ts] console warn").await;
+        ui.wait_for("Warning: [errs.ts] raw stderr").await;
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_native_panel_repaints_after_a_height_only_resize() {
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/native/fixture.mjs");
+    let package = serde_json::json!({"name": "native-fixture", "pi": {"native": [{
+        "command": env!("CARGO_BIN_EXE_pi"),
+        "args": [fixture.display().to_string()],
+        "env": {"PI_JS_FORK": "1"},
+    }]}});
+    let package: &'static str = Box::leak(package.to_string().into_boxed_str());
+    local(async {
+        let ui =
+            start(Options { files: vec![(".pi/extensions/native/package.json", package)], ..Options::default() }).await;
+        ui.submit("/native-panel").await;
+        ui.wait_until("30 rows", |ui| ui.screen().contains("height 30")).await;
+        ui.terminal.borrow_mut().resize(100, 12);
+        ui.wait_until("12 rows", |ui| ui.screen().contains("height 12")).await;
+        ui.terminal.borrow_mut().resize(60, 12);
+        ui.wait_until("60 columns", |ui| ui.screen().contains("width 60 height 12")).await;
+    })
+    .await;
+}

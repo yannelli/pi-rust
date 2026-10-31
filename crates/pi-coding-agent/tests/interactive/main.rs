@@ -14,6 +14,7 @@ mod notify;
 #[path = "../offline_guard/mod.rs"]
 mod offline_guard;
 mod prompt_history;
+mod quit;
 mod retry;
 mod review;
 mod run_limits;

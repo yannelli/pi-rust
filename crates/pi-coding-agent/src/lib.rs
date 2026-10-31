@@ -1,6 +1,7 @@
 //! Coding agent: tools, sessions, system prompt, compaction, and CLI modes.
 
 pub mod acp;
+pub mod acp_client;
 pub mod agent_session;
 pub mod app;
 pub mod auth_cli;
@@ -47,4 +48,5 @@ pub mod system_prompt;
 pub mod theme;
 pub mod tools;
 pub mod update;
+pub mod usage_cli;
 pub mod virtual_models;

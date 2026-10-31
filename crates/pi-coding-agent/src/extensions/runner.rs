@@ -83,6 +83,8 @@ pub struct ExtensionRunner {
     backend: JsBackend,
     /// The `--extension-runtime` choice, passed on to the runner a reload starts.
     requested_runtime: OnceLock<ExtensionRuntime>,
+    /// The mode the session binds later; `config.info` reports it while extensions load.
+    load_mode: OnceLock<crate::extension_ui::ExtensionMode>,
     cwd: PathBuf,
     agent_dir: PathBuf,
     pub(crate) registry: RwLock<Registry>,
@@ -187,6 +189,7 @@ impl ExtensionRunner {
                 host: OnceLock::new(),
                 backend,
                 requested_runtime: OnceLock::new(),
+                load_mode: OnceLock::new(),
                 cwd: cwd.clone(),
                 agent_dir,
                 registry: RwLock::default(),
@@ -245,6 +248,14 @@ impl ExtensionRunner {
 
     pub(crate) fn requested_runtime(&self) -> Option<ExtensionRuntime> {
         self.requested_runtime.get().copied()
+    }
+
+    pub(crate) fn load_mode(&self) -> Option<crate::extension_ui::ExtensionMode> {
+        self.load_mode.get().copied()
+    }
+
+    pub(crate) fn set_load_mode(&self, mode: crate::extension_ui::ExtensionMode) {
+        let _ = self.load_mode.set(mode);
     }
 
     pub(crate) fn set_requested_runtime(&self, runtime: ExtensionRuntime) {
