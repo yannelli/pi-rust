@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use super::support::task_support::{open_tasks, open_tasks_with};
 use super::support::{ControlledStorage, Gate};
 use super::*;
+use crate::support::{ValueCall, on_value};
 use pi_durable::session::DocumentWatch;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -56,11 +57,11 @@ async fn rejects_runtime_operations_after_the_invocation_ends_and_stops_its_watc
             *capture.lock().unwrap() = Some((runtime.clone(), context.clone()));
             *absent_slot.lock().unwrap() = Some(runtime.watch_doc(&ABSENT, (), &context).await?.is_none());
             let watch = runtime.watch_doc(&NOTES, (), &context).await?.unwrap();
-            watch.start(move |pi_chord::WatchChange { value, .. }, _| {
+            watch.start(on_value(move |ValueCall { value, .. }, _| {
                 let text = value.get("text").and_then(Json::as_str).unwrap_or("retired").to_owned();
                 sink.lock().unwrap().push(text);
                 async { Ok(()) }
-            })?;
+            }))?;
             *watch_slot.lock().unwrap() = Some(watch);
             runtime.commit(|_, _| async { Ok(completed(Value::Null)) }, &context).await
         }

@@ -15,6 +15,7 @@ use pi_durable::testing::faux::{
 use support::chat::answer;
 
 use super::*;
+use crate::support::{ValueCall, on_value};
 
 type Lines = Arc<Mutex<Vec<String>>>;
 
@@ -68,7 +69,7 @@ async fn ex21_late_join_sees_running_output_in_the_view_and_follows_it() {
         (Lines::new(Mutex::new(vec![tool["output"].as_str().unwrap().to_owned()])), Lines::default());
     let (shown, last) = (outputs.clone(), ended.clone());
     watch
-        .start(move |pi_chord::WatchChange { value, .. }, _| {
+        .start(on_value(move |ValueCall { value, .. }, _| {
             match slot(&value) {
                 Some(tool) if tool["status"] == "running" => {
                     shown.lock().unwrap().push(tool["output"].as_str().unwrap_or_default().to_owned())
@@ -79,7 +80,7 @@ async fn ex21_late_join_sees_running_output_in_the_view_and_follows_it() {
                 _ => {}
             }
             async { Ok(()) }
-        })
+        }))
         .unwrap();
     submission.wait(&ctx()).await.unwrap();
     harness.wait_for_idle(&ctx()).await.unwrap();
@@ -189,7 +190,7 @@ fn attach(
         let watch = conversation.watch(&ctx(), None).await.unwrap();
         let newest_of = |view: &Value| view["entries"].as_array().and_then(|e| e.last()).and_then(|e| e["id"].as_u64());
         let newest = Arc::new(Mutex::new(newest_of(&watch.value().to_serde()).unwrap_or(0)));
-        let listener = move |pi_chord::WatchChange { value, .. }: pi_chord::WatchChange, _| {
+        let listener = on_value(move |ValueCall { value, .. }, _| {
             let (harness, indent, lines, attached) = (harness.clone(), indent.clone(), lines.clone(), attached.clone());
             let value = value.to_serde();
             let since = *newest.lock().unwrap();
@@ -208,7 +209,7 @@ fn attach(
                 }
                 Ok(())
             }
-        };
+        });
         watch.start(listener).unwrap();
         std::mem::forget(watch); // Lives until the Harness closes, like the upstream script's watches.
     })

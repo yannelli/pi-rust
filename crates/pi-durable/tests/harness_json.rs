@@ -38,7 +38,7 @@ async fn does_not_merge_a_new_proto_member_into_anything_else() {
     // `__proto__` is not a safe op path, so the change sets the object that holds it whole.
     let ops = r#"[["s",["message","args"],{"path":"xy","__proto__":{"polluted":true}}]]"#;
     let ops = pi_chord::delta::parse_ops(&json(ops)).unwrap();
-    let pi_durable::DocumentCommitChange::Document { ops: published, .. } =
+    let pi_durable::DocumentCommitChange::Change { ops: published, .. } =
         &document_changes(&test.last_publication())[0]
     else {
         panic!("a document change")

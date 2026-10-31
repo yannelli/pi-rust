@@ -356,7 +356,7 @@ async fn fails_it_for_a_storage_request_error_from_a_commit_whose_effect_is_unkn
 #[tokio::test]
 async fn fails_it_for_a_throw_in_its_own_commit_listeners_which_would_leave_memory_behind_storage() {
     let Started { harness, root, reports, .. } = started(Arc::new(ControlledStorage::default())).await;
-    let _unsubscribe = harness.observe_commits(|_, _| Err(DurableError::error("listener bug"))).unwrap();
+    let _unsubscribe = harness.follow_commits(|_, _| Err(DurableError::error("listener bug"))).unwrap();
     // The commit itself is durable and resolves; the Session fails behind it.
     note(&root).await.unwrap();
     assert_eq!(closed_reason(&harness).await, ("failed".into(), Some("listener bug".into())));
@@ -405,7 +405,7 @@ async fn ends_an_abort_that_joins_a_run_ignoring_its_signal_and_a_reentrant_repo
     let cell: Arc<OnceLock<Harness>> = Arc::default();
     let reentered = Arc::new(Mutex::new(None::<tokio::task::JoinHandle<DurableResult<()>>>));
     let (harness_cell, slot) = (cell.clone(), reentered.clone());
-    let options = HarnessOptions::new(Arc::new(create_models()), registry).with_on_report(move |_, _| {
+    let options = HarnessOptions::new(Arc::new(create_models()), registry).with_on_report(move |_| {
         let mut slot = slot.lock().unwrap();
         if slot.is_none()
             && let Some(harness) = harness_cell.get().cloned()

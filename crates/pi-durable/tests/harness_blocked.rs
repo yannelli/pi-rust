@@ -6,6 +6,7 @@ mod support;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use crate::support::{ValueCall, on_value};
 use async_trait::async_trait;
 use pi_chord::{Context, Json};
 use pi_durable::harness::*;
@@ -300,7 +301,7 @@ async fn blocked_state(harness: &Harness, id: TaskId) -> TaskInspectionState {
 /// Watch the task graph; `blocked` reads one task's `blocked` field.
 async fn watch_graph(harness: &Harness) -> TaskGraphWatch {
     let graph = harness.watch_task_graph(&context()).await.unwrap();
-    graph.start(|pi_chord::WatchChange { .. }, _| async { Ok(()) }).unwrap();
+    graph.start(on_value(|ValueCall { .. }, _| async { Ok(()) })).unwrap();
     graph
 }
 
@@ -334,7 +335,7 @@ async fn keeps_the_hosts_wake_active_until_opens_recovery_pass_has_landed() {
     let storage = CrashStorage::new(Arc::new(open_sqlite_storage(&path).await.unwrap()));
     *storage.fail_next.lock().unwrap() = Some(DurableError::error("reset"));
     let opened = open_on(storage, &registry, &no_limit).await;
-    assert_eq!(opened.harness.closed().await.reason(), "failed");
+    assert_eq!(opened.harness.closed().await.kind(), "failed");
     // The host was told work is underway, and never that it ended: its recovery alarm stays.
     flush().await;
     assert_eq!(*opened.wakes.lock().unwrap(), [Wake { active: true, at: None }]);
@@ -360,7 +361,7 @@ async fn faults_an_extensions_task_cut_off_restart_limit_times_in_a_row_instead_
     let harness = opened.harness.clone();
     assert_eq!(restarts(&harness, id).await, Some(3));
     // Nothing is parked: the task is ready, and the host is asked to run, which ends it.
-    assert_eq!(blocked_state(&harness, id).await, TaskInspectionState::Ready { migrates: false });
+    assert_eq!(blocked_state(&harness, id).await, TaskInspectionState::Pending { migrates: false });
     assert!(harness.wake().unwrap().active);
     harness.resume().unwrap();
     let settled = harness.wait_for_task(id, &context()).await.unwrap();

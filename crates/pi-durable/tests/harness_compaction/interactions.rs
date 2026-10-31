@@ -273,7 +273,7 @@ async fn lists_a_compaction_from_start_to_end_with_its_retry_backoff_in_a_late_j
     let compactions = watched_live(&chat).await["compactions"].clone();
     assert_eq!(compactions.as_array().map(Vec::len), Some(1));
     let status = &compactions[0];
-    assert_eq!((&status["taskId"], &status["reason"]), (&json!(task), &json!("manual")));
+    assert_eq!((&status["taskId"], &status["trigger"]), (&json!(task), &json!("manual")));
     assert_eq!((&status["blocking"], &status["attempt"]), (&json!(false), &json!(1)));
     assert!(status["retry"]["at"].is_number());
     assert_eq!(status["retry"]["error"], "overloaded");
@@ -282,7 +282,7 @@ async fn lists_a_compaction_from_start_to_end_with_its_retry_backoff_in_a_late_j
     views.detach();
     let listed: Vec<Value> =
         views.live().iter().flat_map(|state| state["compactions"].as_array().cloned().unwrap_or_default()).collect();
-    assert_eq!(listed[0], json!({ "taskId": task, "reason": "manual", "blocking": false, "attempt": 1 }));
+    assert_eq!(listed[0], json!({ "taskId": task, "trigger": "manual", "blocking": false, "attempt": 1 }));
     // An abort is not a failure.
     assert!(views.live().last().unwrap().get("compactionFailure").is_none());
     chat.close().await;

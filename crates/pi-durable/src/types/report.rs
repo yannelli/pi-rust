@@ -2,6 +2,7 @@
 
 use serde::Serialize;
 
+use crate::errors::DurableError;
 use crate::ids::{ConversationId, TaskId};
 use crate::types::TaskOutcomeError;
 
@@ -55,21 +56,22 @@ impl InterruptionReason {
 }
 
 /// Why a running task keeps running under its old definition: it was uninstalled, or replaced by one that cannot
-/// take over its state.
+/// take over its state, being older than the task or newer without a `migrate`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OutdatedReason {
     MissingTask,
-    IncompatibleTask,
+    TaskTooOld,
+    MigrationFailed,
 }
 
-/// What a report to `HarnessOptions::on_report` is about. `extension`, where present, names the extension whose code
-/// failed, when known; for a task's own code, the one that installed the definition the task ran.
+/// What a report to `HarnessOptions::on_report` is about, by `kind` ([`Report`] adds the error). `extension` names the
+/// extension whose code failed, when known; for a task's own code, the one that installed its definition.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ReportInfo {
     /// The error failed the Session, which closes: a Storage error, often a platform reset.
-    SessionFailed,
+    StorageFailed,
     TaskFaulted {
         task: ReportTask,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -120,6 +122,36 @@ pub enum ReportInfo {
     },
     /// A commit, close, watch, view, or document listener failed.
     ListenerError,
+}
+
+impl ReportInfo {
+    /// The serialized `kind`.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::StorageFailed => "storage_failed",
+            Self::TaskFaulted { .. } => "task_faulted",
+            Self::TaskInterrupted { .. } => "task_interrupted",
+            Self::MigrationFailed { .. } => "migration_failed",
+            Self::TaskOutdated { .. } => "task_outdated",
+            Self::TaskError { .. } => "task_error",
+            Self::ExtensionError { .. } => "extension_error",
+            Self::HostError { .. } => "host_error",
+            Self::ListenerError => "listener_error",
+        }
+    }
+}
+
+/// One report to `HarnessOptions::on_report`: what it is about and the error reported.
+#[derive(Clone, Debug)]
+pub struct Report {
+    pub info: ReportInfo,
+    pub error: DurableError,
+}
+
+impl Report {
+    pub fn kind(&self) -> &'static str {
+        self.info.kind()
+    }
 }
 
 /// Whose code a task's `runtime.report_from()` is about when not the task's own.

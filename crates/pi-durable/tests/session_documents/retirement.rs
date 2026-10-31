@@ -41,11 +41,10 @@ async fn retires_documents_and_creates_a_new_incarnation_at_the_same_address() {
     flush().await;
     let publication = test.last_publication();
     let changes = document_changes(&publication);
-    let DocumentCommitChange::Document { record: retired, value: None, ops, .. } = &changes[0] else { panic!() };
+    let DocumentCommitChange::Retire { record: retired, .. } = &changes[0] else { panic!() };
     assert_eq!(retired.id, old_id);
-    assert!(ops.is_empty());
     assert_eq!(retired.retired_at, Some(publication.seq));
-    let DocumentCommitChange::Document { record: created, value: Some(value), ops, .. } = &changes[1] else { panic!() };
+    let DocumentCommitChange::Change { record: created, value, ops, .. } = &changes[1] else { panic!() };
     assert_ne!(created.id, old_id);
     assert_eq!(created.created_at, publication.seq);
     assert_eq!(value["message"], Json::from("new"));

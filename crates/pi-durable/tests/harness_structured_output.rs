@@ -12,9 +12,9 @@ use pi_durable::storage::MemoryStorage;
 use pi_durable::tools::{BashToolOptions, create_bash_tool};
 use pi_durable::{CommitChange, DocumentCommitChange, DurableError};
 use serde_json::{Value, json};
-use support::ControlledStorage;
 use support::chat::{add_tool, answer, call, no_parameters};
 use support::harness_support::*;
+use support::{ControlledStorage, commit_observer};
 
 fn count_schema() -> Value {
     json!({ "type": "object", "properties": { "count": { "type": "number" } }, "required": ["count"] })
@@ -147,10 +147,9 @@ async fn stores_exactly_what_callers_and_events_get_without_the_model_s_output_a
     // The result each nested call's document got, as committed.
     let stored = Arc::new(Mutex::new(Vec::new()));
     let sink = stored.clone();
-    let _listener = harness.subscribe_commits(move |publication, _| {
+    let _listener = harness.observe_commits(commit_observer(move |publication, _| {
         for change in &publication.changes {
-            if let CommitChange::Document(DocumentCommitChange::Document { record, value: Some(value), ops, .. }) =
-                change
+            if let CommitChange::Document(DocumentCommitChange::Change { record, value, ops, .. }) = change
                 && record.kind == "pi.tool.nested-call"
                 && !ops.is_empty()
                 && !value["result"].is_null()
@@ -159,7 +158,7 @@ async fn stores_exactly_what_callers_and_events_get_without_the_model_s_output_a
             }
         }
         Ok(())
-    });
+    }));
     go(&root).await;
     harness.wait_for_idle(&ctx()).await.unwrap();
     harness.close(&ctx()).await.unwrap();

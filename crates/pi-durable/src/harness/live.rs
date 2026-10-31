@@ -2,14 +2,15 @@
 //! `harness/live.ts`).
 
 use std::collections::HashSet;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use pi_ai::Usage;
+use pi_chord::delta::Op;
 use pi_chord::{Json, JsonMap};
 use serde::{Deserialize, Serialize};
 
 use super::types::{CompactionReason, ToolDiagnostic};
-use crate::documents::{DocSpec, DocToken, LatestConversation, LatestFork, define_doc};
+use crate::documents::{CheckpointInfo, DocDefinition, DocScope, DocToken, LatestConversation, LatestFork, encode};
 use crate::errors::DurableResult;
 use crate::ids::{EntryId, SubmissionId, TaskId};
 use crate::session::{Draft, Tx};
@@ -116,7 +117,8 @@ pub struct RetryState {
 #[serde(rename_all = "camelCase")]
 pub struct CompactionStatus {
     pub task_id: TaskId,
-    pub reason: CompactionReason,
+    /// What started it: `compact()`, a threshold, or a context overflow.
+    pub trigger: CompactionReason,
     /// Whether a generation waits for it.
     pub blocking: bool,
     pub attempt: u32,
@@ -129,7 +131,8 @@ pub struct CompactionStatus {
 #[serde(rename_all = "camelCase")]
 pub struct CompactionFailure {
     pub task_id: TaskId,
-    pub reason: CompactionReason,
+    /// What started the compaction that failed.
+    pub trigger: CompactionReason,
     /// The failed or faulted outcome's error message, or why the scheduler orphaned the task.
     pub error: String,
 }
@@ -278,13 +281,48 @@ fn running(slots: Option<&Json>) -> bool {
 /// Every commit that consumes or clears streamed fields reads `pi.live`, so it stores them with its own changes.
 pub const PROGRESS_COMMIT: CommitOptions = CommitOptions::DEFERRED;
 
+// Built from an erased definition so the migration keeps the stored JSON whole; a typed one re-encodes it.
 pub static LIVE_DOC: LazyLock<DocToken<LiveState, LatestConversation>> = LazyLock::new(|| {
-    let spec =
-        DocSpec::new("pi.live", 1, LatestConversation(LatestFork::Initial), LiveState::default, |value, _, _| {
-            Ok(value.get("generation").is_none() && !running(value.get("tools")) && !running(value.get("nestedTools")))
-        });
-    define_doc(spec).unwrap_or_else(|_| unreachable!("pi.live is a valid definition"))
+    let checkpoint_when = |value: &Json, _: &[Op], _: CheckpointInfo| -> DurableResult<bool> {
+        Ok(value.get("generation").is_none() && !running(value.get("tools")) && !running(value.get("nestedTools")))
+    };
+    let definition = DocDefinition::from_shared(
+        "pi.live",
+        2,
+        LatestConversation(LatestFork::Initial).semantics(),
+        false,
+        Arc::new(|_: Option<&Json>| encode(&LiveState::default())),
+        Arc::new(checkpoint_when),
+    )
+    .unwrap_or_else(|_| unreachable!("pi.live is a valid definition"))
+    .with_migrate(|value, _| Ok(migrate_live_v1(value)));
+    DocToken::from_definition(Arc::new(definition))
 });
+
+/// Version 1 named a compaction's trigger `reason`, in `compactions` and `compactionFailure`.
+fn migrate_live_v1(value: &Json) -> Json {
+    let Some(live) = value.as_object() else { return value.clone() };
+    let mut migrated = JsonMap::new();
+    for (key, field) in live.iter() {
+        let field = match (&**key, field.as_array()) {
+            ("compactions", Some(statuses)) => Json::array(statuses.iter().map(rename_reason).collect()),
+            ("compactionFailure", _) => rename_reason(field),
+            _ => field.clone(),
+        };
+        migrated.insert(&**key, field);
+    }
+    Json::object(migrated)
+}
+
+/// A copy of a version 1 compaction status or failure with `reason` renamed `trigger`, its keys in their order.
+fn rename_reason(value: &Json) -> Json {
+    let Some(fields) = value.as_object() else { return value.clone() };
+    let mut renamed = JsonMap::new();
+    for (key, field) in fields.iter() {
+        renamed.insert(if &**key == "reason" { "trigger" } else { &**key }, field.clone());
+    }
+    Json::object(renamed)
+}
 
 pub type LiveDraft = Draft<LiveState>;
 
@@ -333,7 +371,7 @@ pub fn remove_compaction_status(live: &mut LiveState, task_id: TaskId) {
 /// Remove the status of compaction task `task_id` and record that it failed with `error`.
 pub fn fail_compaction_status(live: &mut LiveState, task_id: TaskId, error: impl Into<String>) {
     if let Some(status) = compaction_status(live, task_id) {
-        let failure = CompactionFailure { task_id: status.task_id, reason: status.reason, error: error.into() };
+        let failure = CompactionFailure { task_id: status.task_id, trigger: status.trigger, error: error.into() };
         live.compaction_failure = Some(failure);
     }
     remove_compaction_status(live, task_id);

@@ -21,7 +21,7 @@ async fn starts_above_the_background_threshold_without_blocking_the_run_idle_wai
     assert!(task.background);
     assert_eq!(task.input.get("reason").and_then(Json::as_str), Some("threshold"));
     assert!(task.owner.is_none());
-    let expected = json!([{ "taskId": task.id, "reason": "threshold", "blocking": false, "attempt": 1 }]);
+    let expected = json!([{ "taskId": task.id, "trigger": "threshold", "blocking": false, "attempt": 1 }]);
     assert_eq!(chat.live().await["compactions"], expected);
     // Background work: neither conversation idle nor Esc waits for or stops it.
     chat.root.wait_for_idle(&ctx()).await.unwrap();
@@ -86,7 +86,7 @@ async fn records_a_failure_in_live_in_the_commit_that_ends_the_compaction_until_
     chat.turn(&text("u4", 100), &text("a4", 100)).await;
     wait_for(|| async { chat.live().await.get("compactionFailure").is_some() }).await;
     let recorded = chat.live().await["compactionFailure"].clone();
-    assert_eq!(recorded["reason"], "threshold");
+    assert_eq!(recorded["trigger"], "threshold");
     assert_eq!(recorded["error"], "Summarization failed: bad request");
     // The value that drops the compaction's status records its failure.
     let ended = |task: &Value| {
@@ -128,7 +128,7 @@ async fn records_the_error_of_a_compaction_the_scheduler_faults_or_orphans() {
         chat.root.commit(settle, &ctx()).await.unwrap();
         let live = chat.live().await;
         assert!(live.get("compactions").is_none());
-        assert_eq!(live["compactionFailure"]["reason"], "threshold");
+        assert_eq!(live["compactionFailure"]["trigger"], "threshold");
         assert_eq!(live["compactionFailure"]["error"], error);
         chat.close().await;
     }
@@ -177,7 +177,7 @@ async fn waits_for_its_compaction_which_appends_the_summary_before_the_request()
     assert_eq!(state["on"], json!([child.id]));
     assert_eq!(state["checkpoint"]["phase"], "prepare");
     assert_eq!((&state["checkpoint"]["attempt"], &state["checkpoint"]["compacted"]), (&json!(1), &json!(child.id)));
-    let expected = json!([{ "taskId": child.id, "reason": "threshold", "blocking": true, "attempt": 1 }]);
+    let expected = json!([{ "taskId": child.id, "trigger": "threshold", "blocking": true, "attempt": 1 }]);
     assert_eq!(chat.live().await["compactions"], expected);
     // Nothing was appended before the wait.
     assert_eq!(chat.kinds().await.last().map(String::as_str), Some("pi.user"));
@@ -241,7 +241,7 @@ async fn fails_the_run_with_the_compactions_error_without_a_request_when_its_com
     assert_eq!(chat.kinds().await.last().map(String::as_str), Some("pi.user"));
     let live = chat.live().await;
     assert!(live.get("compactions").is_none());
-    assert_eq!(live["compactionFailure"]["reason"], "threshold");
+    assert_eq!(live["compactionFailure"]["trigger"], "threshold");
     assert_eq!(live["compactionFailure"]["error"], "Summarization failed: bad request");
     chat.close().await;
 }

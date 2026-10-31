@@ -296,7 +296,7 @@ impl Scheduler {
                 reason: BlockedReason::MigrationFailed,
                 error: Some(missing_migration(&record.kind, task.version, record.version).to_string()),
             },
-            Ok((_, migrates)) => TaskInspectionState::Ready { migrates },
+            Ok((_, migrates)) => TaskInspectionState::Pending { migrates },
         }
     }
 

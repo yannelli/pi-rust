@@ -6,6 +6,7 @@ use pi_chord::delta::Op;
 
 use super::support::*;
 use super::*;
+use crate::support::{ValueCall, on_value};
 
 fn v1_doc() -> SessionDoc {
     define_doc(session_doc("cache.versioned", 1, r#"{"name":"first"}"#)).unwrap()
@@ -57,11 +58,11 @@ async fn sends_observers_of_an_older_shape_a_root_replacement_after_a_newer_toke
     let delivered = Deferred::default();
     let (sink, done) = (frames.clone(), delivered.clone());
     watch
-        .start(move |pi_chord::WatchChange { ops, .. }, _| {
+        .start(on_value(move |ValueCall { ops, .. }, _| {
             sink.lock().unwrap().push(ops);
             done.resolve();
             async { Ok(()) }
-        })
+        }))
         .unwrap();
     push_second(&test, &v2).await;
     delivered.wait().await;

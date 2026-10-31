@@ -7,9 +7,8 @@ use std::sync::{Arc, Mutex};
 
 use pi_chord::delta::Op;
 use pi_chord::state::{ReplicatedStateSourceOptions, attach_replicated_state_source};
-use pi_chord::{Context, Json, Unsubscribe, WatchChange, without_abort_signal};
+use pi_chord::{Context, Json, Unsubscribe, without_abort_signal};
 
-use super::DocumentState;
 use super::cache::DocumentPin;
 use super::core::{LoadedDocument, Session, SessionCore};
 use super::guarded::FailureLatch;
@@ -18,6 +17,7 @@ use super::observation::{CommittedObserver, CommittedStateSource, Release};
 use super::observer::{GuardedObserver, Observation, Observer};
 use super::reads::{Def, check_loaded};
 use super::watch::DocumentWatch;
+use super::{DocumentState, WatchCall, session_end};
 use crate::documents::{DocFamilyToken, DocScope, DocToken, DocValue, ResolvedAddress};
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::DocumentId;
@@ -69,7 +69,7 @@ impl SessionCore {
         let (target, state, alive, subscription) =
             (observer.clone(), followed.clone(), attached.clone(), commits.clone());
         let weak = Arc::downgrade(self);
-        let listener = self.observe_commits(Arc::new(move |publication, context| {
+        let listener = self.follow_commits(Arc::new(move |publication, context| {
             // Listeners run from a copy of the list: another observer's call may have detached this one.
             if !alive.load(Ordering::SeqCst) {
                 return Ok(());
@@ -83,9 +83,13 @@ impl SessionCore {
                         owner_ends |= ends && record.is_terminal();
                         continue;
                     }
-                    CommitChange::Document(DocumentCommitChange::Document { record, version, value, ops, .. }) => {
+                    CommitChange::Document(DocumentCommitChange::Change { record, version, value, ops, .. }) => {
                         let Some(core) = weak.upgrade() else { return Ok(()) };
-                        follow(&core, &state, &address, &address_id, record, *version, value.as_ref(), ops)
+                        follow(&core, &state, &address, &address_id, record, Some((*version, value)), ops)
+                    }
+                    CommitChange::Document(DocumentCommitChange::Retire { record, .. }) => {
+                        let Some(core) = weak.upgrade() else { return Ok(()) };
+                        follow(&core, &state, &address, &address_id, record, None, &[])
                     }
                     _ => continue,
                 };
@@ -123,32 +127,30 @@ impl SessionCore {
         let (weak, detach) = (Arc::downgrade(self), release.clone());
         let close = self.subscribe_close(Arc::new(move || {
             detach.run();
-            observer.end(weak.upgrade().and_then(|core| core.failure()));
+            observer.end(session_end(weak.upgrade().and_then(|core| core.failure())));
         }));
         release.push(move || close.unsubscribe());
         Ok(())
     }
 }
 
-/// One committed document change seen by the observer of `address`: the change it delivers, if any, after updating
-/// what it follows.
-#[allow(clippy::too_many_arguments)]
+/// One committed document change seen by the observer of `address`: the call it delivers, if any, after updating
+/// what it follows. `content` is the version and value of a change, `None` for a retirement.
 fn follow(
     core: &Arc<SessionCore>,
     state: &Mutex<Followed>,
     address: &DocumentAddress,
     address_id: &str,
     record: &DocumentRecord,
-    version: Option<u32>,
-    value: Option<&Json>,
+    content: Option<(u32, &Json)>,
     ops: &[Op],
-) -> Option<WatchChange> {
+) -> Option<WatchCall> {
     let mut followed = lock(state);
     // The incarnation followed is at the address by definition; only another record needs the address compared.
     if followed.incarnation != Some(record.id) && !at_address(record, address) {
         return None;
     }
-    let Some(value) = value else {
+    let Some((version, value)) = content else {
         if followed.incarnation != Some(record.id) {
             return None;
         }
@@ -158,9 +160,8 @@ fn follow(
         if let Some(pin) = followed.pin.take() {
             pin.release();
         }
-        return Some(WatchChange { value: last, ops: Vec::new(), retired: true });
+        return Some(WatchCall::Value { value: last, ops: Vec::new(), retired: true });
     };
-    let version = version.unwrap_or(followed.version);
     if followed.incarnation != Some(record.id) || version != followed.version {
         // A new incarnation at the address, or a value of another definition version: shown whole.
         if followed.incarnation != Some(record.id) {
@@ -172,14 +173,14 @@ fn follow(
         }
         followed.version = version;
         followed.value = Some(value.clone());
-        return Some(WatchChange::new(value.clone(), vec![Op::Replace(value.clone())]));
+        return Some(WatchCall::new(value.clone(), vec![Op::Replace(value.clone())]));
     }
     // A migration-only base changes nothing for an observer of the new version.
     if ops.is_empty() {
         return None;
     }
     followed.value = Some(value.clone());
-    Some(WatchChange::new(value.clone(), ops.to_vec()))
+    Some(WatchCall::new(value.clone(), ops.to_vec()))
 }
 
 impl Session {
@@ -274,11 +275,11 @@ impl Session {
         async move {
             let Some(watch) = attached.await? else { return Ok(None) };
             if context.is_cancelled() {
-                watch.cancel();
+                watch.abort();
                 return Err(cancellation(&context));
             }
             if let Some(signal) = context.abort_signal() {
-                watch.observe_cancellation(&signal)?;
+                watch.observe_abort(&signal)?;
             }
             Ok(Some(watch))
         }

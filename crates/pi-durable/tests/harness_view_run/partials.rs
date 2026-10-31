@@ -2,12 +2,12 @@
 //! replacement, and streamed as appends at their argument paths (#9265).
 
 use pi_ai::StopReason;
-use pi_chord::{Context, WatchChange};
-use pi_durable::session::{Observation, Observer};
+use pi_chord::Context;
+use pi_durable::DurableResult;
+use pi_durable::session::{Observation, Observer, WatchCall, WatchEnd};
 use pi_durable::testing::faux::{
     FauxMessageOptions, faux_assistant_message, faux_text, faux_thinking, faux_tool_call_with_id,
 };
-use pi_durable::{DurableError, DurableResult};
 
 use super::*;
 
@@ -15,12 +15,14 @@ use super::*;
 struct OpsRecorder(Frames);
 
 impl Observer for OpsRecorder {
-    fn advance(&self, change: &WatchChange, _context: &Context) -> DurableResult<()> {
-        self.0.lock().unwrap().push((change.value.clone(), change.ops.clone()));
+    fn advance(&self, call: &WatchCall, _context: &Context) -> DurableResult<()> {
+        if let WatchCall::Value { value, ops, .. } = call {
+            self.0.lock().unwrap().push((value.clone(), ops.clone()));
+        }
         Ok(())
     }
 
-    fn end(&self, _failure: Option<DurableError>) {}
+    fn end(&self, _end: WatchEnd) {}
 }
 
 /// Observe `conversation`'s view synchronously, one frame per commit that changes it.

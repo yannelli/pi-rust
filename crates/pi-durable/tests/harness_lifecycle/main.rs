@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::support::{ValueCall, on_value};
 use futures::future::BoxFuture;
 use pi_chord::state::{DeliveryKind, StateListener};
 use pi_chord::{AbortController, ChordError, Context, Json, with_abort_signal};
@@ -157,7 +158,7 @@ async fn rethrows_the_open_error_and_reports_it_once_though_closing_then_fails_t
     let reports = Arc::new(Mutex::new(Vec::new()));
     let sink = reports.clone();
     let options = HarnessOptions::new(Arc::new(create_models()), Arc::new(create_registry()))
-        .with_on_report(move |error, _| sink.lock().unwrap().push(error.to_string()));
+        .with_on_report(move |report| sink.lock().unwrap().push(report.error.to_string()));
     let error = Harness::open(storage, options, &context()).await.map(|_| ()).unwrap_err();
     assert!(error.to_string().contains("disk full"), "{error}");
     // The storage failure that failed open is the cause; the close that fails after it adds no report.
@@ -382,10 +383,10 @@ async fn publishes_no_frame_to_states_and_watches_from_a_commit_that_settles_dur
     for (watch, name) in [(&graph_watch, "graphWatch"), (&doc_watch, "docWatch"), (&view_watch, "viewWatch")] {
         let sink = frames.clone();
         watch
-            .start(move |pi_chord::WatchChange { .. }, _| {
+            .start(on_value(move |ValueCall { .. }, _| {
                 sink.lock().unwrap().push(name);
                 async { Ok(()) }
-            })
+            }))
             .unwrap();
     }
     let (doc_value, view_value) = (doc_state.value(), view_state.value());

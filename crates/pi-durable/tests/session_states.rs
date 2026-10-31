@@ -117,10 +117,10 @@ async fn shares_exact_committed_value_and_operation_references_with_chord() {
     let received = operations(&state);
     set_value(&test.session, 4).await;
     flush().await;
-    let DocumentCommitChange::Document { value, ops, .. } = &document_changes(&test.last_publication())[0] else {
+    let DocumentCommitChange::Change { value, ops, .. } = &document_changes(&test.last_publication())[0] else {
         panic!()
     };
-    assert!(state.value().same_ref(value.as_ref().unwrap()));
+    assert!(state.value().same_ref(value));
     assert_eq!(received.lock().unwrap().last().unwrap(), ops);
     let snapshot = test.session.snapshot(&STATE_DOC, (), &context()).await.unwrap().unwrap();
     assert!(state.value()["retained"].same_ref(&snapshot["retained"]));

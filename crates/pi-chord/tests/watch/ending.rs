@@ -3,14 +3,10 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use pi_chord::{ChordError, Json, NativeWatch, NativeWatchChange, Watch, WatchChange, WatchEnd, json};
+use pi_chord::{ChordError, Json, NativeWatch, Watch, WatchCall, WatchEnd, json};
 
 use super::support::Gate;
 use super::*;
-
-fn retirement(value: Json) -> WatchChange {
-    WatchChange { value, ops: Vec::new(), retired: true }
-}
 
 #[tokio::test]
 async fn takes_no_more_frames_delivers_what_is_pending_then_ends_ended_and_only_then_detaches() {
@@ -23,7 +19,7 @@ async fn takes_no_more_frames_delivers_what_is_pending_then_ends_ended_and_only_
     // The source sends nothing more: a later frame is not taken.
     watch.advance(frame(json!(2), replace(json!(2))), context());
     flush().await;
-    assert_eq!(*changes.lock().unwrap(), [retirement(json!(1))]);
+    assert_eq!(seen(&changes), [Seen::from(&retirement(json!(1)))]);
     assert!(matches!(*settled.lock().unwrap(), Some(WatchEnd::Ended)));
     assert_eq!(recorded.detached(), 1);
 }
@@ -55,7 +51,7 @@ async fn ends_a_never_started_watch_at_its_source_s_end_dropping_what_is_pending
     let (watch, recorded) = recorded_watch(json!(1));
     watch.advance(retirement(json!(1)), context());
     watch.end_after_delivery();
-    watch.end(Some(ChordError::error("source failed")));
+    watch.end(WatchEnd::Failed(ChordError::error("source failed")));
     let end = watch.closed().await;
     assert!(matches!(&end, WatchEnd::Failed(error) if error.to_string() == "source failed"), "{end:?}");
     assert_eq!(recorded.detached(), 1);
@@ -78,10 +74,11 @@ async fn ending_while_running(fails: bool) -> Ending {
     let (gate, values, returned) = (Gate::new(), Arc::new(Mutex::new(Vec::new())), Arc::new(AtomicBool::new(false)));
     let (held, sink, done) = (gate.clone(), values.clone(), returned.clone());
     watch
-        .start(move |change, _| {
-            sink.lock().unwrap().push(change.value);
+        .start(move |call, _| {
+            let delivered = value_call(call).map(|(value, _, _)| sink.lock().unwrap().push(value));
             let (held, done) = (held.clone(), done.clone());
             async move {
+                delivered?;
                 held.wait().await?;
                 if fails {
                     return Err(ChordError::error("listener failed"));
@@ -91,7 +88,7 @@ async fn ending_while_running(fails: bool) -> Ending {
             }
         })
         .unwrap();
-    watch.advance(WatchChange { value: json!(1), ops: replace(json!(1)), retired: true }, context());
+    watch.advance(WatchCall::Value { value: json!(1), ops: replace(json!(1)), retired: true }, context());
     flush().await;
     assert_eq!(*values.lock().unwrap(), [json!(1)]);
     watch.end_after_delivery();
@@ -134,8 +131,10 @@ async fn ends_stopped_when_stopped_while_ending_without_awaiting_the_running_cal
     assert!(matches!(ending.watch.closed().await, WatchEnd::Stopped));
 }
 
+/// Upstream "hands a listener plain data only: `{ kind, value, ops, retired }`" and "passes a frame delivered alone on
+/// as the source made it".
 #[tokio::test]
-async fn hands_a_listener_plain_data_and_passes_a_frame_delivered_alone_on_as_the_source_made_it() {
+async fn hands_a_listener_plain_data_only_kind_value_ops_retired_and_passes_a_frame_delivered_alone_on() {
     let (watch, _) = recorded_watch(json!({ "n": 0 }));
     let changes = collect_changes(&watch);
     let alone = frame(json!({ "n": 1 }), ops(json!([["s", ["n"], 1]])));
@@ -145,9 +144,16 @@ async fn hands_a_listener_plain_data_and_passes_a_frame_delivered_alone_on_as_th
     watch.advance(frame(json!({ "n": 2 }), ops(json!([["s", ["n"], 2]]))), context());
     watch.advance(retirement(json!({ "n": 2 })), context());
     flush().await;
-    let changes = changes.lock().unwrap().clone();
-    assert_eq!(changes[0], alone);
-    assert_eq!(changes[1], WatchChange { value: json!({ "n": 2 }), ops: ops(json!([["s", ["n"], 2]])), retired: true });
+    let calls = changes.lock().unwrap().clone();
+    assert_eq!(calls.len(), 2);
+    for call in &calls {
+        // Every field is named, so a call carries `kind`, `value`, `ops` and `retired` only.
+        let WatchCall::Value { value: _, ops: _, retired: _ } = call else { panic!("{call:?}") };
+        assert_eq!(call.kind(), "value");
+        assert_eq!(Seen::from(&call.clone()), Seen::from(call));
+    }
+    let folded = WatchCall::Value { value: json!({ "n": 2 }), ops: ops(json!([["s", ["n"], 2]])), retired: true };
+    assert_eq!(seen(&changes), [Seen::from(&alone), Seen::from(&folded)]);
     watch.stop().await;
 }
 
@@ -159,14 +165,15 @@ async fn delivers_a_native_backlog_that_never_drains_in_order() {
     let next = Arc::new(Mutex::new(50u32));
     // Each call queues one more value behind a backlog of 50, so the queue never empties for 1,000 values.
     watch
-        .start(move |NativeWatchChange { value }, _| {
+        .start(move |call, _| {
+            let Ok(value) = native_value_call(call) else { return std::future::ready(Ok(())) };
             sink.lock().unwrap().push(value);
             let mut next = next.lock().unwrap();
             if *next < 1_000 {
                 feeder.advance(*next, context());
                 *next += 1;
             }
-            async { Ok(()) }
+            std::future::ready(Ok(()))
         })
         .unwrap();
     for n in 0..50 {

@@ -122,7 +122,7 @@ impl FileWatcher for RemoteWatcher {
         *lock(&self.state.mode)
     }
 
-    async fn close(&self, _context: &Context) {
+    async fn stop(&self, _context: &Context) {
         if self.state.closed.swap(true, Ordering::SeqCst) {
             return;
         }
@@ -171,7 +171,7 @@ fn handle_event(state: &WatchState, event: &Json, ready: &AtomicBool, sender: &R
                 Some(Value::String(message)) => message.clone(),
                 other => other.map_or("undefined".into(), Value::to_string),
             };
-            state.deliver(FileChange::Error(FileError::new(code, message, None)));
+            state.deliver(FileChange::Failed(FileError::new(code, message, None)));
             state.closed.store(true, Ordering::SeqCst);
         }
         _ => {}
@@ -211,7 +211,7 @@ fn start(state: Arc<WatchState>) -> BoxFuture<'static, Result<(), RemoteError>> 
                 tokio::spawn(reconnect(task_state));
                 return;
             }
-            task_state.deliver(FileChange::Error(to_file_error(&error, None)));
+            task_state.deliver(FileChange::Failed(to_file_error(&error, None)));
             task_state.closed.store(true, Ordering::SeqCst);
         });
         *lock(&state.task) = Some(task);
@@ -238,7 +238,7 @@ async fn reconnect(state: Arc<WatchState>) {
             }
             Err(error) if is_connection_lost(&error) => delay = (delay * 2).min(RECONNECT_MAX),
             Err(error) => {
-                state.deliver(FileChange::Error(to_file_error(&error, None)));
+                state.deliver(FileChange::Failed(to_file_error(&error, None)));
                 state.closed.store(true, Ordering::SeqCst);
                 return;
             }

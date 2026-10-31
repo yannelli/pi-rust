@@ -49,9 +49,9 @@ impl ChatSetup {
         let settings = self.settings.clone();
         let (reports, infos) = (self.reports.clone(), self.infos.clone());
         let mut options = HarnessOptions::new(self.models.clone(), self.registry.clone() as Arc<dyn RegistryReader>)
-            .with_on_report(move |error, info| {
-                reports.lock().unwrap().push(error.clone());
-                infos.lock().unwrap().push(info.clone());
+            .with_on_report(move |report| {
+                reports.lock().unwrap().push(report.error.clone());
+                infos.lock().unwrap().push(report.info.clone());
             });
         let (now, offset) = (self.now.clone(), self.now_offset_ms.clone());
         options =

@@ -5,46 +5,97 @@ use std::future::Future;
 use std::sync::Arc;
 
 use super::lifecycle::{Lifecycle, PendingStore, Replace};
-use super::{NativeWatchChange, NativeWatchHandle, WatchChange, WatchEnd, WatchHandle};
+use super::{NativeWatchCall, NativeWatchHandle, WatchCall, WatchEnd, WatchHandle};
 use crate::context::{AbortSignal, Context};
 use crate::delta::{Op, PendingOps, PendingTake};
 use crate::error::ChordError;
 use crate::json::Json;
 use crate::sync::BoxFuture;
 
-/// Frames of a JSON watch waiting for its listener: their ops folded, the newest value and context, and whether one was a
-/// retirement.
-#[derive(Default)]
-pub(crate) struct JsonPending {
+/// Frames of a JSON watch waiting for its listener: their ops folded, the newest value and context, whether one was a
+/// retirement, and a failure that came after the last value call.
+pub(crate) struct JsonPending<E> {
     ops: PendingOps,
-    /// The source's change while it is the only frame pending: the call passes it on as it came.
-    lone: Option<WatchChange>,
-    newest: Option<(Json, Context)>,
+    /// The source's value call while it is the only frame pending: the call passes it on as it came.
+    lone: Option<WatchCall<Json, E>>,
+    newest_value: Option<Json>,
+    /// The newest frame's context, while a call is pending; it also marks that one is.
+    newest_context: Option<Context>,
     retired: bool,
+    /// The newest frame was a failure: the next call is this.
+    failure: Option<WatchCall<Json, E>>,
+    /// A failure came after the last value call: the next value call replaces the root, and ops are not kept.
+    replace: bool,
 }
 
-impl JsonPending {
-    fn advance(&mut self, change: WatchChange, context: Context) -> bool {
-        let first = self.newest.is_none();
-        self.newest = Some((change.value.clone(), context));
-        self.retired |= change.retired;
-        if first {
-            self.lone = Some(change);
-        } else {
-            if let Some(lone) = self.lone.take() {
-                self.ops.push(lone.ops);
-            }
-            self.ops.push(change.ops);
+impl<E> Default for JsonPending<E> {
+    fn default() -> Self {
+        Self {
+            ops: PendingOps::default(),
+            lone: None,
+            newest_value: None,
+            newest_context: None,
+            retired: false,
+            failure: None,
+            replace: false,
         }
-        true
     }
 }
 
-impl PendingStore<WatchChange> for JsonPending {
-    fn next(&mut self) -> Option<(WatchChange, Context)> {
-        let (value, context) = self.newest.take()?;
+impl<E> JsonPending<E> {
+    fn advance(&mut self, call: WatchCall<Json, E>, context: Context) -> bool {
+        let (value, ops, retired) = match call {
+            WatchCall::Value { value, ops, retired } => (value, ops, retired),
+            failure => return self.fail(failure, context),
+        };
+        self.retired |= retired;
+        if self.replace {
+            self.failure = None;
+        } else if self.newest_context.is_none() {
+            self.lone = Some(WatchCall::Value { value: value.clone(), ops, retired });
+        } else {
+            if let Some(WatchCall::Value { ops, .. }) = self.lone.take() {
+                self.ops.push(ops);
+            }
+            self.ops.push(ops);
+        }
+        self.newest_value = Some(value);
+        self.newest_context = Some(context);
+        true
+    }
+
+    /// Drop the pending frames and wait as one `Failed` call; the next value call replaces the root.
+    fn fail(&mut self, call: WatchCall<Json, E>, context: Context) -> bool {
+        self.ops.take();
+        self.lone = None;
+        self.newest_value = None;
+        self.failure = Some(call);
+        self.newest_context = Some(context);
+        self.replace = true;
+        true
+    }
+
+    /// The pending failure, or the value after one as a root replacement (no ops were kept since the failure).
+    fn next_after_failure(&mut self, context: Context) -> Option<(WatchCall<Json, E>, Context)> {
+        if let Some(failure) = self.failure.take() {
+            return Some((failure, context));
+        }
+        let value = self.newest_value.take()?;
         let retired = std::mem::take(&mut self.retired);
-        // One frame never folds or overflows: its change is the call's.
+        self.replace = false;
+        Some((WatchCall::Value { value: value.clone(), ops: vec![Op::Replace(value)], retired }, context))
+    }
+}
+
+impl<E: Send + 'static> PendingStore<WatchCall<Json, E>> for JsonPending<E> {
+    fn next(&mut self) -> Option<(WatchCall<Json, E>, Context)> {
+        let context = self.newest_context.take()?;
+        if self.replace {
+            return self.next_after_failure(context);
+        }
+        let value = self.newest_value.take()?;
+        let retired = std::mem::take(&mut self.retired);
+        // One frame never folds or overflows: its call is the listener's.
         if let Some(lone) = self.lone.take() {
             return Some((lone, context));
         }
@@ -52,58 +103,75 @@ impl PendingStore<WatchChange> for JsonPending {
             PendingTake::Ops(ops) => ops,
             PendingTake::Replace => vec![Op::Replace(value.clone())],
         };
-        Some((WatchChange { value, ops, retired }, context))
+        Some((WatchCall::Value { value, ops, retired }, context))
     }
 
     fn has_pending(&self) -> bool {
-        self.newest.is_some()
+        self.newest_context.is_some()
     }
 
     fn release(&mut self) {
         self.ops.take();
         self.lone = None;
-        self.newest = None;
+        self.newest_value = None;
+        self.newest_context = None;
         self.retired = false;
+        self.failure = None;
+        self.replace = false;
     }
 }
 
 /// Maximum values kept behind one unavailable native watch listener.
 const MAX_PENDING_NATIVE_VALUES: usize = 100;
 
-/// Values of a native watch waiting for its listener, in order.
-pub(crate) struct NativePending<T> {
+/// Values of a native watch waiting for its listener, in order, or one failure that dropped them.
+pub(crate) struct NativePending<T, E> {
     values: VecDeque<(T, Context)>,
     replace: Option<Replace<T>>,
+    /// A pending failure and its frame's context; nothing else is pending meanwhile.
+    failure: Option<(E, Context)>,
 }
 
-impl<T: Send + Sync + 'static> PendingStore<NativeWatchChange<T>> for NativePending<T> {
-    fn next(&mut self) -> Option<(NativeWatchChange<T>, Context)> {
+impl<T: Send + Sync + 'static, E: Send + 'static> PendingStore<NativeWatchCall<T, E>> for NativePending<T, E> {
+    fn next(&mut self) -> Option<(NativeWatchCall<T, E>, Context)> {
+        if let Some((error, context)) = self.failure.take() {
+            return Some((NativeWatchCall::Failed { error }, context));
+        }
         let (value, context) = self.values.pop_front()?;
-        Some((NativeWatchChange { value }, context))
+        Some((NativeWatchCall::Value { value }, context))
     }
 
     fn has_pending(&self) -> bool {
-        !self.values.is_empty()
+        self.failure.is_some() || !self.values.is_empty()
     }
 
     fn release(&mut self) {
         self.values.clear();
         self.replace = None;
+        self.failure = None;
     }
 }
 
-fn change_value(change: &WatchChange) -> Json {
-    change.value.clone()
+fn call_value<E>(call: &WatchCall<Json, E>) -> Option<Json> {
+    match call {
+        WatchCall::Value { value, .. } => Some(value.clone()),
+        WatchCall::Failed { .. } => None,
+    }
 }
 
-fn native_value<T: Clone>(change: &NativeWatchChange<T>) -> T {
-    change.value.clone()
+fn native_value<T: Clone, E>(call: &NativeWatchCall<T, E>) -> Option<T> {
+    match call {
+        NativeWatchCall::Value { value } => Some(value.clone()),
+        NativeWatchCall::Failed { .. } => None,
+    }
 }
+
+type JsonWatchLifecycle<E> = Lifecycle<Json, WatchCall<Json, E>, E, JsonPending<E>>;
 
 /// The watch handle of a JSON source. Frames that arrive before `start()` or while the listener runs wait in one
 /// [`PendingOps`] queue; the next call gets the newest value, the folded ops (or `[["r", newest]]` after an overflow),
 /// `retired` when any frame was a retirement, and the newest frame's context. Cheap to clone.
-pub struct Watch<E = ChordError>(Arc<Lifecycle<Json, WatchChange, E, JsonPending>>);
+pub struct Watch<E = ChordError>(Arc<JsonWatchLifecycle<E>>);
 
 impl<E> Clone for Watch<E> {
     fn clone(&self) -> Self {
@@ -121,10 +189,10 @@ where
         detach: impl FnOnce() + Send + 'static,
         report: impl Fn(&E) + Send + Sync + 'static,
     ) -> Self {
-        Self(Lifecycle::new(value, JsonPending::default(), Box::new(detach), Arc::new(report), change_value))
+        Self(Lifecycle::new(value, JsonPending::default(), Box::new(detach), Arc::new(report), call_value::<E>))
     }
 
-    /// The acquisition value before `start()`, then the latest delivered value.
+    /// The acquisition value before `start()`, then the latest delivered value (a `Failed` call keeps it).
     pub fn value(&self) -> Json {
         self.0.value()
     }
@@ -132,10 +200,10 @@ where
     /// Install the sole serialized asynchronous listener. Delivery never runs inline.
     pub fn start<F, Fut>(&self, listener: F) -> Result<(), E>
     where
-        F: Fn(WatchChange, Context) -> Fut + Send + Sync + 'static,
+        F: Fn(WatchCall<Json, E>, Context) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<(), E>> + Send + 'static,
     {
-        self.0.start(Arc::new(move |change, context| Box::pin(listener(change, context))))
+        self.0.start(Arc::new(move |call, context| Box::pin(listener(call, context))))
     }
 
     /// Idempotently stop future callbacks and return the end. A running callback keeps running.
@@ -149,20 +217,20 @@ where
         self.0.closed()
     }
 
-    /// End the watch `cancelled` when `signal` aborts; installed once.
-    pub fn observe_cancellation(&self, signal: &AbortSignal) -> Result<(), E> {
-        self.0.observe_cancellation(signal)
+    /// End the watch `aborted` when `signal` aborts; installed once.
+    pub fn observe_abort(&self, signal: &AbortSignal) -> Result<(), E> {
+        self.0.observe_abort(signal)
     }
 
-    /// End the watch `cancelled`: its acquisition context was cancelled.
-    pub fn cancel(&self) {
-        self.0.terminate(WatchEnd::Cancelled);
+    /// End the watch `aborted`: its acquisition context was aborted.
+    pub fn abort(&self) {
+        self.0.terminate(WatchEnd::Aborted);
     }
 
-    /// The source closed: end with `ended`, or with `failed` and the error when the source failed, at once, dropping
-    /// what is pending.
-    pub fn end(&self, failure: Option<E>) {
-        self.0.terminate(failure.map_or(WatchEnd::Ended, WatchEnd::Failed));
+    /// End the watch with `end` at once, dropping what is pending: the source closed (`Ended`), or failed for good
+    /// (`Failed`). A failure the source may recover from is a `Failed` call instead (`fail()`).
+    pub fn end(&self, end: WatchEnd<E>) {
+        self.0.terminate(end);
     }
 
     /// The source sends nothing more: deliver what is pending, then end `ended` after the running call returns.
@@ -170,10 +238,16 @@ where
         self.0.end_after_delivery();
     }
 
-    /// Queue the frame `change`: its ops turn the value before it into its value, and `retired` says the followed
-    /// document was retired, which the next call reports however many frames it folds.
-    pub fn advance(&self, change: WatchChange, context: Context) {
-        self.0.feed(|pending| pending.advance(change, context));
+    /// Queue the frame `call`. A value's ops turn the value before it into its value, and `retired` says the followed
+    /// document was retired, which the next value call reports however many frames it folds; a failure is `fail()`.
+    pub fn advance(&self, call: WatchCall<Json, E>, context: Context) {
+        self.0.feed(|pending| pending.advance(call, context));
+    }
+
+    /// Queue a recoverable failure: it replaces the pending frames (`value()` keeps the last delivered value), and the
+    /// first value after it arrives as `[["r", value]]`.
+    pub fn fail(&self, error: E, context: Context) {
+        self.0.feed(|pending| pending.fail(WatchCall::Failed { error }, context));
     }
 }
 
@@ -187,7 +261,7 @@ where
 
     fn start<F, Fut>(&self, listener: F) -> Result<(), E>
     where
-        F: Fn(WatchChange, Context) -> Fut + Send + Sync + 'static,
+        F: Fn(WatchCall<Json, E>, Context) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<(), E>> + Send + 'static,
     {
         Watch::start(self, listener)
@@ -202,9 +276,11 @@ where
     }
 }
 
+type NativeWatchLifecycle<T, E> = Lifecycle<T, NativeWatchCall<T, E>, E, NativePending<T, E>>;
+
 /// The watch handle of a native source: every value in order, one call each; past 100 pending values they collapse to
 /// one, `replace()` or by default the newest value. `detach` and `report` as for [`Watch`]. Cheap to clone.
-pub struct NativeWatch<T, E = ChordError>(Arc<Lifecycle<T, NativeWatchChange<T>, E, NativePending<T>>>);
+pub struct NativeWatch<T, E = ChordError>(Arc<NativeWatchLifecycle<T, E>>);
 
 impl<T, E> Clone for NativeWatch<T, E> {
     fn clone(&self) -> Self {
@@ -223,8 +299,8 @@ where
         report: impl Fn(&E) + Send + Sync + 'static,
         replace: Option<Replace<T>>,
     ) -> Self {
-        let pending = NativePending { values: VecDeque::new(), replace };
-        Self(Lifecycle::new(value, pending, Box::new(detach), Arc::new(report), native_value::<T>))
+        let pending = NativePending { values: VecDeque::new(), replace, failure: None };
+        Self(Lifecycle::new(value, pending, Box::new(detach), Arc::new(report), native_value::<T, E>))
     }
 
     pub fn value(&self) -> T {
@@ -234,10 +310,10 @@ where
     /// Install the sole serialized asynchronous listener. Delivery never runs inline.
     pub fn start<F, Fut>(&self, listener: F) -> Result<(), E>
     where
-        F: Fn(NativeWatchChange<T>, Context) -> Fut + Send + Sync + 'static,
+        F: Fn(NativeWatchCall<T, E>, Context) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<(), E>> + Send + 'static,
     {
-        self.0.start(Arc::new(move |change, context| Box::pin(listener(change, context))))
+        self.0.start(Arc::new(move |call, context| Box::pin(listener(call, context))))
     }
 
     pub fn stop(&self) -> impl Future<Output = WatchEnd<E>> + Send + use<T, E> {
@@ -249,16 +325,16 @@ where
         self.0.closed()
     }
 
-    pub fn observe_cancellation(&self, signal: &AbortSignal) -> Result<(), E> {
-        self.0.observe_cancellation(signal)
+    pub fn observe_abort(&self, signal: &AbortSignal) -> Result<(), E> {
+        self.0.observe_abort(signal)
     }
 
-    pub fn cancel(&self) {
-        self.0.terminate(WatchEnd::Cancelled);
+    pub fn abort(&self) {
+        self.0.terminate(WatchEnd::Aborted);
     }
 
-    pub fn end(&self, failure: Option<E>) {
-        self.0.terminate(failure.map_or(WatchEnd::Ended, WatchEnd::Failed));
+    pub fn end(&self, end: WatchEnd<E>) {
+        self.0.terminate(end);
     }
 
     /// The source sends nothing more: deliver what is pending, then end `ended` after the running call returns.
@@ -266,9 +342,10 @@ where
         self.0.end_after_delivery();
     }
 
-    /// Queue `value`, the source's new value.
+    /// Queue `value`, the source's new value; it replaces a pending failure.
     pub fn advance(&self, value: T, context: Context) {
         self.0.feed(|pending| {
+            pending.failure = None;
             if pending.values.len() >= MAX_PENDING_NATIVE_VALUES {
                 pending.values.clear();
                 let value = pending.replace.as_ref().map_or(value, |replace| replace());
@@ -276,6 +353,16 @@ where
             } else {
                 pending.values.push_back((value, context));
             }
+            true
+        });
+    }
+
+    /// Queue a recoverable failure: it replaces the pending values (`value()` keeps the last delivered value), and a
+    /// value after it replaces it.
+    pub fn fail(&self, error: E, context: Context) {
+        self.0.feed(|pending| {
+            pending.values.clear();
+            pending.failure = Some((error, context));
             true
         });
     }
@@ -292,7 +379,7 @@ where
 
     fn start<F, Fut>(&self, listener: F) -> Result<(), E>
     where
-        F: Fn(NativeWatchChange<T>, Context) -> Fut + Send + Sync + 'static,
+        F: Fn(NativeWatchCall<T, E>, Context) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<(), E>> + Send + 'static,
     {
         NativeWatch::start(self, listener)

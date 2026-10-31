@@ -438,7 +438,8 @@ pub struct Wake {
 #[derive(Clone, Debug, PartialEq)]
 pub enum TaskInspectionState {
     Running,
-    Ready {
+    /// The next scheduling pass reserves it; `migrates` when its definition is newer and has a migration.
+    Pending {
         migrates: bool,
     },
     Waiting {

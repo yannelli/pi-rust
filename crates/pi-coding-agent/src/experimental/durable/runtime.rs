@@ -6,16 +6,55 @@ use std::sync::{Arc, Mutex};
 
 use pi_ai::Message;
 use pi_chord::state::StateListener;
-use pi_chord::{BACKGROUND_CONTEXT, Unsubscribe};
+use pi_chord::{BACKGROUND_CONTEXT, Context, Unsubscribe};
+use pi_durable::ROOT_CONVERSATION_ID;
 use pi_durable::harness::types::{AgentState, ModelRef};
 use pi_durable::harness::{Conversation, EntryRange, Harness};
-use pi_durable::{CommitChange, ConversationId, ConversationQuery, Cursor, DurableResult, EntryRecord};
-use pi_durable::{ROOT_CONVERSATION_ID, session::DocumentState};
+use pi_durable::session::{CommitObserver, DocumentState, WatchEnd};
+use pi_durable::{
+    CommitChange, CommitPublication, ConversationId, ConversationQuery, Cursor, DurableResult, EntryRecord,
+};
 use serde_json::Value;
 use tokio::sync::watch;
 
 use super::controller::{ControllerState, DurableController};
 use crate::agent_session::ModelRuntime;
+
+/// Adds each conversation a commit stores, and fills in a conversation's title from its first input.
+struct ConversationList {
+    store: Arc<ViewStore>,
+    root_id: ConversationId,
+}
+
+impl CommitObserver for ConversationList {
+    fn advance(&self, publication: &CommitPublication, _context: &Context) -> DurableResult<()> {
+        let mut changed = false;
+        let mut conversations = self.store.current().conversations;
+        for change in &publication.changes {
+            match change {
+                CommitChange::Conversation(record) => {
+                    let label = label(self.root_id, record.id);
+                    conversations.push(ConversationSummary { id: record.id, label, title: None });
+                    changed = true;
+                }
+                CommitChange::Entry(entry) if entry.kind == "pi.user" => {
+                    let id = entry.conversation_id;
+                    if let Some(summary) = conversations.iter_mut().find(|s| s.id == id && s.title.is_none()) {
+                        summary.title = title_of(Some(entry));
+                        changed = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if changed {
+            self.store.update(|view| view.conversations = conversations);
+        }
+        Ok(())
+    }
+
+    fn end(&self, _end: WatchEnd) {}
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModelSummary {
@@ -218,36 +257,12 @@ pub(crate) async fn open_view(
         tasks: None,
     }));
     let unsubscribe = follow_conversation(&store, &view_state);
-    // Subagents appear as their conversations are created. A commit listener only records.
-    let commits = store.clone();
-    let unsubscribe_commits = harness.session().subscribe_commits(move |publication, _| {
-        let mut changed = false;
-        let mut conversations = commits.current().conversations;
-        for change in &publication.changes {
-            match change {
-                CommitChange::Conversation(record) => {
-                    let summary = ConversationSummary { id: record.id, label: label(root_id, record.id), title: None };
-                    conversations.push(summary);
-                    changed = true;
-                }
-                CommitChange::Entry(entry) if entry.kind == "pi.user" => {
-                    let id = entry.conversation_id;
-                    if let Some(summary) = conversations.iter_mut().find(|s| s.id == id && s.title.is_none()) {
-                        summary.title = title_of(Some(entry));
-                        changed = true;
-                    }
-                }
-                _ => {}
-            }
-        }
-        if changed {
-            commits.update(|view| view.conversations = conversations);
-        }
-        Ok(())
-    })?;
+    // Subagents appear as their conversations are created. A commit observer only records.
+    let observer = Arc::new(ConversationList { store: store.clone(), root_id });
+    let commit_observation = harness.session().observe_commits(observer)?;
 
     let state = ControllerState::new(harness.clone(), model_runtime.clone(), store.clone(), root, view_state);
-    state.set_subscriptions(unsubscribe, unsubscribe_commits);
+    state.set_subscriptions(unsubscribe, commit_observation);
     let controller = DurableController::start(state);
     let saved = agent_of(&store.current().conversation).model;
     match saved {

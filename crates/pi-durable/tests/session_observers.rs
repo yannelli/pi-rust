@@ -4,11 +4,16 @@
 #[path = "support/mod.rs"]
 mod support;
 
+#[path = "session_observers/commits.rs"]
+mod commits;
+
 use std::sync::{Arc, LazyLock, Mutex, Weak};
 
-use pi_chord::{AbortController, ChordError, Context, Json, WatchChange, with_abort_signal};
+use pi_chord::{AbortController, ChordError, Context, Json, with_abort_signal};
 use pi_durable::documents::*;
-use pi_durable::session::{Observation, Observer, Session, SessionHooks, SessionOptions, Tx, create_session};
+use pi_durable::session::{
+    Observation, Observer, Session, SessionHooks, SessionOptions, Tx, WatchCall, WatchEnd, create_session,
+};
 use pi_durable::*;
 use support::*;
 
@@ -64,9 +69,10 @@ fn open() -> Opened {
 
 #[derive(Clone, Debug, PartialEq)]
 enum Call {
-    /// A change, and whether it came inside the storage's `adopt`.
-    Advance(WatchChange, bool),
-    End(Option<String>),
+    /// A value call, and whether it came inside the storage's `adopt`.
+    Advance(ValueCall, bool),
+    /// The end's kind and error.
+    End(&'static str, Option<String>),
 }
 
 /// An observer that records each call, and whether it ran inside the storage's `adopt`.
@@ -76,13 +82,13 @@ struct Recorder {
 }
 
 impl Observer for Recorder {
-    fn advance(&self, change: &WatchChange, _context: &Context) -> DurableResult<()> {
-        self.calls.lock().unwrap().push(Call::Advance(change.clone(), self.storage.adopting()));
+    fn advance(&self, call: &WatchCall, _context: &Context) -> DurableResult<()> {
+        self.calls.lock().unwrap().push(Call::Advance(ValueCall::of(call), self.storage.adopting()));
         Ok(())
     }
 
-    fn end(&self, failure: Option<DurableError>) {
-        self.calls.lock().unwrap().push(Call::End(failure.map(|error| error.to_string())));
+    fn end(&self, end: WatchEnd) {
+        self.calls.lock().unwrap().push(Call::End(end.kind(), end.error().map(ToString::to_string)));
     }
 }
 
@@ -101,15 +107,15 @@ struct Calls<A, E>(A, E);
 
 impl<A, E> Observer for Calls<A, E>
 where
-    A: Fn(&WatchChange) -> DurableResult<()> + Send + Sync,
-    E: Fn(Option<DurableError>) + Send + Sync,
+    A: Fn(&ValueCall) -> DurableResult<()> + Send + Sync,
+    E: Fn(WatchEnd) + Send + Sync,
 {
-    fn advance(&self, change: &WatchChange, _context: &Context) -> DurableResult<()> {
-        (self.0)(change)
+    fn advance(&self, call: &WatchCall, _context: &Context) -> DurableResult<()> {
+        (self.0)(&ValueCall::of(call))
     }
 
-    fn end(&self, failure: Option<DurableError>) {
-        (self.1)(failure)
+    fn end(&self, end: WatchEnd) {
+        (self.1)(end)
     }
 }
 
@@ -118,7 +124,7 @@ fn ops(text: &str) -> Vec<pi_chord::delta::Op> {
 }
 
 fn advance(value: Json, ops: Vec<pi_chord::delta::Op>, retired: bool) -> Call {
-    Call::Advance(WatchChange { value, ops, retired }, true)
+    Call::Advance(ValueCall { value, ops, retired }, true)
 }
 
 async fn add(session: &Session, by: i64) {
@@ -187,7 +193,7 @@ async fn advances_when_memory_adopts_a_held_commit_before_anything_is_stored() {
     let options = CommitOptions::deferred(Some(f64::INFINITY));
     test.session.commit_with_options(change, &context(), options).await.unwrap();
     assert_eq!(test.storage.commit_count(), stored);
-    let held = Call::Advance(WatchChange::new(counter(5), ops(r#"[["s",["count"],5]]"#)), false);
+    let held = Call::Advance(ValueCall::new(counter(5), ops(r#"[["s",["count"],5]]"#)), false);
     assert_eq!(recorder.calls(), [held]);
     observation.detach();
     test.session.close(&context()).await.unwrap();
@@ -239,7 +245,7 @@ async fn ends_once_when_the_session_closes() {
     let recorder = recorder(&test.storage);
     observe(&test.session, recorder.clone()).await.unwrap();
     test.session.close(&context()).await.unwrap();
-    assert_eq!(recorder.calls(), [Call::End(None)]);
+    assert_eq!(recorder.calls(), [Call::End("ended", None)]);
 }
 
 #[tokio::test]
@@ -254,7 +260,7 @@ async fn ends_with_the_error_that_failed_the_session() {
     let error = test.session.commit(change, &context()).await.unwrap_err();
     assert!(error.to_string().contains("disk gone"));
     test.session.closed().await;
-    assert_eq!(recorder.calls(), [Call::End(Some("disk gone".into()))]);
+    assert_eq!(recorder.calls(), [Call::End("failed", Some("disk gone".into()))]);
 }
 
 #[tokio::test]
@@ -262,14 +268,14 @@ async fn reports_a_throwing_observer_detaches_it_and_ends_it_with_the_error_the_
     let test = open();
     add(&test.session, 1).await;
     let ends: Ends = Arc::default();
-    let throwing = Calls(|_: &WatchChange| Err(DurableError::error("observer bug")), record_end(&ends));
+    let throwing = Calls(|_: &ValueCall| Err(DurableError::error("observer bug")), record_end(&ends));
     observe(&test.session, Arc::new(throwing)).await.unwrap();
     let healthy = recorder(&test.storage);
     observe(&test.session, healthy.clone()).await.unwrap();
     add(&test.session, 1).await;
     add(&test.session, 1).await;
     assert_eq!(test.reports.listener_errors(), ["observer bug"]);
-    assert_eq!(*ends.lock().unwrap(), [Some("observer bug".to_owned())]);
+    assert_eq!(*ends.lock().unwrap(), [("listener_error", Some("observer bug".to_owned()))]);
     assert_eq!(healthy.calls().len(), 2);
     assert_eq!(test.session.snapshot(&SESSION_COUNTER, (), &context()).await.unwrap(), Some(counter(3)));
     test.session.close(&context()).await.unwrap();
@@ -355,20 +361,20 @@ async fn recreate(session: &Session, id: ConversationId) {
     session.commit(change, &context()).await.unwrap();
 }
 
-type Ends = Arc<Mutex<Vec<Option<String>>>>;
+type Ends = Arc<Mutex<Vec<(&'static str, Option<String>)>>>;
 
-fn record_end(ends: &Ends) -> impl Fn(Option<DurableError>) + Send + Sync + use<> {
+fn record_end(ends: &Ends) -> impl Fn(WatchEnd) + Send + Sync + use<> {
     let sink = ends.clone();
-    move |failure| sink.lock().unwrap().push(failure.map(|error| error.to_string()))
+    move |end| sink.lock().unwrap().push((end.kind(), end.error().map(ToString::to_string)))
 }
 
 #[tokio::test]
 async fn gets_nothing_more_of_the_commit_once_it_fails_on_the_retirement_and_pins_nothing_for_the_recreation() {
     let (test, id) = retiring().await;
-    let (changes, ends): (Arc<Mutex<Vec<WatchChange>>>, Ends) = Default::default();
+    let (changes, ends): (Arc<Mutex<Vec<ValueCall>>>, Ends) = Default::default();
     let sink = changes.clone();
     let failing = Calls(
-        move |change: &WatchChange| {
+        move |change: &ValueCall| {
             sink.lock().unwrap().push(change.clone());
             Err(DurableError::error("observer bug"))
         },
@@ -376,9 +382,9 @@ async fn gets_nothing_more_of_the_commit_once_it_fails_on_the_retirement_and_pin
     );
     let observation = observe_conversation(&test.session, id, Arc::new(failing)).await;
     recreate(&test.session, id).await;
-    let retirement = WatchChange { value: observation.value.clone(), ops: Vec::new(), retired: true };
+    let retirement = ValueCall { value: observation.value.clone(), ops: Vec::new(), retired: true };
     assert_eq!(*changes.lock().unwrap(), [retirement]);
-    assert_eq!(*ends.lock().unwrap(), [Some("observer bug".to_owned())]);
+    assert_eq!(*ends.lock().unwrap(), [("listener_error", Some("observer bug".to_owned()))]);
     assert_eq!(test.reports.listener_errors(), ["observer bug"]);
     assert_eq!(test.session.document_cache_sizes().attached, 0);
     observation.detach();
@@ -389,11 +395,11 @@ async fn gets_nothing_more_of_the_commit_once_it_fails_on_the_retirement_and_pin
 #[tokio::test]
 async fn gets_nothing_more_of_the_commit_once_it_detaches_in_the_retirement_call_and_pins_nothing() {
     let (test, id) = retiring().await;
-    let (changes, ends): (Arc<Mutex<Vec<WatchChange>>>, Ends) = Default::default();
+    let (changes, ends): (Arc<Mutex<Vec<ValueCall>>>, Ends) = Default::default();
     let attached: Arc<Mutex<Option<Observation>>> = Arc::default();
     let (sink, own) = (changes.clone(), attached.clone());
     let detaching = Calls(
-        move |change: &WatchChange| {
+        move |change: &ValueCall| {
             sink.lock().unwrap().push(change.clone());
             if let Some(observation) = own.lock().unwrap().as_ref() {
                 observation.detach();
@@ -405,7 +411,7 @@ async fn gets_nothing_more_of_the_commit_once_it_detaches_in_the_retirement_call
     let observation = observe_conversation(&test.session, id, Arc::new(detaching)).await;
     *attached.lock().unwrap() = Some(observation.clone());
     recreate(&test.session, id).await;
-    let retirement = WatchChange { value: observation.value.clone(), ops: Vec::new(), retired: true };
+    let retirement = ValueCall { value: observation.value.clone(), ops: Vec::new(), retired: true };
     assert_eq!(*changes.lock().unwrap(), [retirement]);
     assert_eq!(test.session.document_cache_sizes().attached, 0);
     test.session.close(&context()).await.unwrap();
@@ -419,7 +425,7 @@ async fn gets_nothing_of_the_commit_when_another_observer_s_call_detached_it_fir
     let second: Arc<Mutex<Option<Observation>>> = Arc::default();
     let other = second.clone();
     let first_observer = Calls(
-        move |_: &WatchChange| {
+        move |_: &ValueCall| {
             if let Some(observation) = other.lock().unwrap().as_ref() {
                 observation.detach();
             }
