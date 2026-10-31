@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.8.6] - 2026-10-31
+
+### Fixed
+
+- **coding-agent:** preserve active tool order (upstream b9e3eef6c) ([6a624ab](https://github.com/yannelli/pi-rust/commit/6a624ab0f587b38cb6065d2c13334ad1a1ed26f2))
+
 ## [0.8.5] - 2026-10-30
 
 ### Added
