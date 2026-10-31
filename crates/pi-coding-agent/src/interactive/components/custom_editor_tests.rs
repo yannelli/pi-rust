@@ -76,7 +76,11 @@ impl AutocompleteProvider for Commands {
 #[test]
 fn pages_an_open_autocomplete_menu_before_pasting_an_image_with_the_same_key() {
     // Bind both explicitly: the paste default is Alt+V on Windows and WSL.
-    let _keys = setup_with(&[("tui.select.pageDown", "ctrl+v"), ("app.clipboard.pasteImage", "ctrl+v")]);
+    let _keys = setup_with(&[
+        ("tui.select.pageDown", "ctrl+v"),
+        ("tui.select.pageUp", "alt+v"),
+        ("app.clipboard.pasteImage", "ctrl+v"),
+    ]);
     let tui = tui();
     let editor = editor(&tui);
     let pastes = Rc::new(Cell::new(0));
@@ -93,6 +97,8 @@ fn pages_an_open_autocomplete_menu_before_pasting_an_image_with_the_same_key() {
     }
     assert!(editor.editor().is_showing_autocomplete());
     editor.handle_input("\x16");
+    editor.handle_input("\x16");
+    editor.handle_input("\x1bv");
     editor.handle_input("\r");
 
     assert_eq!(pastes.get(), 0);

@@ -192,6 +192,13 @@ fn defers_viewport_keys_to_a_focused_list_instead_of_scrolling_the_transcript() 
     h.wait();
     assert_eq!(list.borrow().get_selected_item().map(|item| item.value.clone()).as_deref(), Some("item-3"));
     assert_eq!(h.tui.viewport_top(), top_before);
+    h.send("\x1b[102;6u");
+    h.wait();
+    assert!(h.tui.has_overlay(), "search opens while the list captures viewport keys");
+    let search_top = h.tui.viewport_top();
+    h.send("\x1b[5~");
+    h.wait();
+    assert!(h.tui.viewport_top() < search_top);
     h.stop();
 }
 

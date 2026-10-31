@@ -109,7 +109,7 @@ export async function scenario(t) {
 		tui.start();
 		tui.renderNow();
 		const top = tui.viewportTop;
-		send(PAGE_DOWN);
+		send(CTRL_HOME);
 		const deferred = { deferredSeen: seen.length, deferredTopKept: tui.viewportTop === top };
 		box.capture = false;
 		send(PAGE_UP);
