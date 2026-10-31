@@ -156,8 +156,9 @@ async fn respond(socket: &mut TcpStream, state: &State, request: &Value) -> Valu
                 json!({"name": exposed_name(&tool.name), "description": tool.description, "inputSchema": clean_schema(&tool.schema)})
             });
             let mut page = json!({"tools": listed.collect::<Vec<_>>()});
-            if start + PAGE_TOOLS < tools.len() {
-                page["nextCursor"] = json!((start + PAGE_TOOLS).to_string());
+            let next = start.saturating_add(PAGE_TOOLS);
+            if next < tools.len() {
+                page["nextCursor"] = json!(next.to_string());
             }
             page
         }
@@ -251,6 +252,9 @@ mod tests {
         assert!(first.contains(r#""nextCursor":"64""#) && first.contains("pi_t63") && !first.contains("pi_t64"));
         let (_, second) = post(&bridge, &bridge.token, list(json!("64"))).await;
         assert!(second.contains("pi_t64") && !second.contains("nextCursor"), "{second}");
+        let (status, past) = post(&bridge, &bridge.token, list(json!(usize::MAX.to_string()))).await;
+        assert_eq!(status, 200);
+        assert!(past.contains(r#""tools":[]"#) && !past.contains("nextCursor"), "{past}");
     }
 
     #[tokio::test]
