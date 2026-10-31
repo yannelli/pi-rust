@@ -175,11 +175,11 @@ mod file {
         path: PathBuf,
         stop: Arc<AtomicBool>,
         thread: Option<JoinHandle<()>>,
-        _owner: Option<fs::File>,
+        _owner: Option<super::owner::Owner>,
     }
 
     impl FileLock {
-        fn serve(listener: UnixListener, path: PathBuf, owner: Option<fs::File>) -> io::Result<Self> {
+        fn serve(listener: UnixListener, path: PathBuf, owner: Option<super::owner::Owner>) -> io::Result<Self> {
             let stop = Arc::new(AtomicBool::new(false));
             let flag = stop.clone();
             let thread = std::thread::Builder::new().name("chord2-lock".into()).spawn(move || {
