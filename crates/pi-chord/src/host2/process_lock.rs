@@ -10,6 +10,9 @@ use crate::host2::errors::ChordErrorCode;
 use crate::sync::lock;
 
 #[cfg(unix)]
+mod owner;
+
+#[cfg(unix)]
 pub use file::socket_file_lock;
 
 /// A held lock. Dropping it (or [`ProcessLock::release`]) releases it; so does the end of the process.
@@ -120,6 +123,7 @@ mod file {
     /// abstract sockets are missing.
     pub async fn socket_file_lock(name: &str, dir: &Path) -> ChordResult<ProcessLock> {
         let path = lock_socket_path(dir, &format!("chord2-{}.sock", lock_key(name)))?;
+        let owner = super::owner::claim(name, &path)?;
         let listener = loop {
             match UnixListener::bind(&path) {
                 Ok(listener) => break listener,
@@ -135,7 +139,7 @@ mod file {
                 Err(error) => return Err(io_failure(error)),
             }
         };
-        let held = FileLock::serve(listener, path).map_err(io_failure)?;
+        let held = FileLock::serve(listener, path, owner).map_err(io_failure)?;
         Ok(ProcessLock { _held: Held::File { _socket: held } })
     }
 
@@ -171,10 +175,11 @@ mod file {
         path: PathBuf,
         stop: Arc<AtomicBool>,
         thread: Option<JoinHandle<()>>,
+        _owner: Option<super::owner::Owner>,
     }
 
     impl FileLock {
-        fn serve(listener: UnixListener, path: PathBuf) -> io::Result<Self> {
+        fn serve(listener: UnixListener, path: PathBuf, owner: Option<super::owner::Owner>) -> io::Result<Self> {
             let stop = Arc::new(AtomicBool::new(false));
             let flag = stop.clone();
             let thread = std::thread::Builder::new().name("chord2-lock".into()).spawn(move || {
@@ -187,7 +192,7 @@ mod file {
                     }
                 }
             })?;
-            Ok(Self { path, stop, thread: Some(thread) })
+            Ok(Self { path, stop, thread: Some(thread), _owner: owner })
         }
     }
 

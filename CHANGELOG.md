@@ -2,6 +2,16 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.8.8] - 2026-10-31
+
+### Added
+
+- **extensions:** native renderers, prepareArguments, oauth builtin, settings.set, auth.login ([833a01f](https://github.com/yannelli/pi-rust/commit/833a01fb8648c1f58ce3b1136c480ff0b7dfa029))
+
+### Fixed
+
+- **extensions:** reserve acpRegistryUrl from settings.set ([614c0ae](https://github.com/yannelli/pi-rust/commit/614c0ae5f432b8e78a01cb6ddd28491cb6ac0dfc))
+
 ## [0.8.7] - 2026-10-31
 
 ### Added
