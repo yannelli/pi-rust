@@ -14,7 +14,7 @@ use crate::entries::{ASSISTANT_ENTRY, RESET_ENTRY, TypedEntryDraft};
 use crate::errors::{DurableError, DurableResult};
 use crate::harness::agent::add_tools;
 use crate::harness::inbox::{BoundaryAt, apply_boundary, prepare_boundary};
-use crate::harness::live::{LIVE_DOC, LiveState, SlotStatus, ToolSlot, end_run};
+use crate::harness::live::{LIVE_DOC, LiveState, RunEnd, RunFailureReason, SlotStatus, ToolSlot, end_run};
 use crate::harness::scheduler::TaskRuntime;
 use crate::harness::tool::{ToolTaskInput, append_tool_result, harness_error, tool_task};
 use crate::harness::types::{ToolControl, ToolExecutionMode};
@@ -22,7 +22,7 @@ use crate::ids::{ConversationId, EntryId, TaskId};
 use crate::models::DeferredCancelOptions;
 use crate::session::Tx;
 use crate::tasks::TaskOptions;
-use crate::types::{DraftHead, HostCallback, ReportFrom, SubmissionSettlement, TaskOutcome, TaskRecord, TaskState};
+use crate::types::{DraftHead, HostCallback, ReportFrom, TaskOutcome, TaskRecord, TaskState};
 
 /// A tool task for call `call_id`, owned by the generation.
 async fn create_tool_task(tx: &Tx, owner: TaskId, assistant: EntryId, call_id: String) -> DurableResult<TaskId> {
@@ -162,7 +162,7 @@ async fn finish_tool_round(
         }
         let live = tx.doc(&LIVE_DOC, conversation_id).await?;
         let now = core.now();
-        let done = SubmissionSettlement::Done { answer: assistant };
+        let done = RunEnd::Done { answer: assistant };
         if let Some(handoff) = handoff {
             // The handoff's reset precedes every queued item, so queued writes and selected steers land in its context.
             let message = Message::User(UserMessage { content: UserContent::Text(handoff), timestamp: now as i64 });
@@ -178,15 +178,15 @@ async fn finish_tool_round(
             let placed = apply_boundary(&tx, &mut boundary, BoundaryAt::Final, now).await?;
             end_live(&tx, &live, owner, done)?;
             if !placed.users.is_empty() {
-                super::start_run(&tx, conversation_id, &live, placed.users).await?;
+                super::start_run(&tx, conversation_id, &live, placed.users, false).await?;
             }
         } else {
             let placed = apply_boundary(&tx, &mut boundary, BoundaryAt::PostTools, now).await?;
             if placed.reset {
                 // The queued reset cut the run's context before an answer.
-                end_live(&tx, &live, owner, unanswered("reset", None))?;
+                end_live(&tx, &live, owner, unanswered(RunFailureReason::Reset, None))?;
                 if !placed.users.is_empty() {
-                    super::start_run(&tx, conversation_id, &live, placed.users).await?;
+                    super::start_run(&tx, conversation_id, &live, placed.users, true).await?;
                 }
             } else {
                 let successor = create_generation(&tx, conversation_id).await?;
@@ -207,14 +207,9 @@ async fn finish_tool_round(
     runtime.commit(change, context).await
 }
 
-fn end_live(
-    tx: &Tx,
-    live: &crate::session::Draft<LiveState>,
-    owner: TaskId,
-    settlement: SubmissionSettlement,
-) -> DurableResult<()> {
+fn end_live(tx: &Tx, live: &crate::session::Draft<LiveState>, owner: TaskId, end: RunEnd) -> DurableResult<()> {
     let mut state = live.get()?;
-    end_run(tx, &mut state, owner, settlement)?;
+    end_run(tx, &mut state, owner, end)?;
     live.set(&state)
 }
 
@@ -262,6 +257,6 @@ async fn abort_in(
         let result = harness_error("aborted", &format!("Tool {} was aborted", call.name));
         append_tool_result(tx, conversation_id, &call, &result, now, None).await?;
     }
-    end_run(tx, &mut live, owner, unanswered("aborted", None))?;
+    end_run(tx, &mut live, owner, unanswered(RunFailureReason::Aborted, None))?;
     draft.set(&live)
 }

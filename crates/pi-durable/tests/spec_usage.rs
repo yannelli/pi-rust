@@ -363,6 +363,29 @@ async fn spawn(tx: &Tx, conversation_id: ConversationId, name: &str) -> DurableR
     configure(tx, child.id, &change).await
 }
 
+fn render(_: &TranscriptView) {}
+
+/// Section 9.3: a client's transcript over the windowed view.
+async fn transcript(conversation: Conversation, context: &Context) -> DurableResult<ConversationWatch> {
+    let pages = conversation.clone();
+    let load: EntryLoader = Arc::new(move |range: EntryRange, limit: usize, context: Context| {
+        let pages = pages.clone();
+        futures::FutureExt::boxed(async move { pages.entries(range, limit, None, &context).await })
+    });
+    let transcript = Arc::new(ConversationTranscript::new(load, None)?);
+    let watch = conversation.watch(context, None).await?;
+    render(transcript.merge(&watch.value())?.as_ref());
+    let merging = transcript.clone();
+    watch.start(move |pi_chord::WatchChange { value, .. }, _| {
+        let merged = merging.merge(&value).map(|view| render(&view));
+        async move { merged }
+    })?;
+    // A marker scrolled into view:
+    render(&*transcript.load_earlier(context).await?);
+    // Reconnect after a drop:
+    conversation.watch(context, transcript.resume()).await
+}
+
 /// Section 4: table reads before the first table write; documents stay usable.
 async fn table_rules(session: &Session, conversation_id: ConversationId, context: &Context) -> DurableResult<()> {
     let change = move |tx: Tx| async move {

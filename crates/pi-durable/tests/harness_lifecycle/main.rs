@@ -363,7 +363,7 @@ async fn publishes_no_frame_to_states_and_watches_from_a_commit_that_settles_dur
     let doc_state = harness.document_state(&notes, (), &context()).await.unwrap().unwrap();
     let doc_watch = harness.watch_doc(&notes, (), &context()).await.unwrap().unwrap();
     let view_state = root.view_state(&context()).await.unwrap();
-    let view_watch = root.watch(&context()).await.unwrap();
+    let view_watch = root.watch(&context(), None).await.unwrap();
     let graph_state = harness.task_graph(&context()).await.unwrap();
     let graph_watch = harness.watch_task_graph(&context()).await.unwrap();
     let frames = Arc::new(Mutex::new(Vec::<&'static str>::new()));

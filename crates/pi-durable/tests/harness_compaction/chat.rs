@@ -337,22 +337,15 @@ impl Chat {
     }
 }
 
-pub type Events = Arc<Mutex<Vec<Value>>>;
-
-/// Record every event of the root conversation as upstream JSON.
-pub async fn listen(chat: &Chat) -> (AgentEventStream, Events) {
-    let stream = watch_events(&chat.harness, chat.root.id, &ctx()).await.unwrap();
-    let events = Events::default();
-    let sink = events.clone();
-    stream
-        .start(move |pi_chord::NativeWatchChange { value: batch }, _| {
-            sink.lock().unwrap().extend(batch.iter().map(Value::from));
-            async { Ok(()) }
-        })
-        .unwrap();
-    (stream, events)
+/// Every view of the root conversation from now on, unfolded.
+pub async fn views(chat: &Chat) -> super::support::live_support::History {
+    super::support::live_support::view_history(&chat.harness, chat.root.id).await
 }
 
-pub fn event_types(events: &Events) -> Vec<String> {
-    events.lock().unwrap().iter().map(|event| event["type"].as_str().unwrap_or_default().to_owned()).collect()
+/// The `pi.live` value of the root conversation's late watch.
+pub async fn watched_live(chat: &Chat) -> Value {
+    let watch = chat.root.watch(&ctx(), None).await.unwrap();
+    let live = watch.value().to_serde()["docs"]["pi.live"].clone();
+    watch.stop().await;
+    live
 }

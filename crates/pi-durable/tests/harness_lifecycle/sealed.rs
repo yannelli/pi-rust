@@ -74,7 +74,7 @@ async fn leaves_no_mount_behind_a_watch_acquisition_cancelled_on_the_line() {
     let find = storage.hold_find_document();
     let controller = AbortController::new();
     let (watching, watch_context) = (root.clone(), with_signal(&controller));
-    let view_watch = tokio::spawn(async move { watching.watch(&watch_context).await.map(|_| ()) });
+    let view_watch = tokio::spawn(async move { watching.watch(&watch_context, None).await.map(|_| ()) });
     find.entered().await;
     controller.abort(Some(ChordError::error("cancelled")));
     find.release();
@@ -198,7 +198,7 @@ async fn rejects_conversation_and_harness_operations_once_close_begins_inspect_q
             "watch",
             op({
                 let (r, c) = (r.clone(), c.clone());
-                async move { r.watch(&c).await }
+                async move { r.watch(&c, None).await }
             }),
         ),
         (
@@ -402,7 +402,7 @@ async fn completes_reads_queued_at_the_seal_and_rejects_queued_waits_and_acquisi
             "watch",
             op({
                 let (r, c) = (r.clone(), c.clone());
-                async move { r.watch(&c).await }
+                async move { r.watch(&c, None).await }
             }),
         ),
         (

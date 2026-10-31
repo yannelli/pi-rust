@@ -18,7 +18,9 @@ use crate::documents::encode;
 use crate::errors::{DurableError, DurableResult};
 use crate::harness::compaction::{CompactionInput, create_compaction, select_cut};
 use crate::harness::inbox::{BoundaryAt, append_user, apply_boundary, prepare_boundary};
-use crate::harness::live::{DeferredPoll, LIVE_DOC, LiveGeneration, PROGRESS_COMMIT, RetryState, end_run};
+use crate::harness::live::{
+    DeferredPoll, LIVE_DOC, LiveGeneration, PROGRESS_COMMIT, RetryState, RunEnd, RunFailureReason, end_run,
+};
 use crate::harness::partial_changes::{PartialChanges, PartialCommit};
 use crate::harness::scheduler::TaskRuntime;
 use crate::harness::types::{CompactionReason, ModelRef, UserInput};
@@ -28,7 +30,7 @@ use crate::ids::{EntryId, TaskId};
 use crate::models::{DeferredFetchOptions, SimpleStreamOptions};
 use crate::session::Tx;
 use crate::timers::Disarm;
-use crate::types::{SubmissionSettlement, TaskRecord};
+use crate::types::TaskRecord;
 
 const DEFAULT_POLL_AFTER_MS: f64 = 5000.0;
 
@@ -404,7 +406,7 @@ pub(super) async fn classify(
         let text = message.error_message.clone().unwrap_or_else(|| {
             format!("Model response ended with stop reason {}", stop_reason_text(message.stop_reason))
         });
-        super::end_failed_run(&tx, &runtime_, failure, unanswered("model_error", Some(&text))).await?;
+        super::end_failed_run(&tx, &runtime_, failure, unanswered(RunFailureReason::ModelError, Some(&text))).await?;
         Ok(super::failed(&text, "model_error"))
     };
     runtime.commit(change, context).await
@@ -461,10 +463,10 @@ async fn answer(runtime: &TaskRuntime, message: AssistantMessage, context: &Cont
             return Ok(result);
         }
         let mut state = live.get()?;
-        end_run(&tx, &mut state, owner, SubmissionSettlement::Done { answer: entry.id })?;
+        end_run(&tx, &mut state, owner, RunEnd::Done { answer: entry.id })?;
         live.set(&state)?;
         if !placed.users.is_empty() {
-            super::start_run(&tx, conversation_id, &live, placed.users).await?;
+            super::start_run(&tx, conversation_id, &live, placed.users, false).await?;
         }
         Ok(result)
     };

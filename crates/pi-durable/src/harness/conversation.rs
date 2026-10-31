@@ -178,8 +178,13 @@ impl Conversation {
         self.harness.0.views.state(self.id, context).await
     }
 
-    /// A serialized exact-frame watch of the [`super::ConversationView`].
-    pub async fn watch(&self, context: &Context) -> DurableResult<ConversationWatch> {
-        self.harness.0.views.watch(self.id, context).await
+    /// A serialized exact-frame watch of the [`super::ConversationView`]. Its `entries` are a window over the
+    /// transcript as `window` says: the newest 50 by default, then appends, dropping the oldest past 100.
+    pub async fn watch(
+        &self,
+        context: &Context,
+        window: Option<super::ConversationWindow>,
+    ) -> DurableResult<ConversationWatch> {
+        self.harness.0.views.watch(self.id, context, window).await
     }
 }

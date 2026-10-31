@@ -1,4 +1,4 @@
-//! The task graph (spec section 9.5): every live task of the Session with its durable status, kept in step with
+//! The task graph (spec section 9.4): every live task of the Session with its durable status, kept in step with
 //! commit publications (upstream `harness/task-graph.ts`).
 
 use std::collections::HashMap;

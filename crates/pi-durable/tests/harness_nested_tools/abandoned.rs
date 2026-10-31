@@ -10,9 +10,10 @@ use pi_durable::storage::sqlite::open_sqlite_storage;
 use pi_durable::*;
 use serde_json::{Value, json};
 
-use super::calls::{cancelled, listen, live_value};
+use super::calls::{cancelled, live_value};
 use super::support::Deferred;
 use super::support::harness_support::*;
+use super::support::live_support::{ended_at, nested_result_of, nested_results, slots_of, start_order, view_history};
 use super::support::task_support::{aborted, eventually};
 use super::{add_tool, args, call, done, echo_tool, nested_text, result_text, results, run_once, tool, tool_tasks};
 
@@ -199,17 +200,6 @@ async fn rejects_explicit_keys_that_are_empty_have_a_slash_are_proto_or_are_posi
     harness.close(&ctx()).await.unwrap();
 }
 
-fn start_end_events(events: &[Value]) -> Vec<(String, String, Value)> {
-    let tools =
-        events.iter().filter(|event| event["type"] == "tool_execution_start" || event["type"] == "tool_execution_end");
-    tools
-        .map(|event| {
-            let kind = event["type"].as_str().unwrap().to_owned();
-            (kind, event["toolCallId"].as_str().unwrap().to_owned(), event["parentToolCallId"].clone())
-        })
-        .collect()
-}
-
 #[tokio::test]
 async fn runs_nested_calls_of_nested_calls_and_ends_them_children_first() {
     let setup = chat_setup(Default::default());
@@ -230,24 +220,19 @@ async fn runs_nested_calls_of_nested_calls_and_ends_them_children_first() {
     );
     setup.faux.set_responses([call("outer"), done()]);
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &setup).await;
-    let (stream, events) = listen(&harness, &root).await;
+    let history = view_history(&harness, root.id).await;
     root.submit(SubmissionDraft::input("go"), &ctx()).await.unwrap().wait(&ctx()).await.unwrap();
     harness.wait_for_idle(&ctx()).await.unwrap();
-    stream.stop().await;
+    history.detach();
     assert_eq!(result_text(&results(&all_entries(&root).await)[0]), "echo deep");
     let tasks = tool_tasks(&harness).await;
     assert_eq!((tasks[1].owner, tasks[2].owner), (Some(tasks[0].id), Some(tasks[1].id)));
-    let expected = [
-        ("tool_execution_start", "c1", Value::Null),
-        ("tool_execution_start", "c1/1", json!("c1")),
-        ("tool_execution_start", "c1/1/x", json!("c1/1")),
-        ("tool_execution_end", "c1/1/x", json!("c1/1")),
-        ("tool_execution_end", "c1/1", json!("c1")),
-        ("tool_execution_end", "c1", Value::Null),
-    ];
-    let expected: Vec<(String, String, Value)> =
-        expected.into_iter().map(|(a, b, c)| (a.into(), b.into(), c)).collect();
-    assert_eq!(start_end_events(&events.lock().unwrap()), expected);
+    let states = history.live();
+    assert_eq!(start_order(&states), ["c1", "c1/1", "c1/1/x"]);
+    assert_eq!(slots_of(&states, "c1/1/x").into_iter().flatten().next().unwrap()["parentCallId"], "c1/1");
+    // Children end first.
+    assert!(ended_at(&states, "c1/1/x").unwrap() < ended_at(&states, "c1/1").unwrap());
+    assert!(ended_at(&states, "c1/1").unwrap() < ended_at(&states, "c1").unwrap());
     assert_eq!(live_value(&harness, &root).await, json!({}));
     harness.close(&ctx()).await.unwrap();
 }
@@ -291,30 +276,38 @@ async fn reports_the_output_of_several_running_nested_calls_and_shows_them_to_a_
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &setup).await;
     let submission = root.submit(SubmissionDraft::input("go"), &ctx()).await.unwrap();
     futures::join!(running_one.wait(), running_two.wait());
-    let (stream, events) = listen(&harness, &root).await;
-    let slots: Vec<(Value, Value)> = stream.snapshot["nestedTools"]
-        .to_serde()
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|slot| (slot["callId"].clone(), slot["status"].clone()))
-        .collect();
+    let watch = root.watch(&ctx(), None).await.unwrap();
+    let nested_of = |view: &Value| view["docs"]["pi.live"]["nestedTools"].as_array().cloned().unwrap_or_default();
+    let initial = watch.value().to_serde();
+    let slots: Vec<(Value, Value)> =
+        nested_of(&initial).iter().map(|slot| (slot["callId"].clone(), slot["status"].clone())).collect();
     assert_eq!(slots, [(json!("c1/1"), json!("running")), (json!("c1/2"), json!("running"))]);
-    let updates = || -> Vec<(Value, Value)> {
-        let events = events.lock().unwrap();
-        let outputs =
-            events.iter().filter(|event| event["type"] == "tool_execution_update" && event.get("output").is_some());
-        outputs.map(|event| (event["toolCallId"].clone(), event["output"].clone())).collect()
-    };
+    // Each value's operations rebuild the next one, the late subscriber's starting value included.
+    let replayed = Arc::new(Mutex::new(watch.value()));
+    let outputs: Arc<Mutex<Vec<(Value, Value)>>> = Arc::default();
+    let (rebuilt, sink) = (replayed.clone(), outputs.clone());
+    watch
+        .start(move |change: pi_chord::WatchChange, _| {
+            let mut current = rebuilt.lock().unwrap();
+            *current = pi_chord::delta::apply_immutable(Some(&*current), &change.ops).unwrap();
+            assert_eq!(*current, change.value);
+            let slots = nested_of(&change.value.to_serde());
+            let output = |index: usize| slots.get(index).map_or(Value::Null, |slot| slot["output"].clone());
+            sink.lock().unwrap().push((output(0), output(1)));
+            async { Ok(()) }
+        })
+        .unwrap();
+    let last = || outputs.lock().unwrap().last().cloned();
     // The second slot writes first, so a wrong slot index in the update path would show.
     wrote_two.resolve();
-    eventually(|| async { updates().len() == 1 }).await;
+    eventually(|| async { last().is_some_and(|(_, two)| two == "two\n") }).await;
+    assert_eq!(last(), Some((Value::Null, json!("two\n"))));
     wrote_one.resolve();
-    eventually(|| async { updates().len() == 2 }).await;
+    eventually(|| async { last().is_some_and(|(one, _)| one == "one\n") }).await;
+    assert_eq!(last(), Some((json!("one\n"), json!("two\n"))));
     release.resolve();
     submission.wait(&ctx()).await.unwrap();
-    stream.stop().await;
-    assert_eq!(updates(), [(json!("c1/2"), json!({ "set": "two\n" })), (json!("c1/1"), json!({ "set": "one\n" }))]);
+    watch.stop().await;
     harness.close(&ctx()).await.unwrap();
 }
 
@@ -399,15 +392,13 @@ async fn loses_the_running_output_of_a_nested_call_made_with_progress_false_when
     );
     setup.faux.set_responses([call("batch"), done()]);
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &setup).await;
-    let (stream, events) = listen(&harness, &root).await;
+    let history = view_history(&harness, root.id).await;
+    let nested = nested_results(&harness);
     root.submit(SubmissionDraft::input("go"), &ctx()).await.unwrap().wait(&ctx()).await.unwrap();
     harness.wait_for_idle(&ctx()).await.unwrap();
-    stream.stop().await;
+    history.detach();
     // The abort's result is built from the slot, which never got the output.
-    let events = events.lock().unwrap().clone();
-    let end =
-        events.iter().find(|event| event["type"] == "tool_execution_end" && event["toolCallId"] == "c1/1").unwrap();
-    let result = &end["result"];
+    let result = &nested_result_of(&history.live(), &nested, "c1/1").unwrap();
     assert_eq!(result["isError"], true);
     assert!(result.get("structuredOutput").is_none() && result.get("details").is_none(), "{result}");
     let codes: Vec<Value> =

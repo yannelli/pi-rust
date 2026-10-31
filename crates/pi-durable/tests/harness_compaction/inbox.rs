@@ -112,23 +112,32 @@ async fn loses_an_application_edit_placed_while_a_compaction_summarizes() {
 }
 
 #[tokio::test]
-async fn keeps_the_kept_entries_mounted_in_the_conversation_view() {
+async fn appends_the_summary_to_the_conversation_view_in_place_its_head_on_a_kept_entry() {
     let chat = open(OpenOptions::default()).await;
     chat.history().await;
     let state = Arc::new(chat.root.view_state(&ctx()).await.unwrap());
+    let before = state.value().get("entries").unwrap().to_serde().as_array().unwrap().clone();
     chat.faux.summary(summary());
     let task = chat.compact(None).await;
     chat.result(task).await;
     let probe = state.clone();
     wait_for(move || {
-        let first =
-            probe.value().get("entries").and_then(|entries| entries.to_serde()[0]["kind"].as_str().map(str::to_owned));
-        async move { first.as_deref() == Some("pi.compaction") }
+        let entries = probe.value().get("entries").map(|entries| entries.to_serde()).unwrap_or_default();
+        let last = entries.as_array().and_then(|entries| entries.last()).map(|entry| entry["kind"].clone());
+        async move { last == Some(json!("pi.compaction")) }
     })
     .await;
     let mounted = state.value().get("entries").unwrap().to_serde();
-    let entries = chat.root.context(&ctx(), None).await.unwrap().entries;
-    assert_eq!(Json::from(mounted), Json::from(serde_json::to_value(entries).unwrap()));
+    let mounted = mounted.as_array().unwrap();
+    // Nothing leaves the window: the summary is appended where it was written.
+    assert_eq!(&mounted[..before.len()], &before[..]);
+    assert_eq!(
+        pi_chord::Json::from(Value::from(mounted.clone())),
+        pi_chord::Json::from(serde_json::to_value(all_entries(&chat.root).await).unwrap())
+    );
+    let head = chat.root.context(&ctx(), None).await.unwrap().head.unwrap();
+    assert_eq!(mounted.last().unwrap(), &serde_json::to_value(&head).unwrap());
+    assert!(mounted.iter().any(|entry| entry["id"] == json!(head.head)));
     state.dispose().unwrap();
     chat.close().await;
 }

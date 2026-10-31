@@ -357,7 +357,7 @@ pub async fn admit_submission(
             _ => AdmissionStatus::Queued,
         };
         if !placed.users.is_empty() {
-            start_run(tx, conversation_id, &live_draft, placed.users).await?;
+            start_run(tx, conversation_id, &live_draft, placed.users, false).await?;
         }
         return Ok(Admission { id: record.id, status });
     }
@@ -377,7 +377,7 @@ pub async fn admit_submission(
         SubmissionDraft::Input { content, entry, .. } => {
             let entry = append_input(tx, conversation_id, content, entry.as_ref(), now).await?;
             let record = tx.create_submission(create(SubmissionStatus::Placed, Some(entry))).await?;
-            start_run(tx, conversation_id, &live_draft, vec![record.id]).await?;
+            start_run(tx, conversation_id, &live_draft, vec![record.id], false).await?;
             Ok(Admission { id: record.id, status: AdmissionStatus::Placed })
         }
     }

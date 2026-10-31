@@ -160,22 +160,8 @@ async fn stores_exactly_what_callers_and_events_get_without_the_model_s_output_a
         }
         Ok(())
     });
-    let stream = watch_events(&harness, root.id, &ctx()).await.unwrap();
-    let ends = Arc::new(Mutex::new(Vec::new()));
-    let sink = ends.clone();
-    stream
-        .start(move |pi_chord::NativeWatchChange { value: batch }, _| {
-            for event in batch {
-                if event["type"] == "tool_execution_end".into() && event.get("parentToolCallId").is_some() {
-                    sink.lock().unwrap().push(Value::from(&event["result"]));
-                }
-            }
-            async { Ok(()) }
-        })
-        .unwrap();
     go(&root).await;
     harness.wait_for_idle(&ctx()).await.unwrap();
-    stream.stop().await;
     harness.close(&ctx()).await.unwrap();
 
     let received: Vec<Value> =
@@ -184,8 +170,8 @@ async fn stores_exactly_what_callers_and_events_get_without_the_model_s_output_a
     assert_eq!((received[1]["structuredOutput"].clone(), received[1]["isError"].clone()), (Value::Null, json!(false)));
     assert!(received[1].as_object().unwrap().contains_key("structuredOutput"));
     assert!(received[0].get("output").is_none());
+    // A client reads a live caller's nested results from the same documents.
     assert_eq!(*stored.lock().unwrap(), received);
-    assert_eq!(*ends.lock().unwrap(), received);
 }
 
 #[tokio::test]

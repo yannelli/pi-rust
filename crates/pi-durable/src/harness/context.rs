@@ -247,18 +247,6 @@ fn settle(mut settled: Vec<Message>, open: Vec<Message>) -> (Vec<Message>, Vec<M
     }
 }
 
-/// The raw active entries within captured bounds, without deriving model context.
-pub async fn active_entries(
-    storage: &dyn Storage,
-    conversation_id: ConversationId,
-    bounds: Option<&ContextBounds>,
-    context: &Context,
-) -> DurableResult<Vec<EntryRecord>> {
-    let Some(bounds) = bounds else { return Ok(Vec::new()) };
-    let entries = scan_range(storage, range_query(conversation_id, bounds), context).await?;
-    Ok(select_active(bounds.head.as_ref(), &entries))
-}
-
 fn range_query(conversation_id: ConversationId, bounds: &ContextBounds) -> EntryQuery {
     let mut query = EntryQuery::new(conversation_id);
     query.max_entry_id = Some(bounds.tail);

@@ -228,8 +228,9 @@ async fn aborts_a_subagent_run_with_its_parent_s_conversation_rejecting_the_wait
     tool_wait.wait().await;
     let child = child.lock().unwrap().unwrap();
     harness.conversation(child, &context()).await.unwrap().unwrap().wait_for_idle(&context()).await.unwrap();
-    let live = harness.snapshot(&LIVE_DOC, child, &context()).await.unwrap().unwrap();
-    assert_eq!(serde_json::to_value(live).unwrap(), json!({}));
+    let live = serde_json::to_value(harness.snapshot(&LIVE_DOC, child, &context()).await.unwrap().unwrap()).unwrap();
+    assert_eq!(live.as_object().unwrap().keys().collect::<Vec<_>>(), ["runFailure"]);
+    assert_eq!(live["runFailure"]["reason"], json!("aborted"));
     let inspection = harness.inspect(&context()).await.unwrap();
     assert!(inspection.submissions.iter().all(|record| record.conversation_id != child));
     harness.wait_for_idle(&context()).await.unwrap();

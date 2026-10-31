@@ -134,63 +134,45 @@ async fn treats_a_length_stop_as_an_ordinary_answer_not_an_overflow() {
     chat.close().await;
 }
 
-async fn until_event(events: &Events, kind: &'static str) {
-    let seen = events.clone();
-    wait_for(move || {
-        let found = event_types(&seen).iter().any(|seen| seen == kind);
-        async move { found }
-    })
-    .await;
-}
-
 #[tokio::test]
-async fn orders_the_events_of_a_summary_placed_at_once() {
+async fn places_a_summary_at_once_in_the_commit_that_ends_its_compaction() {
     let chat = open(OpenOptions::default()).await;
     chat.history().await;
-    let (stream, events) = listen(&chat).await;
+    let views = views(&chat).await;
     chat.faux.summary(summary());
     let task = chat.compact(None).await;
     chat.result(task).await;
-    until_event(&events, "compaction_end").await;
-    let types = event_types(&events);
-    let end = types.iter().position(|kind| kind == "compaction_end").unwrap();
-    assert_eq!(
-        types[end - 2..end + 3],
-        ["message_start", "message_end", "compaction_end", "submission", "usage_changed"]
-    );
-    stream.stop().await;
+    views.detach();
+    let (states, values) = (views.live(), views.views());
+    let listed = states.iter().position(|state| state.get("compactions").is_some()).unwrap();
+    let ended = states
+        .iter()
+        .enumerate()
+        .position(|(index, state)| index > listed && state.get("compactions").is_none())
+        .unwrap();
+    let before = values[ended - 1]["entries"].as_array().unwrap().len();
+    let appended: Vec<Value> = values[ended]["entries"].as_array().unwrap()[before..].to_vec();
+    assert_eq!(appended.iter().map(|entry| entry["kind"].clone()).collect::<Vec<_>>(), [json!("pi.compaction")]);
     chat.close().await;
 }
 
 #[tokio::test]
-async fn puts_compaction_start_last_in_the_batch_of_the_preparation_commit() {
+async fn lists_a_background_compaction_in_the_preparation_commit_with_the_entries_it_appends() {
     let chat = open(window(2000)).await;
     chat.history().await;
     chat.set_policy(background());
-    let stream = watch_events(&chat.harness, chat.root.id, &ctx()).await.unwrap();
-    let batches: Arc<Mutex<Vec<Vec<String>>>> = Arc::default();
-    let sink = batches.clone();
-    stream
-        .start(move |pi_chord::NativeWatchChange { value: batch }, _| {
-            let types = batch.iter().map(|event| Value::from(event)["type"].as_str().unwrap_or_default().to_owned());
-            sink.lock().unwrap().push(types.collect());
-            async { Ok(()) }
-        })
-        .unwrap();
+    let views = views(&chat).await;
     // A new section makes the preparation commit append a system entry next to the compaction's status.
     add_section(&chat.setup.registry, "extra", "extra", None);
     chat.faux.summary(gated(&Deferred::default(), summary(), None));
     chat.turn(&text("u4", 100), "a4").await;
-    let has_start = |batch: &Vec<String>| batch.iter().any(|kind| kind == "compaction_start");
-    let seen = batches.clone();
-    wait_for(move || {
-        let found = seen.lock().unwrap().iter().any(has_start);
-        async move { found }
-    })
-    .await;
-    let batch = batches.lock().unwrap().iter().find(|batch| has_start(batch)).cloned().unwrap();
-    assert_eq!(batch, ["message_start", "message_end", "compaction_start"]);
-    stream.stop().await;
+    wait_for(|| async { chat.live().await.get("compactions").is_some() }).await;
+    views.detach();
+    let (states, values) = (views.live(), views.views());
+    let started = states.iter().position(|state| state.get("compactions").is_some()).unwrap();
+    let before = values[started - 1]["entries"].as_array().unwrap().len();
+    let appended: Vec<Value> = values[started]["entries"].as_array().unwrap()[before..].to_vec();
+    assert_eq!(appended.iter().map(|entry| entry["kind"].clone()).collect::<Vec<_>>(), [json!("pi.system")]);
     let task = chat.compaction_tasks().await.remove(0);
     chat.harness.abort_task(task.id, &ctx()).await.unwrap();
     chat.close().await;

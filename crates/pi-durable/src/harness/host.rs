@@ -194,7 +194,7 @@ impl Harness {
         &self.0.session
     }
 
-    /// A disposable read-only Chord state of every live task (spec section 9.5); its value is a [`super::TaskGraph`].
+    /// A disposable read-only Chord state of every live task (spec section 9.4); its value is a [`super::TaskGraph`].
     pub async fn task_graph(&self, context: &Context) -> DurableResult<crate::session::DocumentState> {
         self.0.task_graph.state(context).await
     }
@@ -206,15 +206,17 @@ impl Harness {
 
     /// Attach a synchronous [`Observer`] to a conversation's [`super::ConversationView`], atomically on the Session
     /// line, for adapters: `advance` gets each next revision with its ops as memory adopts the commit, so it only
-    /// records it. `context` governs only the attachment.
+    /// records it. `window` as for [`super::Conversation::watch`]; each observer has its own. `context` governs only
+    /// the attachment.
     pub async fn observe_conversation(
         &self,
         id: ConversationId,
         observer: Arc<dyn Observer>,
         context: &Context,
+        window: Option<super::ConversationWindow>,
     ) -> DurableResult<Observation> {
         self.0.session.assert_usable()?;
-        self.0.views.observe(id, observer, context).await
+        self.0.views.observe(id, observer, context, window).await
     }
 
     /// Attach a synchronous [`Observer`] to the [`super::TaskGraph`], as `observe_conversation()` does to a view. A

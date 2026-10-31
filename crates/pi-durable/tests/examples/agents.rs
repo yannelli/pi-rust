@@ -4,9 +4,8 @@ use std::collections::BTreeSet;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use pi_ai::{Message, StopReason};
+use pi_ai::StopReason;
 use pi_durable::harness::agent::configure;
-use pi_durable::harness::watch_events;
 use pi_durable::storage::sqlite::open_sqlite_storage;
 use pi_durable::tasks::TaskOptions;
 use pi_durable::testing::faux::{
@@ -29,7 +28,7 @@ fn pause(ms: u64) -> tokio::time::Sleep {
 }
 
 #[tokio::test]
-async fn ex21_late_join_sees_running_output_in_the_view_and_the_event_snapshot() {
+async fn ex21_late_join_sees_running_output_in_the_view_and_follows_it() {
     let pacing = RegisterFauxProviderOptions {
         tokens_per_second: Some(40.0),
         token_size: Some(FauxTokenSize { min: Some(1), max: Some(1) }),
@@ -59,59 +58,52 @@ async fn ex21_late_join_sees_running_output_in_the_view_and_the_event_snapshot()
         async move { ready }
     })
     .await;
-    let kinds: Vec<String> = view
-        .value()
-        .get("entries")
-        .unwrap()
-        .to_serde()
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|e| e["kind"].as_str().unwrap().to_owned())
-        .collect();
-    assert_eq!(kinds, ["pi.user", "pi.system", "pi.assistant"]);
-    let stream = watch_events(&harness, root.id, &ctx()).await.unwrap();
-    let tools = stream.snapshot.get("tools").unwrap().to_serde();
-    assert_eq!((&tools[0]["name"], &tools[0]["status"]), (&json!("count"), &json!("running")));
-    let output = Arc::new(Mutex::new(tools[0]["output"].as_str().unwrap_or_default().to_owned()));
-    let (lines, sink, joined): (Lines, _, _) = (Lines::default(), output.clone(), output.clone());
-    let log = lines.clone();
-    stream
-        .start(move |pi_chord::NativeWatchChange { value: events }, _| {
-            for event in events.iter().map(Json::to_serde) {
-                let mut output = sink.lock().unwrap();
-                match (event["type"].as_str().unwrap_or_default(), &event["output"]) {
-                    ("tool_execution_update", change) if change.is_object() => {
-                        // Rebuild the output from the joiner's copy: `set`, or trim then append.
-                        if let Some(set) = change["set"].as_str() {
-                            *output = set.to_owned();
-                        } else {
-                            let trim = change["trimStart"].as_u64().unwrap_or(0) as usize;
-                            *output = format!("{}{}", &output[trim..], change["append"].as_str().unwrap_or(""));
-                        }
-                    }
-                    (kind, _) => log.lock().unwrap().push(kind.to_owned()),
+    view.dispose().unwrap();
+    let watch = root.watch(&ctx(), None).await.unwrap();
+    let joined = watch.value();
+    assert_eq!(kinds(&joined), ["pi.user", "pi.system", "pi.assistant"]);
+    let tool = slot(&joined).unwrap();
+    assert_eq!((&tool["name"], &tool["status"]), (&json!("count"), &json!("running")));
+    let (outputs, ended): (Lines, Lines) =
+        (Lines::new(Mutex::new(vec![tool["output"].as_str().unwrap().to_owned()])), Lines::default());
+    let (shown, last) = (outputs.clone(), ended.clone());
+    watch
+        .start(move |pi_chord::WatchChange { value, .. }, _| {
+            match slot(&value) {
+                Some(tool) if tool["status"] == "running" => {
+                    shown.lock().unwrap().push(tool["output"].as_str().unwrap_or_default().to_owned())
                 }
+                _ if value.get("docs").and_then(|docs| docs.get("pi.live")?.get("run")).is_none() => {
+                    *last.lock().unwrap() = kinds(&value)
+                }
+                _ => {}
             }
             async { Ok(()) }
         })
         .unwrap();
     submission.wait(&ctx()).await.unwrap();
     harness.wait_for_idle(&ctx()).await.unwrap();
-    // Events arrive asynchronously; the end event follows the last output update.
-    let ended = || lines.lock().unwrap().iter().any(|kind| kind == "tool_execution_end");
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-    while !ended() && tokio::time::Instant::now() < deadline {
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
-    stream.stop().await;
-    view.dispose().unwrap();
-    // Events come from commits: output written in the commit that ends the tool has no update event, as upstream.
+    let done = ended.clone();
+    wait_for(move || {
+        let ready = !done.lock().unwrap().is_empty();
+        async move { ready }
+    })
+    .await;
+    watch.stop().await;
+    // The view takes every commit: output written in the commit that ends the tool shows only as its result.
     let expected: String = (1..=10).map(|n| format!("{n}\n")).collect();
-    let joined = joined.lock().unwrap().clone();
-    assert!(joined.starts_with("1\n") && expected.starts_with(&joined), "{joined:?}");
-    assert!(lines.lock().unwrap().iter().any(|kind| kind == "tool_execution_end"));
+    let outputs = outputs.lock().unwrap().clone();
+    assert!(outputs[0].starts_with("1\n"), "{outputs:?}");
+    assert!(outputs.windows(2).all(|pair| pair[1].starts_with(&pair[0])), "{outputs:?}");
+    assert!(outputs.iter().all(|output| expected.starts_with(output.as_str())), "{outputs:?}");
+    let kinds = ended.lock().unwrap().clone();
+    assert_eq!(kinds, ["pi.user", "pi.system", "pi.assistant", "pi.tool-result", "pi.assistant"]);
     harness.close(&ctx()).await.unwrap();
+}
+
+fn kinds(view: &Json) -> Vec<String> {
+    let entries = view.get("entries").map(Json::to_serde).unwrap_or_default();
+    entries.as_array().into_iter().flatten().map(|entry| entry["kind"].as_str().unwrap().to_owned()).collect()
 }
 
 /// The text of an assistant answer entry, read through the tool's transaction.
@@ -162,7 +154,28 @@ fn subagent_extension() -> Extension {
     Extension::new("subagent").tool(tool.with_replay(ToolReplay::Safe))
 }
 
-/// Attach to a conversation's events, logging answers and tool starts, and attach to children it reports.
+/// Log an assistant entry's text and tool calls.
+fn print(indent: &str, entry: &Value, lines: &Lines) {
+    let message = &entry["model"][0];
+    if entry["kind"] != "pi.assistant" || message["role"] != "assistant" {
+        return;
+    }
+    for block in message["content"].as_array().into_iter().flatten() {
+        match block["type"].as_str() {
+            Some("text") if block["text"] != "" => {
+                lines.lock().unwrap().push(format!("{indent}assistant: {}", block["text"].as_str().unwrap()))
+            }
+            Some("toolCall") => lines.lock().unwrap().push(format!(
+                "{indent}tool {}({})",
+                block["name"].as_str().unwrap(),
+                block["arguments"]
+            )),
+            _ => {}
+        }
+    }
+}
+
+/// Watch a conversation's view, logging new entries, and attach to the children its running calls name.
 fn attach(
     harness: Harness,
     id: ConversationId,
@@ -172,39 +185,32 @@ fn attach(
 ) -> futures::future::BoxFuture<'static, ()> {
     Box::pin(async move {
         attached.lock().unwrap().insert(id);
-        let stream = watch_events(&harness, id, &ctx()).await.unwrap();
-        let listener = move |pi_chord::NativeWatchChange::<Vec<Json>> { value: events }, _| {
+        let conversation = harness.conversation(id, &ctx()).await.unwrap().unwrap();
+        let watch = conversation.watch(&ctx(), None).await.unwrap();
+        let newest_of = |view: &Value| view["entries"].as_array().and_then(|e| e.last()).and_then(|e| e["id"].as_u64());
+        let newest = Arc::new(Mutex::new(newest_of(&watch.value().to_serde()).unwrap_or(0)));
+        let listener = move |pi_chord::WatchChange { value, .. }: pi_chord::WatchChange, _| {
             let (harness, indent, lines, attached) = (harness.clone(), indent.clone(), lines.clone(), attached.clone());
+            let value = value.to_serde();
+            let since = *newest.lock().unwrap();
+            for entry in value["entries"].as_array().into_iter().flatten() {
+                if entry["id"].as_u64().is_some_and(|id| id > since) {
+                    print(&indent, entry, &lines);
+                }
+            }
+            *newest.lock().unwrap() = newest_of(&value).unwrap_or(since).max(since);
             async move {
-                for event in events.iter().map(Json::to_serde) {
-                    match event["type"].as_str().unwrap_or_default() {
-                        "message_end" if event["entry"]["kind"] == "pi.assistant" => {
-                            let message: Message = serde_json::from_value(event["entry"]["model"][0].clone()).unwrap();
-                            let text = text_of(Some(&message)).unwrap_or_default();
-                            if !text.is_empty() {
-                                lines.lock().unwrap().push(format!("{indent}assistant: {text}"));
-                            }
-                        }
-                        "tool_execution_start" => lines.lock().unwrap().push(format!(
-                            "{indent}tool {}({})",
-                            event["toolName"].as_str().unwrap(),
-                            event["args"]
-                        )),
-                        "tool_execution_update" => {
-                            let child = event["details"]["conversationId"].as_u64().map(ConversationId);
-                            if let Some(child) = child.filter(|child| !attached.lock().unwrap().contains(child)) {
-                                attach(harness.clone(), child, format!("{indent}  "), lines.clone(), attached.clone())
-                                    .await;
-                            }
-                        }
-                        _ => {}
+                for slot in value["docs"]["pi.live"]["tools"].as_array().into_iter().flatten() {
+                    let child = slot["details"]["conversationId"].as_u64().map(ConversationId);
+                    if let Some(child) = child.filter(|child| !attached.lock().unwrap().contains(child)) {
+                        attach(harness.clone(), child, format!("{indent}  "), lines.clone(), attached.clone()).await;
                     }
                 }
                 Ok(())
             }
         };
-        stream.start(listener).unwrap();
-        std::mem::forget(stream); // Lives until the Harness closes, like the upstream script's streams.
+        watch.start(listener).unwrap();
+        std::mem::forget(watch); // Lives until the Harness closes, like the upstream script's watches.
     })
 }
 

@@ -62,7 +62,7 @@ async fn never_schedules_from_a_read_only_viewer() {
     root.context(&c, None).await.unwrap();
     root.entries(EntryRange::default(), 10, None, &c).await.unwrap();
     root.view_state(&c).await.unwrap().dispose().unwrap();
-    root.watch(&c).await.unwrap().stop().await;
+    root.watch(&c, None).await.unwrap().stop().await;
     harness.task_graph(&c).await.unwrap().dispose().unwrap();
     harness.watch_task_graph(&c).await.unwrap().stop().await;
     flush().await;

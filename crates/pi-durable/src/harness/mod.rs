@@ -7,7 +7,6 @@ pub mod context;
 mod conversation;
 mod core;
 pub mod define;
-pub mod events;
 pub mod generation;
 mod host;
 pub mod inbox;
@@ -26,10 +25,13 @@ pub mod task_graph;
 pub mod telemetry;
 pub mod tool;
 pub mod tool_registration;
+pub mod transcript;
+mod transcript_state;
 pub mod types;
 pub mod usage;
 pub(crate) mod util;
 pub mod view;
+mod view_window;
 
 pub use agent::{AGENT_DOC, INSTRUCTIONS_KEY, add_tools, configure, create_agent};
 pub use conversation::{Conversation, CreateOptions, EntryRange};
@@ -37,7 +39,6 @@ pub use core::{
     ConversationCreatedHook, EnvBuilder, EnvTarget, HarnessOptions, NowFn, ReportFn, WakeFn, default_harness_identity,
 };
 pub use define::*;
-pub use events::{AgentEvent, AgentEventStream, watch_events};
 pub use host::{ConversationInit, Harness};
 pub use registry::{Registry, RegistryReader, RegistrySnapshot, builtin_tasks, create_registry};
 pub use scheduler::{ConversationHandle, HookApi, IndexSizes, TaskRuntime};
@@ -48,5 +49,6 @@ pub use task_graph::{TaskGraph, TaskGraphWatch};
 pub use telemetry::DURABLE_TELEMETRY_SCHEMA;
 pub use tool::{ExecuteToolOptions, ToolExecutionApi};
 pub use tool_registration::*;
+pub use transcript::{ConversationTranscript, EntryLoader, TranscriptItem, TranscriptView};
 pub use types::*;
-pub use view::{ConversationView, ConversationWatch};
+pub use view::{ConversationView, ConversationWatch, ConversationWindow};

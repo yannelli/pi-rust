@@ -124,7 +124,7 @@ async fn ends_everything_with_the_first_error_the_call_later_calls_waits_watches
     let waiter = harness.clone();
     let idle = tokio::spawn(async move { waiter.wait_for_idle(&context()).await });
     let watch = harness.watch_doc(&LIVE_DOC, root.id, &context()).await.unwrap().unwrap();
-    let stream = watch_events(&harness, root.id, &context()).await.unwrap();
+    let stream = root.watch(&context(), None).await.unwrap();
     stream.start(|_, _| async { Ok(()) }).unwrap();
 
     storage.fail_next_commit(DurableError::storage("disk gone"));

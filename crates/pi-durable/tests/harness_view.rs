@@ -23,9 +23,16 @@ const MOUNTED: [&str; 5] = ["pi.agent", "pi.inbox", "pi.live", "pi.provider", "p
 
 type Frames = Arc<Mutex<Vec<(Json, Vec<Op>)>>>;
 
-/// Start a watch of `conversation` that records its acquisition revision and every delivered frame.
 async fn record(conversation: &Conversation) -> (Json, Frames, ConversationWatch) {
-    let watch = conversation.watch(&context()).await.unwrap();
+    record_window(conversation, None).await
+}
+
+/// Start a watch of `conversation` that records its acquisition revision and every delivered frame.
+async fn record_window(
+    conversation: &Conversation,
+    window: Option<ConversationWindow>,
+) -> (Json, Frames, ConversationWatch) {
+    let watch = conversation.watch(&context(), window).await.unwrap();
     let acquired = watch.value();
     let frames: Frames = Arc::default();
     let sink = frames.clone();
@@ -45,8 +52,17 @@ async fn fresh(conversation: &Conversation) -> Json {
     value
 }
 
-/// The view as committed state defines it, read without any mount.
-async fn committed(harness: &Harness, conversation: &Conversation, record: &Json) -> Value {
+/// A freshly built view of `conversation` with `window`, for comparing with an advanced one.
+async fn fresh_window(conversation: &Conversation, window: ConversationWindow) -> Json {
+    let watch = conversation.watch(&context(), Some(window)).await.unwrap();
+    let value = watch.value();
+    watch.stop().await;
+    value
+}
+
+/// The view as committed state defines it, read without any mount: the newest `size` entries, the entry before
+/// them, and the built-in documents.
+async fn committed(harness: &Harness, conversation: &Conversation, record: &Json, size: usize) -> Value {
     let mut docs = JsonMap::new();
     let id = conversation.id;
     let values = [
@@ -61,8 +77,19 @@ async fn committed(harness: &Harness, conversation: &Conversation, record: &Json
             docs.insert(kind, value);
         }
     }
-    let entries = conversation.context(&context(), None).await.unwrap().entries;
-    json!({ "conversation": record.to_serde(), "entries": serde_json::to_value(entries).unwrap(), "docs": Json::object(docs).to_serde() })
+    let mut newest = conversation.entries(EntryRange::default(), size + 1, None, &context()).await.unwrap().items;
+    let before = if newest.len() > size { newest.pop().map(|entry| entry.id) } else { None };
+    newest.reverse();
+    let mut view = json!({ "conversation": record.to_serde(), "entries": serde_json::to_value(newest).unwrap() });
+    if let Some(before) = before {
+        view["before"] = json!(before);
+    }
+    view["docs"] = Json::object(docs).to_serde();
+    view
+}
+
+fn entry_count(view: &Value) -> usize {
+    view["entries"].as_array().unwrap().len()
 }
 
 /// Apply every frame's operations to the acquisition value, checking each delivered revision on the way.
@@ -81,13 +108,17 @@ fn ops_json(ops: &[Op]) -> Vec<Value> {
 
 #[path = "harness_view/more.rs"]
 mod more;
+#[path = "harness_view/ownership.rs"]
+mod ownership;
+#[path = "harness_view/window.rs"]
+mod window;
 
 async fn drained() {
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 }
 
 #[tokio::test]
-async fn hydrates_the_active_entries_and_the_built_in_documents() {
+async fn hydrates_the_newest_entries_and_the_built_in_documents() {
     let setup = chat_setup(RegisterFauxProviderOptions::default());
     setup.faux.set_responses([faux_assistant_message("hello", FauxMessageOptions::default())]);
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &setup).await;
@@ -99,6 +130,7 @@ async fn hydrates_the_active_entries_and_the_built_in_documents() {
         Json::from(view["entries"].clone()),
         Json::from(serde_json::to_value(all_entries(&root).await).unwrap())
     );
+    assert!(view.get("before").is_none());
     let mut keys: Vec<&str> = view["docs"].as_object().unwrap().keys().map(String::as_str).collect();
     keys.sort();
     assert_eq!(keys, MOUNTED);
@@ -137,8 +169,9 @@ async fn publishes_frames_whose_operations_rebuild_every_revision() {
     harness.wait_for_idle(&ctx()).await.unwrap();
     drained().await;
     let frames = frames.lock().unwrap().clone();
-    let expected = committed(&harness, &root, acquired.get("conversation").unwrap()).await;
-    assert_eq!(Json::from(replay(&acquired, &frames)), Json::from(expected));
+    let last = replay(&acquired, &frames);
+    let expected = committed(&harness, &root, acquired.get("conversation").unwrap(), entry_count(&last)).await;
+    assert_eq!(Json::from(last), Json::from(expected));
     let first = ops_json(&frames[0].1);
     assert!(
         first.iter().any(|op| op[0] == "p" && op[1] == json!(["entries"]) && op[4][0]["kind"] == "pi.user"),
@@ -179,7 +212,7 @@ async fn skips_commits_that_touch_nothing_mounted() {
 }
 
 #[tokio::test]
-async fn cuts_the_entries_at_a_head_marker_keeping_the_entries_from_its_head() {
+async fn keeps_head_markers_in_place_a_summary_and_a_reset_are_appended_entries() {
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &chat_setup(Default::default())).await;
     let id = root.id;
     let note = |kind: &'static str, head: Option<EntryId>| {
@@ -205,10 +238,19 @@ async fn cuts_the_entries_at_a_head_marker_keeping_the_entries_from_its_head() {
             entries.as_array().unwrap().iter().map(|entry| entry["kind"].as_str().unwrap().to_owned()).collect()
         })
         .collect();
-    assert_eq!(kinds, [vec!["summary", "b", "c"], vec!["summary", "b", "c", "d"], vec!["pi.reset"]]);
+    assert_eq!(
+        kinds,
+        [
+            vec!["a", "b", "c", "summary"],
+            vec!["a", "b", "c", "summary", "d"],
+            vec!["a", "b", "c", "summary", "d", "pi.reset"]
+        ]
+    );
     let summary = serde_json::to_value(&summary).unwrap();
-    assert_eq!(ops_json(&frames[0].1), [json!(["p", ["entries"], 0, 1, [summary]])]);
-    let expected = committed(&harness, &root, acquired.get("conversation").unwrap()).await;
+    assert_eq!(ops_json(&frames[0].1), [json!(["p", ["entries"], 3, 0, [summary]])]);
+    // The summary's `head` tells a renderer where the entries it summarizes end.
+    assert_eq!(frames[0].0.get("entries").unwrap().to_serde()[3]["head"], json!(b.id));
+    let expected = committed(&harness, &root, acquired.get("conversation").unwrap(), 6).await;
     assert_eq!(Json::from(replay(&acquired, &frames)), Json::from(expected));
     watch.stop().await;
     harness.close(&context()).await.unwrap();
@@ -220,6 +262,6 @@ async fn ends_states_and_watches_at_close_and_rejects_later_acquisition() {
     let (_, _, watch) = record(&root).await;
     harness.close(&context()).await.unwrap();
     watch.closed().await;
-    assert!(root.watch(&context()).await.is_err());
+    assert!(root.watch(&context(), None).await.is_err());
     assert!(root.view_state(&context()).await.is_err());
 }

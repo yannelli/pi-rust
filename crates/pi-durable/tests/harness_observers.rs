@@ -112,12 +112,12 @@ async fn observe_conversation_and_observe_task_graph_start_at_the_current_value_
     let harness = open_tasks(storage.clone(), Vec::new()).await.harness;
     let root = harness.root(&context(), CreateOptions::default()).await.unwrap();
     let view = recorder(&storage);
-    let view_observation = harness.observe_conversation(root.id, view.clone(), &context()).await.unwrap();
+    let view_observation = harness.observe_conversation(root.id, view.clone(), &context(), None).await.unwrap();
     let graph = recorder(&storage);
     let graph_observation = harness.observe_task_graph(graph.clone(), &context()).await.unwrap();
     assert_eq!(view_observation.value["conversation"]["id"], Json::from(root.id.get()));
     assert_eq!(graph_observation.value, Json::from(json!({ "tasks": {} })));
-    let watch = root.watch(&context()).await.unwrap();
+    let watch = root.watch(&context(), None).await.unwrap();
     let watched = Arc::new(Mutex::new(Vec::new()));
     let sink = watched.clone();
     watch
@@ -163,7 +163,7 @@ async fn observers_reject_on_a_closed_harness() {
     let harness = open_tasks(storage.clone(), Vec::new()).await.harness;
     let root = harness.root(&context(), CreateOptions::default()).await.unwrap();
     harness.close(&context()).await.unwrap();
-    let view = harness.observe_conversation(root.id, recorder(&storage), &context()).await;
+    let view = harness.observe_conversation(root.id, recorder(&storage), &context(), None).await;
     let graph = harness.observe_task_graph(recorder(&storage), &context()).await;
     assert!(view.unwrap_err().to_string().contains("Session is closed"));
     assert!(graph.unwrap_err().to_string().contains("Session is closed"));
