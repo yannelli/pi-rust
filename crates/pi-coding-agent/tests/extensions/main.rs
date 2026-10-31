@@ -14,6 +14,7 @@ mod loading;
 #[allow(dead_code)]
 mod mcp_fake;
 mod native;
+mod native_contracts;
 #[path = "../offline_guard/mod.rs"]
 mod offline_guard;
 mod provider;

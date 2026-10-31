@@ -139,15 +139,57 @@ async fn extension_stderr_keeps_its_label_through_a_path_alias() {
     .await;
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_native_panel_repaints_after_a_height_only_resize() {
+/// `package.json` of the native fixture, which pi runs as a child process.
+fn native_package() -> &'static str {
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/native/fixture.mjs");
     let package = serde_json::json!({"name": "native-fixture", "pi": {"native": [{
         "command": env!("CARGO_BIN_EXE_pi"),
         "args": [fixture.display().to_string()],
         "env": {"PI_JS_FORK": "1"},
     }]}});
-    let package: &'static str = Box::leak(package.to_string().into_boxed_str());
+    Box::leak(package.to_string().into_boxed_str())
+}
+
+/// The render width of the first visible line with `prefix`: the number after its last ` at `.
+fn drawn_width(screen: &str, prefix: &str) -> Option<usize> {
+    let line = screen.lines().find(|line| line.contains(prefix))?;
+    line.rsplit(" at ").next()?.split_whitespace().next()?.parse().ok()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_renderers_draw_tool_rows_messages_and_entries_in_the_transcript() {
+    let package = native_package();
+    local(async {
+        let ui = start(Options {
+            files: vec![(".pi/extensions/native/package.json", package)],
+            responses: vec![
+                FauxResponse::tool_call("c1", "native_draw", serde_json::json!({"text": 7})),
+                FauxResponse::text("drawn"),
+            ],
+            ..Options::default()
+        })
+        .await;
+        ui.submit("draw seven").await;
+        ui.wait_for("RESULT drew coerced 7 at").await;
+        ui.wait_for("CALL ").await;
+        let wide = drawn_width(&ui.screen(), "CALL ").expect("a call row with its width");
+        assert!((80..100).contains(&wide), "call width {wide}:\n{}", ui.screen());
+        ui.terminal.borrow_mut().resize(70, 30);
+        ui.wait_until("a narrower call row", |ui| drawn_width(&ui.screen(), "CALL ").is_some_and(|width| width < 70))
+            .await;
+        ui.submit("/native-card").await;
+        ui.wait_for("CARD teal card at").await;
+        ui.wait_for("NOTE plum at").await;
+        let screen = ui.screen();
+        assert_eq!(drawn_width(&screen, "CARD teal card at"), Some(70), "{screen}");
+        assert!(screen.contains("NOTE plum at 70 closed"), "{screen}");
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_native_panel_repaints_after_a_height_only_resize() {
+    let package = native_package();
     local(async {
         let ui =
             start(Options { files: vec![(".pi/extensions/native/package.json", package)], ..Options::default() }).await;
@@ -157,6 +199,80 @@ async fn a_native_panel_repaints_after_a_height_only_resize() {
         ui.wait_until("12 rows", |ui| ui.screen().contains("height 12")).await;
         ui.terminal.borrow_mut().resize(60, 12);
         ui.wait_until("60 columns", |ui| ui.screen().contains("width 60 height 12")).await;
+    })
+    .await;
+}
+
+fn entry_type(entry: &pi_coding_agent::session::Entry) -> Option<&str> {
+    entry.raw().get("customType").and_then(|kind| kind.as_str())
+}
+
+/// The core `anthropic` login of the test: no browser and no request.
+struct FakeAnthropic;
+
+#[async_trait::async_trait]
+impl pi_ai::auth::OAuthAuth for FakeAnthropic {
+    fn name(&self) -> &str {
+        "Anthropic (Claude Pro/Max)"
+    }
+
+    async fn login(
+        &self,
+        _: &dyn pi_ai::auth::AuthInteraction,
+        _: &pi_ai::auth::LoginOptions,
+        _: tokio_util::sync::CancellationToken,
+    ) -> pi_ai::auth::AuthResult<pi_ai::auth::OAuthCredential> {
+        let expires = pi_ai::now_ms() + 3_600_000;
+        Ok(pi_ai::auth::OAuthCredential {
+            refresh: "r".into(),
+            access: "slot-access".into(),
+            expires,
+            extra: Default::default(),
+        })
+    }
+
+    async fn refresh(
+        &self,
+        credential: &pi_ai::auth::OAuthCredential,
+        _: tokio_util::sync::CancellationToken,
+    ) -> pi_ai::auth::AuthResult<pi_ai::auth::OAuthCredential> {
+        Ok(credential.clone())
+    }
+
+    fn to_auth(&self, credential: &pi_ai::auth::OAuthCredential) -> pi_ai::auth::ModelAuth {
+        pi_ai::auth::ModelAuth { api_key: Some(credential.access.clone()), ..Default::default() }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_auth_login_runs_the_login_dialog_of_pi() {
+    let package = native_package();
+    let oauth: pi_ai::auth::OAuthLookup = std::sync::Arc::new(|id: &str| {
+        (id == "anthropic").then(|| std::sync::Arc::new(FakeAnthropic) as std::sync::Arc<dyn pi_ai::auth::OAuthAuth>)
+    });
+    local(async {
+        let files = vec![(".pi/extensions/native/package.json", package)];
+        let ui = start(Options { files, oauth: Some(oauth), ..Options::default() }).await;
+        ui.submit("/native-oauth").await;
+        ui.submit("/native-login").await;
+        let login = |ui: &crate::harness::Ui| {
+            let session = ui.session();
+            let manager = session.session_manager();
+            let entries = manager.entries();
+            let kind = |entry: &&_| entry_type(entry) == Some("native-login");
+            entries.iter().find(kind).and_then(|entry| entry.raw().get("data").cloned())
+        };
+        ui.wait_until("the login result", |ui| login(ui).is_some()).await;
+        let data = login(&ui).unwrap();
+        assert_eq!(data["slot"], serde_json::json!({"result": true}), "{data}");
+        assert_eq!(data["foreign"]["code"], serde_json::json!(-32602), "{data}");
+        let store = ui.session().model_runtime().credential_store();
+        let stored = store.read("anthropic-2").await.unwrap();
+        assert!(
+            matches!(stored, Some(pi_ai::auth::Credential::OAuth(ref credential)) if credential.access == "slot-access"),
+            "{stored:?}"
+        );
+        assert!(store.read("anthropic").await.unwrap().is_none());
     })
     .await;
 }

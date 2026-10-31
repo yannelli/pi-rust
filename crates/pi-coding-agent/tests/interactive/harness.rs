@@ -36,6 +36,8 @@ pub struct Options {
     /// The faux provider waits this long between streamed chunks.
     pub chunk_delay: Duration,
     pub run_limits: pi_coding_agent::agent_session::RunLimits,
+    /// The core OAuth flows by provider id in place of pi's.
+    pub oauth: Option<pi_ai::auth::OAuthLookup>,
 }
 
 impl Default for Options {
@@ -48,6 +50,7 @@ impl Default for Options {
             agent_dir: None,
             chunk_delay: Duration::ZERO,
             run_limits: Default::default(),
+            oauth: None,
         }
     }
 }
@@ -91,6 +94,7 @@ pub async fn start(options: Options) -> Ui {
         credentials: Some(Arc::new(InMemoryCredentialStore::new(BTreeMap::new()))),
         credential_env: Some(crate::offline_guard::credential_free_env()),
         run_limits: options.run_limits,
+        oauth: options.oauth.clone(),
         ..AppOptions::default()
     };
     let manager = SessionManager::create(&cwd, Some(&agent_dir.join("sessions")));

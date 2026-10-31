@@ -55,6 +55,8 @@ pub struct ModelRuntime {
     /// `pi.registerProvider` configs by provider id, applied over `models.json`.
     pub(super) extension_providers: RwLock<BTreeMap<String, serde_json::Value>>,
     pub(super) extension_oauth: Arc<RwLock<HashMap<String, Arc<dyn OAuthAuth>>>>,
+    /// The core OAuth flows by provider id, without the extension ones.
+    pub(super) builtin_oauth: OAuthLookup,
     /// `refreshModels`, `oauth.modifyModels`, `images`, and `classifiers` of extension providers.
     pub(super) extension_hooks: RwLock<HashMap<String, super::runtime_extension_ops::ExtensionHookState>>,
     pub(super) offline_refreshes: OfflineRefreshes,
@@ -80,6 +82,7 @@ impl ModelRuntime {
         let builtin = options.oauth.unwrap_or_else(|| Arc::new(|_: &str| None));
         let extension_oauth: Arc<RwLock<HashMap<String, Arc<dyn OAuthAuth>>>> = Arc::default();
         let registered = extension_oauth.clone();
+        let builtin_oauth = builtin.clone();
         let oauth: OAuthLookup =
             Arc::new(move |provider: &str| read(&registered).get(provider).cloned().or_else(|| builtin(provider)));
         let resolver = Arc::new(AuthResolver::new(runtime_store.clone(), oauth).with_env(options.credential_env));
@@ -98,6 +101,7 @@ impl ModelRuntime {
             provider_auth: RwLock::default(),
             extension_providers: RwLock::default(),
             extension_oauth,
+            builtin_oauth,
             extension_hooks: RwLock::default(),
             offline_refreshes: OfflineRefreshes::default(),
             usage,

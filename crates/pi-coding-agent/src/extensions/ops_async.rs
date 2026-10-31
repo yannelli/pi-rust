@@ -102,12 +102,21 @@ async fn model_op(runner: &Arc<ExtensionRunner>, name: &str, args: Args) -> Resu
             };
             json!({"providers": usages})
         }
-        "providerAuth" => match runtime.resolve_provider_auth(&args.str(1)?).await {
-            Some(Ok(Some(resolved))) => {
-                json!({"apiKey": resolved.auth.api_key, "headers": resolved.auth.headers, "source": resolved.source})
+        "providerAuth" => {
+            // Upstream `getProviderAuth` is `getAuth`: ambient auth, else stored credentials (OAuth
+            // refreshed), environment keys, and config keys.
+            let provider = args.str(1)?;
+            let resolved = match runtime.resolve_provider_auth(&provider).await {
+                Some(resolved) => resolved,
+                None => runtime.resolver().resolve(&provider, &Default::default()).await.map_err(|e| e.to_string()),
+            };
+            match resolved {
+                Ok(Some(resolved)) => {
+                    json!({"apiKey": resolved.auth.api_key, "headers": resolved.auth.headers, "source": resolved.source})
+                }
+                _ => Value::Null,
             }
-            _ => Value::Null,
-        },
+        }
         "stream" => {
             let model = model(args.json(1))?;
             let context: pi_ai::Context = serde_json::from_value(args.json(2)).map_err(error)?;
@@ -150,6 +159,10 @@ pub(crate) async fn run(runner: Arc<ExtensionRunner>, op: &str, args: Vec<HostVa
     let value = match group {
         "ui" if name == "custom" => ops_ui::custom(&runner, args.u64(0), args.u64(1), args.json(2)).await?,
         "ui" if name == "autocompleteBase" => ops_ui::autocomplete_base(&runner, &args).await?,
+        "ui" if name == "login" => {
+            let ui = runner.target_ui(args.u64(0));
+            json!(ui.login(&args.str(1)?).await.map_err(error)?)
+        }
         "ui" => dialog(&runner, name, &args).await?,
         "models" => model_op(&runner, name, args).await?,
         "tools" if name == "executeNested" => nested_call(&runner, &args).await?,

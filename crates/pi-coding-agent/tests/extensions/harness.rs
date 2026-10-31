@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use pi_ai::auth::InMemoryCredentialStore;
+use pi_ai::auth::{InMemoryCredentialStore, OAuthLookup};
 use pi_ai::providers::faux::{FauxProvider, FauxResponse};
 use pi_ai::register_api_provider;
 use pi_coding_agent::agent_session::{
@@ -127,6 +127,8 @@ pub struct Setup {
     pub mcp: Option<McpSessionOptions>,
     /// `--extension-runtime`; `None` runs on the backend `PI_EXTENSION_RUNTIME` names.
     pub runtime: Option<ExtensionRuntime>,
+    /// The core OAuth flows by provider id in place of pi's.
+    pub oauth: Option<OAuthLookup>,
 }
 
 impl Default for Setup {
@@ -145,6 +147,7 @@ impl Default for Setup {
             start_event: None,
             mcp: None,
             runtime: None,
+            oauth: None,
         }
     }
 }
@@ -162,6 +165,7 @@ pub struct Harness {
     pub ui: Arc<RecordingUi>,
     pub errors: Arc<Mutex<Vec<ExtensionError>>>,
     pub events: Arc<Mutex<Vec<Value>>>,
+    pub credentials: Arc<InMemoryCredentialStore>,
 }
 
 #[allow(dead_code)]
@@ -247,9 +251,11 @@ pub async fn harness(setup: Setup) -> Harness {
         values[key] = value.clone();
     }
     let settings = Arc::new(SettingsManager::in_memory(values));
+    let credentials = Arc::new(InMemoryCredentialStore::new(Default::default()));
     let services = create_agent_session_services(CreateServicesOptions {
         settings: Some(settings),
-        credentials: Some(Arc::new(InMemoryCredentialStore::new(Default::default()))),
+        credentials: Some(credentials.clone()),
+        oauth: setup.oauth.clone(),
         credential_env: Some(crate::offline_guard::credential_free_env()),
         ..CreateServicesOptions::new(&cwd, &agent_dir)
     })
@@ -307,7 +313,20 @@ pub async fn harness(setup: Setup) -> Harness {
         };
         session.bind_extensions(bindings).await;
     }
-    Harness { _root: root, cwd, agent_dir, extension_dir, provider, services, session, runner, ui, errors, events }
+    Harness {
+        _root: root,
+        cwd,
+        agent_dir,
+        extension_dir,
+        provider,
+        services,
+        session,
+        runner,
+        ui,
+        errors,
+        events,
+        credentials,
+    }
 }
 
 /// With `PI_EXTENSION_RUNTIME=node` (or `Setup.runtime` Node), a QuickJS fallback fails the test.

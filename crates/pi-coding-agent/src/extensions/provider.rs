@@ -72,6 +72,45 @@ struct JsOAuth {
     name: String,
 }
 
+/// A core OAuth flow under the name of the extension provider that reuses it: login and refresh
+/// run in pi, and the credential is stored under the extension provider's id.
+struct BuiltinOAuth {
+    inner: Arc<dyn OAuthAuth>,
+    name: String,
+}
+
+#[async_trait]
+impl OAuthAuth for BuiltinOAuth {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn is_subscription(&self) -> bool {
+        self.inner.is_subscription()
+    }
+
+    fn login_label(&self) -> Option<&str> {
+        Some(&self.name)
+    }
+
+    async fn login(
+        &self,
+        interaction: &dyn AuthInteraction,
+        options: &LoginOptions,
+        cancel: CancellationToken,
+    ) -> AuthResult<OAuthCredential> {
+        self.inner.login(interaction, options, cancel).await
+    }
+
+    async fn refresh(&self, credential: &OAuthCredential, cancel: CancellationToken) -> AuthResult<OAuthCredential> {
+        self.inner.refresh(credential, cancel).await
+    }
+
+    fn to_auth(&self, credential: &OAuthCredential) -> ModelAuth {
+        self.inner.to_auth(credential)
+    }
+}
+
 /// A login callback from JavaScript, answered by the login's interaction.
 pub(crate) struct LoginRequest {
     name: String,
@@ -255,6 +294,10 @@ impl ExtensionRunner {
     /// `pi.registerProvider`: models and auth settings, a `streamSimple` API, and OAuth.
     pub(crate) fn register_provider(&self, name: &str, config: Value, extension_path: &str) -> Result<(), String> {
         let runtime = self.model_runtime().clone();
+        let builtin = config["oauth"]["builtin"].as_str().map(|id| {
+            runtime.builtin_oauth(id).ok_or_else(|| format!("Provider {name}: no built-in OAuth login \"{id}\""))
+        });
+        let builtin = builtin.transpose()?;
         if config["hasStreamSimple"].as_bool() == Some(true) {
             let api = config["api"]
                 .as_str()
@@ -281,8 +324,11 @@ impl ExtensionRunner {
         runtime.register_extension_hooks(name, hooks.map(|hooks| Arc::new(hooks) as _));
         if let Some(oauth) = config["oauth"].as_object() {
             let display = oauth.get("name").and_then(Value::as_str).unwrap_or(name).to_string();
-            let oauth = JsOAuth { runner: self.weak(), provider: name.to_string(), name: display };
-            runtime.register_extension_oauth(name, Some(Arc::new(oauth)));
+            let flow: Arc<dyn OAuthAuth> = match builtin {
+                Some(inner) => Arc::new(BuiltinOAuth { inner, name: display }),
+                None => Arc::new(JsOAuth { runner: self.weak(), provider: name.to_string(), name: display }),
+            };
+            runtime.register_extension_oauth(name, Some(flow));
         }
         // This runs on the extension thread, and `refreshModels` calls back into it: spawn.
         runtime.refresh_offline_in_background();
