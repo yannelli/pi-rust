@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use futures::FutureExt;
 
 use super::*;
+use crate::support::{ValueCall, on_value};
 
 /// Commit `n` chat lines after `count`, one entry each.
 async fn chat(root: &Conversation, count: &Mutex<u64>, n: usize) {
@@ -59,10 +60,10 @@ fn follow(
     latest: &Arc<Mutex<Arc<TranscriptView>>>,
 ) {
     let (merging, sink) = (transcript.clone(), latest.clone());
-    let listen = move |pi_chord::WatchChange { value, .. }, _| {
+    let listen = on_value(move |ValueCall { value, .. }, _| {
         let merged = merging.merge(&value).map(|view| *sink.lock().unwrap() = view);
         async move { merged }
-    };
+    });
     watch.start(listen).unwrap();
 }
 

@@ -9,8 +9,9 @@ mod lifetime;
 
 use std::sync::{Arc, LazyLock, Mutex};
 
+use crate::support::{ValueCall, on_value};
+use pi_chord::Json;
 use pi_chord::delta::Op;
-use pi_chord::{Json, WatchChange};
 use pi_durable::documents::*;
 use pi_durable::session::{DocumentWatch, Session};
 use support::*;
@@ -63,23 +64,23 @@ pub fn record(watch: &DocumentWatch) -> Frames {
     let frames: Frames = Arc::default();
     let sink = frames.clone();
     watch
-        .start(move |pi_chord::WatchChange { value, ops, .. }, _| {
+        .start(on_value(move |ValueCall { value, ops, .. }, _| {
             sink.lock().unwrap().push((value, ops));
             async { Ok(()) }
-        })
+        }))
         .unwrap();
     frames
 }
 
-pub type Changes = Arc<Mutex<Vec<WatchChange>>>;
+pub type Changes = Arc<Mutex<Vec<ValueCall>>>;
 
 /// Start `watch` with a listener that records every change as it came.
 pub fn record_changes(watch: &DocumentWatch) -> Changes {
     let changes: Changes = Arc::default();
     let sink = changes.clone();
     watch
-        .start(move |change, _| {
-            sink.lock().unwrap().push(change);
+        .start(move |call, _| {
+            sink.lock().unwrap().push(ValueCall::of(&call));
             async { Ok(()) }
         })
         .unwrap();

@@ -15,7 +15,7 @@ use pi_durable::testing::faux::{
 };
 use pi_durable::*;
 use support::harness_support::*;
-use support::{ControlledStorage, observe_commits};
+use support::{ControlledStorage, commit_observer, follow_commits};
 
 /// A slow stream: 4 characters 80 times a second.
 fn slow_setup(persist_within_ms: f64) -> ChatSetup {
@@ -58,10 +58,9 @@ async fn open(storage: &Arc<ControlledStorage>, setup: &ChatSetup) -> Opened {
     harness.resume().unwrap();
     let memory: Arc<Mutex<Vec<String>>> = Arc::default();
     let sink = memory.clone();
-    let observing = observe_commits(&harness, move |publication, _| {
+    let observing = follow_commits(&harness, move |publication, _| {
         for change in &publication.changes {
-            let CommitChange::Document(DocumentCommitChange::Document { record, value: Some(value), .. }) = change
-            else {
+            let CommitChange::Document(DocumentCommitChange::Change { record, value, .. }) = change else {
                 continue;
             };
             if record.kind == "pi.live" && value["generation"].get("message").is_some() {
@@ -143,12 +142,12 @@ async fn converts_what_was_stored_into_the_aborted_entry_after_a_crash_and_retri
     let setup = slow_setup(150.0);
     setup.faux.set_responses([answer(&long())]);
     let opened = open(&storage, &setup).await;
-    // A replica fed by subscribe_commits() alone, as a replication feed would be.
+    // A replica fed by observe_commits() alone, as a replication feed would be.
     let replica = Arc::new(Mutex::new(stored_live(&storage, opened.root.id).await));
     let sink = replica.clone();
-    let feed = opened.harness.subscribe_commits(move |publication, _| {
+    let feed = opened.harness.observe_commits(commit_observer(move |publication, _| {
         for change in &publication.changes {
-            if let CommitChange::Document(DocumentCommitChange::Document { record, ops, .. }) = change
+            if let CommitChange::Document(DocumentCommitChange::Change { record, ops, .. }) = change
                 && record.kind == "pi.live"
             {
                 let mut replica = sink.lock().unwrap();
@@ -156,7 +155,7 @@ async fn converts_what_was_stored_into_the_aborted_entry_after_a_crash_and_retri
             }
         }
         Ok(())
-    });
+    }));
     std::mem::forget(feed.unwrap());
     let submission = opened.root.submit(SubmissionDraft::input("hi"), &ctx()).await.unwrap();
     let id = opened.root.id;

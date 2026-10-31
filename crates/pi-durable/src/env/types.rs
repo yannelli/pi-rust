@@ -252,15 +252,16 @@ pub struct WatchTarget {
     pub exclude: Option<WatchExclude>,
 }
 
-/// What changed below the watched targets.
+/// What changed below the watched targets, by kind.
 #[derive(Clone, Debug)]
 pub enum FileChange {
     /// Something at or below each path may have changed. Calls may be spurious; none is missed while healthy.
     Paths(Vec<String>),
     /// Coverage was uncertain for a while (lost events, reconnect); rescan everything that is watched.
     Overflow,
-    /// The watcher stopped, for example because the tree grew past the environment's limit; no calls follow.
-    Error(FileError),
+    /// The watcher stopped with the error, for example because the tree grew past the environment's limit; no calls
+    /// follow.
+    Failed(FileError),
 }
 
 /// How a watcher learns about changes.

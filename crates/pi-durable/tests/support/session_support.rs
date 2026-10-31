@@ -92,6 +92,8 @@ pub struct ControlledStorage {
     pub adoption_fault: Mutex<Option<AdoptionFault>>,
     /// `adopt`, `adopted`, and `resolve` of every commit, in order.
     pub adoption_order: Mutex<Vec<&'static str>>,
+    /// Upstream `LateResolvingStorage`: when set, every commit yields after adopting before it resolves.
+    pub resolve_late: AtomicBool,
     closed: AtomicBool,
 }
 
@@ -237,6 +239,9 @@ impl Storage for ControlledStorage {
             order.lock().unwrap().push("adopted");
         };
         let seq = self.inner.commit(writes, &recording, context).await?;
+        if self.resolve_late.load(Ordering::SeqCst) {
+            flush().await;
+        }
         order.lock().unwrap().push("resolve");
         if fault == Some(AdoptionFault::RejectAfterAdopt) {
             return Err(DurableError::error("reclaim failed"));
@@ -423,23 +428,21 @@ pub fn open_test_session() -> TestSession {
     let session = create_session(storage.clone(), options);
     let publications = Arc::new(Mutex::new(Vec::new()));
     let sink = publications.clone();
-    session
-        .subscribe_commits(move |publication, _| {
-            sink.lock().unwrap().push(publication.clone());
-            Ok(())
-        })
-        .unwrap();
+    let record = commit_observer(move |publication, _| {
+        sink.lock().unwrap().push(publication.clone());
+        Ok(())
+    });
+    session.observe_commits(record).unwrap();
     TestSession { storage, session, publications }
 }
 
-/// Document value changes of a publication: `(record, conversation, version, value, ops)`.
-/// Upstream `observeCommits()`: every commit as memory adopts it, deferred ones before they are stored. A commit held
-/// in memory comes with `seq` 0.
-pub fn observe_commits(
+/// Upstream `followCommits()`: every commit as memory adopts it, deferred ones before they are stored, as views and
+/// document watches do; `observe_commits()` sees only what was stored. A commit held in memory comes with `seq` 0.
+pub fn follow_commits(
     session: &Session,
     listener: impl Fn(&CommitPublication, &Context) -> DurableResult<()> + Send + Sync + 'static,
 ) -> DurableResult<pi_chord::Unsubscribe> {
-    session.observe_commits(move |observed, context| {
+    session.follow_commits(move |observed, context| {
         let publication = match observed {
             pi_durable::session::ObservedCommit::Stored(publication) => publication.clone(),
             pi_durable::session::ObservedCommit::Memory(changes) => {
@@ -450,12 +453,80 @@ pub fn observe_commits(
     })
 }
 
+/// The document changes and retirements of a publication, without copies.
 pub fn document_changes(publication: &CommitPublication) -> Vec<DocumentCommitChange> {
     let documents = publication.changes.iter().filter_map(|change| match change {
-        CommitChange::Document(document @ DocumentCommitChange::Document { .. }) => Some(document.clone()),
+        CommitChange::Document(
+            document @ (DocumentCommitChange::Change { .. } | DocumentCommitChange::Retire { .. }),
+        ) => Some(document.clone()),
         _ => None,
     });
     documents.collect()
+}
+
+/// A `CommitObserver` that runs `advance` for each stored commit and ignores its end, as upstream's
+/// `{ advance, end: () => {} }`.
+pub fn commit_observer(
+    advance: impl Fn(&CommitPublication, &Context) -> DurableResult<()> + Send + Sync + 'static,
+) -> Arc<dyn pi_durable::session::CommitObserver> {
+    struct Advance<F>(F);
+    impl<F> pi_durable::session::CommitObserver for Advance<F>
+    where
+        F: Fn(&CommitPublication, &Context) -> DurableResult<()> + Send + Sync,
+    {
+        fn advance(&self, publication: &CommitPublication, context: &Context) -> DurableResult<()> {
+            (self.0)(publication, context)
+        }
+
+        fn end(&self, _end: pi_durable::session::WatchEnd) {}
+    }
+    Arc::new(Advance(advance))
+}
+
+/// The fields of a watch's `Value` call, as upstream `onValue()` hands them to its listener; tests record and compare it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ValueCall {
+    pub value: Json,
+    pub ops: Vec<pi_chord::delta::Op>,
+    pub retired: bool,
+}
+
+impl ValueCall {
+    /// A frame a source hands its watch that is not a retirement.
+    pub fn new(value: Json, ops: Vec<pi_chord::delta::Op>) -> Self {
+        Self { value, ops, retired: false }
+    }
+
+    /// The fields of `call`; Durable's failures are final, so an observer never gets a `Failed` call.
+    pub fn of(call: &pi_chord::WatchCall<Json, DurableError>) -> Self {
+        match call {
+            pi_chord::WatchCall::Value { value, ops, retired } => {
+                Self { value: value.clone(), ops: ops.clone(), retired: *retired }
+            }
+            pi_chord::WatchCall::Failed { error } => panic!("Unexpected failed watch call: {error}"),
+        }
+    }
+}
+
+/// Upstream `onValue()`: a watch listener for a source that never fails recoverably; a `Failed` call fails it.
+pub fn on_value<F, Fut>(
+    listener: F,
+) -> impl Fn(pi_chord::WatchCall<Json, DurableError>, Context) -> futures::future::BoxFuture<'static, DurableResult<()>>
++ Send
++ Sync
++ 'static
+where
+    F: Fn(ValueCall, Context) -> Fut + Send + Sync + 'static,
+    Fut: std::future::Future<Output = DurableResult<()>> + Send + 'static,
+{
+    move |call, context| match call {
+        pi_chord::WatchCall::Value { value, ops, retired } => {
+            Box::pin(listener(ValueCall { value, ops, retired }, context))
+        }
+        pi_chord::WatchCall::Failed { error } => {
+            Box::pin(async move { Err(DurableError::error(format!("Unexpected failed watch call: {error}"))) })
+        }
+    }
 }
 
 pub fn document_copy_changes(publication: &CommitPublication) -> Vec<DocumentCommitChange> {
@@ -469,14 +540,16 @@ pub fn document_copy_changes(publication: &CommitPublication) -> Vec<DocumentCom
 /// The value of a document change; `None` for retirement.
 pub fn change_value(change: &DocumentCommitChange) -> Option<Json> {
     match change {
-        DocumentCommitChange::Document { value, .. } => value.clone(),
-        DocumentCommitChange::Copy { .. } => None,
+        DocumentCommitChange::Change { value, .. } => Some(value.clone()),
+        DocumentCommitChange::Retire { .. } | DocumentCommitChange::Copy { .. } => None,
     }
 }
 
 pub fn change_record(change: &DocumentCommitChange) -> &DocumentRecord {
     match change {
-        DocumentCommitChange::Document { record, .. } | DocumentCommitChange::Copy { record, .. } => record,
+        DocumentCommitChange::Change { record, .. }
+        | DocumentCommitChange::Retire { record, .. }
+        | DocumentCommitChange::Copy { record, .. } => record,
     }
 }
 

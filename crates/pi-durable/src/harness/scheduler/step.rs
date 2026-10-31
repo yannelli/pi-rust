@@ -265,7 +265,7 @@ impl Scheduler {
             return Ok(Decision::End);
         }
         if !run.reported.as_ref().is_some_and(|task| same(task, &next)) {
-            let reason = if next.is_none() { OutdatedReason::MissingTask } else { OutdatedReason::IncompatibleTask };
+            let reason = outdated_reason(next.as_ref(), current);
             run.reported = Some(next);
             let message = format!("Task {} keeps running under its old {} definition", current.id, current.kind);
             let info = ReportInfo::TaskOutdated { task: report_task(current), extension, reason };
@@ -541,6 +541,16 @@ fn validate_sleep(invocation: &Invocation, task: TaskId, until: f64) -> DurableR
         return Err(DurableError::error(format!("Task {task} cannot sleep until {until}: not a time in milliseconds")));
     }
     Ok(())
+}
+
+/// Why a replacement definition cannot take a running task: none is registered, it is older than the task, or it is
+/// newer without a `migrate`.
+fn outdated_reason(task: Option<&Task>, record: &TaskRecord) -> OutdatedReason {
+    match task {
+        None => OutdatedReason::MissingTask,
+        Some(task) if task.version < record.version => OutdatedReason::TaskTooOld,
+        Some(_) => OutdatedReason::MigrationFailed,
+    }
 }
 
 /// Whether a definition can take the task at reservation: same version, or newer with a migration.

@@ -250,7 +250,7 @@ impl Scheduler {
     pub async fn open(&self, context: &Context) -> DurableResult<()> {
         let session = &self.core.session;
         let weak = self.weak.clone();
-        session.observe_commits(move |publication, _| {
+        session.follow_commits(move |publication, _| {
             if let Some(scheduler) = weak.upgrade() {
                 scheduler.observe(publication);
             }

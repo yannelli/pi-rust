@@ -135,11 +135,11 @@ async fn open(
     let reports = store.clone();
     let registry: Arc<dyn RegistryReader> = Arc::new(registry);
     let mut harness_options =
-        HarnessOptions::new(runtime_models(&model_runtime), registry).with_on_report(move |error, _| {
+        HarnessOptions::new(runtime_models(&model_runtime), registry).with_on_report(move |report| {
             let mut reports = reports.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             match &reports.0 {
-                Some(view) => view.notice(NoticeLevel::Warning, error.to_string()),
-                None => reports.1.push(error.to_string()),
+                Some(view) => view.notice(NoticeLevel::Warning, report.error.to_string()),
+                None => reports.1.push(report.error.to_string()),
             }
         });
     harness_options.settings = Some(create_harness_settings(settings.clone()));

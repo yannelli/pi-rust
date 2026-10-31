@@ -1,9 +1,10 @@
 //! Upstream `harness-view.test.ts`, "conversation view window": each observer's window over one mount.
 
 use pi_durable::EntryRecord;
-use pi_durable::session::Observer;
+use pi_durable::session::{Observer, WatchCall, WatchEnd};
 
 use super::*;
+use crate::support::{ValueCall, on_value};
 
 /// Append one entry of `kind` per commit; returns the entries.
 async fn notes(conversation: &Conversation, count: usize, kind: &'static str) -> Vec<EntryRecord> {
@@ -184,11 +185,11 @@ async fn uses_from_only_for_the_first_value_a_from_past_the_newest_entry_starts_
 struct Ignore;
 
 impl Observer for Ignore {
-    fn advance(&self, _change: &pi_chord::WatchChange, _context: &pi_chord::Context) -> pi_durable::DurableResult<()> {
+    fn advance(&self, _call: &WatchCall, _context: &pi_chord::Context) -> pi_durable::DurableResult<()> {
         Ok(())
     }
 
-    fn end(&self, _failure: Option<pi_durable::DurableError>) {}
+    fn end(&self, _end: WatchEnd) {}
 }
 
 #[tokio::test]
@@ -209,12 +210,14 @@ async fn rejects_window_bounds_that_put_min_below_one_or_max_below_min() {
 struct Values(Arc<Mutex<Vec<Json>>>);
 
 impl Observer for Values {
-    fn advance(&self, change: &pi_chord::WatchChange, _context: &pi_chord::Context) -> pi_durable::DurableResult<()> {
-        self.0.lock().unwrap().push(change.value.clone());
+    fn advance(&self, call: &WatchCall, _context: &pi_chord::Context) -> pi_durable::DurableResult<()> {
+        if let WatchCall::Value { value, .. } = call {
+            self.0.lock().unwrap().push(value.clone());
+        }
         Ok(())
     }
 
-    fn end(&self, _failure: Option<pi_durable::DurableError>) {}
+    fn end(&self, _end: WatchEnd) {}
 }
 
 #[tokio::test]
@@ -250,10 +253,10 @@ async fn bounds_an_overflow_replacement_by_max() {
     let frames: Frames = Arc::default();
     let sink = frames.clone();
     watch
-        .start(move |pi_chord::WatchChange { value, ops, .. }, _| {
+        .start(on_value(move |ValueCall { value, ops, .. }, _| {
             sink.lock().unwrap().push((value, ops));
             async { Ok(()) }
-        })
+        }))
         .unwrap();
     drained().await;
     let frames = frames.lock().unwrap().clone();

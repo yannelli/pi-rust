@@ -91,7 +91,7 @@ async fn reports_task_interrupted_for_a_run_that_ends_interrupted_and_for_a_task
     wait_for(|| async { !setup.infos.lock().unwrap().is_empty() }).await;
     let infos = serde_json::to_value(&*setup.infos.lock().unwrap()).unwrap();
     let task = json!({ "id": task_id, "kind": "pi.generation", "conversationId": ROOT_CONVERSATION_ID });
-    assert_eq!(infos, json!([{ "type": "task_interrupted", "task": task, "reason": "interrupted", "restarts": 1 }]));
+    assert_eq!(infos, json!([{ "kind": "task_interrupted", "task": task, "reason": "interrupted", "restarts": 1 }]));
     assert!(setup.reports()[0].contains(&format!("{STOPPED_ANSWERING} 1")), "{:?}", setup.reports());
     harness.close(&ctx()).await.unwrap();
 }

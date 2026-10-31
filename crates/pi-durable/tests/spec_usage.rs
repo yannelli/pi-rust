@@ -3,8 +3,11 @@
 //! settings source closure, and declared tasks such as `Anchor` are small definitions.
 #![allow(dead_code, clippy::too_many_arguments)]
 
+mod support;
+
 use std::sync::{Arc, LazyLock, Mutex};
 
+use crate::support::{ValueCall, on_value};
 use pi_ai::{AssistantMessage, ToolCall, UserContent};
 use pi_chord::{Context, Json};
 use pi_durable::documents::*;
@@ -376,10 +379,10 @@ async fn transcript(conversation: Conversation, context: &Context) -> DurableRes
     let watch = conversation.watch(context, None).await?;
     render(transcript.merge(&watch.value())?.as_ref());
     let merging = transcript.clone();
-    watch.start(move |pi_chord::WatchChange { value, .. }, _| {
+    watch.start(on_value(move |ValueCall { value, .. }, _| {
         let merged = merging.merge(&value).map(|view| render(&view));
         async move { merged }
-    })?;
+    }))?;
     // A marker scrolled into view:
     render(&*transcript.load_earlier(context).await?);
     // Reconnect after a drop:

@@ -16,6 +16,7 @@ use super::support::harness_support::*;
 use super::support::live_support::{ended_at, nested_result_of, nested_results, slots_of, start_order, view_history};
 use super::support::task_support::{aborted, eventually};
 use super::{add_tool, args, call, done, echo_tool, nested_text, result_text, results, run_once, tool, tool_tasks};
+use crate::support::{ValueCall, on_value};
 
 fn keyed(key: &str) -> ExecuteToolOptions {
     ExecuteToolOptions { key: Some(key.into()), ..ExecuteToolOptions::default() }
@@ -287,7 +288,7 @@ async fn reports_the_output_of_several_running_nested_calls_and_shows_them_to_a_
     let outputs: Arc<Mutex<Vec<(Value, Value)>>> = Arc::default();
     let (rebuilt, sink) = (replayed.clone(), outputs.clone());
     watch
-        .start(move |change: pi_chord::WatchChange, _| {
+        .start(on_value(move |change: ValueCall, _| {
             let mut current = rebuilt.lock().unwrap();
             *current = pi_chord::delta::apply_immutable(Some(&*current), &change.ops).unwrap();
             assert_eq!(*current, change.value);
@@ -295,7 +296,7 @@ async fn reports_the_output_of_several_running_nested_calls_and_shows_them_to_a_
             let output = |index: usize| slots.get(index).map_or(Value::Null, |slot| slot["output"].clone());
             sink.lock().unwrap().push((output(0), output(1)));
             async { Ok(()) }
-        })
+        }))
         .unwrap();
     let last = || outputs.lock().unwrap().last().cloned();
     // The second slot writes first, so a wrong slot index in the update path would show.

@@ -5,6 +5,7 @@ mod support;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
+use crate::support::{ValueCall, on_value};
 use pi_chord::delta::{Op, apply_immutable};
 use pi_chord::state::{DeliveryKind, StateListener};
 use pi_chord::{AbortController, ChordError, Json, with_abort_signal};
@@ -267,13 +268,13 @@ async fn builds_from_committed_tasks_shows_surviving_tasks_as_pending_after_reop
     let frames = Arc::new(Mutex::new(Vec::<Vec<Op>>::new()));
     let (sink, frame_sink) = (replica.clone(), frames.clone());
     watch
-        .start(move |pi_chord::WatchChange { value, ops, .. }, _| {
+        .start(on_value(move |ValueCall { value, ops, .. }, _| {
             let next = apply_immutable(Some(&sink.lock().unwrap()), &ops).unwrap();
             assert_eq!(next, value);
             *sink.lock().unwrap() = next;
             frame_sink.lock().unwrap().push(ops);
             async { Ok(()) }
-        })
+        }))
         .unwrap();
     harness.resume().unwrap();
     eventually(|| {

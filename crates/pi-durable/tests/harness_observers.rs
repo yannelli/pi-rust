@@ -5,15 +5,15 @@ mod support;
 
 use std::sync::{Arc, LazyLock, Mutex};
 
-use pi_chord::{Context, Json, WatchChange};
+use pi_chord::{Context, Json};
 use pi_durable::documents::*;
 use pi_durable::harness::*;
-use pi_durable::session::{Observer, Tx, WatchEnd};
+use pi_durable::session::{Observer, Tx, WatchCall, WatchEnd};
 use pi_durable::tasks::TaskOptions;
 use pi_durable::*;
 use serde_json::{Value, json};
 use support::task_support::{OpenedTasks, completed, open_tasks};
-use support::{ControlledStorage, Deferred, context, flush};
+use support::{ControlledStorage, Deferred, ValueCall, commit_observer, context, flush};
 
 static PROGRESS: LazyLock<DocToken<Json, TaskScope>> = LazyLock::new(|| {
     let initial = || Json::from(json!({ "lines": [] }));
@@ -22,10 +22,10 @@ static PROGRESS: LazyLock<DocToken<Json, TaskScope>> = LazyLock::new(|| {
 
 #[derive(Clone, Debug, PartialEq)]
 enum Call {
-    /// A change, and whether it came inside the storage's `adopt`.
-    Advance(WatchChange, bool),
-    /// The end, and whether it came inside the storage's `adopt`.
-    End(Option<String>, bool),
+    /// A value call, and whether it came inside the storage's `adopt`.
+    Advance(ValueCall, bool),
+    /// The end's kind and error, and whether it came inside the storage's `adopt`.
+    End(&'static str, Option<String>, bool),
 }
 
 /// An observer recording each call and whether it ran inside the storage's `adopt`.
@@ -35,13 +35,15 @@ struct Recorder {
 }
 
 impl Observer for Recorder {
-    fn advance(&self, change: &WatchChange, _context: &Context) -> DurableResult<()> {
-        self.calls.lock().unwrap().push(Call::Advance(change.clone(), self.storage.adopting()));
+    fn advance(&self, call: &WatchCall, _context: &Context) -> DurableResult<()> {
+        // Durable never sends a failure call.
+        self.calls.lock().unwrap().push(Call::Advance(ValueCall::of(call), self.storage.adopting()));
         Ok(())
     }
 
-    fn end(&self, failure: Option<DurableError>) {
-        self.calls.lock().unwrap().push(Call::End(failure.map(|error| error.to_string()), self.storage.adopting()));
+    fn end(&self, end: WatchEnd) {
+        let error = end.error().map(ToString::to_string);
+        self.calls.lock().unwrap().push(Call::End(end.kind(), error, self.storage.adopting()));
     }
 }
 
@@ -121,8 +123,8 @@ async fn observe_conversation_and_observe_task_graph_start_at_the_current_value_
     let watched = Arc::new(Mutex::new(Vec::new()));
     let sink = watched.clone();
     watch
-        .start(move |change, _| {
-            sink.lock().unwrap().push(change);
+        .start(move |call, _| {
+            sink.lock().unwrap().push(ValueCall::of(&call));
             async { Ok(()) }
         })
         .unwrap();
@@ -141,7 +143,7 @@ async fn observe_conversation_and_observe_task_graph_start_at_the_current_value_
     assert_eq!(view.calls().len(), 1);
     watch.stop().await;
     harness.close(&context()).await.unwrap();
-    assert_eq!(graph.calls(), [Call::End(None, false)]);
+    assert_eq!(graph.calls(), [Call::End("ended", None, false)]);
 }
 
 #[tokio::test]
@@ -154,7 +156,7 @@ async fn observers_end_with_the_error_that_failed_the_harness() {
     storage.fail_next_commit(DurableError::error("disk gone"));
     assert!(note(&root).await.unwrap_err().to_string().contains("disk gone"));
     harness.closed().await;
-    assert_eq!(graph.calls(), [Call::End(Some("disk gone".into()), false)]);
+    assert_eq!(graph.calls(), [Call::End("failed", Some("disk gone".into()), false)]);
 }
 
 #[tokio::test]
@@ -178,8 +180,8 @@ async fn a_task_document_watch_delivers_the_retirement_of_the_commit_that_ends_i
     let changes = Arc::new(Mutex::new(Vec::new()));
     let sink = changes.clone();
     watch
-        .start(move |change, _| {
-            sink.lock().unwrap().push(change);
+        .start(move |call, _| {
+            sink.lock().unwrap().push(ValueCall::of(&call));
             async { Ok(()) }
         })
         .unwrap();
@@ -187,7 +189,7 @@ async fn a_task_document_watch_delivers_the_retirement_of_the_commit_that_ends_i
     harness.wait_for_task(id, &context()).await.unwrap();
     assert!(matches!(watch.closed().await, WatchEnd::Ended));
     let last = Json::from(json!({ "lines": ["started"] }));
-    assert_eq!(*changes.lock().unwrap(), [WatchChange { value: last, ops: Vec::new(), retired: true }]);
+    assert_eq!(*changes.lock().unwrap(), [ValueCall { value: last, ops: Vec::new(), retired: true }]);
     assert!(changes.lock().unwrap()[0].value.same_ref(&watch.value()));
     // The task is terminal: its address is absent for good.
     assert!(harness.watch_doc(&PROGRESS, id, &context()).await.unwrap().is_none());
@@ -203,8 +205,8 @@ async fn a_task_document_observer_gets_the_retirement_then_its_end_inside_the_ad
     finish.resolve();
     harness.wait_for_task(id, &context()).await.unwrap();
     let last = Json::from(json!({ "lines": ["started"] }));
-    let retirement = WatchChange { value: last, ops: Vec::new(), retired: true };
-    assert_eq!(progress.calls(), [Call::Advance(retirement, true), Call::End(None, true)]);
+    let retirement = ValueCall { value: last, ops: Vec::new(), retired: true };
+    assert_eq!(progress.calls(), [Call::Advance(retirement, true), Call::End("ended", None, true)]);
     harness.close(&context()).await.unwrap();
     assert_eq!(progress.calls().len(), 2);
 }
@@ -230,7 +232,7 @@ async fn start(root: &Conversation, task: &Task) -> TaskId {
 }
 
 #[tokio::test]
-async fn resumes_task_and_idle_waits_only_once_subscribe_commits_listeners_saw_the_terminal_commit() {
+async fn resumes_task_and_idle_waits_only_once_observe_commits_observers_saw_the_terminal_commit() {
     let gate = Deferred::default();
     let task = gated("test.wake-gated", gate.clone());
     let harness = open_tasks(Arc::new(ControlledStorage::default()), vec![task.clone()]).await.harness;
@@ -238,7 +240,7 @@ async fn resumes_task_and_idle_waits_only_once_subscribe_commits_listeners_saw_t
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = seen.clone();
     harness
-        .subscribe_commits(move |publication, _| {
+        .observe_commits(commit_observer(move |publication, _| {
             for change in &publication.changes {
                 if let CommitChange::Task(record) = change
                     && record.is_terminal()
@@ -247,7 +249,7 @@ async fn resumes_task_and_idle_waits_only_once_subscribe_commits_listeners_saw_t
                 }
             }
             Ok(())
-        })
+        }))
         .unwrap();
     let id = start(&root, &task).await;
     harness.resume().unwrap();
@@ -292,7 +294,7 @@ async fn signals_a_newly_marked_run_after_host_listeners_saw_the_mark_outside_th
     let id = start(&root, &task).await;
     let host = order.clone();
     harness
-        .subscribe_commits(move |publication, _| {
+        .observe_commits(commit_observer(move |publication, _| {
             let marked = publication.changes.iter().any(
                 |change| matches!(change, CommitChange::Task(record) if record.id == id && record.abort_requested),
             );
@@ -300,7 +302,7 @@ async fn signals_a_newly_marked_run_after_host_listeners_saw_the_mark_outside_th
                 host.lock().unwrap().push("host".to_owned());
             }
             Ok(())
-        })
+        }))
         .unwrap();
     harness.resume().unwrap();
     reached.wait().await;

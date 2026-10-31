@@ -125,19 +125,25 @@ pub enum StorageWrite {
     DocumentRetire { id: DocumentId },
 }
 
-/// Committed change of one document incarnation.
+/// Committed change of one document incarnation: a `Change` (a creation or an update), a `Retire` (this commit
+/// retired the incarnation), or a `Copy`.
 #[derive(Clone, Debug, PartialEq)]
 pub enum DocumentCommitChange {
-    Document {
+    Change {
         record: DocumentRecord,
         /// Conversation owning the document; task documents derive it from their task. `None` for Session documents.
         conversation_id: Option<ConversationId>,
-        /// Definition version of `value`; `None` when this commit retired the incarnation.
-        version: Option<u32>,
-        /// Exact adopted revision, or `None` when this commit retired the incarnation.
-        value: Option<Json>,
-        /// Exact adopted operations for an ordinary update; empty for creation and retirement.
+        /// Definition version of `value`.
+        version: u32,
+        /// Exact adopted revision.
+        value: Json,
+        /// Exact adopted operations for an ordinary update; empty for creation.
         ops: Vec<Op>,
+    },
+    Retire {
+        record: DocumentRecord,
+        /// Conversation owning the document; task documents derive it from their task. `None` for Session documents.
+        conversation_id: Option<ConversationId>,
     },
     /// Definition-free child initialization; consumers hydrate through watch acquisition.
     Copy { record: DocumentRecord, conversation_id: ConversationId, source: DocumentCopySource },

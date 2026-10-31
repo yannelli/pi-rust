@@ -25,7 +25,7 @@ use pi_durable::testing::faux::{
 use pi_durable::*;
 use serde_json::{Value, json};
 use support::harness_support::*;
-use support::{ControlledStorage, observe_commits};
+use support::{ControlledStorage, follow_commits};
 
 /// Open (or reopen after a crash) a chat over `storage`.
 async fn open(storage: &Arc<ControlledStorage>, setup: &ChatSetup) -> (Harness, Conversation) {
@@ -66,9 +66,9 @@ impl Drop for LiveValues {
 fn live_values(harness: &Harness) -> LiveValues {
     let values: Arc<Mutex<Vec<Value>>> = Arc::default();
     let sink = values.clone();
-    let observing = observe_commits(harness, move |publication, _| {
+    let observing = follow_commits(harness, move |publication, _| {
         for change in &publication.changes {
-            if let CommitChange::Document(DocumentCommitChange::Document { record, value: Some(value), .. }) = change
+            if let CommitChange::Document(DocumentCommitChange::Change { record, value, .. }) = change
                 && record.kind == "pi.live"
             {
                 sink.lock().unwrap().push(value.to_serde());

@@ -20,7 +20,7 @@ use pi_durable::{EntryRecord, StorageWrite};
 use serde_json::{Value, json};
 use support::chat::{add_tool, answer, call, calls, no_parameters};
 use support::harness_support::*;
-use support::{ControlledStorage, document_changes, observe_commits};
+use support::{ControlledStorage, commit_observer, document_changes, follow_commits};
 
 type Commits = Arc<Mutex<Vec<Vec<Value>>>>;
 type Action = Box<dyn FnOnce(ToolExecutionApi) -> BoxFuture<'static, bool> + Send>;
@@ -29,9 +29,9 @@ type Action = Box<dyn FnOnce(ToolExecutionApi) -> BoxFuture<'static, bool> + Sen
 fn record_live_ops(harness: &Harness) -> Commits {
     let commits = Commits::default();
     let sink = commits.clone();
-    let unsubscribe = observe_commits(harness, move |publication, _| {
+    let unsubscribe = follow_commits(harness, move |publication, _| {
         for change in document_changes(publication) {
-            if let DocumentCommitChange::Document { record, ops, .. } = change
+            if let DocumentCommitChange::Change { record, ops, .. } = change
                 && record.kind == "pi.live"
                 && !ops.is_empty()
             {
@@ -312,18 +312,16 @@ async fn stores_a_complete_base_exactly_in_the_commits_where_nothing_runs() {
     // Per publication, in order: the pi.live document's ID and value when the commit changed it.
     let published = Arc::new(Mutex::new(Vec::new()));
     let sink = published.clone();
-    let unsubscribe = harness.subscribe_commits(move |publication: &CommitPublication, _| {
+    let unsubscribe = harness.observe_commits(commit_observer(move |publication: &CommitPublication, _| {
         let live = publication.changes.iter().find_map(|change| match change {
-            CommitChange::Document(DocumentCommitChange::Document { record, value: Some(value), .. })
-                if record.kind == "pi.live" =>
-            {
+            CommitChange::Document(DocumentCommitChange::Change { record, value, .. }) if record.kind == "pi.live" => {
                 Some((record.id, Value::from(value)))
             }
             _ => None,
         });
         sink.lock().unwrap().push(live);
         Ok(())
-    });
+    }));
     std::mem::forget(unsubscribe);
     let first = storage.commit_count();
     root.submit(SubmissionDraft::input("go"), &ctx()).await.unwrap().wait(&ctx()).await.unwrap();
@@ -389,9 +387,9 @@ async fn commits_the_tool_calling_answer_its_tool_tasks_the_generation_s_wait_an
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &setup).await;
     let handover = Arc::new(Mutex::new(None::<CommitPublication>));
     let sink = handover.clone();
-    let unsubscribe = observe_commits(&harness, move |publication, _| {
+    let unsubscribe = follow_commits(&harness, move |publication, _| {
         for change in document_changes(publication) {
-            if let DocumentCommitChange::Document { record, value: Some(value), .. } = change
+            if let DocumentCommitChange::Change { record, value, .. } = change
                 && record.kind == "pi.live"
                 && value["tools"].as_array().is_some_and(|tools| tools.len() == 2)
             {

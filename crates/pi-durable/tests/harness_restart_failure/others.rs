@@ -73,7 +73,7 @@ async fn ends_a_tool_call_with_an_error_result_instead_of_running_it_again() {
     assert_eq!((&state["status"], &state["outcome"]["status"]), (&json!("terminal"), &json!("failed")));
     assert_eq!(state["outcome"]["error"]["detail"], json!({ "reason": "restart_limit" }));
     let task = json!({ "id": tool.id, "kind": "pi.tool", "conversationId": ROOT_CONVERSATION_ID });
-    let interrupted = json!({ "type": "task_interrupted", "task": task, "reason": "restart_limit", "restarts": 2 });
+    let interrupted = json!({ "kind": "task_interrupted", "task": task, "reason": "restart_limit", "restarts": 2 });
     assert!(infos(&setup).contains(&interrupted), "{:?}", infos(&setup));
     harness.close(&ctx()).await.unwrap();
 }
@@ -110,11 +110,11 @@ async fn fails_a_compaction_into_compaction_failure() {
         json!({ "status": "failed", "error": { "message": error, "detail": { "reason": "restart_limit" } } })
     );
     let state = live(&harness).await;
-    assert_eq!(state["compactionFailure"], json!({ "taskId": compaction, "reason": "manual", "error": error }));
+    assert_eq!(state["compactionFailure"], json!({ "taskId": compaction, "trigger": "manual", "error": error }));
     assert!(state.get("compactions").is_none(), "{state}");
     wait_for(|| async { !setup.infos.lock().unwrap().is_empty() }).await;
     let task = json!({ "id": compaction, "kind": "pi.compaction", "conversationId": ROOT_CONVERSATION_ID });
-    let interrupted = json!({ "type": "task_interrupted", "task": task, "reason": "restart_limit", "restarts": 1 });
+    let interrupted = json!({ "kind": "task_interrupted", "task": task, "reason": "restart_limit", "restarts": 1 });
     assert!(infos(&setup).contains(&interrupted), "{:?}", infos(&setup));
     harness.close(&ctx()).await.unwrap();
 }

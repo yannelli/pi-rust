@@ -34,7 +34,7 @@ pub async fn watch_reports_a_missing_files_creation_changes_replacement_and_remo
     watching.expect_change("AGENTS.md", write(&env, "AGENTS.md", "four")).await;
     let remove = async { env.remove("AGENTS.md", RemoveOptions::default(), &context()).await.unwrap() };
     watching.expect_change("AGENTS.md", remove).await;
-    watching.close().await;
+    watching.stop().await;
 }
 
 pub async fn watch_reports_a_missing_target_whose_ancestors_are_created(
@@ -43,7 +43,7 @@ pub async fn watch_reports_a_missing_target_whose_ancestors_are_created(
 ) {
     let watching = Watching::start(&env, &[target("a/b/c/AGENTS.md", false)]).await;
     watching.expect_change("a/b/c/AGENTS.md", write(&env, "a/b/c/AGENTS.md", "x")).await;
-    watching.close().await;
+    watching.stop().await;
 }
 
 pub async fn watch_follows_directories_created_together_with_their_contents(
@@ -56,7 +56,7 @@ pub async fn watch_follows_directories_created_together_with_their_contents(
     watching.expect_change("skills/a/b/SKILL.md", write(&env, "skills/a/b/SKILL.md", "one")).await;
     watching.expect_change("skills/a/b/SKILL.md", write(&env, "skills/a/b/SKILL.md", "two!")).await;
     watching.expect_change("skills/a/b/c/SKILL.md", write(&env, "skills/a/b/c/SKILL.md", "deeper")).await;
-    watching.close().await;
+    watching.stop().await;
 }
 
 pub async fn watch_keeps_watching_a_path_whose_parent_is_renamed_and_recreated(
@@ -68,7 +68,7 @@ pub async fn watch_keeps_watching_a_path_whose_parent_is_renamed_and_recreated(
     watching.expect_change("proj/.pi/skills", rename(&env, "proj/.pi", "proj/old")).await;
     watching.expect_change("proj/.pi/skills/y.md", write(&env, "proj/.pi/skills/y.md", "y")).await;
     watching.expect_change("proj/.pi/skills/y.md", write(&env, "proj/.pi/skills/y.md", "yy")).await;
-    watching.close().await;
+    watching.stop().await;
 }
 
 pub async fn watch_skips_excluded_entries_and_reports_a_rename_out_of_them(
@@ -89,7 +89,7 @@ pub async fn watch_skips_excluded_entries_and_reports_a_rename_out_of_them(
             assert!(!hidden.iter().any(|excluded| path.starts_with(excluded.as_str())), "excluded {path}");
         }
     }
-    watching.close().await;
+    watching.stop().await;
 }
 
 pub async fn watch_keeps_recursive_coverage_where_a_non_recursive_target_overlaps(
@@ -99,7 +99,7 @@ pub async fn watch_keeps_recursive_coverage_where_a_non_recursive_target_overlap
     write(&env, "skills/a/one.md", "one").await;
     let watching = Watching::start(&env, &[target("skills", false), target("skills", true)]).await;
     watching.expect_change("skills/a/two.md", write(&env, "skills/a/two.md", "two")).await;
-    watching.close().await;
+    watching.stop().await;
 }
 
 pub async fn watch_follows_a_directory_replaced_at_the_same_path(env: SharedEnv, _options: &EnvConformanceOptions) {
@@ -112,17 +112,17 @@ pub async fn watch_follows_a_directory_replaced_at_the_same_path(env: SharedEnv,
     watching.expect_change("skills/a", replace).await;
     watching.expect_change("skills/a/y.md", write(&env, "skills/a/y.md", "y")).await;
     watching.expect_change("skills/a/y.md", write(&env, "skills/a/y.md", "yy")).await;
-    watching.close().await;
+    watching.stop().await;
 }
 
-pub async fn watch_stops_reporting_once_closed(env: SharedEnv, _options: &EnvConformanceOptions) {
+pub async fn watch_stops_reporting_once_stopped(env: SharedEnv, _options: &EnvConformanceOptions) {
     let changes = Arc::new(Mutex::new(Vec::new()));
     let sink = changes.clone();
     let listener = Arc::new(move |change| sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(change));
     let watcher = env.watch(&[target("file.txt", false)], listener, &context()).await.unwrap();
     assert!(matches!(watcher.mode(), WatchMode::Native | WatchMode::Polling), "watcher reports its mode");
-    watcher.close(&context()).await;
-    watcher.close(&context()).await;
+    watcher.stop(&context()).await;
+    watcher.stop(&context()).await;
     write(&env, "file.txt", "x").await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(changes.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).is_empty());
@@ -142,5 +142,5 @@ pub async fn watch_reports_changes_to_the_file_a_watched_symbolic_link_points_to
     assert_eq!(linked.unwrap().exit_code, 0);
     let watching = Watching::start(&env, &[target("config/AGENTS.md", false)]).await;
     watching.expect_change("config/AGENTS.md", write(&env, "data/real.md", "two!")).await;
-    watching.close().await;
+    watching.stop().await;
 }

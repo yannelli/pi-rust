@@ -15,27 +15,28 @@ use crate::sync::BoxFuture;
 pub use handle::{NativeWatch, Watch};
 pub use lifecycle::Replace;
 
-/// Terminal result of one watch. `E` is the error type of the source; upstream errors are untyped.
+/// Terminal result of one watch, tagged by `kind`; a recoverable failure is a `Failed` call ([`WatchCall`]) instead.
+/// `E` is the error type of the source; upstream errors are untyped.
 #[derive(Clone, Debug)]
 pub enum WatchEnd<E = ChordError> {
     /// `stop()` was called.
     Stopped,
-    /// The context the watch was acquired with was cancelled.
-    Cancelled,
+    /// The context the watch was acquired with was aborted.
+    Aborted,
     /// The source closed (its owner ended or closed).
     Ended,
     /// The listener failed with the error.
     ListenerError(E),
-    /// The source failed with the error.
+    /// The source failed for good with the error.
     Failed(E),
 }
 
 impl<E> WatchEnd<E> {
-    /// The upstream `reason` string.
-    pub fn reason(&self) -> &'static str {
+    /// The upstream `kind` string.
+    pub fn kind(&self) -> &'static str {
         match self {
             Self::Stopped => "stopped",
-            Self::Cancelled => "cancelled",
+            Self::Aborted => "aborted",
             Self::Ended => "ended",
             Self::ListenerError(_) => "listener_error",
             Self::Failed(_) => "failed",
@@ -50,39 +51,61 @@ impl<E> WatchEnd<E> {
     }
 }
 
-/// One call of a JSON watch's listener, and one change a source hands its watch: the newest value, its ops, and
-/// whether the followed document was retired since the call before. A retirement does not end the watch; a document
-/// created at the address later arrives as `[["r", value]]`. Plain data: the frame's context comes apart.
+/// One call of a JSON watch's listener and one frame a source hands it: a value with its ops and retirement flag, or a
+/// failure the watch stays open through. Plain data: the frame's context is the listener's second argument.
 #[derive(Clone, Debug, PartialEq)]
-pub struct WatchChange<T = Json> {
-    pub value: T,
-    pub ops: Vec<Op>,
-    pub retired: bool,
+pub enum WatchCall<T = Json, E = ChordError> {
+    Value { value: T, ops: Vec<Op>, retired: bool },
+    Failed { error: E },
 }
 
-impl<T> WatchChange<T> {
-    /// A source's frame that is not a retirement.
+impl<T, E> WatchCall<T, E> {
+    /// A source's value frame that is not a retirement.
     pub fn new(value: T, ops: Vec<Op>) -> Self {
-        Self { value, ops, retired: false }
+        Self::Value { value, ops, retired: false }
+    }
+
+    /// The upstream `kind` string.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Value { .. } => "value",
+            Self::Failed { .. } => "failed",
+        }
     }
 }
 
-/// One call of a native watch's listener: the new value.
+/// One call of a native watch's listener: the new value, or a failure its source may recover from, as in
+/// [`WatchCall`].
 #[derive(Clone, Debug, PartialEq)]
-pub struct NativeWatchChange<T> {
-    pub value: T,
+pub enum NativeWatchCall<T, E = ChordError> {
+    Value { value: T },
+    Failed { error: E },
+}
+
+impl<T, E> NativeWatchCall<T, E> {
+    pub fn new(value: T) -> Self {
+        Self::Value { value }
+    }
+
+    /// The upstream `kind` string.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Value { .. } => "value",
+            Self::Failed { .. } => "failed",
+        }
+    }
 }
 
 /// Serialized observation of an immutable value: one listener call at a time; changes made meanwhile arrive folded into
 /// the next call.
 pub trait WatchHandle<T = Json, E = ChordError> {
-    /// Acquisition revision before start; latest delivered immutable revision afterward.
+    /// Acquisition revision before start; latest delivered immutable revision afterward (a `Failed` call keeps it).
     fn value(&self) -> T;
 
     /// Install the sole asynchronous listener. Never invokes it inline.
     fn start<F, Fut>(&self, listener: F) -> Result<(), E>
     where
-        F: Fn(WatchChange<T>, Context) -> Fut + Send + Sync + 'static,
+        F: Fn(WatchCall<T, E>, Context) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<(), E>> + Send + 'static;
 
     /// Idempotently stop future callbacks and return this watch's terminal result.
@@ -95,13 +118,13 @@ pub trait WatchHandle<T = Json, E = ChordError> {
 /// Serialized observation of an in-process value: as [`WatchHandle`], but each new value is its own call, in order,
 /// without ops.
 pub trait NativeWatchHandle<T, E = ChordError> {
-    /// Acquisition value before start; latest delivered value afterward.
+    /// Acquisition value before start; latest delivered value afterward (a `Failed` call keeps it).
     fn value(&self) -> T;
 
     /// Install the sole asynchronous listener. Never invokes it inline.
     fn start<F, Fut>(&self, listener: F) -> Result<(), E>
     where
-        F: Fn(NativeWatchChange<T>, Context) -> Fut + Send + Sync + 'static,
+        F: Fn(NativeWatchCall<T, E>, Context) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<(), E>> + Send + 'static;
 
     /// Idempotently stop future callbacks and return this watch's terminal result.
@@ -120,18 +143,18 @@ pub trait Watchable<T = Json, E = ChordError> {
     /// The current value.
     fn value(&self) -> T;
 
-    /// A watch holding the current value, then its changes; the context's cancellation ends it.
+    /// A watch holding the current value, then its changes; aborting the context ends it.
     fn watch(&self, context: &Context) -> BoxFuture<Result<Self::Handle, E>>;
 }
 
 /// An in-process value that changes and can be watched (it may hold anything, errors and functions included): a change
-/// is a new value, delivered without ops.
+/// is a new value by identity, delivered without ops.
 pub trait NativeWatchable<T, E = ChordError> {
     type Handle: NativeWatchHandle<T, E>;
 
     /// The current value.
     fn value(&self) -> T;
 
-    /// A watch holding the current value, then one frame per new value; the context's cancellation ends it.
+    /// A watch holding the current value, then one frame per new value; aborting the context ends it.
     fn watch(&self, context: &Context) -> BoxFuture<Result<Self::Handle, E>>;
 }

@@ -126,7 +126,7 @@ async fn ends_a_run_whose_generation_is_cut_off_restart_limit_times_outside_a_re
     assert_eq!(live(&harness).await, json!({ "runFailure": failure }));
     wait_for(|| async { !setup.infos.lock().unwrap().is_empty() }).await;
     let infos = serde_json::to_value(&*setup.infos.lock().unwrap()).unwrap();
-    let interrupted = |info: &&Value| info["type"] == "task_interrupted" && info["reason"] == "restart_limit";
+    let interrupted = |info: &&Value| info["kind"] == "task_interrupted" && info["reason"] == "restart_limit";
     assert_eq!(infos.as_array().unwrap().iter().find(interrupted).unwrap()["restarts"], 1, "{infos}");
     harness.close(&ctx()).await.unwrap();
 }

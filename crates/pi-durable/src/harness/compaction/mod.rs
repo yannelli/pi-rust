@@ -306,9 +306,9 @@ pub async fn create_compaction(
         trace: Default::default(),
         links: Default::default(),
     };
-    let reason = input.reason;
+    let trigger = input.reason;
     let task_id = tx.create_task(compaction_task(), encode(&input)?, options).await?;
-    let status = CompactionStatus { task_id, reason, blocking: owner.is_some(), attempt: 1, retry: None };
+    let status = CompactionStatus { task_id, trigger, blocking: owner.is_some(), attempt: 1, retry: None };
     tx.doc(&LIVE_DOC, conversation_id).await?.edit(|live| add_compaction_status(live, status))?;
     Ok(task_id)
 }

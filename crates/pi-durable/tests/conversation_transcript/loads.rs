@@ -9,6 +9,7 @@ use pi_durable::session::Tx;
 use pi_durable::storage::MemoryStorage;
 
 use super::*;
+use crate::support::{ValueCall, on_value};
 
 /// A loader over `entries` that fails with `message` while `failing` is set, counting every call.
 fn failing_loader(
@@ -158,10 +159,10 @@ async fn follows_the_walkthrough_live_appends_a_stall_fill_gap_load_earlier_and_
     let watch = root.watch(&ctx(), Some(window)).await.unwrap();
     let latest = Arc::new(Mutex::new(transcript.merge(&watch.value()).unwrap()));
     let (merging, sink) = (transcript.clone(), latest.clone());
-    let listen = move |pi_chord::WatchChange { value, .. }, _| {
+    let listen = on_value(move |ValueCall { value, .. }, _| {
         let merged = merging.merge(&value).map(|view| *sink.lock().unwrap() = view);
         async move { merged }
-    };
+    });
     watch.start(listen).unwrap();
     notes(&root, 15).await;
     tokio::time::sleep(std::time::Duration::from_millis(20)).await;

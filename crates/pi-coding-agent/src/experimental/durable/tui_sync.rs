@@ -90,7 +90,7 @@ impl DurableTui {
         } else if !generation["deferred"].is_null() {
             "Waiting for deferred response...".to_string()
         } else if !compaction.is_null() {
-            let reason = compaction["reason"].as_str().unwrap_or_default();
+            let reason = compaction["trigger"].as_str().unwrap_or_default();
             match compaction["retry"].as_bool() == Some(true) {
                 true => format!("Retrying {reason} compaction (attempt {})...", attempt(compaction)), // concise-ignore
                 false => format!("Compacting ({reason})..."),

@@ -166,7 +166,7 @@ async fn shows_a_late_joiner_a_compaction_that_is_summarizing() {
     chat.faux.summary(gated(&Deferred::default(), summary(), Some(&reached)));
     let task = chat.compact(None).await;
     reached.wait().await;
-    let expected = json!([{ "taskId": task, "reason": "manual", "blocking": false, "attempt": 1 }]);
+    let expected = json!([{ "taskId": task, "trigger": "manual", "blocking": false, "attempt": 1 }]);
     assert_eq!(watched_live(&chat).await["compactions"], expected);
     chat.harness.abort_task(task, &ctx()).await.unwrap();
     chat.close().await;
@@ -232,7 +232,7 @@ async fn survives_reopen_blocked_and_is_orphaned_on_abort_with_its_status_remove
         let input = Json::from(json!({ "reason": "manual" }));
         let options = TaskOptions { conversation_id: None, ..TaskOptions::conversation(id) };
         let task = tx.create_task(newer, input, options).await?;
-        let status = json!([{ "taskId": task, "reason": "manual", "blocking": false, "attempt": 1 }]);
+        let status = json!([{ "taskId": task, "trigger": "manual", "blocking": false, "attempt": 1 }]);
         tx.doc(&LIVE_DOC, id).await?.update(|live| live.set("compactions", Json::from(status)))??;
         Ok(task)
     };
@@ -252,7 +252,7 @@ async fn survives_reopen_blocked_and_is_orphaned_on_abort_with_its_status_remove
         json!({ "status": "orphaned", "reason": "task_too_old" })
     );
     assert!(chat.live().await.get("compactions").is_none());
-    let failure = json!({ "taskId": task, "reason": "manual", "error": "task_too_old" });
+    let failure = json!({ "taskId": task, "trigger": "manual", "error": "task_too_old" });
     assert_eq!(chat.live().await["compactionFailure"], failure);
     chat.close().await;
 }

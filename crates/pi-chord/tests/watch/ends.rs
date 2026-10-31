@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex, Weak};
 
-use pi_chord::{AbortController, ChordError, Json, Watch, WatchChange, WatchEnd, json};
+use pi_chord::{AbortController, ChordError, Json, Watch, WatchEnd, json};
 
 use super::support::Gate;
 use super::*;
@@ -26,14 +26,14 @@ async fn stops_idempotently_and_rejects_a_repeated_or_late_start() {
 async fn ends_ended_or_failed_from_its_source_dropping_pending_frames() {
     let (watch, _, frames) = collecting_watch(json!(0));
     watch.advance(frame(json!(1), replace(json!(1))), context());
-    watch.end(None);
+    watch.end(WatchEnd::Ended);
     flush().await;
     assert!(frames.lock().unwrap().is_empty());
     assert!(matches!(watch.closed().await, WatchEnd::Ended));
 
     let (failed, _) = recorded_watch(json!(0));
-    failed.end(Some(ChordError::error("source failed")));
-    failed.end(None);
+    failed.end(WatchEnd::Failed(ChordError::error("source failed")));
+    failed.end(WatchEnd::Ended);
     let end = failed.closed().await;
     assert!(matches!(&end, WatchEnd::Failed(error) if error.to_string() == "source failed"), "{end:?}");
 }
@@ -45,9 +45,10 @@ async fn stops_future_delivery_without_aborting_or_awaiting_an_in_flight_callbac
     let calls = Arc::new(Mutex::new(Vec::<String>::new()));
     let (sink, held) = (calls.clone(), gate.clone());
     watch
-        .start(move |WatchChange { value, .. }, _| {
+        .start(move |call, _| {
             let (sink, held) = (sink.clone(), held.clone());
             async move {
+                let (value, _, _) = value_call(call)?;
                 sink.lock().unwrap().push(format!("start {value}"));
                 held.wait().await?;
                 sink.lock().unwrap().push(format!("end {value}"));
@@ -65,25 +66,27 @@ async fn stops_future_delivery_without_aborting_or_awaiting_an_in_flight_callbac
 }
 
 #[tokio::test]
-async fn ends_cancelled_when_its_acquisition_signal_aborts_also_when_already_aborted() {
+async fn ends_aborted_when_its_acquisition_signal_aborts_also_when_already_aborted() {
     let controller = AbortController::new();
     let (watch, recorded) = recorded_watch(json!(0));
-    watch.observe_cancellation(&controller.signal()).unwrap();
-    let repeated = watch.observe_cancellation(&controller.signal()).unwrap_err();
-    assert_eq!(repeated.to_string(), "Watch cancellation is already installed");
+    watch.observe_abort(&controller.signal()).unwrap();
+    let repeated = watch.observe_abort(&controller.signal()).unwrap_err();
+    assert_eq!(repeated.to_string(), "Watch abort is already installed");
     controller.abort(None);
-    assert!(matches!(watch.closed().await, WatchEnd::Cancelled));
+    let end = watch.closed().await;
+    assert!(matches!(end, WatchEnd::Aborted));
+    assert_eq!(end.kind(), "aborted");
     assert_eq!(recorded.detached(), 1);
 
     let (aborted, _) = recorded_watch(json!(0));
     let already = AbortController::new();
     already.abort(None);
-    aborted.observe_cancellation(&already.signal()).unwrap();
-    assert!(matches!(aborted.closed().await, WatchEnd::Cancelled));
+    aborted.observe_abort(&already.signal()).unwrap();
+    assert!(matches!(aborted.closed().await, WatchEnd::Aborted));
 
-    let (cancelled, _) = recorded_watch(json!(0));
-    cancelled.cancel();
-    assert!(matches!(cancelled.closed().await, WatchEnd::Cancelled));
+    let (direct, _) = recorded_watch(json!(0));
+    direct.abort();
+    assert!(matches!(direct.closed().await, WatchEnd::Aborted));
 }
 
 #[tokio::test]
@@ -93,10 +96,11 @@ async fn ends_listener_error_on_a_throw_reports_it_and_delivers_nothing_more() {
     let gate = Gate::new();
     let (sink, held) = (seen.clone(), gate.clone());
     watch
-        .start(move |WatchChange { value, .. }, _| {
-            sink.lock().unwrap().push(value);
+        .start(move |call, _| {
+            let delivered = value_call(call).map(|(value, _, _)| sink.lock().unwrap().push(value));
             let held = held.clone();
             async move {
+                delivered?;
                 held.wait().await?;
                 Err(ChordError::error("listener failed"))
             }
@@ -121,7 +125,7 @@ async fn acquire_watch(end: impl FnOnce(&Watch)) -> (Watch, Weak<()>, Weak<()>) 
     let watch = Watch::new(json!(0), move || drop(in_detach), move |_: &ChordError| drop(in_report.clone()));
     let sentinel = Arc::new(());
     let listener = Arc::downgrade(&sentinel);
-    watch.observe_cancellation(&controller.signal()).unwrap();
+    watch.observe_abort(&controller.signal()).unwrap();
     watch
         .start(move |_, _| {
             let _held = sentinel.clone();
@@ -144,8 +148,8 @@ async fn retains_neither_its_source_nor_its_listener_once_ended_while_still_refe
 
     let ends: [fn(&Watch); 4] = [
         |watch| drop(watch.stop()),
-        |watch| watch.cancel(),
-        |watch| watch.end(None),
+        |watch| watch.abort(),
+        |watch| watch.end(WatchEnd::Ended),
         |watch| watch.end_after_delivery(),
     ];
     for end in ends {

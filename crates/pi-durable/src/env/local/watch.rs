@@ -330,7 +330,7 @@ impl Core {
                 }
             }
             Err(error) => {
-                self.shared.deliver(FileChange::Error(scan_error(error)));
+                self.shared.deliver(FileChange::Failed(scan_error(error)));
                 self.shared.close();
                 self.stopped = true;
             }
@@ -425,7 +425,7 @@ impl FileWatcher for LocalFileWatcher {
         self.shared.mode()
     }
 
-    async fn close(&self, _context: &Context) {
+    async fn stop(&self, _context: &Context) {
         self.shared.close();
         let _ = self.messages.send(Message::Close);
         if let Some(task) = self.task.lock().await.take() {
