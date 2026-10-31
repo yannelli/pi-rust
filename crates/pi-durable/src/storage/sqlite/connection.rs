@@ -92,9 +92,14 @@ fn exec(connection: &SharedConnection, sql: &str) -> DurableResult<()> {
 }
 
 fn run(connection: &SharedConnection, sql: &str, params: &[SqliteValue]) -> DurableResult<()> {
+    run_counted(connection, sql, params).map(drop)
+}
+
+fn run_counted(connection: &SharedConnection, sql: &str, params: &[SqliteValue]) -> DurableResult<u64> {
     with_connection(connection, |connection| {
         let mut statement = connection.prepare_cached(sql)?;
-        statement.execute(params_from_iter(params.iter().map(to_sql))).map(drop)
+        statement.execute(params_from_iter(params.iter().map(to_sql)))?;
+        Ok(connection.changes())
     })
 }
 
@@ -124,6 +129,11 @@ impl SqliteExecutor for TransactionHandle {
     async fn run(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<()> {
         self.check()?;
         run(&self.connection, sql, params)
+    }
+
+    async fn run_counted(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<u64> {
+        self.check()?;
+        run_counted(&self.connection, sql, params)
     }
 
     async fn get(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<Option<SqliteRow>> {
@@ -186,6 +196,11 @@ impl SqliteExecutor for BundledSqliteDatabase {
     async fn run(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<()> {
         let _access = self.access.lock().await;
         run(&self.connection, sql, params)
+    }
+
+    async fn run_counted(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<u64> {
+        let _access = self.access.lock().await;
+        run_counted(&self.connection, sql, params)
     }
 
     async fn get(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<Option<SqliteRow>> {

@@ -121,3 +121,4 @@ Do this item only after the preceding ACP, provider, and TUI work is released on
 
 - `pi experimental server` and `client` use Unix sockets. On Windows, they report that they need Unix.
 - On Unix, the chord2 host manager gives a child its IPC channel as stdin. Upstream uses an extra file descriptor there. On Windows, the channel is a named pipe. On Windows, `kill_tree` ends only the child, as upstream does there.
+- This Rust tree has no Durable Objects or workerd runtime target. `sqlite_cloudflare.rs` checks the Durable Object SQLite driver's contract, including the `SELECT changes()` count of `run_counted`, on a stand-in adapter over the bundled SQLite. Upstream's workerd tests (`test-workers/`) are not run.
