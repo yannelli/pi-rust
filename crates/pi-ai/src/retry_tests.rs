@@ -155,6 +155,42 @@ fn keeps_the_chatgpt_business_workspace_usage_limit_non_retryable() {
 }
 
 #[test]
+fn does_not_retry_zhipu_usage_limit_codes() {
+    for text in [
+        r#"429 {"code":"1308","message":"Usage limit reached."}"#,
+        r#"429 {"code":1308,"message":"Usage limit reached."}"#,
+        r#"429 {"code" : "1308", "message":"Usage limit reached."}"#,
+        r#"429 {"code": 1308}"#,
+    ] {
+        assert!(!is_retryable_assistant_error(&error_message(text)), "{text}");
+    }
+    for text in [
+        r#"429 {"code":"13080","message":"Try again."}"#,
+        r#"429 {"code":13080,"message":"Try again."}"#,
+        r#"429 {"request_id":"1308","message":"Try again."}"#,
+        "429 request 1308 failed temporarily",
+    ] {
+        assert!(is_retryable_assistant_error(&error_message(text)), "{text}");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn zhipu_usage_limit_stops_agent_retries_after_one_call() {
+    let calls = AtomicU32::new(0);
+    let policy = RetryPolicy { enabled: true, max_retries: 3, base_delay_ms: 10, max_agent_delay_ms: None };
+    let produce = || {
+        calls.fetch_add(1, Ordering::SeqCst);
+        std::future::ready(error_message(r#"429 {"code":"1308","message":"Usage limit reached."}"#))
+    };
+    let mut events = Vec::new();
+    let result =
+        retry_assistant_call(produce, Some(&policy), &CancellationToken::new(), &mut |event| events.push(event)).await;
+    assert_eq!(result.stop_reason, StopReason::Error);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert!(events.is_empty(), "{events:?}");
+}
+
+#[test]
 fn agent_retry_delay_is_capped() {
     assert_eq!(retry_delay_ms(2000, None, 6), 60_000);
     assert_eq!(retry_delay_ms(2000, Some(5000), 5), 5000);
