@@ -120,8 +120,8 @@ function setupChannel(target, open, serialization = "json", peerPid = () => 0) {
   let explicitRef = null;
   let writes = Promise.resolve();
   const received = [];
-  // Windows: a copy of each sent socket stays open until the peer acknowledges it, as in Node. Closing the
-  // last copy before the peer imports its duplicate would reset the connection.
+  // Keep a sender copy until the peer acknowledges adoption, as Node does on every platform.
+  // Closing the last sender copy while the socket is in transit can end the receiver's reads.
   const kept = [];
   const id = open((kind, value, handles) => {
     if (kind === "connect") target._channelConnected = true;
@@ -221,8 +221,8 @@ function setupChannel(target, open, serialization = "json", peerPid = () => 0) {
     if (type) {
       handleId = native.net.exportHandle(handle._handle);
       payload = { cmd: "NODE_HANDLE", type, msg: payload };
+      kept.push(native.net.exportHandle(handle._handle));
       if (windows()) {
-        kept.push(native.net.exportHandle(handle._handle));
         payload.wsa = native.net.duplicateHandle(handleId, peerPid());
       }
       if (type === "net.Socket" && !(options && options.keepOpen)) handle.destroy();

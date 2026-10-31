@@ -36,10 +36,12 @@ export async function scenario(ai) {
 		models: [{ id: "m1", name: "Model One" }],
 		tokenSize: { min: 1000, max: 1000 },
 	});
+	// Pin both timing branches: completion is timed, and the older streamed response stays untimed.
 	faux.setResponses([
-		ai.fauxAssistantMessage("hello there"),
+		ai.fauxAssistantMessage("hello there", { timestamp: Number.MAX_SAFE_INTEGER }),
 		ai.fauxAssistantMessage([ai.fauxThinking("plan"), ai.fauxToolCall("read", { path: "a.txt" }, { id: "call-1" })], {
 			stopReason: "toolUse",
+			timestamp: 0,
 		}),
 	]);
 	const model = faux.getModel();
