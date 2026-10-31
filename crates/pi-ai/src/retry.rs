@@ -210,6 +210,7 @@ const NON_RETRYABLE_PATTERNS: &[&str] = &[
     // Sign in with ChatGPT on a ChatGPT Business plan: a usage limit set by the
     // workspace admin. Only the admin can raise it.
     "subscription_sharing_workplace_individual_usage_limit_exceeded",
+    r#""code"\s*:\s*"?1308(?:[^0-9]|$)"#,
 ];
 
 const RETRYABLE_PATTERNS: &[&str] = &[
