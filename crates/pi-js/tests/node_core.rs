@@ -139,6 +139,7 @@ return {
   receivers: [error(() => format.call("1234")), error(() => format.call({ valueOf: () => 1234 })),
     error(() => format.call(null)), error(() => format.call(1n))],
   shape: [format.length, format.name],
+  edges: [-0, -0.0001, Infinity, -Infinity].map((value) => value.toLocaleString()),
 };
 "##;
 
@@ -153,6 +154,7 @@ async fn number_to_locale_string_groups_digits_like_node() {
         "boxed": "1,234",
         "receivers": [receiver, receiver, receiver, receiver],
         "shape": [0, "toLocaleString"],
+        "edges": ["-0", "-0", "∞", "-∞"],
     });
     assert_eq!(actual, expected);
 }
