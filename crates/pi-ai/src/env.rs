@@ -118,7 +118,19 @@ pub fn credential_env_vars() -> BTreeSet<&'static str> {
 /// test sessions pass a lookup that hides [`credential_env_vars`], so no developer key is found.
 pub trait EnvLookup: Send + Sync {
     fn var(&self, name: &str) -> Option<String>;
+
+    /// Whether the file at `path` exists; a leading `~` is the home directory of this process.
+    fn file_exists(&self, path: &str) -> bool {
+        let home = || std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from);
+        match path.strip_prefix("~/") {
+            Some(rest) => home().is_some_and(|home| home.join(rest).exists()),
+            None => PathBuf::from(path).exists(),
+        }
+    }
 }
+
+/// Upstream `VERTEX_ADC_PATH`: gcloud application default credentials.
+pub const VERTEX_ADC_PATH: &str = "~/.config/gcloud/application_default_credentials.json";
 
 /// The real process environment.
 #[derive(Clone, Copy, Debug, Default)]
@@ -200,12 +212,8 @@ pub fn get_env_api_key(provider: &str) -> Option<String> {
 }
 
 fn vertex_adc_credentials_exist(env: Option<&ProviderEnv>, base: &dyn EnvLookup) -> bool {
-    if let Some(path) = env_value_in("GOOGLE_APPLICATION_CREDENTIALS", env, base) {
-        return PathBuf::from(path).exists();
-    }
-    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
-    home.map(PathBuf::from)
-        .is_some_and(|home| home.join(".config/gcloud/application_default_credentials.json").exists())
+    let path = env_value_in("GOOGLE_APPLICATION_CREDENTIALS", env, base);
+    base.file_exists(path.as_deref().unwrap_or(VERTEX_ADC_PATH))
 }
 
 static CHILD_PROCESS_ENV: LazyLock<RwLock<BTreeMap<String, String>>> = LazyLock::new(Default::default);
@@ -238,6 +246,44 @@ pub fn process_env_value(name: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct Files(BTreeMap<String, String>, bool);
+
+    impl EnvLookup for Files {
+        fn var(&self, name: &str) -> Option<String> {
+            self.0.get(name).cloned()
+        }
+
+        fn file_exists(&self, _path: &str) -> bool {
+            self.1
+        }
+    }
+
+    #[test]
+    fn vertex_ambient_credentials_ask_the_lookup_for_the_adc_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let adc = dir.path().join("adc.json");
+        std::fs::write(&adc, "{}").unwrap();
+        let vars = |path: &str| {
+            let names = [
+                ("GOOGLE_APPLICATION_CREDENTIALS", path),
+                ("GOOGLE_CLOUD_PROJECT", "p"),
+                ("GOOGLE_CLOUD_LOCATION", "l"),
+            ];
+            names.iter().map(|(name, value)| (name.to_string(), value.to_string())).collect::<BTreeMap<_, _>>()
+        };
+        let host = vars(adc.to_str().unwrap());
+        let lookup = move |name: &str| host.get(name).cloned();
+        assert_eq!(get_env_api_key_in("google-vertex", None, &lookup).as_deref(), Some(AMBIENT_CREDENTIAL));
+        let missing = vars(dir.path().join("missing.json").to_str().unwrap());
+        let lookup = move |name: &str| missing.get(name).cloned();
+        assert_eq!(get_env_api_key_in("google-vertex", None, &lookup), None);
+
+        let denied = Files(vars(adc.to_str().unwrap()), false);
+        assert_eq!(get_env_api_key_in("google-vertex", None, &denied), None);
+        let granted = Files(vars("/no/such/adc.json"), true);
+        assert_eq!(get_env_api_key_in("google-vertex", None, &granted).as_deref(), Some(AMBIENT_CREDENTIAL));
+    }
 
     #[test]
     fn table_covers_upstream_providers() {

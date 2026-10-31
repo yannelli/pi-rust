@@ -224,6 +224,32 @@ export default function (pi) {
 }
 "#;
 
+const VERTEX: &str = r#"
+import { builtinProviders } from '@earendil-works/pi-ai/providers/all';
+
+const PLACE = { GOOGLE_CLOUD_PROJECT: 'p', GOOGLE_CLOUD_LOCATION: 'l' };
+
+export default function (pi) {
+  pi.registerCommand('vertex', { handler: async () => {
+    const vertex = builtinProviders().find((provider) => provider.id === 'google-vertex');
+    const signal = new AbortController().signal;
+    const resolve = async (vars, exists, credential) => {
+      const asked = [];
+      const ctx = { env: async (name) => vars[name], fileExists: async (path) => (asked.push(path), exists) };
+      const result = await vertex.auth.apiKey.resolve({ ctx, credential, signal });
+      return [result?.source ?? null, asked];
+    };
+    pi.appendEntry('vertex', {
+      hostFileCtxFalse: await resolve({ ...PLACE, GOOGLE_APPLICATION_CREDENTIALS: '__HOST_ADC__' }, false),
+      missingFileCtxTrue: await resolve({ ...PLACE, GOOGLE_APPLICATION_CREDENTIALS: '/no/such/adc.json' }, true),
+      defaultCtxTrue: await resolve(PLACE, true),
+      defaultCtxFalse: await resolve(PLACE, false),
+      credentialPath: await resolve(PLACE, true, { type: 'api_key', env: { GOOGLE_APPLICATION_CREDENTIALS: '/cred/adc.json' } }),
+    });
+  }});
+}
+"#;
+
 const AGENT: &str = r#"
 import { Agent, agentLoop, streamProxy } from '@earendil-works/pi-agent-core';
 
@@ -436,4 +462,20 @@ async fn builtin_providers_classify_generate_images_and_refresh_through_rust() {
     assert_eq!(requests[2]["path"], "/v1/oauth/token");
     let form = requests[2]["body"].as_str().unwrap();
     assert!(form.contains("grant_type=refresh_token") && form.contains("refresh_token=r1"), "{form}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn vertex_auth_asks_the_caller_context_for_the_adc_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let host_adc = dir.path().join("adc.json");
+    std::fs::write(&host_adc, "{}").unwrap();
+    let source = VERTEX.replace("__HOST_ADC__", &host_adc.display().to_string().replace('\\', "/"));
+    let (_h, data) = run("vertex.ts", source, "vertex", Vec::new()).await;
+    let adc = "~/.config/gcloud/application_default_credentials.json";
+    let ambient = "ambient credentials";
+    assert_eq!(data["hostFileCtxFalse"][0], Value::Null, "{data}");
+    assert_eq!(data["missingFileCtxTrue"], json!([ambient, ["/no/such/adc.json"]]), "{data}");
+    assert_eq!(data["defaultCtxTrue"], json!([ambient, [adc]]), "{data}");
+    assert_eq!(data["defaultCtxFalse"], json!([null, [adc]]), "{data}");
+    assert_eq!(data["credentialPath"], json!([ambient, ["/cred/adc.json"]]), "{data}");
 }
