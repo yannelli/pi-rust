@@ -49,6 +49,9 @@ const SDK_AI_FILES: &[&str] = &[
     "utils/text.ts",
     "utils/transcript.ts",
     "providers/radius-config.ts",
+    "providers/faux.ts",
+    "images-api-registry.ts",
+    "images.ts",
 ];
 
 const TELEMETRY_FILES: &[&str] = &["index.ts", "memory.ts", "metrics.ts", "noop.ts", "render.ts"];
