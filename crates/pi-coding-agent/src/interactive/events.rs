@@ -81,6 +81,7 @@ impl InteractiveMode {
                 }
             }
             UiEvent::AgentEnd => {
+                self.refresh_acp_commands();
                 self.set_terminal_progress(false);
                 self.clear_status_indicator(Some(StatusKind::Working));
                 let streaming = {
@@ -170,6 +171,9 @@ impl InteractiveMode {
         }
         let Some(object) = entry.as_object() else { return };
         let entry = Entry::from_raw(object.clone());
+        if entry.kind() == "model_change" {
+            self.setup_autocomplete_provider();
+        }
         match entry.data() {
             crate::session::entry::EntryData::CustomMessage(custom) if custom.display => {
                 let message = crate::messages::create_custom_message(

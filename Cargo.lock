@@ -3047,6 +3047,7 @@ dependencies = [
  "regex",
  "reqwest",
  "ring",
+ "rustix",
  "rustls",
  "ruzstd",
  "serde",

@@ -13,10 +13,6 @@ use super::{AcpAgentEntry, provider_id, store};
 use crate::agent_session::ModelRuntime;
 use crate::settings::SettingsManager;
 
-/// Agents do not report a window up front; a large one keeps pi from compacting their sessions.
-const CONTEXT_WINDOW: u64 = 1_000_000;
-const MAX_TOKENS: u64 = 64_000;
-
 static REGISTERED: LazyLock<Mutex<BTreeSet<String>>> = LazyLock::new(Mutex::default);
 
 pub fn launch(entry: &AcpAgentEntry) -> AgentLaunch {
@@ -29,16 +25,23 @@ pub fn launch(entry: &AcpAgentEntry) -> AgentLaunch {
     }
 }
 
-fn model(id: &str, name: &str, reasoning: bool) -> Value {
-    json!({"id": id, "name": name, "reasoning": reasoning, "input": ["text", "image"],
-        "contextWindow": CONTEXT_WINDOW, "maxTokens": MAX_TOKENS})
+/// A model of an agent. The window is the `size` of the agent's last `usage_update` for it, or 0
+/// (unknown) before one; ACP has no output limit, so `maxTokens` is 0 too.
+fn model(id: &str, name: &str, state: &HostState, provider: &str) -> Value {
+    let reasoning = state.thinking.get(provider).copied().unwrap_or(false);
+    let window = state.context.get(provider).and_then(|windows| windows.get(id)).copied().unwrap_or(0);
+    let input = match state.images.get(provider) {
+        Some(false) => json!(["text"]),
+        _ => json!(["text", "image"]),
+    };
+    json!({"id": id, "name": name, "reasoning": reasoning, "input": input, "contextWindow": window, "maxTokens": 0})
 }
 
 fn config(name: &str, id: &str, state: &HostState, provider: &str) -> Value {
-    let reasoning = state.thinking.get(provider).copied().unwrap_or(false);
-    let mut models = vec![model(DEFAULT_MODEL, &format!("{name} (agent default)"), reasoning)];
+    let mut models = vec![model(DEFAULT_MODEL, &format!("{name} (agent default)"), state, provider)];
     let advertised = state.models.get(provider).into_iter().flatten();
-    models.extend(advertised.filter(|choice| choice.id != DEFAULT_MODEL).map(|c| model(&c.id, &c.name, reasoning)));
+    let others = advertised.filter(|choice| choice.id != DEFAULT_MODEL);
+    models.extend(others.map(|choice| model(&choice.id, &choice.name, state, provider)));
     json!({"name": name, "api": acp::API, "baseUrl": format!("acp://{id}"), "apiKey": "acp", "models": models})
 }
 

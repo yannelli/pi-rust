@@ -2,8 +2,8 @@
 //! (pi-rust extension). They live in memory, belong to one session, and are lost on exit.
 
 use std::collections::VecDeque;
-use std::hash::{DefaultHasher, Hash, Hasher};
-use std::io::ErrorKind;
+use std::hash::{DefaultHasher, Hasher};
+use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
@@ -25,16 +25,51 @@ struct Fingerprint {
 impl Fingerprint {
     fn of(bytes: &[u8]) -> Self {
         let mut hasher = DefaultHasher::new();
-        bytes.hash(&mut hasher);
+        hasher.write(bytes);
         Self { len: bytes.len() as u64, hash: hasher.finish() }
     }
+
+    /// [`Self::of`] the content of `path`, read in chunks.
+    fn of_file(path: &Path) -> std::io::Result<Self> {
+        let mut file = std::fs::File::open(path)?;
+        let (mut hasher, mut len, mut buffer) = (DefaultHasher::new(), 0u64, vec![0u8; 64 * 1024]);
+        loop {
+            let read = file.read(&mut buffer)?;
+            if read == 0 {
+                return Ok(Self { len, hash: hasher.finish() });
+            }
+            hasher.write(&buffer[..read]);
+            len += read as u64;
+        }
+    }
+}
+
+/// What a change left in a file.
+#[derive(Clone, Copy, Debug)]
+pub enum Written<'a> {
+    Bytes(&'a [u8]),
+    /// The file as it is on disk now, which pi reads in chunks and does not keep.
+    OnDisk,
+    Deleted,
 }
 
 struct FileCheckpoint {
     key: PathBuf,
     path: PathBuf,
     prior: PriorContent,
-    written: Fingerprint,
+    /// `None` when the change deleted the file.
+    written: Option<Fingerprint>,
+    /// Found by a workspace scan; the agent did not report the change.
+    detected: bool,
+}
+
+/// One file that `/undo` would restore.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UndoCandidate {
+    pub path: PathBuf,
+    /// Found by the workspace scan of an ACP turn, not reported by the agent; another program
+    /// or the user may have made the change.
+    pub detected: bool,
 }
 
 struct PromptChanges {
@@ -56,6 +91,8 @@ pub enum UndoSkip {
     ChangedSince,
     /// Its prior state was not kept; the text says why.
     NotRestorable(String),
+    /// A change that the agent did not report, left as is on request.
+    Unreported,
     /// Restoring it failed.
     Failed(String),
 }
@@ -117,8 +154,28 @@ impl FileCheckpoints {
 
     /// `path` now holds `written`. `prior` is its state before the first change of the prompt.
     pub fn record(&self, session_id: &str, path: &Path, prior: Option<PriorContent>, written: &[u8]) {
+        self.record_change(session_id, path, prior, Written::Bytes(written), false);
+    }
+
+    /// [`Self::record`] for any change, including a delete. A `detected` change comes from a
+    /// workspace scan; a reported change of the same file clears the flag.
+    pub fn record_change(
+        &self,
+        session_id: &str,
+        path: &Path,
+        prior: Option<PriorContent>,
+        written: Written<'_>,
+        detected: bool,
+    ) {
         let key = checkpoint_key(path);
-        let written = Fingerprint::of(written);
+        let written = match written {
+            Written::Bytes(bytes) => Some(Fingerprint::of(bytes)),
+            Written::OnDisk => match Fingerprint::of_file(path) {
+                Ok(fingerprint) => Some(fingerprint),
+                Err(_) => return,
+            },
+            Written::Deleted => None,
+        };
         let mut inner = self.for_session(session_id);
         let prompt = inner.prompt;
         if inner.groups.back().is_none_or(|group| group.prompt != prompt) {
@@ -130,6 +187,7 @@ impl FileCheckpoints {
         let Some(group) = inner.groups.back_mut() else { return };
         if let Some(file) = group.files.iter_mut().find(|file| file.key == key) {
             file.written = written;
+            file.detected &= detected;
             return;
         }
         let prior = match prior {
@@ -139,7 +197,7 @@ impl FileCheckpoints {
             Some(prior) => prior,
             None => PriorContent::NotRestorable("its earlier content was not captured".into()),
         };
-        group.files.push(FileCheckpoint { key, path: path.to_path_buf(), prior, written });
+        group.files.push(FileCheckpoint { key, path: path.to_path_buf(), prior, written, detected });
     }
 
     /// Prompts of `session_id` whose changes `/undo` can restore.
@@ -147,8 +205,20 @@ impl FileCheckpoints {
         self.for_session(session_id).groups.len()
     }
 
+    /// The files that [`Self::undo`] would restore.
+    pub fn candidates(&self, session_id: &str) -> Vec<UndoCandidate> {
+        let inner = self.for_session(session_id);
+        let files = inner.groups.back().into_iter().flat_map(|group| &group.files);
+        files.map(|file| UndoCandidate { path: file.path.clone(), detected: file.detected }).collect()
+    }
+
     /// Restore the files of the newest prompt with changes. `None` when there is none.
     pub fn undo(&self, session_id: &str) -> Option<UndoReport> {
+        self.undo_with(session_id, true)
+    }
+
+    /// [`Self::undo`]; without `detected`, changes the agent did not report stay as they are.
+    pub fn undo_with(&self, session_id: &str, detected: bool) -> Option<UndoReport> {
         let (group, remaining) = {
             let mut inner = self.for_session(session_id);
             let group = inner.groups.pop_back()?;
@@ -156,7 +226,10 @@ impl FileCheckpoints {
         };
         let mut report = UndoReport { remaining, ..UndoReport::default() };
         for file in group.files {
-            restore(file, &mut report);
+            match file.detected && !detected {
+                true => report.skipped.push((file.path, UndoSkip::Unreported)),
+                false => restore(file, &mut report),
+            }
         }
         Some(report)
     }
@@ -169,19 +242,27 @@ fn checkpoint_key(path: &Path) -> PathBuf {
     resolved.unwrap_or_else(|| path.to_path_buf())
 }
 
-/// Whether `path` still holds what the agent last wrote.
-fn unchanged_since(path: &Path, written: Fingerprint) -> std::io::Result<bool> {
+/// Whether `path` still holds what the agent last wrote, or is still absent after a delete.
+fn unchanged_since(path: &Path, written: Option<Fingerprint>) -> std::io::Result<bool> {
+    let Some(written) = written else {
+        return match std::fs::symlink_metadata(path) {
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(true),
+            Err(error) => Err(error),
+            Ok(_) => Ok(false),
+        };
+    };
     match std::fs::metadata(path) {
         Ok(meta) if meta.len() != written.len => return Ok(false),
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(false),
         Err(error) => return Err(error),
         Ok(_) => {}
     }
-    Ok(Fingerprint::of(&std::fs::read(path)?) == written)
+    Ok(Fingerprint::of_file(path)? == written)
 }
 
 fn restore(file: FileCheckpoint, report: &mut UndoReport) {
     let FileCheckpoint { path, prior, written, .. } = file;
+    let was_deleted = written.is_none();
     let prior = match prior {
         PriorContent::NotRestorable(reason) => return report.skipped.push((path, UndoSkip::NotRestorable(reason))),
         PriorContent::Bytes(bytes) => Some(bytes),
@@ -193,13 +274,21 @@ fn restore(file: FileCheckpoint, report: &mut UndoReport) {
         Err(error) => return report.skipped.push((path, UndoSkip::Failed(error.to_string()))),
     }
     let (result, done) = match prior {
-        Some(bytes) => (std::fs::write(&path, bytes), &mut report.restored),
+        Some(bytes) => (write_restored(&path, &bytes, was_deleted), &mut report.restored),
         None => (std::fs::remove_file(&path), &mut report.deleted),
     };
     match result {
         Ok(()) => done.push(path),
         Err(error) => report.skipped.push((path, UndoSkip::Failed(error.to_string()))),
     }
+}
+
+/// Restores `bytes`; a deleted file gets its folder back first.
+fn write_restored(path: &Path, bytes: &[u8], was_deleted: bool) -> std::io::Result<()> {
+    if was_deleted && let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, bytes)
 }
 
 /// Forwards the changes of the session's tools to its checkpoints.
@@ -233,6 +322,22 @@ impl AgentSession {
     /// prompt of this session changed files.
     pub fn undo_file_changes(&self) -> Option<UndoReport> {
         self.file_checkpoints.undo(&self.session_id())
+    }
+
+    /// [`Self::undo_file_changes`]; without `detected`, the changes that an ACP agent did not
+    /// report stay as they are.
+    pub fn undo_file_changes_with(&self, detected: bool) -> Option<UndoReport> {
+        self.file_checkpoints.undo_with(&self.session_id(), detected)
+    }
+
+    /// The files that [`Self::undo_file_changes`] would restore.
+    pub fn undo_candidates(&self) -> Vec<UndoCandidate> {
+        self.file_checkpoints.candidates(&self.session_id())
+    }
+
+    /// Records a change of an ACP turn for `/undo` (see [`FileCheckpoints::record_change`]).
+    pub(crate) fn record_file_change(&self, path: &Path, prior: PriorContent, written: Written<'_>, detected: bool) {
+        self.file_checkpoints.record_change(&self.session_id(), path, Some(prior), written, detected);
     }
 
     /// Prompts whose file changes [`Self::undo_file_changes`] can restore.
