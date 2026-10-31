@@ -451,6 +451,15 @@ async fn exec_writes_stdin_to_the_process() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn exec_caps_output_at_max_buffer_and_validates_it() {
+    let (h, _ui) = native(Vec::new()).await;
+    h.session.prompt("/native-exec-cap", Vec::new()).await.unwrap();
+    let start = &env!("CARGO_PKG_VERSION")[..3];
+    let capped = json!({"stdout": start, "stderr": "", "code": 1, "killed": true, "truncated": true});
+    assert_eq!(entry_data(&h, "native-exec-cap"), Some(json!({"capped": capped, "invalid": -32602})));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn agent_before_settle_results_append_entries() {
     let (h, _ui) = native(vec![FauxResponse::text("settled")]).await;
     h.session.prompt("/native-settle", Vec::new()).await.unwrap();

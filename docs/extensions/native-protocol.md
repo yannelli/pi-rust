@@ -205,7 +205,7 @@ Line-based surfaces: a widget (surface `widget:<key>`), the footer (surface `foo
 | `usage.get` | `{ provider?, refresh? }` | `{ providers: [{ provider, plan, windows: [{ label, usedPercent, resetsAt, windowMinutes }], error, fetchedAt }] }` |
 | `events.emit` | `{ channel, data }` | `null` |
 | `events.subscribe` / `events.unsubscribe` | `{ channel }` | `null` |
-| `exec` | `{ command, args?, cwd?, timeout?, stdin? }` | `{ stdout, stderr, code, killed }` |
+| `exec` | `{ command, args?, cwd?, timeout?, stdin?, maxBuffer? }` | `{ stdout, stderr, code, killed, truncated }` |
 | `provider.register` | `{ name, config }` | `null` |
 | `provider.unregister` | `{ name }` | `null` |
 | `virtualModel.register` | `{ provider, id, name?, ... }` | `null` |
@@ -220,6 +220,7 @@ Line-based surfaces: a widget (surface `widget:<key>`), the footer (surface `foo
   - pi-rust 0.8.2 and older answer `-32601`.
 - `model.find` returns the model in the shape of the ctx snapshot `model`, or `null` when `provider` or `id` is missing or is not a string.
 - `exec` writes `stdin` to the standard input of the process and then closes it. Without `stdin`, the process gets no standard input.
+- `exec` runs the command without a shell, as `pi.exec` does. `signal` (the request's `$/cancelRequest`) and `timeout` stop it, and a command that ignores SIGTERM gets SIGKILL after 5 seconds. `maxBuffer` limits stdout and stderr together: an integer from 0 to the string limit of the runtime (default 256 MiB), else `-32602`. Over the limit pi stops the command and answers the output up to the limit with `truncated: true`, `killed: true`, and a nonzero `code`; an incomplete UTF-8 character at the cut is dropped. `killed` is true whenever pi stopped the command. pi-rust 0.8.6 and older cap the output at 16 MiB with a marker in `stderr`, and send no `truncated`.
 - `events.subscribe` delivers each `pi.events` message on `channel` as an `events.message` notification.
 - `provider.register` takes the declarative part of `pi.registerProvider`: `name`, `baseUrl`, `api` (an existing API id), `apiKey`, `headers`, `models`, and `oauth: { builtin, name? }`. Functions are not available. See [Providers](#providers).
 - `virtualModel.register` takes the definition of `pi.registerVirtualModel`; pi sends `virtualModel.route` for each request.

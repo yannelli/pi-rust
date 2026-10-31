@@ -133,7 +133,7 @@ async fn exec_result(command: &str, args: &[&str]) -> Value {
 #[tokio::test(flavor = "multi_thread")]
 async fn exec_keeps_stderr_empty_when_a_command_exits_silently() {
     let result = exec_result("sh", &["-c", "exit 1"]).await;
-    assert_eq!(result, json!({"stdout": "", "stderr": "", "code": 1, "killed": false}));
+    assert_eq!(result, json!({"stdout": "", "stderr": "", "code": 1, "killed": false, "truncated": false}));
 }
 
 // Upstream #11312: a character split across two pipe chunks came back as U+FFFD.
@@ -143,18 +143,18 @@ async fn exec_decodes_output_across_utf8_chunk_boundaries() {
     let split = r"printf '\344'; sleep 0.1; printf '\275\240\345\245\275'";
     let script = format!("{split}; ({split}) >&2");
     let result = exec_result("sh", &["-c", &script]).await;
-    assert_eq!(result, json!({"stdout": "你好", "stderr": "你好", "code": 0, "killed": false}));
+    assert_eq!(result, json!({"stdout": "你好", "stderr": "你好", "code": 0, "killed": false, "truncated": false}));
 }
 
 // Upstream issue 11360: unbounded output could exhaust the string limit and crash the host.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
-async fn exec_stops_a_command_whose_output_exceeds_the_cap() {
+async fn exec_stops_a_command_whose_output_exceeds_max_buffer() {
     let source = r#"export default function (pi) {
 	pi.registerCommand("big", { handler: async (_args, ctx) => {
-		const big = await pi.exec("yes", ["0123456789abcdef0123456789abcdef"]);
+		const big = await pi.exec("yes", ["0123456789abcdef0123456789abcdef"], { maxBuffer: 1024 * 1024 });
 		const small = await pi.exec("sh", ["-c", "printf ok"]);
-		ctx.ui.notify(JSON.stringify({ length: big.stdout.length, code: big.code, killed: big.killed, stderr: big.stderr, small: small.stdout }));
+		ctx.ui.notify(JSON.stringify({ length: big.stdout.length, code: big.code, killed: big.killed, truncated: big.truncated, stderr: big.stderr, small: small.stdout }));
 	} });
 }
 "#;
@@ -163,11 +163,9 @@ async fn exec_stops_a_command_whose_output_exceeds_the_cap() {
     let calls = h.ui.calls();
     let [call] = calls.as_slice() else { panic!("{calls:?}") };
     let result: Value = serde_json::from_str(call.strip_prefix("notify(info): ").expect("notify")).unwrap();
-    let cap = 16 * 1024 * 1024;
-    assert_eq!(result["length"], cap);
+    assert_eq!(result["length"], 1024 * 1024);
     assert_ne!(result["code"], 0);
-    assert_eq!(result["killed"], true);
-    assert_eq!(result["stderr"], format!("[output exceeded {cap} bytes; output is incomplete]"));
+    assert_eq!((&result["killed"], &result["truncated"], &result["stderr"]), (&json!(true), &json!(true), &json!("")));
     assert_eq!(result["small"], "ok", "the next command still runs");
 }
 
