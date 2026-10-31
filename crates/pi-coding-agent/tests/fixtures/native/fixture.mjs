@@ -45,7 +45,7 @@ const registrations = {
 	commands: [
 		"native-ask", "native-panel", "native-llm", "native-crash", "native-write", "native-probe",
 		"native-ctx", "native-find", "native-usage", "native-input", "native-exec", "native-settle", "native-llm-headers", "native-log",
-		"native-settings", "native-oauth", "native-auth", "native-login", "native-card", "native-order", "native-restyle", "native-render-count",
+		"native-settings", "native-oauth", "native-auth", "native-login", "native-card", "native-order", "native-restyle", "native-render-count", "native-usage-slot",
 	].map((name) => ({ name })),
 	flags: [{ name: "native-flag", type: "string", default: "off" }],
 	events: [
@@ -193,6 +193,8 @@ async function runCommand({ name, ctx }) {
 	} else if (name === "native-card") {
 		await request("session.sendMessage", { customType: "native-card", content: "teal card", display: true });
 		await append("native-note", { color: "plum" });
+	} else if (name === "native-usage-slot") {
+		await append("native-usage-slot", await request("usage.get", { provider: "anthropic-2", refresh: true }));
 	} else if (name === "native-restyle") {
 		cardStyle = " bold";
 	} else if (name === "native-render-count") {

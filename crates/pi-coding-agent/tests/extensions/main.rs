@@ -15,6 +15,7 @@ mod loading;
 mod mcp_fake;
 mod native;
 mod native_contracts;
+mod native_usage;
 #[path = "../offline_guard/mod.rs"]
 mod offline_guard;
 mod provider;

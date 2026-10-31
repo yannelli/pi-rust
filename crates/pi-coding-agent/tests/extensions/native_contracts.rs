@@ -135,7 +135,7 @@ async fn after_provider_response_finishes_before_message_end() {
 
 /// The core `anthropic` flow of the test: counts logins and refreshes and makes no request.
 #[derive(Default)]
-struct FakeAnthropic {
+pub(crate) struct FakeAnthropic {
     logins: AtomicUsize,
     refreshes: AtomicUsize,
 }
