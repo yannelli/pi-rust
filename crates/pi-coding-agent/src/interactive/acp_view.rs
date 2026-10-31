@@ -13,8 +13,9 @@ use tokio::sync::mpsc::unbounded_channel;
 use self::component::{AcpAction, AcpBrowser, AcpRow};
 use super::mode::InteractiveMode;
 use crate::acp_client::install::{install, needs_program, uninstall};
+use crate::acp_client::registry::registry_url_for;
 use crate::acp_client::registry::{RegistryAgent, fetch};
-use crate::acp_client::{AcpAgentEntry, AcpScope, platform_key, provider_id, registry_url, store, with_builtins};
+use crate::acp_client::{AcpAgentEntry, AcpScope, platform_key, provider_id, store, with_builtins};
 use crate::settings::SettingsManager;
 
 impl InteractiveMode {
@@ -37,7 +38,7 @@ impl InteractiveMode {
         let close = self.mount_view(view.clone());
         let agent_dir = self.agent_dir.clone();
         self.spawn(move |mode| async move {
-            let url = registry_url();
+            let url = registry_url_for(&mode.settings());
             let mut fetching = Some(tokio::spawn(async move { fetch(&url).await }));
             let mut agents: Vec<RegistryAgent> = Vec::new();
             let mut registry_error = None;

@@ -76,6 +76,13 @@ pub fn registry_url() -> String {
         .unwrap_or_else(|| REGISTRY_URL.into())
 }
 
+/// `PI_ACP_REGISTRY_URL`, then the `acpRegistryUrl` setting, then [`REGISTRY_URL`].
+pub fn registry_url_for(settings: &crate::settings::SettingsManager) -> String {
+    let configured = std::env::var("PI_ACP_REGISTRY_URL").ok().filter(|url| !url.trim().is_empty());
+    let setting = || settings.settings().extra.get("acpRegistryUrl").and_then(Value::as_str).map(str::to_string);
+    configured.or_else(|| setting().filter(|url| !url.trim().is_empty())).unwrap_or_else(|| REGISTRY_URL.into())
+}
+
 pub async fn fetch(url: &str) -> Result<Vec<RegistryAgent>, String> {
     fetch_with(&pi_ai::http::shared_client(), url).await
 }

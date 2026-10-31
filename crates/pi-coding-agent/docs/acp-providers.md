@@ -128,7 +128,7 @@ The agent edits files and runs commands with its own tools. pi shows its permiss
 | `loginCommand` | The login program for agents that exit before ACP starts without a login, for example `["kiro-cli", "login"]`. **Log in** runs it when the agent does not start. |
 | `version`, `description`, `source`, `installDir` | Set by the install. `installDir` is removed with the entry. |
 
-`PI_ACP_REGISTRY_URL` replaces the registry URL.
+The `acpRegistryUrl` setting replaces the registry URL, for example with a mirror. `PI_ACP_REGISTRY_URL` replaces both.
 
 pi keeps these files in `~/.pi/agent/acp/`:
 
