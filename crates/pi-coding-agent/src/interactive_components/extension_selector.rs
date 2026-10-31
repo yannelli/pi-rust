@@ -8,9 +8,13 @@ use std::time::Duration;
 use pi_tui::components::Text;
 use pi_tui::{Component, Container, Tui, component, get_keybindings};
 
-use super::common::{Shared, bold, border, fg, shared, spacer, text};
+use super::common::{Shared, bold, border, fg, shared, spacer, text, visible_window};
 use super::{CountdownTimer, key_hint, raw_key_hint};
 use crate::theme::ThemeColor;
+
+const MAX_VISIBLE: usize = 10;
+/// Rows kept free for the footer under the selector.
+const FOOTER_ROWS: usize = 4;
 
 /// Optional behavior of an [`ExtensionSelector`].
 #[derive(Default)]
@@ -29,7 +33,9 @@ pub struct ExtensionSelector {
     container: Container,
     options: Vec<String>,
     selected_index: usize,
+    max_visible: usize,
     list: Rc<RefCell<Container>>,
+    tui: Option<Tui>,
     on_select: Box<dyn FnMut(&str)>,
     on_cancel: Shared<dyn FnMut()>,
     on_toggle_tools_expanded: Option<Box<dyn FnMut()>>,
@@ -90,7 +96,9 @@ impl ExtensionSelector {
             container,
             options,
             selected_index: 0,
+            max_visible: MAX_VISIBLE,
             list,
+            tui: opts.tui,
             on_select: Box::new(on_select),
             on_cancel,
             on_toggle_tools_expanded: opts.on_toggle_tools_expanded,
@@ -107,13 +115,18 @@ impl ExtensionSelector {
     fn update_list(&mut self) {
         let mut list = self.list.borrow_mut();
         list.clear();
-        for (index, option) in self.options.iter().enumerate() {
+        let (start, end) = visible_window(self.selected_index, self.options.len(), self.max_visible);
+        for (index, option) in self.options.iter().enumerate().take(end).skip(start) {
             let line = if index == self.selected_index {
                 fg(ThemeColor::Accent, "→ ") + &fg(ThemeColor::Accent, option)
             } else {
                 format!("  {}", fg(ThemeColor::Text, option))
             };
             list.add_child(text(&line, 1, 0));
+        }
+        if end - start < self.options.len() {
+            let count = format!("  ({}/{})", self.selected_index + 1, self.options.len());
+            list.add_child(text(&fg(ThemeColor::Muted, &count), 1, 0));
         }
     }
 
@@ -136,8 +149,21 @@ impl ExtensionSelector {
 }
 
 impl Component for ExtensionSelector {
+    /// Shrinks the option window until the selector and footer fit the terminal height.
     fn render(&mut self, width: usize) -> Vec<String> {
-        self.container.render(width)
+        let rows = self.tui.as_ref().map(|tui| tui.terminal().borrow().rows());
+        let mut max_visible = MAX_VISIBLE;
+        loop {
+            if self.max_visible != max_visible {
+                self.max_visible = max_visible;
+                self.update_list();
+            }
+            let lines = self.container.render(width);
+            match rows {
+                Some(rows) if max_visible > 1 && lines.len() + FOOTER_ROWS > rows => max_visible -= 1,
+                _ => return lines,
+            }
+        }
     }
 
     fn handle_input(&mut self, data: &str) {
