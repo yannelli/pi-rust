@@ -123,6 +123,9 @@ fn checkpoint(task: &TaskRecord) -> DurableResult<CompactionCheckpoint> {
 }
 
 async fn select_phase(task: TaskRecord, runtime: TaskRuntime, context: Context) -> DurableResult<()> {
+    if super::live::cut_off_too_often(&task, &runtime) {
+        return fail_cut_off(&runtime, &task, &context).await;
+    }
     let conversation_id = runtime.conversation_id();
     let agent = runtime.agent(&context).await?;
     let settings = runtime.settings();
@@ -176,6 +179,9 @@ async fn select_phase(task: TaskRecord, runtime: TaskRuntime, context: Context) 
 }
 
 async fn summarize_phase(task: TaskRecord, runtime: TaskRuntime, context: Context) -> DurableResult<()> {
+    if super::live::cut_off_too_often(&task, &runtime) {
+        return fail_cut_off(&runtime, &task, &context).await;
+    }
     let CompactionCheckpoint::Summarize(request) = checkpoint(&task)? else {
         return Err(DurableError::error("Compaction checkpoint is not in phase summarize"));
     };
@@ -256,6 +262,9 @@ async fn summarize_phase(task: TaskRecord, runtime: TaskRuntime, context: Contex
 
 /// After the backoff's sleep; a run before `until` (an early wake, or a record of an earlier version) sleeps again.
 async fn retry_phase(task: TaskRecord, runtime: TaskRuntime, context: Context) -> DurableResult<()> {
+    if super::live::cut_off_too_often(&task, &runtime) {
+        return fail_cut_off(&runtime, &task, &context).await;
+    }
     let CompactionCheckpoint::Retry { until, request } = checkpoint(&task)? else {
         return Err(DurableError::error("Compaction checkpoint is not in phase retry"));
     };
@@ -400,6 +409,22 @@ async fn finish(runtime: &TaskRuntime, context: &Context, result: Option<Json>) 
         Ok(Some(TaskState::Terminal { outcome }))
     };
     runtime.commit(change, context).await
+}
+
+async fn fail_cut_off(runtime: &TaskRuntime, task: &TaskRecord, context: &Context) -> DurableResult<()> {
+    let message = format!("Compaction was interrupted {}", super::live::cut_off_count(task));
+    let (conversation_id, task_id) = (runtime.conversation_id(), runtime.task_id());
+    runtime
+        .commit(
+            move |tx: Tx, _| async move {
+                tx.doc(&LIVE_DOC, conversation_id)
+                    .await?
+                    .edit(|live| fail_compaction_status(live, task_id, message.as_str()))?;
+                Ok(failed(&message, "restart_limit"))
+            },
+            context,
+        )
+        .await
 }
 
 async fn fail_no_model(runtime: &TaskRuntime, model: Option<&ModelRef>, context: &Context) -> DurableResult<()> {

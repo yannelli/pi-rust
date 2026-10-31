@@ -31,7 +31,7 @@ use crate::types::{TaskOutcome, TaskOutcomeError, TaskRecord, TaskState};
 pub(crate) enum Ending {
     Completed,
     Aborted,
-    Failed(String),
+    Failed { message: String, reason: Option<String> },
 }
 
 /// Commit the tool's terminal state and mark its slot done. Nested calls this call left running are aborted
@@ -106,7 +106,10 @@ pub(crate) async fn settle(
         let result = Some(encode(&settled)?);
         let outcome = match ending {
             Ending::Aborted => TaskOutcome::Aborted { reason: None, result },
-            Ending::Failed(message) => TaskOutcome::Failed { error: TaskOutcomeError::new(message), result },
+            Ending::Failed { message, reason } => {
+                let detail = reason.map(|reason| Json::from(serde_json::json!({ "reason": reason })));
+                TaskOutcome::Failed { error: TaskOutcomeError { message, detail }, result }
+            }
             Ending::Completed => TaskOutcome::Completed { result },
         };
         Ok(Some(TaskState::Terminal { outcome }))

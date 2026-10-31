@@ -10,7 +10,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use pi_chord::Context;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::time::Instant;
 
 use super::LocalExecutionEnv;
@@ -40,20 +40,53 @@ fn resolve_timeout(timeout: Option<f64>) -> Result<Option<Duration>, ExecutionEr
     Ok(Some(Duration::from_secs_f64(seconds)))
 }
 
+type Chunks = mpsc::Sender<(OutputStream, Vec<u8>)>;
+
+/// Read one pipe until it ends or `stop` is set. Every chunk already read is sent; after `stop`, on Unix, also what
+/// the pipe can give without waiting, up to one chunk.
 fn spawn_reader(
     mut stream: impl AsyncRead + Unpin + Send + 'static,
     source: OutputStream,
-    sender: mpsc::Sender<(OutputStream, Vec<u8>)>,
+    sender: Chunks,
+    mut stop: watch::Receiver<bool>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut buffer = vec![0u8; READ_CHUNK];
-        while let Ok(count) = stream.read(&mut buffer).await {
+        while !*stop.borrow() {
+            let count = tokio::select! {
+                biased;
+                read = stream.read(&mut buffer) => match read {
+                    Ok(count) => count,
+                    Err(_) => return,
+                },
+                _ = stop.wait_for(|stopped| *stopped) => break,
+            };
             if count == 0 || sender.send((source, buffer[..count].to_vec())).await.is_err() {
-                break;
+                return;
             }
         }
+        drain(&mut stream, &mut buffer, source, &sender).await;
     })
 }
+
+/// Send the bytes a Unix pipe holds now, up to one chunk, without waiting for more or for its end.
+#[cfg(unix)]
+async fn drain(stream: &mut (impl AsyncRead + Unpin), buffer: &mut [u8], source: OutputStream, sender: &Chunks) {
+    use futures::FutureExt;
+    let mut drained = 0;
+    while drained < buffer.len() {
+        let limit = buffer.len() - drained;
+        let Some(Ok(count)) = stream.read(&mut buffer[..limit]).now_or_never() else { return };
+        if count == 0 || sender.send((source, buffer[..count].to_vec())).await.is_err() {
+            return;
+        }
+        drained += count;
+    }
+}
+
+/// Windows pipes read on a blocking thread, so a read started now would not return at once; nothing more is read.
+#[cfg(not(unix))]
+async fn drain(_stream: &mut (impl AsyncRead + Unpin), _buffer: &mut [u8], _source: OutputStream, _sender: &Chunks) {}
 
 fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
     match payload.downcast::<String>() {
@@ -120,6 +153,25 @@ impl Output<'_> {
             OutputStream::Stderr => self.stderr.decode(bytes),
         };
         self.emit(&text, stream)
+    }
+}
+
+/// Decode and spill one chunk, killing the command at once when the callback or the spill fails.
+async fn take_chunk(
+    output: &mut Output<'_>,
+    spill: &mut Option<Spill>,
+    guard: &ChildGuard,
+    env: &LocalExecutionEnv,
+    stream: OutputStream,
+    bytes: &[u8],
+) {
+    if !output.decode(stream, bytes) {
+        guard.kill();
+    }
+    if let Some(spill) = spill.as_mut() {
+        if !spill.feed(bytes, env, output.context).await {
+            guard.kill();
+        }
     }
 }
 
@@ -202,9 +254,13 @@ impl Shell for LocalExecutionEnv {
         }
 
         let (sender, mut receiver) = mpsc::channel(8);
+        let (stop, stopped) = watch::channel(false);
         let readers = [
-            child.stdout.take().map(|stdout| spawn_reader(stdout, OutputStream::Stdout, sender.clone())),
-            child.stderr.take().map(|stderr| spawn_reader(stderr, OutputStream::Stderr, sender)),
+            child
+                .stdout
+                .take()
+                .map(|stdout| spawn_reader(stdout, OutputStream::Stdout, sender.clone(), stopped.clone())),
+            child.stderr.take().map(|stderr| spawn_reader(stderr, OutputStream::Stderr, sender, stopped)),
         ];
         let signal = context.abort_signal();
         let abort = async {
@@ -240,14 +296,7 @@ impl Shell for LocalExecutionEnv {
                 }
                 chunk = receiver.recv(), if !streams_done => match chunk {
                     Some((stream, bytes)) => {
-                        if !output.decode(stream, &bytes) {
-                            guard.kill();
-                        }
-                        if let Some(spill) = spill.as_mut() {
-                            if !spill.feed(&bytes, self, context).await {
-                                guard.kill();
-                            }
-                        }
+                        take_chunk(&mut output, &mut spill, &guard, self, stream, &bytes).await;
                         if status.is_some() {
                             idle = Instant::now() + EXIT_STDIO_GRACE;
                         }
@@ -267,8 +316,13 @@ impl Shell for LocalExecutionEnv {
                 () = tokio::time::sleep_until(idle), if status.is_some() => break,
             }
         }
+        // The readers end promptly once stopped; what they read before, or can read at once, is still delivered.
+        let _ = stop.send(true);
+        while let Some((stream, bytes)) = receiver.recv().await {
+            take_chunk(&mut output, &mut spill, &guard, self, stream, &bytes).await;
+        }
         for reader in readers.into_iter().flatten() {
-            reader.abort();
+            let _ = reader.await;
         }
         if let Some(spill) = spill.as_mut() {
             spill.finish().await;
@@ -306,6 +360,9 @@ impl Shell for LocalExecutionEnv {
         Ok(ShellExecResult { exit_code: status.unwrap_or(1), spill_path })
     }
 }
+
+#[cfg(test)]
+mod reader_tests;
 
 #[cfg(test)]
 mod tests {

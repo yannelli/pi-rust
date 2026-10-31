@@ -23,8 +23,7 @@ use crate::types::{CommitChange, ConversationQuery, TaskQuery, TaskRecord, TaskS
 /// `{ tasks }`: every live task keyed by its decimal ID. A node is `{ id, kind, conversationId, owner?, background,
 /// abortRequested, state, blocked?, conversations }`; `state` is `{ status, phase }`, `{ status: "waiting", phase, on,
 /// policy }`, `{ status: "sleeping", phase, until }`, or `{ status: "completing", outcome }` with the outcome's status.
-/// `blocked` says why the task cannot run here, when it cannot: no registered definition takes it (`missing_task`,
-/// `task_too_old`, `migration_failed`), or the restart limit parked it (`restart_limit`). It follows registry changes.
+/// `blocked` means no registered definition takes it (`missing_task`, `task_too_old`, `migration_failed`); it follows registry changes.
 pub type TaskGraph = Json;
 
 /// A serialized exact-frame watch of the task graph.
