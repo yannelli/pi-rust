@@ -19,6 +19,16 @@ out.contexts = {
   wrong: context({ key: __PKCS8__, passphrase: "nope" }),
   legacyMissing: context({ key: __LEGACY__ }),
   legacyWrong: context({ key: __LEGACY__, passphrase: "nope" }),
+  ownNumber: context({ key: [{ pem: __PKCS8__, passphrase: 123 }] }),
+  ownObject: context({ key: [{ pem: __PKCS8__, passphrase: {} }] }),
+  ownBoolean: context({ key: [{ pem: __PKCS8__, passphrase: true }] }),
+  plainKeyNumber: context({ key: [{ pem: __PLAIN__, passphrase: 123 }] }),
+  ownOverInvalidTop: context({ key: [{ pem: __PKCS8__, passphrase: "pi-test" }], passphrase: 7 }),
+  invalidOwnOverTop: context({ key: [{ pem: __PKCS8__, passphrase: 7 }], passphrase: "pi-test" }),
+  nullOwn: context({ key: [{ pem: __PKCS8__, passphrase: null }], passphrase: "pi-test" }),
+  missingOwn: context({ key: [{ pem: __PKCS8__ }], passphrase: "pi-test" }),
+  nullTop: context({ key: __PKCS8__, passphrase: null }),
+  secondKey: context({ key: [{ pem: __PKCS8__, passphrase: "pi-test" }, { pem: __PLAIN__, passphrase: 5 }] }),
 };
 
 const exported = [];

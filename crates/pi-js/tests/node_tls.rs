@@ -115,6 +115,7 @@ async fn encrypted_keys_and_keying_material_match_node() {
     let script = include_str!("fixtures/node_tls/key_export.js")
         .replace("__PKCS8__", &pem(include_str!("fixtures/node_tls/key_pkcs8_encrypted.pem")))
         .replace("__LEGACY__", &pem(include_str!("fixtures/node_tls/key_legacy_encrypted.pem")))
+        .replace("__PLAIN__", &pem(include_str!("fixtures/node_http/key.pem")))
         .replace("__CERT__", &pem(include_str!("fixtures/node_http/cert.pem")));
     let actual = run_cjs_within(&runtime, &root, &script, 120).await;
     assert_same_keys(&actual, &serde_json::from_str(include_str!("fixtures/node_tls/key_export.json")).unwrap());

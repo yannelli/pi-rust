@@ -58,23 +58,25 @@ function SecureContext(options = {}) {
       throw codeError(TypeError, "ERR_TLS_INVALID_PROTOCOL_VERSION", `${JSON.stringify(options[name])} is not a valid ${name.slice(0, 3)} TLS protocol version`);
     }
   }
-  if (options.passphrase !== undefined && options.passphrase !== null) validate.string(options.passphrase, "options.passphrase");
   const keys = pemList(options.key, "key");
   this.context = {};
   this._options = {
     ca: pemList(options.ca, "ca"),
     cert: pemList(options.cert, "cert") && pemList(options.cert, "cert").join("\n"),
-    key: keys && plainKey(keys[0], keyPassphrase(options)),
+    key: keys && keys.map((pem, index) => plainKey(pem, keyPassphrase(options, index)))[0],
     minVersion: options.minVersion || tlsExports.DEFAULT_MIN_VERSION,
     maxVersion: options.maxVersion || tlsExports.DEFAULT_MAX_VERSION,
   };
 }
 
-// The passphrase of the first key: its own `{ pem, passphrase }`, else `options.passphrase`.
-function keyPassphrase(options) {
-  const first = Array.isArray(options.key) ? options.key[0] : options.key;
-  const own = first && typeof first === "object" && !ArrayBuffer.isView(first) ? first.passphrase : undefined;
-  return own !== undefined && own !== null ? own : options.passphrase;
+// The passphrase of key `index`, as Node's setKey checks it: its own `{ pem, passphrase }` in a
+// key array, else `options.passphrase`.
+function keyPassphrase(options, index) {
+  const item = Array.isArray(options.key) ? options.key[index] : undefined;
+  const own = item && typeof item === "object" && !ArrayBuffer.isView(item) ? item.passphrase : undefined;
+  const passphrase = own !== undefined ? own : options.passphrase;
+  if (passphrase !== undefined && passphrase !== null) validate.string(passphrase, "options.passphrase");
+  return passphrase;
 }
 
 // rustls takes no encrypted keys, so an encrypted key is decrypted here, where Node fails too.
