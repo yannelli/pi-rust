@@ -140,6 +140,7 @@ pub(crate) fn sync(runner: &ExtensionRunner, op: &str, args: &Args) -> Result<Ho
         "theme.byName" => {
             crate::theme::get_theme(&args.str(0)?).map(|theme| theme_snapshot(&theme)).unwrap_or(Value::Null)
         }
+        "theme.available" => json!(crate::theme::get_available_themes()),
         "theme.highlight" => json!(crate::theme::highlight_code(&args.str(0)?, args.opt_str(1).as_deref())),
         "theme.language" => json!(crate::theme::get_language_from_path(&args.str(0)?)),
         "config.info" => json!({

@@ -17,6 +17,10 @@ export { SkillInvocationMessageComponent } from "../pi-coding-agent/src/modes/in
 export { ThinkingSelectorComponent } from "../pi-coding-agent/src/modes/interactive/components/thinking-selector.ts";
 export { UserMessageComponent } from "../pi-coding-agent/src/modes/interactive/components/user-message.ts";
 export { UserMessageSelectorComponent } from "../pi-coding-agent/src/modes/interactive/components/user-message-selector.ts";
+export { LoginDialogComponent } from "../pi-coding-agent/src/modes/interactive/components/login-dialog.ts";
+export { SessionSelectorComponent } from "../pi-coding-agent/src/modes/interactive/components/session-selector.ts";
+export { ThemeSelectorComponent } from "../pi-coding-agent/src/modes/interactive/components/theme-selector.ts";
+export { TreeSelectorComponent } from "../pi-coding-agent/src/modes/interactive/components/tree-selector.ts";
 export { BorderedLoader } from "../pi-coding-agent/src/modes/interactive/components/bordered-loader.ts";
 export { CustomEditor } from "../pi-coding-agent/src/modes/interactive/components/custom-editor.ts";
 export { DynamicBorder } from "../pi-coding-agent/src/modes/interactive/components/dynamic-border.ts";

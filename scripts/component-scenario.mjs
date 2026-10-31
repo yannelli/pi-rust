@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Usage: node scripts/component-scenario.mjs <upstream pi checkout with node_modules>
-// Runs tests/fixtures/extensions/component_scenario.mjs on upstream components and writes the result.
+// Runs the component scenarios of tests/fixtures/extensions on upstream components and writes the results.
 import { writeFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { dirname, join, resolve } from "node:path";
@@ -24,7 +24,7 @@ registerHooks({
 const source = (path) => import(pathToFileURL(join(upstream, "packages", path)).href);
 const { initTheme } = await source("coding-agent/src/modes/interactive/theme/theme.ts");
 const { KeybindingsManager } = await source("coding-agent/src/core/keybindings.ts");
-const { setKeybindings } = await source("tui/src/index.ts");
+const { getKeybindings, setKeybindings } = await source("tui/src/index.ts");
 initTheme("dark");
 setKeybindings(new KeybindingsManager());
 
@@ -43,17 +43,29 @@ const FILES = {
 	ThinkingSelectorComponent: "thinking-selector",
 	UserMessageComponent: "user-message",
 	UserMessageSelectorComponent: "user-message-selector",
+	LoginDialogComponent: "login-dialog",
+	SessionSelectorComponent: "session-selector",
+	ThemeSelectorComponent: "theme-selector",
+	TreeSelectorComponent: "tree-selector",
 };
 const classes = {};
 for (const [name, file] of Object.entries(FILES)) {
 	classes[name] = (await source(`coding-agent/src/modes/interactive/components/${file}.ts`))[name];
 }
 
-const { scenario } = await import(pathToFileURL(join(fixtures, "component_scenario.mjs")).href);
-const { rendered, ...rest } = scenario(classes);
-const field = ([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`;
-const renders = Object.entries(rendered).map((entry) => `\t\t${field(entry)}`).join(",\n");
-const top = Object.entries(rest).map((entry) => `\t${field(entry)}`).join(",\n");
-writeFileSync(join(fixtures, "component_scenario.json"), `{\n${top},\n\t"rendered": {\n${renders}\n\t}\n}\n`);
-console.log(`Wrote ${join(fixtures, "component_scenario.json")}`);
+classes.getKeybindings = getKeybindings;
+
+/** One line per top-level field and per rendered component, so the fixture stays short. */
+async function write(name) {
+	const { scenario } = await import(pathToFileURL(join(fixtures, `${name}.mjs`)).href);
+	const { rendered, ...rest } = await scenario(classes);
+	const field = ([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`;
+	const renders = Object.entries(rendered).map((entry) => `\t\t${field(entry)}`).join(",\n");
+	const top = Object.entries(rest).map((entry) => `\t${field(entry)}`).join(",\n");
+	writeFileSync(join(fixtures, `${name}.json`), `{\n${top},\n\t"rendered": {\n${renders}\n\t}\n}\n`);
+	console.log(`Wrote ${join(fixtures, `${name}.json`)}`);
+}
+
+await write("component_scenario");
+await write("component_scenario_b");
 process.exit(0);

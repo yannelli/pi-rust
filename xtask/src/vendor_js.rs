@@ -84,6 +84,16 @@ const CODING_AGENT_FILES: &[&str] = &[
     "modes/interactive/components/user-message.ts",
     "modes/interactive/components/user-message-selector.ts",
     "utils/ansi.ts",
+    "core/tools/render-utils.ts",
+    "modes/interactive/components/auth-url.ts",
+    "modes/interactive/components/login-dialog.ts",
+    "modes/interactive/components/session-selector-search.ts",
+    "modes/interactive/components/session-selector.ts",
+    "modes/interactive/components/theme-selector.ts",
+    "modes/interactive/components/tree-selector.ts",
+    "utils/open-browser.ts",
+    "utils/paths.ts",
+    "utils/shell.ts",
 ];
 
 /// Bare specifiers inside bundled files and the bundled file each one resolves to.

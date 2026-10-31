@@ -21,6 +21,7 @@ const HOST_FILES: &[(&str, &str)] = &[
     ("coding_utils.js", include_str!("js/coding_utils.js")),
     ("coding_unsupported.js", include_str!("js/coding_unsupported.js")),
     ("compaction_utils.js", include_str!("js/compaction_utils.js")),
+    ("component_shims.js", include_str!("js/component_shims.js")),
     ("context.js", include_str!("js/context.js")),
     ("host.js", include_str!("js/host.js")),
     ("models.js", include_str!("js/models.js")),
@@ -41,8 +42,15 @@ const HOST_FILES: &[(&str, &str)] = &[
     ("ui.js", include_str!("js/ui.js")),
 ];
 
-/// Upstream components import their theme from here; it is the host theme module.
-const THEME_SHIM: &str = "pi-coding-agent/src/modes/interactive/theme/theme.ts";
+/// Upstream modules that vendored components import, each answered by a host module: the path and
+/// the `export` list of its source.
+const SHIMS: &[(&str, &str, &str)] = &[
+    ("pi-coding-agent/src/modes/interactive/theme/theme.ts", "*", "host/theme.js"),
+    ("pi-coding-agent/src/config.ts", "{ getAgentDir, getBinDir }", "host/component_shims.js"),
+    ("pi-coding-agent/src/utils/child-process.ts", "{ spawnProcessSync }", "host/component_shims.js"),
+    ("pi-coding-agent/src/core/keybindings.ts", "{ KeybindingsManager }", "host/component_shims.js"),
+    ("pi-coding-agent/src/utils/clipboard.ts", "{ copyToClipboard }", "host/component_shims.js"),
+];
 
 fn path(key: &str) -> String {
     vendor::specifier(&vendor_root(), key)
@@ -62,7 +70,9 @@ pub(crate) fn source_files() -> Vec<(PathBuf, String)> {
     let root = vendor_root();
     let mut files = vendor::source_files(&root);
     files.extend(HOST_FILES.iter().map(|(name, source)| (root.join("host").join(name), source.to_string())));
-    files.push((root.join(THEME_SHIM), format!("export * from \"{}\";\n", path("host/theme.js"))));
+    for (shim, names, host) in SHIMS {
+        files.push((root.join(shim), format!("export {names} from \"{}\";\n", path(host))));
+    }
     files
 }
 
