@@ -62,6 +62,14 @@ gh run download <run-id> -R yannelli/pi-rust -n upstream-model-data -D ../model-
 cargo xtask models ../model-data
 ```
 
+`cargo xtask models` also copies `generatedAt` from the `.manifest.json` of the data to `crates/pi-ai/models.manifest.json`. It stops when the manifest is missing. The Parity artifact includes the hidden `.manifest.json` only when its upload step sets `include-hidden-files: true`. Without the manifest, run `npm ci --ignore-scripts` and `npm run hydrate-model-data -w packages/ai` in an upstream checkout, then use `packages/ai/src/providers/data`.
+
+The provider names, base URLs, and auth labels of `@earendil-works/pi-ai/providers/all` come from upstream `builtinProviders()`. Regenerate them in the same upstream checkout, after the model data:
+
+```sh
+node scripts/builtin-providers.mjs <upstream-checkout>
+```
+
 ## Porting an upstream commit
 
 1. Read the upstream diff: `git -C ../pi-upstream show <sha>`.

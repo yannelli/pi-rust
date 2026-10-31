@@ -122,6 +122,7 @@ pub(crate) fn stream_options_from_json(value: &Value) -> StreamOptions {
     options.max_retries = value["maxRetries"].as_u64().map(|retries| retries as u32);
     options.metadata = value["metadata"].as_object().cloned();
     options.identity = serde_json::from_value(value["identity"].clone()).ok();
+    options.env = serde_json::from_value(value["env"].clone()).unwrap_or_default();
     if let Some(headers) = value["headers"].as_object() {
         for (name, header) in headers {
             match header.as_str() {

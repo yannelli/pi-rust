@@ -1,5 +1,6 @@
 //! `cargo xtask models <data-dir> [--out <path>]`: flatten the upstream per-provider catalog
-//! (`packages/ai/src/providers/data/*.json`) into the bundled `crates/pi-ai/models.json`.
+//! (`packages/ai/src/providers/data/*.json`) into the bundled `crates/pi-ai/models.json`, and copy
+//! the generation time of `.manifest.json` to `models.manifest.json` beside it.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -24,7 +25,10 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     let dir = dir.ok_or("models needs the upstream data directory")?;
     let out = out.unwrap_or_else(|| root.join("crates/pi-ai/models.json"));
     let catalog = flatten_dir(&dir)?;
+    let manifest = manifest_json(&dir)?;
     std::fs::write(&out, render(&catalog.models)).map_err(|error| format!("{}: {error}", out.display()))?;
+    let manifest_out = out.with_file_name("models.manifest.json");
+    std::fs::write(&manifest_out, manifest).map_err(|error| format!("{}: {error}", manifest_out.display()))?;
     let types: Vec<String> = MODEL_TYPES.iter().map(|kind| format!("{kind} {}", catalog.count(kind))).collect();
     println!(
         "Wrote {} models ({}) from {} providers to {}",
@@ -34,6 +38,16 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
         out.display()
     );
     Ok(())
+}
+
+/// `{"generatedAt": ...}` from the `.manifest.json` upstream writes with its provider files.
+pub fn manifest_json(dir: &Path) -> Result<String, String> {
+    let path = dir.join(".manifest.json");
+    let text = std::fs::read_to_string(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let manifest: Value = serde_json::from_str(&text).map_err(|error| format!("{}: {error}", path.display()))?;
+    let generated_at = manifest.get("generatedAt").and_then(Value::as_str).filter(|stamp| !stamp.is_empty());
+    let generated_at = generated_at.ok_or_else(|| format!("{}: no generatedAt", path.display()))?;
+    Ok(format!("{}\n", serde_json::json!({ "generatedAt": generated_at })))
 }
 
 /// The flattened catalog: models in output order plus the number of provider files read.
@@ -254,6 +268,16 @@ mod tests {
         assert_eq!(ids(&catalog), ["alpha/m", "beta/z2", "beta/z1", "beta/a1"]);
         assert_eq!(catalog.count("chat"), 2);
         assert_eq!(catalog.counts()["beta"]["image"], 1);
+    }
+
+    #[test]
+    fn copies_the_manifest_generation_time() {
+        let stamp = r#"{"schemaVersion":6,"generatedAt":"2026-10-31T05:41:14.278Z","files":{}}"#;
+        let dir = fixture(&[(".manifest.json", stamp)]);
+        assert_eq!(manifest_json(dir.path()).unwrap(), "{\"generatedAt\":\"2026-10-31T05:41:14.278Z\"}\n");
+        let error = manifest_json(fixture(&[(".manifest.json", r#"{"files":{}}"#)]).path()).unwrap_err();
+        assert!(error.contains("no generatedAt"), "{error}");
+        assert!(manifest_json(fixture(&[]).path()).unwrap_err().contains(".manifest.json"));
     }
 
     #[test]

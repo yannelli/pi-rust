@@ -2,6 +2,7 @@
 // embedded upstream code; streaming, the catalog, and API providers go to Rust.
 import { call, optional } from "./bridge.js";
 import { failedMessage, rustStream } from "./stream.js";
+import { getBuiltinModel, getBuiltinModels, getBuiltinProviders } from "./providers_all.js";
 import { createAssistantMessageEventStream } from "../pi-ai/src/utils/event-stream.ts";
 
 export { Type } from "typebox";
@@ -127,12 +128,9 @@ export const [streamOpenAICodexResponses, streamSimpleOpenAICodexResponses] = le
 export const [streamOpenAICompletions, streamSimpleOpenAICompletions] = legacy("openai-completions");
 export const [streamOpenAIResponses, streamSimpleOpenAIResponses] = legacy("openai-responses");
 
-export const getModel = (provider, modelId) => optional(call("ai.catalog", "model", provider, modelId));
-export const getModels = (provider) => call("ai.catalog", "models", provider ?? null) ?? [];
-export const getProviders = () => call("ai.catalog", "providers") ?? [];
-export const getBuiltinModel = getModel;
-export const getBuiltinModels = getModels;
-export const getBuiltinProviders = getProviders;
+export const getModel = getBuiltinModel;
+export const getModels = getBuiltinModels;
+export const getProviders = getBuiltinProviders;
 export const getEnvApiKey = (provider) => optional(call("ai.envApiKey", provider));
 
 export function supportsXhigh(model) {

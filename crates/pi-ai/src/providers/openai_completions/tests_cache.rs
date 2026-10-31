@@ -179,7 +179,8 @@ async fn anthropic_cache_markers_cover_prompt_tools_and_last_message() {
     assert!(body["messages"].as_array().unwrap().last().unwrap()["content"].is_string());
     for id in ["fable", "haiku", "opus", "sonnet"] {
         let model = catalog("openrouter", &format!("~anthropic/claude-{id}-latest"));
-        assert_eq!(model.compat.as_ref().unwrap()["cacheControlFormat"], "anthropic", "{id}");
+        assert_eq!(model.api, "anthropic-messages", "{id}");
+        assert_eq!(model.compat.as_ref().unwrap()["forceAdaptiveThinking"], true, "{id}");
     }
 }
 

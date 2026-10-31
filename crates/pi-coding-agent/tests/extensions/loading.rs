@@ -178,7 +178,8 @@ export default function (pi) {
 	pi.on("session_start", (_event, ctx) => {
 		const cost = { input: 1, output: 2, cacheRead: 0.5, cacheWrite: 1.25, tiers: [{ inputTokensAbove: 1000, input: 3, output: 4, cacheRead: 1, cacheWrite: 2 }] };
 		const model = { provider: "p", id: "m", cost };
-		const usage = (input) => ({ input, output: 1000, cacheRead: 0, cacheWrite: 100, cacheWrite1h: 40, totalTokens: 0 });
+		const usage = (input) => ({ input, output: 1000, cacheRead: 0, cacheWrite: 100, cacheWrite1h: 40, totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } });
 		const small = usage(500);
 		const large = usage(2000);
 		calculateCost(model, small);
