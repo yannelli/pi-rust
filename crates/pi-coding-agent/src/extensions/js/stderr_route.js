@@ -1,6 +1,7 @@
 // In the TUI, stderr output of extensions would land at the cursor, inside the prompt box. There,
 // `console.error`, `console.warn`, and `process.stderr.write` become warnings in the chat.
 import { formatWithOptions } from "node:util";
+import { realpathSync } from "node:fs";
 import { call } from "./bridge.js";
 
 const inTui = () => {
@@ -22,7 +23,13 @@ export function extensionName(path) {
 function caller(extensions) {
 	const stack = (new Error().stack ?? "").replace(/\\/g, "/");
 	for (const ext of extensions()) {
-		if (ext.resolvedPath && stack.includes(ext.resolvedPath.replace(/\\/g, "/"))) return ext;
+		if (!ext.resolvedPath) continue;
+		if (stack.includes(ext.resolvedPath.replace(/\\/g, "/"))) return ext;
+		try {
+			if (stack.includes(realpathSync(ext.resolvedPath).replace(/\\/g, "/"))) return ext;
+		} catch {
+			// Registered sources can have no file on disk.
+		}
 	}
 	return undefined;
 }

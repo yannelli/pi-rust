@@ -118,3 +118,23 @@ async fn extension_stderr_shows_as_warnings_in_the_chat() {
     })
     .await;
 }
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn extension_stderr_keeps_its_label_through_a_path_alias() {
+    local(async {
+        let root = tempfile::tempdir().unwrap();
+        let agent_dir = root.path().join("agent");
+        let extensions = agent_dir.join("extensions");
+        std::fs::create_dir_all(&extensions).unwrap();
+        let source = root.path().join("source.ts");
+        std::fs::write(&source, STDERR).unwrap();
+        std::os::unix::fs::symlink(source, extensions.join("errs.ts")).unwrap();
+        let ui = start(Options { agent_dir: Some(agent_dir), ..Options::default() }).await;
+        ui.submit("/errs").await;
+        ui.wait_for("Warning: [errs.ts] console error").await;
+        ui.wait_for("Warning: [errs.ts] console warn").await;
+        ui.wait_for("Warning: [errs.ts] raw stderr").await;
+    })
+    .await;
+}
