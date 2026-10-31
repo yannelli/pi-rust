@@ -2,6 +2,19 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.10.0] - 2026-10-31
+
+### Breaking Changes
+
+- **durable:** return SQLite statement row counts (upstream 8025c414d) ([43e0421](https://github.com/yannelli/pi-rust/commit/43e04216ef481a4c590da2e33d85ae357f20af94))
+- **durable:** add recoverable watch calls and align session reports (upstream 5f312dac4) ([3ac2a9e](https://github.com/yannelli/pi-rust/commit/3ac2a9e31ea68e7b75bede982a53eff7bab1a07e))
+- **durable:** end interrupted runs at the restart limit (upstream b3a29f111) ([c889811](https://github.com/yannelli/pi-rust/commit/c889811f023cf8b887235a7764311b58623aff82))
+
+### Fixed
+
+- **durable:** preserve ready shell output when pipe readers stop ([38afd67](https://github.com/yannelli/pi-rust/commit/38afd673d72637eda23057db356c4858c3d5e614))
+- **durable:** strip whole ANSI escapes from tool output (upstream 50d9f823e) ([e4ccde7](https://github.com/yannelli/pi-rust/commit/e4ccde79eb2767d2ed9bc74cfc3dc9302e52f39b))
+
 ## [0.9.2] - 2026-10-31
 
 ### Fixed
