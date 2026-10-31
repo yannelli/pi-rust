@@ -28,10 +28,28 @@ impl Process {
         lines.iter().cloned().collect::<Vec<_>>().join("\n")
     }
 
-    /// Stops the agent and waits for it to exit.
+    /// Stops the agent and the processes it started, and waits for it to exit.
     pub async fn shutdown(&mut self) {
+        kill_group(&self.child);
         let _ = self.child.kill().await;
     }
+}
+
+impl Drop for Process {
+    fn drop(&mut self) {
+        kill_group(&self.child);
+    }
+}
+
+/// Kills the process group of the agent, which `spawn` made with the agent as its leader. A
+/// reaped child has no ID, so pi never signals a reused one.
+fn kill_group(child: &Child) {
+    #[cfg(unix)]
+    if let Some(pid) = child.id().and_then(|id| i32::try_from(id).ok()).and_then(rustix::process::Pid::from_raw) {
+        let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+    }
+    #[cfg(not(unix))]
+    let _ = child;
 }
 
 /// Leaks one label per agent name; agents come from settings, so the set is small.

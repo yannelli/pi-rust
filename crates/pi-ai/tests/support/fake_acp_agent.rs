@@ -1,9 +1,11 @@
 //! A scripted ACP agent for the `acp` provider tests. The prompt text picks the script: `tools`
 //! edits a file with permission, `wait` runs until `session/cancel`, anything else echoes.
 //! `own-edit` edits files with the agent's own tools, `probe` tries what a read-only session
-//! refuses, `mcp` lists the MCP servers, and `/name` echoes a slash command.
+//! refuses, `mcp` lists the MCP servers, `proxy-call` calls a tool of pi's MCP proxy,
+//! `wait-child` starts a `sleep` child and waits for `session/cancel`, and `/name` echoes a
+//! slash command.
 
-use std::io::{BufRead, Write};
+use std::io::{BufRead, Read, Write};
 
 use serde_json::{Value, json};
 
@@ -14,7 +16,27 @@ struct Agent {
     mode: String,
     model: String,
     turns: u32,
-    mcp: Vec<String>,
+    mcp: Vec<Value>,
+}
+
+/// One MCP request to a streamable HTTP server, reading the first JSON-RPC reply of the stream.
+fn mcp_post(url: &str, authorization: &str, body: &Value) -> Value {
+    let rest = url.strip_prefix("http://").unwrap_or(url);
+    let (address, path) = rest.split_once('/').unwrap_or((rest, ""));
+    let Ok(mut stream) = std::net::TcpStream::connect(address) else { return Value::Null };
+    let body = body.to_string();
+    let request = format!(
+        "POST /{path} HTTP/1.1\r\nhost: {address}\r\nauthorization: {authorization}\r\n\
+         content-type: application/json\r\naccept: application/json, text/event-stream\r\n\
+         content-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let mut response = String::new();
+    if stream.write_all(request.as_bytes()).is_err() || stream.read_to_string(&mut response).is_err() {
+        return Value::Null;
+    }
+    let data = response.lines().find_map(|line| line.strip_prefix("data: "));
+    data.and_then(|data| serde_json::from_str(data).ok()).unwrap_or_default()
 }
 
 fn send(message: &Value) {
@@ -134,16 +156,34 @@ impl Agent {
         let options = json!([{"optionId": "yes", "name": "Allow", "kind": "allow_once"}]);
         let answer =
             self.call("session/request_permission", json!({"sessionId": "s1", "toolCall": call, "options": options}));
+        let child = std::process::Command::new("sleep").arg("30").spawn().map(|child| child.id()).unwrap_or_default();
         chunk(
             "agent_message_chunk",
             &format!(
-                "write-rejected={} terminal-rejected={} permission={} pid={}",
+                "write-rejected={} terminal-rejected={} permission={} child={child} pid={}",
                 write.get("error").is_some(),
                 terminal.get("error").is_some(),
                 answer["outcome"]["outcome"],
                 std::process::id()
             ),
         );
+    }
+
+    /// Lists the tools of pi's MCP proxy and calls the first one.
+    fn proxy_call(&self) {
+        let Some(proxy) = self.mcp.iter().find(|server| server["name"] == "pi-mcp") else {
+            return chunk("agent_message_chunk", "no proxy");
+        };
+        let (url, authorization) = (proxy["url"].as_str().unwrap_or_default(), &proxy["headers"][0]["value"]);
+        let authorization = authorization.as_str().unwrap_or_default();
+        let list = mcp_post(url, authorization, &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}));
+        let tools = list.pointer("/result/tools").and_then(Value::as_array).cloned().unwrap_or_default();
+        let names: Vec<&str> = tools.iter().filter_map(|tool| tool["name"].as_str()).collect();
+        let call = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": {"name": names.first().copied().unwrap_or_default(), "arguments": {"query": "rust"}}});
+        let result = mcp_post(url, authorization, &call);
+        let text = result.pointer("/result/content/0/text").and_then(Value::as_str).unwrap_or_default();
+        chunk("agent_message_chunk", &format!("proxy-tools={} proxy-result={text}", names.join(",")));
     }
 
     fn prompt(&mut self, params: &Value, cwd: &str) -> Value {
@@ -158,7 +198,23 @@ impl Agent {
         match text.as_str() {
             "own-edit" => self.own_edit(cwd),
             "probe" => self.probe(cwd),
-            "mcp" => chunk("agent_message_chunk", &format!("mcp={}", self.mcp.join(","))),
+            "mcp" => {
+                let names: Vec<&str> = self.mcp.iter().filter_map(|server| server["name"].as_str()).collect();
+                chunk("agent_message_chunk", &format!("mcp={}", names.join(",")));
+            }
+            "proxy-call" => self.proxy_call(),
+            "wait-child" => {
+                let child = std::process::Command::new("sleep").arg("30").spawn().map(|child| child.id());
+                chunk("agent_message_chunk", &format!("child={}", child.unwrap_or_default()));
+                while !self.cancelled {
+                    match self.lines.next() {
+                        Some(Ok(line)) if line.contains("session/cancel") => self.cancelled = true,
+                        Some(Ok(_)) => {}
+                        _ => break,
+                    }
+                }
+                return json!({"stopReason": "cancelled"});
+            }
             command if command.starts_with('/') => chunk("agent_message_chunk", &format!("command={command}")),
             "tools" => self.tools(cwd),
             "wait" => {
@@ -202,8 +258,7 @@ impl Agent {
                 "authenticate" => json!({}),
                 "session/new" | "session/load" => {
                     cwd = params["cwd"].as_str().unwrap_or_default().to_string();
-                    let servers = params["mcpServers"].as_array().into_iter().flatten();
-                    self.mcp = servers.filter_map(|server| server["name"].as_str().map(str::to_string)).collect();
+                    self.mcp = params["mcpServers"].as_array().cloned().unwrap_or_default();
                     if method == "session/load" {
                         chunk("agent_message_chunk", "replayed history");
                     }

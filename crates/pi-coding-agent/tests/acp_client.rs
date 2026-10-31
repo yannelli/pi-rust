@@ -3,6 +3,9 @@
 
 #[path = "../../pi-ai/tests/support/fake_acp_agent.rs"]
 mod fake_agent;
+#[path = "agent_session/mcp_fake.rs"]
+#[allow(dead_code)]
+mod mcp_fake;
 #[path = "offline_guard/mod.rs"]
 mod offline_guard;
 
@@ -63,7 +66,10 @@ async fn acp_turns_undo_agent_edits_and_survive_compaction() {
     })
     .await;
     let manager = SessionManager::in_memory(&cwd);
-    let session = create_agent_session(CreateAgentSessionOptions::new(services, manager)).await.unwrap().session;
+    let mut options = CreateAgentSessionOptions::new(services, manager);
+    let docs = mcp_fake::Fake::new(mcp_fake::FakeOptions::default());
+    options.mcp = docs.session_options("docs", json!({"url": "https://docs.invalid/mcp"}), json!({}));
+    let session = create_agent_session(options).await.unwrap().session;
     assert_eq!(session.model().map(|model| model.provider).as_deref(), Some("fake-acp"));
 
     session.prompt("own-edit", Vec::new()).await.unwrap();
@@ -98,6 +104,12 @@ async fn acp_turns_undo_agent_edits_and_survive_compaction() {
     session.prompt("again", Vec::new()).await.unwrap();
     let reply = last_reply(&session);
     assert!(reply.starts_with("Hello [text] mode=ask model=fast turn=4 "), "the agent session continued: {reply}");
+    session.prompt("proxy-call", Vec::new()).await.unwrap();
+    let reply = last_reply(&session);
+    let tools = "proxy-tools=pi_mcp__docs__search,pi_mcp__docs__fail,pi_mcp__docs__shot";
+    assert!(reply.contains(&format!("{tools} proxy-result=rust guide")), "the OAuth server's tools: {reply}");
+    assert_eq!(docs.calls(), [r#"search:{"query":"rust"}"#], "pi called the tool with its own connection");
+
     let state = host::read_state(&agent_dir);
     assert_eq!(state.sessions.len(), 1, "the summary session is not recorded: {:?}", state.sessions);
 }

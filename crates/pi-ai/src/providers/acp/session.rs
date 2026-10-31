@@ -154,6 +154,7 @@ pub(crate) struct Runtime {
     pub last_reply: Option<i64>,
     /// Shown once in the next reply, for example MCP servers the agent did not get.
     pub notices: Vec<String>,
+    pub proxy: Option<super::proxy::Proxy>,
 }
 
 impl Runtime {
@@ -168,10 +169,21 @@ impl Runtime {
     ) -> Result<(Self, bool), String> {
         let Connected { connection, process, initialize } = connect(&agent, &cwd).await?;
         let capabilities = &initialize["agentCapabilities"];
-        let (servers, notices) = match read_only {
+        let (mut servers, mut notices) = match read_only {
             true => (Vec::new(), Vec::new()),
             false => super::mcp::servers(capabilities, &agent.name),
         };
+        let mut proxy = None;
+        if !read_only {
+            match super::proxy::start(capabilities, &agent.name, pi_session).await {
+                Ok(Some((server, started))) => {
+                    servers.push(server);
+                    proxy = Some(started);
+                }
+                Ok(None) => {}
+                Err(notice) => notices.push(notice),
+            }
+        }
         let resume = host().filter(|_| !read_only).and_then(|host| host.recall_session(&agent.provider, pi_session));
         let can_load = capabilities["loadSession"] == json!(true);
         let mut reply = None;
@@ -219,6 +231,7 @@ impl Runtime {
             pi_model: super::DEFAULT_MODEL.into(),
             last_reply: None,
             notices,
+            proxy,
         };
         Ok((runtime, resumed))
     }

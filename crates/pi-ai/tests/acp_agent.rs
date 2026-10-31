@@ -8,7 +8,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use async_trait::async_trait;
 use futures::StreamExt;
 use pi_ai::providers::acp::{
-    self, AcpHost, AgentLaunch, FileChange, PermissionRequest, PlanEntry, PriorFile, SessionInfo,
+    self, AcpHost, AgentLaunch, FileChange, McpProxy, PermissionRequest, PlanEntry, PriorFile, ProxyTool, SessionInfo,
 };
 use pi_ai::providers::antigravity_acp::{PassthroughMcpServer, set_passthrough_mcp_servers};
 use pi_ai::registry::{ApiProvider, StreamOptions};
@@ -27,6 +27,7 @@ struct Host {
     changes: Mutex<Vec<(String, FileChange)>>,
     /// `(pi session, started)` for each turn hook.
     turns: Mutex<Vec<(String, bool)>>,
+    proxy_calls: Mutex<Vec<(String, String, serde_json::Value)>>,
 }
 
 #[async_trait]
@@ -60,6 +61,37 @@ impl AcpHost for Host {
     fn turn_ended(&self, pi_session: &str, _cwd: &std::path::Path) {
         self.turns.lock().unwrap().push((pi_session.into(), false));
     }
+    async fn mcp_proxy(&self, pi_session: &str) -> McpProxy {
+        if !pi_session.starts_with("proxy") {
+            return McpProxy::default();
+        }
+        let schema = serde_json::json!({"type": "object", "properties": {"query": {"type": "string"}}});
+        let tool = ProxyTool { name: "mcp__docs__search".into(), description: "Search the docs".into(), schema };
+        McpProxy { servers: vec!["docs".into()], tools: vec![tool] }
+    }
+    async fn call_mcp_proxy(&self, pi_session: &str, tool: &str, arguments: serde_json::Value) -> serde_json::Value {
+        self.proxy_calls.lock().unwrap().push((pi_session.into(), tool.into(), arguments.clone()));
+        serde_json::json!({"content": [{"type": "text", "text": format!("searched {}", arguments["query"])}]})
+    }
+}
+
+/// Whether process `pid` (a positive ID) is gone within three seconds, reaped zombies included.
+#[cfg(unix)]
+fn exits(pid: &str) -> bool {
+    assert!(pid.parse::<u32>().is_ok_and(|pid| pid > 0), "not a process ID: {pid}");
+    for _ in 0..60 {
+        let alive = std::process::Command::new("kill").args(["-0", pid]).status().unwrap().success();
+        let zombie = std::process::Command::new("ps").args(["-o", "stat=", "-p", pid]).output().unwrap();
+        if !alive || String::from_utf8_lossy(&zombie.stdout).trim_start().starts_with('Z') {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    false
+}
+
+fn field<'a>(text: &'a str, key: &str) -> &'a str {
+    text.split(&format!("{key}=")).nth(1).and_then(|rest| rest.split_whitespace().next()).unwrap_or_default()
 }
 
 static HOST: LazyLock<Arc<Host>> = LazyLock::new(|| {
@@ -297,10 +329,38 @@ async fn summaries_run_read_only_in_a_process_of_their_own() {
     assert!(HOST.turns.lock().unwrap().iter().all(|(session, _)| *session != id));
     #[cfg(unix)]
     {
-        let pid = text.rsplit("pid=").next().unwrap().trim();
-        let alive = std::process::Command::new("kill").args(["-0", pid]).status().unwrap().success();
-        assert!(!alive, "the one-shot agent {pid} exited");
+        assert!(exits(field(&text, "pid")), "the one-shot agent exited: {text}");
+        assert!(exits(field(&text, "child")), "the process the agent started exited too: {text}");
     }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_cancelled_summary_stops_the_agent_and_its_children() {
+    let (_dir, id) = session("summary-cancel");
+    let cancel = CancellationToken::new();
+    let context = Context { messages: vec![Message::user("wait-child")], ..Context::default() };
+    let mut stream = acp::Acp.stream(&model("default"), &context, options(&id, cancel.clone()));
+    let mut seen = String::new();
+    while let Some(event) = stream.next().await {
+        if let AssistantMessageEvent::TextDelta { delta, .. } = &event {
+            seen.push_str(delta);
+            if seen.contains("child=") {
+                cancel.cancel();
+            }
+        }
+    }
+    assert!(exits(field(&seen, "child")), "the child of the cancelled agent exited: {seen}");
+}
+
+#[tokio::test]
+async fn servers_whose_login_pi_holds_reach_the_agent_through_the_proxy() {
+    let (_dir, id) = session("proxy");
+    let (_, message) = ask("default", vec![Message::user("proxy-call")], options(&id, CancellationToken::new())).await;
+    let text = text(&message);
+    assert!(text.contains("proxy-tools=pi_mcp__docs__search proxy-result=searched \"rust\""), "{text}");
+    let calls = HOST.proxy_calls.lock().unwrap();
+    assert_eq!(calls.as_slice(), [(id.clone(), "mcp__docs__search".into(), serde_json::json!({"query": "rust"}))]);
 }
 
 #[tokio::test]

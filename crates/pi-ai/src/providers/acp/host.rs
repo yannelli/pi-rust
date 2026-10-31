@@ -121,6 +121,22 @@ pub struct FileChange {
     pub written: Option<Vec<u8>>,
 }
 
+/// An MCP tool that pi calls for the agent, from a server whose login pi holds.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ProxyTool {
+    /// The pi tool name, such as `mcp__docs__search`.
+    pub name: String,
+    pub description: String,
+    pub schema: Value,
+}
+
+/// The MCP servers that the agent reaches through pi's loopback proxy, and their tools.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct McpProxy {
+    pub servers: Vec<String>,
+    pub tools: Vec<ProxyTool>,
+}
+
 #[async_trait]
 pub trait AcpHost: Send + Sync {
     /// The chosen `optionId`, or `None` to answer `cancelled`.
@@ -146,6 +162,14 @@ pub trait AcpHost: Send + Sync {
     fn turn_started(&self, _pi_session: &str, _cwd: &std::path::Path) {}
     /// Called on a blocking thread after the turn ends, also when it fails or is cancelled.
     fn turn_ended(&self, _pi_session: &str, _cwd: &std::path::Path) {}
+    /// The servers whose tools pi offers the agent through its proxy (see [`McpProxy`]).
+    async fn mcp_proxy(&self, _pi_session: &str) -> McpProxy {
+        McpProxy::default()
+    }
+    /// Calls proxy tool `tool`; the reply is an MCP `CallToolResult`.
+    async fn call_mcp_proxy(&self, _pi_session: &str, tool: &str, _arguments: Value) -> Value {
+        crate::providers::antigravity_acp::error_result(&format!("pi has no MCP tool {tool}"))
+    }
 }
 
 static AGENTS: LazyLock<RwLock<Vec<AgentLaunch>>> = LazyLock::new(RwLock::default);

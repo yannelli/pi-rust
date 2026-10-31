@@ -9,6 +9,7 @@ mod host;
 mod mcp;
 mod process;
 mod prompt;
+mod proxy;
 mod render;
 mod session;
 mod terminal;
@@ -24,8 +25,8 @@ use tokio_util::sync::CancellationToken;
 
 pub use self::auth::{AuthMethod, TerminalLogin, auth_methods, auth_methods_of, authenticate};
 pub use self::host::{
-    AcpHost, AgentCommand, AgentLaunch, Choice, FileChange, PermissionRequest, PlanEntry, PriorFile, Selector,
-    SessionInfo, agent, set_agents, set_host,
+    AcpHost, AgentCommand, AgentLaunch, Choice, FileChange, McpProxy, PermissionRequest, PlanEntry, PriorFile,
+    ProxyTool, Selector, SessionInfo, agent, set_agents, set_host,
 };
 use self::render::Transcript;
 use self::session::{Runtime, rpc, slot};
@@ -137,6 +138,9 @@ async fn run(
         *guard = Some(runtime);
     }
     let runtime = guard.as_mut().expect("started above");
+    if let Some(proxy) = &runtime.proxy {
+        proxy.refresh(pi_session).await;
+    }
     prepare(runtime, model, options).await?;
     let blocks = prompt::build(messages, runtime.seen, runtime.capabilities, &runtime.client.cwd);
     out.start();

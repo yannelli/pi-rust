@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-use self::bridge::{BridgeTool, error_result};
+pub(crate) use self::bridge::{BridgeTool, error_result};
 use self::runtime::{Runtime, rpc, slot};
 use crate::providers::acp::connection::{Connection, Incoming};
 use crate::providers::common::short_hash;
@@ -25,6 +25,7 @@ use crate::simple_options::{clamp_thinking_level, provider_thinking_value};
 use crate::stream::{AssistantMessageEventStream, MessageBuilder, error_stream, event_channel};
 use crate::types::{ContentBlock, Context, Message, Model, ModelCost, StopReason, ThinkingLevel, Usage};
 
+pub(crate) use self::bridge::{Bridge, ParkedCall};
 pub(crate) use self::install::{install, release, root as install_root};
 pub(crate) use self::process::NOT_INSTALLED;
 pub(crate) use self::runtime::{OfferedModel, login, offered_models, passthrough};

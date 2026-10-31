@@ -15,7 +15,8 @@ use crate::auth::oauth::random_uuid;
 pub(crate) const BRIDGE_NAME: &str = "pi-bridge";
 const PROTOCOL_VERSIONS: [&str; 5] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];
 const MAX_BODY_BYTES: usize = 1024 * 1024;
-const MAX_TOOLS: usize = 64;
+/// Tools per `tools/list` page; `nextCursor` gives the rest.
+const PAGE_TOOLS: usize = 64;
 const KEEPALIVE: Duration = Duration::from_secs(15);
 const SCHEMA_ANNOTATIONS: [&str; 7] = ["$schema", "$id", "$comment", "examples", "deprecated", "readOnly", "writeOnly"];
 
@@ -150,10 +151,15 @@ async fn respond(socket: &mut TcpStream, state: &State, request: &Value) -> Valu
         }
         "tools/list" => {
             let tools = state.1.read().unwrap_or_else(|poisoned| poisoned.into_inner());
-            let listed = tools.iter().take(MAX_TOOLS).map(|tool| {
+            let start = params["cursor"].as_str().and_then(|cursor| cursor.parse::<usize>().ok()).unwrap_or(0);
+            let listed = tools.iter().skip(start).take(PAGE_TOOLS).map(|tool| {
                 json!({"name": exposed_name(&tool.name), "description": tool.description, "inputSchema": clean_schema(&tool.schema)})
             });
-            json!({"tools": listed.collect::<Vec<_>>()})
+            let mut page = json!({"tools": listed.collect::<Vec<_>>()});
+            if start + PAGE_TOOLS < tools.len() {
+                page["nextCursor"] = json!((start + PAGE_TOOLS).to_string());
+            }
+            page
         }
         "tools/call" => call(socket, state, params).await,
         _ => json!({}),
@@ -231,6 +237,20 @@ mod tests {
         let client = reqwest::Client::builder().no_proxy().build().unwrap();
         let response = client.post(&bridge.url).bearer_auth(token).json(&body).send().await.unwrap();
         (response.status().as_u16(), response.text().await.unwrap())
+    }
+
+    #[tokio::test]
+    async fn tool_lists_page_with_a_cursor() {
+        let (calls, _parked) = mpsc::unbounded_channel();
+        let bridge = Bridge::start(calls).await.unwrap();
+        let tool = |n: usize| BridgeTool { name: format!("t{n}"), description: String::new(), schema: json!({}) };
+        bridge.set_tools((0..PAGE_TOOLS + 1).map(tool).collect());
+        let list =
+            |cursor: Value| json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {"cursor": cursor}});
+        let (_, first) = post(&bridge, &bridge.token, list(Value::Null)).await;
+        assert!(first.contains(r#""nextCursor":"64""#) && first.contains("pi_t63") && !first.contains("pi_t64"));
+        let (_, second) = post(&bridge, &bridge.token, list(json!("64"))).await;
+        assert!(second.contains("pi_t64") && !second.contains("nextCursor"), "{second}");
     }
 
     #[tokio::test]

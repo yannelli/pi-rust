@@ -7,7 +7,7 @@ use std::sync::{Arc, LazyLock, Mutex, RwLock, Weak};
 
 use async_trait::async_trait;
 use pi_ai::providers::acp::{
-    AcpHost, AgentCommand, Choice, FileChange, PermissionRequest, PlanEntry, PriorFile, SessionInfo,
+    AcpHost, AgentCommand, Choice, FileChange, McpProxy, PermissionRequest, PlanEntry, PriorFile, SessionInfo,
 };
 use serde::{Deserialize, Serialize};
 
@@ -260,6 +260,24 @@ impl AcpHost for PiAcpHost {
         for (path, prior) in reported.into_iter().filter(|(path, _)| !before.covers(&root, path)) {
             let written = if path.exists() { Written::OnDisk } else { Written::Deleted };
             session.record_file_change(&path, prior, written, false);
+        }
+    }
+
+    async fn mcp_proxy(&self, pi_session: &str) -> McpProxy {
+        let manager = session(pi_session).and_then(|session| session.mcp_manager());
+        match manager {
+            Some(manager) => super::mcp_proxy::offer(&manager).await,
+            None => McpProxy::default(),
+        }
+    }
+
+    async fn call_mcp_proxy(&self, pi_session: &str, tool: &str, arguments: serde_json::Value) -> serde_json::Value {
+        let manager = session(pi_session).and_then(|session| session.mcp_manager());
+        match manager {
+            Some(manager) => super::mcp_proxy::call(&manager, tool, arguments).await,
+            None => {
+                serde_json::json!({"content": [{"type": "text", "text": "The pi session has ended"}], "isError": true})
+            }
         }
     }
 
