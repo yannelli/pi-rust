@@ -2,6 +2,33 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.8.5] - 2026-10-30
+
+### Added
+
+- **tui:** add the /acp browser for ACP agents ([985574b](https://github.com/yannelli/pi-rust/commit/985574b91dad9ba25c6f2b0da9d4ff7b439732e0))
+- **coding-agent:** register ACP agents from acpAgents as providers ([b485b74](https://github.com/yannelli/pi-rust/commit/b485b74286bd195e9bbe0b7f8201b5f847492b5c))
+- **ai:** report SuperGrok and Grok Build usage for the xai login ([71adaf1](https://github.com/yannelli/pi-rust/commit/71adaf1882dba20a07f267db4c85ba6fb9d74aee))
+- **interactive:** cap extension widget height and add /widgets ([4827a77](https://github.com/yannelli/pi-rust/commit/4827a773b5e1c5705758075efce19f5fa06d50ac))
+- **usage:** show subscription limits with /usage, pi usage, and usage.get ([6787804](https://github.com/yannelli/pi-rust/commit/678780480138c7787168ac1f740e32fedfcb30d5))
+- **ai:** add the acp provider for external ACP agents ([16771da](https://github.com/yannelli/pi-rust/commit/16771da2c4ad8a56ef818c0614a76098fb8bb00f))
+
+### Fixed
+
+- **interactive:** render again when the terminal size for extensions changes ([e7c1ed9](https://github.com/yannelli/pi-rust/commit/e7c1ed98d17797e14c0d11fc5ec13c9a4bbc2a9b))
+- **extensions:** send the terminal height to native extensions ([e4f02d5](https://github.com/yannelli/pi-rust/commit/e4f02d5cdfa39dc259057672584a89331c322e75))
+- **interactive:** keep the selected extension select option visible in short terminals ([f1c9a1b](https://github.com/yannelli/pi-rust/commit/f1c9a1bd4e03b6dd5e18fdb14f7528ffffabc20b))
+- **interactive:** bound runtime disposal when quitting ([87725fc](https://github.com/yannelli/pi-rust/commit/87725fc734638472c28f41040d50c8e62dc1eaf3))
+- **tui:** list a single-extension package once in /extensions ([f03bd69](https://github.com/yannelli/pi-rust/commit/f03bd6924faf58ba4598709f1c08bdb835008728))
+- **extensions:** retain stderr labels for canonical path aliases ([b2dc180](https://github.com/yannelli/pi-rust/commit/b2dc1806b3304c1d94afb9dc29a1ee1fc34cc958))
+- **extensions:** match Windows paths in stderr attribution ([27f41b2](https://github.com/yannelli/pi-rust/commit/27f41b20671eed409236def24aa8973435904709))
+- **extensions:** show JavaScript extension stderr as chat warnings in the TUI ([0e042e3](https://github.com/yannelli/pi-rust/commit/0e042e3ce5562551ad00d2366d74c02875174e9d))
+- **extensions:** send the bind mode in the native initialize request ([0fe4d57](https://github.com/yannelli/pi-rust/commit/0fe4d57a608e7a895efb103e55d80fbc5a9bf143))
+- **ai:** read Antigravity usage through the shared ACP connection ([330cc38](https://github.com/yannelli/pi-rust/commit/330cc3893745e170e2a92caff3d9240778dd0fd5))
+- **usage:** open the Antigravity usage session in the working directory, as the login does ([784760e](https://github.com/yannelli/pi-rust/commit/784760e3f30ae6be492b7ba2d5b04ce27f74e9f4))
+- **extensions:** show native extension log lines as notifications in the TUI ([68003ce](https://github.com/yannelli/pi-rust/commit/68003ce252463ff09acb2d6560d9e55195168921))
+- **codemode:** summarize union and multi-line output types in tool descriptions (upstream f6ee9ce9c) ([a8d1aae](https://github.com/yannelli/pi-rust/commit/a8d1aae5f575997d75e7e101c943020352c73eb2))
+
 ## [0.8.4] - 2026-10-30
 
 ### Added
