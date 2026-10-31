@@ -1,10 +1,12 @@
 // The `pi` object each extension factory receives (upstream `createExtensionAPI` and
 // `createExtensionRuntime` in `loader.ts`). Registrations write to the extension; actions go to
 // Rust once the runtime is bound, and throw while extensions are still loading.
+import { constants as bufferConstants } from "node:buffer";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { StringDecoder } from "node:string_decoder";
 import { call, callAsync } from "./bridge.js";
+import { waitForChildProcess } from "./child_wait.js";
 
 export function createEventBus() {
 	const emitter = new EventEmitter();
@@ -25,11 +27,16 @@ export function createEventBus() {
 	};
 }
 
-/** Combined stdout and stderr bytes `pi.exec` keeps before it stops the command. */
-const MAX_EXEC_OUTPUT_BYTES = 16 * 1024 * 1024;
+const DEFAULT_EXEC_MAX_BUFFER = Math.min(256 * 1024 * 1024, bufferConstants.MAX_STRING_LENGTH);
+const FORCE_KILL_DELAY_MS = 5000;
 
-/** Run a command without a shell (upstream `execCommand`); pi-rust adds `options.stdin`. */
+// Run a command without a shell (upstream `execCommand`); pi-rust adds `options.stdin`. Output
+// over `options.maxBuffer` stops the command with `truncated: true` (upstream issue 11360).
 export function execCommand(command, args, cwd, options) {
+	const maxBuffer = options?.maxBuffer ?? DEFAULT_EXEC_MAX_BUFFER;
+	if (!Number.isInteger(maxBuffer) || maxBuffer < 0 || maxBuffer > bufferConstants.MAX_STRING_LENGTH) {
+		return Promise.reject(new RangeError(`maxBuffer must be an integer between 0 and ${bufferConstants.MAX_STRING_LENGTH} bytes`));
+	}
 	return new Promise((resolve) => {
 		const stdin = typeof options?.stdin === "string" ? options.stdin : undefined;
 		const proc = spawn(command, args, { cwd, shell: false, stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"] });
@@ -39,39 +46,41 @@ export function execCommand(command, args, cwd, options) {
 		}
 		let stdout = "";
 		let stderr = "";
-		// Unbounded output could exhaust the string limit (upstream issue 11360), so the command
-		// is stopped at the cap and fails with a marker instead of reading as a success.
-		let outputBytes = 0;
-		let overflowed = false;
 		// A multi-byte character can be split between two chunks (upstream #11312).
 		const stdoutDecoder = new StringDecoder("utf8");
 		const stderrDecoder = new StringDecoder("utf8");
+		let outputBytes = 0;
+		let truncated = false;
 		let killed = false;
 		let timer;
+		let forceKill;
 		const kill = () => {
 			if (killed) return;
 			killed = true;
 			proc.kill("SIGTERM");
-			setTimeout(() => {
-				if (proc.exitCode === null) proc.kill("SIGKILL");
-			}, 5000).unref?.();
+			forceKill = setTimeout(() => {
+				// `proc.killed` only says a signal was sent; check that the child has not exited.
+				if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL");
+			}, FORCE_KILL_DELAY_MS);
 		};
 		if (options?.signal) {
 			if (options.signal.aborted) kill();
 			else options.signal.addEventListener("abort", kill, { once: true });
 		}
 		if (options?.timeout > 0) timer = setTimeout(kill, options.timeout);
+		// Close both pipes on overflow, so a descendant that keeps writing cannot keep the call open.
 		const take = (data) => {
-			if (overflowed) return undefined;
-			const room = MAX_EXEC_OUTPUT_BYTES - outputBytes;
+			if (truncated) return undefined;
+			const room = maxBuffer - outputBytes;
 			if (data.length <= room) {
 				outputBytes += data.length;
 				return data;
 			}
-			overflowed = true;
-			outputBytes = MAX_EXEC_OUTPUT_BYTES;
+			truncated = true;
+			proc.stdout?.destroy();
+			proc.stderr?.destroy();
 			kill();
-			return data.subarray(0, room);
+			return room > 0 ? data.subarray(0, room) : undefined;
 		};
 		proc.stdout?.on("data", (data) => {
 			const kept = take(data);
@@ -81,21 +90,25 @@ export function execCommand(command, args, cwd, options) {
 			const kept = take(data);
 			if (kept) stderr += stderrDecoder.write(kept);
 		});
+		let finished = false;
 		const finish = (code, error) => {
+			if (finished) return;
+			finished = true;
 			clearTimeout(timer);
-			stdout += stdoutDecoder.end();
-			stderr += stderrDecoder.end();
+			clearTimeout(forceKill);
 			options?.signal?.removeEventListener("abort", kill);
-			if (overflowed) {
-				stderr += `${stderr ? "\n" : ""}[output exceeded ${MAX_EXEC_OUTPUT_BYTES} bytes; output is incomplete]`;
-				resolve({ stdout, stderr, code: code || 1, killed });
-				return;
+			// A truncated result drops an incomplete character instead of adding U+FFFD.
+			if (!truncated) {
+				stdout += stdoutDecoder.end();
+				stderr += stderrDecoder.end();
 			}
 			// A command that could not start reports why, unlike one that exits 1 without output.
-			resolve({ stdout, stderr: stderr || (error?.message ?? ""), code, killed });
+			if (error && !stderr) stderr = error.message;
+			const exitCode = code ?? 0;
+			resolve({ stdout, stderr, code: truncated && exitCode === 0 ? 1 : exitCode, killed, truncated });
 		};
-		proc.on("error", (error) => finish(1, error));
-		proc.on("close", (code) => finish(code ?? 0));
+		// Do not hang on inherited stdio handles held open by detached descendants.
+		waitForChildProcess(proc).then((code) => finish(code), (error) => finish(1, error));
 	});
 }
 

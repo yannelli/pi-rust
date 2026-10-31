@@ -5,6 +5,7 @@ mod api;
 mod events;
 mod examples;
 mod examples_more;
+mod exec;
 mod harness;
 mod host;
 #[path = "../agent_session/http_mock.rs"]
