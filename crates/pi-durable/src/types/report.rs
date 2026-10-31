@@ -3,6 +3,7 @@
 use serde::Serialize;
 
 use crate::ids::{ConversationId, TaskId};
+use crate::types::TaskOutcomeError;
 
 /// The task a report is about.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -35,6 +36,24 @@ pub enum FaultReason {
     RestartLimit,
 }
 
+/// Why crashes ended a built-in task.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InterruptionReason {
+    RestartLimit,
+    Interrupted,
+}
+
+impl InterruptionReason {
+    pub(crate) fn from_error(error: &TaskOutcomeError) -> Option<Self> {
+        match error.detail.as_ref()?.get("reason")?.as_str()? {
+            "restart_limit" => Some(Self::RestartLimit),
+            "interrupted" => Some(Self::Interrupted),
+            _ => None,
+        }
+    }
+}
+
 /// Why a running task keeps running under its old definition: it was uninstalled, or replaced by one that cannot
 /// take over its state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -57,11 +76,13 @@ pub enum ReportInfo {
         extension: Option<String>,
         reason: FaultReason,
     },
-    /// The restart limit parked the task until `Harness::retry_task()`.
-    TaskParked {
+    /// Crashes ended a built-in task, with its restart count when it ended.
+    TaskInterrupted {
         task: ReportTask,
         #[serde(skip_serializing_if = "Option::is_none")]
         extension: Option<String>,
+        reason: InterruptionReason,
+        restarts: u32,
     },
     /// The task's stored state could not be migrated; it is blocked until the registry changes.
     MigrationFailed {

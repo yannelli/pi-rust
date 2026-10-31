@@ -79,8 +79,7 @@ pub struct HarnessOptions {
     pub on_wake: Option<WakeFn>,
     /// Receives failures that do not fail the calling operation, such as a failing hook or listener, a task that
     /// faulted, and the error that fails the Session, once. The [`ReportInfo`] says what happened: a host can tell a
-    /// failed Session (`SessionFailed`, often a platform reset) from a faulted task (`TaskFaulted`) or a parked one
-    /// (`TaskParked`).
+    /// failed Session (`SessionFailed`, often a platform reset) from a faulted task (`TaskFaulted`).
     pub on_report: Option<ReportFn>,
     /// Open for reading only, as a viewer of a session that another process drives, for example a synced copy on a
     /// device that only shows it. Open recovers nothing: a `running` task stays as committed. Every commit with writes

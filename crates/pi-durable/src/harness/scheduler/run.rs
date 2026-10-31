@@ -5,7 +5,6 @@ use std::sync::{Arc, Mutex};
 use pi_chord::{AbortController, Json, with_abort_signal};
 use tokio::sync::watch;
 
-use super::index::is_parked;
 use super::{Invocation, Mode, SchedState, Scheduler, Up, installer_of, report_task, with_abort_mark, with_state};
 use crate::errors::{DurableError, DurableResult};
 use crate::harness::registry::RegistrySnapshot;
@@ -25,8 +24,6 @@ struct Pass {
     abandoned: Vec<TaskId>,
     /// Abort-marked tasks faulted by the restart limit, with their messages, to report.
     faulted: Vec<(TaskRecord, String)>,
-    /// Whether tasks were parked or unparked without a commit, as after a changed limit: the graph must hear it.
-    parked_changed: bool,
 }
 
 pub(crate) struct Reservation {
@@ -82,9 +79,6 @@ impl Scheduler {
             }
             state.dirty = true;
         }
-        if pass.parked_changed {
-            self.notify_blocked();
-        }
         Ok(reservations)
     }
 
@@ -119,14 +113,12 @@ impl Scheduler {
             }
         }
         self.load_scopes(false).await?;
-        let limit = self.restart_limit();
         let now = self.core.now();
         {
             // Every pass picks up sleeps whose time has come: a pass started by any change may be the first to run after
             // a deadline, and the wake it schedules no longer keeps a timer for a due sleep.
             let mut state = lock(&self.state);
             state.wake_due(now);
-            pass.parked_changed = state.unpark_raised(limit);
         }
         let candidates: Vec<TaskId> = lock(&self.state).runnable.iter().copied().collect();
         let mut snapshot: Option<RegistrySnapshot> = None;
@@ -148,12 +140,6 @@ impl Scheduler {
                     state.runnable.remove(&id);
                     continue;
                 }
-                // It returns when `retry()` clears its restart count, or at a pass after the restart limit rose.
-                if is_parked(&record, limit) {
-                    state.runnable.remove(&id);
-                    pass.parked_changed |= state.parked.insert(id);
-                    continue;
-                }
                 let below = !record.abort_requested && !record.background && state.below_cancelled(Up::of(&record));
                 (record, below)
             };
@@ -165,10 +151,13 @@ impl Scheduler {
                 self.schedule_reconcile();
                 continue;
             }
-            // An abort handler cut off `restart_limit` times in a row would run forever; nothing is left to park it for.
-            if mode == Mode::Abort && f64::from(restarts) >= limit {
-                let message =
-                    format!("Abort handler of task {} ({}) was cut off {restarts} times", record.id, record.kind);
+            let cut_off = record.restarts.is_some_and(|count| f64::from(count) >= self.restart_limit());
+            if cut_off && (mode == Mode::Abort || !crate::harness::live::limits_restarts(&record.kind)) {
+                let message = if mode == Mode::Abort {
+                    format!("Abort handler of task {} ({}) was cut off {restarts} times", record.id, record.kind)
+                } else {
+                    format!("Task {} ({}) was cut off {restarts} times without progress", record.id, record.kind)
+                };
                 let error = TaskOutcomeError {
                     message: message.clone(),
                     detail: Some(Json::from(serde_json::json!({ "reason": "restart_limit" }))),
@@ -300,9 +289,6 @@ impl Scheduler {
             {
                 return TaskInspectionState::Sleeping { until };
             }
-        }
-        if self.parked(record.abort_requested, record.restarts) {
-            return TaskInspectionState::Blocked { reason: BlockedReason::RestartLimit, error: None };
         }
         match self.fit(record.id, record.version, snapshot.task(&record.kind)) {
             Err((reason, error)) => TaskInspectionState::Blocked { reason, error: error.map(|e| e.to_string()) },

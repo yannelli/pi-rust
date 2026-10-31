@@ -150,6 +150,10 @@ pub enum RunFailureReason {
     Faulted,
     /// The run's task was aborted while no registered definition could take it.
     Orphaned,
+    /// The host stopped during requests or polls more often than the retry policy allows.
+    Interrupted,
+    /// The generation was cut off repeatedly without committing progress.
+    RestartLimit,
 }
 
 impl RunFailureReason {
@@ -161,6 +165,8 @@ impl RunFailureReason {
             Self::Reset => "reset",
             Self::Faulted => "faulted",
             Self::Orphaned => "orphaned",
+            Self::Interrupted => "interrupted",
+            Self::RestartLimit => "restart_limit",
         }
     }
 }
@@ -461,6 +467,27 @@ const TOOL_TASK_KIND: &str = "pi.tool";
 const COMPACTION_TASK_KIND: &str = "pi.compaction";
 const RUN_TASK_KIND: &str = "pi.generation";
 
+/// Built-in phases end themselves at the limit; the scheduler faults other task kinds.
+pub(crate) fn limits_restarts(kind: &str) -> bool {
+    matches!(kind, TOOL_TASK_KIND | COMPACTION_TASK_KIND | RUN_TASK_KIND)
+}
+
+pub(crate) fn cut_off_too_often(task: &TaskRecord, runtime: &super::scheduler::TaskRuntime) -> bool {
+    task.restarts.is_some_and(|count| f64::from(count) >= runtime.settings().restart_limit)
+}
+
+/// Cleanup is attempted at the limit; beyond it, that cleanup may be what keeps failing.
+pub(crate) fn salvageable(task: &TaskRecord, runtime: &super::scheduler::TaskRuntime) -> bool {
+    task.restarts.is_none_or(|count| f64::from(count) <= runtime.settings().restart_limit)
+}
+
+pub(crate) fn cut_off_count(task: &TaskRecord) -> String {
+    match task.restarts.unwrap_or(0) {
+        1 => "once".into(),
+        count => format!("{count} times in a row"),
+    }
+}
+
 /// Harness cleanup for an outcome the scheduler writes itself (`faulted` or `orphaned`): a run task ends its run, a
 /// tool task's slot is marked done without an entry, and a compaction task's status is removed and its failure
 /// recorded.
@@ -471,6 +498,8 @@ pub async fn settle_scheduler_outcome(tx: &Tx, record: &TaskRecord, outcome: &Ta
     }
     let draft = tx.doc(&LIVE_DOC, record.conversation_id).await?;
     let mut live = draft.get()?;
+    let cut_off = matches!(outcome, TaskOutcome::Faulted { error }
+        if crate::types::InterruptionReason::from_error(error) == Some(crate::types::InterruptionReason::RestartLimit));
     match kind {
         TOOL_TASK_KIND => {
             if let Some(mut slot) = tool_slot(&mut live, record.id) {
@@ -484,15 +513,24 @@ pub async fn settle_scheduler_outcome(tx: &Tx, record: &TaskRecord, outcome: &Ta
                 TaskOutcome::Orphaned { reason } => reason.clone(),
                 other => other.status().to_owned(),
             };
-            fail_compaction_status(&mut live, record.id, error);
+            if cut_off {
+                remove_compaction_status(&mut live, record.id);
+            } else {
+                fail_compaction_status(&mut live, record.id, error);
+            }
         }
         _ => {
             if live.run.as_ref().is_none_or(|run| run.task_id != record.id) {
                 return Ok(());
             }
-            super::generation::convert_partial(tx, &mut live, record.conversation_id).await?;
+            if !cut_off {
+                super::generation::convert_partial(tx, &mut live, record.conversation_id).await?;
+            }
             let end = match outcome {
-                TaskOutcome::Faulted { error } => RunEnd::unanswered(RunFailureReason::Faulted, Some(&error.message)),
+                TaskOutcome::Faulted { error } => RunEnd::unanswered(
+                    if cut_off { RunFailureReason::Aborted } else { RunFailureReason::Faulted },
+                    Some(&error.message),
+                ),
                 TaskOutcome::Orphaned { reason } => RunEnd::Unanswered {
                     reason: RunFailureReason::Orphaned,
                     detail: Some(reason.clone()),

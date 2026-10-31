@@ -8,7 +8,7 @@ use pi_chord::Context;
 use pi_durable::harness::*;
 use pi_durable::models::Models;
 use pi_durable::testing::faux::{FauxProviderHandle, FauxResponseStep, RegisterFauxProviderOptions, faux_provider};
-use pi_durable::{DurableError, EntryDraft, EntryRecord, Storage, TaskQuery, TaskRecord};
+use pi_durable::{DurableError, EntryDraft, EntryRecord, ReportInfo, Storage, TaskQuery, TaskRecord};
 use tokio::sync::Notify;
 
 use super::context;
@@ -20,10 +20,14 @@ pub struct ChatSetup {
     pub models: Arc<dyn Models>,
     pub registry: Arc<Registry>,
     pub reports: Arc<Mutex<Vec<DurableError>>>,
+    /// What each report was about, in the order of `reports`.
+    pub infos: Arc<Mutex<Vec<ReportInfo>>>,
     /// Live Harness settings; tests change them between decisions.
     pub settings: Arc<Mutex<HarnessSettings>>,
     /// Fixed clock in milliseconds; `None` reads the system clock.
     pub now: Arc<Mutex<Option<f64>>>,
+    /// Added to the system clock when `now` is `None`, for a clock that moves but runs ahead.
+    pub now_offset_ms: Arc<Mutex<f64>>,
 }
 
 pub fn chat_setup(options: RegisterFauxProviderOptions) -> ChatSetup {
@@ -33,19 +37,25 @@ pub fn chat_setup(options: RegisterFauxProviderOptions) -> ChatSetup {
         faux,
         registry: Arc::new(create_registry()),
         reports: Arc::default(),
+        infos: Arc::default(),
         settings: Arc::default(),
         now: Arc::default(),
+        now_offset_ms: Arc::default(),
     }
 }
 
 impl ChatSetup {
     pub fn options(&self) -> HarnessOptions {
         let settings = self.settings.clone();
-        let reports = self.reports.clone();
+        let (reports, infos) = (self.reports.clone(), self.infos.clone());
         let mut options = HarnessOptions::new(self.models.clone(), self.registry.clone() as Arc<dyn RegistryReader>)
-            .with_on_report(move |error, _| reports.lock().unwrap().push(error.clone()));
-        let now = self.now.clone();
-        options = options.with_now(move || now.lock().unwrap().unwrap_or_else(system_now));
+            .with_on_report(move |error, info| {
+                reports.lock().unwrap().push(error.clone());
+                infos.lock().unwrap().push(info.clone());
+            });
+        let (now, offset) = (self.now.clone(), self.now_offset_ms.clone());
+        options =
+            options.with_now(move || now.lock().unwrap().unwrap_or_else(|| system_now() + *offset.lock().unwrap()));
         options.settings = Some(Arc::new(move || Ok(settings.lock().unwrap().clone())));
         options
     }

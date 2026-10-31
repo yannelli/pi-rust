@@ -48,6 +48,12 @@ pub(super) struct Request {
 }
 
 pub(super) async fn request(task: TaskRecord, runtime: TaskRuntime, context: Context) -> DurableResult<()> {
+    if crate::harness::live::cut_off_too_often(&task, &runtime) {
+        return super::restart::end_cut_off(task, runtime, context).await;
+    }
+    if task.restarts.is_some() {
+        return super::restart::interrupted(task, runtime, context).await;
+    }
     let GenerationCheckpoint::Request { attempt, compacted, model: model_ref, thinking_level, stream_options, cutoff } =
         decode(&task)?
     else {
@@ -103,6 +109,12 @@ pub(super) async fn request(task: TaskRecord, runtime: TaskRuntime, context: Con
 
 /// After the sleep until `poll_at`; a run before it (an early wake, or a record of an earlier version) sleeps again.
 pub(super) async fn poll(task: TaskRecord, runtime: TaskRuntime, context: Context) -> DurableResult<()> {
+    if crate::harness::live::cut_off_too_often(&task, &runtime) {
+        return super::restart::end_cut_off(task, runtime, context).await;
+    }
+    if task.restarts.is_some() {
+        return super::restart::interrupted(task, runtime, context).await;
+    }
     let GenerationCheckpoint::Poll { attempt, compacted, model: model_ref, thinking_level, cutoff, handle, poll_at } =
         decode(&task)?
     else {
@@ -401,7 +413,7 @@ pub(super) async fn classify(
             let generation =
                 LiveGeneration { retry: Some(RetryState { at: until, error }), ..LiveGeneration::new(attempt) };
             tx.doc(&LIVE_DOC, conversation_id).await?.edit(|live| live.generation = Some(generation))?;
-            return sleeping(&GenerationCheckpoint::Retry { attempt, compacted, until }, until);
+            return sleeping(&GenerationCheckpoint::Retry { attempt, compacted, until, poll: None }, until);
         };
         let text = message.error_message.clone().unwrap_or_else(|| {
             format!("Model response ended with stop reason {}", stop_reason_text(message.stop_reason))

@@ -89,7 +89,6 @@ impl SchedState {
             self.runnable.remove(&id);
             self.finalize_checks.remove(&id);
             self.sleeping.remove(&id);
-            self.parked.remove(&id);
             self.settled.insert(id, node);
             // Before anything is dropped: the walk up to the task it held passes the ended tasks between them. Its chain
             // is loaded, as every commit that ends a task loads the chains of `unloaded` first.
@@ -137,23 +136,6 @@ impl SchedState {
                 self.runnable.insert(*id);
             }
         }
-    }
-
-    /// Make parked tasks that a raised restart limit no longer parks candidates again; whether any were.
-    pub fn unpark_raised(&mut self, limit: f64) -> bool {
-        let mut unparked = false;
-        for id in self.parked.clone() {
-            let record = self.live.get(&id);
-            if record.is_some_and(|record| is_parked(record, limit)) {
-                continue;
-            }
-            self.parked.remove(&id);
-            if record.is_some() {
-                self.runnable.insert(id);
-                unparked = true;
-            }
-        }
-        unparked
     }
 
     /// The nearest live task above ended ordinary work may be free now: one holding its outcome, or an aborting one.
@@ -413,9 +395,4 @@ impl SchedState {
         }
         true
     }
-}
-
-/// A task cut off `limit` times in a row; an abort mark still runs its abort handler.
-pub(super) fn is_parked(record: &TaskRecord, limit: f64) -> bool {
-    !record.abort_requested && record.restarts.is_some_and(|restarts| f64::from(restarts) >= limit)
 }

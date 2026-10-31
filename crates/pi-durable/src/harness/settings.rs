@@ -148,9 +148,8 @@ pub struct HarnessSettings {
     pub document_retention_ms: Option<f64>,
     /// What a failed run does with the inputs queued behind it; default `Keep`.
     pub after_failed_run: Option<AfterFailedRun>,
-    /// How many times in a row a task may be cut off by a crash, eviction, or reset (a close does not count) without
-    /// changing its state before it is parked as blocked (`restart_limit`) instead of run again;
-    /// `Harness::retry_task()` runs it again. Default 5; `f64::INFINITY` never parks. Below 1 means the default.
+    /// Consecutive interruptions without progress before a task ends. Default 5; infinity never ends it for restarts.
+    /// Generations first charge interrupted requests and polls under the retry policy. Below 1 uses the default.
     pub restart_limit: Option<f64>,
 }
 
