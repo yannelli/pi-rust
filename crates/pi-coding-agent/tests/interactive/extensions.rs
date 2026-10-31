@@ -159,12 +159,13 @@ fn drawn_width(screen: &str, prefix: &str) -> Option<usize> {
     line.rsplit(" at ").next()?.split_whitespace().next()?.parse().ok()
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn native_renderers_draw_tool_rows_messages_and_entries_in_the_transcript() {
-    let package = native_package();
+#[test]
+fn native_renderers_draw_tool_rows_messages_and_entries_in_the_transcript() {
     let dog = Watchdog::start("native_renderers_draw_tool_rows_messages_and_entries_in_the_transcript", NATIVE_LIMIT);
-    let dog = &dog;
-    local(async {
+    dog.stage("build Tokio runtime");
+    let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+    let package = native_package();
+    runtime.block_on(local(async {
         dog.stage("start");
         let ui = start(Options {
             files: vec![(".pi/extensions/native/package.json", package)],
@@ -195,8 +196,9 @@ async fn native_renderers_draw_tool_rows_messages_and_entries_in_the_transcript(
         assert_eq!(drawn_width(&screen, "CARD teal card at"), Some(70), "{screen}");
         assert!(screen.contains("NOTE plum at 70 closed"), "{screen}");
         dog.stage("tear down");
-    })
-    .await;
+    }));
+    dog.stage("drop Tokio runtime");
+    drop(runtime);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
