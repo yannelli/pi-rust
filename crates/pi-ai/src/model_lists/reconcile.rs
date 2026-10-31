@@ -5,7 +5,7 @@
 use std::cmp::Reverse;
 use std::collections::HashSet;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::Personalized;
 use crate::models::is_chat_model;
@@ -18,6 +18,8 @@ pub(crate) struct Listed {
     pub name: Option<String>,
     pub context_window: Option<u64>,
     pub max_tokens: Option<u64>,
+    /// Ids of the service tiers the list offers, kept in `compat.serviceTiers`.
+    pub service_tiers: Option<Vec<String>>,
 }
 
 impl Listed {
@@ -117,6 +119,11 @@ fn closest<'a>(chats: &[&'a Model], id: &str) -> Option<&'a Model> {
 fn with_limits(mut model: Model, listed: &Listed) -> Model {
     model.context_window = listed.context_window.unwrap_or(model.context_window);
     model.max_tokens = listed.max_tokens.unwrap_or(model.max_tokens);
+    if let Some(tiers) = &listed.service_tiers {
+        let mut compat = model.compat.take().filter(Value::is_object).unwrap_or_else(|| json!({}));
+        compat["serviceTiers"] = json!(tiers);
+        model.compat = Some(compat);
+    }
     model
 }
 

@@ -10,7 +10,7 @@ use crate::agent_session::{BashResult, StreamingBehavior};
 use crate::resources::SourceInfo;
 
 /// Every command `type`, in the order of `rpc-commands.md`.
-pub const COMMAND_TYPES: [&str; 33] = [
+pub const COMMAND_TYPES: [&str; 34] = [
     "prompt",
     "steer",
     "follow_up",
@@ -25,6 +25,7 @@ pub const COMMAND_TYPES: [&str; 33] = [
     "set_thinking_level",
     "cycle_thinking_level",
     "get_available_thinking_levels",
+    "set_fast_mode",
     "set_steering_mode",
     "set_follow_up_mode",
     "compact",
@@ -102,6 +103,10 @@ pub enum RpcCommand {
     },
     CycleThinkingLevel,
     GetAvailableThinkingLevels,
+    /// pi-rust extension.
+    SetFastMode {
+        enabled: bool,
+    },
     SetSteeringMode {
         mode: QueueMode,
     },
@@ -240,6 +245,10 @@ pub struct RpcSessionState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<Model>,
     pub thinking_level: ThinkingLevel,
+    /// pi-rust extension.
+    pub fast_mode: bool,
+    /// pi-rust extension: whether the current model has a fast mode.
+    pub fast_mode_available: bool,
     pub is_streaming: bool,
     pub is_compacting: bool,
     pub steering_mode: QueueMode,
@@ -353,6 +362,6 @@ mod tests {
         );
         let failed = error(None, Some(&json!("parse")), "boom");
         assert_eq!(failed.to_string(), r#"{"type":"response","command":"parse","success":false,"error":"boom"}"#);
-        assert_eq!(COMMAND_TYPES.len(), 33);
+        assert_eq!(COMMAND_TYPES.len(), 34);
     }
 }

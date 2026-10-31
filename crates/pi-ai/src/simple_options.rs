@@ -87,6 +87,30 @@ pub fn clamp_thinking_level(model: &Model, level: ThinkingLevel) -> ThinkingLeve
         .unwrap_or(ThinkingLevel::Off)
 }
 
+/// Anthropic models with fast mode (`speed: "fast"`) on the first-party API.
+const ANTHROPIC_FAST_MODELS: [&str; 3] = ["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"];
+
+/// Whether `model` has a fast mode (pi-rust extension). A `compat.fastMode` bool decides;
+/// otherwise Anthropic's fast models, Codex models that offer the `priority` service tier, and
+/// Cursor models with fast variants have one.
+pub fn supports_fast(model: &Model) -> bool {
+    let compat = model.compat.as_ref();
+    if let Some(fast) = compat.and_then(|compat| compat.get("fastMode")).and_then(serde_json::Value::as_bool) {
+        return fast;
+    }
+    match model.api.as_str() {
+        "anthropic-messages" => model.provider == "anthropic" && ANTHROPIC_FAST_MODELS.contains(&model.id.as_str()),
+        "openai-codex-responses" => compat
+            .and_then(|compat| compat.get("serviceTiers"))
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|tiers| tiers.iter().any(|tier| tier == "priority")),
+        "cursor-agent" => {
+            compat.is_some_and(|compat| compat.get("cursorFast").is_some_and(serde_json::Value::is_object))
+        }
+        _ => false,
+    }
+}
+
 /// Model sampling parameters, then the ones for the effective thinking level, then the request's.
 pub fn resolve_sampling_params(
     model: &Model,

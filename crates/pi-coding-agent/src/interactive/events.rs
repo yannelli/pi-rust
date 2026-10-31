@@ -46,6 +46,7 @@ impl InteractiveMode {
             UiEvent::EntryAppended(entry) => self.on_entry_appended(entry),
             UiEvent::SessionInfoChanged => self.update_terminal_title(),
             UiEvent::ThinkingLevelChanged => self.update_editor_border_color(),
+            UiEvent::FastModeChanged => {}
             UiEvent::MessageStart(message) => self.on_message_start(message),
             UiEvent::MessageUpdate(message) => self.on_message_update(message),
             UiEvent::MessageEnd(message) => self.on_message_end(message),

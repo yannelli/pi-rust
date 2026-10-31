@@ -8,6 +8,10 @@ use super::{Fetched, ModelListContext, Personalized, get_json};
 use crate::providers::openai_codex::{DEFAULT_CODEX_BASE_URL, chatgpt_account_id};
 use crate::types::Model;
 
+/// The backend lists only the models of this client version, so pi sends a Codex CLI release
+/// (2026-10-29) in place of its own version.
+const CODEX_CLIENT_VERSION: &str = "0.166.0";
+
 /// `{base}/codex/models`, accepting bases that already end in `/codex` or `/codex/responses`.
 fn models_url(base_url: &str) -> String {
     let base = base_url.trim_end_matches('/');
@@ -29,7 +33,10 @@ fn listed(entry: &Value) -> Option<Listed> {
     let context_window = ["/context_window", "/max_context_window", "/contextWindow"]
         .iter()
         .find_map(|pointer| positive(entry, pointer));
-    Some(Listed { name: text("display_name").map(String::from), context_window, ..Listed::new(id) })
+    let service_tiers = entry.get("service_tiers").and_then(Value::as_array).map(|tiers| {
+        tiers.iter().filter_map(|tier| tier.get("id").and_then(Value::as_str)).map(String::from).collect()
+    });
+    Some(Listed { name: text("display_name").map(String::from), context_window, service_tiers, ..Listed::new(id) })
 }
 
 /// The catalog narrowed to the account's Codex models. A token without a ChatGPT account, a
@@ -40,8 +47,7 @@ pub(crate) async fn personalize_codex_catalog(
 ) -> Result<Personalized, String> {
     let Some(token) = context.key() else { return Ok(Personalized::Models(catalog)) };
     let Some(account) = chatgpt_account_id(token) else { return Ok(Personalized::Models(catalog)) };
-    let version = env!("CARGO_PKG_VERSION");
-    let url = format!("{}?client_version={version}", models_url(&context.base(DEFAULT_CODEX_BASE_URL)));
+    let url = format!("{}?client_version={CODEX_CLIENT_VERSION}", models_url(&context.base(DEFAULT_CODEX_BASE_URL)));
     let headers =
         [("authorization", format!("Bearer {token}")), ("chatgpt-account-id", account), ("originator", "pi".into())];
     let Fetched::Json(body) = get_json(context, "OpenAI Codex", &url, &headers).await? else {

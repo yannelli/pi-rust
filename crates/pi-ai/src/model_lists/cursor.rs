@@ -1,8 +1,8 @@
 //! The models of a Cursor login, `aiserver.v1.AiService/AvailableModels` (pi-rust extension): one
-//! model per Cursor model and speed, with a route for each thinking level, as Cursor's own ACP
-//! server groups them. Max mode variants are left out.
+//! model per Cursor model, with a route for each thinking level and the fast routes in
+//! `compat.cursorFast`, as Cursor's own ACP server groups them. Max mode variants are left out.
 
-use serde_json::{Map, Value as Json, json};
+use serde_json::{Value as Json, json};
 
 use super::{MODEL_LIST_TIMEOUT, ModelListContext, Personalized};
 use crate::auth::oauth::random_uuid;
@@ -21,14 +21,21 @@ pub(crate) struct Route {
     pub parameters: Vec<(String, String)>,
 }
 
-/// One pi model: `model` at one speed, with the variant of each thinking level.
+/// The routes of one speed: the default route and the variant of each thinking level.
+#[derive(Debug, PartialEq)]
+pub(crate) struct RouteSet {
+    pub default: Route,
+    pub levels: Vec<(ThinkingLevel, Route)>,
+}
+
+/// One pi model: `model` with its normal routes and, when it has both speeds, its fast routes.
 #[derive(Debug, PartialEq)]
 pub(crate) struct CursorModel {
     pub id: String,
     pub name: String,
     pub model: String,
-    pub default: Route,
-    pub levels: Vec<(ThinkingLevel, Route)>,
+    pub routes: RouteSet,
+    pub fast: Option<RouteSet>,
     pub context_window: Option<u64>,
     pub images: Option<bool>,
 }
@@ -105,6 +112,31 @@ fn configs(details: &[(u32, Value)]) -> Result<Vec<Config>, String> {
     Ok(out)
 }
 
+/// The route set of `group`. A later variant of a level replaces an earlier one, unless that is
+/// the default. The default route is the group's default variant, else the variant of `default_level`.
+fn route_set(group: &[&Config], default_level: Option<ThinkingLevel>) -> Option<RouteSet> {
+    let first = group.first()?;
+    let mut levels: Vec<(ThinkingLevel, Route, bool)> = Vec::new();
+    for config in group {
+        let Some(level) = config.level else { continue };
+        match levels.iter_mut().find(|(known, _, _)| *known == level) {
+            Some(entry) if !entry.2 => *entry = (level, config.route.clone(), config.default),
+            Some(_) => {}
+            None => levels.push((level, config.route.clone(), config.default)),
+        }
+    }
+    levels.sort_by_key(|(level, _, _)| *level);
+    let default = group
+        .iter()
+        .find(|config| config.default)
+        .or_else(|| group.iter().find(|config| config.level.is_some() && config.level == default_level))
+        .unwrap_or(first);
+    Some(RouteSet {
+        default: default.route.clone(),
+        levels: levels.into_iter().map(|(level, route, _)| (level, route)).collect(),
+    })
+}
+
 /// The models of an `AvailableModelsResponse`, without hidden models and repeated ids.
 pub(crate) fn models(response: &[u8]) -> Result<Vec<CursorModel>, String> {
     let mut out: Vec<CursorModel> = Vec::new();
@@ -125,40 +157,22 @@ pub(crate) fn models(response: &[u8]) -> Result<Vec<CursorModel>, String> {
             default: true,
         };
         let configs = if configs.is_empty() { vec![plain] } else { configs };
-        for fast in [false, true] {
-            let group: Vec<&Config> = configs.iter().filter(|config| config.fast == fast).collect();
-            let Some(first) = group.first() else { continue };
-            let mut levels: Vec<(ThinkingLevel, Route, bool)> = Vec::new();
-            for config in &group {
-                let Some(level) = config.level else { continue };
-                match levels.iter_mut().find(|(known, _, _)| *known == level) {
-                    // A later variant of the same level replaces an earlier one, unless that is the default.
-                    Some(entry) if !entry.2 => *entry = (level, config.route.clone(), config.default),
-                    Some(_) => {}
-                    None => levels.push((level, config.route.clone(), config.default)),
-                }
-            }
-            levels.sort_by_key(|(level, _, _)| *level);
-            let default = group
-                .iter()
-                .find(|config| config.default)
-                .or_else(|| group.iter().find(|config| config.level.is_some() && config.level == default_level))
-                .unwrap_or(first);
-            let context = parameter(&default.route.parameters, "context").and_then(context_size);
-            let id = if fast { format!("{model}-fast") } else { model.to_string() };
-            if out.iter().any(|known| known.id == id) {
-                continue;
-            }
-            out.push(CursorModel {
-                name: if fast { format!("{display} Fast") } else { display.clone() },
-                id,
-                model: model.into(),
-                default: default.route.clone(),
-                levels: levels.into_iter().map(|(level, route, _)| (level, route)).collect(),
-                context_window: context.or(standard),
-                images,
-            });
+        let (normal, fast): (Vec<&Config>, Vec<&Config>) = configs.iter().partition(|config| !config.fast);
+        let (normal, fast) = if normal.is_empty() { (fast, Vec::new()) } else { (normal, fast) };
+        let Some(routes) = route_set(&normal, default_level) else { continue };
+        if out.iter().any(|known| known.id == model) {
+            continue;
         }
+        let context = parameter(&routes.default.parameters, "context").and_then(context_size);
+        out.push(CursorModel {
+            id: model.into(),
+            name: display,
+            model: model.into(),
+            fast: route_set(&fast, default_level),
+            routes,
+            context_window: context.or(standard),
+            images,
+        });
     }
     Ok(out)
 }
@@ -166,6 +180,19 @@ pub(crate) fn models(response: &[u8]) -> Result<Vec<CursorModel>, String> {
 fn route_json(route: &Route) -> Json {
     let parameters: Vec<Json> = route.parameters.iter().map(|(id, value)| json!({"id": id, "value": value})).collect();
     json!({"slug": route.slug, "parameters": parameters})
+}
+
+fn levels_json(levels: &[(ThinkingLevel, Route)]) -> Json {
+    Json::Object(levels.iter().map(|(level, route)| (level.as_str().to_string(), route_json(route))).collect())
+}
+
+/// `{slug, parameters}` of the default route, with `levels` when the set has more than one level.
+fn route_set_json(routes: &RouteSet) -> Json {
+    let mut json = route_json(&routes.default);
+    if routes.levels.len() > 1 {
+        json["levels"] = levels_json(&routes.levels);
+    }
+    json
 }
 
 /// A catalog model for `cursor`, with the catalog model of the same id (else the first one) as
@@ -181,24 +208,31 @@ fn model_for(cursor: &CursorModel, catalog: &[Model]) -> Option<Model> {
     if let Some(images) = cursor.images {
         model.input = if images { vec!["text".into(), "image".into()] } else { vec!["text".into()] };
     }
-    let default = route_json(&cursor.default);
+    let default = route_json(&cursor.routes.default);
     let mut compat = model.compat.clone().filter(Json::is_object).unwrap_or_else(|| json!({}));
     compat["cursorModel"] = json!(cursor.model);
     compat["cursorSlug"] = default["slug"].clone();
     compat["cursorParameters"] = default["parameters"].clone();
     compat["cursorMaxMode"] = json!(false);
-    model.reasoning = cursor.levels.len() > 1;
+    match &cursor.fast {
+        Some(fast) => compat["cursorFast"] = route_set_json(fast),
+        None => {
+            if let Some(object) = compat.as_object_mut() {
+                object.remove("cursorFast");
+            }
+        }
+    }
+    let levels = &cursor.routes.levels;
+    model.reasoning = levels.len() > 1;
     if model.reasoning {
-        let levels: Map<String, Json> =
-            cursor.levels.iter().map(|(level, route)| (level.as_str().to_string(), route_json(route))).collect();
-        let offered = |level: ThinkingLevel| cursor.levels.iter().any(|(known, _)| *known == level);
+        let offered = |level: ThinkingLevel| levels.iter().any(|(known, _)| *known == level);
         model.thinking_level_map = Some(
             ThinkingLevel::ALL
                 .into_iter()
                 .map(|level| (level.as_str().to_string(), offered(level).then(|| level.as_str().to_string())))
                 .collect(),
         );
-        compat["cursorLevels"] = Json::Object(levels);
+        compat["cursorLevels"] = levels_json(levels);
     } else {
         model.thinking_level_map = None;
         if let Some(object) = compat.as_object_mut() {
@@ -307,7 +341,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn variants_group_into_one_model_per_speed_with_thinking_levels() {
+    async fn variants_group_into_one_model_with_thinking_levels_and_fast_routes() {
         let server = RouteServer::start(|_| Reply::new(200, "application/proto", response())).await;
         let context = ModelListContext {
             base_url: Some(server.base_url.clone()),
@@ -318,11 +352,11 @@ mod tests {
             panic!("models")
         };
         let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
-        assert_eq!(ids, ["grok-4.7", "grok-4.7-fast", "claude-opus-5", "composer-2.5"]);
+        assert_eq!(ids, ["grok-4.7", "claude-opus-5", "composer-2.5"]);
         let names: Vec<&str> = models.iter().map(|model| model.name.as_str()).collect();
-        assert_eq!(names, ["Grok 4.7", "Grok 4.7 Fast", "Claude Opus 5", "composer-2.5"]);
+        assert_eq!(names, ["Grok 4.7", "Claude Opus 5", "composer-2.5"]);
 
-        let (grok, fast, opus, composer) = (&models[0], &models[1], &models[2], &models[3]);
+        let (grok, opus, composer) = (&models[0], &models[1], &models[2]);
         assert_eq!((grok.context_window, grok.reasoning), (256_000, true));
         assert_eq!(levels(grok), ["low", "high"]);
         let compat = grok.compat.as_ref().unwrap();
@@ -330,13 +364,20 @@ mod tests {
         assert_eq!(compat["cursorSlug"], "grok-4.7-high");
         assert_eq!(compat["cursorLevels"]["low"]["slug"], "grok-4.7-low");
         assert_eq!(compat["cursorLevels"]["low"]["parameters"][1], json!({"id": "reasoning_effort", "value": "low"}));
-        assert_eq!(fast.compat.as_ref().unwrap()["cursorSlug"], "grok-4.7-high-fast");
+        let fast = &compat["cursorFast"];
+        assert_eq!(fast["slug"], "grok-4.7-high-fast");
+        assert_eq!(fast["parameters"][2], json!({"id": "fast", "value": "true"}));
+        assert_eq!(fast["levels"]["low"]["slug"], "grok-4.7-low-fast");
+        assert_eq!(fast["levels"]["high"]["slug"], "grok-4.7-high-fast");
+        assert!(crate::simple_options::supports_fast(grok));
+        assert!(!crate::simple_options::supports_fast(opus));
 
         assert_eq!(levels(opus), ["off", "high", "max"]);
         let opus_levels = &opus.compat.as_ref().unwrap()["cursorLevels"];
         assert_eq!(opus_levels["off"]["slug"], "claude-opus-5-high");
         assert_eq!(opus_levels["max"]["slug"], "claude-opus-5-thinking-max");
         assert_eq!(opus.context_window, 300_000);
+        assert!(opus.compat.as_ref().unwrap().get("cursorFast").is_none());
 
         assert!(!composer.reasoning && composer.thinking_level_map.is_none());
         assert_eq!((composer.input.as_slice(), composer.context_window), (["text".to_string()].as_slice(), 200_000));
@@ -346,6 +387,24 @@ mod tests {
         assert_eq!(request.path, PATH);
         assert_eq!(request.headers["authorization"], "Bearer cursor-token");
         assert_eq!(request.headers["content-type"], "application/proto");
+    }
+
+    #[test]
+    fn fast_only_variants_are_the_normal_routes() {
+        let variant = |slug: &str, fast: &str| {
+            Writer::new().message(1, Writer::new().string(1, "fast").string(2, fast)).string(11, slug)
+        };
+        let only_fast = Writer::new().string(1, "composer-3").message(30, variant("composer-3-fast", "true"));
+        let both = Writer::new()
+            .string(1, "composer-2.5")
+            .message(30, variant("composer-2.5", "false"))
+            .message(30, variant("composer-2.5-fast", "true"));
+        let listed = models(&Writer::new().message(2, only_fast).message(2, both).finish()).unwrap();
+        assert_eq!((listed[0].routes.default.slug.as_str(), listed[0].fast.is_none()), ("composer-3-fast", true));
+        let compat = model_for(&listed[1], &catalog()).unwrap().compat.unwrap();
+        assert_eq!(compat["cursorSlug"], "composer-2.5");
+        let fast = json!({"slug": "composer-2.5-fast", "parameters": [{"id": "fast", "value": "true"}]});
+        assert_eq!(compat["cursorFast"], fast, "one fast level sends no levels");
     }
 
     #[tokio::test]

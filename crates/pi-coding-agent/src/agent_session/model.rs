@@ -3,6 +3,7 @@
 
 use pi_agent::QueueMode;
 use pi_ai::models::{clamp_thinking_level, models_are_equal, supported_thinking_levels};
+use pi_ai::simple_options::supports_fast;
 use pi_ai::{Model, ThinkingLevel};
 
 use super::{AgentSession, AgentSessionEvent, lock};
@@ -157,6 +158,28 @@ impl AgentSession {
                 });
                 runner.emit_detached(event);
             }
+        }
+    }
+
+    /// Whether fast mode is on (pi-rust extension). Providers apply it only where
+    /// [`Self::fast_mode_available`] holds.
+    pub fn fast_mode(&self) -> bool {
+        self.with_state(|state| state.fast)
+    }
+
+    pub fn fast_mode_available(&self) -> bool {
+        self.model().is_some_and(|model| supports_fast(&model))
+    }
+
+    /// Turn fast mode on or off; `persist` saves it as `fastMode`. Not recorded in the session.
+    pub fn set_fast_mode(&self, enabled: bool, persist: bool) {
+        let before = self.fast_mode();
+        self.agent.update_state(|state| state.fast = enabled);
+        if persist {
+            self.settings().set_fast_mode(enabled);
+        }
+        if enabled != before {
+            self.emit(&AgentSessionEvent::FastModeChanged { enabled });
         }
     }
 

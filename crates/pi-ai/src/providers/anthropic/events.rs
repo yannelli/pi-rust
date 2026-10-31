@@ -10,7 +10,7 @@ use crate::json::parse_json_with_repair;
 use crate::providers::common::{SseHandler, compat_value};
 use crate::sse::SseEvent;
 use crate::stream::{MessageBuilder, diagnostic};
-use crate::types::{Model, ModelCost, StopReason, Tool};
+use crate::types::{Model, ModelCost, StopReason, Tool, Usage};
 
 const MESSAGE_EVENTS: [&str; 6] = [
     "message_start",
@@ -31,6 +31,8 @@ enum Block {
 pub(super) struct AnthropicStream {
     model: Model,
     cost: ModelCost,
+    /// Whether the usage reported `speed: "fast"`, which bills at twice the standard price.
+    fast: bool,
     /// Current tools, for mapping Claude Code casing back under OAuth; empty otherwise.
     oauth_tools: Vec<Tool>,
     provider_thinking_level: Option<String>,
@@ -46,6 +48,7 @@ impl AnthropicStream {
         Self {
             model: model.clone(),
             cost: model.cost.clone(),
+            fast: false,
             oauth_tools,
             provider_thinking_level,
             blocks: HashMap::new(),
@@ -152,6 +155,7 @@ impl AnthropicStream {
             }
         }
         let raw = &message["usage"];
+        self.fast |= raw["speed"] == "fast";
         let count = |key: &str| raw[key].as_u64().unwrap_or_default();
         let usage = &mut builder.message_mut().usage;
         usage.input = count("input_tokens");
@@ -160,7 +164,7 @@ impl AnthropicStream {
         usage.cache_write = count("cache_creation_input_tokens");
         usage.cache_write_1h = Some(raw.pointer("/cache_creation/ephemeral_1h_input_tokens").map_or(0, as_count));
         usage.total_tokens = usage.input + usage.output + usage.cache_read + usage.cache_write;
-        usage.apply_cost(&self.cost);
+        apply_cost(usage, &self.cost, self.fast);
     }
 
     /// Local pricing of a server-side fallback model from `compat.allowedFallbackModels`.
@@ -182,6 +186,7 @@ impl AnthropicStream {
             self.stop = Some(map_stop_reason(reason, data.pointer("/delta/stop_details/explanation"))?);
         }
         let raw = &data["usage"];
+        self.fast |= raw["speed"] == "fast";
         let usage = &mut builder.message_mut().usage;
         if raw.is_object() {
             let set = |field: &mut u64, key: &str| {
@@ -201,7 +206,7 @@ impl AnthropicStream {
             }
         }
         usage.total_tokens = usage.input + usage.output + usage.cache_read + usage.cache_write;
-        usage.apply_cost(&self.cost);
+        apply_cost(usage, &self.cost, self.fast);
         // OpenRouter adds billing fields to streamed message_delta usage at runtime.
         if raw.is_object() && crate::providers::openrouter_cost::is_openrouter_model(&self.model) {
             crate::providers::openrouter_cost::apply_openrouter_reported_cost(usage, raw);
@@ -248,6 +253,19 @@ impl AnthropicStream {
         };
         self.blocks.insert(index, entry);
         Ok(())
+    }
+}
+
+/// Catalog pricing, doubled for fast mode.
+fn apply_cost(usage: &mut Usage, cost: &ModelCost, fast: bool) {
+    usage.apply_cost(cost);
+    if fast {
+        let cost = &mut usage.cost;
+        cost.input *= 2.0;
+        cost.output *= 2.0;
+        cost.cache_read *= 2.0;
+        cost.cache_write *= 2.0;
+        cost.total = cost.input + cost.output + cost.cache_read + cost.cache_write;
     }
 }
 

@@ -38,6 +38,8 @@ pub struct CreateAgentSessionOptions {
     pub session_manager: SessionManager,
     pub model: Option<Model>,
     pub thinking_level: Option<ThinkingLevel>,
+    /// Fast mode for this session; unset reads `fastMode` from settings.
+    pub fast: Option<bool>,
     pub scoped_models: Vec<ScopedModel>,
     /// Tool names or `*` patterns; a list of only `+name`/`-name` entries changes the defaults.
     pub tools: Option<Vec<String>>,
@@ -68,6 +70,7 @@ impl CreateAgentSessionOptions {
             session_manager,
             model: None,
             thinking_level: None,
+            fast: None,
             scoped_models: Vec::new(),
             tools: None,
             exclude_tools: Vec::new(),
@@ -210,6 +213,7 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
     agent.update_state(|state| {
         state.system_prompt = None;
         state.thinking_level = thinking;
+        state.fast = options.fast.unwrap_or_else(|| settings.fast_mode());
         state.messages = existing.messages;
     });
     agent.set_queue_modes(settings.steering_mode(), settings.follow_up_mode());

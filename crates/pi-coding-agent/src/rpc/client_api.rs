@@ -115,6 +115,11 @@ impl RpcClient {
         self.request(RpcCommand::SetThinkingLevel { level }).await.map(drop)
     }
 
+    /// pi-rust extension.
+    pub async fn set_fast_mode(&self, enabled: bool) -> anyhow::Result<()> {
+        self.request(RpcCommand::SetFastMode { enabled }).await.map(drop)
+    }
+
     /// The next level, or `None` when the model has no reasoning.
     pub async fn cycle_thinking_level(&self) -> anyhow::Result<Option<ThinkingLevel>> {
         let data = self.request(RpcCommand::CycleThinkingLevel).await?;

@@ -23,6 +23,7 @@ use self::session::Session;
 use crate::auth::oauth::random_uuid;
 use crate::providers::common::header_map;
 use crate::registry::{ApiProvider, ProviderResponse, StreamOptions};
+use crate::simple_options::supports_fast;
 use crate::stream::{AssistantMessageEventStream, MessageBuilder, error_stream, event_channel};
 use crate::types::{Context, Model, StopReason};
 
@@ -138,7 +139,8 @@ async fn run(
     token: &str,
 ) -> Result<StopReason, String> {
     let request_id = random_uuid();
-    let built = request::build(model, context, options.reasoning, &random_uuid(), &random_uuid());
+    let fast = options.fast && supports_fast(model);
+    let built = request::build(model, context, options.reasoning, fast, &random_uuid(), &random_uuid());
     let base = base_url(model);
     let run_headers = headers(model, options, token, &request_id, "application/connect+proto");
     let open_body = envelope(0, &Writer::new().string(1, &request_id).finish());

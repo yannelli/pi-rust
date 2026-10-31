@@ -21,8 +21,8 @@ use super::auth::{TerminalLaunch, auth_methods, client_supports_terminal_auth};
 use super::backend::{AcpClient, BackendFactory, PiBackend};
 use super::commands::{builtin_available_commands, commands_from_pi, load_slash_commands, merge_commands};
 use super::config::{
-    MODE_CONFIG_ID, MODEL_CONFIG_ID, THOUGHT_LEVEL_CONFIG_ID, emit_config_options_update, session_configuration,
-    set_session_model,
+    FAST_MODE_CONFIG_ID, FAST_MODE_FAST, FAST_MODE_STANDARD, MODE_CONFIG_ID, MODEL_CONFIG_ID, THOUGHT_LEVEL_CONFIG_ID,
+    emit_config_options_update, session_configuration, set_session_model,
 };
 use super::errors::{AcpResult, auth_or_internal, auth_required, internal_failure, invalid_params};
 use super::listing::{find_pi_session, list_pi_sessions, read_session_title};
@@ -423,6 +423,15 @@ impl AcpAgent {
                     return Err(invalid_params("Expected nonempty thinking level"));
                 }
                 backend.set_thinking_level(&value).await.map_err(|error| internal_failure(&error))?;
+                false
+            }
+            FAST_MODE_CONFIG_ID => {
+                let enabled = match value.as_str() {
+                    FAST_MODE_FAST => true,
+                    FAST_MODE_STANDARD => false,
+                    _ => return Err(invalid_params(format!("Unknown speed: {value}"))),
+                };
+                backend.set_fast_mode(enabled).await.map_err(|error| internal_failure(&error))?;
                 false
             }
             _ => return Err(invalid_params(format!("Unknown config option: {config_id}"))),

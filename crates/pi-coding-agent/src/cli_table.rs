@@ -160,6 +160,7 @@ pub const CLI_OPTIONS: &[CliOption] = &[
         Choice(THINKING_LEVELS),
         &["Set thinking level: off, minimal, low, medium, high, xhigh, max"],
     ),
+    flag("--fast", None, &["Turn on fast mode for this run, for models that support it (pi-rust extension)"]),
     valued(
         "--extension",
         Some("-e"),

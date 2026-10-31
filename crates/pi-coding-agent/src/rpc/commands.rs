@@ -33,6 +33,8 @@ pub fn session_state(session: &AgentSession) -> RpcSessionState {
     RpcSessionState {
         model: session.model(),
         thinking_level: session.thinking_level(),
+        fast_mode: session.fast_mode(),
+        fast_mode_available: session.fast_mode_available(),
         is_streaming: session.is_streaming(),
         is_compacting: session.is_compacting(),
         steering_mode: session.steering_mode(),
@@ -134,6 +136,10 @@ impl RpcServer {
             RpcCommand::GetAvailableThinkingLevels => {
                 let levels = session.available_thinking_levels();
                 ok(id, "get_available_thinking_levels", Some(json!({"levels": levels})))
+            }
+            RpcCommand::SetFastMode { enabled } => {
+                session.set_fast_mode(enabled, false);
+                ok(id, "set_fast_mode", None)
             }
             RpcCommand::SetSteeringMode { mode } => {
                 session.set_steering_mode(mode);

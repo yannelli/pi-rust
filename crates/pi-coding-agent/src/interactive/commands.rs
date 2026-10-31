@@ -55,6 +55,9 @@ impl InteractiveMode {
         } else if let Some(search) = argument(text, "thinking") {
             clear();
             self.handle_thinking_command(search.map(str::to_string));
+        } else if let Some(choice) = argument(text, "fast") {
+            clear();
+            self.handle_fast_command(choice);
         } else if argument(text, "export").is_some() {
             self.handle_export_command(text);
             clear();
