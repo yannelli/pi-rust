@@ -18,6 +18,9 @@ use serde_json::{Value, json};
 
 use crate::harness::{Harness, Setup, eventually, harness};
 use crate::http_mock::{Reply, Server};
+use crate::watchdog::Watchdog;
+
+const NATIVE_LIMIT: std::time::Duration = std::time::Duration::from_secs(90);
 
 #[derive(Default)]
 pub(crate) struct NativeUi {
@@ -130,16 +133,36 @@ impl ExtensionUi for NativeUi {
     }
 
     async fn custom(&self, request: CustomRequest) -> Result<Option<Value>, String> {
-        let mut component = request.factory.create_async().await?;
-        let lines = tokio::task::block_in_place(|| {
-            let first = component.render(30);
-            let resized = render_until(&mut component, 30, "width 30");
-            component.handle_input("\x1b[A");
-            [first, resized].concat()
+        let mut component = request.factory.create_async().await.map_err(|error| raw_diagnostic(&error))?;
+        // This runs in a spawned host op, where a panic would leave the command waiting forever.
+        let rendered = tokio::task::block_in_place(|| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let first = component.render(30);
+                let resized = render_until(&mut component, 30, "width 30");
+                component.handle_input("\x1b[A");
+                [first, resized].concat()
+            }))
         });
+        let lines =
+            rendered.map_err(|payload| raw_diagnostic(&format!("render panicked: {}", panic_text(&*payload))))?;
         self.push(format!("panel: {}", lines.join("|")));
-        Ok(Some(request.done.await.map_err(|error| error.to_string())?))
+        match tokio::time::timeout(std::time::Duration::from_secs(10), request.done).await {
+            Ok(done) => Ok(Some(done.map_err(|error| raw_diagnostic(&error.to_string()))?)),
+            Err(_) => Err(raw_diagnostic("the panel was not closed within 10 s")),
+        }
     }
+}
+
+/// Write `message` past the test output capture, which a watchdog exit would discard.
+fn raw_diagnostic(message: &str) -> String {
+    let line = format!("\nNativeUi::custom: {message}\n");
+    let _ = std::io::Write::write_all(&mut std::io::stderr(), line.as_bytes());
+    message.to_string()
+}
+
+fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
+    let text = payload.downcast_ref::<&str>().map(|text| text.to_string());
+    text.or_else(|| payload.downcast_ref::<String>().cloned()).unwrap_or_else(|| "a non-text panic".into())
 }
 
 pub(crate) fn package_json(env: &[(&str, &str)]) -> String {
@@ -278,21 +301,37 @@ async fn ui_resize_sends_the_height_and_reports_height_changes_alone() {
     assert_eq!(entry_data(&h, "native-ctx").unwrap()["terminalHeight"], json!(12));
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn commands_reach_dialogs_panels_and_the_model() {
-    let (h, ui) = native(vec![FauxResponse::text("llm answer")]).await;
-    ui.answers.lock().unwrap().push("blue".into());
-    h.session.prompt("/native-ask", Vec::new()).await.unwrap();
-    h.session.prompt("/native-panel", Vec::new()).await.unwrap();
-    h.session.prompt("/native-llm", Vec::new()).await.unwrap();
-    let data = |custom_type: &str| entry_data(&h, custom_type);
-    assert_eq!(data("native-answer"), Some(json!({"answer": "blue"})));
-    assert_eq!(data("native-panel"), Some(json!({"result": "closed by \u{1b}[A/up"})));
-    assert_eq!(data("native-llm"), Some(json!({"text": "llm answer"})));
-    let calls = ui.calls();
-    assert!(calls.contains(&"select: Pick one [red, blue]".to_string()), "{calls:?}");
-    assert!(calls.contains(&"panel: Panel one|width 30 height 24".to_string()), "{calls:?}");
-    assert!(h.errors().is_empty(), "{:?}", h.errors());
+#[test]
+fn commands_reach_dialogs_panels_and_the_model() {
+    let dog = Watchdog::start("commands_reach_dialogs_panels_and_the_model", NATIVE_LIMIT);
+    dog.stage("build Tokio runtime");
+    let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+    runtime.block_on(async {
+        dog.stage("start the native fixture");
+        let (h, ui) = native(vec![FauxResponse::text("llm answer")]).await;
+        ui.answers.lock().unwrap().push("blue".into());
+        dog.stage("prompt /native-ask");
+        h.session.prompt("/native-ask", Vec::new()).await.unwrap();
+        dog.stage("prompt /native-panel");
+        h.session.prompt("/native-panel", Vec::new()).await.unwrap();
+        dog.stage("prompt /native-llm");
+        h.session.prompt("/native-llm", Vec::new()).await.unwrap();
+        dog.stage("assertions");
+        let data = |custom_type: &str| entry_data(&h, custom_type);
+        assert_eq!(data("native-answer"), Some(json!({"answer": "blue"})));
+        assert_eq!(data("native-panel"), Some(json!({"result": "closed by \u{1b}[A/up"})));
+        assert_eq!(data("native-llm"), Some(json!({"text": "llm answer"})));
+        let calls = ui.calls();
+        assert!(calls.contains(&"select: Pick one [red, blue]".to_string()), "{calls:?}");
+        assert!(calls.contains(&"panel: Panel one|width 30 height 24".to_string()), "{calls:?}");
+        assert!(h.errors().is_empty(), "{:?}", h.errors());
+        dog.stage("session_shutdown");
+        h.runner.emit(json!({"type": "session_shutdown", "reason": "quit"})).await;
+        dog.stage("drop harness");
+        drop(h);
+    });
+    dog.stage("drop Tokio runtime");
+    drop(runtime);
 }
 
 #[tokio::test(flavor = "multi_thread")]

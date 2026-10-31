@@ -24,3 +24,5 @@ mod provider_compose;
 mod provider_hooks;
 mod reaches_tools;
 mod runtime;
+#[path = "../interactive/watchdog.rs"]
+mod watchdog;
