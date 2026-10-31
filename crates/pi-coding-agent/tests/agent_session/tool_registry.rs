@@ -295,6 +295,36 @@ async fn keeps_explicit_tool_options_on_reload() {
 }
 
 #[tokio::test]
+async fn reordering_active_tools_keeps_the_prompt_and_declarations_unchanged() {
+    let h = session_with(Select::default()).await;
+    h.provider.push(FauxResponse::text("one"));
+    h.session.prompt("first", Vec::new()).await.unwrap();
+    let before = h.session.active_tool_names();
+    let prompt = h.session.system_prompt();
+    let reversed: Vec<String> = before.iter().rev().cloned().collect();
+    h.session.set_active_tools_by_name(&reversed);
+    assert_eq!(h.session.active_tool_names(), before);
+    assert_eq!(h.session.system_prompt(), prompt);
+
+    h.provider.push(FauxResponse::text("two"));
+    h.session.prompt("second", Vec::new()).await.unwrap();
+    let systems = h.session.messages().iter().filter(|message| matches!(message, Message::System(_))).count();
+    assert_eq!(systems, 1);
+    let request = h.requests().pop().unwrap();
+    let declared: Vec<String> = request.tools.iter().map(|tool| tool.name.clone()).collect();
+    assert_eq!(declared, before);
+}
+
+#[tokio::test]
+async fn changing_the_active_set_keeps_survivors_before_new_tools() {
+    let h = session_with(Select::default()).await;
+    h.session.set_active_tools_by_name(&strings(&["grep", "write", "read", "grep", "unknown"]));
+    assert_eq!(h.session.active_tool_names(), ["read", "write", "grep"]);
+    h.session.set_active_tools_by_name(&strings(&["bash", "grep", "read"]));
+    assert_eq!(h.session.active_tool_names(), ["read", "grep", "bash"]);
+}
+
+#[tokio::test]
 async fn declares_tool_changes_between_prompts_in_system_messages() {
     let h = session_with(Select::default()).await;
     h.provider.push(FauxResponse::text("one"));
