@@ -2,6 +2,14 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.9.2] - 2026-10-31
+
+### Fixed
+
+- **js:** retain transferred sockets until the receiver acknowledges them ([36575a9](https://github.com/yannelli/pi-rust/commit/36575a9a50987b379a7acd96d5a8500e5d54dd7b))
+- **tui:** wrap wide math and stop bare URLs at CJK punctuation ([e567dc6](https://github.com/yannelli/pi-rust/commit/e567dc6925f1bf2d4220d80ec13a9d008600fc3a))
+- **coding-agent:** bound pi.exec output and finish after child exit (upstream c466a3595) ([65eed61](https://github.com/yannelli/pi-rust/commit/65eed6127ed0fc31067346d6167cbc80ae7ce652))
+
 ## [0.9.1] - 2026-10-31
 
 ### Added
