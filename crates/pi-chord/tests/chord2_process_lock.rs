@@ -92,4 +92,53 @@ mod socket_file {
         assert_locked(&error, &name);
         held.release();
     }
+
+    #[cfg(not(target_os = "solaris"))]
+    #[tokio::test]
+    async fn an_owner_in_another_process_protects_a_socket_not_yet_bound() {
+        use std::os::unix::fs::OpenOptionsExt;
+        use std::process::{Command, Stdio};
+        use std::time::{Duration, Instant};
+
+        use rustix::fs::{FlockOperation, flock};
+
+        const CHILD_DIR: &str = "PI_CHORD_LOCK_OWNER_CHILD_DIR";
+        let name = "owner-between-probe-and-bind";
+        if let Some(dir) = std::env::var_os(CHILD_DIR) {
+            let result = socket_file_lock(name, Path::new(&dir)).await;
+            let Err(error) = result else { panic!("a second holder ignored kernel ownership") };
+            assert_locked(&error, name);
+            return;
+        }
+        let dir = short_tempdir();
+        let path = socket_path(dir.path(), name).with_extension("owner");
+        let owner = std::fs::OpenOptions::new().read(true).write(true).create_new(true).mode(0o600).open(path).unwrap();
+        flock(&owner, FlockOperation::NonBlockingLockExclusive).unwrap();
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "socket_file::an_owner_in_another_process_protects_a_socket_not_yet_bound",
+                "--nocapture",
+            ])
+            .env(CHILD_DIR, dir.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap();
+        let started = Instant::now();
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert!(status.success(), "contending child failed: {status}");
+                break;
+            }
+            if started.elapsed() > Duration::from_secs(10) {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("contending child did not exit");
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        drop(owner);
+        socket_file_lock(name, dir.path()).await.unwrap().release();
+    }
 }
