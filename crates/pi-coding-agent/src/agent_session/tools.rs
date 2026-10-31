@@ -250,7 +250,10 @@ impl ToolState {
     /// Apply an active set (upstream `_setActiveTools`). Returns whether a tool was deactivated.
     pub fn set_active(&mut self, names: &[String]) -> bool {
         let previous = self.registry.active_names();
-        self.registry.set_active_tools(names);
+        let requested: HashSet<&str> = names.iter().map(String::as_str).collect();
+        let kept = previous.iter().filter(|name| requested.contains(name.as_str()));
+        let ordered: Vec<&str> = kept.chain(names).map(String::as_str).collect();
+        self.registry.set_active_tools(&ordered);
         self.after_loadout();
         let active: HashSet<String> = self.registry.active_names().into_iter().collect();
         previous.iter().any(|name| !active.contains(name))
