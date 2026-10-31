@@ -24,7 +24,18 @@ impl std::fmt::Display for FatalErrorReported {
 
 impl std::error::Error for FatalErrorReported {}
 
+/// How long quitting waits for the running turn and `session_shutdown` handlers to finish.
+const DISPOSE_TIMEOUT: Duration = Duration::from_secs(3);
+
 impl InteractiveMode {
+    /// Dispose of the runtime, waiting at most [`DISPOSE_TIMEOUT`]. A late cleanup task keeps
+    /// running detached until the process exits; entries are already on disk as they are appended.
+    pub(super) async fn dispose_runtime_bounded(&self) {
+        let runtime = self.runtime.clone();
+        let dispose = tokio::spawn(async move { runtime.dispose().await });
+        let _ = tokio::time::timeout(DISPOSE_TIMEOUT, dispose).await;
+    }
+
     /// SIGTERM or SIGHUP: dispose of the runtime before touching the terminal, then stop the
     /// TUI. No resume hint is printed.
     pub(super) fn request_signal_shutdown(&self) {
@@ -32,8 +43,7 @@ impl InteractiveMode {
             return;
         }
         self.spawn(|mode| async move {
-            let runtime = mode.runtime.clone();
-            let _ = tokio::spawn(async move { runtime.dispose().await }).await;
+            mode.dispose_runtime_bounded().await;
             if let Some(controller) = mode.theme_controller() {
                 controller.disable_auto_sync();
             }

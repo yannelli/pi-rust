@@ -98,6 +98,7 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. This se
   The APIs that do not work throw `ERR_PI_UNSUPPORTED`. Examples are `crypto.subtle` other than `digest`, and rare `crypto` ciphers such as Camellia. `crates/pi-js/src/unsupported.rs` lists all of them. Native npm addons cannot load on QuickJS.
 
   To run extensions on Node 22 or later, set `extensionRuntime` to `"node"` or `"auto"`, or use `--extension-runtime` or `PI_EXTENSION_RUNTIME`. On Node, native addons, `child_process.fork`, and V8-only modules work. If Node is missing, pi uses QuickJS. See [Node backend](docs/agents/node-compat.md#node-backend).
+- When you quit the interactive mode, pi waits at most 3 seconds for the running turn and the `session_shutdown` handlers, then exits. Upstream pi waits until they finish.
 - `grep` and `find` use the Rust `ignore` crate, so pi-rust does not download `rg` or `fd`.
 - The version check and `pi update --self` use the releases of this repository.
 - Word movement in Chinese, Japanese, Korean (CJK), and Thai text uses ICU4X dictionaries. Thus some word boundaries are different from `Intl.Segmenter` in Node.
