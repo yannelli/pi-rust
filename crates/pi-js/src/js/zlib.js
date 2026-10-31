@@ -68,7 +68,14 @@ function ZlibBase(opts, mode, nativeOptions, flushRange, defaults) {
   this.bytesWritten = 0;
   this._level = nativeOptions.level;
   this._strategy = opts.strategy;
+  this._rejectGarbageAfterEnd = opts.rejectGarbageAfterEnd === true;
 }
+
+// Node fails only streams and the callback helpers on it, after pushing the output; sync calls ignore it.
+ZlibBase.prototype._junkError = function junkError() {
+  if (!this._rejectGarbageAfterEnd || this._handle === null || !nativeZlib.trailingJunk(this._handle)) return null;
+  return codeError(TypeError, "ERR_TRAILING_JUNK_AFTER_STREAM_END", "Trailing junk found after the end of the compressed stream");
+};
 Object.setPrototypeOf(ZlibBase.prototype, Transform.prototype);
 Object.setPrototypeOf(ZlibBase, Transform);
 
@@ -102,6 +109,11 @@ ZlibBase.prototype._transform = function transform(chunk, encoding, callback) {
     return callback(error);
   }
   this._pushOut(out);
+  const junk = this._junkError();
+  if (junk) {
+    this.destroy(junk);
+    return callback(junk);
+  }
   callback();
 };
 
@@ -244,7 +256,7 @@ const BrotliDecompress = engine("BrotliDecompress", constants.BROTLI_DECODE, Bro
 const ZstdCompress = engine("ZstdCompress", constants.ZSTD_COMPRESS, Zstd);
 const ZstdDecompress = engine("ZstdDecompress", constants.ZSTD_DECOMPRESS, Zstd);
 
-function bufferSync(stream, buffer) {
+function bufferSync(stream, buffer, failOnJunk = false) {
   const bytes = toBytes(buffer, "buffer");
   if (stream._mode === constants.ZSTD_COMPRESS && stream._nativeOptions.pledgedSrcSize === undefined) {
     nativeZlib.close(stream._handle);
@@ -253,6 +265,8 @@ function bufferSync(stream, buffer) {
   let out;
   try {
     out = stream._run(bytes, stream._finishFlushFlag);
+    const junk = failOnJunk && stream._junkError();
+    if (junk) throw junk;
   } finally {
     stream._closeHandle();
   }
@@ -297,7 +311,7 @@ for (const [name, Engine] of Object.entries(engines)) {
       setImmediate(() => {
         let result;
         try {
-          result = bufferSync(stream, bytes);
+          result = bufferSync(stream, bytes, true);
         } catch (error) {
           return callback(error);
         }

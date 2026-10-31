@@ -79,11 +79,11 @@ function writeChunk(stream, chunk, encoding, callback) {
         chunk = Buffer.from(chunk, encoding);
         encoding = "buffer";
       }
-    } else if (chunk instanceof Uint8Array) {
+    } else if (ArrayBuffer.isView(chunk)) {
       if (!Buffer.isBuffer(chunk)) chunk = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
       encoding = "buffer";
     } else {
-      throw errors.invalidArg("chunk", "of type string or an instance of Buffer or Uint8Array", chunk);
+      throw errors.invalidArg("chunk", "of type string or an instance of Buffer, TypedArray, or DataView", chunk);
     }
   }
   let error;

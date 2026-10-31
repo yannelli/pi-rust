@@ -328,14 +328,6 @@ class TextDecoderStream extends TransformStream {
   }
 }
 
-function unsupportedClass(name) {
-  return class {
-    constructor() {
-      throw internal.unsupported(name);
-    }
-  };
-}
-
 module.exports = {
   WritableStream,
   WritableStreamDefaultWriter,
@@ -346,6 +338,4 @@ module.exports = {
   CountQueuingStrategy,
   TextEncoderStream,
   TextDecoderStream,
-  CompressionStream: unsupportedClass("CompressionStream"),
-  DecompressionStream: unsupportedClass("DecompressionStream"),
 };

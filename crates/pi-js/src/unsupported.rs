@@ -37,7 +37,6 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
     "process: binding, dlopen (native .node addons; supported on the Node backend), \
      setUncaughtExceptionCaptureCallback, and running code after process.exit when the embedder's on_exit \
      callback returns (the runtime is shutting down)",
-    "stream/web: CompressionStream and DecompressionStream",
     "v8: queryObjects",
     "vm: SourceTextModule, SyntheticModule, and Module (Node needs --experimental-vm-modules for them), \
      and breakOnSigint (accepted and ignored)",
@@ -64,6 +63,9 @@ pub const DIFFERENCES: &[&str] = &[
      backend runs them on real Node",
     "fs.openAsBlob reads the whole file when it is called, so later changes to the file do not show \
      in the Blob (Node reads it lazily and fails the read if the file changed)",
+    "CompressionStream and DecompressionStream reject a chunk that is not a string, TypedArray, DataView, \
+     or ArrayBuffer (ERR_INVALID_ARG_TYPE, null as ERR_STREAM_NULL_VALUES) and accept an ArrayBuffer, as \
+     Node 24 does; Node 22 leaves the write of such a chunk, and of an ArrayBuffer, pending",
     "tty.ReadStream works only for descriptor 0 (process.stdin); other descriptors fail with ERR_TTY_INIT_FAILED",
     "PerformanceObserver sees function, mark, and measure entries only",
     "process.exit calls the embedder's on_exit callback when one is set",
