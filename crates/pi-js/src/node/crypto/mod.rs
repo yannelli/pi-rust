@@ -158,6 +158,18 @@ fn pbkdf2(password: &[u8], salt: &[u8], iterations: u32, length: usize, digest: 
     Ok(out)
 }
 
+/// The PKCS#8 PEM of an encrypted private key, for `node:tls`. Like OpenSSL there, a missing
+/// passphrase is a bad decrypt.
+pub(crate) fn decrypt_tls_key(pem: &str, passphrase: Option<&[u8]>) -> Result<String, JsError> {
+    let key = keys::Key::parse("pem", "", pem.as_bytes(), passphrase).map_err(|error| {
+        if error.code.as_deref() == Some("ERR_MISSING_PASSPHRASE") { cipher::bad_decrypt() } else { error }
+    })?;
+    if !key.is_private() {
+        return Err(der::unsupported_key());
+    }
+    Ok(der::pem_encode("PRIVATE KEY", &key.pkcs8()?))
+}
+
 pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
     let object = Object::new(ctx.clone())?;
     let store = |ctx: &Ctx<'js>, result: Result<HashState, JsError>| {
