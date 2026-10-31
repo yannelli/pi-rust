@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Usage: node scripts/component-scenario.mjs <upstream pi checkout with node_modules>
 // Runs the component scenarios of tests/fixtures/extensions on upstream components and writes the results.
-import { writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { registerHooks } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -20,6 +21,16 @@ registerHooks({
 		return next(pathToFileURL(join(upstream, "packages", dir, "src", `${entry}.ts`)).href, context);
 	},
 });
+
+// pi-rust ships more built-in themes than upstream (docs/parity/allowlist.json); upstream lists
+// them as custom themes of a temporary agent directory, so its selector renders the same list.
+const agentDir = mkdtempSync(join(tmpdir(), "pi-component-scenario-"));
+mkdirSync(join(agentDir, "themes"));
+const builtinThemes = join(dirname(fileURLToPath(import.meta.url)), "../crates/pi-coding-agent/src/theme/builtin");
+for (const name of ["ghostty", "darcula-islands", "nord", "catppuccin"]) {
+	copyFileSync(join(builtinThemes, `${name}.json`), join(agentDir, "themes", `${name}.json`));
+}
+process.env.PI_CODING_AGENT_DIR = agentDir;
 
 const source = (path) => import(pathToFileURL(join(upstream, "packages", path)).href);
 const { initTheme } = await source("coding-agent/src/modes/interactive/theme/theme.ts");

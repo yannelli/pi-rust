@@ -70,29 +70,12 @@ export default function (pi) {
 }
 "#;
 
-/// pi-rust ships more built-in themes than upstream (`docs/parity/allowlist.json`), so the theme
-/// selector lists the Rust registry and its Down key from `dark` picks the next name there.
-fn with_rust_themes(expected: &mut Value) {
-    let names = pi_coding_agent::theme::get_available_themes();
-    let next = names[names.iter().position(|name| name == "dark").unwrap() + 1].clone();
-    for event in expected["events"].as_array_mut().unwrap() {
-        if event[0] == "preview" || event[0] == "theme" {
-            event[1] = Value::String(next.clone());
-        }
-    }
-    // SelectList pads names to `clamp(longest + 2, 12, 32)` and shows "(current)" above 40 columns.
-    let column = (names.iter().map(|name| name.chars().count()).max().unwrap_or(0) + 2).clamp(12, 32);
-    for (width, current) in [("narrow", false), ("wide", true)] {
-        let row = |name: &String| match (name == "dark", current) {
-            (true, true) => format!("→ {name:<column$}(current)"),
-            (true, false) => format!("→ {name}"),
-            _ => format!("  {name}"),
-        };
-        let rendered = expected["rendered"]["themes"][width].as_array_mut().unwrap();
-        let border = rendered[0].clone();
-        let rows = names.iter().map(|name| Value::String(row(name)));
-        *rendered = std::iter::once(border.clone()).chain(rows).chain([border]).collect();
-    }
+/// The golden renders upstream's theme selector over pi-rust's theme list, which has more
+/// built-in themes than upstream (`docs/parity/allowlist.json`); the registry must list the same names.
+fn assert_rust_themes_match(expected: &Value) {
+    let rows = expected["rendered"]["themes"]["narrow"].as_array().unwrap();
+    let names: Vec<&str> = rows[1..rows.len() - 1].iter().map(|row| row.as_str().unwrap()[2..].trim_end()).collect();
+    assert_eq!(pi_coding_agent::theme::get_available_themes(), names);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -101,9 +84,8 @@ async fn record_driven_selectors_and_the_login_dialog_match_upstream() {
         ("components.ts", EXTENSION_B.to_string()),
         ("component_scenario_b.mjs", include_str!("fixtures/extensions/component_scenario_b.mjs").to_string()),
     ];
-    let mut expected: Value =
-        serde_json::from_str(include_str!("fixtures/extensions/component_scenario_b.json")).unwrap();
-    with_rust_themes(&mut expected);
+    let expected: Value = serde_json::from_str(include_str!("fixtures/extensions/component_scenario_b.json")).unwrap();
+    assert_rust_themes_match(&expected);
     let data = components_entry(files).await;
     assert_eq!(data["scenario"]["events"], expected["events"]);
     for (name, rendered) in expected["rendered"].as_object().unwrap() {
