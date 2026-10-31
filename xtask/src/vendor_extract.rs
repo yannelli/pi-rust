@@ -1,5 +1,7 @@
 //! Generated modules for `vendor-js`: named top-level declarations of an upstream file, copied
-//! verbatim, where the rest of the file needs packages the extension host does not bundle.
+//! verbatim with the imports they use, where the rest of the file needs packages the host does not bundle.
+
+use std::collections::BTreeMap;
 
 /// Upstream file, archive key, and the declarations the vendored components import from it.
 pub const GENERATED: &[(&str, &str, &[&str])] = &[
@@ -17,6 +19,11 @@ pub const GENERATED: &[(&str, &str, &[&str])] = &[
             "parseHttpIdleTimeoutMs",
             "formatHttpIdleTimeoutMs",
         ],
+    ),
+    (
+        "packages/coding-agent/src/core/trust-manager.ts",
+        "pi-coding-agent/src/core/trust-manager.ts",
+        &["TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES", "hasTrustRequiringProjectResources"],
     ),
 ];
 
@@ -39,26 +46,58 @@ fn declared(line: &str) -> Option<(&str, bool)> {
     Some((name, matches!(*kind, "function" | "class")))
 }
 
+/// One runtime binding of an import statement: the clause entry that names it (`x`, `* as x`, `a as x`), whether
+/// it sits in braces, its local name, and the statement's index and specifier.
+struct Binding {
+    entry: String,
+    named: bool,
+    local: String,
+    statement: usize,
+    specifier: String,
+}
+
 /// Runtime bindings of the file's imports; `import type` and `type` entries are left out.
-fn imported(source: &str) -> Vec<String> {
-    let mut names = Vec::new();
-    for statement in source.split(';').map(str::trim).filter(|text| text.starts_with("import ")) {
-        let Some((clause, _)) = statement["import ".len()..].split_once(" from ") else { continue };
+fn imported(source: &str) -> Vec<Binding> {
+    let mut bindings = Vec::new();
+    let statements = source.split(';').map(str::trim).filter(|text| text.starts_with("import "));
+    for (statement, text) in statements.enumerate() {
+        let Some((clause, from)) = text["import ".len()..].split_once(" from ") else { continue };
         if clause.starts_with("type ") {
             continue;
         }
+        let specifier = from.trim().trim_matches(['"', '\'']).to_string();
         let (default, braces) = match clause.split_once('{') {
             Some((before, inside)) => (before, inside.trim_end_matches('}')),
             None => (clause, ""),
         };
-        for part in default.split(',').map(str::trim).filter(|part| !part.is_empty()) {
-            names.extend(part.rsplit(' ').next().map(str::to_string));
-        }
-        for entry in braces.split(',').map(str::trim).filter(|entry| !entry.is_empty() && !entry.starts_with("type ")) {
-            names.extend(entry.rsplit(' ').next().map(str::to_string));
+        let defaults = default.split(',').map(|part| (part.trim(), false));
+        let entries =
+            braces.split(',').map(|entry| (entry.trim(), true)).filter(|(entry, _)| !entry.starts_with("type "));
+        for (entry, named) in defaults.chain(entries).filter(|(entry, _)| !entry.is_empty()) {
+            let Some(local) = entry.rsplit(' ').next() else { continue };
+            let (entry, local, specifier) = (entry.to_string(), local.to_string(), specifier.clone());
+            bindings.push(Binding { entry, named, local, statement, specifier });
         }
     }
-    names
+    bindings
+}
+
+/// The import statements of `used`, each narrowed to its used bindings, in source order.
+fn import_lines(used: &[&Binding]) -> String {
+    let mut lines = String::new();
+    let mut statements: Vec<usize> = used.iter().map(|binding| binding.statement).collect();
+    statements.dedup();
+    for statement in statements {
+        let bindings: Vec<&&Binding> = used.iter().filter(|binding| binding.statement == statement).collect();
+        let mut clause: Vec<String> =
+            bindings.iter().filter(|binding| !binding.named).map(|binding| binding.entry.clone()).collect();
+        let named: Vec<&str> = bindings.iter().filter(|binding| binding.named).map(|binding| &*binding.entry).collect();
+        if !named.is_empty() {
+            clause.push(format!("{{ {} }}", named.join(", ")));
+        }
+        lines.push_str(&format!("import {} from \"{}\";\n", clause.join(", "), bindings[0].specifier));
+    }
+    lines
 }
 
 /// End of the declaration that starts at `start`: the `;` of a variable, or the closing `}` of a
@@ -104,8 +143,8 @@ fn declaration_end(source: &str, start: usize, is_function: bool) -> Option<usiz
     None
 }
 
-/// `names` from `source` (upstream `file`), in that order, as a module. Fails when a name has no
-/// top-level declaration, or a declaration uses an import or an unlisted top-level declaration.
+/// `names` from `source` (upstream `file`), in that order, as a module with the imports they use. Fails when a
+/// name has no top-level declaration, or a declaration uses an unlisted top-level declaration.
 pub fn extract(file: &str, source: &str, names: &[&str]) -> Result<String, String> {
     let mut starts = Vec::new();
     let mut offset = 0;
@@ -116,7 +155,8 @@ pub fn extract(file: &str, source: &str, names: &[&str]) -> Result<String, Strin
         offset += line.len();
     }
     let imports = imported(source);
-    let mut out = format!("// Generated by `cargo xtask vendor-js` from upstream {file}: {}.\n", names.join(", "));
+    let mut used = vec![false; imports.len()];
+    let mut declarations = String::new();
     for name in names {
         let &(_, is_function, start) = starts
             .iter()
@@ -126,25 +166,74 @@ pub fn extract(file: &str, source: &str, names: &[&str]) -> Result<String, Strin
             .ok_or_else(|| format!("{file}: the declaration of {name} does not end"))?;
         let text = &source[start..end];
         for word in words(text) {
-            if imports.iter().any(|import| import == word) {
-                return Err(format!("{file}: {name} uses the import {word}"));
+            for (index, binding) in imports.iter().enumerate() {
+                used[index] |= binding.local == word;
             }
             if word != *name && !names.contains(&word) && starts.iter().any(|(declared, ..)| *declared == word) {
                 return Err(format!("{file}: {name} uses {word}, which is not extracted"));
             }
         }
-        out.push('\n');
-        out.push_str(text);
-        out.push('\n');
+        declarations.push('\n');
+        declarations.push_str(text);
+        declarations.push('\n');
     }
-    Ok(out)
+    let used: Vec<&Binding> = imports.iter().zip(used).filter(|(_, used)| *used).map(|(binding, _)| binding).collect();
+    let header = format!("// Generated by `cargo xtask vendor-js` from upstream {file}: {}.\n", names.join(", "));
+    Ok(format!("{header}{}{declarations}", import_lines(&used)))
+}
+
+/// Archive keys of the upstream modules the extension host answers with its own (`SHIMS` in `modules.rs`).
+pub fn shim_keys(root: &std::path::Path) -> Result<Vec<String>, String> {
+    let path = root.join("crates/pi-coding-agent/src/extensions/modules.rs");
+    let source = std::fs::read_to_string(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let table = source.split_once("const SHIMS").and_then(|(_, rest)| rest.split_once("\n];")).map(|(table, _)| table);
+    let table = table.ok_or_else(|| format!("{}: no SHIMS table", path.display()))?;
+    let literals: Vec<&str> = table.split('"').skip(1).step_by(2).collect();
+    Ok(literals.into_iter().step_by(3).map(str::to_string).collect())
+}
+
+/// Check that every import of generated module `key` resolves: a `node:` builtin, an archive file, or a host shim.
+/// Run after `rewrite_bare_imports`, so a bare specifier left over is one the archive does not bundle.
+pub fn check_imports(key: &str, files: &BTreeMap<String, String>, shims: &[String]) -> Result<(), String> {
+    let module = files.get(key).ok_or_else(|| format!("{key}: not generated"))?;
+    for line in module.lines().filter(|line| line.starts_with("import ")) {
+        let specifier = line.rsplit_once(" from ").map(|(_, from)| from.trim_end_matches(';').trim_matches('"'));
+        let specifier = specifier.ok_or_else(|| format!("{key}: cannot read {line}"))?;
+        if specifier.starts_with("node:") {
+            continue;
+        }
+        if !specifier.starts_with('.') {
+            return Err(format!("{key}: imports {specifier}, which the archive does not bundle"));
+        }
+        let resolved = resolve(key, specifier);
+        if !files.contains_key(&resolved) && !shims.contains(&resolved) {
+            return Err(format!("{key}: imports {specifier}, which is neither an archive file nor a host shim"));
+        }
+    }
+    Ok(())
+}
+
+/// `specifier` relative to the directory of archive key `key`.
+fn resolve(key: &str, specifier: &str) -> String {
+    let mut parts: Vec<&str> = key.split('/').collect();
+    parts.pop();
+    for segment in specifier.split('/') {
+        match segment {
+            "." => {}
+            ".." => {
+                parts.pop();
+            }
+            name => parts.push(name),
+        }
+    }
+    parts.join("/")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const SOURCE: &str = r#"import { EventEmitter } from "node:events";
+    const SOURCE: &str = r#"import { EventEmitter, once as onceEvent, type Listener } from "node:events";
 import * as undici from "undici";
 import type { Thing } from "./thing.ts";
 
@@ -172,6 +261,10 @@ export function agent() {
 export function viaHelper() {
 	return helper();
 }
+
+export function waitOnce(emitter: unknown): Promise<Listener> {
+	return onceEvent(emitter, "done");
+}
 "#;
 
     #[test]
@@ -184,12 +277,67 @@ export function viaHelper() {
     #[test]
     fn rejects_missing_and_dependent_declarations() {
         assert_eq!(extract("x.ts", SOURCE, &["NOPE"]).unwrap_err(), "x.ts: no top-level declaration of NOPE");
-        assert_eq!(extract("x.ts", SOURCE, &["agent"]).unwrap_err(), "x.ts: agent uses the import undici");
         let error = extract("x.ts", SOURCE, &["viaHelper"]).unwrap_err();
         assert_eq!(error, "x.ts: viaHelper uses helper, which is not extracted");
         assert_eq!(
             extract("x.ts", SOURCE, &["format"]).unwrap_err(),
             "x.ts: format uses CHOICES, which is not extracted"
         );
+    }
+
+    #[test]
+    fn keeps_only_the_runtime_bindings_the_declarations_use_in_import_order() {
+        let module = extract("x.ts", SOURCE, &["agent", "waitOnce"]).unwrap();
+        let imports: Vec<&str> = module.lines().filter(|line| line.starts_with("import ")).collect();
+        assert_eq!(
+            imports,
+            ["import { once as onceEvent } from \"node:events\";", "import * as undici from \"undici\";"]
+        );
+        assert!(module.contains("\nexport function agent() {") && module.contains("\nexport function waitOnce("));
+        let plain = extract("x.ts", SOURCE, &["LIMIT"]).unwrap();
+        assert!(!plain.contains("import "), "{plain}");
+    }
+
+    #[test]
+    fn keeps_a_used_default_import_with_its_used_named_aliases() {
+        let source = r#"import Default, { a as aliased, b, type T } from "./mixed.ts";
+import * as ns from "./ns.ts";
+import Unused from "./unused.ts";
+
+export function usesAll(): T {
+	return [Default, aliased, ns.x];
+}
+"#;
+        let module = extract("x.ts", source, &["usesAll"]).unwrap();
+        let imports: Vec<&str> = module.lines().filter(|line| line.starts_with("import ")).collect();
+        assert_eq!(
+            imports,
+            ["import Default, { a as aliased } from \"./mixed.ts\";", "import * as ns from \"./ns.ts\";"]
+        );
+    }
+
+    #[test]
+    fn checks_that_every_kept_import_resolves() {
+        let module = |imports: &str| format!("// Generated\n{imports}\nexport const A = 1;\n");
+        let mut files = BTreeMap::new();
+        files.insert("p/src/c.ts".to_string(), String::new());
+        let shims = vec!["p/src/config.ts".to_string()];
+        let ok = "import { a } from \"node:fs\";\nimport { b } from \"../c.ts\";\nimport { C } from \"../config.ts\";";
+        files.insert("p/src/core/x.ts".to_string(), module(ok));
+        assert_eq!(check_imports("p/src/core/x.ts", &files, &shims), Ok(()));
+        files.insert("p/src/core/x.ts".to_string(), module("import * as undici from \"undici\";"));
+        let error = check_imports("p/src/core/x.ts", &files, &shims).unwrap_err();
+        assert_eq!(error, "p/src/core/x.ts: imports undici, which the archive does not bundle");
+        files.insert("p/src/core/x.ts".to_string(), module("import { m } from \"./missing.ts\";"));
+        let error = check_imports("p/src/core/x.ts", &files, &shims).unwrap_err();
+        assert_eq!(error, "p/src/core/x.ts: imports ./missing.ts, which is neither an archive file nor a host shim");
+    }
+
+    #[test]
+    fn reads_the_host_shim_keys_from_modules_rs() {
+        let keys = shim_keys(std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."))).unwrap();
+        assert!(keys.iter().any(|key| key == "pi-coding-agent/src/config.ts"), "{keys:?}");
+        assert!(keys.iter().any(|key| key == "pi-ai/src/providers/images/register-builtins.ts"), "{keys:?}");
+        assert!(keys.iter().all(|key| key.ends_with(".ts")), "{keys:?}");
     }
 }

@@ -7,6 +7,7 @@ import { call, callAsync } from "./bridge.js";
 import { appKeybindings } from "./ui.js";
 
 /** Upstream `config.ts`. */
+export const CONFIG_DIR_NAME = call("config.info").configDirName;
 export const getAgentDir = () => call("config.info").agentDir;
 export const getBinDir = () => join(getAgentDir(), "bin");
 

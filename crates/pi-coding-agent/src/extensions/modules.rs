@@ -49,7 +49,7 @@ const HOST_FILES: &[(&str, &str)] = &[
 /// the `export` list of its source.
 const SHIMS: &[(&str, &str, &str)] = &[
     ("pi-coding-agent/src/modes/interactive/theme/theme.ts", "*", "host/theme.js"),
-    ("pi-coding-agent/src/config.ts", "{ getAgentDir, getBinDir }", "host/component_shims.js"),
+    ("pi-coding-agent/src/config.ts", "{ CONFIG_DIR_NAME, getAgentDir, getBinDir }", "host/component_shims.js"),
     ("pi-coding-agent/src/utils/child-process.ts", "{ spawnProcessSync }", "host/component_shims.js"),
     ("pi-coding-agent/src/core/keybindings.ts", "{ KeybindingsManager }", "host/component_shims.js"),
     ("pi-coding-agent/src/utils/clipboard.ts", "{ copyToClipboard }", "host/component_shims.js"),
