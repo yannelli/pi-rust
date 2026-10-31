@@ -59,9 +59,23 @@ fn resolve(path: &Path) -> PathBuf {
     resolved
 }
 
-/// `path` when it is absolute and inside `cwd`.
+/// `path` as an agent gets it: without the `\\?\` prefix that `canonicalize` adds on Windows,
+/// under which Windows reads `/` as part of a name.
+pub(crate) fn agent_path(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    if let Some(share) = text.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{share}");
+    }
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => rest.to_string(),
+        _ => text.into_owned(),
+    }
+}
+
+/// `path` when it is absolute and inside `cwd`. On Windows, `/` separates names too.
 pub(crate) fn inside(cwd: &Path, path: &str) -> Result<PathBuf, String> {
-    let candidate = Path::new(path);
+    let path = if cfg!(windows) { path.replace('/', "\\") } else { path.to_string() };
+    let candidate = Path::new(&path);
     if !candidate.is_absolute() {
         return Err(format!("{path} is not an absolute path"));
     }
@@ -164,4 +178,29 @@ pub(crate) fn handle(
             Err(message) => connection.respond_error(id, -32603, &message),
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agents_get_paths_without_the_verbatim_prefix() {
+        assert_eq!(agent_path(Path::new(r"\\?\C:\Users\me\work")), r"C:\Users\me\work");
+        assert_eq!(agent_path(Path::new(r"\\?\UNC\server\share\work")), r"\\server\share\work");
+        assert_eq!(agent_path(Path::new(r"\\?\Volume{1}\work")), r"\\?\Volume{1}\work");
+        assert_eq!(agent_path(Path::new("/home/me/work")), "/home/me/work");
+    }
+
+    #[test]
+    fn agent_paths_with_forward_slashes_stay_inside() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir(root.join("sub")).unwrap();
+        let expected = root.join("sub").join("b.txt");
+        for base in [agent_path(&root), root.display().to_string()] {
+            assert_eq!(inside(&root, &format!("{base}/sub/b.txt")), Ok(expected.clone()), "{base}");
+        }
+        assert!(inside(&root, &format!("{}/../elsewhere.txt", agent_path(&root))).is_err());
+    }
 }

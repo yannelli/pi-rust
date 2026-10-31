@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 use super::checkpoints::Checkpoints;
-use super::client::ClientContext;
+use super::client::{ClientContext, agent_path};
 use super::connection::{Connection, RpcError};
 use super::host::{AgentCommand, AgentLaunch, Choice, Selector, SessionInfo, host};
 use super::process::{self, Process};
@@ -189,7 +189,7 @@ impl Runtime {
         let can_load = capabilities["loadSession"] == json!(true);
         let mut reply = None;
         if let Some(id) = resume.filter(|_| can_load) {
-            let params = json!({"sessionId": id, "cwd": cwd, "mcpServers": servers});
+            let params = json!({"sessionId": id, "cwd": agent_path(&cwd), "mcpServers": servers});
             if let Ok(mut loaded) = connection.request("session/load", params, SESSION_TIMEOUT).await {
                 loaded["sessionId"] = json!(id);
                 reply = Some(loaded);
@@ -199,7 +199,7 @@ impl Runtime {
         let reply = match reply {
             Some(reply) => reply,
             None => {
-                let params = json!({"cwd": cwd, "mcpServers": servers});
+                let params = json!({"cwd": agent_path(&cwd), "mcpServers": servers});
                 connection.request("session/new", params, SESSION_TIMEOUT).await.map_err(|e| rpc(&agent.name, e))?
             }
         };

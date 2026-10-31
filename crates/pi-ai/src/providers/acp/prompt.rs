@@ -19,6 +19,16 @@ pub(crate) struct PromptCapabilities {
     pub images: bool,
 }
 
+/// A `file:` URI: `file:///C:/x` for a drive path and `file://server/share` for a UNC path.
+fn file_uri(path: &Path) -> String {
+    let shown = super::client::agent_path(path).replace('\\', "/");
+    match shown.strip_prefix("//") {
+        Some(share) => format!("file://{share}"),
+        None if shown.starts_with('/') => format!("file://{shown}"),
+        None => format!("file:///{shown}"),
+    }
+}
+
 /// `@path` mentions of files that exist inside `cwd`, as `resource_link` blocks.
 pub(crate) fn file_links(text: &str, cwd: &Path) -> Vec<Value> {
     let mut links: Vec<Value> = Vec::new();
@@ -33,7 +43,7 @@ pub(crate) fn file_links(text: &str, cwd: &Path) -> Vec<Value> {
         if !path.is_file() {
             continue;
         }
-        let uri = format!("file://{}", path.to_string_lossy().replace('\\', "/"));
+        let uri = file_uri(&path);
         if links.iter().any(|link| link["uri"] == uri.as_str()) {
             continue;
         }
@@ -132,6 +142,8 @@ mod tests {
         assert_eq!(blocks[1]["text"], "read @notes.md and @missing.md");
         assert_eq!(blocks[2]["type"], "resource_link");
         assert_eq!(blocks[2]["name"], "notes.md");
+        let uri = blocks[2]["uri"].as_str().unwrap();
+        assert!(uri.starts_with("file:///") && uri.ends_with("/notes.md") && !uri.contains(['?', '\\']), "{uri}");
         assert_eq!(blocks.len(), 3);
         assert_eq!(build(&messages[..2], 2, caps, dir.path()), vec![json!({"type": "text", "text": CONTINUE})]);
         let command = build(&[Message::user("/acp:web rust acp")], 0, caps, dir.path());

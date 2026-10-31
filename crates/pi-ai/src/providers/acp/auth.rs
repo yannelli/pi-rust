@@ -88,7 +88,7 @@ pub async fn authenticate(agent: &AgentLaunch, cwd: &Path, method: Option<&str>)
             .await
             .map_err(|e| rpc(&agent.name, e))?;
     }
-    let params = json!({"cwd": cwd, "mcpServers": []});
+    let params = json!({"cwd": super::client::agent_path(cwd), "mcpServers": []});
     match connected.connection.request("session/new", params, CHECK_TIMEOUT).await {
         Ok(_) => Ok(()),
         Err(error) if error.code == AUTH_REQUIRED => Err(format!("The {} login did not complete", agent.name)),
