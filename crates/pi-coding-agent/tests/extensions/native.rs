@@ -20,7 +20,7 @@ use crate::harness::{Harness, Setup, eventually, harness};
 use crate::http_mock::{Reply, Server};
 
 #[derive(Default)]
-struct NativeUi {
+pub(crate) struct NativeUi {
     calls: Mutex<Vec<String>>,
     answers: Mutex<Vec<String>>,
     widgets: Mutex<Vec<(String, ComponentFactory)>>,
@@ -35,7 +35,7 @@ impl NativeUi {
         self.calls.lock().unwrap().push(line);
     }
 
-    fn calls(&self) -> Vec<String> {
+    pub(crate) fn calls(&self) -> Vec<String> {
         self.calls.lock().unwrap().clone()
     }
 
@@ -46,7 +46,7 @@ impl NativeUi {
 }
 
 /// Render `component` until a line contains `text`.
-fn render_until(component: &mut dyn Component, width: usize, text: &str) -> Vec<String> {
+pub(crate) fn render_until(component: &mut dyn Component, width: usize, text: &str) -> Vec<String> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         let lines = component.render(width);
@@ -124,6 +124,11 @@ impl ExtensionUi for NativeUi {
         Some(AutocompleteSuggestions { items, prefix })
     }
 
+    async fn login(&self, provider: &str) -> Result<bool, String> {
+        self.push(format!("login: {provider}"));
+        Ok(true)
+    }
+
     async fn custom(&self, request: CustomRequest) -> Result<Option<Value>, String> {
         let mut component = request.factory.create_async().await?;
         let lines = tokio::task::block_in_place(|| {
@@ -137,7 +142,7 @@ impl ExtensionUi for NativeUi {
     }
 }
 
-fn package_json(env: &[(&str, &str)]) -> String {
+pub(crate) fn package_json(env: &[(&str, &str)]) -> String {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/native/fixture.mjs");
     let mut vars = json!({"PI_JS_FORK": "1"});
     for (name, value) in env {
@@ -168,7 +173,7 @@ async fn native_with(
 }
 
 /// The fixture loaded into `setup`, with `env` set for the child process.
-async fn native_in(
+pub(crate) async fn native_in(
     setup: Setup,
     env: &[(&str, &str)],
     mode: ExtensionMode,
@@ -203,12 +208,12 @@ async fn native_in(
     h
 }
 
-async fn native(responses: Vec<FauxResponse>) -> (Harness, Arc<NativeUi>) {
+pub(crate) async fn native(responses: Vec<FauxResponse>) -> (Harness, Arc<NativeUi>) {
     let ui = Arc::new(NativeUi::default());
     (native_with(responses, ExtensionMode::Tui, ui.clone(), false).await, ui)
 }
 
-fn entry_data(h: &Harness, custom_type: &str) -> Option<Value> {
+pub(crate) fn entry_data(h: &Harness, custom_type: &str) -> Option<Value> {
     h.entries().iter().find(|entry| entry["customType"] == custom_type).map(|entry| entry["data"].clone())
 }
 

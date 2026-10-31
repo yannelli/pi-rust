@@ -225,6 +225,7 @@ function providerJson(config) {
 	if (oauth) {
 		json.oauth = {
 			name: oauth.name,
+			builtin: typeof oauth.builtin === "string" ? oauth.builtin : undefined,
 			hasModifyModels: typeof oauth.modifyModels === "function",
 			usesCallbackServer: Boolean(oauth.usesCallbackServer),
 		};

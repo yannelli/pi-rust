@@ -2,6 +2,29 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.8.7] - 2026-10-31
+
+### Added
+
+- **pi-js:** CompressionStream and DecompressionStream on QuickJS ([bbe2814](https://github.com/yannelli/pi-rust/commit/bbe2814a21fb13f0136f4b1d1a3d2962ce368224))
+- **js:** encrypted private keys and exportKeyingMaterial in node:tls ([47a9089](https://github.com/yannelli/pi-rust/commit/47a90896e719f0b175dc6f55d724448f25924864))
+- **extensions:** add the missing pi-ai and pi-tui module exports ([d49671d](https://github.com/yannelli/pi-rust/commit/d49671db69a57d385f1075c30db8eda880c4a3ef))
+- **acp:** complete the ACP client integration ([046a0c2](https://github.com/yannelli/pi-rust/commit/046a0c2ca2444ef79e5d9da7a5ce8f888bf199bc))
+
+### Fixed
+
+- **ai:** stop retrying Zhipu usage limits (upstream c719d5b08) ([bd7b48b](https://github.com/yannelli/pi-rust/commit/bd7b48b7db1df96deb9b925c37c748ac2162bbbc))
+- **ai:** detect LiteLLM pre-call context overflow (upstream d3398f826) ([6982e1b](https://github.com/yannelli/pi-rust/commit/6982e1b9dddda54687fa7cd3e6a105293507dded))
+- **acp:** percent-encode resource_link file URIs ([c686eac](https://github.com/yannelli/pi-rust/commit/c686eac1d66fa93a89fe73d216e30e6b8531cf4d))
+- **acp:** send agents Windows paths without the verbatim prefix ([d14e4d2](https://github.com/yannelli/pi-rust/commit/d14e4d2373e428b60f7216aaddee24463fec2f1e))
+- **js:** check each tls key passphrase as Node does ([b3b1444](https://github.com/yannelli/pi-rust/commit/b3b1444990afaf73309760f37716f20355907172))
+- **extensions:** ask the caller's AuthContext for the Vertex AI credentials file ([e859722](https://github.com/yannelli/pi-rust/commit/e859722bfcc0fe4aad49116be609342c8b6bf558))
+- **acp:** gate the process test helper on Unix ([efa7016](https://github.com/yannelli/pi-rust/commit/efa7016628420e82365fea3bbb2e0e44d638015b))
+- **parity:** retain the model catalog manifest in uploaded data ([6676ecb](https://github.com/yannelli/pi-rust/commit/6676ecb208ffceaaa78a4f4903b6cb4064b6c788))
+- **acp:** clear agent commands on an empty available_commands_update ([60b52b0](https://github.com/yannelli/pi-rust/commit/60b52b0478673ff36a18e8338541654ba9818b05))
+- **acp:** saturate the bridge tools/list cursor ([9cdf1e1](https://github.com/yannelli/pi-rust/commit/9cdf1e1e18b09a9655502c0be217abbe864830eb))
+- **acp:** proxy pi-held MCP logins and stop agent process groups ([0ee654c](https://github.com/yannelli/pi-rust/commit/0ee654c4ffbff9d010977ef3788932edcd9bbf26))
+
 ## [0.8.6] - 2026-10-31
 
 ### Fixed

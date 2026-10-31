@@ -267,6 +267,12 @@ pub trait ExtensionUi: Send + Sync {
 
     /// A tool renderer asked to draw the row of `tool_call_id` again (`context.invalidate()`).
     fn invalidate_tool(&self, _tool_call_id: &str) {}
+
+    /// Run pi's OAuth login dialog for `provider` (`auth.login` of native extensions): `Ok(true)`
+    /// after a login, `Ok(false)` when the user cancels it.
+    async fn login(&self, _provider: &str) -> Result<bool, String> {
+        Err("pi has no login dialog in this mode".into())
+    }
 }
 
 /// The UI of modes without one (print and JSON): dialogs return their defaults at once.

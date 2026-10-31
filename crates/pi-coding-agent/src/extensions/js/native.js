@@ -47,6 +47,7 @@ export function nativeFactory(spec) {
 function createState(pi, spec) {
 	const state = {
 		pi,
+		spec,
 		path: spec.extensionPath,
 		ctx: undefined,
 		commandCtx: undefined,
@@ -55,6 +56,7 @@ function createState(pi, spec) {
 		stopping: false,
 		autocompleteInstalled: false,
 		tools: new Set(),
+		oauthProviders: new Set(),
 		events: new Set(),
 		flags: [],
 		triggers: [],
@@ -143,7 +145,7 @@ function onExit(state, code, signal) {
 	if (state.stopping || !state.loaded) return;
 	if (!inTui(state)) state.log(message);
 	safe(() => state.ctx?.ui.notify(message, "error"));
-	safe(() => state.pi.setActiveTools(state.pi.getActiveTools().filter((name) => !state.tools.has(name))));
+	safe(() => state.spec.forgetTools?.([...state.tools]));
 }
 
 async function stop(state) {

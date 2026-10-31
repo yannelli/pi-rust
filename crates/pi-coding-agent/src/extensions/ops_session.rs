@@ -236,6 +236,15 @@ fn action(runner: &ExtensionRunner, session: &Arc<AgentSession>, name: &str, arg
         "getAllTools" => Ok(session.all_tools().iter().map(all_tools_entry).collect()),
         "toolReaches" => Ok(tool_reaches(session, &args.str(1)?, &args.json(2))),
         "getSettings" => Ok(serde_json::to_value(session.settings().settings()).unwrap_or(Value::Null)),
+        "setSettings" => {
+            let scope = match args.str(1)?.as_str() {
+                "global" => crate::settings::SettingsScope::Global,
+                "project" => crate::settings::SettingsScope::Project,
+                other => return Err(error(format!("Unknown settings scope: {other}"))),
+            };
+            let value = Some(args.json(3)).filter(|value| !value.is_null());
+            session.settings().set_extension_namespace(scope, &args.str(2)?, value).map(|()| done).map_err(error)
+        }
         "setActiveTools" => {
             let names: Vec<String> = serde_json::from_value(args.json(1)).unwrap_or_default();
             session.set_active_tools_by_name(&names);

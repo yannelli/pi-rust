@@ -307,6 +307,13 @@ impl ExtensionUi for TuiExtensionUi {
         self.run(move |mode| mode.set_tools_expanded(expanded));
     }
 
+    async fn login(&self, provider: &str) -> Result<bool, String> {
+        let (sender, receiver) = oneshot::channel();
+        let provider = provider.to_string();
+        self.run(move |mode| mode.login_for_extension(provider, sender));
+        receiver.await.unwrap_or(Ok(false))
+    }
+
     async fn custom(&self, request: CustomRequest) -> Result<Option<Value>, String> {
         let (sender, receiver) = oneshot::channel();
         self.run(move |mode| mode.show_extension_custom(request, sender));

@@ -375,4 +375,18 @@ impl SettingsManager {
     pub fn set_project_value(&self, key: &str, value: Option<Value>) -> Result<(), String> {
         self.write(SettingsScope::Project, |map| set_key(map, key, value.clone()))
     }
+
+    /// Set (or remove) the top-level `namespace` of an extension in `scope`, keeping the other
+    /// keys. Keys of pi's own settings are refused; project writes need a trusted project.
+    pub fn set_extension_namespace(
+        &self,
+        scope: SettingsScope,
+        namespace: &str,
+        value: Option<Value>,
+    ) -> Result<(), String> {
+        if namespace.is_empty() || super::schema::PI_SETTINGS_KEYS.contains(&namespace) {
+            return Err(format!("\"{namespace}\" is not an extension settings namespace"));
+        }
+        self.write(scope, |map| set_key(map, namespace, value.clone()))
+    }
 }

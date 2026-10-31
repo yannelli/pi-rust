@@ -27,6 +27,8 @@ use crate::model_resolver::default_model_for;
 const RADIUS_PROVIDER_ID: &str = "radius";
 
 type OnBack = Option<Rc<dyn Fn()>>;
+/// Where an extension that started a login (`auth.login`) learns how it ended.
+type LoginDone = Option<tokio::sync::oneshot::Sender<Result<bool, String>>>;
 
 fn auth_type_order(auth_type: AuthType) -> u8 {
     if auth_type == AuthType::OAuth { 0 } else { 1 }
@@ -256,8 +258,27 @@ impl InteractiveMode {
         }));
     }
 
+    /// `auth.login` of a native extension: the OAuth login dialog of `provider`, reported to `done`.
+    pub(super) fn login_for_extension(
+        &self,
+        provider: String,
+        done: tokio::sync::oneshot::Sender<Result<bool, String>>,
+    ) {
+        self.spawn(move |mode| async move {
+            let options = mode.login_options(Some(AuthType::OAuth)).await;
+            match options.into_iter().find(|option| option.id == provider) {
+                Some(option) => mode.show_login_dialog_then(option, None, Some(done)),
+                None => drop(done.send(Err(format!("{provider} has no OAuth login")))),
+            }
+        });
+    }
+
     /// The login dialog in the editor slot, running the provider's flow until it ends.
     fn show_login_dialog(&self, provider: AuthSelectorProvider, on_back: OnBack) {
+        self.show_login_dialog_then(provider, on_back, None);
+    }
+
+    fn show_login_dialog_then(&self, provider: AuthSelectorProvider, on_back: OnBack, done: LoginDone) {
         if provider.ambient {
             return self.show_ambient_auth_dialog(&provider, on_back);
         }
@@ -280,6 +301,13 @@ impl InteractiveMode {
             let result = run_dialog_login(&dialog, &runtime, &provider.id, provider.auth_type, &options).await;
             mode.set_blocked_status("login", None);
             close();
+            if let Some(done) = done {
+                let _ = done.send(match &result {
+                    Ok(_) => Ok(true),
+                    Err(AuthError::Cancelled) => Ok(false),
+                    Err(error) => Err(error.to_string()),
+                });
+            }
             match result {
                 Ok(_) => {
                     mode.complete_provider_authentication(&provider, previous_model).await;

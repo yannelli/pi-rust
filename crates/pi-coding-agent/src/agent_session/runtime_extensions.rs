@@ -158,6 +158,11 @@ impl ModelRuntime {
         }
     }
 
+    /// The core OAuth flow of provider `id` (`oauth: { builtin }` of `pi.registerProvider`).
+    pub fn builtin_oauth(&self, id: &str) -> Option<Arc<dyn OAuthAuth>> {
+        (self.builtin_oauth)(id)
+    }
+
     /// OAuth flows of extension providers, for `/login`.
     pub fn extension_oauth_providers(&self) -> Vec<(String, Arc<dyn OAuthAuth>)> {
         let mut providers: Vec<_> =

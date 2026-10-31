@@ -61,6 +61,12 @@ export function createHost(config) {
 	let loading;
 	routeStderr(() => (loading ? [...runner.extensions, loading] : runner.extensions));
 
+	/** Drop tools of a native extension whose child exited; Rust removes them from the session. */
+	const forgetTools = (extension, names) => {
+		for (const name of names) extension.tools.delete(name);
+		runtime.markChanged(true);
+	};
+
 	const findTool = (name) => {
 		for (const ext of runner.extensions) {
 			const tool = ext.tools.get(name);
@@ -105,9 +111,8 @@ export function createHost(config) {
 			for (const entry of entries) {
 				loading = { path: entry.path, resolvedPath: entry.resolvedPath };
 				try {
-					const module = entry.native
-						? { default: nativeFactory({ ...entry.native, extensionPath: entry.path }) }
-						: await import(entry.resolvedPath);
+					const native = entry.native && { ...entry.native, extensionPath: entry.path };
+					const module = native ? { default: nativeFactory(native) } : await import(entry.resolvedPath);
 					call("timing", `${entry.path} module import`);
 					const factory = typeof module.default === "function" ? module.default : module;
 					if (typeof factory !== "function") {
@@ -115,6 +120,7 @@ export function createHost(config) {
 						continue;
 					}
 					const extension = createExtension(entry.path, entry.resolvedPath, entry.sourceInfo);
+					if (native) native.forgetTools = (names) => forgetTools(extension, names);
 					const load = createExtensionAPI(extension, runtime, config.cwd, eventBus);
 					try {
 						await factory(load.api);

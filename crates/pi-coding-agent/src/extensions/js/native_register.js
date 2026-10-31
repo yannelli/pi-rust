@@ -1,8 +1,10 @@
 // Registrations of native extensions: tools, commands, shortcuts, flags, events, providers,
 // virtual models, and autocomplete triggers become `pi.*` registrations that call the child.
 import { isObject, mergePatch, snapshot, toJson } from "./native_host.js";
+import { createContentRenderers, keyTexts, toolRenderers } from "./native_render.js";
 
 const TOOL_ABORT_MS = 5000;
+const PREPARE_MS = 1500;
 const TOOL_RESULT_KEYS = ["content", "details", "structuredContent", "isError", "usage"];
 
 /** The handler result of events whose runner reads only the result, built from a patched event. */
@@ -40,9 +42,17 @@ export function createRegistrar(state) {
 		return result ?? PATCHED_RESULTS[name]?.(event);
 	};
 
+	/** Runs before validation; the Rust hook blocks on the returned promise for at most 2 seconds. */
+	const prepare = (name) => (args) => {
+		if (state.dead) return args;
+		return request("tool.prepare", { name, args: toJson(args) }, { timeout: PREPARE_MS });
+	};
+
 	const tool = (definition) => {
 		state.tools.add(definition.name);
 		pi.registerTool({
+			...toolRenderers(state, definition),
+			prepareArguments: definition.prepareArguments ? prepare(definition.name) : undefined,
 			name: definition.name,
 			label: definition.label ?? definition.name,
 			description: definition.description ?? "",
@@ -117,14 +127,24 @@ export function createRegistrar(state) {
 		state.installAutocomplete();
 	};
 
+	const content = createContentRenderers(state);
+
+	const provider = (name, config) => {
+		pi.registerProvider(name, config);
+		if (isObject(config?.oauth)) state.oauthProviders.add(name);
+		else state.oauthProviders.delete(name);
+	};
+
 	const apply = (init) => {
 		for (const definition of init.tools ?? []) tool(definition);
 		for (const definition of init.commands ?? []) command(definition);
 		for (const definition of init.shortcuts ?? []) shortcut(definition);
 		for (const definition of init.flags ?? []) flag(definition);
-		for (const { name, config } of init.providers ?? []) pi.registerProvider(name, config);
+		for (const { name, config } of init.providers ?? []) provider(name, config);
 		for (const definition of init.virtualModels ?? []) virtualModel(definition);
 		for (const definition of init.autocomplete ?? []) autocomplete(definition);
+		for (const customType of init.messageRenderers ?? []) content.message(customType);
+		for (const customType of init.entryRenderers ?? []) content.entry(customType);
 		events(init.events);
 	};
 
@@ -135,8 +155,15 @@ export function createRegistrar(state) {
 		"register.flag": (p) => (flag(p), null),
 		"register.events": (p) => (events(p.events), null),
 		"register.autocomplete": (p) => (autocomplete(p), null),
-		"provider.register": (p) => (pi.registerProvider(p.name, p.config), null),
-		"provider.unregister": (p) => (pi.unregisterProvider(p.name), null),
+		"register.messageRenderer": (p) => (content.message(p.customType), null),
+		"register.entryRenderer": (p) => (content.entry(p.customType), null),
+		"keybindings.get": (p) => keyTexts(p),
+		"provider.register": (p) => (provider(p.name, p.config), null),
+		"provider.unregister": (p) => {
+			state.oauthProviders.delete(p.name);
+			pi.unregisterProvider(p.name);
+			return null;
+		},
 		"virtualModel.register": (p) => (virtualModel(p), null),
 		"virtualModel.unregister": (p) => (pi.unregisterVirtualModel(p.provider, p.id), null),
 		"tool.update": ({ toolCallId, partial }) => {
