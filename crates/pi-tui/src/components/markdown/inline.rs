@@ -4,7 +4,7 @@ use super::block::{floor_boundary, rtrim};
 use super::lexer::Lexer;
 use super::rules::{self, captures, captures_anywhere, is_match};
 use super::token::Token;
-use crate::utils::js_trim;
+use crate::utils::{CJK_PUNCTUATION_REGEX, js_trim};
 
 /// marked's `findClosingBracket` for `()`: index of the unbalanced `)`, `None` when balanced,
 /// and `Err` when an opening bracket is left open.
@@ -351,6 +351,9 @@ impl Lexer {
             };
             (current, href)
         };
+        if let Some(punctuation) = CJK_PUNCTUATION_REGEX.find(&raw) {
+            return self.url(&raw[..punctuation.start()]);
+        }
         let tokens = vec![text_token(&raw)];
         Some(Token::Link { raw: raw.clone(), href, text: raw, tokens, image: false })
     }
