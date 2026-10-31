@@ -3,7 +3,7 @@
 use super::SelectListTheme;
 use crate::autocomplete::AutocompleteItem;
 use crate::component::{TuiMouseButton, TuiMouseEvent, TuiMouseEventResult, TuiMouseEventType};
-use crate::keybindings::{get_keybindings, ids};
+use crate::keybindings::{get_keybindings, get_select_page_index, ids};
 use crate::utils::{truncate_to_width_with, visible_width};
 
 const DEFAULT_PRIMARY_COLUMN_WIDTH: usize = 32;
@@ -68,7 +68,7 @@ impl AutocompleteList {
         (start, (start + self.max_visible).min(self.items.len()))
     }
 
-    /// Up and Down move the selection, wrapping around.
+    /// Up and Down move the selection, wrapping around; page keys move one visible page, clamped.
     pub fn handle_key(&mut self, data: &str) {
         let kb = get_keybindings();
         let count = self.items.len();
@@ -79,6 +79,8 @@ impl AutocompleteList {
             self.selected = if self.selected == 0 { count - 1 } else { self.selected - 1 };
         } else if kb.matches(data, ids::SELECT_DOWN) {
             self.selected = if self.selected + 1 == count { 0 } else { self.selected + 1 };
+        } else if let Some(page_index) = get_select_page_index(&kb, data, self.selected, count, self.max_visible) {
+            self.selected = page_index;
         }
     }
 

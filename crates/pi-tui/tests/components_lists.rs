@@ -375,3 +375,44 @@ fn keeps_a_settings_list_focused_when_a_click_in_its_submenu_closes_the_submenu(
     assert_eq!(*changes.borrow(), [change("theme", "second"), change("other", "on")]);
     h.stop();
 }
+
+#[test]
+fn select_list_moves_by_one_visible_page_with_selection_page_keys() {
+    let items = (0..12).map(|i| item(&format!("item-{i}"), &format!("Item {i}"), None)).collect();
+    let mut list = SelectList::new(items, 5, select_theme(), SelectListLayoutOptions::default());
+    let selections: Rc<RefCell<Vec<String>>> = Rc::default();
+    let sink = selections.clone();
+    list.on_selection_change = Some(Box::new(move |item| sink.borrow_mut().push(item.value.clone())));
+    assert!(list.captures_viewport_input());
+
+    for key in ["\x1b[6~", "\x1b[6~", "\x1b[6~", "\x1b[6~", "\x1b[5~"] {
+        list.handle_input(key);
+    }
+    assert_eq!(*selections.borrow(), ["item-5", "item-10", "item-11", "item-6"]);
+
+    list.set_filter("no match");
+    list.handle_input("\x1b[6~");
+    assert_eq!(*selections.borrow(), ["item-5", "item-10", "item-11", "item-6"]);
+}
+
+#[test]
+fn settings_list_moves_by_one_visible_page_with_selection_page_keys() {
+    let items = (0..12)
+        .map(|i| SettingItem {
+            id: format!("setting-{i}"),
+            label: format!("Setting {i}"),
+            current_value: i.to_string(),
+            ..SettingItem::default()
+        })
+        .collect();
+    let (mut list, _) = settings_list(items, 5, false);
+    assert!(list.captures_viewport_input());
+
+    list.handle_input("\x1b[6~");
+    assert!(list.render(80).join("\n").contains("> Setting 5"), "{:?}", list.render(80));
+    list.handle_input("\x1b[6~");
+    list.handle_input("\x1b[6~");
+    assert!(list.render(80).join("\n").contains("> Setting 11"), "{:?}", list.render(80));
+    list.handle_input("\x1b[5~");
+    assert!(list.render(80).join("\n").contains("> Setting 6"), "{:?}", list.render(80));
+}

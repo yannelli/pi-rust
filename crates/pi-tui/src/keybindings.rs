@@ -155,6 +155,25 @@ pub fn set_keybindings(manager: KeybindingsManager) {
     *GLOBAL_KEYBINDINGS.write().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(manager));
 }
 
+/// The selection index after a `tui.select.pageUp` or `tui.select.pageDown` key, moved by `page_size` and clamped to
+/// `0..item_count - 1`. `None` when `data` is not a page key; `Some(0)` on an empty list, so callers check for items.
+pub fn get_select_page_index(
+    keybindings: &KeybindingsManager,
+    data: &str,
+    selected_index: usize,
+    item_count: usize,
+    page_size: usize,
+) -> Option<usize> {
+    let moved = if keybindings.matches(data, ids::SELECT_PAGE_UP) {
+        selected_index.saturating_sub(page_size)
+    } else if keybindings.matches(data, ids::SELECT_PAGE_DOWN) {
+        selected_index.saturating_add(page_size)
+    } else {
+        return None;
+    };
+    Some(moved.min(item_count.saturating_sub(1)))
+}
+
 /// Edits a copy of the process-wide keybindings and installs it (for example to reload user
 /// overrides, which upstream does by mutating the shared manager). Returns the new manager.
 pub fn update_keybindings(edit: impl FnOnce(&mut KeybindingsManager)) -> Arc<KeybindingsManager> {

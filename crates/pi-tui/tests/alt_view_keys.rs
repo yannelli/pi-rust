@@ -2,16 +2,24 @@
 //! bindings, OSC 133 prompt jumps, and iTerm2 output.
 
 mod alt_view_common;
+mod editor_common;
 mod layout_common;
 mod support;
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use alt_view_common::{Harness, numbered_lines, recording_editor, scroll_view};
+use editor_common::{MockProvider, default_theme};
 use layout_common::{entry, fn_component, text};
-use pi_tui::components::ScrollFollow;
+use pi_tui::autocomplete::{AutocompleteItem, AutocompleteSuggestions};
+use pi_tui::components::select_list::SelectListTheme;
+use pi_tui::components::{ScrollFollow, SelectItem, SelectList, SelectListLayoutOptions, StyleFn};
 use pi_tui::keybindings::{KeybindingsConfig, tui_keybindings};
 use pi_tui::terminal_image::{ImageDimensions, ImageProtocol, TerminalCapabilities, reset_capabilities_cache};
 use pi_tui::{
-    KeybindingsManager, ScrollViewOptions, StackOptions, VStack, component, get_keybindings, set_keybindings,
+    ComponentRef, Editor, EditorOptions, KeybindingsManager, ScrollViewOptions, StackOptions, VStack, component,
+    get_keybindings, set_keybindings,
 };
 use support::{Image, ImageOptions, ImageTheme};
 
@@ -155,6 +163,75 @@ fn routes_home_and_end_to_the_focused_component_and_ctrl_home_end_to_the_transcr
     assert_eq!(state.scroll_top(), 1);
     assert_eq!(*editor_inputs.borrow(), editor_keys);
 
+    h.stop();
+}
+
+#[test]
+fn defers_viewport_keys_to_a_focused_list_instead_of_scrolling_the_transcript() {
+    let h = Harness::new(20, 6);
+    let plain: StyleFn = Rc::new(|text: &str| text.to_string());
+    let theme = SelectListTheme {
+        selected_prefix: plain.clone(),
+        selected_text: plain.clone(),
+        description: plain.clone(),
+        scroll_info: plain.clone(),
+        no_match: plain,
+    };
+    let items = (0..12).map(|i| SelectItem::new(&format!("item-{i}"), &format!("item-{i}"))).collect();
+    let list = component(SelectList::new(items, 3, theme, SelectListLayoutOptions::default()));
+    h.tui.add_child(text(&numbered_lines(12)));
+    let focused: ComponentRef = list.clone();
+    h.tui.add_child(focused.clone());
+    h.tui.set_focus(Some(focused));
+    h.tui.start();
+    h.wait();
+    let top_before = h.tui.viewport_top();
+
+    h.send("\x1b[6~");
+    h.send("\x1b[1;5H");
+    h.wait();
+    assert_eq!(list.borrow().get_selected_item().map(|item| item.value.clone()).as_deref(), Some("item-3"));
+    assert_eq!(h.tui.viewport_top(), top_before);
+    h.stop();
+}
+
+#[test]
+fn gives_viewport_keys_back_to_the_transcript_when_editor_autocomplete_closes() {
+    let h = Harness::new(40, 8);
+    let editor = Editor::new(&h.tui, default_theme(), EditorOptions::default());
+    let submitted: Rc<RefCell<String>> = Rc::default();
+    let sink = submitted.clone();
+    editor.on_submit(move |text| *sink.borrow_mut() = text.to_string());
+    let provider = MockProvider::new(|_, _, _, _| {
+        let items = (0..12).map(|i| AutocompleteItem::new(format!("/command-{i}"), format!("command-{i}"))).collect();
+        Some(AutocompleteSuggestions { items, prefix: "/".into() })
+    });
+    editor.set_autocomplete_provider(provider.shared());
+    h.tui.add_child(text(&numbered_lines(30)));
+    let focused: ComponentRef = component(editor.clone());
+    h.tui.add_child(focused.clone());
+    h.tui.set_focus(Some(focused));
+    h.tui.start();
+    h.wait();
+
+    h.send("/");
+    h.wait();
+    assert!(editor.is_showing_autocomplete());
+    let top_with_menu = h.tui.viewport_top();
+    // PageDown pages the menu.
+    h.send("\x1b[6~");
+    h.wait();
+    assert_eq!(h.tui.viewport_top(), top_with_menu);
+
+    h.send("\r");
+    h.wait();
+    assert_eq!(*submitted.borrow(), "/command-5");
+    assert!(!editor.is_showing_autocomplete());
+    let top_without_menu = h.tui.viewport_top();
+    // PageUp scrolls the transcript again.
+    h.send("\x1b[5~");
+    h.wait();
+    assert!(h.tui.viewport_top() < top_without_menu);
     h.stop();
 }
 
