@@ -2,11 +2,12 @@
 //! must be inside the session directory.
 
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
+use super::checkpoints::Checkpoints;
 use super::connection::{Connection, Incoming};
 use super::host::{PermissionRequest, host};
 use super::terminal::Terminals;
@@ -19,7 +20,12 @@ pub(crate) struct ClientContext {
     pub pi_session: String,
     pub cwd: PathBuf,
     pub terminals: Terminals,
+    /// A one-shot session, such as a compaction summary: no writes, terminals, or permissions.
+    pub read_only: bool,
+    pub checkpoints: Arc<Mutex<Checkpoints>>,
 }
+
+const READ_ONLY: &str = "pi runs this request read-only";
 
 fn normalize(path: &Path) -> PathBuf {
     let mut normal = PathBuf::new();
@@ -84,7 +90,10 @@ fn write_text_file(context: &ClientContext, params: &Value) -> Result<Value, Str
         std::fs::create_dir_all(parent).map_err(|error| format!("Cannot create {}: {error}", parent.display()))?;
     }
     let content = params["content"].as_str().unwrap_or_default();
+    let mut checkpoints = context.checkpoints.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    checkpoints.before_write(&path);
     std::fs::write(&path, content).map_err(|error| format!("Cannot write {}: {error}", path.display()))?;
+    checkpoints.after_write(&context.pi_session, &path);
     Ok(Value::Null)
 }
 
@@ -134,7 +143,12 @@ pub(crate) fn handle(
     let (connection, context) = (connection.clone(), context.clone());
     tokio::spawn(async move {
         let params = &event.params;
-        let result = match event.method.as_str() {
+        let method = event.method.as_str();
+        if context.read_only && (method == "fs/write_text_file" || method.starts_with("terminal/")) {
+            return connection.respond_error(id, -32603, READ_ONLY);
+        }
+        let result = match method {
+            "session/request_permission" if context.read_only => Ok(json!({"outcome": {"outcome": "cancelled"}})),
             "session/request_permission" => Ok(permission(&context, params, &cancel).await),
             "fs/read_text_file" => read_text_file(&context, params),
             "fs/write_text_file" => write_text_file(&context, params),

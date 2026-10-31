@@ -61,6 +61,10 @@ pub struct LocalCommand {
     pub args: Vec<String>,
     /// Shown when `program` is not on PATH.
     pub install_hint: String,
+    /// The official installer of `program`, which pi offers to run in the terminal.
+    pub installer: Vec<String>,
+    /// Folders the installer puts `program` in, searched after PATH.
+    pub install_dirs: Vec<String>,
     pub login: Vec<String>,
 }
 
@@ -113,6 +117,8 @@ pub fn builtin_agents() -> Vec<RegistryAgent> {
             args: vec!["acp".into(), "--agent-engine=v3".into()],
             install_hint: "Install Kiro CLI with `curl -fsSL https://cli.kiro.dev/install | bash`, then try again."
                 .into(),
+            installer: vec!["sh".into(), "-c".into(), "curl -fsSL https://cli.kiro.dev/install | bash".into()],
+            install_dirs: vec!["~/.local/bin".into()],
             login: vec!["kiro-cli".into(), "login".into()],
         }),
         ..RegistryAgent::default()

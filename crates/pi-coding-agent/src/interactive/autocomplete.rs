@@ -181,6 +181,8 @@ impl InteractiveMode {
             }
         }
         self.state.borrow_mut().skill_commands = skills;
+        let agent_commands = self.acp_slash_commands(&commands);
+        commands.extend(agent_commands);
         let cwd = session.cwd().display().to_string();
         let provider = CombinedAutocompleteProvider::new(commands, cwd, None);
         let provider = self.wrap_extension_autocomplete(Rc::new(provider));

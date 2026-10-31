@@ -18,7 +18,7 @@ const STDERR_LINES: usize = 20;
 pub(crate) struct Process {
     pub connection: Arc<Connection>,
     stderr: Arc<Mutex<VecDeque<String>>>,
-    _child: Child,
+    child: Child,
 }
 
 impl Process {
@@ -26,6 +26,11 @@ impl Process {
     pub fn stderr_tail(&self) -> String {
         let lines = self.stderr.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         lines.iter().cloned().collect::<Vec<_>>().join("\n")
+    }
+
+    /// Stops the agent and waits for it to exit.
+    pub async fn shutdown(&mut self) {
+        let _ = self.child.kill().await;
     }
 }
 
@@ -72,5 +77,5 @@ pub(crate) fn spawn(agent: &AgentLaunch, cwd: &Path) -> Result<Process, String> 
         }
     });
     let connection = Connection::new(label(&agent.name), stdout, stdin);
-    Ok(Process { connection, stderr: tail, _child: child })
+    Ok(Process { connection, stderr: tail, child })
 }

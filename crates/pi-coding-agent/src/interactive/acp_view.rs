@@ -12,7 +12,7 @@ use tokio::sync::mpsc::unbounded_channel;
 
 use self::component::{AcpAction, AcpBrowser, AcpRow};
 use super::mode::InteractiveMode;
-use crate::acp_client::install::{install, uninstall};
+use crate::acp_client::install::{install, needs_program, uninstall};
 use crate::acp_client::registry::{RegistryAgent, fetch};
 use crate::acp_client::{AcpAgentEntry, AcpScope, platform_key, provider_id, registry_url, store, with_builtins};
 use crate::settings::SettingsManager;
@@ -71,6 +71,12 @@ impl InteractiveMode {
                                 }
                                 String::new()
                             }
+                            AcpAction::Install(id, scope) if program_missing(&agents, &id) => {
+                                let Some(agent) = agents.iter().find(|agent| agent.id == id).cloned() else { continue };
+                                close();
+                                mode.acp_install_program(agent, scope);
+                                break;
+                            }
                             change => match apply(change, &agents, &settings, &agent_dir).await {
                                 Ok(message) => {
                                     crate::acp_client::providers::sync_providers(&mode.session()).await;
@@ -97,6 +103,15 @@ impl InteractiveMode {
     }
 }
 
+/// Whether agent `id` runs a program that is missing and that has an installer pi can run.
+fn program_missing(agents: &[RegistryAgent], id: &str) -> bool {
+    let path = std::env::var_os("PATH");
+    let agent = agents.iter().find(|agent| agent.id == id);
+    agent.is_some_and(|agent| {
+        agent.local.as_ref().is_some_and(|local| !local.installer.is_empty()) && needs_program(agent, path.as_deref())
+    })
+}
+
 fn find(settings: &SettingsManager, id: &str) -> Option<(AcpAgentEntry, AcpScope)> {
     store::list(settings).into_iter().find(|(entry, _)| entry.id == id)
 }
@@ -109,24 +124,30 @@ async fn apply(
     agent_dir: &Path,
 ) -> Result<String, String> {
     match action {
-        AcpAction::Install(id) => {
+        AcpAction::Install(id, scope) => {
             let agent =
                 agents.iter().find(|agent| agent.id == id).cloned().ok_or("The agent is not in the registry")?;
             let dir = agent_dir.to_path_buf();
             let entry =
                 tokio::spawn(async move { install(&agent, &dir).await }).await.map_err(|error| error.to_string())??;
-            store::upsert(settings, &entry, AcpScope::Global)?;
-            Ok(format!("Installed {}. Its provider is {}.", entry.name, provider_id(&entry.id)))
+            store::upsert(settings, &entry, scope)?;
+            let (name, provider, scope) = (entry.name, provider_id(&entry.id), scope.label());
+            Ok(format!("Installed {name} in the {scope} settings. Its provider is {provider}."))
         }
-        AcpAction::Toggle(id) => {
-            let (entry, scope) = find(settings, &id).ok_or("The agent is no longer installed")?;
+        AcpAction::Toggle(id, scope) => {
+            let entry = store::get(settings, &id, scope).ok_or("The agent is no longer installed")?;
             store::set_enabled(settings, &id, scope, !entry.enabled)?;
             Ok(format!("{} {}.", if entry.enabled { "Disabled" } else { "Enabled" }, entry.name))
         }
-        AcpAction::Remove(id) => {
-            let (entry, scope) = find(settings, &id).ok_or("The agent is no longer installed")?;
+        AcpAction::Move(id, scope) => {
+            let entry = store::get(settings, &id, scope).ok_or("The agent is no longer installed")?;
+            let to = store::move_entry(settings, &id, scope)?;
+            Ok(format!("Moved {} to the {} settings.", entry.name, to.label()))
+        }
+        AcpAction::Remove(id, scope) => {
+            let entry = store::get(settings, &id, scope).ok_or("The agent is no longer installed")?;
             store::remove(settings, &id, scope)?;
-            let shared = store::list(settings).iter().any(|(other, _)| other.install_dir == entry.install_dir);
+            let shared = store::all(settings).iter().any(|(other, _, _)| other.install_dir == entry.install_dir);
             if !shared {
                 uninstall(&entry, agent_dir)?;
             }
@@ -138,13 +159,13 @@ async fn apply(
 
 fn installed_rows(settings: &SettingsManager) -> Vec<AcpRow> {
     let default = settings.settings().default_provider;
-    store::list(settings)
+    store::all(settings)
         .into_iter()
-        .map(|(entry, scope)| {
+        .map(|(entry, scope, shadowed)| {
             let provider = provider_id(&entry.id);
             let command = std::iter::once(entry.command.as_str()).chain(entry.args.iter().map(String::as_str));
             AcpRow {
-                is_default: default.as_deref() == Some(provider.as_str()),
+                is_default: !shadowed && default.as_deref() == Some(provider.as_str()),
                 details: vec![
                     format!("Provider: {provider}"),
                     format!("Command: {}", command.collect::<Vec<_>>().join(" ")),
@@ -155,7 +176,8 @@ fn installed_rows(settings: &SettingsManager) -> Vec<AcpRow> {
                 name: entry.name,
                 description: entry.description.unwrap_or_default(),
                 version: entry.version.unwrap_or_default(),
-                scope: scope.label().into(),
+                scope: Some(scope),
+                shadowed,
                 enabled: Some(entry.enabled),
                 installed: true,
             }

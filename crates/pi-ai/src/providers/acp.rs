@@ -2,14 +2,17 @@
 //! over stdio and streams its session into one assistant message; the agent runs its own tools.
 
 mod auth;
+mod checkpoints;
 mod client;
 pub(crate) mod connection;
 mod host;
+mod mcp;
 mod process;
 mod prompt;
 mod render;
 mod session;
 mod terminal;
+mod updates;
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
@@ -21,13 +24,14 @@ use tokio_util::sync::CancellationToken;
 
 pub use self::auth::{AuthMethod, TerminalLogin, auth_methods, auth_methods_of, authenticate};
 pub use self::host::{
-    AcpHost, AgentLaunch, Choice, PermissionRequest, PlanEntry, Selector, SessionInfo, agent, set_agents, set_host,
+    AcpHost, AgentCommand, AgentLaunch, Choice, FileChange, PermissionRequest, PlanEntry, PriorFile, Selector,
+    SessionInfo, agent, set_agents, set_host,
 };
 use self::render::Transcript;
 use self::session::{Runtime, rpc, slot};
 use crate::registry::{ApiProvider, StreamOptions};
 use crate::stream::{AssistantMessageEventStream, MessageBuilder, event_channel};
-use crate::types::{Context, Model, ModelCost, StopReason, Usage};
+use crate::types::{Context, Message, Model, ModelCost, StopReason, Usage};
 
 pub const API: &str = "acp";
 /// The model ID that keeps the model the agent chose.
@@ -96,10 +100,18 @@ async fn run(
 ) -> Result<StopReason, String> {
     let agent =
         agent(&model.provider).ok_or_else(|| format!("No ACP agent is set up for {}. Run /acp.", model.provider))?;
-    let pi_session = options.session_id.as_deref().unwrap_or("default");
+    let live = options.session_id.as_deref().is_some_and(|id| host::host().is_none_or(|host| host.live_session(id)));
+    let Some(pi_session) = options.session_id.as_deref().filter(|_| live) else {
+        return one_shot(out, agent, model, context, options).await;
+    };
     let shared = slot(&agent.provider, pi_session);
     let mut guard = shared.lock().await;
     let messages = &context.messages;
+    if let Some(runtime) = guard.as_mut()
+        && let Some(index) = last_reply(messages, &agent.provider, runtime.last_reply)
+    {
+        runtime.seen = index + 1;
+    }
     let stale = guard.as_ref().is_some_and(|runtime| {
         runtime.connection.closed_reason().is_some() || runtime.seen > messages.len() || runtime.agent != agent
     });
@@ -111,7 +123,7 @@ async fn run(
             Some(cwd) => cwd,
             None => std::env::current_dir().map_err(|error| format!("Cannot read the working directory: {error}"))?,
         };
-        let (mut runtime, resumed) = Runtime::start(agent.clone(), cwd, pi_session).await?;
+        let (mut runtime, resumed) = Runtime::start(agent.clone(), cwd, pi_session, false).await?;
         if resumed {
             skip_replay(&mut runtime).await;
             runtime.seen = messages.len().saturating_sub(1);
@@ -125,19 +137,76 @@ async fn run(
         *guard = Some(runtime);
     }
     let runtime = guard.as_mut().expect("started above");
+    prepare(runtime, model, options).await?;
+    let blocks = prompt::build(messages, runtime.seen, runtime.capabilities, &runtime.client.cwd);
+    out.start();
+    for notice in std::mem::take(&mut runtime.notices) {
+        out.text_delta(&format!("> {notice}\n\n"));
+    }
+    turn_hook(runtime, true).await;
+    let result = drive(out, runtime, blocks, &model.cost, &options.cancel).await;
+    turn_hook(runtime, false).await;
+    runtime.seen = messages.len();
+    runtime.last_reply = Some(out.message().timestamp);
+    runtime.report();
+    result
+}
+
+/// The index of the reply with `timestamp` that this agent wrote, also after compaction.
+fn last_reply(messages: &[Message], provider: &str, timestamp: Option<i64>) -> Option<usize> {
+    let timestamp = timestamp?;
+    messages.iter().rposition(|message| {
+        matches!(message, Message::Assistant(reply)
+            if reply.api == API && reply.provider == provider && reply.timestamp == timestamp)
+    })
+}
+
+/// Selects the model and thinking level of the request.
+async fn prepare(runtime: &mut Runtime, model: &Model, options: &StreamOptions) -> Result<(), String> {
     if model.id != DEFAULT_MODEL {
         runtime.set("model", &model.id).await?;
     }
+    runtime.pi_model = model.id.clone();
     let thought = runtime.selectors.iter().find(|selector| selector.category == "thought_level");
     let level =
         thinking_value(options).filter(|level| thought.is_some_and(|s| s.choices.iter().any(|c| &c.id == level)));
     if let (Some(level), Some(id)) = (level, thought.map(|selector| selector.id.clone())) {
         runtime.set(&id, &level).await?;
     }
-    let blocks = prompt::build(messages, runtime.seen, runtime.capabilities, &runtime.client.cwd);
-    out.start();
-    let result = drive(out, runtime, blocks, &model.cost, &options.cancel).await;
-    runtime.seen = messages.len();
+    Ok(())
+}
+
+/// [`AcpHost::turn_started`] or [`AcpHost::turn_ended`] on a blocking thread.
+async fn turn_hook(runtime: &Runtime, started: bool) {
+    let Some(host) = host::host().filter(|_| !runtime.client.read_only) else { return };
+    let (pi_session, cwd) = (runtime.client.pi_session.clone(), runtime.client.cwd.clone());
+    let _ = tokio::task::spawn_blocking(move || match started {
+        true => host.turn_started(&pi_session, &cwd),
+        false => host.turn_ended(&pi_session, &cwd),
+    })
+    .await;
+}
+
+/// A request outside a live pi session, such as a compaction summary: a new read-only session
+/// of its own, whose process ends with the reply.
+async fn one_shot(
+    out: &mut MessageBuilder,
+    agent: AgentLaunch,
+    model: &Model,
+    context: &Context,
+    options: &StreamOptions,
+) -> Result<StopReason, String> {
+    let cwd = std::env::current_dir().map_err(|error| format!("Cannot read the working directory: {error}"))?;
+    let pi_session = options.session_id.clone().unwrap_or_default();
+    let (mut runtime, _) = Runtime::start(agent, cwd, &pi_session, true).await?;
+    let result = async {
+        prepare(&mut runtime, model, options).await?;
+        let blocks = prompt::one_shot(context, runtime.capabilities, &runtime.client.cwd);
+        out.start();
+        drive(out, &mut runtime, blocks, &model.cost, &options.cancel).await
+    }
+    .await;
+    runtime.process.shutdown().await;
     result
 }
 
@@ -146,16 +215,7 @@ async fn skip_replay(runtime: &mut Runtime) {
     let connection = runtime.connection.clone();
     let mut incoming = connection.incoming.lock().await;
     while let Ok(event) = incoming.try_recv() {
-        let update = &event.params["update"];
-        match update["sessionUpdate"].as_str() {
-            Some("config_option_update") => {
-                runtime.apply_config(update["configOptions"].as_array().map_or(&[][..], Vec::as_slice))
-            }
-            Some("current_mode_update") => {
-                runtime.set_current("mode", update["currentModeId"].as_str().unwrap_or_default())
-            }
-            _ => {}
-        }
+        updates::apply(runtime, &event.params["update"]);
     }
 }
 
@@ -168,6 +228,7 @@ async fn drive(
 ) -> Result<StopReason, String> {
     let connection = runtime.connection.clone();
     let mut incoming = connection.incoming.lock().await;
+    runtime.client.checkpoints.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clear();
     let turn = CancellationToken::new();
     let _close_dialogs = turn.clone().drop_guard();
     let params = json!({"sessionId": runtime.session_id, "prompt": blocks});
@@ -215,23 +276,21 @@ fn update(out: &mut MessageBuilder, runtime: &mut Runtime, transcript: &mut Tran
         return;
     }
     let update = &params["update"];
-    match update["sessionUpdate"].as_str().unwrap_or_default() {
-        "config_option_update" => {
-            runtime.apply_config(update["configOptions"].as_array().map_or(&[][..], Vec::as_slice));
-            runtime.report();
-        }
-        "current_mode_update" => {
-            let mode = runtime.selectors.iter().find(|selector| selector.category == "mode").map(|s| s.id.clone());
-            runtime.set_current(&mode.unwrap_or_default(), update["currentModeId"].as_str().unwrap_or_default());
-            runtime.report();
-        }
-        "plan" => {
-            transcript.update(out, update, &runtime.client.terminals);
-            if let Some(host) = host::host() {
-                host.plan(&runtime.client.pi_session, &transcript.plan);
-            }
-        }
-        _ => transcript.update(out, update, &runtime.client.terminals),
+    let kind = update["sessionUpdate"].as_str().unwrap_or_default();
+    if updates::apply(runtime, update) && kind != "usage_update" {
+        return runtime.report();
+    }
+    let client = &runtime.client;
+    if matches!(kind, "tool_call" | "tool_call_update") && !client.read_only {
+        let mut checkpoints = client.checkpoints.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        checkpoints.tool_update(&client.pi_session, &client.cwd, update);
+    }
+    transcript.update(out, update, &client.terminals);
+    if kind == "plan"
+        && !client.read_only
+        && let Some(host) = host::host()
+    {
+        host.plan(&client.pi_session, &transcript.plan);
     }
 }
 

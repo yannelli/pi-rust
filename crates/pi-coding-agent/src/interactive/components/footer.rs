@@ -240,7 +240,10 @@ impl FooterComponent {
             parts.push(format!("${:.3}{}", totals.cost, if snapshot.subscription { " (sub)" } else { "" }));
         }
         let auto = if snapshot.auto_compact { " (auto)" } else { "" };
-        let window = format_tokens(snapshot.context_window.unwrap_or(0));
+        let window = match snapshot.context_window.unwrap_or(0) {
+            0 => "?".to_string(),
+            window => format_tokens(window),
+        };
         let display = match percent {
             Some(percent) => format!("{percent:.1}%/{window}{auto}"),
             None => format!("?/{window}{auto}"),

@@ -212,9 +212,12 @@ pub fn estimate_projected_context_tokens(projection: &SessionProjection, branch:
     ContextUsageEstimate { tokens, usage_tokens: 0, trailing_tokens: tokens, last_usage_index: None }
 }
 
-/// Whether `context_tokens` crosses `context_window - reserve_tokens`.
+/// Whether `context_tokens` crosses `context_window - reserve_tokens`. A window of 0 is unknown
+/// and never crosses.
 pub fn should_compact(context_tokens: u64, context_window: u64, settings: &CompactionSettings) -> bool {
-    settings.enabled && (context_tokens as i128) > context_window as i128 - settings.reserve_tokens as i128
+    settings.enabled
+        && context_window > 0
+        && (context_tokens as i128) > context_window as i128 - settings.reserve_tokens as i128
 }
 
 /// Context use for status displays. `tokens` is `None` right after a compaction, until a

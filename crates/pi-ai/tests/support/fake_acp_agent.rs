@@ -1,5 +1,7 @@
 //! A scripted ACP agent for the `acp` provider tests. The prompt text picks the script: `tools`
 //! edits a file with permission, `wait` runs until `session/cancel`, anything else echoes.
+//! `own-edit` edits files with the agent's own tools, `probe` tries what a read-only session
+//! refuses, `mcp` lists the MCP servers, and `/name` echoes a slash command.
 
 use std::io::{BufRead, Write};
 
@@ -11,6 +13,8 @@ struct Agent {
     cancelled: bool,
     mode: String,
     model: String,
+    turns: u32,
+    mcp: Vec<String>,
 }
 
 fn send(message: &Value) {
@@ -92,13 +96,70 @@ impl Agent {
         chunk("agent_message_chunk", &format!("exit={} outside-rejected={rejected}", output["exitStatus"]["exitCode"]));
     }
 
+    /// Changes files with the agent's own tools: an edit it announces, and a shell command that
+    /// names no file.
+    fn own_edit(&mut self, cwd: &str) {
+        let (edited, shell) = (format!("{cwd}/b.txt"), format!("{cwd}/c.txt"));
+        update(json!({"sessionUpdate": "tool_call", "toolCallId": "e1", "title": "Edit b.txt", "kind": "edit",
+            "status": "pending", "locations": [{"path": edited}]}));
+        update(json!({"sessionUpdate": "tool_call", "toolCallId": "x1", "title": "Run sed", "kind": "execute",
+            "status": "pending"}));
+        let call = json!({"toolCallId": "e1", "title": "Edit b.txt", "kind": "edit"});
+        let options = json!([{"optionId": "yes", "name": "Allow", "kind": "allow_once"}]);
+        self.call("session/request_permission", json!({"sessionId": "s1", "toolCall": call, "options": options}));
+        let _ = std::fs::write(&edited, "agent edit\n");
+        let _ = std::fs::write(&shell, "shell edit\n");
+        let _ = std::fs::remove_file(format!("{cwd}/gone.txt"));
+        if let Ok(file) = std::fs::File::options().write(true).open(format!("{cwd}/same.txt")) {
+            let modified = file.metadata().and_then(|meta| meta.modified());
+            let _ = std::fs::write(format!("{cwd}/same.txt"), "XYZ\n");
+            if let Ok(modified) = modified {
+                let _ = file.set_modified(modified);
+            }
+        }
+        for id in ["e1", "x1"] {
+            update(json!({"sessionUpdate": "tool_call_update", "toolCallId": id, "status": "completed"}));
+        }
+    }
+
+    /// Tries a write, a terminal, and a permission request, and reports what pi answered.
+    fn probe(&mut self, cwd: &str) {
+        let write = self.call(
+            "fs/write_text_file",
+            json!({"sessionId": "s1", "path": format!("{cwd}/probe.txt"),
+            "content": "x"}),
+        );
+        let terminal = self.call("terminal/create", json!({"sessionId": "s1", "command": "echo", "args": []}));
+        let call = json!({"toolCallId": "p1", "title": "Probe", "kind": "edit"});
+        let options = json!([{"optionId": "yes", "name": "Allow", "kind": "allow_once"}]);
+        let answer =
+            self.call("session/request_permission", json!({"sessionId": "s1", "toolCall": call, "options": options}));
+        chunk(
+            "agent_message_chunk",
+            &format!(
+                "write-rejected={} terminal-rejected={} permission={} pid={}",
+                write.get("error").is_some(),
+                terminal.get("error").is_some(),
+                answer["outcome"]["outcome"],
+                std::process::id()
+            ),
+        );
+    }
+
     fn prompt(&mut self, params: &Value, cwd: &str) -> Value {
         let blocks = params["prompt"].as_array().cloned().unwrap_or_default();
         let types: Vec<&str> = blocks.iter().filter_map(|block| block["type"].as_str()).collect();
         let text = blocks.iter().rev().find_map(|block| block["text"].as_str()).unwrap_or_default().to_string();
+        self.turns += 1;
         chunk("agent_thought_chunk", "thinking");
-        chunk("agent_message_chunk", &format!("Hello [{}] mode={} model={} ", types.join(","), self.mode, self.model));
+        let greeting =
+            format!("Hello [{}] mode={} model={} turn={} ", types.join(","), self.mode, self.model, self.turns);
+        chunk("agent_message_chunk", &greeting);
         match text.as_str() {
+            "own-edit" => self.own_edit(cwd),
+            "probe" => self.probe(cwd),
+            "mcp" => chunk("agent_message_chunk", &format!("mcp={}", self.mcp.join(","))),
+            command if command.starts_with('/') => chunk("agent_message_chunk", &format!("command={command}")),
             "tools" => self.tools(cwd),
             "wait" => {
                 while !self.cancelled {
@@ -135,11 +196,14 @@ impl Agent {
                         );
                     }
                     json!({"protocolVersion": 1, "authMethods": methods, "agentCapabilities": {"loadSession": true,
+                        "mcpCapabilities": {"http": true},
                         "promptCapabilities": {"image": true, "embeddedContext": true}}})
                 }
                 "authenticate" => json!({}),
                 "session/new" | "session/load" => {
                     cwd = params["cwd"].as_str().unwrap_or_default().to_string();
+                    let servers = params["mcpServers"].as_array().into_iter().flatten();
+                    self.mcp = servers.filter_map(|server| server["name"].as_str().map(str::to_string)).collect();
                     if method == "session/load" {
                         chunk("agent_message_chunk", "replayed history");
                     }
@@ -166,12 +230,18 @@ impl Agent {
                 }
             };
             send(&json!({"jsonrpc": "2.0", "id": id, "result": result}));
+            if method == "session/new" || method == "session/load" {
+                update(json!({"sessionUpdate": "available_commands_update", "availableCommands": [
+                    {"name": "web", "description": "Search the web", "input": {"hint": "query"}},
+                    {"name": "compact", "description": "Compact the agent context"}]}));
+            }
         }
     }
 }
 
-fn main() {
+pub fn main() {
     println!("fake agent log line on stdout");
     let lines = std::io::stdin().lock().lines();
-    Agent { lines, next_id: 100, cancelled: false, mode: "ask".into(), model: "fast".into() }.run();
+    let (mode, model) = ("ask".into(), "fast".into());
+    Agent { lines, next_id: 100, cancelled: false, mode, model, turns: 0, mcp: Vec::new() }.run();
 }

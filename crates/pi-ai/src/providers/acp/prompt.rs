@@ -7,9 +7,11 @@ use serde_json::{Value, json};
 
 use super::API;
 use crate::providers::antigravity_acp::prompt::{history, user_text};
-use crate::types::{ContentBlock, Message, UserContent};
+use crate::types::{ContentBlock, Context, Message, UserContent};
 
 const CONTINUE: &str = "Continue.";
+/// `/acp:<name>` runs the agent command `<name>` when a pi command has the same name.
+pub const COMMAND_PREFIX: &str = "/acp:";
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct PromptCapabilities {
@@ -54,7 +56,11 @@ fn request(messages: &[Message], capabilities: PromptCapabilities, cwd: &Path) -
         return vec![json!({"type": "text", "text": CONTINUE})];
     };
     let text = user_text(&user.content);
-    let mut blocks = vec![json!({"type": "text", "text": text})];
+    let sent = match text.strip_prefix(COMMAND_PREFIX) {
+        Some(command) => format!("/{command}"),
+        None => text.clone(),
+    };
+    let mut blocks = vec![json!({"type": "text", "text": sent})];
     if let UserContent::Blocks(content) = &user.content {
         for block in content {
             if let ContentBlock::Image { data, mime_type } = block {
@@ -92,6 +98,16 @@ pub(crate) fn build(messages: &[Message], seen: usize, capabilities: PromptCapab
     blocks
 }
 
+/// The prompt of a one-shot session: the instructions of the request, then all of its messages.
+pub(crate) fn one_shot(context: &Context, capabilities: PromptCapabilities, cwd: &Path) -> Vec<Value> {
+    let mut blocks = Vec::new();
+    if let Some(system) = context.system_prompt.as_deref().filter(|system| !system.trim().is_empty()) {
+        blocks.push(json!({"type": "text", "text": format!("# Instructions\n\n{system}")}));
+    }
+    blocks.extend(build(&context.messages, 0, capabilities, cwd));
+    blocks
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,5 +134,7 @@ mod tests {
         assert_eq!(blocks[2]["name"], "notes.md");
         assert_eq!(blocks.len(), 3);
         assert_eq!(build(&messages[..2], 2, caps, dir.path()), vec![json!({"type": "text", "text": CONTINUE})]);
+        let command = build(&[Message::user("/acp:web rust acp")], 0, caps, dir.path());
+        assert_eq!(command[0]["text"], "/web rust acp");
     }
 }

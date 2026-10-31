@@ -47,6 +47,7 @@ async fn enabled_agents_become_providers_with_advertised_models() {
         pi_session: "p1".into(),
         acp_session: "s9".into(),
         selectors: vec![selector],
+        ..SessionInfo::default()
     };
     installed.session_changed(&info);
     assert!(runtime.get_model("kiro-acp", "claude-y").is_some());

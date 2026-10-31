@@ -130,3 +130,50 @@ fn a_change_without_a_prior_state_is_not_restorable() {
     let report = store.undo(SESSION).unwrap();
     assert!(matches!(&report.skipped[..], [(_, UndoSkip::NotRestorable(_))]), "{report:?}");
 }
+
+#[test]
+fn restores_deleted_files_only_while_they_stay_deleted() {
+    let dir = tempfile::tempdir().unwrap();
+    let (gone, recreated) = (dir.path().join("sub").join("gone.txt"), dir.path().join("recreated.txt"));
+    let store = FileCheckpoints::default();
+    store.begin_prompt(SESSION);
+    store.record_change(SESSION, &gone, Some(PriorContent::Bytes(b"kept".to_vec())), Written::Deleted, false);
+    store.record_change(SESSION, &recreated, Some(PriorContent::Bytes(b"before".to_vec())), Written::Deleted, true);
+    std::fs::write(&recreated, "made by someone else").unwrap();
+
+    let report = store.undo(SESSION).unwrap();
+    assert_eq!(report.restored, vec![gone.clone()]);
+    assert_eq!(std::fs::read_to_string(&gone).unwrap(), "kept");
+    assert_eq!(report.skipped, vec![(recreated.clone(), UndoSkip::ChangedSince)]);
+    assert_eq!(std::fs::read_to_string(&recreated).unwrap(), "made by someone else");
+}
+
+#[test]
+fn unreported_changes_are_listed_and_can_stay() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reported, detected) = (dir.path().join("reported.txt"), dir.path().join("detected.txt"));
+    std::fs::write(&reported, "agent").unwrap();
+    std::fs::write(&detected, "shell").unwrap();
+    let store = FileCheckpoints::default();
+    store.begin_prompt(SESSION);
+    store.record_change(SESSION, &reported, Some(PriorContent::Missing), Written::Bytes(b"agent"), true);
+    store.record_change(SESSION, &reported, Some(PriorContent::Missing), Written::OnDisk, false);
+    store.record_change(SESSION, &detected, Some(PriorContent::Bytes(b"old".to_vec())), Written::OnDisk, true);
+    let candidates = store.candidates(SESSION);
+    let flags: Vec<bool> = candidates.iter().map(|candidate| candidate.detected).collect();
+    assert_eq!(flags, [false, true], "a reported change clears the detected flag");
+
+    let report = store.undo_with(SESSION, false).unwrap();
+    assert_eq!(report.deleted, vec![reported.clone()]);
+    assert_eq!(report.skipped, vec![(detected.clone(), UndoSkip::Unreported)]);
+    assert_eq!(std::fs::read_to_string(&detected).unwrap(), "shell");
+}
+
+#[test]
+fn file_fingerprints_match_the_bytes_in_chunks() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("big.bin");
+    let bytes: Vec<u8> = (0..200_003u32).map(|n| (n % 251) as u8).collect();
+    std::fs::write(&path, &bytes).unwrap();
+    assert_eq!(Fingerprint::of_file(&path).unwrap(), Fingerprint::of(&bytes));
+}

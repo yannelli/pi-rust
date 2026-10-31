@@ -1,23 +1,28 @@
 # ACP agents as providers
 
-Created: 2026-10-30. Last updated: 2026-10-30.
+Created: 2026-10-30. Last updated: 2026-10-31.
 
 pi can run an external [Agent Client Protocol](https://agentclientprotocol.com) (ACP) agent, such as Kiro CLI or Amp, and show its work in the pi transcript. This page has the acceptance criteria, the design decision, the research with sources, and the user guide. For pi as an ACP server (`pi --mode acp`), see [acp.md](acp.md).
 
 ## Acceptance criteria
 
 1. Each enabled entry of `acpAgents` is a provider `<id>-acp` (or `<id>` when the ID ends in `-acp`) in `/model`, with the API `acp`. Its models are `default` plus the models that the agent advertised in its last session.
-2. A request starts the agent command over stdio in the session working directory, sends `initialize` (protocol 1, `fs` and `terminal` client capabilities, `auth.terminal`), then `session/new`. A later request of the same pi session reuses the ACP session. After a restart of pi, `session/load` resumes the ACP session when the agent advertises `loadSession`. Otherwise pi sends the earlier conversation as a context resource.
+2. A request starts the agent command over stdio in the session working directory, sends `initialize` (protocol 1, `fs` and `terminal` client capabilities, `auth.terminal`), then `session/new` with the MCP servers of criterion 13. A later request of the same pi session reuses the ACP session. After a restart of pi, `session/load` resumes the ACP session when the agent advertises `loadSession`. Otherwise pi sends the earlier conversation as a context resource.
 3. `session/prompt` gets the user text, images (when `promptCapabilities.image`), and a `resource_link` for each file that the user message names with `@`.
-4. `session/update` goes into one assistant message: message chunks as text, thought chunks as thinking, tool calls as text lines with the kind, title, and status, with diffs as fenced `diff` blocks and terminal output when the call ends, plans as a checklist, and `usage_update` as context use. Every stream ends with `Done` or `Error` through `MessageBuilder`.
+4. `session/update` goes into one assistant message: message chunks as text, thought chunks as thinking, tool calls as text lines with the kind, title, and status, with diffs as fenced `diff` blocks and terminal output when the call ends, plans as a checklist, and `usage_update` as context use. Every stream ends with `Done` or `Error` through `MessageBuilder`. A compacted transcript keeps the ACP session: pi finds the last reply of the session by its timestamp and sends only what comes after it.
 5. `session/request_permission` shows a dialog with the options of the agent (allow once, allow always, reject once, reject always). Without a UI, pi rejects. A cancel answers open requests with `cancelled`.
 6. `fs/read_text_file`, `fs/write_text_file`, and `terminal/create`, `terminal/output`, `terminal/wait_for_exit`, `terminal/kill`, `terminal/release` work for paths inside the session working directory. Paths outside it fail.
 7. Escape sends `session/cancel`. The stream ends with stop reason `aborted`.
 8. Modes (`modes` or a `configOptions` selector of category `mode`) are selectable with `/acp mode`. Models (`configOptions` category `model`, or `models.availableModels` of older agents) are selectable in `/model`.
-9. `/acp` opens a browser with two tabs. **Installed** lists the agents in `acpAgents` (global and project scope): remove, enable or disable, set as default, and log in. **Registry** lists the ACP registry and the built-in entries for Kiro and Amp: install.
+9. `/acp` opens a browser with two tabs. **Installed** lists every `acpAgents` entry of the global and the project settings. A global entry that a project entry replaces is marked and can only be enabled, disabled, or removed. The other entries can also be logged in to, set as default, and moved to the other settings file. **Registry** lists the ACP registry and the built-in entries for Kiro and Amp. Install asks for the global or the project settings.
 10. Install uses the distribution of the registry entry: `npx` and `uvx` store the command; `binary` downloads the archive for the platform, checks the SHA-256 when the entry has one, and unpacks it under `~/.pi/agent/acp/agents/<id>/<version>/`.
 11. Log in shows the `authMethods` of the agent. A terminal method (`type: "terminal"` or `_meta["terminal-auth"]`) runs in the terminal while the TUI is stopped. Other methods go to `authenticate`.
-12. Tests use a fake ACP agent and a local mock HTTP server. They cover initialize, prompt streaming, tool call updates, permission requests, fs read and write, cancel, registry fetch, and install. No test uses the network, a real agent, or a key.
+12. Tests use a fake ACP agent and a local mock HTTP server. They cover initialize, prompt streaming, tool call updates, permission requests, fs read and write, cancel, registry fetch, install, and criteria 13 to 17. No test uses the network, a real agent, or a key.
+13. `session/new` and `session/load` get the MCP servers that pi passes through: the enabled, not hidden servers of `mcp.json`, plus `.pi/mcp.json` in a trusted project, except HTTP servers whose login pi holds (OAuth or a pi provider key). A stdio server always goes to the agent, with a bare command resolved on PATH. An `http` or `sse` server goes to the agent only when `agentCapabilities.mcpCapabilities` has that transport. Otherwise the reply starts with a line that names the server that pi held back.
+14. `available_commands_update` gives the slash commands of the agent. pi keeps them per provider in `state.json`, and the editor completes them while an ACP model is selected. `/<name> <input>` goes to the agent as prompt text. A name that a pi command uses completes as `/acp:<name>`, and the provider sends `/<name>`.
+15. The `size` of `usage_update` is the context window of the pi model, per provider and model ID. Before an agent sends one, the window and `maxTokens` are 0, which means unknown: threshold compaction does not run, and the footer and `/context` show `?` or `unknown`. The model input has images unless the agent reported `promptCapabilities.image: false`.
+16. A request that is not a turn of a live pi session, such as a compaction or branch summary, runs in a new ACP process with a new session. That session gets the system prompt of the request, no MCP servers, and no `session/load`. pi rejects its file writes and terminals, cancels its permission requests, records nothing in `state.json`, and stops the process after the reply.
+17. `/undo` covers ACP turns. Before a turn, pi keeps the files of the working directory that `.gitignore` does not exclude (hidden files included, `.git` not). It keeps up to 4 MiB a file and 256 MiB in all. After the turn, pi compares the content and records new, changed, and deleted files. `fs/write_text_file` and the files named by `edit`, `delete`, and `move` tool calls are recorded as reported changes. Other differences are marked as not reported, and `/undo` lists them and asks before restoring them.
 
 ## Decision: a pi-ai provider
 
@@ -48,6 +53,10 @@ Source: [schema/v1/schema.json](https://github.com/agentclientprotocol/agent-cli
 - The unstable `models` field and `session/set_model` were removed on 2026-06-01 (commit `822ef53cd`, #1325). Models come in `configOptions` with `category: "model"`. pi still reads `models.availableModels` and sends `session/set_model` to agents that do not send `configOptions`.
 - `configOptions` categories: `mode`, `model`, `model_config`, `thought_level`, `_custom`. `session/set_config_option` takes `{sessionId, configId, value}`.
 - Stop reasons: `end_turn`, `max_tokens`, `max_turn_requests`, `refusal`, `cancelled`.
+- Read on 2026-10-31 from the same schema: `McpServer` is stdio (`name`, `command` as an absolute path, `args`, `env` as `{name, value}` pairs), which every agent must support, or `type: "http"` and `type: "sse"` (`name`, `url`, `headers`), which an agent takes only with `agentCapabilities.mcpCapabilities.http` or `.sse`.
+- `AvailableCommandsUpdate` has `availableCommands` of `{name, description, input?: {hint}}`. A client runs a command by sending `/<name> <input>` as prompt text.
+- `UsageUpdate` has `used` (tokens in context) and `size` (the context window), both required, and an optional cumulative `cost`.
+- `Diff` has `path`, `newText`, and `oldText` (`null` for a new file). `ToolCallLocation` has `path` and an optional `line`. Both are hints for the client: they do not have to name every file a tool changes.
 
 ### Registry
 
@@ -83,8 +92,8 @@ Sources: [amp-acp](https://github.com/tao12345666333/amp-acp) `src/server.ts`, t
 ## Use an ACP agent
 
 1. Run `/acp`. The **Registry** tab lists the agents of the registry, plus Kiro CLI (V3) and Amp.
-2. Select an agent and press Enter to install it. pi adds it to the global `~/.pi/agent/settings.json`. To use it in one project only, move the entry to `.pi/settings.json`.
-3. In the **Installed** tab, select the agent and choose **Log in** if the agent needs a login. For Kiro, install Kiro CLI first (`curl -fsSL https://cli.kiro.dev/install | bash`), then log in with `kiro-cli login` or the **Log in** action. Kiro CLI exits before ACP starts when it has no login, so **Log in** runs `kiro-cli login` in the terminal.
+2. Select an agent and press Enter, then choose the global settings (every project) or the project settings (this project only). A project entry replaces a global entry with the same ID.
+3. In the **Installed** tab, select the agent and choose **Log in** if the agent needs a login. For Kiro without `kiro-cli` on PATH or in `~/.local/bin`, Install offers to run the official installer (`curl -fsSL https://cli.kiro.dev/install | bash`) in the terminal after you confirm. Then log in with `kiro-cli login` or the **Log in** action. Kiro CLI exits before ACP starts when it has no login, so **Log in** runs `kiro-cli login` in the terminal. The installer and an authenticated Kiro session were not run in the tests.
 4. Select the model `<provider>/default` with `/model`, or choose **Set as default**. After the first prompt, `/model` also lists the models that the agent advertised.
 5. Run `/acp mode` to change the mode or another setting of the agent session.
 
@@ -124,12 +133,14 @@ The agent edits files and runs commands with its own tools. pi shows its permiss
 pi keeps these files in `~/.pi/agent/acp/`:
 
 - `agents/<id>/<version>/`: unpacked binary distributions.
-- `state.json`: the ACP session ID of each pi session (for `session/load`) and the models each agent advertised.
+- `state.json`: the ACP session ID of each pi session (for `session/load`), and per agent the models, slash commands, context windows, and image support it advertised.
 
-## Not done yet
+## Limits
 
-- pi does not send its MCP servers to the agent in `session/new`.
-- `available_commands_update` (the slash commands of the agent) is not shown.
-- The context window of the agent models is a fixed 1,000,000 tokens, so pi does not compact the transcript. The agent manages its own context.
-- Agent file writes do not go into the pi `/undo` checkpoints.
-- `/compact` sends its summary request to the agent session like any prompt.
+- `/undo` cannot tell who made a change during an ACP turn. A change that you or another program make in the working directory during the turn is a candidate too. Only changes the agent reported are attributed to it.
+- pi tracks only the working directory. pi's `fs` and `terminal` methods refuse paths outside it, but the agent's own tools are not confined. Changes outside the working directory are not tracked or undone.
+- A file that `.gitignore` excludes is tracked only when the agent names it in `fs/write_text_file` or in the locations or diff of an `edit`, `delete`, or `move` tool call before the change.
+- A file larger than 4 MiB, or a file beyond the 256 MiB total, is found by its size and time only. `/undo` lists it as not restorable, with the reason.
+- `/undo` restores a file only while it holds what the turn left. It leaves a file that changed after the turn, and it does not restore a deleted file that came back.
+- The stdio `cwd` of an `mcp.json` server is not sent: ACP has no field for it.
+- pi compacts its own transcript. The agent keeps its context and compacts it itself.

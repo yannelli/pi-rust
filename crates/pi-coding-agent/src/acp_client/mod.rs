@@ -7,6 +7,7 @@ pub mod providers;
 pub mod register;
 pub mod registry;
 pub mod store;
+pub mod workspace;
 
 #[cfg(test)]
 mod tests;
