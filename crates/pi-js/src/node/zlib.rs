@@ -48,6 +48,8 @@ pub(crate) enum Codec {
         dictionary: Option<Vec<u8>>,
         ended: bool,
         header: Vec<u8>,
+        /// Input came after the end of the stream (`rejectGarbageAfterEnd` streams fail on it).
+        junk: bool,
     },
     BrotliEncode(Box<BrotliEncoderStateStruct<StandardAlloc>>),
     BrotliDecode {
@@ -115,6 +117,7 @@ fn create(mode: u8, settings: Settings) -> Result<Codec, JsError> {
                 dictionary: settings.dictionary,
                 ended: false,
                 header: Vec::new(),
+                junk: false,
             }
         }
         BROTLI_ENCODE => {
@@ -257,7 +260,7 @@ impl Codec {
     pub(crate) fn process(&mut self, input: &[u8], flush: i32) -> Result<Vec<u8>, JsError> {
         match self {
             Codec::Deflate(compress) => deflate(compress, input, flush),
-            Codec::Inflate { inner, mode, window_bits, dictionary, ended, header } => {
+            Codec::Inflate { inner, mode, window_bits, dictionary, ended, header, junk } => {
                 let mut out = Vec::new();
                 let buffered;
                 let mut input = input;
@@ -273,18 +276,23 @@ impl Codec {
                     input = &buffered;
                 }
                 let decoder = inner.as_mut().expect("decoder");
-                while !*ended && !input.is_empty() {
+                loop {
+                    // As node_zlib.cc: a gzip member is followed by another one unless the next byte is 0.
+                    if *ended && *mode == GUNZIP && input.first().is_some_and(|byte| *byte != 0) {
+                        **decoder = new_decompress(GUNZIP, *window_bits, None)?;
+                        *ended = false;
+                    }
+                    if *ended || input.is_empty() {
+                        break;
+                    }
                     let status = inflate_step(decoder, &mut input, &mut out, dictionary.as_deref())?;
                     if status == Status::StreamEnd {
                         *ended = true;
-                        if *mode == GUNZIP && input.starts_with(&[0x1f, 0x8b]) {
-                            **decoder = new_decompress(GUNZIP, *window_bits, None)?;
-                            *ended = false;
-                        }
                     } else if status == Status::BufError && input.is_empty() {
                         break;
                     }
                 }
+                *junk |= *ended && !input.is_empty();
                 if !*ended {
                     loop {
                         let mut empty: &[u8] = &[];
@@ -464,6 +472,9 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
         let bytes = bytes_of(&input);
         let out = with_codec(&ctx, id, |codec| codec.process(&bytes, flush))?;
         bytes_to_js(&ctx, out)
+    })?;
+    set_fn(&object, "trailingJunk", |ctx: Ctx<'js>, id: u64| {
+        with_codec(&ctx, id, |codec| Ok(matches!(codec, Codec::Inflate { junk: true, .. })))
     })?;
     set_fn(&object, "params", |ctx: Ctx<'js>, id: u64, value: i32| {
         with_codec(&ctx, id, |codec| match codec {
