@@ -200,7 +200,7 @@ export default function (pi) {
 "#;
 
 const OPERATIONS: &str = r#"
-import { builtinModels, getBuiltinClassifierModels, getBuiltinImageModels } from '@earendil-works/pi-ai/providers/all';
+import { builtinModels, getBuiltinClassifierModels, getBuiltinImageModels, radiusProvider } from '@earendil-works/pi-ai/providers/all';
 
 const KEYS = { TYPESAFE_API_KEY: 'ts-key', OPENROUTER_API_KEY: 'or-key' };
 const authContext = { env: async (name) => KEYS[name], fileExists: async () => false };
@@ -213,9 +213,12 @@ export default function (pi) {
     const questions = { approved: { type: 'bool', instructions: 'Approved?', criteria: { true: 'Yes', false: 'No' } } };
     const classified = await models.classify(classifier, { state: { text: 'Ship it.' }, questions }, {});
     const images = await models.generateImages(image, { input: [{ type: 'text', text: 'Draw a dog' }] }, {});
+    const oauth = radiusProvider({ gateway: '__BASE__' }).auth.oauth;
+    const refreshed = await oauth.refresh({ type: 'oauth', access: 'old', refresh: 'r1', expires: 1 }, new AbortController().signal);
     pi.appendEntry('operations', {
       classified: [classified.provider, classified.stopReason, classified.answers.approved],
       images: [images.provider, images.stopReason, images.responseId, images.output.map((block) => block.type)],
+      refreshed: [refreshed.type, refreshed.access, refreshed.refresh, refreshed.expires > Date.now()],
     });
   }});
 }
@@ -363,7 +366,7 @@ async fn providers_all_reads_the_rust_catalog_and_builds_upstream_providers() {
 }
 
 /// A local server answering each request with the next JSON body; it records the path, the
-/// `authorization` header, and the body of every request.
+/// `authorization` header, and the body (JSON, else text) of every request.
 async fn json_server(bodies: Vec<Value>) -> (String, std::sync::Arc<std::sync::Mutex<Vec<Value>>>) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -394,7 +397,7 @@ async fn json_server(bodies: Vec<Value>) -> (String, std::sync::Arc<std::sync::M
             recorded.lock().unwrap().push(json!({
                 "path": head.split_whitespace().nth(1),
                 "authorization": header("authorization:"),
-                "body": serde_json::from_str::<Value>(&request).unwrap_or(Value::Null),
+                "body": serde_json::from_str::<Value>(&request).unwrap_or(Value::String(request)),
             }));
             let body = body.to_string();
             let response = format!(
@@ -409,11 +412,12 @@ async fn json_server(bodies: Vec<Value>) -> (String, std::sync::Arc<std::sync::M
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn builtin_providers_classify_and_generate_images_through_rust() {
+async fn builtin_providers_classify_generate_images_and_refresh_through_rust() {
     let classified = json!({"answers": {"approved": {"type": "noul", "noul": 0.95}}});
     let images = json!({"id": "img-1", "choices": [{"message": {"content": "A dog.",
         "images": [{"image_url": "data:image/png;base64,ZmFrZS1wbmc="}]}}]});
-    let (base, requests) = json_server(vec![classified, images]).await;
+    let token = json!({"access_token": "new", "refresh_token": "r2", "expires_in": 3600});
+    let (base, requests) = json_server(vec![classified, images, token]).await;
     let (_h, data) = run("operations.ts", OPERATIONS.replace("__BASE__", &base), "operations", Vec::new()).await;
     assert_eq!(data["classified"], json!(["typesafe", "stop", {"type": "bool", "probability": 0.95}]), "{data}");
     assert_eq!(data["images"], json!(["openrouter", "stop", "img-1", ["text", "image"]]), "{data}");
@@ -428,4 +432,8 @@ async fn builtin_providers_classify_and_generate_images_through_rust() {
         (&json!("/api/v1/chat/completions"), &json!("bearer or-key"))
     );
     assert_eq!(requests[1]["body"]["messages"][0]["content"][0]["text"], "Draw a dog");
+    assert_eq!(data["refreshed"], json!(["oauth", "new", "r2", true]), "{data}");
+    assert_eq!(requests[2]["path"], "/v1/oauth/token");
+    let form = requests[2]["body"].as_str().unwrap();
+    assert!(form.contains("grant_type=refresh_token") && form.contains("refresh_token=r1"), "{form}");
 }
