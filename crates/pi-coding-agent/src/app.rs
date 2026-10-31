@@ -47,6 +47,8 @@ pub struct AppOptions {
     /// `--api-key`: a runtime key for the selected model's provider, never written to disk.
     pub api_key: Option<String>,
     pub thinking: Option<ThinkingLevel>,
+    /// `--fast` (pi-rust): fast mode on for this run without saving it.
+    pub fast: bool,
     /// `--models` patterns; `None` uses the `enabledModels` setting.
     pub models: Option<Vec<String>>,
     pub tools: Option<Vec<String>>,
@@ -135,6 +137,7 @@ impl AppOptions {
             model: args.model.clone(),
             api_key: args.api_key.clone(),
             thinking: args.thinking,
+            fast: args.fast,
             models: args.models.clone(),
             tools: args.tools.clone(),
             exclude_tools: args.exclude_tools.clone(),
@@ -279,6 +282,7 @@ async fn create_runtime_parts(
     let mut create = CreateAgentSessionOptions::new(services, target.session_manager);
     create.model = choice.model;
     create.thinking_level = choice.thinking;
+    create.fast = options.fast.then_some(true);
     create.scoped_models = choice.scoped;
     create.tools = options.tools.clone();
     create.exclude_tools = options.exclude_tools.clone();

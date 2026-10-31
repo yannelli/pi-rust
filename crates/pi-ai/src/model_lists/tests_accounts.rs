@@ -144,7 +144,9 @@ fn codex_catalog() -> Vec<Model> {
 async fn codex_lists_the_accounts_visible_models() {
     let body = json!({"models": [
         {"slug": "gpt-6-sol", "display_name": "GPT-6 Sol", "visibility": "list", "supported_in_api": true,
-         "context_window": 400_000, "supported_reasoning_levels": [{"effort": "low"}], "extra": {"x": 1}},
+         "context_window": 400_000, "supported_reasoning_levels": [{"effort": "low"}], "extra": {"x": 1},
+         "service_tiers": [{"id": "priority", "name": "Fast", "description": "1.5x speed, increased usage"}],
+         "additional_speed_tiers": ["fast"]},
         {"slug": "gpt-6.1-sol", "visibility": "hide"},
         {"id": "gpt-6.2-sol", "display_name": "GPT-6.2 Sol"},
         {"slug": "gpt-5.5", "visibility": "LIST"},
@@ -157,11 +159,12 @@ async fn codex_lists_the_accounts_visible_models() {
 
     assert_eq!(ids(&models), ["gpt-5.5", "gpt-6-sol", "gpt-6.2-sol"]);
     assert_eq!((models[1].context_window, models[1].name.as_str()), (400_000, "gpt-6-sol"));
+    assert_eq!(models[1].compat, Some(json!({"flag": "gpt-6-sol", "serviceTiers": ["priority"]})));
+    assert_eq!(models[0].compat, Some(json!({"flag": "gpt-5.5"})), "no service_tiers keeps compat");
     assert_eq!((models[2].name.as_str(), models[2].api.as_str()), ("GPT-6.2 Sol", "openai-codex-responses"));
     assert_eq!(models[2].compat, Some(json!({"flag": "gpt-6.1-sol"})), "copied from the closest model");
     let request = &server.requests()[0];
-    let version = env!("CARGO_PKG_VERSION");
-    assert_eq!(request.path, format!("/codex/models?client_version={version}"));
+    assert_eq!(request.path, "/codex/models?client_version=0.166.0");
     assert_eq!(request.headers["authorization"], format!("Bearer {token}"));
     assert_eq!(
         (request.headers["chatgpt-account-id"].as_str(), request.headers["originator"].as_str()),

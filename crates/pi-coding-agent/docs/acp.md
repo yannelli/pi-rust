@@ -26,11 +26,12 @@ Each editor session runs a pi session in its project directory. pi saves it in `
 These features of the editor work:
 
 - The model and thinking selectors.
+- The **Speed** selector (pi-rust extension). It shows only for models that have a fast mode. See [Fast mode](providers.md#fast-mode-pi-rust-extension).
 - Tool call diffs and terminals.
 - Context usage.
 - Slash commands: prompt templates, `/skill:name`, `/compact`, `/autocompact`, `/export`, `/session`, `/name`, `/steering`, `/follow-up`, and `/changelog`.
 
-Model labels use the display names of the providers. Catalog variants with a `fast` segment in their ID have a ⚡ label. ACP has no standard field for a model icon. The ⚡ label does not add a fast-mode toggle to other models.
+Model labels use the display names of the providers. Catalog variants with a `fast` segment in their ID have a ⚡ label. ACP has no standard field for a model icon.
 
 ## Tool approval
 

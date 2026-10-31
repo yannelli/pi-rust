@@ -19,6 +19,7 @@ pub const BUILTIN_SLASH_COMMANDS: &[(&str, &str, Option<&str>)] = &[
     ("model", "Select model (opens selector UI)", Some("<provider/model>")),
     ("tree", "Navigate session tree (switch branches)", None),
     ("thinking", "Set thinking level", Some("<level>")),
+    ("fast", "Toggle fast mode for models that support it", Some("[on|off]")),
     ("scoped-models", "Enable/disable models for Ctrl+P cycling", None),
     ("export", "Export session (HTML default, or specify path: .html/.jsonl/.md)", None),
     ("import", "Import and resume a session from a JSONL file", None),
@@ -108,6 +109,11 @@ fn model_completions(weak: &Weak<InteractiveMode>, prefix: &str) -> Option<Vec<A
     })
 }
 
+fn fast_completions(prefix: &str) -> Option<Vec<AutocompleteItem>> {
+    let filtered = fuzzy_filter(vec!["on", "off"], prefix, |value: &&str| value);
+    (!filtered.is_empty()).then(|| filtered.into_iter().map(|value| AutocompleteItem::new(value, value)).collect())
+}
+
 fn thinking_completions(weak: &Weak<InteractiveMode>, prefix: &str) -> Option<Vec<AutocompleteItem>> {
     let levels: Vec<String> = weak
         .upgrade()?
@@ -141,6 +147,7 @@ impl InteractiveMode {
             command = match *name {
                 "model" => command.with_argument_completions(move |prefix| model_completions(&weak, prefix)),
                 "thinking" => command.with_argument_completions(move |prefix| thinking_completions(&weak, prefix)),
+                "fast" => command.with_argument_completions(fast_completions),
                 "login" => command.with_argument_completions(move |prefix| {
                     weak.upgrade().and_then(|mode| mode.login_completions(prefix))
                 }),

@@ -53,6 +53,24 @@ impl InteractiveMode {
         }
     }
 
+    /// `/fast [on|off]`: set fast mode, or toggle it without an argument; the choice is saved.
+    pub(super) fn handle_fast_command(&self, choice: Option<&str>) {
+        let session = self.session();
+        let enabled = match choice.map(str::to_lowercase).as_deref() {
+            None => !session.fast_mode(),
+            Some("on") => true,
+            Some("off") => false,
+            Some(other) => return self.show_error(&format!("Unknown fast mode \"{other}\". Use on or off.")),
+        };
+        session.set_fast_mode(enabled, true);
+        let status = match (enabled, session.fast_mode_available()) {
+            (false, _) => "Fast mode off",
+            (true, true) => "Fast mode on",
+            (true, false) => "Fast mode on (the current model has no fast mode)",
+        };
+        self.show_status(status);
+    }
+
     fn select_thinking_level(&self, level: ThinkingLevel, persist: bool) {
         self.session().set_thinking_level(level, persist);
         self.update_editor_border_color();

@@ -223,6 +223,14 @@ impl SettingsManager {
         self.set_global_value("defaultThinkingLevel", Some(json!(level)));
     }
 
+    pub fn fast_mode(&self) -> bool {
+        self.state().merged.fast_mode.unwrap_or(false)
+    }
+
+    pub fn set_fast_mode(&self, enabled: bool) {
+        self.set_global_value("fastMode", Some(json!(enabled)));
+    }
+
     pub fn model_thinking_level(&self, provider: &str, model_id: &str) -> Option<ThinkingLevel> {
         self.state().merged.model_thinking_levels.as_ref()?.get(&format!("{provider}/{model_id}")).copied()
     }

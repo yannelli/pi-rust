@@ -77,6 +77,18 @@ fn writes_keep_unknown_keys_and_external_edits() {
 }
 
 #[test]
+fn fast_mode_defaults_off_and_round_trips() {
+    let dirs = Dirs::new();
+    let settings = dirs.manager(true);
+    assert!(!settings.fast_mode());
+    settings.set_fast_mode(true);
+    assert_eq!(read(&dirs.global())["fastMode"], true);
+    assert!(dirs.manager(true).fast_mode());
+    settings.set_fast_mode(false);
+    assert!(!dirs.manager(true).fast_mode());
+}
+
+#[test]
 fn project_settings_merge_over_global_and_respect_trust() {
     let dirs = Dirs::new();
     write(

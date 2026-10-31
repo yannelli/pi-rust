@@ -58,6 +58,8 @@ pub struct FooterSnapshot {
     pub auto_compact: bool,
     pub model: Option<FooterModel>,
     pub thinking: ThinkingLevel,
+    /// Fast mode is on and the model supports it.
+    pub fast: bool,
     pub routed: Option<(String, Option<ThinkingLevel>)>,
     pub subscription: bool,
 }
@@ -195,6 +197,7 @@ impl FooterComponent {
                 reasoning: model.reasoning,
             }),
             thinking: session.thinking_level(),
+            fast: session.fast_mode() && session.fast_mode_available(),
             routed: routed_model(&session),
             subscription,
         }
@@ -271,6 +274,9 @@ impl FooterComponent {
                 ThinkingLevel::Off => format!("{model_name} • thinking off"),
                 level => format!("{model_name} • {}", level.as_str()),
             };
+        }
+        if snapshot.fast {
+            right.push_str(" • ⚡ fast");
         }
         if let Some((routed, level)) = &snapshot.routed {
             let level = level.map(|level| format!(" • {}", level.as_str())).unwrap_or_default();

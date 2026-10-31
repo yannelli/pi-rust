@@ -26,6 +26,8 @@ pub trait PiBackend: Send + Sync {
     async fn set_model(&self, provider: &str, model_id: &str) -> anyhow::Result<()>;
     async fn get_available_thinking_levels(&self) -> anyhow::Result<Vec<String>>;
     async fn set_thinking_level(&self, level: &str) -> anyhow::Result<()>;
+    /// pi-rust extension: turn fast mode on or off and save the choice.
+    async fn set_fast_mode(&self, enabled: bool) -> anyhow::Result<()>;
     async fn set_steering_mode(&self, mode: &str) -> anyhow::Result<()>;
     async fn set_follow_up_mode(&self, mode: &str) -> anyhow::Result<()>;
     async fn compact(&self, custom_instructions: Option<String>) -> anyhow::Result<Value>;

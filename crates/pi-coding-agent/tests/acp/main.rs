@@ -36,13 +36,21 @@ struct Setup {
 
 /// An agent dir whose `local/tiny` model is served by a fresh faux provider.
 fn setup(responses: Vec<FauxResponse>) -> Setup {
+    setup_with_models(
+        responses,
+        json!([{"id": "tiny", "contextWindow": 128_000, "maxTokens": 4_000, "reasoning": true}]),
+    )
+}
+
+/// [`setup`] with other `local` models; the first one is the default.
+fn setup_with_models(responses: Vec<FauxResponse>, local_models: Value) -> Setup {
     let root = tempfile::tempdir().unwrap();
     let (agent_dir, work) = (root.path().join("agent"), root.path().join("work"));
     std::fs::create_dir_all(&agent_dir).unwrap();
     std::fs::create_dir_all(&work).unwrap();
     let api = format!("faux-acp-{}", NEXT_API.fetch_add(1, Ordering::Relaxed));
     let models = json!({"providers": {"local": {"baseUrl": "http://unused", "api": api, "apiKey": "test-key",
-        "models": [{"id": "tiny", "contextWindow": 128_000, "maxTokens": 4_000, "reasoning": true}]}}});
+        "models": local_models}}});
     std::fs::write(agent_dir.join("models.json"), models.to_string()).unwrap();
     offline_guard::assert_models_file_loads(&agent_dir.join("models.json"));
     // ACP refreshes model catalogs in the background unless offline.
@@ -167,6 +175,44 @@ async fn drives_sessions_over_acp_with_the_faux_provider() {
     assert_eq!(deleted["result"], json!({}));
     assert_eq!(client.request("session/list", json!({})).await["result"]["sessions"], json!([]));
     assert_eq!(setup.provider.requests().len(), 3);
+}
+
+fn config_option<'a>(options: &'a Value, id: &str) -> Option<&'a Value> {
+    options.as_array().unwrap().iter().find(|option| option["id"] == id)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn speed_option_follows_the_models_fast_mode() {
+    let setup = setup_with_models(
+        Vec::new(),
+        json!([{"id": "tiny", "contextWindow": 128_000, "maxTokens": 4_000, "compat": {"fastMode": true}},
+            {"id": "plain", "contextWindow": 128_000, "maxTokens": 4_000}]),
+    );
+    let settings = setup.options.app.settings.clone().unwrap();
+    let work = setup.root.path().join("work");
+    let mut client = start(&setup);
+    let created = client.request("session/new", json!({"cwd": work, "mcpServers": []})).await;
+    let id = created["result"]["sessionId"].clone();
+    let speed = config_option(&created["result"]["configOptions"], "fast_mode").expect("speed option");
+    assert_eq!(
+        *speed,
+        json!({"type": "select", "id": "fast_mode", "category": "_speed", "name": "Speed",
+            "description": "Run the model in its fast mode", "currentValue": "standard",
+            "options": [{"value": "standard", "name": "Standard"}, {"value": "fast", "name": "Fast"}]})
+    );
+
+    let set = |value: &str| json!({"sessionId": id, "configId": "fast_mode", "value": value});
+    let fast = client.request("session/set_config_option", set("fast")).await;
+    assert_eq!(config_option(&fast["result"]["configOptions"], "fast_mode").unwrap()["currentValue"], "fast");
+    assert!(settings.fast_mode(), "the Speed option saves fastMode");
+    let bad = client.request("session/set_config_option", set("turbo")).await;
+    assert_eq!(bad["error"]["code"], -32602);
+
+    let model = |value: &str| json!({"sessionId": id, "configId": "model", "value": value});
+    let plain = client.request("session/set_config_option", model("local/plain")).await;
+    assert!(config_option(&plain["result"]["configOptions"], "fast_mode").is_none());
+    let tiny = client.request("session/set_config_option", model("local/tiny")).await;
+    assert_eq!(config_option(&tiny["result"]["configOptions"], "fast_mode").unwrap()["currentValue"], "fast");
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -33,6 +33,40 @@ These providers use your subscription. Log in with `/login cursor` or `/login go
 
 Kiro CLI, Amp, and the agents of the ACP registry run as providers with the API `acp`. Install and manage them with `/acp`. See [ACP agents](acp-providers.md).
 
+## Fast mode (pi-rust extension)
+
+Some models have a fast mode. The provider runs the model faster and charges more. Upstream pi does not have fast mode.
+
+| Provider | Models | Request |
+| --- | --- | --- |
+| `anthropic` on the Claude API | Claude Opus 5.5, Opus 5, and Opus 4.8 | pi sends `speed: "fast"`. The price is 2 times the standard price. |
+| `openai-codex` | Codex models that offer the priority tier | pi sends `service_tier: "priority"`. |
+| `cursor` | Models that have fast variants | pi sends the fast variant of the model. |
+
+To turn fast mode on or off:
+
+- In the TUI, type `/fast` to toggle fast mode. Type `/fast on` or `/fast off` to set it. When fast mode is on and the model supports it, the footer shows `⚡ fast` next to the thinking level.
+- To turn on fast mode for one run, start pi with `--fast`. pi does not save this choice.
+- In ACP mode, use the **Speed** option. The editor shows this option only for models that have a fast mode.
+- In RPC mode, send `{"type": "set_fast_mode", "enabled": true}`. `get_state` returns `fastMode` and `fastModeAvailable`.
+
+`/fast` and the ACP **Speed** option save the choice as `fastMode` in the global `settings.json`. New sessions read this setting. RPC `set_fast_mode` does not save it.
+
+Fast mode stays on when you select a model that has no fast mode. pi sends standard requests for that model.
+
+To mark a model in `models.json`, set `compat.fastMode`. `true` gives the model a fast mode, and `false` removes it. pi sends the fast request only for the `anthropic-messages`, `openai-codex-responses`, and `cursor-agent` APIs.
+
+```json
+{
+  "providers": {
+    "my-gateway": {
+      "api": "anthropic-messages",
+      "models": [{ "id": "my-model", "compat": { "fastMode": true } }]
+    }
+  }
+}
+```
+
 ## Disable providers
 
 To hide a provider from model selection, add its exact ID to `disabledProviders` in `~/.pi/agent/settings.json`. If you set `PI_CODING_AGENT_DIR`, use the `settings.json` in that directory.
@@ -124,6 +158,8 @@ After other failures, redirects too, pi keeps the last saved list.
 ### OpenAI Codex
 
 With a ChatGPT login, pi reads the models of the account from the Codex backend at `<base URL>/codex/models`. This is the list that Codex shows. pi skips hidden models. The endpoint is not a public API, so pi accepts some changes in its format. For example, pi uses `id` when `slug` is missing.
+
+pi sends `client_version=0.166.0`, the Codex CLI release of 2026-10-29. The backend leaves out models that need a newer client. pi copies the `service_tiers[].id` values of each model into `compat.serviceTiers`. A model with `priority` in this list has a [fast mode](#fast-mode-pi-rust-extension).
 
 ### Anthropic
 

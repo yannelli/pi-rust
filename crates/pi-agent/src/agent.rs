@@ -57,6 +57,8 @@ pub struct AgentState {
     pub system_prompt: Option<String>,
     pub model: Model,
     pub thinking_level: ThinkingLevel,
+    /// Fast mode (pi-rust extension); providers apply it where the model supports it.
+    pub fast: bool,
     pub tools: Vec<SharedTool>,
     pub messages: Vec<Message>,
     pub is_streaming: bool,
@@ -82,6 +84,7 @@ pub struct AgentInitialState {
     pub system_prompt: Option<String>,
     pub model: Option<Model>,
     pub thinking_level: ThinkingLevel,
+    pub fast: bool,
     pub tools: Vec<SharedTool>,
     pub messages: Vec<Message>,
 }
@@ -150,6 +153,7 @@ impl Agent {
             system_prompt: None,
             model,
             thinking_level: ThinkingLevel::Off,
+            fast: false,
             tools: Vec::new(),
             messages: Vec::new(),
             is_streaming: false,
@@ -190,6 +194,7 @@ impl Agent {
         }
         agent.update_state(|state| {
             state.thinking_level = initial.thinking_level;
+            state.fast = initial.fast;
             state.tools = initial.tools;
             state.messages = messages;
         });
@@ -433,6 +438,7 @@ impl Agent {
         let config = AgentLoopConfig {
             model: state.model,
             reasoning: (state.thinking_level != ThinkingLevel::Off).then_some(state.thinking_level),
+            fast: state.fast,
             stream_fn: hooks.stream_fn,
             api_key: hooks.api_key,
             get_api_key: hooks.get_api_key,

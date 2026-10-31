@@ -2,6 +2,18 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.8.4] - 2026-10-30
+
+### Added
+
+- add fast mode for Anthropic, Codex, and Cursor models ([19b61e0](https://github.com/yannelli/pi-rust/commit/19b61e0e0c5e5611e843bf18acd3680ca4e4e3b4))
+
+## [0.8.3] - 2026-10-30
+
+### Fixed
+
+- **ai:** group Cursor models and read Antigravity models from the server ([d804b44](https://github.com/yannelli/pi-rust/commit/d804b44dd47ac4d9ed6b6d6727604f68acbc7e26))
+
 ## [0.8.2] - 2026-10-30
 
 ### Fixed

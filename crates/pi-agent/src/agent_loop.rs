@@ -82,6 +82,8 @@ pub struct AgentLoopConfig {
     pub model: Model,
     /// Requested reasoning effort; `None` means off.
     pub reasoning: Option<ThinkingLevel>,
+    /// Fast mode (pi-rust extension), copied into `StreamOptions::fast`.
+    pub fast: bool,
     /// Defaults to `pi_ai::stream`.
     pub stream_fn: Option<StreamFn>,
     pub api_key: Option<String>,
@@ -130,6 +132,7 @@ impl AgentLoopConfig {
         Self {
             model,
             reasoning: None,
+            fast: false,
             stream_fn: None,
             api_key: None,
             get_api_key: None,
@@ -365,6 +368,7 @@ async fn stream_assistant_response(
         max_tokens: config.max_tokens.or(base.max_tokens),
         temperature: config.temperature.or(base.temperature),
         reasoning: config.reasoning.filter(|level| *level != ThinkingLevel::Off),
+        fast: config.fast,
         session_id: config.session_id.clone().or_else(|| base.session_id.clone()),
         identity: merge_client_identity([Some(&default_agent_identity()), base.identity.as_ref()]),
         ..base.clone()

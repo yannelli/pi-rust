@@ -277,3 +277,38 @@ async fn cancellation_mid_stream_aborts() {
     let message = cancel_after_first_text(AnthropicMessages.stream(&model, &context(), options), cancel).await;
     assert_eq!((message.stop_reason, message.text()), (StopReason::Aborted, "Hi".to_string()));
 }
+
+async fn fast_request(id: &str, fast: bool) -> crate::providers::mock_server::RecordedRequest {
+    let mut frames = vec![message_start(json!({"input_tokens": 1}))];
+    frames.extend(message_end("end_turn", json!({"output_tokens": 1})));
+    let mut server = MockServer::start(MockResponse::Sse(frames)).await;
+    let model = crate::types::Model { id: id.into(), ..test_model(API, "anthropic", &server.base_url) };
+    let (_, message) = collect(AnthropicMessages.stream(&model, &context(), StreamOptions { fast, ..options() })).await;
+    assert_eq!(message.stop_reason, StopReason::Stop);
+    server.request().await
+}
+
+#[tokio::test]
+async fn fast_mode_sends_speed_and_beta_only_for_fast_models() {
+    let request = fast_request("claude-opus-5-5", true).await;
+    assert_eq!(request.body["speed"], "fast");
+    assert!(request.headers["anthropic-beta"].split(',').any(|beta| beta == "fast-mode-2026-02-01"));
+    for (id, fast) in [("claude-opus-5-5", false), ("claude-sonnet-5-5", true)] {
+        let request = fast_request(id, fast).await;
+        assert!(request.body.get("speed").is_none(), "{id} fast={fast}");
+        let betas = request.headers.get("anthropic-beta").map(String::as_str).unwrap_or_default();
+        assert!(!betas.contains("fast-mode"), "{id} fast={fast}");
+    }
+}
+
+#[tokio::test]
+async fn fast_speed_usage_doubles_the_cost() {
+    let mut frames = vec![message_start(json!({"input_tokens": 100, "output_tokens": 1, "speed": "fast"}))];
+    frames.extend(message_end("end_turn", json!({"output_tokens": 25})));
+    let server = MockServer::start(MockResponse::Sse(frames)).await;
+    let model = crate::types::Model { id: "claude-opus-5-5".into(), ..test_model(API, "anthropic", &server.base_url) };
+    let (_, message) = collect(AnthropicMessages.stream(&model, &context(), options())).await;
+    let cost = message.usage.cost;
+    assert!((cost.total - 2.0 * (100.0 + 25.0 * 2.0) / 1e6).abs() < 1e-12);
+    assert!((cost.output - 2.0 * 25.0 * 2.0 / 1e6).abs() < 1e-12);
+}

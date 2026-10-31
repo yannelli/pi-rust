@@ -59,6 +59,8 @@ pub struct Args {
     /// Texts or file paths appended to the system prompt, in order.
     pub append_system_prompt: Vec<String>,
     pub thinking: Option<ThinkingLevel>,
+    /// `--fast` (pi-rust): fast mode for this run, not saved.
+    pub fast: bool,
     /// `-n/--name`: session display name (session stream).
     pub name: Option<String>,
     pub no_session: bool,
@@ -243,6 +245,7 @@ pub fn parse_args(raw: &[String]) -> Args {
                     }
                 }
             }
+            "--fast" => args.fast = true,
             "-p" | "--print" => {
                 args.print = true;
                 if let Some(next) = raw.get(index + 1)

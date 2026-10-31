@@ -270,6 +270,11 @@ impl PiBackend for RuntimeBackend {
         Ok(())
     }
 
+    async fn set_fast_mode(&self, enabled: bool) -> anyhow::Result<()> {
+        self.session.set_fast_mode(enabled, true);
+        Ok(())
+    }
+
     async fn set_steering_mode(&self, mode: &str) -> anyhow::Result<()> {
         self.session.set_steering_mode(parse_enum::<QueueMode>(mode, "steering mode")?);
         Ok(())

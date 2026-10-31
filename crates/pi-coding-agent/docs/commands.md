@@ -4,7 +4,9 @@ In interactive mode, type `/` to see the list of commands. Examples are `/login`
 
 If you type while the agent works, pi puts your input in the queue as steering. To put it in the queue as a follow-up, press Alt+Enter. On Windows, press Ctrl+Q.
 
-pi-rust adds `/diff`, `/context`, `/usage`, `/init`, `/review`, `/undo`, `/retry`, `/extensions`, `/widgets`, and the prompt history. `/export` is also in upstream pi. pi-rust adds its Markdown output.
+pi-rust adds `/diff`, `/context`, `/usage`, `/init`, `/review`, `/undo`, `/retry`, `/extensions`, `/widgets`, `/fast`, and the prompt history. `/export` is also in upstream pi. pi-rust adds its Markdown output.
+
+`/fast` turns fast mode on or off. See [Fast mode](providers.md#fast-mode-pi-rust-extension).
 
 ## /diff
 

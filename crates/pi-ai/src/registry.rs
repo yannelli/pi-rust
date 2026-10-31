@@ -84,6 +84,10 @@ pub struct StreamOptions {
     pub temperature: Option<f64>,
     /// Requested reasoning effort; `None` or `Off` disables thinking where the API allows it.
     pub reasoning: Option<ThinkingLevel>,
+    /// Fast mode (pi-rust extension): providers apply it to models where [`supports_fast`] holds.
+    ///
+    /// [`supports_fast`]: crate::simple_options::supports_fast
+    pub fast: bool,
     pub thinking_budgets: Option<ThinkingBudgets>,
     /// Extra headers; a `None` value suppresses a provider default header.
     pub headers: BTreeMap<String, String>,
