@@ -130,11 +130,95 @@ async fn a_quiet_descendant_holding_the_pipes_does_not_keep_the_call_open() {
     assert!(result["elapsed"].as_u64().unwrap() < 3000, "pi.exec waited for the descendant: {result}");
 }
 
+/// A background writer gated by token files in `$1`: it starts after `release`, writes TICK<n> only after `ack<n-1>`,
+/// then holds the pipes until `stop` or the directory is gone. Each wait gives up after 10 s.
+#[cfg(unix)]
+const LATE_WRITER: &str = r#"d=$1
+alive() { [ -d "$d" ] && [ ! -e "$d/stop" ]; }
+wait_token() { n=0; while alive && [ ! -e "$d/$1" ] && [ $n -lt 1000 ]; do sleep 0.01; n=$((n+1)); done; }
+( wait_token release; i=1
+  while [ $i -le 6 ] && alive; do echo TICK$i; wait_token ack$i; i=$((i+1)); done
+  wait_token stop ) &
+echo HEAD"#;
+
+/// Runs `LATE_WRITER` through the real `pi.exec` with only its 100 ms idle grace on a virtual clock: each stdout
+/// chunk advances it 90 ms before the helper re-arms, and after TICK6 the test checks the pipes at 99 and 100 ms.
+#[cfg(unix)]
+const LATE_OUTPUT_BODY: &str = r#"const fs = require("fs"), os = require("os"), path = require("path");
+const { ChildProcess } = require("child_process");
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-exec-late-"));
+const token = (name) => { try { fs.writeFileSync(path.join(dir, name), ""); } catch {} };
+const real = { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout, spawn: ChildProcess.prototype.spawn };
+const timers = new Set();
+const report = { chunks: [], armed: 0, tick6: false, openAt99: null, closedAt100: null };
+let now = 0;
+let child;
+let watchdog;
+const advance = (ms) => {
+	now += ms;
+	for (const timer of [...timers]) if (timer.at <= now && timers.delete(timer)) timer.callback();
+};
+try {
+	globalThis.setTimeout = (callback, ms, ...rest) => {
+		if (ms !== 100) return real.setTimeout(callback, ms, ...rest);
+		const timer = { at: now + ms, callback: () => callback(...rest) };
+		timers.add(timer);
+		report.armed++;
+		return timer;
+	};
+	globalThis.clearTimeout = (handle) => (timers.has(handle) ? timers.delete(handle) : real.clearTimeout(handle));
+	ChildProcess.prototype.spawn = function (...args) {
+		child = this;
+		return real.spawn.apply(this, args);
+	};
+	let pending;
+	try {
+		pending = pi.exec("sh", ["-c", SCRIPT, "sh", dir], { maxBuffer: 1000 });
+	} finally {
+		ChildProcess.prototype.spawn = real.spawn;
+	}
+	let settled = false;
+	await new Promise((resolve, reject) => {
+		watchdog = real.setTimeout(() => reject(new Error(`watchdog: ${JSON.stringify(report)}`)), 20000);
+		pending.then(() => { settled = true; if (!report.tick6) resolve(); }, reject);
+		child.once("exit", () => token("release"));
+		let text = "";
+		let acked = 0;
+		child.stdout.prependListener("data", (chunk) => {
+			advance(90);
+			report.chunks.push(chunk.toString());
+			text += chunk.toString();
+			while (acked < 6 && text.includes(`TICK${acked + 1}\n`)) token(`ack${++acked}`);
+			if (acked < 6 || report.tick6) return;
+			report.tick6 = true;
+			real.setTimeout(() => {
+				advance(99);
+				report.openAt99 = !settled && !child.stdout.destroyed && !child.stderr.destroyed;
+				advance(1);
+				report.closedAt100 = child.stdout.destroyed && child.stderr.destroyed;
+				resolve();
+			}, 0);
+		});
+	});
+	return { result: await pending, report };
+} finally {
+	real.clearTimeout(watchdog);
+	globalThis.setTimeout = real.setTimeout;
+	globalThis.clearTimeout = real.clearTimeout;
+	ChildProcess.prototype.spawn = real.spawn;
+	token("stop");
+	fs.rmSync(dir, { recursive: true, force: true });
+}"#;
+
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn output_a_descendant_writes_after_the_exit_is_kept() {
-    let script = "(i=1; while [ $i -le 6 ]; do sleep 0.02; echo TICK$i; i=$((i+1)); done) & echo HEAD";
-    let result = exec(script, "1000").await;
-    let stdout = result["stdout"].as_str().unwrap();
-    assert!(stdout.starts_with("HEAD\n") && stdout.contains("TICK6"), "{result}");
+    let value = value_of(&LATE_OUTPUT_BODY.replace("SCRIPT", &json!(LATE_WRITER).to_string())).await;
+    let stdout = "HEAD\nTICK1\nTICK2\nTICK3\nTICK4\nTICK5\nTICK6\n";
+    let expected = json!({"stdout": stdout, "stderr": "", "code": 0, "killed": false, "truncated": false});
+    assert_eq!(value["result"], expected, "{value}");
+    let report = &value["report"];
+    // Open while the grace runs, closed when it ends: 6 chunks after the exit took 540 virtual ms, 90 apart.
+    assert_eq!((&report["openAt99"], &report["closedAt100"]), (&json!(true), &json!(true)), "{report}");
+    assert!(report["armed"].as_u64().unwrap() >= 7, "the grace restarts on the exit and each chunk: {report}");
 }
