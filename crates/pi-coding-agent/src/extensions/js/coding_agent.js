@@ -3,6 +3,20 @@
 import { createEventBus } from "./api.js";
 import { call, callAsync, optional, registerCallback, releaseCallback, signalFor, signalId } from "./bridge.js";
 
+export { ArminComponent } from "../pi-coding-agent/src/modes/interactive/components/armin.ts";
+export { AssistantMessageComponent } from "../pi-coding-agent/src/modes/interactive/components/assistant-message.ts";
+export { BashExecutionComponent } from "../pi-coding-agent/src/modes/interactive/components/bash-execution.ts";
+export { BranchSummaryMessageComponent } from "../pi-coding-agent/src/modes/interactive/components/branch-summary-message.ts";
+export { CompactionSummaryMessageComponent } from "../pi-coding-agent/src/modes/interactive/components/compaction-summary-message.ts";
+export { CustomMessageComponent } from "../pi-coding-agent/src/modes/interactive/components/custom-message.ts";
+export { ExtensionInputComponent } from "../pi-coding-agent/src/modes/interactive/components/extension-input.ts";
+export { ExtensionSelectorComponent } from "../pi-coding-agent/src/modes/interactive/components/extension-selector.ts";
+export { OAuthSelectorComponent } from "../pi-coding-agent/src/modes/interactive/components/oauth-selector.ts";
+export { ShowImagesSelectorComponent } from "../pi-coding-agent/src/modes/interactive/components/show-images-selector.ts";
+export { SkillInvocationMessageComponent } from "../pi-coding-agent/src/modes/interactive/components/skill-invocation-message.ts";
+export { ThinkingSelectorComponent } from "../pi-coding-agent/src/modes/interactive/components/thinking-selector.ts";
+export { UserMessageComponent } from "../pi-coding-agent/src/modes/interactive/components/user-message.ts";
+export { UserMessageSelectorComponent } from "../pi-coding-agent/src/modes/interactive/components/user-message-selector.ts";
 export { BorderedLoader } from "../pi-coding-agent/src/modes/interactive/components/bordered-loader.ts";
 export { CustomEditor } from "../pi-coding-agent/src/modes/interactive/components/custom-editor.ts";
 export { DynamicBorder } from "../pi-coding-agent/src/modes/interactive/components/dynamic-border.ts";

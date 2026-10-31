@@ -67,6 +67,23 @@ const CODING_AGENT_FILES: &[&str] = &[
     "modes/interactive/components/dynamic-border.ts",
     "modes/interactive/components/keybinding-hints.ts",
     "modes/interactive/components/visual-truncate.ts",
+    "modes/interactive/components/armin.ts",
+    "modes/interactive/components/assistant-message.ts",
+    "modes/interactive/components/bash-execution.ts",
+    "modes/interactive/components/branch-summary-message.ts",
+    "modes/interactive/components/compaction-summary-message.ts",
+    "modes/interactive/components/countdown-timer.ts",
+    "modes/interactive/components/custom-message.ts",
+    "modes/interactive/components/extension-input.ts",
+    "modes/interactive/components/extension-selector.ts",
+    "modes/interactive/components/markdown-transform.ts",
+    "modes/interactive/components/oauth-selector.ts",
+    "modes/interactive/components/show-images-selector.ts",
+    "modes/interactive/components/skill-invocation-message.ts",
+    "modes/interactive/components/thinking-selector.ts",
+    "modes/interactive/components/user-message.ts",
+    "modes/interactive/components/user-message-selector.ts",
+    "utils/ansi.ts",
 ];
 
 /// Bare specifiers inside bundled files and the bundled file each one resolves to.
@@ -118,6 +135,7 @@ fn add_sdk(upstream: &Path, files: &mut BTreeMap<String, String>) -> Result<(), 
         ("agent", "pi-agent-core", AGENT_CORE_FILES),
         ("telemetry", "pi-telemetry", TELEMETRY_FILES),
         ("tui", "pi-tui", TUI_UPDATE_FILES),
+        ("coding-agent", "pi-coding-agent", CODING_AGENT_FILES),
     ];
     for (package, prefix, names) in packages {
         for name in names {

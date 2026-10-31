@@ -1,7 +1,7 @@
 // `ctx.ui` (upstream `ExtensionUIContext`). Dialogs and plain calls go to the Rust `ExtensionUi`
 // of the session `target`; component factories stay here and Rust creates their components by id
 // when the TUI shows them (`createComponent`).
-import { KeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
+import { KeybindingsManager, setKeybindings, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { call, callAsync, invokeCallback, optional, registerCallback, releaseCallback, signalId } from "./bridge.js";
 import { currentTheme, getEditorTheme, themeByName } from "./theme.js";
 
@@ -42,11 +42,12 @@ function tuiHandle(target) {
 
 let keybindings;
 
-/** The app keybindings (`keybindings.json` over the defaults) for `matches(data, id)`. */
+/** The app keybindings (`keybindings.json` over the defaults), also as pi-tui's global ones. */
 export function appKeybindings() {
 	if (!keybindings) {
 		const { definitions, user } = call("ui.keybindings");
 		keybindings = new KeybindingsManager({ ...TUI_KEYBINDINGS, ...definitions }, user);
+		setKeybindings(keybindings);
 	}
 	return keybindings;
 }
