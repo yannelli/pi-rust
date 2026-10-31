@@ -572,6 +572,7 @@ pub const PI_SETTINGS_KEYS: &[&str] = &[
     "fastMode",
     "disabledProviders",
     "acpAgents",
+    "acpRegistryUrl",
 ];
 
 /// Typed settings from a JSON object. Keys that do not match the schema are dropped and

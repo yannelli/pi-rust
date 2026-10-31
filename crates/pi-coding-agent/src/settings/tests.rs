@@ -311,3 +311,18 @@ fn disabled_providers_setter_writes_global_scope_only() {
     settings.reload();
     assert!(settings.disabled_providers().is_empty());
 }
+
+#[test]
+fn extension_namespaces_refuse_pi_keys_and_keep_other_keys() {
+    let manager =
+        SettingsManager::in_memory(json!({"defaultModel": "tiny", "acpRegistryUrl": "https://registry.example"}));
+    for key in ["acpRegistryUrl", "defaultModel", "extensions", ""] {
+        let refused = manager.set_extension_namespace(SettingsScope::Global, key, Some(json!("x")));
+        assert!(refused.is_err(), "{key:?} was written");
+    }
+    manager.set_extension_namespace(SettingsScope::Global, "myExtension", Some(json!({"on": true}))).unwrap();
+    let global = manager.global_settings();
+    assert_eq!(global.extra.get("myExtension"), Some(&json!({"on": true})));
+    assert_eq!(global.extra.get("acpRegistryUrl"), Some(&json!("https://registry.example")));
+    assert_eq!(global.default_model.as_deref(), Some("tiny"));
+}
