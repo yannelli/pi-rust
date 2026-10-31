@@ -107,8 +107,8 @@ function suggest({ lines, cursorLine, cursorCol }) {
 async function runCommand({ name, ctx }) {
 	if (name === "native-ctx") {
 		const model = ctx.model ?? {};
-		const { scopedModels, terminalWidth, isProjectTrusted } = ctx;
-		await append("native-ctx", { scopedModels, terminalWidth, isProjectTrusted, baseUrl: model.baseUrl, compat: model.compat, keys: Object.keys(model) });
+		const { scopedModels, terminalWidth, terminalHeight, isProjectTrusted } = ctx;
+		await append("native-ctx", { scopedModels, terminalWidth, terminalHeight, isProjectTrusted, baseUrl: model.baseUrl, compat: model.compat, keys: Object.keys(model) });
 	} else if (name === "native-find") {
 		const found = await request("model.find", { provider: "local", id: "other" });
 		const missing = await request("model.find", { provider: "local", id: "missing" });
@@ -163,7 +163,7 @@ const methods = {
 
 function onNotification({ method, params }) {
 	if (method === "$/cancelRequest") cancels.get(params.id)?.();
-	if (method === "ui.resize") notify("ui.update", { surface: params.surface, lines: [`width ${params.width}`] });
+	if (method === "ui.resize") notify("ui.update", { surface: params.surface, lines: [`width ${params.width} height ${params.height ?? "none"}`] });
 	if (method === "ui.key") panelWaiters.get(params.surface)?.(`${params.data}/${params.key}`);
 	if (method === "footer.changed" && params.footer.gitBranch === "feature-x" && !footerSeen) {
 		footerSeen = true;

@@ -1,9 +1,19 @@
 // Line-based UI of native extensions: widgets, the footer, and `ui.custom` panels render the last
-// lines the extension pushed. Width changes and keys go to the extension as notifications.
+// lines the extension pushed. Size changes and keys go to the extension as notifications.
 import { parseKey, truncateToWidth } from "@earendil-works/pi-tui";
 import { rpcError } from "./native_rpc.js";
 
 const lineList = (lines) => (Array.isArray(lines) ? lines.map((line) => String(line ?? "")) : []);
+
+/** Terminal rows as a positive integer, else `undefined`. */
+const terminalRows = (tui) => {
+	try {
+		const rows = tui?.terminal?.rows;
+		return Number.isInteger(rows) && rows > 0 ? rows : undefined;
+	} catch {
+		return undefined;
+	}
+};
 
 export function createSurfaces(state) {
 	const surfaces = new Map();
@@ -11,9 +21,11 @@ export function createSurfaces(state) {
 	const component = (id, surface) => {
 		const view = {
 			render(width) {
-				if (surface.width !== width) {
+				const height = terminalRows(surface.tui);
+				if (surface.width !== width || surface.height !== height) {
 					surface.width = width;
-					state.peer.notify("ui.resize", { surface: id, width });
+					surface.height = height;
+					state.peer.notify("ui.resize", height === undefined ? { surface: id, width } : { surface: id, width, height });
 				}
 				return surface.lines.map((line) => truncateToWidth(line, width));
 			},
