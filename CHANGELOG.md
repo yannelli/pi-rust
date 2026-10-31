@@ -2,6 +2,25 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.9.2] - 2026-10-31
+
+### Fixed
+
+- **js:** retain transferred sockets until the receiver acknowledges them ([36575a9](https://github.com/yannelli/pi-rust/commit/36575a9a50987b379a7acd96d5a8500e5d54dd7b))
+- **tui:** wrap wide math and stop bare URLs at CJK punctuation ([e567dc6](https://github.com/yannelli/pi-rust/commit/e567dc6925f1bf2d4220d80ec13a9d008600fc3a))
+- **coding-agent:** bound pi.exec output and finish after child exit (upstream c466a3595) ([65eed61](https://github.com/yannelli/pi-rust/commit/65eed6127ed0fc31067346d6167cbc80ae7ce652))
+
+## [0.9.1] - 2026-10-31
+
+### Added
+
+- **extensions:** expose upstream compaction exports ([f8a44f9](https://github.com/yannelli/pi-rust/commit/f8a44f9fb10cd69eb578f171aa14f63b0eff7076))
+- **extensions:** expose upstream faux providers and image APIs ([f5977de](https://github.com/yannelli/pi-rust/commit/f5977de44b77d723314f66f9e67091c42ac3cc44))
+
+### Fixed
+
+- **extensions:** refresh vendored Markdown rendering ([9f5d2b2](https://github.com/yannelli/pi-rust/commit/9f5d2b278478211c7a783b44b28556f6f992574e))
+
 ## [0.9.0] - 2026-10-31
 
 ### Breaking Changes

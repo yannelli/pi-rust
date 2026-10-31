@@ -132,7 +132,9 @@ impl Markdown {
             Token::LatexBlock { raw, text, pending } => {
                 let source = js_trim(raw);
                 let rendered = if !pending && self.options.render_latex {
-                    render_latex_with(text, RenderLatexOptions { display: true }).unwrap_or_else(|| source.to_string())
+                    render_latex_with(text, RenderLatexOptions { display: true })
+                        .filter(|layout| layout.lines().all(|line| visible_width(line) <= width))
+                        .unwrap_or_else(|| source.to_string())
                 } else {
                     source.to_string()
                 };
