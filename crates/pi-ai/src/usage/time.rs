@@ -54,6 +54,32 @@ pub fn unix_from_iso(text: &str) -> Option<i64> {
     valid.then(|| days_from_civil(year, month, day) * 86_400 + hour * 3600 + minute * 60 + second - offset * 60)
 }
 
+/// Unix seconds of an HTTP date in the IMF-fixdate form, such as `Sun, 06 Nov 1994 08:49:37 GMT`.
+pub(crate) fn unix_from_http_date(text: &str) -> Option<i64> {
+    const MONTHS: [&str; 12] = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+    let parts: Vec<&str> = text.split_whitespace().collect();
+    let [_, day, month, year, clock, zone] = parts.as_slice() else { return None };
+    if !zone.eq_ignore_ascii_case("GMT") {
+        return None;
+    }
+    let month = MONTHS.iter().position(|name| name.eq_ignore_ascii_case(month))? as i64 + 1;
+    unix_from_iso(&format!("{year}-{month:02}-{day:0>2}T{clock}Z"))
+}
+
+/// Unix milliseconds of a reset time: an ISO 8601 string (with its fraction) or a number of
+/// seconds (below 10^11) or milliseconds.
+pub(crate) fn ms_from_value(value: &serde_json::Value) -> Option<i64> {
+    if let Some(number) = value.as_f64().filter(|number| number.is_finite()) {
+        return Some(if number < 1e11 { number * 1000.0 } else { number } as i64);
+    }
+    let text = value.as_str()?;
+    let seconds = unix_from_iso(text)?;
+    let fraction = text.split_once(['T', ' ']).and_then(|(_, rest)| rest.split_once('.')).map(|(_, rest)| rest);
+    let digits: String = fraction.unwrap_or_default().chars().take_while(char::is_ascii_digit).take(3).collect();
+    let millis = if digits.is_empty() { 0 } else { format!("{digits:0<3}").parse::<i64>().ok()? };
+    Some(seconds * 1000 + millis)
+}
+
 /// Unix seconds or milliseconds; values below 10^10 are seconds.
 pub(crate) fn iso_from_epoch(value: f64) -> Option<String> {
     let seconds = if value.abs() < 1e10 { value } else { value / 1000.0 };

@@ -22,6 +22,14 @@ fn service(base_url: &str, credentials: Vec<(&str, Credential)>) -> UsageService
     UsageService::with_endpoints(Arc::new(resolver), endpoints)
 }
 
+/// The windows as [`UsageWindow::new`] builds them, without the id, scope, and exact reset.
+fn basic(windows: &[UsageWindow]) -> Vec<UsageWindow> {
+    windows
+        .iter()
+        .map(|w| UsageWindow::new(w.label.clone(), w.used_percent, w.resets_at.clone(), w.window_minutes))
+        .collect()
+}
+
 fn window(label: &str, used: f64, resets_at: Option<&str>, minutes: Option<u64>) -> UsageWindow {
     UsageWindow::new(label, used, resets_at.map(str::to_string), minutes)
 }
@@ -44,7 +52,7 @@ async fn anthropic_reads_session_weekly_and_model_windows_with_oauth_headers() {
     let result = usage.get("anthropic", false).await;
     assert_eq!(result.error, None);
     assert_eq!(
-        result.windows,
+        basic(&result.windows),
         vec![
             window("5h", 42.0, Some("2026-10-30T17:00:00Z"), Some(300)),
             window("Weekly", 18.0, Some("2026-11-04T09:00:00Z"), Some(10_080)),
@@ -87,7 +95,7 @@ async fn codex_sends_the_account_and_reads_primary_secondary_and_extra_limits() 
     let result = usage.get("openai-codex", false).await;
     assert_eq!(result.plan.as_deref(), Some("pro"));
     assert_eq!(
-        result.windows,
+        basic(&result.windows),
         vec![
             window("5h", 42.0, Some("2026-10-30T17:00:00Z"), Some(300)),
             window("Weekly", 18.5, Some("2026-11-04T17:00:00Z"), Some(10_080)),
@@ -112,7 +120,7 @@ async fn cursor_posts_connect_json_and_reads_plan_percentages() {
     let result = usage.get("cursor", false).await;
     let cycle = Some(43_200);
     assert_eq!(
-        result.windows,
+        basic(&result.windows),
         vec![
             window("Total", 61.5, Some("2026-10-30T17:00:00Z"), cycle),
             window("Auto", 40.0, Some("2026-10-30T17:00:00Z"), cycle)
@@ -150,7 +158,7 @@ async fn failures_and_missing_logins_return_an_error_state() {
 #[test]
 fn parsers_skip_absent_windows() {
     assert!(anthropic::windows(&json!({"five_hour": null, "seven_day": {"resets_at": "x"}})).is_empty());
-    assert!(codex::windows(&json!({"rate_limit": null})).is_empty());
+    assert!(codex::windows(&json!({"rate_limit": null}), 0).is_empty());
     assert!(cursor::windows(&json!({})).is_empty());
     assert!(grok::weekly(&json!({"currentPeriod": {"start": "2026-10-01T00:00:00Z", "end": "2026-11-01T00:00:00Z", "type": "MONTH"}}), 0).is_empty());
     assert_eq!(grok::monthly(&json!({"monthlyLimit": {"val": 0}, "used": {"val": 3}})), None);
@@ -168,7 +176,7 @@ async fn grok_reads_weekly_credits_and_products_with_the_cli_headers() {
     let result = usage.get("xai", false).await;
     let reset = Some("2026-11-04T17:00:00Z");
     assert_eq!(
-        result.windows,
+        basic(&result.windows),
         vec![
             window("Weekly", 37.5, reset, Some(10_080)),
             window("Weekly Grok Build", 12.0, reset, Some(10_080)),
@@ -192,7 +200,7 @@ async fn grok_unified_billing_falls_back_to_the_monthly_quota() {
     let server = MockHttp::start(vec![Reply::json(200, &credits), Reply::json(200, &monthly)]).await;
     let usage = service(&server.base_url, vec![("xai", oauth("grok-token", json!({})))]);
     let result = usage.get("xai", false).await;
-    assert_eq!(result.windows, vec![window("Monthly", 25.0, Some("2026-10-31T00:00:00Z"), Some(43_200))]);
+    assert_eq!(basic(&result.windows), vec![window("Monthly", 25.0, Some("2026-10-31T00:00:00Z"), Some(43_200))]);
     assert_eq!(server.request(1).path, "/v1/billing");
     let empty = MockHttp::start(vec![Reply::json(200, &json!({"config": {}})), Reply::json(200, &json!({}))]).await;
     let usage = service(&empty.base_url, vec![("xai", oauth("grok-token", json!({})))]);

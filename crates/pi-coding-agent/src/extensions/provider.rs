@@ -294,7 +294,8 @@ impl ExtensionRunner {
     /// `pi.registerProvider`: models and auth settings, a `streamSimple` API, and OAuth.
     pub(crate) fn register_provider(&self, name: &str, config: Value, extension_path: &str) -> Result<(), String> {
         let runtime = self.model_runtime().clone();
-        let builtin = config["oauth"]["builtin"].as_str().map(|id| {
+        let builtin_id = config["oauth"]["builtin"].as_str();
+        let builtin = builtin_id.map(|id| {
             runtime.builtin_oauth(id).ok_or_else(|| format!("Provider {name}: no built-in OAuth login \"{id}\""))
         });
         let builtin = builtin.transpose()?;
@@ -330,6 +331,8 @@ impl ExtensionRunner {
             };
             runtime.register_extension_oauth(name, Some(flow));
         }
+        // A built-in login also reads usage with that provider's fetcher (when it has one).
+        runtime.usage().set_alias(name, builtin_id);
         // This runs on the extension thread, and `refreshModels` calls back into it: spawn.
         runtime.refresh_offline_in_background();
         let mut providers = lock(&self.providers);
@@ -355,6 +358,7 @@ impl ExtensionRunner {
         self.model_runtime().unregister_extension_provider(name);
         self.model_runtime().register_extension_hooks(name, None);
         self.model_runtime().register_extension_oauth(name, None);
+        self.model_runtime().usage().set_alias(name, None);
         self.model_runtime().refresh_offline_in_background();
         if let Some(session) = self.session() {
             session.refresh_model_from_registry();
