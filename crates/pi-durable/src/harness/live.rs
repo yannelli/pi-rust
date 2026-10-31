@@ -134,6 +134,73 @@ pub struct CompactionFailure {
     pub error: String,
 }
 
+/// Why a run ended without an answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunFailureReason {
+    /// The model's response failed, after any retries, or the compaction a request needed failed.
+    ModelError,
+    /// No model is configured, or the configured one is not available.
+    NoModel,
+    /// The run was aborted (`Conversation::abort()`, `abort_task()`).
+    Aborted,
+    /// A queued reset started a new context at the post-tools boundary, before an answer.
+    Reset,
+    /// The run's task threw where it cannot recover, or storage rejected its commit.
+    Faulted,
+    /// The run's task was aborted while no registered definition could take it.
+    Orphaned,
+}
+
+impl RunFailureReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ModelError => "model_error",
+            Self::NoModel => "no_model",
+            Self::Aborted => "aborted",
+            Self::Reset => "reset",
+            Self::Faulted => "faulted",
+            Self::Orphaned => "orphaned",
+        }
+    }
+}
+
+/// The newest run that ended without an answer (spec section 8.2).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunFailure {
+    /// The task that ended the run: the run's task at its end.
+    pub task_id: TaskId,
+    /// The run's inputs, settled `unanswered`.
+    pub inputs: Vec<SubmissionId>,
+    pub reason: RunFailureReason,
+    /// `model_error`: the error text; `no_model`: which model is missing; `faulted`: the error message; `orphaned`:
+    /// why the task could not run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// How a run ends: with an answer, or without one, settling its inputs `unanswered` and recording why.
+#[derive(Clone, Debug, PartialEq)]
+pub enum RunEnd {
+    Done {
+        answer: EntryId,
+    },
+    Unanswered {
+        reason: RunFailureReason,
+        detail: Option<String>,
+        /// The inputs' settlement; default `unanswered` with `reason` and `detail`.
+        settlement: Option<SubmissionSettlement>,
+    },
+}
+
+impl RunEnd {
+    /// An unanswered end whose inputs settle with `reason` and `detail`.
+    pub fn unanswered(reason: RunFailureReason, detail: Option<&str>) -> Self {
+        Self::Unanswered { reason, detail: detail.map(str::to_owned), settlement: None }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LiveRun {
@@ -188,6 +255,10 @@ pub struct LiveState {
     /// summary removes it; one that is aborted or finds nothing to compact leaves it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compaction_failure: Option<CompactionFailure>,
+    /// Why the newest run ended without an answer. Set in the commit that ends the run; removed when a later commit
+    /// starts a run. A run started in the same commit, by `afterFailedRun: "continue"` or after a reset, keeps it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_failure: Option<RunFailure>,
 }
 
 fn running(slots: Option<&Json>) -> bool {
@@ -211,11 +282,23 @@ pub static LIVE_DOC: LazyLock<DocToken<LiveState, LatestConversation>> = LazyLoc
 
 pub type LiveDraft = Draft<LiveState>;
 
-/// End the run owned by `task_id`: settle each of its inputs and remove `run`. Always removes the presentation.
-pub fn end_run(tx: &Tx, live: &mut LiveState, task_id: TaskId, settlement: SubmissionSettlement) -> DurableResult<()> {
+/// End the run owned by `task_id`: settle each of its inputs, remove `run`, and, without an answer, record
+/// `run_failure`. Always removes the presentation, which belongs to the ending run.
+pub fn end_run(tx: &Tx, live: &mut LiveState, task_id: TaskId, end: RunEnd) -> DurableResult<()> {
     if let Some(run) = live.run.take_if(|run| run.task_id == task_id) {
-        for id in run.inputs {
-            tx.settle_submission(id, settlement.clone())?;
+        let settlement = match &end {
+            RunEnd::Done { answer } => SubmissionSettlement::Done { answer: *answer },
+            RunEnd::Unanswered { settlement: Some(settlement), .. } => settlement.clone(),
+            RunEnd::Unanswered { reason, detail, settlement: None } => SubmissionSettlement::Unanswered {
+                reason: reason.as_str().into(),
+                detail: detail.as_deref().map(Json::from),
+            },
+        };
+        for id in &run.inputs {
+            tx.settle_submission(*id, settlement.clone())?;
+        }
+        if let RunEnd::Unanswered { reason, detail, .. } = end {
+            live.run_failure = Some(RunFailure { task_id, inputs: run.inputs, reason, detail });
         }
     }
     live.generation = None;
@@ -408,17 +491,23 @@ pub async fn settle_scheduler_outcome(tx: &Tx, record: &TaskRecord, outcome: &Ta
                 return Ok(());
             }
             super::generation::convert_partial(tx, &mut live, record.conversation_id).await?;
-            let settlement = match outcome {
-                TaskOutcome::Faulted { error } => SubmissionSettlement::Unanswered {
-                    reason: "faulted".into(),
-                    detail: Some(Json::from(error.message.as_str())),
+            let end = match outcome {
+                TaskOutcome::Faulted { error } => RunEnd::unanswered(RunFailureReason::Faulted, Some(&error.message)),
+                TaskOutcome::Orphaned { reason } => RunEnd::Unanswered {
+                    reason: RunFailureReason::Orphaned,
+                    detail: Some(reason.clone()),
+                    settlement: Some(SubmissionSettlement::Unanswered { reason: reason.clone(), detail: None }),
                 },
-                TaskOutcome::Orphaned { reason } => {
-                    SubmissionSettlement::Unanswered { reason: reason.clone(), detail: None }
-                }
-                _ => SubmissionSettlement::Unanswered { reason: outcome.status().into(), detail: None },
+                _ => RunEnd::Unanswered {
+                    reason: RunFailureReason::Orphaned,
+                    detail: Some(outcome.status().into()),
+                    settlement: Some(SubmissionSettlement::Unanswered {
+                        reason: outcome.status().into(),
+                        detail: None,
+                    }),
+                },
             };
-            end_run(tx, &mut live, record.id, settlement)?;
+            end_run(tx, &mut live, record.id, end)?;
         }
     }
     draft.set(&live)

@@ -18,6 +18,8 @@ mod subagents;
 mod support;
 #[path = "examples/tools.rs"]
 mod tools;
+#[path = "examples/transcript.rs"]
+mod transcript;
 
 use std::sync::{Arc, LazyLock};
 

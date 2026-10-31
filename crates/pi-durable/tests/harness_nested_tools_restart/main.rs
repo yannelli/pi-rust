@@ -204,20 +204,12 @@ async fn abandons_a_replay_unsafe_caller_s_unfinished_nested_calls_before_they_r
     harness.close(&ctx()).await.unwrap();
 
     let (harness, root) = open(&path, &setup).await;
-    let ends = Arc::new(Mutex::new(Vec::<Value>::new()));
-    let stream = watch_events(&harness, root.id, &ctx()).await.unwrap();
-    let sink = ends.clone();
-    stream
-        .start(move |pi_chord::NativeWatchChange { value: batch }, _| {
-            let found = batch.iter().filter(|event| event["type"] == Json::from("tool_execution_end")).map(Value::from);
-            sink.lock().unwrap().extend(found);
-            async { Ok(()) }
-        })
-        .unwrap();
+    let history = support::live_support::view_history(&harness, root.id).await;
+    let nested = support::live_support::nested_results(&harness);
     harness.resume().unwrap();
     assert_eq!(settle(&harness, id).await, SubmissionStatus::Done);
     harness.wait_for_idle(&ctx()).await.unwrap();
-    stream.stop().await;
+    history.detach();
     assert_eq!(*runs.lock().unwrap(), (1, 0));
     let tasks = nested_tasks(&harness).await;
     assert_eq!(tasks.len(), 2);
@@ -228,10 +220,9 @@ async fn abandons_a_replay_unsafe_caller_s_unfinished_nested_calls_before_they_r
         );
         assert_eq!(outcome_status(task), Some("aborted"));
     }
-    let ends = ends.lock().unwrap().clone();
+    let live = history.live();
     let end = |call_id: &str| -> Option<NestedToolExecutionResult> {
-        let event = ends.iter().find(|event| event["toolCallId"] == call_id)?;
-        serde_json::from_value(event["result"].clone()).ok()
+        serde_json::from_value(support::live_support::nested_result_of(&live, &nested, call_id)?).ok()
     };
     let first = end("c1/1");
     assert_eq!(codes(first.as_ref()), ["interrupted"]);

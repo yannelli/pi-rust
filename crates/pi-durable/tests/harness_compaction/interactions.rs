@@ -141,10 +141,15 @@ async fn compacts_a_fork_whose_cut_falls_on_a_parent_entry() {
     assert_eq!(rest, [text("u3", 100), text("a3", 100)]);
     // The parent is untouched.
     assert!(!chat.kinds().await.contains(&"pi.compaction".to_owned()));
-    // The fork's view keeps the parent entries the summary kept.
+    // The fork's view shows the parent entries in ID order, the summary after them, its head on a parent entry.
     let state = fork.view_state(&ctx()).await.unwrap();
     let mounted = state.value().get("entries").unwrap().to_serde();
-    assert_eq!(Json::from(mounted), Json::from(serde_json::to_value(&view.entries).unwrap()));
+    assert_eq!(
+        pi_chord::Json::from(mounted.clone()),
+        pi_chord::Json::from(serde_json::to_value(all_entries(&fork).await).unwrap())
+    );
+    assert_eq!(mounted.as_array().unwrap().last().unwrap(), &serde_json::to_value(&head).unwrap());
+    assert!(mounted.as_array().unwrap().iter().any(|entry| entry["id"] == json!(u3.unwrap().id)));
     state.dispose().unwrap();
     chat.close().await;
 }
@@ -255,53 +260,31 @@ async fn places_a_hooks_summary_and_holds_while_work_the_hook_created_runs() {
 // `Models::get_model` returns an `Option` and cannot fail, so this fault is not reachable from a test.
 
 #[tokio::test]
-async fn reports_start_and_end_and_the_retry_backoff_in_a_late_joiners_snapshot() {
+async fn lists_a_compaction_from_start_to_end_with_its_retry_backoff_in_a_late_joiners_view() {
     let chat = open(OpenOptions::default()).await;
     chat.history().await;
     let retry =
         RetryOverrides { enabled: Some(true), max_retries: Some(2), base_delay_ms: Some(60_000), ..Default::default() };
     chat.setup.settings.lock().unwrap().retry = Some(retry);
-    let (stream, events) = listen(&chat).await;
+    let views = views(&chat).await;
     chat.faux.summary(failure("overloaded"));
     let task = chat.compact(None).await;
-    let probe = chat.clone();
-    wait_for(move || {
-        let chat = probe.clone();
-        async move { !chat.live().await["compactions"][0]["retry"].is_null() }
-    })
-    .await;
-    let late = watch_events(&chat.harness, chat.root.id, &ctx()).await.unwrap();
-    let snapshot = Value::from(&late.snapshot);
-    let compactions = &snapshot["compactions"];
+    wait_for(|| async { !chat.live().await["compactions"][0]["retry"].is_null() }).await;
+    let compactions = watched_live(&chat).await["compactions"].clone();
     assert_eq!(compactions.as_array().map(Vec::len), Some(1));
     let status = &compactions[0];
     assert_eq!((&status["taskId"], &status["reason"]), (&json!(task), &json!("manual")));
     assert_eq!((&status["blocking"], &status["attempt"]), (&json!(false), &json!(1)));
     assert!(status["retry"]["at"].is_number());
     assert_eq!(status["retry"]["error"], "overloaded");
-    late.stop().await;
     chat.harness.abort_task(task, &ctx()).await.unwrap();
-    let seen = events.clone();
-    wait_for(move || {
-        let ended = event_types(&seen).iter().any(|kind| kind == "compaction_end");
-        async move { ended }
-    })
-    .await;
-    let compaction_events: Vec<Value> = events
-        .lock()
-        .unwrap()
-        .iter()
-        .filter(|event| event["type"].as_str().is_some_and(|kind| kind.starts_with("compaction_")))
-        .cloned()
-        .collect();
-    assert_eq!(
-        compaction_events,
-        [
-            json!({ "type": "compaction_start", "taskId": task, "reason": "manual", "blocking": false }),
-            json!({ "type": "compaction_end", "taskId": task, "reason": "manual" }),
-        ]
-    );
-    stream.stop().await;
+    wait_for(|| async { chat.live().await.get("compactions").is_none() }).await;
+    views.detach();
+    let listed: Vec<Value> =
+        views.live().iter().flat_map(|state| state["compactions"].as_array().cloned().unwrap_or_default()).collect();
+    assert_eq!(listed[0], json!({ "taskId": task, "reason": "manual", "blocking": false, "attempt": 1 }));
+    // An abort is not a failure.
+    assert!(views.live().last().unwrap().get("compactionFailure").is_none());
     chat.close().await;
 }
 

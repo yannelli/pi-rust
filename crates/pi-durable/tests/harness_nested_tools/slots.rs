@@ -15,7 +15,7 @@ use pi_durable::tasks::TaskOptions;
 use pi_durable::*;
 use serde_json::{Value, json};
 
-use super::calls::{listen, live_value};
+use super::calls::live_value;
 use super::support::Deferred;
 use super::support::harness_support::*;
 use super::{add_tool, args, call, done, echo_tool, nested_text, result_text, results, run_once, tool, tool_tasks};
@@ -67,7 +67,6 @@ async fn shows_a_nested_call_s_arguments_in_its_slot_as_made_then_unbounded_as_i
     );
     setup.faux.set_responses([call("batch"), done()]);
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &setup).await;
-    let (stream, events) = listen(&harness, &root).await;
     let submission = root.submit(SubmissionDraft::input("go"), &ctx()).await.unwrap();
     let slot = || async { live_value(&harness, &root).await["nestedTools"][0].clone() };
     hook_entered.wait().await;
@@ -86,12 +85,7 @@ async fn shows_a_nested_call_s_arguments_in_its_slot_as_made_then_unbounded_as_i
     release.resolve();
     submission.wait(&ctx()).await.unwrap();
     harness.wait_for_idle(&ctx()).await.unwrap();
-    stream.stop().await;
-    // The start event carries the arguments the call runs with; the task input keeps the ones it was made with.
-    let events = events.lock().unwrap().clone();
-    let start =
-        events.iter().find(|event| event["type"] == "tool_execution_start" && event["toolCallId"] == "c1/1").unwrap();
-    assert_eq!(start["args"], json!({ "text": large }));
+    // The slot showed the arguments the call runs with; the task input keeps the ones it was made with.
     let tasks = tool_tasks(&harness).await;
     let nested = tasks.iter().find(|task| task.input["kind"] == Json::from("nested")).unwrap();
     assert_eq!(nested.input["call"]["arguments"].to_serde(), json!({ "text": "asked" }));

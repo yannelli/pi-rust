@@ -1,4 +1,4 @@
-//! Nested call keys, usage, events, aborts with the caller, and reattachment cases.
+//! Nested call keys, usage, slots, aborts with the caller, and reattachment cases.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -14,23 +14,9 @@ use serde_json::{Value, json};
 
 use super::support::Deferred;
 use super::support::harness_support::*;
+use super::support::live_support::{ended_at, nested_result_of, nested_results, slots_of, start_order, view_history};
 use super::support::task_support::aborted;
 use super::{add_tool, args, call, done, echo_tool, nested_text, result_text, results, run_once, tool, tool_tasks};
-
-pub type Events = Arc<Mutex<Vec<Value>>>;
-
-pub async fn listen(harness: &Harness, conversation: &Conversation) -> (AgentEventStream, Events) {
-    let stream = watch_events(harness, conversation.id, &ctx()).await.unwrap();
-    let events = Events::default();
-    let sink = events.clone();
-    stream
-        .start(move |pi_chord::NativeWatchChange { value: batch }, _| {
-            sink.lock().unwrap().extend(batch.iter().map(Value::from));
-            async { Ok(()) }
-        })
-        .unwrap();
-    (stream, events)
-}
 
 pub async fn cancelled(context: &Context) -> DurableResult<ToolExecutionResult> {
     let signal = context.abort_signal().unwrap().clone();
@@ -114,29 +100,25 @@ async fn aborts_the_nested_calls_a_caller_left_running_when_it_returns_keeping_t
     );
     setup.faux.set_responses([call("batch"), done()]);
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &setup).await;
-    let (stream, events) = listen(&harness, &root).await;
+    let history = view_history(&harness, root.id).await;
+    let nested = nested_results(&harness);
     let settled = root.submit(SubmissionDraft::input("go"), &ctx()).await.unwrap().wait(&ctx()).await.unwrap();
     assert_eq!(settled.status, SubmissionStatus::Done);
     harness.wait_for_idle(&ctx()).await.unwrap();
-    stream.stop().await;
+    history.detach();
     assert_eq!(result_text(&results(&all_entries(&root).await)[0]), "returned early");
     let child = tool_tasks(&harness).await.remove(1);
     let state = serde_json::to_value(&child.state).unwrap();
     assert_eq!((state["status"].as_str(), state["outcome"]["status"].as_str()), (Some("terminal"), Some("aborted")));
     assert_eq!(state["outcome"]["result"]["kind"], "nested");
-    let ends: Vec<Value> =
-        events.lock().unwrap().iter().filter(|event| event["type"] == "tool_execution_end").cloned().collect();
     // The aborted call's result keeps its details; programs get no partial output, which only the model read.
-    let child_end = ends.iter().find(|event| event["toolCallId"] == "c1/1").unwrap();
-    assert_eq!(
-        (child_end["result"]["isError"].clone(), child_end["result"]["details"].clone()),
-        (json!(true), json!({ "step": 1 }))
-    );
-    assert!(child_end["result"].get("structuredOutput").is_none());
-    // The nested call ends, with its result, before its caller.
-    let order: Vec<(Value, bool)> =
-        ends.iter().map(|event| (event["toolCallId"].clone(), event.get("result").is_some())).collect();
-    assert_eq!(order, [(json!("c1/1"), true), (json!("c1"), false)]);
+    let child_result = nested_result_of(&history.live(), &nested, "c1/1").unwrap();
+    assert_eq!((child_result["isError"].clone(), child_result["details"].clone()), (json!(true), json!({ "step": 1 })));
+    assert!(child_result.get("structuredOutput").is_none());
+    // The nested call ends before its caller.
+    let live = history.live();
+    let (child_end, caller_end) = (ended_at(&live, "c1/1").unwrap(), ended_at(&live, "c1").unwrap());
+    assert!(child_end > 0 && child_end < caller_end, "{child_end} {caller_end}");
     assert_eq!(live_value(&harness, &root).await, json!({}));
     harness.close(&ctx()).await.unwrap();
 }
@@ -171,7 +153,7 @@ async fn records_a_nested_call_s_usage_under_its_tool() {
 }
 
 #[tokio::test]
-async fn reports_nested_calls_in_pi_live_nested_tools_and_as_tool_events_with_their_parent() {
+async fn reports_nested_calls_in_pi_live_nested_tools_with_their_parent() {
     let setup = chat_setup(Default::default());
     let (release, running) = (Deferred::default(), Deferred::default());
     let (gate, signal) = (release.clone(), running.clone());
@@ -197,8 +179,9 @@ async fn reports_nested_calls_in_pi_live_nested_tools_and_as_tool_events_with_th
     );
     setup.faux.set_responses([call("batch"), done()]);
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &setup).await;
-    let (stream, events) = listen(&harness, &root).await;
-    assert_eq!(stream.snapshot["nestedTools"].to_serde(), json!([]));
+    let history = view_history(&harness, root.id).await;
+    assert!(history.live()[0].get("nestedTools").is_none());
+    let nested = nested_results(&harness);
     let submission = root.submit(SubmissionDraft::input("go"), &ctx()).await.unwrap();
     running.wait().await;
     let mut slot = live_value(&harness, &root).await["nestedTools"][0].clone();
@@ -214,43 +197,20 @@ async fn reports_nested_calls_in_pi_live_nested_tools_and_as_tool_events_with_th
     release.resolve();
     submission.wait(&ctx()).await.unwrap();
     harness.wait_for_idle(&ctx()).await.unwrap();
-    stream.stop().await;
-    let events = events.lock().unwrap().clone();
-    let tools: Vec<(String, String, Value)> = events
-        .iter()
-        .filter(|event| event["type"] == "tool_execution_start" || event["type"] == "tool_execution_end")
-        .map(|event| {
-            let kind = event["type"].as_str().unwrap().to_owned();
-            (kind, event["toolCallId"].as_str().unwrap().to_owned(), event["parentToolCallId"].clone())
-        })
-        .collect();
-    let expected = [
-        ("tool_execution_start", "c1", Value::Null),
-        ("tool_execution_start", "c1/1", json!("c1")),
-        ("tool_execution_end", "c1/1", json!("c1")),
-        ("tool_execution_end", "c1", Value::Null),
-    ];
-    let expected: Vec<(String, String, Value)> =
-        expected.into_iter().map(|(kind, id, parent)| (kind.into(), id.into(), parent)).collect();
-    assert_eq!(tools, expected);
-    let end_of = |id: &str| {
-        events.iter().find(|event| event["type"] == "tool_execution_end" && event["toolCallId"] == id).unwrap().clone()
-    };
-    let (nested_end, parent_end) = (end_of("c1/1"), end_of("c1"));
-    assert_eq!(
-        (nested_end["result"]["structuredOutput"].clone(), nested_end["result"]["isError"].clone()),
-        (json!("slow done"), json!(false))
-    );
-    // Events name the call's task and, for a nested call, the calling one.
+    history.detach();
+    let states = history.live();
+    assert_eq!(start_order(&states), ["c1", "c1/1"]);
+    assert!(ended_at(&states, "c1/1").unwrap() < ended_at(&states, "c1").unwrap());
+    let result = nested_result_of(&states, &nested, "c1/1").unwrap();
+    assert_eq!((&result["structuredOutput"], &result["isError"]), (&json!("slow done"), &json!(false)));
+    // Slots name the call's task and, for a nested call, the calling one.
     let tasks = tool_tasks(&harness).await;
     let (parent, child) = (json!(tasks[0].id), json!(tasks[1].id));
-    assert_eq!((nested_end["taskId"].clone(), nested_end["parentTaskId"].clone()), (child, parent.clone()));
-    assert_eq!(parent_end["taskId"], parent);
-    assert!(parent_end.get("parentTaskId").is_none());
-    let updated = events.iter().any(|event| {
-        event["type"] == "tool_execution_update" && event["toolCallId"] == "c1/1" && event["parentToolCallId"] == "c1"
-    });
-    assert!(updated);
+    let nested_slot = slots_of(&states, "c1/1").into_iter().flatten().next().unwrap();
+    assert_eq!((&nested_slot["taskId"], &nested_slot["parentCallId"]), (&child, &json!("c1")));
+    assert_eq!(nested_slot["parentTaskId"], parent);
+    let caller = slots_of(&states, "c1").into_iter().flatten().find(|slot| slot["taskId"].is_u64()).unwrap();
+    assert_eq!(caller["taskId"], parent);
     assert_eq!(live_value(&harness, &root).await, json!({}));
     harness.close(&ctx()).await.unwrap();
 }
@@ -289,7 +249,9 @@ async fn aborts_nested_calls_with_their_caller() {
     let (parent, child) = (outcome(&tasks[0]), outcome(&tasks[1]));
     assert_eq!((child["status"].clone(), child["result"]["kind"].clone()), (json!("aborted"), json!("nested")));
     assert_eq!((parent["status"].clone(), parent["result"]["kind"].clone()), (json!("aborted"), json!("model")));
-    assert_eq!(live_value(&harness, &root).await, json!({}));
+    let live = live_value(&harness, &root).await;
+    assert_eq!(live.as_object().unwrap().keys().collect::<Vec<_>>(), ["runFailure"]);
+    assert_eq!(live["runFailure"]["reason"], json!("aborted"));
     harness.close(&ctx()).await.unwrap();
 }
 

@@ -23,15 +23,7 @@ async fn appends_a_data_only_write_mid_run_in_time_order_leaving_the_models_mess
     let requests = Arc::new(Mutex::new(Vec::new()));
     setup.faux.set_responses([request_log(&requests, hold_message()), request_log(&requests, reply("done"))]);
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &setup).await;
-    let events = Arc::new(Mutex::new(Vec::<Value>::new()));
-    let stream = watch_events(&harness, root.id, &ctx()).await.unwrap();
-    let sink = events.clone();
-    stream
-        .start(move |pi_chord::NativeWatchChange { value: batch }, _| {
-            sink.lock().unwrap().extend(batch.iter().map(Value::from));
-            async { Ok(()) }
-        })
-        .unwrap();
+    let history = super::support::live_support::view_history(&harness, root.id).await;
     let input = root.submit(SubmissionDraft::input("a"), &ctx()).await.unwrap();
     tool_running(&harness, &root).await;
     let data = json!({ "author": "bob", "text": "lunch?" });
@@ -43,19 +35,12 @@ async fn appends_a_data_only_write_mid_run_in_time_order_leaving_the_models_mess
     assert!(inbox_items(&harness, &root).await.is_empty());
     let mid = json!([["pi.user", "a"], ["pi.assistant"], ["chat.message", data]]);
     assert_eq!(transcript(&all_entries(&root).await), mid);
-    let appended = |events: &Mutex<Vec<Value>>| {
-        let events = events.lock().unwrap();
-        events.iter().find(|event| event["type"] == "entry_appended").cloned()
-    };
-    wait_for(|| {
-        let events = events.clone();
-        async move { events.lock().unwrap().iter().any(|event| event["type"] == "entry_appended") }
-    })
-    .await;
-    let appended = appended(&events).unwrap();
-    assert_eq!(appended["entry"]["kind"], "chat.message");
-    assert_eq!(appended["entry"]["id"], json!(settled.entry.unwrap()));
-    assert!(events.lock().unwrap().iter().all(|event| event["type"] != "run_end"));
+    // The view shows it while the run goes on.
+    let has_message = |view: &Value| view["entries"].as_array().unwrap().iter().any(|e| e["kind"] == "chat.message");
+    let shown = history.views().into_iter().find(has_message).unwrap();
+    let last = shown["entries"].as_array().unwrap().last().unwrap().clone();
+    assert_eq!((&last["kind"], &last["id"]), (&json!("chat.message"), &json!(settled.entry.unwrap())));
+    assert_eq!(shown["docs"]["pi.live"]["run"]["inputs"], json!([input.id]));
     // A repeated request ID returns the same write without a second entry.
     assert_eq!(root.submit(draft(), &ctx()).await.unwrap().id, write.id);
 
@@ -72,7 +57,7 @@ async fn appends_a_data_only_write_mid_run_in_time_order_leaving_the_models_mess
     assert_eq!(transcript(&all_entries(&root).await), expected);
     let requests = requests.lock().unwrap().clone();
     assert_eq!(requests, [vec!["system:", "user:a"], vec!["system:", "user:a", "assistant:", "toolResult:held"]]);
-    stream.stop().await;
+    history.detach();
     harness.close(&ctx()).await.unwrap();
 }
 
@@ -180,7 +165,11 @@ async fn appends_a_data_only_write_while_idle_after_a_failed_run_without_placing
     assert_eq!(f.status(&ctx()).await.unwrap().status, SubmissionStatus::Queued);
     let ids: Vec<_> = inbox_items(&harness, &root).await.iter().map(|item| item["id"].clone()).collect();
     assert_eq!(ids, [json!(f.id)]);
-    assert_eq!(dormant(&harness, &root).await, Some(Json::from(json!({}))));
+    let live = dormant(&harness, &root).await.unwrap().to_serde();
+    let failure = &live["runFailure"];
+    assert!(failure["taskId"].is_u64(), "{live}");
+    let expected = json!({ "taskId": failure["taskId"], "inputs": [input.id], "reason": "model_error", "detail": "invalid request" });
+    assert_eq!(live, json!({ "runFailure": expected }));
     assert_eq!(setup.faux.state().call_count, 1);
     // The next input places the waiting mention first.
     let g = root.submit(SubmissionDraft::input("g"), &ctx()).await.unwrap();

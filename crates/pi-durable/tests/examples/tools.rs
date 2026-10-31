@@ -1,4 +1,4 @@
-//! Examples 17 to 20: coding tools with a timing hook, a print mode, JSON event and op streams, and the inbox.
+//! Examples 17 to 20: coding tools with a timing hook, a print mode, JSON op and state streams, and the inbox.
 
 use std::sync::Mutex;
 use std::time::Instant;
@@ -8,7 +8,6 @@ use pi_durable::entries::{ASSISTANT_ENTRY, TOOL_RESULT_ENTRY};
 use pi_durable::env::{LocalEnvOptions, LocalExecutionEnv, SharedEnv};
 use pi_durable::harness::inbox::INBOX_DOC;
 use pi_durable::harness::tool::{ToolHooks, tool_task};
-use pi_durable::harness::watch_events;
 use pi_durable::storage::sqlite::open_sqlite_storage;
 use pi_durable::storage::{JsonlStorageOptions, open_local_jsonl_storage};
 use pi_durable::testing::faux::{
@@ -136,7 +135,7 @@ async fn ex18_print_prints_the_final_answer() {
     harness.close(&ctx()).await.unwrap();
 }
 
-/// Run the listing prompt and collect each printed JSON line: events, or the view and its ops.
+/// Run the listing prompt and collect each printed JSON line: the view and its ops, or entries since and `pi.live`.
 async fn run_json(storage: Arc<dyn Storage>, ops: bool) -> Vec<Value> {
     let directory = tempfile::tempdir().unwrap();
     let env = local_env(&directory.path().to_string_lossy());
@@ -146,49 +145,54 @@ async fn run_json(storage: Arc<dyn Storage>, ops: bool) -> Vec<Value> {
     let (harness, root) = open_chat_with(storage, &setup, setup.options().with_shared_env(env)).await;
     let printed = Arc::new(Mutex::new(Vec::new()));
     let sink = printed.clone();
-    let stop: Box<dyn FnOnce() -> futures::future::BoxFuture<'static, ()>> = if ops {
-        let watch = root.watch(&ctx()).await.unwrap();
-        printed.lock().unwrap().push(json!({ "view": watch.value().to_serde() }));
+    let watch = root.watch(&ctx(), None).await.unwrap();
+    let view = watch.value().to_serde();
+    if ops {
+        printed.lock().unwrap().push(json!({ "view": view }));
         let listen = move |pi_chord::WatchChange { ops, .. }, _| {
             sink.lock().unwrap().push(json!({ "ops": serde_json::to_value(ops).unwrap() }));
             async { Ok(()) }
         };
         watch.start(listen).unwrap();
-        Box::new(move || {
-            Box::pin(async move {
-                watch.stop().await;
-            })
-        })
     } else {
-        let stream = watch_events(&harness, root.id, &ctx()).await.unwrap();
-        printed.lock().unwrap().push(stream.snapshot.to_serde());
-        stream
-            .start(move |pi_chord::NativeWatchChange { value: events }, _| {
-                sink.lock().unwrap().extend(events.iter().map(Json::to_serde));
-                async { Ok(()) }
-            })
-            .unwrap();
-        Box::new(move || {
-            Box::pin(async move {
-                stream.stop().await;
-            })
-        })
-    };
+        let newest = Mutex::new(newest_id(&view));
+        printed.lock().unwrap().push(json!({ "entries": view["entries"], "live": view["docs"]["pi.live"] }));
+        let listen = move |pi_chord::WatchChange { value, .. }: pi_chord::WatchChange, _| {
+            let value = value.to_serde();
+            let mut newest = newest.lock().unwrap();
+            let since = *newest;
+            let entries: Vec<&Value> =
+                value["entries"].as_array().unwrap().iter().filter(|entry| entry["id"].as_u64() > since).collect();
+            *newest = newest_id(&value).max(since);
+            let mut line = json!({ "live": value["docs"]["pi.live"] });
+            if !entries.is_empty() {
+                line["entries"] = json!(entries);
+            }
+            sink.lock().unwrap().push(line);
+            async { Ok(()) }
+        };
+        watch.start(listen).unwrap();
+    }
     let submission = root.submit(SubmissionDraft::input("What is in this directory?"), &ctx()).await.unwrap();
     submission.wait(&ctx()).await.unwrap();
     harness.wait_for_idle(&ctx()).await.unwrap();
     tokio::task::yield_now().await;
-    stop().await;
+    watch.stop().await;
     harness.close(&ctx()).await.unwrap();
     std::mem::take(&mut *printed.lock().unwrap())
 }
 
-fn event_types(lines: &[Value]) -> Vec<String> {
-    lines.iter().filter_map(|line| Some(line["type"].as_str()?.to_owned())).collect()
+fn newest_id(view: &Value) -> Option<u64> {
+    view["entries"].as_array().and_then(|entries| entries.last()).and_then(|entry| entry["id"].as_u64())
+}
+
+fn entry_kinds(lines: &[Value]) -> Vec<String> {
+    let entries = lines.iter().flat_map(|line| line["entries"].as_array().cloned().unwrap_or_default());
+    entries.filter_map(|entry| Some(entry["kind"].as_str()?.to_owned())).collect()
 }
 
 #[tokio::test]
-async fn ex19_json_prints_events_over_sqlite_and_jsonl_and_ops_over_memory() {
+async fn ex19_json_prints_state_over_sqlite_and_jsonl_and_ops_over_memory() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("json.sqlite").to_string_lossy().into_owned();
     let sqlite = run_json(Arc::new(open_sqlite_storage(&path).await.unwrap()), false).await;
@@ -197,11 +201,12 @@ async fn ex19_json_prints_events_over_sqlite_and_jsonl_and_ops_over_memory() {
     let jsonl = open_local_jsonl_storage(&jsonl_path, &ctx(), JsonlStorageOptions::default()).await.unwrap();
     let jsonl = run_json(Arc::new(jsonl), false).await;
     for lines in [&sqlite, &jsonl] {
-        let types = event_types(lines);
-        assert_eq!(types.first().map(String::as_str), Some("snapshot"));
-        for expected in ["run_start", "tool_execution_start", "tool_execution_end", "run_end"] {
-            assert!(types.iter().any(|kind| kind == expected), "{expected} in {types:?}");
+        let kinds = entry_kinds(lines);
+        for expected in ["pi.user", "pi.assistant", "pi.tool-result"] {
+            assert!(kinds.iter().any(|kind| kind == expected), "{expected} in {kinds:?}");
         }
+        assert!(lines.iter().any(|line| line["live"]["tools"].is_array()), "a running tool in {lines:?}");
+        assert!(lines.last().unwrap()["live"].get("run").is_none(), "{:?}", lines.last());
     }
     let ops = run_json(memory(), true).await;
     assert!(ops[0]["view"].is_object());

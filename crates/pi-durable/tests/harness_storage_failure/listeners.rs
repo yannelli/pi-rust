@@ -49,5 +49,5 @@ async fn reports_a_throwing_watch_listener_which_ends_that_watch() {
     harness.close(&context()).await.unwrap();
 }
 
-// Not ported: "keeps feeding the other observers of a view when one throws". A Rust view observer's `publication`
+// Not ported: "keeps feeding the other observers of a view when one throws". A Rust view observer's `advance`
 // returns nothing, so it has no error to report.

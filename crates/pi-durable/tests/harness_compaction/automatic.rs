@@ -77,52 +77,36 @@ async fn does_not_start_while_another_compaction_is_listed() {
 }
 
 #[tokio::test]
-async fn records_a_failure_in_live_the_snapshot_and_compaction_end_until_a_summary_is_produced() {
+async fn records_a_failure_in_live_in_the_commit_that_ends_the_compaction_until_a_summary_is_produced() {
     let chat = open(window(2000)).await;
     chat.history().await;
     chat.set_policy(background());
-    let (stream, events) = listen(&chat).await;
+    let views = views(&chat).await;
     chat.faux.summary(failure("bad request"));
     chat.turn(&text("u4", 100), &text("a4", 100)).await;
-    let ended = |events: &Events, task: Option<&Value>| {
-        let events = events.lock().unwrap();
-        events
-            .iter()
-            .find(|event| event["type"] == "compaction_end" && task.is_none_or(|id| event["taskId"] == *id))
-            .cloned()
-    };
-    let seen = events.clone();
-    wait_for(move || {
-        let done = seen.lock().unwrap().iter().any(|event| event["type"] == "compaction_end");
-        async move { done }
-    })
-    .await;
+    wait_for(|| async { chat.live().await.get("compactionFailure").is_some() }).await;
     let recorded = chat.live().await["compactionFailure"].clone();
     assert_eq!(recorded["reason"], "threshold");
     assert_eq!(recorded["error"], "Summarization failed: bad request");
-    let expected = json!({
-        "type": "compaction_end", "taskId": recorded["taskId"], "reason": "threshold",
-        "error": "Summarization failed: bad request"
-    });
-    assert_eq!(ended(&events, None), Some(expected));
-    let reopened = watch_events(&chat.harness, chat.root.id, &ctx()).await.unwrap();
-    assert_eq!(Value::from(&reopened.snapshot)["compactionFailure"], recorded);
-    reopened.stop().await;
-    // A compaction that produces a summary removes the failure, and ends without an error.
+    // The value that drops the compaction's status records its failure.
+    let ended = |task: &Value| {
+        let states = views.live();
+        let lists =
+            |state: &Value| state["compactions"].as_array().is_some_and(|all| all.iter().any(|s| s["taskId"] == *task));
+        let listed = states.iter().position(lists).unwrap();
+        states.into_iter().enumerate().find(|(index, state)| *index > listed && !lists(state)).unwrap().1
+    };
+    assert_eq!(ended(&recorded["taskId"])["compactionFailure"], recorded);
+    // A late watch starts with it.
+    assert_eq!(watched_live(&chat).await["compactionFailure"], recorded);
+    // A compaction that produces a summary removes the failure in the commit that ends it.
     chat.set_policy(manual());
     chat.faux.summary(summary());
     let manual_task = chat.compact(None).await;
     assert_eq!(chat.outcome(manual_task).await["status"], "completed");
     assert!(chat.live().await.get("compactionFailure").is_none());
-    let seen = events.clone();
-    let id = json!(manual_task);
-    wait_for(move || {
-        let done = seen.lock().unwrap().iter().any(|event| event["type"] == "compaction_end" && event["taskId"] == id);
-        async move { done }
-    })
-    .await;
-    assert!(ended(&events, Some(&json!(manual_task))).unwrap().get("error").is_none());
-    stream.stop().await;
+    assert!(ended(&json!(manual_task)).get("compactionFailure").is_none());
+    views.detach();
     chat.close().await;
 }
 
@@ -288,7 +272,7 @@ async fn is_aborted_with_its_generation_by_esc_before_the_generations_abort_hand
     chat.set_policy(blocking());
     let reached = Deferred::default();
     chat.faux.summary(gated(&Deferred::default(), summary(), Some(&reached)));
-    let (stream, events) = listen(&chat).await;
+    let views = views(&chat).await;
     let input = chat.submit(&text("u4", 200)).await;
     reached.wait().await;
     let child = chat.compaction_tasks().await.remove(0);
@@ -296,16 +280,19 @@ async fn is_aborted_with_its_generation_by_esc_before_the_generations_abort_hand
     let settled = input.wait(&ctx()).await.unwrap();
     assert_eq!((settled.status, settled.reason.as_deref()), (SubmissionStatus::Unanswered, Some("aborted")));
     assert_eq!(chat.outcome(child.id).await["status"], "aborted");
-    let seen = events.clone();
-    wait_for(move || {
-        let done = event_types(&seen).iter().any(|kind| kind == "run_end");
-        async move { done }
-    })
-    .await;
-    let types = event_types(&events);
-    let position = |kind: &str| types.iter().position(|seen| seen == kind).unwrap();
-    assert!(position("compaction_end") < position("run_end"), "{types:?}");
-    stream.stop().await;
+    views.detach();
+    // The compaction's status leaves before the run ends.
+    let states = views.live();
+    let busy = states.iter().position(|state| state.get("compactions").is_some()).unwrap();
+    let after = |test: &dyn Fn(&Value) -> bool| {
+        states.iter().enumerate().position(|(index, state)| index > busy && test(state)).unwrap()
+    };
+    let compaction_end = after(&|state| state.get("compactions").is_none());
+    let run_end = after(&|state| state.get("run").is_none());
+    assert!(busy > 0);
+    assert!(compaction_end < run_end, "{states:?}");
+    assert_eq!(states[run_end]["runFailure"]["inputs"], json!([input.id]));
+    assert_eq!(states[run_end]["runFailure"]["reason"], "aborted");
     chat.close().await;
 }
 

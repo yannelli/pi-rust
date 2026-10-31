@@ -35,22 +35,7 @@ async fn open() -> (Harness, Conversation) {
 }
 
 #[tokio::test]
-async fn keeps_only_mounted_entries_for_a_raw_head_write_that_targets_before_the_active_range() {
-    let (harness, root) = open().await;
-    let old = note(&root, "old", None).await;
-    root.reset(None, &context()).await.unwrap();
-    let (_, frames, watch) = record(&root).await;
-    note(&root, "summary", Some(old.id)).await;
-    drained().await;
-    // Model context starts at `old` again, but the mount never held it (spec section 12); a rebuilt mount shows it.
-    assert_eq!(kinds(&frames.lock().unwrap()[0].0), ["summary"]);
-    watch.stop().await;
-    assert_eq!(kinds(&fresh(&root).await), ["summary", "old"]);
-    harness.close(&context()).await.unwrap();
-}
-
-#[tokio::test]
-async fn cuts_a_forks_view_into_its_inherited_entries() {
+async fn shows_a_forks_inherited_entries_in_id_order_its_head_markers_in_place() {
     let (harness, root) = open().await;
     let a = note(&root, "a", None).await;
     let b = note(&root, "b", None).await;
@@ -60,8 +45,8 @@ async fn cuts_a_forks_view_into_its_inherited_entries() {
     drained().await;
     assert_eq!(entry_ids(&acquired), [json!(a.id), json!(b.id)]);
     let frames = frames.lock().unwrap().clone();
-    assert_eq!(kinds(&frames[0].0), ["summary", "b"]);
-    let expected = committed(&harness, &fork, acquired.get("conversation").unwrap()).await;
+    assert_eq!(kinds(&frames[0].0), ["a", "b", "summary"]);
+    let expected = committed(&harness, &fork, acquired.get("conversation").unwrap(), 3).await;
     assert_eq!(frames[0].0, Json::from(expected));
     watch.stop().await;
     harness.close(&context()).await.unwrap();
@@ -108,7 +93,7 @@ async fn unmounts_a_retired_document_and_mounts_its_recreation_whole() {
 #[tokio::test]
 async fn folds_undelivered_commits_into_one_call_whose_ops_reach_the_newest_view() {
     let (harness, root) = open().await;
-    let watch = root.watch(&context()).await.unwrap();
+    let watch = root.watch(&context(), None).await.unwrap();
     let initial = watch.value();
     for _ in 0..101 {
         note(&root, "note", None).await;
@@ -126,7 +111,9 @@ async fn folds_undelivered_commits_into_one_call_whose_ops_reach_the_newest_view
     assert_eq!(frames.len(), 1);
     assert!(!frames[0].1[0].is_replace());
     assert_eq!(pi_chord::delta::apply_immutable(Some(&initial), &frames[0].1).unwrap(), frames[0].0);
-    assert_eq!(kinds(&frames[0].0).len(), 101);
+    // The default window took 100 appends, then dropped its oldest 51 at the 101st, down to 50.
+    let expected = committed(&harness, &root, initial.get("conversation").unwrap(), 50).await;
+    assert_eq!(frames[0].0, Json::from(expected));
     watch.stop().await;
     harness.close(&context()).await.unwrap();
 }
@@ -175,7 +162,7 @@ async fn rejects_an_acquisition_cancelled_or_closed_while_it_waits_for_the_sessi
     let controller = AbortController::new();
     let cancellable = with_abort_signal(&controller.signal(), &BACKGROUND_CONTEXT);
     let waiting = root.clone();
-    let cancelled = tokio::spawn(async move { waiting.watch(&cancellable).await.map(|_| ()) });
+    let cancelled = tokio::spawn(async move { waiting.watch(&cancellable, None).await.map(|_| ()) });
     tokio::task::yield_now().await;
     controller.abort(Some(pi_chord::ChordError::error("cancelled")));
     release.resolve();
@@ -185,7 +172,7 @@ async fn rejects_an_acquisition_cancelled_or_closed_while_it_waits_for_the_sessi
 
     let (release, blocking) = hold(&root).await;
     let waiting = root.clone();
-    let queued = tokio::spawn(async move { waiting.watch(&context()).await.map(|_| ()) });
+    let queued = tokio::spawn(async move { waiting.watch(&context(), None).await.map(|_| ()) });
     tokio::task::yield_now().await;
     let closer = harness.clone();
     let closing = tokio::spawn(async move { closer.close(&context()).await });
@@ -200,10 +187,12 @@ async fn rejects_an_acquisition_cancelled_or_closed_while_it_waits_for_the_sessi
 #[tokio::test]
 async fn shares_one_mount_between_concurrent_observers_and_isolates_a_failing_listener() {
     let (harness, root) = open().await;
-    let failing = root.watch(&context()).await.unwrap();
+    let failing = root.watch(&context(), None).await.unwrap();
     let (_, frames, watch) = record(&root).await;
     let shared = root.view_state(&context()).await.unwrap();
-    assert!(failing.value().same_ref(&shared.value()));
+    // Each observer has its own window; the documents are the mount's.
+    assert_eq!(failing.value(), shared.value());
+    assert!(failing.value().get("docs").unwrap().same_ref(shared.value().get("docs").unwrap()));
     shared.dispose().unwrap();
     failing
         .start(|pi_chord::WatchChange { .. }, _| async { Err(pi_durable::DurableError::error("listener failed")) })
@@ -248,7 +237,7 @@ async fn publishes_one_frame_for_a_commit_that_appends_several_entries_and_edits
     let frames = frames.lock().unwrap().clone();
     assert_eq!(frames.len(), 1);
     assert_eq!(kinds(&frames[0].0), ["a", "b"]);
-    let expected = committed(&harness, &root, acquired.get("conversation").unwrap()).await;
+    let expected = committed(&harness, &root, acquired.get("conversation").unwrap(), 2).await;
     assert_eq!(Json::from(replay(&acquired, &frames)), Json::from(expected));
     watch.stop().await;
     harness.close(&context()).await.unwrap();

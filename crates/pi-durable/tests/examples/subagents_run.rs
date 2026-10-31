@@ -35,20 +35,28 @@ fn line(message: &Message) -> Vec<String> {
     }
 }
 
-async fn follow(harness: &Harness, id: ConversationId, lines: &Lines) -> pi_durable::harness::AgentEventStream {
-    let stream = watch_events(harness, id, &ctx()).await.unwrap();
+async fn follow(harness: &Harness, id: ConversationId, lines: &Lines) -> ConversationWatch {
+    let conversation = harness.conversation(id, &ctx()).await.unwrap().unwrap();
+    let watch = conversation.watch(&ctx(), None).await.unwrap();
+    let newest_of = |view: &Value| view["entries"].as_array().and_then(|e| e.last()).and_then(|e| e["id"].as_u64());
+    let newest = Mutex::new(newest_of(&watch.value().to_serde()).unwrap_or(0));
     let sink = lines.clone();
-    stream
-        .start(move |pi_chord::NativeWatchChange { value: events }, _| {
-            for event in events.iter().map(Json::to_serde).filter(|event| event["type"] == "message_end") {
-                if let Ok(message) = serde_json::from_value::<Message>(event["entry"]["model"][0].clone()) {
+    watch
+        .start(move |pi_chord::WatchChange { value, .. }, _| {
+            let value = value.to_serde();
+            let mut newest = newest.lock().unwrap();
+            let since = *newest;
+            let entries = value["entries"].as_array().into_iter().flatten();
+            for entry in entries.filter(|entry| entry["id"].as_u64().is_some_and(|id| id > since)) {
+                if let Ok(message) = serde_json::from_value::<Message>(entry["model"][0].clone()) {
                     sink.lock().unwrap().extend(line(&message));
                 }
             }
+            *newest = newest_of(&value).unwrap_or(since).max(since);
             async { Ok(()) }
         })
         .unwrap();
-    stream
+    watch
 }
 
 struct Run {

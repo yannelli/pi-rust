@@ -15,7 +15,7 @@ use pi_durable::harness::live::LIVE_DOC;
 use pi_durable::harness::*;
 use pi_durable::storage::MemoryStorage;
 use pi_durable::testing::faux::{FauxMessageOptions, RegisterFauxProviderOptions, faux_assistant_message};
-use pi_durable::{SubmissionStatus, TaskOutcome};
+use pi_durable::{SubmissionId, SubmissionStatus, TaskId, TaskOutcome};
 use serde_json::json;
 use support::harness_support::*;
 
@@ -38,6 +38,11 @@ pub async fn live(harness: &Harness, conversation: &Conversation) -> Option<Json
 
 pub fn empty() -> Option<Json> {
     Some(Json::from(json!({})))
+}
+
+/// The `pi.live` left by run `task_id` that ended without an answer to `input`.
+pub fn failed(task_id: TaskId, input: SubmissionId, reason: &str) -> Option<Json> {
+    Some(Json::from(json!({ "runFailure": { "taskId": task_id, "inputs": [input], "reason": reason } })))
 }
 
 #[tokio::test]
@@ -92,7 +97,8 @@ async fn still_ends_a_run_whose_input_something_else_already_settled() {
     assert!(matches!(settled.state.outcome(), Some(TaskOutcome::Aborted { .. })));
     let status = submission.status(&ctx()).await.unwrap();
     assert_eq!((status.status, status.reason.as_deref()), (SubmissionStatus::Unanswered, Some("withdrawn")));
-    assert_eq!(live(&harness, &root).await, empty());
+    // A run ends without an answer even when its inputs were settled already.
+    assert_eq!(live(&harness, &root).await, failed(task_id, submission.id, "aborted"));
     harness.close(&ctx()).await.unwrap();
 }
 
@@ -122,8 +128,18 @@ async fn fails_with_no_model_when_no_model_is_configured_or_the_model_is_unknown
             }
         })
     );
-    assert_eq!(live(&harness, &root).await, empty());
-    assert_eq!(live(&harness, &plain).await, empty());
+    let failure = json!({
+        "taskId": tasks[0].id,
+        "inputs": [unknown.id],
+        "reason": "no_model",
+        "detail": "Model faux/missing is not available",
+    });
+    assert_eq!(live(&harness, &root).await, Some(Json::from(json!({ "runFailure": failure }))));
+    let plain_failure = live(&harness, &plain).await.unwrap().to_serde()["runFailure"].clone();
+    assert_eq!(
+        (&plain_failure["reason"], &plain_failure["detail"]),
+        (&json!("no_model"), &json!("No model is configured"))
+    );
     harness.close(&ctx()).await.unwrap();
 }
 
@@ -231,7 +247,7 @@ async fn converts_the_committed_partial_when_aborted_during_streaming() {
     let Some(Message::Assistant(message)) = converted else { panic!("expected an assistant message") };
     assert_eq!(message.stop_reason, StopReason::Aborted);
     assert!(text_of(converted).unwrap().starts_with(&partial));
-    assert_eq!(live(&harness, &root).await, empty());
+    assert_eq!(live(&harness, &root).await, failed(task_id, submission.id, "aborted"));
     let task = harness.wait_for_task(task_id, &ctx()).await.unwrap();
     assert_eq!(serde_json::to_value(task.state.outcome()).unwrap(), json!({ "status": "aborted" }));
     harness.close(&ctx()).await.unwrap();

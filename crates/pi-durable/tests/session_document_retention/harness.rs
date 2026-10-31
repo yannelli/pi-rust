@@ -1,6 +1,6 @@
 //! The Harness reads the retention from its settings at each use, and runs the same with documents evicted at once.
 
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use pi_ai::StopReason;
@@ -44,7 +44,7 @@ async fn follows_a_harness_settings_change_at_the_next_use() {
     harness.close(&ctx()).await.unwrap();
 }
 
-async fn event_sequence(document_retention_ms: f64) -> Vec<String> {
+async fn view_sequence(document_retention_ms: f64) -> Vec<String> {
     let setup = chat_setup(Default::default());
     {
         let mut settings = setup.settings.lock().unwrap();
@@ -69,31 +69,35 @@ async fn event_sequence(document_retention_ms: f64) -> Vec<String> {
     let last = faux_assistant_message(vec![faux_text("done")], FauxMessageOptions::default());
     setup.faux.set_responses([FauxResponseStep::from(first), FauxResponseStep::from(last)]);
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &setup).await;
-    let stream = watch_events(&harness, root.id, &ctx()).await.unwrap();
-    let events = Arc::new(Mutex::new(Vec::new()));
-    let sink = events.clone();
-    stream
-        .start(move |pi_chord::NativeWatchChange { value: batch }, _| {
-            sink.lock().unwrap().extend(batch.iter().map(Value::from));
-            async { Ok(()) }
-        })
-        .unwrap();
+    let history = super::support::live_support::view_history(&harness, root.id).await;
     root.submit(SubmissionDraft::input("go"), &ctx()).await.unwrap().wait(&ctx()).await.unwrap();
     harness.wait_for_idle(&ctx()).await.unwrap();
-    stream.stop().await;
+    history.detach();
     harness.close(&ctx()).await.unwrap();
-    // Ids and times differ between runs; the sequence of event types and tool outputs must not.
-    let events = events.lock().unwrap().clone();
-    events
-        .iter()
-        .map(|event| match event["type"].as_str().unwrap() {
-            "tool_execution_update" => format!("update:{}", event["output"]),
-            other => other.to_owned(),
-        })
-        .collect()
+    // Ids and times differ between runs; the sequence of entries, run states, and tool outputs must not.
+    let line = |view: &Value| {
+        let live = view["docs"].get("pi.live").cloned().unwrap_or_else(|| json!({}));
+        let slots = live["tools"].as_array().cloned().unwrap_or_default();
+        let tools: Vec<String> = slots
+            .iter()
+            .map(|slot| {
+                format!(
+                    "{}:{}:{}",
+                    slot["callId"].as_str().unwrap(),
+                    slot["status"].as_str().unwrap(),
+                    slot["output"].as_str().unwrap_or("")
+                )
+            })
+            .collect();
+        let entries = view["entries"].as_array().unwrap().iter();
+        let kinds: Vec<&str> = entries.map(|entry| entry["kind"].as_str().unwrap()).collect();
+        let (run, generation) = (live.get("run").is_some(), live.get("generation").is_some());
+        format!("{} run:{run} generation:{generation} {}", kinds.join(","), tools.join(" "))
+    };
+    history.views().iter().map(line).collect()
 }
 
 #[tokio::test]
-async fn gives_the_same_events_with_documents_evicted_right_after_use_as_with_documents_kept() {
-    assert_eq!(event_sequence(0.0).await, event_sequence(600_000.0).await);
+async fn gives_the_same_views_with_documents_evicted_right_after_use_as_with_documents_kept() {
+    assert_eq!(view_sequence(0.0).await, view_sequence(600_000.0).await);
 }

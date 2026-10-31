@@ -10,11 +10,12 @@ use pi_durable::harness::*;
 use pi_durable::storage::MemoryStorage;
 use pi_durable::tasks::TaskOptions;
 use pi_durable::*;
-use serde_json::{Value, json};
+use serde_json::json;
 
 use super::nodes::*;
 use super::support::chat::{add_tool, answer, calls, no_parameters};
 use super::support::harness_support::{ChatSetup, all_entries, chat_setup, open_chat};
+use super::support::live_support::{generations, graph_history, view_history};
 use super::support::task_support::{aborted, eventually};
 use super::support::{Deferred, context};
 
@@ -129,7 +130,8 @@ async fn aborts_a_parallel_round_with_its_generation_tools_first_then_the_genera
     let ids: Vec<String> =
         tool_results(&all_entries(&root).await).into_iter().map(|result| result.tool_call_id).collect();
     assert_eq!(ids, ["c1", "c2"]);
-    assert_eq!(serde_json::to_value(live(&harness, &root).await).unwrap(), json!({}));
+    let failure = json!({ "taskId": generation, "inputs": [submission.id], "reason": "aborted" });
+    assert_eq!(serde_json::to_value(live(&harness, &root).await).unwrap(), json!({ "runFailure": failure }));
     assert_eq!(outcome_of(&harness, generation).await, "aborted");
     harness.close(&context()).await.unwrap();
 }
@@ -162,7 +164,7 @@ async fn answers_the_unstarted_calls_of_an_aborted_sequential_round_with_aborted
 }
 
 #[tokio::test]
-async fn ends_a_turn_at_the_generation_s_hold_before_its_successor_s_turn_starts() {
+async fn hands_run_control_to_the_successor_while_the_generation_holds_and_keeps_it_in_the_graph_until_it_ends() {
     let setup = chat_setup(Default::default());
     let nodes = Nodes::new();
     add_tool(&setup, noop_tool());
@@ -171,30 +173,24 @@ async fn ends_a_turn_at_the_generation_s_hold_before_its_successor_s_turn_starts
     setup.faux.set_responses([tool_calls(&[("noop", "c1")]), answer("done")]);
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &setup).await;
     *opened.lock().unwrap() = Some(harness.clone());
-    let stream = watch_events(&harness, root.id, &context()).await.unwrap();
-    let events = Arc::new(Mutex::new(Vec::<Value>::new()));
-    let sink = events.clone();
-    stream
-        .start(move |pi_chord::NativeWatchChange { value: batch }, _| {
-            sink.lock().unwrap().extend(batch.iter().map(Value::from));
-            async { Ok(()) }
-        })
-        .unwrap();
+    let graph = graph_history(&harness).await;
+    let history = view_history(&harness, root.id).await;
     root.submit(SubmissionDraft::input("go"), &context()).await.unwrap().wait(&context()).await.unwrap();
     let query = TaskQuery { kind: Some("pi.generation".into()), ..TaskQuery::default() };
     let first = tasks_of(&harness, query).await.remove(0);
     assert_eq!(status(&harness, first.id).await, TaskStatus::Completing);
-    let turns = || -> Vec<String> {
-        let events = events.lock().unwrap();
-        let types = events.iter().filter_map(|event| event["type"].as_str());
-        types.filter(|kind| kind.starts_with("turn_")).map(str::to_owned).collect()
-    };
-    eventually(|| async { turns().len() == 4 }).await;
-    assert_eq!(turns(), ["turn_start", "turn_end", "turn_start", "turn_end"]);
+    // The first generation's outcome is committed at its hold: the successor already runs the run, and the graph shows
+    // the first one completing beside it.
+    let handed = graph.views().into_iter().find(|value| generations(value).len() == 2).unwrap();
+    let pair = generations(&handed);
+    assert_eq!((&pair[0]["id"], &pair[0]["state"]["status"]), (&json!(first.id), &json!("completing")));
+    assert_ne!(pair[1]["state"]["status"], "completing");
+    assert!(history.live().iter().any(|live| live["run"]["taskId"] == pair[1]["id"]));
     nodes.open_ok("hooked");
     assert_eq!(outcome_of(&harness, first.id).await, "completed");
-    eventually(|| async { turns().len() == 4 }).await;
-    stream.stop().await;
+    eventually(|| async { graph.views().last().unwrap()["tasks"].get(first.id.to_string()).is_none() }).await;
+    graph.detach();
+    history.detach();
     harness.close(&context()).await.unwrap();
 }
 

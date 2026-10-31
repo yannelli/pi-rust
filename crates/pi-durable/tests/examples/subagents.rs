@@ -7,7 +7,6 @@ use std::time::Duration;
 use pi_ai::{Message, StopReason};
 use pi_durable::harness::agent::configure;
 use pi_durable::harness::live::LIVE_DOC;
-use pi_durable::harness::watch_events;
 use pi_durable::storage::sqlite::open_sqlite_storage;
 use pi_durable::tasks::TaskOptions;
 use pi_durable::testing::faux::{

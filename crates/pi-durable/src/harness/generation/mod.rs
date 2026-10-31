@@ -16,7 +16,7 @@ use super::agent::section_extension;
 use super::compaction::{CompactionInput, create_compaction, estimate_context, select_cut};
 use super::define::{PromptInput, PromptSection};
 use super::inbox::{Boundary, BoundaryAt, apply_boundary, prepare_boundary, withdraw_queued_inputs};
-use super::live::{LIVE_DOC, LiveGeneration, LiveState, end_run};
+use super::live::{LIVE_DOC, LiveGeneration, LiveState, RunEnd, RunFailureReason, end_run};
 use super::prompt::{plan_system_entries, render_sections, replay_sections};
 use super::scheduler::{HookApi, TaskRuntime};
 use super::settings::{AfterFailedRun, CompactionPolicy, ConversationStreamOptions};
@@ -140,8 +140,8 @@ pub(crate) fn failed(message: &str, reason: &str) -> Option<TaskState> {
     Some(TaskState::Terminal { outcome: TaskOutcome::Failed { error, result: None } })
 }
 
-pub(crate) fn unanswered(reason: &str, detail: Option<&str>) -> SubmissionSettlement {
-    SubmissionSettlement::Unanswered { reason: reason.into(), detail: detail.map(Json::from) }
+pub(crate) fn unanswered(reason: RunFailureReason, detail: Option<&str>) -> RunEnd {
+    RunEnd::unanswered(reason, detail)
 }
 
 static GENERATION_TASK: LazyLock<Task> = LazyLock::new(|| {
@@ -321,7 +321,7 @@ pub(crate) async fn fail_model_error(runtime: &TaskRuntime, text: &str, context:
     let (runtime_, text) = (runtime.clone(), text.to_owned());
     let change = move |tx: Tx, _| async move {
         let failure = prepare_failure(&tx, &runtime_).await?;
-        end_failed_run(&tx, &runtime_, failure, unanswered("model_error", Some(&text))).await?;
+        end_failed_run(&tx, &runtime_, failure, unanswered(RunFailureReason::ModelError, Some(&text))).await?;
         Ok(failed(&text, "model_error"))
     };
     runtime.commit(change, context).await
@@ -340,7 +340,12 @@ pub(crate) async fn fail_no_model(
     let runtime_ = runtime.clone();
     let change = move |tx: Tx, _| async move {
         let failure = prepare_failure(&tx, &runtime_).await?;
-        end_failed_run(&tx, &runtime_, failure, unanswered("no_model", None)).await?;
+        let end = RunEnd::Unanswered {
+            reason: RunFailureReason::NoModel,
+            detail: Some(message.clone()),
+            settlement: Some(SubmissionSettlement::Unanswered { reason: "no_model".into(), detail: None }),
+        };
+        end_failed_run(&tx, &runtime_, failure, end).await?;
         Ok(failed(&message, "no_model"))
     };
     runtime.commit(change, context).await
@@ -362,18 +367,13 @@ pub(crate) async fn prepare_failure(tx: &Tx, runtime: &TaskRuntime) -> DurableRe
     Ok(Failure { policy, boundary: Some(boundary) })
 }
 
-/// End a failed run, settling its inputs with `settlement`, and do with the inputs queued behind it what
-/// `settings.after_failed_run` says: keep them, start the next run with them, or withdraw them.
-pub(crate) async fn end_failed_run(
-    tx: &Tx,
-    runtime: &TaskRuntime,
-    failure: Failure,
-    settlement: SubmissionSettlement,
-) -> DurableResult<()> {
+/// End a failed run as `end` says, and do with the inputs queued behind it what `settings.after_failed_run` says:
+/// keep them, start the next run with them, or withdraw them.
+pub(crate) async fn end_failed_run(tx: &Tx, runtime: &TaskRuntime, failure: Failure, end: RunEnd) -> DurableResult<()> {
     let conversation_id = runtime.conversation_id();
     let live = tx.doc(&LIVE_DOC, conversation_id).await?;
     let mut state = live.get()?;
-    end_run(tx, &mut state, runtime.task_id(), settlement)?;
+    end_run(tx, &mut state, runtime.task_id(), end)?;
     live.set(&state)?;
     if failure.policy == AfterFailedRun::Withdraw {
         withdraw_queued_inputs(tx, conversation_id, "run_failed").await?;
@@ -381,7 +381,7 @@ pub(crate) async fn end_failed_run(
     let Some(mut boundary) = failure.boundary else { return Ok(()) };
     let placed = apply_boundary(tx, &mut boundary, BoundaryAt::Final, runtime.now()).await?;
     if !placed.users.is_empty() {
-        start_run(tx, conversation_id, &live, placed.users).await?;
+        start_run(tx, conversation_id, &live, placed.users, true).await?;
     }
     Ok(())
 }
@@ -415,12 +415,14 @@ pub(crate) async fn append_assistant(
     Ok(tx.append_typed_entry(&ASSISTANT_ENTRY, conversation_id, draft).await?.record)
 }
 
-/// Start a run for `inputs`, placed input submissions: a new generation takes `pi.live.run`.
+/// Start a run for `inputs`, placed input submissions: a new generation takes `pi.live.run`. Removes `run_failure`,
+/// unless `keep_failure`: a run started in the commit that ended the failed one keeps its failure.
 pub(crate) async fn start_run(
     tx: &Tx,
     conversation_id: ConversationId,
     live: &Draft<LiveState>,
     inputs: Vec<SubmissionId>,
+    keep_failure: bool,
 ) -> DurableResult<()> {
     // The run continues the first input's trace, or starts at the root; the other inputs become links.
     let mut traces = Vec::new();
@@ -433,7 +435,12 @@ pub(crate) async fn start_run(
         options.links = rest.iter_mut().filter_map(Option::take).collect();
     }
     let task_id = tx.create_task(generation_task(), Json::empty_object(), options).await?;
-    live.edit(|live| live.run = Some(super::live::LiveRun { task_id, inputs }))
+    live.edit(|live| {
+        live.run = Some(super::live::LiveRun { task_id, inputs });
+        if !keep_failure {
+            live.run_failure = None;
+        }
+    })
 }
 
 /// A generation owned by its conversation.

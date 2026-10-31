@@ -166,10 +166,8 @@ async fn shows_a_late_joiner_a_compaction_that_is_summarizing() {
     chat.faux.summary(gated(&Deferred::default(), summary(), Some(&reached)));
     let task = chat.compact(None).await;
     reached.wait().await;
-    let stream = watch_events(&chat.harness, chat.root.id, &ctx()).await.unwrap();
     let expected = json!([{ "taskId": task, "reason": "manual", "blocking": false, "attempt": 1 }]);
-    assert_eq!(Value::from(&stream.snapshot)["compactions"], expected);
-    stream.stop().await;
+    assert_eq!(watched_live(&chat).await["compactions"], expected);
     chat.harness.abort_task(task, &ctx()).await.unwrap();
     chat.close().await;
 }
@@ -244,7 +242,6 @@ async fn survives_reopen_blocked_and_is_orphaned_on_abort_with_its_status_remove
     let (harness, root) = open_chat(Arc::new(open_sqlite_storage(&path).await.unwrap()), &setup).await;
     harness.resume().unwrap();
     let chat = Chat { harness, root, setup: Arc::new(setup), faux };
-    let (stream, events) = listen(&chat).await;
     let inspection = chat.harness.inspect(&ctx()).await.unwrap();
     let state = inspection.tasks.iter().find(|candidate| candidate.record.id == task).unwrap().state.clone();
     assert!(matches!(state, TaskInspectionState::Blocked { reason: BlockedReason::TaskTooOld, .. }), "{state:?}");
@@ -255,13 +252,8 @@ async fn survives_reopen_blocked_and_is_orphaned_on_abort_with_its_status_remove
         json!({ "status": "orphaned", "reason": "task_too_old" })
     );
     assert!(chat.live().await.get("compactions").is_none());
-    let seen = events.clone();
-    wait_for(move || {
-        let ended = event_types(&seen).iter().any(|kind| kind == "compaction_end");
-        async move { ended }
-    })
-    .await;
-    stream.stop().await;
+    let failure = json!({ "taskId": task, "reason": "manual", "error": "task_too_old" });
+    assert_eq!(chat.live().await["compactionFailure"], failure);
     chat.close().await;
 }
 

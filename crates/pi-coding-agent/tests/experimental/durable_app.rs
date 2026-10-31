@@ -66,3 +66,36 @@ async fn opens_the_vacation_planner_with_its_own_sessions() {
     assert_eq!(extensions, &serde_json::json!(["vacation"]));
     opened.close().await.unwrap();
 }
+
+#[tokio::test]
+async fn opens_a_long_session_with_the_default_window_of_its_newest_fifty_entries() {
+    use pi_chord::BACKGROUND_CONTEXT;
+    use pi_durable::session::{SessionOptions, Tx, create_session};
+    use pi_durable::{EntryDraft, ROOT_CONVERSATION_ID};
+
+    let (agent_dir, cwd) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let opened = open_durable(DurableApp::Coding, options(agent_dir.path(), cwd.path(), false)).await.unwrap();
+    let database = std::path::Path::new(&opened.view.current().session.directory).join("session.sqlite");
+    let before = opened.view.current().conversation["entries"].as_array().unwrap().len();
+    opened.close().await.unwrap();
+
+    let storage = pi_durable::storage::open_sqlite_storage(&database.display().to_string()).await.unwrap();
+    let session = create_session(std::sync::Arc::new(storage), SessionOptions::default());
+    let append = |tx: Tx| async move {
+        let mut ids = Vec::new();
+        for _ in 0..60 {
+            ids.push(tx.append_entry(ROOT_CONVERSATION_ID, EntryDraft::new("app.note")).await?.id);
+        }
+        Ok(ids)
+    };
+    let written = session.commit(append, &BACKGROUND_CONTEXT).await.unwrap();
+    session.close(&BACKGROUND_CONTEXT).await.unwrap();
+
+    let continued = open_durable(DurableApp::Coding, options(agent_dir.path(), cwd.path(), true)).await.unwrap();
+    let view = continued.view.current().conversation;
+    let ids: Vec<u64> = view["entries"].as_array().unwrap().iter().map(|entry| entry["id"].as_u64().unwrap()).collect();
+    let newest: Vec<u64> = written[10..].iter().map(|id| id.get()).collect();
+    assert_eq!(ids, newest, "{before} entries before the notes");
+    assert_eq!(view["before"], serde_json::json!(written[9]));
+    continued.close().await.unwrap();
+}

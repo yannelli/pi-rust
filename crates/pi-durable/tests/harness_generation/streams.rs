@@ -19,7 +19,7 @@ use serde_json::json;
 use super::support::harness_support::*;
 use super::support::models_support::{WrappedModels, scripted_stream};
 use super::support::{ControlledStorage, change_record, change_value, content_kind, document_changes, observe_commits};
-use super::{answer, empty, live};
+use super::{answer, failed, live};
 
 /// Every published `pi.live` value of `harness`, in order.
 fn live_publications(harness: &Harness) -> Arc<Mutex<Vec<Json>>> {
@@ -120,7 +120,7 @@ async fn cancels_a_deferred_response_when_aborted_during_polling() {
     let settled = submission.wait(&ctx()).await.unwrap();
     assert_eq!((settled.status, settled.reason.as_deref()), (SubmissionStatus::Unanswered, Some("aborted")));
     assert_eq!(setup.faux.state().cancelled_deferred.len(), 1);
-    assert_eq!(live(&harness, &root).await, empty());
+    assert_eq!(live(&harness, &root).await, failed(task_id, submission.id, "aborted"));
     harness.close(&ctx()).await.unwrap();
 }
 
@@ -138,7 +138,7 @@ async fn reports_a_failed_deferred_cancellation_and_still_ends_the_run_aborted()
     let settled = submission.wait(&ctx()).await.unwrap();
     assert_eq!((settled.status, settled.reason.as_deref()), (SubmissionStatus::Unanswered, Some("aborted")));
     assert!(setup.reports().contains(&"cancel failed".to_owned()), "{:?}", setup.reports());
-    assert_eq!(live(&harness, &root).await, empty());
+    assert_eq!(live(&harness, &root).await, failed(task_id, submission.id, "aborted"));
     harness.close(&ctx()).await.unwrap();
 }
 
@@ -247,6 +247,8 @@ async fn orphans_a_blocked_run_task_with_full_run_cleanup() {
     assert_eq!(outcome, json!({ "status": "orphaned", "reason": "task_too_old" }));
     let record = harness.submission(submission_id, &ctx()).await.unwrap().unwrap().status(&ctx()).await.unwrap();
     assert_eq!((record.status, record.reason.as_deref()), (SubmissionStatus::Unanswered, Some("task_too_old")));
-    assert_eq!(live(&harness, &root).await, empty());
+    let failure =
+        json!({ "taskId": task_id, "inputs": [submission_id], "reason": "orphaned", "detail": "task_too_old" });
+    assert_eq!(live(&harness, &root).await, Some(Json::from(json!({ "runFailure": failure }))));
     harness.close(&ctx()).await.unwrap();
 }
