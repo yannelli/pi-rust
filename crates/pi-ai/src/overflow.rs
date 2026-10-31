@@ -14,6 +14,7 @@ const OVERFLOW_FRAGMENTS: &[&str] = &[
     "request_too_large",
     "input is too long for requested model",
     "exceeds the context window",
+    "context window exceeded",
     "maximum context length",
     "input token count",
     "maximum prompt length is",
@@ -113,6 +114,14 @@ mod tests {
         silent.usage.input = 200;
         assert!(is_context_overflow(&silent, Some(100)));
         assert!(!is_context_overflow(&silent, Some(0)));
+    }
+
+    #[test]
+    fn detects_litellm_pre_call_context_window_overflow() {
+        let message = failed(
+            r#"400: {"message":"litellm.ContextWindowExceededError: litellm.BadRequestError: litellm._pre_call_checks: Context Window exceeded for given call. No models have context window large enough for this call.\nModel=Qwen3.8-Flash-Next, Max Input Tokens=262144, Got=265262\nmodel=Qwen3.8-Flash-Next. context_window_fallbacks=None. fallbacks=[]."}"#,
+        );
+        assert!(is_context_overflow(&message, Some(262_144)));
     }
 
     #[test]
