@@ -63,6 +63,7 @@ const SOURCES: &[(&str, &str)] = &[
     ("child_process", include_str!("../js/child_process.js")),
     ("internal/streams_web", include_str!("../js/streams_web.js")),
     ("internal/streams_web_bytes", include_str!("../js/streams_web_bytes.js")),
+    ("internal/streams_web_compression", include_str!("../js/streams_web_compression.js")),
     ("internal/streams_web_writable", include_str!("../js/streams_web_writable.js")),
     ("stream/web", include_str!("../js/stream_web.js")),
     ("internal/fetch_body", include_str!("../js/fetch_body.js")),

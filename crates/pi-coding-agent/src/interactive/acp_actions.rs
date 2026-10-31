@@ -3,12 +3,44 @@
 use std::rc::Rc;
 
 use pi_ai::providers::acp::{self, AuthMethod, DEFAULT_MODEL, TerminalLogin};
+use pi_tui::SlashCommand;
+use pi_tui::autocomplete::CommandEntry;
 
 use super::mode::InteractiveMode;
-use crate::acp_client::{AcpAgentEntry, provider_id, register};
+use crate::acp_client::registry::RegistryAgent;
+use crate::acp_client::{AcpAgentEntry, AcpScope, host, provider_id, register, store};
 use crate::extension_ui::{DialogOptions, ExtensionUi};
 
+/// `/acp:<name>` runs an agent command whose name a pi command already uses.
+const COMMAND_PREFIX: &str = "acp:";
+
 impl InteractiveMode {
+    /// The slash commands of the ACP agent of the current model, for the editor. A name that
+    /// `taken` holds gets the `acp:` prefix, which the provider removes before sending.
+    pub(super) fn acp_slash_commands(&self, taken: &[CommandEntry]) -> Vec<CommandEntry> {
+        let Some(model) = self.session().model().filter(|model| model.api == acp::API) else { return Vec::new() };
+        let commands = host::commands(&self.agent_dir, &model.provider);
+        commands
+            .into_iter()
+            .map(|command| {
+                let free = !taken.iter().any(|entry| entry.name() == command.name);
+                let name = if free { command.name.clone() } else { format!("{COMMAND_PREFIX}{}", command.name) };
+                let mut entry = SlashCommand::new(name, Some(format!("[acp] {}", command.description).trim_end()));
+                if let Some(hint) = command.hint {
+                    entry = entry.with_argument_hint(hint);
+                }
+                entry.into()
+            })
+            .collect()
+    }
+
+    /// Rebuilds the editor commands after a turn of an ACP agent, which can change its commands.
+    pub(super) fn refresh_acp_commands(&self) {
+        if self.session().model().is_some_and(|model| model.api == acp::API) {
+            self.setup_autocomplete_provider();
+        }
+    }
+
     /// Shows the auth methods of the agent and runs the chosen one: a terminal method runs while
     /// the TUI is stopped, an agent method goes to `authenticate`.
     pub(super) fn acp_login(&self, entry: AcpAgentEntry) {
@@ -52,6 +84,42 @@ impl InteractiveMode {
                 Ok(Err(error)) => mode.show_error(&error),
                 Err(error) => mode.show_error(&error.to_string()),
             }
+        });
+    }
+
+    /// Offers the official installer of an agent program that is not installed, runs it in the
+    /// terminal, then adds the agent to the `scope` settings.
+    pub(super) fn acp_install_program(&self, agent: RegistryAgent, scope: AcpScope) {
+        let agent_dir = self.agent_dir.clone();
+        self.spawn(move |mode| async move {
+            let Some(local) = agent.local.clone() else { return };
+            let shown = local.installer.last().cloned().unwrap_or_default();
+            let title = format!("{} is not installed. Run its installer in the terminal?\n{shown}", local.program);
+            let options = ["Run the installer".to_string(), "Cancel".to_string()];
+            let choice = mode.extension_ui().select(&title, &options, DialogOptions::default()).await;
+            if choice.as_deref() != Some(options[0].as_str()) {
+                return mode.show_status("Install cancelled");
+            }
+            let installer = TerminalLogin {
+                command: local.installer[0].clone(),
+                args: local.installer[1..].to_vec(),
+                env: Default::default(),
+            };
+            if let Err(error) = run_in_terminal(&mode, &installer).await {
+                return mode.show_error(&error);
+            }
+            let (name, dir) = (agent.name.clone(), agent_dir.clone());
+            let entry = tokio::spawn(async move { crate::acp_client::install::install(&agent, &dir).await }).await;
+            let entry = match entry {
+                Ok(Ok(entry)) => entry,
+                Ok(Err(error)) => return mode.show_error(&error),
+                Err(error) => return mode.show_error(&error.to_string()),
+            };
+            if let Err(error) = store::upsert(&mode.settings(), &entry, scope) {
+                return mode.show_error(&error);
+            }
+            crate::acp_client::providers::sync_providers(&mode.session()).await;
+            mode.show_status(&format!("Installed {name} in the {} settings. Run /acp to log in.", scope.label()));
         });
     }
 

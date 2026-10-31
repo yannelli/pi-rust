@@ -12,7 +12,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadHalf, Wr
 use tokio::sync::watch;
 
 use super::set_fn;
-use super::tls::Tls;
+use super::tls::{Exporter, Tls};
 use crate::error::{JsError, io_code};
 use crate::runtime::convert::{bytes_of, bytes_to_js, error_value, from_json, throw, to_json};
 use crate::runtime::scope::spawn_op;
@@ -32,6 +32,7 @@ pub(super) struct Conn {
     socket: Option<socket2::Socket>,
     tcp: bool,
     info: serde_json::Value,
+    exporter: Option<Exporter>,
 }
 
 pub(super) enum Kind {
@@ -44,6 +45,8 @@ pub(super) enum Kind {
         tcp: bool,
         /// Whether the socket was sent to another process, which may still read it.
         exported: bool,
+        /// Set for a TLS socket.
+        exporter: Option<Exporter>,
     },
     Listener {
         path: Option<String>,
@@ -56,6 +59,16 @@ pub(super) struct Entry {
     referenced: bool,
     pub(super) task: Option<tokio::task::AbortHandle>,
     kind: Kind,
+}
+
+impl Entry {
+    /// The keying material exporter of a TLS socket.
+    pub(super) fn exporter(&self) -> Option<Exporter> {
+        match &self.kind {
+            Kind::Stream { exporter, .. } => exporter.clone(),
+            Kind::Listener { .. } => None,
+        }
+    }
 }
 
 pub(super) enum Event {
@@ -116,7 +129,7 @@ pub(super) fn tcp_conn(stream: tokio::net::TcpStream) -> std::io::Result<Conn> {
     let tcp = socket2::SockRef::from(&stream).try_clone()?;
     let info =
         json!({ "local": address_json(stream.local_addr().ok()), "remote": address_json(stream.peer_addr().ok()) });
-    Ok(Conn { io: Box::new(stream), socket: Some(tcp), tcp: true, info })
+    Ok(Conn { io: Box::new(stream), socket: Some(tcp), tcp: true, info, exporter: None })
 }
 
 impl Conn {
@@ -127,19 +140,19 @@ impl Conn {
 }
 
 pub(super) fn pipe_conn(io: BoxIo, path: &str) -> Conn {
-    Conn { io, socket: None, tcp: false, info: json!({ "path": path }) }
+    Conn { io, socket: None, tcp: false, info: json!({ "path": path }), exporter: None }
 }
 
 /// A Unix socket connection, with a copy of the socket so close drains it like TCP.
 #[cfg(unix)]
 pub(super) fn unix_conn(stream: tokio::net::UnixStream, path: &str) -> Conn {
     let socket = socket2::SockRef::from(&stream).try_clone().ok();
-    Conn { io: Box::new(stream), socket, tcp: false, info: json!({ "path": path }) }
+    Conn { io: Box::new(stream), socket, tcp: false, info: json!({ "path": path }), exporter: None }
 }
 
 /// A connection with no address of its own, such as TLS over a JavaScript stream.
 pub(super) fn plain_conn(io: BoxIo) -> Conn {
-    Conn { io, socket: None, tcp: false, info: json!({}) }
+    Conn { io, socket: None, tcp: false, info: json!({}), exporter: None }
 }
 
 pub(super) async fn secure(
@@ -150,10 +163,10 @@ pub(super) async fn secure(
 ) -> Result<Conn, JsError> {
     let conn = conn?;
     let Some(tls) = tls else { return Ok(conn) };
-    let (io, extra) = tls.handshake(conn.io, sender, id).await?;
+    let (io, extra, exporter) = tls.handshake(conn.io, sender, id).await?;
     let mut info = conn.info;
     info["tls"] = extra;
-    Ok(Conn { io, info, ..conn })
+    Ok(Conn { io, info, exporter: Some(exporter), ..conn })
 }
 
 pub(super) fn post(sender: &Sender, id: u64, event: Event) {
@@ -187,16 +200,16 @@ fn report_attempt<'js>(
 }
 
 pub(super) fn stream_kind(conn: Option<Conn>) -> (Kind, serde_json::Value) {
-    let (pending, writer, socket, tcp, info) = match conn {
+    let (pending, writer, socket, tcp, info, exporter) = match conn {
         Some(conn) => {
             let (read, write) = tokio::io::split(conn.io);
-            (Some(read), Some(write), conn.socket, conn.tcp, conn.info)
+            (Some(read), Some(write), conn.socket, conn.tcp, conn.info, conn.exporter)
         }
-        None => (None, None, None, false, serde_json::Value::Null),
+        None => (None, None, None, false, serde_json::Value::Null, None),
     };
     let writer = Arc::new(tokio::sync::Mutex::new(writer));
     let paused = watch::Sender::new(false);
-    (Kind::Stream { pending, reader: None, writer, paused, socket, tcp, exported: false }, info)
+    (Kind::Stream { pending, reader: None, writer, paused, socket, tcp, exported: false, exporter }, info)
 }
 
 fn deliver(ctx: &Ctx<'_>, id: u64, event: Event) {

@@ -50,7 +50,9 @@ pub use self::builtins::{BUILTIN_EXTENSIONS, McpSessionOptions, NotifyFn, Notify
 pub use self::cache::CacheWarmingDecider;
 pub use self::events::{AgentSessionEvent, CompactionReason, SummarizationSource, compaction_result_json};
 pub use self::extension_hooks::RequestHooksSlot;
-pub use self::file_checkpoints::{MAX_CHECKPOINT_FILE_BYTES, MAX_UNDO_PROMPTS, UndoReport, UndoSkip};
+pub use self::file_checkpoints::{
+    MAX_CHECKPOINT_FILE_BYTES, MAX_UNDO_PROMPTS, UndoCandidate, UndoReport, UndoSkip, Written,
+};
 pub use self::llama_api::LlamaProgressFn;
 pub use self::model::ModelCycleResult;
 pub use self::model_runtime::{ModelRuntime, ModelRuntimeOptions};

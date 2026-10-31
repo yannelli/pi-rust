@@ -261,6 +261,7 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
             weak: weak.clone(),
         }
     });
+    crate::acp_client::host::track_session(&session);
     session.install_builtin_tools();
     session.refresh_tools(ActiveSelection { names: Some(active), include_all_registered: true });
     // A resumed session that uses the default tools gets the loadout its transcript records.

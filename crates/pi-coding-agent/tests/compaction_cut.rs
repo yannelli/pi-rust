@@ -56,6 +56,7 @@ fn token_math_and_thresholds() {
     let settings = CompactionSettings { enabled: true, reserve_tokens: 10_000, keep_recent_tokens: 20_000 };
     assert!(should_compact(95_000, 100_000, &settings) && !should_compact(89_000, 100_000, &settings));
     assert!(!should_compact(95_000, 100_000, &CompactionSettings { enabled: false, ..settings }));
+    assert!(!should_compact(95_000, 0, &settings), "an unknown window does not trigger compaction");
 }
 
 #[test]

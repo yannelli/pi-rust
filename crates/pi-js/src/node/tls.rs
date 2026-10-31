@@ -2,8 +2,10 @@
 //! `cert`, `key`, `rejectUnauthorized`, ALPN, SNI, versions, sessions) and the handshake info
 //! JS reads.
 
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 
 use rquickjs::{Ctx, Value};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
@@ -13,6 +15,7 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use rustls::{CertificateError, DigitallySignedStruct, Error as TlsError, RootCertStore, SignatureScheme};
 use serde::Deserialize;
 use serde_json::json;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use super::net::{BoxIo, Sender, parse_options};
 use super::tls_session::{Credentials, SessionStore};
@@ -39,6 +42,53 @@ struct Options {
     session: Option<String>,
     /// The resource that says whether a server asks JavaScript for SNI contexts.
     sni_flag: Option<u64>,
+}
+
+/// `tlsSocket.exportKeyingMaterial` on the live connection: `(length, label, context)`.
+pub(crate) type Exporter = Arc<dyn Fn(usize, &[u8], Option<&[u8]>) -> Result<Vec<u8>, String> + Send + Sync>;
+
+/// A TLS stream that the socket and its [`Exporter`] share. Each poll locks it only for the
+/// call, so the exporter never waits for network I/O.
+struct Shared<S>(Arc<Mutex<S>>);
+
+fn locked<S>(shared: &Shared<S>) -> std::sync::MutexGuard<'_, S> {
+    shared.0.lock().unwrap_or_else(|poison| poison.into_inner())
+}
+
+impl<S: AsyncRead + Unpin> AsyncRead for Shared<S> {
+    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut *locked(&self)).poll_read(cx, buf)
+    }
+}
+
+impl<S: AsyncWrite + Unpin> AsyncWrite for Shared<S> {
+    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
+        Pin::new(&mut *locked(&self)).poll_write(cx, buf)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut *locked(&self)).poll_flush(cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut *locked(&self)).poll_shutdown(cx)
+    }
+}
+
+type Export<S> = fn(&S, usize, &[u8], Option<&[u8]>) -> Result<Vec<u8>, TlsError>;
+
+/// The stream as socket I/O, and its exporter, which `export` runs on the rustls connection.
+fn share<S>(stream: S, export: Export<S>) -> (BoxIo, Exporter)
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let shared = Arc::new(Mutex::new(stream));
+    let inner = shared.clone();
+    let exporter: Exporter = Arc::new(move |length, label, context| {
+        let stream = inner.lock().unwrap_or_else(|poison| poison.into_inner());
+        export(&stream, length, label, context).map_err(|error| error.to_string())
+    });
+    (Box::new(Shared(shared)), exporter)
 }
 
 /// A client or server TLS setup for one connection or listener.
@@ -329,7 +379,7 @@ impl Tls {
         io: BoxIo,
         sender: &Sender,
         id: u64,
-    ) -> Result<(BoxIo, serde_json::Value), JsError> {
+    ) -> Result<(BoxIo, serde_json::Value, Exporter), JsError> {
         match self {
             Tls::Client { connector, name, verifier, session } => {
                 session.link(sender, id);
@@ -342,7 +392,10 @@ impl Tls {
                 info["authorized"] = json!(failure.is_none());
                 info["authorizationError"] = failure.map_or(json!(null), |(code, message)| json!([code, message]));
                 info["session"] = json!(to_hex(&session.handle()));
-                Ok((Box::new(stream), info))
+                let (io, exporter) = share(stream, |stream, length, label, context| {
+                    stream.get_ref().1.export_keying_material(vec![0; length], label, context)
+                });
+                Ok((io, info, exporter))
             }
             Tls::Server { acceptor, sni } => {
                 let stream = if sni.is_some_and(|flag| flag.load(Ordering::SeqCst)) {
@@ -356,7 +409,10 @@ impl Tls {
                 let resumed12 = info["reused"] == json!(true) && info["protocol"] == json!("TLSv1.2");
                 info["servername"] = if resumed12 { json!(null) } else { json!(connection.server_name()) };
                 info["authorized"] = json!(connection.peer_certificates().is_some_and(|chain| !chain.is_empty()));
-                Ok((Box::new(stream), info))
+                let (io, exporter) = share(stream, |stream, length, label, context| {
+                    stream.get_ref().1.export_keying_material(vec![0; length], label, context)
+                });
+                Ok((io, info, exporter))
             }
         }
     }
@@ -375,9 +431,34 @@ pub(crate) fn root_certificates() -> Vec<String> {
     webpki_root_certs::TLS_SERVER_ROOT_CERTS.iter().map(|cert| wrap(cert)).collect()
 }
 
+/// `tlsSocket.exportKeyingMaterial` for socket `id`; JS checks the arguments.
+fn export_keying_material<'js>(
+    ctx: Ctx<'js>,
+    id: u64,
+    length: usize,
+    label: String,
+    context: Option<rquickjs::TypedArray<'js, u8>>,
+) -> rquickjs::Result<Value<'js>> {
+    let invalid_state =
+        || JsError::new("TLS socket connection must be securely established").with_code("ERR_TLS_INVALID_STATE");
+    let exporter = state().with_resource(id, |entry: &mut super::net::Entry| entry.exporter());
+    let exporter = exporter.ok().flatten().ok_or_else(invalid_state).map_err(|error| throw(&ctx, &error))?;
+    let context = context.as_ref().map(crate::runtime::convert::bytes_of);
+    let material =
+        exporter(length, label.as_bytes(), context.as_deref()).map_err(|error| throw(&ctx, &JsError::new(error)))?;
+    crate::runtime::convert::bytes_to_js(&ctx, material)
+}
+
+/// The PKCS#8 PEM of an encrypted `key`, which `tls.createSecureContext` decrypts at once.
+fn decrypt_key(ctx: Ctx<'_>, key: String, passphrase: Option<String>) -> rquickjs::Result<String> {
+    super::crypto::decrypt_tls_key(&key, passphrase.as_deref().map(str::as_bytes)).map_err(|error| throw(&ctx, &error))
+}
+
 pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<rquickjs::Object<'js>> {
     let object = rquickjs::Object::new(ctx.clone())?;
     super::set_fn(&object, "rootCertificates", root_certificates)?;
+    super::set_fn(&object, "exportKeyingMaterial", export_keying_material)?;
+    super::set_fn(&object, "decryptKey", decrypt_key)?;
     super::tls_wrap::natives(&object)?;
     super::tls_sni::natives(&object)?;
     Ok(object)
