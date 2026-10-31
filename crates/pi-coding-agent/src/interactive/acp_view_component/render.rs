@@ -3,7 +3,8 @@
 use pi_tui::Component;
 use pi_tui::utils::{truncate_to_width, wrap_text_with_ansi};
 
-use super::{AcpBrowser, AcpRow, AcpTab, Mode};
+use super::{AcpBrowser, AcpRow, AcpTab, INSTALL_SCOPES, Mode, scope_choice};
+use crate::acp_client::AcpScope;
 use crate::interactive_components::{key_hint, raw_key_hint};
 use crate::theme::{ThemeColor, theme};
 
@@ -18,11 +19,13 @@ pub(super) fn render(browser: &mut AcpBrowser, width: usize) -> Vec<String> {
     lines.push(String::new());
     match browser.mode.clone() {
         Mode::List => lines.extend(list_lines(browser, width)),
-        Mode::Menu { id, item } => lines.extend(menu_lines(browser, &id, Some(item), width)),
-        Mode::ConfirmRemove { id, name } => {
-            lines.extend(menu_lines(browser, &id, None, width));
-            lines.push(t.fg(ThemeColor::Warning, &format!(" Remove {name}? y confirm · n cancel")));
+        Mode::Menu { id, scope, item } => lines.extend(menu_lines(browser, &id, scope, Some(item), width)),
+        Mode::ConfirmRemove { id, scope, name } => {
+            lines.extend(menu_lines(browser, &id, scope, None, width));
+            let prompt = format!(" Remove {name} from the {} settings? y confirm · n cancel", scope.label());
+            lines.push(t.fg(ThemeColor::Warning, &prompt));
         }
+        Mode::InstallScope { name, item, .. } => lines.extend(scope_lines(&name, item)),
     }
     lines.push(String::new());
     if let Some(status) = &browser.status {
@@ -111,8 +114,11 @@ fn markers(row: &AcpRow) -> String {
     if !row.version.is_empty() {
         out.push_str(&t.fg(ThemeColor::Muted, &format!(" v{}", row.version.trim_start_matches('v'))));
     }
-    if !row.scope.is_empty() {
-        out.push_str(&t.fg(ThemeColor::Dim, &format!(" [{}]", row.scope)));
+    if let Some(scope) = row.scope {
+        out.push_str(&t.fg(ThemeColor::Dim, &format!(" [{}]", scope.label())));
+    }
+    if row.shadowed {
+        out.push_str(&t.fg(ThemeColor::Muted, " replaced by the project entry"));
     }
     if row.builtin {
         out.push_str(&t.fg(ThemeColor::Dim, " built-in"));
@@ -129,10 +135,24 @@ fn markers(row: &AcpRow) -> String {
     out
 }
 
-/// The installed agent `id` with its details, and its actions when `item` is set.
-fn menu_lines(browser: &AcpBrowser, id: &str, item: Option<usize>, width: usize) -> Vec<String> {
+/// Where to install `name`, with choice `item` selected.
+fn scope_lines(name: &str, item: usize) -> Vec<String> {
     let t = theme();
-    let Some(row) = browser.installed_row(id) else { return Vec::new() };
+    let mut lines = vec![format!(" {}", t.fg(ThemeColor::Accent, &t.bold(&format!("Install {name} in"))))];
+    for (index, scope) in INSTALL_SCOPES.iter().enumerate() {
+        let label = scope_choice(*scope);
+        lines.push(match index == item {
+            true => format!(" {}{}", t.fg(ThemeColor::Accent, "→ "), t.fg(ThemeColor::Accent, label)),
+            false => format!("   {label}"),
+        });
+    }
+    lines
+}
+
+/// The installed agent `id` of `scope` with its details, and its actions when `item` is set.
+fn menu_lines(browser: &AcpBrowser, id: &str, scope: AcpScope, item: Option<usize>, width: usize) -> Vec<String> {
+    let t = theme();
+    let Some(row) = browser.installed_row(id, scope) else { return Vec::new() };
     let mut lines = vec![format!(" {}{}", t.fg(ThemeColor::Accent, &t.bold(&row.name)), markers(row))];
     if !row.description.is_empty() {
         lines.extend(wrap_text_with_ansi(&format!(" {}", row.description), width));
@@ -162,7 +182,7 @@ fn hints(browser: &AcpBrowser) -> Vec<String> {
     }
     match browser.mode {
         Mode::ConfirmRemove { .. } => return hints,
-        Mode::Menu { .. } => {
+        Mode::Menu { .. } | Mode::InstallScope { .. } => {
             hints.push(raw_key_hint("↑↓", "choose"));
             hints.push(key_hint("tui.select.confirm", "run"));
             hints.push(key_hint("tui.select.cancel", "back"));

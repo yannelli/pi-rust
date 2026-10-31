@@ -92,10 +92,10 @@ function addChunk(stream, chunk, encoding, toFront) {
     if (typeof chunk === "string") {
       encoding = encoding || state.defaultEncoding;
       if (state.encoding !== encoding) chunk = Buffer.from(chunk, encoding);
-    } else if (chunk instanceof Uint8Array && !Buffer.isBuffer(chunk)) {
+    } else if (ArrayBuffer.isView(chunk) && !Buffer.isBuffer(chunk)) {
       chunk = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
     } else if (!Buffer.isBuffer(chunk)) {
-      errorOrDestroy(stream, errors.invalidArg("chunk", "of type string or an instance of Buffer or Uint8Array", chunk));
+      errorOrDestroy(stream, errors.invalidArg("chunk", "of type string or an instance of Buffer, TypedArray, or DataView", chunk));
       return false;
     }
   }

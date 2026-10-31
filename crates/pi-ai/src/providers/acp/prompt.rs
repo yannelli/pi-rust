@@ -7,14 +7,21 @@ use serde_json::{Value, json};
 
 use super::API;
 use crate::providers::antigravity_acp::prompt::{history, user_text};
-use crate::types::{ContentBlock, Message, UserContent};
+use crate::types::{ContentBlock, Context, Message, UserContent};
 
 const CONTINUE: &str = "Continue.";
+/// `/acp:<name>` runs the agent command `<name>` when a pi command has the same name.
+pub const COMMAND_PREFIX: &str = "/acp:";
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct PromptCapabilities {
     pub embedded_context: bool,
     pub images: bool,
+}
+
+/// The percent-encoded `file:` URI of an absolute path, also for Windows `\\?\` paths.
+fn file_uri(path: &Path) -> Option<String> {
+    reqwest::Url::from_file_path(path).ok().map(String::from)
 }
 
 /// `@path` mentions of files that exist inside `cwd`, as `resource_link` blocks.
@@ -31,7 +38,7 @@ pub(crate) fn file_links(text: &str, cwd: &Path) -> Vec<Value> {
         if !path.is_file() {
             continue;
         }
-        let uri = format!("file://{}", path.to_string_lossy().replace('\\', "/"));
+        let Some(uri) = file_uri(&path) else { continue };
         if links.iter().any(|link| link["uri"] == uri.as_str()) {
             continue;
         }
@@ -54,7 +61,11 @@ fn request(messages: &[Message], capabilities: PromptCapabilities, cwd: &Path) -
         return vec![json!({"type": "text", "text": CONTINUE})];
     };
     let text = user_text(&user.content);
-    let mut blocks = vec![json!({"type": "text", "text": text})];
+    let sent = match text.strip_prefix(COMMAND_PREFIX) {
+        Some(command) => format!("/{command}"),
+        None => text.clone(),
+    };
+    let mut blocks = vec![json!({"type": "text", "text": sent})];
     if let UserContent::Blocks(content) = &user.content {
         for block in content {
             if let ContentBlock::Image { data, mime_type } = block {
@@ -92,10 +103,34 @@ pub(crate) fn build(messages: &[Message], seen: usize, capabilities: PromptCapab
     blocks
 }
 
+/// The prompt of a one-shot session: the instructions of the request, then all of its messages.
+pub(crate) fn one_shot(context: &Context, capabilities: PromptCapabilities, cwd: &Path) -> Vec<Value> {
+    let mut blocks = Vec::new();
+    if let Some(system) = context.system_prompt.as_deref().filter(|system| !system.trim().is_empty()) {
+        blocks.push(json!({"type": "text", "text": format!("# Instructions\n\n{system}")}));
+    }
+    blocks.extend(build(&context.messages, 0, capabilities, cwd));
+    blocks
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::types::AssistantMessage;
+
+    #[test]
+    fn file_uris_percent_encode_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let uri = file_uri(&root.join("my notes #1 100%.md")).unwrap();
+        assert!(uri.starts_with("file:///") && uri.ends_with("/my%20notes%20%231%20100%25.md"), "{uri}");
+        assert!(!uri.contains('?') && !uri.contains('\\'), "no verbatim prefix: {uri}");
+        let plain = Path::new(&super::super::client::agent_path(&root)).join("my notes #1 100%.md");
+        assert_eq!(reqwest::Url::parse(&uri).unwrap().to_file_path().unwrap(), plain);
+        #[cfg(unix)]
+        assert!(file_uri(&root.join(r"back\slash.md")).unwrap().ends_with("/back%5Cslash.md"));
+        assert_eq!(file_uri(Path::new("relative.md")), None);
+    }
 
     #[test]
     fn prompts_link_mentioned_files_and_skip_own_replies() {
@@ -116,7 +151,15 @@ mod tests {
         assert_eq!(blocks[1]["text"], "read @notes.md and @missing.md");
         assert_eq!(blocks[2]["type"], "resource_link");
         assert_eq!(blocks[2]["name"], "notes.md");
+        let uri = blocks[2]["uri"].as_str().unwrap();
+        assert!(uri.starts_with("file:///") && uri.ends_with("/notes.md") && !uri.contains(['?', '\\']), "{uri}");
         assert_eq!(blocks.len(), 3);
         assert_eq!(build(&messages[..2], 2, caps, dir.path()), vec![json!({"type": "text", "text": CONTINUE})]);
+        std::fs::write(dir.path().join("a#1%.md"), "x").unwrap();
+        let odd = build(&[Message::user("see @a#1%.md")], 0, caps, dir.path());
+        let uri = odd[1]["uri"].as_str().unwrap();
+        assert!(uri.ends_with("/a%231%25.md"), "{uri}");
+        let command = build(&[Message::user("/acp:web rust acp")], 0, caps, dir.path());
+        assert_eq!(command[0]["text"], "/web rust acp");
     }
 }

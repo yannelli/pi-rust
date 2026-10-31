@@ -8,9 +8,10 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use super::client::ClientContext;
+use super::checkpoints::Checkpoints;
+use super::client::{ClientContext, agent_path};
 use super::connection::{Connection, RpcError};
-use super::host::{AgentLaunch, Choice, Selector, SessionInfo, host};
+use super::host::{AgentCommand, AgentLaunch, Choice, Selector, SessionInfo, host};
 use super::process::{self, Process};
 use super::prompt::PromptCapabilities;
 use super::terminal::Terminals;
@@ -144,19 +145,51 @@ pub(crate) struct Runtime {
     pub seen: usize,
     /// The session cost in USD from the last `usage_update`.
     pub cost_usd: Option<f64>,
+    pub commands: Vec<AgentCommand>,
+    pub commands_known: bool,
+    /// The `size` of the last `usage_update`.
+    pub context_window: Option<u64>,
+    /// The pi model ID of the last turn.
+    pub pi_model: String,
+    /// The timestamp of the last reply of this session, to find it in a compacted transcript.
+    pub last_reply: Option<i64>,
+    /// Shown once in the next reply, for example MCP servers the agent did not get.
+    pub notices: Vec<String>,
+    pub proxy: Option<super::proxy::Proxy>,
 }
 
 impl Runtime {
-    /// Starts the agent and resumes `resume` with `session/load` when the agent can, else starts a
-    /// new session. Returns whether the session was resumed.
-    pub async fn start(agent: AgentLaunch, cwd: PathBuf, pi_session: &str) -> Result<(Self, bool), String> {
+    /// Starts the agent and resumes the session of `pi_session` with `session/load` when the agent
+    /// can, else starts a new session. Returns whether the session was resumed. A `read_only`
+    /// session gets no MCP servers and does not resume.
+    pub async fn start(
+        agent: AgentLaunch,
+        cwd: PathBuf,
+        pi_session: &str,
+        read_only: bool,
+    ) -> Result<(Self, bool), String> {
         let Connected { connection, process, initialize } = connect(&agent, &cwd).await?;
         let capabilities = &initialize["agentCapabilities"];
-        let resume = host().and_then(|host| host.recall_session(&agent.provider, pi_session));
+        let (mut servers, mut notices) = match read_only {
+            true => (Vec::new(), Vec::new()),
+            false => super::mcp::servers(capabilities, &agent.name),
+        };
+        let mut proxy = None;
+        if !read_only {
+            match super::proxy::start(capabilities, &agent.name, pi_session).await {
+                Ok(Some((server, started))) => {
+                    servers.push(server);
+                    proxy = Some(started);
+                }
+                Ok(None) => {}
+                Err(notice) => notices.push(notice),
+            }
+        }
+        let resume = host().filter(|_| !read_only).and_then(|host| host.recall_session(&agent.provider, pi_session));
         let can_load = capabilities["loadSession"] == json!(true);
         let mut reply = None;
         if let Some(id) = resume.filter(|_| can_load) {
-            let params = json!({"sessionId": id, "cwd": cwd, "mcpServers": []});
+            let params = json!({"sessionId": id, "cwd": agent_path(&cwd), "mcpServers": servers});
             if let Ok(mut loaded) = connection.request("session/load", params, SESSION_TIMEOUT).await {
                 loaded["sessionId"] = json!(id);
                 reply = Some(loaded);
@@ -166,7 +199,7 @@ impl Runtime {
         let reply = match reply {
             Some(reply) => reply,
             None => {
-                let params = json!({"cwd": cwd, "mcpServers": []});
+                let params = json!({"cwd": agent_path(&cwd), "mcpServers": servers});
                 connection.request("session/new", params, SESSION_TIMEOUT).await.map_err(|e| rpc(&agent.name, e))?
             }
         };
@@ -178,6 +211,8 @@ impl Runtime {
             pi_session: pi_session.to_string(),
             cwd,
             terminals: Terminals::default(),
+            read_only,
+            checkpoints: Arc::new(Mutex::new(Checkpoints::default())),
         };
         let runtime = Self {
             connection,
@@ -192,6 +227,13 @@ impl Runtime {
             agent,
             seen: 0,
             cost_usd: None,
+            commands: Vec::new(),
+            commands_known: false,
+            context_window: None,
+            pi_model: super::DEFAULT_MODEL.into(),
+            last_reply: None,
+            notices,
+            proxy,
         };
         Ok((runtime, resumed))
     }
@@ -202,10 +244,19 @@ impl Runtime {
             pi_session: self.client.pi_session.clone(),
             acp_session: self.session_id.clone(),
             selectors: self.selectors.clone(),
+            commands: self.commands.clone(),
+            commands_known: self.commands_known,
+            pi_model: self.pi_model.clone(),
+            context_window: self.context_window,
+            images: self.capabilities.images,
         }
     }
 
+    /// Tells the host of the session state; a read-only session stays out of it.
     pub fn report(&self) {
+        if self.client.read_only {
+            return;
+        }
         if let Some(host) = host() {
             host.session_changed(&self.info());
         }

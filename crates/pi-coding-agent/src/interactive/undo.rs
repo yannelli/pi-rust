@@ -6,9 +6,12 @@ use std::path::Path;
 use super::mode::InteractiveMode;
 use super::util::format_path_relative_to_cwd_or_absolute;
 use crate::agent_session::{UndoReport, UndoSkip};
+use crate::extension_ui::{DialogOptions, ExtensionUi};
 use crate::theme::{ThemeColor, theme};
 
 const NOTE: &str = "Bash tool changes are not tracked, and the conversation is unchanged (use /tree for that).";
+const RESTORE_ALL: &str = "Restore all of them";
+const RESTORE_REPORTED: &str = "Restore only the changes the agent reported";
 
 /// One line of the `/undo` summary and its color.
 type Line = (ThemeColor, String);
@@ -24,6 +27,7 @@ pub(super) fn undo_summary(report: &UndoReport, cwd: &Path) -> Vec<Line> {
             UndoSkip::ChangedSince => "changed since the agent wrote it".to_string(),
             UndoSkip::NotRestorable(reason) => reason.clone(),
             UndoSkip::Failed(error) => format!("could not restore it: {error}"),
+            UndoSkip::Unreported => "the agent did not report this change".to_string(),
         };
         lines.push((ThemeColor::Warning, format!("  skipped   {} ({reason})", path(file))));
     }
@@ -43,10 +47,36 @@ impl InteractiveMode {
             return self
                 .show_warning("Wait for the current response to finish, or press Esc to abort it, before /undo.");
         }
-        let Some(report) = session.undo_file_changes() else {
+        let candidates = session.undo_candidates();
+        if candidates.is_empty() {
             return self.show_status("Nothing to undo: no edit or write tool changes recorded in this session.");
-        };
-        let lines = undo_summary(&report, session.cwd());
+        }
+        let unreported: Vec<String> = candidates
+            .iter()
+            .filter(|candidate| candidate.detected)
+            .map(|candidate| format_path_relative_to_cwd_or_absolute(&candidate.path, session.cwd()))
+            .collect();
+        if unreported.is_empty() {
+            return self.show_undo_report(session.undo_file_changes());
+        }
+        self.spawn(move |mode| async move {
+            let title = format!(
+                "These files changed during the ACP agent's turn, but the agent did not report the change. \
+                 You or another program may have changed them:\n{}",
+                unreported.join("\n")
+            );
+            let options = [RESTORE_ALL.to_string(), RESTORE_REPORTED.to_string()];
+            let Some(choice) = mode.extension_ui().select(&title, &options, DialogOptions::default()).await else {
+                return mode.show_status("Undo cancelled");
+            };
+            let session = mode.session();
+            mode.show_undo_report(session.undo_file_changes_with(choice == RESTORE_ALL));
+        });
+    }
+
+    fn show_undo_report(&self, report: Option<UndoReport>) {
+        let Some(report) = report else { return };
+        let lines = undo_summary(&report, self.session().cwd());
         self.add_spacer();
         self.add_text(
             move || lines.iter().map(|(color, text)| theme().fg(*color, text)).collect::<Vec<_>>().join("\n"),

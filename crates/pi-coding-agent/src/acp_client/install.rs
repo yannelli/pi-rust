@@ -17,16 +17,18 @@ pub fn agents_root(agent_dir: &Path) -> PathBuf {
 
 pub async fn install(agent: &RegistryAgent, agent_dir: &Path) -> Result<AcpAgentEntry, String> {
     let path = std::env::var_os("PATH");
-    install_with(&pi_ai::http::shared_client(), agent, agent_dir, path.as_deref()).await
+    let home = pi_mcp::runtime::transport::home_dir();
+    install_with(&pi_ai::http::shared_client(), agent, agent_dir, path.as_deref(), home.as_deref()).await
 }
 
 /// Uses a binary for this platform first, then `npx`, then `uvx`. `path` is the PATH to search
-/// for a built-in program such as `kiro-cli`.
+/// for a built-in program such as `kiro-cli`, then its install folders under `home`.
 pub(crate) async fn install_with(
     client: &reqwest::Client,
     agent: &RegistryAgent,
     agent_dir: &Path,
     path: Option<&OsStr>,
+    home: Option<&Path>,
 ) -> Result<AcpAgentEntry, String> {
     let non_empty = |value: &str| (!value.is_empty()).then(|| value.to_string());
     let mut entry = AcpAgentEntry {
@@ -59,10 +61,13 @@ pub(crate) async fn install_with(
         entry.args = std::iter::once(uvx.package.clone()).chain(uvx.args.iter().cloned()).collect();
         entry.env = uvx.env.clone();
     } else if let Some(local) = &agent.local {
-        if find_on_path(&local.program, path).is_none() {
-            return Err(format!("{} is not on PATH. {}", local.program, local.install_hint));
-        }
-        entry.command = local.program.clone();
+        entry.command = match find_on_path(&local.program, path) {
+            Some(_) => local.program.clone(),
+            None => match find_in_install_dirs(local, home) {
+                Some(found) => found.display().to_string(),
+                None => return Err(format!("{} is not on PATH. {}", local.program, local.install_hint)),
+            },
+        };
         entry.args = local.args.clone();
         entry.login_command = (!local.login.is_empty()).then(|| local.login.clone());
     } else {
@@ -240,6 +245,25 @@ fn make_executable(file: &Path, cmd: &str) -> Result<(), String> {
         std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o755)).map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+/// `program` in the folders its installer uses, where `~` is `home`.
+pub(crate) fn find_in_install_dirs(local: &super::registry::LocalCommand, home: Option<&Path>) -> Option<PathBuf> {
+    let home = home?;
+    let dirs = local.install_dirs.iter().map(|dir| pi_mcp::runtime::transport::expand_home_with(dir, Some(home)));
+    let joined = std::env::join_paths(dirs).ok()?;
+    find_on_path(&local.program, Some(&joined))
+}
+
+/// Whether installing `agent` needs its program, which is not installed yet.
+pub fn needs_program(agent: &RegistryAgent, path: Option<&OsStr>) -> bool {
+    let distribution = &agent.distribution;
+    let packaged = platform_key().is_some_and(|key| distribution.binary.contains_key(key))
+        || distribution.npx.is_some()
+        || distribution.uvx.is_some();
+    let Some(local) = agent.local.as_ref().filter(|_| !packaged) else { return false };
+    let home = pi_mcp::runtime::transport::home_dir();
+    find_on_path(&local.program, path).is_none() && find_in_install_dirs(local, home.as_deref()).is_none()
 }
 
 /// The first file named `program` (with `.exe` or `.cmd` on Windows) in the directories of `path`.
