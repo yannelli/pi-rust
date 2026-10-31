@@ -105,6 +105,8 @@ export function createHost(config) {
 		runner,
 		/** Load extension files in order; failures are collected, not thrown. */
 		async load(entries) {
+			// Upstream installs the app keybindings at startup; component key hints read them.
+			ui.appKeybindings();
 			const errors = [];
 			for (const entry of entries) {
 				loading = { path: entry.path, resolvedPath: entry.resolvedPath };

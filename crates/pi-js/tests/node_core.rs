@@ -128,3 +128,33 @@ async fn util_mime_type_parses_like_node() {
     });
     assert_same_keys(&actual, &expected);
 }
+
+const LOCALE_SCRIPT: &str = r##"
+const format = Number.prototype.toLocaleString;
+const error = (fn) => { try { return fn(); } catch (e) { return `${e.constructor.name}: ${e.message}`; } };
+return {
+  values: [(1234).toLocaleString(), (1234.5678).toLocaleString(), (-1234567).toLocaleString(), (0.5).toLocaleString(),
+    (1234).toLocaleString("en-US", { maximumFractionDigits: 0 }), NaN.toLocaleString()],
+  boxed: format.call(new Number(1234)),
+  receivers: [error(() => format.call("1234")), error(() => format.call({ valueOf: () => 1234 })),
+    error(() => format.call(null)), error(() => format.call(1n))],
+  shape: [format.length, format.name],
+  edges: [-0, -0.0001, Infinity, -Infinity].map((value) => value.toLocaleString()),
+};
+"##;
+
+#[tokio::test]
+async fn number_to_locale_string_groups_digits_like_node() {
+    let (_dir, root) = tempdir();
+    let (runtime, _capture) = runtime(&root);
+    let actual = run_cjs(&runtime, &root, LOCALE_SCRIPT).await;
+    let receiver = "TypeError: Number.prototype.toLocaleString requires that 'this' be a Number";
+    let expected = serde_json::json!({
+        "values": ["1,234", "1,234.568", "-1,234,567", "0.5", "1,234", "NaN"],
+        "boxed": "1,234",
+        "receivers": [receiver, receiver, receiver, receiver],
+        "shape": [0, "toLocaleString"],
+        "edges": ["-0", "-0", "∞", "-∞"],
+    });
+    assert_eq!(actual, expected);
+}

@@ -1,0 +1,195 @@
+//! Generated modules for `vendor-js`: named top-level declarations of an upstream file, copied
+//! verbatim, where the rest of the file needs packages the extension host does not bundle.
+
+/// Upstream file, archive key, and the declarations the vendored components import from it.
+pub const GENERATED: &[(&str, &str, &[&str])] = &[
+    (
+        "packages/coding-agent/src/core/settings-manager.ts",
+        "pi-coding-agent/src/core/settings-manager.ts",
+        &["CACHE_WARMING_MODES"],
+    ),
+    (
+        "packages/coding-agent/src/core/http-dispatcher.ts",
+        "pi-coding-agent/src/core/http-dispatcher.ts",
+        &[
+            "DEFAULT_HTTP_IDLE_TIMEOUT_MS",
+            "HTTP_IDLE_TIMEOUT_CHOICES",
+            "parseHttpIdleTimeoutMs",
+            "formatHttpIdleTimeoutMs",
+        ],
+    ),
+];
+
+const DECLARATION_KINDS: [&str; 5] = ["const", "let", "var", "function", "class"];
+
+fn is_ident(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == '$'
+}
+
+fn words(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|c: char| !is_ident(c)).filter(|word| !word.is_empty())
+}
+
+/// The name a top-level line declares, as `(name, is_function)`.
+fn declared(line: &str) -> Option<(&str, bool)> {
+    let rest = line.strip_prefix("export ").unwrap_or(line);
+    let rest = rest.strip_prefix("async ").unwrap_or(rest);
+    let kind = DECLARATION_KINDS.iter().find(|kind| rest.starts_with(&format!("{kind} ")))?;
+    let name = rest[kind.len() + 1..].split(|c: char| !is_ident(c)).next().filter(|name| !name.is_empty())?;
+    Some((name, matches!(*kind, "function" | "class")))
+}
+
+/// Runtime bindings of the file's imports; `import type` and `type` entries are left out.
+fn imported(source: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    for statement in source.split(';').map(str::trim).filter(|text| text.starts_with("import ")) {
+        let Some((clause, _)) = statement["import ".len()..].split_once(" from ") else { continue };
+        if clause.starts_with("type ") {
+            continue;
+        }
+        let (default, braces) = match clause.split_once('{') {
+            Some((before, inside)) => (before, inside.trim_end_matches('}')),
+            None => (clause, ""),
+        };
+        for part in default.split(',').map(str::trim).filter(|part| !part.is_empty()) {
+            names.extend(part.rsplit(' ').next().map(str::to_string));
+        }
+        for entry in braces.split(',').map(str::trim).filter(|entry| !entry.is_empty() && !entry.starts_with("type ")) {
+            names.extend(entry.rsplit(' ').next().map(str::to_string));
+        }
+    }
+    names
+}
+
+/// End of the declaration that starts at `start`: the `;` of a variable, or the closing `}` of a
+/// function or class body, at bracket depth 0. Strings, templates, and comments are skipped.
+fn declaration_end(source: &str, start: usize, is_function: bool) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let (mut depth, mut i) = (0i32, start);
+    while i < bytes.len() {
+        match bytes[i] {
+            b'/' if bytes.get(i + 1) == Some(&b'/') => i = source[i..].find('\n').map_or(bytes.len(), |at| i + at),
+            b'/' if bytes.get(i + 1) == Some(&b'*') => i = source[i + 2..].find("*/").map(|at| i + at + 3)?,
+            quote @ (b'"' | b'\'') => {
+                i += 1;
+                while i < bytes.len() && bytes[i] != quote {
+                    i += if bytes[i] == b'\\' { 2 } else { 1 };
+                }
+            }
+            b'`' => {
+                let mut nested = 0;
+                i += 1;
+                while i < bytes.len() && (bytes[i] != b'`' || nested > 0) {
+                    match bytes[i] {
+                        b'\\' => i += 1,
+                        b'{' if nested > 0 || bytes[i - 1] == b'$' => nested += 1,
+                        b'}' if nested > 0 => nested -= 1,
+                        _ => {}
+                    }
+                    i += 1;
+                }
+            }
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => {
+                depth -= 1;
+                if depth == 0 && is_function && bytes[i] == b'}' {
+                    return Some(i + 1);
+                }
+            }
+            b';' if depth == 0 && !is_function => return Some(i + 1),
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// `names` from `source` (upstream `file`), in that order, as a module. Fails when a name has no
+/// top-level declaration, or a declaration uses an import or an unlisted top-level declaration.
+pub fn extract(file: &str, source: &str, names: &[&str]) -> Result<String, String> {
+    let mut starts = Vec::new();
+    let mut offset = 0;
+    for line in source.split_inclusive('\n') {
+        if let Some((name, is_function)) = declared(line) {
+            starts.push((name, is_function, offset));
+        }
+        offset += line.len();
+    }
+    let imports = imported(source);
+    let mut out = format!("// Generated by `cargo xtask vendor-js` from upstream {file}: {}.\n", names.join(", "));
+    for name in names {
+        let &(_, is_function, start) = starts
+            .iter()
+            .find(|(declared, ..)| declared == name)
+            .ok_or_else(|| format!("{file}: no top-level declaration of {name}"))?;
+        let end = declaration_end(source, start, is_function)
+            .ok_or_else(|| format!("{file}: the declaration of {name} does not end"))?;
+        let text = &source[start..end];
+        for word in words(text) {
+            if imports.iter().any(|import| import == word) {
+                return Err(format!("{file}: {name} uses the import {word}"));
+            }
+            if word != *name && !names.contains(&word) && starts.iter().any(|(declared, ..)| *declared == word) {
+                return Err(format!("{file}: {name} uses {word}, which is not extracted"));
+            }
+        }
+        out.push('\n');
+        out.push_str(text);
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SOURCE: &str = r#"import { EventEmitter } from "node:events";
+import * as undici from "undici";
+import type { Thing } from "./thing.ts";
+
+export const LIMIT = 5;
+export const CHOICES = [
+	{ label: "a;b", ms: 1 },
+] as const;
+
+function helper(): number {
+	return LIMIT;
+}
+
+export function format(ms: number): string {
+	const choice = CHOICES.find((item) => item.ms === ms);
+	if (choice) {
+		return choice.label;
+	}
+	return `${ms / 1000} sec { }`;
+}
+
+export function agent() {
+	return new undici.Agent();
+}
+
+export function viaHelper() {
+	return helper();
+}
+"#;
+
+    #[test]
+    fn copies_named_declarations_verbatim() {
+        let module = extract("x.ts", SOURCE, &["LIMIT", "CHOICES", "format"]).unwrap();
+        let expected = "// Generated by `cargo xtask vendor-js` from upstream x.ts: LIMIT, CHOICES, format.\n\nexport const LIMIT = 5;\n\nexport const CHOICES = [\n\t{ label: \"a;b\", ms: 1 },\n] as const;\n\nexport function format(ms: number): string {\n\tconst choice = CHOICES.find((item) => item.ms === ms);\n\tif (choice) {\n\t\treturn choice.label;\n\t}\n\treturn `${ms / 1000} sec { }`;\n}\n";
+        assert_eq!(module, expected);
+    }
+
+    #[test]
+    fn rejects_missing_and_dependent_declarations() {
+        assert_eq!(extract("x.ts", SOURCE, &["NOPE"]).unwrap_err(), "x.ts: no top-level declaration of NOPE");
+        assert_eq!(extract("x.ts", SOURCE, &["agent"]).unwrap_err(), "x.ts: agent uses the import undici");
+        let error = extract("x.ts", SOURCE, &["viaHelper"]).unwrap_err();
+        assert_eq!(error, "x.ts: viaHelper uses helper, which is not extracted");
+        assert_eq!(
+            extract("x.ts", SOURCE, &["format"]).unwrap_err(),
+            "x.ts: format uses CHOICES, which is not extracted"
+        );
+    }
+}

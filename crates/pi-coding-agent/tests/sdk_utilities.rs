@@ -479,3 +479,50 @@ async fn vertex_auth_asks_the_caller_context_for_the_adc_file() {
     assert_eq!(data["defaultCtxFalse"], json!([null, [adc]]), "{data}");
     assert_eq!(data["credentialPath"], json!([ambient, ["/cred/adc.json"]]), "{data}");
 }
+
+const SUBSCRIPTION: &str = r#"
+import { ModelRuntime } from '@earendil-works/pi-coding-agent';
+
+export default function (pi) {
+  pi.registerCommand('subscription', { handler: async () => {
+    const runtime = await ModelRuntime.create();
+    const providers = ['anthropic', 'openrouter', 'openai', 'groq'];
+    pi.appendEntry('subscription', providers.map((provider) => runtime.isUsingSubscription(provider)));
+  }});
+}
+"#;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn model_runtime_reports_subscriptions_from_stored_oauth() {
+    use pi_ai::auth::{ApiKeyCredential, Credential, OAuthCredential};
+    let setup = Setup {
+        files: vec![("subscription.ts", SUBSCRIPTION.into())],
+        load: vec!["subscription.ts"],
+        ..Setup::default()
+    };
+    let h = harness(setup).await;
+    let oauth = |access: &str| {
+        Credential::OAuth(OAuthCredential {
+            refresh: "r".into(),
+            access: access.into(),
+            expires: i64::MAX,
+            ..Default::default()
+        })
+    };
+    // Anthropic's OAuth flow is a subscription, OpenRouter's is not; openai has an API key, groq nothing.
+    let stored = [
+        ("anthropic", oauth("a")),
+        ("openrouter", oauth("o")),
+        ("openai", Credential::ApiKey(ApiKeyCredential { key: Some("sk".into()), env: None })),
+    ];
+    let store = h.session.model_runtime().credential_store();
+    for (provider, credential) in stored {
+        store.update(provider, Box::new(move |_| Box::pin(async move { Ok(Some(credential)) }))).await.unwrap();
+    }
+    let prompt = h.session.prompt("/subscription", Vec::new());
+    tokio::time::timeout(std::time::Duration::from_secs(20), prompt).await.unwrap().unwrap();
+    assert!(h.errors().is_empty(), "{:?}", h.errors());
+    let entry =
+        h.entries().into_iter().find(|entry| entry["customType"] == "subscription").expect("subscription entry");
+    assert_eq!(entry["data"], json!([true, false, false, false]));
+}

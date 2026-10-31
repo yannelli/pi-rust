@@ -221,6 +221,17 @@ pub trait ExtensionUi: Send + Sync {
     /// Render extension components again (`tui.requestRender()`).
     fn request_render(&self, _force: bool) {}
 
+    /// Upstream `tui.stop()`: give the terminal to another program until [`Self::start_tui`].
+    fn stop_tui(&self) {}
+
+    /// Upstream `tui.start()` after [`Self::stop_tui`].
+    fn start_tui(&self) {}
+
+    /// Upstream `editInExternalEditor`: the edited text, or the message of the failure.
+    async fn external_editor(&self, _command: &str, _content: &str) -> Result<String, String> {
+        Err("pi has no terminal for an external editor in this mode".into())
+    }
+
     /// Terminal `(columns, rows)` for extension components.
     fn terminal_size(&self) -> (u16, u16) {
         (80, 24)
