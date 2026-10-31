@@ -19,14 +19,9 @@ pub(crate) struct PromptCapabilities {
     pub images: bool,
 }
 
-/// A `file:` URI: `file:///C:/x` for a drive path and `file://server/share` for a UNC path.
-fn file_uri(path: &Path) -> String {
-    let shown = super::client::agent_path(path).replace('\\', "/");
-    match shown.strip_prefix("//") {
-        Some(share) => format!("file://{share}"),
-        None if shown.starts_with('/') => format!("file://{shown}"),
-        None => format!("file:///{shown}"),
-    }
+/// The percent-encoded `file:` URI of an absolute path, also for Windows `\\?\` paths.
+fn file_uri(path: &Path) -> Option<String> {
+    reqwest::Url::from_file_path(path).ok().map(String::from)
 }
 
 /// `@path` mentions of files that exist inside `cwd`, as `resource_link` blocks.
@@ -43,7 +38,7 @@ pub(crate) fn file_links(text: &str, cwd: &Path) -> Vec<Value> {
         if !path.is_file() {
             continue;
         }
-        let uri = file_uri(&path);
+        let Some(uri) = file_uri(&path) else { continue };
         if links.iter().any(|link| link["uri"] == uri.as_str()) {
             continue;
         }
@@ -124,6 +119,20 @@ mod tests {
     use crate::types::AssistantMessage;
 
     #[test]
+    fn file_uris_percent_encode_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let uri = file_uri(&root.join("my notes #1 100%.md")).unwrap();
+        assert!(uri.starts_with("file:///") && uri.ends_with("/my%20notes%20%231%20100%25.md"), "{uri}");
+        assert!(!uri.contains('?') && !uri.contains('\\'), "no verbatim prefix: {uri}");
+        let plain = Path::new(&super::super::client::agent_path(&root)).join("my notes #1 100%.md");
+        assert_eq!(reqwest::Url::parse(&uri).unwrap().to_file_path().unwrap(), plain);
+        #[cfg(unix)]
+        assert!(file_uri(&root.join(r"back\slash.md")).unwrap().ends_with("/back%5Cslash.md"));
+        assert_eq!(file_uri(Path::new("relative.md")), None);
+    }
+
+    #[test]
     fn prompts_link_mentioned_files_and_skip_own_replies() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("notes.md"), "x").unwrap();
@@ -146,6 +155,10 @@ mod tests {
         assert!(uri.starts_with("file:///") && uri.ends_with("/notes.md") && !uri.contains(['?', '\\']), "{uri}");
         assert_eq!(blocks.len(), 3);
         assert_eq!(build(&messages[..2], 2, caps, dir.path()), vec![json!({"type": "text", "text": CONTINUE})]);
+        std::fs::write(dir.path().join("a#1%.md"), "x").unwrap();
+        let odd = build(&[Message::user("see @a#1%.md")], 0, caps, dir.path());
+        let uri = odd[1]["uri"].as_str().unwrap();
+        assert!(uri.ends_with("/a%231%25.md"), "{uri}");
         let command = build(&[Message::user("/acp:web rust acp")], 0, caps, dir.path());
         assert_eq!(command[0]["text"], "/web rust acp");
     }
