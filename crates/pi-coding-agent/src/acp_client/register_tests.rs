@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use pi_ai::auth::InMemoryCredentialStore;
-use pi_ai::providers::acp::{self, AcpHost, Choice, PermissionRequest, Selector, SessionInfo};
+use pi_ai::providers::acp::{self, AcpHost, AgentCommand, Choice, PermissionRequest, Selector, SessionInfo};
 use serde_json::json;
 
 use super::{host, register};
@@ -53,6 +53,14 @@ async fn enabled_agents_become_providers_with_advertised_models() {
     assert!(runtime.get_model("kiro-acp", "claude-y").is_some());
     assert!(runtime.get_model("kiro-acp", "claude-x").is_none());
     assert_eq!(installed.recall_session("kiro-acp", "p1").as_deref(), Some("s9"));
+
+    let web = AgentCommand { name: "web".into(), description: "Search".into(), hint: None };
+    let unknown = SessionInfo { commands_known: false, commands: Vec::new(), ..info.clone() };
+    installed.session_changed(&SessionInfo { commands_known: true, commands: vec![web], ..info.clone() });
+    installed.session_changed(&unknown);
+    assert_eq!(host::commands(dir.path(), "kiro-acp").len(), 1, "a session that sent no update keeps them");
+    installed.session_changed(&SessionInfo { commands_known: true, ..unknown });
+    assert!(host::commands(dir.path(), "kiro-acp").is_empty(), "an empty update clears the editor commands");
 
     let request = PermissionRequest {
         provider: "kiro-acp".into(),

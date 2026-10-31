@@ -146,6 +146,7 @@ pub(crate) struct Runtime {
     /// The session cost in USD from the last `usage_update`.
     pub cost_usd: Option<f64>,
     pub commands: Vec<AgentCommand>,
+    pub commands_known: bool,
     /// The `size` of the last `usage_update`.
     pub context_window: Option<u64>,
     /// The pi model ID of the last turn.
@@ -227,6 +228,7 @@ impl Runtime {
             seen: 0,
             cost_usd: None,
             commands: Vec::new(),
+            commands_known: false,
             context_window: None,
             pi_model: super::DEFAULT_MODEL.into(),
             last_reply: None,
@@ -243,6 +245,7 @@ impl Runtime {
             acp_session: self.session_id.clone(),
             selectors: self.selectors.clone(),
             commands: self.commands.clone(),
+            commands_known: self.commands_known,
             pi_model: self.pi_model.clone(),
             context_window: self.context_window,
             images: self.capabilities.images,

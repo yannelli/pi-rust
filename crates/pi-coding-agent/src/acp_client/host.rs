@@ -207,8 +207,12 @@ impl AcpHost for PiAcpHost {
                     models_changed |= windows.insert(model, size) != Some(size);
                 }
             }
-            if !info.commands.is_empty() && state.commands.get(provider) != Some(&info.commands) {
-                state.commands.insert(provider.clone(), info.commands.clone());
+            let stored = state.commands.get(provider).map_or(&[][..], Vec::as_slice);
+            if info.commands_known && stored != info.commands.as_slice() {
+                match info.commands.is_empty() {
+                    true => state.commands.remove(provider),
+                    false => state.commands.insert(provider.clone(), info.commands.clone()),
+                };
                 changed = true;
             }
             changed |= models_changed;

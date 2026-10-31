@@ -306,6 +306,9 @@ async fn agent_commands_context_size_and_the_acp_prefix() {
     assert_eq!(names, ["web", "compact"]);
     assert_eq!(info.commands[0].hint.as_deref(), Some("query"));
     assert_eq!((info.context_window, info.pi_model.as_str(), info.images), (Some(200_000), "default", true));
+    ask("default", vec![Message::user("drop-commands")], options(&id, CancellationToken::new())).await;
+    let info = acp::session_info(PROVIDER, &id).unwrap();
+    assert!(info.commands_known && info.commands.is_empty(), "an empty update removes the commands");
 }
 
 #[tokio::test]

@@ -203,6 +203,7 @@ impl Agent {
                 chunk("agent_message_chunk", &format!("mcp={}", names.join(",")));
             }
             "proxy-call" => self.proxy_call(),
+            "drop-commands" => update(json!({"sessionUpdate": "available_commands_update", "availableCommands": []})),
             "wait-child" => {
                 let child = std::process::Command::new("sleep").arg("30").spawn().map(|child| child.id());
                 chunk("agent_message_chunk", &format!("child={}", child.unwrap_or_default()));

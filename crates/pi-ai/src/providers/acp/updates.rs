@@ -32,7 +32,10 @@ pub(crate) fn apply(runtime: &mut Runtime, update: &Value) -> bool {
             let mode = runtime.selectors.iter().find(|selector| selector.category == "mode").map(|s| s.id.clone());
             runtime.set_current(&mode.unwrap_or_default(), update["currentModeId"].as_str().unwrap_or_default());
         }
-        "available_commands_update" => runtime.commands = commands(update),
+        "available_commands_update" => {
+            runtime.commands = commands(update);
+            runtime.commands_known = true;
+        }
         "usage_update" => match update["size"].as_u64().filter(|size| *size > 0) {
             Some(size) => runtime.context_window = Some(size),
             None => return false,

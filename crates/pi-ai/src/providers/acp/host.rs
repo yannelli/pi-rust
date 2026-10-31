@@ -63,6 +63,8 @@ pub struct SessionInfo {
     pub acp_session: String,
     pub selectors: Vec<Selector>,
     pub commands: Vec<AgentCommand>,
+    /// Whether the agent sent `available_commands_update`; an empty list then means no commands.
+    pub commands_known: bool,
     /// The pi model ID of the last turn: `default` or a model the agent offers.
     pub pi_model: String,
     /// The context window from the last `usage_update`; `None` until the agent sends a size.
