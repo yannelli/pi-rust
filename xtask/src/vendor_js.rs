@@ -153,6 +153,7 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     let out = out.unwrap_or_else(|| root.join("crates/pi-coding-agent/src/extensions/vendor.json.gz"));
     let mut files = if update_sdk { read_archive(&out)? } else { collect(&upstream)? };
     add_sdk(&upstream, &mut files)?;
+    crate::vendor_tui_capture::apply(&mut files)?;
     crate::vendor_assets::add_repo_assets(root, &mut files)?;
     let json = serde_json::to_vec(&files).map_err(|error| error.to_string())?;
     let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
