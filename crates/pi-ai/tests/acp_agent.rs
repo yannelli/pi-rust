@@ -90,6 +90,7 @@ fn exits(pid: &str) -> bool {
     false
 }
 
+#[cfg(unix)]
 fn field<'a>(text: &'a str, key: &str) -> &'a str {
     text.split(&format!("{key}=")).nth(1).and_then(|rest| rest.split_whitespace().next()).unwrap_or_default()
 }
