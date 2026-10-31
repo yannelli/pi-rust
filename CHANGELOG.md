@@ -2,6 +2,29 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.9.0] - 2026-10-31
+
+### Breaking Changes
+
+- **durable:** add windowed views and paged transcripts (upstream f3255de76) ([07c49ff](https://github.com/yannelli/pi-rust/commit/07c49ffd0903d437e2d9634219a408c2c4a17906))
+
+### Added
+
+- **extensions:** vendor the editor, footer, model and settings selectors, and tool execution components ([dc102ee](https://github.com/yannelli/pi-rust/commit/dc102ee78dc5440869e2c70d55d9edf3a30c0cfb))
+- **extensions:** vendor the session, tree, and theme selectors and the login dialog ([a94760f](https://github.com/yannelli/pi-rust/commit/a94760f687d8302856355fb7ef083a3eb8604b0d))
+- **ai:** usage for builtin-OAuth slots with model scope, credits, and retry-after ([8a11994](https://github.com/yannelli/pi-rust/commit/8a119946066d8f72838e5cb0c0f2b3396d4f4c44))
+- **extensions:** vendor the standalone interactive components of pi-coding-agent ([0ec93f4](https://github.com/yannelli/pi-rust/commit/0ec93f41c5d8da8c4643618cb0c330577812579f))
+
+### Fixed
+
+- **tui:** cancel timers safely during callback and thread teardown ([51a0c47](https://github.com/yannelli/pi-rust/commit/51a0c47a635c5dbaea1bab9e317bf8580fc0d72c))
+- **ai:** build fixes for usage errors and the slot test login lookup ([914e8b2](https://github.com/yannelli/pi-rust/commit/914e8b265670291d8d8d550b29adda03511ba748))
+- **ai:** bound ISO and HTTP date fields before the date math ([bf2e7b3](https://github.com/yannelli/pi-rust/commit/bf2e7b38df5db41f964ece3970dd6e87dda8eeb8))
+- **ai:** exact usage window seconds, bounded times, and no Antigravity slot alias ([5950991](https://github.com/yannelli/pi-rust/commit/59509912ae585261d152606629a6f4df76de13f9))
+- **js:** keep the sign of zero and format infinities in Intl.NumberFormat as Node does ([1ad2632](https://github.com/yannelli/pi-rust/commit/1ad2632251ab6a35dec9156a4c39cfeba69b257a))
+- **js:** check the receiver and keep length 0 for Number#toLocaleString ([d2b2874](https://github.com/yannelli/pi-rust/commit/d2b2874bc70e8ba35ea8b78cb24f832cc611d97d))
+- **js:** format Number#toLocaleString through Intl.NumberFormat as Node does ([b9c8e22](https://github.com/yannelli/pi-rust/commit/b9c8e229a840436201383474c38eebb9b1ed8231))
+
 ## [0.8.9] - 2026-10-31
 
 ### Fixed
