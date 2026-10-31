@@ -79,7 +79,7 @@ pub(crate) fn bounded_http_date(header: &str) -> Option<&str> {
 
 /// A whole number of milliseconds that fits an exact `f64` and an `i64`.
 pub(crate) fn ms_from_f64(ms: f64) -> Option<i64> {
-    (ms.is_finite() && ms.abs() < 9.0e15).then(|| ms as i64)
+    (ms.is_finite() && ms.abs() < 9.0e15).then_some(ms as i64)
 }
 
 /// Unix milliseconds of a reset time: an ISO 8601 string (with its fraction) or a number of

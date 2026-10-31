@@ -8,7 +8,7 @@ use super::{Fetched, UsageWindow, json_response, number};
 
 const WEEK: u64 = 10_080;
 
-async fn billing(base_url: &str, token: &str, query: &str) -> Result<Value, String> {
+async fn billing(base_url: &str, token: &str, query: &str) -> Result<Value, super::UsageError> {
     let request = crate::http::shared_client()
         .get(format!("{}/v1/billing{query}", base_url.trim_end_matches('/')))
         .bearer_auth(token)

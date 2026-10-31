@@ -19,7 +19,9 @@ fn service(base_url: &str, credentials: Vec<(&str, Credential)>) -> UsageService
     let credentials: BTreeMap<String, Credential> =
         credentials.into_iter().map(|(provider, credential)| (provider.to_string(), credential)).collect();
     let store = Arc::new(InMemoryCredentialStore::new(credentials));
-    let resolver = AuthResolver::new(store, Arc::new(crate::auth::oauth::builtin_oauth));
+    // As the host registers them: `anthropic-2` logs in with the flow of `anthropic`.
+    let flow = |id: &str| crate::auth::oauth::builtin_oauth(id.strip_suffix("-2").unwrap_or(id));
+    let resolver = AuthResolver::new(store, Arc::new(flow));
     let url = || base_url.to_string();
     let endpoints = UsageEndpoints { anthropic: url(), chatgpt: url(), cursor: url(), grok: url() };
     UsageService::with_endpoints(Arc::new(resolver), endpoints)
