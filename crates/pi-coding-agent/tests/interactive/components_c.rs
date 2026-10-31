@@ -39,7 +39,7 @@ export default function (pi) {
 	} });
 	pi.registerCommand("edit-settings", { handler: async (_args, ctx) => {
 		const settings = SettingsManager.create(ctx.cwd);
-		const callbacks = new Proxy({}, { get: () => () => {} });
+		const callbacks = new Proxy({}, { get: (target, name) => target[name] ?? (() => {}) });
 		const result = await ctx.ui.custom((_tui, _theme, _keys, done) => {
 			const selector = new SettingsSelectorComponent(
 				settingsConfig(settings.getCompactionEnabled()),
