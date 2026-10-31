@@ -138,3 +138,25 @@ async fn extension_stderr_keeps_its_label_through_a_path_alias() {
     })
     .await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_native_panel_repaints_after_a_height_only_resize() {
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/native/fixture.mjs");
+    let package = serde_json::json!({"name": "native-fixture", "pi": {"native": [{
+        "command": env!("CARGO_BIN_EXE_pi"),
+        "args": [fixture.display().to_string()],
+        "env": {"PI_JS_FORK": "1"},
+    }]}});
+    let package: &'static str = Box::leak(package.to_string().into_boxed_str());
+    local(async {
+        let ui =
+            start(Options { files: vec![(".pi/extensions/native/package.json", package)], ..Options::default() }).await;
+        ui.submit("/native-panel").await;
+        ui.wait_until("30 rows", |ui| ui.screen().contains("height 30")).await;
+        ui.terminal.borrow_mut().resize(100, 12);
+        ui.wait_until("12 rows", |ui| ui.screen().contains("height 12")).await;
+        ui.terminal.borrow_mut().resize(60, 12);
+        ui.wait_until("60 columns", |ui| ui.screen().contains("width 60 height 12")).await;
+    })
+    .await;
+}

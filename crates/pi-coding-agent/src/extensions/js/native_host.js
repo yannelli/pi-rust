@@ -68,6 +68,8 @@ export function footerJson() {
 /** The ctx snapshot sent with events, tool calls, commands, and shortcuts. */
 export function snapshot(state, ctx) {
 	const sessionManager = safe(() => ctx.sessionManager);
+	const size = safe(() => ctx.mode) === "tui" ? safe(() => call("ui.terminalSize", 0)) : null;
+	const rows = size?.[1];
 	return {
 		cwd: safe(() => ctx.cwd),
 		mode: safe(() => ctx.mode),
@@ -81,7 +83,8 @@ export function snapshot(state, ctx) {
 		isIdle: safe(() => ctx.isIdle(), true),
 		isProjectTrusted: safe(() => ctx.isProjectTrusted(), false),
 		contextUsage: toJson(safe(() => ctx.getContextUsage())),
-		terminalWidth: safe(() => ctx.mode) === "tui" ? safe(() => call("ui.terminalSize", 0)[0]) : null,
+		terminalWidth: size?.[0] ?? null,
+		terminalHeight: Number.isInteger(rows) && rows > 0 ? rows : null,
 		flags: Object.fromEntries(state.flags.map((name) => [name, toJson(safe(() => state.pi.getFlag(name)))])),
 		footer: footerJson(),
 	};

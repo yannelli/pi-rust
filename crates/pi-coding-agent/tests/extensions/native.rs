@@ -27,6 +27,7 @@ struct NativeUi {
     git_branch: Mutex<Value>,
     footer_reads: std::sync::atomic::AtomicUsize,
     autocomplete: Mutex<Vec<ComponentFactory>>,
+    rows: Mutex<Option<u16>>,
 }
 
 impl NativeUi {
@@ -104,7 +105,7 @@ impl ExtensionUi for NativeUi {
     }
 
     fn terminal_size(&self) -> (u16, u16) {
-        (77, 24)
+        (77, self.rows.lock().unwrap().unwrap_or(24))
     }
 
     fn footer_data(&self, kind: &str) -> Value {
@@ -235,7 +236,7 @@ async fn tools_events_and_widgets_cross_the_process_boundary() {
         let resized = render_until(&mut component, 40, "width 40");
         [first, resized]
     });
-    assert_eq!(widget, [vec!["widget for tui".to_string(), "flag=on".into()], vec!["width 40".into()]]);
+    assert_eq!(widget, [vec!["widget for tui".to_string(), "flag=on".into()], vec!["width 40 height 24".into()]]);
 
     h.session.prompt("hello", Vec::new()).await.unwrap();
     let transcript = h.transcript();
@@ -246,6 +247,30 @@ async fn tools_events_and_widgets_cross_the_process_boundary() {
     let system = pi_ai::transcript::flatten_context(&h.provider.requests()[0]).system_prompt.unwrap_or_default();
     assert!(system.contains("From the native fixture."), "{system}");
     assert!(h.errors().is_empty(), "{:?}", h.errors());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ui_resize_sends_the_height_and_reports_height_changes_alone() {
+    let (h, ui) = native(Vec::new()).await;
+    eventually(|| ui.widget("native").is_some()).await;
+    let factory = ui.widget("native").unwrap();
+    let set_rows = |rows| *ui.rows.lock().unwrap() = Some(rows);
+    let lines = tokio::task::block_in_place(|| {
+        let mut component = factory.create().unwrap();
+        let tall = render_until(&mut component, 40, "width 40 height 24");
+        set_rows(12);
+        let short = render_until(&mut component, 40, "width 40 height 12");
+        set_rows(0);
+        let unknown = render_until(&mut component, 40, "width 40 height none");
+        let wider = render_until(&mut component, 50, "width 50 height none");
+        [tall, short, unknown, wider].concat()
+    });
+    let expected = ["width 40 height 24", "width 40 height 12", "width 40 height none", "width 50 height none"];
+    assert_eq!(lines, expected);
+
+    set_rows(12);
+    h.session.prompt("/native-ctx", Vec::new()).await.unwrap();
+    assert_eq!(entry_data(&h, "native-ctx").unwrap()["terminalHeight"], json!(12));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -261,7 +286,7 @@ async fn commands_reach_dialogs_panels_and_the_model() {
     assert_eq!(data("native-llm"), Some(json!({"text": "llm answer"})));
     let calls = ui.calls();
     assert!(calls.contains(&"select: Pick one [red, blue]".to_string()), "{calls:?}");
-    assert!(calls.contains(&"panel: Panel one|width 30".to_string()), "{calls:?}");
+    assert!(calls.contains(&"panel: Panel one|width 30 height 24".to_string()), "{calls:?}");
     assert!(h.errors().is_empty(), "{:?}", h.errors());
 }
 
@@ -353,7 +378,7 @@ async fn requests_without_a_ctx_are_answered_during_initialize() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_ctx_snapshot_has_scoped_models_model_endpoint_and_terminal_width() {
+async fn the_ctx_snapshot_has_scoped_models_model_endpoint_and_terminal_size() {
     let (h, _ui) = native(Vec::new()).await;
     let runtime = h.session.model_runtime().clone();
     let other = runtime.get_model("local", "other").unwrap();
@@ -363,6 +388,7 @@ async fn the_ctx_snapshot_has_scoped_models_model_endpoint_and_terminal_width() 
     let data = entry_data(&h, "native-ctx").unwrap();
     assert_eq!(data["scopedModels"], json!([{"provider": "local", "id": "other", "thinkingLevel": "high"}]));
     assert_eq!(data["terminalWidth"], json!(77));
+    assert_eq!(data["terminalHeight"], json!(24));
     assert_eq!(data["baseUrl"], json!("http://unused"));
     assert_eq!(data["compat"], Value::Null);
     let keys = data["keys"].to_string();
@@ -372,6 +398,7 @@ async fn the_ctx_snapshot_has_scoped_models_model_endpoint_and_terminal_width() 
     print.session.prompt("/native-ctx", Vec::new()).await.unwrap();
     let data = entry_data(&print, "native-ctx").unwrap();
     assert_eq!(data["terminalWidth"], Value::Null);
+    assert_eq!(data["terminalHeight"], Value::Null);
     assert_eq!(data["scopedModels"], json!([]));
 }
 
