@@ -44,7 +44,7 @@ const registrations = {
 	entryRenderers: ["native-note"],
 	commands: [
 		"native-ask", "native-panel", "native-llm", "native-crash", "native-write", "native-probe",
-		"native-ctx", "native-find", "native-usage", "native-input", "native-exec", "native-settle", "native-llm-headers", "native-log",
+		"native-ctx", "native-find", "native-usage", "native-input", "native-exec", "native-exec-cap", "native-settle", "native-llm-headers", "native-log",
 		"native-settings", "native-oauth", "native-auth", "native-login", "native-card", "native-order", "native-restyle", "native-render-count", "native-usage-slot",
 	].map((name) => ({ name })),
 	flags: [{ name: "native-flag", type: "string", default: "off" }],
@@ -153,6 +153,10 @@ async function runCommand({ name, ctx }) {
 	} else if (name === "native-exec") {
 		const { stdout, code } = await request("exec", { command: "cat", stdin: "piped text" });
 		await append("native-exec", { stdout, code });
+	} else if (name === "native-exec-cap") {
+		const capped = await request("exec", { command: process.execPath, args: ["--version"], maxBuffer: 3 });
+		const invalid = await answer("exec", { command: process.execPath, args: ["--version"], maxBuffer: -1 });
+		await append("native-exec-cap", { capped, invalid: invalid.code });
 	} else if (name === "native-log") {
 		process.stderr.write("warn: careful\nerror: broke\nplain line\n");
 	} else if (name === "native-settle") {

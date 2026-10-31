@@ -295,8 +295,12 @@ export function hostMethods(state) {
 			return done();
 		},
 		exec: async (p, signal) => {
-			const options = { cwd: p.cwd, timeout: p.timeout, stdin: p.stdin, signal };
-			return toJson(await pi.exec(p.command, p.args ?? [], options));
+			const options = { cwd: p.cwd, timeout: p.timeout, stdin: p.stdin, maxBuffer: p.maxBuffer ?? undefined, signal };
+			try {
+				return toJson(await pi.exec(p.command, p.args ?? [], options));
+			} catch (error) {
+				throw error instanceof RangeError ? rpcError(-32602, error.message) : error;
+			}
 		},
 		"pi.call": (p) => piCall(state, p),
 	};

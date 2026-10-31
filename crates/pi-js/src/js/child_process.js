@@ -258,9 +258,19 @@ class ChildProcess extends EventEmitter {
     }
   }
   kill(signal = "SIGTERM") {
+    const signals = require("os").constants.signals;
+    const name = signal === 0 ? "SIG0" : typeof signal === "number" ? signalName(signal) : typeof signal === "string" ? signal.toUpperCase() : undefined;
+    if (signal !== 0 && !signals[name]) {
+      throw errors.codeError(TypeError, "ERR_UNKNOWN_SIGNAL", `Unknown signal: ${signal}`);
+    }
     if (this._id === null || this.exitCode !== null || this.signalCode !== null) return false;
-    const name = typeof signal === "number" ? signalName(signal) : String(signal);
-    const sent = nativeChild.kill(this._id, name);
+    let sent;
+    try {
+      sent = nativeChild.kill(this._id, name);
+    } catch (error) {
+      if (error.code === "ESRCH") return false;
+      throw error;
+    }
     if (sent) this.killed = true;
     return sent;
   }

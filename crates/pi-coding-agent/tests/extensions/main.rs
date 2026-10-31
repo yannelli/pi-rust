@@ -5,6 +5,7 @@ mod api;
 mod events;
 mod examples;
 mod examples_more;
+mod exec;
 mod harness;
 mod host;
 #[path = "../agent_session/http_mock.rs"]
@@ -23,3 +24,5 @@ mod provider_compose;
 mod provider_hooks;
 mod reaches_tools;
 mod runtime;
+#[path = "../interactive/watchdog.rs"]
+mod watchdog;
