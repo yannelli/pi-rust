@@ -70,6 +70,8 @@ async fn missing_cwd_prompt_offers_continue_and_cancel() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn session_picker_selects_or_cancels() {
     let _theme = global_state();
+    // `select_session_on` installs the process-wide keybindings.
+    let _keys = crate::interactive_components::test_support::setup();
     local(async {
         let root = tempfile::tempdir().unwrap();
         let (cwd, agent_dir) = (root.path().join("work"), root.path().join("agent"));
