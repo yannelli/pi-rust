@@ -2,6 +2,13 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.8.9] - 2026-10-31
+
+### Fixed
+
+- **chord:** unlock ownership before inherited descriptors close ([bac8585](https://github.com/yannelli/pi-rust/commit/bac858568fe1a044775fb9f02552d5b151638c02))
+- **chord:** retain kernel ownership while probing socket-file locks ([db4fd5e](https://github.com/yannelli/pi-rust/commit/db4fd5e3fc6b40d743feff1c72c58afd13f6bc31))
+
 ## [0.8.8] - 2026-10-31
 
 ### Added
