@@ -94,6 +94,18 @@ const CODING_AGENT_FILES: &[&str] = &[
     "utils/open-browser.ts",
     "utils/paths.ts",
     "utils/shell.ts",
+    "core/experimental.ts",
+    "core/settings-defaults.ts",
+    "core/usage-totals.ts",
+    "modes/interactive/components/extension-editor.ts",
+    "modes/interactive/components/footer.ts",
+    "modes/interactive/components/model-selector.ts",
+    "modes/interactive/components/settings-selector.ts",
+    "modes/interactive/components/settings-submenu.ts",
+    "modes/interactive/components/tool-execution.ts",
+    "modes/interactive/model-catalog-refresh.ts",
+    "modes/interactive/model-search.ts",
+    "utils/abort.ts",
 ];
 
 /// Bare specifiers inside bundled files and the bundled file each one resolves to.
@@ -103,6 +115,7 @@ const BARE_IMPORTS: &[(&str, &str)] = &[
     ("partial-json", "partial-json/dist/index.js"),
     ("@earendil-works/pi-ai", "host/ai.js"),
     ("@earendil-works/pi-telemetry", "pi-telemetry/src/index.ts"),
+    ("@earendil-works/pi-ai/utils/retry", "pi-ai/src/utils/retry.ts"),
 ];
 
 pub fn run(args: &[String], root: &Path) -> Result<(), String> {
@@ -153,6 +166,10 @@ fn add_sdk(upstream: &Path, files: &mut BTreeMap<String, String>) -> Result<(), 
             let source = read(&upstream.join("packages").join(package).join("src").join(name))?;
             files.insert(key.clone(), rewrite_bare_imports(&key, &source));
         }
+    }
+    for (path, key, names) in crate::vendor_extract::GENERATED {
+        let source = read(&upstream.join(path))?;
+        files.insert(key.to_string(), crate::vendor_extract::extract(path, &source, names)?);
     }
     Ok(())
 }
