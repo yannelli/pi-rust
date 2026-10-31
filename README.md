@@ -105,6 +105,7 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. This se
 - Word movement in Chinese, Japanese, Korean (CJK), and Thai text uses ICU4X dictionaries. Thus some word boundaries are different from `Intl.Segmenter` in Node.
 - `pi-env` looks for remote daemons in a `pi-env-daemons` folder next to the `pi` program. Each release has a `pi-env-daemons-<tag>.tar.gz` archive with the daemons for Linux, Android (Termux), macOS, and Windows on x86-64 and arm64. Extract this archive in the folder that contains `pi`.
 - `pi experimental` and its commands `server`, `client`, `durable`, and `vacation` need `PI_EXPERIMENTAL=1`, as in upstream pi. `server` and `client` use Unix sockets. On Windows, they show a message that they need Unix. Upstream pi also has no Windows transport.
+- When a local shell command exits, pi-durable still stops waiting for output 100 ms after the exit or the last chunk after it, as upstream does. It then delivers queued chunks and any chunk the readers finish reading before they observe the stop signal. On Unix it also takes at most 64 KiB more per stream if readable without waiting. On Windows it starts no further read. See [Platform](docs/parity/GAPS.md#platform).
 - Extension and login `select` menus show at most 10 options and fewer in short terminals, with a `(n/total)` counter, so the selected option stays visible. Upstream pi shows all options.
 
 ### Additions
