@@ -98,6 +98,8 @@ pub const DIFFERENCES: &[&str] = &[
     "child_process: messages sent after a handle do not wait for the peer's NODE_HANDLE_ACK (Node queues \
      them, and resends the handle after a NODE_HANDLE_NACK), and bytes that a sent socket had read in the \
      sender but not yet emitted as 'data' are dropped instead of emitted there",
+    "child_process (non-Linux Unix): a child spawned on another thread between receiving an IPC socket \
+     and marking it close-on-exec can inherit it; Node closes inherited descriptors by default on macOS",
     "dgram: addMembership, dropMembership, and the source-specific variants need a bound socket (Node \
      binds an unbound one to a random port first)",
     "cluster: round-robin hands each connection to the next connected worker in turn rather than to the \
