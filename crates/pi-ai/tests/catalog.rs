@@ -10,48 +10,48 @@ use serde_json::Value;
 
 /// Upstream model counts per provider file: (provider, chat, image, classifier).
 const COUNTS: [(&str, usize, usize, usize); 42] = [
-    ("amazon-bedrock", 194, 0, 0),
+    ("amazon-bedrock", 197, 0, 0),
     ("ant-ling", 3, 0, 0),
     ("anthropic", 17, 0, 0),
-    ("azure", 44, 0, 0),
+    ("azure", 45, 0, 0),
     ("baseten", 14, 0, 0),
     ("cerebras", 2, 0, 0),
-    ("cloudflare-ai-gateway", 58, 0, 0),
+    ("cloudflare-ai-gateway", 59, 0, 0),
     ("cloudflare-workers-ai", 19, 0, 5),
     ("deepseek", 2, 0, 0),
     ("fireworks", 29, 0, 0),
     ("github-copilot", 27, 0, 0),
-    ("google", 24, 0, 0),
-    ("google-vertex", 14, 0, 0),
+    ("google-vertex", 13, 0, 0),
+    ("google", 23, 0, 0),
     ("groq", 7, 0, 0),
     ("huggingface", 78, 0, 0),
     ("kimi-coding", 6, 0, 0),
     ("meta", 6, 0, 0),
-    ("minimax", 4, 0, 0),
     ("minimax-cn", 4, 0, 0),
-    ("mistral", 32, 0, 0),
-    ("moonshotai", 6, 0, 0),
+    ("minimax", 4, 0, 0),
+    ("mistral", 34, 0, 0),
     ("moonshotai-cn", 6, 0, 0),
-    ("nvidia", 22, 0, 0),
-    ("openai", 43, 0, 1),
+    ("moonshotai", 6, 0, 0),
+    ("nvidia", 21, 0, 0),
     ("openai-codex", 8, 0, 0),
-    ("opencode", 80, 0, 2),
+    ("openai", 44, 0, 1),
     ("opencode-go", 30, 0, 0),
-    ("openrouter", 399, 63, 30),
-    ("qwen-token-plan", 21, 0, 0),
+    ("opencode", 79, 0, 2),
+    ("openrouter", 392, 64, 33),
     ("qwen-token-plan-cn", 21, 0, 0),
     ("qwen-token-plan-individual", 9, 0, 0),
-    ("radius", 32, 0, 0),
+    ("qwen-token-plan", 21, 0, 0),
+    ("radius", 28, 0, 0),
     ("together", 15, 0, 0),
     ("typesafe", 0, 0, 1),
-    ("vercel-ai-gateway", 303, 0, 14),
+    ("vercel-ai-gateway", 303, 0, 15),
     ("xai", 4, 0, 0),
-    ("xiaomi", 3, 0, 0),
     ("xiaomi-token-plan-ams", 2, 0, 0),
     ("xiaomi-token-plan-cn", 2, 0, 0),
     ("xiaomi-token-plan-sgp", 2, 0, 0),
-    ("zai", 7, 0, 0),
+    ("xiaomi", 3, 0, 0),
     ("zai-coding-cn", 4, 0, 0),
+    ("zai", 7, 0, 0),
 ];
 
 /// Provider to `[chat, image, classifier]` counts.
@@ -111,8 +111,8 @@ fn totals_per_type_match_upstream() {
     for model in upstream_models() {
         totals[type_index(model.model_type.as_deref().expect("every bundled model declares its type"))] += 1;
     }
-    assert_eq!(totals, [1603, 63, 53]);
-    assert_eq!(upstream_models().len(), 1719);
+    assert_eq!(totals, [1596, 64, 57]);
+    assert_eq!(upstream_models().len(), 1717);
     assert_eq!(bundled_counts().len(), 42);
 }
 

@@ -8,6 +8,12 @@ fn bundled_catalog_parses() {
 }
 
 #[test]
+fn bundled_catalog_has_its_generation_time() {
+    let stamp = builtin_model_data_generated_at().unwrap();
+    assert!(stamp.len() == 24 && stamp.ends_with('Z') && stamp.as_bytes()[10] == b'T', "{stamp}");
+}
+
+#[test]
 fn models_json_adds_providers_and_overrides() {
     let mut registry = ModelRegistry::builtin();
     let anthropic = registry.models().iter().find(|model| model.provider == "anthropic").unwrap().id.clone();

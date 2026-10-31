@@ -61,14 +61,22 @@ fn builtin_info(runner: &ExtensionRunner, name: &str) -> Result<Value, JsError> 
     }))
 }
 
+/// Catalog reads; `model` and `models` take a model type, where null matches every type.
 fn catalog(kind: &str, args: &Args) -> Value {
     let models = pi_ai::models::builtin_models();
+    let of_type = |at: usize| {
+        let wanted = args.opt_str(at);
+        move |model: &&pi_ai::Model| {
+            wanted.as_deref().is_none_or(|wanted| pi_ai::model_operations::model_type(model) == wanted)
+        }
+    };
     match kind {
         "model" => {
             let (provider, id) = (args.opt_str(1), args.opt_str(2));
             json!(
                 models
                     .iter()
+                    .filter(of_type(3))
                     .find(|model| Some(&model.provider) == provider.as_ref() && Some(&model.id) == id.as_ref())
             )
         }
@@ -77,12 +85,13 @@ fn catalog(kind: &str, args: &Args) -> Value {
             let models: Vec<_> = models
                 .iter()
                 .filter(|model| provider.as_ref().is_none_or(|wanted| &model.provider == wanted))
+                .filter(of_type(2))
                 .collect();
             json!(models)
         }
+        "generatedAt" => json!(pi_ai::models::builtin_model_data_generated_at()),
         _ => {
             let mut providers: Vec<&str> = models.iter().map(|model| model.provider.as_str()).collect();
-            providers.dedup();
             providers.sort_unstable();
             providers.dedup();
             json!(providers)
@@ -169,6 +178,7 @@ pub(crate) fn sync(runner: &ExtensionRunner, op: &str, args: &Args) -> Result<Ho
         "tools.builtinInfo" => builtin_info(runner, &args.str(0)?)?,
         "ai.catalog" => catalog(&args.str(0)?, args),
         "ai.envApiKey" => json!(pi_ai::env::get_env_api_key(&args.str(0)?)),
+        "ai.credentialEnvVars" => json!(pi_ai::env::credential_env_vars()),
         "ai.hasApi" => {
             let api = args.str(0)?;
             json!(pi_ai::api_provider(&api).is_some() || runner.has_js_api(&api))

@@ -28,6 +28,15 @@ pub fn builtin_models() -> &'static [Model] {
     &BUILTIN
 }
 
+/// When upstream generated the data behind `models.json`, as the ISO 8601 text of its manifest.
+pub fn builtin_model_data_generated_at() -> Option<&'static str> {
+    static GENERATED_AT: LazyLock<Option<String>> = LazyLock::new(|| {
+        let manifest: serde_json::Value = serde_json::from_str(include_str!("../models.manifest.json")).ok()?;
+        manifest.get("generatedAt")?.as_str().map(str::to_string)
+    });
+    GENERATED_AT.as_deref()
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ModelsFileError {
     #[error("Failed to load models.json: {source}\n\nFile: {path}")]
