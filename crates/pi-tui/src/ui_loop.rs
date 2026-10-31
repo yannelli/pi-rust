@@ -196,11 +196,11 @@ pub fn set_interval(period: Duration, callback: impl FnMut() + 'static) -> Timer
     add_timer(period, Some(period), Rc::new(RefCell::new(callback)))
 }
 
-/// Cancels a timer. Unknown or finished timers are ignored.
+/// Cancels a timer. Unknown timers and an already-destroyed UI loop are ignored.
 pub fn clear_timer(id: TimerId) {
-    LOOP.with(|state| {
-        state.timers.borrow_mut().remove(&id.0);
-    });
+    let removed = LOOP.try_with(|state| state.timers.borrow_mut().remove(&id.0));
+    // Dropping a callback may cancel another timer; release the map borrow first.
+    drop(removed);
 }
 
 /// Whether the timer is still scheduled.
