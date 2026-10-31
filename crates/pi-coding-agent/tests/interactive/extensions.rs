@@ -3,7 +3,10 @@
 
 use pi_ai::providers::faux::FauxResponse;
 
-use crate::harness::{Options, local, start};
+use crate::harness::{Options, Watchdog, local, start};
+
+/// How long a native interactive test may run before the watchdog ends the test process.
+const NATIVE_LIMIT: std::time::Duration = std::time::Duration::from_secs(90);
 
 const EXTENSION: &str = r#"import { Text } from "@earendil-works/pi-tui";
 export default function (pi) {
@@ -159,7 +162,10 @@ fn drawn_width(screen: &str, prefix: &str) -> Option<usize> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_renderers_draw_tool_rows_messages_and_entries_in_the_transcript() {
     let package = native_package();
+    let dog = Watchdog::start("native_renderers_draw_tool_rows_messages_and_entries_in_the_transcript", NATIVE_LIMIT);
+    let dog = &dog;
     local(async {
+        dog.stage("start");
         let ui = start(Options {
             files: vec![(".pi/extensions/native/package.json", package)],
             responses: vec![
@@ -169,20 +175,26 @@ async fn native_renderers_draw_tool_rows_messages_and_entries_in_the_transcript(
             ..Options::default()
         })
         .await;
+        dog.stage("submit the tool call");
         ui.submit("draw seven").await;
+        dog.stage("wait for the result row");
         ui.wait_for("RESULT drew coerced 7 at").await;
+        dog.stage("wait for the call row");
         ui.wait_for("CALL ").await;
         let wide = drawn_width(&ui.screen(), "CALL ").expect("a call row with its width");
         assert!((80..100).contains(&wide), "call width {wide}:\n{}", ui.screen());
+        dog.stage("resize to 70 columns");
         ui.terminal.borrow_mut().resize(70, 30);
         ui.wait_until("a narrower call row", |ui| drawn_width(&ui.screen(), "CALL ").is_some_and(|width| width < 70))
             .await;
+        dog.stage("post the card and the note");
         ui.submit("/native-card").await;
         ui.wait_for("CARD teal card at").await;
         ui.wait_for("NOTE plum at").await;
         let screen = ui.screen();
         assert_eq!(drawn_width(&screen, "CARD teal card at"), Some(70), "{screen}");
         assert!(screen.contains("NOTE plum at 70 closed"), "{screen}");
+        dog.stage("tear down");
     })
     .await;
 }
@@ -190,6 +202,7 @@ async fn native_renderers_draw_tool_rows_messages_and_entries_in_the_transcript(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_native_panel_repaints_after_a_height_only_resize() {
     let package = native_package();
+    let _dog = Watchdog::start("a_native_panel_repaints_after_a_height_only_resize", NATIVE_LIMIT);
     local(async {
         let ui =
             start(Options { files: vec![(".pi/extensions/native/package.json", package)], ..Options::default() }).await;
@@ -247,6 +260,7 @@ impl pi_ai::auth::OAuthAuth for FakeAnthropic {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_auth_login_runs_the_login_dialog_of_pi() {
     let package = native_package();
+    let _dog = Watchdog::start("native_auth_login_runs_the_login_dialog_of_pi", NATIVE_LIMIT);
     let oauth: pi_ai::auth::OAuthLookup = std::sync::Arc::new(|id: &str| {
         (id == "anthropic").then(|| std::sync::Arc::new(FakeAnthropic) as std::sync::Arc<dyn pi_ai::auth::OAuthAuth>)
     });
