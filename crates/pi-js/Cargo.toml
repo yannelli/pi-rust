@@ -116,3 +116,7 @@ harness = false
 [[test]]
 name = "node_cluster"
 harness = false
+
+[[test]]
+name = "node_ipc_cloexec"
+harness = false
