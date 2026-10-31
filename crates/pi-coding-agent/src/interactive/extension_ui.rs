@@ -55,8 +55,10 @@ impl UiMirror {
         *lock(&self.editor_text) = text.to_string();
     }
 
-    pub fn set_size(&self, columns: usize, rows: usize) {
-        *lock(&self.size) = (columns.min(u16::MAX as usize) as u16, rows.min(u16::MAX as usize) as u16);
+    /// Returns whether the size changed.
+    pub fn set_size(&self, columns: usize, rows: usize) -> bool {
+        let size = (columns.min(u16::MAX as usize) as u16, rows.min(u16::MAX as usize) as u16);
+        std::mem::replace(&mut *lock(&self.size), size) != size
     }
 
     pub fn set_footer(&self, branch: Option<String>, statuses: &BTreeMap<String, String>, providers: usize) {
