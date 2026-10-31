@@ -443,7 +443,17 @@
   }
   defineLazy("crypto", () => loadBuiltin("crypto").webcrypto);
   defineLazy("WebAssembly", () => loadBuiltin("internal/webassembly"));
-  if (typeof globalThis.Intl === "undefined") defineLazy("Intl", () => loadBuiltin("internal/intl"));
+  if (typeof globalThis.Intl === "undefined") {
+    defineLazy("Intl", () => loadBuiltin("internal/intl"));
+    // Node formats numbers for `toLocaleString` with Intl.NumberFormat; QuickJS adds no grouping.
+    Object.defineProperty(Number.prototype, "toLocaleString", {
+      value: function toLocaleString(locales, options) {
+        return new Intl.NumberFormat(locales, options).format(this);
+      },
+      writable: true,
+      configurable: true,
+    });
+  }
   defineLazy("navigator", () => ({
     hardwareConcurrency: loadBuiltin("os").availableParallelism(),
     language: "en-US",

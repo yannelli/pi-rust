@@ -128,3 +128,17 @@ async fn util_mime_type_parses_like_node() {
     });
     assert_same_keys(&actual, &expected);
 }
+
+const LOCALE_SCRIPT: &str = r##"
+return [(1234).toLocaleString(), (1234.5678).toLocaleString(), (-1234567).toLocaleString(), (0.5).toLocaleString(),
+  (1234).toLocaleString("en-US", { maximumFractionDigits: 0 }), NaN.toLocaleString()];
+"##;
+
+#[tokio::test]
+async fn number_to_locale_string_groups_digits_like_node() {
+    let (_dir, root) = tempdir();
+    let (runtime, _capture) = runtime(&root);
+    let actual = run_cjs(&runtime, &root, LOCALE_SCRIPT).await;
+    let expected = serde_json::json!(["1,234", "1,234.568", "-1,234,567", "0.5", "1,234", "NaN"]);
+    assert_eq!(actual, expected);
+}
