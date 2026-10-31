@@ -104,6 +104,9 @@ impl SqliteExecutor for ControlledSettlementDatabase {
     async fn run(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<()> {
         self.delegate.run(sql, params).await
     }
+    async fn run_counted(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<u64> {
+        self.delegate.run_counted(sql, params).await
+    }
     async fn get(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<Option<SqliteRow>> {
         self.delegate.get(sql, params).await
     }

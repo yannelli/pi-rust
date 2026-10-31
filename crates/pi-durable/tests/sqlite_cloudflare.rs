@@ -27,7 +27,10 @@ struct PlainHandle {
 }
 
 fn execute(connection: &Mutex<Connection>, sql: &str, params: &[SqliteValue]) -> DurableResult<Vec<SqliteRow>> {
-    let connection = connection.lock().unwrap();
+    execute_on(&connection.lock().unwrap(), sql, params)
+}
+
+fn execute_on(connection: &Connection, sql: &str, params: &[SqliteValue]) -> DurableResult<Vec<SqliteRow>> {
     let fail = |error: rusqlite::Error| DurableError::storage(error.to_string());
     if params.is_empty() && sql.trim().trim_end_matches(';').contains(';') {
         connection.execute_batch(sql).map_err(fail)?;
@@ -61,6 +64,15 @@ fn execute(connection: &Mutex<Connection>, sql: &str, params: &[SqliteValue]) ->
     Ok(found)
 }
 
+/// Like the Durable Object adapter: the statement, then `SELECT changes()`, since a cursor's `rowsWritten` counts index
+/// writes too.
+fn counted(connection: &Mutex<Connection>, sql: &str, params: &[SqliteValue]) -> DurableResult<u64> {
+    let connection = connection.lock().unwrap();
+    execute_on(&connection, sql, params)?;
+    let rows = execute_on(&connection, "SELECT changes() AS changes", &[])?;
+    rows.first().map_or(Ok(0), |row| row.integer("changes").map(|changes| changes as u64))
+}
+
 impl PlainHandle {
     fn check(&self) -> DurableResult<()> {
         if self.active.load(Ordering::SeqCst) {
@@ -79,6 +91,10 @@ impl SqliteExecutor for PlainHandle {
     async fn run(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<()> {
         let _guard = self.check()?;
         execute(&self.connection, sql, params).map(drop)
+    }
+    async fn run_counted(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<u64> {
+        let _guard = self.check()?;
+        counted(&self.connection, sql, params)
     }
     async fn get(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<Option<SqliteRow>> {
         let _guard = self.check()?;
@@ -99,6 +115,10 @@ impl SqliteExecutor for PlainDatabase {
     async fn run(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<()> {
         let _guard = self.queue.lock().await;
         execute(&self.connection, sql, params).map(drop)
+    }
+    async fn run_counted(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<u64> {
+        let _guard = self.queue.lock().await;
+        counted(&self.connection, sql, params)
     }
     async fn get(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<Option<SqliteRow>> {
         let _guard = self.queue.lock().await;
@@ -235,4 +255,48 @@ async fn queues_operations_behind_an_active_transaction() {
     assert_eq!(rows[0].get("id"), Some(&SqliteValue::Integer(1)));
     assert_eq!(*order.lock().unwrap(), ["transaction", "read"]);
     database.close().await.unwrap();
+}
+
+#[path = "support/sqlite_changes.rs"]
+mod changes;
+
+#[tokio::test]
+async fn reports_the_rows_a_statement_changed_without_index_writes() {
+    let database = database();
+    assert_eq!(changes::run_changes(&*database).await.unwrap(), changes::RUN_CHANGES);
+    let in_transaction = pi_durable::storage::sqlite::transaction(&*database, |handle| {
+        Box::pin(async move {
+            let row = [SqliteValue::Text("t".into()), SqliteValue::Text("t/1".into()), SqliteValue::Integer(1)];
+            handle.run_counted("INSERT INTO changes_probe VALUES (?, ?, ?)", &row).await
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(in_transaction, 1);
+    assert_eq!(changes::trigger_changes(&*database).await.unwrap(), (1, 1));
+}
+
+// Upstream `test-workers/storage.test.ts` in workerd, on the stand-in: the probe row sits at `b/x`, outside the bulk
+// range, as upstream 973b74c55 fixed it; at `a/x` the bulk update would change 11 rows.
+#[tokio::test]
+async fn counts_the_workerd_probe_statements_without_index_writes() {
+    let database = database();
+    database
+        .exec("CREATE TABLE probe (id TEXT PRIMARY KEY, path TEXT NOT NULL, n INTEGER NOT NULL) STRICT, WITHOUT ROWID")
+        .await
+        .unwrap();
+    database.exec("CREATE INDEX probe_path ON probe (path, id)").await.unwrap();
+    database.exec("CREATE INDEX probe_n ON probe (n, id)").await.unwrap();
+    let text = |value: &str| SqliteValue::Text(value.into());
+    for i in 0..10 {
+        let row = [text(&format!("k{i}")), text(&format!("a/{i}")), SqliteValue::Integer(i)];
+        database.run("INSERT INTO probe VALUES (?, ?, ?)", &row).await.unwrap();
+    }
+    let probe = [text("x"), text("b/x"), SqliteValue::Integer(99)];
+    assert_eq!(database.run_counted("INSERT INTO probe VALUES (?, ?, ?)", &probe).await.unwrap(), 1);
+    assert_eq!(database.run_counted("UPDATE probe SET n = 0 WHERE id = ?", &[text("absent")]).await.unwrap(), 0);
+    let bulk = "UPDATE probe SET path = 'c/' || substr(path, 3) WHERE path >= 'a/' AND path < 'a0'";
+    assert_eq!(database.run_counted(bulk, &[]).await.unwrap(), 10);
+    let bulk_delete = "DELETE FROM probe WHERE path >= 'c/' AND path < 'c0'";
+    assert_eq!(database.run_counted(bulk_delete, &[]).await.unwrap(), 10);
 }

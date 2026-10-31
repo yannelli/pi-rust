@@ -223,5 +223,25 @@ async fn queues_database_calls_a_transaction_makes_on_the_database_itself() {
     database.close().await.unwrap();
 }
 
+#[tokio::test]
+async fn reports_the_rows_a_statement_changed_without_index_writes() {
+    let database = memory_database().await;
+    assert_eq!(changes::run_changes(&*database).await.unwrap(), changes::RUN_CHANGES);
+    let in_transaction = pi_durable::storage::sqlite::transaction(&*database, |handle| {
+        Box::pin(async move {
+            let row = [SqliteValue::Text("t".into()), SqliteValue::Text("t/1".into()), SqliteValue::Integer(1)];
+            handle.run_counted("INSERT INTO changes_probe VALUES (?, ?, ?)", &row).await
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(in_transaction, 1);
+    assert_eq!(changes::trigger_changes(&*database).await.unwrap(), (1, 1));
+    database.close().await.unwrap();
+}
+
+#[path = "support/sqlite_changes.rs"]
+mod changes;
+
 #[path = "support/sqlite_facade_settlement.rs"]
 mod settlement;
