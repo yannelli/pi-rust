@@ -1,6 +1,5 @@
-//! Port of upstream `test/harness-deferred-progress.test.ts`, generation partials. A crash fails the Harness: from then
-//! on nothing reaches Storage, as when the process dies, and the reopened Harness resumes from what was stored. The tool
-//! output, compaction, and third-party cases are not ported yet.
+//! Port of upstream `test/harness-deferred-progress.test.ts`: generation partials and tool restart counts. A crash
+//! fails the Harness, so nothing more reaches Storage. Other tool output, compaction, and third-party cases wait.
 
 mod support;
 
@@ -24,7 +23,16 @@ fn slow_setup(persist_within_ms: f64) -> ChatSetup {
     let setup =
         chat_setup(RegisterFauxProviderOptions { tokens_per_second: Some(80.0), token_size, ..Default::default() });
     let progress = Some(ProgressOverrides { persist_within_ms: Some(persist_within_ms), ..Default::default() });
-    setup.settings.lock().unwrap().progress = progress;
+    let mut settings = setup.settings.lock().unwrap();
+    settings.progress = progress;
+    // A request a crash interrupted is a failed attempt: retry at once.
+    settings.retry = Some(RetryOverrides {
+        enabled: Some(true),
+        max_retries: Some(5),
+        base_delay_ms: Some(1),
+        ..Default::default()
+    });
+    drop(settings);
     setup
 }
 
@@ -130,7 +138,7 @@ async fn hold_partials_in_memory_and_store_them_together_at_most_every_persist_w
 }
 
 #[tokio::test]
-async fn converts_what_was_stored_into_the_aborted_entry_after_a_crash_and_resends() {
+async fn converts_what_was_stored_into_the_aborted_entry_after_a_crash_and_retries_the_charged_attempt() {
     let storage = Arc::new(ControlledStorage::default());
     let setup = slow_setup(150.0);
     setup.faux.set_responses([answer(&long())]);
@@ -225,5 +233,56 @@ async fn stores_everything_held_at_a_clean_close() {
     let again = opened.harness.submission(submission.id, &ctx()).await.unwrap().unwrap();
     again.wait(&ctx()).await.unwrap();
     assert_eq!(answers(&all_entries(&opened.root).await)[0], (Some(at_close), "aborted".to_owned()));
+    opened.harness.close(&ctx()).await.unwrap();
+}
+
+/// The first tool slot's output in `pi.live` as Storage has it.
+async fn stored_output(storage: &ControlledStorage, id: ConversationId) -> Option<String> {
+    let live = stored_live(storage, id).await?;
+    live["tools"].as_array()?.first()?["output"].as_str().map(str::to_owned)
+}
+
+// A generation's request is charged at once after a crash, so its partials never stream with a count; a replay-safe
+// tool reruns and streams its output with one.
+#[tokio::test]
+async fn never_counts_progress_commits_as_progress_of_a_task_cut_off_again_and_again() {
+    let storage = Arc::new(ControlledStorage::default());
+    let setup = slow_setup(50.0);
+    let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = runs.clone();
+    let work = define_tool("work", "work", support::chat::no_parameters(), move |_, api, context| {
+        let run = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        async move {
+            let signal = context.abort_signal().unwrap();
+            for line in 0.. {
+                if signal.aborted() {
+                    break;
+                }
+                api.output(&format!("run {run} line {line}\n"))?;
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            Ok(ToolExecutionResult::default())
+        }
+    })
+    .with_replay(ToolReplay::Safe);
+    support::chat::add_tool(&setup, work);
+    setup.faux.set_responses([support::chat::call("work", "c1")]);
+    let mut opened = open(&storage, &setup).await;
+    opened.root.submit(SubmissionDraft::input("go"), &ctx()).await.unwrap();
+    for crashes in 1..=2u32 {
+        // This run stored output of its own, a progress commit, before it was cut off.
+        let (storage_ref, id, prefix) = (storage.clone(), opened.root.id, format!("run {crashes} "));
+        wait_for(|| {
+            let (storage, prefix) = (storage_ref.clone(), prefix.clone());
+            async move { stored_output(&storage, id).await.is_some_and(|output| output.starts_with(&prefix)) }
+        })
+        .await;
+        crash(&opened.harness).await;
+        opened = open(&storage, &setup).await;
+        let query = TaskQuery { kind: Some("pi.tool".into()), ..TaskQuery::default() };
+        let scan = move |tx: pi_durable::session::Tx| async move { tx.scan_tasks(query, 1, None).await };
+        let tool = opened.harness.commit(scan, &ctx()).await.unwrap().items.remove(0);
+        assert_eq!(tool.restarts, Some(crashes));
+    }
     opened.harness.close(&ctx()).await.unwrap();
 }

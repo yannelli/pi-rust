@@ -19,10 +19,9 @@ use crate::harness::scheduler::TaskRuntime;
 use crate::harness::tool::{ToolTaskInput, append_tool_result, harness_error, tool_task};
 use crate::harness::types::{ToolControl, ToolExecutionMode};
 use crate::ids::{ConversationId, EntryId, TaskId};
-use crate::models::DeferredCancelOptions;
 use crate::session::Tx;
 use crate::tasks::TaskOptions;
-use crate::types::{DraftHead, HostCallback, ReportFrom, TaskOutcome, TaskRecord, TaskState};
+use crate::types::{DraftHead, TaskOutcome, TaskRecord, TaskState};
 
 /// A tool task for call `call_id`, owned by the generation.
 async fn create_tool_task(tx: &Tx, owner: TaskId, assistant: EntryId, call_id: String) -> DurableResult<TaskId> {
@@ -85,6 +84,9 @@ pub(super) async fn start_tool_round(
 }
 
 pub(super) async fn tools_phase(task: TaskRecord, runtime: TaskRuntime, context: Context) -> DurableResult<()> {
+    if crate::harness::live::cut_off_too_often(&task, &runtime) {
+        return super::restart::end_cut_off(task, runtime, context).await;
+    }
     let GenerationCheckpoint::Tools { assistant, tools, pending } = decode(&task)? else {
         return Err(DurableError::error("Generation checkpoint is not in phase tools"));
     };
@@ -216,17 +218,8 @@ fn end_live(tx: &Tx, live: &crate::session::Draft<LiveState>, owner: TaskId, end
 /// Runs after the round's tool tasks are terminal; calls never started get `aborted` results.
 pub(super) async fn abort(task: TaskRecord, runtime: TaskRuntime, context: Context) -> DurableResult<()> {
     let checkpoint = decode(&task)?;
-    if let GenerationCheckpoint::Poll { model, handle, .. } = &checkpoint
-        && let Some(model) = runtime.models().get_model(&model.provider, &model.model_id)
-    {
-        let options = DeferredCancelOptions {
-            signal: Some(runtime.signal()),
-            telemetry: Some(context.telemetry()),
-            ..DeferredCancelOptions::default()
-        };
-        if let Err(error) = runtime.models().cancel_deferred(&model, handle, options).await {
-            runtime.report_from(&error, ReportFrom::Host(HostCallback::Models));
-        }
+    if let Some(poll) = super::restart::deferred_of(&checkpoint) {
+        super::restart::cancel_deferred(&runtime, &poll, &context).await;
     }
     let unstarted = match &checkpoint {
         GenerationCheckpoint::Tools { assistant, pending, .. } => {

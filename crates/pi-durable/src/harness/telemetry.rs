@@ -25,7 +25,7 @@ pub static DURABLE_TELEMETRY_SCHEMA: LazyLock<TelemetrySchemaDefinition> = LazyL
         "required": true,
         "description": "ReportInfo type.",
         "values": [
-            "session_failed", "task_faulted", "task_parked", "migration_failed", "task_outdated", "task_error",
+            "session_failed", "task_faulted", "task_interrupted", "migration_failed", "task_outdated", "task_error",
             "extension_error", "host_error", "listener_error",
         ],
     });
@@ -37,7 +37,7 @@ pub static DURABLE_TELEMETRY_SCHEMA: LazyLock<TelemetrySchemaDefinition> = LazyL
                 "type": "string",
                 "required": false,
                 "description": "Fixed report reason, when present.",
-                "values": ["threw", "restart_limit", "missing_task", "incompatible_task"],
+                "values": ["threw", "restart_limit", "interrupted", "missing_task", "incompatible_task"],
             },
             "extension": {"type": "string", "required": false, "description": "Registered extension name, when present."},
             "task.id": {"type": "number", "required": false, "description": "Task ID, when present.", "cardinality": "high"},

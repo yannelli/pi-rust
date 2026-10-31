@@ -315,13 +315,6 @@ impl Harness {
         self.0.scheduler.abort(id, context, false).await
     }
 
-    /// Run a task parked by `HarnessSettings::restart_limit` again: clears its restart count and enables scheduling.
-    /// Does nothing for a task that is not parked; fails for an unknown one.
-    pub async fn retry_task(&self, id: TaskId, context: &Context) -> DurableResult<()> {
-        self.0.session.assert_usable()?;
-        self.0.scheduler.retry(id, context).await
-    }
-
     pub async fn wait_for_task(&self, id: TaskId, context: &Context) -> DurableResult<TaskRecord> {
         self.0.scheduler.resume()?;
         self.0.scheduler.wait_for_task(id, context).await
