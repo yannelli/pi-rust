@@ -83,3 +83,48 @@ async fn record_driven_selectors_and_the_login_dialog_match_upstream() {
         assert_eq!(&data["scenario"]["rendered"][name], rendered, "{name}");
     }
 }
+
+const EXTENSION_C: &str = r#"
+import * as ca from '@earendil-works/pi-coding-agent';
+import { getKeybindings, resetCapabilitiesCache, setCapabilities } from '@earendil-works/pi-tui';
+import { scenario } from './component_scenario_c.mjs';
+
+const JPEG = '__JPEG__';
+
+/** A JPEG result on a Kitty terminal: the tool output must carry PNG data from the Rust converter. */
+function kittyImage() {
+  setCapabilities({ images: 'kitty', trueColor: true, hyperlinks: false });
+  try {
+    const tui = { requestRender() {}, terminal: { rows: 24, columns: 80 } };
+    const tool = new ca.ToolExecutionComponent('read', 'c2', { path: 'tiny.jpg' }, {}, undefined, tui, '/work');
+    tool.updateResult({ content: [{ type: 'image', data: JPEG, mimeType: 'image/jpeg' }], isError: false });
+    const output = tool.render(60).join('\n');
+    return [output.includes('iVBORw0KGgo'), output.includes(JPEG.slice(0, 40))];
+  } finally {
+    resetCapabilitiesCache();
+  }
+}
+
+export default function (pi) {
+  pi.registerCommand('components', { handler: async () => {
+    const classes = { ...ca, getKeybindings, resetCapabilitiesCache, setCapabilities };
+    pi.appendEntry('components', { scenario: await scenario(classes), image: kittyImage() });
+  }});
+}
+"#;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn session_backed_components_match_upstream_and_convert_images_in_rust() {
+    let jpeg = include_str!("fixtures/extensions/tiny_jpeg.b64").trim();
+    let files = vec![
+        ("components.ts", EXTENSION_C.replace("__JPEG__", jpeg)),
+        ("component_scenario_c.mjs", include_str!("fixtures/extensions/component_scenario_c.mjs").to_string()),
+    ];
+    let expected: Value = serde_json::from_str(include_str!("fixtures/extensions/component_scenario_c.json")).unwrap();
+    let data = components_entry(files).await;
+    assert_eq!(data["scenario"]["events"], expected["events"]);
+    for (name, rendered) in expected["rendered"].as_object().unwrap() {
+        assert_eq!(&data["scenario"]["rendered"][name], rendered, "{name}");
+    }
+    assert_eq!(data["image"], serde_json::json!([true, false]), "{data}");
+}

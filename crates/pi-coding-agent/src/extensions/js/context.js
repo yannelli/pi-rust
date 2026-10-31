@@ -31,7 +31,13 @@ export function createSessionManagerView(target) {
 export function createModelRegistry(target, makeStream) {
 	const read = (method, ...args) => optional(call("models.read", target, method, ...args));
 	return {
-		refresh: (options) => callAsync("models.refresh", target, options ?? {}),
+		refresh: async (options) => {
+			const { signal: _signal, ...rest } = options ?? {};
+			const result = await callAsync("models.refresh", target, rest);
+			// Upstream `ModelsRefreshResult`: errors as a Map of provider id to Error.
+			const errors = Object.entries(result?.errors ?? {}).map(([provider, message]) => [provider, new Error(message)]);
+			return { aborted: Boolean(result?.aborted), errors: new Map(errors) };
+		},
 		getError: () => read("getError"),
 		getAll: () => read("getAll") ?? [],
 		getAvailable: () => read("getAvailable") ?? [],

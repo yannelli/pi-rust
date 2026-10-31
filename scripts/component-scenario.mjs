@@ -24,7 +24,7 @@ registerHooks({
 const source = (path) => import(pathToFileURL(join(upstream, "packages", path)).href);
 const { initTheme } = await source("coding-agent/src/modes/interactive/theme/theme.ts");
 const { KeybindingsManager } = await source("coding-agent/src/core/keybindings.ts");
-const { getKeybindings, setKeybindings } = await source("tui/src/index.ts");
+const { getKeybindings, resetCapabilitiesCache, setCapabilities, setKeybindings } = await source("tui/src/index.ts");
 initTheme("dark");
 setKeybindings(new KeybindingsManager());
 
@@ -47,13 +47,18 @@ const FILES = {
 	SessionSelectorComponent: "session-selector",
 	ThemeSelectorComponent: "theme-selector",
 	TreeSelectorComponent: "tree-selector",
+	ExtensionEditorComponent: "extension-editor",
+	FooterComponent: "footer",
+	ModelSelectorComponent: "model-selector",
+	SettingsSelectorComponent: "settings-selector",
+	ToolExecutionComponent: "tool-execution",
 };
 const classes = {};
 for (const [name, file] of Object.entries(FILES)) {
 	classes[name] = (await source(`coding-agent/src/modes/interactive/components/${file}.ts`))[name];
 }
 
-classes.getKeybindings = getKeybindings;
+Object.assign(classes, { getKeybindings, resetCapabilitiesCache, setCapabilities });
 
 /** One line per top-level field and per rendered component, so the fixture stays short. */
 async function write(name) {
@@ -68,4 +73,5 @@ async function write(name) {
 
 await write("component_scenario");
 await write("component_scenario_b");
+await write("component_scenario_c");
 process.exit(0);

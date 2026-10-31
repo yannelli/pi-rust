@@ -2,6 +2,7 @@
 
 mod components;
 mod components_b;
+mod components_c;
 mod context;
 mod dialogs;
 mod diff;

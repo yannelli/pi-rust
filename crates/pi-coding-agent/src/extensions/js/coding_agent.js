@@ -21,6 +21,11 @@ export { LoginDialogComponent } from "../pi-coding-agent/src/modes/interactive/c
 export { SessionSelectorComponent } from "../pi-coding-agent/src/modes/interactive/components/session-selector.ts";
 export { ThemeSelectorComponent } from "../pi-coding-agent/src/modes/interactive/components/theme-selector.ts";
 export { TreeSelectorComponent } from "../pi-coding-agent/src/modes/interactive/components/tree-selector.ts";
+export { ExtensionEditorComponent } from "../pi-coding-agent/src/modes/interactive/components/extension-editor.ts";
+export { FooterComponent } from "../pi-coding-agent/src/modes/interactive/components/footer.ts";
+export { ModelSelectorComponent } from "../pi-coding-agent/src/modes/interactive/components/model-selector.ts";
+export { SettingsSelectorComponent } from "../pi-coding-agent/src/modes/interactive/components/settings-selector.ts";
+export { ToolExecutionComponent } from "../pi-coding-agent/src/modes/interactive/components/tool-execution.ts";
 export { BorderedLoader } from "../pi-coding-agent/src/modes/interactive/components/bordered-loader.ts";
 export { CustomEditor } from "../pi-coding-agent/src/modes/interactive/components/custom-editor.ts";
 export { DynamicBorder } from "../pi-coding-agent/src/modes/interactive/components/dynamic-border.ts";
