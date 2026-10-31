@@ -118,8 +118,133 @@ export default function (pi) {
       stored: (await store.read('p')).models.length,
       legacy: typeof ai.streamAnthropic === 'function' && typeof ai.streamSimpleOpenAIResponses === 'function',
       anthropicEnv: ai.ANTHROPIC_API_KEY_ENV,
-      unsupported: code(() => ai.createModels()),
+      createModels: typeof ai.createModels().setProvider,
       oauthKeys: Object.keys(oauth).filter((key) => key !== 'default'),
+    });
+  }});
+}
+"#;
+
+const CATALOG: &str = r#"
+import * as all from '@earendil-works/pi-ai/providers/all';
+import * as legacyAll from '@mariozechner/pi-ai/providers/all';
+import * as compat from '@earendil-works/pi-ai/compat';
+import * as models from '@earendil-works/pi-ai/models';
+import { getSelectPageIndex, replaceControlCharacters } from '@earendil-works/pi-tui';
+import * as legacyTui from '@mariozechner/pi-tui';
+
+const NAMES = ['builtinModels', 'builtinProviders', 'getAllBuiltinModels', 'getBuiltinClassifierModel',
+  'getBuiltinClassifierModels', 'getBuiltinImageModel', 'getBuiltinImageModels', 'getBuiltinModelDataGeneratedAt',
+  'radiusProvider'];
+const counts = (p) => [all.getBuiltinModels(p).length, all.getBuiltinImageModels(p).length,
+  all.getBuiltinClassifierModels(p).length, all.getAllBuiltinModels(p).length];
+const unused = () => { throw new Error('unused'); };
+
+export default function (pi) {
+  pi.registerCommand('catalog', { handler: async () => {
+    const signal = new AbortController().signal;
+    const providers = all.builtinProviders();
+    const byId = (id) => providers.find((provider) => provider.id === id);
+    const [groq, typesafe, anthropic] = ['groq', 'typesafe', 'anthropic'].map(byId);
+    const groqModel = all.getBuiltinModels('groq')[0];
+    const classifierId = all.getBuiltinClassifierModels('typesafe')[0].id;
+    const registry = all.builtinModels();
+    const custom = models.createModels();
+    custom.setProvider(models.createProvider({ id: 'local', models: [{ ...groqModel, provider: 'local' }],
+      auth: { apiKey: { name: 'k', resolve: async () => ({ auth: { apiKey: 'x' } }) } },
+      api: { stream: unused, streamSimple: unused } }));
+    const groqCtx = (key) => ({ env: async (name) => (name === 'GROQ_API_KEY' ? key : undefined), fileExists: async () => false });
+    process.env.GROQ_API_KEY = 'host-key';
+    const auth = {
+      stored: await groq.auth.apiKey.resolve({ ctx: groqCtx('ctx-key'), credential: { type: 'api_key', key: 'k1' }, signal }),
+      ctx: await groq.auth.apiKey.resolve({ ctx: groqCtx('ctx-key'), signal }),
+      empty: (await groq.auth.apiKey.resolve({ ctx: groqCtx(undefined), signal })) ?? null,
+      isolated: (await all.builtinModels({ authContext: groqCtx(undefined) }).getAuth('groq')) ?? null,
+      process: (await all.builtinModels().getAuth('groq'))?.auth ?? null,
+    };
+    delete process.env.GROQ_API_KEY;
+    const prompts = [];
+    const interaction = { signal, notify: () => {}, prompt: async (prompt) => (prompts.push(prompt), 'nope') };
+    const login = await all.radiusProvider({ gateway: 'http://127.0.0.1:9' }).auth.oauth.login(interaction)
+      .then(() => 'ok', (error) => error.message);
+    const kb = { matches: (data, id) => (data === 'up' && id === 'tui.select.pageUp') || (data === 'down' && id === 'tui.select.pageDown') };
+    pi.appendEntry('catalog', {
+      missing: NAMES.filter((name) => typeof all[name] !== 'function' || typeof legacyAll[name] !== 'function'),
+      schema: [compat.AI_TELEMETRY_SCHEMA.version, models.AI_TELEMETRY_SCHEMA === compat.AI_TELEMETRY_SCHEMA,
+        Object.keys(models.AI_TELEMETRY_SCHEMA.spans)],
+      chatOnly: compat.getModels('openrouter').every((model) => model.type === 'chat'),
+      counts: ['openrouter', 'typesafe'].map(counts),
+      types: [all.getBuiltinImageModel('openrouter', all.getBuiltinImageModels('openrouter')[0].id).type,
+        all.getBuiltinClassifierModel('typesafe', classifierId).type, all.getBuiltinModel('typesafe', classifierId) ?? null,
+        all.getBuiltinModels().length],
+      generatedAt: new Date(all.getBuiltinModelDataGeneratedAt()).toISOString(),
+      providerIds: providers.map((provider) => provider.id),
+      groq: [groq.name, groq.baseUrl, groq.getModels().length === all.getBuiltinModels('groq').length, groq.auth.apiKey.name],
+      typesafe: typesafe.getAllModels().map((model) => model.type),
+      auth,
+      oauth: [anthropic.auth.oauth.name, anthropic.auth.oauth.isSubscription,
+        await anthropic.auth.oauth.toAuth({ type: 'oauth', access: 'tok', refresh: 'r', expires: 1 })],
+      login: [login, prompts.map((prompt) => [prompt.type, prompt.message, prompt.options.map((option) => option.id)])],
+      registry: [registry.getProviders().length, registry.getModel('groq', groqModel.id).provider,
+        registry.getModelsOfType('classifier', 'typesafe').length],
+      custom: custom.getModels('local').map((model) => model.provider),
+      radius: [all.radiusProvider().getModels().length === all.getBuiltinModels('radius').length,
+        all.radiusProvider({ id: 'r2' }).getModels().every((model) => model.provider === 'r2'),
+        all.radiusProvider({ gateway: 'gateway.example' }).getModels().length],
+      tui: [replaceControlCharacters('a\x1b[31m\nb\x07'), getSelectPageIndex(kb, 'down', 2, 10, 5),
+        getSelectPageIndex(kb, 'down', 8, 10, 5), getSelectPageIndex(kb, 'up', 2, 10, 5),
+        getSelectPageIndex(kb, 'x', 2, 10, 5) ?? null, typeof legacyTui.getSelectPageIndex],
+    });
+  }});
+}
+"#;
+
+const OPERATIONS: &str = r#"
+import { builtinModels, getBuiltinClassifierModels, getBuiltinImageModels, radiusProvider } from '@earendil-works/pi-ai/providers/all';
+
+const KEYS = { TYPESAFE_API_KEY: 'ts-key', OPENROUTER_API_KEY: 'or-key' };
+const authContext = { env: async (name) => KEYS[name], fileExists: async () => false };
+
+export default function (pi) {
+  pi.registerCommand('operations', { handler: async () => {
+    const models = builtinModels({ authContext });
+    const classifier = { ...getBuiltinClassifierModels('typesafe')[0], baseUrl: '__BASE__/v1/' };
+    const image = { ...getBuiltinImageModels('openrouter')[0], baseUrl: '__BASE__/api/v1' };
+    const questions = { approved: { type: 'bool', instructions: 'Approved?', criteria: { true: 'Yes', false: 'No' } } };
+    const classified = await models.classify(classifier, { state: { text: 'Ship it.' }, questions }, {});
+    const images = await models.generateImages(image, { input: [{ type: 'text', text: 'Draw a dog' }] }, {});
+    const oauth = radiusProvider({ gateway: '__BASE__' }).auth.oauth;
+    const refreshed = await oauth.refresh({ type: 'oauth', access: 'old', refresh: 'r1', expires: 1 }, new AbortController().signal);
+    pi.appendEntry('operations', {
+      classified: [classified.provider, classified.stopReason, classified.answers.approved],
+      images: [images.provider, images.stopReason, images.responseId, images.output.map((block) => block.type)],
+      refreshed: [refreshed.type, refreshed.access, refreshed.refresh, refreshed.expires > Date.now()],
+    });
+  }});
+}
+"#;
+
+const VERTEX: &str = r#"
+import { builtinProviders } from '@earendil-works/pi-ai/providers/all';
+
+const PLACE = { GOOGLE_CLOUD_PROJECT: 'p', GOOGLE_CLOUD_LOCATION: 'l' };
+
+export default function (pi) {
+  pi.registerCommand('vertex', { handler: async () => {
+    const vertex = builtinProviders().find((provider) => provider.id === 'google-vertex');
+    const signal = new AbortController().signal;
+    const resolve = async (vars, exists, credential) => {
+      const asked = [];
+      const ctx = { env: async (name) => vars[name], fileExists: async (path) => (asked.push(path), exists) };
+      const result = await vertex.auth.apiKey.resolve({ ctx, credential, signal });
+      return [result?.source ?? null, asked];
+    };
+    pi.appendEntry('vertex', {
+      hostFileCtxFalse: await resolve({ ...PLACE, GOOGLE_APPLICATION_CREDENTIALS: '__HOST_ADC__' }, false),
+      missingFileCtxTrue: await resolve({ ...PLACE, GOOGLE_APPLICATION_CREDENTIALS: '/no/such/adc.json' }, true),
+      defaultCtxTrue: await resolve(PLACE, true),
+      defaultCtxFalse: await resolve(PLACE, false),
+      credentialPath: await resolve(PLACE, true, { type: 'api_key', env: { GOOGLE_APPLICATION_CREDENTIALS: '/cred/adc.json' } }),
     });
   }});
 }
@@ -215,7 +340,7 @@ async fn pi_ai_exports_embedded_utilities_and_type_only_oauth() {
     assert_eq!(data["stored"], 0);
     assert_eq!(data["legacy"], true);
     assert_eq!(data["anthropicEnv"], "ANTHROPIC_API_KEY");
-    assert_eq!(data["unsupported"], "ERR_PI_UNSUPPORTED: createModels is not supported in pi-rust");
+    assert_eq!(data["createModels"], "function");
     assert_eq!(data["oauthKeys"], json!([]));
 }
 
@@ -229,4 +354,128 @@ async fn agent_core_runs_a_prompt_on_the_default_stream_function() {
     }
     assert_eq!(data["exports"], json!(["function", "function"]));
     assert_eq!(h.provider.requests().len(), 1);
+}
+
+/// Models of `provider` by type in the bundled catalog: chat, image, classifier, and all.
+fn catalog_counts(provider: &str) -> Value {
+    let models: Vec<_> = pi_ai::models::builtin_models().iter().filter(|model| model.provider == provider).collect();
+    let of = |kind: &str| models.iter().filter(|model| pi_ai::model_operations::model_type(model) == kind).count();
+    json!([of("chat"), of("image"), of("classifier"), models.len()])
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn providers_all_reads_the_rust_catalog_and_builds_upstream_providers() {
+    let (_h, data) = run("catalog.ts", CATALOG.into(), "catalog", Vec::new()).await;
+    assert_eq!(data["missing"], json!([]), "{data}");
+    assert_eq!(data["schema"], json!([1, true, ["pi.ai.request", "pi.ai.poll"]]));
+    assert_eq!(data["chatOnly"], true);
+    assert_eq!(data["counts"], json!([catalog_counts("openrouter"), catalog_counts("typesafe")]));
+    assert_eq!(data["types"], json!(["image", "classifier", null, 0]));
+    assert_eq!(data["generatedAt"], pi_ai::models::builtin_model_data_generated_at().unwrap());
+    let ids = data["providerIds"].as_array().unwrap();
+    assert_eq!((ids.len(), &ids[0]), (42, &json!("amazon-bedrock")), "{data}");
+    assert!(ids.contains(&json!("radius")) && !ids.contains(&json!("cursor")), "{data}");
+    assert_eq!(data["groq"], json!(["Groq", "https://api.groq.com/openai/v1", true, "Groq API key"]));
+    assert_eq!(data["typesafe"], json!(["classifier"]));
+    let auth = &data["auth"];
+    assert_eq!(auth["stored"], json!({"auth": {"apiKey": "k1"}, "source": "stored credential"}), "{data}");
+    assert_eq!(auth["ctx"], json!({"auth": {"apiKey": "ctx-key"}, "source": "GROQ_API_KEY"}), "{data}");
+    assert_eq!((&auth["empty"], &auth["isolated"]), (&Value::Null, &Value::Null), "{data}");
+    assert_eq!(auth["process"], json!({"apiKey": "host-key"}), "{data}");
+    assert_eq!(data["oauth"], json!(["Anthropic (Claude Pro/Max)", true, {"apiKey": "tok"}]));
+    assert!(data["login"][0].as_str().unwrap().contains("Unknown Radius sign-in method: nope"), "{data}");
+    assert_eq!(data["login"][1], json!([["select", "Sign in to Radius:", ["browser", "device-code"]]]));
+    assert_eq!(data["registry"], json!([42, "groq", 1]));
+    assert_eq!(data["custom"], json!(["local"]));
+    assert_eq!(data["radius"], json!([true, true, 0]));
+    assert_eq!(data["tui"], json!(["a [31m b ", 7, 9, 0, null, "function"]));
+}
+
+/// A local server answering each request with the next JSON body; it records the path, the
+/// `authorization` header, and the body (JSON, else text) of every request.
+async fn json_server(bodies: Vec<Value>) -> (String, std::sync::Arc<std::sync::Mutex<Vec<Value>>>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorded = requests.clone();
+    tokio::spawn(async move {
+        for body in bodies {
+            let Ok((mut socket, _)) = listener.accept().await else { return };
+            let (mut buffer, mut chunk) = (Vec::new(), [0u8; 8192]);
+            let (head, request) = loop {
+                let read = socket.read(&mut chunk).await.unwrap();
+                buffer.extend_from_slice(&chunk[..read]);
+                let text = String::from_utf8_lossy(&buffer).to_string();
+                if let Some((head, rest)) = text.split_once("\r\n\r\n") {
+                    let length = head.lines().find_map(|line| {
+                        line.to_lowercase().strip_prefix("content-length:").map(|value| value.trim().parse().unwrap())
+                    });
+                    if rest.len() >= length.unwrap_or(0) || read == 0 {
+                        break (head.to_string(), rest.to_string());
+                    }
+                }
+            };
+            let header = |name: &str| {
+                head.lines()
+                    .find_map(|line| line.to_lowercase().strip_prefix(name).map(|value| value.trim().to_string()))
+            };
+            recorded.lock().unwrap().push(json!({
+                "path": head.split_whitespace().nth(1),
+                "authorization": header("authorization:"),
+                "body": serde_json::from_str::<Value>(&request).unwrap_or(Value::String(request)),
+            }));
+            let body = body.to_string();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+            let _ = socket.shutdown().await;
+        }
+    });
+    (base, requests)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn builtin_providers_classify_generate_images_and_refresh_through_rust() {
+    let classified = json!({"answers": {"approved": {"type": "noul", "noul": 0.95}}});
+    let images = json!({"id": "img-1", "choices": [{"message": {"content": "A dog.",
+        "images": [{"image_url": "data:image/png;base64,ZmFrZS1wbmc="}]}}]});
+    let token = json!({"access_token": "new", "refresh_token": "r2", "expires_in": 3600});
+    let (base, requests) = json_server(vec![classified, images, token]).await;
+    let (_h, data) = run("operations.ts", OPERATIONS.replace("__BASE__", &base), "operations", Vec::new()).await;
+    assert_eq!(data["classified"], json!(["typesafe", "stop", {"type": "bool", "probability": 0.95}]), "{data}");
+    assert_eq!(data["images"], json!(["openrouter", "stop", "img-1", ["text", "image"]]), "{data}");
+    let requests = requests.lock().unwrap().clone();
+    assert_eq!(
+        (&requests[0]["path"], &requests[0]["authorization"]),
+        (&json!("/v1/systemone"), &json!("bearer ts-key"))
+    );
+    assert_eq!(requests[0]["body"]["questions"]["approved"]["type"], "noul");
+    assert_eq!(
+        (&requests[1]["path"], &requests[1]["authorization"]),
+        (&json!("/api/v1/chat/completions"), &json!("bearer or-key"))
+    );
+    assert_eq!(requests[1]["body"]["messages"][0]["content"][0]["text"], "Draw a dog");
+    assert_eq!(data["refreshed"], json!(["oauth", "new", "r2", true]), "{data}");
+    assert_eq!(requests[2]["path"], "/v1/oauth/token");
+    let form = requests[2]["body"].as_str().unwrap();
+    assert!(form.contains("grant_type=refresh_token") && form.contains("refresh_token=r1"), "{form}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn vertex_auth_asks_the_caller_context_for_the_adc_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let host_adc = dir.path().join("adc.json");
+    std::fs::write(&host_adc, "{}").unwrap();
+    let source = VERTEX.replace("__HOST_ADC__", &host_adc.display().to_string().replace('\\', "/"));
+    let (_h, data) = run("vertex.ts", source, "vertex", Vec::new()).await;
+    let adc = "~/.config/gcloud/application_default_credentials.json";
+    let ambient = "ambient credentials";
+    assert_eq!(data["hostFileCtxFalse"][0], Value::Null, "{data}");
+    assert_eq!(data["missingFileCtxTrue"], json!([ambient, ["/no/such/adc.json"]]), "{data}");
+    assert_eq!(data["defaultCtxTrue"], json!([ambient, [adc]]), "{data}");
+    assert_eq!(data["defaultCtxFalse"], json!([null, [adc]]), "{data}");
+    assert_eq!(data["credentialPath"], json!([ambient, ["/cred/adc.json"]]), "{data}");
 }

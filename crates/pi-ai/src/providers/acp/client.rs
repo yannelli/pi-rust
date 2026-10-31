@@ -2,11 +2,12 @@
 //! must be inside the session directory.
 
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
+use super::checkpoints::Checkpoints;
 use super::connection::{Connection, Incoming};
 use super::host::{PermissionRequest, host};
 use super::terminal::Terminals;
@@ -19,7 +20,12 @@ pub(crate) struct ClientContext {
     pub pi_session: String,
     pub cwd: PathBuf,
     pub terminals: Terminals,
+    /// A one-shot session, such as a compaction summary: no writes, terminals, or permissions.
+    pub read_only: bool,
+    pub checkpoints: Arc<Mutex<Checkpoints>>,
 }
+
+const READ_ONLY: &str = "pi runs this request read-only";
 
 fn normalize(path: &Path) -> PathBuf {
     let mut normal = PathBuf::new();
@@ -53,9 +59,23 @@ fn resolve(path: &Path) -> PathBuf {
     resolved
 }
 
-/// `path` when it is absolute and inside `cwd`.
+/// `path` as an agent gets it: without the `\\?\` prefix that `canonicalize` adds on Windows,
+/// under which Windows reads `/` as part of a name.
+pub(crate) fn agent_path(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    if let Some(share) = text.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{share}");
+    }
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => rest.to_string(),
+        _ => text.into_owned(),
+    }
+}
+
+/// `path` when it is absolute and inside `cwd`. On Windows, `/` separates names too.
 pub(crate) fn inside(cwd: &Path, path: &str) -> Result<PathBuf, String> {
-    let candidate = Path::new(path);
+    let path = if cfg!(windows) { path.replace('/', "\\") } else { path.to_string() };
+    let candidate = Path::new(&path);
     if !candidate.is_absolute() {
         return Err(format!("{path} is not an absolute path"));
     }
@@ -84,7 +104,10 @@ fn write_text_file(context: &ClientContext, params: &Value) -> Result<Value, Str
         std::fs::create_dir_all(parent).map_err(|error| format!("Cannot create {}: {error}", parent.display()))?;
     }
     let content = params["content"].as_str().unwrap_or_default();
+    let mut checkpoints = context.checkpoints.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    checkpoints.before_write(&path);
     std::fs::write(&path, content).map_err(|error| format!("Cannot write {}: {error}", path.display()))?;
+    checkpoints.after_write(&context.pi_session, &path);
     Ok(Value::Null)
 }
 
@@ -134,7 +157,12 @@ pub(crate) fn handle(
     let (connection, context) = (connection.clone(), context.clone());
     tokio::spawn(async move {
         let params = &event.params;
-        let result = match event.method.as_str() {
+        let method = event.method.as_str();
+        if context.read_only && (method == "fs/write_text_file" || method.starts_with("terminal/")) {
+            return connection.respond_error(id, -32603, READ_ONLY);
+        }
+        let result = match method {
+            "session/request_permission" if context.read_only => Ok(json!({"outcome": {"outcome": "cancelled"}})),
             "session/request_permission" => Ok(permission(&context, params, &cancel).await),
             "fs/read_text_file" => read_text_file(&context, params),
             "fs/write_text_file" => write_text_file(&context, params),
@@ -150,4 +178,29 @@ pub(crate) fn handle(
             Err(message) => connection.respond_error(id, -32603, &message),
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agents_get_paths_without_the_verbatim_prefix() {
+        assert_eq!(agent_path(Path::new(r"\\?\C:\Users\me\work")), r"C:\Users\me\work");
+        assert_eq!(agent_path(Path::new(r"\\?\UNC\server\share\work")), r"\\server\share\work");
+        assert_eq!(agent_path(Path::new(r"\\?\Volume{1}\work")), r"\\?\Volume{1}\work");
+        assert_eq!(agent_path(Path::new("/home/me/work")), "/home/me/work");
+    }
+
+    #[test]
+    fn agent_paths_with_forward_slashes_stay_inside() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir(root.join("sub")).unwrap();
+        let expected = root.join("sub").join("b.txt");
+        for base in [agent_path(&root), root.display().to_string()] {
+            assert_eq!(inside(&root, &format!("{base}/sub/b.txt")), Ok(expected.clone()), "{base}");
+        }
+        assert!(inside(&root, &format!("{}/../elsewhere.txt", agent_path(&root))).is_err());
+    }
 }

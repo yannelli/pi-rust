@@ -16,6 +16,7 @@ const HOST_FILES: &[(&str, &str)] = &[
     ("ai_extras.js", include_str!("js/ai_extras.js")),
     ("api.js", include_str!("js/api.js")),
     ("bridge.js", include_str!("js/bridge.js")),
+    ("builtin_providers.js", include_str!("js/builtin_providers.js")),
     ("coding_agent.js", include_str!("js/coding_agent.js")),
     ("coding_utils.js", include_str!("js/coding_utils.js")),
     ("coding_unsupported.js", include_str!("js/coding_unsupported.js")),
@@ -29,6 +30,7 @@ const HOST_FILES: &[(&str, &str)] = &[
     ("native_render.js", include_str!("js/native_render.js")),
     ("native_rpc.js", include_str!("js/native_rpc.js")),
     ("native_ui.js", include_str!("js/native_ui.js")),
+    ("providers_all.js", include_str!("js/providers_all.js")),
     ("runner.js", include_str!("js/runner.js")),
     ("sdk_session.js", include_str!("js/sdk_session.js")),
     ("sdk_storage.js", include_str!("js/sdk_storage.js")),
@@ -75,13 +77,7 @@ pub(crate) fn virtual_modules() -> VirtualModules {
     modules.insert("@earendil-works/pi-ai/compat", reexport("host/ai.js"));
     modules.insert("@earendil-works/pi-ai/models", reexport("host/models.js"));
     modules.insert("@earendil-works/pi-ai/oauth", VirtualModule::Json(serde_json::json!({})));
-    modules.insert(
-        "@earendil-works/pi-ai/providers/all",
-        VirtualModule::Source(format!(
-            "export {{ getBuiltinModel, getBuiltinModels, getBuiltinProviders }} from \"{}\";\n",
-            path("host/ai.js")
-        )),
-    );
+    modules.insert("@earendil-works/pi-ai/providers/all", reexport("host/providers_all.js"));
     modules.insert("@earendil-works/pi-agent-core", reexport("host/agent_core.js"));
     modules.insert("@earendil-works/pi-coding-agent", reexport("host/coding_agent.js"));
     modules

@@ -42,7 +42,19 @@ const SDK_AI_FILES: &[&str] = &[
     "utils/version.ts",
     "utils/retry.ts",
     "utils/models-error.ts",
+    "models.ts",
+    "telemetry.ts",
+    "auth/resolve.ts",
+    "utils/model-operations.ts",
+    "utils/text.ts",
+    "utils/transcript.ts",
+    "providers/radius-config.ts",
 ];
+
+const TELEMETRY_FILES: &[&str] = &["index.ts", "memory.ts", "metrics.ts", "noop.ts", "render.ts"];
+
+/// pi-tui files that `--update-sdk` refreshes; the rest of pi-tui stays at the `collect` version.
+const TUI_UPDATE_FILES: &[&str] = &["index.ts", "keybindings.ts", "utils.ts"];
 
 const AGENT_CORE_FILES: &[&str] = &["index.ts", "agent.ts", "agent-loop.ts", "proxy.ts", "stream-fn.ts", "types.ts"];
 
@@ -63,6 +75,7 @@ const BARE_IMPORTS: &[(&str, &str)] = &[
     ("get-east-asian-width", "get-east-asian-width/index.js"),
     ("partial-json", "partial-json/dist/index.js"),
     ("@earendil-works/pi-ai", "host/ai.js"),
+    ("@earendil-works/pi-telemetry", "pi-telemetry/src/index.ts"),
 ];
 
 pub fn run(args: &[String], root: &Path) -> Result<(), String> {
@@ -100,7 +113,13 @@ fn read_archive(path: &Path) -> Result<BTreeMap<String, String>, String> {
 }
 
 fn add_sdk(upstream: &Path, files: &mut BTreeMap<String, String>) -> Result<(), String> {
-    for (package, prefix, names) in [("ai", "pi-ai", SDK_AI_FILES), ("agent", "pi-agent-core", AGENT_CORE_FILES)] {
+    let packages = [
+        ("ai", "pi-ai", SDK_AI_FILES),
+        ("agent", "pi-agent-core", AGENT_CORE_FILES),
+        ("telemetry", "pi-telemetry", TELEMETRY_FILES),
+        ("tui", "pi-tui", TUI_UPDATE_FILES),
+    ];
+    for (package, prefix, names) in packages {
         for name in names {
             let key = format!("{prefix}/src/{name}");
             let source = read(&upstream.join("packages").join(package).join("src").join(name))?;
@@ -202,5 +221,12 @@ mod tests {
         let source = "import { EventStream } from \"@earendil-works/pi-ai\";";
         let rewritten = rewrite_bare_imports("pi-agent-core/src/agent-loop.ts", source);
         assert!(rewritten.contains("from \"../../host/ai.js\""));
+    }
+
+    #[test]
+    fn ai_telemetry_imports_the_bundled_telemetry_package() {
+        let source = "import { defineTelemetrySchema } from \"@earendil-works/pi-telemetry\";";
+        let rewritten = rewrite_bare_imports("pi-ai/src/telemetry.ts", source);
+        assert!(rewritten.contains("from \"../../pi-telemetry/src/index.ts\""), "{rewritten}");
     }
 }

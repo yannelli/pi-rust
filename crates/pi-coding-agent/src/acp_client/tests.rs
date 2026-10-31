@@ -60,6 +60,33 @@ fn store_round_trip_with_project_override() {
 }
 
 #[test]
+fn every_scope_is_listed_and_entries_move_between_scopes() {
+    let settings = SettingsManager::in_memory(json!({}));
+    store::upsert(&settings, &entry("a", "global-a"), AcpScope::Global).unwrap();
+    store::upsert(&settings, &entry("a", "project-a"), AcpScope::Project).unwrap();
+    store::upsert(&settings, &entry("b", "global-b"), AcpScope::Global).unwrap();
+    let all: Vec<_> =
+        store::all(&settings).into_iter().map(|(e, scope, shadowed)| (e.command, scope, shadowed)).collect();
+    assert_eq!(
+        all,
+        vec![
+            ("global-a".to_string(), AcpScope::Global, true),
+            ("global-b".to_string(), AcpScope::Global, false),
+            ("project-a".to_string(), AcpScope::Project, false),
+        ]
+    );
+    assert!(store::move_entry(&settings, "a", AcpScope::Global).is_err(), "the project already has \"a\"");
+    assert_eq!(store::move_entry(&settings, "b", AcpScope::Global).unwrap(), AcpScope::Project);
+    let listed: Vec<_> = store::list(&settings).into_iter().map(|(e, scope)| (e.command, scope)).collect();
+    assert_eq!(
+        listed,
+        vec![("project-a".to_string(), AcpScope::Project), ("global-b".to_string(), AcpScope::Project)],
+        "the project entry still wins over the global one"
+    );
+    assert!(store::get(&settings, "b", AcpScope::Global).is_none());
+}
+
+#[test]
 fn project_write_fails_when_untrusted() {
     let settings = SettingsManager::in_memory(json!({}));
     settings.set_project_trusted(false);
@@ -93,7 +120,7 @@ async fn fetch_reads_agents_and_adds_builtins() {
 async fn install_npx_and_uvx_and_kiro() {
     let dir = tempfile::tempdir().unwrap();
     let amp = with_builtins(Vec::new()).into_iter().find(|agent| agent.id == "amp-acp").unwrap();
-    let installed = install_with(&client(), &amp, dir.path(), None).await.unwrap();
+    let installed = install_with(&client(), &amp, dir.path(), None, None).await.unwrap();
     assert_eq!((installed.command.as_str(), installed.args.clone()), ("npx", vec!["-y".to_string(), "amp-acp".into()]));
     assert_eq!(installed.source, "builtin");
 
@@ -106,20 +133,29 @@ async fn install_npx_and_uvx_and_kiro() {
         },
         ..Default::default()
     };
-    let installed = install_with(&client(), &uvx, dir.path(), None).await.unwrap();
+    let installed = install_with(&client(), &uvx, dir.path(), None, None).await.unwrap();
     assert_eq!((installed.command.as_str(), installed.args), ("uvx", vec!["py-acp".to_string(), "acp".into()]));
     assert_eq!(installed.source, "registry");
 
     let kiro = with_builtins(Vec::new()).into_iter().find(|agent| agent.id == "kiro").unwrap();
-    let error = install_with(&client(), &kiro, dir.path(), Some(dir.path().as_os_str())).await.unwrap_err();
+    let error = install_with(&client(), &kiro, dir.path(), Some(dir.path().as_os_str()), None).await.unwrap_err();
     assert!(error.contains("curl -fsSL https://cli.kiro.dev/install | bash"), "{error}");
     let program = if cfg!(windows) { "kiro-cli.exe" } else { "kiro-cli" };
     std::fs::write(dir.path().join(program), "").unwrap();
-    let installed = install_with(&client(), &kiro, dir.path(), Some(dir.path().as_os_str())).await.unwrap();
+    let installed = install_with(&client(), &kiro, dir.path(), Some(dir.path().as_os_str()), None).await.unwrap();
     assert_eq!(
         (installed.command.as_str(), installed.args),
         ("kiro-cli", vec!["acp".to_string(), "--agent-engine=v3".into()])
     );
+
+    let home = tempfile::tempdir().unwrap();
+    let local_bin = home.path().join(".local").join("bin");
+    std::fs::create_dir_all(&local_bin).unwrap();
+    std::fs::write(local_bin.join(program), "").unwrap();
+    let empty = tempfile::tempdir().unwrap();
+    let path = Some(empty.path().as_os_str());
+    let installed = install_with(&client(), &kiro, dir.path(), path, Some(home.path())).await.unwrap();
+    assert_eq!(std::path::Path::new(&installed.command), local_bin.join(program), "the installer folder is searched");
 }
 
 fn tar_gz(files: &[(&str, &[u8])]) -> Vec<u8> {
@@ -169,14 +205,14 @@ async fn install_binary_checks_sha256_and_uninstalls() {
     let version_dir = agents_root(dir.path()).join("bin").join("2.0.0");
 
     let wrong = binary_agent(url.clone(), Some("00".repeat(32)));
-    let error = install_with(&client(), &wrong, dir.path(), None).await.unwrap_err();
+    let error = install_with(&client(), &wrong, dir.path(), None, None).await.unwrap_err();
     assert!(error.contains("SHA-256"), "{error}");
     assert!(!version_dir.exists());
     assert!(!agents_root(dir.path()).join("bin").exists());
 
     let sha = ring::digest::digest(&ring::digest::SHA256, &archive);
     let sha: String = sha.as_ref().iter().map(|byte| format!("{byte:02X}")).collect();
-    let installed = install_with(&client(), &binary_agent(url, Some(sha)), dir.path(), None).await.unwrap();
+    let installed = install_with(&client(), &binary_agent(url, Some(sha)), dir.path(), None, None).await.unwrap();
     let command = std::path::PathBuf::from(&installed.command);
     assert!(command.is_absolute() && command.ends_with("bin/2.0.0/dist/agent"), "{}", installed.command);
     assert_eq!(std::fs::read(&command).unwrap(), b"#!/bin/sh\n");

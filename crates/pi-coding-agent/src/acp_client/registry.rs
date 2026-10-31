@@ -61,6 +61,10 @@ pub struct LocalCommand {
     pub args: Vec<String>,
     /// Shown when `program` is not on PATH.
     pub install_hint: String,
+    /// The official installer of `program`, which pi offers to run in the terminal.
+    pub installer: Vec<String>,
+    /// Folders the installer puts `program` in, searched after PATH.
+    pub install_dirs: Vec<String>,
     pub login: Vec<String>,
 }
 
@@ -70,6 +74,13 @@ pub fn registry_url() -> String {
         .ok()
         .filter(|url| !url.trim().is_empty())
         .unwrap_or_else(|| REGISTRY_URL.into())
+}
+
+/// `PI_ACP_REGISTRY_URL`, then the `acpRegistryUrl` setting, then [`REGISTRY_URL`].
+pub fn registry_url_for(settings: &crate::settings::SettingsManager) -> String {
+    let configured = std::env::var("PI_ACP_REGISTRY_URL").ok().filter(|url| !url.trim().is_empty());
+    let setting = || settings.settings().extra.get("acpRegistryUrl").and_then(Value::as_str).map(str::to_string);
+    configured.or_else(|| setting().filter(|url| !url.trim().is_empty())).unwrap_or_else(|| REGISTRY_URL.into())
 }
 
 pub async fn fetch(url: &str) -> Result<Vec<RegistryAgent>, String> {
@@ -113,6 +124,8 @@ pub fn builtin_agents() -> Vec<RegistryAgent> {
             args: vec!["acp".into(), "--agent-engine=v3".into()],
             install_hint: "Install Kiro CLI with `curl -fsSL https://cli.kiro.dev/install | bash`, then try again."
                 .into(),
+            installer: vec!["sh".into(), "-c".into(), "curl -fsSL https://cli.kiro.dev/install | bash".into()],
+            install_dirs: vec!["~/.local/bin".into()],
             login: vec!["kiro-cli".into(), "login".into()],
         }),
         ..RegistryAgent::default()

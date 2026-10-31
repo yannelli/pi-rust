@@ -44,6 +44,17 @@ pub struct Selector {
     pub legacy_mode: bool,
 }
 
+/// A slash command from `available_commands_update`, run by sending `/<name> <input>` as a prompt.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AgentCommand {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    /// The `input.hint` of a command that takes input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+}
+
 /// What an agent session offers, reported when it starts and when it changes.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SessionInfo {
@@ -51,6 +62,15 @@ pub struct SessionInfo {
     pub pi_session: String,
     pub acp_session: String,
     pub selectors: Vec<Selector>,
+    pub commands: Vec<AgentCommand>,
+    /// Whether the agent sent `available_commands_update`; an empty list then means no commands.
+    pub commands_known: bool,
+    /// The pi model ID of the last turn: `default` or a model the agent offers.
+    pub pi_model: String,
+    /// The context window from the last `usage_update`; `None` until the agent sends a size.
+    pub context_window: Option<u64>,
+    /// Whether the agent accepts images (`promptCapabilities.image`).
+    pub images: bool,
 }
 
 impl SessionInfo {
@@ -85,6 +105,40 @@ pub struct PlanEntry {
     pub status: String,
 }
 
+/// The state of a file before the first change of a prompt.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PriorFile {
+    Bytes(Vec<u8>),
+    Missing,
+    /// pi did not keep the earlier content; the text says why.
+    NotRestorable(String),
+}
+
+/// A file that the agent changed, through `fs/write_text_file` or its own tools.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FileChange {
+    pub path: std::path::PathBuf,
+    pub prior: PriorFile,
+    /// The content after the change; `None` when the agent deleted the file.
+    pub written: Option<Vec<u8>>,
+}
+
+/// An MCP tool that pi calls for the agent, from a server whose login pi holds.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ProxyTool {
+    /// The pi tool name, such as `mcp__docs__search`.
+    pub name: String,
+    pub description: String,
+    pub schema: Value,
+}
+
+/// The MCP servers that the agent reaches through pi's loopback proxy, and their tools.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct McpProxy {
+    pub servers: Vec<String>,
+    pub tools: Vec<ProxyTool>,
+}
+
 #[async_trait]
 pub trait AcpHost: Send + Sync {
     /// The chosen `optionId`, or `None` to answer `cancelled`.
@@ -98,6 +152,25 @@ pub trait AcpHost: Send + Sync {
     /// The working directory of `pi_session`; the process directory when `None`.
     fn session_cwd(&self, _pi_session: &str) -> Option<std::path::PathBuf> {
         None
+    }
+    /// Whether `pi_session` is a live pi session. Other requests, such as compaction summaries,
+    /// run in a one-shot read-only ACP session.
+    fn live_session(&self, _pi_session: &str) -> bool {
+        true
+    }
+    /// A file change of a turn, for `/undo`.
+    fn file_changed(&self, _pi_session: &str, _change: FileChange) {}
+    /// Called on a blocking thread before the prompt of a turn goes to the agent.
+    fn turn_started(&self, _pi_session: &str, _cwd: &std::path::Path) {}
+    /// Called on a blocking thread after the turn ends, also when it fails or is cancelled.
+    fn turn_ended(&self, _pi_session: &str, _cwd: &std::path::Path) {}
+    /// The servers whose tools pi offers the agent through its proxy (see [`McpProxy`]).
+    async fn mcp_proxy(&self, _pi_session: &str) -> McpProxy {
+        McpProxy::default()
+    }
+    /// Calls proxy tool `tool`; the reply is an MCP `CallToolResult`.
+    async fn call_mcp_proxy(&self, _pi_session: &str, tool: &str, _arguments: Value) -> Value {
+        crate::providers::antigravity_acp::error_result(&format!("pi has no MCP tool {tool}"))
     }
 }
 

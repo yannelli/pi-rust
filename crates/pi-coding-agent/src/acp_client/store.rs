@@ -37,6 +37,41 @@ pub fn list(settings: &SettingsManager) -> Vec<(AcpAgentEntry, AcpScope)> {
     entries
 }
 
+/// Every entry of both scopes, with whether a project entry replaces it.
+pub fn all(settings: &SettingsManager) -> Vec<(AcpAgentEntry, AcpScope, bool)> {
+    let project = scope_entries(settings, AcpScope::Project);
+    let global = scope_entries(settings, AcpScope::Global).into_iter().map(|entry| {
+        let shadowed = project.iter().any(|other| other.id == entry.id);
+        (entry, AcpScope::Global, shadowed)
+    });
+    let global: Vec<_> = global.collect();
+    global.into_iter().chain(project.into_iter().map(|entry| (entry, AcpScope::Project, false))).collect()
+}
+
+/// The entry `id` of `scope`.
+pub fn get(settings: &SettingsManager, id: &str, scope: AcpScope) -> Option<AcpAgentEntry> {
+    scope_entries(settings, scope).into_iter().find(|entry| entry.id == id)
+}
+
+/// Moves the entry `id` from `from` to the other scope, which must not have one.
+pub fn move_entry(settings: &SettingsManager, id: &str, from: AcpScope) -> Result<AcpScope, String> {
+    let to = match from {
+        AcpScope::Global => AcpScope::Project,
+        AcpScope::Project => AcpScope::Global,
+    };
+    if get(settings, id, to).is_some() {
+        return Err(format!("The {} settings already have an ACP agent \"{id}\"", to.label()));
+    }
+    let Some(item) = raw(settings, from).into_iter().find(|item| has_id(item, id)) else {
+        return Err(format!("ACP agent \"{id}\" is not in the {} settings", from.label()));
+    };
+    let mut target = raw(settings, to);
+    target.push(item);
+    write(settings, to, target)?;
+    remove(settings, id, from)?;
+    Ok(to)
+}
+
 fn has_id(item: &Value, id: &str) -> bool {
     item.get("id").and_then(Value::as_str) == Some(id)
 }

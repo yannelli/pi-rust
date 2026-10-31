@@ -2,6 +2,7 @@
 const readable = require("internal/streams_web");
 const writable = require("internal/streams_web_writable");
 const bytes = require("internal/streams_web_bytes");
+const compression = require("internal/streams_web_compression");
 
 module.exports = {
   ReadableStream: readable.ReadableStream,
@@ -11,4 +12,6 @@ module.exports = {
   ReadableByteStreamController: bytes.ReadableByteStreamController,
   ReadableStreamBYOBReader: bytes.ReadableStreamBYOBReader,
   ReadableStreamBYOBRequest: bytes.ReadableStreamBYOBRequest,
+  CompressionStream: compression.CompressionStream,
+  DecompressionStream: compression.DecompressionStream,
 };

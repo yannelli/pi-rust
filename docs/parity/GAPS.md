@@ -56,17 +56,11 @@ The Node backend (`extensionRuntime: "node"`, see [Node backend](../agents/node-
 
 ## Extension module exports
 
-Section 8 of the parity report compares the runtime exports of each module in upstream `virtual-modules.ts` with the bundled module. Run `cargo xtask parity --upstream <checkout>` to get the current list. On 2026-10-29 the report found these gaps.
-
-Missing in pi-rust (13):
-
-- `@earendil-works/pi-ai/compat` and `@earendil-works/pi-ai/models`: `AI_TELEMETRY_SCHEMA`.
-- `@earendil-works/pi-ai/providers/all`: `builtinModels`, `builtinProviders`, `getAllBuiltinModels`, `getBuiltinClassifierModel`, `getBuiltinClassifierModels`, `getBuiltinImageModel`, `getBuiltinImageModels`, `getBuiltinModelDataGeneratedAt`, `radiusProvider`. The module re-exports only the three catalog reads of `host/ai.js`.
-- `@earendil-works/pi-tui`: `getSelectPageIndex`, `replaceControlCharacters`. The embedded pi-tui is older than upstream. Run `cargo xtask vendor-js` to update it.
+Section 8 of the parity report compares the runtime exports of each module in upstream `virtual-modules.ts` with the bundled module. Run `cargo xtask parity --upstream <checkout>` to get the current list. On 2026-10-31 the report found no missing exports.
 
 These exports are present, but they throw `ERR_PI_UNSUPPORTED`:
 
-- `@earendil-works/pi-ai/compat`: faux providers (`createFauxCore`, `fauxProvider`, `registerFauxProvider`), `createModels`, `createProvider`, `setBedrockProviderModule`, and the image API (`generateImages`, `generateImagesOpenRouter`, `getImageModel`, `getImageModels`, `getImageProviders`, `getImagesApiProvider`, `registerImagesApiProvider`, `registerBuiltInImagesApiProviders`). Providers, models, and images run in Rust. `@earendil-works/pi-ai/models` re-exports the same `createModels` and `createProvider`.
+- `@earendil-works/pi-ai/compat`: faux providers (`createFauxCore`, `fauxProvider`, `registerFauxProvider`), `setBedrockProviderModule`, and the image API (`generateImages`, `generateImagesOpenRouter`, `getImageModel`, `getImageModels`, `getImageProviders`, `getImagesApiProvider`, `registerImagesApiProvider`, `registerBuiltInImagesApiProviders`). Providers and images run in Rust.
 - `@earendil-works/pi-coding-agent`, interactive components: `ArminComponent`, `AssistantMessageComponent`, `BashExecutionComponent`, `BranchSummaryMessageComponent`, `CompactionSummaryMessageComponent`, `CustomMessageComponent`, `ExtensionEditorComponent`, `ExtensionInputComponent`, `ExtensionSelectorComponent`, `FooterComponent`, `LoginDialogComponent`, `ModelSelectorComponent`, `OAuthSelectorComponent`, `SessionSelectorComponent`, `SettingsSelectorComponent`, `ShowImagesSelectorComponent`, `SkillInvocationMessageComponent`, `ThemeSelectorComponent`, `ThinkingSelectorComponent`, `ToolExecutionComponent`, `TreeSelectorComponent`, `UserMessageComponent`, `UserMessageSelectorComponent`. The Rust TUI draws these parts.
 - `@earendil-works/pi-coding-agent`, run modes and CLI: `InteractiveMode`, `RpcClient`, `main`, `parseArgs`, `runPrintMode`, `runRpcMode`, `resolveCliModel`, `resolveModelScopeWithDiagnostics`, `readStoredCredential`.
 - `@earendil-works/pi-coding-agent`, sessions and extensions: `AgentSession` and `AgentSessionRuntime` as constructors, `createAgentSessionFromServices`, `createAgentSessionRuntime`, `createAgentSessionServices`, `ExtensionRunner`, `createExtensionRuntime`, `discoverAndLoadExtensions`, `createCodemodeExtension`, `createMcpExtension`, `createToolSearchExtension`, `DefaultPackageManager`, `ProjectTrustStore`, `hasTrustRequiringProjectResources`, `loadProjectContextFiles`.
@@ -82,6 +76,8 @@ Other limits of the exports that work:
 - `DefaultResourceLoader` rejects `extensionFactories`, `additionalExtensionPaths`, `additionalThemePaths`, and every override option except `systemPromptOverride` and `appendSystemPromptOverride`. `getExtensions`, `getSkills`, `getPrompts`, `getThemes`, and `getAgentsFiles` throw unless the matching `no*` option is set.
 - `ModelRuntime` and `ModelRegistry` use the runtime of the host session and need a bound session. `ModelRuntime.create` with options, login, credentials, and provider registration throw `ERR_PI_UNSUPPORTED`. These reads work: `getModel`, `getModels`, `getAllModels`, `getAllAvailable`, `getAvailableSnapshot`, `getProviders`.
 - `generateDiffString` and `generateUnifiedPatch` use a fixed value of 4 context lines.
+- `createModels` and `createProvider` are upstream code. The providers of `@earendil-works/pi-ai/providers/all` read the Rust catalog and stream, classify, and generate images in Rust. Their API key auth resolves as the Rust resolver does, over the credential variables that `ctx.env` of upstream `ApiKeyAuth.resolve` returns. Google Vertex AI asks `ctx.fileExists` for its application default credentials file, as upstream does. Their API key `login` asks for one key. For Amazon Bedrock, Google Vertex AI, and Cloudflare, upstream asks for more values. OAuth `login`, `refresh`, and `toAuth` run the Rust flows.
+- `builtinProviders()` returns the 42 upstream providers. `getBuiltinProviders()` also lists `cursor` and `google-antigravity`, which only pi-rust has.
 
 ## Removed upstream, still in pi-rust
 

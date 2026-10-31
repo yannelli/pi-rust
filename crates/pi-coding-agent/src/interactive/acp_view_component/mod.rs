@@ -10,6 +10,8 @@ use pi_tui::Component;
 use pi_tui::components::{Input, InputOptions};
 use pi_tui::fuzzy::fuzzy_filter;
 
+use crate::acp_client::AcpScope;
+
 /// One agent as the browser shows it: an `acpAgents` entry or a registry entry.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AcpRow {
@@ -17,8 +19,10 @@ pub struct AcpRow {
     pub name: String,
     pub description: String,
     pub version: String,
-    /// The settings scope of an installed agent; empty for registry rows.
-    pub scope: String,
+    /// The settings file of an installed agent; `None` for registry rows.
+    pub scope: Option<AcpScope>,
+    /// A global entry that a project entry with the same ID replaces.
+    pub shadowed: bool,
     /// `None` for registry rows.
     pub enabled: Option<bool>,
     pub installed: bool,
@@ -31,11 +35,13 @@ pub struct AcpRow {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AcpAction {
     Close,
-    Install(String),
+    Install(String, AcpScope),
     Login(String),
     SetDefault(String),
-    Toggle(String),
-    Remove(String),
+    Toggle(String, AcpScope),
+    Remove(String, AcpScope),
+    /// Move the entry from this scope to the other one.
+    Move(String, AcpScope),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,6 +56,8 @@ pub(super) enum MenuItem {
     SetDefault,
     Enable,
     Disable,
+    MoveToProject,
+    MoveToGlobal,
     Remove,
 }
 
@@ -60,16 +68,29 @@ impl MenuItem {
             MenuItem::SetDefault => "Set as default",
             MenuItem::Enable => "Enable",
             MenuItem::Disable => "Disable",
+            MenuItem::MoveToProject => "Move to project settings",
+            MenuItem::MoveToGlobal => "Move to global settings",
             MenuItem::Remove => "Remove",
         }
+    }
+}
+
+/// The install targets, in menu order.
+pub(super) const INSTALL_SCOPES: [AcpScope; 2] = [AcpScope::Global, AcpScope::Project];
+
+pub(super) fn scope_choice(scope: AcpScope) -> &'static str {
+    match scope {
+        AcpScope::Global => "Global settings: every project",
+        AcpScope::Project => "Project settings: this project only",
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Mode {
     List,
-    Menu { id: String, item: usize },
-    ConfirmRemove { id: String, name: String },
+    Menu { id: String, scope: AcpScope, item: usize },
+    ConfirmRemove { id: String, scope: AcpScope, name: String },
+    InstallScope { id: String, name: String, item: usize },
 }
 
 pub struct AcpBrowser {
@@ -145,21 +166,31 @@ impl AcpBrowser {
         self.visible().get(self.selected).and_then(|index| self.rows().get(*index))
     }
 
-    pub(super) fn installed_row(&self, id: &str) -> Option<&AcpRow> {
-        self.installed.iter().find(|row| row.id == id)
+    pub(super) fn installed_row(&self, id: &str, scope: AcpScope) -> Option<&AcpRow> {
+        self.installed.iter().find(|row| row.id == id && row.scope == Some(scope))
     }
 
+    /// The actions of an installed row. A replaced global entry can only be toggled or removed.
     pub(super) fn menu_items(row: &AcpRow) -> Vec<MenuItem> {
         let toggle = if row.enabled == Some(false) { MenuItem::Enable } else { MenuItem::Disable };
-        vec![MenuItem::Login, MenuItem::SetDefault, toggle, MenuItem::Remove]
+        if row.shadowed {
+            return vec![toggle, MenuItem::Remove];
+        }
+        let shift = match row.scope {
+            Some(AcpScope::Project) => MenuItem::MoveToGlobal,
+            _ => MenuItem::MoveToProject,
+        };
+        vec![MenuItem::Login, MenuItem::SetDefault, toggle, shift, MenuItem::Remove]
     }
 
     fn after_rows_changed(&mut self) {
         let len = self.visible().len();
         self.selected = self.selected.min(len.saturating_sub(1));
         let missing = match &self.mode {
-            Mode::List => false,
-            Mode::Menu { id, .. } | Mode::ConfirmRemove { id, .. } => self.installed_row(id).is_none(),
+            Mode::List | Mode::InstallScope { .. } => false,
+            Mode::Menu { id, scope, .. } | Mode::ConfirmRemove { id, scope, .. } => {
+                self.installed_row(id, *scope).is_none()
+            }
         };
         if missing {
             self.mode = Mode::List;
@@ -176,6 +207,7 @@ impl AcpBrowser {
         self.emit(action);
     }
 
+    /// Asks for the settings scope of a registry agent.
     pub(super) fn install(&mut self, row: &AcpRow) {
         if self.busy {
             return;
@@ -184,7 +216,13 @@ impl AcpBrowser {
             self.set_status(format!("{} is already installed.", row.name), false);
             return;
         }
-        self.emit_mutation(AcpAction::Install(row.id.clone()), format!("Installing {}…", row.name));
+        self.mode = Mode::InstallScope { id: row.id.clone(), name: row.name.clone(), item: 0 };
+    }
+
+    pub(super) fn install_in(&mut self, id: String, name: &str, scope: AcpScope) {
+        self.mode = Mode::List;
+        let status = format!("Installing {name} in the {} settings…", scope.label());
+        self.emit_mutation(AcpAction::Install(id, scope), status);
     }
 
     /// Runs a menu item. Remove asks for confirmation first; busy blocks every item.
@@ -194,13 +232,17 @@ impl AcpBrowser {
         }
         let id = row.id.clone();
         let name = row.name.clone();
+        let Some(scope) = row.scope else { return };
         self.mode = Mode::List;
         match item {
             MenuItem::Login => self.emit(AcpAction::Login(id)),
             MenuItem::SetDefault => self.emit(AcpAction::SetDefault(id)),
-            MenuItem::Enable => self.emit_mutation(AcpAction::Toggle(id), format!("Enabling {name}…")),
-            MenuItem::Disable => self.emit_mutation(AcpAction::Toggle(id), format!("Disabling {name}…")),
-            MenuItem::Remove => self.mode = Mode::ConfirmRemove { id, name },
+            MenuItem::Enable => self.emit_mutation(AcpAction::Toggle(id, scope), format!("Enabling {name}…")),
+            MenuItem::Disable => self.emit_mutation(AcpAction::Toggle(id, scope), format!("Disabling {name}…")),
+            MenuItem::MoveToProject | MenuItem::MoveToGlobal => {
+                self.emit_mutation(AcpAction::Move(id, scope), format!("Moving {name}…"))
+            }
+            MenuItem::Remove => self.mode = Mode::ConfirmRemove { id, scope, name },
         }
     }
 }

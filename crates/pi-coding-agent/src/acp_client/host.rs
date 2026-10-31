@@ -1,16 +1,20 @@
 //! pi's side of the `acp` provider ([`pi_ai::providers::acp::AcpHost`]): permission dialogs, the
-//! plan widget, the ACP session of each pi session, and the models each agent advertised.
+//! plan widget, the ACP session of each pi session, what each agent advertised, and `/undo`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex, RwLock, Weak};
 
 use async_trait::async_trait;
-use pi_ai::providers::acp::{AcpHost, Choice, PermissionRequest, PlanEntry, SessionInfo};
+use pi_ai::providers::acp::{
+    AcpHost, AgentCommand, Choice, FileChange, McpProxy, PermissionRequest, PlanEntry, PriorFile, SessionInfo,
+};
 use serde::{Deserialize, Serialize};
 
-use crate::agent_session::ModelRuntime;
+use super::workspace::{self, Snapshot};
+use crate::agent_session::{AgentSession, ModelRuntime, Written};
 use crate::extension_ui::{DialogOptions, ExtensionMode, ExtensionUi};
+use crate::tools::PriorContent;
 
 const PLAN_WIDGET: &str = "acp-plan";
 
@@ -27,6 +31,15 @@ pub struct HostState {
     /// Providers whose agent has a `thought_level` selector.
     #[serde(default)]
     pub thinking: BTreeMap<String, bool>,
+    /// The slash commands each provider advertised in its last session.
+    #[serde(default)]
+    pub commands: BTreeMap<String, Vec<AgentCommand>>,
+    /// The context window per provider and model ID, from `usage_update`.
+    #[serde(default)]
+    pub context: BTreeMap<String, BTreeMap<String, u64>>,
+    /// Whether each provider accepts images.
+    #[serde(default)]
+    pub images: BTreeMap<String, bool>,
 }
 
 pub fn state_path(agent_dir: &Path) -> PathBuf {
@@ -48,14 +61,51 @@ fn write_state(agent_dir: &Path, state: &HostState) {
     }
 }
 
+/// The workspace at the start of an ACP turn and the changes the agent reported since.
+struct Turn {
+    before: Snapshot,
+    reported: BTreeMap<PathBuf, PriorContent>,
+}
+
 pub struct PiAcpHost {
     agent_dir: PathBuf,
     ui: RwLock<Option<(Arc<dyn ExtensionUi>, ExtensionMode)>>,
     runtime: RwLock<Weak<ModelRuntime>>,
     lock: Mutex<()>,
+    turns: Mutex<HashMap<String, Turn>>,
 }
 
 static HOST: LazyLock<RwLock<Option<Arc<PiAcpHost>>>> = LazyLock::new(RwLock::default);
+static SESSIONS: LazyLock<Mutex<Vec<Weak<AgentSession>>>> = LazyLock::new(Mutex::default);
+
+/// Makes `session` known to ACP agents: its directory, its checkpoints, and that it is live.
+pub fn track_session(session: &Arc<AgentSession>) {
+    let mut sessions = SESSIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    sessions.retain(|weak| weak.strong_count() > 0);
+    sessions.push(Arc::downgrade(session));
+}
+
+/// The live session whose ID is `pi_session`.
+fn session(pi_session: &str) -> Option<Arc<AgentSession>> {
+    let sessions: Vec<Arc<AgentSession>> = {
+        let sessions = SESSIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        sessions.iter().filter_map(Weak::upgrade).collect()
+    };
+    sessions.into_iter().find(|session| session.session_id() == pi_session)
+}
+
+fn prior_content(prior: PriorFile) -> PriorContent {
+    match prior {
+        PriorFile::Bytes(bytes) => PriorContent::Bytes(bytes),
+        PriorFile::Missing => PriorContent::Missing,
+        PriorFile::NotRestorable(reason) => PriorContent::NotRestorable(reason),
+    }
+}
+
+/// The commands that `provider` advertised in its last session.
+pub fn commands(agent_dir: &Path, provider: &str) -> Vec<AgentCommand> {
+    read_state(agent_dir).commands.remove(provider).unwrap_or_default()
+}
 
 /// The host for `agent_dir`, installed in pi-ai on first use.
 pub fn install(agent_dir: &Path, runtime: &Arc<ModelRuntime>) -> Arc<PiAcpHost> {
@@ -68,6 +118,7 @@ pub fn install(agent_dir: &Path, runtime: &Arc<ModelRuntime>) -> Arc<PiAcpHost> 
                 ui: RwLock::default(),
                 runtime: RwLock::default(),
                 lock: Mutex::default(),
+                turns: Mutex::default(),
             });
             pi_ai::providers::acp::set_host(Some(host.clone()));
             *slot = Some(host.clone());
@@ -133,17 +184,36 @@ impl AcpHost for PiAcpHost {
     fn session_changed(&self, info: &SessionInfo) {
         let models = info.models();
         let thinking = info.selectors.iter().any(|selector| selector.category == "thought_level");
+        let agent_model = info.selectors.iter().find(|s| s.category == "model").and_then(|s| s.current.clone());
         let mut models_changed = false;
         self.update(|state| {
-            let key = session_key(&info.provider, &info.pi_session);
+            let provider = &info.provider;
+            let key = session_key(provider, &info.pi_session);
             let mut changed = state.sessions.insert(key, info.acp_session.clone()).as_ref() != Some(&info.acp_session);
-            if !models.is_empty() && state.models.get(&info.provider) != Some(&models) {
-                state.models.insert(info.provider.clone(), models.clone());
+            if !models.is_empty() && state.models.get(provider) != Some(&models) {
+                state.models.insert(provider.clone(), models.clone());
                 models_changed = true;
             }
-            if state.thinking.get(&info.provider) != Some(&thinking) {
-                state.thinking.insert(info.provider.clone(), thinking);
+            if state.thinking.get(provider) != Some(&thinking) {
+                state.thinking.insert(provider.clone(), thinking);
                 models_changed = true;
+            }
+            if state.images.insert(provider.clone(), info.images) != Some(info.images) {
+                models_changed = true;
+            }
+            if let Some(size) = info.context_window {
+                let windows = state.context.entry(provider.clone()).or_default();
+                for model in std::iter::once(info.pi_model.clone()).chain(agent_model) {
+                    models_changed |= windows.insert(model, size) != Some(size);
+                }
+            }
+            let stored = state.commands.get(provider).map_or(&[][..], Vec::as_slice);
+            if info.commands_known && stored != info.commands.as_slice() {
+                match info.commands.is_empty() {
+                    true => state.commands.remove(provider),
+                    false => state.commands.insert(provider.clone(), info.commands.clone()),
+                };
+                changed = true;
             }
             changed |= models_changed;
             changed
@@ -151,6 +221,67 @@ impl AcpHost for PiAcpHost {
         let runtime = self.runtime.read().unwrap_or_else(|poisoned| poisoned.into_inner()).upgrade();
         if let (true, Some(runtime)) = (models_changed, runtime) {
             super::register::refresh_models(&runtime, &self.agent_dir, &info.provider);
+        }
+    }
+
+    fn session_cwd(&self, pi_session: &str) -> Option<PathBuf> {
+        session(pi_session).map(|session| session.cwd().to_path_buf())
+    }
+
+    fn live_session(&self, pi_session: &str) -> bool {
+        session(pi_session).is_some()
+    }
+
+    fn file_changed(&self, pi_session: &str, change: FileChange) {
+        let mut turns = self.turns.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(turn) = turns.get_mut(pi_session) {
+            turn.reported.entry(change.path).or_insert_with(|| prior_content(change.prior));
+            return;
+        }
+        drop(turns);
+        if let Some(session) = session(pi_session) {
+            let written = change.written.as_deref().map_or(Written::Deleted, Written::Bytes);
+            session.record_file_change(&change.path, prior_content(change.prior), written, false);
+        }
+    }
+
+    fn turn_started(&self, pi_session: &str, cwd: &Path) {
+        let turn = Turn { before: workspace::take(cwd), reported: BTreeMap::new() };
+        self.turns.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).insert(pi_session.to_string(), turn);
+    }
+
+    /// Records what changed under `cwd` since the turn started. The snapshot gives the prior
+    /// state; changes the agent did not report are marked as detected.
+    fn turn_ended(&self, pi_session: &str, cwd: &Path) {
+        let turn = self.turns.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).remove(pi_session);
+        let (Some(Turn { before, mut reported }), Some(session)) = (turn, session(pi_session)) else { return };
+        let root = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
+        for difference in before.differences(&root) {
+            let detected = reported.remove(&difference.path).is_none();
+            let written = if difference.exists { Written::OnDisk } else { Written::Deleted };
+            session.record_file_change(&difference.path, difference.prior, written, detected);
+        }
+        for (path, prior) in reported.into_iter().filter(|(path, _)| !before.covers(&root, path)) {
+            let written = if path.exists() { Written::OnDisk } else { Written::Deleted };
+            session.record_file_change(&path, prior, written, false);
+        }
+    }
+
+    async fn mcp_proxy(&self, pi_session: &str) -> McpProxy {
+        let manager = session(pi_session).and_then(|session| session.mcp_manager());
+        match manager {
+            Some(manager) => super::mcp_proxy::offer(&manager).await,
+            None => McpProxy::default(),
+        }
+    }
+
+    async fn call_mcp_proxy(&self, pi_session: &str, tool: &str, arguments: serde_json::Value) -> serde_json::Value {
+        let manager = session(pi_session).and_then(|session| session.mcp_manager());
+        match manager {
+            Some(manager) => super::mcp_proxy::call(&manager, tool, arguments).await,
+            None => {
+                serde_json::json!({"content": [{"type": "text", "text": "The pi session has ended"}], "isError": true})
+            }
         }
     }
 

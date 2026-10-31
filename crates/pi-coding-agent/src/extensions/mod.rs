@@ -10,6 +10,7 @@ pub mod inline;
 pub mod loader;
 mod modules;
 mod ops;
+mod ops_ai;
 mod ops_async;
 mod ops_host;
 mod ops_sdk;

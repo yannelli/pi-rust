@@ -1,6 +1,6 @@
 # Documentation index
 
-Created: 2026-10-29. Last updated: 2026-10-30.
+Created: 2026-10-29. Last updated: 2026-10-31.
 
 | Document | Use it when |
 | --- | --- |

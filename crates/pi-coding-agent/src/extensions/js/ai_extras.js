@@ -1,5 +1,5 @@
 // Compat members of `@earendil-works/pi-ai` outside the embedded upstream files: faux content
-// helpers, and members that need the upstream provider runtime, image APIs, or Bedrock module.
+// helpers, and members that need the upstream faux provider, image APIs, or Bedrock module.
 import { unsupportedFunction } from "./unsupported.js";
 
 const FAUX_USAGE = {
@@ -44,8 +44,6 @@ export function fauxAssistantMessage(content, options = {}) {
 export const createFauxCore = unsupportedFunction("createFauxCore");
 export const fauxProvider = unsupportedFunction("fauxProvider");
 export const registerFauxProvider = unsupportedFunction("registerFauxProvider");
-export const createModels = unsupportedFunction("createModels");
-export const createProvider = unsupportedFunction("createProvider");
 export const setBedrockProviderModule = unsupportedFunction("setBedrockProviderModule");
 export const generateImages = unsupportedFunction("generateImages");
 export const generateImagesOpenRouter = unsupportedFunction("generateImagesOpenRouter");

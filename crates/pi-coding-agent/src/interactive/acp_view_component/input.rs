@@ -3,23 +3,39 @@
 use pi_tui::keys::matches_key;
 use pi_tui::{Component, get_keybindings};
 
-use super::{AcpAction, AcpBrowser, AcpTab, Mode};
+use super::{AcpAction, AcpBrowser, AcpTab, INSTALL_SCOPES, Mode};
+use crate::acp_client::AcpScope;
 
 const PAGE: usize = 10;
 
 pub(super) fn handle(browser: &mut AcpBrowser, data: &str) {
     match browser.mode.clone() {
-        Mode::ConfirmRemove { id, name } => handle_confirm(browser, data, id, name),
-        Mode::Menu { id, item } => handle_menu(browser, data, id, item),
+        Mode::ConfirmRemove { id, scope, name } => handle_confirm(browser, data, id, scope, name),
+        Mode::Menu { id, scope, item } => handle_menu(browser, data, id, scope, item),
+        Mode::InstallScope { id, name, item } => handle_install_scope(browser, data, id, name, item),
         Mode::List => handle_list(browser, data),
     }
 }
 
-fn handle_confirm(browser: &mut AcpBrowser, data: &str, id: String, name: String) {
+/// `item` cycles through [`INSTALL_SCOPES`].
+fn handle_install_scope(browser: &mut AcpBrowser, data: &str, id: String, name: String, item: usize) {
+    let kb = get_keybindings();
+    let count = INSTALL_SCOPES.len();
+    if kb.matches(data, "tui.select.cancel") {
+        browser.mode = Mode::List;
+    } else if kb.matches(data, "tui.select.up") || kb.matches(data, "tui.select.down") {
+        let item = if kb.matches(data, "tui.select.up") { (item + count - 1) % count } else { (item + 1) % count };
+        browser.mode = Mode::InstallScope { id, name, item };
+    } else if kb.matches(data, "tui.select.confirm") && !browser.busy {
+        browser.install_in(id, &name, INSTALL_SCOPES[item % count]);
+    }
+}
+
+fn handle_confirm(browser: &mut AcpBrowser, data: &str, id: String, scope: AcpScope, name: String) {
     if data == "y" || data == "Y" {
         if !browser.busy {
             browser.mode = Mode::List;
-            browser.emit_mutation(AcpAction::Remove(id), format!("Removing {name}…"));
+            browser.emit_mutation(AcpAction::Remove(id, scope), format!("Removing {name}…"));
         }
         return;
     }
@@ -28,9 +44,9 @@ fn handle_confirm(browser: &mut AcpBrowser, data: &str, id: String, name: String
     }
 }
 
-fn handle_menu(browser: &mut AcpBrowser, data: &str, id: String, item: usize) {
+fn handle_menu(browser: &mut AcpBrowser, data: &str, id: String, scope: AcpScope, item: usize) {
     let kb = get_keybindings();
-    let Some(row) = browser.installed_row(&id).cloned() else {
+    let Some(row) = browser.installed_row(&id, scope).cloned() else {
         browser.mode = Mode::List;
         return;
     };
@@ -39,10 +55,10 @@ fn handle_menu(browser: &mut AcpBrowser, data: &str, id: String, item: usize) {
         browser.mode = Mode::List;
     } else if kb.matches(data, "tui.select.up") {
         let item = if item == 0 { items.len() - 1 } else { item - 1 };
-        browser.mode = Mode::Menu { id, item };
+        browser.mode = Mode::Menu { id, scope, item };
     } else if kb.matches(data, "tui.select.down") {
         let item = if item + 1 >= items.len() { 0 } else { item + 1 };
-        browser.mode = Mode::Menu { id, item };
+        browser.mode = Mode::Menu { id, scope, item };
     } else if kb.matches(data, "tui.select.confirm")
         && let Some(chosen) = items.get(item).copied()
     {
@@ -81,7 +97,11 @@ fn handle_list(browser: &mut AcpBrowser, data: &str) {
     } else if kb.matches(data, "tui.select.confirm") {
         let Some(row) = browser.selected_row().cloned() else { return };
         match browser.tab {
-            AcpTab::Installed => browser.mode = Mode::Menu { id: row.id, item: 0 },
+            AcpTab::Installed => {
+                if let Some(scope) = row.scope {
+                    browser.mode = Mode::Menu { id: row.id, scope, item: 0 };
+                }
+            }
             AcpTab::Registry => browser.install(&row),
         }
     } else {
