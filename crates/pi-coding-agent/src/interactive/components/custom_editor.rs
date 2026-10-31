@@ -194,6 +194,13 @@ impl EditorHandle {
             return;
         }
         let keys = get_keybindings();
+        // Selection page keys move an open autocomplete menu before app actions run, so a user can bind
+        // Ctrl+V to them even though it pastes images by default.
+        let paging = keys.matches(data, "tui.select.pageUp") || keys.matches(data, "tui.select.pageDown");
+        if paging && self.editor.is_showing_autocomplete() {
+            self.editor.handle_input(data);
+            return;
+        }
         let submits = keys.matches(data, "tui.input.submit") || keys.matches(data, "app.message.followUp");
         self.leading_space.set(submits && self.editor.get_text().starts_with(' '));
         if keys.matches(data, "app.clipboard.pasteImage") {
@@ -324,6 +331,10 @@ impl Component for CustomEditor {
         true
     }
 
+    fn captures_viewport_input(&self) -> bool {
+        self.handle.editor.captures_viewport_input()
+    }
+
     fn handle_mouse(&mut self, event: &TuiMouseEvent) -> Option<MouseResponse> {
         self.handle.editor.handle_mouse(event).map(MouseResponse::Handled)
     }
@@ -336,3 +347,7 @@ impl Component for CustomEditor {
         self.handle.editor.set_focused(focused);
     }
 }
+
+#[cfg(test)]
+#[path = "custom_editor_tests.rs"]
+mod tests;
