@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Usage: node scripts/component-scenario.mjs <upstream pi checkout with node_modules>
+// Usage: node scripts/component-scenario.mjs <upstream pi checkout with node_modules> [--platform <name>]
 // Runs the component scenarios of tests/fixtures/extensions on upstream components and writes the results.
+import { spawnSync } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { registerHooks } from "node:module";
@@ -10,6 +11,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const upstream = resolve(process.argv[2] ?? "");
 if (!process.argv[2]) throw new Error("Usage: node scripts/component-scenario.mjs <upstream-root>");
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "../crates/pi-coding-agent/tests/fixtures/extensions");
+// Upstream keybinding defaults depend on the platform when their module loads, so it is set first.
+const platform = process.argv[3] === "--platform" ? process.argv[4] : undefined;
+if (platform) Object.defineProperty(process, "platform", { value: platform, configurable: true });
 
 const PACKAGES = { "pi-ai": "ai", "pi-telemetry": "telemetry", "pi-tui": "tui", "pi-agent-core": "agent" };
 registerHooks({
@@ -72,17 +76,26 @@ for (const [name, file] of Object.entries(FILES)) {
 Object.assign(classes, { getKeybindings, resetCapabilitiesCache, setCapabilities });
 
 /** One line per top-level field and per rendered component, so the fixture stays short. */
-async function write(name) {
+async function write(name, suffix = "") {
 	const { scenario } = await import(pathToFileURL(join(fixtures, `${name}.mjs`)).href);
 	const { rendered, ...rest } = await scenario(classes);
 	const field = ([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`;
 	const renders = Object.entries(rendered).map((entry) => `\t\t${field(entry)}`).join(",\n");
 	const top = Object.entries(rest).map((entry) => `\t${field(entry)}`).join(",\n");
-	writeFileSync(join(fixtures, `${name}.json`), `{\n${top},\n\t"rendered": {\n${renders}\n\t}\n}\n`);
-	console.log(`Wrote ${join(fixtures, `${name}.json`)}`);
+	const file = join(fixtures, `${name}${suffix}.json`);
+	writeFileSync(file, `{\n${top},\n\t"rendered": {\n${renders}\n\t}\n}\n`);
+	console.log(`Wrote ${file}`);
 }
 
-await write("component_scenario");
-await write("component_scenario_b");
-await write("component_scenario_c");
+if (platform) {
+	await write("component_scenario_b", `.${platform}`);
+} else {
+	await write("component_scenario");
+	await write("component_scenario_c");
+	// Scenario B renders tree keys whose defaults differ per platform: one fixture per platform.
+	for (const name of ["darwin", "linux", "win32"]) {
+		const run = spawnSync(process.execPath, [fileURLToPath(import.meta.url), upstream, "--platform", name], { stdio: "inherit" });
+		if (run.status !== 0) throw new Error(`scenario B for ${name} failed`);
+	}
+}
 process.exit(0);

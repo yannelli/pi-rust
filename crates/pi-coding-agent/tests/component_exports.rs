@@ -58,6 +58,15 @@ async fn standalone_components_render_and_handle_input_as_upstream() {
     }
 }
 
+/// Upstream output of scenario B with `process.platform` set before upstream loaded: tree key
+/// defaults differ per platform (`core/keybindings.ts`), as the Rust keybindings do.
+#[cfg(target_os = "macos")]
+const EXPECTED_B: &str = include_str!("fixtures/extensions/component_scenario_b.darwin.json");
+#[cfg(windows)]
+const EXPECTED_B: &str = include_str!("fixtures/extensions/component_scenario_b.win32.json");
+#[cfg(not(any(target_os = "macos", windows)))]
+const EXPECTED_B: &str = include_str!("fixtures/extensions/component_scenario_b.linux.json");
+
 const EXTENSION_B: &str = r#"
 import * as ca from '@earendil-works/pi-coding-agent';
 import { getKeybindings } from '@earendil-works/pi-tui';
@@ -90,7 +99,7 @@ async fn record_driven_selectors_and_the_login_dialog_match_upstream() {
         ("components.ts", EXTENSION_B.to_string()),
         ("component_scenario_b.mjs", include_str!("fixtures/extensions/component_scenario_b.mjs").to_string()),
     ];
-    let expected: Value = serde_json::from_str(include_str!("fixtures/extensions/component_scenario_b.json")).unwrap();
+    let expected: Value = serde_json::from_str(EXPECTED_B).unwrap();
     assert_rust_themes_match(&expected);
     let data = components_entry(files).await;
     assert_eq!(data["scenario"]["events"], expected["events"]);
