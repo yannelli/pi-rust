@@ -57,7 +57,15 @@ const SDK_AI_FILES: &[&str] = &[
 const TELEMETRY_FILES: &[&str] = &["index.ts", "memory.ts", "metrics.ts", "noop.ts", "render.ts"];
 
 /// pi-tui files that `--update-sdk` refreshes; the rest of pi-tui stays at the `collect` version.
-const TUI_UPDATE_FILES: &[&str] = &["index.ts", "keybindings.ts", "utils.ts", "components/markdown.ts"];
+const TUI_UPDATE_FILES: &[&str] = &[
+    "index.ts",
+    "keybindings.ts",
+    "utils.ts",
+    "components/markdown.ts",
+    "components/select-list.ts",
+    "components/settings-list.ts",
+    "components/editor.ts",
+];
 
 const AGENT_CORE_FILES: &[&str] = &["index.ts", "agent.ts", "agent-loop.ts", "proxy.ts", "stream-fn.ts", "types.ts"];
 

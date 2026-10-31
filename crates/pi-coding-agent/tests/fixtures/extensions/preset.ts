@@ -252,6 +252,8 @@ export default function presetExtension(pi: ExtensionAPI) {
 			container.addChild(new DynamicBorder((str) => theme.fg("accent", str)));
 
 			return {
+				capturesViewportInput: selectList.capturesViewportInput,
+
 				render(width: number) {
 					return container.render(width);
 				},

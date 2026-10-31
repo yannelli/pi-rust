@@ -2,6 +2,7 @@
 //! the embedded JavaScript runtime against sessions over the faux provider.
 
 mod api;
+mod component_capture;
 mod events;
 mod examples;
 mod examples_more;
