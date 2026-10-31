@@ -156,9 +156,30 @@ async fn extreme_numbers_give_no_reset_or_length_instead_of_overflowing() {
     let windows = usage.get("openai-codex", false).await.windows;
     assert_eq!((windows[0].window_seconds, windows[0].resets_at_ms, windows[1].resets_at_ms), (None, None, None));
     let now = crate::now_ms();
-    for header in ["99999999999999999999", "Wed, 21 Oct 999999999 07:28:00 GMT", "-5", "soon"] {
+    let headers = [
+        "99999999999999999999",
+        "Wed, 21 Oct 999999999 07:28:00 GMT",
+        "Wed, 9223372036854775807 Oct 2099 07:28:00 GMT",
+        "Wed, 21 Oct 2099 9223372036854775807:00:00 GMT",
+        "-5",
+        "soon",
+    ];
+    for header in headers {
         assert_eq!(super::retry_after_ms(header, now), None, "{header}");
     }
     assert_eq!(super::time::ms_from_value(&json!("999999999-01-01T00:00:00Z")), None);
     assert_eq!(super::time::ms_from_value(&json!(f64::MAX)), None);
+}
+
+#[tokio::test]
+async fn an_anthropic_reset_with_a_huge_year_is_dropped_without_overflow() {
+    let body = json!({
+        "five_hour": {"utilization": 42, "resets_at": "999999999999-01-01T00:00:00Z"},
+        "seven_day": {"utilization": 18, "resets_at": "2026-11-04T09:00:00Z"},
+    });
+    let server = MockHttp::start(vec![Reply::json(200, &body)]).await;
+    let usage = service(&server.base_url, vec![("anthropic", oauth("tok", json!({})))]);
+    let windows = usage.get("anthropic", false).await.windows;
+    assert_eq!((windows[0].resets_at.as_deref(), windows[0].resets_at_ms), (None, None));
+    assert_eq!(windows[1].resets_at.as_deref(), Some("2026-11-04T09:00:00Z"));
 }

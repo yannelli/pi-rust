@@ -50,13 +50,31 @@ pub fn unix_from_iso(text: &str) -> Option<i64> {
             if *sign == b'-' { -minutes } else { minutes }
         }
     };
-    let valid = (1..=12).contains(&month) && (1..=31).contains(&day) && hour < 24 && minute < 60 && second < 61;
+    let valid = plausible_year(year).is_some()
+        && (1..=12).contains(&month)
+        && (1..=31).contains(&day)
+        && (0..24).contains(&hour)
+        && (0..60).contains(&minute)
+        && (0..61).contains(&second);
     valid.then(|| days_from_civil(year, month, day) * 86_400 + hour * 3600 + minute * 60 + second - offset * 60)
 }
 
 /// `Some` for a year that the civil-date math handles without overflow.
 pub(crate) fn plausible_year(year: i64) -> Option<()> {
     (1970..=9999).contains(&year).then_some(())
+}
+
+/// `header` when its IMF-fixdate fields are in range, so the shared HTTP date parser cannot overflow.
+pub(crate) fn bounded_http_date(header: &str) -> Option<&str> {
+    let parts: Vec<&str> = header.split_whitespace().collect();
+    let [_, day, _, year, clock, _] = parts.as_slice() else { return None };
+    let clock: Vec<i64> = clock.split(':').map(|part| part.parse().ok()).collect::<Option<_>>()?;
+    let [hour, minute, second] = clock.as_slice() else { return None };
+    let day: i64 = day.parse().ok()?;
+    plausible_year(year.parse().ok()?)?;
+    let valid =
+        (1..=31).contains(&day) && (0..24).contains(hour) && (0..60).contains(minute) && (0..61).contains(second);
+    valid.then_some(header)
 }
 
 /// A whole number of milliseconds that fits an exact `f64` and an `i64`.
@@ -71,7 +89,6 @@ pub(crate) fn ms_from_value(value: &serde_json::Value) -> Option<i64> {
         return ms_from_f64(if number < 1e11 { number * 1000.0 } else { number });
     }
     let text = value.as_str()?;
-    plausible_year(text.trim().split('-').next()?.parse().ok()?)?;
     let seconds = unix_from_iso(text)?;
     let fraction = text.split_once(['T', ' ']).and_then(|(_, rest)| rest.split_once('.')).map(|(_, rest)| rest);
     let digits: String = fraction.unwrap_or_default().chars().take_while(char::is_ascii_digit).take(3).collect();

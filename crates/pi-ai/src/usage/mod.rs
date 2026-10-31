@@ -401,11 +401,7 @@ pub(crate) fn retry_after_ms(header: &str, now: i64) -> Option<i64> {
     let header = header.trim();
     let ms = match header.parse::<i64>() {
         Ok(seconds) => seconds.checked_mul(1000)?,
-        Err(_) => {
-            let year: i64 = header.split_whitespace().nth(3)?.parse().ok()?;
-            time::plausible_year(year)?;
-            crate::retry::parse_http_date_ms(header)?.checked_sub(now)?
-        }
+        Err(_) => time::bounded_http_date(header).and_then(crate::retry::parse_http_date_ms)?.checked_sub(now)?,
     };
     (ms > 0).then_some(ms)
 }
