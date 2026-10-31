@@ -6,8 +6,8 @@ use super::component::ExtensionRow;
 use crate::agent_session::AgentSession;
 use crate::packages::marketplace::is_newer_tag;
 use crate::packages::{
-    ConfigEditor, ConfigWriteScope, Marketplace, MarketplaceIndex, MissingSourceAction, MissingSourceHandler,
-    PackageManager, PackageManagerOptions, ScopedResolvedPaths,
+    ConfigEditor, ConfigItem, ConfigWriteScope, Marketplace, MarketplaceIndex, MissingSourceAction,
+    MissingSourceHandler, PackageManager, PackageManagerOptions, ScopedResolvedPaths,
 };
 use crate::resources::{ResourceType, SourceOrigin, SourceScope};
 use crate::settings::SettingsManager;
@@ -59,7 +59,7 @@ impl BrowserBackend {
         if self.manager.settings.is_project_trusted() {
             editor.set_write_scope(ConfigWriteScope::Project);
         }
-        let items: Vec<_> = editor
+        let mut items: Vec<ConfigItem> = editor
             .groups()
             .iter()
             .flat_map(|group| &group.subgroups)
@@ -69,14 +69,12 @@ impl BrowserBackend {
         let mut snapshot = Snapshot { rows: Vec::new(), targets: HashMap::new() };
         for package in self.manager.list_configured_packages().await {
             let id = format!("package:{:?}:{}", package.scope, package.source);
-            let provided: Vec<_> = items
-                .iter()
-                .filter(|item| {
-                    item.metadata.origin == SourceOrigin::Package
-                        && item.metadata.source == package.source
-                        && item.metadata.scope == package.scope
-                })
-                .collect();
+            let (provided, rest): (Vec<_>, Vec<_>) = items.into_iter().partition(|item| {
+                item.metadata.origin == SourceOrigin::Package
+                    && item.metadata.source == package.source
+                    && item.metadata.scope == package.scope
+            });
+            items = rest;
             let manifest = package.installed_path.as_deref().map(read_manifest).unwrap_or_default();
             let mut row = ExtensionRow {
                 id: id.clone(),
@@ -106,40 +104,46 @@ impl BrowserBackend {
                 },
             );
             snapshot.rows.push(row);
+            // A package with one extension is one row; with more, each extension toggles alone.
+            if provided.len() > 1 {
+                provided.into_iter().for_each(|item| self.push_extension(&mut snapshot, item));
+            }
         }
-        for item in items {
-            let path = item.path.display().to_string();
-            let id = format!("extension:{:?}:{path}", item.metadata.scope);
-            let manifest = item.metadata.package_root.as_deref().map(read_manifest).unwrap_or_default();
-            snapshot.rows.push(ExtensionRow {
-                id: id.clone(),
-                name: format!("  {}", item.display_name),
-                description: manifest["description"].as_str().unwrap_or_default().into(),
-                source: format!("{} ({:?})", item.metadata.source, item.metadata.scope),
-                version: if item.metadata.source == "builtin" {
-                    env!("CARGO_PKG_VERSION").into()
-                } else {
-                    manifest["version"].as_str().unwrap_or_default().into()
-                },
-                path: path.clone(),
-                tags: Vec::new(),
-                enabled: Some(item.enabled),
-                installed: true,
-                update_available: false,
-                details: self.registrations(&path),
-            });
-            snapshot.targets.insert(
-                id,
-                Target {
-                    source: item.metadata.source,
-                    scope: item.metadata.scope,
-                    paths: vec![path],
-                    enabled: item.enabled,
-                    package: false,
-                },
-            );
-        }
+        items.into_iter().for_each(|item| self.push_extension(&mut snapshot, item));
         Ok(snapshot)
+    }
+
+    fn push_extension(&self, snapshot: &mut Snapshot, item: ConfigItem) {
+        let path = item.path.display().to_string();
+        let id = format!("extension:{:?}:{path}", item.metadata.scope);
+        let manifest = item.metadata.package_root.as_deref().map(read_manifest).unwrap_or_default();
+        snapshot.rows.push(ExtensionRow {
+            id: id.clone(),
+            name: format!("  {}", item.display_name),
+            description: manifest["description"].as_str().unwrap_or_default().into(),
+            source: format!("{} ({:?})", item.metadata.source, item.metadata.scope),
+            version: if item.metadata.source == "builtin" {
+                env!("CARGO_PKG_VERSION").into()
+            } else {
+                manifest["version"].as_str().unwrap_or_default().into()
+            },
+            path: path.clone(),
+            tags: Vec::new(),
+            enabled: Some(item.enabled),
+            installed: true,
+            update_available: false,
+            details: self.registrations(&path),
+        });
+        snapshot.targets.insert(
+            id,
+            Target {
+                source: item.metadata.source,
+                scope: item.metadata.scope,
+                paths: vec![path],
+                enabled: item.enabled,
+                package: false,
+            },
+        );
     }
 
     fn registrations(&self, path: &str) -> Vec<String> {
