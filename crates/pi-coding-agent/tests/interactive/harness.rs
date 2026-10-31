@@ -25,7 +25,7 @@ use tempfile::TempDir;
 
 #[path = "watchdog.rs"]
 mod watchdog;
-pub use watchdog::Watchdog;
+pub type Watchdog = watchdog::Watchdog;
 
 static NEXT_API: AtomicU64 = AtomicU64::new(1);
 const TIMEOUT: Duration = Duration::from_secs(10);
