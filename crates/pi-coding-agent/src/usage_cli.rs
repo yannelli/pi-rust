@@ -146,7 +146,17 @@ mod tests {
 
     fn usage(provider: &str, windows: Vec<UsageWindow>, error: Option<&str>) -> ProviderUsage {
         let error = error.map(str::to_string);
-        ProviderUsage { provider: provider.into(), plan: None, windows, error, fetched_at: 0 }
+        let (credits, error_kind, retry_after_ms) = (None, None, None);
+        ProviderUsage {
+            provider: provider.into(),
+            plan: None,
+            windows,
+            error,
+            fetched_at: 0,
+            credits,
+            error_kind,
+            retry_after_ms,
+        }
     }
 
     #[test]
