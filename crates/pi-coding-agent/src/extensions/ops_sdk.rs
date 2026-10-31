@@ -98,6 +98,12 @@ pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<
                 "sessionId" => json!(session.session_id()),
                 "sessionFile" => json!(session.session_file()),
                 "systemPrompt" => json!(session.agent().state().current_system_prompt()),
+                "routedModel" => json!(session.routed_model().map(|routed| {
+                    json!({"model": routed.model, "thinkingLevel": routed.thinking_level})
+                })),
+                "contextUsage" => json!(session.context_usage().map(|usage| {
+                    json!({"tokens": usage.tokens, "contextWindow": usage.context_window, "percent": usage.percent})
+                })),
                 member => return Err(JsError::unsupported(&format!("AgentSession.{member}"))),
             }
         }

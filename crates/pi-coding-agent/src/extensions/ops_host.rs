@@ -141,6 +141,15 @@ pub(crate) fn sync(runner: &ExtensionRunner, op: &str, args: &Args) -> Result<Ho
             crate::theme::get_theme(&args.str(0)?).map(|theme| theme_snapshot(&theme)).unwrap_or(Value::Null)
         }
         "theme.available" => json!(crate::theme::get_available_themes()),
+        "theme.systemName" => json!(crate::theme::SYSTEM_THEME_NAME),
+        "theme.parseAuto" => json!(
+            crate::theme::parse_auto_theme_setting(args.opt_str(0).as_deref())
+                .map(|auto| json!({"lightTheme": auto.light_theme, "darkTheme": auto.dark_theme}))
+        ),
+        "images.convertToPng" => json!(
+            crate::images::convert_to_png(&args.str(0)?, &args.str(1)?)
+                .map(|(data, mime_type)| json!({"data": data, "mimeType": mime_type}))
+        ),
         "theme.highlight" => json!(crate::theme::highlight_code(&args.str(0)?, args.opt_str(1).as_deref())),
         "theme.language" => json!(crate::theme::get_language_from_path(&args.str(0)?)),
         "config.info" => json!({

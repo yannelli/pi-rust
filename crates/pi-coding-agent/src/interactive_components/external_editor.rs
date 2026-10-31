@@ -8,8 +8,8 @@ use std::process::Stdio;
 pub enum ExternalEditorResult {
     /// The editor exited with status 0; the file content without a final newline.
     Complete(String),
-    /// The editor could not start or exited with an error.
-    Failed,
+    /// The editor could not start or exited with an error; upstream's message for it.
+    Failed(String),
 }
 
 /// The configured editor command: `$VISUAL`, `$EDITOR`, then `notepad` or `nano`.
@@ -19,6 +19,18 @@ pub fn default_editor_command() -> String {
         .filter_map(|name| std::env::var(name).ok())
         .find(|value| !value.is_empty())
         .unwrap_or_else(|| if cfg!(windows) { "notepad" } else { "nano" }.to_string())
+}
+
+/// `code N`, else the signal, as upstream prints `code ?? signal`.
+fn exit_text(status: std::process::ExitStatus) -> String {
+    if let Some(code) = status.code() {
+        return format!("code {code}");
+    }
+    #[cfg(unix)]
+    if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(&status) {
+        return format!("signal {signal}");
+    }
+    status.to_string()
 }
 
 /// A fresh `pi-editor-*` directory under the temp dir, removed on drop.
@@ -53,12 +65,14 @@ impl Drop for TempDirectory {
 /// Writes `content` to a temporary `prompt.md`, runs `command` on it with the terminal attached,
 /// and reads the result back. The command is split on spaces; Windows runs it through the shell.
 pub async fn edit_in_external_editor(command: &str, content: &str) -> ExternalEditorResult {
-    let Ok(directory) = TempDirectory::create() else {
-        return ExternalEditorResult::Failed;
+    let failed = |message: String| ExternalEditorResult::Failed(message);
+    let directory = match TempDirectory::create() {
+        Ok(directory) => directory,
+        Err(error) => return failed(error.to_string()),
     };
     let path = directory.0.join("prompt.md");
-    if std::fs::write(&path, content).is_err() {
-        return ExternalEditorResult::Failed;
+    if let Err(error) = std::fs::write(&path, content) {
+        return failed(error.to_string());
     }
     let mut stdout = std::io::stdout();
     let _ = write!(stdout, "Launching external editor: {command}\nPi will resume when the editor exits.\n");
@@ -78,13 +92,14 @@ pub async fn edit_in_external_editor(command: &str, content: &str) -> ExternalEd
     child.stdin(Stdio::inherit()).stdout(Stdio::inherit()).stderr(Stdio::inherit());
     match child.status().await {
         Ok(status) if status.success() => {}
-        _ => return ExternalEditorResult::Failed,
+        Ok(status) => return failed(format!("External editor exited with {}; prompt unchanged", exit_text(status))),
+        Err(_) => return failed(format!("Failed to launch external editor: {command}")),
     }
     match std::fs::read_to_string(&path) {
         Ok(text) => {
             let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
             ExternalEditorResult::Complete(text.strip_suffix('\n').unwrap_or(text).to_string())
         }
-        Err(_) => ExternalEditorResult::Failed,
+        Err(error) => failed(error.to_string()),
     }
 }

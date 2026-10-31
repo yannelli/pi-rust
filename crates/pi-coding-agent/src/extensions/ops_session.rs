@@ -104,10 +104,12 @@ fn read_models(session: &AgentSession, method: &str, args: &Args) -> Result<Valu
             json!(models)
         }
         "hasConfiguredAuth" => json!(runtime.has_configured_auth(&args.str(2)?)),
-        "isUsingOAuth" => {
+        "isUsingOAuth" | "isUsingSubscription" => {
             let (provider, store) = (args.str(2)?, runtime.credential_store());
+            let subscription = runtime.resolver().oauth(&provider).is_some_and(|oauth| oauth.is_subscription());
             let stored = block_on_fresh(async move { store.read(&provider).await });
-            json!(matches!(stored, Some(Ok(Some(pi_ai::auth::Credential::OAuth(_))))))
+            let oauth = matches!(stored, Some(Ok(Some(pi_ai::auth::Credential::OAuth(_)))));
+            json!(oauth && (method == "isUsingOAuth" || subscription))
         }
         "getProviderDisplayName" => {
             let provider = args.str(2)?;

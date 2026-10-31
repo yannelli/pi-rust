@@ -1,5 +1,6 @@
 import { resolve, join } from "node:path";
 import { call, callAsync, optional, registerCallback, releaseCallback } from "./bridge.js";
+import { hostRuntime } from "./sdk_resources.js";
 import { SessionManager, SettingsManager } from "./sdk_storage.js";
 
 function unsupported(member) {
@@ -68,6 +69,10 @@ export async function createAgentSession(options = {}) {
 		get sessionId() { return read("sessionId"); },
 		get sessionFile() { return read("sessionFile"); },
 		get systemPrompt() { return read("systemPrompt"); },
+		get state() { return { model: read("model"), thinkingLevel: read("thinkingLevel") }; },
+		get routedModel() { return read("routedModel"); },
+		getContextUsage: () => read("contextUsage"),
+		modelRuntime: options.modelRuntime ?? hostRuntime(),
 		subscribe(listener) {
 			assertActive();
 			if (typeof listener !== "function") throw new TypeError("Expected a session event listener");

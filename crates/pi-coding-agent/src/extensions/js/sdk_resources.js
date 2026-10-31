@@ -151,7 +151,7 @@ export class DefaultResourceLoader {
 }
 
 const RUNTIME_UNSUPPORTED = [
-	"setRuntimeApiKey", "removeRuntimeApiKey", "listCredentials", "login", "logout", "isUsingSubscription",
+	"setRuntimeApiKey", "removeRuntimeApiKey", "listCredentials", "login", "logout",
 	"registerProvider", "unregisterProvider", "registerNativeProvider", "registerVirtualModel",
 	"unregisterVirtualModel", "getRegisteredProviderConfig", "getRegisteredNativeProvider",
 	"getCompatibilityRequestConfig", "getPhysicalModel",
@@ -167,7 +167,7 @@ const ofProvider = (models, providerId) =>
 	providerId === undefined ? models : models.filter((model) => model.provider === providerId);
 
 /** Upstream `ModelRuntime` over the host session's models; auth methods take provider ids. */
-function hostRuntime() {
+export function hostRuntime() {
 	const registry = createModelRegistry(0, sessionStream);
 	const runtime = {
 		...registry,
@@ -181,6 +181,7 @@ function hostRuntime() {
 			[...new Set(registry.getAll().map((model) => model.provider))].map(registry.getProvider).filter(Boolean),
 		hasConfiguredAuth: (providerId) => registry.hasConfiguredAuth({ provider: providerId }),
 		isUsingOAuth: (providerId) => registry.isUsingOAuth({ provider: providerId }),
+		isUsingSubscription: (providerId) => Boolean(call("models.read", 0, "isUsingSubscription", providerId)),
 	};
 	for (const name of RUNTIME_UNSUPPORTED) {
 		runtime[name] = () => {

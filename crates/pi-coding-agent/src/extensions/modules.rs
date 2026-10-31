@@ -50,6 +50,8 @@ const SHIMS: &[(&str, &str, &str)] = &[
     ("pi-coding-agent/src/utils/child-process.ts", "{ spawnProcessSync }", "host/component_shims.js"),
     ("pi-coding-agent/src/core/keybindings.ts", "{ KeybindingsManager }", "host/component_shims.js"),
     ("pi-coding-agent/src/utils/clipboard.ts", "{ copyToClipboard }", "host/component_shims.js"),
+    ("pi-coding-agent/src/modes/interactive/external-editor.ts", "{ editInExternalEditor }", "host/component_shims.js"),
+    ("pi-coding-agent/src/utils/image-convert.ts", "{ ensurePngTranscoder }", "host/component_shims.js"),
 ];
 
 fn path(key: &str) -> String {

@@ -79,6 +79,14 @@ pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<
             ui.request_render(args.bool(1));
             Value::Null
         }
+        "stop" => {
+            ui.stop_tui();
+            Value::Null
+        }
+        "start" => {
+            ui.start_tui();
+            Value::Null
+        }
         "terminalSize" => {
             let (columns, rows) = ui.terminal_size();
             json!([columns, rows])

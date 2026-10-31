@@ -146,6 +146,13 @@ export function highlightCode(code, lang) {
 	return call("theme.highlight", code, lang ?? null);
 }
 
+export const SYSTEM_THEME_NAME = call("theme.systemName");
+
+/** Upstream `parseAutoThemeSetting`: `light/dark` theme names, else undefined. */
+export function parseAutoThemeSetting(themeSetting) {
+	return optional(call("theme.parseAuto", themeSetting ?? null));
+}
+
 /** Upstream `getAvailableThemes`: the system theme, built-in themes, then custom themes. */
 export function getAvailableThemes() {
 	return call("theme.available");

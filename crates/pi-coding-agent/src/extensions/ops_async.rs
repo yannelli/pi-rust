@@ -150,6 +150,13 @@ pub(crate) async fn run(runner: Arc<ExtensionRunner>, op: &str, args: Vec<HostVa
     let value = match group {
         "ui" if name == "custom" => ops_ui::custom(&runner, args.u64(0), args.u64(1), args.json(2)).await?,
         "ui" if name == "autocompleteBase" => ops_ui::autocomplete_base(&runner, &args).await?,
+        "ui" if name == "externalEditor" => {
+            let ui = runner.target_ui(args.u64(0));
+            match ui.external_editor(&args.str(1)?, &args.str(2)?).await {
+                Ok(content) => json!({"status": "complete", "content": content}),
+                Err(message) => json!({"status": "failed", "message": message}),
+            }
+        }
         "ui" => dialog(&runner, name, &args).await?,
         "models" => model_op(&runner, name, args).await?,
         "tools" if name == "executeNested" => nested_call(&runner, &args).await?,

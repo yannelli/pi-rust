@@ -19,6 +19,7 @@ use crate::extension_ui::{
     DialogOptions, ExtensionUi, NotifyType, ThemeInfo, WidgetPlacement, WorkingIndicatorOptions,
 };
 use crate::extensions::{ComponentFactory, CustomRequest};
+use crate::interactive_components::{ExternalEditorResult, edit_in_external_editor};
 
 /// UI state extensions read without waiting for the UI thread.
 #[derive(Default)]
@@ -371,6 +372,32 @@ impl ExtensionUi for TuiExtensionUi {
 
     fn request_render(&self, force: bool) {
         self.run(move |mode| if force { mode.request_full_render() } else { mode.request_render() });
+    }
+
+    fn stop_tui(&self) {
+        self.run(|mode| mode.tui().stop(pi_tui::TuiStopOptions::default()));
+    }
+
+    fn start_tui(&self) {
+        self.run(|mode| mode.tui().start());
+    }
+
+    async fn external_editor(&self, command: &str, content: &str) -> Result<String, String> {
+        let (command, content) = (command.to_string(), content.to_string());
+        // Posted to the UI thread after a preceding `stop_tui`, so the editor gets the terminal.
+        let gone = Err("The terminal UI has closed".to_string());
+        self.ask(gone, false, move |_mode| {
+            let (sender, receiver) = oneshot::channel();
+            tokio::task::spawn_local(async move {
+                let result = match edit_in_external_editor(&command, &content).await {
+                    ExternalEditorResult::Complete(text) => Ok(text),
+                    ExternalEditorResult::Failed(message) => Err(message),
+                };
+                let _ = sender.send(result);
+            });
+            receiver
+        })
+        .await
     }
 
     fn terminal_size(&self) -> (u16, u16) {

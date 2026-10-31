@@ -23,6 +23,8 @@ export function releaseFactory(id) {
 function tuiHandle(target) {
 	return {
 		requestRender: (force) => call("ui.requestRender", target, Boolean(force)),
+		stop: () => call("ui.stop", target),
+		start: () => call("ui.start", target),
 		get terminal() {
 			const [columns, rows] = call("ui.terminalSize", target);
 			return { columns, rows, get width() {
