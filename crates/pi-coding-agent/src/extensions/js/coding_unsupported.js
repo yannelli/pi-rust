@@ -2,10 +2,6 @@
 // expose to extensions: the CLI and run modes, the extension runtime, and the interactive UI.
 import { unsupportedClass, unsupportedFunction } from "./unsupported.js";
 
-export const compact = unsupportedFunction("compact");
-export const generateBranchSummary = unsupportedFunction("generateBranchSummary");
-export const generateSummary = unsupportedFunction("generateSummary");
-export const generateSummaryWithUsage = unsupportedFunction("generateSummaryWithUsage");
 export const createAgentSessionFromServices = unsupportedFunction("createAgentSessionFromServices");
 export const createAgentSessionRuntime = unsupportedFunction("createAgentSessionRuntime");
 export const createAgentSessionServices = unsupportedFunction("createAgentSessionServices");

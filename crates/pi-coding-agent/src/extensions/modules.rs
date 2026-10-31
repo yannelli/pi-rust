@@ -55,6 +55,11 @@ const SHIMS: &[(&str, &str, &str)] = &[
     ("pi-coding-agent/src/modes/interactive/external-editor.ts", "{ editInExternalEditor }", "host/component_shims.js"),
     ("pi-coding-agent/src/utils/image-convert.ts", "{ ensurePngTranscoder }", "host/component_shims.js"),
     (
+        "pi-coding-agent/src/core/session-manager.ts",
+        "{ buildSessionProjection, sessionEntryToContextMessages }",
+        "host/session_utils.js",
+    ),
+    (
         "pi-ai/src/providers/images/register-builtins.ts",
         "{ generateImagesOpenRouter, registerBuiltInImagesApiProviders }",
         "host/ai_images.js",
