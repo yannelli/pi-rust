@@ -100,6 +100,10 @@ const CODING_AGENT_FILES: &[&str] = &[
     "core/experimental.ts",
     "core/settings-defaults.ts",
     "core/usage-totals.ts",
+    "core/compaction/branch-summarization.ts",
+    "core/compaction/compaction.ts",
+    "core/compaction/utils.ts",
+    "core/messages.ts",
     "modes/interactive/components/extension-editor.ts",
     "modes/interactive/components/footer.ts",
     "modes/interactive/components/model-selector.ts",
@@ -118,6 +122,7 @@ const BARE_IMPORTS: &[(&str, &str)] = &[
     ("get-east-asian-width", "get-east-asian-width/index.js"),
     ("partial-json", "partial-json/dist/index.js"),
     ("@earendil-works/pi-ai", "host/ai.js"),
+    ("@earendil-works/pi-ai/compat", "host/ai.js"),
     ("@earendil-works/pi-telemetry", "pi-telemetry/src/index.ts"),
     ("@earendil-works/pi-ai/utils/retry", "pi-ai/src/utils/retry.ts"),
 ];
