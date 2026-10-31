@@ -195,6 +195,9 @@ fn native_renderers_draw_tool_rows_messages_and_entries_in_the_transcript() {
         let screen = ui.screen();
         assert_eq!(drawn_width(&screen, "CARD teal card at"), Some(70), "{screen}");
         assert!(screen.contains("NOTE plum at 70 closed"), "{screen}");
+        dog.stage("quit and shut down the native extension");
+        ui.submit("/quit").await;
+        ui.wait_until("native session shutdown", |ui| ui.mode.is_exited()).await;
         dog.stage("tear down");
     }));
     dog.stage("drop Tokio runtime");
