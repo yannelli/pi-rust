@@ -3,7 +3,7 @@
 // per line) and relays messages to the Worker that runs extension code. It does not block.
 const net = require("node:net");
 const path = require("node:path");
-const { Worker, MessageChannel } = require("node:worker_threads");
+const { Worker, MessageChannel, SHARE_ENV } = require("node:worker_threads");
 
 const port = Number(process.env.PI_NODE_BACKEND_PORT);
 const token = process.env.PI_NODE_BACKEND_TOKEN;
@@ -75,7 +75,8 @@ function start(config) {
   if (config.memoryMb) resourceLimits.maxOldGenerationSizeMb = config.memoryMb;
   if (config.stackMb) resourceLimits.stackSizeMb = config.stackMb;
   worker = new Worker(path.join(__dirname, "worker.cjs"), {
-    env: config.env ?? process.env,
+    // Bootstrap applied config.env to this dedicated process; native queries must see later writes too.
+    env: SHARE_ENV,
     stdout: true,
     stderr: true,
     resourceLimits,

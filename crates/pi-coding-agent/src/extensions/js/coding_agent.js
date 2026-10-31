@@ -29,6 +29,7 @@ export { ToolExecutionComponent } from "../pi-coding-agent/src/modes/interactive
 export { BorderedLoader } from "../pi-coding-agent/src/modes/interactive/components/bordered-loader.ts";
 export { generateBranchSummary } from "../pi-coding-agent/src/core/compaction/branch-summarization.ts";
 export { compact, generateSummary, generateSummaryWithUsage } from "../pi-coding-agent/src/core/compaction/compaction.ts";
+export { hasTrustRequiringProjectResources } from "../pi-coding-agent/src/core/trust-manager.ts";
 export { CustomEditor } from "../pi-coding-agent/src/modes/interactive/components/custom-editor.ts";
 export { DynamicBorder } from "../pi-coding-agent/src/modes/interactive/components/dynamic-border.ts";
 export {
