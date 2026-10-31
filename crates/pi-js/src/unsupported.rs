@@ -29,7 +29,7 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
     "cluster: workers sharing Unix socket or named pipe servers, and TLS servers (each worker listens on its own)",
     "net: sockets and servers from a file descriptor or an existing handle, and reusePort outside Linux \
      (ENOTSUP, as in libuv)",
-    "tls: pfx (no PKCS#12 parser is bundled), encrypted private keys, exportKeyingMaterial, and TLS before 1.2",
+    "tls: pfx (no PKCS#12 parser is bundled) and TLS before 1.2",
     "http: the insecureHTTPParser option (accepted and ignored)",
     "http2: performServerHandshake, altsvc and origin frames (ignored), and stream priority (h2 sends no \
      PRIORITY frames)",

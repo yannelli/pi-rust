@@ -2,6 +2,7 @@
 const { Buffer } = require("buffer");
 const net = require("net");
 const { codeError, invalidArgType, validate } = require("internal/errors");
+const BUFFER_TYPES = "an instance of Buffer, TypedArray, or DataView";
 const { isIP } = require("internal/net_address");
 const { Socket, kAccepted, normalizeArgs } = require("internal/net_socket");
 const wrapper = require("internal/tls_wrap");
@@ -57,15 +58,29 @@ function SecureContext(options = {}) {
       throw codeError(TypeError, "ERR_TLS_INVALID_PROTOCOL_VERSION", `${JSON.stringify(options[name])} is not a valid ${name.slice(0, 3)} TLS protocol version`);
     }
   }
+  if (options.passphrase !== undefined && options.passphrase !== null) validate.string(options.passphrase, "options.passphrase");
   const keys = pemList(options.key, "key");
   this.context = {};
   this._options = {
     ca: pemList(options.ca, "ca"),
     cert: pemList(options.cert, "cert") && pemList(options.cert, "cert").join("\n"),
-    key: keys && keys[0],
+    key: keys && plainKey(keys[0], keyPassphrase(options)),
     minVersion: options.minVersion || tlsExports.DEFAULT_MIN_VERSION,
     maxVersion: options.maxVersion || tlsExports.DEFAULT_MAX_VERSION,
   };
+}
+
+// The passphrase of the first key: its own `{ pem, passphrase }`, else `options.passphrase`.
+function keyPassphrase(options) {
+  const first = Array.isArray(options.key) ? options.key[0] : options.key;
+  const own = first && typeof first === "object" && !ArrayBuffer.isView(first) ? first.passphrase : undefined;
+  return own !== undefined && own !== null ? own : options.passphrase;
+}
+
+// rustls takes no encrypted keys, so an encrypted key is decrypted here, where Node fails too.
+function plainKey(pem, passphrase) {
+  if (!/-----BEGIN ENCRYPTED PRIVATE KEY-----|Proc-Type:\s*4,ENCRYPTED/.test(pem)) return pem;
+  return nativeTls.decryptKey(pem, passphrase === undefined || passphrase === null ? undefined : String(passphrase));
 }
 
 function createSecureContext(options) {
@@ -337,8 +352,15 @@ Object.assign(TLSSocket.prototype, {
     if (callback) process.nextTick(callback, codeError(Error, "ERR_TLS_RENEGOTIATION_DISABLED", "TLS session renegotiation disabled for this socket"));
     return false;
   },
-  exportKeyingMaterial() {
-    throw internal.unsupported("tlsSocket.exportKeyingMaterial");
+  exportKeyingMaterial(length, label, context) {
+    validate.integer(length, "length", 1, 4294967295);
+    validate.string(label, "label");
+    if (context !== undefined && !ArrayBuffer.isView(context)) throw invalidArgType("context", BUFFER_TYPES, context);
+    if (this._handle === null || !this._tls) {
+      throw codeError(Error, "ERR_TLS_INVALID_STATE", "TLS socket connection must be securely established");
+    }
+    const bytes = context === undefined ? undefined : new Uint8Array(context.buffer, context.byteOffset, context.byteLength);
+    return Buffer.from(nativeTls.exportKeyingMaterial(this._handle, length, label, bytes));
   },
 });
 

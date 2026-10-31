@@ -105,3 +105,23 @@ async fn tls_over_a_unix_socket_closes_without_a_reset() {
     assert_same_keys(&actual, &serde_json::from_str(include_str!("fixtures/node_tls/unix_close.json")).unwrap());
     assert!(capture.uncaught.lock().unwrap().is_empty());
 }
+
+// Encrypted keys from `node_http/key.pem` (passphrase `pi-test`); expected values from Node 22.23.4.
+#[tokio::test]
+async fn encrypted_keys_and_keying_material_match_node() {
+    let (_dir, root) = tempdir();
+    let (runtime, capture) = runtime(&root);
+    let pem = |text: &str| format!("{text:?}");
+    let script = include_str!("fixtures/node_tls/key_export.js")
+        .replace("__PKCS8__", &pem(include_str!("fixtures/node_tls/key_pkcs8_encrypted.pem")))
+        .replace("__LEGACY__", &pem(include_str!("fixtures/node_tls/key_legacy_encrypted.pem")))
+        .replace("__CERT__", &pem(include_str!("fixtures/node_http/cert.pem")));
+    let actual = run_cjs_within(&runtime, &root, &script, 120).await;
+    assert_same_keys(&actual, &serde_json::from_str(include_str!("fixtures/node_tls/key_export.json")).unwrap());
+    let uncaught = capture.uncaught.lock().unwrap();
+    assert!(
+        uncaught.is_empty(),
+        "{:?}",
+        uncaught.iter().map(|(_, error)| error.display_with_stack()).collect::<Vec<_>>()
+    );
+}
