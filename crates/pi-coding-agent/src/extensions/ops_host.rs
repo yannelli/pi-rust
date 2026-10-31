@@ -187,7 +187,6 @@ pub(crate) fn sync(runner: &ExtensionRunner, op: &str, args: &Args) -> Result<Ho
         }
         "tools.builtinInfo" => builtin_info(runner, &args.str(0)?)?,
         "ai.catalog" => catalog(&args.str(0)?, args),
-        "ai.envApiKey" => json!(pi_ai::env::get_env_api_key(&args.str(0)?)),
         "ai.credentialEnvVars" => json!(pi_ai::env::credential_env_vars()),
         "ai.hasApi" => {
             let api = args.str(0)?;

@@ -10,7 +10,10 @@ use pi_ai::auth::{
     AuthError, AuthEvent, AuthInteraction, AuthOverrides, AuthPrompt, AuthResolver, AuthResult,
     InMemoryCredentialStore, LoginOptions, OAuthAuth, OAuthCredential,
 };
+use pi_ai::classify::{ClassifierContext, ClassifierOptions, ClassifierResult};
 use pi_ai::env::EnvLookup;
+use pi_ai::images::{AssistantImages, ImagesContext, ImagesOptions};
+use pi_ai::model_operations;
 use pi_ai::request::RequestOptions;
 use pi_js::JsError;
 use serde_json::{Value, json};
@@ -135,26 +138,60 @@ async fn api_key(args: &Args) -> Result<Value, JsError> {
         .map_or(Value::Null, |resolved| json!({"auth": resolved.auth, "env": resolved.env, "source": resolved.source})))
 }
 
+/// Upstream `generateImages`: the API registered for `model.api` with the caller's auth only. The
+/// pi-ai entry point would add the host environment's key, which upstream providers never read.
+async fn generate_images(model: &pi_ai::Model, context: &ImagesContext, options: ImagesOptions) -> AssistantImages {
+    let aborted = options.request.cancel.is_cancelled();
+    if let Err(message) = model_operations::assert_image_model(model) {
+        return model_operations::image_error_result(model, message, aborted);
+    }
+    match pi_ai::images::images_api(&model.api) {
+        Some(api) => api.generate_images(model, context, options).await,
+        None => model_operations::image_error_result(
+            model,
+            format!("No API provider registered for api: {}", model.api),
+            aborted,
+        ),
+    }
+}
+
+/// Upstream `classify` dispatch, also with the caller's auth only.
+async fn classify(model: &pi_ai::Model, context: &ClassifierContext, options: ClassifierOptions) -> ClassifierResult {
+    let aborted = options.request.cancel.is_cancelled();
+    let supported = model_operations::assert_classifier_model(model)
+        .and_then(|()| model_operations::assert_classifier_input_supported(model, context));
+    if let Err(message) = supported {
+        return model_operations::classifier_error_result(model, message, aborted);
+    }
+    match pi_ai::classify::classifier_api(&model.api) {
+        Some(api) => api.classify(model, context, options).await,
+        None => {
+            let message = format!("No API provider registered for api: {}", model.api);
+            model_operations::classifier_error_result(model, message, aborted)
+        }
+    }
+}
+
 /// `ai.<name>`; `classify` and `generateImages` take the model, the context, and the options.
 pub(crate) async fn run(runner: &Arc<ExtensionRunner>, name: &str, args: Args) -> Result<Value, JsError> {
     Ok(match name {
         "classify" => {
             let options_json = args.json(2);
-            let options = pi_ai::classify::ClassifierOptions {
+            let options = ClassifierOptions {
                 request: request_options(runner, &options_json),
                 temperature: options_json["temperature"].as_f64(),
             };
             let (model, context) = (json_arg(&args, 0, "model")?, json_arg(&args, 1, "classifier context")?);
-            json!(pi_ai::classify::classify(&model, &context, options).await)
+            json!(classify(&model, &context, options).await)
         }
         "generateImages" => {
             let options_json = args.json(2);
-            let options = pi_ai::images::ImagesOptions {
+            let options = ImagesOptions {
                 request: request_options(runner, &options_json),
                 metadata: options_json["metadata"].as_object().cloned(),
             };
             let (model, context) = (json_arg(&args, 0, "model")?, json_arg(&args, 1, "images context")?);
-            json!(pi_ai::images::generate_images(&model, &context, options).await)
+            json!(generate_images(&model, &context, options).await)
         }
         "apiKey" => api_key(&args).await?,
         "oauth" => oauth(runner, &args).await?,
