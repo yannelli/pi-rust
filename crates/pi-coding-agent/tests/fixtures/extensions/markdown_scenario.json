@@ -1,0 +1,20 @@
+{
+	"rendered": {
+		"mathBeforeTable": ["Intro","","$$","","┌───┬───┐","│ \u001b[1mA\u001b[22m │ \u001b[1mB\u001b[22m │","├───┼───┤","│ 1 │ 2 │","└───┴───┘","","After"],
+		"bracketBeforeTable": ["\\[","x = 1","","┌───┬───┐","│ \u001b[1mA\u001b[22m │ \u001b[1mB\u001b[22m │","├───┼───┤","│ 1 │ 2 │","└───┴───┘"],
+		"cjkBold": ["\u001b[1m这是测试。\u001b[22m后面"],
+		"cjkQuoteBold": ["字\u001b[1m「引用」\u001b[22m字"],
+		"cjkItalic": ["\u001b[3m斜体。\u001b[23m后面"],
+		"latinFlanking": ["**end.**Then next"],
+		"deepQuote": [" │ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3m│ \u001b[3mx\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m\u001b[23m"],
+		"wideMath40": ["∂² u   ∂² u   n   1   1","──── + ──── = ∑   ── +∫ f(x) dx","∂ x²   ∂ y²  i=1  i²  0"],
+		"wideMath30": ["\\[","\\frac{\\partial^2 u}{\\partial","x^2} + \\frac{\\partial^2","u}{\\partial y^2} =","\\sum_{i=1}^{n} \\frac{1}{i^2} +","\\int_0^1 f(x)\\,dx","\\]"],
+		"urlComma": ["\u001b]8;;https://example.com\u001b\\https://example.com\u001b]8;;\u001b\\，后面的中文"],
+		"urlPathPeriod": ["\u001b]8;;https://example.com/中文?q=搜索#片段\u001b\\https://example.com/中文?q=搜索#片段\u001b]8;;\u001b\\。后面的中文"],
+		"urlWwwBracket": ["\u001b]8;;http://www.example.com\u001b\\www.example.com\u001b]8;;\u001b\\」后面的中文"],
+		"urlCjkLetters": ["\u001b]8;;https://example.com紧接着中文\u001b\\https://example.com紧接着中文\u001b]8;;\u001b\\"],
+		"explicitLink": ["\u001b]8;;https://example.com/中文，路径·テスト・한글…—。\u001b\\文档\u001b]8;;\u001b\\"],
+		"angleLink": ["\u001b]8;;https://example.com/中文，路径·テスト・한글…—。\u001b\\https://example.com/中文，路径·テスト・한글…—。\u001b]8;;\u001b\\"],
+		"latinTrimFirst": ["\u001b]8;;https://example.com\u001b\\https://example.com\u001b]8;;\u001b\\.，后面的中文"]
+	}
+}
