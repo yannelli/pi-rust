@@ -108,17 +108,6 @@ pi-rust adds this behavior on purpose. Do not report these items as gaps in the 
 - Markdown export: if the output path ends in `.md`, `/export` and `pi --export` write Markdown ([Export](../../crates/pi-coding-agent/docs/commands.md#export)).
 - The README section "Differences from upstream pi" lists the other additions: slash commands, CLI commands and flags, and settings. It also lists the bugs that pi-rust fixes and that are still open upstream. `allowlist.json` holds the matching parity report entries.
 
-## Native extension protocol
-
-Requests from extension authors that protocol version 1 does not support yet ([native protocol](../extensions/native-protocol.md#not-yet-supported)):
-
-- Custom renderers for tool calls, tool results, and session entries (`renderCall`, `renderResult`, `registerMessageRenderer`).
-- `prepareArguments` of a tool definition.
-- `provider.register` with `oauth: { builtin }`, to reuse a login flow of pi.
-- An order guarantee for `after_provider_response` before `message_end` of the same response.
-- `settings.set`, to write a settings namespace.
-- Unregistering the tools of a crashed child. pi deactivates them but keeps them in the registry.
-
 ## Post-release follow-up
 
 Do this item only after the preceding ACP, provider, and TUI work is released on `main`. Then find why Anthropic Sonnet 4.5 has the label `(Latest)`. Change the label or its update source only if Pi Rust supplies it. Do not override metadata that an external provider supplies. Do not investigate this item before that release.

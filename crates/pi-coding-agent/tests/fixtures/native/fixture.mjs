@@ -31,20 +31,32 @@ const registrations = {
 			description: "Echo the text; wait=true runs until cancelled",
 			parameters: { type: "object", properties: { text: { type: "string" }, wait: { type: "boolean" } } },
 		},
+		{
+			name: "native_draw",
+			description: "Echo a string; the extension coerces other values and draws the rows",
+			parameters: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+			prepareArguments: true,
+			renderCall: true,
+			renderResult: true,
+		},
 	],
+	messageRenderers: ["native-card"],
+	entryRenderers: ["native-note"],
 	commands: [
 		"native-ask", "native-panel", "native-llm", "native-crash", "native-write", "native-probe",
 		"native-ctx", "native-find", "native-usage", "native-input", "native-exec", "native-settle", "native-llm-headers", "native-log",
+		"native-settings", "native-oauth", "native-auth", "native-login", "native-card", "native-order", "native-restyle", "native-render-count",
 	].map((name) => ({ name })),
 	flags: [{ name: "native-flag", type: "string", default: "off" }],
 	events: [
 		"session_start", "before_agent_start", "tool_call", "tool_result", "message_end", "context",
-		"agent_before_settle", ...(process.env.NATIVE_FOOTER === "off" ? [] : ["footer_changed"]),
+		"agent_before_settle", "after_provider_response", ...(process.env.NATIVE_FOOTER === "off" ? [] : ["footer_changed"]),
 	],
 	autocomplete: [{ triggerCharacters: ["@"] }],
 };
 
-async function executeTool(id, { toolCallId, params }) {
+async function executeTool(id, { toolCallId, name, params }) {
+	if (name === "native_draw") return text(`drew ${params.text}`);
 	notify("tool.update", { toolCallId, partial: text(`working on ${params.text}`) });
 	if (!params.wait) return text(`echo: ${params.text}`);
 	await new Promise((resolve) => cancels.set(id, resolve));
@@ -56,7 +68,7 @@ const textOf = (content) => (Array.isArray(content) ? content.map((block) => blo
 
 const answer = (method, params) => request(method, params).then(
 	(result) => ({ result }),
-	(error) => ({ error: error.message }),
+	(error) => ({ error: error.message, code: error.code }),
 );
 
 async function initialize(params) {
@@ -69,7 +81,21 @@ async function initialize(params) {
 	return registrations;
 }
 
-function onEvent({ name, event, ctx }) {
+const order = [];
+let orderArmed = false;
+
+async function onEvent({ name, event, ctx }) {
+	if (name === "after_provider_response") {
+		if (!orderArmed) return {};
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		order.push(`after_provider_response ${event.status}`);
+		return {};
+	}
+	if (name === "message_end" && orderArmed && event.message.role === "assistant") {
+		orderArmed = false;
+		order.push("message_end");
+		void append("native-order", { order: [...order] });
+	}
 	if (name === "agent_before_settle") {
 		if (!settleArmed) return {};
 		settleArmed = false;
@@ -154,14 +180,73 @@ async function runCommand({ name, ctx }) {
 		await request("session.appendEntry", { customType: "native-write", data: { wrote } });
 	} else if (name === "native-probe") {
 		await request("session.appendEntry", { customType: "native-probe", data: initProbe });
+	} else if (name === "native-settings") {
+		await settingsCommand();
+	} else if (name === "native-oauth") {
+		await oauthCommand();
+	} else if (name === "native-auth") {
+		await authCommand();
+	} else if (name === "native-login") {
+		const slot = await answer("auth.login", { provider: "anthropic-2" });
+		const foreign = await answer("auth.login", { provider: "local" });
+		await append("native-login", { slot, foreign });
+	} else if (name === "native-card") {
+		await request("session.sendMessage", { customType: "native-card", content: "teal card", display: true });
+		await append("native-note", { color: "plum" });
+	} else if (name === "native-restyle") {
+		cardStyle = " bold";
+	} else if (name === "native-render-count") {
+		await append("native-render-count", { count: messageRenders });
+	} else if (name === "native-order") {
+		orderArmed = true;
+		order.length = 0;
 	} else if (name === "native-crash") {
 		process.exit(3);
 	}
 	return null;
 }
 
+/** Settings round trip: the extension namespace, a pi key, and the project scope. */
+async function settingsCommand() {
+	const global = await answer("settings.set", { namespace: "nativeFixture", value: { color: "teal" } });
+	const read = await request("settings.get", { namespace: "nativeFixture" });
+	const project = await answer("settings.set", { namespace: "nativeFixture", scope: "project", value: { color: "plum" } });
+	const merged = await request("settings.get", { namespace: "nativeFixture" });
+	const piKey = await answer("settings.set", { namespace: "defaultModel", value: "other" });
+	const badScope = await answer("settings.set", { namespace: "nativeFixture", scope: "team", value: 1 });
+	await append("native-settings", { global, read, project, merged, piKey, badScope });
+}
+
+async function oauthCommand() {
+	const models = [{ id: "slot-model", name: "Slot model", contextWindow: 1000, maxTokens: 100 }];
+	const config = { name: "Anthropic #2", api: "anthropic-messages", baseUrl: "http://127.0.0.1:9", models, oauth: { builtin: "anthropic", name: "Anthropic #2" } };
+	const registered = await answer("provider.register", { name: "anthropic-2", config });
+	const unknown = await answer("provider.register", { name: "nope-2", config: { ...config, oauth: { builtin: "nope" } } });
+	await append("native-oauth", { registered, unknown });
+}
+
+async function authCommand() {
+	const auth = await answer("auth.getProviderAuth", { provider: "anthropic-2" });
+	await append("native-auth", auth);
+}
+
+let cardStyle = "";
+let messageRenders = 0;
+
+const renders = {
+	"render.toolCall": ({ args, width }) => ({ lines: [`CALL ${args.text} at ${width}`] }),
+	"render.toolResult": ({ result, options, width }) => ({ lines: [`RESULT ${textOf(result.content)} at ${width}${options.isPartial ? " partial" : ""}`] }),
+	"render.message": ({ message, width }) => {
+		messageRenders++;
+		return { lines: [`CARD ${textOf(message.content)} at ${width}${cardStyle}`] };
+	},
+	"render.entry": ({ entry, options, width }) => ({ lines: [`NOTE ${entry.data.color} at ${width} ${options.expanded ? "open" : "closed"}`] }),
+};
+
 const methods = {
 	initialize,
+	...renders,
+	"tool.prepare": ({ args }) => ({ ...args, text: typeof args.text === "string" ? args.text : `coerced ${JSON.stringify(args.text)}` }),
 	"tool.execute": executeTool,
 	event: onEvent,
 	"command.run": runCommand,
@@ -198,7 +283,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 	else {
 		const waiter = pending.get(message.id);
 		pending.delete(message.id);
-		if (message.error) waiter?.reject(new Error(message.error.message));
+		if (message.error) waiter?.reject(Object.assign(new Error(message.error.message), { code: message.error.code }));
 		else waiter?.resolve(message.result);
 	}
 }).on("close", exit);

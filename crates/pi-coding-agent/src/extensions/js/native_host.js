@@ -129,6 +129,24 @@ async function llmComplete(ctx, params, signal) {
 	return { message: toJson(message), text };
 }
 
+const SCOPES = new Set(["global", "project"]);
+
+/** `settings.set`: one extension namespace of the global or the trusted project settings. */
+function settingsSet(ctx, { namespace, value, scope = "global" }) {
+	if (typeof namespace !== "string" || namespace === "") throw rpcError(-32602, "namespace must be a non-empty string");
+	if (!SCOPES.has(scope)) throw rpcError(-32602, `scope must be "global" or "project", not ${JSON.stringify(scope)}`);
+	if (scope === "project" && !ctx.isProjectTrusted()) {
+		throw rpcError(-32003, "The project is not trusted; pi does not write its settings");
+	}
+	try {
+		call("action.setSettings", 0, scope, namespace, value === undefined ? null : value);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		throw rpcError(message.includes("not an extension settings namespace") ? -32602 : -32603, message);
+	}
+	return null;
+}
+
 const TARGETS = {
 	pi: (state) => state.pi,
 	ctx: (state) => state.currentCtx(),
@@ -173,6 +191,8 @@ const CTX_METHODS = new Set([
 	"ctx.getSystemPrompt",
 	"llm.complete",
 	"auth.getProviderAuth",
+	"settings.set",
+	"auth.login",
 ]);
 
 /** Whether request `method` reads `state.currentCtx()`, so it waits for the first ctx. */
@@ -238,6 +258,7 @@ export function hostMethods(state) {
 			const settings = toJson(pi.getSettings()) ?? {};
 			return p.namespace ? (settings[p.namespace] ?? null) : settings;
 		},
+		"settings.set": (p) => settingsSet(ctx(), p),
 		"ctx.compact": (p) =>
 			new Promise((resolve, reject) =>
 				ctx().compact({
@@ -252,6 +273,13 @@ export function hostMethods(state) {
 		"ctx.getSystemPrompt": () => ctx().getSystemPrompt(),
 		"llm.complete": (p, signal) => llmComplete(ctx(), p, signal),
 		"auth.getProviderAuth": async (p) => toJson(await ctx().modelRegistry.getProviderAuth(p.provider)),
+		"auth.login": async (p) => {
+			if (!state.oauthProviders.has(p.provider)) {
+				throw rpcError(-32602, `This extension registered no provider ${JSON.stringify(p.provider)} with oauth`);
+			}
+			if (ui() && ctx().mode !== "tui") throw rpcError(-32001, "pi has no login dialog in this mode");
+			return Boolean(await callAsync("ui.login", 0, p.provider));
+		},
 		"usage.get": async (p) => toJson(await callAsync("models.usage", 0, p.provider ?? null, Boolean(p.refresh))),
 		"events.emit": (p) => (pi.events.emit(p.channel, p.data), done()),
 		"events.subscribe": (p) => {
