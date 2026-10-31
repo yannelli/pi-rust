@@ -10,6 +10,7 @@ use pi_ai::auth::{
     AuthError, AuthEvent, AuthInteraction, AuthOverrides, AuthPrompt, AuthResolver, AuthResult,
     InMemoryCredentialStore, LoginOptions, OAuthAuth, OAuthCredential,
 };
+use pi_ai::env::EnvLookup;
 use pi_ai::request::RequestOptions;
 use pi_js::JsError;
 use serde_json::{Value, json};
@@ -96,8 +97,28 @@ async fn oauth(runner: &Arc<ExtensionRunner>, args: &Args) -> Result<Value, JsEr
     })
 }
 
-/// Upstream's built-in `ApiKeyAuth.resolve`: a stored key, else the credential variables that
-/// JavaScript read through the caller's `AuthContext`, never the host environment.
+/// What the caller's `AuthContext` reported: credential variables and `fileExists` answers.
+/// Paths it was not asked about count as missing.
+#[derive(serde::Deserialize, Default)]
+struct ContextEnv {
+    #[serde(default)]
+    vars: BTreeMap<String, String>,
+    #[serde(default)]
+    files: BTreeMap<String, bool>,
+}
+
+impl EnvLookup for ContextEnv {
+    fn var(&self, name: &str) -> Option<String> {
+        self.vars.get(name).cloned()
+    }
+
+    fn file_exists(&self, path: &str) -> bool {
+        self.files.get(path).copied().unwrap_or(false)
+    }
+}
+
+/// Upstream's built-in `ApiKeyAuth.resolve`: a stored key, else what the caller's `AuthContext`
+/// reported, never the host environment or file system.
 async fn api_key(args: &Args) -> Result<Value, JsError> {
     let provider = args.str(0)?;
     let credential = args.json(1);
@@ -106,10 +127,9 @@ async fn api_key(args: &Args) -> Result<Value, JsError> {
         env: serde_json::from_value(credential["env"].clone()).ok(),
         min_oauth_validity_ms: None,
     };
-    let context_env: BTreeMap<String, String> = serde_json::from_value(args.json(2)).unwrap_or_default();
-    let lookup = move |name: &str| context_env.get(name).cloned();
+    let context: ContextEnv = serde_json::from_value(args.json(2)).unwrap_or_default();
     let store = Arc::new(InMemoryCredentialStore::new(BTreeMap::new()));
-    let resolver = AuthResolver::without_oauth(store).with_env(Arc::new(lookup));
+    let resolver = AuthResolver::without_oauth(store).with_env(Arc::new(context));
     let resolved = resolver.resolve(&provider, &overrides).await.map_err(|failure| error(failure.to_string()))?;
     Ok(resolved
         .map_or(Value::Null, |resolved| json!({"auth": resolved.auth, "env": resolved.env, "source": resolved.source})))

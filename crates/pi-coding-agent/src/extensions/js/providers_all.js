@@ -63,16 +63,25 @@ function operations(models) {
 
 let credentialEnvVars;
 
-/** The credential variables Rust resolution reads, as `ctx.env` reports them. */
-async function contextEnv(ctx, signal) {
+/** Upstream `VERTEX_ADC_PATH`, which the caller's `fileExists` resolves. */
+const VERTEX_ADC_PATH = "~/.config/gcloud/application_default_credentials.json";
+
+/** The credential variables and files Rust resolution reads, as `ctx` reports them. */
+async function contextEnv(provider, ctx, credential, signal) {
 	credentialEnvVars ??= call("ai.credentialEnvVars");
-	const env = {};
+	const vars = {};
 	for (const name of credentialEnvVars) {
 		const value = await ctx.env(name);
 		signal?.throwIfAborted();
-		if (value) env[name] = value;
+		if (value) vars[name] = value;
 	}
-	return env;
+	const files = {};
+	if (provider === "google-vertex") {
+		const adcPath = credential?.env?.GOOGLE_APPLICATION_CREDENTIALS ?? vars.GOOGLE_APPLICATION_CREDENTIALS ?? VERTEX_ADC_PATH;
+		files[adcPath] = await ctx.fileExists(adcPath);
+		signal?.throwIfAborted();
+	}
+	return { vars, files };
 }
 
 /** An `ApiKeyAuth` named `name` that resolves as the Rust resolver does for `provider`, over `ctx`. */
@@ -82,8 +91,8 @@ function rustApiKeyAuth(provider, name) {
 		login: envApiKeyAuth(name, []).login,
 		resolve: async ({ ctx, credential, signal }) => {
 			signal?.throwIfAborted();
-			const env = credential?.key ? {} : await contextEnv(ctx, signal);
-			const result = await callAsync("ai.apiKey", provider, credential ?? null, env);
+			const context = credential?.key ? {} : await contextEnv(provider, ctx, credential, signal);
+			const result = await callAsync("ai.apiKey", provider, credential ?? null, context);
 			signal?.throwIfAborted();
 			return result ? withoutNulls({ ...result, auth: withoutNulls(result.auth) }) : undefined;
 		},
