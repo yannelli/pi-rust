@@ -12,7 +12,7 @@ export default function (pi) {
 	} });
 	pi.registerCommand("ask", { handler: async (_args, ctx) => {
 		const name = await ctx.ui.custom((tui, _theme, _keys, done) =>
-			new ExtensionInputComponent("Your name?", undefined, done, () => done(null), { tui, initialValue: "Ada" }));
+			new ExtensionInputComponent("Your name?", undefined, done, () => done("cancelled"), { tui, initialValue: "Ada" }));
 		ctx.ui.notify(`named ${name}`);
 	} });
 	pi.registerCommand("show", { handler: async (_args, ctx) => {
@@ -58,7 +58,7 @@ async fn extension_input_component_submits_its_prefill_and_escape_cancels() {
         ui.submit("/ask").await;
         ui.wait_until("input again", |ui| ui.screen().contains("Your name?")).await;
         ui.send("\x1b").await;
-        ui.wait_for("named null").await;
+        ui.wait_for("named cancelled").await;
     })
     .await;
 }

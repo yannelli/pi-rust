@@ -42,6 +42,8 @@ jobs:
           name: upstream-model-data
           path: packages/ai/src/providers/data
           if-no-files-found: error
+          # `.manifest.json` holds the generation time that `cargo xtask models` copies.
+          include-hidden-files: true
 
   report:
     needs: model-data
