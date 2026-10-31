@@ -63,13 +63,14 @@ class NumberFormat {
   format(value) {
     const options = this.#options;
     let number = Number(value);
-    if (!Number.isFinite(number)) return String(number);
     const style = options.style ?? "decimal";
     if (style === "percent") number *= 100;
+    // Node keeps the sign of values that round to zero, and of -0.
+    const sign = number < 0 || Object.is(number, -0) ? "-" : "";
     const defaultMax = { currency: 2, percent: 0 }[style] ?? 3;
     const min = options.minimumFractionDigits ?? (style === "currency" ? 2 : 0);
     const max = Math.max(min, options.maximumFractionDigits ?? defaultMax);
-    let text = Math.abs(number).toFixed(max);
+    let text = Number.isNaN(number) ? "NaN" : Number.isFinite(number) ? Math.abs(number).toFixed(max) : "∞";
     if (text.includes(".")) {
       let [whole, fraction] = text.split(".");
       while (fraction.length > min && fraction.endsWith("0")) fraction = fraction.slice(0, -1);
@@ -77,7 +78,6 @@ class NumberFormat {
     }
     const [whole, fraction] = text.split(".");
     text = (options.useGrouping === false ? whole : group(whole)) + (fraction ? `.${fraction}` : "");
-    const sign = number < 0 && Number(text.replace(/,/g, "")) !== 0 ? "-" : "";
     if (style === "percent") return `${sign}${text}%`;
     if (style === "currency") {
       const symbol = !options.currency || options.currency === "USD" ? "$" : `${options.currency} `;
