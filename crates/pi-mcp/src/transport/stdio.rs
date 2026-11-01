@@ -44,6 +44,8 @@ pub struct StdioTransportOptions {
     pub max_stderr_bytes: usize,
     /// Time to wait after SIGTERM before SIGKILL. Default: 2 s.
     pub close_timeout: Duration,
+    /// Names the program in spawn errors in place of `command`. Default: `command`.
+    pub command_label: Option<String>,
 }
 
 impl StdioTransportOptions {
@@ -59,6 +61,7 @@ impl StdioTransportOptions {
             max_message_bytes: DEFAULT_MAX_MESSAGE_BYTES,
             max_stderr_bytes: DEFAULT_MAX_STDERR_BYTES,
             close_timeout: DEFAULT_CLOSE_TIMEOUT,
+            command_label: None,
         }
     }
 }
@@ -146,8 +149,8 @@ impl McpTransport for StdioTransport {
         command.process_group(0);
         #[cfg(windows)]
         command.creation_flags(0x0800_0000);
-        let mut child =
-            command.spawn().map_err(|error| McpError::other(process::spawn_error(&options.command, &error)))?;
+        let label = options.command_label.as_deref().unwrap_or(&options.command);
+        let mut child = command.spawn().map_err(|error| McpError::other(process::spawn_error(label, &error)))?;
         let pid = child.id();
         if let Some(pid) = pid {
             process::track(pid);

@@ -17,7 +17,7 @@ use futures::FutureExt;
 use futures::future::{BoxFuture, Shared};
 use tokio_util::sync::CancellationToken;
 
-use crate::config::{LoadedMcpConfig, McpServerConfigPatch, McpServerEntry, update_mcp_server_config};
+use crate::config::{LoadedMcpConfig, McpConfigScope, McpServerConfigPatch, McpServerEntry, update_mcp_server_config};
 use crate::log::McpServerLog;
 use crate::oauth::{CallbackServerFactory, LoopbackCallbackFactory};
 use crate::registered::McpServerRegistry;
@@ -147,6 +147,8 @@ struct State {
     config_errors: Vec<String>,
     /// Name and source of the servers from `mcp.json`, which take precedence over registered ones.
     configured: Vec<(String, String)>,
+    /// Names of the servers an ACP client supplied; registered servers with the same key are overridden.
+    clients: Vec<String>,
     /// Registered servers that `mcp.json` overrides.
     overridden: Vec<String>,
     registry_listener: Option<u64>,
@@ -204,6 +206,7 @@ impl McpManager {
             next_id: 0,
             config_errors: Vec::new(),
             configured: Vec::new(),
+            clients: Vec::new(),
             overridden: Vec::new(),
             registry_listener: None,
             project_config: None,
@@ -256,7 +259,9 @@ impl McpManager {
             state.warned_unreachable = false;
             state.waited_for_startup = false;
             state.configured = loaded.servers.iter().map(|entry| (entry.name.clone(), entry.source.clone())).collect();
-            let (registered, overridden) = self.inner.registered_for_start(&state.configured);
+            let clients = loaded.servers.iter().filter(|entry| entry.scope == Some(McpConfigScope::Client));
+            state.clients = clients.map(|entry| entry.name.clone()).collect();
+            let (registered, overridden) = self.inner.registered_for_start(&state.configured, &state.clients);
             state.overridden = overridden;
             let configured = loaded.servers.into_iter().map(|entry| (entry, None));
             let all = configured.chain(registered.into_iter().map(|(entry, config)| (entry, Some(config))));

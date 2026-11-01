@@ -199,13 +199,14 @@ impl McpManager {
 }
 
 impl Inner {
-    /// Save a config change. Registered servers change for this session only.
+    /// Save a config change. Registered and ACP client servers change for this session only.
     pub(super) fn save_config(&self, name: &str, patch: &McpServerConfigPatch, in_project: bool) -> Option<String> {
         let mut state = self.lock();
         let project_config = state.project_config.clone();
         let Some(server) = state.servers.iter_mut().find(|server| server.entry.name == name) else {
             return Some(format!("No MCP server named \"{name}\"."));
         };
+        let in_project = in_project && server.entry.scope != Some(McpConfigScope::Client);
         let override_path = if in_project {
             project_config.map(|path: PathBuf| path.display().to_string())
         } else {
@@ -213,7 +214,7 @@ impl Inner {
         };
         let mut entry = server.entry.clone();
         entry.override_path = override_path;
-        if entry.scope != Some(McpConfigScope::Extension)
+        if entry.scope.is_none_or(McpConfigScope::is_saved)
             && let Err(error) = self.update_config(&entry, patch)
         {
             return Some(format!(
