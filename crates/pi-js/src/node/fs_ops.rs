@@ -310,6 +310,14 @@ pub(crate) fn chown(path: &Path, uid: u32, gid: u32, follow: bool) -> io::Result
 }
 
 fn system_time(seconds: f64) -> std::time::SystemTime {
+    #[cfg(unix)]
+    let duration = {
+        let seconds = seconds.abs();
+        let whole = seconds.trunc();
+        let nanos = ((seconds - whole) * 1e9) as u32;
+        std::time::Duration::new(whole as u64, nanos / 1000 * 1000)
+    };
+    #[cfg(not(unix))]
     let duration = std::time::Duration::from_secs_f64(seconds.abs());
     if seconds >= 0.0 { std::time::UNIX_EPOCH + duration } else { std::time::UNIX_EPOCH - duration }
 }

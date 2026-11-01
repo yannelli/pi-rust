@@ -25,7 +25,13 @@ for (const path of ["file", "directory"]) {
   out[path] = { sync, callback, promise: times() };
 }
 out.contents = fs.readFileSync("file", "utf8");
-out.directory = fs.statSync("directory").isDirectory();
+out.isDirectory = fs.statSync("directory").isDirectory();
+mark("file: fd sync");
+const fd = fs.openSync("file", "r+");
+fs.futimesSync(fd, new Date(1000005), new Date(2000005));
+const stat = fs.fstatSync(fd);
+out.fdSync = [stat.atimeMs, stat.mtimeMs];
+fs.closeSync(fd);
 mark("done");
 return out;
 "#;
