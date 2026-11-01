@@ -419,6 +419,164 @@
     Object.defineProperty(method, "length", { value: original.length });
     Object.defineProperty(ArrayBuffer.prototype, name, { ...descriptor, value: method });
   }
+  // JSON diagnostics derive from V8 (BSD-3-Clause, LICENSE-v8) and count UTF-16 positions.
+  // Preserve coercion and reviver exceptions.
+  const nativeJsonParse = JSON.parse;
+  const jsonMessage = (source) => {
+    const length = source.length;
+    const code = (at) => (at < length ? source.charCodeAt(at) : -1);
+    const isDigit = (c) => c >= 48 && c <= 57;
+    const isNumberPart = (c) => isDigit(c) || c === 46 || c === 101 || c === 69 || c === 45 || c === 43;
+    const located = (text, at, jsonContext = true) => {
+      let line = 1;
+      let lineStart = 0;
+      for (let i = 0; i < at; i++) {
+        if (code(i) === 13 && i < at - 1 && code(i + 1) === 10) i++;
+        if (code(i) === 13 || code(i) === 10) [line, lineStart] = [line + 1, i + 1];
+      }
+      return `${text}${jsonContext ? " in JSON" : ""} at position ${at} (line ${line} column ${at - lineStart + 1})`;
+    };
+    const unexpected = (at) => {
+      const c = code(at);
+      if (c < 0) return "Unexpected end of JSON input";
+      if (c === 34) return located("Unexpected string", at);
+      if (c === 45 || isDigit(c)) return located("Unexpected number", at);
+      if (["[object Object]", "undefined", "Infinity", "NaN"].includes(source)) return `"${source}" is not valid JSON`;
+      const token = `Unexpected token '${source[at]}', `;
+      if (length < 21) return `${token}"${source}" is not valid JSON`;
+      if (at < 10) return `${token}"${source.slice(0, at + 10)}"... is not valid JSON`;
+      if (at < length - 10) return `${token}..."${source.slice(at - 10, at + 10)}"... is not valid JSON`;
+      return `${token}..."${source.slice(at - 10)}" is not valid JSON`;
+    };
+    let i = 0;
+    const skip = () => {
+      while (code(i) === 32 || code(i) === 9 || code(i) === 13 || code(i) === 10) i++;
+    };
+    const string = () => {
+      for (i++; ; i++) {
+        const c = code(i);
+        if (c < 0) return located("Unterminated string", i);
+        if (c === 34) return void i++;
+        if (c < 32) return located("Bad control character in string literal", i);
+        if (c !== 92) continue;
+        const escape = code(++i);
+        if (escape < 0 || escape > 255) return unexpected(i);
+        if (escape === 117) {
+          for (let digit = 0; digit < 4; digit++) {
+            if (!/[0-9a-fA-F]/.test(source[++i] ?? "")) return located("Bad Unicode escape", i);
+          }
+        } else if (!'"\\/bfnrt'.includes(source[i])) return located("Bad escaped character", i);
+      }
+    };
+    const digits = () => {
+      while (isDigit(code(i))) i++;
+    };
+    const number = () => {
+      const negative = code(i) === 45;
+      if (negative) i++;
+      if (code(i) === 48) {
+        const c = code(++i);
+        if (isNumberPart(c) && isDigit(c)) return unexpected(i);
+        if (!isNumberPart(c) && !negative) return undefined;
+      } else {
+        const start = i;
+        digits();
+        if (i === start) return located("No number after minus sign", i);
+        if (!isNumberPart(code(i))) return undefined;
+      }
+      if (code(i) === 46) {
+        if (!isDigit(code(++i))) return located("Unterminated fractional number", i);
+        digits();
+      }
+      if ((code(i) | 32) === 101) {
+        if (code(++i) === 45 || code(i) === 43) i++;
+        if (!isDigit(code(i))) return located("Exponent part is missing a number", i);
+        digits();
+      }
+      return undefined;
+    };
+    const literal = (word) => {
+      for (let k = 1; k < word.length; k++) {
+        if (code(++i) !== word.charCodeAt(k)) return unexpected(i);
+      }
+      return void i++;
+    };
+    const member = (missing) => {
+      skip();
+      if (code(i) !== 34) return located(missing, i);
+      const error = string();
+      if (error) return error;
+      skip();
+      if (code(i) !== 58) return located("Expected ':' after property name", i);
+      return void i++;
+    };
+    const open = [];
+    for (;;) {
+      skip();
+      const c = code(i);
+      let error;
+      if (c === 34) error = string();
+      else if (c === 45 || isDigit(c)) error = number();
+      else if (c === 116 || c === 102 || c === 110) error = literal(c === 116 ? "true" : c === 102 ? "false" : "null");
+      else if (c === 123 || c === 91) {
+        i++;
+        skip();
+        if (code(i) === c + 2) i++;
+        else if (c === 91) {
+          open.push(c);
+          continue;
+        } else {
+          error = member("Expected property name or '}'");
+          if (!error) {
+            open.push(c);
+            continue;
+          }
+        }
+      } else return unexpected(i);
+      if (error) return error;
+      for (;;) {
+        skip();
+        const container = open.at(-1);
+        if (container === undefined) {
+          return i < length ? located("Unexpected non-whitespace character after JSON", i, false) : undefined;
+        }
+        if (code(i) === 44) {
+          i++;
+          if (container === 91) break;
+          error = member("Expected double-quoted property name");
+          if (error) return error;
+          break;
+        }
+        if (code(i) !== container + 2) {
+          const after = container === 91 ? "',' or ']' after array element" : "',' or '}' after property value";
+          return located(`Expected ${after}`, i);
+        }
+        i++;
+        open.pop();
+      }
+    }
+  };
+  const json = {
+    parse(text, reviver) {
+      const source = `${text}`;
+      let reviverThrew = false;
+      const forward = function (...args) {
+        try {
+          return Reflect.apply(reviver, this, args);
+        } catch (error) {
+          reviverThrew = true;
+          throw error;
+        }
+      };
+      try {
+        return typeof reviver === "function" ? nativeJsonParse(source, forward) : nativeJsonParse(source);
+      } catch (error) {
+        if (!reviverThrew && error instanceof SyntaxError) error.message = jsonMessage(source) ?? error.message;
+        throw error;
+      }
+    },
+  };
+  Object.defineProperty(JSON, "parse", { value: json.parse, writable: true, configurable: true });
   Object.defineProperty(globalThis, "global", { value: globalThis, writable: true, configurable: true });
   defineLazy("process", () => loadBuiltin("process"));
   defineLazy("console", () => loadBuiltin("console"));

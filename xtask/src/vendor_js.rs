@@ -127,6 +127,7 @@ const BARE_IMPORTS: &[(&str, &str)] = &[
     ("@earendil-works/pi-telemetry", "pi-telemetry/src/index.ts"),
     ("@earendil-works/pi-ai/utils/retry", "pi-ai/src/utils/retry.ts"),
     ("chalk", "host/context_color.js"),
+    ("proper-lockfile", "host/trust_lock.js"),
 ];
 
 pub fn run(args: &[String], root: &Path) -> Result<(), String> {
@@ -303,17 +304,19 @@ mod tests {
                 let declared = |kind: &str| {
                     module.contains(&format!("\n{kind} {name}")) || module.contains(&format!("\nexport {kind} {name}"))
                 };
-                assert!(declared("const") || declared("function"), "{key}: {name}");
+                assert!(declared("const") || declared("function") || declared("class"), "{key}: {name}");
             }
         }
         let trust = &files["pi-coding-agent/src/core/trust-manager.ts"];
         let imports: Vec<&str> = trust.lines().filter(|line| line.starts_with("import ")).collect();
         let expected = [
-            "import { existsSync } from \"node:fs\";",
+            "import { existsSync, mkdirSync, readFileSync, writeFileSync } from \"node:fs\";",
             "import { homedir } from \"node:os\";",
             "import { dirname, join } from \"node:path\";",
+            "import lockfile from \"../../../host/trust_lock.js\";",
             "import { CONFIG_DIR_NAME } from \"../config.ts\";",
             "import { canonicalizePath, pathsEqual, resolvePath } from \"../utils/paths.ts\";",
+            "import { stripBom } from \"../utils/text.ts\";",
         ];
         assert_eq!(imports, expected);
         let loader = &files["pi-coding-agent/src/core/resource-loader.ts"];
@@ -341,6 +344,15 @@ mod tests {
         let rewritten =
             rewrite_bare_imports("pi-coding-agent/src/core/resource-loader.ts", "import chalk from \"chalk\";");
         assert_eq!(rewritten, "import chalk from \"../../../host/context_color.js\";");
+    }
+
+    #[test]
+    fn trust_locks_resolve_to_the_private_host_port() {
+        let rewritten = rewrite_bare_imports(
+            "pi-coding-agent/src/core/trust-manager.ts",
+            "import lockfile from \"proper-lockfile\";",
+        );
+        assert_eq!(rewritten, "import lockfile from \"../../../host/trust_lock.js\";");
     }
 
     #[test]

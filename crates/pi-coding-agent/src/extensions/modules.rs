@@ -26,6 +26,7 @@ const HOST_FILES: &[(&str, &str)] = &[
     ("component_shims.js", include_str!("js/component_shims.js")),
     ("context.js", include_str!("js/context.js")),
     ("context_color.js", include_str!("js/context_color.js")),
+    ("trust_lock.js", include_str!("js/trust_lock.js")),
     ("host.js", include_str!("js/host.js")),
     ("models.js", include_str!("js/models.js")),
     ("native.js", include_str!("js/native.js")),
