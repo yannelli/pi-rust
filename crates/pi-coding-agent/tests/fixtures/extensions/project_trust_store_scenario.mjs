@@ -10,7 +10,9 @@ export async function scenario(c, options = {}) {
 	const savedHome = ["HOME", "USERPROFILE"].map((name) => [name, name in process.env, process.env[name]]);
 	const out = {};
 	let agents = 0;
-	const clean = (text) => String(text).split(root).join("<root>").replaceAll("\\", "/");
+	// The trust file bytes hold the root JSON-escaped; on Unix that text equals `root`, so the output is unchanged.
+	const escapedRoot = JSON.stringify(root).slice(1, -1);
+	const clean = (text) => String(text).split(root).join("<root>").split(escapedRoot).join("<root>").replaceAll("\\", "/");
 	const agentDir = () => join(root, `agent-${agents++}`);
 	const paths = (dir) => ({ trust: join(dir, "trust.json"), lock: join(dir, "trust.json.lock") });
 	const bytes = (dir) => (existsSync(paths(dir).trust) ? clean(readFileSync(paths(dir).trust, "utf8")) : null);

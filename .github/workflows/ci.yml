@@ -5,11 +5,16 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      trust_store_oracle:
+        description: Only generate Windows ProjectTrustStore goldens
+        type: boolean
+        default: false
 
 # A new push to a PR cancels its older runs. On main, a waiting run gives way to a newer one,
 # and the running one finishes so Release still sees a completed CI run.
 concurrency:
-  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.ref_name }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.ref_name }}${{ inputs.trust_store_oracle && github.ref != 'refs/heads/main' && '-trust-oracle' || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -19,6 +24,7 @@ env:
 
 jobs:
   check:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.trust_store_oracle || github.ref == 'refs/heads/main' }}
     name: check (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
@@ -45,11 +51,12 @@ jobs:
           node-version: 22
       - run: cargo test --workspace --locked --no-fail-fast
       - name: extension tests on the Node backend
-        run: cargo test -p pi-coding-agent --test extensions --locked --no-fail-fast
+        run: cargo test -p pi-coding-agent --test extensions --test project_trust_store_exports --locked --no-fail-fast
         env:
           PI_EXTENSION_RUNTIME: node
 
   install-scripts:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.trust_store_oracle || github.ref == 'refs/heads/main' }}
     name: install scripts (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
@@ -64,3 +71,75 @@ jobs:
       - if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/test-install.ps1
+
+  project-trust-store-oracle:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.trust_store_oracle && github.ref != 'refs/heads/main' }}
+    env:
+      UPSTREAM_PIN: 35dfa757378bd7a8570670e99c2687bdd1039a06
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Byte-exact upstream sources, so the recorded sha256 values match the pin.
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+        with:
+          path: pi-rust
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: earendil-works/pi
+          ref: ${{ env.UPSTREAM_PIN }}
+          path: pi-upstream
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Only the packages of upstream's own lock file, without their install scripts.
+      - name: Install upstream's locked packages
+        working-directory: pi-upstream
+        run: npm ci --ignore-scripts
+      - name: Check upstream is at the pin and unchanged
+        working-directory: pi-upstream
+        run: |
+          test "$(git rev-parse HEAD)" = "$UPSTREAM_PIN"
+          git diff --exit-code HEAD --
+          test -z "$(git status --porcelain --untracked-files=all)"
+      - name: Generate the Windows goldens
+        run: node pi-rust/scripts/project-trust-store-scenario.mjs pi-upstream --temp-parent "$RUNNER_TEMP"
+      - name: Record provenance
+        run: |
+          fixtures=pi-rust/crates/pi-coding-agent/tests/fixtures/extensions
+          if grep -l '"_status"' "$fixtures"/project_trust_store_*.win32.json "$fixtures"/project_trust_store_windows_scenario.json; then
+            echo "a placeholder was not replaced" >&2
+            exit 1
+          fi
+          test "$(git -C pi-upstream rev-parse HEAD)" = "$UPSTREAM_PIN"
+          git -C pi-upstream diff --exit-code HEAD --
+          test -z "$(git -C pi-upstream status --porcelain --untracked-files=all)"
+          {
+            echo "pi-rust $(git -C pi-rust rev-parse HEAD)"
+            echo "upstream $(git -C pi-upstream rev-parse HEAD) (pin $UPSTREAM_PIN)"
+            echo "upstream tracked files unchanged after npm ci and generation: git diff --exit-code HEAD and status --porcelain empty"
+            echo "node $(node --version)"
+            echo "npm $(npm --version)"
+            echo "runner ${RUNNER_OS} ${ImageOS:-unknown} ${ImageVersion:-unknown}"
+            sha256sum pi-rust/scripts/project-trust-store-scenario.mjs pi-upstream/package-lock.json \
+              "$fixtures"/project_trust_store_scenario.mjs "$fixtures"/project_trust_store_windows_scenario.mjs \
+              "$fixtures"/project_trust_store_exit.mjs "$fixtures"/project_trust_store_scenario.win32.json \
+              "$fixtures"/project_trust_store_windows_scenario.json "$fixtures"/project_trust_store_exit.win32.json
+          } > provenance.txt
+          cat provenance.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: project-trust-store-windows-goldens
+          if-no-files-found: error
+          path: |
+            provenance.txt
+            pi-rust/crates/pi-coding-agent/tests/fixtures/extensions/project_trust_store_scenario.win32.json
+            pi-rust/crates/pi-coding-agent/tests/fixtures/extensions/project_trust_store_windows_scenario.json
+            pi-rust/crates/pi-coding-agent/tests/fixtures/extensions/project_trust_store_exit.win32.json

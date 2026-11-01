@@ -1,6 +1,5 @@
 //! `ProjectTrustStore` of `@earendil-works/pi-coding-agent` is upstream code: reads, writes, inheritance, removal,
-//! normalization, key order, store errors, and the lock protocol, checked against goldens from upstream on Node 22.
-#![cfg(unix)]
+//! normalization, key order, store errors, and the lock protocol, against upstream goldens (`.win32.json` on Windows).
 
 mod cli_support;
 #[path = "extensions/harness.rs"]
@@ -8,27 +7,47 @@ mod cli_support;
 mod harness;
 #[path = "offline_guard/mod.rs"]
 mod offline_guard;
+#[cfg(windows)]
+#[path = "project_trust_store/windows.rs"]
+mod windows;
 
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use harness::{Setup, harness};
 use serde_json::{Map, Value, json};
+#[cfg(windows)]
+use windows::{canonical, own_group, stop};
 
 /// Upstream output, written by `node scripts/project-trust-store-scenario.mjs <upstream> --temp-parent <dir>`.
-const SCENARIO: &str = include_str!("fixtures/extensions/project_trust_store_scenario.json");
+#[cfg(not(windows))]
+const SCENARIO: (&str, &str) =
+    (include_str!("fixtures/extensions/project_trust_store_scenario.json"), "project_trust_store_scenario.json");
+#[cfg(windows)]
+const SCENARIO: (&str, &str) = (
+    include_str!("fixtures/extensions/project_trust_store_scenario.win32.json"),
+    "project_trust_store_scenario.win32.json",
+);
 /// The same script's child cases per mode: exit code, the child's report, markers, and the lock afterwards.
-const EXIT: &str = include_str!("fixtures/extensions/project_trust_store_exit.json");
+#[cfg(not(windows))]
+const EXIT: (&str, &str) =
+    (include_str!("fixtures/extensions/project_trust_store_exit.json"), "project_trust_store_exit.json");
+#[cfg(windows)]
+const EXIT: (&str, &str) =
+    (include_str!("fixtures/extensions/project_trust_store_exit.win32.json"), "project_trust_store_exit.win32.json");
 const SCENARIO_MODULE: &str = include_str!("fixtures/extensions/project_trust_store_scenario.mjs");
 const EXIT_MODULE: &str = include_str!("fixtures/extensions/project_trust_store_exit.mjs");
+/// How long a `pi -p` child may run; Windows process startup and `taskkill` cleanup take longer.
+const CHILD_LIMIT: Duration = Duration::from_secs(if cfg!(windows) { 120 } else { 60 });
 /// Compared only in `the_json_parse_error_text_is_v8s`: the engine's own `JSON.parse` message.
 const ENGINE_CASE: &str = "engine JSON.parse text";
 
 const EXTENSION: &str = r#"
 import { ProjectTrustStore } from '@earendil-works/pi-coding-agent';
-import { scenario } from './project_trust_store_scenario.mjs';
+import { scenario } from './__MODULE__';
 
 export default function (pi) {
   pi.registerCommand('truststore', { handler: async () => {
@@ -54,7 +73,8 @@ export default function (pi) {
 }
 "#;
 
-fn golden(text: &str, file: &str) -> Map<String, Value> {
+/// The cases of a golden. A `_status` placeholder fails, and a Windows golden must come from Node on win32.
+fn golden((text, file): (&str, &str)) -> Map<String, Value> {
     let value: Value = serde_json::from_str(text).unwrap();
     if let Some(status) = value.get("_status") {
         panic!("{file} holds no upstream output yet: {status}");
@@ -62,7 +82,14 @@ fn golden(text: &str, file: &str) -> Map<String, Value> {
     let mut map = value.as_object().unwrap().clone();
     let generator = map.shift_remove("_generator").unwrap_or_else(|| panic!("{file} has no _generator record"));
     assert!(generator["node"].as_str().is_some_and(|node| node.starts_with("v22.")), "{file}: {generator}");
+    let platform = generator.get("platform").and_then(Value::as_str);
+    assert_eq!(platform == Some("win32"), cfg!(windows), "{file} was generated on {platform:?}");
     map
+}
+
+#[cfg(not(windows))]
+fn canonical(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap()
 }
 
 /// `value` without its `engine` fields, which hold the engine's own `JSON.parse` text.
@@ -96,13 +123,16 @@ fn engine_fields(name: &str, value: &Value, out: &mut Vec<(String, Value)>) {
 
 /// Runs the scenario in the extension host and returns its cases.
 async fn run_scenario() -> Map<String, Value> {
+    run_module("project_trust_store_scenario.mjs", SCENARIO_MODULE).await
+}
+
+/// Runs the `scenario` export of the module `name` with `source` in the extension host and returns its cases.
+async fn run_module(name: &str, source: &str) -> Map<String, Value> {
     let parent = tempfile::tempdir().unwrap();
-    let parent_path = std::fs::canonicalize(parent.path()).unwrap();
+    let parent_path = canonical(parent.path());
     let parent_json = serde_json::to_string(&parent_path.display().to_string()).unwrap();
-    let files = vec![
-        ("truststore.ts", EXTENSION.replace("__TEMP_PARENT__", &parent_json)),
-        ("project_trust_store_scenario.mjs", SCENARIO_MODULE.to_string()),
-    ];
+    let extension = EXTENSION.replace("__TEMP_PARENT__", &parent_json).replace("__MODULE__", name);
+    let files = vec![("truststore.ts", extension), (name, source.to_string())];
     let h = harness(Setup { files, load: vec!["truststore.ts"], ..Setup::default() }).await;
     assert!(h.errors().is_empty(), "{:?}", h.errors());
     let prompt = h.session.prompt("/truststore", Vec::new());
@@ -116,7 +146,7 @@ async fn run_scenario() -> Map<String, Value> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn project_trust_store_matches_upstream() {
-    let expected = golden(SCENARIO, "project_trust_store_scenario.json");
+    let expected = golden(SCENARIO);
     let actual = run_scenario().await;
     assert_eq!(actual.keys().collect::<Vec<_>>(), expected.keys().collect::<Vec<_>>());
     let mut compared = 0;
@@ -135,7 +165,7 @@ async fn project_trust_store_matches_upstream() {
 /// gives the same text, so a QuickJS difference shows here as its own failure.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_json_parse_error_text_is_v8s() {
-    let expected = golden(SCENARIO, "project_trust_store_scenario.json");
+    let expected = golden(SCENARIO);
     let actual = run_scenario().await;
     let (mut want, mut got) = (Vec::new(), Vec::new());
     for (name, case) in &expected {
@@ -147,8 +177,7 @@ async fn the_json_parse_error_text_is_v8s() {
     assert_eq!(actual[ENGINE_CASE], expected[ENGINE_CASE], "JSON.parse messages of the engine itself");
 }
 
-/// The child's exit code, or `Err` after `limit`. The child leads its own process group, so on a timeout that
-/// group is killed while the child is not yet reaped and its id cannot name another group.
+/// The child's exit code, or `Err` after `limit`, when [`stop`] ends the child and what it started.
 fn wait(child: &mut Child, limit: Duration) -> Result<Option<i32>, Duration> {
     let started = Instant::now();
     loop {
@@ -156,14 +185,27 @@ fn wait(child: &mut Child, limit: Duration) -> Result<Option<i32>, Duration> {
             return Ok(status.code());
         }
         if started.elapsed() > limit {
-            let group = rustix::process::Pid::from_child(child);
-            let killed = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
-            let _ = child.wait();
-            println!("killed process group {} after {limit:?}: {killed:?}", group.as_raw_nonzero());
+            stop(child, limit);
             return Err(limit);
         }
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+/// Makes the child the leader of a new process group.
+#[cfg(unix)]
+fn own_group(command: &mut Command) {
+    command.process_group(0);
+}
+
+/// The child leads its own process group, so its group is killed while the child is not yet reaped and its id
+/// cannot name another group.
+#[cfg(unix)]
+fn stop(child: &mut Child, limit: Duration) {
+    let group = rustix::process::Pid::from_child(child);
+    let killed = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
+    let _ = child.wait();
+    println!("killed process group {} after {limit:?}: {killed:?}", group.as_raw_nonzero());
 }
 
 /// The last `limit` bytes of `path`, for failure output.
@@ -174,10 +216,10 @@ fn tail(path: &Path, limit: usize) -> String {
 
 /// One child case in a `pi -p` child of its own, compared with upstream's Node child of the same mode.
 fn child_case(mode: &str) {
-    let mut expected = golden(EXIT, "project_trust_store_exit.json");
-    let expected = expected.remove(mode).unwrap_or_else(|| panic!("no {mode} case in project_trust_store_exit.json"));
+    let mut expected = golden(EXIT);
+    let expected = expected.remove(mode).unwrap_or_else(|| panic!("no {mode} case in {}", EXIT.1));
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = canonical(dir.path());
     cli_support::setup(&root, "http://127.0.0.1:9/v1");
     let work = root.join("exit-work");
     std::fs::create_dir_all(&work).unwrap();
@@ -191,13 +233,16 @@ fn child_case(mode: &str) {
     cli_support::isolate(&mut command, &root)
         .args(["-e", &extension, "--model", "mock/mock-model", "--no-session", "-p", "/trustexit"])
         .current_dir(root.join("work"))
-        .process_group(0)
         .stdin(Stdio::null())
         .stdout(std::fs::File::create(root.join("pi.stdout")).unwrap())
         .stderr(std::fs::File::create(root.join("pi.stderr")).unwrap());
+    own_group(&mut command);
     let mut child = command.spawn().unwrap();
-    let waited = wait(&mut child, Duration::from_secs(60));
-    let clean = |text: String| text.replace(&work.display().to_string(), "<work>");
+    let waited = wait(&mut child, CHILD_LIMIT);
+    // The report is JSON, so a path with `\` appears escaped; on Unix both forms are the same text.
+    let work_text = work.display().to_string();
+    let escaped = serde_json::to_string(&work_text).unwrap();
+    let clean = |text: String| text.replace(&escaped[1..escaped.len() - 1], "<work>").replace(&work_text, "<work>");
     let exists = |path: &Path| path.exists();
     let parsed = std::fs::read_to_string(&report).ok().map(clean);
     let parsed = parsed.map(|text| serde_json::from_str::<Value>(&text).unwrap());

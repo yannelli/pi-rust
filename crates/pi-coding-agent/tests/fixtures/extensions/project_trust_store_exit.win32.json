@@ -1,0 +1,3 @@
+{
+	"_status": "UNVERIFIED: no upstream output yet. Generate on real Windows with Node 22.19 or later 22.x: node scripts/project-trust-store-scenario.mjs <upstream pi at 35dfa757 with npm ci --ignore-scripts> --temp-parent <dir>; a person reviews the output before it replaces this file."
+}
