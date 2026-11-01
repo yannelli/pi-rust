@@ -356,11 +356,12 @@ async fn an_abort_requested_while_before_agent_start_runs_aborts_the_run() {
         session.send_custom_message(custom_message("first", "background task finished"), true).await
     });
     eventually(|| h.entries().iter().any(|entry| entry["customType"] == "handler-started")).await;
-    let session = h.session.clone();
-    let abort = tokio::spawn(async move { session.abort().await });
+    let abort = h.session.abort();
+    tokio::pin!(abort);
+    assert!(futures::poll!(&mut abort).is_pending());
     h.session.prompt("/release", Vec::new()).await.unwrap();
     run.await.unwrap().unwrap();
-    abort.await.unwrap();
+    abort.await;
 
     let last = h.session.messages().pop().expect("messages");
     assert!(matches!(&last, Message::Assistant(message) if message.stop_reason == StopReason::Aborted), "{last:?}");
