@@ -122,6 +122,8 @@ Do this item only after the preceding ACP, provider, and TUI work is released on
 
 ## Platform
 
+- On non-Linux Unix, QuickJS marks received IPC sockets close-on-exec before JavaScript sees them. A child spawned on another thread between receipt and that flag can still inherit the socket. Node's macOS `posix_spawn` path closes inherited descriptors.
+
 - `pi experimental server` and `client` use Unix sockets. On Windows, they report that they need Unix.
 - On Unix, the chord2 host manager gives a child its IPC channel as stdin. Upstream uses an extra file descriptor there. On Windows, the channel is a named pipe. On Windows, `kill_tree` ends only the child, as upstream does there.
 - When pi-durable stops waiting for a local shell command's output (100 ms after the exit or the last chunk after it), it delivers queued chunks and any chunk the readers finish reading before they observe the stop signal. On Unix it also takes at most 64 KiB more per stream if readable without waiting. Windows pipes read on a blocking thread, so on Windows it starts no further read.

@@ -112,6 +112,17 @@ pub(super) mod unix {
         }
     }
 
+    /// Received descriptors as sockets that spawned children do not inherit. Linux receives them close-on-exec
+    /// (`MSG_CMSG_CLOEXEC`); elsewhere the flag is set here, so a fork between `recvmsg` and this call still inherits them.
+    fn close_on_exec(fds: Vec<OwnedFd>) -> io::Result<Vec<socket2::Socket>> {
+        let sockets: Vec<socket2::Socket> = fds.into_iter().map(socket2::Socket::from).collect();
+        #[cfg(not(target_os = "linux"))]
+        for socket in &sockets {
+            socket.set_cloexec(true)?;
+        }
+        Ok(sockets)
+    }
+
     /// Reads the IPC socket, keeping descriptors that arrive with the bytes.
     pub(in crate::node) struct FdReader(pub Arc<UnixStream>, pub Arc<Received>);
 
@@ -127,9 +138,14 @@ pub(super) mod unix {
                 };
                 match result {
                     Ok(count) => {
+                        // A failure closes the whole batch before any of it or its bytes is published.
+                        let sockets = match close_on_exec(fds) {
+                            Ok(sockets) => sockets,
+                            Err(error) => return Poll::Ready(Err(error)),
+                        };
                         buf.advance(count);
                         let mut received = self.1.0.lock().unwrap_or_else(|poison| poison.into_inner());
-                        received.extend(fds.into_iter().map(socket2::Socket::from));
+                        received.extend(sockets);
                         return Poll::Ready(Ok(()));
                     }
                     Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,

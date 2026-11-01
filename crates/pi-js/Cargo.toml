@@ -128,3 +128,7 @@ harness = false
 [[test]]
 name = "node_ipc_windows_diag"
 harness = false
+
+[[test]]
+name = "node_ipc_cloexec"
+harness = false
