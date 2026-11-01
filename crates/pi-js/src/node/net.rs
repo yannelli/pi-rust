@@ -130,6 +130,8 @@ pub(super) fn tcp_conn(stream: tokio::net::TcpStream) -> std::io::Result<Conn> {
     #[cfg(windows)]
     socket2::SockRef::from(&stream).set_no_inherit(true)?;
     let tcp = socket2::SockRef::from(&stream).try_clone()?;
+    #[cfg(windows)]
+    tcp.set_no_inherit(true)?;
     let info =
         json!({ "local": address_json(stream.local_addr().ok()), "remote": address_json(stream.peer_addr().ok()) });
     Ok(Conn { io: Box::new(stream), socket: Some(tcp), tcp: true, info, exporter: None })
