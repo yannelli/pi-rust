@@ -3,7 +3,10 @@
 //! `own-edit` edits files with the agent's own tools, `probe` tries what a read-only session
 //! refuses, `mcp` lists the MCP servers, `proxy-call` calls a tool of pi's MCP proxy,
 //! `wait-child` starts a `sleep` child and waits for `session/cancel`, and `/name` echoes a
-//! slash command.
+//! slash command. `FAKE_ACP_CONFIG` picks the config options (`fake_acp_config.rs`).
+
+#[path = "fake_acp_config.rs"]
+mod fake_acp_config;
 
 use std::io::{BufRead, Read, Write};
 
@@ -17,6 +20,10 @@ struct Agent {
     model: String,
     turns: u32,
     mcp: Vec<Value>,
+    variant: String,
+    effort: String,
+    /// The `session/new` requests so far.
+    news: u32,
 }
 
 /// One MCP request to a streamable HTTP server, reading the first JSON-RPC reply of the stream.
@@ -53,19 +60,19 @@ fn chunk(kind: &str, text: &str) {
     update(json!({"sessionUpdate": kind, "content": {"type": "text", "text": text}}));
 }
 
-fn config(model: &str) -> Value {
-    json!([
-        {"id": "model", "name": "Model", "category": "model", "type": "select", "currentValue": model,
-         "options": [{"value": "fast", "name": "Fast"}, {"value": "smart", "name": "Smart"}]},
-        {"id": "effort", "name": "Effort", "category": "thought_level", "type": "select", "currentValue": "low",
-         "options": [{"value": "low", "name": "Low"}, {"value": "high", "name": "High"}]},
-    ])
-}
-
 impl Agent {
     fn session(&self) -> Value {
-        json!({"sessionId": "s1", "configOptions": config(&self.model),
-            "modes": {"currentModeId": self.mode, "availableModes": [{"id": "ask", "name": "Ask"}, {"id": "code", "name": "Code"}]}})
+        let modes = json!([{"id": "ask", "name": "Ask"}, {"id": "code", "name": "Code"}]);
+        let mut session = json!({"sessionId": "s1", "modes": {"currentModeId": self.mode, "availableModes": modes}});
+        match self.config() {
+            Some(config) => session["configOptions"] = config,
+            None => session["models"] = fake_acp_config::legacy_models(&self.model),
+        }
+        session
+    }
+
+    fn config(&self) -> Option<Value> {
+        fake_acp_config::options(&self.variant, &self.model, &self.effort, &self.mode)
     }
 
     /// Sends a request to the client and reads until its reply; notes a `session/cancel` on the way.
@@ -192,8 +199,9 @@ impl Agent {
         let text = blocks.iter().rev().find_map(|block| block["text"].as_str()).unwrap_or_default().to_string();
         self.turns += 1;
         chunk("agent_thought_chunk", "thinking");
+        let (mode, model, turns, effort, news) = (&self.mode, &self.model, self.turns, &self.effort, self.news);
         let greeting =
-            format!("Hello [{}] mode={} model={} turn={} ", types.join(","), self.mode, self.model, self.turns);
+            format!("Hello [{}] mode={mode} model={model} turn={turns} effort={effort} news={news} ", types.join(","));
         chunk("agent_message_chunk", &greeting);
         match text.as_str() {
             "own-edit" => self.own_edit(cwd),
@@ -258,6 +266,10 @@ impl Agent {
                 }
                 "authenticate" => json!({}),
                 "session/new" | "session/load" => {
+                    self.news += u32::from(method == "session/new");
+                    if let Ok(path) = std::env::var("FAKE_ACP_PID_FILE") {
+                        let _ = std::fs::write(path, std::process::id().to_string());
+                    }
                     cwd = params["cwd"].as_str().unwrap_or_default().to_string();
                     self.mcp = params["mcpServers"].as_array().cloned().unwrap_or_default();
                     if method == "session/load" {
@@ -270,10 +282,18 @@ impl Agent {
                     json!({})
                 }
                 "session/set_config_option" => {
-                    if params["configId"] == "model" {
-                        self.model = params["value"].as_str().unwrap_or_default().to_string();
+                    let value = params["value"].as_str().unwrap_or_default().to_string();
+                    match params["configId"].as_str().unwrap_or_default() {
+                        "model" => self.model = value,
+                        "effort" | "effortLevel" => self.effort = value,
+                        "permission" if fake_acp_config::PERMISSIONS.contains(&value.as_str()) => self.mode = value,
+                        _ => {}
                     }
-                    json!({"configOptions": config(&self.model)})
+                    json!({"configOptions": self.config()})
+                }
+                "session/set_model" => {
+                    self.model = params["modelId"].as_str().unwrap_or_default().to_string();
+                    json!({})
                 }
                 "session/prompt" => {
                     self.cancelled = false;
@@ -299,5 +319,8 @@ pub fn main() {
     println!("fake agent log line on stdout");
     let lines = std::io::stdin().lock().lines();
     let (mode, model) = ("ask".into(), "fast".into());
-    Agent { lines, next_id: 100, cancelled: false, mode, model, turns: 0, mcp: Vec::new() }.run();
+    let variant = std::env::var("FAKE_ACP_CONFIG").unwrap_or_default();
+    let effort = fake_acp_config::initial_effort(&variant).to_string();
+    Agent { lines, next_id: 100, cancelled: false, mode, model, turns: 0, mcp: Vec::new(), variant, effort, news: 0 }
+        .run();
 }

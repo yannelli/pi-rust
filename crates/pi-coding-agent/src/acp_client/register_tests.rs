@@ -2,11 +2,14 @@ use std::sync::Arc;
 
 use pi_ai::auth::InMemoryCredentialStore;
 use pi_ai::providers::acp::{self, AcpHost, AgentCommand, Choice, PermissionRequest, Selector, SessionInfo};
+use pi_ai::types::ThinkingLevel;
 use serde_json::json;
 
 use super::{host, register};
 use crate::agent_session::{ModelRuntime, ModelRuntimeOptions};
 use crate::settings::SettingsManager;
+
+static GLOBAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 async fn runtime(dir: &std::path::Path) -> Arc<ModelRuntime> {
     let options = ModelRuntimeOptions {
@@ -20,6 +23,7 @@ async fn runtime(dir: &std::path::Path) -> Arc<ModelRuntime> {
 
 #[tokio::test]
 async fn enabled_agents_become_providers_with_advertised_models() {
+    let _guard = GLOBAL.lock().await;
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("acp")).unwrap();
     let state =
@@ -75,4 +79,38 @@ async fn enabled_agents_become_providers_with_advertised_models() {
         tool_call: json!({}),
     };
     assert_eq!(installed.request_permission(request).await.as_deref(), Some("n"));
+}
+
+#[tokio::test]
+async fn advertised_thought_levels_become_the_thinking_level_map() {
+    let _guard = GLOBAL.lock().await;
+    let dir = tempfile::tempdir().unwrap();
+    let settings =
+        SettingsManager::in_memory(json!({"acpAgents": [{"id": "kiro", "name": "Kiro", "command": "kiro"}]}));
+    let runtime = runtime(dir.path()).await;
+    register::sync(&runtime, &settings, dir.path());
+    let installed = host::install(dir.path(), &runtime);
+    let choice = |id: &str, name: &str| Choice { id: id.into(), name: name.into(), description: None };
+    let choices = vec![choice("1", "Low"), choice("3", "HIGH"), choice("auto", "Auto")];
+    let effort =
+        Selector { id: "effortLevel".into(), category: "thought_level".into(), choices, ..Selector::default() };
+    let info = SessionInfo {
+        provider: "kiro-acp".into(),
+        pi_session: "p1".into(),
+        acp_session: "s1".into(),
+        selectors: vec![effort],
+        ..SessionInfo::default()
+    };
+    installed.session_changed(&info);
+    let model = runtime.get_model("kiro-acp", acp::DEFAULT_MODEL).unwrap();
+    let map = model.thinking_level_map.clone().expect("a map from the advertised levels");
+    assert_eq!((map["low"].as_deref(), map["high"].as_deref()), (Some("1"), Some("3")));
+    assert_eq!((map["off"].as_deref(), map["medium"].as_deref()), (None, None));
+    assert_eq!(pi_ai::simple_options::supported_thinking_levels(&model), [ThinkingLevel::Low, ThinkingLevel::High]);
+    assert_eq!(host::read_state(dir.path()).thought_levels["kiro-acp"].len(), 3);
+
+    installed.session_changed(&SessionInfo { selectors: Vec::new(), ..info });
+    let model = runtime.get_model("kiro-acp", acp::DEFAULT_MODEL).unwrap();
+    assert!(!model.reasoning && model.thinking_level_map.is_none());
+    assert!(register::thinking_level_map(&[choice("auto", "Auto")]).is_none(), "no pi level, no map");
 }

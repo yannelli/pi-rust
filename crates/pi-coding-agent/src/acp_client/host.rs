@@ -31,6 +31,9 @@ pub struct HostState {
     /// Providers whose agent has a `thought_level` selector.
     #[serde(default)]
     pub thinking: BTreeMap<String, bool>,
+    /// The values of each provider's `thought_level` selector, for the pi thinking levels.
+    #[serde(default)]
+    pub thought_levels: BTreeMap<String, Vec<Choice>>,
     /// The slash commands each provider advertised in its last session.
     #[serde(default)]
     pub commands: BTreeMap<String, Vec<AgentCommand>>,
@@ -83,6 +86,11 @@ pub fn track_session(session: &Arc<AgentSession>) {
     let mut sessions = SESSIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     sessions.retain(|weak| weak.strong_count() > 0);
     sessions.push(Arc::downgrade(session));
+}
+
+pub(crate) fn untrack_session(pi_session: &str) {
+    let mut sessions = SESSIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    sessions.retain(|session| session.upgrade().is_some_and(|session| session.session_id() != pi_session));
 }
 
 /// The live session whose ID is `pi_session`.
@@ -183,7 +191,8 @@ impl AcpHost for PiAcpHost {
 
     fn session_changed(&self, info: &SessionInfo) {
         let models = info.models();
-        let thinking = info.selectors.iter().any(|selector| selector.category == "thought_level");
+        let thought = info.selectors.iter().find(|selector| selector.category == "thought_level");
+        let (thinking, levels) = (thought.is_some(), thought.map(|selector| selector.choices.clone()));
         let agent_model = info.selectors.iter().find(|s| s.category == "model").and_then(|s| s.current.clone());
         let mut models_changed = false;
         self.update(|state| {
@@ -198,6 +207,11 @@ impl AcpHost for PiAcpHost {
                 state.thinking.insert(provider.clone(), thinking);
                 models_changed = true;
             }
+            let stored = match &levels {
+                Some(levels) => state.thought_levels.insert(provider.clone(), levels.clone()),
+                None => state.thought_levels.remove(provider),
+            };
+            models_changed |= stored != levels;
             if state.images.insert(provider.clone(), info.images) != Some(info.images) {
                 models_changed = true;
             }
