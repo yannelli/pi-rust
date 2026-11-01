@@ -94,6 +94,7 @@ pub struct ExtensionRunner {
     pub(crate) resources: Mutex<super::ops_sdk_resources::ResourcesState>,
     /// Set for the child host of an SDK `DefaultResourceLoader`.
     pub(crate) parent: OnceLock<super::ops_sdk_resources::ParentLink>,
+    pub(crate) model_runtimes: super::ops_sdk_model_runtime::ModelRuntimes,
     bindings: RwLock<ExtensionBindings>,
     ids: AtomicU64,
     pub(crate) signals: Mutex<HashMap<u64, CancellationToken>>,
@@ -201,6 +202,7 @@ impl ExtensionRunner {
                 sdk: Default::default(),
                 resources: Mutex::default(),
                 parent: OnceLock::new(),
+                model_runtimes: Default::default(),
                 bindings: RwLock::default(),
                 ids: AtomicU64::new(1),
                 signals: Mutex::default(),

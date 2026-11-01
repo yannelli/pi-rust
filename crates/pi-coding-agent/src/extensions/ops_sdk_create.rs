@@ -50,7 +50,7 @@ pub(crate) async fn create(runner: &Arc<ExtensionRunner>, options: Value) -> Res
         cwd,
         agent_dir,
         settings,
-        model_runtime: runner.model_runtime().clone(),
+        model_runtime: runner.sdk_model_runtime(options["modelRuntimeId"].as_u64().unwrap_or(0))?,
         resource_loader,
         diagnostics: Vec::new(),
     };

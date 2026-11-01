@@ -1,6 +1,5 @@
-//! Extensions of an SDK `DefaultResourceLoader` (upstream `loadFinalExtensionSet`). Files load in
-//! a child extension host the child session binds; `extensionFactories` run in this host, and the
-//! child host loads a mirror of each one after the files (`mirror.rs`).
+//! Files load in a child extension host; factories run in the caller host.
+//! The child host mirrors factory calls after loading the files (upstream `loadFinalExtensionSet`).
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
