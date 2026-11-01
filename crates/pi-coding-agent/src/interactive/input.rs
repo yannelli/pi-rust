@@ -45,7 +45,7 @@ impl InteractiveMode {
         bind("app.thinking.cycle", |mode| mode.cycle_thinking_level());
         bind("app.model.cycleForward", |mode| mode.cycle_model(false));
         bind("app.model.cycleBackward", |mode| mode.cycle_model(true));
-        bind("app.model.select", |mode| mode.show_model_selector(None));
+        bind("app.model.select", |mode| mode.handle_model_command(None));
         bind("app.tools.expand", |mode| mode.toggle_tool_output_expansion());
         bind(super::widget_stack::TOGGLE_KEY, |mode| mode.toggle_widgets());
         bind("app.thinking.toggle", |mode| mode.toggle_thinking_block_visibility());
@@ -153,6 +153,7 @@ impl InteractiveMode {
                 };
                 let name = if result.model.name.is_empty() { &result.model.id } else { &result.model.name };
                 self.show_status(&format!("Switched to {name}{thinking}"));
+                self.open_current_acp_session();
             }
         }
     }

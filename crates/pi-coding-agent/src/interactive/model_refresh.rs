@@ -199,13 +199,27 @@ impl InteractiveMode {
         if let Some(warning) = outcome.warning("searching cached models") {
             self.show_warning(&warning);
         }
+        if let Some(model) = find_exact_model_reference_match(search, &runtime.available_models()) {
+            return Some(model);
+        }
+        // A registered ACP agent lists its models once its session runs; start only the named one.
+        let provider = super::acp_session::referenced_acp_provider(search)?;
+        self.open_acp_session(&provider).await?;
         find_exact_model_reference_match(search, &runtime.available_models())
     }
 
-    /// `/model [reference]`: switch to an exact match, else open the selector with the search.
+    /// `/model [reference]`: switch to an exact match, else open the selector with the search. The
+    /// session of a current ACP agent opens first, so the list holds the models it advertises.
     pub(super) fn handle_model_command(&self, search: Option<String>) {
-        let Some(search) = search else { return self.show_model_selector(None) };
+        let acp = self.current_model_is_acp();
+        if search.is_none() && !acp {
+            return self.show_model_selector(None);
+        }
         self.spawn(move |mode| async move {
+            if acp {
+                mode.prepare_acp_session().await;
+            }
+            let Some(search) = search else { return mode.show_model_selector(None) };
             match mode.find_exact_model_match(&search).await {
                 Some(model) => mode.apply_model(model, false),
                 None => mode.show_model_selector(Some(search)),

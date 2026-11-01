@@ -147,6 +147,7 @@ impl InteractiveMode {
         self.setup_extension_shortcuts();
         self.state.borrow_mut().ready = true;
         self.request_render();
+        self.open_current_acp_session();
     }
 
     fn setup_extension_shortcuts(&self) {

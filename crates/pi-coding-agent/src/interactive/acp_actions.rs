@@ -138,20 +138,23 @@ impl InteractiveMode {
         });
     }
 
-    /// `/acp mode`: the modes and other settings of the live ACP session of the current model.
+    /// `/acp mode`: the modes, permissions, and other settings the ACP agent of the current model
+    /// advertises; its session opens first when none runs.
     pub(super) fn acp_mode(&self) {
         let session = self.session();
         let Some(model) = session.model().filter(|model| model.api == acp::API) else {
             return self.show_warning("The current model is not an ACP agent. Select one with /model.");
         };
-        let Some(info) = acp::session_info(&model.provider, &session.session_id()) else {
-            return self.show_warning("No ACP session is running. Send a prompt first, then run /acp mode.");
-        };
-        let selectors: Vec<_> = info.selectors.into_iter().filter(|selector| selector.category != "model").collect();
-        if selectors.is_empty() {
-            return self.show_status("The agent offers no modes.");
+        if !self.current_model_is_acp() {
+            return self.show_warning(&format!("No ACP agent is set up for {}. Run /acp.", model.provider));
         }
         self.spawn(move |mode| async move {
+            let Some(info) = mode.prepare_acp_session().await else { return };
+            let selectors: Vec<_> =
+                info.selectors.into_iter().filter(|selector| selector.category != "model").collect();
+            if selectors.is_empty() {
+                return mode.show_status("The agent offers no modes.");
+            }
             let ui = mode.extension_ui();
             let selector = match selectors.len() {
                 1 => selectors[0].clone(),
@@ -177,7 +180,12 @@ impl InteractiveMode {
             let result =
                 tokio::spawn(async move { acp::set_session_option(&provider, &pi_session, &id, &value).await }).await;
             match result {
-                Ok(Ok(())) => mode.show_status(&format!("{}: {}", selector.name, selector.choices[index].name)),
+                Ok(Ok(())) => {
+                    mode.show_status(&format!("{}: {}", selector.name, selector.choices[index].name));
+                    if let Some(info) = acp::session_info(&model.provider, &session.session_id()) {
+                        mode.apply_acp_session_info(&info);
+                    }
+                }
                 Ok(Err(error)) => mode.show_error(&error),
                 Err(error) => mode.show_error(&error.to_string()),
             }
