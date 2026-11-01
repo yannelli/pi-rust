@@ -1,0 +1,72 @@
+{
+ "repository": "earendil-works/pi",
+ "commit": "35dfa757378bd7a8570670e99c2687bdd1039a06",
+ "files": {
+  "packages/coding-agent/package.json": {
+   "blob": "0e452d9b5356c4302ed48c546deb43c6dc6e9a65",
+   "sha256": "f9c21f2fe252a5f988a19f6e4097bb058c411cb98e2eb60e39f85e88c54f05c9",
+   "bytes": 3873,
+   "runtime": true
+  },
+  "packages/coding-agent/src/config.ts": {
+   "blob": "5a9552d5de451817ab06e99f2626e931d15c3384",
+   "sha256": "b226dccdba72d5438ec6facadd4f3c5f3ff0d4fe66ee591078c486712dbe915a",
+   "bytes": 24469,
+   "runtime": true
+  },
+  "packages/coding-agent/src/utils/paths.ts": {
+   "blob": "cf77b5bff03e5cb0b1ecd62562014478312e9279",
+   "sha256": "c8a2995b52a181e46cfae3b30f31448d201742d303249f34119ef2fd7a44e672",
+   "bytes": 7089,
+   "runtime": true
+  },
+  "packages/coding-agent/src/utils/text.ts": {
+   "blob": "737466e851bac7de1deeda16a71c7d0e8cd2e8ab",
+   "sha256": "bb323f9607c499115b532021f4f0163c6df04d834aee9c32c3c77b273bd2d7c6",
+   "bytes": 404,
+   "runtime": true
+  },
+  "packages/coding-agent/src/utils/child-process.ts": {
+   "blob": "b152444d6c79cfbfeb61b5cc007b3b5d1dc702be",
+   "sha256": "cd324f5b9a1abadd85ab5a331750d475c8bd51ec65cae091ad9b416245ec85d4",
+   "bytes": 4146,
+   "runtime": true
+  },
+  "packages/coding-agent/src/core/settings-manager.ts": {
+   "blob": "99bbeade0d212549375da990199797a8afdce3d6",
+   "sha256": "7b21f0900b96b8b11751c046cc009bdbd62b2a6f579a96e9727c737d0dd5e62d",
+   "bytes": 47254,
+   "runtime": true
+  },
+  "packages/coding-agent/src/core/settings-defaults.ts": {
+   "blob": "1f90280457f4d4d9563269754e7fa28ff0a2903f",
+   "sha256": "6fb94031cfd462e357723a35aab328e9a1ed5109c2aa59549d8291345875d5a9",
+   "bytes": 1521,
+   "runtime": true
+  },
+  "packages/coding-agent/src/core/http-dispatcher.ts": {
+   "blob": "7b810b39dacc65a64e70e5f928ada4f36f9d7543",
+   "sha256": "d64922c476d11b90555b8f23cab92ce1f4f83174cb750c125a96d8d4374744e2",
+   "bytes": 4020,
+   "runtime": true
+  },
+  "packages/coding-agent/src/core/settings-schema.ts": {
+   "blob": "c3ada287261eac5b15276801ced1ed87391f7da6",
+   "sha256": "322448282589066f1e7c291b184b9c8d20011f9579ad1dd8712c3c31b02d6636",
+   "bytes": 18648,
+   "runtime": false
+  },
+  "packages/ai/src/utils/retry.ts": {
+   "blob": "eabf6c7de00a3a28c35da8b03870d7e972e98fce",
+   "sha256": "3316a190562bda1e2a7905a3fb44ec2504fea6f800a85c7bc3396b6546fecea2",
+   "bytes": 11061,
+   "runtime": true
+  },
+  "packages/ai/package.json": {
+   "blob": "6e04980f052577c8bb9000858172921d7ccff74e",
+   "sha256": "7bb671d180ac55ac52f3e722e47aee15162e8bed06f89c10f2f4684ab1a7f995",
+   "bytes": 2699,
+   "runtime": true
+  }
+ }
+}

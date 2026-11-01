@@ -57,28 +57,43 @@ impl FileSettingsStorage {
     }
 }
 
+/// Node's message for a failed file call, such as `EISDIR: illegal operation on a directory, read`.
+fn node_error(error: &std::io::Error, syscall: &str, path: &Path) -> String {
+    let path = path.display().to_string();
+    let path = (error.kind() != std::io::ErrorKind::IsADirectory).then_some(path.as_str());
+    pi_js::JsError::from_io(error, if path.is_some() { syscall } else { "read" }, path).message
+}
+
+/// Upstream's lock: 10 tries 20 ms apart, then proper-lockfile's `ELOCKED` message.
+fn lock(path: &Path) -> Result<FileLock, String> {
+    FileLock::acquire_blocking(path).map_err(|error| match error.kind() {
+        std::io::ErrorKind::WouldBlock => "Lock file is already being held".to_string(),
+        _ => node_error(&error, "mkdir", &pi_ai::auth::store_lock::lock_dir(path)),
+    })
+}
+
 impl SettingsStorage for FileSettingsStorage {
     /// Locks only when the file exists or is written, so reading never creates `.pi/`.
     fn with_lock(&self, scope: SettingsScope, edit: SettingsEdit<'_>) -> Result<(), String> {
         let path = self.file(scope);
-        let lock_error = |error: std::io::Error| format!("cannot lock {}: {error}", path.display());
-        let mut lock = None;
+        let mut held = None;
         let current = if path.exists() {
-            lock = Some(FileLock::acquire_blocking(path).map_err(lock_error)?);
-            Some(std::fs::read_to_string(path).map_err(|error| error.to_string())?)
+            held = Some(lock(path)?);
+            let bytes = std::fs::read(path).map_err(|error| node_error(&error, "open", path))?;
+            Some(String::from_utf8_lossy(&bytes).into_owned())
         } else {
             None
         };
         if let Some(next) = edit(current.as_deref())? {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            if let Some(parent) = path.parent().filter(|parent| !parent.exists()) {
+                std::fs::create_dir_all(parent).map_err(|error| node_error(&error, "mkdir", parent))?;
             }
-            if lock.is_none() {
-                lock = Some(FileLock::acquire_blocking(path).map_err(lock_error)?);
+            if held.is_none() {
+                held = Some(lock(path)?);
             }
-            std::fs::write(path, next).map_err(|error| error.to_string())?;
+            std::fs::write(path, next).map_err(|error| node_error(&error, "open", path))?;
         }
-        drop(lock);
+        drop(held);
         Ok(())
     }
 

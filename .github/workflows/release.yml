@@ -190,6 +190,7 @@ jobs:
           cp README.md LICENSE THIRD-PARTY-LICENSES.md crates/pi-coding-agent/src/acp/LICENSE-pi-acp \
             crates/pi-js/src/js/LICENSE-node crates/pi-mcp/src/oauth/LICENSE-mcp-typescript-sdk \
             crates/pi-coding-agent/src/extensions/js/LICENSE-chalk "dist/$name/"
+          cp crates/pi-coding-agent/src/settings/LICENSE-v8 "dist/$name/LICENSE-v8-settings"
           [ -f CHANGELOG.md ] && cp CHANGELOG.md "dist/$name/"
           if [ "${{ runner.os }}" = Windows ]; then
             cp "target/$TARGET/release/pi.exe" "dist/$name/"

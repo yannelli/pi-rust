@@ -37,6 +37,7 @@ const HOST_FILES: &[(&str, &str)] = &[
     ("providers_all.js", include_str!("js/providers_all.js")),
     ("runner.js", include_str!("js/runner.js")),
     ("sdk_session.js", include_str!("js/sdk_session.js")),
+    ("sdk_settings.js", include_str!("js/sdk_settings.js")),
     ("sdk_storage.js", include_str!("js/sdk_storage.js")),
     ("sdk_resources.js", include_str!("js/sdk_resources.js")),
     ("session_utils.js", include_str!("js/session_utils.js")),

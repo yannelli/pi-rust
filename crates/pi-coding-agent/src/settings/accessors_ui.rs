@@ -11,7 +11,7 @@ use super::schema::*;
 use super::storage::SettingsScope;
 use super::tools::resolve_default_tools;
 
-fn uuid_v4() -> String {
+pub(super) fn uuid_v4() -> String {
     use std::hash::{BuildHasher, Hasher};
     let mut bytes = [0u8; 16];
     for chunk in bytes.chunks_mut(8) {

@@ -244,11 +244,11 @@ impl SettingsManager {
     }
 
     pub fn remove_model_thinking_level(&self, provider: &str, model_id: &str) {
-        let _ = self.write(SettingsScope::Global, |map| {
+        let _ = self.write(SettingsScope::Global, "modelThinkingLevels", None, |map| {
             if let Some(Value::Object(levels)) = map.get_mut("modelThinkingLevels") {
-                levels.remove(&format!("{provider}/{model_id}"));
+                levels.shift_remove(&format!("{provider}/{model_id}"));
                 if levels.is_empty() {
-                    map.remove("modelThinkingLevels");
+                    map.shift_remove("modelThinkingLevels");
                 }
             }
         });
