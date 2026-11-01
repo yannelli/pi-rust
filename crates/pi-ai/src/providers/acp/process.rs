@@ -43,7 +43,7 @@ impl Drop for Process {
 
 /// Kills the process group of the agent, which `spawn` made with the agent as its leader. A
 /// reaped child has no ID, so pi never signals a reused one.
-fn kill_group(child: &Child) {
+pub(crate) fn kill_group(child: &Child) {
     #[cfg(unix)]
     if let Some(pid) = child.id().and_then(|id| i32::try_from(id).ok()).and_then(rustix::process::Pid::from_raw) {
         let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);

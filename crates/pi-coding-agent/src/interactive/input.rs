@@ -155,9 +155,29 @@ impl InteractiveMode {
         }
     }
 
+    /// An Antigravity target is confirmed by the agent first; pi then switches to that exact target, and only
+    /// when the current model is unchanged.
     fn cycle_model(&self, backward: bool) {
         let session = self.session();
-        match session.cycle_model(backward, true) {
+        let Some(target) = session.next_cycle_model(backward) else { return self.show_cycle_result(None) };
+        if !super::acp_session::is_antigravity(&target.model) {
+            return self.show_cycle_result(Some(session.apply_cycle_target(target, true)));
+        }
+        let from = session.model().map(|model| (model.provider, model.id));
+        self.spawn(move |mode| async move {
+            if mode.open_antigravity_session(&target.model, target.thinking_level).await.is_none() {
+                return;
+            }
+            let session = mode.session();
+            if session.model().map(|model| (model.provider, model.id)) == from {
+                mode.show_cycle_result(Some(session.apply_cycle_target(target, true)));
+            }
+        });
+    }
+
+    fn show_cycle_result(&self, result: Option<crate::agent_session::ModelCycleResult>) {
+        let session = self.session();
+        match result {
             None => {
                 let scoped = !session.scoped_models().is_empty();
                 self.show_status(if scoped { "Only one model in scope" } else { "Only one model available" });

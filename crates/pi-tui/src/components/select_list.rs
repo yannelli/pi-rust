@@ -6,7 +6,7 @@ use crate::component::{
     Component, MouseResponse, TuiMouseButton, TuiMouseEvent, TuiMouseEventResult, TuiMouseEventType,
 };
 use crate::components::scroll_view::StyleFn;
-use crate::keybindings::{get_keybindings, ids};
+use crate::keybindings::{get_keybindings, get_select_page_index, ids};
 use crate::utils::{js_trim, truncate_to_width_with, visible_width};
 
 const DEFAULT_PRIMARY_COLUMN_WIDTH: usize = 32;
@@ -255,6 +255,7 @@ impl Component for SelectList {
     fn handle_input(&mut self, data: &str) {
         let kb = get_keybindings();
         let len = self.filtered_items.len();
+        let page_index = get_select_page_index(&kb, data, self.selected_index, len, self.max_visible);
         if kb.matches(data, ids::SELECT_UP) {
             if len == 0 {
                 return;
@@ -267,6 +268,13 @@ impl Component for SelectList {
             }
             self.selected_index = if self.selected_index + 1 >= len { 0 } else { self.selected_index + 1 };
             self.notify_selection_change();
+        } else if let Some(page_index) = page_index {
+            // Page up/down: one visible page, clamped to the list bounds.
+            if len == 0 || page_index == self.selected_index {
+                return;
+            }
+            self.selected_index = page_index;
+            self.notify_selection_change();
         } else if kb.matches(data, ids::SELECT_CONFIRM) {
             self.notify_select();
         } else if kb.matches(data, ids::SELECT_CANCEL)
@@ -277,6 +285,10 @@ impl Component for SelectList {
     }
 
     fn handles_input(&self) -> bool {
+        true
+    }
+
+    fn captures_viewport_input(&self) -> bool {
         true
     }
 

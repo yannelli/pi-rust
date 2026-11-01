@@ -66,7 +66,22 @@ pub(crate) struct Server {
     pub connection: Arc<Connection>,
     /// The Google sign-in URLs that the server prints to stderr.
     pub sign_in: mpsc::UnboundedReceiver<String>,
-    _child: Child,
+    child: Child,
+}
+
+impl Server {
+    /// Stops the server and the processes it started, and waits for it to exit.
+    pub(crate) async fn shutdown(&mut self) {
+        crate::providers::acp::process::kill_group(&self.child);
+        let _ = self.child.kill().await;
+    }
+}
+
+/// A server dropped without `shutdown`, for example by a cancelled start, still takes its processes along.
+impl Drop for Server {
+    fn drop(&mut self) {
+        crate::providers::acp::process::kill_group(&self.child);
+    }
 }
 
 pub(crate) fn sign_in_url(line: &str) -> Option<String> {
@@ -104,7 +119,7 @@ pub(crate) fn spawn(binary: &Path, cwd: &Path) -> std::io::Result<Server> {
             }
         }
     });
-    Ok(Server { connection: Connection::new(super::LABEL, stdout, stdin), sign_in, _child: child })
+    Ok(Server { connection: Connection::new(super::LABEL, stdout, stdin), sign_in, child })
 }
 
 #[cfg(test)]
@@ -139,5 +154,69 @@ mod tests {
         let line = format!("{SIGN_IN_PREFIX}https://accounts.google.com/o/oauth2/auth?client_id=x");
         assert_eq!(sign_in_url(&line).as_deref(), Some("https://accounts.google.com/o/oauth2/auth?client_id=x"));
         assert_eq!(sign_in_url("INFO Could not open a browser automatically"), None);
+    }
+
+    /// The server and a process it started have both ended, and the server is reaped, after `shutdown`.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn shutdown_stops_the_server_and_its_process_group() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::Duration;
+        let dir = tempfile::tempdir().unwrap();
+        let binary = dir.path().join("agy_acp_server");
+        std::fs::write(&binary, "#!/bin/sh\nsleep 300 &\necho $! > grandchild.pid\nwait\n").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut server = spawn(&binary, dir.path()).unwrap();
+        let leader = i32::try_from(server.child.id().unwrap()).unwrap();
+        let pid_file = dir.path().join("grandchild.pid");
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        let grandchild = loop {
+            let pid = std::fs::read_to_string(&pid_file).ok().and_then(|text| text.trim().parse::<i32>().ok());
+            if let Some(pid) = pid.filter(|pid| *pid > 0) {
+                break pid;
+            }
+            assert!(tokio::time::Instant::now() < deadline, "the fake server did not start its child");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        server.shutdown().await;
+        let alive = |pid: i32| {
+            rustix::process::Pid::from_raw(pid).is_some_and(|pid| rustix::process::test_kill_process(pid).is_ok())
+        };
+        assert!(!alive(leader), "the server is reaped when shutdown returns");
+        while alive(grandchild) {
+            assert!(tokio::time::Instant::now() < deadline, "the server's child outlived shutdown");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// A server dropped mid-start, as a timed-out open drops it, still stops the processes it started.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn dropping_a_server_stops_its_process_group() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::Duration;
+        let dir = tempfile::tempdir().unwrap();
+        let binary = dir.path().join("agy_acp_server");
+        std::fs::write(&binary, "#!/bin/sh\nsleep 300 &\necho $! > grandchild.pid\nwait\n").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let server = spawn(&binary, dir.path()).unwrap();
+        let pid_file = dir.path().join("grandchild.pid");
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        let grandchild = loop {
+            let pid = std::fs::read_to_string(&pid_file).ok().and_then(|text| text.trim().parse::<i32>().ok());
+            if let Some(pid) = pid.filter(|pid| *pid > 0) {
+                break pid;
+            }
+            assert!(tokio::time::Instant::now() < deadline, "the fake server did not start its child");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        drop(server);
+        let alive = |pid: i32| {
+            rustix::process::Pid::from_raw(pid).is_some_and(|pid| rustix::process::test_kill_process(pid).is_ok())
+        };
+        while alive(grandchild) {
+            assert!(tokio::time::Instant::now() < deadline, "the server's child outlived the dropped server");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
 }

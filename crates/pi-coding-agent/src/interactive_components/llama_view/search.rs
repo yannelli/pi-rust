@@ -10,7 +10,7 @@ use futures::FutureExt;
 use futures::future::LocalBoxFuture;
 use pi_tui::components::{Input, InputOptions};
 use pi_tui::ui_loop::{self, TimerId};
-use pi_tui::{Component, Container, Tui, component, get_keybindings};
+use pi_tui::{Component, Container, Tui, component, get_keybindings, get_select_page_index};
 use tokio_util::sync::CancellationToken;
 
 use super::super::common::{fg, fuzzy_filter_by, spacer, text};
@@ -251,6 +251,15 @@ impl Component for HuggingFaceSearch {
             }
             return;
         }
+        if let Some(page_index) =
+            get_select_page_index(&keybindings, data, self.selected, self.filtered.len(), MAX_VISIBLE)
+        {
+            if !self.filtered.is_empty() {
+                self.selected = page_index;
+                self.update_results();
+            }
+            return;
+        }
         if keybindings.matches(data, "tui.select.confirm") {
             let exact = is_exact_model_query(&self.query).then(|| self.query.clone());
             let selected = exact.or_else(|| self.filtered.get(self.selected).map(|model| model.id.clone()));
@@ -274,6 +283,10 @@ impl Component for HuggingFaceSearch {
     }
 
     fn handles_input(&self) -> bool {
+        true
+    }
+
+    fn captures_viewport_input(&self) -> bool {
         true
     }
 

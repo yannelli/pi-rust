@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use pi_ai::Model;
 use pi_tui::components::{Input, Text};
-use pi_tui::{Component, Container, Tui, component, get_keybindings};
+use pi_tui::{Component, Container, Tui, component, get_keybindings, get_select_page_index};
 use tokio_util::sync::CancellationToken;
 
 mod source;
@@ -389,6 +389,7 @@ impl Component for ModelSelector {
     fn handle_input(&mut self, data: &str) {
         let kb = get_keybindings();
         let len = self.filtered.len();
+        let page_index = get_select_page_index(&kb, data, self.selected_index, len, MAX_VISIBLE);
         if kb.matches(data, "tui.input.tab") {
             if !self.scoped_items.is_empty() {
                 self.set_scope(if self.scope == Scope::All { Scope::Scoped } else { Scope::All });
@@ -407,6 +408,12 @@ impl Component for ModelSelector {
                 return;
             }
             self.selected_index = if self.selected_index + 1 == len { 0 } else { self.selected_index + 1 };
+            self.update_list();
+        } else if let Some(page_index) = page_index {
+            if len == 0 {
+                return;
+            }
+            self.selected_index = page_index;
             self.update_list();
         } else if kb.matches(data, "tui.select.confirm") {
             self.select();
@@ -431,6 +438,10 @@ impl Component for ModelSelector {
     }
 
     fn handles_input(&self) -> bool {
+        true
+    }
+
+    fn captures_viewport_input(&self) -> bool {
         true
     }
 

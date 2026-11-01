@@ -1,6 +1,51 @@
 mod common;
+mod node_common;
 
 use common::*;
+
+#[tokio::test]
+async fn file_and_directory_timestamps_match_real_node() {
+    const SCRIPT: &str = r#"
+const fs = require("node:fs");
+const mark = (text) => fs.writeFileSync("stage", text);
+mark("create paths");
+fs.writeFileSync("file", "unchanged");
+fs.mkdirSync("directory");
+const out = {};
+for (const path of ["file", "directory"]) {
+  const times = () => { const s = fs.statSync(path); return [s.atimeMs, s.mtimeMs]; };
+  mark(`${path}: sync`);
+  fs.utimesSync(path, new Date(1000005), new Date(2000005));
+  const sync = times();
+  mark(`${path}: callback`);
+  await new Promise((resolve, reject) => fs.utimes(path, new Date(3000007), 4000.125, (error) => error ? reject(error) : resolve()));
+  const callback = times();
+  mark(`${path}: promises`);
+  await fs.promises.utimes(path, 5000.25, new Date(6000009));
+  out[path] = { sync, callback, promise: times() };
+}
+out.contents = fs.readFileSync("file", "utf8");
+out.isDirectory = fs.statSync("directory").isDirectory();
+mark("file: fd sync");
+const fd = fs.openSync("file", "r+");
+fs.futimesSync(fd, new Date(1000005), new Date(2000005));
+const stat = fs.fstatSync(fd);
+out.fdSync = [stat.atimeMs, stat.mtimeMs];
+fs.closeSync(fd);
+mark("done");
+return out;
+"#;
+    let (_node_dir, node_root) = tempdir();
+    let Some((node, _capture)) = node_common::node_runtime(&node_root) else {
+        assert!(std::env::var_os("CI").is_none(), "CI must run the real Node timestamp control");
+        return;
+    };
+    let expected = run_cjs_within(&node, &node_root, SCRIPT, 30).await;
+    let (_quickjs_dir, quickjs_root) = tempdir();
+    let (quickjs, _capture) = runtime(&quickjs_root);
+    let actual = run_cjs_within(&quickjs, &quickjs_root, SCRIPT, 30).await;
+    assert_eq!(actual, expected);
+}
 
 // Expected values come from running the same script under Node 22 in an empty directory.
 const FS_SCRIPT: &str = r##"

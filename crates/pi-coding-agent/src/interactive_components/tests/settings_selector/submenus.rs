@@ -246,6 +246,28 @@ fn select_submenu_filters_when_searchable() {
 }
 
 #[test]
+fn pages_a_searchable_submenu_with_selection_page_keys() {
+    let _kb = setup();
+    let options: Vec<SelectItem> =
+        (0..20).map(|i| SelectItem::new(&format!("theme-{i}"), &format!("theme-{i}"))).collect();
+    let selected = Calls::new();
+    let on_select = selected.clone();
+    let mut submenu = SelectSubmenu::new(
+        "Theme",
+        "",
+        options,
+        "theme-0",
+        move |value: &str| on_select.push(value.to_string()),
+        || {},
+        None,
+        SelectSubmenuOptions { searchable: true, layout: None },
+    );
+    submenu.handle_input(keys::PAGE_DOWN);
+    submenu.handle_input(keys::ENTER);
+    assert_eq!(selected.get(), ["theme-10"]);
+}
+
+#[test]
 fn provider_submenu_toggles_filters_and_keeps_changes_after_escape() {
     let _kb = setup();
     let changed = Calls::new();
