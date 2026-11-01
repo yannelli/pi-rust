@@ -13,7 +13,7 @@ use crate::resources::brand::{APP_NAME, CONFIG_DIR_NAME};
 use crate::theme::{ThemeBg, ThemeColor};
 
 /// The ANSI tables of a theme for the JavaScript `Theme`.
-fn theme_snapshot(theme: &crate::theme::Theme) -> Value {
+pub(super) fn theme_snapshot(theme: &crate::theme::Theme) -> Value {
     let mut fg = serde_json::Map::new();
     let mut dim = Vec::new();
     for color in ThemeColor::ALL {
