@@ -126,6 +126,9 @@ pub(crate) fn address_json(address: Option<SocketAddr>) -> serde_json::Value {
 }
 
 pub(super) fn tcp_conn(stream: tokio::net::TcpStream) -> std::io::Result<Conn> {
+    // std's `accept` leaves the socket inheritable, so a child spawned later would hold the connection open.
+    #[cfg(windows)]
+    socket2::SockRef::from(&stream).set_no_inherit(true)?;
     let tcp = socket2::SockRef::from(&stream).try_clone()?;
     let info =
         json!({ "local": address_json(stream.local_addr().ok()), "remote": address_json(stream.peer_addr().ok()) });

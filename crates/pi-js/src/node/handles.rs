@@ -195,8 +195,8 @@ mod windows {
     use std::os::windows::io::{AsRawSocket, FromRawSocket};
 
     use windows_sys::Win32::Networking::WinSock::{
-        FROM_PROTOCOL_INFO, INVALID_SOCKET, SOCKET_ERROR, WSA_FLAG_OVERLAPPED, WSADATA, WSADuplicateSocketW,
-        WSAGetLastError, WSAPROTOCOL_INFOW, WSASocketW, WSAStartup,
+        FROM_PROTOCOL_INFO, INVALID_SOCKET, SOCKET_ERROR, WSA_FLAG_NO_HANDLE_INHERIT, WSA_FLAG_OVERLAPPED, WSADATA,
+        WSADuplicateSocketW, WSAGetLastError, WSAPROTOCOL_INFOW, WSASocketW, WSAStartup,
     };
 
     const INFO_BYTES: usize = std::mem::size_of::<WSAPROTOCOL_INFOW>();
@@ -227,8 +227,8 @@ mod windows {
                 (&mut info as *mut WSAPROTOCOL_INFOW).cast::<u8>(),
                 INFO_BYTES,
             );
-            let socket =
-                WSASocketW(FROM_PROTOCOL_INFO, FROM_PROTOCOL_INFO, FROM_PROTOCOL_INFO, &info, 0, WSA_FLAG_OVERLAPPED);
+            let flags = WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT;
+            let socket = WSASocketW(FROM_PROTOCOL_INFO, FROM_PROTOCOL_INFO, FROM_PROTOCOL_INFO, &info, 0, flags);
             if socket == INVALID_SOCKET {
                 return Err(io::Error::from_raw_os_error(WSAGetLastError()));
             }
