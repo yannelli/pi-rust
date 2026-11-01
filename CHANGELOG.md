@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.10.7] - 2026-11-01
+
+### Added
+
+- **acp:** configure Antigravity sessions before prompts (#176) ([e6deb1e](https://github.com/yannelli/pi-rust/commit/e6deb1eba0445282b3b74abe9dae621c48327a81))
+
 ## [0.10.6] - 2026-11-01
 
 ### Fixed

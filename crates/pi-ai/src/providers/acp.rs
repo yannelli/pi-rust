@@ -7,7 +7,7 @@ mod client;
 pub(crate) mod connection;
 mod host;
 mod mcp;
-mod process;
+pub(crate) mod process;
 mod prompt;
 mod proxy;
 mod render;
@@ -29,6 +29,7 @@ pub use self::host::{
     ProxyTool, Selector, SessionInfo, agent, set_agents, set_host,
 };
 use self::render::Transcript;
+pub(crate) use self::session::selectors as session_selectors;
 use self::session::{Runtime, Shared, is_current, rpc, slot, take_slots};
 use crate::registry::{ApiProvider, StreamOptions};
 use crate::simple_options::{MappedLevel, mapped_thinking_level};

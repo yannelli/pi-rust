@@ -223,6 +223,10 @@ impl Component for LlamaView {
         true
     }
 
+    fn captures_viewport_input(&self) -> bool {
+        self.input_handler.as_ref().is_some_and(|handler| handler.borrow().captures_viewport_input())
+    }
+
     fn is_focusable(&self) -> bool {
         true
     }

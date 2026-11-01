@@ -2,6 +2,7 @@
 //! system prompt, queues, persistence, auto retry, compaction, tree navigation, and bash
 //! execution. Every mode (print, JSON, RPC, interactive) drives a session through this API.
 
+mod antigravity;
 pub mod auth;
 pub mod bash;
 mod boundary;

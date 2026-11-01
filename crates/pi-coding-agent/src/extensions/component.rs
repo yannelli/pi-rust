@@ -181,6 +181,12 @@ impl Component for JsComponent {
         self.wants_key_release
     }
 
+    fn captures_viewport_input(&self) -> bool {
+        self.component
+            .blocking_get("capturesViewportInput")
+            .is_ok_and(|value| value.as_json().and_then(Value::as_bool) == Some(true))
+    }
+
     fn invalidate(&mut self) {
         let _ = self.component.blocking_call_optional_method("invalidate");
     }

@@ -19,7 +19,7 @@ use crate::types::{
 /// Requests the agent received: method and params.
 static SEEN: LazyLock<Mutex<Vec<(String, Value)>>> = LazyLock::new(Mutex::default);
 /// The tests share the agent factory and the request log.
-static SERIAL: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(tokio::sync::Mutex::default);
+pub(super) static SERIAL: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(tokio::sync::Mutex::default);
 
 fn config(model: &str, thought: &str) -> Value {
     let levels: &[&str] = if model == "gemini-3.8-flash" { &["low", "medium", "high"] } else { &["low", "high"] };

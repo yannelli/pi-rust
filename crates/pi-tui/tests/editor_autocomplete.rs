@@ -11,7 +11,10 @@ use std::time::{Duration, Instant};
 use editor_common::{
     MockProvider, TestEditor, before_cursor, cursor, editor, flush, flush_debounce, recorder, suggestions, type_text,
 };
-use pi_tui::autocomplete::{AutocompleteProvider, AutocompleteSuggestions, CombinedAutocompleteProvider};
+use pi_tui::Component;
+use pi_tui::autocomplete::{
+    AutocompleteItem, AutocompleteProvider, AutocompleteSuggestions, CombinedAutocompleteProvider,
+};
 
 fn recording_provider(requests: &Rc<RefCell<Vec<String>>>, triggers: &[&str]) -> Rc<dyn AutocompleteProvider> {
     let requests = requests.clone();
@@ -375,4 +378,34 @@ fn resets_custom_triggers_when_the_provider_changes() {
     flush_debounce();
     assert_eq!(calls.get(), 0);
     assert!(!editor.is_showing_autocomplete());
+}
+
+/// A provider that offers `/command-0` to `/command-11` for `/`.
+fn twelve_commands() -> Rc<dyn AutocompleteProvider> {
+    MockProvider::new(|_, _, _, _| {
+        let items = (0..12).map(|i| AutocompleteItem::new(format!("/command-{i}"), format!("command-{i}"))).collect();
+        Some(AutocompleteSuggestions { items, prefix: "/".into() })
+    })
+    .shared()
+}
+
+#[test]
+fn moves_the_autocomplete_selection_with_selection_page_keys() {
+    let editor = editor();
+    let submitted = recorder();
+    let sink = submitted.clone();
+    editor.on_submit(move |text| sink.borrow_mut().push(text.to_string()));
+    editor.set_autocomplete_provider(twelve_commands());
+
+    assert!(!editor.captures_viewport_input());
+    editor.handle_input("/");
+    flush();
+    assert!(editor.captures_viewport_input());
+
+    editor.handle_input("\x1b[6~");
+    editor.handle_input("\x1b[6~");
+    editor.handle_input("\x1b[5~");
+    editor.handle_input("\r");
+
+    assert_eq!(*submitted.borrow(), ["/command-5"]);
 }
