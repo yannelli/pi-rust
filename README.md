@@ -87,6 +87,7 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. This se
 
 ### Runtime
 
+- New Kimi Code OAuth logins use the global `.ai` endpoints. To sign in to mainland China, set `KIMI_CODE_OAUTH_HOST=https://auth.kimi.com`. The login stores its OAuth and API endpoints for later refreshes; older logins without this metadata retain their mainland endpoints. Explicit `KIMI_CODE_OAUTH_HOST` and `KIMI_CODE_BASE_URL` values override saved endpoints. A custom model `baseUrl` in `models.json` stays in effect. Kimi and Moonshot tool requests infer omitted types from enums, constants, and unambiguous schema structure.
 - Extensions run on an embedded QuickJS engine, so pi-rust does not need Node.js. All Node built-in modules load. These include:
   - `zlib` with gzip, brotli, and zstd.
   - `async_hooks` with `AsyncLocalStorage`, and `v8` serialization.
@@ -232,5 +233,6 @@ These parts come from other MIT-licensed projects. Each release archive includes
 | ACP mode | [pi-acp](https://github.com/svkozak/pi-acp) by Sergii Kozak | [`LICENSE-pi-acp`](crates/pi-coding-agent/src/acp/LICENSE-pi-acp) |
 | Some JavaScript modules of the extension runtime | [Node.js](https://github.com/nodejs/node) | [`LICENSE-node`](crates/pi-js/src/js/LICENSE-node) |
 | MCP OAuth code, ported from upstream pi | [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) | [`LICENSE-mcp-typescript-sdk`](crates/pi-mcp/src/oauth/LICENSE-mcp-typescript-sdk) |
+| Warning colors of `loadProjectContextFiles` in the extension SDK | [chalk](https://github.com/chalk/chalk) 6.0.0 by Sindre Sorhus | [`LICENSE-chalk`](crates/pi-coding-agent/src/extensions/js/LICENSE-chalk) |
 
 The release archives also include `THIRD-PARTY-LICENSES.md` with the licenses of the third-party Rust crates in the binaries. The Release workflow writes it with [cargo-about](https://github.com/EmbarkStudios/cargo-about) from `about.toml` and `about.hbs`.

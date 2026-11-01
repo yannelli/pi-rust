@@ -46,7 +46,7 @@ Each [release](https://github.com/yannelli/pi-rust/releases) has one archive for
 
 - `pi` or `pi.exe`
 - `README.md` and `CHANGELOG.md`
-- `LICENSE`, `LICENSE-pi-acp`, `LICENSE-node`, `LICENSE-mcp-typescript-sdk`, and `THIRD-PARTY-LICENSES.md`
+- `LICENSE`, `LICENSE-pi-acp`, `LICENSE-node`, `LICENSE-mcp-typescript-sdk`, `LICENSE-chalk`, and `THIRD-PARTY-LICENSES.md`
 
 | Platform | Target |
 | --- | --- |

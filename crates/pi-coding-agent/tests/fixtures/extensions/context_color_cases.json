@@ -1,0 +1,297 @@
+{
+	"probes": [
+		"Warning: Could not read /x/AGENTS.md: Error: EACCES: permission denied, open '/x/AGENTS.md'",
+		"a\nb",
+		"a\r\nb\n",
+		"x\u001b[39my",
+		""
+	],
+	"cases": [
+		{
+			"name": "FORCE_COLOR=0",
+			"env": {
+				"FORCE_COLOR": "0"
+			},
+			"argv": [],
+			"nonTerminalOnly": false,
+			"outputs": [
+				"Warning: Could not read /x/AGENTS.md: Error: EACCES: permission denied, open '/x/AGENTS.md'",
+				"a\nb",
+				"a\r\nb\n",
+				"x\u001b[39my",
+				""
+			]
+		},
+		{
+			"name": "FORCE_COLOR=false",
+			"env": {
+				"FORCE_COLOR": "false"
+			},
+			"argv": [],
+			"nonTerminalOnly": false,
+			"outputs": [
+				"Warning: Could not read /x/AGENTS.md: Error: EACCES: permission denied, open '/x/AGENTS.md'",
+				"a\nb",
+				"a\r\nb\n",
+				"x\u001b[39my",
+				""
+			]
+		},
+		{
+			"name": "FORCE_COLOR=1",
+			"env": {
+				"FORCE_COLOR": "1"
+			},
+			"argv": [],
+			"nonTerminalOnly": false,
+			"outputs": [
+				"\u001b[33mWarning: Could not read /x/AGENTS.md: Error: EACCES: permission denied, open '/x/AGENTS.md'\u001b[39m",
+				"\u001b[33ma\u001b[39m\n\u001b[33mb\u001b[39m",
+				"\u001b[33ma\u001b[39m\r\n\u001b[33mb\u001b[39m\n\u001b[33m\u001b[39m",
+				"\u001b[33mx\u001b[39m\u001b[33my\u001b[39m",
+				""
+			]
+		},
+		{
+			"name": "FORCE_COLOR=3",
+			"env": {
+				"FORCE_COLOR": "3"
+			},
+			"argv": [],
+			"nonTerminalOnly": false,
+			"outputs": [
+				"\u001b[33mWarning: Could not read /x/AGENTS.md: Error: EACCES: permission denied, open '/x/AGENTS.md'\u001b[39m",
+				"\u001b[33ma\u001b[39m\n\u001b[33mb\u001b[39m",
+				"\u001b[33ma\u001b[39m\r\n\u001b[33mb\u001b[39m\n\u001b[33m\u001b[39m",
+				"\u001b[33mx\u001b[39m\u001b[33my\u001b[39m",
+				""
+			]
+		},
+		{
+			"name": "FORCE_COLOR=7 caps at 3",
+			"env": {
+				"FORCE_COLOR": "7"
+			},
+			"argv": [],
+			"nonTerminalOnly": false,
+			"outputs": [
+				"\u001b[33mWarning: Could not read /x/AGENTS.md: Error: EACCES: permission denied, open '/x/AGENTS.md'\u001b[39m",
+				"\u001b[33ma\u001b[39m\n\u001b[33mb\u001b[39m",
+				"\u001b[33ma\u001b[39m\r\n\u001b[33mb\u001b[39m\n\u001b[33m\u001b[39m",
+				"\u001b[33mx\u001b[39m\u001b[33my\u001b[39m",
+				""
+			]
+		},
+		{
+			"name": "FORCE_COLOR=true with TERM=dumb",
+			"env": {
+				"FORCE_COLOR": "true",
+				"TERM": "dumb"
+			},
+			"argv": [],
+			"nonTerminalOnly": false,
+			"outputs": [
+				"\u001b[33mWarning: Could not read /x/AGENTS.md: Error: EACCES: permission denied, open '/x/AGENTS.md'\u001b[39m",
+				"\u001b[33ma\u001b[39m\n\u001b[33mb\u001b[39m",
+				"\u001b[33ma\u001b[39m\r\n\u001b[33mb\u001b[39m\n\u001b[33m\u001b[39m",
+				"\u001b[33mx\u001b[39m\u001b[33my\u001b[39m",
+				""
+			]
+		},
+		{
+			"name": "empty FORCE_COLOR with TERM=dumb",
+			"env": {
+				"FORCE_COLOR": "",
+				"TERM": "dumb"
+			},
+			"argv": [],
+			"nonTerminalOnly": false,
+			"outputs": [
+				"\u001b[33mWarning: Could not read /x/AGENTS.md: Error: EACCES: permission denied, open '/x/AGENTS.md'\u001b[39m",
+				"\u001b[33ma\u001b[39m\n\u001b[33mb\u001b[39m",
+				"\u001b[33ma\u001b[39m\r\n\u001b[33mb\u001b[39m\n\u001b[33m\u001b[39m",
+				"\u001b[33mx\u001b[39m\u001b[33my\u001b[39m",
+				""
+			]
+		},
+		{
+			"name": "FORCE_COLOR=true, TEAMCITY_VERSION=8.0",
+			"env": {
+				"FORCE_COLOR": "true",
+				"TEAMCITY_VERSION": "8.0"
+			},
+			"argv": [],
+			"nonTerminalOnly": false,
+			"outputs": [
+				"Warning: Could not read /x/AGENTS.md: Error: EACCES: permission denied, open '/x/AGENTS.md'",
+				"a\nb",
+				"a\r\nb\n",
+				"x\u001b[39my",
+				""
+			],
+			"win32Oracle": "Node 22 with process.platform set to win32 and os.release() set to 10.0.19045 before chalk loads: chalk's win32 JavaScript branch, not a run on Windows",
+			"win32Outputs": [
+				"\u001b[33mWarning: Could not read /x/AGENTS.md: Error: EACCES: permission denied, open '/x/AGENTS.md'\u001b[39m",
+				"\u001b[33ma\u001b[39m\n\u001b[33mb\u001b[39m",
+				"\u001b[33ma\u001b[39m\r\n\u001b[33mb\u001b[39m\n\u001b[33m\u001b[39m",
+				"\u001b[33mx\u001b[39m\u001b[33my\u001b[39m",
+				""
+			]
+		},
+		{
+			"name": "FORCE_COLOR=true, TEAMCITY_VERSION=9.1.0",
+			"env": {
+				"FORCE_COLOR": "true",
+				"TEAMCITY_VERSION": "9.1.0"
+			},
+			"argv": [],
+			"nonTerminalOnly": false,
+			"outputs": [
+				"\u001b[33mWarning: Could not read /x/AGENTS.md: Error: EACCES: permission denied, open '/x/AGENTS.md'\u001b[39m",
+				"\u001b[33ma\u001b[39m\n\u001b[33mb\u001b[39m",
+				"\u001b[33ma\u001b[39m\r\n\u001b[33mb\u001b[39m\n\u001b[33m\u001b[39m",
+				"\u001b[33mx\u001b[39m\u001b[33my\u001b[39m",
+				""
+			]
+		},
+		{
+			"name": "--no-color",
+			"env": {},
+			"argv": [
+				"--no-color"
+			],
+			"nonTerminalOnly": false,
+			"outputs": [
+				"Warning: Could not read /x/AGENTS.md: Error: EACCES: permission denied, open '/x/AGENTS.md'",
+				"a\nb",
+				"a\r\nb\n",
+				"x\u001b[39my",
+				""
+			]
+		},
+		{
+			"name": "--color with TERM=dumb",
+			"env": {
+				"TERM": "dumb"
+			},
+			"argv": [
+				"--color"
+			],
+			"nonTerminalOnly": false,
+			"outputs": [
+				"\u001b[33mWarning: Could not read /x/AGENTS.md: Error: EACCES: permission denied, open '/x/AGENTS.md'\u001b[39m",
+				"\u001b[33ma\u001b[39m\n\u001b[33mb\u001b[39m",
+				"\u001b[33ma\u001b[39m\r\n\u001b[33mb\u001b[39m\n\u001b[33m\u001b[39m",
+				"\u001b[33mx\u001b[39m\u001b[33my\u001b[39m",
+				""
+			]
+		},
+		{
+			"name": "--colors",
+			"env": {},
+			"argv": [
+				"--colors"
+			],
+			"nonTerminalOnly": false,
+			"outputs": [
+				"\u001b[33mWarning: Could not read /x/AGENTS.md: Error: EACCES: permission denied, open '/x/AGENTS.md'\u001b[39m",
+				"\u001b[33ma\u001b[39m\n\u001b[33mb\u001b[39m",
+				"\u001b[33ma\u001b[39m\r\n\u001b[33mb\u001b[39m\n\u001b[33m\u001b[39m",
+				"\u001b[33mx\u001b[39m\u001b[33my\u001b[39m",
+				""
+			]
+		},
+		{
+			"name": "--color=256",
+			"env": {},
+			"argv": [
+				"--color=256"
+			],
+			"nonTerminalOnly": false,
+			"outputs": [
+				"\u001b[33mWarning: Could not read /x/AGENTS.md: Error: EACCES: permission denied, open '/x/AGENTS.md'\u001b[39m",
+				"\u001b[33ma\u001b[39m\n\u001b[33mb\u001b[39m",
+				"\u001b[33ma\u001b[39m\r\n\u001b[33mb\u001b[39m\n\u001b[33m\u001b[39m",
+				"\u001b[33mx\u001b[39m\u001b[33my\u001b[39m",
+				""
+			]
+		},
+		{
+			"name": "--no-color with FORCE_COLOR=1",
+			"env": {
+				"FORCE_COLOR": "1"
+			},
+			"argv": [
+				"--no-color"
+			],
+			"nonTerminalOnly": false,
+			"outputs": [
+				"\u001b[33mWarning: Could not read /x/AGENTS.md: Error: EACCES: permission denied, open '/x/AGENTS.md'\u001b[39m",
+				"\u001b[33ma\u001b[39m\n\u001b[33mb\u001b[39m",
+				"\u001b[33ma\u001b[39m\r\n\u001b[33mb\u001b[39m\n\u001b[33m\u001b[39m",
+				"\u001b[33mx\u001b[39m\u001b[33my\u001b[39m",
+				""
+			]
+		},
+		{
+			"name": "TF_BUILD and AGENT_NAME",
+			"env": {
+				"TF_BUILD": "True",
+				"AGENT_NAME": "agent"
+			},
+			"argv": [],
+			"nonTerminalOnly": false,
+			"outputs": [
+				"\u001b[33mWarning: Could not read /x/AGENTS.md: Error: EACCES: permission denied, open '/x/AGENTS.md'\u001b[39m",
+				"\u001b[33ma\u001b[39m\n\u001b[33mb\u001b[39m",
+				"\u001b[33ma\u001b[39m\r\n\u001b[33mb\u001b[39m\n\u001b[33m\u001b[39m",
+				"\u001b[33mx\u001b[39m\u001b[33my\u001b[39m",
+				""
+			]
+		},
+		{
+			"name": "--color after --, stdout not a terminal",
+			"env": {},
+			"argv": [
+				"--",
+				"--color"
+			],
+			"nonTerminalOnly": true,
+			"outputs": [
+				"Warning: Could not read /x/AGENTS.md: Error: EACCES: permission denied, open '/x/AGENTS.md'",
+				"a\nb",
+				"a\r\nb\n",
+				"x\u001b[39my",
+				""
+			]
+		},
+		{
+			"name": "nothing set, stdout not a terminal",
+			"env": {},
+			"argv": [],
+			"nonTerminalOnly": true,
+			"outputs": [
+				"Warning: Could not read /x/AGENTS.md: Error: EACCES: permission denied, open '/x/AGENTS.md'",
+				"a\nb",
+				"a\r\nb\n",
+				"x\u001b[39my",
+				""
+			]
+		},
+		{
+			"name": "FORCE_COLOR=abc, stdout not a terminal",
+			"env": {
+				"FORCE_COLOR": "abc"
+			},
+			"argv": [],
+			"nonTerminalOnly": true,
+			"outputs": [
+				"Warning: Could not read /x/AGENTS.md: Error: EACCES: permission denied, open '/x/AGENTS.md'",
+				"a\nb",
+				"a\r\nb\n",
+				"x\u001b[39my",
+				""
+			]
+		}
+	]
+}
