@@ -10,7 +10,7 @@ mod offline_guard;
 use harness::{Setup, harness};
 use serde_json::Value;
 
-/// Upstream output, written by `node scripts/tui-viewport-scenario.mjs <upstream>` (source-derived until it runs).
+/// Upstream output, written by `node --experimental-strip-types scripts/tui-viewport-scenario.mjs <upstream>`.
 const EXPECTED: &str = include_str!("fixtures/extensions/tui_viewport_scenario.json");
 
 const EXTENSION: &str = r#"
