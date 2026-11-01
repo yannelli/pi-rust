@@ -37,6 +37,7 @@ async fn startup_discovers_the_agent_models_and_model_lists_them_before_a_prompt
             screen.contains("fast") && screen.contains("smart")
         })
         .await;
+        eprintln!("ACP model picker:\n{}", ui.screen());
         ui.send("\x1b").await;
         assert!(!has_reply(&ui), "listing models sends no prompt");
         shut_down(&ui).await;
@@ -77,6 +78,8 @@ async fn thinking_high_sets_effort_three_before_a_prompt_and_the_selector_keeps_
         wait_thinking_levels(&ui).await;
         assert_eq!(ui.session().thinking_level(), ThinkingLevel::Medium, "the agent starts at effort 2");
         ui.submit("/thinking high").await;
+        // The first Enter accepts the argument completion; the second submits the command.
+        ui.send("\r").await;
         ui.wait_for("Thinking level: high").await;
         assert_eq!(ui.session().thinking_level(), ThinkingLevel::High);
         assert_eq!(remote_value(&ui, "effortLevel").as_deref(), Some("3"));
@@ -84,6 +87,7 @@ async fn thinking_high_sets_effort_three_before_a_prompt_and_the_selector_keeps_
 
         ui.submit("/thinking").await;
         ui.wait_for("✓ high").await;
+        eprintln!("ACP thinking picker:\n{}", ui.screen());
         ui.send("\x1b").await;
         assert_eq!(ui.session().thinking_level(), ThinkingLevel::High, "reopening the selector keeps the level");
         assert_eq!(remote_value(&ui, "effortLevel").as_deref(), Some("3"));
@@ -92,6 +96,26 @@ async fn thinking_high_sets_effort_three_before_a_prompt_and_the_selector_keeps_
         ui.wait_for("news=1").await;
         assert!(ui.history().contains("effort=3"), "{}", ui.history());
         ui.wait_until("the turn to end", |ui| !ui.session().is_streaming()).await;
+        shut_down(&ui).await;
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn thinking_shortcut_sets_the_agent_level_before_saving_it() {
+    local(async {
+        let _serial = serialize().await;
+        let ui = start_acp(None).await;
+        wait_thinking_levels(&ui).await;
+        assert_eq!(ui.session().thinking_level(), ThinkingLevel::Medium);
+        ui.send("\x1b[Z").await;
+        ui.wait_until("the next thinking level", |ui| ui.session().thinking_level() == ThinkingLevel::High).await;
+        assert_eq!(remote_value(&ui, "effortLevel").as_deref(), Some("3"), "the shortcut must set the agent first");
+        assert_eq!(ui.session().settings().default_thinking_level(), Some(ThinkingLevel::High));
+        assert!(!has_reply(&ui), "the shortcut sends no prompt");
+        ui.submit("/thinking").await;
+        ui.wait_for("✓ high").await;
+        ui.send("\x1b").await;
         shut_down(&ui).await;
     })
     .await;

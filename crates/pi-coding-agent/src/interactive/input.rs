@@ -128,6 +128,24 @@ impl InteractiveMode {
     }
 
     fn cycle_thinking_level(&self) {
+        if self.current_model_is_acp() {
+            self.spawn(|mode| async move {
+                if mode.prepare_acp_session().await.is_none() {
+                    return;
+                }
+                let session = mode.session();
+                if !session.supports_thinking() {
+                    return mode.show_status("Current model does not support thinking");
+                }
+                let levels = session.available_thinking_levels();
+                let index = levels.iter().position(|level| *level == session.thinking_level()).map_or(0, |i| i + 1);
+                let next = levels[index % levels.len()];
+                if let Some(confirmed) = mode.set_acp_thinking_level(next).await {
+                    mode.finish_thinking_level(confirmed, true);
+                }
+            });
+            return;
+        }
         match self.session().cycle_thinking_level(true) {
             None => self.show_status("Current model does not support thinking"),
             Some(level) => {

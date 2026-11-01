@@ -95,7 +95,7 @@ impl InteractiveMode {
         });
     }
 
-    fn finish_thinking_level(&self, level: ThinkingLevel, persist: bool) {
+    pub(super) fn finish_thinking_level(&self, level: ThinkingLevel, persist: bool) {
         self.session().set_thinking_level(level, persist);
         self.update_editor_border_color();
         let label = if persist { "Default thinking level" } else { "Thinking level" };
