@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.11.2] - 2026-11-01
+
+### Fixed
+
+- **cli:** register termination signals before print work ([f9ced4b](https://github.com/yannelli/pi-rust/commit/f9ced4b8301c674183456c2acc73546d846028d3))
+
 ## [0.11.1] - 2026-11-01
 
 ### Fixed
