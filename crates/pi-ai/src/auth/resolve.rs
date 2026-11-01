@@ -339,42 +339,52 @@ impl AuthResolver {
     }
 }
 
-/// Refresh a stored OAuth credential under the store lock and persist it before the lock is
-/// released. Expiry is checked again under the lock, so concurrent callers refresh once.
-/// Returns the stored OAuth credential afterwards, or `None` after a logout.
+/// Refresh and persist a stored OAuth credential in its own task under the store lock, so a dropped caller
+/// cannot discard a rotated token. Concurrent callers refresh once. Returns `None` after a logout.
 pub async fn refresh_stored_oauth(
     store: &Arc<dyn CredentialStore>,
     provider_id: &str,
     oauth: Arc<dyn OAuthAuth>,
     min_validity_ms: i64,
 ) -> AuthResult<Option<OAuthCredential>> {
-    let provider = provider_id.to_string();
-    let post = store
-        .update(
-            provider_id,
-            Box::new(move |current| {
-                async move {
-                    let Some(Credential::OAuth(current)) = current else { return Ok(None) };
-                    if !current.expires_within(now_ms(), min_validity_ms) {
-                        return Ok(None);
-                    }
-                    let cancel = CancellationToken::new();
-                    let refresh = oauth.refresh(&current, cancel.clone());
-                    match tokio::time::timeout(OAUTH_REFRESH_TIMEOUT, refresh).await {
-                        Ok(Ok(credential)) => Ok(Some(Credential::OAuth(credential))),
-                        Ok(Err(error)) => {
-                            Err(AuthError::other(format!("OAuth refresh failed for {provider}: {error}")))
+    let caller = CancellationToken::new();
+    let _caller_alive = caller.clone().drop_guard();
+    let (store, id, provider) = (store.clone(), provider_id.to_string(), provider_id.to_string());
+    let transaction = tokio::spawn(async move {
+        store
+            .update(
+                &id,
+                Box::new(move |current| {
+                    async move {
+                        // A caller dropped while waiting for the lock starts no refresh.
+                        if caller.is_cancelled() {
+                            return Err(AuthError::Cancelled);
                         }
-                        Err(_) => {
-                            cancel.cancel();
-                            Err(AuthError::other(format!("OAuth refresh failed for {provider}: timed out")))
+                        let Some(Credential::OAuth(current)) = current else { return Ok(None) };
+                        if !current.expires_within(now_ms(), min_validity_ms) {
+                            return Ok(None);
+                        }
+                        let cancel = CancellationToken::new();
+                        let refresh = oauth.refresh(&current, cancel.clone());
+                        match tokio::time::timeout(OAUTH_REFRESH_TIMEOUT, refresh).await {
+                            Ok(Ok(credential)) => Ok(Some(Credential::OAuth(credential))),
+                            Ok(Err(error)) => {
+                                Err(AuthError::other(format!("OAuth refresh failed for {provider}: {error}")))
+                            }
+                            Err(_) => {
+                                cancel.cancel();
+                                Err(AuthError::other(format!("OAuth refresh failed for {provider}: timed out")))
+                            }
                         }
                     }
-                }
-                .boxed()
-            }),
-        )
-        .await?;
+                    .boxed()
+                }),
+            )
+            .await
+    });
+    let post = transaction
+        .await
+        .map_err(|error| AuthError::other(format!("OAuth refresh failed for {provider_id}: {error}")))??;
     Ok(match post {
         Some(Credential::OAuth(credential)) => Some(credential),
         _ => None,
@@ -384,3 +394,7 @@ pub async fn refresh_stored_oauth(
 #[cfg(test)]
 #[path = "resolve_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "resolve_cancel_tests.rs"]
+mod cancel_tests;
