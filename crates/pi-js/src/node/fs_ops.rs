@@ -316,6 +316,14 @@ fn system_time(seconds: f64) -> std::time::SystemTime {
 
 /// `fs.utimes` with times in seconds.
 pub(crate) fn utimes(path: &Path, atime: f64, mtime: f64) -> io::Result<()> {
+    #[cfg(windows)]
+    let file = {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_WRITE_ATTRIBUTES: u32 = 0x100;
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        OpenOptions::new().access_mode(FILE_WRITE_ATTRIBUTES).custom_flags(FILE_FLAG_BACKUP_SEMANTICS).open(path)?
+    };
+    #[cfg(not(windows))]
     let file = if path.is_dir() { File::open(path)? } else { OpenOptions::new().write(true).open(path)? };
     let times = fs::FileTimes::new().set_accessed(system_time(atime)).set_modified(system_time(mtime));
     file.set_times(times)
