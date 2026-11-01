@@ -38,8 +38,20 @@ impl ModelSelectorSource for RuntimeSource {
 }
 
 impl InteractiveMode {
-    /// `/thinking [level]`: set it directly, or open the selector.
+    /// `/thinking [level]`: set it directly, or open the selector. For an ACP agent, its session opens
+    /// first, so the levels are the ones it advertises for the current model.
     pub(super) fn handle_thinking_command(&self, search: Option<String>) {
+        if !self.current_model_is_acp() {
+            return self.thinking_command(search);
+        }
+        self.spawn(move |mode| async move {
+            if mode.prepare_acp_session().await.is_some() {
+                mode.thinking_command(search);
+            }
+        });
+    }
+
+    fn thinking_command(&self, search: Option<String>) {
         let Some(search) = search else { return self.show_thinking_selector() };
         let available = self.session().available_thinking_levels();
         let wanted = search.trim().to_lowercase();
@@ -71,7 +83,19 @@ impl InteractiveMode {
         self.show_status(status);
     }
 
+    /// For an ACP agent, the agent sets the level first, and the level it confirms is the one applied.
     fn select_thinking_level(&self, level: ThinkingLevel, persist: bool) {
+        if !self.current_model_is_acp() {
+            return self.finish_thinking_level(level, persist);
+        }
+        self.spawn(move |mode| async move {
+            if let Some(confirmed) = mode.set_acp_thinking_level(level).await {
+                mode.finish_thinking_level(confirmed, persist);
+            }
+        });
+    }
+
+    pub(super) fn finish_thinking_level(&self, level: ThinkingLevel, persist: bool) {
         self.session().set_thinking_level(level, persist);
         self.update_editor_border_color();
         let label = if persist { "Default thinking level" } else { "Thinking level" };
@@ -124,6 +148,7 @@ impl InteractiveMode {
                     mode.update_available_provider_count();
                     mode.update_editor_border_color();
                     mode.show_status(&if persist { format!("Default model: {id}") } else { format!("Model: {short}") });
+                    mode.prepare_acp_session().await;
                 }
                 Ok(Err(error)) => mode.show_error(&error.to_string()),
                 Err(error) => mode.show_error(&error.to_string()),

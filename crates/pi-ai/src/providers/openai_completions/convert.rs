@@ -38,7 +38,10 @@ pub(super) fn convert_tools(tools: &[Tool], compat: &Compat) -> Result<Vec<Value
                 return Ok(json!({"type": "custom", "custom": custom}));
             }
             let strict = resolve_json_schema_strict_sampling(tool, compat.supports_strict_mode, None)?;
-            let parameters = json_schema_tool_parameters(tool, strict == Some(true));
+            let mut parameters = json_schema_tool_parameters(tool, strict == Some(true));
+            if compat.requires_typed_tool_properties {
+                super::kimi_schema::normalize(&mut parameters);
+            }
             let mut function = json!({"name": tool.name, "description": tool.description, "parameters": parameters});
             if compat.supports_strict_mode {
                 function["strict"] = json!(strict.unwrap_or(false));

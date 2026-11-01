@@ -2,6 +2,24 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.10.5] - 2026-11-01
+
+### Fixed
+
+- **js:** recover IPC handle transfers and release failed copies (#169) ([f271ea5](https://github.com/yannelli/pi-rust/commit/f271ea55ac90cd460d5b008375daa6bd0f56a5c1))
+
+## [0.10.4] - 2026-11-01
+
+### Fixed
+
+- **ai:** use global Kimi login and complete tool schema types (#173) ([8f441d3](https://github.com/yannelli/pi-rust/commit/8f441d30f2e2fc3050cbca3705bf275234142ad9))
+
+## [0.10.3] - 2026-11-01
+
+### Added
+
+- **sdk:** export project context loading (#174) ([ccaa6e0](https://github.com/yannelli/pi-rust/commit/ccaa6e09f45e3527a0065f0d48cbb06684591c49))
+
 ## [0.10.2] - 2026-10-31
 
 ### Fixed

@@ -95,13 +95,15 @@ pub const DIFFERENCES: &[&str] = &[
      SETTINGS frame of their own, a client's goaway sends no GOAWAY frame, received \
      data is not flow-controlled by the reader, closing a pushed stream on the client sends no RST_STREAM, \
      and session and stream state objects are approximate",
-    "child_process: messages sent after a handle do not wait for the peer's NODE_HANDLE_ACK (Node queues \
-     them, and resends the handle after a NODE_HANDLE_NACK), and bytes that a sent socket had read in the \
-     sender but not yet emitted as 'data' are dropped instead of emitted there",
+    "child_process: bytes a sent socket read but did not emit as 'data' are dropped; internalMessage listeners \
+     get received descriptors as objects with only close() instead of raw TCP handles; a stray handle ACK or NACK \
+     is ignored instead of asserting; resends use a flat wrapper instead of nested net.Native wrappers, and a \
+     failed resend releases its copy and queue instead of leaving the handle pending",
     "dgram: addMembership, dropMembership, and the source-specific variants need a bound socket (Node \
      binds an unbound one to a random port first)",
     "cluster: round-robin hands each connection to the next connected worker in turn rather than to the \
-     next free one, and the primary does not report worker server errors with Node's exact errno text",
+     next free one; a connection queued to a worker that disconnects is not reclaimed; and the primary does not \
+     report worker server errors with Node's exact errno text",
     "vm: a context is a separate QuickJS context whose globals forward to the contextified object; \
      `this` and `globalThis` inside it are that context's own global, not the object, globals the code \
      declares are copied to the object when each run ends, cached data is accepted but not used, and \
