@@ -2,6 +2,18 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.11.0] - 2026-11-01
+
+### Breaking Changes
+
+- **acp:** accept client stdio MCP servers ([babda88](https://github.com/yannelli/pi-rust/commit/babda88015c340dec0ebc8e9cdc88dff72439ac1))
+
+## [0.10.10] - 2026-11-01
+
+### Fixed
+
+- **js:** match Node realpath path-walk behavior ([c364d1c](https://github.com/yannelli/pi-rust/commit/c364d1c369a2f3f0b6efe027aaedcfaf8e5f91cb))
+
 ## [0.10.9] - 2026-11-01
 
 ### Fixed

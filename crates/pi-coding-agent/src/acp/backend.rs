@@ -9,6 +9,8 @@ use async_trait::async_trait;
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;
 
+use super::mcp_servers::ClientMcpServers;
+
 /// One pi session. Data methods return the `data` of the matching RPC command.
 #[async_trait]
 pub trait PiBackend: Send + Sync {
@@ -43,10 +45,16 @@ pub trait PiBackend: Send + Sync {
     async fn dispose(&self);
 }
 
-/// Creates pi sessions: a new one in `cwd`, or the stored one at `session_file`.
+/// Creates pi sessions: a new one in `cwd`, or the stored one at `session_file`, with the MCP
+/// servers the ACP client supplied for it.
 #[async_trait]
 pub trait BackendFactory: Send + Sync {
-    async fn create(&self, cwd: &Path, session_file: Option<&Path>) -> Result<Arc<dyn PiBackend>, Error>;
+    async fn create(
+        &self,
+        cwd: &Path,
+        session_file: Option<&Path>,
+        mcp_servers: &ClientMcpServers,
+    ) -> Result<Arc<dyn PiBackend>, Error>;
 }
 
 /// The client side of the connection, as the agent calls it.

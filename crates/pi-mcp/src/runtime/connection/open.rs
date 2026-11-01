@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use super::{CONNECT_RETRY_DELAYS, Inner, McpServerConnection, ServerState, Status};
 use crate::client::{McpClient, McpClientOptions, RequestOptions};
+use crate::config::McpConfigScope;
 use crate::error::{McpError, OAuthError};
 use crate::transport::SharedTransport;
 use crate::types::{ResourceTemplate, Root, Tool};
@@ -93,6 +94,9 @@ impl Inner {
     pub(super) fn mark_needs_auth(self: &Arc<Self>) {
         {
             let mut status = self.lock();
+            if self.shutdown.is_cancelled() {
+                return;
+            }
             status.state = ServerState::NeedsAuth;
             status.error = None;
         }
@@ -110,7 +114,14 @@ impl Inner {
     }
 
     pub(super) async fn open(self: Arc<Self>) -> Result<McpClient, McpError> {
-        self.lock().state = ServerState::Connecting;
+        {
+            let mut status = self.lock();
+            // A `close` that ran before this task started did not wait for it.
+            if self.shutdown.is_cancelled() {
+                return Err(McpError::other(format!("MCP server \"{}\" is shut down", self.options.entry.name)));
+            }
+            status.state = ServerState::Connecting;
+        }
         self.changed();
         let retries: &[Duration] = if self.options.entry.config.is_http() { &CONNECT_RETRY_DELAYS } else { &[] };
         let mut retry = 0;
@@ -136,7 +147,9 @@ impl Inner {
         client_options.request_timeout = Some(self.handle().timeout());
         client_options.roots = Some(vec![root(&options.cwd)]);
         let client = McpClient::new(client_options);
-        if let Some(log) = options.log.clone() {
+        // Messages from servers an ACP client supplied are not written to the log file.
+        let log = options.log.clone().filter(|_| options.entry.scope != Some(McpConfigScope::Client));
+        if let Some(log) = log {
             let name = options.entry.name.clone();
             client.on_notification("notifications/message", move |params| log.write(&name, params));
         }
@@ -152,37 +165,39 @@ impl Inner {
             result = self.initialize(&client, &transport) => result,
             () = self.shutdown.cancelled() => Err(McpError::closed()),
         };
-        let checked = result.and_then(|listed| {
-            if self.shutdown.is_cancelled() {
-                Err(McpError::other("shut down while connecting"))
-            } else if !client.is_connected() {
-                Err(McpError::other("connection closed during setup"))
-            } else {
-                Ok(listed)
+        let error = match result.and_then(|listed| self.publish(&client, listed)) {
+            Ok(()) => {
+                self.tools_changed();
+                self.changed();
+                return Ok(client);
             }
-        });
-        let listed = match checked {
-            Ok(listed) => listed,
-            Err(error) => {
-                client.close().await;
-                let tail = stderr_tail(&transport);
-                self.lock().stderr_tail = tail;
-                return Err(error);
-            }
+            Err(error) => error,
         };
-        {
-            let mut status = self.lock();
-            status.client = Some(client.clone());
-            status.tools = listed.tools;
-            status.has_resources = listed.has_resources;
-            status.instructions =
-                client.instructions().map(|text| text.trim().to_string()).filter(|text| !text.is_empty());
-            status.state = ServerState::Connected;
-            status.error = None;
+        client.close().await;
+        // Shutdown can win the select before `initialize` hands the transport to the client.
+        transport.close().await;
+        let tail = stderr_tail(&transport);
+        self.lock().stderr_tail = tail;
+        Err(error)
+    }
+
+    /// Install a connected client, unless `close` began: it cancels `shutdown` before it takes the
+    /// status lock, so a client published under that lock is one `close` takes and closes.
+    fn publish(&self, client: &McpClient, listed: Listed) -> Result<(), McpError> {
+        let mut status = self.lock();
+        if self.shutdown.is_cancelled() {
+            return Err(McpError::other("shut down while connecting"));
         }
-        self.tools_changed();
-        self.changed();
-        Ok(client)
+        if !client.is_connected() {
+            return Err(McpError::other("connection closed during setup"));
+        }
+        status.client = Some(client.clone());
+        status.tools = listed.tools;
+        status.has_resources = listed.has_resources;
+        status.instructions = client.instructions().map(|text| text.trim().to_string()).filter(|text| !text.is_empty());
+        status.state = ServerState::Connected;
+        status.error = None;
+        Ok(())
     }
 
     async fn initialize(self: &Arc<Self>, client: &McpClient, transport: &SharedTransport) -> Result<Listed, McpError> {
@@ -208,23 +223,31 @@ impl Inner {
     }
 
     fn connect_failed(self: &Arc<Self>, error: McpError) -> McpError {
-        let closed = self.shutdown.is_cancelled();
-        if self.needs_sign_in(&error) && !closed {
-            self.mark_needs_auth();
-            return McpError::Other(self.sign_in_required_message());
-        }
+        let needs_sign_in = self.needs_sign_in(&error);
         let message = {
             let mut status = self.lock();
-            status.state = if closed { ServerState::Closed } else { ServerState::Failed };
-            let message = match &status.stderr_tail {
-                Some(tail) => format!("{error}\n{tail}"),
-                None => error.to_string(),
-            };
-            status.error = Some(message.clone());
-            message
+            let closed = self.shutdown.is_cancelled();
+            if needs_sign_in && !closed {
+                status.state = ServerState::NeedsAuth;
+                status.error = None;
+                None
+            } else {
+                status.state = if closed { ServerState::Closed } else { ServerState::Failed };
+                let message = match &status.stderr_tail {
+                    Some(tail) => format!("{error}\n{tail}"),
+                    None => error.to_string(),
+                };
+                status.error = Some(message.clone());
+                Some(message)
+            }
         };
         self.changed();
-        McpError::Other(format!("MCP server \"{}\" failed to connect: {message}", self.options.entry.name))
+        match message {
+            None => McpError::Other(self.sign_in_required_message()),
+            Some(message) => {
+                McpError::Other(format!("MCP server \"{}\" failed to connect: {message}", self.options.entry.name))
+            }
+        }
     }
 
     /// The transport dropped. The next call reconnects; until then the status shows why.
@@ -261,3 +284,6 @@ impl Inner {
         self.changed();
     }
 }
+
+#[cfg(test)]
+mod tests;

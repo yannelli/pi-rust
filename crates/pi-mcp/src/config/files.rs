@@ -25,6 +25,15 @@ pub enum McpConfigScope {
     Project,
     /// Registered by an extension; changes are not saved.
     Extension,
+    /// Supplied by an ACP client for one session: values are used literally and never saved.
+    Client,
+}
+
+impl McpConfigScope {
+    /// Whether changes to servers of this scope are written to a config file.
+    pub fn is_saved(self) -> bool {
+        matches!(self, Self::Global | Self::Project)
+    }
 }
 
 impl fmt::Display for McpConfigScope {
@@ -33,6 +42,7 @@ impl fmt::Display for McpConfigScope {
             Self::Global => "global",
             Self::Project => "project",
             Self::Extension => "extension",
+            Self::Client => "client",
         })
     }
 }
