@@ -12,9 +12,10 @@ use pi_mcp::runtime::transport::stdio_options;
 use pi_mcp::runtime::{InMemoryAuthStorageBackend, McpOAuthCredentialStore, TransportFactory};
 use pi_mcp::{
     LoadedMcpConfig, McpClient, McpClientOptions, McpConfigScope, McpExposure, McpManager, McpManagerOptions,
-    McpServerEntry, McpServerRegistry, McpTransport, NotifyLevel, RequestOptions, SharedTransport, StdioTransport,
-    add_client_servers,
+    McpServerEntry, McpServerRegistry, NotifyLevel, RequestOptions, StdioTransport, add_client_servers,
 };
+#[cfg(unix)]
+use pi_mcp::{McpTransport, SharedTransport};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
@@ -196,6 +197,7 @@ async fn spawn_errors_of_client_servers_name_the_server_only() {
 }
 
 /// Stdio transports built like the default ones, kept for the test, each reporting its stderr chunks.
+#[cfg(unix)]
 fn recording_transports(chunks: Arc<Mutex<String>>) -> (TransportFactory, Arc<Mutex<Vec<Arc<StdioTransport>>>>) {
     let transports: Arc<Mutex<Vec<Arc<StdioTransport>>>> = Arc::default();
     let kept = transports.clone();
