@@ -72,6 +72,22 @@ fn choices(options: &Value) -> Vec<Choice> {
     .collect()
 }
 
+/// The category of a config option. Without one (or with `_custom`), the IDs `model`, `mode`,
+/// `permission`, and the effort IDs that agents use name the category.
+fn category(option: &Value) -> String {
+    match option["category"].as_str().filter(|category| !category.is_empty() && *category != "_custom") {
+        Some(category) => category.to_string(),
+        None => match option["id"].as_str().unwrap_or_default() {
+            "model" => "model".into(),
+            "mode" | "permission" => "mode".into(),
+            "thought_level" | "thinking_level" | "reasoning_effort" | "effortLevel" | "effort" => {
+                "thought_level".into()
+            }
+            _ => "_custom".into(),
+        },
+    }
+}
+
 /// The selectors of a `session/new` or `session/load` reply, or of a `config_option_update`.
 pub(crate) fn selectors(reply: &Value, config: Option<&[Value]>) -> Vec<Selector> {
     let text = |value: &Value, key: &str| value[key].as_str().map(str::to_string);
@@ -83,7 +99,7 @@ pub(crate) fn selectors(reply: &Value, config: Option<&[Value]>) -> Vec<Selector
         .map(|option| Selector {
             id: text(option, "id").unwrap_or_default(),
             name: text(option, "name").or_else(|| text(option, "id")).unwrap_or_default(),
-            category: text(option, "category").unwrap_or_else(|| "_custom".into()),
+            category: category(option),
             current: text(option, "currentValue"),
             choices: choices(&option["options"]),
             legacy_mode: false,
@@ -151,6 +167,9 @@ pub(crate) struct Runtime {
     pub context_window: Option<u64>,
     /// The pi model ID of the last turn.
     pub pi_model: String,
+    /// `session/load` resumed the session and no prompt ran yet: the first prompt sends only the
+    /// newest request.
+    pub resumed: bool,
     /// The timestamp of the last reply of this session, to find it in a compacted transcript.
     pub last_reply: Option<i64>,
     /// Shown once in the next reply, for example MCP servers the agent did not get.
@@ -231,6 +250,7 @@ impl Runtime {
             commands_known: false,
             context_window: None,
             pi_model: super::DEFAULT_MODEL.into(),
+            resumed: false,
             last_reply: None,
             notices,
             proxy,
@@ -317,6 +337,19 @@ impl Runtime {
 
 pub(crate) type Shared = Arc<tokio::sync::Mutex<Option<Runtime>>>;
 static RUNTIMES: LazyLock<Mutex<HashMap<(String, String), Shared>>> = LazyLock::new(Mutex::default);
+
+/// Removes the runtime slots of `pi_session`, for every provider.
+pub(crate) fn take_slots(pi_session: &str) -> Vec<Shared> {
+    let mut runtimes = RUNTIMES.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let keys: Vec<(String, String)> = runtimes.keys().filter(|(_, session)| session == pi_session).cloned().collect();
+    keys.iter().filter_map(|key| runtimes.remove(key)).collect()
+}
+
+/// Whether `shared` is still the slot of `provider` and `pi_session`; `close_session` removes it.
+pub(crate) fn is_current(provider: &str, pi_session: &str, shared: &Shared) -> bool {
+    let runtimes = RUNTIMES.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    runtimes.get(&(provider.to_string(), pi_session.to_string())).is_some_and(|current| Arc::ptr_eq(current, shared))
+}
 
 /// The runtime slot of a pi session and agent provider.
 pub(crate) fn slot(provider: &str, pi_session: &str) -> Shared {

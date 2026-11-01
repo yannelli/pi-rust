@@ -28,6 +28,41 @@ pub struct ModelCycleResult {
 }
 
 impl AgentSession {
+    /// Refresh ACP model capabilities and its advertised current thinking level without changing the model selection.
+    pub fn refresh_acp_model_metadata(&self, info: &pi_ai::providers::acp::SessionInfo) -> bool {
+        let Some(current) = self.model().filter(|model| model.api == pi_ai::providers::acp::API) else {
+            return false;
+        };
+        if current.provider != info.provider || self.session_id() != info.pi_session {
+            return false;
+        }
+        let Some(model) = self.model_runtime().get_model(&current.provider, &current.id) else {
+            return false;
+        };
+        let remote = info
+            .selectors
+            .iter()
+            .find(|selector| selector.category == "thought_level")
+            .and_then(|selector| selector.current.as_deref());
+        let level: Option<ThinkingLevel> = model.thinking_level_map.as_ref().and_then(|map| {
+            map.iter().find_map(|(level, value)| match value.as_deref() {
+                Some(value) if Some(value) == remote => level.parse().ok(),
+                _ => None,
+            })
+        });
+        let mut refreshed = false;
+        self.agent.update_state(|state| {
+            if models_are_equal(&state.model, &current) {
+                state.model = model.clone();
+                refreshed = true;
+            }
+        });
+        if let Some(level) = level.filter(|_| refreshed) {
+            self.set_thinking_level(level, false);
+        }
+        refreshed
+    }
+
     /// Switch to `model`. The thinking level becomes the model's `modelThinkingLevels` entry, the
     /// `defaultThinkingLevel` setting, or the current level. `persist` saves the default model.
     pub async fn set_model(&self, model: Model, persist: bool) -> anyhow::Result<()> {
