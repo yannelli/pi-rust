@@ -31,6 +31,7 @@ export default function (pi) {
   pi.registerCommand('probe', { handler: async (_args, ctx) => {
     const root = join(ctx.cwd, '..');
     process.env.HOME = join(root, 'home');
+    process.env.USERPROFILE = process.env.HOME;
     const agentDir = join(root, 'agent');
     const missing = { skill: join(root, 'missing-skill'), prompt: join(root, 'missing.md'), theme: join(root, 'missing-theme.json') };
     const result = {};
@@ -187,13 +188,13 @@ async fn reload_matches_upstream_order_and_the_native_loader() {
     let find = |list: &Value, name: &str| list.as_array().unwrap().iter().find(|item| item["name"] == name).cloned();
     let extra = find(&extended["skills"]["skills"], "extra-skill").expect("extra skill");
     assert_eq!(extra["sourceInfo"]["source"], "extension:extra");
-    assert_eq!(extra["sourceInfo"]["path"], json!(root.join("extra-skills/extra-skill/SKILL.md")));
+    assert_eq!(extra["sourceInfo"]["path"], json!(root.join("extra-skills").join("extra-skill").join("SKILL.md")));
     let file_url = find(&extended["skills"]["skills"], "file-url-skill").expect("file URL skill");
-    assert_eq!(file_url["filePath"], json!(root.join("extra skills/file-url-skill/SKILL.md")));
+    assert_eq!(file_url["filePath"], json!(root.join("extra skills").join("file-url-skill").join("SKILL.md")));
     assert_eq!(file_url["sourceInfo"]["source"], "extension:file-url");
     let prompt = find(&extended["prompts"]["prompts"], "extra").expect("extra prompt");
     assert_eq!(prompt["sourceInfo"]["source"], "extension:extra");
-    assert_eq!(prompt["sourceInfo"]["path"], json!(root.join("extra-prompts/extra.md")));
+    assert_eq!(prompt["sourceInfo"]["path"], json!(root.join("extra-prompts").join("extra.md")));
     let rerun = &extended["prompts"]["diagnostics"];
     assert!(!has(rerun, "error", "Prompt template path does not exist", &missing("missing.md")));
     assert_eq!(data["options"], "createAgentSession.resourceLoader.skillsOverride is not supported in pi-rust");
@@ -246,7 +247,7 @@ async fn overrides_keep_their_objects_and_get_missing_errors() {
     let themes = &data["themes"];
     assert_eq!([&themes["newArray"], &themes["same"], &themes["bareInfo"]], [&json!(true); 3]);
     assert_eq!(themes["tag"], "proto");
-    assert_eq!(themes["info"]["path"], json!(h.agent_dir.join("themes/mine.json")));
+    assert_eq!(themes["info"]["path"], json!(h.agent_dir.join("themes").join("mine.json")));
     assert_eq!(data["agentsFiles"], true);
     assert_eq!(data["systemPrompt"], "Custom system prompt");
     assert_eq!(data["noSkills"], json!(["custom"]));
