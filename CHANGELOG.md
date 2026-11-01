@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.10.1] - 2026-10-31
+
+### Added
+
+- **extensions:** support project resource trust checks ([94277bb](https://github.com/yannelli/pi-rust/commit/94277bbcb4bbec2f707f881ffa5534fb79278d02))
+
 ## [0.10.0] - 2026-10-31
 
 ### Breaking Changes
