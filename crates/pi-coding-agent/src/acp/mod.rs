@@ -15,6 +15,7 @@ pub mod errors;
 mod events;
 mod ext_ui;
 pub mod listing;
+pub mod mcp_servers;
 pub mod permissions;
 pub mod runtime;
 mod session;
@@ -39,6 +40,7 @@ pub use backend::{AcpClient, BackendFactory, PiBackend};
 pub use connection::ClientConnection;
 pub use events::{edit_old_texts, find_unique_line_number, format_auto_retry_message, tool_call_locations};
 pub use ext_ui::{extension_ui_tool_call, option_index};
+pub use mcp_servers::ClientMcpServers;
 pub use runtime::{EventEncoder, RuntimeBackend, RuntimeBackendFactory};
 pub use session::{
     AcpSession, AcpSessionParams, SESSION_STATS_TIMEOUT, TurnEnd, TurnReport, TurnResult, to_usage_update,

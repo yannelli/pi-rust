@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use super::{CONNECT_RETRY_DELAYS, Inner, McpServerConnection, ServerState, Status};
 use crate::client::{McpClient, McpClientOptions, RequestOptions};
+use crate::config::McpConfigScope;
 use crate::error::{McpError, OAuthError};
 use crate::transport::SharedTransport;
 use crate::types::{ResourceTemplate, Root, Tool};
@@ -136,7 +137,9 @@ impl Inner {
         client_options.request_timeout = Some(self.handle().timeout());
         client_options.roots = Some(vec![root(&options.cwd)]);
         let client = McpClient::new(client_options);
-        if let Some(log) = options.log.clone() {
+        // Messages from servers an ACP client supplied are not written to the log file.
+        let log = options.log.clone().filter(|_| options.entry.scope != Some(McpConfigScope::Client));
+        if let Some(log) = log {
             let name = options.entry.name.clone();
             client.on_notification("notifications/message", move |params| log.write(&name, params));
         }

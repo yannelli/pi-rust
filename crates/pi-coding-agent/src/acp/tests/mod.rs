@@ -6,6 +6,7 @@ mod agent;
 mod config;
 mod events;
 mod listing;
+mod mcp_servers;
 mod permissions;
 mod session;
 mod translate;
@@ -26,6 +27,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use super::agent::{AcpAgent, AcpAgentOptions};
 use super::auth::TerminalLaunch;
 use super::backend::{AcpClient, BackendFactory, PiBackend};
+use super::mcp_servers::ClientMcpServers;
 use super::session::{AcpSession, AcpSessionParams};
 
 type Hook<T> = Box<dyn Fn(&mut Value, T) -> anyhow::Result<()> + Send + Sync>;
@@ -96,6 +98,7 @@ pub struct FakeConfig {
     pub stats: Read<Value>,
     pub stats_delay: Option<Duration>,
     pub messages: Value,
+    pub messages_error: Option<String>,
     pub commands: Result<Value, String>,
     pub prompt_error: Option<String>,
     pub set_thinking: Hook<String>,
@@ -113,6 +116,7 @@ impl Default for FakeConfig {
             stats: Box::new(|_| Ok(json!({}))),
             stats_delay: None,
             messages: json!({"messages": []}),
+            messages_error: None,
             commands: Ok(json!({"commands": []})),
             prompt_error: None,
             set_thinking: Box::new(|state, level| {
@@ -301,7 +305,11 @@ impl PiBackend for FakeBackend {
     }
 
     async fn get_messages(&self) -> anyhow::Result<Value> {
-        Ok(self.config().messages.clone())
+        let config = self.config();
+        match &config.messages_error {
+            Some(error) => Err(anyhow::anyhow!("{error}")),
+            None => Ok(config.messages.clone()),
+        }
     }
 
     async fn get_commands(&self) -> anyhow::Result<Value> {
@@ -320,9 +328,10 @@ impl PiBackend for FakeBackend {
 
 type Spawn = Box<dyn Fn(&Path, Option<&Path>) -> Result<Arc<FakeBackend>, Error> + Send + Sync>;
 
-/// Opens scripted backends and records each spawn.
+/// Opens scripted backends and records each spawn with the client MCP servers it got.
 pub struct FakeFactory {
     pub spawns: Mutex<Vec<(PathBuf, Option<PathBuf>)>>,
+    pub mcp_servers: Mutex<Vec<ClientMcpServers>>,
     pub spawn: Mutex<Spawn>,
 }
 
@@ -333,7 +342,7 @@ impl FakeFactory {
     }
 
     pub fn with(spawn: Spawn) -> Arc<Self> {
-        Arc::new(Self { spawns: Mutex::new(Vec::new()), spawn: Mutex::new(spawn) })
+        Arc::new(Self { spawns: Mutex::new(Vec::new()), mcp_servers: Mutex::new(Vec::new()), spawn: Mutex::new(spawn) })
     }
 
     pub fn spawn_count(&self) -> usize {
@@ -343,8 +352,14 @@ impl FakeFactory {
 
 #[async_trait]
 impl BackendFactory for FakeFactory {
-    async fn create(&self, cwd: &Path, session_file: Option<&Path>) -> Result<Arc<dyn PiBackend>, Error> {
+    async fn create(
+        &self,
+        cwd: &Path,
+        session_file: Option<&Path>,
+        mcp_servers: &ClientMcpServers,
+    ) -> Result<Arc<dyn PiBackend>, Error> {
         self.spawns.lock().unwrap().push((cwd.to_path_buf(), session_file.map(Path::to_path_buf)));
+        self.mcp_servers.lock().unwrap().push(mcp_servers.clone());
         let backend = (self.spawn.lock().unwrap())(cwd, session_file)?;
         Ok(backend)
     }

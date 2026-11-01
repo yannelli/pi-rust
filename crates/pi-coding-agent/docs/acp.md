@@ -48,10 +48,20 @@ The Mode selector controls tool approval. It is independent of the Thinking sele
 - If each call needs a review, use Ask.
 - New connections start in Auto. pi does not save Bypass.
 
+## MCP servers from the client
+
+- pi connects the stdio `mcpServers` of `session/new` and `session/load` for that session, next to the servers of the pi `mcp.json` files. Project trust still applies to `.pi/mcp.json` only.
+- `command` must be an absolute path. pi runs it with `args` as separate arguments and without a shell, and uses `command`, `args`, and `env` exactly as sent: no `${VAR}`, `!command`, or `~` expansion.
+- pi does not save these servers or their values. It keeps no server stderr, writes no server messages to `mcp.log`, and names only the server in errors. A server can still return its own values in tool results.
+- pi rejects `http` and `sse` servers, because `mcpCapabilities.http` and `.sse` are false. It also rejects a list with a relative command, a NUL byte, a repeated env name, or two servers whose tool names would be the same. A rejected list starts nothing and leaves the open session as it was.
+- When a client server has the tool names of a server from `mcp.json` or from an extension, the client server is used for the session and `/mcp` shows a notice. This is a decision of pi; the protocol does not require it.
+- A session that pi reopens without `session/load`, for example for a prompt after the client closed it, has no client servers. Send `session/load` with the list again.
+
+Paseo 0.14 adds an HTTP `paseo` server by default. For a custom Pi ACP provider, set `providers.<provider-id>.paseoTools.enabled` to `false` and send only stdio servers. Pi rejects unsupported transports instead of dropping them.
+
 ## Known limits
 
 - Paseo shows the error `cannot preapprove exact MCP tools for unattended execution` before ACP starts. The cause is a provider policy in the host. A change to the pi mode does not remove the error. The Paseo ACP adapter needs support for exact-tool preapproval. Do not use Bypass in place of an exact-tool allowlist.
-- pi does not load the `mcpServers` that the client supplies. Configure servers in the pi `mcp.json` files.
 
 ## Options
 

@@ -12,7 +12,10 @@ use pi_mcp::manager::UpdateConfigFn;
 use pi_mcp::oauth::CallbackServerFactory;
 use pi_mcp::runtime::transport::acp_passthrough_server;
 use pi_mcp::runtime::{McpOAuthCredentialStore, TransportFactory};
-use pi_mcp::{LoadedMcpConfig, MCP_SERVERS_SECTION, McpManager, McpManagerOptions, McpServerRegistry, load_mcp_config};
+use pi_mcp::{
+    LoadedMcpConfig, MCP_SERVERS_SECTION, McpManager, McpManagerOptions, McpServerEntry, McpServerRegistry,
+    add_client_servers, load_mcp_config,
+};
 
 use super::same_tool;
 use crate::agent_session::tools::ToolSource;
@@ -41,6 +44,8 @@ pub struct McpSessionOptions {
     pub update_config: Option<UpdateConfigFn>,
     /// Servers extensions register with `pi.registerMcpServer()`; they connect while registered.
     pub registry: Option<McpServerRegistry>,
+    /// Servers an ACP client supplied for this session (scope `Client`), added after the loaded config.
+    pub client_servers: Vec<McpServerEntry>,
 }
 
 fn mcp_source() -> ToolSource {
@@ -111,16 +116,17 @@ impl AgentSession {
             return;
         }
         let manager = self.create_mcp_manager();
-        let load_config = {
+        let (load_config, client_servers) = {
             let mut builtins = lock(&self.builtins);
             builtins.mcp = Some(manager.clone());
-            builtins.mcp_options.load_config.clone()
+            (builtins.mcp_options.load_config.clone(), builtins.mcp_options.client_servers.clone())
         };
         let cwd = self.cwd().to_path_buf();
-        let loaded = match load_config {
+        let mut loaded = match load_config {
             Some(load) => load(&cwd),
             None => load_mcp_config(&self.services.agent_dir, &cwd, self.settings().is_project_trusted()),
         };
+        add_client_servers(&mut loaded, &client_servers);
         let passthrough = loaded.servers.iter().filter_map(|entry| acp_passthrough_server(entry).ok().flatten());
         pi_ai::providers::antigravity_acp::set_passthrough_mcp_servers(passthrough.collect());
         manager.start(cwd, loaded);

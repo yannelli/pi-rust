@@ -16,6 +16,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use super::backend::{AcpClient, BackendFactory, PiBackend};
 use super::errors::internal_error;
+use super::mcp_servers::ClientMcpServers;
 use super::permissions::{PermissionMode, ToolPermissions};
 use crate::agent_session::{
     AgentSession, AgentSessionEvent, AgentSessionRuntime, DiagnosticLevel, PromptOptions, compaction_result_json, lock,
@@ -349,7 +350,12 @@ pub struct RuntimeBackendFactory {
 }
 
 impl RuntimeBackendFactory {
-    async fn open(&self, cwd: &Path, session_file: Option<&Path>) -> anyhow::Result<AgentSessionRuntime> {
+    async fn open(
+        &self,
+        cwd: &Path,
+        session_file: Option<&Path>,
+        mcp_servers: &ClientMcpServers,
+    ) -> anyhow::Result<AgentSessionRuntime> {
         let override_dir = self.session_dir.as_deref();
         let manager = match session_file {
             Some(file) => SessionManager::open_with(file, override_dir, None)?,
@@ -358,15 +364,24 @@ impl RuntimeBackendFactory {
                 SessionManager::create_with(cwd, Some(&dir), NewSessionOptions::default())?
             }
         };
-        create_app_runtime(self.app.clone(), manager).await
+        let mut app = self.app.clone();
+        app.mcp.client_servers = mcp_servers.entries().to_vec();
+        create_app_runtime(app, manager).await
     }
 }
 
 #[async_trait]
 impl BackendFactory for RuntimeBackendFactory {
-    async fn create(&self, cwd: &Path, session_file: Option<&Path>) -> Result<Arc<dyn PiBackend>, Error> {
-        let runtime =
-            self.open(cwd, session_file).await.map_err(|error| internal_error(json!({}), &format!("{error:#}")))?;
+    async fn create(
+        &self,
+        cwd: &Path,
+        session_file: Option<&Path>,
+        mcp_servers: &ClientMcpServers,
+    ) -> Result<Arc<dyn PiBackend>, Error> {
+        let runtime = self
+            .open(cwd, session_file, mcp_servers)
+            .await
+            .map_err(|error| internal_error(json!({}), &format!("{error:#}")))?;
         let mut errors = Vec::new();
         for diagnostic in runtime.diagnostics() {
             match diagnostic.level {
