@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.10.5] - 2026-11-01
+
+### Fixed
+
+- **js:** recover IPC handle transfers and release failed copies (#169) ([f271ea5](https://github.com/yannelli/pi-rust/commit/f271ea55ac90cd460d5b008375daa6bd0f56a5c1))
+
 ## [0.10.4] - 2026-11-01
 
 ### Fixed
