@@ -99,6 +99,8 @@ pub const DIFFERENCES: &[&str] = &[
      get received descriptors as objects with only close() instead of raw TCP handles; a stray handle ACK or NACK \
      is ignored instead of asserting; resends use a flat wrapper instead of nested net.Native wrappers, and a \
      failed resend releases its copy and queue instead of leaving the handle pending",
+    "child_process (non-Linux Unix): a child spawned on another thread between receiving an IPC socket \
+     and marking it close-on-exec can inherit it; Node's macOS posix_spawn path closes inherited descriptors",
     "dgram: addMembership, dropMembership, and the source-specific variants need a bound socket (Node \
      binds an unbound one to a random port first)",
     "cluster: round-robin hands each connection to the next connected worker in turn rather than to the \
