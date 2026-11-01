@@ -137,8 +137,10 @@ export class SessionManager {
 		return this._write("appendModelChange", provider, modelId);
 	}
 
-	appendUsage() {
-		throw unsupportedError("SessionManager.appendUsage");
+	/** Returns the stored entry, read back from Rust, where upstream returns the entry it appended. */
+	appendUsage(kind, provider, model, usage, note) {
+		const given = usage !== undefined;
+		return this.getEntry(this._write("appendUsage", kind, provider, model, orNull(usage), given, note || null));
 	}
 
 	appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromHook, usage) {
