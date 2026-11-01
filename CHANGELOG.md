@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.11.1] - 2026-11-01
+
+### Fixed
+
+- **mcp:** close transports when setup is cancelled ([5f12721](https://github.com/yannelli/pi-rust/commit/5f12721e3bab65d33bfcfa04c522a5336d9a287d))
+
 ## [0.11.0] - 2026-11-01
 
 ### Breaking Changes
