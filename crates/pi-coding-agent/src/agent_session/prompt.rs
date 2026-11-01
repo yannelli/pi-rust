@@ -228,9 +228,7 @@ impl AgentSession {
             };
             self.check_compaction(&last, entry_id.as_deref(), false, &tool_results).await;
         }
-        let servers_section = self.prepare_mcp_for_prompt().await;
-        let mut prompt_options = self.effective_prompt_options();
-        set_servers_section(&mut prompt_options, servers_section);
+        let prompt_options = self.turn_prompt_options().await;
         // Before image normalization, so a model chosen by a handler sets the resize profile.
         let (prompt_options, extra) = self.run_before_agent_start(trigger, prompt_options).await;
         let mut messages = match trigger {
@@ -253,6 +251,15 @@ impl AgentSession {
             messages.insert(0, Message::System(update));
         }
         messages
+    }
+
+    /// The prompt options of the next run before `before_agent_start`: MCP servers with `direct` tools are
+    /// ready, and the options carry the `mcp_servers` section.
+    pub(crate) async fn turn_prompt_options(&self) -> crate::system_prompt::BuildSystemPromptOptions {
+        let servers_section = self.prepare_mcp_for_prompt().await;
+        let mut prompt_options = self.effective_prompt_options();
+        set_servers_section(&mut prompt_options, servers_section);
+        prompt_options
     }
 
     /// `/skill:name args` and `/template args` expansion; on an error the text is sent as is.

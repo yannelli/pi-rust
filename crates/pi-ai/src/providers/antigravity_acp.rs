@@ -2,6 +2,9 @@
 //! user installs and logs in to. pi runs its own tools: the agent calls them over a loopback MCP bridge.
 
 mod bridge;
+mod controls;
+#[cfg(test)]
+mod controls_tests;
 mod install;
 mod process;
 pub(crate) mod prompt;
@@ -17,7 +20,9 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 pub(crate) use self::bridge::{BridgeTool, error_result};
-use self::runtime::{Runtime, rpc, slot};
+use self::controls::{ensure, is_current, slot};
+use self::runtime::{Runtime, rpc};
+use crate::providers::acp;
 use crate::providers::acp::connection::{Connection, Incoming};
 use crate::providers::common::short_hash;
 use crate::registry::{ApiProvider, StreamOptions};
@@ -35,6 +40,7 @@ pub(crate) use self::usage::usage;
 pub(crate) fn installed() -> bool {
     process::locate(&|name| std::env::var(name).ok()).is_some()
 }
+pub use self::controls::{close_session, open_session, session_info, set_session_option};
 pub use self::runtime::{PassthroughMcpServer, set_passthrough_mcp_servers};
 
 pub const API: &str = "antigravity-acp";
@@ -80,8 +86,60 @@ fn bridge_tools(context: &Context) -> Vec<BridgeTool> {
         .collect()
 }
 
-fn effort(model: &Model, options: &StreamOptions) -> Option<String> {
-    let level = clamp_thinking_level(model, options.reasoning.unwrap_or(ThinkingLevel::Off));
+/// What a session is built for: its system prompt and bridge tools; a different fingerprint needs a new session.
+struct Shape {
+    system: Option<String>,
+    tools: Vec<BridgeTool>,
+    fingerprint: String,
+}
+
+/// The shape of a provider request context, the same for a turn and for a session opened before one.
+fn session_shape(context: &Context) -> Shape {
+    let tools = bridge_tools(context);
+    let system = context.system_prompt.clone();
+    let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_str()).collect();
+    let fingerprint = short_hash(&format!("{}\u{0}{}", system.as_deref().unwrap_or_default(), names.join(",")));
+    Shape { system, tools, fingerprint }
+}
+
+fn level(value: &str) -> Option<ThinkingLevel> {
+    match value {
+        "extra_high" | "extra-high" => Some(ThinkingLevel::Xhigh),
+        other => other.parse().ok(),
+    }
+}
+
+/// `model` with the thinking levels of the server's `thought_level` values; other fields stay.
+pub(crate) fn with_levels(mut model: Model, values: &[String]) -> Model {
+    let levels: Vec<(ThinkingLevel, &str)> =
+        values.iter().filter_map(|value| Some((level(value)?, value.as_str()))).collect();
+    model.reasoning = !levels.is_empty();
+    model.thinking_level_map = model.reasoning.then(|| {
+        ThinkingLevel::ALL
+            .into_iter()
+            .map(|level| {
+                let value = levels.iter().find(|(known, _)| *known == level).map(|(_, value)| value.to_string());
+                (level.as_str().to_string(), value)
+            })
+            .collect()
+    });
+    model
+}
+
+/// `model` with the thinking levels that its open session offers now (none without a thinking selector), or
+/// `None` when they are the catalog's or the session reports another model.
+pub fn live_model(model: &Model, info: &acp::SessionInfo) -> Option<Model> {
+    if model.api != API || info.pi_model != model.id {
+        return None;
+    }
+    let thought = info.selectors.iter().find(|selector| selector.category == "thought_level");
+    let values: Vec<String> = thought.into_iter().flat_map(|thought| &thought.choices).map(|c| c.id.clone()).collect();
+    let live = with_levels(model.clone(), &values);
+    (live != *model).then_some(live)
+}
+
+fn effort_for(model: &Model, level: ThinkingLevel) -> Option<String> {
+    let level = clamp_thinking_level(model, level);
     (model.reasoning && level != ThinkingLevel::Off).then(|| provider_thinking_value(model, level)).flatten()
 }
 
@@ -122,35 +180,30 @@ async fn run(
     context: &Context,
     options: &StreamOptions,
 ) -> Result<StopReason, String> {
-    let shared = slot(options.session_id.as_deref().unwrap_or("default"));
-    let mut guard = shared.lock().await;
+    let pi_session = options.session_id.as_deref().unwrap_or("default");
+    let shared = slot(pi_session);
+    let mut state = shared.lock().await;
+    if !is_current(pi_session, &shared) {
+        return Err(controls::closed(pi_session));
+    }
     let messages = &context.messages;
-    let tools = bridge_tools(context);
-    let system = context.system_prompt.as_deref();
-    let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_str()).collect();
-    let fingerprint = short_hash(&format!("{}\u{0}{}", system.unwrap_or_default(), names.join(",")));
-    if let Some(runtime) = guard.as_mut().filter(|runtime| !runtime.parked.is_empty()) {
+    let mut unresolved = false;
+    if let Some(runtime) = state.runtime.as_mut().filter(|runtime| !runtime.parked.is_empty()) {
         match resolve_parked(runtime, messages) {
             true => runtime.seen = messages.len(),
-            false => *guard = None,
+            false => unresolved = true,
         }
     }
-    let stale = guard.as_ref().is_some_and(|runtime| {
-        runtime.prompt.is_none()
-            && (runtime.fingerprint != fingerprint
-                || runtime.seen > messages.len()
-                || runtime.connection.closed_reason().is_some())
-    });
-    if stale {
-        *guard = None;
+    if unresolved {
+        if let Some(old) = state.runtime.take() {
+            old.shutdown().await;
+        }
     }
-    if guard.is_none() {
-        let cwd = std::env::current_dir().map_err(|error| format!("Cannot read the working directory: {error}"))?;
-        *guard = Some(Runtime::start(cwd, system, tools, fingerprint).await?);
-    }
-    let runtime = guard.as_mut().expect("started above");
+    ensure(&mut state, session_shape(context), Some(messages.len())).await?;
+    let runtime = state.runtime.as_mut().expect("ensured above");
     if runtime.prompt.is_none() {
-        runtime.select(&model.id, effort(model, options).as_deref()).await?;
+        runtime.select_confirmed(model, options.reasoning.unwrap_or(ThinkingLevel::Off)).await?;
+        let system = context.system_prompt.as_deref();
         let blocks = match runtime.seen {
             0 => prompt::fresh(messages, system.filter(|_| !runtime.system_in_meta), &runtime.capabilities),
             seen => prompt::delta(messages, seen, &runtime.capabilities),
@@ -166,11 +219,11 @@ async fn run(
     out.start();
     let result = drive(out, runtime, messages.len(), &model.cost, &options.cancel).await;
     if result.is_err() {
-        if let Some(runtime) = guard.as_mut() {
+        if let Some(mut runtime) = state.runtime.take() {
             runtime.connection.notify("session/cancel", json!({"sessionId": runtime.session_id}));
-            resolve_parked(runtime, &[]);
+            resolve_parked(&mut runtime, &[]);
+            runtime.shutdown().await;
         }
-        *guard = None;
     }
     result
 }

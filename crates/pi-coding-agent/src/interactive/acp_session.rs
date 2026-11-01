@@ -3,7 +3,8 @@
 
 use std::time::Duration;
 
-use pi_ai::providers::acp::{self, DEFAULT_MODEL, SessionInfo};
+use pi_ai::providers::acp::{self, DEFAULT_MODEL, Selector, SessionInfo};
+use pi_ai::providers::antigravity_acp;
 use pi_ai::simple_options::{MappedLevel, mapped_thinking_level};
 use pi_ai::{Model, ThinkingLevel};
 
@@ -17,6 +18,11 @@ pub(super) fn is_registered_acp(model: &Model) -> bool {
     model.api == acp::API && acp::agent(&model.provider).is_some()
 }
 
+/// The built-in Google Antigravity agent, which has its own provider API and session.
+pub(super) fn is_antigravity(model: &Model) -> bool {
+    model.api == antigravity_acp::API
+}
+
 /// The registered ACP provider that a typed `provider/model` reference names.
 pub(super) fn referenced_acp_provider(search: &str) -> Option<String> {
     let (provider, _) = search.trim().split_once('/')?;
@@ -24,9 +30,53 @@ pub(super) fn referenced_acp_provider(search: &str) -> Option<String> {
 }
 
 impl InteractiveMode {
-    /// Whether the current model is a registered ACP agent.
+    /// Whether the current model is a registered ACP agent or the built-in Antigravity agent.
     pub(super) fn current_model_is_acp(&self) -> bool {
-        self.session().model().is_some_and(|model| is_registered_acp(&model))
+        self.session().model().is_some_and(|model| is_registered_acp(&model) || is_antigravity(&model))
+    }
+
+    /// Opens (or reuses) the Antigravity session from the request of the next turn, with `model` and `level`
+    /// confirmed by the agent. Shows the error and returns `None` on a failure.
+    pub(super) async fn open_antigravity_session(&self, model: &Model, level: ThinkingLevel) -> Option<SessionInfo> {
+        let session = self.session();
+        let open = async {
+            let context = session.antigravity_context().await;
+            antigravity_acp::open_session(&session.session_id(), &context, model, level).await
+        };
+        match tokio::time::timeout(OPEN_TIMEOUT, open).await {
+            Ok(Ok(info)) => {
+                self.apply_acp_session_info(&info);
+                Some(info)
+            }
+            Ok(Err(error)) => {
+                self.show_error(&error);
+                None
+            }
+            Err(_) => {
+                self.show_error(&format!("Antigravity did not start within {} seconds", OPEN_TIMEOUT.as_secs()));
+                None
+            }
+        }
+    }
+
+    /// Sets `selector` of the open Antigravity session to `value`; the agent confirms it before pi keeps it.
+    pub(super) async fn set_antigravity_option(&self, selector: &Selector, value: &str) -> Option<SessionInfo> {
+        let pi_session = self.session().session_id();
+        let set = antigravity_acp::set_session_option(&pi_session, &selector.id, selector.legacy_mode, value);
+        match tokio::time::timeout(OPEN_TIMEOUT, set).await {
+            Ok(Ok(info)) => {
+                self.apply_acp_session_info(&info);
+                Some(info)
+            }
+            Ok(Err(error)) => {
+                self.show_error(&error);
+                None
+            }
+            Err(_) => {
+                self.show_error(&format!("Antigravity did not set {} in time", selector.name));
+                None
+            }
+        }
     }
 
     /// Opens (or reuses) the agent session of `provider` for this pi session. Shows the error and
@@ -50,7 +100,10 @@ impl InteractiveMode {
     /// and refreshes its thinking levels; `None` for other models or after an error, shown once.
     pub(super) async fn prepare_acp_session(&self) -> Option<SessionInfo> {
         let session = self.session();
-        let model = session.model().filter(is_registered_acp)?;
+        let model = session.model().filter(|model| is_registered_acp(model) || is_antigravity(model))?;
+        if is_antigravity(&model) {
+            return self.open_antigravity_session(&model, session.thinking_level()).await;
+        }
         let mut info = self.open_acp_session(&model.provider).await?;
         if model.id != DEFAULT_MODEL {
             let selector = info.selectors.iter().find(|selector| selector.category == "model");
@@ -90,7 +143,7 @@ impl InteractiveMode {
     /// returns the level the agent then reports. `None` after an error, shown once; nothing is set then.
     pub(super) async fn set_acp_thinking_level(&self, level: ThinkingLevel) -> Option<ThinkingLevel> {
         let info = self.prepare_acp_session().await?;
-        let model = self.session().model().filter(is_registered_acp)?;
+        let model = self.session().model().filter(|model| is_registered_acp(model) || is_antigravity(model))?;
         let Some(selector) = info.selectors.iter().find(|selector| selector.category == "thought_level") else {
             self.show_error(&format!("{} offers no thinking levels", model.provider));
             return None;
@@ -102,21 +155,26 @@ impl InteractiveMode {
                 return None;
             }
         };
-        let pi_session = self.session().session_id();
-        let set = acp::set_session_option(&model.provider, &pi_session, &selector.id, &value);
-        match tokio::time::timeout(OPEN_TIMEOUT, set).await {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => {
-                self.show_error(&error);
-                return None;
+        let info = if is_antigravity(&model) {
+            self.set_antigravity_option(selector, &value).await?
+        } else {
+            let pi_session = self.session().session_id();
+            let set = acp::set_session_option(&model.provider, &pi_session, &selector.id, &value);
+            match tokio::time::timeout(OPEN_TIMEOUT, set).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    self.show_error(&error);
+                    return None;
+                }
+                Err(_) => {
+                    self.show_error(&format!("{} did not set the thinking level in time", model.provider));
+                    return None;
+                }
             }
-            Err(_) => {
-                self.show_error(&format!("{} did not set the thinking level in time", model.provider));
-                return None;
-            }
-        }
-        let info = self.open_acp_session(&model.provider).await?;
-        self.apply_acp_session_info(&info);
+            let info = self.open_acp_session(&model.provider).await?;
+            self.apply_acp_session_info(&info);
+            info
+        };
         let model = self.session().model()?;
         let thought = info.selectors.iter().find(|selector| selector.category == "thought_level");
         let current = thought.and_then(|selector| selector.current.clone()).unwrap_or_default();
