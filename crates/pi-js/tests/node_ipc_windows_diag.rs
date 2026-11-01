@@ -22,10 +22,10 @@ if (process.argv[2] === "transfer") {
 process.send("ready");
 "#;
 
-/// `within` gives "pending" after its bound and clears its timer either way; a "pending" snapshot is not proof that an
-/// event never happens. Each client end is marked with the phase it arrived in: "measure" or "cleanup".
+/// Bounded snapshots mark each end as measure or cleanup. Pending is not proof of absence.
+/// The plain child exits on stdin EOF while the IPC child stays connected.
 const PARENT: &str = r#"
-const { fork } = require("child_process");
+const { fork, spawn } = require("child_process");
 const net = require("net");
 const fs = require("fs");
 const path = require("path");
@@ -44,11 +44,16 @@ const within = (promise, ms) => {
 const meta = {
   platform: process.platform, node: process.versions.node, startedAt: new Date(t0).toISOString(),
   bounds: { readyMs: 10000, ackedMs: 10000, snapshotMs: 2000, exitMs: 20000, endAfterExitMs: 10000, cleanupMs: 5000 },
+  plainBounds: { readyMs: 15000, exitMs: 15000, endAfterPlainExitMs: 10000 },
   note: "beforeDisconnect is a bounded snapshot, not proof of absence",
 };
 let phase = "measure";
 let server, client, child, exit;
 let exitSeen = false;
+let plain, plainExit, plainEnded = false, plainExitSeen = false;
+const plainResult = {};
+const plainScript = 'process.stdin.on("end", () => process.exit(0)); process.stdin.resume(); process.stdout.write("ready");';
+const endPlain = () => plainEnded || ((plainEnded = true), plain.stdin.end());
 try {
   server = net.createServer();
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -76,6 +81,26 @@ try {
   if (socket === "pending") throw new Error("no connection within 10 s");
   mark("accepted");
   if (ACCEPT_FIRST) await start();
+  if (PLAIN) {
+    plain = spawn("node", ["-e", plainScript], { stdio: ["pipe", "pipe", "pipe"] });
+    plainExit = new Promise((resolve) => plain.once("exit", (code, signal) => {
+      plainExitSeen = true;
+      mark(`plain child exit ${code} ${signal} (${phase})`);
+      resolve({ code, signal });
+    }));
+    const plainReady = new Promise((resolve) => {
+      let text = "";
+      plain.stdout.on("data", (chunk) => {
+        text += String(chunk);
+        if (text === "ready") resolve(text);
+      });
+      plain.stdout.once("end", () => resolve(`EOF ${text}`));
+      plain.once("error", (error) => resolve(`error ${error.code}`));
+    });
+    const said = await within(plainReady, 15000);
+    if (said !== "ready") throw new Error(`the plain child gave ${said} within 15 s`);
+    mark("plain child ready");
+  }
   if (TRANSFER) {
     const acked = new Promise((resolve) => child.on("message", (message) => message === "acked" && resolve("acked")));
     child.send("A", socket, (error) => mark(`send callback ${error ? error.code : "ok"}`));
@@ -85,15 +110,35 @@ try {
     socket.destroy();
     mark("parent destroyed the accepted socket");
   }
+  if (PLAIN) {
+    plainResult.beforePlainExit = await within(ended, 2000);
+    endPlain();
+    plainResult.plainExited = await within(plainExit, 15000);
+    if (plainResult.plainExited === "pending") throw new Error("the plain child did not exit within 15 s of stdin EOF");
+    if (plainResult.plainExited.code !== 0 || plainResult.plainExited.signal !== null) {
+      throw new Error(`the plain child exited ${JSON.stringify(plainResult.plainExited)}`);
+    }
+    const { beforePlainExit } = plainResult;
+    plainResult.afterPlainExit = beforePlainExit === "pending" ? await within(ended, 10000) : beforePlainExit;
+    mark(`after the plain exit: ${plainResult.afterPlainExit}, IPC child connected ${child.connected}`);
+  }
   const beforeDisconnect = await within(ended, 2000);
   child.disconnect();
   const exited = await within(exit, 20000);
   const afterExit = beforeDisconnect === "pending" ? await within(ended, 10000) : beforeDisconnect;
-  return { beforeDisconnect, afterExit, exited, meta, events };
+  return { beforeDisconnect, afterExit, exited, ...plainResult, meta, events };
 } catch (error) {
-  return { error: String((error && error.stack) || error), meta, events };
+  return { error: String((error && error.stack) || error), ...plainResult, meta, events };
 } finally {
   phase = "cleanup";
+  if (plain && !plainExitSeen) {
+    endPlain();
+    if ((await within(plainExit, 5000)) === "pending") {
+      plain.kill();
+      mark("cleanup killed the plain child");
+      if ((await within(plainExit, 5000)) === "pending") mark("cleanup: no plain exit within 5 s of the kill");
+    }
+  }
   if (child && child.connected) {
     child.disconnect();
     mark("cleanup disconnected the child");
@@ -108,12 +153,14 @@ try {
 }
 "#;
 
-/// The four orders: the child forked after or before the accept, with or without a transfer of the socket.
-const CASES: [(&str, bool, bool); 4] = [
-    ("accept, fork, destroy", true, false),
-    ("fork, accept, destroy", false, false),
-    ("accept, fork, transfer", true, true),
-    ("fork, accept, transfer", false, true),
+/// The child forked after or before the accept, with or without a transfer of the socket, and with or without a plain
+/// child started after the accept.
+const CASES: [(&str, bool, bool, bool); 5] = [
+    ("accept, fork, destroy", true, false, false),
+    ("fork, accept, destroy", false, false, false),
+    ("accept, fork, transfer", true, true, false),
+    ("fork, accept, transfer", false, true, false),
+    ("fork, accept, plain child, transfer", false, true, true),
 ];
 
 /// Like `common::run_cjs`, but a failed import or call becomes an `error` result, so every case and backend runs.
@@ -132,17 +179,18 @@ async fn run_case(runtime: &pi_js::JsRuntime, root: &std::path::Path, file: &str
 async fn run(runtime: &pi_js::JsRuntime, root: &std::path::Path, backend: &str) -> Vec<(String, Value)> {
     write(root, "diag_child.js", CHILD);
     let mut results = Vec::new();
-    for (index, (name, accept_first, transfer)) in CASES.into_iter().enumerate() {
+    for (index, (name, accept_first, transfer, plain)) in CASES.into_iter().enumerate() {
         let body = PARENT
             .replace("CASE", name)
             .replace("ACCEPT_FIRST", &accept_first.to_string())
-            .replace("TRANSFER", &transfer.to_string());
+            .replace("TRANSFER", &transfer.to_string())
+            .replace("PLAIN", &plain.to_string());
         let file = format!("diag-{backend}-{index}.cjs");
-        let limit = std::time::Duration::from_secs(90);
+        let limit = std::time::Duration::from_secs(if plain { 150 } else { 90 });
         let result = match tokio::time::timeout(limit, run_case(runtime, root, &file, &body)).await {
             Ok(value) => value,
             Err(_) => {
-                json!({ "error": "case exceeded 90 s", "stage": std::fs::read_to_string(root.join("stage")).ok() })
+                json!({ "error": format!("case exceeded {} s", limit.as_secs()), "stage": std::fs::read_to_string(root.join("stage")).ok() })
             }
         };
         println!("ipc-windows-diag {backend} | {name} | {result}");
