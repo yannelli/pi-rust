@@ -2,6 +2,13 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.10.8] - 2026-11-01
+
+### Fixed
+
+- **js:** update Windows directory timestamps with Node precision (#177) ([89c67b8](https://github.com/yannelli/pi-rust/commit/89c67b84cf3160e61bbb64091e0242a29f2f3987))
+- **tui,coding-agent:** handle selection page keys in all scrolling lists (upstream 3bae85274) (#178) ([b7abd73](https://github.com/yannelli/pi-rust/commit/b7abd730a483f2f153d74efac9c179bf3ab0bc0d))
+
 ## [0.10.7] - 2026-11-01
 
 ### Added
