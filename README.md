@@ -231,5 +231,6 @@ These parts come from other MIT-licensed projects. Each release archive includes
 | ACP mode | [pi-acp](https://github.com/svkozak/pi-acp) by Sergii Kozak | [`LICENSE-pi-acp`](crates/pi-coding-agent/src/acp/LICENSE-pi-acp) |
 | Some JavaScript modules of the extension runtime | [Node.js](https://github.com/nodejs/node) | [`LICENSE-node`](crates/pi-js/src/js/LICENSE-node) |
 | MCP OAuth code, ported from upstream pi | [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) | [`LICENSE-mcp-typescript-sdk`](crates/pi-mcp/src/oauth/LICENSE-mcp-typescript-sdk) |
+| Warning colors of `loadProjectContextFiles` in the extension SDK | [chalk](https://github.com/chalk/chalk) 6.0.0 by Sindre Sorhus | [`LICENSE-chalk`](crates/pi-coding-agent/src/extensions/js/LICENSE-chalk) |
 
 The release archives also include `THIRD-PARTY-LICENSES.md` with the licenses of the third-party Rust crates in the binaries. The Release workflow writes it with [cargo-about](https://github.com/EmbarkStudios/cargo-about) from `about.toml` and `about.hbs`.
