@@ -10,7 +10,6 @@ export const createExtensionRuntime = unsupportedFunction("createExtensionRuntim
 export const createMcpExtension = unsupportedFunction("createMcpExtension");
 export const createToolSearchExtension = unsupportedFunction("createToolSearchExtension");
 export const discoverAndLoadExtensions = unsupportedFunction("discoverAndLoadExtensions");
-export const loadProjectContextFiles = unsupportedFunction("loadProjectContextFiles");
 export const main = unsupportedFunction("main");
 export const parseArgs = unsupportedFunction("parseArgs");
 export const readStoredCredential = unsupportedFunction("readStoredCredential");
