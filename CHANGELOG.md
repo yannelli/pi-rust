@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.10.9] - 2026-11-01
+
+### Fixed
+
+- **js:** mark received IPC sockets close-on-exec ([a2a6e97](https://github.com/yannelli/pi-rust/commit/a2a6e97b15f0bb1be2adeb21a1fa330baf2a9ddf))
+
 ## [0.10.8] - 2026-11-01
 
 ### Fixed
