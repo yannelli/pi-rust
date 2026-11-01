@@ -56,7 +56,7 @@ fn descriptor(entry: &Entry) -> Result<Option<Owned>, JsError> {
         }
         #[cfg(unix)]
         Entry::Socket { socket } => {
-            let socket = super::net::socket_of(*socket)
+            let socket = super::net::socket_of(*socket, true)
                 .ok_or_else(|| JsError::unsupported("child_process stdio pipe sockets"))?;
             Ok(Some(socket.map_err(|error| JsError::from_io(&error, "spawn", None))?.into()))
         }

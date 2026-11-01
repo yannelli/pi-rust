@@ -5,6 +5,7 @@
 
 use std::sync::Mutex;
 
+use rquickjs::function::Opt;
 use rquickjs::{Ctx, Function, Object, Value};
 use serde_json::json;
 
@@ -236,12 +237,22 @@ mod windows {
     }
 }
 
-fn export(ctx: Ctx<'_>, id: u64) -> rquickjs::Result<u64> {
-    let socket = super::net::socket_of(id).ok_or_else(|| {
+/// A copy of a stream or listener; `mark` (default true) marks the stream shared once the copy succeeds. IPC passes
+/// false and calls `markExported` after every copy it needs is ready.
+fn export(ctx: Ctx<'_>, id: u64, mark: Opt<bool>) -> rquickjs::Result<u64> {
+    let socket = super::net::socket_of(id, mark.0.unwrap_or(true)).ok_or_else(|| {
         throw(&ctx, &JsError::type_error("This handle type cannot be sent").with_code("ERR_INVALID_HANDLE_TYPE"))
     })?;
     let socket = socket.map_err(|error| throw(&ctx, &JsError::from_io(&error, "dup", None)))?;
     Ok(state().insert_resource(Box::new(SocketHandle(socket))))
+}
+
+/// Another copy of a held socket, so a handle the peer did not receive can be sent again.
+fn clone_handle(ctx: Ctx<'_>, id: u64) -> rquickjs::Result<u64> {
+    let copy = state().with_resource(id, |handle: &mut SocketHandle| handle.0.try_clone());
+    let copy = copy.map_err(|error| throw(&ctx, &error))?;
+    let copy = copy.map_err(|error| throw(&ctx, &JsError::from_io(&error, "dup", None)))?;
+    Ok(state().insert_resource(Box::new(SocketHandle(copy))))
 }
 
 fn adopt_socket<'js>(ctx: Ctx<'js>, handle: u64) -> rquickjs::Result<Value<'js>> {
@@ -280,6 +291,8 @@ fn import(ctx: Ctx<'_>, text: String) -> rquickjs::Result<u64> {
 
 pub(super) fn natives<'js>(object: &Object<'js>) -> rquickjs::Result<()> {
     set_fn(object, "exportHandle", export)?;
+    set_fn(object, "cloneHandle", clone_handle)?;
+    set_fn(object, "markExported", super::net::mark_exported)?;
     set_fn(object, "closeHandle", |id: u64| drop(state().resources.borrow_mut().remove(&id)))?;
     set_fn(object, "adoptSocket", adopt_socket)?;
     set_fn(object, "adoptServer", adopt_server)?;

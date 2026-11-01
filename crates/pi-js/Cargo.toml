@@ -116,3 +116,11 @@ harness = false
 [[test]]
 name = "node_cluster"
 harness = false
+
+[[test]]
+name = "node_ipc_missing_handle"
+harness = false
+
+[[test]]
+name = "node_ipc_recovery"
+harness = false

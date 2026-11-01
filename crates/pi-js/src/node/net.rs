@@ -251,17 +251,33 @@ fn deliver(ctx: &Ctx<'_>, id: u64, event: Event) {
     }
 }
 
-/// A copy of the socket behind a TCP stream or listener, for handle passing.
-pub(super) fn socket_of(id: u64) -> Option<std::io::Result<socket2::Socket>> {
+/// A copy of the socket behind a TCP stream or listener, for handle passing. With `mark_exported`, a stream whose
+/// copy succeeded is marked shared, so its close leaves the FIN and unread bytes to the other owner.
+pub(super) fn socket_of(id: u64, mark_exported: bool) -> Option<std::io::Result<socket2::Socket>> {
     let result = state().with_resource(id, |entry: &mut Entry| match &mut entry.kind {
         Kind::Stream { socket: Some(socket), tcp: true, exported, .. } => {
-            *exported = true;
-            Some(socket.try_clone())
+            let copy = socket.try_clone();
+            if mark_exported && copy.is_ok() {
+                *exported = true;
+            }
+            Some(copy)
         }
         Kind::Listener { socket: Some(socket), .. } => Some(socket.try_clone()),
         _ => None,
     });
     result.ok().flatten()
+}
+
+/// Mark a TCP stream as shared with another process, as `socket_of` does; false for anything else.
+pub(super) fn mark_exported(id: u64) -> bool {
+    let result = state().with_resource(id, |entry: &mut Entry| match &mut entry.kind {
+        Kind::Stream { socket: Some(_), tcp: true, exported, .. } => {
+            *exported = true;
+            true
+        }
+        _ => false,
+    });
+    result.unwrap_or(false)
 }
 
 /// Register an open connection that no listener produced; reading starts when JavaScript attaches.

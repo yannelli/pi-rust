@@ -90,6 +90,7 @@ function decodeAdvanced(value, refs = []) {
 
 // A forked child loads this module while `process` is still being built, so check the platform on use.
 const windows = () => process.platform === "win32";
+const MAX_HANDLE_RETRANSMISSIONS = 3;
 
 function handleType(handle) {
   const net = require("net");
@@ -109,20 +110,50 @@ function adoptHandle(type, id) {
   return undefined;
 }
 
-const channelClosed = () => errors.codeError(Error, "ERR_IPC_CHANNEL_CLOSED", "Channel closed");
+// What `internalMessage` listeners get with a NODE_HANDLE message: a received descriptor that only
+// supports `close()`, where Node passes its raw TCP handle.
+class ReceivedHandle {
+  #id;
+  constructor(id) {
+    this.#id = id;
+  }
+  static take(handle) {
+    const id = handle instanceof ReceivedHandle ? handle.#id : undefined;
+    if (id !== undefined) handle.#id = undefined;
+    return id;
+  }
+  close() {
+    const id = ReceivedHandle.take(this);
+    if (id !== undefined) native.net.closeHandle(id);
+  }
+}
 
-// Give `target` (a ChildProcess or process) Node's send, disconnect, connected, and channel.
+const channelClosed = () => errors.codeError(Error, "ERR_IPC_CHANNEL_CLOSED", "Channel closed");
+const isInternal = (message) =>
+  message !== null && typeof message === "object" && typeof message.cmd === "string" && message.cmd.startsWith("NODE_");
+const isProtocolReply = (message) =>
+  message !== null && typeof message === "object" && (message.cmd === "NODE_HANDLE_ACK" || message.cmd === "NODE_HANDLE_NACK");
+
+// Give `target` (a ChildProcess or process) Node's send, disconnect, connected, and channel. As in Node, a sent
+// handle holds back every later message until the peer acknowledges it, and a socket is resent on a NACK.
 function setupChannel(target, open, serialization = "json", peerPid = () => 0) {
   const advanced = serialization === "advanced";
+  const encode = (message) => (advanced ? encodeAdvanced(message) : message);
   const decoder = new TextDecoder();
   let pending = "";
   let refs = 0;
   let explicitRef = null;
   let writes = Promise.resolve();
+  let channelOpen = true;
+  let inFlight = null;
   const received = [];
-  // Keep a sender copy until the peer acknowledges adoption, as Node does on every platform.
-  // Closing the last sender copy while the socket is in transit can end the receiver's reads.
-  const kept = [];
+  target._handleQueue = null;
+  target._pendingMessage = null;
+  const deliver = (message, handle) => {
+    if (isInternal(message)) target.emit("internalMessage", message, handle);
+    else if (held) held.push([message, handle]);
+    else target.emit("message", message, handle);
+  };
   const id = open((kind, value, handles) => {
     if (kind === "connect") target._channelConnected = true;
     else if (kind === "data") {
@@ -133,25 +164,18 @@ function setupChannel(target, open, serialization = "json", peerPid = () => 0) {
         const line = pending.slice(0, newline);
         pending = pending.slice(newline + 1);
         if (!line) continue;
-        let parsed = JSON.parse(line);
-        let handle;
+        const parsed = JSON.parse(line);
         if (parsed !== null && typeof parsed === "object" && parsed.cmd === "NODE_HANDLE" && typeof parsed.type === "string") {
-          const handleId = windows() ? native.net.importHandle(parsed.wsa) : received.shift();
-          handle = handleId === undefined ? undefined : adoptHandle(parsed.type, handleId);
-          parsed = parsed.msg;
-          if (target.connected) target.send({ cmd: "NODE_HANDLE_ACK" });
+          const handleId = windows()
+            ? parsed.wsa === undefined ? undefined : native.net.importHandle(parsed.wsa)
+            : received.shift();
+          target.emit("internalMessage", parsed, handleId === undefined ? undefined : new ReceivedHandle(handleId));
+        } else {
+          deliver(advanced ? decodeAdvanced(parsed) : parsed, undefined);
         }
-        const message = advanced ? decodeAdvanced(parsed) : parsed;
-        const internalMessage = message !== null && typeof message === "object" && typeof message.cmd === "string" && message.cmd.startsWith("NODE_");
-        if (internalMessage && message.cmd === "NODE_HANDLE_ACK") {
-          if (kept.length) native.net.closeHandle(kept.shift());
-          continue;
-        }
-        if (!internalMessage && held) held.push([message, handle]);
-        else target.emit(internalMessage ? "internalMessage" : "message", message, handle);
       }
     } else if (kind === "end" || kind === "error") {
-      if (target.connected) finishDisconnect();
+      if (channelOpen) finishDisconnect();
       else nativePipe.close(id);
     }
   });
@@ -179,8 +203,104 @@ function setupChannel(target, open, serialization = "json", peerPid = () => 0) {
   });
   refs = target.listenerCount("message") + target.listenerCount("disconnect");
   updateRef();
+
+  // Protocol replies must not turn a peer's disconnect into a user error.
+  const reply = (cmd) => channelOpen && target._send({ cmd }, null, { swallowErrors: true });
+  // The built-in protocol listener, removable like Node's: ACK/NACK settle the pending handle, NODE_HANDLE adopts.
+  target.on("internalMessage", (message, handle) => {
+    if (isProtocolReply(message)) return settleHandle(message.cmd === "NODE_HANDLE_ACK");
+    if (message.cmd !== "NODE_HANDLE") return;
+    const handleId = ReceivedHandle.take(handle);
+    if (handleId === undefined) return reply("NODE_HANDLE_NACK");
+    reply("NODE_HANDLE_ACK");
+    const adopted = adoptHandle(message.type, handleId);
+    deliver(advanced ? decodeAdvanced(message.msg) : message.msg, adopted);
+  });
+
+  function closePending() {
+    native.net.closeHandle(target._pendingMessage.copy);
+    target._pendingMessage = null;
+  }
+  function releaseQueue() {
+    const queue = target._handleQueue;
+    if (!queue) return;
+    target._handleQueue = null;
+    inFlight = null;
+    if (target._pendingMessage) resend(target._pendingMessage);
+    for (const entry of queue) {
+      // As in Node, a queued handle that was closed meanwhile goes out as its message alone.
+      const handle = entry.handle && entry.handle._handle === null ? null : entry.handle;
+      target._send(entry.message, handle, entry.options, entry.callback);
+    }
+    if (!target.connected && channelOpen && !target._handleQueue) writes.then(finishDisconnect);
+  }
+  function settleHandle(ack) {
+    const sent = target._pendingMessage;
+    if (sent && ack) closePending();
+    else if (sent && sent.retransmissions++ === MAX_HANDLE_RETRANSMISSIONS) {
+      closePending();
+      process.emitWarning("Handle did not reach the receiving process correctly", "SentHandleNotReceivedWarning");
+    }
+    releaseQueue();
+  }
+  // A failed write drops the copy at once, as Node closes the handle, and lets held-back messages go.
+  function failHandle(entry) {
+    if (inFlight !== entry) return;
+    if (target._pendingMessage === entry) closePending();
+    releaseQueue();
+  }
+  // Errors of a send go to its callback, or to 'error' unless swallowed, on a later tick as in Node.
+  function fail(error, options, callback) {
+    if (options.swallowErrors) return;
+    if (typeof callback === "function") process.nextTick(callback, error);
+    else process.nextTick(() => target.emit("error", error));
+  }
+  function queueWrite(write, options, callback, onFailure) {
+    writes = writes.then(write).then(
+      () => typeof callback === "function" && process.nextTick(callback, null),
+      (error) => {
+        if (onFailure) onFailure();
+        fail(error, options, callback);
+      },
+    );
+  }
+  // The whole wrapper is serialized before any socket copy exists, so a message that cannot be serialized (or whose
+  // toJSON drops it) leaves nothing to release; "wsa" is appended without serializing the message again.
+  const handleJson = (type, message) => JSON.stringify({ cmd: "NODE_HANDLE", type, msg: encode(message) });
+  function writeHandle(entry, json, sent, wsa) {
+    const line = wsa === undefined ? json : `${json.slice(0, -1)},"wsa":${JSON.stringify(wsa)}}`;
+    const bytes = internal.bytesToLatin1(Buffer.from(line + "\n"));
+    target._handleQueue = [];
+    inFlight = entry;
+    const write = windows() ? () => nativePipe.write(id, bytes) : () => nativePipe.writeHandle(id, bytes, sent);
+    // A write that never ran left `sent` registered; closing an id already taken or duplicated does nothing.
+    queueWrite(write, entry.options, entry.callback, () => {
+      native.net.closeHandle(sent);
+      failHandle(entry);
+    });
+  }
+  // As in Node, a resend serializes the message again. A failure to prepare it releases every copy and reports the
+  // error; releaseQueue then sends the held-back messages.
+  function resend(entry) {
+    let json, sent, wsa;
+    try {
+      json = handleJson(entry.type, entry.message);
+      sent = native.net.cloneHandle(entry.copy);
+      if (windows()) wsa = native.net.duplicateHandle(sent, peerPid());
+    } catch (error) {
+      if (sent !== undefined) native.net.closeHandle(sent);
+      closePending();
+      fail(error, entry.options, entry.callback);
+      return;
+    }
+    writeHandle(entry, json, sent, wsa);
+  }
   function finishDisconnect() {
-    kept.splice(0).forEach((keep) => native.net.closeHandle(keep));
+    if (!channelOpen) return;
+    channelOpen = false;
+    if (target._pendingMessage) closePending();
+    target._handleQueue = null;
+    inFlight = null;
     target.connected = false;
     target.channel = undefined;
     nativePipe.close(id);
@@ -199,7 +319,7 @@ function setupChannel(target, open, serialization = "json", peerPid = () => 0) {
     hasRef: () => explicitRef ?? refs > 0,
   };
   target._closeChannel = () => {
-    if (target.connected) finishDisconnect();
+    if (channelOpen) finishDisconnect();
   };
   target.send = function send(message, handle, options, callback) {
     if (typeof handle === "function") [callback, handle, options] = [handle, undefined, undefined];
@@ -211,29 +331,44 @@ function setupChannel(target, open, serialization = "json", peerPid = () => 0) {
       else process.nextTick(() => target.emit("error", error));
       return false;
     }
+    return target._send(message, handle, { swallowErrors: false, ...options }, callback);
+  };
+  target._send = function _send(message, handle, options, callback) {
     if (message === undefined) throw errors.missingArgs("message");
     if (!["string", "object", "number", "boolean"].includes(typeof message)) {
       throw errors.invalidArgType("message", "one of type string, object, number, or boolean", message);
     }
-    let payload = advanced ? encodeAdvanced(message) : message;
-    let handleId;
+    if (typeof options === "boolean") options = { swallowErrors: options };
+    options = { swallowErrors: false, ...options };
     const type = handle === undefined || handle === null ? null : handleType(handle);
-    if (type) {
-      handleId = native.net.exportHandle(handle._handle);
-      payload = { cmd: "NODE_HANDLE", type, msg: payload };
-      kept.push(native.net.exportHandle(handle._handle));
-      if (windows()) {
-        payload.wsa = native.net.duplicateHandle(handleId, peerPid());
-      }
-      if (type === "net.Socket" && !(options && options.keepOpen)) handle.destroy();
+    if (target._handleQueue && (type || !isProtocolReply(message))) {
+      target._handleQueue.push({ message, handle: type ? handle : null, options, callback });
+      return target._handleQueue.length === 1;
     }
-    const line = JSON.stringify(payload) + "\n";
-    const bytes = internal.bytesToLatin1(Buffer.from(line));
-    const write = type && !windows() ? () => nativePipe.writeHandle(id, bytes, handleId) : () => nativePipe.write(id, bytes);
-    writes = writes.then(write).then(
-      () => typeof callback === "function" && process.nextTick(callback, null),
-      (error) => (typeof callback === "function" ? process.nextTick(callback, error) : target.emit("error", error)),
-    );
+    if (!type) {
+      const bytes = internal.bytesToLatin1(Buffer.from(JSON.stringify(encode(message)) + "\n"));
+      queueWrite(() => nativePipe.write(id, bytes), options, callback);
+      return true;
+    }
+    const json = handleJson(type, message);
+    const keep = type === "net.Socket" && !options.keepOpen;
+    const entry = { message, type, options, callback, retransmissions: 0, copy: undefined };
+    let sent, wsa;
+    try {
+      sent = native.net.exportHandle(handle._handle, false);
+      if (keep) entry.copy = native.net.exportHandle(handle._handle, false);
+      if (windows()) wsa = native.net.duplicateHandle(sent, peerPid());
+    } catch (error) {
+      for (const copy of [sent, entry.copy]) if (copy !== undefined) native.net.closeHandle(copy);
+      throw error;
+    }
+    // Only now is the socket shared: its close must leave the FIN and unread bytes to the peer.
+    native.net.markExported(handle._handle);
+    if (keep) {
+      handle.destroy();
+      target._pendingMessage = entry;
+    }
+    writeHandle(entry, json, sent, wsa);
     return true;
   };
   target.disconnect = function disconnect() {
@@ -242,10 +377,7 @@ function setupChannel(target, open, serialization = "json", peerPid = () => 0) {
       return;
     }
     target.connected = false;
-    writes.then(() => {
-      target.connected = true;
-      finishDisconnect();
-    });
+    if (!target._handleQueue) writes.then(finishDisconnect);
   };
   return id;
 }
