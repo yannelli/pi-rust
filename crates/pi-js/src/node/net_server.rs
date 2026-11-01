@@ -168,7 +168,7 @@ pub(super) fn listen<'js>(
     }
     let listener = bound.map_err(|error| throw(&ctx, &net_error(&error, "listen", Some(hosts[0]), Some(port))))?;
     let address = address_json(listener.local_addr().ok());
-    let socket = socket2::SockRef::from(&listener).try_clone().ok();
+    let socket = super::net::private_copy(&socket2::SockRef::from(&listener)).ok();
     let id = insert(&ctx, Kind::Listener { path: None, socket }, Some(callback));
     let task = state.shared.tokio.spawn(accept_tcp(sender, id, listener, tls));
     let _ = state.with_resource(id, |entry: &mut Entry| entry.task = Some(task.abort_handle()));
@@ -200,7 +200,7 @@ pub(super) fn adopt<'js>(
 ) -> rquickjs::Result<Value<'js>> {
     let state = state();
     let _guard = state.shared.tokio.enter();
-    let copy = socket.try_clone().ok();
+    let copy = super::net::private_copy(&socket).ok();
     let listener = socket
         .set_nonblocking(true)
         .and_then(|()| tokio::net::TcpListener::from_std(socket.into()))

@@ -129,18 +129,24 @@ pub(super) fn tcp_conn(stream: tokio::net::TcpStream) -> std::io::Result<Conn> {
     // std's `accept` leaves the socket inheritable, so a child spawned later would hold the connection open.
     #[cfg(windows)]
     socket2::SockRef::from(&stream).set_no_inherit(true)?;
-    let tcp = socket2::SockRef::from(&stream).try_clone()?;
-    #[cfg(windows)]
-    tcp.set_no_inherit(true)?;
+    let tcp = private_copy(&socket2::SockRef::from(&stream))?;
     let info =
         json!({ "local": address_json(stream.local_addr().ok()), "remote": address_json(stream.peer_addr().ok()) });
     Ok(Conn { io: Box::new(stream), socket: Some(tcp), tcp: true, info, exporter: None })
 }
 
+/// A copy of `socket` that child processes do not inherit. In Windows CI a WinSock duplicate stayed inheritable.
+pub(super) fn private_copy(socket: &socket2::Socket) -> std::io::Result<socket2::Socket> {
+    let copy = socket.try_clone()?;
+    #[cfg(windows)]
+    copy.set_no_inherit(true)?;
+    Ok(copy)
+}
+
 impl Conn {
     /// Another copy of the socket, which keeps the connection open after `io` is dropped.
     pub(super) fn socket_copy(&self) -> Option<socket2::Socket> {
-        self.socket.as_ref().and_then(|socket| socket.try_clone().ok())
+        self.socket.as_ref().and_then(|socket| private_copy(socket).ok())
     }
 }
 
@@ -261,13 +267,13 @@ fn deliver(ctx: &Ctx<'_>, id: u64, event: Event) {
 pub(super) fn socket_of(id: u64, mark_exported: bool) -> Option<std::io::Result<socket2::Socket>> {
     let result = state().with_resource(id, |entry: &mut Entry| match &mut entry.kind {
         Kind::Stream { socket: Some(socket), tcp: true, exported, .. } => {
-            let copy = socket.try_clone();
+            let copy = private_copy(socket);
             if mark_exported && copy.is_ok() {
                 *exported = true;
             }
             Some(copy)
         }
-        Kind::Listener { socket: Some(socket), .. } => Some(socket.try_clone()),
+        Kind::Listener { socket: Some(socket), .. } => Some(private_copy(socket)),
         _ => None,
     });
     result.ok().flatten()

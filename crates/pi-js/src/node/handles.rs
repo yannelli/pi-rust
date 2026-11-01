@@ -218,7 +218,7 @@ mod windows {
             return Err(io::ErrorKind::InvalidData.into());
         }
         // SAFETY: the bytes came from WSADuplicateSocketW in the peer; WSAStartup may run twice.
-        unsafe {
+        let socket = unsafe {
             let mut data: WSADATA = std::mem::zeroed();
             WSAStartup(0x202, &mut data);
             let mut info: WSAPROTOCOL_INFOW = std::mem::zeroed();
@@ -232,8 +232,11 @@ mod windows {
             if socket == INVALID_SOCKET {
                 return Err(io::Error::from_raw_os_error(WSAGetLastError()));
             }
-            Ok(socket2::Socket::from_raw_socket(socket as _))
-        }
+            socket2::Socket::from_raw_socket(socket as _)
+        };
+        // The flag passed to WSASocketW did not keep a WinSock duplicate private in Windows CI.
+        socket.set_no_inherit(true)?;
+        Ok(socket)
     }
 }
 
@@ -249,7 +252,7 @@ fn export(ctx: Ctx<'_>, id: u64, mark: Opt<bool>) -> rquickjs::Result<u64> {
 
 /// Another copy of a held socket, so a handle the peer did not receive can be sent again.
 fn clone_handle(ctx: Ctx<'_>, id: u64) -> rquickjs::Result<u64> {
-    let copy = state().with_resource(id, |handle: &mut SocketHandle| handle.0.try_clone());
+    let copy = state().with_resource(id, |handle: &mut SocketHandle| super::net::private_copy(&handle.0));
     let copy = copy.map_err(|error| throw(&ctx, &error))?;
     let copy = copy.map_err(|error| throw(&ctx, &JsError::from_io(&error, "dup", None)))?;
     Ok(state().insert_resource(Box::new(SocketHandle(copy))))
