@@ -52,7 +52,7 @@ fn child_writes_queue_behind_caller_writes_and_wake_the_queue() {
     let child = shared.manager.clone();
     std::thread::spawn(move || child.set_default_model_and_provider("openai", "gpt-child")).join().unwrap();
     let queued = shared.manager.sdk_claim();
-    assert!(queued > 0);
+    assert_eq!(queued, 1, "model and provider share one saved snapshot");
     assert_eq!(shared.wakes.load(Ordering::SeqCst), queued, "each child snapshot wakes the queue");
     assert_eq!(std::fs::read_to_string(&shared.global).unwrap(), before, "nothing is written before the queue runs");
     assert_eq!(shared.manager.theme().as_deref(), Some("light"), "the child reads the caller's change at once");
