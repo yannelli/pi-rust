@@ -92,6 +92,8 @@ pub struct ExtensionRunner {
     pub(crate) targets: Mutex<HashMap<u64, Weak<AgentSession>>>,
     pub(crate) sdk: super::ops_sdk::SdkState,
     pub(crate) resources: Mutex<super::ops_sdk_resources::ResourcesState>,
+    /// Set for the child host of an SDK `DefaultResourceLoader`.
+    pub(crate) parent: OnceLock<super::ops_sdk_resources::ParentLink>,
     bindings: RwLock<ExtensionBindings>,
     ids: AtomicU64,
     pub(crate) signals: Mutex<HashMap<u64, CancellationToken>>,
@@ -198,6 +200,7 @@ impl ExtensionRunner {
                 targets: Mutex::default(),
                 sdk: Default::default(),
                 resources: Mutex::default(),
+                parent: OnceLock::new(),
                 bindings: RwLock::default(),
                 ids: AtomicU64::new(1),
                 signals: Mutex::default(),
@@ -425,6 +428,7 @@ impl ExtensionRunner {
     /// Stop the JavaScript runtime and restore the APIs it replaced. Pending calls fail.
     pub fn shutdown(&self) {
         self.sdk.shutdown();
+        super::ops_sdk_resources::shutdown(self);
         self.restore_apis();
         for (_, watcher) in lock(&self.watchers).drain() {
             watcher.cancel();

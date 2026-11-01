@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 
 use super::super::ops::error;
 use super::super::ops_host::theme_snapshot;
-use super::{Entry, typed};
+use super::typed;
 use crate::resources::loader::resolve_prompt_input;
 use crate::resources::paths::{file_kind, sorted_entries};
 use crate::resources::{
@@ -122,9 +122,7 @@ fn load_themes(loader: &ResourceLoader, mode: TerminalColorMode) -> (Vec<Theme>,
     (kept, diagnostics)
 }
 
-pub(super) fn load(entry: &mut Entry, kind: &str) -> Result<Value, JsError> {
-    let settings = entry.settings()?;
-    let loader = &mut entry.loader;
+pub(super) fn load(loader: &mut ResourceLoader, settings: &SettingsManager, kind: &str) -> Result<Value, JsError> {
     Ok(match kind {
         "skills" => {
             let (skills, diagnostics) = loader.base_skills();
@@ -135,7 +133,7 @@ pub(super) fn load(entry: &mut Entry, kind: &str) -> Result<Value, JsError> {
             json!({"prompts": prompts, "diagnostics": diagnostics})
         }
         "themes" => {
-            let (themes, diagnostics) = load_themes(loader, color_mode(&settings));
+            let (themes, diagnostics) = load_themes(loader, color_mode(settings));
             json!({"themes": themes.iter().map(theme_snapshot).collect::<Vec<_>>(), "diagnostics": diagnostics})
         }
         "agentsFiles" => {
@@ -159,13 +157,12 @@ pub(super) fn load(entry: &mut Entry, kind: &str) -> Result<Value, JsError> {
 }
 
 pub(super) fn set(
-    entry: &mut Entry,
+    loader: &mut ResourceLoader,
     kind: &str,
     mut value: Value,
     report: bool,
     inputs: Value,
 ) -> Result<Value, JsError> {
-    let loader = &mut entry.loader;
     let member = format!("DefaultResourceLoader.{kind}Override");
     let inputs = || typed::<Vec<String>>(inputs, &member);
     let diagnostics = |value: &mut Value| typed::<Vec<ResourceDiagnostic>>(value["diagnostics"].take(), &member);

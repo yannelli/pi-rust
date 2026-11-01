@@ -120,6 +120,7 @@ export function createRuntime(onChange) {
 	const unsubscribers = new Set();
 	const runtime = {
 		bound: false,
+		target: 0,
 		modelsBound: false,
 		staleMessage: undefined,
 		flagValues: new Map(),
@@ -219,7 +220,7 @@ export function createRuntime(onChange) {
 			runtime.action = (op, ...args) => {
 				runtime.assertActive();
 				runtime.markChanged(true);
-				return call(op, 0, ...args);
+				return call(op, runtime.target, ...args);
 			};
 		},
 	};
@@ -421,7 +422,7 @@ export function createExtensionAPI(extension, runtime, cwd, eventBus) {
 			assertActive();
 			if (!runtime.bound) return Promise.reject(new Error("Extension runtime not initialized"));
 			runtime.markChanged(true);
-			return callAsync("action.setModel", 0, model);
+			return callAsync("action.setModel", runtime.target, model);
 		},
 		getThinkingLevel() {
 			assertActive();

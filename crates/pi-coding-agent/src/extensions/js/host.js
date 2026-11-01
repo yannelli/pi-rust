@@ -6,6 +6,8 @@ import { call, callAsync, errorMessage, optional, registerCallback, releaseCallb
 import { nativeFactory } from "./native.js";
 import { Runner } from "./runner.js";
 import { apiProviders } from "./ai.js";
+import { parentOps, setParentRuntime } from "./sdk_extensions.js";
+import { childOps } from "./sdk_mirror.js";
 import { routeStderr } from "./stderr_route.js";
 import { sessionStream } from "./stream.js";
 import { currentTheme } from "./theme.js";
@@ -58,6 +60,7 @@ export function createHost(config) {
 	});
 	const runner = new Runner(runtime, sessionStream);
 	const eventBus = createEventBus();
+	setParentRuntime(runtime);
 	let loading;
 	routeStderr(() => (loading ? [...runner.extensions, loading] : runner.extensions));
 
@@ -217,7 +220,8 @@ export function createHost(config) {
 			const tool = findTool(name);
 			if (!tool) throw new Error(`Tool ${name} is not registered`);
 			const abort = signalFor(signal);
-			const onUpdate = updateKey ? (partial) => call("tool.update", updateKey, normalizeToolResult(partial)) : undefined;
+			const update = (partial) => call("tool.update", updateKey, normalizeToolResult(partial));
+			const onUpdate = updateKey ? Object.assign(update, { updateKey }) : undefined;
 			const ctx = runner.createToolContext(toolCallId, abort);
 			return normalizeToolResult(await tool.execute(toolCallId, params, abort, onUpdate, ctx));
 		},
@@ -265,6 +269,8 @@ export function createHost(config) {
 		abortSignal: bridge.abortSignal,
 		releaseSignal: bridge.releaseSignal,
 		invokeCallback: (key, ...args) => bridge.invokeCallback(key, ...args),
+		/** SDK resource loader calls: a child host's mirrors and bus, or this host's factories. */
+		sdk: (name, ...args) => (childOps[name] ? childOps[name]({ runner, runtime, eventBus }, ...args) : parentOps[name](...args)),
 		releaseCallback: (key) => releaseCallback(key),
 		async providerStream(name, model, context, options, sink) {
 			const provider = runtime.providers.get(name)?.config;

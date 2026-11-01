@@ -244,7 +244,8 @@ export default function (pi) {
       prompts: loader.getPrompts(),
       overrideError: await code(() => new DefaultResourceLoader({ cwd: ctx.cwd, agentDir,
         systemPromptOverride: () => { throw new Error('override failed'); } })._sdkOptions()),
-      factories: await code(() => new DefaultResourceLoader({ cwd: ctx.cwd, agentDir, extensionFactories: [() => {}] })),
+      factories: await code(() => new DefaultResourceLoader({ cwd: ctx.cwd, agentDir,
+        extensionFactories: [{ name: 'core', factory: () => {}, builtin: true }] })),
       hostRuntime: runtime._sdkHostRuntime, model: runtime.getModel('local', 'tiny')?.id,
       models: runtime.getModels('local').map((model) => model.id), auth: runtime.hasConfiguredAuth('local'),
       registry: new ModelRegistry(runtime).find('local', 'other')?.id,
@@ -274,6 +275,7 @@ async fn resource_loader_and_model_runtime_serve_child_sessions() {
     assert_eq!(options["noSkills"], true);
     assert_eq!(options["noExtensions"], false);
     assert!(options["settingsManagerId"].as_u64().is_some(), "{options}");
+    assert!(options["resourceLoaderId"].as_u64().is_some(), "{options}");
     assert_eq!(data["prompts"], json!({"prompts": [], "diagnostics": []}));
     assert_eq!(data["factories"], "ERR_PI_UNSUPPORTED");
     assert_eq!(data["hostRuntime"], true);

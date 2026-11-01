@@ -1,32 +1,38 @@
 //! `resources.*`: upstream `DefaultResourceLoader` for SDK use. Rust holds each loader, its paths
 //! and its stored layers; `sdk_resources.js` runs each override hook between `load` and `set`.
+//! A child session shares the loader, and binds the extensions its last reload loaded.
 
+mod extensions;
 mod kinds;
+mod mirror;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use pi_js::{HostValue, JsError};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
+pub(crate) use self::extensions::{Hosted, ParentLink};
+pub(crate) use self::mirror::{child_sync, forward};
 use super::ops::{Args, error};
 use super::runner::ExtensionRunner;
 use crate::agent_session::lock;
 use crate::agent_session::services::{ResourceOptions, resource_loader_options};
 use crate::packages::{PackageManager, PackageManagerOptions};
-use crate::resources::paths::resolve_path;
+use crate::resources::paths::{is_local_path, resolve_path};
 use crate::resources::{
     ExtensionResourcePaths, PathMetadata, ResolvedPaths, ResourceLoader, ResourceLoaderOptions, ResourceType,
 };
 use crate::settings::{SettingsManager, SettingsScope};
 
 struct Entry {
-    loader: ResourceLoader,
+    loader: Arc<Mutex<ResourceLoader>>,
     home: PathBuf,
     settings: Option<Arc<SettingsManager>>,
+    loaded: extensions::Loaded,
 }
 
 #[derive(Default)]
@@ -50,6 +56,7 @@ impl Entry {
 #[derive(Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 struct LoaderData {
+    additional_extension_paths: Vec<String>,
     additional_skill_paths: Vec<String>,
     additional_prompt_template_paths: Vec<String>,
     additional_theme_paths: Vec<String>,
@@ -91,9 +98,15 @@ fn expand_home(raw: &str, home: &Path) -> String {
     }
 }
 
-fn loader_options(entry: &Entry, settings: &SettingsManager, data: &LoaderData) -> ResourceLoaderOptions {
-    let expand = |paths: &[String]| paths.iter().map(|path| expand_home(path, &entry.home)).collect();
+fn loader_options(
+    home: &Path,
+    current: &ResourceLoaderOptions,
+    settings: &SettingsManager,
+    data: &LoaderData,
+) -> ResourceLoaderOptions {
+    let expand = |paths: &[String]| paths.iter().map(|path| expand_home(path, home)).collect();
     let resources = ResourceOptions {
+        extension_sources: expand(&data.additional_extension_paths),
         skill_paths: expand(&data.additional_skill_paths),
         prompt_template_paths: expand(&data.additional_prompt_template_paths),
         theme_paths: expand(&data.additional_theme_paths),
@@ -105,18 +118,16 @@ fn loader_options(entry: &Entry, settings: &SettingsManager, data: &LoaderData) 
         system_prompt: data.system_prompt.clone(),
         append_system_prompt: data.append_system_prompt.clone(),
         disabled_builtin_extensions: data.disabled_builtin_extensions.clone(),
-        home: Some(entry.home.clone()),
+        home: Some(home.to_path_buf()),
         ..ResourceOptions::default()
     };
-    let current = &entry.loader.options;
     let mut options = resource_loader_options(&current.cwd, &current.agent_dir, settings, &resources);
     options.builtin_extensions.clear();
     options
 }
 
-fn extend(entry: &mut Entry, paths: Value) -> Result<Value, JsError> {
+fn extend(loader: &mut ResourceLoader, home: &Path, paths: Value) -> Result<Value, JsError> {
     let paths: ExtendPaths = typed(paths, "DefaultResourceLoader.extendResources")?;
-    let home = &entry.home;
     let entries = |list: Vec<ExtendEntry>| -> Vec<(PathBuf, PathMetadata)> {
         list.into_iter().map(|item| (PathBuf::from(expand_home(&item.path, home)), item.metadata)).collect()
     };
@@ -125,7 +136,7 @@ fn extend(entry: &mut Entry, paths: Value) -> Result<Value, JsError> {
         prompt_paths: entries(paths.prompt_paths),
         theme_paths: entries(paths.theme_paths),
     };
-    let kinds = entry.loader.extend_paths(paths).into_iter().map(|kind| match kind {
+    let kinds = loader.extend_paths(paths).into_iter().map(|kind| match kind {
         ResourceType::Skills => "skills",
         ResourceType::Prompts => "prompts",
         _ => "themes",
@@ -134,46 +145,95 @@ fn extend(entry: &mut Entry, paths: Value) -> Result<Value, JsError> {
 }
 
 pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<HostValue, JsError> {
-    if name == "create" {
-        let (home, base) = (PathBuf::from(args.str(2)?), PathBuf::from(args.str(3)?));
-        let cwd = resolve_path(&expand_home(&args.str(0)?, &home), &base);
-        let agent_dir = resolve_path(&expand_home(&args.str(1)?, &home), &base);
-        let loader = ResourceLoader::new(ResourceLoaderOptions::new(&cwd, &agent_dir));
-        let mut state = lock(&runner.resources);
-        state.next_id += 1;
-        let id = state.next_id;
-        state.loaders.insert(id, Entry { loader, home, settings: None });
-        let (cwd, agent_dir) = (cwd.display().to_string(), agent_dir.display().to_string());
-        return Ok(HostValue::Json(json!({"id": id, "cwd": cwd, "agentDir": agent_dir})));
-    }
-    if name == "configure" {
-        let settings = lock(&runner.sdk.storage).settings(args.u64(1));
-        let settings = settings.ok_or_else(|| error("SettingsManager has been disposed"))?;
-        let data: LoaderData = typed(args.json(2), "DefaultResourceLoader")?;
-        let mut state = lock(&runner.resources);
-        let entry = state.entry(args.u64(0))?;
-        entry.loader.options = loader_options(entry, &settings, &data);
-        entry.settings = Some(settings);
-        return Ok(HostValue::Json(Value::Null));
-    }
-    let mut state = lock(&runner.resources);
-    let entry = state.entry(args.u64(0))?;
     let value = match name {
-        "load" => kinds::load(entry, &args.str(1)?)?,
-        "set" => kinds::set(entry, &args.str(1)?, args.json(2), args.bool(3), args.json(4))?,
-        "extend" => extend(entry, args.json(1))?,
+        "create" => {
+            let (home, base) = (PathBuf::from(args.str(2)?), PathBuf::from(args.str(3)?));
+            let cwd = resolve_path(&expand_home(&args.str(0)?, &home), &base);
+            let agent_dir = resolve_path(&expand_home(&args.str(1)?, &home), &base);
+            let loader = Arc::new(Mutex::new(ResourceLoader::new(ResourceLoaderOptions::new(&cwd, &agent_dir))));
+            let mut state = lock(&runner.resources);
+            state.next_id += 1;
+            let id = state.next_id;
+            state.loaders.insert(id, Entry { loader, home, settings: None, loaded: Default::default() });
+            json!({"id": id, "cwd": cwd.display().to_string(), "agentDir": agent_dir.display().to_string()})
+        }
+        "configure" => {
+            let settings = lock(&runner.sdk.storage).settings(args.u64(1));
+            let settings = settings.ok_or_else(|| error("SettingsManager has been disposed"))?;
+            let data: LoaderData = typed(args.json(2), "DefaultResourceLoader")?;
+            if data.additional_extension_paths.iter().any(|path| !is_local_path(path)) {
+                return Err(JsError::unsupported("DefaultResourceLoader.additionalExtensionPaths package sources"));
+            }
+            let (loader, home) = {
+                let mut state = lock(&runner.resources);
+                let entry = state.entry(args.u64(0))?;
+                entry.settings = Some(settings.clone());
+                (entry.loader.clone(), entry.home.clone())
+            };
+            let mut loader = lock(&*loader);
+            let options = loader_options(&home, &loader.options, &settings, &data);
+            loader.options = options;
+            Value::Null
+        }
+        "mirror" => mirror::store(runner, args)?,
+        "deliver" => mirror::deliver(runner, args),
+        _ => {
+            let (loader, settings, home) = {
+                let mut state = lock(&runner.resources);
+                let entry = state.entry(args.u64(0))?;
+                (entry.loader.clone(), entry.settings(), entry.home.clone())
+            };
+            let mut loader = lock(&*loader);
+            match name {
+                "load" => kinds::load(&mut loader, &settings?, &args.str(1)?)?,
+                "set" => kinds::set(&mut loader, &args.str(1)?, args.json(2), args.bool(3), args.json(4))?,
+                "extend" => extend(&mut loader, &home, args.json(1))?,
+                other => return Err(error(format!("Unknown host operation: resources.{other}"))),
+            }
+        }
+    };
+    Ok(HostValue::Json(value))
+}
+
+/// The loader and the extensions a new child session binds, with the parent's target for it.
+pub(crate) fn take(
+    runner: &ExtensionRunner,
+    id: u64,
+) -> Result<(Arc<Mutex<ResourceLoader>>, Option<(Hosted, u64)>), JsError> {
+    let mut state = lock(&runner.resources);
+    let entry = state.entry(id)?;
+    let hosted = extensions::take(runner, &mut entry.loaded)?;
+    Ok((entry.loader.clone(), hosted))
+}
+
+/// End every child host of `runner`'s loaders.
+pub(crate) fn shutdown(runner: &ExtensionRunner) {
+    let loaders = std::mem::take(&mut lock(&runner.resources).loaders);
+    drop(loaders);
+}
+
+pub(crate) async fn run(runner: Arc<ExtensionRunner>, name: &str, args: Args) -> Result<HostValue, JsError> {
+    let value = match name {
+        "reload" => reload(&runner, &args).await?,
+        "finish" => extensions::finish(&runner, args.u64(0)).await?,
+        "order" => extensions::order(&runner, args.u64(0), args.json(1)).await?,
         other => return Err(error(format!("Unknown host operation: resources.{other}"))),
     };
     Ok(HostValue::Json(value))
 }
 
-/// Upstream `packageManager.resolve()` and the path stage; JavaScript then loads each kind.
-pub(crate) async fn reload(runner: Arc<ExtensionRunner>, args: Args) -> Result<HostValue, JsError> {
+/// Upstream `packageManager.resolve()`, the path stage, and the extension files of one phase;
+/// JavaScript then runs the factories and loads each resource kind.
+async fn reload(runner: &Arc<ExtensionRunner>, args: &Args) -> Result<Value, JsError> {
     let id = args.u64(0);
-    let (cwd, agent_dir, settings) = {
+    let (loader, settings) = {
         let mut state = lock(&runner.resources);
         let entry = state.entry(id)?;
-        (entry.loader.options.cwd.clone(), entry.loader.options.agent_dir.clone(), entry.settings()?)
+        (entry.loader.clone(), entry.settings()?)
+    };
+    let (cwd, agent_dir) = {
+        let loader = lock(&*loader);
+        (loader.options.cwd.clone(), loader.options.agent_dir.clone())
     };
     let scopes = [SettingsScope::Global, SettingsScope::Project];
     let (packages, warnings) = if scopes.iter().all(|scope| settings.packages(*scope).is_empty()) {
@@ -186,13 +246,24 @@ pub(crate) async fn reload(runner: Arc<ExtensionRunner>, args: Args) -> Result<H
             let (text, prefix) = (failure.warning(), format!("Extension package \"{}\": ", failure.source));
             json!({"path": failure.source, "warning": text.strip_prefix(&prefix).unwrap_or(&text)})
         });
-        (resolved, warnings.collect())
+        (resolved, warnings.collect::<Vec<_>>())
     };
     let has_packages = packages != ResolvedPaths::default();
-    let mut state = lock(&runner.resources);
-    let entry = state.entry(id)?;
-    entry.loader.options.package_resources = packages;
-    entry.loader.resolve_paths();
-    let extensions = entry.loader.resources().extensions.len();
-    Ok(HostValue::Json(json!({"warnings": warnings, "packages": has_packages, "extensions": extensions})))
+    let (entries, missing) = {
+        let mut loader = lock(&*loader);
+        loader.options.package_resources = packages;
+        loader.resolve_paths();
+        let resources = loader.resources();
+        let missing = resources
+            .extension_diagnostics
+            .iter()
+            .map(|diagnostic| json!({"path": diagnostic.path, "error": diagnostic.message}));
+        (super::loader::load_entries(&resources.extensions), missing.collect::<Vec<_>>())
+    };
+    let phase = args.str(1)?;
+    let reload = extensions::Reload { id, loader, settings, cwd, agent_dir, entries, warnings };
+    let mut loaded = extensions::load(runner, reload, &phase, args.bool(2)).await?;
+    loaded["packages"] = json!(has_packages);
+    loaded["missing"] = json!(if phase == "pretrust" { Vec::new() } else { missing });
+    Ok(loaded)
 }
