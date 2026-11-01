@@ -9,6 +9,8 @@ use super::{host, register};
 use crate::agent_session::{ModelRuntime, ModelRuntimeOptions};
 use crate::settings::SettingsManager;
 
+static GLOBAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 async fn runtime(dir: &std::path::Path) -> Arc<ModelRuntime> {
     let options = ModelRuntimeOptions {
         models_path: dir.join("models.json"),
@@ -21,6 +23,7 @@ async fn runtime(dir: &std::path::Path) -> Arc<ModelRuntime> {
 
 #[tokio::test]
 async fn enabled_agents_become_providers_with_advertised_models() {
+    let _guard = GLOBAL.lock().await;
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("acp")).unwrap();
     let state =
@@ -80,6 +83,7 @@ async fn enabled_agents_become_providers_with_advertised_models() {
 
 #[tokio::test]
 async fn advertised_thought_levels_become_the_thinking_level_map() {
+    let _guard = GLOBAL.lock().await;
     let dir = tempfile::tempdir().unwrap();
     let settings =
         SettingsManager::in_memory(json!({"acpAgents": [{"id": "kiro", "name": "Kiro", "command": "kiro"}]}));
