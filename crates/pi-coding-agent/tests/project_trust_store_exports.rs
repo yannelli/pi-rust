@@ -13,7 +13,7 @@ mod windows;
 
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -88,7 +88,7 @@ fn golden((text, file): (&str, &str)) -> Map<String, Value> {
 }
 
 #[cfg(not(windows))]
-fn canonical(path: &Path) -> PathBuf {
+fn canonical(path: &Path) -> std::path::PathBuf {
     std::fs::canonicalize(path).unwrap()
 }
 
@@ -127,7 +127,7 @@ async fn run_scenario() -> Map<String, Value> {
 }
 
 /// Runs the `scenario` export of the module `name` with `source` in the extension host and returns its cases.
-async fn run_module(name: &str, source: &str) -> Map<String, Value> {
+async fn run_module(name: &'static str, source: &str) -> Map<String, Value> {
     let parent = tempfile::tempdir().unwrap();
     let parent_path = canonical(parent.path());
     let parent_json = serde_json::to_string(&parent_path.display().to_string()).unwrap();
