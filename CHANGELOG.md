@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.10.4] - 2026-11-01
+
+### Fixed
+
+- **ai:** use global Kimi login and complete tool schema types (#173) ([8f441d3](https://github.com/yannelli/pi-rust/commit/8f441d30f2e2fc3050cbca3705bf275234142ad9))
+
 ## [0.10.3] - 2026-11-01
 
 ### Added
