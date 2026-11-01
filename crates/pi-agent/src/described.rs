@@ -10,7 +10,7 @@ use crate::nested::ToolContext;
 use crate::tool_model::{
     ToolAnnotations, ToolExposure, ToolLoadout, ToolLoadoutChanges, ToolNamespace, ToolReach, ToolReplay,
 };
-use crate::types::{AgentTool, AgentToolResult, SharedTool, ToolExecutionMode, ToolUpdateCallback};
+use crate::types::{AgentTool, AgentToolResult, AsAnyTool, SharedTool, ToolExecutionMode, ToolUpdateCallback};
 
 /// Delegates everything to the wrapped tool except the description.
 pub struct DescribedTool {
@@ -22,6 +22,15 @@ impl DescribedTool {
     pub fn inner(&self) -> &SharedTool {
         &self.inner
     }
+}
+
+/// The tool that runs for `tool`: what a [`DescribedTool`] wraps, at any depth; any other tool itself.
+pub fn undescribed(tool: &SharedTool) -> &SharedTool {
+    let mut current = tool;
+    while let Some(described) = AsAnyTool::as_any(&**current).downcast_ref::<DescribedTool>() {
+        current = &described.inner;
+    }
+    current
 }
 
 /// `tool` with `description` as its model-facing description.
