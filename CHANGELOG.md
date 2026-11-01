@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.10.2] - 2026-10-31
+
+### Fixed
+
+- **auth:** persist rotated OAuth tokens after caller cancellation (#171) ([097aa7a](https://github.com/yannelli/pi-rust/commit/097aa7ad681c70abe4fec27118366307fb42e52c))
+
 ## [0.10.1] - 2026-10-31
 
 ### Added
