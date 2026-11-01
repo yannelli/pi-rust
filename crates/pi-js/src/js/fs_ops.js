@@ -76,7 +76,11 @@ const ops = {
     if (typeof options.filter !== "function") throw utils.invalidArg("options.filter", "of type function", options.filter);
     return { walk: () => Object.assign(cpWalk(request.from, request.to, request, options), { options }) };
   },
-  realpath: (path, options) => ({ request: { op: "realpath", path: toPath(path) }, map: encoded(options) }),
+  realpath(path, options) {
+    path = toPath(path);
+    if (process.platform === "win32") path = require("path").resolve(path);
+    return { request: { op: "realpath", path }, map: encoded(options) };
+  },
   readlink: (path, options) => ({ request: { op: "readlink", path: toPath(path) }, map: encoded(options) }),
   symlink: (target, path, type) => ({ request: { op: "symlink", target: toPath(target, "target"), path: toPath(path), kind: type || undefined } }),
   link: (from, to) => ({ request: { op: "link", from: toPath(from, "existingPath"), to: toPath(to, "newPath") } }),
