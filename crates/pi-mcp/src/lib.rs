@@ -26,8 +26,8 @@ pub use auth::{AuthProvider, StaticToken, UnauthorizedContext};
 pub use cli::{McpCommandOptions, run_mcp_command};
 pub use client::{ClientState, McpClient, McpClientOptions, RequestOptions};
 pub use config::{
-    LoadedMcpConfig, McpConfigScope, McpExposure, McpServerConfig, McpServerEntry, get_mcp_tool_exposure,
-    load_mcp_config, mcp_namespace,
+    LoadedMcpConfig, McpConfigScope, McpExposure, McpServerConfig, McpServerEntry, add_client_servers,
+    get_mcp_tool_exposure, load_mcp_config, mcp_namespace,
 };
 pub use content::{CallToolResult, ContentBlock, to_llm_content};
 pub use error::{McpError, OAuthError};
@@ -36,7 +36,7 @@ pub use log::McpServerLog;
 pub use manager::{
     McpAgentTool, McpConnectionId, McpManager, McpManagerOptions, McpServerStatus, McpSubscription, NotifyLevel,
 };
-pub use naming::create_mcp_tool_name;
+pub use naming::{create_mcp_tool_name, server_key};
 pub use output::{McpToolDetails, McpToolOutput, convert_mcp_result};
 pub use registered::{McpServerRegistry, RegisteredMcpServer};
 pub use resources::{McpResourceServer, McpResourceTool, create_mcp_resource_tools};

@@ -8,6 +8,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::naming::server_key;
+
 pub use files::{
     CONFIG_DIR_NAME, LoadedMcpConfig, McpConfigScope, McpServerConfigPatch, McpServerEntry, add_mcp_server_config,
     load_mcp_config, remove_mcp_server_config, update_mcp_server_config,
@@ -220,6 +222,25 @@ pub fn get_mcp_tool_exposure(config: &McpServerConfig, tool: &str) -> McpExposur
 /// Namespace of a server's tools: `mcp__<server>` with `-` replaced by `_`.
 pub fn mcp_namespace(server: &str) -> String {
     format!("mcp__{}", server.replace('-', "_"))
+}
+
+/// Add the servers an ACP client supplied for one session. A configured server with the same
+/// [`server_key`] as one of them is left out, with a notice in `errors`: the client's server wins.
+pub fn add_client_servers(loaded: &mut LoadedMcpConfig, clients: &[McpServerEntry]) {
+    if clients.is_empty() {
+        return;
+    }
+    for entry in std::mem::take(&mut loaded.servers) {
+        let key = server_key(&entry.name);
+        match clients.iter().find(|client| server_key(&client.name) == key) {
+            Some(client) => loaded.errors.push(format!(
+                "\"{}\" in {} is replaced by the ACP client server \"{}\" for this session",
+                entry.name, entry.source, client.name
+            )),
+            None => loaded.servers.push(entry),
+        }
+    }
+    loaded.servers.extend(clients.iter().cloned());
 }
 
 #[cfg(test)]
