@@ -25,7 +25,20 @@ pub const GENERATED: &[(&str, &str, &[&str])] = &[
         "pi-coding-agent/src/core/trust-manager.ts",
         &["TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES", "hasTrustRequiringProjectResources"],
     ),
+    (
+        "packages/coding-agent/src/core/footer-data-provider.ts",
+        "pi-coding-agent/src/core/footer-data-provider.ts",
+        &["findGitPaths"],
+    ),
+    (
+        "packages/coding-agent/src/core/resource-loader.ts",
+        "pi-coding-agent/src/core/resource-loader.ts",
+        &["loadContextFileFromDir", "findShadowedContextFile", "loadProjectContextFiles"],
+    ),
 ];
+
+/// Node builtins that upstream imports without the `node:` prefix.
+const BARE_NODE_BUILTINS: [&str; 2] = ["fs", "path"];
 
 const DECLARATION_KINDS: [&str; 5] = ["const", "let", "var", "function", "class"];
 
@@ -100,8 +113,8 @@ fn import_lines(used: &[&Binding]) -> String {
     lines
 }
 
-/// End of the declaration that starts at `start`: the `;` of a variable, or the closing `}` of a
-/// function or class body, at bracket depth 0. Strings, templates, and comments are skipped.
+/// End of the declaration that starts at `start`: the `;` of a variable, or the closing `}` of a function or class
+/// body, at bracket depth 0 and the start of a line, so an object type in the signature does not end it.
 fn declaration_end(source: &str, start: usize, is_function: bool) -> Option<usize> {
     let bytes = source.as_bytes();
     let (mut depth, mut i) = (0i32, start);
@@ -131,7 +144,7 @@ fn declaration_end(source: &str, start: usize, is_function: bool) -> Option<usiz
             b'(' | b'[' | b'{' => depth += 1,
             b')' | b']' | b'}' => {
                 depth -= 1;
-                if depth == 0 && is_function && bytes[i] == b'}' {
+                if depth == 0 && is_function && bytes[i] == b'}' && (i == 0 || bytes[i - 1] == b'\n') {
                     return Some(i + 1);
                 }
             }
@@ -192,14 +205,25 @@ pub fn shim_keys(root: &std::path::Path) -> Result<Vec<String>, String> {
     Ok(literals.into_iter().step_by(3).map(str::to_string).collect())
 }
 
-/// Check that every import of generated module `key` resolves: a `node:` builtin, an archive file, or a host shim.
-/// Run after `rewrite_bare_imports`, so a bare specifier left over is one the archive does not bundle.
+/// Archive keys of the host modules (`HOST_FILES` in `modules.rs`), such as `host/context_color.js`.
+pub fn host_keys(root: &std::path::Path) -> Result<Vec<String>, String> {
+    let path = root.join("crates/pi-coding-agent/src/extensions/modules.rs");
+    let source = std::fs::read_to_string(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let table =
+        source.split_once("const HOST_FILES").and_then(|(_, rest)| rest.split_once("\n];")).map(|(table, _)| table);
+    let table = table.ok_or_else(|| format!("{}: no HOST_FILES table", path.display()))?;
+    let names = table.lines().filter_map(|line| line.trim().strip_prefix("(\"")?.split_once('"').map(|(name, _)| name));
+    Ok(names.map(|name| format!("host/{name}")).collect())
+}
+
+/// Check that every import of generated module `key` resolves: a Node builtin, an archive file, a host shim, or a
+/// host module. Run after `rewrite_bare_imports`, so a bare specifier left over is one the archive does not bundle.
 pub fn check_imports(key: &str, files: &BTreeMap<String, String>, shims: &[String]) -> Result<(), String> {
     let module = files.get(key).ok_or_else(|| format!("{key}: not generated"))?;
     for line in module.lines().filter(|line| line.starts_with("import ")) {
         let specifier = line.rsplit_once(" from ").map(|(_, from)| from.trim_end_matches(';').trim_matches('"'));
         let specifier = specifier.ok_or_else(|| format!("{key}: cannot read {line}"))?;
-        if specifier.starts_with("node:") {
+        if specifier.starts_with("node:") || BARE_NODE_BUILTINS.contains(&specifier) {
             continue;
         }
         if !specifier.starts_with('.') {
@@ -331,6 +355,34 @@ export function usesAll(): T {
         files.insert("p/src/core/x.ts".to_string(), module("import { m } from \"./missing.ts\";"));
         let error = check_imports("p/src/core/x.ts", &files, &shims).unwrap_err();
         assert_eq!(error, "p/src/core/x.ts: imports ./missing.ts, which is neither an archive file nor a host shim");
+    }
+
+    #[test]
+    fn an_object_type_in_the_signature_does_not_end_a_function() {
+        let source = "export function load(options: {\n\tcwd: string;\n}): { path: string } | null {\n\tif (options) {\n\t\treturn { path: \"\" };\n\t}\n\treturn null;\n}\n\nexport const AFTER = 1;\n";
+        let module = extract("x.ts", source, &["load"]).unwrap();
+        assert!(module.ends_with("\treturn null;\n}\n"), "{module}");
+        assert!(!module.contains("AFTER"), "{module}");
+    }
+
+    #[test]
+    fn accepts_bare_node_builtins_and_host_modules() {
+        let mut files = BTreeMap::new();
+        let imports = "import { existsSync } from \"fs\";\nimport { join } from \"path\";\nimport chalk from \"../../../host/context_color.js\";";
+        files.insert("p/src/core/x.ts".to_string(), format!("// Generated\n{imports}\n"));
+        let known = vec!["host/context_color.js".to_string()];
+        assert_eq!(check_imports("p/src/core/x.ts", &files, &known), Ok(()));
+        files.insert("p/src/core/x.ts".to_string(), "// Generated\nimport { x } from \"os\";\n".to_string());
+        let error = check_imports("p/src/core/x.ts", &files, &known).unwrap_err();
+        assert_eq!(error, "p/src/core/x.ts: imports os, which the archive does not bundle");
+    }
+
+    #[test]
+    fn reads_the_host_module_keys_from_modules_rs() {
+        let keys = host_keys(std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."))).unwrap();
+        assert!(keys.iter().any(|key| key == "host/context_color.js"), "{keys:?}");
+        assert!(keys.iter().any(|key| key == "host/coding_agent.js"), "{keys:?}");
+        assert!(keys.iter().all(|key| key.starts_with("host/") && key.ends_with(".js")), "{keys:?}");
     }
 
     #[test]
