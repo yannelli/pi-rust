@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.10.6] - 2026-11-01
+
+### Fixed
+
+- **acp:** discover models and apply session controls before prompts (#175) ([bccd575](https://github.com/yannelli/pi-rust/commit/bccd5756f80cd0637302bfd009d898c57a6a7e32))
+
 ## [0.10.5] - 2026-11-01
 
 ### Fixed
