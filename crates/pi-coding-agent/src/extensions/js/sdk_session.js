@@ -49,15 +49,30 @@ export async function createAgentSession(options = {}) {
 		tools: options.tools, excludeTools: options.excludeTools, noTools: options.noTools,
 		sessionManagerId: sessionManager._sdkId, settingsManagerId: settingsManager._sdkId, resources,
 	});
-	const listeners = new Set();
+	const listeners = [];
 	let disposed = false;
-	let prompting = false;
+	let events;
 	const assertActive = () => {
 		if (disposed) throw new Error("AgentSession has been disposed");
 	};
 	const read = (member) => {
 		assertActive();
 		return optional(call("sdk.read", result.id, member));
+	};
+	const control = (name, ...args) => {
+		assertActive();
+		return optional(call("sdk.control", result.id, name, ...args));
+	};
+	const run = (name, ...args) => {
+		assertActive();
+		return callAsync(`sdk.${name}`, result.id, ...args).then(optional);
+	};
+	const persist = (options) => options?.persist === true;
+	const stopEvents = () => {
+		if (events === undefined) return;
+		if (!disposed) call("sdk.control", result.id, "unsubscribe");
+		releaseCallback(events);
+		events = undefined;
 	};
 	const session = new Proxy({
 		sessionManager,
@@ -66,43 +81,93 @@ export async function createAgentSession(options = {}) {
 		get model() { return read("model"); },
 		get thinkingLevel() { return read("thinkingLevel"); },
 		get isStreaming() { return read("isStreaming"); },
+		get isIdle() { return read("isIdle"); },
+		get isCompacting() { return read("isCompacting"); },
 		get sessionId() { return read("sessionId"); },
 		get sessionFile() { return read("sessionFile"); },
+		get sessionName() { return read("sessionName"); },
 		get systemPrompt() { return read("systemPrompt"); },
-		get state() { return { model: read("model"), thinkingLevel: read("thinkingLevel") }; },
+		get state() {
+			const state = read("state");
+			return { ...state, pendingToolCalls: new Set(state.pendingToolCalls) };
+		},
 		get routedModel() { return read("routedModel"); },
+		get pendingMessageCount() { return read("pendingMessageCount"); },
+		get steeringMode() { return read("steeringMode"); },
+		get followUpMode() { return read("followUpMode"); },
+		get autoCompactionEnabled() { return read("autoCompactionEnabled"); },
+		get retryAttempt() { return read("retryAttempt"); },
+		get isRetrying() { return read("isRetrying"); },
+		get autoRetryEnabled() { return read("autoRetryEnabled"); },
+		get isBashRunning() { return read("isBashRunning"); },
+		get hasPendingBashMessages() { return read("hasPendingBashMessages"); },
 		getContextUsage: () => read("contextUsage"),
+		getSteeringMessages: () => read("steeringMessages"),
+		getFollowUpMessages: () => read("followUpMessages"),
+		getAvailableThinkingLevels: () => read("availableThinkingLevels"),
+		supportsThinking: () => read("supportsThinking"),
+		getSessionStats: () => read("sessionStats"),
+		getUserMessagesForForking: () => read("userMessagesForForking"),
+		getLastAssistantText: () => read("lastAssistantText"),
+		getActiveToolNames: () => read("activeToolNames"),
+		getCallableToolNames: () => read("callableToolNames"),
+		getAllTools: () => read("allTools"),
 		modelRuntime: options.modelRuntime ?? hostRuntime(),
 		subscribe(listener) {
 			assertActive();
 			if (typeof listener !== "function") throw new TypeError("Expected a session event listener");
-			listeners.add(listener);
-			return () => listeners.delete(listener);
+			listeners.push(listener);
+			if (events === undefined) {
+				events = registerCallback((event) => {
+					for (const each of [...listeners]) each(event);
+				});
+				control("subscribe", events);
+			}
+			return () => {
+				const index = listeners.indexOf(listener);
+				if (index !== -1) listeners.splice(index, 1);
+				if (listeners.length === 0) stopEvents();
+			};
 		},
 		async prompt(text, promptOptions = {}) {
-			assertActive();
-			checkOptions(promptOptions, ["images", "expandPromptTemplates", "source"], "AgentSession.prompt");
-			if (prompting) throw new Error("Agent is already processing.");
-			prompting = true;
-			const callback = registerCallback((event) => {
-				for (const listener of [...listeners]) listener(event);
-			});
-			try {
-				await callAsync("sdk.prompt", result.id, text, promptOptions, callback);
-			} finally {
-				prompting = false;
-				releaseCallback(callback);
-			}
+			checkOptions(promptOptions, ["images", "expandPromptTemplates", "source", "streamingBehavior"], "AgentSession.prompt");
+			const behavior = promptOptions.streamingBehavior;
+			const streamingBehavior = behavior ? (behavior === "followUp" ? "followUp" : "steer") : undefined;
+			await run("prompt", text, { ...promptOptions, streamingBehavior });
 		},
-		async abort() {
-			assertActive();
-			await callAsync("sdk.abort", result.id);
+		steer(text, images, queueOptions = {}) { return run("steer", text, images ?? null, queueOptions); },
+		followUp(text, images, queueOptions = {}) { return run("followUp", text, images ?? null, queueOptions); },
+		clearQueue: () => control("clearQueue"),
+		async abort() { await run("abort"); },
+		async waitForIdle() { await run("waitForIdle"); },
+		async setModel(model, modelOptions) { await run("setModel", model, persist(modelOptions)); },
+		async cycleModel(direction = "forward", modelOptions) { return control("cycleModel", direction, persist(modelOptions)); },
+		setThinkingLevel(level, modelOptions) { control("setThinkingLevel", level, persist(modelOptions)); },
+		cycleThinkingLevel: (modelOptions) => control("cycleThinkingLevel", persist(modelOptions)),
+		setSteeringMode(mode) { control("setSteeringMode", mode); },
+		setFollowUpMode(mode) { control("setFollowUpMode", mode); },
+		compact: (customInstructions) => run("compact", customInstructions ?? null),
+		abortCompaction() { control("abortCompaction"); },
+		abortBranchSummary() { control("abortBranchSummary"); },
+		setAutoCompactionEnabled(enabled) { control("setAutoCompactionEnabled", enabled === true); },
+		abortRetry() { control("abortRetry"); },
+		setAutoRetryEnabled(enabled) { control("setAutoRetryEnabled", enabled === true); },
+		setCacheWarmingMode(mode) { control("setCacheWarmingMode", mode); },
+		abortBash() { control("abortBash"); },
+		setSessionName(name) { control("setSessionName", name); },
+		refreshContext() { control("refreshContext"); },
+		setActiveToolsByName(names) { control("setActiveToolsByName", names); },
+		exportToJsonl: (outputPath) => control("exportToJsonl", outputPath ?? null),
+		async exportToHtml(outputPath, exportOptions = {}) {
+			checkOptions(exportOptions, [], "AgentSession.exportToHtml");
+			return control("exportToHtml", outputPath ?? null);
 		},
 		dispose() {
 			if (disposed) return;
 			call("sdk.dispose", result.id);
 			disposed = true;
-			listeners.clear();
+			listeners.length = 0;
+			stopEvents();
 		},
 	}, {
 		get(target, property, receiver) {
