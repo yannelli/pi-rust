@@ -169,6 +169,12 @@ pub trait Component: AsAny {
         false
     }
 
+    /// If true while focused, fullscreen viewport keys (`tui.altScreen.*` scrolling and prompt jumps) go to this
+    /// component instead of scrolling the transcript, as they do for a focused overlay. Default false.
+    fn captures_viewport_input(&self) -> bool {
+        false
+    }
+
     /// Invalidates cached rendering state, for example after a theme change.
     fn invalidate(&mut self) {}
 

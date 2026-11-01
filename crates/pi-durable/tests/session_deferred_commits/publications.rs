@@ -10,6 +10,7 @@ use serde_json::json;
 
 use super::support::*;
 use super::*;
+use crate::support::{ValueCall, on_value};
 
 #[tokio::test]
 async fn stores_a_base_when_a_held_commit_selected_one_and_counts_the_store_as_one_delta_otherwise() {
@@ -64,7 +65,7 @@ async fn stores_the_whole_value_once_more_than_max_pending_ops_operations_are_he
     assert_eq!(changes[0].1, DocumentContent::Base { version: 1, value: value.clone() });
     // A durable listener replaces its copy with the stored value.
     let published = opened.stored.lock().unwrap().last().cloned().unwrap();
-    let DocumentCommitChange::Document { ops, .. } = &document_changes(&published)[0] else { unreachable!() };
+    let DocumentCommitChange::Change { ops, .. } = &document_changes(&published)[0] else { unreachable!() };
     assert_eq!(*ops, vec![Op::Replace(value)]);
 }
 
@@ -85,7 +86,7 @@ async fn stores_a_base_of_the_commit_s_own_value_when_it_stores_an_overflowed_ho
 }
 
 #[tokio::test]
-async fn give_subscribe_commits_exactly_what_was_stored_and_nothing_for_a_held_commit() {
+async fn give_observe_commits_exactly_what_was_stored_and_nothing_for_a_held_commit() {
     let opened = open(None, None).await;
     let (from, publications, id) = (opened.mark(), opened.stored.lock().unwrap().len(), opened.conversation_id);
     opened.append("a", CommitOptions::DEFERRED).await.unwrap();
@@ -114,10 +115,10 @@ async fn give_subscribe_commits_exactly_what_was_stored_and_nothing_for_a_held_c
         };
         let change =
             document_changes(publication).into_iter().find(|change| change_record(change).id == opened.record_id);
-        let DocumentCommitChange::Document { ops, value, .. } = change.unwrap() else { unreachable!() };
+        let DocumentCommitChange::Change { ops, value, .. } = change.unwrap() else { unreachable!() };
         from_publications = apply_immutable(Some(&from_publications), &ops).unwrap();
         assert_eq!(from_publications, from_storage);
-        assert_eq!(value, Some(from_storage.clone()));
+        assert_eq!(value, from_storage.clone());
     }
     assert_eq!(from_storage, json(r#"{"text":"abcdef"}"#));
     let kinds: Vec<Vec<&str>> = published
@@ -142,10 +143,10 @@ async fn show_every_held_commit_to_watches_and_the_session_s_own_observers_once(
     let values: Arc<Mutex<Vec<String>>> = Arc::default();
     let sink = values.clone();
     watch
-        .start(move |pi_chord::WatchChange { value, .. }, _| {
+        .start(on_value(move |ValueCall { value, .. }, _| {
             sink.lock().unwrap().push(value["text"].as_str().unwrap_or_default().to_owned());
             async { Ok(()) }
-        })
+        }))
         .unwrap();
     let from = opened.observed.lock().unwrap().len();
     for text in ["a", "b", "c"] {
@@ -163,7 +164,7 @@ async fn show_every_held_commit_to_watches_and_the_session_s_own_observers_once(
         .iter()
         .map(|publication| {
             let changes = publication.changes().iter().filter_map(|change| match change {
-                CommitChange::Document(DocumentCommitChange::Document { ops, .. }) => Some(ops.clone()),
+                CommitChange::Document(DocumentCommitChange::Change { ops, .. }) => Some(ops.clone()),
                 _ => None,
             });
             changes.collect()
@@ -197,9 +198,9 @@ async fn leaves_storage_at_the_last_stored_state_which_memory_had_and_nothing_he
     let opened = open(None, None).await;
     let states: Arc<Mutex<Vec<String>>> = Arc::default();
     let (sink, record_id) = (states.clone(), opened.record_id);
-    std::mem::forget(opened.session.observe_commits(move |publication, _| {
+    std::mem::forget(opened.session.follow_commits(move |publication, _| {
         for change in publication.changes() {
-            if let CommitChange::Document(DocumentCommitChange::Document { record, value: Some(value), .. }) = change
+            if let CommitChange::Document(DocumentCommitChange::Change { record, value, .. }) = change
                 && record.id == record_id
             {
                 sink.lock().unwrap().push(value["text"].as_str().unwrap_or_default().to_owned());

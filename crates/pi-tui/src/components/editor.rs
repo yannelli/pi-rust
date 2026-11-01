@@ -309,6 +309,11 @@ impl Component for Editor {
         true
     }
 
+    /// The open autocomplete menu receives fullscreen viewport keys, such as PageUp/PageDown.
+    fn captures_viewport_input(&self) -> bool {
+        self.is_showing_autocomplete()
+    }
+
     fn handle_mouse(&mut self, event: &TuiMouseEvent) -> Option<MouseResponse> {
         Editor::handle_mouse(self, event).map(MouseResponse::Handled)
     }

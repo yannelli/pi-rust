@@ -214,10 +214,14 @@ impl AgentSession {
         self.ensure_mcp_discovery();
     }
 
-    /// Close the MCP connections and wait for running sign-ins (upstream `session_shutdown`).
+    /// Close ACP agents (Antigravity too) and MCP connections, and wait for running sign-ins (upstream
+    /// `session_shutdown`).
     pub async fn shutdown(&self) {
+        crate::acp_client::host::untrack_session(&self.session_id());
         if let Some(manager) = self.stop_mcp() {
             manager.shutdown().await;
         }
+        pi_ai::providers::acp::close_session(&self.session_id()).await;
+        pi_ai::providers::antigravity_acp::close_session(&self.session_id()).await;
     }
 }

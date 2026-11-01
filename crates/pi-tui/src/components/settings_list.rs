@@ -9,7 +9,7 @@ use crate::component::{
 use crate::components::input::{Input, InputOptions};
 use crate::components::scroll_view::StyleFn;
 use crate::fuzzy::fuzzy_filter;
-use crate::keybindings::{get_keybindings, ids};
+use crate::keybindings::{get_keybindings, get_select_page_index, ids};
 use crate::utils::{truncate_to_width, truncate_to_width_with, visible_width, wrap_text_with_ansi};
 
 /// Builds a submenu for an item from its current value and a [`SubmenuDone`] handle.
@@ -319,6 +319,7 @@ impl Component for SettingsList {
         let kb = get_keybindings();
         let len = self.display_items().len();
         let search_empty = self.search_input.as_ref().is_none_or(|input| input.get_value().is_empty());
+        let page_index = get_select_page_index(&kb, data, self.selected_index, len, self.max_visible);
         if kb.matches(data, ids::SELECT_UP) {
             if len > 0 {
                 self.selected_index = if self.selected_index == 0 { len - 1 } else { self.selected_index - 1 };
@@ -326,6 +327,10 @@ impl Component for SettingsList {
         } else if kb.matches(data, ids::SELECT_DOWN) {
             if len > 0 {
                 self.selected_index = if self.selected_index + 1 >= len { 0 } else { self.selected_index + 1 };
+            }
+        } else if let Some(page_index) = page_index {
+            if len > 0 {
+                self.selected_index = page_index;
             }
         } else if kb.matches(data, ids::SELECT_CONFIRM) || (data == " " && search_empty) {
             self.activate_item();
@@ -339,6 +344,10 @@ impl Component for SettingsList {
     }
 
     fn handles_input(&self) -> bool {
+        true
+    }
+
+    fn captures_viewport_input(&self) -> bool {
         true
     }
 

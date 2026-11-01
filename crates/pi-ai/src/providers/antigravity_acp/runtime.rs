@@ -1,9 +1,8 @@
 //! One Antigravity ACP session per pi session: the server process, its connection, the tool bridge,
 //! and what the session has seen. Sessions outlive a pi call so parked tool calls can finish.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, LazyLock, Mutex, RwLock};
+use std::sync::{Arc, LazyLock, RwLock};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -18,13 +17,13 @@ use crate::auth::{AuthEvent, AuthInteraction, AuthPrompt};
 use crate::providers::acp::connection::{Connection, RpcError};
 
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(30);
-const SESSION_TIMEOUT: Duration = Duration::from_secs(120);
+pub(super) const SESSION_TIMEOUT: Duration = Duration::from_secs(120);
 /// The server waits 300 seconds for the Google redirect.
 const AUTHENTICATE_TIMEOUT: Duration = Duration::from_secs(330);
 const SIGN_IN_INSTRUCTIONS: &str = "Open this link to sign in with Google.";
 const PASTE_MESSAGE: &str =
     "If the browser cannot open the 127.0.0.1 page after sign-in (a remote machine), paste that page's address here:";
-const THOUGHT_LEVEL: [&str; 3] = ["thought_level", "thinking_level", "reasoning_effort"];
+pub(super) const THOUGHT_LEVEL: [&str; 3] = ["thought_level", "thinking_level", "reasoning_effort"];
 const ROUTING: &str = "Use the pi_ tools from the pi-bridge MCP server for files, shell commands, and edits. They run in the user's pi session.";
 
 /// A user MCP server that Antigravity connects to itself, with the prefix of pi's own copies of its
@@ -83,14 +82,16 @@ pub(crate) async fn connect(cwd: &std::path::Path) -> Result<(Arc<Connection>, O
 
 pub(crate) struct Runtime {
     pub connection: Arc<Connection>,
-    _server: Option<Server>,
+    server: Option<Server>,
     _bridge: Bridge,
     pub calls: mpsc::UnboundedReceiver<ParkedCall>,
     pub session_id: String,
     pub capabilities: PromptCapabilities,
     /// pi carries the system prompt in `_meta.antigravity.systemPrompt.append`.
     pub system_in_meta: bool,
-    config: Vec<Value>,
+    pub(super) config: Vec<Value>,
+    /// The session's `modes`, with `currentModeId` kept up to date.
+    pub(super) modes: Option<Value>,
     legacy_models: Vec<String>,
     /// What the session was built for; a change starts a new session.
     pub fingerprint: String,
@@ -102,7 +103,7 @@ pub(crate) struct Runtime {
 }
 
 /// Selectors of `configOptions`: a `select` whose category or id is `kind`.
-fn selector<'a>(config: &'a [Value], kinds: &[&str]) -> Option<&'a Value> {
+pub(super) fn selector<'a>(config: &'a [Value], kinds: &[&str]) -> Option<&'a Value> {
     config.iter().find(|option| {
         option["type"] == "select"
             && kinds.iter().any(|kind| option["category"].as_str() == Some(kind) || option["id"].as_str() == Some(kind))
@@ -127,7 +128,7 @@ fn named_values(selector: &Value) -> Vec<(String, String)> {
         .collect()
 }
 
-fn values(selector: &Value) -> Vec<String> {
+pub(super) fn values(selector: &Value) -> Vec<String> {
     named_values(selector).into_iter().map(|(value, _)| value).collect()
 }
 
@@ -169,7 +170,7 @@ impl Runtime {
         let legacy = session.pointer("/models/availableModels").and_then(Value::as_array).into_iter().flatten();
         Ok(Self {
             connection,
-            _server: server,
+            server,
             _bridge: bridge,
             calls,
             session_id: session_id.to_string(),
@@ -179,6 +180,7 @@ impl Runtime {
             },
             system_in_meta,
             config: session["configOptions"].as_array().cloned().unwrap_or_default(),
+            modes: session.get("modes").filter(|modes| modes.is_object()).cloned(),
             legacy_models: legacy.filter_map(|model| model["modelId"].as_str()).map(str::to_string).collect(),
             fingerprint,
             seen: 0,
@@ -188,7 +190,7 @@ impl Runtime {
         })
     }
 
-    async fn set_option(&mut self, kinds: &[&str], value: &str) -> Result<(), String> {
+    pub(super) async fn set_option(&mut self, kinds: &[&str], value: &str) -> Result<(), String> {
         let Some(option) = selector(&self.config, kinds) else { return Ok(()) };
         if option["currentValue"].as_str() == Some(value) {
             return Ok(());
@@ -234,15 +236,13 @@ impl Runtime {
     pub fn update_config(&mut self, config: &[Value]) {
         self.config = config.to_vec();
     }
-}
 
-pub(crate) type Shared = Arc<tokio::sync::Mutex<Option<Runtime>>>;
-static RUNTIMES: LazyLock<Mutex<HashMap<String, Shared>>> = LazyLock::new(Mutex::default);
-
-/// The runtime slot of a pi session.
-pub(crate) fn slot(session: &str) -> Shared {
-    let mut runtimes = RUNTIMES.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    runtimes.entry(session.to_string()).or_default().clone()
+    /// Stops the server and the tool bridge, and waits for the server to exit.
+    pub async fn shutdown(mut self) {
+        if let Some(server) = self.server.as_mut() {
+            server.shutdown().await;
+        }
+    }
 }
 
 /// Whether an `authMethods` entry is the Google account login.

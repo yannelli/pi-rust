@@ -4,26 +4,28 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use pi_chord::{Context, WatchChange};
-use pi_durable::errors::{DurableError, DurableResult};
+use pi_chord::Context;
+use pi_durable::errors::DurableResult;
 use pi_durable::harness::Harness;
-use pi_durable::session::{Observation, Observer};
+use pi_durable::session::{Observation, Observer, WatchCall, WatchEnd};
 use pi_durable::types::{CommitChange, DocumentCommitChange};
 use pi_durable::{ConversationId, TaskId};
 use serde_json::{Value, json};
 
-use super::session_support::{context as ctx, observe_commits};
+use super::session_support::{context as ctx, follow_commits};
 
 /// Records every value an observer gets, unfolded.
 struct Recorder(Arc<Mutex<Vec<Value>>>);
 
 impl Observer for Recorder {
-    fn advance(&self, change: &WatchChange, _context: &Context) -> DurableResult<()> {
-        self.0.lock().unwrap().push(change.value.to_serde());
+    fn advance(&self, call: &WatchCall, _context: &Context) -> DurableResult<()> {
+        if let WatchCall::Value { value, .. } = call {
+            self.0.lock().unwrap().push(value.to_serde());
+        }
         Ok(())
     }
 
-    fn end(&self, _failure: Option<DurableError>) {}
+    fn end(&self, _end: WatchEnd) {}
 }
 
 /// Every value of a view or task graph from attachment on, one per commit that changes it.
@@ -112,10 +114,9 @@ pub type NestedResults = Arc<Mutex<HashMap<TaskId, Value>>>;
 pub fn nested_results(harness: &Harness) -> NestedResults {
     let results = NestedResults::default();
     let sink = results.clone();
-    let unsubscribe = observe_commits(harness, move |publication, _| {
+    let unsubscribe = follow_commits(harness, move |publication, _| {
         for change in &publication.changes {
-            let CommitChange::Document(DocumentCommitChange::Document { record, value: Some(value), .. }) = change
-            else {
+            let CommitChange::Document(DocumentCommitChange::Change { record, value, .. }) = change else {
                 continue;
             };
             let state = value.to_serde();

@@ -7,6 +7,7 @@ mod support;
 mod delivery;
 mod ending;
 mod ends;
+mod failures;
 mod native;
 mod overflow;
 
@@ -15,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use pi_chord::delta::{Op, Seg, parse_ops};
-use pi_chord::{BACKGROUND_CONTEXT, ChordError, Context, Json, Watch, WatchChange, WatchEnd};
+use pi_chord::{BACKGROUND_CONTEXT, ChordError, Context, Json, NativeWatchCall, Watch, WatchCall, WatchEnd};
 
 pub fn context() -> Context {
     BACKGROUND_CONTEXT.clone()
@@ -30,8 +31,52 @@ pub fn ops(batch: Json) -> Vec<Op> {
 }
 
 /// A source's frame that is not a retirement.
-pub fn frame(value: Json, ops: Vec<Op>) -> WatchChange {
-    WatchChange::new(value, ops)
+pub fn frame(value: Json, ops: Vec<Op>) -> WatchCall {
+    WatchCall::new(value, ops)
+}
+
+/// A source's retirement frame.
+pub fn retirement(value: Json) -> WatchCall {
+    WatchCall::Value { value, ops: Vec::new(), retired: true }
+}
+
+/// The fields of a value call (upstream `onValue`): a `Failed` call is an error, which ends the watch.
+pub fn value_call(call: WatchCall) -> Result<(Json, Vec<Op>, bool), ChordError> {
+    match call {
+        WatchCall::Value { value, ops, retired } => Ok((value, ops, retired)),
+        WatchCall::Failed { .. } => Err(ChordError::error("Unexpected failed call")),
+    }
+}
+
+/// A call as comparable data, a failure by its message (`ChordError` has no equality).
+#[derive(Debug, PartialEq)]
+pub enum Seen {
+    Value { value: Json, ops: Vec<Op>, retired: bool },
+    Failed(String),
+}
+
+impl From<&WatchCall> for Seen {
+    fn from(call: &WatchCall) -> Self {
+        match call {
+            WatchCall::Value { value, ops, retired } => {
+                Self::Value { value: value.clone(), ops: ops.clone(), retired: *retired }
+            }
+            WatchCall::Failed { error } => Self::Failed(error.to_string()),
+        }
+    }
+}
+
+/// Every call kept so far, as comparable data.
+pub fn seen(calls: &Mutex<Vec<WatchCall>>) -> Vec<Seen> {
+    calls.lock().unwrap().iter().map(Seen::from).collect()
+}
+
+/// The value of a native value call, as `value_call`.
+pub fn native_value_call<T>(call: NativeWatchCall<T>) -> Result<T, ChordError> {
+    match call {
+        NativeWatchCall::Value { value } => Ok(value),
+        NativeWatchCall::Failed { .. } => Err(ChordError::error("Unexpected failed call")),
+    }
 }
 
 pub fn replace(value: Json) -> Vec<Op> {
@@ -70,9 +115,9 @@ pub fn collect_frames(watch: &Watch) -> Frames {
     let frames: Frames = Arc::default();
     let sink = frames.clone();
     watch
-        .start(move |WatchChange { value, ops, .. }, _| {
-            sink.lock().unwrap().push((value, ops));
-            async { Ok(()) }
+        .start(move |call, _| {
+            let delivered = value_call(call).map(|(value, ops, _)| sink.lock().unwrap().push((value, ops)));
+            async move { delivered }
         })
         .unwrap();
     frames
@@ -85,9 +130,9 @@ pub fn collecting_watch(value: Json) -> (Watch, Recorded, Frames) {
     (watch, recorded, frames)
 }
 
-/// Start `watch` with a listener that keeps every change it gets.
-pub fn collect_changes(watch: &Watch) -> Arc<Mutex<Vec<WatchChange>>> {
-    let changes: Arc<Mutex<Vec<WatchChange>>> = Arc::default();
+/// Start `watch` with a listener that keeps every call it gets, failures included.
+pub fn collect_changes(watch: &Watch) -> Arc<Mutex<Vec<WatchCall>>> {
+    let changes: Arc<Mutex<Vec<WatchCall>>> = Arc::default();
     let sink = changes.clone();
     watch
         .start(move |change, _| {

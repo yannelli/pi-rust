@@ -102,7 +102,9 @@ class RoundRobinHandle {
     const { Socket } = require("net");
     const socket = new Socket();
     socket._handle = id;
-    worker.process.send(message("newconn", { key: this.key }), socket, (error) => error && this.pending.push(id));
+    // Only a connection that was never handed over can wait for another worker; a sent one is already closed.
+    const retry = (error) => error && socket._handle === id && this.pending.push(id);
+    worker.process.send(message("newconn", { key: this.key }), socket, retry);
   }
 }
 

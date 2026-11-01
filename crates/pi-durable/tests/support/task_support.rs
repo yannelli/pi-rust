@@ -45,9 +45,9 @@ pub async fn open_tasks_with(
     let (sink, info_sink) = (reports.clone(), infos.clone());
     let options =
         HarnessOptions::new(chat_setup(Default::default()).models, registry.clone() as Arc<dyn RegistryReader>)
-            .with_on_report(move |error, info| {
-                sink.lock().unwrap().push(error.clone());
-                info_sink.lock().unwrap().push(info.clone());
+            .with_on_report(move |report| {
+                sink.lock().unwrap().push(report.error.clone());
+                info_sink.lock().unwrap().push(report.info.clone());
             });
     let harness = Harness::open(storage, configure(options), &context()).await.unwrap();
     OpenedTasks { harness, registry, reports, infos }

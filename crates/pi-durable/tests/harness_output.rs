@@ -64,6 +64,32 @@ fn removes_control_characters_but_keeps_tabs_newlines_and_other_text() {
 }
 
 #[test]
+fn removes_whole_ansi_escape_sequences_from_tool_output() {
+    assert_eq!(sanitize_output("\x1b[31mERROR\x1b[0m\n"), "ERROR\n");
+    assert_eq!(sanitize_output("\x1b[1;38;5;208mx\x1b[?25l\x1b[2K\x1b(By\x1b7z"), "xyz");
+    assert_eq!(sanitize_output("\x1b]8;;https://pi.dev\x07link\x1b]8;;\x1b\\ \x1b]0;title\x07ok"), "link ok");
+    for kind in [']', 'P', 'X', '^', '_'] {
+        for end in ["\x07", "\x1b\\"] {
+            assert_eq!(sanitize_output(&format!("a\x1b{kind}hidden{end}b😀")), "ab😀");
+        }
+    }
+    assert_eq!(sanitize_output("a\x1b]unfinished"), "aunfinished");
+    assert_eq!(sanitize_output("a\x1b[31"), "a31");
+    assert_eq!(sanitize_output("a\x1b\n😀"), "a\n😀");
+}
+
+#[test]
+fn removes_an_ansi_sequence_split_across_output_chunks() {
+    let mut output = OutputBuffer::new(tail(100, 1024));
+    for chunk in ["\x1b[3", "1mERROR\x1b[0", "m\n"] {
+        output.push(OutputChunk::Text(chunk), None).unwrap();
+    }
+    let snapshot = output.snapshot();
+    assert_eq!(snapshot.text, "ERROR\n");
+    assert_eq!((snapshot.dropped_bytes, snapshot.dropped_lines), (0, 0));
+}
+
+#[test]
 fn keeps_output_within_the_limits_unchanged() {
     assert_eq!(bound("a\nb\n", head(2, 1000)), kept("a\nb\n", 0, 0));
     assert_eq!(bound("a\nb", tail(2, 1000)), kept("a\nb", 0, 0));

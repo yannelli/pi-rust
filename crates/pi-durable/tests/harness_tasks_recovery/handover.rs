@@ -90,10 +90,16 @@ fn handover_report(id: TaskId) -> ReportTask {
 }
 
 async fn start_handover(log: &Log, gates: Gates, storage: Arc<dyn Storage>) -> Started {
+    start_handover_at(log, gates, storage, 1).await
+}
+
+/// `start_handover()` with the running definition at `version`.
+async fn start_handover_at(log: &Log, gates: Gates, storage: Arc<dyn Storage>, version: u32) -> Started {
     let registry = Arc::new(create_registry());
-    add_task(&registry, handover_task("old", 1, log, gates, None));
+    add_task(&registry, handover_task("old", version, log, gates, None));
     let opened = open_tasks_with(storage, vec![], registry.clone(), |options| options).await;
-    let id = create_in(&opened.harness, &handover_task("old", 1, log, Gates::default(), None), Value::Null).await;
+    let task = handover_task("old", version, log, Gates::default(), None);
+    let id = create_in(&opened.harness, &task, Value::Null).await;
     opened.harness.resume().unwrap();
     eventually(|| async { log_of(log).len() == 1 }).await;
     Started { harness: opened.harness, registry, reports: opened.reports, infos: opened.infos, id }
@@ -209,7 +215,7 @@ async fn keeps_running_under_the_old_definition_when_the_replacement_is_missing_
     gate_a.resolve();
     eventually(|| async { log_of(&log).contains(&"old:b start".to_owned()) }).await;
     // A newer definition without a migration cannot take the task either.
-    add_task(&registry, handover_task("incompatible", 2, &log, Gates::default(), None));
+    add_task(&registry, handover_task("unmigratable", 2, &log, Gates::default(), None));
     gate_b.resolve();
     harness.wait_for_task(id, &context()).await.unwrap();
     assert_eq!(log_of(&log), ["old:a start", "old:a end", "old:b start", "old:b end", "old:c"]);
@@ -221,8 +227,25 @@ async fn keeps_running_under_the_old_definition_when_the_replacement_is_missing_
         extension: Some("task:test.handover".into()),
         reason,
     };
-    let expected = [outdated(OutdatedReason::MissingTask), outdated(OutdatedReason::IncompatibleTask)];
+    let expected = [outdated(OutdatedReason::MissingTask), outdated(OutdatedReason::MigrationFailed)];
     assert_eq!(*infos.lock().unwrap(), expected);
+    harness.close(&context()).await.unwrap();
+}
+
+#[tokio::test]
+async fn reports_a_replacement_older_than_the_running_task_as_task_too_old_and_keeps_the_old_definition() {
+    let (log, gate) = (Log::default(), Deferred::default());
+    let Started { harness, registry, id, infos, .. } =
+        start_handover_at(&log, gate_a(&gate), Arc::new(MemoryStorage::new()), 2).await;
+    // The same extension name replaces the running definition with an older version.
+    add_task(&registry, handover_task("older", 1, &log, Gates::default(), None));
+    gate.resolve();
+    harness.wait_for_task(id, &context()).await.unwrap();
+    assert_eq!(log_of(&log), ["old:a start", "old:a end", "old:b start", "old:b end", "old:c"]);
+    let extension = Some("task:test.handover".to_owned());
+    let outdated =
+        ReportInfo::TaskOutdated { task: handover_report(id), extension, reason: OutdatedReason::TaskTooOld };
+    assert_eq!(*infos.lock().unwrap(), [outdated]);
     harness.close(&context()).await.unwrap();
 }
 

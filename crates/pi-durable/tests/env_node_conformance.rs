@@ -67,16 +67,16 @@ async fn refuses_a_tree_over_the_directory_budget_and_stops_with_an_error_when_o
     // Windows polls by default (see LocalFileWatcher::open).
     assert_eq!(watcher.mode(), if cfg!(windows) { WatchMode::Polling } else { WatchMode::Native });
     env.create_dir("tree/d", true, &ctx).await.unwrap();
-    let errored = || changes.lock().unwrap().iter().any(|change| matches!(change, FileChange::Error(_)));
+    let errored = || changes.lock().unwrap().iter().any(|change| matches!(change, FileChange::Failed(_)));
     let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
     while !errored() && tokio::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     match changes.lock().unwrap().last() {
-        Some(FileChange::Error(error)) => assert_eq!(error.code, FileErrorCode::Invalid),
+        Some(FileChange::Failed(error)) => assert_eq!(error.code, FileErrorCode::Invalid),
         other => panic!("expected an error, got {other:?}"),
     }
-    watcher.close(&ctx).await;
+    watcher.stop(&ctx).await;
 }
 
 #[tokio::test]

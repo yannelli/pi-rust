@@ -92,17 +92,17 @@ async fn runs_its_own_observers_then_host_listeners_inside_adopt_before_storage_
     let inside = Arc::new(Mutex::new(Vec::new()));
     let seen = inside.clone();
     test.session
-        .observe_commits(move |_, _| {
+        .follow_commits(move |_, _| {
             seen.lock().unwrap().push(storage.adopting());
             observed();
             Ok(())
         })
         .unwrap();
     test.session
-        .subscribe_commits(move |_, _| {
+        .observe_commits(commit_observer(move |_, _| {
             host();
             Ok(())
-        })
+        }))
         .unwrap();
     bump(&test.session).await.unwrap();
     assert_eq!(*test.storage.adoption_order.lock().unwrap(), ["adopt", "observed", "host", "adopted", "resolve"]);
@@ -116,26 +116,26 @@ async fn fails_the_session_after_storage_returned_for_a_failure_of_its_own_obser
     let (observed, after, host, close) =
         (mark(&test, "observed"), mark(&test, "observed after"), mark(&test, "host"), mark(&test, "close"));
     test.session
-        .observe_commits(move |_, _| {
+        .follow_commits(move |_, _| {
             observed();
             Err(DurableError::error("observer bug"))
         })
         .unwrap();
     test.session
-        .observe_commits(move |_, _| {
+        .follow_commits(move |_, _| {
             after();
             Ok(())
         })
         .unwrap();
     let session = test.session.clone();
     test.session
-        .subscribe_commits(move |_, _| {
+        .observe_commits(commit_observer(move |_, _| {
             assert!(session.failure().is_none());
             {
                 host();
                 Ok(())
             }
-        })
+        }))
         .unwrap();
     test.session.subscribe_close(close).unwrap();
     bump(&test.session).await.unwrap();
@@ -156,16 +156,16 @@ async fn publishes_a_commit_that_storage_rejects_after_adopting_it_then_fails_th
     bump(&test.session).await.unwrap();
     let (observed, host) = (mark(&test, "observed"), mark(&test, "host"));
     test.session
-        .observe_commits(move |_, _| {
+        .follow_commits(move |_, _| {
             observed();
             Ok(())
         })
         .unwrap();
     test.session
-        .subscribe_commits(move |_, _| {
+        .observe_commits(commit_observer(move |_, _| {
             host();
             Ok(())
-        })
+        }))
         .unwrap();
     let publications = test.publication_count();
     test.storage.adoption_order.lock().unwrap().clear();
@@ -183,7 +183,7 @@ async fn fails_with_the_storage_error_when_it_rejects_after_adopting_and_reports
     let options = SessionOptions { hooks: Some(Arc::new(Reports(reports.clone()))), ..SessionOptions::default() };
     let session = create_session(storage.clone(), options);
     bump(&session).await.unwrap();
-    session.observe_commits(|_, _| Err(DurableError::error("observer bug"))).unwrap();
+    session.follow_commits(|_, _| Err(DurableError::error("observer bug"))).unwrap();
     *storage.adoption_fault.lock().unwrap() = Some(AdoptionFault::RejectAfterAdopt);
     assert_eq!(message(bump(&session).await), "reclaim failed");
     assert_eq!(failure(session.closed().await), "reclaim failed");

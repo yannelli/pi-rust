@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, Weak};
 
 use pi_chord::delta::{Op, Path, Seg, apply_immutable};
 use pi_chord::state::{ReplicatedStateSourceOptions, attach_replicated_state_source};
-use pi_chord::{BACKGROUND_CONTEXT, Context, Json, JsonMap, Watch, WatchChange, without_abort_signal};
+use pi_chord::{BACKGROUND_CONTEXT, Context, Json, JsonMap, Watch, without_abort_signal};
 
 use super::scheduler::{BlockedSubject, Scheduler};
 use super::types::BlockedReason;
@@ -16,15 +16,14 @@ use crate::errors::{DurableError, DurableResult};
 use crate::ids::ConversationId;
 use crate::session::{
     CommittedObserver, CommittedStateSource, DocumentState, GuardedObserver, Observation, ObservedCommit, Observer,
-    Release, Session,
+    Release, Session, WatchCall, session_end,
 };
 use crate::types::{CommitChange, ConversationQuery, TaskQuery, TaskRecord, TaskState, TaskStatus};
 
 /// `{ tasks }`: every live task keyed by its decimal ID. A node is `{ id, kind, conversationId, owner?, background,
 /// abortRequested, state, blocked?, conversations }`; `state` is `{ status, phase }`, `{ status: "waiting", phase, on,
 /// policy }`, `{ status: "sleeping", phase, until }`, or `{ status: "completing", outcome }` with the outcome's status.
-/// `blocked` says why the task cannot run here, when it cannot: no registered definition takes it (`missing_task`,
-/// `task_too_old`, `migration_failed`), or the restart limit parked it (`restart_limit`). It follows registry changes.
+/// `blocked` means no registered definition takes it (`missing_task`, `task_too_old`, `migration_failed`); it follows registry changes.
 pub type TaskGraph = Json;
 
 /// A serialized exact-frame watch of the task graph.
@@ -62,7 +61,7 @@ impl TaskGraphView {
             next: AtomicU64::new(0),
         });
         let weak = Arc::downgrade(&view);
-        session.observe_commits(move |publication, context| {
+        session.follow_commits(move |publication, context| {
             if let Some(view) = weak.upgrade() {
                 view.advance(publication, context);
             }
@@ -79,9 +78,9 @@ impl TaskGraphView {
             let Some(view) = weak.upgrade() else { return };
             view.closed.store(true, Ordering::SeqCst);
             let mount = lock(&view.mount).take();
-            let failure = view.session.failure();
+            let end = session_end(view.session.failure());
             for (_, observer) in mount.into_iter().flat_map(|mount| mount.observers) {
-                observer.end(failure.clone());
+                observer.end(end.clone());
             }
         })?;
         Ok(view)
@@ -128,7 +127,7 @@ impl TaskGraphView {
         Ok(Observation::new(value, Arc::new(move || guarded.detach())))
     }
 
-    /// A serialized exact-frame watch of the graph, an observer of its mount; cancelling `context` stops it.
+    /// A serialized exact-frame watch of the graph, an observer of its mount; aborting `context` ends it `Aborted`.
     pub async fn watch(self: &Arc<Self>, context: &Context) -> DurableResult<TaskGraphWatch> {
         let session = self.session.clone();
         let (watch, _) = self
@@ -138,11 +137,11 @@ impl TaskGraphView {
             })
             .await?;
         if context.is_cancelled() {
-            watch.cancel();
+            watch.abort();
             return Err(cancellation(context));
         }
         if let Some(signal) = context.abort_signal() {
-            watch.observe_cancellation(&signal)?;
+            watch.observe_abort(&signal)?;
         }
         Ok(watch)
     }
@@ -241,9 +240,9 @@ impl TaskGraphView {
             (mount.value.clone(), ops, observers)
         };
         let (value, ops, observers) = delivery;
-        let change = WatchChange::new(value, ops);
+        let call = WatchCall::new(value, ops);
         for observer in observers {
-            observer.advance(change.clone(), BACKGROUND_CONTEXT.clone());
+            observer.advance(call.clone(), BACKGROUND_CONTEXT.clone());
         }
     }
 
@@ -305,9 +304,9 @@ impl TaskGraphView {
             }
         };
         let (value, ops, observers) = delivery;
-        let (change, frame_context) = (WatchChange::new(value, ops), without_abort_signal(context));
+        let (call, frame_context) = (WatchCall::new(value, ops), without_abort_signal(context));
         for observer in observers {
-            observer.advance(change.clone(), frame_context.clone());
+            observer.advance(call.clone(), frame_context.clone());
         }
     }
 }

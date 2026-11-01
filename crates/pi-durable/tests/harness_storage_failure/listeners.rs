@@ -9,8 +9,9 @@ use pi_durable::session::{Tx, WatchEnd};
 use pi_durable::storage::MemoryStorage;
 use pi_durable::*;
 
-use super::support::context;
+use super::support::{commit_observer, context};
 use super::{Started, messages, note, started};
+use crate::support::{ValueCall, on_value};
 
 // A Rust close listener returns nothing, so only commit listeners can fail here; the close listener half checks
 // that every close listener runs.
@@ -18,13 +19,14 @@ use super::{Started, messages, note, started};
 async fn reports_a_throwing_commit_listener_and_runs_the_others_the_commit_stands() {
     let Started { harness, root, reports, .. } = started(Arc::new(MemoryStorage::new())).await;
     let seen = Arc::new(Mutex::new(Vec::<&'static str>::new()));
-    let _failing = harness.subscribe_commits(|_, _| Err(DurableError::error("commit listener"))).unwrap();
+    let _failing =
+        harness.observe_commits(commit_observer(|_, _| Err(DurableError::error("commit listener")))).unwrap();
     let sink = seen.clone();
     let _commit = harness
-        .subscribe_commits(move |_, _| {
+        .observe_commits(commit_observer(move |_, _| {
             sink.lock().unwrap().push("commit");
             Ok(())
-        })
+        }))
         .unwrap();
     let sink = seen.clone();
     let _close = harness.subscribe_close(move || sink.lock().unwrap().push("close")).unwrap();
@@ -38,7 +40,7 @@ async fn reports_a_throwing_commit_listener_and_runs_the_others_the_commit_stand
 async fn reports_a_throwing_watch_listener_which_ends_that_watch() {
     let Started { harness, root, reports, .. } = started(Arc::new(MemoryStorage::new())).await;
     let watch = harness.watch_doc(&LIVE_DOC, root.id, &context()).await.unwrap().unwrap();
-    watch.start(|pi_chord::WatchChange { .. }, _| async { Err(DurableError::error("listener broke")) }).unwrap();
+    watch.start(on_value(|ValueCall { .. }, _| async { Err(DurableError::error("listener broke")) })).unwrap();
     let id = root.id;
     let change =
         move |tx: Tx| async move { tx.doc(&LIVE_DOC, id).await?.edit(|live| live.compactions = Some(Vec::new())) };

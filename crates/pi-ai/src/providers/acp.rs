@@ -7,7 +7,7 @@ mod client;
 pub(crate) mod connection;
 mod host;
 mod mcp;
-mod process;
+pub(crate) mod process;
 mod prompt;
 mod proxy;
 mod render;
@@ -29,8 +29,10 @@ pub use self::host::{
     ProxyTool, Selector, SessionInfo, agent, set_agents, set_host,
 };
 use self::render::Transcript;
-use self::session::{Runtime, rpc, slot};
+pub(crate) use self::session::selectors as session_selectors;
+use self::session::{Runtime, Shared, is_current, rpc, slot, take_slots};
 use crate::registry::{ApiProvider, StreamOptions};
+use crate::simple_options::{MappedLevel, mapped_thinking_level};
 use crate::stream::{AssistantMessageEventStream, MessageBuilder, event_channel};
 use crate::types::{Context, Message, Model, ModelCost, StopReason, Usage};
 
@@ -88,9 +90,66 @@ pub async fn set_session_option(provider: &str, pi_session: &str, id: &str, valu
     }
 }
 
-fn thinking_value(options: &StreamOptions) -> Option<String> {
-    let level = options.reasoning?;
-    serde_json::to_value(level).ok()?.as_str().map(str::to_string)
+/// Starts the agent session of `pi_session` without a prompt, so its models, modes, and thinking
+/// levels are known before the first turn, which then reuses the session. Waits for a running start or turn.
+pub async fn open_session(provider: &str, pi_session: &str) -> Result<SessionInfo, String> {
+    let agent = agent(provider).ok_or_else(|| format!("No ACP agent is set up for {provider}. Run /acp."))?;
+    let live = !pi_session.is_empty() && host::host().is_none_or(|host| host.live_session(pi_session));
+    if !live {
+        return Err(format!("{pi_session} is not a live pi session"));
+    }
+    open_in(&agent, pi_session, slot(&agent.provider, pi_session)).await
+}
+
+/// Opens the session in `shared`. A `close_session` while this open waited for the slot removed it,
+/// so the open fails and starts no agent; a later open gets a new slot.
+async fn open_in(agent: &AgentLaunch, pi_session: &str, shared: Shared) -> Result<SessionInfo, String> {
+    let mut guard = shared.lock().await;
+    if !is_current(&agent.provider, pi_session, &shared) {
+        return Err(format!("The {} session of {pi_session} was closed", agent.name));
+    }
+    let stale =
+        guard.as_ref().is_some_and(|runtime| runtime.connection.closed_reason().is_some() || runtime.agent != *agent);
+    if stale {
+        *guard = None;
+    }
+    if guard.is_none() {
+        *guard = Some(start_live(agent, pi_session).await?);
+    }
+    Ok(guard.as_ref().expect("started above").info())
+}
+
+/// Stops the agents of `pi_session` with their process groups, and drops the values waiting for
+/// a session; a running turn ends first. Other pi sessions keep theirs.
+pub async fn close_session(pi_session: &str) {
+    PENDING.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).retain(|(_, session), _| session != pi_session);
+    for shared in take_slots(pi_session) {
+        let runtime = shared.lock().await.take();
+        if let Some(mut runtime) = runtime {
+            runtime.process.shutdown().await;
+        }
+    }
+}
+
+/// The live session of `pi_session`: `session/load` or `session/new`, the replay dropped, the
+/// values set before it started applied, and the host told.
+async fn start_live(agent: &AgentLaunch, pi_session: &str) -> Result<Runtime, String> {
+    let cwd = match host::host().and_then(|host| host.session_cwd(pi_session)) {
+        Some(cwd) => cwd,
+        None => std::env::current_dir().map_err(|error| format!("Cannot read the working directory: {error}"))?,
+    };
+    let (mut runtime, resumed) = Runtime::start(agent.clone(), cwd, pi_session, false).await?;
+    if resumed {
+        skip_replay(&mut runtime).await;
+        runtime.resumed = true;
+    }
+    let key = (agent.provider.clone(), pi_session.to_string());
+    let pending = PENDING.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).remove(&key);
+    for (id, value) in pending.unwrap_or_default() {
+        runtime.set(&id, &value).await?;
+    }
+    runtime.report();
+    Ok(runtime)
 }
 
 async fn run(
@@ -107,6 +166,9 @@ async fn run(
     };
     let shared = slot(&agent.provider, pi_session);
     let mut guard = shared.lock().await;
+    if !session::is_current(&agent.provider, pi_session, &shared) {
+        return Err(format!("The {} session of {pi_session} was closed", agent.name));
+    }
     let messages = &context.messages;
     if let Some(runtime) = guard.as_mut()
         && let Some(index) = last_reply(messages, &agent.provider, runtime.last_reply)
@@ -120,24 +182,12 @@ async fn run(
         *guard = None;
     }
     if guard.is_none() {
-        let cwd = match host::host().and_then(|host| host.session_cwd(pi_session)) {
-            Some(cwd) => cwd,
-            None => std::env::current_dir().map_err(|error| format!("Cannot read the working directory: {error}"))?,
-        };
-        let (mut runtime, resumed) = Runtime::start(agent.clone(), cwd, pi_session, false).await?;
-        if resumed {
-            skip_replay(&mut runtime).await;
-            runtime.seen = messages.len().saturating_sub(1);
-        }
-        let key = (agent.provider.clone(), pi_session.to_string());
-        let pending = PENDING.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).remove(&key);
-        for (id, value) in pending.unwrap_or_default() {
-            runtime.set(&id, &value).await?;
-        }
-        runtime.report();
-        *guard = Some(runtime);
+        *guard = Some(start_live(&agent, pi_session).await?);
     }
     let runtime = guard.as_mut().expect("started above");
+    if std::mem::take(&mut runtime.resumed) {
+        runtime.seen = messages.len().saturating_sub(1);
+    }
     if let Some(proxy) = &runtime.proxy {
         proxy.refresh(pi_session).await;
     }
@@ -171,11 +221,18 @@ async fn prepare(runtime: &mut Runtime, model: &Model, options: &StreamOptions) 
         runtime.set("model", &model.id).await?;
     }
     runtime.pi_model = model.id.clone();
-    let thought = runtime.selectors.iter().find(|selector| selector.category == "thought_level");
-    let level =
-        thinking_value(options).filter(|level| thought.is_some_and(|s| s.choices.iter().any(|c| &c.id == level)));
-    if let (Some(level), Some(id)) = (level, thought.map(|selector| selector.id.clone())) {
-        runtime.set(&id, &level).await?;
+    let Some(thought) = runtime.selectors.iter().find(|selector| selector.category == "thought_level") else {
+        return Ok(());
+    };
+    let Some(level) = options.reasoning else { return Ok(()) };
+    let value = match mapped_thinking_level(model, level) {
+        MappedLevel::Value(value) => value.to_string(),
+        MappedLevel::Default => level.as_str().to_string(),
+        MappedLevel::Unsupported => return Ok(()),
+    };
+    if thought.choices.iter().any(|choice| choice.id == value) {
+        let id = thought.id.clone();
+        runtime.set(&id, &value).await?;
     }
     Ok(())
 }
@@ -330,3 +387,6 @@ fn finish(
         _ => Ok(StopReason::Stop),
     }
 }
+
+#[cfg(test)]
+mod open_tests;

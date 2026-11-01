@@ -58,7 +58,7 @@ macro_rules! env_conformance_tests {
             watch_skips_excluded_entries_and_reports_a_rename_out_of_them,
             watch_keeps_recursive_coverage_where_a_non_recursive_target_overlaps,
             watch_follows_a_directory_replaced_at_the_same_path,
-            watch_stops_reporting_once_closed,
+            watch_stops_reporting_once_stopped,
             argv_exec_passes_arguments_to_the_program_without_shell_parsing,
             exec_reports_the_stream_of_every_chunk_in_both_forms,
             argv_exec_honors_cwd_and_exit_codes,
@@ -144,7 +144,7 @@ fn covers(change: &FileChange, path: &str) -> bool {
         FileChange::Paths(paths) => paths.iter().any(|reported| {
             path == reported || path.starts_with(&format!("{reported}/")) || path.starts_with(&format!("{reported}\\"))
         }),
-        FileChange::Error(_) => false,
+        FileChange::Failed(_) => false,
     }
 }
 
@@ -189,7 +189,7 @@ impl Watching {
         }
     }
 
-    pub async fn close(self) {
-        self.watcher.close(&context()).await;
+    pub async fn stop(self) {
+        self.watcher.stop(&context()).await;
     }
 }

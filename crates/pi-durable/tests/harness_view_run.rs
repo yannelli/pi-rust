@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::support::{ValueCall, on_value};
 use pi_chord::Json;
 use pi_chord::delta::{Op, apply_immutable};
 use pi_durable::EntryDraft;
@@ -20,7 +21,7 @@ use support::Deferred;
 use support::chat::{add_tool, answer, calls};
 use support::harness_support::*;
 use support::live_support::*;
-use support::{change_record, change_value, document_changes, observe_commits};
+use support::{change_record, change_value, document_changes, follow_commits};
 
 #[path = "harness_view_run/partials.rs"]
 mod partials;
@@ -36,10 +37,10 @@ fn start_recording(watch: &ConversationWatch) -> Frames {
     let frames: Frames = Arc::default();
     let sink = frames.clone();
     watch
-        .start(move |pi_chord::WatchChange { value, ops, .. }, _| {
+        .start(on_value(move |ValueCall { value, ops, .. }, _| {
             sink.lock().unwrap().push((value, ops));
             async { Ok(()) }
-        })
+        }))
         .unwrap();
     frames
 }
@@ -90,7 +91,7 @@ type Committed = Arc<Mutex<Vec<Value>>>;
 fn committed_live(harness: &Harness, pick: impl Fn(&Value) -> Option<Value> + Send + Sync + 'static) -> Committed {
     let values = Committed::default();
     let sink = values.clone();
-    let unsubscribe = observe_commits(harness, move |publication, _| {
+    let unsubscribe = follow_commits(harness, move |publication, _| {
         for change in document_changes(publication) {
             let picked = change_value(&change).and_then(|value| pick(&value.to_serde()));
             if change_record(&change).kind == "pi.live"

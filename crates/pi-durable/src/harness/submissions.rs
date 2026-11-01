@@ -44,7 +44,7 @@ impl Submissions {
             weak: weak.clone(),
         });
         let weak = Arc::downgrade(&submissions);
-        session.observe_commits(move |publication, _| {
+        session.follow_commits(move |publication, _| {
             let Some(submissions) = weak.upgrade() else { return Ok(()) };
             // A commit held in memory changes documents only.
             if publication.is_memory() {

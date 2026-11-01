@@ -33,7 +33,7 @@ pub use state::{
 pub use strict::{CopyJsonOptions, copy_json, is_json_value};
 pub use sync::{BoxFuture, Unsubscribe};
 pub use watch::{
-    NativeWatch, NativeWatchChange, NativeWatchHandle, NativeWatchable, Watch, WatchChange, WatchEnd, WatchHandle,
+    NativeWatch, NativeWatchCall, NativeWatchHandle, NativeWatchable, Watch, WatchCall, WatchEnd, WatchHandle,
     Watchable,
 };
 

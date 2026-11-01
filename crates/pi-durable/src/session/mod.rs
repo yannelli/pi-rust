@@ -45,7 +45,7 @@ use crate::types::{CommitChange, CommitPublication, ConversationRecord, ReportIn
 /// removed document states; pi-rust keeps them for its experimental server stack.
 pub type DocumentState = pi_chord::state::AttachedReplicatedState;
 
-/// How the Session ended: `closed`, or `failed` with the error that failed it.
+/// How the Session ended, by `kind`: `closed`, or `failed` with the error that failed it.
 #[derive(Clone, Debug)]
 pub enum SessionEnd {
     Closed,
@@ -53,7 +53,7 @@ pub enum SessionEnd {
 }
 
 impl SessionEnd {
-    pub fn reason(&self) -> &'static str {
+    pub fn kind(&self) -> &'static str {
         match self {
             Self::Closed => "closed",
             Self::Failed(_) => "failed",
@@ -64,10 +64,38 @@ impl SessionEnd {
 /// Why a watch ended (spec section 9.1): Chord's `WatchEnd` with the Session's error type.
 pub type WatchEnd = pi_chord::WatchEnd<DurableError>;
 
-/// Synchronous post-adoption commit listener. It must not block or call Session operations.
-pub type CommitListener = Arc<dyn Fn(&CommitPublication, &Context) -> DurableResult<()> + Send + Sync>;
+/// One call of a JSON watch or observer: Chord's `WatchCall` with the Session's error type.
+pub type WatchCall = pi_chord::WatchCall<pi_chord::Json, DurableError>;
 
-/// What the Session's own components observe of one commit (`observe_commits()`): a stored commit with its own changes,
+/// How the Session's close ends a watch or observer: `Failed` with the error that failed the Session, else `Ended`.
+pub(crate) fn session_end(failure: Option<DurableError>) -> WatchEnd {
+    match failure {
+        Some(error) => WatchEnd::Failed(error),
+        None => WatchEnd::Ended,
+    }
+}
+
+/// A synchronous observer of stored commits (`Session::observe_commits()`): `advance` gets each stored commit, `end`
+/// the Session's close. Neither may block or call Session operations.
+pub trait CommitObserver: Send + Sync {
+    /// An error is reported as `ListenerError`, detaches the observer, and ends it `ListenerError`.
+    fn advance(&self, publication: &CommitPublication, context: &Context) -> DurableResult<()>;
+    /// Called once: `Ended` after the last publication at close, `Failed` when the Session fails; never after detach.
+    fn end(&self, end: WatchEnd);
+}
+
+/// An attached [`CommitObserver`]. `detach()` is idempotent; no `advance` or `end` follows it.
+pub struct CommitObservation(pub(crate) pi_chord::Unsubscribe);
+
+impl CommitObservation {
+    pub fn detach(&self) {
+        self.0.unsubscribe();
+    }
+}
+
+pub(crate) type CommitListener = Arc<dyn CommitObserver>;
+
+/// What the Session's own components observe of one commit (`follow_commits()`): a stored commit with its own changes,
 /// or a deferred one adopted in memory only ([`crate::CommitPersistence`]), which changes documents only. Memory is
 /// never behind: a later store of held changes is not observed again.
 #[derive(Clone, Debug, PartialEq)]

@@ -45,7 +45,7 @@ impl InteractiveMode {
         bind("app.thinking.cycle", |mode| mode.cycle_thinking_level());
         bind("app.model.cycleForward", |mode| mode.cycle_model(false));
         bind("app.model.cycleBackward", |mode| mode.cycle_model(true));
-        bind("app.model.select", |mode| mode.show_model_selector(None));
+        bind("app.model.select", |mode| mode.handle_model_command(None));
         bind("app.tools.expand", |mode| mode.toggle_tool_output_expansion());
         bind(super::widget_stack::TOGGLE_KEY, |mode| mode.toggle_widgets());
         bind("app.thinking.toggle", |mode| mode.toggle_thinking_block_visibility());
@@ -128,6 +128,24 @@ impl InteractiveMode {
     }
 
     fn cycle_thinking_level(&self) {
+        if self.current_model_is_acp() {
+            self.spawn(|mode| async move {
+                if mode.prepare_acp_session().await.is_none() {
+                    return;
+                }
+                let session = mode.session();
+                if !session.supports_thinking() {
+                    return mode.show_status("Current model does not support thinking");
+                }
+                let levels = session.available_thinking_levels();
+                let index = levels.iter().position(|level| *level == session.thinking_level()).map_or(0, |i| i + 1);
+                let next = levels[index % levels.len()];
+                if let Some(confirmed) = mode.set_acp_thinking_level(next).await {
+                    mode.finish_thinking_level(confirmed, true);
+                }
+            });
+            return;
+        }
         match self.session().cycle_thinking_level(true) {
             None => self.show_status("Current model does not support thinking"),
             Some(level) => {
@@ -137,9 +155,29 @@ impl InteractiveMode {
         }
     }
 
+    /// An Antigravity target is confirmed by the agent first; pi then switches to that exact target, and only
+    /// when the current model is unchanged.
     fn cycle_model(&self, backward: bool) {
         let session = self.session();
-        match session.cycle_model(backward, true) {
+        let Some(target) = session.next_cycle_model(backward) else { return self.show_cycle_result(None) };
+        if !super::acp_session::is_antigravity(&target.model) {
+            return self.show_cycle_result(Some(session.apply_cycle_target(target, true)));
+        }
+        let from = session.model().map(|model| (model.provider, model.id));
+        self.spawn(move |mode| async move {
+            if mode.open_antigravity_session(&target.model, target.thinking_level).await.is_none() {
+                return;
+            }
+            let session = mode.session();
+            if session.model().map(|model| (model.provider, model.id)) == from {
+                mode.show_cycle_result(Some(session.apply_cycle_target(target, true)));
+            }
+        });
+    }
+
+    fn show_cycle_result(&self, result: Option<crate::agent_session::ModelCycleResult>) {
+        let session = self.session();
+        match result {
             None => {
                 let scoped = !session.scoped_models().is_empty();
                 self.show_status(if scoped { "Only one model in scope" } else { "Only one model available" });
@@ -153,6 +191,7 @@ impl InteractiveMode {
                 };
                 let name = if result.model.name.is_empty() { &result.model.id } else { &result.model.name };
                 self.show_status(&format!("Switched to {name}{thinking}"));
+                self.open_current_acp_session();
             }
         }
     }

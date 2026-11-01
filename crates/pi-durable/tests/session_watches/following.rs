@@ -9,6 +9,7 @@ use pi_durable::{ConversationId, StorageWrite};
 
 use super::support::*;
 use super::*;
+use crate::support::{ValueCall, on_value};
 
 fn text(text: &str) -> Json {
     json(&format!(r#"{{"text":"{text}"}}"#))
@@ -47,7 +48,7 @@ async fn reports_a_change_and_a_retirement_in_one_commit_as_the_retirement_with_
     // Storage got the change, then the retirement; the commit publishes the retirement only.
     let writes = test.storage.last_commit();
     assert!(matches!(writes.as_slice(), [StorageWrite::DocumentChange { .. }, StorageWrite::DocumentRetire { .. }]));
-    assert_eq!(*changes.lock().unwrap(), [WatchChange { value: before.clone(), ops: Vec::new(), retired: true }]);
+    assert_eq!(*changes.lock().unwrap(), [ValueCall { value: before.clone(), ops: Vec::new(), retired: true }]);
     assert!(changes.lock().unwrap()[0].value.same_ref(&before));
     watch.stop().await;
 }
@@ -137,8 +138,8 @@ async fn takes_the_version_of_a_recreation_written_by_a_newer_definition_then_it
     flush().await;
     let recreated = json(r#"{"value":5,"migrated":false}"#);
     let expected = [
-        WatchChange { value: recreated.clone(), ops: vec![Op::Replace(recreated)], retired: true },
-        WatchChange {
+        ValueCall { value: recreated.clone(), ops: vec![Op::Replace(recreated)], retired: true },
+        ValueCall {
             value: json(r#"{"value":6,"migrated":false}"#),
             ops: ops(r#"[["s",["value"],6]]"#),
             retired: false,
@@ -164,10 +165,10 @@ async fn keeps_a_watch_of_a_retired_conversation_document_until_it_is_stopped_th
         let sentinel = Arc::new(());
         let listener = Arc::downgrade(&sentinel);
         watch
-            .start(move |WatchChange { .. }, _| {
+            .start(on_value(move |ValueCall { .. }, _| {
                 let _held = sentinel.clone();
                 async { Ok(()) }
-            })
+            }))
             .unwrap();
         let retire = move |tx: Tx| async move { tx.retire_doc(&NOTES_DOC, conversation_id).await };
         session.commit(retire, &context()).await.unwrap();

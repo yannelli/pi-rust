@@ -10,7 +10,7 @@ use pi_chord::state::StateListener;
 use pi_chord::{BACKGROUND_CONTEXT, Unsubscribe};
 use pi_durable::harness::types::{AgentChange, Change, ModelRef, SubmissionDraft, WhenBusy};
 use pi_durable::harness::{Conversation, Harness};
-use pi_durable::session::DocumentState;
+use pi_durable::session::{CommitObservation, DocumentState};
 use pi_durable::{ConversationId, DurableError, DurableResult, SubmissionStatus};
 use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
@@ -30,7 +30,7 @@ pub struct ControllerState {
     current: Mutex<Conversation>,
     view_state: Mutex<DocumentState>,
     unsubscribe: Mutex<Option<Unsubscribe>>,
-    unsubscribe_commits: Mutex<Option<Unsubscribe>>,
+    commits: Mutex<Option<CommitObservation>>,
     tasks: Mutex<Option<(DocumentState, Unsubscribe)>>,
 }
 
@@ -49,14 +49,14 @@ impl ControllerState {
             current: Mutex::new(current),
             view_state: Mutex::new(view_state),
             unsubscribe: Mutex::default(),
-            unsubscribe_commits: Mutex::default(),
+            commits: Mutex::default(),
             tasks: Mutex::default(),
         })
     }
 
-    pub(crate) fn set_subscriptions(&self, view: Unsubscribe, commits: Unsubscribe) {
+    pub(crate) fn set_subscriptions(&self, view: Unsubscribe, commits: CommitObservation) {
         *lock(&self.unsubscribe) = Some(view);
-        *lock(&self.unsubscribe_commits) = Some(commits);
+        *lock(&self.commits) = Some(commits);
     }
 
     fn current(&self) -> Conversation {
@@ -72,10 +72,11 @@ impl ControllerState {
 
     /// Stop every subscription. Closing the Harness is the caller's.
     pub(crate) fn detach(&self) {
-        for slot in [&self.unsubscribe, &self.unsubscribe_commits] {
-            if let Some(unsubscribe) = lock(slot).take() {
-                unsubscribe.unsubscribe();
-            }
+        if let Some(unsubscribe) = lock(&self.unsubscribe).take() {
+            unsubscribe.unsubscribe();
+        }
+        if let Some(commits) = lock(&self.commits).take() {
+            commits.detach();
         }
         let _ = lock(&self.view_state).dispose();
         self.close_tasks();

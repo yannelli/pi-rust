@@ -3,6 +3,7 @@
 //! `pi.live.run`.
 
 mod classify;
+mod restart;
 mod round;
 
 use std::sync::{Arc, LazyLock};
@@ -66,6 +67,8 @@ pub enum GenerationCheckpoint {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         compacted: Option<TaskId>,
         until: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        poll: Option<DeferredRetryPoll>,
     },
     Poll {
         attempt: u32,
@@ -88,6 +91,17 @@ pub enum GenerationCheckpoint {
         /// Calls of a sequential round not started yet, in call order.
         pending: Vec<String>,
     },
+}
+
+/// The deferred response to poll again after an interrupted fetch's backoff.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeferredRetryPoll {
+    pub model: ModelRef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_level: Option<ThinkingLevel>,
+    pub cutoff: EntryId,
+    pub handle: DeferredHandle,
 }
 
 /// Result of a generation task.
@@ -163,6 +177,9 @@ pub fn generation_task() -> Task {
 
 /// Render the system prompt and tool loadout, append the `pi.system` entries they need, and move to `request`.
 async fn prepare(task: TaskRecord, runtime: TaskRuntime, context: Context) -> DurableResult<()> {
+    if super::live::cut_off_too_often(&task, &runtime) {
+        return restart::end_cut_off(task, runtime, context).await;
+    }
     let conversation_id = runtime.conversation_id();
     let agent = runtime.agent(&context).await?;
     let settings = runtime.settings();
@@ -258,7 +275,10 @@ async fn prepare(task: TaskRecord, runtime: TaskRuntime, context: Context) -> Du
 
 /// After the backoff's sleep; a run before `until` (an early wake, or a record of an earlier version) sleeps again.
 async fn retry(task: TaskRecord, runtime: TaskRuntime, context: Context) -> DurableResult<()> {
-    let GenerationCheckpoint::Retry { attempt, compacted, until } = decode(&task)? else {
+    if super::live::cut_off_too_often(&task, &runtime) {
+        return restart::end_cut_off(task, runtime, context).await;
+    }
+    let GenerationCheckpoint::Retry { attempt, compacted, until, poll } = decode(&task)? else {
         return Err(DurableError::error("Generation checkpoint is not in phase retry"));
     };
     if until > runtime.now() {
@@ -266,10 +286,29 @@ async fn retry(task: TaskRecord, runtime: TaskRuntime, context: Context) -> Dura
         return runtime.sleep_until(until, checkpoint, &context).await;
     }
     let conversation_id = runtime.conversation_id();
+    let runtime_ = runtime.clone();
     let change = move |tx: Tx, _| async move {
         let live = tx.doc(&LIVE_DOC, conversation_id).await?;
-        live.edit(|live| live.generation = Some(LiveGeneration::new(attempt + 1)))?;
-        running(&GenerationCheckpoint::Prepare { attempt: attempt + 1, compacted, overflow: None, threshold: false })
+        let attempt = attempt + 1;
+        if let Some(poll) = poll {
+            let poll_at = runtime_.now();
+            let generation = LiveGeneration {
+                deferred: Some(super::live::DeferredPoll { poll_at }),
+                ..LiveGeneration::new(attempt)
+            };
+            live.edit(|live| live.generation = Some(generation))?;
+            return running(&GenerationCheckpoint::Poll {
+                attempt,
+                compacted,
+                model: poll.model,
+                thinking_level: poll.thinking_level,
+                cutoff: poll.cutoff,
+                handle: poll.handle,
+                poll_at,
+            });
+        }
+        live.edit(|live| live.generation = Some(LiveGeneration::new(attempt)))?;
+        running(&GenerationCheckpoint::Prepare { attempt, compacted, overflow: None, threshold: false })
     };
     runtime.commit(change, &context).await
 }

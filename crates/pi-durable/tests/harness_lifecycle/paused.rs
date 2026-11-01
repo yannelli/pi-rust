@@ -128,7 +128,7 @@ async fn runs_what_the_registry_holds_at_resume_a_definition_installed_or_replac
     let install = |task: Task| opened.registry.install(Extension::new("task:test.late-definition").task(task)).unwrap();
     install(define("v1"));
     let ready = states(harness.inspect(&context()).await.unwrap());
-    assert!(matches!(ready[..], [TaskInspectionState::Ready { .. }]), "{ready:?}");
+    assert!(matches!(ready[..], [TaskInspectionState::Pending { .. }]), "{ready:?}");
     // The same extension name replaces the definition in place, still before resume.
     opened.registry.uninstall("task:test.late-definition").unwrap();
     install(define("v2"));

@@ -33,6 +33,7 @@ use pi_durable::types::DocumentCommitChange;
 use pi_durable::*;
 use serde_json::{Value, json};
 use support::chat::{add_tool, answer, calls};
+use support::commit_observer;
 use support::harness_support::*;
 use support::task_support::{aborted, eventually};
 use support::{ControlledStorage, Deferred, document_changes};
@@ -455,16 +456,16 @@ async fn journals_results_that_finish_together_in_one_commit() {
     let (harness, root) = open(&sqlite_path(&directory), &chat.setup).await;
     let commits = Arc::new(AtomicUsize::new(0));
     let counter = commits.clone();
-    let listener = harness.subscribe_commits(move |publication, _| {
+    let listener = harness.observe_commits(commit_observer(move |publication, _| {
         for change in document_changes(publication) {
-            if let DocumentCommitChange::Document { record, .. } = change
+            if let DocumentCommitChange::Change { record, .. } | DocumentCommitChange::Retire { record, .. } = change
                 && record.kind == "pi.codemode.journal"
             {
                 counter.fetch_add(1, Ordering::SeqCst);
             }
         }
         Ok(())
-    });
+    }));
     let listener = listener.unwrap();
     harness.resume().unwrap();
     let id = submit(&root, "go").await;

@@ -42,7 +42,13 @@ pub async fn request_auth(runtime: &ModelRuntime, model: &Model) -> Result<Reque
     match resolved {
         Some(resolved) if resolved.auth.api_key.is_some() || !resolved.auth.headers.is_empty() => {
             let mut model = model.clone();
-            if let Some(base_url) = &resolved.auth.base_url {
+            let stock_kimi = matches!(
+                model.base_url.trim_end_matches('/'),
+                "" | "https://api.kimi.com/coding/v1" | "https://api.kimi.ai/coding/v1"
+            );
+            if let Some(base_url) =
+                resolved.auth.base_url.as_ref().filter(|_| model.provider != "kimi-coding" || stock_kimi)
+            {
                 model.base_url = base_url.clone();
             }
             Ok(RequestAuth { model, auth: resolved.auth, env: resolved.env })
@@ -56,6 +62,10 @@ pub async fn request_auth(runtime: &ModelRuntime, model: &Model) -> Result<Reque
         }
     }
 }
+
+#[cfg(test)]
+#[path = "auth_kimi_tests.rs"]
+mod kimi_tests;
 
 /// Install telemetry: `PI_TELEMETRY` when set, else the `enableInstallTelemetry` setting.
 pub fn install_telemetry_enabled(settings: &SettingsManager) -> bool {

@@ -5,6 +5,7 @@
 
 use std::sync::Mutex;
 
+use rquickjs::function::Opt;
 use rquickjs::{Ctx, Function, Object, Value};
 use serde_json::json;
 
@@ -210,8 +211,8 @@ mod windows {
     use std::os::windows::io::{AsRawSocket, FromRawSocket};
 
     use windows_sys::Win32::Networking::WinSock::{
-        FROM_PROTOCOL_INFO, INVALID_SOCKET, SOCKET_ERROR, WSA_FLAG_OVERLAPPED, WSADATA, WSADuplicateSocketW,
-        WSAGetLastError, WSAPROTOCOL_INFOW, WSASocketW, WSAStartup,
+        FROM_PROTOCOL_INFO, INVALID_SOCKET, SOCKET_ERROR, WSA_FLAG_NO_HANDLE_INHERIT, WSA_FLAG_OVERLAPPED, WSADATA,
+        WSADuplicateSocketW, WSAGetLastError, WSAPROTOCOL_INFOW, WSASocketW, WSAStartup,
     };
 
     const INFO_BYTES: usize = std::mem::size_of::<WSAPROTOCOL_INFOW>();
@@ -233,7 +234,7 @@ mod windows {
             return Err(io::ErrorKind::InvalidData.into());
         }
         // SAFETY: the bytes came from WSADuplicateSocketW in the peer; WSAStartup may run twice.
-        unsafe {
+        let socket = unsafe {
             let mut data: WSADATA = std::mem::zeroed();
             WSAStartup(0x202, &mut data);
             let mut info: WSAPROTOCOL_INFOW = std::mem::zeroed();
@@ -242,22 +243,35 @@ mod windows {
                 (&mut info as *mut WSAPROTOCOL_INFOW).cast::<u8>(),
                 INFO_BYTES,
             );
-            let socket =
-                WSASocketW(FROM_PROTOCOL_INFO, FROM_PROTOCOL_INFO, FROM_PROTOCOL_INFO, &info, 0, WSA_FLAG_OVERLAPPED);
+            let flags = WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT;
+            let socket = WSASocketW(FROM_PROTOCOL_INFO, FROM_PROTOCOL_INFO, FROM_PROTOCOL_INFO, &info, 0, flags);
             if socket == INVALID_SOCKET {
                 return Err(io::Error::from_raw_os_error(WSAGetLastError()));
             }
-            Ok(socket2::Socket::from_raw_socket(socket as _))
-        }
+            socket2::Socket::from_raw_socket(socket as _)
+        };
+        // The flag passed to WSASocketW did not keep a WinSock duplicate private in Windows CI.
+        socket.set_no_inherit(true)?;
+        Ok(socket)
     }
 }
 
-fn export(ctx: Ctx<'_>, id: u64) -> rquickjs::Result<u64> {
-    let socket = super::net::socket_of(id).ok_or_else(|| {
+/// A copy of a stream or listener; `mark` (default true) marks the stream shared once the copy succeeds. IPC passes
+/// false and calls `markExported` after every copy it needs is ready.
+fn export(ctx: Ctx<'_>, id: u64, mark: Opt<bool>) -> rquickjs::Result<u64> {
+    let socket = super::net::socket_of(id, mark.0.unwrap_or(true)).ok_or_else(|| {
         throw(&ctx, &JsError::type_error("This handle type cannot be sent").with_code("ERR_INVALID_HANDLE_TYPE"))
     })?;
     let socket = socket.map_err(|error| throw(&ctx, &JsError::from_io(&error, "dup", None)))?;
     Ok(state().insert_resource(Box::new(SocketHandle(socket))))
+}
+
+/// Another copy of a held socket, so a handle the peer did not receive can be sent again.
+fn clone_handle(ctx: Ctx<'_>, id: u64) -> rquickjs::Result<u64> {
+    let copy = state().with_resource(id, |handle: &mut SocketHandle| super::net::private_copy(&handle.0));
+    let copy = copy.map_err(|error| throw(&ctx, &error))?;
+    let copy = copy.map_err(|error| throw(&ctx, &JsError::from_io(&error, "dup", None)))?;
+    Ok(state().insert_resource(Box::new(SocketHandle(copy))))
 }
 
 fn adopt_socket<'js>(ctx: Ctx<'js>, handle: u64) -> rquickjs::Result<Value<'js>> {
@@ -296,6 +310,8 @@ fn import(ctx: Ctx<'_>, text: String) -> rquickjs::Result<u64> {
 
 pub(super) fn natives<'js>(object: &Object<'js>) -> rquickjs::Result<()> {
     set_fn(object, "exportHandle", export)?;
+    set_fn(object, "cloneHandle", clone_handle)?;
+    set_fn(object, "markExported", super::net::mark_exported)?;
     set_fn(object, "closeHandle", |id: u64| drop(state().resources.borrow_mut().remove(&id)))?;
     set_fn(object, "adoptSocket", adopt_socket)?;
     set_fn(object, "adoptServer", adopt_server)?;

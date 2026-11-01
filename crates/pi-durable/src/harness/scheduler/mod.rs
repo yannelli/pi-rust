@@ -35,8 +35,7 @@ use crate::ids::{ConversationId, TaskId};
 use crate::session::{DocumentWatch, TransactionScope};
 use crate::timers::Disarm;
 use crate::types::{
-    AbortReason, JoinPolicy, ReportInfo, ReportTask, StorageWrite, TaskOutcome, TaskQuery, TaskRecord, TaskState,
-    TaskStatus,
+    AbortReason, JoinPolicy, ReportTask, StorageWrite, TaskOutcome, TaskQuery, TaskRecord, TaskState, TaskStatus,
 };
 
 const SCAN_PAGE_SIZE: usize = 256;
@@ -165,8 +164,6 @@ pub(crate) struct SchedState {
     pub reconcile_scheduled: bool,
     /// Reconcile passes underway with work; they finalize held outcomes and mark cascades.
     pub reconciling: usize,
-    /// Tasks a pass left out as parked; each pass checks them again, as the restart limit may have risen.
-    pub parked: BTreeSet<TaskId>,
     pub cascade_pending: bool,
     pub unsubscribe_registry: Option<RegistryUnsubscribe>,
     pub enabled: bool,
@@ -205,7 +202,6 @@ pub(crate) struct BlockedSubject {
     pub version: u32,
     pub abort_requested: bool,
     pub abort_reason: Option<AbortReason>,
-    pub restarts: Option<u32>,
     pub status: TaskStatus,
 }
 
@@ -217,7 +213,6 @@ impl BlockedSubject {
             version: record.version,
             abort_requested: record.abort_requested,
             abort_reason: record.abort_reason,
-            restarts: record.restarts,
             status: record.status(),
         }
     }
@@ -250,13 +245,12 @@ impl Scheduler {
         lock(&self.state).closing
     }
 
-    /// Load live tasks and change surviving `running` tasks back to `pending`, counting the restart. Dispatches nothing.
-    /// A task that reaches the restart limit this way is parked and reported. Read-only, it only loads them: a
-    /// `running` task stays as committed, running in another process.
+    /// Load live tasks, moving surviving running tasks to pending and counting restarts without dispatching.
+    /// Read-only sessions leave records unchanged; tasks at the limit end when next reserved.
     pub async fn open(&self, context: &Context) -> DurableResult<()> {
         let session = &self.core.session;
         let weak = self.weak.clone();
-        session.observe_commits(move |publication, _| {
+        session.follow_commits(move |publication, _| {
             if let Some(scheduler) = weak.upgrade() {
                 scheduler.observe(publication);
             }
@@ -276,7 +270,6 @@ impl Scheduler {
             }
         }));
         lock(&self.state).unsubscribe_registry = Some(unsubscribe);
-        let limit = self.restart_limit();
         let read_only = self.core.read_only;
         let scheduler = self.arc()?;
         let opened = session.commit_with(
@@ -288,7 +281,6 @@ impl Scheduler {
                     records.extend(scan_all(|cursor| tx.scan_tasks(query.clone(), SCAN_PAGE_SIZE, cursor)).await?);
                 }
                 let mut state = lock(&scheduler.state);
-                let mut parked = Vec::new();
                 for record in records {
                     scheduler.count_active(&record.kind, 1.0);
                     state.resumed.insert(record.id);
@@ -304,9 +296,6 @@ impl Scheduler {
                             let pending = TaskState::Pending { checkpoint: checkpoint.clone() };
                             let restarts = record.restarts.unwrap_or(0) + 1;
                             let restarted = TaskRecord { restarts: Some(restarts), ..with_state(&record, pending) };
-                            if f64::from(restarts) >= limit && !record.abort_requested {
-                                parked.push(restarted.clone());
-                            }
                             tx.set_task(restarted)?;
                         }
                         TaskState::Waiting { policy: JoinPolicy::FailFast, .. } => {
@@ -316,20 +305,12 @@ impl Scheduler {
                     }
                     state.track(None, &record);
                 }
-                Ok(parked)
+                Ok(())
             },
             context,
             TransactionScope::default(),
         );
-        for record in opened.await? {
-            let restarts = record.restarts.unwrap_or(0);
-            let message = format!(
-                "Task {} ({}) was cut off {restarts} times without progress; it is parked until retry_task()",
-                record.id, record.kind
-            );
-            let (task, extension) = self.about_task(&record);
-            self.core.report(&DurableError::error(message), &ReportInfo::TaskParked { task, extension }, None);
-        }
+        opened.await?;
         if read_only {
             return Ok(());
         }
@@ -351,33 +332,7 @@ impl Scheduler {
         Ok(())
     }
 
-    /// Run a task parked by the restart limit again: clears its restart count and enables scheduling. Does nothing for
-    /// a task that is not parked; fails for an unknown one.
-    pub async fn retry(&self, id: TaskId, context: &Context) -> DurableResult<()> {
-        let scheduler = self.arc()?;
-        let retried = self.core.session.commit_with(
-            move |tx| async move {
-                let Some(current) = tx.task(id).await? else {
-                    return Err(DurableError::error(format!("Task {id} does not exist")));
-                };
-                let status = current.status();
-                if status == TaskStatus::Terminal
-                    || status == TaskStatus::Completing
-                    || !scheduler.parked(current.abort_requested, current.restarts)
-                {
-                    return Ok(());
-                }
-                tx.set_task(progressed(&current))
-            },
-            context,
-            TransactionScope::default(),
-        );
-        retried.await?;
-        self.resume()
-    }
-
-    /// Why a live task cannot run here, if it cannot: its definition (missing, too old, failed migration) or the
-    /// restart limit. A running task, an abort-marked one, and one holding its outcome are never blocked.
+    /// Whether no registered definition can take the task. Running, terminal, and completing tasks are not blocked.
     pub(crate) fn blocked_reason(&self, record: &BlockedSubject) -> Option<BlockedReason> {
         if matches!(record.status, TaskStatus::Running | TaskStatus::Completing | TaskStatus::Terminal) {
             return None;
@@ -385,9 +340,6 @@ impl Scheduler {
         // An abort request runs its handler or orphans the task; a `restart` mark waits for the definition, blocked.
         if record.abort_requested && record.abort_reason.is_none() {
             return None;
-        }
-        if self.parked(record.abort_requested, record.restarts) {
-            return Some(BlockedReason::RestartLimit);
         }
         match self.fit(record.id, record.version, self.core.registry.snapshot().task(&record.kind)) {
             Err((reason, _)) => Some(reason),
@@ -407,11 +359,6 @@ impl Scheduler {
         for listener in listeners {
             listener();
         }
-    }
-
-    /// A task cut off `restart_limit` times in a row; an abort mark still runs its abort handler.
-    pub(crate) fn parked(&self, abort_requested: bool, restarts: Option<u32>) -> bool {
-        !abort_requested && restarts.is_some_and(|n| f64::from(n) >= self.restart_limit())
     }
 
     /// `settings.restart_limit`; a failing settings source is reported and the default applies.
@@ -436,7 +383,6 @@ impl Scheduler {
             return Wake::default();
         }
         let now = self.core.now();
-        let limit = self.restart_limit();
         let (mut active, at, candidates) = {
             let state = lock(&self.state);
             // A reconcile pass with work finalizes held outcomes and marks cascades, at open as recovery: a process
@@ -459,9 +405,6 @@ impl Scheduler {
                     _ => {}
                 }
                 if active {
-                    continue;
-                }
-                if !record.abort_requested && record.restarts.is_some_and(|n| f64::from(n) >= limit) {
                     continue;
                 }
                 if record.abort_requested {
