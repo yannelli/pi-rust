@@ -13,8 +13,13 @@ use std::io::IsTerminal;
 use harness::{Setup, harness};
 use serde_json::Value;
 
-/// Upstream output, written by `node scripts/project-context-scenario.mjs <upstream>`.
-const EXPECTED: &str = include_str!("fixtures/extensions/project_context_scenario.json");
+/// Upstream output per filesystem kind, written by `node scripts/project-context-scenario.mjs` on a volume of that kind.
+const CASE_INSENSITIVE: (&str, &str) =
+    ("project_context_scenario.json", include_str!("fixtures/extensions/project_context_scenario.json"));
+const CASE_SENSITIVE: (&str, &str) = (
+    "project_context_scenario.case_sensitive.json",
+    include_str!("fixtures/extensions/project_context_scenario.case_sensitive.json"),
+);
 /// Upstream chalk 6.0.0 output per environment, written by the same script.
 const COLOR_CASES: &str = include_str!("fixtures/extensions/context_color_cases.json");
 const COLOR_PORT: &str = include_str!("../src/extensions/js/context_color.js");
@@ -28,13 +33,14 @@ import { scenario } from './project_context_scenario.mjs';
 
 export default function (pi) {
   pi.registerCommand('context', { handler: async () => {
-    const data = await scenario({ loadProjectContextFiles });
+    const tempParent = __TEMP_PARENT__;
+    const data = await scenario({ loadProjectContextFiles }, { tempParent });
     let chalk = 'absent';
     try {
       await import('chalk');
       chalk = 'present';
     } catch {}
-    pi.appendEntry('context', { data, chalk, name: loadProjectContextFiles.name });
+    pi.appendEntry('context', { data, chalk, tempParent, name: loadProjectContextFiles.name });
   }});
 }
 "#;
@@ -45,10 +51,31 @@ fn assert_generated(expected: &Value, file: &str) {
     }
 }
 
+/// Probes the volume of `dir` with std::fs, independently of the JS runtime: whether a lower-case file answers to its
+/// upper-case name, and whether the probe file is owned by root (which permission bits do not stop).
+fn probe_volume(dir: &std::path::Path) -> (bool, bool) {
+    let probe = dir.join("case-probe");
+    std::fs::write(&probe, "").unwrap();
+    let insensitive = dir.join("CASE-PROBE").exists();
+    #[cfg(unix)]
+    let root = std::os::unix::fs::MetadataExt::uid(&std::fs::metadata(&probe).unwrap()) == 0;
+    #[cfg(not(unix))]
+    let root = false;
+    std::fs::remove_file(&probe).unwrap();
+    (insensitive, root)
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn load_project_context_files_matches_upstream() {
+    let parent = tempfile::tempdir().unwrap();
+    let parent_path = std::fs::canonicalize(parent.path()).unwrap();
+    let (insensitive, root) = probe_volume(&parent_path);
+    let (golden, text) = if insensitive { CASE_INSENSITIVE } else { CASE_SENSITIVE };
+    let expected: Value = serde_json::from_str(text).unwrap();
+    assert_generated(&expected, golden);
+    let parent_json = serde_json::to_string(&parent_path.display().to_string()).unwrap();
     let files = vec![
-        ("context.ts", EXTENSION.to_string()),
+        ("context.ts", EXTENSION.replace("__TEMP_PARENT__", &parent_json)),
         ("project_context_scenario.mjs", include_str!("fixtures/extensions/project_context_scenario.mjs").to_string()),
     ];
     let h = harness(Setup { files, load: vec!["context.ts"], ..Setup::default() }).await;
@@ -59,7 +86,7 @@ async fn load_project_context_files_matches_upstream() {
     let entry = h.entries().into_iter().find(|entry| entry["customType"] == "context").expect("context entry");
     assert_eq!(entry["data"]["name"], "loadProjectContextFiles");
     assert_eq!(entry["data"]["chalk"], "absent", "the chalk port must stay private to the vendored loader");
-    let expected: Value = serde_json::from_str(EXPECTED).unwrap();
+    assert_eq!(entry["data"]["tempParent"], parent_path.display().to_string(), "the scenario ran on the probed volume");
     let cases: BTreeMap<&String, &Value> =
         expected.as_object().unwrap().iter().filter(|(name, _)| *name != "_status").collect();
     let actual = entry["data"]["data"].as_object().unwrap();
@@ -75,9 +102,11 @@ async fn load_project_context_files_matches_upstream() {
         assert_eq!(value, *case, "{name}");
         compared += 1;
     }
-    println!("project context scenario: {compared} compared, {skipped} skipped");
-    assert!(skipped <= 1 && compared + skipped == cases.len(), "{compared} compared, {skipped} skipped");
-    assert_generated(&expected, "project_context_scenario.json");
+    let kind = if insensitive { "case-insensitive" } else { "case-sensitive" };
+    println!("project context scenario ({kind}, {golden}): {compared} compared, {skipped} skipped");
+    let expected_skips = usize::from(cfg!(windows) || root);
+    assert_eq!(skipped, expected_skips, "skips allowed only on Windows or as root");
+    assert_eq!(compared + skipped, cases.len(), "{compared} compared, {skipped} skipped");
 }
 
 /// Each case loads the port in a fresh runtime with only the case's environment and arguments, as the level is fixed

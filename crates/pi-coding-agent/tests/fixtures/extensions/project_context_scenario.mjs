@@ -4,8 +4,8 @@ import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, w
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 
-export async function scenario(c) {
-	const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-context-scenario-")));
+export async function scenario(c, options = {}) {
+	const root = realpathSync(mkdtempSync(join(options.tempParent ?? tmpdir(), "pi-context-scenario-")));
 	const savedHome = ["HOME", "USERPROFILE"].map((name) => [name, name in process.env, process.env[name]]);
 	const savedError = console.error;
 	const locked = [];

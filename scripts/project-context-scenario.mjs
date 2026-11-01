@@ -1,26 +1,59 @@
 #!/usr/bin/env node
-// Usage: node scripts/project-context-scenario.mjs <upstream pi checkout with node_modules>
-// Writes the upstream expectations of project_context_scenario.json and context_color_cases.json.
+// Usage: node scripts/project-context-scenario.mjs <upstream pi checkout with node_modules> --temp-parent <dir>
+//   --filesystem case-insensitive|case-sensitive. Writes that filesystem's scenario golden (and, for case-insensitive, the color cases).
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const upstream = resolve(process.argv[2] ?? "");
-if (!process.argv[2]) throw new Error("Usage: node scripts/project-context-scenario.mjs <upstream-root>");
+const GOLDENS = {
+	"case-insensitive": "project_context_scenario.json",
+	"case-sensitive": "project_context_scenario.case_sensitive.json",
+};
+const args = process.argv.slice(2);
+const option = (name) => {
+	const at = args.indexOf(name);
+	return at >= 0 ? args[at + 1] : undefined;
+};
+const [root] = args;
+const parent = option("--temp-parent");
+const filesystem = option("--filesystem");
+if (!root || root.startsWith("--") || !parent || !(filesystem in GOLDENS)) {
+	throw new Error("Usage: node scripts/project-context-scenario.mjs <upstream-root> --temp-parent <dir> --filesystem case-insensitive|case-sensitive");
+}
+const upstream = resolve(root);
+const tempParent = realpathSync(resolve(parent));
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "../crates/pi-coding-agent/tests/fixtures/extensions");
 
-const loader = await import(pathToFileURL(join(upstream, "packages/coding-agent/src/core/resource-loader.ts")).href);
+// The kind is checked on the volume the scenario uses: a file written in lower case, looked up in upper case.
+const probeDir = mkdtempSync(join(tempParent, "pi-context-case-probe-"));
+let actual;
+try {
+	writeFileSync(join(probeDir, "case-probe"), "");
+	actual = existsSync(join(probeDir, "CASE-PROBE")) ? "case-insensitive" : "case-sensitive";
+} finally {
+	rmSync(probeDir, { recursive: true, force: true });
+}
+if (actual !== filesystem) throw new Error(`--filesystem ${filesystem}, but ${tempParent} is ${actual}`);
+
+const loaderPath = join(upstream, "packages/coding-agent/src/core/resource-loader.ts");
+const chalkVersion = JSON.parse(readFileSync(join(upstream, "node_modules/chalk/package.json"), "utf8")).version;
+if (chalkVersion !== "6.0.0") throw new Error(`expected chalk 6.0.0 at ${upstream}, found ${chalkVersion}`);
+const loader = await import(pathToFileURL(loaderPath).href);
 const { scenario } = await import(pathToFileURL(join(fixtures, "project_context_scenario.mjs")).href);
-const result = await scenario({ loadProjectContextFiles: loader.loadProjectContextFiles });
+const result = await scenario({ loadProjectContextFiles: loader.loadProjectContextFiles }, { tempParent });
 const lines = Object.entries(result).map(([name, value]) => `\t${JSON.stringify(name)}: ${JSON.stringify(value)}`);
-writeFileSync(join(fixtures, "project_context_scenario.json"), `{\n${lines.join(",\n")}\n}\n`);
+const golden = join(fixtures, GOLDENS[filesystem]);
+writeFileSync(golden, `{\n${lines.join(",\n")}\n}\n`);
+const loaderSha = createHash("sha256").update(readFileSync(loaderPath)).digest("hex");
+console.log(`Wrote ${golden} (${filesystem}, temp parent ${tempParent}, ${Object.keys(result).length} cases)`);
+console.log(`Node ${process.version}, resource-loader.ts sha256 ${loaderSha}, chalk ${chalkVersion}`);
+if (filesystem !== "case-insensitive") process.exit(0);
 
 // Each color case loads chalk fresh in a child with only the case's environment, and stdout piped (not a terminal).
 const chalk = pathToFileURL(join(upstream, "node_modules/chalk/source/index.js")).href;
-const version = JSON.parse(readFileSync(join(upstream, "node_modules/chalk/package.json"), "utf8")).version;
-if (version !== "6.0.0") throw new Error(`expected chalk 6.0.0 at ${upstream}, found ${version}`);
 const colorPath = join(fixtures, "context_color_cases.json");
 const { probes, cases } = JSON.parse(readFileSync(colorPath, "utf8"));
 if (process.platform === "win32") throw new Error("generate on macOS or Linux: `outputs` are the non-win32 expectations");
@@ -45,5 +78,5 @@ try {
 	rmSync(work, { recursive: true, force: true });
 }
 writeFileSync(colorPath, `${JSON.stringify({ probes, cases }, null, "\t")}\n`);
-console.log(`Wrote ${join(fixtures, "project_context_scenario.json")} and ${colorPath} with Node ${process.version}`);
+console.log(`Wrote ${colorPath}`);
 process.exit(0);
