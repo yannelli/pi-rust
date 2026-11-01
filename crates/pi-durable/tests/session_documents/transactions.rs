@@ -28,11 +28,11 @@ async fn creates_an_initial_base_on_first_access_and_adopts_it_after_storage_suc
     flush().await;
     let publication = test.last_publication();
     let published = &document_changes(&publication)[0];
-    let DocumentCommitChange::Document { record, value, conversation_id: owner, .. } = published else { panic!() };
+    let DocumentCommitChange::Change { record, value, conversation_id: owner, .. } = published else { panic!() };
     assert_eq!(record.created_at, publication.seq);
-    assert!(value.as_ref().unwrap().same_ref(&snapshot));
+    assert!(value.same_ref(&snapshot));
     assert_eq!(*owner, Some(conversation_id));
-    assert!(created.same_ref(value.as_ref().unwrap()));
+    assert!(created.same_ref(value));
 }
 
 #[tokio::test]
@@ -86,10 +86,10 @@ async fn adopts_by_pointer_swap_and_shares_operation_payloads_with_the_published
         .unwrap();
     flush().await;
     let snapshot = live_snapshot(&test.session, conversation_id).await.unwrap();
-    let DocumentCommitChange::Document { value, ops, .. } = &document_changes(&test.last_publication())[0] else {
+    let DocumentCommitChange::Change { value, ops, .. } = &document_changes(&test.last_publication())[0] else {
         panic!()
     };
-    assert!(value.as_ref().unwrap().same_ref(&snapshot));
+    assert!(value.same_ref(&snapshot));
     let writes = test.storage.last_commit();
     let Some(StorageWrite::DocumentChange { content: DocumentContent::Delta { ops: admitted, .. }, .. }) =
         writes.iter().find(|write| matches!(write, StorageWrite::DocumentChange { .. }))

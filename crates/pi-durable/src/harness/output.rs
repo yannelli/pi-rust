@@ -36,9 +36,58 @@ fn is_invalid(c: char) -> bool {
     matches!(c, '\u{0}'..='\u{8}' | '\u{b}'..='\u{1f}' | '\u{fff9}'..='\u{fffb}')
 }
 
-/// Remove control characters that break display and transcripts; tabs and newlines stay.
+/// The end of a complete 7-bit string, CSI, or short escape, as upstream matches them.
+fn escape_sequence_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let prefix = *bytes.get(start + 1)?;
+    if b"]PX^_".contains(&prefix) {
+        let mut cursor = start + 2;
+        while let Some(&byte) = bytes.get(cursor) {
+            match byte {
+                b'\x07' => return Some(cursor + 1),
+                b'\x1b' if bytes.get(cursor + 1) == Some(&b'\\') => return Some(cursor + 2),
+                b'\x1b' => break,
+                _ => cursor += 1,
+            }
+        }
+    }
+    if prefix == b'[' {
+        let mut cursor = start + 2;
+        while bytes.get(cursor).is_some_and(|byte| (b'0'..=b'?').contains(byte)) {
+            cursor += 1;
+        }
+        while bytes.get(cursor).is_some_and(|byte| (b' '..=b'/').contains(byte)) {
+            cursor += 1;
+        }
+        if bytes.get(cursor).is_some_and(|byte| (b'@'..=b'~').contains(byte)) {
+            return Some(cursor + 1);
+        }
+    }
+    let mut cursor = start + 1;
+    while bytes.get(cursor).is_some_and(|byte| (b' '..=b'/').contains(byte)) {
+        cursor += 1;
+    }
+    bytes.get(cursor).filter(|byte| (b'0'..=b'~').contains(*byte)).map(|_| cursor + 1)
+}
+
+/// Remove whole escape sequences and invalid control characters; tabs and newlines stay.
 pub fn sanitize_output(text: &str) -> String {
-    if text.chars().any(is_invalid) { text.chars().filter(|c| !is_invalid(*c)).collect() } else { text.to_owned() }
+    if !text.chars().any(is_invalid) {
+        return text.to_owned();
+    }
+    let mut output = String::with_capacity(text.len());
+    let mut chars = text.char_indices().peekable();
+    while let Some((index, character)) = chars.next() {
+        if character == '\x1b' {
+            if let Some(end) = escape_sequence_end(text.as_bytes(), index) {
+                while chars.peek().is_some_and(|(index, _)| *index < end) {
+                    chars.next();
+                }
+            }
+        } else if !is_invalid(character) {
+            output.push(character);
+        }
+    }
+    output
 }
 
 /// Bound `text` to whole lines within the limits: the first lines for head, the last lines for tail. A single

@@ -17,9 +17,10 @@ async fn gets_one_call_per_batch_whose_ops_turn_the_delivered_value_into_the_new
     let calls = Arc::new(Mutex::new(Vec::<usize>::new()));
     let (mirror, sink) = (replica.clone(), calls.clone());
     watch
-        .start(move |WatchChange { value, ops, .. }, _| {
+        .start(move |call, _| {
             let (mirror, sink) = (mirror.clone(), sink.clone());
             async move {
+                let (value, ops, _) = value_call(call)?;
                 let next = apply_immutable(Some(&mirror.lock().unwrap()), &ops).unwrap();
                 assert_eq!(next, value);
                 *mirror.lock().unwrap() = next;
@@ -85,9 +86,10 @@ async fn never_folds_the_in_flight_call_into_an_overflow() {
     let frames: Frames = Arc::default();
     let (seen, held) = (frames.clone(), gate.clone());
     watch
-        .start(move |WatchChange { value, ops, .. }, _| {
+        .start(move |call, _| {
             let (seen, held) = (seen.clone(), held.clone());
             async move {
+                let (value, ops, _) = value_call(call)?;
                 let first = {
                     let mut seen = seen.lock().unwrap();
                     seen.push((value, ops));

@@ -16,6 +16,7 @@ mod github_copilot_models;
 mod http;
 pub(crate) mod interact;
 mod kimi_coding;
+mod kimi_region;
 mod loopback;
 mod meta;
 mod openai_chatgpt;

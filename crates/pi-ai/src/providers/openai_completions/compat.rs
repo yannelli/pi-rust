@@ -26,6 +26,7 @@ pub(crate) struct Compat {
     /// Top-level field that caps reasoning tokens, if the server has one.
     pub thinking_budget_field: Option<String>,
     pub supports_strict_mode: bool,
+    pub requires_typed_tool_properties: bool,
     /// Grammar tools are sent as OpenAI `custom` tools.
     pub supports_openai_grammar_tools: bool,
     pub supports_mid_convo_system_messages: bool,
@@ -154,6 +155,11 @@ impl Compat {
             zai_tool_stream: flag("zaiToolStream", false),
             thinking_budget_field: budget_field,
             supports_strict_mode: flag("supportsStrictMode", false),
+            requires_typed_tool_properties: moonshot
+                || model.provider == "kimi-coding"
+                || reqwest::Url::parse(&model.base_url)
+                    .ok()
+                    .is_some_and(|url| matches!(url.host_str(), Some("api.kimi.ai" | "api.kimi.com"))),
             supports_openai_grammar_tools: flag("supportsOpenAIGrammarTools", false),
             supports_mid_convo_system_messages: flag("supportsMidConvoSystemMessages", false),
             supports_mid_convo_tool_additions: flag("supportsMidConvoToolAdditions", false),

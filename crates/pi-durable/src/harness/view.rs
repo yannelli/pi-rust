@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use pi_chord::state::{ReplicatedStateSourceOptions, attach_replicated_state_source};
-use pi_chord::{Context, Json, JsonMap, Watch, WatchChange, without_abort_signal};
+use pi_chord::{Context, Json, JsonMap, Watch, without_abort_signal};
 
 use super::agent::AGENT_DOC;
 use super::inbox::INBOX_DOC;
@@ -20,7 +20,7 @@ use crate::errors::{DurableError, DurableResult};
 use crate::ids::ConversationId;
 use crate::session::{
     CommittedObserver, CommittedStateSource, DocumentState, GuardedObserver, Observation, ObservedCommit, Observer,
-    Release, Session,
+    Release, Session, WatchCall, WatchEnd, session_end,
 };
 
 /// The view `{ conversation, entries, before?, docs }` as JSON: a window over the fork-aware transcript in entry ID
@@ -32,20 +32,20 @@ pub type ConversationWatch = Watch<DurableError>;
 
 /// Receives each next revision of one observer's window, and the Session's close.
 pub(crate) trait ViewObserver: Send + Sync {
-    fn advance(&self, change: &WatchChange, context: &Context);
-    /// The Session closed, or failed with `failure`.
-    fn end(&self, failure: Option<DurableError>);
+    fn advance(&self, call: &WatchCall, context: &Context);
+    /// The Session closed (`Ended`), or failed (`Failed`).
+    fn end(&self, end: WatchEnd);
 }
 
 struct Committed(Arc<dyn CommittedObserver>);
 
 impl ViewObserver for Committed {
-    fn advance(&self, change: &WatchChange, context: &Context) {
-        self.0.advance(change.clone(), context.clone());
+    fn advance(&self, call: &WatchCall, context: &Context) {
+        self.0.advance(call.clone(), context.clone());
     }
 
-    fn end(&self, failure: Option<DurableError>) {
-        self.0.end(failure);
+    fn end(&self, end: WatchEnd) {
+        self.0.end(end);
     }
 }
 
@@ -67,7 +67,7 @@ impl ConversationViews {
             next: AtomicU64::new(0),
         });
         let weak = Arc::downgrade(&views);
-        session.observe_commits(move |publication, context| {
+        session.follow_commits(move |publication, context| {
             if let Some(views) = weak.upgrade() {
                 views.advance_all(publication, context);
             }
@@ -78,9 +78,9 @@ impl ConversationViews {
             let Some(views) = weak.upgrade() else { return };
             views.closed.store(true, Ordering::SeqCst);
             let mounts: Vec<Mount> = lock(&views.mounts).drain().map(|(_, mount)| mount).collect();
-            let failure = views.session.failure();
+            let end = session_end(views.session.failure());
             for (_, windowed) in mounts.into_iter().flat_map(|mount| mount.observers) {
-                windowed.observer.end(failure.clone());
+                windowed.observer.end(end.clone());
             }
         })?;
         Ok(views)
@@ -129,7 +129,7 @@ impl ConversationViews {
         Ok(Observation::new(value, Arc::new(move || guarded.detach())))
     }
 
-    /// A serialized exact-frame watch of the view, an observer of its mount; cancelling `context` stops it.
+    /// A serialized exact-frame watch of the view, an observer of its mount; aborting `context` ends it `Aborted`.
     pub async fn watch(
         self: &Arc<Self>,
         id: ConversationId,
@@ -144,11 +144,11 @@ impl ConversationViews {
             })
             .await?;
         if context.is_cancelled() {
-            watch.cancel();
+            watch.abort();
             return Err(cancellation(context));
         }
         if let Some(signal) = context.abort_signal() {
-            watch.observe_cancellation(&signal)?;
+            watch.observe_abort(&signal)?;
         }
         Ok(watch)
     }
@@ -246,8 +246,8 @@ impl ConversationViews {
             }
         }
         let frame_context = without_abort_signal(context);
-        for (observer, change) in deliveries {
-            observer.advance(&change, &frame_context);
+        for (observer, call) in deliveries {
+            observer.advance(&call, &frame_context);
         }
     }
 }

@@ -1,6 +1,7 @@
 //! The example 23 script: spawn, report, stop, status, and a report delivered after a restart.
 
 use super::*;
+use crate::support::{ValueCall, on_value};
 
 type Lines = Arc<Mutex<Vec<String>>>;
 
@@ -42,7 +43,7 @@ async fn follow(harness: &Harness, id: ConversationId, lines: &Lines) -> Convers
     let newest = Mutex::new(newest_of(&watch.value().to_serde()).unwrap_or(0));
     let sink = lines.clone();
     watch
-        .start(move |pi_chord::WatchChange { value, .. }, _| {
+        .start(on_value(move |ValueCall { value, .. }, _| {
             let value = value.to_serde();
             let mut newest = newest.lock().unwrap();
             let since = *newest;
@@ -54,7 +55,7 @@ async fn follow(harness: &Harness, id: ConversationId, lines: &Lines) -> Convers
             }
             *newest = newest_of(&value).unwrap_or(since).max(since);
             async { Ok(()) }
-        })
+        }))
         .unwrap();
     watch
 }

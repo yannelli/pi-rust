@@ -6,6 +6,7 @@ mod support;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use crate::support::{ValueCall, on_value};
 use async_trait::async_trait;
 use pi_chord::{Context, Json};
 use pi_durable::harness::*;
@@ -297,14 +298,10 @@ async fn blocked_state(harness: &Harness, id: TaskId) -> TaskInspectionState {
     inspection.tasks.into_iter().find(|task| task.record.id == id).unwrap().state
 }
 
-fn restart_limit_blocked() -> TaskInspectionState {
-    TaskInspectionState::Blocked { reason: BlockedReason::RestartLimit, error: None }
-}
-
 /// Watch the task graph; `blocked` reads one task's `blocked` field.
 async fn watch_graph(harness: &Harness) -> TaskGraphWatch {
     let graph = harness.watch_task_graph(&context()).await.unwrap();
-    graph.start(|pi_chord::WatchChange { .. }, _| async { Ok(()) }).unwrap();
+    graph.start(on_value(|ValueCall { .. }, _| async { Ok(()) })).unwrap();
     graph
 }
 
@@ -338,14 +335,14 @@ async fn keeps_the_hosts_wake_active_until_opens_recovery_pass_has_landed() {
     let storage = CrashStorage::new(Arc::new(open_sqlite_storage(&path).await.unwrap()));
     *storage.fail_next.lock().unwrap() = Some(DurableError::error("reset"));
     let opened = open_on(storage, &registry, &no_limit).await;
-    assert_eq!(opened.harness.closed().await.reason(), "failed");
+    assert_eq!(opened.harness.closed().await.kind(), "failed");
     // The host was told work is underway, and never that it ended: its recovery alarm stays.
     flush().await;
     assert_eq!(*opened.wakes.lock().unwrap(), [Wake { active: true, at: None }]);
 }
 
 #[tokio::test]
-async fn parks_a_task_cut_off_restart_limit_times_in_a_row_shows_why_and_runs_it_again_on_retry_task() {
+async fn faults_an_extensions_task_cut_off_restart_limit_times_in_a_row_instead_of_running_it_again() {
     let directory = tempfile::tempdir().unwrap();
     let path = sqlite_path(&directory);
     let state = Loop::crashing();
@@ -363,27 +360,24 @@ async fn parks_a_task_cut_off_restart_limit_times_in_a_row_shows_why_and_runs_it
     }
     let harness = opened.harness.clone();
     assert_eq!(restarts(&harness, id).await, Some(3));
-    let parked = ReportInfo::TaskParked { task: report_task(id, "test.crash-loop"), extension: Some("loop".into()) };
-    assert_eq!(opened.infos(), [parked]);
-    assert_eq!(blocked_state(&harness, id).await, restart_limit_blocked());
-    let graph = watch_graph(&harness).await;
-    assert_eq!(blocked(&graph, id), json!("restart_limit"));
-    // Parked work needs no process: nothing is active.
-    eventually(|| async { !harness.wake().unwrap().active }).await;
-    assert_eq!(harness.wake().unwrap(), Wake { active: false, at: None });
+    // Nothing is parked: the task is ready, and the host is asked to run, which ends it.
+    assert_eq!(blocked_state(&harness, id).await, TaskInspectionState::Pending { migrates: false });
+    assert!(harness.wake().unwrap().active);
     harness.resume().unwrap();
-    // A scheduling pass runs within a few turns; it leaves the parked task out.
-    for _ in 0..5 {
-        flush().await;
-    }
-    assert_eq!(state.started(), 3);
-
-    state.crashing.store(false, Ordering::SeqCst);
-    harness.retry_task(id, &context()).await.unwrap();
     let settled = harness.wait_for_task(id, &context()).await.unwrap();
-    assert!(matches!(settled.state.outcome(), Some(TaskOutcome::Completed { .. })));
-    assert_eq!(state.started(), 4);
-    graph.stop().await;
+    let outcome = serde_json::to_value(settled.state.outcome()).unwrap();
+    let message = format!("Task {id} (test.crash-loop) was cut off 3 times without progress");
+    let expected =
+        json!({ "status": "faulted", "error": { "message": message, "detail": { "reason": "restart_limit" } } });
+    assert_eq!(outcome, expected);
+    assert_eq!(state.started(), 3);
+    eventually(|| async { !opened.infos().is_empty() }).await;
+    let faulted = ReportInfo::TaskFaulted {
+        task: report_task(id, "test.crash-loop"),
+        extension: Some("loop".into()),
+        reason: FaultReason::RestartLimit,
+    };
+    assert_eq!(opened.infos(), [faulted]);
     harness.close(&context()).await.unwrap();
 }
 
@@ -506,7 +500,7 @@ async fn faults_a_task_whose_abort_handler_is_cut_off_restart_limit_times() {
 }
 
 #[tokio::test]
-async fn runs_a_parked_task_once_a_raised_restart_limit_no_longer_parks_it() {
+async fn reads_restart_limit_when_it_reserves_the_task_a_raised_one_runs_it_again() {
     let directory = tempfile::tempdir().unwrap();
     let path = sqlite_path(&directory);
     let state = Loop::crashing();
@@ -519,26 +513,19 @@ async fn runs_a_parked_task_once_a_raised_restart_limit_no_longer_parks_it() {
     eventually(|| async { state.started() == 1 }).await;
     opened.kill().await; // a crash: a close would not count
     let opened = open_with(&path, &registry, &settings).await;
-    let graph = watch_graph(&opened.harness).await;
-    opened.harness.resume().unwrap();
-    eventually(|| async { blocked(&graph, id) == json!("restart_limit") }).await;
-    // Let a scheduling pass leave the parked task out.
-    for _ in 0..5 {
-        flush().await;
-    }
+    assert_eq!(restarts(&opened.harness, id).await, Some(1));
     state.crashing.store(false, Ordering::SeqCst);
-    // The host's live settings change; the next pass runs the task.
+    // The host's live settings change before the task is reserved; it runs instead of ending.
     *settings.lock().unwrap() = Some(f64::INFINITY);
     opened.harness.resume().unwrap();
     let settled = opened.harness.wait_for_task(id, &context()).await.unwrap();
     assert!(matches!(settled.state.outcome(), Some(TaskOutcome::Completed { .. })));
     assert_eq!(state.started(), 2);
-    graph.stop().await;
     opened.harness.close(&context()).await.unwrap();
 }
 
 #[tokio::test]
-async fn still_runs_the_abort_handler_of_a_parked_task() {
+async fn runs_the_abort_handler_of_a_task_at_the_limit() {
     let directory = tempfile::tempdir().unwrap();
     let path = sqlite_path(&directory);
     let state = Loop::crashing();
@@ -601,7 +588,14 @@ async fn does_not_count_the_same_checkpoint_committed_again_as_progress() {
         opened = open_with(&path, &registry, &two).await;
     }
     assert_eq!(restarts(&opened.harness, id).await, Some(2));
-    assert_eq!(blocked_state(&opened.harness, id).await, restart_limit_blocked());
+    opened.harness.resume().unwrap();
+    let settled = opened.harness.wait_for_task(id, &context()).await.unwrap();
+    let outcome = serde_json::to_value(settled.state.outcome()).unwrap();
+    assert_eq!(
+        (&outcome["status"], &outcome["error"]["detail"]),
+        (&json!("faulted"), &json!({ "reason": "restart_limit" }))
+    );
+    assert_eq!(started.load(Ordering::SeqCst), 2);
     opened.harness.close(&context()).await.unwrap();
 }
 

@@ -38,6 +38,9 @@ fn invalid(message: &str) -> ToolExecutionResult {
 pub(super) async fn call(task: TaskRecord, runtime: TaskRuntime, context: Context) -> DurableResult<()> {
     let input = decode_input(&task)?;
     let call = read_call(&runtime, &input, &context).await?;
+    if crate::harness::live::cut_off_too_often(&task, &runtime) {
+        return end_cut_off(&task, &runtime, &input, &call, &context).await;
+    }
     let Some(tool) = resolve_tool(&runtime, &input, &call.call.name, &context).await? else {
         let error = harness_error("tool_unavailable", &format!("Tool {} is not available", call.call.name));
         return settle(&runtime, &input, &call, Ending::Completed, move |_| error, &context, None).await;
@@ -122,6 +125,9 @@ pub(super) async fn execute(task: TaskRecord, runtime: TaskRuntime, context: Con
     let call = read_call(&runtime, &input, &context).await?;
     let tool = resolve_tool(&runtime, &input, &call.call.name, &context).await?;
     if let Some(tool) = tool.filter(|tool| replay == ToolReplay::Safe && tool.replay == Some(ToolReplay::Safe)) {
+        if crate::harness::live::cut_off_too_often(&task, &runtime) {
+            return end_cut_off(&task, &runtime, &input, &call, &context).await;
+        }
         // The rerun reports from scratch; clear what the interrupted run published.
         let (conversation_id, task_id) = (runtime.conversation_id(), runtime.task_id());
         let change = move |tx: Tx, _| async move {
@@ -137,8 +143,21 @@ pub(super) async fn execute(task: TaskRecord, runtime: TaskRuntime, context: Con
     }
     let message = format!("Tool {} was interrupted and may have partially run", call.call.name);
     // `failed` records cancellation intent, so the call's owned conversations, left unsupervised, are aborted.
-    let ending = Ending::Failed(message.clone());
+    let ending = Ending::Failed { message: message.clone(), reason: None };
     settle(&runtime, &input, &call, ending, move |slot| from_slot(slot, "interrupted", &message), &context, None).await
+}
+
+async fn end_cut_off(
+    task: &TaskRecord,
+    runtime: &TaskRuntime,
+    input: &ToolTaskInput,
+    call: &ToolHookCall,
+    context: &Context,
+) -> DurableResult<()> {
+    let count = crate::harness::live::cut_off_count(task);
+    let message = format!("Tool {} was interrupted {count}; it is not run again", call.call.name);
+    let ending = Ending::Failed { message: message.clone(), reason: Some("restart_limit".into()) };
+    settle(runtime, input, call, ending, move |slot| from_slot(slot, "restart_limit", &message), context, None).await
 }
 
 pub(super) async fn abort(task: TaskRecord, runtime: TaskRuntime, context: Context) -> DurableResult<()> {
@@ -226,7 +245,7 @@ async fn run(
                 ..ToolExecutionResult::default()
             };
             // A failure ends the task `failed`, which cancels what the call owned.
-            (result, Ending::Failed(format!("Tool {} threw", call.call.name)))
+            (result, Ending::Failed { message: format!("Tool {} threw", call.call.name), reason: None })
         }
     };
     state.ended.store(true, Ordering::SeqCst);

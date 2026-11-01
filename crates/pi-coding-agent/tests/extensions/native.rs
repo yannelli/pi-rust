@@ -133,6 +133,9 @@ impl ExtensionUi for NativeUi {
     }
 
     async fn custom(&self, request: CustomRequest) -> Result<Option<Value>, String> {
+        // pi-js starts each later host op only after this op's first poll returns, so block only after a yield:
+        // the panel's `ui.resize` write to the child is such an op.
+        tokio::task::yield_now().await;
         let mut component = request.factory.create_async().await.map_err(|error| raw_diagnostic(&error))?;
         // This runs in a spawned host op, where a panic would leave the command waiting forever.
         let rendered = tokio::task::block_in_place(|| {

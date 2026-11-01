@@ -13,6 +13,8 @@ mod inbox;
 mod interactions;
 #[path = "harness_compaction/manual.rs"]
 mod manual;
+#[path = "harness_compaction/migration.rs"]
+mod migration;
 #[path = "harness_compaction/outcomes.rs"]
 mod outcomes;
 #[path = "harness_compaction/overflow.rs"]

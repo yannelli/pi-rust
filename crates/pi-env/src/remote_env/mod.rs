@@ -347,7 +347,7 @@ impl FileSystem for RemoteExecutionEnv {
             .await
             .map_err(|error| to_file_error(&error, None))?;
         if let Some(aborted) = abort_result(context, None) {
-            watcher.close(context).await;
+            watcher.stop(context).await;
             return aborted;
         }
         Ok(Box::new(watcher))

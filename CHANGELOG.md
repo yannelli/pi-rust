@@ -2,6 +2,62 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.10.4] - 2026-11-01
+
+### Fixed
+
+- **ai:** use global Kimi login and complete tool schema types (#173) ([8f441d3](https://github.com/yannelli/pi-rust/commit/8f441d30f2e2fc3050cbca3705bf275234142ad9))
+
+## [0.10.3] - 2026-11-01
+
+### Added
+
+- **sdk:** export project context loading (#174) ([ccaa6e0](https://github.com/yannelli/pi-rust/commit/ccaa6e09f45e3527a0065f0d48cbb06684591c49))
+
+## [0.10.2] - 2026-10-31
+
+### Fixed
+
+- **auth:** persist rotated OAuth tokens after caller cancellation (#171) ([097aa7a](https://github.com/yannelli/pi-rust/commit/097aa7ad681c70abe4fec27118366307fb42e52c))
+
+## [0.10.1] - 2026-10-31
+
+### Added
+
+- **extensions:** support project resource trust checks ([94277bb](https://github.com/yannelli/pi-rust/commit/94277bbcb4bbec2f707f881ffa5534fb79278d02))
+
+## [0.10.0] - 2026-10-31
+
+### Breaking Changes
+
+- **durable:** return SQLite statement row counts (upstream 8025c414d) ([43e0421](https://github.com/yannelli/pi-rust/commit/43e04216ef481a4c590da2e33d85ae357f20af94))
+- **durable:** add recoverable watch calls and align session reports (upstream 5f312dac4) ([3ac2a9e](https://github.com/yannelli/pi-rust/commit/3ac2a9e31ea68e7b75bede982a53eff7bab1a07e))
+- **durable:** end interrupted runs at the restart limit (upstream b3a29f111) ([c889811](https://github.com/yannelli/pi-rust/commit/c889811f023cf8b887235a7764311b58623aff82))
+
+### Fixed
+
+- **durable:** preserve ready shell output when pipe readers stop ([38afd67](https://github.com/yannelli/pi-rust/commit/38afd673d72637eda23057db356c4858c3d5e614))
+- **durable:** strip whole ANSI escapes from tool output (upstream 50d9f823e) ([e4ccde7](https://github.com/yannelli/pi-rust/commit/e4ccde79eb2767d2ed9bc74cfc3dc9302e52f39b))
+
+## [0.9.2] - 2026-10-31
+
+### Fixed
+
+- **js:** retain transferred sockets until the receiver acknowledges them ([36575a9](https://github.com/yannelli/pi-rust/commit/36575a9a50987b379a7acd96d5a8500e5d54dd7b))
+- **tui:** wrap wide math and stop bare URLs at CJK punctuation ([e567dc6](https://github.com/yannelli/pi-rust/commit/e567dc6925f1bf2d4220d80ec13a9d008600fc3a))
+- **coding-agent:** bound pi.exec output and finish after child exit (upstream c466a3595) ([65eed61](https://github.com/yannelli/pi-rust/commit/65eed6127ed0fc31067346d6167cbc80ae7ce652))
+
+## [0.9.1] - 2026-10-31
+
+### Added
+
+- **extensions:** expose upstream compaction exports ([f8a44f9](https://github.com/yannelli/pi-rust/commit/f8a44f9fb10cd69eb578f171aa14f63b0eff7076))
+- **extensions:** expose upstream faux providers and image APIs ([f5977de](https://github.com/yannelli/pi-rust/commit/f5977de44b77d723314f66f9e67091c42ac3cc44))
+
+### Fixed
+
+- **extensions:** refresh vendored Markdown rendering ([9f5d2b2](https://github.com/yannelli/pi-rust/commit/9f5d2b278478211c7a783b44b28556f6f992574e))
+
 ## [0.9.0] - 2026-10-31
 
 ### Breaking Changes

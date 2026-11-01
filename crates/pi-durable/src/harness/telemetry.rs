@@ -23,9 +23,9 @@ pub static DURABLE_TELEMETRY_SCHEMA: LazyLock<TelemetrySchemaDefinition> = LazyL
     let report_type = json!({
         "type": "string",
         "required": true,
-        "description": "ReportInfo type.",
+        "description": "Report kind (`Report.kind`).",
         "values": [
-            "session_failed", "task_faulted", "task_parked", "migration_failed", "task_outdated", "task_error",
+            "storage_failed", "task_faulted", "task_interrupted", "migration_failed", "task_outdated", "task_error",
             "extension_error", "host_error", "listener_error",
         ],
     });
@@ -37,7 +37,7 @@ pub static DURABLE_TELEMETRY_SCHEMA: LazyLock<TelemetrySchemaDefinition> = LazyL
                 "type": "string",
                 "required": false,
                 "description": "Fixed report reason, when present.",
-                "values": ["threw", "restart_limit", "missing_task", "incompatible_task"],
+                "values": ["threw", "restart_limit", "interrupted", "missing_task", "task_too_old", "migration_failed"],
             },
             "extension": {"type": "string", "required": false, "description": "Registered extension name, when present."},
             "task.id": {"type": "number", "required": false, "description": "Task ID, when present.", "cardinality": "high"},
@@ -106,7 +106,7 @@ pub static DURABLE_TELEMETRY_SCHEMA: LazyLock<TelemetrySchemaDefinition> = LazyL
         "metrics": {
             "pi.durable.reports": {
                 "kind": "counter",
-                "description": "Reports raised, grouped by their fixed ReportInfo type.",
+                "description": "Reports raised, grouped by their fixed kind.",
                 "attributes": {"type": report_type},
             },
             "pi.durable.phase.duration": {
@@ -152,10 +152,10 @@ impl DurableTelemetry {
         }
     }
 
-    /// Count a report by type and add a fixed-field `pi.durable.report` event to the context's span; no error payload.
+    /// Count a report by kind and add a fixed-field `pi.durable.report` event to the context's span; no error payload.
     pub fn report(&self, info: &ReportInfo, context: Option<&Context>) {
+        let kind = info.kind().to_owned();
         let info = serde_json::to_value(info).unwrap_or_default();
-        let kind = info["type"].as_str().unwrap_or_default().to_owned();
         let _ = self.reports.add(1.0, SpanAttributes::new().with("type", kind.clone()));
         let Some(context) = context else { return };
         let attributes = SpanAttributes::new()

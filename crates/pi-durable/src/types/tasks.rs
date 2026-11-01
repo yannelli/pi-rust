@@ -239,9 +239,8 @@ pub struct TaskRecord {
     /// Wall-clock milliseconds of the change to `terminal`, stamped by the Session; absent while live.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ended_at: Option<f64>,
-    /// How many times in a row a crash, eviction, or reset cut the task off while it ran, without the task changing
-    /// its state since; open counts them, and a close does not. At `HarnessSettings::restart_limit` the task is
-    /// parked as blocked until `Harness::retry_task()`.
+    /// Consecutive interruptions without a state change; open counts them, close does not. At the restart limit,
+    /// built-in phases end themselves and the scheduler faults other kinds. Generations use this to charge attempts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restarts: Option<u32>,
     /// Adapter-owned context that created this task; phase invocations extract it as their parent.

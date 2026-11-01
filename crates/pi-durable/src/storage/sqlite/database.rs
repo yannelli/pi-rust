@@ -94,6 +94,9 @@ impl SqliteRow {
 pub trait SqliteExecutor: Send + Sync {
     async fn exec(&self, sql: &str) -> DurableResult<()>;
     async fn run(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<()>;
+    /// `run`, returning the rows changed as SQLite `changes()` counts them, without index or trigger writes. It may
+    /// cost an extra statement, so callers that need no count use `run`.
+    async fn run_counted(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<u64>;
     async fn get(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<Option<SqliteRow>>;
     async fn all(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<Vec<SqliteRow>>;
 }

@@ -1,5 +1,5 @@
-//! A `Models` wrapper standing in for upstream's `Proxy` over `models`: it replaces `stream_simple` or
-//! `cancel_deferred` and delegates the rest.
+//! A `Models` wrapper standing in for upstream's `Proxy` over `models`: it replaces `stream_simple`,
+//! `fetch_deferred`, or `cancel_deferred` and delegates the rest.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,21 +12,40 @@ use pi_durable::models::{DeferredCancelOptions, DeferredFetchOptions, Models, Si
 use pi_durable::{DurableError, DurableResult};
 
 pub type StreamFn = Arc<dyn Fn(&Model) -> AssistantMessageEventStream + Send + Sync>;
+/// Replaces `fetch_deferred`; it gets the wrapped `Models` to delegate to.
+pub type FetchFn = Arc<
+    dyn Fn(&Arc<dyn Models>, &Model, &DeferredHandle, DeferredFetchOptions) -> BoxFuture<'static, AssistantMessage>
+        + Send
+        + Sync,
+>;
+pub type CancelFn = Arc<dyn Fn(DeferredCancelOptions) -> BoxFuture<'static, DurableResult<()>> + Send + Sync>;
 
 pub struct WrappedModels {
     pub inner: Arc<dyn Models>,
     pub stream: Option<StreamFn>,
     /// When set, `cancel_deferred` rejects with this message.
     pub cancel_error: Option<String>,
+    pub fetch: Option<FetchFn>,
+    pub cancel: Option<CancelFn>,
 }
 
 impl WrappedModels {
     pub fn stream(inner: Arc<dyn Models>, stream: StreamFn) -> Arc<dyn Models> {
-        Arc::new(Self { inner, stream: Some(stream), cancel_error: None })
+        Arc::new(Self { inner, stream: Some(stream), cancel_error: None, fetch: None, cancel: None })
     }
 
     pub fn failing_cancel(inner: Arc<dyn Models>, message: &str) -> Arc<dyn Models> {
-        Arc::new(Self { inner, stream: None, cancel_error: Some(message.to_owned()) })
+        Arc::new(Self { inner, stream: None, cancel_error: Some(message.to_owned()), fetch: None, cancel: None })
+    }
+
+    /// `inner` with `fetch_deferred` replaced by `fetch`.
+    pub fn fetching(inner: Arc<dyn Models>, fetch: FetchFn) -> Arc<dyn Models> {
+        Arc::new(Self { inner, stream: None, cancel_error: None, fetch: Some(fetch), cancel: None })
+    }
+
+    /// `inner` with `cancel_deferred` replaced by `cancel`.
+    pub fn cancelling(inner: Arc<dyn Models>, cancel: CancelFn) -> Arc<dyn Models> {
+        Arc::new(Self { inner, stream: None, cancel_error: None, fetch: None, cancel: Some(cancel) })
     }
 }
 
@@ -60,12 +79,27 @@ impl Models for WrappedModels {
         self.inner.stream_deferred(model, handle, options)
     }
 
+    fn fetch_deferred(
+        &self,
+        model: &Model,
+        handle: &DeferredHandle,
+        options: DeferredFetchOptions,
+    ) -> BoxFuture<'static, AssistantMessage> {
+        match &self.fetch {
+            Some(fetch) => fetch(&self.inner, model, handle, options),
+            None => self.inner.fetch_deferred(model, handle, options),
+        }
+    }
+
     fn cancel_deferred(
         &self,
         model: &Model,
         handle: &DeferredHandle,
         options: DeferredCancelOptions,
     ) -> BoxFuture<'static, DurableResult<()>> {
+        if let Some(cancel) = &self.cancel {
+            return cancel(options);
+        }
         match &self.cancel_error {
             Some(message) => {
                 let error = DurableError::error(message.clone());

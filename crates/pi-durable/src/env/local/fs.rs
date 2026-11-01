@@ -410,7 +410,7 @@ impl FileSystem for LocalExecutionEnv {
             .collect();
         let watcher = watch::LocalFileWatcher::open(resolved, on_change, self.watch_options).await?;
         if context.is_cancelled() {
-            watcher.close(context).await;
+            watcher.stop(context).await;
             return Err(FileError::aborted(None));
         }
         Ok(Box::new(watcher))

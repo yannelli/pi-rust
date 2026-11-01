@@ -151,9 +151,9 @@ impl Tx {
                 continue;
             }
             lock(&change.tracker).adopt(&change.prepared)?;
-            let (version, value, ops) = (Some(change.version), Some(change.prepared.value), change.prepared.ops);
+            let (version, value, ops) = (change.version, change.prepared.value, change.prepared.ops);
             let conversation_id = plan.conversation_id;
-            publications.push(DocumentCommitChange::Document { record, conversation_id, version, value, ops });
+            publications.push(DocumentCommitChange::Change { record, conversation_id, version, value, ops });
         }
         Ok(publications)
     }
@@ -252,7 +252,7 @@ impl SessionCore {
     }
 
     /// On the line: store the held changes of `ids` in one storage transaction. Memory already has them, so only
-    /// `subscribe_commits()` listeners see it, published as Storage adopts it. A failure fails the Session, as every
+    /// `observe_commits()` observers see it, published as Storage adopts it. A failure fails the Session, as every
     /// Storage failure does.
     pub(crate) async fn store_holds(self: &Arc<Self>, ids: &[DocumentId], context: &Context) -> DurableResult<()> {
         let (mut writes, mut changes, mut stored) = (Vec::new(), Vec::new(), Vec::new());
@@ -270,8 +270,7 @@ impl SessionCore {
                     DocumentScope::Conversation { conversation_id } => Some(conversation_id),
                     _ => None,
                 };
-                let (version, value) = (Some(version), Some(value));
-                let change = DocumentCommitChange::Document { record, conversation_id, version, value, ops };
+                let change = DocumentCommitChange::Change { record, conversation_id, version, value, ops };
                 changes.push(CommitChange::Document(change));
             }
         }

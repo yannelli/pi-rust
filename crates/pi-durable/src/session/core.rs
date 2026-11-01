@@ -14,7 +14,10 @@ use super::guarded::{FailureLatch, GuardedStorage};
 use super::holds::{Holds, deferral};
 use super::line::{Line, SharedResult, await_with_context, lock, spawn_shared};
 use super::tx::{TransactionScope, Tx};
-use super::{CommitListener, ObservedCommit, ObservedCommitListener, SessionEnd, SessionHooks};
+use super::{
+    CommitListener, CommitObservation, CommitObserver, ObservedCommit, ObservedCommitListener, SessionEnd,
+    SessionHooks, WatchEnd,
+};
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{EntryId, Seq};
 use crate::timers::{SetTimer, Timers};
@@ -71,7 +74,7 @@ pub(crate) struct Settings {
     pub set_timer: Option<SetTimer>,
 }
 
-/// What adoption publishes: to the Session's own observers, and the stored changes to `subscribe_commits()`.
+/// What adoption publishes: to the Session's own followers, and the stored changes to `observe_commits()`.
 pub(crate) struct AdoptedDocuments {
     /// This commit's own changes, as memory adopted them.
     pub observed: Vec<DocumentCommitChange>,
@@ -135,7 +138,7 @@ impl SessionCore {
             // Seal first, so a report handler that calls back finds the Session failed.
             drop(Session(core).close(&BACKGROUND_CONTEXT));
         }
-        self.hooks.report(&error, &ReportInfo::SessionFailed, context);
+        self.hooks.report(&error, &ReportInfo::StorageFailed, context);
     }
 
     /// A listener's error, which never fails what ran it.
@@ -186,7 +189,7 @@ impl SessionCore {
         id
     }
 
-    pub fn observe_commits(&self, listener: ObservedCommitListener) -> Unsubscribe {
+    pub fn follow_commits(&self, listener: ObservedCommitListener) -> Unsubscribe {
         let id = self.add_listener(&self.internal_listeners, listener);
         let weak = self.weak.clone();
         Unsubscribe::new(move || {
@@ -206,8 +209,8 @@ impl SessionCore {
         })
     }
 
-    /// Inside `adopt`: publish a stored commit. Its telemetry events, then the Session's own observers, then the
-    /// `subscribe_commits()` listeners, all before the waits the observers wake run. Returns the first error of an own
+    /// Inside `adopt`: publish a stored commit. Its telemetry events, then the Session's own followers, then the
+    /// `observe_commits()` observers, all before the waits the followers wake run. Returns the first error of an own
     /// observer, which fails the Session once `Storage::commit()` returned.
     pub fn publish(
         &self,
@@ -270,17 +273,36 @@ impl SessionCore {
         failure
     }
 
-    /// Give `subscribe_commits()` listeners one stored commit; a failing listener is reported.
-    pub(super) fn publish_stored(&self, publication: &CommitPublication, host: &[CommitListener], context: &Context) {
-        for listener in host {
-            if let Err(error) = listener(publication, context) {
+    /// Give `observe_commits()` observers one stored commit. A failing one is reported, detached, and ended.
+    pub(super) fn publish_stored(
+        &self,
+        publication: &CommitPublication,
+        host: &[(u64, CommitListener)],
+        context: &Context,
+    ) {
+        for (id, observer) in host {
+            if !lock(&self.commit_listeners).iter().any(|(other, _)| other == id) {
+                continue;
+            }
+            if let Err(error) = observer.advance(publication, context) {
                 self.hooks.report(&error, &ReportInfo::ListenerError, Some(context));
+                if self.release_commit_listener(*id) {
+                    observer.end(WatchEnd::ListenerError(error));
+                }
             }
         }
     }
 
-    pub(super) fn host_listeners(&self) -> Vec<CommitListener> {
-        lock(&self.commit_listeners).iter().map(|(_, l)| l.clone()).collect()
+    /// Detach an `observe_commits()` observer; whether it was still attached.
+    fn release_commit_listener(&self, id: u64) -> bool {
+        let mut listeners = lock(&self.commit_listeners);
+        let attached = listeners.len();
+        listeners.retain(|(other, _)| *other != id);
+        listeners.len() < attached
+    }
+
+    pub(super) fn host_listeners(&self) -> Vec<(u64, CommitListener)> {
+        lock(&self.commit_listeners).clone()
     }
 
     pub(super) fn internal_listeners(&self) -> Vec<ObservedCommitListener> {
@@ -505,32 +527,28 @@ impl Session {
         async move { await_with_context(closing, &context).await }
     }
 
-    /// Register a synchronous listener for every stored commit, with exactly what it stored. It runs inside Storage's
-    /// `adopt`, after the Session's own observers and before every wait the commit resolves and every abort it queues;
-    /// it must not block or call Session operations, and an error it returns is reported.
-    pub fn subscribe_commits(
-        &self,
-        listener: impl Fn(&CommitPublication, &Context) -> DurableResult<()> + Send + Sync + 'static,
-    ) -> DurableResult<Unsubscribe> {
+    /// Observe every stored commit, with exactly what it stored. `advance` runs inside Storage's `adopt`, after the
+    /// Session's own followers and before every wait the commit resolves and every abort it queues. Attaches at once.
+    pub fn observe_commits(&self, observer: Arc<dyn CommitObserver>) -> DurableResult<CommitObservation> {
         self.0.assert_usable()?;
-        let id = self.0.add_listener(&self.0.commit_listeners, Arc::new(listener) as CommitListener);
+        let id = self.0.add_listener(&self.0.commit_listeners, observer as CommitListener);
         let weak = Arc::downgrade(&self.0);
-        Ok(Unsubscribe::new(move || {
+        Ok(CommitObservation(Unsubscribe::new(move || {
             if let Some(core) = weak.upgrade() {
                 lock(&core.commit_listeners).retain(|(other, _)| *other != id);
             }
-        }))
+        })))
     }
 
     /// Internal: get every commit as memory adopts it, for the Session's own components; an error fails the
     /// Session. For a stored commit they run inside Storage's `adopt`, so they call no Storage method and run no task
     /// code.
-    pub fn observe_commits(
+    pub fn follow_commits(
         &self,
         listener: impl Fn(&ObservedCommit, &Context) -> DurableResult<()> + Send + Sync + 'static,
     ) -> DurableResult<Unsubscribe> {
         self.0.assert_usable()?;
-        Ok(self.0.observe_commits(Arc::new(listener)))
+        Ok(self.0.follow_commits(Arc::new(listener)))
     }
 
     /// Register a listener called synchronously when close begins, also when a failure closes the Session.
@@ -578,7 +596,16 @@ async fn close_session(core: Arc<SessionCore>, cleanup: Context) -> DurableResul
                 None => job_core.store_all_holds(&cleanup).await.err(),
                 Some(_) => None,
             };
-            lock(&job_core.commit_listeners).clear();
+            let end = match job_core.failure() {
+                Some(error) => WatchEnd::Failed(error),
+                None => WatchEnd::Ended,
+            };
+            // Each observer is released before its end, so one an earlier end detached gets none.
+            for (id, observer) in job_core.host_listeners() {
+                if job_core.release_commit_listener(id) {
+                    observer.end(end.clone());
+                }
+            }
             lock(&job_core.internal_listeners).clear();
             lock(&job_core.documents).clear_all();
             job_core.clear_holds();
@@ -594,7 +621,7 @@ async fn close_session(core: Arc<SessionCore>, cleanup: Context) -> DurableResul
                     first
                 };
                 if first {
-                    job_core.hooks.report(error, &ReportInfo::SessionFailed, None);
+                    job_core.hooks.report(error, &ReportInfo::StorageFailed, None);
                 }
             }
             match unstored {

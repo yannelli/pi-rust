@@ -211,7 +211,7 @@ async fn creates_a_task_and_then_its_document_in_one_transaction_without_read_af
     assert_eq!(documents.len(), 2);
     // Task documents derive their conversation from the task record.
     for document in &documents {
-        let DocumentCommitChange::Document { conversation_id: owner, .. } = document else { panic!() };
+        let DocumentCommitChange::Change { conversation_id: owner, .. } = document else { panic!() };
         assert_eq!(*owner, Some(conversation_id));
     }
     test.session
@@ -225,7 +225,7 @@ async fn creates_a_task_and_then_its_document_in_one_transaction_without_read_af
         .await
         .unwrap();
     flush().await;
-    let DocumentCommitChange::Document { conversation_id: owner, .. } = &document_changes(&test.last_publication())[0]
+    let DocumentCommitChange::Change { conversation_id: owner, .. } = &document_changes(&test.last_publication())[0]
     else {
         panic!()
     };
@@ -314,9 +314,7 @@ async fn retires_task_documents_at_terminal_settlement_including_documents_creat
     let documents = document_changes(&publication);
     assert_eq!(documents.len(), 3);
     for document in &documents {
-        let DocumentCommitChange::Document { value, ops, conversation_id: owner, .. } = document else { panic!() };
-        assert!(value.is_none());
-        assert!(ops.is_empty());
+        let DocumentCommitChange::Retire { conversation_id: owner, .. } = document else { panic!() };
         assert_eq!(*owner, Some(conversation_id));
     }
     let ctx = context();

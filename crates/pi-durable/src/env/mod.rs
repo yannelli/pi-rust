@@ -55,7 +55,7 @@ pub trait DirReader: Send + Sync {
 pub trait FileWatcher: Send + Sync {
     fn mode(&self) -> WatchMode;
     /// Stop watching; no listener call starts after this returns. Idempotent.
-    async fn close(&self, context: &Context);
+    async fn stop(&self, context: &Context);
 }
 
 /// Portable file system capability.

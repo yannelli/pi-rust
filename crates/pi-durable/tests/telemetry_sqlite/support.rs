@@ -125,6 +125,10 @@ impl SqliteExecutor for Counted {
         self.inner.run(sql, params).await
     }
 
+    async fn run_counted(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<u64> {
+        self.inner.run_counted(sql, params).await
+    }
+
     async fn get(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<Option<SqliteRow>> {
         self.inner.get(sql, params).await
     }
@@ -143,6 +147,10 @@ impl SqliteExecutor for Spy {
 
     async fn run(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<()> {
         self.inner.run(sql, params).await
+    }
+
+    async fn run_counted(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<u64> {
+        self.inner.run_counted(sql, params).await
     }
 
     async fn get(&self, sql: &str, params: &[SqliteValue]) -> DurableResult<Option<SqliteRow>> {

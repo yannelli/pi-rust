@@ -7,6 +7,7 @@ use pi_chord::{DeliveryKind, StateListener};
 use pi_durable::tasks::{TaskOptions, TaskOwnership};
 
 use super::*;
+use crate::support::{ValueCall, on_value};
 
 #[tokio::test]
 async fn ex00_conversation_creates_an_ownerless_conversation() {
@@ -153,12 +154,12 @@ async fn ex05_watches_delivers_committed_values_after_the_baseline() {
     let (sender, delivered) = tokio::sync::oneshot::channel();
     let sender = Mutex::new(Some(sender));
     watch
-        .start(move |pi_chord::WatchChange { value, .. }, _| {
+        .start(on_value(move |ValueCall { value, .. }, _| {
             if let Some(sender) = sender.lock().unwrap().take() {
                 let _ = sender.send(notes(Some(value)));
             }
             async { Ok(()) }
-        })
+        }))
         .unwrap();
     set_notes(&session, chat, "observed asynchronously").await;
     assert_eq!(delivered.await.unwrap().as_deref(), Some("observed asynchronously"));

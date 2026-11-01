@@ -5,6 +5,7 @@ mod cursor;
 mod github_copilot;
 mod helpers;
 mod kimi_coding;
+mod kimi_regions;
 mod meta;
 mod openai_chatgpt;
 mod openai_codex;

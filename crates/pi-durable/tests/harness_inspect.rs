@@ -85,10 +85,10 @@ async fn derives_every_live_task_state_without_running_task_code() {
     let paused = harness.inspect(&context()).await.unwrap();
     assert_eq!(paused.scheduling, Scheduling::Paused);
     assert_eq!(paused.tasks.iter().map(|entry| entry.record.id).collect::<Vec<_>>(), ids);
-    assert_eq!(state_of(&paused, gate_id), Some(TaskInspectionState::Ready { migrates: false }));
-    assert_eq!(state_of(&paused, migrating_id), Some(TaskInspectionState::Ready { migrates: true }));
+    assert_eq!(state_of(&paused, gate_id), Some(TaskInspectionState::Pending { migrates: false }));
+    assert_eq!(state_of(&paused, migrating_id), Some(TaskInspectionState::Pending { migrates: true }));
     // A migration that was never tried is not run to find out.
-    assert_eq!(state_of(&paused, failing_id), Some(TaskInspectionState::Ready { migrates: true }));
+    assert_eq!(state_of(&paused, failing_id), Some(TaskInspectionState::Pending { migrates: true }));
     let Some(TaskInspectionState::Blocked { reason, error }) = state_of(&paused, no_migration) else {
         panic!("expected a blocked task");
     };

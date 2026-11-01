@@ -11,15 +11,15 @@ use crate::context::{AbortSignal, Context, without_abort_signal};
 use crate::error::ChordError;
 use crate::sync::{BoxFuture, lock};
 
-/// Calls the listener with one change and the delivery context.
-pub(crate) type ChangeListener<C, E> = Arc<dyn Fn(C, Context) -> BoxFuture<Result<(), E>> + Send + Sync>;
+/// Calls the listener with one call and the delivery context.
+pub(crate) type CallListener<C, E> = Arc<dyn Fn(C, Context) -> BoxFuture<Result<(), E>> + Send + Sync>;
 pub(crate) type Report<E> = Arc<dyn Fn(&E) + Send + Sync>;
 /// Gives the value an overflow delivers instead of the newest one.
 pub type Replace<T> = Arc<dyn Fn() -> T + Send + Sync>;
 
 /// What a handle keeps pending until its listener takes it.
 pub(crate) trait PendingStore<C>: Send + 'static {
-    /// Take the next change and the context of the newest frame it covers, or `None` when nothing is pending.
+    /// Take the next call and the context of the newest frame it covers, or `None` when nothing is pending.
     fn next(&mut self) -> Option<(C, Context)>;
     fn has_pending(&self) -> bool;
     /// Drop everything pending and every reference into the source; called once, when the watch ends.
@@ -28,7 +28,7 @@ pub(crate) trait PendingStore<C>: Send + 'static {
 
 struct State<T, C, E, P> {
     value: T,
-    listener: Option<ChangeListener<C, E>>,
+    listener: Option<CallListener<C, E>>,
     pending: P,
     started: bool,
     scheduled: bool,
@@ -37,7 +37,7 @@ struct State<T, C, E, P> {
     ending: bool,
     /// Set once, by `terminate()`.
     end: Option<WatchEnd<E>>,
-    cancellation: Option<(AbortSignal, u64)>,
+    abort: Option<(AbortSignal, u64)>,
     /// References into the source, dropped when the watch ends.
     detach: Option<Box<dyn FnOnce() + Send>>,
     report: Option<Report<E>>,
@@ -48,8 +48,8 @@ struct State<T, C, E, P> {
 pub(crate) struct Lifecycle<T, C, E, P> {
     state: Mutex<State<T, C, E, P>>,
     closed: watch::Sender<Option<WatchEnd<E>>>,
-    /// The value a change delivers.
-    value_of: fn(&C) -> T,
+    /// The value a call delivers; a `Failed` call has none and keeps the last.
+    value_of: fn(&C) -> Option<T>,
 }
 
 impl<T, C, E, P> Lifecycle<T, C, E, P>
@@ -64,7 +64,7 @@ where
         pending: P,
         detach: Box<dyn FnOnce() + Send>,
         report: Report<E>,
-        value_of: fn(&C) -> T,
+        value_of: fn(&C) -> Option<T>,
     ) -> Arc<Self> {
         let state = State {
             value,
@@ -75,7 +75,7 @@ where
             running: false,
             ending: false,
             end: None,
-            cancellation: None,
+            abort: None,
             detach: Some(detach),
             report: Some(report),
         };
@@ -86,7 +86,7 @@ where
         lock(&self.state).value.clone()
     }
 
-    pub fn start(self: &Arc<Self>, listener: ChangeListener<C, E>) -> Result<(), E> {
+    pub fn start(self: &Arc<Self>, listener: CallListener<C, E>) -> Result<(), E> {
         {
             let mut state = lock(&self.state);
             if state.started {
@@ -110,27 +110,27 @@ where
         }
     }
 
-    /// End the watch `cancelled` when `signal` aborts; installed once.
-    pub fn observe_cancellation(self: &Arc<Self>, signal: &AbortSignal) -> Result<(), E> {
+    /// End the watch `aborted` when `signal` aborts; installed once.
+    pub fn observe_abort(self: &Arc<Self>, signal: &AbortSignal) -> Result<(), E> {
         let mut state = lock(&self.state);
-        if state.cancellation.is_some() {
-            return Err(ChordError::error("Watch cancellation is already installed").into());
+        if state.abort.is_some() {
+            return Err(ChordError::error("Watch abort is already installed").into());
         }
         if state.end.is_some() {
             return Ok(());
         }
         drop(state);
         let lifecycle = self.clone();
-        let id = signal.add_listener(move |_| lifecycle.terminate(WatchEnd::Cancelled));
+        let id = signal.add_listener(move |_| lifecycle.terminate(WatchEnd::Aborted));
         state = lock(&self.state);
         if state.end.is_none() {
-            state.cancellation = Some((signal.clone(), id));
+            state.abort = Some((signal.clone(), id));
         } else {
             signal.remove_listener(id);
         }
         drop(state);
         if signal.aborted() {
-            self.terminate(WatchEnd::Cancelled);
+            self.terminate(WatchEnd::Aborted);
         }
         Ok(())
     }
@@ -152,7 +152,7 @@ where
 
     /// The source sends nothing more after its last frames, such as a retirement: take no more frames, deliver what is
     /// pending, then end `ended`, after the running call returns, if one runs. Until then the watch stays attached, so
-    /// its source's end, `stop()`, cancellation, and a failing listener still end it first.
+    /// its source's end, `stop()`, an abort, and a failing listener still end it first.
     pub fn end_after_delivery(&self) {
         let now = {
             let mut state = lock(&self.state);
@@ -193,13 +193,13 @@ where
             state.running = true;
         }
         loop {
-            let (change, context, listener) = {
+            let (call, context, listener) = {
                 let mut state = lock(&self.state);
                 if state.end.is_some() {
                     break;
                 }
                 let Some(listener) = state.listener.clone() else { break };
-                let Some((change, context)) = state.pending.next() else {
+                let Some((call, context)) = state.pending.next() else {
                     let ending = state.ending;
                     drop(state);
                     if ending {
@@ -207,10 +207,12 @@ where
                     }
                     break;
                 };
-                state.value = (self.value_of)(&change);
-                (change, context, listener)
+                if let Some(value) = (self.value_of)(&call) {
+                    state.value = value;
+                }
+                (call, context, listener)
             };
-            let delivered = listener(change, without_abort_signal(&context)).await;
+            let delivered = listener(call, without_abort_signal(&context)).await;
             drop(listener);
             if let Err(error) = delivered {
                 let report = {
@@ -238,7 +240,7 @@ where
     /// End the watch once: detach, drop what is pending and every reference into the source, and settle `closed`. A
     /// callback already running keeps running.
     pub fn terminate(&self, end: WatchEnd<E>) {
-        let (cancellation, detach, dropped) = {
+        let (abort, detach, dropped) = {
             let mut state = lock(&self.state);
             if state.end.is_some() {
                 return;
@@ -246,10 +248,10 @@ where
             state.end = Some(end.clone());
             state.pending.release();
             let dropped = (state.report.take(), state.listener.take());
-            (state.cancellation.take(), state.detach.take(), dropped)
+            (state.abort.take(), state.detach.take(), dropped)
         };
         drop(dropped);
-        if let Some((signal, id)) = cancellation {
+        if let Some((signal, id)) = abort {
             signal.remove_listener(id);
         }
         if let Some(detach) = detach {

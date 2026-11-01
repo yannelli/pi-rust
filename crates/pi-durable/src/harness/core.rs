@@ -18,7 +18,7 @@ use crate::ids::ConversationId;
 use crate::models::{Models, with_client_identity};
 use crate::session::{Session, Tx};
 use crate::timers::{Disarm, SetTimer, TimerCallback, TimerOptions, Timers};
-use crate::types::{ConversationRecord, HostCallback, ReportInfo};
+use crate::types::{ConversationRecord, HostCallback, Report, ReportInfo};
 
 /// Request identity of a Harness's model requests (upstream `DEFAULT_HARNESS_IDENTITY`): pi-ai's defaults with
 /// provider attribution to pi.
@@ -42,8 +42,8 @@ pub type EnvBuilder =
 /// Runs in every commit that creates or forks a conversation, after the built-in documents.
 pub type ConversationCreatedHook =
     Arc<dyn Fn(Tx, ConversationRecord) -> BoxFuture<'static, DurableResult<()>> + Send + Sync>;
-/// Receives a failure with what it is about.
-pub type ReportFn = Arc<dyn Fn(&DurableError, &ReportInfo) + Send + Sync>;
+/// Receives one report: the failure and what it is about.
+pub type ReportFn = Arc<dyn Fn(&Report) + Send + Sync>;
 pub type NowFn = Arc<dyn Fn() -> f64 + Send + Sync>;
 /// Told when the Session next needs a process (`HarnessOptions::on_wake`); an error is reported.
 pub type WakeFn = Arc<dyn Fn(Wake) -> DurableResult<()> + Send + Sync>;
@@ -78,9 +78,8 @@ pub struct HarnessOptions {
     /// `resume()`, and must not block. An error is reported, and the value is offered again at the next change.
     pub on_wake: Option<WakeFn>,
     /// Receives failures that do not fail the calling operation, such as a failing hook or listener, a task that
-    /// faulted, and the error that fails the Session, once. The [`ReportInfo`] says what happened: a host can tell a
-    /// failed Session (`SessionFailed`, often a platform reset) from a faulted task (`TaskFaulted`) or a parked one
-    /// (`TaskParked`).
+    /// faulted, and the error that fails the Session, once: one [`Report`], the error and what happened. A host can tell
+    /// a failed Session (`StorageFailed`, often a platform reset) from a faulted task (`TaskFaulted`).
     pub on_report: Option<ReportFn>,
     /// Open for reading only, as a viewer of a session that another process drives, for example a synced copy on a
     /// device that only shows it. Open recovers nothing: a `running` task stays as committed. Every commit with writes
@@ -165,7 +164,7 @@ impl HarnessOptions {
         self
     }
 
-    pub fn with_on_report(mut self, report: impl Fn(&DurableError, &ReportInfo) + Send + Sync + 'static) -> Self {
+    pub fn with_on_report(mut self, report: impl Fn(&Report) + Send + Sync + 'static) -> Self {
         self.on_report = Some(Arc::new(report));
         self
     }
@@ -196,7 +195,7 @@ impl HarnessCore {
     /// Report to `HarnessOptions::on_report`, count it, and add a `pi.durable.report` event to the context's span.
     pub fn report(&self, error: &DurableError, info: &ReportInfo, context: Option<&Context>) {
         if let Some(on_report) = &self.on_report {
-            on_report(error, info);
+            on_report(&Report { info: info.clone(), error: error.clone() });
         }
         self.telemetry.report(info, context);
     }

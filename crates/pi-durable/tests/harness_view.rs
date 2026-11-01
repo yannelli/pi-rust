@@ -4,6 +4,7 @@ mod support;
 
 use std::sync::{Arc, Mutex};
 
+use crate::support::{ValueCall, on_value};
 use pi_ai::ThinkingLevel;
 use pi_chord::delta::{Op, apply_immutable};
 use pi_chord::{Json, JsonMap};
@@ -37,10 +38,10 @@ async fn record_window(
     let frames: Frames = Arc::default();
     let sink = frames.clone();
     watch
-        .start(move |pi_chord::WatchChange { value, ops, .. }, _| {
+        .start(on_value(move |ValueCall { value, ops, .. }, _| {
             sink.lock().unwrap().push((value, ops));
             async { Ok(()) }
-        })
+        }))
         .unwrap();
     (acquired, frames, watch)
 }

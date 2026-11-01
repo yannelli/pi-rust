@@ -4,13 +4,13 @@
 use std::sync::Arc;
 
 use pi_chord::delta::{Op, Path, Seg, apply_immutable};
-use pi_chord::{Json, JsonMap, WatchChange};
+use pi_chord::{Json, JsonMap};
 
 use super::view::ViewObserver;
 use crate::documents::encode;
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{ConversationId, DocumentId, EntryId};
-use crate::session::ObservedCommit;
+use crate::session::{ObservedCommit, WatchCall};
 use crate::types::{CommitChange, Cursor, DocumentCommitChange, EntryQuery, EntryRecord, ScanOrder, Storage};
 use pi_chord::Context;
 
@@ -137,7 +137,7 @@ async fn scan_up_to(
     }
 }
 
-pub(super) type Delivery = (Arc<dyn ViewObserver>, WatchChange);
+pub(super) type Delivery = (Arc<dyn ViewObserver>, WatchCall);
 
 fn key_path(keys: &[&str]) -> Path {
     keys.iter().map(|key| Seg::Key(Arc::from(*key))).collect()
@@ -156,7 +156,7 @@ pub(super) fn advance(
     for change in publication.changes() {
         match change {
             CommitChange::Entry(entry) if entry.conversation_id == id => appended.push(encode(entry)?),
-            CommitChange::Document(DocumentCommitChange::Document { record, conversation_id, version, value, ops })
+            CommitChange::Document(DocumentCommitChange::Change { record, conversation_id, version, value, ops })
                 if *conversation_id == Some(id) =>
             {
                 let kind = record.kind.as_str();
@@ -165,23 +165,25 @@ pub(super) fn advance(
                 }
                 let path = key_path(&["docs", kind]);
                 let mounted = mount.incarnations.get(kind).copied();
-                match value {
-                    None => {
-                        if mounted.map(|(doc, _)| doc) != Some(record.id) {
-                            continue;
-                        }
-                        mount.incarnations.remove(kind);
-                        doc_ops.push(Op::Delete(path));
-                    }
-                    Some(value) => {
-                        if mounted.is_some_and(|(doc, at)| doc == record.id && Some(at) == *version) {
-                            doc_ops.extend(ops.iter().map(|op| prefixed(op, &path)));
-                        } else {
-                            mount.incarnations.insert(kind.to_owned(), (record.id, version.unwrap_or(1)));
-                            doc_ops.push(Op::Set(path, value.clone()));
-                        }
-                    }
+                if mounted.is_some_and(|(doc, at)| doc == record.id && at == *version) {
+                    doc_ops.extend(ops.iter().map(|op| prefixed(op, &path)));
+                } else {
+                    mount.incarnations.insert(kind.to_owned(), (record.id, *version));
+                    doc_ops.push(Op::Set(path, value.clone()));
                 }
+            }
+            CommitChange::Document(DocumentCommitChange::Retire { record, conversation_id })
+                if *conversation_id == Some(id) =>
+            {
+                let kind = record.kind.as_str();
+                if !MOUNTED_KINDS.contains(&kind) || record.key.is_some() {
+                    continue;
+                }
+                if mount.incarnations.get(kind).map(|(doc, _)| *doc) != Some(record.id) {
+                    continue;
+                }
+                mount.incarnations.remove(kind);
+                doc_ops.push(Op::Delete(key_path(&["docs", kind])));
             }
             _ => {}
         }
@@ -215,7 +217,7 @@ pub(super) fn advance(
             entries = Json::array(kept);
         }
         windowed.value = view(&mount.conversation, entries, before, &mount.docs);
-        deliveries.push((windowed.observer.clone(), WatchChange::new(windowed.value.clone(), ops)));
+        deliveries.push((windowed.observer.clone(), WatchCall::new(windowed.value.clone(), ops)));
     }
     Ok(())
 }

@@ -69,7 +69,7 @@ struct Armed {
     disarmed: Arc<AtomicBool>,
 }
 
-/// A Session over controlled storage with a manual clock and manual timers, recording what `subscribe_commits()`
+/// A Session over controlled storage with a manual clock and manual timers, recording what `observe_commits()`
 /// and the Session's own observers get.
 pub struct Opened {
     pub clock: Arc<Mutex<f64>>,
@@ -106,13 +106,13 @@ pub async fn open(retention_ms: Option<f64>, persist_within_ms: Option<f64>) -> 
     let session = create_session(storage.clone(), options);
     let stored: Arc<Mutex<Vec<CommitPublication>>> = Arc::default();
     let sink = stored.clone();
-    std::mem::forget(session.subscribe_commits(move |publication, _| {
+    std::mem::forget(session.observe_commits(commit_observer(move |publication, _| {
         sink.lock().unwrap().push(publication.clone());
         Ok(())
-    }));
+    })));
     let observed: Arc<Mutex<Vec<ObservedCommit>>> = Arc::default();
     let sink = observed.clone();
-    std::mem::forget(session.observe_commits(move |publication, _| {
+    std::mem::forget(session.follow_commits(move |publication, _| {
         sink.lock().unwrap().push(publication.clone());
         Ok(())
     }));
