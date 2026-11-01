@@ -177,6 +177,13 @@ fn write_manager(manager: &mut SessionManager, method: &str, args: &Args) -> Res
             id(manager.append_thinking_level_change(level))
         }
         "appendModelChange" => id(manager.append_model_change(&args.str(2)?, &args.str(3)?)),
+        "appendUsage" => id(manager.append_usage_json(
+            &args.str(2)?,
+            &args.str(3)?,
+            &args.str(4)?,
+            args.bool(6).then(|| args.json(5)),
+            args.opt_str(7).as_deref(),
+        )),
         "appendCompaction" => id(manager.append_compaction_with(NewCompaction {
             summary: args.str(2)?,
             first_kept_entry_id: args.opt_str(3),

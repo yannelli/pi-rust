@@ -33,6 +33,9 @@ async fn run_command(source: &str, before: impl FnOnce(&Harness)) -> (Harness, V
 const SESSIONS: &str = r#"
 import { SessionManager } from '@earendil-works/pi-coding-agent';
 const code = (run) => { try { run(); return null; } catch (error) { return error.code ?? error.message; } };
+const FULL_USAGE = { input: 3, output: 4, cacheRead: 5, cacheWrite: 6, totalTokens: 18,
+  cost: { input: 0.5, output: 0.25, cacheRead: 0, cacheWrite: 0, total: 0.75 } };
+const EXTENDED_USAGE = { input: 1.5, output: 2, extra: { nested: [1, 'two'], flag: true } };
 export default function (pi) {
   pi.registerCommand('probe', { handler: async (_args, ctx) => {
     const dir = ctx.cwd + '/sdk-sessions';
@@ -43,6 +46,22 @@ export default function (pi) {
     manager.appendCustomEntry('note', { a: 1 });
     manager.appendLabelChange(user, 'start');
     manager.appendSessionInfo('Round trip');
+    const contextBefore = JSON.stringify(manager.buildSessionContext());
+    const leafBefore = manager.getLeafId();
+    const warm = manager.appendUsage('cache_warm', 'local', 'tiny', FULL_USAGE, 'warm');
+    const warmLeaf = manager.getLeafId();
+    const estimate = manager.appendUsage('estimate', 'local', 'tiny', EXTENDED_USAGE, '');
+    const explicitNull = manager.appendUsage('null_usage', 'local', 'tiny', null);
+    const missing = manager.appendUsage('missing_usage', 'local', 'tiny');
+    const usage = {
+      explicitNull, missing, nullStored: manager.getEntry(explicitNull.id), missingStored: manager.getEntry(missing.id),
+      nullKept: 'usage' in explicitNull && explicitNull.usage === null, missingLeftOut: missing.usage === undefined,
+      warm, estimate, warmStored: manager.getEntry(warm.id), estimateStored: manager.getEntry(estimate.id),
+      warmParentIsLeaf: warm.parentId === leafBefore, warmLeaf: warmLeaf === warm.id,
+      estimateParentIsWarm: estimate.parentId === warm.id, missingLeaf: manager.getLeafId() === missing.id,
+      timestamps: [warm, estimate, explicitNull, missing].every((entry) => !Number.isNaN(Date.parse(entry.timestamp))),
+      contextSame: JSON.stringify(manager.buildSessionContext()) === contextBefore,
+    };
     const file = manager.getSessionFile();
     const reopened = SessionManager.open(file);
     const listed = await SessionManager.list(ctx.cwd, dir);
@@ -57,7 +76,7 @@ export default function (pi) {
       listed: listed.map((info) => ({ id: info.id, name: info.name, dated: info.created instanceof Date })),
       recent: recent.getSessionId(), found: SessionManager.findById(ctx.cwd, manager.getSessionId(), dir) === file,
       memory: memory._sdkDescriptor(), memoryEntries: memory.getEntryCount(),
-      usage: code(() => manager.appendUsage()), badBranch: code(() => manager.branch('missing')),
+      usage, badBranch: code(() => manager.branch('missing')),
     });
   }});
 }
@@ -72,9 +91,20 @@ async fn session_manager_round_trips_an_upstream_jsonl_file() {
     assert_eq!(data["header"]["version"], 3);
     assert_eq!(
         data["types"],
-        json!(["model_change", "thinking_level_change", "message", "custom", "label", "session_info"])
+        json!([
+            "model_change",
+            "thinking_level_change",
+            "message",
+            "custom",
+            "label",
+            "session_info",
+            "usage",
+            "usage",
+            "usage",
+            "usage"
+        ])
     );
-    assert_eq!(data["branch"], 6);
+    assert_eq!(data["branch"], 10);
     assert_eq!(data["label"], "start");
     assert_eq!(data["name"], "Round trip");
     assert_eq!(data["leaf"], true);
@@ -87,18 +117,68 @@ async fn session_manager_round_trips_an_upstream_jsonl_file() {
     assert_eq!(data["memory"]["inMemory"], true);
     assert_eq!(data["memory"]["sessionFile"], Value::Null);
     assert_eq!(data["memoryEntries"], 1);
-    assert_eq!(data["usage"], "ERR_PI_UNSUPPORTED");
+    let usage = &data["usage"];
+    let full = json!({"input": 3, "output": 4, "cacheRead": 5, "cacheWrite": 6, "totalTokens": 18,
+        "cost": {"input": 0.5, "output": 0.25, "cacheRead": 0, "cacheWrite": 0, "total": 0.75}});
+    let extended = json!({"input": 1.5, "output": 2, "extra": {"nested": [1, "two"], "flag": true}});
+    for (key, value) in
+        [("type", "usage"), ("kind", "cache_warm"), ("provider", "local"), ("model", "tiny"), ("note", "warm")]
+    {
+        assert_eq!(usage["warm"][key], value, "{key}");
+    }
+    assert_eq!(usage["warm"]["usage"], full);
+    assert_eq!(usage["estimate"]["kind"], "estimate");
+    assert_eq!(usage["estimate"]["usage"], extended, "partial, extra, and fractional usage is kept as given");
+    assert!(usage["estimate"].get("note").is_none(), "an empty note is left out");
+    assert_eq!(usage["warmStored"], usage["warm"]);
+    assert_eq!(usage["estimateStored"], usage["estimate"]);
+    assert_eq!(usage["explicitNull"].get("usage"), Some(&Value::Null), "an explicit null usage is stored");
+    assert!(usage["missing"].get("usage").is_none(), "an undefined usage is left out");
+    assert_eq!(usage["nullStored"], usage["explicitNull"]);
+    assert_eq!(usage["missingStored"], usage["missing"]);
+    for check in [
+        "warmParentIsLeaf",
+        "warmLeaf",
+        "estimateParentIsWarm",
+        "missingLeaf",
+        "nullKept",
+        "missingLeftOut",
+        "timestamps",
+        "contextSame",
+    ] {
+        assert_eq!(usage[check], true, "{check}");
+    }
     assert_eq!(data["badBranch"], "Entry missing not found");
 
     let lines: Vec<Value> =
         std::fs::read_to_string(file).unwrap().lines().map(|line| serde_json::from_str(line).unwrap()).collect();
-    assert_eq!(lines.len(), 7);
+    assert_eq!(lines.len(), 11);
     assert_eq!(lines[0]["type"], "session");
     assert_eq!(lines[3]["message"]["content"], "hello");
     assert_eq!(lines[4]["data"], json!({"a": 1}));
+    assert_eq!(lines[7], usage["warm"]);
+    assert_eq!(lines[8], usage["estimate"]);
+    assert_eq!(lines[9], usage["explicitNull"]);
+    assert_eq!(lines[9].get("usage"), Some(&Value::Null));
+    assert_eq!(lines[10], usage["missing"]);
+    assert!(lines[10].get("usage").is_none());
+    let keys: Vec<&str> = lines[7].as_object().unwrap().keys().map(String::as_str).collect();
+    assert_eq!(keys, ["type", "id", "parentId", "timestamp", "kind", "provider", "model", "usage", "note"]);
     let reopened = SessionManager::open(std::path::Path::new(file)).unwrap();
     assert_eq!(reopened.id(), data["sessionId"]);
     assert_eq!(reopened.session_name().as_deref(), Some("Round trip"));
+}
+
+#[test]
+fn the_typed_append_usage_stores_the_serialized_usage() {
+    let mut manager = SessionManager::in_memory(std::path::Path::new("/tmp"));
+    let usage = pi_ai::Usage { input: 3, output: 4, total_tokens: 7, ..pi_ai::Usage::default() };
+    let id = manager.append_usage("cache_warm", "local", "tiny", &usage, Some("")).unwrap();
+    let entry = manager.get_entry(&id).unwrap();
+    assert_eq!(entry.raw().get("usage"), Some(&serde_json::to_value(usage).unwrap()));
+    assert_eq!(entry.raw().get("kind"), Some(&json!("cache_warm")));
+    assert!(entry.raw().get("note").is_none());
+    assert_eq!(manager.leaf_id(), Some(id.as_str()));
 }
 
 const SETTINGS: &str = r#"

@@ -62,13 +62,26 @@ impl SessionManager {
         usage: &Usage,
         note: Option<&str>,
     ) -> anyhow::Result<String> {
+        self.append_usage_json(kind, provider, model, Some(serde_json::to_value(usage)?), note)
+    }
+
+    /// `append_usage` with the usage JSON stored as given, as upstream `appendUsage` does: `None` (an
+    /// `undefined` usage) leaves the key out, as `JSON.stringify` does, and `Some(Null)` stores `null`.
+    pub(crate) fn append_usage_json(
+        &mut self,
+        kind: &str,
+        provider: &str,
+        model: &str,
+        usage: Option<Value>,
+        note: Option<&str>,
+    ) -> anyhow::Result<String> {
         self.append_typed(
             "usage",
             vec![
                 ("kind", Some(json!(kind))),
                 ("provider", Some(json!(provider))),
                 ("model", Some(json!(model))),
-                ("usage", to_json(usage)),
+                ("usage", usage),
                 ("note", note.filter(|note| !note.is_empty()).map(|note| json!(note))),
             ],
         )
