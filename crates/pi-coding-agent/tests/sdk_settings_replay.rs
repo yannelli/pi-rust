@@ -65,6 +65,43 @@ fn compare(path: &str, golden: &Value, ours: &Value, mismatches: &mut Vec<String
     }
 }
 
+// Upstream emits native Windows paths and notepad. Its JSON-text replacement leaves paths unnormalized.
+// Adapt only the golden; normalizing actual paths would hide incorrect separators.
+#[cfg(windows)]
+fn on_this_platform(mut golden: Value, run: &std::path::Path) -> Value {
+    fn expand(value: &mut Value, run: &str, home: &str) -> usize {
+        match value {
+            Value::String(text) => {
+                let at_run = text.strip_prefix("<RUN>/").map(|rest| (run, rest));
+                let Some((folder, rest)) = at_run.or_else(|| text.strip_prefix("<HOME>/").map(|rest| (home, rest)))
+                else {
+                    assert!(!text.contains("<RUN>") && !text.contains("<HOME>"), "{text}");
+                    return 0;
+                };
+                *text = format!("{folder}\\{}", rest.replace('/', "\\"));
+                1
+            }
+            Value::Array(items) => items.iter_mut().map(|item| expand(item, run, home)).sum(),
+            Value::Object(map) => map.values_mut().map(|item| expand(item, run, home)).sum(),
+            _ => 0,
+        }
+    }
+    let (run, home) = (run.display().to_string(), std::env::var("USERPROFILE").expect("USERPROFILE"));
+    let editor_fallbacks = ["getter/getExternalEditorCommand/empty", "getter/getExternalEditorCommand/invalid"];
+    let mut counts = (0, 0);
+    for case in golden["cases"].as_array_mut().unwrap() {
+        if editor_fallbacks.contains(&case["id"].as_str().unwrap_or_default()) {
+            let returned = &mut case["steps"][0]["returned"];
+            assert_eq!(*returned, "nano");
+            *returned = Value::from("notepad");
+            counts.1 += 1;
+        }
+        counts.0 += expand(case, &run, &home);
+    }
+    assert_eq!(counts, (10, 2), "folder values and editor fallbacks rewritten");
+    golden
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_oracle_cases_replay_against_the_sdk_settings_manager() {
     let fixture = |path: &'static str, source: &str| (path, source.to_string());
@@ -85,6 +122,8 @@ async fn the_oracle_cases_replay_against_the_sdk_settings_manager() {
     assert!(h.errors().is_empty(), "{:?}", h.errors());
     let replay: Value = serde_json::from_str(&std::fs::read_to_string(h.cwd.join("replay.json")).unwrap()).unwrap();
     let golden = golden();
+    #[cfg(windows)]
+    let golden = on_this_platform(golden, &h.cwd.join("oracle-run"));
     let (expected, actual) = (golden["cases"].as_array().unwrap(), replay["cases"].as_array().unwrap());
     let ids = |cases: &[Value]| {
         cases.iter().map(|case| case["id"].as_str().unwrap_or_default().to_string()).collect::<Vec<_>>()
@@ -102,4 +141,32 @@ async fn the_oracle_cases_replay_against_the_sdk_settings_manager() {
     let members = golden["memberCount"].as_u64().unwrap() as usize;
     assert_eq!(used.len(), members, "every public member ran: {:?}", used.keys().collect::<Vec<_>>());
     assert!(used.values().all(|count| count.as_u64() >= Some(2)), "each member ran in at least 2 cases: {used:?}");
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn directory_settings_error_matches_real_node() {
+    use pi_coding_agent::settings::{FileSettingsStorage, SettingsScope, SettingsStorage};
+
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("settings.json");
+    std::fs::create_dir(&path).unwrap();
+    let node = std::env::var_os("PI_NODE_PATH").unwrap_or_else(|| "node".into());
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        tokio::process::Command::new(node)
+            .args(["-e", "try { require('node:fs').readFileSync(process.argv[1], 'utf8'); } catch (e) { process.stdout.write(e.message); }"])
+            .arg(&path)
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .expect("the Node directory control finishes")
+    .expect("Node must run the Windows directory control");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let expected = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(expected, "EISDIR: illegal operation on a directory, read");
+    let storage = FileSettingsStorage::new(root.path(), root.path());
+    let actual = storage.with_lock(SettingsScope::Global, &mut |_| panic!("a directory must not be read"));
+    assert_eq!(actual.unwrap_err(), expected);
 }

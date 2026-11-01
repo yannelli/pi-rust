@@ -79,6 +79,10 @@ impl SettingsStorage for FileSettingsStorage {
         let mut held = None;
         let current = if path.exists() {
             held = Some(lock(path)?);
+            // Node opens a directory on Windows too and fails the read; Rust fails the open with EACCES there.
+            if path.is_dir() {
+                return Err("EISDIR: illegal operation on a directory, read".into());
+            }
             let bytes = std::fs::read(path).map_err(|error| node_error(&error, "open", path))?;
             Some(String::from_utf8_lossy(&bytes).into_owned())
         } else {

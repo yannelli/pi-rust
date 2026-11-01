@@ -98,7 +98,8 @@ pub(super) fn env<'a>(env: &'a Map<String, Value>, key: &str) -> Option<&'a str>
     env.get(key).and_then(Value::as_str).filter(|value| !value.is_empty())
 }
 
-/// `path.posix.join(home, rest)`.
+/// `path.join(home, rest)` with `posix` rules.
+#[cfg(not(windows))]
 fn join(home: &str, rest: &str) -> String {
     let joined = format!("{home}/{rest}");
     let mut parts: Vec<&str> = Vec::new();
@@ -114,6 +115,17 @@ fn join(home: &str, rest: &str) -> String {
     let mut out = format!("{}{}", if joined.starts_with('/') { "/" } else { "" }, parts.join("/"));
     if joined.ends_with('/') && !out.ends_with('/') {
         out.push('/');
+    }
+    out
+}
+
+/// `path.join(home, rest)` with `win32` rules: backslashes, and a trailing separator kept.
+#[cfg(windows)]
+fn join(home: &str, rest: &str) -> String {
+    let joined = crate::resources::paths::normalize(&std::path::Path::new(home).join(rest));
+    let mut out = joined.to_string_lossy().into_owned();
+    if rest.ends_with(['/', '\\']) && !out.ends_with('\\') {
+        out.push('\\');
     }
     out
 }
