@@ -5,6 +5,7 @@
 mod compat;
 mod convert;
 mod events;
+mod kimi_schema;
 mod reasoning_details;
 mod request;
 #[cfg(test)]
@@ -15,6 +16,8 @@ mod tests;
 mod tests_cache;
 #[cfg(test)]
 mod tests_identity;
+#[cfg(test)]
+mod tests_kimi;
 #[cfg(test)]
 mod tests_request;
 #[cfg(test)]
