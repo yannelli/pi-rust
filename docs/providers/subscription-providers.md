@@ -68,11 +68,13 @@ pi is an Agent Client Protocol (ACP) client of Google's Antigravity ACP server. 
   - After the sign-in, Google sends the browser to the server's loopback callback `http://127.0.0.1:<port>/`. The port is in the `redirect_uri` of the URL.
   - On a remote machine, the browser cannot open that page. Copy the page address from the browser and paste it into pi. pi sends its query to the callback on the machine that runs pi. Proxies do not apply to this request.
   - The server waits 300 seconds for the callback. pi waits 330 seconds for `authenticate`.
-- Session: pi keeps one ACP session for each pi session. `session/new` gets:
+- Session: interactive mode opens the selected Antigravity session before the first prompt, which reuses it. pi keeps one ACP session for each pi session. `session/new` gets:
   - the `pi-bridge` MCP server of pi;
   - the MCP servers of the user that the agent can reach itself;
   - `_meta.antigravity` when the server shows `systemPrompt.append`. This holds the system prompt, `eagerMcpServers: ["pi-bridge"]`, and `enabledTools: []`, which turns off the built-in tools of Antigravity.
-- Model and thinking: pi sets the `model` selector to the model ID and the `thought_level` selector to the thinking level of the model row, with `session/set_config_option`. An older server gets `session/set_model`. If the server does not offer the model, the error lists the models that it offers.
+- Model and thinking: `/model`, model cycling, `/thinking`, and Shift+Tab apply the choice in the agent before pi saves it. The current session supplies its thinking levels, including changes since the catalog refresh. pi sets the `model` and `thought_level` selectors with `session/set_config_option`; an older server gets `session/set_model`. A rejected change leaves pi's selection unchanged.
+- Modes and settings: `/acp mode` lists the agent's permission settings and other selectors, including older `session/set_mode` modes. The agent must accept a choice before pi keeps it. A changed system prompt or tool list starts a new session and reapplies the confirmed settings before the prompt. Changes are refused while a turn is running.
+- Shutdown: ending the pi session stops the server's process group and tool bridge, and waits for the server to exit.
 - Model list: the account model list starts the server in the temporary directory and sends `session/new` with no MCP servers. Each option of the `model` selector becomes one model. pi selects each model with `session/set_config_option` and reads the `thought_level` values from the reply. The thinking level map sends each pi level to its server value, for example `xhigh` to `extra_high`. A server without config options gives `models.availableModels` without levels. The list has a time limit of 90 s.
 - Tools: the bridge is a streamable HTTP MCP server on `127.0.0.1`. It accepts only `POST /mcp` with a random bearer token. It shows each pi tool as `pi_<name>`. A `tools/call` stays open while pi runs the tool, with an SSE keepalive every 15 s:
   1. The pi stream ends with stop reason `toolUse`.

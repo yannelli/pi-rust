@@ -6,37 +6,18 @@ use std::time::Duration;
 use super::{ModelListContext, Personalized};
 use crate::models::is_chat_model;
 use crate::providers::antigravity_acp::{self as acp, OfferedModel};
-use crate::types::{Model, ThinkingLevel};
+use crate::types::Model;
 
 /// Starting the server and a session takes longer than one HTTP model list request.
 const LIST_TIMEOUT: Duration = Duration::from_secs(90);
-
-fn level(value: &str) -> Option<ThinkingLevel> {
-    match value {
-        "extra_high" | "extra-high" => Some(ThinkingLevel::Xhigh),
-        other => other.parse().ok(),
-    }
-}
 
 /// A catalog model for `offered`, with the catalog model of the same id (else the first one) as
 /// the template for limits and base URL.
 fn model_for(offered: &OfferedModel, catalog: &[Model]) -> Option<Model> {
     let chats: Vec<&Model> = catalog.iter().filter(|model| is_chat_model(model)).collect();
     let template = chats.iter().find(|model| model.id == offered.id).or_else(|| chats.first())?;
-    let mut model = Model { id: offered.id.clone(), name: offered.name.clone(), ..(*template).clone() };
-    let levels: Vec<(ThinkingLevel, &str)> =
-        offered.levels.iter().filter_map(|value| Some((level(value)?, value.as_str()))).collect();
-    model.reasoning = !levels.is_empty();
-    model.thinking_level_map = model.reasoning.then(|| {
-        ThinkingLevel::ALL
-            .into_iter()
-            .map(|level| {
-                let value = levels.iter().find(|(known, _)| *known == level).map(|(_, value)| value.to_string());
-                (level.as_str().to_string(), value)
-            })
-            .collect()
-    });
-    Some(model)
+    let model = Model { id: offered.id.clone(), name: offered.name.clone(), ..(*template).clone() };
+    Some(acp::with_levels(model, &offered.levels))
 }
 
 /// The catalog replaced by the models that the server offers. Without a login or an installed
@@ -95,5 +76,36 @@ mod tests {
             ("gemini-4-flash", "gemini-4-flash name", 1_048_576)
         );
         assert!(!other.reasoning && other.thinking_level_map.is_none());
+    }
+
+    #[test]
+    fn the_live_thought_levels_replace_only_the_thinking_map() {
+        use crate::providers::acp::{Choice, Selector, SessionInfo};
+        let mut catalog =
+            Model { id: "gemini-3.1-pro".into(), name: "Pro".into(), api: acp::API.into(), ..Model::default() };
+        catalog.context_window = 1_048_576;
+        catalog.thinking_level_map = Some([("medium".to_string(), Some("medium".to_string()))].into());
+        let choice = |id: &str| Choice { id: id.into(), name: id.into(), description: None };
+        let thought = Selector {
+            id: "thought".into(),
+            category: "thought_level".into(),
+            choices: vec![choice("low"), choice("extra_high")],
+            ..Selector::default()
+        };
+        let info =
+            SessionInfo { pi_model: "gemini-3.1-pro".into(), selectors: vec![thought], ..SessionInfo::default() };
+        let live = acp::live_model(&catalog, &info).expect("the session offers other levels than the catalog");
+        let map = live.thinking_level_map.as_ref().unwrap();
+        assert_eq!(
+            (map["low"].as_deref(), map["xhigh"].as_deref(), map["medium"].as_deref()),
+            (Some("low"), Some("extra_high"), None)
+        );
+        assert_eq!((live.name.as_str(), live.context_window), ("Pro", 1_048_576));
+        assert_eq!(acp::live_model(&live, &info), None, "a model with the live levels needs no change");
+        let none = SessionInfo { selectors: Vec::new(), ..info.clone() };
+        let cleared = acp::live_model(&catalog, &none).expect("a session without thinking levels clears them");
+        assert!(!cleared.reasoning && cleared.thinking_level_map.is_none());
+        let other = SessionInfo { pi_model: "gemini-3.8-flash".into(), ..info };
+        assert_eq!(acp::live_model(&catalog, &other), None, "levels of another remote model are not taken");
     }
 }

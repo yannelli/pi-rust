@@ -141,6 +141,13 @@ impl InteractiveMode {
     pub(super) fn apply_model(&self, model: Model, persist: bool) {
         let session = self.session();
         self.spawn(move |mode| async move {
+            // Antigravity selects the model first; pi switches only to a model the agent confirmed.
+            if super::acp_session::is_antigravity(&model) {
+                let level = session.switch_thinking_level(&model);
+                if mode.open_antigravity_session(&model, level).await.is_none() {
+                    return;
+                }
+            }
             let id = format!("{}/{}", model.provider, model.id);
             let short = model.id.clone();
             match tokio::spawn(async move { session.set_model(model, persist).await }).await {
