@@ -124,3 +124,7 @@ harness = false
 [[test]]
 name = "node_ipc_recovery"
 harness = false
+
+[[test]]
+name = "node_ipc_windows_diag"
+harness = false
