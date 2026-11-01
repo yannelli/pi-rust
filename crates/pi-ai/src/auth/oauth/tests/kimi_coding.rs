@@ -13,8 +13,8 @@ const CLIENT_ID: &str = "17e5f671-d194-4dfb-9706-5516cb48c098";
 
 fn device_authorization(overrides: Value) -> Value {
     let mut body = json!({ "user_code": "ABCD-1234", "device_code": "device-code-123",
-        "verification_uri": "https://www.kimi.com/code",
-        "verification_uri_complete": "https://www.kimi.com/code?user_code=ABCD-1234", "interval": 5, "expires_in": 600 });
+        "verification_uri": "https://www.kimi.ai/code",
+        "verification_uri_complete": "https://www.kimi.ai/code?user_code=ABCD-1234", "interval": 5, "expires_in": 600 });
     for (key, value) in overrides.as_object().unwrap() {
         body[key] = value.clone();
     }
@@ -57,12 +57,14 @@ async fn device_login_polls_until_tokens_arrive() {
     let polls = server.requests_to("/api/oauth/token");
     let times: Vec<u128> = polls.iter().map(|r| (r.at - start).as_millis()).collect();
     assert_eq!(times, [5000, 10000, 20000]);
-    assert_eq!(polls[0].path, "/auth.kimi.com/api/oauth/token");
+    assert_eq!(polls[0].path, "/auth.kimi.ai/api/oauth/token");
+    assert_eq!(credential.extra["oauthHost"], "https://auth.kimi.ai");
+    assert_eq!(flow(&server).to_auth(&credential).base_url.as_deref(), Some("https://api.kimi.ai/coding/v1"));
     assert_eq!(polls[0].form("grant_type").as_deref(), Some("urn:ietf:params:oauth:grant-type:device_code"));
     assert_eq!(polls[0].form("device_code").as_deref(), Some("device-code-123"));
     let expected = AuthEvent::DeviceCode {
         user_code: "ABCD-1234".into(),
-        verification_uri: "https://www.kimi.com/code?user_code=ABCD-1234".into(),
+        verification_uri: "https://www.kimi.ai/code?user_code=ABCD-1234".into(),
         interval_seconds: Some(5),
         expires_in_seconds: Some(600),
         open_browser_on_confirm: None,
@@ -133,7 +135,14 @@ async fn refresh_returns_a_bearer_header_and_retries_throttling() {
     .await;
     let before = crate::auth::oauth::http::now_ms();
     let credential = flow(&server).refresh(&stored("old-refresh"), CancellationToken::new()).await.unwrap();
-    assert!(credential.expires >= before + 3_600_000 && credential.extra.is_empty());
+    assert!(credential.expires >= before + 3_600_000);
+    assert_eq!(
+        credential.extra,
+        json!({"oauthHost": "https://auth.kimi.com", "baseUrl": "https://api.kimi.com/coding/v1"})
+            .as_object()
+            .unwrap()
+            .clone()
+    );
     assert_eq!(server.requests()[0].form("refresh_token").as_deref(), Some("old-refresh"));
     let headers = BTreeMap::from([("Authorization".to_string(), "Bearer new-access".to_string())]);
     assert_eq!(flow(&server).to_auth(&credential).headers, headers);

@@ -87,6 +87,7 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. This se
 
 ### Runtime
 
+- New Kimi Code OAuth logins use the global `.ai` endpoints. To sign in to mainland China, set `KIMI_CODE_OAUTH_HOST=https://auth.kimi.com`. The login stores its OAuth and API endpoints for later refreshes; older logins without this metadata retain their mainland endpoints. Explicit `KIMI_CODE_OAUTH_HOST` and `KIMI_CODE_BASE_URL` values override saved endpoints. A custom model `baseUrl` in `models.json` stays in effect. Kimi and Moonshot tool requests infer omitted types from enums, constants, and unambiguous schema structure.
 - Extensions run on an embedded QuickJS engine, so pi-rust does not need Node.js. All Node built-in modules load. These include:
   - `zlib` with gzip, brotli, and zstd.
   - `async_hooks` with `AsyncLocalStorage`, and `v8` serialization.
