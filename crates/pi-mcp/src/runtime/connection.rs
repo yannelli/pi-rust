@@ -430,9 +430,12 @@ impl McpServerConnection {
     /// Resolves once no transport of this server is open, including one that was still connecting.
     pub async fn close(&self) {
         self.inner.shutdown.cancel();
-        self.inner.lock().state = ServerState::Closed;
+        let client = {
+            let mut status = self.inner.lock();
+            status.state = ServerState::Closed;
+            status.client.take()
+        };
         self.inner.changed();
-        let client = self.inner.lock().client.take();
         if let Some(client) = client {
             client.close().await;
         }

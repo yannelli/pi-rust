@@ -200,6 +200,42 @@ async fn closes_a_connection_that_is_still_initializing_before_close_returns() {
     assert_eq!(connection.state(), ServerState::Closed);
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn closes_a_transport_created_after_close_started() {
+    // The factory waits until `close` cancelled the connection; the unbiased select then picks either
+    // branch, and the transport must end closed in every round.
+    for round in 0..32 {
+        let (transport, _server) = fake_server().await;
+        let created = transport.clone();
+        let (entered, factory_entered) = tokio::sync::oneshot::channel::<()>();
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let gate = Mutex::new((Some(entered), released));
+        let opener: Opener = Box::new(move || {
+            let mut gate = gate.lock().unwrap();
+            if let Some(entered) = gate.0.take() {
+                let _ = entered.send(());
+            }
+            let _ = gate.1.recv();
+            transport.clone() as SharedTransport
+        });
+        let (connection, _) = connect_with(stdio(), vec![opener]);
+        let opening = tokio::spawn({
+            let connection = connection.clone();
+            async move { connection.get_client().await.map(|_| ()) }
+        });
+        factory_entered.await.unwrap();
+        let closing = tokio::spawn({
+            let connection = connection.clone();
+            async move { connection.close().await }
+        });
+        wait_until(|| connection.state() == ServerState::Closed).await;
+        release.send(()).unwrap();
+        closing.await.unwrap();
+        assert!(opening.await.unwrap().is_err(), "round {round}");
+        assert!(created.is_closed(), "round {round}: the transport is still open");
+    }
+}
+
 #[tokio::test]
 async fn stops_waiting_to_retry_a_connection_when_closed() {
     let (transport, _server) = fake_server().await;
