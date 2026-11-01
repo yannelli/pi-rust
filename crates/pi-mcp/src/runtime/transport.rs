@@ -1,12 +1,13 @@
 //! Transports built from server configs: stdio for `command`, streamable HTTP for `url`.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use url::Url;
 
 use crate::auth::AuthProvider;
-use crate::config::McpServerEntry;
+use crate::config::{McpConfigScope, McpServerEntry};
 use crate::config_value::{resolve_config_value_or_err, resolve_headers_or_err};
 use crate::error::McpError;
 use crate::transport::SharedTransport;
@@ -40,7 +41,8 @@ pub fn expand_home(value: &str) -> String {
     expand_home_with(value, home_dir().as_deref())
 }
 
-/// Resolve `${VAR}` and `!command` in env values and headers, and expand `~`.
+/// Resolve `${VAR}` and `!command` in env values and headers, and expand `~`; see [`stdio_options`]
+/// for servers an ACP client supplied.
 pub fn create_default_transport(
     entry: &McpServerEntry,
     cwd: &Path,
@@ -48,6 +50,9 @@ pub fn create_default_transport(
 ) -> Result<SharedTransport, McpError> {
     let config = &entry.config;
     let name = &entry.name;
+    if entry.scope == Some(McpConfigScope::Client) && config.url.is_some() {
+        return Err(McpError::other(format!("MCP server \"{name}\" from the ACP client must use stdio")));
+    }
     if let Some(url) = &config.url {
         let headers = resolve_headers_or_err(config.header_pairs(), &format!("MCP server \"{name}\""))
             .map_err(McpError::Other)?;
@@ -57,7 +62,18 @@ pub fn create_default_transport(
         options.auth_provider = auth_provider;
         return Ok(Arc::new(StreamableHttpTransport::new(options)?));
     }
-    let mut env = std::collections::BTreeMap::new();
+    Ok(Arc::new(StdioTransport::new(stdio_options(entry, cwd)?)))
+}
+
+/// The stdio options of a server. ACP client servers ([`McpConfigScope::Client`]) are used literally:
+/// no `${VAR}`, `!command`, or `~` handling, no stderr kept, and spawn errors name the server only.
+pub fn stdio_options(entry: &McpServerEntry, cwd: &Path) -> Result<StdioTransportOptions, McpError> {
+    if entry.scope == Some(McpConfigScope::Client) {
+        return client_stdio_options(entry, cwd);
+    }
+    let config = &entry.config;
+    let name = &entry.name;
+    let mut env = BTreeMap::new();
     for (key, value) in config.env_pairs() {
         let description = format!("MCP server \"{name}\" env \"{key}\"");
         env.insert(key.to_string(), resolve_config_value_or_err(value, &description, None).map_err(McpError::Other)?);
@@ -68,7 +84,27 @@ pub fn create_default_transport(
     options.cwd = Some(cwd.join(expand_home(config.cwd.as_deref().unwrap_or("."))));
     options.env = env;
     options.stderr = StderrMode::Pipe;
-    Ok(Arc::new(StdioTransport::new(options)))
+    Ok(options)
+}
+
+fn client_stdio_options(entry: &McpServerEntry, cwd: &Path) -> Result<StdioTransportOptions, McpError> {
+    let config = &entry.config;
+    let mut env = BTreeMap::new();
+    for (key, value) in config.env.iter().flatten() {
+        let Some(value) = value.as_str() else {
+            return Err(McpError::other(format!("MCP server \"{}\" env \"{key}\" is not a string", entry.name)));
+        };
+        env.insert(key.clone(), value.to_string());
+    }
+    let command = config.command.clone().unwrap_or_default();
+    let mut options = StdioTransportOptions::new(command, config.args.clone().unwrap_or_default());
+    options.cwd = Some(cwd.to_path_buf());
+    options.env = env;
+    options.stderr = StderrMode::Pipe;
+    // The pipe is still drained; keeping none of it keeps echoed client values out of errors.
+    options.max_stderr_bytes = 0;
+    options.command_label = Some(format!("MCP server \"{}\"", entry.name));
+    Ok(options)
 }
 
 pub fn default_transport_factory() -> TransportFactory {
@@ -76,11 +112,14 @@ pub fn default_transport_factory() -> TransportFactory {
 }
 
 /// The `session/new` entry for an agent that connects to this server itself (Antigravity ACP), with
-/// the same value resolution. `None` for disabled or hidden servers and for HTTP servers whose
-/// login pi holds (OAuth or a pi provider credential).
+/// the same value resolution. `None` for disabled or hidden servers, for HTTP servers whose login
+/// pi holds (OAuth or a pi provider credential), and for servers an ACP client supplied to pi.
 pub fn acp_passthrough_server(
     entry: &McpServerEntry,
 ) -> Result<Option<pi_ai::providers::antigravity_acp::PassthroughMcpServer>, McpError> {
+    if entry.scope == Some(McpConfigScope::Client) {
+        return Ok(None);
+    }
     let config = &entry.config;
     let pi_login = config.is_http() && (config.uses_oauth() || config.auth_provider().is_some());
     if !config.is_enabled() || config.exposure() == crate::config::McpExposure::Hidden || pi_login {
@@ -154,5 +193,34 @@ mod tests {
         let keyed = acp_passthrough_server(&entry("keyed", keyed)).unwrap().unwrap();
         assert_eq!(keyed.acp["type"], "http");
         assert_eq!(keyed.acp["headers"], serde_json::json!([{"name": "Authorization", "value": "Bearer k"}]));
+        let mut client = entry("client", McpServerConfig::stdio("/bin/docs", Vec::new()));
+        client.scope = Some(McpConfigScope::Client);
+        assert!(acp_passthrough_server(&client).unwrap().is_none());
+    }
+
+    #[test]
+    fn only_client_servers_skip_value_resolution() {
+        use crate::config::McpServerConfig;
+        let args = vec!["~/x".to_string(), "$HOME".into(), "!echo hi".into(), "${A}".into()];
+        let mut client = entry("docs", McpServerConfig::stdio("/opt/docs", args.clone()));
+        client.config.env = Some(serde_json::json!({"T": "!echo hi", "U": "~/u"}).as_object().cloned().unwrap());
+        client.scope = Some(McpConfigScope::Client);
+        let cwd = Path::new("/work");
+        let options = stdio_options(&client, cwd).unwrap();
+        assert_eq!((options.command.as_str(), options.args.clone()), ("/opt/docs", args.clone()));
+        let env: Vec<(&str, &str)> = options.env.iter().map(|(key, value)| (key.as_str(), value.as_str())).collect();
+        assert_eq!(env, [("T", "!echo hi"), ("U", "~/u")]);
+        assert_eq!(options.cwd.as_deref(), Some(cwd));
+        assert_eq!((options.max_stderr_bytes, options.command_label.as_deref()), (0, Some("MCP server \"docs\"")));
+        let global = entry("docs", McpServerConfig::stdio("~/docs", vec!["~/x".into()]));
+        let options = stdio_options(&global, cwd).unwrap();
+        if let Some(home) = home_dir() {
+            assert_eq!(options.args, [home.join("x").display().to_string()]);
+        }
+        assert_eq!(options.command_label, None);
+        assert_ne!(options.max_stderr_bytes, 0);
+        let mut http = entry("web", McpServerConfig::http("https://mcp.example.com"));
+        http.scope = Some(McpConfigScope::Client);
+        assert!(create_default_transport(&http, cwd, None).is_err());
     }
 }

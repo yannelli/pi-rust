@@ -271,6 +271,7 @@ pub fn server_menu(servers: &dyn McpServers, name: &str) -> McpMenu {
     let entry = &status.entry;
     let saved = match (entry.scope, &entry.override_path) {
         (Some(McpConfigScope::Extension), _) => "for this session".to_string(),
+        (Some(McpConfigScope::Client), _) => "for this ACP session".to_string(),
         (_, Some(_)) => "saved to the project mcp.json".into(),
         (Some(scope), None) => format!("saved to the {scope} mcp.json"),
         (None, None) => "saved to mcp.json".into(),
@@ -307,6 +308,7 @@ pub fn server_menu(servers: &dyn McpServers, name: &str) -> McpMenu {
     }
     let transport = match &entry.config.url {
         Some(url) => url.clone(),
+        None if entry.scope == Some(McpConfigScope::Client) => "stdio (command and args not shown)".to_string(),
         None => {
             let command = entry.config.command.iter().chain(entry.config.args.iter().flatten());
             command.map(String::as_str).collect::<Vec<_>>().join(" ")
@@ -367,6 +369,7 @@ pub fn exposure_menu(status: &McpServerStatus) -> McpMenu {
         Some(McpConfigScope::Extension) => {
             format!("Applies to this session; the server is registered by {}.", entry.source)
         }
+        Some(McpConfigScope::Client) => "Applies to this session; the ACP client supplied the server.".to_string(),
         _ => format!("Saved to {}.", entry.override_path.as_deref().unwrap_or(&entry.source)),
     };
     let items = EXPOSURE_DESCRIPTIONS.iter().map(|(exposure, description)| {
