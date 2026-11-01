@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use pi_tui::utils::truncate_to_width;
-use pi_tui::{Component, Container, component, get_keybindings, ui_loop};
+use pi_tui::{Component, Container, component, get_keybindings, get_select_page_index, ui_loop};
 
 use super::common::{Shared, bold, border, fg, shared, spacer, text};
 use crate::theme::ThemeColor;
@@ -79,10 +79,15 @@ impl Component for UserMessageList {
     fn handle_input(&mut self, data: &str) {
         let kb = get_keybindings();
         let last = self.messages.len().saturating_sub(1);
+        let page_index = get_select_page_index(&kb, data, self.selected_index, self.messages.len(), self.max_visible);
         if kb.matches(data, "tui.select.up") {
             self.selected_index = if self.selected_index == 0 { last } else { self.selected_index - 1 };
         } else if kb.matches(data, "tui.select.down") {
             self.selected_index = if self.selected_index >= last { 0 } else { self.selected_index + 1 };
+        } else if let Some(page_index) = page_index {
+            if !self.messages.is_empty() {
+                self.selected_index = page_index;
+            }
         } else if kb.matches(data, "tui.select.confirm") {
             let selected = self.messages.get(self.selected_index).map(|message| message.id.clone());
             if let (Some(id), Some(on_select)) = (selected, self.on_select.as_mut()) {
@@ -96,6 +101,10 @@ impl Component for UserMessageList {
     }
 
     fn handles_input(&self) -> bool {
+        true
+    }
+
+    fn captures_viewport_input(&self) -> bool {
         true
     }
 }
@@ -156,6 +165,10 @@ impl Component for UserMessageSelector {
 
     fn handles_input(&self) -> bool {
         true
+    }
+
+    fn captures_viewport_input(&self) -> bool {
+        self.message_list.borrow().captures_viewport_input()
     }
 
     fn invalidate(&mut self) {

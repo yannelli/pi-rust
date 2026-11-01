@@ -9,6 +9,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use pi_mcp::runtime::{McpSignInPrompt, ServerState};
 use pi_mcp::{McpConfigScope, McpExposure, McpServerConfig, McpServerEntry, McpServerStatus, McpSubscription, Tool};
+use pi_tui::Component;
+use pi_tui::components::SelectItem;
 use reqwest::Url;
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
@@ -193,6 +195,29 @@ fn status_cancels_the_running_operation_with_the_cancel_key() {
     harness.settle();
     assert!(!harness.screen().contains("cancel") && harness.screen().contains(" Connecting…"));
     harness.send(keys::ESCAPE);
+}
+
+#[test]
+fn captures_fullscreen_viewport_keys_only_while_a_menu_list_is_shown() {
+    let harness = view();
+    let choices = Calls::new();
+    let items = (0..20).map(|i| SelectItem::new(&format!("server-{i}"), &format!("server-{i}"))).collect();
+    let menu = McpMenu {
+        title: "MCP servers".into(),
+        items,
+        confirm_label: "open".into(),
+        cancel_label: "close".into(),
+        ..McpMenu::default()
+    };
+    harness.component.borrow_mut().menu(Rc::new(move || menu.clone()), false, choices.recorder());
+    harness.settle();
+    assert!(harness.component.borrow().captures_viewport_input());
+
+    harness.send_all(&[keys::PAGE_DOWN, keys::ENTER]);
+    assert_eq!(choices.take(), [Some("server-12".to_string())]);
+
+    harness.component.borrow_mut().status("Sign in to issues", "Connecting…", None);
+    assert!(!harness.component.borrow().captures_viewport_input());
 }
 
 #[test]

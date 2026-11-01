@@ -45,7 +45,7 @@ jobs:
           node-version: 22
       - run: cargo test --workspace --locked --no-fail-fast
       - name: extension tests on the Node backend
-        run: cargo test -p pi-coding-agent --test extensions --locked --no-fail-fast
+        run: cargo test -p pi-coding-agent --test extensions --test tui_viewport_exports --locked --no-fail-fast
         env:
           PI_EXTENSION_RUNTIME: node
 

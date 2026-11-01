@@ -44,7 +44,11 @@ pub struct McpMenu {
 pub type McpMenuBuilder = Rc<dyn Fn() -> McpMenu>;
 
 type Finish = Rc<RefCell<Option<Box<dyn FnOnce(Option<String>)>>>>;
-type InputHandler = Box<dyn FnMut(&str)>;
+/// Where the view sends input: a shown menu list, which also captures viewport keys, or a key handler.
+enum InputHandler {
+    List(ComponentRef),
+    Keys(Box<dyn FnMut(&str)>),
+}
 
 fn finish(slot: &Finish, value: Option<String>) {
     let callback = slot.borrow_mut().take();
@@ -144,7 +148,8 @@ impl McpManagerView {
                     finish(&slot, None);
                 }
             };
-            self.set_content(frame(&menu.title, body, Some(&cancel_hint)), Some(Box::new(handler)), None);
+            let handler = InputHandler::Keys(Box::new(handler));
+            self.set_content(frame(&menu.title, body, Some(&cancel_hint)), Some(handler), None);
             return;
         }
         let visible = menu.items.len().min(MAX_VISIBLE_ITEMS);
@@ -164,8 +169,7 @@ impl McpManagerView {
         let list = component(list);
         body.push(list.clone());
         let footer = format!("{} • {cancel_hint}", key_hint("tui.select.confirm", &menu.confirm_label));
-        let handler = move |data: &str| list.borrow_mut().handle_input(data);
-        self.set_content(frame(&menu.title, body, Some(&footer)), Some(Box::new(handler)), None);
+        self.set_content(frame(&menu.title, body, Some(&footer)), Some(InputHandler::List(list)), None);
     }
 
     /// A message while an operation runs; with `on_cancel`, the cancel key calls it.
@@ -182,7 +186,7 @@ impl McpManagerView {
             }
         };
         let footer = key_hint("tui.select.cancel", "cancel");
-        self.set_content(frame(title, body, Some(&footer)), Some(Box::new(handler)), None);
+        self.set_content(frame(title, body, Some(&footer)), Some(InputHandler::Keys(Box::new(handler))), None);
     }
 
     /// The authorization URL with a copy key and an input for the redirected URL; `on_done`
@@ -231,7 +235,7 @@ impl McpManagerView {
                 field.borrow_mut().handle_input(data);
             }
         };
-        self.set_content(frame(title, body, Some(&footer)), Some(Box::new(handler)), Some(input));
+        self.set_content(frame(title, body, Some(&footer)), Some(InputHandler::Keys(Box::new(handler))), Some(input));
     }
 }
 
@@ -241,14 +245,20 @@ impl Component for McpManagerView {
     }
 
     fn handle_input(&mut self, data: &str) {
-        if let Some(handler) = &mut self.input_handler {
-            handler(data);
+        match &mut self.input_handler {
+            Some(InputHandler::List(list)) => list.borrow_mut().handle_input(data),
+            Some(InputHandler::Keys(handler)) => handler(data),
+            None => {}
         }
         self.tui.request_render(false);
     }
 
     fn handles_input(&self) -> bool {
         true
+    }
+
+    fn captures_viewport_input(&self) -> bool {
+        matches!(&self.input_handler, Some(InputHandler::List(list)) if list.borrow().captures_viewport_input())
     }
 
     fn is_focusable(&self) -> bool {

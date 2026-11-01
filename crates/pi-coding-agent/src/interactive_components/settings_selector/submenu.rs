@@ -150,9 +150,16 @@ impl Component for SelectSubmenu {
             return;
         };
         let kb = get_keybindings();
-        let is_nav = ["tui.select.up", "tui.select.down", "tui.select.confirm", "tui.select.cancel"]
-            .iter()
-            .any(|id| kb.matches(data, id));
+        let is_nav = [
+            "tui.select.up",
+            "tui.select.down",
+            "tui.select.pageUp",
+            "tui.select.pageDown",
+            "tui.select.confirm",
+            "tui.select.cancel",
+        ]
+        .iter()
+        .any(|id| kb.matches(data, id));
         if is_nav {
             self.select_list.borrow_mut().handle_input(data);
             return;

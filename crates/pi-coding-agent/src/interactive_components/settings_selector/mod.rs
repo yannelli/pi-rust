@@ -144,6 +144,10 @@ impl Component for SettingsSelector {
         true
     }
 
+    fn captures_viewport_input(&self) -> bool {
+        self.settings_list.borrow().captures_viewport_input()
+    }
+
     fn handle_mouse(&mut self, event: &TuiMouseEvent) -> Option<MouseResponse> {
         let response = self.container.handle_mouse(event);
         self.apply_updates();

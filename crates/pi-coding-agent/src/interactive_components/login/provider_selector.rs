@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use pi_ai::auth::{AuthCheck, AuthType};
 use pi_tui::components::Input;
-use pi_tui::{Component, Container, component, get_keybindings};
+use pi_tui::{Component, Container, component, get_keybindings, get_select_page_index};
 
 use crate::agent_session::login::LoginProvider;
 use crate::interactive_components::common::{bold, border, fg, fuzzy_filter_by, spacer, truncated, visible_window};
@@ -224,6 +224,7 @@ impl Component for OAuthSelector {
 
     fn handle_input(&mut self, data: &str) {
         let kb = get_keybindings();
+        let page_index = get_select_page_index(&kb, data, self.selected_index, self.filtered.len(), MAX_VISIBLE);
         if kb.matches(data, "tui.select.up") {
             if self.filtered.is_empty() {
                 return;
@@ -235,6 +236,12 @@ impl Component for OAuthSelector {
                 return;
             }
             self.selected_index = (self.selected_index + 1).min(self.filtered.len() - 1);
+            self.update_list();
+        } else if let Some(page_index) = page_index {
+            if self.filtered.is_empty() {
+                return;
+            }
+            self.selected_index = page_index;
             self.update_list();
         } else if kb.matches(data, "tui.select.confirm") {
             self.select_current();
@@ -251,6 +258,10 @@ impl Component for OAuthSelector {
     }
 
     fn handles_input(&self) -> bool {
+        true
+    }
+
+    fn captures_viewport_input(&self) -> bool {
         true
     }
 

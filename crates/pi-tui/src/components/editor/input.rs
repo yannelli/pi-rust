@@ -227,7 +227,8 @@ impl EditorCore {
             self.cancel_autocomplete();
             return true;
         }
-        if kb.matches(data, ids::SELECT_UP) || kb.matches(data, ids::SELECT_DOWN) {
+        let moves = [ids::SELECT_UP, ids::SELECT_DOWN, ids::SELECT_PAGE_UP, ids::SELECT_PAGE_DOWN];
+        if moves.iter().any(|id| kb.matches(data, id)) {
             if let Some(list) = self.autocomplete_list.as_mut() {
                 list.handle_key(data);
             }

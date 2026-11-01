@@ -161,7 +161,13 @@ fn search_overlay_focused(inner: &TuiInner) -> bool {
     overlay.is_some_and(|overlay| overlay.is_focused())
 }
 
-fn should_defer_to_overlay(inner: &TuiInner) -> bool {
+/// Focused overlays and components that capture viewport input receive viewport keys instead of the transcript.
+fn should_defer_viewport_input(inner: &TuiInner) -> bool {
+    let focused = inner.state.borrow().focused.clone();
+    let captures = |component: &ComponentRef| component.try_borrow().is_ok_and(|inner| inner.captures_viewport_input());
+    if focused.as_ref().is_some_and(captures) {
+        return true;
+    }
     inner.is_overlay_focused() && !search_overlay_focused(inner)
 }
 
@@ -338,7 +344,7 @@ pub(crate) fn handle_viewport_input(inner: &TuiInner, data: &str) -> bool {
             return true;
         }
     }
-    if should_defer_to_overlay(inner) {
+    if should_defer_viewport_input(inner) {
         return false;
     }
     let viewport_height = primary(inner).map_or(0, |v| v.viewport_height()) as i64;

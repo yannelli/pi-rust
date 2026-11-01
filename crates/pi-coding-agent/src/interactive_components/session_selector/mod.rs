@@ -381,6 +381,10 @@ impl Component for SessionSelector {
         true
     }
 
+    fn captures_viewport_input(&self) -> bool {
+        self.mode != Mode::Rename
+    }
+
     fn is_focusable(&self) -> bool {
         true
     }

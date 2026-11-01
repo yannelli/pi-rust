@@ -228,6 +228,10 @@ impl Component for TreeSelector {
         true
     }
 
+    fn captures_viewport_input(&self) -> bool {
+        self.label_input.is_none()
+    }
+
     fn is_focusable(&self) -> bool {
         true
     }

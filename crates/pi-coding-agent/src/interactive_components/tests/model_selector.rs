@@ -86,6 +86,29 @@ fn keeps_the_current_model_marked_while_browsing() {
 }
 
 #[test]
+fn moves_by_one_page_with_remapped_selection_page_keys() {
+    let _kb = setup_with(&[("tui.select.pageUp", "alt+v"), ("tui.select.pageDown", "ctrl+v")]);
+    let models: Vec<Model> = (0..12).map(|i| model("faux", &format!("model-{i:02}"), "")).collect();
+    let selected = Calls::new();
+    let on_select = selected.recorder();
+    let harness = Harness::new_shared(120, 30, |tui| {
+        let mut on_select = on_select;
+        ModelSelector::new(
+            tui,
+            None,
+            source(models.clone()),
+            Vec::new(),
+            move |model: &Model| on_select(model.id.clone()),
+            || {},
+            Default::default(),
+        )
+    });
+    assert!(harness.component.borrow().captures_viewport_input());
+    harness.send_all(&["\x16", "\x16", "\x1bv", keys::ENTER]);
+    assert_eq!(selected.get(), ["model-01"]);
+}
+
+#[test]
 fn uses_the_configured_save_binding() {
     let _kb = setup_with(&[("app.models.save", "ctrl+r")]);
     let current = model("faux", "m1", "M1");
