@@ -181,3 +181,22 @@ fn strict_mode_preferences_follow_provider_support() {
     assert!(make_strict_json_schema(&json!({"type": "string"}), None).is_err());
     assert!(make_strict_json_schema(&json!({"type": "object", "required": ["missing"]}), None).is_err());
 }
+
+#[test]
+fn recognizes_preferred_strict_tools_and_strict_tool_limit_messages() {
+    let constrained = |config: Value| tool(payload_schema(), Some(config));
+    assert!(prefers_json_schema_strict_sampling(&constrained(json!({"type": "json_schema", "strict": "prefer"}))));
+    assert!(!prefers_json_schema_strict_sampling(&constrained(json!({"type": "json_schema", "strict": "require"}))));
+    assert!(!prefers_json_schema_strict_sampling(&constrained(json!({"type": "grammar", "strict": "prefer"}))));
+    assert!(!prefers_json_schema_strict_sampling(&tool(payload_schema(), None)));
+
+    for message in [
+        "The compiled grammar is too large, which would cause performance issues.",
+        "Too many strict tools (32). The maximum number of strict tools supported is 20.",
+        "The model returned the following errors: Schemas contains too many parameters with union types (20 parameters).",
+    ] {
+        assert!(is_strict_tool_limit_error_message(message), "{message}");
+    }
+    assert!(!is_strict_tool_limit_error_message("messages: field required"));
+    assert!(!is_strict_tool_limit_error_message("Too many strict tools"));
+}
