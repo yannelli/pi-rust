@@ -1,6 +1,6 @@
 # CLI commands and flags
 
-Run `pi --help` to see all options. This page describes `pi completion`, `pi doctor`, `pi sessions`, `pi stats`, `pi extensions`, the run limits, and structured output. pi-rust adds them, and upstream pi does not have them.
+Run `pi --help` to see all options. This page explains session working directories and the commands that pi-rust adds: `pi completion`, `pi doctor`, `pi sessions`, `pi stats`, `pi extensions`, the run limits, and structured output.
 
 pi-rust also adds `--fast`. It turns on fast mode for one run. See [Fast mode](providers.md#fast-mode-pi-rust-extension).
 
@@ -28,6 +28,22 @@ pi completion fish > ~/.config/fish/completions/pi.fish
 - The features that the terminal supports.
 
 `pi doctor --json` prints the same report as JSON. `pi doctor` does not use the network and does not start MCP servers. If it finds a problem, it exits with code 1.
+
+## Session working directories
+
+A session records the working directory where it was created. Tools, `@path` references, project configuration, and context files use the session's working directory. Opening the session from another directory does not change its saved working directory.
+
+| Entry point | Working directory |
+| --- | --- |
+| `--continue`, `-c` | The current directory. Continues its most recent session. |
+| `--resume`, `-r`, or `/resume` | The selected session's saved working directory. |
+| `--session <path\|id>` | The session's saved working directory. Accepts a file path or full or partial ID. |
+| `/import` | The imported JSONL session's saved working directory. Also preserves its ID. |
+| `--session-id <id>` | The current directory. Opens its session with this exact ID, or creates one. |
+| `--fork <path\|id>` | The current directory, in a new session. Accepts a file path or full or partial ID. |
+| A `--session` ID found in another directory, when you choose to fork it | The current directory, in a new session. |
+
+If the saved directory no longer exists, interactive mode asks whether to use the current directory. This choice applies only to that run; it does not change the saved session header. Other modes return an error.
 
 ## Sessions
 
