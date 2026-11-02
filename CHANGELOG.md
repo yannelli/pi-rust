@@ -2,6 +2,29 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.1] - 2026-11-02
+
+### Added
+
+- **durable:** run unoffered calls as tool tasks (upstream 1c6928b30) ([55e45a2](https://github.com/yannelli/pi-rust/commit/55e45a2f0189ce6449043e9e9fb97fff65139f54))
+- **sdk:** support child session scoped models ([2dbcdad](https://github.com/yannelli/pi-rust/commit/2dbcdad281c84f59e1d4ed5b036e17af727e4d0d))
+- **durable:** reject input on idle conversations (upstream 6a2825113) ([e9ba109](https://github.com/yannelli/pi-rust/commit/e9ba1098c53b8fd4b65e95cce6965cd9b9ed0450))
+- **durable:** run after-tool hooks on all task results (upstream 87eff524f) ([1b2b93e](https://github.com/yannelli/pi-rust/commit/1b2b93e919f49d073cc7875e3dd3d400104c4989))
+- **sdk:** bridge loader extensions into child sessions ([d8aebe9](https://github.com/yannelli/pi-rust/commit/d8aebe97f6710eba3e3d1580d3a9bf1b3f0faec2))
+- **sdk:** expose child session controls and persistent events ([6787e30](https://github.com/yannelli/pi-rust/commit/6787e30c587f64b9fdf749752a407d43ee3b0b11))
+
+### Fixed
+
+- **session:** roll back failed session writes (upstream 807a5c051) ([622f0aa](https://github.com/yannelli/pi-rust/commit/622f0aa3f74b74f02a7e99bf0d017ea6ee4b3999))
+- **cli:** report a deleted startup directory (upstream 88ffcdc73) ([c21caa3](https://github.com/yannelli/pi-rust/commit/c21caa3924ce4a058050b01efc36ad57d2c8e1ce))
+- **sdk:** resolve summary auth through the session stream (upstream 6fed3cfb9) ([8108e1b](https://github.com/yannelli/pi-rust/commit/8108e1b13c484becb7b4c97fab8ce9b7de5f33bb))
+- **mcp:** accept local login and logout (upstream be15fe3c1) ([f7659e8](https://github.com/yannelli/pi-rust/commit/f7659e820c00170249c430c313dd9c2b31a60ece))
+- **mcp:** preserve concurrent direct-tool activation ([35ad820](https://github.com/yannelli/pi-rust/commit/35ad8203e28c63f3646d58d4eddf2f478fabc890))
+- **ai:** retry Bedrock preferred strict tools (upstream 842c73170) ([13404a4](https://github.com/yannelli/pi-rust/commit/13404a4053c412e1b7fd7fc561e8f3552ac25211))
+- **mcp:** preserve concurrent direct-tool activation ([da89292](https://github.com/yannelli/pi-rust/commit/da89292ea32bdae1a0e89d5440a56ea7325595cc))
+- **sdk:** preserve child prompts and extension bus startup ([422ca68](https://github.com/yannelli/pi-rust/commit/422ca687b58313c0b058f1206736a84e7ef5bc90))
+- **sdk:** bind loader providers to child model runtimes ([a2d8e59](https://github.com/yannelli/pi-rust/commit/a2d8e59e40d4bb81fe42bcceb2f6c8387adc7ba7))
+
 ## [0.12.0] - 2026-11-01
 
 ### Breaking Changes
