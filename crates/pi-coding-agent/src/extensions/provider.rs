@@ -30,6 +30,7 @@ enum StreamTarget {
 
 struct JsApiProvider {
     runner: Weak<ExtensionRunner>,
+    group: u64,
     target: StreamTarget,
 }
 
@@ -48,9 +49,9 @@ impl ApiProvider for JsApiProvider {
         };
         let args =
             vec![json!(name), json!(model), json!(context), stream_options_to_json(&options, signal), json!(key)];
-        let model = model.clone();
+        let (model, group) = (model.clone(), self.group);
         handle.spawn(async move {
-            let result = runner.call_json(method, args).await;
+            let result = runner.call_model(group, method, args).await;
             lock(&runner.sinks).remove(&key);
             runner.release_signal(signal);
             if let Err(failure) = result {
@@ -68,6 +69,7 @@ impl ApiProvider for JsApiProvider {
 /// A JavaScript `oauth` config of a registered provider.
 struct JsOAuth {
     runner: Weak<ExtensionRunner>,
+    group: u64,
     provider: String,
     name: String,
 }
@@ -126,7 +128,7 @@ impl JsOAuth {
     async fn call(&self, method: &str, args: Vec<Value>) -> AuthResult<Value> {
         let runner = self.runner()?;
         let call = vec![json!(self.provider), json!(method), Value::Array(args)];
-        runner.call_json("oauth", call).await.map_err(|failure| AuthError::Other(failure.message))
+        runner.call_model(self.group, "oauth", call).await.map_err(|failure| AuthError::Other(failure.message))
     }
 }
 
@@ -225,8 +227,13 @@ impl OAuthAuth for JsOAuth {
 
     fn to_auth(&self, credential: &OAuthCredential) -> ModelAuth {
         let Ok(runner) = self.runner() else { return ModelAuth::default() };
-        let call = vec![json!(self.provider).into(), json!("getApiKey").into(), json!([credential]).into()];
-        let result = runner.host().blocking_call_method_within("oauth", call, Duration::from_secs(10));
+        let call: Vec<HostValue> =
+            vec![json!(self.provider).into(), json!("getApiKey").into(), json!([credential]).into()];
+        let (method, call) = match self.group {
+            0 => ("oauth", call),
+            group => ("groupCallback", [json!(group).into(), json!("oauth").into()].into_iter().chain(call).collect()),
+        };
+        let result = runner.host().blocking_call_method_within(method, call, Duration::from_secs(10));
         let api_key = match result {
             Ok(HostValue::Json(Value::String(key))) => Some(key),
             _ => None,
@@ -263,6 +270,7 @@ pub(crate) async fn oauth_callback(runner: &Arc<ExtensionRunner>, args: &Args) -
 /// A JavaScript `route(request, ctx)` of a virtual model.
 struct JsRouter {
     runner: Weak<ExtensionRunner>,
+    group: u64,
     key: String,
 }
 
@@ -273,7 +281,7 @@ impl ModelRouter for JsRouter {
         let signal = runner.signal_for(&request.cancel);
         let mut value = request.to_json();
         value["signal"] = json!(signal);
-        let result = runner.call_json("route", vec![json!(self.key), value]).await;
+        let result = runner.call_model(self.group, "route", vec![json!(self.key), value]).await;
         runner.release_signal(signal);
         let route = result.map_err(|failure| anyhow::anyhow!(failure.message))?;
         let target = &route["model"];
@@ -293,6 +301,19 @@ impl ModelRouter for JsRouter {
 impl ExtensionRunner {
     /// `pi.registerProvider`: models and auth settings, a `streamSimple` API, and OAuth.
     pub(crate) fn register_provider(&self, name: &str, config: Value, extension_path: &str) -> Result<(), String> {
+        self.register_provider_for(&self.this(), 0, name, config, extension_path)
+    }
+
+    /// Register with this runner's runtime; JavaScript callbacks go to factory `group` of `callbacks`,
+    /// which also owns the API it installs (an SDK child host binding its parent's factories).
+    pub(crate) fn register_provider_for(
+        &self,
+        callbacks: &Arc<Self>,
+        group: u64,
+        name: &str,
+        config: Value,
+        extension_path: &str,
+    ) -> Result<(), String> {
         let runtime = self.model_runtime().clone();
         let builtin_id = config["oauth"]["builtin"].as_str();
         let builtin = builtin_id.map(|id| {
@@ -303,8 +324,9 @@ impl ExtensionRunner {
             let api = config["api"]
                 .as_str()
                 .ok_or(format!("Provider {name}: \"api\" is required when registering streamSimple."))?;
-            let provider = JsApiProvider { runner: self.weak(), target: StreamTarget::Provider(name.to_string()) };
-            self.install_api(api, Arc::new(provider), Some(name));
+            let target = StreamTarget::Provider(name.to_string());
+            let provider = JsApiProvider { runner: callbacks.weak(), group, target };
+            callbacks.install_api(api, Arc::new(provider), Some((group, name)));
         }
         let mut stored = config.clone();
         if let Some(object) = stored.as_object_mut() {
@@ -321,13 +343,15 @@ impl ExtensionRunner {
             }
         }
         runtime.register_extension_provider(name, stored)?;
-        let hooks = super::provider_hooks::JsProviderHooks::from_config(self.weak(), name, &config);
+        let hooks = super::provider_hooks::JsProviderHooks::from_config(callbacks.weak(), group, name, &config);
         runtime.register_extension_hooks(name, hooks.map(|hooks| Arc::new(hooks) as _));
         if let Some(oauth) = config["oauth"].as_object() {
             let display = oauth.get("name").and_then(Value::as_str).unwrap_or(name).to_string();
             let flow: Arc<dyn OAuthAuth> = match builtin {
                 Some(inner) => Arc::new(BuiltinOAuth { inner, name: display }),
-                None => Arc::new(JsOAuth { runner: self.weak(), provider: name.to_string(), name: display }),
+                None => {
+                    Arc::new(JsOAuth { runner: callbacks.weak(), group, provider: name.to_string(), name: display })
+                }
             };
             runtime.register_extension_oauth(name, Some(flow));
         }
@@ -347,13 +371,10 @@ impl ExtensionRunner {
 
     pub(crate) fn unregister_provider(&self, name: &str) {
         lock(&self.providers).retain(|(existing, _)| existing != name);
-        let apis: Vec<String> = lock(&self.apis)
-            .iter()
-            .filter(|(_, (_, owner))| owner.as_deref() == Some(name))
-            .map(|(api, _)| api.clone())
-            .collect();
-        for api in apis {
-            self.restore_api(&api);
+        self.restore_owned_apis(0, name);
+        let parent = self.parent.get().and_then(|link| Some((link.parent.upgrade()?, link.group)));
+        if let Some((parent, group)) = parent {
+            parent.restore_owned_apis(group, name);
         }
         self.model_runtime().unregister_extension_provider(name);
         self.model_runtime().register_extension_hooks(name, None);
@@ -370,14 +391,26 @@ impl ExtensionRunner {
         lock(&self.providers).iter().map(|(name, _)| name.clone()).collect()
     }
 
-    fn install_api(&self, api: &str, provider: Arc<dyn ApiProvider>, owner: Option<&str>) {
+    fn install_api(&self, api: &str, provider: Arc<dyn ApiProvider>, owner: Option<(u64, &str)>) {
         let mut apis = lock(&self.apis);
         let previous = match apis.remove(api) {
             Some((previous, _)) => previous,
             None => pi_ai::api_provider(api),
         };
-        apis.insert(api.to_string(), (previous, owner.map(str::to_string)));
+        apis.insert(api.to_string(), (previous, owner.map(|(group, name)| (group, name.to_string()))));
         pi_ai::register_api_provider(api, provider);
+    }
+
+    /// Restore the APIs that provider `name` of factory `group` installed here.
+    fn restore_owned_apis(&self, group: u64, name: &str) {
+        let apis: Vec<String> = lock(&self.apis)
+            .iter()
+            .filter(|(_, (_, owner))| owner.as_ref().is_some_and(|owner| owner.0 == group && owner.1 == name))
+            .map(|(api, _)| api.clone())
+            .collect();
+        for api in apis {
+            self.restore_api(&api);
+        }
     }
 
     fn restore_api(&self, api: &str) {
@@ -403,7 +436,7 @@ impl ExtensionRunner {
     /// `registerApiProvider` / `unregisterApiProviders` from `@earendil-works/pi-ai`.
     pub(crate) fn set_js_api(&self, api: &str, registered: bool) {
         if registered {
-            let provider = JsApiProvider { runner: self.weak(), target: StreamTarget::Api(api.to_string()) };
+            let provider = JsApiProvider { runner: self.weak(), group: 0, target: StreamTarget::Api(api.to_string()) };
             self.install_api(api, Arc::new(provider), None);
         } else {
             self.restore_api(api);
@@ -429,9 +462,18 @@ impl ExtensionRunner {
 
     /// `pi.registerVirtualModel`: the definition without `route`, which stays in JavaScript.
     pub(crate) fn register_virtual_model(&self, definition: Value) -> Result<(), String> {
+        self.register_virtual_model_for(&self.this(), 0, definition)
+    }
+
+    pub(crate) fn register_virtual_model_for(
+        &self,
+        callbacks: &Arc<Self>,
+        group: u64,
+        definition: Value,
+    ) -> Result<(), String> {
         let text = |key: &str| definition[key].as_str().unwrap_or_default().to_string();
         let (provider, id) = (text("provider"), text("id"));
-        let router = JsRouter { runner: self.weak(), key: format!("{provider}/{id}") };
+        let router = JsRouter { runner: callbacks.weak(), group, key: format!("{provider}/{id}") };
         let mut model =
             VirtualModelDefinition::new(&provider, &id, definition["name"].as_str().unwrap_or(&id), Arc::new(router));
         model.thinking_levels = definition["thinkingLevels"]
