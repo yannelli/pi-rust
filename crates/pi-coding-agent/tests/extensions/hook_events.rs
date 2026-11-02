@@ -72,7 +72,7 @@ async fn prompt_expansion_reports_the_expansion_and_appends_context_texts() {
 
     let events = recorded(&h, "prompt_expansion");
     assert_eq!(events.len(), 2, "plain text expands nothing: {events:?}");
-    let review = h.cwd.join(".pi/prompts/review.md").display().to_string();
+    let review = h.cwd.join(".pi").join("prompts").join("review.md").display().to_string();
     assert_eq!(
         events[0],
         json!({"type": "prompt_expansion", "kind": "prompt_template", "name": "review", "args": "main.rs",
@@ -81,7 +81,7 @@ async fn prompt_expansion_reports_the_expansion_and_appends_context_texts() {
     let skill = &events[1];
     assert_eq!((&skill["kind"], &skill["name"], &skill["args"]), (&json!("skill"), &json!("deploy"), &json!("now")));
     assert_eq!(skill["prompt"], "/skill:deploy now");
-    assert!(skill["source"].as_str().unwrap().ends_with("skills/deploy/SKILL.md"), "{skill}");
+    assert!(skill["source"].as_str().unwrap().replace('\\', "/").ends_with("skills/deploy/SKILL.md"), "{skill}");
     assert!(skill["text"].as_str().unwrap().contains("Run the deploy script."), "{skill}");
 }
 
