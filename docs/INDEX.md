@@ -1,11 +1,12 @@
 # Documentation index
 
-Created: 2026-10-29. Last updated: 2026-10-31.
+Created: 2026-10-29. Last updated: 2026-11-01.
 
 | Document | Use it when |
 | --- | --- |
 | [parity/README.md](parity/README.md) | You look for gaps against upstream pi or port an upstream commit. |
 | [parity/GAPS.md](parity/GAPS.md) | You need the open parity gaps and the pi-rust extensions. |
+| [parity/sdk-child-session.md](parity/sdk-child-session.md) | You change the SDK `AgentSession` of `createAgentSession`. It lists the members that run and the ones that still throw. |
 | [agents/node-compat.md](agents/node-compat.md) | You close a Node API gap in the extension runtime. |
 | [agents/ci-triage.md](agents/ci-triage.md) | You diagnose a CI failure or a flaky test. |
 | [agents/release.md](agents/release.md) | You ship a change. |

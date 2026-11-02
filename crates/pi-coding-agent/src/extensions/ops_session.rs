@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use super::convert::prompt_options_from_json;
 use super::ops::{Args, error};
 use super::runner::{ExtensionError, ExtensionRunner};
-use crate::agent_session::{AgentSession, lock};
+use crate::agent_session::{AgentSession, ModelRuntime, lock};
 use crate::session::SessionManager;
 
 fn entry_json(entry: &crate::session::Entry) -> Value {
@@ -76,8 +76,12 @@ pub(super) fn read_manager(manager: &SessionManager, method: &str, args: &Args) 
 }
 
 /// `ctx.modelRegistry` reads.
-fn read_models(session: &AgentSession, method: &str, args: &Args) -> Result<Value, JsError> {
-    let runtime = session.model_runtime();
+pub(super) fn read_models(
+    runtime: &ModelRuntime,
+    registered: impl FnOnce() -> Vec<String>,
+    method: &str,
+    args: &Args,
+) -> Result<Value, JsError> {
     let of_type = |model: &pi_ai::Model, kind: &str| model.model_type.as_deref().unwrap_or("chat") == kind;
     Ok(match method {
         "getError" => json!(runtime.load_error()),
@@ -117,7 +121,10 @@ fn read_models(session: &AgentSession, method: &str, args: &Args) -> Result<Valu
         }
         "getProviderAuthStatus" => {
             let provider = args.str(2)?;
-            json!({"configured": runtime.has_configured_auth(&provider)})
+            match runtime.has_runtime_api_key(&provider) {
+                true => json!({"configured": true, "source": "runtime"}),
+                false => json!({"configured": runtime.has_configured_auth(&provider)}),
+            }
         }
         "getProvider" => {
             let provider = args.str(2)?;
@@ -127,9 +134,7 @@ fn read_models(session: &AgentSession, method: &str, args: &Args) -> Result<Valu
                 false => Value::Null,
             }
         }
-        "getRegisteredProviderIds" => {
-            json!(session.extension_runner().map(|runner| runner.provider_ids()).unwrap_or_default())
-        }
+        "getRegisteredProviderIds" => json!(registered()),
         other => return Err(error(format!("Unknown model registry method: {other}"))),
     })
 }
@@ -338,7 +343,11 @@ pub(crate) fn sync(runner: &ExtensionRunner, op: &str, args: &Args) -> Result<Ho
             match group {
                 "ctx" => context(runner, &session, name, target)?,
                 "session" => read_session(&session, &args.str(1)?, args)?,
-                "models" => read_models(&session, &args.str(1)?, args)?,
+                "models" => {
+                    let registered =
+                        || session.extension_runner().map(|runner| runner.provider_ids()).unwrap_or_default();
+                    read_models(session.model_runtime(), registered, &args.str(1)?, args)?
+                }
                 "tools" if name == "callable" => tool_infos(&session, &session.callable_tool_names()),
                 "action" => action(runner, &session, name, args)?,
                 _ => return Err(error(format!("Unknown host operation: {op}"))),

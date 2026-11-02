@@ -1,16 +1,15 @@
 // Upstream `DefaultResourceLoader`, `ModelRegistry`, and `ModelRuntime` for SDK use. Rust holds each
 // loader's paths and layers (`resources.*` ops); this file runs the override hooks and keeps their objects.
 import { homedir } from "node:os";
-import { call, callAsync, optional } from "./bridge.js";
+import { createEventBus } from "./api.js";
+import { call, callAsync, optional, signalId } from "./bridge.js";
 import { createModelRegistry } from "./context.js";
+import { bindExtensions, loadExtensions } from "./sdk_extensions.js";
 import { SettingsManager } from "./sdk_storage.js";
 import { sessionStream } from "./stream.js";
 import { Theme } from "./theme.js";
 import { unsupportedError } from "./unsupported.js";
 
-// Options whose results only the upstream extension loader produces.
-const UNSUPPORTED_OPTIONS = ["extensionFactories", "additionalExtensionPaths", "extensionsOverride"];
-const CHILD_DROPPED_OVERRIDES = ["skillsOverride", "promptsOverride", "themesOverride", "agentsFilesOverride"];
 const FIELDS = {
 	skills: ["name", "description", "filePath", "baseDir", "sourceInfo", "disableModelInvocation", "license",
 		"compatibility", "metadata", "allowedTools"],
@@ -75,25 +74,23 @@ function stages(loader, kinds, report) {
 
 export class DefaultResourceLoader {
 	constructor(options) {
-		for (const key of UNSUPPORTED_OPTIONS) {
-			const value = options[key];
-			if (value !== undefined && !(Array.isArray(value) && value.length === 0)) {
-				throw unsupportedError(`DefaultResourceLoader.${key}`);
-			}
-		}
-		if (options.eventBus !== undefined && options.noExtensions !== true) {
-			throw unsupportedError("DefaultResourceLoader.eventBus");
+		if (options.extensionFactories?.some((input) => typeof input !== "function" && input.builtin === true)) {
+			throw unsupportedError("DefaultResourceLoader.extensionFactories builtin entries");
 		}
 		if (options.settingsManager != null && typeof options.settingsManager._sdkId !== "number") {
 			throw unsupportedError("DefaultResourceLoader.settingsManager");
 		}
 		const created = res("create", options.cwd, options.agentDir, homedir(), process.cwd());
 		this._sdkId = created.id;
-		this._sdkState = { extended: false, packages: false, extensions: 0, prompts: false, staging: 0 };
+		this._sdkState = { prompts: false, staging: 0 };
+		this._sdkExtensions = {};
 		this.cwd = created.cwd;
 		this.agentDir = created.agentDir;
 		this.settingsManager = options.settingsManager ?? SettingsManager.create(this.cwd, this.agentDir);
-		this.eventBus = options.eventBus;
+		this.eventBus = options.eventBus ?? createEventBus();
+		this.extensionFactories = options.extensionFactories ?? [];
+		this.extensionsOverride = options.extensionsOverride;
+		this.additionalExtensionPaths = options.additionalExtensionPaths ?? [];
 		this.additionalSkillPaths = options.additionalSkillPaths ?? [];
 		this.additionalPromptTemplatePaths = options.additionalPromptTemplatePaths ?? [];
 		this.additionalThemePaths = options.additionalThemePaths ?? [];
@@ -130,6 +127,7 @@ export class DefaultResourceLoader {
 	/** Sends the settings manager and the current option values; upstream reads them live on each reload. */
 	_sdkConfigure() {
 		res("configure", this._sdkId, this.settingsManager._sdkId, {
+			additionalExtensionPaths: this.additionalExtensionPaths,
 			additionalSkillPaths: this.additionalSkillPaths,
 			additionalPromptTemplatePaths: this.additionalPromptTemplatePaths,
 			additionalThemePaths: this.additionalThemePaths,
@@ -145,7 +143,6 @@ export class DefaultResourceLoader {
 	}
 
 	getExtensions() {
-		if (this._sdkState.extensions > 0) throw unsupportedError("DefaultResourceLoader.getExtensions");
 		return this.extensionsResult;
 	}
 
@@ -187,46 +184,41 @@ export class DefaultResourceLoader {
 			promptPaths: paths.promptPaths ?? [],
 			themePaths: paths.themePaths ?? [],
 		});
-		if (kinds.length > 0) this._sdkState.extended = true;
 		stages(this, kinds, false);
 	}
 
+	/** Upstream: user, global, and CLI extensions under an untrusted project, with the factories. */
 	async loadProjectTrustExtensions() {
-		throw unsupportedError("DefaultResourceLoader.loadProjectTrustExtensions");
+		this.settingsManager.setProjectTrusted(false);
+		await this.settingsManager.reload();
+		this._sdkConfigure();
+		return (await loadExtensions(this, "pretrust")).result;
 	}
 
 	async reload(options) {
-		if (options?.resolveProjectTrust) throw unsupportedError("DefaultResourceLoader.reload.resolveProjectTrust");
+		const resolve = options?.resolveProjectTrust;
+		if (resolve) {
+			const extensionsResult = await this.loadProjectTrustExtensions();
+			this.settingsManager.setProjectTrusted(await resolve({ extensionsResult }));
+		}
 		await this.settingsManager.reload();
 		this._sdkConfigure();
-		const { warnings, packages, extensions } = await callAsync("resources.reload", this._sdkId);
-		Object.assign(this._sdkState, { packages, extensions });
-		this.extensionsResult = { extensions: [], errors: [], runtime: undefined, warnings };
+		this.extensionsResult = (await loadExtensions(this, resolve ? "final" : "full")).result;
 		stages(this, ["skills", "prompts", "themes"], true);
 		stages(this, ["agentsFiles", "systemPrompt", "appendSystemPrompt"], false);
 		this.loaded = true;
 	}
 
-	/**
-	 * The options a child session reads. It refuses what the child would drop; before `reload()` it
-	 * loads the system prompts once.
-	 */
+	/** The options a child session reads; it shares this loader. Before `reload()` it loads the system prompts once. */
 	_sdkOptions() {
 		const state = this._sdkState;
-		const dropped = [
-			...CHILD_DROPPED_OVERRIDES.filter((key) => this[key] !== undefined),
-			...(this.additionalThemePaths.length > 0 ? ["additionalThemePaths"] : []),
-			...(state.extended ? ["extendResources"] : []),
-			...(state.packages ? ["packages"] : []),
-			...(state.extensions > 0 ? ["extensions"] : []),
-		];
-		if (dropped.length > 0) throw unsupportedError(`createAgentSession.resourceLoader.${dropped[0]}`);
 		if (!this.loaded && !state.prompts && state.staging === 0) {
 			this._sdkConfigure();
 			stages(this, ["systemPrompt", "appendSystemPrompt"], false);
 			state.prompts = true;
 		}
 		return {
+			resourceLoaderId: this._sdkId,
 			cwd: this.cwd,
 			agentDir: this.agentDir,
 			systemPrompt: this.systemPrompt,
@@ -241,40 +233,53 @@ export class DefaultResourceLoader {
 			settingsManagerId: this.settingsManager._sdkId,
 		};
 	}
+
+	/** The child session `target` took the extensions of the last reload. */
+	_sdkBind(target) {
+		return bindExtensions(this, target);
+	}
 }
 
 const RUNTIME_UNSUPPORTED = [
-	"setRuntimeApiKey", "removeRuntimeApiKey", "listCredentials", "login", "logout",
-	"registerProvider", "unregisterProvider", "registerNativeProvider", "registerVirtualModel",
+	"login", "logout", "registerProvider", "unregisterProvider", "registerNativeProvider", "registerVirtualModel",
 	"unregisterVirtualModel", "getRegisteredProviderConfig", "getRegisteredNativeProvider",
 	"getCompatibilityRequestConfig", "getPhysicalModel",
 ];
 
-function rejectOptions(options, member) {
-	for (const [key, value] of Object.entries(options ?? {})) {
-		if (value !== undefined) throw unsupportedError(`${member}.${key}`);
-	}
+const unsupportedStream = () => {
+	throw unsupportedError("ModelRuntime.stream");
+};
+
+function registryFor(id) {
+	return createModelRegistry(id, id === 0 ? sessionStream : unsupportedStream, "modelRuntime");
 }
 
-const ofProvider = (models, providerId) =>
-	providerId === undefined ? models : models.filter((model) => model.provider === providerId);
-
-/** Upstream `ModelRuntime` over the host session's models; auth methods take provider ids. */
-export function hostRuntime() {
-	const registry = createModelRegistry(0, sessionStream);
+/** Upstream `ModelRuntime` over native runtime `id` (0 is the host's); auth methods take provider ids. */
+function runtimeFor(id) {
+	const registry = registryFor(id);
+	const read = (method, ...args) => optional(call("modelRuntime.read", id, method, ...args));
+	const run = (name, ...args) => callAsync(`modelRuntime.${name}`, id, ...args);
 	const runtime = {
 		...registry,
-		_sdkHostRuntime: true,
+		_sdkRuntimeId: id,
 		getModel: (providerId, modelId) => registry.find(providerId, modelId),
-		getModels: (providerId) => registry.getModelsOfType("chat", providerId),
-		getAllModels: (providerId) => ofProvider(registry.getAll(), providerId),
-		getAllAvailable: async (providerId) => ofProvider(registry.getAvailable(), providerId),
+		getModels: (providerId) => read("getModels", providerId ?? null) ?? [],
+		getAllModels: (providerId) => read("getAllModels", providerId ?? null) ?? [],
+		getAvailable: async (providerId) => (await run("getAvailable", providerId ?? null)) ?? [],
+		getAllAvailable: async (providerId) => read("getAllAvailable", providerId ?? null) ?? [],
+		getAvailableOfType: async (type, providerId) => registry.getAvailableOfType(type, providerId),
 		getAvailableSnapshot: () => registry.getAvailable(),
-		getProviders: () =>
-			[...new Set(registry.getAll().map((model) => model.provider))].map(registry.getProvider).filter(Boolean),
+		getProviders: () => read("getProviders") ?? [],
 		hasConfiguredAuth: (providerId) => registry.hasConfiguredAuth({ provider: providerId }),
 		isUsingOAuth: (providerId) => registry.isUsingOAuth({ provider: providerId }),
-		isUsingSubscription: (providerId) => Boolean(call("models.read", 0, "isUsingSubscription", providerId)),
+		isUsingSubscription: (providerId) => Boolean(read("isUsingSubscription", providerId)),
+		setRuntimeApiKey: async (providerId, apiKey) => {
+			await run("setRuntimeApiKey", providerId, apiKey);
+		},
+		removeRuntimeApiKey: async (providerId) => {
+			await run("removeRuntimeApiKey", providerId);
+		},
+		listCredentials: async () => (await run("listCredentials")) ?? [],
 	};
 	for (const name of RUNTIME_UNSUPPORTED) {
 		runtime[name] = () => {
@@ -284,17 +289,25 @@ export function hostRuntime() {
 	return runtime;
 }
 
+export function hostRuntime() {
+	return runtimeFor(0);
+}
+
 export class ModelRuntime {
-	static async create(options) {
-		rejectOptions(options, "ModelRuntime.create");
-		return hostRuntime();
+	static async create(options = {}) {
+		for (const key of ["credentials", "modelsStore"]) {
+			if (options[key] !== undefined) throw unsupportedError(`ModelRuntime.create.${key}`);
+		}
+		if (options.modelsPath === null) throw unsupportedError("ModelRuntime.create.modelsPath");
+		const { signal, ...rest } = options;
+		return runtimeFor(await callAsync("modelRuntime.create", { ...rest, signal: signalId(signal) }));
 	}
 }
 
-/** Upstream `ModelRegistry`: the extension-facing registry over the host runtime. */
+/** Upstream `ModelRegistry`: the extension-facing registry over a runtime. */
 export class ModelRegistry {
 	constructor(runtime) {
-		if (!runtime?._sdkHostRuntime) throw unsupportedError("new ModelRegistry");
-		return createModelRegistry(0, sessionStream);
+		if (typeof runtime?._sdkRuntimeId !== "number") throw unsupportedError("new ModelRegistry");
+		return registryFor(runtime._sdkRuntimeId);
 	}
 }
