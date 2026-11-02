@@ -12,6 +12,7 @@ mod host;
 #[path = "../agent_session/http_mock.rs"]
 mod http_mock;
 mod loading;
+mod mcp_elicitation;
 #[path = "../agent_session/mcp_fake.rs"]
 #[allow(dead_code)]
 mod mcp_fake;
