@@ -16,14 +16,15 @@ use pi_durable::*;
 use serde_json::{Value, json};
 use support::harness_support::{chat_setup, faux_model};
 use support::task_support::{completed, eventually};
-use support::{ControlledStorage, Deferred, context};
+use support::{ControlledStorage, Deferred, commit_observer, context};
 
 type Reports = Arc<Mutex<Vec<(String, ReportInfo)>>>;
 
 fn collect(options: HarnessOptions) -> (HarnessOptions, Reports) {
     let reports: Reports = Arc::default();
     let sink = reports.clone();
-    let options = options.with_on_report(move |error, info| sink.lock().unwrap().push((message(error), info.clone())));
+    let options =
+        options.with_on_report(move |report| sink.lock().unwrap().push((message(&report.error), report.info.clone())));
     (options, reports)
 }
 
@@ -93,7 +94,7 @@ async fn say_which_task_reported_a_failure_or_faulted() {
     // Hosts see upstream's JSON shape.
     let faulted = serde_json::to_value(&reports.lock().unwrap()[1].1).unwrap();
     let task = json!({ "id": id.0, "kind": "test.faulty", "conversationId": ROOT_CONVERSATION_ID.0 });
-    assert_eq!(faulted, json!({ "type": "task_faulted", "task": task, "extension": "test", "reason": "threw" }));
+    assert_eq!(faulted, json!({ "kind": "task_faulted", "task": task, "extension": "test", "reason": "threw" }));
     harness.close(&context()).await.unwrap();
 }
 
@@ -204,7 +205,7 @@ async fn tell_extension_listener_wake_and_timer_failures_from_a_failed_session()
         Ok(Arc::new(renamed))
     });
     registry.install(Extension::new("wraps").wrap(rename)).unwrap();
-    let _listener = harness.subscribe_commits(|_, _| Err(DurableError::error("listener"))).unwrap();
+    let _listener = harness.observe_commits(commit_observer(|_, _| Err(DurableError::error("listener")))).unwrap();
     let root = harness.root(&context(), CreateOptions::default()).await.unwrap();
     root.agent(&context()).await.unwrap();
     create(&harness, &sleeper).await;
@@ -230,5 +231,41 @@ async fn tell_extension_listener_wake_and_timer_failures_from_a_failed_session()
     let create_conversation = |tx: Tx| async move { tx.create_conversation(ConversationOwnership::Ownerless).await };
     let _ = root.commit(create_conversation, &context()).await;
     harness.closed().await;
-    assert_eq!(info_of(&reports, "disk gone"), Some(ReportInfo::SessionFailed));
+    assert_eq!(info_of(&reports, "disk gone"), Some(ReportInfo::StorageFailed));
+}
+
+#[test]
+fn names_every_report_by_the_kind_it_serializes() {
+    let task = ReportTask { id: TaskId(1), kind: "test.task".into(), conversation_id: ROOT_CONVERSATION_ID };
+    let infos = [
+        ReportInfo::StorageFailed,
+        ReportInfo::TaskFaulted { task: task.clone(), extension: None, reason: FaultReason::Threw },
+        ReportInfo::TaskInterrupted {
+            task: task.clone(),
+            extension: None,
+            reason: InterruptionReason::Interrupted,
+            restarts: 1,
+        },
+        ReportInfo::MigrationFailed { task: task.clone(), extension: None },
+        ReportInfo::TaskOutdated { task: task.clone(), extension: None, reason: OutdatedReason::TaskTooOld },
+        ReportInfo::TaskError { task, extension: None },
+        ReportInfo::ExtensionError { extension: None, task: None, conversation_id: None },
+        ReportInfo::HostError { callback: HostCallback::Now, task: None },
+        ReportInfo::ListenerError,
+    ];
+    let kinds: Vec<&str> = infos.iter().map(ReportInfo::kind).collect();
+    let tags: Vec<Value> = infos.iter().map(|info| serde_json::to_value(info).unwrap()["kind"].clone()).collect();
+    assert_eq!(tags, kinds.iter().map(|kind| json!(kind)).collect::<Vec<_>>());
+    let expected = [
+        "storage_failed",
+        "task_faulted",
+        "task_interrupted",
+        "migration_failed",
+        "task_outdated",
+        "task_error",
+        "extension_error",
+        "host_error",
+        "listener_error",
+    ];
+    assert_eq!(kinds, expected);
 }

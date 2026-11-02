@@ -61,10 +61,10 @@ async fn run(mode: &str, shape: &str, n: u64) -> (f64, usize) {
     let commits = Arc::new(AtomicUsize::new(0));
     let counter = commits.clone();
     let listener = harness
-        .subscribe_commits(move |_, _| {
+        .observe_commits(commit_observer(move |_, _| {
             counter.fetch_add(1, Ordering::SeqCst);
             Ok(())
-        })
+        }))
         .unwrap();
     let started = Instant::now();
     let id = submit(&root, "go").await;

@@ -372,6 +372,52 @@ async fn the_loop_runs_nested_calls_with_hooks_and_records_them_on_the_result() 
 }
 
 #[tokio::test]
+async fn a_nested_call_runs_the_tool_its_hook_saw_when_callable_tools_change_during_the_hook() {
+    let orchestrate = ctx_tool("orchestrate", |context| {
+        async move {
+            let outcome = context.execute_tool("echo", json!({}), ExecuteToolOptions::default()).await;
+            AgentToolResult::text(outcome.result.content[0].as_text().unwrap_or_default())
+        }
+        .boxed()
+    });
+    let echo = |reply: &'static str| -> SharedTool {
+        let tool: SharedTool =
+            FnTool::new("echo", json!({"type": "object"}), move |_, _| Ok(AgentToolResult::text(reply)));
+        tool
+    };
+    let (original, replacement) = (echo("original"), echo("replacement"));
+    let callable = Arc::new(Mutex::new(vec![orchestrate.clone(), original.clone()]));
+    let (_, stream_fn) = sequence(vec![tool_use(vec![call("model-1", "orchestrate", json!({}))])]);
+    let mut config = config(stream_fn);
+    let listed = callable.clone();
+    config.callable_tools = Some(Arc::new(move || listed.lock().unwrap().clone()));
+    let hooked = Arc::new(Mutex::new(Vec::<SharedTool>::new()));
+    let (seen, swap, swapped) = (hooked.clone(), callable.clone(), vec![orchestrate.clone(), replacement.clone()]);
+    config.before_tool_call = Some(Arc::new(move |input, _| {
+        seen.lock().unwrap().push(input.tool.clone());
+        if input.parent_tool_call_id.is_some() {
+            *swap.lock().unwrap() = swapped.clone();
+        }
+        async { None }.boxed()
+    }));
+    let mut context =
+        AgentContext { system_prompt: Some(String::new()), tools: vec![orchestrate.clone()], ..Default::default() };
+    let (_, sink) = recorder();
+    let added = run_agent_loop(vec![Message::user("go")], &mut context, &config, sink, CancellationToken::new()).await;
+
+    let Some(Message::ToolResult(result)) = added.iter().find(|message| matches!(message, Message::ToolResult(_)))
+    else {
+        panic!("expected a tool result");
+    };
+    assert_eq!(result.content[0].as_text(), Some("original"));
+    let same = |a: &SharedTool, b: &SharedTool| std::ptr::addr_eq(Arc::as_ptr(a), Arc::as_ptr(b));
+    let hooked = hooked.lock().unwrap();
+    assert!(hooked.len() == 2 && same(&hooked[0], &orchestrate) && same(&hooked[1], &original));
+    // A lookup by name after the hook finds the replacement, which never ran.
+    assert!(same(&callable.lock().unwrap()[1], &replacement));
+}
+
+#[tokio::test]
 async fn tools_outside_the_loop_cannot_run_nested_calls() {
     let outcome = ToolContext::new("solo").execute_tool("echo", json!({}), ExecuteToolOptions::default()).await;
     assert!(outcome.is_error && !ToolContext::new("solo").can_execute_tools());

@@ -297,10 +297,10 @@ async fn delivers_complete_publications_synchronously_after_adoption() {
     let sink = delivered.clone();
     let unsubscribe = test
         .session
-        .subscribe_commits(move |_, context| {
+        .observe_commits(commit_observer(move |_, context| {
             *sink.lock().unwrap() = Some(context.clone());
             Ok(())
-        })
+        }))
         .unwrap();
     let commit_context = context();
     let result = test
@@ -317,7 +317,7 @@ async fn delivers_complete_publications_synchronously_after_adoption() {
     assert_eq!(result, "done");
     assert!(delivered.lock().unwrap().as_ref().unwrap().ptr_eq(&commit_context));
     assert_eq!(test.publication_count(), published + 1);
-    unsubscribe.unsubscribe();
+    unsubscribe.detach();
 }
 
 #[tokio::test]

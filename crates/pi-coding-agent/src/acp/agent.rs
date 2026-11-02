@@ -26,6 +26,7 @@ use super::config::{
 };
 use super::errors::{AcpResult, auth_or_internal, auth_required, internal_failure, invalid_params};
 use super::listing::{find_pi_session, list_pi_sessions, read_session_title};
+use super::mcp_servers::ClientMcpServers;
 use super::session::{AcpSession, AcpSessionParams};
 use super::settings::{enable_skill_commands, quiet_startup};
 use super::startup::{StartupInfoInput, build_startup_info, update_notice};
@@ -201,10 +202,12 @@ impl AcpAgent {
             .mcp_capabilities(McpCapabilities::new().http(false).sse(false))
             .prompt_capabilities(prompt)
             .session_capabilities(sessions);
+        let meta = json!({"piAcp": {"exactMcpPreapproval": true}});
         InitializeResponse::new(ProtocolVersion::V1)
             .agent_info(Implementation::new("pi", self.options.version.clone()).title("pi"))
             .auth_methods(auth_methods(supports_meta, &self.options.terminal_launch))
             .agent_capabilities(capabilities)
+            .meta(meta.as_object().cloned())
     }
 
     /// Terminal Auth happens out of band, so `authenticate` succeeds without doing anything.
@@ -229,9 +232,10 @@ impl AcpAgent {
         if !super::settings::node_is_absolute(&params.cwd) {
             return Err(invalid_params(format!("cwd must be an absolute path: {}", params.cwd.display())));
         }
+        let mcp_servers = ClientMcpServers::from_request(&params.mcp_servers, params.meta.as_ref())?;
         let cwd = params.cwd.display().to_string();
         self.set_last_cwd(&cwd);
-        let backend = self.factory.create(&params.cwd, None).await?;
+        let backend = self.factory.create(&params.cwd, None, &mcp_servers).await?;
         let first_state = backend.get_state().await.ok();
         let session_id = first_state.as_ref().and_then(|state| state["sessionId"].as_str()).map(String::from);
         let session_id = session_id.unwrap_or_else(uuid_v4);
@@ -321,8 +325,19 @@ impl AcpAgent {
         Some((found.cwd, file))
     }
 
-    /// The live session, or the stored one reopened.
+    /// The live session, or the stored one reopened without client MCP servers: pi keeps no copy of
+    /// them, so a session reopened after a close has none until `session/load` supplies them again.
     pub async fn restore_session(&self, session_id: &str, cwd: Option<&str>) -> AcpResult<Arc<AcpSession>> {
+        self.restore_session_with(session_id, cwd, &ClientMcpServers::default()).await
+    }
+
+    /// The live session, or the stored one reopened with `mcp_servers`.
+    pub(super) async fn restore_session_with(
+        &self,
+        session_id: &str,
+        cwd: Option<&str>,
+        mcp_servers: &ClientMcpServers,
+    ) -> AcpResult<Arc<AcpSession>> {
         if let Some(session) = self.session(session_id) {
             return Ok(session);
         }
@@ -334,7 +349,7 @@ impl AcpAgent {
             return Err(invalid_params(format!("Unknown sessionId: {session_id}")));
         };
         let cwd = cwd.map(String::from).unwrap_or(stored_cwd);
-        let backend = self.factory.create(Path::new(&cwd), Some(Path::new(&file))).await?;
+        let backend = self.factory.create(Path::new(&cwd), Some(Path::new(&file)), mcp_servers).await?;
         let session = self.register(session_id, &cwd, backend, false);
         self.set_last_cwd(&cwd);
         self.store.upsert(session_id, &cwd, &file);

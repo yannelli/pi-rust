@@ -6,6 +6,7 @@ mod parity;
 mod vendor_assets;
 mod vendor_extract;
 mod vendor_js;
+mod vendor_tui_capture;
 mod version;
 
 use std::path::{Path, PathBuf};

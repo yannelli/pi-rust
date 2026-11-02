@@ -9,6 +9,7 @@ use pi_durable::{ConversationOwnership, DraftHead};
 use serde::{Deserialize, Serialize};
 
 use super::*;
+use crate::support::{ValueCall, on_value};
 
 fn ownerless() -> CreateOptions {
     CreateOptions { ownership: ConversationOwnership::Ownerless, ..CreateOptions::default() }
@@ -101,10 +102,10 @@ async fn folds_undelivered_commits_into_one_call_whose_ops_reach_the_newest_view
     let frames: Frames = Arc::default();
     let sink = frames.clone();
     watch
-        .start(move |pi_chord::WatchChange { value, ops, .. }, _| {
+        .start(on_value(move |ValueCall { value, ops, .. }, _| {
             sink.lock().unwrap().push((value, ops));
             async { Ok(()) }
-        })
+        }))
         .unwrap();
     drained().await;
     let frames = frames.lock().unwrap().clone();
@@ -195,7 +196,7 @@ async fn shares_one_mount_between_concurrent_observers_and_isolates_a_failing_li
     assert!(failing.value().get("docs").unwrap().same_ref(shared.value().get("docs").unwrap()));
     shared.dispose().unwrap();
     failing
-        .start(|pi_chord::WatchChange { .. }, _| async { Err(pi_durable::DurableError::error("listener failed")) })
+        .start(on_value(|ValueCall { .. }, _| async { Err(pi_durable::DurableError::error("listener failed")) }))
         .unwrap();
     note(&root, "one", None).await;
     note(&root, "two", None).await;

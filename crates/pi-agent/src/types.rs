@@ -81,11 +81,23 @@ pub enum ToolExecutionMode {
     Parallel,
 }
 
+/// The concrete object behind a tool. Only the blanket impl provides it, so no tool can report
+/// another object as itself.
+pub trait AsAnyTool {
+    fn as_any(&self) -> &dyn std::any::Any;
+}
+
+impl<T: std::any::Any> AsAnyTool for T {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
 /// A tool the agent can call. Returning `Err` reports the error text to the model.
 /// Everything but the name, description, parameters, and `execute` has a default, so
 /// built-in, extension, MCP, and codemode tools all register the same way.
 #[async_trait]
-pub trait AgentTool: Send + Sync {
+pub trait AgentTool: AsAnyTool + Send + Sync {
     fn name(&self) -> &str;
 
     /// Human-readable name for display.
@@ -261,6 +273,8 @@ pub enum AgentEvent {
 pub struct BeforeToolCall<'a> {
     pub assistant_message: &'a AssistantMessage,
     pub tool_call: &'a ToolCall,
+    /// The tool that runs when the call is allowed.
+    pub tool: &'a SharedTool,
     /// Validated arguments for the tool schema.
     pub args: &'a Value,
     /// Agent context at the time the call is prepared.

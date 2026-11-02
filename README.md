@@ -87,6 +87,7 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. This se
 
 ### Runtime
 
+- New Kimi Code OAuth logins use the global `.ai` endpoints. To sign in to mainland China, set `KIMI_CODE_OAUTH_HOST=https://auth.kimi.com`. The login stores its OAuth and API endpoints for later refreshes; older logins without this metadata retain their mainland endpoints. Explicit `KIMI_CODE_OAUTH_HOST` and `KIMI_CODE_BASE_URL` values override saved endpoints. A custom model `baseUrl` in `models.json` stays in effect. Kimi and Moonshot tool requests infer omitted types from enums, constants, and unambiguous schema structure.
 - Extensions run on an embedded QuickJS engine, so pi-rust does not need Node.js. All Node built-in modules load. These include:
   - `zlib` with gzip, brotli, and zstd.
   - `async_hooks` with `AsyncLocalStorage`, and `v8` serialization.
@@ -98,6 +99,8 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. This se
   The APIs that do not work throw `ERR_PI_UNSUPPORTED`. Examples are `crypto.subtle` other than `digest`, and rare `crypto` ciphers such as Camellia. `crates/pi-js/src/unsupported.rs` lists all of them. Native npm addons cannot load on QuickJS.
 
   To run extensions on Node 22 or later, set `extensionRuntime` to `"node"` or `"auto"`, or use `--extension-runtime` or `PI_EXTENSION_RUNTIME`. On Node, native addons, `child_process.fork`, and V8-only modules work. If Node is missing, pi uses QuickJS. See [Node backend](docs/agents/node-compat.md#node-backend).
+- IPC handle retries use a pi-js-specific wrapper. Internal handle listeners receive an object with only `close()`, and cluster connections queued to a disconnected worker are not reclaimed. See [Extension runtime](docs/parity/GAPS.md#extension-runtime-pi-js).
+- On non-Linux Unix, a concurrent child spawn can inherit an IPC socket before QuickJS marks it close-on-exec. Node closes inherited descriptors in its macOS `posix_spawn` path. See [Platform](docs/parity/GAPS.md#platform).
 - The providers that extensions get from `@earendil-works/pi-ai/providers/all` stream, classify, generate images, and resolve auth in Rust. Their API key login asks for one key, also for Amazon Bedrock, Google Vertex AI, and Cloudflare. See [Extension module exports](docs/parity/GAPS.md#extension-module-exports).
 - When you quit the interactive mode, pi waits at most 3 seconds for the running turn and the `session_shutdown` handlers, then exits. Upstream pi waits until they finish.
 - `grep` and `find` use the Rust `ignore` crate, so pi-rust does not download `rg` or `fd`.
@@ -105,6 +108,7 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. This se
 - Word movement in Chinese, Japanese, Korean (CJK), and Thai text uses ICU4X dictionaries. Thus some word boundaries are different from `Intl.Segmenter` in Node.
 - `pi-env` looks for remote daemons in a `pi-env-daemons` folder next to the `pi` program. Each release has a `pi-env-daemons-<tag>.tar.gz` archive with the daemons for Linux, Android (Termux), macOS, and Windows on x86-64 and arm64. Extract this archive in the folder that contains `pi`.
 - `pi experimental` and its commands `server`, `client`, `durable`, and `vacation` need `PI_EXPERIMENTAL=1`, as in upstream pi. `server` and `client` use Unix sockets. On Windows, they show a message that they need Unix. Upstream pi also has no Windows transport.
+- When a local shell command exits, pi-durable still stops waiting for output 100 ms after the exit or the last chunk after it, as upstream does. It then delivers queued chunks and any chunk the readers finish reading before they observe the stop signal. On Unix it also takes at most 64 KiB more per stream if readable without waiting. On Windows it starts no further read. See [Platform](docs/parity/GAPS.md#platform).
 - Extension and login `select` menus show at most 10 options and fewer in short terminals, with a `(n/total)` counter, so the selected option stays visible. Upstream pi shows all options.
 
 ### Additions
@@ -121,11 +125,11 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. This se
 | `marketplace:` package sources and `pi extensions search` and `info` use signed indexes and checksummed native binaries | Has no Rust extension marketplace | [Marketplace](crates/pi-coding-agent/docs/marketplace.md) |
 | The `/extensions` browser searches, installs, updates, removes, enables, and disables extensions, then offers a reload | Has no `/extensions` command | [/extensions](crates/pi-coding-agent/docs/commands.md#extensions) |
 | Run limits (`--max-turns`, `--max-cost`) and structured output (`--output-schema`, `--output-retries`) | | [Run limits](crates/pi-coding-agent/docs/cli.md#run-limits) |
-| `pi --mode acp`. Permission modes are separate from thinking levels and control tool execution. | Needs the separate pi-acp adapter | [ACP mode](crates/pi-coding-agent/docs/acp.md) |
+| `pi --mode acp`. Permission modes are separate from thinking levels and control tool execution. The stdio MCP servers the client sends connect for that session. | Needs the separate pi-acp adapter | [ACP mode](crates/pi-coding-agent/docs/acp.md) |
 | Account model lists for OpenAI Codex, Anthropic, GitHub Copilot, OpenAI, xAI, Google, and Cursor | Limits only OpenRouter | [Account model lists](crates/pi-coding-agent/docs/providers.md#account-model-lists) |
 | `/usage`, `pi usage`, and the native extension method `usage.get` show the subscription limits of the Claude, ChatGPT (Codex), Cursor, SuperGrok (`xai`, with Grok Build), and Google Antigravity logins: the 5-hour and weekly windows, the used percentage, and the reset time | Has no usage report | [Subscription usage limits](docs/providers/usage.md) |
 | Fast mode for models that have one: `/fast`, `--fast`, the `fastMode` setting, the ACP **Speed** option, and RPC `set_fast_mode` | Has no fast mode | [Fast mode](crates/pi-coding-agent/docs/providers.md#fast-mode-pi-rust-extension) |
-| The providers `cursor` and `google-antigravity` | Has none of them | [Subscription providers](crates/pi-coding-agent/docs/providers.md#cursor-and-google-antigravity-pi-rust-extension) |
+| The providers `cursor` and `google-antigravity`. Antigravity supports `/acp mode`, `/model`, and `/thinking` before a prompt, with the agent confirming selections before pi saves them. | Has none of them | [Subscription providers](crates/pi-coding-agent/docs/providers.md#cursor-and-google-antigravity-pi-rust-extension) |
 | ACP agents as providers: Kiro CLI (V3), Amp, and the agents of the ACP registry run over stdio with their own tools. `/acp` installs them from the registry in the global or project settings, logs in, enables, disables, moves, and sets the default. The `acpAgents` setting stores them. They get pi's MCP servers, their slash commands complete in the editor, and `/undo` covers their file changes. | Has no ACP client | [ACP agents](crates/pi-coding-agent/docs/acp-providers.md) |
 | The global `disabledProviders` setting hides providers from model selection and keeps their credentials. The TUI `/settings` menu has a **Disabled providers** list. | | [Disable providers](crates/pi-coding-agent/docs/providers.md#disable-providers) |
 | `/settings` items for the `retry.*` and `retry.provider.*` values | Sets these values only in `settings.json` | [Retry settings](crates/pi-coding-agent/docs/providers.md#retry-settings) |
@@ -230,5 +234,6 @@ These parts come from other MIT-licensed projects. Each release archive includes
 | ACP mode | [pi-acp](https://github.com/svkozak/pi-acp) by Sergii Kozak | [`LICENSE-pi-acp`](crates/pi-coding-agent/src/acp/LICENSE-pi-acp) |
 | Some JavaScript modules of the extension runtime | [Node.js](https://github.com/nodejs/node) | [`LICENSE-node`](crates/pi-js/src/js/LICENSE-node) |
 | MCP OAuth code, ported from upstream pi | [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) | [`LICENSE-mcp-typescript-sdk`](crates/pi-mcp/src/oauth/LICENSE-mcp-typescript-sdk) |
+| Warning colors of `loadProjectContextFiles` in the extension SDK | [chalk](https://github.com/chalk/chalk) 6.0.0 by Sindre Sorhus | [`LICENSE-chalk`](crates/pi-coding-agent/src/extensions/js/LICENSE-chalk) |
 
 The release archives also include `THIRD-PARTY-LICENSES.md` with the licenses of the third-party Rust crates in the binaries. The Release workflow writes it with [cargo-about](https://github.com/EmbarkStudios/cargo-about) from `about.toml` and `about.hbs`.

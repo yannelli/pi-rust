@@ -57,7 +57,7 @@ async fn coalesces_a_typed_migration_and_override_into_the_copied_creation_base(
     assert_eq!(*value, json(r#"{"count":9,"migrated":true}"#));
     assert_eq!(checkpoints.load(Ordering::SeqCst), 0);
     let published = document_changes(&test.last_publication());
-    assert!(matches!(published[..], [DocumentCommitChange::Document { version: Some(2), .. }]));
+    assert!(matches!(published[..], [DocumentCommitChange::Change { version: 2, .. }]));
     assert_eq!(snapshot(&test.session, &v2, child.id).await.unwrap(), json(r#"{"count":9,"migrated":true}"#));
     let record = find_record(&test, "fork.override", parent).await.unwrap();
     let stored = test.storage.document(record.id, DocumentPoint::Current, &context()).await.unwrap().unwrap();

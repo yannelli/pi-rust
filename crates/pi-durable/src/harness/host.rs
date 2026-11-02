@@ -29,8 +29,8 @@ use crate::session::{
 };
 use crate::timers::Timers;
 use crate::types::{
-    ConversationOwnership, ConversationQuery, ConversationRecord, HostCallback, ReportInfo, Storage, SubmissionQuery,
-    SubmissionStatus, TaskRecord,
+    ConversationOwnership, ConversationQuery, ConversationRecord, HostCallback, Report, ReportInfo, Storage,
+    SubmissionQuery, SubmissionStatus, TaskRecord,
 };
 
 const SCAN_PAGE_SIZE: usize = 256;
@@ -82,7 +82,7 @@ impl SessionHooks for HarnessHooks {
 
     fn report(&self, error: &DurableError, info: &ReportInfo, context: Option<&Context>) {
         if let Some(report) = &self.options.on_report {
-            report(error, info);
+            report(&Report { info: info.clone(), error: error.clone() });
         }
         self.telemetry.report(info, context);
     }
@@ -199,7 +199,7 @@ impl Harness {
         self.0.task_graph.state(context).await
     }
 
-    /// A serialized exact-frame watch of the [`super::TaskGraph`]; cancelling `context` stops it.
+    /// A serialized exact-frame watch of the [`super::TaskGraph`]; aborting `context` ends it `Aborted`.
     pub async fn watch_task_graph(&self, context: &Context) -> DurableResult<TaskGraphWatch> {
         self.0.task_graph.watch(context).await
     }
@@ -313,13 +313,6 @@ impl Harness {
 
     pub async fn abort_task(&self, id: TaskId, context: &Context) -> DurableResult<AbortTaskResult> {
         self.0.scheduler.abort(id, context, false).await
-    }
-
-    /// Run a task parked by `HarnessSettings::restart_limit` again: clears its restart count and enables scheduling.
-    /// Does nothing for a task that is not parked; fails for an unknown one.
-    pub async fn retry_task(&self, id: TaskId, context: &Context) -> DurableResult<()> {
-        self.0.session.assert_usable()?;
-        self.0.scheduler.retry(id, context).await
     }
 
     pub async fn wait_for_task(&self, id: TaskId, context: &Context) -> DurableResult<TaskRecord> {

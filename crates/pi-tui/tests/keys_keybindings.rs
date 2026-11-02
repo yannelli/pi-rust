@@ -6,7 +6,7 @@ use std::sync::MutexGuard;
 use pi_tui::env::global_state_lock;
 use pi_tui::keybindings::{
     KeybindingConflict, KeybindingDefinition, KeybindingValue, KeybindingsConfig, KeybindingsManager, get_keybindings,
-    ids, set_keybindings, tui_keybindings, update_keybindings,
+    get_select_page_index, ids, set_keybindings, tui_keybindings, update_keybindings,
 };
 use pi_tui::keys::set_kitty_protocol_active;
 
@@ -185,4 +185,29 @@ fn global_manager_defaults_to_tui_bindings_and_can_be_replaced() {
     let updated = update_keybindings(|kb| kb.set_user_bindings(KeybindingsConfig::new()));
     assert_eq!(updated.get_keys(ids::SELECT_CANCEL), ["escape", "ctrl+c"]);
     assert_eq!(get_keybindings().get_keys(ids::SELECT_CANCEL), ["escape", "ctrl+c"]);
+}
+
+#[test]
+fn select_page_index_moves_one_page_clamped_and_follows_remapped_page_keys() {
+    let _lock = locked();
+    let kb = manager(KeybindingsConfig::new());
+    assert_eq!(get_select_page_index(&kb, "\x1b[6~", 2, 10, 5), Some(7));
+    assert_eq!(get_select_page_index(&kb, "\x1b[6~", 8, 10, 5), Some(9));
+    assert_eq!(get_select_page_index(&kb, "\x1b[5~", 2, 10, 5), Some(0));
+    assert_eq!(get_select_page_index(&kb, "x", 2, 10, 5), None);
+    assert_eq!(get_select_page_index(&kb, "\x1b[6~", 0, 0, 5), Some(0), "an empty list gives 0");
+    assert_eq!(get_select_page_index(&kb, "\x1b[6~", 3, 10, 0), Some(3));
+
+    let mut config = KeybindingsConfig::new();
+    config.insert("tui.select.pageUp", "alt+v");
+    config.insert("tui.select.pageDown", "ctrl+v");
+    let remapped = manager(config);
+    assert_eq!(get_select_page_index(&remapped, "\x16", 0, 12, 5), Some(5));
+    assert_eq!(get_select_page_index(&remapped, "\x1bv", 7, 12, 5), Some(2));
+    assert_eq!(get_select_page_index(&remapped, "\x1b[6~", 0, 12, 5), None);
+
+    let mut both = KeybindingsConfig::new();
+    both.insert("tui.select.pageUp", "ctrl+v");
+    both.insert("tui.select.pageDown", "ctrl+v");
+    assert_eq!(get_select_page_index(&manager(both), "\x16", 7, 12, 5), Some(2), "page up wins a shared key");
 }

@@ -2,6 +2,7 @@
 //! [`InteractiveMode`] with a virtual terminal through [`InteractiveOptions::terminal`].
 
 mod acp_actions;
+mod acp_session;
 mod acp_view;
 mod auth;
 mod autocomplete;

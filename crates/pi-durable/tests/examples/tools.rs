@@ -18,6 +18,7 @@ use pi_durable::tools::{BashToolOptions, ReadToolOptions, coding_tools, create_b
 use support::chat::answer;
 
 use super::*;
+use crate::support::{ValueCall, on_value};
 
 fn tool_call(name: &str, args: Value, id: &str) -> FauxResponseStep {
     let call = faux_tool_call_with_id(name, args, id);
@@ -149,15 +150,15 @@ async fn run_json(storage: Arc<dyn Storage>, ops: bool) -> Vec<Value> {
     let view = watch.value().to_serde();
     if ops {
         printed.lock().unwrap().push(json!({ "view": view }));
-        let listen = move |pi_chord::WatchChange { ops, .. }, _| {
+        let listen = on_value(move |ValueCall { ops, .. }, _| {
             sink.lock().unwrap().push(json!({ "ops": serde_json::to_value(ops).unwrap() }));
             async { Ok(()) }
-        };
+        });
         watch.start(listen).unwrap();
     } else {
         let newest = Mutex::new(newest_id(&view));
         printed.lock().unwrap().push(json!({ "entries": view["entries"], "live": view["docs"]["pi.live"] }));
-        let listen = move |pi_chord::WatchChange { value, .. }: pi_chord::WatchChange, _| {
+        let listen = on_value(move |ValueCall { value, .. }, _| {
             let value = value.to_serde();
             let mut newest = newest.lock().unwrap();
             let since = *newest;
@@ -170,7 +171,7 @@ async fn run_json(storage: Arc<dyn Storage>, ops: bool) -> Vec<Value> {
             }
             sink.lock().unwrap().push(line);
             async { Ok(()) }
-        };
+        });
         watch.start(listen).unwrap();
     }
     let submission = root.submit(SubmissionDraft::input("What is in this directory?"), &ctx()).await.unwrap();

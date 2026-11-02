@@ -5,6 +5,7 @@ mod support;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use crate::support::{ValueCall, on_value};
 use pi_ai::{AssistantMessage, Message, StopReason};
 use pi_chord::Json;
 use pi_durable::harness::live::LIVE_DOC;
@@ -180,12 +181,12 @@ async fn converts_a_committed_partial_into_an_aborted_entry_and_resends_the_same
     let watched = Arc::new(Mutex::new(None::<String>));
     let sink = watched.clone();
     watch
-        .start(move |pi_chord::WatchChange { value, .. }, _| {
+        .start(on_value(move |ValueCall { value, .. }, _| {
             if let Some(text) = partial_text(&Value::from(&value)) {
                 *sink.lock().unwrap() = Some(text);
             }
             async { Ok(()) }
-        })
+        }))
         .unwrap();
     let id = submit(&root, "hi").await;
     wait_for(|| {

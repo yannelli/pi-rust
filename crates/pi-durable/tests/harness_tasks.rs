@@ -59,7 +59,7 @@ async fn open_root(tasks: Vec<Task>) -> (Harness, Conversation, Arc<Mutex<Vec<Du
     let reports = Arc::new(Mutex::new(Vec::new()));
     let sink = reports.clone();
     let options = HarnessOptions::new(chat_setup(Default::default()).models, registry as Arc<dyn RegistryReader>)
-        .with_on_report(move |error, _| sink.lock().unwrap().push(error.clone()));
+        .with_on_report(move |report| sink.lock().unwrap().push(report.error.clone()));
     let harness = Harness::open(Arc::new(MemoryStorage::new()), options, &context()).await.unwrap();
     let root = harness.root(&context(), CreateOptions::default()).await.unwrap();
     (harness, root, reports)

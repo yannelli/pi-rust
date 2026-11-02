@@ -3,22 +3,22 @@
 
 use std::sync::{Arc, Mutex};
 
-use pi_chord::{Context, Json, WatchChange};
+use pi_chord::{Context, Json};
 
 use super::line::lock;
 use super::observation::CommittedObserver;
+use super::{WatchCall, WatchEnd};
 use crate::errors::{DurableError, DurableResult};
 
-/// A synchronous observer of committed Durable state, for adapters such as a Chord source (`observe_doc()`,
-/// `Harness::observe_conversation()`, `Harness::observe_task_graph()`). `advance` gets every change, unfolded, as
-/// memory adopts it, so it must only record it: never block or call the Session.
+/// A synchronous observer of committed state with Chord's watch shapes (`observe_doc()`, `observe_conversation()`,
+/// `observe_task_graph()`). `advance` gets every change, unfolded, as memory adopts it: record it, never block.
 pub trait Observer: Send + Sync {
-    /// One change; its ops apply from the value before it. An error is reported as `listener_error`, detaches the
-    /// observer, and ends it with the error.
-    fn advance(&self, change: &WatchChange, context: &Context) -> DurableResult<()>;
-    /// Called once: the Session closed or failed (`failure`), or the owner of the scope ended; never after
-    /// `Observation::detach()`.
-    fn end(&self, failure: Option<DurableError>);
+    /// One call; its ops apply from the value before it. Durable's failures are final, so every call is a `Value`.
+    /// An error is reported as `listener_error`, detaches the observer, and ends it `ListenerError`.
+    fn advance(&self, call: &WatchCall, context: &Context) -> DurableResult<()>;
+    /// Called once: `Ended` when the Session closes or the owner of the scope ends, `Failed` with the error that
+    /// failed the Session; never after `Observation::detach()`.
+    fn end(&self, end: WatchEnd);
 }
 
 /// An attached [`Observer`]: the value at attachment, which every later `advance` starts from, and how to detach it.
@@ -81,25 +81,25 @@ impl GuardedObserver {
 }
 
 impl CommittedObserver for GuardedObserver {
-    fn advance(&self, change: WatchChange, context: Context) {
+    fn advance(&self, call: WatchCall, context: Context) {
         let current = lock(&self.0).as_ref().map(|attached| (attached.observer.clone(), attached.report.clone()));
         let Some((observer, report)) = current else { return };
-        if let Err(error) = observer.advance(&change, &context) {
+        if let Err(error) = observer.advance(&call, &context) {
             report(&error);
             if self.release().is_some() {
-                observer.end(Some(error));
+                observer.end(WatchEnd::ListenerError(error));
             }
         }
     }
 
-    fn end(&self, failure: Option<DurableError>) {
+    fn end(&self, end: WatchEnd) {
         if let Some((observer, _)) = self.release() {
-            observer.end(failure);
+            observer.end(end);
         }
     }
 
     fn owner_ended(&self) {
-        self.end(None);
+        self.end(WatchEnd::Ended);
     }
 
     fn keeps_cancellation(&self) -> bool {

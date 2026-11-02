@@ -18,7 +18,7 @@ use serde_json::json;
 
 use super::support::harness_support::*;
 use super::support::models_support::{WrappedModels, scripted_stream};
-use super::support::{ControlledStorage, change_record, change_value, content_kind, document_changes, observe_commits};
+use super::support::{ControlledStorage, change_record, change_value, content_kind, document_changes, follow_commits};
 use super::{answer, failed, live};
 
 /// Every published `pi.live` value of `harness`, in order.
@@ -35,7 +35,7 @@ fn live_publications(harness: &Harness) -> Arc<Mutex<Vec<Json>>> {
         }
         Ok(())
     };
-    std::mem::forget(observe_commits(harness, listener).unwrap());
+    std::mem::forget(follow_commits(harness, listener).unwrap());
     values
 }
 

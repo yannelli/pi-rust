@@ -5,6 +5,7 @@ use std::sync::Weak;
 use pi_durable::storage::open_sqlite_storage;
 
 use super::*;
+use crate::support::{ValueCall, on_value};
 
 #[tokio::test]
 async fn releases_trimmed_entries_while_the_watch_remains_live() {
@@ -18,7 +19,7 @@ async fn releases_trimmed_entries_while_the_watch_remains_live() {
     let captured = first.clone();
     let (delivered, mut deliveries) = tokio::sync::mpsc::unbounded_channel();
     watch
-        .start(move |pi_chord::WatchChange { value, .. }, _| {
+        .start(on_value(move |ValueCall { value, .. }, _| {
             let entries = value.get("entries").unwrap().as_array().unwrap();
             let mut first = captured.lock().unwrap();
             if first.is_none()
@@ -28,7 +29,7 @@ async fn releases_trimmed_entries_while_the_watch_remains_live() {
             }
             delivered.send(entries.len()).unwrap();
             async { Ok(()) }
-        })
+        }))
         .unwrap();
 
     for index in 0..201 {

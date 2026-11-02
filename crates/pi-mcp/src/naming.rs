@@ -24,8 +24,19 @@ fn hex(bytes: &[u8]) -> String {
 /// the identifier codemode scripts call it by. Names over 64 characters, or names `is_taken` reports
 /// as used by another tool, are shortened and get a hash suffix.
 pub fn create_mcp_tool_name(server: &str, tool: &str, is_taken: impl Fn(&str) -> bool) -> String {
+    let name = format!("mcp__{}__{}", identifier(server), identifier(tool));
+    if name.len() <= MAX_TOOL_NAME_LENGTH && !is_taken(&name) {
+        return name;
+    }
+    let hash = hex(&sha256(format!("{server}\0{tool}").as_bytes()))[..8].to_string();
+    let keep = MAX_TOOL_NAME_LENGTH - hash.len() - 1;
+    format!("{}_{hash}", &name[..name.len().min(keep)])
+}
+
+/// `text` with everything but `[A-Za-z0-9_]` replaced by `_`.
+fn identifier(text: &str) -> String {
     let mut name = String::new();
-    for character in format!("mcp__{server}__{tool}").chars() {
+    for character in text.chars() {
         if character.is_ascii_alphanumeric() || character == '_' {
             name.push(character);
         } else {
@@ -33,12 +44,12 @@ pub fn create_mcp_tool_name(server: &str, tool: &str, is_taken: impl Fn(&str) ->
             name.extend(std::iter::repeat_n('_', character.len_utf16()));
         }
     }
-    if name.len() <= MAX_TOOL_NAME_LENGTH && !is_taken(&name) {
-        return name;
-    }
-    let hash = hex(&sha256(format!("{server}\0{tool}").as_bytes()))[..8].to_string();
-    let keep = MAX_TOOL_NAME_LENGTH - hash.len() - 1;
-    format!("{}_{hash}", &name[..name.len().min(keep)])
+    name
+}
+
+/// The server part of its tool names. Servers with the same key would get the same tool names.
+pub fn server_key(server: &str) -> String {
+    identifier(server)
 }
 
 /// Split `mcp__<server>__<tool>` into the server and tool parts shown in labels.
@@ -72,5 +83,15 @@ mod tests {
         assert!(second.starts_with("mcp__s__a_b_") && second.len() == "mcp__s__a_b_".len() + 8, "{second}");
         assert_eq!(split_mcp_tool_name("mcp__docs__get__item"), Some(("docs", "get__item")));
         assert!(is_mcp_tool_name("read_mcp_resource") && !is_mcp_tool_name("read"));
+    }
+
+    #[test]
+    fn server_keys_match_the_server_part_of_tool_names() {
+        for server in ["a-b", "a.b", "a b", "a_b"] {
+            assert_eq!(server_key(server), "a_b");
+            assert_eq!(create_mcp_tool_name(server, "t", |_| false), "mcp__a_b__t");
+        }
+        assert_eq!(server_key("é"), "_");
+        assert_eq!(server_key("😀"), "__");
     }
 }

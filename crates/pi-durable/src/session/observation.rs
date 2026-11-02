@@ -8,10 +8,10 @@ use pi_chord::state::{
     ReplicatedStateSource, ReplicatedStateSourceAttachment, ReplicatedStateSourceFrame, ReplicatedStateSourceSnapshot,
     SourceFrameListener,
 };
-use pi_chord::{ChordError, ChordResult, Context, Json, WatchChange};
+use pi_chord::{ChordError, ChordResult, Context, Json};
 
 use super::line::lock;
-use crate::errors::DurableError;
+use super::{WatchCall, WatchEnd};
 
 /// The frame a document state publishes for a retirement: `null`.
 pub fn retirement_operations() -> Vec<Op> {
@@ -21,9 +21,9 @@ pub fn retirement_operations() -> Vec<Op> {
 /// The Session's own observer of one document address or view: a watch, a document state, or a host observer behind
 /// its guard. Its source ends it explicitly.
 pub trait CommittedObserver: Send + Sync {
-    fn advance(&self, change: WatchChange, context: Context);
-    /// The Session closed, or failed with its first error.
-    fn end(&self, failure: Option<DurableError>);
+    fn advance(&self, call: WatchCall, context: Context);
+    /// The Session closed (`Ended`), or failed with its first error (`Failed`).
+    fn end(&self, end: WatchEnd);
     /// The owner of the scope it follows ended (a task document's task): no later commit changes the address.
     fn owner_ended(&self);
     /// Whether frames carry the commit's cancellation; a document state's frames carry none.
@@ -115,10 +115,12 @@ impl CommittedStateSource {
 }
 
 impl CommittedObserver for CommittedStateSource {
-    fn advance(&self, change: WatchChange, context: Context) {
-        let (value, ops) = match change.retired && change.ops.is_empty() {
+    fn advance(&self, call: WatchCall, context: Context) {
+        // Durable's failures are final: they end the source instead of arriving as a call.
+        let WatchCall::Value { value, ops, retired } = call else { return };
+        let (value, ops) = match retired && ops.is_empty() {
             true => (Json::Null, retirement_operations()),
-            false => (change.value, change.ops),
+            false => (value, ops),
         };
         let (frame, attachments) = {
             let mut state = lock(&self.state);
@@ -136,11 +138,11 @@ impl CommittedObserver for CommittedStateSource {
     }
 
     fn owner_ended(&self) {
-        self.end(None);
+        self.end(WatchEnd::Ended);
     }
 
     /// Stop publishing; the attached states keep their last value.
-    fn end(&self, _failure: Option<DurableError>) {
+    fn end(&self, _end: WatchEnd) {
         let attachments = {
             let state = lock(&self.state);
             if state.closed {

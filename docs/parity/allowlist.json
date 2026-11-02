@@ -132,7 +132,12 @@
     }
   ],
   "tools": [],
-  "models": [],
+  "models": [
+    {
+      "item": "kimi-coding",
+      "reason": "New OAuth logins default to global auth.kimi.ai and api.kimi.ai endpoints, retain endpoint metadata across refreshes, and preserve mainland endpoints for legacy credentials. Kimi/Moonshot tool requests infer omitted types from enum, const, and structural schema keywords; other providers keep their schemas unchanged."
+    }
+  ],
   "extensionApi": [
     {
       "item": "writeTerminal",

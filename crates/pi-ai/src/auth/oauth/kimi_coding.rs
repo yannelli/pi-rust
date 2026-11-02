@@ -1,5 +1,4 @@
-//! Kimi Code (subscription) OAuth flow: an RFC 8628 device grant against auth.kimi.com.
-//! The access token authenticates requests to api.kimi.com/coding as a Bearer header.
+//! Kimi Code subscription device grant, with the login region retained for refresh and API calls.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -10,12 +9,12 @@ use tokio_util::sync::CancellationToken;
 
 use super::device_code::{DeviceCodePollOptions, DevicePoll, poll_device_code_flow};
 use super::http::{Hooks, Reply, SendError, expires_at, json_text, positive_number, send, trusted_http_url};
+use super::kimi_region::Endpoints;
 use crate::auth::{
     AuthError, AuthEvent, AuthInteraction, AuthResult, LoginOptions, ModelAuth, OAuthAuth, OAuthCredential,
 };
 
 const CLIENT_ID: &str = "17e5f671-d194-4dfb-9706-5516cb48c098";
-const DEFAULT_OAUTH_HOST: &str = "https://auth.kimi.com";
 const DEVICE_CODE_TIMEOUT_SECONDS: f64 = 15.0 * 60.0;
 const DEFAULT_POLL_INTERVAL_SECONDS: f64 = 5.0;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -63,11 +62,6 @@ fn with_body(prefix: String, body: &str) -> String {
 }
 
 impl KimiCodingOAuth {
-    fn oauth_host(&self) -> String {
-        let host = self.hooks.env("KIMI_CODE_OAUTH_HOST").or_else(|| self.hooks.env("KIMI_OAUTH_HOST"));
-        host.unwrap_or_else(|| DEFAULT_OAUTH_HOST.into()).trim_end_matches('/').to_string()
-    }
-
     async fn post_form(
         &self,
         url: &str,
@@ -241,8 +235,8 @@ impl OAuthAuth for KimiCodingOAuth {
         _options: &LoginOptions,
         cancel: CancellationToken,
     ) -> AuthResult<OAuthCredential> {
-        let host = self.oauth_host();
-        let device = self.start_device_authorization(&host, &cancel).await?;
+        let endpoints = Endpoints::login(&self.hooks);
+        let device = self.start_device_authorization(&endpoints.oauth_host, &cancel).await?;
         interaction.notify(AuthEvent::DeviceCode {
             user_code: device.user_code.clone(),
             verification_uri: device.verification_uri_complete.clone(),
@@ -251,15 +245,19 @@ impl OAuthAuth for KimiCodingOAuth {
             open_browser_on_confirm: None,
             copy_code_on_confirm: None,
         });
-        self.poll_for_token(&host, &device, &cancel).await
+        let credential = self.poll_for_token(&endpoints.oauth_host, &device, &cancel).await?;
+        Ok(endpoints.remember(credential))
     }
 
     async fn refresh(&self, credential: &OAuthCredential, cancel: CancellationToken) -> AuthResult<OAuthCredential> {
-        self.refresh_token(&self.oauth_host(), &credential.refresh, &cancel).await
+        let endpoints = Endpoints::stored(&self.hooks, credential);
+        let refreshed = self.refresh_token(&endpoints.oauth_host, &credential.refresh, &cancel).await?;
+        Ok(endpoints.remember(refreshed))
     }
 
     fn to_auth(&self, credential: &OAuthCredential) -> ModelAuth {
         let headers = BTreeMap::from([("Authorization".to_string(), format!("Bearer {}", credential.access))]);
-        ModelAuth { headers, ..ModelAuth::default() }
+        let base_url = Endpoints::stored(&self.hooks, credential).base_url;
+        ModelAuth { headers, base_url, ..ModelAuth::default() }
     }
 }

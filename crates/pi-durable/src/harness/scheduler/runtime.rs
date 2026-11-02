@@ -29,7 +29,9 @@ use crate::ids::{ConversationId, EntryId, TaskId};
 use crate::models::Models;
 use crate::session::{DocumentWatch, TransactionScope, Tx};
 use crate::timers::Disarm;
-use crate::types::{CommitOptions, EntryRecord, ReportFrom, ReportInfo, TaskOutcome, TaskRecord, TaskState};
+use crate::types::{
+    CommitOptions, EntryRecord, InterruptionReason, ReportFrom, ReportInfo, TaskOutcome, TaskRecord, TaskState,
+};
 
 type AgentFuture = Shared<BoxFuture<'static, DurableResult<Agent>>>;
 
@@ -162,10 +164,17 @@ impl TaskRuntime {
         Fut: Future<Output = DurableResult<Option<NextTaskState>>> + Send + 'static,
     {
         let (scheduler, invocation) = (self.scheduler.clone(), self.invocation.clone());
-        let checkpoint = self
+        let (checkpoint, interrupted) = self
             .gated_with(
                 move |tx, current| async move {
-                    let Some(next) = change(tx.clone(), current.clone()).await? else { return Ok(None) };
+                    let Some(next) = change(tx.clone(), current.clone()).await? else { return Ok((None, None)) };
+                    let interrupted = match &next {
+                        TaskState::Terminal { outcome: TaskOutcome::Failed { error, .. } } => {
+                            InterruptionReason::from_error(error)
+                                .map(|reason| (reason, error.clone(), current.restarts.unwrap_or(0)))
+                        }
+                        _ => None,
+                    };
                     scheduler.commit_state(&tx, &invocation, &current, next.clone()).await?;
                     let phase = match (&current.state, &next) {
                         (TaskState::Running { checkpoint: from }, TaskState::Running { checkpoint: to }) => {
@@ -173,12 +182,21 @@ impl TaskRuntime {
                         }
                         _ => None,
                     };
-                    Ok(phase)
+                    Ok((phase, interrupted))
                 },
                 context,
                 options,
             )
             .await?;
+        if let Some((reason, error, restarts)) = interrupted {
+            let info = ReportInfo::TaskInterrupted {
+                task: self.invocation.report_task(),
+                extension: self.invocation.extension.clone(),
+                reason,
+                restarts,
+            };
+            self.scheduler.core.report(&DurableError::error(error.message), &info, Some(&self.invocation.context()));
+        }
         if let Some(phase) = checkpoint {
             let attributes = SpanAttributes::new().with("phase", phase);
             self.invocation.context().telemetry().add_event("pi.durable.checkpoint", attributes);

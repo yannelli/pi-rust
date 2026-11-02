@@ -9,6 +9,7 @@ mod harness;
 
 use std::sync::{Arc, LazyLock, Mutex};
 
+use crate::support::{ValueCall, on_value};
 use pi_chord::Json;
 use pi_durable::documents::*;
 use pi_durable::session::{self, DocumentCacheSizes, Session, SessionOptions, create_session};
@@ -162,10 +163,10 @@ async fn never_evicts_a_document_a_watch_or_a_document_state_observes_and_evicts
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = seen.clone();
     watch
-        .start(move |pi_chord::WatchChange { value, .. }, _| {
+        .start(on_value(move |ValueCall { value, .. }, _| {
             sink.lock().unwrap().push(value["count"].as_f64().unwrap_or(-1.0));
             async { Ok(()) }
-        })
+        }))
         .unwrap();
     advance(&test.clock, 1_000_000.0);
     bump(&test.session, conversation_id, 1.0).await;

@@ -6,9 +6,9 @@ use pi_durable::harness::*;
 use pi_durable::{CommitChange, DocumentCommitChange, SubmissionStatus};
 use serde_json::Value;
 
-use super::support::Deferred;
 use super::support::chat::{add_tool, answer, call};
 use super::support::harness_support::*;
+use super::support::{Deferred, commit_observer};
 use super::{cancelled, nested_tasks, open, outcome_status, settle, sqlite_path, submit, tool};
 
 /// Counts the runs of a caller, and returns the number of the current one.
@@ -50,7 +50,7 @@ async fn clears_the_slots_of_nested_calls_an_earlier_run_finished_when_the_rerun
     let (harness, _) = open(&path, &setup).await;
     let slots_after_caller = Arc::new(Mutex::new(None));
     let sink = slots_after_caller.clone();
-    let _listener = harness.subscribe_commits(move |publication, _| {
+    let _listener = harness.observe_commits(commit_observer(move |publication, _| {
         let ended = publication.changes.iter().any(|change| {
             matches!(change, CommitChange::Task(task)
                 if task.kind == "pi.tool" && task.input["kind"] == "model".into() && task.state.outcome().is_some())
@@ -59,15 +59,15 @@ async fn clears_the_slots_of_nested_calls_an_earlier_run_finished_when_the_rerun
             return Ok(());
         }
         for change in &publication.changes {
-            if let CommitChange::Document(DocumentCommitChange::Document { record, value, .. }) = change
+            if let CommitChange::Document(DocumentCommitChange::Change { record, value, .. }) = change
                 && record.kind == "pi.live"
             {
-                let live = value.as_ref().map(|value| Value::from(value.clone())).unwrap_or_default();
+                let live = Value::from(value.clone());
                 *sink.lock().unwrap() = Some(live["nestedTools"].as_array().map_or(0, Vec::len));
             }
         }
         Ok(())
-    });
+    }));
     harness.resume().unwrap();
     assert_eq!(settle(&harness, id).await, SubmissionStatus::Done);
     assert_eq!(*runs.lock().unwrap(), 2);

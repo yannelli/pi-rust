@@ -25,6 +25,7 @@ const HOST_FILES: &[(&str, &str)] = &[
     ("compaction_utils.js", include_str!("js/compaction_utils.js")),
     ("component_shims.js", include_str!("js/component_shims.js")),
     ("context.js", include_str!("js/context.js")),
+    ("context_color.js", include_str!("js/context_color.js")),
     ("host.js", include_str!("js/host.js")),
     ("models.js", include_str!("js/models.js")),
     ("native.js", include_str!("js/native.js")),
@@ -49,7 +50,7 @@ const HOST_FILES: &[(&str, &str)] = &[
 /// the `export` list of its source.
 const SHIMS: &[(&str, &str, &str)] = &[
     ("pi-coding-agent/src/modes/interactive/theme/theme.ts", "*", "host/theme.js"),
-    ("pi-coding-agent/src/config.ts", "{ getAgentDir, getBinDir }", "host/component_shims.js"),
+    ("pi-coding-agent/src/config.ts", "{ CONFIG_DIR_NAME, getAgentDir, getBinDir }", "host/component_shims.js"),
     ("pi-coding-agent/src/utils/child-process.ts", "{ spawnProcessSync }", "host/component_shims.js"),
     ("pi-coding-agent/src/core/keybindings.ts", "{ KeybindingsManager }", "host/component_shims.js"),
     ("pi-coding-agent/src/utils/clipboard.ts", "{ copyToClipboard }", "host/component_shims.js"),

@@ -102,7 +102,7 @@ pub async fn run_print_mode(
     // keep running while the runtime is disposed, so the abort can settle the agent loop.
     let mut work = std::pin::pin!(result);
     let result = tokio::select! {
-        result = &mut work => result,
+        biased;
         code = crate::signals::termination_signal() => {
             crate::signals::kill_tracked_detached_children();
             runtime.set_rebind_session(None);
@@ -117,6 +117,7 @@ pub async fn run_print_mode(
             let _ = crate::diagnostics::flush_raw_stdout();
             std::process::exit(code);
         }
+        result = &mut work => result,
     };
     let app = crate::resources::brand::APP_NAME;
     let code = match (result, runtime.session().run_limit_stop()) {

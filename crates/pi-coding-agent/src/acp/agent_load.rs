@@ -14,6 +14,7 @@ use super::bash::{
 };
 use super::config::session_configuration;
 use super::errors::{AcpResult, internal_failure, invalid_params};
+use super::mcp_servers::ClientMcpServers;
 use super::translate::{normalize_pi_assistant_text, normalize_pi_message_text, tool_kind, tool_result_to_text};
 use crate::session::ids::uuid_v4;
 
@@ -71,6 +72,7 @@ impl AcpAgent {
         if !super::settings::node_is_absolute(&params.cwd) {
             return Err(invalid_params(format!("cwd must be an absolute path: {}", params.cwd.display())));
         }
+        let mcp_servers = ClientMcpServers::from_request(&params.mcp_servers, params.meta.as_ref())?;
         let session_id = params.session_id.0.to_string();
         let cwd = params.cwd.display().to_string();
         self.close(&session_id).await;
@@ -78,7 +80,7 @@ impl AcpAgent {
         let Some((_, file)) = self.find_stored_session(&session_id) else {
             return Err(invalid_params(format!("Unknown sessionId: {session_id}")));
         };
-        let session = self.restore_session(&session_id, Some(&cwd)).await?;
+        let session = self.restore_session_with(&session_id, Some(&cwd), &mcp_servers).await?;
         let configuration = match session_configuration(session.backend.as_ref(), None, None).await {
             Ok(configuration) => configuration,
             Err(error) => {
@@ -88,7 +90,13 @@ impl AcpAgent {
         };
         self.close_all_except(&session_id).await;
         self.store.upsert(&session_id, &cwd, &file);
-        let data = session.backend.get_messages().await.map_err(|error| internal_failure(&error))?;
+        let data = match session.backend.get_messages().await {
+            Ok(data) => data,
+            Err(error) => {
+                self.close(&session_id).await;
+                return Err(internal_failure(&error));
+            }
+        };
         for message in data["messages"].as_array().into_iter().flatten() {
             for update in replay_message(message, &cwd) {
                 self.client().session_update(SessionNotification::new(session_id.clone(), update));

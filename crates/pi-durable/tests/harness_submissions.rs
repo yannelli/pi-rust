@@ -2,6 +2,9 @@
 
 mod support;
 
+#[path = "harness_submissions/commits.rs"]
+mod commits;
+
 use std::sync::Arc;
 
 use pi_ai::{Message, UserContent, UserMessage};

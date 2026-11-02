@@ -7,6 +7,7 @@ use pi_chord::delta::Op;
 
 use super::support::*;
 use super::*;
+use crate::support::{ValueCall, on_value};
 
 type Frames = Arc<Mutex<Vec<(Json, Vec<Op>)>>>;
 
@@ -67,10 +68,10 @@ async fn writes_the_required_base_on_the_first_successful_transaction_then_write
     let frames: Frames = Arc::default();
     let sink = frames.clone();
     watch
-        .start(move |pi_chord::WatchChange { value, ops, .. }, _| {
+        .start(on_value(move |ValueCall { value, ops, .. }, _| {
             sink.lock().unwrap().push((value, ops));
             async { Ok(()) }
-        })
+        }))
         .unwrap();
     assert_eq!(snapshot(&test.session, &current).await.unwrap().unwrap(), json(r#"{"count":4}"#));
     let migrated = snapshot(&test.session, &current).await.unwrap().unwrap();
@@ -79,10 +80,10 @@ async fn writes_the_required_base_on_the_first_successful_transaction_then_write
     let current_frames: Arc<Mutex<Vec<Json>>> = Arc::default();
     let sink = current_frames.clone();
     watch_current
-        .start(move |pi_chord::WatchChange { value, .. }, _| {
+        .start(on_value(move |ValueCall { value, .. }, _| {
             sink.lock().unwrap().push(value);
             async { Ok(()) }
-        })
+        }))
         .unwrap();
     touch(&test.session, &current, ()).await.unwrap();
     flush().await;
@@ -91,9 +92,7 @@ async fn writes_the_required_base_on_the_first_successful_transaction_then_write
     assert_eq!(checkpoints.load(Ordering::SeqCst), 0);
     // The migration-only base is published, so the older-shape watch receives the new value as a root replacement.
     let published = document_changes(&test.last_publication());
-    let DocumentCommitChange::Document { version: Some(3), value: Some(value), ops, .. } = &published[0] else {
-        panic!()
-    };
+    let DocumentCommitChange::Change { version: 3, value, ops, .. } = &published[0] else { panic!() };
     assert_eq!(*value, json(r#"{"count":4}"#));
     assert!(ops.is_empty());
     let expected = (json(r#"{"count":4}"#), vec![Op::Replace(json(r#"{"count":4}"#))]);
@@ -160,8 +159,7 @@ async fn rolls_migration_and_edits_back_with_the_callback_then_coalesces_later_e
     };
     assert_eq!(*base, json(r#"{"count":9,"migrated":false}"#));
     flush().await;
-    let DocumentCommitChange::Document { value: Some(value), ops, .. } = &document_changes(&test.last_publication())[0]
-    else {
+    let DocumentCommitChange::Change { value, ops, .. } = &document_changes(&test.last_publication())[0] else {
         panic!()
     };
     assert!(value.same_ref(&snapshot(&test.session, &current).await.unwrap().unwrap()));

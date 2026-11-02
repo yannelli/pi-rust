@@ -1,6 +1,51 @@
 mod common;
+mod node_common;
 
 use common::*;
+
+#[tokio::test]
+async fn file_and_directory_timestamps_match_real_node() {
+    const SCRIPT: &str = r#"
+const fs = require("node:fs");
+const mark = (text) => fs.writeFileSync("stage", text);
+mark("create paths");
+fs.writeFileSync("file", "unchanged");
+fs.mkdirSync("directory");
+const out = {};
+for (const path of ["file", "directory"]) {
+  const times = () => { const s = fs.statSync(path); return [s.atimeMs, s.mtimeMs]; };
+  mark(`${path}: sync`);
+  fs.utimesSync(path, new Date(1000005), new Date(2000005));
+  const sync = times();
+  mark(`${path}: callback`);
+  await new Promise((resolve, reject) => fs.utimes(path, new Date(3000007), 4000.125, (error) => error ? reject(error) : resolve()));
+  const callback = times();
+  mark(`${path}: promises`);
+  await fs.promises.utimes(path, 5000.25, new Date(6000009));
+  out[path] = { sync, callback, promise: times() };
+}
+out.contents = fs.readFileSync("file", "utf8");
+out.isDirectory = fs.statSync("directory").isDirectory();
+mark("file: fd sync");
+const fd = fs.openSync("file", "r+");
+fs.futimesSync(fd, new Date(1000005), new Date(2000005));
+const stat = fs.fstatSync(fd);
+out.fdSync = [stat.atimeMs, stat.mtimeMs];
+fs.closeSync(fd);
+mark("done");
+return out;
+"#;
+    let (_node_dir, node_root) = tempdir();
+    let Some((node, _capture)) = node_common::node_runtime(&node_root) else {
+        assert!(std::env::var_os("CI").is_none(), "CI must run the real Node timestamp control");
+        return;
+    };
+    let expected = run_cjs_within(&node, &node_root, SCRIPT, 30).await;
+    let (_quickjs_dir, quickjs_root) = tempdir();
+    let (quickjs, _capture) = runtime(&quickjs_root);
+    let actual = run_cjs_within(&quickjs, &quickjs_root, SCRIPT, 30).await;
+    assert_eq!(actual, expected);
+}
 
 // Expected values come from running the same script under Node 22 in an empty directory.
 const FS_SCRIPT: &str = r##"
@@ -179,4 +224,89 @@ async fn fs_statfs_blob_and_web_stream_match_node() {
     let (runtime, _capture) = runtime(&root);
     let actual = run_cjs(&runtime, &root, FS_STATFS_SCRIPT).await;
     assert_same_keys(&actual, &serde_json::from_str(FS_STATFS_EXPECTED).unwrap());
+}
+
+// realpath in each form, compared with Node 22 run on the same script in its own directory.
+const REALPATH_SCRIPT: &str = r#"
+const fs = require("node:fs");
+const path = require("node:path");
+const { pathToFileURL } = require("node:url");
+const mark = (text) => fs.writeFileSync("stage", text);
+const here = process.cwd();
+const rel = (value) => path.relative(here, String(value)).replaceAll("\\", "/");
+const clean = (text) => String(text).split(here).join("<here>").replaceAll("\\", "/");
+const failure = (error) => [error.code, error.syscall, clean(error.path), clean(error.message)];
+const settle = (fn) => fn().then((value) => ["ok", rel(value)], (error) => ["error", ...failure(error)]);
+const sync = (fn) => settle(async () => fn());
+const callback = (form, ...args) => settle(() => new Promise((resolve, reject) => form(...args, (error, value) => (error ? reject(error) : resolve(value)))));
+const forms = (target) => Promise.all([
+  sync(() => fs.realpathSync(target)),
+  callback(fs.realpath, target),
+  sync(() => fs.realpathSync.native(target)),
+  callback(fs.realpath.native, target),
+  settle(() => fs.promises.realpath(target)),
+]);
+const out = {};
+mark("casing");
+fs.mkdirSync("Work/a/b", { recursive: true });
+out.casing = await forms("wOrK");
+out.casingNested = await forms("wOrK/A");
+mark("missing component");
+out.missing = await forms("Work/missing/x");
+mark("junction");
+fs.symlinkSync(path.resolve("Work/a/b"), "junction", "junction");
+out.junction = await forms("junction");
+out.junctionParent = await forms("junction/..");
+if (process.platform !== "win32") {
+  mark("relative links");
+  fs.symlinkSync("a/b", "Work/rel");
+  fs.symlinkSync("Work/rel", "chain");
+  out.chain = await forms("chain");
+  out.dotdot = await forms("chain/..");
+  fs.symlinkSync("loop2", "loop1");
+  fs.symlinkSync("loop1", "loop2");
+  out.loop = await forms("loop1/x");
+  mark("repeated link");
+  fs.symlinkSync(".", "Work/self");
+  out.repeated = await forms("Work/self/self/self/a");
+  mark("socket");
+  const server = require("node:net").createServer();
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(path.join(here, "sk"), resolve);
+  });
+  fs.symlinkSync("sk", "sl");
+  out.socket = await forms("sl/sub");
+  await new Promise((resolve) => server.close(resolve));
+}
+mark("encodings");
+const buffer = fs.realpathSync("Work/a", "buffer");
+out.buffer = [Buffer.isBuffer(buffer), rel(buffer.toString())];
+out.hex = rel(Buffer.from(fs.realpathSync("Work/a", { encoding: "hex" }), "hex").toString());
+out.bufferCallback = await new Promise((resolve) => fs.realpath("Work/a", { encoding: "buffer" }, (error, value) => resolve([error, Buffer.isBuffer(value), rel(value.toString())])));
+out.inputs = [rel(fs.realpathSync(Buffer.from("Work/a"))), rel(fs.realpathSync(pathToFileURL(path.resolve("Work/a"))))];
+let early = true;
+out.later = await new Promise((resolve) => {
+  fs.realpath("Work", () => resolve(early));
+  early = false;
+});
+try { fs.realpath("Work", {}, "nope"); } catch (error) { out.badCallback = error.code; }
+out.native = [typeof fs.realpathSync.native, fs.realpathSync.native !== fs.realpathSync, typeof fs.realpath.native];
+mark("done");
+return out;
+"#;
+
+#[tokio::test]
+async fn realpath_forms_match_real_node() {
+    let (_node_dir, node_root) = tempdir();
+    let Some((node, _capture)) = node_common::node_runtime(&node_root) else {
+        assert!(std::env::var_os("CI").is_none(), "CI must run the real Node realpath control");
+        return;
+    };
+    let expected = run_cjs_within(&node, &node_root, REALPATH_SCRIPT, 30).await;
+    let (_quickjs_dir, quickjs_root) = tempdir();
+    let (quickjs, _capture) = runtime(&quickjs_root);
+    let actual = run_cjs_within(&quickjs, &quickjs_root, REALPATH_SCRIPT, 30).await;
+    assert_same_keys(&actual, &expected);
+    assert_eq!(actual, expected);
 }

@@ -111,7 +111,7 @@ pub use components::{
 };
 pub use components::{Editor, EditorOptions, EditorTheme};
 pub use editor_component::EditorComponent;
-pub use keybindings::{KeybindingsManager, get_keybindings, set_keybindings};
+pub use keybindings::{KeybindingsManager, get_keybindings, get_select_page_index, set_keybindings};
 pub use keys::{Key, KeyEventType, is_key_release, is_key_repeat, matches_key, parse_key};
 pub use main_screen::TuiMainScreenRenderState;
 pub use stdin_buffer::{StdinBuffer, StdinBufferEvent, StdinBufferOptions};

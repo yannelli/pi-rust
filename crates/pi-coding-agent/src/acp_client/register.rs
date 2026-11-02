@@ -1,11 +1,12 @@
 //! The enabled `acpAgents` entries as providers with the API `acp`: one `default` model plus the
 //! models each agent advertised, and the launch commands that pi-ai starts.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::{Arc, LazyLock, Mutex};
 
-use pi_ai::providers::acp::{self, AgentLaunch, DEFAULT_MODEL};
+use pi_ai::providers::acp::{self, AgentLaunch, Choice, DEFAULT_MODEL};
+use pi_ai::types::ThinkingLevel;
 use serde_json::{Value, json};
 
 use super::host::{self, HostState};
@@ -25,16 +26,38 @@ pub fn launch(entry: &AcpAgentEntry) -> AgentLaunch {
     }
 }
 
+/// Each pi thinking level to the agent value whose ID or name is that level, ignoring case, and
+/// `None` for the levels the agent does not offer; `None` when it offers none of them.
+pub(super) fn thinking_level_map(choices: &[Choice]) -> Option<BTreeMap<String, Option<String>>> {
+    let value = |level: ThinkingLevel| {
+        let named = |text: &str| text.eq_ignore_ascii_case(level.as_str());
+        choices.iter().find(|choice| named(&choice.id) || named(&choice.name)).map(|choice| choice.id.clone())
+    };
+    let map: BTreeMap<String, Option<String>> =
+        ThinkingLevel::ALL.into_iter().map(|level| (level.as_str().to_string(), value(level))).collect();
+    map.values().any(Option::is_some).then_some(map)
+}
+
 /// A model of an agent. The window is the `size` of the agent's last `usage_update` for it, or 0
 /// (unknown) before one; ACP has no output limit, so `maxTokens` is 0 too.
 fn model(id: &str, name: &str, state: &HostState, provider: &str) -> Value {
-    let reasoning = state.thinking.get(provider).copied().unwrap_or(false);
+    let levels = state.thought_levels.get(provider).map(Vec::as_slice).and_then(thinking_level_map);
+    let advertised = state.thought_levels.contains_key(provider);
+    let reasoning = match advertised {
+        true => levels.is_some(),
+        false => state.thinking.get(provider).copied().unwrap_or(false),
+    };
     let window = state.context.get(provider).and_then(|windows| windows.get(id)).copied().unwrap_or(0);
     let input = match state.images.get(provider) {
         Some(false) => json!(["text"]),
         _ => json!(["text", "image"]),
     };
-    json!({"id": id, "name": name, "reasoning": reasoning, "input": input, "contextWindow": window, "maxTokens": 0})
+    let mut model = json!({"id": id, "name": name, "reasoning": reasoning, "input": input,
+        "contextWindow": window, "maxTokens": 0});
+    if let Some(levels) = levels {
+        model["thinkingLevelMap"] = json!(levels);
+    }
+    model
 }
 
 fn config(name: &str, id: &str, state: &HostState, provider: &str) -> Value {

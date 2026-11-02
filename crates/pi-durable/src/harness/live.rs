@@ -2,14 +2,15 @@
 //! `harness/live.ts`).
 
 use std::collections::HashSet;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use pi_ai::Usage;
+use pi_chord::delta::Op;
 use pi_chord::{Json, JsonMap};
 use serde::{Deserialize, Serialize};
 
 use super::types::{CompactionReason, ToolDiagnostic};
-use crate::documents::{DocSpec, DocToken, LatestConversation, LatestFork, define_doc};
+use crate::documents::{CheckpointInfo, DocDefinition, DocScope, DocToken, LatestConversation, LatestFork, encode};
 use crate::errors::DurableResult;
 use crate::ids::{EntryId, SubmissionId, TaskId};
 use crate::session::{Draft, Tx};
@@ -116,7 +117,8 @@ pub struct RetryState {
 #[serde(rename_all = "camelCase")]
 pub struct CompactionStatus {
     pub task_id: TaskId,
-    pub reason: CompactionReason,
+    /// What started it: `compact()`, a threshold, or a context overflow.
+    pub trigger: CompactionReason,
     /// Whether a generation waits for it.
     pub blocking: bool,
     pub attempt: u32,
@@ -129,7 +131,8 @@ pub struct CompactionStatus {
 #[serde(rename_all = "camelCase")]
 pub struct CompactionFailure {
     pub task_id: TaskId,
-    pub reason: CompactionReason,
+    /// What started the compaction that failed.
+    pub trigger: CompactionReason,
     /// The failed or faulted outcome's error message, or why the scheduler orphaned the task.
     pub error: String,
 }
@@ -150,6 +153,10 @@ pub enum RunFailureReason {
     Faulted,
     /// The run's task was aborted while no registered definition could take it.
     Orphaned,
+    /// The host stopped during requests or polls more often than the retry policy allows.
+    Interrupted,
+    /// The generation was cut off repeatedly without committing progress.
+    RestartLimit,
 }
 
 impl RunFailureReason {
@@ -161,6 +168,8 @@ impl RunFailureReason {
             Self::Reset => "reset",
             Self::Faulted => "faulted",
             Self::Orphaned => "orphaned",
+            Self::Interrupted => "interrupted",
+            Self::RestartLimit => "restart_limit",
         }
     }
 }
@@ -272,13 +281,48 @@ fn running(slots: Option<&Json>) -> bool {
 /// Every commit that consumes or clears streamed fields reads `pi.live`, so it stores them with its own changes.
 pub const PROGRESS_COMMIT: CommitOptions = CommitOptions::DEFERRED;
 
+// Built from an erased definition so the migration keeps the stored JSON whole; a typed one re-encodes it.
 pub static LIVE_DOC: LazyLock<DocToken<LiveState, LatestConversation>> = LazyLock::new(|| {
-    let spec =
-        DocSpec::new("pi.live", 1, LatestConversation(LatestFork::Initial), LiveState::default, |value, _, _| {
-            Ok(value.get("generation").is_none() && !running(value.get("tools")) && !running(value.get("nestedTools")))
-        });
-    define_doc(spec).unwrap_or_else(|_| unreachable!("pi.live is a valid definition"))
+    let checkpoint_when = |value: &Json, _: &[Op], _: CheckpointInfo| -> DurableResult<bool> {
+        Ok(value.get("generation").is_none() && !running(value.get("tools")) && !running(value.get("nestedTools")))
+    };
+    let definition = DocDefinition::from_shared(
+        "pi.live",
+        2,
+        LatestConversation(LatestFork::Initial).semantics(),
+        false,
+        Arc::new(|_: Option<&Json>| encode(&LiveState::default())),
+        Arc::new(checkpoint_when),
+    )
+    .unwrap_or_else(|_| unreachable!("pi.live is a valid definition"))
+    .with_migrate(|value, _| Ok(migrate_live_v1(value)));
+    DocToken::from_definition(Arc::new(definition))
 });
+
+/// Version 1 named a compaction's trigger `reason`, in `compactions` and `compactionFailure`.
+fn migrate_live_v1(value: &Json) -> Json {
+    let Some(live) = value.as_object() else { return value.clone() };
+    let mut migrated = JsonMap::new();
+    for (key, field) in live.iter() {
+        let field = match (&**key, field.as_array()) {
+            ("compactions", Some(statuses)) => Json::array(statuses.iter().map(rename_reason).collect()),
+            ("compactionFailure", _) => rename_reason(field),
+            _ => field.clone(),
+        };
+        migrated.insert(&**key, field);
+    }
+    Json::object(migrated)
+}
+
+/// A copy of a version 1 compaction status or failure with `reason` renamed `trigger`, its keys in their order.
+fn rename_reason(value: &Json) -> Json {
+    let Some(fields) = value.as_object() else { return value.clone() };
+    let mut renamed = JsonMap::new();
+    for (key, field) in fields.iter() {
+        renamed.insert(if &**key == "reason" { "trigger" } else { &**key }, field.clone());
+    }
+    Json::object(renamed)
+}
 
 pub type LiveDraft = Draft<LiveState>;
 
@@ -327,7 +371,7 @@ pub fn remove_compaction_status(live: &mut LiveState, task_id: TaskId) {
 /// Remove the status of compaction task `task_id` and record that it failed with `error`.
 pub fn fail_compaction_status(live: &mut LiveState, task_id: TaskId, error: impl Into<String>) {
     if let Some(status) = compaction_status(live, task_id) {
-        let failure = CompactionFailure { task_id: status.task_id, reason: status.reason, error: error.into() };
+        let failure = CompactionFailure { task_id: status.task_id, trigger: status.trigger, error: error.into() };
         live.compaction_failure = Some(failure);
     }
     remove_compaction_status(live, task_id);
@@ -461,6 +505,27 @@ const TOOL_TASK_KIND: &str = "pi.tool";
 const COMPACTION_TASK_KIND: &str = "pi.compaction";
 const RUN_TASK_KIND: &str = "pi.generation";
 
+/// Built-in phases end themselves at the limit; the scheduler faults other task kinds.
+pub(crate) fn limits_restarts(kind: &str) -> bool {
+    matches!(kind, TOOL_TASK_KIND | COMPACTION_TASK_KIND | RUN_TASK_KIND)
+}
+
+pub(crate) fn cut_off_too_often(task: &TaskRecord, runtime: &super::scheduler::TaskRuntime) -> bool {
+    task.restarts.is_some_and(|count| f64::from(count) >= runtime.settings().restart_limit)
+}
+
+/// Cleanup is attempted at the limit; beyond it, that cleanup may be what keeps failing.
+pub(crate) fn salvageable(task: &TaskRecord, runtime: &super::scheduler::TaskRuntime) -> bool {
+    task.restarts.is_none_or(|count| f64::from(count) <= runtime.settings().restart_limit)
+}
+
+pub(crate) fn cut_off_count(task: &TaskRecord) -> String {
+    match task.restarts.unwrap_or(0) {
+        1 => "once".into(),
+        count => format!("{count} times in a row"),
+    }
+}
+
 /// Harness cleanup for an outcome the scheduler writes itself (`faulted` or `orphaned`): a run task ends its run, a
 /// tool task's slot is marked done without an entry, and a compaction task's status is removed and its failure
 /// recorded.
@@ -471,6 +536,8 @@ pub async fn settle_scheduler_outcome(tx: &Tx, record: &TaskRecord, outcome: &Ta
     }
     let draft = tx.doc(&LIVE_DOC, record.conversation_id).await?;
     let mut live = draft.get()?;
+    let cut_off = matches!(outcome, TaskOutcome::Faulted { error }
+        if crate::types::InterruptionReason::from_error(error) == Some(crate::types::InterruptionReason::RestartLimit));
     match kind {
         TOOL_TASK_KIND => {
             if let Some(mut slot) = tool_slot(&mut live, record.id) {
@@ -484,15 +551,24 @@ pub async fn settle_scheduler_outcome(tx: &Tx, record: &TaskRecord, outcome: &Ta
                 TaskOutcome::Orphaned { reason } => reason.clone(),
                 other => other.status().to_owned(),
             };
-            fail_compaction_status(&mut live, record.id, error);
+            if cut_off {
+                remove_compaction_status(&mut live, record.id);
+            } else {
+                fail_compaction_status(&mut live, record.id, error);
+            }
         }
         _ => {
             if live.run.as_ref().is_none_or(|run| run.task_id != record.id) {
                 return Ok(());
             }
-            super::generation::convert_partial(tx, &mut live, record.conversation_id).await?;
+            if !cut_off {
+                super::generation::convert_partial(tx, &mut live, record.conversation_id).await?;
+            }
             let end = match outcome {
-                TaskOutcome::Faulted { error } => RunEnd::unanswered(RunFailureReason::Faulted, Some(&error.message)),
+                TaskOutcome::Faulted { error } => RunEnd::unanswered(
+                    if cut_off { RunFailureReason::Aborted } else { RunFailureReason::Faulted },
+                    Some(&error.message),
+                ),
                 TaskOutcome::Orphaned { reason } => RunEnd::Unanswered {
                     reason: RunFailureReason::Orphaned,
                     detail: Some(reason.clone()),

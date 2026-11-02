@@ -406,15 +406,12 @@ pub struct ContextView {
     pub messages: Vec<Message>,
 }
 
-/// Why a task cannot be reserved: no registered definition can take it, or it was cut off `restart_limit` times in a
-/// row. Derived from the registry, the settings, and the record's `restarts`.
+/// Why a task cannot be reserved: no registered definition can take it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BlockedReason {
     MissingTask,
     TaskTooOld,
     MigrationFailed,
-    /// Cut off `HarnessSettings::restart_limit` times in a row; `Harness::retry_task()` runs it again.
-    RestartLimit,
 }
 
 impl BlockedReason {
@@ -423,7 +420,6 @@ impl BlockedReason {
             Self::MissingTask => "missing_task",
             Self::TaskTooOld => "task_too_old",
             Self::MigrationFailed => "migration_failed",
-            Self::RestartLimit => "restart_limit",
         }
     }
 }
@@ -442,7 +438,8 @@ pub struct Wake {
 #[derive(Clone, Debug, PartialEq)]
 pub enum TaskInspectionState {
     Running,
-    Ready {
+    /// The next scheduling pass reserves it; `migrates` when its definition is newer and has a migration.
+    Pending {
         migrates: bool,
     },
     Waiting {
@@ -453,8 +450,7 @@ pub enum TaskInspectionState {
         until: f64,
     },
     Completing,
-    /// Cannot run here: no registered definition can take it (aborting it settles it as `orphaned`), or it is parked
-    /// by the restart limit (`retry_task()` runs it again).
+    /// Cannot run here: no registered definition can take it. Aborting it settles it as orphaned.
     Blocked {
         reason: BlockedReason,
         error: Option<String>,

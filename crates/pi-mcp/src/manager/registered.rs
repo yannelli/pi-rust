@@ -1,23 +1,32 @@
-//! Servers extensions register (upstream `registeredServers` and the `mcp_servers_change`
-//! handler): they connect next to the servers from `mcp.json`, which take precedence over a
-//! registered server with the same namespace. Changes to them apply to the session only.
+//! Servers extensions register (upstream `registeredServers`): an `mcp.json` server with the same namespace,
+//! or an ACP client server with the same [`server_key`], takes precedence. Changes apply to the session only.
 
 use std::sync::Arc;
 
 use super::{Inner, McpManager, Server};
 use crate::config::{McpConfigScope, McpServerEntry, mcp_namespace};
+use crate::naming::server_key;
 use crate::registered::McpServerRegistry;
 use crate::runtime::McpServerConnection;
 
-/// The registered servers as entries with their registered config, except the ones `mcp.json`
-/// overrides, which are described in the second list.
+/// The registered servers as entries with their registered config, except the ones `mcp.json` or an
+/// ACP client server (`clients`) overrides, which are described in the second list.
 fn registered_servers(
     registry: &McpServerRegistry,
     configured: &[(String, String)],
+    clients: &[String],
 ) -> (Vec<(McpServerEntry, String)>, Vec<String>) {
     let mut servers = Vec::new();
     let mut overridden = Vec::new();
     for server in registry.list() {
+        let key = server_key(&server.name);
+        if let Some(client) = clients.iter().find(|client| server_key(client) == key) {
+            overridden.push(format!(
+                "\"{}\" registered by {} is overridden by the ACP client server \"{client}\"",
+                server.name, server.extension_path
+            ));
+            continue;
+        }
         let namespace = mcp_namespace(&server.name);
         if let Some((name, source)) = configured.iter().find(|(name, _)| mcp_namespace(name) == namespace) {
             overridden.push(format!(
@@ -56,7 +65,7 @@ impl McpManager {
             if state.session.is_cancelled() {
                 return;
             }
-            let (registered, overridden) = registered_servers(&registry, &state.configured);
+            let (registered, overridden) = registered_servers(&registry, &state.configured, &state.clients);
             state.overridden = overridden;
             let next = |name: &str| registered.iter().find(|(entry, _)| entry.name == name).map(|(_, config)| config);
             let (kept, removed): (Vec<Server>, Vec<Server>) =
@@ -101,9 +110,10 @@ impl Inner {
     pub(super) fn registered_for_start(
         &self,
         configured: &[(String, String)],
+        clients: &[String],
     ) -> (Vec<(McpServerEntry, String)>, Vec<String>) {
         match &self.options.registry {
-            Some(registry) => registered_servers(registry, configured),
+            Some(registry) => registered_servers(registry, configured, clients),
             None => (Vec::new(), Vec::new()),
         }
     }

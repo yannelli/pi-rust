@@ -310,12 +310,28 @@ pub(crate) fn chown(path: &Path, uid: u32, gid: u32, follow: bool) -> io::Result
 }
 
 fn system_time(seconds: f64) -> std::time::SystemTime {
+    #[cfg(unix)]
+    let duration = {
+        let seconds = seconds.abs();
+        let whole = seconds.trunc();
+        let nanos = ((seconds - whole) * 1e9) as u32;
+        std::time::Duration::new(whole as u64, nanos / 1000 * 1000)
+    };
+    #[cfg(not(unix))]
     let duration = std::time::Duration::from_secs_f64(seconds.abs());
     if seconds >= 0.0 { std::time::UNIX_EPOCH + duration } else { std::time::UNIX_EPOCH - duration }
 }
 
 /// `fs.utimes` with times in seconds.
 pub(crate) fn utimes(path: &Path, atime: f64, mtime: f64) -> io::Result<()> {
+    #[cfg(windows)]
+    let file = {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_WRITE_ATTRIBUTES: u32 = 0x100;
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        OpenOptions::new().access_mode(FILE_WRITE_ATTRIBUTES).custom_flags(FILE_FLAG_BACKUP_SEMANTICS).open(path)?
+    };
+    #[cfg(not(windows))]
     let file = if path.is_dir() { File::open(path)? } else { OpenOptions::new().write(true).open(path)? };
     let times = fs::FileTimes::new().set_accessed(system_time(atime)).set_modified(system_time(mtime));
     file.set_times(times)

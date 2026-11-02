@@ -11,6 +11,7 @@ use pi_durable::storage::MemoryStorage;
 
 use super::support::*;
 use super::*;
+use crate::support::{ValueCall, on_value};
 
 /// Start `watch` with a listener that records its context, signals entry, and waits for release.
 fn hold(watch: &DocumentWatch) -> (Deferred, Deferred, Arc<Mutex<Option<Context>>>) {
@@ -18,7 +19,7 @@ fn hold(watch: &DocumentWatch) -> (Deferred, Deferred, Arc<Mutex<Option<Context>
     let delivered: Arc<Mutex<Option<Context>>> = Arc::default();
     let (gate_in, gate_out, sink) = (entered.clone(), release.clone(), delivered.clone());
     watch
-        .start(move |pi_chord::WatchChange { .. }, context| {
+        .start(on_value(move |ValueCall { .. }, context| {
             *sink.lock().unwrap() = Some(context);
             let (gate_in, gate_out) = (gate_in.clone(), gate_out.clone());
             async move {
@@ -26,7 +27,7 @@ fn hold(watch: &DocumentWatch) -> (Deferred, Deferred, Arc<Mutex<Option<Context>
                 gate_out.wait().await;
                 Ok(())
             }
-        })
+        }))
         .unwrap();
     (entered, release, delivered)
 }
@@ -91,11 +92,11 @@ async fn follows_its_address_across_a_retirement_and_a_recreation_in_one_commit_
         .unwrap();
     flush().await;
     let recreated = test.session.snapshot(&STATE_DOC, (), &context()).await.unwrap().unwrap();
-    let expected = WatchChange { value: recreated.clone(), ops: vec![Op::Replace(recreated)], retired: true };
+    let expected = ValueCall { value: recreated.clone(), ops: vec![Op::Replace(recreated)], retired: true };
     assert_eq!(*changes.lock().unwrap(), [expected]);
     set_value(&test.session, 11).await;
     flush().await;
-    let expected = WatchChange { value: watch.value(), ops: ops(r#"[["s",["value"],11]]"#), retired: false };
+    let expected = ValueCall { value: watch.value(), ops: ops(r#"[["s",["value"],11]]"#), retired: false };
     assert_eq!(changes.lock().unwrap()[1], expected);
     assert_eq!(value_of(&watch.value()), 11);
     let ended = tokio::time::timeout(std::time::Duration::from_millis(10), watch.closed()).await;
@@ -112,7 +113,7 @@ async fn session_close_discards_retirement_buffered_before_start() {
     test.session.close(&context()).await.unwrap();
     assert!(matches!(watch.closed().await, WatchEnd::Ended));
     assert!(watch.value().same_ref(&baseline));
-    assert!(message(watch.start(|pi_chord::WatchChange { .. }, _| async { Ok(()) })).contains("stopped"));
+    assert!(message(watch.start(on_value(|ValueCall { .. }, _| async { Ok(()) }))).contains("stopped"));
 }
 
 #[tokio::test]
@@ -123,7 +124,7 @@ async fn session_close_discards_retirement_behind_an_in_flight_callback() {
     let values: Arc<Mutex<Vec<Json>>> = Arc::default();
     let (sink, gate_in, gate_out) = (values.clone(), entered.clone(), release.clone());
     watch
-        .start(move |pi_chord::WatchChange { value, .. }, _| {
+        .start(on_value(move |ValueCall { value, .. }, _| {
             sink.lock().unwrap().push(value["value"].clone());
             let (gate_in, gate_out) = (gate_in.clone(), gate_out.clone());
             async move {
@@ -131,7 +132,7 @@ async fn session_close_discards_retirement_behind_an_in_flight_callback() {
                 gate_out.wait().await;
                 Ok(())
             }
-        })
+        }))
         .unwrap();
     set_value(&test.session, 1).await;
     entered.wait().await;
@@ -147,14 +148,14 @@ async fn session_close_discards_retirement_behind_an_in_flight_callback() {
 async fn supports_idempotent_stop_and_rejects_repeated_or_late_start() {
     let test = create_state().await;
     let started = watch_state(&test.session).await;
-    started.start(|pi_chord::WatchChange { .. }, _| async { Ok(()) }).unwrap();
-    assert!(message(started.start(|pi_chord::WatchChange { .. }, _| async { Ok(()) })).contains("already started"));
+    started.start(on_value(|ValueCall { .. }, _| async { Ok(()) })).unwrap();
+    assert!(message(started.start(on_value(|ValueCall { .. }, _| async { Ok(()) }))).contains("already started"));
     let (first, second) = (started.stop(), started.stop());
     assert!(matches!(first.await, WatchEnd::Stopped));
     assert!(matches!(second.await, WatchEnd::Stopped));
     let stopped = watch_state(&test.session).await;
     stopped.stop().await;
-    assert!(message(stopped.start(|pi_chord::WatchChange { .. }, _| async { Ok(()) })).contains("stopped"));
+    assert!(message(stopped.start(on_value(|ValueCall { .. }, _| async { Ok(()) }))).contains("stopped"));
 }
 
 #[tokio::test]
@@ -180,7 +181,7 @@ async fn cancels_future_delivery_without_aborting_an_in_flight_callback() {
     set_value(&test.session, 1).await;
     entered.wait().await;
     controller.abort(None);
-    assert!(matches!(watch.closed().await, WatchEnd::Cancelled));
+    assert!(matches!(watch.closed().await, WatchEnd::Aborted));
     assert!(delivered.lock().unwrap().as_ref().unwrap().abort_signal().is_none());
     release.resolve();
 }
@@ -203,11 +204,11 @@ async fn settles_listener_failure_on_only_the_affected_watch() {
     let test = create_state().await;
     let failed = watch_state(&test.session).await;
     let healthy = watch_state(&test.session).await;
-    failed.start(|pi_chord::WatchChange { .. }, _| async { Err(DurableError::error("listener failed")) }).unwrap();
+    failed.start(on_value(|ValueCall { .. }, _| async { Err(DurableError::error("listener failed")) })).unwrap();
     let frames = record(&healthy);
     set_value(&test.session, 1).await;
     let end = failed.closed().await;
-    assert_eq!(end.reason(), "listener_error");
+    assert_eq!(end.kind(), "listener_error");
     assert_eq!(end.error().unwrap().to_string(), "listener failed");
     flush().await;
     assert_eq!(frames.lock().unwrap().len(), 1);
@@ -265,7 +266,7 @@ async fn continues_after_the_tracker_cache_unloads() {
     let reloaded = test.session.snapshot(&STATE_DOC, (), &context()).await.unwrap().unwrap();
     assert_eq!(reloaded, baseline);
     assert!(test.storage.document_reads() > reads);
-    watch.start(|pi_chord::WatchChange { .. }, _| async { Ok(()) }).unwrap();
+    watch.start(on_value(|ValueCall { .. }, _| async { Ok(()) })).unwrap();
     set_value(&test.session, 7).await;
     flush().await;
     assert_eq!(value_of(&watch.value()), 7);
@@ -284,10 +285,10 @@ async fn retains_neither_its_session_nor_its_listener_once_stopped_while_still_r
         let sentinel = Arc::new(());
         let listener = Arc::downgrade(&sentinel);
         watch
-            .start(move |pi_chord::WatchChange { .. }, _| {
+            .start(on_value(move |ValueCall { .. }, _| {
                 let _held = sentinel.clone();
                 async { Ok(()) }
-            })
+            }))
             .unwrap();
         set_value(&session, 1).await;
         flush().await;

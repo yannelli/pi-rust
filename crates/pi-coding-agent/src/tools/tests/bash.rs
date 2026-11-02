@@ -44,11 +44,27 @@ async fn timeout_kills_and_reports() {
     assert!(err.to_string().starts_with("Invalid timeout"));
 }
 
-fn process_gone(pid: &str) -> bool {
+fn process_observation(pid: &str) -> (bool, String) {
     match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
-        Err(_) => true,
-        Ok(stat) => stat.split(") ").nth(1).is_some_and(|rest| rest.starts_with('Z')) || sigkill_pending(pid),
+        Err(error) => (error.kind() == std::io::ErrorKind::NotFound, error.to_string()),
+        Ok(stat) => (process_has_exited(&stat) || sigkill_pending(pid), stat),
     }
+}
+
+fn process_has_exited(stat: &str) -> bool {
+    matches!(stat.rsplit_once(") ").and_then(|(_, rest)| rest.split_whitespace().next()), Some("Z" | "X"))
+}
+
+#[test]
+fn process_exit_observation_accepts_terminal_states_only() {
+    for state in ["Z", "X"] {
+        assert!(process_has_exited(&format!("16275 (sleep) {state} 1 16274")));
+    }
+    for state in ["R", "S", "D", "T", "t", "I", "P", "", "Zombie"] {
+        assert!(!process_has_exited(&format!("16275 (sleep) {state} 1 16274")));
+    }
+    assert!(process_has_exited("16275 (name) with parens) X 1 16274"));
+    assert!(!process_has_exited("malformed"));
 }
 
 /// Whether the kernel has queued SIGKILL for `pid`: the process never runs user code again.
@@ -81,11 +97,14 @@ async fn cancellation_kills_process_group() {
     let pid = pid.trim().to_string();
     // SIGKILL is asynchronous: a loaded CI runner can take seconds to schedule the exit.
     let deadline = Instant::now() + Duration::from_secs(20);
-    while !process_gone(&pid) && Instant::now() < deadline {
+    let (gone, stat) = loop {
+        let observation = process_observation(&pid);
+        if observation.0 || Instant::now() >= deadline {
+            break observation;
+        }
         tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
-    assert!(process_gone(&pid), "background child {pid} still running: {stat}");
+    };
+    assert!(gone, "background child {pid} still running: {stat}");
 }
 
 #[tokio::test]

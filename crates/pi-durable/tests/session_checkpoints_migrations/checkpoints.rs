@@ -79,7 +79,7 @@ async fn selects_bases_only_for_nonempty_ordinary_batches_and_passes_the_exact_p
     let snapshot = snapshot(&test.session, &base_doc).await.unwrap().unwrap();
     let delta_snapshot = snapshot_of(&test, &delta_doc).await;
     let published = document_changes(&test.last_publication());
-    let (DocumentCommitChange::Document { ops: base_ops, .. }, DocumentCommitChange::Document { ops: delta_ops, .. }) =
+    let (DocumentCommitChange::Change { ops: base_ops, .. }, DocumentCommitChange::Change { ops: delta_ops, .. }) =
         (&published[0], &published[1])
     else {
         panic!()

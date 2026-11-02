@@ -8,7 +8,7 @@ use std::rc::Rc;
 use pi_ai::Model;
 use pi_tui::components::{Input, Text};
 use pi_tui::keys::matches_key;
-use pi_tui::{Component, Container, component, get_keybindings};
+use pi_tui::{Component, Container, component, get_keybindings, get_select_page_index};
 
 use super::common::{bold, border, fg, fuzzy_filter_by, spacer, text, visible_window};
 use super::key_display_text;
@@ -344,6 +344,13 @@ impl Component for ScopedModelsSelector {
             }
             return;
         }
+        if let Some(page_index) = get_select_page_index(&kb, data, self.selected_index, len, MAX_VISIBLE) {
+            if len > 0 {
+                self.selected_index = page_index;
+                self.update_list();
+            }
+            return;
+        }
         let (up, down) = (kb.matches(data, "app.models.reorderUp"), kb.matches(data, "app.models.reorderDown"));
         if up || down {
             self.reorder(if up { -1 } else { 1 });
@@ -411,6 +418,10 @@ impl Component for ScopedModelsSelector {
     }
 
     fn handles_input(&self) -> bool {
+        true
+    }
+
+    fn captures_viewport_input(&self) -> bool {
         true
     }
 

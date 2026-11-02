@@ -52,6 +52,7 @@ const SOURCES: &[(&str, &str)] = &[
     ("crypto", include_str!("../js/crypto.js")),
     ("internal/fs_utils", include_str!("../js/fs_utils.js")),
     ("internal/fs_ops", include_str!("../js/fs_ops.js")),
+    ("internal/fs_realpath", include_str!("../js/fs_realpath.js")),
     ("internal/fs_streams", include_str!("../js/fs_streams.js")),
     ("fs", include_str!("../js/fs.js")),
     ("fs/promises", include_str!("../js/fs_promises.js")),

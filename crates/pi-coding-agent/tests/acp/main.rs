@@ -5,11 +5,16 @@
 mod cli_support;
 #[path = "../agent_session/http_mock.rs"]
 mod http_mock;
+#[path = "../agent_session/mcp_fake.rs"]
+#[allow(dead_code)]
+mod mcp_fake;
 #[path = "../offline_guard/mod.rs"]
 mod offline_guard;
 
 mod binary;
 mod client;
+mod mcp_servers;
+mod permission_identity;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

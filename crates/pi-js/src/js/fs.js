@@ -60,8 +60,9 @@ function statSync(operation) {
 }
 fs.statSync = statSync(ops.stat);
 fs.lstatSync = statSync(ops.lstat);
-fs.realpathSync.native = fs.realpathSync;
-fs.realpath.native = fs.realpath;
+const realpaths = require("internal/fs_realpath");
+fs.realpathSync = Object.assign(realpaths.realpathSync, { native: fs.realpathSync });
+fs.realpath = Object.assign(realpaths.realpath, { native: fs.realpath });
 
 // The standard streams are not files here; their descriptors go to the runtime's output.
 const STDIO = { 1: "stdout", 2: "stderr" };

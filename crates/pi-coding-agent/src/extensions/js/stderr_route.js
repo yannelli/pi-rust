@@ -26,7 +26,8 @@ function caller(extensions) {
 		if (!ext.resolvedPath) continue;
 		if (stack.includes(ext.resolvedPath.replace(/\\/g, "/"))) return ext;
 		try {
-			if (stack.includes(realpathSync(ext.resolvedPath).replace(/\\/g, "/"))) return ext;
+			// The QuickJS module loader names files by the OS realpath, so match that spelling.
+			if (stack.includes(realpathSync.native(ext.resolvedPath).replace(/\\/g, "/"))) return ext;
 		} catch {
 			// Registered sources can have no file on disk.
 		}

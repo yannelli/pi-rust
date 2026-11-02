@@ -3,7 +3,7 @@
 use std::sync::{Arc, Mutex, Weak};
 
 use pi_chord::{
-    AbortController, ChordError, NativeWatch, NativeWatchChange, WatchEnd, create_context_key, with_context_value,
+    AbortController, ChordError, NativeWatch, NativeWatchCall, WatchEnd, create_context_key, with_context_value,
 };
 
 use super::*;
@@ -15,9 +15,10 @@ async fn delivers_values_in_order_with_a_context_never_inline() {
     let delivered = Arc::new(Mutex::new(Vec::<(Arc<str>, Option<String>)>::new()));
     let (sink, frame_key) = (delivered.clone(), key.clone());
     watch
-        .start(move |NativeWatchChange { value }, delivery| {
-            sink.lock().unwrap().push((value, delivery.value(&frame_key).cloned()));
-            async { Ok(()) }
+        .start(move |call, delivery| {
+            let delivered = native_value_call(call)
+                .map(|value| sink.lock().unwrap().push((value, delivery.value(&frame_key).cloned())));
+            std::future::ready(delivered)
         })
         .unwrap();
     let (first, second): (Arc<str>, Arc<str>) = ("first".into(), "second".into());
@@ -41,9 +42,9 @@ async fn collapses_101_pending_values_to_the_newest() {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = seen.clone();
     watch
-        .start(move |NativeWatchChange { value }, _| {
-            sink.lock().unwrap().push(value);
-            async { Ok(()) }
+        .start(move |call, _| {
+            let delivered = native_value_call(call).map(|value| sink.lock().unwrap().push(value));
+            std::future::ready(delivered)
         })
         .unwrap();
     flush().await;
@@ -60,9 +61,9 @@ async fn collapses_101_pending_values_to_the_value_of_replace() {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = seen.clone();
     watch
-        .start(move |NativeWatchChange { value }, _| {
-            sink.lock().unwrap().push(value);
-            async { Ok(()) }
+        .start(move |call, _| {
+            let delivered = native_value_call(call).map(|value| sink.lock().unwrap().push(value));
+            std::future::ready(delivered)
         })
         .unwrap();
     flush().await;
@@ -74,18 +75,18 @@ async fn ends_with_every_reason_of_its_lifecycle() {
     let create = || NativeWatch::<u32>::new(0, || {}, |_: &ChordError| {}, None);
     assert!(matches!(create().stop().await, WatchEnd::Stopped));
 
-    let cancelled = create();
+    let aborted = create();
     let controller = AbortController::new();
     controller.abort(None);
-    cancelled.observe_cancellation(&controller.signal()).unwrap();
-    assert!(matches!(cancelled.closed().await, WatchEnd::Cancelled));
+    aborted.observe_abort(&controller.signal()).unwrap();
+    assert!(matches!(aborted.closed().await, WatchEnd::Aborted));
 
     let ended = create();
-    ended.end(None);
+    ended.end(WatchEnd::Ended);
     assert!(matches!(ended.closed().await, WatchEnd::Ended));
 
     let failed = create();
-    failed.end(Some(ChordError::error("source failed")));
+    failed.end(WatchEnd::Failed(ChordError::error("source failed")));
     assert!(matches!(failed.closed().await, WatchEnd::Failed(error) if error.to_string() == "source failed"));
 
     let reported = Arc::new(Mutex::new(Vec::<String>::new()));
@@ -97,6 +98,48 @@ async fn ends_with_every_reason_of_its_lifecycle() {
     let end = throwing.closed().await;
     assert!(matches!(&end, WatchEnd::ListenerError(error) if error.to_string() == "listener failed"), "{end:?}");
     assert_eq!(*reported.lock().unwrap(), ["listener failed"]);
+}
+
+#[tokio::test]
+async fn delivers_a_failure_as_a_call_stays_open_and_folds_it_with_the_values_around_it() {
+    let reported = Arc::new(Mutex::new(Vec::<String>::new()));
+    let sink = reported.clone();
+    let report = move |error: &ChordError| sink.lock().unwrap().push(error.to_string());
+    let watch = NativeWatch::<u32>::new(0, || {}, report, None);
+    let calls = Arc::new(Mutex::new(Vec::<NativeWatchCall<u32>>::new()));
+    let seen = calls.clone();
+    watch
+        .start(move |call, _| {
+            seen.lock().unwrap().push(call);
+            async { Ok(()) }
+        })
+        .unwrap();
+    watch.advance(1, context());
+    flush().await;
+    // Values followed by a failure: the failure; a failure followed by values: the values, in order.
+    watch.advance(2, context());
+    watch.advance(3, context());
+    watch.fail(ChordError::error("down"), context());
+    flush().await;
+    assert_eq!(watch.value(), 1);
+    watch.fail(ChordError::error("again"), context());
+    watch.advance(4, context());
+    watch.advance(5, context());
+    flush().await;
+    let described: Vec<String> = calls
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|call| match call {
+            NativeWatchCall::Value { value } => format!("value {value}"),
+            NativeWatchCall::Failed { error } => format!("failed {error}"),
+        })
+        .collect();
+    assert_eq!(described, ["value 1", "failed down", "value 4", "value 5"]);
+    assert_eq!(calls.lock().unwrap()[1].kind(), "failed");
+    assert_eq!(watch.value(), 5);
+    assert!(reported.lock().unwrap().is_empty());
+    watch.stop().await;
 }
 
 #[tokio::test]

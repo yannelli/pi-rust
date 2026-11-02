@@ -10,7 +10,7 @@ use pi_durable::storage::open_sqlite_storage;
 use pi_durable::testing::faux::FauxTokenSize;
 use pi_durable::types::DocumentContent;
 use pi_durable::{DocumentCommitChange, DocumentId, StorageWrite, TaskId};
-use support::{ControlledStorage, document_changes};
+use support::{ControlledStorage, commit_observer, document_changes};
 
 use super::*;
 
@@ -20,9 +20,9 @@ type Ops = Arc<Mutex<Vec<Vec<serde_json::Value>>>>;
 fn record_inbox_ops(harness: &Harness) -> Ops {
     let ops = Ops::default();
     let sink = ops.clone();
-    let unsubscribe = harness.subscribe_commits(move |publication, _| {
+    let unsubscribe = harness.observe_commits(commit_observer(move |publication, _| {
         for change in document_changes(publication) {
-            if let DocumentCommitChange::Document { record, ops, .. } = change
+            if let DocumentCommitChange::Change { record, ops, .. } = change
                 && record.kind == "pi.inbox"
                 && !ops.is_empty()
             {
@@ -30,7 +30,7 @@ fn record_inbox_ops(harness: &Harness) -> Ops {
             }
         }
         Ok(())
-    });
+    }));
     std::mem::forget(unsubscribe);
     ops
 }
@@ -120,16 +120,16 @@ async fn stores_the_inbox_as_a_base_exactly_when_it_becomes_empty() {
     let (harness, root) = open_chat(storage.clone(), &setup).await;
     let inbox_id: Arc<Mutex<Option<DocumentId>>> = Arc::default();
     let sink = inbox_id.clone();
-    let unsubscribe = harness.subscribe_commits(move |publication, _| {
+    let unsubscribe = harness.observe_commits(commit_observer(move |publication, _| {
         for change in document_changes(publication) {
-            if let DocumentCommitChange::Document { record, .. } = change
+            if let DocumentCommitChange::Change { record, .. } | DocumentCommitChange::Retire { record, .. } = change
                 && record.kind == "pi.inbox"
             {
                 *sink.lock().unwrap() = Some(record.id);
             }
         }
         Ok(())
-    });
+    }));
     std::mem::forget(unsubscribe);
     let input = root.submit(SubmissionDraft::input("a"), &ctx()).await.unwrap();
     reached.notified().await;
@@ -303,9 +303,9 @@ async fn records_usage_as_numeric_sets_on_the_ledger_in_the_entrys_commit() {
     type UsageCommits = Arc<Mutex<Vec<(usize, Vec<Op>)>>>;
     let commits: UsageCommits = Arc::default();
     let sink = commits.clone();
-    let unsubscribe = harness.subscribe_commits(move |publication, _| {
+    let unsubscribe = harness.observe_commits(commit_observer(move |publication, _| {
         for change in document_changes(publication) {
-            if let DocumentCommitChange::Document { record, ops, .. } = change
+            if let DocumentCommitChange::Change { record, ops, .. } = change
                 && record.kind == "pi.usage"
             {
                 let entries =
@@ -314,7 +314,7 @@ async fn records_usage_as_numeric_sets_on_the_ledger_in_the_entrys_commit() {
             }
         }
         Ok(())
-    });
+    }));
     std::mem::forget(unsubscribe);
     root.submit(SubmissionDraft::input("a"), &ctx()).await.unwrap().wait(&ctx()).await.unwrap();
     root.submit(SubmissionDraft::input("b"), &ctx()).await.unwrap().wait(&ctx()).await.unwrap();

@@ -348,10 +348,10 @@ impl Tx {
             let stored = stored.get_or_insert_with(|| publications.clone());
             // Only a document change of a loaded incarnation carries held operations.
             let held = match &publication {
-                DocumentCommitChange::Document { record, conversation_id, version, value, .. } => {
+                DocumentCommitChange::Change { record, conversation_id, version, value, .. } => {
                     let (record, conversation_id, version, value) =
                         (record.clone(), *conversation_id, *version, value.clone());
-                    DocumentCommitChange::Document { record, conversation_id, version, value, ops: held_ops }
+                    DocumentCommitChange::Change { record, conversation_id, version, value, ops: held_ops }
                 }
                 other => other.clone(),
             };
@@ -368,8 +368,7 @@ impl Tx {
 fn describe(plan: &DocumentPlan, record: DocumentRecord) -> Option<DocumentCommitChange> {
     let conversation_id = plan.conversation_id;
     if plan.retire {
-        let (version, value, ops) = (None, None, Vec::new());
-        return Some(DocumentCommitChange::Document { record, conversation_id, version, value, ops });
+        return Some(DocumentCommitChange::Retire { record, conversation_id });
     }
     if let Some(StorageWrite::DocumentCopy { source, .. }) = &plan.content {
         let conversation_id = match record.scope {
@@ -380,6 +379,6 @@ fn describe(plan: &DocumentPlan, record: DocumentRecord) -> Option<DocumentCommi
     }
     let change = plan.change.as_ref().filter(|_| plan.publishes())?;
     let ops = if change.loaded.is_some() { change.prepared.ops.clone() } else { Vec::new() };
-    let (version, value) = (Some(change.version), Some(change.prepared.value.clone()));
-    Some(DocumentCommitChange::Document { record, conversation_id, version, value, ops })
+    let (version, value) = (change.version, change.prepared.value.clone());
+    Some(DocumentCommitChange::Change { record, conversation_id, version, value, ops })
 }
