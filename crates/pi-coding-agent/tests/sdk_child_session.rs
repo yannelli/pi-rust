@@ -12,7 +12,7 @@ use pi_ai::providers::faux::FauxResponse;
 use serde_json::{Value, json};
 
 const PRELUDE: &str = r#"
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createAgentSession, SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
 const until = async (check) => {
   for (let i = 0; i < 300 && !check(); i++) await new Promise((resolve) => setTimeout(resolve, 10));
@@ -182,7 +182,7 @@ async fn deferred_members_stay_unsupported() {
     let body = r#"
   const session = await child(ctx);
   const members = ['agent', 'getToolDefinition', 'navigateTree', 'executeBash', 'sendUserMessage',
-    'sendCustomMessage', 'scopedModels', 'cacheWarmingStatus', 'reload', 'extensionRunner'];
+    'sendCustomMessage', 'cacheWarmingStatus', 'reload', 'extensionRunner'];
   const errors = members.map((member) => {
     try { session[member]; return [member, null]; } catch (error) { return [member, error.code]; }
   });
@@ -190,9 +190,102 @@ async fn deferred_members_stay_unsupported() {
   pi.appendEntry('result', { errors });
 "#;
     let (_h, data) = run("deferred", body, Vec::new()).await;
+    assert_eq!(data["errors"].as_array().unwrap().len(), 9);
     for pair in data["errors"].as_array().unwrap() {
         assert_eq!(pair[1], "ERR_PI_UNSUPPORTED", "{pair}");
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn scoped_models_cycle_with_the_scoped_thinking_level() {
+    let body = r#"
+  const [tiny, other] = [ctx.modelRegistry.find('local', 'tiny'), ctx.modelRegistry.find('local', 'other')];
+  const session = await child(ctx);
+  session.setScopedModels([{ model: tiny, thinkingLevel: 'high' }, { model: other }]);
+  session.setThinkingLevel('high');
+  const first = await session.cycleModel();
+  const afterFirst = [session.model.id, session.thinkingLevel];
+  const second = await session.cycleModel();
+  const afterSecond = [session.model.id, session.thinkingLevel];
+  const scoped = session.scopedModels.map((entry) => [entry.model.provider, entry.model.id, entry.thinkingLevel ?? null]);
+  session.dispose();
+  pi.appendEntry('result', { afterFirst, afterSecond, scoped,
+    first: [first.model.id, first.thinkingLevel, first.isScoped], second: [second.model.id, second.isScoped] });
+"#;
+    let (h, data) = run("scoped-cycle", body, Vec::new()).await;
+    assert_eq!(data["afterFirst"], json!(["other", "off"]));
+    assert_eq!(data["afterSecond"], json!(["tiny", "high"]));
+    assert_eq!(data["first"], json!(["other", "off", true]));
+    assert_eq!(data["second"], json!(["tiny", true]));
+    assert_eq!(data["scoped"], json!([["local", "tiny", "high"], ["local", "other", null]]));
+    assert!(h.provider.requests().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn scoped_models_option_sets_the_scope_without_choosing_the_model() {
+    let body = r#"
+  const other = ctx.modelRegistry.find('local', 'other');
+  const { session } = await createAgentSession({
+    thinkingLevel: 'low', tools: [], scopedModels: [{ model: other, thinkingLevel: 'high' }],
+    sessionManager: SessionManager.inMemory(ctx.cwd),
+    settingsManager: SettingsManager.inMemory({ defaultProvider: 'local', defaultModel: 'tiny',
+      retry: { enabled: false }, compaction: { enabled: false } }),
+  });
+  const ids = () => session.scopedModels.map((entry) => [entry.model.id, entry.thinkingLevel ?? null]);
+  const initial = { model: session.model.id, level: session.thinkingLevel, scoped: ids() };
+  let invalid = null;
+  try { session.setScopedModels([{ model: other, thinkingLevel: 'loud' }]); } catch (error) { invalid = error.message; }
+  const afterInvalid = ids();
+  session.setScopedModels([]);
+  const cleared = ids();
+  const cycled = await session.cycleModel();
+  session.dispose();
+  pi.appendEntry('result', { initial, invalid, afterInvalid, cleared, cycledScoped: cycled?.isScoped ?? null });
+"#;
+    let (h, data) = run("scoped-option", body, Vec::new()).await;
+    assert_eq!(data["initial"], json!({"model": "tiny", "level": "low", "scoped": [["other", "high"]]}));
+    assert!(data["invalid"].is_string(), "{data}");
+    assert_eq!(data["afterInvalid"], json!([["other", "high"]]), "a rejected scope leaves the scope unchanged");
+    assert_eq!(data["cleared"], json!([]));
+    assert_eq!(data["cycledScoped"], false, "an empty scope cycles through the available models");
+    assert!(h.provider.requests().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn persisted_set_model_adds_to_a_non_empty_scope() {
+    let body = r#"
+  const agentDir = `${ctx.cwd}/sdk-agent`;
+  mkdirSync(agentDir, { recursive: true });
+  writeFileSync(`${agentDir}/settings.json`, JSON.stringify({ enabledModels: ['local/tiny'],
+    retry: { enabled: false }, compaction: { enabled: false } }));
+  const file = () => JSON.parse(readFileSync(`${agentDir}/settings.json`, 'utf8'));
+  const [tiny, other] = [ctx.modelRegistry.find('local', 'tiny'), ctx.modelRegistry.find('local', 'other')];
+  const settingsManager = SettingsManager.create(ctx.cwd, agentDir);
+  const { session } = await createAgentSession({ model: tiny, tools: [], scopedModels: [{ model: tiny }],
+    sessionManager: SessionManager.inMemory(ctx.cwd), settingsManager });
+  const ids = () => session.scopedModels.map((entry) => entry.model.id);
+  await session.setModel(other);
+  const transient = ids();
+  await session.setModel(other, { persist: true });
+  await settingsManager.flush();
+  const persisted = { scoped: ids(), enabled: file().enabledModels, model: file().defaultModel };
+  await session.setModel(tiny, { persist: true });
+  await settingsManager.flush();
+  const known = { scoped: ids(), enabled: file().enabledModels };
+  session.setScopedModels([]);
+  await session.setModel(other, { persist: true });
+  await settingsManager.flush();
+  const empty = { scoped: ids(), enabled: file().enabledModels };
+  session.dispose();
+  pi.appendEntry('result', { transient, persisted, known, empty });
+"#;
+    let (h, data) = run("scoped-persist", body, Vec::new()).await;
+    assert_eq!(data["transient"], json!(["tiny"]), "setModel without persist keeps the scope");
+    let both = json!({"scoped": ["tiny", "other"], "enabled": ["local/tiny", "local/other"]});
+    assert_eq!(data["persisted"], json!({"scoped": both["scoped"], "enabled": both["enabled"], "model": "other"}));
+    assert_eq!(data["known"], both, "a model already in the scope is not added again");
+    assert_eq!(data["empty"], json!({"scoped": [], "enabled": both["enabled"]}), "an empty scope stays empty");
+    assert!(h.provider.requests().is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

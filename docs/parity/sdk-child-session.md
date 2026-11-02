@@ -29,10 +29,11 @@ This file records which members of the SDK `AgentSession` that `createAgentSessi
 | `getActiveToolNames`, `getCallableToolNames`, `getAllTools`, `setActiveToolsByName` | Work. `getAllTools` entries have no `reachesTools`. |
 | `state` | Returns `systemPrompt`, `model`, `thinkingLevel`, `tools`, `messages`, `isStreaming`, `streamingMessage`, `pendingToolCalls` (a `Set`), and `errorMessage`. `tools` holds tool infos without `execute`; each read is a new copy. |
 | `subscribe` | Works for the whole session. |
+| `scopedModels`, `setScopedModels`, and the `createAgentSession` option `scopedModels` | Work on the native scope: `cycleModel` uses it with its thinking levels, and `setModel` with `{ persist: true }` adds the model to a non-empty scope and to `enabledModels`. The scope does not choose the initial model, as upstream. Each read is a new copy, where upstream returns the stored array. A value that is not an array of `{ model, thinkingLevel? }` with a valid level throws an `Error` and keeps the scope; upstream stores it unchecked. |
 
 These members still throw `ERR_PI_UNSUPPORTED`:
 
 - `agent`, which needs a JavaScript `Agent` backed by Rust.
 - `sendCustomMessage`, `sendUserMessage`, `executeBash` (needs `onChunk` and `operations` callbacks), `recordBashResult`, `navigateTree`, `reload`, `cacheWarmingStatus`.
-- `scopedModels`, `setScopedModels`, `promptTemplates`, `resourceLoader`, `bindExtensions`, `extensionRunner`, `hasExtensionHandlers`, `createReplacedSessionContext`, `getToolDefinition`, `summarizeForBugReport`.
-- The `createAgentSession` options `customTools`, `scopedModels`, and `sessionStartEvent`, and `extensionsResult.runtime`.
+- `promptTemplates`, `resourceLoader`, `bindExtensions`, `extensionRunner`, `hasExtensionHandlers`, `createReplacedSessionContext`, `getToolDefinition`, `summarizeForBugReport`.
+- The `createAgentSession` options `customTools` and `sessionStartEvent`, and `extensionsResult.runtime`.
