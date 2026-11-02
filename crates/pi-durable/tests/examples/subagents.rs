@@ -82,6 +82,7 @@ fn reporter() -> Task {
                     request_id: Some(format!("subagent:{}", task.id)),
                     content,
                     when_busy: Some(when_busy),
+                    when_idle: None,
                     entry: None,
                 };
                 let settled = subagent.submit(request, &context).await?.wait(&context).await?;
@@ -123,6 +124,7 @@ fn reporter() -> Task {
                             request_id,
                             content,
                             when_busy: Some(WhenBusy::FollowUp),
+                            when_idle: None,
                             entry: None,
                         },
                         &context,

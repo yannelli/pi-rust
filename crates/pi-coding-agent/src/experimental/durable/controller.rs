@@ -200,6 +200,7 @@ impl DurableController {
                 request_id: None,
                 content: pi_ai::UserContent::Text(text),
                 when_busy: Some(when_busy),
+                when_idle: None,
                 entry: None,
             };
             let submission = state.current().submit(draft, &BACKGROUND_CONTEXT).await?;

@@ -35,6 +35,9 @@ pub enum DurableError {
     /// A submission reached a busy conversation and was not admitted.
     #[error("Conversation {0} is busy")]
     ConversationBusy(ConversationId),
+    /// An input with `WhenIdle::Reject` reached an idle conversation and was not admitted.
+    #[error("Conversation {0} is idle")]
+    ConversationIdle(ConversationId),
     /// A Chord failure, including cancellation of the caller's context.
     #[error(transparent)]
     Chord(ChordError),
@@ -98,6 +101,7 @@ impl DurableError {
             Self::SessionFailed(_) => "SessionFailed",
             Self::ReadOnlySession(_) => "ReadOnlySession",
             Self::ConversationBusy(_) => "ConversationBusy",
+            Self::ConversationIdle(_) => "ConversationIdle",
             Self::Chord(ChordError::Type(_)) => "TypeError",
             Self::Chord(ChordError::Aborted) => "AbortError",
             Self::Chord(_) => "Error",
