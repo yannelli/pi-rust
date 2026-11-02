@@ -145,6 +145,65 @@ async fn rejects_unknown_servers_and_servers_without_oauth_for_login_and_logout(
 }
 
 #[tokio::test]
+async fn suggests_a_configured_server_for_a_mistyped_name() {
+    let dir = tempfile::tempdir().unwrap();
+    for command in ["login", "logout"] {
+        let result = run(&[command, "fixtures"], Some(servers()), dir.path()).await;
+        assert_eq!(result.code, 1);
+        assert_eq!(
+            result.output,
+            "No MCP server named \"fixtures\". Did you mean \"fixture\"? Configured: fixture, broken, parked."
+        );
+    }
+}
+
+#[tokio::test]
+async fn reports_unknown_options_as_typed() {
+    let dir = tempfile::tempdir().unwrap();
+    for option in ["-l", "--local", "--unknown"] {
+        let result = run(&["list", option], None, dir.path()).await;
+        assert_eq!(result.code, 1);
+        assert_eq!(result.output, format!("Unknown option {option}.\nUse \"pi mcp --help\" for usage."));
+    }
+}
+
+#[tokio::test]
+async fn restricts_login_and_logout_to_project_servers_with_local() {
+    let dir = tempfile::tempdir().unwrap();
+    let added = run(&["add", "-l", "local", "--", "node", "server.js"], Some(servers()), dir.path()).await;
+    assert_eq!(added.code, 0, "{}", added.output);
+    for command in ["login", "logout"] {
+        for flag in ["-l", "--local"] {
+            let local = run_with(&[command, flag, "local"], None, dir.path(), |options| {
+                options.project_trusted = true;
+            })
+            .await;
+            assert_eq!(local.code, 1);
+            assert_eq!(
+                local.output,
+                "MCP server \"local\" does not use OAuth. Only HTTP servers without an Authorization header do."
+            );
+            let global = run_with(&[command, flag, "fixture"], None, dir.path(), |options| {
+                options.project_trusted = true;
+            })
+            .await;
+            assert_eq!(global.code, 1);
+            assert_eq!(
+                global.output,
+                format!(
+                    "MCP server \"fixture\" is defined in {}, not in the project; omit --local.",
+                    dir.path().join("mcp.json").display()
+                )
+            );
+        }
+    }
+    let untrusted = run(&["logout", "-l", "local"], None, dir.path()).await;
+    assert_eq!(untrusted.code, 1);
+    assert!(untrusted.output.contains("is ignored because the project is not trusted"));
+    assert!(!untrusted.output.contains("does not use OAuth"));
+}
+
+#[tokio::test]
 async fn adds_stdio_servers_and_passes_options_after_the_command_through() {
     let dir = tempfile::tempdir().unwrap();
     let args = ["add", "--env", "A=1", "--env", "B=x=y", "files", "--", "npx", "-y", "server", "--root", "."];
