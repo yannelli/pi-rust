@@ -50,8 +50,11 @@ jobs:
         with:
           node-version: 22
       - run: cargo test --workspace --locked --no-fail-fast
-      - name: extension tests on the Node backend
-        run: cargo test -p pi-coding-agent --test extensions --test tui_viewport_exports --test project_trust_store_exports --locked --no-fail-fast
+      - name: extension and SDK tests on the Node backend
+        run: >-
+          cargo test -p pi-coding-agent --test extensions --test tui_viewport_exports --test project_trust_store_exports
+          --test sdk_child_session --test sdk_session --test sdk_settings_replay --test sdk_settings_child
+          --locked --no-fail-fast
         env:
           PI_EXTENSION_RUNTIME: node
 

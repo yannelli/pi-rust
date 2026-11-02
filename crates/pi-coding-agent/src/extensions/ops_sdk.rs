@@ -3,12 +3,13 @@ use std::sync::{Arc, Mutex};
 
 use pi_js::{HostValue, JsError};
 use serde_json::{Value, json};
-use tokio::sync::mpsc;
 
 use super::ops::{Args, error};
 use super::ops_sdk_storage::StorageState;
 use super::runner::ExtensionRunner;
-use crate::agent_session::{AgentSession, PromptOptions, lock};
+use crate::agent_session::{AgentSession, lock};
+
+mod child;
 
 pub(crate) struct ChildSession {
     pub session: Arc<AgentSession>,
@@ -19,10 +20,14 @@ pub(crate) struct ChildSession {
 pub(crate) struct SdkState {
     pub storage: Mutex<StorageState>,
     pub children: Mutex<HashMap<u64, ChildSession>>,
+    subscriptions: Mutex<HashMap<u64, child::Subscription>>,
 }
 
 impl SdkState {
     pub fn shutdown(&self) {
+        for (_, subscription) in lock(&self.subscriptions).drain() {
+            subscription.stop(None);
+        }
         for (_, child) in lock(&self.children).drain() {
             child.session.dispose();
             lock(&self.storage).detach_child(child.manager_id, &child.session);
@@ -82,74 +87,19 @@ pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<
             json!(crate::tools::edit_diff::generate_unified_patch(&args.str(0)?, &args.str(1)?, &args.str(2)?))
         }
         "dispose" => {
-            if let Some(child) = lock(&runner.sdk.children).remove(&args.u64(0)) {
+            let removed = lock(&runner.sdk.children).remove(&args.u64(0));
+            if let Some(child) = removed {
+                child::unsubscribe(&runner.sdk, args.u64(0), Some(&child.session));
                 child.session.dispose();
                 lock(&runner.sdk.storage).detach_child(child.manager_id, &child.session);
             }
             Value::Null
         }
-        "read" => {
-            let session = runner.sdk.session(args.u64(0))?;
-            match args.str(1)?.as_str() {
-                "messages" => json!(session.messages()),
-                "model" => json!(session.model()),
-                "thinkingLevel" => json!(session.thinking_level()),
-                "isStreaming" => json!(session.is_streaming()),
-                "sessionId" => json!(session.session_id()),
-                "sessionFile" => json!(session.session_file()),
-                "systemPrompt" => json!(session.agent().state().current_system_prompt()),
-                "routedModel" => json!(
-                    session
-                        .routed_model()
-                        .map(|routed| { json!({"model": routed.model, "thinkingLevel": routed.thinking_level}) })
-                ),
-                "contextUsage" => json!(session.context_usage().map(|usage| {
-                    json!({"tokens": usage.tokens, "contextWindow": usage.context_window, "percent": usage.percent})
-                })),
-                member => return Err(JsError::unsupported(&format!("AgentSession.{member}"))),
-            }
-        }
+        "read" => child::read(runner.sdk.session(args.u64(0))?.as_ref(), &args.str(1)?)?,
+        "control" => child::control(runner, &runner.sdk.session(args.u64(0))?, args)?,
         _ => return Err(JsError::unsupported(&format!("AgentSession.{name}"))),
     };
     Ok(HostValue::Json(value))
-}
-
-async fn prompt(runner: &ExtensionRunner, args: &Args) -> Result<(), JsError> {
-    let session = runner.sdk.session(args.u64(0))?;
-    let text = args.str(1)?;
-    let options = args.json(2);
-    let callback = args.u64(3);
-    let images = options.get("images").cloned().map(serde_json::from_value).transpose().map_err(error)?;
-    let prompt_options = PromptOptions {
-        images: images.unwrap_or_default(),
-        expand_prompt_templates: options["expandPromptTemplates"].as_bool().unwrap_or(true),
-        source: options["source"].as_str().map(str::to_owned),
-        ..Default::default()
-    };
-    let (sender, mut receiver) = mpsc::unbounded_channel();
-    let listener = session.subscribe(move |event| {
-        let _ = sender.send(event.to_json());
-    });
-    let run = async {
-        let result = session.prompt_with(&text, prompt_options).await;
-        session.unsubscribe(listener);
-        result.map_err(error)
-    };
-    let forward = async {
-        let mut failure = None;
-        while let Some(event) = receiver.recv().await {
-            if let Err(error) =
-                runner.host().call_method("invokeCallback", vec![json!(callback).into(), event.into()]).await
-            {
-                session.request_abort();
-                failure.get_or_insert(error);
-            }
-        }
-        failure.map_or(Ok(()), Err)
-    };
-    let (result, delivered) = tokio::join!(run, forward);
-    result?;
-    delivered
 }
 
 pub(crate) async fn run(runner: Arc<ExtensionRunner>, name: &str, args: Args) -> Result<HostValue, JsError> {
@@ -187,13 +137,8 @@ pub(crate) async fn run(runner: Arc<ExtensionRunner>, name: &str, args: Args) ->
             .await
             .map_err(error)?
         }
-        "prompt" => {
-            prompt(&runner, &args).await?;
-            Value::Null
-        }
-        "abort" => {
-            runner.sdk.session(args.u64(0))?.abort().await;
-            Value::Null
+        "prompt" | "steer" | "followUp" | "waitForIdle" | "setModel" | "compact" | "abort" => {
+            child::run(&runner, name, &args).await?
         }
         _ => return Err(JsError::unsupported(&format!("AgentSession.{name}"))),
     };
