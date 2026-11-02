@@ -6,6 +6,7 @@ import { footerJson, hostMethods, needsCtx } from "./native_host.js";
 import { autocompleteFactory, createRegistrar } from "./native_register.js";
 import { createPeer, readLines, rpcError } from "./native_rpc.js";
 import { createSurfaces } from "./native_ui.js";
+import { NOTIFY_SOURCE } from "./ui.js";
 
 export const PROTOCOL_VERSION = 1;
 const INITIALIZE_MS = 10000;
@@ -34,7 +35,7 @@ function logLine(state, line) {
 	const text = `[${state.path}] ${level ? line.slice(level[0].length) : line}`;
 	if (inTui(state)) {
 		const type = level ? NOTIFY_TYPE[level[1]] : "warning";
-		if (safe(() => (state.ctx.ui.notify(text, type), true), false)) return;
+		if (safe(() => (state.ctx.ui.notify(text, type, { [NOTIFY_SOURCE]: state.path }), true), false)) return;
 	}
 	console.error(`[${state.path}] ${line}`);
 }

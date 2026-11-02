@@ -3,6 +3,7 @@
 import { complete } from "@earendil-works/pi-ai";
 import { call, callAsync } from "./bridge.js";
 import { rpcError } from "./native_rpc.js";
+import { NOTIFY_SOURCE } from "./ui.js";
 
 const isSignal = (value) =>
 	typeof value === "object" && value !== null && typeof value.aborted === "boolean" && typeof value.addEventListener === "function";
@@ -210,7 +211,7 @@ export function hostMethods(state) {
 	const dialog = (params, signal) => ({ timeout: params.timeout, signal });
 	const done = () => null;
 	return {
-		"ui.notify": (p) => (ctx().ui.notify(String(p.message ?? ""), p.type), done()),
+		"ui.notify": (p) => (ctx().ui.notify(String(p.message ?? ""), p.type, { [NOTIFY_SOURCE]: state.path }), done()),
 		"ui.select": async (p, signal) => toJson(await ui().select(p.title, p.options ?? [], dialog(p, signal))),
 		"ui.confirm": async (p, signal) => Boolean(await ui().confirm(p.title, p.message ?? "", dialog(p, signal))),
 		"ui.input": async (p, signal) => {

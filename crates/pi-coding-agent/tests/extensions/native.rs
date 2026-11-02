@@ -187,6 +187,9 @@ const OBSERVER: &str = r#"export default function (pi) {
 	pi.on("tool_call", (event) => {
 		if (event.input?.text === "array") pi.appendEntry("array-keys", { keys: Object.keys(event).filter((key) => /^\d+$/.test(key)) });
 	});
+	pi.on("notification", (event) => {
+		if (event.message === "native ready") pi.appendEntry("native-notice", event);
+	});
 }"#;
 
 async fn native_with(
@@ -399,6 +402,11 @@ async fn patches_reach_tool_results_messages_and_context() {
     let request = serde_json::to_string(&h.provider.requests()[0].messages).unwrap();
     assert!(request.contains("context patched"), "{request}");
     assert_eq!(entry_data(&h, "array-keys"), Some(json!({"keys": []})));
+    // pi-rust `notification` names the native extension that sent the notice.
+    eventually(|| entry_data(&h, "native-notice").is_some()).await;
+    let notice = json!({"type": "notification", "message": "native ready", "level": "info", "source": "extension",
+        "extension": "native:native-fixture/fixture.mjs"});
+    assert_eq!(entry_data(&h, "native-notice"), Some(notice));
     assert!(h.errors().is_empty(), "{:?}", h.errors());
 }
 

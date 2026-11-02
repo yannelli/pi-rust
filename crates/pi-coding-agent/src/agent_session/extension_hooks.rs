@@ -221,9 +221,15 @@ impl AgentSession {
         None
     }
 
-    /// `tool_call` handlers: a throwing handler blocks the call; edits of `input` apply.
-    pub(crate) async fn extension_tool_call(&self, call: &BeforeToolCall<'_>) -> Option<BeforeToolCallResult> {
-        let runner = self.extension_runner().filter(|runner| runner.has_handlers("tool_call"))?;
+    /// `tool_call` handlers: a throwing handler blocks the call; edits of `input` apply. The
+    /// second value is the path of the extension that blocked the call.
+    pub(crate) async fn extension_tool_call(
+        &self,
+        call: &BeforeToolCall<'_>,
+    ) -> (Option<BeforeToolCallResult>, Option<String>) {
+        let Some(runner) = self.extension_runner().filter(|runner| runner.has_handlers("tool_call")) else {
+            return (None, None);
+        };
         let mut event = json!({
             "type": "tool_call",
             "toolName": call.tool_call.name,
@@ -238,15 +244,45 @@ impl AgentSession {
                 let input = result.get("input").filter(|input| *input != call.args).cloned();
                 let block = result["block"].as_bool().unwrap_or(false);
                 let reason = result["reason"].as_str().map(str::to_string);
-                (block || input.is_some()).then_some(BeforeToolCallResult {
+                let blocker = result["extensionPath"].as_str().filter(|_| block).map(str::to_string);
+                let hooked = (block || input.is_some()).then_some(BeforeToolCallResult {
                     block,
                     reason,
                     terminate: false,
                     args: input,
-                })
+                });
+                (hooked, blocker)
             }
-            Err(error) => Some(BeforeToolCallResult { block: true, reason: Some(error.message), ..Default::default() }),
+            Err(error) => {
+                (Some(BeforeToolCallResult { block: true, reason: Some(error.message), ..Default::default() }), None)
+            }
         }
+    }
+
+    /// pi-rust `tool_call_blocked` after an extension or the permission policy blocked a call.
+    pub(crate) fn emit_tool_call_blocked(
+        &self,
+        call: &BeforeToolCall<'_>,
+        input: &Value,
+        reason: Option<&str>,
+        source: &str,
+        extension: Option<&str>,
+    ) {
+        let Some(runner) = self.extension_runner().filter(|runner| runner.has_handlers("tool_call_blocked")) else {
+            return;
+        };
+        let mut event = json!({
+            "type": "tool_call_blocked",
+            "toolCallId": call.tool_call.id,
+            "toolName": call.tool_call.name,
+            "input": input,
+            "reason": reason,
+            "source": source,
+        });
+        if let Some(extension) = extension {
+            event["extension"] = json!(extension);
+        }
+        runner.emit_detached(event);
     }
 
     /// `tool_result` handlers: changed content, details, and error state.

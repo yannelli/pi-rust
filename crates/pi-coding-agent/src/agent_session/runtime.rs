@@ -231,6 +231,7 @@ impl AgentSessionRuntime {
             SessionStartReason::Fork => "fork",
         };
         let bindings = self.session().extension_bindings();
+        let old_cwd = self.cwd();
         let target_file = session_manager.file().map(Path::to_path_buf);
         self.teardown_current(reason_name, target_file.as_deref()).await;
         let target = RuntimeTarget {
@@ -249,6 +250,12 @@ impl AgentSessionRuntime {
             start["previousSessionFile"] = serde_json::json!(previous.display().to_string());
         }
         session.set_session_start_event(start);
+        if session.cwd() != old_cwd {
+            let (old_cwd, new_cwd) = (old_cwd.display().to_string(), session.cwd().display().to_string());
+            session.queue_after_session_start(
+                serde_json::json!({"type": "cwd_changed", "oldCwd": old_cwd, "newCwd": new_cwd}),
+            );
+        }
         *lock(&self.current) = parts;
         if let Some(setup) = setup {
             setup(session.clone()).await?;
@@ -257,6 +264,10 @@ impl AgentSessionRuntime {
         // The new session's extensions bind with the mode's bindings before the mode rebinds.
         if let Some(bindings) = bindings {
             session.bind_extensions(bindings).await;
+        }
+        // A `session_start` handler switched again; that replacement rebound already.
+        if !Arc::ptr_eq(&self.session(), &session) {
+            return Ok(());
         }
         let rebind = lock(&self.rebind).clone();
         if let Some(rebind) = rebind {

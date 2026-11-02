@@ -252,6 +252,7 @@ export function createHost(config) {
 		emitResourcesDiscover: (cwd, reason) => runner.emitResourcesDiscover(cwd, reason),
 		emitInput: (text, images, source, behavior) => runner.emitInput(text, optional(images), source, optional(behavior)),
 		emitCacheWarmingDecision: (event) => runner.emitCacheWarmingDecision(event),
+		emitPromptExpansion: (event) => runner.emitPromptExpansion(event),
 		emitBoundary: (event) => runner.emitBoundary(event),
 		async emitUserBash(event) {
 			const result = await runner.emitUserBash(event);

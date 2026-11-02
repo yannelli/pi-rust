@@ -129,6 +129,8 @@ pub struct Setup {
     pub runtime: Option<ExtensionRuntime>,
     /// The core OAuth flows by provider id in place of pi's.
     pub oauth: Option<OAuthLookup>,
+    /// Files relative to the temporary root (`work/`, `agent/`), written before resources load.
+    pub root_files: Vec<(&'static str, String)>,
 }
 
 impl Default for Setup {
@@ -148,6 +150,7 @@ impl Default for Setup {
             mcp: None,
             runtime: None,
             oauth: None,
+            root_files: Vec::new(),
         }
     }
 }
@@ -232,6 +235,11 @@ pub async fn harness(setup: Setup) -> Harness {
     }
     for (path, content) in &setup.files {
         let path = extension_dir.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, content).unwrap();
+    }
+    for (path, content) in &setup.root_files {
+        let path = root.path().join(path);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, content).unwrap();
     }

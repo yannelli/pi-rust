@@ -112,6 +112,22 @@ pi builds no result for `before_agent_start`: a built `systemPrompt` would repla
 
 The ctx snapshot: `{ cwd, mode, hasUI, model, scopedModels, thinkingLevel, sessionId, sessionName, sessionFile, isIdle, isProjectTrusted, contextUsage, terminalWidth, terminalHeight, flags, footer? }`. `model` is `{ provider, id, name, api, baseUrl, compat, contextWindow, maxTokens, reasoning }` or `null`; it has no headers and no keys. `scopedModels` is `[{ provider, id, thinkingLevel? }]` (the `--models` scope, empty when there is none). `contextUsage` is `{ tokens, contextWindow, percent }` or `null`. `terminalWidth` is the terminal width in columns in `tui` mode, else `null`. `terminalHeight` is the terminal height in rows in `tui` mode, else `null`; it is also `null` when the host does not know the height. `flags` maps each flag of this extension to its value. `footer` is `{ gitBranch, sessionStats?, runState? }` when the host supplies it.
 
+#### pi-rust events
+
+pi-rust adds these events for hook runners. Upstream pi has no such events. JavaScript extensions receive them with `pi.on(name)` too. Each event object also has `type`.
+
+| Event | Payload | Result |
+| --- | --- | --- |
+| `instructions_loaded` | `{ path, scope: "user" \| "project", reason }`. pi sends one for each context file (`AGENTS.md`, `CLAUDE.md`, and the other names) in the system prompt, after `session_start`. `scope` is `user` for the file of the agent directory. `reason` is the `session_start` reason (`startup`, `reload`, `new`, `resume`, or `fork`). | none |
+| `prompt_expansion` | `{ kind: "skill" \| "prompt_template", name, args, source, prompt, text }`, when a prompt `/skill:name args` or `/template args` expands. `source` is the path of the skill or template file, `prompt` is the prompt text, and `text` is the expansion. | `{ action: "block", reason? }` drops the prompt and shows `reason` as a warning. `{ action: "context", text }` appends `"\n\n" + text` to the expansion. The first block wins. The `context` texts of all handlers join in handler order. pi reads only `result`. |
+| `notification` | `{ message, level: "info" \| "warning" \| "error", source: "extension" \| "pi", extension? }`, for each `ui.notify` of an extension and each notice of pi itself. `extension` is the `extensionPath` of a native extension that sent the notice. Notices sent while `notification` handlers run make no `notification` event, so a handler that calls `ui.notify` does not loop. | none |
+| `tool_call_blocked` | `{ toolCallId, toolName, input, reason, source: "extension" \| "permission", extension? }`, after a `tool_call` handler blocked a call (`extension`) or the ACP permission policy denied it (`permission`). `extension` is the path of the extension that blocked the call. | none |
+| `cwd_changed` | `{ oldCwd, newCwd }`, after the session is replaced by a session in another directory. The extensions of the new session get it after their `session_start`. | none |
+
+pi does not wait for the handlers of `instructions_loaded`, `notification`, `tool_call_blocked`, and `cwd_changed`.
+
+During `session_start`, the event context also has `switchSession(sessionPath)` (pi-rust only; upstream pi has it only on command contexts). A native extension calls it with `pi.call` `{ target: "ctx", method: "switchSession", args: [sessionPath] }`. pi queues the switch and returns `null` (`undefined` in JavaScript) at once. When the `session_start` handlers are done, pi switches to the session as a command `ctx.switchSession()` does: `session_before_switch`, new extensions, `session_start` with reason `resume`, and `cwd_changed` when the directory changes. When several handlers queue a switch, the last one wins. After `session_start`, the call fails.
+
 ### Tools
 
 During `tool.execute` the extension sends `tool.update` notifications `{ toolCallId, partial: { content, details? } }`. When the agent aborts the call, pi sends `$/cancelRequest` and waits 5 seconds for the answer; after that the call fails with `Tool call aborted`.
