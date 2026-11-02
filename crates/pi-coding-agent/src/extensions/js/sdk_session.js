@@ -28,8 +28,8 @@ function resourceOptions(loader) {
 }
 
 export async function createAgentSession(options = {}) {
-	checkOptions(options, ["cwd", "agentDir", "model", "thinkingLevel", "tools", "excludeTools", "noTools",
-		"systemPrompt", "resourceLoader", "sessionManager", "settingsManager", "modelRuntime"], "createAgentSession");
+	checkOptions(options, ["cwd", "agentDir", "model", "thinkingLevel", "scopedModels", "tools", "excludeTools",
+		"noTools", "systemPrompt", "resourceLoader", "sessionManager", "settingsManager", "modelRuntime"], "createAgentSession");
 	const modelRuntimeId = options.modelRuntime?._sdkRuntimeId;
 	if (options.modelRuntime && typeof modelRuntimeId !== "number") unsupported("createAgentSession.modelRuntime");
 	if (options.tools?.some((tool) => typeof tool !== "string")) unsupported("createAgentSession.tools.definition");
@@ -50,7 +50,7 @@ export async function createAgentSession(options = {}) {
 	}
 	if (options.systemPrompt !== undefined) resources.systemPrompt = options.systemPrompt;
 	const result = await callAsync("sdk.create", {
-		cwd, agentDir, model: options.model, thinkingLevel: options.thinkingLevel,
+		cwd, agentDir, model: options.model, thinkingLevel: options.thinkingLevel, scopedModels: options.scopedModels,
 		tools: options.tools, excludeTools: options.excludeTools, noTools: options.noTools,
 		sessionManagerId: sessionManager._sdkId, settingsManagerId: settingsManager._sdkId, resources, modelRuntimeId,
 	});
@@ -86,6 +86,7 @@ export async function createAgentSession(options = {}) {
 		get messages() { return read("messages"); },
 		get model() { return read("model"); },
 		get thinkingLevel() { return read("thinkingLevel"); },
+		get scopedModels() { return read("scopedModels"); },
 		get isStreaming() { return read("isStreaming"); },
 		get isIdle() { return read("isIdle"); },
 		get isCompacting() { return read("isCompacting"); },
@@ -150,6 +151,7 @@ export async function createAgentSession(options = {}) {
 		async cycleModel(direction = "forward", modelOptions) { return control("cycleModel", direction, persist(modelOptions)); },
 		setThinkingLevel(level, modelOptions) { control("setThinkingLevel", level, persist(modelOptions)); },
 		cycleThinkingLevel: (modelOptions) => control("cycleThinkingLevel", persist(modelOptions)),
+		setScopedModels(scopedModels) { control("setScopedModels", scopedModels); },
 		setSteeringMode(mode) { control("setSteeringMode", mode); },
 		setFollowUpMode(mode) { control("setFollowUpMode", mode); },
 		compact: (customInstructions) => run("compact", customInstructions ?? null),
