@@ -50,7 +50,7 @@ const registrations = {
 	flags: [{ name: "native-flag", type: "string", default: "off" }],
 	events: [
 		"session_start", "before_agent_start", "tool_call", "tool_result", "message_end", "context",
-		"agent_before_settle", "after_provider_response", ...(process.env.NATIVE_FOOTER === "off" ? [] : ["footer_changed"]),
+		"agent_before_settle", "after_provider_response", "message_display", ...(process.env.NATIVE_FOOTER === "off" ? [] : ["footer_changed"]),
 	],
 	autocomplete: [{ triggerCharacters: ["@"] }],
 };
@@ -101,6 +101,9 @@ async function onEvent({ name, event, ctx }) {
 		settleArmed = false;
 		const entry = { type: "custom", customType: "native-settle", data: { outcome: event.outcome, before: event.entries.length } };
 		return { result: { entries: [...event.entries, entry], continue: false } };
+	}
+	if (name === "message_display") {
+		return event.text.startsWith("native display") ? { result: { text: `NATIVE<${event.messageId} ${event.text}>` } } : {};
 	}
 	if (name === "tool_result") {
 		return event.input?.text === "patch!" ? { patch: { content: [{ type: "text", text: "patched result" }] } } : {};

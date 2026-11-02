@@ -245,6 +245,7 @@ export function createHost(config) {
 		emitToolCall: (event) => runner.emitToolCall(event),
 		emitToolResult: (event) => runner.emitToolResult(event),
 		emitMessageEnd: (event) => runner.emitMessageEnd(event),
+		emitMessageDisplay: (event) => runner.emitMessageDisplay(event),
 		emitContext: (messages) => runner.emitContext(messages),
 		emitBeforeProviderRequest: (payload) => runner.emitBeforeProviderRequest(payload),
 		emitBeforeProviderHeaders: (headers) => runner.emitBeforeProviderHeaders(headers),

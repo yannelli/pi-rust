@@ -161,6 +161,25 @@ export class Runner {
 		return action;
 	}
 
+	/** pi-rust `message_display`: each handler sees the text the previous one returned. */
+	async emitMessageDisplay(event) {
+		const ctx = this.createContext();
+		let current;
+		for (const { ext, handlers } of snapshot(this.extensions, "message_display")) {
+			for (const handler of handlers) {
+				try {
+					const text = current ?? event.text;
+					const delta = current ?? event.delta;
+					const result = await handler({ ...event, delta, text }, ctx);
+					if (typeof result?.text === "string") current = result.text;
+				} catch (error) {
+					this.reportFailure(ext, "message_display", error);
+				}
+			}
+		}
+		return current;
+	}
+
 	async emitMessageEnd(event) {
 		const ctx = this.createContext();
 		let current = event.message;
