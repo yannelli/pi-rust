@@ -54,6 +54,9 @@ pub enum ToolTaskInput {
     Model {
         assistant: EntryId,
         call_id: String,
+        /// A call to a tool its request did not offer: settles `tool_unavailable` without resolving the name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unoffered: Option<bool>,
     },
     Nested {
         parent: TaskId,
@@ -139,11 +142,13 @@ pub static NESTED_CALL_DOC: LazyLock<DocFamilyToken<NestedCallState, (), TaskSco
 });
 
 static TOOL_TASK: LazyLock<Task> = LazyLock::new(|| {
-    let definition = TaskDefinition::new("pi.tool", 2, |_| encode(&ToolTaskCheckpoint::Call))
-        .migrate(|input, checkpoint, _| {
-            // Version 1 had only model-issued calls.
+    let definition = TaskDefinition::new("pi.tool", 3, |_| encode(&ToolTaskCheckpoint::Call))
+        .migrate(|input, checkpoint, from_version| {
+            // Version 1 had only model-issued calls, without `kind`; version 3 added `unoffered`, absent in version 2.
             let mut input = input.clone();
-            if let Some(map) = input.as_object_mut() {
+            if from_version == 1
+                && let Some(map) = input.as_object_mut()
+            {
                 map.insert("kind", "model");
             }
             Ok((input, checkpoint.clone()))
@@ -161,6 +166,11 @@ pub fn tool_task() -> Task {
 
 pub(crate) fn decode_input(task: &TaskRecord) -> DurableResult<ToolTaskInput> {
     Ok(task.input.deserialize_into()?)
+}
+
+/// A model-issued call to a tool its request did not offer (spec section 8.3).
+pub(crate) fn is_unoffered(input: &ToolTaskInput) -> bool {
+    matches!(input, ToolTaskInput::Model { unoffered: Some(true), .. })
 }
 
 /// The called tool: among the tools offered to the model for a model-issued call, else among those tools call.
@@ -185,7 +195,7 @@ pub(crate) async fn read_call(
         ToolTaskInput::Nested { call, parent, parent_call_id, .. } => {
             ToolHookCall { call: call.clone(), parent: Some((*parent, parent_call_id.clone())) }
         }
-        ToolTaskInput::Model { assistant, call_id } => {
+        ToolTaskInput::Model { assistant, call_id, .. } => {
             let entry = runtime.typed_entry(&ASSISTANT_ENTRY, *assistant, context).await?;
             let model = entry.as_ref().and_then(|entry| entry.record.model.as_ref()).and_then(|model| model.first());
             let call = match model {

@@ -13,8 +13,8 @@ use super::result::{
 };
 use super::settle::{Ending, publish_progress, reject, settle, settle_from_slot, tool_for_limits};
 use super::{
-    BeforeToolDecision, ToolHookCall, ToolHooks, ToolTaskCheckpoint, ToolTaskInput, decode_input, json_equal, prepare,
-    read_call, resolve_tool, validate,
+    BeforeToolDecision, ToolHookCall, ToolHooks, ToolTaskCheckpoint, ToolTaskInput, decode_input, is_unoffered,
+    json_equal, prepare, read_call, resolve_tool, validate,
 };
 use crate::documents::encode;
 use crate::env::ShellOutputWindow;
@@ -40,7 +40,9 @@ pub(super) async fn call(task: TaskRecord, runtime: TaskRuntime, context: Contex
     if crate::harness::live::cut_off_too_often(&task, &runtime) {
         return end_cut_off(&task, &runtime, &input, &call, &context).await;
     }
-    let Some(tool) = resolve_tool(&runtime, &input, &call.call.name, &context).await? else {
+    let tool =
+        if is_unoffered(&input) { None } else { resolve_tool(&runtime, &input, &call.call.name, &context).await? };
+    let Some(tool) = tool else {
         let error = harness_error("tool_unavailable", &format!("Tool {} is not available", call.call.name));
         return reject(&runtime, &input, &call, None, error, &context).await;
     };
@@ -169,7 +171,9 @@ pub(super) async fn abort(task: TaskRecord, runtime: TaskRuntime, context: Conte
     let call = read_call(&runtime, &input, &context).await?;
     let name = &call.call.name;
     let executing = task.state.checkpoint().and_then(|c| c.get("phase")).and_then(|p| p.as_str()) == Some("execute");
+    // An unoffered call could not run in any case, and its result says so.
     let (code, message) = match (task.abort_reason, executing) {
+        _ if is_unoffered(&input) => ("tool_unavailable", format!("Tool {name} is not available")),
         (Some(AbortReason::Restart), true) => {
             ("interrupted", format!("Tool {name} was interrupted by a restart and may have partially run"))
         }

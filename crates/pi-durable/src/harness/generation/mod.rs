@@ -160,7 +160,10 @@ pub(crate) fn unanswered(reason: RunFailureReason, detail: Option<&str>) -> RunE
 
 static GENERATION_TASK: LazyLock<Task> = LazyLock::new(|| {
     let first = GenerationCheckpoint::Prepare { attempt: 1, compacted: None, overflow: None, threshold: false };
-    let definition = TaskDefinition::new("pi.generation", 1, move |_| encode(&first))
+    // Version 2 keeps unoffered calls in a sequential `pending`, flagged on their slots, which version 1 would start
+    // unflagged; so version 1 leaves version 2 blocked. A version 1 record has no such calls and is kept as it is.
+    let definition = TaskDefinition::new("pi.generation", 2, move |_| encode(&first))
+        .migrate(|input, checkpoint, _| Ok((input.clone(), checkpoint.clone())))
         .phase("prepare", prepare)
         .phase("request", classify::request)
         .phase("retry", retry)

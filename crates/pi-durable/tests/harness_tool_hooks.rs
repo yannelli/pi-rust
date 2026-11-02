@@ -8,6 +8,8 @@ mod nested;
 #[path = "harness_tool_hooks/slot.rs"]
 mod slot;
 mod support;
+#[path = "harness_tool_hooks/unoffered.rs"]
+mod unoffered;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};

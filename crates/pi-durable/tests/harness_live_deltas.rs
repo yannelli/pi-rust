@@ -347,7 +347,7 @@ async fn stores_a_complete_base_exactly_in_the_commits_where_nothing_runs() {
 }
 
 #[tokio::test]
-async fn starts_calls_the_request_did_not_offer_as_done() {
+async fn starts_calls_the_request_did_not_offer_as_flagged_tasks() {
     let setup = chat_setup(Default::default());
     add_tool(
         &setup,
@@ -359,20 +359,25 @@ async fn starts_calls_the_request_did_not_offer_as_done() {
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &setup).await;
     let commits = record_live_ops(&harness);
     root.submit(SubmissionDraft::input("go"), &ctx()).await.unwrap().wait(&ctx()).await.unwrap();
-    let entries = all_entries(&root).await;
-    let ghost = entries.iter().find(|entry| entry.kind == "pi.tool-result").unwrap().id;
     let commits = commits.lock().unwrap().clone();
     let handover = commits.iter().find(|ops| ops.iter().any(|op| op[0] == "s" && op[1][0] == "tools")).unwrap();
     let slots = handover.iter().find(|op| op[1] == json!(["tools"])).unwrap();
-    assert_eq!(slots[2][0], json!({ "callId": "g", "name": "ghost", "status": "done", "entry": ghost }));
+    // An unoffered call gets a task too, flagged on its slot.
+    let ghost = &slots[2][0];
+    assert!(ghost["taskId"].is_u64());
+    let task_id = ghost["taskId"].clone();
+    assert_eq!(
+        ghost,
+        &json!({ "callId": "g", "name": "ghost", "taskId": task_id, "status": "pending", "unoffered": true })
+    );
     assert_eq!((slots[2][1]["callId"].clone(), slots[2][1]["status"].clone()), (json!("b"), json!("pending")));
     assert!(slots[2][1]["taskId"].is_u64());
+    assert_eq!(slots[2][1].get("unoffered"), None);
     harness.close(&ctx()).await.unwrap();
 }
 
-// Not ported: the second half of "starts calls the request did not offer as done and marks a faulted tool's slot
-// done without an entry". Upstream faults the tool with a result that is not strict JSON; a Rust `Json` value is
-// always strict JSON, so the fault cleanup cannot be reached this way.
+// Not ported: the second half of "starts calls the request did not offer as flagged tasks and marks a faulted tool's
+// slot done without an entry": upstream faults the tool with non-strict JSON, which a Rust `Json` value cannot hold.
 
 #[tokio::test]
 async fn commits_the_tool_calling_answer_its_tool_tasks_the_generation_s_wait_and_the_tool_round_in_one_commit() {
