@@ -40,6 +40,7 @@ fn initialize_advertises_capabilities_and_terminal_auth() {
     );
     assert_eq!(capabilities["sessionCapabilities"], json!({"list": {}, "delete": {}}));
     assert!(response["authMethods"][0].get("_meta").is_none());
+    assert_eq!(response["_meta"], json!({"piAcp": {"exactMcpPreapproval": true}}));
     let zed: InitializeRequest =
         serde_json::from_value(json!({"protocolVersion": 7, "clientCapabilities": {"_meta": {"terminal-auth": true}}}))
             .unwrap();

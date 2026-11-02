@@ -14,6 +14,7 @@ mod offline_guard;
 mod binary;
 mod client;
 mod mcp_servers;
+mod permission_identity;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

@@ -116,7 +116,7 @@ Do this item only after the preceding ACP, provider, and TUI work is released on
 
 ## ACP and provider integration work
 
-- Paseo rejects exact MCP tool preapproval for generic ACP providers before it starts Pi. Its provider contract and ACP permission handler must match tools exactly. Pi's permission modes alone cannot resolve that host-side error.
+- Paseo rejects exact MCP tool preapproval for generic ACP providers before it starts Pi. Its provider contract and ACP permission handler must match tools exactly. Pi's permission modes alone cannot resolve that host-side error. Pi sends the exact MCP server and tool names in `_meta.piAcp.mcp` of each permission request and accepts `_meta.piAcp.clientMcpExposure: "direct"`; a host adapter that matches grants is still missing ([ACP mode](../../crates/pi-coding-agent/docs/acp.md#tool-approval)).
 - ACP `session/new` and `session/load` connect client-supplied stdio `mcpServers` for the session, with literal values that pi does not save. `http` and `sse` servers are rejected (`mcpCapabilities` is false), and a session reopened without `session/load` has no client servers ([ACP mode](../../crates/pi-coding-agent/docs/acp.md#mcp-servers-from-the-client)).
 - ACP has no standard model icon field. Fast catalog variants get a lightning-bolt label. Models with a fast mode get the **Speed** option ([Fast mode](../../crates/pi-coding-agent/docs/providers.md#fast-mode-pi-rust-extension)).
 

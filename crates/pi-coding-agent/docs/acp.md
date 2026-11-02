@@ -47,6 +47,7 @@ The Mode selector controls tool approval. It is independent of the Thinking sele
 - The modes control approval only. They do not isolate tools from the system. Auto trusts the read-only annotations of the tool authors, and read-only tools can read outside the project.
 - If each call needs a review, use Ask.
 - New connections start in Auto. pi does not save Bypass.
+- A permission request for an MCP server tool has `toolCall._meta.piAcp.mcp` with the server name and the server's own tool name, as `{"server": "...", "tool": "..."}`. The tool title is the pi tool name, which can differ. A call that another tool made, for example from `codemode`, has `_meta.piAcp.parentToolCallId`. Other tools, resource tools, and tools of other sources with the same name have no `mcp` field. The request contains no argument values in `_meta`. The `initialize` response has `_meta.piAcp.exactMcpPreapproval: true` when pi sends these fields and accepts `clientMcpExposure`.
 
 ## MCP servers from the client
 
@@ -55,6 +56,7 @@ The Mode selector controls tool approval. It is independent of the Thinking sele
 - pi does not save these servers or their values. It keeps no server stderr, writes no server messages to `mcp.log`, and names only the server in errors. A server can still return its own values in tool results.
 - pi rejects `http` and `sse` servers, because `mcpCapabilities.http` and `.sse` are false. It also rejects a list with a relative command, a NUL byte, a repeated env name, or two servers whose tool names would be the same. A rejected list starts nothing and leaves the open session as it was.
 - When a client server has the tool names of a server from `mcp.json` or from an extension, the client server is used for the session and `/mcp` shows a notice. This is a decision of pi; the protocol does not require it.
+- To give the model the client servers' tools directly, without `codemode`, send `"_meta": {"piAcp": {"clientMcpExposure": "direct"}}` in `session/new` or `session/load`. `"direct"` is the only value. pi rejects other values before it starts or closes anything. Servers from `mcp.json` keep their own exposure, and pi does not save this setting.
 - A session that pi reopens without `session/load`, for example for a prompt after the client closed it, has no client servers. Send `session/load` with the list again.
 
 Paseo 0.14 adds an HTTP `paseo` server by default. For a custom Pi ACP provider, set `providers.<provider-id>.paseoTools.enabled` to `false` and send only stdio servers. Pi rejects unsupported transports instead of dropping them.
