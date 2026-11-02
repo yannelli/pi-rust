@@ -5,7 +5,9 @@
 use std::sync::Arc;
 
 use pi_ai::{ContentBlock, Message, UserContent, UserMessage};
+use serde_json::{Value, json};
 
+use super::builtins::NotifyLevel;
 use super::builtins::mcp::set_servers_section;
 use super::{AgentSession, lock};
 use crate::app::{format_no_api_key_found_message, oauth_failed_message};
@@ -165,7 +167,15 @@ impl AgentSession {
             return Ok(PromptDisposition::Handled);
         };
         let text = text.as_str();
-        let expanded = if options.expand_prompt_templates { self.expand_input(text) } else { text.to_string() };
+        let expanded = if options.expand_prompt_templates {
+            let Some(expanded) = self.expand_input_with_extensions(text).await else {
+                preflight(PromptDisposition::Handled);
+                return Ok(PromptDisposition::Handled);
+            };
+            expanded
+        } else {
+            text.to_string()
+        };
         if self.is_streaming() {
             let Some(behavior) = options.streaming_behavior else {
                 anyhow::bail!(
@@ -276,6 +286,61 @@ impl AgentSession {
         }
     }
 
+    /// [`Self::expand_input`], then the pi-rust `prompt_expansion` handlers: `None` when one
+    /// blocked the prompt, else the expansion with the texts of `context` results appended.
+    pub(crate) async fn expand_input_with_extensions(&self, text: &str) -> Option<String> {
+        let expanded = self.expand_input(text);
+        let Some(runner) = self.extension_runner().filter(|runner| runner.has_handlers("prompt_expansion")) else {
+            return Some(expanded);
+        };
+        let Some(event) = self.prompt_expansion_event(text, &expanded) else { return Some(expanded) };
+        let result = runner.call_json("emitPromptExpansion", vec![event]).await.unwrap_or(Value::Null);
+        match result["action"].as_str() {
+            Some("block") => {
+                let reason = result["reason"].as_str().unwrap_or("An extension blocked the prompt");
+                self.notify(reason, NotifyLevel::Warning);
+                None
+            }
+            Some("context") => match result["text"].as_str() {
+                Some(extra) => Some(format!("{expanded}\n\n{extra}")),
+                None => Some(expanded),
+            },
+            _ => Some(expanded),
+        }
+    }
+
+    /// The `prompt_expansion` event of `/skill:name args` or `/template args` that expanded.
+    fn prompt_expansion_event(&self, text: &str, expanded: &str) -> Option<Value> {
+        let command = text.strip_prefix('/').filter(|_| expanded != text)?;
+        let services = self.services();
+        let loader = services.resources();
+        let resources = loader.resources();
+        let (kind, name, args, source) = match command.strip_prefix("skill:") {
+            Some(rest) => {
+                let (name, args) = rest.split_once(' ').map_or((rest, ""), |(name, args)| (name, args.trim()));
+                let skill = resources.skills.iter().find(|skill| skill.name == name)?;
+                ("skill", name, args, skill.file_path.clone())
+            }
+            None => {
+                let (name, args) = match command.find(char::is_whitespace) {
+                    Some(at) => (&command[..at], command[at..].trim_start()),
+                    None => (command, ""),
+                };
+                let template = resources.prompts.iter().find(|template| template.name == name)?;
+                ("prompt_template", name, args, template.file_path.clone())
+            }
+        };
+        Some(json!({
+            "type": "prompt_expansion",
+            "kind": kind,
+            "name": name,
+            "args": args,
+            "source": source.display().to_string(),
+            "prompt": text,
+            "text": expanded,
+        }))
+    }
+
     async fn ensure_auth(&self) -> anyhow::Result<()> {
         let model = self.model().ok_or_else(|| anyhow::anyhow!(super::compaction::no_model_selected_message()))?;
         let runtime = self.model_runtime();
@@ -340,7 +405,9 @@ impl AgentSession {
         let Some((text, images)) = self.run_input_handlers(text, images, source, streaming).await else {
             return Ok(PromptDisposition::Handled);
         };
-        let expanded = self.expand_input(&text);
+        let Some(expanded) = self.expand_input_with_extensions(&text).await else {
+            return Ok(PromptDisposition::Handled);
+        };
         self.queue_message(&expanded, images, behavior, source == "extension");
         Ok(PromptDisposition::Queued)
     }

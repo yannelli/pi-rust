@@ -168,8 +168,11 @@ fn before_tool_call_hook(weak: Weak<AgentSession>) -> BeforeToolCallFn {
                 let reach = session.tool(name).and_then(|tool| tool.reaches_tools(call.args));
                 manager.wait_for_tool_call(name, reach.as_ref(), &cancel).await;
             }
-            let result = session.extension_tool_call(&call).await;
-            if result.as_ref().is_some_and(|result| result.block) {
+            let (result, blocker) = session.extension_tool_call(&call).await;
+            if let Some(blocked) = result.as_ref().filter(|result| result.block) {
+                let reason = blocked.reason.as_deref();
+                let input = blocked.args.as_ref().unwrap_or(call.args);
+                session.emit_tool_call_blocked(&call, input, reason, "extension", blocker.as_deref());
                 return result;
             }
             let authorize = lock(&session.tool_authorizer).clone();
@@ -177,6 +180,9 @@ fn before_tool_call_hook(weak: Weak<AgentSession>) -> BeforeToolCallFn {
                 let args = result.as_ref().and_then(|result| result.args.as_ref()).unwrap_or(call.args);
                 let checked = pi_agent::BeforeToolCall { args, ..call };
                 if let Some(denied) = authorize(checked, cancel).await {
+                    if denied.block {
+                        session.emit_tool_call_blocked(&call, args, denied.reason.as_deref(), "permission", None);
+                    }
                     return Some(denied);
                 }
             }
