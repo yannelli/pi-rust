@@ -128,7 +128,26 @@ impl ExtensionRunner {
         if !self.has_handlers(&kind) {
             return Value::Null;
         }
-        self.call_json("emit", vec![event]).await.unwrap_or(Value::Null)
+        if kind != "notification" {
+            return self.call_json("emit", vec![event]).await.unwrap_or(Value::Null);
+        }
+        self.notifying.store(true, std::sync::atomic::Ordering::SeqCst);
+        let result = self.call_json("emit", vec![event]).await.unwrap_or(Value::Null);
+        self.notifying.store(false, std::sync::atomic::Ordering::SeqCst);
+        result
+    }
+
+    /// pi-rust `notification` for a notice from `source` (`extension` or `pi`); `extension` is
+    /// the path of the extension that sent it, when known.
+    pub(crate) fn emit_notification(&self, message: &str, level: &str, source: &str, extension: Option<&str>) {
+        if self.notifying.load(std::sync::atomic::Ordering::SeqCst) || !self.has_handlers("notification") {
+            return;
+        }
+        let mut event = json!({"type": "notification", "message": message, "level": level, "source": source});
+        if let Some(extension) = extension {
+            event["extension"] = json!(extension);
+        }
+        self.emit_detached(event);
     }
 
     /// Emit without waiting, for events upstream does not await.

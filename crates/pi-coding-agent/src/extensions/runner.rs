@@ -124,6 +124,8 @@ pub struct ExtensionRunner {
     stale: AtomicBool,
     /// Queue of `emit_detached` events, delivered one at a time in order.
     pub(crate) detached: OnceLock<mpsc::UnboundedSender<Value>>,
+    /// True while `notification` handlers run; their own notices emit no `notification`.
+    pub(crate) notifying: AtomicBool,
     weak: Weak<ExtensionRunner>,
 }
 
@@ -228,6 +230,7 @@ impl ExtensionRunner {
                 terminal_input: AtomicBool::new(false),
                 stale: AtomicBool::new(false),
                 detached: OnceLock::new(),
+                notifying: AtomicBool::new(false),
                 weak: weak.clone(),
             }
         });

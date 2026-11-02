@@ -104,6 +104,15 @@ export class Runner {
 		return createContext(this);
 	}
 
+	/** pi-rust: `ctx.switchSession()` of `session_start` queues the switch; it runs after the handlers. */
+	createStartContext() {
+		const ctx = this.createContext();
+		ctx.switchSession = async (sessionPath) => {
+			call("session.queueSwitch", 0, String(sessionPath));
+		};
+		return ctx;
+	}
+
 	createToolContext(toolCallId, signal) {
 		return createToolContext(this, toolCallId, signal);
 	}
@@ -140,7 +149,7 @@ export class Runner {
 	}
 
 	async emit(event) {
-		const ctx = this.createContext();
+		const ctx = event.type === "session_start" ? this.createStartContext() : this.createContext();
 		let result;
 		for (const { ext, handlers } of snapshot(this.extensions, event.type)) {
 			for (const handler of handlers) {
@@ -238,12 +247,12 @@ export class Runner {
 	async emitToolCall(event) {
 		const ctx = this.createContext();
 		let result;
-		for (const { handlers } of snapshot(this.extensions, "tool_call")) {
+		for (const { ext, handlers } of snapshot(this.extensions, "tool_call")) {
 			for (const handler of handlers) {
 				const handlerResult = await handler(event, ctx);
 				if (handlerResult) {
 					result = handlerResult;
-					if (result.block) return { block: true, reason: result.reason, input: event.input };
+					if (result.block) return { block: true, reason: result.reason, input: event.input, extensionPath: ext.path };
 				}
 			}
 		}
@@ -305,6 +314,24 @@ export class Runner {
 			}
 		}
 		return current;
+	}
+
+	/** pi-rust `prompt_expansion`: the first block wins; `context` texts join in handler order. */
+	async emitPromptExpansion(event) {
+		const ctx = this.createContext();
+		const contexts = [];
+		for (const { ext, handlers } of snapshot(this.extensions, "prompt_expansion")) {
+			for (const handler of handlers) {
+				try {
+					const result = await handler(event, ctx);
+					if (result?.action === "block") return { action: "block", reason: result.reason };
+					if (result?.action === "context" && typeof result.text === "string") contexts.push(result.text);
+				} catch (error) {
+					this.reportFailure(ext, "prompt_expansion", error);
+				}
+			}
+		}
+		return contexts.length > 0 ? { action: "context", text: contexts.join("\n\n") } : { action: "continue" };
 	}
 
 	async emitContext(messages) {

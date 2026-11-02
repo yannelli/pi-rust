@@ -252,3 +252,39 @@ async fn a_failing_new_session_setup_reports_the_extension_stack() {
     let folder = r.extension.parent().and_then(|dir| dir.file_name()).unwrap().to_string_lossy();
     assert!(fatal.contains(&*folder) && fatal.contains("ext.ts:"), "{fatal}");
 }
+
+/// pi-rust: `ctx.switchSession()` of `session_start` runs once the handlers finish.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_start_switch_runs_after_the_handlers_and_reports_the_cwd_change() {
+    let target = tempfile::tempdir().unwrap();
+    let other = target.path().join("other");
+    std::fs::create_dir_all(&other).unwrap();
+    let file = target.path().join("other.jsonl");
+    let header = json!({"type": "session", "version": 3, "id": "start-switch", "timestamp": "2025-01-01T00:00:00Z",
+        "cwd": other.display().to_string()});
+    std::fs::write(&file, format!("{header}\n")).unwrap();
+    let path = serde_json::to_string(&file.display().to_string()).unwrap();
+    let source = format!(
+        r#"export default function (pi) {{
+	pi.on("session_start", async (event, ctx) => {{
+		ctx.ui.notify(`start ${{event.reason}}`);
+		if (event.reason === "startup") ctx.ui.notify(`queued ${{await ctx.switchSession({path})}}`);
+	}});
+	pi.on("cwd_changed", (event, ctx) => ctx.ui.notify(`cwd ${{event.oldCwd}} -> ${{event.newCwd}}`));
+}}
+"#
+    );
+    let r = runtime(&source, Vec::new(), ExtensionMode::Tui).await;
+    assert_eq!(r.runtime.session().session_file().as_deref(), Some(file.as_path()));
+    eventually(|| r.ui.calls().len() >= 4).await;
+    let work = r._root.path().join("work");
+    assert_eq!(
+        r.ui.calls(),
+        vec![
+            "notify(info): start startup".to_string(),
+            "notify(info): queued undefined".into(),
+            "notify(info): start resume".into(),
+            format!("notify(info): cwd {} -> {}", work.display(), other.display()),
+        ]
+    );
+}

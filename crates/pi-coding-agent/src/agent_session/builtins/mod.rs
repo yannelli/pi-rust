@@ -92,6 +92,14 @@ impl AgentSession {
         if let Some(handler) = handler {
             handler(message, level);
         }
+        if let Some(runner) = self.extension_runner() {
+            let level = match level {
+                NotifyLevel::Info => "info",
+                NotifyLevel::Warning => "warning",
+                NotifyLevel::Error => "error",
+            };
+            runner.emit_notification(message, level, "pi", None);
+        }
     }
 
     /// Append a custom entry to the session (upstream `pi.appendEntry`), for extension state.

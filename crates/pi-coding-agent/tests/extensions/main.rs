@@ -8,6 +8,7 @@ mod examples;
 mod examples_more;
 mod exec;
 mod harness;
+mod hook_events;
 mod host;
 #[path = "../agent_session/http_mock.rs"]
 mod http_mock;

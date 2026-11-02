@@ -35,6 +35,10 @@ pub(crate) struct ExtensionState {
     pub(crate) outcome: Mutex<&'static str>,
     /// What the mode bound, kept for extensions loaded later (reload, replacement).
     bindings: Mutex<Option<ExtensionBindings>>,
+    /// Events the next bind emits after `session_start` (pi-rust `cwd_changed`).
+    after_start: Mutex<Vec<Value>>,
+    /// `Some` while `session_start` handlers run; holds the session a handler switches to.
+    start_switch: Mutex<Option<Option<PathBuf>>>,
 }
 
 impl Default for ExtensionState {
@@ -48,6 +52,8 @@ impl Default for ExtensionState {
             dispatched: Mutex::default(),
             outcome: Mutex::new("completed"),
             bindings: Mutex::default(),
+            after_start: Mutex::default(),
+            start_switch: Mutex::default(),
         }
     }
 }
@@ -137,10 +143,86 @@ impl AgentSession {
         self.extensions.bound.send_replace(false);
         let event = lock(&self.extensions.start_event).clone();
         let reason = if event["reason"] == "reload" { "reload" } else { "startup" };
+        let start_reason = event["reason"].as_str().unwrap_or("startup").to_string();
+        *lock(&self.extensions.start_switch) = Some(None);
         runner.emit(event).await;
+        let queued = lock(&self.extensions.start_switch).take().flatten();
+        if let Some(path) = queued
+            && self.run_start_switch(path).await
+        {
+            self.extensions.bound.send_replace(true);
+            return;
+        }
+        self.emit_instructions_loaded(&runner, &start_reason);
+        for event in std::mem::take(&mut *lock(&self.extensions.after_start)) {
+            runner.emit_detached(event);
+        }
         runner.report_unconnected_mcp();
         self.discover_extension_resources(&runner, reason).await;
         self.extensions.bound.send_replace(true);
+    }
+
+    /// An event the next bind emits right after `session_start`.
+    pub(crate) fn queue_after_session_start(&self, event: Value) {
+        lock(&self.extensions.after_start).push(event);
+    }
+
+    /// pi-rust `ctx.switchSession()` of `session_start` handlers: the last path queued wins.
+    pub(crate) fn queue_start_switch(&self, path: PathBuf) -> Result<(), String> {
+        match lock(&self.extensions.start_switch).as_mut() {
+            Some(queued) => {
+                *queued = Some(path);
+                Ok(())
+            }
+            None => Err("ctx.switchSession() of an event context works only during session_start".into()),
+        }
+    }
+
+    /// Switch to the session a `session_start` handler queued; true when the switch happened.
+    fn run_start_switch(&self, path: PathBuf) -> BoxFuture<'_, bool> {
+        async move {
+            let runtime = self.extension_bindings().and_then(|bindings| bindings.runtime);
+            let Some(runtime) = runtime.and_then(|runtime| runtime.upgrade()) else {
+                self.notify("ctx.switchSession(): this mode cannot switch sessions", super::NotifyLevel::Warning);
+                return false;
+            };
+            match runtime.switch_session(&path, None).await {
+                Ok(result) => !result.cancelled,
+                Err(error) => {
+                    self.notify(&format!("ctx.switchSession(): {error:#}"), super::NotifyLevel::Error);
+                    false
+                }
+            }
+        }
+        .boxed()
+    }
+
+    /// pi-rust `instructions_loaded`, one per context file of the system prompt.
+    fn emit_instructions_loaded(&self, runner: &ExtensionRunner, reason: &str) {
+        if !runner.has_handlers("instructions_loaded") {
+            return;
+        }
+        let events: Vec<Value> = {
+            let services = self.services();
+            let loader = services.resources();
+            let agent_dir = loader.options.agent_dir.clone();
+            let files = &loader.resources().context_files;
+            files
+                .iter()
+                .map(|file| {
+                    let scope = if file.path.starts_with(&agent_dir) { "user" } else { "project" };
+                    json!({
+                        "type": "instructions_loaded",
+                        "path": file.path.display().to_string(),
+                        "scope": scope,
+                        "reason": reason,
+                    })
+                })
+                .collect()
+        };
+        for event in events {
+            runner.emit_detached(event);
+        }
     }
 
     /// What the mode last bound with [`Self::bind_extensions`].
