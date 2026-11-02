@@ -267,8 +267,14 @@ async fn prepare(
         Err(error) => return immediate(error, false),
     };
     if let Some(before) = before {
-        let input =
-            BeforeToolCall { assistant_message: message, tool_call: call, args: &args, context, parent_tool_call_id };
+        let input = BeforeToolCall {
+            assistant_message: message,
+            tool_call: call,
+            tool,
+            args: &args,
+            context,
+            parent_tool_call_id,
+        };
         let decision = before(input, cancel.clone()).await;
         if cancel.is_cancelled() {
             return immediate("Operation aborted".into(), false);

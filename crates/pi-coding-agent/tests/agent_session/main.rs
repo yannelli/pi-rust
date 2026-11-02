@@ -13,6 +13,7 @@ mod login;
 mod mcp;
 mod mcp_discovery;
 mod mcp_fake;
+mod mcp_identity;
 mod offline;
 #[path = "../offline_guard/mod.rs"]
 mod offline_guard;
