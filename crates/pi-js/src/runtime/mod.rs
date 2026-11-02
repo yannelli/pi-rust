@@ -196,6 +196,7 @@ impl JsRuntime {
             files: Default::default(),
             http: Default::default(),
             source_files: Default::default(),
+            namespaces: Default::default(),
             interrupt: Arc::new(AtomicBool::new(false)),
             vm_deadline: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             alive: AtomicBool::new(false),

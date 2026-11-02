@@ -1,6 +1,6 @@
 //! Values and host functions shared between Rust and JavaScript.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::Arc;
 
@@ -121,6 +121,7 @@ impl std::fmt::Debug for HostFunction {
 #[derive(Clone, Debug, Default)]
 pub struct HostFunctions {
     functions: HashMap<String, HostFunction>,
+    removed: HashSet<String>,
 }
 
 impl HostFunctions {
@@ -129,12 +130,33 @@ impl HostFunctions {
     }
 
     pub fn insert(&mut self, name: impl Into<String>, function: HostFunction) -> &mut Self {
-        self.functions.insert(name.into(), function);
+        let name = name.into();
+        self.removed.remove(&name);
+        self.functions.insert(name, function);
         self
+    }
+
+    /// Remove `name`; [`Self::lookup`] then reports it as disposed until it is inserted again.
+    pub fn remove(&mut self, name: &str) -> Option<HostFunction> {
+        let removed = self.functions.remove(name)?;
+        self.removed.insert(name.to_string());
+        Some(removed)
     }
 
     pub fn get(&self, name: &str) -> Option<&HostFunction> {
         self.functions.get(name)
+    }
+
+    /// The function a JavaScript call of `name` runs, or the error that call throws.
+    pub fn lookup(&self, name: &str) -> Result<&HostFunction, JsError> {
+        if let Some(function) = self.functions.get(name) {
+            return Ok(function);
+        }
+        if self.removed.contains(name) {
+            return Err(JsError::new(format!("The host function {name} was unregistered"))
+                .with_code("ERR_PI_HOST_FUNCTION_DISPOSED"));
+        }
+        Err(JsError::new(format!("Unknown host function: {name}")).with_code("ERR_PI_HOST_FUNCTION"))
     }
 
     pub fn names(&self) -> Vec<String> {
