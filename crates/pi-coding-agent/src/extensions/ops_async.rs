@@ -14,7 +14,7 @@ use super::ops::{Args, error};
 use super::runner::ExtensionRunner;
 use super::{ops_ui, replace, shell};
 use crate::agent_session::auth::request_auth;
-use crate::agent_session::lock;
+use crate::agent_session::{ModelRuntime, lock};
 
 fn model(value: Value) -> Result<Model, JsError> {
     serde_json::from_value(value).map_err(|failure| error(format!("Invalid model: {failure}")))
@@ -83,7 +83,25 @@ async fn nested_call(runner: &Arc<ExtensionRunner>, args: &Args) -> Result<Value
 
 async fn model_op(runner: &Arc<ExtensionRunner>, name: &str, args: Args) -> Result<Value, JsError> {
     let session = runner.target_session(args.u64(0))?;
-    let runtime = session.model_runtime().clone();
+    if name == "stream" {
+        let model = model(args.json(1))?;
+        let context: pi_ai::Context = serde_json::from_value(args.json(2)).map_err(error)?;
+        let options_json = args.json(3);
+        let mut options = stream_options_from_json(&options_json);
+        options.cancel = runner.token(options_json["signal"].as_u64());
+        let stream = (session.stream_fn())(&model, &context, options);
+        return Ok(pump(runner, stream, args.u64(4)).await);
+    }
+    runtime_op(runner, session.model_runtime().clone(), name, args).await
+}
+
+/// Model requests that need only `runtime`, shared by `ctx.modelRegistry` and SDK runtimes.
+pub(super) async fn runtime_op(
+    runner: &Arc<ExtensionRunner>,
+    runtime: Arc<ModelRuntime>,
+    name: &str,
+    args: Args,
+) -> Result<Value, JsError> {
     Ok(match name {
         "refresh" => {
             let result = runtime.refresh_catalogs(true, None, false).await;
@@ -116,15 +134,6 @@ async fn model_op(runner: &Arc<ExtensionRunner>, name: &str, args: Args) -> Resu
                 }
                 _ => Value::Null,
             }
-        }
-        "stream" => {
-            let model = model(args.json(1))?;
-            let context: pi_ai::Context = serde_json::from_value(args.json(2)).map_err(error)?;
-            let options_json = args.json(3);
-            let mut options = stream_options_from_json(&options_json);
-            options.cancel = runner.token(options_json["signal"].as_u64());
-            let stream = (session.stream_fn())(&model, &context, options);
-            pump(runner, stream, args.u64(4)).await
         }
         "classify" => {
             let model = model(args.json(1))?;

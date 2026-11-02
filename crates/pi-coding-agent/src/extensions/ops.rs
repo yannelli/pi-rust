@@ -91,6 +91,7 @@ pub(crate) fn dispatch_sync(runner: &ExtensionRunner, args: Vec<HostValue>) -> R
         "storage" => super::ops_sdk_storage::sync(runner, &runner.sdk.storage, &op, &args),
         "resources" => super::ops_sdk_resources::sync(runner, name, &args),
         "ui" => ops_ui::sync(runner, name, &args),
+        "modelRuntime" => super::ops_sdk_model_runtime::sync(runner, name, &args),
         "ctx" | "session" | "models" | "tools" | "tool" | "action" | "prompt" | "boundary" => {
             ops_session::sync(runner, &op, &args)
         }
@@ -105,6 +106,9 @@ pub(crate) async fn dispatch_async(runner: Arc<ExtensionRunner>, args: Vec<HostV
     }
     if let Some(name) = op.strip_prefix("sdk.") {
         return super::ops_sdk::run(runner, name, args).await;
+    }
+    if let Some(name) = op.strip_prefix("modelRuntime.") {
+        return super::ops_sdk_model_runtime::run(runner, name, args).await;
     }
     ops_async::run(runner, &op, args.0).await
 }

@@ -30,7 +30,8 @@ function resourceOptions(loader) {
 export async function createAgentSession(options = {}) {
 	checkOptions(options, ["cwd", "agentDir", "model", "thinkingLevel", "tools", "excludeTools", "noTools",
 		"systemPrompt", "resourceLoader", "sessionManager", "settingsManager", "modelRuntime"], "createAgentSession");
-	if (options.modelRuntime && !options.modelRuntime._sdkHostRuntime) unsupported("createAgentSession.modelRuntime");
+	const modelRuntimeId = options.modelRuntime?._sdkRuntimeId;
+	if (options.modelRuntime && typeof modelRuntimeId !== "number") unsupported("createAgentSession.modelRuntime");
 	if (options.tools?.some((tool) => typeof tool !== "string")) unsupported("createAgentSession.tools.definition");
 	if (options.systemPrompt !== undefined && typeof options.systemPrompt !== "string") {
 		throw new TypeError("createAgentSession.systemPrompt must be a string");
@@ -47,7 +48,7 @@ export async function createAgentSession(options = {}) {
 	const result = await callAsync("sdk.create", {
 		cwd, agentDir, model: options.model, thinkingLevel: options.thinkingLevel,
 		tools: options.tools, excludeTools: options.excludeTools, noTools: options.noTools,
-		sessionManagerId: sessionManager._sdkId, settingsManagerId: settingsManager._sdkId, resources,
+		sessionManagerId: sessionManager._sdkId, settingsManagerId: settingsManager._sdkId, resources, modelRuntimeId,
 	});
 	const listeners = new Set();
 	let disposed = false;

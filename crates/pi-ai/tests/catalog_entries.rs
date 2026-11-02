@@ -98,3 +98,28 @@ fn opencode_deepseek_v4_1_flash_does_not_support_long_cache_retention() {
     let model = find("opencode", "deepseek-v4.1-flash", "chat");
     assert_eq!(model.compat.as_ref().unwrap()["supportsLongCacheRetention"], json!(false));
 }
+
+#[test]
+fn opencode_models_use_protocol_specific_endpoints() {
+    for provider in ["opencode", "opencode-go"] {
+        let models: Vec<_> = builtin_models().iter().filter(|model| model.provider == provider).collect();
+        assert!(!models.is_empty(), "{provider} has bundled models");
+        let base =
+            if provider == "opencode" { "https://opencode.ai/inference" } else { "https://opencode.ai/inference/go" };
+        for model in models {
+            let suffix = match model.api.as_str() {
+                "openai-completions" | "openai-responses" => "/openai/v1",
+                "anthropic-messages" => "/anthropic",
+                "google-generative-ai" => "/google/v1beta",
+                "typesafe-system-one" => "/systemone/v1",
+                api => panic!("unexpected OpenCode API {api} for {provider}/{}", model.id),
+            };
+            assert_eq!(model.base_url, format!("{base}{suffix}"), "{provider}/{}", model.id);
+        }
+    }
+    for id in ["qwen3.7-plus", "qwen3.8-flash", "qwen3.8-max"] {
+        let model = find("opencode-go", id, "chat");
+        assert_eq!(model.api, "anthropic-messages", "{id}");
+        assert_eq!(model.base_url, "https://opencode.ai/inference/go/anthropic", "{id}");
+    }
+}
