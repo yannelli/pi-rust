@@ -2,6 +2,27 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.0] - 2026-11-01
+
+### Breaking Changes
+
+- **acp:** identify executing MCP tools in permission requests ([0ae33ed](https://github.com/yannelli/pi-rust/commit/0ae33ed695862d413639be0b6ef448ec1fb899d7))
+
+### Added
+
+- **sdk:** expose ProjectTrustStore to extensions (#181) ([f0be171](https://github.com/yannelli/pi-rust/commit/f0be171fb3e2024add1f43c0a9319b7db6b3c8d2))
+- **sdk:** isolate model runtime instances ([77c5d48](https://github.com/yannelli/pi-rust/commit/77c5d486c9fd11a25532a6a2541b9c523f14d3f3))
+- **sdk:** retain native resource loader state ([9818141](https://github.com/yannelli/pi-rust/commit/9818141bfb20534b91a1d91aa1c2325a93b09d4b))
+- **sdk:** implement SettingsManager storage and state contracts ([a6369ef](https://github.com/yannelli/pi-rust/commit/a6369ef895ccac1049c24291d530b8943a84e80a))
+- **sdk:** implement SessionManager appendUsage ([cda3cd4](https://github.com/yannelli/pi-rust/commit/cda3cd4fd4c54a99bfaa2da86b622fb894ac39a4))
+
+### Fixed
+
+- **sdk:** preserve appendUsage payloads ([6fa8c77](https://github.com/yannelli/pi-rust/commit/6fa8c771c8bdf6430d7ac491611b8abd0fc25031))
+- **settings:** match Windows paths and directory errors ([73dcf5e](https://github.com/yannelli/pi-rust/commit/73dcf5e3c83e0d68bfe1d154a4b1a68a60b8f693))
+- **mcp:** close transports when setup is cancelled ([b959276](https://github.com/yannelli/pi-rust/commit/b9592760876eedd8d131998cfb364ad24eb764b9))
+- **cli:** register termination signals before print work ([a05efbc](https://github.com/yannelli/pi-rust/commit/a05efbcfa1282466813413711f96c430f9666416))
+
 ## [0.11.2] - 2026-11-01
 
 ### Fixed
