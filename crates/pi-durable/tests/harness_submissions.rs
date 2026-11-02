@@ -62,7 +62,7 @@ async fn places_idle_input_and_rejects_busy_input_with_when_busy_reject_without_
     let submission = root.submit(SubmissionDraft::input("hi"), &ctx()).await.unwrap();
     reached.notified().await;
     let record = submission.status(&ctx()).await.unwrap();
-    assert_eq!(record.status, SubmissionStatus::Placed);
+    assert_eq!((record.kind, record.status), (SubmissionType::Input, SubmissionStatus::Placed));
     let entry_id = record.entry.unwrap();
     let entry = root.commit(move |tx: Tx| async move { tx.entry(entry_id).await }, &ctx()).await.unwrap().unwrap();
     assert!(USER_ENTRY.is(Some(&entry)));
@@ -284,7 +284,7 @@ async fn settles_submissions_by_their_current_record_in_the_transaction() {
     for id in [queued, write] {
         let settlement = answer.clone();
         let error = root.commit(move |tx: Tx| async move { tx.settle_submission(id, settlement) }, &ctx()).await;
-        assert!(error.err().unwrap().to_string().contains("is not a placed input"));
+        assert!(error.err().unwrap().to_string().contains("is not a placed input or continue"));
     }
     let missing = SubmissionSettlement::Unanswered { reason: "x".into(), detail: None };
     let settle = move |tx: Tx| async move { tx.settle_submission(SubmissionId(999_999), missing) };

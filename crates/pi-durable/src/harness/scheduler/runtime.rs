@@ -588,11 +588,9 @@ impl ConversationHandle {
         Ok(with_abort_signal(&self.invocation.controller.signal(), context))
     }
 
-    /// Admit input; the returned submission's operations are bound to the invocation too.
+    /// Admit any submission, as `Conversation::submit` does, so a tool may continue a conversation it owns. The
+    /// returned submission's operations are bound to the invocation too.
     pub async fn submit(&self, draft: SubmissionDraft, context: &Context) -> DurableResult<Submission> {
-        if matches!(draft, SubmissionDraft::Write { .. }) {
-            return Err(DurableError::type_error("Task conversation handles submit input only"));
-        }
         let bound = self.bind(context)?;
         let submissions = self.scheduler.submissions.get().and_then(std::sync::Weak::upgrade);
         let submissions =

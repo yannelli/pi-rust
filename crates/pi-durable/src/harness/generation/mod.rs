@@ -213,6 +213,11 @@ async fn prepare(task: TaskRecord, runtime: TaskRuntime, context: Context) -> Du
         }
     }
     let view = runtime.context(conversation_id, &context, None).await?;
+    // Only a context ending in a user message or tool results owes an answer; system messages say nothing to answer.
+    let last = view.messages.iter().rfind(|message| !matches!(message, Message::System(_)));
+    if !matches!(last, Some(Message::User(_) | Message::ToolResult(_))) {
+        return fail_nothing_to_answer(&runtime, &context).await;
+    }
     let shown = replay_sections(&view.messages);
     let env = match runtime.env(&context).await {
         Ok(env) => env,
@@ -389,6 +394,17 @@ pub(crate) async fn fail_no_model(
         };
         end_failed_run(&tx, &runtime_, failure, end).await?;
         Ok(failed(&message, "no_model"))
+    };
+    runtime.commit(change, context).await
+}
+
+/// End the run without a request: its context has nothing the model would answer.
+async fn fail_nothing_to_answer(runtime: &TaskRuntime, context: &Context) -> DurableResult<()> {
+    let runtime_ = runtime.clone();
+    let change = move |tx: Tx, _| async move {
+        let failure = prepare_failure(&tx, &runtime_).await?;
+        end_failed_run(&tx, &runtime_, failure, unanswered(RunFailureReason::NothingToAnswer, None)).await?;
+        Ok(failed("The conversation has nothing to answer", "nothing_to_answer"))
     };
     runtime.commit(change, context).await
 }
