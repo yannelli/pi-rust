@@ -72,7 +72,7 @@ impl AcpAgent {
         if !super::settings::node_is_absolute(&params.cwd) {
             return Err(invalid_params(format!("cwd must be an absolute path: {}", params.cwd.display())));
         }
-        let mcp_servers = ClientMcpServers::from_request(&params.mcp_servers)?;
+        let mcp_servers = ClientMcpServers::from_request(&params.mcp_servers, params.meta.as_ref())?;
         let session_id = params.session_id.0.to_string();
         let cwd = params.cwd.display().to_string();
         self.close(&session_id).await;

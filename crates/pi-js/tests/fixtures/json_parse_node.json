@@ -1,0 +1,237 @@
+{
+	"node": "v22.23.3",
+	"cases": {
+		"bom": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected token '﻿', \\\"﻿{}\\\" is not valid JSON\""
+		},
+		"bomPath": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected token '﻿', \\\"﻿{\\\"/stable\\\"... is not valid JSON\""
+		},
+		"nbsp": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected token ' ', \\\" {}\\\" is not valid JSON\""
+		},
+		"cjk": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected token '中', \\\"中{}\\\" is not valid JSON\""
+		},
+		"emoji": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected token '\\ud83d', \\\"😀{}\\\" is not valid JSON\""
+		},
+		"longStart": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected token 'é', \\\"é         \\\"... is not valid JSON\""
+		},
+		"longMiddle": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected token 'é', ...\\\"          é         \\\"... is not valid JSON\""
+		},
+		"longEnd": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected token 'é', ...\\\"          é\\\" is not valid JSON\""
+		},
+		"objectKey": {
+			"error": "SyntaxError",
+			"message": "\"Expected ':' after property name in JSON at position 4 (line 1 column 5)\""
+		},
+		"objectValue": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected token 'é', \\\"{\\\"a\\\":é}\\\" is not valid JSON\""
+		},
+		"arrayComma": {
+			"error": "SyntaxError",
+			"message": "\"Expected ',' or ']' after array element in JSON at position 2 (line 1 column 3)\""
+		},
+		"trailing": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected non-whitespace character after JSON at position 2 (line 1 column 3)\""
+		},
+		"unicodeKeyThenComma": {
+			"error": "SyntaxError",
+			"message": "\"Expected double-quoted property name in JSON at position 9 (line 1 column 10)\""
+		},
+		"unicodeStringThenToken": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected token 'x', \\\"[\\\"中文\\\", x]\\\" is not valid JSON\""
+		},
+		"unicodeValueThenSpace": {
+			"error": "SyntaxError",
+			"message": "\"Expected ',' or '}' after property value in JSON at position 8 (line 1 column 9)\""
+		},
+		"unicodeStringTrailing": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected non-whitespace character after JSON at position 6 (line 1 column 7)\""
+		},
+		"escapeLatin1": {
+			"error": "SyntaxError",
+			"message": "\"Bad escaped character in JSON at position 2 (line 1 column 3)\""
+		},
+		"escapeOver255": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected token '中', \\\"\\\"\\\\中\\\"\\\" is not valid JSON\""
+		},
+		"escapeAtEnd": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected end of JSON input\""
+		},
+		"ascii": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected token 'x', \\\"x\\\" is not valid JSON\""
+		},
+		"shortLiteral": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected end of JSON input\""
+		},
+		"literalMismatch": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected token 'x', \\\"nulx\\\" is not valid JSON\""
+		},
+		"literalDigit": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected number in JSON at position 3 (line 1 column 4)\""
+		},
+		"literalQuote": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected string in JSON at position 2 (line 1 column 3)\""
+		},
+		"capital": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected token 'T', \\\"True\\\" is not valid JSON\""
+		},
+		"arrayTrailingComma": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected token ']', \\\"[1,]\\\" is not valid JSON\""
+		},
+		"objectLeadingComma": {
+			"error": "SyntaxError",
+			"message": "\"Expected property name or '}' in JSON at position 1 (line 1 column 2)\""
+		},
+		"objectNumberKey": {
+			"error": "SyntaxError",
+			"message": "\"Expected property name or '}' in JSON at position 1 (line 1 column 2)\""
+		},
+		"leadingZero": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected number in JSON at position 1 (line 1 column 2)\""
+		},
+		"minusOnly": {
+			"error": "SyntaxError",
+			"message": "\"No number after minus sign in JSON at position 1 (line 1 column 2)\""
+		},
+		"minusLetter": {
+			"error": "SyntaxError",
+			"message": "\"No number after minus sign in JSON at position 1 (line 1 column 2)\""
+		},
+		"fraction": {
+			"error": "SyntaxError",
+			"message": "\"Unterminated fractional number in JSON at position 2 (line 1 column 3)\""
+		},
+		"exponent": {
+			"error": "SyntaxError",
+			"message": "\"Exponent part is missing a number in JSON at position 3 (line 1 column 4)\""
+		},
+		"unterminated": {
+			"error": "SyntaxError",
+			"message": "\"Unterminated string in JSON at position 4 (line 1 column 5)\""
+		},
+		"badEscape": {
+			"error": "SyntaxError",
+			"message": "\"Bad escaped character in JSON at position 2 (line 1 column 3)\""
+		},
+		"badUnicodeEscape": {
+			"error": "SyntaxError",
+			"message": "\"Bad Unicode escape in JSON at position 5 (line 1 column 6)\""
+		},
+		"controlCharacter": {
+			"error": "SyntaxError",
+			"message": "\"Bad control character in string literal in JSON at position 2 (line 1 column 3)\""
+		},
+		"colonValue": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected token ':', \\\":\\\" is not valid JSON\""
+		},
+		"undefined": {
+			"error": "SyntaxError",
+			"message": "\"\\\"undefined\\\" is not valid JSON\""
+		},
+		"nan": {
+			"error": "SyntaxError",
+			"message": "\"\\\"NaN\\\" is not valid JSON\""
+		},
+		"infinity": {
+			"error": "SyntaxError",
+			"message": "\"\\\"Infinity\\\" is not valid JSON\""
+		},
+		"objectObject": {
+			"error": "SyntaxError",
+			"message": "\"\\\"[object Object]\\\" is not valid JSON\""
+		},
+		"empty": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected end of JSON input\""
+		},
+		"whitespace": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected end of JSON input\""
+		},
+		"openBrace": {
+			"error": "SyntaxError",
+			"message": "\"Expected property name or '}' in JSON at position 1 (line 1 column 2)\""
+		},
+		"openArray": {
+			"error": "SyntaxError",
+			"message": "\"Expected ',' or ']' after array element in JSON at position 2 (line 1 column 3)\""
+		},
+		"newlineGrammar": {
+			"error": "SyntaxError",
+			"message": "\"Expected ':' after property name in JSON at position 14 (line 3 column 5)\""
+		},
+		"carriageReturns": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected token 'é', \\\"[\\r1\\r\\n,é]\\\" is not valid JSON\""
+		},
+		"unicodeEarlierLine": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected token 'x', \\\"[\\\"é😀\\\",\\n x]\\\" is not valid JSON\""
+		},
+		"longGrammar": {
+			"error": "SyntaxError",
+			"message": "\"Expected ':' after property name in JSON at position 34 (line 1 column 35)\""
+		},
+		"longTrailing": {
+			"error": "SyntaxError",
+			"message": "\"Unexpected non-whitespace character after JSON at position 44 (line 1 column 45)\""
+		},
+		"objectArgument": {
+			"error": "SyntaxError",
+			"message": "\"\\\"[object Object]\\\" is not valid JSON\""
+		},
+		"reviver": {
+			"value": "{\"a\":[2,4,{\"b\":null}],\"é\":6}"
+		},
+		"coercedOnce": {
+			"value": "[1]",
+			"coercions": 1
+		},
+		"reviverFake": {
+			"same": true,
+			"message": "\"Unexpected token '\\\\ufeff' in JSON\""
+		},
+		"reviverFakeQuickJs": {
+			"same": true,
+			"message": "\"unexpected token: 'x'\""
+		},
+		"coercerFake": {
+			"same": true,
+			"message": "\"Unexpected end of JSON input\""
+		},
+		"function": {
+			"name": "parse",
+			"length": 2,
+			"constructs": "TypeError"
+		}
+	}
+}

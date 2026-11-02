@@ -4,11 +4,13 @@
 
 use std::sync::Arc;
 
+use pi_agent::SharedTool;
 use pi_mcp::manager::describe_state;
 use pi_mcp::runtime::{McpSignInPrompt, ServerState};
-use pi_mcp::{McpExposure, McpServerStatus, McpSubscription, NotifyLevel};
+use pi_mcp::{McpAgentTool, McpExposure, McpServerStatus, McpSubscription, NotifyLevel};
 use tokio_util::sync::CancellationToken;
 
+use super::same_tool;
 use crate::agent_session::{AgentSession, lock};
 
 const MCP_USAGE: &str = "Usage: /mcp, /mcp login [server], /mcp logout [server], /mcp reconnect [server]";
@@ -25,6 +27,18 @@ impl AgentSession {
     /// Servers for a manager view: the ones that need the user first, then by name.
     pub fn mcp_statuses(&self) -> Vec<McpServerStatus> {
         self.mcp_manager().map(|manager| manager.statuses_by_attention()).unwrap_or_default()
+    }
+
+    /// The server and the server's own tool name behind `tool` when it is one of the MCP manager's
+    /// server tools, also behind a description wrapper. Resource and other tools get `None`.
+    pub fn mcp_tool_identity(&self, tool: &SharedTool) -> Option<(String, String)> {
+        let tool = pi_agent::described::undescribed(tool);
+        self.mcp_manager()?.tools().iter().find_map(|entry| match entry {
+            McpAgentTool::Tool(mcp) if same_tool(&entry.agent_tool(), tool) => {
+                Some((mcp.server().to_string(), mcp.mcp_name().to_string()))
+            }
+            _ => None,
+        })
     }
 
     /// Config problems found when the session started.

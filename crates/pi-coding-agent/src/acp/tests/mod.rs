@@ -3,6 +3,7 @@
 #![allow(clippy::field_reassign_with_default)]
 
 mod agent;
+mod client_exposure;
 mod config;
 mod events;
 mod listing;
