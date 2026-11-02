@@ -4,7 +4,11 @@ Last reviewed 2026-10-27 against upstream `main` at `531340f10` (2026-10-27). Th
 
 ## Upstream commits not yet ported
 
-None up to `531340f10`. Every commit after the synced commit is ported or listed in `allowlist.json` with a reason.
+The ledger was reviewed through `35dfa7573` (2026-10-30) against pi-rust `2f1da357` on 2026-11-02. Of 163 upstream package commits after `531340f10`, 13 are ported, 89 have an explicit allowlist reason, and 61 remain open. The synced commit stays at `531340f10`.
+
+The open set includes 58 runtime or behavior-test commits, plus CLI help text (`2a46c4208`) and two documentation commits tied to unported behavior (`bec1e0f5a`, `3ac64a074`). It includes the three draft-tracker regression cases in `a92283056`; existing Rust tests do not cover them all. The first open commit is the Bedrock fix `842c73170`.
+
+The allowlist separates upstream-only design notes, docs and examples from catalog state already present in Rust. Closing a design note does not close its related runtime commit. The conditional upstream Node oracle remains unrun, and the OpenCode endpoint tests in PR #191 are pending; neither is a full parity claim.
 
 ## Deferred work
 

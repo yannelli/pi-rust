@@ -3,6 +3,358 @@
     {
       "item": "bb65e3e49",
       "reason": "Only changes which TypeScript module durable code mode imports toCodemodeIdentifier from, so loading it skips the WASM QuickJS runtime. pi-durable calls pi_codemode::to_codemode_identifier from a linked crate and loads no runtime for it."
+    },
+    {
+      "item": "973b74c55",
+      "reason": "Already ported: main 2f1da357 crates/pi-durable/tests/sqlite_cloudflare.rs:279-298 puts the probe row at b/x outside the bulk range, added in 43e04216 (whose message names only upstream 8025c414d). Upstream change is workerd test-only."
+    },
+    {
+      "item": "177e2ad7e",
+      "reason": "Catalog generator URLs, an opencode.ts comment, and test URL expectations only. Rust classify/system_one.rs reads model.base_url and hardcodes no OpenCode path. models.json from d49671db already puts all 111 opencode and opencode-go models on the protocol-specific endpoints. Catalog state present, not a code port; draft PR191 adds tests only."
+    },
+    {
+      "item": "db14038bd",
+      "reason": "Accepted difference: upstream bounds Node SQLite prepared statements with a 256-entry LRU. pi-durable already uses rusqlite prepare_cached with a 512-entry LRU (crates/pi-durable/src/storage/sqlite/connection.rs:30,73,160 at main 2f1da357); there is no unbounded Rust cache."
+    },
+    {
+      "item": "81d6759fc",
+      "reason": "Catalog generator only plus a test model swap. models.json from d49671db omits supportsAdditionalTools for openai gpt-5.4* and gpt-5.5* and keeps it for gpt-5.6-sol; Rust additional_tools tests use synthetic compat, so the swap has no counterpart. Catalog state present, not a code port."
+    },
+    {
+      "item": "59ca40cf5",
+      "reason": "User doc only (llama.cpp install via llama.app). pi-rust ships no llama.cpp setup guide at main 2f1da357; no product string changed upstream."
+    },
+    {
+      "item": "85c2ee3e7",
+      "reason": "Docs and example only: docs/extensions.md and examples/extensions/reload-runtime.ts, neither shipped by pi-rust at main 2f1da357. The fixed example uses existing APIs (agent_settled in agent_session/events.rs, expandPromptTemplates in extensions/js/sdk_session.js); no runtime change upstream."
+    },
+    {
+      "item": "44f6851b7",
+      "reason": "Catalog generator only (generate-models.ts, openrouter-catalog.ts) plus a test deletion. pi-rust has no generator; xtask models flattens upstream data. models.json regenerated in d49671db (generatedAt 2026-10-31T05:41Z) sets anthropic-messages and compat.forceAdaptiveThinking on all four ~anthropic/*-latest aliases, asserted in openai_completions/tests_cache.rs:180-184. Catalog state present, not a code port."
+    },
+    {
+      "item": "e509d7edc",
+      "reason": "Upstream installer docs (pi.dev install.ps1 tab). pi-rust documents its own installer in README.md:28 and crates/pi-coding-agent/docs/install.md at main 2f1da357."
+    },
+    {
+      "item": "068e972c7",
+      "reason": "Deletes a TypeScript test that copied the catalog generator rule. pi-rust has no equivalent test at main 2f1da357 (no generator-rule or EXPECTED_CURRENT_ADAPTIVE test); nothing to remove."
+    },
+    {
+      "item": "bdb68f750",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: Chord v2 and its docs live upstream; slice 6b D1 revised. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "7dff3effa",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 6b D2, Durable's records as declared tables. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "cc12dad23",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 6b D3, one id counter per store. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "a9181321a",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 6b D4, the store has Durable's Storage semantics. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "4ba356228",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: mark Store errors superseded in part. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "66330961b",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 6b D5; Harness.open in the examples. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "cf4920c82",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 6b D6, persisted jobs restart as Durable's tasks. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "97622a8f1",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 6b D7, job.abort as Durable's abortTask. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "47dba56f9",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 6b D8, deferred run state per change. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "e4c58271b",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 6b D9, self.follow; spec decided. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "bb6ae4b8e",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: self.follow in design and slices. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "c3d8ce44d",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 8 is registries and host.root; the harness object is p3's. Does not close related open code commit 6eb99ad65."
+    },
+    {
+      "item": "2eb6a8d15",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 6b R1, retirement per record by history. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "84576c70c",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 6b R2, no host kind in store names. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "74bbffadf",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 6b owner names and claims, no pi.durable. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "8c38be894",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 6b R3, a seal is a clean stop for persisted runs. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "a2c5657c8",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 6b R4, a follow source's end. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "7f3cfb060",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 6b spec revised after the first spec review. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "b2fcfee08",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 6b ready to build; claims per table and namespace. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "ad702637f",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 8 spec draft. Does not close related open code commit 6eb99ad65."
+    },
+    {
+      "item": "1e1716e69",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 8 D1, registries served by their provider. Does not close related open code commit 6eb99ad65."
+    },
+    {
+      "item": "9cef0db2d",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 8 registry failures. Does not close related open code commit 6eb99ad65."
+    },
+    {
+      "item": "07a76f1ef",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 8 D2, D3; spec decided. Does not close related open code commit 6eb99ad65."
+    },
+    {
+      "item": "cf9042b48",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 8 S1, a Session close fails Durable's observers. Does not close related open code commit 6eb99ad65."
+    },
+    {
+      "item": "df9275d43",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 8 S2, registry readers of an older version. Does not close related open code commit 6eb99ad65."
+    },
+    {
+      "item": "b0eb8ace1",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 6b entry_heads table. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "677e8067b",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 6b revision part and examples as built. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "376ccf6e8",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 8 revised: self.registry is a dependency; S1-S3; review gaps. Does not close related open code commit 6eb99ad65."
+    },
+    {
+      "item": "5f75cd77f",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 8 S3, self.registry is a dependency. Does not close related open code commit 6eb99ad65."
+    },
+    {
+      "item": "02a2b2532",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 8 accepts adapters guarded; example shape. Does not close related open code commit 6eb99ad65."
+    },
+    {
+      "item": "eb9d44346",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 8 review 2 fixes; design §17 and slices folded. Does not close related open code commit 6eb99ad65."
+    },
+    {
+      "item": "82a0d646e",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 8 review 2 leftovers; design §24 harness example. Does not close related open code commit 6eb99ad65."
+    },
+    {
+      "item": "568f6c47e",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 8 ready to build. Does not close related open code commit 6eb99ad65."
+    },
+    {
+      "item": "dc35ae2d9",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 8: ref.state is a native source too. Does not close related open code commit 6eb99ad65."
+    },
+    {
+      "item": "9ae3d8814",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: design §6 seal fence: staged job changes adopted. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "cc41246b9",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: design audit of slices 1-6a, decisions 6a and 7a. Does not close related open code commit 391e83fb1."
+    },
+    {
+      "item": "97553d10f",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: design text after the audit of slices 1-6a. Does not close related open code commit 391e83fb1."
+    },
+    {
+      "item": "ec2c8ed31",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 6b reopen and commit numbers accepted. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "33385f957",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: attribution of the StoreStorage.close rule. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "4e5cd1a97",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 6b resume watch cost accepted. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "9017ce081",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 6b built. Does not close related open code commit 14b4c56e5."
+    },
+    {
+      "item": "e613c7487",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: design §3 placement: a parent link that is down waits. Does not close related open code commit 93029a0f1."
+    },
+    {
+      "item": "6975eb18a",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: design §3 route context, §7 retry of a refused hold. Does not close related open code commit 93029a0f1."
+    },
+    {
+      "item": "a87b742ff",
+      "reason": "Doc comment in env/daemon windows.rs and env/docs/protocol.md only. pi-env-daemon already sets JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK (crates/pi-env-daemon/src/sys/windows.rs:454-455 at main 2f1da357); pi-rust ships no protocol.md copy."
+    },
+    {
+      "item": "1ce44bede",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 8 S2 and S3 wording as refined. Does not close related open code commit 6eb99ad65."
+    },
+    {
+      "item": "790a98b9a",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: design §17 compose failure and helper names as built. Does not close related open code commit 6eb99ad65."
+    },
+    {
+      "item": "edab3efa8",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 8: only Chord watchables are followed as contributions. Does not close related open code commit 6eb99ad65."
+    },
+    {
+      "item": "556860a38",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: no client providers for now. Does not close related open code commit 93029a0f1."
+    },
+    {
+      "item": "e65b3b88c",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: dependency model proposal for slice 7 and its explainer (Parked Until Resolved). Does not close related open code commit 339847eb1."
+    },
+    {
+      "item": "67c63c0f7",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: dependency model: the dependency check applies R18 after live, not a rule of its own. Does not close related open code commit 339847eb1."
+    },
+    {
+      "item": "1b760044e",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: note: every object may contribute (for later). Does not close related open code commit 339847eb1."
+    },
+    {
+      "item": "13dee7552",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: every remote type declares its placement. Does not close related open code commit 5ec241882."
+    },
+    {
+      "item": "0ddc95310",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: dependency model: placement required on remote types. Does not close related open code commit 5ec241882."
+    },
+    {
+      "item": "599127ea3",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: decision: hostAddress instead of placement. Does not close related open code commit 5ec241882."
+    },
+    {
+      "item": "943f30c90",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: design: hostAddress instead of placement. Does not close related open code commit 5ec241882."
+    },
+    {
+      "item": "d0687bce8",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: only hosts with an address serve remote types; holds always carry their address. Does not close related open code commit 5ec241882."
+    },
+    {
+      "item": "373fbcc70",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: dependency model: hostAddress. Does not close related open code commit 5ec241882."
+    },
+    {
+      "item": "aee933269",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: dependency model: hostAddress wording. Does not close related open code commit 5ec241882."
+    },
+    {
+      "item": "a54f250fb",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: decision: getters wait through waiting until their readyTimeout. Does not close related open code commit 339847eb1."
+    },
+    {
+      "item": "249f24bfc",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: getters decision: reviewer votes. Does not close related open code commit 339847eb1."
+    },
+    {
+      "item": "a5609aae8",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: decision: no cycle probe; parked_long diagnostic and authoring rules. Does not close related open code commit 339847eb1."
+    },
+    {
+      "item": "39b16b228",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: the dependency model is decided. Does not close related open code commit 339847eb1."
+    },
+    {
+      "item": "babe30a7e",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 7a spec: the dependency model; slice 7 split into 7a and 7b. Does not close related open code commit 339847eb1."
+    },
+    {
+      "item": "972d7017a",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 7b brief: reload, decided and open points. Does not close related open code commit 4b535d57e."
+    },
+    {
+      "item": "adfa8f382",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 7b brief: plugin layout, building and loading, assets, HTTP, the app kit, measurements. Does not close related open code commit 4b535d57e."
+    },
+    {
+      "item": "601461e20",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: decision: plugin dependencies bundled, external by opt-in. Does not close related open code commit 4b535d57e."
+    },
+    {
+      "item": "b857fbd8a",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 7b brief: plugin dependencies. Does not close related open code commit 4b535d57e."
+    },
+    {
+      "item": "ba7bdb9af",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice order: 7b, 7c, 10, 11, telemetry last. No code commit through 35dfa7573."
+    },
+    {
+      "item": "ec7852988",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 7b decisions as recommended. Does not close related open code commit 4b535d57e."
+    },
+    {
+      "item": "0c3675e64",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 7b spec: reload in the kernel. Does not close related open code commit 4b535d57e."
+    },
+    {
+      "item": "1a09925d3",
+      "reason": "Upstream CHANGELOG.md entry only. pi-rust CHANGELOG.md is generated by its release workflow and never edited by hand (AGENTS.md)."
+    },
+    {
+      "item": "18a155e2f",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 7c spec (plugins), per plugin at startup and reload. Does not close related open code commit a14cdf90f."
+    },
+    {
+      "item": "318d9add6",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: one failed list in load and reload reports. Does not close related open code commit a14cdf90f."
+    },
+    {
+      "item": "26e05e64f",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: reload's failed option for plugins kept before staging. Does not close related open code commit a14cdf90f."
+    },
+    {
+      "item": "3bbb06aad",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: 7c closure rule kept as is; review wording. Does not close related open code commit a14cdf90f."
+    },
+    {
+      "item": "b7e824952",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: 7c build: abort after commit names what it applied, per-plugin wording, examples. Does not close related open code commit a14cdf90f."
+    },
+    {
+      "item": "f8497996f",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 10 spec draft, HTTP points D1-D8. No code commit through 35dfa7573."
+    },
+    {
+      "item": "9e4868a60",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 10 points D9-D12, RouteHandle.retry, design §23 folded. No code commit through 35dfa7573."
+    },
+    {
+      "item": "918c6ffc2",
+      "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 10 spec review folded (R1-R6), no automatic worker restarts, app kit malleable by plugins. No code commit through 35dfa7573."
     }
   ],
   "cliFlags": [
