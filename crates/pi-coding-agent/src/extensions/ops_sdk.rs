@@ -14,6 +14,8 @@ mod child;
 pub(crate) struct ChildSession {
     pub session: Arc<AgentSession>,
     pub manager_id: u64,
+    /// The child host of the `DefaultResourceLoader` extensions the session bound.
+    pub extensions: Option<super::ops_sdk_resources::Hosted>,
 }
 
 #[derive(Default)]
@@ -28,7 +30,8 @@ impl SdkState {
         for (_, subscription) in lock(&self.subscriptions).drain() {
             subscription.stop(None);
         }
-        for (_, child) in lock(&self.children).drain() {
+        let children: Vec<_> = lock(&self.children).drain().map(|(_, child)| child).collect();
+        for child in children {
             child.session.dispose();
             lock(&self.storage).detach_child(child.manager_id, &child.session);
         }

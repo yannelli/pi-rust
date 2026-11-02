@@ -72,8 +72,9 @@ impl Default for ExtensionBindings {
 
 pub(crate) type DataFn = Arc<dyn Fn(&str) + Send + Sync>;
 
-/// An API implementation a runner replaced, and the provider that owns the replacement.
-pub(crate) type ReplacedApi = (Option<Arc<dyn ApiProvider>>, Option<String>);
+/// An API implementation a runner replaced, and the provider that owns the replacement: its SDK
+/// factory group (0 for the runner's own extensions) and name.
+pub(crate) type ReplacedApi = (Option<Arc<dyn ApiProvider>>, Option<(u64, String)>);
 
 /// One loaded set of extensions. Always held in an `Arc`.
 pub struct ExtensionRunner {
@@ -91,8 +92,10 @@ pub struct ExtensionRunner {
     session: RwLock<Weak<AgentSession>>,
     pub(crate) targets: Mutex<HashMap<u64, Weak<AgentSession>>>,
     pub(crate) sdk: super::ops_sdk::SdkState,
-    pub(crate) model_runtimes: super::ops_sdk_model_runtime::ModelRuntimes,
     pub(crate) resources: Mutex<super::ops_sdk_resources::ResourcesState>,
+    /// Set for the child host of an SDK `DefaultResourceLoader`.
+    pub(crate) parent: OnceLock<super::ops_sdk_resources::ParentLink>,
+    pub(crate) model_runtimes: super::ops_sdk_model_runtime::ModelRuntimes,
     bindings: RwLock<ExtensionBindings>,
     ids: AtomicU64,
     pub(crate) signals: Mutex<HashMap<u64, CancellationToken>>,
@@ -103,6 +106,8 @@ pub struct ExtensionRunner {
     pub(crate) nested: Mutex<HashMap<String, ToolContext>>,
     pub(crate) mcp: McpServerRegistry,
     model_runtime: Arc<ModelRuntime>,
+    /// The runtime of the session an SDK child host serves, set before it binds models.
+    selected_runtime: OnceLock<Arc<ModelRuntime>>,
     /// Providers this runner registered, with the extension that registered each.
     pub(crate) providers: Mutex<Vec<(String, String)>>,
     /// APIs this runner replaced: the replaced implementation and the owning provider.
@@ -198,8 +203,9 @@ impl ExtensionRunner {
                 session: RwLock::new(Weak::new()),
                 targets: Mutex::default(),
                 sdk: Default::default(),
-                model_runtimes: Default::default(),
                 resources: Mutex::default(),
+                parent: OnceLock::new(),
+                model_runtimes: Default::default(),
                 bindings: RwLock::default(),
                 ids: AtomicU64::new(1),
                 signals: Mutex::default(),
@@ -210,6 +216,7 @@ impl ExtensionRunner {
                 nested: Mutex::default(),
                 mcp: McpServerRegistry::new(),
                 model_runtime,
+                selected_runtime: OnceLock::new(),
                 providers: Mutex::default(),
                 apis: Mutex::default(),
                 logins: Mutex::default(),
@@ -238,7 +245,12 @@ impl ExtensionRunner {
 
     /// The model runtime providers and virtual models register with.
     pub fn model_runtime(&self) -> &Arc<ModelRuntime> {
-        &self.model_runtime
+        self.selected_runtime.get().unwrap_or(&self.model_runtime)
+    }
+
+    /// Use `runtime` from now on; `false` when a runtime was already selected.
+    pub(crate) fn select_model_runtime(&self, runtime: Arc<ModelRuntime>) -> bool {
+        self.selected_runtime.set(runtime).is_ok()
     }
 
     pub(crate) fn this(&self) -> Arc<Self> {
@@ -294,6 +306,15 @@ impl ExtensionRunner {
     pub(crate) async fn call_json(&self, method: &str, args: Vec<Value>) -> Result<Value, JsError> {
         let args = args.into_iter().map(HostValue::Json).collect();
         Ok(self.call(method, args).await?.into_json())
+    }
+
+    /// Call a provider or virtual model callback of SDK factory group `group` (0: this runner's own).
+    pub(crate) async fn call_model(&self, group: u64, method: &str, args: Vec<Value>) -> Result<Value, JsError> {
+        if group == 0 {
+            return self.call_json(method, args).await;
+        }
+        let scoped = [json!(group), json!(method)].into_iter().chain(args).collect();
+        self.call_json("groupCallback", scoped).await
     }
 
     /// Load extension files in order. Failures are kept as [`Self::load_errors`].
@@ -427,6 +448,7 @@ impl ExtensionRunner {
     /// Stop the JavaScript runtime and restore the APIs it replaced. Pending calls fail.
     pub fn shutdown(&self) {
         self.sdk.shutdown();
+        super::ops_sdk_resources::shutdown(self);
         self.restore_apis();
         for (_, watcher) in lock(&self.watchers).drain() {
             watcher.cancel();

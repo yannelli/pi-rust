@@ -90,6 +90,7 @@ pub(crate) fn dispatch_sync(runner: &ExtensionRunner, args: Vec<HostValue>) -> R
         "sdk" => super::ops_sdk::sync(runner, name, &args),
         "storage" => super::ops_sdk_storage::sync(runner, &runner.sdk.storage, &op, &args),
         "resources" => super::ops_sdk_resources::sync(runner, name, &args),
+        "inline" => super::ops_sdk_resources::child_sync(runner, name, &args),
         "ui" => ops_ui::sync(runner, name, &args),
         "modelRuntime" => super::ops_sdk_model_runtime::sync(runner, name, &args),
         "ctx" | "session" | "models" | "tools" | "tool" | "action" | "prompt" | "boundary" => {
@@ -101,8 +102,8 @@ pub(crate) fn dispatch_sync(runner: &ExtensionRunner, args: Vec<HostValue>) -> R
 
 pub(crate) async fn dispatch_async(runner: Arc<ExtensionRunner>, args: Vec<HostValue>) -> Result<HostValue, JsError> {
     let (op, args) = split(args)?;
-    if op == "resources.reload" {
-        return super::ops_sdk_resources::reload(runner, args).await;
+    if let Some(name) = op.strip_prefix("resources.") {
+        return super::ops_sdk_resources::run(runner, name, args).await;
     }
     if let Some(name) = op.strip_prefix("sdk.") {
         return super::ops_sdk::run(runner, name, args).await;

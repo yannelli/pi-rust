@@ -1,5 +1,5 @@
-//! Theme color mode and validation (upstream `resource-loader-theme.test.ts`), packages, `~`, refused options,
-//! and prompt overrides that reenter `_sdkOptions()`.
+//! Theme color mode and validation (upstream `resource-loader-theme.test.ts`), packages, `~`, refused and
+//! accepted options, and prompt overrides that reenter `_sdkOptions()`.
 
 use super::*;
 
@@ -55,11 +55,11 @@ const LIMITS: &str = r#"
     result.packageOptions = await fail(() => loader._sdkOptions());
     const make = (options) => new DefaultResourceLoader({ cwd: ctx.cwd, agentDir, ...options });
     result.tilde = (({ cwd, agentDir }) => ({ cwd, agentDir }))(make({ cwd: '~/proj', agentDir: '~/agent' }));
+    const adding = make({ noExtensions: true, extensionsOverride: (base) => ({ ...base, extensions: [{ path: 'x' }] }) });
     result.blocked = [
-      await fail(() => make({ extensionFactories: [() => {}] })),
-      await fail(() => make({ additionalExtensionPaths: ['x.ts'] })),
-      await fail(() => make({ extensionsOverride: (base) => base })),
-      await fail(() => make({ eventBus: {} })),
+      await fail(() => make({ extensionFactories: [{ name: 'core', factory: () => {}, builtin: true }] })),
+      await fail(() => make({ additionalExtensionPaths: ['npm:some-package'] })),
+      await fail(() => adding.reload()),
       await fail(() => make({ eventBus: {}, noExtensions: true })),
       await fail(() => make({ settingsManager: { isProjectTrusted: () => true } })),
       await fail(() => make({ noExtensions: true }).reload({ resolveProjectTrust: async () => true })),
@@ -68,7 +68,7 @@ const LIMITS: &str = r#"
 "#;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn packages_tilde_and_unsupported_options() {
+async fn packages_tilde_and_option_limits() {
     let (_h, root, data) = run(LIMITS, |h, root| {
         let package = root.join("pkg");
         write(&package.join("package.json"), r#"{"name":"local-pkg","version":"1.0.0","pi":{"skills":["./skills"]}}"#);
@@ -77,19 +77,18 @@ async fn packages_tilde_and_unsupported_options() {
     })
     .await;
     assert!(data["packageSkills"].as_array().unwrap().contains(&json!("pkg-skill")), "{data}");
-    assert_eq!(data["packageOptions"], "createAgentSession.resourceLoader.packages is not supported in pi-rust");
+    assert_eq!(data["packageOptions"], Value::Null, "a child session shares the loader's packages");
     let home = root.join("home");
     assert_eq!(data["tilde"], json!({"cwd": home.join("proj"), "agentDir": home.join("agent")}));
     let member = |name: &str| json!(format!("{name} is not supported in pi-rust"));
     let blocked = json!([
-        member("DefaultResourceLoader.extensionFactories"),
-        member("DefaultResourceLoader.additionalExtensionPaths"),
-        member("DefaultResourceLoader.extensionsOverride"),
-        member("DefaultResourceLoader.eventBus"),
+        member("DefaultResourceLoader.extensionFactories builtin entries"),
+        member("DefaultResourceLoader.additionalExtensionPaths package sources"),
+        member("DefaultResourceLoader.extensionsOverride adding extensions"),
         Value::Null,
         member("DefaultResourceLoader.settingsManager"),
-        member("DefaultResourceLoader.reload.resolveProjectTrust"),
-        member("createAgentSession.resourceLoader.additionalThemePaths"),
+        Value::Null,
+        Value::Null,
     ]);
     assert_eq!(data["blocked"], blocked);
 }

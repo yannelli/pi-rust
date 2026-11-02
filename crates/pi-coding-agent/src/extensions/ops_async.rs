@@ -246,6 +246,7 @@ pub(crate) async fn run(runner: Arc<ExtensionRunner>, op: &str, args: Vec<HostVa
         }
         "ai" => super::ops_ai::run(&runner, name, args).await?,
         "oauth" => super::provider::oauth_callback(&runner, &args).await?,
+        "inline" if name == "forward" => super::ops_sdk_resources::forward(&runner, &args).await?,
         "inline" => super::inline::event(&runner, &args).await?,
         _ => return Err(error(format!("Unknown host operation: {op}"))),
     };

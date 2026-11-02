@@ -40,16 +40,21 @@ export async function createAgentSession(options = {}) {
 	const agentDir = resolve(options.agentDir ?? call("config.info").agentDir);
 	const directoryName = `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
 	const sessionManager = options.sessionManager ?? SessionManager.create(cwd, join(agentDir, "sessions", directoryName));
-	const resources = resourceOptions(options.resourceLoader);
+	const loader = options.resourceLoader;
+	const resources = resourceOptions(loader);
 	const settingsManager = options.settingsManager ?? SettingsManager.create(cwd, agentDir);
 	if (!sessionManager._sdkId) unsupported("createAgentSession.sessionManager");
 	if (!settingsManager._sdkId) unsupported("createAgentSession.settingsManager");
+	if (options.systemPrompt !== undefined && resources.resourceLoaderId !== undefined) {
+		unsupported("createAgentSession.systemPrompt with a DefaultResourceLoader");
+	}
 	if (options.systemPrompt !== undefined) resources.systemPrompt = options.systemPrompt;
 	const result = await callAsync("sdk.create", {
 		cwd, agentDir, model: options.model, thinkingLevel: options.thinkingLevel,
 		tools: options.tools, excludeTools: options.excludeTools, noTools: options.noTools,
 		sessionManagerId: sessionManager._sdkId, settingsManagerId: settingsManager._sdkId, resources, modelRuntimeId,
 	});
+	const binding = resources.resourceLoaderId !== undefined ? loader._sdkBind(result.target) : undefined;
 	const listeners = [];
 	let disposed = false;
 	let events;
@@ -169,6 +174,7 @@ export async function createAgentSession(options = {}) {
 			disposed = true;
 			listeners.length = 0;
 			stopEvents();
+			binding?.release();
 		},
 	}, {
 		get(target, property, receiver) {
@@ -177,7 +183,7 @@ export async function createAgentSession(options = {}) {
 			unsupported(`AgentSession.${property}`);
 		},
 	});
-	const extensionsResult = {
+	const extensionsResult = binding ? loader.getExtensions() : {
 		extensions: [], errors: [],
 		get runtime() { unsupported("createAgentSession.extensionsResult.runtime"); },
 	};

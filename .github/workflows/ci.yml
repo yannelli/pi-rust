@@ -54,6 +54,7 @@ jobs:
         run: >-
           cargo test -p pi-coding-agent --test extensions --test tui_viewport_exports --test project_trust_store_exports
           --test sdk_child_session --test sdk_session --test sdk_settings_replay --test sdk_settings_child
+          --test sdk_resources --test sdk_model_runtime --test sdk_storage --test sdk_utilities
           --locked --no-fail-fast
         env:
           PI_EXTENSION_RUNTIME: node

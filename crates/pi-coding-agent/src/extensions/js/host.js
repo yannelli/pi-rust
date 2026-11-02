@@ -6,6 +6,8 @@ import { call, callAsync, errorMessage, optional, registerCallback, releaseCallb
 import { nativeFactory } from "./native.js";
 import { Runner } from "./runner.js";
 import { apiProviders } from "./ai.js";
+import { groupScope, parentOps } from "./sdk_extensions.js";
+import { childOps } from "./sdk_mirror.js";
 import { routeStderr } from "./stderr_route.js";
 import { sessionStream } from "./stream.js";
 import { currentTheme } from "./theme.js";
@@ -40,6 +42,56 @@ function toolDescriptor(definition, sourceInfo, extensionPath) {
 function normalizeToolResult(result) {
 	if (!result || typeof result !== "object") return { content: [] };
 	return { ...result, content: Array.isArray(result.content) ? result.content : [] };
+}
+
+/** Provider and virtual model callbacks of `runtime`: a host's own, or an SDK factory group's. */
+function modelCallbacks(runtime, createContext) {
+	return {
+		async providerStream(name, model, context, options, sink) {
+			const provider = runtime.providers.get(name)?.config;
+			if (!provider?.streamSimple) throw new Error(`Provider ${name} has no streamSimple`);
+			const stream = provider.streamSimple(model, context, { ...options, signal: signalFor(options.signal) });
+			for await (const event of stream) call("stream.event", sink, event);
+			return null;
+		},
+		async providerRefreshModels(name, context) {
+			const provider = runtime.providers.get(name)?.config;
+			if (typeof provider?.refreshModels !== "function") throw new Error(`Provider ${name} has no refreshModels`);
+			const signal = signalFor(context.signal);
+			return (await provider.refreshModels({ ...context, signal, publish: async ({ update }) => (update?.(), true) })) ?? [];
+		},
+		async providerModifyModels(name, models, credential) {
+			const modify = runtime.providers.get(name)?.config.oauth?.modifyModels;
+			if (typeof modify !== "function") throw new Error(`Provider ${name} has no OAuth modifyModels`);
+			return modify(models, credential);
+		},
+		async providerImages(name, api, model, context, options) {
+			const implementation = runtime.providers.get(name)?.config.images?.[api];
+			if (!implementation) throw new Error(`Provider ${name} has no image implementation for "${api}"`);
+			return implementation.generateImages(model, context, { ...options, signal: signalFor(options.signal) });
+		},
+		async providerClassify(name, api, model, context, options) {
+			const implementation = runtime.providers.get(name)?.config.classifiers?.[api];
+			if (!implementation) throw new Error(`Provider ${name} has no classifier implementation for "${api}"`);
+			return implementation.classify(model, context, { ...options, signal: signalFor(options.signal) });
+		},
+		async providerHeaders(name, model) {
+			const headers = runtime.providers.get(name)?.config.headers;
+			return typeof headers === "function" ? await headers(model) : headers;
+		},
+		async oauth(name, method, args) {
+			const oauth = runtime.providers.get(name)?.config.oauth;
+			if (!oauth?.[method]) throw new Error(`Provider ${name} has no OAuth ${method}`);
+			if (method === "login") return await oauth.login(loginCallbacks(args[0]));
+			return await oauth[method](...args);
+		},
+		async route(key, request) {
+			const entry = runtime.virtualModels.get(key);
+			if (!entry) throw new Error(`Virtual model ${key} is not registered`);
+			const signal = signalFor(request.signal);
+			return await entry.definition.route({ ...request, signal }, createContext());
+		},
+	};
 }
 
 export function createHost(config) {
@@ -217,7 +269,8 @@ export function createHost(config) {
 			const tool = findTool(name);
 			if (!tool) throw new Error(`Tool ${name} is not registered`);
 			const abort = signalFor(signal);
-			const onUpdate = updateKey ? (partial) => call("tool.update", updateKey, normalizeToolResult(partial)) : undefined;
+			const update = (partial) => call("tool.update", updateKey, normalizeToolResult(partial));
+			const onUpdate = updateKey ? Object.assign(update, { updateKey }) : undefined;
 			const ctx = runner.createToolContext(toolCallId, abort);
 			return normalizeToolResult(await tool.execute(toolCallId, params, abort, onUpdate, ctx));
 		},
@@ -265,14 +318,9 @@ export function createHost(config) {
 		abortSignal: bridge.abortSignal,
 		releaseSignal: bridge.releaseSignal,
 		invokeCallback: (key, ...args) => bridge.invokeCallback(key, ...args),
+		/** SDK resource loader calls: a child host's mirrors and bus, or this host's factories. */
+		sdk: (name, ...args) => (childOps[name] ? childOps[name]({ runner, runtime, eventBus }, ...args) : parentOps[name](...args)),
 		releaseCallback: (key) => releaseCallback(key),
-		async providerStream(name, model, context, options, sink) {
-			const provider = runtime.providers.get(name)?.config;
-			if (!provider?.streamSimple) throw new Error(`Provider ${name} has no streamSimple`);
-			const stream = provider.streamSimple(model, context, { ...options, signal: signalFor(options.signal) });
-			for await (const event of stream) call("stream.event", sink, event);
-			return null;
-		},
 		async apiStream(api, model, context, options, sink) {
 			const provider = apiProviders.get(api)?.provider;
 			if (!provider) throw new Error(`No provider registered for API: ${api}`);
@@ -280,43 +328,8 @@ export function createHost(config) {
 			for await (const event of stream) call("stream.event", sink, event);
 			return null;
 		},
-		async providerRefreshModels(name, context) {
-			const provider = runtime.providers.get(name)?.config;
-			if (typeof provider?.refreshModels !== "function") throw new Error(`Provider ${name} has no refreshModels`);
-			const signal = signalFor(context.signal);
-			return (await provider.refreshModels({ ...context, signal, publish: async ({ update }) => (update?.(), true) })) ?? [];
-		},
-		async providerModifyModels(name, models, credential) {
-			const modify = runtime.providers.get(name)?.config.oauth?.modifyModels;
-			if (typeof modify !== "function") throw new Error(`Provider ${name} has no OAuth modifyModels`);
-			return modify(models, credential);
-		},
-		async providerImages(name, api, model, context, options) {
-			const implementation = runtime.providers.get(name)?.config.images?.[api];
-			if (!implementation) throw new Error(`Provider ${name} has no image implementation for "${api}"`);
-			return implementation.generateImages(model, context, { ...options, signal: signalFor(options.signal) });
-		},
-		async providerClassify(name, api, model, context, options) {
-			const implementation = runtime.providers.get(name)?.config.classifiers?.[api];
-			if (!implementation) throw new Error(`Provider ${name} has no classifier implementation for "${api}"`);
-			return implementation.classify(model, context, { ...options, signal: signalFor(options.signal) });
-		},
-		async providerHeaders(name, model) {
-			const headers = runtime.providers.get(name)?.config.headers;
-			return typeof headers === "function" ? await headers(model) : headers;
-		},
-		async oauth(name, method, args) {
-			const oauth = runtime.providers.get(name)?.config.oauth;
-			if (!oauth?.[method]) throw new Error(`Provider ${name} has no OAuth ${method}`);
-			if (method === "login") return await oauth.login(loginCallbacks(args[0]));
-			return await oauth[method](...args);
-		},
-		async route(key, request) {
-			const entry = runtime.virtualModels.get(key);
-			if (!entry) throw new Error(`Virtual model ${key} is not registered`);
-			const signal = signalFor(request.signal);
-			return await entry.definition.route({ ...request, signal }, runner.createContext());
-		},
+		...modelCallbacks(runtime, () => runner.createContext()),
+		groupCallback: (group, method, ...args) => modelCallbacks(...groupScope(group))[method](...args),
 		createComponent: ui.createComponent,
 		autocompleteChain: ui.autocompleteChain,
 		autocomplete: ui.autocomplete,

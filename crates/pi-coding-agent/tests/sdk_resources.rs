@@ -10,6 +10,10 @@ mod mcp_fake;
 #[path = "offline_guard/mod.rs"]
 mod offline_guard;
 
+#[path = "sdk_resources/composition.rs"]
+mod composition;
+#[path = "sdk_resources/extensions.rs"]
+mod extensions;
 #[path = "sdk_resources/limits.rs"]
 mod limits;
 
@@ -22,8 +26,8 @@ use pi_coding_agent::settings::{SettingsManager, SettingsOptions};
 use serde_json::{Value, json};
 
 const PRELUDE: &str = r#"
-import { DefaultResourceLoader, SettingsManager } from '@earendil-works/pi-coding-agent';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { createAgentSession, DefaultResourceLoader, ModelRegistry, ModelRuntime, SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 const fail = async (run) => { try { await run(); return null; } catch (error) { return error.message; } };
 const pick = ({ name, sourcePath, sourceInfo }) => ({ name, sourcePath, sourceInfo });
@@ -109,7 +113,7 @@ const LIFECYCLE: &str = r#"
     });
     result.extendOrder = order.slice(result.order.length);
     result.extended = { skills: loader.getSkills(), prompts: loader.getPrompts() };
-    result.options = await fail(() => loader._sdkOptions());
+    result.options = loader._sdkOptions().resourceLoaderId === loader._sdkId;
 "#;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -197,7 +201,7 @@ async fn reload_matches_upstream_order_and_the_native_loader() {
     assert_eq!(prompt["sourceInfo"]["path"], json!(root.join("extra-prompts").join("extra.md")));
     let rerun = &extended["prompts"]["diagnostics"];
     assert!(!has(rerun, "error", "Prompt template path does not exist", &missing("missing.md")));
-    assert_eq!(data["options"], "createAgentSession.resourceLoader.skillsOverride is not supported in pi-rust");
+    assert_eq!(data["options"], true, "a child session shares the loader and its overrides");
 }
 
 const OVERRIDES: &str = r#"

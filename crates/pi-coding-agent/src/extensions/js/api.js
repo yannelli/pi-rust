@@ -120,6 +120,7 @@ export function createRuntime(onChange) {
 	const unsubscribers = new Set();
 	const runtime = {
 		bound: false,
+		target: 0,
 		modelsBound: false,
 		staleMessage: undefined,
 		flagValues: new Map(),
@@ -127,6 +128,7 @@ export function createRuntime(onChange) {
 		pendingVirtualModels: [],
 		providers: new Map(),
 		virtualModels: new Map(),
+		modelCall: call,
 		action: notBound,
 		markChanged: onChange,
 		assertActive() {
@@ -161,7 +163,7 @@ export function createRuntime(onChange) {
 			const entry = runtime.providers.get(name);
 			if (!entry) return;
 			try {
-				call("provider.register", name, providerJson(entry.config), entry.extensionPath);
+				runtime.modelCall("provider.register", name, providerJson(entry.config), entry.extensionPath);
 			} catch (error) {
 				call("error", {
 					extensionPath: entry.extensionPath,
@@ -174,7 +176,7 @@ export function createRuntime(onChange) {
 		unregisterProvider(name) {
 			runtime.providers.delete(name);
 			runtime.pendingProviders = runtime.pendingProviders.filter((pending) => pending !== name);
-			if (runtime.modelsBound) call("provider.unregister", name);
+			if (runtime.modelsBound) runtime.modelCall("provider.unregister", name);
 		},
 		registerVirtualModel(definition, extensionPath) {
 			const key = `${definition.provider}/${definition.id}`;
@@ -190,7 +192,7 @@ export function createRuntime(onChange) {
 			if (!entry) return;
 			const { route: _route, ...definition } = entry.definition;
 			try {
-				call("virtualModel.register", definition, entry.extensionPath);
+				runtime.modelCall("virtualModel.register", definition, entry.extensionPath);
 			} catch (error) {
 				call("error", {
 					extensionPath: entry.extensionPath,
@@ -204,7 +206,7 @@ export function createRuntime(onChange) {
 			const key = `${provider}/${id}`;
 			runtime.virtualModels.delete(key);
 			runtime.pendingVirtualModels = runtime.pendingVirtualModels.filter((pending) => pending !== key);
-			if (runtime.modelsBound) call("virtualModel.unregister", provider, id);
+			if (runtime.modelsBound) runtime.modelCall("virtualModel.unregister", provider, id);
 		},
 		/** The model runtime exists: apply queued providers and virtual models, then directly. */
 		bindModels() {
@@ -219,7 +221,7 @@ export function createRuntime(onChange) {
 			runtime.action = (op, ...args) => {
 				runtime.assertActive();
 				runtime.markChanged(true);
-				return call(op, 0, ...args);
+				return call(op, runtime.target, ...args);
 			};
 		},
 	};
@@ -421,7 +423,7 @@ export function createExtensionAPI(extension, runtime, cwd, eventBus) {
 			assertActive();
 			if (!runtime.bound) return Promise.reject(new Error("Extension runtime not initialized"));
 			runtime.markChanged(true);
-			return callAsync("action.setModel", 0, model);
+			return callAsync("action.setModel", runtime.target, model);
 		},
 		getThinkingLevel() {
 			assertActive();
