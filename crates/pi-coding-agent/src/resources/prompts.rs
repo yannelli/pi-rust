@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use regex::{Captures, Regex};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::ResourceDiagnostic;
@@ -14,12 +14,12 @@ use super::frontmatter::parse_frontmatter;
 use super::paths::{absolute, file_kind, is_under_path, resolve_path, sorted_entries};
 use super::source_info::{SourceInfo, SourceScope, create_synthetic_source_info};
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptTemplate {
     pub name: String,
     pub description: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub argument_hint: Option<String>,
     pub content: String,
     pub source_info: SourceInfo,

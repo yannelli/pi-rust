@@ -1,5 +1,5 @@
 //! SDK storage exports for extensions: `SessionManager` JSONL round trips, `SettingsManager` file
-//! reads and writes, `DefaultResourceLoader` system prompts, and the host `ModelRuntime`.
+//! reads and writes, `DefaultResourceLoader` system prompts, and `ModelRuntime.create`.
 
 #[path = "extensions/harness.rs"]
 #[allow(dead_code)]
@@ -241,15 +241,15 @@ export default function (pi) {
     pi.appendEntry('result', {
       beforeReload, systemPrompt: loader.getSystemPrompt(), source: loader.getSystemPromptSource(),
       append: loader.getAppendSystemPrompt(), skills: loader.getSkills(), options: loader._sdkOptions(),
-      prompts: await code(() => loader.getPrompts()),
+      prompts: loader.getPrompts(),
       overrideError: await code(() => new DefaultResourceLoader({ cwd: ctx.cwd, agentDir,
         systemPromptOverride: () => { throw new Error('override failed'); } })._sdkOptions()),
       factories: await code(() => new DefaultResourceLoader({ cwd: ctx.cwd, agentDir, extensionFactories: [() => {}] })),
-      hostRuntime: runtime._sdkHostRuntime, model: runtime.getModel('local', 'tiny')?.id,
+      ownRuntime: runtime._sdkRuntimeId > 0, model: runtime.getModel('local', 'tiny')?.id,
       models: runtime.getModels('local').map((model) => model.id), auth: runtime.hasConfiguredAuth('local'),
       registry: new ModelRegistry(runtime).find('local', 'other')?.id,
       login: await code(() => runtime.login('local')),
-      modelsPath: await code(() => ModelRuntime.create({ modelsPath: '/elsewhere/models.json' })),
+      modelsPath: await code(() => ModelRuntime.create({ modelsPath: null })),
     });
   }});
 }
@@ -274,9 +274,9 @@ async fn resource_loader_and_model_runtime_serve_child_sessions() {
     assert_eq!(options["noSkills"], true);
     assert_eq!(options["noExtensions"], false);
     assert!(options["settingsManagerId"].as_u64().is_some(), "{options}");
-    assert_eq!(data["prompts"], "ERR_PI_UNSUPPORTED");
+    assert_eq!(data["prompts"], json!({"prompts": [], "diagnostics": []}));
     assert_eq!(data["factories"], "ERR_PI_UNSUPPORTED");
-    assert_eq!(data["hostRuntime"], true);
+    assert_eq!(data["ownRuntime"], true);
     assert_eq!(data["model"], "tiny");
     assert_eq!(data["models"], json!(["tiny", "other"]));
     assert_eq!(data["auth"], true);

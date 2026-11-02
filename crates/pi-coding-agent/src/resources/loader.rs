@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use super::brand::CONFIG_DIR_NAME;
 use super::context::{ContextFile, load_project_context_files};
-use super::discovery::{LocalResourceOptions, ResourceSettings, resolve_local_resources};
+use super::discovery::{LocalResourceOptions, ResourceSettings, ResourceType, resolve_local_resources};
 use super::paths::{absolute, file_kind, home_dir, is_local_path, sorted_entries};
 use super::prompts::{LoadPromptTemplatesOptions, PromptTemplate, load_prompt_templates};
 use super::skills::{LoadSkillsOptions, Skill, load_skills};
@@ -157,7 +157,7 @@ fn map_skill_path(resource: &ResolvedResource, lookup: &mut SourceLookup) -> Pat
     resource.path.clone()
 }
 
-fn resolve_prompt_input(input: &str, description: &str) -> Option<String> {
+pub fn resolve_prompt_input(input: &str, description: &str) -> Option<String> {
     if input.is_empty() {
         return None;
     }
@@ -201,6 +201,16 @@ impl ResourceLoader {
 
     /// Discover and load every resource for the current options.
     pub fn reload(&mut self) {
+        self.resolve_paths();
+        self.update_skills();
+        self.update_prompts();
+        self.update_themes();
+        self.report_missing();
+        self.load_prompt_files();
+    }
+
+    /// The first stage of [`Self::reload`]: extension entries and the merged paths of each kind.
+    pub fn resolve_paths(&mut self) {
         crate::diagnostics::reset_timings(crate::diagnostics::timings::EXTENSIONS);
         let options = &self.options;
         let local = LocalResourceOptions {
@@ -272,60 +282,92 @@ impl ResourceLoader {
         self.last_paths[SKILLS] = merge_paths(&options.cwd, &skills, &options.skill_paths);
         self.last_paths[PROMPTS] = merge_paths(&options.cwd, &prompts, &options.prompt_template_paths);
         self.last_paths[THEMES] = merge_paths(&options.cwd, &themes, &options.theme_paths);
-        self.update_skills();
-        self.update_prompts();
-        self.update_themes();
-        self.report_missing();
-        self.load_prompt_files();
     }
 
     fn report_missing(&mut self) {
+        for kind in [ResourceType::Skills, ResourceType::Prompts, ResourceType::Themes] {
+            self.report_missing_for(kind);
+        }
+    }
+
+    /// Returns the "path does not exist" errors it adds; a path already in a diagnostic is skipped.
+    pub fn report_missing_for(&mut self, kind: ResourceType) -> Vec<ResourceDiagnostic> {
         let options = &self.options;
-        let checks = [
-            (&options.skill_paths, &mut self.loaded.skill_diagnostics, "Skill path does not exist", true),
-            (
+        let (paths, diagnostics, message, local_only) = match kind {
+            ResourceType::Skills => {
+                (&options.skill_paths, &mut self.loaded.skill_diagnostics, "Skill path does not exist", true)
+            }
+            ResourceType::Prompts => (
                 &options.prompt_template_paths,
                 &mut self.loaded.prompt_diagnostics,
                 "Prompt template path does not exist",
                 true,
             ),
-            (&options.theme_paths, &mut self.loaded.theme_diagnostics, "Theme path does not exist", false),
-        ];
-        for (paths, diagnostics, message, local_only) in checks {
-            for raw in paths.iter().filter(|raw| !local_only || is_local_path(raw)) {
-                let path = resolve_resource_path(&options.cwd, raw);
-                if !path.exists() && !diagnostics.iter().any(|diagnostic| diagnostic.path_is(&path)) {
-                    diagnostics.push(ResourceDiagnostic::error(message, &path));
-                }
+            ResourceType::Themes => {
+                (&options.theme_paths, &mut self.loaded.theme_diagnostics, "Theme path does not exist", false)
+            }
+            ResourceType::Extensions => return Vec::new(),
+        };
+        let start = diagnostics.len();
+        for raw in paths.iter().filter(|raw| !local_only || is_local_path(raw)) {
+            let path = resolve_resource_path(&options.cwd, raw);
+            if !path.exists() && !diagnostics.iter().any(|diagnostic| diagnostic.path_is(&path)) {
+                diagnostics.push(ResourceDiagnostic::error(message, &path));
             }
         }
+        diagnostics[start..].to_vec()
     }
 
     fn load_prompt_files(&mut self) {
-        let options = &self.options;
-        self.loaded.context_files = if options.no_context_files {
-            Vec::new()
-        } else {
-            load_project_context_files(&options.cwd, &options.agent_dir)
-        };
-        let discover = |name: &str| -> Option<String> {
-            let project = options.cwd.join(CONFIG_DIR_NAME).join(name);
-            if options.project_trusted && project.exists() {
-                return Some(project.display().to_string());
-            }
-            let global = options.agent_dir.join(name);
-            global.exists().then(|| global.display().to_string())
-        };
-        let source = options.system_prompt.clone().or_else(|| discover("SYSTEM.md"));
-        self.loaded.system_prompt = source.as_deref().and_then(|source| resolve_prompt_input(source, "system prompt"));
+        let context_files = self.base_context_files();
+        self.set_context_files(context_files);
+        let source = self.system_prompt_input();
+        let text = source.as_deref().and_then(|source| resolve_prompt_input(source, "system prompt"));
+        self.set_system_prompt(text, source.as_deref());
+        let append = self.append_system_prompt_inputs();
+        let texts = append.iter().filter_map(|source| resolve_prompt_input(source, "append system prompt")).collect();
+        self.set_append_system_prompt(texts, &append);
+    }
+
+    fn discover(&self, name: &str) -> Option<String> {
+        let project = self.options.cwd.join(CONFIG_DIR_NAME).join(name);
+        if self.options.project_trusted && project.exists() {
+            return Some(project.display().to_string());
+        }
+        let global = self.options.agent_dir.join(name);
+        global.exists().then(|| global.display().to_string())
+    }
+
+    pub fn base_context_files(&self) -> Vec<ContextFile> {
+        if self.options.no_context_files {
+            return Vec::new();
+        }
+        load_project_context_files(&self.options.cwd, &self.options.agent_dir)
+    }
+
+    pub fn set_context_files(&mut self, files: Vec<ContextFile>) {
+        self.loaded.context_files = files;
+    }
+
+    pub fn system_prompt_input(&self) -> Option<String> {
+        self.options.system_prompt.clone().or_else(|| self.discover("SYSTEM.md"))
+    }
+
+    pub fn append_system_prompt_inputs(&self) -> Vec<String> {
+        let discovered = || self.discover("APPEND_SYSTEM.md").into_iter().collect();
+        self.options.append_system_prompt.clone().unwrap_or_else(discovered)
+    }
+
+    pub fn set_system_prompt(&mut self, text: Option<String>, input: Option<&str>) {
+        self.loaded.system_prompt = text;
         self.loaded.system_prompt_source =
-            source.filter(|source| Path::new(source).exists()).map(|source| absolute(Path::new(&source)));
-        let append =
-            options.append_system_prompt.clone().unwrap_or_else(|| discover("APPEND_SYSTEM.md").into_iter().collect());
-        self.loaded.append_system_prompt =
-            append.iter().filter_map(|source| resolve_prompt_input(source, "append system prompt")).collect();
-        self.loaded.append_system_prompt.extend(options.output_schema_prompt.clone());
-        self.loaded.append_system_prompt_sources = append
+            input.filter(|source| Path::new(source).exists()).map(|source| absolute(Path::new(source)));
+    }
+
+    pub fn set_append_system_prompt(&mut self, mut texts: Vec<String>, inputs: &[String]) {
+        texts.extend(self.options.output_schema_prompt.clone());
+        self.loaded.append_system_prompt = texts;
+        self.loaded.append_system_prompt_sources = inputs
             .iter()
             .filter(|source| Path::new(source).exists())
             .map(|source| absolute(Path::new(source)))
@@ -334,9 +376,24 @@ impl ResourceLoader {
 
     /// Add skill, prompt, and theme paths contributed by extensions and reload those types.
     pub fn extend_resources(&mut self, paths: ExtensionResourcePaths) {
+        for kind in self.extend_paths(paths) {
+            match kind {
+                ResourceType::Skills => self.update_skills(),
+                ResourceType::Prompts => self.update_prompts(),
+                _ => self.update_themes(),
+            }
+        }
+    }
+
+    pub fn extend_paths(&mut self, paths: ExtensionResourcePaths) -> Vec<ResourceType> {
         let cwd = self.options.cwd.clone();
-        let lists = [(SKILLS, paths.skill_paths), (PROMPTS, paths.prompt_paths), (THEMES, paths.theme_paths)];
-        for (index, entries) in lists {
+        let lists = [
+            (SKILLS, ResourceType::Skills, paths.skill_paths),
+            (PROMPTS, ResourceType::Prompts, paths.prompt_paths),
+            (THEMES, ResourceType::Themes, paths.theme_paths),
+        ];
+        let mut changed = Vec::new();
+        for (index, kind, entries) in lists {
             if entries.is_empty() {
                 continue;
             }
@@ -345,23 +402,58 @@ impl ResourceLoader {
                 let path = resolve_resource_path(&cwd, &path.to_string_lossy());
                 metadata.base_dir = metadata.base_dir.map(|dir| resolve_resource_path(&cwd, &dir.to_string_lossy()));
                 let info = super::source_info::create_source_info(&path.display().to_string(), &metadata);
-                self.extra[index].push((path.clone(), info));
+                match self.extra[index].iter().position(|(known, _)| *known == path) {
+                    Some(at) => self.extra[index][at].1 = info,
+                    None => self.extra[index].push((path.clone(), info)),
+                }
                 added.push(path.display().to_string());
             }
             self.last_paths[index] = merge_paths(&cwd, &self.last_paths[index], &added);
-            match index {
-                SKILLS => self.update_skills(),
-                PROMPTS => self.update_prompts(),
-                _ => self.update_themes(),
-            }
+            changed.push(kind);
+        }
+        changed
+    }
+
+    fn index(kind: ResourceType) -> Option<usize> {
+        match kind {
+            ResourceType::Skills => Some(SKILLS),
+            ResourceType::Prompts => Some(PROMPTS),
+            ResourceType::Themes => Some(THEMES),
+            ResourceType::Extensions => None,
         }
     }
 
+    pub fn paths(&self, kind: ResourceType) -> &[PathBuf] {
+        Self::index(kind).map_or(&[][..], |index| self.last_paths[index].as_slice())
+    }
+
+    pub fn find_source_info(&self, kind: ResourceType, path: &Path) -> Option<SourceInfo> {
+        let extra = Self::index(kind).map_or(&[][..], |index| self.extra[index].as_slice());
+        self.lookup.find(path, extra)
+    }
+
+    pub fn default_source_info(&self, path: &Path) -> SourceInfo {
+        self.lookup.default_for(path)
+    }
+
     fn update_skills(&mut self) {
+        let (skills, diagnostics) = self.base_skills();
+        let skills = skills
+            .into_iter()
+            .map(|skill| Skill {
+                source_info: self
+                    .find_source_info(ResourceType::Skills, &skill.file_path)
+                    .unwrap_or(skill.source_info.clone()),
+                ..skill
+            })
+            .collect();
+        self.set_skills(skills, diagnostics);
+    }
+
+    pub fn base_skills(&self) -> (Vec<Skill>, Vec<ResourceDiagnostic>) {
         let paths = &self.last_paths[SKILLS];
         if self.options.no_skills && paths.is_empty() {
-            (self.loaded.skills, self.loaded.skill_diagnostics) = (Vec::new(), Vec::new());
-            return;
+            return (Vec::new(), Vec::new());
         }
         let result = load_skills(&LoadSkillsOptions {
             cwd: self.options.cwd.clone(),
@@ -369,24 +461,31 @@ impl ResourceLoader {
             skill_paths: paths.iter().map(|path| path.display().to_string()).collect(),
             include_defaults: false,
         });
-        let lookup = &self.lookup;
-        let extra = &self.extra[SKILLS];
-        self.loaded.skills = result
-            .skills
-            .into_iter()
-            .map(|skill| Skill {
-                source_info: lookup.find(&skill.file_path, extra).unwrap_or(skill.source_info.clone()),
-                ..skill
-            })
-            .collect();
-        self.loaded.skill_diagnostics = result.diagnostics;
+        (result.skills, result.diagnostics)
+    }
+
+    pub fn set_skills(&mut self, skills: Vec<Skill>, diagnostics: Vec<ResourceDiagnostic>) {
+        (self.loaded.skills, self.loaded.skill_diagnostics) = (skills, diagnostics);
     }
 
     fn update_prompts(&mut self) {
+        let (mut prompts, diagnostics) = self.base_prompts();
+        for prompt in &mut prompts {
+            if let Some(info) = self.find_source_info(ResourceType::Prompts, &prompt.file_path) {
+                prompt.source_info = info;
+            }
+        }
+        self.set_prompts(prompts, diagnostics);
+    }
+
+    pub fn set_prompts(&mut self, prompts: Vec<PromptTemplate>, diagnostics: Vec<ResourceDiagnostic>) {
+        (self.loaded.prompts, self.loaded.prompt_diagnostics) = (prompts, diagnostics);
+    }
+
+    pub fn base_prompts(&self) -> (Vec<PromptTemplate>, Vec<ResourceDiagnostic>) {
         let paths = &self.last_paths[PROMPTS];
         if self.options.no_prompt_templates && paths.is_empty() {
-            (self.loaded.prompts, self.loaded.prompt_diagnostics) = (Vec::new(), Vec::new());
-            return;
+            return (Vec::new(), Vec::new());
         }
         let result = load_prompt_templates(&LoadPromptTemplatesOptions {
             cwd: self.options.cwd.clone(),
@@ -408,13 +507,11 @@ impl ResourceLoader {
                 None => prompts.push(prompt),
             }
         }
-        let (lookup, extra) = (&self.lookup, &self.extra[PROMPTS]);
-        for prompt in &mut prompts {
-            if let Some(info) = lookup.find(&prompt.file_path, extra) {
-                prompt.source_info = info;
-            }
-        }
-        (self.loaded.prompts, self.loaded.prompt_diagnostics) = (prompts, diagnostics);
+        (prompts, diagnostics)
+    }
+
+    pub fn set_themes(&mut self, themes: Vec<ThemeFile>, diagnostics: Vec<ResourceDiagnostic>) {
+        (self.loaded.themes, self.loaded.theme_diagnostics) = (themes, diagnostics);
     }
 
     fn update_themes(&mut self) {

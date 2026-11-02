@@ -1,29 +1,76 @@
-// Upstream `DefaultResourceLoader`, `ModelRegistry`, and `ModelRuntime` for SDK use. The loader
-// resolves system prompts the way upstream does; child sessions read its `_sdkOptions()` snapshot.
-import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { call } from "./bridge.js";
+// Upstream `DefaultResourceLoader`, `ModelRegistry`, and `ModelRuntime` for SDK use. Rust holds each
+// loader's paths and layers (`resources.*` ops); this file runs the override hooks and keeps their objects.
+import { homedir } from "node:os";
+import { call, callAsync, optional, signalId } from "./bridge.js";
 import { createModelRegistry } from "./context.js";
 import { SettingsManager } from "./sdk_storage.js";
 import { sessionStream } from "./stream.js";
+import { Theme } from "./theme.js";
 import { unsupportedError } from "./unsupported.js";
 
-// Options whose resources only the upstream package manager and extension loader produce.
-const UNSUPPORTED_OPTIONS = [
-	"extensionFactories",
-	"additionalExtensionPaths",
-	"additionalThemePaths",
-	"extensionsOverride",
-	"skillsOverride",
-	"promptsOverride",
-	"themesOverride",
-	"agentsFilesOverride",
-];
+// Options whose results only the upstream extension loader produces.
+const UNSUPPORTED_OPTIONS = ["extensionFactories", "additionalExtensionPaths", "extensionsOverride"];
+const CHILD_DROPPED_OVERRIDES = ["skillsOverride", "promptsOverride", "themesOverride", "agentsFilesOverride"];
+const FIELDS = {
+	skills: ["name", "description", "filePath", "baseDir", "sourceInfo", "disableModelInvocation", "license",
+		"compatibility", "metadata", "allowedTools"],
+	prompts: ["name", "description", "argumentHint", "content", "sourceInfo", "filePath"],
+	themes: ["name", "sourcePath", "sourceInfo"],
+};
+const DIAGNOSTIC_FIELDS = ["type", "message", "path", "collision"];
+const DIAGNOSTICS = { skills: "skillDiagnostics", prompts: "promptDiagnostics", themes: "themeDiagnostics" };
 
-function resolvePromptInput(input) {
-	if (!input) return undefined;
-	if (!existsSync(input)) return input;
-	return readFileSync(input, "utf-8").replace(/^\uFEFF/, "");
+const res = (op, ...args) => call(`resources.${op}`, ...args);
+
+const picker = (fields) => (item) => {
+	const picked = {};
+	for (const field of fields) {
+		if (item?.[field] !== undefined) picked[field] = item[field];
+	}
+	return picked;
+};
+
+/** One kind of upstream `reload()`: Rust loads the base, the override runs here, Rust stores what it returned. */
+function stage(loader, kind, report) {
+	const id = loader._sdkId;
+	const override = loader[`${kind}Override`];
+	const base = res("load", id, kind);
+	if (kind === "systemPrompt") {
+		loader.systemPrompt = override ? override(optional(base.value)) : optional(base.value);
+		loader.systemPromptSourcePath = optional(res("set", id, kind, loader.systemPrompt ?? null, false, base.inputs));
+	} else if (kind === "appendSystemPrompt") {
+		loader.appendSystemPrompt = override ? override(base.value) : base.value;
+		loader.appendSystemPromptSourcePaths = res("set", id, kind, loader.appendSystemPrompt, false, base.inputs);
+	} else if (kind === "agentsFiles") {
+		const result = override ? override(base) : base;
+		res("set", id, kind, result.agentsFiles.map(picker(["path", "content"])), false);
+		loader.agentsFiles = result.agentsFiles;
+	} else {
+		if (kind === "themes") base.themes = base.themes.map((snapshot) => new Theme(snapshot));
+		const result = override ? override(base) : base;
+		const items = result[kind].map(picker(FIELDS[kind]));
+		const payload = { [kind]: items, diagnostics: result.diagnostics.map(picker(DIAGNOSTIC_FIELDS)) };
+		const { sourceInfos, missing } = res("set", id, kind, payload, report);
+		loader[kind] = result[kind].map((item, index) => {
+			const sourceInfo = sourceInfos[index] ?? item.sourceInfo;
+			if (kind !== "themes") return { ...item, sourceInfo };
+			item.sourceInfo = sourceInfo;
+			return item;
+		});
+		loader[DIAGNOSTICS[kind]] = result.diagnostics;
+		result.diagnostics.push(...missing);
+	}
+}
+
+// While stages run, a nested `_sdkOptions()` reads the current values, as upstream getters do.
+function stages(loader, kinds, report) {
+	const state = loader._sdkState;
+	state.staging += 1;
+	try {
+		for (const kind of kinds) stage(loader, kind, report);
+	} finally {
+		state.staging -= 1;
+	}
 }
 
 export class DefaultResourceLoader {
@@ -34,71 +81,88 @@ export class DefaultResourceLoader {
 				throw unsupportedError(`DefaultResourceLoader.${key}`);
 			}
 		}
-		this.cwd = resolve(options.cwd);
-		this.agentDir = resolve(options.agentDir);
-		this.configDirName = call("config.info").configDirName;
+		if (options.eventBus !== undefined && options.noExtensions !== true) {
+			throw unsupportedError("DefaultResourceLoader.eventBus");
+		}
+		if (options.settingsManager != null && typeof options.settingsManager._sdkId !== "number") {
+			throw unsupportedError("DefaultResourceLoader.settingsManager");
+		}
+		const created = res("create", options.cwd, options.agentDir, homedir(), process.cwd());
+		this._sdkId = created.id;
+		this._sdkState = { extended: false, packages: false, extensions: 0, prompts: false, staging: 0 };
+		this.cwd = created.cwd;
+		this.agentDir = created.agentDir;
 		this.settingsManager = options.settingsManager ?? SettingsManager.create(this.cwd, this.agentDir);
-		this.options = options;
+		this.eventBus = options.eventBus;
+		this.additionalSkillPaths = options.additionalSkillPaths ?? [];
+		this.additionalPromptTemplatePaths = options.additionalPromptTemplatePaths ?? [];
+		this.additionalThemePaths = options.additionalThemePaths ?? [];
+		this.noExtensions = options.noExtensions ?? false;
+		this.disabledBuiltinExtensions = new Set(options.disabledBuiltinExtensions);
+		this.noSkills = options.noSkills ?? false;
+		this.noPromptTemplates = options.noPromptTemplates ?? false;
+		this.noThemes = options.noThemes ?? false;
+		this.noContextFiles = options.noContextFiles ?? false;
+		this.systemPromptSource = options.systemPrompt;
+		this.appendSystemPromptSource = options.appendSystemPrompt;
+		this.skillsOverride = options.skillsOverride;
+		this.promptsOverride = options.promptsOverride;
+		this.themesOverride = options.themesOverride;
+		this.agentsFilesOverride = options.agentsFilesOverride;
+		this.systemPromptOverride = options.systemPromptOverride;
+		this.appendSystemPromptOverride = options.appendSystemPromptOverride;
+		this.extensionsResult = { extensions: [], errors: [], runtime: undefined };
+		this.skills = [];
+		this.skillDiagnostics = [];
+		this.prompts = [];
+		this.promptDiagnostics = [];
+		this.themes = [];
+		this.themeDiagnostics = [];
+		this.agentsFiles = [];
 		this.systemPrompt = undefined;
 		this.systemPromptSourcePath = undefined;
 		this.appendSystemPrompt = [];
 		this.appendSystemPromptSourcePaths = [];
 		this.loaded = false;
+		this._sdkConfigure();
 	}
 
-	discover(name) {
-		const projectPath = join(this.cwd, this.configDirName, name);
-		if (this.settingsManager.isProjectTrusted() && existsSync(projectPath)) return projectPath;
-		const globalPath = join(this.agentDir, name);
-		return existsSync(globalPath) ? globalPath : undefined;
-	}
-
-	async reload() {
-		this.loadPrompts();
-	}
-
-	loadPrompts() {
-		const { systemPromptOverride, appendSystemPromptOverride } = this.options;
-		const systemSource = this.options.systemPrompt ?? this.discover("SYSTEM.md");
-		const baseSystemPrompt = resolvePromptInput(systemSource);
-		this.systemPrompt = systemPromptOverride ? systemPromptOverride(baseSystemPrompt) : baseSystemPrompt;
-		this.systemPromptSourcePath = systemSource && existsSync(systemSource) ? resolve(systemSource) : undefined;
-
-		let appendSources = this.options.appendSystemPrompt;
-		if (!appendSources) {
-			const discovered = this.discover("APPEND_SYSTEM.md");
-			appendSources = discovered ? [discovered] : [];
-		}
-		const baseAppend = appendSources.map(resolvePromptInput).filter((text) => text !== undefined);
-		this.appendSystemPrompt = appendSystemPromptOverride ? appendSystemPromptOverride(baseAppend) : baseAppend;
-		this.appendSystemPromptSourcePaths = appendSources.filter((source) => existsSync(source)).map((source) => resolve(source));
-		this.loaded = true;
-	}
-
-	/** Skills, prompts, themes, and context files load in the child session; only disabled kinds read here. */
-	disabledOnly(flag, member, empty) {
-		if (this.options[flag]) return empty;
-		throw unsupportedError(`DefaultResourceLoader.${member}`);
+	/** Sends the settings manager and the current option values; upstream reads them live on each reload. */
+	_sdkConfigure() {
+		res("configure", this._sdkId, this.settingsManager._sdkId, {
+			additionalSkillPaths: this.additionalSkillPaths,
+			additionalPromptTemplatePaths: this.additionalPromptTemplatePaths,
+			additionalThemePaths: this.additionalThemePaths,
+			noExtensions: Boolean(this.noExtensions),
+			disabledBuiltinExtensions: [...this.disabledBuiltinExtensions],
+			noSkills: Boolean(this.noSkills),
+			noPromptTemplates: Boolean(this.noPromptTemplates),
+			noThemes: Boolean(this.noThemes),
+			noContextFiles: Boolean(this.noContextFiles),
+			systemPrompt: this.systemPromptSource ?? null,
+			appendSystemPrompt: this.appendSystemPromptSource ?? null,
+		});
 	}
 
 	getExtensions() {
-		return this.disabledOnly("noExtensions", "getExtensions", { extensions: [], errors: [], runtime: undefined });
+		if (this._sdkState.extensions > 0) throw unsupportedError("DefaultResourceLoader.getExtensions");
+		return this.extensionsResult;
 	}
 
 	getSkills() {
-		return this.disabledOnly("noSkills", "getSkills", { skills: [], diagnostics: [] });
+		return { skills: this.skills, diagnostics: this.skillDiagnostics };
 	}
 
 	getPrompts() {
-		return this.disabledOnly("noPromptTemplates", "getPrompts", { prompts: [], diagnostics: [] });
+		return { prompts: this.prompts, diagnostics: this.promptDiagnostics };
 	}
 
 	getThemes() {
-		return this.disabledOnly("noThemes", "getThemes", { themes: [], diagnostics: [] });
+		return { themes: this.themes, diagnostics: this.themeDiagnostics };
 	}
 
 	getAgentsFiles() {
-		return this.disabledOnly("noContextFiles", "getAgentsFiles", { agentsFiles: [] });
+		return { agentsFiles: this.agentsFiles };
 	}
 
 	getSystemPrompt() {
@@ -118,70 +182,108 @@ export class DefaultResourceLoader {
 	}
 
 	extendResources(paths) {
-		if (Object.values(paths ?? {}).some((value) => Array.isArray(value) && value.length > 0)) {
-			throw unsupportedError("DefaultResourceLoader.extendResources");
-		}
+		const kinds = res("extend", this._sdkId, {
+			skillPaths: paths.skillPaths ?? [],
+			promptPaths: paths.promptPaths ?? [],
+			themePaths: paths.themePaths ?? [],
+		});
+		if (kinds.length > 0) this._sdkState.extended = true;
+		stages(this, kinds, false);
 	}
 
 	async loadProjectTrustExtensions() {
 		throw unsupportedError("DefaultResourceLoader.loadProjectTrustExtensions");
 	}
 
-	/** The options a child session reads; loads the system prompts on first use, as `reload()` does. */
+	async reload(options) {
+		if (options?.resolveProjectTrust) throw unsupportedError("DefaultResourceLoader.reload.resolveProjectTrust");
+		await this.settingsManager.reload();
+		this._sdkConfigure();
+		const { warnings, packages, extensions } = await callAsync("resources.reload", this._sdkId);
+		Object.assign(this._sdkState, { packages, extensions });
+		this.extensionsResult = { extensions: [], errors: [], runtime: undefined, warnings };
+		stages(this, ["skills", "prompts", "themes"], true);
+		stages(this, ["agentsFiles", "systemPrompt", "appendSystemPrompt"], false);
+		this.loaded = true;
+	}
+
+	/**
+	 * The options a child session reads. It refuses what the child would drop; before `reload()` it
+	 * loads the system prompts once.
+	 */
 	_sdkOptions() {
-		if (!this.loaded) {
-			this.loadPrompts();
+		const state = this._sdkState;
+		const dropped = [
+			...CHILD_DROPPED_OVERRIDES.filter((key) => this[key] !== undefined),
+			...(this.additionalThemePaths.length > 0 ? ["additionalThemePaths"] : []),
+			...(state.extended ? ["extendResources"] : []),
+			...(state.packages ? ["packages"] : []),
+			...(state.extensions > 0 ? ["extensions"] : []),
+		];
+		if (dropped.length > 0) throw unsupportedError(`createAgentSession.resourceLoader.${dropped[0]}`);
+		if (!this.loaded && !state.prompts && state.staging === 0) {
+			this._sdkConfigure();
+			stages(this, ["systemPrompt", "appendSystemPrompt"], false);
+			state.prompts = true;
 		}
-		const options = this.options;
 		return {
 			cwd: this.cwd,
 			agentDir: this.agentDir,
 			systemPrompt: this.systemPrompt,
 			appendSystemPrompt: this.appendSystemPrompt,
-			noExtensions: Boolean(options.noExtensions),
-			noSkills: Boolean(options.noSkills),
-			noPromptTemplates: Boolean(options.noPromptTemplates),
-			noThemes: Boolean(options.noThemes),
-			noContextFiles: Boolean(options.noContextFiles),
-			additionalSkillPaths: options.additionalSkillPaths ?? [],
-			additionalPromptTemplatePaths: options.additionalPromptTemplatePaths ?? [],
+			noExtensions: Boolean(this.noExtensions),
+			noSkills: Boolean(this.noSkills),
+			noPromptTemplates: Boolean(this.noPromptTemplates),
+			noThemes: Boolean(this.noThemes),
+			noContextFiles: Boolean(this.noContextFiles),
+			additionalSkillPaths: this.additionalSkillPaths,
+			additionalPromptTemplatePaths: this.additionalPromptTemplatePaths,
 			settingsManagerId: this.settingsManager._sdkId,
 		};
 	}
 }
 
+
 const RUNTIME_UNSUPPORTED = [
-	"setRuntimeApiKey", "removeRuntimeApiKey", "listCredentials", "login", "logout",
-	"registerProvider", "unregisterProvider", "registerNativeProvider", "registerVirtualModel",
+	"login", "logout", "registerProvider", "unregisterProvider", "registerNativeProvider", "registerVirtualModel",
 	"unregisterVirtualModel", "getRegisteredProviderConfig", "getRegisteredNativeProvider",
 	"getCompatibilityRequestConfig", "getPhysicalModel",
 ];
 
-function rejectOptions(options, member) {
-	for (const [key, value] of Object.entries(options ?? {})) {
-		if (value !== undefined) throw unsupportedError(`${member}.${key}`);
-	}
+const unsupportedStream = () => {
+	throw unsupportedError("ModelRuntime.stream");
+};
+
+function registryFor(id) {
+	return createModelRegistry(id, id === 0 ? sessionStream : unsupportedStream, "modelRuntime");
 }
 
-const ofProvider = (models, providerId) =>
-	providerId === undefined ? models : models.filter((model) => model.provider === providerId);
-
-/** Upstream `ModelRuntime` over the host session's models; auth methods take provider ids. */
-export function hostRuntime() {
-	const registry = createModelRegistry(0, sessionStream);
+/** Upstream `ModelRuntime` over native runtime `id` (0 is the host's); auth methods take provider ids. */
+function runtimeFor(id) {
+	const registry = registryFor(id);
+	const read = (method, ...args) => optional(call("modelRuntime.read", id, method, ...args));
+	const run = (name, ...args) => callAsync(`modelRuntime.${name}`, id, ...args);
 	const runtime = {
 		...registry,
-		_sdkHostRuntime: true,
+		_sdkRuntimeId: id,
 		getModel: (providerId, modelId) => registry.find(providerId, modelId),
-		getModels: (providerId) => registry.getModelsOfType("chat", providerId),
-		getAllModels: (providerId) => ofProvider(registry.getAll(), providerId),
-		getAllAvailable: async (providerId) => ofProvider(registry.getAvailable(), providerId),
+		getModels: (providerId) => read("getModels", providerId ?? null) ?? [],
+		getAllModels: (providerId) => read("getAllModels", providerId ?? null) ?? [],
+		getAvailable: async (providerId) => (await run("getAvailable", providerId ?? null)) ?? [],
+		getAllAvailable: async (providerId) => read("getAllAvailable", providerId ?? null) ?? [],
+		getAvailableOfType: async (type, providerId) => registry.getAvailableOfType(type, providerId),
 		getAvailableSnapshot: () => registry.getAvailable(),
-		getProviders: () =>
-			[...new Set(registry.getAll().map((model) => model.provider))].map(registry.getProvider).filter(Boolean),
+		getProviders: () => read("getProviders") ?? [],
 		hasConfiguredAuth: (providerId) => registry.hasConfiguredAuth({ provider: providerId }),
 		isUsingOAuth: (providerId) => registry.isUsingOAuth({ provider: providerId }),
-		isUsingSubscription: (providerId) => Boolean(call("models.read", 0, "isUsingSubscription", providerId)),
+		isUsingSubscription: (providerId) => Boolean(read("isUsingSubscription", providerId)),
+		setRuntimeApiKey: async (providerId, apiKey) => {
+			await run("setRuntimeApiKey", providerId, apiKey);
+		},
+		removeRuntimeApiKey: async (providerId) => {
+			await run("removeRuntimeApiKey", providerId);
+		},
+		listCredentials: async () => (await run("listCredentials")) ?? [],
 	};
 	for (const name of RUNTIME_UNSUPPORTED) {
 		runtime[name] = () => {
@@ -191,17 +293,25 @@ export function hostRuntime() {
 	return runtime;
 }
 
+export function hostRuntime() {
+	return runtimeFor(0);
+}
+
 export class ModelRuntime {
-	static async create(options) {
-		rejectOptions(options, "ModelRuntime.create");
-		return hostRuntime();
+	static async create(options = {}) {
+		for (const key of ["credentials", "modelsStore"]) {
+			if (options[key] !== undefined) throw unsupportedError(`ModelRuntime.create.${key}`);
+		}
+		if (options.modelsPath === null) throw unsupportedError("ModelRuntime.create.modelsPath");
+		const { signal, ...rest } = options;
+		return runtimeFor(await callAsync("modelRuntime.create", { ...rest, signal: signalId(signal) }));
 	}
 }
 
-/** Upstream `ModelRegistry`: the extension-facing registry over the host runtime. */
+/** Upstream `ModelRegistry`: the extension-facing registry over a runtime. */
 export class ModelRegistry {
 	constructor(runtime) {
-		if (!runtime?._sdkHostRuntime) throw unsupportedError("new ModelRegistry");
-		return createModelRegistry(0, sessionStream);
+		if (typeof runtime?._sdkRuntimeId !== "number") throw unsupportedError("new ModelRegistry");
+		return registryFor(runtime._sdkRuntimeId);
 	}
 }

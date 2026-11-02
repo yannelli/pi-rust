@@ -15,6 +15,8 @@ mod ops_async;
 mod ops_host;
 mod ops_sdk;
 mod ops_sdk_create;
+mod ops_sdk_model_runtime;
+mod ops_sdk_resources;
 mod ops_sdk_settings;
 mod ops_sdk_storage;
 mod ops_session;

@@ -91,15 +91,28 @@ async fn rejects_chat_models_at_the_classifier_entry_point() {
 
 #[tokio::test]
 async fn routes_jev_on_gateways_to_their_typesafe_compatible_endpoints() {
-    for (provider, id, prefix) in [
-        ("vercel-ai-gateway", "typesafe-ai/jev", "/typesafe/v1"),
-        ("opencode", "jev-1.13", "/zen/v1"),
-        ("opencode", "jev-1.13-free", "/zen/v1"),
+    let models = crate::models::builtin_models();
+    for (provider, id, expected_base) in [
+        ("vercel-ai-gateway", "typesafe-ai/jev", "https://ai-gateway.vercel.sh/typesafe/v1"),
+        ("opencode", "jev-1.13", "https://opencode.ai/inference/systemone/v1"),
+        ("opencode", "jev-1.13-free", "https://opencode.ai/inference/systemone/v1"),
     ] {
+        let mut jev = models
+            .iter()
+            .find(|model| {
+                model.provider == provider && model.id == id && model.model_type.as_deref() == Some("classifier")
+            })
+            .cloned()
+            .expect("the bundled catalog contains the classifier");
+        assert_eq!((jev.api.as_str(), jev.context_window), ("typesafe-system-one", 32_000));
+        assert_eq!(jev.base_url, expected_base);
+        assert!(!models.iter().any(|model| {
+            model.provider == provider && model.id == id && matches!(model.model_type.as_deref(), None | Some("chat"))
+        }));
+        let prefix = reqwest::Url::parse(&jev.base_url).unwrap().path().to_owned();
         let response = json!({ "model": id, "answers": { "approved": { "type": "noul", "noul": 0.8 } } });
         let mut server = MockServer::start(MockResponse::json(&response)).await;
-        let base_url = format!("{}{prefix}", server.base_url);
-        let jev = classifier_model("typesafe-system-one", provider, id, &base_url);
+        jev.base_url = format!("{}{prefix}", server.base_url);
         let context = approval_context();
         let result = classify(&jev, &context, with_key("secret")).await;
 
