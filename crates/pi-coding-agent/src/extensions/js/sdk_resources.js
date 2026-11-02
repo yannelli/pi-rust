@@ -1,7 +1,7 @@
 // Upstream `DefaultResourceLoader`, `ModelRegistry`, and `ModelRuntime` for SDK use. Rust holds each
 // loader's paths and layers (`resources.*` ops); this file runs the override hooks and keeps their objects.
 import { homedir } from "node:os";
-import { call, callAsync, optional } from "./bridge.js";
+import { call, callAsync, optional, signalId } from "./bridge.js";
 import { createModelRegistry } from "./context.js";
 import { SettingsManager } from "./sdk_storage.js";
 import { sessionStream } from "./stream.js";
@@ -243,38 +243,47 @@ export class DefaultResourceLoader {
 	}
 }
 
+
 const RUNTIME_UNSUPPORTED = [
-	"setRuntimeApiKey", "removeRuntimeApiKey", "listCredentials", "login", "logout",
-	"registerProvider", "unregisterProvider", "registerNativeProvider", "registerVirtualModel",
+	"login", "logout", "registerProvider", "unregisterProvider", "registerNativeProvider", "registerVirtualModel",
 	"unregisterVirtualModel", "getRegisteredProviderConfig", "getRegisteredNativeProvider",
 	"getCompatibilityRequestConfig", "getPhysicalModel",
 ];
 
-function rejectOptions(options, member) {
-	for (const [key, value] of Object.entries(options ?? {})) {
-		if (value !== undefined) throw unsupportedError(`${member}.${key}`);
-	}
+const unsupportedStream = () => {
+	throw unsupportedError("ModelRuntime.stream");
+};
+
+function registryFor(id) {
+	return createModelRegistry(id, id === 0 ? sessionStream : unsupportedStream, "modelRuntime");
 }
 
-const ofProvider = (models, providerId) =>
-	providerId === undefined ? models : models.filter((model) => model.provider === providerId);
-
-/** Upstream `ModelRuntime` over the host session's models; auth methods take provider ids. */
-export function hostRuntime() {
-	const registry = createModelRegistry(0, sessionStream);
+/** Upstream `ModelRuntime` over native runtime `id` (0 is the host's); auth methods take provider ids. */
+function runtimeFor(id) {
+	const registry = registryFor(id);
+	const read = (method, ...args) => optional(call("modelRuntime.read", id, method, ...args));
+	const run = (name, ...args) => callAsync(`modelRuntime.${name}`, id, ...args);
 	const runtime = {
 		...registry,
-		_sdkHostRuntime: true,
+		_sdkRuntimeId: id,
 		getModel: (providerId, modelId) => registry.find(providerId, modelId),
-		getModels: (providerId) => registry.getModelsOfType("chat", providerId),
-		getAllModels: (providerId) => ofProvider(registry.getAll(), providerId),
-		getAllAvailable: async (providerId) => ofProvider(registry.getAvailable(), providerId),
+		getModels: (providerId) => read("getModels", providerId ?? null) ?? [],
+		getAllModels: (providerId) => read("getAllModels", providerId ?? null) ?? [],
+		getAvailable: async (providerId) => (await run("getAvailable", providerId ?? null)) ?? [],
+		getAllAvailable: async (providerId) => read("getAllAvailable", providerId ?? null) ?? [],
+		getAvailableOfType: async (type, providerId) => registry.getAvailableOfType(type, providerId),
 		getAvailableSnapshot: () => registry.getAvailable(),
-		getProviders: () =>
-			[...new Set(registry.getAll().map((model) => model.provider))].map(registry.getProvider).filter(Boolean),
+		getProviders: () => read("getProviders") ?? [],
 		hasConfiguredAuth: (providerId) => registry.hasConfiguredAuth({ provider: providerId }),
 		isUsingOAuth: (providerId) => registry.isUsingOAuth({ provider: providerId }),
-		isUsingSubscription: (providerId) => Boolean(call("models.read", 0, "isUsingSubscription", providerId)),
+		isUsingSubscription: (providerId) => Boolean(read("isUsingSubscription", providerId)),
+		setRuntimeApiKey: async (providerId, apiKey) => {
+			await run("setRuntimeApiKey", providerId, apiKey);
+		},
+		removeRuntimeApiKey: async (providerId) => {
+			await run("removeRuntimeApiKey", providerId);
+		},
+		listCredentials: async () => (await run("listCredentials")) ?? [],
 	};
 	for (const name of RUNTIME_UNSUPPORTED) {
 		runtime[name] = () => {
@@ -284,17 +293,25 @@ export function hostRuntime() {
 	return runtime;
 }
 
+export function hostRuntime() {
+	return runtimeFor(0);
+}
+
 export class ModelRuntime {
-	static async create(options) {
-		rejectOptions(options, "ModelRuntime.create");
-		return hostRuntime();
+	static async create(options = {}) {
+		for (const key of ["credentials", "modelsStore"]) {
+			if (options[key] !== undefined) throw unsupportedError(`ModelRuntime.create.${key}`);
+		}
+		if (options.modelsPath === null) throw unsupportedError("ModelRuntime.create.modelsPath");
+		const { signal, ...rest } = options;
+		return runtimeFor(await callAsync("modelRuntime.create", { ...rest, signal: signalId(signal) }));
 	}
 }
 
-/** Upstream `ModelRegistry`: the extension-facing registry over the host runtime. */
+/** Upstream `ModelRegistry`: the extension-facing registry over a runtime. */
 export class ModelRegistry {
 	constructor(runtime) {
-		if (!runtime?._sdkHostRuntime) throw unsupportedError("new ModelRegistry");
-		return createModelRegistry(0, sessionStream);
+		if (typeof runtime?._sdkRuntimeId !== "number") throw unsupportedError("new ModelRegistry");
+		return registryFor(runtime._sdkRuntimeId);
 	}
 }
