@@ -144,6 +144,20 @@ fn tool_infos(session: &AgentSession, names: &[String]) -> Value {
     names.iter().filter_map(|name| infos.iter().find(|info| &info.name == name)).map(tool_info_json).collect()
 }
 
+/// Upstream `ScopedModel` entries `{ model, thinkingLevel? }`.
+pub(crate) fn scoped_models_json(scoped: &[crate::model_resolver::ScopedModel]) -> Value {
+    scoped
+        .iter()
+        .map(|scoped| {
+            let mut value = json!({"model": scoped.model});
+            if let Some(level) = scoped.thinking_level {
+                value["thinkingLevel"] = json!(level.as_str());
+            }
+            value
+        })
+        .collect()
+}
+
 pub(crate) fn tool_info_json(info: &crate::agent_session::ToolInfo) -> Value {
     let mut value = json!({
         "name": info.name,
@@ -274,17 +288,7 @@ fn context(runner: &ExtensionRunner, session: &Arc<AgentSession>, name: &str, ta
         "hasUI" => json!(runner.mode().has_ui()),
         "cwd" => json!(session.cwd().display().to_string()),
         "model" => json!(session.model()),
-        "scopedModels" => session
-            .scoped_models()
-            .iter()
-            .map(|scoped| {
-                let mut value = json!({"model": scoped.model});
-                if let Some(level) = scoped.thinking_level {
-                    value["thinkingLevel"] = json!(level.as_str());
-                }
-                value
-            })
-            .collect(),
+        "scopedModels" => scoped_models_json(&session.scoped_models()),
         "thinkingLevel" => json!(session.thinking_level().as_str()),
         "isIdle" => json!(session.is_idle()),
         "isProjectTrusted" => json!(session.settings().is_project_trusted()),
