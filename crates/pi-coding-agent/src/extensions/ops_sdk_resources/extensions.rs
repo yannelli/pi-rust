@@ -42,6 +42,19 @@ pub(crate) struct ParentLink {
     pub(crate) target: AtomicU64,
     pub(crate) to_parent: Queue,
     pub(crate) to_child: Queue,
+    /// `pi.events` calls of the child host, held until `resources.busReady` runs them (`mirror::bus_ready`).
+    pub(super) held: Mutex<Option<Vec<Vec<Value>>>>,
+}
+
+impl ParentLink {
+    pub(crate) fn bus(&self, call: Vec<Value>) {
+        match lock(&self.held).as_mut() {
+            Some(held) => held.push(call),
+            None => {
+                let _ = self.to_parent.send(call);
+            }
+        }
+    }
 }
 
 /// A child extension host. Dropping it ends the host and removes what it registered.
@@ -132,6 +145,7 @@ async fn start(
         target: AtomicU64::new(0),
         to_parent: queue(parent.host().clone()),
         to_child: queue(child.host().clone()),
+        held: Mutex::new(Some(Vec::new())),
     };
     let _ = child.parent.set(link);
     child

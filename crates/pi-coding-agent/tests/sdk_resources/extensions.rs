@@ -64,7 +64,10 @@ async fn trust_preload_loads_user_extensions_once_and_reuses_them() {
 
 const FACTORIES: &str = r#"
     const seen = { pongs: [], starts: 0 };
+    let early = true;
     const factory = (pi) => {
+      if (early) pi.events.emit('ping', 'early');
+      early = false;
       pi.on('agent_start', () => { seen.starts += 1; });
       pi.registerTool({ name: 'echo', label: 'Echo', description: 'Echo text',
         parameters: { type: 'object', properties: { text: { type: 'string' } } },
@@ -93,7 +96,7 @@ const FACTORIES: &str = r#"
     });
     await session.prompt('use echo');
     await session.prompt('/mark now');
-    await until(() => seen.pongs.length > 0);
+    await until(() => seen.pongs.length > 1);
     result.tool = session.messages.find((message) => message.role === 'toolResult')?.content?.[0]?.text;
     result.updates = updates;
     result.entries = session.sessionManager.getEntries().filter((entry) => entry.type === 'custom')
@@ -126,7 +129,7 @@ async fn factories_and_files_serve_one_child_session_per_reload() {
     assert!(entries.contains(&json!(["tool-entry", {"text": "hi"}])), "{data}");
     assert!(entries.contains(&json!(["mark", {"args": "now", "trusted": true}])), "{data}");
     assert_eq!(data["starts"], 1);
-    assert_eq!(data["pongs"], json!(["pong hi"]), "each bus listener ran once");
+    assert_eq!(data["pongs"], json!(["pong early", "pong hi"]), "each bus listener ran once");
     let limit = "A second AgentSession on the extensions of one DefaultResourceLoader reload (call reload() first) \
                  is not supported in pi-rust";
     assert_eq!(data["second"], limit);

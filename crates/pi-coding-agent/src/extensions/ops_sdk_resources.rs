@@ -188,7 +188,7 @@ pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<
             };
             let mut loader = lock(&*loader);
             match name {
-                "load" => kinds::load(&mut loader, &settings?, &args.str(1)?)?,
+                "load" => kinds::load(&mut loader, settings?.as_ref(), &args.str(1)?)?,
                 "set" => kinds::set(&mut loader, &args.str(1)?, args.json(2), args.bool(3), args.json(4))?,
                 "extend" => extend(&mut loader, &home, args.json(1))?,
                 other => return Err(error(format!("Unknown host operation: resources.{other}"))),
@@ -198,11 +198,10 @@ pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<
     Ok(HostValue::Json(value))
 }
 
+pub(crate) type SessionResources = (Arc<Mutex<ResourceLoader>>, Option<(Hosted, u64)>);
+
 /// The loader and the extensions a new child session binds, with the parent's target for it.
-pub(crate) fn take(
-    runner: &ExtensionRunner,
-    id: u64,
-) -> Result<(Arc<Mutex<ResourceLoader>>, Option<(Hosted, u64)>), JsError> {
+pub(crate) fn take(runner: &ExtensionRunner, id: u64) -> Result<SessionResources, JsError> {
     let mut state = lock(&runner.resources);
     let entry = state.entry(id)?;
     let hosted = extensions::take(runner, &mut entry.loaded)?;
@@ -220,6 +219,7 @@ pub(crate) async fn run(runner: Arc<ExtensionRunner>, name: &str, args: Args) ->
         "reload" => reload(&runner, &args).await?,
         "finish" => extensions::finish(&runner, args.u64(0)).await?,
         "order" => extensions::order(&runner, args.u64(0), args.json(1)).await?,
+        "busReady" => mirror::bus_ready(&runner, args.u64(0)).await?,
         other => return Err(error(format!("Unknown host operation: resources.{other}"))),
     };
     Ok(HostValue::Json(value))

@@ -78,6 +78,26 @@ pub(super) fn deliver(parent: &ExtensionRunner, args: &Args) -> Value {
     Value::Null
 }
 
+/// `resources.busReady`: run the bus calls the child host of `group` made while loading, in order and to
+/// completion. `held` becomes `None` only when empty, so a later call cannot pass a held one.
+pub(super) async fn bus_ready(parent: &Arc<ExtensionRunner>, group: u64) -> Result<Value, JsError> {
+    let child = find_child(parent, group).ok_or_else(|| error("The extension host has shut down"))?;
+    let (link, _) = link(&child)?;
+    loop {
+        let call = {
+            let mut held = lock(&link.held);
+            match held.as_mut() {
+                Some(calls) if !calls.is_empty() => calls.remove(0),
+                _ => {
+                    *held = None;
+                    return Ok(Value::Null);
+                }
+            }
+        };
+        parent.call_json("sdk", call).await?;
+    }
+}
+
 /// `inline.*` of a child host: the descriptor of a mirror, a tool hook, or a `pi.events` call.
 pub(crate) fn child_sync(child: &ExtensionRunner, name: &str, args: &Args) -> Result<HostValue, JsError> {
     let (link, parent) = link(child)?;
@@ -95,8 +115,7 @@ pub(crate) fn child_sync(child: &ExtensionRunner, name: &str, args: &Args) -> Re
             parent.host().blocking_call_method_within("sdk", args, HOOK_TIMEOUT)?.into_json()
         }
         "bus" => {
-            let _ =
-                link.to_parent.send(vec![json!("bus"), json!(link.group), args.json(0), args.json(1), args.json(2)]);
+            link.bus(vec![json!("bus"), json!(link.group), args.json(0), args.json(1), args.json(2)]);
             Value::Null
         }
         other => return Err(error(format!("Unknown host operation: inline.{other}"))),

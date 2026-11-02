@@ -2,7 +2,7 @@
 // loader's paths and layers (`resources.*` ops); this file runs the override hooks and keeps their objects.
 import { homedir } from "node:os";
 import { createEventBus } from "./api.js";
-import { call, optional } from "./bridge.js";
+import { call, callAsync, optional, signalId } from "./bridge.js";
 import { createModelRegistry } from "./context.js";
 import { bindExtensions, loadExtensions } from "./sdk_extensions.js";
 import { SettingsManager } from "./sdk_storage.js";
@@ -239,8 +239,6 @@ export class DefaultResourceLoader {
 		return bindExtensions(this, target);
 	}
 }
-
-import { callAsync, optional, signalId } from "./bridge.js";
 
 const RUNTIME_UNSUPPORTED = [
 	"login", "logout", "registerProvider", "unregisterProvider", "registerNativeProvider", "registerVirtualModel",

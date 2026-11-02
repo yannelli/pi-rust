@@ -1,5 +1,5 @@
-// The child host of an SDK `DefaultResourceLoader`. Each `extensionFactories` entry loads here as a
-// mirror that forwards its handlers, tools, and commands to the factory in the parent host.
+// The child host of an SDK `DefaultResourceLoader`: mirrors that forward each `extensionFactories` entry
+// to the factory in the parent host, and both ends of the `pi.events` bridge to the loader's bus.
 import { call, callAsync, optional, signalId } from "./bridge.js";
 
 const PLAIN = new Set([Object.prototype, Array.prototype, null]);
@@ -107,6 +107,36 @@ function bridge(eventBus) {
 	eventBus.deliver = (channel, envelope) => {
 		for (const listener of [...(listeners.get(channel) ?? [])]) listener(unwrap(envelope));
 	};
+}
+
+const buses = new Map();
+
+/** Parent host: the loader's bus for the child host of group `id`, open from its reload until `closeBus`. */
+export function openBus(id, loader) {
+	if (id) buses.set(id, { loader, forwarders: new Map() });
+}
+
+export function closeBus(id) {
+	const bus = buses.get(id);
+	buses.delete(id);
+	for (const off of bus?.forwarders.values() ?? []) off();
+}
+
+/** Parent host: a `pi.events` call of the child host of group `id`. */
+export function busCall(id, kind, channel, envelope) {
+	const bus = buses.get(id);
+	if (!bus) return null;
+	const eventBus = bus.loader.eventBus;
+	if (kind === "emit") eventBus.emit(channel, unwrap(envelope));
+	else if (kind === "on" && !bus.forwarders.has(channel)) {
+		const member = `eventBus "${channel}" data for an SDK child session`;
+		const forward = (data) => call("resources.deliver", id, channel, wrap(data, member));
+		bus.forwarders.set(channel, eventBus.on(channel, forward));
+	} else if (kind === "off") {
+		bus.forwarders.get(channel)?.();
+		bus.forwarders.delete(channel);
+	}
+	return null;
 }
 
 const snapshot = (ext) => ({

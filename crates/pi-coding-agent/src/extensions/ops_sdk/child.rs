@@ -107,13 +107,14 @@ fn thinking_level(value: &str) -> Result<ThinkingLevel, JsError> {
 /// Upstream `AgentState`; `tools` holds the active tool infos.
 fn state(session: &AgentSession) -> Value {
     let (all, active, model) = (session.all_tools(), session.active_tool_names(), session.model());
+    let system_prompt = session.system_prompt();
     let tools: Vec<Value> =
         active.iter().filter_map(|name| all.iter().find(|info| &info.name == name)).map(tool_info_json).collect();
     session.with_state(|state| {
         let mut pending: Vec<&String> = state.pending_tool_calls.iter().collect();
         pending.sort();
         json!({
-            "systemPrompt": state.current_system_prompt(),
+            "systemPrompt": system_prompt,
             "model": model,
             "thinkingLevel": state.thinking_level,
             "tools": tools,
@@ -134,7 +135,7 @@ pub(super) fn read(session: &AgentSession, member: &str) -> Result<Value, JsErro
         "isStreaming" => json!(session.is_streaming()),
         "sessionId" => json!(session.session_id()),
         "sessionFile" => json!(session.session_file()),
-        "systemPrompt" => json!(session.agent().state().current_system_prompt()),
+        "systemPrompt" => json!(session.system_prompt()),
         "routedModel" => json!(
             session.routed_model().map(|routed| json!({"model": routed.model, "thinkingLevel": routed.thinking_level}))
         ),

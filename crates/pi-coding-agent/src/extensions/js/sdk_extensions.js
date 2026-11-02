@@ -4,7 +4,7 @@ import { createExtension, createExtensionAPI, createRuntime } from "./api.js";
 import { call, callAsync, signalFor } from "./bridge.js";
 import { createCommandContext, createContext, createToolContext } from "./context.js";
 import { Runner, STALE_MESSAGE } from "./runner.js";
-import { dataOf, plain, unwrap, wrap } from "./sdk_mirror.js";
+import { busCall, closeBus, dataOf, openBus, plain } from "./sdk_mirror.js";
 import { sessionStream } from "./stream.js";
 import { unsupportedError } from "./unsupported.js";
 
@@ -54,7 +54,7 @@ function publish(group) {
 }
 
 function createGroup(id, loader) {
-	const group = { id, loaderId: loader._sdkId, loader, ids: new WeakMap(), nextId: 1, forwarders: new Map() };
+	const group = { id, loaderId: loader._sdkId, loader, ids: new WeakMap(), nextId: 1 };
 	group.runtime = createRuntime((immediate) => {
 		if (!group.published) return;
 		if (immediate) {
@@ -128,29 +128,13 @@ function hook(groupId, target, { index, tool: name, hook: kind, input }) {
 	return tool?.[kind]?.(input) ?? (kind === "reachesTools" ? [] : input);
 }
 
-function bus(groupId, kind, channel, envelope) {
-	const group = groups.get(groupId);
-	if (!group) return null;
-	const eventBus = group.loader.eventBus;
-	if (kind === "emit") eventBus.emit(channel, unwrap(envelope));
-	else if (kind === "on" && !group.forwarders.has(channel)) {
-		const member = `eventBus "${channel}" data for an SDK child session`;
-		const forward = (data) => call("resources.deliver", group.id, channel, wrap(data, member));
-		group.forwarders.set(channel, eventBus.on(channel, forward));
-	} else if (kind === "off") {
-		group.forwarders.get(channel)?.();
-		group.forwarders.delete(channel);
-	}
-	return null;
-}
-
 function models(groupId) {
 	groups.get(groupId)?.runtime.bindModels();
 	return null;
 }
 
 /** `host.sdk(name, ...)` calls a child host's mirrors make through Rust. */
-export const parentOps = { invoke, hook, bus, models };
+export const parentOps = { invoke, hook, bus: busCall, models };
 
 /** End a group: its pi objects go stale and its bus listeners stop (upstream #7193). */
 export function releaseGroup(group) {
@@ -158,8 +142,6 @@ export function releaseGroup(group) {
 	groups.delete(group.id);
 	group.runtime.invalidate(STALE_MESSAGE);
 	group.runner.invalidate(STALE_MESSAGE);
-	for (const off of group.forwarders.values()) off();
-	group.forwarders.clear();
 }
 
 /** Upstream `loadExtensionFactories`. */
@@ -259,9 +241,13 @@ export async function loadExtensions(loader, phase) {
 	const reuse = loaded.reused;
 	if (!reuse) {
 		if (state.group !== state.bound) releaseGroup(state.group);
+		if (state.bus !== state.boundBus) closeBus(state.bus);
+		state.bus = loaded.group;
+		openBus(loaded.group, loader);
 		state.group = undefined;
 		state.cache = new Map();
 	}
+	if (!reuse && loaded.group) await callAsync("resources.busReady", loaded.group);
 	let factoryErrors = [];
 	if (!reuse && factories) ({ group: state.group, errors: factoryErrors } = await loadFactories(loader, loaded.group));
 	const finished = await callAsync("resources.finish", loader._sdkId);
@@ -287,8 +273,13 @@ export async function loadExtensions(loader, phase) {
 /** The child session `target` took this reload's extensions; `release()` ends them with the session. */
 export function bindExtensions(loader, target) {
 	const state = loader._sdkExtensions;
-	const group = state.group;
-	state.bound = group;
+	const [group, bus] = [state.group, state.bus];
+	Object.assign(state, { bound: group, boundBus: bus });
 	if (group && target !== 0) bindGroup(group, target);
-	return { release: () => releaseGroup(group) };
+	return {
+		release: () => {
+			releaseGroup(group);
+			closeBus(bus);
+		},
+	};
 }
