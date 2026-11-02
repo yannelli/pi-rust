@@ -194,11 +194,12 @@ process.on("unhandledRejection", (reason) => {
   if (process.listenerCount("unhandledRejection") === 1) report("rejection", reason);
 });
 
-const realExit = process.exit.bind(process);
-process.exit = (code) => {
-  const exitCode = code ?? process.exitCode ?? 0;
-  ask({ t: "exit", code: Number(exitCode) | 0 });
-  realExit(exitCode);
+// Node's own process.exit validates the code and emits `exit` first; the host hears the code only when
+// the thread would end, and may end the whole process there.
+const realReallyExit = process.reallyExit;
+process.reallyExit = function reallyExit(code) {
+  ask({ t: "exit", code: Number(code) | 0 });
+  return realReallyExit.call(process, code);
 };
 
 process.argv = [process.execPath, ...config.argv.slice(1)];

@@ -202,10 +202,12 @@ impl AcpAgent {
             .mcp_capabilities(McpCapabilities::new().http(false).sse(false))
             .prompt_capabilities(prompt)
             .session_capabilities(sessions);
+        let meta = json!({"piAcp": {"exactMcpPreapproval": true}});
         InitializeResponse::new(ProtocolVersion::V1)
             .agent_info(Implementation::new("pi", self.options.version.clone()).title("pi"))
             .auth_methods(auth_methods(supports_meta, &self.options.terminal_launch))
             .agent_capabilities(capabilities)
+            .meta(meta.as_object().cloned())
     }
 
     /// Terminal Auth happens out of band, so `authenticate` succeeds without doing anything.
@@ -230,7 +232,7 @@ impl AcpAgent {
         if !super::settings::node_is_absolute(&params.cwd) {
             return Err(invalid_params(format!("cwd must be an absolute path: {}", params.cwd.display())));
         }
-        let mcp_servers = ClientMcpServers::from_request(&params.mcp_servers)?;
+        let mcp_servers = ClientMcpServers::from_request(&params.mcp_servers, params.meta.as_ref())?;
         let cwd = params.cwd.display().to_string();
         self.set_last_cwd(&cwd);
         let backend = self.factory.create(&params.cwd, None, &mcp_servers).await?;
