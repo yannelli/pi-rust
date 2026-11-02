@@ -3,6 +3,7 @@
 //! reported once through `notify`.
 
 mod actions;
+mod call;
 mod registered;
 mod registry;
 mod status;
@@ -27,6 +28,7 @@ use crate::runtime::{
 };
 
 pub use actions::McpConnectionId;
+pub use call::McpCallError;
 pub use registry::McpAgentTool;
 pub use status::{McpServerStatus, describe_state};
 pub use waits::{STILL_CONNECTING_MESSAGE, reaches_server};

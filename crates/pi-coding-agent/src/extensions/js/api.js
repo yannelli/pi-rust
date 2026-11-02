@@ -5,7 +5,7 @@ import { constants as bufferConstants } from "node:buffer";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { StringDecoder } from "node:string_decoder";
-import { call, callAsync } from "./bridge.js";
+import { call, callAsync, signalId } from "./bridge.js";
 import { waitForChildProcess } from "./child_wait.js";
 
 export function createEventBus() {
@@ -466,6 +466,14 @@ export function createExtensionAPI(extension, runtime, cwd, eventBus) {
 		getMcpServers() {
 			assertActive();
 			return call("mcp.list");
+		},
+		// pi-rust only. Errors carry the JSON-RPC `code` of the native protocol method `mcp.callTool`.
+		async callMcpTool(server, tool, args, options) {
+			assertActive();
+			const settings = { timeout: options?.timeout ?? null, signal: signalId(options?.signal) ?? null };
+			const reply = await callAsync("mcp.callTool", server, tool, args ?? null, settings);
+			if (reply.error !== undefined) throw Object.assign(new Error(reply.error), { code: reply.code });
+			return reply.result;
 		},
 		registerVirtualModel(model) {
 			assertActive();
