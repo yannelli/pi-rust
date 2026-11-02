@@ -13,6 +13,7 @@ use crate::harness::types::{DiagnosticSeverity, NestedToolExecutionResult, ToolD
 use crate::harness::usage::{UsageBucket, record_usage};
 use crate::ids::{ConversationId, TaskId};
 use crate::session::Tx;
+use crate::truncate::{DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES};
 use crate::types::{EntryRecord, TaskOutcome};
 
 /// An error result the Harness writes itself: no content and one `error` diagnostic with `code`.
@@ -40,24 +41,38 @@ pub(crate) fn truncated(dropped_bytes: u64, dropped_lines: u64, kept: Option<Ret
     ToolDiagnostic::new(DiagnosticSeverity::Warn, message).with_code("truncated")
 }
 
-/// An error result from the slot's durable partial output, details, and diagnostics.
-pub(crate) fn from_slot(slot: Option<SlotProgress>, code: &str, message: &str) -> ToolExecutionResult {
+/// An error result from the slot's durable partial output, details, and diagnostics, ending with `code`; and the
+/// truncation diagnostic of that output, when its bounds dropped some, which the caller adds after `after_tool`.
+pub(crate) fn from_slot(
+    slot: Option<SlotProgress>,
+    code: &str,
+    message: &str,
+) -> (ToolExecutionResult, Option<ToolDiagnostic>) {
     let slot = slot.unwrap_or_default();
+    let truncation = (slot.dropped_bytes > 0).then(|| truncated(slot.dropped_bytes, slot.dropped_lines, None));
     let mut diagnostics = slot.diagnostics;
-    if slot.dropped_bytes > 0 {
-        diagnostics.push(truncated(slot.dropped_bytes, slot.dropped_lines, None));
-    }
     diagnostics.push(tool_diagnostic(code, message));
     let output = match slot.output {
         Some(text) if !text.is_empty() => vec![ContentBlock::text(text)],
         _ => Vec::new(),
     };
-    ToolExecutionResult {
+    let result = ToolExecutionResult {
         output: Some(output),
         is_error: Some(true),
         details: slot.details,
         diagnostics: Some(diagnostics),
         ..ToolExecutionResult::default()
+    };
+    (result, truncation)
+}
+
+/// The tool's output limits, the defaults filled in; all defaults when the tool did not resolve.
+pub(crate) fn output_limits(tool: Option<&ToolRegistration>) -> OutputLimits {
+    let limits = tool.and_then(|tool| tool.output_limits).unwrap_or_default();
+    OutputLimits {
+        max_bytes: limits.max_bytes.unwrap_or(DEFAULT_MAX_BYTES),
+        max_lines: limits.max_lines.unwrap_or(DEFAULT_MAX_LINES),
+        retain: limits.retain.unwrap_or_default(),
     }
 }
 
