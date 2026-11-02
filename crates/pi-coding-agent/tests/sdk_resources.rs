@@ -10,6 +10,8 @@ mod mcp_fake;
 #[path = "offline_guard/mod.rs"]
 mod offline_guard;
 
+#[path = "sdk_resources/composition.rs"]
+mod composition;
 #[path = "sdk_resources/extensions.rs"]
 mod extensions;
 #[path = "sdk_resources/limits.rs"]
@@ -24,7 +26,7 @@ use pi_coding_agent::settings::{SettingsManager, SettingsOptions};
 use serde_json::{Value, json};
 
 const PRELUDE: &str = r#"
-import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
+import { createAgentSession, DefaultResourceLoader, ModelRegistry, ModelRuntime, SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 const fail = async (run) => { try { await run(); return null; } catch (error) { return error.message; } };

@@ -8,7 +8,7 @@ mod mirror;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use pi_js::{HostValue, JsError};
 use serde::Deserialize;
@@ -39,6 +39,8 @@ struct Entry {
 pub(crate) struct ResourcesState {
     loaders: HashMap<u64, Entry>,
     next_id: u64,
+    /// The child host of each factory group, while it lives.
+    hosts: HashMap<u64, Weak<ExtensionRunner>>,
 }
 
 impl ResourcesState {
@@ -177,6 +179,7 @@ pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<
         }
         "mirror" => mirror::store(runner, args)?,
         "deliver" => mirror::deliver(runner, args),
+        "models" => mirror::group_models(runner, args)?,
         _ => {
             let (loader, settings, home) = {
                 let mut state = lock(&runner.resources);

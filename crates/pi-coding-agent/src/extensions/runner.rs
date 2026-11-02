@@ -72,8 +72,9 @@ impl Default for ExtensionBindings {
 
 pub(crate) type DataFn = Arc<dyn Fn(&str) + Send + Sync>;
 
-/// An API implementation a runner replaced, and the provider that owns the replacement.
-pub(crate) type ReplacedApi = (Option<Arc<dyn ApiProvider>>, Option<String>);
+/// An API implementation a runner replaced, and the provider that owns the replacement: its SDK
+/// factory group (0 for the runner's own extensions) and name.
+pub(crate) type ReplacedApi = (Option<Arc<dyn ApiProvider>>, Option<(u64, String)>);
 
 /// One loaded set of extensions. Always held in an `Arc`.
 pub struct ExtensionRunner {
@@ -105,6 +106,8 @@ pub struct ExtensionRunner {
     pub(crate) nested: Mutex<HashMap<String, ToolContext>>,
     pub(crate) mcp: McpServerRegistry,
     model_runtime: Arc<ModelRuntime>,
+    /// The runtime of the session an SDK child host serves, set before it binds models.
+    selected_runtime: OnceLock<Arc<ModelRuntime>>,
     /// Providers this runner registered, with the extension that registered each.
     pub(crate) providers: Mutex<Vec<(String, String)>>,
     /// APIs this runner replaced: the replaced implementation and the owning provider.
@@ -213,6 +216,7 @@ impl ExtensionRunner {
                 nested: Mutex::default(),
                 mcp: McpServerRegistry::new(),
                 model_runtime,
+                selected_runtime: OnceLock::new(),
                 providers: Mutex::default(),
                 apis: Mutex::default(),
                 logins: Mutex::default(),
@@ -241,7 +245,12 @@ impl ExtensionRunner {
 
     /// The model runtime providers and virtual models register with.
     pub fn model_runtime(&self) -> &Arc<ModelRuntime> {
-        &self.model_runtime
+        self.selected_runtime.get().unwrap_or(&self.model_runtime)
+    }
+
+    /// Use `runtime` from now on; `false` when a runtime was already selected.
+    pub(crate) fn select_model_runtime(&self, runtime: Arc<ModelRuntime>) -> bool {
+        self.selected_runtime.set(runtime).is_ok()
     }
 
     pub(crate) fn this(&self) -> Arc<Self> {
@@ -297,6 +306,15 @@ impl ExtensionRunner {
     pub(crate) async fn call_json(&self, method: &str, args: Vec<Value>) -> Result<Value, JsError> {
         let args = args.into_iter().map(HostValue::Json).collect();
         Ok(self.call(method, args).await?.into_json())
+    }
+
+    /// Call a provider or virtual model callback of SDK factory group `group` (0: this runner's own).
+    pub(crate) async fn call_model(&self, group: u64, method: &str, args: Vec<Value>) -> Result<Value, JsError> {
+        if group == 0 {
+            return self.call_json(method, args).await;
+        }
+        let scoped = [json!(group), json!(method)].into_iter().chain(args).collect();
+        self.call_json("groupCallback", scoped).await
     }
 
     /// Load extension files in order. Failures are kept as [`Self::load_errors`].

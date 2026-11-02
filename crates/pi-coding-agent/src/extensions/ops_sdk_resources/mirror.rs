@@ -137,3 +137,22 @@ pub(crate) async fn forward(child: &Arc<ExtensionRunner>, args: &Args) -> Result
     }
     result
 }
+
+/// `resources.models`: a provider or virtual model call of factory group `args[0]`. It binds to the
+/// runtime of the group's child host, and its callbacks run in this host's maps of that group.
+pub(super) fn group_models(parent: &ExtensionRunner, args: &Args) -> Result<Value, JsError> {
+    let group = args.u64(0);
+    let child = lock(&parent.resources).hosts.get(&group).and_then(std::sync::Weak::upgrade);
+    let child = child.ok_or_else(|| error("The session of these extension factories has ended"))?;
+    let callbacks = parent.this();
+    match args.str(1)?.as_str() {
+        "provider.register" => {
+            child.register_provider_for(&callbacks, group, &args.str(2)?, args.json(3), &args.str(4)?).map_err(error)?
+        }
+        "provider.unregister" => child.unregister_provider(&args.str(2)?),
+        "virtualModel.register" => child.register_virtual_model_for(&callbacks, group, args.json(2)).map_err(error)?,
+        "virtualModel.unregister" => child.unregister_virtual_model(&args.str(2)?, &args.str(3)?),
+        other => return Err(error(format!("Unknown model operation: {other}"))),
+    }
+    Ok(Value::Null)
+}

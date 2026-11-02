@@ -199,6 +199,10 @@ pub(super) async fn load(
         }
     }
     let mut state = lock(&parent.resources);
+    state.hosts.retain(|_, host| host.strong_count() > 0);
+    if let Some(started) = &started {
+        state.hosts.insert(group, Arc::downgrade(&started.0));
+    }
     let loaded = &mut state.entry(reload.id)?.loaded;
     if started.is_some() {
         loaded.hosted = started;
@@ -239,7 +243,8 @@ pub(super) async fn finish(parent: &Arc<ExtensionRunner>, id: u64) -> Result<Val
     Ok(json!({"extensions": extensions, "errors": errors}))
 }
 
-/// Keep and order the child host's extensions as the final result lists them, then bind models.
+/// Keep and order the child host's extensions as the final result lists them. Their models bind
+/// when a session takes them, to that session's runtime (`ops_sdk_create`).
 pub(super) async fn order(parent: &Arc<ExtensionRunner>, id: u64, paths: Value) -> Result<Value, JsError> {
     let child = {
         let mut state = lock(&parent.resources);
@@ -247,8 +252,6 @@ pub(super) async fn order(parent: &Arc<ExtensionRunner>, id: u64, paths: Value) 
     };
     if let Some(child) = child {
         child.call_json("sdk", vec![json!("order"), paths]).await?;
-        child.call_json("bindModels", Vec::new()).await?;
-        parent.model_runtime().wait_for_offline_refreshes().await;
     }
     Ok(Value::Null)
 }

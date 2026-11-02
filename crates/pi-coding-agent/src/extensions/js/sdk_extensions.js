@@ -12,10 +12,16 @@ const HOOKS = ["prepareArguments", "reachesTools", "prepareLoadout"];
 const MCP = ["registerMcpServer", "unregisterMcpServer", "getMcpServers"];
 const FILE_ONLY = ["handlers", "shortcuts", "messageRenderers", "entryRenderers", "toolRenderers"];
 const groups = new Map();
-let parentRuntime;
 
-export function setParentRuntime(runtime) {
-	parentRuntime = runtime;
+/** The runtime and session context of factory group `id`, for its provider and virtual model callbacks. */
+export function groupScope(id) {
+	const group = groups.get(id);
+	if (!group) throw new Error(STALE_MESSAGE);
+	const context = () => {
+		if (!group.runtime.bound) throw new Error("Extension runtime not initialized");
+		return createContext(group.runner, group.runtime.target);
+	};
+	return [group.runtime, context];
 }
 
 const normalize = (result) =>
@@ -58,10 +64,7 @@ function createGroup(id, loader) {
 			queueMicrotask(() => group.scheduled && publish(group));
 		}
 	});
-	if (parentRuntime) {
-		group.runtime.providers = parentRuntime.providers;
-		group.runtime.virtualModels = parentRuntime.virtualModels;
-	}
+	group.runtime.modelCall = (op, ...args) => call("resources.models", id, op, ...args);
 	group.runner = new Runner(group.runtime, sessionStream);
 	group.extensions = group.runner.extensions;
 	groups.set(id, group);
@@ -141,8 +144,13 @@ function bus(groupId, kind, channel, envelope) {
 	return null;
 }
 
+function models(groupId) {
+	groups.get(groupId)?.runtime.bindModels();
+	return null;
+}
+
 /** `host.sdk(name, ...)` calls a child host's mirrors make through Rust. */
-export const parentOps = { invoke, hook, bus };
+export const parentOps = { invoke, hook, bus, models };
 
 /** End a group: its pi objects go stale and its bus listeners stop (upstream #7193). */
 export function releaseGroup(group) {
