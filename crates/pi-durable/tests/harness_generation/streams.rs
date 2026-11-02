@@ -210,8 +210,9 @@ async fn orphans_a_blocked_run_task_with_full_run_cleanup() {
     let setup = chat_setup(Default::default());
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), &setup).await;
     // A run whose task was stored by a newer generation definition this process cannot run.
+    let version = pi_durable::harness::generation::generation_task().version + 1;
     let newer = define_task(
-        TaskDefinition::new("pi.generation", 2, |_| Ok(Json::from(json!({ "phase": "run" }))))
+        TaskDefinition::new("pi.generation", version, |_| Ok(Json::from(json!({ "phase": "run" }))))
             .phase("run", |_, _, _| async { Ok(()) })
             .abort(|_, _, _| async { Ok(()) }),
     );

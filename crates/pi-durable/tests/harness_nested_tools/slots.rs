@@ -1,4 +1,4 @@
-//! Nested call slots, error results, and version 1 tool task records.
+//! Nested call slots, error results, and version 1 and 2 tool task records.
 
 use std::sync::{Arc, Mutex};
 
@@ -309,9 +309,26 @@ fn migrates_version_1_tool_task_input_to_a_model_issued_call() {
     assert_eq!(checkpoint.to_serde(), json!({ "phase": "call" }));
 }
 
-/// Store a live tool task for call `c1` of an assistant entry, close, and rewrite its record as version 1 stored it:
-/// `{ assistant, callId }` input at version 1, with `checkpoint`. Returns the storage path and the task ID.
-async fn store_version_1(setup: &ChatSetup, directory: &tempfile::TempDir, checkpoint: Value) -> (String, TaskId) {
+#[test]
+fn keeps_version_2_tool_task_input_as_it_is() {
+    let model = json!({ "kind": "model", "assistant": 3, "callId": "c1" });
+    let call = json!({ "type": "toolCall", "id": "c1/k", "name": "echo", "arguments": {} });
+    let nested = json!({ "kind": "nested", "parent": 7, "parentCallId": "c1", "key": "k", "call": call });
+    let checkpoint = Json::from(json!({ "phase": "call" }));
+    for input in [model, nested] {
+        let (migrated, _) = tool_task().run_migrate(&Json::from(input.clone()), &checkpoint, 2).unwrap();
+        assert_eq!(migrated.to_serde(), input);
+    }
+}
+
+/// Store a live tool task for call `c1` of an assistant entry, close, and rewrite its record as `version` stored it,
+/// with `checkpoint` (version 1 input has no `kind`). Returns the storage path and the task ID.
+async fn store_version(
+    setup: &ChatSetup,
+    directory: &tempfile::TempDir,
+    checkpoint: Value,
+    version: u32,
+) -> (String, TaskId) {
     let path = directory.path().join("session.sqlite").to_string_lossy().into_owned();
     // No submission, so the Harness never starts scheduling and the task stays pending.
     let (harness, root) = open_chat(Arc::new(open_sqlite_storage(&path).await.unwrap()), setup).await;
@@ -331,11 +348,12 @@ async fn store_version_1(setup: &ChatSetup, directory: &tempfile::TempDir, check
     let storage = open_sqlite_storage(&path).await.unwrap();
     let record = storage.task(task_id, &ctx()).await.unwrap().unwrap();
     let mut input = record.input.to_serde();
-    input.as_object_mut().unwrap().remove("kind");
+    if version == 1 {
+        input.as_object_mut().unwrap().remove("kind");
+    }
     let mut state = serde_json::to_value(&record.state).unwrap();
     state["checkpoint"] = checkpoint;
-    let old =
-        TaskRecord { version: 1, input: Json::from(input), state: serde_json::from_value(state).unwrap(), ..record };
+    let old = TaskRecord { version, input: Json::from(input), state: serde_json::from_value(state).unwrap(), ..record };
     storage.commit(&[StorageWrite::Task { value: old }], &|_| {}, &ctx()).await.unwrap();
     storage.close(&ctx()).await.unwrap();
     (path, task_id)
@@ -347,12 +365,12 @@ async fn migrates_a_pending_version_1_task_and_runs_it_as_a_model_issued_call() 
     let setup = chat_setup(Default::default());
     let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     add_tool(&setup, echo_tool(runs.clone()));
-    let (path, id) = store_version_1(&setup, &directory, json!({ "phase": "call" })).await;
+    let (path, id) = store_version(&setup, &directory, json!({ "phase": "call" }), 1).await;
     let (harness, root) = open_chat(Arc::new(open_sqlite_storage(&path).await.unwrap()), &setup).await;
     assert_eq!(harness.get_task(id, &ctx()).await.unwrap().unwrap().version, 1);
     harness.resume().unwrap();
     let settled = harness.wait_for_task(id, &ctx()).await.unwrap();
-    assert_eq!(settled.version, 2);
+    assert_eq!(settled.version, 3);
     assert_eq!((settled.input["kind"].to_serde(), settled.input["callId"].to_serde()), (json!("model"), json!("c1")));
     let outcome = serde_json::to_value(settled.state.outcome()).unwrap();
     assert_eq!((outcome["status"].clone(), outcome["result"]["kind"].clone()), (json!("completed"), json!("model")));
@@ -369,16 +387,39 @@ async fn migrates_a_version_1_task_interrupted_after_intent_and_settles_it_inter
     let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     add_tool(&setup, echo_tool(runs.clone()));
     let intent = json!({ "phase": "execute", "arguments": { "text": "old" }, "replay": "unsafe" });
-    let (path, id) = store_version_1(&setup, &directory, intent).await;
+    let (path, id) = store_version(&setup, &directory, intent, 1).await;
     let (harness, root) = open_chat(Arc::new(open_sqlite_storage(&path).await.unwrap()), &setup).await;
     harness.resume().unwrap();
     let settled = harness.wait_for_task(id, &ctx()).await.unwrap();
-    assert_eq!(settled.version, 2);
+    assert_eq!(settled.version, 3);
     let outcome = serde_json::to_value(settled.state.outcome()).unwrap();
     assert_eq!((outcome["status"].clone(), outcome["result"]["kind"].clone()), (json!("failed"), json!("model")));
     assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 0);
     let result = results(&all_entries(&root).await).remove(0);
     assert_eq!((result.tool_call_id.as_str(), result.is_error), ("c1", true));
     assert!(result_text(&result).contains("Tool echo was interrupted"));
+    harness.close(&ctx()).await.unwrap();
+}
+
+#[tokio::test]
+async fn reserves_a_stored_version_2_task_under_version_3_and_runs_it_as_a_model_issued_call() {
+    let directory = tempfile::tempdir().unwrap();
+    let setup = chat_setup(Default::default());
+    let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    add_tool(&setup, echo_tool(runs.clone()));
+    let (path, id) = store_version(&setup, &directory, json!({ "phase": "call" }), 2).await;
+    let (harness, root) = open_chat(Arc::new(open_sqlite_storage(&path).await.unwrap()), &setup).await;
+    assert_eq!(harness.get_task(id, &ctx()).await.unwrap().unwrap().version, 2);
+    harness.resume().unwrap();
+    let settled = harness.wait_for_task(id, &ctx()).await.unwrap();
+    assert_eq!(settled.version, 3);
+    let input = settled.input.to_serde();
+    assert!(input["assistant"].is_u64(), "{input}");
+    assert_eq!(input, json!({ "kind": "model", "assistant": input["assistant"], "callId": "c1" }));
+    let outcome = serde_json::to_value(settled.state.outcome()).unwrap();
+    assert_eq!((outcome["status"].clone(), outcome["result"]["kind"].clone()), (json!("completed"), json!("model")));
+    assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 1);
+    let result = results(&all_entries(&root).await).remove(0);
+    assert_eq!((result.tool_call_id.as_str(), result_text(&result).as_str()), ("c1", "echo old"));
     harness.close(&ctx()).await.unwrap();
 }

@@ -13,7 +13,7 @@ use super::result::{
 };
 use super::{
     MADE_NESTED_CALLS, NESTED_CALL_DOC, ToolHookCall, ToolHooks, ToolTaskInput, ToolTaskResult, decode_input,
-    json_equal, resolve_tool, tool_task,
+    is_unoffered, json_equal, resolve_tool, tool_task,
 };
 use crate::documents::encode;
 use crate::errors::{DurableError, DurableResult};
@@ -80,13 +80,17 @@ pub(crate) async fn settle_from_slot(
     settle(runtime, input, call, ending, settled, context, None).await
 }
 
-/// The tool whose output limits bound a hooks' result: the called tool, or none when it or the agent does not resolve.
+/// The tool whose output limits bound a hooks' result: the called tool, or none when it or the agent does not resolve,
+/// and for an unoffered call, which never resolves its name.
 pub(crate) async fn tool_for_limits(
     runtime: &TaskRuntime,
     input: &ToolTaskInput,
     name: &str,
     context: &Context,
 ) -> Option<Arc<ToolRegistration>> {
+    if is_unoffered(input) {
+        return None;
+    }
     resolve_tool(runtime, input, name, context).await.ok().flatten()
 }
 

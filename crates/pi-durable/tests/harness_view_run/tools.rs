@@ -56,7 +56,7 @@ async fn rebuilds_a_sliding_tail_window_from_output_trims_and_appends() {
 }
 
 #[tokio::test]
-async fn ends_a_call_that_never_runs_with_its_result_at_once_and_a_tool_aborted_with_its_generation() {
+async fn ends_a_call_that_never_runs_through_its_own_task_and_a_tool_aborted_with_its_generation() {
     let setup = chat_setup(RegisterFauxProviderOptions::default());
     let wait =
         define_tool("wait", "Waits until aborted", no_parameters(), |_, _, context: pi_chord::Context| async move {
@@ -78,15 +78,16 @@ async fn ends_a_call_that_never_runs_with_its_result_at_once_and_a_tool_aborted_
     submission.wait(&ctx()).await.unwrap();
     history.detach();
     let (states, views) = (history.live(), history.views());
-    // The call not offered is listed done, with its result entry, in the commit of its calling answer.
+    // The call not offered is listed pending with its task in the commit of its calling answer, and its task ends it
+    // done with its result entry.
     let ghosts = slots_of(&states, "c1");
     let listed = ghosts.iter().position(Option::is_some).unwrap();
     let ghost = ghosts[listed].as_ref().unwrap();
-    assert_eq!(ghost["status"], "done");
-    let listing = view_entries(&views[listed]);
-    let kinds: Vec<&str> = listing.iter().map(|entry| entry["kind"].as_str().unwrap_or_default()).collect();
-    assert_eq!(kinds[kinds.len() - 2..], ["pi.assistant", "pi.tool-result"]);
-    assert_eq!(ghost["entry"], listing.last().unwrap()["id"]);
+    assert_eq!((&ghost["status"], &ghost["unoffered"]), (&json!("pending"), &json!(true)));
+    assert!(ghost["taskId"].is_u64(), "{ghost}");
+    assert_eq!(last_entry(&views[listed])["kind"], "pi.assistant");
+    let ended = ghosts.iter().position(|slot| slot.as_ref().is_some_and(|slot| slot["status"] == "done")).unwrap();
+    assert_eq!(ghosts[ended].as_ref().unwrap()["entry"], last_entry(&views[ended])["id"]);
     // The aborted tool ends with its result entry, then the run ends without an answer.
     let waits = slots_of(&states, "c2");
     let done = waits.iter().position(|slot| slot.as_ref().is_some_and(|slot| slot["status"] == "done")).unwrap();
