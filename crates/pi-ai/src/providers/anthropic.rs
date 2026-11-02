@@ -32,6 +32,7 @@ use crate::providers::common::{
     HttpRequest, RequestFallback, RequestRewrite, endpoint, has_header, header_map_with,
     spawn_provider_stream_with_fallback,
 };
+use crate::providers::constrained_sampling::is_strict_tool_limit_error_message;
 use crate::providers::github_copilot::{copilot_anthropic_auth_headers, copilot_dynamic_headers};
 use crate::registry::{ApiProvider, CacheRetention, StreamOptions};
 use crate::retry::ProviderRequestError;
@@ -138,20 +139,13 @@ impl ApiProvider for AnthropicMessages {
     }
 }
 
-/// Provider rejections of a strict tool set that is too large or too complex.
-const STRICT_TOOL_LIMIT_MESSAGES: [&str; 3] = [
-    "The compiled grammar is too large",
-    "Too many strict tools (",
-    "Schemas contains too many parameters with union types (",
-];
-
 /// A 400 `invalid_request_error` that names one of the strict tool limits.
 fn rejects_strict_tool_limits(error: &ProviderRequestError) -> Option<String> {
     let body = error.body.as_deref()?;
     let parsed: serde_json::Value = serde_json::from_str(body).ok()?;
     let rejected = error.status == Some(400)
         && parsed.pointer("/error/type").and_then(|kind| kind.as_str()) == Some("invalid_request_error")
-        && STRICT_TOOL_LIMIT_MESSAGES.iter().any(|limit| body.contains(limit));
+        && is_strict_tool_limit_error_message(body);
     rejected.then(|| parsed.pointer("/error/message").and_then(|m| m.as_str()).unwrap_or(&error.message).to_string())
 }
 

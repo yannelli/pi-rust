@@ -24,8 +24,8 @@ const HELP_TEMPLATE: &str = r#"Usage:
   {app} mcp add <server> [options] --url <url>
   {app} mcp remove <server> [-l]
   {app} mcp list [--json]
-  {app} mcp login <server> [--timeout <seconds>]
-  {app} mcp logout <server>
+  {app} mcp login <server> [-l] [--timeout <seconds>]
+  {app} mcp logout <server> [-l]
 
 Configure and check MCP servers and sign in to OAuth servers without starting a session.
 Reads ~/{config}/agent/mcp.json and, in trusted projects, {config}/mcp.json.
@@ -37,7 +37,7 @@ Commands:
   login <server>          Sign in through the browser
   logout <server>         Delete the stored OAuth credentials
 
-Options for add and remove:
+Options for add, remove, login, and logout:
   -l, --local             Use {config}/mcp.json in the current project instead of the global file
 
 Options for add:
@@ -139,7 +139,8 @@ fn parse_options(args: &[String], known: &[(&str, Kind)], error: &LineFn, max_po
     let mut parsed = Parsed::default();
     let mut index = 0;
     while index < args.len() {
-        let arg = if args[index] == "-l" { "--local" } else { args[index].as_str() };
+        let typed = args[index].as_str();
+        let arg = if typed == "-l" { "--local" } else { typed };
         if arg == "--" || parsed.positional.len() >= max_positionals {
             let start = if arg == "--" { index + 1 } else { index };
             parsed.positional.extend(args[start..].iter().cloned());
@@ -151,7 +152,7 @@ fn parse_options(args: &[String], known: &[(&str, Kind)], error: &LineFn, max_po
             continue;
         };
         let Some((_, kind)) = known.iter().find(|(known, _)| *known == name) else {
-            error(&format!("Unknown option {arg}.\n{}", *HELP_HINT));
+            error(&format!("Unknown option {typed}.\n{}", *HELP_HINT));
             return None;
         };
         if *kind == Kind::Flag {
@@ -208,19 +209,35 @@ pub async fn run_mcp_command(args: &[String], options: &McpCommandOptions) -> i3
             report::list(&loaded, parsed.has("json"), untrusted_note.as_deref(), options).await
         }
         "login" | "logout" => {
-            let known: &[(&str, Kind)] = if command == "login" { &[("timeout", Kind::Value)] } else { &[] };
+            let known: &[(&str, Kind)] = if command == "login" {
+                &[("local", Kind::Flag), ("timeout", Kind::Value)]
+            } else {
+                &[("local", Kind::Flag)]
+            };
             let Some(parsed) = parse_options(rest, known, error, usize::MAX) else { return 1 };
             let [name] = parsed.positional.as_slice() else {
-                error(&format!("Usage: {APP_NAME} mcp {command} <server>\n{}", *HELP_HINT));
+                error(&format!("Usage: {APP_NAME} mcp {command} <server> [-l]\n{}", *HELP_HINT));
                 return 1;
             };
             let Some(entry) = loaded.servers.iter().find(|server| server.name == *name) else {
                 let names: Vec<&str> = loaded.servers.iter().map(|server| server.name.as_str()).collect();
                 let configured = if names.is_empty() { "none".to_string() } else { names.join(", ") };
+                let suggestion = names
+                    .iter()
+                    .find(|candidate| edit_distance(candidate, name) <= 2)
+                    .map(|candidate| format!(" Did you mean \"{candidate}\"?"))
+                    .unwrap_or_default();
                 let note = untrusted_note.map(|note| format!(" {note}")).unwrap_or_default();
-                error(&format!("No MCP server named \"{name}\".{note} Configured: {configured}."));
+                error(&format!("No MCP server named \"{name}\".{suggestion}{note} Configured: {configured}."));
                 return 1;
             };
+            if parsed.has("local") && entry.scope != Some(McpConfigScope::Project) {
+                error(&format!(
+                    "MCP server \"{name}\" is defined in {}, not in the project; omit --local.",
+                    entry.source
+                ));
+                return 1;
+            }
             let timeout = match parsed.value("timeout") {
                 None => 300.0,
                 Some(value) => value.trim().parse::<f64>().unwrap_or(f64::NAN),
@@ -236,6 +253,20 @@ pub async fn run_mcp_command(args: &[String], options: &McpCommandOptions) -> i3
             1
         }
     }
+}
+
+// Match upstream's Levenshtein distance over JavaScript UTF-16 string units.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<u16> = b.encode_utf16().collect();
+    let mut previous: Vec<usize> = (0..=b.len()).collect();
+    for (i, left) in a.encode_utf16().enumerate() {
+        let mut current = vec![i + 1];
+        for (j, right) in b.iter().enumerate() {
+            current.push((previous[j + 1] + 1).min(current[j] + 1).min(previous[j] + usize::from(left != *right)));
+        }
+        previous = current;
+    }
+    previous[b.len()]
 }
 
 /// `KEY=VALUE` pairs of a repeatable option.

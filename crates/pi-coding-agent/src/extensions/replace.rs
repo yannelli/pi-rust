@@ -49,6 +49,9 @@ pub(crate) async fn run(runner: &Arc<ExtensionRunner>, name: &str, args: &Args) 
         return Ok(json!({"cancelled": result.cancelled}));
     }
     if name == "reload" {
+        if runner.target_runner(target).parent.get().is_some() {
+            return Err(JsError::unsupported("ctx.reload() in an SDK child session"));
+        }
         let session = runner.target_session(target)?;
         session.reload_extensions().await.map_err(failure)?;
         return Ok(Value::Null);
