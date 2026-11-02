@@ -171,6 +171,25 @@ fn config_type(tool: &Tool) -> Option<&str> {
     tool.constrained_sampling.as_ref()?.get("type")?.as_str()
 }
 
+/// Whether the tool asks for JSON-schema strict sampling only when possible (`strict: "prefer"`).
+pub fn prefers_json_schema_strict_sampling(tool: &Tool) -> bool {
+    config_type(tool) == Some("json_schema")
+        && tool.constrained_sampling.as_ref().and_then(|config| config.get("strict")?.as_str()) == Some("prefer")
+}
+
+/// Claude (Anthropic API and Bedrock) rejects strict tools over its limits with one of these messages.
+/// Observed limits: 20 strict tools, and 16 optional or union-typed parameters across all strict tools.
+const STRICT_TOOL_LIMIT_ERROR_MESSAGES: [&str; 3] = [
+    "The compiled grammar is too large",
+    "Too many strict tools (",
+    "Schemas contains too many parameters with union types (",
+];
+
+/// Whether a provider error message says the request's strict tools exceed the provider's limits.
+pub fn is_strict_tool_limit_error_message(message: &str) -> bool {
+    STRICT_TOOL_LIMIT_ERROR_MESSAGES.iter().any(|limit| message.contains(limit))
+}
+
 /// Whether a JSON-schema tool is sent in strict mode: `Some(true)` for strict, `None` to
 /// leave the provider default. Errors when the tool requires strict mode and cannot have it.
 pub fn resolve_json_schema_strict_sampling(

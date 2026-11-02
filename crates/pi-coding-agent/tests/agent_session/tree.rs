@@ -1,10 +1,21 @@
 //! Tree navigation, names, labels, stats, and export (upstream `agent-session-tree-navigation`
 //! and `agent-session-stats` tests).
 
-use pi_ai::providers::faux::FauxResponse;
-use pi_ai::{Message, ThinkingLevel};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+
+use async_trait::async_trait;
+use pi_ai::auth::{
+    AuthInteraction, AuthResult, Credential, LoginOptions, ModelAuth, OAuthAuth, OAuthCredential, UpdateFn,
+};
+use pi_ai::providers::faux::{FauxProvider, FauxResponse};
+use pi_ai::{
+    ApiProvider, AssistantMessageEventStream, Context, Message, Model, StreamOptions, ThinkingLevel,
+    register_api_provider,
+};
 use pi_coding_agent::agent_session::NavigateTreeOptions;
 use serde_json::{Value, json};
+use tokio_util::sync::CancellationToken;
 
 use crate::harness::{Harness, Options, harness, roles};
 
@@ -122,4 +133,85 @@ async fn prompts_after_tree_navigation_record_the_live_thinking_level() {
     let before = changes(&h);
     h.session.prompt("fourth question", Vec::new()).await.unwrap();
     assert_eq!(changes(&h), before, "an unchanged level is not recorded again");
+}
+
+/// Turns a stored credential into its access token and counts the conversions.
+#[derive(Default)]
+struct CountingOAuth {
+    resolutions: AtomicUsize,
+}
+
+#[async_trait]
+impl OAuthAuth for CountingOAuth {
+    fn name(&self) -> &str {
+        "Local account"
+    }
+
+    async fn login(
+        &self,
+        _interaction: &dyn AuthInteraction,
+        _options: &LoginOptions,
+        _cancel: CancellationToken,
+    ) -> AuthResult<OAuthCredential> {
+        unreachable!("the credential is stored")
+    }
+
+    async fn refresh(&self, _credential: &OAuthCredential, _cancel: CancellationToken) -> AuthResult<OAuthCredential> {
+        unreachable!("the stored credential does not expire")
+    }
+
+    fn to_auth(&self, credential: &OAuthCredential) -> ModelAuth {
+        self.resolutions.fetch_add(1, Ordering::SeqCst);
+        ModelAuth { api_key: Some(credential.access.clone()), ..ModelAuth::default() }
+    }
+}
+
+/// Records the API key of every request, then streams from the harness faux provider.
+struct KeyRecorder {
+    inner: Arc<FauxProvider>,
+    keys: Mutex<Vec<Option<String>>>,
+}
+
+impl ApiProvider for KeyRecorder {
+    fn stream(&self, model: &Model, context: &Context, options: StreamOptions) -> AssistantMessageEventStream {
+        self.keys.lock().unwrap().push(options.api_key.clone());
+        self.inner.stream(model, context, options)
+    }
+}
+
+// Upstream issue 11520: SDK summaries resolve stored OAuth through the session runtime, not as
+// an explicit API key that would select the provider's API-key method.
+#[tokio::test]
+async fn branch_summaries_resolve_stored_oauth_through_the_session_runtime() {
+    let oauth = OAuthCredential {
+        refresh: "oauth-refresh".into(),
+        access: "oauth-access".into(),
+        expires: i64::MAX,
+        extra: Default::default(),
+    };
+    let responses = ["first answer", "second answer", "## Branch\nSummary."].map(FauxResponse::text).to_vec();
+    let h = harness(Options { responses, ..Options::default() }).await;
+    let runtime = h.session.model_runtime();
+    let flow = Arc::new(CountingOAuth::default());
+    runtime.register_extension_oauth("local", Some(flow.clone()));
+    let stored = Credential::OAuth(oauth);
+    let store: UpdateFn = Box::new(move |_| Box::pin(async move { Ok(Some(stored)) }));
+    runtime.credential_store().update("local", store).await.unwrap();
+    runtime.refresh_configured_providers().await;
+    assert!(runtime.is_using_oauth("local").await);
+    let recorder = Arc::new(KeyRecorder { inner: h.provider.clone(), keys: Mutex::default() });
+    register_api_provider(h.session.model().unwrap().api, recorder.clone());
+
+    h.session.prompt("first question", Vec::new()).await.unwrap();
+    h.session.prompt("second question", Vec::new()).await.unwrap();
+    let before = flow.resolutions.load(Ordering::SeqCst);
+    let second = user_entry_ids(&h)[1].clone();
+    let options = NavigateTreeOptions { summarize: true, ..NavigateTreeOptions::default() };
+    let result = h.session.navigate_tree(&second, options).await.unwrap();
+
+    assert!(result.summary_entry_id.is_some());
+    assert_eq!(h.requests().len(), 3, "two prompts and one branch summary");
+    let keys = recorder.keys.lock().unwrap().clone();
+    assert_eq!(keys, vec![Some("oauth-access".to_string()); 3], "never the models.json test-key");
+    assert_eq!(flow.resolutions.load(Ordering::SeqCst), before + 1, "the summary resolved the stored OAuth once");
 }

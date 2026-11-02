@@ -330,6 +330,18 @@ async fn run(raw: Vec<String>) -> anyhow::Result<i32> {
     start(raw).await.or_else(|error| error.downcast::<Exit>().map(|exit| exit.0))
 }
 
+fn resolve_startup_cwd(result: std::io::Result<PathBuf>) -> anyhow::Result<PathBuf> {
+    result.map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            anyhow::anyhow!(
+                "The current working directory no longer exists. Change to an existing directory and try again."
+            )
+        } else {
+            error.into()
+        }
+    })
+}
+
 async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
     reset_timings(pi_coding_agent::diagnostics::timings::MAIN);
     set_child_process_env("PI_CODING_AGENT", "true");
@@ -351,7 +363,7 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
     if let Some(output) = pi_coding_agent::usage_cli::run_usage_command(&raw, &agent_dir, oauth_lookup()).await {
         return Ok(print_output(output));
     }
-    let cwd = std::env::current_dir()?;
+    let cwd = resolve_startup_cwd(std::env::current_dir())?;
     let doctor = || DoctorInputs::from_env(cwd.clone(), agent_dir.clone(), oauth_lookup());
     if let Some(output) = run_doctor_command(&raw, doctor).await {
         return Ok(print_output(output));
@@ -656,6 +668,24 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reports_a_deleted_startup_directory() {
+        let error = resolve_startup_cwd(Err(std::io::Error::from(std::io::ErrorKind::NotFound))).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "The current working directory no longer exists. Change to an existing directory and try again."
+        );
+    }
+
+    #[test]
+    fn preserves_other_startup_directory_errors() {
+        let source = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "cwd access denied");
+        let error = resolve_startup_cwd(Err(source)).unwrap_err();
+        let source = error.downcast_ref::<std::io::Error>().unwrap();
+        assert_eq!(source.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(source.to_string(), "cwd access denied");
+    }
 
     #[test]
     fn chooses_print_mode_when_a_stream_is_redirected() {

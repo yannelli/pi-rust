@@ -197,6 +197,13 @@ impl SettingsManager {
     }
 
     pub fn set_default_model_and_provider(&self, provider: &str, model_id: &str) {
+        let mut state = self.lock();
+        if state.sdk.is_some() {
+            super::sdk_setters::set_model_and_provider(&mut state, json!(provider), json!(model_id));
+            super::deferred::save(&mut state, SettingsScope::Global, true);
+            return;
+        }
+        drop(state);
         self.set_default_provider(provider);
         self.set_default_model(model_id);
     }
