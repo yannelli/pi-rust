@@ -1,6 +1,7 @@
 //! What the TUI asks of extensions (upstream `ExtensionRunner` getters the interactive mode uses):
-//! shortcuts, raw terminal input, command argument completions, message and tool renderers, and
-//! Markdown transformers. Render calls block on the JavaScript thread; call them off it.
+//! shortcuts, raw terminal input, command argument completions, message and tool renderers,
+//! Markdown transformers, and the pi-rust `message_display` event. Render calls block on the
+//! JavaScript thread; call them off it.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -16,6 +17,9 @@ use crate::markdown_transform::{MarkdownMessageType, MarkdownTransformContext, M
 
 /// How long input and Markdown hooks may take before the TUI goes on without them.
 const HOOK_LIMIT: Duration = Duration::from_secs(2);
+
+/// How long `message_display` handlers may take before pi keeps the original text.
+pub const MESSAGE_DISPLAY_LIMIT: Duration = Duration::from_secs(10);
 
 /// Keybindings extensions cannot take over (upstream `RESERVED_KEYBINDINGS_FOR_EXTENSION_CONFLICTS`).
 const RESERVED_KEYBINDINGS: &[&str] = &[
@@ -302,5 +306,28 @@ impl ExtensionRunner {
             let result = runner.blocking_json("transformMarkdown", vec![json!(markdown), context])?;
             result.as_str().map(str::to_string)
         }))
+    }
+
+    /// Whether an extension listens to `message_display`.
+    pub fn listens_to_message_display(&self) -> bool {
+        self.has_handlers("message_display")
+    }
+
+    /// The display text `message_display` handlers return for an assistant message, or `None`
+    /// to show `text`. The session keeps `text`. `message_id` is its session entry id, if saved.
+    pub async fn message_display(&self, message_id: Option<&str>, text: &str, limit: Duration) -> Option<String> {
+        if !self.listens_to_message_display() {
+            return None;
+        }
+        let event = json!({
+            "type": "message_display",
+            "messageId": message_id,
+            "index": 0,
+            "final": true,
+            "delta": text,
+            "text": text,
+        });
+        let result = tokio::time::timeout(limit, self.call_json("emitMessageDisplay", vec![event])).await;
+        result.ok()?.ok()?.as_str().map(str::to_string)
     }
 }

@@ -104,9 +104,16 @@ How each event uses a patch:
 | --- | --- |
 | `tool_call` (`input`), `before_agent_start` (`systemPromptOptions`), `before_provider_request` (`payload`), `before_provider_headers` (`headers`) | pi reads the changed event object. Example: `{ "input": { "command": "ls" } }` for `tool_call`. |
 | `tool_result`, `message_end`, `context`, `context_with_system` | When `result` is absent, pi builds it from the patched event: `{ content, details, structuredContent, isError, usage }` (the keys the event has) for `tool_result`, `{ message }` for `message_end`, `{ messages }` for the context events. Example: `{ "content": [...] }` for `tool_result`. |
-| All other events, including `input`, `turn_end`, `agent_before_settle`, `cache_warming_decision`, `resources_discover`, `user_bash`, `project_trust`, `mcp_elicitation`, `mcp_elicitation_result`, and `session_before_*` | pi reads only `result`; a patch has no effect. |
+| All other events, including `message_display`, `input`, `turn_end`, `agent_before_settle`, `cache_warming_decision`, `resources_discover`, `user_bash`, `project_trust`, `mcp_elicitation`, `mcp_elicitation_result`, and `session_before_*` | pi reads only `result`; a patch has no effect. |
 
 pi builds no result for `before_agent_start`: a built `systemPrompt` would replace the whole system prompt.
+
+`message_display` (pi-rust only) changes how the text of an assistant message shows in `tui` mode. pi sends it once for each complete assistant message that has text, and once for each such message when pi draws a saved session. The event is `{ type, messageId, index, final, delta, text }`. `messageId` is the session entry id of the message, or `null` when pi has not saved it yet. pi sends the full text in one batch, so `index` is `0`, `final` is `true`, and `delta` and `text` are the same. `text` joins the text blocks of the message with a blank line.
+
+- The result `{ text }` replaces the text blocks on the screen. The thinking blocks stay. An empty `text` hides the text. The session, exports, and the model context keep the original text.
+- pi shows the original text until the answer arrives. If no answer arrives within 10 seconds, or the handler fails, pi keeps the original text.
+- When several handlers listen, each one gets the `text` (and `delta`) that the handler before it returned. A JavaScript extension listens with `pi.on("message_display", handler)` and returns the same result.
+- pi stores the answer for each message, so redraws and width changes send no new event. In the `print`, `json`, and `rpc` modes, pi sends no `message_display` event.
 
 `after_provider_response` of a request reaches the extension, and pi waits for its answer, before pi passes on the first stream event of that response. Thus the `message_end` of the response always comes after the answer to its `after_provider_response`.
 

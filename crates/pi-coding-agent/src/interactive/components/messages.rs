@@ -89,6 +89,8 @@ pub struct AssistantMessageComponent {
     has_tool_calls: bool,
     is_streaming: bool,
     meta: Option<MessageMeta>,
+    /// What `message_display` handlers show in place of the text blocks.
+    display_text: Option<String>,
     overrides: HashMap<usize, bool>,
     /// A thinking run clicked during mouse dispatch, applied once dispatch returns.
     pending_toggle: Rc<Cell<Option<(usize, bool)>>>,
@@ -121,6 +123,7 @@ impl AssistantMessageComponent {
             has_tool_calls: false,
             is_streaming: false,
             meta,
+            display_text: None,
             overrides: HashMap::new(),
             pending_toggle: Rc::default(),
         };
@@ -144,6 +147,19 @@ impl AssistantMessageComponent {
     pub fn set_output_pad(&mut self, padding: usize) {
         self.options.output_pad = padding;
         self.rebuild();
+    }
+
+    /// The message last drawn.
+    pub fn message(&self) -> Option<&AssistantMessage> {
+        self.last_message.as_ref()
+    }
+
+    /// Show `text` in place of the message text; the message itself stays unchanged.
+    pub fn set_display_text(&mut self, text: Option<String>) {
+        if self.display_text != text {
+            self.display_text = text;
+            self.rebuild();
+        }
     }
 
     fn rebuild(&mut self) {
@@ -175,11 +191,19 @@ impl AssistantMessageComponent {
         let pad = self.options.output_pad;
         let mut run_index = 0;
         let mut i = 0;
+        // The display text takes the place of the first text block and hides the others.
+        let mut display = self.display_text.clone();
         while i < message.content.len() {
             match &message.content[i] {
                 ContentBlock::Text { text, .. } if !text.trim().is_empty() => {
-                    let markdown = self.markdown(text.trim(), MarkdownMessageType::Assistant, None);
-                    add_visible(&mut self.content, &mut needs_spacer, component(markdown));
+                    let shown = match (&self.display_text, display.take()) {
+                        (None, _) => Some(text.trim().to_string()),
+                        (Some(_), replacement) => replacement.filter(|text| !text.trim().is_empty()),
+                    };
+                    if let Some(shown) = shown {
+                        let markdown = self.markdown(shown.trim(), MarkdownMessageType::Assistant, None);
+                        add_visible(&mut self.content, &mut needs_spacer, component(markdown));
+                    }
                     i += 1;
                 }
                 ContentBlock::Thinking { .. } => {
@@ -358,5 +382,18 @@ mod tests {
         let text = thinking_then(ContentBlock::text("answer"), StopReason::Stop);
         assert_eq!(rows(&text, ""), ["", "answer"]);
         assert_eq!(rows(&text, "Thinking..."), ["", "Thinking...", "", "answer"]);
+    }
+
+    #[test]
+    fn display_text_replaces_the_text_blocks_and_keeps_the_message() {
+        let mut message = thinking_then(ContentBlock::text("first"), StopReason::Stop);
+        message.content.push(ContentBlock::text("second"));
+        let mut component =
+            AssistantMessageComponent::new(Some(&message), true, "Thinking...", RenderOptions::default());
+        component.set_display_text(Some("shown".into()));
+        let drawn: Vec<String> =
+            component.render(80).iter().map(|line| strip_terminal_sequences(line).trim().to_string()).collect();
+        assert_eq!(drawn, ["", "Thinking...", "", "shown"]);
+        assert_eq!(component.message(), Some(&message));
     }
 }

@@ -225,7 +225,9 @@ impl InteractiveMode {
                     (state.hide_thinking_block, state.hidden_thinking_label.clone())
                 };
                 let options = self.render_options();
-                let component = AssistantMessageComponent::with_meta(Some(assistant), hide, &label, options, meta);
+                let entry_id = meta.as_ref().map(|meta| meta.id.clone());
+                let mut component = AssistantMessageComponent::with_meta(Some(assistant), hide, &label, options, meta);
+                self.apply_message_display(&mut component, entry_id);
                 self.add_to_chat(Rc::new(RefCell::new(component)));
             }
             Message::Custom(_) => self.add_custom_role_message(message),

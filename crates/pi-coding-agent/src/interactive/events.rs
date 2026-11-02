@@ -288,6 +288,7 @@ impl InteractiveMode {
             error = Some(text);
         }
         streaming.borrow_mut().update_content(&assistant, false);
+        self.apply_message_display(&mut streaming.borrow_mut(), None);
         let tools: Vec<_> = self.state.borrow().pending_tools.iter().map(|(_, tool)| tool.clone()).collect();
         if matches!(assistant.stop_reason, StopReason::Aborted | StopReason::Error) {
             let text = error.or_else(|| assistant.error_message.clone()).unwrap_or_else(|| "Error".into());

@@ -295,3 +295,49 @@ async fn native_auth_login_runs_the_login_dialog_of_pi() {
     })
     .await;
 }
+
+const DISPLAY: &str = r#"export default function (pi) {
+	pi.on("message_display", (event) => {
+		pi.appendEntry("display", { messageId: event.messageId, final: event.final, index: event.index });
+		return { text: `DISPLAYED ${event.text.toUpperCase()}` };
+	});
+}
+"#;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn message_display_changes_the_shown_text_and_not_the_session() {
+    local(async {
+        let ui = start(Options {
+            files: vec![(".pi/extensions/display.ts", DISPLAY)],
+            responses: vec![FauxResponse::text("hello from model")],
+            ..Options::default()
+        })
+        .await;
+        ui.submit("hi").await;
+        ui.wait_until("the display text", |ui| ui.screen().contains("DISPLAYED HELLO FROM MODEL")).await;
+        assert!(!ui.screen().contains("hello from model"), "{}", ui.screen());
+
+        // A redraw at another width uses the cached text and does not ask again.
+        ui.terminal.borrow_mut().resize(80, 30);
+        ui.settle(200).await;
+        assert!(ui.screen().contains("DISPLAYED HELLO FROM MODEL"), "{}", ui.screen());
+
+        let session = ui.session();
+        let manager = session.session_manager();
+        let entries = manager.entries();
+        let assistant = entries
+            .iter()
+            .find(|entry| matches!(entry.message(), Some(pi_ai::Message::Assistant(_))))
+            .expect("assistant entry");
+        let Some(pi_ai::Message::Assistant(message)) = assistant.message() else { unreachable!() };
+        assert_eq!(message.content, vec![pi_ai::ContentBlock::text("hello from model")]);
+        let displays: Vec<_> = entries
+            .iter()
+            .filter(|entry| entry_type(entry) == Some("display"))
+            .map(|entry| entry.raw()["data"].clone())
+            .collect();
+        let expected = serde_json::json!({"messageId": assistant.id(), "final": true, "index": 0});
+        assert_eq!(displays, vec![expected]);
+    })
+    .await;
+}

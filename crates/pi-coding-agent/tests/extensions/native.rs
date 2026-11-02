@@ -411,6 +411,16 @@ async fn patches_reach_tool_results_messages_and_context() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn message_display_results_come_back_from_the_child() {
+    let (h, _ui) = native(Vec::new()).await;
+    let limit = std::time::Duration::from_secs(10);
+    let shown = h.runner.message_display(Some("entry-7"), "native display text", limit).await;
+    assert_eq!(shown.as_deref(), Some("NATIVE<entry-7 native display text>"));
+    assert_eq!(h.runner.message_display(None, "other text", limit).await, None);
+    assert!(h.errors().is_empty(), "{:?}", h.errors());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn write_terminal_reports_whether_the_host_wrote() {
     let (tui, _ui) = native(Vec::new()).await;
     tui.session.prompt("/native-write", Vec::new()).await.unwrap();
