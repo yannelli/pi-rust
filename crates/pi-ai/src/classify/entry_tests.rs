@@ -109,7 +109,7 @@ async fn routes_jev_on_gateways_to_their_typesafe_compatible_endpoints() {
         assert!(!models.iter().any(|model| {
             model.provider == provider && model.id == id && matches!(model.model_type.as_deref(), None | Some("chat"))
         }));
-        let prefix = url::Url::parse(&jev.base_url).unwrap().path().to_owned();
+        let prefix = reqwest::Url::parse(&jev.base_url).unwrap().path().to_owned();
         let response = json!({ "model": id, "answers": { "approved": { "type": "noul", "noul": 0.8 } } });
         let mut server = MockServer::start(MockResponse::json(&response)).await;
         jev.base_url = format!("{}{prefix}", server.base_url);

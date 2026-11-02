@@ -117,9 +117,9 @@ fn opencode_models_use_protocol_specific_endpoints() {
             assert_eq!(model.base_url, format!("{base}{suffix}"), "{provider}/{}", model.id);
         }
     }
-    for id in ["qwen3.5-plus", "qwen3.6-plus"] {
+    for id in ["qwen3.7-plus", "qwen3.8-flash", "qwen3.8-max"] {
         let model = find("opencode-go", id, "chat");
-        assert_eq!(model.api, "openai-completions", "{id}");
-        assert_eq!(model.base_url, "https://opencode.ai/inference/go/openai/v1", "{id}");
+        assert_eq!(model.api, "anthropic-messages", "{id}");
+        assert_eq!(model.base_url, "https://opencode.ai/inference/go/anthropic", "{id}");
     }
 }
