@@ -27,13 +27,13 @@ export function createSessionManagerView(target) {
 	};
 }
 
-/** `ctx.modelRegistry`: the session's model runtime. */
-export function createModelRegistry(target, makeStream) {
-	const read = (method, ...args) => optional(call("models.read", target, method, ...args));
+/** `ctx.modelRegistry`: the session's model runtime, or SDK runtime `target` under `group` "modelRuntime". */
+export function createModelRegistry(target, makeStream, group = "models") {
+	const read = (method, ...args) => optional(call(`${group}.read`, target, method, ...args));
 	return {
 		refresh: async (options) => {
-			const { signal: _signal, ...rest } = options ?? {};
-			const result = await callAsync("models.refresh", target, rest);
+			const { signal, ...rest } = options ?? {};
+			const result = await callAsync(`${group}.refresh`, target, { ...rest, signal: signalId(signal) });
 			// Upstream `ModelsRefreshResult`: errors as a Map of provider id to Error.
 			const errors = Object.entries(result?.errors ?? {}).map(([provider, message]) => [provider, new Error(message)]);
 			return { aborted: Boolean(result?.aborted), errors: new Map(errors) };
@@ -52,18 +52,18 @@ export function createModelRegistry(target, makeStream) {
 		getProviderAuthStatus: (provider) => read("getProviderAuthStatus", provider),
 		getProvider: (provider) => read("getProvider", provider),
 		getRegisteredProviderIds: () => read("getRegisteredProviderIds") ?? [],
-		getApiKeyAndHeaders: (model) => callAsync("models.auth", target, model),
-		getApiKeyForProvider: (provider) => callAsync("models.apiKey", target, provider).then(optional),
-		getProviderAuth: (provider) => callAsync("models.providerAuth", target, provider).then(optional),
-		getUsage: (provider, options) => callAsync("models.usage", target, provider ?? null, Boolean(options?.refresh)),
+		getApiKeyAndHeaders: (model) => callAsync(`${group}.auth`, target, model),
+		getApiKeyForProvider: (provider) => callAsync(`${group}.apiKey`, target, provider).then(optional),
+		getProviderAuth: (provider) => callAsync(`${group}.providerAuth`, target, provider).then(optional),
+		getUsage: (provider, options) => callAsync(`${group}.usage`, target, provider ?? null, Boolean(options?.refresh)),
 		stream: (model, context, options) => makeStream(target, model, context, options),
 		streamSimple: (model, context, options) => makeStream(target, model, context, options),
 		complete: (model, context, options) => makeStream(target, model, context, options).result(),
 		completeSimple: (model, context, options) => makeStream(target, model, context, options).result(),
 		classify: (model, context, options) =>
-			callAsync("models.classify", target, model, context, { ...options, signal: signalId(options?.signal) }),
+			callAsync(`${group}.classify`, target, model, context, { ...options, signal: signalId(options?.signal) }),
 		generateImages: (model, context, options) =>
-			callAsync("models.generateImages", target, model, context, { ...options, signal: signalId(options?.signal) }),
+			callAsync(`${group}.generateImages`, target, model, context, { ...options, signal: signalId(options?.signal) }),
 	};
 }
 

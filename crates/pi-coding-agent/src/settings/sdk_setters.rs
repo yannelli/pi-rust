@@ -74,6 +74,11 @@ fn set(state: &mut State, field: &str, value: Value) {
     mark(state, SettingsScope::Global, field, None);
 }
 
+pub(super) fn set_model_and_provider(state: &mut State, provider: Value, model_id: Value) {
+    set(state, "defaultProvider", provider);
+    set(state, "defaultModel", model_id);
+}
+
 /// `globalSettings[field][key] = value`, creating the object when the field is falsy (or, with
 /// `nullish_only`, when it is `null` or `undefined`, as `??=` does).
 fn set_nested(state: &mut State, field: &str, key: &str, value: Value, nullish_only: bool) {
@@ -132,10 +137,7 @@ pub(super) fn setter(state: &mut State, name: &str, args: &[Value]) -> Result<Op
                 }
                 return Ok(Some(read(state.global.get("deviceId"))));
             }
-            "setDefaultModelAndProvider" => {
-                set(state, "defaultProvider", value(0));
-                set(state, "defaultModel", value(1));
-            }
+            "setDefaultModelAndProvider" => set_model_and_provider(state, value(0), value(1)),
             "setExtensionChangelogVersion" => {
                 let key = js_string(arg(0));
                 let mut versions = spread(state.global.get("extensionChangelogVersions"));

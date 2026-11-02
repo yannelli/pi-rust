@@ -494,7 +494,7 @@ export default function (pi) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn model_runtime_reports_subscriptions_from_stored_oauth() {
-    use pi_ai::auth::{ApiKeyCredential, Credential, OAuthCredential};
+    use pi_ai::auth::{ApiKeyCredential, Credential, CredentialStore, FileCredentialStore, OAuthCredential};
     let setup = Setup {
         files: vec![("subscription.ts", SUBSCRIPTION.into())],
         load: vec!["subscription.ts"],
@@ -515,7 +515,7 @@ async fn model_runtime_reports_subscriptions_from_stored_oauth() {
         ("openrouter", oauth("o")),
         ("openai", Credential::ApiKey(ApiKeyCredential { key: Some("sk".into()), env: None })),
     ];
-    let store = h.session.model_runtime().credential_store();
+    let store = FileCredentialStore::new(h.agent_dir.join("auth.json"));
     for (provider, credential) in stored {
         store.update(provider, Box::new(move |_| Box::pin(async move { Ok(Some(credential)) }))).await.unwrap();
     }

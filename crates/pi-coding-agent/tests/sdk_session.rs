@@ -96,7 +96,7 @@ export default pi => pi.registerCommand('unsupported-sdk', { handler: async (_ar
   try { await createAgentSession({ customTools: [] }); }
   catch (error) { pi.appendEntry('option-error', { code: error.code, message: error.message }); }
   const { session } = await createAgentSession({ model: ctx.model, tools: [], sessionManager: SessionManager.inMemory(ctx.cwd) });
-  try { session.compact(); }
+  try { session.getToolDefinition('read'); }
   catch (error) { pi.appendEntry('member-error', { code: error.code, message: error.message }); }
   session.dispose();
 }});
@@ -106,7 +106,8 @@ export default pi => pi.registerCommand('unsupported-sdk', { handler: async (_ar
     h.session.prompt("/unsupported-sdk", Vec::new()).await.unwrap();
     assert!(h.errors().is_empty(), "{:?}", h.errors());
     let entries = h.entries();
-    for (kind, member) in [("option-error", "createAgentSession.customTools"), ("member-error", "AgentSession.compact")]
+    for (kind, member) in
+        [("option-error", "createAgentSession.customTools"), ("member-error", "AgentSession.getToolDefinition")]
     {
         let data = &entries.iter().find(|entry| entry["customType"] == kind).unwrap()["data"];
         assert_eq!(data["code"], "ERR_PI_UNSUPPORTED");
