@@ -23,13 +23,20 @@ use crate::session::Tx;
 use crate::tasks::TaskOptions;
 use crate::types::{DraftHead, TaskOutcome, TaskRecord, TaskState};
 
-/// A tool task for call `call_id`, owned by the generation.
-async fn create_tool_task(tx: &Tx, owner: TaskId, assistant: EntryId, call_id: String) -> DurableResult<TaskId> {
-    let input = encode(&ToolTaskInput::Model { assistant, call_id })?;
+/// A tool task for call `call_id`, owned by the generation; `unoffered` for a call to a tool its request did not offer.
+async fn create_tool_task(
+    tx: &Tx,
+    owner: TaskId,
+    assistant: EntryId,
+    call_id: String,
+    unoffered: Option<bool>,
+) -> DurableResult<TaskId> {
+    let input = encode(&ToolTaskInput::Model { assistant, call_id, unoffered })?;
     tx.create_task(tool_task(), input, TaskOptions::owned_by(owner)).await
 }
 
-/// Append the tool-calling answer and start its tool round in one commit (spec section 8.3).
+/// Append the tool-calling answer and start its tool round in one commit (spec section 8.3): a tool task per call, in
+/// call order, only the first now if sequential; a call to a tool not offered is flagged, settling `tool_unavailable`.
 pub(super) async fn start_tool_round(
     runtime: &TaskRuntime,
     request: &Request,
@@ -51,27 +58,22 @@ pub(super) async fn start_tool_round(
                 && tools.iter().find(|tool| tool.name() == call.name).and_then(|tool| tool.execution_mode)
                     == Some(ToolExecutionMode::Sequential)
         });
-    let (owner, core) = (runtime.task_id(), runtime.scheduler.core.clone());
+    let owner = runtime.task_id();
     let change = move |tx: Tx, _| async move {
         let live = tx.doc(&LIVE_DOC, conversation_id).await?;
         let entry = append_assistant(&tx, conversation_id, &message).await?;
         let (mut slots, mut tasks, mut pending) = (Vec::new(), Vec::new(), Vec::new());
         for call in calls {
-            if !offered.contains(&call.name) {
-                let unavailable = harness_error("tool_unavailable", &format!("Tool {} is not available", call.name));
-                let result = append_tool_result(&tx, conversation_id, &call, &unavailable, core.now(), None).await?;
-                slots
-                    .push(ToolSlot { entry: Some(result.id), ..ToolSlot::new(&call.id, &call.name, SlotStatus::Done) });
-                continue;
-            }
+            let unoffered = (!offered.contains(&call.name)).then_some(true);
+            let slot = ToolSlot { unoffered, ..ToolSlot::new(&call.id, &call.name, SlotStatus::Pending) };
             if sequential && !tasks.is_empty() {
-                slots.push(ToolSlot::new(&call.id, &call.name, SlotStatus::Pending));
+                slots.push(slot);
                 pending.push(call.id);
                 continue;
             }
-            let task_id = create_tool_task(&tx, owner, entry.id, call.id.clone()).await?;
+            let task_id = create_tool_task(&tx, owner, entry.id, call.id.clone(), unoffered).await?;
             tasks.push(task_id);
-            slots.push(ToolSlot { task_id: Some(task_id), ..ToolSlot::new(&call.id, &call.name, SlotStatus::Pending) });
+            slots.push(ToolSlot { task_id: Some(task_id), ..slot });
         }
         live.edit(|live| {
             live.generation = None;
@@ -98,10 +100,12 @@ pub(super) async fn tools_phase(task: TaskRecord, runtime: TaskRuntime, context:
         (next.clone(), rest.to_vec(), runtime.task_id(), runtime.conversation_id());
     let change = move |tx: Tx, _| async move {
         let live = tx.doc(&LIVE_DOC, conversation_id).await?;
-        let task_id = create_tool_task(&tx, owner, assistant, next.clone()).await?;
+        let unstarted = |slot: &ToolSlot| slot.call_id == next && slot.task_id.is_none();
+        let slots = live.get()?.tools.unwrap_or_default();
+        let unoffered = slots.iter().find(|slot| unstarted(slot)).and_then(|slot| slot.unoffered);
+        let task_id = create_tool_task(&tx, owner, assistant, next.clone(), unoffered).await?;
         live.edit(|live| {
-            let slots = live.tools.iter_mut().flatten();
-            if let Some(slot) = slots.into_iter().find(|slot| slot.call_id == next && slot.task_id.is_none()) {
+            if let Some(slot) = live.tools.iter_mut().flatten().find(|slot| unstarted(slot)) {
                 slot.task_id = Some(task_id);
             }
         })?;
@@ -149,13 +153,13 @@ async fn finish_tool_round(
         }
     }
     let control_of = |id: TaskId| controls.iter().find(|(task, _)| *task == id).and_then(|(_, c)| c.clone());
-    // Every call of the round, including those answered without a task, must ask to terminate.
-    let terminate = !slots.is_empty()
-        && slots.iter().all(|slot| slot.task_id.and_then(control_of).is_some_and(|c| c.terminate == Some(true)));
-    let added: Vec<String> =
-        controls.iter().flat_map(|(_, c)| c.iter().flat_map(|c| c.add_tools.clone().unwrap_or_default())).collect();
+    // In call order, the slots' order; a slot without a task (faulted or orphaned before it got one) has no control.
+    let ordered: Vec<Option<ToolControl>> = slots.iter().map(|slot| slot.task_id.and_then(control_of)).collect();
+    // Every call of the round must ask to terminate.
+    let terminate = !slots.is_empty() && ordered.iter().all(|c| c.as_ref().is_some_and(|c| c.terminate == Some(true)));
+    let added: Vec<String> = ordered.iter().flatten().flat_map(|c| c.add_tools.clone().unwrap_or_default()).collect();
     // The last handoff in call order wins.
-    let handoff = controls.iter().rev().find_map(|(_, c)| c.as_ref().and_then(|c| c.handoff.clone()));
+    let handoff = ordered.iter().rev().find_map(|c| c.as_ref().and_then(|c| c.handoff.clone()));
     let (owner, core) = (runtime.task_id(), runtime.scheduler.core.clone());
     let change = move |tx: Tx, _| async move {
         let mut boundary = prepare_boundary(&tx, conversation_id, &core.settings()).await?;
@@ -215,7 +219,8 @@ fn end_live(tx: &Tx, live: &crate::session::Draft<LiveState>, owner: TaskId, end
     live.set(&state)
 }
 
-/// Runs after the round's tool tasks are terminal; calls never started get `aborted` results.
+/// Runs after the round's tool tasks are terminal; calls never started get `aborted` results, unoffered ones
+/// `tool_unavailable`.
 pub(super) async fn abort(task: TaskRecord, runtime: TaskRuntime, context: Context) -> DurableResult<()> {
     let checkpoint = decode(&task)?;
     if let Some(poll) = super::restart::deferred_of(&checkpoint) {
@@ -247,7 +252,13 @@ async fn abort_in(
     let mut live = draft.get()?;
     convert_partial(tx, &mut live, conversation_id).await?;
     for call in unstarted {
-        let result = harness_error("aborted", &format!("Tool {} was aborted", call.name));
+        // A call its request did not offer could not have run either way.
+        let slot = live.tools.iter().flatten().find(|slot| slot.call_id == call.id);
+        let result = if slot.is_some_and(|slot| slot.unoffered == Some(true)) {
+            harness_error("tool_unavailable", &format!("Tool {} is not available", call.name))
+        } else {
+            harness_error("aborted", &format!("Tool {} was aborted", call.name))
+        };
         append_tool_result(tx, conversation_id, &call, &result, now, None).await?;
     }
     end_run(tx, &mut live, owner, unanswered(RunFailureReason::Aborted, None))?;

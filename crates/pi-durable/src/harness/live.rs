@@ -30,9 +30,12 @@ pub enum SlotStatus {
 pub struct ToolSlot {
     pub call_id: String,
     pub name: String,
-    /// Absent for a call not started yet and for a call its request did not offer.
+    /// Absent for a call not started yet (sequential round).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_id: Option<TaskId>,
+    /// A call to a tool its request did not offer: its task settles `tool_unavailable` without running anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unoffered: Option<bool>,
     pub status: SlotStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
@@ -55,6 +58,7 @@ impl ToolSlot {
             call_id: call_id.into(),
             name: name.into(),
             task_id: None,
+            unoffered: None,
             status,
             output: None,
             dropped_bytes: None,

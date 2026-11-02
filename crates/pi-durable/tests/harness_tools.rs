@@ -172,7 +172,7 @@ async fn gives_tools_and_hooks_the_harness_models() {
 }
 
 #[tokio::test]
-async fn answers_calls_to_tools_the_request_did_not_offer_without_a_task() {
+async fn answers_calls_to_tools_the_request_did_not_offer_through_a_flagged_tool_task() {
     let setup = chat_setup(RegisterFauxProviderOptions::default());
     add_tool(&setup, tool("echo", |_, _, _| async { Ok(empty_result()) }));
     let responses = vec![calls(&[("ghost", json!({}), "c1"), ("echo", json!({}), "c2")]), done()];
@@ -194,8 +194,30 @@ async fn answers_calls_to_tools_the_request_did_not_offer_without_a_task() {
             json!({ "diagnostics": [{ "severity": "error", "code": "tool_unavailable", "message": "Tool ghost is not available" }] })
         )
     );
+    // The unoffered call has its own task, so `after_tool` and `control` apply to it as to any call.
     let tasks = conversation_tasks(&harness, &root).await;
-    assert_eq!(tasks.iter().filter(|task| task.kind == "pi.tool").count(), 1);
+    let inputs: Vec<Value> =
+        tasks.iter().filter(|task| task.kind == "pi.tool").map(|task| task.input.to_serde()).collect();
+    assert_eq!(inputs.len(), 2);
+    assert!(inputs.iter().any(|input| input["callId"] == "c1" && input["unoffered"] == true), "{inputs:?}");
+    assert!(inputs.iter().any(|input| input.get("unoffered").is_none()), "{inputs:?}");
+    harness.close(&ctx()).await.unwrap();
+}
+
+#[tokio::test]
+async fn never_runs_a_tool_the_request_did_not_offer_even_when_the_agent_has_it() {
+    let setup = chat_setup(RegisterFauxProviderOptions::default());
+    let ran = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = ran.clone();
+    let hidden = tool("hidden", move |_, _, _| {
+        count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        async { Ok(empty_result()) }
+    });
+    add_tool(&setup, hidden.with_deferred());
+    let Run { harness, entries, status, .. } = run(&setup, vec![calls(&[("hidden", json!({}), "c1")]), done()]).await;
+    assert_eq!(status, SubmissionStatus::Done);
+    assert_eq!(ran.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert_eq!(result_text(&results(&entries)[0]), "<harness>\n[error] Tool hidden is not available\n</harness>");
     harness.close(&ctx()).await.unwrap();
 }
 
