@@ -189,6 +189,7 @@ export function createUiContext(target, prompt) {
 		setWorkingVisible: (visible) => call("ui.setWorkingVisible", target, Boolean(visible)),
 		setWorkingIndicator: (options) => call("ui.setWorkingIndicator", target, options ?? null),
 		setHiddenThinkingLabel: (label) => call("ui.setHiddenThinkingLabel", target, label ?? null),
+		setChatStyle: (options) => call("ui.setChatStyle", target, options ?? null),
 		setWidget: (key, content, options) => {
 			const placement = options?.placement ?? null;
 			if (typeof content === "function") {

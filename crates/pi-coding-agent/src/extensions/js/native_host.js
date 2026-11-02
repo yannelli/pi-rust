@@ -148,6 +148,26 @@ function settingsSet(ctx, { namespace, value, scope = "global" }) {
 	return null;
 }
 
+const optionalText = (value) => (typeof value === "string" ? value : undefined);
+
+/** `ui.setWorkingIndicator` params as upstream options; without `frames`, pi's own indicator. */
+function indicatorOptions({ frames, intervalMs }) {
+	if (!Array.isArray(frames)) return undefined;
+	const options = { frames: frames.map((frame) => String(frame ?? "")) };
+	if (Number.isFinite(intervalMs) && intervalMs > 0) options.intervalMs = Math.round(intervalMs);
+	return options;
+}
+
+/** `ui.setChatStyle` params with the known keys only. */
+function chatStyle({ userPrefix, assistantPrefix, collapseThinking, roundedEditor }) {
+	return {
+		userPrefix: optionalText(userPrefix),
+		assistantPrefix: optionalText(assistantPrefix),
+		collapseThinking: collapseThinking === true,
+		roundedEditor: roundedEditor === true,
+	};
+}
+
 const TARGETS = {
 	pi: (state) => state.pi,
 	ctx: (state) => state.currentCtx(),
@@ -174,6 +194,11 @@ const CTX_METHODS = new Set([
 	"ui.editor",
 	"ui.setStatus",
 	"ui.setTitle",
+	"ui.setWorkingMessage",
+	"ui.setWorkingIndicator",
+	"ui.setWorkingVisible",
+	"ui.setHiddenThinkingLabel",
+	"ui.setChatStyle",
 	"ui.setEditorText",
 	"ui.getEditorText",
 	"ui.writeTerminal",
@@ -221,6 +246,12 @@ export function hostMethods(state) {
 		"ui.editor": async (p) => toJson(await ui().editor(p.title, p.prefill)),
 		"ui.setStatus": (p) => (ctx().ui.setStatus(p.key, p.text ?? undefined), done()),
 		"ui.setTitle": (p) => (ctx().ui.setTitle(p.title), done()),
+		"ui.setWorkingMessage": (p) => (ctx().ui.setWorkingMessage(optionalText(p.message)), done()),
+		"ui.setWorkingIndicator": (p) => (ctx().ui.setWorkingIndicator(indicatorOptions(p)), done()),
+		"ui.setWorkingVisible": (p) => (ctx().ui.setWorkingVisible(p.visible !== false), done()),
+		"ui.setHiddenThinkingLabel": (p) => (ctx().ui.setHiddenThinkingLabel(optionalText(p.label)), done()),
+		"ui.setChatStyle": (p) => (ctx().ui.setChatStyle(chatStyle(p)), done()),
+		"ui.getTheme": () => call("theme.current"),
 		"ui.setEditorText": (p) => (ctx().ui.setEditorText(p.text ?? ""), done()),
 		"ui.getEditorText": () => ctx().ui.getEditorText(),
 		"ui.writeTerminal": (p) => {

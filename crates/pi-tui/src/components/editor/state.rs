@@ -73,6 +73,8 @@ pub(crate) struct EditorCore {
     pub border_color: StyleFn,
     pub top_border: Option<BorderRenderer>,
     pub bottom_border: Option<BorderRenderer>,
+    /// Round corners on the borders and side bars in the padding columns.
+    pub rounded: bool,
     pub disable_submit: bool,
     pub events: VecDeque<EditorEvent>,
     /// Handle used by timers and autocomplete tasks to reach this state later.
@@ -135,6 +137,7 @@ impl EditorCore {
             padding_x: options.padding_x,
             top_border: None,
             bottom_border: None,
+            rounded: false,
             disable_submit: false,
             events: VecDeque::new(),
             self_ref,

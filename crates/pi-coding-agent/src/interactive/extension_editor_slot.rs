@@ -9,10 +9,10 @@ use pi_tui::components::LoaderIndicatorOptions;
 use pi_tui::{ComponentRef, TuiInputListenerResult};
 use serde_json::{Value, json};
 
-use super::components::{AssistantMessageComponent, StatusKind};
+use super::components::{AssistantMessageComponent, StatusKind, UserMessageComponent};
 use super::extension_view::{call_js, dispose};
 use super::mode::{DEFAULT_HIDDEN_THINKING_LABEL, DEFAULT_WORKING_MESSAGE, InteractiveMode};
-use crate::extension_ui::WorkingIndicatorOptions;
+use crate::extension_ui::{ChatStyle, WorkingIndicatorOptions};
 use crate::extensions::{ComponentFactory, TerminalInputVerdict};
 
 impl InteractiveMode {
@@ -191,6 +191,24 @@ impl InteractiveMode {
                 && let Some(message) = child.as_any_mut().downcast_mut::<AssistantMessageComponent>()
             {
                 message.set_hidden_thinking_label(&label);
+            }
+        }
+        self.request_render();
+    }
+
+    /// Message prefixes, collapsed thinking, and the rounded editor; rebuilds the chat.
+    pub(super) fn set_chat_style(&self, style: ChatStyle) {
+        self.editor.editor().set_rounded(style.rounded_editor);
+        self.state.borrow_mut().chat_style = style.clone();
+        let mut messages = self.ui.chat.borrow().children.clone();
+        messages.extend(self.state.borrow().streaming_component.clone().map(|component| component as ComponentRef));
+        for child in &messages {
+            let Ok(mut child) = child.try_borrow_mut() else { continue };
+            let any = child.as_any_mut();
+            if let Some(message) = any.downcast_mut::<AssistantMessageComponent>() {
+                message.set_chat_style(style.clone());
+            } else if let Some(message) = any.downcast_mut::<UserMessageComponent>() {
+                message.set_chat_style(style.clone());
             }
         }
         self.request_render();

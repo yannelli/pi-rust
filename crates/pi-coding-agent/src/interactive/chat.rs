@@ -67,7 +67,13 @@ impl InteractiveMode {
         });
         let mut transformers = vec![mermaid];
         transformers.extend(self.extension_markdown_transformers());
-        RenderOptions { markdown_theme, output_pad: self.state.borrow().output_pad, transformers }
+        let state = self.state.borrow();
+        RenderOptions {
+            markdown_theme,
+            output_pad: state.output_pad,
+            transformers,
+            chat_style: state.chat_style.clone(),
+        }
     }
 
     pub(super) fn add_to_chat(&self, child: ComponentRef) {

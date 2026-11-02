@@ -13,7 +13,14 @@ const INITIALIZE_MS = 10000;
 const SHUTDOWN_MS = 2000;
 const KILL_MS = 2000;
 const CTX_WAIT_MS = 30000;
-const FOOTER_POLL_MS = 250;
+const POLL_MS = 250;
+/** Optional protocol parts this host speaks, sent in `initialize` as `features`. */
+const FEATURES = ["toolRenderers", "render.spinner", "render.refresh", "ui.getTheme", "theme_changed", "ui.working", "ui.chatStyle"];
+/** What `footer_changed` and `theme_changed` subscribers watch: the reader and the notification. */
+const WATCHED = {
+	footer: { read: () => footerJson(), notify: (value) => ["footer.changed", { footer: value }] },
+	theme: { read: () => call("theme.current"), notify: (value) => ["theme.changed", { theme: value }] },
+};
 
 const safe = (read, fallback = null) => {
 	try {
@@ -22,6 +29,8 @@ const safe = (read, fallback = null) => {
 		return fallback;
 	}
 };
+
+const safeText = (read) => JSON.stringify(safe(read));
 
 const LOG_LEVEL = /^(error|warn|info|debug):\s*/;
 const NOTIFY_TYPE = { error: "error", warn: "warning", info: "info", debug: "info" };
@@ -74,7 +83,7 @@ function createState(pi, spec) {
 			state.ctx = ctx;
 			for (const resolve of state.ctxWaiters.splice(0)) resolve();
 			state.installAutocomplete();
-			state.startFooterPoll();
+			state.startPoll();
 		},
 		ctxWaiters: [],
 		/** Requests sent before the first event wait for its ctx. */
@@ -85,29 +94,32 @@ function createState(pi, spec) {
 				setTimeout(resolve, CTX_WAIT_MS).unref?.();
 			});
 		},
-		footerWatched: false,
-		footerTimer: undefined,
-		watchFooter() {
-			state.footerWatched = true;
-			state.startFooterPoll();
+		/** The last JSON text of each watched kind (`footer`, `theme`); undefined until the first check. */
+		watched: new Map(),
+		pollTimer: undefined,
+		watch(kind) {
+			if (!state.watched.has(kind)) state.watched.set(kind, state.pollTimer ? safeText(WATCHED[kind].read) : undefined);
+			state.startPoll();
 		},
-		/** `footer.changed` for `footer_changed` subscribers: one check per FOOTER_POLL_MS in `tui` mode. */
-		startFooterPoll() {
-			const idle = !state.footerWatched || state.footerTimer || state.dead || state.stopping;
+		/** `footer.changed` and `theme.changed` for their subscribers: one check per POLL_MS in `tui` mode. */
+		startPoll() {
+			const idle = state.watched.size === 0 || state.pollTimer || state.dead || state.stopping;
 			if (idle || safe(() => state.ctx?.mode) !== "tui") return;
-			let last = JSON.stringify(footerJson());
-			state.footerTimer = setInterval(() => {
-				const footer = footerJson();
-				const text = JSON.stringify(footer);
-				if (text === last) return;
-				last = text;
-				state.peer.notify("footer.changed", { footer });
-			}, FOOTER_POLL_MS);
-			state.footerTimer.unref?.();
+			for (const [kind, last] of state.watched) if (last === undefined) state.watched.set(kind, safeText(WATCHED[kind].read));
+			state.pollTimer = setInterval(() => {
+				for (const [kind, last] of state.watched) {
+					const value = safe(WATCHED[kind].read);
+					const text = JSON.stringify(value);
+					if (text === last || value === null) continue;
+					state.watched.set(kind, text);
+					state.peer.notify(...WATCHED[kind].notify(value));
+				}
+			}, POLL_MS);
+			state.pollTimer.unref?.();
 		},
-		stopFooterPoll() {
-			clearInterval(state.footerTimer);
-			state.footerTimer = undefined;
+		stopPoll() {
+			clearInterval(state.pollTimer);
+			state.pollTimer = undefined;
 		},
 		installAutocomplete() {
 			if (state.autocompleteInstalled || state.triggers.length === 0 || !safe(() => state.ctx?.hasUI, false)) return;
@@ -130,13 +142,14 @@ function initializeParams(state) {
 		mode: info.loadMode?.mode ?? safe(() => call("ctx.mode", 0)),
 		hasUI: info.loadMode?.hasUI ?? safe(() => call("ctx.hasUI", 0), false),
 		flags: {},
+		features: FEATURES,
 	};
 }
 
 function onExit(state, code, signal) {
 	if (state.dead) return;
 	state.dead = true;
-	state.stopFooterPoll();
+	state.stopPoll();
 	const reason = signal ? `signal ${signal}` : `code ${code}`;
 	const message = `Native extension ${state.path} exited with ${reason}`;
 	state.peer.close(new Error(message));
@@ -152,7 +165,7 @@ function onExit(state, code, signal) {
 async function stop(state) {
 	if (state.dead || state.stopping) return;
 	state.stopping = true;
-	state.stopFooterPoll();
+	state.stopPoll();
 	await state.peer.request("shutdown", {}, { timeout: SHUTDOWN_MS }).catch(() => undefined);
 	state.peer.notify("exit");
 	state.child.stdin.end();
