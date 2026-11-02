@@ -125,6 +125,58 @@ fn invalidates_competing_open_overlays_without_changing_their_base() {
 }
 
 #[test]
+fn makes_the_newer_of_two_open_drafts_stale_when_the_older_is_adopted() {
+    let mut tracker = track(json!({"value": 0, "child": {"value": 0}}));
+    let mut older = tracker.begin_change();
+    put(older.state().unwrap(), &path!["value"], 1);
+    let mut newer = tracker.begin_change();
+    put(newer.state().unwrap(), &path!["child", "value"], 2);
+    let prepared = older.prepare().unwrap();
+    tracker.adopt(&prepared).unwrap();
+    assert_eq!(tracker.value(), &json!({"value": 1, "child": {"value": 0}}));
+    assert!(newer.peek().unwrap_err().to_string().contains("settled"));
+    assert!(newer.state().unwrap_err().to_string().contains("settled"));
+    assert!(newer.prepare().unwrap_err().to_string().contains("settled"));
+    settle(&mut tracker, |draft| put(draft, &path!["value"], 3));
+    assert_eq!(tracker.value(), &json!({"value": 3, "child": {"value": 0}}));
+}
+
+#[test]
+fn makes_every_other_of_three_drafts_stale_open_or_prepared_whichever_is_adopted() {
+    for winner in 0..3 {
+        let mut tracker = track(json!({"value": 0, "rows": [{"value": 0}]}));
+        let mut changes = [tracker.begin_change(), tracker.begin_change(), tracker.begin_change()];
+        for (index, change) in (1..).zip(changes.iter_mut()) {
+            put(change.state().unwrap(), &path!["rows", 0usize, "value"], index);
+        }
+        let prepared = changes[(winner + 1) % 3].prepare().unwrap();
+        let adopted = changes[winner].prepare().unwrap();
+        tracker.adopt(&adopted).unwrap();
+        let expected = winner as i32 + 1;
+        assert_eq!(tracker.value(), &json!({"value": 0, "rows": [{"value": expected}]}));
+        assert!(tracker.adopt(&prepared).unwrap_err().to_string().contains("stale"));
+        let open = &mut changes[(winner + 2) % 3];
+        assert!(open.peek().unwrap_err().to_string().contains("settled"));
+        assert!(open.prepare().unwrap_err().to_string().contains("settled"));
+        let candidate = ((winner + 1) % 3) as i32 + 1;
+        assert_eq!(prepared.value, json!({"value": 0, "rows": [{"value": candidate}]}));
+        assert_eq!(tracker.revision(), 1);
+    }
+}
+
+#[test]
+fn keeps_an_abandoned_draft_a_competitor_of_later_changes() {
+    let mut tracker = track(json!({"value": 0, "child": {"value": 0}}));
+    let mut abandoned = tracker.begin_change();
+    put(abandoned.state().unwrap(), &path!["child", "value"], 1);
+    settle(&mut tracker, |draft| put(draft, &path!["value"], 2));
+    settle(&mut tracker, |draft| put(draft, &path!["value"], 3));
+    assert_eq!(tracker.value(), &json!({"value": 3, "child": {"value": 0}}));
+    assert!(abandoned.peek().unwrap_err().to_string().contains("settled"));
+    assert!(abandoned.prepare().unwrap_err().to_string().contains("settled"));
+}
+
+#[test]
 fn adopts_object_edits_as_ordinary_revisions() {
     let initial = json!({"first": 1, "second": 2});
     let mut tracker = track(initial.clone());

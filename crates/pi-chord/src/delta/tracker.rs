@@ -61,7 +61,7 @@ pub struct Change {
     owner: u64,
     status: Status,
     base_revision: u64,
-    /// Both are dropped once the change settles or goes stale, so held changes keep nothing alive.
+    /// Both are dropped once the change settles; a stale change drops them at its next `state`, `prepare`, or `abort`.
     base: Option<Json>,
     draft: Option<Json>,
     settled: bool,
