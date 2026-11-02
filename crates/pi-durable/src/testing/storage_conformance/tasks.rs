@@ -224,3 +224,36 @@ pub async fn stores_passive_write_submissions(storage: Arc<dyn Storage>) {
     assert_eq!(storage.submission(failed_id, ctx).await.unwrap(), Some(unanswered.clone()));
     assert_eq!(storage.submission_by_request(root_id, "passive-failed", ctx).await.unwrap(), Some(unanswered));
 }
+
+pub async fn stores_continue_submissions(storage: Arc<dyn Storage>) {
+    let storage = &*storage;
+    let ctx = context();
+    let root_id = create_root(storage).await;
+    let done_id: SubmissionId = mint(storage).await;
+    let failed_id: SubmissionId = mint(storage).await;
+    let placed = |id, request: &str| SubmissionRecord {
+        kind: SubmissionType::Continue,
+        request_id: Some(request.into()),
+        ..submission(id, root_id, SubmissionStatus::Placed)
+    };
+    let placed_done = placed(done_id, "continue-done");
+    let placed_failed = placed(failed_id, "continue-failed");
+    storage.commit(&[submission_write(&placed_done), submission_write(&placed_failed)], &|_| {}, ctx).await.unwrap();
+    assert_eq!(storage.submission(done_id, ctx).await.unwrap(), Some(placed_done.clone()));
+    let placed_query = SubmissionQuery { status: Some(SubmissionStatus::Placed), ..SubmissionQuery::default() };
+    let page = storage.scan_submissions(&placed_query, 10, None, ctx).await.unwrap();
+    assert_eq!(page.items, [placed_done.clone(), placed_failed.clone()]);
+
+    let answer: EntryId = mint(storage).await;
+    let done = SubmissionRecord { status: SubmissionStatus::Done, answer: Some(answer), ..placed_done };
+    let unanswered = SubmissionRecord {
+        status: SubmissionStatus::Unanswered,
+        reason: Some("nothing_to_answer".into()),
+        ..placed_failed
+    };
+    storage.commit(&[submission_write(&done), submission_write(&unanswered)], &|_| {}, ctx).await.unwrap();
+    assert_eq!(storage.submission(done_id, ctx).await.unwrap(), Some(done.clone()));
+    assert_eq!(storage.submission_by_request(root_id, "continue-done", ctx).await.unwrap(), Some(done));
+    assert_eq!(storage.submission(failed_id, ctx).await.unwrap(), Some(unanswered.clone()));
+    assert_eq!(storage.submission_by_request(root_id, "continue-failed", ctx).await.unwrap(), Some(unanswered));
+}

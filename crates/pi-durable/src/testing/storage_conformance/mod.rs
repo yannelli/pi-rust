@@ -66,6 +66,7 @@ macro_rules! __for_each_storage_conformance_case {
             scans_sleeping_tasks => "stores and scans sleeping tasks by status",
             indexes_request_ids_per_conversation => "indexes request IDs per conversation and replaces complete submission records",
             stores_passive_write_submissions => "stores passive write submissions without input-only lifecycle states",
+            stores_continue_submissions => "stores continue submissions, which have no entry and are never queued",
             reconstructs_rewindable_documents => "reconstructs rewindable documents and preserves half-open incarnations",
             streams_long_document_tails => "streams long document tails across root replacement deltas",
             copies_document_bases_independently => "copies stored document bases independently and rejects ambiguous sources",
