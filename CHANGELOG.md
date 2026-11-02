@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.4] - 2026-11-02
+
+### Added
+
+- **extensions:** let extensions call MCP tools with mcp.callTool ([6a13fa2](https://github.com/yannelli/pi-rust/commit/6a13fa22d95ec36e304fd61c99d1457d1367ad18))
+
 ## [0.12.3] - 2026-11-02
 
 ### Added
