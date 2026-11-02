@@ -137,6 +137,39 @@ async fn message_end_replaces_messages_of_the_same_role() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn message_display_handlers_chain_and_time_out_to_the_original() {
+    let body = r#"
+	pi.on("message_display", (event) => {
+		pi.appendEntry("display", { event });
+		return { text: `[${event.text}]` };
+	});
+	pi.on("message_display", (event) => ({ text: `${event.delta}!` }));
+	pi.on("message_display", () => ({ text: 42 }));
+	pi.on("message_display", () => { throw new Error("boom"); });
+"#;
+    let h =
+        harness(Setup { files: vec![("display.ts", with_probe(body))], load: vec!["display.ts"], ..Setup::default() })
+            .await;
+    let limit = std::time::Duration::from_secs(10);
+    let shown = h.runner.message_display(Some("entry-1"), "hello", limit).await;
+    assert_eq!(shown.as_deref(), Some("[hello]!"));
+    let entry = h.entries().into_iter().find(|entry| entry["customType"] == "display").expect("display entry");
+    assert_eq!(
+        entry["data"]["event"],
+        json!({"type": "message_display", "messageId": "entry-1", "index": 0, "final": true, "delta": "hello", "text": "hello"})
+    );
+    assert_eq!(h.errors(), vec!["message_display: boom"]);
+
+    let slow = r#"
+	pi.on("message_display", () => new Promise((resolve) => setTimeout(() => resolve({ text: "late" }), 2000)));
+"#;
+    let h =
+        harness(Setup { files: vec![("slow.ts", with_probe(slow))], load: vec!["slow.ts"], ..Setup::default() }).await;
+    let shown = h.runner.message_display(None, "hello", std::time::Duration::from_millis(100)).await;
+    assert_eq!(shown, None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn compaction_can_be_cancelled_by_extensions() {
     let body = r#"
 	pi.on("session_before_compact", (event) => ({ cancel: event.customInstructions === "keep" }));

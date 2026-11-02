@@ -89,6 +89,7 @@ pub(super) struct ModeState {
     pub login_providers: Vec<crate::interactive_components::login::AuthSelectorProvider>,
     pub main_screen_state: Option<pi_tui::TuiMainScreenRenderState>,
     pub extensions: super::extension_view::ExtensionUiState,
+    pub message_display: super::message_display::MessageDisplayCache,
 }
 
 impl ModeState {
@@ -127,6 +128,7 @@ impl ModeState {
             login_providers: Vec::new(),
             main_screen_state: None,
             extensions: Default::default(),
+            message_display: Default::default(),
         }
     }
 }
