@@ -334,6 +334,13 @@ export function hostMethods(state) {
 				throw error instanceof RangeError ? rpcError(-32602, error.message) : error;
 			}
 		},
+		"mcp.callTool": async (p, signal) => {
+			try {
+				return toJson(await pi.callMcpTool(p.server, p.tool, p.args, { timeout: p.timeout, signal }));
+			} catch (error) {
+				throw typeof error?.code === "number" ? rpcError(error.code, error.message) : error;
+			}
+		},
 		"pi.call": (p) => piCall(state, p),
 	};
 }

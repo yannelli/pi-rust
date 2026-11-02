@@ -1,5 +1,5 @@
-//! Asynchronous host operations: dialogs, model requests, compaction, nested tool calls,
-//! session replacement, built-in tools, and shell commands.
+//! Asynchronous host operations: dialogs, model requests, compaction, nested tool calls, MCP
+//! tool calls, session replacement, built-in tools, and shell commands.
 
 use std::sync::Arc;
 
@@ -7,6 +7,7 @@ use futures::StreamExt;
 use pi_agent::{AgentToolResult, ExecuteToolOptions, ToolUpdateCallback};
 use pi_ai::{AssistantMessageEventStream, Model};
 use pi_js::{HostValue, JsError};
+use pi_mcp::McpCallError;
 use serde_json::{Value, json};
 
 use super::convert::stream_options_from_json;
@@ -79,6 +80,50 @@ async fn nested_call(runner: &Arc<ExtensionRunner>, args: &Args) -> Result<Value
     let on_update = js_update_callback(runner, options["updateKey"].as_u64());
     let outcome = context.execute_tool(&name, call_args, ExecuteToolOptions { cancel, on_update }).await;
     Ok(json!({"toolCall": outcome.tool_call, "result": outcome.result, "isError": outcome.is_error}))
+}
+
+/// `pi.callMcpTool`: `{ result }`, or `{ error, code }` with a JSON-RPC code of the native protocol.
+async fn mcp_call(runner: &Arc<ExtensionRunner>, args: &Args) -> Value {
+    let failure = |code: i64, message: String| json!({"error": message, "code": code});
+    let (Ok(server), Ok(tool)) = (args.str(0), args.str(1)) else {
+        return failure(-32602, "server and tool must be strings".into());
+    };
+    let call_args = match args.json(2) {
+        Value::Null => json!({}),
+        Value::Object(object) => Value::Object(object),
+        _ => return failure(-32602, "args must be an object".into()),
+    };
+    let options = args.json(3);
+    let timeout = match &options["timeout"] {
+        Value::Null => None,
+        value => match value.as_f64().filter(|ms| ms.is_finite() && *ms > 0.0) {
+            Some(ms) => Some(std::time::Duration::from_millis(ms.ceil() as u64)),
+            None => return failure(-32602, "timeout must be a positive number of milliseconds".into()),
+        },
+    };
+    let Some(manager) = runner.session().and_then(|session| session.mcp_manager()) else {
+        return failure(-32004, "MCP support is off in this session".into());
+    };
+    let cancel = runner.token(options["signal"].as_u64());
+    match manager.call_server_tool(&server, &tool, call_args, timeout, &cancel).await {
+        Ok(result) => {
+            let mut value = json!({"content": result.content, "isError": result.is_error.unwrap_or(false)});
+            if let Some(structured) = result.structured_content {
+                value["structuredContent"] = structured;
+            }
+            json!({"result": value})
+        }
+        Err(error) => {
+            let code = match error {
+                McpCallError::UnknownServer(_) | McpCallError::UnknownTool { .. } => -32602,
+                McpCallError::NotConnected(_) => -32004,
+                McpCallError::Timeout(_) => -32005,
+                McpCallError::Cancelled => -32800,
+                McpCallError::Failed(_) => -32603,
+            };
+            failure(code, error.to_string())
+        }
+    }
 }
 
 async fn model_op(runner: &Arc<ExtensionRunner>, name: &str, args: Args) -> Result<Value, JsError> {
@@ -183,6 +228,7 @@ pub(crate) async fn run(runner: Arc<ExtensionRunner>, op: &str, args: Vec<HostVa
         "models" => model_op(&runner, name, args).await?,
         "tools" if name == "executeNested" => nested_call(&runner, &args).await?,
         "tools" if name == "builtinExecute" => shell::builtin_execute(&runner, &args).await?,
+        "mcp" if name == "callTool" => mcp_call(&runner, &args).await,
         "shell" => shell::exec(&runner, &args).await?,
         "ctx" if name == "compact" => {
             let session = runner.target_session(args.u64(0))?;

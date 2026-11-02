@@ -24,7 +24,7 @@ A package declares native extensions in `package.json`:
 - Both sides send requests, responses, and notifications. Each side numbers its own request ids.
 - `$/cancelRequest` `{ "id": <request id> }` cancels a request of the other side. The receiver still answers it: with a result, or with error `-32800`.
 - An extension-to-host method sent as a notification (no `id`) runs, and the host drops its result.
-- Error codes: `-32700` parse error, `-32600` invalid request, `-32601` unknown method, `-32602` invalid params, `-32603` internal error, `-32800` cancelled, `-32001` no UI, `-32002` no context (no event reached the extension within 30 seconds), `-32003` the project is not trusted. A request that needs a ctx and arrives before the first event waits for that event; other requests are answered at once, also during `initialize`. The bridge takes the ctx of `session_start` for every extension.
+- Error codes: `-32700` parse error, `-32600` invalid request, `-32601` unknown method, `-32602` invalid params, `-32603` internal error, `-32800` cancelled, `-32001` no UI, `-32002` no context (no event reached the extension within 30 seconds), `-32003` the project is not trusted, `-32004` the MCP server is not connected, `-32005` timed out. A request that needs a ctx and arrives before the first event waits for that event; other requests are answered at once, also during `initialize`. The bridge takes the ctx of `session_start` for every extension.
 - Requests that need a ctx: `ui.notify`, `ui.select`, `ui.confirm`, `ui.input`, `ui.editor`, `ui.setStatus`, `ui.setTitle`, `ui.setEditorText`, `ui.getEditorText`, `ui.writeTerminal`, `ui.setWidget`, `ui.setFooter`, `ui.custom`, `session.getEntries`, `session.getBranch`, `model.get`, `model.set`, `model.find`, `ctx.*`, `llm.complete`, `auth.getProviderAuth`, `auth.login`, `settings.set`, and `pi.call` with a target other than `pi`.
 
 ## Lifecycle
@@ -289,6 +289,21 @@ Line-based surfaces: a widget (surface `widget:<key>`), the footer (surface `foo
 - `events.subscribe` delivers each `pi.events` message on `channel` as an `events.message` notification.
 - `provider.register` takes the declarative part of `pi.registerProvider`: `name`, `baseUrl`, `api` (an existing API id), `apiKey`, `headers`, `models`, and `oauth: { builtin, name? }`. Functions are not available. See [Providers](#providers).
 - `virtualModel.register` takes the definition of `pi.registerVirtualModel`; pi sends `virtualModel.route` for each request.
+
+### MCP
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `mcp.callTool` | `{ server, tool, args?, timeout? }` | `{ content, isError, structuredContent? }` |
+
+`mcp.callTool` calls a tool of an MCP server of the session outside of a tool call, for example for a hook. `server` is the server name of `mcp.json` or of `pi.registerMcpServer`, and `tool` is the tool name that the server lists (not `mcp__<server>__<tool>`). `args` is an object (default `{}`). `content` holds the MCP content blocks of the result. A result with `isError: true` is an answer, not an error.
+
+- The call does not go through the `tool_call` and `tool_result` events, and pi does not write it to the session. It works while the agent is idle or streaming.
+- When the server is still connecting, pi waits for it. `timeout` (milliseconds) limits the wait and the call together. Without it, pi waits until the connection try ends, and the call uses the `timeout` of the server config.
+- pi never starts a sign-in. A server that needs a sign-in fails with `-32004`.
+- Errors: `-32602` for an unknown server, an unknown tool, or invalid params; `-32004` for a server that is disabled, failed, or needs a sign-in, and when MCP support is off; `-32005` when `timeout` expires; `-32800` after `$/cancelRequest`; `-32603` when the server fails the request.
+- Upstream pi has no such method. pi-rust 0.12.1 and older answer `-32601`.
+- In JavaScript and TypeScript extensions, `pi.callMcpTool(server, tool, args?, { timeout?, signal? })` returns the same object. Its errors have the code as `error.code`.
 
 ### Providers
 

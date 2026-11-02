@@ -224,6 +224,11 @@ impl McpServerConnection {
         self.inner.lock().error.clone()
     }
 
+    /// How to sign in to the server, for calls that fail with `NeedsAuth`.
+    pub fn sign_in_message(&self) -> String {
+        self.inner.sign_in_required_message()
+    }
+
     pub fn tools(&self) -> Vec<Tool> {
         self.inner.lock().tools.clone()
     }

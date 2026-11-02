@@ -51,6 +51,7 @@ const registrations = {
 		"native-ask", "native-panel", "native-llm", "native-crash", "native-theme", "native-write", "native-probe",
 		"native-ctx", "native-find", "native-usage", "native-input", "native-exec", "native-exec-cap", "native-settle", "native-llm-headers", "native-log",
 		"native-settings", "native-oauth", "native-auth", "native-login", "native-card", "native-order", "native-restyle", "native-render-count", "native-usage-slot",
+		"native-mcp", "native-mcp-wait",
 	].map((name) => ({ name })),
 	flags: [{ name: "native-flag", type: "string", default: "off" }],
 	events: [
@@ -219,6 +220,17 @@ async function runCommand({ name, ctx }) {
 		await append("native-note", { color: "plum" });
 	} else if (name === "native-usage-slot") {
 		await append("native-usage-slot", await request("usage.get", { provider: "anthropic-2", refresh: true }));
+	} else if (name === "native-mcp") {
+		const search = await answer("mcp.callTool", { server: "docs", tool: "search", args: { query: "n" } });
+		const fail = await answer("mcp.callTool", { server: "docs", tool: "fail" });
+		const unknown = await answer("mcp.callTool", { server: "nope", tool: "search" });
+		await append("native-mcp", { search, fail, unknown });
+	} else if (name === "native-mcp-wait") {
+		const timeout = await answer("mcp.callTool", { server: "docs", tool: "search", args: {}, timeout: 50 });
+		const id = nextId;
+		const call = answer("mcp.callTool", { server: "docs", tool: "search", args: {} });
+		setTimeout(() => notify("$/cancelRequest", { id }), 50);
+		await append("native-mcp-wait", { timeout, cancelled: await call });
 	} else if (name === "native-restyle") {
 		cardStyle = " bold";
 	} else if (name === "native-render-count") {

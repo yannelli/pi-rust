@@ -9,7 +9,7 @@ import { sessionStream } from "./stream.js";
 import { unsupportedError } from "./unsupported.js";
 
 const HOOKS = ["prepareArguments", "reachesTools", "prepareLoadout"];
-const MCP = ["registerMcpServer", "unregisterMcpServer", "getMcpServers"];
+const MCP = ["registerMcpServer", "unregisterMcpServer", "getMcpServers", "callMcpTool"];
 const FILE_ONLY = ["handlers", "shortcuts", "messageRenderers", "entryRenderers", "toolRenderers"];
 const groups = new Map();
 

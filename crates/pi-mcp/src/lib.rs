@@ -39,7 +39,8 @@ pub use error::{McpError, OAuthError};
 pub use jsonrpc::{JsonRpcErrorObject, JsonRpcId, JsonRpcMessage};
 pub use log::McpServerLog;
 pub use manager::{
-    McpAgentTool, McpConnectionId, McpManager, McpManagerOptions, McpServerStatus, McpSubscription, NotifyLevel,
+    McpAgentTool, McpCallError, McpConnectionId, McpManager, McpManagerOptions, McpServerStatus, McpSubscription,
+    NotifyLevel,
 };
 pub use naming::{create_mcp_tool_name, server_key};
 pub use output::{McpToolDetails, McpToolOutput, convert_mcp_result};
