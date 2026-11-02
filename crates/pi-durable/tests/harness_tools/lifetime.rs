@@ -284,14 +284,21 @@ async fn rejects_details_still_waiting_when_the_call_is_aborted_during_after_too
     let in_after_tool = Deferred::default();
     let signal = in_after_tool.clone();
     let hooks = ToolHooks {
-        after_tool: Some(Arc::new(move |_: (ToolHookCall, ToolExecutionResult), _, context: pi_chord::Context| {
-            let signal = signal.clone();
-            Box::pin(async move {
-                signal.resolve();
-                aborted(context.abort_signal().unwrap().clone()).await;
-                Ok(None)
-            })
-        })),
+        after_tool: Some(Arc::new(
+            move |(_, result): (ToolHookCall, ToolExecutionResult), _, context: pi_chord::Context| {
+                let signal = signal.clone();
+                // The abort handler's result runs the hooks too (upstream issue 11043); only the executed call's waits.
+                let abort_result = result.diagnostics.iter().flatten().any(|d| d.code.as_deref() == Some("aborted"));
+                Box::pin(async move {
+                    if abort_result {
+                        return Ok(None);
+                    }
+                    signal.resolve();
+                    aborted(context.abort_signal().unwrap().clone()).await;
+                    Ok(None)
+                })
+            },
+        )),
         ..ToolHooks::default()
     };
     add_tool_hooks(&setup, "hooks", hooks);

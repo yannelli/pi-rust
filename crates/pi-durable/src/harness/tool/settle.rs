@@ -8,16 +8,21 @@ use pi_chord::{Context, Json};
 use pi_telemetry::SpanAttributes;
 
 use super::api::CallState;
-use super::decode_input;
-use super::result::{append_tool_result, nested_result, summary_of};
-use super::{MADE_NESTED_CALLS, NESTED_CALL_DOC, ToolHookCall, ToolTaskInput, ToolTaskResult, json_equal, tool_task};
+use super::result::{
+    append_tool_result, bound_content, from_slot, nested_result, output_limits, output_value, summary_of, truncated,
+};
+use super::{
+    MADE_NESTED_CALLS, NESTED_CALL_DOC, ToolHookCall, ToolHooks, ToolTaskInput, ToolTaskResult, decode_input,
+    json_equal, resolve_tool, tool_task,
+};
 use crate::documents::encode;
 use crate::errors::{DurableError, DurableResult};
 use crate::harness::live::{
-    LIVE_DOC, NestedToolSlot, PROGRESS_COMMIT, SlotProgress, SlotRef, SlotStatus, remove_nested_slots, tool_slot,
+    LIVE_DOC, NestedToolSlot, PROGRESS_COMMIT, SlotRef, SlotStatus, remove_nested_slots, tool_slot,
 };
 use crate::harness::progress::{Progress, ProgressClock};
 use crate::harness::scheduler::TaskRuntime;
+use crate::harness::tool_registration::ToolRegistration;
 use crate::harness::types::{ToolDiagnostic, ToolExecutionResult};
 use crate::harness::usage::{UsageBucket, record_usage};
 use crate::harness::util::lock;
@@ -34,14 +39,100 @@ pub(crate) enum Ending {
     Failed { message: String, reason: Option<String> },
 }
 
+/// Settle a result the Harness decided in the `call` phase, without running the tool: the tool did not resolve, the
+/// arguments are invalid, or `before_tool` blocked the call. `after_tool` applies as to an executed call's result.
+pub(crate) async fn reject(
+    runtime: &TaskRuntime,
+    input: &ToolTaskInput,
+    call: &ToolHookCall,
+    tool: Option<&ToolRegistration>,
+    result: ToolExecutionResult,
+    context: &Context,
+) -> DurableResult<()> {
+    let settled = after_harness_result(runtime, input, call, tool, result, None, context).await?;
+    settle(runtime, input, call, Ending::Completed, settled, context, None).await
+}
+
+/// Settle an error result `(code, message)` built from the slot, current while the tool does not run: with `hooks`,
+/// after `after_tool` and bounded with the limits of the tool in it; without, as built, as the hooks may cut it off.
+pub(crate) async fn settle_from_slot(
+    runtime: &TaskRuntime,
+    input: &ToolTaskInput,
+    call: &ToolHookCall,
+    hooks: Option<Option<&ToolRegistration>>,
+    ending: Ending,
+    (code, message): (&str, &str),
+    context: &Context,
+) -> DurableResult<()> {
+    let task_id = runtime.task_id();
+    let live = runtime.snapshot(&LIVE_DOC, runtime.conversation_id(), context).await?;
+    let mut live = live.map(|value| LIVE_DOC.decode(&value)).transpose()?;
+    let slot = live.as_mut().and_then(|live| tool_slot(live, task_id).map(|slot| slot.progress()));
+    let (result, truncation) = from_slot(slot, code, message);
+    let settled = match hooks {
+        Some(tool) => after_harness_result(runtime, input, call, tool, result, truncation, context).await?,
+        None => {
+            let mut result = result;
+            result.diagnostics.get_or_insert_with(Vec::new).extend(truncation);
+            result
+        }
+    };
+    settle(runtime, input, call, ending, settled, context, None).await
+}
+
+/// The tool whose output limits bound a hooks' result: the called tool, or none when it or the agent does not resolve.
+pub(crate) async fn tool_for_limits(
+    runtime: &TaskRuntime,
+    input: &ToolTaskInput,
+    name: &str,
+    context: &Context,
+) -> Option<Arc<ToolRegistration>> {
+    resolve_tool(runtime, input, name, context).await.ok().flatten()
+}
+
+/// A result the Harness wrote, after `after_tool`, bounded like an executed call's and without the hooks' structured
+/// output; a schema-less nested success gets its output as value. `truncation` stays while the hooks keep the output.
+async fn after_harness_result(
+    runtime: &TaskRuntime,
+    input: &ToolTaskInput,
+    call: &ToolHookCall,
+    tool: Option<&ToolRegistration>,
+    result: ToolExecutionResult,
+    truncation: Option<ToolDiagnostic>,
+    context: &Context,
+) -> DurableResult<ToolExecutionResult> {
+    let mut last = result.clone();
+    for hooks in runtime.hooks::<ToolHooks>(context).await? {
+        let Some(hook) = &hooks.after_tool else { continue };
+        match hook((call.clone(), last.clone()), runtime.clone(), context.clone()).await {
+            Ok(Some(replaced)) => last = replaced,
+            Ok(None) => {}
+            Err(error) => runtime.hook_failed(&hooks, error)?,
+        }
+    }
+    let mut harness: Vec<ToolDiagnostic> = truncation.filter(|_| last.output == result.output).into_iter().collect();
+    let limits = output_limits(tool);
+    let (content, dropped_bytes, dropped_lines) = bound_content(last.output.as_deref().unwrap_or_default(), limits);
+    if dropped_bytes > 0 {
+        harness.push(truncated(dropped_bytes, dropped_lines, Some(limits.retain)));
+    }
+    let succeeded = matches!(input, ToolTaskInput::Nested { .. })
+        && last.is_error != Some(true)
+        && tool.is_none_or(|tool| tool.structured_output_schema.is_none());
+    let structured_output = if succeeded { Some(output_value(&content)?) } else { None };
+    let mut diagnostics = last.diagnostics.take().unwrap_or_default();
+    diagnostics.extend(harness);
+    Ok(ToolExecutionResult { output: Some(content), diagnostics: Some(diagnostics), structured_output, ..last })
+}
+
 /// Commit the tool's terminal state and mark its slot done. Nested calls this call left running are aborted
-/// first. `build` receives the slot's progress so interruption and abort can report it.
+/// first. `control` applies only when the task completes.
 pub(crate) async fn settle(
     runtime: &TaskRuntime,
     input: &ToolTaskInput,
     call: &ToolHookCall,
     ending: Ending,
-    build: impl FnOnce(Option<SlotProgress>) -> ToolExecutionResult + Send + 'static,
+    result: ToolExecutionResult,
     context: &Context,
     duration_ms: Option<u64>,
 ) -> DurableResult<()> {
@@ -64,7 +155,6 @@ pub(crate) async fn settle(
     let change = move |tx: Tx, _| async move {
         let draft = tx.doc(&LIVE_DOC, conversation_id).await?;
         let mut live = draft.get()?;
-        let result = build(tool_slot(&mut live, task_id).map(|slot| slot.progress()));
         let settled = match &input {
             ToolTaskInput::Nested { parent, key, .. } => {
                 let nested = nested_result(task_id, &result, duration_ms);

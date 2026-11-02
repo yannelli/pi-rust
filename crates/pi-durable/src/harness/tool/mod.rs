@@ -108,7 +108,8 @@ type Hook<A, R> = Arc<dyn Fn(A, HookApi, Context) -> BoxFuture<'static, DurableR
 pub struct ToolHooks {
     /// Before intent; the first block wins, otherwise arguments replace the call's. A failure blocks.
     pub before_tool: Option<Hook<ToolHookCall, Option<BeforeToolDecision>>>,
-    /// After execution, before the result is committed; replaces the result.
+    /// Before the result is committed; replaces the result. Runs on every result the tool task writes, also its own
+    /// error results (told apart by diagnostic code), except past the restart limit and in an abort's last attempt.
     pub after_tool: Option<Hook<(ToolHookCall, ToolExecutionResult), Option<ToolExecutionResult>>>,
 }
 
