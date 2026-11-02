@@ -73,6 +73,7 @@ pub(super) struct ModeState {
     pub hide_thinking_block: bool,
     pub output_pad: usize,
     pub hidden_thinking_label: String,
+    pub chat_style: crate::extension_ui::ChatStyle,
     pub skill_commands: HashMap<String, PathBuf>,
     pub is_bash_mode: bool,
     pub bash_component: Option<Rc<RefCell<BashExecutionComponent>>>,
@@ -89,6 +90,7 @@ pub(super) struct ModeState {
     pub login_providers: Vec<crate::interactive_components::login::AuthSelectorProvider>,
     pub main_screen_state: Option<pi_tui::TuiMainScreenRenderState>,
     pub extensions: super::extension_view::ExtensionUiState,
+    pub message_display: super::message_display::MessageDisplayCache,
 }
 
 impl ModeState {
@@ -112,6 +114,7 @@ impl ModeState {
             hide_thinking_block: settings.hide_thinking_block(),
             output_pad: usize::from(settings.output_pad()),
             hidden_thinking_label: DEFAULT_HIDDEN_THINKING_LABEL.to_string(),
+            chat_style: Default::default(),
             skill_commands: HashMap::new(),
             is_bash_mode: false,
             bash_component: None,
@@ -127,6 +130,7 @@ impl ModeState {
             login_providers: Vec::new(),
             main_screen_state: None,
             extensions: Default::default(),
+            message_display: Default::default(),
         }
     }
 }

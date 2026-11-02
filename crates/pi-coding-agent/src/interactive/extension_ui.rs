@@ -16,7 +16,7 @@ use super::bridge::EventBridge;
 use super::extension_view::Widget;
 use super::mode::InteractiveMode;
 use crate::extension_ui::{
-    DialogOptions, ExtensionUi, NotifyType, ThemeInfo, WidgetPlacement, WorkingIndicatorOptions,
+    ChatStyle, DialogOptions, ExtensionUi, NotifyType, ThemeInfo, WidgetPlacement, WorkingIndicatorOptions,
 };
 use crate::extensions::{ComponentFactory, CustomRequest};
 use crate::interactive_components::{ExternalEditorResult, edit_in_external_editor};
@@ -276,6 +276,10 @@ impl ExtensionUi for TuiExtensionUi {
 
     fn set_working_indicator(&self, options: Option<WorkingIndicatorOptions>) {
         self.run(move |mode| mode.set_working_indicator(options));
+    }
+
+    fn set_chat_style(&self, style: ChatStyle) {
+        self.run(move |mode| mode.set_chat_style(style));
     }
 
     fn set_hidden_thinking_label(&self, label: Option<&str>) {

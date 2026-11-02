@@ -85,7 +85,8 @@ pub const DEFAULT_CONTEXT_RETENTION_MS: f64 = 600_000.0;
 /// Default `restart_limit`.
 pub const DEFAULT_RESTART_LIMIT: f64 = 5.0;
 
-/// What a run that fails (`model_error`, `no_model`) does with the inputs queued behind it.
+/// What a run that fails (`model_error`, `no_model`, `interrupted`, `restart_limit`, `nothing_to_answer`) does with
+/// the inputs queued behind it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AfterFailedRun {

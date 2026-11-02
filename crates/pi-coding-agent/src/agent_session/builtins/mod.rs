@@ -6,6 +6,7 @@ mod codemode;
 mod codemode_host;
 pub mod mcp;
 mod mcp_api;
+mod mcp_elicitation;
 mod tool_search;
 
 use std::sync::Arc;
@@ -90,6 +91,14 @@ impl AgentSession {
         };
         if let Some(handler) = handler {
             handler(message, level);
+        }
+        if let Some(runner) = self.extension_runner() {
+            let level = match level {
+                NotifyLevel::Info => "info",
+                NotifyLevel::Warning => "warning",
+                NotifyLevel::Error => "error",
+            };
+            runner.emit_notification(message, level, "pi", None);
         }
     }
 

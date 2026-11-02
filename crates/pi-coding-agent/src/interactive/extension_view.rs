@@ -368,6 +368,7 @@ impl InteractiveMode {
         self.set_working_message(None);
         self.set_working_indicator(None);
         self.set_hidden_thinking_label(None);
+        self.set_chat_style(crate::extension_ui::ChatStyle::default());
         self.request_render();
     }
 }

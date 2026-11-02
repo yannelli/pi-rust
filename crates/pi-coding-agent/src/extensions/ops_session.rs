@@ -333,6 +333,11 @@ pub(crate) fn sync(runner: &ExtensionRunner, op: &str, args: &Args) -> Result<Ho
             Value::Null
         }
         ("session", "write") => super::replace::write(runner, args)?,
+        ("session", "queueSwitch") => {
+            let session = runner.target_session(args.u64(0))?;
+            session.queue_start_switch(std::path::PathBuf::from(args.str(1)?)).map_err(error)?;
+            Value::Null
+        }
         // `project_trust` handlers run before a session exists.
         ("ctx", "mode") if args.u64(0) == 0 => json!(runner.mode().as_str()),
         ("ctx", "hasUI") if args.u64(0) == 0 => json!(runner.mode().has_ui()),

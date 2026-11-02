@@ -38,11 +38,18 @@ pub struct RenderOptions {
     pub markdown_theme: MarkdownTheme,
     pub output_pad: usize,
     pub transformers: Vec<MarkdownTransformer>,
+    /// Message prefixes and collapsed thinking of an extension's `setChatStyle`.
+    pub chat_style: crate::extension_ui::ChatStyle,
 }
 
 impl Default for RenderOptions {
     fn default() -> Self {
-        Self { markdown_theme: get_markdown_theme(), output_pad: 1, transformers: Vec::new() }
+        Self {
+            markdown_theme: get_markdown_theme(),
+            output_pad: 1,
+            transformers: Vec::new(),
+            chat_style: Default::default(),
+        }
     }
 }
 

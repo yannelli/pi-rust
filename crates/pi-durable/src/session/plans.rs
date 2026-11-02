@@ -124,7 +124,8 @@ pub(crate) fn plan_document(document: &DocumentEntry) -> Option<DocumentPlan> {
     Some(DocumentPlan { address_id, record, retire, content, change, conversation_id: None, held: None })
 }
 
-/// Complete record after one change; `None` when the record stays unchanged. Only a placed input is answered.
+/// Complete record after one change; `None` when the record stays unchanged. A continue is never queued, so never
+/// placed; only a placed input or continue is answered.
 pub(crate) fn apply_submission_change(
     current: &SubmissionRecord,
     change: SubmissionChange,
@@ -140,13 +141,16 @@ pub(crate) fn apply_submission_change(
             }
             next.status = match current.kind {
                 SubmissionType::Input => SubmissionStatus::Placed,
-                SubmissionType::Write => SubmissionStatus::Done,
+                SubmissionType::Write | SubmissionType::Continue => SubmissionStatus::Done,
             };
             next.entry = Some(entry);
         }
         SubmissionChange::Settle(SubmissionSettlement::Done { answer }) => {
             if current.status != SubmissionStatus::Placed {
-                return Err(DurableError::error(format!("Submission {} is not a placed input", current.id)));
+                return Err(DurableError::error(format!(
+                    "Submission {} is not a placed input or continue",
+                    current.id
+                )));
             }
             next.status = SubmissionStatus::Done;
             next.answer = Some(answer);

@@ -2,6 +2,21 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.3] - 2026-11-02
+
+### Added
+
+- **extensions:** native UI hooks for tool rows, theme, working indicator, and chat style ([f6e97b6](https://github.com/yannelli/pi-rust/commit/f6e97b62508394d8d36044edc13b4c36b708345c))
+- **extensions:** add instructions_loaded, prompt_expansion, notification, tool_call_blocked, and cwd_changed events ([de4c2ff](https://github.com/yannelli/pi-rust/commit/de4c2ff41d234b919f3a78dc0ac9a778d17fc60e))
+- **mcp:** support elicitation requests with extension events ([b7d8ba6](https://github.com/yannelli/pi-rust/commit/b7d8ba65e2a4fab4dad844a79220e59fce93d00f))
+- **extensions:** add the message_display event for display-only text ([beddeab](https://github.com/yannelli/pi-rust/commit/beddeab5ec506978e9c43d45ce7c04342461a596))
+
+## [0.12.2] - 2026-11-02
+
+### Added
+
+- **durable:** continue conversations without a new input (upstream fb524dd2e) ([2fd3401](https://github.com/yannelli/pi-rust/commit/2fd3401926d13fcd92d2d906d7d1fdcd2c7f1453))
+
 ## [0.12.1] - 2026-11-02
 
 ### Added

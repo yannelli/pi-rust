@@ -42,8 +42,13 @@ const registrations = {
 	],
 	messageRenderers: ["native-card"],
 	entryRenderers: ["native-note"],
+	toolRenderers: [
+		{ toolName: "read", renderCall: true, renderShell: "self" },
+		{ toolName: "native_draw", renderCall: true, renderShell: "self" },
+		{ renderCall: true },
+	],
 	commands: [
-		"native-ask", "native-panel", "native-llm", "native-crash", "native-write", "native-probe",
+		"native-ask", "native-panel", "native-llm", "native-crash", "native-theme", "native-write", "native-probe",
 		"native-ctx", "native-find", "native-usage", "native-input", "native-exec", "native-exec-cap", "native-settle", "native-llm-headers", "native-log",
 		"native-settings", "native-oauth", "native-auth", "native-login", "native-card", "native-order", "native-restyle", "native-render-count", "native-usage-slot",
 		"native-mcp", "native-mcp-wait",
@@ -51,7 +56,7 @@ const registrations = {
 	flags: [{ name: "native-flag", type: "string", default: "off" }],
 	events: [
 		"session_start", "before_agent_start", "tool_call", "tool_result", "message_end", "context",
-		"agent_before_settle", "after_provider_response", ...(process.env.NATIVE_FOOTER === "off" ? [] : ["footer_changed"]),
+		"agent_before_settle", "after_provider_response", "message_display", ...(process.env.NATIVE_FOOTER === "off" ? [] : ["footer_changed"]),
 	],
 	autocomplete: [{ triggerCharacters: ["@"] }],
 };
@@ -77,6 +82,7 @@ async function initialize(params) {
 		mode: params.mode,
 		hasUI: params.hasUI,
 		flag: await answer("pi.call", { target: "pi", method: "getFlag", args: ["native-flag"] }),
+		features: params.features,
 		commands: await answer("commands.getAll", {}),
 	};
 	return registrations;
@@ -102,6 +108,9 @@ async function onEvent({ name, event, ctx }) {
 		settleArmed = false;
 		const entry = { type: "custom", customType: "native-settle", data: { outcome: event.outcome, before: event.entries.length } };
 		return { result: { entries: [...event.entries, entry], continue: false } };
+	}
+	if (name === "message_display") {
+		return event.text.startsWith("native display") ? { result: { text: `NATIVE<${event.messageId} ${event.text}>` } } : {};
 	}
 	if (name === "tool_result") {
 		return event.input?.text === "patch!" ? { patch: { content: [{ type: "text", text: "patched result" }] } } : {};
@@ -183,6 +192,17 @@ async function runCommand({ name, ctx }) {
 	} else if (name === "native-write") {
 		const wrote = await request("ui.writeTerminal", { data: "\u001b]0;native\u0007" });
 		await request("session.appendEntry", { customType: "native-write", data: { wrote } });
+	} else if (name === "native-theme") {
+		const theme = await request("ui.getTheme", {});
+		await request("ui.setWorkingMessage", { message: "Thinking (3s)" });
+		await request("ui.setWorkingIndicator", { frames: ["a", "b"], intervalMs: 90 });
+		await request("ui.setHiddenThinkingLabel", { label: "Thought" });
+		await request("ui.setChatStyle", { userPrefix: "› ", assistantPrefix: 7, collapseThinking: true, roundedEditor: "yes" });
+		await request("ui.setWorkingIndicator", {});
+		await request("ui.setWorkingMessage", {});
+		const late = await answer("register.toolRenderer", { renderCall: true });
+		await request("register.toolRenderer", { toolName: "grep", renderCall: true });
+		await append("native-theme", { name: theme.name, accent: theme.fg.accent, mode: theme.mode, appearance: theme.appearance, late: late.code });
 	} else if (name === "native-probe") {
 		await request("session.appendEntry", { customType: "native-probe", data: initProbe });
 	} else if (name === "native-settings") {
@@ -249,10 +269,15 @@ async function authCommand() {
 }
 
 let cardStyle = "";
+let readRenders = 0;
 let messageRenders = 0;
 
 const renders = {
-	"render.toolCall": ({ args, width }) => ({ lines: [`CALL ${args.text} at ${width}`] }),
+	"render.toolCall": ({ toolName, args, width }) => {
+		if (toolName !== "read") return { lines: [`CALL ${args.text} at ${width}`] };
+		readRenders++;
+		return { lines: [`READ ${args.path} #${readRenders} \u001b_pi:spinner\u0007`], refreshMs: 250 };
+	},
 	"render.toolResult": ({ result, options, width }) => ({ lines: [`RESULT ${textOf(result.content)} at ${width}${options.isPartial ? " partial" : ""}`] }),
 	"render.message": ({ message, width }) => {
 		messageRenders++;

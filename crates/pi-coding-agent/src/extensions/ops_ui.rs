@@ -10,7 +10,7 @@ use super::component::{ComponentFactory, ComponentKind, CustomRequest};
 use super::ops::{Args, error};
 use super::runner::ExtensionRunner;
 use crate::agent_session::lock;
-use crate::extension_ui::{DialogOptions, NotifyType, WidgetPlacement, WorkingIndicatorOptions};
+use crate::extension_ui::{ChatStyle, DialogOptions, NotifyType, WidgetPlacement, WorkingIndicatorOptions};
 
 fn placement(value: &Value) -> Option<WidgetPlacement> {
     match value.as_str() {
@@ -105,7 +105,10 @@ pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<
             json!(ui.write_terminal(&args.str(1)?, args.json(2)["tmuxPassthrough"].as_bool().unwrap_or(false)))
         }
         "notify" => {
-            ui.notify(&args.str(1)?, notify_type(&args.json(2)));
+            let (message, kind) = (args.str(1)?, notify_type(&args.json(2)));
+            ui.notify(&message, kind);
+            let level = kind.unwrap_or_default().as_str();
+            runner.target_runner(target).emit_notification(&message, level, "extension", text(3).as_deref());
             Value::Null
         }
         "terminalInput" => {
@@ -135,6 +138,10 @@ pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<
                 interval_ms: options["intervalMs"].as_u64(),
             });
             ui.set_working_indicator(indicator);
+            Value::Null
+        }
+        "setChatStyle" => {
+            ui.set_chat_style(ChatStyle::from_json(&args.json(1)));
             Value::Null
         }
         "setHiddenThinkingLabel" => {

@@ -21,6 +21,7 @@ use crate::client::{McpClient, RequestOptions};
 use crate::config::McpServerEntry;
 use crate::config_value::resolve_config_value_or_err;
 use crate::content::CallToolResult;
+use crate::elicitation::McpElicitation;
 use crate::error::McpError;
 use crate::log::McpServerLog;
 use crate::oauth::OAuthChallenge;
@@ -77,6 +78,8 @@ pub struct ConnectionOptions {
     pub log: Option<Arc<McpServerLog>>,
     pub client_version: String,
     pub http_client: Option<reqwest::Client>,
+    /// Answers `elicitation/create`; without it the capability is not announced.
+    pub elicitation: Option<McpElicitation>,
 }
 
 impl ConnectionOptions {
@@ -92,6 +95,7 @@ impl ConnectionOptions {
             log: None,
             client_version: env!("CARGO_PKG_VERSION").into(),
             http_client: None,
+            elicitation: None,
         }
     }
 }

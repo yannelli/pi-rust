@@ -82,6 +82,7 @@ impl AgentSession {
         }
         options.update_config = configured.update_config;
         options.registry = configured.registry;
+        options.elicitation = Some(self.mcp_elicitation());
         let weak = self.weak.clone();
         options.on_registered_change = Some(Arc::new(move || {
             if let Some(session) = weak.upgrade() {

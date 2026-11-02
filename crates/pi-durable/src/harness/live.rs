@@ -161,6 +161,8 @@ pub enum RunFailureReason {
     Interrupted,
     /// The generation was cut off repeatedly without committing progress.
     RestartLimit,
+    /// The context did not end in a user message or tool results (empty, or ending in an answer): no request was sent.
+    NothingToAnswer,
 }
 
 impl RunFailureReason {
@@ -174,6 +176,7 @@ impl RunFailureReason {
             Self::Orphaned => "orphaned",
             Self::Interrupted => "interrupted",
             Self::RestartLimit => "restart_limit",
+            Self::NothingToAnswer => "nothing_to_answer",
         }
     }
 }

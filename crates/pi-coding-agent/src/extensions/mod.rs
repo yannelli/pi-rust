@@ -46,4 +46,4 @@ pub use runner::{
 };
 pub use session::{LoadOptions, LoadedExtensions, load_extensions};
 pub use tool::ExtensionTool;
-pub use tui_hooks::{TerminalInputVerdict, ToolRenderRequest, ToolRendererInfo};
+pub use tui_hooks::{MESSAGE_DISPLAY_LIMIT, TerminalInputVerdict, ToolRenderRequest, ToolRendererInfo};

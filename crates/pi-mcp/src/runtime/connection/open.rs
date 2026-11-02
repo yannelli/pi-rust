@@ -8,6 +8,7 @@ use std::time::Duration;
 use super::{CONNECT_RETRY_DELAYS, Inner, McpServerConnection, ServerState, Status};
 use crate::client::{McpClient, McpClientOptions, RequestOptions};
 use crate::config::McpConfigScope;
+use crate::elicitation::McpElicitation;
 use crate::error::{McpError, OAuthError};
 use crate::transport::SharedTransport;
 use crate::types::{ResourceTemplate, Root, Tool};
@@ -146,9 +147,15 @@ impl Inner {
         let mut client_options = McpClientOptions::new("pi", options.client_version.clone());
         client_options.request_timeout = Some(self.handle().timeout());
         client_options.roots = Some(vec![root(&options.cwd)]);
+        if options.elicitation.is_some() {
+            client_options.capabilities.insert("elicitation".into(), McpElicitation::capability());
+        }
         let client = McpClient::new(client_options);
         // Messages from servers an ACP client supplied are not written to the log file.
         let log = options.log.clone().filter(|_| options.entry.scope != Some(McpConfigScope::Client));
+        if let Some(elicitation) = &options.elicitation {
+            elicitation.install(&client, &options.entry.name, log.clone());
+        }
         if let Some(log) = log {
             let name = options.entry.name.clone();
             client.on_notification("notifications/message", move |params| log.write(&name, params));

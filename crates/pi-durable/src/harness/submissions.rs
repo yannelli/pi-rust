@@ -83,15 +83,16 @@ impl Submissions {
     ) -> DurableResult<Submission> {
         self.scheduler.resume()?;
         let core = self.scheduler.core.clone();
-        let input = matches!(draft, SubmissionDraft::Input { .. });
-        // Each input starts its own trace, linked to its caller; a write is a child of its caller.
-        let parent: Arc<dyn TelemetryContext> = if input { core.telemetry.root.clone() } else { context.telemetry() };
-        let attributes = SpanAttributes::new()
-            .with("submission.type", if input { "input" } else { "write" })
-            .with("conversation.id", conversation_id.get());
+        let kind = submission_type(&draft);
+        // Inputs and continues start runs: root traces linked to their callers. A write is a child of its caller.
+        let starts_run = kind != SubmissionType::Write;
+        let parent: Arc<dyn TelemetryContext> =
+            if starts_run { core.telemetry.root.clone() } else { context.telemetry() };
+        let attributes =
+            SpanAttributes::new().with("submission.type", kind.as_str()).with("conversation.id", conversation_id.get());
         let options = SpanOptions::new("pi.durable.submit").with_attributes(attributes);
         let admitted = parent.start_infallible_span(options, |span| async move {
-            if input {
+            if starts_run {
                 span.add_link(SpanLink::new(context.telemetry()));
             }
             let admitting = span.clone();
@@ -269,16 +270,13 @@ pub async fn admit_submission(
     if let SubmissionDraft::Input { entry: Some(entry), .. } = &draft {
         check_input_entry(entry)?;
     }
-    let kind = match draft {
-        SubmissionDraft::Input { .. } => SubmissionType::Input,
-        SubmissionDraft::Write { .. } => SubmissionType::Write,
-    };
+    let kind = submission_type(&draft);
     let request_id = draft.request_id().map(str::to_owned);
     if let Some(request) = &request_id
         && let Some(existing) = tx.submission_by_request(conversation_id, request.clone()).await?
     {
         if existing.kind != kind {
-            let existing_kind = if existing.kind == SubmissionType::Input { "input" } else { "write" };
+            let existing_kind = existing.kind.as_str();
             let message = format!("Request {request} already identifies a submission of type {existing_kind}");
             return Err(DurableError::error(message));
         }
@@ -320,6 +318,20 @@ pub async fn admit_submission(
     if !busy && matches!(draft, SubmissionDraft::Input { when_idle: Some(WhenIdle::Reject), .. }) {
         return Err(DurableError::ConversationIdle(conversation_id));
     }
+    if kind == SubmissionType::Continue {
+        // Never queued: whether a run can continue depends on how the current one ends. A busy conversation rejects it
+        // before any write; an idle one starts a run with its queued items and the continue, which places no entry.
+        if busy {
+            return Err(DurableError::ConversationBusy(conversation_id));
+        }
+        let mut boundary = prepare_boundary(tx, conversation_id, settings).await?;
+        let record = tx.create_submission(create(SubmissionStatus::Placed, None)).await?;
+        // Items an earlier failed run left queued (`afterFailedRun: keep`) are placed first and join the run.
+        let mut inputs = apply_boundary(tx, &mut boundary, BoundaryAt::Final, now).await?.users;
+        inputs.push(record.id);
+        start_run(tx, conversation_id, &live_draft, inputs, false).await?;
+        return Ok(Admission { id: record.id, status: AdmissionStatus::Placed });
+    }
     // A boundary reads the table, so it is prepared before the first table write; a busy one needs none.
     let mut boundary = if busy { None } else { Some(prepare_boundary(tx, conversation_id, settings).await?) };
     let queued_items = match &boundary {
@@ -339,6 +351,7 @@ pub async fn admit_submission(
                     _ => InboxItem::FollowUp { id: record.id, content, entry },
                 }
             }
+            SubmissionDraft::Continue { .. } => unreachable!("a continue is never queued"),
         };
         let inbox = match &boundary {
             Some(boundary) => boundary.inbox.clone(),
@@ -378,5 +391,14 @@ pub async fn admit_submission(
             start_run(tx, conversation_id, &live_draft, vec![record.id], false).await?;
             Ok(Admission { id: record.id, status: AdmissionStatus::Placed })
         }
+        SubmissionDraft::Continue { .. } => unreachable!("a continue was admitted before the boundary"),
+    }
+}
+
+fn submission_type(draft: &SubmissionDraft) -> SubmissionType {
+    match draft {
+        SubmissionDraft::Input { .. } => SubmissionType::Input,
+        SubmissionDraft::Write { .. } => SubmissionType::Write,
+        SubmissionDraft::Continue { .. } => SubmissionType::Continue,
     }
 }

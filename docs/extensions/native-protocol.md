@@ -1,6 +1,6 @@
 # Native extension protocol
 
-Created 2026-10-29. Last updated 2026-10-31.
+Created 2026-10-29. Last updated 2026-11-02.
 
 A native extension is a program that pi starts as a child process. pi and the child exchange JSON-RPC 2.0 messages. The built-in bridge (`crates/pi-coding-agent/src/extensions/js/native*.js`) runs in the extension runtime and maps each message onto the `pi` and `ctx` objects of the JavaScript extension API. The Rust SDK is `crates/pi-ext-sdk` in `yannelli/pi-rust-extensions`.
 
@@ -39,7 +39,9 @@ When the child exits early, pi shows one error notification, fails the pending r
 
 ### `initialize` (host to extension)
 
-Params: `protocolVersion` (integer), `piVersion`, `cwd`, `agentDir`, `extensionPath`, `platform` (`process.platform`), `mode` (`tui`, `rpc`, `json`, `print`), `hasUI`, `flags`.
+Params: `protocolVersion` (integer), `piVersion`, `cwd`, `agentDir`, `extensionPath`, `platform` (`process.platform`), `mode` (`tui`, `rpc`, `json`, `print`), `hasUI`, `flags`, `features`.
+
+`features` lists the optional parts of this document that the host speaks: `toolRenderers`, `render.spinner`, `render.refresh`, `ui.getTheme`, `theme_changed`, `ui.working`, and `ui.chatStyle`. Older hosts send no `features`; treat a missing list as empty.
 
 pi loads extensions before it binds the session. `mode` and `hasUI` are the mode the session binds the extensions in (`tui` in interactive mode, and `rpc`, `json`, or `print` for the CLI modes). Hosts that do not know the mode at load time, for example SDK sessions, send `print` and `false`. The ctx snapshot of each event has the current values. `flags` holds the values pi has at load time and is empty for flags this extension declares in its answer. Read flag values from `ctx.flags` or with `flags.get`.
 
@@ -58,6 +60,7 @@ Result:
 | `autocomplete` | `[{ triggerCharacters: ["@"] }]` |
 | `messageRenderers` | custom message types the extension draws, see [Renderers](#renderers) |
 | `entryRenderers` | custom session entry types the extension draws |
+| `toolRenderers` | `[{ toolName, renderCall?: boolean, renderResult?: boolean, renderShell?: "default" \| "self" }]`: rows of tools that this extension does not register, see [Renderers](#renderers) |
 
 All fields except `protocolVersion` are optional.
 
@@ -86,14 +89,15 @@ All fields except `protocolVersion` are optional.
 | `render.entry` | `{ customType, entry, options, width }` | `{ lines }` or `null` |
 | `shutdown` | `{}` | `null` |
 
-Notifications: `initialized`, `exit`, `events.message` `{ channel, data }`, `ui.resize` `{ surface, width, height? }`, `ui.key` `{ surface, data, key }`, `ui.closed` `{ surface }`, `footer.changed` `{ footer }`, `$/cancelRequest`.
+Notifications: `initialized`, `exit`, `events.message` `{ channel, data }`, `ui.resize` `{ surface, width, height? }`, `ui.key` `{ surface, data, key }`, `ui.closed` `{ surface }`, `footer.changed` `{ footer }`, `theme.changed` `{ theme }`, `$/cancelRequest`.
 
 - `autocomplete.suggest`: with `merge: true`, pi adds its own suggestions after the extension's items when both use the same `prefix`. When the prefixes differ, pi shows only the extension's items.
 - `footer.changed`: pi sends it to an extension that lists `footer_changed` in `events`, when the `footer` of the ctx snapshot changes in `tui` mode. pi checks the footer data 4 times per second, so it sends at most 4 notifications per second.
+- `theme.changed`: pi sends it to an extension that lists `theme_changed` in `events`, when the theme of the TUI changes in `tui` mode (`/settings`, a system theme that follows the terminal, or an edit of the theme file). `theme` has the shape of the `ui.getTheme` result. pi checks 4 times per second.
 
 ### Events
 
-pi sends `event` only for the names the extension subscribed to. `footer_changed` is no event: it subscribes to the `footer.changed` notification. `event` is the event object of the JavaScript API without functions and without `signal`. When the event signal aborts, pi sends `$/cancelRequest`.
+pi sends `event` only for the names the extension subscribed to. `footer_changed` and `theme_changed` are no events: they subscribe to the `footer.changed` and `theme.changed` notifications. `event` is the event object of the JavaScript API without functions and without `signal`. When the event signal aborts, pi sends `$/cancelRequest`.
 
 - `patch` is an RFC 7386 JSON merge patch. pi applies it to the event object in place before the next handler runs. A `null` value removes the key. pi ignores a patch that is not a JSON object and logs a line.
 - `result` is the handler return value: `{ block, reason }` for `tool_call`, `{ action: "transform", text }` for `input`, `{ compaction }` or `{ cancel: true }` for `session_before_compact`, `{ message }` for `message_end`, `{ messages }` for `context`, `{ entries, continue }` for `agent_before_settle`, and the other results of upstream pi.
@@ -104,13 +108,59 @@ How each event uses a patch:
 | --- | --- |
 | `tool_call` (`input`), `before_agent_start` (`systemPromptOptions`), `before_provider_request` (`payload`), `before_provider_headers` (`headers`) | pi reads the changed event object. Example: `{ "input": { "command": "ls" } }` for `tool_call`. |
 | `tool_result`, `message_end`, `context`, `context_with_system` | When `result` is absent, pi builds it from the patched event: `{ content, details, structuredContent, isError, usage }` (the keys the event has) for `tool_result`, `{ message }` for `message_end`, `{ messages }` for the context events. Example: `{ "content": [...] }` for `tool_result`. |
-| All other events, including `input`, `turn_end`, `agent_before_settle`, `cache_warming_decision`, `resources_discover`, `user_bash`, `project_trust`, and `session_before_*` | pi reads only `result`; a patch has no effect. |
+| All other events, including `message_display`, `input`, `turn_end`, `agent_before_settle`, `cache_warming_decision`, `resources_discover`, `user_bash`, `project_trust`, `mcp_elicitation`, `mcp_elicitation_result`, and `session_before_*` | pi reads only `result`; a patch has no effect. |
 
 pi builds no result for `before_agent_start`: a built `systemPrompt` would replace the whole system prompt.
+
+`message_display` (pi-rust only) changes how the text of an assistant message shows in `tui` mode. pi sends it once for each complete assistant message that has text, and once for each such message when pi draws a saved session. The event is `{ type, messageId, index, final, delta, text }`. `messageId` is the session entry id of the message, or `null` when pi has not saved it yet. pi sends the full text in one batch, so `index` is `0`, `final` is `true`, and `delta` and `text` are the same. `text` joins the text blocks of the message with a blank line.
+
+- The result `{ text }` replaces the text blocks on the screen. The thinking blocks stay. An empty `text` hides the text. The session, exports, and the model context keep the original text.
+- pi shows the original text until the answer arrives. If no answer arrives within 10 seconds, or the handler fails, pi keeps the original text.
+- When several handlers listen, each one gets the `text` (and `delta`) that the handler before it returned. A JavaScript extension listens with `pi.on("message_display", handler)` and returns the same result.
+- pi stores the answer for each message, so redraws and width changes send no new event. In the `print`, `json`, and `rpc` modes, pi sends no `message_display` event.
 
 `after_provider_response` of a request reaches the extension, and pi waits for its answer, before pi passes on the first stream event of that response. Thus the `message_end` of the response always comes after the answer to its `after_provider_response`.
 
 The ctx snapshot: `{ cwd, mode, hasUI, model, scopedModels, thinkingLevel, sessionId, sessionName, sessionFile, isIdle, isProjectTrusted, contextUsage, terminalWidth, terminalHeight, flags, footer? }`. `model` is `{ provider, id, name, api, baseUrl, compat, contextWindow, maxTokens, reasoning }` or `null`; it has no headers and no keys. `scopedModels` is `[{ provider, id, thinkingLevel? }]` (the `--models` scope, empty when there is none). `contextUsage` is `{ tokens, contextWindow, percent }` or `null`. `terminalWidth` is the terminal width in columns in `tui` mode, else `null`. `terminalHeight` is the terminal height in rows in `tui` mode, else `null`; it is also `null` when the host does not know the height. `flags` maps each flag of this extension to its value. `footer` is `{ gitBranch, sessionStats?, runState? }` when the host supplies it.
+
+#### pi-rust events
+
+pi-rust adds these events for hook runners. Upstream pi has no such events. JavaScript extensions receive them with `pi.on(name)` too. Each event object also has `type`.
+
+| Event | Payload | Result |
+| --- | --- | --- |
+| `instructions_loaded` | `{ path, scope: "user" \| "project", reason }`. pi sends one for each context file (`AGENTS.md`, `CLAUDE.md`, and the other names) in the system prompt, after `session_start`. `scope` is `user` for the file of the agent directory. `reason` is the `session_start` reason (`startup`, `reload`, `new`, `resume`, or `fork`). | none |
+| `prompt_expansion` | `{ kind: "skill" \| "prompt_template", name, args, source, prompt, text }`, when a prompt `/skill:name args` or `/template args` expands. `source` is the path of the skill or template file, `prompt` is the prompt text, and `text` is the expansion. | `{ action: "block", reason? }` drops the prompt and shows `reason` as a warning. `{ action: "context", text }` appends `"\n\n" + text` to the expansion. The first block wins. The `context` texts of all handlers join in handler order. pi reads only `result`. |
+| `notification` | `{ message, level: "info" \| "warning" \| "error", source: "extension" \| "pi", extension? }`, for each `ui.notify` of an extension and each notice of pi itself. `extension` is the `extensionPath` of a native extension that sent the notice. Notices sent while `notification` handlers run make no `notification` event, so a handler that calls `ui.notify` does not loop. | none |
+| `tool_call_blocked` | `{ toolCallId, toolName, input, reason, source: "extension" \| "permission", extension? }`, after a `tool_call` handler blocked a call (`extension`) or the ACP permission policy denied it (`permission`). `extension` is the path of the extension that blocked the call. | none |
+| `cwd_changed` | `{ oldCwd, newCwd }`, after the session is replaced by a session in another directory. The extensions of the new session get it after their `session_start`. | none |
+
+pi does not wait for the handlers of `instructions_loaded`, `notification`, `tool_call_blocked`, and `cwd_changed`.
+
+During `session_start`, the event context also has `switchSession(sessionPath)` (pi-rust only; upstream pi has it only on command contexts). A native extension calls it with `pi.call` `{ target: "ctx", method: "switchSession", args: [sessionPath] }`. pi queues the switch and returns `null` (`undefined` in JavaScript) at once. When the `session_start` handlers are done, pi switches to the session as a command `ctx.switchSession()` does: `session_before_switch`, new extensions, `session_start` with reason `resume`, and `cwd_changed` when the directory changes. When several handlers queue a switch, the last one wins. After `session_start`, the call fails.
+
+#### MCP elicitation events
+
+These events are pi-rust only. Upstream pi has no MCP elicitation. Native and JavaScript extensions get the same events. With them, an extension can implement hooks such as the `Elicitation` and `ElicitationResult` hooks of Claude Code.
+
+An MCP server sends `elicitation/create` to ask the user for data (form mode) or to open a URL (URL mode). pi announces the `elicitation` client capability with `form` and `url`. pi does these steps:
+
+1. pi sends `mcp_elicitation` to the extensions.
+2. If no handler answers, pi shows a dialog. Without a UI (`print` and `json` modes), pi answers `decline`.
+3. After the dialog, pi sends `mcp_elicitation_result`.
+4. pi sends the answer to the server.
+
+| Event | Payload | Result |
+| --- | --- | --- |
+| `mcp_elicitation` | `{ type, server, message, mode, url?, elicitationId?, requestedSchema? }` | `{ action, content? }` answers the server, and pi shows no dialog and sends no `mcp_elicitation_result`. If more than one handler answers, a `decline` wins. Otherwise the first answer applies. No result shows the dialog. |
+| `mcp_elicitation_result` | `{ type, server, action, mode, elicitationId?, content? }` | `{ action, content? }` replaces the answer of the user. Each handler gets the answer so far. |
+
+- `mode` is `"form"` or `"url"`. A form request has `requestedSchema`: a flat object schema with string, number, integer, boolean, and enum properties. A URL request has `url` and `elicitationId`.
+- `action` is `"accept"`, `"decline"`, or `"cancel"`. `content` is the form data of `accept` in form mode. pi removes `content` from other answers.
+- Before pi sends an `accept` in form mode, it checks `content` against `requestedSchema`: required properties, unknown properties, and the types of the values. If the check fails, pi sends `decline` and writes a warning line to `mcp.log`.
+- A result that is not `undefined` or a valid `{ action, content? }` is an extension error. pi ignores it.
+
+The dialog shows the server name and the message first. In form mode, the user selects **Respond** or **Decline**. Then pi asks for each property: a text input for strings, numbers, integers, and lists, and a selection for booleans and enums. A `default` value fills the input or comes first in the selection. Optional properties can be empty or skipped. Then the user selects **Accept** or **Decline**. In URL mode, pi shows the full URL and its domain, and warns about Punycode domains. The user selects **Open in browser**, **Accept (I will open it myself)**, or **Decline**. pi opens the URL only after the user selects **Open in browser**. Esc in any step sends `cancel`. When the server sends `notifications/elicitation/complete` for an accepted URL request, pi shows a notification.
 
 ### Tools
 
@@ -126,6 +176,9 @@ A tool with `renderCall: true` or `renderResult: true` draws its own call or res
 - pi never waits for the answer. It draws the last lines of the row, or nothing for a new row, and draws again when the answer arrives. Each row has at most one request open. pi keeps the lines of the last 4 widths for each input, so a redraw at a known width sends no request. When the inputs change, for example when a result arrives, or when pi redraws the whole screen (for example after a theme change), pi sends a new request, shows the old lines until the answer arrives, and drops older answers.
 - `context` of the tool requests: `{ args, toolCallId, cwd, executionStarted, argsComplete, isPartial, expanded, showImages, isError }`. `options` of `render.toolResult`: `{ expanded, isPartial }`. `options` of `render.message` and `render.entry`: `{ expanded }`.
 - `renderShell: "self"` tells pi not to draw the tool frame around the rows.
+- `toolRenderers` draw the rows of a tool that pi or another extension registers, for example the built-in `bash` or `read`. They apply only while no other renderer draws that tool: when the tool's own definition, or a `registerToolRenderer` of a JavaScript extension, has a `renderCall` or `renderResult`, pi uses those. A renderer slot that the entry does not set falls back to pi's own row. `register.toolRenderer` takes one entry later.
+- `render.spinner`: the zero-width token `\u001b_pi:spinner\u0007` (an APC string) in an answered line is replaced by the current frame of pi's spinner (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`, 80 ms) on each frame, so a row can animate without a request per frame. Styles around the token apply to the frame. Remove the token, for example when the tool finishes, to stop the animation.
+- `render.refresh`: an answer `{ lines, refreshMs }` asks pi to send the request again after `refreshMs` milliseconds (at least 250) while the inputs of the row stay the same, for example for an elapsed time. pi keeps the old lines until the new answer arrives. An answer without `refreshMs` ends the refreshes.
 - A failed request is logged; the row keeps its last lines until its inputs change.
 - Key hints: `keybindings.get` `{ ids? }` returns `{ "<keybinding id>": "<keys>" }`, for example `{ "app.tools.expand": "ctrl+o" }`, with the keys of the user's keybindings (upstream `keyText` of the render context, `9376c8d`). Without `ids`, it returns every app keybinding. An empty string means that the keybinding has no keys.
 
@@ -144,6 +197,12 @@ A tool with `renderCall: true` or `renderResult: true` draws its own call or res
 | `ui.setWidget` | `{ key, lines: string[] \| null, placement?: "aboveEditor" \| "belowEditor" }` | `null` |
 | `ui.setFooter` | `{ lines: string[] \| null }` | `null` |
 | `ui.setTitle` | `{ title }` | `null` |
+| `ui.setWorkingMessage` | `{ message? }` | `null` |
+| `ui.setWorkingIndicator` | `{ frames?: string[], intervalMs? }` | `null` |
+| `ui.setWorkingVisible` | `{ visible }` | `null` |
+| `ui.setHiddenThinkingLabel` | `{ label? }` | `null` |
+| `ui.setChatStyle` | `{ userPrefix?, assistantPrefix?, collapseThinking?, roundedEditor? }` | `null` |
+| `ui.getTheme` | `{}` | the theme, see below |
 | `ui.setEditorText` | `{ text }` | `null` |
 | `ui.getEditorText` | `{}` | string |
 | `ui.writeTerminal` | `{ data, tmuxPassthrough? }` | `true` when pi wrote to the terminal (`tui` mode), else `false` |
@@ -152,6 +211,12 @@ A tool with `renderCall: true` or `renderResult: true` draws its own call or res
 | `ui.close` | `{ surface, result? }` | `null` |
 
 Dialogs and `ui.custom` return error `-32001` when pi has no UI. `$/cancelRequest` closes an open dialog.
+
+Working indicator (`ui.working`, upstream `ctx.ui.setWorkingMessage`, `setWorkingIndicator`, `setWorkingVisible`, and `setHiddenThinkingLabel`): the indicator shows while the agent works. Without `message` or `label`, pi shows its own text again. `frames` are drawn as they are, so they can carry their own styles; without `frames`, pi draws its own spinner.
+
+Chat style (`ui.chatStyle`, pi-rust `ctx.ui.setChatStyle`): `userPrefix` goes before the first line of each user message and `assistantPrefix` before the first line of the text of each assistant message; the other lines get the same indent. `collapseThinking: true` shows finished thinking blocks as the hidden thinking label, and keeps the block being written open; a click opens one block, and showing thinking blocks with the thinking toggle (`app.thinking.toggle`) opens them all. `roundedEditor: true` rounds the editor corners and draws side bars in the editor padding (`editorPaddingX`). Each call replaces the whole style, and a reload resets it.
+
+`ui.getTheme` returns the theme that the TUI draws with: `{ name, sourcePath, appearance: "dark" | "light", mode: "truecolor" | "256color", fg: { <token>: <SGR open sequence> }, bg: { <token>: <SGR open sequence> }, dim: [<token>] }`. The tokens are those of the theme JSON, for example `accent`, `muted`, `toolTitle`, and `toolSuccessBg`. A token in `dim` also needs `\u001b[2m`. Close a foreground with `\u001b[39m` (and `\u001b[22m` after dim) and a background with `\u001b[49m`. It needs no ctx.
 
 `ui.input`: `prefill` is the initial text. `secret: true` shows `*` for each character in `tui` mode. In `rpc` mode pi adds `prefill` and `secret` to the `input` request of the client.
 
@@ -252,7 +317,7 @@ Line-based surfaces: a widget (surface `widget:<key>`), the footer (surface `foo
 
 ### Later registrations
 
-`register.tool` (one tool definition), `register.command`, `register.shortcut`, `register.flag`, `register.events` (`{ events }`, adds subscriptions), and `register.autocomplete` take the same shapes as the `initialize` result fields. `register.messageRenderer` and `register.entryRenderer` take `{ customType }`. They answer `null`.
+`register.tool` (one tool definition), `register.command`, `register.shortcut`, `register.flag`, `register.events` (`{ events }`, adds subscriptions), and `register.autocomplete` take the same shapes as the `initialize` result fields. `register.messageRenderer` and `register.entryRenderer` take `{ customType }`, and `register.toolRenderer` takes one `toolRenderers` entry. They answer `null`.
 
 ## Example transcript
 

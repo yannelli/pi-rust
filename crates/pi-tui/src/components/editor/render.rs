@@ -57,6 +57,41 @@ struct LayoutLine {
     cursor: Option<usize>,
 }
 
+/// `border` with `left` and `right` in place of a `─` at its first and last visible column.
+pub fn round_border(border: &str, left: char, right: char) -> String {
+    let mut visible: Vec<(usize, char)> = Vec::new();
+    let mut chars = border.char_indices().peekable();
+    while let Some((at, ch)) = chars.next() {
+        if ch != '\x1b' {
+            visible.push((at, ch));
+            continue;
+        }
+        // CSI ends at a final byte; OSC and APC end at BEL or ST.
+        match chars.next().map(|(_, kind)| kind) {
+            Some('[') => {
+                while chars.next_if(|(_, ch)| !('@'..='~').contains(ch)).is_some() {}
+                chars.next();
+            }
+            Some(']' | '_' | 'P') => {
+                while let Some((_, ch)) = chars.next() {
+                    if ch == '\x07' || (ch == '\x1b' && chars.next_if(|(_, ch)| *ch == '\\').is_some()) {
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = border.to_string();
+    if let Some(&(at, '\u{2500}')) = visible.last() {
+        out.replace_range(at..at + '\u{2500}'.len_utf8(), &right.to_string());
+    }
+    if let Some(&(at, '\u{2500}')) = visible.first() {
+        out.replace_range(at..at + '\u{2500}'.len_utf8(), &left.to_string());
+    }
+    out
+}
+
 /// Horizontal padding that fits `width`, and the content width inside it.
 fn padding_and_content(padding_x: usize, width: usize) -> (usize, usize) {
     let padding = padding_x.min(width.saturating_sub(1) / 2);
@@ -99,10 +134,31 @@ impl EditorCore {
         let border_color = self.border_color.clone();
         let context = BorderContext { width, hidden_line_count, border_color: &border_color, is_top };
         let renderer = if is_top { &mut self.top_border } else { &mut self.bottom_border };
-        match renderer {
+        let border = match renderer {
             Some(renderer) => renderer(&context),
             None => context.default_border(),
+        };
+        match (self.rounded, is_top) {
+            (false, _) => border,
+            (true, true) => round_border(&border, '\u{256d}', '\u{256e}'),
+            (true, false) => round_border(&border, '\u{2570}', '\u{256f}'),
         }
+    }
+
+    /// The left and right padding of a text row; the right one is a column shorter when the
+    /// cursor stands in it. A rounded editor draws a side bar in the outer padding columns.
+    fn row_sides(&self, padding_x: usize, cursor_in_padding: bool) -> (String, String) {
+        let spaces = |count: usize| " ".repeat(count);
+        let right_width = padding_x - usize::from(cursor_in_padding);
+        if !self.rounded || padding_x == 0 {
+            return (spaces(padding_x), spaces(right_width));
+        }
+        let bar = (self.border_color)("\u{2502}");
+        let right = match right_width {
+            0 => String::new(),
+            width => format!("{}{bar}", spaces(width - 1)),
+        };
+        (format!("{bar}{}", spaces(padding_x - 1)), right)
     }
 
     pub fn render(&mut self, width: usize) -> Vec<String> {
@@ -149,8 +205,8 @@ impl EditorCore {
                 }
             }
             let fill = " ".repeat(content_width.saturating_sub(line_width));
-            let right = if cursor_in_padding { &side_padding[1..] } else { &side_padding[..] };
-            result.push(format!("{side_padding}{display}{fill}{right}"));
+            let (left, right) = self.row_sides(padding_x, cursor_in_padding);
+            result.push(format!("{left}{display}{fill}{right}"));
         }
         let below = layout.len() - end;
         result.push(self.render_border(width, below, false));

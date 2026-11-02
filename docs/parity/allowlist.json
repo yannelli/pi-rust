@@ -502,6 +502,10 @@
     {
       "item": "getRunState",
       "reason": "pi-rust extension: footer data `getRunState()` gives the program state (`idle`, `working`, `blocked`, `done`, `error`) that the iTerm2 tab color uses."
+    },
+    {
+      "item": "setChatStyle",
+      "reason": "pi-rust extension: `ctx.ui.setChatStyle({ userPrefix, assistantPrefix, collapseThinking, roundedEditor })` styles chat messages and the editor, for the compact-tui extension. Upstream has no such call."
     }
   ],
   "nodeBuiltins": [

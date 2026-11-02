@@ -5,6 +5,9 @@ import { KeybindingsManager, setKeybindings, TUI_KEYBINDINGS } from "@earendil-w
 import { call, callAsync, invokeCallback, optional, registerCallback, releaseCallback, signalId } from "./bridge.js";
 import { currentTheme, getEditorTheme, themeByName } from "./theme.js";
 
+/** Key of the hidden third `notify` argument: the extension path for `notification` events. */
+export const NOTIFY_SOURCE = Symbol("notifySource");
+
 const factories = new Map();
 let nextFactory = 1;
 
@@ -169,7 +172,8 @@ export function createUiContext(target, prompt) {
 					releaseFactory(id);
 				}
 			}),
-		notify: (message, type) => call("ui.notify", target, String(message), type ?? null),
+		notify: (message, type, source) =>
+			call("ui.notify", target, String(message), type ?? null, source?.[NOTIFY_SOURCE] ?? null),
 		onTerminalInput: (handler) => {
 			const key = registerCallback(handler);
 			terminalInputHandlers.set(key, handler);
@@ -185,6 +189,7 @@ export function createUiContext(target, prompt) {
 		setWorkingVisible: (visible) => call("ui.setWorkingVisible", target, Boolean(visible)),
 		setWorkingIndicator: (options) => call("ui.setWorkingIndicator", target, options ?? null),
 		setHiddenThinkingLabel: (label) => call("ui.setHiddenThinkingLabel", target, label ?? null),
+		setChatStyle: (options) => call("ui.setChatStyle", target, options ?? null),
 		setWidget: (key, content, options) => {
 			const placement = options?.placement ?? null;
 			if (typeof content === "function") {

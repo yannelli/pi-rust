@@ -41,6 +41,19 @@ function isUserBashResult(value) {
 	);
 }
 
+const ELICITATION_ACTIONS = new Set(["accept", "decline", "cancel"]);
+
+/** `{ action, content? }` of an elicitation handler, or undefined; throws on other values. */
+function elicitationResult(type, value) {
+	if (value === undefined || value === null) return undefined;
+	const content = value?.content;
+	const validContent = content === undefined || (typeof content === "object" && content !== null && !Array.isArray(content));
+	if (typeof value !== "object" || !ELICITATION_ACTIONS.has(value.action) || !validContent) {
+		throw new Error(`Invalid ${type} handler result: return undefined or { action: "accept" | "decline" | "cancel", content? }`);
+	}
+	return content === undefined ? { action: value.action } : { action: value.action, content };
+}
+
 export class Runner {
 	extensions = [];
 	staleMessage;
@@ -91,6 +104,15 @@ export class Runner {
 		return createContext(this);
 	}
 
+	/** pi-rust: `ctx.switchSession()` of `session_start` queues the switch; it runs after the handlers. */
+	createStartContext() {
+		const ctx = this.createContext();
+		ctx.switchSession = async (sessionPath) => {
+			call("session.queueSwitch", 0, String(sessionPath));
+		};
+		return ctx;
+	}
+
 	createToolContext(toolCallId, signal) {
 		return createToolContext(this, toolCallId, signal);
 	}
@@ -127,7 +149,7 @@ export class Runner {
 	}
 
 	async emit(event) {
-		const ctx = this.createContext();
+		const ctx = event.type === "session_start" ? this.createStartContext() : this.createContext();
 		let result;
 		for (const { ext, handlers } of snapshot(this.extensions, event.type)) {
 			for (const handler of handlers) {
@@ -159,6 +181,25 @@ export class Runner {
 			}
 		}
 		return action;
+	}
+
+	/** pi-rust `message_display`: each handler sees the text the previous one returned. */
+	async emitMessageDisplay(event) {
+		const ctx = this.createContext();
+		let current;
+		for (const { ext, handlers } of snapshot(this.extensions, "message_display")) {
+			for (const handler of handlers) {
+				try {
+					const text = current ?? event.text;
+					const delta = current ?? event.delta;
+					const result = await handler({ ...event, delta, text }, ctx);
+					if (typeof result?.text === "string") current = result.text;
+				} catch (error) {
+					this.reportFailure(ext, "message_display", error);
+				}
+			}
+		}
+		return current;
 	}
 
 	async emitMessageEnd(event) {
@@ -225,12 +266,12 @@ export class Runner {
 	async emitToolCall(event) {
 		const ctx = this.createContext();
 		let result;
-		for (const { handlers } of snapshot(this.extensions, "tool_call")) {
+		for (const { ext, handlers } of snapshot(this.extensions, "tool_call")) {
 			for (const handler of handlers) {
 				const handlerResult = await handler(event, ctx);
 				if (handlerResult) {
 					result = handlerResult;
-					if (result.block) return { block: true, reason: result.reason, input: event.input };
+					if (result.block) return { block: true, reason: result.reason, input: event.input, extensionPath: ext.path };
 				}
 			}
 		}
@@ -257,6 +298,59 @@ export class Runner {
 			}
 		}
 		return undefined;
+	}
+
+	/** pi-rust: the first answer of the handlers, or the first decline. */
+	async emitMcpElicitation(event) {
+		const ctx = this.createContext();
+		let answer;
+		for (const { ext, handlers } of snapshot(this.extensions, "mcp_elicitation")) {
+			for (const handler of handlers) {
+				try {
+					const result = elicitationResult("mcp_elicitation", await handler(event, ctx));
+					if (result?.action === "decline") return result;
+					answer ??= result;
+				} catch (error) {
+					this.reportFailure(ext, "mcp_elicitation", error);
+				}
+			}
+		}
+		return answer;
+	}
+
+	/** pi-rust: each handler sees the answer so far and can replace it. */
+	async emitMcpElicitationResult(event) {
+		const ctx = this.createContext();
+		let current;
+		for (const { ext, handlers } of snapshot(this.extensions, "mcp_elicitation_result")) {
+			for (const handler of handlers) {
+				try {
+					const seen = current ? { ...event, action: current.action, content: current.content } : event;
+					current = elicitationResult("mcp_elicitation_result", await handler(seen, ctx)) ?? current;
+				} catch (error) {
+					this.reportFailure(ext, "mcp_elicitation_result", error);
+				}
+			}
+		}
+		return current;
+	}
+
+	/** pi-rust `prompt_expansion`: the first block wins; `context` texts join in handler order. */
+	async emitPromptExpansion(event) {
+		const ctx = this.createContext();
+		const contexts = [];
+		for (const { ext, handlers } of snapshot(this.extensions, "prompt_expansion")) {
+			for (const handler of handlers) {
+				try {
+					const result = await handler(event, ctx);
+					if (result?.action === "block") return { action: "block", reason: result.reason };
+					if (result?.action === "context" && typeof result.text === "string") contexts.push(result.text);
+				} catch (error) {
+					this.reportFailure(ext, "prompt_expansion", error);
+				}
+			}
+		}
+		return contexts.length > 0 ? { action: "context", text: contexts.join("\n\n") } : { action: "continue" };
 	}
 
 	async emitContext(messages) {

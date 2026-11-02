@@ -245,6 +245,7 @@ export function createHost(config) {
 		emitToolCall: (event) => runner.emitToolCall(event),
 		emitToolResult: (event) => runner.emitToolResult(event),
 		emitMessageEnd: (event) => runner.emitMessageEnd(event),
+		emitMessageDisplay: (event) => runner.emitMessageDisplay(event),
 		emitContext: (messages) => runner.emitContext(messages),
 		emitBeforeProviderRequest: (payload) => runner.emitBeforeProviderRequest(payload),
 		emitBeforeProviderHeaders: (headers) => runner.emitBeforeProviderHeaders(headers),
@@ -252,6 +253,7 @@ export function createHost(config) {
 		emitResourcesDiscover: (cwd, reason) => runner.emitResourcesDiscover(cwd, reason),
 		emitInput: (text, images, source, behavior) => runner.emitInput(text, optional(images), source, optional(behavior)),
 		emitCacheWarmingDecision: (event) => runner.emitCacheWarmingDecision(event),
+		emitPromptExpansion: (event) => runner.emitPromptExpansion(event),
 		emitBoundary: (event) => runner.emitBoundary(event),
 		async emitUserBash(event) {
 			const result = await runner.emitUserBash(event);
@@ -261,6 +263,8 @@ export function createHost(config) {
 			}
 			return result;
 		},
+		emitMcpElicitation: (event) => runner.emitMcpElicitation(event),
+		emitMcpElicitationResult: (event) => runner.emitMcpElicitationResult(event),
 		async emitProjectTrust(cwd) {
 			const ctx = runner.createContext();
 			return runner.emitProjectTrust({ type: "project_trust", cwd }, ctx);

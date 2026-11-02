@@ -126,12 +126,25 @@ impl EntryDraft {
     }
 }
 
-/// Whether a submission asks the model (`input`) or only appends an entry (`write`).
+/// Whether a submission asks the model (`input`), only appends an entry (`write`), or starts a run without a user
+/// message (`continue`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SubmissionType {
     Input,
     Write,
+    /// Places no entry and is never queued.
+    Continue,
+}
+
+impl SubmissionType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Input => "input",
+            Self::Write => "write",
+            Self::Continue => "continue",
+        }
+    }
 }
 
 /// Lifecycle status of a submission.
@@ -140,7 +153,7 @@ pub enum SubmissionType {
 pub enum SubmissionStatus {
     /// Admitted but not yet represented in the transcript.
     Queued,
-    /// An input added to the transcript and owned by an active run.
+    /// An input added to the transcript, or a continue, owned by an active run.
     Placed,
     Done,
     Unanswered,
@@ -161,8 +174,8 @@ impl SubmissionStatus {
     }
 }
 
-/// Durable lifecycle of one admitted user input or passive entry write. Which optional fields are present follows
-/// `type` and `status` as in upstream's union: `entry` once placed, `answer` for a done input, `reason` when unanswered.
+/// Durable lifecycle of one admitted user input, passive entry write, or continue. Optional fields follow `type` and
+/// `status` as in upstream's union: `entry` once placed, `answer` when answered, never an `entry` for a continue.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubmissionRecord {

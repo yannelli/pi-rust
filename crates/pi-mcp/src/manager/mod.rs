@@ -19,6 +19,7 @@ use futures::future::{BoxFuture, Shared};
 use tokio_util::sync::CancellationToken;
 
 use crate::config::{LoadedMcpConfig, McpConfigScope, McpServerConfigPatch, McpServerEntry, update_mcp_server_config};
+use crate::elicitation::McpElicitation;
 use crate::log::McpServerLog;
 use crate::oauth::{CallbackServerFactory, LoopbackCallbackFactory};
 use crate::registered::McpServerRegistry;
@@ -79,6 +80,8 @@ pub struct McpManagerOptions {
     pub registry: Option<McpServerRegistry>,
     /// Called after registered servers were added or removed, for example to activate codemode.
     pub on_registered_change: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// Answers `elicitation/create` of every server; without it the capability is not announced.
+    pub elicitation: Option<McpElicitation>,
 }
 
 impl McpManagerOptions {
@@ -96,6 +99,7 @@ impl McpManagerOptions {
             client_version: env!("CARGO_PKG_VERSION").into(),
             registry: None,
             on_registered_change: None,
+            elicitation: None,
         }
     }
 }
@@ -418,6 +422,7 @@ impl Inner {
         options.provider_token = self.options.provider_token.clone();
         options.log = Some(self.log.clone());
         options.client_version = self.options.client_version.clone();
+        options.elicitation = self.options.elicitation.clone();
         let (weak, current) = (Arc::downgrade(self), session.clone());
         options.on_tools = Some(Arc::new(move |connection| {
             if let Some(inner) = weak.upgrade().filter(|inner| inner.is_current(id, attempt, &current)) {

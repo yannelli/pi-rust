@@ -31,6 +31,7 @@ mod input;
 mod layout;
 mod llama;
 mod mcp;
+mod message_display;
 mod mode;
 mod model_refresh;
 mod moved_features;
