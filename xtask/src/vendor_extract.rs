@@ -23,7 +23,18 @@ pub const GENERATED: &[(&str, &str, &[&str])] = &[
     (
         "packages/coding-agent/src/core/trust-manager.ts",
         "pi-coding-agent/src/core/trust-manager.ts",
-        &["TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES", "hasTrustRequiringProjectResources"],
+        &[
+            "TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES",
+            "normalizeCwd",
+            "findTrustFileKeys",
+            "findNearestTrustEntry",
+            "readTrustFile",
+            "writeTrustFile",
+            "acquireTrustLockSync",
+            "withTrustFileLock",
+            "hasTrustRequiringProjectResources",
+            "ProjectTrustStore",
+        ],
     ),
     (
         "packages/coding-agent/src/core/footer-data-provider.ts",

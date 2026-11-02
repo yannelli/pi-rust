@@ -1,0 +1,89 @@
+{
+	"_generator": {
+		"node": "v22.23.4",
+		"upstream": "35dfa757378bd7a8570670e99c2687bdd1039a06",
+		"packages": {
+			"proper-lockfile": "4.1.2",
+			"graceful-fs": "4.2.11",
+			"signal-exit": "3.0.7",
+			"proper-lockfile/node_modules/retry": "0.12.0"
+		},
+		"sha256": {
+			"packages\\coding-agent\\src\\core\\trust-manager.ts": "ce480f9a1689e2da996609e9708443c391f9ab0cab5bcc047aebc1613b17e2f9",
+			"packages\\coding-agent\\src\\utils\\paths.ts": "c8a2995b52a181e46cfae3b30f31448d201742d303249f34119ef2fd7a44e672",
+			"node_modules\\proper-lockfile\\lib\\lockfile.js": "c517a976f7a31c8b1768cb8e7ac9936aee70299ae762548495016a79d64a6434",
+			"node_modules\\proper-lockfile\\lib\\adapter.js": "c95e2408b91b70e02c625a9b1a42e0c793140dbe6c1bff8cc183bb88bc267c6c",
+			"node_modules\\proper-lockfile\\lib\\mtime-precision.js": "eb5adf91a21715b50f39438cdcda52043d551ccb5fe530681364c474c7206218",
+			"node_modules\\signal-exit\\index.js": "7cc6f6a1e14dec79dc23f6afd7caca1319189747144e1a33af77616c21d9e9de"
+		},
+		"platform": "win32",
+		"arch": "x64",
+		"release": "10.0.26100"
+	},
+	"exit": {
+		"exitCode": 7,
+		"report": [
+			{
+				"getter": "exit",
+				"lockHeld": true
+			},
+			{
+				"listener": "exit",
+				"exitCode": 7,
+				"lockHeld": true
+			},
+			{
+				"nested": {
+					"code": "ELOCKED",
+					"message": "Lock file is already being held"
+				},
+				"waitedAtLeast150ms": true
+			}
+		],
+		"returned": false,
+		"finally": false,
+		"lockAfterExit": false,
+		"trustFileAfterExit": false
+	},
+	"reallyExit": {
+		"exitCode": 7,
+		"report": [
+			{
+				"getter": "reallyExit",
+				"lockHeld": true
+			}
+		],
+		"returned": false,
+		"finally": false,
+		"lockAfterExit": false,
+		"trustFileAfterExit": false
+	},
+	"compromised": {
+		"exitCode": 0,
+		"report": [
+			{
+				"inner": "ok",
+				"value": null
+			},
+			{
+				"outer": {
+					"code": "ENOTACQUIRED",
+					"message": "Lock is not acquired/owned by you"
+				},
+				"lockExists": false
+			},
+			{
+				"uncaught": {
+					"code": "ECOMPROMISED",
+					"message": "ENOENT: no such file or directory, stat '<work>\\agent\\trust.json.lock'"
+				},
+				"afterAtLeast4000ms": true,
+				"lockExists": false
+			}
+		],
+		"returned": false,
+		"finally": false,
+		"lockAfterExit": false,
+		"trustFileAfterExit": true
+	}
+}

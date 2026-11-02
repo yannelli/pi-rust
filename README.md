@@ -227,13 +227,15 @@ cargo xtask notes 0.2.0          # print release notes
 
 MIT. pi-rust is based on [pi](https://github.com/earendil-works/pi) by Mario Zechner. See [LICENSE](LICENSE).
 
-These parts come from other MIT-licensed projects. Each release archive includes their licenses.
+These parts come from other projects. Each release archive includes their licenses.
 
 | Part | Source | License file |
 | --- | --- | --- |
 | ACP mode | [pi-acp](https://github.com/svkozak/pi-acp) by Sergii Kozak | [`LICENSE-pi-acp`](crates/pi-coding-agent/src/acp/LICENSE-pi-acp) |
 | Some JavaScript modules of the extension runtime | [Node.js](https://github.com/nodejs/node) | [`LICENSE-node`](crates/pi-js/src/js/LICENSE-node) |
+| JSON syntax diagnostics in the extension runtime | [V8](https://github.com/nodejs/node/tree/v22.12.0/deps/v8) | [`LICENSE-v8`](crates/pi-js/src/js/LICENSE-v8) |
 | MCP OAuth code, ported from upstream pi | [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) | [`LICENSE-mcp-typescript-sdk`](crates/pi-mcp/src/oauth/LICENSE-mcp-typescript-sdk) |
 | Warning colors of `loadProjectContextFiles` in the extension SDK | [chalk](https://github.com/chalk/chalk) 6.0.0 by Sindre Sorhus | [`LICENSE-chalk`](crates/pi-coding-agent/src/extensions/js/LICENSE-chalk) |
+| File locks and exit cleanup for `ProjectTrustStore` | [proper-lockfile](https://github.com/moxystudio/node-proper-lockfile) 4.1.2 and [signal-exit](https://github.com/tapjs/signal-exit) 3.0.7 | [`LICENSE-proper-lockfile`](crates/pi-coding-agent/src/extensions/js/LICENSE-proper-lockfile), [`LICENSE-signal-exit`](crates/pi-coding-agent/src/extensions/js/LICENSE-signal-exit) |
 
 The release archives also include `THIRD-PARTY-LICENSES.md` with the licenses of the third-party Rust crates in the binaries. The Release workflow writes it with [cargo-about](https://github.com/EmbarkStudios/cargo-about) from `about.toml` and `about.hbs`.
