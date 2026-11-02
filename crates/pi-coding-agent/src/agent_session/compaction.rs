@@ -8,7 +8,6 @@ use pi_ai::{AssistantMessage, Message, Model};
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
-use super::auth::request_auth;
 use super::{AgentSession, AgentSessionEvent, CompactionReason, SummarizationSource, lock};
 use crate::compaction::{
     CompactionCheck, CompactionCheckInput, CompactionPreparation, CompactionResult, CompactionSettings, RetryEventFn,
@@ -96,7 +95,7 @@ impl AgentSession {
     }
 
     /// The model of a summary (a virtual selection routed first) and its request settings.
-    /// Missing auth fails unless the session was created with its own stream function.
+    /// The session stream function resolves auth for each request.
     pub(crate) async fn summarization_options(
         &self,
         model: &Model,
@@ -104,11 +103,6 @@ impl AgentSession {
         source: SummarizationSource,
     ) -> anyhow::Result<(Model, SummarizationOptions)> {
         let (model, thinking_level) = self.summary_model(model, &cancel).await?;
-        if let Err(message) = request_auth(self.model_runtime(), &model).await
-            && !self.has_custom_stream_fn()
-        {
-            anyhow::bail!(message);
-        }
         let options = SummarizationOptions {
             cancel,
             thinking_level: Some(thinking_level),

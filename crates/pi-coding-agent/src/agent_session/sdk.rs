@@ -217,7 +217,6 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
         state.messages = existing.messages;
     });
     agent.set_queue_modes(settings.steering_mode(), settings.follow_up_mode());
-    let has_custom_stream = options.stream_fn.is_some();
     let request_hooks = super::RequestHooksSlot::default();
     let stream_fn =
         auth_stream_fn(services.model_runtime.clone(), settings.clone(), options.stream_fn, request_hooks.clone());
@@ -247,7 +246,6 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
             tool_authorizer: Mutex::new(None),
             builtins: Mutex::new(builtins),
             stream_fn,
-            has_custom_stream,
             model_selected: AtomicBool::new(model.is_some()),
             scoped_models: Mutex::new(options.scoped_models),
             agent_listener: Mutex::new(None),

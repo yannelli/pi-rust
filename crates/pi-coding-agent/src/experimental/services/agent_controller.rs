@@ -179,8 +179,13 @@ impl DurableAgentController {
         mode: WhenBusy,
         context: &Context,
     ) -> Result<String, AgentOperationError> {
-        let draft =
-            SubmissionDraft::Input { request_id: None, content: to_input(request), when_busy: Some(mode), entry: None };
+        let draft = SubmissionDraft::Input {
+            request_id: None,
+            content: to_input(request),
+            when_busy: Some(mode),
+            when_idle: None,
+            entry: None,
+        };
         match self.conversation.submit(draft, context).await {
             Ok(submission) => Ok(submission.id.get().to_string()),
             Err(error) => Err(to_agent_error(&error)),
