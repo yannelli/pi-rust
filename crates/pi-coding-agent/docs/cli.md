@@ -46,6 +46,12 @@ To delete sessions, use these commands:
 
 On a terminal, both commands ask before they delete. In other cases, they need `--yes`.
 
+## MCP sign-in commands
+
+`pi mcp login <server> [-l] [--timeout <seconds>]` signs in to a configured OAuth server. The timeout covers the whole sign-in and defaults to 300 seconds. `pi mcp logout <server> [-l]` deletes its saved OAuth credentials.
+
+For either command, `-l` or `--local` requires the server to come from the trusted project's `.pi/mcp.json`. A server defined only in the global config is rejected. Without this option, both commands use the configured server from either scope. If the server name is misspelled, the error suggests a close match when one exists.
+
 ## Usage stats
 
 `pi stats` adds up the sessions of the current project. With `--all`, it adds up the sessions of all projects. It shows these totals:
