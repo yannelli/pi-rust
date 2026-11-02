@@ -23,5 +23,4 @@ export const AgentSessionRuntime = unsupportedClass("AgentSessionRuntime");
 export const DefaultPackageManager = unsupportedClass("DefaultPackageManager");
 export const ExtensionRunner = unsupportedClass("ExtensionRunner");
 export const InteractiveMode = unsupportedClass("InteractiveMode");
-export const ProjectTrustStore = unsupportedClass("ProjectTrustStore");
 export const RpcClient = unsupportedClass("RpcClient");

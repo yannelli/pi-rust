@@ -3,10 +3,11 @@
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol_schema::{
-    PermissionOption, PermissionOptionKind, RequestPermissionOutcome, RequestPermissionRequest, SessionMode,
+    Meta, PermissionOption, PermissionOptionKind, RequestPermissionOutcome, RequestPermissionRequest, SessionMode,
     SessionModeState, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
 };
 use pi_ai::ToolCall;
+use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use super::backend::AcpClient;
@@ -50,6 +51,34 @@ impl PermissionMode {
     }
 }
 
+/// The MCP tool behind a call, by the names its server uses (not the sanitized pi tool name).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct McpToolIdentity {
+    pub server: String,
+    pub tool: String,
+}
+
+/// Where a call comes from, sent as `_meta.piAcp` of the permission request. It holds no argument values.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CallOrigin {
+    pub mcp: Option<McpToolIdentity>,
+    /// The tool that made this call, such as `codemode` for each tool its script calls.
+    pub parent_tool_call_id: Option<String>,
+}
+
+impl CallOrigin {
+    fn meta(&self) -> Option<Meta> {
+        let mut origin = serde_json::Map::new();
+        if let Some(mcp) = &self.mcp {
+            origin.insert("mcp".into(), json!({"server": mcp.server, "tool": mcp.tool}));
+        }
+        if let Some(parent) = &self.parent_tool_call_id {
+            origin.insert("parentToolCallId".into(), json!(parent));
+        }
+        (!origin.is_empty()).then(|| Meta::from_iter([("piAcp".to_string(), Value::Object(origin))]))
+    }
+}
+
 #[derive(Default)]
 pub struct ToolPermissions {
     mode: Mutex<PermissionMode>,
@@ -74,6 +103,7 @@ impl ToolPermissions {
         call: ToolCall,
         args: serde_json::Value,
         read_only: bool,
+        origin: CallOrigin,
         cancel: CancellationToken,
     ) -> bool {
         if cancel.is_cancelled() {
@@ -92,7 +122,7 @@ impl ToolPermissions {
             .raw_input(args);
         let request = RequestPermissionRequest::new(
             session_id,
-            ToolCallUpdate::new(call.id, fields),
+            ToolCallUpdate::new(call.id, fields).meta(origin.meta()),
             vec![
                 PermissionOption::new("allow", "Allow once", PermissionOptionKind::AllowOnce),
                 PermissionOption::new("reject", "Reject", PermissionOptionKind::RejectOnce),

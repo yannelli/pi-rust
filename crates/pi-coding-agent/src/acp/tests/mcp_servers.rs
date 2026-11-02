@@ -61,7 +61,7 @@ async fn new_and_load_pass_the_client_servers_exactly() {
 
 #[test]
 fn debug_output_names_the_servers_only() {
-    let servers = ClientMcpServers::from_request(&parsed(&json!([stdio("docs")]))).unwrap();
+    let servers = ClientMcpServers::from_request(&parsed(&json!([stdio("docs")])), None).unwrap();
     assert_eq!(format!("{servers:?}"), r#"["docs (5 args, 1 env)"]"#);
     assert_eq!(servers.names(), ["docs"]);
 }

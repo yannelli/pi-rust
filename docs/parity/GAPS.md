@@ -64,13 +64,14 @@ These exports are present, but they throw `ERR_PI_UNSUPPORTED`:
 
 - `@earendil-works/pi-ai/compat`: `setBedrockProviderModule`. Amazon Bedrock streams in Rust, so there is no Node Bedrock module to inject.
 - `@earendil-works/pi-coding-agent`, run modes and CLI: `InteractiveMode`, `RpcClient`, `main`, `parseArgs`, `runPrintMode`, `runRpcMode`, `resolveCliModel`, `resolveModelScopeWithDiagnostics`, `readStoredCredential`.
-- `@earendil-works/pi-coding-agent`, sessions and extensions: `AgentSession` and `AgentSessionRuntime` as constructors, `createAgentSessionFromServices`, `createAgentSessionRuntime`, `createAgentSessionServices`, `ExtensionRunner`, `createExtensionRuntime`, `discoverAndLoadExtensions`, `createCodemodeExtension`, `createMcpExtension`, `createToolSearchExtension`, `DefaultPackageManager`, `ProjectTrustStore`.
+- `@earendil-works/pi-coding-agent`, sessions and extensions: `AgentSession` and `AgentSessionRuntime` as constructors, `createAgentSessionFromServices`, `createAgentSessionRuntime`, `createAgentSessionServices`, `ExtensionRunner`, `createExtensionRuntime`, `discoverAndLoadExtensions`, `createCodemodeExtension`, `createMcpExtension`, `createToolSearchExtension`, `DefaultPackageManager`.
 
 Other limits of the exports that work:
 
 - `createAgentSession` makes a child session. It supports `cwd`, `agentDir`, `model`, `thinkingLevel`, tool names, `excludeTools`, `noTools`, `systemPrompt`, `resourceLoader`, and the `SessionManager`, `SettingsManager`, and `ModelRuntime` wrappers. These options throw `ERR_PI_UNSUPPORTED`: `customTools`, `scopedModels`, `sessionStartEvent`, a `modelRuntime` that is not from `ModelRuntime.create`, third-party session or settings managers, and a custom `ResourceLoader` with skills, prompts, context files, or extensions. A child session does not load extensions. It uses the native runtime of its `modelRuntime`, or the runtime and auth of the host without one.
 - `AgentSession.prompt` supports images, `expandPromptTemplates`, and `source`. `streamingBehavior` throws `ERR_PI_UNSUPPORTED`. A second prompt during a running prompt is rejected.
 - `SDK.extensionsResult.runtime` throws `ERR_PI_UNSUPPORTED`.
+- `ProjectTrustStore` uses upstream path, read, and write code with a private synchronous lock port. Unix and Windows QuickJS and Node fixtures cover its store, error, lock, and exit behavior. Signal cleanup, graceful-fs changes, and lock-map sharing with other host code remain open.
 - `SessionManager.appendUsage` stores the usage JSON as given, `null` included, and returns a copy of the stored entry read back from Rust. Upstream returns the object it appended, so changes to the returned object do not reach the session, and for an `undefined` usage the copy has no `usage` key where the upstream object has one set to `undefined`.
 - When a `SessionManager` append cannot be written to the session file, pi-rust keeps the entry in memory and as the leaf. Upstream removes it again.
 - `SettingsManager` has the 139 upstream members, `fromStorage` with a custom storage, and the write queue that `flush` and `reload` wait for. Rust holds the layers that a child session shares (`host/sdk_settings.js`, `settings/sdk_*.rs`). Errors carry V8's `JSON.parse` text. Getters that return a stored object return it live, so a change to it changes the settings. The package also exports `InMemorySettingsStorage`. These differences remain:
@@ -122,7 +123,7 @@ Do this item only after the preceding ACP, provider, and TUI work is released on
 
 ## ACP and provider integration work
 
-- Paseo rejects exact MCP tool preapproval for generic ACP providers before it starts Pi. Its provider contract and ACP permission handler must match tools exactly. Pi's permission modes alone cannot resolve that host-side error.
+- Paseo rejects exact MCP tool preapproval for generic ACP providers before it starts Pi. Its provider contract and ACP permission handler must match tools exactly. Pi's permission modes alone cannot resolve that host-side error. Pi sends the exact MCP server and tool names in `_meta.piAcp.mcp` of each permission request and accepts `_meta.piAcp.clientMcpExposure: "direct"`; a host adapter that matches grants is still missing ([ACP mode](../../crates/pi-coding-agent/docs/acp.md#tool-approval)).
 - ACP `session/new` and `session/load` connect client-supplied stdio `mcpServers` for the session, with literal values that pi does not save. `http` and `sse` servers are rejected (`mcpCapabilities` is false), and a session reopened without `session/load` has no client servers ([ACP mode](../../crates/pi-coding-agent/docs/acp.md#mcp-servers-from-the-client)).
 - ACP has no standard model icon field. Fast catalog variants get a lightning-bolt label. Models with a fast mode get the **Speed** option ([Fast mode](../../crates/pi-coding-agent/docs/providers.md#fast-mode-pi-rust-extension)).
 

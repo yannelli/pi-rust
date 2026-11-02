@@ -74,10 +74,15 @@ process.exit = function exit(code) {
     process._exiting = true;
     process.emit("exit", exitCode);
   }
-  nativeProcess.exit(exitCode);
+  // Looked up on `process` each time, as Node's exit does, so a wrapper of reallyExit runs.
+  process.reallyExit(exitCode);
   throw internal.unsupported("continuing after process.exit");
 };
-process.reallyExit = process.exit;
+// Ends the process without `exit` listeners, as Node's binding does.
+process.reallyExit = function reallyExit(code) {
+  nativeProcess.exit(Number(code) | 0);
+  throw internal.unsupported("continuing after process.exit");
+};
 process.abort = () => native.process.abort();
 process.kill = (pid, signal = "SIGTERM") => {
   let name = String(signal);

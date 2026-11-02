@@ -17,7 +17,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use super::backend::{AcpClient, BackendFactory, PiBackend};
 use super::errors::internal_error;
 use super::mcp_servers::ClientMcpServers;
-use super::permissions::{PermissionMode, ToolPermissions};
+use super::permissions::{CallOrigin, McpToolIdentity, PermissionMode, ToolPermissions};
 use crate::agent_session::{
     AgentSession, AgentSessionEvent, AgentSessionRuntime, DiagnosticLevel, PromptOptions, compaction_result_json, lock,
 };
@@ -143,18 +143,22 @@ impl RuntimeBackend {
         let weak = Arc::downgrade(&session);
         *lock(&session.tool_authorizer) = Some(Arc::new(move |call, cancel| {
             let policy = policy.clone();
-            let read_only = weak
-                .upgrade()
-                .and_then(|session| session.tool(&call.tool_call.name))
-                .and_then(|tool| tool.annotations().cloned())
-                .is_some_and(|annotations| annotations.read_only_hint == Some(true));
+            let session = weak.upgrade();
+            let read_only = call.tool.annotations().is_some_and(|annotations| annotations.read_only_hint == Some(true));
+            let mcp = session.as_ref().and_then(|session| session.mcp_tool_identity(call.tool));
+            let origin = CallOrigin {
+                mcp: mcp.map(|(server, tool)| McpToolIdentity { server, tool }),
+                parent_tool_call_id: call.parent_tool_call_id.map(String::from),
+            };
             let tool_call = call.tool_call.clone();
             let args = call.args.clone();
             async move {
-                (!policy.authorize(tool_call, args, read_only, cancel).await).then(|| pi_agent::BeforeToolCallResult {
-                    block: true,
-                    reason: Some("Tool execution denied by ACP permission policy".into()),
-                    ..Default::default()
+                (!policy.authorize(tool_call, args, read_only, origin, cancel).await).then(|| {
+                    pi_agent::BeforeToolCallResult {
+                        block: true,
+                        reason: Some("Tool execution denied by ACP permission policy".into()),
+                        ..Default::default()
+                    }
                 })
             }
             .boxed()
