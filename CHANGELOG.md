@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.2] - 2026-11-02
+
+### Added
+
+- **durable:** continue conversations without a new input (upstream fb524dd2e) ([2fd3401](https://github.com/yannelli/pi-rust/commit/2fd3401926d13fcd92d2d906d7d1fdcd2c7f1453))
+
 ## [0.12.1] - 2026-11-02
 
 ### Added

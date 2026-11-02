@@ -65,7 +65,8 @@ impl InputEntry {
     }
 }
 
-/// Host submission: user input that may start a run, or a passive entry write.
+/// Host submission: user input that may start a run, a passive entry write, or a continue: a run without a new user
+/// message, for an idle conversation whose context ends in a user message or tool results.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SubmissionDraft {
     Input {
@@ -80,6 +81,11 @@ pub enum SubmissionDraft {
         request_id: Option<String>,
         entry: EntryDraft,
     },
+    /// Only when idle; it never queues, and kept inbox items join its run. A context with nothing to answer ends the
+    /// run `unanswered` with `nothing_to_answer`; a cut-off answer with tool calls ends in their `missing_result`s.
+    Continue {
+        request_id: Option<String>,
+    },
 }
 
 impl SubmissionDraft {
@@ -93,15 +99,24 @@ impl SubmissionDraft {
         Self::Write { request_id: None, entry }
     }
 
+    /// Upstream `{ type: "continue" }`.
+    pub fn continue_run() -> Self {
+        Self::Continue { request_id: None }
+    }
+
     pub fn request_id(&self) -> Option<&str> {
         match self {
-            Self::Input { request_id, .. } | Self::Write { request_id, .. } => request_id.as_deref(),
+            Self::Input { request_id, .. } | Self::Write { request_id, .. } | Self::Continue { request_id } => {
+                request_id.as_deref()
+            }
         }
     }
 
     pub fn with_request_id(mut self, id: impl Into<String>) -> Self {
         match &mut self {
-            Self::Input { request_id, .. } | Self::Write { request_id, .. } => *request_id = Some(id.into()),
+            Self::Input { request_id, .. } | Self::Write { request_id, .. } | Self::Continue { request_id } => {
+                *request_id = Some(id.into())
+            }
         }
         self
     }
@@ -120,7 +135,7 @@ impl SubmissionDraft {
         self
     }
 
-    /// Place an input as `placed` instead of a `pi.user` entry; no effect on a write.
+    /// Place an input as `placed` instead of a `pi.user` entry; no effect on a write or continue.
     pub fn with_entry(mut self, placed: InputEntry) -> Self {
         if let Self::Input { entry, .. } = &mut self {
             *entry = Some(placed);

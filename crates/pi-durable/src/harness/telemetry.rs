@@ -55,10 +55,10 @@ pub static DURABLE_TELEMETRY_SCHEMA: LazyLock<TelemetrySchemaDefinition> = LazyL
         "version": 1,
         "spans": {
             "pi.durable.submit": {
-                "description": "Public submission admission and its commit. Inputs start root traces linked to their callers; writes are children. Internal admissions emit phase events only.",
+                "description": "Public submission admission and its commit. Inputs and continues start root traces linked to their callers; writes are children. Internal admissions emit phase events only.",
                 "parents": {"kind": "any"},
                 "startAttributes": {
-                    "submission.type": {"type": "string", "required": true, "values": ["input", "write"], "description": "Submission type."},
+                    "submission.type": {"type": "string", "required": true, "values": ["input", "write", "continue"], "description": "Submission type."},
                     "conversation.id": {"type": "number", "required": true, "description": "Conversation ID.", "cardinality": "high"},
                 },
                 "endAttributes": {
