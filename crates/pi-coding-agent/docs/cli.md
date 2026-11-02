@@ -1,6 +1,6 @@
 # CLI commands and flags
 
-Run `pi --help` to see all options. This page describes `pi completion`, `pi doctor`, `pi sessions`, `pi stats`, `pi extensions`, the run limits, and structured output. pi-rust adds them, and upstream pi does not have them.
+Run `pi --help` to see all options. This page explains session working directories and the commands that pi-rust adds: `pi completion`, `pi doctor`, `pi sessions`, `pi stats`, `pi extensions`, the run limits, and structured output.
 
 pi-rust also adds `--fast`. It turns on fast mode for one run. See [Fast mode](providers.md#fast-mode-pi-rust-extension).
 
@@ -29,6 +29,22 @@ pi completion fish > ~/.config/fish/completions/pi.fish
 
 `pi doctor --json` prints the same report as JSON. `pi doctor` does not use the network and does not start MCP servers. If it finds a problem, it exits with code 1.
 
+## Session working directories
+
+A session records the working directory where it was created. Tools, `@path` references, project configuration, and context files use the session's working directory. Opening the session from another directory does not change its saved working directory.
+
+| Entry point | Working directory |
+| --- | --- |
+| `--continue`, `-c` | The current directory. Continues its most recent session. |
+| `--resume`, `-r`, or `/resume` | The selected session's saved working directory. |
+| `--session <path\|id>` | The session's saved working directory. Accepts a file path or full or partial ID. |
+| `/import` | The imported JSONL session's saved working directory. Also preserves its ID. |
+| `--session-id <id>` | The current directory. Opens its session with this exact ID, or creates one. |
+| `--fork <path\|id>` | The current directory, in a new session. Accepts a file path or full or partial ID. |
+| A `--session` ID found in another directory, when you choose to fork it | The current directory, in a new session. |
+
+If the saved directory no longer exists, interactive mode asks whether to use the current directory. This choice applies only to that run; it does not change the saved session header. Other modes return an error.
+
 ## Sessions
 
 `pi sessions` lists the saved sessions of the current project, newest first. For each session, it shows a short ID, the last activity, the number of messages, the cost, and the name or the first prompt.
@@ -45,6 +61,12 @@ To delete sessions, use these commands:
 - `pi sessions prune --older-than 30d` deletes the sessions that had no activity for that time. The units are `s`, `m`, `h`, `d`, and `w`. The command prints the number of bytes that it frees. With `--dry-run`, it shows the sessions that it can delete and does not delete them.
 
 On a terminal, both commands ask before they delete. In other cases, they need `--yes`.
+
+## MCP sign-in commands
+
+`pi mcp login <server> [-l] [--timeout <seconds>]` signs in to a configured OAuth server. The timeout covers the whole sign-in and defaults to 300 seconds. `pi mcp logout <server> [-l]` deletes its saved OAuth credentials.
+
+For either command, `-l` or `--local` requires the server to come from the trusted project's `.pi/mcp.json`. A server defined only in the global config is rejected. Without this option, both commands use the configured server from either scope. If the server name is misspelled, the error suggests a close match when one exists.
 
 ## Usage stats
 

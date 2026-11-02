@@ -114,6 +114,7 @@ async fn deliver(task: TaskRecord, runtime: TaskRuntime, context: Context) -> Du
         request_id: Some(format!("research:{}", task.id)),
         content: UserContent::Text(content),
         when_busy: None,
+        when_idle: None,
         entry: None,
     };
     let settled = child.submit(request, &context).await?.wait(&context).await?;
@@ -149,6 +150,7 @@ async fn report(task: TaskRecord, runtime: TaskRuntime, context: Context) -> Dur
         request_id: Some(format!("research-report:{}", task.id)),
         content: UserContent::Text(text.unwrap_or_default()),
         when_busy: Some(WhenBusy::FollowUp),
+        when_idle: None,
         entry: None,
     };
     main.submit(request, &context).await?;

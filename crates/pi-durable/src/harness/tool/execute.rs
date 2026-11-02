@@ -9,9 +9,9 @@ use pi_chord::Context;
 
 use super::api::{CallState, Reported, ToolExecutionApi};
 use super::result::{
-    bound_content, from_slot, harness_error, output_value, structured_output_error, tool_diagnostic, truncated,
+    bound_content, harness_error, output_limits, output_value, structured_output_error, tool_diagnostic, truncated,
 };
-use super::settle::{Ending, publish_progress, settle};
+use super::settle::{Ending, publish_progress, reject, settle, settle_from_slot, tool_for_limits};
 use super::{
     BeforeToolDecision, ToolHookCall, ToolHooks, ToolTaskCheckpoint, ToolTaskInput, decode_input, json_equal, prepare,
     read_call, resolve_tool, validate,
@@ -21,14 +21,13 @@ use crate::env::ShellOutputWindow;
 use crate::errors::{DurableError, DurableResult};
 use crate::harness::agent::tool_extension;
 use crate::harness::live::{LIVE_DOC, SlotRef, SlotStatus, tool_slot};
-use crate::harness::output::{OutputBuffer, OutputLimits};
+use crate::harness::output::OutputBuffer;
 use crate::harness::progress::PROGRESS_BYTES_PER_SECOND;
 use crate::harness::scheduler::TaskRuntime;
 use crate::harness::tool_registration::{Retain, ToolRegistration, ToolReplay};
 use crate::harness::types::{DiagnosticSeverity, ToolExecutionResult};
 use crate::harness::util::lock;
 use crate::session::Tx;
-use crate::truncate::{DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES};
 use crate::types::{AbortReason, ReportFrom, TaskRecord, TaskState};
 
 fn invalid(message: &str) -> ToolExecutionResult {
@@ -43,15 +42,12 @@ pub(super) async fn call(task: TaskRecord, runtime: TaskRuntime, context: Contex
     }
     let Some(tool) = resolve_tool(&runtime, &input, &call.call.name, &context).await? else {
         let error = harness_error("tool_unavailable", &format!("Tool {} is not available", call.call.name));
-        return settle(&runtime, &input, &call, Ending::Completed, move |_| error, &context, None).await;
+        return reject(&runtime, &input, &call, None, error, &context).await;
     };
     let checked = prepare(&tool, &call.call.arguments).and_then(|args| validate(&tool, &call.call, args));
     let mut args = match checked {
         Ok(args) => args,
-        Err(message) => {
-            return settle(&runtime, &input, &call, Ending::Completed, move |_| invalid(&message), &context, None)
-                .await;
-        }
+        Err(message) => return reject(&runtime, &input, &call, Some(&*tool), invalid(&message), &context).await,
     };
     let mut block: Option<String> = None;
     for hooks in runtime.hooks::<ToolHooks>(&context).await? {
@@ -77,14 +73,11 @@ pub(super) async fn call(task: TaskRecord, runtime: TaskRuntime, context: Contex
     }
     if let Some(reason) = block {
         let blocked = harness_error("blocked", &format!("Tool call blocked: {reason}"));
-        return settle(&runtime, &input, &call, Ending::Completed, move |_| blocked, &context, None).await;
+        return reject(&runtime, &input, &call, Some(&*tool), blocked, &context).await;
     }
     let args = match validate(&tool, &call.call, args) {
         Ok(args) => args,
-        Err(message) => {
-            return settle(&runtime, &input, &call, Ending::Completed, move |_| invalid(&message), &context, None)
-                .await;
-        }
+        Err(message) => return reject(&runtime, &input, &call, Some(&*tool), invalid(&message), &context).await,
     };
     let (conversation_id, task_id) = (runtime.conversation_id(), runtime.task_id());
     let replay = tool.replay.unwrap_or_default();
@@ -123,11 +116,13 @@ pub(super) async fn execute(task: TaskRecord, runtime: TaskRuntime, context: Con
         return Err(DurableError::error("Tool checkpoint is not in phase execute"));
     };
     let call = read_call(&runtime, &input, &context).await?;
+    // Also before an interruption result: its `after_tool` hooks may be what cut the task off.
+    if crate::harness::live::cut_off_too_often(&task, &runtime) {
+        return end_cut_off(&task, &runtime, &input, &call, &context).await;
+    }
     let tool = resolve_tool(&runtime, &input, &call.call.name, &context).await?;
-    if let Some(tool) = tool.filter(|tool| replay == ToolReplay::Safe && tool.replay == Some(ToolReplay::Safe)) {
-        if crate::harness::live::cut_off_too_often(&task, &runtime) {
-            return end_cut_off(&task, &runtime, &input, &call, &context).await;
-        }
+    let rerun = tool.as_ref().filter(|tool| replay == ToolReplay::Safe && tool.replay == Some(ToolReplay::Safe));
+    if let Some(tool) = rerun.cloned() {
         // The rerun reports from scratch; clear what the interrupted run published.
         let (conversation_id, task_id) = (runtime.conversation_id(), runtime.task_id());
         let change = move |tx: Tx, _| async move {
@@ -144,7 +139,9 @@ pub(super) async fn execute(task: TaskRecord, runtime: TaskRuntime, context: Con
     let message = format!("Tool {} was interrupted and may have partially run", call.call.name);
     // `failed` records cancellation intent, so the call's owned conversations, left unsupervised, are aborted.
     let ending = Ending::Failed { message: message.clone(), reason: None };
-    settle(&runtime, &input, &call, ending, move |slot| from_slot(slot, "interrupted", &message), &context, None).await
+    // Not cut off too often (checked above), so the hooks run.
+    let hooks = Some(tool.as_deref());
+    settle_from_slot(&runtime, &input, &call, hooks, ending, ("interrupted", &message), &context).await
 }
 
 async fn end_cut_off(
@@ -157,7 +154,14 @@ async fn end_cut_off(
     let count = crate::harness::live::cut_off_count(task);
     let message = format!("Tool {} was interrupted {count}; it is not run again", call.call.name);
     let ending = Ending::Failed { message: message.clone(), reason: Some("restart_limit".into()) };
-    settle(runtime, input, call, ending, move |slot| from_slot(slot, "restart_limit", &message), context, None).await
+    // Past the limit the hooks may be what keeps cutting the task off (`salvageable`).
+    let tool = if crate::harness::live::salvageable(task, runtime) {
+        Some(tool_for_limits(runtime, input, &call.call.name, context).await)
+    } else {
+        None
+    };
+    let hooks = tool.as_ref().map(Option::as_deref);
+    settle_from_slot(runtime, input, call, hooks, ending, ("restart_limit", &message), context).await
 }
 
 pub(super) async fn abort(task: TaskRecord, runtime: TaskRuntime, context: Context) -> DurableResult<()> {
@@ -174,7 +178,12 @@ pub(super) async fn abort(task: TaskRecord, runtime: TaskRuntime, context: Conte
         }
         (None, _) => ("aborted", format!("Tool {name} was aborted")),
     };
-    settle(&runtime, &input, &call, Ending::Aborted, move |slot| from_slot(slot, code, &message), &context, None).await
+    // The scheduler runs an abort handler only while its restarts are below the limit, and faults the task without a
+    // result when the last attempt is cut off. That attempt skips the hooks, which may be what cuts it off.
+    let last_attempt = f64::from(task.restarts.unwrap_or(0)) >= runtime.settings().restart_limit - 1.0;
+    let tool = if last_attempt { None } else { Some(tool_for_limits(&runtime, &input, name, &context).await) };
+    let hooks = tool.as_ref().map(Option::as_deref);
+    settle_from_slot(&runtime, &input, &call, hooks, Ending::Aborted, (code, &message), &context).await
 }
 
 /// Execute with the resolved implementation, then settle its result.
@@ -186,12 +195,7 @@ async fn run(
     args: JsonObject,
     context: &Context,
 ) -> DurableResult<()> {
-    let limits = tool.output_limits.unwrap_or_default();
-    let limits = OutputLimits {
-        max_bytes: limits.max_bytes.unwrap_or(DEFAULT_MAX_BYTES),
-        max_lines: limits.max_lines.unwrap_or(DEFAULT_MAX_LINES),
-        retain: limits.retain.unwrap_or_default(),
-    };
+    let limits = output_limits(Some(&*tool));
     let reported = Reported { output: OutputBuffer::new(limits), limits, diagnostics: Vec::new(), details: None };
     let state = Arc::new(CallState {
         reported: Mutex::new(reported),
@@ -258,7 +262,7 @@ async fn run(
     let pending = progress.stop().await;
     let settled = async {
         let result = final_result(runtime, input, call, &tool, result, &state, context).await?;
-        settle(runtime, input, call, ending, move |_| result, context, duration_ms).await
+        settle(runtime, input, call, ending, result, context, duration_ms).await
     }
     .await;
     for waiter in pending {

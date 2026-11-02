@@ -324,10 +324,17 @@ impl SessionManager {
 
     pub(crate) fn append_entry(&mut self, entry: Entry) -> anyhow::Result<String> {
         let id = entry.id().to_string();
+        let previous_leaf = self.leaf.replace(id.clone());
         self.by_id.insert(id.clone(), self.entries.len());
         self.entries.push(entry);
-        self.leaf = Some(id.clone());
-        self.persist_entry(self.entries.len() - 1)?;
+        if let Err(error) = self.persist_entry(self.entries.len() - 1) {
+            // An entry that was not written must not become the parent of later entries, or the file
+            // would hold entries pointing to a missing parent.
+            self.entries.pop();
+            self.by_id.remove(&id);
+            self.leaf = previous_leaf;
+            return Err(error);
+        }
         Ok(id)
     }
 

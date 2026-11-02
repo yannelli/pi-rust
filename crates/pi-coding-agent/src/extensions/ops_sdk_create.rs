@@ -12,6 +12,7 @@ use crate::agent_session::services::resource_loader_options;
 use crate::agent_session::{
     AgentSessionServices, CreateAgentSessionOptions, ModelRuntime, NoTools, ResourceOptions, create_agent_session, lock,
 };
+use crate::model_resolver::ScopedModel;
 use crate::resources::ResourceLoader;
 use crate::settings::SettingsManager;
 
@@ -30,6 +31,23 @@ fn strings(value: &Value) -> Result<Vec<String>, JsError> {
     if value.is_null() { Ok(Vec::new()) } else { serde_json::from_value(value.clone()).map_err(error) }
 }
 
+/// Upstream `ScopedModel` entries `{ model, thinkingLevel? }` of `scopedModels` and `setScopedModels`.
+pub(crate) fn scoped_models(value: &Value) -> Result<Vec<ScopedModel>, JsError> {
+    let entries = value.as_array().ok_or_else(|| error("Scoped models must be an array"))?;
+    entries
+        .iter()
+        .map(|entry| -> Result<ScopedModel, JsError> {
+            let model = serde_json::from_value(entry["model"].clone())
+                .map_err(|failure| error(format!("Invalid model: {failure}")))?;
+            let thinking_level = match &entry["thinkingLevel"] {
+                Value::Null => None,
+                level => Some(serde_json::from_value(level.clone()).map_err(error)?),
+            };
+            Ok(ScopedModel { model, thinking_level })
+        })
+        .collect()
+}
+
 pub(crate) async fn create(runner: &Arc<ExtensionRunner>, options: Value) -> Result<Value, JsError> {
     let manager_id = options["sessionManagerId"].as_u64().ok_or_else(|| error("Missing SessionManager"))?;
     let settings_id = options["settingsManagerId"].as_u64().ok_or_else(|| error("Missing SettingsManager"))?;
@@ -37,6 +55,8 @@ pub(crate) async fn create(runner: &Arc<ExtensionRunner>, options: Value) -> Res
     let model = options.get("model").cloned().map(serde_json::from_value).transpose().map_err(error)?;
     let thinking_level =
         options.get("thinkingLevel").cloned().map(serde_json::from_value).transpose().map_err(error)?;
+    let scoped = &options["scopedModels"];
+    let scoped = if scoped.is_null() { Vec::new() } else { scoped_models(scoped)? };
     let tools = options.get("tools").map(strings).transpose()?;
     let exclude_tools = strings(&options["excludeTools"])?;
     let no_tools = match options["noTools"].as_str() {
@@ -68,6 +88,7 @@ pub(crate) async fn create(runner: &Arc<ExtensionRunner>, options: Value) -> Res
     create.extensions = hosted.as_ref().map(|(hosted, _)| hosted.0.clone());
     create.model = model;
     create.thinking_level = thinking_level;
+    create.scoped_models = scoped;
     create.tools = tools;
     create.exclude_tools = exclude_tools;
     create.no_tools = no_tools;

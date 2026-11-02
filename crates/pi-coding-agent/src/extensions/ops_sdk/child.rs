@@ -14,7 +14,8 @@ use tokio::task::JoinHandle;
 use super::SdkState;
 use crate::agent_session::{AgentSession, PromptOptions, StreamingBehavior, compaction_result_json, lock};
 use crate::extensions::ops::{Args, error};
-use crate::extensions::ops_session::tool_info_json;
+use crate::extensions::ops_sdk_create::scoped_models;
+use crate::extensions::ops_session::{scoped_models_json, tool_info_json};
 use crate::extensions::runner::ExtensionRunner;
 
 enum Delivery {
@@ -171,6 +172,7 @@ pub(super) fn read(session: &AgentSession, member: &str) -> Result<Value, JsErro
         "activeToolNames" => json!(session.active_tool_names()),
         "callableToolNames" => json!(session.callable_tool_names()),
         "allTools" => Value::Array(session.all_tools().iter().map(tool_info_json).collect()),
+        "scopedModels" => scoped_models_json(&session.scoped_models()),
         member => return Err(JsError::unsupported(&format!("AgentSession.{member}"))),
     })
 }
@@ -191,6 +193,7 @@ fn set(session: &AgentSession, name: &str, args: &Args) -> Result<bool, JsError>
         "setSessionName" => session.set_session_name(&args.str(2)?).map_err(error)?,
         "refreshContext" => session.refresh_context(),
         "setActiveToolsByName" => session.set_active_tools_by_name(&parse::<Vec<String>>(args.json(2))?),
+        "setScopedModels" => session.set_scoped_models(scoped_models(&args.json(2))?),
         _ => return Ok(false),
     }
     Ok(true)
