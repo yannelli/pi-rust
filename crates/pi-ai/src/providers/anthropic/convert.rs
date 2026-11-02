@@ -6,7 +6,9 @@ use std::collections::{BTreeMap, HashSet};
 use serde_json::{Map, Value, json};
 
 use crate::providers::common::{has_images, sanitize_id, split_error_tool_result_images, take_chars};
-use crate::providers::constrained_sampling::{json_schema_tool_parameters, resolve_json_schema_strict_sampling};
+use crate::providers::constrained_sampling::{
+    json_schema_tool_parameters, prefers_json_schema_strict_sampling, resolve_json_schema_strict_sampling,
+};
 use crate::transcript::render_system_message_update;
 use crate::types::{AssistantMessage, ContentBlock, Message, Tool, ToolResultMessage, UserContent};
 
@@ -64,17 +66,12 @@ pub(super) struct ToolFormat {
     pub disable_preferred_strict_tools: bool,
 }
 
-/// Whether the tool asks for JSON-schema strict sampling only when available.
-fn prefers_strict(tool: &Tool) -> bool {
-    tool.constrained_sampling.as_ref().is_some_and(|config| {
-        config.get("type").and_then(Value::as_str) == Some("json_schema")
-            && config.get("strict").and_then(Value::as_str) == Some("prefer")
-    })
-}
-
 /// Whether any `strict: "prefer"` tool was sent strict, so a retry without strict can help.
 pub(super) fn has_preferred_strict(tools: &[Tool], definitions: &[Value]) -> bool {
-    tools.iter().zip(definitions).any(|(tool, definition)| definition["strict"] == true && prefers_strict(tool))
+    tools
+        .iter()
+        .zip(definitions)
+        .any(|(tool, definition)| definition["strict"] == true && prefers_json_schema_strict_sampling(tool))
 }
 
 /// Keywords that Anthropic strict tool use rejects for the whole request.
@@ -121,7 +118,7 @@ pub(super) fn convert_tools(
     let last = tools.len().saturating_sub(1);
     let mut converted = Vec::with_capacity(tools.len());
     for (index, tool) in tools.iter().enumerate() {
-        let strict = !(format.disable_preferred_strict_tools && prefers_strict(tool))
+        let strict = !(format.disable_preferred_strict_tools && prefers_json_schema_strict_sampling(tool))
             && resolve_json_schema_strict_sampling(tool, format.strict_tools, Some(&strict_unsupported))? == Some(true);
         let parameters = json_schema_tool_parameters(tool, strict);
         let name = if format.oauth { to_claude_code_name(&tool.name) } else { tool.name.clone() };

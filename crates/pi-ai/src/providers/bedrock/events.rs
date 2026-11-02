@@ -43,6 +43,8 @@ pub(super) struct Failure {
     pub message: String,
     pub status: Option<u16>,
     pub error_code: Option<String>,
+    /// The message of a rejected request as the service sent it, without the error prefix.
+    pub provider_message: Option<String>,
 }
 
 impl Failure {
