@@ -3,8 +3,9 @@
 import { call, optional } from "./bridge.js";
 import { unsupportedError } from "./unsupported.js";
 
+export { InMemorySettingsStorage, SettingsManager } from "./sdk_settings.js";
+
 const sessionOp = (name, ...args) => optional(call(`storage.session.${name}`, ...args));
-const settingsOp = (name, ...args) => optional(call(`storage.settings.${name}`, ...args));
 const orNull = (value) => value ?? null;
 
 function sessionInfo(info) {
@@ -189,98 +190,5 @@ export class SessionManager {
 for (const [name, fallback] of Object.entries(SESSION_READS)) {
 	SessionManager.prototype[name] = function (...args) {
 		return this._read(name, ...args) ?? fallback;
-	};
-}
-
-const SETTINGS_ACCESSORS = [
-	"getLastChangelogVersion", "setLastChangelogVersion", "getSessionDir", "getDefaultProvider", "getDefaultModel",
-	"setDefaultProvider", "setDefaultModel", "setDefaultModelAndProvider", "getThemeSetting", "getTheme", "setTheme",
-	"getDefaultThinkingLevel", "setDefaultThinkingLevel", "getModelThinkingLevel", "getAllModelThinkingLevels",
-	"setModelThinkingLevel", "removeModelThinkingLevel", "getTransport", "getCompactionEnabled", "setCompactionEnabled",
-	"getCompactionReserveTokens", "getCompactionKeepRecentTokens", "getRetryEnabled", "setRetryEnabled",
-	"getHideThinkingBlock", "setHideThinkingBlock", "getSteeringMode", "getFollowUpMode", "getExternalEditorCommand",
-	"getShellPath", "setShellPath", "getShellCommandPrefix", "setShellCommandPrefix", "getDefaultProjectTrust",
-	"getNpmCommand", "getEnableSkillCommands", "getEnabledModels", "setEnabledModels", "getDefaultTools",
-	"getImageWidthCells", "setImageWidthCells", "getClearOnShrink", "setClearOnShrink", "getEnableAnalytics",
-	"getHttpIdleTimeoutMs", "getExtensionPaths", "setExtensionPaths", "setProjectExtensionPaths", "getSkillPaths",
-	"setSkillPaths", "setProjectSkillPaths", "getPromptTemplatePaths", "setPromptTemplatePaths",
-	"setProjectPromptTemplatePaths", "getThemePaths", "setThemePaths", "setProjectThemePaths",
-];
-
-export class SettingsManager {
-	constructor(id) {
-		if (typeof id !== "number") throw unsupportedError("new SettingsManager");
-		this._sdkId = id;
-		// Upstream accessors without a Rust counterpart throw `ERR_PI_UNSUPPORTED` naming the member.
-		return new Proxy(this, {
-			get(target, property, receiver) {
-				if (property in target || typeof property !== "string" || !/^(get|set|remove)[A-Z]/.test(property)) {
-					return Reflect.get(target, property, receiver);
-				}
-				return () => {
-					throw unsupportedError(`SettingsManager.${property}`);
-				};
-			},
-		});
-	}
-
-	static create(cwd, agentDir, options) {
-		return new SettingsManager(settingsOp("create", orNull(cwd), orNull(agentDir), options ?? {}));
-	}
-
-	static inMemory(settings, options) {
-		return new SettingsManager(settingsOp("inMemory", settings ?? {}, options ?? {}));
-	}
-
-	static fromStorage() {
-		throw unsupportedError("SettingsManager.fromStorage");
-	}
-
-	_sdkDispose() {
-		settingsOp("dispose", this._sdkId);
-	}
-
-	getSettings() {
-		return settingsOp("get", this._sdkId, "merged");
-	}
-
-	getGlobalSettings() {
-		return settingsOp("get", this._sdkId, "global");
-	}
-
-	getProjectSettings() {
-		return settingsOp("get", this._sdkId, "project");
-	}
-
-	isProjectTrusted() {
-		return Boolean(settingsOp("isProjectTrusted", this._sdkId));
-	}
-
-	setProjectTrusted(trusted) {
-		settingsOp("setProjectTrusted", this._sdkId, Boolean(trusted));
-	}
-
-	applyOverrides(overrides) {
-		settingsOp("applyOverrides", this._sdkId, overrides ?? {});
-	}
-
-	async reload() {
-		settingsOp("reload", this._sdkId);
-	}
-
-	async flush() {}
-
-	drainErrors() {
-		return settingsOp("drainErrors", this._sdkId).map(({ scope, path, message }) => ({
-			scope,
-			...(path ? { path } : {}),
-			error: new Error(message),
-		}));
-	}
-}
-
-for (const name of SETTINGS_ACCESSORS) {
-	SettingsManager.prototype[name] = function (...args) {
-		return settingsOp("call", this._sdkId, name, ...args.map(orNull));
 	};
 }

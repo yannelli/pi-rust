@@ -150,7 +150,7 @@ fn invalid_files_report_diagnostics_and_are_never_overwritten() {
 
     write(&dirs.global(), json!({"retry": {"maxRetries": "many"}, "tuiMode": "sideways", "theme": "ok"}));
     settings.reload();
-    let messages: Vec<String> = settings.drain_errors().iter().map(SettingsError::diagnostic).collect();
+    let messages: Vec<String> = settings.drain_diagnostics().iter().map(SettingsError::diagnostic).collect();
     assert_eq!(messages.len(), 2, "{messages:?}");
     assert!(messages.iter().any(|message| message.contains("\"tuiMode\"")));
     assert_eq!(settings.theme().as_deref(), Some("ok"));

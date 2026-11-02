@@ -210,7 +210,7 @@ pub async fn create_agent_session_services(options: CreateServicesOptions) -> Ag
         Arc::new(SettingsManager::create(&cwd, &agent_dir, SettingsOptions { project_trusted }))
     });
     let mut diagnostics: Vec<RuntimeDiagnostic> =
-        settings.drain_errors().iter().map(|error| RuntimeDiagnostic::warning(error.diagnostic())).collect();
+        settings.drain_diagnostics().iter().map(|error| RuntimeDiagnostic::warning(error.diagnostic())).collect();
     let model_runtime = match options.model_runtime {
         Some(runtime) => {
             runtime.set_disabled_providers(settings.global_settings().disabled_providers.unwrap_or_default());

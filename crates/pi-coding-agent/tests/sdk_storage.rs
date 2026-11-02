@@ -191,11 +191,12 @@ export default function (pi) {
       compaction: settings.getCompactionEnabled(), skills: settings.getSkillPaths() };
     settings.setDefaultModel('written-model');
     settings.setCompactionEnabled(false);
+    await settings.flush();
     const memory = SettingsManager.inMemory({ theme: 'light' });
     pi.appendEntry('result', {
       before, global: settings.getGlobalSettings().defaultModel, compaction: settings.getCompactionEnabled(),
       trusted: settings.isProjectTrusted(), errors: settings.drainErrors(), memoryTheme: memory.getTheme(),
-      unsupported: code(() => settings.getTuiMode()), fromStorage: code(() => SettingsManager.fromStorage({})),
+      tuiMode: settings.getTuiMode(), fromStorage: code(() => SettingsManager.fromStorage({})),
     });
   }});
 }
@@ -217,8 +218,8 @@ async fn settings_manager_reads_and_writes_the_settings_file() {
     assert_eq!(data["trusted"], true);
     assert_eq!(data["errors"], json!([]));
     assert_eq!(data["memoryTheme"], "light");
-    assert_eq!(data["unsupported"], "ERR_PI_UNSUPPORTED");
-    assert_eq!(data["fromStorage"], "ERR_PI_UNSUPPORTED");
+    assert_eq!(data["tuiMode"], "fullscreen");
+    assert_eq!(data["fromStorage"], Value::Null, "a storage without withLock records a load error");
     let file: Value =
         serde_json::from_str(&std::fs::read_to_string(h.agent_dir.join("settings.json")).unwrap()).unwrap();
     assert_eq!(file["defaultModel"], "written-model");

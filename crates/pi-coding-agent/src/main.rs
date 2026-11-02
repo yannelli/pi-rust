@@ -457,8 +457,11 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
     if startup_benchmark_enabled() && mode != AppMode::Interactive {
         return Err(fail("PI_STARTUP_BENCHMARK only supports interactive mode").into());
     }
-    let startup_diagnostics: Vec<RuntimeDiagnostic> =
-        startup_settings.drain_errors().iter().map(|error| RuntimeDiagnostic::warning(error.diagnostic())).collect();
+    let startup_diagnostics: Vec<RuntimeDiagnostic> = startup_settings
+        .drain_diagnostics()
+        .iter()
+        .map(|error| RuntimeDiagnostic::warning(error.diagnostic()))
+        .collect();
 
     let env_session_dir =
         process_env_value(&pi_coding_agent::resources::brand::session_dir_env_var()).filter(|dir| !dir.is_empty());

@@ -169,7 +169,7 @@ fn one_line(text: &str) -> String {
 
 async fn config_and_auth(inputs: &DoctorInputs, problems: &mut Vec<String>) -> (ConfigReport, AuthReport) {
     let settings = SettingsManager::create(&inputs.cwd, &inputs.agent_dir, SettingsOptions { project_trusted: true });
-    let settings_errors = settings.drain_errors();
+    let settings_errors = settings.drain_diagnostics();
     problems.extend(settings_errors.iter().map(|error| error.diagnostic()));
     let scope_errors = |scope: SettingsScope| {
         settings_errors.iter().filter(|error| error.scope == scope).map(|error| error.message.clone()).collect()

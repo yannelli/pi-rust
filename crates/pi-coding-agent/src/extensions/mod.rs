@@ -25,6 +25,8 @@ pub mod registry;
 mod replace;
 pub mod rpc;
 pub mod runner;
+#[cfg(test)]
+mod sdk_settings_tests;
 mod session;
 pub(crate) mod shell;
 pub mod tool;

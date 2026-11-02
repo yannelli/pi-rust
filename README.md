@@ -83,7 +83,7 @@ When pi-rust starts for the first time, it moves files from older pi layouts, as
 
 ## Differences from upstream pi
 
-pi-rust has all the features of the upstream `pi` CLI and its libraries. This section gives the differences.
+pi-rust ports the upstream `pi` CLI and its libraries. This section lists the differences and SDK limits.
 
 ### Runtime
 
@@ -101,6 +101,7 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. This se
   To run extensions on Node 22 or later, set `extensionRuntime` to `"node"` or `"auto"`, or use `--extension-runtime` or `PI_EXTENSION_RUNTIME`. On Node, native addons, `child_process.fork`, and V8-only modules work. If Node is missing, pi uses QuickJS. See [Node backend](docs/agents/node-compat.md#node-backend).
 - IPC handle retries use a pi-js-specific wrapper. Internal handle listeners receive an object with only `close()`, and cluster connections queued to a disconnected worker are not reclaimed. See [Extension runtime](docs/parity/GAPS.md#extension-runtime-pi-js).
 - On non-Linux Unix, a concurrent child spawn can inherit an IPC socket before QuickJS marks it close-on-exec. Node closes inherited descriptors in its macOS `posix_spawn` path. See [Platform](docs/parity/GAPS.md#platform).
+- The extension SDK still has gaps in child sessions, resource loading, and model runtimes. `SettingsManager` supports custom storage and queued writes, with limits on JSON values and live object references. See [Extension module exports](docs/parity/GAPS.md#extension-module-exports) for the remaining differences.
 - The providers that extensions get from `@earendil-works/pi-ai/providers/all` stream, classify, generate images, and resolve auth in Rust. Their API key login asks for one key, also for Amazon Bedrock, Google Vertex AI, and Cloudflare. See [Extension module exports](docs/parity/GAPS.md#extension-module-exports).
 - When you quit the interactive mode, pi waits at most 3 seconds for the running turn and the `session_shutdown` handlers, then exits. Upstream pi waits until they finish.
 - `grep` and `find` use the Rust `ignore` crate, so pi-rust does not download `rg` or `fd`.
@@ -227,7 +228,7 @@ cargo xtask notes 0.2.0          # print release notes
 
 MIT. pi-rust is based on [pi](https://github.com/earendil-works/pi) by Mario Zechner. See [LICENSE](LICENSE).
 
-These parts come from other projects. Each release archive includes their licenses.
+These parts come from other projects. Each release archive includes their license notices.
 
 | Part | Source | License file |
 | --- | --- | --- |
@@ -236,6 +237,7 @@ These parts come from other projects. Each release archive includes their licens
 | JSON syntax diagnostics in the extension runtime | [V8](https://github.com/nodejs/node/tree/v22.12.0/deps/v8) | [`LICENSE-v8`](crates/pi-js/src/js/LICENSE-v8) |
 | MCP OAuth code, ported from upstream pi | [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) | [`LICENSE-mcp-typescript-sdk`](crates/pi-mcp/src/oauth/LICENSE-mcp-typescript-sdk) |
 | Warning colors of `loadProjectContextFiles` in the extension SDK | [chalk](https://github.com/chalk/chalk) 6.0.0 by Sindre Sorhus | [`LICENSE-chalk`](crates/pi-coding-agent/src/extensions/js/LICENSE-chalk) |
+| Settings JSON error messages | [V8](https://github.com/v8/v8), BSD 3-Clause | [`LICENSE-v8-settings`](crates/pi-coding-agent/src/settings/LICENSE-v8) |
 | File locks and exit cleanup for `ProjectTrustStore` | [proper-lockfile](https://github.com/moxystudio/node-proper-lockfile) 4.1.2 and [signal-exit](https://github.com/tapjs/signal-exit) 3.0.7 | [`LICENSE-proper-lockfile`](crates/pi-coding-agent/src/extensions/js/LICENSE-proper-lockfile), [`LICENSE-signal-exit`](crates/pi-coding-agent/src/extensions/js/LICENSE-signal-exit) |
 
 The release archives also include `THIRD-PARTY-LICENSES.md` with the licenses of the third-party Rust crates in the binaries. The Release workflow writes it with [cargo-about](https://github.com/EmbarkStudios/cargo-about) from `about.toml` and `about.hbs`.
