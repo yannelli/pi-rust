@@ -241,7 +241,7 @@ export default function (pi) {
     pi.appendEntry('result', {
       beforeReload, systemPrompt: loader.getSystemPrompt(), source: loader.getSystemPromptSource(),
       append: loader.getAppendSystemPrompt(), skills: loader.getSkills(), options: loader._sdkOptions(),
-      prompts: await code(() => loader.getPrompts()),
+      prompts: loader.getPrompts(),
       overrideError: await code(() => new DefaultResourceLoader({ cwd: ctx.cwd, agentDir,
         systemPromptOverride: () => { throw new Error('override failed'); } })._sdkOptions()),
       factories: await code(() => new DefaultResourceLoader({ cwd: ctx.cwd, agentDir, extensionFactories: [() => {}] })),
@@ -274,7 +274,7 @@ async fn resource_loader_and_model_runtime_serve_child_sessions() {
     assert_eq!(options["noSkills"], true);
     assert_eq!(options["noExtensions"], false);
     assert!(options["settingsManagerId"].as_u64().is_some(), "{options}");
-    assert_eq!(data["prompts"], "ERR_PI_UNSUPPORTED");
+    assert_eq!(data["prompts"], json!({"prompts": [], "diagnostics": []}));
     assert_eq!(data["factories"], "ERR_PI_UNSUPPORTED");
     assert_eq!(data["ownRuntime"], true);
     assert_eq!(data["model"], "tiny");

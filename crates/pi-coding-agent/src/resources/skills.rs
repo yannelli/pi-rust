@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::brand::CONFIG_DIR_NAME;
@@ -17,7 +17,7 @@ use super::{CollisionResourceType, ResourceDiagnostic};
 pub const MAX_NAME_LENGTH: usize = 64;
 pub const MAX_DESCRIPTION_LENGTH: usize = 1024;
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Skill {
     pub name: String,
@@ -25,15 +25,16 @@ pub struct Skill {
     pub file_path: PathBuf,
     pub base_dir: PathBuf,
     pub source_info: SourceInfo,
+    #[serde(default)]
     pub disable_model_invocation: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compatibility: Option<String>,
-    #[serde(skip_serializing_if = "Map::is_empty")]
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
     pub metadata: Map<String, Value>,
     /// The experimental `allowed-tools` list, split on whitespace when given as a string.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_tools: Vec<String>,
 }
 
