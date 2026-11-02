@@ -64,13 +64,14 @@ These exports are present, but they throw `ERR_PI_UNSUPPORTED`:
 
 - `@earendil-works/pi-ai/compat`: `setBedrockProviderModule`. Amazon Bedrock streams in Rust, so there is no Node Bedrock module to inject.
 - `@earendil-works/pi-coding-agent`, run modes and CLI: `InteractiveMode`, `RpcClient`, `main`, `parseArgs`, `runPrintMode`, `runRpcMode`, `resolveCliModel`, `resolveModelScopeWithDiagnostics`, `readStoredCredential`.
-- `@earendil-works/pi-coding-agent`, sessions and extensions: `AgentSession` and `AgentSessionRuntime` as constructors, `createAgentSessionFromServices`, `createAgentSessionRuntime`, `createAgentSessionServices`, `ExtensionRunner`, `createExtensionRuntime`, `discoverAndLoadExtensions`, `createCodemodeExtension`, `createMcpExtension`, `createToolSearchExtension`, `DefaultPackageManager`, `ProjectTrustStore`.
+- `@earendil-works/pi-coding-agent`, sessions and extensions: `AgentSession` and `AgentSessionRuntime` as constructors, `createAgentSessionFromServices`, `createAgentSessionRuntime`, `createAgentSessionServices`, `ExtensionRunner`, `createExtensionRuntime`, `discoverAndLoadExtensions`, `createCodemodeExtension`, `createMcpExtension`, `createToolSearchExtension`, `DefaultPackageManager`.
 
 Other limits of the exports that work:
 
 - `createAgentSession` makes a child session. It supports `cwd`, `agentDir`, `model`, `thinkingLevel`, tool names, `excludeTools`, `noTools`, `systemPrompt`, `resourceLoader`, and the `SessionManager`, `SettingsManager`, and `ModelRuntime` wrappers. These options throw `ERR_PI_UNSUPPORTED`: `customTools`, `scopedModels`, `sessionStartEvent`, a separate custom `ModelRuntime`, third-party session or settings managers, and a custom `ResourceLoader` with skills, prompts, context files, or extensions. A child session does not load extensions. It uses the runtime and auth of the host.
 - `AgentSession.prompt` supports images, `expandPromptTemplates`, and `source`. `streamingBehavior` throws `ERR_PI_UNSUPPORTED`. A second prompt during a running prompt is rejected.
 - `SDK.extensionsResult.runtime` throws `ERR_PI_UNSUPPORTED`.
+- `ProjectTrustStore` uses upstream path, read, and write code with a private synchronous lock port. Unix and Windows QuickJS and Node fixtures cover its store, error, lock, and exit behavior. Signal cleanup, graceful-fs changes, and lock-map sharing with other host code remain open.
 - `SessionManager.appendUsage` stores the usage JSON as given, `null` included, and returns a copy of the stored entry read back from Rust. Upstream returns the object it appended, so changes to the returned object do not reach the session, and for an `undefined` usage the copy has no `usage` key where the upstream object has one set to `undefined`.
 - When a `SessionManager` append cannot be written to the session file, pi-rust keeps the entry in memory and as the leaf. Upstream removes it again.
 - `SettingsManager` works through `SettingsManager.create` and `SettingsManager.inMemory`. `new SettingsManager()` and `get*`, `set*`, and `remove*` accessors without a Rust counterpart throw `ERR_PI_UNSUPPORTED` with the member name (`host/sdk_storage.js`).
