@@ -17,6 +17,8 @@ use crate::agent_session::{ExtensionProviderHooks, RefreshModelsContext};
 
 pub(crate) struct JsProviderHooks {
     pub runner: Weak<ExtensionRunner>,
+    /// The SDK factory group whose callbacks these are (0: the runner's own).
+    pub group: u64,
     pub provider: String,
     pub refresh_models: bool,
     pub modify_models: bool,
@@ -30,9 +32,10 @@ fn strings(value: &Value) -> Vec<String> {
 
 impl JsProviderHooks {
     /// The hooks a registration declares; `None` when it has none.
-    pub fn from_config(runner: Weak<ExtensionRunner>, provider: &str, config: &Value) -> Option<Self> {
+    pub fn from_config(runner: Weak<ExtensionRunner>, group: u64, provider: &str, config: &Value) -> Option<Self> {
         let hooks = Self {
             runner,
+            group,
             provider: provider.to_string(),
             refresh_models: config["hasRefreshModels"].as_bool() == Some(true),
             modify_models: config["oauth"]["hasModifyModels"].as_bool() == Some(true),
@@ -58,7 +61,7 @@ impl JsProviderHooks {
             options.insert("signal".into(), json!(signal));
         }
         args.insert(0, json!(self.provider));
-        let result = runner.call_json(method, args).await;
+        let result = runner.call_model(self.group, method, args).await;
         runner.release_signal(signal);
         result.map_err(|failure| failure.message)
     }

@@ -290,3 +290,26 @@ fn adopted_changes_keep_only_the_document() {
     assert!(!early.alive());
     assert_eq!(tracker.value()["entries"][0]["text"].as_str().unwrap().len(), 4 * 11_000);
 }
+
+/// Open a change, write a large payload that only its draft holds, and drop the change unsettled.
+fn abandon(tracker: &mut pi_chord::delta::Tracker) -> Watch {
+    let mut change = tracker.begin_change();
+    let payload = rows(50_000);
+    let watch = Watch::new(payload.at(0).unwrap());
+    change.state().unwrap().set("payload", object(vec![("rows", payload)])).unwrap();
+    assert!(watch.alive(), "the open draft holds its payload");
+    watch
+}
+
+/// Upstream worker scenario `abandoned-draft-released`. Upstream keeps the latest dropped draft until the
+/// tracker's next change or adoption; the Rust tracker holds no draft, so dropping the change frees it.
+#[test]
+fn releases_an_abandoned_draft_when_it_is_dropped() {
+    let mut tracker = track(json!({"value": 0, "payload": null}));
+    let chain: Vec<Watch> = (0..20).map(|_| abandon(&mut tracker)).collect();
+    assert!(chain.iter().all(|watch| !watch.alive()), "the tracker kept a dropped draft");
+    let replacement = tracker.prepare_replace(json!({"value": 1, "payload": null}));
+    tracker.adopt(&replacement).unwrap();
+    assert_eq!(tracker.value(), &json!({"value": 1, "payload": null}));
+    assert_eq!(tracker.revision(), 1);
+}

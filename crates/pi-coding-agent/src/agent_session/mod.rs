@@ -135,8 +135,6 @@ pub struct AgentSession {
     pub(crate) builtins: Mutex<builtins::BuiltinState>,
     /// The auth-wrapped stream function, shared by session and summarization requests.
     stream_fn: StreamFn,
-    /// Whether the session was created with its own stream function (tests, SDK hosts).
-    has_custom_stream: bool,
     model_selected: AtomicBool,
     scoped_models: Mutex<Vec<ScopedModel>>,
     agent_listener: Mutex<Option<u64>>,
@@ -176,10 +174,6 @@ impl AgentSession {
 
     pub(crate) fn stream_fn(&self) -> &StreamFn {
         &self.stream_fn
-    }
-
-    pub(crate) fn has_custom_stream_fn(&self) -> bool {
-        self.has_custom_stream
     }
 
     /// The session tree, locked. Do not hold the guard across session calls.

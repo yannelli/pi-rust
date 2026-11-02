@@ -196,11 +196,18 @@ impl AgentSession {
             (has_codemode, reaches(pi_codemode::TOOL_SEARCH_TOOL_NAME), tools.registry.active_names())
         };
         let activate = manager.ensure_discovery_active(has_codemode, has_tool_search, &active);
-        if !activate.is_empty() {
-            let mut next = active;
-            next.extend(activate);
-            self.set_active_tools_by_name(&next);
+        if activate.is_empty() {
+            return;
         }
+        {
+            let mut tools = lock(&self.tools);
+            let mut next = tools.registry.active_names();
+            next.extend(activate);
+            if tools.set_active(&next) {
+                tools.pending.clear();
+            }
+        }
+        self.sync_agent_tools();
     }
 
     /// Before a prompt: pick up sign-ins made elsewhere, wait once for servers with `direct`
