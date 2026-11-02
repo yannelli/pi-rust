@@ -16,7 +16,7 @@ use super::inbox::{
 use super::live::LIVE_DOC;
 use super::scheduler::Scheduler;
 use super::settings::Settings;
-use super::types::{AbortSubmissionResult, InputEntry, SubmissionDraft, WhenBusy};
+use super::types::{AbortSubmissionResult, InputEntry, SubmissionDraft, WhenBusy, WhenIdle};
 use super::util::{Waiters, closed_error};
 use crate::errors::{DurableError, DurableResult};
 use crate::ids::{ConversationId, SubmissionId};
@@ -256,13 +256,8 @@ fn check_input_entry(entry: &InputEntry) -> DurableResult<()> {
     Ok(())
 }
 
-/// Admit a submission inside a commit (spec section 6). A known request ID returns its submission. A display-only
-/// write (only `kind` and `data`) is appended and settled `done` at once, busy or not, as it changes nothing the model
-/// sees; only behind a queued reset it queues, so it lands after the reset. A busy conversation queues anything else,
-/// or rejects `reject` input with `ConversationBusy`. An idle one with queued items queues it behind them and runs a
-/// final boundary. Otherwise idle input places its entry (`pi.user`, or the input's own) and starts a run, and an
-/// idle write appends its entry.
-/// With `span`, the submission stores its carrier, and a steer links the span to the running generation's trace.
+/// Admit a submission in a commit, deduplicating request IDs before the busy and idle rejection checks.
+/// Queue input and model-visible writes as needed; settle display-only writes unless a reset is ahead.
 pub async fn admit_submission(
     tx: &Tx,
     conversation_id: ConversationId,
@@ -321,6 +316,9 @@ pub async fn admit_submission(
     }
     if busy && matches!(draft, SubmissionDraft::Input { when_busy: Some(WhenBusy::Reject), .. }) {
         return Err(DurableError::ConversationBusy(conversation_id));
+    }
+    if !busy && matches!(draft, SubmissionDraft::Input { when_idle: Some(WhenIdle::Reject), .. }) {
+        return Err(DurableError::ConversationIdle(conversation_id));
     }
     // A boundary reads the table, so it is prepared before the first table write; a busy one needs none.
     let mut boundary = if busy { None } else { Some(prepare_boundary(tx, conversation_id, settings).await?) };

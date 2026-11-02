@@ -38,6 +38,14 @@ pub enum WhenBusy {
     Reject,
 }
 
+/// How input submitted to an idle conversation (no run) is treated; unset, it starts a run. `Reject` refuses it with
+/// `ConversationIdle` and writes nothing; with `WhenBusy::Steer`, the input steers a run or is refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WhenIdle {
+    Reject,
+}
+
 /// The entry an input is placed as, instead of `pi.user`: an application kind, and data the transcript shows, such as
 /// its author. Its model message is still the input's user message.
 #[derive(Clone, Debug, PartialEq)]
@@ -64,6 +72,7 @@ pub enum SubmissionDraft {
         request_id: Option<String>,
         content: UserInput,
         when_busy: Option<WhenBusy>,
+        when_idle: Option<WhenIdle>,
         /// Place the input as this entry; default `pi.user` without data. The kind must not start with `pi.`.
         entry: Option<InputEntry>,
     },
@@ -76,7 +85,8 @@ pub enum SubmissionDraft {
 impl SubmissionDraft {
     /// User text with the default busy behavior (`followUp`).
     pub fn input(content: impl Into<String>) -> Self {
-        Self::Input { request_id: None, content: UserContent::Text(content.into()), when_busy: None, entry: None }
+        let content = UserContent::Text(content.into());
+        Self::Input { request_id: None, content, when_busy: None, when_idle: None, entry: None }
     }
 
     pub fn write(entry: EntryDraft) -> Self {
@@ -99,6 +109,13 @@ impl SubmissionDraft {
     pub fn with_when_busy(mut self, mode: WhenBusy) -> Self {
         if let Self::Input { when_busy, .. } = &mut self {
             *when_busy = Some(mode);
+        }
+        self
+    }
+
+    pub fn with_when_idle(mut self, mode: WhenIdle) -> Self {
+        if let Self::Input { when_idle, .. } = &mut self {
+            *when_idle = Some(mode);
         }
         self
     }
