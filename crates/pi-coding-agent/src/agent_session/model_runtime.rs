@@ -242,6 +242,21 @@ impl ModelRuntime {
         self.registry_mut().set_configured_providers(configured);
     }
 
+    /// Drops a [`Self::set_runtime_api_key`] key and rechecks which providers have auth.
+    pub async fn remove_runtime_api_key(&self, provider: &str) {
+        self.runtime_store.remove_runtime_api_key(provider);
+        self.refresh_configured_providers().await;
+    }
+
+    pub fn has_runtime_api_key(&self, provider: &str) -> bool {
+        self.runtime_store.has_runtime_api_key(provider)
+    }
+
+    /// Stored and runtime credentials, without their secrets.
+    pub async fn list_credentials(&self) -> pi_ai::auth::AuthResult<Vec<pi_ai::auth::CredentialInfo>> {
+        self.runtime_store.list().await
+    }
+
     /// The API key a request to `provider` would use now, refreshing OAuth tokens if needed.
     pub async fn api_key_for(&self, provider: &str) -> Option<String> {
         let resolved = self.resolver.resolve(provider, &Default::default()).await.ok().flatten();
