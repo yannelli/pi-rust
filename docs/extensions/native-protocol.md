@@ -1,6 +1,6 @@
 # Native extension protocol
 
-Created 2026-10-29. Last updated 2026-10-31.
+Created 2026-10-29. Last updated 2026-11-02.
 
 A native extension is a program that pi starts as a child process. pi and the child exchange JSON-RPC 2.0 messages. The built-in bridge (`crates/pi-coding-agent/src/extensions/js/native*.js`) runs in the extension runtime and maps each message onto the `pi` and `ctx` objects of the JavaScript extension API. The Rust SDK is `crates/pi-ext-sdk` in `yannelli/pi-rust-extensions`.
 
@@ -39,7 +39,9 @@ When the child exits early, pi shows one error notification, fails the pending r
 
 ### `initialize` (host to extension)
 
-Params: `protocolVersion` (integer), `piVersion`, `cwd`, `agentDir`, `extensionPath`, `platform` (`process.platform`), `mode` (`tui`, `rpc`, `json`, `print`), `hasUI`, `flags`.
+Params: `protocolVersion` (integer), `piVersion`, `cwd`, `agentDir`, `extensionPath`, `platform` (`process.platform`), `mode` (`tui`, `rpc`, `json`, `print`), `hasUI`, `flags`, `features`.
+
+`features` lists the optional parts of this document that the host speaks: `toolRenderers`, `render.spinner`, `render.refresh`, `ui.getTheme`, `theme_changed`, `ui.working`, and `ui.chatStyle`. Older hosts send no `features`; treat a missing list as empty.
 
 pi loads extensions before it binds the session. `mode` and `hasUI` are the mode the session binds the extensions in (`tui` in interactive mode, and `rpc`, `json`, or `print` for the CLI modes). Hosts that do not know the mode at load time, for example SDK sessions, send `print` and `false`. The ctx snapshot of each event has the current values. `flags` holds the values pi has at load time and is empty for flags this extension declares in its answer. Read flag values from `ctx.flags` or with `flags.get`.
 
@@ -58,6 +60,7 @@ Result:
 | `autocomplete` | `[{ triggerCharacters: ["@"] }]` |
 | `messageRenderers` | custom message types the extension draws, see [Renderers](#renderers) |
 | `entryRenderers` | custom session entry types the extension draws |
+| `toolRenderers` | `[{ toolName, renderCall?: boolean, renderResult?: boolean, renderShell?: "default" \| "self" }]`: rows of tools that this extension does not register, see [Renderers](#renderers) |
 
 All fields except `protocolVersion` are optional.
 
@@ -86,14 +89,15 @@ All fields except `protocolVersion` are optional.
 | `render.entry` | `{ customType, entry, options, width }` | `{ lines }` or `null` |
 | `shutdown` | `{}` | `null` |
 
-Notifications: `initialized`, `exit`, `events.message` `{ channel, data }`, `ui.resize` `{ surface, width, height? }`, `ui.key` `{ surface, data, key }`, `ui.closed` `{ surface }`, `footer.changed` `{ footer }`, `$/cancelRequest`.
+Notifications: `initialized`, `exit`, `events.message` `{ channel, data }`, `ui.resize` `{ surface, width, height? }`, `ui.key` `{ surface, data, key }`, `ui.closed` `{ surface }`, `footer.changed` `{ footer }`, `theme.changed` `{ theme }`, `$/cancelRequest`.
 
 - `autocomplete.suggest`: with `merge: true`, pi adds its own suggestions after the extension's items when both use the same `prefix`. When the prefixes differ, pi shows only the extension's items.
 - `footer.changed`: pi sends it to an extension that lists `footer_changed` in `events`, when the `footer` of the ctx snapshot changes in `tui` mode. pi checks the footer data 4 times per second, so it sends at most 4 notifications per second.
+- `theme.changed`: pi sends it to an extension that lists `theme_changed` in `events`, when the theme of the TUI changes in `tui` mode (`/settings`, a system theme that follows the terminal, or an edit of the theme file). `theme` has the shape of the `ui.getTheme` result. pi checks 4 times per second.
 
 ### Events
 
-pi sends `event` only for the names the extension subscribed to. `footer_changed` is no event: it subscribes to the `footer.changed` notification. `event` is the event object of the JavaScript API without functions and without `signal`. When the event signal aborts, pi sends `$/cancelRequest`.
+pi sends `event` only for the names the extension subscribed to. `footer_changed` and `theme_changed` are no events: they subscribe to the `footer.changed` and `theme.changed` notifications. `event` is the event object of the JavaScript API without functions and without `signal`. When the event signal aborts, pi sends `$/cancelRequest`.
 
 - `patch` is an RFC 7386 JSON merge patch. pi applies it to the event object in place before the next handler runs. A `null` value removes the key. pi ignores a patch that is not a JSON object and logs a line.
 - `result` is the handler return value: `{ block, reason }` for `tool_call`, `{ action: "transform", text }` for `input`, `{ compaction }` or `{ cancel: true }` for `session_before_compact`, `{ message }` for `message_end`, `{ messages }` for `context`, `{ entries, continue }` for `agent_before_settle`, and the other results of upstream pi.
@@ -149,6 +153,9 @@ A tool with `renderCall: true` or `renderResult: true` draws its own call or res
 - pi never waits for the answer. It draws the last lines of the row, or nothing for a new row, and draws again when the answer arrives. Each row has at most one request open. pi keeps the lines of the last 4 widths for each input, so a redraw at a known width sends no request. When the inputs change, for example when a result arrives, or when pi redraws the whole screen (for example after a theme change), pi sends a new request, shows the old lines until the answer arrives, and drops older answers.
 - `context` of the tool requests: `{ args, toolCallId, cwd, executionStarted, argsComplete, isPartial, expanded, showImages, isError }`. `options` of `render.toolResult`: `{ expanded, isPartial }`. `options` of `render.message` and `render.entry`: `{ expanded }`.
 - `renderShell: "self"` tells pi not to draw the tool frame around the rows.
+- `toolRenderers` draw the rows of a tool that pi or another extension registers, for example the built-in `bash` or `read`. They apply only while no other renderer draws that tool: when the tool's own definition, or a `registerToolRenderer` of a JavaScript extension, has a `renderCall` or `renderResult`, pi uses those. A renderer slot that the entry does not set falls back to pi's own row. `register.toolRenderer` takes one entry later.
+- `render.spinner`: the zero-width token `\u001b_pi:spinner\u0007` (an APC string) in an answered line is replaced by the current frame of pi's spinner (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`, 80 ms) on each frame, so a row can animate without a request per frame. Styles around the token apply to the frame. Remove the token, for example when the tool finishes, to stop the animation.
+- `render.refresh`: an answer `{ lines, refreshMs }` asks pi to send the request again after `refreshMs` milliseconds (at least 250) while the inputs of the row stay the same, for example for an elapsed time. pi keeps the old lines until the new answer arrives. An answer without `refreshMs` ends the refreshes.
 - A failed request is logged; the row keeps its last lines until its inputs change.
 - Key hints: `keybindings.get` `{ ids? }` returns `{ "<keybinding id>": "<keys>" }`, for example `{ "app.tools.expand": "ctrl+o" }`, with the keys of the user's keybindings (upstream `keyText` of the render context, `9376c8d`). Without `ids`, it returns every app keybinding. An empty string means that the keybinding has no keys.
 
@@ -167,6 +174,12 @@ A tool with `renderCall: true` or `renderResult: true` draws its own call or res
 | `ui.setWidget` | `{ key, lines: string[] \| null, placement?: "aboveEditor" \| "belowEditor" }` | `null` |
 | `ui.setFooter` | `{ lines: string[] \| null }` | `null` |
 | `ui.setTitle` | `{ title }` | `null` |
+| `ui.setWorkingMessage` | `{ message? }` | `null` |
+| `ui.setWorkingIndicator` | `{ frames?: string[], intervalMs? }` | `null` |
+| `ui.setWorkingVisible` | `{ visible }` | `null` |
+| `ui.setHiddenThinkingLabel` | `{ label? }` | `null` |
+| `ui.setChatStyle` | `{ userPrefix?, assistantPrefix?, collapseThinking?, roundedEditor? }` | `null` |
+| `ui.getTheme` | `{}` | the theme, see below |
 | `ui.setEditorText` | `{ text }` | `null` |
 | `ui.getEditorText` | `{}` | string |
 | `ui.writeTerminal` | `{ data, tmuxPassthrough? }` | `true` when pi wrote to the terminal (`tui` mode), else `false` |
@@ -175,6 +188,12 @@ A tool with `renderCall: true` or `renderResult: true` draws its own call or res
 | `ui.close` | `{ surface, result? }` | `null` |
 
 Dialogs and `ui.custom` return error `-32001` when pi has no UI. `$/cancelRequest` closes an open dialog.
+
+Working indicator (`ui.working`, upstream `ctx.ui.setWorkingMessage`, `setWorkingIndicator`, `setWorkingVisible`, and `setHiddenThinkingLabel`): the indicator shows while the agent works. Without `message` or `label`, pi shows its own text again. `frames` are drawn as they are, so they can carry their own styles; without `frames`, pi draws its own spinner.
+
+Chat style (`ui.chatStyle`, pi-rust `ctx.ui.setChatStyle`): `userPrefix` goes before the first line of each user message and `assistantPrefix` before the first line of the text of each assistant message; the other lines get the same indent. `collapseThinking: true` shows finished thinking blocks as the hidden thinking label, and keeps the block being written open; a click opens one block, and showing thinking blocks with the thinking toggle (`app.thinking.toggle`) opens them all. `roundedEditor: true` rounds the editor corners and draws side bars in the editor padding (`editorPaddingX`). Each call replaces the whole style, and a reload resets it.
+
+`ui.getTheme` returns the theme that the TUI draws with: `{ name, sourcePath, appearance: "dark" | "light", mode: "truecolor" | "256color", fg: { <token>: <SGR open sequence> }, bg: { <token>: <SGR open sequence> }, dim: [<token>] }`. The tokens are those of the theme JSON, for example `accent`, `muted`, `toolTitle`, and `toolSuccessBg`. A token in `dim` also needs `\u001b[2m`. Close a foreground with `\u001b[39m` (and `\u001b[22m` after dim) and a background with `\u001b[49m`. It needs no ctx.
 
 `ui.input`: `prefill` is the initial text. `secret: true` shows `*` for each character in `tui` mode. In `rpc` mode pi adds `prefill` and `secret` to the `input` request of the client.
 
@@ -260,7 +279,7 @@ Line-based surfaces: a widget (surface `widget:<key>`), the footer (surface `foo
 
 ### Later registrations
 
-`register.tool` (one tool definition), `register.command`, `register.shortcut`, `register.flag`, `register.events` (`{ events }`, adds subscriptions), and `register.autocomplete` take the same shapes as the `initialize` result fields. `register.messageRenderer` and `register.entryRenderer` take `{ customType }`. They answer `null`.
+`register.tool` (one tool definition), `register.command`, `register.shortcut`, `register.flag`, `register.events` (`{ events }`, adds subscriptions), and `register.autocomplete` take the same shapes as the `initialize` result fields. `register.messageRenderer` and `register.entryRenderer` take `{ customType }`, and `register.toolRenderer` takes one `toolRenderers` entry. They answer `null`.
 
 ## Example transcript
 

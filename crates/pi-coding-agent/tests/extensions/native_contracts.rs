@@ -272,3 +272,71 @@ async fn an_invalidated_renderer_asks_the_child_again_once() {
     assert_eq!(message_renders(&h).await, settled, "redraws after the answer sent requests");
     assert_eq!(settled, 2);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tool_renderers_draw_tools_without_renderers_and_animate_spinner_tokens() {
+    let (h, _ui) = native(Vec::new()).await;
+    let info = h.runner.tool_renderer_info("read").expect("read has the extension's call renderer");
+    assert!(info.call && !info.result && info.self_shell, "{info:?}");
+    assert_eq!(h.runner.tool_renderer_info("ls"), None);
+    let request = ToolRenderRequest {
+        tool_call_id: "r2".into(),
+        args: json!({"path": "a.txt"}),
+        args_complete: true,
+        execution_started: true,
+        ..ToolRenderRequest::default()
+    };
+    let runner = h.runner.clone();
+    let (first, refreshed) = tokio::task::block_in_place(move || {
+        let mut call = runner.render_tool_call("read", &request).expect("a call component");
+        let first = render_until(&mut call, 40, "READ a.txt #1");
+        let refreshed = render_until(&mut call, 40, "READ a.txt #2");
+        (first, refreshed)
+    });
+    let spinning = |lines: &[String]| {
+        let frame = lines[0].chars().last();
+        frame.is_some_and(|frame| ('\u{2800}'..='\u{28ff}').contains(&frame)) && !lines[0].contains("\x1b_")
+    };
+    assert!(spinning(&first) && spinning(&refreshed), "{first:?} {refreshed:?}");
+    h.session.prompt("/native-probe", Vec::new()).await.unwrap();
+    let features = entry_data(&h, "native-probe").unwrap()["features"].clone();
+    let expected = [
+        "toolRenderers",
+        "render.spinner",
+        "render.refresh",
+        "ui.getTheme",
+        "theme_changed",
+        "ui.working",
+        "ui.chatStyle",
+    ];
+    for feature in expected {
+        assert!(features.as_array().unwrap().contains(&json!(feature)), "{features}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn theme_working_indicator_and_later_tool_renderers_reach_the_host() {
+    let (h, ui) = native(Vec::new()).await;
+    assert_eq!(h.runner.tool_renderer_info("grep"), None);
+    h.session.prompt("/native-theme", Vec::new()).await.unwrap();
+    let data = entry_data(&h, "native-theme").unwrap();
+    assert!(
+        data["name"].is_string() && data["accent"].as_str().is_some_and(|ansi| ansi.starts_with("\x1b[")),
+        "{data}"
+    );
+    assert!(["truecolor", "256color"].contains(&data["mode"].as_str().unwrap_or_default()), "{data}");
+    assert_eq!(data["late"], json!(-32602), "{data}");
+    let calls = ui.calls();
+    let expected = [
+        r#"working message: Some("Thinking (3s)")"#,
+        r#"working indicator: Some((Some(["a", "b"]), Some(90)))"#,
+        r#"hidden thinking label: Some("Thought")"#,
+        r#"chat style: ChatStyle { user_prefix: Some("› "), assistant_prefix: None, collapse_thinking: true, rounded_editor: false }"#,
+        "working indicator: None",
+        "working message: None",
+    ];
+    for line in expected {
+        assert!(calls.contains(&line.to_string()), "{line} not in {calls:?}");
+    }
+    assert!(h.runner.tool_renderer_info("grep").is_some_and(|info| info.call));
+}

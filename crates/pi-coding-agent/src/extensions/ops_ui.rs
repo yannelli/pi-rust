@@ -10,7 +10,7 @@ use super::component::{ComponentFactory, ComponentKind, CustomRequest};
 use super::ops::{Args, error};
 use super::runner::ExtensionRunner;
 use crate::agent_session::lock;
-use crate::extension_ui::{DialogOptions, NotifyType, WidgetPlacement, WorkingIndicatorOptions};
+use crate::extension_ui::{ChatStyle, DialogOptions, NotifyType, WidgetPlacement, WorkingIndicatorOptions};
 
 fn placement(value: &Value) -> Option<WidgetPlacement> {
     match value.as_str() {
@@ -138,6 +138,10 @@ pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<
                 interval_ms: options["intervalMs"].as_u64(),
             });
             ui.set_working_indicator(indicator);
+            Value::Null
+        }
+        "setChatStyle" => {
+            ui.set_chat_style(ChatStyle::from_json(&args.json(1)));
             Value::Null
         }
         "setHiddenThinkingLabel" => {

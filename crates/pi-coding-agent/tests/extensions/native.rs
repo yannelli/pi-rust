@@ -7,7 +7,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use pi_ai::providers::faux::FauxResponse;
 use pi_coding_agent::extension_ui::{
-    AutocompleteRequest, DialogOptions, ExtensionMode, ExtensionUi, NoOpExtensionUi, NotifyType, WidgetPlacement,
+    AutocompleteRequest, ChatStyle, DialogOptions, ExtensionMode, ExtensionUi, NoOpExtensionUi, NotifyType,
+    WidgetPlacement, WorkingIndicatorOptions,
 };
 use pi_coding_agent::extensions::autocomplete::JsAutocompleteProvider;
 use pi_coding_agent::extensions::{ComponentFactory, CustomRequest, ExtensionBindings};
@@ -100,6 +101,23 @@ impl ExtensionUi for NativeUi {
     }
 
     fn set_title(&self, _title: &str) {}
+
+    fn set_working_message(&self, message: Option<&str>) {
+        self.push(format!("working message: {message:?}"));
+    }
+
+    fn set_working_indicator(&self, options: Option<WorkingIndicatorOptions>) {
+        let options = options.map(|options| (options.frames, options.interval_ms));
+        self.push(format!("working indicator: {options:?}"));
+    }
+
+    fn set_hidden_thinking_label(&self, label: Option<&str>) {
+        self.push(format!("hidden thinking label: {label:?}"));
+    }
+
+    fn set_chat_style(&self, style: ChatStyle) {
+        self.push(format!("chat style: {style:?}"));
+    }
 
     fn set_editor_text(&self, _text: &str) {}
 

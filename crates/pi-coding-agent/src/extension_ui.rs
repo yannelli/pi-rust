@@ -107,6 +107,33 @@ pub struct WorkingIndicatorOptions {
     pub interval_ms: Option<u64>,
 }
 
+/// How chat messages and the editor look (pi-rust `ctx.ui.setChatStyle`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ChatStyle {
+    /// Drawn before the first line of each user message; the other lines get the same indent.
+    pub user_prefix: Option<String>,
+    /// Drawn before the first line of the text of each assistant message.
+    pub assistant_prefix: Option<String>,
+    /// Finished thinking blocks show the hidden thinking label; the block being written shows.
+    pub collapse_thinking: bool,
+    /// Round editor corners, and side bars when the editor has padding.
+    pub rounded_editor: bool,
+}
+
+impl ChatStyle {
+    /// The style of `setChatStyle(options)`: `{ userPrefix, assistantPrefix, collapseThinking,
+    /// roundedEditor }`; missing or invalid fields keep pi's look.
+    pub fn from_json(options: &Value) -> Self {
+        let prefix = |key: &str| options[key].as_str().filter(|text| !text.is_empty()).map(str::to_string);
+        Self {
+            user_prefix: prefix("userPrefix"),
+            assistant_prefix: prefix("assistantPrefix"),
+            collapse_thinking: options["collapseThinking"].as_bool() == Some(true),
+            rounded_editor: options["roundedEditor"].as_bool() == Some(true),
+        }
+    }
+}
+
 /// A theme the UI can switch to (upstream `getAllThemes()` entries).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ThemeInfo {
@@ -152,6 +179,8 @@ pub trait ExtensionUi: Send + Sync {
     fn set_working_indicator(&self, _options: Option<WorkingIndicatorOptions>) {}
 
     fn set_hidden_thinking_label(&self, _label: Option<&str>) {}
+
+    fn set_chat_style(&self, _style: ChatStyle) {}
 
     fn get_all_themes(&self) -> Vec<ThemeInfo> {
         Vec::new()

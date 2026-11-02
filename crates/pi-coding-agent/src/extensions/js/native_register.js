@@ -1,7 +1,8 @@
 // Registrations of native extensions: tools, commands, shortcuts, flags, events, providers,
 // virtual models, and autocomplete triggers become `pi.*` registrations that call the child.
 import { isObject, mergePatch, snapshot, toJson } from "./native_host.js";
-import { createContentRenderers, keyTexts, toolRenderers } from "./native_render.js";
+import { createContentRenderers, createToolOverrides, keyTexts, toolRenderers } from "./native_render.js";
+import { rpcError } from "./native_rpc.js";
 
 const TOOL_ABORT_MS = 5000;
 const PREPARE_MS = 1500;
@@ -107,7 +108,8 @@ export function createRegistrar(state) {
 		for (const name of names ?? []) {
 			if (state.events.has(name)) continue;
 			state.events.add(name);
-			if (name === "footer_changed") state.watchFooter();
+			if (name === "footer_changed") state.watch("footer");
+			else if (name === "theme_changed") state.watch("theme");
 			else if (name !== "session_start" && name !== "session_shutdown") pi.on(name, (event, ctx) => forward(name, event, ctx));
 		}
 	};
@@ -128,6 +130,7 @@ export function createRegistrar(state) {
 	};
 
 	const content = createContentRenderers(state);
+	const toolRenderer = createToolOverrides(state);
 
 	const provider = (name, config) => {
 		pi.registerProvider(name, config);
@@ -145,6 +148,9 @@ export function createRegistrar(state) {
 		for (const definition of init.autocomplete ?? []) autocomplete(definition);
 		for (const customType of init.messageRenderers ?? []) content.message(customType);
 		for (const customType of init.entryRenderers ?? []) content.entry(customType);
+		for (const definition of init.toolRenderers ?? []) {
+			if (!toolRenderer(definition)) state.log("toolRenderers: skipped an entry without a toolName");
+		}
 		events(init.events);
 	};
 
@@ -157,6 +163,10 @@ export function createRegistrar(state) {
 		"register.autocomplete": (p) => (autocomplete(p), null),
 		"register.messageRenderer": (p) => (content.message(p.customType), null),
 		"register.entryRenderer": (p) => (content.entry(p.customType), null),
+		"register.toolRenderer": (p) => {
+			if (!toolRenderer(p)) throw rpcError(-32602, "toolName must be a non-empty string");
+			return null;
+		},
 		"keybindings.get": (p) => keyTexts(p),
 		"provider.register": (p) => (provider(p.name, p.config), null),
 		"provider.unregister": (p) => {

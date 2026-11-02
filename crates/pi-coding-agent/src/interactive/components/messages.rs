@@ -13,6 +13,7 @@ use pi_tui::{
 };
 
 use super::RenderOptions;
+use crate::extension_ui::ChatStyle;
 use crate::markdown_transform::{MarkdownMessageType, MessageMeta, create_markdown_transform};
 use crate::theme::{ThemeBg, ThemeColor, theme};
 
@@ -31,6 +32,64 @@ fn mark_zone(mut lines: Vec<String>) -> Vec<String> {
     lines
 }
 
+/// The byte offset of visible column `column` in `line`, past escape sequences before it.
+fn column_offset(line: &str, column: usize) -> usize {
+    let mut seen = 0;
+    let mut chars = line.char_indices().peekable();
+    while let Some(&(at, ch)) = chars.peek() {
+        if ch == '\x1b' {
+            chars.next();
+            if chars.next_if(|(_, ch)| *ch == '[').is_some() {
+                while chars.next_if(|(_, ch)| !('@'..='~').contains(ch)).is_some() {}
+            }
+            chars.next();
+            continue;
+        }
+        if seen >= column {
+            return at;
+        }
+        seen += pi_tui::visible_width(&ch.to_string());
+        chars.next();
+    }
+    line.len()
+}
+
+/// `prefix` at column `pad` of the first line with text, and as many spaces on the others.
+fn prefix_lines(lines: Vec<String>, prefix: &str, pad: usize) -> Vec<String> {
+    let indent = " ".repeat(pi_tui::visible_width(prefix));
+    let first = lines.iter().position(|line| !pi_tui::utils::strip_terminal_sequences(line).trim().is_empty());
+    lines
+        .into_iter()
+        .enumerate()
+        .map(|(index, mut line)| {
+            let offset = column_offset(&line, pad);
+            line.insert_str(offset, if Some(index) == first { prefix } else { &indent });
+            line
+        })
+        .collect()
+}
+
+/// Renders `child` narrower by the prefix width and puts the prefix in front.
+struct Prefixed {
+    child: Markdown,
+    prefix: String,
+    pad: usize,
+}
+
+impl Component for Prefixed {
+    fn render(&mut self, width: usize) -> Vec<String> {
+        let prefix_width = pi_tui::visible_width(&self.prefix);
+        if width <= prefix_width + self.pad + 1 {
+            return self.child.render(width);
+        }
+        prefix_lines(self.child.render(width - prefix_width), &self.prefix, self.pad)
+    }
+
+    fn invalidate(&mut self) {
+        self.child.invalidate();
+    }
+}
+
 fn fg_style(color: ThemeColor) -> pi_tui::components::StyleFn {
     Rc::new(move |text: &str| theme().fg(color, text))
 }
@@ -38,6 +97,8 @@ fn fg_style(color: ThemeColor) -> pi_tui::components::StyleFn {
 /// A user message: Markdown on the user message background.
 pub struct UserMessageComponent {
     markdown: Markdown,
+    pad: usize,
+    style: ChatStyle,
 }
 
 impl UserMessageComponent {
@@ -65,13 +126,23 @@ impl UserMessageComponent {
         };
         let markdown =
             Markdown::new(text, options.output_pad, 1, options.markdown_theme.clone(), Some(style), markdown_options);
-        Self { markdown }
+        Self { markdown, pad: options.output_pad, style: options.chat_style.clone() }
+    }
+
+    pub fn set_chat_style(&mut self, style: ChatStyle) {
+        self.style = style;
+        self.markdown.invalidate();
     }
 }
 
 impl Component for UserMessageComponent {
     fn render(&mut self, width: usize) -> Vec<String> {
-        mark_zone(self.markdown.render(width))
+        let prefix = self.style.user_prefix.as_deref().unwrap_or_default();
+        let prefix_width = pi_tui::visible_width(prefix);
+        if prefix.is_empty() || width <= prefix_width + self.pad + 1 {
+            return mark_zone(self.markdown.render(width));
+        }
+        mark_zone(prefix_lines(self.markdown.render(width - prefix_width), prefix, self.pad))
     }
 
     fn invalidate(&mut self) {
@@ -92,6 +163,7 @@ pub struct AssistantMessageComponent {
     /// What `message_display` handlers show in place of the text blocks.
     display_text: Option<String>,
     overrides: HashMap<usize, bool>,
+    thinking_runs: usize,
     /// A thinking run clicked during mouse dispatch, applied once dispatch returns.
     pending_toggle: Rc<Cell<Option<(usize, bool)>>>,
 }
@@ -125,6 +197,7 @@ impl AssistantMessageComponent {
             meta,
             display_text: None,
             overrides: HashMap::new(),
+            thinking_runs: 0,
             pending_toggle: Rc::default(),
         };
         if let Some(message) = message {
@@ -133,14 +206,24 @@ impl AssistantMessageComponent {
         component
     }
 
+    /// The thinking toggle; showing also opens the runs that collapsed thinking closed.
     pub fn set_hide_thinking_block(&mut self, hide: bool) {
         self.hide_thinking_block = hide;
         self.overrides.clear();
+        if !hide && self.options.chat_style.collapse_thinking {
+            self.overrides.extend((0..self.thinking_runs).map(|index| (index, false)));
+        }
         self.rebuild();
     }
 
     pub fn set_hidden_thinking_label(&mut self, label: &str) {
         self.hidden_thinking_label = label.to_string();
+        self.rebuild();
+    }
+
+    /// Builds the message again with `style`.
+    pub fn set_chat_style(&mut self, style: ChatStyle) {
+        self.options.chat_style = style;
         self.rebuild();
     }
 
@@ -189,6 +272,8 @@ impl AssistantMessageComponent {
             content.add_child(child);
         };
         let pad = self.options.output_pad;
+        let style = self.options.chat_style.clone();
+        let mut prefix = style.assistant_prefix.clone();
         let mut run_index = 0;
         let mut i = 0;
         // The display text takes the place of the first text block and hides the others.
@@ -202,7 +287,11 @@ impl AssistantMessageComponent {
                     };
                     if let Some(shown) = shown {
                         let markdown = self.markdown(shown.trim(), MarkdownMessageType::Assistant, None);
-                        add_visible(&mut self.content, &mut needs_spacer, component(markdown));
+                        let child: pi_tui::ComponentRef = match prefix.take() {
+                            Some(prefix) => component(Prefixed { child: markdown, prefix, pad }),
+                            None => component(markdown),
+                        };
+                        add_visible(&mut self.content, &mut needs_spacer, child);
                     }
                     i += 1;
                 }
@@ -219,7 +308,10 @@ impl AssistantMessageComponent {
                     }
                     let index = run_index;
                     run_index += 1;
-                    let hidden = self.overrides.get(&index).copied().unwrap_or(self.hide_thinking_block);
+                    // With collapsed thinking only the run being written stays open.
+                    let writing = is_streaming && i >= message.content.len();
+                    let collapsed = self.hide_thinking_block || (style.collapse_thinking && !writing);
+                    let hidden = self.overrides.get(&index).copied().unwrap_or(collapsed);
                     // A hidden run with an empty label renders nothing, not even spacing.
                     if hidden && self.hidden_thinking_label.trim().is_empty() {
                         continue;
@@ -254,6 +346,7 @@ impl AssistantMessageComponent {
             }
         }
 
+        self.thinking_runs = run_index;
         self.has_tool_calls = message.content.iter().any(|block| matches!(block, ContentBlock::ToolCall(_)));
         let error_line = |text: &str| component(Text::new(&theme().fg(ThemeColor::Error, text), pad, 0));
         if message.stop_reason == StopReason::Length {
@@ -395,5 +488,50 @@ mod tests {
             component.render(80).iter().map(|line| strip_terminal_sequences(line).trim().to_string()).collect();
         assert_eq!(drawn, ["", "Thinking...", "", "shown"]);
         assert_eq!(component.message(), Some(&message));
+    }
+
+    fn styled() -> RenderOptions {
+        let chat_style = ChatStyle {
+            user_prefix: Some("› ".into()),
+            assistant_prefix: Some("● ".into()),
+            collapse_thinking: true,
+            rounded_editor: false,
+        };
+        RenderOptions { chat_style, ..RenderOptions::default() }
+    }
+
+    fn plain(lines: Vec<String>) -> Vec<String> {
+        lines.iter().map(|line| strip_terminal_sequences(line).trim_end().to_string()).collect()
+    }
+
+    #[test]
+    fn chat_style_prefixes_the_first_line_and_indents_the_rest() {
+        let mut user = UserMessageComponent::new("hello\n\nthere", &styled());
+        let lines = user.render(30);
+        assert!(lines.iter().all(|line| pi_tui::visible_width(line) == 30), "{lines:?}");
+        assert_eq!(plain(lines), ["", " › hello", "", "   there", ""]);
+        user.set_chat_style(ChatStyle::default());
+        assert_eq!(plain(user.render(30))[1], " hello");
+
+        let text = thinking_then(ContentBlock::text("answer"), StopReason::Stop);
+        let mut done = AssistantMessageComponent::new(Some(&text), false, "∴ Thought", styled());
+        assert_eq!(plain(done.render(30)), ["", " ∴ Thought", "", " ● answer"]);
+        done.set_chat_style(ChatStyle::default());
+        assert_eq!(plain(done.render(30)), ["", " reasoning", "", " answer"]);
+    }
+
+    #[test]
+    fn collapsed_thinking_keeps_the_run_being_written_open() {
+        let thinking =
+            ContentBlock::Thinking { thinking: "planning".into(), thinking_signature: None, redacted: false };
+        let partial = AssistantMessage { content: vec![thinking], ..AssistantMessage::default() };
+        let mut streaming = AssistantMessageComponent::new(None, false, "∴ Thought", styled());
+        streaming.update_content(&partial, true);
+        assert_eq!(plain(streaming.render(30)), ["", " planning"]);
+        streaming.update_content(&partial, false);
+        assert_eq!(plain(streaming.render(30)), ["", " ∴ Thought"]);
+        streaming.set_hide_thinking_block(true);
+        streaming.set_hide_thinking_block(false);
+        assert_eq!(plain(streaming.render(30)), ["", " planning"], "the toggle opens collapsed runs");
     }
 }

@@ -258,3 +258,27 @@ fn single_wide_grapheme_wider_than_the_line_does_not_recurse() {
     let chunks = word_wrap_line("你好", 1);
     assert_eq!(texts(&chunks), ["你", "好"]);
 }
+
+#[test]
+fn rounded_editor_draws_corners_and_side_bars_in_the_padding() {
+    let editor = editor_with(80, default_theme(), EditorOptions { padding_x: 2, ..EditorOptions::default() });
+    editor.set_rounded(true);
+    editor.set_text("hi");
+    let lines: Vec<String> = editor.render(12).iter().map(|line| strip_terminal_sequences(line)).collect();
+    assert_eq!(lines[0], "╭──────────╮");
+    assert_eq!(lines[1].chars().next(), Some('│'));
+    assert_eq!(lines[1].chars().last(), Some('│'));
+    assert_eq!(visible_width(&lines[1]), 12);
+    assert_eq!(lines[2], "╰──────────╯");
+    editor.set_rounded(false);
+    let plain: Vec<String> = editor.render(12).iter().map(|line| strip_terminal_sequences(line)).collect();
+    assert_eq!(plain[0], "────────────");
+    assert!(plain[1].starts_with("  hi"), "{plain:?}");
+}
+
+#[test]
+fn round_border_replaces_only_the_outer_rule_characters() {
+    use pi_tui::components::editor::round_border;
+    assert_eq!(round_border("\x1b[2m── x ──\x1b[22m", '╭', '╮'), "\x1b[2m╭─ x ─╮\x1b[22m");
+    assert_eq!(round_border("↑ 3 more ─", '╭', '╮'), "↑ 3 more ╮");
+}
