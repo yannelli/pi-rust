@@ -41,6 +41,19 @@ function isUserBashResult(value) {
 	);
 }
 
+const ELICITATION_ACTIONS = new Set(["accept", "decline", "cancel"]);
+
+/** `{ action, content? }` of an elicitation handler, or undefined; throws on other values. */
+function elicitationResult(type, value) {
+	if (value === undefined || value === null) return undefined;
+	const content = value?.content;
+	const validContent = content === undefined || (typeof content === "object" && content !== null && !Array.isArray(content));
+	if (typeof value !== "object" || !ELICITATION_ACTIONS.has(value.action) || !validContent) {
+		throw new Error(`Invalid ${type} handler result: return undefined or { action: "accept" | "decline" | "cancel", content? }`);
+	}
+	return content === undefined ? { action: value.action } : { action: value.action, content };
+}
+
 export class Runner {
 	extensions = [];
 	staleMessage;
@@ -285,6 +298,41 @@ export class Runner {
 			}
 		}
 		return undefined;
+	}
+
+	/** pi-rust: the first answer of the handlers, or the first decline. */
+	async emitMcpElicitation(event) {
+		const ctx = this.createContext();
+		let answer;
+		for (const { ext, handlers } of snapshot(this.extensions, "mcp_elicitation")) {
+			for (const handler of handlers) {
+				try {
+					const result = elicitationResult("mcp_elicitation", await handler(event, ctx));
+					if (result?.action === "decline") return result;
+					answer ??= result;
+				} catch (error) {
+					this.reportFailure(ext, "mcp_elicitation", error);
+				}
+			}
+		}
+		return answer;
+	}
+
+	/** pi-rust: each handler sees the answer so far and can replace it. */
+	async emitMcpElicitationResult(event) {
+		const ctx = this.createContext();
+		let current;
+		for (const { ext, handlers } of snapshot(this.extensions, "mcp_elicitation_result")) {
+			for (const handler of handlers) {
+				try {
+					const seen = current ? { ...event, action: current.action, content: current.content } : event;
+					current = elicitationResult("mcp_elicitation_result", await handler(seen, ctx)) ?? current;
+				} catch (error) {
+					this.reportFailure(ext, "mcp_elicitation_result", error);
+				}
+			}
+		}
+		return current;
 	}
 
 	/** pi-rust `prompt_expansion`: the first block wins; `context` texts join in handler order. */

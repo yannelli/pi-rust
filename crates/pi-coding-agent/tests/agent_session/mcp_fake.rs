@@ -9,8 +9,8 @@ use futures::FutureExt;
 use pi_coding_agent::agent_session::McpSessionOptions;
 use pi_mcp::runtime::{InMemoryAuthStorageBackend, McpOAuthCredentialStore, TransportFactory};
 use pi_mcp::{
-    InMemoryTransport, JsonRpcMessage, LATEST_PROTOCOL_VERSION, LoadedMcpConfig, McpServerEntry, McpTransport,
-    SharedTransport, TransportEvent, in_memory_pair,
+    InMemoryTransport, JsonRpcErrorObject, JsonRpcId, JsonRpcMessage, LATEST_PROTOCOL_VERSION, LoadedMcpConfig,
+    McpServerEntry, McpTransport, SharedTransport, TransportEvent, in_memory_pair,
 };
 use serde_json::{Value, json};
 
@@ -50,6 +50,8 @@ pub struct Fake {
     /// Server ends of the transports, in connection order.
     pub servers: Arc<Mutex<Vec<Arc<InMemoryTransport>>>>,
     pub connected: Arc<Mutex<Vec<String>>>,
+    /// `initialize` params and answers to server requests, as the clients sent them.
+    pub received: Arc<Mutex<Vec<JsonRpcMessage>>>,
     pub options: FakeOptions,
 }
 
@@ -60,6 +62,7 @@ impl Fake {
             tools: Arc::new(Mutex::new(server_tools())),
             servers: Arc::default(),
             connected: Arc::default(),
+            received: Arc::default(),
             options,
         }
     }
@@ -87,9 +90,11 @@ impl Fake {
             let fake = fake.clone();
             tokio::spawn(async move {
                 while let Some(event) = events.recv().await {
-                    let TransportEvent::Message(JsonRpcMessage::Request { id, method, params }) = event else {
-                        continue;
-                    };
+                    let TransportEvent::Message(message) = event else { continue };
+                    if matches!(&message, JsonRpcMessage::Response { .. }) || message.method() == Some("initialize") {
+                        fake.received.lock().unwrap().push(message.clone());
+                    }
+                    let JsonRpcMessage::Request { id, method, params } = message else { continue };
                     let (fake, server) = (fake.clone(), server.clone());
                     tokio::spawn(async move {
                         if let Some(result) = fake.respond(&method, params.unwrap_or_default()).await {
@@ -100,6 +105,24 @@ impl Fake {
             });
             Ok(client as SharedTransport)
         })
+    }
+
+    /// Send a request to the latest client and wait for its answer.
+    pub async fn request_client(&self, id: &str, method: &str, params: Value) -> Result<Value, JsonRpcErrorObject> {
+        let server = self.servers.lock().unwrap().last().cloned().expect("a connected client");
+        server.send(&JsonRpcMessage::request(id, method, Some(params))).await.expect("send");
+        let id = JsonRpcId::from(id);
+        for _ in 0..1000 {
+            let answer = self.received.lock().unwrap().iter().find_map(|message| match message {
+                JsonRpcMessage::Response { id: answered, result } if *answered == id => Some(result.clone()),
+                _ => None,
+            });
+            if let Some(answer) = answer {
+                return answer;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("no answer to {method}");
     }
 
     async fn respond(&self, method: &str, params: Value) -> Option<Value> {

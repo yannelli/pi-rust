@@ -6,6 +6,7 @@ mod codemode;
 mod codemode_host;
 pub mod mcp;
 mod mcp_api;
+mod mcp_elicitation;
 mod tool_search;
 
 use std::sync::Arc;

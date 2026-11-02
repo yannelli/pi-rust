@@ -289,3 +289,14 @@ async fn mcp_status_and_actions_reach_the_session() {
     assert!(session.mcp_manager().is_none());
     assert!(!session.all_tools().iter().any(|tool| tool.name.starts_with("mcp__")));
 }
+
+#[tokio::test]
+async fn announces_elicitation_and_declines_without_a_ui() {
+    let s = setup(json!({ "exposure": "direct" }), SetupOptions::default()).await;
+    let initialize = s.fake.received.lock().unwrap()[0].to_value();
+    assert_eq!(initialize["params"]["capabilities"]["elicitation"], json!({ "form": {}, "url": {} }));
+    let schema = json!({ "type": "object", "properties": { "name": { "type": "string" } } });
+    let params = json!({ "message": "Name?", "requestedSchema": schema });
+    let answer = s.fake.request_client("e1", "elicitation/create", params).await;
+    assert_eq!(answer.unwrap(), json!({ "action": "decline" }));
+}

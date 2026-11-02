@@ -108,7 +108,7 @@ How each event uses a patch:
 | --- | --- |
 | `tool_call` (`input`), `before_agent_start` (`systemPromptOptions`), `before_provider_request` (`payload`), `before_provider_headers` (`headers`) | pi reads the changed event object. Example: `{ "input": { "command": "ls" } }` for `tool_call`. |
 | `tool_result`, `message_end`, `context`, `context_with_system` | When `result` is absent, pi builds it from the patched event: `{ content, details, structuredContent, isError, usage }` (the keys the event has) for `tool_result`, `{ message }` for `message_end`, `{ messages }` for the context events. Example: `{ "content": [...] }` for `tool_result`. |
-| All other events, including `message_display`, `input`, `turn_end`, `agent_before_settle`, `cache_warming_decision`, `resources_discover`, `user_bash`, `project_trust`, and `session_before_*` | pi reads only `result`; a patch has no effect. |
+| All other events, including `message_display`, `input`, `turn_end`, `agent_before_settle`, `cache_warming_decision`, `resources_discover`, `user_bash`, `project_trust`, `mcp_elicitation`, `mcp_elicitation_result`, and `session_before_*` | pi reads only `result`; a patch has no effect. |
 
 pi builds no result for `before_agent_start`: a built `systemPrompt` would replace the whole system prompt.
 
@@ -138,6 +138,29 @@ pi-rust adds these events for hook runners. Upstream pi has no such events. Java
 pi does not wait for the handlers of `instructions_loaded`, `notification`, `tool_call_blocked`, and `cwd_changed`.
 
 During `session_start`, the event context also has `switchSession(sessionPath)` (pi-rust only; upstream pi has it only on command contexts). A native extension calls it with `pi.call` `{ target: "ctx", method: "switchSession", args: [sessionPath] }`. pi queues the switch and returns `null` (`undefined` in JavaScript) at once. When the `session_start` handlers are done, pi switches to the session as a command `ctx.switchSession()` does: `session_before_switch`, new extensions, `session_start` with reason `resume`, and `cwd_changed` when the directory changes. When several handlers queue a switch, the last one wins. After `session_start`, the call fails.
+
+#### MCP elicitation events
+
+These events are pi-rust only. Upstream pi has no MCP elicitation. Native and JavaScript extensions get the same events. With them, an extension can implement hooks such as the `Elicitation` and `ElicitationResult` hooks of Claude Code.
+
+An MCP server sends `elicitation/create` to ask the user for data (form mode) or to open a URL (URL mode). pi announces the `elicitation` client capability with `form` and `url`. pi does these steps:
+
+1. pi sends `mcp_elicitation` to the extensions.
+2. If no handler answers, pi shows a dialog. Without a UI (`print` and `json` modes), pi answers `decline`.
+3. After the dialog, pi sends `mcp_elicitation_result`.
+4. pi sends the answer to the server.
+
+| Event | Payload | Result |
+| --- | --- | --- |
+| `mcp_elicitation` | `{ type, server, message, mode, url?, elicitationId?, requestedSchema? }` | `{ action, content? }` answers the server, and pi shows no dialog and sends no `mcp_elicitation_result`. If more than one handler answers, a `decline` wins. Otherwise the first answer applies. No result shows the dialog. |
+| `mcp_elicitation_result` | `{ type, server, action, mode, elicitationId?, content? }` | `{ action, content? }` replaces the answer of the user. Each handler gets the answer so far. |
+
+- `mode` is `"form"` or `"url"`. A form request has `requestedSchema`: a flat object schema with string, number, integer, boolean, and enum properties. A URL request has `url` and `elicitationId`.
+- `action` is `"accept"`, `"decline"`, or `"cancel"`. `content` is the form data of `accept` in form mode. pi removes `content` from other answers.
+- Before pi sends an `accept` in form mode, it checks `content` against `requestedSchema`: required properties, unknown properties, and the types of the values. If the check fails, pi sends `decline` and writes a warning line to `mcp.log`.
+- A result that is not `undefined` or a valid `{ action, content? }` is an extension error. pi ignores it.
+
+The dialog shows the server name and the message first. In form mode, the user selects **Respond** or **Decline**. Then pi asks for each property: a text input for strings, numbers, integers, and lists, and a selection for booleans and enums. A `default` value fills the input or comes first in the selection. Optional properties can be empty or skipped. Then the user selects **Accept** or **Decline**. In URL mode, pi shows the full URL and its domain, and warns about Punycode domains. The user selects **Open in browser**, **Accept (I will open it myself)**, or **Decline**. pi opens the URL only after the user selects **Open in browser**. Esc in any step sends `cancel`. When the server sends `notifications/elicitation/complete` for an accepted URL request, pi shows a notification.
 
 ### Tools
 

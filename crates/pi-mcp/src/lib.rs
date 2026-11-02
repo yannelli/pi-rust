@@ -7,6 +7,7 @@ pub mod client;
 pub mod config;
 pub mod config_value;
 pub mod content;
+pub mod elicitation;
 pub mod error;
 pub mod jsonrpc;
 pub mod log;
@@ -30,6 +31,10 @@ pub use config::{
     get_mcp_tool_exposure, load_mcp_config, mcp_namespace,
 };
 pub use content::{CallToolResult, ContentBlock, to_llm_content};
+pub use elicitation::{
+    ElicitFn, ElicitationAction, ElicitationCompleteFn, ElicitationMode, ElicitationRequest, ElicitationResponse,
+    McpElicitation,
+};
 pub use error::{McpError, OAuthError};
 pub use jsonrpc::{JsonRpcErrorObject, JsonRpcId, JsonRpcMessage};
 pub use log::McpServerLog;

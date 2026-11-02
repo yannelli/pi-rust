@@ -263,6 +263,8 @@ export function createHost(config) {
 			}
 			return result;
 		},
+		emitMcpElicitation: (event) => runner.emitMcpElicitation(event),
+		emitMcpElicitationResult: (event) => runner.emitMcpElicitationResult(event),
 		async emitProjectTrust(cwd) {
 			const ctx = runner.createContext();
 			return runner.emitProjectTrust({ type: "project_trust", cwd }, ctx);
