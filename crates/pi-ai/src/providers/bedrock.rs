@@ -6,6 +6,8 @@ mod model_info;
 mod request;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_strict_fallback;
 
 use std::collections::BTreeMap;
 use std::time::{Duration, SystemTime};
@@ -22,10 +24,11 @@ use crate::providers::aws::credentials::{self, ChainInput, profile_region};
 use crate::providers::aws::endpoint::{regional_endpoint, standard_bedrock_endpoint_region};
 use crate::providers::aws::event_stream::Decoder;
 use crate::providers::aws::sigv4::{Credentials, SignableRequest, sign, uri_encode};
+use crate::providers::constrained_sampling::is_strict_tool_limit_error_message;
 use crate::providers::provider_env::{process_env_value, provider_env_value};
 use crate::registry::{ApiProvider, StreamOptions};
 use crate::request::provider_response;
-use crate::stream::{AssistantMessageEventStream, MessageBuilder, event_channel};
+use crate::stream::{AssistantMessageEventStream, MessageBuilder, diagnostic, event_channel};
 use crate::types::{Context, Model, StopReason};
 
 /// Sends per request, as the AWS SDK does for throttling and transient failures.
@@ -174,6 +177,34 @@ fn is_reserved_header(name: &str) -> bool {
     lower.starts_with("x-amz-") || lower == "authorization" || lower == "host"
 }
 
+/// The URL and payload of `body` after the `on_payload` hook; the URL names the body's `modelId`.
+async fn request_target(
+    model: &Model,
+    options: &StreamOptions,
+    target: &Target,
+    mut body: Value,
+) -> Result<(reqwest::Url, Vec<u8>), Failure> {
+    if let Some(hook) = &options.on_payload
+        && let Some(replacement) = hook(&body, model).await
+    {
+        body = replacement;
+    }
+    let model_id = body.get("modelId").and_then(Value::as_str).unwrap_or(&model.id).to_string();
+    if let Some(object) = body.as_object_mut() {
+        object.remove("modelId");
+    }
+    let url = format!("{}/model/{}/converse-stream", target.endpoint.trim_end_matches('/'), uri_encode(&model_id));
+    let url =
+        reqwest::Url::parse(&url).map_err(|error| Failure::new(format!("Invalid Bedrock endpoint {url}: {error}")))?;
+    Ok((url, serde_json::to_vec(&body).unwrap_or_default()))
+}
+
+/// A `ValidationException` that names one of the strict tool limits.
+fn rejects_strict_tool_limits(failure: &Failure) -> bool {
+    failure.error_code.as_deref() == Some("ValidationException")
+        && failure.provider_message.as_deref().is_some_and(is_strict_tool_limit_error_message)
+}
+
 struct Run {
     events: BedrockEvents,
     request_id: Option<String>,
@@ -188,21 +219,6 @@ impl Run {
         builder: &mut MessageBuilder,
     ) -> Result<StopReason, Failure> {
         let target = resolve_target_with(model, &options.bedrock, &options.env).map_err(Failure::new)?;
-        let mut body =
-            request::build_body(model, context, options, target.configured_region.as_deref()).map_err(Failure::new)?;
-        if let Some(hook) = &options.on_payload
-            && let Some(replacement) = hook(&body, model).await
-        {
-            body = replacement;
-        }
-        let model_id = body.get("modelId").and_then(Value::as_str).unwrap_or(&model.id).to_string();
-        if let Some(object) = body.as_object_mut() {
-            object.remove("modelId");
-        }
-        let url = format!("{}/model/{}/converse-stream", target.endpoint.trim_end_matches('/'), uri_encode(&model_id));
-        let url = reqwest::Url::parse(&url)
-            .map_err(|error| Failure::new(format!("Invalid Bedrock endpoint {url}: {error}")))?;
-        let payload = serde_json::to_vec(&body).unwrap_or_default();
         let mut headers = vec![("content-type".to_string(), "application/json".to_string())];
         let named = |name: &String| name.eq_ignore_ascii_case("user-agent");
         if !options.headers.keys().any(named) && !options.suppressed_headers.iter().any(named) {
@@ -210,8 +226,36 @@ impl Run {
         }
         let custom = options.headers.iter().filter(|(name, _)| !is_reserved_header(name));
         headers.extend(custom.map(|(name, value)| (name.clone(), value.clone())));
-        let auth = resolve_auth(options, &target).await.map_err(Failure::new)?;
-        let response = self.send(&url, &headers, &payload, &auth, &target, options).await?;
+        let mut resolved_auth = None;
+        let mut disable_preferred_strict_tools = false;
+        let response = loop {
+            let region = target.configured_region.as_deref();
+            let built = request::build_request(model, context, options, region, disable_preferred_strict_tools)
+                .map_err(Failure::new)?;
+            let (url, payload) = request_target(model, options, &target, built.body).await?;
+            let auth = match resolved_auth.take() {
+                Some(auth) => auth,
+                None => resolve_auth(options, &target).await.map_err(Failure::new)?,
+            };
+            let sent = self.send(&url, &headers, &payload, &auth, &target, options).await;
+            resolved_auth = Some(auth);
+            let failure = match sent {
+                Ok(response) => break response,
+                Err(failure) => failure,
+            };
+            // Bedrock checks the tool schemas before it starts the stream, so a retry never repeats streamed output.
+            let retry = !disable_preferred_strict_tools
+                && built.preferred_strict_tools
+                && !options.cancel.is_cancelled()
+                && rejects_strict_tool_limits(&failure);
+            if !retry {
+                return Err(failure);
+            }
+            disable_preferred_strict_tools = true;
+            let details = serde_json::json!({"reason": "strict_tool_limits_exceeded"}).as_object().cloned();
+            let fallback = diagnostic("bedrock_strict_tools_fallback", failure.provider_message.as_deref(), details);
+            builder.message_mut().diagnostics.push(fallback);
+        };
         if let Some(hook) = &options.on_response {
             hook(&provider_response(&response), model);
         }
@@ -310,5 +354,6 @@ fn http_failure(status: u16, headers: &HeaderMap, body: &str) -> Failure {
         message: with_retention_hint(format!("{prefix}: {message}")),
         status: Some(status),
         error_code: code.filter(|code| code != "Unknown"),
+        provider_message: Some(message),
     }
 }

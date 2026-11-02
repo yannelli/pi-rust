@@ -33,7 +33,7 @@ pub(super) fn bedrock_model(id: &str, base_url: &str) -> Model {
     }
 }
 
-fn event(kind: &str, payload: Value) -> Vec<u8> {
+pub(super) fn event(kind: &str, payload: Value) -> Vec<u8> {
     encode(&Frame {
         headers: vec![
             (":message-type".into(), HeaderValue::String("event".into())),
@@ -54,7 +54,7 @@ fn exception(kind: &str, message: &str) -> Vec<u8> {
     })
 }
 
-fn stream_reply(frames: Vec<Vec<u8>>) -> Reply {
+pub(super) fn stream_reply(frames: Vec<Vec<u8>>) -> Reply {
     let headers = vec![
         ("content-type".to_string(), "application/vnd.amazon.eventstream".to_string()),
         ("x-amzn-requestid".to_string(), "req-123".to_string()),
@@ -70,7 +70,7 @@ fn context() -> Context {
     }
 }
 
-fn bearer_options() -> StreamOptions {
+pub(super) fn bearer_options() -> StreamOptions {
     StreamOptions { api_key: Some("bedrock-key".into()), ..StreamOptions::default() }
 }
 

@@ -12,7 +12,9 @@ use crate::provider_options::BedrockOptions;
 use crate::providers::common::{
     compat_bool, sanitize_id, split_error_tool_result_images, take_chars, transform_messages,
 };
-use crate::providers::constrained_sampling::{json_schema_tool_parameters, resolve_json_schema_strict_sampling};
+use crate::providers::constrained_sampling::{
+    json_schema_tool_parameters, prefers_json_schema_strict_sampling, resolve_json_schema_strict_sampling,
+};
 use crate::registry::{CacheRetention, StreamOptions, ThinkingBudgets};
 use crate::simple_options::{
     adjust_max_tokens_for_thinking, clamp_max_tokens_to_context, clamp_reasoning, clamp_thinking_budget_to_answer_room,
@@ -25,13 +27,31 @@ const EMPTY_TEXT_PLACEHOLDER: &str = "<empty>";
 const THINKING_BINDING_CONTROLS_BETA: &str = "thinking-binding-controls-2026-08-01";
 const INTERLEAVED_THINKING_BETA: &str = "interleaved-thinking-2025-05-14";
 
+/// A request body and whether it sends a `strict: "prefer"` tool strict.
+pub(super) struct Built {
+    pub body: Value,
+    pub preferred_strict_tools: bool,
+}
+
 /// The request as upstream passes it to `onPayload`: the Converse body plus `modelId`.
+#[cfg(test)]
 pub(super) fn build_body(
     model: &Model,
     context: &Context,
     options: &StreamOptions,
     configured_region: Option<&str>,
 ) -> Result<Value, String> {
+    build_request(model, context, options, configured_region, false).map(|built| built.body)
+}
+
+/// The request, with `strict: "prefer"` tools sent non-strict after a strict tool limit rejection.
+pub(super) fn build_request(
+    model: &Model,
+    context: &Context,
+    options: &StreamOptions,
+    configured_region: Option<&str>,
+    disable_preferred_strict_tools: bool,
+) -> Result<Built, String> {
     let cache = resolve_cache_retention(options.cache_retention, &options.env);
     let reasoning = options.reasoning.filter(|level| *level != ThinkingLevel::Off && model.reasoning);
     let transcript = normalize_context(context);
@@ -63,8 +83,9 @@ pub(super) fn build_body(
         inference.insert("temperature".into(), json!(temperature));
     }
     body.insert("inferenceConfig".into(), Value::Object(inference));
-    if let Some(tool_config) = tool_config(model, context, options)? {
-        body.insert("toolConfig".into(), tool_config);
+    let (tools, preferred_strict_tools) = tool_config(model, context, options, disable_preferred_strict_tools)?;
+    if let Some(tools) = tools {
+        body.insert("toolConfig".into(), tools);
     }
     if let Some(level) = reasoning
         && let Some(fields) = additional_fields(model, level, &budgets, configured_region, &options.bedrock)
@@ -74,7 +95,7 @@ pub(super) fn build_body(
     if let Some(metadata) = &options.bedrock.request_metadata {
         body.insert("requestMetadata".into(), json!(metadata));
     }
-    Ok(Value::Object(body))
+    Ok(Built { body: Value::Object(body), preferred_strict_tools })
 }
 
 fn cache_point(model: &Model, cache: CacheRetention, options: &StreamOptions) -> Option<Value> {
@@ -137,15 +158,22 @@ fn additional_fields(
     gpt_effort(model, level).map(|effort| json!({"reasoning": {"effort": effort}}))
 }
 
-fn tool_config(model: &Model, context: &Context, options: &StreamOptions) -> Result<Option<Value>, String> {
+/// The tool config, and whether it sends a `strict: "prefer"` tool strict.
+fn tool_config(
+    model: &Model,
+    context: &Context,
+    options: &StreamOptions,
+    disable_preferred_strict_tools: bool,
+) -> Result<(Option<Value>, bool), String> {
     let choice = options.tool_choice.as_deref();
     if context.tools.is_empty() || choice == Some("none") {
-        return Ok(None);
+        return Ok((None, false));
     }
     let supports_strict = compat_bool(model, "supportsStrictMode").unwrap_or(false);
     let mut specs = Vec::new();
     for tool in &context.tools {
-        let strict = resolve_json_schema_strict_sampling(tool, supports_strict, None)? == Some(true);
+        let strict = !(disable_preferred_strict_tools && prefers_json_schema_strict_sampling(tool))
+            && resolve_json_schema_strict_sampling(tool, supports_strict, None)? == Some(true);
         specs.push((tool, strict, json_schema_tool_parameters(tool, strict)));
     }
     // Strict schemas make every optional property a union with null, and Bedrock rejects a strict tool
@@ -157,6 +185,8 @@ fn tool_config(model: &Model, context: &Context, options: &StreamOptions) -> Res
             (*strict, *schema) = (false, tool.parameters.clone());
         }
     }
+    let preferred_strict_tools =
+        specs.iter().any(|(tool, strict, _)| *strict && prefers_json_schema_strict_sampling(tool));
     let mut tools = Vec::new();
     for (tool, strict, schema) in specs {
         let mut spec = json!({"name": tool.name, "description": tool.description, "inputSchema": {"json": schema}});
@@ -171,7 +201,7 @@ fn tool_config(model: &Model, context: &Context, options: &StreamOptions) -> Res
         Some("any") => config["toolChoice"] = json!({"any": {}}),
         _ => {}
     }
-    Ok(Some(config))
+    Ok((Some(config), preferred_strict_tools))
 }
 
 /// Bedrock rejects strict tool sets with more parameters with union types than this
