@@ -259,6 +259,9 @@ Line-based surfaces: a widget (surface `widget:<key>`), the footer (surface `foo
 | `ctx.isIdle` | `{}` | boolean |
 | `ctx.getContextUsage` | `{}` | usage or `null` |
 | `ctx.getSystemPrompt` | `{}` | string |
+| `ctx.getContextBreakdown` | `{}` | `{ parts: [{ id, label, tokens }], total }` |
+
+`ctx.getContextBreakdown` is a pi-rust extension, also on the JavaScript `ctx`. It returns the estimated tokens of each part of the next request, in the order `/context` shows them. The ids are `systemPrompt`, `builtinTools`, `extensionTools`, `mcpTools`, `contextFiles`, `skills`, `userMessages`, `assistantMessages`, and `toolResults`. The parts are estimates, so their total can differ from the `tokens` of `ctx.getContextUsage`. Upstream pi and pi-rust 0.12.6 and older have no such method.
 
 ### Models, auth, events, and processes
 

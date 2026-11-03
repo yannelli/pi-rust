@@ -4,9 +4,11 @@ use pi_ai::providers::faux::FauxResponse;
 
 use crate::harness::{Options, local, start};
 
-const CATEGORIES: [&str; 8] = [
+const CATEGORIES: [&str; 10] = [
     "System prompt",
-    "Tool definitions",
+    "Built-in tools",
+    "Extension tools",
+    "MCP tools",
     "Context files",
     "Skills",
     "User messages",

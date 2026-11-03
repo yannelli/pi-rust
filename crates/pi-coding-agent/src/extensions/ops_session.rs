@@ -316,6 +316,7 @@ fn context(runner: &ExtensionRunner, session: &Arc<AgentSession>, name: &str, ta
             }
             None => Value::Null,
         },
+        "contextBreakdown" => session.context_breakdown().to_json(),
         "systemPrompt" => json!(session.system_prompt()),
         "systemPromptOptions" => session.extension_prompt_options(),
         other => return Err(error(format!("Unknown context property: {other}"))),

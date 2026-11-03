@@ -341,3 +341,53 @@ async fn message_display_changes_the_shown_text_and_not_the_session() {
     })
     .await;
 }
+
+const BREAKDOWN: &str = r#"export default function (pi) {
+	pi.on("agent_end", (_event, ctx) => {
+		pi.appendEntry("breakdown", ctx.getContextBreakdown());
+	});
+}
+"#;
+
+/// `ctx.getContextBreakdown()` (pi-rust extension) gives the `/context` parts in order.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn context_breakdown_lists_the_parts_of_the_next_request() {
+    local(async {
+        let ui = start(Options {
+            files: vec![(".pi/extensions/breakdown.ts", BREAKDOWN)],
+            responses: vec![FauxResponse::text("breakdown answer")],
+            ..Options::default()
+        })
+        .await;
+        ui.submit("hi").await;
+        let has_entry = |ui: &crate::harness::Ui| {
+            ui.session().session_manager().entries().iter().any(|entry| entry_type(entry) == Some("breakdown"))
+        };
+        ui.wait_until("the breakdown entry", has_entry).await;
+        let session = ui.session();
+        let manager = session.session_manager();
+        let entries = manager.entries();
+        let entry = entries.iter().find(|entry| entry_type(entry) == Some("breakdown")).expect("entry");
+        let data = &entry.raw()["data"];
+        let parts = data["parts"].as_array().expect("parts");
+        let ids: Vec<_> = parts.iter().map(|part| part["id"].as_str().unwrap_or_default()).collect();
+        let expected = [
+            "systemPrompt",
+            "builtinTools",
+            "extensionTools",
+            "mcpTools",
+            "contextFiles",
+            "skills",
+            "userMessages",
+            "assistantMessages",
+            "toolResults",
+        ];
+        assert_eq!(ids, expected);
+        let tokens = |id: &str| parts.iter().find(|part| part["id"] == id).and_then(|part| part["tokens"].as_u64());
+        assert!(tokens("systemPrompt") > Some(0) && tokens("builtinTools") > Some(0), "{data}");
+        assert!(tokens("userMessages") > Some(0) && tokens("assistantMessages") > Some(0), "{data}");
+        let sum: u64 = parts.iter().filter_map(|part| part["tokens"].as_u64()).sum();
+        assert_eq!(data["total"].as_u64(), Some(sum));
+    })
+    .await;
+}

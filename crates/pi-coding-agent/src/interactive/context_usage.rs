@@ -1,12 +1,11 @@
 //! `/context` (pi-rust extension): how much of the model's context window the conversation
 //! uses, with an estimated breakdown of the next request by part.
 
-use pi_ai::{JsonObject, Message, SystemMessage, Tool, UserContent};
+use pi_tui::colors::{Color, color_to_oklch, oklch_color};
 
 use super::util::format_tokens;
-use crate::compaction::{ContextUsageEstimate, estimate_projected_context_tokens, estimate_tokens};
-use crate::system_prompt::{SystemPromptState, build_system_prompt_state, sections_to_json};
-use pi_tui::colors::{Color, color_to_oklch, oklch_color};
+use crate::agent_session::context_breakdown::ContextBreakdown;
+use crate::compaction::{ContextUsageEstimate, estimate_projected_context_tokens};
 
 use super::mode::InteractiveMode;
 use crate::theme::{StyleFg, Theme, ThemeColor, ThemeStyle, theme};
@@ -19,77 +18,6 @@ const HALF_CELL: &str = "⡇";
 const FULL_CELL: &str = "⣿";
 const LABEL_WIDTH: usize = 15;
 const ROW_WIDTH: usize = 20;
-
-/// Estimated tokens of each part of the next request.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct ContextBreakdown {
-    system_prompt: u64,
-    tool_definitions: u64,
-    context_files: u64,
-    skills: u64,
-    /// User prompts, plus shell command output, extension messages, and summaries.
-    user: u64,
-    assistant: u64,
-    tool_results: u64,
-}
-
-impl ContextBreakdown {
-    fn rows(&self) -> [(&'static str, u64); 7] {
-        [
-            ("System prompt", self.system_prompt),
-            ("Tool definitions", self.tool_definitions),
-            ("Context files", self.context_files),
-            ("Skills", self.skills),
-            ("User messages", self.user),
-            ("Assistant messages", self.assistant),
-            ("Tool results", self.tool_results),
-        ]
-    }
-
-    fn total(&self) -> u64 {
-        self.rows().iter().map(|(_, tokens)| tokens).sum()
-    }
-}
-
-/// The compaction estimate of a system message with these parts.
-fn system_tokens(content: &str, sections: Option<JsonObject>, tools: &[Tool]) -> u64 {
-    let system = SystemMessage {
-        content: UserContent::Text(content.to_string()),
-        sections,
-        tools_added: (!tools.is_empty()).then(|| tools.to_vec()),
-        tools_removed: None,
-        timestamp: 0,
-    };
-    estimate_tokens(&Message::System(system))
-}
-
-/// Context files and skills are prompt sections; the rest of the prompt is the system prompt.
-/// System messages in `messages` only patch the prompt, so they are not counted again.
-fn context_breakdown(prompt: &SystemPromptState, tools: &[Tool], messages: &[Message]) -> ContextBreakdown {
-    let sections = prompt.sections.as_deref().unwrap_or_default();
-    let section = |name: &str| {
-        sections.iter().find(|(section, _)| section == name).map_or(0, |(_, text)| system_tokens(text, None, &[]))
-    };
-    let (context_files, skills) = (section("project_context"), section("skills"));
-    let whole = system_tokens(&prompt.content, prompt.sections.as_ref().map(sections_to_json), &[]);
-    let mut breakdown = ContextBreakdown {
-        system_prompt: whole.saturating_sub(context_files + skills),
-        tool_definitions: system_tokens("", None, tools),
-        context_files,
-        skills,
-        ..ContextBreakdown::default()
-    };
-    for message in messages {
-        let slot = match message {
-            Message::System(_) => continue,
-            Message::User(_) | Message::Custom(_) => &mut breakdown.user,
-            Message::Assistant(_) => &mut breakdown.assistant,
-            Message::ToolResult(_) => &mut breakdown.tool_results,
-        };
-        *slot += estimate_tokens(message);
-    }
-    breakdown
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum UsageSource {
@@ -122,7 +50,7 @@ struct ContextReport {
 enum Style {
     Title,
     Label,
-    /// A part of the breakdown, by its index in [`ContextBreakdown::rows`].
+    /// A part of the breakdown, by its index in [`ContextBreakdown::parts`].
     Part(usize),
 }
 
@@ -138,7 +66,7 @@ fn step_parts(in_use: u64, window: u64, breakdown: &ContextBreakdown) -> Vec<Opt
     let total = breakdown.total().max(1) as u128;
     let mut ends = Vec::new();
     let mut sum = 0;
-    for (_, tokens) in breakdown.rows() {
+    for (_, _, tokens) in breakdown.parts() {
         sum += tokens as u128;
         ends.push(((sum * used as u128 + total / 2) / total) as usize);
     }
@@ -187,7 +115,9 @@ fn report_text(report: &ContextReport, style: &dyn Fn(Style, &str) -> String) ->
     lines.push(style(Style::Title, "Estimated breakdown"));
     let free = report.window.saturating_sub(report.in_use);
     let free_row = (window > 0).then_some(("Free space", free));
-    for (index, (name, tokens)) in report.breakdown.rows().into_iter().chain(free_row).enumerate() {
+    for (index, (name, tokens)) in
+        report.breakdown.parts().into_iter().map(|(_, name, tokens)| (name, tokens)).chain(free_row).enumerate()
+    {
         let share = if window > 0 { format!(" {:>6}", percent(tokens, window)) } else { String::new() };
         let key = if name == "Free space" { EMPTY_CELL.to_string() } else { style(Style::Part(index), FULL_CELL) };
         lines.push(format!("  {key} {name:<ROW_WIDTH$}{:>7}{share}", format_tokens(tokens)));
@@ -200,8 +130,8 @@ fn report_text(report: &ContextReport, style: &dyn Fn(Style, &str) -> String) ->
 fn part_colors(theme: &Theme) -> Vec<Color> {
     let accent_color = theme.color(ThemeColor::Accent);
     let accent = color_to_oklch(&accent_color);
-    let middle = (ContextBreakdown::default().rows().len() - 1) as f64 / 2.0;
-    (0..ContextBreakdown::default().rows().len())
+    let middle = (ContextBreakdown::default().parts().len() - 1) as f64 / 2.0;
+    (0..ContextBreakdown::default().parts().len())
         .map(|part| {
             let offset = part as f64 - middle;
             let lightness = (accent.l + offset * 0.03).clamp(0.0, 1.0);
@@ -216,14 +146,7 @@ impl InteractiveMode {
         let session = self.session();
         let selected = session.model();
         let limits = session.limits_model();
-        let prompt = build_system_prompt_state(&session.effective_prompt_options())
-            .unwrap_or(SystemPromptState { content: String::new(), sections: None });
-        let hidden = session.hidden_declarations();
-        let tools: Vec<Tool> = session.with_tool_registry(|registry| {
-            let declared = registry.active_tools().iter().filter(|tool| !hidden.iter().any(|name| name == tool.name()));
-            declared.map(|tool| tool.declaration()).collect()
-        });
-        let breakdown = context_breakdown(&prompt, &tools, &session.messages());
+        let breakdown = session.context_breakdown();
         let estimate = {
             let manager = session.session_manager();
             estimate_projected_context_tokens(&manager.build_session_projection(), &manager.get_branch(None))
@@ -260,70 +183,10 @@ impl InteractiveMode {
 
 #[cfg(test)]
 mod tests {
-    use pi_ai::{AssistantMessage, ContentBlock, ToolResultMessage, UserMessage};
-    use serde_json::json;
-
     use super::*;
 
     fn plain(_: Style, text: &str) -> String {
         text.to_string()
-    }
-
-    fn text_of(chars: usize) -> String {
-        "x".repeat(chars)
-    }
-
-    fn sectioned(sections: &[(&str, usize)]) -> SystemPromptState {
-        let sections = sections.iter().map(|(name, chars)| (name.to_string(), text_of(*chars))).collect();
-        SystemPromptState { content: String::new(), sections: Some(sections) }
-    }
-
-    fn system(chars: usize) -> Message {
-        let content = UserContent::Text(text_of(chars));
-        Message::System(SystemMessage { content, sections: None, tools_added: None, tools_removed: None, timestamp: 0 })
-    }
-
-    fn assistant(chars: usize) -> Message {
-        let content = vec![ContentBlock::text(text_of(chars))];
-        Message::Assistant(AssistantMessage { content, ..AssistantMessage::default() })
-    }
-
-    fn tool_result(chars: usize) -> Message {
-        let content = vec![ContentBlock::text(text_of(chars))];
-        Message::ToolResult(ToolResultMessage { content, ..ToolResultMessage::default() })
-    }
-
-    #[test]
-    fn splits_the_prompt_sections_tools_and_messages() {
-        let prompt = sectioned(&[("preamble", 400), ("project_context", 80), ("skills", 40), ("cwd", 4)]);
-        let tools = [Tool::new("read", "Read a file", json!({"type": "object"}))];
-        let messages = vec![
-            system(800),
-            Message::User(UserMessage { content: UserContent::Text(text_of(12)), timestamp: 0 }),
-            assistant(20),
-            tool_result(400),
-        ];
-        let breakdown = context_breakdown(&prompt, &tools, &messages);
-        let tool_tokens = system_tokens("", None, &tools);
-        assert!(tool_tokens > 0);
-        let expected = ContextBreakdown {
-            system_prompt: 101,
-            tool_definitions: tool_tokens,
-            context_files: 20,
-            skills: 10,
-            user: 3,
-            assistant: 5,
-            tool_results: 100,
-        };
-        assert_eq!(breakdown, expected);
-        assert_eq!(breakdown.total(), 239 + tool_tokens);
-    }
-
-    #[test]
-    fn a_forced_prompt_counts_as_the_system_prompt() {
-        let prompt = SystemPromptState { content: text_of(40), sections: None };
-        let breakdown = context_breakdown(&prompt, &[], &[]);
-        assert_eq!(breakdown, ContextBreakdown { system_prompt: 10, ..ContextBreakdown::default() });
     }
 
     #[test]
@@ -341,7 +204,9 @@ mod tests {
     fn renders_a_table_with_a_braille_bar_and_free_space() {
         let breakdown = ContextBreakdown {
             system_prompt: 1_200,
-            tool_definitions: 2_500,
+            builtin_tools: 2_000,
+            extension_tools: 300,
+            mcp_tools: 200,
             context_files: 400,
             skills: 0,
             user: 900,
@@ -370,7 +235,9 @@ mod tests {
             "",
             "Estimated breakdown",
             "  ⣿ System prompt          1.2k   1.2%",
-            "  ⣿ Tool definitions       2.5k   2.5%",
+            "  ⣿ Built-in tools         2.0k   2.0%",
+            "  ⣿ Extension tools         300   0.3%",
+            "  ⣿ MCP tools               200   0.2%",
             "  ⣿ Context files           400   0.4%",
             "  ⣿ Skills                    0   0.0%",
             "  ⣿ User messages           900   0.9%",
@@ -427,19 +294,19 @@ mod tests {
     fn the_parts_share_the_used_steps_in_order() {
         let breakdown = ContextBreakdown {
             system_prompt: 2_000,
-            tool_definitions: 2_000,
+            builtin_tools: 2_000,
             user: 1_000,
             assistant: 5_000,
             tool_results: 10_000,
             ..ContextBreakdown::default()
         };
         let steps = step_parts(20_000, 20_000, &breakdown);
-        let mut expected = vec![Some(0), Some(0), Some(1), Some(1), Some(4)];
-        expected.extend([Some(5); 5]);
-        expected.extend([Some(6); 10]);
+        let mut expected = vec![Some(0), Some(0), Some(1), Some(1), Some(6)];
+        expected.extend([Some(7); 5]);
+        expected.extend([Some(8); 10]);
         assert_eq!(steps, expected);
         // A reported count larger than the estimate scales the parts up to the bar.
         assert_eq!(step_parts(10_000, 20_000, &breakdown).iter().flatten().count(), 10);
-        assert_eq!(step_parts(10_000, 20_000, &breakdown)[..3], [Some(0), Some(1), Some(4)]);
+        assert_eq!(step_parts(10_000, 20_000, &breakdown)[..3], [Some(0), Some(1), Some(6)]);
     }
 }

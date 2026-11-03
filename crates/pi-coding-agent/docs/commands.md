@@ -28,7 +28,7 @@ With `--stat`, `/diff` does not show the diff. With a path, it shows only the ch
 - A bar of 10 braille cells that fills from left to right in steps of 5%. A cell is empty (`⠀`, U+2800), half (`⡇`), or full (`⣿`). Each part of the context has a different shade of the theme accent, and a cell has the shade of the part that fills its left half.
 - A table with the estimated tokens for each part of the context, and the free space. Each row starts with a `⣿` in the shade of its part.
 
-The parts of the context are the system prompt, tool definitions, context files, skills, user messages, assistant messages, and tool results.
+The parts of the context are the system prompt, built-in tools, extension tools, MCP tools, context files, skills, user messages, assistant messages, and tool results. Extension tools are the tools of extensions, packages, the SDK, and built-in extensions other than MCP. Extensions can read the same breakdown with `ctx.getContextBreakdown()`.
 
 The count of tokens in use is the usage that the last response reported, plus estimates for newer messages. Before a response reports usage, the count is an estimate of the next request.
 

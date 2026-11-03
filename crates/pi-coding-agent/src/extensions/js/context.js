@@ -117,6 +117,7 @@ export function createContext(runner, target = 0) {
 		hasPendingMessages: () => Boolean(read("ctx.hasPendingMessages")),
 		shutdown: () => read("ctx.shutdown"),
 		getContextUsage: () => read("ctx.contextUsage"),
+		getContextBreakdown: () => read("ctx.contextBreakdown"),
 		compact: (options) => {
 			active();
 			callAsync("ctx.compact", target, options?.customInstructions ?? null).then(
