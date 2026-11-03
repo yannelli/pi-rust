@@ -58,8 +58,8 @@ Version-specific workarounds in `worker_modules.cjs` and `hooks.mjs`:
 Set `PI_EXTENSION_RUNTIME=node` to run the extension tests on Node. The harness in `crates/pi-coding-agent/tests/extensions/harness.rs` then fails a test if the runner fell back to QuickJS.
 
 ```sh
-PI_EXTENSION_RUNTIME=node cargo test -p pi-coding-agent --test extensions --no-fail-fast
-cargo test -p pi-js --test node_backend --test node_backend_modules --test node_backend_transport
+PI_EXTENSION_RUNTIME=node cargo test -p pi-coding-agent --test integration --no-fail-fast extensions::
+cargo test -p pi-js --test integration -- node_backend:: node_backend_modules:: node_backend_transport::
 ```
 
 The pi-js Node tests skip with a message when no Node 22 or later is found. Set `PI_NODE_PATH` to test one Node version, for example Node 22.14 for the `module.register` path.

@@ -69,10 +69,8 @@ jobs:
       # --workspace keeps the feature set of the steps above, so nothing is rebuilt.
       - name: extension and SDK tests on the Node backend
         run: >-
-          cargo nextest run --workspace --locked --profile ci -E "package(pi-coding-agent) & (binary(=extensions)
-          | binary(=tui_viewport_exports) | binary(=project_trust_store_exports) | binary(=sdk_child_session)
-          | binary(=sdk_session) | binary(=sdk_settings_replay) | binary(=sdk_settings_child)
-          | binary(=sdk_resources) | binary(=sdk_model_runtime) | binary(=sdk_storage) | binary(=sdk_utilities))"
+          cargo nextest run --workspace --locked --profile ci -E "package(pi-coding-agent) & binary(=integration)
+          & test(/^(extensions|tui_viewport_exports|project_trust_store_exports|sdk_child_session|sdk_session|sdk_settings_replay|sdk_settings_child|sdk_resources|sdk_model_runtime|sdk_storage|sdk_utilities)::/)"
         env:
           PI_EXTENSION_RUNTIME: node
 
