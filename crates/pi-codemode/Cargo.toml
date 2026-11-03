@@ -7,6 +7,16 @@ license.workspace = true
 publish.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+autotests = false
+
+[[test]]
+name = "integration"
+path = "tests/main.rs"
+
+# Its own process: the codemode worker limit it changes is shared by every script in the process.
+[[test]]
+name = "worker_admission"
+path = "tests/worker_admission.rs"
 
 [dependencies]
 anyhow.workspace = true

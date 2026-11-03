@@ -1,6 +1,6 @@
 //! Ported from upstream `packages/codemode/test/sandbox.test.ts`: limits, lifetime, escape hatches.
 
-mod common;
+use crate::common;
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};

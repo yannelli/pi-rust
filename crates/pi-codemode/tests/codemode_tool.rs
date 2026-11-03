@@ -1,7 +1,7 @@
 //! Ported from upstream `coding-agent/test/suite/agent-session-codemode.test.ts`: scripts, output,
 //! options, and the store, against a host stand-in.
 
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 

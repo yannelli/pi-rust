@@ -1,7 +1,7 @@
 //! Ported from upstream `packages/codemode/test/deterministic.test.ts`: `start()` runs a script
 //! deterministically with the caller answering its calls, so a durable host can replay it.
 
-mod common;
+use crate::common;
 
 use std::process::Command;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -189,7 +189,7 @@ fn in_zone(test: &str, zone: &str) -> bool {
 
 #[tokio::test]
 async fn runs_in_utc_whatever_the_hosts_timezone_and_without_weakref() {
-    if !in_zone("runs_in_utc_whatever_the_hosts_timezone_and_without_weakref", "IST-5:30") {
+    if !in_zone("deterministic::runs_in_utc_whatever_the_hosts_timezone_and_without_weakref", "IST-5:30") {
         return;
     }
     let code =
@@ -208,7 +208,7 @@ async fn runs_in_utc_whatever_the_hosts_timezone_and_without_weakref() {
 
 #[tokio::test]
 async fn reads_and_writes_local_time_as_utc() {
-    if !in_zone("reads_and_writes_local_time_as_utc", "PST8PDT") {
+    if !in_zone("deterministic::reads_and_writes_local_time_as_utc", "PST8PDT") {
         return;
     }
     let code = r#"
