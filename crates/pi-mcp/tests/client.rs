@@ -1,6 +1,6 @@
 //! Client protocol tests against an in-memory server, ported from `packages/mcp/test/client.test.ts`.
 
-mod common;
+use crate::common;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

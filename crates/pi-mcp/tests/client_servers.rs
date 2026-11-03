@@ -1,7 +1,7 @@
 //! Servers an ACP client supplies (`McpConfigScope::Client`): literal values, never saved, no stderr
 //! or log file output, and the same tool key wins over configured and registered servers.
 
-mod common;
+use crate::common;
 
 use std::sync::{Arc, Mutex};
 

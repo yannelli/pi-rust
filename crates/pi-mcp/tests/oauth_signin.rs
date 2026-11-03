@@ -2,7 +2,7 @@
 //! Metadata Documents. Ported from coding-agent's mcp-oauth-refresh.test.ts and
 //! agent-session-mcp-oauth.test.ts.
 
-mod common;
+use crate::common;
 
 use std::sync::{Arc, Mutex};
 

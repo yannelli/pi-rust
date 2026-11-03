@@ -2,7 +2,7 @@
 //! sign in, refresh, and sign out. Ported from coding-agent's mcp-oauth-refresh.test.ts,
 //! mcp-oauth-store.test.ts, and agent-session-mcp-oauth.test.ts.
 
-mod common;
+use crate::common;
 
 use std::path::Path;
 use std::sync::Arc;

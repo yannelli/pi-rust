@@ -1,6 +1,6 @@
 //! Stdio transport tests against the fake server binary, ported from `packages/mcp/test/stdio.test.ts`.
 
-mod common;
+use crate::common;
 
 use std::sync::{Arc, Mutex};
 #[cfg(unix)]

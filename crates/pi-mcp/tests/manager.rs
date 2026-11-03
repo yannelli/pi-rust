@@ -1,7 +1,7 @@
 //! The MCP manager: tool registration, exposure, resource tools, discovery, and the servers section.
 //! Ported from coding-agent's agent-session-mcp.test.ts.
 
-mod common;
+use crate::common;
 
 use std::sync::Arc;
 
