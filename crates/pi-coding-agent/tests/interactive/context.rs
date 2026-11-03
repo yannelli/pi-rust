@@ -26,7 +26,7 @@ async fn context_shows_the_window_and_the_breakdown() {
         let history = ui.history();
         let files_row = history.lines().find(|line| line.contains("Context files")).unwrap();
         // The section also holds the file's path, whose length depends on the temp folder.
-        let tokens = files_row.split_whitespace().nth(2).unwrap_or_default();
+        let tokens = files_row.split_whitespace().nth(3).unwrap_or_default();
         assert!(matches!(tokens, "1.0k" | "1.1k" | "1.2k"), "AGENTS.md is about 1k tokens: {files_row}");
         for expected in ["Context Usage", "local/tiny", "128k tokens", "estimated", "Auto-compact:"] {
             assert!(history.contains(expected), "missing {expected:?}:\n{history}");

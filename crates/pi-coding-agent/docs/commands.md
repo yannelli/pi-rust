@@ -25,7 +25,8 @@ With `--stat`, `/diff` does not show the diff. With a path, it shows only the ch
 - The model and the window size.
 - The tokens in use and their percentage.
 - The point where auto-compaction starts.
-- A table with the estimated tokens for each part of the context, and the free space.
+- A grid of 100 dots. Each dot is 1% of the window. A used dot has the color of the part of the context that fills it. A free dot is `○`.
+- A table with the estimated tokens for each part of the context, and the free space. Each row starts with a dot in the color of its part.
 
 The parts of the context are the system prompt, tool definitions, context files, skills, user messages, assistant messages, and tool results.
 
