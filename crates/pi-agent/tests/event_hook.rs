@@ -1,7 +1,7 @@
 //! The awaited `on_event` hook: ordering before listeners, `message_end` replacement, and
 //! tool updates delivered in order before `tool_execution_end`.
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

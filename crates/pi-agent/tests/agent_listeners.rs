@@ -1,6 +1,6 @@
 //! Async subscribers and the idle barrier, ported from upstream `agent.test.ts`.
 
-mod support;
+use crate::support;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};

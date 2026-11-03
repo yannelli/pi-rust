@@ -1,6 +1,6 @@
 //! `finish_turn`, `prepare_request`, and `prepare_next_turn`, ported from upstream `agent-loop.test.ts`.
 
-mod support;
+use crate::support;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

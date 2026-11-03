@@ -1,7 +1,7 @@
 //! Tool loadout declarations and transcript state, ported from upstream `agent.test.ts`
 //! and `agent-loop.test.ts`.
 
-mod support;
+use crate::support;
 
 use pi_agent::transcript::{declared_tools, hide_tool_declarations};
 use pi_agent::{Agent, AgentContext, AgentHooks, AgentInitialState, SharedTool, run_agent_loop};

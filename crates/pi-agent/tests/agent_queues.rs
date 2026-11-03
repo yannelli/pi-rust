@@ -1,6 +1,6 @@
 //! Agent queue behavior, ported from upstream `agent.test.ts`.
 
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 

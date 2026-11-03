@@ -1,6 +1,6 @@
 //! Nested tool calls, ported from upstream `nested-tool-calls.test.ts`, plus the loop wiring.
 
-mod support;
+use crate::support;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
