@@ -52,9 +52,14 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
+      # nextest gives each test its own process. Without PI_ENV_DAEMON, each pi-env test process runs
+      # cargo build, which relinks the daemon while another test starts it.
+      - run: cargo build --workspace --locked --bin pi-env
       # nextest runs the tests of every binary in parallel; .config/nextest.toml lists the
       # binaries with their own main, which run with cargo test.
       - run: cargo nextest run --workspace --locked --profile ci
+        env:
+          PI_ENV_DAEMON: ${{ github.workspace }}/target/debug/pi-env${{ runner.os == 'Windows' && '.exe' || '' }}
       - name: tests with their own harness
         run: >-
           cargo test --workspace --locked --no-fail-fast --test chord2_manager_child --test node_fork
