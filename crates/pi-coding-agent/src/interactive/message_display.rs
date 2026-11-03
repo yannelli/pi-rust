@@ -2,6 +2,7 @@
 //! shows in the TUI. The session, exports, and the model context keep the original text.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use pi_ai::{AssistantMessage, ContentBlock, Message};
 
@@ -33,6 +34,22 @@ pub(super) fn display_source(message: &AssistantMessage) -> Option<String> {
         })
         .collect();
     (!blocks.is_empty()).then(|| blocks.join("\n\n"))
+}
+
+/// How long the event waits for the session to save the message, in steps of `ENTRY_WAIT_STEP`.
+const ENTRY_WAIT_STEPS: u32 = 20;
+const ENTRY_WAIT_STEP: Duration = Duration::from_millis(25);
+
+/// The session emits `message_end` before it saves the message, so the entry can come a moment
+/// after the event; a message that is never saved gets `None` after the wait.
+async fn wait_for_entry_id(session: &AgentSession, timestamp: i64) -> Option<String> {
+    for _ in 0..ENTRY_WAIT_STEPS {
+        if let Some(id) = saved_entry_id(session, timestamp) {
+            return Some(id);
+        }
+        tokio::time::sleep(ENTRY_WAIT_STEP).await;
+    }
+    saved_entry_id(session, timestamp)
 }
 
 /// The session entry id of the saved assistant message with `timestamp`.
@@ -75,7 +92,10 @@ impl InteractiveMode {
         let pending = Cached { original: text.clone(), replacement: None };
         self.state.borrow_mut().message_display.entries.insert(key, pending);
         self.spawn(move |mode| async move {
-            let entry_id = entry_id.or_else(|| saved_entry_id(&session, key));
+            let entry_id = match entry_id {
+                Some(id) => Some(id),
+                None => wait_for_entry_id(&session, key).await,
+            };
             let replacement = runner.message_display(entry_id.as_deref(), &text, MESSAGE_DISPLAY_LIMIT).await;
             mode.finish_message_display(key, text, replacement);
         });
