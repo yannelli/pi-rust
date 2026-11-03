@@ -1,7 +1,7 @@
 //! Upstream `test/differential.test.ts`: `RemoteExecutionEnv` against the local env (upstream `NodeExecutionEnv`) on
 //! the same machine, for random operation sequences, special files, odd names, and the read and bash tools.
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, Mutex};
 

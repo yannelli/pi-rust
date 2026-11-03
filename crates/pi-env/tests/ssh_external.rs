@@ -2,7 +2,7 @@
 //! `PI_ENV_SSH_HOST`, `PI_ENV_SSH_USER`, `PI_ENV_SSH_PORT`, `PI_ENV_SSH_KEY` and `PI_ENV_SSH_PROGRAM`. Every test is
 //! ignored: it needs that server. Run them with `cargo test -p pi-env --test ssh_external -- --ignored`.
 
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 

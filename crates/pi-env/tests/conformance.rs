@@ -2,7 +2,7 @@
 //! `RemoteExecutionEnv` over a pipe and against `LocalExecutionEnv`. Each case gets its own connection: a tokio test
 //! owns its runtime, so one connection cannot serve every case.
 
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 
