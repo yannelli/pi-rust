@@ -49,13 +49,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: cargo test --workspace --locked --no-fail-fast
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      # nextest runs the tests of every binary in parallel; .config/nextest.toml lists the
+      # binaries with their own main, which run with cargo test.
+      - run: cargo nextest run --workspace --locked --profile ci
+      - name: tests with their own harness
+        run: >-
+          cargo test --workspace --locked --no-fail-fast --test chord2_manager_child --test node_fork
+          --test node_cluster --test node_ipc_missing_handle --test node_ipc_recovery
+          --test node_ipc_windows_diag --test node_ipc_cloexec
+      - run: cargo test --workspace --doc --locked --no-fail-fast
+      # --workspace keeps the feature set of the steps above, so nothing is rebuilt.
       - name: extension and SDK tests on the Node backend
         run: >-
-          cargo test -p pi-coding-agent --test extensions --test tui_viewport_exports --test project_trust_store_exports
-          --test sdk_child_session --test sdk_session --test sdk_settings_replay --test sdk_settings_child
-          --test sdk_resources --test sdk_model_runtime --test sdk_storage --test sdk_utilities
-          --locked --no-fail-fast
+          cargo nextest run --workspace --locked --profile ci -E "package(pi-coding-agent) & (binary(=extensions)
+          | binary(=tui_viewport_exports) | binary(=project_trust_store_exports) | binary(=sdk_child_session)
+          | binary(=sdk_session) | binary(=sdk_settings_replay) | binary(=sdk_settings_child)
+          | binary(=sdk_resources) | binary(=sdk_model_runtime) | binary(=sdk_storage) | binary(=sdk_utilities))"
         env:
           PI_EXTENSION_RUNTIME: node
 
