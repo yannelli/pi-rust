@@ -1,6 +1,6 @@
 //! Port of upstream `test/client.test.ts`, "Client service operations".
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, Mutex};
 
