@@ -3,17 +3,20 @@
 
 use pi_ai::{JsonObject, Message, SystemMessage, Tool, UserContent};
 
-use super::mode::InteractiveMode;
 use super::util::format_tokens;
 use crate::compaction::{ContextUsageEstimate, estimate_projected_context_tokens, estimate_tokens};
 use crate::system_prompt::{SystemPromptState, build_system_prompt_state, sections_to_json};
-use crate::theme::{ThemeColor, theme};
+use pi_tui::colors::{Color, color_to_oklch, oklch_color};
 
-const GRID_COLUMNS: usize = 20;
-const GRID_ROWS: usize = 5;
-const GRID_DOTS: usize = GRID_COLUMNS * GRID_ROWS;
-const USED_DOT: &str = "⣿";
-const FREE_DOT: &str = "⣤";
+use super::mode::InteractiveMode;
+use crate::theme::{StyleFg, Theme, ThemeColor, ThemeStyle, theme};
+
+/// Each braille cell is empty, half (left column), or full, so the bar moves in half cells.
+const BAR_CELLS: usize = 10;
+const BAR_STEPS: usize = BAR_CELLS * 2;
+const EMPTY_CELL: &str = "\u{2800}";
+const HALF_CELL: &str = "⡇";
+const FULL_CELL: &str = "⣿";
 const LABEL_WIDTH: usize = 15;
 const ROW_WIDTH: usize = 20;
 
@@ -121,42 +124,39 @@ enum Style {
     Label,
     /// A part of the breakdown, by its index in [`ContextBreakdown::rows`].
     Part(usize),
-    Free,
 }
 
 fn percent(tokens: u64, window: u64) -> String {
     format!("{:.1}%", tokens as f64 / window as f64 * 100.0)
 }
 
-/// The part that fills each dot of the grid, or `None` for a free dot. One dot is
-/// `1 / GRID_DOTS` of the window; the parts share the used dots in proportion to their size.
-fn dot_parts(in_use: u64, window: u64, breakdown: &ContextBreakdown) -> Vec<Option<usize>> {
-    let used = (in_use.saturating_mul(GRID_DOTS as u64).div_ceil(window) as usize).min(GRID_DOTS);
-    let total = breakdown.total().max(1);
+/// The part that fills each half-cell step of the bar, or `None` for a free step. One step is
+/// `1 / BAR_STEPS` of the window; the parts share the used steps in proportion to their size.
+fn step_parts(in_use: u64, window: u64, breakdown: &ContextBreakdown) -> Vec<Option<usize>> {
+    let steps = BAR_STEPS as u128;
+    let used = ((in_use as u128 * steps + window as u128 / 2) / window as u128).min(steps) as usize;
+    let total = breakdown.total().max(1) as u128;
     let mut ends = Vec::new();
     let mut sum = 0;
     for (_, tokens) in breakdown.rows() {
-        sum += tokens;
-        ends.push(((sum as u128 * used as u128 + total as u128 / 2) / total as u128) as usize);
+        sum += tokens as u128;
+        ends.push(((sum * used as u128 + total / 2) / total) as usize);
     }
     let last = ends.len() - 1;
-    (0..GRID_DOTS).map(|dot| (dot < used).then(|| ends.iter().position(|&end| end > dot).unwrap_or(last))).collect()
+    (0..BAR_STEPS).map(|step| (step < used).then(|| ends.iter().position(|&end| end > step).unwrap_or(last))).collect()
 }
 
-fn usage_grid(
-    in_use: u64,
-    window: u64,
-    breakdown: &ContextBreakdown,
-    style: &dyn Fn(Style, &str) -> String,
-) -> Vec<String> {
-    let dots: Vec<String> = dot_parts(in_use, window, breakdown)
-        .into_iter()
-        .map(|part| match part {
-            Some(part) => style(Style::Part(part), USED_DOT),
-            None => style(Style::Free, FREE_DOT),
+/// A cell takes the color of the part that fills its left half.
+fn usage_bar(in_use: u64, window: u64, breakdown: &ContextBreakdown, style: &dyn Fn(Style, &str) -> String) -> String {
+    let steps = step_parts(in_use, window, breakdown);
+    steps
+        .chunks(2)
+        .map(|cell| match (cell[0], cell[1]) {
+            (Some(part), Some(_)) => style(Style::Part(part), FULL_CELL),
+            (Some(part), None) => style(Style::Part(part), HALF_CELL),
+            _ => EMPTY_CELL.to_string(),
         })
-        .collect();
-    dots.chunks(GRID_COLUMNS).map(|row| row.concat()).collect()
+        .collect()
 }
 
 fn report_text(report: &ContextReport, style: &dyn Fn(Style, &str) -> String) -> String {
@@ -181,7 +181,7 @@ fn report_text(report: &ContextReport, style: &dyn Fn(Style, &str) -> String) ->
         };
         lines.push(field("Auto-compact:", &compaction));
         lines.push(String::new());
-        lines.extend(usage_grid(report.in_use, window, &report.breakdown, style));
+        lines.push(usage_bar(report.in_use, window, &report.breakdown, style));
     }
     lines.push(String::new());
     lines.push(style(Style::Title, "Estimated breakdown"));
@@ -189,22 +189,26 @@ fn report_text(report: &ContextReport, style: &dyn Fn(Style, &str) -> String) ->
     let free_row = (window > 0).then_some(("Free space", free));
     for (index, (name, tokens)) in report.breakdown.rows().into_iter().chain(free_row).enumerate() {
         let share = if window > 0 { format!(" {:>6}", percent(tokens, window)) } else { String::new() };
-        let key = if name == "Free space" { style(Style::Free, FREE_DOT) } else { style(Style::Part(index), USED_DOT) };
+        let key = if name == "Free space" { EMPTY_CELL.to_string() } else { style(Style::Part(index), FULL_CELL) };
         lines.push(format!("  {key} {name:<ROW_WIDTH$}{:>7}{share}", format_tokens(tokens)));
     }
     lines.join("\n")
 }
 
-/// The dot color of each part, in the order of [`ContextBreakdown::rows`].
-const PART_COLORS: [ThemeColor; 7] = [
-    ThemeColor::SyntaxKeyword,
-    ThemeColor::SyntaxFunction,
-    ThemeColor::SyntaxType,
-    ThemeColor::SyntaxNumber,
-    ThemeColor::Accent,
-    ThemeColor::SyntaxString,
-    ThemeColor::Warning,
-];
+/// Mild variations of the accent, one per part: the hue turns and the lightness steps a little,
+/// so the parts also differ when the accent is gray.
+fn part_colors(theme: &Theme) -> Vec<Color> {
+    let accent_color = theme.color(ThemeColor::Accent);
+    let accent = color_to_oklch(&accent_color);
+    let middle = (ContextBreakdown::default().rows().len() - 1) as f64 / 2.0;
+    (0..ContextBreakdown::default().rows().len())
+        .map(|part| {
+            let offset = part as f64 - middle;
+            let lightness = (accent.l + offset * 0.03).clamp(0.0, 1.0);
+            oklch_color(lightness, accent.c, accent.h + offset * 12.0).unwrap_or(accent_color)
+        })
+        .collect()
+}
 
 impl InteractiveMode {
     /// `/context`: the report is built once and painted with the current theme.
@@ -237,11 +241,14 @@ impl InteractiveMode {
         let report = ContextReport { model, window, in_use, source, compact_at, breakdown };
         let render = move || {
             let t = theme();
+            let colors = part_colors(&t);
             let style = |style: Style, text: &str| match style {
                 Style::Title => t.bold(text),
                 Style::Label => t.fg(ThemeColor::Dim, text),
-                Style::Part(part) => t.fg(PART_COLORS[part.min(PART_COLORS.len() - 1)], text),
-                Style::Free => t.fg(ThemeColor::Dim, text),
+                Style::Part(part) => {
+                    let fg = colors.get(part).copied().map(StyleFg::Color);
+                    t.style(text, &ThemeStyle { fg, ..ThemeStyle::default() })
+                }
             };
             report_text(&report, &style)
         };
@@ -331,7 +338,7 @@ mod tests {
     }
 
     #[test]
-    fn renders_a_table_with_a_dot_grid_and_free_space() {
+    fn renders_a_table_with_a_braille_bar_and_free_space() {
         let breakdown = ContextBreakdown {
             system_prompt: 1_200,
             tool_definitions: 2_500,
@@ -350,8 +357,7 @@ mod tests {
             breakdown,
         };
         let text = report_text(&report, &plain);
-        let used = USED_DOT.repeat(GRID_COLUMNS);
-        let free = FREE_DOT.repeat(GRID_COLUMNS);
+        let bar = format!("⣿⣿{}", EMPTY_CELL.repeat(8));
         let expected = [
             "Context Usage",
             "",
@@ -360,11 +366,7 @@ mod tests {
             "In use:         20k tokens (20.0%), from the last response",
             "Auto-compact:   at 84k tokens (83.6%)",
             "",
-            used.as_str(),
-            free.as_str(),
-            free.as_str(),
-            free.as_str(),
-            free.as_str(),
+            bar.as_str(),
             "",
             "Estimated breakdown",
             "  ⣿ System prompt          1.2k   1.2%",
@@ -374,7 +376,7 @@ mod tests {
             "  ⣿ User messages           900   0.9%",
             "  ⣿ Assistant messages     3.0k   3.0%",
             "  ⣿ Tool results            12k  12.0%",
-            "  ⣤ Free space              80k  80.0%",
+            "  \u{2800} Free space              80k  80.0%",
         ];
         assert_eq!(text, expected.join("\n"));
     }
@@ -393,29 +395,51 @@ mod tests {
         let text = report_text(&report, &plain);
         assert!(text.contains("Model:          none selected\nWindow:         unknown\n"), "{text}");
         assert!(text.contains("In use:         500 tokens, estimated\n"), "{text}");
-        assert!(!text.contains("Auto-compact") && !text.contains("Free space") && !text.contains('⣤'), "{text}");
+        assert!(!text.contains("Auto-compact") && !text.contains("Free space") && !text.contains('\u{2800}'), "{text}");
         assert!(text.ends_with(&format!("  ⣿ Tool results{}0", " ".repeat(14))), "{text}");
     }
 
     #[test]
-    fn the_parts_share_the_used_dots_in_order() {
+    fn the_bar_fills_in_half_cells_of_five_percent() {
+        let breakdown = ContextBreakdown { tool_results: 1, ..ContextBreakdown::default() };
+        let bar = |percent: u64| usage_bar(percent, 100, &breakdown, &plain).replace(EMPTY_CELL, "_");
+        let expected = [
+            (0, "__________"),
+            (5, "⡇_________"),
+            (10, "⣿_________"),
+            (15, "⣿⡇________"),
+            (25, "⣿⣿⡇_______"),
+            (40, "⣿⣿⣿⣿______"),
+            (50, "⣿⣿⣿⣿⣿_____"),
+            (65, "⣿⣿⣿⣿⣿⣿⡇___"),
+            (75, "⣿⣿⣿⣿⣿⣿⣿⡇__"),
+            (90, "⣿⣿⣿⣿⣿⣿⣿⣿⣿_"),
+            (95, "⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇"),
+            (100, "⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿"),
+            (250, "⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿"),
+        ];
+        for (percent, shown) in expected {
+            assert_eq!(bar(percent), shown, "{percent}%");
+        }
+    }
+
+    #[test]
+    fn the_parts_share_the_used_steps_in_order() {
         let breakdown = ContextBreakdown {
-            system_prompt: 1_200,
-            tool_definitions: 2_500,
-            context_files: 400,
-            user: 900,
-            assistant: 3_000,
-            tool_results: 12_000,
+            system_prompt: 2_000,
+            tool_definitions: 2_000,
+            user: 1_000,
+            assistant: 5_000,
+            tool_results: 10_000,
             ..ContextBreakdown::default()
         };
-        let dots = dot_parts(20_000, 100_000, &breakdown);
-        let mut expected = vec![Some(0), Some(1), Some(1), Some(1), Some(4), Some(5), Some(5), Some(5)];
-        expected.extend([Some(6); 12]);
-        expected.extend([None; GRID_DOTS - 20]);
-        assert_eq!(dots, expected);
-        // A reported count larger than the estimate scales the parts up; a full window fills every dot.
-        assert_eq!(dot_parts(40_000, 100_000, &breakdown).iter().flatten().count(), 40);
-        assert!(dot_parts(250_000, 100_000, &breakdown).iter().all(Option::is_some));
-        assert_eq!(dot_parts(1, 100_000, &breakdown)[..2], [Some(6), None]);
+        let steps = step_parts(20_000, 20_000, &breakdown);
+        let mut expected = vec![Some(0), Some(0), Some(1), Some(1), Some(4)];
+        expected.extend([Some(5); 5]);
+        expected.extend([Some(6); 10]);
+        assert_eq!(steps, expected);
+        // A reported count larger than the estimate scales the parts up to the bar.
+        assert_eq!(step_parts(10_000, 20_000, &breakdown).iter().flatten().count(), 10);
+        assert_eq!(step_parts(10_000, 20_000, &breakdown)[..3], [Some(0), Some(1), Some(4)]);
     }
 }
