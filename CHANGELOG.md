@@ -2,6 +2,13 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.7] - 2026-11-03
+
+### Added
+
+- **extensions:** add ctx.getContextBreakdown and split tool parts ([24ea4f1](https://github.com/yannelli/pi-rust/commit/24ea4f159c3426defaaaec18be4e56b94f575623))
+- **interactive:** show /context use as a 10-cell braille bar ([0980534](https://github.com/yannelli/pi-rust/commit/098053418b09fae606342ed3085222fcaa332cc6))
+
 ## [0.12.6] - 2026-11-02
 
 ### Added
