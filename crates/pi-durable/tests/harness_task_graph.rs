@@ -1,6 +1,6 @@
 //! Port of upstream `test/harness-task-graph.test.ts`.
 
-mod support;
+use crate::support;
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};

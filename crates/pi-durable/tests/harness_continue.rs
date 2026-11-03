@@ -1,7 +1,7 @@
 //! Port of upstream `test/harness-continue.test.ts`: `SubmissionDraft::Continue`, a run without a new user message
 //! (upstream #11043).
 
-mod support;
+use crate::support;
 
 #[path = "harness_continue/admission.rs"]
 mod admission;

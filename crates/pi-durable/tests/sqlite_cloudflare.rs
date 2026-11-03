@@ -257,8 +257,7 @@ async fn queues_operations_behind_an_active_transaction() {
     database.close().await.unwrap();
 }
 
-#[path = "support/sqlite_changes.rs"]
-mod changes;
+use crate::support::sqlite_changes as changes;
 
 #[tokio::test]
 async fn reports_the_rows_a_statement_changed_without_index_writes() {

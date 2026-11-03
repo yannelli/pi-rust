@@ -1,7 +1,6 @@
 //! Port of upstream `test/session-adoption.test.ts`: the Session adopts inside `Storage::commit()`.
 
-#[path = "support/mod.rs"]
-mod support;
+use crate::support;
 
 use std::sync::{Arc, LazyLock, Mutex};
 

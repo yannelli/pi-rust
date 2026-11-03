@@ -1,6 +1,6 @@
 //! Port of the upstream test file for `Harness` inspection. concise-ignore
 
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

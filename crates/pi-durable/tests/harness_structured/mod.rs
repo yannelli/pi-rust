@@ -1,8 +1,7 @@
 //! Port of upstream `test/harness-structured.test.ts`. `nodes.rs` holds the scriptable `test.node` task and the
 //! helpers; this file holds the task ownership cases, and the sibling modules the other upstream sections.
 
-#[path = "../support/mod.rs"]
-mod support;
+use crate::support;
 
 mod completing;
 mod definitions;

@@ -9,7 +9,7 @@ use pi_telemetry::{
 };
 use serde_json::json;
 
-use crate::support::{Fixture, Spy, clock};
+use super::support::{Fixture, Spy, clock};
 
 fn add(f: &Fixture, name: &str, value: f64) {
     f.telemetry.counter(name, InstrumentOptions::default()).add(value, SpanAttributes::new());

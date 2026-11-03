@@ -7,7 +7,7 @@ mod derivation;
 mod reads;
 #[path = "harness_context/steps.rs"]
 mod steps;
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 

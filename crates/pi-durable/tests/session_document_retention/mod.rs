@@ -1,8 +1,7 @@
 //! Port of upstream `test/session-document-retention.test.ts`: the Session's document cache is bounded by use.
 //! No counterpart for a clock or setting that throws, or for timers that cannot be unreferenced: Rust has neither.
 
-#[path = "../support/mod.rs"]
-mod support;
+use crate::support;
 
 mod edges;
 mod harness;

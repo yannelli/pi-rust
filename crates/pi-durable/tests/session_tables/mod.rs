@@ -1,7 +1,6 @@
 //! Port of upstream `test/session-tables.test.ts`.
 
-#[path = "../support/mod.rs"]
-mod support;
+use crate::support;
 
 mod owners;
 mod tasks;

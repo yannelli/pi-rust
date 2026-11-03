@@ -1,7 +1,7 @@
 //! Port of upstream `test/harness-observers.test.ts`: the Harness's synchronous observers (`observe_conversation()`,
 //! `observe_task_graph()`, `observe_doc()` of a task document) and task document watches, which end with their task.
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, LazyLock, Mutex};
 

@@ -11,7 +11,7 @@ mod phases;
 mod runtime;
 #[path = "harness_tasks/scheduling.rs"]
 mod scheduling;
-mod support;
+use crate::support;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

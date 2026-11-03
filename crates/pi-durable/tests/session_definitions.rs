@@ -1,7 +1,7 @@
 //! Port of upstream `test/session-definitions.test.ts`. Accepted overload forms compile and run here; each
 //! `@ts-expect-error` form upstream is a Rust compile error, noted where upstream asserts it.
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, LazyLock};
 

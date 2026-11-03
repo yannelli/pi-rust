@@ -1,8 +1,7 @@
 //! Port of upstream `test/session-observers.test.ts`: `Session::observe_doc()`, the synchronous observer of one
 //! document address that watches are built on.
 
-#[path = "support/mod.rs"]
-mod support;
+use crate::support;
 
 #[path = "session_observers/commits.rs"]
 mod commits;

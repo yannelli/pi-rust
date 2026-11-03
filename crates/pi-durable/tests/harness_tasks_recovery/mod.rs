@@ -1,8 +1,7 @@
 //! Port of upstream `test/harness-tasks-recovery.test.ts`. This file holds the helpers and the recovery and crash
 //! cases; `blocked.rs` holds blocked tasks, and `handover.rs` definition handover and Harness open.
 
-#[path = "../support/mod.rs"]
-mod support;
+use crate::support;
 
 mod blocked;
 mod handover;

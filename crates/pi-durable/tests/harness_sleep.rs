@@ -1,6 +1,6 @@
 //! Port of upstream `test/harness-sleep.test.ts`: sleeping tasks, host timers, and wakeups.
 
-mod support;
+use crate::support;
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

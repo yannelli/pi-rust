@@ -9,7 +9,7 @@ mod lifetime;
 mod result_cases;
 #[path = "harness_tools/rounds.rs"]
 mod rounds;
-mod support;
+use crate::support;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

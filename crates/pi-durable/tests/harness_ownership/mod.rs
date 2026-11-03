@@ -2,8 +2,7 @@
 //! `marks.rs` holds orphan, cancellation, and dependency races, `reopen.rs` the cases across reopen and failed
 //! cascades, and `handles.rs` owned conversations from tools and supervisors.
 
-#[path = "../support/mod.rs"]
-mod support;
+use crate::support;
 
 mod bridges;
 mod handles;

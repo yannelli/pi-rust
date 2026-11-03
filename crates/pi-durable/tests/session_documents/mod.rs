@@ -1,7 +1,6 @@
 //! Port of upstream `test/session-documents.test.ts`.
 
-#[path = "../support/mod.rs"]
-mod support;
+use crate::support;
 
 mod lifecycle;
 mod retirement;

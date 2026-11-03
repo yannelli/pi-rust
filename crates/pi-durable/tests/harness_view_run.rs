@@ -1,7 +1,7 @@
 //! Port of upstream `test/harness-view-run.test.ts`: what a renderer sees of a run through the conversation view, the
 //! transcript window and `pi.live`, every change a commit makes, rebuilt from operations alone.
 
-mod support;
+use crate::support;
 
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};

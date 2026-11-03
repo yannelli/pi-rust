@@ -1,8 +1,7 @@
 //! Port of upstream `test/harness-nested-tools-restart.test.ts` (nested tool calls across a restart). This file holds
 //! the helpers and the abandonment cases; `recovery.rs` holds the replay-safe and child task cases.
 
-#[path = "../support/mod.rs"]
-mod support;
+use crate::support;
 
 mod earlier_runs;
 mod recovery;

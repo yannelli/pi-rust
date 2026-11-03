@@ -2,8 +2,7 @@
 //! Upstream guards `assignJson()` against merging a new `__proto__` member into `Object.prototype`; a Rust JSON map
 //! has no prototype, so the member is an own member like any other.
 
-#[path = "support/mod.rs"]
-mod support;
+use crate::support;
 
 use std::sync::LazyLock;
 

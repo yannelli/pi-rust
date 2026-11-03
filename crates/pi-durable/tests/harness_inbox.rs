@@ -11,7 +11,7 @@ mod failed_run;
 mod handoffs;
 #[path = "harness_inbox/ledger.rs"]
 mod ledger;
-mod support;
+use crate::support;
 
 use std::sync::{Arc, Mutex};
 

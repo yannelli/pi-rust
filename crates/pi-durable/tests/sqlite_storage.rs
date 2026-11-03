@@ -1,6 +1,6 @@
 //! Port of upstream `test/sqlite-storage.test.ts`.
 
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 

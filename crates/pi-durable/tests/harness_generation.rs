@@ -5,7 +5,7 @@
 mod options;
 #[path = "harness_generation/streams.rs"]
 mod streams;
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 

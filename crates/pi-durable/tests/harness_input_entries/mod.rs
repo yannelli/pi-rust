@@ -2,8 +2,7 @@
 //! write cases are in `writes.rs`. No counterpart for an untyped caller's extra fields: `InputEntry` has only a kind
 //! and data.
 
-#[path = "../support/mod.rs"]
-mod support;
+use crate::support;
 mod writes;
 
 use std::sync::{Arc, Mutex};

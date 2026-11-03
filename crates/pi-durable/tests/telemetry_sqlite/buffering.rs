@@ -11,7 +11,7 @@ use pi_telemetry::{
 };
 use serde_json::{Value, json};
 
-use crate::support::Fixture;
+use super::support::Fixture;
 
 type Slot = Arc<Mutex<Option<Arc<dyn TelemetrySpan>>>>;
 

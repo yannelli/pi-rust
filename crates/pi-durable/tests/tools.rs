@@ -6,8 +6,7 @@
 mod harness;
 #[path = "tools/shell.rs"]
 mod shell;
-#[path = "support/tools_support.rs"]
-mod support;
+use crate::support::tools_support as support;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
