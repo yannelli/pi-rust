@@ -1,7 +1,7 @@
 //! JS ownership and control-flow proof that a handle send failing while it prepares socket copies releases them all:
 //! shipped ipc.js on fake natives, with a mock "win32" platform. Not a kernel, WinSock or Node-parity test.
 
-mod common;
+use crate::common;
 
 use common::*;
 use serde_json::{Value, json};

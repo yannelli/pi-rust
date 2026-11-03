@@ -1,7 +1,7 @@
 //! Readable byte streams with BYOB readers, FileHandle.readableWebStream, and Duplex.from for
 //! promises, async functions, Blobs, and web streams. Expected values come from Node 22.
 
-mod common;
+use crate::common;
 
 use common::*;
 

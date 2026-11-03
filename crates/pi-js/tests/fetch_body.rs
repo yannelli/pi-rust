@@ -1,7 +1,7 @@
 //! Body.formData for multipart and urlencoded bodies, and fetch request bodies sent as they are
 //! read. Expected values come from Node 22; the server is node:http on localhost.
 
-mod common;
+use crate::common;
 
 use common::*;
 

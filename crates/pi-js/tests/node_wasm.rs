@@ -1,7 +1,7 @@
 //! The WebAssembly global and node:wasi. The scripts are in fixtures/wasm, with a small binary
 //! builder (there are no text format tools); the expected output there comes from Node 22.
 
-mod common;
+use crate::common;
 
 use common::*;
 

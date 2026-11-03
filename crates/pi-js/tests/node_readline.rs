@@ -2,7 +2,7 @@
 //! on top of it. Expected values, including the bytes written to the output, come from Node 22
 //! (Node 24 for TERM=dumb). Each script sets TERM because readline output depends on it.
 
-mod common;
+use crate::common;
 
 use common::*;
 

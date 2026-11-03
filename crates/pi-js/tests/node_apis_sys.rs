@@ -1,7 +1,7 @@
 //! Node APIs backed by the operating system: fs.glob, fs.cp filters, bigint Stats, fs.watch,
 //! os priorities and interfaces, and process resource usage.
 
-mod common;
+use crate::common;
 
 use common::*;
 use serde_json::json;

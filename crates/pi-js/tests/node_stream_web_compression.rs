@@ -1,7 +1,7 @@
 //! CompressionStream and DecompressionStream on QuickJS against Node 22.23 results: formats, the
 //! constructor contract, vectors Node compressed, errors, cancel and abort, and backpressure.
 
-mod common;
+use crate::common;
 
 use common::*;
 use serde_json::json;

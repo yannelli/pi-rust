@@ -1,8 +1,8 @@
 //! JSON.parse results and SyntaxError messages match real Node 22. `fixtures/json_parse_cases.cjs` holds the
 //! cases; running it with Node writes `fixtures/json_parse_node.json`, and both backends must give the same cases.
 
-mod common;
-mod node_common;
+use crate::common;
+use crate::node_common;
 
 use std::path::Path;
 

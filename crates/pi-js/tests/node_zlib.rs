@@ -1,6 +1,6 @@
 //! node:zlib: round trips, Node's compressed vectors, options, streams, and error codes.
 
-mod common;
+use crate::common;
 
 use common::*;
 use serde_json::json;

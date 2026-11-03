@@ -1,7 +1,7 @@
 //! Node APIs that once threw ERR_PI_UNSUPPORTED: util, path globs, perf_hooks, events,
 //! diagnostics_channel, stream.compose, buffer, assert.CallTracker, and module.
 
-mod common;
+use crate::common;
 
 use common::*;
 use serde_json::json;

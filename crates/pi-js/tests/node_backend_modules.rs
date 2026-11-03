@@ -1,8 +1,8 @@
 //! The Node backend's module hooks: pi's resolver, virtual modules, registered sources, and
 //! TypeScript through pi-js's transpiler, plus Node APIs QuickJS lacks.
 
-mod common;
-mod node_common;
+use crate::common;
+use crate::node_common;
 
 use common::*;
 use node_common::*;

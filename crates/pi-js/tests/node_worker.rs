@@ -1,7 +1,7 @@
 //! node:worker_threads: workers on their own runtime threads, message ports, and broadcast
 //! channels.
 
-mod common;
+use crate::common;
 
 use common::*;
 use serde_json::json;

@@ -1,8 +1,8 @@
 //! The Node backend's transport: raw output on the child's stdout, shutdown with grandchildren
 //! holding stdout, a killed child, and the bootstrap directory.
 
-mod common;
-mod node_common;
+use crate::common;
+use crate::node_common;
 
 use std::time::{Duration, Instant};
 
