@@ -9,6 +9,7 @@ mod boundary;
 pub mod builtins;
 mod cache;
 mod compaction;
+pub mod context_breakdown;
 pub mod events;
 mod export_tools;
 mod extension_hooks;
