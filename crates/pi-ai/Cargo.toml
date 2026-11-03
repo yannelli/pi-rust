@@ -7,6 +7,16 @@ license.workspace = true
 publish.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+autotests = false
+
+[[test]]
+name = "integration"
+path = "tests/main.rs"
+
+# Its own process: acp_agent.rs sets a different process-wide ACP host and agent list.
+[[test]]
+name = "acp_controls"
+path = "tests/acp_controls.rs"
 
 # Development OAuth login helper (upstream `pi-ai` CLI); the release builds only `pi`.
 [[bin]]
