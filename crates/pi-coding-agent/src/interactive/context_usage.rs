@@ -12,8 +12,8 @@ use crate::theme::{ThemeColor, theme};
 const GRID_COLUMNS: usize = 20;
 const GRID_ROWS: usize = 5;
 const GRID_DOTS: usize = GRID_COLUMNS * GRID_ROWS;
-const USED_DOT: &str = "●";
-const FREE_DOT: &str = "○";
+const USED_DOT: &str = "⣿";
+const FREE_DOT: &str = "⣤";
 const LABEL_WIDTH: usize = 15;
 const ROW_WIDTH: usize = 20;
 
@@ -156,7 +156,7 @@ fn usage_grid(
             None => style(Style::Free, FREE_DOT),
         })
         .collect();
-    dots.chunks(GRID_COLUMNS).map(|row| row.join(" ")).collect()
+    dots.chunks(GRID_COLUMNS).map(|row| row.concat()).collect()
 }
 
 fn report_text(report: &ContextReport, style: &dyn Fn(Style, &str) -> String) -> String {
@@ -350,8 +350,8 @@ mod tests {
             breakdown,
         };
         let text = report_text(&report, &plain);
-        let used = vec!["●"; GRID_COLUMNS].join(" ");
-        let free = vec!["○"; GRID_COLUMNS].join(" ");
+        let used = USED_DOT.repeat(GRID_COLUMNS);
+        let free = FREE_DOT.repeat(GRID_COLUMNS);
         let expected = [
             "Context Usage",
             "",
@@ -367,14 +367,14 @@ mod tests {
             free.as_str(),
             "",
             "Estimated breakdown",
-            "  ● System prompt          1.2k   1.2%",
-            "  ● Tool definitions       2.5k   2.5%",
-            "  ● Context files           400   0.4%",
-            "  ● Skills                    0   0.0%",
-            "  ● User messages           900   0.9%",
-            "  ● Assistant messages     3.0k   3.0%",
-            "  ● Tool results            12k  12.0%",
-            "  ○ Free space              80k  80.0%",
+            "  ⣿ System prompt          1.2k   1.2%",
+            "  ⣿ Tool definitions       2.5k   2.5%",
+            "  ⣿ Context files           400   0.4%",
+            "  ⣿ Skills                    0   0.0%",
+            "  ⣿ User messages           900   0.9%",
+            "  ⣿ Assistant messages     3.0k   3.0%",
+            "  ⣿ Tool results            12k  12.0%",
+            "  ⣤ Free space              80k  80.0%",
         ];
         assert_eq!(text, expected.join("\n"));
     }
@@ -393,8 +393,8 @@ mod tests {
         let text = report_text(&report, &plain);
         assert!(text.contains("Model:          none selected\nWindow:         unknown\n"), "{text}");
         assert!(text.contains("In use:         500 tokens, estimated\n"), "{text}");
-        assert!(!text.contains("Auto-compact") && !text.contains("Free space") && !text.contains('○'), "{text}");
-        assert!(text.ends_with(&format!("  ● Tool results{}0", " ".repeat(14))), "{text}");
+        assert!(!text.contains("Auto-compact") && !text.contains("Free space") && !text.contains('⣤'), "{text}");
+        assert!(text.ends_with(&format!("  ⣿ Tool results{}0", " ".repeat(14))), "{text}");
     }
 
     #[test]
