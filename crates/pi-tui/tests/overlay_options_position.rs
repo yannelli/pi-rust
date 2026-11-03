@@ -1,7 +1,7 @@
 //! Port of upstream `test/overlay-options.test.ts`: "offset", "percentage positioning",
 //! "maxHeight", "absolute positioning", "stacked overlays", and "hiding after stop".
 
-mod overlay_common;
+use crate::overlay_common;
 
 use std::cell::RefCell;
 use std::rc::Rc;

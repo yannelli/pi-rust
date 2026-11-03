@@ -1,9 +1,9 @@
 //! Port of upstream `tui-alt-screen.test.ts`: wheel routing, wheel line counts, and layout
 //! mouse dispatch.
 
-mod alt_view_common;
-mod layout_common;
-mod support;
+use crate::alt_view_common;
+use crate::layout_common;
+use crate::support;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;

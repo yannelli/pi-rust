@@ -1,6 +1,6 @@
 //! Port of upstream `markdown.test.ts`: block spacing, block quotes, and streaming code fences.
 
-mod markdown_common;
+use crate::markdown_common;
 
 use markdown_common::{
     CYAN, Capabilities, MAGENTA, YELLOW, chalk, default_theme, markdown, plain, strip_ansi, styled_markdown,

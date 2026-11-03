@@ -1,8 +1,7 @@
 //! Port of upstream `tui-alt-screen.test.ts`: viewport, dock, and jump-to-end indicator cases.
 
-mod alt_view_common;
-mod layout_common;
-mod support;
+use crate::alt_view_common;
+use crate::layout_common;
 
 use std::cell::Cell;
 use std::rc::Rc;

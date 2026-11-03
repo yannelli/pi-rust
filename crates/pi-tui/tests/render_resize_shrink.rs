@@ -1,7 +1,7 @@
 //! Port of the "TUI resize handling" and "TUI content shrinkage" cases of upstream
 //! `test/tui-render.test.ts`, and of upstream `test/tui-shrink.test.ts`.
 
-mod render_common;
+use crate::render_common;
 
 use pi_tui::testing::VirtualTerminal;
 use pi_tui::{Tui, TuiStopOptions};

@@ -1,6 +1,6 @@
 //! Upstream Markdown regressions for wide display math and bare URLs next to CJK punctuation.
 
-mod markdown_common;
+use crate::markdown_common;
 
 use markdown_common::{Capabilities, markdown, plain, strip_ansi};
 use pi_tui::{Component, visible_width};

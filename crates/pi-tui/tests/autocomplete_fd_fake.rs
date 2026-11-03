@@ -2,8 +2,8 @@
 //! ordering, quoting, `.git` filtering, aborts, and delivery to the editor from the worker thread.
 #![cfg(unix)]
 
-mod autocomplete_common;
-mod editor_common;
+use crate::autocomplete_common;
+use crate::editor_common;
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;

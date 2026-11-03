@@ -1,6 +1,6 @@
 //! Ports of the upstream editor tests: grapheme-aware wrapping and `wordWrapLine`.
 
-mod editor_common;
+use crate::editor_common;
 
 use editor_common::{default_theme, editor, editor_with, type_text};
 use pi_tui::components::editor::{EditorOptions, TextChunk, TextSegment, word_wrap_line, word_wrap_line_with_segments};

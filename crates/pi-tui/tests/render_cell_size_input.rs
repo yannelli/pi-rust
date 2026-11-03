@@ -1,6 +1,6 @@
 //! Port of upstream `test/tui-cell-size-input.test.ts`.
 
-mod render_common;
+use crate::render_common;
 
 use std::cell::RefCell;
 use std::rc::Rc;

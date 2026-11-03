@@ -1,6 +1,6 @@
 //! Port of upstream `markdown.test.ts`: tables.
 
-mod markdown_common;
+use crate::markdown_common;
 
 use std::rc::Rc;
 

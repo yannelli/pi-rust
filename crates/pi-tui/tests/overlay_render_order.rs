@@ -1,7 +1,7 @@
 //! Port of upstream `test/overlay-non-capturing.test.ts`, "rendering order": overlapping overlays
 //! composite in focus order, and focusing an overlay brings it to the front.
 
-mod overlay_common;
+use crate::overlay_common;
 
 use overlay_common::*;
 

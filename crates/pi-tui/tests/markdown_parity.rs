@@ -2,7 +2,7 @@
 //! the upstream docs, the upstream tests, and random structural input) with the lines the
 //! TypeScript `Markdown` component renders for it, using the simple theme below.
 
-mod markdown_common;
+use crate::markdown_common;
 
 use std::rc::Rc;
 

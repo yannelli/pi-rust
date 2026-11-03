@@ -1,6 +1,6 @@
 //! Ports of the upstream editor sticky column tests.
 
-mod editor_common;
+use crate::editor_common;
 
 use editor_common::{TestEditor, UNDO, cursor, editor, editor_cols};
 

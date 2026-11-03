@@ -1,6 +1,6 @@
 //! Ports of upstream `autocomplete.test.ts`: path prefix extraction, `./` paths, and quoted paths.
 
-mod autocomplete_common;
+use crate::autocomplete_common;
 
 use autocomplete_common::{apply, provider, setup_folder, suggest, values};
 use pi_tui::autocomplete::CombinedAutocompleteProvider;

@@ -2,7 +2,7 @@
 //! Upstream ticks mock timers by 19 and 20 ms; here requests are checked before and after the
 //! 20 ms debounce elapses on the real UI loop.
 
-mod editor_common;
+use crate::editor_common;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;

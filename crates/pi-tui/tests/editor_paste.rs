@@ -1,6 +1,6 @@
 //! Ports of the upstream editor paste marker tests.
 
-mod editor_common;
+use crate::editor_common;
 
 use std::cell::RefCell;
 use std::rc::Rc;

@@ -1,7 +1,7 @@
 //! Ports of upstream `select-list.test.ts`, `settings-list.test.ts`, and the SelectList and
 //! SettingsList cases of `mouse-components.test.ts`.
 
-mod alt_view_common;
+use crate::alt_view_common;
 
 use std::cell::RefCell;
 use std::rc::Rc;

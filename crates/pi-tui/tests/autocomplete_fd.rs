@@ -1,7 +1,7 @@
 //! Ports of the upstream `fd @ file suggestions` tests. Like upstream, they are skipped when `fd`
 //! is not on `PATH`; `autocomplete_fd_fake.rs` covers the result handling without it.
 
-mod autocomplete_common;
+use crate::autocomplete_common;
 
 use std::path::{Path, PathBuf};
 

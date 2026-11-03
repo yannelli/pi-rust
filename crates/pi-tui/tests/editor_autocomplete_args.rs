@@ -1,7 +1,7 @@
 //! Ports of the upstream editor autocomplete tests: slash commands, argument completion,
 //! re-querying on cursor moves, and aborting stale requests.
 
-mod editor_common;
+use crate::editor_common;
 
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};

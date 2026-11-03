@@ -1,13 +1,15 @@
 //! Port of upstream `editor-history-keybindings.test.ts`. It replaces the process-wide
-//! keybindings, so it lives in its own test binary.
+//! keybindings, so it holds the global state lock while it runs.
 
-mod editor_common;
+use crate::editor_common;
 
 use editor_common::{cursor, editor};
+use pi_tui::env::global_state_lock;
 use pi_tui::keybindings::{KeybindingsConfig, KeybindingsManager, ids, set_keybindings, tui_keybindings};
 
 #[test]
 fn browses_history_directly_without_moving_the_cursor_first() {
+    let _lock = global_state_lock();
     let mut user = KeybindingsConfig::new();
     user.insert(ids::EDITOR_HISTORY_PREVIOUS, "ctrl+p");
     user.insert(ids::EDITOR_HISTORY_NEXT, "ctrl+n");

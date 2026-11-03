@@ -1,7 +1,7 @@
 //! Port of upstream `layout.test.ts` ("viewport layout"): scroll views and scrollbars.
 
-mod layout_common;
-mod support;
+use crate::layout_common;
+use crate::support;
 
 use std::rc::Rc;
 use std::time::Duration;

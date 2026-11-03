@@ -1,12 +1,13 @@
 //! Ports of the upstream editor tests: Unicode editing, word movement, and scroll indicators.
 //! Cursor columns are byte offsets, so expected columns are written as prefix lengths.
 
-mod editor_common;
+use crate::editor_common;
 
 use std::rc::Rc;
 
 use editor_common::{cursor, default_theme, editor, editor_with, type_text};
 use pi_tui::components::editor::{EditorOptions, EditorTheme};
+use pi_tui::env::global_state_lock;
 use pi_tui::{strip_terminal_sequences, visible_width};
 
 const LEFT: &str = "\x1b[D";
@@ -83,6 +84,7 @@ fn ctrl_a_moves_to_start() {
 
 #[test]
 fn deletes_words_with_ctrl_w_and_alt_backspace() {
+    let _lock = global_state_lock();
     let editor = editor();
     for (text, expected) in [
         ("foo bar baz", "foo bar "),
@@ -233,6 +235,8 @@ fn custom_border_renderer_replaces_the_top_border() {
 }
 
 const CTRL_W: &str = "\x17";
+// Legacy Alt sequences parse only while the Kitty flag is off. Tests that send them hold the
+// global state lock, because the keys tests set the flag while they hold it.
 const ALT_D: &str = "\x1bd";
 
 #[test]
@@ -253,6 +257,7 @@ fn moves_over_japanese_and_thai_dictionary_words() {
 
 #[test]
 fn deletes_cjk_and_thai_words() {
+    let _lock = global_state_lock();
     let editor = editor();
     editor.set_text("中华人民共和国。ฉันชอบกิน");
     for expected in ["中华人民共和国。ฉันชอบ", "中华人民共和国。ฉัน", "中华人民共和国。", "中华人民共和国", "中华人民"]

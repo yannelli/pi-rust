@@ -1,7 +1,7 @@
 //! Port of the OSC 8 link, OSC 52, and injected copy cases of upstream `test/tui-alt-screen.test.ts`.
 
-mod alt_select_common;
-mod support;
+use crate::alt_select_common;
+use crate::support;
 
 use std::cell::RefCell;
 use std::rc::Rc;

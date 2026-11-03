@@ -1,7 +1,7 @@
 //! Port of upstream `tui-alt-screen.test.ts`: transcript search matching, the match index, and
 //! the search box rendering.
 
-mod alt_view_common;
+use crate::alt_view_common;
 
 use std::rc::Rc;
 

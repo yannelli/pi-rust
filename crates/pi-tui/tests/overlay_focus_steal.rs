@@ -1,7 +1,7 @@
 //! Port of upstream `test/overlay-non-capturing.test.ts`, "focus management": base focus steals,
 //! restore eligibility, and focus restore through overlay removals.
 
-mod overlay_common;
+use crate::overlay_common;
 
 use std::cell::Cell;
 use std::rc::Rc;

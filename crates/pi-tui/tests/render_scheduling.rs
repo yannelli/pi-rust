@@ -1,7 +1,7 @@
 //! Port of the render scheduling, debug logging, bounded output, and crash dump cases of upstream
 //! `test/tui-render.test.ts`.
 
-mod render_common;
+use crate::render_common;
 
 use std::cell::RefCell;
 use std::rc::Rc;

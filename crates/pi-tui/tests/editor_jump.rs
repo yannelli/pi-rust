@@ -1,6 +1,6 @@
 //! Ports of the upstream editor character jump tests (Ctrl+] and Ctrl+Alt+]).
 
-mod editor_common;
+use crate::editor_common;
 
 use editor_common::{UNDO, cursor, editor};
 
