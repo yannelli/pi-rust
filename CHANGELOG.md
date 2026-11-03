@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.6] - 2026-11-02
+
+### Added
+
+- **interactive:** draw the /context grid with braille cells ([209ea32](https://github.com/yannelli/pi-rust/commit/209ea3249687c03c30ce5734093f801eed379d03))
+
 ## [0.12.5] - 2026-11-02
 
 ### Added
