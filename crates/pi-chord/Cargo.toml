@@ -49,6 +49,10 @@ tokio = { workspace = true, features = ["full", "test-util"] }
 name = "integration"
 path = "tests/main.rs"
 
+# On macOS its child can inherit a socket another test opens, so it keeps its own process.
+[[test]]
+name = "chord2_process_lock_owner"
+
 # Its own harness: the test binary is also the child host it spawns (see the file).
 [[test]]
 name = "chord2_manager_child"

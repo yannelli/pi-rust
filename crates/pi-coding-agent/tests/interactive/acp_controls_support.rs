@@ -18,12 +18,12 @@ use pi_coding_agent::settings::schema::TuiMode;
 use pi_tui::testing::VirtualTerminal;
 use serde_json::{Value, json};
 
-use crate::interactive::harness::Ui;
+use crate::harness::Ui;
 
 /// Set for the agent process, so the test below runs the fake agent.
 pub const AGENT_ENV: &str = "PI_TEST_FAKE_ACP_UI";
 pub const PROVIDER: &str = "controls-acp";
-const AGENT_TEST: &str = "acp_interactive::acp_controls::fake_acp_agent_process";
+const AGENT_TEST: &str = "acp_controls::fake_acp_agent_process";
 const DOWN: &str = "\x1b[B";
 
 static SERIAL: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync::Mutex::new(()));

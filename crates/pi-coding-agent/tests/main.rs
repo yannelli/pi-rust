@@ -3,16 +3,10 @@
 // Helpers shared by several test modules.
 mod cli_support;
 mod common;
-#[path = "../../pi-ai/tests/support/fake_acp_agent.rs"]
-mod fake_agent;
 mod offline_guard;
-mod own_process;
 mod session_fixtures;
 
 mod acp;
-mod acp_client;
-mod acp_client_controls;
-mod acp_interactive;
 mod agent_session;
 mod antigravity_interactive;
 mod branch_summary;
@@ -31,15 +25,12 @@ mod compaction_exports;
 mod compaction_recovery;
 mod compaction_summary;
 mod component_exports;
-mod crash_hook;
 mod deleted_cwd;
 mod experimental;
-mod experimental_radius;
 mod export_html;
 mod extension_markdown;
 mod extensions;
 mod interactive;
-mod interactive_keybindings;
 mod mermaid_render;
 mod project_context_exports;
 mod project_trust_store_exports;

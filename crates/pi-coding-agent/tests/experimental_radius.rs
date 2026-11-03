@@ -1,4 +1,4 @@
-//! Port of upstream `test/experimental-radius-relay.test.ts`. Each test has a process of its own: the `experimental`
+//! Port of upstream `test/experimental-radius-relay.test.ts`. It is its own test binary: the `experimental`
 //! tests mark their processes offline, and Radius auth resolution reads that mark in-process.
 //! Sockets report events on a channel, so where upstream checks right after an event, these tests wait.
 #![cfg(unix)]
@@ -138,7 +138,6 @@ fn matches_the_radius_multiplexing_envelope() {
 
 #[tokio::test]
 async fn bridges_multiplexed_host_clients_into_independent_server_connections() {
-    crate::own_process::alone!(bridges_multiplexed_host_clients_into_independent_server_connections);
     let (sockets, factory) = socket_factory();
     let received: Arc<Mutex<Vec<Vec<u8>>>> = Arc::default();
     let closes = Arc::new(AtomicUsize::new(0));
@@ -192,7 +191,6 @@ async fn bridges_multiplexed_host_clients_into_independent_server_connections() 
 // test checks the virtual time that passed.
 #[tokio::test(start_paused = true)]
 async fn reconnects_the_server_host_after_the_relay_connection_drops() {
-    crate::own_process::alone!(reconnects_the_server_host_after_the_relay_connection_drops);
     let (sockets, factory) = socket_factory();
     let statuses: Arc<Mutex<Vec<RadiusRelayHostStatus>>> = Arc::default();
     let reported = statuses.clone();
@@ -233,7 +231,6 @@ fn handlers() -> (ByteTransportHandlers, Calls) {
 
 #[tokio::test]
 async fn uses_a_raw_authenticated_web_socket_as_the_client_byte_transport() {
-    crate::own_process::alone!(uses_a_raw_authenticated_web_socket_as_the_client_byte_transport);
     let (sockets, factory) = socket_factory();
     let (handlers, (data, closes, errors)) = handlers();
     let transport_factory = create_radius_client_transport_factory(SERVER_ID.into(), token_auth(), Some(factory));
@@ -256,7 +253,6 @@ async fn uses_a_raw_authenticated_web_socket_as_the_client_byte_transport() {
 
 #[tokio::test]
 async fn reports_established_abnormal_closures_so_the_client_can_reconnect() {
-    crate::own_process::alone!(reports_established_abnormal_closures_so_the_client_can_reconnect);
     let (sockets, factory) = socket_factory();
     let (handlers, (_, closes, errors)) = handlers();
     let transport_factory = create_radius_client_transport_factory(SERVER_ID.into(), token_auth(), Some(factory));
@@ -275,7 +271,6 @@ async fn reports_established_abnormal_closures_so_the_client_can_reconnect() {
 
 #[tokio::test]
 async fn reports_a_useful_error_when_the_web_socket_omits_failure_details() {
-    crate::own_process::alone!(reports_a_useful_error_when_the_web_socket_omits_failure_details);
     let (sockets, factory) = socket_factory();
     let (handlers, _) = handlers();
     let transport_factory = create_radius_client_transport_factory(SERVER_ID.into(), token_auth(), Some(factory));
@@ -356,7 +351,6 @@ impl RadiusReconnectClient for Fake {
 // Upstream advances fake timers by 1 s and then 2 s; the paused clock checks the same delays.
 #[tokio::test(start_paused = true)]
 async fn reconnects_an_established_client_and_restores_its_selected_session() {
-    crate::own_process::alone!(reconnects_an_established_client_and_restores_its_selected_session);
     let client = Arc::new(FakeClient { connected: Mutex::new(true), ..FakeClient::default() });
     let reattached: Arc<Mutex<Vec<String>>> = Arc::default();
     let record = reattached.clone();

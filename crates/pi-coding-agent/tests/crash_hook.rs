@@ -1,11 +1,10 @@
-//! The panic hook records upstream's `uncaught_exception` crash kind. It has a process of its own,
-//! since the hook is process-wide.
+//! The panic hook records upstream's `uncaught_exception` crash kind. Its own binary, since the
+//! hook is process-wide.
 
 use pi_coding_agent::diagnostics::{CrashContext, crash_log_path, install_crash_hook, read_crash_log};
 
 #[test]
 fn panics_are_recorded_as_uncaught_exceptions() {
-    crate::own_process::alone!(panics_are_recorded_as_uncaught_exceptions);
     let dir = tempfile::tempdir().unwrap();
     let path = crash_log_path(dir.path());
     let context = CrashContext::default();

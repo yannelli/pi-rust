@@ -33,7 +33,6 @@ mod chord2_manager;
 mod chord2_placement;
 mod chord2_principals;
 mod chord2_process_lock;
-mod chord2_process_lock_owner;
 mod chord2_provider_cost;
 mod chord2_publish;
 mod chord2_readiness;

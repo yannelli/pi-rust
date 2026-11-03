@@ -1,6 +1,5 @@
-//! A socket-file lock owner in another process (upstream `processLock` in `manager.ts`). Under `cargo test` the
-//! child it spawns can inherit a socket another test creates at the same time (macOS sets close-on-exec late);
-//! nextest runs each test in its own process, so CI does not see that.
+//! A socket-file lock owner in another process (upstream `processLock` in `manager.ts`). Its own binary: the
+//! child it spawns can inherit a socket another test creates at the same time (macOS sets close-on-exec late).
 #![cfg(all(unix, not(target_os = "solaris")))]
 
 use std::path::Path;
@@ -45,8 +44,7 @@ async fn an_owner_in_another_process_protects_a_socket_not_yet_bound() {
     let owner = std::fs::OpenOptions::new().read(true).write(true).create_new(true).mode(0o600).open(path).unwrap();
     flock(&owner, FlockOperation::NonBlockingLockExclusive).unwrap();
     let mut child = Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "chord2_process_lock_owner::an_owner_in_another_process_protects_a_socket_not_yet_bound"])
-        .arg("--nocapture")
+        .args(["--exact", "an_owner_in_another_process_protects_a_socket_not_yet_bound", "--nocapture"])
         .env(CHILD_DIR, dir.path())
         .stdout(Stdio::null())
         .stderr(Stdio::inherit())

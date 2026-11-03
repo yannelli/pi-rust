@@ -1,9 +1,13 @@
 //! pi as an ACP client end to end: a session whose model is the fake ACP agent of pi-ai, which
 //! this test binary runs when started with [`AGENT_ENV`].
 
-use crate::agent_session::mcp_fake;
-use crate::fake_agent;
-use crate::offline_guard;
+#[path = "../../pi-ai/tests/support/fake_acp_agent.rs"]
+mod fake_agent;
+#[path = "agent_session/mcp_fake.rs"]
+#[allow(dead_code)]
+mod mcp_fake;
+#[path = "offline_guard/mod.rs"]
+mod offline_guard;
 
 use std::sync::Arc;
 
@@ -19,7 +23,7 @@ use pi_coding_agent::settings::SettingsManager;
 use serde_json::json;
 
 const AGENT_ENV: &str = "PI_TEST_FAKE_ACP_AGENT";
-const TEST_NAME: &str = "acp_client::fake_acp_agent_process";
+const TEST_NAME: &str = "fake_acp_agent_process";
 
 /// The fake agent, when this binary runs as one; a no-op test otherwise.
 #[test]
@@ -40,7 +44,6 @@ fn last_reply(session: &AgentSession) -> String {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn acp_turns_undo_agent_edits_and_survive_compaction() {
-    crate::own_process::alone!(acp_turns_undo_agent_edits_and_survive_compaction);
     let root = tempfile::tempdir().unwrap();
     let (cwd, agent_dir) = (root.path().join("work"), root.path().join("agent"));
     std::fs::create_dir_all(&cwd).unwrap();
