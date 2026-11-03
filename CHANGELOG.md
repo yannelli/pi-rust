@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.5] - 2026-11-02
+
+### Added
+
+- **interactive:** show /context usage as a dot grid ([eae35ee](https://github.com/yannelli/pi-rust/commit/eae35eed3c80a4d5a89ecb58cad621c16cae523d))
+
 ## [0.12.4] - 2026-11-02
 
 ### Added
