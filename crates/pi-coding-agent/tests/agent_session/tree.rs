@@ -17,7 +17,7 @@ use pi_coding_agent::agent_session::NavigateTreeOptions;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use crate::harness::{Harness, Options, harness, roles};
+use crate::agent_session::harness::{Harness, Options, harness, roles};
 
 /// Session entry ids of user messages, in order.
 fn user_entry_ids(h: &Harness) -> Vec<String> {
@@ -67,7 +67,7 @@ async fn summarizes_the_abandoned_branch_with_custom_instructions() {
     let result = h.session.navigate_tree(&second, options).await.unwrap();
     let summary_id = result.summary_entry_id.clone().unwrap();
     let request = h.requests().pop().unwrap();
-    let prompt = crate::harness::text(request.messages.last().unwrap());
+    let prompt = crate::agent_session::harness::text(request.messages.last().unwrap());
     assert!(prompt.contains("Mention the answers"), "{prompt}");
 
     let entries = h.entries();

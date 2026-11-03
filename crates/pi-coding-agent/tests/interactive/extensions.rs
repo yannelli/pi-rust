@@ -3,7 +3,7 @@
 
 use pi_ai::providers::faux::FauxResponse;
 
-use crate::harness::{Options, Watchdog, local, start};
+use crate::interactive::harness::{Options, Watchdog, local, start};
 
 /// How long a native interactive test may run before the watchdog ends the test process.
 const NATIVE_LIMIT: std::time::Duration = std::time::Duration::from_secs(90);
@@ -274,7 +274,7 @@ async fn native_auth_login_runs_the_login_dialog_of_pi() {
         let ui = start(Options { files, oauth: Some(oauth), ..Options::default() }).await;
         ui.submit("/native-oauth").await;
         ui.submit("/native-login").await;
-        let login = |ui: &crate::harness::Ui| {
+        let login = |ui: &crate::interactive::harness::Ui| {
             let session = ui.session();
             let manager = session.session_manager();
             let entries = manager.entries();
@@ -360,7 +360,7 @@ async fn context_breakdown_lists_the_parts_of_the_next_request() {
         })
         .await;
         ui.submit("hi").await;
-        let has_entry = |ui: &crate::harness::Ui| {
+        let has_entry = |ui: &crate::interactive::harness::Ui| {
             ui.session().session_manager().entries().iter().any(|entry| entry_type(entry) == Some("breakdown"))
         };
         ui.wait_until("the breakdown entry", has_entry).await;

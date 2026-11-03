@@ -1,7 +1,7 @@
 //! Upstream interactive components from `@earendil-works/pi-coding-agent` in `ctx.ui.custom`: they
 //! draw in the Rust terminal, take keys, and resolve the custom call.
 
-use crate::harness::{Options, Ui, local, start};
+use crate::interactive::harness::{Options, Ui, local, start};
 
 const EXTENSION: &str = r#"import { AssistantMessageComponent, ExtensionInputComponent, ExtensionSelectorComponent } from "@earendil-works/pi-coding-agent";
 export default function (pi) {

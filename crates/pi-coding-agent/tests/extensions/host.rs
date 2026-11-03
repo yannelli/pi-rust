@@ -11,7 +11,7 @@ use pi_coding_agent::extensions::InlineExtension;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use crate::harness::{Setup, harness};
+use crate::extensions::harness::{Setup, harness};
 
 struct Shout;
 

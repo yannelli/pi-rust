@@ -1,11 +1,7 @@
 //! The 609 oracle cases of upstream `SettingsManager` (earendil-works/pi 35dfa757), replayed against
 //! pi-rust's SDK `SettingsManager` and compared with the golden the authentic upstream class wrote.
 
-#[path = "extensions/harness.rs"]
-#[allow(dead_code)]
-mod harness;
-#[path = "offline_guard/mod.rs"]
-mod offline_guard;
+use crate::extensions::harness;
 
 use harness::{Setup, harness};
 use serde::Serialize;

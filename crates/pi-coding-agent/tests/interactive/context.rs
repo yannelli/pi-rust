@@ -2,7 +2,7 @@
 
 use pi_ai::providers::faux::FauxResponse;
 
-use crate::harness::{Options, local, start};
+use crate::interactive::harness::{Options, local, start};
 
 const CATEGORIES: [&str; 10] = [
     "System prompt",

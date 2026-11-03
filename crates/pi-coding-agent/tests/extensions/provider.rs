@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use pi_ai::auth::{AuthEvent, AuthInteraction, AuthPrompt, AuthResult, AuthType, Credential, LoginOptions};
 use tokio_util::sync::CancellationToken;
 
-use crate::harness::{Setup, example, harness};
+use crate::extensions::harness::{Setup, example, harness};
 
 /// A stand-in for `@anthropic-ai/sdk` that streams one fixed text answer.
 const FAKE_ANTHROPIC_SDK: &str = r#"

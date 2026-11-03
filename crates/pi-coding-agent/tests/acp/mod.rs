@@ -1,15 +1,8 @@
 //! ACP mode end to end: a scripted ACP client drives `serve_acp` over a byte stream against
 //! the faux provider, and `pi --mode acp` over real stdio against a local mock server.
 
-#[path = "../cli_support/mod.rs"]
-mod cli_support;
-#[path = "../agent_session/http_mock.rs"]
-mod http_mock;
-#[path = "../agent_session/mcp_fake.rs"]
-#[allow(dead_code)]
-mod mcp_fake;
-#[path = "../offline_guard/mod.rs"]
-mod offline_guard;
+use crate::agent_session::{http_mock, mcp_fake};
+use crate::offline_guard;
 
 mod binary;
 mod client;

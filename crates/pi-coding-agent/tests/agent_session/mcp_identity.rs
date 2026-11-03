@@ -4,9 +4,9 @@
 use pi_coding_agent::agent_session::ToolSource;
 use serde_json::json;
 
-use crate::mcp_fake::FakeOptions;
-use crate::tool_registry::tool;
-use crate::tool_support::{SetupOptions, setup};
+use crate::agent_session::mcp_fake::FakeOptions;
+use crate::agent_session::tool_registry::tool;
+use crate::agent_session::tool_support::{SetupOptions, setup};
 
 const SEARCH: &str = "mcp__docs__search";
 
@@ -19,7 +19,7 @@ async fn only_the_managers_own_server_tools_have_an_identity() {
     let fake = FakeOptions { resources: true, ..FakeOptions::default() };
     let s = setup(json!({ "exposure": "direct" }), SetupOptions { fake, ..SetupOptions::default() }).await;
     let session = &s.h.session;
-    crate::harness::wait_until(|| session.tool("list_mcp_resources").is_some()).await;
+    crate::agent_session::harness::wait_until(|| session.tool("list_mcp_resources").is_some()).await;
     assert_eq!(session.mcp_tool_identity(&session.tool(SEARCH).unwrap()), docs_search());
     assert_eq!(session.mcp_tool_identity(&session.tool("list_mcp_resources").unwrap()), None);
     assert_eq!(session.mcp_tool_identity(&tool("mcp__docs__search", true)), None);

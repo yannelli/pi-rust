@@ -1,7 +1,6 @@
 //! `pi stats` through the binary, on session files written into a temporary agent directory.
 
-mod cli_support;
-mod session_fixtures;
+use crate::session_fixtures;
 
 use serde_json::{Value, json};
 use session_fixtures::*;

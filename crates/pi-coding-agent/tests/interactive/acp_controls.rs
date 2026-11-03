@@ -1,15 +1,14 @@
 //! ACP agent controls on the virtual terminal before the first prompt: discovery at startup, `/model`,
 //! `/acp mode`, and `/thinking`, against the local fake agent with numeric effort values.
 
-#[path = "../../../pi-ai/tests/support/fake_acp_agent.rs"]
-mod fake_agent;
+use crate::fake_agent;
 #[path = "acp_controls_support.rs"]
 mod support;
 
 use pi_ai::ThinkingLevel;
 use support::{AGENT_ENV, choose, has_reply, remote_value, serialize, shut_down, start_acp, wait_discovered};
 
-use crate::harness::{Ui, local};
+use crate::interactive::harness::{Ui, local};
 
 /// The agent process: this binary started with `AGENT_ENV` set runs only this test.
 #[test]
@@ -26,6 +25,7 @@ async fn wait_thinking_levels(ui: &Ui) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn startup_discovers_the_agent_models_and_model_lists_them_before_a_prompt() {
+    crate::own_process::alone!(startup_discovers_the_agent_models_and_model_lists_them_before_a_prompt);
     local(async {
         let _serial = serialize().await;
         let ui = start_acp(None).await;
@@ -47,6 +47,7 @@ async fn startup_discovers_the_agent_models_and_model_lists_them_before_a_prompt
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn acp_mode_sets_the_exact_permission_before_a_prompt_that_reuses_the_session() {
+    crate::own_process::alone!(acp_mode_sets_the_exact_permission_before_a_prompt_that_reuses_the_session);
     local(async {
         let _serial = serialize().await;
         let ui = start_acp(None).await;
@@ -72,6 +73,7 @@ async fn acp_mode_sets_the_exact_permission_before_a_prompt_that_reuses_the_sess
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn thinking_high_sets_effort_three_before_a_prompt_and_the_selector_keeps_it() {
+    crate::own_process::alone!(thinking_high_sets_effort_three_before_a_prompt_and_the_selector_keeps_it);
     local(async {
         let _serial = serialize().await;
         let ui = start_acp(None).await;
@@ -103,6 +105,7 @@ async fn thinking_high_sets_effort_three_before_a_prompt_and_the_selector_keeps_
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn thinking_shortcut_sets_the_agent_level_before_saving_it() {
+    crate::own_process::alone!(thinking_shortcut_sets_the_agent_level_before_saving_it);
     local(async {
         let _serial = serialize().await;
         let ui = start_acp(None).await;
@@ -123,6 +126,7 @@ async fn thinking_shortcut_sets_the_agent_level_before_saving_it() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_unsupported_thinking_level_changes_nothing() {
+    crate::own_process::alone!(an_unsupported_thinking_level_changes_nothing);
     local(async {
         let _serial = serialize().await;
         let ui = start_acp(None).await;
@@ -141,6 +145,7 @@ async fn an_unsupported_thinking_level_changes_nothing() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_agent_that_cannot_start_shows_one_error_per_command_and_changes_nothing() {
+    crate::own_process::alone!(an_agent_that_cannot_start_shows_one_error_per_command_and_changes_nothing);
     local(async {
         let _serial = serialize().await;
         let ui = start_acp(Some("/nonexistent/pi-fake-acp-agent")).await;

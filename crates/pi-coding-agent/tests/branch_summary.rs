@@ -1,7 +1,7 @@
 //! Branch summaries and tree navigation, ported from upstream `branch-summarization.test.ts`
 //! and `agent-session-tree-navigation.test.ts`, using the faux provider.
 
-mod common;
+use crate::common;
 
 use std::sync::{Arc, Mutex};
 

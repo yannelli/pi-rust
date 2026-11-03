@@ -6,8 +6,8 @@ use pi_coding_agent::extensions::rpc::ExtensionRpcHost;
 use pi_coding_agent::rpc::RpcModeOptions;
 use serde_json::{Value, json};
 
-use crate::harness::Options;
-use crate::support::{Rpc, start_with};
+use crate::rpc::harness::Options;
+use crate::rpc::support::{Rpc, start_with};
 
 const EXTENSION: &str = r#"export default function (pi) {
 	pi.on("input", (event, ctx) => { ctx.ui.notify(`source ${event.source}`); });

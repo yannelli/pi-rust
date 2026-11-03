@@ -4,7 +4,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use crate::harness::{Options, Ui, local, start};
+use crate::interactive::harness::{Options, Ui, local, start};
 
 fn git_available() -> bool {
     Command::new("git").arg("--version").output().is_ok_and(|output| output.status.success())

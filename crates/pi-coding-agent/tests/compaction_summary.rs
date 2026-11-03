@@ -1,7 +1,7 @@
 //! Summary generation with the faux provider: compaction prompts, split turns, file lists,
 //! stored usage, failures, and the summarization retry.
 
-mod common;
+use crate::common;
 
 use std::sync::{Arc, Mutex};
 

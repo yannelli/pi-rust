@@ -3,8 +3,8 @@
 
 use serde_json::{Value, json};
 
-use crate::harness::{Harness, Setup, eventually, harness};
-use crate::mcp_fake::{Fake, FakeOptions};
+use crate::extensions::harness::{Harness, Setup, eventually, harness};
+use crate::extensions::mcp_fake::{Fake, FakeOptions};
 
 const RECORDER: &str = r#"export default function (pi) {
 	pi.on("mcp_elicitation", (event, ctx) => {

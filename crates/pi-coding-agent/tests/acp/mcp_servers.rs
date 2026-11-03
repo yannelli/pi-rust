@@ -9,8 +9,8 @@ use pi_mcp::runtime::TransportFactory;
 use pi_mcp::{McpConfigScope, McpServerEntry};
 use serde_json::{Value, json};
 
-use crate::mcp_fake::{Fake, FakeOptions};
-use crate::{Setup, setup, setup_with_models, start};
+use crate::acp::mcp_fake::{Fake, FakeOptions};
+use crate::acp::{Setup, setup, setup_with_models, start};
 
 const SECRET: &str = "SENTINEL_ACP_9c1e";
 

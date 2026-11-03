@@ -8,7 +8,7 @@ use pi_coding_agent::tools::{ShellSpawnContext, ToolsOptions};
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
-use crate::harness::{Options, harness_with};
+use crate::agent_session::harness::{Options, harness_with};
 
 type Seen = Arc<Mutex<Vec<ShellSpawnContext>>>;
 

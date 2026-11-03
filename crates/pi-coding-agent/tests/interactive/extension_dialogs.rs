@@ -3,7 +3,7 @@
 
 use pi_tui::program_status::{BlockedKind, ProgramState};
 
-use crate::harness::{Options, Ui, local, start};
+use crate::interactive::harness::{Options, Ui, local, start};
 
 const EXTENSION: &str = r#"import { Text } from "@earendil-works/pi-tui";
 export default function (pi) {

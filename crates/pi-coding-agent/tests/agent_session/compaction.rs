@@ -8,7 +8,7 @@ use pi_ai::{
 use pi_coding_agent::session::SessionManager;
 use serde_json::{Value, json};
 
-use crate::harness::{Options, harness, open_session, record, roles, text};
+use crate::agent_session::harness::{Options, harness, open_session, record, roles, text};
 
 const SUMMARY: &str = "## Goal\nSummarized";
 

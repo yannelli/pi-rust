@@ -1,14 +1,7 @@
 //! SDK storage exports for extensions: `SessionManager` JSONL round trips, `SettingsManager` file
 //! reads and writes, `DefaultResourceLoader` system prompts, and `ModelRuntime.create`.
 
-#[path = "extensions/harness.rs"]
-#[allow(dead_code)]
-mod harness;
-#[path = "agent_session/mcp_fake.rs"]
-#[allow(dead_code)]
-mod mcp_fake;
-#[path = "offline_guard/mod.rs"]
-mod offline_guard;
+use crate::extensions::harness;
 
 use harness::{Harness, Setup, harness};
 use pi_coding_agent::session::SessionManager;

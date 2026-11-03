@@ -1,0 +1,63 @@
+//! The integration tests of pi-coding-agent, in one test binary: each module was its own binary.
+
+// Helpers shared by several test modules.
+mod cli_support;
+mod common;
+#[path = "../../pi-ai/tests/support/fake_acp_agent.rs"]
+mod fake_agent;
+mod offline_guard;
+mod own_process;
+mod session_fixtures;
+
+mod acp;
+mod acp_client;
+mod acp_client_controls;
+mod acp_interactive;
+mod agent_session;
+mod antigravity_interactive;
+mod branch_summary;
+mod cli;
+mod cli_completion;
+mod cli_doctor;
+mod cli_mcp;
+mod cli_output_schema;
+mod cli_run_limits;
+mod cli_session;
+mod cli_sessions;
+mod cli_stats;
+mod cli_update;
+mod compaction_cut;
+mod compaction_exports;
+mod compaction_recovery;
+mod compaction_summary;
+mod component_exports;
+mod crash_hook;
+mod deleted_cwd;
+mod experimental;
+mod experimental_radius;
+mod export_html;
+mod extension_markdown;
+mod extensions;
+mod interactive;
+mod interactive_keybindings;
+mod mermaid_render;
+mod project_context_exports;
+mod project_trust_store_exports;
+mod rpc;
+mod sdk_child_session;
+mod sdk_model_runtime;
+mod sdk_resources;
+mod sdk_session;
+mod sdk_settings_child;
+mod sdk_settings_replay;
+mod sdk_storage;
+mod sdk_utilities;
+mod session_context;
+mod session_files;
+mod session_format;
+mod session_listing;
+mod session_tree;
+mod session_write_failure;
+mod theme_tui;
+mod trust_resources_exports;
+mod tui_viewport_exports;

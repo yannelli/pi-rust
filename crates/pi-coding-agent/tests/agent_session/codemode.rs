@@ -17,9 +17,9 @@ use regex::Regex;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use crate::harness::{Harness, Options, harness_with};
-use crate::mcp_fake::TINY_PNG;
-use crate::tool_support::{declared_description, tool_result};
+use crate::agent_session::harness::{Harness, Options, harness_with};
+use crate::agent_session::mcp_fake::TINY_PNG;
+use crate::agent_session::tool_support::{declared_description, tool_result};
 
 pub struct TestTool {
     name: &'static str,

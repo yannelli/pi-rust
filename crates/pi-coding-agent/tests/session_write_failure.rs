@@ -2,7 +2,7 @@
 //! failed write must not leave later entries pointing to a missing parent.
 #![cfg(unix)]
 
-mod common;
+use crate::common;
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;

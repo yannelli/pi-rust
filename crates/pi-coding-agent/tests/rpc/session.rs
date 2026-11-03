@@ -4,8 +4,8 @@
 use pi_ai::providers::faux::FauxResponse;
 use serde_json::{Value, json};
 
-use crate::harness::Options;
-use crate::support::{Rpc, start};
+use crate::rpc::harness::Options;
+use crate::rpc::support::{Rpc, start};
 
 async fn prompt(rpc: &mut Rpc, id: &str, message: &str, settled: usize) {
     let data = rpc.data(json!({"id": id, "type": "prompt", "message": message})).await;

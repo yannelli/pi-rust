@@ -1,9 +1,7 @@
 //! Initial ACP discovery, mapped thinking, permission selectors, and cleanup through a real pi session.
 
-#[path = "../../pi-ai/tests/support/fake_acp_agent.rs"]
-mod fake_agent;
-#[path = "offline_guard/mod.rs"]
-mod offline_guard;
+use crate::fake_agent;
+use crate::offline_guard;
 
 use std::sync::Arc;
 
@@ -19,7 +17,7 @@ use pi_coding_agent::settings::SettingsManager;
 use serde_json::json;
 
 const AGENT_ENV: &str = "PI_TEST_FAKE_ACP_CONTROLS";
-const TEST_NAME: &str = "fake_acp_agent_process";
+const TEST_NAME: &str = "acp_client_controls::fake_acp_agent_process";
 
 #[test]
 fn fake_acp_agent_process() {
@@ -30,6 +28,7 @@ fn fake_acp_agent_process() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn discovery_and_controls_work_before_the_first_prompt() {
+    crate::own_process::alone!(discovery_and_controls_work_before_the_first_prompt);
     let root = tempfile::tempdir().unwrap();
     let (cwd, agent_dir) = (root.path().join("work"), root.path().join("agent"));
     std::fs::create_dir_all(&cwd).unwrap();

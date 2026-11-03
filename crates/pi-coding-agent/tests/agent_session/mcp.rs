@@ -7,8 +7,8 @@ use pi_ai::ContentBlock;
 use pi_ai::providers::faux::FauxResponse;
 use serde_json::{Value, json};
 
-use crate::mcp_fake::{FakeOptions, TINY_PNG};
-use crate::tool_support::{
+use crate::agent_session::mcp_fake::{FakeOptions, TINY_PNG};
+use crate::agent_session::tool_support::{
     SetupOptions, declared_description, declared_tool_names, last_line, result_text, setup, tool_result,
 };
 
@@ -19,7 +19,10 @@ async fn keeps_mcp_tools_when_tools_names_no_mcp_tool() {
         let options = SetupOptions { tools: Some(vec!["read", "codemode"]), fake, ..SetupOptions::default() };
         let s = setup(json!({ "exposure": exposure }), options).await;
         let session = &s.h.session;
-        crate::harness::wait_until(|| session.callable_tool_names().contains(&"read_mcp_resource".to_string())).await;
+        crate::agent_session::harness::wait_until(|| {
+            session.callable_tool_names().contains(&"read_mcp_resource".to_string())
+        })
+        .await;
         assert_eq!(session.active_tool_names(), ["read", "codemode"]);
         let callable = session.callable_tool_names();
         for name in ["mcp__docs__search", "mcp__docs__fail", "list_mcp_resources", "read_mcp_resource"] {
@@ -31,7 +34,10 @@ async fn keeps_mcp_tools_when_tools_names_no_mcp_tool() {
     // A direct MCP tool stays registered but is declared only when --tools names it.
     let options = SetupOptions { tools: Some(vec!["codemode"]), ..SetupOptions::default() };
     let s = setup(json!({ "exposure": "codemode", "toolExposure": { "fail": "direct" } }), options).await;
-    crate::harness::wait_until(|| s.h.session.all_tools().iter().any(|tool| tool.name == "mcp__docs__fail")).await;
+    crate::agent_session::harness::wait_until(|| {
+        s.h.session.all_tools().iter().any(|tool| tool.name == "mcp__docs__fail")
+    })
+    .await;
     assert_eq!(s.h.session.active_tool_names(), ["codemode"]);
 }
 
@@ -53,7 +59,7 @@ async fn filters_mcp_tools_by_the_mcp_entries_of_tools() {
     let options = SetupOptions { tools: Some(vec!["codemode", "mcp__docs__s*"]), fake, ..SetupOptions::default() };
     let s = setup(json!({ "exposure": "codemode", "toolExposure": { "shot": "direct" } }), options).await;
     let session = &s.h.session;
-    crate::harness::wait_until(|| session.active_tool_names() == ["codemode", "mcp__docs__shot"]).await;
+    crate::agent_session::harness::wait_until(|| session.active_tool_names() == ["codemode", "mcp__docs__shot"]).await;
     let registered: Vec<String> = session.all_tools().into_iter().map(|tool| tool.name).collect();
     assert!(registered.contains(&"mcp__docs__search".into()) && registered.contains(&"mcp__docs__shot".into()));
     assert!(!registered.contains(&"mcp__docs__fail".into()) && !registered.contains(&"list_mcp_resources".into()));
@@ -165,7 +171,7 @@ async fn withdraws_and_restores_mcp_tools_the_server_changes() {
         };
         assert!(reachable().contains(&"mcp__docs__fail".to_string()));
 
-        let without_fail: Vec<Value> = crate::mcp_fake::server_tools()
+        let without_fail: Vec<Value> = crate::agent_session::mcp_fake::server_tools()
             .as_array()
             .unwrap()
             .iter()
@@ -174,14 +180,14 @@ async fn withdraws_and_restores_mcp_tools_the_server_changes() {
             .collect();
         *s.fake.tools.lock().unwrap() = Value::Array(without_fail);
         s.fake.list_changed().await;
-        crate::harness::wait_until(|| !reachable().contains(&"mcp__docs__fail".to_string())).await;
+        crate::agent_session::harness::wait_until(|| !reachable().contains(&"mcp__docs__fail".to_string())).await;
         assert!(reachable().contains(&"mcp__docs__search".to_string()));
         let description = declared_description(&s.h.session, "codemode").unwrap_or_default();
         assert!(!description.contains("mcp__docs__fail"));
 
-        *s.fake.tools.lock().unwrap() = crate::mcp_fake::server_tools();
+        *s.fake.tools.lock().unwrap() = crate::agent_session::mcp_fake::server_tools();
         s.fake.list_changed().await;
-        crate::harness::wait_until(|| reachable().contains(&"mcp__docs__fail".to_string())).await;
+        crate::agent_session::harness::wait_until(|| reachable().contains(&"mcp__docs__fail".to_string())).await;
     }
 }
 
@@ -190,7 +196,10 @@ async fn lists_and_reads_resources_with_the_resource_tools() {
     let fake = FakeOptions { resources: true, ..FakeOptions::default() };
     let s = setup(json!({ "exposure": "direct" }), SetupOptions { fake, ..SetupOptions::default() }).await;
     let session = &s.h.session;
-    crate::harness::wait_until(|| session.active_tool_names().contains(&"read_mcp_resource".to_string())).await;
+    crate::agent_session::harness::wait_until(|| {
+        session.active_tool_names().contains(&"read_mcp_resource".to_string())
+    })
+    .await;
     s.h.provider.push(FauxResponse::tool_calls(&[
         ("r1", "list_mcp_resources", json!({})),
         ("r2", "list_mcp_resource_templates", json!({ "server": "docs" })),
@@ -223,7 +232,10 @@ async fn lists_and_reads_resources_with_the_resource_tools() {
 async fn makes_the_resource_tools_callable_from_codemode_for_codemode_servers() {
     let fake = FakeOptions { resources: true, ..FakeOptions::default() };
     let s = setup(json!({ "exposure": "codemode" }), SetupOptions { fake, ..SetupOptions::default() }).await;
-    crate::harness::wait_until(|| s.h.session.callable_tool_names().contains(&"read_mcp_resource".into())).await;
+    crate::agent_session::harness::wait_until(|| {
+        s.h.session.callable_tool_names().contains(&"read_mcp_resource".into())
+    })
+    .await;
     let code = r#"const listed = await tools.list_mcp_resources({ server: "docs" });
 const read = await tools.read_mcp_resource({ server: "docs", uri: listed.resources[0].uri });
 return { uris: listed.resources.map((r) => r.uri), text: read.contents[0].text };"#;
@@ -242,7 +254,8 @@ async fn applies_per_tool_exposure_overrides() {
     let config = json!({ "exposure": "hidden", "toolExposure": { "search": "direct", "s*": "codemode" } });
     let options = SetupOptions { wait_for_tools: false, ..SetupOptions::default() };
     let s = setup(config, options).await;
-    crate::harness::wait_until(|| s.h.session.active_tool_names().contains(&"mcp__docs__search".into())).await;
+    crate::agent_session::harness::wait_until(|| s.h.session.active_tool_names().contains(&"mcp__docs__search".into()))
+        .await;
     s.h.provider.push(FauxResponse::text("ready"));
     s.h.session.prompt("start", Vec::new()).await.unwrap();
 

@@ -1,6 +1,6 @@
 //! End-to-end runs of the `pi` binary against a local OpenAI-compatible server.
 
-mod cli_support;
+use crate::cli_support;
 
 use serde_json::{Value, json};
 
@@ -438,7 +438,7 @@ fn isolation_probe() {
 #[test]
 fn spawned_pi_does_not_inherit_provider_credentials() {
     let output = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "isolation_probe", "--nocapture", "--test-threads=1"])
+        .args(["--exact", "cli::isolation_probe", "--nocapture", "--test-threads=1"])
         .env(ISOLATION_PROBE, "1")
         .env("OPENAI_API_KEY", FAKE_OPENAI_KEY)
         .env("AWS_ACCESS_KEY_ID", "AKIATESTFAKE")
@@ -447,5 +447,5 @@ fn spawned_pi_does_not_inherit_provider_credentials() {
         .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success(), "{stdout}{}", String::from_utf8_lossy(&output.stderr));
-    assert!(stdout.contains("test isolation_probe ... ok"), "the probe ran: {stdout}");
+    assert!(stdout.contains("test cli::isolation_probe ... ok"), "the probe ran: {stdout}");
 }

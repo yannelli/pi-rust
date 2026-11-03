@@ -10,9 +10,9 @@ use pi_coding_agent::agent_session::NavigateTreeOptions;
 use pi_coding_agent::session::SessionManager;
 use serde_json::json;
 
-use crate::harness::{open_session_with, wait_until};
-use crate::mcp_fake::{Fake, FakeOptions};
-use crate::tool_support::{SetupOptions, declared_description, result_text, setup, tool_result};
+use crate::agent_session::harness::{open_session_with, wait_until};
+use crate::agent_session::mcp_fake::{Fake, FakeOptions};
+use crate::agent_session::tool_support::{SetupOptions, declared_description, result_text, setup, tool_result};
 
 fn load_responses(provider: &pi_ai::providers::faux::FauxProvider) {
     provider.push(FauxResponse::tool_call("t1", "tool_search", json!({ "query": "search the docs", "limit": 1 })));
@@ -101,7 +101,7 @@ async fn rejects_empty_queries_and_bad_limits() {
 /// A second session over the stored file of `first`, restoring its tools, with a server that
 /// answers `initialize` after `delay`.
 async fn resume(
-    first: &crate::tool_support::Setup,
+    first: &crate::agent_session::tool_support::Setup,
     delay: Duration,
 ) -> (std::sync::Arc<pi_coding_agent::agent_session::AgentSession>, Fake) {
     let fake = Fake::new(FakeOptions { initialize_delay: Some(delay), ..FakeOptions::default() });

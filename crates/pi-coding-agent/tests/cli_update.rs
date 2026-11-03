@@ -1,9 +1,8 @@
 //! `pi update --models` against a local catalog server, `pi update --self` against a local
 //! GitHub release server, and `PI_TIMING`, all through the binary.
 
-mod cli_support;
-#[path = "agent_session/http_mock.rs"]
-mod http_mock;
+use crate::agent_session::http_mock;
+use crate::cli_support;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};

@@ -3,8 +3,8 @@
 
 use serde_json::{Value, json};
 
-use crate::harness::Options;
-use crate::support::start;
+use crate::rpc::harness::Options;
+use crate::rpc::support::start;
 
 /// `provider/id` of the `local` models; credentials in the environment can add others.
 fn local_ids(models: &Value) -> Vec<String> {

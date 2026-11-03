@@ -3,7 +3,7 @@
 use pi_tui::Component;
 use serde_json::json;
 
-use crate::harness::{Setup, harness};
+use crate::extensions::harness::{Setup, harness};
 
 const SOURCE: &str = r#"
 import { SelectList } from "@earendil-works/pi-tui";

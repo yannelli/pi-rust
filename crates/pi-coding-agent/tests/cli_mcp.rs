@@ -1,7 +1,7 @@
 //! `pi mcp` through the binary: servers added with `pi mcp add` connect in `pi mcp list` and
 //! give print mode their tools, `--no-mcp` leaves them out, and `pi mcp remove` drops them.
 
-mod cli_support;
+use crate::cli_support;
 
 #[cfg(unix)]
 mod unix {

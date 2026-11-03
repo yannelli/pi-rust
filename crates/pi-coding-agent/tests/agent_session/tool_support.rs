@@ -7,8 +7,8 @@ use pi_ai::{ContentBlock, Message, ToolResultMessage};
 use pi_coding_agent::agent_session::AgentSession;
 use serde_json::{Value, json};
 
-use crate::harness::{Harness, Options, harness_with, wait_until};
-use crate::mcp_fake::{Fake, FakeOptions};
+use crate::agent_session::harness::{Harness, Options, harness_with, wait_until};
+use crate::agent_session::mcp_fake::{Fake, FakeOptions};
 
 pub struct Setup {
     pub h: Harness,

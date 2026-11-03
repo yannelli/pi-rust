@@ -5,7 +5,7 @@ use pi_ai::providers::faux::FauxResponse;
 use pi_coding_agent::agent_session::RunLimits;
 use serde_json::json;
 
-use crate::harness::{Options, local, start};
+use crate::interactive::harness::{Options, local, start};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_turn_limit_shows_a_status_line_and_the_next_prompt_runs() {

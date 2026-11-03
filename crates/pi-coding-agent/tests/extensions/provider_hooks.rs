@@ -3,8 +3,8 @@
 
 use serde_json::json;
 
-use crate::harness::{Setup, harness};
-use crate::http_mock::{Reply, Server};
+use crate::extensions::harness::{Setup, harness};
+use crate::extensions::http_mock::{Reply, Server};
 
 const STREAM: &str = concat!(
     "data: {\"id\":\"r1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hel\"},\"finish_reason\":null}]}\n\n",

@@ -13,7 +13,7 @@ use pi_coding_agent::extensions::{
 use pi_coding_agent::settings::SettingsManager;
 use serde_json::json;
 
-use crate::harness::{RecordingUi, Setup, harness};
+use crate::extensions::harness::{RecordingUi, Setup, harness};
 
 fn transform(suffix: &str) -> String {
     format!(
@@ -269,7 +269,7 @@ async fn queued_input_runs_input_handlers_and_refuses_extension_commands() {
     .await;
     let session = h.session.clone();
     let running = tokio::spawn(async move { session.prompt("start", Vec::new()).await });
-    crate::harness::eventually(|| h.session.is_streaming()).await;
+    crate::extensions::harness::eventually(|| h.session.is_streaming()).await;
     let queue = |text: &'static str, behavior| {
         let session = h.session.clone();
         async move { session.queue_user_input(text, Vec::new(), behavior, "rpc").await }

@@ -23,7 +23,7 @@ async fn slash_commands_are_recalled_in_full_instead_of_the_previous_prompt() {
 
 use pi_ai::providers::faux::FauxResponse;
 
-use crate::harness::{Options, local, start};
+use crate::interactive::harness::{Options, local, start};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn prompts_from_an_earlier_run_come_back_with_up_and_reverse_search() {

@@ -6,7 +6,7 @@ use pi_ai::Message;
 use pi_ai::providers::faux::FauxResponse;
 use serde_json::json;
 
-use crate::harness::{Options, harness, text, wait_until};
+use crate::agent_session::harness::{Options, harness, text, wait_until};
 
 #[tokio::test]
 async fn records_bash_results_and_sends_them_to_the_model() {

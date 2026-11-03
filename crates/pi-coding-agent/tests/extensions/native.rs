@@ -17,9 +17,9 @@ use pi_tui::autocomplete::{AutocompleteProvider, AutocompleteSuggestions, Sugges
 use pi_tui::{AutocompleteItem, Component};
 use serde_json::{Value, json};
 
-use crate::harness::{Harness, Setup, eventually, harness};
-use crate::http_mock::{Reply, Server};
-use crate::watchdog::Watchdog;
+use crate::extensions::harness::{Harness, Setup, eventually, harness};
+use crate::extensions::http_mock::{Reply, Server};
+use crate::extensions::watchdog::Watchdog;
 
 const NATIVE_LIMIT: std::time::Duration = std::time::Duration::from_secs(90);
 

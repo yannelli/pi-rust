@@ -1,7 +1,7 @@
 //! Ported from upstream `test/session-manager/tree-traversal.test.ts`, `labels.test.ts`,
 //! and `save-entry.test.ts`.
 
-mod common;
+use crate::common;
 
 use common::*;
 use pi_ai::ThinkingLevel;

@@ -2,7 +2,7 @@
 
 use pi_ai::providers::faux::FauxResponse;
 
-use crate::harness::{Options, local, start};
+use crate::interactive::harness::{Options, local, start};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn app_keys_cycle_thinking_and_models_and_toggle_views() {

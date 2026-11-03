@@ -13,7 +13,7 @@ use pi_coding_agent::agent_session::{ModelRuntime, ModelRuntimeOptions};
 use pi_coding_agent::config::models_path;
 use tokio_util::sync::CancellationToken;
 
-use crate::harness::{Options, harness};
+use crate::agent_session::harness::{Options, harness};
 
 /// Answers every prompt with `answer` and records what it was asked.
 struct ScriptedInteraction {

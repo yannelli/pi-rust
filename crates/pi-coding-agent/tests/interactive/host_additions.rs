@@ -3,7 +3,7 @@
 
 use pi_ai::providers::faux::FauxResponse;
 
-use crate::harness::{Options, local, start};
+use crate::interactive::harness::{Options, local, start};
 
 const EXTENSION: &str = r#"import { Text } from "@earendil-works/pi-tui";
 export default function (pi) {

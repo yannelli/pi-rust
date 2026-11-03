@@ -10,7 +10,7 @@ use pi_coding_agent::agent_session::{CatalogSetup, ModelRuntime, ModelRuntimeOpt
 use pi_coding_agent::catalog::{CatalogConfig, FileModelsStore};
 use serde_json::{Value, json};
 
-use crate::http_mock::{Reply, Server};
+use crate::agent_session::http_mock::{Reply, Server};
 
 fn model_json(provider: &str, id: &str) -> Value {
     json!({"id": id, "name": id, "api": "anthropic-messages", "provider": provider,

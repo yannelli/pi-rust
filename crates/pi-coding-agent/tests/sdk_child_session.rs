@@ -1,11 +1,7 @@
 //! SDK `AgentSession` controls of a child session: queueing while streaming, events outside a
 //! prompt and their teardown, and model and thinking controls that save only with `persist`.
 
-#[path = "extensions/harness.rs"]
-#[allow(dead_code)]
-mod harness;
-#[path = "offline_guard/mod.rs"]
-mod offline_guard;
+use crate::extensions::harness;
 
 use harness::{Harness, Setup, harness};
 use pi_ai::providers::faux::FauxResponse;

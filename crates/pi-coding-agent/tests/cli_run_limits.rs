@@ -1,6 +1,6 @@
 //! `--max-turns` and `--max-cost` through the `pi` binary against a local mock server.
 
-mod cli_support;
+use crate::cli_support;
 
 use serde_json::json;
 

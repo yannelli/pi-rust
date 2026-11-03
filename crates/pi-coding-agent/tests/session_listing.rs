@@ -2,7 +2,7 @@
 //! `SessionInfo` timestamp test, `session-selector-search.test.ts`, and the `--session` id
 //! resolution in `main.ts`.
 
-mod common;
+use crate::common;
 
 use std::path::{Path, PathBuf};
 

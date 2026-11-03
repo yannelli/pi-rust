@@ -1,7 +1,7 @@
 //! Automatic compaction decisions, ported from the `_checkCompaction` cases of upstream
 //! `suite/agent-session-compaction.test.ts` and `agent-session-auto-compaction-queue.test.ts`.
 
-mod common;
+use crate::common;
 
 use common::*;
 use pi_ai::providers::faux::FauxProvider;

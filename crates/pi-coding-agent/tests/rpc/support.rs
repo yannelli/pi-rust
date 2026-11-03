@@ -13,7 +13,7 @@ use serde_json::Value;
 use tokio::io::{AsyncWriteExt, DuplexStream};
 use tokio::task::JoinHandle;
 
-use crate::harness::{Harness, Options, harness};
+use crate::rpc::harness::{Harness, Options, harness};
 
 #[derive(Clone, Default)]
 pub struct Sink(pub Arc<Mutex<Vec<u8>>>);

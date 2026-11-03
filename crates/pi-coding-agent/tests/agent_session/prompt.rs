@@ -11,7 +11,7 @@ use pi_coding_agent::model_resolver::ScopedModel;
 use pi_coding_agent::session::SessionManager;
 use serde_json::json;
 
-use crate::harness::{Options, event_order, harness, open_session, roles, text, wait_until};
+use crate::agent_session::harness::{Options, event_order, harness, open_session, roles, text, wait_until};
 
 #[tokio::test]
 async fn runs_tools_persists_and_resumes_sessions() {

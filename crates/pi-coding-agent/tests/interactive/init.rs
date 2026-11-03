@@ -4,7 +4,7 @@
 use pi_ai::Message;
 use pi_ai::providers::faux::FauxResponse;
 
-use crate::harness::{Options, Ui, local, start};
+use crate::interactive::harness::{Options, Ui, local, start};
 
 /// The text of the user message in the first model request.
 fn sent_prompt(ui: &Ui) -> String {

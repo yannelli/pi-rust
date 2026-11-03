@@ -6,8 +6,8 @@ use std::time::Duration;
 use pi_ai::providers::faux::FauxResponse;
 use serde_json::json;
 
-use crate::harness::{Options, event_order};
-use crate::support::start;
+use crate::rpc::harness::{Options, event_order};
+use crate::rpc::support::start;
 
 const PIXEL: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
@@ -74,7 +74,7 @@ async fn rejected_prompts_get_exactly_one_error_response() {
 #[tokio::test]
 async fn prompt_without_auth_fails_before_acceptance() {
     let options = Options { responses: vec![FauxResponse::text("unused")], ..Options::default() };
-    let mut rpc = crate::support::start_with(options, Default::default(), |h, app| {
+    let mut rpc = crate::rpc::support::start_with(options, Default::default(), |h, app| {
         let path = h.agent_dir.join("models.json");
         let mut models: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         models["providers"]["keyless"] = json!({"baseUrl": "http://127.0.0.1:9", "api": "openai-completions",
@@ -183,7 +183,7 @@ async fn a_run_limit_streams_a_run_limit_event_and_aborts_the_run() {
         files: vec![("notes.txt", "hi")],
         ..Options::default()
     };
-    let mut rpc = crate::support::start_with(options, Default::default(), |_, app| {
+    let mut rpc = crate::rpc::support::start_with(options, Default::default(), |_, app| {
         app.run_limits = pi_coding_agent::agent_session::RunLimits { max_turns: Some(1), max_cost: None };
     })
     .await;

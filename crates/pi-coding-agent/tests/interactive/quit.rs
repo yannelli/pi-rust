@@ -3,7 +3,7 @@
 use pi_ai::providers::faux::FauxResponse;
 use serde_json::json;
 
-use crate::harness::{Options, Ui, local, start};
+use crate::interactive::harness::{Options, Ui, local, start};
 
 const HANGING_SHUTDOWN: &str = r#"export default function (pi) {
 	pi.on("session_start", (_event, ctx) => ctx.ui.notify("HANG-READY"));

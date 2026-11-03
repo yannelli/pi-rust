@@ -17,7 +17,7 @@ use pi_coding_agent::settings::{SettingsManager, SettingsOptions};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use crate::harness::{Harness, Options, harness_with, open_session_with};
+use crate::agent_session::harness::{Harness, Options, harness_with, open_session_with};
 
 struct Plain {
     name: &'static str,

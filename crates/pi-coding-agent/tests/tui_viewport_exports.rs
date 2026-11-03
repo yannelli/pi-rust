@@ -1,11 +1,7 @@
 //! The exported JavaScript `TuiAltScreen` gives fullscreen viewport keys to a focused component that captures them:
 //! a SelectList, a component whose capture flips, the wheel, and an Editor while its autocomplete is open.
 
-#[path = "extensions/harness.rs"]
-#[allow(dead_code)]
-mod harness;
-#[path = "offline_guard/mod.rs"]
-mod offline_guard;
+use crate::extensions::harness;
 
 use harness::{Setup, harness};
 use serde_json::Value;

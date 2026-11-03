@@ -23,8 +23,7 @@ use pi_tui::testing::VirtualTerminal;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
-#[path = "watchdog.rs"]
-mod watchdog;
+use super::watchdog;
 pub type Watchdog = watchdog::Watchdog;
 
 static NEXT_API: AtomicU64 = AtomicU64::new(1);

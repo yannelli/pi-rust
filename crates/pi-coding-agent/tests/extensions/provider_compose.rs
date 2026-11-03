@@ -6,7 +6,7 @@ use pi_ai::classify::{ClassifierContext, ClassifierOptions, ClassifierStopReason
 use pi_ai::images::{ImagesContext, ImagesOptions, ImagesStopReason};
 use serde_json::{Map, json};
 
-use crate::harness::{Setup, harness};
+use crate::extensions::harness::{Setup, harness};
 
 const SOURCE: &str = r#"const cost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 export default function (pi) {

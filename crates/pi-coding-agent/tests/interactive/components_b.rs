@@ -3,7 +3,7 @@
 
 use pi_ai::providers::faux::FauxResponse;
 
-use crate::harness::{Options, Ui, local, start};
+use crate::interactive::harness::{Options, Ui, local, start};
 
 const EXTENSION: &str = r#"import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

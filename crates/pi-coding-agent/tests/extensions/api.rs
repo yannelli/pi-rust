@@ -5,7 +5,7 @@ use pi_coding_agent::markdown_transform::{MarkdownMessageType, MarkdownTransform
 use pi_tui::Component;
 use serde_json::{Value, json};
 
-use crate::harness::{Setup, eventually, harness};
+use crate::extensions::harness::{Setup, eventually, harness};
 
 fn probe_extension() -> String {
     let exe = std::env::current_exe().unwrap().display().to_string();

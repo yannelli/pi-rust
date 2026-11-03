@@ -4,7 +4,7 @@ use pi_ai::providers::faux::FauxResponse;
 use pi_coding_agent::session::SessionManager;
 use serde_json::{Value, json};
 
-use crate::harness::{Options, harness, open_session, roles, wait_until};
+use crate::agent_session::harness::{Options, harness, open_session, roles, wait_until};
 
 fn retry_events(events: &[Value]) -> Vec<Value> {
     events

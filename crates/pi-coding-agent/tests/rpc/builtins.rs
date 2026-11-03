@@ -3,9 +3,9 @@
 
 use serde_json::{Value, json};
 
-use crate::harness::{Options, wait_until};
-use crate::mcp_fake::{Fake, FakeOptions};
-use crate::support::start_with;
+use crate::rpc::harness::{Options, wait_until};
+use crate::rpc::mcp_fake::{Fake, FakeOptions};
+use crate::rpc::support::start_with;
 
 #[tokio::test]
 async fn lists_and_runs_the_mcp_command() {

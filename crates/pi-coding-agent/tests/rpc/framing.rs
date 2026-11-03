@@ -8,8 +8,8 @@ use pi_coding_agent::rpc::{RpcModeOptions, serve_rpc};
 use pi_coding_agent::session::SessionManager;
 use serde_json::json;
 
-use crate::harness::{Options, harness};
-use crate::support::start;
+use crate::rpc::harness::{Options, harness};
+use crate::rpc::support::start;
 
 #[tokio::test]
 async fn malformed_and_unknown_records_get_error_responses() {
