@@ -25,8 +25,8 @@ With `--stat`, `/diff` does not show the diff. With a path, it shows only the ch
 - The model and the window size.
 - The tokens in use and their percentage.
 - The point where auto-compaction starts.
-- A grid of 100 braille cells. Each cell is 1% of the window. A used cell is `⣿` in the color of the part of the context that fills it. A free cell is `⣤`.
-- A table with the estimated tokens for each part of the context, and the free space. Each row starts with a cell in the color of its part.
+- A bar of 10 braille cells that fills from left to right in steps of 5%. A cell is empty (`⠀`, U+2800), half (`⡇`), or full (`⣿`). Each part of the context has a different shade of the theme accent, and a cell has the shade of the part that fills its left half.
+- A table with the estimated tokens for each part of the context, and the free space. Each row starts with a `⣿` in the shade of its part.
 
 The parts of the context are the system prompt, tool definitions, context files, skills, user messages, assistant messages, and tool results.
 
