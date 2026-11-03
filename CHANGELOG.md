@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.8] - 2026-11-03
+
+### Fixed
+
+- **interactive:** wait for the saved entry before message_display ([de90b37](https://github.com/yannelli/pi-rust/commit/de90b3778d2d7bf876241117b18df1cdc7d2cd3d))
+
 ## [0.12.7] - 2026-11-03
 
 ### Added
