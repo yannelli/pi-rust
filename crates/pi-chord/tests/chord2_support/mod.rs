@@ -111,11 +111,16 @@ pub mod net;
 pub mod reload;
 pub mod tutorial;
 
-/// Serializes the runtime tests of one binary: the publish queue is process-wide.
+/// Serializes the runtime tests and the publish-queue test: the publish queue is process-wide.
 static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub async fn serial() -> tokio::sync::MutexGuard<'static, ()> {
     SERIAL.lock().await
+}
+
+/// [`serial`] for a test that runs outside a Tokio runtime.
+pub fn serial_blocking() -> tokio::sync::MutexGuard<'static, ()> {
+    SERIAL.blocking_lock()
 }
 
 /// Lets spawned work run (upstream `setImmediate`).

@@ -2,7 +2,7 @@
 //! honored only from the link the root came over" and the cross-host reloads) are in
 //! `chord2_links_review_reload.rs`.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::collections::HashMap;
 use std::future::ready;

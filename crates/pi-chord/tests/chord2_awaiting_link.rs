@@ -1,7 +1,7 @@
 //! Port of upstream `test/awaiting.test.ts` in its own form: a browser awaits `Slow` from the server over a link
 //! that counts the `hold` and `release` frames it sends. The one-host form is in `chord2_awaiting.rs`.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

@@ -1,7 +1,7 @@
 //! Port of upstream `test/host-objects-reload.test.ts`: the host's own references to `lifetime: "host"` objects
 //! across reloads. Upstream reads `HostImpl.hostObjects`; [`Host::host_object`] is the public view of it here.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

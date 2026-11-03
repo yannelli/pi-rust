@@ -1,6 +1,6 @@
 //! Port of upstream `test/facets.test.ts`: activation order, keyed routing, and reloads.
 
-mod support;
+use crate::support;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

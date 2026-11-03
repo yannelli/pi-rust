@@ -2,7 +2,7 @@
 //! root came over" and the cross-host reloads (#3 to #6). The greeter here is the cluster tests' one, placed on
 //! the `session:` family (upstream's is named `session:S1`).
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::future::ready;
 use std::sync::{Arc, Mutex};

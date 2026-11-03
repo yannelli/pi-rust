@@ -1,7 +1,7 @@
 //! Port of upstream `test/readiness.test.ts`, every case. The deferred case runs a worker whose parent link is
 //! accepted only after its facets load.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::future::ready;
 use std::sync::atomic::{AtomicUsize, Ordering};

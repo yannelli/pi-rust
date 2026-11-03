@@ -1,7 +1,7 @@
 //! Port of upstream `test/hydration.test.ts`: a local object goes live only with its state, also where it forwards
 //! or derives from a remote reference's member; activation waits at most `ready_timeout` (a cycle fails with a hint).
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::sync::Arc;
 use std::time::Duration;

@@ -1,7 +1,7 @@
 //! IPC links (upstream `link.ts` and "links: IPC" in `test/link.test.ts`): frames travel as `{ chord2: frame }`
 //! messages, and [`StreamChannel`] writes each as one line of JSON like Node's IPC, checked against golden frames.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};

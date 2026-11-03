@@ -1,7 +1,7 @@
 //! Port of upstream `test/placement.test.ts`. Left out: the type errors for a family's input field (typo, number,
 //! optional), which `remote` does not check at runtime.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::collections::HashMap;
 use std::future::ready;

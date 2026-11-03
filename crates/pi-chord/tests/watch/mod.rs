@@ -1,8 +1,7 @@
 //! Port of upstream `test/watch.test.ts`: the shared lifecycle through `Watch`, and what `NativeWatch` does
 //! differently.
 
-#[path = "../support/mod.rs"]
-mod support;
+use crate::support;
 
 mod delivery;
 mod ending;

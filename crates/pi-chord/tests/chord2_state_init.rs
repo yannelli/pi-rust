@@ -1,6 +1,6 @@
 //! Port of upstream `test/state-init.test.ts`.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::future::ready;
 use std::sync::{Arc, Mutex};

@@ -2,7 +2,7 @@
 //! identity and a memory link. Sections 7 to 11 are in `chord2_tutorial_reload.rs`. Upstream also checks that
 //! `docs/tutorial.md` prints its TypeScript examples unchanged; that drift check has no Rust counterpart.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

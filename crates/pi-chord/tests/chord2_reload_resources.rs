@@ -1,7 +1,7 @@
 //! Port of upstream `test/reload.test.ts`, part 2: resources across reloads, the two-version rule, forced
 //! retirement, task replacement and facet signals. Upstream's fake timers are real short timers here.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

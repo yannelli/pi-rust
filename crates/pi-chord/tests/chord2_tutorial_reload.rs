@@ -2,7 +2,7 @@
 //! reloads, a fake provider, and short roots. Sections 1 to 6 are in `chord2_tutorial.rs`. Like upstream, the
 //! tests pass facets built in memory to `load` and `reload`, so no `FacetLoader` takes part.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::collections::HashMap;
 use std::future::ready;

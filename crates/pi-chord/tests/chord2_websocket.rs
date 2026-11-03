@@ -1,7 +1,7 @@
 //! Port of upstream `test/websocket.test.ts`: a browser host over a real socket stamped by the authenticator, and
 //! packed payloads as binary messages. The client's own socket is read through a tee of its TCP stream.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::io::{Read, Write};
 use std::pin::Pin;

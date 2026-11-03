@@ -1,7 +1,7 @@
 //! Port of upstream `test/cluster.test.ts`, part 1: cluster reloads of a server and its workers, failing votes,
 //! removals and their tombstones, and browsers. The reconciliation cases are in `chord2_cluster_reconcile.rs`.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::sync::Arc;
 

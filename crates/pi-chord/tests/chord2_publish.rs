@@ -1,12 +1,15 @@
 //! The publication queue (upstream `publish.ts`): FIFO delivery, re-entrant enqueues, and held publications. The
-//! queue is process-wide, so one test covers it in this binary.
+//! queue is process-wide, so one test covers it, and it holds the lock of the runtime tests that also use the queue.
 
 use std::sync::{Arc, Mutex};
 
 use pi_chord::host2::{enqueue, hold_publications};
 
+use crate::chord2_support::serial_blocking;
+
 #[test]
 fn notifications_run_in_enqueue_order_and_wait_for_holds() {
+    let _serial = serial_blocking();
     let log = Arc::new(Mutex::new(Vec::new()));
     let push = |entry: &'static str| {
         let log = log.clone();

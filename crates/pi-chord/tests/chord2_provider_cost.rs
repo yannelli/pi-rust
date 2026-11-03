@@ -2,7 +2,7 @@
 //! same ops on every link. Upstream also counts encoder calls (`vi.mock` on the delta module): those two
 //! assertions are left out, since a Rust test cannot swap the runtime's encoder.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::sync::{Arc, Mutex};
 

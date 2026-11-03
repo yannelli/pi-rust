@@ -2,7 +2,7 @@
 //! foreign ctxs, a remote reference's foreign ctx). The reload cases are in `chord2_review_reload.rs`. Left out:
 //! the forged ctx (Rust code cannot make a `Ctx`).
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::future::ready;
 use std::sync::atomic::{AtomicUsize, Ordering};

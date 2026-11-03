@@ -2,7 +2,7 @@
 //! TypeScript: each frame as the IPC/memory object and as WebSocket messages, packing around the threshold, frame
 //! validation verdicts and wire errors.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;

@@ -2,7 +2,7 @@
 //! arguments, protocol versions and packed payloads over a relay. Relays, stamping and lifetime are in
 //! `chord2_connection_relay.rs`, the memory-link cases in `chord2_link.rs`, the IPC case in `chord2_ipc.rs`.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::future::ready;
 use std::sync::Arc;

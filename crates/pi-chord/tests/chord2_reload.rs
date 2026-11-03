@@ -1,7 +1,7 @@
 //! Port of upstream `test/reload.test.ts`, part 1: compatible reloads, recording mode, state versions and the
 //! gate. The rest is in `chord2_reload_resources.rs` and `chord2_reload_contracts.rs`.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::sync::Arc;
 

@@ -1,6 +1,6 @@
 //! Port of upstream `test/services.test.ts`: provider lifecycle, binding rebinds, and keyed observation.
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, Mutex};
 

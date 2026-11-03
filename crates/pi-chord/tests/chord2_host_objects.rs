@@ -1,7 +1,7 @@
 //! Port of upstream `test/host.test.ts`, part 2: lifetime "host", identities and variants, registries and
 //! composition. Left out: the "unknown lifetime" refusal (`Lifetime` is an enum).
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::future::ready;
 use std::sync::Arc;

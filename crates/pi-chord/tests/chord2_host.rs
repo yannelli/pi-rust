@@ -1,7 +1,7 @@
 //! Port of upstream `test/host.test.ts`, part 1: activation, lifetime, declarations and methods. The rest is in
 //! `chord2_host_objects.rs`. Left out: async factories (Rust factories are synchronous).
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::future::ready;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
