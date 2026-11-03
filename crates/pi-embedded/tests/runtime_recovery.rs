@@ -1,6 +1,6 @@
 //! Port of upstream `test/runtime.test.ts`: restoration, repair, reconciliation, and storage.
 
-mod common;
+use crate::common;
 
 use std::sync::{Arc, Mutex};
 

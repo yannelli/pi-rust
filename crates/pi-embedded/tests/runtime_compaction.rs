@@ -1,6 +1,6 @@
 //! Port of upstream `test/runtime.test.ts`: compaction and workspace tools.
 
-mod common;
+use crate::common;
 
 use std::sync::{Arc, Mutex};
 
