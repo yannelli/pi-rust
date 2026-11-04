@@ -17,7 +17,7 @@ mod wrap;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-pub use render::{BorderContext, BorderRenderer, round_border, scroll_border};
+pub use render::{BorderContext, BorderRenderer, EditorLayout, PromptBox, round_border, scroll_border};
 pub use segment::TextSegment;
 pub use wrap::{TextChunk, word_wrap_line, word_wrap_line_with_segments};
 
@@ -280,6 +280,11 @@ impl Editor {
     /// Rounded corners on the borders, and side bars when the editor has horizontal padding.
     pub fn set_rounded(&self, rounded: bool) {
         self.with(|core| core.rounded = rounded);
+    }
+
+    /// The frame around the text.
+    pub fn set_layout(&self, layout: EditorLayout) {
+        self.with(|core| core.layout = layout);
     }
 
     /// Replaces the top border (upstream subclasses override `renderTopBorder`).

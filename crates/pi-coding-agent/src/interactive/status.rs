@@ -5,6 +5,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use pi_ai::{Message, StopReason};
+use pi_tui::colors::parse_color;
 use pi_tui::components::StyleFn;
 use pi_tui::program_status::{BlockedKind, ProgramState, ProgramStatus};
 
@@ -12,9 +13,10 @@ use super::bridge::UiEvent;
 use super::components::{IdleStatus, SharedIndicator, StatusIndicator, StatusKind};
 use super::mode::{DEFAULT_WORKING_MESSAGE, InteractiveMode};
 use crate::agent_session::CompactionReason;
+use crate::extension_ui::{EditorBorderColor, PromptLayout};
 use crate::resources::brand::APP_NAME;
 use crate::settings::schema::TuiMode;
-use crate::theme::theme;
+use crate::theme::{StyleFg, ThemeColor, ThemeStyle, theme};
 
 fn first_line(text: Option<&str>) -> String {
     let line = text.and_then(|text| text.split(['\r', '\n']).next()).map(str::trim).unwrap_or("");
@@ -290,14 +292,26 @@ impl InteractiveMode {
         self.show_status_indicator(StatusIndicator::compaction(&self.tui(), reason, self.embedded_status_color()));
     }
 
-    /// Editor border: the bash color in `!` mode, otherwise the thinking level color.
+    /// Editor border: the chat style color when set, the theme border color in a harbor box, the
+    /// bash color in `!` mode, otherwise the thinking level color.
     pub(super) fn update_editor_border_color(&self) {
-        let bash_mode = self.state.borrow().is_bash_mode;
-        let style: StyleFn = if bash_mode {
-            Rc::new(|text: &str| theme().get_bash_mode_border_color()(text))
-        } else {
-            let level = self.session().thinking_level();
-            Rc::new(move |text: &str| theme().get_thinking_border_color(level)(text))
+        let (bash_mode, color, harbor) = {
+            let state = self.state.borrow();
+            let style = &state.chat_style;
+            (state.is_bash_mode, style.editor_border_color.clone(), style.prompt_layout == Some(PromptLayout::Harbor))
+        };
+        let style: StyleFn = match color {
+            Some(EditorBorderColor::Token(color)) => Rc::new(move |text: &str| theme().fg(color, text)),
+            Some(EditorBorderColor::Hex(hex)) => {
+                let fg = parse_color(&hex).ok().map(StyleFg::Color);
+                Rc::new(move |text: &str| theme().style(text, &ThemeStyle { fg, ..ThemeStyle::default() }))
+            }
+            None if harbor => Rc::new(|text: &str| theme().fg(ThemeColor::Border, text)),
+            None if bash_mode => Rc::new(|text: &str| theme().get_bash_mode_border_color()(text)),
+            None => {
+                let level = self.session().thinking_level();
+                Rc::new(move |text: &str| theme().get_thinking_border_color(level)(text))
+            }
         };
         self.editor.set_border_color(style);
         let active = self.state.borrow().active_status.clone();

@@ -197,7 +197,14 @@ async function runCommand({ name, ctx }) {
 		await request("ui.setWorkingMessage", { message: "Thinking (3s)" });
 		await request("ui.setWorkingIndicator", { frames: ["a", "b"], intervalMs: 90 });
 		await request("ui.setHiddenThinkingLabel", { label: "Thought" });
-		await request("ui.setChatStyle", { userPrefix: "› ", assistantPrefix: 7, collapseThinking: true, roundedEditor: "yes" });
+		await request("ui.setChatStyle", {
+			userPrefix: "› ",
+			assistantPrefix: 7,
+			collapseThinking: true,
+			roundedEditor: "yes",
+			editorBorderColor: "borderAccent",
+			promptLayout: "caret",
+		});
 		await request("ui.setWorkingIndicator", {});
 		await request("ui.setWorkingMessage", {});
 		const late = await answer("register.toolRenderer", { renderCall: true });

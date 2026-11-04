@@ -495,7 +495,7 @@ mod tests {
             user_prefix: Some("› ".into()),
             assistant_prefix: Some("● ".into()),
             collapse_thinking: true,
-            rounded_editor: false,
+            ..ChatStyle::default()
         };
         RenderOptions { chat_style, ..RenderOptions::default() }
     }

@@ -7,7 +7,7 @@ use std::time::Instant;
 use regex::{NoExpand, Regex};
 
 use super::popup::AutocompleteList;
-use super::render::BorderRenderer;
+use super::render::{BorderRenderer, EditorLayout};
 use super::segment::{PasteRegistry, TextSegment, grapheme_segments};
 use super::{EditorEvent, EditorOptions, EditorTheme, Shared};
 use crate::autocomplete::{AbortController, AutocompleteProvider};
@@ -75,6 +75,7 @@ pub(crate) struct EditorCore {
     pub bottom_border: Option<BorderRenderer>,
     /// Round corners on the borders and side bars in the padding columns.
     pub rounded: bool,
+    pub layout: EditorLayout,
     pub disable_submit: bool,
     pub events: VecDeque<EditorEvent>,
     /// Handle used by timers and autocomplete tasks to reach this state later.
@@ -138,6 +139,7 @@ impl EditorCore {
             top_border: None,
             bottom_border: None,
             rounded: false,
+            layout: EditorLayout::Lines,
             disable_submit: false,
             events: VecDeque::new(),
             self_ref,
