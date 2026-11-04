@@ -290,6 +290,19 @@ impl Agent {
         lock(&self.inner.follow_up).messages.clear();
     }
 
+    /// Remove and return the queued messages that match `matches`, steering first.
+    pub fn remove_queued(&self, matches: impl Fn(&Message) -> bool) -> Vec<Message> {
+        let mut removed = Vec::new();
+        for queue in [&self.inner.steering, &self.inner.follow_up] {
+            let mut queue = lock(queue);
+            let (taken, kept): (Vec<_>, Vec<_>) =
+                std::mem::take(&mut queue.messages).into_iter().partition(|m| matches(m));
+            queue.messages = kept.into();
+            removed.extend(taken);
+        }
+        removed
+    }
+
     /// The messages the next drain point would take, without consuming them.
     pub fn peek_queued_messages(&self) -> Vec<Message> {
         let steering = lock(&self.inner.steering).peek();

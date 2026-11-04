@@ -300,14 +300,18 @@ impl AgentSession {
         let message = custom.clone().into_message();
         let deliver_as = options["deliverAs"].as_str();
         let trigger = options["triggerTurn"].as_bool();
+        let behavior = match deliver_as {
+            Some("followUp") => StreamingBehavior::FollowUp,
+            _ => StreamingBehavior::Steer,
+        };
         if deliver_as == Some("nextTurn") {
             lock(&self.state).pending_next_turn.push(message);
-        } else if self.is_streaming() && trigger != Some(false) {
-            match deliver_as {
-                Some("followUp") => self.agent.follow_up(message),
-                _ => self.agent.steer(message),
-            }
-        } else if trigger == Some(true) {
+            return Ok(None);
+        }
+        if trigger != Some(false) && self.queue_if_running(&message, Some(behavior)) {
+            return Ok(None);
+        }
+        if trigger == Some(true) {
             let session = self.clone();
             if self.is_compacting() {
                 // A run now would overlap the compaction and miss its result, so the message is sent again
@@ -325,9 +329,8 @@ impl AgentSession {
                 ));
             }
             return Ok(Some(async move { session.start_run(RunTrigger::Custom(custom), || {}).await }.boxed()));
-        } else if self.is_streaming() {
-            lock(&self.state).pending_custom.push(message);
-        } else {
+        }
+        if !self.queue_if_running(&message, None) {
             self.append_custom_message(message);
         }
         Ok(None)

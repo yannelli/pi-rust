@@ -432,13 +432,14 @@ impl AgentSession {
         }
     }
 
-    /// Clear both queues and return their texts (steering, follow-up).
+    /// Clear the queued user messages and return their texts (steering, follow-up). Queued
+    /// extension messages, such as background task results, stay queued.
     pub fn clear_queue(&self) -> (Vec<String>, Vec<String>) {
         let cleared = {
             let mut state = lock(&self.state);
             (std::mem::take(&mut state.steering), std::mem::take(&mut state.follow_up))
         };
-        self.agent.clear_queues();
+        self.agent.remove_queued(|message| matches!(message, Message::User(_)));
         self.emit_queue_update();
         cleared
     }
@@ -463,12 +464,7 @@ impl AgentSession {
     pub async fn send_custom_message(&self, message: CustomMessage, trigger_turn: bool) -> anyhow::Result<()> {
         let custom = message.clone();
         let message = message.into_message();
-        if self.is_streaming() {
-            if trigger_turn {
-                self.agent.steer(message);
-            } else {
-                lock(&self.state).pending_custom.push(message);
-            }
+        if self.queue_if_running(&message, trigger_turn.then_some(StreamingBehavior::Steer)) {
             return Ok(());
         }
         if trigger_turn {
@@ -481,6 +477,22 @@ impl AgentSession {
         }
         self.append_custom_message(message);
         Ok(())
+    }
+
+    /// Queue `message` for the active run: in the agent queue with `behavior`, else until the end
+    /// of the current turn. False when no run is active. The check and the push share the state
+    /// lock with [`Self::settle_run`], so no message lands in a queue that no run will read.
+    pub(crate) fn queue_if_running(&self, message: &Message, behavior: Option<StreamingBehavior>) -> bool {
+        let mut state = lock(&self.state);
+        if !state.run_active {
+            return false;
+        }
+        match behavior {
+            Some(StreamingBehavior::Steer) => self.agent.steer(message.clone()),
+            Some(StreamingBehavior::FollowUp) => self.agent.follow_up(message.clone()),
+            None => state.pending_custom.push(message.clone()),
+        }
+        true
     }
 
     /// Context for the next user prompt, sent along with it.

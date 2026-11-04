@@ -2,7 +2,7 @@
 
 use pi_ai::providers::faux::FauxResponse;
 use pi_ai::{Message, StopReason, UserContent};
-use pi_coding_agent::messages::CustomMessage;
+use pi_coding_agent::messages::{CustomMessage, CustomRole};
 use serde_json::{Value, json};
 
 use crate::extensions::harness::{Setup, eventually, harness};
@@ -399,6 +399,68 @@ async fn a_custom_message_sent_while_before_agent_start_runs_joins_the_starting_
     let requests = h.provider.requests();
     assert_eq!(requests.len(), 1);
     assert_eq!(user_texts(&requests[0]), ["task one finished", "task two finished"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn clearing_the_queue_keeps_queued_extension_messages() {
+    let h = harness(Setup {
+        files: vec![("hold.ts", with_probe(HOLD_FIRST))],
+        load: vec!["hold.ts"],
+        responses: vec![FauxResponse::text("handled")],
+        ..Setup::default()
+    })
+    .await;
+    let session = h.session.clone();
+    let first =
+        tokio::spawn(
+            async move { session.send_custom_message(custom_message("first", "task one finished"), true).await },
+        );
+    eventually(|| h.entries().iter().any(|entry| entry["customType"] == "handler-started")).await;
+    h.session.follow_up("queued by the user", Vec::new()).await.unwrap();
+    h.session.send_custom_message(custom_message("second", "task two finished"), true).await.unwrap();
+    assert_eq!(h.session.clear_queue(), (Vec::new(), vec!["queued by the user".to_string()]));
+    h.session.prompt("/release", Vec::new()).await.unwrap();
+    first.await.unwrap().unwrap();
+
+    let requests = h.provider.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(user_texts(&requests[0]), ["task one finished", "task two finished"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_extension_follow_up_left_by_an_abort_joins_the_conversation() {
+    let body = format!(
+        "{HOLD_FIRST}\n\tpi.registerCommand(\"notify\", {{ handler: async () => {{ pi.sendMessage({{ customType: \"task-done\", content: \"background task finished\", display: true }}, {{ triggerTurn: true, deliverAs: \"followUp\" }}); }} }});\n"
+    );
+    let h = harness(Setup {
+        files: vec![("hold.ts", with_probe(&body))],
+        load: vec!["hold.ts"],
+        responses: vec![FauxResponse::text("should not complete")],
+        ..Setup::default()
+    })
+    .await;
+    let session = h.session.clone();
+    let run =
+        tokio::spawn(
+            async move { session.send_custom_message(custom_message("first", "task one finished"), true).await },
+        );
+    eventually(|| h.entries().iter().any(|entry| entry["customType"] == "handler-started")).await;
+    h.session.prompt("/notify", Vec::new()).await.unwrap();
+    let abort = h.session.abort();
+    tokio::pin!(abort);
+    assert!(futures::poll!(&mut abort).is_pending());
+    h.session.prompt("/release", Vec::new()).await.unwrap();
+    run.await.unwrap().unwrap();
+    abort.await;
+
+    assert!(h.session.is_idle());
+    let custom_types: Vec<String> = h
+        .session
+        .messages()
+        .iter()
+        .filter_map(|message| CustomMessage::from_message(message).map(|custom| custom.custom_type))
+        .collect();
+    assert!(custom_types.contains(&"task-done".to_string()), "{custom_types:?}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
