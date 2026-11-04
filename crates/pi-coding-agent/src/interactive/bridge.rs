@@ -125,6 +125,7 @@ impl UiEvent {
             AgentSessionEvent::SessionInfoChanged { .. } => UiEvent::SessionInfoChanged,
             AgentSessionEvent::ThinkingLevelChanged { .. } => UiEvent::ThinkingLevelChanged,
             AgentSessionEvent::FastModeChanged { .. } => UiEvent::FastModeChanged,
+            AgentSessionEvent::ModelChanged { .. } => return None,
             AgentSessionEvent::AutoRetryStart { attempt, max_attempts, delay_ms, .. } => {
                 UiEvent::AutoRetryStart { attempt: *attempt, max_attempts: *max_attempts, delay_ms: *delay_ms }
             }

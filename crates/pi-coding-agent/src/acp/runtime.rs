@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol_schema::Error;
@@ -19,9 +20,11 @@ use super::errors::internal_error;
 use super::mcp_servers::ClientMcpServers;
 use super::permissions::{CallOrigin, McpToolIdentity, PermissionMode, ToolPermissions};
 use crate::agent_session::{
-    AgentSession, AgentSessionEvent, AgentSessionRuntime, DiagnosticLevel, PromptOptions, compaction_result_json, lock,
+    AgentSession, AgentSessionEvent, AgentSessionRuntime, DiagnosticLevel, PromptDisposition, PromptOptions,
+    compaction_result_json, lock,
 };
 use crate::app::{AppOptions, create_app_runtime};
+use crate::headless_commands::{HeadlessOutput, run_headless_command};
 use crate::rpc::{
     RpcExtensionBinding, RpcExtensionHost, RpcExtensionUi, RpcOutput, RpcShutdownHandle, builtin_commands,
     resource_commands, session_state,
@@ -69,7 +72,7 @@ impl EventEncoder {
 
     /// The record for `event`; `None` for events ACP mode ignores.
     pub fn encode(&mut self, event: &AgentSessionEvent<'_>) -> Option<Value> {
-        if !event.is_upstream_event() {
+        if !event.is_upstream_event() && !matches!(event, AgentSessionEvent::ModelChanged { .. }) {
             return None;
         }
         let AgentSessionEvent::Agent(agent_event) = event else { return Some(event.to_json()) };
@@ -127,8 +130,13 @@ pub struct RuntimeBackend {
     runtime: Arc<AgentSessionRuntime>,
     session: Arc<AgentSession>,
     ui: Arc<RpcExtensionUi>,
+    /// Extension UI records; they reach the event stream in the order sent.
+    output: RpcOutput,
     host: Option<Arc<dyn RpcExtensionHost>>,
+    binding: RpcExtensionBinding,
     subscription: u64,
+    /// `agent_settled` events so far.
+    settled: Arc<AtomicU64>,
     permissions: Arc<ToolPermissions>,
     events: Mutex<Option<UnboundedReceiver<Value>>>,
 }
@@ -166,7 +174,12 @@ impl RuntimeBackend {
         let (sender, receiver) = unbounded_channel();
         let events = sender.clone();
         let encoder = Mutex::new(EventEncoder::new(session.cwd()));
+        let settled = Arc::new(AtomicU64::new(0));
+        let settled_count = settled.clone();
         let subscription = session.subscribe(move |event| {
+            if matches!(event, AgentSessionEvent::AgentSettled { .. }) {
+                settled_count.fetch_add(1, Ordering::SeqCst);
+            }
             if let Some(value) = lock(&encoder).encode(event) {
                 let _ = events.send(value);
             }
@@ -174,12 +187,14 @@ impl RuntimeBackend {
         let output = RpcOutput::spawn(Box::new(EventWriter { sender, buffer: Vec::new() }));
         let ui = RpcExtensionUi::new(output.clone());
         crate::rpc::bind_builtins(&session, &ui);
+        let shutdown = RpcShutdownHandle::default();
+        let binding = RpcExtensionBinding::new(runtime.clone(), session.clone(), ui.clone(), shutdown, output.clone());
         if let Some(host) = &host {
-            let shutdown = RpcShutdownHandle::default();
-            host.bind(RpcExtensionBinding::new(runtime.clone(), session.clone(), ui.clone(), shutdown, output));
+            host.bind(binding.clone());
         }
         session.model_runtime().refresh_in_background();
-        Arc::new(Self { runtime, session, ui, host, subscription, permissions, events: Mutex::new(Some(receiver)) })
+        let events = Mutex::new(Some(receiver));
+        Arc::new(Self { runtime, session, ui, output, host, binding, subscription, settled, permissions, events })
     }
 
     pub fn session(&self) -> &Arc<AgentSession> {
@@ -222,9 +237,16 @@ impl PiBackend for RuntimeBackend {
             })),
             ..PromptOptions::default()
         };
-        let session = self.session.clone();
+        let (session, output, settled) = (self.session.clone(), self.output.clone(), self.settled.clone());
+        let settled_before = settled.load(Ordering::SeqCst);
         tokio::spawn(async move {
             let result = session.prompt_with(&message, options).await;
+            // An extension command or `/mcp` handled the prompt without a run, so no `agent_settled`
+            // would end the turn.
+            let no_run = !session.is_streaming() && settled.load(Ordering::SeqCst) == settled_before;
+            if matches!(result, Ok(PromptDisposition::Handled)) && no_run {
+                output.send(&json!({"type": "agent_settled", "aborted": false}));
+            }
             if let Some(sender) = lock(&accepted_sender).take() {
                 let _ = sender.send(result.map(|_| ()));
             }
@@ -327,6 +349,16 @@ impl PiBackend for RuntimeBackend {
         }
         commands.extend(resource_commands(&self.session));
         Ok(json!({"commands": commands}))
+    }
+
+    async fn run_headless_command(&self, name: &str, args: &str) -> Option<HeadlessOutput> {
+        let output = run_headless_command(&self.session, name, args).await?;
+        if output.reloaded
+            && let Some(host) = &self.host
+        {
+            host.bind(self.binding.clone());
+        }
+        Some(output)
     }
 
     async fn send_extension_ui_response(&self, response: Value) -> anyhow::Result<()> {

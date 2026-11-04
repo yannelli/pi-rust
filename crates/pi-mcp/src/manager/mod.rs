@@ -1,9 +1,11 @@
 //! The MCP integration of a session, without its UI: servers from `mcp.json` connect in the
-//! background and their tools register as `mcp__<server>__<tool>`. Problems found at startup are
+//! background and their tools register as `mcp__<server>__<tool>`. `lazy` servers register the
+//! tools saved in their tool cache and connect on first use. Problems found at startup are
 //! reported once through `notify`.
 
 mod actions;
 mod call;
+mod lazy;
 mod registered;
 mod registry;
 mod status;
@@ -18,7 +20,9 @@ use futures::FutureExt;
 use futures::future::{BoxFuture, Shared};
 use tokio_util::sync::CancellationToken;
 
-use crate::config::{LoadedMcpConfig, McpConfigScope, McpServerConfigPatch, McpServerEntry, update_mcp_server_config};
+use crate::config::{
+    LoadedMcpConfig, McpConfigScope, McpLifecycle, McpServerConfigPatch, McpServerEntry, update_mcp_server_config,
+};
 use crate::elicitation::McpElicitation;
 use crate::log::McpServerLog;
 use crate::oauth::{CallbackServerFactory, LoopbackCallbackFactory};
@@ -119,6 +123,10 @@ struct Server {
     message: Option<String>,
     /// For servers extensions registered: the config as registered, to notice registering again.
     registered_config: Option<String>,
+    /// Tools were registered from the tool cache.
+    cached: bool,
+    /// Server instructions from the tool cache, until the server connects.
+    cached_instructions: Option<String>,
 }
 
 impl Server {
@@ -132,6 +140,8 @@ impl Server {
             closing: None,
             message: None,
             registered_config,
+            cached: false,
+            cached_instructions: None,
         }
     }
 
@@ -160,6 +170,8 @@ struct State {
     registry_listener: Option<u64>,
     project_config: Option<PathBuf>,
     auto_enable_codemode: bool,
+    /// The top-level `lifecycle` of `mcp.json`.
+    default_lifecycle: McpLifecycle,
     warned_unreachable: bool,
     waited_for_startup: bool,
     pending: Option<Ready>,
@@ -179,6 +191,19 @@ impl State {
 
     fn named(&self, name: &str) -> Option<&Server> {
         self.servers.iter().find(|server| server.entry.name == name)
+    }
+
+    /// When the server connects. Extension and ACP client servers connect at once.
+    fn lifecycle(&self, server: &Server) -> McpLifecycle {
+        if server.registered() || server.entry.scope == Some(McpConfigScope::Client) {
+            return McpLifecycle::Eager;
+        }
+        server.entry.config.lifecycle.unwrap_or(self.default_lifecycle)
+    }
+
+    /// An enabled `lazy` server that has not started to connect.
+    fn is_idle(&self, server: &Server) -> bool {
+        server.enabled() && server.attempt.is_none() && self.lifecycle(server) == McpLifecycle::Lazy
     }
 }
 
@@ -217,6 +242,7 @@ impl McpManager {
             registry_listener: None,
             project_config: None,
             auto_enable_codemode: true,
+            default_lifecycle: McpLifecycle::Eager,
             warned_unreachable: false,
             waited_for_startup: false,
             pending: None,
@@ -254,14 +280,16 @@ impl McpManager {
     }
 
     /// Start a session: take the loaded config and connect the enabled servers in the background.
+    /// Enabled `lazy` servers only register the tools of their tool cache.
     pub fn start(&self, cwd: PathBuf, loaded: LoadedMcpConfig) {
-        let enabled: Vec<u64> = {
+        let (eager, lazy): (Vec<u64>, Vec<u64>) = {
             let mut state = self.inner.lock();
             state.session = CancellationToken::new();
             state.cwd = cwd;
             state.config_errors = loaded.errors;
             state.project_config = loaded.project_config;
             state.auto_enable_codemode = loaded.auto_enable_codemode.unwrap_or(true);
+            state.default_lifecycle = loaded.lifecycle.unwrap_or_default();
             state.warned_unreachable = false;
             state.waited_for_startup = false;
             state.configured = loaded.servers.iter().map(|entry| (entry.name.clone(), entry.source.clone())).collect();
@@ -277,15 +305,21 @@ impl McpManager {
                 servers.push(Server::new(state.next_id, entry, registered_config));
             }
             state.servers = servers;
-            state.servers.iter().filter(|server| server.enabled()).map(|server| server.id).collect()
+            let enabled = state.servers.iter().filter(|server| server.enabled());
+            let (lazy, eager): (Vec<&Server>, Vec<&Server>) =
+                enabled.partition(|server| state.lifecycle(server) == McpLifecycle::Lazy);
+            (eager.iter().map(|server| server.id).collect(), lazy.iter().map(|server| server.id).collect())
         };
         self.inner.watch_registry();
+        for id in lazy {
+            self.inner.register_cached_tools(id);
+        }
         self.inner.emit_change();
-        if enabled.is_empty() {
+        if eager.is_empty() {
             self.inner.report_problems(None);
             return;
         }
-        let readies: Vec<Ready> = enabled.iter().map(|id| self.inner.start_connection(*id, None)).collect();
+        let readies: Vec<Ready> = eager.iter().map(|id| self.inner.start_connection(*id, None)).collect();
         let (weak, session) = (Arc::downgrade(&self.inner), self.inner.lock().session.clone());
         let task = tokio::spawn(async move {
             futures::future::join_all(readies).await;

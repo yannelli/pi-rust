@@ -15,10 +15,17 @@ pub(super) fn render(browser: &mut AcpBrowser, width: usize) -> Vec<String> {
     let mut lines = vec![t.fg(ThemeColor::Border, &"─".repeat(width))];
     lines.push(format!(" {}", t.fg(ThemeColor::Accent, &t.bold("ACP agents"))));
     lines.push(tabs_line(browser));
-    lines.extend(browser.search.render(width));
+    if browser.mode != Mode::Form {
+        lines.extend(browser.search.render(width));
+    }
     lines.push(String::new());
     match browser.mode.clone() {
         Mode::List => lines.extend(list_lines(browser, width)),
+        Mode::Form => {
+            if let Some(form) = &mut browser.form {
+                lines.extend(form.render(width));
+            }
+        }
         Mode::Menu { id, scope, item } => lines.extend(menu_lines(browser, &id, scope, Some(item), width)),
         Mode::ConfirmRemove { id, scope, name } => {
             lines.extend(menu_lines(browser, &id, scope, None, width));
@@ -66,7 +73,14 @@ fn list_lines(browser: &AcpBrowser, width: usize) -> Vec<String> {
             lines.extend(wrap_text_with_ansi(&t.fg(ThemeColor::Warning, &text), width));
         }
     }
+    let add_row = || {
+        let prefix = if browser.adding_selected() { "→ " } else { "  " };
+        t.fg(ThemeColor::Accent, &format!(" {prefix}Add custom agent"))
+    };
     if browser.rows().is_empty() {
+        if browser.tab == AcpTab::Installed {
+            lines.push(add_row());
+        }
         let empty = match browser.tab {
             AcpTab::Installed => " No ACP agents installed. Tab opens the registry.",
             AcpTab::Registry => " No registry agents",
@@ -76,14 +90,20 @@ fn list_lines(browser: &AcpBrowser, width: usize) -> Vec<String> {
     }
     let visible = browser.visible();
     if visible.is_empty() {
+        if browser.tab == AcpTab::Installed {
+            lines.push(add_row());
+        }
         lines.push(t.fg(ThemeColor::Muted, " No matching agents"));
         return lines;
     }
-    let selected = browser.selected.min(visible.len() - 1);
+    let selected = browser.selected.min(visible.len());
     let start = selected.saturating_sub(MAX_VISIBLE / 2).min(visible.len().saturating_sub(MAX_VISIBLE));
     let end = (start + MAX_VISIBLE).min(visible.len());
     for (position, index) in visible.iter().enumerate().take(end).skip(start) {
         lines.push(row_line(&browser.rows()[*index], position == selected, width));
+    }
+    if browser.tab == AcpTab::Installed {
+        lines.push(add_row());
     }
     if start > 0 || end < visible.len() {
         lines.push(t.fg(ThemeColor::Muted, &format!("  ({}/{})", selected + 1, visible.len())));
@@ -181,6 +201,13 @@ fn hints(browser: &AcpBrowser) -> Vec<String> {
         hints.push(t.fg(ThemeColor::Warning, "busy: changes disabled"));
     }
     match browser.mode {
+        Mode::Form => {
+            hints.push(raw_key_hint("tab/shift+tab", "field"));
+            hints.push(raw_key_hint("enter/space", "change"));
+            hints.push(raw_key_hint("ctrl+s", "save"));
+            hints.push(key_hint("tui.select.cancel", "cancel"));
+            return hints;
+        }
         Mode::ConfirmRemove { .. } => return hints,
         Mode::Menu { .. } | Mode::InstallScope { .. } => {
             hints.push(raw_key_hint("↑↓", "choose"));
@@ -194,6 +221,7 @@ fn hints(browser: &AcpBrowser) -> Vec<String> {
     match browser.tab {
         AcpTab::Installed => {
             hints.push(key_hint("tui.select.confirm", "actions"));
+            hints.push(raw_key_hint("ctrl+n", "add custom agent"));
             hints.push(raw_key_hint("tab", "registry"));
         }
         AcpTab::Registry => {

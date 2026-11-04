@@ -125,6 +125,7 @@ impl AgentSession {
         self.agent.update_state(|state| state.model = model.clone());
         self.model_selected.store(true, std::sync::atomic::Ordering::Relaxed);
         self.set_thinking_level(level, false);
+        self.emit(&AgentSessionEvent::ModelChanged { model: &model });
     }
 
     fn add_persisted_default_to_scope(&self, model: &Model) {

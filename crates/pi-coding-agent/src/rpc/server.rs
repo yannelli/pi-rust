@@ -95,6 +95,11 @@ impl RpcServer {
             *current = Some((session.clone(), id));
         }
         super::builtins::bind_builtins(session, &self.ui);
+        self.bind_extension_host(session);
+    }
+
+    /// Bind the extension host to `session`, also after a reload, which can load its first extension.
+    pub(super) fn bind_extension_host(&self, session: &Arc<AgentSession>) {
         if let Some(host) = &self.host {
             let binding = RpcExtensionBinding::new(
                 self.runtime.clone(),

@@ -25,7 +25,7 @@ async fn lists_and_runs_the_mcp_command() {
     );
 
     let handled = rpc.data(json!({"id": "p", "type": "prompt", "message": "/mcp"})).await;
-    assert_eq!(handled, json!({"disposition": "handled"}));
+    assert_eq!(handled, json!({"disposition": "handled", "agentInvoked": false}));
     let notice = rpc.wait_for(|record| record["method"] == "notify").await;
     assert!(notice["message"].as_str().unwrap().contains("docs"), "{notice}");
     assert_eq!(notice["notifyType"], "info");

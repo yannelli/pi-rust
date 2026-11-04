@@ -18,7 +18,7 @@ use super::store::McpOAuthCredentialStore;
 use super::transport::{TransportFactory, default_transport_factory};
 use crate::auth::AuthProvider;
 use crate::client::{McpClient, RequestOptions};
-use crate::config::McpServerEntry;
+use crate::config::{McpServerConfig, McpServerEntry};
 use crate::config_value::resolve_config_value_or_err;
 use crate::content::CallToolResult;
 use crate::elicitation::McpElicitation;
@@ -57,6 +57,11 @@ impl fmt::Display for ServerState {
             Self::Closed => "closed",
         })
     }
+}
+
+/// Per-request timeout of a server: its `timeout`, else 60 seconds.
+pub fn request_timeout(config: &McpServerConfig) -> Duration {
+    Duration::from_secs_f64(config.timeout.unwrap_or(DEFAULT_TIMEOUT_SECONDS))
 }
 
 pub type ConnectionCallback = Arc<dyn Fn(&McpServerConnection) + Send + Sync>;
@@ -254,7 +259,7 @@ impl McpServerConnection {
     }
 
     pub fn timeout(&self) -> Duration {
-        Duration::from_secs_f64(self.inner.options.entry.config.timeout.unwrap_or(DEFAULT_TIMEOUT_SECONDS))
+        request_timeout(&self.inner.options.entry.config)
     }
 
     /// Server URL when the server authenticates with OAuth.

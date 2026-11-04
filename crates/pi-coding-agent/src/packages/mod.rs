@@ -58,6 +58,7 @@ pub use config::{
     ConfigGroup, ConfigItem, ConfigSubgroup, ConfigWriteScope, ProjectOverrideState, ScopedResolvedPaths,
     build_config_groups,
 };
+pub(crate) use config_cmd::APPLY_HINT;
 pub use config_cmd::{ConfigSelectorFn, ConfigSelectorRequest, render_config_text, run_config_command};
 pub use config_editor::ConfigEditor;
 pub use git_url::{GitSource, parse_git_url};

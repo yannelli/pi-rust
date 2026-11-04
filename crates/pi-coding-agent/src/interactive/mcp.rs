@@ -11,7 +11,7 @@ use pi_ai::auth::oauth::{DEFAULT_RADIUS_GATEWAY, normalize_radius_gateway_url};
 use pi_mcp::config::{ProviderAuth, add_mcp_server_config};
 use pi_mcp::manager::describe_state;
 use pi_mcp::runtime::{McpSignInPrompt, ServerState};
-use pi_mcp::{McpServerConfig, McpServerStatus, NotifyLevel, load_mcp_config};
+use pi_mcp::{McpLifecycle, McpServerConfig, McpServerStatus, NotifyLevel, load_mcp_config};
 use pi_tui::AutocompleteItem;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
@@ -189,7 +189,10 @@ impl InteractiveMode {
             .session()
             .mcp_statuses()
             .into_iter()
-            .filter(|status| if action == "reconnect" { status.state.is_some() } else { status.oauth })
+            .filter(|status| match action {
+                "reconnect" => status.state.is_some() || status.lifecycle == McpLifecycle::Lazy,
+                _ => status.oauth,
+            })
             .filter(|status| status.entry.name.starts_with(server))
             .map(|status| {
                 let name = status.entry.name.clone();

@@ -99,6 +99,11 @@ pub fn report_text(usages: &[ProviderUsage], now: i64, style: &dyn Fn(Tone, &str
 pub async fn fetch(agent_dir: &Path, oauth: OAuthLookup, provider: Option<&str>) -> Vec<ProviderUsage> {
     let store = Arc::new(FileCredentialStore::new(auth_path(agent_dir)));
     let service = UsageService::new(Arc::new(auth_context(agent_dir, store, oauth).await.resolver));
+    fetch_from(&service, provider).await
+}
+
+/// Fresh usage of `provider`, or of every logged-in provider, from `service`.
+pub async fn fetch_from(service: &UsageService, provider: Option<&str>) -> Vec<ProviderUsage> {
     match provider {
         Some(provider) => vec![service.get(provider, true).await],
         None => service.all(true).await,

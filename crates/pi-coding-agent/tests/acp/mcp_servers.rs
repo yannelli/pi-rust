@@ -167,3 +167,27 @@ async fn a_failed_new_session_closes_its_client_servers() {
     closed_eventually(&fake).await;
     assert!(!all_text(&setup.root.path().join("agent")).contains(SECRET));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mcp_is_advertised_and_answers_without_a_model_call() {
+    let mut setup = setup(Vec::new());
+    let (_fake, _) = with_fake(&mut setup);
+    let work = setup.root.path().join("work");
+    let mut client = start(&setup);
+    client.request("initialize", json!({"protocolVersion": 1, "clientCapabilities": {}})).await;
+    let created = client.request("session/new", json!({"cwd": work, "mcpServers": client_servers()})).await;
+    let id = created["result"]["sessionId"].as_str().expect("session id").to_string();
+    let advertised =
+        client.until(|message| message["params"]["update"]["sessionUpdate"] == "available_commands_update").await;
+    let commands = advertised["params"]["update"]["availableCommands"].as_array().unwrap().clone();
+    let mcp = commands.iter().find(|command| command["name"] == "mcp").expect("/mcp advertised");
+    assert_eq!(mcp["input"]["hint"], "[login|logout|reconnect] [server]");
+
+    let prompt = json!({"sessionId": id, "prompt": [{"type": "text", "text": "/mcp"}]});
+    let response = client.request("session/prompt", prompt).await;
+    assert_eq!(response["result"]["stopReason"], "end_turn", "{response}");
+    let notices: Vec<Value> =
+        client.updates(&id).into_iter().filter(|update| update["_meta"]["piAcp"]["notify"].is_object()).collect();
+    assert!(notices.iter().any(|notice| notice["content"]["text"].as_str().unwrap().contains("docs")), "{notices:?}");
+    assert!(setup.provider.requests().is_empty());
+}

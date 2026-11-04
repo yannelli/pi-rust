@@ -2,7 +2,7 @@
 //! modes (upstream `modes/json-event.ts`, `docs/json.md`).
 
 use pi_agent::AgentEvent;
-use pi_ai::{AssistantMessageEvent, ContentBlock, Message, ThinkingLevel};
+use pi_ai::{AssistantMessageEvent, ContentBlock, Message, Model, ThinkingLevel};
 use serde_json::{Map, Value, json};
 
 use crate::cache_stats::CacheMiss;
@@ -76,6 +76,10 @@ pub enum AgentSessionEvent<'a> {
     FastModeChanged {
         enabled: bool,
     },
+    /// pi-rust extension: the session switched to another model. Only ACP mode forwards it.
+    ModelChanged {
+        model: &'a Model,
+    },
     AutoRetryStart {
         attempt: u32,
         max_attempts: u32,
@@ -131,6 +135,7 @@ impl AgentSessionEvent<'_> {
             Self::SessionInfoChanged { .. } => "session_info_changed",
             Self::ThinkingLevelChanged { .. } => "thinking_level_changed",
             Self::FastModeChanged { .. } => "fast_mode_changed",
+            Self::ModelChanged { .. } => "model_changed",
             Self::AutoRetryStart { .. } => "auto_retry_start",
             Self::AutoRetryEnd { .. } => "auto_retry_end",
             Self::SummarizationRetryScheduled { .. } => "summarization_retry_scheduled",
@@ -145,7 +150,10 @@ impl AgentSessionEvent<'_> {
 
     /// Whether upstream pi sends this event too; JSON mode prints only those.
     pub fn is_upstream_event(&self) -> bool {
-        !matches!(self, Self::ModelRouted { .. } | Self::CacheMiss { .. } | Self::RunLimit(_))
+        !matches!(
+            self,
+            Self::ModelRouted { .. } | Self::CacheMiss { .. } | Self::RunLimit(_) | Self::ModelChanged { .. }
+        )
     }
 
     /// Whether JSON and RPC mode send this event: upstream events, and `run_limit`, which only
@@ -198,6 +206,7 @@ impl AgentSessionEvent<'_> {
             },
             Self::ThinkingLevelChanged { level } => json!({"type": "thinking_level_changed", "level": level.as_str()}),
             Self::FastModeChanged { enabled } => json!({"type": "fast_mode_changed", "enabled": enabled}),
+            Self::ModelChanged { model } => json!({"type": "model_changed", "model": model}),
             Self::AutoRetryStart { attempt, max_attempts, delay_ms, error_message } => json!({
                 "type": "auto_retry_start",
                 "attempt": attempt,

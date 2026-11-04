@@ -1,5 +1,6 @@
 //! Calls to a tool of one server by its MCP name, outside the agent's tool calls (the extension
-//! method `mcp.callTool`). A call waits for a server that is connecting and never signs in.
+//! method `mcp.callTool`). A call connects an idle `lazy` server, waits for a server that is
+//! connecting, and never signs in.
 
 use std::time::Duration;
 
@@ -51,6 +52,7 @@ impl McpManager {
             }
             found.id
         };
+        self.inner.connect_idle(id);
         let ids = [id];
         let wait = self.inner.wait_for_servers(&ids, cancel);
         match deadline {

@@ -19,7 +19,8 @@ async fn prompt_reports_started_and_streams_events_until_settled() {
     let response = rpc.response("p1").await;
     assert_eq!(
         response,
-        json!({"id": "p1", "type": "response", "command": "prompt", "success": true, "data": {"disposition": "started"}})
+        json!({"id": "p1", "type": "response", "command": "prompt", "success": true,
+            "data": {"disposition": "started", "agentInvoked": true}})
     );
     let settled = rpc.settled(1).await;
     assert_eq!(settled, json!({"type": "agent_settled", "aborted": false}));
