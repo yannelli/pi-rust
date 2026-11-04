@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use pi_mcp::config::{McpServerConfigPatch, add_mcp_server_config, remove_mcp_server_config, update_mcp_server_config};
-use pi_mcp::{McpConfigScope, McpExposure, McpServerConfig, get_mcp_tool_exposure, load_mcp_config};
+use pi_mcp::{McpConfigScope, McpExposure, McpLifecycle, McpServerConfig, get_mcp_tool_exposure, load_mcp_config};
 use serde_json::{Value, json};
 
 struct Paths {
@@ -104,19 +104,29 @@ fn lets_project_entries_override_enabled_and_exposure_of_global_servers() {
     assert_eq!(config_json(&tools.config), json!({ "command": "x", "env": { "TOKEN": "secret" }, "enabled": false }));
 
     // Overrides keep `enabled: true`, since it replaces the global value.
-    update_mcp_server_config(&project, "tools", McpServerConfigPatch { enabled: Some(true), exposure: None }, false)
-        .unwrap();
+    update_mcp_server_config(
+        &project,
+        "tools",
+        McpServerConfigPatch { enabled: Some(true), exposure: None, lifecycle: None },
+        false,
+    )
+    .unwrap();
     assert_eq!(read(&project)["mcpServers"]["tools"], json!({ "enabled": true }));
     // Definitions drop default values instead.
     let global = paths.agent_dir.join("mcp.json");
-    let patch = McpServerConfigPatch { enabled: Some(false), exposure: Some(McpExposure::Direct) };
+    let patch = McpServerConfigPatch { enabled: Some(false), exposure: Some(McpExposure::Direct), lifecycle: None };
     update_mcp_server_config(&global, "tools", patch, false).unwrap();
-    let patch = McpServerConfigPatch { enabled: Some(true), exposure: Some(McpExposure::Codemode) };
+    let patch = McpServerConfigPatch { enabled: Some(true), exposure: Some(McpExposure::Codemode), lifecycle: None };
     update_mcp_server_config(&global, "tools", patch, false).unwrap();
     assert_eq!(read(&global)["mcpServers"]["tools"], json!({ "command": "x", "env": { "TOKEN": "secret" } }));
     // A missing entry is added as an override when asked to.
-    update_mcp_server_config(&project, "other", McpServerConfigPatch { enabled: Some(false), exposure: None }, true)
-        .unwrap();
+    update_mcp_server_config(
+        &project,
+        "other",
+        McpServerConfigPatch { enabled: Some(false), exposure: None, lifecycle: None },
+        true,
+    )
+    .unwrap();
     assert_eq!(read(&project)["mcpServers"]["other"], json!({ "enabled": false }));
     let missing = update_mcp_server_config(&global, "nope", McpServerConfigPatch::default(), false).unwrap_err();
     assert!(missing.ends_with("does not define MCP server \"nope\""));
@@ -172,6 +182,42 @@ fn validates_exposure_and_reads_auto_enable_codemode_with_project_precedence() {
     let trusted = load_mcp_config(&paths.agent_dir, &paths.cwd, true);
     assert_eq!(trusted.auto_enable_codemode, Some(false));
     assert!(trusted.errors.iter().any(|error| error.contains("autoEnableCodemode must be a boolean")));
+}
+
+#[test]
+fn reads_lifecycle_per_server_as_a_default_and_in_project_overrides() {
+    let global = json!({
+        "lifecycle": "lazy",
+        "mcpServers": { "tools": { "command": "x" }, "eager": { "command": "y", "lifecycle": "eager" } }
+    });
+    let project =
+        json!({ "mcpServers": { "tools": { "lifecycle": "eager" }, "bad": { "command": "z", "lifecycle": "never" } } });
+    let paths = setup(global, project);
+    let loaded = load_mcp_config(&paths.agent_dir, &paths.cwd, true);
+    assert_eq!(loaded.lifecycle, Some(McpLifecycle::Lazy));
+    let lifecycles: Vec<(&str, Option<McpLifecycle>)> =
+        loaded.servers.iter().map(|entry| (entry.name.as_str(), entry.config.lifecycle)).collect();
+    assert_eq!(lifecycles, [("tools", Some(McpLifecycle::Eager)), ("eager", Some(McpLifecycle::Eager))]);
+    assert_eq!(loaded.errors.len(), 1);
+    assert!(
+        loaded.errors[0].ends_with("server \"bad\": lifecycle must be \"eager\" or \"lazy\""),
+        "{:?}",
+        loaded.errors
+    );
+
+    std::fs::write(paths.agent_dir.join("mcp.json"), json!({ "lifecycle": 1 }).to_string()).unwrap();
+    let loaded = load_mcp_config(&paths.agent_dir, &paths.cwd, false);
+    assert_eq!(loaded.lifecycle, None);
+    assert!(loaded.errors[0].ends_with("mcp.json: lifecycle must be \"eager\" or \"lazy\""), "{:?}", loaded.errors);
+
+    // The patch writes `lifecycle` also as `eager`, since the top-level default can differ.
+    let global = paths.agent_dir.join("mcp.json");
+    std::fs::write(&global, json!({ "mcpServers": { "tools": { "command": "x" } } }).to_string()).unwrap();
+    for lifecycle in [McpLifecycle::Lazy, McpLifecycle::Eager] {
+        let patch = McpServerConfigPatch { lifecycle: Some(lifecycle), ..McpServerConfigPatch::default() };
+        update_mcp_server_config(&global, "tools", patch, false).unwrap();
+        assert_eq!(read(&global)["mcpServers"]["tools"], json!({ "command": "x", "lifecycle": lifecycle.as_str() }));
+    }
 }
 
 #[test]

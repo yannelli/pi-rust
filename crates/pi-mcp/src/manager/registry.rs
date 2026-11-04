@@ -3,19 +3,23 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Weak};
+use std::time::Duration;
 
 use pi_agent::{SharedTool, ToolUpdateCallback};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
+use super::lazy::ConnectOnCall;
 use super::{CODEMODE_TOOL_NAME, Inner, McpManager, NotifyLevel, TOOL_SEARCH_TOOL_NAME};
-use crate::config::{McpExposure, get_mcp_tool_exposure, mcp_namespace};
+use crate::config::{McpExposure, McpLifecycle, get_mcp_tool_exposure, mcp_namespace};
 use crate::naming::create_mcp_tool_name;
 use crate::output::McpToolOutput;
 use crate::resources::{McpResourceServer, McpResourceTool, ResourceServersFn, create_mcp_resource_tools};
 use crate::runtime::{McpServerConnection, ServerState};
 use crate::section::configured_exposures;
+use crate::tool_cache::write_cached_tools;
 use crate::tools::{CallerFn, McpTool, McpToolCaller, McpToolOptions, ToolAnnotations, ToolExposure, ToolNamespace};
+use crate::types::Tool;
 
 /// A registered MCP tool: a server tool or a resource tool.
 #[derive(Clone)]
@@ -169,12 +173,21 @@ fn caller(weak: Weak<Inner>, server: String, tool: String) -> CallerFn {
         let inner = weak.upgrade().ok_or_else(disabled)?;
         let state = inner.lock();
         let current = state.named(&server).filter(|current| current.enabled()).ok_or_else(disabled)?;
-        let connection =
-            current.connection.clone().ok_or_else(|| format!("MCP server \"{server}\" is still starting."))?;
+        let hidden = get_mcp_tool_exposure(&current.entry.config, &tool) == McpExposure::Hidden;
+        let unavailable = || format!("MCP tool \"{server}/{tool}\" is no longer available.");
+        let Some(connection) = current.connection.clone() else {
+            if state.lifecycle(current) != McpLifecycle::Lazy {
+                return Err(format!("MCP server \"{server}\" is still starting."));
+            }
+            if hidden {
+                return Err(unavailable());
+            }
+            return Ok(Arc::new(ConnectOnCall::new(weak.clone(), &server)) as Arc<dyn McpToolCaller>);
+        };
         let dropped = connection.state() == ServerState::Connected
             && !connection.tools().iter().any(|offered| offered.name == tool);
-        if get_mcp_tool_exposure(&current.entry.config, &tool) == McpExposure::Hidden || dropped {
-            return Err(format!("MCP tool \"{server}/{tool}\" is no longer available."));
+        if hidden || dropped {
+            return Err(unavailable());
         }
         Ok(Arc::new(connection) as Arc<dyn McpToolCaller>)
     })
@@ -192,13 +205,25 @@ impl Inner {
             .collect()
     }
 
+    /// Register the tools a connected server lists and save them to its tool cache.
     pub(super) fn register_tools(self: &Arc<Self>, connection: &McpServerConnection) {
-        let server = connection.name().to_string();
-        let (offered, instructions, timeout) = (connection.tools(), connection.instructions(), connection.timeout());
+        let (offered, instructions) = (connection.tools(), connection.instructions());
+        let _ = write_cached_tools(&self.options.agent_dir, connection.entry(), &offered, instructions.as_deref());
+        self.register_offered(connection.name(), offered, instructions, connection.timeout());
+    }
+
+    /// Register the tools a server offers, from its connection or its tool cache.
+    pub(super) fn register_offered(
+        self: &Arc<Self>,
+        server: &str,
+        offered: Vec<Tool>,
+        instructions: Option<String>,
+        timeout: Duration,
+    ) {
+        let server = server.to_string();
         {
             let mut state = self.lock();
-            let entry =
-                state.named(&server).map_or_else(|| connection.entry().clone(), |current| current.entry.clone());
+            let Some(entry) = state.named(&server).map(|current| current.entry.clone()) else { return };
             let description = entry.config.description.as_deref().map(str::trim).filter(|text| !text.is_empty());
             let namespace = ToolNamespace {
                 name: mcp_namespace(&server),

@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-use super::{Inner, McpManager, NotifyLevel, Server};
-use crate::config::McpServerEntry;
+use super::{Inner, McpManager, NotifyLevel, Server, State};
+use crate::config::{McpLifecycle, McpServerEntry};
 use crate::resources::locale_cmp;
 use crate::runtime::ServerState;
 
@@ -12,6 +12,8 @@ use crate::runtime::ServerState;
 pub struct McpServerStatus {
     pub entry: McpServerEntry,
     pub enabled: bool,
+    /// When the server connects, with the top-level default applied.
+    pub lifecycle: McpLifecycle,
     /// `None` until the connection is created.
     pub state: Option<ServerState>,
     pub error: Option<String>,
@@ -32,12 +34,15 @@ fn plural(count: usize, word: &str) -> String {
     format!("{count} {word}{}", if count == 1 { "" } else { "s" })
 }
 
+const IDLE_STATE: &str = "idle, connects on first use";
+
 /// Short state for lists and the startup report. `with_error` appends the first line of a failure.
 pub fn describe_state(status: &McpServerStatus, with_error: bool) -> String {
     if !status.enabled {
         return "disabled".into();
     }
     match status.state {
+        None if status.lifecycle == McpLifecycle::Lazy => IDLE_STATE.into(),
         None => "starting".into(),
         Some(ServerState::NeedsAuth) => "needs sign-in".into(),
         Some(ServerState::Failed) if with_error => {
@@ -66,11 +71,12 @@ pub(crate) fn attention_rank(status: &McpServerStatus) -> u8 {
     }
 }
 
-fn status_of(server: &Server) -> McpServerStatus {
+fn status_of(state: &State, server: &Server) -> McpServerStatus {
     let connection = server.connection.as_ref();
     McpServerStatus {
         entry: server.entry.clone(),
         enabled: server.enabled(),
+        lifecycle: state.lifecycle(server),
         state: connection.map(|connection| connection.state()),
         error: connection.and_then(|connection| connection.error()),
         tools: connection
@@ -90,7 +96,8 @@ pub(crate) fn no_servers_message(agent_dir: &Path) -> String {
 impl McpManager {
     /// Every server in config order.
     pub fn statuses(&self) -> Vec<McpServerStatus> {
-        self.inner.lock().servers.iter().map(status_of).collect()
+        let state = self.inner.lock();
+        state.servers.iter().map(|server| status_of(&state, server)).collect()
     }
 
     /// Servers sorted for a manager view: the ones that need the user first, then by name.
@@ -103,7 +110,8 @@ impl McpManager {
     }
 
     pub fn status(&self, name: &str) -> Option<McpServerStatus> {
-        self.inner.lock().named(name).map(status_of)
+        let state = self.inner.lock();
+        state.named(name).map(|server| status_of(&state, server))
     }
 
     pub fn config_errors(&self) -> Vec<String> {
@@ -140,6 +148,7 @@ impl McpManager {
                     _ if !status.enabled => "disabled".to_string(),
                     Some(ServerState::Disconnected) => "disconnected, reconnects on next call".into(),
                     Some(state) => state.to_string(),
+                    None if status.lifecycle == McpLifecycle::Lazy => IDLE_STATE.into(),
                     None => "starting".into(),
                 };
                 let error = match &status.error {
@@ -167,7 +176,7 @@ impl Inner {
                 lines.extend(state.config_errors.iter().map(|error| format!("config: {error}")));
             }
             let servers = state.servers.iter().filter(|server| only.is_none_or(|only| only.contains(&server.id)));
-            for status in servers.map(status_of) {
+            for status in servers.map(|server| status_of(&state, server)) {
                 if matches!(status.state, Some(ServerState::NeedsAuth | ServerState::Failed)) {
                     lines.push(format!("{}: {}", status.entry.name, describe_state(&status, true)));
                 }

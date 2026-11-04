@@ -124,6 +124,7 @@ pi-rust adds this behavior on purpose. Do not report these items as gaps in the 
   - `google-antigravity` from the `model` and `thought_level` selectors of the Antigravity ACP server
 - Subscription providers `cursor` and `google-antigravity` with their logins and the APIs `cursor-agent` and `antigravity-acp` ([Subscription providers](../providers/subscription-providers.md)).
 - Fast mode: `/fast`, `--fast`, the `fastMode` setting, `compat.fastMode`, the ACP `fast_mode` option, RPC `set_fast_mode`, and the `fastMode` and `fastModeAvailable` fields of `get_state` ([Fast mode](../../crates/pi-coding-agent/docs/providers.md#fast-mode-pi-rust-extension)).
+- MCP server `lifecycle` (`eager` or `lazy`) in `mcp.json` and the tool cache in `mcp-cache/` ([MCP server lifecycle](../../crates/pi-coding-agent/docs/mcp.md)).
 - Markdown export: if the output path ends in `.md`, `/export` and `pi --export` write Markdown ([Export](../../crates/pi-coding-agent/docs/commands.md#export)).
 - The README section "Differences from upstream pi" lists the other additions: slash commands, CLI commands and flags, and settings. It also lists the bugs that pi-rust fixes and that are still open upstream. `allowlist.json` holds the matching parity report entries.
 
