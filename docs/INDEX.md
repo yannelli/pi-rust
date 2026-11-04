@@ -1,6 +1,6 @@
 # Documentation index
 
-Created: 2026-10-29. Last updated: 2026-11-01.
+Created: 2026-10-29. Last updated: 2026-11-04.
 
 | Document | Use it when |
 | --- | --- |
@@ -14,3 +14,4 @@ Created: 2026-10-29. Last updated: 2026-11-01.
 | [providers/usage.md](providers/usage.md) | You change `/usage`, `pi usage`, or `usage.get`. It records the usage endpoints of each provider and their sources. |
 | [providers/subscription-providers.md](providers/subscription-providers.md) | You change the Cursor or Google Antigravity provider. It records their login flows and wire protocols. |
 | [../crates/pi-coding-agent/docs/acp-providers.md](../crates/pi-coding-agent/docs/acp-providers.md) | You change the ACP client provider, the `/acp` browser, or the `acpAgents` setting. It records the ACP registry format and how Kiro CLI and Amp run over ACP. |
+| [../crates/pi-coding-agent/docs/mcp.md](../crates/pi-coding-agent/docs/mcp.md) | You change when MCP servers connect (`lifecycle`) or the MCP tool cache in `mcp-cache/`. |

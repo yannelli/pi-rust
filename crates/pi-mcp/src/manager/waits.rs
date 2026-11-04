@@ -1,6 +1,6 @@
 //! Waiting for servers: the first prompt waits for servers with `direct` tools; tools that reach
 //! other tools (codemode scripts, `tool_search`) and the resource tools wait for the servers they need
-//! when they run.
+//! when they run, and connect the `lazy` servers among them whose tools are not known yet.
 
 use pi_agent::ToolReach;
 use tokio_util::sync::CancellationToken;
@@ -28,14 +28,22 @@ pub fn reaches_server(reach: &ToolReach, server: &str) -> bool {
 
 impl McpManager {
     /// The first prompt waits for servers with `direct` tools, up to `startup_wait`, once per session.
-    /// Returns false when it stopped waiting; their tools register once they connect.
+    /// It connects `lazy` servers with `direct` tools that have no tool cache, since the model learns
+    /// of direct tools only from their declarations. Returns false when it stopped waiting; their
+    /// tools register once they connect.
     pub async fn wait_for_direct_servers(&self) -> bool {
-        let ready: Vec<Ready> = {
+        {
             let mut state = self.inner.lock();
             if state.waited_for_startup {
                 return true;
             }
             state.waited_for_startup = true;
+        }
+        for id in self.inner.idle_without_tools(|server| has_direct_tools(&server.entry)) {
+            self.inner.connect_idle(id);
+        }
+        let ready: Vec<Ready> = {
+            let state = self.inner.lock();
             let waiting = state.servers.iter().filter(|server| server.enabled() && has_direct_tools(&server.entry));
             waiting.filter_map(|server| server.ready.clone()).collect()
         };
@@ -58,7 +66,11 @@ impl McpManager {
             .iter()
             .map(|server| McpServerListing {
                 entry: server.entry.clone(),
-                instructions: server.connection.as_ref().and_then(McpServerConnection::instructions),
+                instructions: server
+                    .connection
+                    .as_ref()
+                    .and_then(McpServerConnection::instructions)
+                    .or_else(|| server.cached_instructions.clone()),
             })
             .collect();
         render_servers_section(&listings)
@@ -66,8 +78,14 @@ impl McpManager {
 
     /// Wait before a tool call for the servers it needs: those a tool that reaches other tools may
     /// reach (`reach`, from `AgentTool::reaches_tools`), all of them for the resource tools, else the
-    /// tool's own server.
+    /// tool's own server. Reached `lazy` servers without a tool cache connect first; other `lazy`
+    /// servers connect when one of their tools is called.
     pub async fn wait_for_tool_call(&self, tool_name: &str, reach: Option<&ToolReach>, cancel: &CancellationToken) {
+        if let Some(reach) = reach {
+            for id in self.inner.idle_without_tools(|server| reaches_server(reach, &server.entry.name)) {
+                self.inner.connect_idle(id);
+            }
+        }
         let waiting: Vec<u64> = {
             let state = self.inner.lock();
             let ready = state.servers.iter().filter(|server| server.enabled() && server.ready.is_some());
