@@ -6,9 +6,10 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use pi_tui::components::Text;
+use pi_tui::list_overflow::{ListRow, ListRows};
 use pi_tui::{Component, Container, Tui, component, get_keybindings};
 
-use super::common::{Shared, bold, border, fg, shared, spacer, text, visible_window};
+use super::common::{Shared, bold, border, fg, shared, spacer, text};
 use super::{CountdownTimer, key_hint, raw_key_hint};
 use crate::theme::ThemeColor;
 
@@ -34,7 +35,7 @@ pub struct ExtensionSelector {
     options: Vec<String>,
     selected_index: usize,
     max_visible: usize,
-    list: Rc<RefCell<Container>>,
+    list: Rc<RefCell<ListRows>>,
     tui: Option<Tui>,
     on_select: Box<dyn FnMut(&str)>,
     on_cancel: Shared<dyn FnMut()>,
@@ -79,7 +80,7 @@ impl ExtensionSelector {
             _ => None,
         };
 
-        let list = component(Container::new());
+        let list = component(ListRows::default());
         container.add_child(list.clone());
         container.add_child(spacer(1));
         let hint = format!(
@@ -114,20 +115,19 @@ impl ExtensionSelector {
 
     fn update_list(&mut self) {
         let mut list = self.list.borrow_mut();
-        list.clear();
-        let (start, end) = visible_window(self.selected_index, self.options.len(), self.max_visible);
-        for (index, option) in self.options.iter().enumerate().take(end).skip(start) {
-            let line = if index == self.selected_index {
-                fg(ThemeColor::Accent, "→ ") + &fg(ThemeColor::Accent, option)
-            } else {
-                format!("  {}", fg(ThemeColor::Text, option))
-            };
-            list.add_child(text(&line, 1, 0));
-        }
-        if end - start < self.options.len() {
-            let count = format!("  ({}/{})", self.selected_index + 1, self.options.len());
-            list.add_child(text(&fg(ThemeColor::Muted, &count), 1, 0));
-        }
+        list.rows = self
+            .options
+            .iter()
+            .enumerate()
+            .map(|(index, option)| {
+                let selected = index == self.selected_index;
+                let cursor = if selected { fg(ThemeColor::Accent, "→ ") } else { "  ".to_string() };
+                let content = fg(if selected { ThemeColor::Accent } else { ThemeColor::Text }, option);
+                ListRow::new(format!(" {cursor}"), content)
+            })
+            .collect();
+        list.selected = self.selected_index;
+        list.max_lines = self.max_visible;
     }
 
     /// Stops the countdown.

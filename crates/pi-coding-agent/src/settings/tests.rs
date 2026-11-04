@@ -57,6 +57,24 @@ fn extension_runtime_defaults_to_quickjs_and_project_wins() {
 }
 
 #[test]
+fn list_overflow_defaults_validates_and_round_trips() {
+    use super::schema::ListOverflow;
+    let dirs = Dirs::new();
+    let settings = dirs.manager(true);
+    assert_eq!(settings.list_overflow(), ListOverflow::Truncate);
+    for mode in [ListOverflow::Wrap, ListOverflow::Scroll, ListOverflow::Truncate] {
+        settings.set_list_overflow(mode);
+        assert_eq!(dirs.manager(true).list_overflow(), mode);
+        assert_eq!(read(&dirs.global())["listOverflow"], json!(mode));
+    }
+    write(&dirs.global(), json!({"listOverflow": "invalid", "theme": "light"}));
+    let settings = dirs.manager(true);
+    assert_eq!(settings.list_overflow(), ListOverflow::Truncate);
+    assert_eq!(settings.theme().as_deref(), Some("light"));
+    assert!(super::schema::PI_SETTINGS_KEYS.contains(&"listOverflow"));
+}
+
+#[test]
 fn writes_keep_unknown_keys_and_external_edits() {
     let dirs = Dirs::new();
     write(&dirs.global(), json!({"theme": "dark", "enabledModels": ["a/*"], "customKey": {"x": 1}}));

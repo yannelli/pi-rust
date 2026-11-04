@@ -77,7 +77,40 @@ fn messages_are_flattened_and_truncated() {
     let items = vec![UserMessageItem::new("a", "  first line\nsecond line that is long  ")];
     let mut selector = UserMessageSelector::new(items, |_| {}, || {}, None);
     let lines = render_plain(&mut selector, 24);
-    assert_eq!(selected_line(&lines), "› first line second l...");
+    assert_eq!(selected_line(&lines), "› first line second lin…");
+}
+
+#[test]
+fn user_message_list_uses_each_overflow_mode() {
+    use pi_tui::list_overflow::{ListOverflow, list_overflow, set_list_overflow};
+    struct ResetMode(ListOverflow);
+    impl Drop for ResetMode {
+        fn drop(&mut self) {
+            set_list_overflow(self.0);
+        }
+    }
+    let _kb = setup();
+    let _reset = ResetMode(list_overflow());
+    for mode in [ListOverflow::Truncate, ListOverflow::Wrap, ListOverflow::Scroll] {
+        set_list_overflow(mode);
+        let mut list = UserMessageList::new(vec![UserMessageItem::new("a", "abcdefghijklmno")], None);
+        let lines = render_plain(&mut list, 10);
+        assert!(pi_tui::utils::visible_width(&lines[0]) <= 10);
+        match mode {
+            ListOverflow::Wrap => {
+                assert_eq!(lines[0], "› abcdefgh");
+                assert_eq!(lines[1], "  ijklmno");
+            }
+            ListOverflow::Truncate => assert_eq!(lines[0], "› abcdefg…"),
+            ListOverflow::Scroll => {
+                if pi_tui::list_overflow::reduced_motion() {
+                    assert_eq!(lines[0], "› abcdefg…");
+                } else {
+                    assert_eq!(lines[0], "› abcdefgh");
+                }
+            }
+        }
+    }
 }
 
 #[test]

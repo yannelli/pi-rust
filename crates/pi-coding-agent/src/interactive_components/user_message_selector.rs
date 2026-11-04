@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use pi_tui::utils::truncate_to_width;
+use pi_tui::list_overflow::{ListOverflowState, ListRow};
 use pi_tui::{Component, Container, component, get_keybindings, get_select_page_index, ui_loop};
 
 use super::common::{Shared, bold, border, fg, shared, spacer, text};
@@ -31,6 +31,7 @@ pub struct UserMessageList {
     messages: Vec<UserMessageItem>,
     selected_index: usize,
     max_visible: usize,
+    overflow: ListOverflowState,
     pub on_select: Option<Box<dyn FnMut(String)>>,
     pub on_cancel: Option<Box<dyn FnMut()>>,
 }
@@ -40,7 +41,14 @@ impl UserMessageList {
     pub fn new(messages: Vec<UserMessageItem>, initial_selected_id: Option<&str>) -> Self {
         let initial = initial_selected_id.and_then(|id| messages.iter().position(|message| message.id == id));
         let selected_index = initial.unwrap_or(messages.len().saturating_sub(1));
-        Self { messages, selected_index, max_visible: 10, on_select: None, on_cancel: None }
+        Self {
+            messages,
+            selected_index,
+            max_visible: 10,
+            overflow: ListOverflowState::default(),
+            on_select: None,
+            on_cancel: None,
+        }
     }
 
     pub fn selected_index(&self) -> usize {
@@ -56,19 +64,27 @@ impl Component for UserMessageList {
             return lines;
         }
         let len = self.messages.len();
-        let start = (self.selected_index as i64 - (self.max_visible / 2) as i64)
-            .min(len as i64 - self.max_visible as i64)
-            .max(0) as usize;
-        let end = (start + self.max_visible).min(len);
-        for index in start..end {
-            let message = &self.messages[index];
-            let selected = index == self.selected_index;
-            let normalized = message.text.replace('\n', " ");
-            let truncated = truncate_to_width(normalized.trim(), width.saturating_sub(2));
-            let cursor = if selected { fg(ThemeColor::Accent, "› ") } else { "  ".to_string() };
-            lines.push(cursor + &if selected { bold(&truncated) } else { truncated });
-            lines.push(fg(ThemeColor::Muted, &format!("  Message {} of {len}", index + 1)));
-            lines.push(String::new());
+        let rows: Vec<ListRow> = self
+            .messages
+            .iter()
+            .enumerate()
+            .map(|(index, message)| {
+                let selected = index == self.selected_index;
+                let normalized = message.text.replace('\n', " ");
+                let content = if selected { bold(normalized.trim()) } else { normalized.trim().to_string() };
+                let cursor = if selected { fg(ThemeColor::Accent, "› ") } else { "  ".to_string() };
+                ListRow::new(cursor, content)
+            })
+            .collect();
+        let rendered = self.overflow.render(&rows, self.selected_index, self.max_visible, width);
+        let (start, end) = (rendered.range.start, rendered.range.end);
+        for (line_index, line) in rendered.lines.into_iter().enumerate() {
+            lines.push(line);
+            let index = rendered.row_indices[line_index];
+            if rendered.row_indices.get(line_index + 1) != Some(&index) {
+                lines.push(fg(ThemeColor::Muted, &format!("  Message {} of {len}", index + 1)));
+                lines.push(String::new());
+            }
         }
         if start > 0 || end < len {
             lines.push(fg(ThemeColor::Muted, &format!("  ({}/{len})", self.selected_index + 1)));

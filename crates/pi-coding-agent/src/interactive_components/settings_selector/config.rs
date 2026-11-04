@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 use pi_agent::QueueMode;
 use pi_ai::{Model, ThinkingLevel, Transport};
+use pi_tui::list_overflow::ListOverflow;
 
 use crate::settings::defaults::{
     DEFAULT_HTTP_IDLE_TIMEOUT_MS, DEFAULT_THINKING_LEVEL, PROVIDER_MAX_RETRY_DELAY_MS, RETRY_BASE_DELAY_MS,
@@ -114,6 +115,7 @@ pub struct SettingsConfig {
     /// `0` or `1`.
     pub output_pad: u8,
     pub autocomplete_max_visible: u64,
+    pub list_overflow: ListOverflow,
     pub quiet_startup: QuietStartup,
     pub default_project_trust: DefaultProjectTrust,
     pub clear_on_shrink: bool,
@@ -175,6 +177,7 @@ impl Default for SettingsConfig {
             editor_padding_x: 0,
             output_pad: 1,
             autocomplete_max_visible: 5,
+            list_overflow: ListOverflow::Truncate,
             quiet_startup: QuietStartup::Off,
             default_project_trust: DefaultProjectTrust::Ask,
             clear_on_shrink: false,
@@ -241,6 +244,7 @@ pub struct SettingsCallbacks {
     pub on_editor_padding_x_change: OnChange<u64>,
     pub on_output_pad_change: OnChange<u8>,
     pub on_autocomplete_max_visible_change: OnChange<u64>,
+    pub on_list_overflow_change: OnChange<ListOverflow>,
     pub on_quiet_startup_change: OnChange<QuietStartup>,
     pub on_default_project_trust_change: OnChange<DefaultProjectTrust>,
     pub on_clear_on_shrink_change: OnChange<bool>,
@@ -298,6 +302,7 @@ impl Default for SettingsCallbacks {
             on_editor_padding_x_change: ignore(),
             on_output_pad_change: ignore(),
             on_autocomplete_max_visible_change: ignore(),
+            on_list_overflow_change: ignore(),
             on_quiet_startup_change: ignore(),
             on_default_project_trust_change: ignore(),
             on_clear_on_shrink_change: ignore(),

@@ -48,6 +48,30 @@ pub(super) fn preview_recorder(calls: &Calls<String>) -> Option<OnText> {
 }
 
 #[test]
+fn list_overflow_setting_cycles_and_applies_live() {
+    use pi_tui::list_overflow::{ListOverflow, list_overflow, set_list_overflow};
+    struct ResetMode(ListOverflow);
+    impl Drop for ResetMode {
+        fn drop(&mut self) {
+            set_list_overflow(self.0);
+        }
+    }
+    let _kb = setup();
+    let _reset = ResetMode(list_overflow());
+    let settings = Arc::new(SettingsManager::in_memory(json!({})));
+    let config = SettingsConfig::from_settings(&settings);
+    assert_eq!(config.list_overflow, ListOverflow::Truncate);
+    let mut selector = SettingsSelector::new(config, SettingsCallbacks::persisting(settings.clone()));
+    type_label(&mut selector, "List overflow");
+    for mode in [ListOverflow::Wrap, ListOverflow::Scroll, ListOverflow::Truncate] {
+        selector.handle_input(keys::ENTER);
+        assert_eq!(settings.list_overflow(), mode);
+        assert_eq!(list_overflow(), mode);
+        assert!(list_text(&selector, 40).contains("List overflow"));
+    }
+}
+
+#[test]
 fn cycles_through_fullscreen_settings() {
     let _kb = setup();
     let exit_output = Calls::new();
@@ -194,7 +218,7 @@ fn orders_settings_like_upstream_with_and_without_image_support() {
             "steering-mode",
         ]
     );
-    assert_eq!(ids.len(), 43);
+    assert_eq!(ids.len(), 44);
     let network = ids.iter().position(|id| id == "http-idle-timeout").unwrap();
     assert_eq!(
         &ids[network..network + 10],
@@ -215,7 +239,7 @@ fn orders_settings_like_upstream_with_and_without_image_support() {
     let without = SettingsSelector::with_image_support(SettingsConfig::default(), SettingsCallbacks::default(), false);
     let without = self::ids(&without);
     assert_eq!(without[..2], ["autocompact", "auto-resize-images"]);
-    assert_eq!(without.len(), 41);
+    assert_eq!(without.len(), 42);
 }
 
 #[test]
@@ -232,7 +256,7 @@ fn renders_between_borders_and_navigates_with_a_terminal() {
     assert!(screen.contains("→ Auto-compact"), "{screen}");
     assert!(screen.contains("Automatically compact context when it gets too large"), "{screen}");
     assert!(screen.contains("Type to search · Enter/Space to change · Esc to cancel"), "{screen}");
-    assert!(screen.contains("(1/41)"), "{screen}");
+    assert!(screen.contains("(1/42)"), "{screen}");
     harness.send(keys::DOWN);
     let screen = harness.screen();
     assert!(screen.contains("→ Auto-resize images"), "{screen}");

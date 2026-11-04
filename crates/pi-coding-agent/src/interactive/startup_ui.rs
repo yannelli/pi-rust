@@ -78,6 +78,7 @@ async fn show_startup_dialog<C: pi_tui::Component + 'static>(
     settings: &SettingsManager,
     create: impl FnOnce(Tui, Answer) -> Rc<RefCell<C>>,
 ) -> Option<String> {
+    pi_tui::list_overflow::set_list_overflow(settings.list_overflow());
     let setting = settings.theme_setting();
     init_theme(resolve_theme_setting(setting.as_deref(), get_terminal_theme()).as_deref(), false);
     let tui = Tui::new_main_screen(

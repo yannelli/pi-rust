@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 use pi_agent::QueueMode;
 use pi_ai::{ThinkingLevel, Transport};
+pub use pi_tui::list_overflow::ListOverflow;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -469,6 +470,9 @@ pub struct Settings {
     pub output_pad: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub autocomplete_max_visible: Option<f64>,
+    /// pi-rust extension: fitting of selectable list rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list_overflow: Option<ListOverflow>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_history: Option<PromptHistorySettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -560,6 +564,7 @@ pub const PI_SETTINGS_KEYS: &[&str] = &[
     "editorPaddingX",
     "outputPad",
     "autocompleteMaxVisible",
+    "listOverflow",
     "showHardwareCursor",
     "markdown",
     "warnings",

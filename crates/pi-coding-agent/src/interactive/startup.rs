@@ -288,6 +288,7 @@ impl InteractiveMode {
             state.hide_thinking_block = settings.hide_thinking_block();
             state.output_pad = usize::from(settings.output_pad());
         }
+        pi_tui::list_overflow::set_list_overflow(settings.list_overflow());
         tui.set_show_hardware_cursor(settings.show_hardware_cursor());
         let clear_on_shrink = settings.clear_on_shrink();
         tui.set_clear_on_shrink(clear_on_shrink);

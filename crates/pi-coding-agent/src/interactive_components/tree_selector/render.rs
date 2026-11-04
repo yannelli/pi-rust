@@ -2,11 +2,11 @@
 //! marker, labels, and a horizontal viewport that keeps deep rows readable.
 
 use pi_tui::Component;
-use pi_tui::utils::{slice_by_column, truncate_to_width, truncate_to_width_with, visible_width};
+use pi_tui::list_overflow::ListRow;
+use pi_tui::utils::{slice_by_column, truncate_to_width, visible_width};
 
 use super::list::{FilterMode, TreeList};
 use super::text::{entry_display_text, format_label_timestamp};
-use crate::interactive_components::common::visible_window;
 use crate::theme::{ThemeBg, ThemeColor, theme};
 
 const TREE_GUTTER_WIDTH: usize = 2;
@@ -25,7 +25,7 @@ struct ViewportRow {
 
 /// Clips row bodies horizontally, keeping the cursor gutter. Bodies shift left only when the
 /// selected row's text would start too far right to show useful content.
-fn render_horizontal_viewport(rows: &[ViewportRow], width: usize) -> Vec<String> {
+fn render_horizontal_viewport(rows: &[ViewportRow], width: usize) -> Vec<ListRow> {
     let viewport_width = width.saturating_sub(TREE_GUTTER_WIDTH);
     let max_body_width = rows.iter().map(|row| row.body_width).max().unwrap_or(0);
     let max_scroll = max_body_width.saturating_sub(viewport_width);
@@ -42,12 +42,11 @@ fn render_horizontal_viewport(rows: &[ViewportRow], width: usize) -> Vec<String>
     }
     rows.iter()
         .map(|row| {
-            let line = if scroll > 0 {
-                format!("{}{}\x1b[0m", row.gutter, slice_by_column(&row.body, scroll, viewport_width, true))
-            } else {
-                format!("{}{}", row.gutter, row.body)
-            };
-            truncate_to_width_with(&line, width, "", false)
+            let indent = row.anchor_col.saturating_sub(scroll).min(viewport_width.saturating_sub(1));
+            let prefix = format!("{}{}\x1b[0m", row.gutter, slice_by_column(&row.body, scroll, indent, true));
+            let text =
+                slice_by_column(&row.body, scroll + indent, row.body_width.saturating_sub(scroll + indent), true);
+            ListRow::new(prefix, text)
         })
         .collect()
 }
@@ -107,9 +106,8 @@ impl Component for TreeList {
             return vec![muted("  No entries found"), muted(&format!("  (0/0){}", self.status_labels()))];
         }
 
-        let (start, end) = visible_window(self.selected_index, self.filtered.len(), self.max_visible_lines);
-        let mut rows = Vec::with_capacity(end - start);
-        for index in start..end {
+        let mut rows = Vec::with_capacity(self.filtered.len());
+        for index in 0..self.filtered.len() {
             let flat = self.filtered[index];
             let row = &self.flat_nodes[flat];
             let node = self.node_of(flat);
@@ -147,7 +145,8 @@ impl Component for TreeList {
             rows.push(ViewportRow { gutter, body, anchor_col, body_width, is_selected });
         }
 
-        let mut lines = render_horizontal_viewport(&rows, width);
+        let rows = render_horizontal_viewport(&rows, width);
+        let mut lines = self.overflow.render(&rows, self.selected_index, self.max_visible_lines, width).lines;
         let position = format!("  ({}/{}){}", self.selected_index + 1, self.filtered.len(), self.status_labels());
         lines.push(muted(&position));
         lines

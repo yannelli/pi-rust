@@ -165,6 +165,7 @@ impl InteractiveMode {
         let session = runtime.session();
         let settings = session.settings().clone();
         apply_capability_overrides(&settings);
+        pi_tui::list_overflow::set_list_overflow(settings.list_overflow());
         let tui_mode = options.tui_mode.unwrap_or_else(|| settings.tui_mode());
         options.tui_mode = Some(tui_mode);
         let agent_dir = options.agent_dir.clone().unwrap_or_else(crate::config::agent_dir);

@@ -38,6 +38,7 @@ pub fn config_selector_fn() -> ConfigSelectorFn {
 pub fn run_config_selector(request: ConfigSelectorRequest) {
     let ConfigSelectorRequest { editor, project_mode_available } = request;
     let settings = editor.settings().clone();
+    pi_tui::list_overflow::set_list_overflow(settings.list_overflow());
     init_theme(settings.theme().as_deref(), true);
 
     let terminal: TerminalRef = Rc::new(RefCell::new(ProcessTerminal::new()));

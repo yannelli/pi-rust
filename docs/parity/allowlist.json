@@ -385,6 +385,10 @@
   ],
   "settings": [
     {
+      "item": "listOverflow",
+      "reason": "pi-rust extension: selectable TUI rows can truncate, wrap, or scroll. The /settings menu applies changes live; PI_REDUCED_MOTION=1 disables scrolling."
+    },
+    {
       "item": "disabledProviders",
       "reason": "pi-rust extension: global-only provider exclusions across model selectors and registry refreshes; credentials are preserved. The TUI /settings menu edits it and applies the change immediately."
     },

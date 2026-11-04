@@ -5,10 +5,11 @@ use std::rc::Rc;
 
 use pi_ai::auth::{AuthCheck, AuthType};
 use pi_tui::components::Input;
+use pi_tui::list_overflow::ListRow;
 use pi_tui::{Component, Container, component, get_keybindings, get_select_page_index};
 
 use crate::agent_session::login::LoginProvider;
-use crate::interactive_components::common::{bold, border, fg, fuzzy_filter_by, spacer, truncated, visible_window};
+use crate::interactive_components::common::{bold, border, fg, fuzzy_filter_by, list_rows, spacer, truncated};
 use crate::theme::ThemeColor;
 
 /// One login option of the selector (upstream `AuthSelectorProvider`).
@@ -175,8 +176,8 @@ impl OAuthSelector {
     fn update_list(&mut self) {
         let mut list = self.list.borrow_mut();
         list.clear();
-        let (start, end) = visible_window(self.selected_index, self.filtered.len(), MAX_VISIBLE);
-        for (index, provider) in self.filtered.iter().enumerate().take(end).skip(start) {
+        let mut rows = Vec::with_capacity(self.filtered.len());
+        for (index, provider) in self.filtered.iter().enumerate() {
             let status = format_auth_selector_provider_status(provider);
             let auth_label = if self.show_auth_type_labels {
                 let label = format_auth_selector_provider_type(provider.auth_type, provider.subscription);
@@ -184,21 +185,12 @@ impl OAuthSelector {
             } else {
                 String::new()
             };
-            let line = if index == self.selected_index {
-                format!(
-                    "{}{}{auth_label}{status}",
-                    fg(ThemeColor::Accent, "→ "),
-                    fg(ThemeColor::Accent, &provider.name)
-                )
-            } else {
-                format!("  {}{auth_label}{status}", fg(ThemeColor::Text, &provider.name))
-            };
-            list.add_child(truncated(&line, 1, 0));
+            let selected = index == self.selected_index;
+            let cursor = if selected { fg(ThemeColor::Accent, "→ ") } else { "  ".to_string() };
+            let name = fg(if selected { ThemeColor::Accent } else { ThemeColor::Text }, &provider.name);
+            rows.push(ListRow::new(format!(" {cursor}"), format!("{name}{auth_label}{status}")));
         }
-        if start > 0 || end < self.filtered.len() {
-            let info = format!("  ({}/{})", self.selected_index + 1, self.filtered.len());
-            list.add_child(truncated(&fg(ThemeColor::Muted, &info), 1, 0));
-        }
+        list.add_child(list_rows(rows, self.selected_index, MAX_VISIBLE));
         if self.filtered.is_empty() {
             let message = match (self.all_providers.is_empty(), self.mode) {
                 (true, AuthSelectorMode::Login) => "No providers available",

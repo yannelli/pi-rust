@@ -50,6 +50,7 @@ impl SettingsConfig {
             editor_padding_x: settings.editor_padding_x(),
             output_pad: settings.output_pad(),
             autocomplete_max_visible: settings.autocomplete_max_visible(),
+            list_overflow: settings.list_overflow(),
             quiet_startup: settings.quiet_startup(),
             default_project_trust: DefaultProjectTrust::from_setting(settings.default_project_trust()),
             clear_on_shrink: settings.clear_on_shrink(),
@@ -116,6 +117,13 @@ impl SettingsCallbacks {
             on_editor_padding_x_change: save!(set_editor_padding_x),
             on_output_pad_change: save!(set_output_pad),
             on_autocomplete_max_visible_change: save!(set_autocomplete_max_visible),
+            on_list_overflow_change: {
+                let settings = settings.clone();
+                Box::new(move |value| {
+                    settings.set_list_overflow(value);
+                    pi_tui::list_overflow::set_list_overflow(settings.list_overflow());
+                })
+            },
             on_quiet_startup_change: save!(set_quiet_startup),
             on_default_project_trust_change: Box::new(move |value| trust.set_default_project_trust(value.as_str())),
             on_clear_on_shrink_change: save!(set_clear_on_shrink),

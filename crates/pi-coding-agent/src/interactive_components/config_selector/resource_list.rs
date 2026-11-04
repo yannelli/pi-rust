@@ -1,10 +1,10 @@
 //! The searchable resource list of the config selector (upstream `ResourceList`).
 
 use pi_tui::components::Input;
-use pi_tui::utils::truncate_to_width_with;
+use pi_tui::list_overflow::{ListOverflowState, ListRow};
 use pi_tui::{Component, get_keybindings, matches_key};
 
-use super::super::common::{bold, fg, visible_window};
+use super::super::common::{bold, fg};
 use crate::packages::{ConfigEditor, ConfigItem, ConfigWriteScope, ProjectOverrideState};
 use crate::resources::SourceScope;
 use crate::theme::ThemeColor;
@@ -39,10 +39,7 @@ pub(super) struct ResourceList {
     selected_index: usize,
     search_input: Input,
     max_visible: usize,
-}
-
-fn truncate(text: &str, width: usize, ellipsis: &str) -> String {
-    truncate_to_width_with(text, width, ellipsis, false)
+    overflow: ListOverflowState,
 }
 
 impl ResourceList {
@@ -57,6 +54,7 @@ impl ResourceList {
             selected_index: 0,
             search_input: Input::default(),
             max_visible,
+            overflow: ListOverflowState::default(),
         };
         list.build_flat_list();
         list.filtered_items = list.flat_items.clone();
@@ -213,7 +211,7 @@ impl ResourceList {
             && self.editor.override_state(item) == ProjectOverrideState::Inherit
     }
 
-    fn render_entry(&self, entry: FlatEntry, selected: bool, width: usize) -> String {
+    fn render_entry(&self, entry: FlatEntry, selected: bool) -> ListRow {
         let groups = self.editor.groups();
         match entry {
             FlatEntry::Group(g) => {
@@ -221,13 +219,13 @@ impl ResourceList {
                 let inherited = self.project_mode() && group.scope == SourceScope::User;
                 let label = bold(&format!("{}{}", group.label, if inherited { " · inherited global" } else { "" }));
                 let line = fg(if inherited { ThemeColor::Dim } else { ThemeColor::Accent }, &label);
-                truncate(&format!("  {line}"), width, "")
+                ListRow::new("  ", line)
             }
             FlatEntry::Subgroup(g, s) => {
                 let inherited = self.project_mode() && groups[g].scope == SourceScope::User;
                 let line =
                     fg(if inherited { ThemeColor::Dim } else { ThemeColor::Muted }, groups[g].subgroups[s].label);
-                truncate(&format!("    {line}"), width, "")
+                ListRow::new("    ", line)
             }
             FlatEntry::Item(g, s, i) => {
                 let item = self.item(g, s, i);
@@ -235,8 +233,10 @@ impl ResourceList {
                 let dimmed = self.is_dimmed(item);
                 let name = if selected && !dimmed { bold(&item.display_name) } else { item.display_name.clone() };
                 let name = if dimmed { fg(ThemeColor::Dim, &name) } else { name };
-                let line = format!("{cursor}    {} {name}{}", self.render_checkbox(item), self.item_suffix(item));
-                truncate(&line, width, "...")
+                ListRow::new(
+                    format!("{cursor}    {} ", self.render_checkbox(item)),
+                    format!("{name}{}", self.item_suffix(item)),
+                )
             }
         }
     }
@@ -251,10 +251,15 @@ impl Component for ResourceList {
             return lines;
         }
         let len = self.filtered_items.len();
-        let (start, end) = visible_window(self.selected_index, len, self.max_visible);
-        for index in start..end {
-            lines.push(self.render_entry(self.filtered_items[index], index == self.selected_index, width));
-        }
+        let rows: Vec<ListRow> = self
+            .filtered_items
+            .iter()
+            .enumerate()
+            .map(|(index, &entry)| self.render_entry(entry, index == self.selected_index))
+            .collect();
+        let rendered = self.overflow.render(&rows, self.selected_index, self.max_visible, width);
+        let (start, end) = (rendered.range.start, rendered.range.end);
+        lines.extend(rendered.lines);
         if start > 0 || end < len {
             let count = self.filtered_items.iter().filter(|entry| entry.is_item()).count();
             let current = self.filtered_items[..self.selected_index].iter().filter(|entry| entry.is_item()).count() + 1;
