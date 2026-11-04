@@ -201,7 +201,7 @@ A tool with `renderCall: true` or `renderResult: true` draws its own call or res
 | `ui.setWorkingIndicator` | `{ frames?: string[], intervalMs? }` | `null` |
 | `ui.setWorkingVisible` | `{ visible }` | `null` |
 | `ui.setHiddenThinkingLabel` | `{ label? }` | `null` |
-| `ui.setChatStyle` | `{ userPrefix?, assistantPrefix?, collapseThinking?, roundedEditor? }` | `null` |
+| `ui.setChatStyle` | `{ userPrefix?, assistantPrefix?, collapseThinking?, roundedEditor?, editorBorderColor?, promptLayout? }` | `null` |
 | `ui.getTheme` | `{}` | the theme, see below |
 | `ui.setEditorText` | `{ text }` | `null` |
 | `ui.getEditorText` | `{}` | string |
@@ -215,6 +215,18 @@ Dialogs and `ui.custom` return error `-32001` when pi has no UI. `$/cancelReques
 Working indicator (`ui.working`, upstream `ctx.ui.setWorkingMessage`, `setWorkingIndicator`, `setWorkingVisible`, and `setHiddenThinkingLabel`): the indicator shows while the agent works. Without `message` or `label`, pi shows its own text again. `frames` are drawn as they are, so they can carry their own styles; without `frames`, pi draws its own spinner.
 
 Chat style (`ui.chatStyle`, pi-rust `ctx.ui.setChatStyle`): `userPrefix` goes before the first line of each user message and `assistantPrefix` before the first line of the text of each assistant message; the other lines get the same indent. `collapseThinking: true` shows finished thinking blocks as the hidden thinking label, and keeps the block being written open; a click opens one block, and showing thinking blocks with the thinking toggle (`app.thinking.toggle`) opens them all. `roundedEditor: true` rounds the editor corners and draws side bars in the editor padding (`editorPaddingX`). Each call replaces the whole style, and a reload resets it.
+
+`editorBorderColor` sets the editor border color in every prompt layout: a theme color token (a foreground name of a theme file, such as `accent`, `border`, `borderAccent`, `borderMuted`, `success`, or `warning`) or a `#rrggbb` color. While it is set, the border keeps this color in place of the thinking level and bash mode colors. Without it, or with an empty or unknown value, pi colors the border as before.
+
+`promptLayout` sets the frame around the editor text. Without it, `roundedEditor` decides the corners.
+
+| Value | Editor |
+| --- | --- |
+| `frame` | The rounded editor of `roundedEditor: true`. |
+| `caret` | A rounded box on all four sides with a column of padding inside (`editorPaddingX` when larger) and a two-column gutter. The first text row starts with a bold accent `›`, and wrapped and later rows start under the text. An empty editor shows a muted placeholder with the cursor on its first cell: `Ask anything · / for commands · @ for files`, or `Queue a message · esc to stop the agent` while the agent runs. The working status and the `↑ N more` labels stay in the border. |
+| `harbor` | `caret` after one blank line. The border rules hold no labels: the working status shows above the editor, and the gutter shows `↑` and `↓` on the first and last rows when rows are hidden. The border uses the theme `border` color unless `editorBorderColor` is set. |
+
+Autocomplete opens under the box, aligned with the text. A terminal narrower than six columns shows the plain editor.
 
 `ui.getTheme` returns the theme that the TUI draws with: `{ name, sourcePath, appearance: "dark" | "light", mode: "truecolor" | "256color", fg: { <token>: <SGR open sequence> }, bg: { <token>: <SGR open sequence> }, dim: [<token>] }`. The tokens are those of the theme JSON, for example `accent`, `muted`, `toolTitle`, and `toolSuccessBg`. A token in `dim` also needs `\u001b[2m`. Close a foreground with `\u001b[39m` (and `\u001b[22m` after dim) and a background with `\u001b[49m`. It needs no ctx.
 

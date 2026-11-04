@@ -43,6 +43,7 @@ mod editor_history_keybindings;
 mod editor_history_search;
 mod editor_jump;
 mod editor_kill_ring;
+mod editor_layout;
 mod editor_mouse;
 mod editor_paste;
 mod editor_paste_input;

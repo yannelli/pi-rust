@@ -6,14 +6,19 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use pi_tui::components::LoaderIndicatorOptions;
+use pi_tui::components::editor::{EditorLayout, PromptBox};
 use pi_tui::{ComponentRef, TuiInputListenerResult};
 use serde_json::{Value, json};
 
 use super::components::{AssistantMessageComponent, StatusKind, UserMessageComponent};
 use super::extension_view::{call_js, dispose};
 use super::mode::{DEFAULT_HIDDEN_THINKING_LABEL, DEFAULT_WORKING_MESSAGE, InteractiveMode};
-use crate::extension_ui::{ChatStyle, WorkingIndicatorOptions};
+use crate::extension_ui::{ChatStyle, PromptLayout, WorkingIndicatorOptions};
 use crate::extensions::{ComponentFactory, TerminalInputVerdict};
+use crate::theme::{ThemeColor, theme};
+
+const IDLE_PLACEHOLDER: &str = "Ask anything \u{b7} / for commands \u{b7} @ for files";
+const RUNNING_PLACEHOLDER: &str = "Queue a message \u{b7} esc to stop the agent";
 
 impl InteractiveMode {
     pub(super) fn has_custom_editor(&self) -> bool {
@@ -105,9 +110,11 @@ impl InteractiveMode {
         self.request_render();
     }
 
-    /// Whether the working status goes into the editor border: only the default editor draws it.
+    /// Whether the working status goes into the editor border: only the default editor draws it,
+    /// and a harbor box keeps its border free of labels.
     pub(super) fn embeds_working_status(&self) -> bool {
-        self.editor.embed_working_status() && !self.has_custom_editor()
+        let harbor = self.state.borrow().chat_style.prompt_layout == Some(PromptLayout::Harbor);
+        self.editor.embed_working_status() && !self.has_custom_editor() && !harbor
     }
 
     /// Put the active status indicator where the editor shown now wants it.
@@ -196,10 +203,31 @@ impl InteractiveMode {
         self.request_render();
     }
 
-    /// Message prefixes, collapsed thinking, and the rounded editor; rebuilds the chat.
+    /// The editor frame of the chat style; a caret or harbor box shows the placeholder for an idle
+    /// or a `running` agent.
+    pub(super) fn update_prompt_layout(&self, running: bool) {
+        let prompt_layout = self.state.borrow().chat_style.prompt_layout;
+        let prompt = || PromptBox {
+            marker: Rc::new(|text: &str| theme().bold(&theme().fg(ThemeColor::Accent, text))),
+            muted: Rc::new(|text: &str| theme().fg(ThemeColor::Muted, text)),
+            placeholder: if running { RUNNING_PLACEHOLDER } else { IDLE_PLACEHOLDER }.to_string(),
+        };
+        let layout = match prompt_layout {
+            Some(PromptLayout::Caret) => EditorLayout::Caret(prompt()),
+            Some(PromptLayout::Harbor) => EditorLayout::Harbor(prompt()),
+            Some(PromptLayout::Frame) | None => EditorLayout::Lines,
+        };
+        self.editor.editor().set_layout(layout);
+    }
+
+    /// Message prefixes, collapsed thinking, and the editor frame and border; rebuilds the chat.
     pub(super) fn set_chat_style(&self, style: ChatStyle) {
-        self.editor.editor().set_rounded(style.rounded_editor);
+        let rounded = style.rounded_editor || style.prompt_layout == Some(PromptLayout::Frame);
+        self.editor.editor().set_rounded(rounded);
         self.state.borrow_mut().chat_style = style.clone();
+        self.update_prompt_layout(self.session().is_streaming());
+        self.update_editor_border_color();
+        self.place_status_indicator();
         let mut messages = self.ui.chat.borrow().children.clone();
         messages.extend(self.state.borrow().streaming_component.clone().map(|component| component as ComponentRef));
         for child in &messages {

@@ -6,7 +6,7 @@ use crate::component::{
     CURSOR_MARKER, TuiMouseButton, TuiMouseEvent, TuiMouseEventResult, TuiMouseEventType, render_fake_cursor,
 };
 use crate::components::scroll_view::StyleFn;
-use crate::utils::{slice_by_column, visible_width};
+use crate::utils::{graphemes, slice_by_column, truncate_to_width_with, visible_width};
 
 /// Inputs for a custom border.
 pub struct BorderContext<'a> {
@@ -98,10 +98,78 @@ fn padding_and_content(padding_x: usize, width: usize) -> (usize, usize) {
     (padding, width.saturating_sub(padding * 2).max(1))
 }
 
+/// The frame around the editor text.
+#[derive(Clone, Default)]
+pub enum EditorLayout {
+    /// Rules above and below the text; [`super::Editor::set_rounded`] rounds them.
+    #[default]
+    Lines,
+    /// A rounded box with a `›` gutter in front of the text.
+    Caret(PromptBox),
+    /// [`EditorLayout::Caret`] after a blank line, with plain border rules and the scroll position
+    /// in the gutter.
+    Harbor(PromptBox),
+}
+
+/// Styles and placeholder of a caret or harbor box.
+#[derive(Clone)]
+pub struct PromptBox {
+    /// Styles the `›` in the gutter.
+    pub marker: StyleFn,
+    /// Styles the placeholder and the scroll arrows in the gutter.
+    pub muted: StyleFn,
+    /// Shown while the editor is empty.
+    pub placeholder: String,
+}
+
+const GUTTER_MARKER: &str = "\u{203a}";
+const GUTTER_WIDTH: usize = 2;
+/// Two borders, a gutter, a text column, and a column for the cursor.
+const MIN_BOX_WIDTH: usize = 6;
+
+/// Where the text sits in the rendered editor.
+struct Geometry {
+    /// Columns before the text.
+    left: usize,
+    content_width: usize,
+    /// Columns after the text.
+    right: usize,
+    /// Rows before the first text row.
+    top: usize,
+}
+
 impl EditorCore {
     /// Visible text rows: 30% of the terminal height, at least 5.
     pub fn max_visible_lines(&self) -> usize {
         ((self.terminal_rows() as f64 * 0.3).floor() as usize).max(5)
+    }
+
+    /// The caret or harbor box when `width` fits one, and whether it is a harbor.
+    fn prompt_box(&self, width: usize) -> Option<(&PromptBox, bool)> {
+        match &self.layout {
+            EditorLayout::Caret(prompt) if width >= MIN_BOX_WIDTH => Some((prompt, false)),
+            EditorLayout::Harbor(prompt) if width >= MIN_BOX_WIDTH => Some((prompt, true)),
+            _ => None,
+        }
+    }
+
+    fn geometry(&self, width: usize) -> Geometry {
+        match self.prompt_box(width) {
+            Some((_, harbor)) => {
+                let padding = self.padding_x.max(1).min((width - MIN_BOX_WIDTH) / 2);
+                let content_width = width - 2 - GUTTER_WIDTH - padding * 2;
+                Geometry {
+                    left: 1 + padding + GUTTER_WIDTH,
+                    content_width,
+                    right: padding + 1,
+                    top: 1 + usize::from(harbor),
+                }
+            }
+            None => {
+                let (padding, content_width) = padding_and_content(self.padding_x, width);
+                Geometry { left: padding, content_width, right: padding, top: 1 }
+            }
+        }
     }
 
     fn layout_text(&self, width: usize) -> Vec<LayoutLine> {
@@ -132,13 +200,16 @@ impl EditorCore {
 
     fn render_border(&mut self, width: usize, hidden_line_count: usize, is_top: bool) -> String {
         let border_color = self.border_color.clone();
+        let boxed = self.prompt_box(width).map(|(_, harbor)| harbor);
+        let harbor = boxed == Some(true);
+        let hidden_line_count = if harbor { 0 } else { hidden_line_count };
         let context = BorderContext { width, hidden_line_count, border_color: &border_color, is_top };
         let renderer = if is_top { &mut self.top_border } else { &mut self.bottom_border };
         let border = match renderer {
-            Some(renderer) => renderer(&context),
-            None => context.default_border(),
+            Some(renderer) if !harbor => renderer(&context),
+            _ => context.default_border(),
         };
-        match (self.rounded, is_top) {
+        match (self.rounded || boxed.is_some(), is_top) {
             (false, _) => border,
             (true, true) => round_border(&border, '\u{256d}', '\u{256e}'),
             (true, false) => round_border(&border, '\u{2570}', '\u{256f}'),
@@ -161,10 +232,54 @@ impl EditorCore {
         (format!("{bar}{}", spaces(padding_x - 1)), right)
     }
 
+    /// The sides of a text row in a caret or harbor box: border, padding, and the gutter, which
+    /// holds `›` on the first text row and, in a harbor, arrows where rows are hidden.
+    fn box_row_sides(&self, geometry: &Geometry, gutter: Option<String>, cursor_in_padding: bool) -> (String, String) {
+        let bar = (self.border_color)("\u{2502}");
+        let padding = geometry.right - 1;
+        let gutter = gutter.unwrap_or_else(|| " ".repeat(GUTTER_WIDTH));
+        let left = format!("{bar}{}{gutter}", " ".repeat(padding));
+        let right = format!("{}{bar}", " ".repeat(padding - usize::from(cursor_in_padding)));
+        (left, right)
+    }
+
+    fn gutter(
+        &self,
+        prompt: &PromptBox,
+        harbor: bool,
+        row: usize,
+        visible_index: usize,
+        visible_count: usize,
+        below: usize,
+    ) -> Option<String> {
+        if row == 0 {
+            return Some(format!("{} ", (prompt.marker)(GUTTER_MARKER)));
+        }
+        if !harbor {
+            return None;
+        }
+        if visible_index == 0 {
+            return Some(format!("{} ", (prompt.muted)("\u{2191}")));
+        }
+        (visible_index + 1 == visible_count && below > 0).then(|| format!("{} ", (prompt.muted)("\u{2193}")))
+    }
+
+    /// The placeholder of an empty box with the cursor on its first cell, cut to `width`.
+    fn render_placeholder(&self, prompt: &PromptBox, width: usize, marker: &str) -> Option<(String, usize)> {
+        let placeholder = truncate_to_width_with(&prompt.placeholder, width, "", false);
+        let first = graphemes(&placeholder).next()?;
+        let rest = &placeholder[first.len()..];
+        let display = format!("{marker}{}{}", render_fake_cursor(first), (prompt.muted)(rest));
+        Some((display, visible_width(&placeholder)))
+    }
+
     pub fn render(&mut self, width: usize) -> Vec<String> {
-        let (padding_x, content_width) = padding_and_content(self.padding_x, width);
+        let geometry = self.geometry(width);
+        let content_width = geometry.content_width;
+        let boxed = self.prompt_box(width).map(|(prompt, harbor)| (prompt.clone(), harbor));
+        let has_padding = geometry.right > usize::from(boxed.is_some());
         // Without padding one column is kept free for the cursor; with padding it may overflow.
-        let layout_width = content_width.saturating_sub(if padding_x > 0 { 0 } else { 1 }).max(1);
+        let layout_width = content_width.saturating_sub(if has_padding { 0 } else { 1 }).max(1);
         self.last_width = layout_width;
 
         let layout = self.layout_text(layout_width);
@@ -180,16 +295,26 @@ impl EditorCore {
         let end = (self.scroll_offset + max_visible).min(layout.len());
         let visible = &layout[self.scroll_offset..end];
         self.rendered_visible_line_count = visible.len();
+        let below = layout.len() - end;
 
-        let side_padding = " ".repeat(padding_x);
-        let mut result = vec![self.render_border(width, self.scroll_offset, true)];
+        let mut result = Vec::new();
+        if matches!(boxed, Some((_, true))) {
+            result.push(String::new());
+        }
+        result.push(self.render_border(width, self.scroll_offset, true));
         // The hardware cursor marker helps IME placement even while the popup is open.
         let marker = if self.focused { CURSOR_MARKER } else { "" };
-        for line in visible {
+        let mut placeholder = match &boxed {
+            Some((prompt, _)) if self.is_editor_empty() => self.render_placeholder(prompt, content_width, marker),
+            _ => None,
+        };
+        for (visible_index, line) in visible.iter().enumerate() {
             let mut display = line.text.clone();
             let mut line_width = visible_width(&line.text);
             let mut cursor_in_padding = false;
-            if let Some(cursor) = line.cursor {
+            if let Some((text, width)) = placeholder.take() {
+                (display, line_width) = (text, width);
+            } else if let Some(cursor) = line.cursor {
                 let mut cursor = cursor.min(line.text.len());
                 while !line.text.is_char_boundary(cursor) {
                     cursor -= 1;
@@ -201,17 +326,24 @@ impl EditorCore {
                 } else {
                     display = format!("{before}{marker}{}", render_fake_cursor(" "));
                     line_width += 1;
-                    cursor_in_padding = line_width > content_width && padding_x > 0;
+                    cursor_in_padding = line_width > content_width && has_padding;
                 }
             }
             let fill = " ".repeat(content_width.saturating_sub(line_width));
-            let (left, right) = self.row_sides(padding_x, cursor_in_padding);
+            let (left, right) = match &boxed {
+                Some((prompt, harbor)) => {
+                    let row = self.scroll_offset + visible_index;
+                    let gutter = self.gutter(prompt, *harbor, row, visible_index, visible.len(), below);
+                    self.box_row_sides(&geometry, gutter, cursor_in_padding)
+                }
+                None => self.row_sides(geometry.left, cursor_in_padding),
+            };
             result.push(format!("{left}{display}{fill}{right}"));
         }
-        let below = layout.len() - end;
         result.push(self.render_border(width, below, false));
+        let (left, right) = (" ".repeat(geometry.left), " ".repeat(geometry.right));
         if let Some(line) = self.render_history_search(content_width) {
-            result.push(format!("{side_padding}{line}{side_padding}"));
+            result.push(format!("{left}{line}{right}"));
         }
 
         self.rendered_autocomplete_height = 0;
@@ -222,24 +354,25 @@ impl EditorCore {
             self.rendered_autocomplete_height = lines.len();
             for line in lines {
                 let fill = " ".repeat(content_width.saturating_sub(visible_width(&line)));
-                result.push(format!("{side_padding}{line}{fill}{side_padding}"));
+                result.push(format!("{left}{line}{fill}{right}"));
             }
         }
         result
     }
 
     pub fn handle_mouse(&mut self, event: &TuiMouseEvent) -> Option<TuiMouseEventResult> {
-        let popup_start = self.rendered_visible_line_count as i32 + 2;
+        let geometry = self.geometry(event.width.max(0) as usize);
+        let top = geometry.top as i32;
+        let popup_start = top + self.rendered_visible_line_count as i32 + 1;
         if self.autocomplete_mode.is_some()
             && self.autocomplete_list.is_some()
             && event.y >= popup_start
             && event.y < popup_start + self.rendered_autocomplete_height as i32
         {
-            let (padding_x, content_width) = padding_and_content(self.padding_x, event.width.max(0) as usize);
             let local = TuiMouseEvent {
-                x: event.x - padding_x as i32,
+                x: event.x - geometry.left as i32,
                 y: event.y - popup_start,
-                width: content_width as i32,
+                width: geometry.content_width as i32,
                 height: self.rendered_autocomplete_height as i32,
                 ..event.clone()
             };
@@ -257,16 +390,15 @@ impl EditorCore {
             return None;
         }
         let focus = TuiMouseEventResult { handled: true, focus: true, ..TuiMouseEventResult::default() };
-        if event.y <= 0 || event.y > self.rendered_visible_line_count as i32 {
+        if event.y < top || event.y >= top + self.rendered_visible_line_count as i32 {
             return Some(focus);
         }
         let visual_lines = self.build_visual_line_map(self.last_width);
-        let index = self.scroll_offset + event.y as usize - 1;
+        let index = self.scroll_offset + (event.y - top) as usize;
         let Some(&visual) = visual_lines.get(index) else { return Some(focus) };
         let logical = self.state.lines.get(visual.logical_line).cloned().unwrap_or_default();
         let chunk = &logical[visual.start_col..visual.start_col + visual.length];
-        let (padding_x, _) = padding_and_content(self.padding_x, event.width.max(0) as usize);
-        let target_column = (event.x - padding_x as i32).max(0) as usize;
+        let target_column = (event.x - geometry.left as i32).max(0) as usize;
 
         let mut column = 0;
         let mut target_index = chunk.len();
