@@ -2,6 +2,26 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.10] - 2026-11-04
+
+### Added
+
+- **extensions:** let extensions draw the expanded body of tool results ([9b364e3](https://github.com/yannelli/pi-rust/commit/9b364e349e95fb5c9532eed3ba62c64462e4d134))
+- **extensions:** advertise the contextEntries feature to native extensions ([646258f](https://github.com/yannelli/pi-rust/commit/646258fd91cf1b513bd37d0c7f2c73a84adb941f))
+- **tools:** let tool_search find deferred skills and agent configs ([a74b1bd](https://github.com/yannelli/pi-rust/commit/a74b1bdd81a0659cad744f2db50c07c934ee5d4a))
+- **tui:** editor border color and prompt layouts for extensions ([00a9e40](https://github.com/yannelli/pi-rust/commit/00a9e40108604e8fc30c53a83ed97fc88cfe0db2))
+- **tui:** truncate, wrap, or scroll list rows that do not fit ([d2c5ac6](https://github.com/yannelli/pi-rust/commit/d2c5ac6edd2fca4ea0654be5a08032732738c6c7))
+- **model:** remember the last selected model as the default ([f373137](https://github.com/yannelli/pi-rust/commit/f3731374051ab7da190743e9f2bb4c9001f520aa))
+- **interactive:** send a queued message now ([d3b4e46](https://github.com/yannelli/pi-rust/commit/d3b4e465c006e3ee6b9ca434e2a52b8d5f171f9e))
+- **acp:** label the fast mode option Fast off and Fast on ([be9cee3](https://github.com/yannelli/pi-rust/commit/be9cee3462e9d10db7a659d83d90293cf4da7813))
+- **mcp:** add a lazy lifecycle that connects servers on first use ([0680f4b](https://github.com/yannelli/pi-rust/commit/0680f4b5f570bac19104d672ccdc41a3afe14868))
+- **acp:** add and edit custom ACP agents in /acp ([e4ce5ae](https://github.com/yannelli/pi-rust/commit/e4ce5ae25b3c6fb32d9bd89b968bd72ac26ea511))
+- **acp,rpc:** run built-in commands without a model call ([e77c983](https://github.com/yannelli/pi-rust/commit/e77c9834b03a42d2e35086015609816d17d0d595))
+
+### Fixed
+
+- **session:** keep queued extension messages when the queue is cleared or a run ends ([aacebf9](https://github.com/yannelli/pi-rust/commit/aacebf90c28b1aa35529a8b38b6f1c884f652240))
+
 ## [0.12.9] - 2026-11-03
 
 ### Added
