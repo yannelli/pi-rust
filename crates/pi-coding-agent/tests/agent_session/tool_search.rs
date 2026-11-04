@@ -183,6 +183,7 @@ async fn finds_deferred_skills_and_activates_tool_search_for_them() {
     let text = result_text(&search);
     let expected = "Found 1 context entry. Nothing was loaded; use them as described:\n- skill deploy: Deploy the app to production.\n  Read ";
     assert!(text.starts_with(expected), "{text}");
-    assert!(text.contains("deploy/SKILL.md to load its instructions."));
+    let skill_file = std::path::Path::new("deploy").join("SKILL.md");
+    assert!(text.contains(&format!("{} to load its instructions.", skill_file.display())), "{text}");
     assert_eq!(search.details, Some(json!({ "loaded": [], "context": [{ "kind": "skill", "name": "deploy" }] })));
 }
