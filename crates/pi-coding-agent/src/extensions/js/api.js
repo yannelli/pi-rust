@@ -258,6 +258,7 @@ export function createExtension(path, resolvedPath, sourceInfo) {
 		messageRenderers: new Map(),
 		entryRenderers: new Map(),
 		toolRenderers: [],
+		toolResultExpanders: [],
 		markdownTransformer: undefined,
 		commands: new Map(),
 		flags: new Map(),
@@ -358,6 +359,12 @@ export function createExtensionAPI(extension, runtime, cwd, eventBus) {
 		registerToolRenderer(resolver) {
 			assertActive();
 			extension.toolRenderers.push(resolver);
+			changed();
+		},
+		/** pi-rust: `(toolName, result) => { maxHeight, render(options, theme, context) } | undefined`. */
+		registerToolResultExpander(expander) {
+			assertActive();
+			extension.toolResultExpanders.push(expander);
 			changed();
 		},
 		getFlag(name) {

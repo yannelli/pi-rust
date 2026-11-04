@@ -47,11 +47,12 @@ const registrations = {
 		{ toolName: "native_draw", renderCall: true, renderShell: "self" },
 		{ renderCall: true },
 	],
+	toolResultExpander: { detailsKey: "nativeStored", maxHeight: 7 },
 	commands: [
 		"native-ask", "native-panel", "native-llm", "native-crash", "native-theme", "native-write", "native-probe",
 		"native-ctx", "native-find", "native-usage", "native-input", "native-exec", "native-exec-cap", "native-settle", "native-llm-headers", "native-log",
 		"native-settings", "native-oauth", "native-auth", "native-login", "native-card", "native-order", "native-restyle", "native-render-count", "native-usage-slot",
-		"native-mcp", "native-mcp-wait",
+		"native-mcp", "native-mcp-wait", "native-expander",
 	].map((name) => ({ name })),
 	flags: [{ name: "native-flag", type: "string", default: "off" }],
 	events: [
@@ -142,7 +143,7 @@ function suggest({ lines, cursorLine, cursorCol }) {
 	return { items: [{ value: "@native-one" }, { value: "@native-two" }], prefix, merge: true };
 }
 
-async function runCommand({ name, ctx }) {
+async function runCommand({ name, args, ctx }) {
 	if (name === "native-ctx") {
 		const model = ctx.model ?? {};
 		const { scopedModels, terminalWidth, terminalHeight, isProjectTrusted } = ctx;
@@ -210,6 +211,10 @@ async function runCommand({ name, ctx }) {
 		const late = await answer("register.toolRenderer", { renderCall: true });
 		await request("register.toolRenderer", { toolName: "grep", renderCall: true });
 		await append("native-theme", { name: theme.name, accent: theme.fg.accent, mode: theme.mode, appearance: theme.appearance, late: late.code });
+	} else if (name === "native-expander") {
+		const bad = await answer("register.toolResultExpander", { maxHeight: 3 });
+		await request("register.toolResultExpander", { detailsKey: "nativeStored", maxHeight: Number(args) || 0, enabled: args !== "off" });
+		await append("native-expander", { bad: bad.code });
 	} else if (name === "native-probe") {
 		await request("session.appendEntry", { customType: "native-probe", data: initProbe });
 	} else if (name === "native-settings") {
@@ -286,6 +291,9 @@ const renders = {
 		return { lines: [`READ ${args.path} #${readRenders} \u001b_pi:spinner\u0007`], refreshMs: 250 };
 	},
 	"render.toolResult": ({ result, options, width }) => ({ lines: [`RESULT ${textOf(result.content)} at ${width}${options.isPartial ? " partial" : ""}`] }),
+	"render.toolResultExpanded": ({ toolName, result, options, width }) => ({
+		lines: [`EXPANDED ${toolName} ${result.details.nativeStored} at ${width} max ${options.maxHeight}`],
+	}),
 	"render.message": ({ message, width }) => {
 		messageRenders++;
 		return { lines: [`CARD ${textOf(message.content)} at ${width}${cardStyle}`] };

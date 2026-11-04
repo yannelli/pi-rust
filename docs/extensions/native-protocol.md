@@ -41,7 +41,7 @@ When the child exits early, pi shows one error notification, fails the pending r
 
 Params: `protocolVersion` (integer), `piVersion`, `cwd`, `agentDir`, `extensionPath`, `platform` (`process.platform`), `mode` (`tui`, `rpc`, `json`, `print`), `hasUI`, `flags`, `features`.
 
-`features` lists the optional parts of this document that the host speaks: `toolRenderers`, `render.spinner`, `render.refresh`, `ui.getTheme`, `theme_changed`, `ui.working`, `ui.chatStyle`, and `contextEntries` (a `resources_discover` result can have `contextEntries`, see [Deferred context](../../crates/pi-coding-agent/docs/deferred-context.md#extension-api-context-entries)). Older hosts send no `features`; treat a missing list as empty.
+`features` lists the optional parts of this document that the host speaks: `toolRenderers`, `render.spinner`, `render.refresh`, `ui.getTheme`, `theme_changed`, `ui.working`, `ui.chatStyle`, `contextEntries` (a `resources_discover` result can have `contextEntries`, see [Deferred context](../../crates/pi-coding-agent/docs/deferred-context.md#extension-api-context-entries)), and `toolResultExpander`. Older hosts send no `features`; treat a missing list as empty.
 
 pi loads extensions before it binds the session. `mode` and `hasUI` are the mode the session binds the extensions in (`tui` in interactive mode, and `rpc`, `json`, or `print` for the CLI modes). Hosts that do not know the mode at load time, for example SDK sessions, send `print` and `false`. The ctx snapshot of each event has the current values. `flags` holds the values pi has at load time and is empty for flags this extension declares in its answer. Read flag values from `ctx.flags` or with `flags.get`.
 
@@ -61,6 +61,7 @@ Result:
 | `messageRenderers` | custom message types the extension draws, see [Renderers](#renderers) |
 | `entryRenderers` | custom session entry types the extension draws |
 | `toolRenderers` | `[{ toolName, renderCall?: boolean, renderResult?: boolean, renderShell?: "default" \| "self" }]`: rows of tools that this extension does not register, see [Renderers](#renderers) |
+| `toolResultExpander` | `{ detailsKey, maxHeight?, enabled? }`: draws the expanded body of results of any tool whose `details` hold `detailsKey`, see [Renderers](#renderers) |
 
 All fields except `protocolVersion` are optional.
 
@@ -85,6 +86,7 @@ All fields except `protocolVersion` are optional.
 | `tool.prepare` | `{ name, args }` | the prepared arguments |
 | `render.toolCall` | `{ toolName, toolCallId, args, context, width }` | `{ lines }` or `null` |
 | `render.toolResult` | `{ toolName, toolCallId, result, options, context, width }` | `{ lines }` or `null` |
+| `render.toolResultExpanded` | `{ toolName, toolCallId, result, options, context, width }` | `{ lines }` or `null` |
 | `render.message` | `{ customType, message, options, width }` | `{ lines }` or `null` |
 | `render.entry` | `{ customType, entry, options, width }` | `{ lines }` or `null` |
 | `shutdown` | `{}` | `null` |
@@ -179,6 +181,7 @@ A tool with `renderCall: true` or `renderResult: true` draws its own call or res
 - `context` of the tool requests: `{ args, toolCallId, cwd, executionStarted, argsComplete, isPartial, expanded, showImages, isError }`. `options` of `render.toolResult`: `{ expanded, isPartial }`. `options` of `render.message` and `render.entry`: `{ expanded }`.
 - `renderShell: "self"` tells pi not to draw the tool frame around the rows.
 - `toolRenderers` draw the rows of a tool that pi or another extension registers, for example the built-in `bash` or `read`. They apply only while no other renderer draws that tool: when the tool's own definition, or a `registerToolRenderer` of a JavaScript extension, has a `renderCall` or `renderResult`, pi uses those. A renderer slot that the entry does not set falls back to pi's own row. `register.toolRenderer` takes one entry later.
+- `toolResultExpander` (feature `toolResultExpander`): while a tool row is expanded (the `app.tools.expand` key, or a click on the row) and its final `result.details` hold `detailsKey`, pi draws the lines of `render.toolResultExpanded` in place of the result body, below the row's own call line. The tool's renderer draws the row again on collapse. With `maxHeight` above 0 (`options.maxHeight`), pi shows that many lines, the last one being a position line such as `lines 1-29 of 300`; in fullscreen mode the mouse wheel over the body scrolls it, and collapsing returns to the top. The lines come from the extension and never reach the model. `register.toolResultExpander` takes the same object later and replaces the settings; `enabled: false` turns the expander off. Hosts without the feature ignore the field.
 - `render.spinner`: the zero-width token `\u001b_pi:spinner\u0007` (an APC string) in an answered line is replaced by the current frame of pi's spinner (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`, 80 ms) on each frame, so a row can animate without a request per frame. Styles around the token apply to the frame. Remove the token, for example when the tool finishes, to stop the animation.
 - `render.refresh`: an answer `{ lines, refreshMs }` asks pi to send the request again after `refreshMs` milliseconds (at least 250) while the inputs of the row stay the same, for example for an elapsed time. pi keeps the old lines until the new answer arrives. An answer without `refreshMs` ends the refreshes.
 - A failed request is logged; the row keeps its last lines until its inputs change.
@@ -334,7 +337,7 @@ Line-based surfaces: a widget (surface `widget:<key>`), the footer (surface `foo
 
 ### Later registrations
 
-`register.tool` (one tool definition), `register.command`, `register.shortcut`, `register.flag`, `register.events` (`{ events }`, adds subscriptions), and `register.autocomplete` take the same shapes as the `initialize` result fields. `register.messageRenderer` and `register.entryRenderer` take `{ customType }`, and `register.toolRenderer` takes one `toolRenderers` entry. They answer `null`.
+`register.tool` (one tool definition), `register.command`, `register.shortcut`, `register.flag`, `register.events` (`{ events }`, adds subscriptions), and `register.autocomplete` take the same shapes as the `initialize` result fields. `register.messageRenderer` and `register.entryRenderer` take `{ customType }`, `register.toolRenderer` takes one `toolRenderers` entry, and `register.toolResultExpander` takes a `toolResultExpander` object. They answer `null`.
 
 ## Example transcript
 

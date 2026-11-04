@@ -16,9 +16,10 @@ use pi_tui::{
 };
 use serde_json::Value;
 
+use super::expanded_result::ExpandedResult;
 use crate::interactive::renderers::{
-    RendererState, ToolRenderContext, ToolRenderer, ToolResultView, format_tool_call_with_args, get_text_output,
-    more_lines_hint, text,
+    RendererState, ToolRenderContext, ToolRenderer, ToolResultExpander, ToolResultView, format_tool_call_with_args,
+    get_text_output, more_lines_hint, text,
 };
 use crate::theme::{ThemeBg, ThemeColor, theme};
 
@@ -84,6 +85,10 @@ pub struct ToolExecutionComponent {
     has_result: Rc<Cell<bool>>,
     /// Weak handle to `dirty` for timers, so they do not keep the component alive.
     self_dirty: Weak<Cell<bool>>,
+    /// Draws the expanded body of a final result when an extension claims it.
+    expander: Option<Rc<dyn ToolResultExpander>>,
+    /// First line in view of the expanded body; back to 0 on collapse.
+    expanded_offset: Rc<Cell<usize>>,
 }
 
 fn bg(token: ThemeBg) -> StyleFn {
@@ -126,6 +131,8 @@ impl ToolExecutionComponent {
             clicked: Rc::default(),
             has_result: Rc::default(),
             self_dirty,
+            expander: None,
+            expanded_offset: Rc::default(),
         };
         component.update_display();
         component
@@ -168,7 +175,25 @@ impl ToolExecutionComponent {
 
     pub fn set_expanded(&mut self, expanded: bool) {
         self.expanded = expanded;
+        if !expanded {
+            self.expanded_offset.set(0);
+        }
         self.update_display();
+    }
+
+    pub fn set_result_expander(&mut self, expander: Option<Rc<dyn ToolResultExpander>>) {
+        self.expander = expander;
+        self.update_display();
+    }
+
+    /// The extension's expanded body of a final result, height-limited, when one claims it.
+    fn expanded_body(&self, state: &mut RendererState) -> Option<ComponentRef> {
+        let expander = self.expander.clone().filter(|_| self.expanded && !self.is_partial)?;
+        let result = self.result.clone()?;
+        let (args, cwd) = (self.args.clone(), self.cwd.clone());
+        let (body, max_height) = expander.expand(&self.tool_name, &result, &mut self.context(state, &args, &cwd))?;
+        let wheel = self.tui.mode() == pi_tui::TuiMode::Fullscreen;
+        Some(component(ExpandedResult::new(body, max_height, self.expanded_offset.clone(), wheel)))
     }
 
     pub fn set_output_pad(&mut self, padding: usize) {
@@ -276,17 +301,18 @@ impl ToolExecutionComponent {
             }
             ToolDisplay::Generic => {
                 let call = self.region(text(&format_tool_call_with_args(&self.tool_name, &self.args, self.expanded)));
-                let result = self.result_fallback().map(|result| self.region(result));
+                let body = self.expanded_body(&mut RendererState::default());
+                let result = body.or_else(|| self.result_fallback()).map(|result| self.region(result));
                 self.fill_box(background, call, result);
             }
             ToolDisplay::Renderer(renderer) => {
                 let (args, cwd) = (self.args.clone(), self.cwd.clone());
                 let mut state = std::mem::take(&mut self.state);
                 let mut call = renderer.render_call(&mut self.context(&mut state, &args, &cwd));
-                let result = self
-                    .result
-                    .clone()
-                    .and_then(|result| renderer.render_result(&result, &mut self.context(&mut state, &args, &cwd)));
+                let result = self.expanded_body(&mut state).or_else(|| {
+                    let result = self.result.clone()?;
+                    renderer.render_result(&result, &mut self.context(&mut state, &args, &cwd))
+                });
                 if self.result.is_some() && renderer.refresh_call_after_result() {
                     call = renderer.render_call(&mut self.context(&mut state, &args, &cwd));
                 }

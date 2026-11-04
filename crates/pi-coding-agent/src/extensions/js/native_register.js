@@ -1,7 +1,7 @@
 // Registrations of native extensions: tools, commands, shortcuts, flags, events, providers,
 // virtual models, and autocomplete triggers become `pi.*` registrations that call the child.
 import { isObject, mergePatch, snapshot, toJson } from "./native_host.js";
-import { createContentRenderers, createToolOverrides, keyTexts, toolRenderers } from "./native_render.js";
+import { createContentRenderers, createToolOverrides, createToolResultExpander, keyTexts, toolRenderers } from "./native_render.js";
 import { rpcError } from "./native_rpc.js";
 
 const TOOL_ABORT_MS = 5000;
@@ -131,6 +131,7 @@ export function createRegistrar(state) {
 
 	const content = createContentRenderers(state);
 	const toolRenderer = createToolOverrides(state);
+	const expander = createToolResultExpander(state);
 
 	const provider = (name, config) => {
 		pi.registerProvider(name, config);
@@ -151,6 +152,7 @@ export function createRegistrar(state) {
 		for (const definition of init.toolRenderers ?? []) {
 			if (!toolRenderer(definition)) state.log("toolRenderers: skipped an entry without a toolName");
 		}
+		if (init.toolResultExpander && !expander(init.toolResultExpander)) state.log("toolResultExpander: skipped, detailsKey is not a non-empty string");
 		events(init.events);
 	};
 
@@ -165,6 +167,10 @@ export function createRegistrar(state) {
 		"register.entryRenderer": (p) => (content.entry(p.customType), null),
 		"register.toolRenderer": (p) => {
 			if (!toolRenderer(p)) throw rpcError(-32602, "toolName must be a non-empty string");
+			return null;
+		},
+		"register.toolResultExpander": (p) => {
+			if (!expander(p)) throw rpcError(-32602, "detailsKey must be a non-empty string");
 			return null;
 		},
 		"keybindings.get": (p) => keyTexts(p),

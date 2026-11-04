@@ -180,6 +180,7 @@ impl InteractiveMode {
         let cwd = self.session().cwd().to_path_buf();
         let mut tool =
             ToolExecutionComponent::new(name, id, args, self.tool_options(), self.tool_display(name), &self.tui(), cwd);
+        tool.set_result_expander(self.extension_result_expander());
         tool.set_expanded(self.state.borrow().tool_output_expanded);
         let tool = Rc::new(RefCell::new(tool));
         self.add_to_chat(tool.clone());

@@ -15,7 +15,7 @@ const KILL_MS = 2000;
 const CTX_WAIT_MS = 30000;
 const POLL_MS = 250;
 /** Optional protocol parts this host speaks, sent in `initialize` as `features`. */
-const FEATURES = ["toolRenderers", "render.spinner", "render.refresh", "ui.getTheme", "theme_changed", "ui.working", "ui.chatStyle", "contextEntries"];
+const FEATURES = ["toolRenderers", "render.spinner", "render.refresh", "ui.getTheme", "theme_changed", "ui.working", "ui.chatStyle", "contextEntries", "toolResultExpander"];
 /** What `footer_changed` and `theme_changed` subscribers watch: the reader and the notification. */
 const WATCHED = {
 	footer: { read: () => footerJson(), notify: (value) => ["footer.changed", { footer: value }] },
