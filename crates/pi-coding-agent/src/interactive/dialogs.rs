@@ -185,7 +185,7 @@ impl InteractiveMode {
                 move |model| {
                     done_select();
                     if let Some(mode) = select.upgrade() {
-                        mode.apply_model(model.clone(), false);
+                        mode.apply_model(model.clone(), mode.settings().remember_last_model());
                     }
                 },
                 move || {

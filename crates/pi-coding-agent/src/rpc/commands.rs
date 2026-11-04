@@ -112,11 +112,11 @@ impl RpcServer {
                 else {
                     return failed(id, "set_model", &format!("Model not found: {provider}/{model_id}"));
                 };
-                session.set_model(model.clone(), false).await?;
+                session.set_model(model.clone(), session.settings().remember_last_model()).await?;
                 ok(id, "set_model", Some(to_json(model)))
             }
             RpcCommand::CycleModel => {
-                let data = session.cycle_model(false, false).map_or(Value::Null, |result| {
+                let data = session.cycle_model(false, session.settings().remember_last_model()).map_or(Value::Null, |result| {
                     json!({"model": result.model, "thinkingLevel": result.thinking_level, "isScoped": result.is_scoped})
                 });
                 ok(id, "cycle_model", Some(data))

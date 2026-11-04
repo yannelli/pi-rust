@@ -214,6 +214,34 @@ async fn speed_option_follows_the_models_fast_mode() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn model_changes_save_the_default_model() {
+    let setup = setup_with_models(
+        Vec::new(),
+        json!([{"id": "tiny", "contextWindow": 128_000, "maxTokens": 4_000},
+            {"id": "plain", "contextWindow": 128_000, "maxTokens": 4_000}]),
+    );
+    let settings = setup.options.app.settings.clone().unwrap();
+    let work = setup.root.path().join("work");
+    let mut client = start(&setup);
+    let created = client.request("session/new", json!({"cwd": work, "mcpServers": []})).await;
+    let id = created["result"]["sessionId"].clone();
+
+    let option = json!({"sessionId": id, "configId": "model", "value": "local/plain"});
+    let changed = client.request("session/set_config_option", option).await;
+    assert!(changed["error"].is_null(), "{changed}");
+    assert_eq!(settings.default_model().as_deref(), Some("plain"));
+
+    let changed = client.request("session/set_model", json!({"sessionId": id, "modelId": "local/tiny"})).await;
+    assert!(changed["error"].is_null(), "{changed}");
+    assert_eq!(settings.default_model().as_deref(), Some("tiny"));
+
+    settings.set_remember_last_model(false);
+    let option = json!({"sessionId": id, "configId": "model", "value": "local/plain"});
+    client.request("session/set_config_option", option).await;
+    assert_eq!(settings.default_model().as_deref(), Some("tiny"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn denied_tools_do_not_execute_and_bypass_is_explicit() {
     let setup = setup(vec![
         FauxResponse::tool_call("denied", "write", json!({"path": "output.txt", "content": "denied"})),

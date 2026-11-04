@@ -121,6 +121,7 @@ impl SettingsManager {
         true
     );
     flag!(enable_skill_commands, set_enable_skill_commands, "enableSkillCommands", enable_skill_commands, true);
+    flag!(remember_last_model, set_remember_last_model, "rememberLastModel", remember_last_model, true);
     flag!(
         fullscreen_copy_on_select,
         set_fullscreen_copy_on_select,

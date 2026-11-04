@@ -381,6 +381,9 @@ pub struct Settings {
     /// pi-rust extension: fast mode for models that support it; off by default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fast_mode: Option<bool>,
+    /// pi-rust extension: every user model switch saves the default model; on by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remember_last_model: Option<bool>,
     /// Keyed by `provider/modelId`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_thinking_levels: Option<BTreeMap<String, ThinkingLevel>>,
@@ -570,6 +573,7 @@ pub const PI_SETTINGS_KEYS: &[&str] = &[
     "websockets",
     "extensionRuntime",
     "fastMode",
+    "rememberLastModel",
     "disabledProviders",
     "acpAgents",
     "acpRegistryUrl",

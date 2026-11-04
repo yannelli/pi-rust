@@ -1,6 +1,7 @@
 //! App keybindings and slash commands.
 
 use pi_ai::providers::faux::FauxResponse;
+use serde_json::json;
 
 use crate::interactive::harness::{Options, local, start};
 
@@ -21,6 +22,17 @@ async fn app_keys_cycle_thinking_and_models_and_toggle_views() {
         ui.wait_for("Tool output: expanded").await;
         ui.send("\x14").await;
         ui.wait_for("Thinking blocks: hidden").await;
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn model_cycling_saves_the_default_when_remember_last_model_is_off() {
+    local(async {
+        let ui = start(Options { settings: json!({"rememberLastModel": false}), ..Options::default() }).await;
+        ui.send("\x10").await;
+        ui.wait_for("Switched to").await;
+        assert_eq!(ui.session().settings().default_model().as_deref(), Some("other"));
     })
     .await;
 }
