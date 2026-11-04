@@ -82,6 +82,35 @@ async fn enabled_agents_become_providers_with_advertised_models() {
 }
 
 #[tokio::test]
+async fn custom_agent_sync_updates_launch_command_and_enabled_state() {
+    let _guard = GLOBAL.lock().await;
+    let dir = tempfile::tempdir().unwrap();
+    let settings = SettingsManager::in_memory(json!({}));
+    let runtime = runtime(dir.path()).await;
+    let mut entry: super::AcpAgentEntry = serde_json::from_value(json!({
+        "id": "custom", "name": "Custom", "command": "custom-cli", "args": ["acp"],
+        "env": {"TOKEN": "secret"}
+    }))
+    .unwrap();
+    super::store::upsert(&settings, &entry, super::AcpScope::Global).unwrap();
+    register::sync(&runtime, &settings, dir.path());
+    assert!(runtime.get_model("custom-acp", acp::DEFAULT_MODEL).is_some());
+    let launch = acp::agent("custom-acp").unwrap();
+    assert_eq!(launch.command, "custom-cli");
+    assert_eq!(launch.env["TOKEN"], "secret");
+    entry.command = "updated-cli".into();
+    entry.args.push("--updated".into());
+    super::store::upsert(&settings, &entry, super::AcpScope::Global).unwrap();
+    register::sync(&runtime, &settings, dir.path());
+    let launch = acp::agent("custom-acp").unwrap();
+    assert_eq!(launch.command, "updated-cli");
+    assert_eq!(launch.args, ["acp", "--updated"]);
+    super::store::set_enabled(&settings, "custom", super::AcpScope::Global, false).unwrap();
+    register::sync(&runtime, &settings, dir.path());
+    assert!(runtime.get_model("custom-acp", acp::DEFAULT_MODEL).is_none());
+}
+
+#[tokio::test]
 async fn advertised_thought_levels_become_the_thinking_level_map() {
     let _guard = GLOBAL.lock().await;
     let dir = tempfile::tempdir().unwrap();

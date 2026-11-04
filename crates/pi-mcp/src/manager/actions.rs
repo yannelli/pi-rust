@@ -1,4 +1,5 @@
-//! Actions on one server: sign in and out, reconnect, enable or disable, and change exposure.
+//! Actions on one server: sign in and out, reconnect, enable or disable, and change exposure
+//! (lifecycle changes are in `lazy`).
 //! Each returns the message to show when it failed.
 
 use std::path::PathBuf;
@@ -8,8 +9,9 @@ use futures::FutureExt;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
+use super::lazy::usable;
 use super::{Inner, McpManager, Ready};
-use crate::config::{McpConfigScope, McpExposure, McpServerConfigPatch};
+use crate::config::{McpConfigScope, McpExposure, McpLifecycle, McpServerConfigPatch};
 use crate::error::OAuthError;
 use crate::runtime::{McpSignInPrompt, ServerState, SignInOptions, sign_in_mcp_server};
 
@@ -77,7 +79,21 @@ impl McpManager {
         removed
     }
 
+    /// Reconnect a server, or connect a `lazy` server that has not connected yet.
     pub async fn reconnect(&self, name: &str) -> Option<String> {
+        let idle = {
+            let state = self.inner.lock();
+            state.named(name).filter(|server| state.is_idle(server)).map(|server| server.id)
+        };
+        if let Some(id) = idle {
+            self.inner.connect_idle(id);
+            self.inner.wait_for_servers(&[id], &CancellationToken::new()).await;
+            let connection = self.connection(name);
+            return match connection {
+                Some(connection) => usable(name, &connection).err(),
+                None => Some(format!("MCP server \"{name}\" is disabled.")),
+            };
+        }
         let (sender, receiver) = tokio::sync::oneshot::channel();
         {
             let mut state = self.inner.lock();
@@ -110,12 +126,13 @@ impl McpManager {
 
     /// Enable or disable a server, saved to its config. `in_project` saves a project override.
     pub async fn set_enabled(&self, name: &str, enabled: bool, in_project: bool) -> Option<String> {
-        let patch = McpServerConfigPatch { enabled: Some(enabled), exposure: None };
+        let patch = McpServerConfigPatch { enabled: Some(enabled), exposure: None, lifecycle: None };
         if let Some(failed) = self.inner.save_config(name, &patch, in_project) {
             return Some(failed);
         }
-        let (id, closing) = {
+        let (id, closing, lazy) = {
             let mut state = self.inner.lock();
+            let lazy = state.named(name).is_some_and(|server| state.lifecycle(server) == McpLifecycle::Lazy);
             let Some(server) = state.servers.iter_mut().find(|server| server.entry.name == name) else {
                 return Some(format!("No MCP server named \"{name}\"."));
             };
@@ -139,8 +156,13 @@ impl McpManager {
                     server.closing = Some(closing);
                 }
             }
-            (server.id, server.closing.clone())
+            (server.id, server.closing.clone(), lazy)
         };
+        if enabled && lazy {
+            self.inner.register_cached_tools(id);
+            self.inner.emit_change();
+            return None;
+        }
         if enabled {
             self.inner.start_connection(id, closing).await;
             return None;
@@ -162,7 +184,7 @@ impl McpManager {
 
     /// Change a server's exposure, saved to its config. Tools register again with it.
     pub fn set_exposure(&self, name: &str, exposure: McpExposure) -> Option<String> {
-        let patch = McpServerConfigPatch { enabled: None, exposure: Some(exposure) };
+        let patch = McpServerConfigPatch { enabled: None, exposure: Some(exposure), lifecycle: None };
         if let Some(failed) = self.inner.save_config(name, &patch, false) {
             return Some(failed);
         }
@@ -227,6 +249,9 @@ impl Inner {
         }
         if let Some(exposure) = patch.exposure {
             entry.config.exposure = Some(exposure);
+        }
+        if let Some(lifecycle) = patch.lifecycle {
+            entry.config.lifecycle = Some(lifecycle);
         }
         server.entry = entry;
         None

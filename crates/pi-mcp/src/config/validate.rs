@@ -3,10 +3,11 @@
 use serde_json::{Map, Value};
 use url::Url;
 
-use super::{McpExposure, McpServerConfig};
+use super::{McpExposure, McpLifecycle, McpServerConfig};
 
 const LOOPBACK_HOSTS: [&str; 3] = ["localhost", "127.0.0.1", "[::1]"];
 const EXPOSURES: &str = "\"codemode\", \"deferred\", \"direct\", \"hidden\"";
+pub(super) const LIFECYCLE_ERROR: &str = "lifecycle must be \"eager\" or \"lazy\"";
 
 fn is_server_name(name: &str) -> bool {
     !name.is_empty()
@@ -19,6 +20,10 @@ fn is_string_record(value: &Value) -> bool {
 
 fn is_exposure(value: &Value) -> bool {
     value.as_str().and_then(McpExposure::parse).is_some()
+}
+
+pub(super) fn is_lifecycle(value: &Value) -> bool {
+    value.as_str().and_then(McpLifecycle::parse).is_some()
 }
 
 fn host(url: &Url) -> String {
@@ -175,6 +180,9 @@ pub fn validate_mcp_server_config(name: &str, raw: &Value) -> Result<McpServerCo
             return Err(format!("server \"{name}\": toolExposure \"{tool}\" must be one of {EXPOSURES}"));
         }
     }
+    if value.get("lifecycle").is_some_and(|lifecycle| !is_lifecycle(lifecycle)) {
+        return Err(format!("server \"{name}\": {LIFECYCLE_ERROR}"));
+    }
     if value.get("enabled").is_some_and(|enabled| !enabled.is_boolean()) {
         return Err(format!("server \"{name}\": enabled must be a boolean"));
     }
@@ -238,6 +246,12 @@ mod tests {
             "server \"x\": headers must map names to strings"
         );
         assert_eq!(error("x", json!([])), "server \"x\" must be an object");
+        assert_eq!(
+            error("x", json!({ "command": "a", "lifecycle": "later" })),
+            "server \"x\": lifecycle must be \"eager\" or \"lazy\""
+        );
+        let lazy = validate_mcp_server_config("x", &json!({ "command": "a", "lifecycle": "lazy" })).unwrap();
+        assert_eq!(lazy.lifecycle, Some(McpLifecycle::Lazy));
         assert_eq!(
             error("x", json!({ "type": "stdio", "url": "https://a" })),
             "server \"x\" needs either \"command\" (stdio) or \"url\" (streamable HTTP)"

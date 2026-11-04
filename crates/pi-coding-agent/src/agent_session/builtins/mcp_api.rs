@@ -1,5 +1,5 @@
 //! MCP actions for the `/mcp` views and RPC (upstream `extensions/mcp/index.ts` manager actions):
-//! status, sign in and out, reconnect, enable or disable (also per project), and exposure. Each
+//! status, sign in and out, reconnect, enable or disable (also per project), exposure, and lifecycle. Each
 //! returns the message to show when it failed, and activates codemode or `tool_search` as needed.
 
 use std::sync::Arc;
@@ -7,7 +7,7 @@ use std::sync::Arc;
 use pi_agent::SharedTool;
 use pi_mcp::manager::describe_state;
 use pi_mcp::runtime::{McpSignInPrompt, ServerState};
-use pi_mcp::{McpAgentTool, McpExposure, McpServerStatus, McpSubscription, NotifyLevel};
+use pi_mcp::{McpAgentTool, McpExposure, McpLifecycle, McpServerStatus, McpSubscription, NotifyLevel};
 use tokio_util::sync::CancellationToken;
 
 use super::same_tool;
@@ -118,6 +118,12 @@ impl AgentSession {
         failure
     }
 
+    /// Change when a server connects, saved to its `mcp.json`. A server set to `eager` connects now.
+    pub fn mcp_set_lifecycle(&self, name: &str, lifecycle: McpLifecycle) -> Option<String> {
+        let Some(manager) = self.mcp_manager() else { return Some(MCP_DISABLED.into()) };
+        manager.set_lifecycle(name, lifecycle)
+    }
+
     /// The prompt `/mcp login` signs in with, such as one that opens the browser and reads a
     /// pasted redirect URL. Without one, `/mcp login` needs an interactive mode.
     pub fn set_mcp_sign_in_prompt(&self, prompt: Option<Arc<dyn McpSignInPrompt>>) {
@@ -167,7 +173,9 @@ impl AgentSession {
                 let preferred = |status: &McpServerStatus| {
                     matches!(status.state, Some(ServerState::Failed | ServerState::Disconnected))
                 };
-                let Some(server) = self.pick_mcp_server(name, none, |status| status.state.is_some(), preferred) else {
+                let connectable =
+                    |status: &McpServerStatus| status.state.is_some() || status.lifecycle == McpLifecycle::Lazy;
+                let Some(server) = self.pick_mcp_server(name, none, connectable, preferred) else {
                     return;
                 };
                 match self.mcp_reconnect(&server).await {

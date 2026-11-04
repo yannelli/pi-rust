@@ -1,6 +1,6 @@
 # ACP agents as providers
 
-Created: 2026-10-30. Last updated: 2026-10-31.
+Created: 2026-10-30. Last updated: 2026-11-04.
 
 pi can run an external [Agent Client Protocol](https://agentclientprotocol.com) (ACP) agent, such as Kiro CLI or Amp, and show its work in the pi transcript. This page has the acceptance criteria, the design decision, the research with sources, and the user guide. For pi as an ACP server (`pi --mode acp`), see [acp.md](acp.md).
 
@@ -14,7 +14,7 @@ pi can run an external [Agent Client Protocol](https://agentclientprotocol.com) 
 6. `fs/read_text_file`, `fs/write_text_file`, and `terminal/create`, `terminal/output`, `terminal/wait_for_exit`, `terminal/kill`, `terminal/release` work for paths inside the session working directory. Paths outside it fail.
 7. Escape sends `session/cancel`. The stream ends with stop reason `aborted`.
 8. Modes (`modes` or a `configOptions` selector of category `mode`) are selectable with `/acp mode` before a prompt. Models (`configOptions` category `model`, or `models.availableModels` of older agents) are selectable in `/model`. `/thinking` uses the agent's advertised effort choices: pi level names match option IDs or labels without regard to case, and pi sends the exact advertised option ID. Unsupported levels are omitted. Options without categories use known model, permission, and effort IDs, including Kiro's `effortLevel`.
-9. `/acp` opens a browser with two tabs. **Installed** lists every `acpAgents` entry of the global and the project settings. A global entry that a project entry replaces is marked and can only be enabled, disabled, or removed. The other entries can also be logged in to, set as default, and moved to the other settings file. **Registry** lists the ACP registry and the built-in entries for Kiro and Amp. Install asks for the global or the project settings.
+9. `/acp` opens a browser with two tabs. **Installed** lists every `acpAgents` entry of the global and the project settings. A global entry that a project entry replaces is marked and can be edited, enabled, disabled, or removed. The other entries can also be logged in to, set as default, and moved to the other settings file. **Add custom agent** creates an entry; **Edit** changes any installed entry while keeping its ID, scope, and install metadata. **Registry** lists the ACP registry and the built-in entries for Kiro and Amp. Install asks for the global or the project settings.
 10. Install uses the distribution of the registry entry: `npx` and `uvx` store the command; `binary` downloads the archive for the platform, checks the SHA-256 when the entry has one, and unpacks it under `~/.pi/agent/acp/agents/<id>/<version>/`.
 11. Log in shows the `authMethods` of the agent. A terminal method (`type: "terminal"` or `_meta["terminal-auth"]`) runs in the terminal while the TUI is stopped. Other methods go to `authenticate`.
 12. Tests use a fake ACP agent and a local mock HTTP server. They cover initialize, prompt streaming, tool call updates, permission requests, fs read and write, cancel, registry fetch, install, and criteria 13 to 17. No test uses the network, a real agent, or a key.
@@ -99,6 +99,14 @@ Sources: [amp-acp](https://github.com/tao12345666333/amp-acp) `src/server.ts`, t
 
 The agent edits files and runs commands with its own tools. pi shows its permission requests as dialogs. In print mode (`pi -p`), pi rejects the requests.
 
+## Add a custom agent
+
+On the **Installed** tab of `/acp`, select **Add custom agent** or press Ctrl+N. Name and Command are required; Command is an executable name or path. The ID defaults to a slug of the name and is editable before saving. It must use lowercase letters, digits, and dashes and be unique across global and project settings. The provider is `<id>-acp`, or `<id>` when it already ends in `-acp`.
+
+**Arguments** and the optional **Login command** accept shell-style words with quotes and backslash escapes. For example, `acp --agent-engine=v3` gives two arguments. **Environment** takes `KEY=VALUE` pairs, one per line; Enter adds a line, and multiline paste works. Details mask the values. Description is optional. Choose global or project scope; **Enabled** defaults to on.
+
+Tab and Shift+Tab change fields. Enter or Space changes scope or enabled state. Ctrl+S or **Save** saves and updates the provider list; errors keep the input. Escape cancels. **Edit** opens the same form with ID and scope read-only and preserves source, version, install directory, and unknown fields. Use the move action to change scope.
+
 ## Settings
 
 `acpAgents` is an array in the global or the project `settings.json`. A project entry replaces a global entry with the same `id`.
@@ -126,7 +134,9 @@ The agent edits files and runs commands with its own tools. pi shows its permiss
 | `command`, `args`, `env` | The command that starts the agent in ACP mode over stdio. |
 | `enabled` | `false` removes the provider from `/model` and keeps the entry. |
 | `loginCommand` | The login program for agents that exit before ACP starts without a login, for example `["kiro-cli", "login"]`. **Log in** runs it when the agent does not start. |
-| `version`, `description`, `source`, `installDir` | Set by the install. `installDir` is removed with the entry. |
+| `description` | Optional description shown in `/acp`; editable in the form. |
+| `source` | `registry`, `builtin`, or `custom`. Entries added with the form use `custom`; editing preserves the source. |
+| `version`, `installDir` | Set by the install. `installDir` is removed with the entry. |
 
 The `acpRegistryUrl` setting replaces the registry URL, for example with a mirror. `PI_ACP_REGISTRY_URL` replaces both.
 

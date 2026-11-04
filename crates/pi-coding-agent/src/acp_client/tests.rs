@@ -60,6 +60,33 @@ fn store_round_trip_with_project_override() {
 }
 
 #[test]
+fn upsert_preserves_unknown_fields_and_clears_optional_fields() {
+    let settings = SettingsManager::in_memory(json!({"acpAgents": [{
+        "id": "a", "name": "Agent", "command": "old", "source": "builtin",
+        "version": "1", "installDir": "/agents/a", "description": "Old",
+        "loginCommand": ["old", "login"], "future": {"nested": true}
+    }, {"id": "broken"}]}));
+    let mut edited = store::get(&settings, "a", AcpScope::Global).unwrap();
+    edited.command = "new".into();
+    edited.description = None;
+    edited.login_command = None;
+    store::upsert(&settings, &edited, AcpScope::Global).unwrap();
+    let saved = settings.global_settings().extra["acpAgents"].clone();
+    assert_eq!(saved[0]["command"], "new");
+    assert_eq!(saved[0]["source"], "builtin");
+    assert_eq!(saved[0]["version"], "1");
+    assert_eq!(saved[0]["installDir"], "/agents/a");
+    assert_eq!(saved[0]["future"], json!({"nested": true}));
+    assert!(saved[0].get("description").is_none());
+    assert!(saved[0].get("loginCommand").is_none());
+    assert_eq!(saved[1], json!({"id": "broken"}));
+    assert!(store::contains_id(&settings, "broken"));
+    store::upsert(&settings, &entry("project", "cli"), AcpScope::Project).unwrap();
+    assert!(store::contains_id(&settings, "project"));
+    assert!(!store::contains_id(&settings, "missing"));
+}
+
+#[test]
 fn every_scope_is_listed_and_entries_move_between_scopes() {
     let settings = SettingsManager::in_memory(json!({}));
     store::upsert(&settings, &entry("a", "global-a"), AcpScope::Global).unwrap();

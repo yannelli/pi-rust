@@ -336,6 +336,20 @@ async fn waits_for_servers_before_tool_search_searches() {
 }
 
 #[tokio::test]
+async fn connects_a_lazy_server_without_a_cache_before_tool_search_searches() {
+    let options = SetupOptions { wait_for_tools: false, ..Default::default() };
+    let s = setup(json!({ "exposure": "deferred", "lifecycle": "lazy" }), options).await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert!(s.fake.servers.lock().unwrap().is_empty());
+    s.h.provider.push(FauxResponse::tool_call("t1", "tool_search", json!({ "query": "search the docs", "limit": 1 })));
+    s.h.provider.push(FauxResponse::tool_call("t2", "mcp__docs__search", json!({ "query": "lazy" })));
+    s.h.provider.push(FauxResponse::text("done"));
+    s.h.session.prompt("go", Vec::new()).await.unwrap();
+    assert_eq!(result_text(&tool_result(&s.h.session, "mcp__docs__search")), "lazy guide\nlazy faq");
+    assert_eq!(s.fake.servers.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn holds_the_first_prompt_for_direct_servers_only_up_to_the_startup_wait() {
     let options = SetupOptions {
         fake: slow(Duration::MAX),

@@ -8,7 +8,9 @@ use async_trait::async_trait;
 use pi_mcp::config::get_mcp_tool_exposure;
 use pi_mcp::manager::describe_state;
 use pi_mcp::runtime::{McpSignInPrompt, ServerState};
-use pi_mcp::{McpConfigScope, McpConnectionId, McpExposure, McpManager, McpServerStatus, McpSubscription, Tool};
+use pi_mcp::{
+    McpConfigScope, McpConnectionId, McpExposure, McpLifecycle, McpManager, McpServerStatus, McpSubscription, Tool,
+};
 use pi_tui::components::SelectItem;
 use tokio_util::sync::CancellationToken;
 
@@ -61,6 +63,7 @@ pub trait McpServers {
     async fn reconnect(&self, name: &str) -> Option<String>;
     async fn set_enabled(&self, name: &str, enabled: bool, in_project: bool) -> Option<String>;
     fn set_exposure(&self, name: &str, exposure: McpExposure) -> Option<String>;
+    fn set_lifecycle(&self, name: &str, lifecycle: McpLifecycle) -> Option<String>;
     /// Shows `message` with the server, or clears it.
     fn set_message(&self, name: &str, message: Option<String>);
 }
@@ -136,6 +139,10 @@ impl McpServers for McpManager {
         McpManager::set_exposure(self, name, exposure)
     }
 
+    fn set_lifecycle(&self, name: &str, lifecycle: McpLifecycle) -> Option<String> {
+        McpManager::set_lifecycle(self, name, lifecycle)
+    }
+
     fn set_message(&self, name: &str, message: Option<String>) {
         McpManager::set_message(self, name, message);
     }
@@ -206,6 +213,10 @@ impl McpServers for Arc<AgentSession> {
         self.mcp_set_exposure(name, exposure)
     }
 
+    fn set_lifecycle(&self, name: &str, lifecycle: McpLifecycle) -> Option<String> {
+        self.mcp_set_lifecycle(name, lifecycle)
+    }
+
     fn set_message(&self, name: &str, message: Option<String>) {
         if let Some(manager) = self.mcp_manager() {
             manager.set_message(name, message);
@@ -228,6 +239,14 @@ fn first_line(text: &str) -> &str {
 fn exposure_description(exposure: McpExposure) -> &'static str {
     let described = EXPOSURE_DESCRIPTIONS.iter().find(|(candidate, _)| *candidate == exposure);
     described.map_or("unreachable", |(_, description)| description)
+}
+
+/// The lifecycle item of the server menu; choosing it switches to the other lifecycle.
+fn lifecycle_label(lifecycle: McpLifecycle) -> &'static str {
+    match lifecycle {
+        McpLifecycle::Eager => "Connect: at startup",
+        McpLifecycle::Lazy => "Connect on first use",
+    }
 }
 
 fn scope_name(status: &McpServerStatus) -> Option<String> {
@@ -296,11 +315,16 @@ pub fn server_menu(servers: &dyn McpServers, name: &str) -> McpMenu {
             [ServerState::Failed, ServerState::Disconnected, ServerState::Connected, ServerState::NeedsAuth];
         if state.is_some_and(|state| reconnectable.contains(&state)) {
             items.push(item("reconnect", "Reconnect", None));
+        } else if state.is_none() && status.lifecycle == McpLifecycle::Lazy {
+            items.push(item("reconnect", "Connect", None));
         }
         if state == Some(ServerState::Connected) && status.oauth {
             items.push(item("signout", "Sign out", Some("deletes the stored credentials")));
         }
         items.push(item("exposure", "Exposure", Some(entry.config.exposure().as_str())));
+        if entry.scope.is_none_or(McpConfigScope::is_saved) {
+            items.push(item("lifecycle", lifecycle_label(status.lifecycle), Some(&saved)));
+        }
         items.push(item("disable", "Disable", Some(&saved)));
         if in_project {
             items.push(item("disable-project", "Disable in this project", project_saved));

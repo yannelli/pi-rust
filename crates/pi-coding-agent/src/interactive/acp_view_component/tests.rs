@@ -44,7 +44,9 @@ fn enter_opens_menu_and_runs_items() {
     let (mut browser, calls) = browser();
     browser.handle_input(keys::ENTER);
     let text = render_text(&mut browser, 120);
-    for label in ["Log in", "Set as default", "Disable", "Move to project settings", "Remove", "Provider: kiro-acp"] {
+    for label in
+        ["Log in", "Set as default", "Disable", "Move to project settings", "Edit", "Remove", "Provider: kiro-acp"]
+    {
         assert!(text.contains(label), "{label}: {text}");
     }
     browser.handle_input(keys::ENTER);
@@ -131,4 +133,118 @@ fn shadowed_global_rows_keep_their_own_scope_actions() {
     }
     browser.handle_input(keys::ENTER);
     assert_eq!(calls.take(), vec![AcpAction::Move("kiro".into(), AcpScope::Project)]);
+}
+
+fn add_form(browser: &mut AcpBrowser, name: &str, command: &str) {
+    browser.handle_input("\x0e");
+    browser.handle_input(name);
+    browser.handle_input(keys::TAB);
+    browser.handle_input(keys::TAB);
+    browser.handle_input(command);
+}
+
+#[test]
+fn add_row_and_shortcut_open_form_and_cancel_returns_to_list() {
+    let _keys = setup();
+    let (mut browser, calls) = browser();
+    let text = render_text(&mut browser, 120);
+    assert!(text.contains("Add custom agent") && text.contains("ctrl+n"), "{text}");
+    browser.handle_input(keys::UP);
+    browser.handle_input(keys::ENTER);
+    assert!(render_text(&mut browser, 120).contains("Name:"));
+    browser.handle_input("\x13");
+    assert!(render_text(&mut browser, 120).contains("Name is required."));
+    assert!(calls.is_empty());
+    browser.handle_input(keys::ESCAPE);
+    add_form(&mut browser, "My Agent", "agent-cli");
+    let text = render_text(&mut browser, 120);
+    assert!(text.contains("my-agent-acp") && text.contains("Enabled: on"), "{text}");
+    browser.handle_input("\x13");
+    let actions = calls.take();
+    let [AcpAction::Save { entry, scope, editing }] = actions.as_slice() else { panic!("{actions:?}") };
+    assert_eq!(
+        (entry.id.as_str(), entry.source.as_str(), *scope, *editing),
+        ("my-agent", "custom", AcpScope::Global, false)
+    );
+}
+
+#[test]
+fn validation_retains_input_for_empty_command_duplicate_id_and_bad_environment() {
+    let _keys = setup();
+    let (mut browser, calls) = browser();
+    add_form(&mut browser, "My Agent", "");
+    browser.handle_input("\x13");
+    let text = render_text(&mut browser, 120);
+    assert!(text.contains("Command is required.") && text.contains("My Agent"), "{text}");
+    assert!(calls.is_empty());
+    browser.handle_input("agent-cli");
+    browser.handle_input("\x1b[Z");
+    browser.handle_input("\x0b");
+    browser.handle_input("kiro");
+    browser.handle_input("\x13");
+    assert!(render_text(&mut browser, 120).contains("already installed"));
+    assert!(calls.is_empty());
+    browser.handle_input("\x01");
+    browser.handle_input("\x0b");
+    browser.handle_input("kiro-acp");
+    browser.handle_input("\x13");
+    assert!(render_text(&mut browser, 120).contains("Provider \"kiro-acp\" already belongs to"));
+    assert!(calls.is_empty());
+    browser.handle_input("\x01");
+    browser.handle_input("\x0b");
+    browser.handle_input("custom");
+    for _ in 0..5 {
+        browser.handle_input(keys::TAB);
+    }
+    browser.handle_input("INVALID-LINE");
+    browser.handle_input("\x13");
+    let text = render_text(&mut browser, 120);
+    assert!(text.contains("Environment line 1") && text.contains("INVALID-LINE"), "{text}");
+    assert!(calls.is_empty());
+    browser.handle_input("\x01");
+    browser.handle_input("\x0b");
+    browser.handle_input("TOKEN=secret=with=equals");
+    browser.handle_input("\x13");
+    let actions = calls.take();
+    let [AcpAction::Save { entry, .. }] = actions.as_slice() else { panic!("{actions:?}") };
+    assert_eq!(entry.env["TOKEN"], "secret=with=equals");
+}
+
+#[test]
+fn invalid_id_and_shell_words_stay_in_form() {
+    let _keys = setup();
+    let (mut browser, calls) = browser();
+    add_form(&mut browser, "My Agent", "agent-cli");
+    browser.handle_input("\x1b[Z");
+    browser.handle_input("\x0b");
+    browser.handle_input("Bad_ID");
+    browser.handle_input("\x13");
+    assert!(render_text(&mut browser, 120).contains("lowercase letters, digits, and dashes"));
+    browser.handle_input("\x01");
+    browser.handle_input("\x0b");
+    browser.handle_input("my-agent");
+    browser.handle_input(keys::TAB);
+    browser.handle_input(keys::TAB);
+    browser.handle_input("'unclosed");
+    browser.handle_input("\x13");
+    assert!(render_text(&mut browser, 120).contains("Arguments: Unclosed quote"));
+    assert!(calls.is_empty());
+}
+
+#[test]
+fn save_error_preserves_form_and_busy_blocks_changes() {
+    let _keys = setup();
+    let (mut browser, calls) = browser();
+    add_form(&mut browser, "My Agent", "agent-cli");
+    browser.handle_input("\x13");
+    calls.take();
+    browser.handle_input("\x13");
+    browser.handle_input(keys::ESCAPE);
+    assert!(calls.is_empty());
+    browser.finish_save(Some("Project settings are not trusted".into()));
+    browser.set_status(String::new(), false);
+    let text = render_text(&mut browser, 120);
+    assert!(text.contains("My Agent") && text.contains("Project settings are not trusted"), "{text}");
+    browser.handle_input("\x13");
+    assert_eq!(calls.take().len(), 1);
 }

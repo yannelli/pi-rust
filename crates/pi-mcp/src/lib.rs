@@ -19,6 +19,7 @@ pub mod registered;
 pub mod resources;
 pub mod runtime;
 pub mod section;
+pub mod tool_cache;
 pub mod tools;
 pub mod transport;
 pub mod types;
@@ -27,7 +28,7 @@ pub use auth::{AuthProvider, StaticToken, UnauthorizedContext};
 pub use cli::{McpCommandOptions, run_mcp_command};
 pub use client::{ClientState, McpClient, McpClientOptions, RequestOptions};
 pub use config::{
-    LoadedMcpConfig, McpConfigScope, McpExposure, McpServerConfig, McpServerEntry, add_client_servers,
+    LoadedMcpConfig, McpConfigScope, McpExposure, McpLifecycle, McpServerConfig, McpServerEntry, add_client_servers,
     get_mcp_tool_exposure, load_mcp_config, mcp_namespace,
 };
 pub use content::{CallToolResult, ContentBlock, to_llm_content};

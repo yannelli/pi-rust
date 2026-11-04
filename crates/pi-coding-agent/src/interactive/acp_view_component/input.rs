@@ -9,11 +9,30 @@ use crate::acp_client::AcpScope;
 const PAGE: usize = 10;
 
 pub(super) fn handle(browser: &mut AcpBrowser, data: &str) {
+    if browser.busy && browser.mode == Mode::Form {
+        return;
+    }
     match browser.mode.clone() {
+        Mode::Form => handle_form(browser, data),
         Mode::ConfirmRemove { id, scope, name } => handle_confirm(browser, data, id, scope, name),
         Mode::Menu { id, scope, item } => handle_menu(browser, data, id, scope, item),
         Mode::InstallScope { id, name, item } => handle_install_scope(browser, data, id, name, item),
         Mode::List => handle_list(browser, data),
+    }
+}
+
+fn handle_form(browser: &mut AcpBrowser, data: &str) {
+    if get_keybindings().matches(data, "tui.select.cancel") {
+        browser.form = None;
+        browser.mode = Mode::List;
+        return;
+    }
+    let Some(form) = &mut browser.form else { return };
+    if form.handle(data) {
+        match form.action(&browser.installed) {
+            Ok(action) => browser.emit_mutation(action, "Saving ACP agent…".into()),
+            Err(error) => form.error = Some(error),
+        }
     }
 }
 
@@ -68,7 +87,7 @@ fn handle_menu(browser: &mut AcpBrowser, data: &str, id: String, scope: AcpScope
 
 fn handle_list(browser: &mut AcpBrowser, data: &str) {
     let kb = get_keybindings();
-    let len = browser.visible().len();
+    let len = browser.list_len();
     if kb.matches(data, "tui.select.cancel") {
         if !browser.search.get_value().is_empty() {
             browser.search.set_value("");
@@ -82,6 +101,8 @@ fn handle_list(browser: &mut AcpBrowser, data: &str) {
             AcpTab::Registry => AcpTab::Installed,
         };
         browser.selected = 0;
+    } else if browser.tab == super::AcpTab::Installed && matches_key(data, "ctrl+n") {
+        browser.add_custom();
     } else if kb.matches(data, "tui.select.up") {
         if len > 0 {
             browser.selected = if browser.selected == 0 { len - 1 } else { browser.selected - 1 };
@@ -95,6 +116,10 @@ fn handle_list(browser: &mut AcpBrowser, data: &str) {
     } else if kb.matches(data, "tui.select.pageDown") {
         browser.selected = (browser.selected + PAGE).min(len.saturating_sub(1));
     } else if kb.matches(data, "tui.select.confirm") {
+        if browser.adding_selected() {
+            browser.add_custom();
+            return;
+        }
         let Some(row) = browser.selected_row().cloned() else { return };
         match browser.tab {
             AcpTab::Installed => {

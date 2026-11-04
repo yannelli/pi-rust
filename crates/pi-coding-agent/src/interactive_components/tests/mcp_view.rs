@@ -8,7 +8,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use pi_mcp::runtime::{McpSignInPrompt, ServerState};
-use pi_mcp::{McpConfigScope, McpExposure, McpServerConfig, McpServerEntry, McpServerStatus, McpSubscription, Tool};
+use pi_mcp::{
+    McpConfigScope, McpExposure, McpLifecycle, McpServerConfig, McpServerEntry, McpServerStatus, McpSubscription, Tool,
+};
 use pi_tui::Component;
 use pi_tui::components::SelectItem;
 use reqwest::Url;
@@ -50,6 +52,7 @@ fn status(name: &str, config: McpServerConfig, scope: McpConfigScope, state: Opt
     McpServerStatus {
         entry,
         enabled,
+        lifecycle: McpLifecycle::Eager,
         state,
         error: None,
         tools: Vec::new(),
@@ -167,6 +170,12 @@ impl McpServers for FakeServers {
         None
     }
 
+    fn set_lifecycle(&self, name: &str, lifecycle: McpLifecycle) -> Option<String> {
+        self.log.push(format!("lifecycle {name} {lifecycle}"));
+        self.update(name, |status| status.lifecycle = lifecycle);
+        None
+    }
+
     fn set_message(&self, name: &str, message: Option<String>) {
         self.update(name, |status| status.message = message);
     }
@@ -249,6 +258,7 @@ fn menus_describe_servers_actions_tools_and_exposures() {
         pair("Tools", Some("2 offered")),
         pair("Reconnect", None),
         pair("Exposure", Some("codemode")),
+        pair("Connect: at startup", saved),
         pair("Disable", saved),
     ];
     assert_eq!(labels(&menu), expected);
@@ -259,6 +269,7 @@ fn menus_describe_servers_actions_tools_and_exposures() {
         pair("Sign in", Some("opens the browser")),
         pair("Reconnect", None),
         pair("Exposure", Some("codemode")),
+        pair("Connect: at startup", global),
         pair("Disable", global),
         pair("Disable in this project", saved),
     ];
@@ -372,7 +383,7 @@ async fn manager_flow_changes_exposure_lists_tools_and_disables() {
         assert!(harness.screen().contains("→ ✓ codemode"));
         harness.send_all(&[keys::DOWN, keys::ENTER]);
         wait_line(&harness, &["Exposure", "deferred"]).await;
-        harness.send_all(&[keys::DOWN, keys::DOWN, keys::DOWN, keys::ENTER]);
+        harness.send_all(&[keys::DOWN, keys::DOWN, keys::DOWN, keys::DOWN, keys::ENTER]);
         wait_for(&harness, "→ Enable").await;
         assert_eq!(servers.log.get(), ["exposure docs deferred", "enabled docs false false"]);
         harness.send(keys::ESCAPE);
@@ -414,6 +425,41 @@ async fn signing_in_opens_the_browser_and_reports_cancellation() {
             servers.log.get(),
             ["signin issues None", "signin issues Some(\"http://127.0.0.1/callback?code=2\")"]
         );
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn shows_idle_lazy_servers_and_toggles_the_lifecycle() {
+    local(async {
+        let harness = view();
+        let servers = FakeServers::new(false);
+        servers.update("docs", |status| {
+            (status.lifecycle, status.state, status.tools) = (McpLifecycle::Lazy, None, Vec::new());
+        });
+        let menu = servers_menu(&*servers);
+        assert_eq!(menu.items[1].description.as_deref(), Some("idle, connects on first use · codemode · project"));
+        let saved = Some("saved to the project mcp.json");
+        let expected = [
+            pair("Connect", None),
+            pair("Exposure", Some("codemode")),
+            pair("Connect on first use", saved),
+            pair("Disable", saved),
+        ];
+        assert_eq!(labels(&server_menu(&*servers, "docs")), expected);
+        let client = status("client", McpServerConfig::stdio("x", Vec::new()), McpConfigScope::Client, None);
+        servers.statuses.borrow_mut().push(client);
+        let menu = server_menu(&*servers, "client");
+        assert!(!menu.items.iter().any(|item| item.value == "lifecycle"), "{:?}", labels(&menu));
+
+        let (view, api) = (harness.component.clone(), servers.clone());
+        tokio::task::spawn_local(async move { run_mcp_manager(&view, api, browser(&Calls::new())).await });
+        wait_for(&harness, "→ issues").await;
+        harness.send_all(&[keys::DOWN, keys::ENTER]);
+        wait_for(&harness, "→ Connect").await;
+        harness.send_all(&[keys::DOWN, keys::DOWN, keys::ENTER]);
+        wait_for(&harness, "Connect: at startup").await;
+        assert_eq!(servers.log.get(), ["lifecycle docs eager"]);
     })
     .await;
 }

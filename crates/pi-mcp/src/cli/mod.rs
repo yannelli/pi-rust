@@ -55,6 +55,8 @@ Options for add:
   --oauth-client-name <name>
                           Client name sent when registering with the OAuth server
   --exposure <mode>       codemode (default), deferred, direct, or hidden
+  --lifecycle <when>      eager (default) connects when a session starts; lazy connects
+                          on first use and registers the tools pi saved earlier
   --description <text>    What the server offers, shown in the system prompt
 
 Other options:
@@ -295,7 +297,7 @@ fn number_value(text: &str) -> Value {
     }
 }
 
-const ADD_OPTIONS: [(&str, Kind); 12] = [
+const ADD_OPTIONS: [(&str, Kind); 13] = [
     ("local", Kind::Flag),
     ("url", Kind::Value),
     ("env", Kind::List),
@@ -307,6 +309,7 @@ const ADD_OPTIONS: [(&str, Kind); 12] = [
     ("oauth-callback-port", Kind::Value),
     ("oauth-client-name", Kind::Value),
     ("exposure", Kind::Value),
+    ("lifecycle", Kind::Value),
     ("description", Kind::Value),
 ];
 
@@ -349,7 +352,7 @@ fn build_config(parsed: &Parsed, command: &[String], error: &LineFn) -> Option<M
             config.insert("cwd".into(), json!(cwd));
         }
     }
-    for option in ["exposure", "description"] {
+    for option in ["exposure", "lifecycle", "description"] {
         if let Some(value) = parsed.value(option) {
             config.insert(option.into(), json!(value));
         }
