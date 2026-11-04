@@ -98,7 +98,8 @@ async fn send_now_moves_queued_follow_ups_to_steering() {
         let windows = pi_coding_agent::keybindings::use_windows_keybindings();
         ui.send(if windows { "\x11" } else { "\x1b\r" }).await;
         ui.wait_for("Follow-up: later please").await;
-        let send_now = if windows { "Alt+S" } else { "Alt+Down" };
+        let alt = if cfg!(target_os = "macos") { "Option" } else { "Alt" };
+        let send_now = if windows { format!("{alt}+S") } else { format!("{alt}+Down") };
         ui.wait_for(&format!("{send_now} to send follow-ups now")).await;
         // Send now is alt+s with Windows keybindings and alt+down elsewhere.
         ui.send(if windows { "\x1bs" } else { "\x1b[1;3B" }).await;
