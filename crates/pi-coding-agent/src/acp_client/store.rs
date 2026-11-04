@@ -19,6 +19,13 @@ fn raw(settings: &SettingsManager, scope: AcpScope) -> Vec<Value> {
     }
 }
 
+/// Whether either settings file has this ID, including entries that do not parse.
+pub fn contains_id(settings: &SettingsManager, id: &str) -> bool {
+    [AcpScope::Global, AcpScope::Project]
+        .into_iter()
+        .any(|scope| raw(settings, scope).iter().any(|item| has_id(item, id)))
+}
+
 /// The entries of one scope that parse.
 pub fn scope_entries(settings: &SettingsManager, scope: AcpScope) -> Vec<AcpAgentEntry> {
     raw(settings, scope).into_iter().filter_map(|item| serde_json::from_value(item).ok()).collect()
@@ -87,11 +94,19 @@ fn write(settings: &SettingsManager, scope: AcpScope, items: Vec<Value>) -> Resu
     }
 }
 
-/// Add `entry`, or replace the entry with its ID.
+/// Add `entry`, or replace its known fields while keeping unknown fields.
 pub fn upsert(settings: &SettingsManager, entry: &AcpAgentEntry, scope: AcpScope) -> Result<(), String> {
     let value = serde_json::to_value(entry).map_err(|error| error.to_string())?;
     let mut items = raw(settings, scope);
     match items.iter_mut().find(|item| has_id(item, &entry.id)) {
+        Some(Value::Object(object)) => {
+            for key in ["version", "description", "installDir", "loginCommand"] {
+                object.remove(key);
+            }
+            if let Value::Object(fields) = value {
+                object.extend(fields);
+            }
+        }
         Some(slot) => *slot = value,
         None => items.push(value),
     }

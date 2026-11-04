@@ -58,6 +58,8 @@ impl InteractiveMode {
                     action = receive.recv() => {
                         let Some(action) = action else { break };
                         let settings = mode.settings();
+                        let saving = matches!(&action, AcpAction::Save { .. });
+                        let mut save_error = None;
                         let status = match action {
                             AcpAction::Close => { close(); break; }
                             AcpAction::Login(id) => {
@@ -78,16 +80,23 @@ impl InteractiveMode {
                                 mode.acp_install_program(agent, scope);
                                 break;
                             }
-                            change => match apply(change, &agents, &settings, &agent_dir).await {
-                                Ok(message) => {
-                                    crate::acp_client::providers::sync_providers(&mode.session()).await;
-                                    message
+                            change => match apply_and_sync(change, &agents, &settings, &agent_dir, || async {
+                                crate::acp_client::providers::sync_providers(&mode.session()).await;
+                            }).await {
+                                Ok(message) => message,
+                                Err(error) => {
+                                    if saving {
+                                        save_error = Some(error.clone());
+                                    }
+                                    format!("ACP agent change failed: {error}")
                                 }
-                                Err(error) => format!("ACP agent change failed: {error}"),
                             },
                         };
                         let mut browser = view.borrow_mut();
                         browser.set_installed(installed_rows(&settings));
+                        if saving {
+                            browser.finish_save(save_error);
+                        }
                         if fetching.is_none() {
                             browser.set_registry(registry_rows(&agents, &settings), registry_error.clone());
                         }
@@ -117,7 +126,19 @@ fn find(settings: &SettingsManager, id: &str) -> Option<(AcpAgentEntry, AcpScope
     store::list(settings).into_iter().find(|(entry, _)| entry.id == id)
 }
 
-/// Install, enable or disable, or remove an agent; returns the status message.
+async fn apply_and_sync<F: std::future::Future<Output = ()>>(
+    action: AcpAction,
+    agents: &[RegistryAgent],
+    settings: &SettingsManager,
+    agent_dir: &Path,
+    sync: impl FnOnce() -> F,
+) -> Result<String, String> {
+    let message = apply(action, agents, settings, agent_dir).await?;
+    sync().await;
+    Ok(message)
+}
+
+/// Apply a settings change and return its status message.
 async fn apply(
     action: AcpAction,
     agents: &[RegistryAgent],
@@ -125,6 +146,29 @@ async fn apply(
     agent_dir: &Path,
 ) -> Result<String, String> {
     match action {
+        AcpAction::Save { entry, scope, editing } => {
+            if editing {
+                if store::get(settings, &entry.id, scope).is_none() {
+                    return Err("The agent is no longer installed".into());
+                }
+            } else if store::contains_id(settings, &entry.id) {
+                return Err(format!("ID \"{}\" is already installed. Choose another ID.", entry.id));
+            }
+            let provider = provider_id(&entry.id);
+            if let Some((other, _, _)) = store::all(settings)
+                .into_iter()
+                .find(|(other, _, _)| other.id != entry.id && provider_id(&other.id) == provider)
+            {
+                return Err(format!("Provider \"{provider}\" already belongs to {}. Choose another ID.", other.name));
+            }
+            store::upsert(settings, &entry, scope)?;
+            Ok(format!(
+                "Saved {} in the {} settings. Its provider is {}.",
+                entry.name,
+                scope.label(),
+                provider_id(&entry.id)
+            ))
+        }
         AcpAction::Install(id, scope) => {
             let agent =
                 agents.iter().find(|agent| agent.id == id).cloned().ok_or("The agent is not in the registry")?;
@@ -165,13 +209,16 @@ fn installed_rows(settings: &SettingsManager) -> Vec<AcpRow> {
         .map(|(entry, scope, shadowed)| {
             let provider = provider_id(&entry.id);
             let command = std::iter::once(entry.command.as_str()).chain(entry.args.iter().map(String::as_str));
+            let mut details = vec![
+                format!("Provider: {provider}"),
+                format!("Command: {}", command.collect::<Vec<_>>().join(" ")),
+                format!("Source: {}", entry.source),
+            ];
+            details.extend(entry.env.keys().map(|key| format!("{key}=********")));
             AcpRow {
                 is_default: !shadowed && default.as_deref() == Some(provider.as_str()),
-                details: vec![
-                    format!("Provider: {provider}"),
-                    format!("Command: {}", command.collect::<Vec<_>>().join(" ")),
-                    format!("Source: {}", entry.source),
-                ],
+                details,
+                entry: Some(entry.clone()),
                 builtin: entry.source == "builtin",
                 id: entry.id,
                 name: entry.name,
@@ -215,5 +262,120 @@ fn distribution_label(agent: &RegistryAgent) -> String {
         format!("{} on PATH", local.program)
     } else {
         "none for this platform".into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use pi_tui::Component;
+    use serde_json::json;
+
+    use super::*;
+    use crate::interactive_components::test_support::{Calls, keys, render_text, setup};
+
+    #[tokio::test]
+    async fn add_custom_flow_saves_and_syncs_providers() {
+        let _keys = setup();
+        let settings = SettingsManager::in_memory(json!({}));
+        let calls = Calls::new();
+        let mut browser = AcpBrowser::new(installed_rows(&settings), calls.recorder());
+        browser.handle_input(keys::ENTER);
+        browser.handle_input("My Custom Agent");
+        browser.handle_input(keys::TAB);
+        browser.handle_input(keys::TAB);
+        browser.handle_input("agent-cli");
+        browser.handle_input(keys::TAB);
+        browser.handle_input("acp --agent-engine=v3 'two words'");
+        browser.handle_input(keys::TAB);
+        browser.handle_input("agent-cli login --label 'my account'");
+        browser.handle_input(keys::TAB);
+        browser.handle_input("A custom agent");
+        browser.handle_input(keys::TAB);
+        browser.handle_input("\x1b[200~TOKEN=secret\n");
+        browser.handle_input("REGION=us east\x1b[201~");
+        browser.handle_input(keys::TAB);
+        browser.handle_input(" ");
+        browser.handle_input("\x13");
+        let synced = Cell::new(0);
+        let dir = tempfile::tempdir().unwrap();
+        let action = calls.take().pop().expect("save action");
+        apply_and_sync(action, &[], &settings, dir.path(), || async { synced.set(synced.get() + 1) }).await.unwrap();
+        assert_eq!(synced.get(), 1);
+        let entry = store::get(&settings, "my-custom-agent", AcpScope::Project).unwrap();
+        assert_eq!(entry.args, ["acp", "--agent-engine=v3", "two words"]);
+        assert_eq!(entry.login_command.unwrap(), ["agent-cli", "login", "--label", "my account"]);
+        assert_eq!(entry.env["TOKEN"], "secret");
+        assert_eq!(entry.env["REGION"], "us east");
+        assert_eq!(entry.description.as_deref(), Some("A custom agent"));
+        assert_eq!(entry.source, "custom");
+        assert!(entry.enabled);
+        assert!(store::get(&settings, "my-custom-agent", AcpScope::Global).is_none());
+        browser.set_installed(installed_rows(&settings));
+        browser.finish_save(None);
+        browser.set_status(String::new(), false);
+        let text = render_text(&mut browser, 120);
+        assert!(text.contains("My Custom Agent") && text.contains("[project]"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn edit_keeps_scope_metadata_and_unknown_fields() {
+        let _keys = setup();
+        let original = json!({"id": "agent", "name": "Installed Agent", "command": "old-cli",
+            "source": "registry", "version": "1.2.3", "installDir": "/agents/agent/1.2.3",
+            "description": "Old description", "loginCommand": ["old-cli", "login"],
+            "futureField": {"keep": true}});
+        let settings = SettingsManager::in_memory(json!({"acpAgents": [original]}));
+        store::move_entry(&settings, "agent", AcpScope::Global).unwrap();
+        let calls = Calls::new();
+        let mut browser = AcpBrowser::new(installed_rows(&settings), calls.recorder());
+        browser.handle_input(keys::ENTER);
+        browser.handle_input(keys::UP);
+        browser.handle_input(keys::UP);
+        browser.handle_input(keys::ENTER);
+        let text = render_text(&mut browser, 120);
+        assert!(text.contains("ID (read-only): agent") && text.contains("Scope: project (read-only)"), "{text}");
+        browser.handle_input("\x0b");
+        browser.handle_input("Renamed Agent");
+        browser.handle_input(keys::TAB);
+        browser.handle_input("\x0b");
+        browser.handle_input("new-cli");
+        browser.handle_input(keys::TAB);
+        browser.handle_input(keys::TAB);
+        browser.handle_input("\x0b");
+        browser.handle_input(keys::TAB);
+        browser.handle_input("\x0b");
+        browser.handle_input(keys::TAB);
+        browser.handle_input(keys::TAB);
+        browser.handle_input(" ");
+        browser.handle_input("\x13");
+        let dir = tempfile::tempdir().unwrap();
+        apply_and_sync(calls.take().pop().unwrap(), &[], &settings, dir.path(), || async {}).await.unwrap();
+        assert!(store::get(&settings, "agent", AcpScope::Global).is_none());
+        let saved = settings.project_settings().extra["acpAgents"][0].clone();
+        assert_eq!(saved["name"], "Renamed Agent");
+        assert_eq!(saved["command"], "new-cli");
+        assert_eq!(saved["enabled"], false);
+        assert_eq!(saved["source"], "registry");
+        assert_eq!(saved["version"], "1.2.3");
+        assert_eq!(saved["installDir"], "/agents/agent/1.2.3");
+        assert_eq!(saved["futureField"], json!({"keep": true}));
+        assert!(saved.get("description").is_none());
+        assert!(saved.get("loginCommand").is_none());
+    }
+
+    #[test]
+    fn details_mask_environment_values() {
+        let _keys = setup();
+        let settings = SettingsManager::in_memory(json!({"acpAgents": [{
+            "id": "agent", "name": "Agent", "command": "agent-cli",
+            "env": {"TOKEN": "secret-token", "REGION": "private-region"}
+        }]}));
+        let mut browser = AcpBrowser::new(installed_rows(&settings), |_| {});
+        browser.handle_input(keys::ENTER);
+        let text = render_text(&mut browser, 120);
+        assert!(text.contains("TOKEN=********") && text.contains("REGION=********"), "{text}");
+        assert!(!text.contains("secret-token") && !text.contains("private-region"), "{text}");
     }
 }
