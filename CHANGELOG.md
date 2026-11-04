@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.9] - 2026-11-03
+
+### Added
+
+- distribute pi through a Homebrew tap ([b46818d](https://github.com/yannelli/pi-rust/commit/b46818d836b752771c022ba77c32af15b45a8794))
+
 ## [0.12.8] - 2026-11-03
 
 ### Fixed
