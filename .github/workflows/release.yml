@@ -345,3 +345,35 @@ jobs:
         uses: actions/attest-build-provenance@v4
         with:
           subject-checksums: dist/SHA256SUMS
+
+  # Points the Homebrew tap (brew install yannelli/tap/pi) at the new release. Skipped until the
+  # HOMEBREW_TAP_TOKEN secret exists: a fine-grained token with contents write on yannelli/homebrew-tap.
+  homebrew:
+    needs: [plan, publish]
+    if: needs.plan.outputs.publish == 'true' && needs.plan.outputs.prerelease != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+      - name: Update the formula
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::notice::HOMEBREW_TAP_TOKEN is not set; the Homebrew tap was not updated."
+            exit 0
+          fi
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p SHA256SUMS -D "$RUNNER_TEMP"
+          git clone --depth 1 "https://x-access-token:$GH_TOKEN@github.com/yannelli/homebrew-tap.git" "$RUNNER_TEMP/tap"
+          mkdir -p "$RUNNER_TEMP/tap/Formula"
+          scripts/homebrew-formula.sh "$VERSION" "$RUNNER_TEMP/SHA256SUMS" > "$RUNNER_TEMP/tap/Formula/pi.rb"
+          cd "$RUNNER_TEMP/tap"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/pi.rb
+          git diff --cached --quiet && exit 0
+          git commit -m "pi $VERSION"
+          git push origin HEAD

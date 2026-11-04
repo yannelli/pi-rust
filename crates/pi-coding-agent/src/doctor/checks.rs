@@ -96,6 +96,7 @@ pub(super) fn install(inputs: &DoctorInputs) -> InstallReport {
         Some(executable) => match detect_install_method(executable, inputs.cargo_home.as_deref(), &inputs.home) {
             InstallMethod::Cargo => "cargo",
             InstallMethod::Release => "release",
+            InstallMethod::Homebrew => "homebrew",
         },
         None => "unknown",
     };

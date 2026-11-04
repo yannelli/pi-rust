@@ -28,6 +28,12 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/yannelli/pi-rust/main/install.ps1 | iex
 ```
 
+Homebrew (macOS and Linux):
+
+```sh
+brew install yannelli/tap/pi
+```
+
 The script downloads the latest release, compares it with `SHA256SUMS`, and installs `pi`. For script options, manual install, and build from source, see [Install](crates/pi-coding-agent/docs/install.md).
 
 ## Quick start
