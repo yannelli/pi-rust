@@ -40,6 +40,16 @@ curl -fsSL https://raw.githubusercontent.com/yannelli/pi-rust/main/install.sh | 
 
 In PowerShell, set `$env:PI_VERSION = "0.5.3"` before `irm`.
 
+## Homebrew
+
+On macOS and Linux (x86_64 and arm64):
+
+```sh
+brew install yannelli/tap/pi
+```
+
+The formula installs the release archive for your platform. Update with `brew upgrade yannelli/tap/pi`. `pi update --self` does not replace a Homebrew installation.
+
 ## Manual install
 
 Each [release](https://github.com/yannelli/pi-rust/releases) has one archive for each platform and a `SHA256SUMS` file. Each archive contains a `pi-vX.Y.Z-<target>/` folder with these files:
@@ -109,6 +119,7 @@ On Windows, use the `.zip` file name.
 ## Update
 
 - `pi update --self` replaces a release installation with the latest release.
+- `brew upgrade yannelli/tap/pi` updates a Homebrew installation.
 - `pi update --models` updates the model catalogs.
 
 ## Build from source

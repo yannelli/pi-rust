@@ -133,10 +133,17 @@ pub enum InstallMethod {
     Release,
     /// `cargo install`; updated by running cargo again.
     Cargo,
+    /// A Homebrew formula; updated with `brew upgrade`.
+    Homebrew,
 }
 
-/// `cargo install` puts binaries in `$CARGO_HOME/bin`, `~/.cargo/bin` by default.
+/// `cargo install` puts binaries in `$CARGO_HOME/bin`, `~/.cargo/bin` by default. Homebrew
+/// links `<prefix>/bin/pi` to `<prefix>/Cellar/pi/<version>/bin/pi`.
 pub fn detect_install_method(executable: &Path, cargo_home: Option<&Path>, home: &Path) -> InstallMethod {
+    let resolved = executable.canonicalize().unwrap_or_else(|_| executable.to_path_buf());
+    if resolved.parent().into_iter().flat_map(Path::ancestors).any(|directory| directory.ends_with("Cellar")) {
+        return InstallMethod::Homebrew;
+    }
     let cargo_bin = cargo_home.map(Path::to_path_buf).unwrap_or_else(|| home.join(".cargo")).join("bin");
     let same = |a: &Path, b: &Path| match (a.canonicalize(), b.canonicalize()) {
         (Ok(a), Ok(b)) => a == b,
@@ -147,6 +154,8 @@ pub fn detect_install_method(executable: &Path, cargo_home: Option<&Path>, home:
         _ => InstallMethod::Release,
     }
 }
+
+pub const HOMEBREW_UPDATE_COMMAND: &str = "brew upgrade yannelli/tap/pi";
 
 pub const CARGO_UPDATE_COMMAND: &str =
     "cargo install --locked --git https://github.com/yannelli/pi-rust pi-coding-agent";

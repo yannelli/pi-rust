@@ -140,6 +140,28 @@ async fn cargo_installs_and_unknown_targets_are_refused() {
     assert!(server.requests().is_empty());
 }
 
+#[tokio::test]
+async fn homebrew_installs_are_refused() {
+    let server = release_server("v0.3.0", b"new binary", false).await;
+    let dir = tempfile::tempdir().unwrap();
+    let cellar_bin = dir.path().join("Cellar").join("pi").join("0.2.0").join("bin");
+    std::fs::create_dir_all(&cellar_bin).unwrap();
+    let executable = installed(&cellar_bin);
+    assert_eq!(detect_install_method(&executable, None, dir.path()), InstallMethod::Homebrew);
+    #[cfg(unix)]
+    {
+        let prefix_bin = dir.path().join("bin");
+        std::fs::create_dir_all(&prefix_bin).unwrap();
+        let link = prefix_bin.join("pi");
+        std::os::unix::fs::symlink(&executable, &link).unwrap();
+        assert_eq!(detect_install_method(&link, None, dir.path()), InstallMethod::Homebrew);
+    }
+    let error = run_self_update(&options(&server, &executable, "0.2.0")).await.unwrap_err();
+    assert_eq!(error.to_string(), format!("pi was installed with Homebrew. Update it with: {HOMEBREW_UPDATE_COMMAND}"));
+    assert_eq!(std::fs::read(&executable).unwrap(), b"old binary");
+    assert!(server.requests().is_empty());
+}
+
 #[test]
 fn archives_and_assets_follow_the_release_workflow_names() {
     assert_eq!(

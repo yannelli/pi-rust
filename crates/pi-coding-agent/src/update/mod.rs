@@ -1,6 +1,6 @@
 //! Self-update for release installs (`pi update`): find the newest GitHub release of
 //! pi-rust, download the archive for this target, check it against `SHA256SUMS`, and replace
-//! the running binary. Cargo installs are pointed at `cargo install` instead.
+//! the running binary. Cargo and Homebrew installs are pointed at their own update command.
 
 pub mod install;
 pub mod release;
@@ -13,8 +13,8 @@ use std::path::PathBuf;
 use tokio_util::sync::CancellationToken;
 
 pub use install::{
-    CARGO_UPDATE_COMMAND, InstallMethod, QUARANTINE_DIR_NAME, cleanup_update_quarantine, detect_install_method,
-    extract_binary, parse_sha256sums, replace_executable, sha256_hex, verify_checksum,
+    CARGO_UPDATE_COMMAND, HOMEBREW_UPDATE_COMMAND, InstallMethod, QUARANTINE_DIR_NAME, cleanup_update_quarantine,
+    detect_install_method, extract_binary, parse_sha256sums, replace_executable, sha256_hex, verify_checksum,
 };
 pub use release::{
     ArchiveKind, GITHUB_REPO, GitHubRelease, ReleaseAsset, ReleaseSource, UpdateError, archive_name, binary_name,
@@ -105,10 +105,18 @@ impl SelfUpdateOutcome {
 /// Update the binary at `options.executable` to the latest release.
 pub async fn run_self_update(options: &SelfUpdateOptions) -> Result<SelfUpdateOutcome, UpdateError> {
     let method = detect_install_method(&options.executable, options.cargo_home.as_deref(), &options.home);
-    if method == InstallMethod::Cargo {
-        return Err(UpdateError::Unsupported(format!(
-            "pi was installed with cargo. Update it with: {CARGO_UPDATE_COMMAND}"
-        )));
+    match method {
+        InstallMethod::Cargo => {
+            return Err(UpdateError::Unsupported(format!(
+                "pi was installed with cargo. Update it with: {CARGO_UPDATE_COMMAND}"
+            )));
+        }
+        InstallMethod::Homebrew => {
+            return Err(UpdateError::Unsupported(format!(
+                "pi was installed with Homebrew. Update it with: {HOMEBREW_UPDATE_COMMAND}"
+            )));
+        }
+        InstallMethod::Release => {}
     }
     let Some(target) = options.target.as_deref() else {
         return Err(UpdateError::Unsupported("No pi release archive is published for this platform.".into()));

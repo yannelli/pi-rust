@@ -14,6 +14,8 @@ gh release list -R yannelli/pi-rust -L 3
 gh release view <tag> -R yannelli/pi-rust --json assets --jq '.assets[].name'
 ```
 
+After publishing, the `homebrew` job writes `Formula/pi.rb` in `yannelli/homebrew-tap` from `scripts/homebrew-formula.sh`. It needs the `HOMEBREW_TAP_TOKEN` secret and skips prereleases.
+
 A complete release has 9 assets: 7 `pi-<tag>-<target>` archives, `SHA256SUMS`, and `pi-env-daemons-<tag>.tar.gz`. The 7 archive targets are x86_64 and aarch64 Linux musl, armv7 Linux musl, x86_64 and aarch64 macOS, and x86_64 and aarch64 Windows.
 
 ## When it fails

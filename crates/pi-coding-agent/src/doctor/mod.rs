@@ -41,7 +41,7 @@ pub struct DoctorReport {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstallReport {
-    /// `release` (`pi update --self` replaces it), `cargo`, or `unknown`.
+    /// `release` (`pi update --self` replaces it), `cargo`, `homebrew`, or `unknown`.
     pub method: String,
     pub executable: Option<String>,
 }
