@@ -389,6 +389,10 @@
       "reason": "pi-rust extension: global-only provider exclusions across model selectors and registry refreshes; credentials are preserved. The TUI /settings menu edits it and applies the change immediately."
     },
     {
+      "item": "rememberLastModel",
+      "reason": "pi-rust extension: global flag, on by default. Each user model switch (TUI selector pick, /model <ref>, RPC set_model and cycle_model, ACP model changes) saves defaultProvider/defaultModel. Off keeps upstream behavior, except that Ctrl+P cycling saves the default in both cases."
+    },
+    {
       "item": "theme",
       "reason": "pi-rust additionally ships ghostty, darcula-islands, nord, and catppuccin harness themes. The setting remains upstream-compatible."
     },

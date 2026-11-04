@@ -13,7 +13,7 @@ fn local_ids(models: &Value) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn lists_sets_and_cycles_models_without_saving_them() {
+async fn lists_sets_and_cycles_models_and_saves_the_default() {
     let mut rpc = start(Options::default()).await;
     let models = rpc.data(json!({"id": "l", "type": "get_available_models"})).await["models"].clone();
     assert_eq!(local_ids(&models), ["local/tiny", "local/other"]);
@@ -28,7 +28,7 @@ async fn lists_sets_and_cycles_models_without_saving_them() {
     );
     assert!(set["api"].as_str().unwrap().starts_with("faux-session-") && set.get("baseUrl").is_some());
     assert_eq!(rpc.data(json!({"id": "st", "type": "get_state"})).await["model"]["id"], "other");
-    assert_eq!(rpc.h.settings.default_model().as_deref(), Some("tiny"), "RPC model changes are not saved");
+    assert_eq!(rpc.h.settings.default_model().as_deref(), Some("other"), "rememberLastModel saves set_model");
 
     let missing = rpc.request(json!({"id": "x", "type": "set_model", "provider": "local", "modelId": "nope"})).await;
     assert_eq!(
@@ -40,6 +40,18 @@ async fn lists_sets_and_cycles_models_without_saving_them() {
     let cycled = rpc.data(json!({"id": "c", "type": "cycle_model"})).await;
     assert_eq!((cycled["model"]["id"].clone(), cycled["isScoped"].clone()), (json!("other"), json!(false)));
     assert!(cycled["thinkingLevel"].is_string());
+    assert_eq!(rpc.h.settings.default_model().as_deref(), Some("other"), "rememberLastModel saves cycle_model");
+    rpc.finish().await;
+}
+
+#[tokio::test]
+async fn model_changes_keep_the_default_when_remember_last_model_is_off() {
+    let mut rpc = start(Options { settings: json!({"rememberLastModel": false}), ..Options::default() }).await;
+    rpc.data(json!({"id": "s", "type": "set_model", "provider": "local", "modelId": "other"})).await;
+    assert_eq!(rpc.data(json!({"id": "st", "type": "get_state"})).await["model"]["id"], "other");
+    let cycled = rpc.data(json!({"id": "c", "type": "cycle_model"})).await;
+    assert_eq!(cycled["model"]["id"], "tiny");
+    assert_eq!(rpc.h.settings.default_model().as_deref(), Some("tiny"));
     rpc.finish().await;
 }
 

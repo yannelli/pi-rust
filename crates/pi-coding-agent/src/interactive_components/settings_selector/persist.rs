@@ -35,6 +35,7 @@ impl SettingsConfig {
             disabled_providers: settings.disabled_providers(),
             thinking_level: settings.default_thinking_level().unwrap_or(DEFAULT_THINKING_LEVEL),
             model_thinking_levels: settings.all_model_thinking_levels(),
+            remember_last_model: settings.remember_last_model(),
             current_theme: settings.theme_setting().unwrap_or_else(|| SYSTEM_THEME_NAME.into()),
             terminal_theme: get_terminal_theme(),
             available_themes: get_available_themes(),
@@ -95,6 +96,7 @@ impl SettingsCallbacks {
             on_provider_max_retries_change: save!(set_provider_max_retries),
             on_provider_max_retry_delay_ms_change: save!(set_provider_max_retry_delay_ms),
             on_disabled_providers_change: save!(set_disabled_providers),
+            on_remember_last_model_change: save!(set_remember_last_model),
             on_model_thinking_level_change: Box::new(move |provider, model_id, level| {
                 change.set_model_thinking_level(provider, model_id, level)
             }),

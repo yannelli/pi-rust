@@ -284,7 +284,7 @@ impl PiBackend for RuntimeBackend {
         let Some(model) = available.into_iter().find(|model| model.provider == provider && model.id == model_id) else {
             anyhow::bail!("Model not found: {provider}/{model_id}");
         };
-        self.session.set_model(model, false).await?;
+        self.session.set_model(model, self.session.settings().remember_last_model()).await?;
         Ok(())
     }
 

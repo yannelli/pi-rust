@@ -256,6 +256,13 @@ pub(super) fn build_items(config: &SettingsConfig, supports_images: bool, submen
             enum_str(config.tree_filter_mode),
             &["default", "no-tools", "user-only", "labeled-only", "all"],
         ),
+        item(
+            "remember-last-model",
+            "Remember last model",
+            "Save the model you switch to as the default model",
+            bool_str(config.remember_last_model),
+            BOOL,
+        ),
         submenu_item(
             "model-thinking",
             "Default thinking level per model",
@@ -325,6 +332,7 @@ pub(super) fn dispatch_change(callbacks: &mut SettingsCallbacks, id: &str, value
         "auto-resize-images" => (callbacks.on_auto_resize_images_change)(flag),
         "block-images" => (callbacks.on_block_images_change)(flag),
         "skill-commands" => (callbacks.on_enable_skill_commands_change)(flag),
+        "remember-last-model" => (callbacks.on_remember_last_model_change)(flag),
         "steering-mode" => parse_enum(value).into_iter().for_each(&mut callbacks.on_steering_mode_change),
         "follow-up-mode" => parse_enum(value).into_iter().for_each(&mut callbacks.on_follow_up_mode_change),
         "transport" => parse_enum(value).into_iter().for_each(&mut callbacks.on_transport_change),
