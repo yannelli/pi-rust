@@ -1,8 +1,8 @@
 //! Port of the multi-click, focus loss, flash, auto-scroll, and grapheme selection cases of
 //! upstream `test/tui-alt-screen.test.ts`.
 
-mod alt_select_common;
-mod support;
+use crate::alt_select_common;
+use crate::support;
 
 use std::cell::RefCell;
 use std::rc::Rc;

@@ -1,7 +1,7 @@
 //! Port of upstream `test/bindings.test.ts`, "origins of client holds": a relayed hold carries the id of its
 //! client connection, the server's own holds carry none, and an origin a client sends is replaced.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::collections::HashSet;
 use std::future::ready;

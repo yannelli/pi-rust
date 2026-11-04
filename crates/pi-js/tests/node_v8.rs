@@ -1,7 +1,7 @@
 //! node:v8: serialize bytes match Node's for the same values, the Serializer and Deserializer
 //! classes, and the heap statistics shapes.
 
-mod common;
+use crate::common;
 
 use common::*;
 use serde_json::json;

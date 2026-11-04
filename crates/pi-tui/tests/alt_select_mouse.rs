@@ -1,8 +1,8 @@
 //! Port of the wheel, mouse-aware component, leave-alt-mode, overlay, and transcript search cases
 //! of upstream `test/tui-alt-screen.test.ts`.
 
-mod alt_select_common;
-mod support;
+use crate::alt_select_common;
+use crate::support;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;

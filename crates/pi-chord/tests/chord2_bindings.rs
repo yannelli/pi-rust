@@ -1,7 +1,7 @@
 //! Port of upstream `test/bindings.test.ts`: shared bindings (traffic, linger, identity), hydration over a link,
 //! method-only references and protocol version 4. The origins of client holds are in `chord2_bindings_origins.rs`.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::collections::HashMap;
 use std::future::ready;

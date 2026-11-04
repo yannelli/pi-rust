@@ -1,7 +1,7 @@
 //! `pi completion` through the binary: the scripts parse in their shells (shells that are not
 //! installed are skipped), list every option of the table, and ask pi for model values.
 
-mod cli_support;
+use crate::cli_support;
 
 use std::path::Path;
 use std::process::{Command, Output, Stdio};

@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 
-use crate::harness::{Setup, harness};
+use crate::extensions::harness::{Setup, harness};
 
 /// The returned JSON value of a JavaScript body awaited inside an extension command.
 async fn value_of(body: &str) -> Value {

@@ -40,7 +40,7 @@ fn timers_can_be_cleared_during_thread_shutdown() {
         return;
     }
     let mut child = Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "timers_can_be_cleared_during_thread_shutdown", "--nocapture"])
+        .args(["--exact", "ui_loop_timer_cleanup::timers_can_be_cleared_during_thread_shutdown", "--nocapture"])
         .env(CHILD, "1")
         .stdout(Stdio::null())
         .stderr(Stdio::inherit())

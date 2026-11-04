@@ -1,8 +1,8 @@
 //! Windows: a plain child started while a TCP listener is open must not keep the port listening after the server
 //! closes. QuickJS and the Node backend run the same steps; CI installs Node 22, so a missing Node backend fails.
 
-mod common;
-mod node_common;
+use crate::common;
+use crate::node_common;
 
 use std::sync::Arc;
 

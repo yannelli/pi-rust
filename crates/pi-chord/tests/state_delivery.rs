@@ -1,6 +1,6 @@
 //! Port of upstream `test/state-delivery.test.ts`.
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, Mutex};
 

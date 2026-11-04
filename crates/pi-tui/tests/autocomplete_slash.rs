@@ -1,6 +1,6 @@
 //! Port of upstream `autocomplete-skill-slash.test.ts`, plus provider wrapping.
 
-mod autocomplete_common;
+use crate::autocomplete_common;
 
 use std::rc::Rc;
 

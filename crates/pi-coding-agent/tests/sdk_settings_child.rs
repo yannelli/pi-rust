@@ -1,11 +1,7 @@
 //! An SDK `SettingsManager` shared with a child `AgentSession`: the child reads the caller's queued
 //! changes, the caller's queue writes them once, and custom storage keeps working after the child.
 
-#[path = "extensions/harness.rs"]
-#[allow(dead_code)]
-mod harness;
-#[path = "offline_guard/mod.rs"]
-mod offline_guard;
+use crate::extensions::harness;
 
 use harness::{Setup, harness};
 use pi_ai::providers::faux::FauxResponse;

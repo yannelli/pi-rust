@@ -1,6 +1,6 @@
 //! Port of upstream `test/tool-search.test.ts`: deferred tools and the `tool_search` extension.
 
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 

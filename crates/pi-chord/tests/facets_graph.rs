@@ -1,6 +1,6 @@
 //! Port of upstream `test/facets.test.ts`: scoped views, host services, sources, and graph errors.
 
-mod support;
+use crate::support;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

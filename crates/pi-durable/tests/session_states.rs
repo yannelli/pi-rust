@@ -1,6 +1,6 @@
 //! Port of upstream `test/session-states.test.ts`.
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, LazyLock, Mutex};
 

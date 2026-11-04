@@ -1,6 +1,6 @@
 //! Port of the "TUI fake cursor" cases of upstream `test/tui-render.test.ts`.
 
-mod render_common;
+use crate::render_common;
 
 use pi_tui::{
     CURSOR_MARKER, Input, OverlayOptions, SizeValue, Tui, TuiOptions, TuiStopOptions, component, render_fake_cursor,

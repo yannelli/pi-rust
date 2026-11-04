@@ -5,7 +5,7 @@
 use pi_ai::providers::faux::FauxResponse;
 use serde_json::json;
 
-use crate::harness::{Options, local, start};
+use crate::interactive::harness::{Options, local, start};
 
 const EXTENSION: &str = r#"import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
@@ -114,7 +114,7 @@ async fn model_command_refreshes_catalogs_before_the_selector() {
         let ui = start(Options::default()).await;
         ui.submit("/model no-such-model").await;
         ui.wait_for("Only showing models from configured providers").await;
-        let refreshed = |ui: &crate::harness::Ui| ui.screen().contains("Model catalogs refreshed.");
+        let refreshed = |ui: &crate::interactive::harness::Ui| ui.screen().contains("Model catalogs refreshed.");
         ui.wait_until("selector refresh", refreshed).await;
         ui.send("\x1b").await;
         ui.wait_until("selector closed", |ui| !refreshed(ui)).await;

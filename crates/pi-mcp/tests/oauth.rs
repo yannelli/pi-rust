@@ -1,6 +1,6 @@
 //! OAuth flow against local authorization servers. Ported from packages/mcp/test/oauth.test.ts.
 
-mod common;
+use crate::common;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

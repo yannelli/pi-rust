@@ -1,6 +1,6 @@
 //! Ported from upstream `packages/codemode/test/sandbox.test.ts`: execution, tools, store, globals.
 
-mod common;
+use crate::common;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

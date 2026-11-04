@@ -1,6 +1,6 @@
 //! Port of the "TUI differential rendering" cases of upstream `test/tui-render.test.ts`.
 
-mod render_common;
+use crate::render_common;
 
 use pi_tui::TuiStopOptions;
 use pi_tui::testing::VirtualTerminal;

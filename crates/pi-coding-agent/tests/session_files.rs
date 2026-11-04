@@ -2,7 +2,7 @@
 //! `custom-session-id.test.ts`, the persisted `createBranchedSession` tests, and
 //! `session-file-invalid.test.ts`.
 
-mod common;
+use crate::common;
 
 use std::path::Path;
 

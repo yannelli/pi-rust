@@ -1,6 +1,6 @@
 //! Port of upstream `test/jsonl-storage.test.ts`.
 
-mod support;
+use crate::support;
 
 use std::path::Path;
 use std::sync::Arc;

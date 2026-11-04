@@ -1,7 +1,7 @@
 //! Port of upstream `markdown.test.ts`: LaTeX math, escapes, pre-styled text, headings,
 //! strikethrough, links, and HTML-like tags.
 
-mod markdown_common;
+use crate::markdown_common;
 
 use std::cell::RefCell;
 use std::rc::Rc;

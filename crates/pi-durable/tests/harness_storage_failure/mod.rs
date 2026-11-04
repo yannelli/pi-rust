@@ -1,8 +1,7 @@
 //! Port of upstream `test/harness-storage-failure.test.ts`. This file holds the failed Storage call cases;
 //! `listeners.rs` holds the listener and report error cases.
 
-#[path = "../support/mod.rs"]
-mod support;
+use crate::support;
 
 mod listeners;
 mod requests;

@@ -1,7 +1,7 @@
 //! `elicitation/create` from an in-memory server: the capability, the answers of the callback,
 //! content validation, URL mode, and completion notifications.
 
-mod common;
+use crate::common;
 
 use std::sync::{Arc, Mutex};
 

@@ -1,6 +1,6 @@
 //! Port of upstream `test/runtime.test.ts`: events, approval, queues, and cancellation.
 
-mod common;
+use crate::common;
 
 use std::sync::{Arc, Mutex};
 

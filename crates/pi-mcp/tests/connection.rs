@@ -1,7 +1,7 @@
 //! Server connections: reconnects, retries, sign-in states, and logs. Ported from the
 //! "MCP connections" cases of coding-agent's mcp-extension.test.ts.
 
-mod common;
+use crate::common;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

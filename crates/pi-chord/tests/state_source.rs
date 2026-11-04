@@ -1,6 +1,6 @@
 //! Port of upstream `test/state.test.ts`, authoritative replicated state sources.
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, Mutex, Weak};
 

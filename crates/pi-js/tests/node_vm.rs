@@ -1,6 +1,6 @@
 //! node:vm: separate contexts, timeouts, compileFunction, and values crossing contexts.
 
-mod common;
+use crate::common;
 
 use common::*;
 use serde_json::json;

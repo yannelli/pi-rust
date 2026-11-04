@@ -1,6 +1,6 @@
 //! Port of upstream `test/harness-cancellation-barrier.test.ts` (work below a cancelled owner).
 
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};

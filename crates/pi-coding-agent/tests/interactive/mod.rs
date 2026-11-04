@@ -10,13 +10,11 @@ mod diff;
 mod extension_dialogs;
 mod extensions;
 mod gaps;
-mod harness;
+pub(crate) mod harness;
 mod host_additions;
 mod init;
 mod keys;
 mod notify;
-#[path = "../offline_guard/mod.rs"]
-mod offline_guard;
 mod prompt_history;
 mod quit;
 mod retry;
@@ -24,6 +22,7 @@ mod review;
 mod run_limits;
 mod startup;
 mod undo;
+pub(crate) mod watchdog;
 
 use harness::{Options, local, start};
 use pi_ai::providers::faux::FauxResponse;

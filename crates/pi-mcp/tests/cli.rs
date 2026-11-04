@@ -1,7 +1,7 @@
 //! `pi mcp` subcommands. Ported from coding-agent's mcp-command.test.ts and the `pi mcp login`
 //! cases of agent-session-mcp-oauth.test.ts.
 
-mod common;
+use crate::common;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};

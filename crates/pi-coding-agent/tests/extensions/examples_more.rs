@@ -6,7 +6,7 @@ use pi_coding_agent::extensions::ToolRenderRequest;
 use pi_tui::Component;
 use serde_json::json;
 
-use crate::harness::{Setup, eventually, example, harness};
+use crate::extensions::harness::{Setup, eventually, example, harness};
 
 /// `text` without ANSI escape sequences.
 fn plain(text: &str) -> String {

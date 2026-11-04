@@ -1,8 +1,7 @@
 //! Port of upstream `test/harness-lifecycle.test.ts`. This file holds the helpers and the open and close cases;
 //! `sealed.rs` holds operations after close begins, and `paused.rs` paused scheduling and registry changes.
 
-#[path = "../support/mod.rs"]
-mod support;
+use crate::support;
 
 mod paused;
 mod sealed;

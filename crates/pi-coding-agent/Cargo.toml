@@ -7,10 +7,35 @@ license.workspace = true
 publish.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+autotests = false
 
 [[bin]]
 name = "pi"
 path = "src/main.rs"
+
+[[test]]
+name = "integration"
+path = "tests/main.rs"
+
+# These change process-wide state (the ACP host, keybindings, the panic hook, the offline mark),
+# so each keeps a process of its own under `cargo test`.
+[[test]]
+name = "acp_client"
+
+[[test]]
+name = "acp_client_controls"
+
+[[test]]
+name = "acp_interactive"
+
+[[test]]
+name = "crash_hook"
+
+[[test]]
+name = "experimental_radius"
+
+[[test]]
+name = "interactive_keybindings"
 
 [dependencies]
 anyhow.workspace = true

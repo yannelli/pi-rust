@@ -1,7 +1,7 @@
 //! Port of upstream `test/conversation-transcript.test.ts`: `ConversationTranscript`, the client-side layer that
 //! merges view windows into one transcript. This file holds the helpers and the merge cases; `loads.rs` the rest.
 
-mod support;
+use crate::support;
 
 #[path = "conversation_transcript/loads.rs"]
 mod loads;

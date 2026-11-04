@@ -1,6 +1,6 @@
 //! Port of upstream `test/harness-prompt.test.ts` (system prompt and tool loadout preparation).
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, Mutex};
 

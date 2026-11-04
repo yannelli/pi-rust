@@ -2,7 +2,7 @@
 //! the server's type on the same host. The link cases are in `chord2_requests_links.rs`, the reload cases (#3,
 //! #5 and #7) in `chord2_requests_reload.rs`.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::collections::HashSet;
 use std::future::ready;

@@ -1,6 +1,6 @@
 //! Port of upstream `test/state.test.ts`: state cells, derivations, listeners and tasks of one host.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::collections::HashSet;
 use std::future::ready;

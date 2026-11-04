@@ -2,7 +2,7 @@
 //! browser over a link and counts `hold` and `release` frames. Here the object's gate resource shows the same:
 //! its `open` sees the abort once the last reference is released (or at disposal), and it closes on disposal.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

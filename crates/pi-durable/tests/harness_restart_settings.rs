@@ -1,7 +1,7 @@
 //! Upstream `harness-restart-failure.test.ts`, "the restart limit on the normal path": only a task that was cut off
 //! reads `restart_limit`. Its own target with public API both versions share, so it also runs on the old source.
 
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

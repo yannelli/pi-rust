@@ -1,7 +1,7 @@
 //! Port of upstream `test/harness-run-failure.test.ts`: `pi.live.runFailure`, why the newest run ended without an
 //! answer, as state a renderer shows.
 
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 

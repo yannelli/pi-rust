@@ -1,6 +1,6 @@
 //! Port of upstream `test/conformance.test.ts`, "Session protocol".
 
-mod common;
+use crate::common;
 
 use std::sync::{Arc, Mutex};
 

@@ -1,7 +1,6 @@
 //! Port of upstream `test/session-checkpoints-migrations.test.ts`.
 
-#[path = "../support/mod.rs"]
-mod support;
+use crate::support;
 
 mod cache;
 mod checkpoints;

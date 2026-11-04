@@ -1,11 +1,7 @@
 //! pi-tui's `Markdown` in an extension is upstream code: it renders the cases of five upstream changes as
 //! upstream does under Node. CI runs this on QuickJS and, with `PI_EXTENSION_RUNTIME=node`, on Node.
 
-#[path = "extensions/harness.rs"]
-#[allow(dead_code)]
-mod harness;
-#[path = "offline_guard/mod.rs"]
-mod offline_guard;
+use crate::extensions::harness;
 
 use harness::{Setup, harness};
 use serde_json::Value;

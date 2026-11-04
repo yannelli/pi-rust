@@ -14,8 +14,8 @@ use pi_coding_agent::rpc::{
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use crate::harness::Options;
-use crate::support::{Rpc, start_with};
+use crate::rpc::harness::Options;
+use crate::rpc::support::{Rpc, start_with};
 
 #[derive(Default)]
 struct Host {
@@ -57,7 +57,7 @@ async fn start_host(options: Options) -> (Rpc, Arc<Host>) {
     let host = Arc::new(Host::default());
     let rpc_options = RpcModeOptions { extension_host: Some(host.clone()), handle_signals: false };
     let rpc = start_with(options, rpc_options, |_, _| {}).await;
-    crate::harness::wait_until(|| !host.bindings.lock().unwrap().is_empty()).await;
+    crate::rpc::harness::wait_until(|| !host.bindings.lock().unwrap().is_empty()).await;
     (rpc, host)
 }
 

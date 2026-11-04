@@ -1,7 +1,7 @@
 //! Port of upstream `test/tui-overlay-style-leak.test.ts`, `test/overlay-short-content.test.ts`,
 //! `test/regression-overlay-cjk-boundary.test.ts`, and the TUI case of `test/tab-width.test.ts`.
 
-mod render_common;
+use crate::render_common;
 
 use pi_tui::testing::VirtualTerminal;
 use pi_tui::utils::extract_segments;

@@ -5,7 +5,7 @@ use pi_ai::Message;
 use pi_ai::providers::faux::FauxResponse;
 use pi_coding_agent::session::EntryData;
 
-use crate::harness::{Options, Ui, local, start};
+use crate::interactive::harness::{Options, Ui, local, start};
 
 const EXTENSION: &str = r#"export default function (pi) {
 	pi.registerCommand("ext-ask", {

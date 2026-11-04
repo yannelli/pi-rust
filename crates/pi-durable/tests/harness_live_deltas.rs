@@ -3,7 +3,7 @@
 
 #[path = "harness_live_deltas/streams.rs"]
 mod streams;
-mod support;
+use crate::support;
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};

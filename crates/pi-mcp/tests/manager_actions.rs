@@ -2,7 +2,7 @@
 //! OAuth sign-in. Ported from coding-agent's agent-session-mcp.test.ts and
 //! agent-session-mcp-oauth.test.ts.
 
-mod common;
+use crate::common;
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};

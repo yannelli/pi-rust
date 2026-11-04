@@ -1,7 +1,7 @@
 //! Port of upstream `test/harness-blocked.test.ts`: the crash-loop guard, recovery at open, and blocked tasks in
 //! the task graph.
 
-mod support;
+use crate::support;
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

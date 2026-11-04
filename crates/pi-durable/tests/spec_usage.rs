@@ -3,8 +3,6 @@
 //! settings source closure, and declared tasks such as `Anchor` are small definitions.
 #![allow(dead_code, clippy::too_many_arguments)]
 
-mod support;
-
 use std::sync::{Arc, LazyLock, Mutex};
 
 use crate::support::{ValueCall, on_value};

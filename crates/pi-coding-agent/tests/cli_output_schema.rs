@@ -1,6 +1,6 @@
 //! `--output-schema` through the `pi` binary against a local mock server.
 
-mod cli_support;
+use crate::cli_support;
 
 use std::path::Path;
 use std::process::Output;

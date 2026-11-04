@@ -2,7 +2,7 @@
 //! properties, calls, notifications, and the errors for domains QuickJS cannot provide. Expected
 //! values come from Node 22 except for those domains.
 
-mod common;
+use crate::common;
 
 use common::*;
 

@@ -1,6 +1,6 @@
 //! Port of upstream `test/state.test.ts`, mutable state and replicas. Sources are in `state_source.rs`.
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, Mutex};
 

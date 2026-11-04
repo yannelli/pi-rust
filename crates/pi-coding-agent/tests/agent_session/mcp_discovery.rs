@@ -11,9 +11,9 @@ use pi_ai::providers::faux::FauxResponse;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use crate::harness::wait_until;
-use crate::mcp_fake::FakeOptions;
-use crate::tool_support::{
+use crate::agent_session::harness::wait_until;
+use crate::agent_session::mcp_fake::FakeOptions;
+use crate::agent_session::tool_support::{
     SetupOptions, declared_description, declared_tool_names, last_line, result_text, servers_section, setup,
     tool_result,
 };

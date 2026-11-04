@@ -14,10 +14,10 @@ use pi_coding_agent::agent_session::NavigateTreeOptions;
 use pi_coding_agent::session::SessionManager;
 use serde_json::{Value, json};
 
-use crate::codemode::{check_saved_images, codemode_harness, image_block, output, run, usage};
-use crate::harness::{Harness, Options, open_session_with};
-use crate::mcp_fake::TINY_PNG;
-use crate::tool_support::{declared_description, result_text};
+use crate::agent_session::codemode::{check_saved_images, codemode_harness, image_block, output, run, usage};
+use crate::agent_session::harness::{Harness, Options, open_session_with};
+use crate::agent_session::mcp_fake::TINY_PNG;
+use crate::agent_session::tool_support::{declared_description, result_text};
 
 const INCREMENT: &str = "const next = (load(\"count\") ?? 0) + 1;\nstore(\"count\", next);\nreturn next;";
 
@@ -89,7 +89,7 @@ async fn keeps_the_store_when_the_session_is_resumed() {
     h.provider.push(pi_ai::providers::faux::FauxResponse::tool_call("r1", "codemode", json!({ "code": INCREMENT })));
     h.provider.push(pi_ai::providers::faux::FauxResponse::text("done"));
     resumed.prompt("go", Vec::new()).await.unwrap();
-    let result = crate::tool_support::tool_result(&resumed, "codemode");
+    let result = crate::agent_session::tool_support::tool_result(&resumed, "codemode");
     assert_eq!(output(&result), "3");
 }
 

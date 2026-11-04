@@ -11,7 +11,7 @@ use pi_telemetry::{
 };
 use serde_json::Value;
 
-use crate::support::Fixture;
+use super::support::Fixture;
 
 struct SqliteFixture(Fixture);
 

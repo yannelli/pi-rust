@@ -1,7 +1,7 @@
 //! `pi doctor` through the binary, with a temporary agent directory and a `PATH` the test builds:
 //! a healthy setup as JSON, and on Unix a fake `pi` earlier on `PATH` with broken files.
 
-mod cli_support;
+use crate::cli_support;
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};

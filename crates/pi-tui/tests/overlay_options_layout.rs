@@ -1,7 +1,7 @@
 //! Port of upstream `test/overlay-options.test.ts`: "width overflow protection",
 //! "width percentage", "anchor positioning", and "margin".
 
-mod overlay_common;
+use crate::overlay_common;
 
 use overlay_common::*;
 use pi_tui::{Component, OverlayAnchor, OverlayMargin, OverlayOptions, SizeValue};

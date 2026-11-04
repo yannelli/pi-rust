@@ -6,9 +6,9 @@ use std::time::Duration;
 use pi_coding_agent::extension_ui::ExtensionMode;
 use serde_json::{Value, json};
 
-use crate::harness::{Setup, harness};
-use crate::mcp_fake::{Fake, FakeOptions};
-use crate::native::{NativeUi, entry_data, native_in};
+use crate::extensions::harness::{Setup, harness};
+use crate::extensions::mcp_fake::{Fake, FakeOptions};
+use crate::extensions::native::{NativeUi, entry_data, native_in};
 
 const CALLER: &str = r#"export default function (pi) {
 	const seen = [];
@@ -57,7 +57,7 @@ async fn call_mcp_tool_calls_a_server_tool_without_a_tool_call() {
 }
 
 /// The native fixture with the session MCP server `docs` of `fake`.
-async fn native_with_mcp(fake: &Fake) -> crate::harness::Harness {
+async fn native_with_mcp(fake: &Fake) -> crate::extensions::harness::Harness {
     let mcp = fake.session_options("docs", json!({ "url": "http://unused.invalid" }), json!({}));
     let ui = Arc::new(NativeUi::default());
     native_in(Setup { mcp: Some(mcp), ..Setup::default() }, &[], ExtensionMode::Tui, ui, false).await

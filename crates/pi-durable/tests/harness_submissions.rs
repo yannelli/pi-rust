@@ -1,6 +1,6 @@
 //! Port of upstream `test/harness-submissions.test.ts`.
 
-mod support;
+use crate::support;
 
 #[path = "harness_submissions/commits.rs"]
 mod commits;

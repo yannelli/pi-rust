@@ -2,7 +2,7 @@
 //! key and home directory. Each test starts its own server; without `sshd` the tests return early.
 #![cfg(unix)]
 
-mod support;
+use crate::support;
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};

@@ -1,7 +1,7 @@
 //! Cut points, split turns, and preparation, ported from upstream `test/compaction.test.ts`
 //! and the compaction half of `session-context-edit.test.ts`.
 
-mod common;
+use crate::common;
 
 use common::*;
 use pi_ai::{ContentBlock, Message, StopReason, SystemMessage, ToolCall, ToolResultMessage, UserContent};

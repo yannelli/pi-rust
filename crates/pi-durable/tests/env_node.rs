@@ -1,8 +1,7 @@
 //! Port of upstream `test/env-node.test.ts`: the local execution environment's file system, text line reader, and
 //! shell. Split into modules to keep files short.
 
-#[path = "support/env.rs"]
-mod support;
+use crate::support::env as support;
 
 #[path = "env_node/filesystem.rs"]
 mod filesystem;

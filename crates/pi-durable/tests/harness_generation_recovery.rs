@@ -1,6 +1,6 @@
 //! Port of upstream `test/harness-generation-recovery.test.ts`.
 
-mod support;
+use crate::support;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};

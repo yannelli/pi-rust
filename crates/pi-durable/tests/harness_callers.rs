@@ -1,6 +1,6 @@
 //! Port of upstream `test/harness-callers.test.ts` (who may call a tool).
 
-mod support;
+use crate::support;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

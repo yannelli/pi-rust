@@ -15,8 +15,8 @@ use pi_coding_agent::extensions::ToolRenderRequest;
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
-use crate::harness::{Harness, Setup, eventually};
-use crate::native::{NativeUi, entry_data, native, native_in, render_until};
+use crate::extensions::harness::{Harness, Setup, eventually};
+use crate::extensions::native::{NativeUi, entry_data, native, native_in, render_until};
 
 fn tool_names(h: &Harness) -> (Vec<String>, Vec<String>) {
     let all = h.session.all_tools().into_iter().map(|tool| tool.name).collect();

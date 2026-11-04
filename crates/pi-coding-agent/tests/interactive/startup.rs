@@ -8,7 +8,7 @@ use pi_coding_agent::resources::trust::ProjectTrustStore;
 use pi_coding_agent::settings::schema::TuiMode;
 use pi_tui::testing::VirtualTerminal;
 
-use crate::harness::{Options, local, start};
+use crate::interactive::harness::{Options, local, start};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fullscreen_uses_the_alternate_screen_and_regular_does_not() {

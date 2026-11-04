@@ -2,7 +2,7 @@
 //! `test/server.test.ts`.
 #![cfg(unix)]
 
-mod common;
+use crate::common;
 
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};

@@ -1,6 +1,6 @@
 //! Streamable HTTP transport tests, ported from `packages/mcp/test/streamable-http.test.ts`.
 
-mod common;
+use crate::common;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

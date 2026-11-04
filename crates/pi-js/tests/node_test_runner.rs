@@ -2,7 +2,7 @@
 //! loading. The scripts are in fixtures/node_test; the expected output there comes from Node 22,
 //! with durations, stack frames, and source locations removed on both sides.
 
-mod common;
+use crate::common;
 
 use common::*;
 

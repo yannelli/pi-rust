@@ -1,8 +1,7 @@
 //! Port of upstream `test/env-node-conformance.test.ts`: the conformance suite against `LocalExecutionEnv`, with
 //! native and polling watches, plus its watch limits and reader cases.
 
-#[path = "support/env.rs"]
-mod support;
+use crate::support::env as support;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

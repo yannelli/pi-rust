@@ -1,6 +1,6 @@
 //! Port of upstream `markdown.test.ts`: transforms, lists, and combined features.
 
-mod markdown_common;
+use crate::markdown_common;
 
 use std::cell::RefCell;
 use std::rc::Rc;

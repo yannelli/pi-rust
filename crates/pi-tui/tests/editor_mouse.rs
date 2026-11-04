@@ -1,6 +1,6 @@
 //! Ports of the Editor cases of upstream `mouse-components.test.ts`, plus popup mouse handling.
 
-mod editor_common;
+use crate::editor_common;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -9,6 +9,7 @@ use std::time::Duration;
 use editor_common::{cursor, editor, flush, plain_lines, plain_theme};
 use pi_tui::autocomplete::{CombinedAutocompleteProvider, SlashCommand};
 use pi_tui::components::editor::{Editor, EditorOptions};
+use pi_tui::env::global_state_lock;
 use pi_tui::testing::VirtualTerminal;
 use pi_tui::{
     ComponentRef, CopyCompletion, CopyOutcome, CopySelectionFn, Tui, TuiAltScreenOptions, TuiMouseButton,
@@ -19,6 +20,8 @@ fn wait_for_render() {
     ui_loop::run_for(Duration::from_millis(20)).expect("render");
 }
 
+/// An editor on an alternate-screen TUI. Callers hold the global state lock, because starting
+/// and stopping the alternate screen reads and restores the process-wide image capabilities.
 fn alt_editor(alt: TuiAltScreenOptions) -> (Rc<RefCell<VirtualTerminal>>, Tui, Editor, ComponentRef) {
     let terminal = VirtualTerminal::shared(20, 6);
     let tui = Tui::new_alt_screen(terminal.clone(), TuiOptions::default(), alt);
@@ -30,6 +33,7 @@ fn alt_editor(alt: TuiAltScreenOptions) -> (Rc<RefCell<VirtualTerminal>>, Tui, E
 
 #[test]
 fn positions_and_focuses_the_editor_through_alt_screen_dispatch() {
+    let _lock = global_state_lock();
     let (terminal, tui, editor, handle) = alt_editor(TuiAltScreenOptions::default());
     editor.set_text("hello");
     tui.start();
@@ -48,6 +52,7 @@ fn positions_and_focuses_the_editor_through_alt_screen_dispatch() {
 
 #[test]
 fn selects_and_copies_on_drag_instead_of_moving_the_cursor() {
+    let _lock = global_state_lock();
     let copied: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
     let sink = copied.clone();
     let copy: CopySelectionFn = Rc::new(move |text: String, completion: CopyCompletion| {

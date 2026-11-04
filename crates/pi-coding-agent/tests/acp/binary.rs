@@ -10,9 +10,9 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::mpsc::unbounded_channel;
 
+use crate::acp::client::Client;
+use crate::acp::http_mock::{Reply, Server};
 use crate::cli_support::{mock_server, setup, text_body, tool_call_body};
-use crate::client::Client;
-use crate::http_mock::{Reply, Server};
 
 /// `pi` with only the environment the test chooses, so ambient API keys stay out.
 fn pi(root: &Path, args: &[&str]) -> Command {

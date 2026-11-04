@@ -31,7 +31,7 @@ pub fn install() {
         let script = directory.join("faux-worker.sh");
         let binary = std::env::current_exe().unwrap();
         let body = format!(
-            "#!/bin/sh\nexec '{}' --exact faux_worker::faux_worker_entry --test-threads=1 --nocapture \"$@\"\n",
+            "#!/bin/sh\nexec '{}' --exact experimental::faux_worker::faux_worker_entry --test-threads=1 --nocapture \"$@\"\n",
             binary.display()
         );
         std::fs::write(&script, body).unwrap();

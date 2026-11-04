@@ -1,7 +1,7 @@
 //! node:sqlite: DatabaseSync and StatementSync on the bundled SQLite, user functions,
 //! aggregates, and backup. Expected values come from running the same scripts under Node 22.
 
-mod common;
+use crate::common;
 
 use common::*;
 

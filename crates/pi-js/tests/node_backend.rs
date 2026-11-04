@@ -1,7 +1,7 @@
 //! The Node backend: calls, values, host functions, and process lifecycle.
 
-mod common;
-mod node_common;
+use crate::common;
+use crate::node_common;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering};

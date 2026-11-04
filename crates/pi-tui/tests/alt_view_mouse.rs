@@ -1,9 +1,8 @@
 //! Port of upstream `tui-alt-screen.test.ts`: mouse tracking modes, right-click paste, and
 //! scrollbar hover and dragging.
 
-mod alt_view_common;
-mod layout_common;
-mod support;
+use crate::alt_view_common;
+use crate::layout_common;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;

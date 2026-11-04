@@ -1,7 +1,7 @@
 //! Port of upstream `test/cluster.test.ts`, part 2: children that connect behind or during a reload, the retire
 //! watermark, and forced retirement of a call relayed to a worker.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::sync::Arc;
 use std::time::Instant;

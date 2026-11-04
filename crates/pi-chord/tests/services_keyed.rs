@@ -1,6 +1,6 @@
 //! Port of upstream `test/services.test.ts`: keyed observation through a binding.
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, Mutex};
 

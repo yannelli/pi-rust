@@ -1,7 +1,7 @@
 //! Port of upstream `test/reload.test.ts`, part 3: contract checks at reload, listeners and tasks of the new
 //! code, registry tables per code version, and new objects of a changed type during the gate.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::collections::HashMap;
 use std::sync::Arc;

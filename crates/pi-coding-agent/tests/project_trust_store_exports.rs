@@ -1,12 +1,8 @@
 //! `ProjectTrustStore` of `@earendil-works/pi-coding-agent` is upstream code: reads, writes, inheritance, removal,
 //! normalization, key order, store errors, and the lock protocol, against upstream goldens (`.win32.json` on Windows).
 
-mod cli_support;
-#[path = "extensions/harness.rs"]
-#[allow(dead_code)]
-mod harness;
-#[path = "offline_guard/mod.rs"]
-mod offline_guard;
+use crate::cli_support;
+use crate::extensions::harness;
 #[cfg(windows)]
 #[path = "project_trust_store/windows.rs"]
 mod windows;

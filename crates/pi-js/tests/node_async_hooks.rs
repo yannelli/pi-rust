@@ -1,7 +1,7 @@
 //! node:async_hooks and node:domain: AsyncLocalStorage across awaits, timers, ticks, and
 //! callbacks; AsyncResource; EventEmitterAsyncResource; and domain error routing.
 
-mod common;
+use crate::common;
 
 use common::*;
 use serde_json::json;

@@ -1,6 +1,6 @@
 //! node:punycode (RFC 3492 samples), node:sea, and node:trace_events.
 
-mod common;
+use crate::common;
 
 use common::*;
 use serde_json::json;

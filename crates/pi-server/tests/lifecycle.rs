@@ -1,7 +1,7 @@
 //! Port of upstream `test/conformance.test.ts`: call admission, Session lifecycle, and
 //! "routed Session acquisition failures".
 
-mod common;
+use crate::common;
 
 use std::sync::{Arc, Mutex};
 

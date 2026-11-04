@@ -1,10 +1,10 @@
 //! Port of upstream `tui-alt-screen.test.ts`: keyboard viewport navigation, custom scroll
 //! bindings, OSC 133 prompt jumps, and iTerm2 output.
 
-mod alt_view_common;
-mod editor_common;
-mod layout_common;
-mod support;
+use crate::alt_view_common;
+use crate::editor_common;
+use crate::layout_common;
+use crate::support;
 
 use std::cell::RefCell;
 use std::rc::Rc;

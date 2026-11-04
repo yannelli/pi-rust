@@ -3,6 +3,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::MutexGuard;
 use std::time::Duration;
 
 use pi_tui::testing::VirtualTerminal;
@@ -70,10 +71,12 @@ impl Terminal for RecordingTerminal {
     }
 }
 
-/// A fullscreen TUI on a recording terminal.
+/// A fullscreen TUI on a recording terminal. Holds the global state lock, because starting and
+/// stopping the alternate screen reads and restores the process-wide image capabilities.
 pub struct Harness {
     pub terminal: Rc<RefCell<RecordingTerminal>>,
     pub tui: Tui,
+    _guard: MutexGuard<'static, ()>,
 }
 
 impl Harness {
@@ -86,10 +89,11 @@ impl Harness {
     }
 
     pub fn with_options(columns: usize, rows: usize, options: TuiOptions, alt: TuiAltScreenOptions) -> Self {
+        let guard = pi_tui::env::global_state_lock();
         let terminal = RecordingTerminal::shared(columns, rows);
         let erased: TerminalRef = terminal.clone();
         let tui = Tui::new_alt_screen(erased, options, alt);
-        Self { terminal, tui }
+        Self { terminal, tui, _guard: guard }
     }
 
     /// Queues terminal input; the TUI handles it on the next loop pass.

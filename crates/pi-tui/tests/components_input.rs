@@ -1,8 +1,6 @@
 //! Port of upstream `test/input.test.ts` plus the Input case of `test/mouse-components.test.ts`.
 
-#[path = "components_input/kill_ring.rs"]
 mod kill_ring;
-#[path = "components_input/undo.rs"]
 mod undo;
 
 use std::cell::RefCell;

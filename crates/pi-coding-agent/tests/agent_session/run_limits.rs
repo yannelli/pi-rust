@@ -10,7 +10,7 @@ use pi_coding_agent::print_mode::run_print_mode;
 use pi_coding_agent::session::SessionManager;
 use serde_json::json;
 
-use crate::harness::{Harness, Options, harness_with, open_session_with, roles, text};
+use crate::agent_session::harness::{Harness, Options, harness_with, open_session_with, roles, text};
 
 fn read_call(id: &str) -> FauxResponse {
     FauxResponse::tool_call(id, "read", json!({"path": "notes.txt"}))

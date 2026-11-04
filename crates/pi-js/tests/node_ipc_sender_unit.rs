@@ -2,7 +2,7 @@
 //! ipc.js runs on fake natives that only record which socket ids are open. Not a kernel or Node-parity test.
 #![cfg(unix)]
 
-mod common;
+use crate::common;
 
 use common::*;
 use serde_json::json;

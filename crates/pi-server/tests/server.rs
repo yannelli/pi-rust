@@ -1,6 +1,6 @@
 //! Port of upstream `test/server.test.ts` and `test/listener.test.ts`.
 
-mod common;
+use crate::common;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

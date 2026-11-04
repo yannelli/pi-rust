@@ -1,6 +1,6 @@
 //! Port of upstream `test/service-wire.test.ts`: control calls, parsers, state codecs, and endpoints.
 
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 

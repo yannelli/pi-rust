@@ -2,7 +2,7 @@
 //! of a child that connected behind) and #7 (what each child prepared). Upstream compares a listener's `select`
 //! by its source text; the key given to `on_select` stands for it here.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::sync::{Arc, Mutex};
 

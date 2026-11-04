@@ -23,7 +23,7 @@ mod overflow;
 mod overrides;
 #[path = "harness_compaction/recovery.rs"]
 mod recovery;
-mod support;
+use crate::support;
 #[path = "harness_compaction/together.rs"]
 mod together;
 

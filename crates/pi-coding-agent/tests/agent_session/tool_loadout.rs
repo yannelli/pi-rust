@@ -8,8 +8,8 @@ use pi_coding_agent::agent_session::{AgentSession, NavigateTreeOptions, NoTools}
 use pi_coding_agent::session::SessionManager;
 use serde_json::{Value, json};
 
-use crate::harness::{Harness, open_session_with};
-use crate::tool_registry::{Select, apply, session_with, sorted, tool};
+use crate::agent_session::harness::{Harness, open_session_with};
+use crate::agent_session::tool_registry::{Select, apply, session_with, sorted, tool};
 
 fn references(names: &[&str]) -> Vec<Value> {
     names

@@ -7,26 +7,20 @@ mod events;
 mod examples;
 mod examples_more;
 mod exec;
-mod harness;
+pub(crate) mod harness;
 mod hook_events;
 mod host;
-#[path = "../agent_session/http_mock.rs"]
-mod http_mock;
 mod loading;
 mod mcp_call;
 mod mcp_elicitation;
-#[path = "../agent_session/mcp_fake.rs"]
-#[allow(dead_code)]
-mod mcp_fake;
 mod native;
 mod native_contracts;
 mod native_usage;
-#[path = "../offline_guard/mod.rs"]
-mod offline_guard;
 mod provider;
 mod provider_compose;
 mod provider_hooks;
 mod reaches_tools;
 mod runtime;
-#[path = "../interactive/watchdog.rs"]
-mod watchdog;
+
+use crate::agent_session::{http_mock, mcp_fake};
+use crate::interactive::watchdog;

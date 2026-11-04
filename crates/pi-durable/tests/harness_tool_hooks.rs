@@ -7,7 +7,7 @@ mod limits;
 mod nested;
 #[path = "harness_tool_hooks/slot.rs"]
 mod slot;
-mod support;
+use crate::support;
 #[path = "harness_tool_hooks/unoffered.rs"]
 mod unoffered;
 

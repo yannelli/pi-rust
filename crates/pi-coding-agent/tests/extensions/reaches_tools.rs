@@ -9,8 +9,8 @@ use pi_ai::providers::faux::FauxResponse;
 use pi_ai::{ContentBlock, Message, ToolResultMessage};
 use serde_json::{Value, json};
 
-use crate::harness::{Harness, Setup, harness};
-use crate::mcp_fake::{Fake, FakeOptions};
+use crate::extensions::harness::{Harness, Setup, harness};
+use crate::extensions::mcp_fake::{Fake, FakeOptions};
 
 const TOOLS: &str = r#"import { Type } from "typebox";
 const tool = (name, extra = {}) => ({

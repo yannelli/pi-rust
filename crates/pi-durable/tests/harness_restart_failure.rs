@@ -1,7 +1,7 @@
 //! Port of upstream `test/harness-restart-failure.test.ts`: a generation's request a crash interrupted is a failed
 //! attempt under the retry policy, and other work ends visibly once cut off `restart_limit` times in a row.
 
-mod support;
+use crate::support;
 
 #[path = "harness_restart_failure/deferred.rs"]
 mod deferred;

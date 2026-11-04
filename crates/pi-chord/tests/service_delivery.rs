@@ -1,6 +1,6 @@
 //! Port of upstream `test/service-delivery.test.ts`: provider delivery queues and wire rebaselines.
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, Mutex};
 

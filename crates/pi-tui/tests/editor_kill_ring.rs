@@ -1,13 +1,16 @@
 //! Ports of the upstream editor kill ring tests (Ctrl+W/U/K, Alt+D, Ctrl+Y, Alt+Y).
 
-mod editor_common;
+use crate::editor_common;
 
 use editor_common::{TestEditor, editor};
+use pi_tui::env::global_state_lock;
 
 const CTRL_W: &str = "\x17";
 const CTRL_U: &str = "\x15";
 const CTRL_K: &str = "\x0b";
 const CTRL_Y: &str = "\x19";
+// Legacy Alt sequences parse only while the Kitty flag is off. Tests that send them hold the
+// global state lock, because the keys tests set the flag while they hold it.
 const ALT_Y: &str = "\x1by";
 const ALT_D: &str = "\x1bd";
 const CTRL_A: &str = "\x01";
@@ -73,6 +76,7 @@ fn ctrl_y_does_nothing_with_empty_ring() {
 
 #[test]
 fn alt_y_cycles_after_ctrl_y() {
+    let _lock = global_state_lock();
     let editor = editor();
     fill_ring(&editor, &["first", "second", "third"]);
     assert_eq!(editor.get_text(), "");
@@ -86,6 +90,7 @@ fn alt_y_cycles_after_ctrl_y() {
 
 #[test]
 fn alt_y_needs_a_preceding_yank() {
+    let _lock = global_state_lock();
     let editor = editor();
     fill_ring(&editor, &["test"]);
     editor.set_text("other");
@@ -97,6 +102,7 @@ fn alt_y_needs_a_preceding_yank() {
 
 #[test]
 fn alt_y_needs_two_entries() {
+    let _lock = global_state_lock();
     let editor = editor();
     fill_ring(&editor, &["only"]);
     editor.handle_input(CTRL_Y);
@@ -141,6 +147,7 @@ fn backward_kills_prepend_and_forward_kills_append() {
 
 #[test]
 fn other_actions_break_kill_accumulation() {
+    let _lock = global_state_lock();
     let editor = editor();
     editor.set_text("foo bar baz");
     editor.handle_input(CTRL_W);
@@ -157,6 +164,7 @@ fn other_actions_break_kill_accumulation() {
 
 #[test]
 fn other_actions_break_the_yank_chain() {
+    let _lock = global_state_lock();
     let editor = editor();
     fill_ring(&editor, &["first", "second"]);
     editor.set_text("");
@@ -170,6 +178,7 @@ fn other_actions_break_the_yank_chain() {
 
 #[test]
 fn ring_rotation_persists() {
+    let _lock = global_state_lock();
     let editor = editor();
     fill_ring(&editor, &["first", "second", "third"]);
     editor.set_text("");
@@ -222,6 +231,7 @@ fn yanks_in_the_middle_of_text() {
 
 #[test]
 fn yank_pops_in_the_middle_of_text() {
+    let _lock = global_state_lock();
     let editor = editor();
     fill_ring(&editor, &["FIRST", "SECOND"]);
     editor.set_text("hello world");
@@ -235,6 +245,7 @@ fn yank_pops_in_the_middle_of_text() {
 
 #[test]
 fn multiline_yank_and_yank_pop_in_the_middle() {
+    let _lock = global_state_lock();
     let editor = editor();
     fill_ring(&editor, &["SINGLE"]);
     editor.set_text("A\nB");
@@ -250,6 +261,7 @@ fn multiline_yank_and_yank_pop_in_the_middle() {
 
 #[test]
 fn alt_d_kills_words_forward() {
+    let _lock = global_state_lock();
     let editor = editor();
     editor.set_text("hello world test");
     editor.handle_input(CTRL_A);
@@ -263,6 +275,7 @@ fn alt_d_kills_words_forward() {
 
 #[test]
 fn alt_d_at_line_end_kills_the_newline() {
+    let _lock = global_state_lock();
     let editor = editor();
     editor.set_text("line1\nline2");
     editor.handle_input(UP);

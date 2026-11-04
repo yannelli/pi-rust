@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 
-use crate::harness::{Options, Ui, local, start};
+use crate::interactive::harness::{Options, Ui, local, start};
 
 const DOWN: &str = "\x1b[B";
 const ENTER: &str = "\r";

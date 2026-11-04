@@ -1,6 +1,6 @@
 //! Port of upstream `test/overlay-non-capturing.test.ts`, "focus management" (first part).
 
-mod overlay_common;
+use crate::overlay_common;
 
 use std::cell::RefCell;
 use std::rc::Rc;

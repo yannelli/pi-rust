@@ -1,7 +1,7 @@
 //! Port of upstream `test/contract.test.ts`, plus contract descriptions, fingerprints, coverage and binding checked
 //! against golden fixtures from upstream TypeScript.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::collections::HashMap;
 

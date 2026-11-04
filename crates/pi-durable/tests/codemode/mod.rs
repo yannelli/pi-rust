@@ -1,8 +1,7 @@
 //! Port of upstream `test/codemode.test.ts` (durable code mode). This file holds the helpers and the cases without a
 //! restart; `restarts.rs` holds the resume cases and `divergence.rs` the cases where a rerun takes another path.
 
-#[path = "../support/mod.rs"]
-mod support;
+use crate::support;
 
 mod bench;
 mod describe;

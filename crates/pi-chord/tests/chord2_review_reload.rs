@@ -2,7 +2,7 @@
 //! #11's argument stripping (#11's `fits` case is in `chord2_schema.rs`). Left out: "#1 a commit that still fails
 //! midway", a white-box test that patches an object's `startTasks`; Rust objects cannot be patched.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::future::ready;
 use std::sync::atomic::{AtomicUsize, Ordering};

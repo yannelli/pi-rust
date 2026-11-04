@@ -1,6 +1,6 @@
 //! Port of upstream `test/protocol.test.ts`.
 
-mod common;
+use crate::common;
 
 use std::sync::{Arc, Mutex};
 

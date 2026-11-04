@@ -1,6 +1,6 @@
 //! Upstream `test/remote.test.ts`: transfer windows, cancellation, timeouts, lost connections, and large files.
 
-mod support;
+use crate::support;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

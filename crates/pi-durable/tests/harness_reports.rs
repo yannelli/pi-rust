@@ -1,7 +1,7 @@
 //! Port of upstream `test/harness-reports.test.ts`: what each report to `HarnessOptions::on_report` says it is
 //! about.
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, Mutex};
 

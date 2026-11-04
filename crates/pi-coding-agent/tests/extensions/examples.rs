@@ -3,7 +3,7 @@
 use pi_ai::providers::faux::FauxResponse;
 use serde_json::json;
 
-use crate::harness::{Setup, example, harness};
+use crate::extensions::harness::{Setup, example, harness};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn hello_registers_a_tool_the_model_calls() {

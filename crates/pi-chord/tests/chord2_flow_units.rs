@@ -1,7 +1,7 @@
 //! Port of upstream `test/flow-units.test.ts`: flow control with units (urgent first units, whole snapshots,
 //! unsized links, the per-link cap of waiting ops) and the relay topology. Every case is ported.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::sync::{Arc, Mutex};
 

@@ -1,11 +1,7 @@
 //! `hasTrustRequiringProjectResources` of `@earendil-works/pi-coding-agent` is upstream code: `.pi`
 //! entries, `.agents/skills` in the project or an ancestor, and the user's own skills left out.
 
-#[path = "extensions/harness.rs"]
-#[allow(dead_code)]
-mod harness;
-#[path = "offline_guard/mod.rs"]
-mod offline_guard;
+use crate::extensions::harness;
 
 use harness::{Setup, harness};
 use serde_json::Value;

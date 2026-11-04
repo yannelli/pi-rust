@@ -1,7 +1,7 @@
 //! Port of upstream `test/variants.test.ts`: new variants switched in with `server.reload`, and a re-hold after a
 //! link loss.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

@@ -1,7 +1,6 @@
 //! Port of upstream `layout.test.ts` ("viewport layout"): stack allocation and composition.
 
-mod layout_common;
-mod support;
+use crate::layout_common;
 
 use std::cell::Cell;
 use std::rc::Rc;

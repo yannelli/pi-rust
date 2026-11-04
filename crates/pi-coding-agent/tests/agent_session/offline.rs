@@ -11,7 +11,7 @@ use pi_coding_agent::agent_session::{ModelRuntime, ModelRuntimeOptions};
 use pi_coding_agent::session::SessionManager;
 use serde_json::json;
 
-use crate::harness::{Options, harness};
+use crate::agent_session::harness::{Options, harness};
 use crate::offline_guard::{app_runtime, assert_offline_model, is_offline};
 
 const FAKE_OPENAI_KEY: &str = "sk-pi-rust-test-fake-openai-key";

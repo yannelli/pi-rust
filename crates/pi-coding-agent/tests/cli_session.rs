@@ -2,7 +2,7 @@
 //! `--export` (HTML, or Markdown for `.md` outputs), `--skill`, `--prompt-template`,
 //! `--no-context-files`, and `-a`/`-na`.
 
-mod cli_support;
+use crate::cli_support;
 
 use std::path::{Path, PathBuf};
 

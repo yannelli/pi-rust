@@ -2,7 +2,7 @@
 //! left out with the type errors; so is the case of a host, a parent link or a route without an identity (each one
 //! is a required field here).
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::future::ready;
 use std::sync::Arc;

@@ -1,7 +1,7 @@
 //! Port of upstream `test/flow.test.ts`: link flow control (windowed state, coalescing, overflow resets, relays,
 //! peers without acks, bad acks) and the per-link call limit. Every case is ported.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::sync::{Arc, Mutex};
 

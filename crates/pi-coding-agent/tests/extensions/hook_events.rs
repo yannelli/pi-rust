@@ -7,7 +7,7 @@ use pi_ai::providers::faux::FauxResponse;
 use pi_coding_agent::agent_session::{NotifyLevel, PromptDisposition};
 use serde_json::{Value, json};
 
-use crate::harness::{Harness, Setup, eventually, harness};
+use crate::extensions::harness::{Harness, Setup, eventually, harness};
 
 /// An extension that records each event of `types` as a custom entry of that type.
 fn recorder(types: &[&str], body: &str) -> String {

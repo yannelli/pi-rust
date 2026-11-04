@@ -1,7 +1,7 @@
 //! Ported from upstream `test/session-manager/build-context.test.ts`, `load-entries.test.ts`,
 //! and the session half of `session-context-edit.test.ts`.
 
-mod common;
+use crate::common;
 
 use common::*;
 use pi_ai::{ContentBlock, Message, ThinkingLevel, ToolResultMessage};

@@ -17,7 +17,7 @@ use pi_coding_agent::settings::SettingsManager;
 use serde_json::json;
 use tempfile::TempDir;
 
-use crate::harness::{RecordingUi, eventually};
+use crate::extensions::harness::{RecordingUi, eventually};
 
 struct Runtime {
     _root: TempDir,

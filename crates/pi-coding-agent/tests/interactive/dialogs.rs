@@ -1,6 +1,6 @@
 //! Dialogs opened from slash commands replace the editor until chosen or dismissed.
 
-use crate::harness::{Options, local, start};
+use crate::interactive::harness::{Options, local, start};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn model_selector_switches_the_model() {
@@ -83,7 +83,8 @@ async fn settings_change_the_hide_thinking_setting() {
 async fn settings_disable_and_re_enable_a_provider_in_the_live_registry() {
     local(async {
         let ui = start(Options::default()).await;
-        let local_models = |ui: &crate::harness::Ui| ui.session().model_runtime().get_model("local", "other").is_some();
+        let local_models =
+            |ui: &crate::interactive::harness::Ui| ui.session().model_runtime().get_model("local", "other").is_some();
         assert!(local_models(&ui));
         ui.submit("/settings").await;
         ui.wait_for("Auto-compact").await;
@@ -145,7 +146,8 @@ async fn settings_change_retry_values_from_their_defaults() {
         ui.wait_until("filtered list", |ui| !ui.screen().contains("Auto-compact")).await;
         ui.wait_for("default").await;
         ui.send("\r").await;
-        let timeout = |ui: &crate::harness::Ui| ui.session().settings().provider_retry_settings().timeout_ms;
+        let timeout =
+            |ui: &crate::interactive::harness::Ui| ui.session().settings().provider_retry_settings().timeout_ms;
         ui.wait_until("timeout saved", |ui| timeout(ui) == Some(30_000)).await;
         ui.send("\x1b").await;
 

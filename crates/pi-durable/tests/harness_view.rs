@@ -1,6 +1,6 @@
 //! Port of upstream `test/harness-view.test.ts` .
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, Mutex};
 

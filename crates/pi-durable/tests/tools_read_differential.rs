@@ -1,8 +1,7 @@
 //! Upstream `test/tools-read-differential.test.ts`: `read` must give what reading the whole file gave before bounded
 //! reads, while it reads only a bounded part of the file.
 
-#[path = "support/tools_support.rs"]
-mod support;
+use crate::support::tools_support as support;
 
 use pi_ai::ContentBlock;
 use pi_durable::env::{LocalEnvOptions, LocalExecutionEnv};

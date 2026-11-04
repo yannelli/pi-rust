@@ -1,14 +1,7 @@
 //! SDK `ModelRuntime.create` for extensions: separate native runtimes with their own `models.json`
 //! and `auth.json`, runtime API keys, typed reads, offline refresh, and child sessions.
 
-#[path = "extensions/harness.rs"]
-#[allow(dead_code)]
-mod harness;
-#[path = "agent_session/mcp_fake.rs"]
-#[allow(dead_code)]
-mod mcp_fake;
-#[path = "offline_guard/mod.rs"]
-mod offline_guard;
+use crate::extensions::harness;
 
 use std::path::Path;
 

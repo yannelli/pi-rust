@@ -10,8 +10,8 @@ use pi_coding_agent::llama::{LlamaError, LlamaProgress};
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
-use crate::harness::{Options, harness};
-use crate::http_mock::{Reply, Server};
+use crate::agent_session::harness::{Options, harness};
+use crate::agent_session::http_mock::{Reply, Server};
 
 type Models = Arc<Mutex<Vec<(String, String)>>>;
 
@@ -48,7 +48,7 @@ fn credential(url: &str) -> BTreeMap<String, Credential> {
     BTreeMap::from([("llama.cpp".to_string(), Credential::ApiKey(ApiKeyCredential { key: None, env: Some(env) }))])
 }
 
-fn llama_ids(h: &crate::harness::Harness) -> Vec<String> {
+fn llama_ids(h: &crate::agent_session::harness::Harness) -> Vec<String> {
     let models = h.session.model_runtime().available_models();
     models.into_iter().filter(|model| model.provider == "llama.cpp").map(|model| model.id).collect()
 }

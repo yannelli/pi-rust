@@ -14,7 +14,7 @@ use pi_coding_agent::cache_warmer::{CacheWarmingAction, CacheWarmingPhase, Cache
 use pi_coding_agent::settings::schema::CacheWarmingMode;
 use serde_json::{Value, json};
 
-use crate::harness::{Harness, Options, harness_with};
+use crate::agent_session::harness::{Harness, Options, harness_with};
 
 #[derive(Default)]
 struct Script {

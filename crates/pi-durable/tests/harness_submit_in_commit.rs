@@ -1,7 +1,7 @@
 //! Port of upstream `test/harness-submit-in-commit.test.ts` as of `6a2825113`: admission for hosts that must not
 //! start runs, `WhenIdle::Reject` (#11149).
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, Mutex};
 

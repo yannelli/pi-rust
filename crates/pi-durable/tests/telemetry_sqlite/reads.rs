@@ -7,7 +7,7 @@ use pi_telemetry::{
     InstrumentOptions, MetricQuery, SpanOptions, TelemetryContextExt, TelemetryMetrics, TelemetryStore, TraceQuery,
 };
 
-use crate::support::Fixture;
+use super::support::Fixture;
 
 fn limit(limit: usize) -> TraceQuery {
     TraceQuery { limit: Some(limit), ..TraceQuery::default() }

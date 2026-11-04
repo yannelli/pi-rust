@@ -1,6 +1,6 @@
 //! Port of upstream `test/services.test.ts`: tokens, providers, and singleton bindings.
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, Mutex};
 

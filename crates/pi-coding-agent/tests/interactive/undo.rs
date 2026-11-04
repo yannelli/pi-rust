@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use pi_ai::providers::faux::FauxResponse;
 use serde_json::json;
 
-use crate::harness::{Options, Ui, local, start};
+use crate::interactive::harness::{Options, Ui, local, start};
 
 fn write(id: &str, path: &str, content: &str) -> (String, &'static str, serde_json::Value) {
     (id.to_string(), "write", json!({"path": path, "content": content}))

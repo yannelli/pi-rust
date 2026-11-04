@@ -1,7 +1,7 @@
 //! Port of upstream `test/unix-transport.test.ts` and `test/unix.test.ts`.
 #![cfg(unix)]
 
-mod support;
+use crate::support;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};

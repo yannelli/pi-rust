@@ -1,13 +1,11 @@
 //! `pi mcp` through the binary: servers added with `pi mcp add` connect in `pi mcp list` and
 //! give print mode their tools, `--no-mcp` leaves them out, and `pi mcp remove` drops them.
 
-mod cli_support;
-
 #[cfg(unix)]
 mod unix {
     use serde_json::Value;
 
-    use super::cli_support::{mock_server, pi_async, setup, text_body, tool_call_body};
+    use crate::cli_support::{mock_server, pi_async, setup, text_body, tool_call_body};
 
     /// A stdio MCP server with one tool, `echo`, as a POSIX shell script.
     const SERVER: &str = r#"while IFS= read -r line; do

@@ -1,7 +1,7 @@
 //! Servers extensions register, overridden notices, connection ids, and subscriptions. Ported
 //! from the registered-server tests of coding-agent's agent-session-mcp.test.ts.
 
-mod common;
+use crate::common;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

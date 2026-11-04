@@ -5,7 +5,7 @@ use pi_ai::{Message, StopReason, UserContent};
 use pi_coding_agent::messages::CustomMessage;
 use serde_json::{Value, json};
 
-use crate::harness::{Setup, eventually, harness};
+use crate::extensions::harness::{Setup, eventually, harness};
 
 /// An extension tool `probe` that echoes its `text` argument.
 const PROBE_TOOL: &str = r#"

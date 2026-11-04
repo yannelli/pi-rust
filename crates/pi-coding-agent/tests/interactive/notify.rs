@@ -7,7 +7,7 @@ use pi_ai::providers::faux::FauxResponse;
 use pi_coding_agent::resources::brand::APP_NAME;
 use serde_json::json;
 
-use crate::harness::{Options, Ui, local, start};
+use crate::interactive::harness::{Options, Ui, local, start};
 
 /// How many notifications the terminal got; `osc` picks the protocol from the environment.
 fn notifications(ui: &Ui) -> usize {

@@ -1,7 +1,7 @@
 //! node:repl over stream pairs: evaluation, multi-line input, errors, dot commands, custom eval
 //! and writer, useGlobal, and top-level await. Expected values come from Node 22.
 
-mod common;
+use crate::common;
 
 use common::*;
 

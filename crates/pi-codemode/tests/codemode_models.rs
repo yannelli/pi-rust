@@ -1,7 +1,7 @@
 //! Ported from upstream `agent-session-codemode.test.ts` ("codemode models"): `models.*` from
 //! scripts against a model registry stand-in.
 
-mod support;
+use crate::support;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

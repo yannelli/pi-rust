@@ -7,15 +7,15 @@ use pi_ai::auth::{Credential, CredentialStore, OAuthAuth, OAuthCredential};
 use pi_coding_agent::extension_ui::ExtensionMode;
 use serde_json::{Value, json};
 
-use crate::harness::Setup;
-use crate::native::{NativeUi, entry_data, native_in};
-use crate::native_contracts::FakeAnthropic;
+use crate::extensions::harness::Setup;
+use crate::extensions::native::{NativeUi, entry_data, native_in};
+use crate::extensions::native_contracts::FakeAnthropic;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn usage_get_reads_a_builtin_oauth_slot_with_its_own_login() {
     let body = json!({"plan_type": "max", "five_hour": {"utilization": 42, "resets_at": "2026-10-30T17:00:00Z"},
         "seven_day_opus": {"utilization": 7, "resets_at": null}});
-    let server = crate::http_mock::Server::start(move |_| crate::http_mock::Reply {
+    let server = crate::extensions::http_mock::Server::start(move |_| crate::extensions::http_mock::Reply {
         status: 200,
         content_type: "application/json",
         body: body.to_string().into_bytes(),

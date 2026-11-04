@@ -1,7 +1,7 @@
 //! Ports of the upstream editor tests: prompt history, state accessors, backslash newline, and
 //! Kitty CSI-u input.
 
-mod editor_common;
+use crate::editor_common;
 
 use std::cell::Cell;
 use std::rc::Rc;

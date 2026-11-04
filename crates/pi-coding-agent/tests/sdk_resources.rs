@@ -1,14 +1,7 @@
 //! SDK `DefaultResourceLoader` against upstream `resource-loader.test.ts`, `resource-loader-theme.test.ts`
 //! and the #2753 regression (upstream 35dfa757), and against the native loader on the same tree.
 
-#[path = "extensions/harness.rs"]
-#[allow(dead_code)]
-mod harness;
-#[path = "agent_session/mcp_fake.rs"]
-#[allow(dead_code)]
-mod mcp_fake;
-#[path = "offline_guard/mod.rs"]
-mod offline_guard;
+use crate::extensions::harness;
 
 #[path = "sdk_resources/composition.rs"]
 mod composition;

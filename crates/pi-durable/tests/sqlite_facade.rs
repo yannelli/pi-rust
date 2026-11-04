@@ -240,8 +240,7 @@ async fn reports_the_rows_a_statement_changed_without_index_writes() {
     database.close().await.unwrap();
 }
 
-#[path = "support/sqlite_changes.rs"]
-mod changes;
+use crate::support::sqlite_changes as changes;
 
 #[path = "support/sqlite_facade_settlement.rs"]
 mod settlement;

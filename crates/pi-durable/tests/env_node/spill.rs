@@ -8,8 +8,8 @@ use pi_durable::env::{
     ShellSpillOptions,
 };
 
-use crate::shell::collect;
-use crate::support::{context, join, local_env, path_string, remove_parent, temp_dir};
+use super::shell::collect;
+use super::support::{context, join, local_env, path_string, remove_parent, temp_dir};
 
 fn spill(after_bytes: u64, after_lines: u64) -> Option<ShellSpillOptions> {
     Some(ShellSpillOptions { after_bytes, after_lines })

@@ -1,6 +1,6 @@
 //! Pasted terminal output and bracketed pastes without an end marker (upstream issue 11383).
 
-mod editor_common;
+use crate::editor_common;
 
 use editor_common::editor;
 use pi_tui::stdin_buffer::PASTE_MAX_BYTES;

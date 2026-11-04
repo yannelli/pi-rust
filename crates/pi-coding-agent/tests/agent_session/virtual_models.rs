@@ -13,7 +13,7 @@ use pi_coding_agent::virtual_models::{
 };
 use serde_json::{Value, json};
 
-use crate::harness::{Harness, Options, harness, open_session};
+use crate::agent_session::harness::{Harness, Options, harness, open_session};
 
 type Route = Arc<dyn Fn(&ModelRouteRequest, &dyn ModelLookup) -> anyhow::Result<ModelRoute> + Send + Sync>;
 

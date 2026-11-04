@@ -1,11 +1,7 @@
 //! `loadProjectContextFiles` of `@earendil-works/pi-coding-agent` is upstream code: context file order and precedence,
 //! BOM and UTF-8 handling, read warnings, and linked-worktree shadowing, with chalk's yellow from a private host port.
 
-#[path = "extensions/harness.rs"]
-#[allow(dead_code)]
-mod harness;
-#[path = "offline_guard/mod.rs"]
-mod offline_guard;
+use crate::extensions::harness;
 
 use std::collections::BTreeMap;
 use std::io::IsTerminal;

@@ -1,7 +1,6 @@
 //! Port of upstream `test/session-watches.test.ts`.
 
-#[path = "../support/mod.rs"]
-mod support;
+use crate::support;
 
 mod delivery;
 mod following;

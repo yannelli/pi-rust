@@ -1,7 +1,7 @@
 //! Native Node queries and children follow environment changes within one isolated backend process.
 
-mod common;
-mod node_common;
+use crate::common;
+use crate::node_common;
 
 use common::*;
 use serde_json::json;

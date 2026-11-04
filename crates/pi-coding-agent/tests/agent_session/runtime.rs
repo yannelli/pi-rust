@@ -7,7 +7,7 @@ use pi_ai::providers::faux::FauxResponse;
 use pi_coding_agent::agent_session::{AgentSessionRuntime, ForkPosition};
 use pi_coding_agent::session::SessionManager;
 
-use crate::harness::{Harness, Options, harness, roles, text};
+use crate::agent_session::harness::{Harness, Options, harness, roles, text};
 
 async fn runtime_with_turns(persist: bool) -> (Harness, AgentSessionRuntime) {
     let responses =

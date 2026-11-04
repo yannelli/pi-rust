@@ -1,6 +1,6 @@
 //! The reverse prompt history search (pi-rust extension, `tui.editor.historySearch`).
 
-mod editor_common;
+use crate::editor_common;
 
 use std::cell::Cell;
 use std::rc::Rc;

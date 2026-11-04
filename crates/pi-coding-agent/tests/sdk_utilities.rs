@@ -1,11 +1,7 @@
 //! Runtime exports of the bundled modules beyond the session SDK: coding-agent utilities, pi-ai
 //! helpers, pi-agent-core, and the type-only oauth entry, run from extensions over the faux provider.
 
-#[path = "extensions/harness.rs"]
-#[allow(dead_code)]
-mod harness;
-#[path = "offline_guard/mod.rs"]
-mod offline_guard;
+use crate::extensions::harness;
 
 use harness::{Harness, Setup, harness};
 use pi_ai::providers::faux::FauxResponse;

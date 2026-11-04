@@ -1,7 +1,7 @@
 //! `run_tool_call`, `prepare_arguments`, and argument replacement, ported from upstream
 //! `agent-loop.test.ts`.
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, Mutex};
 

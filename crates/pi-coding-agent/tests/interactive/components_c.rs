@@ -1,7 +1,7 @@
 //! Upstream extension editor, footer, model and settings selectors in the Rust terminal: the editor
 //! runs the external editor with the TUI stopped, and the others read real host sessions and settings.
 
-use crate::harness::{Options, Ui, local, start};
+use crate::interactive::harness::{Options, Ui, local, start};
 
 const EXTENSION: &str = r#"import { createAgentSession, ExtensionEditorComponent, FooterComponent, ModelRuntime, ModelSelectorComponent, SettingsManager, SettingsSelectorComponent } from "@earendil-works/pi-coding-agent";
 

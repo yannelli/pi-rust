@@ -1,6 +1,6 @@
 //! Port of upstream `test/harness-telemetry.test.ts`: Durable's spans, events, carriers, and metrics.
 
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 

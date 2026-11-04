@@ -1,8 +1,7 @@
 //! Port of upstream `test/session-deferred-commits.test.ts`: what a deferred commit holds in memory, what stores it, and
 //! what Storage and each kind of listener then sees.
 
-#[path = "../support/mod.rs"]
-mod support;
+use crate::support;
 
 mod holding;
 mod publications;

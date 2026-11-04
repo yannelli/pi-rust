@@ -1,7 +1,7 @@
 //! Port of upstream `test/harness-read-only.test.ts`: a read-only Harness, a viewer of a session another process
 //! drives, such as a synced copy on another device.
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, Mutex};
 

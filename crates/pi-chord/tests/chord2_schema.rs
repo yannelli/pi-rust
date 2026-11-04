@@ -1,7 +1,7 @@
 //! The chord2 schema module (upstream `schema.ts`) against golden fixtures from upstream TypeScript: hash64,
 //! canonical JSON, `fits`, `normalize` with its identity, and `assertValid` messages. Also ports review test #11.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use chord2_support::*;
 use pi_chord::host2::schema::{assert_valid, canonical_identity, canonical_json, fits, hash64, normalize};

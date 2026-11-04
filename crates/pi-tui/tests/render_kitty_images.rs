@@ -1,8 +1,8 @@
 //! Port of the "TUI Kitty image cleanup" cases of upstream `test/tui-render.test.ts`.
 //! Every case holds the global state lock: images and cell sizes are process-wide.
 
-mod render_common;
-mod support;
+use crate::render_common;
+use crate::support;
 
 use std::sync::MutexGuard;
 

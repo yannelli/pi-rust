@@ -2,7 +2,7 @@
 //! call real providers; they are ignored by default and skip when the token is unset, like upstream's `skipIf`.
 //! Upstream resolves OAuth tokens; here they come from `PI_CODEX_TOKEN` and `ANTHROPIC_API_KEY`.
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, Mutex};
 

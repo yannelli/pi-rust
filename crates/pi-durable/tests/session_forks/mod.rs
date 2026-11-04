@@ -1,7 +1,6 @@
 //! Port of upstream `test/session-forks.test.ts`.
 
-#[path = "../support/mod.rs"]
-mod support;
+use crate::support;
 
 mod copies;
 mod rejections;

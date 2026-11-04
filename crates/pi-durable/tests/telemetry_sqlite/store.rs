@@ -6,7 +6,7 @@ use pi_telemetry::{
     TelemetryStore, TraceQuery,
 };
 
-use crate::support::{Fixture, set};
+use super::support::{Fixture, set};
 
 fn attrs(entries: impl Into<SpanAttributes>) -> SpanAttributes {
     entries.into()

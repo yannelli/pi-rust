@@ -1,7 +1,7 @@
 //! Port of upstream `test/overlay-non-capturing.test.ts`, "no-op guards" and
 //! "focus cycle prevention".
 
-mod overlay_common;
+use crate::overlay_common;
 
 use overlay_common::*;
 use pi_tui::{OverlayOptions, OverlayUnfocusOptions};

@@ -1,7 +1,7 @@
 //! Port of upstream `test/harness-deferred-progress.test.ts`: generation partials and tool restart counts. A crash
 //! fails the Harness, so nothing more reaches Storage. Other tool output, compaction, and third-party cases wait.
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, Mutex};
 

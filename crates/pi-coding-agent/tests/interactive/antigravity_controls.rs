@@ -20,14 +20,15 @@ use pi_coding_agent::settings::schema::TuiMode;
 use pi_tui::testing::VirtualTerminal;
 use serde_json::{Value, json};
 
-use crate::harness::{Ui, local};
+use crate::interactive::harness::{Ui, local};
 
 /// Set for the fake server process, with the request log path as its value.
 const AGENT_ENV: &str = "PI_TEST_FAKE_ANTIGRAVITY_LOG";
 /// Set for the run of the UI test in a child process.
 const UI_ENV: &str = "PI_TEST_ANTIGRAVITY_UI";
-const AGENT_TEST: &str = "antigravity_controls::fake_antigravity_server_process";
-const UI_TEST: &str = "antigravity_controls::mode_and_thinking_are_confirmed_before_the_first_prompt";
+const AGENT_TEST: &str = "antigravity_interactive::antigravity_controls::fake_antigravity_server_process";
+const UI_TEST: &str =
+    "antigravity_interactive::antigravity_controls::mode_and_thinking_are_confirmed_before_the_first_prompt";
 const DOWN: &str = "\x1b[B";
 
 /// The fake server: JSON-RPC on stdio, each request logged with this process ID.

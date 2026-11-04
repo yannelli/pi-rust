@@ -3,7 +3,7 @@
 
 #[path = "harness_conversations/agents.rs"]
 mod agents;
-mod support;
+use crate::support;
 
 use std::sync::{Arc, LazyLock, Mutex};
 

@@ -2,7 +2,7 @@
 //! generation's facet closes over a sentinel; upstream watches it with a `FinalizationRegistry` after a forced GC,
 //! here a `Weak` shows whether anything still holds it (reference counts drop at once, so no GC is needed).
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::sync::{Arc, Mutex, Weak};
 

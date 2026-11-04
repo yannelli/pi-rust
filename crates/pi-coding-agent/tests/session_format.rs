@@ -1,7 +1,7 @@
 //! Upstream-format files: v1 and v2 migration (upstream `migration.test.ts`), a v3 file with
 //! every entry type and role that must round-trip byte for byte, and JSONL export and import.
 
-mod common;
+use crate::common;
 
 use common::*;
 use pi_coding_agent::messages::convert_to_llm;

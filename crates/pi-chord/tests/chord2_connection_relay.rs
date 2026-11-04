@@ -1,7 +1,7 @@
 //! Port of upstream `test/link.test.ts`, "links: relay, stamping, lifetime": a server routing `session:` hosts to
 //! workers it spawns, browsers connected as clients, raw links that try to forward identities.
 
-mod chord2_support;
+use crate::chord2_support;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

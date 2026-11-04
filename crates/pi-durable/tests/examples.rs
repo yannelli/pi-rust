@@ -15,7 +15,7 @@ mod harness;
 mod session;
 #[path = "examples/subagents.rs"]
 mod subagents;
-mod support;
+use crate::support;
 #[path = "examples/tools.rs"]
 mod tools;
 #[path = "examples/transcript.rs"]

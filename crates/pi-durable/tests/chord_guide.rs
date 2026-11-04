@@ -2,7 +2,7 @@
 //! Rust Chord services are untyped: members are named methods over JSON and named replicated states, so the
 //! guide's typed service interfaces become `ServiceImpl`s and calls go through `ServiceHandle::call`.
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, LazyLock, Mutex};
 

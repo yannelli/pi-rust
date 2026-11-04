@@ -10,7 +10,7 @@ use pi_telemetry::{
     TelemetryStore, TraceQuery,
 };
 
-use crate::support::clock;
+use super::support::clock;
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/telemetry/telemetry.sqlite");
 

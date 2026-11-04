@@ -4,6 +4,9 @@
 mod harness;
 #[path = "offline_guard/mod.rs"]
 mod offline_guard;
+#[allow(dead_code)]
+#[path = "interactive/watchdog.rs"]
+mod watchdog;
 
 use harness::{Options, local, start};
 use pi_coding_agent::keybindings::keybindings;

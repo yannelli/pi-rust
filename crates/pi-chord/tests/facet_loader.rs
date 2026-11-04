@@ -1,6 +1,6 @@
 //! Port of upstream `test/facet-loader.test.ts`: loaders and generation reloads.
 
-mod support;
+use crate::support;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};

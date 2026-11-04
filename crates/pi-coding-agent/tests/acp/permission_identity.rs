@@ -11,9 +11,9 @@ use pi_mcp::create_mcp_tool_name;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use crate::client::Client;
-use crate::mcp_fake::{Fake, FakeOptions};
-use crate::{Setup, setup, start};
+use crate::acp::client::Client;
+use crate::acp::mcp_fake::{Fake, FakeOptions};
+use crate::acp::{Setup, setup, start};
 
 fn command() -> String {
     std::env::temp_dir().join("acp-identity-server").display().to_string()

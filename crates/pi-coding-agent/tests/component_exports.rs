@@ -1,11 +1,7 @@
 //! The standalone interactive components of `@earendil-works/pi-coding-agent` are upstream code:
 //! extensions build, render, resize, and drive them as upstream does under Node.
 
-#[path = "extensions/harness.rs"]
-#[allow(dead_code)]
-mod harness;
-#[path = "offline_guard/mod.rs"]
-mod offline_guard;
+use crate::extensions::harness;
 
 use harness::{Setup, harness};
 use serde_json::Value;

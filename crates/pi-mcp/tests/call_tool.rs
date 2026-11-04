@@ -1,6 +1,6 @@
 //! `McpManager::call_server_tool`: calls a tool of one server by its MCP name, for extensions.
 
-mod common;
+use crate::common;
 
 use std::time::Duration;
 

@@ -1,6 +1,6 @@
 //! Ports of the upstream editor undo tests.
 
-mod editor_common;
+use crate::editor_common;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;

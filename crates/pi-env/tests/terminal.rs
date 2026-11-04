@@ -1,7 +1,7 @@
 //! Upstream `test/terminal.test.ts`: programs in the daemon's pseudo-terminals. Terminals are Unix only.
 #![cfg(unix)]
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

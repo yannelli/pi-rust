@@ -9,7 +9,7 @@ mod calls;
 mod documents;
 #[path = "harness_nested_tools/slots.rs"]
 mod slots;
-mod support;
+use crate::support;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

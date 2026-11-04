@@ -1,6 +1,6 @@
 //! Modes `on` and `only`, the inline budget, and the discovery globals scripts use to find tools.
 
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 
