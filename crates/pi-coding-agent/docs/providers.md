@@ -47,10 +47,10 @@ To turn fast mode on or off:
 
 - In the TUI, type `/fast` to toggle fast mode. Type `/fast on` or `/fast off` to set it. When fast mode is on and the model supports it, the footer shows `⚡ fast` next to the thinking level.
 - To turn on fast mode for one run, start pi with `--fast`. pi does not save this choice.
-- In ACP mode, use the **Speed** option. The editor shows this option only for models that have a fast mode.
-- In RPC mode, send `{"type": "set_fast_mode", "enabled": true}`. `get_state` returns `fastMode` and `fastModeAvailable`.
+- In ACP mode, use the **Fast mode** option or `/fast`. The editor shows the option only for models that have a fast mode.
+- In RPC mode, send `{"type": "set_fast_mode", "enabled": true}`, or a `prompt` with `/fast`. `get_state` returns `fastMode` and `fastModeAvailable`.
 
-`/fast` and the ACP **Speed** option save the choice as `fastMode` in the global `settings.json`. New sessions read this setting. RPC `set_fast_mode` does not save it.
+`/fast` in each mode and the ACP **Fast mode** option save the choice as `fastMode` in the global `settings.json`. New sessions read this setting. RPC `set_fast_mode` does not save it.
 
 Fast mode stays on when you select a model that has no fast mode. pi sends standard requests for that model.
 

@@ -229,9 +229,12 @@ async fn host_commands_bash_and_rebinding() {
     let commands = rpc.data(json!({"id": "c", "type": "get_commands"})).await["commands"].clone();
     let names: Vec<&str> =
         commands.as_array().unwrap().iter().map(|command| command["name"].as_str().unwrap()).collect();
-    assert_eq!(names[..2], ["mcp", "deploy"], "built-in commands, then the host's");
+    let builtins =
+        ["mcp", "usage", "context", "extensions", "fast", "reload", "session", "changelog", "export", "name"];
+    assert_eq!(names[..builtins.len()], builtins);
+    assert_eq!(names[builtins.len()], "deploy", "built-in commands, then the host's");
     assert_eq!(
-        commands[1],
+        commands[builtins.len()],
         json!({"name": "deploy", "source": "extension", "sourceInfo": {"path": "/ext/deploy.ts", "source": "local", "scope": "user", "origin": "top-level"}})
     );
 

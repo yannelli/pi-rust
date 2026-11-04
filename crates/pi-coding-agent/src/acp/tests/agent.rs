@@ -230,6 +230,25 @@ async fn name_compact_session_and_autocompact_commands() {
 }
 
 #[tokio::test]
+async fn headless_commands_run_in_pi_and_a_reload_advertises_commands_again() {
+    let env = Env::new();
+    let (client, backend, agent) = live(&env, FakeConfig::default());
+    let run = |text: &'static str| {
+        let agent = agent.clone();
+        async move { agent.prompt(prompt_request("s1", text)).await.unwrap().stop_reason }
+    };
+    assert_eq!(run("/context").await, StopReason::EndTurn);
+    assert_eq!(last_text(&client), "ran /context");
+    run("/fast  on").await;
+    assert_eq!(last_text(&client), "ran /fast on");
+    assert!(client.of_kind("available_commands_update").is_empty());
+    run("/reload").await;
+    assert_eq!(client.kinds().last().unwrap(), "available_commands_update");
+    assert_eq!(backend.calls(), ["headless:context:", "headless:fast:on", "headless:reload:"]);
+    assert!(backend.prompt_texts().is_empty());
+}
+
+#[tokio::test]
 async fn export_links_the_written_html_file() {
     let env = Env::new();
     let file = env.path().join("s.jsonl");

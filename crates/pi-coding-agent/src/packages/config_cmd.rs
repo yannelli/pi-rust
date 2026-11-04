@@ -14,6 +14,9 @@ use super::{PackageManager, PackageManagerOptions};
 use crate::resources::brand::{APP_NAME, CONFIG_DIR_NAME};
 use crate::settings::{SettingsManager, SettingsOptions};
 
+/// Ends the message of `pi extensions enable|disable`.
+pub(crate) const APPLY_HINT: &str = " Restart Pi or run /reload to apply.";
+
 /// What the `pi config` selector edits; `project_mode_available` enables Tab switching.
 pub struct ConfigSelectorRequest {
     pub editor: ConfigEditor,
@@ -236,10 +239,7 @@ async fn run(rest: &[String], options: &PackageCommandOptions, selector: Option<
             }
             return 1;
         }
-        io.line(&format!(
-            "{} {reference}. Restart Pi or run /reload to apply.",
-            if enabled { "Enabled" } else { "Disabled" }
-        ));
+        io.line(&format!("{} {reference}.{APPLY_HINT}", if enabled { "Enabled" } else { "Disabled" }));
         return 0;
     }
     if extensions_only {

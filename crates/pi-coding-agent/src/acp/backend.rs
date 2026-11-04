@@ -10,6 +10,7 @@ use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::mcp_servers::ClientMcpServers;
+use crate::headless_commands::HeadlessOutput;
 
 /// One pi session. Data methods return the `data` of the matching RPC command.
 #[async_trait]
@@ -39,6 +40,8 @@ pub trait PiBackend: Send + Sync {
     async fn export_html(&self, output_path: &Path) -> anyhow::Result<PathBuf>;
     async fn get_messages(&self) -> anyhow::Result<Value>;
     async fn get_commands(&self) -> anyhow::Result<Value>;
+    /// Run a command of [`crate::headless_commands::HEADLESS_COMMANDS`]; `None` for another name.
+    async fn run_headless_command(&self, name: &str, args: &str) -> Option<HeadlessOutput>;
     /// Answer an `extension_ui_request` (`{id, value | confirmed | cancelled}`).
     async fn send_extension_ui_response(&self, response: Value) -> anyhow::Result<()>;
     /// Stop the session and release its resources.

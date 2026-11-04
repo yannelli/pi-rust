@@ -297,6 +297,29 @@ async fn new_session_publishes_usage_and_commands_after_the_response() {
 }
 
 #[tokio::test]
+async fn advertises_the_headless_commands_with_hints_and_mcp_while_it_runs() {
+    let mut config = FakeConfig::default();
+    config.commands =
+        Ok(json!({"commands": [{"name": "mcp", "description": "Manage MCP servers", "source": "extension",
+        "sourceInfo": {"path": "builtin:mcp", "source": "builtin", "scope": "temporary", "origin": "top-level"}}]}));
+    let (env, client, backend) = (Env::new(), FakeClient::new(), FakeBackend::with(config));
+    let agent = env.agent(client.clone(), FakeFactory::returning(backend));
+    let request: NewSessionRequest = serde_json::from_value(json!({"cwd": env.work(), "mcpServers": []})).unwrap();
+    run_after(agent.new_session(request).await.unwrap()).await;
+    let update = client.of_kind("available_commands_update").pop().unwrap();
+    let commands = update["availableCommands"].as_array().unwrap();
+    let hint = |name: &str| {
+        let command = commands.iter().find(|command| command["name"] == name).unwrap_or_else(|| panic!("/{name}"));
+        command["input"]["hint"].clone()
+    };
+    assert_eq!(hint("usage"), "[provider]");
+    assert_eq!(hint("fast"), "[on|off]");
+    assert_eq!(hint("extensions"), "list | status | enable <name-or-path> | disable <name-or-path>");
+    assert_eq!((hint("context"), hint("reload")), (Value::Null, Value::Null));
+    assert_eq!(hint("mcp"), "[login|logout|reconnect] [server]");
+}
+
+#[tokio::test]
 async fn load_advertises_the_exact_levels_too() {
     for levels in [vec!["off"], vec!["low", "high", "max"], vec!["ordinary", "mean"]] {
         let f = fixture();

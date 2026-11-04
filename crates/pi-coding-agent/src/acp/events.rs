@@ -118,6 +118,8 @@ impl AcpSession {
             "tool_execution_start" => self.on_tool_start(&event),
             "tool_execution_update" => self.on_tool_update(&event),
             "tool_execution_end" => self.on_tool_end(&event),
+            // A notice keeps its place before the `agent_settled` that ends a command's turn.
+            "extension_ui_request" if event["method"] == "notify" => self.handle_extension_ui_request(event).await,
             "extension_ui_request" => {
                 let session = self.this();
                 tokio::spawn(async move { session.handle_extension_ui_request(event).await });
@@ -131,6 +133,13 @@ impl AcpSession {
                 if event["reason"] != "manual" && event["aborted"] != true && event.get("errorMessage").is_none() =>
             {
                 self.emit(text_chunk(COMPACTION_END))
+            }
+            "fast_mode_changed" | "thinking_level_changed" => {
+                let _ = self.publish_config_options(false).await;
+            }
+            "model_changed" => {
+                let _ = self.publish_config_options(false).await;
+                self.publish_context_usage().await;
             }
             "agent_start" => lock(&self.inner).in_agent_loop = true,
             "agent_end" => lock(&self.inner).in_agent_loop = false,

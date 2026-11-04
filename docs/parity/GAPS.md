@@ -124,6 +124,7 @@ pi-rust adds this behavior on purpose. Do not report these items as gaps in the 
   - `google-antigravity` from the `model` and `thought_level` selectors of the Antigravity ACP server
 - Subscription providers `cursor` and `google-antigravity` with their logins and the APIs `cursor-agent` and `antigravity-acp` ([Subscription providers](../providers/subscription-providers.md)).
 - Fast mode: `/fast`, `--fast`, the `fastMode` setting, `compat.fastMode`, the ACP `fast_mode` option, RPC `set_fast_mode`, and the `fastMode` and `fastModeAvailable` fields of `get_state` ([Fast mode](../../crates/pi-coding-agent/docs/providers.md#fast-mode-pi-rust-extension)).
+- Built-in commands in RPC and ACP modes: RPC `prompt` runs `/usage`, `/context`, `/extensions`, `/fast`, `/reload`, `/session`, `/changelog`, `/export`, and `/name` without a model call, lists them in `get_commands`, sends a `command_output` record, and sets `agentInvoked` in the response. ACP mode runs the first five too and sends `config_option_update` on in-session model, thinking, and fast mode changes ([RPC mode](../../crates/pi-coding-agent/docs/rpc.md)).
 - MCP server `lifecycle` (`eager` or `lazy`) in `mcp.json` and the tool cache in `mcp-cache/` ([MCP server lifecycle](../../crates/pi-coding-agent/docs/mcp.md)).
 - Markdown export: if the output path ends in `.md`, `/export` and `pi --export` write Markdown ([Export](../../crates/pi-coding-agent/docs/commands.md#export)).
 - The README section "Differences from upstream pi" lists the other additions: slash commands, CLI commands and flags, and settings. It also lists the bugs that pi-rust fixes and that are still open upstream. `allowlist.json` holds the matching parity report entries.
@@ -136,7 +137,7 @@ The `Claude Sonnet 4.5 (latest)` name for `anthropic/claude-sonnet-4-5` comes fr
 
 - Paseo rejects exact MCP tool preapproval for generic ACP providers before it starts Pi. Its provider contract and ACP permission handler must match tools exactly. Pi's permission modes alone cannot resolve that host-side error. Pi sends the exact MCP server and tool names in `_meta.piAcp.mcp` of each permission request and accepts `_meta.piAcp.clientMcpExposure: "direct"`; a host adapter that matches grants is still missing ([ACP mode](../../crates/pi-coding-agent/docs/acp.md#tool-approval)).
 - ACP `session/new` and `session/load` connect client-supplied stdio `mcpServers` for the session, with literal values that pi does not save. `http` and `sse` servers are rejected (`mcpCapabilities` is false), and a session reopened without `session/load` has no client servers ([ACP mode](../../crates/pi-coding-agent/docs/acp.md#mcp-servers-from-the-client)).
-- ACP has no standard model icon field. Fast catalog variants get a lightning-bolt label. Models with a fast mode get the **Speed** option ([Fast mode](../../crates/pi-coding-agent/docs/providers.md#fast-mode-pi-rust-extension)).
+- ACP has no standard model icon field. Fast catalog variants get a lightning-bolt label. Models with a fast mode get the **Fast mode** option ([Fast mode](../../crates/pi-coding-agent/docs/providers.md#fast-mode-pi-rust-extension)).
 
 ## Platform
 

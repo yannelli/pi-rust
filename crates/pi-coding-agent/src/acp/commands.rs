@@ -6,7 +6,9 @@ use std::path::Path;
 use agent_client_protocol_schema::{AvailableCommand, AvailableCommandInput, UnstructuredCommandInput};
 use serde_json::Value;
 
+use crate::headless_commands::HEADLESS_COMMANDS;
 use crate::resources::brand::project_config_dir;
+use crate::resources::source_info::BUILTIN_PATH_PREFIX;
 
 /// A prompt file under `prompts/` (upstream `FileSlashCommand`).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -182,26 +184,42 @@ fn with_hint(name: &str, description: &str, hint: Option<&str>) -> AvailableComm
     }
 }
 
+/// `/mcp` when pi's `get_commands` data lists the built-in MCP extension's command, which
+/// `commands_from_pi` leaves out with the other extension commands.
+pub fn mcp_command(data: &Value) -> Option<AvailableCommand> {
+    let list = data.get("commands").or_else(|| data.get("data").and_then(|data| data.get("commands")));
+    let path = format!("{BUILTIN_PATH_PREFIX}mcp");
+    let mcp = list.and_then(Value::as_array)?.iter().find(|command| {
+        command["name"] == "mcp" && command["source"] == "extension" && command["sourceInfo"]["path"] == path.as_str()
+    })?;
+    let description = mcp["description"].as_str().unwrap_or("Manage MCP servers");
+    Some(with_hint("mcp", description, Some("[login|logout|reconnect] [server]")))
+}
+
 /// The commands ACP mode answers without a model call.
 pub fn builtin_available_commands() -> Vec<AvailableCommand> {
-    vec![
-        with_hint("compact", "Manually compact the session context", Some("optional custom instructions")),
-        with_hint("autocompact", "Toggle automatic context compaction", Some("on|off|toggle")),
-        with_hint("export", "Export session to an HTML file in the session cwd", None),
-        with_hint("session", "Show session stats (messages, tokens, cost, session file)", None),
-        with_hint("name", "Set session display name", Some("<name>")),
-        with_hint(
-            "steering",
-            "Get/set pi steering message delivery mode (how queued steering messages are delivered)",
-            Some("(no args to show) all | one-at-a-time"),
-        ),
-        with_hint(
-            "follow-up",
-            "Get/set pi follow-up message delivery mode (how queued follow-up messages are delivered)",
-            Some("(no args to show) all | one-at-a-time"),
-        ),
-        with_hint("changelog", "Show pi changelog", None),
-    ]
+    let headless =
+        HEADLESS_COMMANDS.iter().map(|command| with_hint(command.name, command.description, command.input_hint));
+    headless
+        .chain([
+            with_hint("compact", "Manually compact the session context", Some("optional custom instructions")),
+            with_hint("autocompact", "Toggle automatic context compaction", Some("on|off|toggle")),
+            with_hint("export", "Export session to an HTML file in the session cwd", None),
+            with_hint("session", "Show session stats (messages, tokens, cost, session file)", None),
+            with_hint("name", "Set session display name", Some("<name>")),
+            with_hint(
+                "steering",
+                "Get/set pi steering message delivery mode (how queued steering messages are delivered)",
+                Some("(no args to show) all | one-at-a-time"),
+            ),
+            with_hint(
+                "follow-up",
+                "Get/set pi follow-up message delivery mode (how queued follow-up messages are delivered)",
+                Some("(no args to show) all | one-at-a-time"),
+            ),
+            with_hint("changelog", "Show pi changelog", None),
+        ])
+        .collect()
 }
 
 /// Concatenate, keeping the first command of each name.

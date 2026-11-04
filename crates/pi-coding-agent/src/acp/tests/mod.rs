@@ -317,6 +317,12 @@ impl PiBackend for FakeBackend {
         self.config().commands.clone().map_err(|message| anyhow::anyhow!(message))
     }
 
+    async fn run_headless_command(&self, name: &str, args: &str) -> Option<crate::headless_commands::HeadlessOutput> {
+        self.call(format!("headless:{name}:{args}"));
+        let text = format!("ran /{name} {args}").trim_end().to_string();
+        Some(crate::headless_commands::HeadlessOutput { text, reloaded: name == "reload" })
+    }
+
     async fn send_extension_ui_response(&self, response: Value) -> anyhow::Result<()> {
         self.ui_responses.lock().unwrap().push(response);
         Ok(())
