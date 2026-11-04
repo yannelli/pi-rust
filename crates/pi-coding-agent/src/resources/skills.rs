@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::brand::CONFIG_DIR_NAME;
+use super::context_entries::ContextExposure;
 use super::frontmatter::parse_frontmatter;
 use super::paths::{IgnoreRules, absolute, canonicalize, file_kind, is_under_path, relative_posix, resolve_path};
 use super::source_info::{SourceInfo, SourceScope, create_synthetic_source_info};
@@ -36,6 +37,9 @@ pub struct Skill {
     /// The experimental `allowed-tools` list, split on whitespace when given as a string.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_tools: Vec<String>,
+    /// pi-rust `exposure` frontmatter: overrides the `contextExposure.skill` setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exposure: Option<ContextExposure>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -131,6 +135,14 @@ pub fn load_skill_from_file(file_path: &Path, source: &str) -> (Option<Skill>, V
         diagnostics.push(ResourceDiagnostic::warning(error, file_path));
     }
     let Some(description) = description else { return (None, diagnostics) };
+    let exposure = frontmatter.get("exposure").and_then(|value| {
+        let parsed = value.as_str().and_then(ContextExposure::parse);
+        if parsed.is_none() {
+            let message = format!("exposure must be \"direct\" or \"deferred\", got {value}");
+            diagnostics.push(ResourceDiagnostic::warning(message, file_path));
+        }
+        parsed
+    });
     let skill = Skill {
         name,
         description: description.to_string(),
@@ -142,6 +154,7 @@ pub fn load_skill_from_file(file_path: &Path, source: &str) -> (Option<Skill>, V
         compatibility: string_field(&frontmatter, "compatibility"),
         metadata: frontmatter.get("metadata").and_then(Value::as_object).cloned().unwrap_or_default(),
         allowed_tools: allowed_tools(frontmatter.get("allowed-tools")),
+        exposure,
     };
     (Some(skill), diagnostics)
 }
@@ -204,7 +217,7 @@ pub enum SkillFileReader {
     Indirect,
 }
 
-fn escape_xml(text: &str) -> String {
+pub(crate) fn escape_xml(text: &str) -> String {
     text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
 }
 

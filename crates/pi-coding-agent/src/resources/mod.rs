@@ -4,6 +4,7 @@
 
 pub mod brand;
 pub mod context;
+pub mod context_entries;
 pub mod discovery;
 pub mod filters;
 pub mod frontmatter;
@@ -21,6 +22,7 @@ mod tests;
 use serde::{Deserialize, Serialize};
 
 pub use context::{ContextFile, load_project_context_files};
+pub use context_entries::{ContextEntry, ContextExposure};
 pub use discovery::{ResourceSettings, ResourceType};
 pub use loader::{
     ExtensionEntry, ExtensionResourcePaths, LoadedResources, ResourceLoader, ResourceLoaderOptions, ThemeFile,

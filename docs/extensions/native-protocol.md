@@ -41,7 +41,7 @@ When the child exits early, pi shows one error notification, fails the pending r
 
 Params: `protocolVersion` (integer), `piVersion`, `cwd`, `agentDir`, `extensionPath`, `platform` (`process.platform`), `mode` (`tui`, `rpc`, `json`, `print`), `hasUI`, `flags`, `features`.
 
-`features` lists the optional parts of this document that the host speaks: `toolRenderers`, `render.spinner`, `render.refresh`, `ui.getTheme`, `theme_changed`, `ui.working`, and `ui.chatStyle`. Older hosts send no `features`; treat a missing list as empty.
+`features` lists the optional parts of this document that the host speaks: `toolRenderers`, `render.spinner`, `render.refresh`, `ui.getTheme`, `theme_changed`, `ui.working`, `ui.chatStyle`, and `contextEntries` (a `resources_discover` result can have `contextEntries`, see [Deferred context](../../crates/pi-coding-agent/docs/deferred-context.md#extension-api-context-entries)). Older hosts send no `features`; treat a missing list as empty.
 
 pi loads extensions before it binds the session. `mode` and `hasUI` are the mode the session binds the extensions in (`tui` in interactive mode, and `rpc`, `json`, or `print` for the CLI modes). Hosts that do not know the mode at load time, for example SDK sessions, send `print` and `false`. The ctx snapshot of each event has the current values. `flags` holds the values pi has at load time and is empty for flags this extension declares in its answer. Read flag values from `ctx.flags` or with `flags.get`.
 
@@ -111,6 +111,8 @@ How each event uses a patch:
 | All other events, including `message_display`, `input`, `turn_end`, `agent_before_settle`, `cache_warming_decision`, `resources_discover`, `user_bash`, `project_trust`, `mcp_elicitation`, `mcp_elicitation_result`, and `session_before_*` | pi reads only `result`; a patch has no effect. |
 
 pi builds no result for `before_agent_start`: a built `systemPrompt` would replace the whole system prompt.
+
+A `resources_discover` result can also have `contextEntries` (pi-rust only): entries such as agent configs that pi lists in the system prompt or defers to `tool_search`. See [Deferred context](../../crates/pi-coding-agent/docs/deferred-context.md#extension-api-context-entries).
 
 `message_display` (pi-rust only) changes how the text of an assistant message shows in `tui` mode. pi sends it once for each complete assistant message that has text, and once for each such message when pi draws a saved session. The event is `{ type, messageId, index, final, delta, text }`. `messageId` is the session entry id of the message, or `null` when pi has not saved it yet. pi sends the full text in one batch, so `index` is `0`, `final` is `true`, and `delta` and `text` are the same. `text` joins the text blocks of the message with a blank line.
 

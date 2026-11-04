@@ -17,6 +17,7 @@ use super::{AgentSession, BashResult, PromptOptions, StreamingBehavior, lock};
 use crate::extensions::convert::{prompt_options_from_json, prompt_options_to_json, user_content};
 use crate::extensions::{ExtensionBindings, ExtensionRunner};
 use crate::messages::{CustomMessage, CustomRole};
+use crate::resources::context_entries::context_entries_from_json;
 use crate::resources::{ExtensionResourcePaths, PathMetadata, SourceOrigin, SourceScope};
 use crate::system_prompt::BuildSystemPromptOptions;
 
@@ -244,21 +245,36 @@ impl AgentSession {
     }
 
     async fn discover_extension_resources(&self, runner: &ExtensionRunner, reason: &str) {
-        if !runner.has_handlers("resources_discover") {
-            return;
-        }
-        let cwd = json!(self.cwd().display().to_string());
-        let Ok(found) = runner.call_json("emitResourcesDiscover", vec![cwd, json!(reason)]).await else { return };
+        let found = if runner.has_handlers("resources_discover") {
+            let cwd = json!(self.cwd().display().to_string());
+            let Ok(found) = runner.call_json("emitResourcesDiscover", vec![cwd, json!(reason)]).await else { return };
+            found
+        } else {
+            Value::Null
+        };
         let paths = ExtensionResourcePaths {
             skill_paths: resource_paths(&found, "skillPaths"),
             prompt_paths: resource_paths(&found, "promptPaths"),
             theme_paths: resource_paths(&found, "themePaths"),
         };
-        if paths.skill_paths.is_empty() && paths.prompt_paths.is_empty() && paths.theme_paths.is_empty() {
-            return;
+        let entries = context_entries_from_json(&found["contextEntries"]);
+        let has_paths =
+            !(paths.skill_paths.is_empty() && paths.prompt_paths.is_empty() && paths.theme_paths.is_empty());
+        let entries_changed = {
+            let services = self.services();
+            let mut loader = services.resources();
+            let changed = loader.resources().context_entries != entries;
+            if changed {
+                loader.set_context_entries(entries);
+            }
+            if has_paths {
+                loader.extend_resources(paths);
+            }
+            changed
+        };
+        if has_paths || entries_changed {
+            self.rebuild_system_prompt();
         }
-        self.services().resources().extend_resources(paths);
-        self.rebuild_system_prompt();
     }
 
     /// Use the catalog entry of the current model after providers changed.
@@ -448,6 +464,8 @@ impl AgentSession {
         let args = vec![trigger.event_fields(), prompt_options_to_json(&options)];
         let Ok(result) = runner.call_json("emitBeforeAgentStart", args).await else { return (options, Vec::new()) };
         let mut edited = prompt_options_from_json(&result["systemPromptOptions"], self.cwd());
+        edited.context_entries = options.context_entries.clone();
+        edited.context_exposure = options.context_exposure.clone();
         // An explicit edit of `selectedTools` wins; otherwise the live loadout stays.
         if edited.selected_tools == options.selected_tools {
             edited.selected_tools = self.active_tool_names();

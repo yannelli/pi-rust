@@ -1,7 +1,7 @@
 //! System prompt sections, ported from upstream `core/system-prompt.ts`. The prompt is a
 //! leading [`SystemMessage`] whose named `sections` later system messages can patch.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use anyhow::bail;
@@ -11,9 +11,11 @@ use serde_json::Value;
 
 use crate::config::ContextFile;
 use crate::resources::Skill;
+use crate::resources::context_entries::{ContextEntry, ContextExposure, SKILL_KIND, entry_exposure, skill_exposure};
 use crate::resources::loader::LoadedResources;
-use crate::resources::skills::{SkillFileReader, format_skills_for_prompt};
+use crate::resources::skills::{SkillFileReader, escape_xml, format_skills_for_prompt};
 use crate::tools::{DEFAULT_TOOLS, tool_info};
+use pi_codemode::TOOL_SEARCH_TOOL_NAME;
 
 const PREAMBLE: &str = "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.";
 const DOCS: &str = "Pi documentation (read only when the user asks about pi itself): this is pi-rust, a Rust port of the pi coding agent. See https://github.com/yannelli/pi-rust for usage, configuration, skills, prompt templates, and supported providers.";
@@ -41,6 +43,10 @@ pub struct BuildSystemPromptOptions {
     pub cwd: PathBuf,
     pub context_files: Vec<ContextFile>,
     pub skills: Vec<Skill>,
+    /// Context entries extensions contribute, such as agent configs.
+    pub context_entries: Vec<ContextEntry>,
+    /// The `contextExposure` setting. Deferred items stay out while `tool_search` is declared.
+    pub context_exposure: BTreeMap<String, ContextExposure>,
 }
 
 impl BuildSystemPromptOptions {
@@ -59,6 +65,8 @@ impl BuildSystemPromptOptions {
             cwd: cwd.to_path_buf(),
             context_files: Vec::new(),
             skills: Vec::new(),
+            context_entries: Vec::new(),
+            context_exposure: BTreeMap::new(),
         }
     }
 
@@ -68,6 +76,7 @@ impl BuildSystemPromptOptions {
         self.append_system_prompt = resources.append_system_prompt_text();
         self.context_files = resources.context_files.clone();
         self.skills = resources.skills.clone();
+        self.context_entries = resources.context_entries.clone();
         self
     }
 
@@ -126,6 +135,39 @@ fn render_project_context(files: &[ContextFile]) -> String {
     parts.join("\n\n")
 }
 
+fn render_context_entries(entries: &[&ContextEntry]) -> String {
+    let mut lines = vec![
+        "Extensions provide these entries. Use one when the task matches its description.".to_string(),
+        String::new(),
+        "<available_context>".to_string(),
+    ];
+    for entry in entries {
+        lines.push("  <entry>".into());
+        lines.push(format!("    <kind>{}</kind>", escape_xml(&entry.kind)));
+        lines.push(format!("    <name>{}</name>", escape_xml(&entry.name)));
+        lines.push(format!("    <description>{}</description>", escape_xml(&entry.description)));
+        if let Some(usage) = entry.usage.as_deref().map(str::trim).filter(|usage| !usage.is_empty()) {
+            lines.push(format!("    <usage>{}</usage>", escape_xml(usage)));
+        }
+        if let Some(path) = &entry.path {
+            lines.push(format!("    <location>{}</location>", escape_xml(&path.display().to_string())));
+        }
+        lines.push("  </entry>".into());
+    }
+    lines.push("</available_context>".into());
+    lines.join("\n")
+}
+
+/// The hint that replaces deferred items: how many of each kind `tool_search` can find.
+fn render_deferred_context(counts: &BTreeMap<&str, usize>) -> String {
+    let counts: Vec<String> =
+        counts.iter().map(|(kind, count)| format!("{count} {kind}{}", if *count == 1 { "" } else { "s" })).collect();
+    format!(
+        "More context is available but not listed here: {}. Find it with `tool_search` using words from the task. A match returns its description and how to load or use it.",
+        counts.join(", ")
+    )
+}
+
 fn set_section(sections: &mut SystemPromptSections, name: &str, text: String) {
     match sections.iter_mut().find(|(existing, _)| existing == name) {
         Some(section) => section.1 = text,
@@ -175,11 +217,36 @@ pub fn build_system_prompt_sections(options: &BuildSystemPromptOptions) -> anyho
         let reachable = readers.iter().any(|(name, _)| options.selected_tools.iter().any(|tool| tool == name));
         reachable.then_some(SkillFileReader::Indirect)
     });
-    if let Some(reader) = reader.filter(|_| !options.skills.is_empty()) {
-        let skills = format_skills_for_prompt(&options.skills, reader).trim().to_string();
+    let deferring = declared.iter().any(|tool| *tool == TOOL_SEARCH_TOOL_NAME);
+    let is_deferred = |exposure: ContextExposure| deferring && exposure == ContextExposure::Deferred;
+    let mut deferred: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut listed_skills = Vec::new();
+    for skill in &options.skills {
+        if !is_deferred(skill_exposure(skill, &options.context_exposure)) {
+            listed_skills.push(skill.clone());
+        } else if !skill.disable_model_invocation && reader.is_some() {
+            *deferred.entry(SKILL_KIND).or_default() += 1;
+        }
+    }
+    if let Some(reader) = reader.filter(|_| !listed_skills.is_empty()) {
+        let skills = format_skills_for_prompt(&listed_skills, reader).trim().to_string();
         if !skills.is_empty() {
             sections.push(("skills".into(), skills));
         }
+    }
+    let mut listed_entries = Vec::new();
+    for entry in &options.context_entries {
+        if is_deferred(entry_exposure(entry, &options.context_exposure)) {
+            *deferred.entry(entry.kind.as_str()).or_default() += 1;
+        } else {
+            listed_entries.push(entry);
+        }
+    }
+    if !listed_entries.is_empty() {
+        sections.push(("context_entries".into(), render_context_entries(&listed_entries)));
+    }
+    if !deferred.is_empty() {
+        sections.push(("deferred_context".into(), render_deferred_context(&deferred)));
     }
     sections.push(("cwd".into(), options.cwd.display().to_string().replace('\\', "/")));
     for (name, text) in &options.sections {

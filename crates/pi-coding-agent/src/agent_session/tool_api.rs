@@ -186,6 +186,8 @@ impl AgentSession {
         let tools = lock(&self.tools);
         let mut options = run.unwrap_or_else(|| tools.base_prompt.clone());
         tools.apply_to_prompt(&mut options);
+        drop(tools);
+        options.context_exposure = self.settings().context_exposure();
         options
     }
 

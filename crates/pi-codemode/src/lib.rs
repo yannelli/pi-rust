@@ -61,8 +61,9 @@ pub use tool::{
     CODEMODE_TOOL_EXPOSURE, CodemodeTool, codemode_constrained_sampling, codemode_schema, codemode_script_reach,
 };
 pub use tool_search::{
-    Bm25Ranker, DEFAULT_TOOL_SEARCH_LIMIT, TOOL_SEARCH_DESCRIPTION, TOOL_SEARCH_PROMPT_SNIPPET, TOOL_SEARCH_TOOL_NAME,
-    ToolRanker, ToolSearchDocument, ToolSearchMatch, ToolSearchResultTool, create_tool_search_document,
-    format_tool_search_result, is_searchable, search_deferred_tools, search_tools, tokenize, tool_search_document,
-    tool_search_limit, tool_search_schema,
+    Bm25Ranker, ContextSearchEntry, DEFAULT_TOOL_SEARCH_LIMIT, DeferredSearchResult, TOOL_SEARCH_DESCRIPTION,
+    TOOL_SEARCH_PROMPT_SNIPPET, TOOL_SEARCH_TOOL_NAME, ToolRanker, ToolSearchDocument, ToolSearchMatch,
+    ToolSearchResultTool, context_search_document, create_tool_search_document, format_deferred_search_result,
+    format_tool_search_result, is_searchable, search_deferred, search_deferred_tools, search_tools, tokenize,
+    tool_search_document, tool_search_limit, tool_search_schema,
 };

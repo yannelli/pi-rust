@@ -4,9 +4,10 @@
 use std::collections::HashSet;
 
 use pi_codemode::{
-    Bm25Ranker, CodemodeDescriptionOptions, CodemodeToolInfo, ToolExposure, ToolNamespace, ToolRanker,
-    create_codemode_description, create_tool_search_document, format_tool_search_result, search_deferred_tools,
-    tokenize, tool_search_document, tool_search_limit,
+    Bm25Ranker, CodemodeDescriptionOptions, CodemodeToolInfo, ContextSearchEntry, DeferredSearchResult, ToolExposure,
+    ToolNamespace, ToolRanker, create_codemode_description, create_tool_search_document, format_deferred_search_result,
+    format_tool_search_result, search_deferred, search_deferred_tools, tokenize, tool_search_document,
+    tool_search_limit,
 };
 use serde_json::{Value, json};
 
@@ -113,6 +114,76 @@ fn searches_deferred_tools_that_are_not_active() {
     assert_eq!(tool_search_limit("x", None), Ok(8));
     assert_eq!(tool_search_limit(" ", None), Err("query must not be empty".into()));
     assert_eq!(tool_search_limit("x", Some(1.5)), Err("limit must be a positive integer".into()));
+}
+
+fn entry(kind: &str, name: &str, description: &str, usage: Option<&str>) -> ContextSearchEntry {
+    ContextSearchEntry {
+        kind: kind.into(),
+        name: name.into(),
+        description: description.into(),
+        usage: usage.map(Into::into),
+    }
+}
+
+fn context() -> Vec<ContextSearchEntry> {
+    vec![
+        entry("skill", "pdf-tools", "Extract text and tables from PDF files.", Some("Read /skills/pdf/SKILL.md.")),
+        entry("agent", "reviewer", "Reviews a diff and lists bugs.\nMore.", Some("Call the subagent tool.")),
+        entry("agent", "explore", "Read-only search of the code base.", None),
+    ]
+}
+
+#[test]
+fn ranks_deferred_context_with_tools() {
+    let tools = vec![
+        (tool("mcp__github__list_issues", "List issues in a repository.", json!({})), ToolExposure::Deferred),
+        (tool("mcp__github__review_pr", "Review a pull request diff.", json!({})), ToolExposure::Deferred),
+    ];
+    let found = search_deferred(&tools, &[], &context(), "pdf tables", 8);
+    assert!(found.tools.is_empty());
+    assert_eq!(found.context, vec![context()[0].clone()]);
+    let found = search_deferred(&tools, &[], &context(), "review diff", 8);
+    assert_eq!(found.tools.iter().map(|tool| tool.name.as_str()).collect::<Vec<_>>(), ["mcp__github__review_pr"]);
+    assert_eq!(found.context.iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>(), ["reviewer"]);
+    // One limit covers tools and entries.
+    let found = search_deferred(&tools, &[], &context(), "review diff", 1);
+    assert_eq!(found.tools.len() + found.context.len(), 1);
+    // The kind is searchable, and a query that names an entry ranks it first.
+    assert_eq!(search_deferred(&[], &[], &context(), "agent", 8).context.len(), 2);
+    assert_eq!(search_deferred(&[], &[], &context(), "explore", 1).context[0].name, "explore");
+    assert_eq!(search_deferred(&[], &[], &context(), "pdf-tools", 1).context[0].name, "pdf-tools");
+}
+
+#[test]
+fn deferred_search_without_context_matches_tool_search() {
+    let tools = vec![
+        (tool("mcp__github__list_issues", "List issues in a repository.", json!({})), ToolExposure::Deferred),
+        (tool("mcp__linear__search_issues", "Search Linear issues.", json!({})), ToolExposure::Codemode),
+    ];
+    for query in ["issues", "linear", "nothing"] {
+        let found = search_deferred(&tools, &[], &[], query, 8);
+        assert_eq!(found.tools, search_deferred_tools(&tools, &[], query, 8));
+        assert_eq!(format_deferred_search_result(&found), format_tool_search_result(&found.tools));
+    }
+}
+
+#[test]
+fn formats_context_matches_after_tools() {
+    let tool_match = pi_codemode::ToolSearchResultTool { name: "mcp__x__run".into(), description: "Run it.".into() };
+    let only_context = DeferredSearchResult { tools: Vec::new(), context: context()[..2].to_vec() };
+    assert_eq!(
+        format_deferred_search_result(&only_context),
+        "Found 2 context entries. Nothing was loaded; use them as described:\n\
+         - skill pdf-tools: Extract text and tables from PDF files.\n  Read /skills/pdf/SKILL.md.\n\
+         - agent reviewer: Reviews a diff and lists bugs.\n  Call the subagent tool."
+    );
+    let both = DeferredSearchResult { tools: vec![tool_match], context: context()[2..].to_vec() };
+    assert_eq!(
+        format_deferred_search_result(&both),
+        "Loaded 1 tool. They are available from your next call:\n- mcp__x__run: Run it.\n\n\
+         Found 1 context entry. Nothing was loaded; use them as described:\n\
+         - agent explore: Read-only search of the code base."
+    );
 }
 
 fn catalog() -> Vec<CodemodeToolInfo> {

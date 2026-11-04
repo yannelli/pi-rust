@@ -10,7 +10,7 @@ use pi_coding_agent::agent_session::NavigateTreeOptions;
 use pi_coding_agent::session::SessionManager;
 use serde_json::json;
 
-use crate::agent_session::harness::{open_session_with, wait_until};
+use crate::agent_session::harness::{Options, harness, open_session_with, wait_until};
 use crate::agent_session::mcp_fake::{Fake, FakeOptions};
 use crate::agent_session::tool_support::{SetupOptions, declared_description, result_text, setup, tool_result};
 
@@ -156,4 +156,34 @@ async fn declares_tools_tool_search_loaded_again_after_reload() {
     s.h.session.reload();
     wait_until(|| s.fake.connected.lock().unwrap().len() == 2).await;
     wait_until(|| s.h.session.active_tool_names().contains(&"mcp__docs__search".to_string())).await;
+}
+
+#[tokio::test]
+async fn finds_deferred_skills_and_activates_tool_search_for_them() {
+    let deploy = "---\nname: deploy\ndescription: Deploy the app to production.\n---\nRun the deploy script.";
+    let lint = "---\nname: lint\ndescription: Lint the code.\nexposure: direct\n---\nRun clippy.";
+    let h = harness(Options {
+        settings: json!({ "contextExposure": { "skill": "deferred" } }),
+        responses: vec![
+            FauxResponse::tool_call("t1", "tool_search", json!({ "query": "deploy to production" })),
+            FauxResponse::text("done"),
+        ],
+        files: vec![(".pi/skills/deploy/SKILL.md", deploy), (".pi/skills/lint/SKILL.md", lint)],
+        ..Options::default()
+    })
+    .await;
+    h.session.prompt("ship it", Vec::new()).await.unwrap();
+
+    assert!(h.session.active_tool_names().contains(&"tool_search".to_string()));
+    let system = h.requests()[0].system_prompt.clone().unwrap();
+    assert!(!system.contains("<name>deploy</name>"), "{system}");
+    assert!(system.contains("<name>lint</name>"));
+    assert!(system.contains("not listed here: 1 skill. Find it with `tool_search`"));
+    let search = tool_result(&h.session, "tool_search");
+    let text = result_text(&search);
+    let expected = "Found 1 context entry. Nothing was loaded; use them as described:\n- skill deploy: Deploy the app to production.\n  Read ";
+    assert!(text.starts_with(expected), "{text}");
+    let skill_file = std::path::Path::new("deploy").join("SKILL.md");
+    assert!(text.contains(&format!("{} to load its instructions.", skill_file.display())), "{text}");
+    assert_eq!(search.details, Some(json!({ "loaded": [], "context": [{ "kind": "skill", "name": "deploy" }] })));
 }

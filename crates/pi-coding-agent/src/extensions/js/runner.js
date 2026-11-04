@@ -453,13 +453,18 @@ export class Runner {
 
 	async emitResourcesDiscover(cwd, reason) {
 		const ctx = this.createContext();
-		const found = { skillPaths: [], promptPaths: [], themePaths: [] };
+		const found = { skillPaths: [], promptPaths: [], themePaths: [], contextEntries: [] };
 		for (const { ext, handlers } of snapshot(this.extensions, "resources_discover")) {
 			for (const handler of handlers) {
 				try {
 					const result = await handler({ type: "resources_discover", cwd, reason }, ctx);
 					for (const key of ["skillPaths", "promptPaths", "themePaths"]) {
 						for (const path of result?.[key] ?? []) found[key].push({ path, extensionPath: ext.path });
+					}
+					// pi-rust: deferrable context, such as agent configs.
+					const entries = Array.isArray(result?.contextEntries) ? result.contextEntries : [];
+					for (const entry of entries) {
+						if (entry && typeof entry === "object") found.contextEntries.push({ ...entry, extensionPath: ext.path });
 					}
 				} catch (error) {
 					this.reportFailure(ext, "resources_discover", error);

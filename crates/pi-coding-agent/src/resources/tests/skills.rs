@@ -27,6 +27,7 @@ fn test_skill(name: &str, description: &str, path: &str, hidden: bool) -> Skill 
         compatibility: None,
         metadata: Default::default(),
         allowed_tools: Vec::new(),
+        exposure: None,
     }
 }
 

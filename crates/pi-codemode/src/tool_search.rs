@@ -293,13 +293,101 @@ pub fn format_tool_search_result(tools: &[ToolSearchResultTool]) -> String {
     if tools.is_empty() {
         return "No matching tools found.".into();
     }
-    let lines: Vec<String> = tools
-        .iter()
-        .map(|tool| {
-            let first = js_trim(&tool.description).split('\n').next().unwrap_or("");
-            format!("- {}: {}", tool.name, first.strip_suffix('\r').unwrap_or(first))
-        })
-        .collect();
+    let lines: Vec<String> =
+        tools.iter().map(|tool| format!("- {}: {}", tool.name, first_line(&tool.description))).collect();
     let plural = if tools.len() == 1 { "" } else { "s" };
     format!("Loaded {} tool{plural}. They are available from your next call:\n{}", tools.len(), lines.join("\n"))
+}
+
+fn first_line(text: &str) -> &str {
+    let first = js_trim(text).split('\n').next().unwrap_or("");
+    first.strip_suffix('\r').unwrap_or(first)
+}
+
+/// Deferred context that `tool_search` finds next to tools, such as a skill or an agent config.
+/// A match loads nothing: the result tells the model how to load or use it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextSearchEntry {
+    /// What the entry is, such as `skill` or `agent`.
+    pub kind: String,
+    pub name: String,
+    pub description: String,
+    /// How to load or use the entry, for example the file to read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<String>,
+}
+
+/// The document name of an entry. The `__` separator lets a query that names the entry rank it first.
+fn context_document_name(entry: &ContextSearchEntry) -> String {
+    format!("{}__{}", entry.kind, entry.name)
+}
+
+/// Search text of a context entry: its name, the name with `-` and `_` as spaces, kind, description, and usage.
+pub fn context_search_document(entry: &ContextSearchEntry) -> ToolSearchDocument {
+    let spaced = entry.name.replace(['-', '_'], " ");
+    let usage = entry.usage.as_deref().unwrap_or_default();
+    let parts = [entry.name.as_str(), &spaced, &entry.kind, &entry.description, usage];
+    let text: Vec<&str> = parts.into_iter().filter(|part| !js_trim(part).is_empty()).collect();
+    ToolSearchDocument { name: context_document_name(entry), text: text.join(" ") }
+}
+
+/// Matches of `tool_search`: tools to load and context entries to report.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DeferredSearchResult {
+    pub tools: Vec<ToolSearchResultTool>,
+    pub context: Vec<ContextSearchEntry>,
+}
+
+/// Rank the searchable tools that are not active yet together with deferred context entries, so
+/// one limit and one relevance order cover both. Without entries this is [`search_deferred_tools`].
+pub fn search_deferred(
+    tools: &[(CodemodeToolInfo, ToolExposure)],
+    active: &[String],
+    context: &[ContextSearchEntry],
+    query: &str,
+    limit: usize,
+) -> DeferredSearchResult {
+    let candidates: Vec<&CodemodeToolInfo> = tools
+        .iter()
+        .filter(|(tool, exposure)| is_searchable(*exposure) && !active.contains(&tool.name))
+        .map(|(tool, _)| tool)
+        .collect();
+    let mut documents: Vec<ToolSearchDocument> = candidates.iter().map(|tool| tool_search_document(tool)).collect();
+    let mut entries: HashMap<String, &ContextSearchEntry> = HashMap::new();
+    for entry in context {
+        let document = context_search_document(entry);
+        if documents.iter().any(|known| known.name == document.name) {
+            continue;
+        }
+        entries.insert(document.name.clone(), entry);
+        documents.push(document);
+    }
+    let mut result = DeferredSearchResult::default();
+    for found in search_tools(query, &documents, limit) {
+        if let Some(entry) = entries.get(&found.name) {
+            result.context.push((*entry).clone());
+        } else if let Some(tool) = candidates.iter().find(|tool| tool.name == found.name) {
+            result.tools.push(ToolSearchResultTool { name: found.name, description: tool.description.clone() });
+        }
+    }
+    result
+}
+
+/// The text `tool_search` returns. Without context matches it is [`format_tool_search_result`].
+pub fn format_deferred_search_result(found: &DeferredSearchResult) -> String {
+    if found.context.is_empty() {
+        return format_tool_search_result(&found.tools);
+    }
+    let mut lines = Vec::new();
+    for entry in &found.context {
+        lines.push(format!("- {} {}: {}", entry.kind, entry.name, first_line(&entry.description)));
+        if let Some(usage) = entry.usage.as_deref().map(js_trim).filter(|usage| !usage.is_empty()) {
+            lines.push(format!("  {usage}"));
+        }
+    }
+    let count = found.context.len();
+    let plural = if count == 1 { "y" } else { "ies" };
+    let context =
+        format!("Found {count} context entr{plural}. Nothing was loaded; use them as described:\n{}", lines.join("\n"));
+    if found.tools.is_empty() { context } else { format!("{}\n\n{context}", format_tool_search_result(&found.tools)) }
 }
