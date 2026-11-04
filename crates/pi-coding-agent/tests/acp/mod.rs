@@ -194,9 +194,9 @@ async fn speed_option_follows_the_models_fast_mode() {
     let speed = config_option(&created["result"]["configOptions"], "fast_mode").expect("speed option");
     assert_eq!(
         *speed,
-        json!({"type": "select", "id": "fast_mode", "category": "_speed", "name": "Speed",
+        json!({"type": "select", "id": "fast_mode", "category": "_speed", "name": "Fast mode",
             "description": "Run the model in its fast mode", "currentValue": "standard",
-            "options": [{"value": "standard", "name": "Standard"}, {"value": "fast", "name": "Fast"}]})
+            "options": [{"value": "standard", "name": "Fast off"}, {"value": "fast", "name": "Fast on"}]})
     );
 
     let set = |value: &str| json!({"sessionId": id, "configId": "fast_mode", "value": value});

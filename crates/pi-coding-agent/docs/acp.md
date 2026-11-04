@@ -26,7 +26,7 @@ Each editor session runs a pi session in its project directory. pi saves it in `
 These features of the editor work:
 
 - The model and thinking selectors.
-- The **Speed** selector (pi-rust extension). It shows only for models that have a fast mode. See [Fast mode](providers.md#fast-mode-pi-rust-extension).
+- The **Fast mode** selector (pi-rust extension, choices **Fast off** and **Fast on**). It shows only for models that have a fast mode. See [Fast mode](providers.md#fast-mode-pi-rust-extension).
 - Tool call diffs and terminals.
 - Context usage.
 - Slash commands: prompt templates, `/skill:name`, `/compact`, `/autocompact`, `/export`, `/session`, `/name`, `/steering`, `/follow-up`, and `/changelog`.

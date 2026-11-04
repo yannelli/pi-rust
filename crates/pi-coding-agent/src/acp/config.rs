@@ -13,7 +13,7 @@ use super::errors::invalid_params;
 pub const MODEL_CONFIG_ID: &str = "model";
 pub const MODE_CONFIG_ID: &str = "mode";
 pub const THOUGHT_LEVEL_CONFIG_ID: &str = "thought_level";
-/// pi-rust extension: the "Speed" selector for models with a fast mode.
+/// pi-rust extension: the "Fast mode" selector for models with a fast mode.
 pub const FAST_MODE_CONFIG_ID: &str = "fast_mode";
 pub const FAST_MODE_STANDARD: &str = "standard";
 pub const FAST_MODE_FAST: &str = "fast";
@@ -94,7 +94,7 @@ async fn thinking_option(backend: &dyn PiBackend, state: &Value) -> anyhow::Resu
         .description("Set the reasoning effort for this session"))
 }
 
-/// The "Speed" selector; `None` when the current model has no fast mode.
+/// The "Fast mode" selector; `None` when the current model has no fast mode.
 fn fast_mode_option(state: &Value) -> Option<SessionConfigOption> {
     if state.get("fastModeAvailable").and_then(Value::as_bool) != Some(true) {
         return None;
@@ -102,10 +102,10 @@ fn fast_mode_option(state: &Value) -> Option<SessionConfigOption> {
     let fast = state.get("fastMode").and_then(Value::as_bool).unwrap_or(false);
     let current = if fast { FAST_MODE_FAST } else { FAST_MODE_STANDARD };
     let choices = vec![
-        SessionConfigSelectOption::new(FAST_MODE_STANDARD, "Standard"),
-        SessionConfigSelectOption::new(FAST_MODE_FAST, "Fast"),
+        SessionConfigSelectOption::new(FAST_MODE_STANDARD, "Fast off"),
+        SessionConfigSelectOption::new(FAST_MODE_FAST, "Fast on"),
     ];
-    let option = SessionConfigOption::select(FAST_MODE_CONFIG_ID, "Speed", current, choices)
+    let option = SessionConfigOption::select(FAST_MODE_CONFIG_ID, "Fast mode", current, choices)
         .category(SessionConfigOptionCategory::Other("_speed".into()))
         .description("Run the model in its fast mode");
     Some(option)
