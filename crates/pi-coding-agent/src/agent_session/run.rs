@@ -23,23 +23,61 @@ impl AgentSession {
         lock(&self.state).failed_response = None;
         self.reset_run_turns();
         self.record_selection();
-        let result = self.drive_run(messages).await;
-        if self.abort_requested() {
-            self.finish_cancelled_retry();
+        let mut result = self.drive_run(messages).await;
+        let (aborted, late_messages) = loop {
+            if self.abort_requested() {
+                self.finish_cancelled_retry();
+            }
+            let run_prompt = {
+                let mut state = lock(&self.state);
+                state.failed_response = None;
+                state.run_prompt.take()
+            };
+            self.flush_pending_bash_messages();
+            self.flush_pending_custom_messages();
+            if let Some(settled) = self.settle_run(result.is_ok()) {
+                break settled;
+            }
+            lock(&self.state).run_prompt = run_prompt;
+            result = self.drive_queued().await;
+        };
+        for message in late_messages {
+            self.append_custom_message(message);
         }
-        {
-            let mut state = lock(&self.state);
-            state.run_prompt = None;
-            state.failed_response = None;
-        }
-        self.flush_pending_bash_messages();
-        self.flush_pending_custom_messages();
-        self.emit_agent_settled().await;
+        self.emit_agent_settled(aborted).await;
         result
+    }
+
+    /// Mark the run inactive, or `None` when messages were queued after its last check and it
+    /// can go on: they continue the run. Senders queue under the same lock
+    /// ([`Self::queue_if_running`]), so nothing waits in a queue no run reads. Returns whether the
+    /// run was aborted and the custom messages to add to the conversation now: those held for the
+    /// end of a turn, and after an abort the queued extension messages, so the agent sees them
+    /// with the next prompt.
+    fn settle_run(&self, can_continue: bool) -> Option<(bool, Vec<Message>)> {
+        let mut state = lock(&self.state);
+        if can_continue && !state.abort_requested && self.agent.has_queued_messages() {
+            return None;
+        }
+        state.run_active = false;
+        let mut late = std::mem::take(&mut state.pending_custom);
+        if state.abort_requested {
+            late.extend(self.agent.remove_queued(|message| matches!(message, Message::Custom(_))));
+        }
+        Some((state.abort_requested, late))
     }
 
     async fn drive_run(&self, messages: Vec<Message>) -> anyhow::Result<()> {
         self.agent.prompt_messages(messages).await?;
+        self.drive_continuations().await
+    }
+
+    async fn drive_queued(&self) -> anyhow::Result<()> {
+        self.agent.continue_run().await?;
+        self.drive_continuations().await
+    }
+
+    async fn drive_continuations(&self) -> anyhow::Result<()> {
         while !self.abort_requested() {
             if self.handle_post_agent_run().await? {
                 if self.abort_requested() {
@@ -56,12 +94,7 @@ impl AgentSession {
         Ok(())
     }
 
-    async fn emit_agent_settled(&self) {
-        let aborted = {
-            let mut state = lock(&self.state);
-            state.run_active = false;
-            state.abort_requested
-        };
+    async fn emit_agent_settled(&self, aborted: bool) {
         self.cache_warmer().on_agent_settled();
         if let Some(runner) = self.extension_runner() {
             runner.emit(serde_json::json!({"type": "agent_settled", "aborted": aborted})).await;
