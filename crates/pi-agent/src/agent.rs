@@ -277,6 +277,18 @@ impl Agent {
         lock(&self.inner.follow_up).messages.push_back(message);
     }
 
+    /// Move the queued follow-ups that `select` accepts to the end of the steering queue, in
+    /// order, and return how many moved. Both locks are held so the loop never sees neither.
+    pub fn promote_follow_ups(&self, select: impl Fn(&Message) -> bool) -> usize {
+        let mut steering = lock(&self.inner.steering);
+        let mut follow_up = lock(&self.inner.follow_up);
+        let (moved, kept): (VecDeque<Message>, VecDeque<Message>) = follow_up.messages.drain(..).partition(select);
+        follow_up.messages = kept;
+        let count = moved.len();
+        steering.messages.extend(moved);
+        count
+    }
+
     pub fn clear_queues(&self) {
         self.clear_steering_queue();
         self.clear_follow_up_queue();

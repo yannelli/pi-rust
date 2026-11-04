@@ -64,6 +64,7 @@ pub fn app_keybindings_for(platform: &str, windows: bool) -> KeybindingDefinitio
         ("app.message.copy", def(&["ctrl+x"], "Copy selection or last assistant message")),
         ("app.message.followUp", def(&[pick("ctrl+q", "alt+enter")], "Queue follow-up message")),
         ("app.message.dequeue", def(&[pick("alt+q", "alt+up")], "Restore queued messages")),
+        ("app.message.sendNow", def(&[pick("alt+s", "alt+down")], "Send queued follow-ups now")),
         (
             "app.clipboard.pasteImage",
             def(&[pick("alt+v", "ctrl+v")], "Paste files on macOS, images, or text from clipboard"),

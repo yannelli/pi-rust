@@ -53,6 +53,7 @@ impl InteractiveMode {
         bind("app.message.copy", |mode| mode.handle_copy_command(true, true));
         bind("app.message.followUp", |mode| mode.handle_follow_up());
         bind("app.message.dequeue", |mode| mode.handle_dequeue());
+        bind("app.message.sendNow", |mode| mode.handle_send_now());
         bind("app.session.new", |mode| mode.handle_new_session());
         bind("app.session.tree", |mode| mode.show_tree_selector(None));
         bind("app.session.fork", |mode| mode.show_user_message_selector());
@@ -240,6 +241,20 @@ impl InteractiveMode {
         }
     }
 
+    /// Queued follow-ups become steering, so they go in after the current turn's tool calls.
+    fn handle_send_now(&self) {
+        let mut moved = self.session().send_follow_ups_now();
+        for queued in &mut self.state.borrow_mut().compaction_queue {
+            moved += usize::from(std::mem::take(&mut queued.follow_up));
+        }
+        self.update_pending_messages_display();
+        match moved {
+            0 => self.show_status("No queued follow-up messages to send"),
+            1 => self.show_status("Sending 1 queued message after the current turn"),
+            count => self.show_status(&format!("Sending {count} queued messages after the current turn")),
+        }
+    }
+
     /// Queued steering and follow-up texts, the session's and those waiting for compaction.
     fn queued_messages(&self) -> (Vec<String>, Vec<String>) {
         let session = self.session();
@@ -275,7 +290,11 @@ impl InteractiveMode {
         for line in lines {
             pending.add_child(component(TruncatedText::new(&theme().fg(ThemeColor::Dim, &line), 1, 0)));
         }
-        let hint = format!("↳ {} to edit all queued messages", key_display_text("app.message.dequeue"));
+        let mut hint = format!("↳ {} to edit all queued messages", key_display_text("app.message.dequeue"));
+        let send_now = key_display_text("app.message.sendNow");
+        if !follow_up.is_empty() && !send_now.is_empty() {
+            hint.push_str(&format!(", {send_now} to send follow-ups now"));
+        }
         pending.add_child(component(TruncatedText::new(&theme().fg(ThemeColor::Dim, &hint), 1, 0)));
     }
 

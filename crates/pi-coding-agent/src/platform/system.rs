@@ -73,6 +73,7 @@ pub fn app_key_defaults(env: &PlatformEnv) -> Vec<(&'static str, Vec<&'static st
         ("app.model.cycleBackward", pick(windows_keys, &["alt+p"], &["shift+ctrl+p"])),
         ("app.message.followUp", pick(windows_keys, &["ctrl+q"], &["alt+enter"])),
         ("app.message.dequeue", pick(windows_keys, &["alt+q"], &["alt+up"])),
+        ("app.message.sendNow", pick(windows_keys, &["alt+s"], &["alt+down"])),
         ("app.clipboard.pasteImage", pick(windows_keys, &["alt+v"], &["ctrl+v"])),
         ("app.tree.foldOrUp", pick(mac, &["alt+left", "ctrl+left"], &["ctrl+left", "alt+left"])),
         ("app.tree.unfoldOrDown", pick(mac, &["alt+right", "ctrl+right"], &["ctrl+right", "alt+right"])),

@@ -118,6 +118,23 @@ fn peeks_the_next_selected_queued_messages_without_consuming_them() {
     assert_eq!((agent.steering_mode(), agent.follow_up_mode()), (QueueMode::OneAtATime, QueueMode::All));
 }
 
+#[test]
+fn promotes_selected_follow_ups_behind_the_steering_queue() {
+    let agent = Agent::new(model());
+    agent.set_queue_modes(QueueMode::All, QueueMode::All);
+    agent.steer(Message::user("steering"));
+    agent.follow_up(Message::user("first"));
+    agent.follow_up(Message::user("keep"));
+    agent.follow_up(Message::user("second"));
+    let moved = agent.promote_follow_ups(|message| user_text(message).is_some_and(|text| text != "keep"));
+    assert_eq!(moved, 2);
+    let peek = |agent: &Agent| agent.peek_queued_messages().iter().filter_map(user_text).collect::<Vec<_>>();
+    assert_eq!(peek(&agent), ["steering", "first", "second"]);
+    agent.clear_steering_queue();
+    assert_eq!(peek(&agent), ["keep"]);
+    assert_eq!(agent.promote_follow_ups(|_| false), 0);
+}
+
 #[tokio::test]
 async fn attributes_requests_to_pi_by_default_and_merges_a_configured_identity_over_it() {
     let (requests, stream_fn) = sequence(Vec::new());

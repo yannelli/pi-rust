@@ -125,6 +125,7 @@ pi-rust ports the upstream `pi` CLI and its libraries. This section lists the di
 | The slash commands `/diff`, `/init`, `/review`, `/context`, `/undo`, and `/retry` | Has none of them. Shows context use only in the footer. | [Interactive commands](crates/pi-coding-agent/docs/commands.md) |
 | Markdown export: `/export notes.md` and `pi --export session.jsonl notes.md` | Exports only HTML and JSONL | [Export](crates/pi-coding-agent/docs/commands.md#export) |
 | Prompt history across sessions, with the Ctrl+R search and the `promptHistory` settings | Keeps prompt history only while the process runs | [Prompt history](crates/pi-coding-agent/docs/commands.md#prompt-history) |
+| Alt+Down (Alt+S on Windows, `app.message.sendNow`) sends the queued follow-ups after the current turn. It moves them to the steering queue. | Can only edit the queue or abort the turn | [Interactive commands](crates/pi-coding-agent/docs/commands.md) |
 | Esc clears the input draft when the agent is idle, and undo restores the draft. Submitted slash commands join prompts and shell commands in the Up and Down history. | | |
 | `pi completion` and `pi doctor` | Has neither command | [CLI](crates/pi-coding-agent/docs/cli.md) |
 | `pi sessions` and `pi stats` | Lists and deletes sessions only in its session picker (`pi -r` and `/resume`). Shows usage only for the current session (`/session`). | [Sessions](crates/pi-coding-agent/docs/cli.md#sessions) |
