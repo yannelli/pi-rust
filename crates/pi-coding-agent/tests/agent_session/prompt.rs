@@ -190,6 +190,37 @@ async fn delivers_follow_ups_after_the_run_and_aborts_cleanly() {
 }
 
 #[tokio::test]
+async fn sends_queued_follow_ups_after_the_current_turn() {
+    let h = harness(Options {
+        responses: vec![
+            FauxResponse::tool_call("call-1", "bash", json!({"command": "sleep 1"})),
+            FauxResponse::text("after tools"),
+            FauxResponse::text("after follow-up"),
+        ],
+        ..Options::default()
+    })
+    .await;
+    let session = h.session.clone();
+    let running = tokio::spawn(async move { session.prompt("go", Vec::new()).await });
+    wait_until(|| !h.events_of("tool_execution_start").is_empty()).await;
+    h.session.follow_up("now please", Vec::new()).await.unwrap();
+    assert_eq!(h.session.send_follow_ups_now(), 1);
+    assert_eq!(h.session.steering_messages(), ["now please"]);
+    assert!(h.session.follow_up_messages().is_empty());
+    assert_eq!(h.session.send_follow_ups_now(), 0);
+    running.await.unwrap().unwrap();
+
+    let requests = h.requests();
+    assert_eq!(requests.len(), 2, "the message joins the turn after the tool call");
+    assert_eq!(text(requests[1].messages.last().unwrap()), "now please");
+    let updates = h.events_of("queue_update");
+    assert!(
+        updates.iter().any(|update| update["steering"] == json!(["now please"]) && update["followUp"] == json!([]))
+    );
+    assert_eq!(h.session.pending_message_count(), 0);
+}
+
+#[tokio::test]
 async fn expands_skills_and_prompt_templates() {
     let skill = "---\nname: deploy\ndescription: Deploy the app\n---\nRun the deploy script.";
     let h = harness(Options {

@@ -423,6 +423,7 @@ fn expanded_instructions() -> String {
         raw_key_hint("!!", "to run bash (no context)"),
         key_hint("app.message.followUp", "to queue follow-up"),
         key_hint("app.message.dequeue", "to edit all queued messages"),
+        key_hint("app.message.sendNow", "to send queued follow-ups now"),
         key_hint("app.clipboard.pasteImage", "to paste files on macOS, images, or text"),
         raw_key_hint("drop files", "to attach"),
     ]

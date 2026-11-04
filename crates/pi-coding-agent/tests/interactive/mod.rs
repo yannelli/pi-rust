@@ -90,6 +90,30 @@ async fn queues_steering_and_follow_ups_and_restores_them_on_abort() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn send_now_moves_queued_follow_ups_to_steering() {
+    local(async {
+        let ui = start(Options { responses: vec![FauxResponse::Hang], ..Options::default() }).await;
+        ui.submit("first question").await;
+        ui.wait_until("streaming", |ui| ui.session().is_streaming()).await;
+        ui.send("later please").await;
+        let windows = pi_coding_agent::keybindings::use_windows_keybindings();
+        ui.send(if windows { "\x11" } else { "\x1b\r" }).await;
+        ui.wait_for("Follow-up: later please").await;
+        let alt = if cfg!(target_os = "macos") { "Option" } else { "Alt" };
+        let send_now = if windows { format!("{alt}+S") } else { format!("{alt}+Down") };
+        ui.wait_for(&format!("{send_now} to send follow-ups now")).await;
+        // Send now is alt+s with Windows keybindings and alt+down elsewhere.
+        ui.send(if windows { "\x1bs" } else { "\x1b[1;3B" }).await;
+        ui.wait_for("Steering: later please").await;
+        ui.wait_for("Sending 1 queued message after the current turn").await;
+        assert_eq!(ui.session().steering_messages(), ["later please"]);
+        assert!(ui.session().follow_up_messages().is_empty());
+        assert!(!ui.screen().contains("to send follow-ups now"), "{}", ui.screen());
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn runs_bang_commands_in_the_chat() {
     local(async {
         let ui = start(Options::default()).await;

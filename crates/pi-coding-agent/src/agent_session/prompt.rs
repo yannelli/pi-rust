@@ -444,6 +444,24 @@ impl AgentSession {
         cleared
     }
 
+    /// Move queued follow-ups to the steering queue, so they go in after the current turn's
+    /// tool calls instead of after the run. Returns how many moved.
+    pub fn send_follow_ups_now(&self) -> usize {
+        let moved = {
+            let mut state = lock(&self.state);
+            let follow_up = std::mem::take(&mut state.follow_up);
+            state.steering.extend(follow_up.iter().cloned());
+            follow_up.len()
+        };
+        if moved == 0 {
+            return 0;
+        }
+        // Custom messages that extensions queued as follow-ups keep their place.
+        self.agent.promote_follow_ups(|message| matches!(message, Message::User(_)));
+        self.emit_queue_update();
+        moved
+    }
+
     /// Steering and follow-up messages not delivered yet.
     pub fn pending_message_count(&self) -> usize {
         let state = lock(&self.state);

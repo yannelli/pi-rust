@@ -26,6 +26,7 @@ fn platform_defaults_apply_consistently() {
         assert_eq!(keys(&definitions, "app.message.followUp"), pick("ctrl+q", "alt+enter"));
         assert_eq!(keys(&definitions, "app.model.cycleBackward"), pick("alt+p", "shift+ctrl+p"));
         assert_eq!(keys(&definitions, "app.message.dequeue"), pick("alt+q", "alt+up"));
+        assert_eq!(keys(&definitions, "app.message.sendNow"), pick("alt+s", "alt+down"));
         let undo = if platform == "win32" { vec!["ctrl+z".to_string()] } else { pick("alt+z", "ctrl+-") };
         assert_eq!(keys(&definitions, "tui.editor.undo"), undo);
         let previous: Vec<&str> = if windows { vec!["ctrl+up"] } else { vec!["ctrl+shift+up", "ctrl+up"] };
