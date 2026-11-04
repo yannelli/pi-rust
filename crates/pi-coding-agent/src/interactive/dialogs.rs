@@ -11,6 +11,7 @@ use pi_tui::component;
 use super::mode::InteractiveMode;
 use super::selector::SelectorSpec;
 use crate::agent_session::{ForkPosition, ModelRuntime};
+use crate::headless_commands::{fast_mode_status, requested_fast_mode};
 use crate::interactive_components::model_selector::DefaultModelReference;
 use crate::interactive_components::{
     ModelSelector, ModelSelectorOptions, ModelSelectorSource, ThinkingSelector, TrustSelector, TrustSelectorOptions,
@@ -68,19 +69,12 @@ impl InteractiveMode {
     /// `/fast [on|off]`: set fast mode, or toggle it without an argument; the choice is saved.
     pub(super) fn handle_fast_command(&self, choice: Option<&str>) {
         let session = self.session();
-        let enabled = match choice.map(str::to_lowercase).as_deref() {
-            None => !session.fast_mode(),
-            Some("on") => true,
-            Some("off") => false,
-            Some(other) => return self.show_error(&format!("Unknown fast mode \"{other}\". Use on or off.")),
+        let enabled = match requested_fast_mode(choice, session.fast_mode()) {
+            Ok(enabled) => enabled,
+            Err(error) => return self.show_error(&error),
         };
         session.set_fast_mode(enabled, true);
-        let status = match (enabled, session.fast_mode_available()) {
-            (false, _) => "Fast mode off",
-            (true, true) => "Fast mode on",
-            (true, false) => "Fast mode on (the current model has no fast mode)",
-        };
-        self.show_status(status);
+        self.show_status(fast_mode_status(enabled, session.fast_mode_available()));
     }
 
     /// For an ACP agent, the agent sets the level first, and the level it confirms is the one applied.

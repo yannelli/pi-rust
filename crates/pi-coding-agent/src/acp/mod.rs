@@ -33,9 +33,9 @@ use std::sync::Arc;
 
 use tokio::io::AsyncRead;
 
+pub use crate::headless_commands::format_session_stats;
 pub use agent::{AcpAgent, AcpAgentOptions, Handled, embedded_context_enabled};
 pub use agent_load::replay_message;
-pub use agent_prompt::format_session_stats;
 pub use backend::{AcpClient, BackendFactory, PiBackend};
 pub use connection::ClientConnection;
 pub use events::{edit_old_texts, find_unique_line_number, format_auto_retry_message, tool_call_locations};

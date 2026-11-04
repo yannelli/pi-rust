@@ -30,6 +30,10 @@ These features of the editor work:
 - Tool call diffs and terminals.
 - Context usage.
 - Slash commands: prompt templates, `/skill:name`, `/compact`, `/autocompact`, `/export`, `/session`, `/name`, `/steering`, `/follow-up`, and `/changelog`.
+- The pi-rust commands `/usage`, `/context`, `/extensions`, `/fast`, and `/reload`. They run in pi without a model call and answer with an agent message. [RPC mode](rpc.md#built-in-commands) describes each one. After `/reload` or an extension change, pi sends `available_commands_update` again.
+- `/mcp` while MCP runs for the session. Its notices are agent messages with `_meta.piAcp.notify`.
+
+When the model, the thinking level, or fast mode changes inside the session, for example through `/fast` or an extension, pi sends `config_option_update` with the new options.
 
 Model labels use the display names of the providers. Catalog variants with a `fast` segment in their ID have a ⚡ label. ACP has no standard field for a model icon.
 

@@ -7,13 +7,14 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use agent_client_protocol_schema::{
-    ContentBlock, ContentChunk, Cost, Error, Meta, SessionInfoUpdate, SessionNotification, SessionUpdate, TextContent,
-    Usage, UsageUpdate,
+    ContentBlock, ContentChunk, Cost, Error, Meta, SessionConfigOption, SessionInfoUpdate, SessionNotification,
+    SessionUpdate, TextContent, Usage, UsageUpdate,
 };
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
 use super::backend::{AcpClient, PiBackend};
+use super::config::{send_config_options_update, session_configuration};
 use super::errors::maybe_auth_required;
 use crate::agent_session::lock;
 use crate::session::ids::iso_timestamp;
@@ -77,6 +78,8 @@ pub(super) struct Inner {
     pub mutations: HashSet<String>,
     pub bash_calls: HashSet<String>,
     pub bash_output: HashMap<String, String>,
+    /// The configuration last sent as `config_option_update`, to skip identical updates.
+    last_configuration: Option<String>,
 }
 
 /// Construction parameters of [`AcpSession`].
@@ -376,6 +379,23 @@ impl AcpSession {
         if self.backend.set_session_name(&title).await.is_ok() {
             self.publish_title(Some(title), Some(iso_timestamp()));
         }
+    }
+
+    /// Send pi's current configuration and return it. Unless `always`, an update that matches the
+    /// last one sent is skipped, so a change and the pi event it causes reach the client once.
+    pub(super) async fn publish_config_options(&self, always: bool) -> anyhow::Result<Vec<SessionConfigOption>> {
+        let configuration = session_configuration(self.backend.as_ref(), None, None).await?;
+        let key = serde_json::to_string(&(&configuration.config_options, &configuration.modes.current_mode_id))?;
+        let changed = {
+            let mut inner = lock(&self.inner);
+            let changed = always || inner.last_configuration.as_ref() != Some(&key);
+            inner.last_configuration = Some(key);
+            changed
+        };
+        if changed {
+            send_config_options_update(self.client.as_ref(), &self.session_id, &configuration);
+        }
+        Ok(configuration.config_options)
     }
 
     /// Send pi's context occupancy as `usage_update`; failures and timeouts are ignored.

@@ -1,6 +1,6 @@
 //! The built-in extensions in RPC mode (upstream `extensions/mcp` with `ctx.mode === "rpc"`):
 //! notices become `notify` requests, `/mcp login` asks for the redirect URL through an `input`
-//! dialog, and `get_commands` lists `/mcp` as an extension command.
+//! dialog, and `get_commands` lists `/mcp` and the built-in commands as extension commands.
 
 use std::sync::Arc;
 
@@ -14,7 +14,8 @@ use super::types::{RpcCommandSource, RpcSlashCommand};
 use super::ui::RpcExtensionUi;
 use crate::agent_session::AgentSession;
 use crate::extension_ui::{DialogOptions, ExtensionUi, NotifyType};
-use crate::resources::source_info::BUILTIN_PATH_PREFIX;
+use crate::headless_commands::{HEADLESS_COMMANDS, SESSION_COMMANDS};
+use crate::resources::source_info::{BUILTIN_PATH_PREFIX, create_synthetic_source_info};
 
 /// Upstream's `/mcp` command description.
 const MCP_DESCRIPTION: &str = "Manage MCP servers: sign in, reconnect, enable or disable, and change exposure";
@@ -64,20 +65,33 @@ pub(crate) fn unbind_builtins(session: &AgentSession) {
     session.set_mcp_sign_in_prompt(None);
 }
 
-/// Commands of the built-in extensions: `/mcp` while MCP runs for the session.
+/// Built-in commands: `/mcp` while MCP runs for the session, then the commands RPC mode runs
+/// without a model call. They are listed like `/mcp`, as extension commands with a
+/// `builtin:<name>` path, so upstream clients parse them.
 pub fn builtin_commands(session: &AgentSession) -> Vec<RpcSlashCommand> {
-    if session.mcp_manager().is_none() {
-        return Vec::new();
-    }
+    let mut commands: Vec<RpcSlashCommand> = mcp_command(session).into_iter().collect();
+    commands.extend(HEADLESS_COMMANDS.iter().chain(&SESSION_COMMANDS).map(|command| {
+        let path = format!("{BUILTIN_PATH_PREFIX}{}", command.name);
+        RpcSlashCommand {
+            name: command.name.into(),
+            description: Some(command.description.into()),
+            source: RpcCommandSource::Extension,
+            source_info: create_synthetic_source_info(&path, "builtin", None, None),
+        }
+    }));
+    commands
+}
+
+fn mcp_command(session: &AgentSession) -> Option<RpcSlashCommand> {
+    session.mcp_manager()?;
     let path = format!("{BUILTIN_PATH_PREFIX}mcp");
     let services = session.services();
     let loader = services.resources();
-    let entry = loader.resources().extensions.iter().find(|entry| entry.path.to_string_lossy() == path);
-    let Some(entry) = entry else { return Vec::new() };
-    vec![RpcSlashCommand {
+    let entry = loader.resources().extensions.iter().find(|entry| entry.path.to_string_lossy() == path)?;
+    Some(RpcSlashCommand {
         name: "mcp".into(),
         description: Some(MCP_DESCRIPTION.into()),
         source: RpcCommandSource::Extension,
         source_info: entry.source_info.clone(),
-    }]
+    })
 }

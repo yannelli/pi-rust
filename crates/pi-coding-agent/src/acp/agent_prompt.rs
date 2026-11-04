@@ -7,50 +7,15 @@ use agent_client_protocol_schema::{
     ContentBlock, ContentChunk, PromptRequest, PromptResponse, ResourceLink, SessionNotification, SessionUpdate,
     StopReason, TextContent,
 };
-use serde_json::Value;
 
 use super::agent::AcpAgent;
 use super::commands::parse_command_args;
 use super::errors::{AcpResult, internal_failure};
 use super::session::{AcpSession, TurnEnd};
 use super::translate::{prompt_to_pi_message, prompt_to_session_title};
-use crate::platform::changelog::EMBEDDED_CHANGELOG;
-
-const CHANGELOG_MAX_CHARS: usize = 20_000;
-
-/// The `/session` summary of pi's session stats.
-pub fn format_session_stats(stats: &Value) -> String {
-    let mut lines = Vec::new();
-    let text = |key: &str| stats[key].as_str().filter(|text| !text.is_empty());
-    if let Some(id) = text("sessionId") {
-        lines.push(format!("Session: {id}"));
-    }
-    if let Some(file) = text("sessionFile") {
-        lines.push(format!("Session file: {file}"));
-    }
-    if let Some(count) = stats["totalMessages"].as_f64() {
-        lines.push(format!("Messages: {count}"));
-    }
-    if let Some(cost) = stats["cost"].as_f64() {
-        lines.push(format!("Cost: {cost}"));
-    }
-    let tokens = &stats["tokens"];
-    if tokens.is_object() {
-        let parts: Vec<String> = [("input", "in"), ("output", "out"), ("cacheRead", "cache read")]
-            .into_iter()
-            .chain([("cacheWrite", "cache write"), ("total", "total")])
-            .filter_map(|(key, label)| tokens[key].as_f64().map(|value| format!("{label} {value}")))
-            .collect();
-        if !parts.is_empty() {
-            lines.push(format!("Tokens: {}", parts.join(", ")));
-        }
-    }
-    if lines.is_empty() {
-        format!("Session stats:\n{}", serde_json::to_string_pretty(stats).unwrap_or_default())
-    } else {
-        lines.join("\n")
-    }
-}
+use crate::headless_commands::{
+    HEADLESS_COMMANDS, changelog_text, export_blocker, export_file_name, format_session_stats,
+};
 
 fn end_turn() -> AcpResult<PromptResponse> {
     Ok(PromptResponse::new(StopReason::EndTurn))
@@ -72,6 +37,11 @@ impl AcpAgent {
         if images.is_empty() && message.trim_start().starts_with('/') {
             let trimmed = message.trim();
             let (command, rest) = trimmed[1..].split_once(' ').unwrap_or((&trimmed[1..], ""));
+            if HEADLESS_COMMANDS.iter().any(|builtin| builtin.name == command)
+                && let Some(response) = self.headless_command(&session, command, rest.trim()).await
+            {
+                return response;
+            }
             let args = parse_command_args(rest);
             if let Some(response) = self.builtin_command(&session, command, &args).await {
                 return response;
@@ -145,11 +115,7 @@ impl AcpAgent {
             }
             "steering" | "follow-up" => self.queue_mode_command(session, command, &first).await,
             "changelog" => {
-                let mut text = EMBEDDED_CHANGELOG.to_string();
-                if text.chars().count() > CHANGELOG_MAX_CHARS {
-                    text = text.chars().take(CHANGELOG_MAX_CHARS).collect::<String>() + "\n\n...(truncated)...";
-                }
-                self.say(session, text);
+                self.say(session, changelog_text());
                 end_turn()
             }
             "export" => self.export_command(session).await,
@@ -179,6 +145,22 @@ impl AcpAgent {
             _ => return None,
         };
         Some(result)
+    }
+
+    /// A command of [`HEADLESS_COMMANDS`]; after a reload the client gets the new command list.
+    async fn headless_command(
+        &self,
+        session: &AcpSession,
+        command: &str,
+        args: &str,
+    ) -> Option<AcpResult<PromptResponse>> {
+        let output = session.backend.run_headless_command(command, args).await?;
+        let _ = session.publish_config_options(false).await;
+        self.say(session, output.text);
+        if output.reloaded {
+            self.advertise_commands(session, &session.cwd).await;
+        }
+        Some(end_turn())
     }
 
     /// `/steering` and `/follow-up`: show or set pi's queue delivery mode.
@@ -212,27 +194,11 @@ impl AcpAgent {
         let state = backend.get_state().await.map_err(|error| internal_failure(&error))?;
         let file = state["sessionFile"].as_str().map(Path::new);
         let count = state["messageCount"].as_u64().unwrap_or(0);
-        let Some(file) = file.filter(|file| count > 0 && file.exists()) else {
-            self.say(session, "Nothing to export yet (no session messages). Send a prompt first.");
+        if let Some(blocker) = export_blocker(file, count) {
+            self.say(session, blocker);
             return end_turn();
-        };
-        match std::fs::read_to_string(file) {
-            Ok(raw) if raw.trim().is_empty() => {
-                self.say(session, "Nothing to export yet (empty session file). Send a prompt first.");
-                return end_turn();
-            }
-            Ok(_) => {}
-            Err(_) => {
-                self.say(session, "Couldn't read session file for export. Try sending a prompt first.");
-                return end_turn();
-            }
         }
-        let safe_id: String = session
-            .session_id
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
-            .collect();
-        let name = format!("pi-session-{safe_id}.html");
+        let name = export_file_name(&session.session_id);
         let path = match backend.export_html(&session.cwd.join(&name)).await {
             Ok(path) => path.display().to_string(),
             Err(error) => {

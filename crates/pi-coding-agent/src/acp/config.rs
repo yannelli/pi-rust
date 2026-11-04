@@ -209,18 +209,12 @@ pub async fn session_configuration(
     Ok(SessionConfiguration { config_options, models: model_state, modes })
 }
 
-/// Send `current_mode_update` and `config_option_update` with pi's current configuration.
-pub async fn emit_config_options_update(
-    client: &dyn AcpClient,
-    session_id: &str,
-    backend: &dyn PiBackend,
-) -> anyhow::Result<Vec<SessionConfigOption>> {
-    let configuration = session_configuration(backend, None, None).await?;
+/// Send `current_mode_update` and `config_option_update` for `configuration`.
+pub fn send_config_options_update(client: &dyn AcpClient, session_id: &str, configuration: &SessionConfiguration) {
     let mode = CurrentModeUpdate::new(configuration.modes.current_mode_id.clone());
     client.session_update(SessionNotification::new(session_id.to_string(), SessionUpdate::CurrentModeUpdate(mode)));
     let options = ConfigOptionUpdate::new(configuration.config_options.clone());
     client.session_update(SessionNotification::new(session_id.to_string(), SessionUpdate::ConfigOptionUpdate(options)));
-    Ok(configuration.config_options)
 }
 
 /// Switch to `provider/model`, or to a bare model id looked up in the available models.
