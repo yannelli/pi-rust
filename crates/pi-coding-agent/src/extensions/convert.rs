@@ -59,6 +59,7 @@ fn skill_from_json(value: &Value) -> Option<Skill> {
         compatibility: value["compatibility"].as_str().map(str::to_string),
         metadata: value["metadata"].as_object().cloned().unwrap_or_default(),
         allowed_tools: strings(&value["allowedTools"]),
+        exposure: serde_json::from_value(value["exposure"].clone()).ok().flatten(),
     })
 }
 

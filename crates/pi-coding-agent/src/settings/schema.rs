@@ -9,6 +9,8 @@ use pi_ai::{ThinkingLevel, Transport};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::resources::ContextExposure;
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompactionModelOverride {
@@ -477,6 +479,9 @@ pub struct Settings {
     pub markdown: Option<MarkdownSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codemode: Option<CodemodeSettings>,
+    /// pi-rust extension: `direct` or `deferred` for each context kind, such as `skill` or `agent`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_exposure: Option<BTreeMap<String, ContextExposure>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_dir: Option<String>,
     /// Global only.
@@ -559,6 +564,7 @@ pub const PI_SETTINGS_KEYS: &[&str] = &[
     "markdown",
     "warnings",
     "codemode",
+    "contextExposure",
     "sessionDir",
     "httpProxy",
     "httpIdleTimeoutMs",

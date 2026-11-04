@@ -1,13 +1,15 @@
 //! Port of upstream `test/system-prompt.test.ts`, plus snapshots with `SYSTEM.md` and
 //! `APPEND_SYSTEM.md` from the resource loader.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use super::write;
 use crate::config::ContextFile;
+use crate::resources::context_entries::deferred_search_entries;
+use crate::resources::skills::load_skill_from_file;
 use crate::resources::source_info::create_synthetic_source_info;
-use crate::resources::{ResourceLoader, ResourceLoaderOptions, Skill};
+use crate::resources::{ContextEntry, ContextExposure, ResourceLoader, ResourceLoaderOptions, Skill};
 use crate::system_prompt::{
     BuildSystemPromptOptions, SystemPromptOptions, build_system_message, build_system_prompt,
     build_system_prompt_sections, diff_system_prompt_sections, render_system_prompt, sections_to_json,
@@ -25,6 +27,7 @@ fn test_skill() -> Skill {
         compatibility: None,
         metadata: Default::default(),
         allowed_tools: Vec::new(),
+        exposure: None,
     }
 }
 
@@ -123,6 +126,99 @@ fn skills_section_follows_the_reader_tool() {
     assert!(hidden.contains("\nLoad a skill's file when the task matches its description."));
     assert!(build(&["read"]).contains("Use bash to load a skill's file"));
     assert!(build(&[]).contains("Use the read tool to load a skill's file"));
+}
+
+fn agent_entry(name: &str, exposure: Option<ContextExposure>) -> ContextEntry {
+    ContextEntry {
+        kind: "agent".into(),
+        name: name.into(),
+        description: format!("The {name} agent."),
+        usage: Some(format!("Call the subagent tool with agent \"{name}\".")),
+        path: None,
+        exposure,
+        extension_path: None,
+    }
+}
+
+#[test]
+fn deferred_skills_and_entries_leave_the_prompt_while_tool_search_is_declared() {
+    let other = Skill { name: "other-skill".into(), exposure: Some(ContextExposure::Direct), ..test_skill() };
+    let build = |tools: &[&str], exposure: &[(&str, ContextExposure)]| {
+        render(&BuildSystemPromptOptions {
+            skills: vec![test_skill(), other.clone()],
+            context_entries: vec![agent_entry("reviewer", None), agent_entry("explore", None)],
+            context_exposure: exposure.iter().map(|(kind, value)| (kind.to_string(), *value)).collect(),
+            ..options(tools)
+        })
+    };
+    // The default lists everything, with or without tool_search.
+    let listed = build(&["read", "tool_search"], &[]);
+    assert!(listed.contains("<name>test-skill</name>") && listed.contains("<name>other-skill</name>"));
+    assert!(listed.contains("<context_entries>\nExtensions provide these entries."));
+    assert!(listed.contains("    <kind>agent</kind>\n    <name>reviewer</name>"));
+    assert!(listed.contains("<usage>Call the subagent tool with agent &quot;reviewer&quot;.</usage>"));
+    assert!(!listed.contains("<deferred_context>"));
+
+    let deferred = [("skill", ContextExposure::Deferred), ("agent", ContextExposure::Deferred)];
+    let prompt = build(&["read", "tool_search"], &deferred);
+    assert!(!prompt.contains("<name>test-skill</name>"));
+    // The skill's own exposure wins over the setting.
+    assert!(prompt.contains("<name>other-skill</name>"));
+    assert!(!prompt.contains("<context_entries>"));
+    assert!(prompt.contains(
+        "<deferred_context>\nMore context is available but not listed here: 2 agents, 1 skill. Find it with `tool_search`"
+    ));
+    let sections = build_system_prompt_sections(&BuildSystemPromptOptions {
+        context_entries: vec![agent_entry("reviewer", None)],
+        context_exposure: deferred.iter().map(|(kind, value)| (kind.to_string(), *value)).collect(),
+        ..options(&["read", "tool_search"])
+    })
+    .unwrap();
+    let names: Vec<&str> = sections.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(names.iter().rev().take(2).collect::<Vec<_>>(), [&"cwd", &"deferred_context"]);
+
+    // Without a declared tool_search nothing is deferred, so nothing becomes unreachable.
+    for tools in [&["read"][..], &["read", "tool_search"][..]] {
+        let hidden = BuildSystemPromptOptions {
+            skills: vec![test_skill()],
+            context_exposure: deferred.iter().map(|(kind, value)| (kind.to_string(), *value)).collect(),
+            hidden_tools: vec!["tool_search".into()],
+            ..options(tools)
+        };
+        assert!(render(&hidden).contains("<name>test-skill</name>"));
+        assert!(!render(&hidden).contains("<deferred_context>"));
+    }
+}
+
+#[test]
+fn deferred_skills_are_searchable_with_their_path() {
+    let settings = BTreeMap::from([("skill".to_string(), ContextExposure::Deferred)]);
+    let hidden = Skill { name: "manual".into(), disable_model_invocation: true, ..test_skill() };
+    let entries = deferred_search_entries(&[test_skill(), hidden], &[agent_entry("reviewer", None)], &settings);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].kind, "skill");
+    assert_eq!(
+        entries[0].usage.as_deref(),
+        Some(
+            "Read /skills/test-skill/SKILL.md to load its instructions. Resolve relative paths in it against /skills/test-skill."
+        )
+    );
+    let found = pi_codemode::search_deferred(&[], &[], &entries, "test skill", 8);
+    assert_eq!(found.context, entries);
+}
+
+#[test]
+fn skill_exposure_frontmatter() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("deep/SKILL.md");
+    write(&path, "---\nname: deep\ndescription: Deep.\nexposure: deferred\n---\nBody.");
+    let (skill, diagnostics) = load_skill_from_file(&path, "test");
+    assert_eq!(skill.unwrap().exposure, Some(ContextExposure::Deferred));
+    assert!(diagnostics.is_empty());
+    write(&path, "---\nname: deep\ndescription: Deep.\nexposure: lazy\n---\nBody.");
+    let (skill, diagnostics) = load_skill_from_file(&path, "test");
+    assert_eq!(skill.unwrap().exposure, None);
+    assert!(diagnostics[0].message.contains("exposure must be"));
 }
 
 #[test]

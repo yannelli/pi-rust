@@ -93,6 +93,52 @@ async fn before_agent_start_and_context_change_what_the_model_sees() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn resources_discover_context_entries_are_listed_or_found_with_tool_search() {
+    let body = r#"
+	pi.on("resources_discover", () => ({
+		contextEntries: [
+			{ kind: "agent", name: "reviewer", description: "Reviews a diff and lists bugs.", usage: "Call the subagent tool with agent \"reviewer\"." },
+			{ kind: "agent", name: "explore", description: "Searches the code base.", exposure: "direct" },
+			{ kind: "Bad Kind", name: "dropped", description: "Invalid kind." },
+		],
+	}));
+"#;
+    let h = harness(Setup {
+        files: vec![("agents.ts", with_probe(body))],
+        load: vec!["agents.ts"],
+        settings: json!({ "contextExposure": { "agent": "deferred" } }),
+        responses: vec![
+            FauxResponse::tool_call("s1", "tool_search", json!({ "query": "review a diff" })),
+            FauxResponse::text("ok"),
+        ],
+        ..Setup::default()
+    })
+    .await;
+    h.session.prompt("check my change", Vec::new()).await.unwrap();
+    let request = h.provider.requests().into_iter().next().expect("request");
+    let system = request.system_prompt.clone().unwrap_or_default();
+    assert!(system.contains("<name>explore</name>"), "{system}");
+    assert!(!system.contains("reviewer") && !system.contains("dropped"));
+    assert!(system.contains("not listed here: 1 agent."));
+    let result = h
+        .session
+        .messages()
+        .into_iter()
+        .find_map(|message| match message {
+            Message::ToolResult(result) if result.tool_name == "tool_search" => Some(result),
+            _ => None,
+        })
+        .expect("tool_search result");
+    let text = text_of(&serde_json::to_value(&result).unwrap());
+    assert_eq!(
+        text,
+        "Found 1 context entry. Nothing was loaded; use them as described:\n\
+         - agent reviewer: Reviews a diff and lists bugs.\n  Call the subagent tool with agent \"reviewer\"."
+    );
+    assert_eq!(h.errors(), Vec::<String>::new());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn tool_calls_can_be_blocked_and_results_rewritten() {
     let body = r#"
 	pi.on("tool_call", (event) => event.input.text === "secret" ? { block: true, reason: "not allowed" } : undefined);

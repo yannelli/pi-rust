@@ -1,5 +1,6 @@
 //! Accessors for resources, models, tools, analytics, and terminal display settings.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -10,6 +11,7 @@ use super::manager::SettingsManager;
 use super::schema::*;
 use super::storage::SettingsScope;
 use super::tools::resolve_default_tools;
+use crate::resources::ContextExposure;
 
 pub(super) fn uuid_v4() -> String {
     use std::hash::{BuildHasher, Hasher};
@@ -271,6 +273,11 @@ impl SettingsManager {
 
     pub fn codemode_mode(&self) -> CodemodeMode {
         self.state().merged.codemode.as_ref().and_then(|codemode| codemode.mode).unwrap_or_default()
+    }
+
+    /// `contextExposure`: the exposure of each context kind that sets one. Unset kinds are `direct`.
+    pub fn context_exposure(&self) -> BTreeMap<String, ContextExposure> {
+        self.state().merged.context_exposure.clone().unwrap_or_default()
     }
 
     pub fn codemode_inline_budget(&self) -> u64 {

@@ -112,6 +112,8 @@ How each event uses a patch:
 
 pi builds no result for `before_agent_start`: a built `systemPrompt` would replace the whole system prompt.
 
+A `resources_discover` result can also have `contextEntries` (pi-rust only): entries such as agent configs that pi lists in the system prompt or defers to `tool_search`. See [Deferred context](../../crates/pi-coding-agent/docs/deferred-context.md#extension-api-context-entries).
+
 `message_display` (pi-rust only) changes how the text of an assistant message shows in `tui` mode. pi sends it once for each complete assistant message that has text, and once for each such message when pi draws a saved session. The event is `{ type, messageId, index, final, delta, text }`. `messageId` is the session entry id of the message, or `null` when pi has not saved it yet. pi sends the full text in one batch, so `index` is `0`, `final` is `true`, and `delta` and `text` are the same. `text` joins the text blocks of the message with a blank line.
 
 - The result `{ text }` replaces the text blocks on the screen. The thinking blocks stay. An empty `text` hides the text. The session, exports, and the model context keep the original text.

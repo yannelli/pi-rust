@@ -206,6 +206,21 @@ fn prompt_history_settings_default_to_on_with_1000_entries() {
 }
 
 #[test]
+fn context_exposure_defaults_to_direct() {
+    use crate::resources::ContextExposure;
+    use crate::resources::context_entries::resolve_exposure;
+    let defaults = SettingsManager::in_memory(json!({}));
+    assert!(defaults.context_exposure().is_empty());
+    assert_eq!(resolve_exposure(None, "skill", &defaults.context_exposure()), ContextExposure::Direct);
+    let custom = SettingsManager::in_memory(json!({"contextExposure": {"skill": "deferred", "agent": "direct"}}));
+    let exposure = custom.context_exposure();
+    assert_eq!(resolve_exposure(None, "skill", &exposure), ContextExposure::Deferred);
+    assert_eq!(resolve_exposure(None, "agent", &exposure), ContextExposure::Direct);
+    let invalid = SettingsManager::in_memory(json!({"contextExposure": {"skill": "hidden"}}));
+    assert!(invalid.context_exposure().is_empty());
+}
+
+#[test]
 fn global_only_keys_ignore_project_values() {
     let dirs = Dirs::new();
     write(&dirs.global(), json!({"cacheWarming": "idle", "defaultProjectTrust": "always"}));

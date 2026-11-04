@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use super::brand::CONFIG_DIR_NAME;
 use super::context::{ContextFile, load_project_context_files};
+use super::context_entries::ContextEntry;
 use super::discovery::{LocalResourceOptions, ResourceSettings, ResourceType, resolve_local_resources};
 use super::paths::{absolute, file_kind, home_dir, is_local_path, sorted_entries};
 use super::prompts::{LoadPromptTemplatesOptions, PromptTemplate, load_prompt_templates};
@@ -114,6 +115,8 @@ pub struct LoadedResources {
     pub themes: Vec<ThemeFile>,
     pub theme_diagnostics: Vec<ResourceDiagnostic>,
     pub context_files: Vec<ContextFile>,
+    /// Context entries from `resources_discover` (`contextEntries`).
+    pub context_entries: Vec<ContextEntry>,
     pub system_prompt: Option<String>,
     pub system_prompt_source: Option<PathBuf>,
     pub append_system_prompt: Vec<String>,
@@ -347,6 +350,11 @@ impl ResourceLoader {
 
     pub fn set_context_files(&mut self, files: Vec<ContextFile>) {
         self.loaded.context_files = files;
+    }
+
+    /// Replace the context entries extensions contribute.
+    pub fn set_context_entries(&mut self, entries: Vec<ContextEntry>) {
+        self.loaded.context_entries = entries;
     }
 
     pub fn system_prompt_input(&self) -> Option<String> {
