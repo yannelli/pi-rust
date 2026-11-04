@@ -197,6 +197,40 @@ export function createToolOverrides(state) {
 	};
 }
 
+/** `toolResultExpander` of `initialize` and `register.toolResultExpander`: the child draws the
+ * expanded body of results whose `details` hold `detailsKey`. A later call replaces the settings;
+ * `enabled: false` turns the expander off. */
+export function createToolResultExpander(state) {
+	let settings;
+	return (definition) => {
+		const detailsKey = definition?.detailsKey;
+		if (typeof detailsKey !== "string" || detailsKey === "") return false;
+		const installed = settings !== undefined;
+		settings = { detailsKey, maxHeight: Number(definition.maxHeight) || 0, enabled: definition.enabled !== false };
+		if (installed) return true;
+		state.pi.registerToolResultExpander((toolName, result) => {
+			if (state.dead || !settings.enabled || result?.details?.[settings.detailsKey] == null) return undefined;
+			return {
+				maxHeight: settings.maxHeight,
+				render(options, _theme, context) {
+					const last = context?.lastComponent;
+					const component = last?.[NATIVE] === "render.toolResultExpanded" ? last : remoteComponent(state, "render.toolResultExpanded");
+					const params = {
+						toolName,
+						toolCallId: context?.toolCallId,
+						result: toJson(result),
+						options: { expanded: true, isPartial: Boolean(options?.isPartial), maxHeight: settings.maxHeight },
+						context: toolContext(context),
+					};
+					component.update(params, () => (context?.invalidate ? context.invalidate() : requestRender()));
+					return component;
+				},
+			};
+		});
+		return true;
+	};
+}
+
 /** `pi.registerMessageRenderer` and `pi.registerEntryRenderer` for the given custom types. */
 export function createContentRenderers(state) {
 	const messages = componentCache(state, "render.message");

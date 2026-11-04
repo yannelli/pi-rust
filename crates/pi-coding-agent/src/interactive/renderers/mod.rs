@@ -99,6 +99,18 @@ pub trait ToolRenderer {
     }
 }
 
+/// Draws the expanded body of a final result in place of the renderer's result
+/// (`registerToolResultExpander`).
+pub trait ToolResultExpander {
+    /// The body and its height limit (0: none), or `None` when no extension claims the result.
+    fn expand(
+        &self,
+        tool_name: &str,
+        result: &ToolResultView,
+        context: &mut ToolRenderContext<'_>,
+    ) -> Option<(ComponentRef, usize)>;
+}
+
 /// The renderer of a built-in tool (upstream `createAllToolRenderers`).
 pub fn builtin_renderer(tool_name: &str) -> Option<Rc<dyn ToolRenderer>> {
     let renderer: Rc<dyn ToolRenderer> = match tool_name {

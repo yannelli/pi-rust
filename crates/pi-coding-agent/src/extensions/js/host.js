@@ -236,6 +236,7 @@ export function createHost(config) {
 				messageRenderers: [...firstPerName("messageRenderers").keys()],
 				entryRenderers: [...firstPerName("entryRenderers").keys()],
 				toolRenderers: runner.extensions.reduce((count, ext) => count + ext.toolRenderers.length, 0),
+				toolResultExpanders: runner.extensions.reduce((count, ext) => count + ext.toolResultExpanders.length, 0),
 				markdownTransformers: runner.extensions.filter((ext) => ext.markdownTransformer).length,
 				extensions: runner.extensions.map((ext) => ({ path: ext.path, sourceInfo: ext.sourceInfo })),
 			});
@@ -373,6 +374,27 @@ export function createHost(config) {
 			if (!render) return null;
 			const [ctx, keep] = toolRenderContext(context, "result");
 			return keep(render(result, options, currentTheme(), ctx));
+		},
+		/** The first expander, in load order, that shows `result` of `toolName` when expanded. */
+		toolResultExpander(toolName, result) {
+			for (const expander of runner.extensions.flatMap((ext) => ext.toolResultExpanders)) {
+				const found = expander(toolName, result);
+				if (found && typeof found.render === "function") return found;
+			}
+			return null;
+		},
+		/** `{ maxHeight }` of the expander of `result`, or null. */
+		toolResultExpansion(toolName, result) {
+			const found = host.toolResultExpander(toolName, result);
+			if (!found) return null;
+			const maxHeight = Number(found.maxHeight);
+			return { maxHeight: Number.isFinite(maxHeight) && maxHeight > 0 ? Math.floor(maxHeight) : 0 };
+		},
+		renderToolResultExpanded(toolName, result, options, context) {
+			const found = host.toolResultExpander(toolName, result);
+			if (!found) return null;
+			const [ctx, keep] = toolRenderContext(context, "expanded");
+			return keep(found.render(options, currentTheme(), ctx));
 		},
 		releaseToolRender(toolCallId) {
 			toolRenderState.delete(toolCallId);

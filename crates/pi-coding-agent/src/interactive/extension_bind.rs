@@ -14,7 +14,8 @@ use super::components::{CustomEntryComponent, CustomEntryRenderer, CustomMessage
 use super::extension_ui::TuiExtensionUi;
 use super::mode::InteractiveMode;
 use super::renderers::{
-    ToolRenderContext, ToolRenderer, ToolResultView, format_tool_call_with_args, get_text_output, text,
+    ToolRenderContext, ToolRenderer, ToolResultExpander, ToolResultView, format_tool_call_with_args, get_text_output,
+    text,
 };
 use crate::extension_ui::ExtensionMode;
 use crate::extensions::{ExtensionBindings, ExtensionError, ExtensionRunner, ToolRenderRequest, ToolRendererInfo};
@@ -32,27 +33,58 @@ struct JsToolRenderer {
     builtin: Option<Rc<dyn ToolRenderer>>,
 }
 
+/// The render request of a row; registers the row's invalidator so `ui.invalidateTool` reaches it.
+fn render_request(mode: &Weak<InteractiveMode>, context: &ToolRenderContext<'_>) -> ToolRenderRequest {
+    if let Some(mode) = mode.upgrade()
+        && let Ok(mut state) = mode.state.try_borrow_mut()
+    {
+        let invalidators = &mut state.extensions.tool_invalidators;
+        invalidators.insert(context.tool_call_id.to_string(), context.invalidate.clone());
+    }
+    ToolRenderRequest {
+        tool_call_id: context.tool_call_id.to_string(),
+        args: context.args.clone(),
+        cwd: context.cwd.display().to_string(),
+        execution_started: context.execution_started,
+        args_complete: context.args_complete,
+        is_partial: context.is_partial,
+        expanded: context.expanded,
+        show_images: context.show_images,
+        is_error: context.is_error,
+        duration_ms: context.duration_ms,
+        output_pad: context.output_pad,
+    }
+}
+
+fn result_value(result: &ToolResultView) -> Value {
+    json!({"content": result.content, "details": result.details, "isError": result.is_error})
+}
+
 impl JsToolRenderer {
     fn request(&self, context: &ToolRenderContext<'_>) -> ToolRenderRequest {
-        if let Some(mode) = self.mode.upgrade()
-            && let Ok(mut state) = mode.state.try_borrow_mut()
-        {
-            let invalidators = &mut state.extensions.tool_invalidators;
-            invalidators.insert(context.tool_call_id.to_string(), context.invalidate.clone());
-        }
-        ToolRenderRequest {
-            tool_call_id: context.tool_call_id.to_string(),
-            args: context.args.clone(),
-            cwd: context.cwd.display().to_string(),
-            execution_started: context.execution_started,
-            args_complete: context.args_complete,
-            is_partial: context.is_partial,
-            expanded: context.expanded,
-            show_images: context.show_images,
-            is_error: context.is_error,
-            duration_ms: context.duration_ms,
-            output_pad: context.output_pad,
-        }
+        render_request(&self.mode, context)
+    }
+}
+
+/// The extensions' expanded bodies of tool results (`registerToolResultExpander`).
+struct JsToolResultExpander {
+    mode: Weak<InteractiveMode>,
+    runner: std::sync::Weak<ExtensionRunner>,
+}
+
+impl ToolResultExpander for JsToolResultExpander {
+    fn expand(
+        &self,
+        tool_name: &str,
+        result: &ToolResultView,
+        context: &mut ToolRenderContext<'_>,
+    ) -> Option<(ComponentRef, usize)> {
+        let runner = self.runner.upgrade()?;
+        let value = result_value(result);
+        let max_height = runner.tool_result_expansion(tool_name, &value)?;
+        let request = render_request(&self.mode, context);
+        let body = runner.render_tool_result_expanded(tool_name, &value, &request)?;
+        Some((component(body), max_height))
     }
 }
 
@@ -76,7 +108,7 @@ impl ToolRenderer for JsToolRenderer {
     fn render_result(&self, result: &ToolResultView, context: &mut ToolRenderContext<'_>) -> Option<ComponentRef> {
         let runner = self.runner.upgrade().filter(|_| self.info.result);
         let request = self.request(context);
-        let value = json!({"content": result.content, "details": result.details, "isError": result.is_error});
+        let value = result_value(result);
         if let Some(js) = runner.and_then(|runner| runner.render_tool_result(&self.tool_name, &value, &request)) {
             return Some(component(js));
         }
@@ -284,6 +316,15 @@ impl InteractiveMode {
             info,
             builtin: super::renderers::builtin_renderer(tool_name),
         }))
+    }
+
+    /// The expander of tool results, when an extension registered one.
+    pub(super) fn extension_result_expander(&self) -> Option<Rc<dyn ToolResultExpander>> {
+        let runner = self.session().extension_runner()?;
+        if runner.registry().tool_result_expanders == 0 {
+            return None;
+        }
+        Some(Rc::new(JsToolResultExpander { mode: self.weak.clone(), runner: Arc::downgrade(&runner) }))
     }
 
     pub(super) fn extension_markdown_transformers(&self) -> Vec<MarkdownTransformer> {

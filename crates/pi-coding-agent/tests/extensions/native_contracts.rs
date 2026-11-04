@@ -309,6 +309,7 @@ async fn tool_renderers_draw_tools_without_renderers_and_animate_spinner_tokens(
         "ui.working",
         "ui.chatStyle",
         "contextEntries",
+        "toolResultExpander",
     ];
     for feature in expected {
         assert!(features.as_array().unwrap().contains(&json!(feature)), "{features}");
@@ -340,4 +341,27 @@ async fn theme_working_indicator_and_later_tool_renderers_reach_the_host() {
         assert!(calls.contains(&line.to_string()), "{line} not in {calls:?}");
     }
     assert!(h.runner.tool_renderer_info("grep").is_some_and(|info| info.call));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_tool_result_expander_draws_claimed_results_of_any_tool() {
+    let (h, _ui) = native(Vec::new()).await;
+    let stored =
+        json!({"content": [{"type": "text", "text": "short"}], "details": {"nativeStored": "tr-1"}, "isError": false});
+    let plain = json!({"content": [{"type": "text", "text": "short"}], "details": {"exitCode": 0}, "isError": false});
+    assert_eq!(h.runner.tool_result_expansion("bash", &stored), Some(7));
+    assert_eq!(h.runner.tool_result_expansion("bash", &plain), None);
+    let request = ToolRenderRequest { tool_call_id: "x1".into(), expanded: true, ..ToolRenderRequest::default() };
+    let (runner, claimed) = (h.runner.clone(), stored.clone());
+    let lines = tokio::task::block_in_place(move || {
+        let mut body = runner.render_tool_result_expanded("bash", &claimed, &request).expect("an expanded body");
+        render_until(&mut body, 30, "EXPANDED bash tr-1 at 30 max 7")
+    });
+    assert_eq!(lines, vec!["EXPANDED bash tr-1 at 30 max 7".to_string()]);
+    h.session.prompt("/native-expander 12", Vec::new()).await.unwrap();
+    assert_eq!(entry_data(&h, "native-expander").unwrap()["bad"], json!(-32602));
+    assert_eq!(h.runner.tool_result_expansion("bash", &stored), Some(12));
+    h.session.prompt("/native-expander off", Vec::new()).await.unwrap();
+    assert_eq!(h.runner.tool_result_expansion("bash", &stored), None);
+    assert!(h.errors().is_empty(), "{:?}", h.errors());
 }

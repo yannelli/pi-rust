@@ -5,6 +5,7 @@ pub mod bash_execution;
 pub mod bordered_loader;
 pub mod custom_editor;
 pub mod diff;
+pub mod expanded_result;
 pub mod footer;
 pub mod messages;
 pub mod pi_logo;

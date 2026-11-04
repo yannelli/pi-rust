@@ -272,6 +272,28 @@ impl ExtensionRunner {
         self.blocking_component("renderToolResult", vec![json!(tool_name), result.clone(), options, request.context()])
     }
 
+    /// The height limit of the expanded body of `result`, when an extension draws it
+    /// (`registerToolResultExpander`). `Some(0)` means no limit.
+    pub fn tool_result_expansion(&self, tool_name: &str, result: &Value) -> Option<usize> {
+        if self.registry().tool_result_expanders == 0 {
+            return None;
+        }
+        let info = self.blocking_json("toolResultExpansion", vec![json!(tool_name), result.clone()])?;
+        Some(info["maxHeight"].as_u64().unwrap_or(0) as usize)
+    }
+
+    /// The expanded body of `result`, drawn by the extension that claims it.
+    pub fn render_tool_result_expanded(
+        &self,
+        tool_name: &str,
+        result: &Value,
+        request: &ToolRenderRequest,
+    ) -> Option<JsComponent> {
+        let options = json!({"expanded": true, "isPartial": request.is_partial});
+        let args = vec![json!(tool_name), result.clone(), options, request.context()];
+        self.blocking_component("renderToolResultExpanded", args)
+    }
+
     /// Forget the renderer state of a tool call whose row is gone.
     pub fn release_tool_render(&self, tool_call_id: &str) {
         let host = self.host().clone();

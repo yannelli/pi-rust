@@ -83,6 +83,7 @@ pub struct Registry {
     pub message_renderers: Vec<String>,
     pub entry_renderers: Vec<String>,
     pub tool_renderers: usize,
+    pub tool_result_expanders: usize,
     pub markdown_transformers: usize,
     pub extensions: Vec<LoadedExtension>,
 }

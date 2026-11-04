@@ -514,6 +514,10 @@
     {
       "item": "setChatStyle",
       "reason": "pi-rust extension: `ctx.ui.setChatStyle({ userPrefix, assistantPrefix, collapseThinking, roundedEditor })` styles chat messages and the editor, for the compact-tui extension. Upstream has no such call."
+    },
+    {
+      "item": "registerToolResultExpander",
+      "reason": "pi-rust extension: `pi.registerToolResultExpander((toolName, result) => ({ maxHeight, render }))` draws the expanded body of any tool's result in a height-limited, scrollable view, for the tool-results extension. Upstream has no such call."
     }
   ],
   "nodeBuiltins": [
