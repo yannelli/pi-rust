@@ -1,0 +1,13 @@
+# These test binaries have their own main and do not support `--list`, so nextest cannot run
+# them. CI runs them with `cargo test --test <name>` (see .github/workflows/ci.yml).
+[profile.default]
+default-filter = """
+not (binary(=node_fork) | binary(=node_cluster) | binary(=node_ipc_missing_handle)
+  | binary(=node_ipc_recovery) | binary(=node_ipc_windows_diag) | binary(=node_ipc_cloexec)
+  | binary(=chord2_manager_child))
+"""
+
+[profile.ci]
+fail-fast = false
+failure-output = "immediate-final"
+slow-timeout = { period = "60s", terminate-after = 5 }
