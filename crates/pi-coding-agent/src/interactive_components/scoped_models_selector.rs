@@ -8,9 +8,10 @@ use std::rc::Rc;
 use pi_ai::Model;
 use pi_tui::components::{Input, Text};
 use pi_tui::keys::matches_key;
+use pi_tui::list_overflow::ListRow;
 use pi_tui::{Component, Container, component, get_keybindings, get_select_page_index};
 
-use super::common::{bold, border, fg, fuzzy_filter_by, spacer, text, visible_window};
+use super::common::{bold, border, fg, fuzzy_filter_by, list_rows, spacer, text};
 use super::key_display_text;
 use super::model_selector::{distinct_model_name, model_search_text};
 use crate::theme::{ThemeColor, theme};
@@ -266,8 +267,8 @@ impl ScopedModelsSelector {
             list.add_child(text(&fg(ThemeColor::Muted, "  No matching models"), 0, 0));
             return;
         }
-        let (start, end) = visible_window(self.selected_index, self.filtered.len(), MAX_VISIBLE);
-        for (index, item) in self.filtered.iter().enumerate().take(end).skip(start) {
+        let mut rows = Vec::with_capacity(self.filtered.len());
+        for (index, item) in self.filtered.iter().enumerate() {
             let selected = index == self.selected_index;
             let prefix = if selected { fg(ThemeColor::Accent, "→ ") } else { "  ".into() };
             let id = item.model.as_ref().map_or(item.full_id.as_str(), |model| model.id.as_str());
@@ -279,12 +280,12 @@ impl ScopedModelsSelector {
                 item.model.as_ref().map_or_else(|| " [unavailable]".to_string(), |m| format!(" [{}]", m.provider));
             let status =
                 if item.model.is_some() && item.enabled { fg(ThemeColor::Accent, "✓ ") } else { "  ".into() };
-            list.add_child(text(&format!("{prefix}{status}{model_text}{name}{}", fg(ThemeColor::Muted, &badge)), 0, 0));
+            rows.push(ListRow::new(
+                format!("{prefix}{status}"),
+                format!("{model_text}{name}{}", fg(ThemeColor::Muted, &badge)),
+            ));
         }
-        if start > 0 || end < self.filtered.len() {
-            let info = format!("  ({}/{})", self.selected_index + 1, self.filtered.len());
-            list.add_child(text(&fg(ThemeColor::Muted, &info), 0, 0));
-        }
+        list.add_child(list_rows(rows, self.selected_index, MAX_VISIBLE));
         let selected = &self.filtered[self.selected_index];
         list.add_child(spacer(1));
         let name =

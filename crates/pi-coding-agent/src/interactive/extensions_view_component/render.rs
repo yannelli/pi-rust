@@ -1,6 +1,7 @@
 //! Rendering for [`ExtensionsBrowser`]: tabs, search, rows or details, status, and key hints.
 
 use pi_tui::Component;
+use pi_tui::list_overflow::ListRow;
 use pi_tui::utils::{truncate_to_width, wrap_text_with_ansi};
 
 use super::input::space_toggles;
@@ -93,18 +94,21 @@ fn row_lines(browser: &ExtensionsBrowser, width: usize) -> Vec<String> {
         return vec![t.fg(ThemeColor::Muted, " No matching extensions")];
     }
     let selected = browser.selected.min(visible.len() - 1);
-    let start = selected.saturating_sub(MAX_VISIBLE / 2).min(visible.len().saturating_sub(MAX_VISIBLE));
-    let end = (start + MAX_VISIBLE).min(visible.len());
-    let mut lines: Vec<String> = (start..end)
-        .map(|position| row_line(&browser.rows()[visible[position]], position == selected, width))
+    let rows: Vec<ListRow> = visible
+        .iter()
+        .enumerate()
+        .map(|(position, &index)| row_line(&browser.rows()[index], position == selected))
         .collect();
+    let rendered = browser.overflow.borrow_mut().render(&rows, selected, MAX_VISIBLE, width);
+    let (start, end) = (rendered.range.start, rendered.range.end);
+    let mut lines = rendered.lines;
     if start > 0 || end < visible.len() {
         lines.push(t.fg(ThemeColor::Muted, &format!("  ({}/{})", selected + 1, visible.len())));
     }
     lines
 }
 
-fn row_line(row: &ExtensionRow, selected: bool, width: usize) -> String {
+fn row_line(row: &ExtensionRow, selected: bool) -> ListRow {
     let t = theme();
     let prefix = if selected { t.fg(ThemeColor::Accent, "→ ") } else { "  ".to_string() };
     let state = match row.enabled {
@@ -114,11 +118,11 @@ fn row_line(row: &ExtensionRow, selected: bool, width: usize) -> String {
         None => "  ".to_string(),
     };
     let name = if selected { t.fg(ThemeColor::Accent, &row.name) } else { row.name.clone() };
-    let mut line = format!(" {prefix}{state}{name}{}", markers(row));
+    let mut line = format!("{name}{}", markers(row));
     if !row.description.is_empty() {
         line.push_str(&t.fg(ThemeColor::Dim, &format!("  {}", row.description)));
     }
-    truncate_to_width(&line, width)
+    ListRow::new(format!(" {prefix}{state}"), line)
 }
 
 fn markers(row: &ExtensionRow) -> String {

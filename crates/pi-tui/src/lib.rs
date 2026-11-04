@@ -52,7 +52,7 @@
 //! # Environment
 //!
 //! Read here: `PI_TUI_ESC_TIMEOUT`, `PI_TUI_WRITE_LOG`, `PI_TUI_DEBUG`, `PI_TUI_DEBUG_REDRAW`,
-//! `PI_PROGRAM_STATUS`, `PI_IMAGE_PROTOCOL`, `PI_TRUE_COLOR`, `PI_HYPERLINKS`, `TERM`,
+//! `PI_PROGRAM_STATUS`, `PI_REDUCED_MOTION`, `PI_IMAGE_PROTOCOL`, `PI_TRUE_COLOR`, `PI_HYPERLINKS`, `TERM`,
 //! `TERM_PROGRAM`, `COLORTERM`, `COLORFGBG`, `TMUX`, `ZELLIJ`, `STY`, `KITTY_WINDOW_ID`,
 //! `ITERM_SESSION_ID`, `WT_SESSION`, `WEZTERM_PANE`, `GHOSTTY_RESOURCES_DIR`, `TERMUX_VERSION`,
 //! `SSH_CONNECTION`, `SSH_CLIENT`, `SSH_TTY`, `COLUMNS`, `LINES`, `DISPLAY`. `PI_HARDWARE_CURSOR`
@@ -76,6 +76,7 @@ pub mod kill_ring;
 pub mod latex;
 pub mod layout;
 pub mod layout_node;
+pub mod list_overflow;
 pub mod main_screen;
 pub mod native_platform;
 pub mod oklab;

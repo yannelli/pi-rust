@@ -139,7 +139,11 @@ impl Component for RadiusLoginMenu {
         let RadiusOption { label, text } = &self.radius_option;
         let selected = fg(ThemeColor::Accent, "→ ") + &fg(ThemeColor::Accent, label);
         let selected_line = Text::new(&selected, 1, 0).render(width).into_iter().next();
-        let index = selected_line.and_then(|line| lines.iter().position(|candidate| *candidate == line));
+        let visible = |line: &str| pi_tui::utils::strip_terminal_sequences(line).trim_end().to_string();
+        let index = selected_line.and_then(|line| {
+            let target = visible(&line);
+            lines.iter().position(|candidate| visible(candidate) == target)
+        });
         self.animating.set(index.is_some() && self.timer.get().is_some());
         if let Some(index) = index {
             let shimmer = radius_shimmer(text, self.started.elapsed());

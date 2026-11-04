@@ -25,6 +25,7 @@ pub fn process_terminal() -> TerminalRef {
 
 /// A main-screen TUI for a startup dialog, themed by `settings`.
 fn startup_tui(terminal: TerminalRef, settings: &SettingsManager) -> Tui {
+    pi_tui::list_overflow::set_list_overflow(settings.list_overflow());
     let setting = settings.theme_setting();
     let name = resolve_theme_setting(setting.as_deref(), get_terminal_theme());
     init_theme(Some(name.as_deref().unwrap_or(SYSTEM_THEME_NAME)), false);

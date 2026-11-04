@@ -8,9 +8,12 @@ mod tests_input;
 #[cfg(test)]
 mod tests_render;
 
+use std::cell::RefCell;
+
 use pi_tui::Component;
 use pi_tui::components::{Input, InputOptions};
 use pi_tui::fuzzy::fuzzy_filter;
+use pi_tui::list_overflow::ListOverflowState;
 
 /// One extension as the browser shows it, installed or from the catalog.
 #[derive(Clone, Debug)]
@@ -85,6 +88,7 @@ pub struct ExtensionsBrowser {
     catalog_error: Option<String>,
     search: Input,
     selected: usize,
+    overflow: RefCell<ListOverflowState>,
     mode: Mode,
     status: Option<String>,
     busy: bool,
@@ -103,6 +107,7 @@ impl ExtensionsBrowser {
             catalog_error: None,
             search: Input::new(options),
             selected: 0,
+            overflow: RefCell::default(),
             mode: Mode::List,
             status: None,
             busy: false,

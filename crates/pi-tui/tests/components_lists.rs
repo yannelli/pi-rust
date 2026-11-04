@@ -82,6 +82,104 @@ fn index_of(line: &str, text: &str) -> usize {
     line[..line.find(text).expect("text")].chars().count()
 }
 
+struct OverflowModeGuard(pi_tui::list_overflow::ListOverflow);
+
+impl OverflowModeGuard {
+    fn new(mode: pi_tui::list_overflow::ListOverflow) -> Self {
+        let previous = pi_tui::list_overflow::list_overflow();
+        pi_tui::list_overflow::set_list_overflow(mode);
+        Self(previous)
+    }
+}
+
+impl Drop for OverflowModeGuard {
+    fn drop(&mut self) {
+        pi_tui::list_overflow::set_list_overflow(self.0);
+    }
+}
+
+#[test]
+fn select_list_fits_each_overflow_mode() {
+    use pi_tui::list_overflow::ListOverflow;
+    for mode in [ListOverflow::Truncate, ListOverflow::Wrap, ListOverflow::Scroll] {
+        let _mode = OverflowModeGuard::new(mode);
+        let mut list = SelectList::new(
+            vec![item("long", "abcdefghijklmno", None)],
+            5,
+            select_theme(),
+            SelectListLayoutOptions::default(),
+        );
+        let lines = list.render(10);
+        assert!(lines.iter().all(|line| visible_width(line) <= 10), "{lines:?}");
+        match mode {
+            ListOverflow::Wrap => assert_eq!(lines, ["→ abcdefgh", "  ijklmno"]),
+            ListOverflow::Truncate => {
+                assert_eq!(lines.len(), 1);
+                assert_eq!(pi_tui::utils::strip_terminal_sequences(&lines[0]), "→ abcde…");
+            }
+            ListOverflow::Scroll => {
+                let plain = pi_tui::utils::strip_terminal_sequences(&lines[0]);
+                let expected = if pi_tui::list_overflow::reduced_motion() { "→ abcde…" } else { "→ abcdefgh" };
+                assert_eq!(plain, expected);
+                assert_eq!(lines.len(), 1);
+            }
+        }
+    }
+}
+
+#[test]
+fn settings_list_fits_each_overflow_mode() {
+    use pi_tui::list_overflow::ListOverflow;
+    for mode in [ListOverflow::Truncate, ListOverflow::Wrap, ListOverflow::Scroll] {
+        let _mode = OverflowModeGuard::new(mode);
+        let (mut list, _) = settings_list(vec![cycling("a", "Mode", "abcdefghijklmno", &[])], 5, false);
+        let lines = list.render(12);
+        assert!(lines.iter().all(|line| visible_width(line) <= 12), "{lines:?}");
+        match mode {
+            ListOverflow::Wrap => {
+                assert_eq!(lines[0].trim_end(), "> Mode");
+                assert!(lines.iter().any(|line| line.ends_with("klmno")), "{lines:?}");
+            }
+            ListOverflow::Truncate => assert_eq!(pi_tui::utils::strip_terminal_sequences(&lines[0]), "> Mode  a…"),
+            ListOverflow::Scroll => {
+                let expected = if pi_tui::list_overflow::reduced_motion() { "> Mode  a…" } else { "> Mode  abcd" };
+                assert_eq!(pi_tui::utils::strip_terminal_sequences(&lines[0]), expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn wrapped_select_list_keeps_the_selection_visible_and_maps_continuation_clicks() {
+    use pi_tui::list_overflow::ListOverflow;
+    let _mode = OverflowModeGuard::new(ListOverflow::Wrap);
+    let items = (0..8).map(|i| item(&i.to_string(), "abcdefghijklmno", None)).collect();
+    let mut list = SelectList::new(items, 5, select_theme(), SelectListLayoutOptions::default());
+    list.set_selected_index(7);
+    let lines = list.render(10);
+    let selected = lines.iter().position(|line| line.starts_with("→ ")).unwrap();
+    assert_eq!(lines[selected + 1], "  ijklmno");
+    assert!(selected + 1 < 5);
+    list.handle_mouse(&mouse(TuiMouseEventType::Press, 1, 1, 10, 6));
+    assert_eq!(list.selected_index(), 6);
+}
+
+#[test]
+fn wrapped_settings_keep_selection_visible_and_map_continuation_clicks() {
+    use pi_tui::list_overflow::ListOverflow;
+    let _mode = OverflowModeGuard::new(ListOverflow::Wrap);
+    let items = (0..8).map(|i| cycling(&i.to_string(), "abcdefghijklmno", "v", &["v", "other"])).collect();
+    let (mut list, changes) = settings_list(items, 6, true);
+    list.select_item("7");
+    let lines = list.render(12);
+    let selected = lines.iter().position(|line| line.starts_with("> abc")).unwrap();
+    assert_eq!(lines[selected + 1], "  klmno  v");
+    assert!(selected + 1 < 8);
+    list.handle_mouse(&mouse(TuiMouseEventType::Press, 1, 3, 12, 12));
+    list.handle_mouse(&mouse(TuiMouseEventType::Click, 1, 3, 12, 12));
+    assert_eq!(*changes.borrow(), [change("5", "other")]);
+}
+
 type Changes = Rc<RefCell<Vec<(String, String)>>>;
 
 fn settings_list(items: Vec<SettingItem>, max_visible: usize, enable_search: bool) -> (SettingsList, Changes) {

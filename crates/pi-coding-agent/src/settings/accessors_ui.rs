@@ -237,6 +237,14 @@ impl SettingsManager {
         self.set_global_value("outputPad", Some(json!(padding.min(1))));
     }
 
+    pub fn list_overflow(&self) -> ListOverflow {
+        self.state().merged.list_overflow.unwrap_or_default()
+    }
+
+    pub fn set_list_overflow(&self, mode: ListOverflow) {
+        self.set_global_value("listOverflow", Some(json!(mode)));
+    }
+
     pub fn autocomplete_max_visible(&self) -> u64 {
         self.state().merged.autocomplete_max_visible.filter(|n| n.is_finite() && *n >= 0.0).map_or(5, |n| n as u64)
     }

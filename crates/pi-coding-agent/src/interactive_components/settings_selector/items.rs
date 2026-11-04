@@ -298,6 +298,13 @@ pub(super) fn build_items(config: &SettingsConfig, supports_images: bool, submen
             config.fullscreen_wheel_scroll_lines.map_or("auto".into(), |lines| lines.to_string()),
             &wheel_values,
         ),
+        item(
+            "list-overflow",
+            "List overflow",
+            "Fit long list rows by truncating, wrapping, or scrolling the selected row",
+            enum_str(config.list_overflow),
+            &["truncate", "wrap", "scroll"],
+        ),
         submenu_item("theme", "Theme", "Color theme for the interface", config.current_theme.clone(), submenus.theme),
     ]);
     let index = items.iter().position(|item| item.id == "cache-warming-mode").unwrap() + 1;
@@ -359,6 +366,7 @@ pub(super) fn dispatch_change(callbacks: &mut SettingsCallbacks, id: &str, value
         "editor-padding" => number.into_iter().for_each(&mut callbacks.on_editor_padding_x_change),
         "output-padding" => (callbacks.on_output_pad_change)(if value == "0" { 0 } else { 1 }),
         "autocomplete-max-visible" => number.into_iter().for_each(&mut callbacks.on_autocomplete_max_visible_change),
+        "list-overflow" => parse_enum(value).into_iter().for_each(&mut callbacks.on_list_overflow_change),
         "clear-on-shrink" => (callbacks.on_clear_on_shrink_change)(flag),
         "terminal-progress" => (callbacks.on_show_terminal_progress_change)(flag),
         "tui-mode" => parse_enum(value).into_iter().for_each(&mut callbacks.on_tui_mode_change),

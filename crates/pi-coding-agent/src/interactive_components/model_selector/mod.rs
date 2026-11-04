@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use pi_ai::Model;
 use pi_tui::components::{Input, Text};
+use pi_tui::list_overflow::ListRow;
 use pi_tui::{Component, Container, Tui, component, get_keybindings, get_select_page_index};
 use tokio_util::sync::CancellationToken;
 
@@ -17,7 +18,7 @@ pub use source::{
     model_search_text, model_selector_search_text,
 };
 
-use super::common::{border, fg, fuzzy_filter_by, locale_compare, spacer, text, visible_window};
+use super::common::{border, fg, fuzzy_filter_by, list_rows, locale_compare, spacer, text};
 use super::{key_display_text, key_hint};
 use crate::model_resolver::ScopedModel;
 use crate::theme::ThemeColor;
@@ -256,9 +257,9 @@ impl ModelSelector {
     fn update_list(&mut self) {
         let mut list = self.list.borrow_mut();
         list.clear();
-        let (start, end) = visible_window(self.selected_index, self.filtered.len(), MAX_VISIBLE);
+        let mut rows = Vec::with_capacity(self.filtered.len());
         let current = self.current_model.as_ref();
-        for (index, model) in self.filtered.iter().enumerate().take(end).skip(start) {
+        for (index, model) in self.filtered.iter().enumerate() {
             let selected = index == self.selected_index;
             let cursor = if selected { fg(ThemeColor::Accent, "→ ") } else { "  ".into() };
             let marker = if models_equal(current, model) { fg(ThemeColor::Accent, "✓ ") } else { "  ".into() };
@@ -267,12 +268,9 @@ impl ModelSelector {
                 .map_or_else(String::new, |name| fg(ThemeColor::Muted, &format!(" ({name})")));
             let provider = fg(ThemeColor::Muted, &format!("[{}]", model.provider));
             let badge = if self.is_default_model(model) { fg(ThemeColor::Muted, " · default") } else { String::new() };
-            list.add_child(text(&format!("{cursor}{marker}{id}{name} {provider}{badge}"), 0, 0));
+            rows.push(ListRow::new(format!("{cursor}{marker}"), format!("{id}{name} {provider}{badge}")));
         }
-        if start > 0 || end < self.filtered.len() {
-            let info = format!("  ({}/{})", self.selected_index + 1, self.filtered.len());
-            list.add_child(text(&fg(ThemeColor::Muted, &info), 0, 0));
-        }
+        list.add_child(list_rows(rows, self.selected_index, MAX_VISIBLE));
         if let Some(error) = &self.error_message {
             for line in error.split('\n') {
                 list.add_child(text(&fg(ThemeColor::Error, line), 0, 0));

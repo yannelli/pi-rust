@@ -93,6 +93,7 @@ pub(crate) struct BaseState {
     pub rendered_overlay_layouts: Vec<RenderedOverlayLayout>,
     pub overlay_focus_restore: FocusRestore,
     listener_counter: ListenerId,
+    list_animation: crate::list_overflow::ListAnimation,
 }
 
 impl BaseState {
@@ -117,6 +118,7 @@ impl BaseState {
             rendered_overlay_layouts: Vec::new(),
             overlay_focus_restore: FocusRestore::Inactive,
             listener_counter: 0,
+            list_animation: crate::list_overflow::ListAnimation::default(),
         }
     }
 
@@ -263,6 +265,7 @@ impl TuiInner {
         let notifications = {
             let mut state = self.state.borrow_mut();
             state.stopped = true;
+            state.list_animation.stop();
             state.render_deadline = None;
             state.render_requested = false;
             state.immediate_render = false;
@@ -324,6 +327,7 @@ impl TuiInner {
         let running = match self.state.try_borrow_mut() {
             Ok(mut state) if state.started && !state.stopped => {
                 state.stopped = true;
+                state.list_animation.stop();
                 true
             }
             _ => false,
@@ -346,7 +350,21 @@ impl TuiInner {
 
     fn do_render(&self) -> Result<(), TuiError> {
         self.apply_pending_focus_flags();
-        if self.is_alt() { crate::alt_screen::do_render(self) } else { crate::main_screen::do_render(self) }
+        crate::list_overflow::ListAnimation::begin_frame();
+        let result =
+            if self.is_alt() { crate::alt_screen::do_render(self) } else { crate::main_screen::do_render(self) };
+        let weak = self.weak.clone();
+        let mut state = self.state.borrow_mut();
+        if result.is_ok() && !state.stopped {
+            state.list_animation.end_frame(move || {
+                if let Some(tui) = weak.upgrade() {
+                    tui.request_render(false);
+                }
+            });
+        } else {
+            state.list_animation.stop();
+        }
+        result
     }
 
     pub fn render_now(&self, force: bool) -> Result<(), TuiError> {

@@ -6,6 +6,7 @@ use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pi_tui::components::Input;
+use pi_tui::list_overflow::{ListOverflowState, ListRow};
 use pi_tui::utils::{truncate_to_width, truncate_to_width_with, visible_width};
 use pi_tui::{Component, get_keybindings};
 
@@ -78,6 +79,7 @@ pub struct SessionList {
     confirming_delete_path: Option<PathBuf>,
     current_session_canonical_path: Option<PathBuf>,
     max_visible: usize,
+    overflow: ListOverflowState,
     pub on_select: Option<Box<dyn FnMut(PathBuf)>>,
     pub on_cancel: Callback,
     pub on_exit: Callback,
@@ -117,6 +119,7 @@ impl SessionList {
             confirming_delete_path: None,
             current_session_canonical_path: current_session_file_path.map(canonicalize),
             max_visible: 10,
+            overflow: ListOverflowState::default(),
             on_select: None,
             on_cancel: None,
             on_exit: None,
@@ -222,7 +225,7 @@ impl SessionList {
         }
     }
 
-    fn render_row(&self, index: usize, width: usize, now: i64) -> String {
+    fn render_row(&self, index: usize, width: usize, now: i64) -> ListRow {
         let theme = theme();
         let node = &self.filtered[index];
         let session = &node.session;
@@ -251,18 +254,21 @@ impl SessionList {
         } else {
             None
         };
-        let mut message = color.map(|color| theme.fg(color, &truncated)).unwrap_or(truncated);
-        if selected {
-            message = theme.bold(&message);
-        }
-        let left = cursor + &theme.fg(ThemeColor::Dim, &prefix) + &message;
+        let style_message = |text: &str| {
+            let message = color.map(|color| theme.fg(color, text)).unwrap_or_else(|| text.to_string());
+            if selected { theme.bold(&message) } else { message }
+        };
+        let row_prefix = cursor + &theme.fg(ThemeColor::Dim, &prefix);
+        let left = row_prefix.clone() + &style_message(&truncated);
         let spacing = (width as i64 - visible_width(&left) as i64 - visible_width(&right) as i64).max(1) as usize;
         let right = theme.fg(if confirming { ThemeColor::Error } else { ThemeColor::Dim }, &right);
         let mut line = format!("{left}{}{right}", " ".repeat(spacing));
         if selected {
             line = theme.bg(ThemeBg::SelectedBg, &line);
         }
-        truncate_to_width(&line, width)
+        let content = format!("{}  {right}", style_message(normalized.trim()));
+        let content = if selected { theme.bg(ThemeBg::SelectedBg, &content) } else { content };
+        ListRow::new(row_prefix, content).with_truncated(truncate_to_width(&line, width))
     }
 
     fn pass_to_search(&mut self, data: &str) {
@@ -293,12 +299,11 @@ impl Component for SessionList {
             return lines;
         }
         let len = self.filtered.len();
-        let start = (self.selected_index as i64 - (self.max_visible / 2) as i64)
-            .min(len as i64 - self.max_visible as i64)
-            .max(0) as usize;
-        let end = (start + self.max_visible).min(len);
         let now = now_millis();
-        lines.extend((start..end).map(|index| self.render_row(index, width, now)));
+        let rows: Vec<ListRow> = (0..len).map(|index| self.render_row(index, width, now)).collect();
+        let rendered = self.overflow.render(&rows, self.selected_index, self.max_visible, width);
+        let (start, end) = (rendered.range.start, rendered.range.end);
+        lines.extend(rendered.lines);
         if start > 0 || end < len {
             let scroll = format!("  ({}/{len})", self.selected_index + 1);
             lines.push(theme().fg(ThemeColor::Muted, &truncate_to_width_with(&scroll, width, "", false)));

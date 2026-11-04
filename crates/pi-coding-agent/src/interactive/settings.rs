@@ -115,6 +115,7 @@ impl InteractiveMode {
             editor_padding_x: settings.editor_padding_x(),
             output_pad: settings.output_pad(),
             autocomplete_max_visible: settings.autocomplete_max_visible(),
+            list_overflow: settings.list_overflow(),
             quiet_startup: settings.quiet_startup(),
             default_project_trust: DefaultProjectTrust::from_setting(settings.default_project_trust()),
             clear_on_shrink: settings.clear_on_shrink(),
@@ -301,6 +302,11 @@ impl InteractiveMode {
             on_quiet_startup_change: on!(weak, |mode, quiet| mode.settings().set_quiet_startup(quiet)),
             on_default_project_trust_change: on!(weak, |mode, trust| {
                 mode.settings().set_default_project_trust(trust.as_str())
+            }),
+            on_list_overflow_change: on!(weak, |mode, overflow| {
+                mode.settings().set_list_overflow(overflow);
+                pi_tui::list_overflow::set_list_overflow(mode.settings().list_overflow());
+                mode.request_render();
             }),
             on_clear_on_shrink_change: on!(weak, |mode, enabled| {
                 mode.settings().set_clear_on_shrink(enabled);

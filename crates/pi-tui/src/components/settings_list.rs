@@ -10,6 +10,7 @@ use crate::components::input::{Input, InputOptions};
 use crate::components::scroll_view::StyleFn;
 use crate::fuzzy::fuzzy_filter;
 use crate::keybindings::{get_keybindings, get_select_page_index, ids};
+use crate::list_overflow::{ListOverflowState, ListRow};
 use crate::utils::{truncate_to_width, truncate_to_width_with, visible_width, wrap_text_with_ansi};
 
 /// Builds a submenu for an item from its current value and a [`SubmenuDone`] handle.
@@ -94,6 +95,8 @@ pub struct SettingsList {
     selected_index: usize,
     mouse_pressed_index: Option<usize>,
     max_visible: usize,
+    overflow: ListOverflowState,
+    rendered_rows: Vec<usize>,
     on_change: SettingChangeCallback,
     on_cancel: Box<dyn FnMut()>,
     search_input: Option<Input>,
@@ -119,6 +122,8 @@ impl SettingsList {
             selected_index: 0,
             mouse_pressed_index: None,
             max_visible,
+            overflow: ListOverflowState::default(),
+            rendered_rows: Vec::new(),
             on_change: Box::new(on_change),
             on_cancel: Box::new(on_cancel),
             search_input: options.enable_search.then(|| Input::new(InputOptions::default())),
@@ -251,9 +256,9 @@ impl SettingsList {
             return lines;
         }
 
-        let (start, end) = self.visible_range(display.len());
+        let mut rows = Vec::with_capacity(display.len());
         let max_label_width = self.items.iter().map(|item| visible_width(&item.label)).max().unwrap_or(0).min(36);
-        for (index, &item_index) in display.iter().enumerate().take(end).skip(start) {
+        for (index, &item_index) in display.iter().enumerate() {
             let item = &self.items[item_index];
             let is_selected = index == self.selected_index;
             let prefix = if is_selected { self.theme.cursor.as_str() } else { "  " };
@@ -264,11 +269,19 @@ impl SettingsList {
             let used_width = visible_width(prefix) + max_label_width + visible_width(separator);
             let value_max_width = width.saturating_sub(used_width + 2);
             let value = (self.theme.value)(
-                &truncate_to_width_with(&item.current_value, value_max_width, "", false),
+                &truncate_to_width_with(&item.current_value, value_max_width, "…", false),
                 is_selected,
             );
-            lines.push(truncate_to_width(&format!("{prefix}{label}{separator}{value}"), width));
+            let full_value = (self.theme.value)(&item.current_value, is_selected);
+            rows.push(
+                ListRow::new(prefix, format!("{label}{separator}{full_value}"))
+                    .with_truncated(format!("{prefix}{label}{separator}{value}")),
+            );
         }
+        let rendered = self.overflow.render(&rows, self.selected_index, self.max_visible, width);
+        let (start, end) = (rendered.range.start, rendered.range.end);
+        self.rendered_rows = rendered.row_indices;
+        lines.extend(rendered.lines);
 
         if start > 0 || end < display.len() {
             let scroll_text = format!("  ({}/{})", self.selected_index + 1, display.len());
@@ -389,12 +402,17 @@ impl Component for SettingsList {
             return None;
         }
         let row_offset = if self.search_enabled() { 2 } else { 0 };
-        let (start, end) = self.visible_range(len);
-        let index = start as i64 + i64::from(event.y) - row_offset;
-        if index < start as i64 || index >= end as i64 {
-            return None;
-        }
-        let index = index as usize;
+        let y = i64::from(event.y) - row_offset;
+        let index = if self.rendered_rows.is_empty() {
+            let (start, end) = self.visible_range(len);
+            let index = start as i64 + y;
+            if index < start as i64 || index >= end as i64 {
+                return None;
+            }
+            index as usize
+        } else {
+            *self.rendered_rows.get(usize::try_from(y).ok()?)?
+        };
         if is_press {
             self.mouse_pressed_index = Some(index);
             self.selected_index = index;

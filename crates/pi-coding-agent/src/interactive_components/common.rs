@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use pi_tui::components::{Spacer, Text, TruncatedText};
+use pi_tui::list_overflow::{ListRow, ListRows};
 use pi_tui::{ComponentRef, component};
 
 use super::DynamicBorder;
@@ -17,6 +18,11 @@ pub fn text(content: &str, padding_x: usize, padding_y: usize) -> ComponentRef {
 /// A [`TruncatedText`] child.
 pub fn truncated(content: &str, padding_x: usize, padding_y: usize) -> ComponentRef {
     component(TruncatedText::new(content, padding_x, padding_y))
+}
+
+/// Selectable rows fitted with the current list overflow setting.
+pub fn list_rows(rows: Vec<ListRow>, selected: usize, max_lines: usize) -> ComponentRef {
+    component(ListRows::new(rows, selected, max_lines))
 }
 
 /// A [`Spacer`] child.
@@ -45,12 +51,6 @@ pub type Shared<F> = Rc<RefCell<Box<F>>>;
 /// Wraps a callback for sharing.
 pub fn shared<F: ?Sized>(callback: Box<F>) -> Shared<F> {
     Rc::new(RefCell::new(callback))
-}
-
-/// Upstream `Math.max(0, Math.min(selected - floor(max / 2), len - max))` and the end index.
-pub fn visible_window(selected: usize, len: usize, max_visible: usize) -> (usize, usize) {
-    let start = (selected as i64 - (max_visible / 2) as i64).min(len as i64 - max_visible as i64).max(0) as usize;
-    (start, (start + max_visible).min(len))
 }
 
 /// [`pi_tui::fuzzy::fuzzy_filter`] with computed search text.

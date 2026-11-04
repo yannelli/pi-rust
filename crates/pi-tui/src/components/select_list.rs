@@ -7,6 +7,7 @@ use crate::component::{
 };
 use crate::components::scroll_view::StyleFn;
 use crate::keybindings::{get_keybindings, get_select_page_index, ids};
+use crate::list_overflow::{ListOverflowState, ListRow};
 use crate::utils::{js_trim, truncate_to_width_with, visible_width};
 
 const DEFAULT_PRIMARY_COLUMN_WIDTH: usize = 32;
@@ -73,6 +74,8 @@ pub struct SelectList {
     selected_index: usize,
     mouse_pressed_index: Option<usize>,
     max_visible: usize,
+    overflow: ListOverflowState,
+    rendered_rows: Vec<usize>,
     theme: SelectListTheme,
     layout: SelectListLayoutOptions,
     pub on_select: Option<SelectItemCallback>,
@@ -110,6 +113,8 @@ impl SelectList {
             selected_index: 0,
             mouse_pressed_index: None,
             max_visible,
+            overflow: ListOverflowState::default(),
+            rendered_rows: Vec::new(),
             theme,
             layout,
             on_select: None,
@@ -195,7 +200,7 @@ impl SelectList {
             Some(truncate) => {
                 truncate(&SelectListTruncatePrimaryContext { text, max_width, column_width, item, is_selected })
             }
-            None => truncate_to_width_with(text, max_width, "", false),
+            None => truncate_to_width_with(text, max_width, "…", false),
         };
         truncate_to_width_with(&truncated, max_width, "", false)
     }
@@ -214,7 +219,7 @@ impl SelectList {
             let description_start = prefix_width + value_width + spacing.len();
             let remaining_width = width as i64 - description_start as i64 - 2;
             if remaining_width > MIN_DESCRIPTION_WIDTH {
-                let description = truncate_to_width_with(&description, remaining_width as usize, "", false);
+                let description = truncate_to_width_with(&description, remaining_width as usize, "…", false);
                 if is_selected {
                     return (self.theme.selected_text)(&format!("{prefix}{value}{spacing}{description}"));
                 }
@@ -234,12 +239,34 @@ impl Component for SelectList {
             return vec![(self.theme.no_match)("  No matching commands")];
         }
         let primary_column_width = self.primary_column_width();
-        let (start, end) = self.visible_range();
-        let mut lines: Vec<String> = (start..end)
-            .map(|index| {
-                self.render_item(&self.filtered_items[index], index == self.selected_index, width, primary_column_width)
+        let rows: Vec<ListRow> = self
+            .filtered_items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                let selected = index == self.selected_index;
+                let prefix = if selected { "→ " } else { "  " };
+                let value = Self::display_value(item);
+                let description = item.description.as_deref().map(normalize_to_single_line).unwrap_or_default();
+                let content = if description.is_empty() {
+                    value.to_string()
+                } else {
+                    let spacing = " ".repeat(primary_column_width.saturating_sub(visible_width(value)).max(2));
+                    format!("{value}{spacing}{}", (self.theme.description)(&description))
+                };
+                let content = if selected { (self.theme.selected_text)(&content) } else { content };
+                ListRow::new(prefix, content).with_truncated(self.render_item(
+                    item,
+                    selected,
+                    width,
+                    primary_column_width,
+                ))
             })
             .collect();
+        let rendered = self.overflow.render(&rows, self.selected_index, self.max_visible, width);
+        let (start, end) = (rendered.range.start, rendered.range.end);
+        self.rendered_rows = rendered.row_indices;
+        let mut lines = rendered.lines;
         if start > 0 || end < self.filtered_items.len() {
             let scroll_text = format!("  ({}/{})", self.selected_index + 1, self.filtered_items.len());
             lines.push((self.theme.scroll_info)(&truncate_to_width_with(
@@ -318,12 +345,16 @@ impl Component for SelectList {
         if event.button != TuiMouseButton::Left || !(is_press || event.kind == TuiMouseEventType::Click) {
             return None;
         }
-        let (start, end) = self.visible_range();
-        let index = start as i64 + i64::from(event.y);
-        if index < start as i64 || index >= end as i64 {
-            return None;
-        }
-        let index = index as usize;
+        let index = if self.rendered_rows.is_empty() {
+            let (start, end) = self.visible_range();
+            let index = start as i64 + i64::from(event.y);
+            if index < start as i64 || index >= end as i64 {
+                return None;
+            }
+            index as usize
+        } else {
+            *self.rendered_rows.get(usize::try_from(event.y).ok()?)?
+        };
         if is_press {
             self.mouse_pressed_index = Some(index);
             if self.selected_index != index {
