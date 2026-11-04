@@ -331,7 +331,7 @@ async fn theme_working_indicator_and_later_tool_renderers_reach_the_host() {
         r#"working message: Some("Thinking (3s)")"#,
         r#"working indicator: Some((Some(["a", "b"]), Some(90)))"#,
         r#"hidden thinking label: Some("Thought")"#,
-        r#"chat style: ChatStyle { user_prefix: Some("› "), assistant_prefix: None, collapse_thinking: true, rounded_editor: false }"#,
+        r#"chat style: ChatStyle { user_prefix: Some("› "), assistant_prefix: None, collapse_thinking: true, rounded_editor: false, editor_border_color: Some(Token(BorderAccent)), prompt_layout: Some(Caret) }"#,
         "working indicator: None",
         "working message: None",
     ];

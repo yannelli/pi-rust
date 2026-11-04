@@ -10,6 +10,7 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use crate::extensions::{ComponentFactory, CustomRequest};
+use crate::theme::ThemeColor;
 
 /// Editor text and cursor (a byte offset) for [`ExtensionUi::autocomplete_base`].
 #[derive(Clone, Debug, Default)]
@@ -118,18 +119,58 @@ pub struct ChatStyle {
     pub collapse_thinking: bool,
     /// Round editor corners, and side bars when the editor has padding.
     pub rounded_editor: bool,
+    /// The editor border color in every layout, in place of the thinking level and bash colors.
+    pub editor_border_color: Option<EditorBorderColor>,
+    /// The frame around the editor text; `None` leaves it to `rounded_editor`.
+    pub prompt_layout: Option<PromptLayout>,
+}
+
+/// An editor border color: a theme color token or a `#rrggbb` color.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EditorBorderColor {
+    Token(ThemeColor),
+    Hex(String),
+}
+
+impl EditorBorderColor {
+    pub fn parse(value: &str) -> Option<Self> {
+        if let Some(digits) = value.strip_prefix('#') {
+            let is_hex = digits.len() == 6 && digits.chars().all(|digit| digit.is_ascii_hexdigit());
+            return is_hex.then(|| Self::Hex(value.to_ascii_lowercase()));
+        }
+        ThemeColor::from_name(value).map(Self::Token)
+    }
+}
+
+/// The frame around the editor text (`promptLayout`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PromptLayout {
+    /// The rounded editor: rounded corners and side bars in the padding.
+    Frame,
+    /// A rounded box with a `›` gutter and a placeholder.
+    Caret,
+    /// A caret box after a blank line, with plain border rules in the theme border color.
+    Harbor,
 }
 
 impl ChatStyle {
     /// The style of `setChatStyle(options)`: `{ userPrefix, assistantPrefix, collapseThinking,
-    /// roundedEditor }`; missing or invalid fields keep pi's look.
+    /// roundedEditor, editorBorderColor, promptLayout }`; missing or invalid fields keep pi's look.
     pub fn from_json(options: &Value) -> Self {
         let prefix = |key: &str| options[key].as_str().filter(|text| !text.is_empty()).map(str::to_string);
+        let prompt_layout = match options["promptLayout"].as_str() {
+            Some("frame") => Some(PromptLayout::Frame),
+            Some("caret") => Some(PromptLayout::Caret),
+            Some("harbor") => Some(PromptLayout::Harbor),
+            _ => None,
+        };
         Self {
             user_prefix: prefix("userPrefix"),
             assistant_prefix: prefix("assistantPrefix"),
             collapse_thinking: options["collapseThinking"].as_bool() == Some(true),
             rounded_editor: options["roundedEditor"].as_bool() == Some(true),
+            editor_border_color: options["editorBorderColor"].as_str().and_then(EditorBorderColor::parse),
+            prompt_layout,
         }
     }
 }
@@ -335,4 +376,39 @@ impl ExtensionUi for NoOpExtensionUi {
     fn set_title(&self, _title: &str) {}
 
     fn set_editor_text(&self, _text: &str) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn chat_style_reads_the_editor_border_color_and_prompt_layout() {
+        let style = ChatStyle::from_json(&json!({"editorBorderColor": "borderAccent", "promptLayout": "harbor"}));
+        assert_eq!(style.editor_border_color, Some(EditorBorderColor::Token(ThemeColor::BorderAccent)));
+        assert_eq!(style.prompt_layout, Some(PromptLayout::Harbor));
+
+        let style = ChatStyle::from_json(&json!({"editorBorderColor": "#FF8800", "promptLayout": "caret"}));
+        assert_eq!(style.editor_border_color, Some(EditorBorderColor::Hex("#ff8800".into())));
+        assert_eq!(style.prompt_layout, Some(PromptLayout::Caret));
+        assert_eq!(ChatStyle::from_json(&json!({"promptLayout": "frame"})).prompt_layout, Some(PromptLayout::Frame));
+    }
+
+    #[test]
+    fn chat_style_keeps_pi_look_for_invalid_fields() {
+        for (color, layout) in [
+            (json!(""), json!("box")),
+            (json!("#ff88"), json!(1)),
+            (json!("#gg8800"), json!("Caret")),
+            (json!("nope"), json!(null)),
+            (json!("selectedBg"), json!(true)),
+            (json!(7), json!("")),
+        ] {
+            let style = ChatStyle::from_json(&json!({"editorBorderColor": color, "promptLayout": layout}));
+            assert_eq!(style, ChatStyle::default(), "{color} {layout}");
+        }
+        assert_eq!(ChatStyle::from_json(&json!({"unknownKey": true})), ChatStyle::default());
+    }
 }

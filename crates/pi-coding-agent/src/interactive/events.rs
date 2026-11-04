@@ -26,6 +26,7 @@ impl InteractiveMode {
         }
         match event {
             UiEvent::AgentStart => {
+                self.update_prompt_layout(true);
                 self.state.borrow_mut().pending_tools.clear();
                 let retry = self.state.borrow_mut().retry_escape.take();
                 if let Some(handler) = retry {
@@ -96,6 +97,7 @@ impl InteractiveMode {
                 }
             }
             UiEvent::AgentSettled { .. } => {
+                self.update_prompt_layout(false);
                 self.notify_run_finished();
                 self.check_shutdown_requested();
             }

@@ -159,12 +159,14 @@ function indicatorOptions({ frames, intervalMs }) {
 }
 
 /** `ui.setChatStyle` params with the known keys only. */
-function chatStyle({ userPrefix, assistantPrefix, collapseThinking, roundedEditor }) {
+function chatStyle({ userPrefix, assistantPrefix, collapseThinking, roundedEditor, editorBorderColor, promptLayout }) {
 	return {
 		userPrefix: optionalText(userPrefix),
 		assistantPrefix: optionalText(assistantPrefix),
 		collapseThinking: collapseThinking === true,
 		roundedEditor: roundedEditor === true,
+		editorBorderColor: optionalText(editorBorderColor),
+		promptLayout: optionalText(promptLayout),
 	};
 }
 
