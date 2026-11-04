@@ -68,6 +68,8 @@ On a terminal, both commands ask before they delete. In other cases, they need `
 
 For either command, `-l` or `--local` requires the server to come from the trusted project's `.pi/mcp.json`. A server defined only in the global config is rejected. Without this option, both commands use the configured server from either scope. If the server name is misspelled, the error suggests a close match when one exists.
 
+`pi mcp add <server> --lifecycle lazy ...` adds a server that connects on first use. See [MCP server lifecycle](mcp.md).
+
 ## Usage stats
 
 `pi stats` adds up the sessions of the current project. With `--all`, it adds up the sessions of all projects. It shows these totals:

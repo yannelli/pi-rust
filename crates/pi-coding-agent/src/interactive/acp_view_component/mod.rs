@@ -1,16 +1,20 @@
 //! The `/acp` browser: Installed and Registry tabs with search, an action menu for installed
 //! agents, and a confirmation before Remove.
 
+mod form;
 mod input;
 mod render;
 #[cfg(test)]
 mod tests;
+mod words;
 
 use pi_tui::Component;
 use pi_tui::components::{Input, InputOptions};
 use pi_tui::fuzzy::fuzzy_filter;
 
-use crate::acp_client::AcpScope;
+use crate::acp_client::{AcpAgentEntry, AcpScope};
+
+use self::form::AgentForm;
 
 /// One agent as the browser shows it: an `acpAgents` entry or a registry entry.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -29,6 +33,7 @@ pub struct AcpRow {
     pub is_default: bool,
     pub builtin: bool,
     pub details: Vec<String>,
+    pub entry: Option<AcpAgentEntry>,
 }
 
 /// A request from the browser to the parent.
@@ -42,6 +47,11 @@ pub enum AcpAction {
     Remove(String, AcpScope),
     /// Move the entry from this scope to the other one.
     Move(String, AcpScope),
+    Save {
+        entry: Box<AcpAgentEntry>,
+        scope: AcpScope,
+        editing: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,6 +68,7 @@ pub(super) enum MenuItem {
     Disable,
     MoveToProject,
     MoveToGlobal,
+    Edit,
     Remove,
 }
 
@@ -70,6 +81,7 @@ impl MenuItem {
             MenuItem::Disable => "Disable",
             MenuItem::MoveToProject => "Move to project settings",
             MenuItem::MoveToGlobal => "Move to global settings",
+            MenuItem::Edit => "Edit",
             MenuItem::Remove => "Remove",
         }
     }
@@ -88,6 +100,7 @@ pub(super) fn scope_choice(scope: AcpScope) -> &'static str {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Mode {
     List,
+    Form,
     Menu { id: String, scope: AcpScope, item: usize },
     ConfirmRemove { id: String, scope: AcpScope, name: String },
     InstallScope { id: String, name: String, item: usize },
@@ -102,6 +115,7 @@ pub struct AcpBrowser {
     search: Input,
     selected: usize,
     mode: Mode,
+    form: Option<AgentForm>,
     status: Option<String>,
     busy: bool,
     on_action: Box<dyn FnMut(AcpAction)>,
@@ -119,6 +133,7 @@ impl AcpBrowser {
             search: Input::new(options),
             selected: 0,
             mode: Mode::List,
+            form: None,
             status: None,
             busy: false,
             on_action: Box::new(on_action),
@@ -162,6 +177,14 @@ impl AcpBrowser {
         fuzzy_filter(items, self.search.get_value(), |item| item.1.as_str()).into_iter().map(|item| item.0).collect()
     }
 
+    pub(super) fn list_len(&self) -> usize {
+        self.visible().len() + usize::from(self.tab == AcpTab::Installed)
+    }
+
+    pub(super) fn adding_selected(&self) -> bool {
+        self.tab == AcpTab::Installed && self.selected == self.visible().len()
+    }
+
     pub(super) fn selected_row(&self) -> Option<&AcpRow> {
         self.visible().get(self.selected).and_then(|index| self.rows().get(*index))
     }
@@ -170,30 +193,52 @@ impl AcpBrowser {
         self.installed.iter().find(|row| row.id == id && row.scope == Some(scope))
     }
 
-    /// The actions of an installed row. A replaced global entry can only be toggled or removed.
+    /// The actions of an installed row, including entries replaced by project settings.
     pub(super) fn menu_items(row: &AcpRow) -> Vec<MenuItem> {
         let toggle = if row.enabled == Some(false) { MenuItem::Enable } else { MenuItem::Disable };
         if row.shadowed {
-            return vec![toggle, MenuItem::Remove];
+            return vec![toggle, MenuItem::Edit, MenuItem::Remove];
         }
         let shift = match row.scope {
             Some(AcpScope::Project) => MenuItem::MoveToGlobal,
             _ => MenuItem::MoveToProject,
         };
-        vec![MenuItem::Login, MenuItem::SetDefault, toggle, shift, MenuItem::Remove]
+        vec![MenuItem::Login, MenuItem::SetDefault, toggle, shift, MenuItem::Edit, MenuItem::Remove]
     }
 
     fn after_rows_changed(&mut self) {
-        let len = self.visible().len();
+        let len = self.list_len();
         self.selected = self.selected.min(len.saturating_sub(1));
         let missing = match &self.mode {
-            Mode::List | Mode::InstallScope { .. } => false,
+            Mode::List | Mode::Form | Mode::InstallScope { .. } => false,
             Mode::Menu { id, scope, .. } | Mode::ConfirmRemove { id, scope, .. } => {
                 self.installed_row(id, *scope).is_none()
             }
         };
         if missing {
             self.mode = Mode::List;
+        }
+    }
+
+    pub(super) fn add_custom(&mut self) {
+        if !self.busy {
+            self.form = Some(AgentForm::new(None, AcpScope::Global));
+            self.mode = Mode::Form;
+            self.status = None;
+        }
+    }
+
+    pub fn finish_save(&mut self, error: Option<String>) {
+        if let Some(form) = &mut self.form {
+            form.error = error;
+            if form.error.is_none() {
+                let (id, scope) = form.target();
+                let selected = self.installed.iter().position(|row| row.id == id && row.scope == Some(scope));
+                self.form = None;
+                self.mode = Mode::List;
+                self.search.set_value("");
+                self.selected = selected.unwrap_or(0);
+            }
         }
     }
 
@@ -241,6 +286,13 @@ impl AcpBrowser {
             MenuItem::Disable => self.emit_mutation(AcpAction::Toggle(id, scope), format!("Disabling {name}…")),
             MenuItem::MoveToProject | MenuItem::MoveToGlobal => {
                 self.emit_mutation(AcpAction::Move(id, scope), format!("Moving {name}…"))
+            }
+            MenuItem::Edit => {
+                if let Some(entry) = row.entry.clone() {
+                    self.form = Some(AgentForm::new(Some(entry), scope));
+                    self.mode = Mode::Form;
+                    self.status = None;
+                }
             }
             MenuItem::Remove => self.mode = Mode::ConfirmRemove { id, scope, name },
         }

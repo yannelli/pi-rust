@@ -14,7 +14,12 @@ use super::types::{
     RpcBashResult, RpcCommand, RpcCommandSource, RpcSessionState, RpcSlashCommand, RpcStreamingBehavior, error,
     success, success_line_with_raw_data,
 };
-use crate::agent_session::{AgentSession, ForkPosition, PromptOptions, StreamingBehavior, compaction_result_json};
+use crate::agent_session::{
+    AgentSession, ForkPosition, PromptDisposition, PromptOptions, StreamingBehavior, compaction_result_json,
+};
+use crate::headless_commands::{
+    HEADLESS_COMMANDS, SESSION_COMMANDS, run_headless_command, run_session_command, split_slash_command,
+};
 
 fn ok(id: Option<&Value>, command: &str, data: Option<Value>) -> anyhow::Result<Option<Reply>> {
     Ok(Some(Reply::Json(success(id, command, data))))
@@ -77,7 +82,14 @@ impl RpcServer {
         let session = self.runtime.session();
         match command {
             RpcCommand::Prompt { message, images, streaming_behavior } => {
-                self.start_prompt(session, id, message, images.unwrap_or_default(), streaming_behavior).await;
+                let images = images.unwrap_or_default();
+                if images.is_empty()
+                    && let Some(text) = self.run_builtin_command(&session, &message).await
+                {
+                    self.output.send(&json!({"type": "command_output", "text": text}));
+                    return ok(id, "prompt", Some(json!({"disposition": "handled", "agentInvoked": false})));
+                }
+                self.start_prompt(session, id, message, images, streaming_behavior).await;
                 Ok(None)
             }
             RpcCommand::Steer { message, images } => {
@@ -112,11 +124,11 @@ impl RpcServer {
                 else {
                     return failed(id, "set_model", &format!("Model not found: {provider}/{model_id}"));
                 };
-                session.set_model(model.clone(), false).await?;
+                session.set_model(model.clone(), session.settings().remember_last_model()).await?;
                 ok(id, "set_model", Some(to_json(model)))
             }
             RpcCommand::CycleModel => {
-                let data = session.cycle_model(false, false).map_or(Value::Null, |result| {
+                let data = session.cycle_model(false, session.settings().remember_last_model()).map_or(Value::Null, |result| {
                     json!({"model": result.model, "thinkingLevel": result.thinking_level, "isScoped": result.is_scoped})
                 });
                 ok(id, "cycle_model", Some(data))
@@ -255,8 +267,26 @@ impl RpcServer {
         }
     }
 
+    /// Run `text` when it is a built-in command of [`HEADLESS_COMMANDS`] or [`SESSION_COMMANDS`];
+    /// returns its output.
+    async fn run_builtin_command(&self, session: &Arc<AgentSession>, text: &str) -> Option<String> {
+        let (name, args) = split_slash_command(text)?;
+        if SESSION_COMMANDS.iter().any(|command| command.name == name) {
+            return run_session_command(session, name, args);
+        }
+        if !HEADLESS_COMMANDS.iter().any(|command| command.name == name) {
+            return None;
+        }
+        let output = run_headless_command(session, name, args).await?;
+        if output.reloaded {
+            self.bind_extension_host(session);
+        }
+        Some(output.text)
+    }
+
     /// Start a prompt; its response goes out once the session accepts or rejects it, and the
-    /// run continues in the background.
+    /// run continues in the background. `agentInvoked` is false when the prompt was handled
+    /// while no run is active, true when it started a run, and absent for a queued prompt.
     async fn start_prompt(
         &self,
         session: Arc<AgentSession>,
@@ -267,12 +297,23 @@ impl RpcServer {
     ) {
         let accepted = Arc::new(AtomicBool::new(false));
         let (flag, output, response_id) = (accepted.clone(), self.output.clone(), id.cloned());
+        let weak = Arc::downgrade(&session);
         let options = PromptOptions {
             images,
             streaming_behavior: streaming_behavior.map(Into::into),
-            preflight_result: Some(Arc::new(move |disposition: crate::agent_session::PromptDisposition| {
+            preflight_result: Some(Arc::new(move |disposition: PromptDisposition| {
                 flag.store(true, Ordering::SeqCst);
-                let data = json!({"disposition": disposition.as_str()});
+                let mut data = json!({"disposition": disposition.as_str()});
+                let agent_invoked = match disposition {
+                    PromptDisposition::Started => Some(true),
+                    PromptDisposition::Handled => {
+                        weak.upgrade().filter(|session| !session.is_streaming()).map(|_| false)
+                    }
+                    PromptDisposition::Queued => None,
+                };
+                if let Some(agent_invoked) = agent_invoked {
+                    data["agentInvoked"] = json!(agent_invoked);
+                }
                 output.send(&success(response_id.as_ref(), "prompt", Some(data)));
             })),
             source: Some("rpc".into()),

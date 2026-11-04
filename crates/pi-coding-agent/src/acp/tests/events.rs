@@ -289,6 +289,32 @@ async fn notify_chunks_carry_their_level() {
     assert_eq!(f.backend.ui_responses.lock().unwrap()[0], json!({"id": "n1", "cancelled": true}));
 }
 
+#[tokio::test]
+async fn configuration_changes_inside_pi_update_the_config_options() {
+    let f = fixture(&here());
+    f.backend.config().state["fastModeAvailable"] = json!(true);
+    f.backend.config().state["fastMode"] = json!(true);
+    f.emit(json!({"type": "fast_mode_changed", "enabled": true})).await;
+    assert_eq!(f.client.kinds(), ["current_mode_update", "config_option_update"]);
+    let options = f.client.of_kind("config_option_update")[0]["configOptions"].clone();
+    let speed = options.as_array().unwrap().iter().find(|option| option["id"] == "fast_mode").unwrap().clone();
+    assert_eq!(speed["currentValue"], "fast");
+
+    f.client.clear();
+    f.emit(json!({"type": "fast_mode_changed", "enabled": true})).await;
+    assert!(f.client.kinds().is_empty(), "an unchanged configuration is not sent again");
+    f.backend.config().state["fastMode"] = json!(false);
+    f.emit(json!({"type": "fast_mode_changed", "enabled": false})).await;
+    assert_eq!(f.client.kinds(), ["current_mode_update", "config_option_update"]);
+    f.client.clear();
+    f.backend.config().state["model"] = json!({"provider": "test", "id": "model"});
+    f.backend.config().state["fastModeAvailable"] = json!(false);
+    f.emit(json!({"type": "model_changed", "model": {"provider": "test", "id": "model"}})).await;
+    assert_eq!(f.client.kinds()[..2], ["current_mode_update", "config_option_update"]);
+    let options = f.client.of_kind("config_option_update")[0]["configOptions"].clone();
+    assert!(options.as_array().unwrap().iter().all(|option| option["id"] != "fast_mode"));
+}
+
 #[test]
 fn choice_ids_must_be_canonical_indexes() {
     use crate::acp::option_index;

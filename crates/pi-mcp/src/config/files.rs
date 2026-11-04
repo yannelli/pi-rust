@@ -1,6 +1,6 @@
 //! Reading and editing `mcp.json` files. Project entries replace global ones with the same name; a
-//! project entry without `command`, `url`, or `type` overrides only `enabled`, `exposure`, and
-//! `toolExposure` of the global server, keeping credentials the project could not set itself.
+//! project entry without `command`, `url`, or `type` overrides only `enabled`, `exposure`,
+//! `toolExposure`, and `lifecycle` of the global server, keeping credentials the project could not set itself.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -8,9 +8,10 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use super::{McpExposure, McpServerConfig, mcp_namespace, validate_mcp_server_config};
+use super::validate::{LIFECYCLE_ERROR, is_lifecycle};
+use super::{McpExposure, McpLifecycle, McpServerConfig, mcp_namespace, validate_mcp_server_config};
 
-const OVERRIDE_KEYS: [&str; 3] = ["enabled", "exposure", "toolExposure"];
+const OVERRIDE_KEYS: [&str; 4] = ["enabled", "exposure", "toolExposure", "lifecycle"];
 /// Name of the project config directory: `.pi` unless the build sets `PI_CONFIG_DIR`, as the
 /// coding agent's `resources::brand::CONFIG_DIR_NAME` does.
 pub const CONFIG_DIR_NAME: &str = match option_env!("PI_CONFIG_DIR") {
@@ -54,7 +55,7 @@ pub struct McpServerEntry {
     /// Config file that defined the entry, or the path of the extension that registered it.
     pub source: String,
     pub scope: Option<McpConfigScope>,
-    /// Project `mcp.json` that overrides this global server's `enabled`, `exposure`, or `toolExposure`.
+    /// Project `mcp.json` that overrides this global server's `enabled`, `exposure`, `toolExposure`, or `lifecycle`.
     pub override_path: Option<String>,
 }
 
@@ -70,6 +71,8 @@ pub struct LoadedMcpConfig {
     pub servers: Vec<McpServerEntry>,
     /// Activate the codemode tool when `codemode` servers connect. Default: true.
     pub auto_enable_codemode: Option<bool>,
+    /// The top-level `lifecycle`, for servers that do not set their own. Default: eager.
+    pub lifecycle: Option<McpLifecycle>,
     pub errors: Vec<String>,
     /// The project `mcp.json` of a trusted project, where project overrides are saved.
     pub project_config: Option<PathBuf>,
@@ -98,6 +101,11 @@ fn read_config_file(path: &Path, scope: McpConfigScope, loaded: &mut LoadedMcpCo
     match parsed.get("autoEnableCodemode") {
         Some(Value::Bool(enabled)) => loaded.auto_enable_codemode = Some(*enabled),
         Some(_) => loaded.errors.push(format!("{shown}: autoEnableCodemode must be a boolean")),
+        None => {}
+    }
+    match parsed.get("lifecycle") {
+        Some(value) if is_lifecycle(value) => loaded.lifecycle = value.as_str().and_then(McpLifecycle::parse),
+        Some(_) => loaded.errors.push(format!("{shown}: {LIFECYCLE_ERROR}")),
         None => {}
     }
     for (name, value) in servers.and_then(Value::as_object).into_iter().flatten() {
@@ -178,10 +186,12 @@ pub fn load_mcp_config(agent_dir: &Path, cwd: &Path, project_trusted: bool) -> L
 }
 
 /// Settings `/mcp` changes. `enabled: true` and `exposure: codemode` are the defaults and remove the key.
+/// `lifecycle` is always written, since the top-level `lifecycle` can change its default.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct McpServerConfigPatch {
     pub enabled: Option<bool>,
     pub exposure: Option<McpExposure>,
+    pub lifecycle: Option<McpLifecycle>,
 }
 
 /// Read an `mcp.json` (empty when missing), let `edit` change it, and write it back with its
@@ -259,6 +269,9 @@ pub fn update_mcp_server_config(
             } else {
                 server.insert("exposure".into(), Value::from(exposure.as_str()));
             }
+        }
+        if let Some(lifecycle) = patch.lifecycle {
+            server.insert("lifecycle".into(), Value::from(lifecycle.as_str()));
         }
         Ok(true)
     })

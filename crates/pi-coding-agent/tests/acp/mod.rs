@@ -194,9 +194,9 @@ async fn speed_option_follows_the_models_fast_mode() {
     let speed = config_option(&created["result"]["configOptions"], "fast_mode").expect("speed option");
     assert_eq!(
         *speed,
-        json!({"type": "select", "id": "fast_mode", "category": "_speed", "name": "Speed",
+        json!({"type": "select", "id": "fast_mode", "category": "_speed", "name": "Fast mode",
             "description": "Run the model in its fast mode", "currentValue": "standard",
-            "options": [{"value": "standard", "name": "Standard"}, {"value": "fast", "name": "Fast"}]})
+            "options": [{"value": "standard", "name": "Fast off"}, {"value": "fast", "name": "Fast on"}]})
     );
 
     let set = |value: &str| json!({"sessionId": id, "configId": "fast_mode", "value": value});
@@ -211,6 +211,85 @@ async fn speed_option_follows_the_models_fast_mode() {
     assert!(config_option(&plain["result"]["configOptions"], "fast_mode").is_none());
     let tiny = client.request("session/set_config_option", model("local/tiny")).await;
     assert_eq!(config_option(&tiny["result"]["configOptions"], "fast_mode").unwrap()["currentValue"], "fast");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn model_changes_save_the_default_model() {
+    let setup = setup_with_models(
+        Vec::new(),
+        json!([{"id": "tiny", "contextWindow": 128_000, "maxTokens": 4_000},
+            {"id": "plain", "contextWindow": 128_000, "maxTokens": 4_000}]),
+    );
+    let settings = setup.options.app.settings.clone().unwrap();
+    let work = setup.root.path().join("work");
+    let mut client = start(&setup);
+    let created = client.request("session/new", json!({"cwd": work, "mcpServers": []})).await;
+    let id = created["result"]["sessionId"].clone();
+
+    let option = json!({"sessionId": id, "configId": "model", "value": "local/plain"});
+    let changed = client.request("session/set_config_option", option).await;
+    assert!(changed["error"].is_null(), "{changed}");
+    assert_eq!(settings.default_model().as_deref(), Some("plain"));
+
+    let changed = client.request("session/set_model", json!({"sessionId": id, "modelId": "local/tiny"})).await;
+    assert!(changed["error"].is_null(), "{changed}");
+    assert_eq!(settings.default_model().as_deref(), Some("tiny"));
+
+    settings.set_remember_last_model(false);
+    let option = json!({"sessionId": id, "configId": "model", "value": "local/plain"});
+    client.request("session/set_config_option", option).await;
+    assert_eq!(settings.default_model().as_deref(), Some("tiny"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn headless_commands_answer_without_a_model_call() {
+    let setup = setup_with_models(
+        Vec::new(),
+        json!([{"id": "tiny", "contextWindow": 128_000, "maxTokens": 4_000, "compat": {"fastMode": true}}]),
+    );
+    let work = setup.root.path().join("work");
+    let mut client = start(&setup);
+    let created = client.request("session/new", json!({"cwd": work, "mcpServers": []})).await;
+    let id = created["result"]["sessionId"].as_str().unwrap().to_string();
+    let advertised =
+        client.until(|message| message["params"]["update"]["sessionUpdate"] == "available_commands_update").await;
+    let names: Vec<&str> = advertised["params"]["update"]["availableCommands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|command| command["name"].as_str())
+        .collect();
+    for name in ["usage", "context", "extensions", "fast", "reload"] {
+        assert!(names.contains(&name), "/{name} in {names:?}");
+    }
+    let prompt = |text: &str| json!({"sessionId": id, "prompt": [{"type": "text", "text": text}]});
+
+    client.clear();
+    let context = client.request("session/prompt", prompt("/context")).await;
+    assert_eq!(context["result"]["stopReason"], "end_turn");
+    let text = texts(&client.updates(&id), "agent_message_chunk");
+    assert!(text.starts_with("```text\nContext Usage") && text.contains("Model:          local/tiny"), "{text}");
+
+    client.clear();
+    let fast = client.send_request("session/prompt", prompt("/fast on")).await;
+    let update = client
+        .until(|message| {
+            let update = &message["params"]["update"];
+            update["sessionUpdate"] == "config_option_update"
+                && config_option(&update["configOptions"], "fast_mode")
+                    .is_some_and(|speed| speed["currentValue"] == "fast")
+        })
+        .await;
+    assert_eq!(update["params"]["sessionId"], id.as_str());
+    assert_eq!(client.response(fast).await["result"]["stopReason"], "end_turn");
+    assert_eq!(texts(&client.updates(&id), "agent_message_chunk"), "Fast mode on");
+
+    client.clear();
+    client.request("session/prompt", prompt("/reload")).await;
+    let updates = client.updates(&id);
+    assert!(texts(&updates, "agent_message_chunk").starts_with("Reloaded extensions"), "{updates:?}");
+    assert!(updates.iter().any(|update| update["sessionUpdate"] == "available_commands_update"));
+    assert!(setup.provider.requests().is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]

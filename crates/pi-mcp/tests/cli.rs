@@ -142,6 +142,24 @@ async fn rejects_unknown_servers_and_servers_without_oauth_for_login_and_logout(
     assert_eq!(help.code, 0);
     assert!(help.output.starts_with("Usage:\n  pi mcp add <server> [options] -- <command> [args...]"));
     assert!(help.output.contains("  --timeout <seconds>     Time limit for the whole sign-in (default: 300)"));
+    assert!(
+        help.output.contains("  --lifecycle <when>      eager (default) connects when a session starts; lazy connects")
+    );
+}
+
+#[tokio::test]
+async fn adds_lazy_servers_with_lifecycle() {
+    let dir = tempfile::tempdir().unwrap();
+    let added = run(&["add", "files", "--lifecycle", "lazy", "--", "node", "server.js"], None, dir.path()).await;
+    assert_eq!(added.code, 0, "{}", added.output);
+    let expected =
+        json!({ "mcpServers": { "files": { "command": "node", "args": ["server.js"], "lifecycle": "lazy" } } });
+    assert_eq!(read_config(&dir.path().join("mcp.json")), expected);
+    let rejected = run(&["add", "other", "--lifecycle", "later", "--", "node"], None, dir.path()).await;
+    assert_eq!(
+        (rejected.code, rejected.output.as_str()),
+        (1, "server \"other\": lifecycle must be \"eager\" or \"lazy\"")
+    );
 }
 
 #[tokio::test]
@@ -272,7 +290,7 @@ async fn adds_http_servers_and_keeps_other_content_of_the_file() {
 
 #[tokio::test]
 async fn rejects_invalid_add_invocations_without_writing() {
-    let cases: [&[&str]; 8] = [
+    let cases: [&[&str]; 9] = [
         &["add", "x"],
         &["add", "x", "--url", "https://example.com", "--", "cmd"],
         &["add", "bad name", "--", "cmd"],
@@ -281,6 +299,7 @@ async fn rejects_invalid_add_invocations_without_writing() {
         &["add", "x", "--header", "A=1", "--", "cmd"],
         &["add", "x", "--env", "NOVALUE", "--", "cmd"],
         &["add", "x", "--exposure", "loud", "--", "cmd"],
+        &["add", "x", "--lifecycle", "later", "--", "cmd"],
     ];
     for args in cases {
         let dir = tempfile::tempdir().unwrap();

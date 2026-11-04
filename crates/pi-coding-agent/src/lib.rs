@@ -20,6 +20,7 @@ pub mod export;
 pub mod extension_ui;
 pub mod extensions;
 pub mod files;
+pub mod headless_commands;
 pub mod highlight;
 pub mod images;
 pub mod interactive;

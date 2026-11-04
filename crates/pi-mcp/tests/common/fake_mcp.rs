@@ -153,7 +153,16 @@ pub fn entry(name: &str, config: Value) -> McpServerEntry {
 
 /// A manager whose servers are fakes; `configure` adjusts its options before it starts.
 pub fn setup(fake: Fake, loaded: LoadedMcpConfig, configure: impl FnOnce(&mut McpManagerOptions)) -> Setup {
-    let dir = tempfile::tempdir().unwrap();
+    setup_in(tempfile::tempdir().unwrap(), fake, loaded, configure)
+}
+
+/// [`setup`] with `dir` as the agent directory, for example to reuse its tool cache.
+pub fn setup_in(
+    dir: tempfile::TempDir,
+    fake: Fake,
+    loaded: LoadedMcpConfig,
+    configure: impl FnOnce(&mut McpManagerOptions),
+) -> Setup {
     let notifications: Arc<Mutex<Vec<String>>> = Arc::default();
     let mut options = McpManagerOptions::new(dir.path());
     options.create_transport = fake.factory();

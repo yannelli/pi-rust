@@ -98,6 +98,7 @@ pub struct SettingsConfig {
     pub available_thinking_levels: Vec<ThinkingLevel>,
     /// Per-model overrides keyed by `provider/modelId`.
     pub model_thinking_levels: BTreeMap<String, ThinkingLevel>,
+    pub remember_last_model: bool,
     /// The theme setting: a name or a `light/dark` pair.
     pub current_theme: String,
     pub terminal_theme: TerminalTheme,
@@ -161,6 +162,7 @@ impl Default for SettingsConfig {
             thinking_level: DEFAULT_THINKING_LEVEL,
             available_thinking_levels: ThinkingLevel::ALL.to_vec(),
             model_thinking_levels: BTreeMap::new(),
+            remember_last_model: true,
             current_theme: SYSTEM_THEME_NAME.into(),
             terminal_theme: TerminalTheme::Dark,
             available_themes: Vec::new(),
@@ -221,6 +223,7 @@ pub struct SettingsCallbacks {
     pub on_provider_max_retries_change: OnChange<Option<u32>>,
     pub on_provider_max_retry_delay_ms_change: OnChange<u64>,
     pub on_disabled_providers_change: OnChange<Vec<String>>,
+    pub on_remember_last_model_change: OnChange<bool>,
     /// Receives the provider, the model id, and the level.
     pub on_model_thinking_level_change: OnModelLevel,
     /// Receives the provider and the model id.
@@ -283,6 +286,7 @@ impl Default for SettingsCallbacks {
             on_provider_max_retries_change: ignore(),
             on_provider_max_retry_delay_ms_change: ignore(),
             on_disabled_providers_change: ignore(),
+            on_remember_last_model_change: ignore(),
             on_model_thinking_level_change: Box::new(|_, _, _| {}),
             on_model_thinking_level_remove: Box::new(|_, _| {}),
             on_theme_change: Box::new(|_| {}),

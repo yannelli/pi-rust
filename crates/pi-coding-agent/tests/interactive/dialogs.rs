@@ -1,17 +1,35 @@
 //! Dialogs opened from slash commands replace the editor until chosen or dismissed.
 
+use serde_json::json;
+
 use crate::interactive::harness::{Options, local, start};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn model_selector_switches_the_model() {
+async fn model_selector_switches_the_model_and_saves_it_as_the_default() {
     local(async {
         let ui = start(Options::default()).await;
         ui.submit("/model").await;
         ui.wait_for("Only showing models from configured providers").await;
         ui.send("other").await;
         ui.send("\r").await;
+        ui.wait_for("Default model: local/other").await;
+        assert_eq!(ui.session().model().unwrap().id, "other");
+        assert_eq!(ui.session().settings().default_model().as_deref(), Some("other"));
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn model_selector_pick_keeps_the_default_when_remember_last_model_is_off() {
+    local(async {
+        let ui = start(Options { settings: json!({"rememberLastModel": false}), ..Options::default() }).await;
+        ui.submit("/model").await;
+        ui.wait_for("Only showing models from configured providers").await;
+        ui.send("other").await;
+        ui.send("\r").await;
         ui.wait_for("Model: other").await;
         assert_eq!(ui.session().model().unwrap().id, "other");
+        assert_eq!(ui.session().settings().default_model().as_deref(), Some("tiny"));
     })
     .await;
 }
@@ -27,7 +45,8 @@ async fn model_command_with_an_exact_reference_skips_the_selector() {
         assert_eq!(ui.session().thinking_level().as_str(), "high");
         ui.submit("/model local/other").await;
         ui.send("\r").await;
-        ui.wait_for("Model: other").await;
+        ui.wait_for("Default model: local/other").await;
+        assert_eq!(ui.session().settings().default_model().as_deref(), Some("other"));
         ui.submit("/thinking high").await;
         ui.send("\r").await;
         ui.wait_for("Unknown thinking level \"high\". Available levels: off.").await;

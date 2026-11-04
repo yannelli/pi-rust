@@ -6,8 +6,8 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use pi_mcp::McpExposure;
 use pi_mcp::runtime::McpSignInPrompt;
+use pi_mcp::{McpExposure, McpLifecycle};
 use reqwest::Url;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
@@ -96,6 +96,15 @@ async fn run_action(view: &View, servers: &Rc<dyn McpServers>, name: &str, actio
             }
         }
         "exposure" => message = choose_exposure(view, servers, name).await,
+        "lifecycle" => {
+            if let Some(status) = servers.status(name) {
+                let next = match status.lifecycle {
+                    McpLifecycle::Eager => McpLifecycle::Lazy,
+                    McpLifecycle::Lazy => McpLifecycle::Eager,
+                };
+                message = servers.set_lifecycle(name, next);
+            }
+        }
         "enable" | "disable" | "enable-project" | "disable-project" => {
             let (task, server) = (servers.clone(), name.to_string());
             let (enable, in_project) = (action.starts_with("enable"), action.ends_with("-project"));

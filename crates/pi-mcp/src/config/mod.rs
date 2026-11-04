@@ -51,6 +51,37 @@ impl fmt::Display for McpExposure {
     }
 }
 
+/// When a server connects: `eager` when the session starts, `lazy` on first use. A pi-rust extension
+/// of `mcp.json`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum McpLifecycle {
+    #[default]
+    Eager,
+    Lazy,
+}
+
+impl McpLifecycle {
+    pub const ALL: [McpLifecycle; 2] = [Self::Eager, Self::Lazy];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Eager => "eager",
+            Self::Lazy => "lazy",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|lifecycle| lifecycle.as_str() == value)
+    }
+}
+
+impl fmt::Display for McpLifecycle {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 /// OAuth client settings for servers without dynamic client registration.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -115,6 +146,9 @@ pub struct McpServerConfig {
     /// Per-request timeout in seconds. Progress notifications restart it. Default: 60.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout: Option<f64>,
+    /// Unset: the top-level `lifecycle` of `mcp.json`, else `eager`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle: Option<McpLifecycle>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }

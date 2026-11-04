@@ -1,4 +1,5 @@
 //! `pi mcp list`, `login`, and `logout`: they connect to the configured servers like a session does.
+//! `list` also saves the tool lists to the tool cache, as a session does.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,6 +20,7 @@ use crate::runtime::{
     ConnectionOptions, McpOAuthCredentialStore, McpServerConnection, McpSignInPrompt, ServerState, SignInOptions,
     sign_in_mcp_server,
 };
+use crate::tool_cache::write_cached_tools;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -89,6 +91,10 @@ async fn report(
     let _ = connection.get_client().await;
     report.state = connection.state().to_string();
     let tools = connection.tools();
+    if connection.state() == ServerState::Connected {
+        let instructions = connection.instructions();
+        let _ = write_cached_tools(&options.agent_dir, entry, &tools, instructions.as_deref());
+    }
     report.tools = tools.iter().map(|tool| tool.name.clone()).collect();
     let overrides: Map<String, Value> = tools
         .iter()

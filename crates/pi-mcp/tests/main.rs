@@ -10,6 +10,7 @@ mod config;
 mod connection;
 mod elicitation;
 mod http;
+mod lazy;
 mod manager;
 mod manager_actions;
 mod oauth;

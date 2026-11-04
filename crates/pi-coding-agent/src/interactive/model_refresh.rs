@@ -221,7 +221,7 @@ impl InteractiveMode {
             }
             let Some(search) = search else { return mode.show_model_selector(None) };
             match mode.find_exact_model_match(&search).await {
-                Some(model) => mode.apply_model(model, false),
+                Some(model) => mode.apply_model(model, mode.settings().remember_last_model()),
                 None => mode.show_model_selector(Some(search)),
             }
         });

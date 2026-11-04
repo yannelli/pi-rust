@@ -19,10 +19,10 @@ use tokio::task::JoinHandle;
 
 use super::auth::{TerminalLaunch, auth_methods, client_supports_terminal_auth};
 use super::backend::{AcpClient, BackendFactory, PiBackend};
-use super::commands::{builtin_available_commands, commands_from_pi, load_slash_commands, merge_commands};
+use super::commands::{builtin_available_commands, commands_from_pi, load_slash_commands, mcp_command, merge_commands};
 use super::config::{
     FAST_MODE_CONFIG_ID, FAST_MODE_FAST, FAST_MODE_STANDARD, MODE_CONFIG_ID, MODEL_CONFIG_ID, THOUGHT_LEVEL_CONFIG_ID,
-    emit_config_options_update, session_configuration, set_session_model,
+    session_configuration, set_session_model,
 };
 use super::errors::{AcpResult, auth_or_internal, auth_required, internal_failure, invalid_params};
 use super::listing::{find_pi_session, list_pi_sessions, read_session_title};
@@ -301,15 +301,17 @@ impl AcpAgent {
         Ok(Handled { response, after: Some(Box::pin(after)) })
     }
 
-    /// After `session/new` and `session/load`: context usage, then `available_commands_update`.
+    /// After `session/new`, `session/load`, and a reload: context usage, then `available_commands_update`.
     pub(super) async fn advertise_commands(&self, session: &AcpSession, cwd: &Path) {
         session.publish_context_usage().await;
         let skills = enable_skill_commands(cwd, &self.options.agent_dir);
-        let commands = match session.backend.get_commands().await {
-            Ok(data) => commands_from_pi(&data, skills, false),
-            Err(_) => super::commands::to_available_commands(&load_slash_commands(cwd, &self.options.agent_dir)),
+        let (commands, mcp) = match session.backend.get_commands().await {
+            Ok(data) => (commands_from_pi(&data, skills, false), mcp_command(&data)),
+            Err(_) => {
+                (super::commands::to_available_commands(&load_slash_commands(cwd, &self.options.agent_dir)), None)
+            }
         };
-        let commands = merge_commands(commands, builtin_available_commands());
+        let commands = merge_commands(commands, builtin_available_commands().into_iter().chain(mcp).collect());
         let update = SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(commands));
         self.client.session_update(SessionNotification::new(session.session_id.clone(), update));
     }
@@ -408,9 +410,7 @@ impl AcpAgent {
         let mode = super::permissions::PermissionMode::parse(&mode)
             .ok_or_else(|| invalid_params(format!("Unknown permission mode: {mode}")))?;
         session.backend.set_permission_mode(mode);
-        emit_config_options_update(self.client.as_ref(), &session.session_id, session.backend.as_ref())
-            .await
-            .map_err(|error| internal_failure(&error))?;
+        session.publish_config_options(true).await.map_err(|error| internal_failure(&error))?;
         Ok(SetSessionModeResponse::new())
     }
 
@@ -451,9 +451,7 @@ impl AcpAgent {
             }
             _ => return Err(invalid_params(format!("Unknown config option: {config_id}"))),
         };
-        let options = emit_config_options_update(self.client.as_ref(), &session.session_id, backend)
-            .await
-            .map_err(|error| internal_failure(&error))?;
+        let options = session.publish_config_options(true).await.map_err(|error| internal_failure(&error))?;
         if model_changed {
             session.publish_context_usage().await;
         }
@@ -464,9 +462,7 @@ impl AcpAgent {
     pub async fn set_session_model(&self, session_id: &str, model_id: &str) -> AcpResult<Value> {
         let session = self.restore_session(session_id, None).await?;
         set_session_model(session.backend.as_ref(), model_id).await?;
-        emit_config_options_update(self.client.as_ref(), &session.session_id, session.backend.as_ref())
-            .await
-            .map_err(|error| internal_failure(&error))?;
+        session.publish_config_options(true).await.map_err(|error| internal_failure(&error))?;
         session.publish_context_usage().await;
         Ok(json!({}))
     }

@@ -96,6 +96,7 @@ impl InteractiveMode {
             thinking_level: settings.default_thinking_level().unwrap_or(DEFAULT_THINKING_LEVEL),
             available_thinking_levels: pi_ai::ThinkingLevel::ALL.to_vec(),
             model_thinking_levels: settings.all_model_thinking_levels(),
+            remember_last_model: settings.remember_last_model(),
             current_theme: controller
                 .as_ref()
                 .and_then(|controller| controller.get_theme_selection())
@@ -210,6 +211,7 @@ impl InteractiveMode {
                 mode.session().model_runtime().set_disabled_providers(providers);
                 mode.update_available_provider_count();
             }),
+            on_remember_last_model_change: on!(weak, |mode, enabled| mode.settings().set_remember_last_model(enabled)),
             on_model_thinking_level_change: {
                 let weak = weak.clone();
                 Box::new(move |provider, id, level| {

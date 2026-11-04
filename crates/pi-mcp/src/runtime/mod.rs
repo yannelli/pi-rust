@@ -9,7 +9,7 @@ pub mod store;
 pub mod transport;
 
 pub use auth::{McpAuthProvider, ProviderTokenAuth, ProviderTokenFn};
-pub use connection::{ConnectionCallback, ConnectionOptions, McpServerConnection, ServerState};
+pub use connection::{ConnectionCallback, ConnectionOptions, McpServerConnection, ServerState, request_timeout};
 pub use signin::{McpOAuthSettings, McpSignInPrompt, SignInOptions, sign_in_mcp_server};
 pub use store::{
     AuthStorageBackend, FileAuthStorageBackend, InMemoryAuthStorageBackend, McpOAuthCredentialStore,

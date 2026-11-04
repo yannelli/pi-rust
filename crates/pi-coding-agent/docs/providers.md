@@ -47,10 +47,10 @@ To turn fast mode on or off:
 
 - In the TUI, type `/fast` to toggle fast mode. Type `/fast on` or `/fast off` to set it. When fast mode is on and the model supports it, the footer shows `⚡ fast` next to the thinking level.
 - To turn on fast mode for one run, start pi with `--fast`. pi does not save this choice.
-- In ACP mode, use the **Speed** option. The editor shows this option only for models that have a fast mode.
-- In RPC mode, send `{"type": "set_fast_mode", "enabled": true}`. `get_state` returns `fastMode` and `fastModeAvailable`.
+- In ACP mode, use the **Fast mode** option or `/fast`. The editor shows the option only for models that have a fast mode.
+- In RPC mode, send `{"type": "set_fast_mode", "enabled": true}`, or a `prompt` with `/fast`. `get_state` returns `fastMode` and `fastModeAvailable`.
 
-`/fast` and the ACP **Speed** option save the choice as `fastMode` in the global `settings.json`. New sessions read this setting. RPC `set_fast_mode` does not save it.
+`/fast` in each mode and the ACP **Fast mode** option save the choice as `fastMode` in the global `settings.json`. New sessions read this setting. RPC `set_fast_mode` does not save it.
 
 Fast mode stays on when you select a model that has no fast mode. pi sends standard requests for that model.
 
@@ -66,6 +66,21 @@ To mark a model in `models.json`, set `compat.fastMode`. `true` gives the model 
   }
 }
 ```
+
+## Remember the last model (pi-rust extension)
+
+When the global setting `rememberLastModel` is `true` (the default), each model you switch to becomes the default model. pi saves it as `defaultProvider` and `defaultModel` in the global `settings.json`. These switches save it:
+
+- A pick in the `/model` selector, and `/model <provider>/<id>`. The status line then shows `Default model: <provider>/<id>`.
+- Model cycling (Ctrl+P by default).
+- RPC `set_model` and `cycle_model`.
+- ACP model changes: the model selector (`session/set_config_option`) and `session/set_model`.
+
+When `--models` or `enabledModels` limits the cycle, a saved model outside it joins the cycle, and pi adds it to `enabledModels` when that setting is set. The selector's set-as-default key does the same.
+
+Set `rememberLastModel` to `false` in `settings.json`, or turn off **Remember last model** in `/settings`, to keep the default model fixed. Then only the selector's set-as-default key and model cycling save it. This matches upstream pi except for model cycling: upstream pi does not save the model on Ctrl+P, and pi-rust saves it with either setting.
+
+`--model`, model changes from extensions, and logins keep their own behavior with either setting.
 
 ## Disable providers
 
