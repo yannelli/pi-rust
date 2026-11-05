@@ -31,11 +31,32 @@ pub struct RequestAuth {
 
 /// Resolve request auth for `model`, failing with upstream messages when nothing usable is set.
 pub async fn request_auth(runtime: &ModelRuntime, model: &Model) -> Result<RequestAuth, String> {
+    request_auth_as(runtime, model, None).await
+}
+
+/// [`request_auth`] with the credential of `account` (pi-rust `before_provider_auth`): an extension
+/// provider registered with `oauth: { builtin: <model provider> }`, such as `anthropic-2`.
+pub async fn request_auth_as(
+    runtime: &ModelRuntime,
+    model: &Model,
+    account: Option<&str>,
+) -> Result<RequestAuth, String> {
+    let account = account.filter(|account| *account != model.provider);
+    if let Some(account) = account
+        && runtime.account_base(account).as_deref() != Some(model.provider.as_str())
+    {
+        return Err(format!("{account} is not an account of provider {}", model.provider));
+    }
+    let auth_id = account.unwrap_or(&model.provider);
     let resolver = runtime.resolver();
-    let resolved = match runtime.resolve_provider_auth(&model.provider).await {
+    let custom = match account {
+        Some(_) => None,
+        None => runtime.resolve_provider_auth(&model.provider).await,
+    };
+    let resolved = match custom {
         Some(resolved) => resolved?,
         None => resolver
-            .resolve_for_model(&model.provider, &model.id, &AuthOverrides::default())
+            .resolve_account_for_model(auth_id, &model.provider, &model.id, &AuthOverrides::default())
             .await
             .map_err(|error| error.to_string())?,
     };
@@ -54,10 +75,10 @@ pub async fn request_auth(runtime: &ModelRuntime, model: &Model) -> Result<Reque
             Ok(RequestAuth { model, auth: resolved.auth, env: resolved.env })
         }
         _ => {
-            let stored = resolver.store().read(&model.provider).await.ok().flatten();
+            let stored = resolver.store().read(auth_id).await.ok().flatten();
             Err(match stored {
-                Some(Credential::OAuth(_)) => oauth_failed_message(&model.provider),
-                _ => format_no_api_key_found_message(&model.provider),
+                Some(Credential::OAuth(_)) => oauth_failed_message(auth_id),
+                _ => format_no_api_key_found_message(auth_id),
             })
         }
     }
@@ -175,7 +196,8 @@ pub fn auth_stream_fn(
                 }
             }
             let mut observers = None;
-            let mut upstream = match request_auth(&runtime, &model).await {
+            let account = super::extension_hooks::request_account(&hooks, &model).await;
+            let mut upstream = match request_auth_as(&runtime, &model, account.as_deref()).await {
                 Ok(request) => {
                     apply_request_settings(&mut options, &request, &settings);
                     super::extension_hooks::apply_header_hooks(&hooks, &mut options).await;

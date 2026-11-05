@@ -23,6 +23,16 @@ fn slot_runner(slot: &RequestHooksSlot) -> Option<Arc<ExtensionRunner>> {
     slot.read().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref().and_then(Weak::upgrade)
 }
 
+/// pi-rust `before_provider_auth`: the account whose stored credential a request for `model` uses,
+/// when a handler names one other than the model's provider. pi checks that it is a login of it.
+pub(crate) async fn request_account(slot: &RequestHooksSlot, model: &Model) -> Option<String> {
+    let runner = slot_runner(slot).filter(|runner| runner.has_handlers("before_provider_auth"))?;
+    let event = json!({ "provider": model.provider, "model": { "provider": model.provider, "id": model.id, "api": model.api } });
+    let result = runner.call_json("emitBeforeProviderAuth", vec![event]).await.ok()?;
+    let account = result["authProvider"].as_str()?;
+    (!account.is_empty() && account != model.provider).then(|| account.to_string())
+}
+
 /// `before_provider_headers` over the session, configured, and request headers in `options`.
 /// Identity headers are added later by the provider, so handlers do not see them.
 pub(crate) async fn apply_header_hooks(slot: &RequestHooksSlot, options: &mut StreamOptions) {

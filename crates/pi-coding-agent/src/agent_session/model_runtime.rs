@@ -55,6 +55,8 @@ pub struct ModelRuntime {
     /// `pi.registerProvider` configs by provider id, applied over `models.json`.
     pub(super) extension_providers: RwLock<BTreeMap<String, serde_json::Value>>,
     pub(super) extension_oauth: Arc<RwLock<HashMap<String, Arc<dyn OAuthAuth>>>>,
+    /// Extension providers registered with `oauth: { builtin }`, by id: the provider they log in to.
+    pub(super) account_bases: RwLock<HashMap<String, String>>,
     /// The core OAuth flows by provider id, without the extension ones.
     pub(super) builtin_oauth: OAuthLookup,
     /// `refreshModels`, `oauth.modifyModels`, `images`, and `classifiers` of extension providers.
@@ -101,6 +103,7 @@ impl ModelRuntime {
             provider_auth: RwLock::default(),
             extension_providers: RwLock::default(),
             extension_oauth,
+            account_bases: RwLock::default(),
             builtin_oauth,
             extension_hooks: RwLock::default(),
             offline_refreshes: OfflineRefreshes::default(),

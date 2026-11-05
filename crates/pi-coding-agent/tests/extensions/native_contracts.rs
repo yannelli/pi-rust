@@ -310,6 +310,7 @@ async fn tool_renderers_draw_tools_without_renderers_and_animate_spinner_tokens(
         "ui.chatStyle",
         "contextEntries",
         "toolResultExpander",
+        "providerAuth",
     ];
     for feature in expected {
         assert!(features.as_array().unwrap().contains(&json!(feature)), "{features}");

@@ -355,8 +355,10 @@ impl ExtensionRunner {
             };
             runtime.register_extension_oauth(name, Some(flow));
         }
-        // A built-in login also reads usage with that provider's fetcher (when it has one).
+        // A built-in login also reads usage with that provider's fetcher (when it has one), and makes
+        // the provider an account that `before_provider_auth` can pick for that provider's models.
         runtime.usage().set_alias(name, builtin_id);
+        runtime.set_account_base(name, builtin_id);
         // This runs on the extension thread, and `refreshModels` calls back into it: spawn.
         runtime.refresh_offline_in_background();
         let mut providers = lock(&self.providers);
@@ -380,6 +382,7 @@ impl ExtensionRunner {
         self.model_runtime().register_extension_hooks(name, None);
         self.model_runtime().register_extension_oauth(name, None);
         self.model_runtime().usage().set_alias(name, None);
+        self.model_runtime().set_account_base(name, None);
         self.model_runtime().refresh_offline_in_background();
         if let Some(session) = self.session() {
             session.refresh_model_from_registry();
