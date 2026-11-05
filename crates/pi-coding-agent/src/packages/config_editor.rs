@@ -10,7 +10,7 @@ use super::config::{
     ConfigGroup, ConfigItem, ConfigWriteScope, ProjectOverrideState, ScopedResolvedPaths, build_config_groups,
 };
 use super::settings_ops::{package_source_text, relative_or_absolute};
-use crate::resources::brand::CONFIG_DIR_NAME;
+use crate::resources::brand::project_settings_dir;
 use crate::resources::paths::{canonicalize, is_local_path, resolve_path};
 use crate::resources::{ResourceType, SourceOrigin, SourceScope};
 use crate::settings::schema::{PackageFilter, PackageSource};
@@ -134,7 +134,7 @@ impl ConfigEditor {
     }
 
     fn base_dir(&self, scope: SourceScope) -> PathBuf {
-        if scope == SourceScope::Project { self.cwd.join(CONFIG_DIR_NAME) } else { self.agent_dir.clone() }
+        if scope == SourceScope::Project { project_settings_dir(&self.cwd) } else { self.agent_dir.clone() }
     }
 
     /// Project mode toggles any item; global mode only user-scope items.

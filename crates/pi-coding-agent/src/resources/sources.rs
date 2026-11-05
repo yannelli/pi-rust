@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::brand::CONFIG_DIR_NAME;
+use super::brand::project_config_path;
 use super::discovery::{ResourceAccumulator, ResourceType, collect_resource_files};
 use super::paths::{canonicalize, file_kind, is_local_path, is_under_path, normalize, resolve_path};
 use super::source_info::{
@@ -120,11 +120,13 @@ impl SourceLookup {
         }
         let normalized = normalize(path);
         let kinds = ["skills", "prompts", "themes", "extensions"];
-        let project = self.cwd.join(CONFIG_DIR_NAME);
-        let roots = [(&self.agent_dir, SourceScope::User), (&project, SourceScope::Project)];
-        for (base, scope) in roots {
+        let roots = [SourceScope::User, SourceScope::Project];
+        for scope in roots {
             for kind in kinds {
-                let root = base.join(kind);
+                let root = match scope {
+                    SourceScope::Project => project_config_path(&self.cwd, kind),
+                    _ => self.agent_dir.join(kind),
+                };
                 if is_under_path(&normalized, &root) {
                     let base_dir = Some(root.display().to_string());
                     return SourceInfo {

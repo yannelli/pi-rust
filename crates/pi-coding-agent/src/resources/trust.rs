@@ -9,7 +9,7 @@ use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::brand::{APP_NAME, CONFIG_DIR_NAME};
+use super::brand::{APP_NAME, CONFIG_DIR_NAME, project_config_path};
 use super::paths::{absolute, canonicalize};
 
 /// Entries under `<cwd>/.pi` that require a trust decision. A bare `.pi` does not.
@@ -72,6 +72,19 @@ pub fn project_trust_parent_path(cwd: &Path) -> Option<PathBuf> {
     normalize_cwd(cwd).parent().map(Path::to_path_buf)
 }
 
+/// Where a saved decision is looked up, closest first: `cwd` and its ancestors. In a linked git
+/// worktree, the main checkout's matching folder and its ancestors come right after the
+/// worktree's own folders, so a trusted repository covers its worktrees.
+fn trust_lookup_dirs(cwd: &Path) -> Vec<PathBuf> {
+    let Some((worktree_root, main_root)) = super::context::linked_worktree_roots(cwd) else {
+        return cwd.ancestors().map(Path::to_path_buf).collect();
+    };
+    let main_dir = canonicalize(&main_root.join(cwd.strip_prefix(&worktree_root).unwrap_or(Path::new(""))));
+    let inside = cwd.ancestors().take_while(|dir| dir.starts_with(&worktree_root));
+    let outside = worktree_root.parent().into_iter().flat_map(Path::ancestors);
+    inside.chain(main_dir.ancestors()).chain(outside).map(Path::to_path_buf).collect()
+}
+
 /// Trust, trust the parent folder, optionally trust for this session, and do not trust.
 pub fn project_trust_options(cwd: &Path, include_session_only: bool) -> Vec<ProjectTrustOption> {
     let trust_path = normalize_cwd(cwd);
@@ -116,8 +129,7 @@ pub fn project_trust_options(cwd: &Path, include_session_only: bool) -> Vec<Proj
 pub fn has_trust_requiring_project_resources(cwd: &Path, home: &Path) -> bool {
     let user_agents_skills = canonicalize(&absolute(home)).join(".agents").join("skills");
     let cwd = normalize_cwd(cwd);
-    let config_dir = cwd.join(CONFIG_DIR_NAME);
-    if TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES.iter().any(|entry| config_dir.join(entry).exists()) {
+    if TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES.iter().any(|entry| project_config_path(&cwd, entry).exists()) {
         return true;
     }
     cwd.ancestors().any(|dir| {
@@ -216,9 +228,9 @@ impl ProjectTrustStore {
     pub fn get_entry(&self, cwd: &Path) -> anyhow::Result<Option<ProjectTrustStoreEntry>> {
         let _lock = acquire_lock(&self.trust_path)?;
         let data = read_trust_file(&self.trust_path)?;
-        Ok(normalize_cwd(cwd).ancestors().find_map(|dir| {
-            let decision = (*data.get(&key(dir))?)?;
-            Some(ProjectTrustStoreEntry { path: dir.to_path_buf(), decision })
+        Ok(trust_lookup_dirs(&normalize_cwd(cwd)).into_iter().find_map(|dir| {
+            let decision = (*data.get(&key(&dir))?)?;
+            Some(ProjectTrustStoreEntry { path: dir, decision })
         }))
     }
 

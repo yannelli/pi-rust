@@ -8,7 +8,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use super::brand::CONFIG_DIR_NAME;
+use super::brand::project_config_path;
 use super::context_entries::ContextExposure;
 use super::frontmatter::parse_frontmatter;
 use super::paths::{IgnoreRules, absolute, canonicalize, file_kind, is_under_path, relative_posix, resolve_path};
@@ -297,7 +297,7 @@ pub fn load_skills(options: &LoadSkillsOptions) -> LoadSkillsResult {
     let cwd = absolute(&options.cwd);
     let agent_dir = absolute(&options.agent_dir);
     let user_dir = agent_dir.join("skills");
-    let project_dir = cwd.join(CONFIG_DIR_NAME).join("skills");
+    let project_dir = project_config_path(&cwd, "skills");
     let mut set = SkillSet::default();
     if options.include_defaults {
         set.add(load_skills_from_dir(&user_dir, "user"));

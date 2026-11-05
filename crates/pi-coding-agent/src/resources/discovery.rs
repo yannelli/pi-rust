@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::brand::CONFIG_DIR_NAME;
+use super::brand::{project_config_path, project_settings_dir};
 use super::paths::{IgnoreRules, canonicalize, file_kind, relative_posix, resolve_path, sorted_entries};
 use super::source_info::{
     BUILTIN_PATH_PREFIX, PathMetadata, ResolvedPaths, ResolvedResource, SourceOrigin, SourceScope,
@@ -326,7 +326,7 @@ pub fn resolve_local_resources(options: &LocalResourceOptions<'_>, packages: &Re
     let empty = ResourceSettings::default();
     let project = if options.project_trusted { options.project } else { &empty };
     let user_base = options.agent_dir.to_path_buf();
-    let project_base = options.cwd.join(CONFIG_DIR_NAME);
+    let project_base = project_settings_dir(options.cwd);
     let local = |scope| PathMetadata::new("local", scope, SourceOrigin::TopLevel);
     for kind in ResourceType::ALL {
         resolve_local_entries(&mut acc, kind, project.entries(kind), &local(SourceScope::Project), &project_base);
@@ -344,7 +344,7 @@ pub fn resolve_local_resources(options: &LocalResourceOptions<'_>, packages: &Re
     let project_meta = auto(SourceScope::Project, &project_base);
     let user_meta = auto(SourceScope::User, &user_base);
     if options.project_trusted {
-        let dir = |kind: ResourceType| project_base.join(kind.dir_name());
+        let dir = |kind: ResourceType| project_config_path(options.cwd, kind.dir_name());
         let skills_overrides = project.entries(ResourceType::Skills);
         add(
             ResourceType::Extensions,

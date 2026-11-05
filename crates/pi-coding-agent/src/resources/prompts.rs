@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::ResourceDiagnostic;
-use super::brand::CONFIG_DIR_NAME;
+use super::brand::project_config_path;
 use super::frontmatter::parse_frontmatter;
 use super::paths::{absolute, file_kind, is_under_path, resolve_path, sorted_entries};
 use super::source_info::{SourceInfo, SourceScope, create_synthetic_source_info};
@@ -171,7 +171,7 @@ pub struct LoadPromptTemplatesOptions {
 pub fn load_prompt_templates(options: &LoadPromptTemplatesOptions) -> LoadPromptTemplatesResult {
     let cwd = absolute(&options.cwd);
     let global_dir = absolute(&options.agent_dir).join("prompts");
-    let project_dir = cwd.join(CONFIG_DIR_NAME).join("prompts");
+    let project_dir = project_config_path(&cwd, "prompts");
     let source_info = |path: &Path| -> SourceInfo {
         let display = path.display().to_string();
         if is_under_path(path, &global_dir) {
