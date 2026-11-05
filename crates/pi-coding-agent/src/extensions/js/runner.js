@@ -407,6 +407,22 @@ export class Runner {
 		return current;
 	}
 
+	/** pi-rust `before_provider_auth`: the first handler that names an account wins. */
+	async emitBeforeProviderAuth(event) {
+		const ctx = this.createContext();
+		for (const { ext, handlers } of snapshot(this.extensions, "before_provider_auth")) {
+			for (const handler of handlers) {
+				try {
+					const result = await handler({ type: "before_provider_auth", ...event }, ctx);
+					if (typeof result?.authProvider === "string" && result.authProvider) return { authProvider: result.authProvider };
+				} catch (error) {
+					this.reportFailure(ext, "before_provider_auth", error);
+				}
+			}
+		}
+		return {};
+	}
+
 	async emitBeforeProviderHeaders(headers) {
 		const ctx = this.createContext();
 		for (const { ext, handlers } of snapshot(this.extensions, "before_provider_headers")) {

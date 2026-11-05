@@ -158,6 +158,20 @@ impl ModelRuntime {
         }
     }
 
+    /// Record (or with `None` forget) that extension provider `account` logs in to provider `base`.
+    pub fn set_account_base(&self, account: &str, base: Option<&str>) {
+        let mut bases = write(&self.account_bases);
+        match base {
+            Some(base) => drop(bases.insert(account.to_string(), base.to_string())),
+            None => drop(bases.remove(account)),
+        }
+    }
+
+    /// The provider whose login extension provider `account` reuses (`oauth: { builtin }`).
+    pub fn account_base(&self, account: &str) -> Option<String> {
+        read(&self.account_bases).get(account).cloned()
+    }
+
     /// The core OAuth flow of provider `id` (`oauth: { builtin }` of `pi.registerProvider`).
     pub fn builtin_oauth(&self, id: &str) -> Option<Arc<dyn OAuthAuth>> {
         (self.builtin_oauth)(id)

@@ -222,7 +222,19 @@ impl AuthResolver {
         model_id: &str,
         overrides: &AuthOverrides,
     ) -> AuthResult<Option<ResolvedAuth>> {
-        let Some(mut resolved) = self.resolve(provider_id, overrides).await? else { return Ok(None) };
+        self.resolve_account_for_model(provider_id, provider_id, model_id, overrides).await
+    }
+
+    /// Like [`Self::resolve_for_model`] with the credential stored under `account`, another login
+    /// of the model's provider (an `oauth: { builtin }` alias such as `anthropic-2`).
+    pub async fn resolve_account_for_model(
+        &self,
+        account: &str,
+        provider_id: &str,
+        model_id: &str,
+        overrides: &AuthOverrides,
+    ) -> AuthResult<Option<ResolvedAuth>> {
+        let Some(mut resolved) = self.resolve(account, overrides).await? else { return Ok(None) };
         let config = self.config(provider_id);
         if let Some(headers) = config.model_headers.get(model_id) {
             let env = merged_env(resolved.env.as_ref(), overrides.env.as_ref());

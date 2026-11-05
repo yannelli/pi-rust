@@ -250,6 +250,7 @@ export function createHost(config) {
 		emitContext: (messages) => runner.emitContext(messages),
 		emitBeforeProviderRequest: (payload) => runner.emitBeforeProviderRequest(payload),
 		emitBeforeProviderHeaders: (headers) => runner.emitBeforeProviderHeaders(headers),
+		emitBeforeProviderAuth: (event) => runner.emitBeforeProviderAuth(event),
 		emitBeforeAgentStart: (prompt, images, options) => runner.emitBeforeAgentStart(prompt, optional(images), options),
 		emitResourcesDiscover: (cwd, reason) => runner.emitResourcesDiscover(cwd, reason),
 		emitInput: (text, images, source, behavior) => runner.emitInput(text, optional(images), source, optional(behavior)),
