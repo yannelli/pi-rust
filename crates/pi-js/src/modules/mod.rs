@@ -2,6 +2,7 @@
 //! and value-backed virtual modules load through facades that re-export an object's keys.
 
 pub(crate) mod cjs;
+pub(crate) mod namespace;
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -11,6 +12,7 @@ use rquickjs::module::Declared;
 use rquickjs::{Ctx, Function, Module, Runtime, Value};
 
 use crate::error::JsError;
+use crate::node_backend::import_meta::lazy_import_meta;
 use crate::resolve::{ResolveKind, Resolved, normalize};
 use crate::runtime::convert::{caught, throw};
 use crate::runtime::state::{LoopState, Shared, state};
@@ -24,23 +26,28 @@ pub(crate) fn install_loader(runtime: &Runtime) {
 /// Resolve to the module key QuickJS caches modules under: an absolute path, `node:x`,
 /// `pi:host`, or a virtual module's canonical name.
 pub(crate) fn resolve_key(specifier: &str, from: Option<&str>) -> Result<String, JsError> {
-    resolve_kind(specifier, from, ResolveKind::Import).map(|(_, key)| key)
+    resolve_scoped(specifier, from, ResolveKind::Import, None).map(|scoped| scoped.key)
 }
 
-/// Like [`resolve_key`], also naming the kind: `builtin`, `virtual`, or `file`.
-pub(crate) fn resolve_kind(
+/// Resolve for an importer in `namespace` (`None` outside every namespace); the kind is
+/// `builtin`, `virtual`, or `file`.
+pub(crate) fn resolve_scoped(
     specifier: &str,
     from: Option<&str>,
     kind: ResolveKind,
-) -> Result<(&'static str, String), JsError> {
+    namespace: Option<&str>,
+) -> Result<namespace::Scoped, JsError> {
     let state = state();
+    if namespace.is_some() && state.module_hooks.get() {
+        return Err(namespace::hooks_unsupported());
+    }
     let base_dir = state.cwd.borrow().clone();
     let inline = |key: &str| state.inline_sources.borrow().contains_key(key);
-    resolve_in(&state.shared, &base_dir, &inline, specifier, from, kind)
+    namespace::resolve_scoped(&state.shared, &base_dir, &inline, specifier, from, kind, namespace)
 }
 
-/// [`resolve_kind`] for any backend: `inline` tells whether a key names a module evaluated from
-/// a string.
+/// [`resolve_scoped`] for any backend, outside namespaces: `inline` tells whether a key names a
+/// module evaluated from a string.
 pub(crate) fn resolve_in(
     shared: &Shared,
     base_dir: &Path,
@@ -133,6 +140,14 @@ impl Resolver for PiResolver {
         name: &str,
         _attributes: Option<ImportAttributes<'js>>,
     ) -> rquickjs::Result<String> {
+        if namespace::take_trusted(name) {
+            return Ok(name.to_string());
+        }
+        if let (Some(id), from) = namespace::split(base) {
+            return resolve_scoped(name, Some(from), ResolveKind::Import, Some(id))
+                .map(|scoped| scoped.module_key())
+                .map_err(|error| throw(ctx, &error));
+        }
         if state().module_hooks.get() {
             let internal = state().internal(ctx)?;
             let hook: Function = internal.get("hookResolve")?;
@@ -157,29 +172,34 @@ impl Loader for PiLoader {
 
 fn load<'js>(ctx: &Ctx<'js>, key: &str) -> Result<Module<'js, Declared>, JsError> {
     let state = state();
-    if state.module_hooks.get()
+    let (namespace, plain) = namespace::split(key);
+    if let Some(id) = namespace {
+        if state.module_hooks.get() {
+            return Err(namespace::hooks_unsupported());
+        }
+        namespace::lookup(&state.shared, id)?;
+    } else if state.module_hooks.get()
         && let Some(module) = hooked_load(ctx, key)?
     {
         return Ok(module);
     }
-    if let Some(source) = inline_source(&state, key) {
-        return load_source(ctx, key, Path::new(key), &source);
+    if let Some(source) = inline_source(&state, plain) {
+        return load_source(ctx, key, Path::new(plain), &source);
     }
-    if key.starts_with("node:") || key == "pi:host" {
+    if namespace.is_none() && (key.starts_with("node:") || key == "pi:host") {
         let name = key.strip_prefix("node:").unwrap_or(key);
         return facade(ctx, key, "builtinFacade", (name.to_string(),));
     }
-    let module = state.shared.virtual_modules.read().unwrap_or_else(|poison| poison.into_inner()).get(key).cloned();
-    if let Some(module) = module {
+    if let Some(module) = namespace::virtual_module(&state.shared, namespace, plain)? {
         return load_virtual(ctx, key, module);
     }
-    let path = PathBuf::from(key);
+    let path = PathBuf::from(plain);
     if path.extension().is_some_and(|ext| ext == "json") {
-        let text = std::fs::read_to_string(&path).map_err(|error| JsError::from_io(&error, "open", Some(key)))?;
+        let text = std::fs::read_to_string(&path).map_err(|error| JsError::from_io(&error, "open", Some(plain)))?;
         let value = ctx.json_parse(text).map_err(|error| caught(ctx, error))?;
         return facade(ctx, key, "valueFacade", (key.to_string(), value));
     }
-    let source = std::fs::read_to_string(&path).map_err(|error| JsError::from_io(&error, "open", Some(key)))?;
+    let source = std::fs::read_to_string(&path).map_err(|error| JsError::from_io(&error, "open", Some(plain)))?;
     load_source(ctx, key, &path, &source)
 }
 
@@ -207,23 +227,34 @@ fn load_source<'js>(ctx: &Ctx<'js>, key: &str, path: &Path, source: &str) -> Res
     let transpiled = state().shared.transpiler.get_or_transpile(path, source)?;
     match transpiled.format {
         ModuleFormat::Esm => {
-            let prefix = esm_prefix(key, &transpiled.free_globals);
+            let (meta, globals) = esm_prefix(key, &transpiled.free_globals);
             let map = transpiled.map.clone().map(Rc::new);
-            register_source_map(key, map, prefix.chars().count() as u32);
-            Module::declare(ctx.clone(), key, format!("{prefix}{}", transpiled.code))
-                .map_err(|error| caught(ctx, error))
+            let source = if namespace::split(key).0.is_some() {
+                register_source_map(key, map, globals.chars().count() as u32);
+                lazy_import_meta(&format!("{globals}{}", transpiled.code), &meta)?
+            } else {
+                register_source_map(key, map, (meta.chars().count() + globals.chars().count()) as u32);
+                format!("{meta}{globals}{}", transpiled.code)
+            };
+            Module::declare(ctx.clone(), key, source).map_err(|error| caught(ctx, error))
         }
-        ModuleFormat::CommonJs => facade(ctx, key, "cjsFacade", (key.to_string(),)),
+        ModuleFormat::CommonJs => match namespace::split(key) {
+            (Some(id), plain) => facade(ctx, key, "cjsFacadeIn", (key.to_string(), plain.to_string(), id.to_string())),
+            (None, _) => facade(ctx, key, "cjsFacade", (key.to_string(),)),
+        },
     }
 }
 
 fn load_virtual<'js>(ctx: &Ctx<'js>, key: &str, module: VirtualModule) -> Result<Module<'js, Declared>, JsError> {
-    match module {
-        VirtualModule::Source(source) => {
+    match (module, namespace::split(key)) {
+        (VirtualModule::Source(source), _) => {
             register_source_map(key, None, 0);
             Module::declare(ctx.clone(), key, source).map_err(|error| caught(ctx, error))
         }
-        VirtualModule::Json(_) | VirtualModule::Native(_) => facade(ctx, key, "virtualFacade", (key.to_string(),)),
+        (_, (Some(id), name)) => {
+            facade(ctx, key, "virtualFacadeIn", (key.to_string(), name.to_string(), id.to_string()))
+        }
+        (_, (None, _)) => facade(ctx, key, "virtualFacade", (key.to_string(),)),
     }
 }
 
@@ -243,18 +274,28 @@ fn js_string(text: &str) -> String {
     serde_json::to_string(text).unwrap_or_else(|_| "\"\"".into())
 }
 
-/// One line put before an ES module: `import.meta` fields and any CommonJS globals it reads.
-fn esm_prefix(key: &str, globals: &FreeGlobals) -> String {
+/// What sets an ES module's `import.meta` fields, and the one-line prefix declaring any CommonJS
+/// globals it reads. A namespaced module sets the fields on its first `import.meta` read.
+fn esm_prefix(key: &str, globals: &FreeGlobals) -> (String, String) {
+    let (namespace, key) = namespace::split(key);
     let path = Path::new(key);
     let file = js_string(key);
     let dir = js_string(&path.parent().map(|dir| dir.display().to_string()).unwrap_or_default());
-    let url = url::Url::from_file_path(path).map(|url| url.to_string()).unwrap_or_else(|_| key.to_string());
-    let mut prefix = format!(
+    let mut url = url::Url::from_file_path(path).map(|url| url.to_string()).unwrap_or_else(|_| key.to_string());
+    let mut scope = String::new();
+    if let Some(id) = namespace {
+        url = namespace::url_in(&url, id);
+        scope = format!(", {}", js_string(id));
+    }
+    let meta = format!(
         "import.meta.url = {}; import.meta.filename = {file}; import.meta.dirname = {dir}; \
-         import.meta.resolve = (s) => globalThis.__pi_internal.resolveUrl(s, {file}); ",
+         import.meta.resolve = (s) => globalThis.__pi_internal.resolveUrl(s, {file}{scope}); ",
         js_string(&url)
     );
-    if globals.require {
+    let mut prefix = String::new();
+    if globals.require && namespace.is_some() {
+        prefix.push_str(&format!("const require = globalThis.__pi_internal.namespacedRequire({file}{scope}); "));
+    } else if globals.require {
         prefix.push_str(&format!("const require = globalThis.__pi_internal.createRequire({file}); "));
     }
     if globals.filename {
@@ -263,12 +304,12 @@ fn esm_prefix(key: &str, globals: &FreeGlobals) -> String {
     if globals.dirname {
         prefix.push_str(&format!("const __dirname = {dir}; "));
     }
-    prefix
+    (meta, prefix)
 }
 
 /// Import a module synchronously (for `require` of an ES module), running jobs until it settles.
 pub(crate) fn import_sync<'js>(ctx: &Ctx<'js>, key: &str) -> rquickjs::Result<Value<'js>> {
-    let promise = Module::import(ctx, key)?;
+    let promise = namespace::import(ctx, key)?;
     match promise.finish::<Value>() {
         Err(rquickjs::Error::WouldBlock) => Err(throw(
             ctx,

@@ -7,7 +7,7 @@ use rquickjs::context::EvalOptions;
 use rquickjs::function::Opt;
 use rquickjs::{Ctx, Function, Object, Value};
 
-use super::{import_sync, resolve_kind};
+use super::{import_sync, namespace, resolve_scoped};
 use crate::error::JsError;
 use crate::resolve::ResolveKind;
 use crate::runtime::JsScope;
@@ -24,19 +24,33 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
         "resolve",
         Function::new(
             ctx.clone(),
-            |ctx: Ctx<'js>, specifier: String, parent: Opt<Option<String>>, kind: Opt<String>| {
+            |ctx: Ctx<'js>,
+             specifier: String,
+             parent: Opt<Option<String>>,
+             kind: Opt<String>,
+             scope: Opt<Option<String>>| {
                 let kind = if kind.0.as_deref() == Some("import") { ResolveKind::Import } else { ResolveKind::Require };
-                let (kind, key) = resolve_kind(&specifier, parent.0.flatten().as_deref(), kind)
+                let scope = scope.0.flatten();
+                let scoped = resolve_scoped(&specifier, parent.0.flatten().as_deref(), kind, scope.as_deref())
                     .map_err(|error| throw(&ctx, &error))?;
                 let result = Object::new(ctx.clone())?;
-                result.set("kind", kind)?;
-                result.set("key", key)?;
+                result.set("kind", scoped.kind)?;
+                result.set("key", scoped.key)?;
+                if let Some(id) = scoped.namespace {
+                    result.set("ns", id)?;
+                }
                 Ok::<_, rquickjs::Error>(result)
             },
         )?,
     )?;
     object.set("compile", Function::new(ctx.clone(), compile)?)?;
-    object.set("importSync", Function::new(ctx.clone(), |ctx: Ctx<'js>, key: String| import_sync(&ctx, &key))?)?;
+    object.set(
+        "importSync",
+        Function::new(ctx.clone(), |ctx: Ctx<'js>, key: String, scope: Opt<Option<String>>| match scope.0.flatten() {
+            Some(id) => import_sync(&ctx, &namespace::key(&id, &key)),
+            None => import_sync(&ctx, &key),
+        })?,
+    )?;
     object.set("virtualValue", Function::new(ctx.clone(), virtual_value)?)?;
     crate::node::set_fn(&object, "settle", |promise: rquickjs::Promise<'js>| promise.finish::<Value<'js>>())?;
     crate::node::set_fn(&object, "enableHooks", || state().module_hooks.set(true))?;
@@ -55,12 +69,17 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
     Ok(object)
 }
 
-/// `{ format: "cjs", fn }`, `{ format: "esm" }`, or `{ format: "json", text }` for a file.
+/// `{ format: "cjs", fn }`, `{ format: "esm" }`, or `{ format: "json", text }` for a file in `scope`.
 /// `source`, when given, replaces the file's text (`module._compile`, `load` hooks).
-fn compile<'js>(ctx: Ctx<'js>, filename: String, source: Opt<String>) -> rquickjs::Result<Object<'js>> {
+fn compile<'js>(
+    ctx: Ctx<'js>,
+    filename: String,
+    source: Opt<Option<String>>,
+    scope: Opt<Option<String>>,
+) -> rquickjs::Result<Object<'js>> {
     let result = Object::new(ctx.clone())?;
     let state = state();
-    let registered = source.0.map(Into::into).or_else(|| super::registered_source(&state.shared, &filename));
+    let registered = source.0.flatten().map(Into::into).or_else(|| super::registered_source(&state.shared, &filename));
     if registered.is_none() && super::has_inline_source(&state, &filename) {
         result.set("format", "esm")?;
         return Ok(result);
@@ -81,10 +100,15 @@ fn compile<'js>(ctx: Ctx<'js>, filename: String, source: Opt<String>) -> rquickj
         result.set("format", "esm")?;
         return Ok(result);
     }
-    register_source_map(&filename, transpiled.map.clone().map(Rc::new), WRAPPER.chars().count() as u32);
+    // Named by its namespaced key, the function's `import()` resolves in the namespace.
+    let name = match scope.0.flatten() {
+        Some(id) => namespace::key(&id, &filename),
+        None => filename,
+    };
+    register_source_map(&name, transpiled.map.clone().map(Rc::new), WRAPPER.chars().count() as u32);
     let mut options = EvalOptions::default();
     options.strict = false;
-    options.filename = Some(filename.clone());
+    options.filename = Some(name);
     let wrapper: Function = ctx.eval_with_options(format!("{WRAPPER}{}\n}})", transpiled.code), options)?;
     result.set("format", "cjs")?;
     result.set("fn", wrapper)?;
@@ -92,8 +116,10 @@ fn compile<'js>(ctx: Ctx<'js>, filename: String, source: Opt<String>) -> rquickj
 }
 
 /// `{ source: true }` for source-backed virtual modules, else `{ value }` built once by the caller.
-fn virtual_value<'js>(ctx: Ctx<'js>, key: String) -> rquickjs::Result<Object<'js>> {
-    let module = state().shared.virtual_modules.read().unwrap_or_else(|poison| poison.into_inner()).get(&key).cloned();
+fn virtual_value<'js>(ctx: Ctx<'js>, key: String, scope: Opt<Option<String>>) -> rquickjs::Result<Object<'js>> {
+    let scope = scope.0.flatten();
+    let module =
+        namespace::virtual_module(&state().shared, scope.as_deref(), &key).map_err(|error| throw(&ctx, &error))?;
     let result = Object::new(ctx.clone())?;
     match module {
         None => return Err(throw(&ctx, &JsError::new(format!("Unknown virtual module {key}")))),

@@ -5,6 +5,7 @@ mod bootstrap;
 mod bridge;
 pub(crate) mod client;
 mod executable;
+pub(crate) mod import_meta;
 mod modules;
 pub(crate) mod ops;
 mod transport;

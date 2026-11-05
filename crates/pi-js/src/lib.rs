@@ -16,6 +16,7 @@ pub mod virtual_modules;
 
 pub use error::{JsError, UNSUPPORTED_CODE};
 pub use host::{HostFunction, HostFunctions, HostValue};
+pub use modules::namespace::ModuleNamespace;
 pub use rquickjs;
 pub use runtime::{
     ExitCallback, JsBackend, JsHandle, JsRef, JsRuntime, JsRuntimeOptions, JsScope, OutputSink, OutputStream,

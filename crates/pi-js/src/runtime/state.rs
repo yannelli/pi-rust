@@ -49,6 +49,7 @@ pub(crate) struct Shared {
     pub http: crate::node::fetch::Clients,
     /// Module sources registered by path; they load as if the files existed.
     pub source_files: RwLock<HashMap<String, Arc<str>>>,
+    pub namespaces: crate::modules::namespace::Namespaces,
 }
 
 pub(crate) struct PendingPromise {
@@ -93,6 +94,8 @@ pub(crate) struct LoopState {
     pub module_hooks: Cell<bool>,
     /// The current async context frame (AsyncLocalStorage values); `None` is the empty frame.
     pub async_frame: RefCell<Option<Persistent<Value<'static>>>>,
+    /// The namespaced module key a Rust import is resolving now.
+    pub trusted_import: RefCell<Option<String>>,
 }
 
 thread_local! {
@@ -126,6 +129,7 @@ impl LoopState {
             idle_time: Cell::new(std::time::Duration::ZERO),
             module_hooks: Cell::new(false),
             async_frame: RefCell::default(),
+            trusted_import: RefCell::default(),
         });
         STATE.with(|slot| *slot.borrow_mut() = Some(state.clone()));
         state

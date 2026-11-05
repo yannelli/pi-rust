@@ -34,6 +34,14 @@ pub fn node_runtime(dir: &Path) -> Option<(JsRuntime, Arc<Capture>)> {
     Some((runtime, capture))
 }
 
+/// Checks that the Node child reports `PI_EXPECT_NODE_VERSION` as its version, when that is set.
+pub async fn expect_node_version(runtime: &JsRuntime) {
+    if let Ok(expected) = std::env::var("PI_EXPECT_NODE_VERSION") {
+        let version = super::common::eval_json(runtime, "return process.version;").await;
+        assert_eq!(version, serde_json::json!(expected), "the Node child runs the expected Node");
+    }
+}
+
 /// Poll `ready` until it holds; panics after 20 seconds.
 pub async fn wait_for(ready: impl Fn() -> bool) {
     for _ in 0..2000 {
