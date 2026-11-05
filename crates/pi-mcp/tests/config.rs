@@ -2,7 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
-use pi_mcp::config::{McpServerConfigPatch, add_mcp_server_config, remove_mcp_server_config, update_mcp_server_config};
+use pi_mcp::config::{
+    McpServerConfigPatch, add_mcp_server_config, project_mcp_config, remove_mcp_server_config, update_mcp_server_config,
+};
 use pi_mcp::{McpConfigScope, McpExposure, McpLifecycle, McpServerConfig, get_mcp_tool_exposure, load_mcp_config};
 use serde_json::{Value, json};
 
@@ -356,4 +358,23 @@ fn reads_and_edits_mcp_json_files_that_start_with_a_utf8_bom() {
     );
     assert!(remove_mcp_server_config(&project, "local").unwrap());
     assert_eq!(read(&project)["mcpServers"], json!({}));
+}
+
+#[test]
+fn a_worktree_without_a_project_file_reads_the_main_checkout_file() {
+    let paths = setup(json!({}), json!({ "mcpServers": { "db": { "command": "db-mcp" } } }));
+    let git_dir = paths.cwd.join(".git/worktrees/wt");
+    let worktree = paths.cwd.parent().unwrap().join("wt");
+    std::fs::create_dir_all(&git_dir).unwrap();
+    std::fs::create_dir_all(&worktree).unwrap();
+    std::fs::write(git_dir.join("commondir"), "../..\n").unwrap();
+    std::fs::write(worktree.join(".git"), format!("gitdir: {}\n", git_dir.display())).unwrap();
+
+    let loaded = load_mcp_config(&paths.agent_dir, &worktree, true);
+    assert_eq!(loaded.servers.iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>(), ["db"]);
+    let main_file = std::fs::canonicalize(paths.project_file()).unwrap();
+    assert_eq!(std::fs::canonicalize(project_mcp_config(&worktree)).unwrap(), main_file);
+    std::fs::create_dir_all(worktree.join(".pi")).unwrap();
+    std::fs::write(worktree.join(".pi/mcp.json"), "{}").unwrap();
+    assert_eq!(project_mcp_config(&worktree), worktree.join(".pi/mcp.json"));
 }

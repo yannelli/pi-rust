@@ -12,8 +12,8 @@ use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 
 use crate::config::{
-    CONFIG_DIR_NAME, McpConfigScope, add_mcp_server_config, load_mcp_config, remove_mcp_server_config,
-    validate_mcp_server_config,
+    CONFIG_DIR_NAME, McpConfigScope, add_mcp_server_config, load_mcp_config, project_mcp_config,
+    remove_mcp_server_config, validate_mcp_server_config,
 };
 use crate::oauth::CallbackServerFactory;
 use crate::runtime::signin::APP_NAME;
@@ -188,7 +188,7 @@ pub async fn run_mcp_command(args: &[String], options: &McpCommandOptions) -> i3
         return 0;
     }
     let rest = &args[1..];
-    let project_config = options.cwd.join(CONFIG_DIR_NAME).join("mcp.json");
+    let project_config = project_mcp_config(&options.cwd);
     match command {
         "add" => return add(rest, &project_config, options),
         "remove" => return remove(rest, &project_config, options),

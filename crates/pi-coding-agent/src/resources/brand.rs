@@ -40,6 +40,24 @@ pub fn project_config_dir(cwd: &Path) -> PathBuf {
     cwd.join(CONFIG_DIR_NAME)
 }
 
+/// `<cwd>/<configDir>/<entry>`. In a linked git worktree without that entry, the main checkout's
+/// copy when it exists, so untracked project settings apply in every worktree of a repository.
+pub fn project_config_path(cwd: &Path, entry: impl AsRef<Path>) -> PathBuf {
+    let entry = Path::new(CONFIG_DIR_NAME).join(entry);
+    let local = cwd.join(&entry);
+    if local.exists() {
+        return local;
+    }
+    super::context::main_checkout_dir(cwd).map(|main| main.join(&entry)).filter(|path| path.exists()).unwrap_or(local)
+}
+
+/// The directory of the project `settings.json` that applies: relative entries, overrides, and
+/// project package installs resolve from it.
+pub fn project_settings_dir(cwd: &Path) -> PathBuf {
+    let settings = project_config_path(cwd, "settings.json");
+    settings.parent().map_or_else(|| project_config_dir(cwd), Path::to_path_buf)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

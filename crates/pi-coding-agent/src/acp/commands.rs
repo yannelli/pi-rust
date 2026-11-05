@@ -7,7 +7,7 @@ use agent_client_protocol_schema::{AvailableCommand, AvailableCommandInput, Unst
 use serde_json::Value;
 
 use crate::headless_commands::HEADLESS_COMMANDS;
-use crate::resources::brand::project_config_dir;
+use crate::resources::brand::project_config_path;
 use crate::resources::source_info::BUILTIN_PATH_PREFIX;
 
 /// A prompt file under `prompts/` (upstream `FileSlashCommand`).
@@ -76,7 +76,7 @@ fn load_dir(dir: &Path, user: bool, subdir: &str, out: &mut Vec<FileSlashCommand
 pub fn load_slash_commands(cwd: &Path, agent_dir: &Path) -> Vec<FileSlashCommand> {
     let mut commands = Vec::new();
     load_dir(&agent_dir.join("prompts"), true, "", &mut commands);
-    load_dir(&project_config_dir(cwd).join("prompts"), false, "", &mut commands);
+    load_dir(&project_config_path(cwd, "prompts"), false, "", &mut commands);
     commands
 }
 

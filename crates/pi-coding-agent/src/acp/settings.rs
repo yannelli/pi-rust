@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
-use crate::resources::brand::project_config_dir;
+use crate::resources::brand::project_config_path;
 
 fn read_object(path: &Path) -> Map<String, Value> {
     std::fs::read_to_string(path)
@@ -35,7 +35,7 @@ fn deep_merge(mut base: Map<String, Value>, overlay: Map<String, Value>) -> Map<
 /// `<agent_dir>/settings.json` merged with `<cwd>/.pi/settings.json`.
 pub fn merged_settings(cwd: &Path, agent_dir: &Path) -> Map<String, Value> {
     let global = read_object(&agent_dir.join("settings.json"));
-    let project = read_object(&project_config_dir(cwd).join("settings.json"));
+    let project = read_object(&project_config_path(cwd, "settings.json"));
     deep_merge(global, project)
 }
 

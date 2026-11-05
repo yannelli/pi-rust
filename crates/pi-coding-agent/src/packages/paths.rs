@@ -10,7 +10,7 @@ use super::PackageManager;
 use super::git_url::GitSource;
 use super::source::ArchiveSource;
 use crate::resources::SourceScope;
-use crate::resources::brand::CONFIG_DIR_NAME;
+use crate::resources::brand::project_settings_dir;
 use crate::resources::paths::{normalize, resolve_path};
 
 /// `<agent dir>/tmp/extensions`, created private to the user.
@@ -122,7 +122,7 @@ impl PackageManager {
     pub(crate) fn base_dir_for_scope(&self, scope: SourceScope) -> anyhow::Result<PathBuf> {
         self.assert_project_trusted(scope)?;
         Ok(match scope {
-            SourceScope::Project => self.cwd.join(CONFIG_DIR_NAME),
+            SourceScope::Project => project_settings_dir(&self.cwd),
             SourceScope::User => self.agent_dir.clone(),
             SourceScope::Temporary => self.cwd.clone(),
         })
@@ -136,7 +136,7 @@ impl PackageManager {
     pub(crate) fn install_root(&self, scope: SourceScope, kind: &str) -> anyhow::Result<Option<PathBuf>> {
         self.assert_project_trusted(scope)?;
         Ok(match scope {
-            SourceScope::Project => Some(self.cwd.join(CONFIG_DIR_NAME).join(kind)),
+            SourceScope::Project => Some(project_settings_dir(&self.cwd).join(kind)),
             SourceScope::User => Some(self.agent_dir.join(kind)),
             SourceScope::Temporary => None,
         })

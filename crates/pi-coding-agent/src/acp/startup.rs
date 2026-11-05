@@ -6,7 +6,7 @@ use std::path::Path;
 use serde_json::Value;
 
 use crate::platform::version_check::LatestPiRelease;
-use crate::resources::brand::project_config_dir;
+use crate::resources::brand::project_config_path;
 
 /// What the startup info lists.
 pub struct StartupInfoInput<'a> {
@@ -94,7 +94,7 @@ pub fn build_startup_info(input: &StartupInfoInput<'_>) -> String {
     let mut skills = Vec::new();
     skills_from_root(&input.agent_dir.join("skills"), &mut skills);
     skills_from_root(&input.home.join(".agents").join("skills"), &mut skills);
-    skills_from_root(&project_config_dir(input.cwd).join("skills"), &mut skills);
+    skills_from_root(&project_config_path(input.cwd, "skills"), &mut skills);
     section("Skills", skills);
 
     let prompts = sorted_entries(&input.agent_dir.join("prompts"))
@@ -113,7 +113,7 @@ pub fn build_startup_info(input: &StartupInfoInput<'_>) -> String {
         .map(|entry| entry.path().display().to_string())
         .collect();
     extensions.extend(settings_packages(&input.agent_dir.join("settings.json")));
-    extensions.extend(settings_packages(&project_config_dir(input.cwd).join("settings.json")));
+    extensions.extend(settings_packages(&project_config_path(input.cwd, "settings.json")));
     section("Extensions", extensions);
 
     if let Some(notice) = input.update_notice {

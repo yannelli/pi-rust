@@ -19,6 +19,30 @@ pub const CONFIG_DIR_NAME: &str = match option_env!("PI_CONFIG_DIR") {
     None => ".pi",
 };
 
+/// `<cwd>/.pi/mcp.json`, or in a linked git worktree without it, the main checkout's copy when
+/// it exists (the coding agent's `project_config_path` does the same for other project files).
+pub fn project_mcp_config(cwd: &Path) -> PathBuf {
+    let entry = Path::new(CONFIG_DIR_NAME).join("mcp.json");
+    let local = cwd.join(&entry);
+    if local.exists() {
+        return local;
+    }
+    main_checkout_dir(cwd).map(|main| main.join(&entry)).filter(|path| path.exists()).unwrap_or(local)
+}
+
+/// The directory of the main checkout that matches `cwd` in a linked git worktree.
+fn main_checkout_dir(cwd: &Path) -> Option<PathBuf> {
+    let root = cwd.ancestors().find(|dir| dir.join(".git").exists())?;
+    let text = std::fs::read_to_string(root.join(".git")).ok()?;
+    let git_dir = root.join(text.trim().strip_prefix("gitdir:")?.trim());
+    let common = std::fs::read_to_string(git_dir.join("commondir")).ok()?;
+    let common = std::fs::canonicalize(git_dir.join(common.trim())).ok()?;
+    if common.file_name()? != ".git" {
+        return None;
+    }
+    Some(common.parent()?.join(cwd.strip_prefix(root).ok()?))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum McpConfigScope {
@@ -178,7 +202,7 @@ pub fn load_mcp_config(agent_dir: &Path, cwd: &Path, project_trusted: bool) -> L
     let mut loaded = LoadedMcpConfig::default();
     read_config_file(&agent_dir.join("mcp.json"), McpConfigScope::Global, &mut loaded);
     if project_trusted {
-        let project = cwd.join(CONFIG_DIR_NAME).join("mcp.json");
+        let project = project_mcp_config(cwd);
         read_config_file(&project, McpConfigScope::Project, &mut loaded);
         loaded.project_config = Some(project);
     }

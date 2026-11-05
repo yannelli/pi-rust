@@ -45,7 +45,7 @@ impl FileSettingsStorage {
     pub fn new(cwd: &Path, agent_dir: &Path) -> Self {
         Self {
             global: agent_dir.join("settings.json"),
-            project: crate::resources::brand::project_config_dir(cwd).join("settings.json"),
+            project: crate::resources::brand::project_config_path(cwd, "settings.json"),
         }
     }
 

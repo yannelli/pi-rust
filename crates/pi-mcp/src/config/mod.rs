@@ -12,7 +12,7 @@ use crate::naming::server_key;
 
 pub use files::{
     CONFIG_DIR_NAME, LoadedMcpConfig, McpConfigScope, McpServerConfigPatch, McpServerEntry, add_mcp_server_config,
-    load_mcp_config, remove_mcp_server_config, update_mcp_server_config,
+    load_mcp_config, project_mcp_config, remove_mcp_server_config, update_mcp_server_config,
 };
 pub use validate::{is_loopback_redirect_uri, resolve_exposure_aliases, validate_mcp_server_config};
 

@@ -64,6 +64,23 @@ fn find_git_paths(cwd: &Path) -> Option<GitPaths> {
     None
 }
 
+/// In a linked git worktree, the worktree root and the main checkout root. `None` in a main
+/// checkout, a submodule, or outside git.
+pub(crate) fn linked_worktree_roots(cwd: &Path) -> Option<(PathBuf, PathBuf)> {
+    let git = find_git_paths(cwd)?;
+    if git.common_git_dir.file_name()? != ".git" {
+        return None;
+    }
+    let main_root = git.common_git_dir.parent()?.to_path_buf();
+    (main_root != git.repo_dir).then_some((git.repo_dir, main_root))
+}
+
+/// In a linked git worktree, the directory of the main checkout that matches `cwd`.
+pub fn main_checkout_dir(cwd: &Path) -> Option<PathBuf> {
+    let (worktree_root, main_root) = linked_worktree_roots(cwd)?;
+    Some(main_root.join(cwd.strip_prefix(&worktree_root).ok()?))
+}
+
 /// In a linked worktree nested inside its main checkout, the main checkout's context file
 /// that the worktree's own copy shadows. Returned in canonical form.
 fn find_shadowed_context_file(cwd: &Path) -> Option<PathBuf> {

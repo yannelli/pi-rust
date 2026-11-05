@@ -188,7 +188,7 @@ async fn config_and_auth(inputs: &DoctorInputs, problems: &mut Vec<String>) -> (
         }
     }
     providers.sort_by(|a, b| a.provider.cmp(&b.provider));
-    let project_settings = crate::resources::brand::project_config_dir(&inputs.cwd).join("settings.json");
+    let project_settings = crate::resources::brand::project_config_path(&inputs.cwd, "settings.json");
     let files = vec![
         config_file("settings", crate::config::settings_path(&inputs.agent_dir), scope_errors(SettingsScope::Global)),
         config_file("project settings", project_settings, scope_errors(SettingsScope::Project)),

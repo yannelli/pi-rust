@@ -174,3 +174,20 @@ fn resolves_trust_in_upstream_order() {
     assert_eq!(DefaultProjectTrust::parse("always"), DefaultProjectTrust::Always);
     assert_eq!(DefaultProjectTrust::parse("bogus"), DefaultProjectTrust::Ask);
 }
+
+#[test]
+fn a_trusted_repository_covers_its_linked_worktrees() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = ProjectTrustStore::new(&temp.path().join("agent"));
+    let (main, worktree) = (temp.path().join("main"), temp.path().join("worktrees/feat"));
+    super::context::link_worktree(&main, &worktree, "feat");
+    write(&main.join(".pi/settings.json"), "{}");
+    assert!(has_trust_requiring_project_resources(&worktree, &temp.path().join("home")));
+
+    store.set(temp.path(), Some(false)).unwrap();
+    store.set(&main, Some(true)).unwrap();
+    assert_eq!(store.get(&worktree).unwrap(), Some(true));
+    assert_eq!(store.get_entry(&worktree).unwrap().unwrap().path, canonicalize(&main));
+    store.set(&worktree, Some(false)).unwrap();
+    assert_eq!(store.get(&worktree).unwrap(), Some(false));
+}

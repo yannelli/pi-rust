@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use super::write;
+use crate::resources::brand::{project_config_path, project_settings_dir};
 use crate::resources::load_project_context_files;
 
 fn contents(cwd: &Path, agent: &Path) -> Vec<String> {
@@ -43,7 +44,7 @@ fn prefers_override_per_directory_and_skips_directories() {
     assert_eq!(files.last().unwrap().content, "Fallback instructions");
 }
 
-fn link_worktree(main: &Path, worktree: &Path, name: &str) -> PathBuf {
+pub(super) fn link_worktree(main: &Path, worktree: &Path, name: &str) -> PathBuf {
     let git_dir = main.join(".git/worktrees").join(name);
     write(&main.join(".git/HEAD"), "ref: refs/heads/main\n");
     write(&git_dir.join("HEAD"), "ref: refs/heads/feat\n");
@@ -161,4 +162,24 @@ fn config_delegates_to_the_resource_module() {
     write(&temp.path().join("AGENTS.md"), "here");
     let files = crate::config::load_context_files(temp.path(), &temp.path().join("agent"));
     assert_eq!(files.last().unwrap().content, "here");
+}
+
+#[test]
+fn project_config_falls_back_to_the_main_checkout_of_a_worktree() {
+    let temp = tempfile::tempdir().unwrap();
+    let (main, worktree) = (temp.path().join("main"), temp.path().join("wt"));
+    link_worktree(&main, &worktree, "wt");
+    assert_eq!(project_config_path(&worktree, "settings.json"), worktree.join(".pi/settings.json"));
+
+    write(&main.join(".pi/settings.json"), "{}");
+    write(&main.join(".pi/skills/review/SKILL.md"), "skill");
+    write(&main.join("sub/.pi/mcp.json"), "{}");
+    assert_eq!(project_config_path(&worktree, "settings.json"), main.join(".pi/settings.json"));
+    assert_eq!(project_settings_dir(&worktree), main.join(".pi"));
+    assert_eq!(project_config_path(&worktree.join("sub"), "mcp.json"), main.join("sub/.pi/mcp.json"));
+
+    write(&worktree.join(".pi/settings.json"), "{}");
+    assert_eq!(project_config_path(&worktree, "settings.json"), worktree.join(".pi/settings.json"));
+    assert_eq!(project_config_path(&worktree, "skills"), main.join(".pi/skills"));
+    assert_eq!(project_config_path(&main, "prompts"), main.join(".pi/prompts"));
 }

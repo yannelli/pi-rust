@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::brand::CONFIG_DIR_NAME;
+use super::brand::project_config_path;
 use super::context::{ContextFile, load_project_context_files};
 use super::context_entries::ContextEntry;
 use super::discovery::{LocalResourceOptions, ResourceSettings, ResourceType, resolve_local_resources};
@@ -333,7 +333,7 @@ impl ResourceLoader {
     }
 
     fn discover(&self, name: &str) -> Option<String> {
-        let project = self.options.cwd.join(CONFIG_DIR_NAME).join(name);
+        let project = project_config_path(&self.options.cwd, name);
         if self.options.project_trusted && project.exists() {
             return Some(project.display().to_string());
         }
