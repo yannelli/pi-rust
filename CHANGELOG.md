@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.11] - 2026-11-04
+
+### Added
+
+- **settings:** read project config from the main checkout in git worktrees ([17e522b](https://github.com/yannelli/pi-rust/commit/17e522b347350aae81550db9b4526832d250ae3e))
+
 ## [0.12.10] - 2026-11-04
 
 ### Added
