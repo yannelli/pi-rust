@@ -121,6 +121,34 @@ async fn virtual_models_route_requests_through_extensions() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn model_registry_finds_classifiers_that_share_an_id_with_a_chat_model() {
+    let source = r#"export default function (pi) {
+	pi.registerCommand("probe", { handler: async (_args, ctx) => {
+		const registry = ctx.modelRegistry;
+		pi.appendEntry("probe", {
+			found: registry.findOfType("classifier", "box", "qwen")?.type ?? null,
+			listed: registry.getModelsOfType("classifier").some((model) => model.provider === "box"),
+			available: registry.getAvailableOfType("classifier", "box").length,
+		});
+	} });
+}
+"#;
+    let models = json!({"providers": {"box": {"baseUrl": "http://127.0.0.1:1", "api": "openai-completions",
+        "apiKey": "box-key", "models": [{"id": "qwen"},
+            {"id": "qwen", "type": "classifier", "api": "llama-cpp-classify", "input": ["text"]}]}}});
+    let h = harness(Setup {
+        files: vec![("probe.ts", source.into())],
+        load: vec!["probe.ts"],
+        models: Some(models),
+        ..Setup::default()
+    })
+    .await;
+    h.session.prompt("/probe", Vec::new()).await.unwrap();
+    let probe = h.entries().into_iter().find(|entry| entry["customType"] == "probe").expect("probe entry");
+    assert_eq!(probe["data"], json!({"found": "classifier", "listed": true, "available": 1}));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn mcp_servers_register_and_replacing_builtin_mcp_reports_unconnected_ones() {
     let source = r#"export default function (pi) {
 	pi.registerMcpServer("docs", { command: "docs-server", args: ["--stdio"] });
