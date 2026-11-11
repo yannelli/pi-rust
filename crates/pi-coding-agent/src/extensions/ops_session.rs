@@ -90,20 +90,26 @@ pub(super) fn read_models(
         "find" => json!(runtime.get_model(&args.str(2)?, &args.str(3)?)),
         "findOfType" => {
             let (kind, provider, id) = (args.str(2)?, args.str(3)?, args.str(4)?);
-            let found = runtime
+            let registry = runtime.registry();
+            let found = registry
                 .all_models()
-                .into_iter()
+                .iter()
                 .find(|model| model.provider == provider && model.id == id && of_type(model, &kind));
             json!(found)
         }
         "getModelsOfType" | "getAvailableOfType" => {
             let (kind, provider) = (args.str(2)?, args.opt_str(3));
-            let models = if method == "getModelsOfType" { runtime.all_models() } else { runtime.available_models() };
-            let models: Vec<_> = models
-                .into_iter()
+            let available = method == "getAvailableOfType";
+            let models: Vec<_> = runtime
+                .registry()
+                .all_models()
+                .iter()
                 .filter(|model| {
-                    of_type(model, &kind) && provider.as_ref().is_none_or(|wanted| &model.provider == wanted)
+                    of_type(model, &kind)
+                        && provider.as_ref().is_none_or(|wanted| &model.provider == wanted)
+                        && (!available || runtime.has_configured_auth(&model.provider))
                 })
+                .cloned()
                 .collect();
             json!(models)
         }
