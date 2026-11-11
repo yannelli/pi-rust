@@ -2,6 +2,16 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.12] - 2026-11-11
+
+### Added
+
+- **extensions:** pick the account of a request with before_provider_auth ([7cb2d5d](https://github.com/yannelli/pi-rust/commit/7cb2d5d61695b37b6d09bb07e3d5e92af4d0b36a))
+
+### Fixed
+
+- **extensions:** find classifier and image models by type in ctx.modelRegistry ([2f0768e](https://github.com/yannelli/pi-rust/commit/2f0768e2b5446412cc18ec0078ec81aa7353b5fd))
+
 ## [0.12.11] - 2026-11-04
 
 ### Added
