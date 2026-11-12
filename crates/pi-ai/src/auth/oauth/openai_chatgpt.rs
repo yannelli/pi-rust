@@ -89,6 +89,10 @@ fn handle_callback(request: &LoopbackRequest, expected_state: &str, sender: &Res
         return page(404, oauth_error_html("Callback route not found.", None));
     }
     if let Some(error) = url_param(&request.url, "error").filter(|error| !error.is_empty()) {
+        // Any page in the browser can request this URL, so only the holder of the state may end the login.
+        if url_param(&request.url, "state").as_deref() != Some(expected_state) {
+            return page(400, oauth_error_html("OAuth state mismatch", None));
+        }
         resolve(Err(AuthError::other(format!("ChatGPT authorization failed: {error}"))));
         return page(400, oauth_error_html("ChatGPT was not connected.", Some(&format!("Error: {error}"))));
     }

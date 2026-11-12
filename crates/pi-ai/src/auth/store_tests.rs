@@ -56,6 +56,18 @@ async fn reads_and_resolves_stored_credentials() {
     assert_eq!(key_of(read_only.read("cmd").await.unwrap()).as_deref(), Some("!printf from-command"));
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn update_makes_an_existing_world_readable_file_private() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_dir, path) = temp_auth("agent");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "{}").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    FileCredentialStore::new(&path).update("openai", set(api_key("first"))).await.unwrap();
+    assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+}
+
 #[tokio::test]
 async fn update_round_trips_and_preserves_external_edits() {
     let (_dir, path) = temp_auth("agent");

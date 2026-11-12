@@ -41,8 +41,15 @@ impl FileAuthStorageBackend {
 fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
+    // `mode` applies when the file is created; the chmod covers a file that exists with a wider mode.
     #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        options.mode(0o600);
+        if path.exists() {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        }
+    }
     std::io::Write::write_all(&mut options.open(path)?, text.as_bytes())
 }
 
