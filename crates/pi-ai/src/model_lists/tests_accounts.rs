@@ -223,6 +223,24 @@ async fn anthropic_follows_pages_and_sends_the_providers_auth_headers() {
     assert!(!oauth.headers.contains_key("x-api-key"));
 }
 
+#[test]
+fn claude_mythos_5_2_stays_only_for_accounts_that_list_it() {
+    let catalog = || -> Vec<Model> {
+        crate::models::builtin_models().iter().filter(|model| model.provider == "anthropic").cloned().collect()
+    };
+    let listed = |ids: &[&str]| -> Vec<Model> {
+        let listed: Vec<Listed> = ids.iter().map(|id| Listed::new(*id)).collect();
+        reconcile(catalog(), &listed, AddRule::Any, Some("claude-opus-4-8")).saved()
+    };
+    let without = listed(&["claude-opus-4-8", "claude-fable-5-2"]);
+    assert_eq!(ids(&without), ["claude-fable-5-2", "claude-opus-4-8"]);
+    let with = listed(&["claude-opus-4-8", "claude-fable-5-2", "claude-mythos-5-2"]);
+    let mythos = with.iter().find(|model| model.id == "claude-mythos-5-2").expect("a listed Mythos 5.2 stays");
+    assert_eq!((mythos.name.as_str(), mythos.cost.input, mythos.cost.output), ("Claude Mythos 5.2", 8.0, 40.0));
+    assert_eq!(mythos.compat.as_ref().unwrap()["supportsMidConvoEffort"], json!(true));
+    assert_eq!(mythos.thinking_level_map.as_ref().unwrap()["off"], None, "Mythos 5.2 rejects disabled thinking");
+}
+
 #[tokio::test]
 async fn anthropic_falls_back_to_the_catalog() {
     assert_fallbacks(AccountModelList::Anthropic, "sk-ant-api-test", anthropic_catalog()).await;

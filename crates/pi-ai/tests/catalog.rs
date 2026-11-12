@@ -10,17 +10,17 @@ use serde_json::Value;
 
 /// Upstream model counts per provider file: (provider, chat, image, classifier).
 const COUNTS: [(&str, usize, usize, usize); 42] = [
-    ("amazon-bedrock", 197, 0, 0),
+    ("amazon-bedrock", 200, 0, 0),
     ("ant-ling", 3, 0, 0),
-    ("anthropic", 17, 0, 0),
+    ("anthropic", 18, 0, 0),
     ("azure", 45, 0, 0),
     ("baseten", 14, 0, 0),
     ("cerebras", 2, 0, 0),
-    ("cloudflare-ai-gateway", 59, 0, 0),
+    ("cloudflare-ai-gateway", 60, 0, 0),
     ("cloudflare-workers-ai", 19, 0, 5),
     ("deepseek", 2, 0, 0),
     ("fireworks", 29, 0, 0),
-    ("github-copilot", 27, 0, 0),
+    ("github-copilot", 28, 0, 0),
     ("google-vertex", 13, 0, 0),
     ("google", 23, 0, 0),
     ("groq", 7, 0, 0),
@@ -36,15 +36,15 @@ const COUNTS: [(&str, usize, usize, usize); 42] = [
     ("openai-codex", 8, 0, 0),
     ("openai", 44, 0, 1),
     ("opencode-go", 30, 0, 0),
-    ("opencode", 79, 0, 2),
-    ("openrouter", 392, 64, 33),
+    ("opencode", 80, 0, 2),
+    ("openrouter", 394, 64, 33),
     ("qwen-token-plan-cn", 21, 0, 0),
     ("qwen-token-plan-individual", 9, 0, 0),
     ("qwen-token-plan", 21, 0, 0),
-    ("radius", 28, 0, 0),
+    ("radius", 29, 0, 0),
     ("together", 15, 0, 0),
     ("typesafe", 0, 0, 1),
-    ("vercel-ai-gateway", 303, 0, 15),
+    ("vercel-ai-gateway", 306, 0, 15),
     ("xai", 4, 0, 0),
     ("xiaomi-token-plan-ams", 2, 0, 0),
     ("xiaomi-token-plan-cn", 2, 0, 0),
@@ -73,15 +73,22 @@ fn expected_counts() -> Counts {
         .collect()
 }
 
-/// `models.extra.json` holds the providers only pi-rust has; they are not in the upstream data.
+/// `models.extra.json` holds the providers and models only pi-rust has; they are not in the
+/// upstream data.
 fn extra_models() -> Vec<Value> {
     serde_json::from_str(include_str!("../models.extra.json")).unwrap()
 }
 
+/// Provider and id of every `models.extra.json` entry.
+fn extra_keys() -> Vec<(String, String)> {
+    let field = |model: &Value, name: &str| model[name].as_str().unwrap().to_string();
+    extra_models().iter().map(|model| (field(model, "provider"), field(model, "id"))).collect()
+}
+
 fn upstream_models() -> Vec<&'static Model> {
-    let extra: Vec<String> =
-        extra_models().iter().filter_map(|model| model["provider"].as_str().map(str::to_string)).collect();
-    builtin_models().iter().filter(|model| !extra.contains(&model.provider)).collect()
+    let extra = extra_keys();
+    let is_extra = |model: &Model| extra.iter().any(|(provider, id)| *provider == model.provider && *id == model.id);
+    builtin_models().iter().filter(|model| !is_extra(model)).collect()
 }
 
 fn bundled_counts() -> Counts {
@@ -111,8 +118,8 @@ fn totals_per_type_match_upstream() {
     for model in upstream_models() {
         totals[type_index(model.model_type.as_deref().expect("every bundled model declares its type"))] += 1;
     }
-    assert_eq!(totals, [1596, 64, 57]);
-    assert_eq!(upstream_models().len(), 1717);
+    assert_eq!(totals, [1609, 64, 57]);
+    assert_eq!(upstream_models().len(), 1730);
     assert_eq!(bundled_counts().len(), 42);
 }
 
@@ -136,6 +143,16 @@ fn counts_match_upstream_data_when_present() {
     }
     assert_eq!(counts, bundled_counts(), "bundled catalog is stale; run cargo xtask models {}", dir.display());
     assert_eq!(counts, expected_counts());
+}
+
+#[test]
+fn extra_models_are_not_in_the_upstream_catalog() {
+    // Delete an extra entry when a regenerated `models.json` lists the same model.
+    let raw: Vec<Value> = serde_json::from_str(include_str!("../models.json")).unwrap();
+    for (provider, id) in extra_keys() {
+        let listed = raw.iter().any(|model| model["provider"] == provider.as_str() && model["id"] == id.as_str());
+        assert!(!listed, "{provider}/{id} is in models.json and models.extra.json");
+    }
 }
 
 #[test]

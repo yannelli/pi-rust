@@ -94,6 +94,34 @@ fn system_one_classifiers_set_their_image_form() {
 }
 
 #[test]
+fn claude_fable_5_2_uses_per_message_effort_like_fable_5_1() {
+    for id in ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-fable-5-2"] {
+        assert_eq!(level(find("anthropic", id, "chat"), "off"), Some(None), "{id}");
+    }
+    let direct = find("anthropic", "claude-fable-5-2", "chat");
+    let compat = direct.compat.as_ref().unwrap();
+    assert_eq!(compat["supportsMidConvoEffort"], json!(true));
+    assert_eq!(compat["supportsMidConvoSystemMessages"], json!(true));
+    assert_eq!((level(direct, "xhigh"), level(direct, "max")), (mapped("xhigh"), mapped("max")));
+    let cost = &direct.cost;
+    assert_eq!((cost.input, cost.output, cost.cache_read, cost.cache_write), (8.0, 40.0, 0.2, 10.0));
+    // Opus 4.8 cannot take per-message effort, so it is dropped from Fable 5.2's fallbacks.
+    let fallbacks: Vec<_> = compat["allowedFallbackModels"].as_array().unwrap().iter().map(|f| &f["model"]).collect();
+    assert_eq!(fallbacks, [&json!("claude-opus-5")]);
+    let openrouter = find("openrouter", "anthropic/claude-fable-5.2", "chat");
+    assert_eq!(openrouter.compat.as_ref().unwrap()["supportsMidConvoEffort"], json!(true));
+}
+
+#[test]
+fn claude_mythos_5_2_has_the_settings_of_fable_5_2() {
+    // Mythos 5.2 is Fable 5.2 for verified organizations; upstream has no entry (pi-rust extension).
+    let fable = find("anthropic", "claude-fable-5-2", "chat");
+    let mythos = find("anthropic", "claude-mythos-5-2", "chat");
+    let expected = Model { id: mythos.id.clone(), name: "Claude Mythos 5.2".into(), ..fable.clone() };
+    assert_eq!(*mythos, expected);
+}
+
+#[test]
 fn opencode_deepseek_v4_1_flash_does_not_support_long_cache_retention() {
     let model = find("opencode", "deepseek-v4.1-flash", "chat");
     assert_eq!(model.compat.as_ref().unwrap()["supportsLongCacheRetention"], json!(false));
