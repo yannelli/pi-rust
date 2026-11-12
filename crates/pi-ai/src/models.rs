@@ -13,7 +13,7 @@ use crate::types::Model;
 mod json;
 
 /// `models.json` is generated from the upstream catalog; `models.extra.json` holds the providers
-/// only pi-rust has, so regenerating the first keeps them.
+/// and models only pi-rust has, so regenerating the first keeps them.
 static BUILTIN: LazyLock<Vec<Model>> = LazyLock::new(|| {
     let mut models: Vec<Model> =
         serde_json::from_str(include_str!("../models.json")).expect("bundled models.json is valid");

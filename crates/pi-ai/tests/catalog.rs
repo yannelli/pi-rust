@@ -73,15 +73,22 @@ fn expected_counts() -> Counts {
         .collect()
 }
 
-/// `models.extra.json` holds the providers only pi-rust has; they are not in the upstream data.
+/// `models.extra.json` holds the providers and models only pi-rust has; they are not in the
+/// upstream data.
 fn extra_models() -> Vec<Value> {
     serde_json::from_str(include_str!("../models.extra.json")).unwrap()
 }
 
+/// Provider and id of every `models.extra.json` entry.
+fn extra_keys() -> Vec<(String, String)> {
+    let field = |model: &Value, name: &str| model[name].as_str().unwrap().to_string();
+    extra_models().iter().map(|model| (field(model, "provider"), field(model, "id"))).collect()
+}
+
 fn upstream_models() -> Vec<&'static Model> {
-    let extra: Vec<String> =
-        extra_models().iter().filter_map(|model| model["provider"].as_str().map(str::to_string)).collect();
-    builtin_models().iter().filter(|model| !extra.contains(&model.provider)).collect()
+    let extra = extra_keys();
+    let is_extra = |model: &Model| extra.iter().any(|(provider, id)| *provider == model.provider && *id == model.id);
+    builtin_models().iter().filter(|model| !is_extra(model)).collect()
 }
 
 fn bundled_counts() -> Counts {
@@ -136,6 +143,16 @@ fn counts_match_upstream_data_when_present() {
     }
     assert_eq!(counts, bundled_counts(), "bundled catalog is stale; run cargo xtask models {}", dir.display());
     assert_eq!(counts, expected_counts());
+}
+
+#[test]
+fn extra_models_are_not_in_the_upstream_catalog() {
+    // Delete an extra entry when a regenerated `models.json` lists the same model.
+    let raw: Vec<Value> = serde_json::from_str(include_str!("../models.json")).unwrap();
+    for (provider, id) in extra_keys() {
+        let listed = raw.iter().any(|model| model["provider"] == provider.as_str() && model["id"] == id.as_str());
+        assert!(!listed, "{provider}/{id} is in models.json and models.extra.json");
+    }
 }
 
 #[test]
