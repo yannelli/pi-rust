@@ -82,6 +82,16 @@ fn includes_the_decoded_payload_size_in_osc_1337_metadata() {
 }
 
 #[test]
+fn image_data_cannot_end_its_sequence_and_start_another() {
+    // A tool result or an MCP server supplies this text: here it tries an OSC 52 clipboard write.
+    let data = "AAAA\x1b\\\x1b]52;c;ZXZpbA==\x07BBBB";
+    let kitty = encode_kitty(data, &KittyEncodeOptions::default());
+    assert_eq!(kitty, "\x1b_Ga=T,f=100,q=2;AAAA52cZXZpbA==BBBB\x1b\\");
+    let iterm2 = encode_iterm2(data, &Iterm2EncodeOptions::default());
+    assert_eq!(iterm2, "\x1b]1337;File=inline=1;size=14:AAAA52cZXZpbA==BBBB\x07");
+}
+
+#[test]
 fn can_request_no_terminal_side_cursor_movement() {
     let options =
         KittyEncodeOptions { columns: Some(2), rows: Some(2), move_cursor: Some(false), ..Default::default() };
