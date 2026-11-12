@@ -2,6 +2,20 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.13] - 2026-11-11
+
+### Fixed
+
+- **ai:** keep metadata credentials off the proxy and stored credentials private ([3d03430](https://github.com/yannelli/pi-rust/commit/3d03430e99247cd742c68a9879d55e8e8006adf3))
+- **coding-agent:** keep temp files of shares, prompts and command output private ([ac87b15](https://github.com/yannelli/pi-rust/commit/ac87b150c5ad4cc6b20b080a98982ccc82fe81e0))
+- **chord:** refuse packed payloads in text frames from WebSocket clients ([d71d3b2](https://github.com/yannelli/pi-rust/commit/d71d3b21a15a99a20b70a58a3cbc82206ea82bee))
+- **schema:** stop following a $ref cycle on the same value ([9e93856](https://github.com/yannelli/pi-rust/commit/9e938569bdc2f6945326b03de39e358ed25188a6))
+- **tui:** keep image data from ending its terminal sequence ([fe636d3](https://github.com/yannelli/pi-rust/commit/fe636d36428a659818ce71d272d611ff9a019233))
+- **js:** check the TLS peer before a client sends its queued writes ([3307eca](https://github.com/yannelli/pi-rust/commit/3307eca6f8a27bb5aabb9de028bedfaf40a29e47))
+- **resources:** let a worktree inherit trust only when its repository lists it ([f8adbc6](https://github.com/yannelli/pi-rust/commit/f8adbc615b68ab5be42b0d74d66b6405953abbfd))
+- **deps:** update rustls, webpki roots, tokio, zstd, pulldown-cmark and rustix to patched versions ([e83836b](https://github.com/yannelli/pi-rust/commit/e83836be42990efd6a8aff0dd179dad771bc9934))
+- **ci:** release only CI runs of this repository, with least-privilege tokens ([1a324ff](https://github.com/yannelli/pi-rust/commit/1a324ff2bbb23aa786056b0e2cdcae1290991dca))
+
 ## [0.12.12] - 2026-11-11
 
 ### Added
