@@ -33,7 +33,8 @@ impl InteractiveMode {
         let session = self.session();
         let dir = ShareDir(std::env::temp_dir().join(format!("pi-share-{}", crate::session::ids::uuid_v4())));
         let jsonl = dir.0.join("session.jsonl");
-        let exported = std::fs::create_dir_all(&dir.0).map_err(anyhow::Error::from).and_then(|()| {
+        let created = crate::agent_session::output_file::create_private_dir(&dir.0);
+        let exported = created.map_err(anyhow::Error::from).and_then(|()| {
             let file = session.session_file().ok_or_else(|| anyhow::anyhow!("Cannot export in-memory session"))?;
             export_session_for_share(&file, &jsonl, &session.system_prompt(), &session.export_tools())
         });

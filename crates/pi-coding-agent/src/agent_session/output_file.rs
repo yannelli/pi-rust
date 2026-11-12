@@ -5,6 +5,18 @@ use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
+/// Creates `path` as a directory that only the user can enter: the temp directory is shared with
+/// other users, and these directories hold session exports and prompts.
+pub(crate) fn create_private_dir(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new().mode(0o700).create(path)
+    }
+    #[cfg(not(unix))]
+    std::fs::create_dir(path)
+}
+
 pub(crate) struct OutputFile {
     path: PathBuf,
     file: File,

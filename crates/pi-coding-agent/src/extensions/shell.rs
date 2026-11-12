@@ -183,9 +183,11 @@ pub(crate) async fn run_user_bash(
         crate::agent_session::bash::sanitize_binary_output(&crate::agent_session::bash::strip_ansi(&lock(&output)));
     on_chunk(&full);
     let truncation = crate::tools::truncate::truncate_tail(&full, Default::default());
+    // A new file with a random name that only the user can read, as for the built-in bash tool.
     let full_output_path = truncation.truncated.then(|| {
-        let path = std::env::temp_dir().join(format!("pi-bash-{}.log", runner.next_id()));
-        std::fs::write(&path, &full).ok().map(|_| path)
+        let mut file = crate::agent_session::output_file::OutputFile::create("pi-bash", ".log")?;
+        file.write(&full);
+        Some(file.finish())
     });
     let (exit_code, cancelled) = match result {
         Ok(code) => (code, false),

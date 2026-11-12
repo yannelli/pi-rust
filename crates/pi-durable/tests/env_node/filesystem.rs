@@ -142,6 +142,17 @@ async fn reports_the_source_path_when_rename_fails_because_the_source_is_missing
     assert_eq!(env.read_text_file("destination.txt", &ctx).await.unwrap(), "unchanged");
 }
 
+/// Command output spills into these directories, and the temp root is shared with other users.
+fn assert_owner_only(dir: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(dir).unwrap().permissions().mode() & 0o777, 0o700, "{}", dir.display());
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
+}
+
 #[tokio::test]
 async fn creates_temporary_directories_and_files() {
     let dir = temp_dir();
@@ -149,10 +160,12 @@ async fn creates_temporary_directories_and_files() {
     let ctx = context();
     let temp = env.create_temp_dir(Some("node-env-test-"), &ctx).await.unwrap();
     assert!(std::path::Path::new(&temp).is_dir());
+    assert_owner_only(std::path::Path::new(&temp));
     std::fs::remove_dir_all(&temp).unwrap();
     let options = TempFileOptions { prefix: Some("prefix-".into()), suffix: Some(".txt".into()) };
     let file = env.create_temp_file(options, &ctx).await.unwrap();
     assert!(std::path::Path::new(&file).is_file());
+    assert_owner_only(std::path::Path::new(&file).parent().unwrap());
     assert!(file.ends_with(".txt"));
     assert_eq!(env.read_text_file(&file, &ctx).await.unwrap(), "");
     remove_parent(&file);

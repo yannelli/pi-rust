@@ -46,7 +46,7 @@ impl TempDirectory {
                 .unwrap_or_default();
             let name = format!("pi-editor-{:x}{:08x}{attempt}", std::process::id(), nanos);
             let path = base.join(name);
-            match std::fs::create_dir(&path) {
+            match crate::agent_session::output_file::create_private_dir(&path) {
                 Ok(()) => return Ok(Self(path)),
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
                 Err(error) => return Err(error),
