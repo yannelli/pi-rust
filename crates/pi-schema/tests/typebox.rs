@@ -88,3 +88,22 @@ fn missing_values_and_patterns() {
     assert_eq!(pattern_test("^x$", "y"), Some(false));
     assert_eq!(pattern_test("(", "x"), None);
 }
+
+#[test]
+fn a_schema_that_references_itself_on_the_same_value_ends() {
+    let cycles = [
+        json!({"type": "object", "$ref": "#"}),
+        json!({"type": "object", "allOf": [{"$ref": "#"}]}),
+        json!({"anyOf": [{"$ref": "#"}, {"type": "string"}]}),
+        json!({"$defs": {"a": {"$ref": "#/$defs/b"}, "b": {"not": {"$ref": "#/$defs/a"}}}, "$ref": "#/$defs/a"}),
+    ];
+    for schema in &cycles {
+        check(schema, &json!({}));
+    }
+    assert!(check(&cycles[0], &json!({})));
+    assert!(!check(&cycles[0], &json!("text")));
+    // A schema that references itself for a nested value still checks every level.
+    let tree = json!({"type": "object", "properties": {"n": {"type": "number"}, "child": {"$ref": "#"}}});
+    assert!(check(&tree, &json!({"n": 1, "child": {"n": 2, "child": {"n": 3}}})));
+    assert!(!check(&tree, &json!({"n": 1, "child": {"n": 2, "child": {"n": "three"}}})));
+}
