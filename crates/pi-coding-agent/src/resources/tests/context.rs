@@ -49,6 +49,7 @@ pub(super) fn link_worktree(main: &Path, worktree: &Path, name: &str) -> PathBuf
     write(&main.join(".git/HEAD"), "ref: refs/heads/main\n");
     write(&git_dir.join("HEAD"), "ref: refs/heads/feat\n");
     write(&git_dir.join("commondir"), "../..");
+    write(&git_dir.join("gitdir"), &format!("{}\n", worktree.join(".git").display()));
     write(&worktree.join(".git"), &format!("gitdir: {}\n", git_dir.display()));
     git_dir
 }
