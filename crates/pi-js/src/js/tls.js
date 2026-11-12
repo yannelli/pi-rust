@@ -258,10 +258,9 @@ TLSSocket.prototype._onConnect = function (info) {
     wrap.ready = true;
     this.connecting = false;
     this._touch();
-  } else {
-    Socket.prototype._onConnect.call(this, info);
   }
   if (settings.isServer) {
+    if (!wrap) Socket.prototype._onConnect.call(this, info);
     this.authorized = !!tls.authorized;
     return this.emit("secure");
   }
@@ -284,6 +283,8 @@ TLSSocket.prototype._onConnect = function (info) {
   } else {
     this.authorized = true;
   }
+  // 'connect' sends the queued writes, so it comes only after the peer is checked.
+  if (!wrap) Socket.prototype._onConnect.call(this, info);
   this.emit("secureConnect");
   this.emit("secure");
   this._flushSessions();

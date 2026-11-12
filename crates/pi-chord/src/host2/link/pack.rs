@@ -163,6 +163,15 @@ pub fn parse_frame(data: &str) -> Result<Received, BadMessage> {
     unpack_object(&message)
 }
 
+/// Parses a JSON text message of a peer that may not send packed payloads: a `z` payload is a protocol error.
+pub fn parse_plain_frame(data: &str) -> Result<Received, BadMessage> {
+    let message = Json::parse(data).map_err(|_| BadMessage("not a frame"))?;
+    if message.as_object().is_some_and(|map| map.get("z").is_some()) {
+        return Err(BadMessage("bad packed payload"));
+    }
+    check_frame(&message, None)
+}
+
 /// A WebSocket message: text, or binary for a frame with a packed payload.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Message {

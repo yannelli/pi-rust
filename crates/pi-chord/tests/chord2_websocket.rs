@@ -266,5 +266,17 @@ async fn large_snapshots_and_results_reach_the_client_as_binary_messages_and_cli
         }
     });
     closed.await.expect("the server closes the socket");
+
+    // So is a text frame that carries a packed payload.
+    let (mut raw, _) = tokio_tungstenite::connect_async(url.as_str()).await.unwrap();
+    raw.send(Message::text(r#"{"t":"call","id":1,"o":1,"m":"add","z":["args","AA=="]}"#)).await.unwrap();
+    let closed = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(Ok(message)) = raw.next().await {
+            if let Message::Close(_) = message {
+                break;
+            }
+        }
+    });
+    closed.await.expect("the server closes the socket");
     accepting.abort();
 }

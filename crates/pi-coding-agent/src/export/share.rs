@@ -237,7 +237,7 @@ impl Drop for TempDir {
 /// Share the session through Radius, falling back to a private gist (upstream `shareSession`).
 pub async fn share_session(request: ShareRequest<'_>) -> Result<ShareOutcome, ShareError> {
     let dir = std::env::temp_dir().join(format!("pi-share-{}", random_hex(12)));
-    std::fs::create_dir_all(&dir).map_err(|error| export_failed(&error))?;
+    crate::agent_session::output_file::create_private_dir(&dir).map_err(|error| export_failed(&error))?;
     let dir = TempDir(dir);
     let jsonl_file = dir.0.join("session.jsonl");
     let html_file = dir.0.join("session.html");

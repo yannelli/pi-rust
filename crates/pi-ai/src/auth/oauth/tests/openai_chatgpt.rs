@@ -101,6 +101,9 @@ async fn login_uses_the_agent_name_and_accepts_the_browser_callback() {
         let sender = page_sender.lock().unwrap().take().unwrap();
         tokio::spawn(async move {
             let stray = get(&format!("{base}?code=c&state=wrong&client_id=x")).await.unwrap();
+            // An error without the state does not end the login.
+            let forged = get(&format!("{base}?error=access_denied&state=wrong")).await.unwrap();
+            assert_eq!((forged.0, forged.1.contains("OAuth state mismatch")), (400, true));
             let page = get(&format!("{base}?code=c&state={state}&client_id=oaiapp_cb")).await.unwrap();
             sender.send((stray, page))
         });

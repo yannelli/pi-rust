@@ -26,6 +26,17 @@ fn random_u64() -> u64 {
     std::collections::hash_map::RandomState::new().hash_one(COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
+/// A directory only its owner can enter, like `mkdtemp`: the temp root is shared with other users.
+fn create_private_dir(path: &str) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new().mode(0o700).create(path)
+    }
+    #[cfg(not(unix))]
+    std::fs::create_dir(path)
+}
+
 /// Six random letters and digits, like `mkdtemp`.
 fn random_suffix() -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -446,7 +457,7 @@ impl FileSystem for LocalExecutionEnv {
         self.run(base, context, move |base| {
             loop {
                 let candidate = format!("{base}{}", random_suffix());
-                match std::fs::create_dir(&candidate) {
+                match create_private_dir(&candidate) {
                     Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
                     other => return other.map(|()| candidate),
                 }

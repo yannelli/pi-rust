@@ -2,6 +2,7 @@
 //! endpoints, EC2 instance metadata (IMDSv2), and the IAM Identity Center portal.
 
 use std::collections::BTreeMap;
+use std::sync::LazyLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
@@ -13,6 +14,14 @@ use crate::registry::http_client;
 
 const METADATA_TIMEOUT: Duration = Duration::from_secs(1);
 const STS_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The client for the plaintext metadata endpoints. It uses no proxy, as the AWS SDKs do: a proxy
+/// would read the container authorization token and could answer with credentials of its own.
+fn metadata_client() -> reqwest::Client {
+    static CLIENT: LazyLock<reqwest::Client> =
+        LazyLock::new(|| reqwest::Client::builder().no_proxy().build().expect("HTTP client configuration is valid"));
+    CLIENT.clone()
+}
 
 /// Parameters of an STS `AssumeRole` or `AssumeRoleWithWebIdentity` call.
 pub struct RoleRequest<'a> {
@@ -154,7 +163,8 @@ pub async fn container_credentials(env: &BTreeMap<String, String>) -> Result<Cre
         ),
         None => provider_env_value("AWS_CONTAINER_AUTHORIZATION_TOKEN", env),
     };
-    let mut builder = http_client().get(url).timeout(METADATA_TIMEOUT);
+    let client = if url.starts_with("https://") { http_client() } else { metadata_client() };
+    let mut builder = client.get(url).timeout(METADATA_TIMEOUT);
     if let Some(token) = token {
         builder = builder.header("authorization", token);
     }
@@ -174,14 +184,17 @@ pub async fn instance_metadata_credentials(env: &BTreeMap<String, String>) -> Re
         .trim_end_matches('/')
         .to_string();
     let token = send_text(
-        http_client()
+        metadata_client()
             .put(format!("{base}/latest/api/token"))
             .timeout(METADATA_TIMEOUT)
             .header("x-aws-ec2-metadata-token-ttl-seconds", "21600"),
     )
     .await?;
     let get = |path: String| {
-        http_client().get(format!("{base}{path}")).timeout(METADATA_TIMEOUT).header("x-aws-ec2-metadata-token", &token)
+        metadata_client()
+            .get(format!("{base}{path}"))
+            .timeout(METADATA_TIMEOUT)
+            .header("x-aws-ec2-metadata-token", &token)
     };
     let roles = send_text(get("/latest/meta-data/iam/security-credentials/".into())).await?;
     let role = roles.lines().map(str::trim).find(|line| !line.is_empty()).ok_or("No EC2 instance role is attached")?;

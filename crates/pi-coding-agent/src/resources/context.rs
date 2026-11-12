@@ -34,6 +34,8 @@ pub fn context_file_in(dir: &Path) -> Option<ContextFile> {
 struct GitPaths {
     repo_dir: PathBuf,
     common_git_dir: PathBuf,
+    /// The worktree's own git dir, when a `commondir` file names the shared one.
+    worktree_git_dir: Option<PathBuf>,
 }
 
 /// The nearest `.git` directory or `gitdir:` file, with the shared git dir of a linked worktree.
@@ -48,27 +50,40 @@ fn find_git_paths(cwd: &Path) -> Option<GitPaths> {
             if !git_dir.join("HEAD").exists() {
                 return None;
             }
-            let common_git_dir = match std::fs::read_to_string(git_dir.join("commondir")) {
-                Ok(common) => super::paths::normalize(&git_dir.join(common.trim())),
-                Err(_) => git_dir,
+            let (common_git_dir, worktree_git_dir) = match std::fs::read_to_string(git_dir.join("commondir")) {
+                Ok(common) => (super::paths::normalize(&git_dir.join(common.trim())), Some(git_dir)),
+                Err(_) => (git_dir, None),
             };
-            return Some(GitPaths { repo_dir: dir.to_path_buf(), common_git_dir });
+            return Some(GitPaths { repo_dir: dir.to_path_buf(), common_git_dir, worktree_git_dir });
         }
         if meta.is_dir() {
-            return git_path
-                .join("HEAD")
-                .exists()
-                .then(|| GitPaths { repo_dir: dir.to_path_buf(), common_git_dir: git_path });
+            return git_path.join("HEAD").exists().then(|| GitPaths {
+                repo_dir: dir.to_path_buf(),
+                common_git_dir: git_path,
+                worktree_git_dir: None,
+            });
         }
     }
     None
 }
 
+/// Whether the repository lists this worktree: its git dir is in the repository's `worktrees`
+/// folder and names this folder's `.git` file, as `git worktree add` writes it. A `.git` file
+/// alone is no proof, because any folder can hold one that names another repository.
+fn repository_lists_worktree(git: &GitPaths) -> bool {
+    let Some(git_dir) = &git.worktree_git_dir else { return false };
+    let Ok(back_link) = std::fs::read_to_string(git_dir.join("gitdir")) else { return false };
+    let back_link = super::paths::normalize(&git_dir.join(back_link.trim()));
+    canonicalize(git_dir).parent() == Some(canonicalize(&git.common_git_dir).join("worktrees").as_path())
+        && canonicalize(&back_link) == canonicalize(&git.repo_dir.join(".git"))
+}
+
 /// In a linked git worktree, the worktree root and the main checkout root. `None` in a main
-/// checkout, a submodule, or outside git.
+/// checkout, a submodule, or outside git, and for a `.git` file the repository does not confirm:
+/// saved trust and project config follow the main checkout.
 pub(crate) fn linked_worktree_roots(cwd: &Path) -> Option<(PathBuf, PathBuf)> {
     let git = find_git_paths(cwd)?;
-    if git.common_git_dir.file_name()? != ".git" {
+    if git.common_git_dir.file_name()? != ".git" || !repository_lists_worktree(&git) {
         return None;
     }
     let main_root = git.common_git_dir.parent()?.to_path_buf();

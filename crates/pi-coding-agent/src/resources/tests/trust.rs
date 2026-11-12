@@ -191,3 +191,30 @@ fn a_trusted_repository_covers_its_linked_worktrees() {
     store.set(&worktree, Some(false)).unwrap();
     assert_eq!(store.get(&worktree).unwrap(), Some(false));
 }
+
+#[test]
+fn a_git_file_that_the_repository_does_not_confirm_borrows_no_trust() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = ProjectTrustStore::new(&temp.path().join("agent"));
+    let (main, worktree) = (temp.path().join("main"), temp.path().join("worktrees/feat"));
+    let listed = super::context::link_worktree(&main, &worktree, "feat");
+    store.set(&main, Some(true)).unwrap();
+
+    // The `.git` file names the trusted repository's git dir.
+    let direct = temp.path().join("downloads/direct");
+    write(&direct.join(".git"), &format!("gitdir: {}\n", main.join(".git").display()));
+    // It names the git dir of a worktree that the repository lists for a different folder.
+    let borrowed = temp.path().join("downloads/borrowed");
+    write(&borrowed.join(".git"), &format!("gitdir: {}\n", listed.display()));
+    // Its own git dir names the trusted repository as the shared one, and itself as the worktree.
+    let forged = temp.path().join("downloads/forged");
+    write(&forged.join("gd/HEAD"), "ref: refs/heads/main\n");
+    write(&forged.join("gd/commondir"), &format!("{}\n", main.join(".git").display()));
+    write(&forged.join("gd/gitdir"), &format!("{}\n", forged.join(".git").display()));
+    write(&forged.join(".git"), "gitdir: gd\n");
+
+    for folder in [&direct, &borrowed, &forged] {
+        assert_eq!(store.get(folder).unwrap(), None, "{}", folder.display());
+    }
+    assert_eq!(store.get(&worktree).unwrap(), Some(true));
+}

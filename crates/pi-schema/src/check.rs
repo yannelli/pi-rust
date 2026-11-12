@@ -26,6 +26,8 @@ type BoundCheck = (&'static str, &'static str, fn(f64, f64) -> bool);
 pub struct Checker<'a> {
     root: &'a Value,
     pub errors: Vec<SchemaError>,
+    /// The `$ref` targets being checked, each with the value it is checked on, as addresses.
+    following: Vec<(usize, usize)>,
 }
 
 /// Numbers as JavaScript prints them: integers without a fraction.
@@ -72,12 +74,17 @@ fn regex(pattern: &str) -> Option<Regex> {
 
 impl<'a> Checker<'a> {
     pub fn new(root: &'a Value) -> Self {
-        Self { root, errors: Vec::new() }
+        Self { root, errors: Vec::new(), following: Vec::new() }
+    }
+
+    /// A checker without errors that knows the `$ref` targets this one is in.
+    fn nested(&self) -> Self {
+        Self { root: self.root, errors: Vec::new(), following: self.following.clone() }
     }
 
     /// Whether `value` matches `schema`, without keeping errors.
     pub fn is_valid(&self, value: &Value, schema: &Value) -> bool {
-        Checker::new(self.root).check(value, schema, "")
+        self.nested().check(value, schema, "")
     }
 
     fn add(&mut self, keyword: &'static str, path: &str, message: String) -> bool {
@@ -136,7 +143,14 @@ impl<'a> Checker<'a> {
         if let Some(target) = schema.get("$ref").and_then(Value::as_str)
             && let Some(resolved) = self.resolve(target)
         {
-            ok &= self.check(value, resolved, path);
+            // The same schema on the same value again is a `$ref` cycle. It adds no constraint, and
+            // following it would not end: schemas come from tools and servers.
+            let step = (std::ptr::from_ref(resolved).addr(), std::ptr::from_ref(value).addr());
+            if !self.following.contains(&step) {
+                self.following.push(step);
+                ok &= self.check(value, resolved, path);
+                self.following.pop();
+            }
         }
         if let Some(expected) = schema.get("const")
             && !json_equal(expected, value)
@@ -170,7 +184,7 @@ impl<'a> Checker<'a> {
 
     /// Errors of `schema` alone, in a fresh context (TypeBox runs logical operands this way).
     fn errors_of(&self, value: &Value, schema: &Value, path: &str) -> Option<Vec<SchemaError>> {
-        let mut nested = Checker::new(self.root);
+        let mut nested = self.nested();
         (!nested.check(value, schema, path)).then_some(nested.errors)
     }
 

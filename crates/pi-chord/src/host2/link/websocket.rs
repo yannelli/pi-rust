@@ -13,7 +13,7 @@ use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::{WebSocketStream, connect_async};
 
-use super::pack::{Message, pack_message, parse_frame, unpack_message};
+use super::pack::{Message, pack_message, parse_frame, parse_plain_frame, unpack_message};
 use super::{BaseLink, Link, Transport};
 use crate::host2::wire::Frame;
 
@@ -132,7 +132,9 @@ async fn pump<S>(
                 let Some(Ok(message)) = incoming else { return };
                 let Some(link) = link.upgrade() else { return };
                 let received = match message {
-                    WsMessage::Text(text) => parse_frame(text.as_str()),
+                    WsMessage::Text(text) if accept_packed => parse_frame(text.as_str()),
+                    // A text frame can carry a packed payload too, as `z: [field, base64]`.
+                    WsMessage::Text(text) => parse_plain_frame(text.as_str()),
                     WsMessage::Binary(bytes) if accept_packed => unpack_message(&bytes),
                     WsMessage::Binary(_) => {
                         Link::close(link.as_ref(), Some("protocol error"));

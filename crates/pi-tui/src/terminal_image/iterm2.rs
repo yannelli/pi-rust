@@ -33,6 +33,7 @@ fn base64_byte_length(data: &str) -> usize {
 
 /// Encodes base64 image data as an iTerm2 OSC 1337 inline image sequence.
 pub fn encode_iterm2(base64_data: &str, options: &Iterm2EncodeOptions) -> String {
+    let base64_data = &*super::dimensions::base64_only(base64_data);
     let mut params = vec![
         format!("inline={}", if options.inline == Some(false) { 0 } else { 1 }),
         format!("size={}", base64_byte_length(base64_data)),

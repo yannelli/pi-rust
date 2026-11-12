@@ -60,6 +60,7 @@ fn chunk_end(data: &str, start: usize) -> usize {
 /// Encodes base64 PNG data as a Kitty command that uploads and shows the image (`a=T`),
 /// split into 4096-byte chunks.
 pub fn encode_kitty(base64_data: &str, options: &KittyEncodeOptions) -> String {
+    let base64_data = &*super::dimensions::base64_only(base64_data);
     let mut params = vec!["a=T".to_owned(), "f=100".to_owned(), "q=2".to_owned()];
     if options.move_cursor == Some(false) {
         params.push("C=1".to_owned());

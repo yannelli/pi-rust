@@ -37,6 +37,16 @@ pub(crate) fn decode_base64_lenient(data: &str) -> Vec<u8> {
     output
 }
 
+/// `data` without the characters that are not base64. Image data comes from tools and servers, and
+/// a control character in it would end the image sequence and start one the sender chose.
+pub(crate) fn base64_only(data: &str) -> std::borrow::Cow<'_, str> {
+    let allowed = |byte: u8| base64_value(byte).is_some() || byte == b'=';
+    if data.bytes().all(allowed) {
+        return std::borrow::Cow::Borrowed(data);
+    }
+    data.chars().filter(|c| u8::try_from(*c).is_ok_and(allowed)).collect()
+}
+
 fn u16_be(buffer: &[u8], offset: usize) -> u32 {
     u32::from(u16::from_be_bytes([buffer[offset], buffer[offset + 1]]))
 }

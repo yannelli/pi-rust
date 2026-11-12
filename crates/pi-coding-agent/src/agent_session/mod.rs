@@ -22,7 +22,7 @@ pub mod login;
 mod login_flows;
 mod model;
 pub mod model_runtime;
-mod output_file;
+pub(crate) mod output_file;
 mod prompt;
 mod routing;
 mod run;

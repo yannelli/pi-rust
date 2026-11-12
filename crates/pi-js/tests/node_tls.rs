@@ -73,6 +73,38 @@ async fn tls_matches_node() {
     );
 }
 
+// Data written before the handshake ends must not reach a server whose certificate is for another name.
+const MISMATCH_SCRIPT: &str = r##"
+const tls = require("node:tls");
+const once = (emitter, name) => new Promise((resolve) => emitter.once(name, resolve));
+const received = [];
+const server = tls.createServer({ key: __KEY__, cert: __CERT__ });
+const served = new Promise((resolve) => {
+  server.on("secureConnection", (socket) => {
+    socket.on("data", (chunk) => received.push(String(chunk)));
+    socket.on("error", () => {});
+    socket.on("close", resolve);
+  });
+});
+server.listen(0, "127.0.0.1");
+await once(server, "listening");
+const client = tls.connect({ port: server.address().port, host: "127.0.0.1", servername: "example.com", ca: __CERT__ });
+client.write("secret");
+const error = await once(client, "error");
+await Promise.race([served, new Promise((resolve) => setTimeout(resolve, 2000))]);
+server.close();
+return { code: error.code, received };
+"##;
+
+#[tokio::test]
+async fn a_client_sends_nothing_to_a_server_with_a_certificate_for_another_name() {
+    let (_dir, root) = tempdir();
+    let (runtime, _capture) = runtime(&root);
+    let script = MISMATCH_SCRIPT.replace("__KEY__", &format!("{KEY:?}")).replace("__CERT__", &format!("{CERT:?}"));
+    let actual = run_cjs(&runtime, &root, &script).await;
+    assert_eq!(actual, serde_json::json!({"code": "ERR_TLS_CERT_ALTNAME_INVALID", "received": []}));
+}
+
 #[tokio::test]
 async fn tls_sockets_sessions_and_sni_match_node() {
     let (_dir, root) = tempdir();
