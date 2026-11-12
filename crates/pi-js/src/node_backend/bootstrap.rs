@@ -22,8 +22,11 @@ const FILES: &[(&str, &str)] = &[
     ("wire.cjs", include_str!("js/wire.cjs")),
     ("worker_globals.cjs", include_str!("js/worker_globals.cjs")),
     ("worker_modules.cjs", include_str!("js/worker_modules.cjs")),
+    ("worker_namespaces.cjs", include_str!("js/worker_namespaces.cjs")),
     ("hooks.mjs", include_str!("js/hooks.mjs")),
     ("require_rewrite.mjs", include_str!("js/require_rewrite.mjs")),
+    // Node's package type search for a namespace's alias paths stops here, not in a parent directory.
+    ("package.json", "{}\n"),
 ];
 
 const START_TIMEOUT: Duration = Duration::from_secs(60);

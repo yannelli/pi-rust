@@ -77,11 +77,12 @@ impl Bridge {
                 let parent = frame["parent"].as_str();
                 let specifier = frame["specifier"].as_str().unwrap_or_default();
                 let kind = frame["kind"].as_str().unwrap_or("import");
-                self.reply(id, modules::resolve(&self.shared, &self.client, specifier, parent, kind));
+                let namespace = frame["ns"].as_str();
+                self.reply(id, modules::resolve(&self.shared, &self.client, specifier, parent, kind, namespace));
             }
             "load" => {
                 let path = frame["path"].as_str().unwrap_or_default();
-                self.reply(id, modules::load(&self.shared, &self.client, path));
+                self.reply(id, modules::load(&self.shared, &self.client, path, frame["ns"].as_str()));
             }
             "out" => {
                 let stream = if frame["s"] == 2 { OutputStream::Stderr } else { OutputStream::Stdout };
@@ -128,10 +129,10 @@ impl Bridge {
     fn host_call(&self, id: &Value, frame: &Value) {
         let name = frame["name"].as_str().unwrap_or_default();
         let function =
-            self.shared.host_functions.read().unwrap_or_else(|poison| poison.into_inner()).get(name).cloned();
-        let Some(function) = function else {
-            let error = JsError::new(format!("Unknown host function: {name}")).with_code("ERR_PI_HOST_FUNCTION");
-            return self.reply(id, Err(error));
+            self.shared.host_functions.read().unwrap_or_else(|poison| poison.into_inner()).lookup(name).cloned();
+        let function = match function {
+            Ok(function) => function,
+            Err(error) => return self.reply(id, Err(error)),
         };
         let args = match wire::decode_all(&self.handle, frame.get("args")) {
             Ok(args) => args,
