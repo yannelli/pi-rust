@@ -2,6 +2,18 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.14] - 2026-11-15
+
+### Added
+
+- **ai:** add Claude Mythos 5.2 to the anthropic catalog ([7d4bd2d](https://github.com/yannelli/pi-rust/commit/7d4bd2d38eed6c2b7948dcb598dca1e9c794ab05))
+- **ai:** add Claude Fable 5.2 (upstream 0d1793c2b) ([2953906](https://github.com/yannelli/pi-rust/commit/2953906200cdf24d4e27c072d1356ed85ff8408a))
+
+### Fixed
+
+- **extensions:** implement SDK parseArgs ([324f96f](https://github.com/yannelli/pi-rust/commit/324f96f8dd7407d98b5bdeaa1c98085d791b522c))
+- **ai:** update reported Claude Code version (upstream a05e3a077) ([d41cf60](https://github.com/yannelli/pi-rust/commit/d41cf60b78bf37846126b4bfbdfb0a65a7ad081e))
+
 ## [0.12.13] - 2026-11-11
 
 ### Fixed
