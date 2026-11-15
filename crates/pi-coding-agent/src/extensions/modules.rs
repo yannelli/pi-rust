@@ -19,6 +19,7 @@ const HOST_FILES: &[(&str, &str)] = &[
     ("bridge.js", include_str!("js/bridge.js")),
     ("child_wait.js", include_str!("js/child_wait.js")),
     ("builtin_providers.js", include_str!("js/builtin_providers.js")),
+    ("cli_args.js", include_str!("js/cli_args.js")),
     ("coding_agent.js", include_str!("js/coding_agent.js")),
     ("coding_utils.js", include_str!("js/coding_utils.js")),
     ("coding_unsupported.js", include_str!("js/coding_unsupported.js")),
