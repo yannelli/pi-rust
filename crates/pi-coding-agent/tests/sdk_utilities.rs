@@ -72,7 +72,24 @@ export default function (pi) {
       png: (await ca.convertToPng(PNG, 'image/png')).mimeType,
       resized: resized && [resized.originalWidth, resized.originalHeight, resized.width, resized.height, resized.wasResized],
       note: ca.formatDimensionNote({ wasResized: true, originalWidth: 4, originalHeight: 2, width: 2, height: 1 }),
-      unsupported: [code(() => ca.parseArgs([])), unsupportedSession],
+      parsed: (() => {
+        const skills = ca.parseArgs(['--no-skills', '-p', 'hi', '@src/a.ts', '--plan', 'x']);
+        const flags = ca.parseArgs(['--flag', '--unknown=v', '-ns']);
+        return {
+          noSkills: skills.noSkills === true && flags.noSkills === true,
+          print: skills.print === true,
+          message: skills.messages[0],
+          file: skills.fileArgs[0],
+          plan: skills.unknownFlags.get('plan'),
+          flag: flags.unknownFlags.get('flag'),
+          unknown: flags.unknownFlags.get('unknown'),
+          mode: ca.parseArgs(['--mode', 'json']).mode,
+          badMode: ca.parseArgs(['--mode', 'nope']).diagnostics[0].message,
+          tools: ca.parseArgs(['-t', 'read, bash']).tools,
+          toolError: ca.parseArgs(['--tools', '+read,bash']).diagnostics[0].message,
+        };
+      })(),
+      unsupported: [unsupportedSession],
       wrapped: [wrapped.name, await wrapped.execute('t1', { v: 2 })],
       rendered: typeof ca.renderDiff('+1 added\n-1 removed\n') === 'string',
       credentialError: new ca.CredentialSynchronizationError('p', 'login', undefined, {}).message,
@@ -307,12 +324,22 @@ async fn coding_agent_utilities_run_upstream_code_and_host_operations() {
     assert_eq!(data["resized"], json!([4, 2, 2, 1, true]));
     assert!(data["note"].as_str().unwrap().contains("Multiply coordinates by 2.00"));
     assert_eq!(
-        data["unsupported"],
-        json!([
-            "ERR_PI_UNSUPPORTED: parseArgs is not supported in pi-rust",
-            "ERR_PI_UNSUPPORTED: AgentSession is not supported in pi-rust"
-        ])
+        data["parsed"],
+        json!({
+            "noSkills": true,
+            "print": true,
+            "message": "hi",
+            "file": "src/a.ts",
+            "plan": "x",
+            "flag": true,
+            "unknown": "v",
+            "mode": "json",
+            "badMode": "Invalid mode \"nope\". Valid values: text, json, rpc",
+            "tools": ["read", "bash"],
+            "toolError": "--tools: tool names cannot be mixed with +name or -name entries",
+        })
     );
+    assert_eq!(data["unsupported"], json!(["ERR_PI_UNSUPPORTED: AgentSession is not supported in pi-rust"]));
     assert_eq!(data["wrapped"], json!(["echo", "t1:2:ctx-t1"]));
     assert_eq!(data["rendered"], true);
     assert_eq!(data["credentialError"], "Credential login committed for p, but local synchronization failed");

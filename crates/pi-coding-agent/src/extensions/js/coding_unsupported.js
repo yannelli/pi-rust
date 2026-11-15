@@ -11,7 +11,6 @@ export const createMcpExtension = unsupportedFunction("createMcpExtension");
 export const createToolSearchExtension = unsupportedFunction("createToolSearchExtension");
 export const discoverAndLoadExtensions = unsupportedFunction("discoverAndLoadExtensions");
 export const main = unsupportedFunction("main");
-export const parseArgs = unsupportedFunction("parseArgs");
 export const readStoredCredential = unsupportedFunction("readStoredCredential");
 export const resolveCliModel = unsupportedFunction("resolveCliModel");
 export const resolveModelScopeWithDiagnostics = unsupportedFunction("resolveModelScopeWithDiagnostics");

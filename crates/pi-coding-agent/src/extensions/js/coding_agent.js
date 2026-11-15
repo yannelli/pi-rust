@@ -43,6 +43,7 @@ export {
 export { truncateToVisualLines } from "../pi-coding-agent/src/modes/interactive/components/visual-truncate.ts";
 export { withFileMutationQueue } from "../pi-coding-agent/src/core/tools/file-mutation-queue.ts";
 export * from "./coding_unsupported.js";
+export { parseArgs } from "./cli_args.js";
 export * from "./coding_utils.js";
 export * from "./compaction_utils.js";
 export { createAgentSession } from "./sdk_session.js";
@@ -59,8 +60,8 @@ export {
 } from "./session_utils.js";
 
 function parseLineNumber(value) {
-	if (typeof value === "string" && value.trim() !== "") value = Number(value);
-	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+	const number = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+	return typeof number === "number" && Number.isFinite(number) ? number : undefined;
 }
 
 /** Upstream `formatReadLineRange` from `core/tools/render-utils.ts`. */
