@@ -11,10 +11,11 @@ use pi_tui::components::{EditorOptions, EditorTheme, StyleFn};
 use pi_tui::testing::VirtualTerminal;
 use pi_tui::{AutocompleteProvider, Tui, TuiOptions, ui_loop};
 
-use super::{CustomEditor, EditorHandle};
+use super::{CustomEditor, EditorHandle, StatusIndicator};
+use crate::agent_session::CompactionReason;
 use crate::interactive_components::test_support::setup_with;
 
-fn editor(tui: &Tui) -> EditorHandle {
+fn plain_theme() -> EditorTheme {
     let plain: StyleFn = Rc::new(str::to_string);
     let select_list = SelectListTheme {
         selected_prefix: plain.clone(),
@@ -23,8 +24,11 @@ fn editor(tui: &Tui) -> EditorHandle {
         scroll_info: plain.clone(),
         no_match: plain.clone(),
     };
-    let theme = EditorTheme { border_color: plain, select_list };
-    CustomEditor::new(tui, theme, EditorOptions::default(), false).handle()
+    EditorTheme { border_color: plain, select_list }
+}
+
+fn editor(tui: &Tui) -> EditorHandle {
+    CustomEditor::new(tui, plain_theme(), EditorOptions::default(), false).handle()
 }
 
 fn tui() -> Tui {
@@ -106,4 +110,23 @@ fn pages_an_open_autocomplete_menu_before_pasting_an_image_with_the_same_key() {
 
     editor.handle_input("\x16");
     assert_eq!(pastes.get(), 1);
+}
+
+/// The embedded status takes the border color, like the interactive mode's spinner. A status
+/// too wide for the `↑ N more` label leaves only the spinner, styled during the editor render.
+#[test]
+fn renders_an_embedded_status_that_reads_the_border_color_while_scrolled() {
+    let tui = tui();
+    let handle = CustomEditor::new(&tui, plain_theme(), EditorOptions::default(), true).handle();
+    let editor = handle.editor().clone();
+    let color: StyleFn = Rc::new(move |text: &str| (editor.border_color())(text));
+    handle.set_working_status_indicator(Some(StatusIndicator::compaction(
+        &tui,
+        CompactionReason::Threshold,
+        Some(color),
+    )));
+    handle.set_text(&["line"; 30].join("\n"));
+
+    let top = handle.editor().render(80).remove(0);
+    assert!(top.contains("↑ 23 more"), "{top}");
 }

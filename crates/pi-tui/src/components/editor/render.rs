@@ -199,7 +199,7 @@ impl EditorCore {
     }
 
     fn render_border(&mut self, width: usize, hidden_line_count: usize, is_top: bool) -> String {
-        let border_color = self.border_color.clone();
+        let border_color = self.border_color();
         let boxed = self.prompt_box(width).map(|(_, harbor)| harbor);
         let harbor = boxed == Some(true);
         let hidden_line_count = if harbor { 0 } else { hidden_line_count };
@@ -224,7 +224,7 @@ impl EditorCore {
         if !self.rounded || padding_x == 0 {
             return (spaces(padding_x), spaces(right_width));
         }
-        let bar = (self.border_color)("\u{2502}");
+        let bar = (self.border_color())("\u{2502}");
         let right = match right_width {
             0 => String::new(),
             width => format!("{}{bar}", spaces(width - 1)),
@@ -235,7 +235,7 @@ impl EditorCore {
     /// The sides of a text row in a caret or harbor box: border, padding, and the gutter, which
     /// holds `›` on the first text row and, in a harbor, arrows where rows are hidden.
     fn box_row_sides(&self, geometry: &Geometry, gutter: Option<String>, cursor_in_padding: bool) -> (String, String) {
-        let bar = (self.border_color)("\u{2502}");
+        let bar = (self.border_color())("\u{2502}");
         let padding = geometry.right - 1;
         let gutter = gutter.unwrap_or_else(|| " ".repeat(GUTTER_WIDTH));
         let left = format!("{bar}{}{gutter}", " ".repeat(padding));

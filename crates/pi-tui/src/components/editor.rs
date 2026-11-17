@@ -77,6 +77,8 @@ struct Callbacks {
 struct Shared {
     core: RefCell<EditorCore>,
     callbacks: RefCell<Callbacks>,
+    /// Outside `core`, so a border renderer or style can read it while the editor renders.
+    border_color: RefCell<StyleFn>,
     dispatching: Cell<bool>,
 }
 
@@ -135,9 +137,11 @@ pub struct Editor {
 
 impl Editor {
     pub fn new(tui: &Tui, theme: EditorTheme, options: EditorOptions) -> Self {
+        let border_color = RefCell::new(theme.border_color.clone());
         let shared = Rc::new_cyclic(|weak| Shared {
             core: RefCell::new(EditorCore::new(tui.downgrade(), theme, &options, weak.clone())),
             callbacks: RefCell::new(Callbacks::default()),
+            border_color,
             dispatching: Cell::new(false),
         });
         Self { shared }
@@ -270,11 +274,11 @@ impl Editor {
     }
 
     pub fn border_color(&self) -> StyleFn {
-        self.read(|core| core.border_color.clone())
+        self.shared.border_color.borrow().clone()
     }
 
     pub fn set_border_color(&self, style: StyleFn) {
-        self.with(|core| core.border_color = style);
+        *self.shared.border_color.borrow_mut() = style;
     }
 
     /// Rounded corners on the borders, and side bars when the editor has horizontal padding.
