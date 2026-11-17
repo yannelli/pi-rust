@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.15] - 2026-11-17
+
+### Fixed
+
+- **tui:** read the editor border color while the editor renders ([20fd832](https://github.com/yannelli/pi-rust/commit/20fd8328b66a7b2a4e8516410b426311fbae8a55))
+
 ## [0.12.14] - 2026-11-15
 
 ### Added
