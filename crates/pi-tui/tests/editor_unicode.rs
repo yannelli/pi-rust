@@ -234,6 +234,16 @@ fn custom_border_renderer_replaces_the_top_border() {
     assert_eq!(strip_terminal_sequences(lines.last().unwrap()), "\u{2500}".repeat(width));
 }
 
+#[test]
+fn border_renderer_reads_the_border_color_through_the_editor() {
+    let editor = editor_with(20, default_theme(), EditorOptions::default());
+    editor.set_border_color(Rc::new(|text: &str| format!("<{text}>")));
+    let handle = editor.editor.clone();
+    editor.set_top_border_renderer(Some(Box::new(move |_| (handle.border_color())("top"))));
+    editor.set_text("hi");
+    assert_eq!(editor.render(20)[0], "<top>");
+}
+
 const CTRL_W: &str = "\x17";
 // Legacy Alt sequences parse only while the Kitty flag is off. Tests that send them hold the
 // global state lock, because the keys tests set the flag while they hold it.

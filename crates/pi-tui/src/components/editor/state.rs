@@ -70,7 +70,6 @@ pub(crate) struct EditorCore {
     pub tui: WeakTui,
     pub theme: EditorTheme,
     pub padding_x: usize,
-    pub border_color: StyleFn,
     pub top_border: Option<BorderRenderer>,
     pub bottom_border: Option<BorderRenderer>,
     /// Round corners on the borders and side bars in the padding columns.
@@ -133,7 +132,6 @@ impl EditorCore {
             state: TextState::default(),
             focused: false,
             tui,
-            border_color: theme.border_color.clone(),
             theme,
             padding_x: options.padding_x,
             top_border: None,
@@ -175,6 +173,13 @@ impl EditorCore {
             snapped_from_cursor_col: None,
             undo_stack: UndoStack::new(),
         }
+    }
+
+    /// The border style. It lives outside the editor state, so render callbacks may read it.
+    pub fn border_color(&self) -> StyleFn {
+        self.self_ref
+            .upgrade()
+            .map_or_else(|| self.theme.border_color.clone(), |shared| shared.border_color.borrow().clone())
     }
 
     /// Asks the TUI for a render, if it still exists.
