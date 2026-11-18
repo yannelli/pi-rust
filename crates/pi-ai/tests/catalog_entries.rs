@@ -105,6 +105,21 @@ fn azure_gpt_6_models_use_the_foundry_context_window_and_keep_the_openai_price_t
 }
 
 #[test]
+fn gpt_6_cyber_and_gpt_image_2_6_come_from_upstream_model_data() {
+    for provider in ["openai", "azure"] {
+        let cyber = find(provider, "gpt-6-cyber", "chat");
+        let cost = &cyber.cost;
+        assert_eq!((cost.input, cost.output, cost.cache_read, cost.cache_write), (20.0, 100.0, 2.0, 25.0));
+        assert_eq!(cyber.context_window, 1_050_000, "{provider}");
+    }
+    for id in ["openai/gpt-image-2.6-flare", "openai/gpt-image-2.6-sunburst"] {
+        assert_eq!(find("openrouter", id, "image").api, "openrouter-images", "{id}");
+    }
+    let terra = find("radius", "gpt-6.1-terra", "chat");
+    assert_eq!((terra.cost.input, level(terra, "off")), (1.0, mapped("none")));
+}
+
+#[test]
 fn kimi_k3_1_pro_models_use_kimi_k3_settings() {
     for (provider, ids) in [
         ("kimi-coding", ["k3.1-pro", "k3.1-pro-highspeed"]),
