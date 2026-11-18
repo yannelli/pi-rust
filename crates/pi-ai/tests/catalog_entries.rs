@@ -3,7 +3,7 @@
 //! and `classifier-models` tests).
 
 use pi_ai::Model;
-use pi_ai::ThinkingLevel::{Max, Xhigh};
+use pi_ai::ThinkingLevel::{High, Low, Max, Medium, Minimal, Xhigh};
 use pi_ai::models::builtin_models;
 use pi_ai::simple_options::supported_thinking_levels;
 use serde_json::json;
@@ -46,8 +46,57 @@ fn gpt_6_1_terra_supports_off_but_not_minimal_with_official_metadata() {
 }
 
 #[test]
+fn gpt_6_2_rejects_off_and_minimal_with_official_metadata() {
+    let levels = [Low, Medium, High, Xhigh, Max];
+    let models = [("gpt-6.2-astra", (8.0, 40.0, 0.4, 10.0), 272_000), ("gpt-6.2-sol", (2.0, 10.0, 0.1, 2.5), 500_000)];
+    for (id, (input, output, cache_read, cache_write), codex_context_window) in models {
+        for provider in ["openai", "azure", "openai-codex"] {
+            let model = find(provider, id, "chat");
+            let expected =
+                if provider == "openai-codex" { [&[Minimal][..], &levels].concat() } else { levels.to_vec() };
+            assert_eq!(supported_thinking_levels(model), expected, "{provider}/{id}");
+            assert_eq!(level(model, "off"), Some(None), "{provider}/{id}");
+            let cost = &model.cost;
+            assert_eq!(
+                (cost.input, cost.output, cost.cache_read, cost.cache_write),
+                (input, output, cache_read, cache_write)
+            );
+            let tier = cost.tiers.first().unwrap_or_else(|| panic!("{provider}/{id} has a long-context tier"));
+            assert_eq!(
+                (tier.input_tokens_above, tier.input, tier.output, tier.cache_read, tier.cache_write),
+                (272_000, input * 2.0, output * 1.5, cache_read * 2.0, cache_write * 2.0),
+                "{provider}/{id}"
+            );
+            let context_window = match provider {
+                "openai-codex" => codex_context_window,
+                "azure" => 1_050_000,
+                _ => 272_000,
+            };
+            assert_eq!((model.context_window, model.max_tokens), (context_window, 128_000), "{provider}/{id}");
+        }
+        for provider in ["openai", "openai-codex"] {
+            let model = find(provider, id, "chat");
+            let compat = model.compat.as_ref().unwrap();
+            for flag in [
+                "supportsAdditionalTools",
+                "supportsMidConvoSystemMessages",
+                "supportsOpenAIGrammarTools",
+                "supportsToolSearch",
+            ] {
+                assert_eq!(compat[flag], json!(true), "{provider}/{id} {flag}");
+            }
+            assert_eq!(level(model, "max"), mapped("max"), "{provider}/{id} sends max");
+        }
+        let openai = find("openai", id, "chat");
+        assert_eq!(openai.compat.as_ref().unwrap()["supportsMidConvoEffort"], json!(true), "{id}");
+        assert_eq!(openai.prompt_cache, None, "{id}: no cache warming from the documented TTL alone");
+    }
+}
+
+#[test]
 fn azure_gpt_6_models_use_the_foundry_context_window_and_keep_the_openai_price_tier() {
-    for id in ["gpt-6-astra", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6.1-terra"] {
+    for id in ["gpt-6-astra", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6.2-astra", "gpt-6.2-sol"]
+    {
         assert_eq!(find("azure", id, "chat").context_window, 1_050_000, "{id}");
     }
     let openai = find("openai", "gpt-6-sol", "chat");

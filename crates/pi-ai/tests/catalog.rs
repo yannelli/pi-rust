@@ -13,7 +13,7 @@ const COUNTS: [(&str, usize, usize, usize); 42] = [
     ("amazon-bedrock", 200, 0, 0),
     ("ant-ling", 3, 0, 0),
     ("anthropic", 18, 0, 0),
-    ("azure", 45, 0, 0),
+    ("azure", 47, 0, 0),
     ("baseten", 14, 0, 0),
     ("cerebras", 2, 0, 0),
     ("cloudflare-ai-gateway", 60, 0, 0),
@@ -33,18 +33,18 @@ const COUNTS: [(&str, usize, usize, usize); 42] = [
     ("moonshotai-cn", 6, 0, 0),
     ("moonshotai", 6, 0, 0),
     ("nvidia", 21, 0, 0),
-    ("openai-codex", 8, 0, 0),
-    ("openai", 44, 0, 1),
+    ("openai-codex", 10, 0, 0),
+    ("openai", 46, 0, 1),
     ("opencode-go", 30, 0, 0),
-    ("opencode", 80, 0, 2),
-    ("openrouter", 394, 64, 33),
+    ("opencode", 82, 0, 2),
+    ("openrouter", 402, 64, 33),
     ("qwen-token-plan-cn", 21, 0, 0),
     ("qwen-token-plan-individual", 9, 0, 0),
     ("qwen-token-plan", 21, 0, 0),
-    ("radius", 29, 0, 0),
+    ("radius", 31, 0, 0),
     ("together", 15, 0, 0),
     ("typesafe", 0, 0, 1),
-    ("vercel-ai-gateway", 306, 0, 15),
+    ("vercel-ai-gateway", 310, 0, 15),
     ("xai", 4, 0, 0),
     ("xiaomi-token-plan-ams", 2, 0, 0),
     ("xiaomi-token-plan-cn", 2, 0, 0),
@@ -118,8 +118,8 @@ fn totals_per_type_match_upstream() {
     for model in upstream_models() {
         totals[type_index(model.model_type.as_deref().expect("every bundled model declares its type"))] += 1;
     }
-    assert_eq!(totals, [1609, 64, 57]);
-    assert_eq!(upstream_models().len(), 1730);
+    assert_eq!(totals, [1631, 64, 57]);
+    assert_eq!(upstream_models().len(), 1752);
     assert_eq!(bundled_counts().len(), 42);
 }
 

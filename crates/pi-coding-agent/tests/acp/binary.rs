@@ -133,7 +133,7 @@ async fn new_sessions_list_the_saved_account_models() {
     std::fs::create_dir_all(&agent).unwrap();
     std::fs::create_dir_all(root.path().join("work")).unwrap();
     let server = Server::start(|request| match request.path() {
-        "/codex/models" => Reply::json(&json!({"models": [{"slug": "gpt-6.1-sol", "visibility": "list"},
+        "/codex/models" => Reply::json(&json!({"models": [{"slug": "gpt-6.2-sol", "visibility": "list"},
             {"slug": "gpt-6.9-sol", "display_name": "GPT-6.9 Sol", "visibility": "list"}]})),
         _ => Reply::status(404),
     })
@@ -142,7 +142,7 @@ async fn new_sessions_list_the_saved_account_models() {
     std::fs::write(agent.join("auth.json"), auth.to_string()).unwrap();
     let models = json!({"providers": {"openai-codex": {"baseUrl": server.url}}});
     std::fs::write(agent.join("models.json"), models.to_string()).unwrap();
-    let settings = json!({"defaultProvider": "openai-codex", "defaultModel": "gpt-6.1-sol"});
+    let settings = json!({"defaultProvider": "openai-codex", "defaultModel": "gpt-6.2-sol"});
     std::fs::write(agent.join("settings.json"), settings.to_string()).unwrap();
 
     let mut update = pi(root.path(), &["update", "--models"]);
@@ -164,8 +164,8 @@ async fn new_sessions_list_the_saved_account_models() {
         .iter()
         .filter_map(|model| model["modelId"].as_str())
         .collect();
-    assert_eq!(listed, ["openai-codex/gpt-6.1-sol", "openai-codex/gpt-6.9-sol"]);
-    assert_eq!(created["result"]["models"]["currentModelId"], "openai-codex/gpt-6.1-sol");
+    assert_eq!(listed, ["openai-codex/gpt-6.2-sol", "openai-codex/gpt-6.9-sol"]);
+    assert_eq!(created["result"]["models"]["currentModelId"], "openai-codex/gpt-6.2-sol");
     assert_eq!(exit(child, client).await, Some(0));
     assert_eq!(server.count("/codex/models"), 1, "offline ACP uses the saved list");
 }
