@@ -41,11 +41,14 @@ async fn prompts_while_streaming_queue_with_a_streaming_behavior() {
     let body = r#"
   const session = await child(ctx);
   const updates = [];
+  let responding = false;
   const off = session.subscribe((event) => {
+    if (event.type === 'message_start' && event.message.role === 'assistant') responding = true;
     if (event.type === 'queue_update') updates.push({ steering: event.steering, followUp: event.followUp });
   });
   const running = session.prompt('one');
-  const streaming = await until(() => session.isStreaming);
+  // A run takes the queued steering before its first request, so steer after the response starts.
+  const streaming = await until(() => session.isStreaming && responding);
   let refused;
   try { await session.prompt('no behavior'); } catch (error) { refused = error.message; }
   await session.prompt('steered', { streamingBehavior: 'steer' });
