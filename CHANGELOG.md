@@ -2,6 +2,17 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.16] - 2026-11-18
+
+### Added
+
+- **ai:** add GPT-6 Cyber and GPT Image 2.6 from upstream model data ([86eacf0](https://github.com/yannelli/pi-rust/commit/86eacf08076af1987952c4ba36a895c2d95d2a59))
+- **ai,coding-agent:** add GPT-6.2 Astra and GPT-6.2 Sol (upstream e56d35ce5, upstream cead615b4) ([0aa80e6](https://github.com/yannelli/pi-rust/commit/0aa80e66f9e3c4cf015ad7153f9c00cf0db026aa))
+
+### Fixed
+
+- **ai:** use the Azure context window and price tier for GPT models (upstream b317575fd, upstream ea1cfcc4c) ([970d6ae](https://github.com/yannelli/pi-rust/commit/970d6ae52864fc6e82194968ccebc9515f0f170e))
+
 ## [0.12.15] - 2026-11-17
 
 ### Fixed
