@@ -4,6 +4,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use pi_tui::line_chunks::LineChunks;
 use pi_tui::{Component, MouseResponse, Text, TuiMouseEvent, TuiMouseEventResult, TuiMouseEventType};
 
 use super::pi_logo::{PI_LOGO_HEIGHT, PI_LOGO_WIDTH};
@@ -24,13 +25,24 @@ impl ThemedText {
     }
 }
 
-impl Component for ThemedText {
-    fn render(&mut self, width: usize) -> Vec<String> {
+impl ThemedText {
+    fn refresh(&mut self) {
         if self.stale {
             self.stale = false;
             self.text.set_text(&(self.build)());
         }
+    }
+}
+
+impl Component for ThemedText {
+    fn render(&mut self, width: usize) -> Vec<String> {
+        self.refresh();
         self.text.render(width)
+    }
+
+    fn render_chunks(&mut self, width: usize, out: &mut LineChunks) {
+        self.refresh();
+        self.text.render_chunks(width, out);
     }
 
     fn invalidate(&mut self) {
@@ -81,6 +93,10 @@ impl ExpandableText {
 impl Component for ExpandableText {
     fn render(&mut self, width: usize) -> Vec<String> {
         self.inner.render(width)
+    }
+
+    fn render_chunks(&mut self, width: usize, out: &mut LineChunks) {
+        self.inner.render_chunks(width, out);
     }
 
     fn invalidate(&mut self) {

@@ -1,5 +1,8 @@
 //! Truncating text to visual lines, accounting for wrapping (upstream `visual-truncate.ts`).
 
+use std::rc::Rc;
+
+use pi_tui::line_chunks::LineChunks;
 use pi_tui::utils::truncate_to_width_with;
 use pi_tui::{Component, Text};
 
@@ -47,7 +50,7 @@ pub struct VisualLinePreview {
     max_visual_lines: usize,
     keep: Keep,
     format_hint: Box<dyn Fn(usize) -> String>,
-    cache: Option<(usize, Vec<String>)>,
+    cache: Option<(usize, Rc<Vec<String>>)>,
 }
 
 impl VisualLinePreview {
@@ -63,6 +66,20 @@ impl VisualLinePreview {
 
 impl Component for VisualLinePreview {
     fn render(&mut self, width: usize) -> Vec<String> {
+        self.render_shared(width).as_ref().clone()
+    }
+
+    fn render_chunks(&mut self, width: usize, out: &mut LineChunks) {
+        out.push(self.render_shared(width));
+    }
+
+    fn invalidate(&mut self) {
+        self.cache = None;
+    }
+}
+
+impl VisualLinePreview {
+    fn render_shared(&mut self, width: usize) -> Rc<Vec<String>> {
         if let Some((cached_width, lines)) = &self.cache
             && *cached_width == width
         {
@@ -77,11 +94,8 @@ impl Component for VisualLinePreview {
                 Keep::End => lines.insert(0, hint),
             }
         }
+        let lines = Rc::new(lines);
         self.cache = Some((width, lines.clone()));
         lines
-    }
-
-    fn invalidate(&mut self) {
-        self.cache = None;
     }
 }

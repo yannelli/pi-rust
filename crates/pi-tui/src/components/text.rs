@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use crate::component::Component;
 use crate::components::scroll_view::StyleFn;
+use crate::line_chunks::LineChunks;
 use crate::utils::{apply_background_to_line, flatten_lines, js_trim, visible_width, wrap_text_with_ansi};
 
 /// Displays multi-line text with word wrapping (upstream `Text`).
@@ -12,7 +13,8 @@ pub struct Text {
     padding_x: usize,
     padding_y: usize,
     custom_bg_fn: Option<StyleFn>,
-    cache: Option<(String, usize, Vec<String>)>,
+    /// Rendered lines and their width. `set_text` and the other setters clear it.
+    cache: Option<(usize, Rc<Vec<String>>)>,
 }
 
 impl Default for Text {
@@ -71,18 +73,19 @@ impl Text {
     }
 }
 
-impl Component for Text {
-    fn render(&mut self, width: usize) -> Vec<String> {
-        if let Some((text, cached_width, lines)) = &self.cache
-            && *text == self.text
+impl Text {
+    /// The rendered lines, shared with the cache.
+    fn render_shared(&mut self, width: usize) -> Rc<Vec<String>> {
+        if let Some((cached_width, lines)) = &self.cache
             && *cached_width == width
         {
             return lines.clone();
         }
 
         if js_trim(&self.text).is_empty() {
-            self.cache = Some((self.text.clone(), width, Vec::new()));
-            return Vec::new();
+            let lines = Rc::new(Vec::new());
+            self.cache = Some((width, lines.clone()));
+            return lines;
         }
 
         let normalized = self.text.replace('\t', "   ");
@@ -101,8 +104,19 @@ impl Component for Text {
         result.extend(content);
         result.extend(std::iter::repeat_n(empty_line, self.padding_y));
         flatten_lines(&mut result);
-        self.cache = Some((self.text.clone(), width, result.clone()));
-        if result.is_empty() { vec![String::new()] } else { result }
+        let lines = Rc::new(result);
+        self.cache = Some((width, lines.clone()));
+        if lines.is_empty() { Rc::new(vec![String::new()]) } else { lines }
+    }
+}
+
+impl Component for Text {
+    fn render(&mut self, width: usize) -> Vec<String> {
+        self.render_shared(width).as_ref().clone()
+    }
+
+    fn render_chunks(&mut self, width: usize, out: &mut LineChunks) {
+        out.push(self.render_shared(width));
     }
 
     fn invalidate(&mut self) {

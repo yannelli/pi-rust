@@ -3,6 +3,7 @@
 use crate::component::{
     Component, ComponentRef, MouseResponse, TuiMouseEvent, TuiMouseEventResult, dispatch_mouse_event,
 };
+use crate::line_chunks::LineChunks;
 
 /// Handler of a [`MouseRegion`]. Returning `None` leaves the event unhandled.
 pub type MouseRegionHandler = Box<dyn FnMut(&TuiMouseEvent) -> Option<TuiMouseEventResult>>;
@@ -29,6 +30,10 @@ impl MouseRegion {
 impl Component for MouseRegion {
     fn render(&mut self, width: usize) -> Vec<String> {
         self.child.borrow_mut().render(width)
+    }
+
+    fn render_chunks(&mut self, width: usize, out: &mut LineChunks) {
+        self.child.borrow_mut().render_chunks(width, out);
     }
 
     fn handle_mouse(&mut self, event: &TuiMouseEvent) -> Option<MouseResponse> {

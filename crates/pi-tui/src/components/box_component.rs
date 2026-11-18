@@ -1,17 +1,20 @@
 //! [`BoxComponent`]: a container that applies padding and a background to its children
 //! (upstream `Box`, renamed so it does not shadow `std::boxed::Box`).
 
+use std::rc::Rc;
+
 use crate::component::{
     Component, ComponentRef, MouseResponse, TuiMouseEvent, dispatch_mouse_event, invalidate_all, same_component,
 };
 use crate::components::scroll_view::StyleFn;
+use crate::line_chunks::{ChunkMemo, LineChunks, chunks_len};
 use crate::utils::{flatten_lines, visible_width};
 
+/// The padded lines, kept while the width, the background sample, and the child lines stay the same.
 struct RenderCache {
-    child_lines: Vec<String>,
     width: usize,
     bg_sample: Option<String>,
-    lines: Vec<String>,
+    memo: ChunkMemo,
 }
 
 /// Renders children with horizontal and vertical padding and an optional background function.
@@ -76,41 +79,51 @@ impl BoxComponent {
     }
 }
 
-impl Component for BoxComponent {
-    fn render(&mut self, width: usize) -> Vec<String> {
+impl BoxComponent {
+    fn render_shared(&mut self, width: usize) -> Option<Rc<Vec<String>>> {
         if self.children.is_empty() {
-            return Vec::new();
+            return None;
         }
         let content_width = self.content_width(width);
-        let mut child_lines = Vec::new();
+        let mut child_chunks = Vec::with_capacity(self.children.len());
         let mut heights = Vec::with_capacity(self.children.len());
         for child in &self.children {
-            let lines = child.borrow_mut().render(content_width);
-            heights.push((child.clone(), lines.len()));
-            child_lines.extend(lines);
+            let start = child_chunks.len();
+            child.borrow_mut().render_chunks(content_width, &mut child_chunks);
+            heights.push((child.clone(), chunks_len(&child_chunks[start..])));
         }
         self.mouse_layout = Some((content_width, heights));
-        if child_lines.is_empty() {
-            return Vec::new();
+        if chunks_len(&child_chunks) == 0 {
+            return None;
         }
 
         let bg_sample = self.bg_fn.as_ref().map(|bg| bg("test"));
-        if let Some(cache) = &self.cache
-            && cache.width == width
-            && cache.bg_sample == bg_sample
-            && cache.child_lines == child_lines
-        {
-            return cache.lines.clone();
-        }
+        let mut cache = match self.cache.take() {
+            Some(cache) if cache.width == width && cache.bg_sample == bg_sample => cache,
+            _ => RenderCache { width, bg_sample, memo: ChunkMemo::default() },
+        };
+        let lines = cache.memo.get(child_chunks, |chunks| {
+            let left_pad = " ".repeat(self.padding_x);
+            let empty = self.apply_bg("", width);
+            let mut result = vec![empty.clone(); self.padding_y];
+            let child_lines = chunks.iter().flat_map(|chunk| chunk.iter());
+            result.extend(child_lines.map(|line| self.apply_bg(&format!("{left_pad}{line}"), width)));
+            result.extend(std::iter::repeat_n(empty, self.padding_y));
+            flatten_lines(&mut result);
+            result
+        });
+        self.cache = Some(cache);
+        Some(lines)
+    }
+}
 
-        let left_pad = " ".repeat(self.padding_x);
-        let empty = self.apply_bg("", width);
-        let mut result = vec![empty.clone(); self.padding_y];
-        result.extend(child_lines.iter().map(|line| self.apply_bg(&format!("{left_pad}{line}"), width)));
-        result.extend(std::iter::repeat_n(empty, self.padding_y));
-        flatten_lines(&mut result);
-        self.cache = Some(RenderCache { child_lines, width, bg_sample, lines: result.clone() });
-        result
+impl Component for BoxComponent {
+    fn render(&mut self, width: usize) -> Vec<String> {
+        self.render_shared(width).map(|lines| lines.as_ref().clone()).unwrap_or_default()
+    }
+
+    fn render_chunks(&mut self, width: usize, out: &mut LineChunks) {
+        out.extend(self.render_shared(width));
     }
 
     fn handle_mouse(&mut self, event: &TuiMouseEvent) -> Option<MouseResponse> {

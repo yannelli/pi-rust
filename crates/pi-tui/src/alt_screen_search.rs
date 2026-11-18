@@ -9,6 +9,7 @@ use crate::component::Component;
 use crate::components::input::{Input, InputOptions};
 use crate::components::scroll_view::StyleFn;
 use crate::keybindings::get_keybindings;
+use crate::line_chunks::{ChunkedLines, same_lines};
 use crate::utils::{graphemes, strip_terminal_sequences, truncate_to_width_with, visible_width};
 
 struct SearchSourceSpan {
@@ -74,9 +75,9 @@ impl CorpusBuilder {
     }
 }
 
-fn build_search_corpus(lines: &[String]) -> SearchCorpus {
+fn build_search_corpus<'a>(lines: impl IntoIterator<Item = &'a String>) -> SearchCorpus {
     let mut builder = CorpusBuilder { text: String::new(), spans: Vec::new(), pending_separator: false };
-    for (row, raw) in lines.iter().enumerate() {
+    for (row, raw) in lines.into_iter().enumerate() {
         let line = strip_terminal_sequences(raw);
         let mut column = 0;
         if is_printable_ascii(&line) {
@@ -168,21 +169,21 @@ pub struct AltScreenSearchResult<'a> {
 /// Caches the corpus and matches while the rendered transcript lines stay the same.
 #[derive(Default)]
 pub struct AltScreenSearchIndex {
-    source_lines: Option<Rc<Vec<String>>>,
+    source_lines: Option<ChunkedLines>,
     corpus: Option<SearchCorpus>,
     normalized_query: Option<String>,
     matches: Vec<AltScreenSearchMatch>,
 }
 
 impl AltScreenSearchIndex {
-    pub fn search(&mut self, lines: &Rc<Vec<String>>, query: &str) -> AltScreenSearchResult<'_> {
+    pub fn search(&mut self, lines: &ChunkedLines, query: &str) -> AltScreenSearchResult<'_> {
         let source_changed = match &self.source_lines {
-            Some(source) => !Rc::ptr_eq(source, lines) && source.as_slice() != lines.as_slice(),
+            Some(source) => !same_lines(source.chunks(), lines.chunks()),
             None => true,
         };
         if source_changed || self.corpus.is_none() {
             self.source_lines = Some(lines.clone());
-            self.corpus = Some(build_search_corpus(lines));
+            self.corpus = Some(build_search_corpus(lines.iter()));
         }
         let normalized = normalize_query(query);
         let changed = source_changed || self.normalized_query.as_deref() != Some(normalized.as_str());
@@ -197,7 +198,11 @@ impl AltScreenSearchIndex {
 /// Matches of `query` in `lines`, ignoring case and collapsing whitespace.
 pub fn find_alt_screen_search_matches(lines: &[String], query: &str) -> Vec<AltScreenSearchMatch> {
     let normalized = normalize_query(query);
-    if normalized.is_empty() { Vec::new() } else { find_corpus_matches(&build_search_corpus(lines), &normalized) }
+    if normalized.is_empty() {
+        Vec::new()
+    } else {
+        find_corpus_matches(&build_search_corpus(lines.iter()), &normalized)
+    }
 }
 
 /// Stable key of a match: first row and column, last row and end column.

@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use pi_ai::{Message, ThinkingLevel};
 use pi_tui::utils::truncate_to_width_with;
@@ -85,6 +86,21 @@ struct SessionStats {
     totals: UsageTotals,
     latest_cache_hit_rate: Option<f64>,
     context_usage: Option<ContextUsage>,
+    /// The key `context_usage` was computed for, and when.
+    context_computed: Option<(StatsKey, Instant)>,
+}
+
+/// During a run, context use is computed again at most this often. Each computation projects the
+/// whole context while it holds the session lock that the agent loop also needs.
+const CONTEXT_USAGE_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Whether the context use computed at `computed` is out of date for `key`.
+fn context_usage_due(computed: Option<&(StatsKey, Instant)>, key: &StatsKey, run_active: bool, now: Instant) -> bool {
+    match computed {
+        Some((computed_key, _)) if computed_key == key => false,
+        Some((_, at)) if run_active => now.saturating_duration_since(*at) >= CONTEXT_USAGE_INTERVAL,
+        _ => true,
+    }
 }
 
 /// The physical model and level a virtual model routed the latest request to.
@@ -125,9 +141,33 @@ impl FooterComponent {
             }
         };
         let session_ptr = Arc::as_ptr(session) as usize;
-        if self.stats.as_ref().is_some_and(|stats| stats.key == key && stats.session == session_ptr) {
-            return self.stats.as_ref().expect("checked above");
+        let previous = self.stats.take().filter(|stats| stats.session == session_ptr);
+        let mut stats = match previous {
+            Some(stats) if stats.key == key => stats,
+            previous => {
+                let (context_usage, context_computed) =
+                    previous.map(|stats| (stats.context_usage, stats.context_computed)).unwrap_or_default();
+                let (totals, latest_cache_hit_rate) = Self::usage_totals(session);
+                SessionStats {
+                    key,
+                    session: session_ptr,
+                    totals,
+                    latest_cache_hit_rate,
+                    context_usage,
+                    context_computed,
+                }
+            }
+        };
+        let now = Instant::now();
+        if context_usage_due(stats.context_computed.as_ref(), &stats.key, session.is_streaming(), now) {
+            stats.context_usage = session.context_usage();
+            stats.context_computed = Some((stats.key.clone(), now));
         }
+        self.stats.insert(stats)
+    }
+
+    /// Token and cost totals of every entry, and the cache hit rate of the latest response.
+    fn usage_totals(session: &AgentSession) -> (UsageTotals, Option<f64>) {
         let mut totals = UsageTotals::default();
         let mut latest_cache_hit_rate = None;
         {
@@ -160,9 +200,7 @@ impl FooterComponent {
                 }
             }
         }
-        let context_usage = session.context_usage();
-        self.stats = Some(SessionStats { key, session: session_ptr, totals, latest_cache_hit_rate, context_usage });
-        self.stats.as_ref().expect("just set")
+        (totals, latest_cache_hit_rate)
     }
 
     /// Everything the footer shows, from the cached stats and the session.
@@ -343,5 +381,23 @@ mod tests {
     #[test]
     fn sanitizes_status_text() {
         assert_eq!(sanitize_status_text(" a\n\tb  c\r"), "a b c");
+    }
+
+    #[test]
+    fn context_use_is_computed_at_most_every_interval_during_a_run_and_at_once_after_it() {
+        let key = |entry_count| StatsKey {
+            session_id: "s".into(),
+            leaf_id: Some(format!("e{entry_count}")),
+            entry_count,
+            limits_model: None,
+        };
+        let start = Instant::now();
+        assert!(context_usage_due(None, &key(1), true, start), "the first render computes it");
+        let computed = (key(1), start);
+        assert!(!context_usage_due(Some(&computed), &key(1), false, start + CONTEXT_USAGE_INTERVAL));
+        let soon = start + CONTEXT_USAGE_INTERVAL / 2;
+        assert!(!context_usage_due(Some(&computed), &key(2), true, soon), "a new entry during a run waits");
+        assert!(context_usage_due(Some(&computed), &key(2), true, start + CONTEXT_USAGE_INTERVAL));
+        assert!(context_usage_due(Some(&computed), &key(2), false, soon), "the render after the run is current");
     }
 }
