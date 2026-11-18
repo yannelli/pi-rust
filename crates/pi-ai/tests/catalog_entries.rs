@@ -46,6 +46,16 @@ fn gpt_6_1_terra_supports_off_but_not_minimal_with_official_metadata() {
 }
 
 #[test]
+fn azure_gpt_6_models_use_the_foundry_context_window_and_keep_the_openai_price_tier() {
+    for id in ["gpt-6-astra", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6.1-terra"] {
+        assert_eq!(find("azure", id, "chat").context_window, 1_050_000, "{id}");
+    }
+    let openai = find("openai", "gpt-6-sol", "chat");
+    assert_eq!(openai.cost.tiers.first().map(|tier| tier.input_tokens_above), Some(272_000));
+    assert_eq!(find("azure", "gpt-6-sol", "chat").cost, openai.cost);
+}
+
+#[test]
 fn kimi_k3_1_pro_models_use_kimi_k3_settings() {
     for (provider, ids) in [
         ("kimi-coding", ["k3.1-pro", "k3.1-pro-highspeed"]),
