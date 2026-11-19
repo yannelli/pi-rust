@@ -2,6 +2,31 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.18] - 2026-11-19
+
+### Added
+
+- **acp:** describe the thinking levels of each model in its _meta ([1f24917](https://github.com/yannelli/pi-rust/commit/1f24917d960004ef47a14a9bdd3a5eaa606115fa))
+- **acp:** give pi's notices and each assistant message their own message id ([045b069](https://github.com/yannelli/pi-rust/commit/045b069f969f4870cbbb3eb32c7eec2d95bf05ac))
+- **acp:** connect the HTTP MCP servers a client sends ([79378fe](https://github.com/yannelli/pi-rust/commit/79378feb51a9e3db6eac757647c4b1d19fe9bf18))
+
+### Fixed
+
+- **acp:** keep the other sessions of a connection open, and support session/close ([c8a1578](https://github.com/yannelli/pi-rust/commit/c8a157861f157917fbf72c313eb77a832fa74e34))
+- **acp:** leave extension questions to the user and show their message ([37fcdc2](https://github.com/yannelli/pi-rust/commit/37fcdc2f028dd8743f96f749aba0660670b2a51d))
+- **acp:** name the problem in the message of invalid params errors ([48b5d4d](https://github.com/yannelli/pi-rust/commit/48b5d4d380b7c101a1bcb7a64109e5e2fc59bd6a))
+- **acp:** replace the session map atomically and keep the id of unprompted sessions ([33ba82d](https://github.com/yannelli/pi-rust/commit/33ba82db3ec7a2b4a3a32a240bad2ebd9929bc7b))
+- **acp:** show bash commands, output, and exit codes in clients without Zed terminals ([b43e226](https://github.com/yannelli/pi-rust/commit/b43e226f4988a4137ef51179a1ebfb90b4e5027c))
+- **acp:** fail the prompt when its run ends with a model error ([2f3da17](https://github.com/yannelli/pi-rust/commit/2f3da17d640810fec520c8be236b9626d1cf834d))
+- **acp:** end a turn only with the run it started or joined ([a948e5b](https://github.com/yannelli/pi-rust/commit/a948e5beba6eb24e01f53d4041f0313881d49247))
+- **acp:** join a run pi started itself and report rejected prompts ([985e640](https://github.com/yannelli/pi-rust/commit/985e6402c0d62b37ce9ca35b2263fbcf263da131))
+- **coding-agent:** send prompt_result when a command's prompt starts no run ([a73dddd](https://github.com/yannelli/pi-rust/commit/a73dddd642192570cad74254e36bc7d929c067b7))
+- **coding-agent:** run extension commands before RPC built-in commands ([88ce9c6](https://github.com/yannelli/pi-rust/commit/88ce9c6c9239248828e920f427a60842557851fa))
+- **coding-agent:** leave display out of custom messages that do not set it ([ddbc0d4](https://github.com/yannelli/pi-rust/commit/ddbc0d4f7e35733dda383a47099bd3a3245bb2a6))
+- **coding-agent:** report agentInvoked for commands that send a prompt ([40f5e70](https://github.com/yannelli/pi-rust/commit/40f5e703b44d9d3ffaf73ca996ba7249dcde7683))
+- **coding-agent:** keep the default model on RPC set_model and cycle_model ([7542d61](https://github.com/yannelli/pi-rust/commit/7542d61b3cc7761f8fc59257bdca91ab6a877e46))
+- **coding-agent:** keep the message_end objects in getEntries() entries ([0004f9c](https://github.com/yannelli/pi-rust/commit/0004f9c587954598d61c19bfbfb31e37edbaa73e))
+
 ## [0.12.17] - 2026-11-19
 
 ### Added
