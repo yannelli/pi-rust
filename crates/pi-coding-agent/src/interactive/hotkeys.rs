@@ -62,6 +62,7 @@ pub fn hotkeys_markdown() -> String {
         (code("app.message.followUp"), "Queue follow-up message"),
         (code("app.message.dequeue"), "Restore queued messages"),
         (code("app.message.sendNow"), "Send queued follow-ups now"),
+        (code("app.message.interrupt"), "Interrupt and send now"),
         (code("app.clipboard.pasteImage"), "Paste files on macOS, images, or text from clipboard"),
         ("`/`".to_string(), "Slash commands"),
         ("`!`".to_string(), "Run bash command"),

@@ -17,6 +17,13 @@ use crate::theme::{ThemeColor, theme};
 
 const DOUBLE_PRESS: Duration = Duration::from_millis(500);
 
+/// The queued messages, then `current`, separated by blank lines.
+fn join_with_queued(queued: &[String], current: &str) -> String {
+    let queued = queued.join("\n\n");
+    let parts: Vec<&str> = [queued.as_str(), current].into_iter().filter(|text| !text.trim().is_empty()).collect();
+    parts.join("\n\n")
+}
+
 impl InteractiveMode {
     /// Before startup finishes: text is kept, and only clear, exit, and submit feedback work.
     pub(super) fn setup_startup_handlers(&self) {
@@ -58,6 +65,8 @@ impl InteractiveMode {
         bind("app.session.tree", |mode| mode.show_tree_selector(None));
         bind("app.session.fork", |mode| mode.show_user_message_selector());
         bind("app.session.resume", |mode| mode.show_session_selector());
+        // Last, so that a key the user also gives to another action runs that action.
+        bind("app.message.interrupt", |mode| mode.handle_interrupt());
         self.editor.set_on_ctrl_d(Some(self.action(|mode| mode.handle_ctrl_d())));
         let weak = self.weak.clone();
         self.editor.on_change(move |text| {
@@ -255,6 +264,39 @@ impl InteractiveMode {
         }
     }
 
+    /// Ctrl+Enter while the agent works: Escape and then Enter in one key. Aborts the run, then
+    /// sends the queued messages and the editor text as one prompt. Commands, and any text while
+    /// idle, go through Enter's path.
+    fn handle_interrupt(&self) {
+        let text = self.editor.get_expanded_text().trim().to_string();
+        let session = self.session();
+        let working = session.is_streaming() || session.is_compacting();
+        if !working || text.starts_with('/') || text.starts_with('!') {
+            if !text.is_empty() {
+                self.editor.set_text("");
+                self.handle_submit(&text);
+            }
+            return;
+        }
+        let queued = self.clear_all_queues();
+        let combined = join_with_queued(&queued, &text).trim().to_string();
+        if combined.is_empty() {
+            return self.show_status("Nothing to send");
+        }
+        if !text.is_empty() {
+            self.editor.record_prompt(&text);
+        }
+        self.editor.set_text("");
+        self.update_pending_messages_display();
+        self.show_status("Interrupting to send now");
+        self.spawn(move |mode| async move {
+            if let Err(error) = tokio::spawn(async move { session.abort().await }).await {
+                mode.show_error(&format!("Failed to interrupt: {error}"));
+            }
+            mode.send_prompt(combined);
+        });
+    }
+
     /// Queued steering and follow-up texts, the session's and those waiting for compaction.
     fn queued_messages(&self) -> (Vec<String>, Vec<String>) {
         let session = self.session();
@@ -295,6 +337,10 @@ impl InteractiveMode {
         if !follow_up.is_empty() && !send_now.is_empty() {
             hint.push_str(&format!(", {send_now} to send follow-ups now"));
         }
+        let interrupt = key_display_text("app.message.interrupt");
+        if !interrupt.is_empty() {
+            hint.push_str(&format!(", {interrupt} to send now"));
+        }
         pending.add_child(component(TruncatedText::new(&theme().fg(ThemeColor::Dim, &hint), 1, 0)));
     }
 
@@ -303,9 +349,7 @@ impl InteractiveMode {
         let queued = self.clear_all_queues();
         if !queued.is_empty() {
             let current = current_text.unwrap_or_else(|| self.editor.get_text());
-            let combined: Vec<String> =
-                [queued.join("\n\n"), current].into_iter().filter(|text| !text.trim().is_empty()).collect();
-            self.editor.set_text(&combined.join("\n\n"));
+            self.editor.set_text(&join_with_queued(&queued, &current));
         }
         self.update_pending_messages_display();
         if abort {
