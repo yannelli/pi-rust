@@ -61,18 +61,49 @@ async fn new_and_load_pass_the_client_servers_exactly() {
 
 #[test]
 fn debug_output_names_the_servers_only() {
-    let servers = ClientMcpServers::from_request(&parsed(&json!([stdio("docs")])), None).unwrap();
-    assert_eq!(format!("{servers:?}"), r#"["docs (5 args, 1 env)"]"#);
-    assert_eq!(servers.names(), ["docs"]);
+    let list = json!([stdio("docs"), http("web", &format!("https://mcp.example/{SECRET}"), json!([]))]);
+    let servers = ClientMcpServers::from_request(&parsed(&list), None).unwrap();
+    assert_eq!(format!("{servers:?}"), r#"["docs (5 args, 1 env)", "web (HTTP, 0 headers)"]"#);
+    assert_eq!(servers.names(), ["docs", "web"]);
+}
+
+#[test]
+fn http_servers_keep_their_url_and_headers_exactly() {
+    let url = format!("http://127.0.0.1:6767/mcp/agents?callerAgentId={SECRET}");
+    let headers = json!([{"name": "Authorization", "value": format!("Bearer {SECRET}")},
+        {"name": "X-Literal", "value": "${HOME} !echo hi ~/x"}]);
+    let servers = ClientMcpServers::from_request(&parsed(&json!([http("paseo", &url, headers)])), None).unwrap();
+    let [entry] = servers.entries() else { panic!("one server expected: {servers:?}") };
+    assert_eq!(
+        (entry.name.as_str(), entry.source.as_str(), entry.scope),
+        ("paseo", "ACP client", Some(McpConfigScope::Client))
+    );
+    assert_eq!(entry.config.url.as_deref(), Some(url.as_str()));
+    let expected = json!({"Authorization": format!("Bearer {SECRET}"), "X-Literal": "${HOME} !echo hi ~/x"});
+    assert_eq!(entry.config.headers.clone().map(Value::Object), Some(expected));
+    assert!(!entry.uses_oauth(), "pi logs in to no server a client supplied");
+    let bare = ClientMcpServers::from_request(&parsed(&json!([http("bare", &url, json!([]))])), None).unwrap();
+    assert!(!bare.entries()[0].uses_oauth() && bare.entries()[0].config.headers.is_none());
+}
+
+fn http(name: &str, url: &str, headers: Value) -> Value {
+    json!({"type": "http", "name": name, "url": url, "headers": headers})
 }
 
 fn rejected_lists() -> Vec<(&'static str, Value)> {
     let headers = json!([{"name": "Authorization", "value": SECRET}]);
     let url = format!("https://mcp.example/{SECRET}");
     let twice = json!([{"name": "A", "value": SECRET}, {"name": "A", "value": SECRET}]);
+    let both_cases = json!([{"name": "X-Key", "value": SECRET}, {"name": "x-key", "value": SECRET}]);
     vec![
-        ("HTTP transport is not supported", json!([{"type": "http", "name": "web", "url": url, "headers": headers}])),
         ("SSE transport is not supported", json!([{"type": "sse", "name": "web", "url": url, "headers": headers}])),
+        ("not a valid http or https URL", json!([http("web", &format!("mcp.example/{SECRET}"), json!([]))])),
+        ("not a valid http or https URL", json!([http("web", &format!("file:///{SECRET}"), json!([]))])),
+        ("is not valid", json!([http("web", &url, json!([{"name": "Bad Name", "value": SECRET}]))])),
+        ("value that is not valid", json!([http("web", &url, json!([{"name": "A", "value": format!("{SECRET}\n")}]))])),
+        ("set more than once", json!([http("web", &url, both_cases)])),
+        ("the name is empty", json!([http(" ", &url, headers.clone())])),
+        ("would be the same", json!([stdio("a-b"), http("a.b", &url, json!([]))])),
         ("absolute path", json!([{"name": "rel", "command": format!("rel/{SECRET}"), "args": [], "env": []}])),
         ("NUL", json!([{"name": "nul", "command": command(), "args": [format!("{SECRET}\u{0}")], "env": []}])),
         ("set more than once", json!([{"name": "dup", "command": command(), "args": [], "env": twice}])),

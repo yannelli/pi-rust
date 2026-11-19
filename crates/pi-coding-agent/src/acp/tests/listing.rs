@@ -82,12 +82,14 @@ async fn lists_sessions_and_load_replays_history() {
     assert_eq!(crate::acp::errors::code(&error), -32602);
 }
 
-#[tokio::test]
-async fn load_replays_tool_results_as_tool_calls() {
+/// Load a conversation with one bash call and one failed read, after `initialize` with `client_meta`.
+async fn replayed(client_meta: Value) -> Vec<Value> {
     let env = Env::new();
     let config = FakeConfig {
         messages: json!({"messages": [
-            {"role": "toolResult", "toolCallId": "call_1", "toolName": "bash", "args": {"command": "echo hello"},
+            {"role": "assistant", "content": [{"type": "toolCall", "id": "call_1", "name": "bash",
+                "arguments": {"command": "echo hello"}}], "stopReason": "toolUse"},
+            {"role": "toolResult", "toolCallId": "call_1", "toolName": "bash",
                 "content": [{"type": "text", "text": "hello from bash"}], "isError": false},
             {"role": "toolResult", "toolCallId": "call_2", "toolName": "read", "content": [{"type": "text", "text": "file"}],
                 "isError": true},
@@ -96,21 +98,30 @@ async fn load_replays_tool_results_as_tool_calls() {
     };
     let (client, backend) = (FakeClient::new(), FakeBackend::with(config));
     let agent = env.agent(client.clone(), FakeFactory::returning(backend));
+    let initialize = json!({"protocolVersion": 1, "clientCapabilities": {"terminal": true, "_meta": client_meta}});
+    agent.initialize(serde_json::from_value(initialize).unwrap());
     agent.store.upsert("s1", "/tmp/project", "/tmp/s.jsonl");
     let request = serde_json::from_value(json!({"sessionId": "s1", "cwd": "/tmp/project", "mcpServers": []})).unwrap();
     agent.load_session(request).await.unwrap();
-    let bodies = client.update_bodies();
+    client.update_bodies()
+}
+
+#[tokio::test]
+async fn load_replays_tool_results_as_tool_calls() {
+    let terminal = json!([{"type": "terminal", "terminalId": "call_1"}]);
+    let meta = json!({"terminal_output": {"terminal_id": "call_1", "data": "hello from bash"},
+        "terminal_exit": {"terminal_id": "call_1", "exit_code": 0, "signal": null}});
+    let bodies = replayed(json!({"terminal_output": true, "terminal-auth": true})).await;
     assert_eq!(
         bodies[0],
         json!({"sessionUpdate": "tool_call", "toolCallId": "call_1", "title": "echo hello", "kind": "execute",
-            "status": "completed", "content": [{"type": "terminal", "terminalId": "call_1"}],
+            "status": "completed", "content": terminal, "rawInput": {"command": "echo hello"},
             "_meta": {"terminal_info": {"terminal_id": "call_1", "cwd": "/tmp/project"}}})
     );
     assert_eq!(
         bodies[1],
         json!({"sessionUpdate": "tool_call_update", "toolCallId": "call_1", "status": "completed",
-            "_meta": {"terminal_output": {"terminal_id": "call_1", "data": "hello from bash"},
-                "terminal_exit": {"terminal_id": "call_1", "exit_code": 0, "signal": null}}})
+            "rawOutput": {"output": "hello from bash", "exitCode": 0}, "_meta": meta})
     );
     assert_eq!(
         (bodies[2]["kind"].clone(), bodies[2]["rawOutput"]["toolCallId"].clone()),
@@ -118,6 +129,16 @@ async fn load_replays_tool_results_as_tool_calls() {
     );
     assert_eq!(bodies[3]["status"], "failed");
     assert_eq!(bodies[3]["content"], json!([{"type": "content", "content": {"type": "text", "text": "file"}}]));
+
+    // A client that shows no terminals from metadata, such as Paseo, also gets the output as text.
+    let bodies = replayed(json!({})).await;
+    assert_eq!(bodies[0]["rawInput"], json!({"command": "echo hello"}));
+    assert_eq!(
+        bodies[1]["content"],
+        json!([{"type": "terminal", "terminalId": "call_1"},
+            {"type": "content", "content": {"type": "text", "text": "hello from bash"}}])
+    );
+    assert_eq!(bodies[1]["rawOutput"], json!({"output": "hello from bash", "exitCode": 0}));
 }
 
 #[test]
@@ -223,6 +244,67 @@ fn session_map_round_trips_and_tolerates_bad_files() {
 }
 
 #[test]
+fn other_processes_never_read_a_half_written_session_map() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("pi-acp/session-map.json");
+    // Each store stands for another pi process with its own lock.
+    let writers: Vec<_> = (0..4)
+        .map(|writer| {
+            let path = path.clone();
+            std::thread::spawn(move || {
+                let store = SessionStore::new(path);
+                for n in 0..40 {
+                    store.upsert(&format!("s{writer}-{n}"), "/cwd", &"x".repeat(4096));
+                }
+            })
+        })
+        .collect();
+    let mut reads = 0;
+    while writers.iter().any(|writer| !writer.is_finished()) {
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            assert!(serde_json::from_str::<Value>(&text).is_ok(), "a partial map of {} bytes", text.len());
+            reads += 1;
+        }
+    }
+    writers.into_iter().for_each(|writer| writer.join().unwrap());
+    assert!(reads > 0);
+    let names: Vec<String> = std::fs::read_dir(path.parent().unwrap())
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, ["session-map.json"], "no temporary file is left");
+}
+
+#[tokio::test]
+async fn loading_a_session_that_never_got_a_prompt_keeps_its_id_and_cwd() {
+    let env = Env::new();
+    let factory = FakeFactory::returning(FakeBackend::new());
+    let agent = env.agent(FakeClient::new(), factory.clone());
+    let dir = env.agent_dir().join("sessions/--work--");
+    let file = dir.join("2026-11-19T00-00-00-000Z_never-prompted.jsonl");
+    agent.store.upsert("never-prompted", "/stored/cwd", &file.display().to_string());
+    let work = env.work().display().to_string();
+    let request = json!({"sessionId": "never-prompted", "cwd": work, "mcpServers": []});
+    agent.load_session(serde_json::from_value(request).unwrap()).await.unwrap();
+    assert_eq!(factory.spawns.lock().unwrap()[0].1.as_deref(), Some(file.as_path()));
+    let text = std::fs::read_to_string(&file).unwrap();
+    let started: Value = serde_json::from_str(text.trim_end()).unwrap();
+    assert_eq!(
+        (started["type"].clone(), started["id"].clone(), started["cwd"].clone(), started["version"].clone()),
+        (json!("session"), json!("never-prompted"), json!(work), json!(3))
+    );
+    assert!(started["timestamp"].as_str().unwrap().ends_with('Z'));
+
+    // A file with entries stays as it is.
+    agent.close("never-prompted").await;
+    write_session(&file, &[header("never-prompted", "/elsewhere")]);
+    let request = json!({"sessionId": "never-prompted", "cwd": work, "mcpServers": []});
+    agent.load_session(serde_json::from_value(request).unwrap()).await.unwrap();
+    assert!(std::fs::read_to_string(&file).unwrap().contains("/elsewhere"));
+}
+
+#[test]
 fn delete_removes_stored_or_discovered_sessions_idempotently() {
     let env = Env::new();
     let agent = env.agent(FakeClient::new(), FakeFactory::returning(FakeBackend::new()));
@@ -295,7 +377,8 @@ async fn restored_sessions_publish_their_title_without_renaming() {
                 .unwrap();
                 let task = tokio::spawn(async move { agent.prompt(request).await });
                 settle().await;
-                backend.emit(json!({"type": "agent_settled"}));
+                backend.emit(backend.accepted());
+                backend.emit(backend.settled());
                 task.await.unwrap().unwrap();
             }
             let titles: Vec<Value> =

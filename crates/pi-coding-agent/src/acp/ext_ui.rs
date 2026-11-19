@@ -1,6 +1,8 @@
 //! Extension UI requests over ACP (upstream `handleExtensionUiRequest`): `select` and
 //! `confirm` become permission requests, `notify` becomes a message chunk tagged with its
-//! level, and the other dialogs are cancelled with a visible note.
+//! level, and the other dialogs are cancelled with a visible note. The options of a dialog all
+//! have the kind `allow_once`, so clients that approve tool calls on their own, such as Paseo
+//! with Auto Accept, take it for a choice and leave it to the user.
 
 use agent_client_protocol_schema::{
     ContentBlock, ContentChunk, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
@@ -25,10 +27,21 @@ pub fn option_index(option_id: &str) -> Option<usize> {
     (index.to_string() == raw).then_some(index)
 }
 
+/// The dialog's title followed by its message, which clients show as the tool call's title.
+fn dialog_title(event: &Value, method: &str) -> String {
+    let text = |key: &str| string_prop(event, key).map(str::trim).filter(|text| !text.is_empty());
+    match (text("title"), text("message")) {
+        (Some(title), Some(message)) if title.ends_with(['.', '?', '!', ':']) => format!("{title} {message}"),
+        (Some(title), Some(message)) => format!("{title}: {message}"),
+        (Some(text), None) | (None, Some(text)) => text.to_string(),
+        (None, None) => format!("Pi {method}"),
+    }
+}
+
 /// The pending tool call a permission request shows for an extension dialog.
 pub fn extension_ui_tool_call(id: &str, event: &Value) -> ToolCallUpdate {
     let method = string_prop(event, "method").unwrap_or("ui");
-    let title = string_prop(event, "title").map(String::from).unwrap_or_else(|| format!("Pi {method}"));
+    let title = dialog_title(event, method);
     let mut raw_input = Map::new();
     raw_input.insert("method".into(), json!(method));
     for key in RAW_INPUT_KEYS {
@@ -44,10 +57,11 @@ pub fn extension_ui_tool_call(id: &str, event: &Value) -> ToolCallUpdate {
     ToolCallUpdate::new(format!("pi-ui-{id}"), fields)
 }
 
+/// Both `allow_once`: with an allow and a reject option, auto-approving clients answer "Yes".
 fn confirm_options() -> Vec<PermissionOption> {
     vec![
         PermissionOption::new("yes", "Yes", PermissionOptionKind::AllowOnce),
-        PermissionOption::new("no", "No", PermissionOptionKind::RejectOnce),
+        PermissionOption::new("no", "No", PermissionOptionKind::AllowOnce),
     ]
 }
 

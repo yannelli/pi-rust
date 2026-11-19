@@ -3,15 +3,17 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use agent_client_protocol_schema::{
-    AgentCapabilities, AuthenticateResponse, AvailableCommandsUpdate, CancelNotification, DeleteSessionRequest,
-    DeleteSessionResponse, Implementation, InitializeRequest, InitializeResponse, ListSessionsRequest,
-    ListSessionsResponse, McpCapabilities, NewSessionRequest, PromptCapabilities, ProtocolVersion, SessionCapabilities,
-    SessionDeleteCapabilities, SessionInfo, SessionListCapabilities, SessionNotification, SessionUpdate,
-    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
+    AgentCapabilities, AuthenticateResponse, AvailableCommandsUpdate, CancelNotification, CloseSessionRequest,
+    CloseSessionResponse, DeleteSessionRequest, DeleteSessionResponse, Implementation, InitializeRequest,
+    InitializeResponse, ListSessionsRequest, ListSessionsResponse, McpCapabilities, NewSessionRequest,
+    PromptCapabilities, ProtocolVersion, SessionCapabilities, SessionCloseCapabilities, SessionDeleteCapabilities,
+    SessionInfo, SessionListCapabilities, SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
 };
 use futures::future::BoxFuture;
 use serde_json::{Value, json};
@@ -19,6 +21,7 @@ use tokio::task::JoinHandle;
 
 use super::auth::{TerminalLaunch, auth_methods, client_supports_terminal_auth};
 use super::backend::{AcpClient, BackendFactory, PiBackend};
+use super::bash::client_shows_terminal_output;
 use super::commands::{builtin_available_commands, commands_from_pi, load_slash_commands, mcp_command, merge_commands};
 use super::config::{
     FAST_MODE_CONFIG_ID, FAST_MODE_FAST, FAST_MODE_STANDARD, MODE_CONFIG_ID, MODEL_CONFIG_ID, THOUGHT_LEVEL_CONFIG_ID,
@@ -30,13 +33,16 @@ use super::mcp_servers::ClientMcpServers;
 use super::session::{AcpSession, AcpSessionParams};
 use super::settings::{enable_skill_commands, quiet_startup};
 use super::startup::{StartupInfoInput, build_startup_info, update_notice};
-use super::store::SessionStore;
+use super::store::{SessionStore, start_missing_session_file};
 use crate::agent_session::lock;
 use crate::platform::version_check::LatestPiRelease;
 use crate::session::ids::uuid_v4;
 
 const PAGE_SIZE: usize = 50;
 const UPDATE_CHECK_WAIT: Duration = Duration::from_millis(800);
+/// Open sessions of a connection beyond which pi closes the idle ones the client used least
+/// recently. Zed runs the threads of a project over one connection.
+pub const MAX_OPEN_SESSIONS: usize = 8;
 
 /// A response plus work that must run after it was sent, such as notifications the client
 /// would drop for a session it does not know yet.
@@ -78,6 +84,10 @@ pub struct AcpAgent {
     last_session_cwd: Mutex<Option<String>>,
     restore_lock: tokio::sync::Mutex<()>,
     version_check: tokio::sync::Mutex<VersionCheck>,
+    /// The client renders bash output from terminal metadata, as `initialize` said.
+    terminal_output: AtomicBool,
+    /// Requests that used a session so far, to find the least recently used.
+    uses: AtomicU64,
     weak: Weak<AcpAgent>,
 }
 
@@ -99,6 +109,8 @@ impl AcpAgent {
             last_session_cwd: Mutex::new(None),
             restore_lock: tokio::sync::Mutex::new(()),
             version_check: tokio::sync::Mutex::new(check),
+            terminal_output: AtomicBool::new(false),
+            uses: AtomicU64::new(0),
             weak: weak.clone(),
         })
     }
@@ -112,7 +124,9 @@ impl AcpAgent {
     }
 
     pub fn session(&self, session_id: &str) -> Option<Arc<AcpSession>> {
-        lock(&self.sessions).get(session_id).cloned()
+        let session = lock(&self.sessions).get(session_id).cloned()?;
+        session.touch(self.uses.fetch_add(1, Ordering::SeqCst) + 1);
+        Some(session)
     }
 
     /// Register a session built elsewhere (tests stand in for `session/new`).
@@ -133,16 +147,34 @@ impl AcpAgent {
         }
     }
 
-    /// One live pi session per connection: stop all others.
-    pub(super) async fn close_all_except(&self, keep: &str) {
-        let others: Vec<Arc<AcpSession>> = {
+    /// Close idle sessions the client used least recently while more than [`MAX_OPEN_SESSIONS`]
+    /// are open. Sessions with a prompt, a run, or `keep` stay open.
+    pub(super) async fn close_idle_sessions(&self, keep: &str) {
+        let closed: Vec<Arc<AcpSession>> = {
             let mut sessions = lock(&self.sessions);
-            let ids: Vec<String> = sessions.keys().filter(|id| *id != keep).cloned().collect();
-            ids.iter().filter_map(|id| sessions.remove(id)).collect()
+            let excess = sessions.len().saturating_sub(MAX_OPEN_SESSIONS);
+            let mut idle: Vec<(u64, String)> = sessions
+                .iter()
+                .filter(|(id, session)| *id != keep && session.is_idle())
+                .map(|(id, session)| (session.last_use(), id.clone()))
+                .collect();
+            idle.sort();
+            idle.into_iter().take(excess).filter_map(|(_, id)| sessions.remove(&id)).collect()
         };
-        for session in others {
+        for session in closed {
             session.dispose().await;
         }
+    }
+
+    /// `session/close`: stop the session's work and free it; unknown sessions succeed too. A later
+    /// request reopens it, without client MCP servers until `session/load`.
+    pub async fn close_session(&self, params: CloseSessionRequest) -> CloseSessionResponse {
+        let session = lock(&self.sessions).remove(&params.session_id.0.to_string());
+        if let Some(session) = session {
+            session.cancel().await;
+            session.dispose().await;
+        }
+        CloseSessionResponse::new()
     }
 
     /// Cancel every running prompt (the client went away).
@@ -169,8 +201,10 @@ impl AcpAgent {
             backend,
             client: self.client.clone(),
             auto_title,
+            terminal_output: self.terminal_output.load(Ordering::SeqCst),
         });
         session.start_event_pump();
+        session.touch(self.uses.fetch_add(1, Ordering::SeqCst) + 1);
         lock(&self.sessions).insert(session_id.to_string(), session.clone());
         session
     }
@@ -193,13 +227,17 @@ impl AcpAgent {
     }
 
     pub fn initialize(&self, params: InitializeRequest) -> InitializeResponse {
-        let supports_meta = client_supports_terminal_auth(params.client_capabilities.meta.as_ref());
+        let client_meta = params.client_capabilities.meta.as_ref();
+        self.terminal_output.store(client_shows_terminal_output(client_meta), Ordering::SeqCst);
+        let supports_meta = client_supports_terminal_auth(client_meta);
         let prompt = PromptCapabilities::new().image(true).audio(false).embedded_context(self.options.embedded_context);
-        let sessions =
-            SessionCapabilities::new().list(SessionListCapabilities::new()).delete(SessionDeleteCapabilities::new());
+        let sessions = SessionCapabilities::new()
+            .list(SessionListCapabilities::new())
+            .delete(SessionDeleteCapabilities::new())
+            .close(SessionCloseCapabilities::new());
         let capabilities = AgentCapabilities::new()
             .load_session(true)
-            .mcp_capabilities(McpCapabilities::new().http(false).sse(false))
+            .mcp_capabilities(McpCapabilities::new().http(true).sse(false))
             .prompt_capabilities(prompt)
             .session_capabilities(sessions);
         let meta = json!({"piAcp": {"exactMcpPreapproval": true}});
@@ -285,7 +323,7 @@ impl AcpAgent {
         if !prelude.is_empty() {
             session.set_startup_info(prelude.clone());
         }
-        self.close_all_except(&session_id).await;
+        self.close_idle_sessions(&session_id).await;
         let response = json!({
             "sessionId": session_id,
             "configOptions": configuration.config_options,
@@ -351,8 +389,10 @@ impl AcpAgent {
             return Err(invalid_params(format!("Unknown sessionId: {session_id}")));
         };
         let cwd = cwd.map(String::from).unwrap_or(stored_cwd);
+        start_missing_session_file(Path::new(&file), session_id, &cwd);
         let backend = self.factory.create(Path::new(&cwd), Some(Path::new(&file)), mcp_servers).await?;
         let session = self.register(session_id, &cwd, backend, false);
+        self.close_idle_sessions(session_id).await;
         self.set_last_cwd(&cwd);
         self.store.upsert(session_id, &cwd, &file);
         if let Some(title) = read_session_title(Path::new(&file), None) {

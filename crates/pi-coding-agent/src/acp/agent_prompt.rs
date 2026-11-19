@@ -52,8 +52,6 @@ impl AcpAgent {
         let stop = match result? {
             TurnEnd::EndTurn => StopReason::EndTurn,
             TurnEnd::Cancelled => StopReason::Cancelled,
-            TurnEnd::Error if session.was_cancel_requested() => StopReason::Cancelled,
-            TurnEnd::Error => StopReason::EndTurn,
         };
         Ok(PromptResponse::new(stop).usage(usage))
     }

@@ -60,7 +60,7 @@ impl Inner {
             };
             let (items, ended) = match chunk {
                 None => (parser.finish()?, true),
-                Some(Err(error)) => return Err(McpError::from_reqwest(error)),
+                Some(Err(error)) => return Err(self.network_error(error)),
                 Some(Ok(bytes)) => (parser.push(&bytes)?, false),
             };
             for item in items {

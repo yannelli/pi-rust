@@ -3,31 +3,32 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use agent_client_protocol_schema::{
-    ContentBlock, ContentChunk, Cost, Error, Meta, SessionConfigOption, SessionInfoUpdate, SessionNotification,
-    SessionUpdate, TextContent, Usage, UsageUpdate,
+    ContentBlock, ContentChunk, Cost, Error, MessageId, Meta, SessionConfigOption, SessionInfoUpdate,
+    SessionNotification, SessionUpdate, TextContent, Usage, UsageUpdate,
 };
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
 
 use super::backend::{AcpClient, PiBackend};
 use super::config::{send_config_options_update, session_configuration};
-use super::errors::maybe_auth_required;
+use super::errors::{maybe_auth_required, prompt_failed};
 use crate::agent_session::lock;
-use crate::session::ids::iso_timestamp;
+use crate::session::ids::{iso_timestamp, uuid_v4};
 
 /// How long a context usage query may take before the turn completes without it.
 pub const SESSION_STATS_TIMEOUT: Duration = Duration::from_secs(1);
 
-/// How a turn ended; `Error` maps to `end_turn` or `cancelled` in the prompt response.
+/// How a turn ended; a failed turn is an `Err` of [`TurnResult`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TurnEnd {
     EndTurn,
     Cancelled,
-    Error,
 }
 
 pub type TurnResult = Result<TurnEnd, Error>;
@@ -39,6 +40,10 @@ struct PendingTurn {
     generation: u64,
     sender: oneshot::Sender<TurnReport>,
     usage: Option<Usage>,
+    /// Set when pi accepted the prompt: the runs that had settled before the run it started or joined.
+    armed: Option<u64>,
+    /// Fired by `session/cancel`, also before pi accepted the prompt.
+    cancel: CancellationToken,
 }
 
 pub(super) struct QueuedTurn {
@@ -72,6 +77,14 @@ pub(super) struct Inner {
     pending: Option<PendingTurn>,
     queue: VecDeque<QueuedTurn>,
     generation: u64,
+    /// The highest `settled` number of the `agent_settled` events so far.
+    last_settled: u64,
+    /// The error of the last assistant message of the running run, if it failed.
+    run_error: Option<String>,
+    /// The error the run numbered `last_settled` ended with.
+    last_settled_error: Option<String>,
+    /// The message id of the assistant message pi streams.
+    pub assistant_message: Option<String>,
     pub tool_calls: HashMap<String, ToolPhase>,
     pub in_agent_loop: bool,
     pub snapshots: HashMap<String, Snapshot>,
@@ -90,6 +103,8 @@ pub struct AcpSessionParams {
     pub client: Arc<dyn AcpClient>,
     /// Name the session after its first prompt (new sessions, not loaded ones).
     pub auto_title: bool,
+    /// The client renders bash output from terminal metadata (see `client_shows_terminal_output`).
+    pub terminal_output: bool,
 }
 
 pub struct AcpSession {
@@ -97,13 +112,19 @@ pub struct AcpSession {
     pub cwd: PathBuf,
     pub backend: Arc<dyn PiBackend>,
     client: Arc<dyn AcpClient>,
+    pub(super) terminal_output: bool,
+    /// When the client last used the session, as a count of uses on the connection.
+    last_use: AtomicU64,
     pub(super) inner: Mutex<Inner>,
     titles: tokio::sync::Mutex<()>,
     weak: Weak<AcpSession>,
 }
 
-pub(super) fn text_chunk(text: impl Into<String>) -> SessionUpdate {
-    SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(text))))
+/// A notice of pi, such as a retry or a queued prompt. It has a message id of its own, so
+/// clients do not merge it into the model's reply.
+pub(super) fn notice(text: impl Into<String>) -> SessionUpdate {
+    let chunk = ContentChunk::new(ContentBlock::Text(TextContent::new(text))).message_id(MessageId::new(uuid_v4()));
+    SessionUpdate::AgentMessageChunk(chunk)
 }
 
 pub(super) fn meta_of(value: Value) -> Meta {
@@ -158,6 +179,8 @@ impl AcpSession {
             cwd: params.cwd,
             backend: params.backend,
             client: params.client,
+            terminal_output: params.terminal_output,
+            last_use: AtomicU64::new(0),
             inner: Mutex::new(inner),
             titles: tokio::sync::Mutex::new(()),
             weak: weak.clone(),
@@ -204,7 +227,7 @@ impl AcpSession {
             inner.startup_info_sent = true;
             inner.startup_info.clone().unwrap_or_default()
         };
-        self.emit(text_chunk(text));
+        self.emit(notice(text));
     }
 
     /// Run a prompt, or queue it behind the running turn; resolves when its turn ends.
@@ -232,7 +255,7 @@ impl AcpSession {
             }
         };
         if let Some(position) = queued_at {
-            self.emit(text_chunk(format!("Queued message (position {position}).")));
+            self.emit(notice(format!("Queued message (position {position}).")));
             self.emit(queue_info(position, true));
         }
         receiver.await.unwrap_or((Ok(TurnEnd::Cancelled), None))
@@ -243,7 +266,9 @@ impl AcpSession {
         inner.in_agent_loop = false;
         inner.generation += 1;
         let generation = inner.generation;
-        inner.pending = Some(PendingTurn { generation, sender: turn.sender, usage: None });
+        let cancel = CancellationToken::new();
+        let pending = PendingTurn { generation, sender: turn.sender, usage: None, armed: None, cancel: cancel.clone() };
+        inner.pending = Some(pending);
         let depth = inner.queue.len();
         let session = self.this();
         let title = turn.title;
@@ -252,15 +277,33 @@ impl AcpSession {
         let session = self.this();
         let (message, images) = (turn.message, turn.images);
         tokio::spawn(async move {
-            if let Err(error) = session.backend.prompt(message, images).await {
+            if let Err(error) = session.backend.prompt(generation, message, images, cancel).await {
                 session.fail_turn(generation, &error);
             }
         });
     }
 
-    /// pi rejected the prompt: report AUTH_REQUIRED for credential errors, else end the turn.
+    /// [`super::backend::PROMPT_ACCEPTED`]: from now on the `agent_settled` of the run the turn started
+    /// or joined ends it.
+    pub(super) fn arm_turn(&self, event: &Value) {
+        let (Some(turn), Some(before)) = (event["turn"].as_u64(), event["settled"].as_u64()) else { return };
+        let settled = {
+            let mut inner = lock(&self.inner);
+            let (last_settled, error) = (inner.last_settled, inner.last_settled_error.clone());
+            let Some(pending) = inner.pending.as_mut().filter(|pending| pending.generation == turn) else { return };
+            pending.armed = Some(before);
+            (last_settled > before).then_some(error)
+        };
+        // The run settled before this event reached the session.
+        if let Some(error) = settled {
+            self.end_turn(error);
+        }
+    }
+
+    /// pi rejected the prompt: AUTH_REQUIRED for credential errors, else an error with pi's message.
+    /// The next queued prompt starts.
     fn fail_turn(&self, generation: u64, error: &anyhow::Error) {
-        let depth = {
+        let next = {
             let mut inner = lock(&self.inner);
             if inner.pending.as_ref().is_none_or(|pending| pending.generation != generation) {
                 return;
@@ -269,30 +312,70 @@ impl AcpSession {
             let result = match maybe_auth_required(error) {
                 Some(auth) => Err(auth),
                 None if inner.cancel_requested => Ok(TurnEnd::Cancelled),
-                None => Ok(TurnEnd::Error),
+                None => Err(prompt_failed(&format!("{error:#}"))),
             };
             let _ = pending.sender.send((result, pending.usage));
             inner.in_agent_loop = false;
-            inner.queue.len()
+            inner.queue.pop_front().map(|turn| (turn, inner.queue.len()))
         };
-        self.emit(queue_info(depth, false));
+        self.start_next(next);
     }
 
-    /// `agent_settled`: publish usage, end the turn, and start the next queued prompt.
-    pub(super) async fn settle_turn(&self) {
+    /// `agent_settled`: publish usage. The settled run ends the turn that started or joined it; an
+    /// earlier run, still in the event stream when the turn began, does not.
+    pub(super) async fn settle_turn(&self, event: &Value) {
         self.publish_context_usage().await;
+        let settled = event["settled"].as_u64();
+        let (ends, error) = {
+            let mut inner = lock(&self.inner);
+            // A prompt handled without a run has no error of its own.
+            let mut error = None;
+            if let Some(settled) = settled {
+                error = inner.run_error.take();
+                inner.last_settled = inner.last_settled.max(settled);
+                inner.last_settled_error = error.clone();
+            }
+            let ends = inner.pending.as_ref().map(|pending| match (pending.armed, settled, event["turn"].as_u64()) {
+                (Some(before), Some(settled), _) => settled > before,
+                (Some(_), None, Some(turn)) => turn == pending.generation,
+                _ => false,
+            });
+            (ends, error)
+        };
+        match ends {
+            Some(true) => self.end_turn(error),
+            Some(false) => {}
+            // A run pi started on its own.
+            None => {
+                lock(&self.inner).in_agent_loop = false;
+                self.emit(queue_info(0, false));
+            }
+        }
+    }
+
+    /// End the pending turn, failed with `error` when its run ended with a model error, and start
+    /// the next queued prompt.
+    fn end_turn(&self, error: Option<String>) {
         let next = {
             let mut inner = lock(&self.inner);
-            let reason = if inner.cancel_requested { TurnEnd::Cancelled } else { TurnEnd::EndTurn };
+            let result = match error {
+                _ if inner.cancel_requested => Ok(TurnEnd::Cancelled),
+                Some(error) => Err(prompt_failed(&error)),
+                None => Ok(TurnEnd::EndTurn),
+            };
             if let Some(pending) = inner.pending.take() {
-                let _ = pending.sender.send((Ok(reason), pending.usage));
+                let _ = pending.sender.send((result, pending.usage));
             }
             inner.in_agent_loop = false;
             inner.queue.pop_front().map(|turn| (turn, inner.queue.len()))
         };
+        self.start_next(next);
+    }
+
+    fn start_next(&self, next: Option<(QueuedTurn, usize)>) {
         match next {
             Some((turn, remaining)) => {
-                self.emit(text_chunk(format!("Starting queued message. ({remaining} remaining)")));
+                self.emit(notice(format!("Starting queued message. ({remaining} remaining)")));
                 let mut inner = lock(&self.inner);
                 self.start_turn(&mut inner, turn);
             }
@@ -305,6 +388,9 @@ impl AcpSession {
         let cleared = {
             let mut inner = lock(&self.inner);
             inner.cancel_requested = true;
+            if let Some(pending) = &inner.pending {
+                pending.cancel.cancel();
+            }
             let queued: Vec<QueuedTurn> = inner.queue.drain(..).collect();
             (!queued.is_empty()).then(|| (queued, inner.pending.is_some()))
         };
@@ -312,7 +398,7 @@ impl AcpSession {
             for turn in queued {
                 let _ = turn.sender.send((Ok(TurnEnd::Cancelled), None));
             }
-            self.emit(text_chunk("Cleared queued prompts."));
+            self.emit(notice("Cleared queued prompts."));
             self.emit(queue_info(0, running));
         }
         if let Err(error) = self.backend.abort().await {
@@ -320,15 +406,34 @@ impl AcpSession {
         }
     }
 
-    /// `message_end` of an assistant message: count its usage for the running turn.
-    pub(super) fn record_turn_usage(&self, usage: &Value) {
-        if let Some(pending) = lock(&self.inner).pending.as_mut() {
-            add_turn_usage(&mut pending.usage, usage);
+    /// `message_end` of an assistant message: count its usage for the running turn, and keep its
+    /// error. Only the last message of a run counts, so a retry that succeeds clears it.
+    pub(super) fn record_assistant_message(&self, message: &Value) {
+        let mut inner = lock(&self.inner);
+        inner.run_error = (message["stopReason"] == "error").then(|| {
+            let error = message["errorMessage"].as_str().map(str::trim).unwrap_or_default();
+            if error.is_empty() { "The model request failed".to_string() } else { error.to_string() }
+        });
+        if let Some(pending) = inner.pending.as_mut() {
+            add_turn_usage(&mut pending.usage, &message["usage"]);
         }
     }
 
-    pub fn was_cancel_requested(&self) -> bool {
-        lock(&self.inner).cancel_requested
+    pub(super) fn touch(&self, use_number: u64) {
+        self.last_use.store(use_number, Ordering::SeqCst);
+    }
+
+    pub(super) fn last_use(&self) -> u64 {
+        self.last_use.load(Ordering::SeqCst)
+    }
+
+    /// No prompt runs or waits, and pi is idle.
+    pub fn is_idle(&self) -> bool {
+        let waiting = {
+            let inner = lock(&self.inner);
+            inner.pending.is_some() || !inner.queue.is_empty()
+        };
+        !waiting && self.backend.is_idle()
     }
 
     /// `/name`: set pi's session name and publish it as the title.

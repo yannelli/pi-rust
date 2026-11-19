@@ -3,16 +3,17 @@
 use std::path::Path;
 
 use agent_client_protocol_schema::{
-    ContentBlock, ContentChunk, Diff, SessionUpdate, TextContent, ToolCall, ToolCallContent, ToolCallLocation,
-    ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+    ContentBlock, ContentChunk, Diff, MessageId, SessionUpdate, TextContent, ToolCall, ToolCallContent,
+    ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
 };
 use serde_json::{Value, json};
 
+use super::backend::PROMPT_ACCEPTED;
 use super::bash::{
-    bash_command, bash_exit_code, bash_output_delta, bash_result_text, bash_terminal_content, bash_terminal_exit_meta,
-    bash_terminal_info_meta, bash_terminal_output_meta, is_bash_tool,
+    bash_command, bash_exit_code, bash_output_delta, bash_raw_output, bash_result_text, bash_terminal_content,
+    bash_terminal_exit_meta, bash_terminal_info_meta, bash_terminal_output_meta, bash_text_content, is_bash_tool,
 };
-use super::session::{AcpSession, Snapshot, ToolPhase, text_chunk};
+use super::session::{AcpSession, Snapshot, ToolPhase, notice};
 use super::translate::{tool_kind, tool_result_to_text};
 use crate::agent_session::lock;
 use crate::session::ids::{iso_timestamp, uuid_v4};
@@ -110,9 +111,13 @@ impl AcpSession {
                 None => self.publish_title(None, Some(iso_timestamp())),
                 Some(_) => {}
             },
+            "message_start" if event["message"]["role"] == "assistant" => {
+                lock(&self.inner).assistant_message = Some(uuid_v4());
+            }
             "message_update" => self.on_message_update(&event["assistantMessageEvent"]),
             "message_end" if event["message"]["role"] == "assistant" => {
-                self.record_turn_usage(&event["message"]["usage"]);
+                lock(&self.inner).assistant_message = None;
+                self.record_assistant_message(&event["message"]);
                 self.publish_context_usage().await;
             }
             "tool_execution_start" => self.on_tool_start(&event),
@@ -124,15 +129,15 @@ impl AcpSession {
                 let session = self.this();
                 tokio::spawn(async move { session.handle_extension_ui_request(event).await });
             }
-            "auto_retry_start" => self.emit(text_chunk(format_auto_retry_message(&event))),
-            "auto_retry_end" => self.emit(text_chunk("Retry finished, resuming.")),
-            "auto_compaction_start" => self.emit(text_chunk(COMPACTION_START)),
-            "auto_compaction_end" => self.emit(text_chunk(COMPACTION_END)),
-            "compaction_start" if event["reason"] != "manual" => self.emit(text_chunk(COMPACTION_START)),
+            "auto_retry_start" => self.emit(notice(format_auto_retry_message(&event))),
+            "auto_retry_end" => self.emit(notice("Retry finished, resuming.")),
+            "auto_compaction_start" => self.emit(notice(COMPACTION_START)),
+            "auto_compaction_end" => self.emit(notice(COMPACTION_END)),
+            "compaction_start" if event["reason"] != "manual" => self.emit(notice(COMPACTION_START)),
             "compaction_end"
                 if event["reason"] != "manual" && event["aborted"] != true && event.get("errorMessage").is_none() =>
             {
-                self.emit(text_chunk(COMPACTION_END))
+                self.emit(notice(COMPACTION_END))
             }
             "fast_mode_changed" | "thinking_level_changed" => {
                 let _ = self.publish_config_options(false).await;
@@ -143,9 +148,15 @@ impl AcpSession {
             }
             "agent_start" => lock(&self.inner).in_agent_loop = true,
             "agent_end" => lock(&self.inner).in_agent_loop = false,
-            "agent_settled" => self.settle_turn().await,
+            "agent_settled" => self.settle_turn(&event).await,
+            PROMPT_ACCEPTED => self.arm_turn(&event),
             _ => {}
         }
+    }
+
+    /// The message id of the assistant message pi streams, so its chunks stay apart from notices.
+    fn assistant_message_id(&self) -> MessageId {
+        MessageId::new(lock(&self.inner).assistant_message.get_or_insert_with(uuid_v4).clone())
     }
 
     fn on_message_update(&self, event: &Value) {
@@ -153,10 +164,12 @@ impl AcpSession {
         match (kind, event.get("delta").and_then(Value::as_str)) {
             ("text_delta", Some(delta)) => {
                 let chunk = ContentChunk::new(ContentBlock::Text(TextContent::new(delta)));
+                let chunk = chunk.message_id(self.assistant_message_id());
                 return self.emit(SessionUpdate::AgentMessageChunk(chunk));
             }
             ("thinking_delta", Some(delta)) => {
                 let chunk = ContentChunk::new(ContentBlock::Text(TextContent::new(delta)));
+                let chunk = chunk.message_id(self.assistant_message_id());
                 return self.emit(SessionUpdate::AgentThoughtChunk(chunk));
             }
             _ => {}
@@ -213,11 +226,13 @@ impl AcpSession {
         lock(&self.inner).bash_calls.insert(call.id.to_string());
         let title = bash_command(call.args).unwrap_or_else(|| call.tool_name.to_string());
         let cwd = self.cwd.display().to_string();
+        let raw_input = (!call.args.is_null()).then(|| call.args.clone());
         if call.create {
             let mut tool = ToolCall::new(call.id.to_string(), title)
                 .kind(ToolKind::Execute)
                 .status(call.status)
                 .content(bash_terminal_content(call.id))
+                .raw_input(raw_input)
                 .meta(bash_terminal_info_meta(call.id, &cwd));
             if let Some(locations) = call.locations {
                 tool = tool.locations(locations);
@@ -228,7 +243,8 @@ impl AcpSession {
             .title(title)
             .kind(ToolKind::Execute)
             .status(call.status)
-            .locations(call.locations);
+            .locations(call.locations)
+            .raw_input(raw_input);
         self.emit(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(call.id.to_string(), fields)));
     }
 
@@ -283,10 +299,16 @@ impl AcpSession {
         let sent = lock(&self.inner).bash_output.insert(id.to_string(), text.clone()).unwrap_or_default();
         let delta = bash_output_delta(&sent, &text);
         let mut meta = if delta.is_empty() { Default::default() } else { bash_terminal_output_meta(id, delta) };
-        if matches!(status, ToolCallStatus::Completed | ToolCallStatus::Failed) {
-            meta.extend(bash_terminal_exit_meta(id, bash_exit_code(result, is_error)));
+        let ended = matches!(status, ToolCallStatus::Completed | ToolCallStatus::Failed);
+        let exit_code = ended.then(|| bash_exit_code(result, is_error));
+        if let Some(code) = exit_code {
+            meta.extend(bash_terminal_exit_meta(id, code));
         }
-        let update = ToolCallUpdate::new(id.to_string(), ToolCallUpdateFields::new().status(status)).meta(meta);
+        let mut fields = ToolCallUpdateFields::new().status(status).raw_output(bash_raw_output(&text, exit_code));
+        if !self.terminal_output {
+            fields = fields.content(bash_text_content(id, &text));
+        }
+        let update = ToolCallUpdate::new(id.to_string(), fields).meta(meta);
         self.emit(SessionUpdate::ToolCallUpdate(update));
     }
 

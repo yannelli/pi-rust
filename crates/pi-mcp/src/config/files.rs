@@ -87,6 +87,12 @@ impl McpServerEntry {
     pub fn new(name: impl Into<String>, config: McpServerConfig, source: impl Into<String>) -> Self {
         Self { name: name.into(), config, source: source.into(), scope: None, override_path: None }
     }
+
+    /// Whether pi logs in to the server with OAuth ([`McpServerConfig::uses_oauth`]). pi uses a
+    /// server an ACP client supplied as sent, without a login.
+    pub fn uses_oauth(&self) -> bool {
+        self.scope != Some(McpConfigScope::Client) && self.config.uses_oauth()
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]

@@ -4,10 +4,12 @@
 use crate::agent_session::{http_mock, mcp_fake};
 use crate::offline_guard;
 
+mod bash;
 mod binary;
 mod client;
 mod mcp_servers;
 mod permission_identity;
+mod turns;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -103,12 +105,22 @@ async fn drives_sessions_over_acp_with_the_faux_provider() {
 
     let init = client.request("initialize", json!({"protocolVersion": 1, "clientCapabilities": {}})).await;
     assert_eq!(init["result"]["protocolVersion"], 1);
-    assert_eq!(init["result"]["agentCapabilities"]["sessionCapabilities"], json!({"list": {}, "delete": {}}));
+    assert_eq!(
+        init["result"]["agentCapabilities"]["sessionCapabilities"],
+        json!({"list": {}, "delete": {}, "close": {}})
+    );
 
     let created = client.request("session/new", json!({"cwd": work, "mcpServers": []})).await;
     let session_id = created["result"]["sessionId"].as_str().expect("session id").to_string();
     assert_eq!(created["result"]["models"]["currentModelId"], "local/tiny");
     assert!(created["result"]["_meta"]["piAcp"]["startupInfo"].as_str().unwrap().starts_with("pi v9.9.9"));
+    let meta = &created["result"]["models"]["availableModels"][0]["_meta"];
+    let efforts: Vec<&Value> =
+        meta["reasoningEfforts"].as_array().unwrap().iter().map(|effort| &effort["id"]).collect();
+    let thinking = config_option(&created["result"]["configOptions"], "thought_level").unwrap();
+    let levels: Vec<&Value> = thinking["options"].as_array().unwrap().iter().map(|level| &level["value"]).collect();
+    assert_eq!(efforts, levels, "the current model's levels are the Thinking choices");
+    assert_eq!((&meta["supportsReasoningEffort"], &meta["reasoningEffort"]), (&json!(true), &thinking["currentValue"]));
     let commands =
         client.until(|message| message["params"]["update"]["sessionUpdate"] == "available_commands_update").await;
     assert_eq!(commands["params"]["sessionId"], session_id.as_str());
@@ -173,6 +185,32 @@ async fn drives_sessions_over_acp_with_the_faux_provider() {
     assert_eq!(deleted["result"], json!({}));
     assert_eq!(client.request("session/list", json!({})).await["result"]["sessions"], json!([]));
     assert_eq!(setup.provider.requests().len(), 3);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_that_never_got_a_prompt_loads_with_its_id_and_cwd() {
+    let setup = setup(vec![FauxResponse::text("Hello again.")]);
+    let work = setup.root.path().join("work");
+    let mut first = start(&setup);
+    first.request("initialize", json!({"protocolVersion": 1, "clientCapabilities": {}})).await;
+    let created = first.request("session/new", json!({"cwd": work, "mcpServers": []})).await;
+    let id = created["result"]["sessionId"].as_str().expect("session id").to_string();
+    drop(first);
+
+    let mut client = start(&setup);
+    client.request("initialize", json!({"protocolVersion": 1, "clientCapabilities": {}})).await;
+    let loaded = client.request("session/load", json!({"sessionId": id, "cwd": work, "mcpServers": []})).await;
+    assert!(loaded["result"].is_object(), "{loaded}");
+    let prompt = json!({"sessionId": id, "prompt": [{"type": "text", "text": "Are you there?"}]});
+    assert_eq!(client.request("session/prompt", prompt).await["result"]["stopReason"], "end_turn");
+    let listed = client.request("session/list", json!({"cwd": work})).await;
+    let ids: Vec<&str> = listed["result"]["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|session| session["sessionId"].as_str())
+        .collect();
+    assert_eq!(ids, [id.as_str()], "{listed}");
 }
 
 fn config_option<'a>(options: &'a Value, id: &str) -> Option<&'a Value> {
@@ -330,7 +368,10 @@ async fn reports_protocol_errors() {
     let relative = client.request("session/new", json!({"cwd": "relative", "mcpServers": []})).await;
     assert_eq!(relative["error"]["code"], -32602);
     let missing = client.request("session/load", json!({"sessionId": "nope", "cwd": "/tmp", "mcpServers": []})).await;
-    assert_eq!(missing["error"]["data"], "Unknown sessionId: nope");
+    assert_eq!(
+        missing["error"],
+        json!({"code": -32602, "message": "Invalid params: Unknown sessionId: nope", "data": "Unknown sessionId: nope"})
+    );
     assert_eq!(client.request("authenticate", json!({"methodId": "pi_terminal_login"})).await["result"], json!({}));
 }
 

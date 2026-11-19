@@ -184,15 +184,19 @@ impl AgentSession {
         } else {
             text.to_string()
         };
-        if self.is_streaming() {
+        while self.is_streaming() {
             let Some(behavior) = options.streaming_behavior else {
                 anyhow::bail!(
                     "Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message."
                 );
             };
-            self.queue_message(&expanded, input_images, behavior, from_extension);
-            preflight(PromptDisposition::Queued);
-            return Ok(PromptDisposition::Queued);
+            if self.queue_message_if_running(&expanded, &input_images, behavior, from_extension) {
+                preflight(PromptDisposition::Queued);
+                return Ok(PromptDisposition::Queued);
+            }
+            // The run is aborting or just ended: start after it, as a prompt sent then would.
+            self.wait_for_aborted_run().await;
+            self.wait_while_settling().await;
         }
         if self.cost_limit_reached() {
             preflight(PromptDisposition::Handled);
@@ -451,6 +455,39 @@ impl AgentSession {
             StreamingBehavior::Steer => self.agent.steer(message),
             StreamingBehavior::FollowUp => self.agent.follow_up(message),
         }
+    }
+
+    /// [`Self::queue_message`] for the active run; false when no run is active or it is aborting.
+    /// The check and the push share the state lock with [`Self::settle_run`], so the run reads it.
+    fn queue_message_if_running(
+        &self,
+        text: &str,
+        images: &[ContentBlock],
+        behavior: StreamingBehavior,
+        from_extension: bool,
+    ) -> bool {
+        let message = user_message(text, images.to_vec());
+        {
+            let mut state = lock(&self.state);
+            if !state.run_active || state.abort_requested {
+                return false;
+            }
+            match behavior {
+                StreamingBehavior::Steer => {
+                    state.steering.push(text.to_string());
+                    self.agent.steer(message.clone());
+                }
+                StreamingBehavior::FollowUp => {
+                    state.follow_up.push(text.to_string());
+                    self.agent.follow_up(message.clone());
+                }
+            }
+        }
+        self.emit_queue_update();
+        if from_extension {
+            self.note_extension_prompt(&message);
+        }
+        true
     }
 
     /// Clear the queued user messages and return their texts (steering, follow-up). Queued

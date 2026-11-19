@@ -42,7 +42,7 @@ pub fn expand_home(value: &str) -> String {
 }
 
 /// Resolve `${VAR}` and `!command` in env values and headers, and expand `~`; see [`stdio_options`]
-/// for servers an ACP client supplied.
+/// and [`client_http_options`] for servers an ACP client supplied.
 pub fn create_default_transport(
     entry: &McpServerEntry,
     cwd: &Path,
@@ -51,7 +51,7 @@ pub fn create_default_transport(
     let config = &entry.config;
     let name = &entry.name;
     if entry.scope == Some(McpConfigScope::Client) && config.url.is_some() {
-        return Err(McpError::other(format!("MCP server \"{name}\" from the ACP client must use stdio")));
+        return Ok(Arc::new(StreamableHttpTransport::new(client_http_options(entry)?)?));
     }
     if let Some(url) = &config.url {
         let headers = resolve_headers_or_err(config.header_pairs(), &format!("MCP server \"{name}\""))
@@ -104,6 +104,23 @@ fn client_stdio_options(entry: &McpServerEntry, cwd: &Path) -> Result<StdioTrans
     // The pipe is still drained; keeping none of it keeps echoed client values out of errors.
     options.max_stderr_bytes = 0;
     options.command_label = Some(format!("MCP server \"{}\"", entry.name));
+    Ok(options)
+}
+
+/// The HTTP options of a server an ACP client supplied: the URL and headers exactly as sent, no
+/// login, and errors without the URL.
+pub fn client_http_options(entry: &McpServerEntry) -> Result<StreamableHttpOptions, McpError> {
+    let name = &entry.name;
+    let url = entry.config.url.as_deref().unwrap_or_default();
+    let url = Url::parse(url).map_err(|_| McpError::other(format!("MCP server \"{name}\" has an invalid URL")))?;
+    let mut options = StreamableHttpOptions::new(url);
+    for (key, value) in entry.config.headers.iter().flatten() {
+        let Some(value) = value.as_str() else {
+            return Err(McpError::other(format!("MCP server \"{name}\" header \"{key}\" is not a string")));
+        };
+        options.headers.push((key.clone(), value.to_string()));
+    }
+    options.hide_url = true;
     Ok(options)
 }
 
@@ -219,8 +236,22 @@ mod tests {
         }
         assert_eq!(options.command_label, None);
         assert_ne!(options.max_stderr_bytes, 0);
-        let mut http = entry("web", McpServerConfig::http("https://mcp.example.com"));
+        let mut http = entry("web", McpServerConfig::http("https://mcp.example.com/mcp?agent=a1"));
+        http.config.headers = Some(
+            serde_json::json!({"Authorization": "Bearer ${TOKEN}", "X-Run": "!echo hi ~/x"})
+                .as_object()
+                .cloned()
+                .unwrap(),
+        );
         http.scope = Some(McpConfigScope::Client);
-        assert!(create_default_transport(&http, cwd, None).is_err());
+        let options = client_http_options(&http).unwrap();
+        assert_eq!(options.url.as_str(), "https://mcp.example.com/mcp?agent=a1");
+        let headers = [("Authorization", "Bearer ${TOKEN}"), ("X-Run", "!echo hi ~/x")];
+        assert_eq!(options.headers, headers.map(|(name, value)| (name.to_string(), value.to_string())));
+        assert!(options.hide_url && options.auth_provider.is_none());
+        assert!(create_default_transport(&http, cwd, None).is_ok());
+        http.config.url = Some("not a url SENTINEL".into());
+        let error = client_http_options(&http).err().unwrap().to_string();
+        assert!(error.contains("\"web\"") && !error.contains("SENTINEL"), "{error}");
     }
 }

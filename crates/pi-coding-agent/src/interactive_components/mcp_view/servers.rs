@@ -331,6 +331,7 @@ pub fn server_menu(servers: &dyn McpServers, name: &str) -> McpMenu {
         }
     }
     let transport = match &entry.config.url {
+        Some(_) if entry.scope == Some(McpConfigScope::Client) => "HTTP (URL and headers not shown)".to_string(),
         Some(url) => url.clone(),
         None if entry.scope == Some(McpConfigScope::Client) => "stdio (command and args not shown)".to_string(),
         None => {

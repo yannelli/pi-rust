@@ -1,11 +1,11 @@
 //! ACP model, thinking, and permission selectors. Legacy modes represent permissions only.
 
 use agent_client_protocol_schema::{
-    ConfigOptionUpdate, CurrentModeUpdate, Error, SessionConfigOption, SessionConfigOptionCategory,
+    ConfigOptionUpdate, CurrentModeUpdate, Error, Meta, SessionConfigOption, SessionConfigOptionCategory,
     SessionConfigSelectOption, SessionModeState, SessionNotification, SessionUpdate,
 };
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::backend::{AcpClient, PiBackend};
 use super::errors::invalid_params;
@@ -25,6 +25,9 @@ pub struct AdvertisedModel {
     pub model_id: String,
     pub name: String,
     pub description: Option<String>,
+    /// The model's own thinking levels, see [`reasoning_meta`].
+    #[serde(rename = "_meta", skip_serializing_if = "Option::is_none")]
+    pub meta: Option<Meta>,
 }
 
 /// The legacy `models` field of `session/new` and `session/load` responses.
@@ -111,6 +114,30 @@ fn fast_mode_option(state: &Value) -> Option<SessionConfigOption> {
     Some(option)
 }
 
+/// The `_meta` of a model with its thinking levels, as Paseo reads it for each model:
+/// `supportsReasoningEffort`, `reasoningEfforts` with ids and labels, and `reasoningEffort`, the
+/// level pi would use with the model. `None` when pi reports no levels.
+fn reasoning_meta(model: &Value) -> Option<Meta> {
+    let levels: Vec<&str> = model["thinkingLevels"].as_array()?.iter().filter_map(Value::as_str).collect();
+    let current = model["thinkingLevel"].as_str().filter(|level| levels.contains(level));
+    let efforts: Vec<Value> = levels
+        .iter()
+        .map(|level| {
+            let mut effort = json!({"id": level, "label": thinking_name(level)});
+            if current == Some(*level) {
+                effort["default"] = json!(true);
+            }
+            effort
+        })
+        .collect();
+    let thinks = levels.iter().any(|level| *level != "off");
+    let mut meta = json!({"supportsReasoningEffort": thinks, "reasoningEfforts": efforts});
+    if let Some(current) = current {
+        meta["reasoningEffort"] = json!(current);
+    }
+    meta.as_object().cloned()
+}
+
 /// Available models and the current one; `None` when pi reports neither.
 fn model_state(models: Option<&Value>, state: Option<&Value>) -> Option<ModelState> {
     let field = |value: &Value, key: &str| match &value[key] {
@@ -138,6 +165,7 @@ fn model_state(models: Option<&Value>, state: Option<&Value>) -> Option<ModelSta
                 model_id: format!("{provider}/{id}"),
                 name: format!("{display_provider}: {name}{}", if fast { " ⚡" } else { "" }),
                 description: None,
+                meta: reasoning_meta(model),
             })
         })
         .collect();
@@ -178,7 +206,9 @@ fn build_config_options(
         let choices: Vec<SessionConfigSelectOption> = models
             .available_models
             .iter()
-            .map(|model| SessionConfigSelectOption::new(model.model_id.clone(), model.name.clone()))
+            .map(|model| {
+                SessionConfigSelectOption::new(model.model_id.clone(), model.name.clone()).meta(model.meta.clone())
+            })
             .collect();
         let option = SessionConfigOption::select(MODEL_CONFIG_ID, "Model", models.current_model_id.clone(), choices)
             .category(SessionConfigOptionCategory::Model)

@@ -162,7 +162,7 @@ impl McpServerConnection {
         let inner = Arc::new_cyclic(|weak: &Weak<Inner>| {
             let entry = options.entry.clone();
             let oauth_url =
-                entry.config.url.clone().filter(|_| entry.config.uses_oauth()).and_then(|url| Url::parse(&url).ok());
+                entry.config.url.clone().filter(|_| entry.uses_oauth()).and_then(|url| Url::parse(&url).ok());
             let oauth = oauth_url.map(|url| {
                 let store = options.credentials.for_server(&entry.name, url.as_str());
                 let settings_entry = entry.clone();
@@ -264,8 +264,8 @@ impl McpServerConnection {
 
     /// Server URL when the server authenticates with OAuth.
     pub fn oauth_url(&self) -> Option<String> {
-        let config = &self.inner.options.entry.config;
-        config.url.clone().filter(|_| config.uses_oauth())
+        let entry = &self.inner.options.entry;
+        entry.config.url.clone().filter(|_| entry.uses_oauth())
     }
 
     /// OAuth settings with the client secret resolved.

@@ -9,9 +9,15 @@ pub type AcpResult<T> = Result<T, Error>;
 
 const AUTH_REQUIRED_MESSAGE: &str = "Configure an API key or log in with an OAuth provider.";
 
-/// `RequestError.invalidParams(data)`: the detail travels as `data`.
+/// `RequestError.invalidParams(data)`, with a text detail also in the message: clients such as
+/// Paseo show only the message when `data` is no object.
 pub fn invalid_params(data: impl Into<Value>) -> Error {
-    Error::new(-32602, "Invalid params").data(data.into())
+    let data = data.into();
+    let message = match data.as_str().map(str::trim) {
+        Some(detail) if !detail.is_empty() => format!("Invalid params: {detail}"),
+        _ => "Invalid params".to_string(),
+    };
+    Error::new(-32602, message).data(data)
 }
 
 /// `RequestError.internalError(data, message)`.
@@ -22,6 +28,12 @@ pub fn internal_error(data: Value, message: &str) -> Error {
 /// An unexpected failure, as the SDK reports a thrown non-`RequestError`.
 pub fn internal_failure(error: &anyhow::Error) -> Error {
     Error::new(-32603, "Internal error").data(json!({"details": format!("{error:#}")}))
+}
+
+/// A prompt that failed, with pi's message as the whole message so clients show it as is.
+pub fn prompt_failed(message: &str) -> Error {
+    let message = message.trim();
+    Error::new(-32603, if message.is_empty() { "The prompt failed" } else { message })
 }
 
 /// `RequestError.methodNotFound(method)`.

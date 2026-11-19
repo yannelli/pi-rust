@@ -8,7 +8,7 @@ use agent_client_protocol_schema::{
 use serde_json::{Value, json};
 
 use super::{FakeBackend, FakeClient, session_with, settle};
-use crate::acp::session::AcpSession;
+use crate::acp::session::{AcpSession, AcpSessionParams};
 use std::sync::Arc;
 
 struct Fixture {
@@ -39,46 +39,132 @@ async fn text_and_thinking_deltas_become_chunks() {
     f.emit(json!({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "hi"}})).await;
     f.emit(json!({"type": "message_update", "assistantMessageEvent": {"type": "thinking_delta", "delta": "hmm"}}))
         .await;
+    let updates = f.client.updates();
+    let id = updates[0]["update"]["messageId"].clone();
+    assert!(id.is_string());
     assert_eq!(
-        f.client.updates(),
+        updates,
         [
-            json!({"sessionId": "s1", "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "hi"}}}),
-            json!({"sessionId": "s1", "update": {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "hmm"}}}),
+            json!({"sessionId": "s1", "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "hi"}, "messageId": id}}),
+            json!({"sessionId": "s1", "update": {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "hmm"}, "messageId": id}}),
         ]
     );
+}
+
+#[tokio::test]
+async fn notices_and_each_assistant_message_have_message_ids_of_their_own() {
+    let f = fixture(&here());
+    let text = |delta: &str| json!({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": delta}});
+    let assistant = |kind: &str| json!({"type": kind, "message": {"role": "assistant"}});
+    for event in [
+        assistant("message_start"),
+        text("first "),
+        text("reply"),
+        assistant("message_end"),
+        json!({"type": "auto_retry_start", "attempt": 1, "maxAttempts": 3, "delayMs": 1000}),
+        json!({"type": "auto_retry_end"}),
+        assistant("message_start"),
+        text("second reply"),
+    ] {
+        f.emit(event).await;
+    }
+    let ids: Vec<(String, String)> = f
+        .client
+        .of_kind("agent_message_chunk")
+        .iter()
+        .map(|update| {
+            (update["content"]["text"].as_str().unwrap().into(), update["messageId"].as_str().unwrap().into())
+        })
+        .collect();
+    assert_eq!(ids[0].1, ids[1].1, "chunks of one message share its id");
+    let distinct: std::collections::HashSet<&str> = ids.iter().skip(1).map(|(_, id)| id.as_str()).collect();
+    assert_eq!(distinct.len(), 4, "the reply, each notice, and the next reply: {ids:?}");
+}
+
+/// A bash call through `session` that prints "running", then "running done", with `result` at the end.
+async fn run_bash(session: &AcpSession, is_error: bool, result: Value) {
+    session
+        .handle_pi_event(
+            json!({"type": "tool_execution_start", "toolCallId": "t1", "toolName": "bash", "args": {"command": "ls"}}),
+        )
+        .await;
+    session
+        .handle_pi_event(json!({"type": "tool_execution_update", "toolCallId": "t1",
+            "partialResult": {"content": [{"type": "text", "text": "running"}]}}))
+        .await;
+    session
+        .handle_pi_event(
+            json!({"type": "tool_execution_end", "toolCallId": "t1", "isError": is_error, "result": result}),
+        )
+        .await;
 }
 
 #[tokio::test]
 async fn bash_tool_calls_render_as_terminals() {
     let f = fixture(&here());
     let cwd = here().display().to_string();
-    f.emit(json!({"type": "tool_execution_start", "toolCallId": "t1", "toolName": "bash", "args": {"command": "ls"}}))
-        .await;
-    f.emit(json!({"type": "tool_execution_update", "toolCallId": "t1",
-        "partialResult": {"content": [{"type": "text", "text": "running"}]}}))
-        .await;
-    f.emit(json!({"type": "tool_execution_end", "toolCallId": "t1", "isError": false,
-        "result": {"content": [{"type": "text", "text": "running done"}]}}))
-        .await;
+    run_bash(&f.session, false, json!({"content": [{"type": "text", "text": "running done"}]})).await;
     let updates = f.client.update_bodies();
     assert_eq!(
         updates[0],
         json!({"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "ls", "kind": "execute",
             "status": "in_progress", "content": [{"type": "terminal", "terminalId": "t1"}],
-            "_meta": {"terminal_info": {"terminal_id": "t1", "cwd": cwd}}})
+            "rawInput": {"command": "ls"}, "_meta": {"terminal_info": {"terminal_id": "t1", "cwd": cwd}}})
     );
     assert_eq!(
         updates[1],
         json!({"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "in_progress",
-            "_meta": {"terminal_output": {"terminal_id": "t1", "data": "running"}}})
+            "rawOutput": {"output": "running"}, "_meta": {"terminal_output": {"terminal_id": "t1", "data": "running"}}})
     );
     assert_eq!(
         updates[2],
         json!({"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed",
+            "rawOutput": {"output": "running done", "exitCode": 0},
             "_meta": {"terminal_output": {"terminal_id": "t1", "data": " done"},
                 "terminal_exit": {"terminal_id": "t1", "exit_code": 0, "signal": null}}})
     );
     assert_eq!(updates.len(), 3);
+}
+
+#[tokio::test]
+async fn clients_without_terminal_output_get_bash_output_as_text() {
+    let (client, backend) = (FakeClient::new(), FakeBackend::new());
+    let session = AcpSession::new(AcpSessionParams {
+        session_id: "s1".into(),
+        cwd: here(),
+        backend,
+        client: client.clone(),
+        auto_title: false,
+        terminal_output: false,
+    });
+    // pi's own bash tool reports the exit code in its structured content.
+    let failed = json!({"content": [{"type": "text", "text": "running done\n\nCommand exited with code 2"}],
+        "structuredContent": {"output": "running done", "exit_code": 2}, "isError": true});
+    run_bash(&session, true, failed).await;
+    let updates = client.update_bodies();
+    let text = |text: &str| json!({"type": "content", "content": {"type": "text", "text": text}});
+    let terminal = json!({"type": "terminal", "terminalId": "t1"});
+    assert_eq!(updates[0]["rawInput"], json!({"command": "ls"}));
+    assert_eq!(updates[1]["content"], json!([terminal, text("running")]));
+    assert_eq!(updates[1]["rawOutput"], json!({"output": "running"}));
+    let output = "running done\n\nCommand exited with code 2";
+    assert_eq!(
+        (updates[2]["status"].clone(), updates[2]["content"].clone()),
+        (json!("failed"), json!([terminal, text(output)]))
+    );
+    assert_eq!(updates[2]["rawOutput"], json!({"output": output, "exitCode": 2}));
+    assert_eq!(updates[2]["_meta"]["terminal_exit"]["exit_code"], 2);
+}
+
+#[test]
+fn only_clients_that_say_so_render_terminal_metadata() {
+    use crate::acp::bash::client_shows_terminal_output;
+    let meta = |value: Value| value.as_object().cloned();
+    assert!(client_shows_terminal_output(meta(json!({"terminal_output": true, "terminal-auth": true})).as_ref()));
+    for value in [json!({}), json!({"terminal_output": "true"}), json!({"terminal-auth": true})] {
+        assert!(!client_shows_terminal_output(meta(value).as_ref()));
+    }
+    assert!(!client_shows_terminal_output(None));
 }
 
 #[tokio::test]
@@ -220,10 +306,13 @@ async fn extension_select_and_confirm_become_permission_requests() {
         .await;
     settle().await;
     let confirm = serde_json::to_value(&f.client.permission_requests.lock().unwrap()[1]).unwrap();
+    assert_eq!(confirm["toolCall"]["title"], "Clear session? All messages will be lost.");
+    assert_eq!(confirm["toolCall"]["rawInput"]["message"], "All messages will be lost.");
     assert_eq!(
         confirm["options"],
-        json!([{"optionId": "yes", "name": "Yes", "kind": "allow_once"}, {"optionId": "no", "name": "No", "kind": "reject_once"}])
+        json!([{"optionId": "yes", "name": "Yes", "kind": "allow_once"}, {"optionId": "no", "name": "No", "kind": "allow_once"}])
     );
+    assert!(!auto_accepted_by_paseo(&request) && !auto_accepted_by_paseo(&confirm));
     f.client.answer(Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled)));
     f.emit(json!({"type": "extension_ui_request", "id": "ui-5", "method": "confirm", "title": "Continue?"})).await;
     settle().await;
@@ -239,6 +328,32 @@ async fn extension_select_and_confirm_become_permission_requests() {
             json!({"id": "ui-6", "cancelled": true}),
         ]
     );
+}
+
+/// Paseo's Auto Accept answers with the first allow option, unless two options share an allow
+/// kind; then the request is a choice for the user (`isACPChooserRequest` in its ACP adapter).
+fn auto_accepted_by_paseo(request: &Value) -> bool {
+    let kinds: Vec<&str> = request["options"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|option| option["kind"].as_str())
+        .filter(|kind| kind.starts_with("allow"))
+        .collect();
+    let choice = kinds.iter().enumerate().any(|(index, kind)| kinds[..index].contains(kind));
+    !choice && !kinds.is_empty()
+}
+
+#[test]
+fn dialog_titles_carry_the_message() {
+    use crate::acp::extension_ui_tool_call;
+    let title = |event: Value| serde_json::to_value(extension_ui_tool_call("1", &event)).unwrap()["title"].clone();
+    let event = |title: &str, message: &str| json!({"method": "confirm", "title": title, "message": message});
+    assert_eq!(title(event("Delete file", "src/main.rs")), "Delete file: src/main.rs");
+    assert_eq!(title(event("Continue?", "The tests fail.")), "Continue? The tests fail.");
+    assert_eq!(title(event("", "Only a message")), "Only a message");
+    assert_eq!(title(json!({"method": "select", "title": "Pick one", "options": ["a"]})), "Pick one");
+    assert_eq!(title(json!({"method": "confirm"})), "Pi confirm");
 }
 
 #[tokio::test]
