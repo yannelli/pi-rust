@@ -199,7 +199,7 @@ impl AcpAgent {
             SessionCapabilities::new().list(SessionListCapabilities::new()).delete(SessionDeleteCapabilities::new());
         let capabilities = AgentCapabilities::new()
             .load_session(true)
-            .mcp_capabilities(McpCapabilities::new().http(false).sse(false))
+            .mcp_capabilities(McpCapabilities::new().http(true).sse(false))
             .prompt_capabilities(prompt)
             .session_capabilities(sessions);
         let meta = json!({"piAcp": {"exactMcpPreapproval": true}});

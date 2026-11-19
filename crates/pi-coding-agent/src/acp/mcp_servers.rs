@@ -1,10 +1,10 @@
-//! MCP servers an ACP client supplies in `session/new` and `session/load`. pi supports stdio only
-//! (`mcpCapabilities.http` and `sse` are false) and keeps each value exactly as sent, in memory only.
+//! MCP servers an ACP client supplies in `session/new` and `session/load`. pi supports stdio and
+//! HTTP (`mcpCapabilities.http`), not SSE, and keeps each value exactly as sent, in memory only.
 
 use std::fmt;
 use std::path::Path;
 
-use agent_client_protocol_schema::{Error, McpServer, McpServerStdio, Meta};
+use agent_client_protocol_schema::{Error, McpServer, McpServerHttp, McpServerStdio, Meta};
 use pi_mcp::{McpConfigScope, McpExposure, McpServerConfig, McpServerEntry, server_key};
 use serde_json::{Map, Value};
 
@@ -24,15 +24,17 @@ impl ClientMcpServers {
         let exposure = client_exposure(meta)?;
         let mut entries: Vec<McpServerEntry> = Vec::new();
         for (index, server) in servers.iter().enumerate() {
-            let McpServer::Stdio(stdio) = server else {
-                return Err(rejected(index, server_name(server), unsupported(server)));
+            let entry = match server {
+                McpServer::Stdio(stdio) => stdio_entry(stdio),
+                McpServer::Http(http) => http_entry(http),
+                _ => return Err(rejected(index, server_name(server), unsupported(server))),
             };
-            let mut entry = stdio_entry(stdio).map_err(|problem| rejected(index, &stdio.name, &problem))?;
+            let mut entry = entry.map_err(|problem| rejected(index, server_name(server), &problem))?;
             entry.config.exposure = exposure;
             let key = server_key(&entry.name);
             if let Some(other) = entries.iter().find(|other| server_key(&other.name) == key) {
                 let problem = format!("its tool names would be the same as those of \"{}\"", other.name);
-                return Err(rejected(index, &stdio.name, &problem));
+                return Err(rejected(index, server_name(server), &problem));
             }
             entries.push(entry);
         }
@@ -55,8 +57,12 @@ impl ClientMcpServers {
 impl fmt::Debug for ClientMcpServers {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let servers = self.0.iter().map(|entry| {
-            let args = entry.config.args.as_ref().map_or(0, Vec::len);
-            let env = entry.config.env.as_ref().map_or(0, Map::len);
+            let config = &entry.config;
+            if config.is_http() {
+                return format!("{} (HTTP, {} headers)", entry.name, config.headers.as_ref().map_or(0, Map::len));
+            }
+            let args = config.args.as_ref().map_or(0, Vec::len);
+            let env = config.env.as_ref().map_or(0, Map::len);
             format!("{} ({args} args, {env} env)", entry.name)
         });
         formatter.debug_list().entries(servers).finish()
@@ -90,10 +96,15 @@ fn server_name(server: &McpServer) -> &str {
 
 fn unsupported(server: &McpServer) -> &'static str {
     match server {
-        McpServer::Http(_) => "HTTP transport is not supported (mcpCapabilities.http is false)",
-        McpServer::Sse(_) => "SSE transport is not supported (mcpCapabilities.sse is false)",
-        _ => "this transport is not supported; use stdio",
+        McpServer::Sse(_) => "SSE transport is not supported (mcpCapabilities.sse is false); use HTTP",
+        _ => "this transport is not supported; use stdio or HTTP",
     }
+}
+
+fn client_entry(name: &str, config: McpServerConfig) -> McpServerEntry {
+    let mut entry = McpServerEntry::new(name.to_string(), config, CLIENT_SOURCE);
+    entry.scope = Some(McpConfigScope::Client);
+    entry
 }
 
 /// A `Client` entry with the command, args, and env exactly as sent.
@@ -128,7 +139,33 @@ fn stdio_entry(server: &McpServerStdio) -> Result<McpServerEntry, String> {
     }
     let mut config = McpServerConfig::stdio(command, server.args.clone());
     config.env = (!env.is_empty()).then_some(env);
-    let mut entry = McpServerEntry::new(server.name.clone(), config, CLIENT_SOURCE);
-    entry.scope = Some(McpConfigScope::Client);
-    Ok(entry)
+    Ok(client_entry(&server.name, config))
+}
+
+/// A `Client` entry with the URL and headers exactly as sent. Problems never quote a value.
+fn http_entry(server: &McpServerHttp) -> Result<McpServerEntry, String> {
+    if server.name.trim().is_empty() {
+        return Err("the name is empty".into());
+    }
+    let url = reqwest::Url::parse(&server.url).ok().filter(|url| matches!(url.scheme(), "http" | "https"));
+    if url.is_none() {
+        return Err("the URL is not a valid http or https URL".into());
+    }
+    let mut headers = Map::new();
+    for header in &server.headers {
+        let name = &header.name;
+        if reqwest::header::HeaderName::from_bytes(name.as_bytes()).is_err() {
+            return Err(format!("the header name {name:?} is not valid"));
+        }
+        if reqwest::header::HeaderValue::from_str(&header.value).is_err() {
+            return Err(format!("header \"{name}\" has a value that is not valid"));
+        }
+        if headers.keys().any(|other: &String| other.eq_ignore_ascii_case(name)) {
+            return Err(format!("header \"{name}\" is set more than once"));
+        }
+        headers.insert(name.clone(), Value::String(header.value.clone()));
+    }
+    let mut config = McpServerConfig::http(server.url.clone());
+    config.headers = (!headers.is_empty()).then_some(headers);
+    Ok(client_entry(&server.name, config))
 }

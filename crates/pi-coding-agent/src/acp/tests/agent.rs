@@ -36,7 +36,7 @@ fn initialize_advertises_capabilities_and_terminal_auth() {
     assert_eq!(capabilities["promptCapabilities"], json!({"image": true, "audio": false, "embeddedContext": false}));
     assert_eq!(
         (capabilities["mcpCapabilities"]["http"].clone(), capabilities["mcpCapabilities"]["sse"].clone()),
-        (json!(false), json!(false))
+        (json!(true), json!(false))
     );
     assert_eq!(capabilities["sessionCapabilities"], json!({"list": {}, "delete": {}}));
     assert!(response["authMethods"][0].get("_meta").is_none());

@@ -20,7 +20,7 @@ pub fn proxied(entry: &McpServerEntry) -> bool {
     config.is_enabled()
         && config.exposure() != McpExposure::Hidden
         && config.is_http()
-        && (config.uses_oauth() || config.auth_provider().is_some())
+        && (entry.uses_oauth() || config.auth_provider().is_some())
 }
 
 /// The proxied servers of `manager` and their tools that are not hidden.

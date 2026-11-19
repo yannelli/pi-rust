@@ -9,6 +9,7 @@ use pi_mcp::runtime::TransportFactory;
 use pi_mcp::{McpConfigScope, McpServerEntry};
 use serde_json::{Value, json};
 
+use crate::acp::http_mock::{Reply, Server};
 use crate::acp::mcp_fake::{Fake, FakeOptions};
 use crate::acp::{Setup, setup, setup_with_models, start};
 
@@ -120,14 +121,76 @@ async fn client_servers_work_after_new_and_load_and_stay_off_disk() {
     }
 
     // A bad list starts nothing; the session from `session/load` stays usable.
-    let rejected =
-        json!([{"type": "http", "name": "web", "url": format!("https://x.invalid/{SECRET}"), "headers": []}]);
+    let rejected = json!([{"type": "sse", "name": "web", "url": format!("https://x.invalid/{SECRET}"), "headers": []}]);
     let error = client.request("session/load", json!({"sessionId": id, "cwd": work, "mcpServers": rejected})).await;
     assert_eq!(error["error"]["code"], -32602, "{error}");
     assert!(!error.to_string().contains(SECRET), "{error}");
     assert_eq!(fake.connected.lock().unwrap().len(), entries.len());
     let closed = client.request("session/delete", json!({"sessionId": id})).await;
     assert_eq!(closed["result"], json!({}));
+}
+
+/// A Streamable HTTP MCP server that answers with JSON, like the `paseo` server Paseo adds.
+async fn http_server() -> Server {
+    Server::start(|request| {
+        if request.method != "POST" {
+            return Reply::status(405);
+        }
+        let message = request.json();
+        let Some(id) = message.get("id").cloned() else { return Reply::status(202) };
+        let result = match message["method"].as_str().unwrap_or_default() {
+            "initialize" => json!({"protocolVersion": pi_mcp::LATEST_PROTOCOL_VERSION, "capabilities": {"tools": {}},
+                "serverInfo": {"name": "paseo", "version": "1.0.0"}}),
+            "tools/list" => json!({"tools": [{"name": "list_agents", "inputSchema": {"type": "object"},
+                "annotations": {"readOnlyHint": true}}]}),
+            _ => json!({"content": [{"type": "text", "text": "two agents"}]}),
+        };
+        Reply::json(&json!({"jsonrpc": "2.0", "id": id, "result": result}))
+    })
+    .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_http_server_with_an_authorization_header_works_after_new_and_load() {
+    let server = http_server().await;
+    let list = || FauxResponse::tool_call("p1", "mcp__paseo__list_agents", json!({}));
+    let setup = setup(vec![list(), FauxResponse::text("Two agents."), list(), FauxResponse::text("Still two.")]);
+    let (root, work) = (setup.root.path().to_path_buf(), setup.root.path().join("work"));
+    let mut client = start(&setup);
+    let init =
+        client.request("initialize", json!({"protocolVersion": 1, "clientCapabilities": {"terminal": true}})).await;
+    assert_eq!(init["result"]["agentCapabilities"]["mcpCapabilities"], json!({"http": true, "sse": false}));
+    let url = format!("{}/mcp/agents?callerAgentId=agent-1", server.url);
+    let servers = json!([{"type": "http", "name": "paseo", "url": url,
+        "headers": [{"name": "Authorization", "value": format!("Bearer {SECRET}")}]}]);
+    let meta = json!({"piAcp": {"clientMcpExposure": "direct"}});
+    let created = client.request("session/new", json!({"cwd": work, "mcpServers": servers, "_meta": meta})).await;
+    let id = created["result"]["sessionId"].as_str().unwrap_or_else(|| panic!("{created}")).to_string();
+    let prompt = json!({"sessionId": id, "prompt": [{"type": "text", "text": "Which agents run?"}]});
+    for round in ["new", "load"] {
+        if round == "load" {
+            let load = json!({"sessionId": id, "cwd": work, "mcpServers": servers, "_meta": meta});
+            let loaded = client.request("session/load", load).await;
+            assert!(loaded["result"].is_object(), "{loaded}");
+        }
+        client.clear();
+        let response = client.request("session/prompt", prompt.clone()).await;
+        assert_eq!(response["result"]["stopReason"], "end_turn", "{round}: {response}");
+        let done = client.updates(&id).into_iter().find(|update| update["status"] == "completed");
+        let done = done.unwrap_or_else(|| panic!("{round}: the tool call completed"));
+        assert!(done.to_string().contains("two agents"), "{round}: {done}");
+    }
+    let calls: Vec<_> =
+        server.requests().into_iter().filter(|request| request.json()["method"] == "tools/call").collect();
+    assert_eq!(calls.len(), 2);
+    for call in calls {
+        assert_eq!(call.target, "/mcp/agents?callerAgentId=agent-1");
+        assert_eq!(call.header("authorization"), Some(format!("Bearer {SECRET}").as_str()));
+    }
+    for (place, text) in [("agent dir", all_text(&root.join("agent"))), ("session map", all_text(&root.join("pi-acp")))]
+    {
+        assert!(!text.contains(SECRET), "{place} holds a client value");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

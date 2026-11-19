@@ -247,3 +247,81 @@ async fn stderr_of_failing_client_servers_stays_out_of_errors_and_notices() {
         manager.shutdown().await;
     }
 }
+
+/// A Streamable HTTP MCP server that answers with JSON: one read-only `echo` tool.
+fn json_server(request: &common::http::Request) -> common::http::Response {
+    use common::http::Response;
+    if request.method != "POST" {
+        return Response::status(405);
+    }
+    let message = request.json();
+    let Some(id) = message.get("id").cloned() else { return Response::status(202) };
+    let result = match message["method"].as_str().unwrap_or_default() {
+        "initialize" => json!({"protocolVersion": pi_mcp::LATEST_PROTOCOL_VERSION, "capabilities": {"tools": {}},
+            "serverInfo": {"name": "http-client-fixture", "version": "1.0.0"}}),
+        "tools/list" => json!({"tools": [{"name": "echo", "inputSchema": {"type": "object"},
+            "annotations": {"readOnlyHint": true}}]}),
+        _ => json!({"content": [{"type": "text", "text": "echoed"}]}),
+    };
+    Response::json(200, &json!({"jsonrpc": "2.0", "id": id, "result": result}))
+}
+
+#[tokio::test]
+async fn client_http_servers_send_their_headers_literally_and_never_log_in() {
+    let requests: Arc<Mutex<Vec<common::http::Request>>> = Arc::default();
+    let recorded = requests.clone();
+    let origin = common::http::serve(move |request, _| {
+        recorded.lock().unwrap().push(request.clone());
+        let response = json_server(&request);
+        async move { response }
+    })
+    .await;
+    let headers = json!({"Authorization": "Bearer ${PI_MCP_UNSET}", "X-Run": "!echo hi ~/x"});
+    let entry = client("web", json!({"url": format!("{origin}/mcp?agent=a1"), "headers": headers}));
+    let dir = tempfile::tempdir().unwrap();
+    let (manager, _) = real_manager(dir.path(), vec![entry], None);
+    wait_until(|| manager.tool("mcp__web__echo").is_some()).await;
+    let tool = manager.tool("mcp__web__echo").unwrap();
+    tool.call(json!({}), CancellationToken::new(), None).await.unwrap();
+    assert!(manager.status("web").is_some_and(|status| !status.oauth));
+    manager.shutdown().await;
+    let requests = requests.lock().unwrap();
+    assert!(requests.iter().any(|request| request.json()["method"] == "tools/call"));
+    for request in requests.iter().filter(|request| request.method == "POST") {
+        assert_eq!(request.target, "/mcp?agent=a1");
+        assert_eq!(request.header("authorization"), Some("Bearer ${PI_MCP_UNSET}"));
+        assert_eq!(request.header("x-run"), Some("!echo hi ~/x"));
+    }
+    let written: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten().map(|entry| entry.file_name()).collect();
+    assert!(written.is_empty(), "nothing saved: {written:?}");
+}
+
+#[tokio::test]
+async fn client_http_servers_without_authorization_fail_without_a_login() {
+    let origin = common::http::serve(|_, _| async { common::http::Response::text(401, "login required") }).await;
+    let dir = tempfile::tempdir().unwrap();
+    let (manager, _) = real_manager(dir.path(), vec![client("web", json!({"url": format!("{origin}/mcp")}))], None);
+    manager.pending().await;
+    let status = manager.status("web").unwrap();
+    assert!(!status.oauth && status.error.is_some(), "{status:?}");
+    manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn network_errors_of_client_http_servers_leave_out_the_url() {
+    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
+    for (scope, shows_url) in [(None, true), (Some(McpConfigScope::Client), false)] {
+        let url = format!("http://{closed}/mcp?token=SENTINEL_QUERY");
+        let entry = server("down", json!({"url": url, "headers": {"Authorization": "Bearer x"}}), scope);
+        let dir = tempfile::tempdir().unwrap();
+        let (manager, notes) = real_manager(dir.path(), vec![entry], None);
+        manager.pending().await;
+        let error = manager.status("down").unwrap().error.unwrap_or_default();
+        assert!(!error.is_empty());
+        assert_eq!(error.contains("SENTINEL_QUERY"), shows_url, "{error}");
+        if !shows_url {
+            assert!(!notes.lock().unwrap().join("\n").contains("SENTINEL"), "{:?}", notes.lock().unwrap());
+        }
+        manager.shutdown().await;
+    }
+}

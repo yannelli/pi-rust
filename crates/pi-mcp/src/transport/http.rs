@@ -47,6 +47,8 @@ pub struct StreamableHttpOptions {
     pub max_message_bytes: usize,
     pub auth_provider: Option<Arc<dyn AuthProvider>>,
     pub reconnect: ReconnectOptions,
+    /// Leave the URL out of request errors. Default: false.
+    pub hide_url: bool,
 }
 
 impl StreamableHttpOptions {
@@ -59,6 +61,7 @@ impl StreamableHttpOptions {
             max_message_bytes: DEFAULT_MAX_MESSAGE_BYTES,
             auth_provider: None,
             reconnect: ReconnectOptions::default(),
+            hide_url: false,
         }
     }
 }
@@ -142,9 +145,13 @@ pub(crate) fn needs_authorization(status: u16, headers: &HeaderMap) -> bool {
 
 /// Reads the body in chunks and stops after `limit` bytes, so an oversized body is never buffered
 /// whole. Returns the bytes read and whether the body was longer than `limit`.
-async fn read_body_limited(response: &mut Response, limit: usize) -> Result<(Vec<u8>, bool), McpError> {
+async fn read_body_limited(
+    response: &mut Response,
+    limit: usize,
+    network_error: impl Fn(reqwest::Error) -> McpError,
+) -> Result<(Vec<u8>, bool), McpError> {
     let mut body = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(McpError::from_reqwest)? {
+    while let Some(chunk) = response.chunk().await.map_err(&network_error)? {
         if chunk.len() > limit - body.len() {
             body.extend_from_slice(&chunk[..limit - body.len()]);
             return Ok((body, true));
@@ -179,6 +186,11 @@ impl Inner {
 
     fn sink(&self) -> Option<TransportSink> {
         self.lock().sink.clone()
+    }
+
+    /// A request error, without the URL when the options hide it.
+    fn network_error(&self, error: reqwest::Error) -> McpError {
+        McpError::from_reqwest(if self.options.hide_url { error.without_url() } else { error })
     }
 
     fn build_headers(&self, extra: &[(&str, String)], token: Option<&str>) -> HeaderMap {
@@ -229,7 +241,7 @@ impl Inner {
                 request = request.body(body.to_string());
             }
             let response = tokio::select! {
-                response = request.send() => response.map_err(McpError::from_reqwest)?,
+                response = request.send() => response.map_err(|error| self.network_error(error))?,
                 _ = self.cancel.cancelled() => return Err(McpError::closed()),
             };
             let status = response.status().as_u16();
@@ -264,7 +276,9 @@ impl Inner {
             .map(str::to_string);
         // Spare bytes finish a character that the read limit cuts, so the truncation below keeps
         // whole characters.
-        let (bytes, _) = read_body_limited(&mut response, MAX_ERROR_BODY_BYTES + 3).await.unwrap_or_default();
+        let (bytes, _) = read_body_limited(&mut response, MAX_ERROR_BODY_BYTES + 3, |error| self.network_error(error))
+            .await
+            .unwrap_or_default();
         let mut body = String::from_utf8_lossy(&bytes).into_owned();
         if body.len() > MAX_ERROR_BODY_BYTES {
             let mut end = MAX_ERROR_BODY_BYTES;
@@ -319,7 +333,8 @@ impl Inner {
         match content_type(&response).as_deref() {
             Some("application/json") => {
                 let max = self.options.max_message_bytes;
-                let (bytes, exceeded) = read_body_limited(&mut response, max).await?;
+                let (bytes, exceeded) =
+                    read_body_limited(&mut response, max, |error| self.network_error(error)).await?;
                 if exceeded {
                     return Err(McpError::other(format!("MCP JSON response exceeds {max} bytes")));
                 }
