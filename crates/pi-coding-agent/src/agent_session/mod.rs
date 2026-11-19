@@ -82,6 +82,15 @@ use crate::system_prompt::BuildSystemPromptOptions;
 /// Receives session events; see [`AgentSession::subscribe`].
 pub type SessionListener = Arc<dyn Fn(&AgentSessionEvent<'_>) + Send + Sync>;
 
+fn idle_in(state: &RunState) -> bool {
+    !state.run_active
+        && !state.emitting_agent_settled
+        && state.pending_extension_prompts == 0
+        && state.manual_compaction.is_none()
+        && state.auto_compaction.is_none()
+        && state.branch_summary.is_none()
+}
+
 pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
@@ -97,6 +106,12 @@ pub(crate) struct RunState {
     pub run_active: bool,
     /// `pi.sendUserMessage` prompts started in the background and not finished yet.
     pub pending_extension_prompts: usize,
+    /// `agent_settled` handlers are running; prompts and turn-starting messages wait for them
+    /// (upstream `_isEmittingAgentSettled`).
+    pub emitting_agent_settled: bool,
+    /// Aborts so far. Extension prompts and turn-starting messages that were pending at an abort
+    /// do not start a run (pi-rust).
+    pub abort_epoch: u64,
     pub abort_requested: bool,
     pub retry_attempt: u32,
     pub retry_sleep: Option<CancellationToken>,
@@ -240,24 +255,50 @@ impl AgentSession {
         state.manual_compaction.is_some() || state.auto_compaction.is_some() || state.branch_summary.is_some()
     }
 
-    /// No agent run, extension prompt, compaction, branch summary, or retry is active.
+    /// No agent run, `agent_settled` handler, extension prompt, compaction, branch summary, or
+    /// retry is active. Unlike upstream, the `agent_settled` handlers count, so `abort()` returns
+    /// after the run's last event.
     pub fn is_idle(&self) -> bool {
-        let state = lock(&self.state);
-        !state.run_active
-            && state.pending_extension_prompts == 0
-            && state.manual_compaction.is_none()
-            && state.auto_compaction.is_none()
-            && state.branch_summary.is_none()
+        idle_in(&lock(&self.state))
     }
 
+    /// Publish idleness, read under the state lock so that a stale value cannot win a race.
     pub(crate) fn notify_idle(&self) {
-        self.idle.send_replace(self.is_idle());
+        let state = lock(&self.state);
+        self.idle.send_replace(idle_in(&state));
+    }
+
+    pub(crate) fn abort_epoch(&self) -> u64 {
+        lock(&self.state).abort_epoch
     }
 
     /// Wait until no compaction or branch summary runs.
     pub(crate) async fn wait_while_compacting(&self) {
         let mut receiver = self.idle.subscribe();
         while self.is_compacting() {
+            if receiver.changed().await.is_err() {
+                return;
+            }
+        }
+    }
+
+    /// Wait until the `agent_settled` handlers of the last run finished.
+    pub(crate) async fn wait_while_settling(&self) {
+        let mut receiver = self.idle.subscribe();
+        while lock(&self.state).emitting_agent_settled {
+            if receiver.changed().await.is_err() {
+                return;
+            }
+        }
+    }
+
+    /// Wait until an aborted run has ended and any `agent_settled` handlers finished. A prompt
+    /// sent meanwhile starts a new run instead of joining the one that stops (pi-rust; upstream
+    /// rejects or queues it), and starts after the previous run's last event.
+    pub(crate) async fn wait_for_aborted_run(&self) {
+        let mut receiver = self.idle.subscribe();
+        let busy = |state: &RunState| (state.run_active && state.abort_requested) || state.emitting_agent_settled;
+        while busy(&lock(&self.state)) {
             if receiver.changed().await.is_err() {
                 return;
             }
@@ -333,7 +374,10 @@ impl AgentSession {
             if state.run_active {
                 state.abort_requested = true;
             }
+            state.abort_epoch += 1;
         }
+        // Wakes the waits that watch for aborts, such as running `agent_settled` handlers.
+        self.notify_idle();
         self.abort_retry();
         self.abort_compaction();
         self.abort_branch_summary();

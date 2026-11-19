@@ -241,7 +241,7 @@ fn action(runner: &ExtensionRunner, session: &Arc<AgentSession>, name: &str, arg
             let session = session.clone();
             let busy = session.begin_extension_prompt();
             tokio::spawn(async move {
-                let result = session.send_extension_user_message(content, &options).await;
+                let result = session.send_extension_user_message(content, &options, busy.epoch()).await;
                 drop(busy);
                 if let Err(failure) = result {
                     on_error(failure);

@@ -10,6 +10,7 @@ use pi_ai::{AssistantMessage, Message, Model, ToolCall, ToolResultMessage, now_m
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
+use crate::abort_grace::{AbortClock, finish_or_drop, grace_elapsed};
 use crate::agent_loop::{AfterToolCallFn, AgentContext, AgentLoopConfig, BeforeToolCallFn, EventSink};
 use crate::nested::{NestedToolCallHost, NestedToolCallRunner, ToolContext, combine_usage};
 use crate::types::{
@@ -65,14 +66,17 @@ fn error_outcome(call: &ToolCall, text: impl Into<String>, terminate: bool) -> A
 pub async fn run_tool_call(call: ToolCall, options: RunToolCallOptions<'_>) -> AgentToolCallOutcome {
     let RunToolCallOptions { tools, assistant_message, context, parent_tool_call_id, cancel, .. } = options;
     let before = options.before_tool_call;
-    match prepare(tools, context, assistant_message, &call, before, parent_tool_call_id, &cancel).await {
+    // Calls made outside a run's loop have no abort time; each wait gets the full grace.
+    let clock = AbortClock::default();
+    match prepare(tools, context, assistant_message, &call, before, parent_tool_call_id, &cancel, &clock).await {
         Prepared::Immediate(outcome) => outcome,
         Prepared::Ready { tool, call, args } => {
             let tool_context = options.tool_context.unwrap_or_else(|| ToolContext::new(call.id.clone()));
             let on_update = options.on_update.unwrap_or_else(|| Arc::new(|_| {}));
-            let executed = execute_prepared(&tool, &args, tool_context, &cancel, on_update).await;
+            let executed = execute_prepared(&tool, &args, tool_context, &cancel, &clock, on_update).await;
             let after = options.after_tool_call;
-            finalize(context, assistant_message, call, &args, executed, after, parent_tool_call_id, &cancel).await
+            finalize(context, assistant_message, call, &args, executed, after, parent_tool_call_id, &cancel, &clock)
+                .await
         }
     }
 }
@@ -193,7 +197,18 @@ async fn run_batch(
     if sequential {
         for call in calls {
             emit_start(call, emit).await;
-            let outcome = match prepare(&context.tools, context, message, call, before, None, cancel).await {
+            let outcome = match prepare(
+                &context.tools,
+                context,
+                message,
+                call,
+                before,
+                None,
+                cancel,
+                &config.abort_clock,
+            )
+            .await
+            {
                 Prepared::Immediate(outcome) => outcome,
                 Prepared::Ready { tool, call, args } => {
                     run_prepared(context, tool, call, args, message, config, emit, cancel, runner).await
@@ -210,7 +225,8 @@ async fn run_batch(
         let mut prepared = Vec::new();
         for call in calls {
             emit_start(call, emit).await;
-            let preparation = prepare(&context.tools, context, message, call, before, None, cancel).await;
+            let preparation =
+                prepare(&context.tools, context, message, call, before, None, cancel, &config.abort_clock).await;
             if let Prepared::Immediate(outcome) = &preparation {
                 emit_end(outcome, emit).await;
             }
@@ -242,6 +258,7 @@ async fn run_batch(
     ToolBatch { messages, terminate }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn prepare(
     tools: &[SharedTool],
     context: &AgentContext,
@@ -250,6 +267,7 @@ async fn prepare(
     before: Option<&BeforeToolCallFn>,
     parent_tool_call_id: Option<&str>,
     cancel: &CancellationToken,
+    clock: &AbortClock,
 ) -> Prepared {
     let immediate = |text: String, terminate: bool| Prepared::Immediate(error_outcome(call, text, terminate));
     let Some(tool) = tools.iter().find(|tool| tool.name() == call.name) else {
@@ -275,7 +293,7 @@ async fn prepare(
             context,
             parent_tool_call_id,
         };
-        let decision = before(input, cancel.clone()).await;
+        let decision = finish_or_drop(before(input, cancel.clone()), grace_elapsed(cancel, clock)).await.flatten();
         if cancel.is_cancelled() {
             return immediate("Operation aborted".into(), false);
         }
@@ -305,6 +323,7 @@ async fn execute_prepared(
     args: &Value,
     tool_context: ToolContext,
     cancel: &CancellationToken,
+    clock: &AbortClock,
     on_update: ToolUpdateCallback,
 ) -> Executed {
     let started = Instant::now();
@@ -318,7 +337,11 @@ async fn execute_prepared(
             }
         })
     };
-    let outcome = tool.execute_with_context(&tool_context, args.clone(), cancel.child_token(), guarded).await;
+    // A tool that is still running `ABORT_GRACE` after an abort is dropped (bash kills its process).
+    let execution = tool.execute_with_context(&tool_context, args.clone(), cancel.child_token(), guarded);
+    let outcome = finish_or_drop(execution, grace_elapsed(cancel, clock))
+        .await
+        .unwrap_or_else(|| Err(anyhow::anyhow!("Operation aborted")));
     accepting.store(false, Ordering::SeqCst);
     let duration_ms = started.elapsed().as_millis() as u64;
     match outcome {
@@ -337,6 +360,7 @@ async fn finalize(
     after: Option<&AfterToolCallFn>,
     parent_tool_call_id: Option<&str>,
     cancel: &CancellationToken,
+    clock: &AbortClock,
 ) -> AgentToolCallOutcome {
     let Executed { mut result, mut is_error, duration_ms } = executed;
     if let Some(after) = after {
@@ -349,7 +373,8 @@ async fn finalize(
             context,
             parent_tool_call_id,
         };
-        if let Some(update) = after(input, cancel.clone()).await {
+        let update = finish_or_drop(after(input, cancel.clone()), grace_elapsed(cancel, clock)).await.flatten();
+        if let Some(update) = update {
             // Structured content not replaced along with the content may no longer match it.
             if update.structured_content.is_some() || update.content.is_some() {
                 result.structured_content = update.structured_content;
@@ -394,8 +419,9 @@ async fn run_prepared(
         parent_tool_call_id: None,
     });
     let tool_context = ToolContext::nested(call.id.clone(), runner.clone(), cancel.clone());
-    let executed = updates.run(execute_prepared(&tool, &args, tool_context, cancel, on_update)).await;
-    finalize(context, message, call, &args, executed, config.after_tool_call.as_ref(), None, cancel).await
+    let clock = &config.abort_clock;
+    let executed = updates.run(execute_prepared(&tool, &args, tool_context, cancel, clock, on_update)).await;
+    finalize(context, message, call, &args, executed, config.after_tool_call.as_ref(), None, cancel, clock).await
 }
 
 /// Delivers `tool_execution_update` events in order while a tool runs. The tool's update

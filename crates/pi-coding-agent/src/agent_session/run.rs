@@ -60,6 +60,8 @@ impl AgentSession {
             return None;
         }
         state.run_active = false;
+        // From here `abort()` and new prompts wait for the `agent_settled` handlers.
+        state.emitting_agent_settled = true;
         let mut late = std::mem::take(&mut state.pending_custom);
         if state.abort_requested {
             late.extend(self.agent.remove_queued(|message| matches!(message, Message::Custom(_))));
@@ -97,9 +99,29 @@ impl AgentSession {
     async fn emit_agent_settled(&self, aborted: bool) {
         self.cache_warmer().on_agent_settled();
         if let Some(runner) = self.extension_runner() {
-            runner.emit(serde_json::json!({"type": "agent_settled", "aborted": aborted})).await;
+            let event = serde_json::json!({"type": "agent_settled", "aborted": aborted});
+            let handlers = tokio::spawn(async move { runner.emit(event).await });
+            // As in the agent loop, the handlers get the rest of ABORT_GRACE after an abort, also
+            // after one that arrives while they run; then they keep running detached (pi-rust).
+            let epoch = self.abort_epoch();
+            let deadline = if aborted { self.agent.abort_clock().deadline() } else { None };
+            let mut changes = self.idle.subscribe();
+            let abort_grace = async {
+                while !aborted && self.abort_epoch() == epoch {
+                    if changes.changed().await.is_err() {
+                        break;
+                    }
+                }
+                let deadline = deadline.unwrap_or_else(|| tokio::time::Instant::now() + pi_agent::ABORT_GRACE);
+                tokio::time::sleep_until(deadline).await;
+            };
+            tokio::select! {
+                _ = handlers => {}
+                () = abort_grace => {}
+            }
         }
         self.emit(&AgentSessionEvent::AgentSettled { aborted });
+        lock(&self.state).emitting_agent_settled = false;
         self.notify_idle();
     }
 

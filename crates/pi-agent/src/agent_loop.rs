@@ -11,6 +11,7 @@ use pi_ai::{
 };
 use tokio_util::sync::CancellationToken;
 
+use crate::abort_grace::{AbortClock, finish_or_drop, grace_elapsed};
 use crate::hooks::{
     AgentLoopTurnUpdate, AgentTurnContext, AgentTurnDecision, FinishTurnFn, PrepareNextTurnFn, PrepareRequestContext,
     PrepareRequestFn,
@@ -114,6 +115,9 @@ pub struct AgentLoopConfig {
     /// The fields above, the cancellation token, and the reasoning level take precedence. The
     /// `identity` is merged over [`default_agent_identity`]; `attribution: Some(None)` sends none.
     pub stream_options: StreamOptions,
+    /// When the run was aborted. Waits after the abort share one `ABORT_GRACE` (pi-rust); without
+    /// a time each wait gets `ABORT_GRACE` from the cancellation.
+    pub abort_clock: AbortClock,
 }
 
 /// Request identity of agent loops (upstream `DEFAULT_AGENT_IDENTITY`): pi-ai's defaults with provider
@@ -151,6 +155,7 @@ impl AgentLoopConfig {
             prepare_next_turn: None,
             callable_tools: None,
             stream_options: StreamOptions::default(),
+            abort_clock: AbortClock::default(),
         }
     }
 }
@@ -251,7 +256,7 @@ async fn run_loop(
             let message = stream_assistant_response(context, &config, emit, cancel).await;
             new_messages.push(Message::Assistant(message.clone()));
             if matches!(message.stop_reason, StopReason::Error | StopReason::Aborted) {
-                finish_turn(&config.finish_turn, &message, &[], context, new_messages, cancel).await;
+                finish_turn(&config, &message, &[], context, new_messages, cancel).await;
                 emit(AgentEvent::TurnEnd { message: Message::Assistant(message), tool_results: Vec::new() }).await;
                 emit(AgentEvent::AgentEnd { messages: new_messages.clone() }).await;
                 return;
@@ -273,13 +278,26 @@ async fn run_loop(
                     new_messages.push(Message::ToolResult(result.clone()));
                 }
             }
-            let decision =
-                finish_turn(&config.finish_turn, &message, &tool_results, context, new_messages, cancel).await;
+            let decision = finish_turn(&config, &message, &tool_results, context, new_messages, cancel).await;
+            // Aborted before `turn_end`, as by the user during tool calls. A `turn_end` listener that
+            // aborts, as pi-rust's run limits do, ends the run after this turn.
+            let aborted_in_turn = cancel.is_cancelled();
             emit(AgentEvent::TurnEnd {
                 message: Message::Assistant(message.clone()),
                 tool_results: tool_results.clone(),
             })
             .await;
+            if aborted_in_turn && decision != Some(AgentTurnDecision::End) && has_more_tool_calls {
+                // Upstream continues into a request with the aborted signal, so the run ends with an
+                // aborted assistant message. pi-rust builds that message without the request.
+                emit(AgentEvent::TurnStart).await;
+                let message = aborted_response(context, &config, emit).await;
+                new_messages.push(Message::Assistant(message.clone()));
+                finish_turn(&config, &message, &[], context, new_messages, cancel).await;
+                emit(AgentEvent::TurnEnd { message: Message::Assistant(message), tool_results: Vec::new() }).await;
+                emit(AgentEvent::AgentEnd { messages: new_messages.clone() }).await;
+                return;
+            }
             if decision == Some(AgentTurnDecision::End) || cancel.is_cancelled() {
                 emit(AgentEvent::AgentEnd { messages: new_messages.clone() }).await;
                 return;
@@ -309,15 +327,16 @@ async fn run_loop(
 }
 
 async fn finish_turn(
-    hook: &Option<FinishTurnFn>,
+    config: &AgentLoopConfig,
     message: &AssistantMessage,
     tool_results: &[ToolResultMessage],
     context: &AgentContext,
     new_messages: &[Message],
     cancel: &CancellationToken,
 ) -> Option<AgentTurnDecision> {
-    let hook = hook.as_ref()?;
-    hook(AgentTurnContext { message, tool_results, context, new_messages }, cancel.clone()).await
+    let hook = config.finish_turn.as_ref()?;
+    let finishing = hook(AgentTurnContext { message, tool_results, context, new_messages }, cancel.clone());
+    finish_or_drop(finishing, grace_elapsed(cancel, &config.abort_clock)).await.flatten()
 }
 
 /// Apply replacement state from a hook and return the messages it asked to append.
@@ -416,6 +435,15 @@ async fn stream_assistant_response(
     message.error_message = Some("Provider stream ended without a final event".into());
     message.thinking_level = Some(config.reasoning.unwrap_or(ThinkingLevel::Off));
     finish_response(context, message, added_partial, emit).await
+}
+
+/// The assistant message of a request made after an abort, as providers report it.
+async fn aborted_response(context: &mut AgentContext, config: &AgentLoopConfig, emit: &EventSink) -> AssistantMessage {
+    let mut message = AssistantMessage::empty(&config.model);
+    message.stop_reason = StopReason::Aborted;
+    message.error_message = Some("Request was aborted".into());
+    message.thinking_level = Some(config.reasoning.unwrap_or(ThinkingLevel::Off));
+    finish_response(context, message, false, emit).await
 }
 
 async fn finish_response(

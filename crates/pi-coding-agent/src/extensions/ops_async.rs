@@ -261,7 +261,8 @@ pub(crate) async fn run(runner: Arc<ExtensionRunner>, op: &str, args: Vec<HostVa
                     Value::Null
                 }
                 "sendUserMessage" => {
-                    let result = session.send_extension_user_message(args.json(1), &args.json(2)).await;
+                    let epoch = session.abort_epoch();
+                    let result = session.send_extension_user_message(args.json(1), &args.json(2), epoch).await;
                     result.map_err(|failure| error(format!("{failure:#}")))?;
                     Value::Null
                 }

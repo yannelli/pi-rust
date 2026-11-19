@@ -60,6 +60,9 @@ pub struct PromptOptions {
     /// Where the input came from for `input` handlers: `interactive` (default), `rpc`, or
     /// `extension`.
     pub source: Option<String>,
+    /// The abort count when the prompt was requested. After a later abort the prompt does not
+    /// start a run (pi-rust, for extension prompts that were pending when the user stopped).
+    pub abort_epoch: Option<u64>,
 }
 
 impl Default for PromptOptions {
@@ -70,6 +73,7 @@ impl Default for PromptOptions {
             streaming_behavior: None,
             preflight_result: None,
             source: None,
+            abort_epoch: None,
         }
     }
 }
@@ -130,6 +134,8 @@ impl AgentSession {
     }
 
     pub async fn prompt_with(&self, text: &str, options: PromptOptions) -> anyhow::Result<PromptDisposition> {
+        // A prompt sent while `agent_settled` handlers run starts after them (upstream defers it).
+        self.wait_while_settling().await;
         let source = options.source.clone().unwrap_or_else(|| "interactive".into());
         if source != "extension" {
             self.wait_extensions_bound().await;
@@ -159,6 +165,8 @@ impl AgentSession {
             self.run_mcp_command(args).await;
             return Ok(PromptDisposition::Handled);
         }
+        // The commands above run at once, as an aborted run may be waiting for one of them.
+        self.wait_for_aborted_run().await;
         let from_extension = source == "extension";
         let behavior = if self.is_streaming() { options.streaming_behavior } else { None };
         let Some((text, input_images)) = self.run_input_handlers(text, options.images.clone(), &source, behavior).await
@@ -192,17 +200,29 @@ impl AgentSession {
         }
         self.ensure_auth().await?;
         let trigger = RunTrigger::User { prompt: expanded, images: input_images, from_extension };
-        self.start_run(trigger, || preflight(PromptDisposition::Started)).await?;
+        if !self.start_run(trigger, options.abort_epoch, || preflight(PromptDisposition::Started)).await? {
+            preflight(PromptDisposition::Handled);
+            return Ok(PromptDisposition::Handled);
+        }
         Ok(PromptDisposition::Started)
     }
 
     /// Start a run from `trigger`. The session counts as busy from here on, so messages sent
     /// while `before_agent_start` handlers run join this run, and an abort requested meanwhile
     /// aborts the run as soon as it exists (upstream `_startRun`). `on_started` runs once the
-    /// run's messages are prepared.
-    pub(crate) async fn start_run(&self, trigger: RunTrigger, on_started: impl FnOnce()) -> anyhow::Result<()> {
+    /// run's messages are prepared. Returns `false` without a run when an abort happened since
+    /// `abort_epoch`.
+    pub(crate) async fn start_run(
+        &self,
+        trigger: RunTrigger,
+        abort_epoch: Option<u64>,
+        on_started: impl FnOnce(),
+    ) -> anyhow::Result<bool> {
         {
             let mut state = lock(&self.state);
+            if abort_epoch.is_some_and(|epoch| epoch != state.abort_epoch) {
+                return Ok(false);
+            }
             state.abort_requested = false;
             state.run_active = true;
         }
@@ -214,7 +234,7 @@ impl AgentSession {
         self.flush_pending_bash_messages();
         self.flush_pending_custom_messages();
         on_started();
-        self.run_agent_prompt(messages).await
+        self.run_agent_prompt(messages).await.map(|()| true)
     }
 
     /// The starting messages of a run: compact first when needed, emit `before_agent_start`,
@@ -491,7 +511,7 @@ impl AgentSession {
                 self.wait_while_compacting().await;
                 return Box::pin(self.send_custom_message(custom, true)).await;
             }
-            return self.start_run(RunTrigger::Custom(custom), || {}).await;
+            return self.start_run(RunTrigger::Custom(custom), None, || {}).await.map(|_| ());
         }
         self.append_custom_message(message);
         Ok(())
