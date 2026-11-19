@@ -162,6 +162,7 @@ impl SessionManager {
             _ => Default::default(),
         };
         self.entries = kept;
+        self.generation = super::next_generation();
         self.session_id = new_id.clone();
         self.build_index();
         if !self.persist {

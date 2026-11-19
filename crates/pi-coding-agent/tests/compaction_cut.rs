@@ -95,7 +95,7 @@ fn split_turns_report_their_turn_start() {
 #[test]
 fn custom_messages_count_toward_the_budget() {
     let mut session = chain(&[user("hi"), assistant("hello")]);
-    session.append_custom_message_entry("test", UserContent::Text("x".repeat(4000)), true, None).unwrap();
+    session.append_custom_message_entry("test", UserContent::Text("x".repeat(4000)), Some(true), None).unwrap();
     session.append_message(&assistant("ok")).unwrap();
     let branch = session.get_branch(None);
     let tiny = find_cut_point(&branch, 0, branch.len(), 1);
@@ -225,14 +225,14 @@ fn boundary_input_stays_verbatim_unless_a_recovery_response_follows() {
 
     let mut session = chain(&[user("old request"), assistant("old answer")]);
     let unsent = session
-        .append_custom_message_entry("next-work", UserContent::Text("UNSENT ".repeat(100)), false, None)
+        .append_custom_message_entry("next-work", UserContent::Text("UNSENT ".repeat(100)), Some(false), None)
         .unwrap();
     session.append_custom_entry("bookkeeping", None).unwrap();
     assert_eq!(prepared(&session).unwrap().first_kept_entry_id, unsent);
 
     let mut session = chain(&[user(&"unanswered input ".repeat(100))]);
     let temporary =
-        session.append_custom_message_entry("temporary", UserContent::Text("temp".into()), false, None).unwrap();
+        session.append_custom_message_entry("temporary", UserContent::Text("temp".into()), Some(false), None).unwrap();
     session.append_context_edit(&temporary, None).unwrap();
     assert!(prepared(&session).is_none());
 

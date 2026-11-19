@@ -112,6 +112,8 @@ pub(crate) struct RunState {
     /// Aborts so far. Extension prompts and turn-starting messages that were pending at an abort
     /// do not start a run (pi-rust).
     pub abort_epoch: u64,
+    /// Runs started so far.
+    pub runs_started: u64,
     pub abort_requested: bool,
     pub retry_attempt: u32,
     pub retry_sleep: Option<CancellationToken>,
@@ -270,6 +272,20 @@ impl AgentSession {
 
     pub(crate) fn abort_epoch(&self) -> u64 {
         lock(&self.state).abort_epoch
+    }
+
+    pub(crate) fn runs_started(&self) -> u64 {
+        lock(&self.state).runs_started
+    }
+
+    /// Wait until no extension prompt is pending; one that starts a run counts until it ends.
+    pub(crate) async fn wait_for_extension_prompts(&self) {
+        let mut receiver = self.idle.subscribe();
+        while lock(&self.state).pending_extension_prompts > 0 {
+            if receiver.changed().await.is_err() {
+                return;
+            }
+        }
     }
 
     /// Wait until no compaction or branch summary runs.

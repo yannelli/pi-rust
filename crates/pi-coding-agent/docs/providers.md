@@ -73,12 +73,13 @@ When the global setting `rememberLastModel` is `true` (the default), each model 
 
 - A pick in the `/model` selector, and `/model <provider>/<id>`. The status line then shows `Default model: <provider>/<id>`.
 - Model cycling (Ctrl+P by default).
-- RPC `set_model` and `cycle_model`.
 - ACP model changes: the model selector (`session/set_config_option`) and `session/set_model`.
 
 When `--models` or `enabledModels` limits the cycle, a saved model outside it joins the cycle, and pi adds it to `enabledModels` when that setting is set. The selector's set-as-default key does the same.
 
 Set `rememberLastModel` to `false` in `settings.json`, or turn off **Remember last model** in `/settings`, to keep the default model fixed. Then only the selector's set-as-default key and model cycling save it. This matches upstream pi except for model cycling: upstream pi does not save the model on Ctrl+P, and pi-rust saves it with either setting.
+
+RPC `set_model` and `cycle_model` change only the model of the session and never save it, as in upstream pi. RPC clients such as Paseo set the model of each session they run, so saving it would change the default model of every other session.
 
 `--model`, model changes from extensions, and logins keep their own behavior with either setting.
 

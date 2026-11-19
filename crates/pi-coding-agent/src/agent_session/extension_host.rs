@@ -40,6 +40,9 @@ pub(crate) struct ExtensionState {
     after_start: Mutex<Vec<Value>>,
     /// `Some` while `session_start` handlers run; holds the session a handler switches to.
     start_switch: Mutex<Option<Option<PathBuf>>>,
+    /// The entry id for the message of the last `message_end`. The extension runtime puts the
+    /// message object its handlers saw in that entry, as upstream entries hold that object.
+    pub(crate) message_entry_id: Mutex<Option<String>>,
 }
 
 impl Default for ExtensionState {
@@ -55,6 +58,7 @@ impl Default for ExtensionState {
             bindings: Mutex::default(),
             after_start: Mutex::default(),
             start_switch: Mutex::default(),
+            message_entry_id: Mutex::default(),
         }
     }
 }
@@ -368,6 +372,12 @@ impl AgentSession {
         ExtensionPromptGuard(self.clone(), epoch)
     }
 
+    /// Whether a `pi.sendUserMessage` prompt or a `triggerTurn` message has not finished; the
+    /// run it starts counts until it ends.
+    pub(crate) fn has_pending_extension_prompts(&self) -> bool {
+        lock(&self.state).pending_extension_prompts > 0
+    }
+
     /// `epoch`: the abort count when the extension asked; a later abort cancels the prompt.
     pub(crate) async fn send_extension_user_message(
         &self,
@@ -430,6 +440,14 @@ impl AgentSession {
     /// `ctx.getSystemPromptOptions()`.
     pub(crate) fn extension_prompt_options(&self) -> Value {
         prompt_options_to_json(&self.effective_prompt_options())
+    }
+
+    /// Whether `text` is `/name args` for a command an extension registered, which a prompt of
+    /// `text` runs (see [`Self::try_extension_command`]).
+    pub(crate) fn is_extension_command(&self, text: &str) -> bool {
+        let Some(body) = text.strip_prefix('/') else { return false };
+        let name = body.split_once(' ').map_or(body, |(name, _)| name);
+        self.extension_runner().is_some_and(|runner| runner.registry().command(name).is_some())
     }
 
     /// Run `/name args` when an extension registered `name`; true when it did.
@@ -513,7 +531,7 @@ impl AgentSession {
                 CustomMessage {
                     custom_type: message["customType"].as_str().unwrap_or_default().to_string(),
                     content,
-                    display: message["display"].as_bool().unwrap_or(false),
+                    display: message["display"].as_bool(),
                     details: Some(message["details"].clone()).filter(|details| !details.is_null()),
                     timestamp: pi_ai::now_ms(),
                 }

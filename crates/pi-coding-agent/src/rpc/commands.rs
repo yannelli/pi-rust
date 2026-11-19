@@ -25,6 +25,14 @@ use crate::headless_commands::{
 /// until the session is idle).
 pub(crate) const ABORT_REPLY_LIMIT: std::time::Duration = std::time::Duration::from_millis(1500);
 
+/// `record` with the request `id`, when the request had one.
+fn with_id(mut record: Value, id: Option<&Value>) -> Value {
+    if let Some(id) = id {
+        record["id"] = id.clone();
+    }
+    record
+}
+
 fn ok(id: Option<&Value>, command: &str, data: Option<Value>) -> anyhow::Result<Option<Reply>> {
     Ok(Some(Reply::Json(success(id, command, data))))
 }
@@ -130,11 +138,12 @@ impl RpcServer {
                 else {
                     return failed(id, "set_model", &format!("Model not found: {provider}/{model_id}"));
                 };
-                session.set_model(model.clone(), session.settings().remember_last_model()).await?;
+                // As upstream, RPC model changes stay in the session; clients switch models per session.
+                session.set_model(model.clone(), false).await?;
                 ok(id, "set_model", Some(to_json(model)))
             }
             RpcCommand::CycleModel => {
-                let data = session.cycle_model(false, session.settings().remember_last_model()).map_or(Value::Null, |result| {
+                let data = session.cycle_model(false, false).map_or(Value::Null, |result| {
                     json!({"model": result.model, "thinkingLevel": result.thinking_level, "isScoped": result.is_scoped})
                 });
                 ok(id, "cycle_model", Some(data))
@@ -262,7 +271,9 @@ impl RpcServer {
                 ok(id, "set_session_name", None)
             }
             RpcCommand::GetCommands => {
+                // A built-in command that an extension command replaces is not listed.
                 let mut commands = super::builtins::builtin_commands(session);
+                commands.retain(|command| !session.is_extension_command(&format!("/{}", command.name)));
                 if let Some(host) = &self.host {
                     commands.extend(host.commands(session));
                 }
@@ -274,8 +285,12 @@ impl RpcServer {
     }
 
     /// Run `text` when it is a built-in command of [`HEADLESS_COMMANDS`] or [`SESSION_COMMANDS`];
-    /// returns its output.
+    /// returns its output. An extension command of the same name runs instead, as upstream has
+    /// no built-in RPC commands.
     async fn run_builtin_command(&self, session: &Arc<AgentSession>, text: &str) -> Option<String> {
+        if session.is_extension_command(text) {
+            return None;
+        }
         let (name, args) = split_slash_command(text)?;
         if SESSION_COMMANDS.iter().any(|command| command.name == name) {
             return run_session_command(session, name, args);
@@ -291,8 +306,10 @@ impl RpcServer {
     }
 
     /// Start a prompt; its response goes out once the session accepts or rejects it, and the
-    /// run continues in the background. `agentInvoked` is false when the prompt was handled
-    /// while no run is active, true when it started a run, and absent for a queued prompt.
+    /// run continues in the background. `agentInvoked` is true when the prompt started a run or
+    /// was handled by sending a prompt to the agent (an extension command that calls
+    /// `pi.sendUserMessage`), false when it was handled otherwise while no run is active, and
+    /// absent for a queued prompt.
     async fn start_prompt(
         &self,
         session: Arc<AgentSession>,
@@ -304,6 +321,7 @@ impl RpcServer {
         let accepted = Arc::new(AtomicBool::new(false));
         let (flag, output, response_id) = (accepted.clone(), self.output.clone(), id.cloned());
         let weak = Arc::downgrade(&session);
+        let runs_before = session.runs_started();
         let options = PromptOptions {
             images,
             streaming_behavior: streaming_behavior.map(Into::into),
@@ -312,9 +330,24 @@ impl RpcServer {
                 let mut data = json!({"disposition": disposition.as_str()});
                 let agent_invoked = match disposition {
                     PromptDisposition::Started => Some(true),
-                    PromptDisposition::Handled => {
-                        weak.upgrade().filter(|session| !session.is_streaming()).map(|_| false)
-                    }
+                    PromptDisposition::Handled => weak.upgrade().and_then(|session| {
+                        // A run that an extension prompt starts counts as pending until it ends.
+                        if !session.has_pending_extension_prompts() {
+                            return (!session.is_streaming()).then_some(false);
+                        }
+                        // The prompt may still start no run: an abort cancels it, or an `input`
+                        // handler takes it. Then `prompt_result` corrects the answer, as Paseo
+                        // expects, so the client's turn does not wait for a run.
+                        let (output, id) = (output.clone(), response_id.clone());
+                        tokio::spawn(async move {
+                            session.wait_for_extension_prompts().await;
+                            if session.runs_started() == runs_before {
+                                let correction = json!({"type": "prompt_result", "agentInvoked": false});
+                                output.send(&with_id(correction, id.as_ref()));
+                            }
+                        });
+                        Some(true)
+                    }),
                     PromptDisposition::Queued => None,
                 };
                 if let Some(agent_invoked) = agent_invoked {

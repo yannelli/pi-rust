@@ -2,7 +2,7 @@
 // reported as extension errors, and each event combines handler results as upstream does.
 import { getCurrentSystemMessage } from "../pi-ai/src/utils/transcript.ts";
 import { call, callAsync, errorMessage, errorStack } from "./bridge.js";
-import { createCommandContext, createContext, createToolContext } from "./context.js";
+import { createCommandContext, createContext, createToolContext, linkEndedMessage } from "./context.js";
 
 export const STALE_MESSAGE =
 	"This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().";
@@ -202,9 +202,12 @@ export class Runner {
 		return current;
 	}
 
-	async emitMessageEnd(event) {
+	/** `entryId`: the entry the message gets, which then holds `event.message` as upstream's does. */
+	async emitMessageEnd(event, entryId) {
 		const ctx = this.createContext();
-		let current = event.message;
+		const message = event.message;
+		if (entryId) linkEndedMessage(entryId, message);
+		let current = message;
 		let modified = false;
 		for (const { ext, handlers } of snapshot(this.extensions, "message_end")) {
 			for (const handler of handlers) {
@@ -229,7 +232,13 @@ export class Runner {
 		if (!modified) return undefined;
 		const role = current.role;
 		const needsContent = role === "user" || role === "assistant" || role === "toolResult" || role === "custom";
-		return needsContent && current.content == null ? { ...current, content: [] } : current;
+		const replacement = needsContent && current.content == null ? { ...current, content: [] } : current;
+		// Upstream replaces the message in place, so the object handlers saw first stays current.
+		if (replacement !== message) {
+			for (const key of Object.keys(message)) delete message[key];
+			Object.assign(message, replacement);
+		}
+		return replacement;
 	}
 
 	async emitToolResult(event) {

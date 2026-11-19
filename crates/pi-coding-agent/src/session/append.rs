@@ -29,7 +29,17 @@ impl SessionManager {
     }
 
     fn append_typed(&mut self, kind: &str, fields: Vec<(&str, Option<Value>)>) -> anyhow::Result<String> {
-        let id = self.new_entry_id();
+        self.append_typed_as(None, kind, fields)
+    }
+
+    /// `id` when no entry has it yet, else a new id.
+    fn append_typed_as(
+        &mut self,
+        id: Option<String>,
+        kind: &str,
+        fields: Vec<(&str, Option<Value>)>,
+    ) -> anyhow::Result<String> {
+        let id = id.filter(|id| self.get_entry(id).is_none()).unwrap_or_else(|| self.new_entry_id());
         let mut all = vec![
             ("type", Some(Value::String(kind.into()))),
             ("id", Some(Value::String(id))),
@@ -43,6 +53,12 @@ impl SessionManager {
     /// Append a message. Summary roles belong in compaction and branch summary entries instead.
     pub fn append_message(&mut self, message: &Message) -> anyhow::Result<String> {
         self.append_typed("message", vec![("message", to_json(message))])
+    }
+
+    /// [`Self::append_message`] under `id`, an id from [`Self::new_entry_id`] that no entry
+    /// took since; otherwise under a new id.
+    pub(crate) fn append_message_as(&mut self, id: Option<String>, message: &Message) -> anyhow::Result<String> {
+        self.append_typed_as(id, "message", vec![("message", to_json(message))])
     }
 
     pub fn append_thinking_level_change(&mut self, level: ThinkingLevel) -> anyhow::Result<String> {
@@ -158,19 +174,20 @@ impl SessionManager {
         self.append_typed("session_info", vec![("name", Some(json!(sanitized.trim())))])
     }
 
-    /// An extension message that enters the LLM context as a `custom` role message.
+    /// An extension message that enters the LLM context as a `custom` role message. With
+    /// `display` `None` the entry has no `display` field, as upstream writes an unset one.
     pub fn append_custom_message_entry(
         &mut self,
         custom_type: &str,
         content: UserContent,
-        display: bool,
+        display: Option<bool>,
         details: Option<Value>,
     ) -> anyhow::Result<String> {
         let entry = Entry::build(vec![
             ("type", Some(json!("custom_message"))),
             ("customType", Some(json!(custom_type))),
             ("content", to_json(&content)),
-            ("display", Some(json!(display))),
+            ("display", display.map(Value::Bool)),
             ("details", details),
             ("id", Some(json!(self.new_entry_id()))),
             ("parentId", Some(self.parent_value())),

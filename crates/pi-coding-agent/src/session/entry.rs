@@ -92,8 +92,9 @@ pub struct CustomMessageEntry {
     pub content: UserContent,
     #[serde(default)]
     pub details: Option<Value>,
+    /// Unset when the extension did not set it; the TUI hides the message then.
     #[serde(default)]
-    pub display: bool,
+    pub display: Option<bool>,
 }
 
 /// Content of a context edit replacement: a string or an array of content blocks.

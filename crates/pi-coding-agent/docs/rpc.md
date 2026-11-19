@@ -33,6 +33,8 @@ A `/reload` or an extension change binds the extensions again. Extensions from `
 
 `get_commands` lists these commands after `/mcp` and before the extension commands, in the shape of the `/mcp` entry: `source` is `extension`, and `sourceInfo.path` is `builtin:<name>` with `sourceInfo.source` `builtin`.
 
+An extension command with the same name as a built-in command replaces it: the prompt runs the extension command, and `get_commands` lists only the extension command. Upstream pi has no built-in RPC commands, so its extension commands always run.
+
 ## agentInvoked
 
 The `prompt` response data has `agentInvoked` when pi knows whether the prompt reached the model:
@@ -41,10 +43,11 @@ The `prompt` response data has `agentInvoked` when pi knows whether the prompt r
 | --- | --- | --- |
 | A built-in command | `handled` | `false` |
 | An extension command, `/mcp`, or an input handler that consumed the prompt, while no run is active | `handled` | `false` |
+| An extension command or input handler that sent the agent a prompt (`pi.sendUserMessage`) or a message with `triggerTurn` that has not finished | `handled` | `true` |
 | A prompt that started a run | `started` | `true` |
 | A prompt queued as steering or a follow-up | `queued` | absent |
 
-A client can finish the turn at once when `agentInvoked` is `false`.
+A client can finish the turn at once when `agentInvoked` is `false`. When an extension command sends a prompt, the response can come before the run starts. If that prompt then starts no run, because an abort cancels it or an `input` handler takes it, pi sends `{"type": "prompt_result", "id": <the prompt's id>, "agentInvoked": false}` once no extension prompt is pending, so the client can finish the turn.
 
 ## Abort
 

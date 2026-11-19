@@ -72,6 +72,7 @@ impl CustomRole for BashExecutionMessage {
 }
 
 /// An extension-injected message. `display` only controls rendering; the model always sees it.
+/// A message sent without `display` keeps it unset, as upstream, and the TUI hides it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CustomMessage {
@@ -79,8 +80,8 @@ pub struct CustomMessage {
     pub custom_type: String,
     #[serde(default = "empty_content")]
     pub content: UserContent,
-    #[serde(default)]
-    pub display: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub details: Option<Value>,
     #[serde(default, deserialize_with = "lenient_millis")]
@@ -168,7 +169,7 @@ pub fn create_compaction_summary_message(summary: &str, tokens_before: u64, time
 pub fn create_custom_message(
     custom_type: &str,
     content: UserContent,
-    display: bool,
+    display: Option<bool>,
     details: Option<Value>,
     timestamp: &str,
 ) -> Message {
@@ -261,7 +262,7 @@ mod tests {
     #[test]
     fn converts_custom_and_summary_roles() {
         let custom =
-            create_custom_message("ext", UserContent::Text("hello".into()), false, None, "1970-01-01T00:00:01Z");
+            create_custom_message("ext", UserContent::Text("hello".into()), Some(false), None, "1970-01-01T00:00:01Z");
         let branch = create_branch_summary_message("left work", "abc", "1970-01-01T00:00:02Z");
         let compaction = create_compaction_summary_message("history", 10, "1970-01-01T00:00:03Z");
         let unknown = Message::Custom(pi_ai::CustomMessage::new("other", serde_json::Map::new()));

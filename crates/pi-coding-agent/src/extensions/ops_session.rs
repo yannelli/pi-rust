@@ -36,6 +36,17 @@ fn read_session(session: &AgentSession, method: &str, args: &Args) -> Result<Val
     read_manager(&session.session_manager(), method, args)
 }
 
+/// pi-rust `entriesSince(generation, count)`: the entries after the first `count`, which the
+/// caller holds from `generation`, or all of them (`start` 0) when the entries were replaced.
+fn entries_since(manager: &SessionManager, args: &Args) -> Value {
+    let entries = manager.entries();
+    let held = usize::try_from(args.u64(3)).unwrap_or(usize::MAX);
+    let current = args.json(2).as_u64() == Some(manager.generation()) && held <= entries.len();
+    let start = if current { held } else { 0 };
+    let added: Vec<Value> = entries[start..].iter().map(entry_json).collect();
+    json!({"generation": manager.generation(), "start": start, "entries": added})
+}
+
 /// `ctx.sessionManager` methods (upstream `ReadonlySessionManager`); method arguments start at 2.
 pub(super) fn read_manager(manager: &SessionManager, method: &str, args: &Args) -> Result<Value, JsError> {
     Ok(match method {
@@ -69,6 +80,7 @@ pub(super) fn read_manager(manager: &SessionManager, method: &str, args: &Args) 
         }
         "getHeader" => serde_json::to_value(manager.header_raw()).unwrap_or(Value::Null),
         "getEntries" => manager.entries().iter().map(entry_json).collect(),
+        "entriesSince" => entries_since(manager, args),
         "getTree" => tree_json(manager),
         "getSessionName" => json!(manager.session_name()),
         other => return Err(error(format!("Unknown session method: {other}"))),
@@ -389,4 +401,42 @@ where
             .ok()
             .flatten()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use pi_js::HostValue;
+    use serde_json::{Value, json};
+
+    use super::{Args, read_manager};
+    use crate::session::{NewSessionOptions, SessionManager};
+
+    /// The `entriesSince` result and the ids of its entries.
+    fn since(manager: &SessionManager, generation: &Value, held: usize) -> (Value, Vec<String>) {
+        let args = [json!(0), json!("entriesSince"), generation.clone(), json!(held)];
+        let args = Args(args.into_iter().map(HostValue::Json).collect());
+        let result = read_manager(manager, "entriesSince", &args).unwrap();
+        let ids = result["entries"].as_array().unwrap().iter().map(|entry| entry["id"].as_str().unwrap().into());
+        let ids = ids.collect();
+        (result, ids)
+    }
+
+    #[test]
+    fn entries_since_sends_the_new_entries_until_the_entries_are_replaced() {
+        let mut manager = SessionManager::in_memory(std::path::Path::new("/work"));
+        let first = manager.append_custom_entry("a", None).unwrap();
+        let (all, ids) = since(&manager, &Value::Null, 0);
+        assert_eq!((all["start"].clone(), ids), (json!(0), vec![first]));
+        let generation = all["generation"].clone();
+        assert_eq!(since(&manager, &generation, 1).1, Vec::<String>::new());
+        let second = manager.append_custom_entry("b", None).unwrap();
+        let (added, ids) = since(&manager, &generation, 1);
+        assert_eq!((added["start"].clone(), ids), (json!(1), vec![second]));
+
+        manager.new_session(NewSessionOptions::default()).unwrap();
+        let third = manager.append_custom_entry("c", None).unwrap();
+        let (replaced, ids) = since(&manager, &generation, 1);
+        assert_ne!(replaced["generation"], generation);
+        assert_eq!((replaced["start"].clone(), ids), (json!(0), vec![third]));
+    }
 }

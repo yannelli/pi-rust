@@ -182,6 +182,78 @@ async fn message_end_replaces_messages_of_the_same_role() {
     assert_eq!(h.transcript(), vec!["system: ", "user: go", "assistant: rewritten"]);
 }
 
+/// Paseo finds the entry of a prompt with `entry.message === message`, `message` being what its
+/// `message_end` handler got: upstream entries hold that object.
+#[tokio::test(flavor = "multi_thread")]
+async fn entries_hold_the_message_objects_of_message_end() {
+    let tracker = r#"
+	const submitted = [];
+	const found = [];
+	const find = (ctx, where) => {
+		const entries = ctx.sessionManager.getEntries();
+		for (let index = 0; index < submitted.length; index += 1) {
+			const entry = entries.find((candidate) => candidate.type === "message" && candidate.message === submitted[index]);
+			if (!entry) continue;
+			submitted.splice(index, 1);
+			index -= 1;
+			const text = entry.message.content.map((block) => block.text ?? "").join("");
+			found.push(`${where}:${entry.message.role}:${entry.id}:${text}`);
+		}
+	};
+	pi.on("message_end", (event, ctx) => {
+		find(ctx, "message_end");
+		if (event.message.role === "user" || event.message.role === "assistant") submitted.push(event.message);
+	});
+	pi.on("message_start", (event, ctx) => {
+		if (event.message.role === "assistant") find(ctx, "message_start");
+	});
+	pi.on("turn_end", (_event, ctx) => find(ctx, "turn_end"));
+	pi.registerCommand("found", { handler: async (_args, ctx) => {
+		const first = ctx.sessionManager.getEntries();
+		const second = ctx.sessionManager.getEntries();
+		const same = (more) => first.every((entry, index) => entry === more[index]);
+		pi.appendEntry("mark", {});
+		const third = ctx.sessionManager.getEntries();
+		const cached = first !== second && second.length === first.length && same(second);
+		const grown = third.length === first.length + 1 && same(third) && third.at(-1).customType === "mark";
+		ctx.ui.notify(`${found.join(" ")} | cached=${cached} grown=${grown} pending=${submitted.length}`);
+	} });
+"#;
+    // Loaded after the tracker, so the tracker holds the message this handler replaces.
+    let editor = r#"export default function (pi) {
+	pi.on("message_end", (event) => {
+		if (event.message.role !== "user") return undefined;
+		return { message: { ...event.message, content: [{ type: "text", text: "edited" }] } };
+	});
+}
+"#;
+    let h = harness(Setup {
+        files: vec![("tracker.ts", with_probe(tracker)), ("editor.ts", editor.to_string())],
+        load: vec!["tracker.ts", "editor.ts"],
+        responses: vec![FauxResponse::tool_call("c1", "probe", json!({"text": "a"})), FauxResponse::text("done")],
+        ..Setup::default()
+    })
+    .await;
+    h.session.prompt("go", Vec::new()).await.unwrap();
+    h.session.prompt("/found", Vec::new()).await.unwrap();
+
+    let entries = h.entries();
+    let ids: Vec<&str> = entries
+        .iter()
+        .filter(|entry| {
+            entry["type"] == "message" && ["user", "assistant"].contains(&entry["message"]["role"].as_str().unwrap())
+        })
+        .map(|entry| entry["id"].as_str().unwrap())
+        .collect();
+    let [user, call, answer] = ids[..] else { panic!("{entries:?}") };
+    let expected = format!(
+        "message_start:user:{user}:edited message_end:assistant:{call}: turn_end:assistant:{answer}:done | cached=true grown=true pending=0"
+    );
+    assert_eq!(h.ui.calls(), vec![format!("notify(info): {expected}")]);
+    assert_eq!(h.transcript()[1], "user: edited");
+    assert_eq!(h.errors(), Vec::<String>::new());
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn message_display_handlers_chain_and_time_out_to_the_original() {
     let body = r#"
@@ -301,7 +373,7 @@ fn custom_message(custom_type: &str, text: &str) -> CustomMessage {
     CustomMessage {
         custom_type: custom_type.into(),
         content: UserContent::Text(text.into()),
-        display: true,
+        display: Some(true),
         details: None,
         timestamp: 0,
     }

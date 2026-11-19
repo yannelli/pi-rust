@@ -22,6 +22,7 @@ export default function (pi) {
 		handler: async (_args, ctx) => {
 			const color = await ctx.ui.select("Pick a color", ["Red", "Blue"]);
 			ctx.ui.notify(`picked ${color}`);
+			pi.sendMessage({ customType: "card", content: `UNSET-${color}` });
 			pi.sendMessage({ customType: "card", content: color, display: true });
 			pi.appendEntry("note", { color });
 		},
@@ -60,6 +61,7 @@ async fn extension_ui_shows_in_the_interactive_mode() {
         ui.wait_for("picked Blue").await;
         ui.wait_for("CARD<Blue>").await;
         ui.wait_for("NOTE<Blue false>").await;
+        assert!(!ui.screen().contains("UNSET-"), "a message without display stays hidden: {}", ui.screen());
 
         ui.send("\x1b[107;6u").await;
         ui.wait_for("shortcut ran").await;

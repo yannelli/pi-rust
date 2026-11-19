@@ -24,7 +24,7 @@ fn apply_drafts(manager: &mut SessionManager, drafts: &[Value]) -> anyhow::Resul
             Some("custom") => manager.append_custom_entry(&text(draft, "customType"), optional(draft, "data"))?,
             Some("custom_message") => {
                 let content = serde_json::from_value(draft["content"].clone())?;
-                let display = draft["display"].as_bool().unwrap_or(false);
+                let display = draft["display"].as_bool();
                 manager.append_custom_message_entry(
                     &text(draft, "customType"),
                     content,

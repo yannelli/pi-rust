@@ -126,7 +126,7 @@ pub(crate) fn write(runner: &ExtensionRunner, args: &Args) -> Result<Value, JsEr
         "appendCustomMessageEntry" => {
             let content = serde_json::from_value(args.json(3)).map_err(error)?;
             let details = Some(args.json(5)).filter(|details| !details.is_null());
-            manager.append_custom_message_entry(&args.str(2)?, content, args.bool(4), details)
+            manager.append_custom_message_entry(&args.str(2)?, content, Some(args.bool(4)), details)
         }
         "appendSessionInfo" => manager.append_session_info(&args.str(2)?),
         "appendLabelChange" => manager.append_label_change(&args.str(2)?, args.opt_str(3).as_deref()),

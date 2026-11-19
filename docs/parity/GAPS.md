@@ -13,6 +13,7 @@ The allowlist separates upstream-only design notes, docs and examples from catal
 ## Deferred work
 
 - **One copy of the partial message per streamed delta.** Since upstream `f715a15c1`, `pi_ai::streaming_json` parses tool-call arguments once per delta. Each `AssistantMessageEvent` still has a full copy of the partial message. Thus a very large tool call costs more per delta as it grows. A change that removes that copy also changes the public event API.
+- **Entry objects of `ctx.sessionManager` reads.** `getEntries()` of an extension's own session returns the same entry objects on each call, and message entries hold the objects that `message_end` handlers received (`host/context.js`). The other reads, such as `getEntry`, `getBranch`, `getLeafEntry`, and `getTree`, return new copies, and changes to returned entries do not reach the session. Upstream returns its own entry objects from all reads. Serving these reads from the same entries would close the gap.
 - **`HarnessOptions.models` as a function** (upstream `7ec1f648e`). This item is not planned. Settings are already a function here, and a `Models` implementation can change its catalog at runtime. The commit is older than the synced commit, so the report does not list it.
 
 ## chord2 differences

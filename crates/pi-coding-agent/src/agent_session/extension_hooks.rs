@@ -193,11 +193,16 @@ impl AgentSession {
                 "assistantMessageEvent": assistant_message_event,
             }),
             AgentEvent::MessageEnd { message } => {
-                if !runner.has_handlers("message_end") {
+                let handled = runner.has_handlers("message_end");
+                // The id of the `message` entry that `persist_message_end` appends; custom roles get none.
+                let entry_id =
+                    (handled && !matches!(message, Message::Custom(_))).then(|| self.session_manager().new_entry_id());
+                *lock(&state.message_entry_id) = entry_id.clone();
+                if !handled {
                     return None;
                 }
                 let event = json!({"type": "message_end", "message": message});
-                let replaced = runner.call_json("emitMessageEnd", vec![event]).await.ok()?;
+                let replaced = runner.call_json("emitMessageEnd", vec![event, json!(entry_id)]).await.ok()?;
                 return crate::extensions::convert::message_from_json(replaced);
             }
             AgentEvent::ToolExecutionStart { tool_call_id, tool_name, args, .. } => json!({
