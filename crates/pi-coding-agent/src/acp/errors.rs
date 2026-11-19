@@ -24,6 +24,12 @@ pub fn internal_failure(error: &anyhow::Error) -> Error {
     Error::new(-32603, "Internal error").data(json!({"details": format!("{error:#}")}))
 }
 
+/// A prompt that failed, with pi's message as the whole message so clients show it as is.
+pub fn prompt_failed(message: &str) -> Error {
+    let message = message.trim();
+    Error::new(-32603, if message.is_empty() { "The prompt failed" } else { message })
+}
+
 /// `RequestError.methodNotFound(method)`.
 pub fn method_not_found(method: &str) -> Error {
     Error::new(-32601, format!("\"Method not found\": {method}")).data(json!({"method": method}))

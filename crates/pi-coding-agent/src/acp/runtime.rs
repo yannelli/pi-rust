@@ -21,7 +21,7 @@ use super::mcp_servers::ClientMcpServers;
 use super::permissions::{CallOrigin, McpToolIdentity, PermissionMode, ToolPermissions};
 use crate::agent_session::{
     AgentSession, AgentSessionEvent, AgentSessionRuntime, DiagnosticLevel, PromptDisposition, PromptOptions,
-    compaction_result_json, lock,
+    StreamingBehavior, compaction_result_json, lock,
 };
 use crate::app::{AppOptions, create_app_runtime};
 use crate::headless_commands::{HeadlessOutput, run_headless_command};
@@ -230,6 +230,8 @@ impl PiBackend for RuntimeBackend {
         let flag = accepted_sender.clone();
         let options = PromptOptions {
             images,
+            // A prompt sent while pi runs on its own (a background result) joins that run.
+            streaming_behavior: Some(StreamingBehavior::Steer),
             preflight_result: Some(Arc::new(move |_| {
                 if let Some(sender) = lock(&flag).take() {
                     let _ = sender.send(Ok(()));
@@ -255,7 +257,10 @@ impl PiBackend for RuntimeBackend {
     }
 
     async fn abort(&self) -> anyhow::Result<()> {
+        // Prompts steered into the run end with it; one steered while it stopped is dropped too.
+        self.session.clear_queue();
         self.session.abort().await;
+        self.session.clear_queue();
         Ok(())
     }
 

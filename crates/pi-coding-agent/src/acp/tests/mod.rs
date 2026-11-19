@@ -145,6 +145,7 @@ pub struct FakeBackend {
     pub aborts: AtomicUsize,
     pub stats_calls: AtomicUsize,
     pub disposed: AtomicUsize,
+    prompt_gate: Mutex<Option<Arc<tokio::sync::Notify>>>,
     sender: UnboundedSender<Value>,
     events: Mutex<Option<UnboundedReceiver<Value>>>,
 }
@@ -164,6 +165,7 @@ impl FakeBackend {
             aborts: AtomicUsize::new(0),
             stats_calls: AtomicUsize::new(0),
             disposed: AtomicUsize::new(0),
+            prompt_gate: Mutex::new(None),
             sender,
             events: Mutex::new(Some(receiver)),
         })
@@ -184,6 +186,11 @@ impl FakeBackend {
 
     pub fn calls(&self) -> Vec<String> {
         self.calls.lock().unwrap().clone()
+    }
+
+    /// From now on each prompt waits for one notification before pi answers it.
+    pub fn gate_prompts(&self) -> Arc<tokio::sync::Notify> {
+        self.prompt_gate.lock().unwrap().get_or_insert_with(Default::default).clone()
     }
 
     fn call(&self, call: String) {
@@ -218,6 +225,10 @@ impl PiBackend for FakeBackend {
 
     async fn prompt(&self, message: String, images: Vec<pi_ai::ContentBlock>) -> anyhow::Result<()> {
         self.prompts.lock().unwrap().push((message, images));
+        let gate = self.prompt_gate.lock().unwrap().clone();
+        if let Some(gate) = gate {
+            gate.notified().await;
+        }
         fail(&self.config().prompt_error)
     }
 

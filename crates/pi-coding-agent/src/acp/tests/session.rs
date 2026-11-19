@@ -147,16 +147,40 @@ async fn slash_commands_reach_pi_unchanged_for_its_own_expansion() {
 }
 
 #[tokio::test]
-async fn rejected_prompts_end_the_turn_or_require_auth() {
+async fn rejected_prompts_fail_with_pis_message_or_require_auth() {
     let (client, backend) = (FakeClient::new(), FakeBackend::new());
     let session = session_with(&backend, &client, &here());
-    backend.config().prompt_error = Some("socket closed".into());
-    assert_eq!(session.prompt("a".into(), Vec::new(), None).await.unwrap(), TurnEnd::Error);
+    backend.config().prompt_error = Some("Cannot submit a prompt while compaction is in progress.".into());
+    let error = session.prompt("a".into(), Vec::new(), None).await.unwrap_err();
+    assert_eq!(
+        serde_json::to_value(&error).unwrap(),
+        json!({"code": -32603, "message": "Cannot submit a prompt while compaction is in progress."})
+    );
     backend.config().prompt_error = Some("No API key found for anthropic".into());
     let error = session.prompt("b".into(), Vec::new(), None).await.unwrap_err();
     assert_eq!(crate::acp::errors::code(&error), -32000);
     let last = client.update_bodies().pop().unwrap();
     assert_eq!(last["_meta"]["piAcp"], json!({"queueDepth": 0, "running": false}));
+}
+
+#[tokio::test]
+async fn a_rejected_prompt_starts_the_next_queued_one() {
+    let (client, backend) = (FakeClient::new(), FakeBackend::new());
+    let gate = backend.gate_prompts();
+    let session = session_with(&backend, &client, &here());
+    backend.config().prompt_error = Some("socket closed".into());
+    let first = start(&session, "one", None);
+    settle().await;
+    let second = start(&session, "two", None);
+    settle().await;
+    gate.notify_one();
+    assert_eq!(first.await.unwrap().unwrap_err().message, "socket closed");
+    backend.config().prompt_error = None;
+    gate.notify_one();
+    settle().await;
+    assert_eq!(backend.prompt_texts(), ["one", "two"]);
+    finish_run(&session).await;
+    assert_eq!(second.await.unwrap().unwrap(), TurnEnd::EndTurn);
 }
 
 #[tokio::test]

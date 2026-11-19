@@ -15,19 +15,18 @@ use tokio::sync::oneshot;
 
 use super::backend::{AcpClient, PiBackend};
 use super::config::{send_config_options_update, session_configuration};
-use super::errors::maybe_auth_required;
+use super::errors::{maybe_auth_required, prompt_failed};
 use crate::agent_session::lock;
 use crate::session::ids::iso_timestamp;
 
 /// How long a context usage query may take before the turn completes without it.
 pub const SESSION_STATS_TIMEOUT: Duration = Duration::from_secs(1);
 
-/// How a turn ended; `Error` maps to `end_turn` or `cancelled` in the prompt response.
+/// How a turn ended; a failed turn is an `Err` of [`TurnResult`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TurnEnd {
     EndTurn,
     Cancelled,
-    Error,
 }
 
 pub type TurnResult = Result<TurnEnd, Error>;
@@ -258,9 +257,10 @@ impl AcpSession {
         });
     }
 
-    /// pi rejected the prompt: report AUTH_REQUIRED for credential errors, else end the turn.
+    /// pi rejected the prompt: AUTH_REQUIRED for credential errors, else an error with pi's message.
+    /// The next queued prompt starts.
     fn fail_turn(&self, generation: u64, error: &anyhow::Error) {
-        let depth = {
+        let next = {
             let mut inner = lock(&self.inner);
             if inner.pending.as_ref().is_none_or(|pending| pending.generation != generation) {
                 return;
@@ -269,13 +269,13 @@ impl AcpSession {
             let result = match maybe_auth_required(error) {
                 Some(auth) => Err(auth),
                 None if inner.cancel_requested => Ok(TurnEnd::Cancelled),
-                None => Ok(TurnEnd::Error),
+                None => Err(prompt_failed(&format!("{error:#}"))),
             };
             let _ = pending.sender.send((result, pending.usage));
             inner.in_agent_loop = false;
-            inner.queue.len()
+            inner.queue.pop_front().map(|turn| (turn, inner.queue.len()))
         };
-        self.emit(queue_info(depth, false));
+        self.start_next(next);
     }
 
     /// `agent_settled`: publish usage, end the turn, and start the next queued prompt.
@@ -290,6 +290,10 @@ impl AcpSession {
             inner.in_agent_loop = false;
             inner.queue.pop_front().map(|turn| (turn, inner.queue.len()))
         };
+        self.start_next(next);
+    }
+
+    fn start_next(&self, next: Option<(QueuedTurn, usize)>) {
         match next {
             Some((turn, remaining)) => {
                 self.emit(text_chunk(format!("Starting queued message. ({remaining} remaining)")));

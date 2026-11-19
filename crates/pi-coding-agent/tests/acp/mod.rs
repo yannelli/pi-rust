@@ -8,6 +8,7 @@ mod binary;
 mod client;
 mod mcp_servers;
 mod permission_identity;
+mod turns;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

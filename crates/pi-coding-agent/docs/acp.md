@@ -21,6 +21,13 @@ Add this to the Zed `settings.json`:
 
 Each editor session runs a pi session in its project directory. pi saves it in `~/.pi/agent/sessions/`, as it does all sessions. Thus the editor can list, resume, and delete these sessions. `pi -r` can resume them too.
 
+## Prompts
+
+- A prompt that arrives while another prompt of the session runs waits in a queue. pi sends `Queued message (position n).` and starts it when the running turn ends.
+- pi can run on its own, for example when an extension sends a background result with `triggerTurn` or `pi.sendUserMessage`. A prompt that arrives then joins that run as a steering message. Its turn ends when the run ends.
+- `session/cancel` stops the run and drops the prompts that pi queued for it.
+- When pi rejects a prompt, `session/prompt` fails with a JSON-RPC error (code `-32603`) whose message is pi's message. Missing credentials give `AUTH_REQUIRED` (`-32000`), as before. Earlier versions ended such a turn with `end_turn` and no text.
+
 ## Editor features
 
 These features of the editor work:
