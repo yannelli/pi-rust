@@ -1,6 +1,8 @@
 //! RPC mode with the extension host: JavaScript extensions list their commands, ask the client
 //! through `extension_ui_request` records, and see prompts with source `rpc`.
 
+use std::path::Path;
+
 use pi_ai::providers::faux::FauxResponse;
 use pi_coding_agent::extensions::rpc::ExtensionRpcHost;
 use pi_coding_agent::rpc::RpcModeOptions;
@@ -55,6 +57,37 @@ async fn extensions_run_with_the_client_as_their_ui() {
     rpc.send(json!({"id": "p", "type": "prompt", "message": "hello"})).await;
     notified(&rpc, "source rpc").await;
     rpc.settled(1).await;
+    rpc.finish().await;
+}
+
+const DISCOVER: &str = r#"export default function (pi) {
+	pi.on("resources_discover", async () => {
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		return { skillPaths: [SKILLS] };
+	});
+}
+"#;
+
+/// An extension in `agent_dir` whose `resources_discover` adds the skill `late` from `skills` after 300 ms.
+pub(crate) fn add_late_skill_extension(agent_dir: &Path, skills: &Path) {
+    std::fs::create_dir_all(skills.join("late")).unwrap();
+    std::fs::write(skills.join("late/SKILL.md"), "---\nname: late\ndescription: Found late.\n---\nBody").unwrap();
+    std::fs::create_dir_all(agent_dir.join("extensions")).unwrap();
+    let extension = DISCOVER.replace("SKILLS", &json!(skills).to_string());
+    std::fs::write(agent_dir.join("extensions/discover.ts"), extension).unwrap();
+}
+
+/// Paseo lists the commands of a new agent as soon as pi starts, before `resources_discover` ends.
+#[tokio::test(flavor = "multi_thread")]
+async fn get_commands_waits_for_the_skills_extensions_discover() {
+    let rpc_options = RpcModeOptions { extension_host: Some(ExtensionRpcHost::shared()), handle_signals: false };
+    let mut rpc = start_with(Options::default(), rpc_options, |h, _| {
+        add_late_skill_extension(&h.agent_dir, &h.cwd.join("discovered"));
+    })
+    .await;
+    let commands = rpc.data(json!({"id": "c", "type": "get_commands"})).await["commands"].clone();
+    let late = commands.as_array().unwrap().iter().find(|command| command["name"] == "skill:late").cloned();
+    assert_eq!(late.map(|command| command["source"].clone()), Some(json!("skill")), "{commands}");
     rpc.finish().await;
 }
 

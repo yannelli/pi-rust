@@ -8,7 +8,7 @@ mod binary;
 mod builtins;
 mod client;
 mod commands;
-mod extension_host;
+pub(crate) mod extension_host;
 mod extension_ui;
 mod framing;
 mod model;

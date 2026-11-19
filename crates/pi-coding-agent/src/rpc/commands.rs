@@ -271,6 +271,9 @@ impl RpcServer {
                 ok(id, "set_session_name", None)
             }
             RpcCommand::GetCommands => {
+                // Upstream binds extensions before it reads input, so the list has the skills and
+                // prompts of `resources_discover`.
+                session.wait_extensions_bound().await;
                 // A built-in command that an extension command replaces is not listed.
                 let mut commands = super::builtins::builtin_commands(session);
                 commands.retain(|command| !session.is_extension_command(&format!("/{}", command.name)));
