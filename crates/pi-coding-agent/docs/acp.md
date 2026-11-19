@@ -52,6 +52,8 @@ The text and thought chunks of each assistant message share one `messageId`. The
 
 When the model, the thinking level, or fast mode changes inside the session, for example through `/fast` or an extension, pi sends `config_option_update` with the new options.
 
+Each model in `models.availableModels` and in the choices of the Model option has `_meta` with its own thinking levels: `supportsReasoningEffort`, `reasoningEfforts` (each with `id` and `label`, and `default` on the level pi would use with that model), and `reasoningEffort`, that level. Paseo uses them to show the thinking choices of each model; the Thinking option shows the levels of the current model.
+
 Model labels use the display names of the providers. Catalog variants with a `fast` segment in their ID have a ⚡ label. ACP has no standard field for a model icon.
 
 ## Bash calls

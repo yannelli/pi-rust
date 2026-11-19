@@ -268,6 +268,35 @@ async fn new_sessions_advertise_model_and_thinking_selectors() {
 }
 
 #[tokio::test]
+async fn models_describe_their_own_thinking_levels() {
+    let config = FakeConfig {
+        state: json!({"thinkingLevel": "high", "model": {"provider": "test", "id": "deep"}}),
+        models: Ok(json!({"models": [
+            {"provider": "test", "id": "deep", "name": "Deep", "thinkingLevels": ["off", "low", "high", "max"],
+                "thinkingLevel": "high"},
+            {"provider": "test", "id": "plain", "name": "Plain", "thinkingLevels": ["off"], "thinkingLevel": "off"},
+            {"provider": "test", "id": "other", "name": "Other"}]})),
+        levels: Box::new(|_| Ok(["off", "low", "high", "max"].map(String::from).to_vec())),
+        ..FakeConfig::default()
+    };
+    let (env, client, backend) = (Env::new(), FakeClient::new(), FakeBackend::with(config));
+    let agent = env.agent(client, FakeFactory::returning(backend));
+    let request: NewSessionRequest = serde_json::from_value(json!({"cwd": env.work(), "mcpServers": []})).unwrap();
+    let result = agent.new_session(request).await.unwrap().response;
+    let effort = |id: &str, label: &str| json!({"id": id, "label": label});
+    let deep = json!({"supportsReasoningEffort": true, "reasoningEffort": "high", "reasoningEfforts": [
+        effort("off", "Off"), effort("low", "Low"), {"id": "high", "label": "High", "default": true}, effort("max", "Max")]});
+    let plain = json!({"supportsReasoningEffort": false, "reasoningEffort": "off",
+        "reasoningEfforts": [{"id": "off", "label": "Off", "default": true}]});
+    let available = &result["models"]["availableModels"];
+    assert_eq!((available[0]["_meta"].clone(), available[1]["_meta"].clone()), (deep.clone(), plain));
+    assert!(available[2].get("_meta").is_none(), "pi reported no levels");
+    let model = option(&result["configOptions"], "model");
+    assert_eq!(model["options"][0]["_meta"], deep);
+    assert!(model["options"][2].get("_meta").is_none());
+}
+
+#[tokio::test]
 async fn new_session_publishes_usage_and_commands_after_the_response() {
     let mut config = FakeConfig::default();
     config.stats = Box::new(|_| Ok(json!({"contextUsage": {"tokens": 1_234, "contextWindow": 100_000}})));

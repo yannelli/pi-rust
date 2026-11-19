@@ -11,6 +11,7 @@ use agent_client_protocol_schema::Error;
 use async_trait::async_trait;
 use futures::FutureExt;
 use pi_agent::{AgentEvent, QueueMode};
+use pi_ai::models::{clamp_thinking_level, supported_thinking_levels};
 use pi_ai::{AssistantMessageEvent, ContentBlock, ThinkingLevel};
 use serde_json::{Value, json};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -310,6 +311,7 @@ impl PiBackend for RuntimeBackend {
 
     async fn get_available_models(&self) -> anyhow::Result<Value> {
         let runtime = self.session.model_runtime();
+        let current = self.session.thinking_level();
         let models: Vec<Value> = runtime
             .available_models()
             .iter()
@@ -318,6 +320,10 @@ impl PiBackend for RuntimeBackend {
                 if let Some(name) = runtime.registry().provider_name(&model.provider) {
                     value["providerName"] = json!(name);
                 }
+                // The model's thinking levels, and the level pi would use with it.
+                let levels: Vec<&str> = supported_thinking_levels(model).iter().map(|level| level.as_str()).collect();
+                value["thinkingLevels"] = json!(levels);
+                value["thinkingLevel"] = json!(clamp_thinking_level(model, current).as_str());
                 value
             })
             .collect();

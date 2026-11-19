@@ -114,6 +114,13 @@ async fn drives_sessions_over_acp_with_the_faux_provider() {
     let session_id = created["result"]["sessionId"].as_str().expect("session id").to_string();
     assert_eq!(created["result"]["models"]["currentModelId"], "local/tiny");
     assert!(created["result"]["_meta"]["piAcp"]["startupInfo"].as_str().unwrap().starts_with("pi v9.9.9"));
+    let meta = &created["result"]["models"]["availableModels"][0]["_meta"];
+    let efforts: Vec<&Value> =
+        meta["reasoningEfforts"].as_array().unwrap().iter().map(|effort| &effort["id"]).collect();
+    let thinking = config_option(&created["result"]["configOptions"], "thought_level").unwrap();
+    let levels: Vec<&Value> = thinking["options"].as_array().unwrap().iter().map(|level| &level["value"]).collect();
+    assert_eq!(efforts, levels, "the current model's levels are the Thinking choices");
+    assert_eq!((&meta["supportsReasoningEffort"], &meta["reasoningEffort"]), (&json!(true), &thinking["currentValue"]));
     let commands =
         client.until(|message| message["params"]["update"]["sessionUpdate"] == "available_commands_update").await;
     assert_eq!(commands["params"]["sessionId"], session_id.as_str());
